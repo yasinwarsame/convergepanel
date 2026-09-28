@@ -93,6 +93,8 @@ function makeDocRef(collectionName: string, docId: string) {
 
 let concurrentMutationHook: ((ref: { __collection: string; __id: string }) => void) | null = null;
 const firestoreUnavailableFlag = { value: false };
+/** R3: when set to a collection name, the fake transaction's `set` throws for that collection. */
+const throwOnSetCollection: { value: string | null } = { value: null };
 const transactionShouldThrow = { value: false };
 const transactionAttemptCount = { value: 0 };
 const MAX_TRANSACTION_ATTEMPTS = 5;
@@ -127,6 +129,12 @@ const mockAdminDb: any = {
         },
         set: (ref: { __collection: string; __id: string }, data: Record<string, unknown>) => {
           hasWritten = true;
+          // R3 §35/§36 — injectable write failure so the atomicity guarantees are COMMITTED
+          // regressions instead of review-time probes. Throwing here aborts the callback before
+          // any `pendingWrites` are applied, which is exactly how a real write rejection behaves.
+          if (throwOnSetCollection.value !== null && ref.__collection === throwOnSetCollection.value) {
+            throw new Error(`simulated write failure for ${ref.__collection}`);
+          }
           pendingWrites.push(() => stores[ref.__collection].set(ref.__id, data));
         },
       };
@@ -236,6 +244,12 @@ const REVIEWER2_UID = "reviewer-2";
 const REVIEWER3_UID = "reviewer-3";
 const VIEWER_UID = "viewer-1";
 const CREATOR_UID = "creator-1";
+/**
+ * R3 §18 — a NON-NULL Project, deliberately distinct from the Workspace id, the run id and every
+ * reviewer id. R2 proved every fixture seeded `projectId: null`, so the four events' Project
+ * binding was pinned only against `null` and hardcoding `null` survived.
+ */
+const PROJECT_ID = "projPanelAuditBinding01";
 const RUN_ID = "run-1";
 const NOW = Timestamp.now();
 const GOVERNANCE_UPDATED_AT = "2026-08-01T00:00:00.000Z";
@@ -350,6 +364,7 @@ beforeEach(() => {
   teamWorkspacesCanaryUids = undefined;
   teamWorkspacesCanaryWorkspaceIds = undefined;
   firestoreUnavailableFlag.value = false;
+  throwOnSetCollection.value = null;
   transactionShouldThrow.value = false;
   transactionAttemptCount.value = 0;
   concurrentMutationHook = null;
@@ -1587,33 +1602,42 @@ describe("overrideWorkspaceReviewPanel — Workspace-canary target admission (Ph
 });
 
 /**
- * TECH_DEBT_WORKSPACE_PANEL_MUTATION_AUDIT_COVERAGE.
+ * TECH_DEBT_WORKSPACE_PANEL_MUTATION_AUDIT_COVERAGE — the audit proof.
  *
- * Phase 9D confirmed in Production that panel create/reconfigure, cancel and vote wrote NO
- * immutable secondary record — the canonical resource document was their only evidence — while
- * finalize wrote 3 and Owner Override 4. These tests pin the four events that close that gap.
+ * Phase 9D confirmed in Production that panel create/reconfigure/cancel/vote wrote NO immutable
+ * secondary record, while finalize wrote 3 and Owner Override 4.
  *
- * R1 review found the first version of this block non-discriminating in three ways, each
- * addressed below and each with its own mutation:
- *   1. ACTOR — `putCall()`'s default has `uid: OWNER_UID` AND `reviewerUserIds[0] === OWNER_UID`,
- *      so an event actor sourced from the CLIENT-SUPPLIED reviewer array satisfied the assertion.
- *   2. RESOURCE BINDING — reconfigure and cancel asserted fields individually and omitted
- *      `workspaceId`/`projectId`, so an event bound to a FOREIGN workspace survived.
- *   3. REJECTION COVERAGE — 5 of the 36 (function, reason) pairs were pinned, so a ghost
- *      "created" event on the `target_not_eligible` rejection survived.
- * All four actions now use a COMPLETE event-shape `toEqual`, so every authority-bearing field is
- * pinned symmetrically rather than some actions pinning more than others.
+ * Two review rounds found this proof layer non-discriminating, and both sets of defects are the
+ * reason for the shape below:
+ *   R1 — the create event's actor could come from client-supplied reviewer input and survive;
+ *        reconfigure/cancel omitted `workspaceId`/`projectId`; 5 of the rejection paths were
+ *        pinned; `reviewerCount` echoed the raw request.
+ *   R2 — FOUR rejection branches still accepted a forged success event, most seriously an
+ *        unauthorized caller's rejected vote minting `vote_cast`; the coverage "guarantee" was
+ *        referenced by nothing, so deleting a case stayed green; `projectId` was pinned only
+ *        against `null` because no fixture used a Project; and the governance context was
+ *        compared to hardcoded literals, so its provenance was unproven.
  */
 const panelEvents = () => [...stores.governanceEvents.entries()].filter(([k]) => k.startsWith(`${RUN_ID}::`)).map(([, v]) => v as Record<string, unknown>);
 
-/** The governance context every panel event carries, from the already-parsed governance record. */
-const GOV_CONTEXT = { schemaId: "decision_support", answerShape: "decision_support_view" } as const;
+/**
+ * R3 §23–§26 — the governance context a panel event must carry, READ BACK from the canonical
+ * seeded record rather than hardcoded. R2's `GOV_CONTEXT` was a literal pair matching the default
+ * fixture, so replacing the production source with those same literals survived: the values were
+ * pinned, their PROVENANCE was not.
+ */
+const canonicalGovContext = () => {
+  const run = stores.runs.get(RUN_ID) as { governanceRecord: { schemaId: string; answerShape: string } };
+  return { schemaId: run.governanceRecord.schemaId, answerShape: run.governanceRecord.answerShape };
+};
+/** A second, deliberately NON-DEFAULT governance context, so one historical literal cannot masquerade as canonical provenance. */
+const ALT_GOV = { schemaId: "evidence_review", answerShape: "evidence_review_view" } as const;
 
-describe("panel mutation audit coverage — immutable governanceEvents", () => {
+describe("panel mutation audit coverage — successful mutations", () => {
   it("panel CREATE writes exactly one created event, with its COMPLETE shape", async () => {
-    const result = await putCall();
-    expect(result.ok).toBe(true);
-    expect(panelEvents()).toHaveLength(1);
+    const before = panelEvents().length;
+    expect((await putCall()).ok).toBe(true);
+    expect(panelEvents()).toHaveLength(before + 1);
     expect(panelEvents()[0]).toEqual({
       action: "adaptive_review_panel_created",
       byUid: OWNER_UID,
@@ -1623,42 +1647,13 @@ describe("panel mutation audit coverage — immutable governanceEvents", () => {
       panelRevision: 1,
       priorPanelRevision: null,
       reviewerCount: 2,
-      ...GOV_CONTEXT,
+      ...canonicalGovContext(),
     });
-  });
-
-  /**
-   * R1's surviving mutation M9: the create event's actor could be sourced from
-   * `args.reviewerUserIds[0]` — client-supplied input — and every test still passed, because the
-   * default fixture's authenticated caller IS that first reviewer. This fixture breaks that
-   * coincidence, and asserts the precondition BEFORE the mutation so the discrimination is
-   * measured rather than assumed.
-   */
-  it("the created event's actor is the AUTHENTICATED caller, not any client-supplied reviewer", async () => {
-    const reviewers = [ADMIN_UID, REVIEWER_UID];
-    // the precondition that makes this test discriminating at all
-    expect(`callerIsNotAnyReviewer:${!reviewers.includes(OWNER_UID)}`).toBe("callerIsNotAnyReviewer:true");
-    expect(`callerIsNotTheFirstReviewer:${reviewers[0] !== OWNER_UID}`).toBe("callerIsNotTheFirstReviewer:true");
-    const result = await putCall({ uid: OWNER_UID, reviewerUserIds: reviewers });
-    expect(result.ok).toBe(true);
-    expect(panelEvents()).toHaveLength(1);
-    expect(panelEvents()[0].byUid).toBe(OWNER_UID);
-    expect(`actorIsNotTheFirstReviewer:${panelEvents()[0].byUid !== reviewers[0]}`).toBe("actorIsNotTheFirstReviewer:true");
-  });
-
-  it("the reconfigured event's actor is the AUTHENTICATED caller, not any client-supplied reviewer", async () => {
-    seedPanel({ revision: 1 });
-    const reviewers = [OWNER_UID, REVIEWER_UID];
-    expect(`callerIsNotTheFirstReviewer:${reviewers[0] !== ADMIN_UID}`).toBe("callerIsNotTheFirstReviewer:true");
-    const result = await putCall({ uid: ADMIN_UID, expectedRevision: 1, reviewerUserIds: reviewers });
-    expect(result.ok).toBe(true);
-    expect(panelEvents()[0].byUid).toBe(ADMIN_UID);
   });
 
   it("panel RECONFIGURE writes exactly one reconfigured event, with its COMPLETE shape", async () => {
     seedPanel({ revision: 1 });
-    const result = await putCall({ expectedRevision: 1, reviewerUserIds: [OWNER_UID, ADMIN_UID, REVIEWER_UID] });
-    expect(result.ok).toBe(true);
+    expect((await putCall({ expectedRevision: 1, reviewerUserIds: [OWNER_UID, ADMIN_UID, REVIEWER_UID] })).ok).toBe(true);
     expect(panelEvents()).toHaveLength(1);
     expect(panelEvents()[0]).toEqual({
       action: "adaptive_review_panel_reconfigured",
@@ -1669,14 +1664,13 @@ describe("panel mutation audit coverage — immutable governanceEvents", () => {
       panelRevision: 2,
       priorPanelRevision: 1,
       reviewerCount: 3,
-      ...GOV_CONTEXT,
+      ...canonicalGovContext(),
     });
   });
 
   it("panel CANCEL writes exactly one cancelled event, with its COMPLETE shape", async () => {
     seedPanel({ revision: 1 });
-    const result = await deleteCall();
-    expect(result.ok).toBe(true);
+    expect((await deleteCall()).ok).toBe(true);
     expect(panelEvents()).toHaveLength(1);
     expect(panelEvents()[0]).toEqual({
       action: "adaptive_review_panel_cancelled",
@@ -1686,14 +1680,13 @@ describe("panel mutation audit coverage — immutable governanceEvents", () => {
       projectId: null,
       panelRevision: 1,
       reviewerCount: 3,
-      ...GOV_CONTEXT,
+      ...canonicalGovContext(),
     });
   });
 
   it("VOTE writes exactly one vote_cast event, with its COMPLETE shape", async () => {
     seedPanel({ revision: 1 });
-    const result = await voteCall({ status: "changes_requested", comment: "needs work", conditions: ["c1", "c2"] });
-    expect(result.ok).toBe(true);
+    expect((await voteCall({ status: "changes_requested", comment: "needs work", conditions: ["c1", "c2"] })).ok).toBe(true);
     expect(panelEvents()).toHaveLength(1);
     expect(panelEvents()[0]).toEqual({
       action: "adaptive_review_panel_vote_cast",
@@ -1705,21 +1698,32 @@ describe("panel mutation audit coverage — immutable governanceEvents", () => {
       voteStatus: "changes_requested",
       commentPresent: true,
       conditionsCount: 2,
-      ...GOV_CONTEXT,
+      ...canonicalGovContext(),
     });
   });
 
-  /**
-   * R1 finding 5, measured: a request of `[OWNER, OWNER, ADMIN]` canonicalizes to TWO reviewers
-   * while an event built from `args.reviewerUserIds.length` claimed THREE — an audit record
-   * overstating the panel it documents. The event must describe what was committed.
-   */
+  // ── actor authority (R1) ──
+  it("the created event's actor is the AUTHENTICATED caller, not any client-supplied reviewer", async () => {
+    const reviewers = [ADMIN_UID, REVIEWER_UID];
+    expect(`callerIsNotAnyReviewer:${!reviewers.includes(OWNER_UID)}`).toBe("callerIsNotAnyReviewer:true");
+    expect((await putCall({ uid: OWNER_UID, reviewerUserIds: reviewers })).ok).toBe(true);
+    expect(panelEvents()[0].byUid).toBe(OWNER_UID);
+    expect(`actorIsNotTheFirstReviewer:${panelEvents()[0].byUid !== reviewers[0]}`).toBe("actorIsNotTheFirstReviewer:true");
+  });
+
+  it("the reconfigured event's actor is the AUTHENTICATED caller, not any client-supplied reviewer", async () => {
+    seedPanel({ revision: 1 });
+    const reviewers = [OWNER_UID, REVIEWER_UID];
+    expect(`callerIsNotTheFirstReviewer:${reviewers[0] !== ADMIN_UID}`).toBe("callerIsNotTheFirstReviewer:true");
+    expect((await putCall({ uid: ADMIN_UID, expectedRevision: 1, reviewerUserIds: reviewers })).ok).toBe(true);
+    expect(panelEvents()[0].byUid).toBe(ADMIN_UID);
+  });
+
+  // ── reviewerCount provenance (R1) ──
   it("reviewerCount comes from the COMMITTED panel, not the raw request array", async () => {
     const raw = [OWNER_UID, OWNER_UID, ADMIN_UID];
-    const result = await putCall({ reviewerUserIds: raw });
-    expect(result.ok).toBe(true);
+    expect((await putCall({ reviewerUserIds: raw })).ok).toBe(true);
     const panel = stores.humanReviewPanel.get(`${RUN_ID}::current`) as { reviewerUserIds: string[] };
-    // the fixture is only discriminating if canonicalization actually changed the cardinality
     expect(`canonicalDiffersFromRaw:${panel.reviewerUserIds.length !== raw.length}`).toBe("canonicalDiffersFromRaw:true");
     expect(panelEvents()[0].reviewerCount).toBe(panel.reviewerUserIds.length);
     expect(`eventDoesNotEchoRawLength:${panelEvents()[0].reviewerCount !== raw.length}`).toBe("eventDoesNotEchoRawLength:true");
@@ -1729,192 +1733,348 @@ describe("panel mutation audit coverage — immutable governanceEvents", () => {
     seedPanel({ revision: 1 });
     expect((await voteCall()).ok).toBe(true);
     expect(panelEvents()).toHaveLength(1);
-    const replay = await voteCall();
-    expect(replay).toMatchObject({ ok: true, submissionStatus: "already_submitted" });
+    expect(await voteCall()).toMatchObject({ ok: true, submissionStatus: "already_submitted" });
     expect(panelEvents()).toHaveLength(1);
   });
 });
 
 /**
- * THE ZERO-GHOST-EVENT CONTRACT: no successful canonical state transition => no success audit
- * event. R1 found only 5 of the rejection paths pinned, and proved a ghost `created` event on
- * `target_not_eligible` survived the whole suite.
- *
- * `REJECTION_INVENTORY` below is an explicitly reviewed constant derived from the actual
- * `reason:` / `kind:` literals in the three in-scope mutations — 36 (function, reason) pairs at
- * the reviewed head. It is deliberately NOT `expected = table.length` against the same table,
- * which would be the self-referential pattern this codebase has already retracted twice: the
- * count is asserted against a separately written total, and the per-reason cases below reference
- * this list, so deleting a case is visible as a coverage gap rather than silently reducing scope.
- *
- * Three reasons are excluded from per-case event assertions with the reason stated, not skipped
- * silently: `team_workspaces_disabled` and `firestore_unavailable` reject BEFORE any Firestore
- * access at all (already covered by the infra/rollout describes, which assert zero access), and
- * `write_failed` is the transaction-failure catch, covered by the atomicity injections rather
- * than by a fixture.
+ * R3 §18–§22 — PROJECT BINDING, with a non-null Project. R2 proved every fixture used
+ * `projectId: null`, so the four `toEqual`s pinned that field vacuously and hardcoding `null`
+ * survived. The expected value here comes from the canonical run document read back from the
+ * store, never from the request.
  */
-const REJECTION_INVENTORY = {
-  putWorkspaceReviewPanel: ["team_workspaces_disabled", "firestore_unavailable", "insufficient_capability", "run_not_found", "not_pending", "single_review_active", "panel_unreadable", "panel_finalized", "stale_revision", "target_not_eligible", "write_failed"],
-  deleteWorkspaceReviewPanel: ["team_workspaces_disabled", "firestore_unavailable", "insufficient_capability", "run_not_found", "not_pending", "panel_absent", "panel_unreadable", "panel_finalized", "panel_already_cancelled", "stale_revision", "write_failed"],
-  submitWorkspaceReviewPanelVote: ["team_workspaces_disabled", "firestore_unavailable", "run_not_found", "not_pending", "panel_absent", "panel_unreadable", "panel_not_open", "panel_stale", "self_review", "not_reviewer", "review_content_unavailable", "vote_malformed", "vote_conflict", "write_failed"],
-} as const;
-const PRE_TRANSACTION_OR_INFRA = ["team_workspaces_disabled", "firestore_unavailable", "write_failed"];
+describe("panel mutation audit coverage — canonical Project binding", () => {
+  const projectBackedRun = () => seedRun({ projectId: PROJECT_ID });
+  const canonicalProjectId = () => (stores.runs.get(RUN_ID) as { projectId: string | null }).projectId;
 
-describe("panel mutation audit coverage — zero ghost events on every rejection", () => {
-  it("the rejection inventory matches the reviewed count, so a deleted case is visible", () => {
-    const pairs = Object.entries(REJECTION_INVENTORY).flatMap(([fn, reasons]) => reasons.map((r) => `${fn}:${r}`));
-    expect(`inventoryPairs:${pairs.length}`).toBe("inventoryPairs:36");
-    const covered = pairs.filter(([, ]) => true).filter((p) => !PRE_TRANSACTION_OR_INFRA.includes(p.split(":")[1]));
-    expect(`pairsRequiringAFixtureCase:${covered.length}`).toBe("pairsRequiringAFixtureCase:27");
+  it("the fixture really is Project-backed, and distinct from every other identifier", () => {
+    projectBackedRun();
+    expect(canonicalProjectId()).toBe(PROJECT_ID);
+    expect([WS_ID, RUN_ID, OWNER_UID, ADMIN_UID, REVIEWER_UID]).not.toContain(PROJECT_ID);
   });
 
-  // ── putWorkspaceReviewPanel ──
-  it("create: insufficient_capability writes no event", async () => {
-    expect(await putCall({ uid: MEMBER_UID })).toEqual({ ok: false, reason: "insufficient_capability" });
-    expect(panelEvents()).toHaveLength(0);
-  });
-  it("create: run_not_found writes no event", async () => {
-    stores.runs.delete(RUN_ID);
-    expect(await putCall()).toEqual({ ok: false, reason: "run_not_found" });
-    expect(panelEvents()).toHaveLength(0);
-  });
-  it("create: not_pending writes no event", async () => {
-    seedRun({ governanceRecord: { ...(stores.runs.get(RUN_ID) as { governanceRecord: Record<string, unknown> }).governanceRecord, humanReview: { status: "approved", reviewedAt: GOVERNANCE_UPDATED_AT } } });
-    const result = await putCall();
-    expect(result).toEqual({ ok: false, reason: "not_pending" });
-    expect(panelEvents()).toHaveLength(0);
-  });
-  it("create: single_review_active writes no event", async () => {
-    seedAssignment({ assignedReviewerUserId: REVIEWER_UID });
-    expect(await putCall()).toEqual({ ok: false, reason: "single_review_active" });
-    expect(panelEvents()).toHaveLength(0);
-  });
-  it("create: panel_unreadable writes no event", async () => {
-    stores.humanReviewPanel.set(`${RUN_ID}::current`, { kind: "not-a-panel" });
-    expect(await putCall()).toEqual({ ok: false, reason: "panel_unreadable" });
-    expect(panelEvents()).toHaveLength(0);
-  });
-  it("create: panel_finalized writes no event", async () => {
-    // a finalized panel needs its finalization fields or it parses as UNREADABLE and the test
-    // would assert the wrong branch — the same shape existing tests use.
-    seedPanel({ revision: 1, status: "finalized", finalizedAt: "2026-08-05T00:00:00.000Z", updatedAt: "2026-08-05T00:00:00.000Z", finalizedByUserId: OWNER_UID, finalStatus: "approved", finalDecisionId: "panel_workspace_dec_x", aggregationPolicyVersion: 1 });
-    expect(await putCall({ expectedRevision: 1 })).toEqual({ ok: false, reason: "panel_finalized" });
-    expect(panelEvents()).toHaveLength(0);
-  });
-  it("create: stale_revision writes no event", async () => {
-    seedPanel({ revision: 3 });
-    expect(await putCall({ expectedRevision: 0 })).toEqual({ ok: false, reason: "stale_revision" });
-    expect(panelEvents()).toHaveLength(0);
-  });
-  it("create: target_not_eligible writes no event — R1's surviving ghost", async () => {
-    const result = await putCall({ reviewerUserIds: [OWNER_UID, VIEWER_UID] });
-    expect(result.ok).toBe(false);
-    expect((result as { reason: { kind: string } }).reason.kind).toBe("target_not_eligible");
-    expect(panelEvents()).toHaveLength(0);
-  });
-
-  // ── deleteWorkspaceReviewPanel ──
-  it("cancel: insufficient_capability writes no event", async () => {
-    seedPanel({ revision: 1 });
-    expect(await deleteCall({ uid: MEMBER_UID })).toEqual({ ok: false, reason: "insufficient_capability" });
-    expect(panelEvents()).toHaveLength(0);
-  });
-  it("cancel: run_not_found writes no event", async () => {
-    seedPanel({ revision: 1 });
-    stores.runs.delete(RUN_ID);
-    expect(await deleteCall()).toEqual({ ok: false, reason: "run_not_found" });
-    expect(panelEvents()).toHaveLength(0);
-  });
-  it("cancel: panel_absent writes no event", async () => {
-    expect(await deleteCall()).toEqual({ ok: false, reason: "panel_absent" });
-    expect(panelEvents()).toHaveLength(0);
-  });
-  it("cancel: panel_unreadable writes no event", async () => {
-    stores.humanReviewPanel.set(`${RUN_ID}::current`, { kind: "not-a-panel" });
-    expect(await deleteCall()).toEqual({ ok: false, reason: "panel_unreadable" });
-    expect(panelEvents()).toHaveLength(0);
-  });
-  it("cancel: panel_finalized writes no event", async () => {
-    seedPanel({ revision: 1, status: "finalized", finalizedAt: "2026-08-05T00:00:00.000Z", updatedAt: "2026-08-05T00:00:00.000Z", finalizedByUserId: OWNER_UID, finalStatus: "approved", finalDecisionId: "panel_workspace_dec_x", aggregationPolicyVersion: 1 });
-    expect(await deleteCall()).toEqual({ ok: false, reason: "panel_finalized" });
-    expect(panelEvents()).toHaveLength(0);
-  });
-  it("cancel: panel_already_cancelled writes no event", async () => {
-    seedPanel({ revision: 1, status: "cancelled" });
-    expect(await deleteCall()).toEqual({ ok: false, reason: "panel_already_cancelled" });
-    expect(panelEvents()).toHaveLength(0);
-  });
-  it("cancel: stale_revision writes no event", async () => {
-    seedPanel({ revision: 3 });
-    expect(await deleteCall({ expectedRevision: 1 })).toEqual({ ok: false, reason: "stale_revision" });
-    expect(panelEvents()).toHaveLength(0);
-  });
-
-  // ── submitWorkspaceReviewPanelVote ──
-  it("vote: run_not_found writes no event", async () => {
-    seedPanel({ revision: 1 });
-    stores.runs.delete(RUN_ID);
-    expect(await voteCall()).toEqual({ ok: false, reason: "run_not_found" });
-    expect(panelEvents()).toHaveLength(0);
-  });
-  it("vote: panel_absent writes no event", async () => {
-    expect(await voteCall()).toEqual({ ok: false, reason: "panel_absent" });
-    expect(panelEvents()).toHaveLength(0);
-  });
-  it("vote: panel_unreadable writes no event", async () => {
-    stores.humanReviewPanel.set(`${RUN_ID}::current`, { kind: "not-a-panel" });
-    expect(await voteCall()).toEqual({ ok: false, reason: "panel_unreadable" });
-    expect(panelEvents()).toHaveLength(0);
-  });
-  it("vote: panel_not_open writes no event", async () => {
-    seedPanel({ revision: 1, status: "cancelled" });
-    expect(await voteCall()).toEqual({ ok: false, reason: "panel_not_open" });
-    expect(panelEvents()).toHaveLength(0);
-  });
-  it("vote: panel_stale writes no event", async () => {
-    seedPanel({ revision: 2 });
-    expect(await voteCall({ panelRevision: 1 })).toEqual({ ok: false, reason: "panel_stale" });
-    expect(panelEvents()).toHaveLength(0);
-  });
-  it("vote: self_review writes no event", async () => {
-    seedPanel({ revision: 1, reviewerUserIds: [CREATOR_UID, OWNER_UID] });
-    expect(await voteCall({ uid: CREATOR_UID })).toEqual({ ok: false, reason: "self_review" });
-    expect(panelEvents()).toHaveLength(0);
-  });
-  it("vote: not_reviewer writes no event", async () => {
-    // REVIEWER2_UID is a seeded reviewer-role member deliberately ABSENT from seedPanel()'s
-    // default set, which sorts to [admin-1, owner-1, reviewer-1]. Asserted, not assumed —
-    // R1's fixture trap (b) was using REVIEWER_UID, which IS on that panel.
-    seedPanel({ revision: 1 });
-    const panel = stores.humanReviewPanel.get(`${RUN_ID}::current`) as { reviewerUserIds: string[] };
-    expect(`outsiderIsNotOnThePanel:${!panel.reviewerUserIds.includes(REVIEWER2_UID)}`).toBe("outsiderIsNotOnThePanel:true");
-    expect(await voteCall({ uid: REVIEWER2_UID })).toEqual({ ok: false, reason: "not_reviewer" });
-    expect(panelEvents()).toHaveLength(0);
-  });
-  it("vote: vote_conflict writes no event beyond the first accepted vote", async () => {
-    seedPanel({ revision: 1 });
-    expect((await voteCall({ status: "approved" })).ok).toBe(true);
-    expect(panelEvents()).toHaveLength(1);
-    expect(await voteCall({ status: "changes_requested" })).toEqual({ ok: false, reason: "vote_conflict" });
-    expect(panelEvents()).toHaveLength(1);
-  });
-  it("vote: vote_malformed writes no event", async () => {
-    seedPanel({ revision: 1 });
-    stores.humanReviewVotes.set(`${RUN_ID}::${buildAdaptiveHumanReviewVoteId(1, OWNER_UID)}`, { kind: "not-a-vote" });
-    expect(await voteCall()).toEqual({ ok: false, reason: "vote_malformed" });
-    expect(panelEvents()).toHaveLength(0);
-  });
-
-  it("on a REJECTED create, neither the panel nor the event changed — both or neither", async () => {
-    seedPanel({ revision: 2 });
-    expect((await putCall({ expectedRevision: 0 })).ok).toBe(false);
-    const panel = stores.humanReviewPanel.get(`${RUN_ID}::current`) as { revision: number };
-    expect(`panel.revision:${panel.revision} events:${panelEvents().length}`).toBe("panel.revision:2 events:0");
-  });
-
-  it("on a SUCCESSFUL create, both the panel and the event are present — both or neither", async () => {
+  it("CREATE binds the event to the canonical Project", async () => {
+    projectBackedRun();
     expect((await putCall()).ok).toBe(true);
-    const panel = stores.humanReviewPanel.get(`${RUN_ID}::current`) as { revision: number };
-    expect(`panel.revision:${panel.revision} events:${panelEvents().length}`).toBe("panel.revision:1 events:1");
+    expect(panelEvents()[0].projectId).toBe(canonicalProjectId());
+    expect(panelEvents()[0].workspaceId).toBe(WS_ID);
+  });
+
+  it("RECONFIGURE binds the event to the canonical Project", async () => {
+    projectBackedRun();
+    seedPanel({ revision: 1 });
+    expect((await putCall({ expectedRevision: 1 })).ok).toBe(true);
+    expect(panelEvents()[0].projectId).toBe(canonicalProjectId());
+  });
+
+  it("CANCEL binds the event to the canonical Project", async () => {
+    projectBackedRun();
+    seedPanel({ revision: 1 });
+    expect((await deleteCall()).ok).toBe(true);
+    expect(panelEvents()[0].projectId).toBe(canonicalProjectId());
+  });
+
+  it("VOTE binds the event to the canonical Project", async () => {
+    projectBackedRun();
+    seedPanel({ revision: 1 });
+    expect((await voteCall()).ok).toBe(true);
+    expect(panelEvents()[0].projectId).toBe(canonicalProjectId());
+  });
+});
+
+/**
+ * R3 §23–§27 — GOVERNANCE CONTEXT PROVENANCE. A second canonical context proves the event
+ * projects the record rather than echoing a historical literal.
+ */
+describe("panel mutation audit coverage — governance context provenance", () => {
+  it("a NON-DEFAULT canonical governance context appears in the event", async () => {
+    seedRun({ governanceRecord: validGovernanceRecord({ schemaId: ALT_GOV.schemaId, answerShape: ALT_GOV.answerShape }) });
+    // the fixture is only discriminating if it differs from the default the other tests use
+    expect(`contextIsNonDefault:${canonicalGovContext().schemaId !== "decision_support"}`).toBe("contextIsNonDefault:true");
+    expect((await putCall()).ok).toBe(true);
+    expect(panelEvents()[0].schemaId).toBe(ALT_GOV.schemaId);
+    expect(panelEvents()[0].answerShape).toBe(ALT_GOV.answerShape);
+  });
+
+  it("the vote event carries the same non-default canonical context", async () => {
+    seedRun({ governanceRecord: validGovernanceRecord({ schemaId: ALT_GOV.schemaId, answerShape: ALT_GOV.answerShape }) });
+    seedPanel({ revision: 1 });
+    expect((await voteCall()).ok).toBe(true);
+    expect(panelEvents()[0]).toMatchObject({ schemaId: ALT_GOV.schemaId, answerShape: ALT_GOV.answerShape });
+  });
+});
+
+/**
+ * ─── R3 §3–§13, §41–§45 — THE REJECTION PROOF, REBUILT AROUND BRANCH IDENTITY ────────────────
+ *
+ * WHY THE PREVIOUS MODEL WAS INVALID. R2's inventory was derived by scanning inline
+ * `reason: "..."` literals. That is structurally blind to a PASSTHROUGH branch:
+ *
+ *     const auth = await authorizeTeamWorkspaceMutationInTransaction(...);
+ *     if (!auth.ok) return { ok: false, reason: auth.reason };
+ *
+ * Seven authorization reasons reach each caller through that single line and none of them appears
+ * as a literal in this module, so the "complete" inventory never saw them — and a forged
+ * `vote_cast` inserted on the vote's authorization denial survived the whole suite. An
+ * unauthorized caller's REJECTED vote minting a "vote cast" record is the worst possible failure
+ * for a collection whose purpose is proving who voted.
+ *
+ * THE UNIT IS NOW THE BRANCH, not the reason string. Two branches can return the same reason
+ * (`run_not_found` has two sites in each operation; `not_reviewer` has two in vote) and a ghost
+ * write can be inserted before either, so a case covering one must not count as coverage for the
+ * other. Branch IDs are stable semantic names, never line numbers.
+ *
+ * TWO INDEPENDENT STRUCTURES, deliberately:
+ *   • `EXPECTED_REJECTION_BRANCHES` — the reviewed contract, hand-audited from the production
+ *     source and from `TeamMutationAuthorizationDenialReason`'s actual union.
+ *   • `REJECTION_CASES` — executable fixtures, each declaring the branchId it exercises.
+ * The runner executes every case and records what it executed; a separate test then asserts exact
+ * set equality between the EXECUTION LEDGER and the CONTRACT. The expected side never comes from
+ * the case table, so deleting a case, skipping one in the runner, registering a duplicate, or
+ * registering an unknown branch all fail. R2's version asserted a hand-written count against a
+ * hand-written total and was referenced by nothing, so deleting a case stayed green.
+ *
+ * WHAT THIS DOES NOT CLAIM (§10, §44): it does not discover future production branches
+ * automatically, and it cannot defend against a coordinated edit deleting both a contract entry
+ * and its case. Adding a rejection branch in production requires updating this contract, which is
+ * review-visible in the same diff. The guarantee is: every branch enumerated here has an
+ * executable zero-event case that actually ran.
+ *
+ * `write_failed` is deliberately absent from the contract: it is not a decision branch but the
+ * transaction-failure catch, and it is covered by the atomicity regressions below, which assert
+ * that neither half of the atomic pair survives.
+ */
+const AUTH_DENIAL_REASONS = ["workspace_not_found", "workspace_malformed", "membership_not_found", "membership_malformed", "membership_removed", "owner_integrity_violation", "insufficient_capability"] as const;
+
+type RejectionBranch = { operation: "create" | "cancel" | "vote"; branchId: string; reason: string };
+const EXPECTED_REJECTION_BRANCHES: readonly RejectionBranch[] = [
+  ...(["create", "cancel", "vote"] as const).flatMap((operation) => [
+    { operation, branchId: `${operation}.team_workspaces_disabled`, reason: "team_workspaces_disabled" },
+    { operation, branchId: `${operation}.firestore_unavailable`, reason: "firestore_unavailable" },
+    ...AUTH_DENIAL_REASONS.map((reason) => ({ operation, branchId: `${operation}.auth_denied.${reason}`, reason })),
+    { operation, branchId: `${operation}.run_not_found`, reason: "run_not_found" },
+    { operation, branchId: `${operation}.not_pending`, reason: "not_pending" },
+  ]),
+  { operation: "create", branchId: "create.single_review_active", reason: "single_review_active" },
+  { operation: "create", branchId: "create.panel_unreadable", reason: "panel_unreadable" },
+  { operation: "create", branchId: "create.panel_finalized", reason: "panel_finalized" },
+  { operation: "create", branchId: "create.stale_revision", reason: "stale_revision" },
+  { operation: "create", branchId: "create.target_not_eligible", reason: "target_not_eligible" },
+  { operation: "cancel", branchId: "cancel.panel_absent", reason: "panel_absent" },
+  { operation: "cancel", branchId: "cancel.panel_unreadable", reason: "panel_unreadable" },
+  { operation: "cancel", branchId: "cancel.panel_finalized", reason: "panel_finalized" },
+  { operation: "cancel", branchId: "cancel.panel_already_cancelled", reason: "panel_already_cancelled" },
+  { operation: "cancel", branchId: "cancel.stale_revision", reason: "stale_revision" },
+  { operation: "vote", branchId: "vote.panel_absent", reason: "panel_absent" },
+  { operation: "vote", branchId: "vote.panel_unreadable", reason: "panel_unreadable" },
+  { operation: "vote", branchId: "vote.panel_not_open", reason: "panel_not_open" },
+  { operation: "vote", branchId: "vote.panel_stale", reason: "panel_stale" },
+  { operation: "vote", branchId: "vote.self_review", reason: "self_review" },
+  { operation: "vote", branchId: "vote.not_reviewer", reason: "not_reviewer" },
+  { operation: "vote", branchId: "vote.review_content_unavailable", reason: "review_content_unavailable" },
+  { operation: "vote", branchId: "vote.vote_malformed", reason: "vote_malformed" },
+  { operation: "vote", branchId: "vote.vote_conflict", reason: "vote_conflict" },
+];
+
+const UNSEEDED_UID = "nobody-1";
+const FINALIZED = { status: "finalized", finalizedAt: "2026-08-05T00:00:00.000Z", updatedAt: "2026-08-05T00:00:00.000Z", finalizedByUserId: OWNER_UID, finalStatus: "approved", finalDecisionId: "panel_workspace_dec_x", aggregationPolicyVersion: 1 };
+const notPendingRun = () => seedRun({ governanceRecord: validGovernanceRecord({ humanReview: { status: "approved", reviewedAt: GOVERNANCE_UPDATED_AT } }) });
+
+/** Puts the caller into the named authorization-denial state. Shared by all three operations. */
+function seedAuthDenial(reason: (typeof AUTH_DENIAL_REASONS)[number], callerUid: string, capabilityRole: string) {
+  if (reason === "workspace_not_found") { stores.workspaces.delete(WS_ID); return callerUid; }
+  if (reason === "workspace_malformed") { seedWorkspace({ type: "personal" }); return callerUid; }
+  if (reason === "membership_not_found") return UNSEEDED_UID;
+  if (reason === "membership_malformed") { seedMembership(callerUid, capabilityRole, WS_ID, { uid: "someone-else" }); return callerUid; }
+  if (reason === "membership_removed") { seedMembership(callerUid, capabilityRole, WS_ID, { status: "removed" }); return callerUid; }
+  if (reason === "owner_integrity_violation") { seedMembership(ADMIN_UID, "owner"); return ADMIN_UID; }
+  // insufficient_capability must use a NON-OWNER caller. Downgrading the workspace owner's own
+  // membership instead trips the owner-integrity check FIRST (the caller is still
+  // `workspace.ownerUserId`), which is how the first draft of this helper asserted
+  // `insufficient_capability` while actually exercising `owner_integrity_violation`.
+  return VIEWER_UID; // seeded "viewer": holds neither reviews.manage nor reviews.submit
+
+}
+
+/**
+ * `setup` runs BEFORE the event-count snapshot, for branches whose prerequisites include a
+ * genuinely successful prior mutation. `vote_conflict` needs an accepted first vote, which
+ * legitimately writes its own event — measuring the delta across both would have counted that
+ * event against the rejection, so the first draft reported `eventDelta:1` and failed honestly.
+ */
+type RejectionCase = { branchId: string; reason: string; setup?: () => Promise<void> | void; run: () => Promise<{ ok: boolean; reason?: unknown }> };
+const REJECTION_CASES: readonly RejectionCase[] = [
+  // ── create ──
+  { branchId: "create.team_workspaces_disabled", reason: "team_workspaces_disabled", run: () => { teamWorkspacesEnabled = false; return putCall(); } },
+  { branchId: "create.firestore_unavailable", reason: "firestore_unavailable", run: () => { firestoreUnavailableFlag.value = true; return putCall(); } },
+  ...AUTH_DENIAL_REASONS.map((reason) => ({ branchId: `create.auth_denied.${reason}`, reason, run: () => { const uid = seedAuthDenial(reason, OWNER_UID, "owner"); return putCall({ uid }); } })),
+  { branchId: "create.run_not_found", reason: "run_not_found", run: () => { stores.runs.delete(RUN_ID); return putCall(); } },
+  { branchId: "create.not_pending", reason: "not_pending", run: () => { notPendingRun(); return putCall(); } },
+  { branchId: "create.single_review_active", reason: "single_review_active", run: () => { seedAssignment({ assignedReviewerUserId: REVIEWER_UID }); return putCall(); } },
+  { branchId: "create.panel_unreadable", reason: "panel_unreadable", run: () => { stores.humanReviewPanel.set(`${RUN_ID}::current`, { kind: "not-a-panel" }); return putCall(); } },
+  { branchId: "create.panel_finalized", reason: "panel_finalized", run: () => { seedPanel({ revision: 1, ...FINALIZED }); return putCall({ expectedRevision: 1 }); } },
+  { branchId: "create.stale_revision", reason: "stale_revision", run: () => { seedPanel({ revision: 3 }); return putCall({ expectedRevision: 0 }); } },
+  { branchId: "create.target_not_eligible", reason: "target_not_eligible", run: () => putCall({ reviewerUserIds: [OWNER_UID, VIEWER_UID] }) },
+  // ── cancel ──
+  { branchId: "cancel.team_workspaces_disabled", reason: "team_workspaces_disabled", run: () => { teamWorkspacesEnabled = false; return deleteCall(); } },
+  { branchId: "cancel.firestore_unavailable", reason: "firestore_unavailable", run: () => { firestoreUnavailableFlag.value = true; return deleteCall(); } },
+  ...AUTH_DENIAL_REASONS.map((reason) => ({ branchId: `cancel.auth_denied.${reason}`, reason, run: () => { seedPanel({ revision: 1 }); const uid = seedAuthDenial(reason, OWNER_UID, "owner"); return deleteCall({ uid }); } })),
+  { branchId: "cancel.run_not_found", reason: "run_not_found", run: () => { seedPanel({ revision: 1 }); stores.runs.delete(RUN_ID); return deleteCall(); } },
+  { branchId: "cancel.not_pending", reason: "not_pending", run: () => { seedPanel({ revision: 1 }); notPendingRun(); return deleteCall(); } },
+  { branchId: "cancel.panel_absent", reason: "panel_absent", run: () => deleteCall() },
+  { branchId: "cancel.panel_unreadable", reason: "panel_unreadable", run: () => { stores.humanReviewPanel.set(`${RUN_ID}::current`, { kind: "not-a-panel" }); return deleteCall(); } },
+  { branchId: "cancel.panel_finalized", reason: "panel_finalized", run: () => { seedPanel({ revision: 1, ...FINALIZED }); return deleteCall(); } },
+  { branchId: "cancel.panel_already_cancelled", reason: "panel_already_cancelled", run: () => { seedPanel({ revision: 1, status: "cancelled" }); return deleteCall(); } },
+  { branchId: "cancel.stale_revision", reason: "stale_revision", run: () => { seedPanel({ revision: 3 }); return deleteCall({ expectedRevision: 1 }); } },
+  // ── vote ──
+  { branchId: "vote.team_workspaces_disabled", reason: "team_workspaces_disabled", run: () => { teamWorkspacesEnabled = false; return voteCall(); } },
+  { branchId: "vote.firestore_unavailable", reason: "firestore_unavailable", run: () => { firestoreUnavailableFlag.value = true; return voteCall(); } },
+  ...AUTH_DENIAL_REASONS.map((reason) => ({ branchId: `vote.auth_denied.${reason}`, reason, run: () => { seedPanel({ revision: 1 }); const uid = seedAuthDenial(reason, OWNER_UID, "owner"); return voteCall({ uid }); } })),
+  { branchId: "vote.run_not_found", reason: "run_not_found", run: () => { seedPanel({ revision: 1 }); stores.runs.delete(RUN_ID); return voteCall(); } },
+  { branchId: "vote.not_pending", reason: "not_pending", run: () => { seedPanel({ revision: 1 }); notPendingRun(); return voteCall(); } },
+  { branchId: "vote.panel_absent", reason: "panel_absent", run: () => voteCall() },
+  { branchId: "vote.panel_unreadable", reason: "panel_unreadable", run: () => { stores.humanReviewPanel.set(`${RUN_ID}::current`, { kind: "not-a-panel" }); return voteCall(); } },
+  { branchId: "vote.panel_not_open", reason: "panel_not_open", run: () => { seedPanel({ revision: 1, status: "cancelled" }); return voteCall(); } },
+  { branchId: "vote.panel_stale", reason: "panel_stale", run: () => { seedPanel({ revision: 2 }); return voteCall({ panelRevision: 1 }); } },
+  { branchId: "vote.self_review", reason: "self_review", run: () => { seedPanel({ revision: 1, reviewerUserIds: [CREATOR_UID, OWNER_UID] }); return voteCall({ uid: CREATOR_UID }); } },
+  { branchId: "vote.not_reviewer", reason: "not_reviewer", run: () => { seedPanel({ revision: 1 }); return voteCall({ uid: REVIEWER2_UID }); } },
+  { branchId: "vote.review_content_unavailable", reason: "review_content_unavailable", run: () => { seedPanel({ revision: 1 }); seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: { conclusion: "", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: true, humanReviewNeeded: false } }) }); return voteCall(); } },
+  { branchId: "vote.vote_malformed", reason: "vote_malformed", run: () => { seedPanel({ revision: 1 }); stores.humanReviewVotes.set(`${RUN_ID}::${buildAdaptiveHumanReviewVoteId(1, OWNER_UID)}`, { kind: "not-a-vote" }); return voteCall(); } },
+  { branchId: "vote.vote_conflict", reason: "vote_conflict", setup: async () => { seedPanel({ revision: 1 }); expect((await voteCall({ status: "approved" })).ok).toBe(true); }, run: () => voteCall({ status: "changes_requested" }) },
+];
+
+/** The per-run execution ledger. Asserted against the CONTRACT, never against the case table. */
+const executedBranchIds: string[] = [];
+const reasonOf = (r: { reason?: unknown }) => (typeof r.reason === "string" ? r.reason : (r.reason as { kind?: string } | undefined)?.kind);
+
+describe("panel mutation audit coverage — zero ghost events on every enumerated rejection branch", () => {
+  it.each(REJECTION_CASES.map((c) => [c.branchId, c] as const))("%s rejects with its own reason and writes no event", async (_branchId, testCase) => {
+    if (testCase.setup) await testCase.setup();
+    const before = panelEvents().length;
+    const result = await testCase.run();
+    expect(`${testCase.branchId}:rejected:${result.ok}`).toBe(`${testCase.branchId}:rejected:false`);
+    expect(`${testCase.branchId}:reason:${reasonOf(result)}`).toBe(`${testCase.branchId}:reason:${testCase.reason}`);
+    expect(`${testCase.branchId}:eventDelta:${panelEvents().length - before}`).toBe(`${testCase.branchId}:eventDelta:0`);
+    executedBranchIds.push(testCase.branchId);
+  });
+
+  /**
+   * §43 — THE RUNNER'S OWN FALSIFIER. Deleting a case, skipping one in the runner, registering a
+   * duplicate, or registering a branch absent from the contract each break this. The expected side
+   * is the CONTRACT, which is maintained independently of the case table.
+   */
+  it("every contract branch was executed exactly once — the ledger matches the contract", () => {
+    const contract = EXPECTED_REJECTION_BRANCHES.map((b) => b.branchId).sort();
+    expect([...executedBranchIds].sort()).toEqual(contract);
+    expect(`executed:${executedBranchIds.length} contract:${contract.length} duplicates:${executedBranchIds.length - new Set(executedBranchIds).size}`).toBe(`executed:${contract.length} contract:${contract.length} duplicates:0`);
+  });
+
+  it("every case's declared reason matches the contract's reason for that branch", () => {
+    const contractReason = new Map(EXPECTED_REJECTION_BRANCHES.map((b) => [b.branchId, b.reason]));
+    const mismatched = REJECTION_CASES.filter((c) => contractReason.get(c.branchId) !== c.reason).map((c) => c.branchId);
+    expect(`casesDisagreeingWithTheContract:${mismatched.join(",")}`).toBe("casesDisagreeingWithTheContract:");
+  });
+
+  it("the contract's shape reconciles: branches, unique operation/reason pairs, and passthrough branches", () => {
+    const branches = EXPECTED_REJECTION_BRANCHES.length;
+    const uniquePairs = new Set(EXPECTED_REJECTION_BRANCHES.map((b) => `${b.operation}:${b.reason}`)).size;
+    const passthrough = EXPECTED_REJECTION_BRANCHES.filter((b) => b.branchId.includes(".auth_denied.")).length;
+    expect(`branches:${branches} uniqueOperationReasonPairs:${uniquePairs} passthroughBranches:${passthrough} executableCases:${REJECTION_CASES.length}`).toBe(`branches:52 uniqueOperationReasonPairs:52 passthroughBranches:21 executableCases:52`);
+  });
+});
+
+/**
+ * ─── R3 §33–§36 — RETRY UNIQUENESS AND ATOMICITY AS COMMITTED REGRESSIONS ─────────────────────
+ *
+ * Both guarantees previously existed only as review-time probes, so nothing stopped a future
+ * change from breaking them silently. They are now permanent.
+ *
+ * RETRY: the event id is generated INSIDE the transaction callback, so a retried attempt mints a
+ * fresh one. Exactly one event survives — not because a check rejects the retry (the retry
+ * SUCCEEDS), but because the aborted attempt's buffered writes are discarded. The `auto-1` /
+ * `auto-2` assertion below pins that mechanism rather than just the count, so a fake that began
+ * retaining aborted writes would fail here instead of silently making the test meaningless.
+ */
+describe("panel audit events — retry uniqueness", () => {
+  const forceOneConflict = (collection: string, id: string, mutate: () => void) => {
+    let fired = false;
+    concurrentMutationHook = (ref) => {
+      if (!fired && ref.__collection === collection && ref.__id === id) { fired = true; mutate(); }
+    };
+  };
+
+  it("a CREATE that conflicts once and then succeeds commits exactly one event", async () => {
+    forceOneConflict("runs", RUN_ID, () => seedRun());
+    const result = await putCall();
+    expect(result.ok).toBe(true);
+    expect(`attempts:${transactionAttemptCount.value >= 2}`).toBe("attempts:true");
+    expect(panelEvents()).toHaveLength(1);
+    // the aborted attempt's auto-id is ABSENT — this is the discard mechanism, not a count
+    const keys = [...stores.governanceEvents.keys()].filter((k) => k.startsWith(`${RUN_ID}::`));
+    expect(`keys:${keys.join(",")}`).toBe(`keys:${RUN_ID}::auto-2`);
+    expect((stores.humanReviewPanel.get(`${RUN_ID}::current`) as { revision: number }).revision).toBe(1);
+  });
+
+  it("a VOTE that conflicts once and then succeeds commits exactly one event and one vote", async () => {
+    seedPanel({ revision: 1 });
+    forceOneConflict("runs", RUN_ID, () => seedRun());
+    expect((await voteCall()).ok).toBe(true);
+    expect(`attempts:${transactionAttemptCount.value >= 2}`).toBe("attempts:true");
+    expect(panelEvents()).toHaveLength(1);
+    expect([...stores.humanReviewVotes.keys()].filter((k) => k.startsWith(`${RUN_ID}::`))).toHaveLength(1);
+  });
+
+  it("a CANCEL that conflicts once and then succeeds commits exactly one event", async () => {
+    seedPanel({ revision: 1 });
+    forceOneConflict("runs", RUN_ID, () => seedRun());
+    expect((await deleteCall()).ok).toBe(true);
+    expect(`attempts:${transactionAttemptCount.value >= 2}`).toBe("attempts:true");
+    expect(panelEvents()).toHaveLength(1);
+  });
+});
+
+/**
+ * ATOMICITY: the audit event and the canonical mutation share one transaction, so an audit failure
+ * must roll back the canonical write — the strict opposite of finalize/override's best-effort
+ * post-commit pattern. Each case asserts the injected failure actually fired (the operation
+ * returns `write_failed`), so a case where an earlier validation branch short-circuited before
+ * reaching the injected write cannot pass silently.
+ */
+describe("panel audit events — atomicity: neither half survives a failure", () => {
+  it("an EVENT-write failure rolls back the panel CREATE", async () => {
+    throwOnSetCollection.value = "governanceEvents";
+    expect(await putCall()).toEqual({ ok: false, reason: "write_failed" });
+    expect(stores.humanReviewPanel.get(`${RUN_ID}::current`)).toBeUndefined();
+    expect(panelEvents()).toHaveLength(0);
+  });
+
+  it("a CANONICAL-write failure leaves no event on CREATE", async () => {
+    throwOnSetCollection.value = "humanReviewPanel";
+    expect(await putCall()).toEqual({ ok: false, reason: "write_failed" });
+    expect(panelEvents()).toHaveLength(0);
+  });
+
+  it("an EVENT-write failure rolls back the CANCEL — the panel stays open", async () => {
+    seedPanel({ revision: 1 });
+    throwOnSetCollection.value = "governanceEvents";
+    expect(await deleteCall()).toEqual({ ok: false, reason: "write_failed" });
+    expect((stores.humanReviewPanel.get(`${RUN_ID}::current`) as { status: string }).status).toBe("open");
+    expect(panelEvents()).toHaveLength(0);
+  });
+
+  it("an EVENT-write failure rolls back the VOTE — no vote is committed", async () => {
+    seedPanel({ revision: 1 });
+    throwOnSetCollection.value = "governanceEvents";
+    expect(await voteCall()).toEqual({ ok: false, reason: "write_failed" });
+    expect([...stores.humanReviewVotes.keys()].filter((k) => k.startsWith(`${RUN_ID}::`))).toHaveLength(0);
+    expect(panelEvents()).toHaveLength(0);
+  });
+
+  it("a CANONICAL-write failure leaves no event on VOTE", async () => {
+    seedPanel({ revision: 1 });
+    throwOnSetCollection.value = "humanReviewVotes";
+    expect(await voteCall()).toEqual({ ok: false, reason: "write_failed" });
+    expect(panelEvents()).toHaveLength(0);
   });
 });

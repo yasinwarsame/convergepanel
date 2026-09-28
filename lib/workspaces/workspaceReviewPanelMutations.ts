@@ -325,8 +325,10 @@ export type PutWorkspaceReviewPanelResult = { ok: true; panel: WorkspaceReviewPa
  *     `identity.uid`). Never a reviewer target, never a body/query value.
  *   • `workspaceId`/`projectId` — `target.*`, derived from the run document by
  *     `resolveWorkspaceReviewTarget`, which rejects a workspace mismatch. Never `args.workspaceId`.
- *   • `panelRevision`/`reviewerCount` — the CANONICAL panel object this transaction is about to
- *     commit, never the request array. R1 measured why this matters: a request of
+ *   • `panelRevision`/`reviewerCount` — the CANONICAL panel object, never the request. For a vote
+ *     that is `panel.revision` (the panel the vote was accepted on, provably equal to
+ *     `args.panelRevision` only because the `panel_stale` guard rejects a mismatch first); for
+ *     create/reconfigure it is `nextPanel.*`, the object about to be committed. R1 measured why this matters: a request of
  *     `[OWNER, OWNER, ADMIN]` canonicalizes to two reviewers, and an event built from
  *     `args.reviewerUserIds.length` claimed three — an audit record overstating the panel it
  *     documents. Route validation rejects duplicates today, but this module's own contract says
@@ -705,7 +707,13 @@ export async function submitWorkspaceReviewPanelVote(args: {
         at: now,
         workspaceId: target.workspaceId,
         projectId: target.projectId,
-        panelRevision: args.panelRevision,
+        // R3 §29-§31 — CANONICAL, not the request's expected revision. These are provably equal
+        // here (the `panel_stale` guard above rejects any mismatch before this point), but the
+        // field documents the panel the vote was accepted ON, so it derives from the canonical
+        // panel object rather than from `args`. The previous revision used `args.panelRevision`
+        // while the field-source table claimed canonical provenance — safe, but the table was
+        // wrong about it.
+        panelRevision: panel.revision,
         voteStatus: nextVote.status,
         commentPresent: nextVote.commentPresent,
         conditionsCount: nextVote.conditionsCount,
