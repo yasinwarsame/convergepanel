@@ -2530,7 +2530,6 @@ describe("governance canary runbook — the debt table parses and says what the 
  */
 describe("module boundary — no loading form reaches a live Firestore (§25–§27)", () => {
   it("require(\"firebase-admin/firestore\").getFirestore() returns the observed fake, not a live handle", async () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { getFirestore } = require("firebase-admin/firestore") as { getFirestore: () => typeof mockAdminDb };
     const db = getFirestore();
     const before = snapshotStore();
@@ -2547,7 +2546,6 @@ describe("module boundary — no loading form reaches a live Firestore (§25–�
   });
 
   it("every handle-producing entry point yields the SAME store — there is no second hidden Firestore", async () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const viaRequire = (require("firebase-admin/firestore") as { getFirestore: () => typeof mockAdminDb }).getFirestore();
     const viaImport = ((await import("firebase-admin/firestore")) as unknown as { getFirestore: () => typeof mockAdminDb }).getFirestore();
     const before = snapshotStore();
