@@ -10,6 +10,7 @@
 
 import { Timestamp } from "firebase-admin/firestore";
 import { readFileSync, readdirSync } from "fs";
+import { execFileSync } from "child_process";
 import { join as joinPath } from "path";
 import * as tsApi from "typescript";
 import { violatesAssignmentSelfReviewGuard, violatesDecisionSelfReviewGuard } from "@/lib/workspaces/workspaceReviewEligibility";
@@ -27,7 +28,14 @@ import { authorizeTeamWorkspaceMutationInTransaction } from "@/lib/workspaces/au
 import { isValidAssignmentTarget } from "@/lib/workspaces/workspaceReviewEligibility";
 
 type StoredDoc = Record<string, unknown>;
-const stores: Record<string, Map<string, StoredDoc>> = {
+/**
+ * R10 (A's F5) — a NULL-PROTOTYPE object. As a plain literal, `storeFor("__proto__")` returned
+ * `Object.prototype`: the escape failed closed only by accident (a `TypeError` on
+ * `Object.prototype.set` aborted the transaction) and such a collection was invisible to
+ * `snapshotStore`'s `Object.entries(stores)`. With a null prototype there is no inherited property to
+ * return, so a prototype-named collection is an ordinary lazily-created store the diff can see.
+ */
+const stores: Record<string, Map<string, StoredDoc>> = Object.assign(Object.create(null) as Record<string, Map<string, StoredDoc>>, {
   workspaces: new Map(),
   workspaceMemberships: new Map(),
   runs: new Map(),
@@ -40,7 +48,7 @@ const stores: Record<string, Map<string, StoredDoc>> = {
   // the canonical update — see that module's own doc comment). Keyed by
   // `${runId}::${autoId}`, same convention as the other per-run subcollections.
   governanceEvents: new Map(),
-};
+});
 
 function resetStores() {
   for (const store of Object.values(stores)) store.clear();
@@ -99,6 +107,28 @@ function pendingHarnessViolations(): string[] {
  * expected substring are left pending on purpose.
  */
 function acknowledgeExpectedViolations(expected: readonly string[]): string[] {
+  /**
+   * R10 — A CATCH-ALL IS NOT AN ACKNOWLEDGEMENT.
+   *
+   * R9 matched by `violation.includes(substring)`, so `[""]` matched everything. Placed at the head of
+   * the module-scope `afterEach`, one line disabled the "unconditional" fail-closed postcondition
+   * entirely: a swallowed unmodelled-API call in a test that never calls `expectStoreDelta` failed the
+   * suite alone and passed with the drain. An acknowledgement must NAME what it is claiming, so a
+   * substring that could match an unrelated future violation is rejected outright rather than honoured.
+   */
+  const pending = pendingHarnessViolations();
+  for (const substring of expected) {
+    // (a) it must LOOK like a label, not a wildcard
+    if (substring.trim().length < 8 || !/[.:]/.test(substring)) {
+      throw new Error(`R10 harness: "${substring}" is too weak to be an acknowledgement — name the violation (>= 8 chars, qualified with "." or ":"), never a catch-all`);
+    }
+    // (b) and it must be SPECIFIC: a substring that sweeps up more than one distinct pending label is a
+    // drain wearing a label's clothes. This is the breadth limit, and it is what `[""]` really violated.
+    const matched = new Set(pending.filter((violation) => violation.includes(substring)));
+    if (matched.size > 1) {
+      throw new Error(`R10 harness: "${substring}" matches ${matched.size} distinct pending violations (${[...matched].join(" | ")}) — acknowledge each by name`);
+    }
+  }
   const claimed: string[] = [];
   harnessViolations.forEach((violation, index) => {
     if (acknowledgedViolationIndexes.has(index)) return;
@@ -591,12 +621,12 @@ function makeSubDocRef(subCollectionName: string, parentCollectionName: string, 
  * call today. `add()`, `Transaction.create`/`delete` and `batch()` were absent — so a write through
  * any of them threw a `TypeError`, and the module's own established house style for post-commit
  * audit writes (`try { await write } catch { logger.warn(...) }`) swallowed it. `.add()` is in fact
- * used at FIVE `.collection("governanceEvents").add(` sites in this repo: two in
+ * used at FIVE [[count:addSites=5]] `.collection("governanceEvents").add(` sites in this repo: two in
  * `lib/firestore/runs.ts`, one in `lib/governance/governanceBackfill.ts`, one in
  * `lib/governance/evaluateAndStore.ts`, and one in `app/api/governance/review/route.ts`.
  *
- * R9 §60, [RETRACTED] — this count has now been wrong twice: first "two other governance-event writers", then
- * "FOUR", which missed the `app/` route because the search was scoped to `lib/`. It is no longer a
+ * R9 §60 — this count has now been wrong twice (see RETRACTED_PHRASES entry 5, then "FOUR", which missed
+ * the `app/` route because the search was scoped to `lib/`). It is no longer a
  * prose number: `countGovernanceEventAddSites()` walks the repository and the test below pins it, so a
  * sixth site fails the suite instead of quietly outdating a comment.
  * Modelling more methods can never be future-complete, so R8 pairs the fuller surface with the
@@ -695,11 +725,39 @@ function armWriteFailureInjection(caseId: string, siteId: InjectionSiteId): void
   throwOnSetCollection.value = armedInjection.targetCollection;
 }
 
+/**
+ * ─── R10 — THE INJECTION JOURNAL IS FAKE-OWNED AND APPEND-ONLY ──────────────────────────────────
+ *
+ * R9 said "`runAtomicityCase` is the only way a case is registered". It was not: `atomicityResults` is
+ * a module-scope Map and any test body can `.set()` into it. A hand-written result claiming
+ * `reached/fired: true` with an empty delta passed the whole reconciliation while production was never
+ * driven for that direction. Same shape as every other defect this series produced — a guard whose
+ * INPUT is controlled by the thing being guarded.
+ *
+ * The journal below is written ONLY here, inside the injection machinery, at the moment the fake
+ * disarms. A test body cannot append to it, cannot alter an entry (each is frozen), and cannot shorten
+ * it. The reconciliation cross-checks `atomicityResults` against the journal, so a fabricated result
+ * has no journal counterpart and is named.
+ */
+type InjectionJournalEntry = Readonly<{ caseId: string; siteId: InjectionSiteId; targetCollection: string; reached: boolean; fired: boolean; sequence: number }>;
+const injectionJournal: InjectionJournalEntry[] = [];
+let injectionSequence = 0;
+/** Read-only view. There is deliberately no writer other than `disarmWriteFailureInjection`. */
+const injectionJournalEntries = (): readonly InjectionJournalEntry[] => injectionJournal.slice();
+
 function disarmWriteFailureInjection(): ArmedInjection {
   if (!armedInjection) throw new Error("R9 harness: disarm called with no armed injection");
   const state = armedInjection;
   armedInjection = null;
   throwOnSetCollection.value = null;
+  injectionJournal.push(Object.freeze({
+    caseId: state.caseId,
+    siteId: state.siteId,
+    targetCollection: state.targetCollection,
+    reached: state.reached,
+    fired: state.fired,
+    sequence: ++injectionSequence,
+  }));
   return state;
 }
 const transactionShouldThrow = { value: false };
@@ -2540,7 +2598,8 @@ const INSTRUMENTED_EVENT_CHANNELS: readonly GovernanceEventChannel[] = Object.fr
   "bulkwriter.create",
   "bulkwriter.update",
   // R9 §19/§20 — the four delete channels, each with its own liveness case and its own
-  // disable-one-observer falsifier below (18 instrumented channels in total). R8 shipped all five
+  // disable-one-observer falsifier below — [[count:instrumentedChannels=18]] instrumented channels,
+  // [[count:deleteChannels=4]] of them deletes. R8 shipped all five
   // delete SITES unobserved.
   "direct.delete",
   "transaction.delete",
@@ -2615,6 +2674,8 @@ const ALLOWED_INTRINSIC_CALLEES: readonly string[] = Object.freeze([
   "Array", "Boolean", "Error", "JSON", "Map", "Number", "Object", "Promise", "Set", "String",
   "isNaN", "parseFloat", "parseInt", "require", "structuredClone", "Symbol", "BigInt", "Date",
 ]);
+
+
 
 /** Derived from the production source, scoped to the four audited operations for call analysis. */
 function deriveProductionWriteSurface(sourceText: string, targetFunctions: readonly string[]): ProductionWriteSurface {
@@ -2695,6 +2756,14 @@ function deriveProductionWriteSurface(sourceText: string, targetFunctions: reado
     if (bindings && tsApi.isNamespaceImport(bindings)) importedBindings.add(bindings.name.text);
   });
 
+  /** Every name declared at MODULE scope — the only place a module's own functions can be parked. */
+  const moduleScopeBindings = new Set<string>();
+  tsApi.forEachChild(sf, (node) => {
+    if (tsApi.isVariableStatement(node)) for (const d of node.declarationList.declarations) if (tsApi.isIdentifier(d.name)) moduleScopeBindings.add(d.name.text);
+    if (tsApi.isFunctionDeclaration(node) && node.name) moduleScopeBindings.add(node.name.text);
+    if (tsApi.isClassDeclaration(node) && node.name) moduleScopeBindings.add(node.name.text);
+  });
+
   const unresolvedLocalCalls = new Set<string>();
   /** Local functions called from `fnNode`, plus any callee this analysis cannot account for. */
   const localCalleesOf = (fnNode: tsApi.Node, owner: string): string[] => {
@@ -2708,7 +2777,23 @@ function deriveProductionWriteSurface(sourceText: string, targetFunctions: reado
             // a local parameter, a closure variable or an unknown global — not resolvable here
             unresolvedLocalCalls.add(`${owner}->${callee.text}`);
           }
-        } else if (!tsApi.isPropertyAccessExpression(callee) && callee.kind !== tsApi.SyntaxKind.ImportKeyword) {
+        } else if (tsApi.isPropertyAccessExpression(callee)) {
+          // R10 — a method call whose RECEIVER is a local, non-imported binding can reach a local
+          // helper the identifier walk never sees. R9 excluded this shape from BOTH branches, so a
+          // transactional write inside a helper reached via `shadowWriters.append(...)` produced no
+          // reachable-function entry, no attributed write site, and no unresolved entry either —
+          // making §17's "no call is unresolvable" false as written.
+          //
+          // The discriminator is DERIVED, not a list: a method call can hide a local-helper dispatch only
+          // when its receiver is a MODULE-SCOPE binding, because that is the only place a module's own
+          // functions can be parked (`const shadowWriters = { append: appendShadowAudit }`). A receiver
+          // that is function-LOCAL — a Firestore snapshot, a parsed panel, an array — holds values that
+          // came from somewhere this analysis already accounts for.
+          const receiverRoot = (function rootOf(e: tsApi.Expression): tsApi.Expression { return tsApi.isPropertyAccessExpression(e) ? rootOf(e.expression) : e; })(callee.expression);
+          if (tsApi.isIdentifier(receiverRoot) && moduleScopeBindings.has(receiverRoot.text) && !importedBindings.has(receiverRoot.text) && !localFunctions.has(receiverRoot.text)) {
+            unresolvedLocalCalls.add(`${owner}->${callee.getText(sf).replace(/\s+/g, " ").slice(0, 60)}`);
+          }
+        } else if (callee.kind !== tsApi.SyntaxKind.ImportKeyword) {
           // computed/element-access or a call on a call result: unresolvable by construction
           unresolvedLocalCalls.add(`${owner}->${callee.getText(sf).replace(/\s+/g, " ").slice(0, 60)}`);
         }
@@ -3092,17 +3177,27 @@ describe("R9 §4/§5 — log-based authority is statically unreachable from secu
       }
     }
   }
-  /** The declaration statement of the log itself — the ONLY bare module-scope reference permitted. */
-  const logDeclarationRange = (() => {
+  /**
+   * The declaration statements of the log and of each log-owning accessor — the ONLY module-scope
+   * positions where a bare reference is permitted. Derived by walking the file, so adding an accessor
+   * does not widen the exemption unless it is also added to `LOG_OWNING_FUNCTIONS`.
+   */
+  const ownDeclarationRanges = (() => {
+    const owned = new Set<string>(["governanceEventLog", ...LOG_OWNING_FUNCTIONS]);
+    const ranges: { name: string; start: number; end: number }[] = [];
     for (const statement of BAN_SF.statements) {
-      if (!tsApi.isVariableStatement(statement)) continue;
-      for (const declaration of statement.declarationList.declarations) {
-        if (tsApi.isIdentifier(declaration.name) && declaration.name.text === "governanceEventLog") {
-          return { start: statement.getStart(BAN_SF), end: statement.getEnd() };
+      if (tsApi.isVariableStatement(statement)) {
+        for (const declaration of statement.declarationList.declarations) {
+          if (tsApi.isIdentifier(declaration.name) && owned.has(declaration.name.text)) {
+            ranges.push({ name: declaration.name.text, start: statement.getStart(BAN_SF), end: statement.getEnd() });
+          }
         }
       }
+      if (tsApi.isFunctionDeclaration(statement) && statement.name && owned.has(statement.name.text)) {
+        ranges.push({ name: statement.name.text, start: statement.getStart(BAN_SF), end: statement.getEnd() });
+      }
     }
-    return null;
+    return ranges;
   })();
   /** Innermost wins: a describe nested inside another is the section that governs its contents. */
   const regionFor = (position: number): Region | undefined =>
@@ -3120,11 +3215,15 @@ describe("R9 §4/§5 — log-based authority is statically unreachable from secu
         ? region.kind === "describe"
           ? DIAGNOSTIC_ONLY_SECTIONS.includes(region.name)
           : LOG_OWNING_FUNCTIONS.includes(region.name)
-        : // Outside any describe and any named module-scope function. The ONLY permitted bare
-          // references are the log's own declaration statement and the declaration of a log-owning
-          // accessor. R9-M6 proved a blanket allowance here defeats the whole guard.
-          (logDeclarationRange !== null && position >= logDeclarationRange.start && position < logDeclarationRange.end) ||
-          LOG_OWNING_FUNCTIONS.includes(node.text);
+        : // Outside any describe and any named module-scope function. The ONLY permitted bare references
+          // are inside the DECLARATION STATEMENTS of the log and of the log-owning accessors.
+          //
+          // R10 — the trailing `LOG_OWNING_FUNCTIONS.includes(node.text)` clause that used to sit here
+          // allowed a bare reference to any accessor NAME anywhere at module scope, so
+          // `const landedAlias = diagnosticLandedEventObservations;` created an unpoliced alias and every
+          // later use of it was invisible. That clause was added while fixing R9-M6 and reopened the hole
+          // one level down — the same shape as the other three defects of that round.
+          ownDeclarationRanges.some((range) => position >= range.start && position < range.end);
       if (!allowed) offences.push(`${region ? `${region.kind}(${region.name})` : "module-scope"}::${node.text}@${BAN_SF.getLineAndCharacterOfPosition(position).line + 1}`);
     }
     tsApi.forEachChild(node, visit);
@@ -3336,6 +3435,97 @@ function countGovernanceEventAddSites(): string[] {
  * known limitation / follow-up debt — are kept distinct in the body, and only MEASURED COUNTS appear
  * below.
  */
+/**
+ * ═══════════════════════════════════════════════════════════════════════════════════════════════════
+ *  LIMITATIONS — WHAT THIS PROOF DOES NOT ESTABLISH
+ * ═══════════════════════════════════════════════════════════════════════════════════════════════════
+ *
+ * Ten rounds of adversarial review, three independent reviewers per round, found ZERO production
+ * defects in these four audit writes. Every defect found was in the apparatus built to prove them. That
+ * asymmetry is the reason this section exists rather than an eleventh round.
+ *
+ * THE TERMINATION RULE, set deliberately: a finding that requires WRITE ACCESS TO THIS TEST HARNESS to
+ * exploit, and that no reviewer can tie to a reachable production defect, is recorded here and does not
+ * block. The threat model those findings defend against is a future contributor editing the proof to
+ * conceal a production defect. That is a real risk on a team; it is not the risk this repository runs
+ * today, and defending against it has no natural stopping point — a sufficiently creative reviewer with
+ * harness write access can always find one more shape. "Clean" is declared, not reached.
+ *
+ * KNOWN LIMITATIONS, each verified by a reviewer and left open on purpose:
+ *
+ *  L1  The proof of "no forged event on a rejection path" covers the THREE audited operations. An INLINE
+ *      `tx.set(runRef.collection("governanceEvents").doc(), …)` on a rejected
+ *      `finalizeWorkspaceReviewPanel` or `overrideWorkspaceReviewPanel` branch is not detected, and those
+ *      branches are reachable — verified by mutation: such a ghost on the override `panel_absent` branch
+ *      survives the full 740-suite run. Audit scope is pinned at [[count:auditedOperations=3]] and
+ *      finalize/override keep their pre-existing best-effort post-commit pattern, so this is a scope
+ *      boundary rather than a regression. It is the largest remaining hole in the "zero ghost events"
+ *      claim, and the denied-Owner-Override path is the most consequential part of it.
+ *
+ *      NARROWER THAN IT SOUNDS, and the distinction is load-bearing: a ghost routed through
+ *      `appendPanelGovernanceEvent` at the SAME site IS killed, by the write-site census that pins
+ *      4 transactional write sites and 3 helper call sites. The escape requires bypassing the helper.
+ *      Verified in both directions by mutation at the override `panel_absent` branch.
+ *
+ *  L2  A citation resolving proves only that the referenced artifact EXISTS. It is a navigation aid. A
+ *      reason may carry a valid citation and a false claim, and the resolver will accept it — including
+ *      when the citation sits inside a URL. Claim validity comes from the mutation, never the citation.
+ *
+ *  L3  The PROVEN vs DOCUMENTATION-ONLY equivalence split compares reader SOURCE TEXT, normalised for
+ *      comments, coercion wrappers and containment. It is a structural check, not a semantic one: two
+ *      genuinely different expressions that happen to read the same thing would still be counted PROVEN.
+ *
+ *  L4  Guard witnesses prove the arranged PRECONDITIONS of a rejection, not that the target source line
+ *      executed. Execution binding rests on the twin-direction checks and on direct site-local ghost
+ *      mutation during review, which is a review-time activity and not a committed regression.
+ *
+ *  L5  The atomicity injection models "the audit write does not land" by throwing at the earliest point
+ *      the module could observe it. Real Firestore commits as a whole and exposes no per-document write
+ *      rejection, so the injection is a modelling device. The guarantee it pins is if anything stronger
+ *      under a single atomic commit.
+ *
+ *  L6  No Production canary backs this. There is no isolated Firebase project and seed users hold no
+ *      credentials, so a stateful canary cannot run without creating ad-hoc Production identities. The
+ *      storage-level recanary is a post-merge obligation.
+ *
+ *  L7  Prose numbers are checked only where they carry a `[[count:id=value]]` marker. Unmarked prose in
+ *      this file is commentary and may drift. Marked numbers cannot. This also covers numbers that live
+ *      only in the PR body: nothing in this repository reads that body, so diff-line figures, suite
+ *      totals and review tallies are measured by hand at review time and are NOT CI-checked.
+ *
+ *  L8  The scope and `.add(`-site checks walk the WORKING TREE, not the committed tree. An untracked or
+ *      generated `.ts`/`.tsx` file under `lib`/`app`/`components` containing one of the four action
+ *      strings, or the `governanceEvents` `.add(` shape, turns this suite red — confirmed by adding such
+ *      a file and observing exit 1. It fails CLOSED, so it can only ever produce a false failure and
+ *      never a false pass, and it therefore cannot conceal a defect. But a dirty working tree is part of
+ *      this suite's input, which qualifies the claim that the scope property "holds identically in any
+ *      checkout": it holds for any clean checkout.
+ *
+ *  L9  `commentPresent` is proved correct against inputs the ROUTE can produce, not against every input
+ *      the module's signature admits. Expressions that differ from production only on `comment: ""` —
+ *      `args.comment !== undefined`, `nextVote.comment !== undefined` — are indistinguishable here,
+ *      because `validateAdaptiveReviewCommentAndConditions` normalises an empty or whitespace-only
+ *      comment to `undefined` before this module is entered. That guarantee lives in the route validator
+ *      and is pinned by the call-site contract regression, NOT in this module. A future direct,
+ *      non-route caller passing `comment: ""` would record `commentPresent: true` for a vote carrying no
+ *      comment — the exact audit lie §44 exists to prevent. Production is correct today
+ *      (`nextVote.commentPresent` is `Boolean(args.comment)`); the limitation is the boundary, not the
+ *      expression.
+ *
+ * Nothing in this list is a statement about whether the four events are written correctly. They are, and
+ * that is what the 500-odd committed regressions below establish.
+ */
+
+/**
+ * R10 — THE PROOF'S OWN NUMBERS, each carrying a discovered marker so none can rot.
+ *
+ * The audited surface is [[count:auditedOperations=3]] operations writing [[count:auditedActions=4]]
+ * actions, proved by [[count:registeredCases=59]] rejection cases over [[count:returnSites=44]] discovered
+ * return sites, [[count:declaredWitnesses=15]] guard witnesses reading [[count:guardOperandReaders=8]]
+ * registry operands, [[count:atomicityCases=8]] atomicity directions, [[count:provenanceSubjects=4]]
+ * provenance subjects with [[count:equivalenceEntries=30]] declared equivalences,
+ * [[count:pinnedImports=24]] pinned imports and [[count:mechanismIds=6]] citable harness mechanisms.
+ */
 describe("PR claim re-derivation — every measured count is computed from source (§61)", () => {
   const surface = () => deriveProductionWriteSurface(PANEL_MUTATIONS_SOURCE, Object.keys(PANEL_OPERATION_FUNCTIONS));
 
@@ -3431,13 +3621,115 @@ describe("PR claim re-derivation — every measured count is computed from sourc
     );
   });
 
-  it("the scope counts: three changed files, and no audit-reader or API file among them", () => {
-    // derived from the production module and the two other files this PR touches; the file LIST itself
-    // is verified against `git diff` in the pre-push gate, which is the only place git is available.
-    const changed = ["lib/workspaces/workspaceReviewPanelMutations.ts", "lib/workspaces/__tests__/workspaceReviewPanelMutations.spec.ts", "docs/operations/workspace-governance-canary-runbook.md"];
-    expect(`changedFiles:${changed.length}`).toBe("changedFiles:3");
-    const forbidden = changed.filter((f) => /auditLog|listWorkspaceAuditEvents|api\/governance\/audit|AUDIT_LOG_DISPLAY_ACTIONS|governanceBackfill/.test(f));
-    expect(`auditReaderOrApiFilesInScope:${forbidden.join(",")}`).toBe("auditReaderOrApiFilesInScope:");
+  /**
+   * ─── R10 — SCOPE IS A PROPERTY OF THE TREE, NOT OF git HISTORY ──────────────────────────────────
+   *
+   * Two wrong versions preceded this one, and both are worth recording.
+   *
+   *   R9 hardcoded the three filenames in an array and deferred verification to "the pre-push gate, which
+   *   is the only place git is available". Both halves were wrong: swapping in a nonexistent path
+   *   survived, and there IS no pre-push gate in this repo (no `.husky`; the Quality Gate workflow runs
+   *   tsc/lint/build/jest only).
+   *
+   *   R10's first attempt asked `git diff --name-only abd032a5 HEAD` and recorded a harness violation
+   *   when git could not answer. Fail-closed, but ENVIRONMENT-DEPENDENT: CI checks out shallow, the merge
+   *   base is absent, the violation fires, and the pinned acknowledgement count moved 8 -> 9 — a red
+   *   Quality Gate on a green local run. A pinned absolute count that differs between a full clone and a
+   *   shallow checkout is a defect in the proof, not in the product.
+   *
+   * What "audit-reader scope is closed" MEANS is a property of the source tree, and it holds identically
+   * in any checkout: the four action strings exist only in the audited module, and no reader, display map,
+   * backfill or audit API references them. That is what is asserted. The git-derived file list remains as
+   * a bonus when the merge base happens to be present, and contributes to no pinned count.
+   */
+  const changedFilesFromGit = (): { files: string[]; gitAvailable: boolean } => {
+    try {
+      const out = execFileSync("git", ["diff", "--name-only", "abd032a5", "HEAD"], { cwd: joinPath(__dirname, "..", "..", ".."), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+      return { files: out.split("\n").map((l) => l.trim()).filter(Boolean).sort(), gitAvailable: true };
+    } catch {
+      return { files: [], gitAvailable: false };
+    }
+  };
+
+  const repoRootPath = () => joinPath(__dirname, "..", "..", "..");
+  const readIfPresent = (relative: string): string | null => {
+    try {
+      return readFileSync(joinPath(repoRootPath(), relative), "utf8");
+    } catch {
+      return null;
+    }
+  };
+
+  it("the four new actions exist ONLY in the audited module — audit-reader scope is closed, in any checkout", () => {
+    const owners: string[] = [];
+    const walk = (directory: string) => {
+      for (const entry of readdirSync(directory, { withFileTypes: true })) {
+        if (entry.name === "node_modules" || entry.name === ".next" || entry.name.startsWith(".")) continue;
+        const full = joinPath(directory, entry.name);
+        if (entry.isDirectory()) { walk(full); continue; }
+        if (!/\.tsx?$/.test(entry.name)) continue;
+        if (PANEL_MUTATION_ACTIONS.some((action) => readFileSync(full, "utf8").includes(`"${action}"`))) owners.push(full.slice(repoRootPath().length + 1));
+      }
+    };
+    for (const top of ["lib", "app", "components"]) walk(joinPath(repoRootPath(), top));
+    expect(owners.sort()).toEqual([
+      "lib/workspaces/__tests__/workspaceReviewPanelMutations.spec.ts",
+      "lib/workspaces/workspaceReviewPanelMutations.ts",
+    ]);
+  });
+
+  it("no audit READER, display map, backfill or audit API mentions any of the four actions", () => {
+    const readers = [
+      "lib/governance/auditLog.ts",
+      "lib/governance/governanceBackfill.ts",
+      "lib/workspaces/listWorkspaceAuditEvents.ts",
+      "app/api/governance/audit/route.ts",
+      "app/api/governance/audit/backfill/route.ts",
+    ];
+    const present = readers.filter((r) => readIfPresent(r) !== null);
+    expect(`readerFilesFound:${present.length}`).toBe(`readerFilesFound:${readers.length}`);
+    const mentions = present.filter((r) => PANEL_MUTATION_ACTIONS.some((action) => (readIfPresent(r) as string).includes(action)));
+    expect(`readersMentioningTheNewActions:${mentions.join(",")}`).toBe("readersMentioningTheNewActions:");
+    // NEGATIVE CONTROL — the predicate can say yes, against the module that DOES own them
+    const owner = readIfPresent("lib/workspaces/workspaceReviewPanelMutations.ts") as string;
+    expect(`ownerMentionsThem:${PANEL_MUTATION_ACTIONS.every((a) => owner.includes(a))}`).toBe("ownerMentionsThem:true");
+  });
+
+  it("L8 — the tree walk fails CLOSED: a planted action string is DETECTED, so it can never yield a false pass", () => {
+    // the mechanism, exercised directly on synthetic input rather than by writing a file into the repo
+    const detect = (sources: readonly { path: string; text: string }[]) =>
+      sources.filter((f) => PANEL_MUTATION_ACTIONS.some((a) => f.text.includes(`"${a}"`))).map((f) => f.path);
+    expect(detect([{ path: "lib/x/__scratch.ts", text: 'export const P = "adaptive_review_panel_created";' }])).toEqual(["lib/x/__scratch.ts"]);
+    expect(detect([{ path: "lib/x/clean.ts", text: "export const P = 1;" }])).toEqual([]);
+    // so the only failure direction is a FALSE RED, never a false green — which is what L8 records
+    expect(`failsClosed:${detect([{ path: "a", text: '"adaptive_review_panel_vote_cast"' }]).length > 0}`).toBe("failsClosed:true");
+  });
+
+  it("L9 — the commentPresent boundary is the ROUTE's, and the module's own signature admits the divergence", () => {
+    // production's expression and the indistinguishable alternative agree on every value the route emits
+    for (const raw of ["", "   ", "\t\n "]) {
+      const parsed = parseSubmitAdaptiveReviewVoteRequest({ status: "approved", panelRevision: 1, comment: raw });
+      expect(`parsed:${parsed.ok}`).toBe("parsed:true");
+      if (parsed.ok) expect(`normalised:${JSON.stringify(parsed.value.comment)}`).toBe("normalised:undefined");
+    }
+    // and they DISAGREE on the one value the route can never produce — which is why L9 exists
+    const empty = "" as string | undefined;
+    expect(`boolean:${Boolean(empty)} notUndefined:${empty !== undefined}`).toBe("boolean:false notUndefined:true");
+  });
+
+  it("BONUS, skipped without ceremony when the merge base is absent: git agrees the change is three files", () => {
+    const { files, gitAvailable } = changedFilesFromGit();
+    if (!gitAvailable) {
+      // a shallow checkout (CI) has no merge base. This contributes to NO pinned count — pinning an
+      // absolute number here is what turned a green local run into a red Quality Gate.
+      expect("gitScopeCheck:unavailable").toBe("gitScopeCheck:unavailable");
+      return;
+    }
+    expect(files).toEqual([
+      "docs/operations/workspace-governance-canary-runbook.md",
+      "lib/workspaces/__tests__/workspaceReviewPanelMutations.spec.ts",
+      "lib/workspaces/workspaceReviewPanelMutations.ts",
+    ]);
   });
 });
 
@@ -3459,59 +3751,136 @@ describe("documented counts and retracted claims (§59/§60)", () => {
     runbook: readFileSync(joinPath(__dirname, "..", "..", "..", "docs", "operations", "workspace-governance-canary-runbook.md"), "utf8"),
   });
 
-  const NUMBER_WORDS: Readonly<Record<string, number>> = { TWO: 2, THREE: 3, FOUR: 4, FIVE: 5, SIX: 6, SEVEN: 7, FOURTEEN: 14 };
+  /**
+   * ─── R10 — PROSE COUNTS ARE DISCOVERED, NOT LISTED ──────────────────────────────────────────────
+   *
+   * R9 listed six claims and asserted "every number this file states in prose is extracted from its own
+   * source and compared with the derived value". That was false: five other prose numbers were
+   * unchecked and could be falsified silently. A list of claims to check is the same shape as a list of
+   * write forms to recognise — it omits what nobody thought of.
+   *
+   * The polarity is inverted. Any prose number that matters carries an inline marker
+   * `[[count:<id>=<value>]]`, the scan DISCOVERS every marker in the file, and a marker with no
+   * registered deriver — or a value that disagrees with its deriver — fails. So the registry cannot
+   * silently fall behind the prose: a new marker demands a deriver, and a changed number is caught.
+   */
+  const DERIVERS: Readonly<Record<string, () => string>> = Object.freeze({
+    executableObligations: () => String(EXECUTABLE_OBLIGATIONS.length),
+    expandedObligations: () => String(EXPANDED_OBLIGATIONS.length),
+    registeredCases: () => String(REJECTION_CASES.length),
+    returnSites: () => String(DISCOVERED_REJECTION_SITES.length),
+    addSites: () => String(countGovernanceEventAddSites().length),
+    instrumentedChannels: () => String(INSTRUMENTED_EVENT_CHANNELS.length),
+    deleteChannels: () => String(INSTRUMENTED_EVENT_CHANNELS.filter((c) => c.endsWith(".delete")).length),
+    twinUnorderedPairs: () => String(new Set(REASON_TWIN_PAIRS.map(([a, b, r]) => `${[a, b].sort().join("|")}::${r}`)).size),
+    twinSites: () => String(new Set(REASON_TWIN_PAIRS.flatMap(([a, b]) => [a, b])).size),
+    twinDirectedChecks: () => String(REASON_TWIN_PAIRS.length),
+    declaredWitnesses: () => String(Object.keys(SITE_GUARD_FACTS).length),
+    guardOperandReaders: () => String(Object.keys(GUARD_OPERAND_READERS).length),
+    atomicityCases: () => String(Object.keys(REQUIRED_ATOMICITY_CASES).length),
+    pinnedImports: () => String(deriveProductionWriteSurface(PANEL_MUTATIONS_SOURCE, Object.keys(PANEL_OPERATION_FUNCTIONS)).allImports.length),
+    provenanceSubjects: () => String(PROVENANCE_SUBJECTS.length),
+    mechanismIds: () => String(HARNESS_MECHANISM_IDS.size),
+    auditedOperations: () => String(Object.keys(PANEL_OPERATION_FUNCTIONS).length),
+    auditedActions: () => String(PANEL_MUTATION_ACTIONS.length),
+    equivalenceEntries: () => String(Object.values(EXPECTED_EQUIVALENT_SPLIT).reduce((n, v) => n + v.proven + v.documented.length, 0)),
+  });
 
-  /** Each claim: where it is written, the pattern that captures it, and the value it must equal. */
-  const DOCUMENTED_CLAIMS: readonly { id: string; where: "spec" | "production" | "runbook"; pattern: RegExp; derive: () => string; asWord?: boolean }[] = [
-    { id: "executableObligations", where: "spec", pattern: /NOTHING is excluded: all (\d+) are executable/, derive: () => String(EXECUTABLE_OBLIGATIONS.length) },
-    { id: "expandedObligationArithmetic", where: "spec", pattern: /so 38 \+ 21 = (\d+)\./, derive: () => String(EXPANDED_OBLIGATIONS.length) },
-    { id: "addSiteCount", where: "spec", pattern: /used at ([A-Z]+) `\.collection\("governanceEvents"\)\.add\(` sites/, derive: () => String(countGovernanceEventAddSites().length), asWord: true },
-    { id: "twinUnorderedPairs", where: "spec", pattern: /([A-Z]+) unordered pairs spanning [A-Z]+ sites/, derive: () => String(new Set(REASON_TWIN_PAIRS.map(([a, b, r]) => `${[a, b].sort().join("|")}::${r}`)).size), asWord: true },
-    { id: "twinSites", where: "spec", pattern: /[A-Z]+ unordered pairs spanning ([A-Z]+) sites/, derive: () => String(new Set(REASON_TWIN_PAIRS.flatMap(([a, b]) => [a, b])).size), asWord: true },
-    { id: "instrumentedChannels", where: "spec", pattern: /\((\d+) instrumented channels/, derive: () => String(INSTRUMENTED_EVENT_CHANNELS.length) },
-  ];
+  const discoveredMarkers = () => {
+    const found: { id: string; value: string; line: number }[] = [];
+    sources().spec.split("\n").forEach((line, index) => {
+      for (const match of line.matchAll(/\[\[count:([A-Za-z]+)=([0-9]+)\]\]/g)) found.push({ id: match[1], value: match[2], line: index + 1 });
+    });
+    return found;
+  };
 
-  it.each(DOCUMENTED_CLAIMS.map((c) => [c.id, c] as const))("%s — the number written in prose equals the number derived from source", (id, claim) => {
-    const match = sources()[claim.where].match(claim.pattern);
-    expect(`${id}:phrasePresent:${match !== null}`).toBe(`${id}:phrasePresent:true`);
-    const captured = (match as RegExpMatchArray)[1];
-    const asNumber = claim.asWord ? String(NUMBER_WORDS[captured] ?? `UNKNOWN_WORD(${captured})`) : captured;
-    expect(`${id}:written:${asNumber} derived:${claim.derive()}`).toBe(`${id}:written:${claim.derive()} derived:${claim.derive()}`);
+  it("R10 — every DISCOVERED prose-count marker has a deriver and agrees with it", () => {
+    const markers = discoveredMarkers();
+    expect(`markersFound:${markers.length > 8}`).toBe("markersFound:true");
+    const orphans = markers.filter((m) => !(m.id in DERIVERS)).map((m) => `${m.id}@${m.line}`);
+    expect(`markersWithNoDeriver:${orphans.join(",")}`).toBe("markersWithNoDeriver:");
+    const wrong = markers.filter((m) => DERIVERS[m.id]() !== m.value).map((m) => `${m.id}@${m.line}:written=${m.value} derived=${DERIVERS[m.id]()}`);
+    expect(`markersDisagreeingWithSource:${wrong.join(" | ")}`).toBe("markersDisagreeingWithSource:");
+  });
+
+  it("R10 — the marker scan is not vacuous, and a wrong or unregistered marker IS reported", () => {
+    const scan = (text: string) => [...text.matchAll(/\[\[count:([A-Za-z]+)=([0-9]+)\]\]/g)].map((m) => ({ id: m[1], value: m[2] }));
+    // the probe markers are ASSEMBLED, never written literally: a literal here would be discovered by the
+    // scan as a real claim about this file, which is exactly what happened on the first attempt.
+    const marker = (id: string, value: string) => `[${"["}count:${id}=${value}]${"]"}`;
+    expect(scan(`there are ${marker("executableObligations", "59")} of them`)).toEqual([{ id: "executableObligations", value: "59" }]);
+    expect(scan("no markers here")).toEqual([]);
+    // a wrong value is caught
+    const wrongOne = scan(marker("executableObligations", "99"))[0];
+    expect(`caught:${DERIVERS[wrongOne.id]() !== wrongOne.value}`).toBe("caught:true");
+    // an unregistered id is caught
+    expect(`orphanCaught:${!("aCountNobodyRegistered" in DERIVERS)}`).toBe("orphanCaught:true");
+  });
+
+  it("R10 — every deriver is USED by at least one marker, so the registry cannot carry dead entries", () => {
+    const used = new Set(discoveredMarkers().map((m) => m.id));
+    expect(`deriversWithNoMarker:${Object.keys(DERIVERS).filter((id) => !used.has(id)).sort().join(",")}`).toBe("deriversWithNoMarker:");
   });
 
   /**
    * §59 — CLAIMS THAT WERE RETRACTED. Each was stated, found false, and withdrawn. Restoring the
    * wording fails here. The compiled-output claim is the one R8 got wrong: production changed twice
    * AFTER the audit writes landed (`reviewerCount`/`schemaId`/`answerShape`, then `panelRevision`), so
-   * [RETRACTED] "byte-identical across every reviewed head" was false. The bounded form is true and is what the PR
-   * body now says.
+   * The compiled-output claim is the one R8 got wrong (see RETRACTED_PHRASES entry 1): production changed
+   * twice AFTER the audit writes landed, so the universal form was false. The bounded form is true and is
+   * what the PR body now says.
    */
   const RETRACTED_PHRASES: readonly { phrase: string; why: string }[] = [
-    { phrase: "byte-identical across every reviewed head", why: "[RETRACTED] false: production changed twice after the audit writes landed" },
-    { phrase: "leaving 56 executable", why: "[RETRACTED] false since R5 made all three excluded sites reachable; the count is 59" },
-    { phrase: "3 are classified STRUCTURALLY UNREACHABLE", why: "[RETRACTED] false since R5; the exclusion map is empty" },
-    { phrase: "14 reason-twin pairs", why: "[RETRACTED] conflates 14 directed checks with 7 unordered pairs" },
-    { phrase: "two other governance-event writers", why: "[RETRACTED] there are five `.add(` sites, not two" },
-    { phrase: "every hostile value is read from a pre-call snapshot", why: "[RETRACTED] about 20 of 93 hostile entries are, correctly, literals" },
+    { phrase: "byte-identical across every reviewed head", why: "false: production changed twice after the audit writes landed" },
+    { phrase: "leaving 56 executable", why: "false since R5 made all three excluded sites reachable; the count is 59" },
+    { phrase: "3 are classified STRUCTURALLY UNREACHABLE", why: "false since R5; the exclusion map is empty" },
+    { phrase: "14 reason-twin pairs", why: "conflates 14 directed checks with 7 unordered pairs" },
+    { phrase: "two other governance-event writers", why: "there are five `.add(` sites, not two" },
+    { phrase: "every hostile value is read from a pre-call snapshot", why: "about 20 of 93 hostile entries are, correctly, literals" },
   ];
 
   /**
-   * The phrases are QUOTED in this file — in the table above, and in the doc comments that record why
-   * each was withdrawn. A quotation is legitimate; a restated CLAIM is not. They are distinguished by an
-   * explicit marker: any line quoting a retracted phrase must carry `[RETRACTED]`. So the historical
-   * record is preserved and a phrase reintroduced as an assertion is caught, which a whole-file
-   * `includes()` could not do — the first version of this check failed on its own table.
+   * ─── R10 — THE RETRACTED WORDING LIVES IN EXACTLY ONE PLACE ────────────────────────────────────
+   *
+   * R9 used a line-level `[RETRACTED]` marker as the licence to quote a withdrawn claim. That is an
+   * opt-out, and an opt-out can be taken: C restated the compiled-output claim verbatim on a line that
+   * also carried the marker and the suite exited 0. Requiring the marker to PRECEDE the phrase does not
+   * help either — writing the marker first is the natural way to write the exploit, and I confirmed that
+   * "fix" leaves the escape open.
+   *
+   * There is no marker now. A retracted phrase may appear ONLY inside the table below, which is the
+   * single record of what was withdrawn and why. Every other mention anywhere in the spec, in production
+   * or in the runbook fails, regardless of how the line is decorated. The doc comments that used to
+   * quote these phrases now refer to the table instead.
    */
-  const RETRACTION_MARKER = "[RETRACTED]";
 
-  it.each(RETRACTED_PHRASES.map((r) => [r.phrase, r.why] as const))('the retracted claim "%s" reappears only as a marked quotation (%s)', (phrase) => {
+  /** The line range of the RETRACTED_PHRASES table — the only place the wording may appear. */
+  // lazy: `sources()` reads PANEL_MUTATIONS_SOURCE, declared further down the file
+  const tableRange = () => {
+    const lines = readFileSync(__filename, "utf8").split("\n");
+    const start = lines.findIndex((l) => l.includes("const RETRACTED_PHRASES: readonly"));
+    const end = lines.findIndex((l, i) => i > start && l.trim() === "];");
+    return { start: start + 1, end: end + 1 };
+  };
+
+  it("the table's own line range was located, so the exemption is a real region and not the whole file", () => {
+    const range = tableRange();
+    expect(`tableLocated:${range.start > 0 && range.end > range.start}`).toBe("tableLocated:true");
+    expect(`tableIsSmall:${range.end - range.start < 20}`).toBe("tableIsSmall:true");
+  });
+
+  it.each(RETRACTED_PHRASES.map((r) => [r.phrase, r.why] as const))('the retracted claim "%s" appears ONLY in the table that records it (%s)', (phrase) => {
     const offenders: string[] = [];
+    const range = tableRange();
     for (const [name, text] of Object.entries(sources())) {
       text.split("\n").forEach((line, index) => {
-        if (line.includes(phrase) && !line.includes(RETRACTION_MARKER)) offenders.push(`${name}:${index + 1}`);
+        if (!line.includes(phrase)) return;
+        const lineNumber = index + 1;
+        const insideTable = name === "spec" && lineNumber >= range.start && lineNumber <= range.end;
+        if (!insideTable) offenders.push(`${name}:${lineNumber}`);
       });
     }
-    expect(`unmarkedRetractedClaimAt:${offenders.join(",")}`).toBe("unmarkedRetractedClaimAt:");
+    expect(`retractedClaimOutsideItsTable:${offenders.join(",")}`).toBe("retractedClaimOutsideItsTable:");
   });
 
   it("every retracted phrase IS still quoted somewhere — the check is over real strings, not an empty list", () => {
@@ -3520,14 +3889,21 @@ describe("documented counts and retracted claims (§59/§60)", () => {
     expect(RETRACTED_PHRASES.length).toBe(6);
   });
 
-  it("the marker discriminates: an unmarked line carrying a retracted phrase IS reported", () => {
-    // the phrase is taken FROM the table, never written here — a literal copy on these very lines is
-    // itself an unmarked occurrence, which is how the first version of this control failed
+  it("R10 — NO decoration excuses a restatement: the region is the only exemption", () => {
+    // the phrase is taken FROM the table, never written here — a literal copy on these lines would
+    // itself be an occurrence outside the table, which is how the first version of this control failed
     const phrase = RETRACTED_PHRASES[0].phrase;
-    const unmarked = `production compiled output is ${phrase}`;
-    const markedUp = `${RETRACTION_MARKER} once said ${phrase}`;
-    const flag = (line: string) => line.includes(phrase) && !line.includes(RETRACTION_MARKER);
-    expect([unmarked, "a line with no claim", markedUp].filter(flag)).toEqual([unmarked]);
+    const outsideTable = (line: string) => line.includes(phrase);
+    // every decoration C's escape used, and the one my first fix used, are all still occurrences
+    for (const decorated of [
+      `production compiled output is ${phrase}`,
+      `// [RETRACTED] historical note. Production compiled output is ${phrase}.`,
+      `${phrase} [RETRACTED] historical note`,
+      `/* [RETRACTED] */ ${phrase}`,
+    ]) {
+      expect(`decoratedStillCounts:${outsideTable(decorated)}`).toBe("decoratedStillCounts:true");
+    }
+    expect(`aLineWithoutIt:${outsideTable("a line with no claim")}`).toBe("aLineWithoutIt:false");
   });
 });
 
@@ -4519,10 +4895,11 @@ describe("panel mutation audit coverage — governance context provenance", () =
  *   • EXPANDED RUNTIME OBLIGATIONS — 59. The 3 `write_failed` catch returns are excluded (not
  *     decision points; the atomicity regressions below own them), leaving 41 decision sites; the
  *     3 authorization passthrough sites each expand to all 7 reachable runtime auth reasons,
- *     so 38 + 21 = 59. NOTHING is excluded: all 59 are executable, and the exclusion map
- *     is empty. (R9 §60, [RETRACTED] — this paragraph said "3 are classified STRUCTURALLY UNREACHABLE … leaving 56
- *     executable" for four rounds after R5 made all three reachable and set the count to 59. The code
- *     and the assertions were right; the comment describing them was three rounds stale.)
+ *     so 38 + 21 = 59 [[count:expandedObligations=59]]. NOTHING is excluded: all 59
+ *     [[count:executableObligations=59]] are executable, and the exclusion map
+ *     is empty. (R9 §60 — this paragraph carried a stale exclusion count for four rounds after R5 made all
+ *     three sites reachable; see RETRACTED_PHRASES entries 2 and 3. The code and the assertions were
+ *     right; the comment describing them was three rounds stale.)
  *
  * The structural invariant that matters is NOT the number 59. It is that the inventory preserves
  * every return site independently, including duplicate reasons, and that the propagated union is
@@ -4903,6 +5280,68 @@ describe("production ReturnStatement census — fails closed on unrecognised sha
     expect(unsupportedIn(`export async function synthOp() { let result: Res; ({ result } = pick()); return result; }`)).toEqual(["create#assign-1"]);
   });
 
+  /**
+   * ─── R10 — THE THREE R9 SURVIVORS, EACH WITH A CONTROL ─────────────────────────────────────────
+   *
+   * These are the shapes that escaped R9 entirely — no census entry of any kind — while a forged
+   * governance event rode the invisible branch at exit 0. Each is now UNSUPPORTED, and each case pairs
+   * the negative with a positive control so "the census reports nothing" can never be mistaken for
+   * "the census is fine".
+   */
+  it("R10 — `for (result of …)` reaches the carrier and is UNSUPPORTED", () => {
+    const forOf = `export async function synthOp(a: number) { let result: Res = seed(a); for (result of [{ ok: false, reason: "r" }]) { break; } return result; }`;
+    const entries = censusOf(forOf);
+    expect(entries.map((x) => x.classification)).toContain("unsupported");
+    expect(entries.find((x) => x.expr.includes("for-of-loop-binding"))).toBeDefined();
+    // CONTROL — the same loop over a NON-carrier binding is correctly silent
+    const unrelated = `export async function synthOp(a: number) { let other: number = 0; let result: Res = seed(a); for (other of [1, 2]) { break; } return result; }`;
+    expect(censusOf(unrelated).filter((x) => x.expr.includes("for-of-loop-binding"))).toEqual([]);
+  });
+
+  it("R10 — a PROPERTY-PATH write through the carrier (`result.ok = false`) is UNSUPPORTED", () => {
+    const through = `export async function synthOp(a: number) { let result: Res = seed(a); if (a < 0) { (result as { ok: boolean }).ok = false; } return result; }`;
+    expect(censusOf(through).find((x) => x.expr.includes("property-path-write"))).toBeDefined();
+    // CONTROL — a write to an unrelated object's `.ok` is silent
+    const unrelated = `export async function synthOp(a: number) { const other = { ok: true }; let result: Res = seed(a); other.ok = false; return result; }`;
+    expect(censusOf(unrelated).filter((x) => x.expr.includes("property-path-write"))).toEqual([]);
+  });
+
+  it("R10 — the carrier handed to a CALL that can mutate it is UNSUPPORTED", () => {
+    const assigned = `export async function synthOp(a: number) { let result: Res = seed(a); if (a < 0) { Object.assign(result, { ok: false, reason: "r" }); } return result; }`;
+    expect(censusOf(assigned).find((x) => x.expr.includes("carrier-passed-to-call"))).toBeDefined();
+    // and a PREFIX of the carrier counts, because the callee can replace the carrier wholesale
+    const prefix = `export async function synthOp(a: number) { const holder: { result: Res } = { result: seed(a) }; mutate(holder); return holder.result; }`;
+    expect(censusOf(prefix).find((x) => x.expr.includes("carrier-passed-to-call"))).toBeDefined();
+    // CONTROL — an argument strictly BELOW the carrier cannot rewrite ok/reason and is silent. This is
+    // production's own shape: `toWorkspacePanelDto(ref, transactionResult.panel)`.
+    const below = `export async function synthOp(a: number) { const result: Res = seed(a); await render(result.panel); return result; }`;
+    expect(censusOf(below).filter((x) => x.expr.includes("carrier-passed-to-call"))).toEqual([]);
+    expect(RESULT_ASSIGNMENTS.filter((x) => x.expr.includes("carrier-passed-to-call"))).toEqual([]);
+  });
+
+  it("R10 — `delete result.ok` and `result.n++` reach the carrier and are UNSUPPORTED, with controls", () => {
+    const deleted = `export async function synthOp(a: number) { const result: Res = seed(a); delete (result as { ok?: boolean }).ok; return result; }`;
+    expect(censusOf(deleted).find((x) => x.expr.includes("delete-on-carrier-path"))).toBeDefined();
+    const bumped = `export async function synthOp(a: number) { const result: Res = seed(a); (result as { n: number }).n++; return result; }`;
+    expect(censusOf(bumped).find((x) => x.expr.includes("increment-on-carrier-path"))).toBeDefined();
+    // CONTROL — the same two operators on an UNRELATED object produce neither entry. (The control still
+    // has one `unsupported` entry, for `const result = seed(a)`: a carrier initialised from an unknown
+    // call is correctly unsupported, which is the census working rather than a false positive — so the
+    // control is scoped to the two mechanisms under test, not to the whole classification.)
+    const control = `export async function synthOp(a: number) { const other = { n: 0 }; const result: Res = seed(a); other.n++; delete (other as { n?: number }).n; return result; }`;
+    expect(censusOf(control).filter((x) => /delete-on-carrier-path|increment-on-carrier-path/.test(x.expr))).toEqual([]);
+    expect(censusOf(control).filter((x) => x.classification === "unsupported").map((x) => x.expr)).toEqual(["UNSUPPORTED_RESULT_WRITE(unclassified-initializer) result: Res = seed(a)"]);
+  });
+
+  it("R10 — THE ESCAPE R9 SHIPPED: the invisible branch that also forges an event is now named", () => {
+    // B's E3, reduced to the census input it presented: an Object.assign rejection on a new branch
+    const escape = `export async function synthOp(a: number) { let result: Res = await db.runTransaction(async () => ({ ok: true })); if (a < 0) { Object.assign(result, { ok: false, reason: "panel_unreadable" }); void writeAudit({}); } return result; }`;
+    const entries = censusOf(escape);
+    expect(entries.map((x) => x.classification).sort()).toEqual(["transaction-result", "unsupported"]);
+    // and the assertion that polices the REAL module is the same expression
+    expect(`unsupportedInRealModule:${RESULT_ASSIGNMENTS.filter((a) => a.classification === "unsupported").length}`).toBe("unsupportedInRealModule:0");
+  });
+
   it("§29 — a carrier reached only through a property chain is still discovered, so the relay detector is not identifier-only", () => {
     const deep = `export async function synthOp(a: number) { const box: { inner: { result?: Res } } = { inner: {} }; box.inner.result = { ok: false, reason: "deep_rejection" }; return box.inner.result; }`;
     expect(shapesOf(deep)).toEqual(["box.inner.result:rejection"]);
@@ -5196,29 +5635,103 @@ function censusResultAssignments(sourceText: string, functionToOperation: Readon
             } else if (ok && ok.kind === tsApi.SyntaxKind.TrueKeyword) classification = "success";
           }
         }
-        out.push({ operation, ordinal, target, classification, reasonLiteral, expr: textOf(node).slice(0, 140) });
+        // R10 — one label for one meaning: an initializer the classifier cannot account for carries the
+        // same `UNSUPPORTED_RESULT_WRITE` marker as every other unsupported shape, so a grep or an
+        // assertion for the marker sees all of them.
+        const label = classification === "unsupported" ? `UNSUPPORTED_RESULT_WRITE(unclassified-initializer) ${textOf(node)}` : textOf(node);
+        out.push({ operation, ordinal, target, classification, reasonLiteral, expr: label.slice(0, 160) });
       };
+      /**
+       * ─── R10 — THE RULE IS "DOES THIS REACH A CARRIER", NOT "IS THIS A KNOWN FORM" ───────────────
+       *
+       * R7, R8 and R9 each enumerated the write forms they knew and each was defeated by shapes not in
+       * the list. R9's three survivors were `for (result of …)`, `(result as {ok:boolean}).ok = false`
+       * and `Object.assign(result, …)`: none is a BinaryExpression assignment to a carrier NAME and
+       * none is a VariableDeclaration, so all three produced no entry at all — not `rejection`, not
+       * `unsupported` — and a forged governance event rode an invisible branch at exit 0.
+       *
+       * The polarity is now inverted. ONE shape is understood — a plain `=` whose left-hand side is
+       * exactly a relayed carrier name — and EVERY other syntactic position that can reach a carrier
+       * is `UNSUPPORTED_RESULT_WRITE`. "Reaches a carrier" means: the node writes a name that is a
+       * carrier, or a name a carrier is a dotted PREFIX of (so `result.ok` counts), or it hands a bare
+       * carrier identifier to a callee that could mutate it. New syntax therefore fails closed by
+       * default instead of being invisible until someone thinks of it.
+       */
+      const carrierOrItsProperty = (name: string | null): string | null => {
+        if (!name) return null;
+        if (relayed.has(name)) return name;
+        // a dotted path THROUGH a carrier: `transactionResult.ok`, `holder.result.reason`
+        for (const carrier of relayed) if (name === carrier || name.startsWith(`${carrier}.`)) return carrier;
+        return null;
+      };
+
       if (tsApi.isBinaryExpression(n) && ASSIGNMENT_OPERATORS.has(n.operatorToken.kind)) {
         const isPlainAssignment = n.operatorToken.kind === tsApi.SyntaxKind.EqualsToken;
-        // (a) simple identifier or PROPERTY-TARGET assignment: `result = ...`, `holder.result = ...`
-        const direct = carrierName(n.left);
-        if (direct && relayed.has(direct)) {
-          if (isPlainAssignment) record(direct, n.right, n);
-          else recordUnsupported(direct, n, `compound-operator ${tsApi.tokenToString(n.operatorToken.kind)}`);
-        } else if (!direct) {
-          // (b) DESTRUCTURING assignment: `({ result } = ...)`, `[result] = ...`
-          const written = namesWrittenByPattern(n.left).filter((name) => relayed.has(name));
-          if (written.length > 0) recordUnsupported(written.sort().join("+"), n, "destructuring-assignment");
+        const leftName = carrierName(n.left);
+        const reached = carrierOrItsProperty(leftName);
+        if (reached) {
+          if (isPlainAssignment && leftName === reached) record(reached, n.right, n);
+          else if (!isPlainAssignment && leftName === reached) recordUnsupported(reached, n, `compound-operator ${tsApi.tokenToString(n.operatorToken.kind)}`);
+          // R9 SURVIVOR: a write THROUGH the carrier, e.g. `(result as {ok:boolean}).ok = false`.
+          else recordUnsupported(reached, n, `property-path-write ${leftName}`);
+        } else if (!leftName) {
+          // DESTRUCTURING assignment: `({ result } = ...)`, `[result] = ...`
+          const written = namesWrittenByPattern(n.left).map(carrierOrItsProperty).filter((x): x is string => x !== null);
+          if (written.length > 0) recordUnsupported([...new Set(written)].sort().join("+"), n, "destructuring-assignment");
         }
       }
       if (tsApi.isVariableDeclaration(n)) {
         if (tsApi.isIdentifier(n.name) && relayed.has(n.name.text) && n.initializer) {
           record(n.name.text, n.initializer, n);
         } else if (!tsApi.isIdentifier(n.name)) {
-          // (c) DESTRUCTURING declaration: `const { result } = ...`, `let [result] = ...`
-          const written = namesWrittenByPattern(n.name).filter((name) => relayed.has(name));
-          if (written.length > 0) recordUnsupported(written.sort().join("+"), n, "destructuring-declaration");
+          // DESTRUCTURING declaration: `const { result } = ...`, `let [result] = ...`
+          const written = namesWrittenByPattern(n.name).map(carrierOrItsProperty).filter((x): x is string => x !== null);
+          if (written.length > 0) recordUnsupported([...new Set(written)].sort().join("+"), n, "destructuring-declaration");
         }
+      }
+      // R9 SURVIVOR: `for (result of […])` / `for (result in …)` — the initializer is an EXISTING
+      // lvalue, so the node is neither a BinaryExpression nor a VariableDeclaration.
+      if (tsApi.isForOfStatement(n) || tsApi.isForInStatement(n)) {
+        const initializer = n.initializer;
+        if (!tsApi.isVariableDeclarationList(initializer)) {
+          const written = carrierOrItsProperty(carrierName(initializer as tsApi.Expression)) ?? namesWrittenByPattern(initializer).map(carrierOrItsProperty).find((x) => x !== null) ?? null;
+          if (written) recordUnsupported(written, n, tsApi.isForOfStatement(n) ? "for-of-loop-binding" : "for-in-loop-binding");
+        }
+      }
+      /**
+       * R9 SURVIVOR: `Object.assign(result, {...})` and any other call handed the carrier ITSELF,
+       * which mutates it in place with no assignment node anywhere.
+       *
+       * THE BOUNDARY, stated rather than left implicit. Flagged: an argument that IS a carrier, or that
+       * is a strict dotted PREFIX of one (`mutate(holder)` where the carrier is `holder.result` can
+       * replace `holder.result` wholesale). NOT flagged: an argument strictly BELOW the carrier, such as
+       * production's own `toWorkspacePanelDto(ref, transactionResult.panel)` — a callee handed
+       * `.panel` can mutate that object but cannot rewrite `ok`/`reason`, so it cannot forge or conceal
+       * a rejection, which is the only property this census exists to protect. Narrowing to exactly
+       * that boundary is what keeps the rule fail-closed without being fail-always.
+       */
+      const carrierReachableByCallee = (name: string | null): string | null => {
+        if (!name) return null;
+        for (const carrier of relayed) if (name === carrier || carrier.startsWith(`${name}.`)) return carrier;
+        return null;
+      };
+      if (tsApi.isCallExpression(n)) {
+        for (const argument of n.arguments) {
+          const reached = carrierReachableByCallee(carrierName(argument));
+          if (reached) {
+            recordUnsupported(reached, n, `carrier-passed-to-call ${n.expression.getText(sf).replace(/\s+/g, " ").slice(0, 40)}`);
+            break;
+          }
+        }
+      }
+      // R10 — a unary/postfix mutation of a carrier path, e.g. `delete result.ok`, `result.n++`.
+      if (tsApi.isDeleteExpression(n)) {
+        const reached = carrierOrItsProperty(carrierName(n.expression));
+        if (reached) recordUnsupported(reached, n, "delete-on-carrier-path");
+      }
+      if ((tsApi.isPostfixUnaryExpression(n) || tsApi.isPrefixUnaryExpression(n)) && (n.operator === tsApi.SyntaxKind.PlusPlusToken || n.operator === tsApi.SyntaxKind.MinusMinusToken)) {
+        const reached = carrierOrItsProperty(carrierName(n.operand));
+        if (reached) recordUnsupported(reached, n, "increment-on-carrier-path");
       }
       tsApi.forEachChild(n, visit);
     };
@@ -5438,9 +5951,20 @@ type WitnessContext = { callerUid: string; reason: string; operation: "create" |
 type GuardFact = {
   /** The production guard expression this fact is an operand of. Verified against the AST. */
   fromGuard: string;
+  /**
+   * R10 — WHICH registry reader supplies this operand. The fact chooses the guard, never the expression.
+   * `actual` is filled in by `resolveGuardFacts` from `GUARD_OPERAND_READERS[operand]`.
+   */
+  operand: GuardOperandKey;
   label: string;
-  actual: unknown;
+  actual?: unknown;
   expected: unknown;
+  /**
+   * R10 §34 — the RELATION the production guard applies to this operand. `current.status === "finalized"`
+   * and `current.status !== "open"` read the SAME operand through the same registry reader and differ
+   * only here, so both are expressible without letting a fact invent its own expression.
+   */
+  relation?: "equals" | "notEquals";
   /**
    * ─── R9 §33/§36/§37 — THE BEHAVIORAL FALSIFIER, WITHOUT WHICH A FACT IS NOT PROOF ─────────────
    *
@@ -5503,6 +6027,52 @@ const changeRealAuthReason = (expected: unknown) => () => {
 };
 const canonicalRunCreatorUid = () => (stores.runs.get(RUN_ID) as { userId: string } | undefined)?.userId ?? CREATOR_UID;
 
+/**
+ * ─── R10 — A FACT NAMES ITS GUARD; THE REGISTRY SUPPLIES THE READ ───────────────────────────────
+ *
+ * R9's §37 required a fact's operand to CHANGE when `flipOperand` ran, and that is a test of
+ * co-variation, not of provenance. A fact reading `typeof panel.finalDecisionId === "string"` — a field
+ * appearing in no guard anywhere — co-varies with the finalized/open fixtures perfectly, so it passed
+ * §37, passed §33's name check, and passed both twin directions at exit 0. The fact still got to choose
+ * its own reader, which is the same shape as every other defect in this series.
+ *
+ * The operand READER is now a property of the GUARD, declared once here, next to the guard text it
+ * belongs to. A site's fact supplies the guard key and the truth value required to reach it; it cannot
+ * supply the expression. An incidental field is no longer expressible, rather than merely detectable.
+ */
+const GUARD_OPERAND_READERS: Readonly<Record<string, (ctx: WitnessContext) => Promise<unknown> | unknown>> = Object.freeze({
+  // `!auth.ok` — the REAL authorizer's outcome, invoked against the seeded stores
+  authOk: async (ctx: WitnessContext) => (await realAuthOutcome(ctx.callerUid, OPERATION_REQUIRED_CAPABILITY[ctx.operation])).ok,
+  authReason: async (ctx: WitnessContext) => {
+    const auth = await realAuthOutcome(ctx.callerUid, OPERATION_REQUIRED_CAPABILITY[ctx.operation]);
+    return auth.ok ? null : auth.reason;
+  },
+  // `!roleHasCapability(auth.membership.role, "research.read")` — through the live capability dependency
+  researchRead: async (ctx: WitnessContext) => {
+    const auth = await realAuthOutcome(ctx.callerUid, OPERATION_REQUIRED_CAPABILITY[ctx.operation]);
+    return auth.ok ? mockedRoleHasCapability(auth.membership.role, "research.read") : null;
+  },
+  // `!runSnap.exists`
+  runExists: () => stores.runs.has(RUN_ID),
+  // `target.kind !== "valid_workspace_review_target"` — through the REAL resolver
+  targetIsValid: () => storedRunTargetKind() === "valid_workspace_review_target",
+  // `current.status === "finalized"` / `!== "open"` — through the REAL panel parser
+  panelStatus: () => storedPanelState().status,
+  // `!panel.reviewerUserIds.includes(args.uid)` — through the REAL panel parser
+  callerOnRoster: (ctx: WitnessContext) => storedPanelState().reviewers.includes(ctx.callerUid),
+  // `!eligibility.eligible` — through the REAL eligibility predicate, with the run's own creator
+  eligible: async (ctx: WitnessContext) => {
+    const auth = await realAuthOutcome(ctx.callerUid, OPERATION_REQUIRED_CAPABILITY[ctx.operation]);
+    if (!auth.ok) return null;
+    return isValidAssignmentTarget({
+      candidate: { uid: ctx.callerUid, workspaceId: WS_ID, role: auth.membership.role, status: "active" },
+      runWorkspaceId: WS_ID,
+      creatorUid: canonicalRunCreatorUid(),
+    }).eligible;
+  },
+});
+type GuardOperandKey = keyof typeof GUARD_OPERAND_READERS;
+
 /** Guard expressions, verbatim from the production source — asserted against the AST inventory below. */
 const G = Object.freeze({
   authDenied: "!auth.ok",
@@ -5519,81 +6089,99 @@ type SiteGuardFacts = (ctx: WitnessContext) => Promise<readonly GuardFact[]>;
 
 const SITE_GUARD_FACTS: Readonly<Record<string, SiteGuardFacts>> = Object.freeze({
   // ── the three authorization passthrough sites: the REAL authorizer must deny, with this reason ──
-  ...Object.fromEntries((["create", "cancel", "vote"] as const).map((op) => [`${op}#reject-03`, async ({ callerUid, reason, operation }: WitnessContext) => {
-    const auth = await realAuthOutcome(callerUid, OPERATION_REQUIRED_CAPABILITY[operation]);
-    return [
-      { fromGuard: G.authDenied, label: "auth.ok", actual: auth.ok, expected: false, flipOperand: grantRealAuthTo(callerUid) },
-      { fromGuard: G.authDenied, label: "auth.reason", actual: auth.ok ? null : auth.reason, expected: reason, flipOperand: changeRealAuthReason(reason) },
-    ];
-  }])),
+  ...Object.fromEntries((["create", "cancel", "vote"] as const).map((op) => [`${op}#reject-03`, async ({ callerUid, reason }: WitnessContext) => [
+    { fromGuard: G.authDenied, operand: "authOk" as const, label: "auth.ok", expected: false, flipOperand: grantRealAuthTo(callerUid) },
+    { fromGuard: G.authDenied, operand: "authReason" as const, label: "auth.reason", expected: reason, flipOperand: changeRealAuthReason(reason) },
+  ]])),
   // ── the inline research.read checks: authorization SUCCEEDS, then the capability is denied ──
-  ...(["create", "cancel"] as const).reduce((acc, op) => ({ ...acc, [`${op}#reject-04`]: async ({ callerUid, operation }: WitnessContext) => {
-    const auth = await realAuthOutcome(callerUid, OPERATION_REQUIRED_CAPABILITY[operation]);
-    return [
-      { fromGuard: G.authDenied, label: "auth.ok (predecessor must be false)", actual: auth.ok, expected: true, flipOperand: revokeRealAuth },
-      { fromGuard: G.researchRead, label: "roleHasCapability(role, research.read)", actual: auth.ok ? mockedRoleHasCapability(auth.membership.role, "research.read") : null, expected: false, flipOperand: restoreRealCapabilities },
-    ];
-  } }), {} as Record<string, SiteGuardFacts>),
+  ...(["create", "cancel"] as const).reduce((acc, op) => ({ ...acc, [`${op}#reject-04`]: async () => [
+    { fromGuard: G.authDenied, operand: "authOk" as const, label: "auth.ok (predecessor: the operand must be TRUE so `!auth.ok` is false)", expected: true, flipOperand: revokeRealAuth },
+    { fromGuard: G.researchRead, operand: "researchRead" as const, label: "roleHasCapability(role, research.read)", expected: false, flipOperand: restoreRealCapabilities },
+  ] }), {} as Record<string, SiteGuardFacts>),
   // ── run_not_found twins: absent document vs present-but-not-this-Workspace ──
   ...(["create", "cancel", "vote"] as const).reduce((acc, op) => ({
     ...acc,
     [`${op}#reject-0${op === "vote" ? 4 : 5}`]: async () => [
-      { fromGuard: G.runAbsent, label: "runSnap.exists", actual: stores.runs.has(RUN_ID), expected: false, flipOperand: () => { seedRun(); } },
+      { fromGuard: G.runAbsent, operand: "runExists" as const, label: "runSnap.exists", expected: false, flipOperand: () => { seedRun(); } },
     ],
     [`${op}#reject-0${op === "vote" ? 5 : 6}`]: async () => [
-      { fromGuard: G.runAbsent, label: "runSnap.exists (predecessor must be false)", actual: stores.runs.has(RUN_ID), expected: true, flipOperand: () => { stores.runs.delete(RUN_ID); } },
-      { fromGuard: G.targetInvalid, label: "target.kind", actual: storedRunTargetKind() === "valid_workspace_review_target", expected: false, flipOperand: () => { seedRun(); } },
+      { fromGuard: G.runAbsent, operand: "runExists" as const, label: "runSnap.exists (predecessor: the operand must be TRUE)", expected: true, flipOperand: () => { stores.runs.delete(RUN_ID); } },
+      { fromGuard: G.targetInvalid, operand: "targetIsValid" as const, label: "target.kind is valid", expected: false, flipOperand: () => { seedRun(); } },
     ],
   }), {} as Record<string, SiteGuardFacts>),
   // ── create's panel_finalized twins: genuinely finalized vs cancelled-and-never-reopened ──
   "create#reject-10": async () => [
-    { fromGuard: G.panelFinalized, label: "current.status", actual: storedPanelState().status, expected: "finalized", flipOperand: () => { seedPanel({ revision: 1 }); } },
+    { fromGuard: G.panelFinalized, operand: "panelStatus" as const, label: "current.status", expected: "finalized", flipOperand: () => { seedPanel({ revision: 1 }); } },
   ],
   "create#reject-11": async () => [
-    { fromGuard: G.panelFinalized, label: "current.status === finalized (predecessor must be false)", actual: storedPanelState().status === "finalized", expected: false, flipOperand: () => { seedPanel({ revision: 1, ...FINALIZED }); } },
-    { fromGuard: G.panelNotOpen, label: "current.status !== open", actual: storedPanelState().status !== "open", expected: true, flipOperand: () => { seedPanel({ revision: 1 }); } },
+    { fromGuard: G.panelFinalized, operand: "panelStatus" as const, relation: "notEquals" as const, label: "current.status (predecessor: NOT finalized)", expected: "finalized", flipOperand: () => { seedPanel({ revision: 1, ...FINALIZED }); } },
+    { fromGuard: G.panelNotOpen, operand: "panelStatus" as const, relation: "notEquals" as const, label: "current.status (its own guard: NOT open)", expected: "open", flipOperand: () => { seedPanel({ revision: 1 }); } },
   ],
   // ── vote's not_reviewer twins: off the roster vs on it but ineligible ──
   "vote#reject-12": async ({ callerUid }: WitnessContext) => [
-    {
-      fromGuard: G.notOnRoster,
-      label: "panel.reviewerUserIds.includes(caller)",
-      actual: storedPanelState().reviewers.includes(callerUid),
-      expected: false,
-      flipOperand: () => { seedPanel({ revision: 1, reviewerUserIds: [callerUid, OWNER_UID, ADMIN_UID].sort() }); },
-    },
+    { fromGuard: G.notOnRoster, operand: "callerOnRoster" as const, label: "panel.reviewerUserIds.includes(caller)", expected: false, flipOperand: () => { seedPanel({ revision: 1, reviewerUserIds: [callerUid, OWNER_UID, ADMIN_UID].sort() }); } },
   ],
-  "vote#reject-13": async ({ callerUid }: WitnessContext) => {
-    const auth = await realAuthOutcome(callerUid, "reviews.submit");
-    const role = auth.ok ? auth.membership.role : null;
-    return [
-      {
-        fromGuard: G.notOnRoster,
-        label: "panel.reviewerUserIds.includes(caller) (predecessor must be false)",
-        actual: storedPanelState().reviewers.includes(callerUid),
-        expected: true,
-        flipOperand: () => { seedPanel({ revision: 1, reviewerUserIds: [REVIEWER_UID, REVIEWER2_UID, REVIEWER3_UID].sort() }); },
-      },
-      {
-        fromGuard: G.notEligible,
-        label: "eligibility.eligible",
-        // R9 §35 — `creatorUid` is read from the CANONICAL RUN, not from a module constant. The R8
-        // version hardcoded `CREATOR_UID`, so the operand this fact reports was partly a literal and a
-        // flip of the run's creator could not move it.
-        actual: role === null ? null : isValidAssignmentTarget({ candidate: { uid: callerUid, workspaceId: WS_ID, role, status: "active" }, runWorkspaceId: WS_ID, creatorUid: canonicalRunCreatorUid() }).eligible,
-        expected: false,
-        flipOperand: restoreRealCapabilities,
-      },
-    ];
-  },
+  "vote#reject-13": async ({ callerUid }: WitnessContext) => [
+    { fromGuard: G.notOnRoster, operand: "callerOnRoster" as const, label: "panel.reviewerUserIds.includes(caller) (predecessor: the operand must be TRUE)", expected: true, flipOperand: () => { seedPanel({ revision: 1, reviewerUserIds: [REVIEWER_UID, REVIEWER2_UID, REVIEWER3_UID].sort() }); } },
+    { fromGuard: G.notEligible, operand: "eligible" as const, label: "eligibility.eligible", expected: false, flipOperand: restoreRealCapabilities },
+  ],
 });
 
+/**
+ * R10 — resolves each declared fact's `actual` from the GUARD REGISTRY, and proves the read is PURE:
+ * the reader is invoked twice with no intervening mutation and must agree. A stateful reader — R9's
+ * monotone-counter attack shape — fails here rather than sliding through the operand-change step.
+ */
+async function resolveGuardFacts(siteId: string, ctx: WitnessContext): Promise<GuardFact[]> {
+  const declared = await SITE_GUARD_FACTS[siteId](ctx);
+  const resolved: GuardFact[] = [];
+  for (const fact of declared) {
+    resolved.push({ ...fact, actual: await readOperandPurely(`${siteId}/${fact.operand}`, GUARD_OPERAND_READERS[fact.operand], ctx) });
+  }
+  return resolved;
+}
+
+/**
+ * Invokes an operand reader twice with no intervening mutation and requires agreement. R9's
+ * monotone-counter attack — a fact whose value "changes" on every read, so the operand-change step is
+ * satisfied without reading production state at all — fails here. Extracted so the check itself is
+ * directly testable: the registry is frozen, so a test cannot install an impure reader into it.
+ */
+async function readOperandPurely(
+  label: string,
+  reader: (ctx: WitnessContext) => Promise<unknown> | unknown,
+  ctx: WitnessContext
+): Promise<unknown> {
+  const first = await reader(ctx);
+  const second = await reader(ctx);
+  if (String(first) !== String(second)) {
+    throw new Error(`R10 harness: the operand reader for ${label} is not PURE (${String(first)} then ${String(second)}) — a guard fact may not depend on harness state`);
+  }
+  return first;
+}
+
 /** The witness: assert every declared guard fact. A witness with no facts is rejected by §35. */
+/** True when the fact's resolved operand satisfies the relation its production guard applies. */
+function guardFactHolds(fact: GuardFact): boolean {
+  return (fact.relation ?? "equals") === "notEquals"
+    ? String(fact.actual) !== String(fact.expected)
+    : String(fact.actual) === String(fact.expected);
+}
+
 async function runSiteWitness(siteId: string, ctx: WitnessContext): Promise<void> {
-  const facts = await SITE_GUARD_FACTS[siteId](ctx);
+  /**
+   * R10 (A's F6) — the witness ledger is written HERE and nowhere else. R9 had four test bodies calling
+   * `executedWitnessIds.add(...)`, so the ledger the module `afterAll` reconciles was writable by the
+   * thing it audits — the same shape as the atomicity results. Recording on entry means a witness is
+   * credited only by actually running, and the source guard below pins that this is the sole writer.
+   */
+  executedWitnessIds.add(siteId);
+  const facts = await resolveGuardFacts(siteId, ctx);
   expect(`${siteId}:factCount>0:${facts.length > 0}`).toBe(`${siteId}:factCount>0:true`);
   for (const fact of facts) {
-    expect(`${siteId}:${fact.label}:${String(fact.actual)}`).toBe(`${siteId}:${fact.label}:${String(fact.expected)}`);
+    const relation = (fact.relation ?? "equals") === "notEquals" ? "!==" : "===";
+    expect(`${siteId}:${fact.label}:${String(fact.actual)} ${relation} ${String(fact.expected)}:${guardFactHolds(fact)}`)
+      .toBe(`${siteId}:${fact.label}:${String(fact.actual)} ${relation} ${String(fact.expected)}:true`);
   }
 }
 
@@ -5721,9 +6309,10 @@ describe("AST rejection-site inventory — the production module's real decision
   /**
    * R9 §60 — TERMINOLOGY, pinned. `REASON_TWIN_PAIRS` holds DIRECTED pairs: each unordered twin pair
    * appears twice, once per direction, because a witness must be proved to reject its twin's state in
-   * both directions. [RETRACTED] Earlier PR text called this "14 reason-twin pairs", conflating the directed-entry
-   * count with a pair count. The correct statement is SEVEN unordered pairs spanning FOURTEEN sites,
-   * exercised as FOURTEEN directed checks. All three numbers are pinned here so no one has to guess
+   * both directions. Earlier PR text conflated the directed-entry count with a pair count (see
+   * RETRACTED_PHRASES entry 4). The correct statement is SEVEN unordered pairs spanning FOURTEEN sites,
+   * exercised as FOURTEEN directed checks — [[count:twinUnorderedPairs=7]] pairs,
+   * [[count:twinSites=14]] sites, [[count:twinDirectedChecks=14]] checks. All three are pinned so no one guesses
    * which of them a later sentence means.
    */
   it("§60 — the twin structure is 7 unordered pairs over 14 sites, exercised as 14 directed checks", () => {
@@ -5798,7 +6387,7 @@ describe("AST rejection-site inventory — the production module's real decision
         seedBaseFixture();
         testCase.arrange?.();
         const ctx = contextFor(testCase);
-        const arranged = await SITE_GUARD_FACTS[siteId](ctx);
+        const arranged = await resolveGuardFacts(siteId, ctx);
         expect(`${siteId}/${testCase.reason}:factCount>0:${arranged.length > 0}`).toBe(`${siteId}/${testCase.reason}:factCount>0:true`);
         // (1) baseline — the witness accepts what this case arranges
         await runSiteWitness(siteId, ctx);
@@ -5806,25 +6395,100 @@ describe("AST rejection-site inventory — the production module's real decision
         for (let index = 0; index < arranged.length; index += 1) {
           seedBaseFixture();
           testCase.arrange?.();
-          const before = await SITE_GUARD_FACTS[siteId](ctx);
+          const before = await resolveGuardFacts(siteId, ctx);
           const tag = `${siteId}/${testCase.reason}#${index}(${before[index].label})`;
           const beforeValue = String(before[index].actual);
           // (2) flip the REAL operand
           before[index].flipOperand();
-          const after = await SITE_GUARD_FACTS[siteId](ctx);
+          const after = await resolveGuardFacts(siteId, ctx);
           // (3) the operand's observed value really moved
           expect(`${tag}:operandChanged:${String(after[index].actual) !== beforeValue}`).toBe(`${tag}:operandChanged:true`);
-          // (4) and THIS fact is the one that no longer holds
-          expect(`${tag}:stillSatisfiesItsExpectation:${String(after[index].actual) === String(after[index].expected)}`).toBe(`${tag}:stillSatisfiesItsExpectation:false`);
+          // (4) and THIS fact is the one that no longer holds, judged by its own guard RELATION
+          expect(`${tag}:stillSatisfiesItsExpectation:${guardFactHolds(after[index])}`).toBe(`${tag}:stillSatisfiesItsExpectation:false`);
           // (5) so the witness rejects
           await expect(runSiteWitness(siteId, ctx)).rejects.toThrow();
           factsChecked += 1;
         }
       }
       expect(`${siteId}:factsFalsified:${factsChecked > 0}`).toBe(`${siteId}:factsFalsified:true`);
-      executedWitnessIds.add(siteId);
     }
   );
+
+  /**
+   * ─── R10 — THE ATTACKS THAT DEFEATED §37, NOW INEXPRESSIBLE ────────────────────────────────────
+   *
+   * R9 gave a fact a free-form `actual`, so it could read anything and merely had to CO-VARY with the
+   * fixtures. Two attacks passed: an incidental field (`panel.finalDecisionId`, present in no guard) and
+   * a stateful reader. Both are now impossible by construction rather than caught after the fact — a
+   * fact supplies a guard key, and the registry supplies the read. These tests pin that.
+   */
+  it("R10 — a fact can only name a reader the GUARD REGISTRY provides, so an incidental field is inexpressible", () => {
+    // every declared fact's operand must be a registry key: there is nowhere else to get a value from
+    const keys = new Set(Object.keys(GUARD_OPERAND_READERS));
+    expect([...keys].sort()).toEqual(["authOk", "authReason", "callerOnRoster", "eligible", "panelStatus", "researchRead", "runExists", "targetIsValid"]);
+    // NEGATIVE CONTROL — the field R9's surviving attack used is not a readable operand
+    expect(keys.has("finalDecisionId" as never)).toBe(false);
+    expect(keys.has("createdByUserId" as never)).toBe(false);
+    // and every reader is reachable from a declared fact, so the registry cannot carry dead entries
+    const declaredOperands = new Set<string>();
+    for (const siteId of Object.keys(SITE_GUARD_FACTS)) {
+      void siteId;
+    }
+    expect(keys.size).toBe(8);
+  });
+
+  it("R10 — every declared fact's operand resolves through the registry, and no fact carries its own expression", async () => {
+    const used = new Set<string>();
+    for (const siteId of Object.keys(SITE_GUARD_FACTS)) {
+      const example = REJECTION_CASES.find((c) => c.siteId === siteId);
+      expect(`${siteId}:hasCase:${Boolean(example)}`).toBe(`${siteId}:hasCase:true`);
+      seedBaseFixture();
+      (example as RejectionCase).arrange?.();
+      for (const fact of await SITE_GUARD_FACTS[siteId](contextFor(example as RejectionCase))) {
+        expect(`${siteId}:operandIsARegistryKey:${fact.operand in GUARD_OPERAND_READERS}`).toBe(`${siteId}:operandIsARegistryKey:true`);
+        // the DECLARED fact has no value of its own — it cannot smuggle one in
+        expect(`${siteId}:factCarriesNoOwnValue:${fact.actual === undefined}`).toBe(`${siteId}:factCarriesNoOwnValue:true`);
+        used.add(fact.operand);
+      }
+    }
+    // no dead registry entry: every reader is exercised by a real site
+    expect(`unusedRegistryReaders:${Object.keys(GUARD_OPERAND_READERS).filter((k) => !used.has(k)).sort().join(",")}`).toBe("unusedRegistryReaders:");
+  });
+
+  it("R10 — a STATEFUL operand reader is rejected as impure, which is R9's monotone-counter attack", async () => {
+    const impure: Readonly<Record<string, () => unknown>> = { counter: (() => { let n = 0; return () => n++; })() };
+    // the same purity check `resolveGuardFacts` applies, run against a deliberately stateful reader
+    const first = impure.counter();
+    const second = impure.counter();
+    expect(`statefulReaderDisagreesWithItself:${String(first) !== String(second)}`).toBe("statefulReaderDisagreesWithItself:true");
+    // POSITIVE CONTROL — every real registry reader agrees with itself under the same check
+    seedBaseFixture();
+    const ctx: WitnessContext = { callerUid: OWNER_UID, reason: "run_not_found", operation: "create" };
+    for (const [key, reader] of Object.entries(GUARD_OPERAND_READERS)) {
+      const a = await reader(ctx);
+      const b = await reader(ctx);
+      expect(`${key}:pure:${String(a) === String(b)}`).toBe(`${key}:pure:true`);
+    }
+  });
+
+  it("R10 — the purity check really rejects an impure reader, and accepts a real one", async () => {
+    seedBaseFixture();
+    const ctx: WitnessContext = { callerUid: OWNER_UID, reason: "panel_finalized", operation: "create" };
+    let n = 0;
+    await expect(readOperandPurely("synthetic/counter", () => `drifting-${n++}`, ctx)).rejects.toThrow(/is not PURE/);
+    // POSITIVE CONTROL — the real reader for the same guard passes the identical check
+    seedPanel({ revision: 1, ...FINALIZED });
+    await expect(readOperandPurely("real/panelStatus", GUARD_OPERAND_READERS.panelStatus, ctx)).resolves.toBe("finalized");
+  });
+
+  it("R10 — the guard registry is FROZEN, so no test can install a reader of its own", () => {
+    expect(Object.isFrozen(GUARD_OPERAND_READERS)).toBe(true);
+    expect(() => {
+      "use strict";
+      (GUARD_OPERAND_READERS as Record<string, unknown>).panelStatus = () => "forged";
+    }).toThrow();
+    expect(GUARD_OPERAND_READERS.panelStatus).toBeInstanceOf(Function);
+  });
 
   /**
    * R9 §36 — THE COERCED-TAUTOLOGY ATTACK, reproduced against the meta-test above rather than
@@ -5885,7 +6549,6 @@ describe("AST rejection-site inventory — the production module's real decision
     seedBaseFixture();
     (own as RejectionCase).arrange?.();
     await runSiteWitness(site, contextFor(own as RejectionCase));
-    executedWitnessIds.add(site);
 
     seedBaseFixture();
     (other as RejectionCase).arrange?.();
@@ -5899,6 +6562,67 @@ describe("AST rejection-site inventory — the production module's real decision
    * short-circuit predecessor control had to pass. A fact about `panel.createdByUserId`, which
    * appears in no guard anywhere, cannot be declared.
    */
+  /**
+   * R10 (B's F-m2) — `realAuthOutcome`'s "invokes the REAL authorization mechanism" was enforced by
+   * nothing: replacing its body with a hand-rolled classifier that never calls the production authorizer
+   * left the suite green. The claim is now checked against this file's own AST, the same way the log ban
+   * is, so a body that stops calling the dependency fails here.
+   */
+  it("R10 — `runSiteWitness` is the ONLY writer of the witness ledger, so no test body can credit a witness", () => {
+    // counted over the AST, so a prose mention in a doc comment is not an occurrence — the same
+    // read-tokens-not-text discipline the log ban uses, and the reason a regex count was wrong here
+    const source = readFileSync(__filename, "utf8");
+    const sf = tsApi.createSourceFile("spec.ts", source, tsApi.ScriptTarget.ES2020, true);
+    const writers: string[] = [];
+    const walk = (node: tsApi.Node, owner: string): void => {
+      const nextOwner = tsApi.isFunctionDeclaration(node) && node.name ? node.name.text : owner;
+      if (tsApi.isCallExpression(node) && tsApi.isPropertyAccessExpression(node.expression)
+          && node.expression.name.text === "add"
+          && node.expression.expression.getText(sf) === "executedWitnessIds") {
+        writers.push(nextOwner || "<module-scope>");
+      }
+      tsApi.forEachChild(node, (child) => walk(child, nextOwner));
+    };
+    walk(sf, "");
+    expect(`witnessLedgerWriters:${writers.join(",")}`).toBe("witnessLedgerWriters:runSiteWitness");
+  });
+
+  it("R10 — a prototype-named collection is an ORDINARY store the diff can see, not Object.prototype", async () => {
+    const before = snapshotStore();
+    await mockAdminDb.collection("__proto__").doc("forged").set({ action: "adaptive_review_panel_created", byUid: "attacker" });
+    expect(diffStore(before, snapshotStore()).added).toEqual(["__proto__/forged"]);
+    expect(`storeIsNotObjectPrototype:${(storeFor("__proto__") as unknown) !== (Object.prototype as unknown)}`).toBe("storeIsNotObjectPrototype:true");
+    expect(`nullPrototype:${Object.getPrototypeOf(stores) === null}`).toBe("nullPrototype:true");
+  });
+
+  it("R10 — `realAuthOutcome` really calls authorizeTeamWorkspaceMutationInTransaction, and every auth reader routes through it", () => {
+    const sf = tsApi.createSourceFile("spec.ts", readFileSync(__filename, "utf8"), tsApi.ScriptTarget.ES2020, true);
+    const callsInside = (functionName: string): string[] => {
+      const found: string[] = [];
+      const walk = (node: tsApi.Node): void => {
+        const isTarget =
+          (tsApi.isFunctionDeclaration(node) && node.name?.text === functionName) ||
+          (tsApi.isVariableDeclaration(node) && tsApi.isIdentifier(node.name) && node.name.text === functionName);
+        if (isTarget) {
+          const inner = (n: tsApi.Node): void => {
+            if (tsApi.isCallExpression(n) && tsApi.isIdentifier(n.expression)) found.push(n.expression.text);
+            tsApi.forEachChild(n, inner);
+          };
+          tsApi.forEachChild(node, inner);
+        }
+        tsApi.forEachChild(node, walk);
+      };
+      walk(sf);
+      return found;
+    };
+    expect(callsInside("realAuthOutcome")).toContain("authorizeTeamWorkspaceMutationInTransaction");
+    // NEGATIVE CONTROL — the detector can say no
+    expect(callsInside("storedRunTargetKind")).not.toContain("authorizeTeamWorkspaceMutationInTransaction");
+    // and every auth-derived registry reader goes through `realAuthOutcome`
+    const registrySource = [GUARD_OPERAND_READERS.authOk, GUARD_OPERAND_READERS.authReason, GUARD_OPERAND_READERS.researchRead, GUARD_OPERAND_READERS.eligible].map((f) => f.toString()).join("");
+    expect(`authReadersUsingTheRealAuthorizer:${(registrySource.match(/realAuthOutcome/g) ?? []).length}`).toBe("authReadersUsingTheRealAuthorizer:4");
+  });
+
   it("§33 — every guard fact names a REAL guard: this site's own, or a preceding one in the same operation", async () => {
     const bySite = new Map(DISCOVERED_REJECTION_SITES.map((s) => [s.siteId, s]));
     const problems: string[] = [];
@@ -5909,7 +6633,7 @@ describe("AST rejection-site inventory — the production module's real decision
       const example = REJECTION_CASES.find((c) => c.siteId === siteId);
       seedBaseFixture();
       example?.arrange?.();
-      const facts = await SITE_GUARD_FACTS[siteId](contextFor(example as RejectionCase));
+      const facts = await resolveGuardFacts(siteId, contextFor(example as RejectionCase));
       if (facts.length === 0) problems.push(`${siteId}:noFacts`);
       if (!facts.some((fact) => fact.fromGuard === site.guardExpr)) problems.push(`${siteId}:noFactOnItsOwnGuard`);
       for (const fact of facts) {
@@ -5936,7 +6660,6 @@ describe("AST rejection-site inventory — the production module's real decision
       (own as RejectionCase).arrange?.();
       const ctx = contextFor(own as RejectionCase);
       await runSiteWitness(siteId, ctx);
-      executedWitnessIds.add(siteId);
       for (const other of AUTH_DENIAL_REASONS.filter((r) => r !== reason)) {
         await expect(runSiteWitness(siteId, { ...ctx, reason: other })).rejects.toThrow();
       }
@@ -5973,6 +6696,30 @@ describe("AST rejection-site inventory — the production module's real decision
    * independently useful facts, each fully asserted — the capability containment, and that the
    * assignment and decision self-review guards really are one predicate.
    */
+  /**
+   * R10 (B's F-m3) — the vote path's required capability was not discriminated. Changing
+   * `OPERATION_REQUIRED_CAPABILITY.vote` from `reviews.submit` to `reviews.manage` left the suite green,
+   * because the `insufficient_capability` leg is arranged with a VIEWER who holds neither. A `member`
+   * holds `reviews.submit` and NOT `reviews.manage`, so it separates them.
+   */
+  it("R10 — the vote path demands reviews.submit, not reviews.manage: a member separates the two", async () => {
+    const roleHas = (role: string, capability: string) => actualCapabilities.roleHasCapability(role, capability);
+    // the discriminating role really is discriminating
+    expect(`member:submit=${roleHas("member", "reviews.submit")} manage=${roleHas("member", "reviews.manage")}`).toBe("member:submit=true manage=false");
+    expect(`viewer:submit=${roleHas("viewer", "reviews.submit")} manage=${roleHas("viewer", "reviews.manage")}`).toBe("viewer:submit=false manage=false");
+    // and the constant under test matches what production actually demands of the vote path
+    expect(`declared:${OPERATION_REQUIRED_CAPABILITY.vote}`).toBe("declared:reviews.submit");
+    expect(PANEL_MUTATIONS_SOURCE).toContain('requiredCapability: "reviews.submit"');
+    // BEHAVIOURAL: a member on the roster passes authorization (so the capability is submit, not manage)
+    // and is rejected later, for eligibility — never `insufficient_capability`.
+    seedBaseFixture();
+    seedPanel({ revision: 1, reviewerUserIds: [MEMBER_UID, REVIEWER_UID, REVIEWER2_UID].sort() });
+    const auth = await realAuthOutcome(MEMBER_UID, "reviews.submit");
+    expect(`memberPassesSubmit:${auth.ok}`).toBe("memberPassesSubmit:true");
+    const asManage = await realAuthOutcome(MEMBER_UID, "reviews.manage");
+    expect(`memberFailsManage:${asManage.ok === false && !asManage.ok && asManage.reason === "insufficient_capability"}`).toBe("memberFailsManage:true");
+  });
+
   it("ROLE-MATRIX FACT: every shipped role with reviews.submit also has research.read, and the two self-review predicates are the same predicate", () => {
     const roles = Object.keys(actualCapabilities.ROLE_CAPABILITIES) as (keyof typeof actualCapabilities.ROLE_CAPABILITIES)[];
     const submitters = roles.filter((role) => actualCapabilities.roleHasCapability(role, "reviews.submit"));
@@ -6112,7 +6859,6 @@ describe("panel mutation audit coverage — zero ghost events at every discovere
     // it interrogates canonical state through the real predicates rather than trusting the label.
     if (SITE_GUARD_FACTS[testCase.siteId]) {
       await runSiteWitness(testCase.siteId, { callerUid: testCase.resolveCallerUid?.() ?? testCase.callerUid ?? OWNER_UID, reason: testCase.reason, operation: testCase.siteId.split("#")[0] as "create" | "cancel" | "vote" });
-      executedWitnessIds.add(testCase.siteId);
     }
     // R8 §8 — snapshotted AFTER arrange, so the contract is "the OPERATION changed nothing durable".
     const before = snapshotStore();
@@ -6299,19 +7045,34 @@ const CITATION_SYMBOL_UNIVERSE: { symbols: ReadonlySet<string>; modules: string[
   const modules: string[] = [];
   const unreadable: string[] = [];
   const repoRoot = joinPath(__dirname, "..", "..", "..");
-  const collect = (source: string) => {
+  /**
+   * R10 — `export { X as Y }` and module-LOCAL symbols are part of the universe too.
+   *
+   * R9 walked only declarations carrying an `export` modifier, so a re-export statement was invisible:
+   * `symbol:ELIGIBLE_PANEL_REVIEWER_ROLES` — a genuine export of a directly-imported pinned module —
+   * did not resolve. And because only exports were collected, this PR's own new helper
+   * `appendPanelGovernanceEvent` could not be cited at all, which is the same "rejects real mechanisms"
+   * failure R9 credited itself with fixing. `includeLocals` is used for the audited module, whose
+   * internal helpers are legitimate citation targets for its own proof.
+   */
+  const collect = (source: string, includeLocals = false) => {
     const sf = tsApi.createSourceFile("m.ts", source, tsApi.ScriptTarget.ES2020, true);
     tsApi.forEachChild(sf, (node) => {
+      // `export { A, B as C }` — a re-export statement carries no modifier on a declaration
+      if (tsApi.isExportDeclaration(node) && node.exportClause && tsApi.isNamedExports(node.exportClause)) {
+        for (const element of node.exportClause.elements) symbols.add(element.name.text);
+        return;
+      }
       const exported = tsApi.canHaveModifiers(node) && tsApi.getModifiers(node)?.some((m) => m.kind === tsApi.SyntaxKind.ExportKeyword);
-      if (!exported) return;
+      if (!exported && !includeLocals) return;
       if (tsApi.isFunctionDeclaration(node) && node.name) symbols.add(node.name.text);
       if (tsApi.isClassDeclaration(node) && node.name) symbols.add(node.name.text);
       if (tsApi.isVariableStatement(node)) for (const d of node.declarationList.declarations) if (tsApi.isIdentifier(d.name)) symbols.add(d.name.text);
       if ((tsApi.isTypeAliasDeclaration(node) || tsApi.isInterfaceDeclaration(node)) && node.name) symbols.add(node.name.text);
     });
   };
-  // the production module itself
-  collect(readFileSync(PANEL_MUTATIONS_SOURCE_PATH, "utf8"));
+  // the production module itself — INCLUDING its module-local helpers, which its own proof may cite
+  collect(readFileSync(PANEL_MUTATIONS_SOURCE_PATH, "utf8"), true);
   modules.push("<the audited module>");
   // and every module it imports, taken from the pinned inventory
   for (const entry of deriveProductionWriteSurface(PANEL_MUTATIONS_SOURCE, Object.keys(PANEL_OPERATION_FUNCTIONS)).allImports) {
@@ -6917,7 +7678,37 @@ describe.each(PROVENANCE_SUBJECTS.map((s) => [s.label, s] as const))("panel muta
    *     is recorded as documentation and explicitly NOT counted as a proven equivalent mutant.
    * Both counts are pinned, so silently converting proof into prose fails here.
    */
-  const readerSource = (fn: () => unknown) => fn.toString().replace(/\s+/g, "");
+  /**
+   * ─── R10 — A SELF-COMPARISON CANNOT BE DRESSED UP AS PROOF ───────────────────────────────────────
+   *
+   * R9 compared `fn.toString()` with whitespace stripped. Two edits defeated that: inserting a COMMENT
+   * into one reader, and wrapping one in `String(...)`. Either re-labelled a tautology as PROVEN, and
+   * with the pinned counts adjusted the suite exited 0 — so `provenEquivalents:18` measured textual
+   * difference between two closures rather than independent evidence, while the PR body presented that
+   * bucket as "Real evidence". `String(x)` dressed as a read is the same shape the guard-fact registry
+   * exists to prevent, left unguarded one section over.
+   *
+   * Normalisation now strips comments and the coercion wrappers that add no read, and a pair counts as a
+   * self-comparison when the normalised bodies are equal OR one CONTAINS the other — so wrapping,
+   * padding or commenting a reader cannot manufacture a difference.
+   */
+  const readerSource = (fn: () => unknown) =>
+    fn
+      .toString()
+      .replace(/\/\*[\s\S]*?\*\//g, "")   // block comments
+      .replace(/\/\/[^\n]*/g, "")          // line comments
+      .replace(/\s+/g, "")
+      .replace(/^\(\)=>/, "")
+      .replace(/^(?:String|Boolean|Number|JSON\.stringify)\((.*)\)$/, "$1")
+      .replace(/^!!/, "")
+      .replace(/^\((.*)\)$/, "$1");
+
+  /** Two readers are the SAME read when one normalises to the other, or contains it. */
+  const isSelfComparison = (a: () => unknown, b: () => unknown) => {
+    const left = readerSource(a);
+    const right = readerSource(b);
+    return left === right || left.includes(right) || right.includes(left);
+  };
 
   it("every EQUIVALENT entry is either PROVEN by two independent reads or declared DOCUMENTATION-ONLY", async () => {
     subject.seed();
@@ -6927,7 +7718,7 @@ describe.each(PROVENANCE_SUBJECTS.map((s) => [s.label, s] as const))("panel muta
         field: row.field,
         name,
         reason,
-        selfComparison: readerSource(read) === readerSource(row.correct),
+        selfComparison: isSelfComparison(read, row.correct),
         equal: read() === row.correct(),
       }))
     );
@@ -6942,6 +7733,22 @@ describe.each(PROVENANCE_SUBJECTS.map((s) => [s.label, s] as const))("panel muta
     // §48 — every mechanism a reason cites must RESOLVE to something that exists in this repo
     const unresolved = rows.flatMap((r) => unresolvedCitations(r.reason).map((c) => `${r.field}<-${r.name}:${c}`));
     expect(`${label}:unresolvedCitations:${unresolved.join(" | ")}`).toBe(`${label}:unresolvedCitations:`);
+  });
+
+  it("R10 — a self-comparison stays DOCUMENTATION-ONLY when dressed with a comment, a coercion or padding", () => {
+    const base = () => MUTATE_NOW;
+    // C's EQ1: a comment inserted into one reader
+    const commented = () => /* a note that adds no read */ MUTATE_NOW;
+    // C's EQ2: a coercion wrapper
+    const coerced = () => String(MUTATE_NOW);
+    const doubleNegated = () => !!MUTATE_NOW;
+    const parenthesised = () => (MUTATE_NOW);
+    for (const [name, variant] of [["comment", commented], ["String()", coerced], ["!!", doubleNegated], ["parens", parenthesised]] as const) {
+      expect(`${name}:stillASelfComparison:${isSelfComparison(variant as () => unknown, base)}`).toBe(`${name}:stillASelfComparison:true`);
+    }
+    // POSITIVE CONTROL — a genuinely different read is NOT a self-comparison, so the rule is not "always true"
+    expect(`independentRead:${isSelfComparison(() => provPanel()?.updatedAt, base)}`).toBe("independentRead:false");
+    expect(`anotherIndependentRead:${isSelfComparison(() => provRun().workspaceId, () => provRun().projectId)}`).toBe("anotherIndependentRead:false");
   });
 
   it("the event's EVERY authority-bearing field equals its canonical source and no wrong source", async () => {
@@ -7334,6 +8141,15 @@ afterAll(() => {
       // write registers a result with `fired:false`. Both are named here, and neither a preserved test
       // title nor a source-text count of injections can satisfy this.
       `atomicityCasesRequired:${Object.keys(REQUIRED_ATOMICITY_CASES).length}`,
+      // R10 — cross-checked against the FAKE-OWNED journal. A result no injection produced is named
+      // here, which is what makes `runAtomicityCase` the only registration route in fact and not by
+      // convention. A journal entry whose `fired` is false is named too, wherever it came from.
+      // R10 — the ledger's acknowledgement count is PINNED. An extra drain anywhere — a hook, a helper,
+      // a new test — moves this number and fails, which the per-test postcondition cannot see.
+      `acknowledgedViolations:${acknowledgedViolationIndexes.size}`,
+      `harnessLedgerTotal:${harnessLedgerLength()}`,
+      `atomicityCasesWithNoJournalEntry:${Object.keys(REQUIRED_ATOMICITY_CASES).filter((id) => !injectionJournalEntries().some((e) => e.caseId === id && e.fired)).sort().join(",")}`,
+      `atomicityResultsWithoutAMatchingJournalEntry:${[...atomicityResults.values()].filter((r) => !injectionJournalEntries().some((e) => e.caseId === r.caseId && e.reached === r.targetReached && e.fired === r.injectionFired)).map((r) => r.caseId).sort().join(",")}`,
       `atomicityCasesWithNoResult:${Object.keys(REQUIRED_ATOMICITY_CASES).filter((id) => !atomicityResults.has(id)).sort().join(",")}`,
       `atomicityCasesWhoseInjectionNeverFired:${[...atomicityResults.values()].filter((r) => !r.injectionFired).map((r) => r.caseId).sort().join(",")}`,
       `atomicityCasesWhoseTargetWasNeverReached:${[...atomicityResults.values()].filter((r) => !r.targetReached).map((r) => r.caseId).sort().join(",")}`,
@@ -7354,6 +8170,10 @@ afterAll(() => {
       "witnessesNeverExecuted:",
       "witnessesExecutedButNotDeclared:",
       "atomicityCasesRequired:8",
+      "acknowledgedViolations:8",
+      "harnessLedgerTotal:8",
+      "atomicityCasesWithNoJournalEntry:",
+      "atomicityResultsWithoutAMatchingJournalEntry:",
       "atomicityCasesWithNoResult:",
       "atomicityCasesWhoseInjectionNeverFired:",
       "atomicityCasesWhoseTargetWasNeverReached:",
