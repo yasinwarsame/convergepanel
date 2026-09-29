@@ -302,6 +302,98 @@ export type PutWorkspaceReviewPanelResult = { ok: true; panel: WorkspaceReviewPa
  * (mirrors 9B.5.1's own division of pure body-shape validation at the route
  * vs. transactional eligibility inside the service).
  */
+/**
+ * SCOPE OF WHAT THIS CLOSES (R5 §43/§44). This closes the WRITE side: the four panel mutations now
+ * leave an immutable secondary record. It does NOT close the customer-visible audit trail. None of
+ * these four actions appears in `AuditAction`, `GOVERNANCE_ACTIONS`, `AUDIT_LOG_DISPLAY_ACTIONS` or
+ * the governance-audit backfill's `isAuditAction` allow-list, and `listWorkspaceAuditEvents()`
+ * deliberately reads only `workspaceMembershipEvents`, so no supported read path surfaces them yet.
+ * That integration is tracked separately as `TECH_DEBT_PANEL_MUTATION_AUDIT_READ_SURFACING` and is
+ * deliberately NOT folded in here — it would expand a heavily reviewed write-path change into a
+ * second subsystem. `TECH_DEBT_WORKSPACE_PANEL_MUTATION_AUDIT_COVERAGE` is therefore recorded as
+ * PARTIALLY CLOSED — WRITE SIDE ONLY (the same words the canary runbook uses) until that follow-up lands; the post-deploy recanary for this change validates the
+ * stored canonical evidence, never reader or UI visibility.
+ *
+ * TECH_DEBT_WORKSPACE_PANEL_MUTATION_AUDIT_COVERAGE — the immutable secondary record for
+ * panel lifecycle mutations.
+ *
+ * WHAT WAS WRONG. Phase 9D confirmed in Production that panel create/reconfigure, cancel and
+ * vote wrote NO immutable secondary record at all — the canonical resource document was the
+ * only evidence they ever happened — while finalize wrote 3 and Owner Override 4. The coverage
+ * was inverted: the rarest, most privileged action had the best audit trail, and the routine
+ * ones that actually constitute the review (who was put on the panel, who voted, who cancelled
+ * it) left nothing behind. A governance product whose votes are unauditable is the gap this
+ * closes.
+ *
+ * WRITTEN INSIDE THE TRANSACTION, deliberately, following `resubmitWorkspaceReview()`'s Phase
+ * 9B.3 precedent rather than finalize/override's best-effort post-commit pattern — that
+ * precedent's own comment calls the atomic form "a stronger guarantee", and
+ * `TECH_DEBT_GOVERNANCE_AUDIT_DURABILITY` is precisely the weakness of the other one. An event
+ * written here cannot survive a rolled-back mutation and cannot be lost after a committed one.
+ *
+ * FIELD SOURCE DISCIPLINE — every field traces to an authority, never to raw client input:
+ *   • `byUid` — the AUTHENTICATED caller (`args.uid`, which each route sets from
+ *     `identity.uid`). Never a reviewer target, never a body/query value.
+ *   • `workspaceId`/`projectId` — `target.*`, derived from the run document by
+ *     `resolveWorkspaceReviewTarget`, which rejects a workspace mismatch. Never `args.workspaceId`.
+ *   • `panelRevision`/`reviewerCount` — the CANONICAL panel object, never the request. For a vote
+ *     that is `panel.revision` (the panel the vote was accepted on, provably equal to
+ *     `args.panelRevision` only because the `panel_stale` guard rejects a mismatch first); for
+ *     create/reconfigure it is `nextPanel.*`, the object about to be committed. R1 measured why this matters: a request of
+ *     `[OWNER, OWNER, ADMIN]` canonicalizes to two reviewers, and an event built from
+ *     `args.reviewerUserIds.length` claimed three — an audit record overstating the panel it
+ *     documents. Route validation rejects duplicates today, but this module's own contract says
+ *     dedup is "assumed already validated by the route", and elsewhere it explicitly refuses to
+ *     trust upstream, so the audit record derives from what was actually written.
+ *   • `schemaId`/`answerShape` — `govParse.record`, the governance record this transaction has
+ *     ALREADY parsed for its own reviewability gate. An earlier revision of this comment
+ *     claimed these were omitted because obtaining them would need reads that
+ *     `resubmitWorkspaceReview()` already does. That was measurably FALSE — R1 proved
+ *     `parseGovernanceRecord()` runs in all three of these flows, adding them costs ZERO new
+ *     reads, and this file already said so further down. They are included, so these events
+ *     carry the same canonical governance CONTEXT (`schemaId`/`answerShape`) that the
+ *     decision/finalization/override entries carry.
+ *
+ * WHAT THAT DOES *NOT* CLAIM. An earlier revision of this comment said these events "carry the same
+ * canonical governance context as every other `governanceEvents` entry instead of leaving the
+ * collection heterogeneous", which overstated it: they omit `teamId`, which
+ * `writeAdaptiveHumanReviewEvent`, `writeAdaptivePanelFinalizationGovernanceEvent` and
+ * `writeAdaptivePanelOverrideGovernanceEvent` all include.
+ *
+ * `teamId` is nonetheless NOT contract-required. There is no stored-document PARSER for
+ * `governanceEvents` — no `parseGovernanceEvent` exists, and the collection is deliberately
+ * per-action heterogeneous. (A previous revision of this comment said there was no schema or parser
+ * "anywhere in this codebase", which was wrong: `normalizeAuditEvent()` in
+ * `app/api/governance/audit/route.ts` is a shared READ-side normaliser applied to every row that
+ * route returns, and the backfill route projects the same rows field by field. Neither reads
+ * `teamId`, so the conclusion survives — the stated reason did not.) It is omitted here for exactly
+ * the reason `resubmitWorkspaceReview()` omits it and says so at its own event write: these are pure
+ * Workspace-native events, and no legacy Team concept applies on this path at all. Nothing is added
+ * to the payload to make a sentence true; the sentence is corrected instead.
+ *
+ * ONLY A WRITE, NEVER A NEW READ. Adding a `tx.get` would enlarge the read set of transactions
+ * whose OCC/contention behaviour was Production-canaried at `c28edbbf`; appending an auto-id
+ * document to a subcollection nothing else reads introduces no new conflict source. The read set
+ * is unchanged at 14 `tx.get` call sites, verified against `origin/main`.
+ */
+function appendPanelGovernanceEvent(
+  tx: FirebaseFirestore.Transaction,
+  runRef: FirebaseFirestore.DocumentReference,
+  event: Readonly<Record<string, unknown>> & { action: string; byUid: string; at: string },
+): void {
+  // Auto-generated id, matching this collection's existing convention.
+  //
+  // WHY A RETRY CANNOT DUPLICATE — stated as the mechanism that actually operates, because R1
+  // measured the previous explanation ("a retried stale request fails a check before reaching
+  // this line") to be wrong for the case that occurs. When a conflict is resolved by a retry
+  // that SUCCEEDS, this line IS reached twice and mints a fresh auto-id each time; the aborted
+  // attempt's buffered writes are DISCARDED by the transaction, so only the final attempt's
+  // event commits. Verified with a forced conflict: two attempts, ids `auto-1` then `auto-2`,
+  // and `auto-1` absent from the committed store. No deterministic event id is needed for that
+  // guarantee — but the reason is write-buffer discard, not an earlier check.
+  tx.set(runRef.collection("governanceEvents").doc(), event);
+}
+
 export async function putWorkspaceReviewPanel(args: {
   uid: string;
   workspaceId: string;
@@ -391,6 +483,21 @@ export async function putWorkspaceReviewPanel(args: {
       });
 
       tx.set(runRef.collection("humanReviewPanel").doc("current"), nextPanel);
+      // `current === null` is genuinely "no panel existed", not "an unreadable one did": an
+      // unreadable panel is rejected earlier by `readAndParsePanel`, so the two actions below
+      // cannot be confused by malformed data.
+      appendPanelGovernanceEvent(tx, runRef, {
+        action: current === null ? "adaptive_review_panel_created" : "adaptive_review_panel_reconfigured",
+        byUid: args.uid,
+        at: now,
+        workspaceId: target.workspaceId,
+        projectId: target.projectId,
+        panelRevision: nextPanel.revision,
+        priorPanelRevision: current?.revision ?? null,
+        reviewerCount: nextPanel.reviewerUserIds.length,
+        schemaId: govParse.record.schemaId,
+        answerShape: govParse.record.answerShape,
+      });
       return { ok: true, panel: nextPanel };
     });
   } catch (err) {
@@ -474,6 +581,17 @@ export async function deleteWorkspaceReviewPanel(args: { uid: string; workspaceI
 
       const nextPanel = buildCancelledAdaptiveHumanReviewPanel({ current, actorUserId: args.uid, now });
       tx.set(panelRef, nextPanel);
+      appendPanelGovernanceEvent(tx, runRef, {
+        action: "adaptive_review_panel_cancelled",
+        byUid: args.uid,
+        at: now,
+        workspaceId: target.workspaceId,
+        projectId: target.projectId,
+        panelRevision: current.revision,
+        reviewerCount: current.reviewerUserIds.length,
+        schemaId: govParse.record.schemaId,
+        answerShape: govParse.record.answerShape,
+      });
       return { ok: true };
     });
   } catch (err) {
@@ -608,6 +726,35 @@ export async function submitWorkspaceReviewPanelVote(args: {
       }
 
       tx.set(voteRef, nextVote);
+      // Deliberately NOT written on the `already_submitted` path above: that path returns the
+      // EXISTING vote and writes nothing canonical, so emitting an event there would fabricate
+      // a second "vote cast" for one vote. An idempotent replay must leave no new trace.
+      appendPanelGovernanceEvent(tx, runRef, {
+        action: "adaptive_review_panel_vote_cast",
+        byUid: args.uid,
+        at: now,
+        workspaceId: target.workspaceId,
+        projectId: target.projectId,
+        // R3 §29-§31 — CANONICAL, not the request's expected revision. These are provably equal
+        // here (the `panel_stale` guard above rejects any mismatch before this point), but the
+        // field documents the panel the vote was accepted ON, so it derives from the canonical
+        // panel object rather than from `args`. The previous revision used `args.panelRevision`
+        // while the field-source table claimed canonical provenance — safe, but the table was
+        // wrong about it.
+        //
+        // DOCUMENTED EQUIVALENT MUTANT: reverting this to `args.panelRevision` SURVIVES the suite,
+        // and no test can distinguish the two, because the `panel_stale` guard above rejects any
+        // request whose expected revision differs from the canonical panel's. That is the proof
+        // that they are equal on every success path — not a coverage gap. The canonical form is
+        // kept because the field documents the panel the vote was accepted ON, so it should not
+        // depend on a guard elsewhere remaining in place.
+        panelRevision: panel.revision,
+        voteStatus: nextVote.status,
+        commentPresent: nextVote.commentPresent,
+        conditionsCount: nextVote.conditionsCount,
+        schemaId: govParse.record.schemaId,
+        answerShape: govParse.record.answerShape,
+      });
       return { ok: true, vote: nextVote, submissionStatus: "submitted" as const };
     });
   } catch (err) {
