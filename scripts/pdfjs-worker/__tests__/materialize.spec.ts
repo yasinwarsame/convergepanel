@@ -123,6 +123,12 @@ describe("materialize — fails closed", () => {
     expect(fs.existsSync(path.join(root, "public"))).toBe(false);
   });
 
+  it("a version that merely starts like x.y.z fails (the check is anchored)", () => {
+    const root = fakeProject({ locked: "6.3.289/../../escape", installed: "6.3.289/../../escape" });
+    expect(() => m.materialize(root)).toThrow(/unexpected pdfjs-dist version format/);
+    expect(fs.existsSync(path.join(root, "public"))).toBe(false);
+  });
+
   it("a symlinked worker source fails (only the package's own regular file is copied)", () => {
     const root = fakeProject({ workerBody: null });
     const elsewhere = path.join(root, "elsewhere.mjs");
@@ -154,6 +160,12 @@ describe("verify — the served artifact", () => {
     const root = fakeProject({});
     m.materialize(root);
     expect(() => m.verify(root)).not.toThrow();
+  });
+
+  it("materialize() ends by verifying, reporting the verified served path", () => {
+    // Only verify() reports servedPath; a materialize() that skipped its own check would not.
+    const root = fakeProject({});
+    expect(m.materialize(root)).toMatchObject({ servedPath: served(root, "6.3.289") });
   });
 
   it("G: one altered byte in the served worker fails", () => {

@@ -25,15 +25,21 @@ async function csp(): Promise<Map<string, string[]>> {
 }
 
 describe("CSP after R-16", () => {
-  it("exactly one header rule exists, so no path can carry a different CSP or drop nosniff", async () => {
-    const rules = await nextConfig.headers();
-    expect(rules.map((r) => r.source)).toEqual(["/:path*"]);
-    expect(rules[0].headers.filter((h) => h.key !== "Content-Security-Policy")).toEqual([
-      { key: "X-Frame-Options", value: "DENY" },
-      { key: "X-Content-Type-Options", value: "nosniff" },
-      { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-      { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
-      { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+  it("exactly one unconditional header rule with exactly one CSP, so no path or request escapes it", async () => {
+    // Whole-object equality: an extra rule, a `has`/`missing` condition, a dropped header, or a second
+    // CSP entry (Next applies the LAST one for a key) all fail here. The CSP value itself is pinned below.
+    expect(await nextConfig.headers()).toEqual([
+      {
+        source: "/:path*",
+        headers: [
+          { key: "Content-Security-Policy", value: expect.any(String) },
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
+          { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+        ],
+      },
     ]);
   });
 
