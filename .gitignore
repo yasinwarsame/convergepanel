@@ -15,6 +15,11 @@
 # production
 /build
 
+# pdf.js worker, copied from node_modules/pdfjs-dist at build time
+# (scripts/pdfjs-worker/materialize.js). Never commit it: a committed copy could
+# drift from the installed package, and the build regenerates it every time.
+/public/vendor/pdfjs/
+
 # misc
 .DS_Store
 *.pem

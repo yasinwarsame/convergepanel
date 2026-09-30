@@ -36,14 +36,25 @@ async function readAsArrayBuffer(file: File): Promise<ArrayBuffer> {
   });
 }
 
+/**
+ * Same-origin URL of the pdf.js worker. The file is copied out of the installed
+ * pdfjs-dist at build time by scripts/pdfjs-worker/materialize.js, which owns the
+ * `/vendor/pdfjs` prefix. It must stay on our origin: the CSP allows workers and
+ * module scripts from 'self' only, so a CDN URL blocks both the worker and
+ * pdf.js's fake-worker fallback (R-16). Keyed by the bundled library version so
+ * the worker can never be a different release than the API calling it.
+ */
+export function pdfWorkerSrc(version: string): string {
+  return `/vendor/pdfjs/${version}/pdf.worker.min.mjs`;
+}
+
 async function extractPdf(file: File): Promise<string> {
   const pdfjsLib = await import("pdfjs-dist");
 
-  // Load worker from CDN to avoid webpack bundling the ESM worker file.
-  // A string URL is never processed by Terser; only webpack URL() magic is.
-  if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
-  }
+  // A plain string URL, not webpack `new URL()` magic, so the ESM worker is
+  // never pulled into the bundle. Assigned unconditionally so nothing else can
+  // leave an off-origin value in place.
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerSrc(pdfjsLib.version);
 
   const buffer = await readAsArrayBuffer(file);
   const doc = await pdfjsLib.getDocument({ data: buffer }).promise;
