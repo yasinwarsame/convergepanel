@@ -9,6 +9,7 @@
  * whether a real browser under the real CSP loads the worker is only settled by
  * the authenticated preview acceptance.
  */
+import { spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -104,6 +105,34 @@ describe("materialize — fails closed", () => {
     expect(fs.existsSync(path.join(root, "public"))).toBe(false);
   });
 
+  it("a missing lockfile entry fails", () => {
+    const root = fakeProject({});
+    fs.writeFileSync(path.join(root, "package-lock.json"), JSON.stringify({ packages: {} }));
+    expect(() => m.materialize(root)).toThrow(/package-lock.json has no node_modules\/pdfjs-dist version/);
+    expect(fs.existsSync(path.join(root, "public"))).toBe(false);
+  });
+
+  it("a version that is not plain x.y.z fails before it is used as a path segment", () => {
+    const root = fakeProject({ locked: "../../escape", installed: "../../escape" });
+    expect(() => m.materialize(root)).toThrow(/unexpected pdfjs-dist version format/);
+    expect(fs.existsSync(path.join(root, "public"))).toBe(false);
+  });
+
+  it("a symlinked worker source fails (only the package's own regular file is copied)", () => {
+    const root = fakeProject({ workerBody: null });
+    const elsewhere = path.join(root, "elsewhere.mjs");
+    fs.writeFileSync(elsewhere, `const f="6.3.289";`);
+    fs.symlinkSync(elsewhere, path.join(root, "node_modules", "pdfjs-dist", "build", "pdf.worker.min.mjs"));
+    expect(() => m.materialize(root)).toThrow(/not a regular file/);
+    expect(fs.existsSync(path.join(root, "public"))).toBe(false);
+  });
+
+  it("an empty worker source fails", () => {
+    const root = fakeProject({ workerBody: "" });
+    expect(() => m.materialize(root)).toThrow(/worker source is empty/);
+    expect(fs.existsSync(path.join(root, "public"))).toBe(false);
+  });
+
   it("wipes a previously materialized version instead of keeping it", () => {
     const root = fakeProject({});
     const stale = served(root, "6.0.227");
@@ -153,14 +182,55 @@ describe("verify — the served artifact", () => {
   });
 });
 
+/**
+ * The build gate is the CLI's exit status: `npm run build` chains it with `&&`.
+ * Runs the real script file, copied into a synthetic project so that its own
+ * project-root resolution (two directories up) lands on the fixture.
+ */
+describe("CLI exit status", () => {
+  const SCRIPT = path.join(__dirname, "..", "materialize.js");
+  function run(root: string, ...args: string[]) {
+    const dir = path.join(root, "scripts", "pdfjs-worker");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.copyFileSync(SCRIPT, path.join(dir, "materialize.js"));
+    return spawnSync(process.execPath, [path.join(dir, "materialize.js"), ...args], { encoding: "utf8" });
+  }
+
+  it("exits 0 and produces the served worker on a healthy project", () => {
+    const root = fakeProject({});
+    const r = run(root);
+    expect(r.status).toBe(0);
+    expect(fs.readFileSync(served(root, "6.3.289"), "utf8")).toBe(`/*w*/const f="6.3.289";`);
+  });
+
+  it("exits non-zero on a broken project, so the build stops", () => {
+    const root = fakeProject({ workerBody: null });
+    const r = run(root);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/worker source missing/);
+  });
+
+  it("--verify writes nothing and exits non-zero when nothing was materialized", () => {
+    const root = fakeProject({});
+    const r = run(root, "--verify");
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/served worker missing/);
+    expect(fs.existsSync(path.join(root, "public"))).toBe(false);
+  });
+});
+
 describe("build integration", () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "package.json"), "utf8"));
 
-  it("the build script materializes the worker before next build", () => {
-    const build: string = pkg.scripts.build;
-    const steps = build.split("&&").map((s: string) => s.trim());
-    expect(steps[0]).toBe("node scripts/pdfjs-worker/materialize.js");
-    expect(steps.indexOf("next build")).toBeGreaterThan(0);
+  it("the build script materializes before next build and re-verifies after it", () => {
+    expect(pkg.scripts.build).toBe(
+      "node scripts/pdfjs-worker/materialize.js && prisma generate && next build && node scripts/pdfjs-worker/materialize.js --verify"
+    );
+  });
+
+  it("no npm lifecycle hook runs around build", () => {
+    // prebuild/postbuild would run outside the pinned chain above (e.g. deleting the worker after verify).
+    expect(Object.keys(pkg.scripts).filter((k) => /^(pre|post)build$/.test(k))).toEqual([]);
   });
 
   it("the dev script materializes the worker before next dev", () => {
