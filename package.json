@@ -6,8 +6,8 @@
     "node": "24.x"
   },
   "scripts": {
-    "dev": "next dev",
-    "build": "prisma generate && next build",
+    "dev": "node scripts/pdfjs-worker/materialize.js && next dev",
+    "build": "node scripts/pdfjs-worker/materialize.js && prisma generate && next build && node scripts/pdfjs-worker/materialize.js --verify",
     "start": "next start",
     "lint": "next lint",
     "test": "jest",
