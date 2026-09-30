@@ -9,7 +9,7 @@
  * whether a real browser under the real CSP loads the worker is only settled by
  * the authenticated preview acceptance.
  */
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -105,6 +105,11 @@ describe("materialize — fails closed", () => {
     expect(fs.existsSync(path.join(root, "public"))).toBe(false);
   });
 
+  it("E: a worker whose version only CONTAINS the expected one fails", () => {
+    const root = fakeProject({ workerBody: `/*w*/const f="6.3.2890";` });
+    expect(() => m.materialize(root)).toThrow(/does not embed version "6\.3\.289"/);
+  });
+
   it("a missing lockfile entry fails", () => {
     const root = fakeProject({});
     fs.writeFileSync(path.join(root, "package-lock.json"), JSON.stringify({ packages: {} }));
@@ -176,6 +181,15 @@ describe("verify — the served artifact", () => {
     expect(() => m.verify(root)).toThrow(/unexpected files next to the worker/);
   });
 
+  it("G: a served symlink instead of a copied file fails", () => {
+    const root = fakeProject({});
+    m.materialize(root);
+    const out = served(root, "6.3.289");
+    fs.rmSync(out);
+    fs.symlinkSync(path.join(root, "node_modules", "pdfjs-dist", "build", "pdf.worker.min.mjs"), out);
+    expect(() => m.verify(root)).toThrow(/served worker is not a regular file/);
+  });
+
   it("a copy step that produced nothing fails", () => {
     const root = fakeProject({});
     expect(() => m.verify(root)).toThrow(/served worker missing/);
@@ -228,9 +242,10 @@ describe("build integration", () => {
     );
   });
 
-  it("no npm lifecycle hook runs around build", () => {
-    // prebuild/postbuild would run outside the pinned chain above (e.g. deleting the worker after verify).
-    expect(Object.keys(pkg.scripts).filter((k) => /^(pre|post)build$/.test(k))).toEqual([]);
+  it("no script can take the build outside that chain", () => {
+    // prebuild/postbuild run around it (e.g. deleting the worker after verify), and Vercel's default
+    // build command runs `vercel-build` INSTEAD of `build` when it exists.
+    expect(Object.keys(pkg.scripts).filter((k) => /^(pre|post)build$|^vercel-build$/.test(k))).toEqual([]);
   });
 
   it("the dev script materializes the worker before next dev", () => {
@@ -238,7 +253,9 @@ describe("build integration", () => {
   });
 
   it("the generated worker is gitignored, never committed", () => {
-    const ignore = fs.readFileSync(path.join(REPO_ROOT, ".gitignore"), "utf8").split("\n");
-    expect(ignore).toContain("/public/vendor/pdfjs/");
+    // Ask git itself, so a later negation (`!/public/vendor/pdfjs/`) cannot slip past a text check.
+    const probe = "public/vendor/pdfjs/6.3.289/pdf.worker.min.mjs";
+    const out = execFileSync("git", ["check-ignore", "--no-index", "-v", probe], { cwd: REPO_ROOT, encoding: "utf8" });
+    expect(out).toMatch(/^\.gitignore:\d+:\/public\/vendor\/pdfjs\/\t/);
   });
 });

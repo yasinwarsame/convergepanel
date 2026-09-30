@@ -25,6 +25,18 @@ async function csp(): Promise<Map<string, string[]>> {
 }
 
 describe("CSP after R-16", () => {
+  it("exactly one header rule exists, so no path can carry a different CSP or drop nosniff", async () => {
+    const rules = await nextConfig.headers();
+    expect(rules.map((r) => r.source)).toEqual(["/:path*"]);
+    expect(rules[0].headers.filter((h) => h.key !== "Content-Security-Policy")).toEqual([
+      { key: "X-Frame-Options", value: "DENY" },
+      { key: "X-Content-Type-Options", value: "nosniff" },
+      { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+      { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
+      { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+    ]);
+  });
+
   it("worker-src allows only our origin and blob:", async () => {
     expect((await csp()).get("worker-src")).toEqual(["'self'", "blob:"]);
   });

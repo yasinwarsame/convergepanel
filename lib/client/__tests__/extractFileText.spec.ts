@@ -40,21 +40,32 @@ const materializer = require("@/scripts/pdfjs-worker/materialize.js") as {
   servedWorkerUrl: (v: string) => string;
 };
 
+/** workerSrc as it was when getDocument ran — pdf.js reads it synchronously there. */
+let workerSrcAtGetDocument: string | undefined;
+
 function fakePdf(pages: string[][]) {
-  fakePdfjs.getDocument.mockReturnValue({
+  fakePdfjs.getDocument.mockImplementation(() => {
+    workerSrcAtGetDocument = fakePdfjs.GlobalWorkerOptions.workerSrc;
+    return docResult(pages);
+  });
+}
+
+function docResult(pages: string[][]) {
+  return {
     promise: Promise.resolve({
       numPages: pages.length,
       getPage: async (i: number) => ({
         getTextContent: async () => ({ items: pages[i - 1].map((str) => ({ str })) }),
       }),
     }),
-  });
+  };
 }
 
 const pdfFile = () => new File([new Uint8Array([0x25, 0x50, 0x44, 0x46])], "doc.pdf", { type: "application/pdf" });
 
 beforeEach(() => {
   fakePdfjs.GlobalWorkerOptions.workerSrc = "";
+  workerSrcAtGetDocument = undefined;
   fakePdfjs.getDocument.mockReset();
   extractRawText.mockReset();
 });
@@ -69,6 +80,13 @@ describe("PDF worker source", () => {
     expect(src.startsWith("/")).toBe(true);
     expect(src.startsWith("//")).toBe(false);
     expect(new URL(src, "https://convergepanel.com").origin).toBe("https://convergepanel.com");
+  });
+
+  it("sets the worker URL before getDocument runs (pdf.js reads it synchronously there)", async () => {
+    fakePdf([["x"]]);
+    await extractFileText(pdfFile());
+    expect(fakePdfjs.getDocument).toHaveBeenCalledTimes(1);
+    expect(workerSrcAtGetDocument).toBe("/vendor/pdfjs/6.3.289/pdf.worker.min.mjs");
   });
 
   it("B: overrides a pre-existing CDN worker URL instead of keeping it", async () => {

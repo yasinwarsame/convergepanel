@@ -111,6 +111,7 @@ function verify(projectRoot) {
   const source = resolveSource(projectRoot);
   const served = servedWorkerPath(projectRoot, source.version);
   if (!fs.existsSync(served)) fail(`served worker missing: ${served}`);
+  if (!fs.lstatSync(served).isFile()) fail(`served worker is not a regular file: ${served}`);
   const servedSha = sha256(fs.readFileSync(served));
   if (servedSha !== source.sha256) {
     fail(`served worker sha256 ${servedSha} != installed source ${source.sha256}`);
