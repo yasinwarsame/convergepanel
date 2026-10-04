@@ -133,6 +133,15 @@ describe("T4 — SYSTEM_ADMIN gates stay fail-closed and ignore admin_session", 
   });
 });
 
+describe("T4 — requireSystemAdminBearer fails closed without the admin claim (unchanged)", () => {
+  it("bearer Firebase credential WITHOUT admin === true → null", async () => {
+    decoded = { uid: "u8", admin: "true" };
+    expect(await requireSystemAdminBearer(req("/api/admin/keys", {}, FIREBASE_CRED))).toBeNull();
+    decoded = { uid: "u8" };
+    expect(await requireSystemAdminBearer(req("/api/admin/keys", {}, FIREBASE_CRED))).toBeNull();
+  });
+});
+
 describe("T4 — requireSystemAdminBearer positive control (unchanged)", () => {
   it("bearer Firebase credential with admin === true → { uid }", async () => {
     decoded = { uid: "u9", admin: true };

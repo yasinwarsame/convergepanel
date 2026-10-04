@@ -70,23 +70,31 @@ function isHashed(e: ts.Expression): boolean {
   return false;
 }
 
-/** Find the nearest declaration of `name` visible from `from` (walks enclosing scopes outward). */
-function resolve(name: string, from: ts.Node): { init?: ts.Expression; viaProperty?: string; param?: boolean } | null {
+type Binding = { inits: ts.Expression[]; viaProperty?: string; param?: boolean; fn?: ts.FunctionLikeDeclaration };
+
+/** Every value a local name can hold, from the nearest enclosing scope that declares it: its initializer,
+ *  every later plain assignment to it in that function/file (so `let id = uid; id = secret` is seen),
+ *  or — for a function name — the function itself (so a helper's return values can be followed). */
+function resolve(name: string, from: ts.Node): Binding | null {
   for (let s: ts.Node | undefined = from.parent; s; s = s.parent) {
     if (ts.isFunctionLike(s)) {
-      for (const p of s.parameters) if (ts.isIdentifier(p.name) && p.name.text === name) return { param: true };
+      for (const p of s.parameters) if (ts.isIdentifier(p.name) && p.name.text === name) return { inits: [], param: true };
     }
     if (ts.isBlock(s) || ts.isSourceFile(s) || ts.isModuleBlock(s) || ts.isCaseClause(s)) {
-      let found: { init?: ts.Expression; viaProperty?: string } | null = null;
+      let found: Binding | null = null;
       const look = (n: ts.Node): void => {
-        if (found || (n !== s && (ts.isFunctionLike(n) || ts.isBlock(n)))) return; // only this scope level
+        if (found) return;
+        if (ts.isFunctionDeclaration(n) && n.name?.text === name) { found = { inits: [], fn: n }; return; }
+        if (n !== s && (ts.isFunctionLike(n) || ts.isBlock(n))) return; // only this scope level
         if (ts.isVariableDeclaration(n)) {
-          if (ts.isIdentifier(n.name) && n.name.text === name) found = { init: n.initializer };
-          else if (ts.isObjectBindingPattern(n.name)) {
+          if (ts.isIdentifier(n.name) && n.name.text === name) {
+            const init = n.initializer ? strip(n.initializer) : undefined;
+            found = init && (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) ? { inits: [], fn: init } : { inits: n.initializer ? [n.initializer] : [] };
+          } else if (ts.isObjectBindingPattern(n.name)) {
             for (const el of n.name.elements) {
               if (ts.isIdentifier(el.name) && el.name.text === name) {
                 const prop = el.propertyName && ts.isIdentifier(el.propertyName) ? el.propertyName.text : name;
-                found = { init: n.initializer, viaProperty: prop };
+                found = { inits: n.initializer ? [n.initializer] : [], viaProperty: prop };
               }
             }
           }
@@ -94,16 +102,43 @@ function resolve(name: string, from: ts.Node): { init?: ts.Expression; viaProper
         ts.forEachChild(n, look);
       };
       ts.forEachChild(s, look);
-      if (found) return found;
+      if (found) {
+        // add reassignments within the declaring function (or file), not descending into nested functions
+        const owner = (() => { let o: ts.Node = s; while (o.parent && !ts.isFunctionLike(o) && !ts.isSourceFile(o)) o = o.parent; return o; })();
+        const assigns = (n: ts.Node): void => {
+          if (n !== owner && ts.isFunctionLike(n)) return;
+          if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isIdentifier(n.left) && n.left.text === name) (found as Binding).inits.push(n.right);
+          ts.forEachChild(n, assigns);
+        };
+        assigns(owner);
+        return found;
+      }
     }
   }
   return null;
 }
 
-export function scanSource(fileName: string, text: string): Violation[] {
-  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, fileName.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+/** Return-value expressions of a function-like node (arrow expression body or `return x` statements). */
+function returnsOf(fn: ts.FunctionLikeDeclaration): ts.Expression[] {
+  if (!fn.body) return [];
+  if (!ts.isBlock(fn.body)) return [fn.body as ts.Expression];
+  const out: ts.Expression[] = [];
+  const walk = (n: ts.Node): void => {
+    if (n !== fn && ts.isFunctionLike(n)) return;
+    if (ts.isReturnStatement(n) && n.expression) out.push(n.expression);
+    ts.forEachChild(n, walk);
+  };
+  walk(fn.body);
+  return out;
+}
 
-  /** Does ANY part of this expression carry a secret (name, source, or alias of one)? */
+const scriptKind = (f: string) =>
+  f.endsWith(".tsx") ? ts.ScriptKind.TSX : f.endsWith(".jsx") ? ts.ScriptKind.JSX : /\.(js|mjs|cjs)$/.test(f) ? ts.ScriptKind.JS : ts.ScriptKind.TS;
+
+export function scanSource(fileName: string, text: string): Violation[] {
+  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, scriptKind(fileName));
+
+  /** Does ANY part of this expression carry a secret (name, source, producer, or alias of one)? */
   const secretDerived = (e: ts.Expression, depth = 0): boolean => {
     if (depth > 8) return false;
     const c = strip(e);
@@ -111,9 +146,9 @@ export function scanSource(fileName: string, text: string): Violation[] {
     if (ts.isIdentifier(c)) {
       if (secretNamed(c.text)) return true;
       const d = resolve(c.text, c);
-      if (!d || d.param || !d.init) return false;
+      if (!d || d.param) return false;
       if (d.viaProperty && secretNamed(d.viaProperty)) return true;
-      return secretDerived(d.init, depth + 1);
+      return d.inits.some((i) => secretDerived(i, depth + 1));
     }
     // A property is secret if its NAME is (`body.token`), or if it is a value pass-through on a secret
     // source (`cookies.get(x)?.value`). Other properties of a secret-derived OBJECT are not secret:
@@ -126,59 +161,69 @@ export function scanSource(fileName: string, text: string): Violation[] {
     if (ts.isTemplateExpression(c)) return c.templateSpans.some((s) => secretDerived(s.expression, depth + 1));
     if (ts.isBinaryExpression(c)) return secretDerived(c.left, depth + 1) || secretDerived(c.right, depth + 1);
     if (ts.isConditionalExpression(c)) return secretDerived(c.whenTrue, depth + 1) || secretDerived(c.whenFalse, depth + 1);
+    if (ts.isArrayLiteralExpression(c)) return c.elements.some((el) => ts.isExpression(el) && secretDerived(el, depth + 1));
     if (ts.isCallExpression(c)) {
       if (SECRET_SOURCE.test(c.getText(sf))) return true;
       const n = calleeName(c.expression);
       if (n && PRODUCER_CALLEE.test(n)) return true; // randomBytes(…), randomBytesAsync(…), getRandomValues(…)
       if (n && secretNamed(n)) return true; // e.g. generateInvitationToken(), issueSessionToken()
+      if (ts.isIdentifier(c.expression)) {
+        // a LOCAL helper: follow its return values (`function newId() { return randomBytes(32)… }`)
+        const d = resolve(c.expression.text, c.expression);
+        if (d?.fn && returnsOf(d.fn).some((r) => secretDerived(r, depth + 1))) return true;
+      }
       const recv = ts.isPropertyAccessExpression(c.expression) ? [c.expression.expression] : [];
-      return [...recv, ...c.arguments].some((a) => secretDerived(a, depth + 1)); // token.trim(), String(token), h.slice(7)
+      return [...recv, ...c.arguments].some((a) => secretDerived(a, depth + 1)); // token.trim(), String(token), h.slice(7), [..].join("/")
     }
     return SECRET_SOURCE.test(c.getText(sf));
   };
 
-  /** Source text of a path argument, following local consts (so a path assembled before doc() is seen). */
-  const pathText = (e: ts.Expression, depth = 0): string => {
-    const c = strip(e);
-    if (depth < 6 && ts.isIdentifier(c)) {
-      const d = resolve(c.text, c);
-      if (d?.init) return pathText(d.init, depth + 1);
-    }
-    return c.getText(sf).replace(/^[`'"]|[`'"]$/g, "");
-  };
-
-  /** String value of a collection-name argument, following a local const if needed. */
-  const literalValue = (e: ts.Expression): string | null => {
+  /** Constant string value of an expression (literals, `+`, templates, local consts); unknown parts become "\u0000". */
+  const fold = (e: ts.Expression, depth = 0): string => {
     const c = strip(e);
     if (ts.isStringLiteralLike(c)) return c.text;
-    if (ts.isIdentifier(c)) {
+    if (ts.isTemplateExpression(c)) return c.head.text + c.templateSpans.map((s) => fold(s.expression, depth + 1) + s.literal.text).join("");
+    if (ts.isBinaryExpression(c) && c.operatorToken.kind === ts.SyntaxKind.PlusToken) return fold(c.left, depth + 1) + fold(c.right, depth + 1);
+    if (depth < 6 && ts.isIdentifier(c)) {
       const d = resolve(c.text, c);
-      if (d?.init && ts.isStringLiteralLike(strip(d.init))) return (strip(d.init) as ts.StringLiteralLike).text;
+      if (d && !d.param && !d.fn && d.inits.length === 1) return fold(d.inits[0], depth + 1);
     }
-    return null;
+    if (depth < 6 && ts.isCallExpression(c) && ts.isPropertyAccessExpression(c.expression) && c.expression.name.text === "join" && ts.isArrayLiteralExpression(strip(c.expression.expression))) {
+      const sep = c.arguments[0] ? fold(c.arguments[0], depth + 1) : ",";
+      return (strip(c.expression.expression) as ts.ArrayLiteralExpression).elements.map((el) => (ts.isExpression(el) ? fold(el, depth + 1) : "\u0000")).join(sep);
+    }
+    return "\u0000";
   };
+  const isMaximalString = (n: ts.Node) =>
+    (ts.isStringLiteralLike(n) || ts.isTemplateExpression(n) || (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.PlusToken)) &&
+    !(n.parent && ((ts.isBinaryExpression(n.parent) && n.parent.operatorToken.kind === ts.SyntaxKind.PlusToken) || ts.isTemplateSpan(n.parent)));
+  const ADMIN_SESSIONS_SEGMENT = /(^|\/)admin_sessions(\/|$)/;
 
   const out: Violation[] = [];
-  const at = (n: ts.Node) => sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
+  const seen = new Set<string>();
+  const push = (n: ts.Node, rule: Violation["rule"]) => {
+    const line = sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
+    const key = `${line}|${rule}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ file: fileName, line, rule, text: n.getText(sf).slice(0, 120) });
+  };
   const visit = (n: ts.Node): void => {
     if (ts.isCallExpression(n)) {
       const name = calleeName(n.expression);
-      if (name === "doc") {
+      if (name === "doc" || name === "collection" || name === "collectionGroup") {
         // namespaced `x.doc(id)` → every arg; modular `doc(db, ...segments)` → segments
         const args = ts.isIdentifier(n.expression) ? n.arguments.slice(1) : n.arguments;
-        if (args.some((a) => secretDerived(a))) out.push({ file: fileName, line: at(n), rule: "SECRET_RESOURCE_ID", text: n.getText(sf).slice(0, 120) });
-      }
-      if (name === "collection" || name === "collectionGroup") {
-        const args = ts.isIdentifier(n.expression) ? n.arguments.slice(1) : n.arguments;
-        if (args.some((a) => secretDerived(a))) out.push({ file: fileName, line: at(n), rule: "SECRET_RESOURCE_ID", text: n.getText(sf).slice(0, 120) });
-        if (n.arguments.some((a) => literalValue(a) === "admin_sessions")) out.push({ file: fileName, line: at(n), rule: "ADMIN_SESSIONS_COLLECTION", text: n.getText(sf).slice(0, 120) });
-      }
-      if (name === "doc" && n.arguments.some((a) => /(^|\/)admin_sessions(\/|$)/.test(pathText(a)))) {
-        out.push({ file: fileName, line: at(n), rule: "ADMIN_SESSIONS_COLLECTION", text: n.getText(sf).slice(0, 120) });
+        if (args.some((a) => secretDerived(a))) push(n, "SECRET_RESOURCE_ID");
+        if (n.arguments.some((a) => ADMIN_SESSIONS_SEGMENT.test(fold(a)))) push(n, "ADMIN_SESSIONS_COLLECTION");
       }
     }
-    if (ts.isStringLiteralLike(n) && n.text === "admin_session") {
-      out.push({ file: fileName, line: at(n), rule: "ADMIN_SESSION_COOKIE", text: n.getText(sf) });
+    // Any constant string anywhere that IS the removed cookie name or names the removed collection —
+    // including concatenations, templates and `[..].join("/")` paths assembled elsewhere.
+    if (isMaximalString(n) || (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === "join")) {
+      const v = fold(n as ts.Expression);
+      if (v === "admin_session") push(n, "ADMIN_SESSION_COOKIE");
+      if (ADMIN_SESSIONS_SEGMENT.test(v)) push(n, "ADMIN_SESSIONS_COLLECTION");
     }
     ts.forEachChild(n, visit);
   };
@@ -186,18 +231,24 @@ export function scanSource(fileName: string, text: string): Violation[] {
   return out;
 }
 
-const SKIP_DIRS = new Set(["node_modules", ".next", "__tests__", "__mocks__"]);
-function sourceFiles(dir: string, acc: string[] = []): string[] {
+const SKIP_DIRS = new Set(["node_modules", ".next", "__tests__", "__mocks__", "__fixtures__"]);
+/** Every JS-family source the app can build or run: Next compiles .js/.jsx routes too (`allowJs: true`). */
+export const SOURCE_EXT = /\.(ts|tsx|js|jsx|mjs|cjs)$/;
+const TEST_FILE = /\.(spec|test)\.(ts|tsx|js|jsx|mjs|cjs)$/;
+function sourceFiles(dir: string, acc: string[] = [], recurse = true): string[] {
   if (!existsSync(dir)) return acc;
   for (const e of readdirSync(dir)) {
     if (SKIP_DIRS.has(e)) continue;
-    const f = join(dir, e);
-    if (statSync(f).isDirectory()) sourceFiles(f, acc);
-    else if (/\.(ts|tsx)$/.test(e) && !/\.(spec|test)\.tsx?$/.test(e) && !e.endsWith(".d.ts")) acc.push(f);
+    const f = dir === "." ? e : join(dir, e);
+    if (statSync(f).isDirectory()) { if (recurse) sourceFiles(f, acc); }
+    else if (SOURCE_EXT.test(e) && !TEST_FILE.test(e) && !e.endsWith(".d.ts")) acc.push(f);
   }
   return acc;
 }
-const PROD_FILES = [...sourceFiles("app"), ...sourceFiles("lib"), ...sourceFiles("hooks"), ...sourceFiles("components"), "middleware.ts"];
+const PROD_FILES = [
+  ...sourceFiles("app"), ...sourceFiles("lib"), ...sourceFiles("hooks"), ...sourceFiles("components"), ...sourceFiles("scripts"),
+  ...sourceFiles(".", [], false), // root files: middleware.ts, instrumentation, configs
+];
 
 /** Pinned: there is no legitimate exception. Adding one must be a reviewed change to this array. */
 const ALLOWED: Violation[] = [];
@@ -288,6 +339,36 @@ describe("T2 — scanner rules fire on secret-derived resource ids (fixtures)", 
     expect(rules(`function outer() { const id = uid; function inner() { const id = randomBytes(8).toString("hex"); return id; } db.collection("x").doc(id); }`)).toEqual([]);
     expect(rules(`function outer() { const id = randomBytes(8).toString("hex"); function inner() { const id = uid; db.collection("x").doc(id); } }`)).toEqual([]);
   });
+  it("D1: JavaScript sources are parsed and scanned (route.js restore of the legacy shape)", () => {
+    const js = 'import { randomBytes } from "crypto";\nexport async function POST() { const t = randomBytes(32).toString("hex"); await adminDb.collection("admin_sessions").doc(t).set({}); (await cookies()).set("admin_session", t); }';
+    const r = scanSource("app/api/admin/login/route.js", js).map((v) => v.rule);
+    expect(r).toEqual(expect.arrayContaining(["SECRET_RESOURCE_ID", "ADMIN_SESSIONS_COLLECTION", "ADMIN_SESSION_COOKIE"]));
+    expect(scanSource("x.jsx", 'const c = <a href="/">x</a>; db.collection("y").doc(sessionToken);').map((v) => v.rule)).toEqual(["SECRET_RESOURCE_ID"]);
+  });
+  it.each([
+    ["R1 local helper function returning a raw secret", 'function newId() { return randomBytes(32).toString("hex"); }\ndb.collection("sessions").doc(newId());'],
+    ["R1 local arrow helper returning a raw secret", 'const mint = () => randomBytes(16).toString("hex");\ndb.collection("sessions").doc(mint());'],
+    ["R2 reassigned let", 'let id = uid;\nid = randomBytes(32).toString("hex");\ndb.collection("x").doc(id);'],
+  ])("flags %s", (_label, src) => {
+    expect(rules(src as string)).toContain("SECRET_RESOURCE_ID");
+  });
+  it("R3: a join()-assembled admin_sessions path is flagged by both rules", () => {
+    const r = rules('const t = randomBytes(32).toString("hex");\ndb.doc(["admin_sessions", t].join("/"));');
+    expect(r).toContain("ADMIN_SESSIONS_COLLECTION");
+    expect(r).toContain("SECRET_RESOURCE_ID");
+  });
+  it.each([
+    ["concatenated cookie name", 'cookies().set("admin_" + "session", v);'],
+    ["template cookie name", 'cookies().set(`admin_${"session"}`, v);'],
+    ["const-assembled cookie name", 'const A = "admin_"; const N = A + "session"; cookies().set(N, v);'],
+  ])("R11: flags an assembled admin_session cookie name (%s)", (_label, src) => {
+    expect(rules(src as string)).toContain("ADMIN_SESSION_COOKIE");
+  });
+  it("negative controls for folding/helpers/reassignment", () => {
+    expect(rules('cookies().set("__session", v); const k = "admin_" + "sessionsX"; db.collection("x").doc(uid);')).toEqual([]);
+    expect(rules('function idOf(u) { return u.uid; } db.collection("users").doc(idOf(user));')).toEqual([]);
+    expect(rules('let id = randomBytes(8).toString("hex"); function f() { let id = uid; db.collection("x").doc(id); }')).toEqual([]);
+  });
   it("flags admin_sessions inside a document path", () => {
     expect(rules("db.doc(`admin_sessions/${uid}`);")).toContain("ADMIN_SESSIONS_COLLECTION");
   });
@@ -315,6 +396,10 @@ describe("T2 — production source uses no secret as a Firestore resource identi
   it("ANCHOR: the scan is not vacuous (real files, real doc() calls)", () => {
     expect(PROD_FILES.length).toBeGreaterThan(500);
     expect(PROD_FILES).toContain("lib/firestore/workspaceInvitations.ts");
+    expect(PROD_FILES).toContain("middleware.ts");
+    // JS-family sources are scanned too (Next builds .js routes with allowJs)
+    expect(PROD_FILES.some((f) => /\.(js|mjs|cjs)$/.test(f))).toBe(true);
+    expect(PROD_FILES).toContain("scripts/check-admin-claims.js");
     const docCalls = PROD_FILES.reduce((n, f) => n + (readFileSync(f, "utf8").match(/\.doc\(/g)?.length ?? 0), 0);
     expect(docCalls).toBeGreaterThan(300);
   });
@@ -327,19 +412,31 @@ describe("T2 — production source uses no secret as a Firestore resource identi
 
 // ─────────────────────────────── T1 reachability ───────────────────────────────
 
-function filesNamed(dir: string, name: string, acc: string[] = []): string[] {
+/** Next App Router entry files in EVERY extension Next will build (`allowJs: true`, default pageExtensions). */
+export const ROUTE_FILE = /^route\.(ts|tsx|js|jsx|mjs)$/;
+export const PAGE_FILE = /^page\.(ts|tsx|js|jsx|mjs|md|mdx)$/;
+function filesMatching(dir: string, re: RegExp, acc: string[] = []): string[] {
   for (const e of readdirSync(dir)) {
     const f = join(dir, e);
-    if (statSync(f).isDirectory()) { if (!SKIP_DIRS.has(e)) filesNamed(f, name, acc); }
-    else if (e === name) acc.push(f);
+    if (statSync(f).isDirectory()) { if (!SKIP_DIRS.has(e)) filesMatching(f, re, acc); }
+    else if (re.test(e)) acc.push(f);
   }
   return acc;
 }
-const toPath = (f: string, file: string) => "/" + f.replace(/^app\//, "").replace(new RegExp(`/?${file.replace(".", "\\.")}$`), "").replace(/\([^)]+\)\//g, "");
-const API_ROUTES = filesNamed("app", "route.ts").map((f) => toPath(f, "route.ts"));
-const PAGES = filesNamed("app", "page.tsx").map((f) => toPath(f, "page.tsx"));
+/** app/(group)/api/x/route.js → /api/x ; app/admin/login/page.jsx → /admin/login */
+export const routePathOf = (f: string) =>
+  "/" + f.replace(/^app\//, "").replace(/\/?(route|page)\.[a-z]+$/, "").replace(/\([^)]+\)\/?/g, "").replace(/\/$/, "");
+const API_ROUTES = filesMatching("app", ROUTE_FILE).map(routePathOf);
+const PAGES = filesMatching("app", PAGE_FILE).map((f) => routePathOf(f) || "/");
 
 describe("T1 — the legacy flow is not reachable", () => {
+  it("ANCHOR: entry-file matching covers every buildable extension (a route.js / page.jsx restore cannot hide)", () => {
+    for (const f of ["route.ts", "route.tsx", "route.js", "route.jsx", "route.mjs"]) expect(ROUTE_FILE.test(f)).toBe(true);
+    for (const f of ["page.tsx", "page.ts", "page.js", "page.jsx", "page.mdx"]) expect(PAGE_FILE.test(f)).toBe(true);
+    expect(routePathOf("app/api/admin/login/route.js")).toBe("/api/admin/login");
+    expect(routePathOf("app/(legacy)/api/admin/logout/route.jsx")).toBe("/api/admin/logout");
+    expect(routePathOf("app/admin/login/page.jsx")).toBe("/admin/login");
+  });
   it("ANCHOR: route and page enumeration works", () => {
     expect(API_ROUTES).toContain("/api/admin/set-admin");
     expect(API_ROUTES).toContain("/api/admin/access");

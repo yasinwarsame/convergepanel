@@ -411,3 +411,24 @@ None of these is closed; each is named so a reader does not infer coverage.
   docstring point at it as a section name.
 - **The raw-ledger deny scan can be removed from `finalize()`** with no test
   noticing when no leak is present. With a leak the other channel still fires.
+
+---
+
+## R-25 — secret-as-Firestore-resource-id scanner: known blind spots (2026-10-04)
+
+`docs/__tests__/r25LegacyAdminSessionRemoved.spec.ts` (T2) is a heuristic AST guard, not a type-level
+proof. It scans every JS-family source Next can build (`.ts/.tsx/.js/.jsx/.mjs/.cjs` under `app/`, `lib/`,
+`hooks/`, `components/`, `scripts/` and the repo root) and follows names, producers, request-credential
+sources, local aliases (including reassigned `let`), destructuring, local helper return values, awaits,
+wrappers, templates, concatenation, `[..].join()` and constant folding. It does **not** see:
+
+- values passed as **parameters** into a function that then writes the document (no inter-procedural flow);
+- secrets held under **non-secret property names** of an object (`s.id` where `s` came from `randomBytes`),
+  or request values outside the cookie/Authorization rules (`x-api-key` headers, `url.searchParams`);
+- `doc` invoked through **element access** (`x["doc"](t)`) or other dynamic dispatch;
+- producers that are neither in the explicit producer set nor secret-named.
+
+Any of these would need review to catch. The behavioural spec
+(`lib/firebase/__tests__/r25AdminSessionCookieGrantsNothing.spec.ts`) separately proves the removed
+`admin_session` credential grants nothing on the live authority paths.
+
