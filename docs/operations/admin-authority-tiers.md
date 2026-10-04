@@ -224,10 +224,16 @@ parameter and cannot carry a uid.
 Neither procedure is performed by any phase that documents it; enrollment is a
 separate, explicitly authorized action.
 
-### Password admin session — ORPHANED / NON-AUTHORITATIVE
-`ADMIN_PASSWORD` and the `admin_session` cookie (`/api/admin/login`,
-`/api/admin/logout`) gate **no** `/api/admin/**` route at this head. Retained
-untouched; do not treat it as authority.
+### Password admin session — REMOVED (R-25)
+The legacy `ADMIN_PASSWORD` flow (`/api/admin/login`, `/api/admin/logout`,
+`/admin/login`, `lib/adminAuth.ts`) never gated any `/api/admin/**` route and
+was removed: it generated a 7-day session secret and used it directly as the
+Firestore document ID `admin_sessions/{secret}`, which Firestore Data Access
+audit logging could retain. `docs/__tests__/r25LegacyAdminSessionRemoved.spec.ts`
+keeps it removed. Production cleanup (leftover `admin_sessions` documents, the
+`expiresAt` TTL override — also tracked in `firestore.indexes.json`, so any
+indexes deploy re-asserts it until that entry is removed — the `ADMIN_PASSWORD` env var) and removal of the
+unused Prisma `AdminSession` model (needs a migration) are separate and gated.
 
 ## The rules that matter
 
@@ -406,7 +412,6 @@ operator does; they are not automated.
    | `/api/admin/users/search` GET | ADMIN_PORTAL | ❌ | ❌ | none |
    | `/api/admin/users/[uid]/details` GET | ADMIN_PORTAL | ❌ | ✅ | — |
    | `/api/admin/access` GET | ADMIN_PORTAL probe | ❌ | ❌ | none |
-   | `/api/admin/login` POST, `/api/admin/logout` POST | orphaned password session (§ above) | ❌ | ❌ | none |
    | `/api/governance/audit/backfill` POST | GOVERNANCE_ADMIN | ❌ **NONE** | ✅ | — |
    | `/api/governance/audit` GET | GOVERNANCE_ADMIN | ❌ | ✅ | — |
    | `/api/governance/queue` GET | GOVERNANCE_ADMIN / reviewer | ❌ | ✅ shape only | — |

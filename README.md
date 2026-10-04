@@ -155,7 +155,6 @@ ConvergePanel/
 │   ├── ResultsDisplay.tsx        # Results display component
 │   └── TopNav.tsx                # Top navigation component
 ├── lib/
-│   ├── adminAuth.ts              # Admin authentication utilities
 │   ├── keyStore.ts               # Server-side key storage
 │   ├── types.ts                  # TypeScript type definitions
 │   ├── consensus.ts              # Consensus engine and synthesis
@@ -371,7 +370,7 @@ ConvergePanel includes an admin-only dashboard for managing API keys and users.
 - The admin dashboard is protected by middleware and requires authentication
 - Keys are never exposed in API responses to non-admin users
 - The `/admin` route is not linked in public navigation
-- Always use strong passwords for `ADMIN_PASSWORD` in production
+- Admin authority is Firebase-only (the `admin` custom claim or a verified `ADMIN_EMAILS` member; see `docs/operations/admin-authority-tiers.md`). There is no password-based admin login.
 
 ## Database Setup
 
@@ -406,7 +405,7 @@ npx prisma generate
 The database includes:
 - **ApiKey**: Stores API keys for all models (replaces file-based storage)
 - **PanelRun**: Optional history of panel runs and results
-- **AdminSession**: Optional admin session tracking
+- **AdminSession**: unused (the legacy password admin session was removed under R-25; dropping the model needs a separate migration)
 
 ### Migrations
 
