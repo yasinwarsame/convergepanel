@@ -427,6 +427,10 @@ wrappers, templates, concatenation, `[..].join()` and constant folding. It does 
   or request values outside the cookie/Authorization rules (`x-api-key` headers, `url.searchParams`);
 - `doc` invoked through **element access** (`x["doc"](t)`) or other dynamic dispatch;
 - producers that are neither in the explicit producer set nor secret-named.
+- class-method producers (`this.mint()`) and `var` declarations hoisted out of nested blocks.
+
+Covered since the 2026-10-04 final-head review: Pages Router / `src/` trees (scanned, and asserted
+absent), raw `Set-Cookie: admin_session=…` strings, `cookies.getAll()` reads.
 
 Any of these would need review to catch. The behavioural spec
 (`lib/firebase/__tests__/r25AdminSessionCookieGrantsNothing.spec.ts`) separately proves the removed

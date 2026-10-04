@@ -36,7 +36,7 @@ export type Violation = { file: string; line: number; rule: "SECRET_RESOURCE_ID"
 const SECRET_NAME = /token|secret|password|passwd|cookie|apikey|api_key|credential|authorization|bearer|jwt/i;
 const HASHED_NAME = /hash|digest|hmac|sha\d*/i;
 /** Text of a direct request-credential source: a cookie read or the Authorization header. */
-const SECRET_SOURCE = /\.cookies\.get\s*\(|cookies\s*\(\s*\)\s*\)?\s*\.get\s*\(|headers(\s*\(\s*\)\s*\)?)?\.get\s*\(\s*["'`]authorization["'`]/i;
+const SECRET_SOURCE = /\.cookies\.get(All)?\s*\(|cookies\s*\(\s*\)\s*\)?\s*\.get\s*\(|headers(\s*\(\s*\)\s*\)?)?\.get\s*\(\s*["'`]authorization["'`]/i;
 /** Explicit secret PRODUCERS, matched on the exact callee name (case-sensitive) — never a substring,
  *  so getRandomBytesCount() / randomBytesLength() are not producers. */
 const PRODUCER_CALLEE = /^(randomBytes|randomBytesSync|randomBytesAsync|pseudoRandomBytes|getRandomValues)$|^secureRandom[A-Z0-9_]?/;
@@ -44,7 +44,7 @@ const PRODUCER_CALLEE = /^(randomBytes|randomBytesSync|randomBytesAsync|pseudoRa
 const NON_SECRET_SUFFIX = /(Id|Ids|Uid|Count|At|Type|Status|Mode|Version|Length|Index|Info|Ref|Path|Name|Month|Date|Day|Year|Enabled|Required)$/;
 /** A callee counts as hashing only when its name STARTS with hash/hmac/sha256 or ENDS in Hash/Hmac/Digest
  *  (so `unhashed(token)` is not a hash), or is createHash/createHmac/digest. */
-const HASH_CALLEE = /^(createHash|createHmac|digest)$|^(hash|hmac|sha256)|(Hash|Hmac|Digest)$/;
+const HASH_CALLEE = /^(createHash|createHmac|digest)$|^(hash|hmac|sha256)(?![a-z])|(Hash|Hmac|Digest)$/;
 
 function calleeName(expr: ts.Expression): string | null {
   if (ts.isPropertyAccessExpression(expr)) return expr.name.text;
@@ -156,7 +156,10 @@ export function scanSource(fileName: string, text: string): Violation[] {
     if (ts.isPropertyAccessExpression(c)) return secretNamed(c.name.text) || (PASS_THROUGH_PROPS.has(c.name.text) && secretDerived(c.expression, depth + 1));
     if (ts.isElementAccessExpression(c)) {
       const k = c.argumentExpression;
-      return ts.isStringLiteralLike(k) && secretNamed(k.text);
+      // a string key is a property name (secret only by name); a numeric/computed index selects an
+      // element of the container, so it carries the container's taint (`cookies.getAll()[0]`)
+      if (ts.isStringLiteralLike(k)) return secretNamed(k.text);
+      return secretDerived(c.expression, depth + 1);
     }
     if (ts.isTemplateExpression(c)) return c.templateSpans.some((s) => secretDerived(s.expression, depth + 1));
     if (ts.isBinaryExpression(c)) return secretDerived(c.left, depth + 1) || secretDerived(c.right, depth + 1);
@@ -198,6 +201,8 @@ export function scanSource(fileName: string, text: string): Violation[] {
     (ts.isStringLiteralLike(n) || ts.isTemplateExpression(n) || (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.PlusToken)) &&
     !(n.parent && ((ts.isBinaryExpression(n.parent) && n.parent.operatorToken.kind === ts.SyntaxKind.PlusToken) || ts.isTemplateSpan(n.parent)));
   const ADMIN_SESSIONS_SEGMENT = /(^|\/)admin_sessions(\/|$)/;
+  /** A raw Set-Cookie value issuing the removed cookie: `admin_session=…` (header strings, templates, concatenations). */
+  const ADMIN_SESSION_SET_COOKIE = /(^|[;,\s])admin_session=/;
 
   const out: Violation[] = [];
   const seen = new Set<string>();
@@ -222,7 +227,7 @@ export function scanSource(fileName: string, text: string): Violation[] {
     // including concatenations, templates and `[..].join("/")` paths assembled elsewhere.
     if (isMaximalString(n) || (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === "join")) {
       const v = fold(n as ts.Expression);
-      if (v === "admin_session") push(n, "ADMIN_SESSION_COOKIE");
+      if (v === "admin_session" || ADMIN_SESSION_SET_COOKIE.test(v)) push(n, "ADMIN_SESSION_COOKIE");
       if (ADMIN_SESSIONS_SEGMENT.test(v)) push(n, "ADMIN_SESSIONS_COLLECTION");
     }
     ts.forEachChild(n, visit);
@@ -247,6 +252,8 @@ function sourceFiles(dir: string, acc: string[] = [], recurse = true): string[] 
 }
 const PROD_FILES = [
   ...sourceFiles("app"), ...sourceFiles("lib"), ...sourceFiles("hooks"), ...sourceFiles("components"), ...sourceFiles("scripts"),
+  // Next also builds the Pages Router (pages/, src/pages/) and src/app/; scanned if they ever appear.
+  ...sourceFiles("pages"), ...sourceFiles("src"), ...sourceFiles("extension"),
   ...sourceFiles(".", [], false), // root files: middleware.ts, instrumentation, configs
 ];
 
@@ -364,6 +371,20 @@ describe("T2 — scanner rules fire on secret-derived resource ids (fixtures)", 
   ])("R11: flags an assembled admin_session cookie name (%s)", (_label, src) => {
     expect(rules(src as string)).toContain("ADMIN_SESSION_COOKIE");
   });
+  it.each([
+    ["Set-Cookie header template", 'export function issue(v) { return new Response(null, { headers: { "Set-Cookie": `admin_session=${v}; Path=/; HttpOnly` } }); }'],
+    ["Set-Cookie header concatenation", 'res.headers.append("set-cookie", "admin_session=" + v + "; Path=/");'],
+    ["Set-Cookie after another cookie", 'res.headers.set("set-cookie", "a=1; admin_session=" + v);'],
+  ])("D2: flags a raw Set-Cookie issuing admin_session (%s)", (_label, src) => {
+    expect(rules(src as string)).toContain("ADMIN_SESSION_COOKIE");
+  });
+  it("N1: getAll() cookie reads are sources; hashtagOf() is not a hash", () => {
+    expect(rules('const c = request.cookies.getAll()[0].value; db.collection("x").doc(c);')).toContain("SECRET_RESOURCE_ID");
+    expect(rules('db.collection("x").doc(hashtagOf(token));')).toContain("SECRET_RESOURCE_ID");
+  });
+  it("D2 negative controls: other cookies / prose mentioning the name are not flagged", () => {
+    expect(rules('res.headers.append("set-cookie", "__session=" + v + "; Path=/"); const s = "my_admin_session=x";')).toEqual([]);
+  });
   it("negative controls for folding/helpers/reassignment", () => {
     expect(rules('cookies().set("__session", v); const k = "admin_" + "sessionsX"; db.collection("x").doc(uid);')).toEqual([]);
     expect(rules('function idOf(u) { return u.uid; } db.collection("users").doc(idOf(user));')).toEqual([]);
@@ -426,8 +447,19 @@ function filesMatching(dir: string, re: RegExp, acc: string[] = []): string[] {
 /** app/(group)/api/x/route.js → /api/x ; app/admin/login/page.jsx → /admin/login */
 export const routePathOf = (f: string) =>
   "/" + f.replace(/^app\//, "").replace(/\/?(route|page)\.[a-z]+$/, "").replace(/\([^)]+\)\/?/g, "").replace(/\/$/, "");
-const API_ROUTES = filesMatching("app", ROUTE_FILE).map(routePathOf);
-const PAGES = filesMatching("app", PAGE_FILE).map((f) => routePathOf(f) || "/");
+/** Pages Router entries: pages/api/admin/login.ts → /api/admin/login ; pages/admin/login/index.jsx → /admin/login */
+export const pagesRoutePathOf = (f: string) =>
+  "/" + f.replace(/^(src\/)?pages\//, "").replace(/\.(ts|tsx|js|jsx|mjs|md|mdx)$/, "").replace(/(^|\/)index$/, "");
+const PAGES_ROUTER_FILES = ["pages", "src/pages"].filter(existsSync).flatMap((d) => filesMatching(d, SOURCE_EXT));
+const API_ROUTES = [
+  ...filesMatching("app", ROUTE_FILE).map(routePathOf),
+  ...(existsSync("src/app") ? filesMatching("src/app", ROUTE_FILE).map((f) => routePathOf(f.replace(/^src\//, ""))) : []),
+  ...PAGES_ROUTER_FILES.map(pagesRoutePathOf).filter((r) => r.startsWith("/api/")),
+];
+const PAGES = [
+  ...filesMatching("app", PAGE_FILE).map((f) => routePathOf(f) || "/"),
+  ...PAGES_ROUTER_FILES.map(pagesRoutePathOf).filter((r) => !r.startsWith("/api/")),
+];
 
 describe("T1 — the legacy flow is not reachable", () => {
   it("ANCHOR: entry-file matching covers every buildable extension (a route.js / page.jsx restore cannot hide)", () => {
@@ -436,6 +468,16 @@ describe("T1 — the legacy flow is not reachable", () => {
     expect(routePathOf("app/api/admin/login/route.js")).toBe("/api/admin/login");
     expect(routePathOf("app/(legacy)/api/admin/logout/route.jsx")).toBe("/api/admin/logout");
     expect(routePathOf("app/admin/login/page.jsx")).toBe("/admin/login");
+  });
+  it("the app is App-Router only: no pages/, src/pages/ or src/app/ tree exists (a Pages Router restore cannot hide)", () => {
+    expect(existsSync("pages")).toBe(false);
+    expect(existsSync("src/pages")).toBe(false);
+    expect(existsSync("src/app")).toBe(false);
+  });
+  it("ANCHOR: Pages Router paths map correctly if a pages/ tree ever appears", () => {
+    expect(pagesRoutePathOf("pages/api/admin/login.ts")).toBe("/api/admin/login");
+    expect(pagesRoutePathOf("src/pages/api/admin/logout.js")).toBe("/api/admin/logout");
+    expect(pagesRoutePathOf("pages/admin/login/index.jsx")).toBe("/admin/login");
   });
   it("ANCHOR: route and page enumeration works", () => {
     expect(API_ROUTES).toContain("/api/admin/set-admin");
