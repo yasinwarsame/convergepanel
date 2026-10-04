@@ -7,7 +7,7 @@
  * `admin_sessions/{secret}` and also set it as the `admin_session` cookie. It
  * never gated anything — no caller ever validated it — but a secret in a
  * document *name* is copied into Firestore Data Access audit entries, which this
- * project retains for 365 days.
+ * project retains (365 days per the private controls record at the time of writing).
  *
  * What each block proves:
  *   T1  the legacy routes/page/module are not reachable: no route or page
@@ -35,50 +35,111 @@ export type Violation = { file: string; line: number; rule: "SECRET_RESOURCE_ID"
 
 const SECRET_NAME = /token|secret|password|passwd|cookie|apikey|api_key|credential/i;
 const HASHED_NAME = /hash|digest|hmac|sha\d*/i;
-const SECRET_SOURCE = /randomBytes\s*\(|\.cookies\.get\s*\(|cookies\s*\(\s*\)\s*\.get\s*\(|headers\.get\s*\(\s*["'`]authorization["'`]/i;
-const HASH_CALL = /^(createHash|createHmac)$|hash|hmac|digest|sha256/i;
+/** Text of a direct secret source: random bytes, a cookie read, the Authorization header. */
+const SECRET_SOURCE = /randomBytes\s*\(|\.cookies\.get\s*\(|cookies\s*\(\s*\)\s*\.get\s*\(|headers(\s*\(\s*\))?\.get\s*\(\s*["'`]authorization["'`]/i;
+/** A callee counts as hashing only when its name STARTS with hash/hmac/sha256 or ENDS in Hash/Hmac/Digest
+ *  (so `unhashed(token)` is not a hash), or is createHash/createHmac/digest. */
+const HASH_CALLEE = /^(createHash|createHmac|digest)$|^(hash|hmac|sha256)|(Hash|Hmac|Digest)$/;
 
 function calleeName(expr: ts.Expression): string | null {
   if (ts.isPropertyAccessExpression(expr)) return expr.name.text;
   if (ts.isIdentifier(expr)) return expr.text;
   return null;
 }
+const strip = (e: ts.Expression): ts.Expression => {
+  let c = e;
+  while (ts.isParenthesizedExpression(c) || ts.isAsExpression(c) || ts.isNonNullExpression(c) || ts.isTypeAssertionExpression(c) || ts.isSatisfiesExpression(c)) c = c.expression;
+  return c;
+};
+const PASS_THROUGH_PROPS = new Set(["value"]);
+const secretNamed = (name: string) => SECRET_NAME.test(name) && !HASHED_NAME.test(name);
 
-/** True when the expression is (or ends in) a hash/HMAC computation. */
+/** True when the expression's value is the output of a hash/HMAC call chain. */
 function isHashed(e: ts.Expression): boolean {
-  let cur: ts.Expression = e;
-  while (ts.isParenthesizedExpression(cur) || ts.isAsExpression(cur) || ts.isNonNullExpression(cur)) cur = cur.expression;
-  if (ts.isCallExpression(cur)) {
-    // walk the whole call chain: createHash("sha256").update(x).digest("hex")
-    let c: ts.Expression = cur;
-    while (ts.isCallExpression(c) || ts.isPropertyAccessExpression(c)) {
-      const n = ts.isCallExpression(c) ? calleeName(c.expression) : c.name.text;
-      if (n && HASH_CALL.test(n)) return true;
-      c = ts.isCallExpression(c) ? c.expression : c.expression;
-    }
+  let c: ts.Expression = strip(e);
+  while (ts.isCallExpression(c) || ts.isPropertyAccessExpression(c)) {
+    const n = ts.isCallExpression(c) ? calleeName(c.expression) : c.name.text;
+    if (n && HASH_CALLEE.test(n)) return true;
+    c = c.expression;
   }
   return false;
 }
 
+/** Find the nearest declaration of `name` visible from `from` (walks enclosing scopes outward). */
+function resolve(name: string, from: ts.Node): { init?: ts.Expression; viaProperty?: string; param?: boolean } | null {
+  for (let s: ts.Node | undefined = from.parent; s; s = s.parent) {
+    if (ts.isFunctionLike(s)) {
+      for (const p of s.parameters) if (ts.isIdentifier(p.name) && p.name.text === name) return { param: true };
+    }
+    if (ts.isBlock(s) || ts.isSourceFile(s) || ts.isModuleBlock(s) || ts.isCaseClause(s)) {
+      let found: { init?: ts.Expression; viaProperty?: string } | null = null;
+      const look = (n: ts.Node): void => {
+        if (found || (n !== s && (ts.isFunctionLike(n) || ts.isBlock(n)))) return; // only this scope level
+        if (ts.isVariableDeclaration(n)) {
+          if (ts.isIdentifier(n.name) && n.name.text === name) found = { init: n.initializer };
+          else if (ts.isObjectBindingPattern(n.name)) {
+            for (const el of n.name.elements) {
+              if (ts.isIdentifier(el.name) && el.name.text === name) {
+                const prop = el.propertyName && ts.isIdentifier(el.propertyName) ? el.propertyName.text : name;
+                found = { init: n.initializer, viaProperty: prop };
+              }
+            }
+          }
+        }
+        ts.forEachChild(n, look);
+      };
+      ts.forEachChild(s, look);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
 export function scanSource(fileName: string, text: string): Violation[] {
   const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, fileName.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
-  const decls = new Map<string, ts.Expression>();
-  const collect = (n: ts.Node): void => {
-    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer) decls.set(n.name.text, n.initializer);
-    ts.forEachChild(n, collect);
-  };
-  collect(sf);
 
+  /** Does ANY part of this expression carry a secret (name, source, or alias of one)? */
   const secretDerived = (e: ts.Expression, depth = 0): boolean => {
-    if (depth > 4 || isHashed(e)) return false;
-    let cur: ts.Expression = e;
-    while (ts.isParenthesizedExpression(cur) || ts.isAsExpression(cur) || ts.isNonNullExpression(cur)) cur = cur.expression;
-    if (ts.isIdentifier(cur)) {
-      if (SECRET_NAME.test(cur.text) && !HASHED_NAME.test(cur.text)) return true;
-      const init = decls.get(cur.text);
-      return init ? secretDerived(init, depth + 1) : false;
+    if (depth > 8) return false;
+    const c = strip(e);
+    if (isHashed(c)) return false;
+    if (ts.isIdentifier(c)) {
+      if (secretNamed(c.text)) return true;
+      const d = resolve(c.text, c);
+      if (!d || d.param || !d.init) return false;
+      if (d.viaProperty && secretNamed(d.viaProperty)) return true;
+      return secretDerived(d.init, depth + 1);
     }
-    return SECRET_SOURCE.test(cur.getText(sf));
+    // A property is secret if its NAME is (`body.token`), or if it is a value pass-through on a secret
+    // source (`cookies.get(x)?.value`). Other properties of a secret-derived OBJECT are not secret:
+    // `(await signIn(auth, email, password)).user.uid` is a uid, not the password.
+    if (ts.isPropertyAccessExpression(c)) return secretNamed(c.name.text) || (PASS_THROUGH_PROPS.has(c.name.text) && secretDerived(c.expression, depth + 1));
+    if (ts.isElementAccessExpression(c)) {
+      const k = c.argumentExpression;
+      return ts.isStringLiteralLike(k) && secretNamed(k.text);
+    }
+    if (ts.isTemplateExpression(c)) return c.templateSpans.some((s) => secretDerived(s.expression, depth + 1));
+    if (ts.isBinaryExpression(c)) return secretDerived(c.left, depth + 1) || secretDerived(c.right, depth + 1);
+    if (ts.isConditionalExpression(c)) return secretDerived(c.whenTrue, depth + 1) || secretDerived(c.whenFalse, depth + 1);
+    if (ts.isCallExpression(c)) {
+      if (SECRET_SOURCE.test(c.getText(sf))) return true;
+      const n = calleeName(c.expression);
+      if (n && secretNamed(n)) return true; // e.g. generateInvitationToken()
+      const recv = ts.isPropertyAccessExpression(c.expression) ? [c.expression.expression] : [];
+      return [...recv, ...c.arguments].some((a) => secretDerived(a, depth + 1)); // token.trim(), String(token), h.slice(7)
+    }
+    return SECRET_SOURCE.test(c.getText(sf));
+  };
+
+  /** String value of a collection-name argument, following a local const if needed. */
+  const literalValue = (e: ts.Expression): string | null => {
+    const c = strip(e);
+    if (ts.isStringLiteralLike(c)) return c.text;
+    if (ts.isIdentifier(c)) {
+      const d = resolve(c.text, c);
+      if (d?.init && ts.isStringLiteralLike(strip(d.init))) return (strip(d.init) as ts.StringLiteralLike).text;
+    }
+    return null;
   };
 
   const out: Violation[] = [];
@@ -89,9 +150,9 @@ export function scanSource(fileName: string, text: string): Violation[] {
       if (name === "doc") {
         // namespaced `x.doc(id)` → every arg; modular `doc(db, ...segments)` → segments
         const args = ts.isIdentifier(n.expression) ? n.arguments.slice(1) : n.arguments;
-        for (const a of args) if (secretDerived(a)) out.push({ file: fileName, line: at(n), rule: "SECRET_RESOURCE_ID", text: n.getText(sf).slice(0, 120) });
+        if (args.some((a) => secretDerived(a))) out.push({ file: fileName, line: at(n), rule: "SECRET_RESOURCE_ID", text: n.getText(sf).slice(0, 120) });
       }
-      if ((name === "collection" || name === "collectionGroup") && n.arguments.some((a) => ts.isStringLiteralLike(a) && a.text === "admin_sessions")) {
+      if ((name === "collection" || name === "collectionGroup") && n.arguments.some((a) => literalValue(a) === "admin_sessions")) {
         out.push({ file: fileName, line: at(n), rule: "ADMIN_SESSIONS_COLLECTION", text: n.getText(sf).slice(0, 120) });
       }
     }
@@ -143,11 +204,33 @@ describe("T2 — scanner rules fire on secret-derived resource ids (fixtures)", 
   it("flags any admin_session cookie name", () => {
     expect(rules(`cookies().set("admin_session", v, {});`)).toEqual(["ADMIN_SESSION_COOKIE"]);
   });
+  it.each([
+    ["template path", "db.doc(`sessions/${token}`);"],
+    ["concatenated path", 'db.doc("sessions/" + token);'],
+    ["property access", "db.collection(\"x\").doc(body.token);"],
+    ["String() / .trim() wrappers", "db.collection(\"x\").doc(String(token)); db.collection(\"y\").doc(token.trim());"],
+    ["destructured rename", "const { token: t } = body; db.collection(\"x\").doc(t);"],
+    ["secret returned by a helper", "const v = generateInvitationToken(); db.collection(\"x\").doc(v);"],
+    ["headers() Authorization", 'const h = headers().get("authorization"); db.collection("x").doc(h);'],
+    ["bearer slice", 'const h = req.headers.get("authorization"); db.collection("x").doc(h.slice(7));'],
+    ["misleading hash-like callee", "db.collection(\"x\").doc(unhashed(token));"],
+  ])("flags %s", (_label, src) => {
+    expect(rules(src as string)).toContain("SECRET_RESOURCE_ID");
+  });
+  it("flags a constant admin_sessions collection name", () => {
+    expect(rules(`const C = "admin_sessions"; db.collection(C).doc(uid);`)).toEqual(["ADMIN_SESSIONS_COLLECTION"]);
+  });
+  it("resolves aliases per scope: a same-named const elsewhere does not hide a secret", () => {
+    expect(rules(`function a() { const id = "fixed"; return id; }\nfunction b() { const id = randomBytes(8).toString("hex"); db.collection("x").doc(id); }`)).toEqual(["SECRET_RESOURCE_ID"]);
+  });
   it("does NOT flag hashed ids or ordinary ids (negative controls)", () => {
     expect(rules(`db.collection("i").doc(hashWorkspaceInvitationToken(rawToken));`)).toEqual([]);
     expect(rules(`db.collection("i").doc(createHash("sha256").update(token).digest("hex"));`)).toEqual([]);
     expect(rules(`const tokenHash = hashIt(token); db.collection("i").doc(tokenHash);`)).toEqual([]);
     expect(rules(`db.collection("runs").doc(runId); db.collection("users").doc(uid); doc(db, "w", workspaceId);`)).toEqual([]);
+    expect(rules("db.doc(`users/${uid}/runs/${runId}`); db.collection(\"i\").doc(invitation.tokenHash);")).toEqual([]);
+    // a uid read off an auth result whose CALL took a password is not the password
+    expect(rules(`const cred = await signInWithEmailAndPassword(auth, email, password); const user = cred.user; await setDoc(doc(db, "users", user.uid), {});`)).toEqual([]);
   });
 });
 

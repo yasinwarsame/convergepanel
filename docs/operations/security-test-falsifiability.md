@@ -330,7 +330,8 @@ rather than a result.
 - **Process death still loses PRE.** C15 adds no crash recovery, and the runbook
   does not tell an operator to restore the old secret to rebuild a pre-check.
 - Unchanged carried debt: deferred/aliased/computed logging sinks; mint-detector
-  and scanner blind spots; `/api/admin/login` limiter coverage; the shared
+  and scanner blind spots; `/api/admin/login` limiter coverage *(moot since
+  2026-10-04: the route was removed under R-25)*; the shared
   invitation budget.
 
 ---

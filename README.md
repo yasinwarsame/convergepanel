@@ -405,7 +405,7 @@ npx prisma generate
 The database includes:
 - **ApiKey**: Stores API keys for all models (replaces file-based storage)
 - **PanelRun**: Optional history of panel runs and results
-- **AdminSession**: Optional admin session tracking
+- **AdminSession**: unused (the legacy password admin session was removed under R-25; dropping the model needs a separate migration)
 
 ### Migrations
 

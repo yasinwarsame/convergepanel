@@ -231,7 +231,8 @@ was removed: it generated a 7-day session secret and used it directly as the
 Firestore document ID `admin_sessions/{secret}`, which Firestore Data Access
 audit logging could retain. `docs/__tests__/r25LegacyAdminSessionRemoved.spec.ts`
 keeps it removed. Production cleanup (leftover `admin_sessions` documents, the
-`expiresAt` TTL override, the `ADMIN_PASSWORD` env var) is separate and gated.
+`expiresAt` TTL override, the `ADMIN_PASSWORD` env var) and removal of the
+unused Prisma `AdminSession` model (needs a migration) are separate and gated.
 
 ## The rules that matter
 
