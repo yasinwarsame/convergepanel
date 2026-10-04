@@ -35,8 +35,13 @@ export type Violation = { file: string; line: number; rule: "SECRET_RESOURCE_ID"
 
 const SECRET_NAME = /token|secret|password|passwd|cookie|apikey|api_key|credential|authorization|bearer|jwt/i;
 const HASHED_NAME = /hash|digest|hmac|sha\d*/i;
-/** Text of a direct secret source: random bytes, a cookie read, the Authorization header. */
-const SECRET_SOURCE = /randomBytes\w*\s*\(|\.cookies\.get\s*\(|cookies\s*\(\s*\)\s*\)?\s*\.get\s*\(|headers(\s*\(\s*\)\s*\)?)?\.get\s*\(\s*["'`]authorization["'`]/i;
+/** Text of a direct request-credential source: a cookie read or the Authorization header. */
+const SECRET_SOURCE = /\.cookies\.get\s*\(|cookies\s*\(\s*\)\s*\)?\s*\.get\s*\(|headers(\s*\(\s*\)\s*\)?)?\.get\s*\(\s*["'`]authorization["'`]/i;
+/** Explicit secret PRODUCERS, matched on the exact callee name (case-sensitive) — never a substring,
+ *  so getRandomBytesCount() / randomBytesLength() are not producers. */
+const PRODUCER_CALLEE = /^(randomBytes|randomBytesSync|randomBytesAsync|pseudoRandomBytes|getRandomValues)$|^secureRandom[A-Z0-9_]?/;
+/** Names that merely describe a secret (an id, count, timestamp, type…) rather than carry it. */
+const NON_SECRET_SUFFIX = /(Id|Ids|Uid|Count|At|Type|Status|Mode|Version|Length|Index|Info|Ref|Path|Name|Month|Date|Day|Year|Enabled|Required)$/;
 /** A callee counts as hashing only when its name STARTS with hash/hmac/sha256 or ENDS in Hash/Hmac/Digest
  *  (so `unhashed(token)` is not a hash), or is createHash/createHmac/digest. */
 const HASH_CALLEE = /^(createHash|createHmac|digest)$|^(hash|hmac|sha256)|(Hash|Hmac|Digest)$/;
@@ -52,7 +57,7 @@ const strip = (e: ts.Expression): ts.Expression => {
   return c;
 };
 const PASS_THROUGH_PROPS = new Set(["value"]);
-const secretNamed = (name: string) => SECRET_NAME.test(name) && !HASHED_NAME.test(name);
+const secretNamed = (name: string) => SECRET_NAME.test(name) && !HASHED_NAME.test(name) && !NON_SECRET_SUFFIX.test(name);
 
 /** True when the expression's value is the output of a hash/HMAC call chain. */
 function isHashed(e: ts.Expression): boolean {
@@ -124,11 +129,22 @@ export function scanSource(fileName: string, text: string): Violation[] {
     if (ts.isCallExpression(c)) {
       if (SECRET_SOURCE.test(c.getText(sf))) return true;
       const n = calleeName(c.expression);
-      if (n && secretNamed(n)) return true; // e.g. generateInvitationToken()
+      if (n && PRODUCER_CALLEE.test(n)) return true; // randomBytes(…), randomBytesAsync(…), getRandomValues(…)
+      if (n && secretNamed(n)) return true; // e.g. generateInvitationToken(), issueSessionToken()
       const recv = ts.isPropertyAccessExpression(c.expression) ? [c.expression.expression] : [];
       return [...recv, ...c.arguments].some((a) => secretDerived(a, depth + 1)); // token.trim(), String(token), h.slice(7)
     }
     return SECRET_SOURCE.test(c.getText(sf));
+  };
+
+  /** Source text of a path argument, following local consts (so a path assembled before doc() is seen). */
+  const pathText = (e: ts.Expression, depth = 0): string => {
+    const c = strip(e);
+    if (depth < 6 && ts.isIdentifier(c)) {
+      const d = resolve(c.text, c);
+      if (d?.init) return pathText(d.init, depth + 1);
+    }
+    return c.getText(sf).replace(/^[`'"]|[`'"]$/g, "");
   };
 
   /** String value of a collection-name argument, following a local const if needed. */
@@ -157,7 +173,7 @@ export function scanSource(fileName: string, text: string): Violation[] {
         if (args.some((a) => secretDerived(a))) out.push({ file: fileName, line: at(n), rule: "SECRET_RESOURCE_ID", text: n.getText(sf).slice(0, 120) });
         if (n.arguments.some((a) => literalValue(a) === "admin_sessions")) out.push({ file: fileName, line: at(n), rule: "ADMIN_SESSIONS_COLLECTION", text: n.getText(sf).slice(0, 120) });
       }
-      if (name === "doc" && n.arguments.some((a) => /(^|\/)admin_sessions(\/|$)/.test(a.getText(sf).replace(/^[`'"]|[`'"]$/g, "")))) {
+      if (name === "doc" && n.arguments.some((a) => /(^|\/)admin_sessions(\/|$)/.test(pathText(a)))) {
         out.push({ file: fileName, line: at(n), rule: "ADMIN_SESSIONS_COLLECTION", text: n.getText(sf).slice(0, 120) });
       }
     }
@@ -230,6 +246,47 @@ describe("T2 — scanner rules fire on secret-derived resource ids (fixtures)", 
     ["bearer/jwt-named identifiers", "db.collection(\"x\").doc(bearer); db.collection(\"y\").doc(jwt);"],
   ])("flags %s", (_label, src) => {
     expect(rules(src as string)).toContain("SECRET_RESOURCE_ID");
+  });
+  it.each([
+    ["await generateInvitationToken() inline", 'doc(db, "collection", await generateInvitationToken());'],
+    ["awaited helper alias", 'const token = await generateInvitationToken();\ndoc(db, "collection", token);'],
+    ["nested awaits", 'const v = await (await getSecretFactory()).issueSessionToken(); db.collection("x").doc(v);'],
+    ["await randomBytesAsync(...)", 'const id = (await randomBytesAsync(32)).toString("hex"); db.collection("x").doc(id);'],
+    ["awaited helper returning a secret, via alias chain", 'const a = await issueSessionToken(); const b = a; const c2 = b; db.collection("x").doc(c2);'],
+    ["destructured alias of an awaited helper", 'const { token: t } = await createSession(); db.collection("x").doc(t);'],
+    ["wrapper around an awaited producer", 'db.collection("x").doc(String(await generateInvitationToken()).trim());'],
+    ["crypto.randomBytes", 'const n = crypto.randomBytes(32).toString("hex"); db.collection("x").doc(n);'],
+    ["getRandomValues", 'const n = toHex(crypto.getRandomValues(new Uint8Array(32))); db.collection("x").doc(n);'],
+    ["secureRandom* wrapper", 'const n = secureRandomHex(32); db.collection("x").doc(n);'],
+  ])("Phase-2/3 positive: %s", (_label, src) => {
+    expect(rules(src as string)).toContain("SECRET_RESOURCE_ID");
+  });
+  it.each([
+    ["getRandomBytesCount()", 'const n = getRandomBytesCount(); db.collection("x").doc(n);'],
+    ["randomBytesLength()", 'const n = randomBytesLength(cfg); db.collection("x").doc(n);'],
+    ["logRandomBytesUsage()", 'const n = logRandomBytesUsage(uid); db.collection("x").doc(n);'],
+    ["RandomBytesTelemetry()", 'const n = RandomBytesTelemetry(); db.collection("x").doc(n);'],
+    ["authorizationRequestId", "db.collection(\"x\").doc(authorizationRequestId);"],
+    ["bearerTokenCount", "db.collection(\"x\").doc(bearerTokenCount);"],
+    ["jwtIssuedAt / tokenUsageMonth / tokenizerName", "db.collection(\"a\").doc(jwtIssuedAt); db.collection(\"b\").doc(tokenUsageMonth); db.collection(\"c\").doc(tokenizerName);"],
+    ["authorizationInfo.permission", "db.collection(\"x\").doc(authorizationInfo.permission);"],
+  ])("Phase-3/N4 negative control (not a secret producer/carrier): %s", (_label, src) => {
+    expect(rules(src as string)).toEqual([]);
+  });
+  it("flags admin_sessions/<secret> assembled before doc() is called", () => {
+    const r = rules('const t = randomBytes(32).toString("hex");\nconst p = `admin_sessions/${t}`;\ndb.doc(p);');
+    expect(r).toContain("ADMIN_SESSIONS_COLLECTION");
+    expect(r).toContain("SECRET_RESOURCE_ID");
+  });
+  it("flags a nested resource path ending in admin_sessions/{secret}", () => {
+    expect(rules('db.collection("tenants").doc(tid).collection("admin_sessions").doc(sessionToken);')).toEqual(["SECRET_RESOURCE_ID", "ADMIN_SESSIONS_COLLECTION"]);
+  });
+  it("modular doc(db, 'admin_sessions', …) is flagged", () => {
+    expect(rules('doc(db, "admin_sessions", sid);')).toContain("ADMIN_SESSIONS_COLLECTION");
+  });
+  it("scope guard: an alias in one function never resolves to a declaration in a sibling or nested scope", () => {
+    expect(rules(`function outer() { const id = uid; function inner() { const id = randomBytes(8).toString("hex"); return id; } db.collection("x").doc(id); }`)).toEqual([]);
+    expect(rules(`function outer() { const id = randomBytes(8).toString("hex"); function inner() { const id = uid; db.collection("x").doc(id); } }`)).toEqual([]);
   });
   it("flags admin_sessions inside a document path", () => {
     expect(rules("db.doc(`admin_sessions/${uid}`);")).toContain("ADMIN_SESSIONS_COLLECTION");
