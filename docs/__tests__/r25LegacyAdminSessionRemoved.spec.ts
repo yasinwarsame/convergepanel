@@ -33,10 +33,10 @@ import * as ts from "typescript";
 
 export type Violation = { file: string; line: number; rule: "SECRET_RESOURCE_ID" | "ADMIN_SESSIONS_COLLECTION" | "ADMIN_SESSION_COOKIE"; text: string };
 
-const SECRET_NAME = /token|secret|password|passwd|cookie|apikey|api_key|credential/i;
+const SECRET_NAME = /token|secret|password|passwd|cookie|apikey|api_key|credential|authorization|bearer|jwt/i;
 const HASHED_NAME = /hash|digest|hmac|sha\d*/i;
 /** Text of a direct secret source: random bytes, a cookie read, the Authorization header. */
-const SECRET_SOURCE = /randomBytes\s*\(|\.cookies\.get\s*\(|cookies\s*\(\s*\)\s*\.get\s*\(|headers(\s*\(\s*\))?\.get\s*\(\s*["'`]authorization["'`]/i;
+const SECRET_SOURCE = /randomBytes\w*\s*\(|\.cookies\.get\s*\(|cookies\s*\(\s*\)\s*\)?\s*\.get\s*\(|headers(\s*\(\s*\)\s*\)?)?\.get\s*\(\s*["'`]authorization["'`]/i;
 /** A callee counts as hashing only when its name STARTS with hash/hmac/sha256 or ENDS in Hash/Hmac/Digest
  *  (so `unhashed(token)` is not a hash), or is createHash/createHmac/digest. */
 const HASH_CALLEE = /^(createHash|createHmac|digest)$|^(hash|hmac|sha256)|(Hash|Hmac|Digest)$/;
@@ -48,7 +48,7 @@ function calleeName(expr: ts.Expression): string | null {
 }
 const strip = (e: ts.Expression): ts.Expression => {
   let c = e;
-  while (ts.isParenthesizedExpression(c) || ts.isAsExpression(c) || ts.isNonNullExpression(c) || ts.isTypeAssertionExpression(c) || ts.isSatisfiesExpression(c)) c = c.expression;
+  while (ts.isParenthesizedExpression(c) || ts.isAsExpression(c) || ts.isNonNullExpression(c) || ts.isTypeAssertionExpression(c) || ts.isSatisfiesExpression(c) || ts.isAwaitExpression(c)) c = c.expression;
   return c;
 };
 const PASS_THROUGH_PROPS = new Set(["value"]);
@@ -152,7 +152,12 @@ export function scanSource(fileName: string, text: string): Violation[] {
         const args = ts.isIdentifier(n.expression) ? n.arguments.slice(1) : n.arguments;
         if (args.some((a) => secretDerived(a))) out.push({ file: fileName, line: at(n), rule: "SECRET_RESOURCE_ID", text: n.getText(sf).slice(0, 120) });
       }
-      if ((name === "collection" || name === "collectionGroup") && n.arguments.some((a) => literalValue(a) === "admin_sessions")) {
+      if (name === "collection" || name === "collectionGroup") {
+        const args = ts.isIdentifier(n.expression) ? n.arguments.slice(1) : n.arguments;
+        if (args.some((a) => secretDerived(a))) out.push({ file: fileName, line: at(n), rule: "SECRET_RESOURCE_ID", text: n.getText(sf).slice(0, 120) });
+        if (n.arguments.some((a) => literalValue(a) === "admin_sessions")) out.push({ file: fileName, line: at(n), rule: "ADMIN_SESSIONS_COLLECTION", text: n.getText(sf).slice(0, 120) });
+      }
+      if (name === "doc" && n.arguments.some((a) => /(^|\/)admin_sessions(\/|$)/.test(a.getText(sf).replace(/^[`'"]|[`'"]$/g, "")))) {
         out.push({ file: fileName, line: at(n), rule: "ADMIN_SESSIONS_COLLECTION", text: n.getText(sf).slice(0, 120) });
       }
     }
@@ -216,6 +221,21 @@ describe("T2 — scanner rules fire on secret-derived resource ids (fixtures)", 
     ["misleading hash-like callee", "db.collection(\"x\").doc(unhashed(token));"],
   ])("flags %s", (_label, src) => {
     expect(rules(src as string)).toContain("SECRET_RESOURCE_ID");
+  });
+  it.each([
+    ["awaited async helper", "const v = await generateInvitationToken(); db.collection(\"x\").doc(v);"],
+    ["awaited headers()", 'const h = (await headers()).get("authorization"); db.collection("y").doc(h);'],
+    ["awaited async randomBytes", 'const id = (await randomBytesAsync(32)).toString("hex"); db.collection("z").doc(id);'],
+    ["secret as a collection id", "db.collection(token).doc(uid);"],
+    ["bearer/jwt-named identifiers", "db.collection(\"x\").doc(bearer); db.collection(\"y\").doc(jwt);"],
+  ])("flags %s", (_label, src) => {
+    expect(rules(src as string)).toContain("SECRET_RESOURCE_ID");
+  });
+  it("flags admin_sessions inside a document path", () => {
+    expect(rules("db.doc(`admin_sessions/${uid}`);")).toContain("ADMIN_SESSIONS_COLLECTION");
+  });
+  it("scope guard: a nested function's same-named const does not shadow an outer secret", () => {
+    expect(rules(`function a() { const id = "fixed"; return id; }\nconst id = randomBytes(8).toString("hex");\ndb.collection("x").doc(id);`)).toEqual(["SECRET_RESOURCE_ID"]);
   });
   it("flags a constant admin_sessions collection name", () => {
     expect(rules(`const C = "admin_sessions"; db.collection(C).doc(uid);`)).toEqual(["ADMIN_SESSIONS_COLLECTION"]);
