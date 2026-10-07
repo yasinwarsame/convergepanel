@@ -131,6 +131,8 @@ beforeEach(() => {
   failRunsGetAll = false;
   getAllPaths.length = 0;
   docs.set(`users/${OWNER}`, { email: OWNER_EMAIL });
+  // Roadmap 4.3a: run-backed events are listed only with an existing parent run.
+  docs.set("runs/r-legacy", { userId: OWNER });
 });
 
 describe("adaptive rows (no recorded owner) — C2 owner release rule", () => {
@@ -180,8 +182,13 @@ describe("adaptive rows (no recorded owner) — C2 owner release rule", () => {
     expectNoUidExposure(body);
   });
 
+  it("missing parent -> the event is not listed at all (roadmap 4.3a containment)", async () => {
+    auditRows = [adaptiveRow("e01", "r-x")];
+    const body = await list([VIEWER, OWNER]);
+    expect(body.events).toEqual([]);
+  });
+
   it.each([
-    ["missing parent", () => undefined],
     ["parent with no userId", () => docs.set("runs/r-x", { question: "q" })],
     ["parent with a non-string userId", () => docs.set("runs/r-x", { userId: 42 })],
     ["owner visible but profile has no email", () => {
@@ -196,11 +203,26 @@ describe("adaptive rows (no recorded owner) — C2 owner release rule", () => {
     expectNoUidExposure(body);
   });
 
-  it("parent read failure -> withheld, page still answers 200", async () => {
+  it("parent read failure on the list -> fails closed (500), never an unclassified event", async () => {
+    // Roadmap 4.3a: the list's containment pass reads the parent first; an
+    // unreadable parent cannot be classified, so nothing is listed.
     docs.set("runs/r-x", { userId: OWNER });
     failRunsGetAll = true;
     auditRows = [adaptiveRow("e01", "r-x")];
-    const body = await list([VIEWER, OWNER]);
+    asViewer([VIEWER, OWNER]);
+    const res = await GET(new NextRequest("http://localhost/api/governance/audit?limit=50"));
+    expect(res.status).toBe(500);
+    expect(JSON.stringify(await res.json())).not.toContain(OWNER);
+  });
+
+  it("parent read failure on the drilldown -> withheld, still 200", async () => {
+    docs.set("runs/r-x", { userId: OWNER });
+    auditRows = [adaptiveRow("e01", "r-x")];
+    failRunsGetAll = true;
+    asViewer([VIEWER, OWNER]);
+    const res = await GET(new NextRequest("http://localhost/api/governance/audit?runId=r-x&collection=runs"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
     expect(ownerFields(body.events[0])).toEqual(WITHHELD);
     expectNoUidExposure(body);
   });
@@ -208,15 +230,15 @@ describe("adaptive rows (no recorded owner) — C2 owner release rule", () => {
   it("'not recorded' and 'not visible' are indistinguishable", async () => {
     docs.set("runs/r-invis", { userId: OWNER });
     docs.set("runs/r-ws", { userId: OWNER, workspaceId: "ws-team-1" });
-    auditRows = [adaptiveRow("e01", "r-invis"), adaptiveRow("e02", "r-ws"), adaptiveRow("e03", "r-missing")];
+    // (A missing parent is no longer listed at all — roadmap 4.3a.)
+    auditRows = [adaptiveRow("e01", "r-invis"), adaptiveRow("e02", "r-ws")];
     const body = await list([VIEWER]);
     const shapes = body.events.map((ev) => {
       const { id: _id, at: _at, runId: _runId, ...rest } = ev;
       return rest;
     });
-    expect(shapes).toHaveLength(3);
+    expect(shapes).toHaveLength(2);
     expect(shapes[1]).toEqual(shapes[0]);
-    expect(shapes[2]).toEqual(shapes[0]);
   });
 
   it("parents and profiles are each read in one batched retrieval, not per event", async () => {

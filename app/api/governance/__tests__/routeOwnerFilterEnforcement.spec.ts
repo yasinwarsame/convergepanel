@@ -158,6 +158,10 @@ jest.mock("@/lib/firebase/admin", () => ({
   adminAuth: { getUser: async () => ({ email: "reviewer@test-invented.example", emailVerified: true, disabled: false }) },
   adminDb: {
     collection: (name: string) => makeQuery(name),
+    // Roadmap 4.3a: the audit list classifies each run-backed event's parent in
+    // one batched read. Every parent here is the addressed legacy run.
+    getAll: async (...args: unknown[]) =>
+      args.filter((a) => a && typeof (a as { get?: unknown }).get === "function").map(() => addressedDoc()),
     runTransaction: async (fn: (txn: unknown) => Promise<unknown>) =>
       fn({ get: (ref: any) => ref.get(), set: (ref: any, data: unknown, opts?: unknown) => ref.set(data, opts) }),
   },

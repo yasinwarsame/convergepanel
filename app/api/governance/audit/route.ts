@@ -12,6 +12,7 @@ import {
 } from "@/lib/governance/governanceVisibleUserIds";
 import { resolveGovernanceRequestUser } from "@/lib/governance/authCheck";
 import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
+import { createRunWorkspaceIntegrityBatch } from "@/lib/workspaces/runWorkspaceIntegrityBatch";
 import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -246,33 +247,48 @@ type AuditResponseEvent = Omit<AuditEvent, "byEmail" | "runOwnerUid" | "runOwner
   runOwnerIsViewer?: true;
 };
 
+/**
+ * Run parents already read (field mask `userId`, `workspaceId`) by the list's
+ * containment pass, keyed by runId; `null` = no usable parent. Lets owner
+ * classification reuse that batch instead of reading the same documents again.
+ */
+type PreloadedRunParents = ReadonlyMap<string, Record<string, unknown> | null>;
+
 async function classifyRunOwnersFromParents(
   runIds: string[],
   viewerUid: string,
-  visibleUserIds: string[] | null
+  visibleUserIds: string[] | null,
+  preloaded?: PreloadedRunParents
 ): Promise<Map<string, string>> {
   const released = new Map<string, string>();
   const db = adminDb;
   if (!db || runIds.length === 0) return released;
-  for (let i = 0; i < runIds.length; i += AUDIT_PARENT_CLASSIFY_CHUNK) {
-    const chunk = runIds.slice(i, i + AUDIT_PARENT_CLASSIFY_CHUNK);
+  const release = (runId: string, data: Record<string, unknown> | null | undefined) => {
+    if (typeof data !== "object" || data === null) return;
+    const ownerUid = typeof data.userId === "string" ? data.userId.trim() : "";
+    if (!ownerUid) return;
+    if (ownerUid === viewerUid) {
+      released.set(runId, ownerUid);
+      return;
+    }
+    if (Object.prototype.hasOwnProperty.call(data, "workspaceId")) return;
+    if (!runOwnerVisibleInGovernance(visibleUserIds, ownerUid)) return;
+    released.set(runId, ownerUid);
+  };
+  const toRead: string[] = [];
+  for (const runId of runIds) {
+    if (preloaded?.has(runId)) release(runId, preloaded.get(runId));
+    else toRead.push(runId);
+  }
+  for (let i = 0; i < toRead.length; i += AUDIT_PARENT_CLASSIFY_CHUNK) {
+    const chunk = toRead.slice(i, i + AUDIT_PARENT_CLASSIFY_CHUNK);
     try {
       const refs = chunk.map((runId) => db.collection("runs").doc(runId));
       const snaps = await db.getAll(...refs, { fieldMask: ["userId", "workspaceId"] });
       chunk.forEach((runId, j) => {
         const snap = snaps[j];
         if (!snap || snap.exists !== true) return;
-        const data = snap.data();
-        if (typeof data !== "object" || data === null) return;
-        const ownerUid = typeof data.userId === "string" ? data.userId.trim() : "";
-        if (!ownerUid) return;
-        if (ownerUid === viewerUid) {
-          released.set(runId, ownerUid);
-          return;
-        }
-        if (Object.prototype.hasOwnProperty.call(data, "workspaceId")) return;
-        if (!runOwnerVisibleInGovernance(visibleUserIds, ownerUid)) return;
-        released.set(runId, ownerUid);
+        release(runId, snap.data());
       });
     } catch (err) {
       logger.warn("[governance/audit] run_owner_parent_read_failed", {
@@ -308,7 +324,8 @@ async function readOwnerProfileEmails(uids: string[]): Promise<Map<string, strin
 async function presentAuditEventsForViewer(
   events: AuditEvent[],
   viewerUid: string,
-  visibleUserIds: string[] | null
+  visibleUserIds: string[] | null,
+  preloaded?: PreloadedRunParents
 ): Promise<AuditResponseEvent[]> {
   const parentRunIds = new Set<string>();
   for (const e of events) {
@@ -317,7 +334,7 @@ async function presentAuditEventsForViewer(
       parentRunIds.add(runId);
     }
   }
-  const ownerByRunId = await classifyRunOwnersFromParents([...parentRunIds], viewerUid, visibleUserIds);
+  const ownerByRunId = await classifyRunOwnersFromParents([...parentRunIds], viewerUid, visibleUserIds, preloaded);
 
   const ownerUidFor = (e: AuditEvent): string => {
     const recorded = (e.runOwnerUid ?? "").trim();
@@ -352,60 +369,105 @@ const VERIFICATION_AUDIT_COLLECTIONS = new Set(["verifications", "videoVerificat
 const AUDIT_PARENT_CLASSIFY_CHUNK = 100;
 
 /**
- * TEAM-VERIFICATION-PARITY-R1 (C1: fail closed) — global Audit tab containment.
+ * Global Audit tab containment — an ALLOW-LIST decision on each event's parent.
+ * The list must never advertise an event whose drilldown
+ * (`?runId=&collection=`) is concealed, so every parent-backed event is
+ * classified by the same rule its drilldown applies.
  *
- * `admin_audit_logs` rows carry `collection` + `runId` but no Workspace
- * scope, and a legacy governance review of a Workspace-bound Claim/Video
- * wrote a DISPLAYABLE row (approved/blocked/changes_requested, with the claim
- * text or video file name as `question`). A verification/video event is
- * therefore an ALLOW-LIST decision on its parent document:
+ * TEAM-VERIFICATION-PARITY-R1 (C1) — Claim/Video events (`collection` is
+ * `verifications` / `videoVerifications`). A legacy governance review of a
+ * Workspace-bound Claim/Video wrote a DISPLAYABLE row, so:
  *
  *   parent exists, masked data is an object with NO `workspaceId` -> Personal, kept
  *   parent exists with a `workspaceId` field (any value)          -> suppressed
- *   parent does not exist                                         -> unclassifiable, suppressed
- *   parent data unusable / no snapshot returned for the ref       -> unclassifiable, suppressed
- *   event has no usable runId                                     -> unclassifiable, suppressed
- *   classification read throws                                    -> propagates, route answers 500
  *
- * Only a positively Personal parent may enter the response; an unknown scope
- * never does. A missing parent is an ordinary outcome, not an error, so one
- * deleted artifact never takes the page down. Reads are batched `getAll()`
- * calls over distinct parents with `fieldMask: ["workspaceId"]`, chunked at
- * AUDIT_PARENT_CLASSIFY_CHUNK and bounded by the events already in hand —
- * never N+1, never for research runs, no writes. Research-run and policy
- * events are untouched.
+ * Roadmap 4.3a (D1) — Research-run events. Any event with a real `runId`
+ * (other than "policy") whose `collection` is `"runs"` OR ABSENT — the
+ * dashboard trail drills into `runs` when `collection` is missing — is a
+ * run-backed event. Team Workspace review, panel, assignment and export events
+ * all write `collection: "runs"` against Team-bound runs, whose drilldown is
+ * concealed (404) by `validateRunWorkspaceAssociation`. The SAME validator
+ * classifies the parent here, through the shared batched integrity cache, so
+ * list and drilldown cannot disagree:
+ *
+ *   legacy (no workspaceId) or valid Personal binding -> kept
+ *   classified `invalid` (Team-bound / malformed)     -> suppressed
+ *
+ * Both kinds:
+ *   parent does not exist / data unusable           -> unclassifiable, suppressed
+ *   event has no usable runId                       -> unclassifiable, suppressed
+ *   any other `collection` value                    -> unclassifiable, suppressed
+ *   a classification read throws                    -> propagates, route answers 500
+ *
+ * `policy_updated` events have no parent and are always kept.
+ *
+ * Reads are batched `getAll()` calls over distinct parents, chunked at
+ * AUDIT_PARENT_CLASSIFY_CHUNK, field-masked to what the rule needs
+ * (`workspaceId` for Claims/Videos; `userId` + `workspaceId` for runs), and
+ * bounded by the events already in hand — never N+1, no writes.
  */
-async function excludeWorkspaceBoundVerificationAuditEvents(events: AuditEvent[]): Promise<AuditEvent[]> {
+type AuditParentKind = "verification" | "run";
+
+function auditParentOf(e: AuditEvent): { kind: AuditParentKind; collection: string; runId: string } | "policy" | null {
+  if (e.action === "policy_updated") return "policy";
+  const runId = (e.runId ?? "").trim();
+  const collection = (e.collection ?? "").trim();
+  if (!runId || runId === "policy") return null;
+  if (VERIFICATION_AUDIT_COLLECTIONS.has(collection)) return { kind: "verification", collection, runId };
+  if (collection === "" || collection === "runs") return { kind: "run", collection: "runs", runId };
+  return null;
+}
+
+async function excludeOutOfDomainAuditEvents(
+  events: AuditEvent[]
+): Promise<{ events: AuditEvent[]; runParents: Map<string, Record<string, unknown> | null> }> {
   const db = adminDb;
   if (!db) throw new Error("no db");
-  const keys = new Map<string, { collection: string; runId: string }>();
+  const parents = new Map<string, { kind: AuditParentKind; collection: string; runId: string }>();
   for (const e of events) {
-    const collection = e.collection ?? "";
-    const runId = (e.runId ?? "").trim();
-    if (!VERIFICATION_AUDIT_COLLECTIONS.has(collection) || !runId) continue;
-    keys.set(`${collection}/${runId}`, { collection, runId });
+    const parent = auditParentOf(e);
+    if (parent && parent !== "policy") parents.set(`${parent.collection}/${parent.runId}`, parent);
   }
 
-  const personalParents = new Set<string>();
-  const entries = [...keys.entries()];
-  for (let i = 0; i < entries.length; i += AUDIT_PARENT_CLASSIFY_CHUNK) {
-    const chunk = entries.slice(i, i + AUDIT_PARENT_CLASSIFY_CHUNK);
-    const refs = chunk.map(([, k]) => db.collection(k.collection).doc(k.runId));
-    const snaps = await db.getAll(...refs, { fieldMask: ["workspaceId"] });
-    chunk.forEach(([key], j) => {
-      const snap = snaps[j];
-      // Firestore guarantees data() is an object for an existing document
-      // (`{}` when the masked field is absent); anything else is not
-      // positively Personal and stays excluded.
-      if (snap && snap.exists === true && isPersonalVerificationArtifact(snap.data())) personalParents.add(key);
-    });
+  const allowedParents = new Set<string>();
+  const runParents = new Map<string, Record<string, unknown> | null>();
+  const validateRun = createRunWorkspaceIntegrityBatch();
+  for (const kind of ["verification", "run"] as const) {
+    const entries = [...parents.entries()].filter(([, p]) => p.kind === kind);
+    const fieldMask = kind === "run" ? ["userId", "workspaceId"] : ["workspaceId"];
+    for (let i = 0; i < entries.length; i += AUDIT_PARENT_CLASSIFY_CHUNK) {
+      const chunk = entries.slice(i, i + AUDIT_PARENT_CLASSIFY_CHUNK);
+      const refs = chunk.map(([, p]) => db.collection(p.collection).doc(p.runId));
+      const snaps = await db.getAll(...refs, { fieldMask });
+      await Promise.all(
+        chunk.map(async ([key, p], j) => {
+          const snap = snaps[j];
+          if (kind === "run") runParents.set(p.runId, null);
+          // Firestore guarantees data() is an object for an existing document
+          // (`{}` when the masked fields are absent); anything else is not
+          // positively in the legacy-governance domain and stays excluded.
+          if (!snap || snap.exists !== true) return;
+          const data = snap.data();
+          if (typeof data !== "object" || data === null) return;
+          if (kind === "verification") {
+            if (isPersonalVerificationArtifact(data)) allowedParents.add(key);
+            return;
+          }
+          runParents.set(p.runId, data as Record<string, unknown>);
+          const integrity = await validateRun(data as Record<string, unknown>);
+          if (integrity.classification !== "invalid") allowedParents.add(key);
+        })
+      );
+    }
   }
 
-  return events.filter((e) => {
-    const collection = e.collection ?? "";
-    if (!VERIFICATION_AUDIT_COLLECTIONS.has(collection)) return true;
-    return personalParents.has(`${collection}/${(e.runId ?? "").trim()}`);
+  const kept = events.filter((e) => {
+    const parent = auditParentOf(e);
+    if (parent === "policy") return true;
+    if (parent === null) return false;
+    return allowedParents.has(`${parent.collection}/${parent.runId}`);
   });
+  return { events: kept, runParents };
 }
 
 /** Fetch recent docs; prefer orderBy("at"), fall back to plain limit if index/field issues. */
@@ -657,7 +719,8 @@ export async function GET(request: NextRequest) {
     events = filterAuditLogDisplayEvents(events);
     events = filterEventsToViewerActions(events, resolved.uid);
     events = dedupeGovernanceAuditEvents(events);
-    events = await excludeWorkspaceBoundVerificationAuditEvents(events);
+    const contained = await excludeOutOfDomainAuditEvents(events);
+    events = contained.events;
     if (fromParam.trim()) {
       events = events.filter((e) => e.at >= fromParam);
     }
@@ -682,7 +745,7 @@ export async function GET(request: NextRequest) {
     );
 
     const tEm3 = Date.now();
-    const presented3 = await presentAuditEventsForViewer(events, resolved.uid, vis.visibleUserIds);
+    const presented3 = await presentAuditEventsForViewer(events, resolved.uid, vis.visibleUserIds, contained.runParents);
     console.log(`[governance/audit] Email lookups: ${Date.now() - tEm3}ms`);
     console.log(`[governance/audit] Total: ${Date.now() - t0}ms`);
     return NextResponse.json({ ok: true, events: presented3 });

@@ -24,8 +24,26 @@ jest.mock("@/lib/governance/governanceVisibleUserIds", () => ({
 }));
 
 const auditDocs: Array<{ id: string; data: Record<string, unknown> }> = [];
+/**
+ * Roadmap 4.3a — run-backed events are listed only when their parent run is in
+ * the legacy-governance domain, so each fixture event's parent exists here
+ * (legacy: no workspaceId).
+ */
+const runParents = new Map<string, Record<string, unknown>>([
+  ["run-1", { userId: "owner-uid" }],
+  ["run-legacy", { userId: "owner-uid" }],
+]);
 const mockAdminDb: any = {
+  getAll: async (...args: any[]) =>
+    args
+      .filter((a) => a && typeof a === "object" && "__path" in a)
+      .map((ref: { __path: string }) => {
+        const data = runParents.get(ref.__path.slice("runs/".length));
+        return { exists: !!data, data: () => (data ? { ...data } : undefined) };
+      }),
   collection: (name: string) => {
+    if (name === "runs") return { doc: (id: string) => ({ __path: `runs/${id}` }) };
+    if (name === "users") return { doc: (id: string) => ({ __path: `users/${id}` }) };
     if (name !== "admin_audit_logs") throw new Error(`unexpected collection ${name}`);
     return {
       orderBy: () => ({
@@ -124,7 +142,7 @@ describe("GET /api/governance/audit — adaptive_human_review_decided pass-throu
   it("legacy actions (approved) still pass through unaffected", async () => {
     auditDocs.push({
       id: "legacy-1",
-      data: { action: "approved", byUid: VIEWER_UID, byEmail: "reviewer@test.com", at: "2026-07-30T00:00:00.000Z" },
+      data: { action: "approved", byUid: VIEWER_UID, byEmail: "reviewer@test.com", at: "2026-07-30T00:00:00.000Z", runId: "run-legacy", collection: "runs" },
     });
     const res = await GET(buildRequest());
     const body = await res.json();
