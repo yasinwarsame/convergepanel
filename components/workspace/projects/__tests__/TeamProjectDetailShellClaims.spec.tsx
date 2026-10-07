@@ -267,10 +267,12 @@ describe("research / claims independence", () => {
 describe("R4-I3 Project create entry point", () => {
   const cta = (r: TestRenderer.ReactTestRenderer) => r.root.findAll((n) => n.type === "a" && n.props?.["data-testid"] === "team-project-claims-new");
 
-  it("offers New Claim on an active Project when the viewer can create and organize", async () => {
+  it("offers Verify New Claim on an active Project when the viewer can create and organize", async () => {
     const r = await mount({ canCreateClaim: true });
     expect(cta(r)).toHaveLength(1);
     expect(cta(r)[0].props.href).toBe("/workspace/team/ws-1/projects/proj-1/claims/new");
+    // Roadmap 4.4b — the exact label, so a regression to "New Claim" fails.
+    expect(String(cta(r)[0].children.join("")).trim()).toBe("Verify New Claim");
   });
 
   it("omits New Claim without the create capability", async () => {

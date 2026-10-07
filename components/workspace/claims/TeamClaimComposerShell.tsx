@@ -243,9 +243,9 @@ export default function TeamClaimComposerShell({ workspaceId, workspaceName, sho
                 { label: workspaceName, href: workspaceHref },
                 { label: "Projects", href: `${workspaceHref}/projects` },
                 { label: project.name, href: projectHref },
-                { label: "New claim" },
+                { label: "Verify a claim" },
               ]
-            : [{ label: workspaceName, href: workspaceHref }, { label: "Claims", href: claimsHref }, { label: "New claim" }]
+            : [{ label: workspaceName, href: workspaceHref }, { label: "Claims", href: claimsHref }, { label: "Verify a claim" }]
         }
         mobileParent={originTarget === null && project && projectHref ? { label: project.name, href: projectHref } : { label: "Claims", href: claimsHref }}
       />

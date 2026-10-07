@@ -58,7 +58,9 @@ describe("creation lives ONLY in the R5-I3-B create surfaces", () => {
     ]) {
       const code = stripComments(read(p));
       expect(code).not.toContain("videos/new");
+      // "New Video" also matches the current "Verify New Video" label; both are named.
       expect(code).not.toContain("New Video");
+      expect(code).not.toContain("Verify New Video");
       expect(code).not.toContain("teamVideoCreateHref");
     }
   });

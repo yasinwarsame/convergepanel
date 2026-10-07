@@ -184,18 +184,19 @@ export default function TeamVideoComposerShell({ workspaceId, workspaceName, sho
         className="mb-3"
         segments={
           project === null
-            ? [{ label: workspaceName, href: workspaceHref }, { label: "Videos", href: `${workspaceHref}/videos` }, { label: "New" }]
+            ? [{ label: workspaceName, href: workspaceHref }, { label: "Videos", href: `${workspaceHref}/videos` }, { label: "Verify a video" }]
             : [
                 { label: workspaceName, href: workspaceHref },
+                { label: "Projects", href: `${workspaceHref}/projects` },
                 { label: project.name, href: projectHref! },
-                { label: "New video" },
+                { label: "Verify a video" },
               ]
         }
         mobileParent={{ label: project === null ? "Videos" : project.name, href: project === null ? `${workspaceHref}/videos` : projectHref! }}
       />
 
       <div className="mb-6">
-        <h1 className="text-xl font-semibold text-cp-text">New video</h1>
+        <h1 className="text-xl font-semibold text-cp-text">Verify a video</h1>
         <p className="mt-1 text-sm text-cp-muted">
           {project === null
             ? "This video will be saved to this Workspace and will not be filed in a Project."
