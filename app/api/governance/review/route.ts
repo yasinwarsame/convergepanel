@@ -243,7 +243,38 @@ export async function POST(request: NextRequest) {
     governanceReviewComment: finalComment,
   }) as DocumentData;
 
-  await ref.set(patch, { merge: true });
+  // Roadmap 4.2a (R1) — the status transition is a compare-and-set. Every check
+  // above ran against `prevStatus` from a plain read; the transaction re-reads
+  // the document and commits ONLY if its status is still exactly that value.
+  // Two concurrent decisions that both validated against the same status
+  // therefore serialize: one commits, the other re-reads a different status and
+  // is refused with 409 before any write. The audit row and the governanceEvents
+  // append below run only after a committed transition, so a refused request
+  // produces neither.
+  const committed = await adminDb.runTransaction(async (txn) => {
+    const current = await txn.get(ref);
+    if (!current.exists) return false;
+    const currentData = current.data() as Record<string, unknown>;
+    const currentStatus =
+      typeof currentData.governanceStatus === "string" && currentData.governanceStatus
+        ? currentData.governanceStatus
+        : "needs_review";
+    if (currentStatus !== prevStatus) return false;
+    txn.set(ref, patch, { merge: true });
+    return true;
+  });
+  if (!committed) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: {
+          code: "conflict",
+          message: "This run was reviewed by someone else in the meantime. Refresh and try again.",
+        },
+      },
+      { status: 409 }
+    );
+  }
 
   const runData = data;
   const rowOwnerUid = String(runData.userId ?? runData.uid ?? ownerUid ?? "").trim();

@@ -38,7 +38,8 @@ let tokenClaims: Record<string, unknown> = {};
 /** What the LIVE Firebase Auth record says. Authority must follow this. */
 let liveRecord: Record<string, unknown> = {};
 let planId = "full";
-let reviewerFor: string[] = [];
+/** Owners whose OWN record assigns this reviewer — the sole grant (roadmap 4.2a, A1). */
+let assignerUids: string[] = [];
 
 const seedRow = (coll: string, owner: string) => ({
   id: `${coll}-${owner}`,
@@ -60,6 +61,8 @@ function makeQuery(name: string) {
   for (const m of ["orderBy", "limit", "select", "startAfter", "endBefore", "offset"]) q[m] = () => q;
   q.where = (f: string, _op: string, v: unknown) => { constraints.push({ f, v }); return q; };
   q.get = async () => {
+    const assignerQuery = name === "users" && constraints.find((x) => x.f === "governanceReviewerUid");
+    if (assignerQuery) return { docs: assignerUids.map((id) => ({ id, data: () => ({}) })), empty: assignerUids.length === 0, size: assignerUids.length };
     if (!SCOPED_COLLECTIONS.includes(name)) return { docs: [], empty: true, size: 0 };
     const owners = [OWNER_A, OWNER_B];
     const c = constraints.find((x) => x.f === "userId" || x.f === "uid");
@@ -69,7 +72,7 @@ function makeQuery(name: string) {
   q.count = () => ({ get: async () => ({ data: () => ({ count: 0 }) }) });
   q.add = async () => undefined;
   q.doc = () => ({
-    get: async () => ({ exists: true, id: "run-1", data: () => ({ userId: OWNER_A, uid: OWNER_A, governanceReviewerFor: reviewerFor }) }),
+    get: async () => ({ exists: true, id: "run-1", data: () => ({ userId: OWNER_A, uid: OWNER_A }) }),
     set: async () => undefined, update: async () => undefined,
     collection: (n: string) => makeQuery(n),
   });
@@ -86,7 +89,6 @@ jest.mock("@/lib/firebase/admin", () => ({
   firebaseAdmin: { firestore: { Timestamp: { now: () => "TS", fromDate: () => "TS" }, FieldValue: { serverTimestamp: () => "TS" } } },
 }));
 jest.mock("@/lib/admin/entitlements", () => ({ getEffectiveEntitlements: async () => ({ planId }) }));
-jest.mock("@/lib/governance/reviewerFields", () => ({ parseGovernanceReviewerFor: () => reviewerFor }));
 
 import { NextRequest } from "next/server";
 import { checkAdminOnly } from "@/lib/governance/authCheck";
@@ -103,7 +105,7 @@ beforeEach(() => {
   process.env.ADMIN_EMAILS = "";
   process.env.GOVERNANCE_ADMIN_EMAILS = GOV_ADDR;
   planId = "full";
-  reviewerFor = [OWNER_A];
+  assignerUids = [OWNER_A];
   tokenClaims = { uid: UID, email: ORDINARY, email_verified: true };
   liveRecord = { email: ORDINARY, emailVerified: true, disabled: false };
 });

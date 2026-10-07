@@ -123,7 +123,8 @@ describe("global governance visibility — evidence is read, not accepted", () =
 
   it("reviewer-scoped ordinary access is unchanged by verification state", async () => {
     plan = "full";
-    userDocData = { governanceReviewerFor: ["owner-1"] };
+    // Roadmap 4.2a (A1): the grant is the assigner's own record (reverse lookup).
+    assignerDocs = [{ id: "owner-1" }];
     for (const verified of [true, false]) {
       liveRecord(OUTSIDER, verified);
       const vis = await resolveGovernanceVisibleUserIds("reviewer");
@@ -184,7 +185,7 @@ describe("STRUCTURAL: governance-global authority cannot be handed forged eviden
 
   it("FAIL CLOSED: Auth lookup failure denies global scope but still resolves reviewer scope", async () => {
     plan = "full";
-    userDocData = { governanceReviewerFor: ["owner-2"] };
+    assignerDocs = [{ id: "owner-2" }];
     getUserThrows = true;
     const vis = await resolveGovernanceVisibleUserIds("reviewer");
     expect(globalScope(vis).ok).toBe(true);

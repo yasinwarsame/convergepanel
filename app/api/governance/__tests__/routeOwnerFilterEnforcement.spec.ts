@@ -154,7 +154,11 @@ function makeQuery(collection: string) {
 
 jest.mock("@/lib/firebase/admin", () => ({
   adminAuth: { getUser: async () => ({ email: "reviewer@test-invented.example", emailVerified: true, disabled: false }) },
-  adminDb: { collection: (name: string) => makeQuery(name) },
+  adminDb: {
+    collection: (name: string) => makeQuery(name),
+    runTransaction: async (fn: (txn: unknown) => Promise<unknown>) =>
+      fn({ get: (ref: any) => ref.get(), set: (ref: any, data: unknown, opts?: unknown) => ref.set(data, opts) }),
+  },
   firebaseAdmin: { firestore: { Timestamp: { now: () => "TS", fromDate: () => "TS" }, FieldValue: { serverTimestamp: () => "TS" } } },
 }));
 jest.mock("@/lib/governance/governanceVisibleUserIds", () => {
