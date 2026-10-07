@@ -211,55 +211,140 @@ const AUDIT_LOG_SELECT_FIELDS = [
   "consensusScore",
 ] as const;
 
-/** Replace UID-shaped runOwnerEmail / fill missing email from users/{uid} before JSON response. */
-async function resolveRunOwnerEmailsForAuditEvents(events: AuditEvent[]): Promise<void> {
+/**
+ * Roadmap 4.1 (C2 + C3) — the run-owner identity an Audit Log viewer may see.
+ *
+ * What leaves this route is the ONLY run-owner identity the client has:
+ * - `runOwnerIsViewer: true` when the run belongs to the viewer, or
+ * - `runOwnerEmail` holding a real address (it contains "@"), or
+ * - neither, which the client renders as "Not available".
+ * `runOwnerUid` never leaves the route, and neither `runOwnerEmail` nor
+ * `byEmail` is ever sent holding anything but a real address. "Never recorded" and "not visible to this viewer" both
+ * produce the same "neither" shape, so the response cannot tell them apart.
+ *
+ * Owner source:
+ * - Rows that persisted `runOwnerUid` at write time (governance review,
+ *   evaluation, backfill) keep the owner they recorded, as before.
+ * - Rows with no recorded owner (the adaptive writers store `byUid` only)
+ *   are classified from their parent `runs/{runId}` document. The owner is
+ *   released only when it is the viewer, or the run carries no `workspaceId`
+ *   field AND the owner passes the governance visibility rule
+ *   (`runOwnerVisibleInGovernance`, the rule the drilldown already enforces).
+ *   A workspace-bound, missing, malformed or unreadable parent, a parent with
+ *   no owner, or an owner outside the visible set releases nothing.
+ *
+ * Reads: one batched getAll() retrieval per chunk of distinct parents (field
+ * mask `userId`, `workspaceId`) and one per chunk of distinct owner profiles —
+ * bounded by the events already in hand, never one round trip per event.
+ * Neither read throws out of this function: a failure releases nothing.
+ */
+const AUDIT_OWNER_PROFILE_CHUNK = 10;
+
+type AuditResponseEvent = Omit<AuditEvent, "byEmail" | "runOwnerUid" | "runOwnerEmail"> & {
+  byEmail?: string;
+  runOwnerEmail?: string;
+  runOwnerIsViewer?: true;
+};
+
+async function classifyRunOwnersFromParents(
+  runIds: string[],
+  viewerUid: string,
+  visibleUserIds: string[] | null
+): Promise<Map<string, string>> {
+  const released = new Map<string, string>();
   const db = adminDb;
-  if (!db || events.length === 0) return;
-  const uidsToResolve = new Set<string>();
-  for (const e of events) {
-    const em = (e.runOwnerEmail ?? "").trim();
-    if (em && !auditOwnerEmailLooksValid(em)) uidsToResolve.add(em);
-    const uid = (e.runOwnerUid ?? "").trim();
-    if (uid && (!em || !auditOwnerEmailLooksValid(em))) uidsToResolve.add(uid);
-  }
-  if (uidsToResolve.size === 0) return;
-
-  const emailMap = new Map<string, string>();
-  const unique = [...uidsToResolve].filter(Boolean);
-  const chunkSize = 10;
-  for (let i = 0; i < unique.length; i += chunkSize) {
-    const chunk = unique.slice(i, i + chunkSize);
-    const refs = chunk.map((uid) => db.collection("users").doc(uid));
+  if (!db || runIds.length === 0) return released;
+  for (let i = 0; i < runIds.length; i += AUDIT_PARENT_CLASSIFY_CHUNK) {
+    const chunk = runIds.slice(i, i + AUDIT_PARENT_CLASSIFY_CHUNK);
     try {
-      const snaps = await db.getAll(...refs);
-      for (let j = 0; j < snaps.length; j++) {
-        const uid = chunk[j];
-        const docSnap = snaps[j];
-        const d = docSnap.data() as Record<string, unknown> | undefined;
-        const mail = typeof d?.email === "string" ? d.email.trim() : "";
-        emailMap.set(uid, auditOwnerEmailLooksValid(mail) ? mail : uid);
-      }
-    } catch {
-      for (const uid of chunk) {
-        if (!emailMap.has(uid)) emailMap.set(uid, uid);
-      }
+      const refs = chunk.map((runId) => db.collection("runs").doc(runId));
+      const snaps = await db.getAll(...refs, { fieldMask: ["userId", "workspaceId"] });
+      chunk.forEach((runId, j) => {
+        const snap = snaps[j];
+        if (!snap || snap.exists !== true) return;
+        const data = snap.data();
+        if (typeof data !== "object" || data === null) return;
+        const ownerUid = typeof data.userId === "string" ? data.userId.trim() : "";
+        if (!ownerUid) return;
+        if (ownerUid === viewerUid) {
+          released.set(runId, ownerUid);
+          return;
+        }
+        if (Object.prototype.hasOwnProperty.call(data, "workspaceId")) return;
+        if (!runOwnerVisibleInGovernance(visibleUserIds, ownerUid)) return;
+        released.set(runId, ownerUid);
+      });
+    } catch (err) {
+      logger.warn("[governance/audit] run_owner_parent_read_failed", {
+        errorName: err instanceof Error ? err.name : typeof err,
+      });
     }
   }
+  return released;
+}
 
-  for (const e of events) {
-    let em = (e.runOwnerEmail ?? "").trim();
-    if (em && !auditOwnerEmailLooksValid(em)) {
-      e.runOwnerEmail = emailMap.get(em) ?? em;
-      em = (e.runOwnerEmail ?? "").trim();
-    }
-    if (!auditOwnerEmailLooksValid(em)) {
-      const uid = (e.runOwnerUid ?? "").trim();
-      if (uid) {
-        const resolved = emailMap.get(uid) ?? uid;
-        if (auditOwnerEmailLooksValid(resolved)) e.runOwnerEmail = resolved;
-      }
+async function readOwnerProfileEmails(uids: string[]): Promise<Map<string, string>> {
+  const emails = new Map<string, string>();
+  const db = adminDb;
+  if (!db || uids.length === 0) return emails;
+  for (let i = 0; i < uids.length; i += AUDIT_OWNER_PROFILE_CHUNK) {
+    const chunk = uids.slice(i, i + AUDIT_OWNER_PROFILE_CHUNK);
+    try {
+      const snaps = await db.getAll(...chunk.map((uid) => db.collection("users").doc(uid)));
+      chunk.forEach((uid, j) => {
+        const d = snaps[j]?.data() as Record<string, unknown> | undefined;
+        const mail = typeof d?.email === "string" ? d.email.trim() : "";
+        if (auditOwnerEmailLooksValid(mail)) emails.set(uid, mail);
+      });
+    } catch (err) {
+      logger.warn("[governance/audit] run_owner_profile_read_failed", {
+        errorName: err instanceof Error ? err.name : typeof err,
+      });
     }
   }
+  return emails;
+}
+
+async function presentAuditEventsForViewer(
+  events: AuditEvent[],
+  viewerUid: string,
+  visibleUserIds: string[] | null
+): Promise<AuditResponseEvent[]> {
+  const parentRunIds = new Set<string>();
+  for (const e of events) {
+    const runId = (e.runId ?? "").trim();
+    if (!(e.runOwnerUid ?? "").trim() && e.collection === "runs" && runId && runId !== "policy") {
+      parentRunIds.add(runId);
+    }
+  }
+  const ownerByRunId = await classifyRunOwnersFromParents([...parentRunIds], viewerUid, visibleUserIds);
+
+  const ownerUidFor = (e: AuditEvent): string => {
+    const recorded = (e.runOwnerUid ?? "").trim();
+    if (recorded) return recorded;
+    if (e.collection !== "runs") return "";
+    return ownerByRunId.get((e.runId ?? "").trim()) ?? "";
+  };
+
+  const profileLookups = new Set<string>();
+  for (const e of events) {
+    const ownerUid = ownerUidFor(e);
+    if (ownerUid && ownerUid !== viewerUid && !auditOwnerEmailLooksValid((e.runOwnerEmail ?? "").trim())) {
+      profileLookups.add(ownerUid);
+    }
+  }
+  const emailByUid = await readOwnerProfileEmails([...profileLookups]);
+
+  return events.map((e) => {
+    const { runOwnerUid: _runOwnerUid, runOwnerEmail: recordedEmail, byEmail, ...base } = e;
+    const rest: AuditResponseEvent = auditOwnerEmailLooksValid(byEmail.trim()) ? { ...base, byEmail } : base;
+    const ownerUid = ownerUidFor(e);
+    if (!ownerUid) return rest;
+    if (ownerUid === viewerUid) return { ...rest, runOwnerIsViewer: true };
+    const recorded = (recordedEmail ?? "").trim();
+    const email = auditOwnerEmailLooksValid(recorded) ? recorded : emailByUid.get(ownerUid);
+    return email ? { ...rest, runOwnerEmail: email } : rest;
+  });
 }
 
 const VERIFICATION_AUDIT_COLLECTIONS = new Set(["verifications", "videoVerifications"]);
@@ -480,10 +565,10 @@ export async function GET(request: NextRequest) {
         const trimmed = sorted.slice(0, limit);
         if (trimmed.length > 0) {
           const tEm0 = Date.now();
-          await resolveRunOwnerEmailsForAuditEvents(trimmed);
+          const presented = await presentAuditEventsForViewer(trimmed, resolved.uid, vis.visibleUserIds);
           console.log(`[governance/audit] Email lookups: ${Date.now() - tEm0}ms`);
           console.log(`[governance/audit] Total: ${Date.now() - t0}ms`);
-          return NextResponse.json({ ok: true, events: trimmed, runId, collection });
+          return NextResponse.json({ ok: true, events: presented, runId, collection });
         }
       } catch {
         /* fall through */
@@ -510,10 +595,10 @@ export async function GET(request: NextRequest) {
         events = filterEventsToViewerActions(events, resolved.uid);
         const out1 = events.slice(0, limit);
         const tEm1 = Date.now();
-        await resolveRunOwnerEmailsForAuditEvents(out1);
+        const presented1 = await presentAuditEventsForViewer(out1, resolved.uid, vis.visibleUserIds);
         console.log(`[governance/audit] Email lookups: ${Date.now() - tEm1}ms`);
         console.log(`[governance/audit] Total: ${Date.now() - t0}ms`);
-        return NextResponse.json({ ok: true, events: out1, runId, collection });
+        return NextResponse.json({ ok: true, events: presented1, runId, collection });
       } catch {
         const snap = await adminDb.collection(collection).doc(runId).collection("governanceEvents").get();
         let events = snap.docs.map((d) =>
@@ -529,12 +614,12 @@ export async function GET(request: NextRequest) {
         events = filterEventsToViewerActions(events, resolved.uid);
         const out2 = events.slice(0, limit);
         const tEm2 = Date.now();
-        await resolveRunOwnerEmailsForAuditEvents(out2);
+        const presented2 = await presentAuditEventsForViewer(out2, resolved.uid, vis.visibleUserIds);
         console.log(`[governance/audit] Email lookups: ${Date.now() - tEm2}ms`);
         console.log(`[governance/audit] Total: ${Date.now() - t0}ms`);
         return NextResponse.json({
           ok: true,
-          events: out2,
+          events: presented2,
           runId,
           collection,
         });
@@ -597,10 +682,10 @@ export async function GET(request: NextRequest) {
     );
 
     const tEm3 = Date.now();
-    await resolveRunOwnerEmailsForAuditEvents(events);
+    const presented3 = await presentAuditEventsForViewer(events, resolved.uid, vis.visibleUserIds);
     console.log(`[governance/audit] Email lookups: ${Date.now() - tEm3}ms`);
     console.log(`[governance/audit] Total: ${Date.now() - t0}ms`);
-    return NextResponse.json({ ok: true, events });
+    return NextResponse.json({ ok: true, events: presented3 });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Audit query failed";
     return NextResponse.json(
