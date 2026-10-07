@@ -883,6 +883,13 @@ The global audit list (`GET /api/governance/audit`) never advertises an event wh
 - **Reads.** Parents are read in one field-masked `getAll()` batch per parent kind (`userId`/`workspaceId` for runs, `workspaceId` for Claims/Videos). Owner-identity presentation reuses the same run batch.
 - **Read failure.** A failed list classification read answers 500 (fail closed).
 
+### Team review list/detail parity (`GET /api/teams/runs?version=1`, roadmap 4.3b)
+
+Every adaptive detail route (`/api/teams/adaptive-runs/{runId}` and its history, review-panel, assignment and votes reads) requires Team-admin authority. The versioned list therefore omits adaptive items for non-admin members.
+
+- **Order:** the items are dropped after classification and before filtering, pagination and enrichment, so they never count toward `pagination.total`.
+- **Unchanged:** legacy items, the unversioned response, and the detail routes' `403 insufficient_role`.
+
 ### Multi-Reviewer Governance (adaptive runs, team plan)
 
 A separate, panel-based review workflow layered on top of the adaptive schema system's `governanceRecord.humanReview`, distinct from the single-reviewer policy engine above. Lives at `runs/{runId}/humanReviewPanel/current` (one active panel per run) plus `runs/{runId}/humanReviewVotes/{revision}:{reviewerUid}` and `runs/{runId}/humanReviewPanelHistory/{revision}:{event}`. Panel lifecycle: create (`PUT`) → reviewers vote (`POST .../votes`) → aggregation reaches `waiting` / `deadlocked` / `ready` → finalize (`POST .../finalize`, majority aggregation) or owner override (`POST .../override`, breaks a deadlock) → cancel (`DELETE`) is available at any open-panel state as a drain operation. Route: `app/api/teams/adaptive-runs/[runId]/review-panel/`.
