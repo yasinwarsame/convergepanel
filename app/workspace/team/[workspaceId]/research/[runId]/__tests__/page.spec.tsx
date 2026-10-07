@@ -101,7 +101,7 @@ describe("TeamUnfiledResearchDetailPage — renders the shell in Unfiled mode", 
       r = TestRenderer.create(element as never);
     });
     expect(r.root.findAllByProps({ "data-testid": "team-research-detail-shell" })).toHaveLength(1);
-    expect(shellProps[0]).toEqual({ workspaceId: WS_ID, workspaceName: "Acme Team", runId: RUN_ID, project: null, showMembers: false, showAudit: true, canVerifyClaim: false });
+    expect(shellProps[0]).toEqual({ workspaceId: WS_ID, workspaceName: "Acme Team", runId: RUN_ID, project: null, showMembers: false, showAudit: true, canVerifyClaim: false, canCreateExport: false });
   });
 
   it("performs no Project lookup and no direct run read, and names no Personal endpoint or address", async () => {
@@ -130,6 +130,16 @@ describe("R4-I4 Verify-this-claim presentation hint", () => {
       TestRenderer.create((await call()) as never);
     });
     expect(shellProps[0].canVerifyClaim).toBe(true);
+  });
+
+  it("TEAM_EXPORT_E3: canCreateExport is exactly exports.create (and never a view gate)", async () => {
+    mockedResolveWorkspaceAccess.mockResolvedValue(granted(["workspace.read", "research.read", "exports.create"]));
+    await act(async () => {
+      TestRenderer.create((await call()) as never);
+    });
+    expect(shellProps[shellProps.length - 1].canCreateExport).toBe(true);
+    expect(CODE).toContain('canCreateExport={access.capabilities.includes("exports.create")}');
+    expect(CODE).not.toMatch(/if \(!access\.capabilities\.includes\("exports\.create"\)\)/);
   });
 
   it("never turns the action hint into a view gate", () => {

@@ -82,6 +82,7 @@ export default async function TeamResearchDetailPage({
       // Project-filed Claim, which the POST's gates require `research.organize`
       // for. Presentation only; viewing still needs just `research.read`.
       canVerifyClaim={access.capabilities.includes("research.create") && access.capabilities.includes("research.organize")}
+      canCreateExport={access.capabilities.includes("exports.create")}
     />
   );
 }

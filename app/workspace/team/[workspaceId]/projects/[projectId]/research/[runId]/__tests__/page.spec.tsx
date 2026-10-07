@@ -174,7 +174,7 @@ describe("TeamResearchDetailPage — hands authorized context to the Team detail
     const r = await renderPage();
     expect(r.root.findAllByProps({ "data-testid": "team-research-detail-shell" })).toHaveLength(1);
     expect(shellProps).toHaveLength(1);
-    expect(shellProps[0]).toEqual({ workspaceId: WS_ID, workspaceName: "Acme Team", runId: RUN_ID, project: { id: PROJECT_ID, name: "ABC Acquisition" }, showMembers: false, showAudit: true, canVerifyClaim: false });
+    expect(shellProps[0]).toEqual({ workspaceId: WS_ID, workspaceName: "Acme Team", runId: RUN_ID, project: { id: PROJECT_ID, name: "ABC Acquisition" }, showMembers: false, showAudit: true, canVerifyClaim: false, canCreateExport: false });
   });
 
   it("showAudit is false without audit.read, and research.read access is unaffected", async () => {
@@ -278,5 +278,21 @@ describe("R4-I4 Verify-this-claim presentation hint", () => {
     await renderPage();
     expect(shellProps).toHaveLength(1);
     expect(shellProps[0].canVerifyClaim).toBe(expected);
+  });
+});
+
+describe("TEAM_EXPORT_E3 export presentation hint", () => {
+  const caps = (...extra: string[]) => ["workspace.read", "projects.read", "research.read", ...extra];
+
+  it.each([
+    ["no exports.create", caps(), false],
+    ["exports.create", caps("exports.create"), true],
+    ["research.create + research.organize but no exports.create", caps("research.create", "research.organize"), false],
+  ])("with %s -> canCreateExport=%s", async (_l, capabilities, expected) => {
+    mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess({ capabilities: capabilities as string[] }));
+    mockedGetProject.mockResolvedValue(foundProject());
+    await renderPage();
+    expect(shellProps).toHaveLength(1);
+    expect(shellProps[0].canCreateExport).toBe(expected);
   });
 });

@@ -37,8 +37,9 @@
  * selected here by the Team caller, never inferred from viewerRole — so the
  * shared renderer mounts no Personal export action, no Personal export
  * history and no Personal/legacy review & governance section, and makes no
- * ancillary request. Team export is intentionally absent (`exportSurface:
- * null`). The review position shows `TeamResearchReviewSummary` built from the
+ * ancillary request. TEAM_EXPORT_E3: the export positions hold the Team export
+ * UI (`TeamResearchExport`) — the action in `exportSurface`, the history in
+ * `exportHistorySurface` — calling only the Team export routes. The review position shows `TeamResearchReviewSummary` built from the
  * already-authorized `team.review`, with no Workspace review deep link (see
  * that component for why the link is deferred).
  *
@@ -65,6 +66,7 @@ import { Breadcrumb } from "@/components/shared/Breadcrumb";
 import WorkspaceNav from "@/components/workspace/WorkspaceNav";
 import PersistedResearchResultView from "@/components/research/PersistedResearchResultView";
 import TeamResearchReviewSummary from "@/components/workspace/projects/TeamResearchReviewSummary";
+import { TeamExportRefreshProvider, TeamResearchExportButton, TeamResearchExportHistory } from "@/components/workspace/projects/TeamResearchExport";
 import type { AdaptiveAncillaryPresentation } from "@/components/adaptive/adaptiveAncillaryPresentation";
 import {
   interpretTeamRunDetailResponse,
@@ -92,6 +94,11 @@ export type TeamResearchDetailShellProps = {
    * from viewerRole, the creator, the assignee or the result body.
    */
   canVerifyClaim?: boolean;
+  /**
+   * TEAM_EXPORT_E3 — the caller's server-derived `exports.create` for this
+   * Workspace. Presentation only: the export POST re-authorizes everything.
+   */
+  canCreateExport?: boolean;
 };
 
 type DetailState =
@@ -112,18 +119,24 @@ const STATE_BOX = "mt-6 rounded-xl border-2 border-cp-border bg-cp-raised p-6";
 
 /**
  * The Team durable-report ancillary policy: always delegated read-only, never
- * Personal default. No export surface; the review position is the Team's own
- * read-only summary (or nothing when the DTO has no review).
+ * Personal default. The review position is the Team's own read-only summary
+ * (or nothing when the DTO has no review). TEAM_EXPORT_E3: given an export
+ * target, the export positions hold the Team export action and history; with
+ * none they stay empty (never a Personal component).
  */
-export function teamResearchAncillaryPresentation(review: TeamRunDetailMeta["review"]): AdaptiveAncillaryPresentation {
+export function teamResearchAncillaryPresentation(
+  review: TeamRunDetailMeta["review"],
+  exportTarget?: { workspaceId: string; runId: string; canCreateExport: boolean }
+): AdaptiveAncillaryPresentation {
   return {
     kind: "delegated_read_only",
-    exportSurface: null,
+    exportSurface: exportTarget ? <TeamResearchExportButton {...exportTarget} /> : null,
+    exportHistorySurface: exportTarget ? <TeamResearchExportHistory workspaceId={exportTarget.workspaceId} runId={exportTarget.runId} /> : null,
     reviewGovernanceSurface: review ? <TeamResearchReviewSummary review={review} /> : null,
   };
 }
 
-export default function TeamResearchDetailShell({ workspaceId, workspaceName, runId, project, showMembers, showAudit, canVerifyClaim = false }: TeamResearchDetailShellProps) {
+export default function TeamResearchDetailShell({ workspaceId, workspaceName, runId, project, showMembers, showAudit, canVerifyClaim = false, canCreateExport = false }: TeamResearchDetailShellProps) {
   const { user, authReady } = useAuth();
   const router = useRouter();
   const [state, setState] = useState<DetailState>({ kind: "loading" });
@@ -361,13 +374,15 @@ export default function TeamResearchDetailShell({ workspaceId, workspaceName, ru
       )}
 
       {state.kind === "ready" && (
-        <PersistedResearchResultView
-          presentation={state.presentation}
-          adaptiveAncillaryPresentation={teamResearchAncillaryPresentation(state.meta.review)}
-          // Absent handler => DeepResearchView renders no action at all, which
-          // is exactly what Reviewers and Viewers must see.
-          onVerifyClaim={canVerifyClaim ? handleVerifyClaim : undefined}
-        />
+        <TeamExportRefreshProvider>
+          <PersistedResearchResultView
+            presentation={state.presentation}
+            adaptiveAncillaryPresentation={teamResearchAncillaryPresentation(state.meta.review, { workspaceId, runId, canCreateExport })}
+            // Absent handler => DeepResearchView renders no action at all, which
+            // is exactly what Reviewers and Viewers must see.
+            onVerifyClaim={canVerifyClaim ? handleVerifyClaim : undefined}
+          />
+        </TeamExportRefreshProvider>
       )}
     </main>
   );

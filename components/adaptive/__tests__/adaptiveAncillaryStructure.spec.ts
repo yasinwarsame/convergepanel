@@ -42,7 +42,8 @@ describe("TopSummaryBar export ownership (§F)", () => {
     expect(BAR.match(/<AdaptiveExportButton\b/g) ?? []).toHaveLength(1);
     expect(BAR.match(/<AdaptiveExportHistorySection\b/g) ?? []).toHaveLength(1);
     expect(BAR).toMatch(/const exportControl = ancillary\.kind === "delegated_read_only" \? \(ancillary\.exportSurface \?\? null\) : <AdaptiveExportButton runId=\{runId\} \/>;/);
-    expect(BAR).toMatch(/const exportHistory = ancillary\.kind === "delegated_read_only" \? null : <AdaptiveExportHistorySection runId=\{runId\} \/>;/);
+    // TEAM_EXPORT_E3: the delegated side renders only the caller's own history surface (or nothing).
+    expect(BAR).toMatch(/const exportHistory = ancillary\.kind === "delegated_read_only" \? \(ancillary\.exportHistorySurface \?\? null\) : <AdaptiveExportHistorySection runId=\{runId\} \/>;/);
   });
 });
 

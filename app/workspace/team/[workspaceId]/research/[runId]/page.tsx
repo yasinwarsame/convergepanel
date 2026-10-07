@@ -54,6 +54,7 @@ export default async function TeamUnfiledResearchDetailPage({ params }: { params
       // never gates the page. The POST re-resolves and re-authorizes the
       // source run's own Project before executing anything.
       canVerifyClaim={access.capabilities.includes("research.create")}
+      canCreateExport={access.capabilities.includes("exports.create")}
     />
   );
 }

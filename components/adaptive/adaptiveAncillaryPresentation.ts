@@ -34,8 +34,14 @@ export type AdaptiveAncillaryPresentation =
   | { kind: "personal_default" }
   | {
       kind: "delegated_read_only";
-      /** Rendered in place of the Personal export action + export history. Absent/null → nothing. */
+      /** Rendered in place of the Personal export ACTION (the summary bar's control position). Absent/null → nothing. */
       exportSurface?: ReactNode | null;
+      /**
+       * TEAM_EXPORT_E3 — rendered in place of the Personal export HISTORY (the
+       * position below the summary card). Absent/null → nothing, so every
+       * existing delegated caller is unchanged.
+       */
+      exportHistorySurface?: ReactNode | null;
       /** Rendered in place of the Personal review & governance section. Absent/null → nothing. */
       reviewGovernanceSurface?: ReactNode | null;
     };

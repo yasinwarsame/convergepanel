@@ -73,7 +73,8 @@ export interface TopSummaryBarProps {
    * Personal default (the export button in the header row and the export
    * history below the card, exactly as before). `delegated_read_only` →
    * NEITHER Personal component mounts; only the caller's `exportSurface`
-   * (if any) renders in the export position.
+   * (if any) renders in the export position, and its `exportHistorySurface`
+   * (TEAM_EXPORT_E3, if any) in the history position below the card.
    */
   ancillaryPresentation?: AdaptiveAncillaryPresentation;
 }
@@ -157,7 +158,7 @@ export default function TopSummaryBar(props: TopSummaryBarProps) {
   // or vice versa.
   const ancillary = resolveAdaptiveAncillaryPresentation(props.ancillaryPresentation);
   const exportControl = ancillary.kind === "delegated_read_only" ? (ancillary.exportSurface ?? null) : <AdaptiveExportButton runId={runId} />;
-  const exportHistory = ancillary.kind === "delegated_read_only" ? null : <AdaptiveExportHistorySection runId={runId} />;
+  const exportHistory = ancillary.kind === "delegated_read_only" ? (ancillary.exportHistorySurface ?? null) : <AdaptiveExportHistorySection runId={runId} />;
 
   return (
     <>
