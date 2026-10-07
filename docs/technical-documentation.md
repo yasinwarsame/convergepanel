@@ -911,6 +911,16 @@ Every adaptive detail route (`/api/teams/adaptive-runs/{runId}` and its history,
 - **Audit.** Each download writes a best-effort `adaptive_export_regenerated` audit row naming the current caller.
 - **History list.** The Team export history (`GET .../exports`) no longer returns the raw `createdBy` uid. It returns the frozen `generatedBy {displayName, maskedEmail}` only when the record carries a well-formed one; it is never resolved live and never synthesized.
 
+### Team research export UI (roadmap Step 5, E3)
+
+Team research detail hosts the Team export UI (`components/workspace/projects/TeamResearchExport.tsx`). It calls only the Team routes (E1 create, E2-A history, E2-B download), never a Personal export route.
+
+- **Export action.** Rendered only when the page's server-derived `canCreateExport` (`exports.create`, threaded like `canVerifyClaim` on both Team research pages) is true, the export flag is on, and the caller's plan has advanced export.
+- **History.** Shown to every reader. The page already requires `research.read`, which is what E2-A requires.
+- **Downloads.** A download control appears only on `ready` and `superseded` rows. Server refusals, for example plan or frozen governance, are shown as the server's message.
+- **Generator.** The frozen `generatedBy` display name, then the masked email, then "Not available". No uid is rendered.
+- **Shared contract.** The ancillary contract gained an optional `exportHistorySurface`, the position below the summary card; existing callers are unchanged.
+
 ### Multi-Reviewer Governance (adaptive runs, team plan)
 
 A separate, panel-based review workflow layered on top of the adaptive schema system's `governanceRecord.humanReview`, distinct from the single-reviewer policy engine above. Lives at `runs/{runId}/humanReviewPanel/current` (one active panel per run) plus `runs/{runId}/humanReviewVotes/{revision}:{reviewerUid}` and `runs/{runId}/humanReviewPanelHistory/{revision}:{event}`. Panel lifecycle: create (`PUT`) → reviewers vote (`POST .../votes`) → aggregation reaches `waiting` / `deadlocked` / `ready` → finalize (`POST .../finalize`, majority aggregation) or owner override (`POST .../override`, breaks a deadlock) → cancel (`DELETE`) is available at any open-panel state as a drain operation. Route: `app/api/teams/adaptive-runs/[runId]/review-panel/`.
