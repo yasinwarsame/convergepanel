@@ -164,23 +164,20 @@ describe("a scoped reviewer keeps the owner filter — the C3 P1 regression", ()
     expect(runOwnerVisibleInGovernance(vis.visibleUserIds, STRANGER)).toBe(true);
   });
 
-  it("MORE THAN 30 ASSIGNERS: bounded finite slice, NEVER null", async () => {
-    // Phase FIRST-ADMIN-C4. R3 found this branch unreachable by any test, and a
-    // mutation returning `null` here — silently granting GLOBAL visibility to a
-    // popular reviewer — survived the whole suite. The cap is a bound, not a
-    // licence to stop filtering.
+  it("MORE THAN 30 ASSIGNERS: the complete finite set, NEVER null", async () => {
+    // Phase FIRST-ADMIN-C4 found a mutation returning `null` here survived; that
+    // must still fail. Roadmap 4.2b (Q3) removed the silent cut to 30: every
+    // assigner is in scope, and the set stays finite — never global.
     reverseAssigners = Array.from({ length: 35 }, (_, i) => `assigned-owner-${i}`);
     const vis = await resolveGovernanceVisibleUserIds(REVIEWER);
     if (!vis.ok) throw new Error("expected a scoped grant");
     expect(vis.visibleUserIds).not.toBeNull();
     expect(Array.isArray(vis.visibleUserIds)).toBe(true);
-    expect((vis.visibleUserIds as string[]).length).toBe(30);
+    expect((vis.visibleUserIds as string[]).length).toBe(35);
     expect(vis.queueScope).toBe("assigners");
     expect(vis.isSupportAdmin).toBe(false);
-    // The owner filter still filters: a stranger is not visible, and neither is
-    // an assigner that fell beyond the cap.
     expect(runOwnerVisibleInGovernance(vis.visibleUserIds, STRANGER)).toBe(false);
-    expect(runOwnerVisibleInGovernance(vis.visibleUserIds, "assigned-owner-34")).toBe(false);
+    expect(runOwnerVisibleInGovernance(vis.visibleUserIds, "assigned-owner-34")).toBe(true);
     expect(runOwnerVisibleInGovernance(vis.visibleUserIds, "assigned-owner-0")).toBe(true);
   });
 

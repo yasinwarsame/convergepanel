@@ -28,6 +28,13 @@ import {
 } from "./governanceUtils";
 import { auditActorDisplay, auditRunOwnerDisplay, type AuditIdentityViewer } from "./auditIdentityDisplay";
 import { maskEmail } from "@/lib/utils/maskEmail";
+import {
+  applyLocalReview,
+  buildQueueView,
+  loadQueueSources,
+  type HistorySource,
+  type PendingSource,
+} from "./queueView";
 
 type TabId = "queue" | "policies" | "audit";
 
@@ -754,8 +761,11 @@ export default function GovernanceDashboard() {
   );
   const [queueRunType, setQueueRunType] = useState<"all" | "research" | "verification" | "video">("all");
   /** Last full snapshot from a single `/api/governance/queue` call (status=all; stats derived client-side). */
-  const [queueSnapshot, setQueueSnapshot] = useState<QueueRow[]>([]);
-  const [queueLoading, setQueueLoading] = useState(false);
+  /** Roadmap 4.2b — complete pending queue (status=needs_review): the only source of pending rows and count. */
+  const [pendingSource, setPendingSource] = useState<PendingSource<QueueRow>>({ state: "loading" });
+  /** Bounded status=all snapshot: approved/blocked history only. */
+  const [historySource, setHistorySource] = useState<HistorySource<QueueRow>>({ state: "loading" });
+  /** Set only when automatic loading has given up (retry budget spent). */
   const [queueError, setQueueError] = useState<string | null>(null);
   const [queueNotice, setQueueNotice] = useState<string | null>(null);
   const [queueScope, setQueueScope] = useState<GovernanceQueueScope | null>(null);
@@ -810,119 +820,50 @@ export default function GovernanceDashboard() {
       if (options?.manual) {
         queueFetchedRef.current = false;
         queueAutoFailureCountRef.current = 0;
-        setQueueError(null);
         setQueueNotice(null);
       } else if (queueAutoFailureCountRef.current >= MAX_QUEUE_AUTO_RETRIES) {
         setQueueError("Queue is temporarily unavailable. Please try again later.");
         return;
       }
+      setQueueError(null);
+      if (!options?.manual) setQueueNotice(null);
+      setPendingSource({ state: "loading" });
+      setHistorySource({ state: "loading" });
 
-      setQueueLoading(true);
-      if (!options?.manual) {
-        setQueueError(null);
-        setQueueNotice(null);
-      }
-      try {
-        const { authedFetch } = await import("@/lib/client/authedFetch");
-        const q = new URLSearchParams({
-          status: "all",
-          runType: "all",
-          limit: "50",
-          offset: "0",
-        });
-        const res = await authedFetch(`/api/governance/queue?${q}`, {
-          user,
-          authReady,
-          method: "GET",
-          cache: "no-store",
-        });
-        if (!res.ok) {
-          queueAutoFailureCountRef.current += 1;
-          const msg = await readApiErrorMessage(res, "Could not load queue.");
-          setQueueError(
-            queueAutoFailureCountRef.current >= MAX_QUEUE_AUTO_RETRIES
-              ? "Queue is temporarily unavailable. Please try again later."
-              : msg
-          );
-          setQueueSnapshot([]);
-          setQueueNotice(null);
-          setQueueScope(null);
-          return;
-        }
-        const data = (await res.json()) as {
-          ok?: boolean;
-          runs?: QueueRow[];
-          queueNotice?: string;
-          queueScope?: string;
-        };
-        if (!data.ok) {
-          queueAutoFailureCountRef.current += 1;
-          setQueueError(
-            queueAutoFailureCountRef.current >= MAX_QUEUE_AUTO_RETRIES
-              ? "Queue is temporarily unavailable. Please try again later."
-              : "Could not load queue."
-          );
-          setQueueSnapshot([]);
-          setQueueNotice(null);
-          setQueueScope(null);
-          return;
-        }
-        queueAutoFailureCountRef.current = 0;
-        setQueueSnapshot(data.runs ?? []);
-        setQueueError(null);
-        setQueueNotice(typeof data.queueNotice === "string" && data.queueNotice.trim() ? data.queueNotice : null);
-        const qs = data.queueScope;
-        setQueueScope(
-          qs === "admin_global" || qs === "assigners" || qs === "no_assigners" ? qs : null
-        );
-        if (options?.manual) queueFetchedRef.current = true;
-      } catch {
-        queueAutoFailureCountRef.current += 1;
-        setQueueError(
-          queueAutoFailureCountRef.current >= MAX_QUEUE_AUTO_RETRIES
-            ? "Queue is temporarily unavailable. Please try again later."
-            : "Could not load queue."
-        );
-        setQueueNotice(null);
-        setQueueScope(null);
-      } finally {
-        setQueueLoading(false);
-      }
+      const { authedFetch } = await import("@/lib/client/authedFetch");
+      // Independent loads (roadmap 4.2b): neither result can erase or stand in for the other.
+      const loaded = await loadQueueSources<QueueRow>(
+        (status) =>
+          authedFetch(`/api/governance/queue?${new URLSearchParams({ status, runType: "all", limit: "50", offset: "0" })}`, {
+            user,
+            authReady,
+            method: "GET",
+            cache: "no-store",
+          }),
+        readApiErrorMessage
+      );
+      setPendingSource(loaded.pending);
+      setHistorySource(loaded.history);
+      const meta = loaded.meta;
+      setQueueNotice(meta && typeof meta.queueNotice === "string" && meta.queueNotice.trim() ? meta.queueNotice : null);
+      const qs = meta?.queueScope;
+      setQueueScope(qs === "admin_global" || qs === "assigners" || qs === "no_assigners" ? qs : null);
+
+      if (loaded.bothOk) queueAutoFailureCountRef.current = 0;
+      else queueAutoFailureCountRef.current += 1;
+      if (options?.manual) queueFetchedRef.current = true;
     },
     [user, authReady]
   );
 
-  const queueStats = useMemo(() => {
-    let needs = 0;
-    let blocked = 0;
-    let approved = 0;
-    for (const r of queueSnapshot) {
-      if (r.governanceStatus === "needs_review") needs += 1;
-      else if (r.governanceStatus === "blocked") blocked += 1;
-      else if (r.governanceStatus === "approved") approved += 1;
-    }
-    return {
-      needs,
-      blocked,
-      approved,
-      total: queueSnapshot.length,
-    };
-  }, [queueSnapshot]);
-
-  const displayedQueueRows = useMemo(() => {
-    let rows = queueSnapshot;
-    if (queueRunType !== "all") {
-      rows = rows.filter((r) => {
-        if (queueRunType === "research") return r.runType === "research";
-        if (queueRunType === "verification") return r.runType === "verification";
-        return r.runType === "video";
-      });
-    }
-    if (queueStatus !== "all") {
-      rows = rows.filter((r) => r.governanceStatus === queueStatus);
-    }
-    return rows.slice(0, 50);
-  }, [queueSnapshot, queueRunType, queueStatus]);
+  const queueView = useMemo(
+    () => buildQueueView({ pending: pendingSource, history: historySource, status: queueStatus, runType: queueRunType }),
+    [pendingSource, historySource, queueStatus, queueRunType]
+  );
+  const queueStats = queueView.stats;
+  const displayedQueueRows = queueView.rows;
+  const queueLoading = queueView.loading;
+  const queueErrors = queueError ? [queueError] : queueView.errors;
 
   const fetchPolicy = useCallback(async () => {
     if (!user || !authReady) return;
@@ -1097,19 +1038,16 @@ export default function GovernanceDashboard() {
   }, [policy]);
 
   const updateRowAfterReview = (row: QueueRow, newStatus: QueueRow["governanceStatus"], comment: string) => {
-    setQueueSnapshot((prev) =>
-      prev.map((r) =>
-        r.runId === row.runId && r.collection === row.collection
-          ? {
-              ...r,
-              governanceStatus: newStatus,
-              governanceReviewedBy: user?.uid,
-              governanceReviewedAt: new Date().toISOString(),
-              governanceReviewComment: comment,
-            }
-          : r
-      )
-    );
+    const updated: QueueRow = {
+      ...row,
+      governanceStatus: newStatus,
+      governanceReviewedBy: user?.uid,
+      governanceReviewedAt: new Date().toISOString(),
+      governanceReviewComment: comment,
+    };
+    const next = applyLocalReview(pendingSource, historySource, row, updated);
+    setPendingSource(next.pending);
+    setHistorySource(next.history);
   };
 
   const submitReview = async (
@@ -1407,23 +1345,23 @@ export default function GovernanceDashboard() {
             <div>
               <span className="text-cp-text/75">Needs Review:</span>{" "}
               <span className="font-bold text-amber-400">
-                {queueLoading ? "…" : queueStats.needs}
+                {queueLoading ? "…" : (queueStats.needs ?? "—")}
               </span>
             </div>
             <div>
               <span className="text-cp-text/75">Blocked:</span>{" "}
-              <span className="font-bold text-red-400">{queueLoading ? "…" : queueStats.blocked}</span>
+              <span className="font-bold text-red-400">{queueLoading ? "…" : (queueStats.blocked ?? "—")}</span>
             </div>
             <div>
               <span className="text-cp-text/75">Approved:</span>{" "}
               <span className="font-bold text-emerald-400">
-                {queueLoading ? "…" : queueStats.approved}
+                {queueLoading ? "…" : (queueStats.approved ?? "—")}
               </span>
             </div>
             <div>
               <span className="text-cp-text/75">Total:</span>{" "}
               <span className="font-bold text-cp-text">
-                {queueLoading ? "…" : queueStats.total}
+                {queueLoading ? "…" : (queueStats.total ?? "—")}
               </span>
             </div>
           </div>
@@ -1474,9 +1412,15 @@ export default function GovernanceDashboard() {
             </button>
           </div>
 
-          {queueError && (
+          {queueView.pendingNote && !queueLoading && (
+            <p className="text-sm text-cp-muted" data-testid="pending-shown-note">
+              {queueView.pendingNote}
+            </p>
+          )}
+
+          {queueErrors.length > 0 && (
             <div className="rounded-lg border border-red-800/50 bg-red-900/20 px-4 py-3 text-sm text-red-400">
-              {queueError}{" "}
+              {queueErrors.join(" ")}{" "}
               <button
                 type="button"
                 className="font-semibold underline"
@@ -1497,7 +1441,9 @@ export default function GovernanceDashboard() {
             ) : displayedQueueRows.length === 0 ? (
               <p className="p-8 text-center text-sm text-cp-text/70">
                 {queueTableEmptyCopy({
-                  snapshotLen: queueSnapshot.length,
+                  snapshotLen:
+                    (pendingSource.state === "ok" ? pendingSource.rows.length : 0) +
+                    (historySource.state === "ok" ? historySource.rows.length : 0),
                   displayedLen: displayedQueueRows.length,
                   queueScope,
                   isAdminUser,

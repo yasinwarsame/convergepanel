@@ -162,12 +162,13 @@ async function resolveVisibilityForTrustedIdentity(
     return { ok: true, visibleUserIds: [], isSupportAdmin: false, queueScope: "no_assigners" };
   }
 
-  let visibleUserIds = allAssigners;
-  if (visibleUserIds.length > 30) {
-    visibleUserIds = visibleUserIds.slice(0, 30);
-    console.warn(`[governance/queue] Truncated visible owner set to 30 (requesting uid retained in request context)`);
-  }
-  visibleUserIds = visibleUserIds.filter((id) => id.trim() !== self);
+  // Roadmap 4.2b (Q3) — no truncation. This set is the reviewer's AUTHORITY
+  // (queue, audit and the review decision all read it); it was silently cut
+  // to 30 to fit one Firestore `in` query, which made owners 31+ invisible and
+  // unreviewable. It is always the complete, finite assigner set. The only
+  // remaining `in` consumer (the bounded queue history snapshot) bounds its
+  // own query input instead.
+  const visibleUserIds = allAssigners.filter((id) => id.trim() !== self);
 
   // Phase FIRST-ADMIN-C6 — governance diagnostics carry SHAPE, not tenant data.
 // These lines ran on every governance queue load and wrote other users' owner

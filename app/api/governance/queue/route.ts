@@ -5,6 +5,11 @@
  * Queries use userId + orderBy for scoped users; admin uses recent global reads with in-memory filters.
  * (existing indexes); governance status and a 7-day lookback are filtered in memory
  * (avoids extra composite indexes for range + in + orderBy).
+ *
+ * Roadmap 4.2b — the PENDING queue (`status=needs_review`, assigners scope) is
+ * the exception and is complete: see `loadPendingStagedForOwners`. The 7-day
+ * lookback and the bounded fetches above still apply to approved/blocked/all
+ * history and to the (intentionally unused) admin_global scope.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -1230,6 +1235,131 @@ async function loadVideoStagedForQueue(
   return { staged, docsRead: vidDocs.length, perOwnerLimit };
 }
 
+/** Max concurrent Firestore queries for the complete pending queue (roadmap 4.2b). */
+const PENDING_QUERY_CONCURRENCY = 8;
+
+async function mapWithConcurrency<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
+/**
+ * Roadmap 4.2b (Q1 + Q2 + Q3) — the COMPLETE pending queue for an assigners-
+ * scoped reviewer.
+ *
+ * For every assigned owner and every requested collection, one equality query:
+ * `userId == owner` AND `governanceStatus == "needs_review"`. Deliberately:
+ * - no lookback window (a pending item never ages out — Q1);
+ * - no limit and no orderBy, so nothing is cut before eligibility filtering, and
+ *   no row is silently dropped for lacking the ordering field (Q2). Rows are
+ *   sorted in memory with the same timestamp fallbacks as the history loaders;
+ *   a row with no usable timestamp sorts last instead of disappearing;
+ * - no cross-owner `in`, so there is no 30-owner ceiling (Q3); per-owner
+ *   queries run with bounded concurrency (PENDING_QUERY_CONCURRENCY).
+ * Equality-only queries on these two fields are served by the existing
+ * indexes; no new index is required.
+ *
+ * Every row then passes the SAME containment checks as the history loaders
+ * (Workspace-bound Claims/Videos never staged; claim/video type checks; owner
+ * re-checked against the visible set), and Research rows still go through the
+ * shared Workspace-integrity filter downstream. The route's `total` is
+ * computed after all of that, so it is the exact eligible population.
+ *
+ * Contract boundary: a document with no valid `governanceStatus` (legacy, or a
+ * failed evaluation) cannot match the equality filter and is outside the
+ * evaluated-governance queue — excluded deterministically, never shown as an
+ * invisible "needs review".
+ */
+async function loadPendingStagedForOwners(
+  visibleUserIds: string[],
+  visibleSet: Set<string>,
+  runType: string
+): Promise<{ staged: StagedQueueRow[]; runsRead: number; verRead: number; videoRead: number }> {
+  if (!adminDb) throw new Error("no db");
+  const db = adminDb;
+  type Job = { owner: string; kind: StagedQueueRow["kind"] };
+  const kinds: StagedQueueRow["kind"][] =
+    runType === "research" ? ["research"] : runType === "verification" ? ["verification"] : runType === "video" ? ["video"] : ["research", "verification", "video"];
+  const jobs: Job[] = visibleUserIds.flatMap((owner) => kinds.map((kind) => ({ owner, kind })));
+
+  const results = await mapWithConcurrency(jobs, PENDING_QUERY_CONCURRENCY, async (job) => {
+    const collection = job.kind === "research" ? "runs" : job.kind === "verification" ? "verifications" : "videoVerifications";
+    const fields = job.kind === "research" ? RUN_QUEUE_FIELDS : job.kind === "verification" ? VER_QUEUE_FIELDS : VIDEO_QUEUE_FIELDS;
+    const snap = await db
+      .collection(collection)
+      .where("userId", "==", job.owner)
+      .where("governanceStatus", "==", "needs_review")
+      .select(...fields)
+      .get();
+    return { job, docs: snap.docs };
+  });
+
+  const staged: StagedQueueRow[] = [];
+  let runsRead = 0;
+  let verRead = 0;
+  let videoRead = 0;
+  for (const { job, docs } of results) {
+    for (const doc of docs) {
+      const data = doc.data() as Record<string, unknown>;
+      if (job.kind === "research") {
+        runsRead++;
+        const rowUid = String(data.userId ?? "").trim();
+        if (!visibleSet.has(rowUid)) continue;
+        if (!filterRowForQueue(data, "needs_review", "runs")) continue;
+        staged.push({
+          sortKey: researchCreatedMs(data),
+          kind: "research",
+          docId: doc.id,
+          data,
+          rowUid,
+          docEmail: typeof data.userEmail === "string" ? data.userEmail : undefined,
+        });
+      } else if (job.kind === "verification") {
+        verRead++;
+        // TEAM-VERIFICATION-PARITY-R1 — never stage a Workspace-bound Claim.
+        if (isWorkspaceBoundVerificationArtifact(data)) continue;
+        if (!isClaimVerificationRow(data)) continue;
+        const rowUid = ownerUidFromVerificationDoc(data);
+        if (!rowUid || !visibleSet.has(rowUid)) continue;
+        if (!filterRowForQueue(data, "needs_review", "verifications")) continue;
+        staged.push({
+          sortKey: verificationTimeMs(data),
+          kind: "verification",
+          docId: doc.id,
+          data,
+          rowUid,
+          docEmail: typeof data.userEmail === "string" ? data.userEmail : undefined,
+        });
+      } else {
+        videoRead++;
+        // TEAM-VERIFICATION-PARITY-R1 — never stage a Workspace-bound Video.
+        if (isWorkspaceBoundVerificationArtifact(data)) continue;
+        if (!isVideoVerificationRow(data)) continue;
+        const rowUid = String(data.userId ?? "").trim();
+        if (!rowUid || !visibleSet.has(rowUid)) continue;
+        if (!filterRowForQueue(data, "needs_review", "videoVerifications")) continue;
+        staged.push({
+          sortKey: firestoreMillis(data.timestamp),
+          kind: "video",
+          docId: doc.id,
+          data,
+          rowUid,
+          docEmail: typeof data.userEmail === "string" ? data.userEmail : undefined,
+        });
+      }
+    }
+  }
+  return { staged, runsRead, verRead, videoRead };
+}
+
 export async function GET(request: NextRequest) {
   if (!adminDb) {
     return NextResponse.json(
@@ -1350,6 +1480,12 @@ export async function GET(request: NextRequest) {
   const merged: Array<{ sortKey: number; summary: RunSummary }> = [];
   const queueCutoffMs = Date.now() - QUEUE_LOOKBACK_MS;
   const visibleSet = visibleUserIds === null ? new Set<string>() : new Set(visibleUserIds.filter(Boolean));
+  // Roadmap 4.2b — the approved/blocked/all HISTORY snapshot is intentionally
+  // bounded and keeps its previous owner bound (30, the Firestore `in` limit its
+  // research query uses). The pending queue (`status=needs_review`) uses the
+  // complete owner set instead.
+  const HISTORY_OWNER_BOUND = 30;
+  const historyOwners = visibleUserIds === null ? null : visibleUserIds.slice(0, HISTORY_OWNER_BOUND);
 
   try {
     let runsSnapSize = 0;
@@ -1360,7 +1496,13 @@ export async function GET(request: NextRequest) {
     let staged: StagedQueueRow[] = [];
 
     try {
-      if (visibleUserIds === null) {
+      if (visibleUserIds !== null && statusFilter === "needs_review") {
+        const pRes = await loadPendingStagedForOwners(visibleUserIds, visibleSet, runType);
+        runsSnapSize = pRes.runsRead;
+        verSnapSize = pRes.verRead;
+        videoSnapSize = pRes.videoRead;
+        staged.push(...pRes.staged);
+      } else if (visibleUserIds === null) {
         if (runType === "all") {
           const [rRes, vRes, vidRes] = await Promise.all([
             loadRunsStagedGlobalQueue(fetchLimit, queueCutoffMs, statusFilter),
@@ -1386,9 +1528,9 @@ export async function GET(request: NextRequest) {
         }
       } else if (runType === "all") {
         const [rRes, vRes, vidRes] = await Promise.all([
-          loadRunsStagedForQueue(visibleUserIds, visibleSet, fetchLimit, queueCutoffMs, statusFilter),
-          loadVerificationsStagedForQueue(visibleUserIds, visibleSet, fetchLimit, queueCutoffMs, statusFilter),
-          loadVideoStagedForQueue(visibleUserIds, visibleSet, fetchLimit, queueCutoffMs, statusFilter),
+          loadRunsStagedForQueue(historyOwners!, visibleSet, fetchLimit, queueCutoffMs, statusFilter),
+          loadVerificationsStagedForQueue(historyOwners!, visibleSet, fetchLimit, queueCutoffMs, statusFilter),
+          loadVideoStagedForQueue(historyOwners!, visibleSet, fetchLimit, queueCutoffMs, statusFilter),
         ]);
         runsSnapSize = rRes.snapSize;
         verSnapSize = vRes.docsRead;
@@ -1406,7 +1548,7 @@ export async function GET(request: NextRequest) {
         }
       } else if (runType === "research") {
         const rRes = await loadRunsStagedForQueue(
-          visibleUserIds,
+          historyOwners!,
           visibleSet,
           fetchLimit,
           queueCutoffMs,
@@ -1416,7 +1558,7 @@ export async function GET(request: NextRequest) {
         staged.push(...rRes.staged);
       } else if (runType === "verification") {
         const vRes = await loadVerificationsStagedForQueue(
-          visibleUserIds,
+          historyOwners!,
           visibleSet,
           fetchLimit,
           queueCutoffMs,
@@ -1432,7 +1574,7 @@ export async function GET(request: NextRequest) {
         }
       } else {
         const vidRes = await loadVideoStagedForQueue(
-          visibleUserIds,
+          historyOwners!,
           visibleSet,
           fetchLimit,
           queueCutoffMs,
@@ -1506,7 +1648,13 @@ export async function GET(request: NextRequest) {
     }
     console.log(`[governance/queue] Processing: ${Date.now() - tProc0}ms`);
 
-    merged.sort((a, b) => b.sortKey - a.sortKey);
+    // Ties (including rows with no usable timestamp, sortKey 0) are broken by
+    // document identity so the order — and therefore every page — is stable.
+    merged.sort(
+      (a, b) =>
+        b.sortKey - a.sortKey ||
+        `${a.summary.collection}/${a.summary.runId}`.localeCompare(`${b.summary.collection}/${b.summary.runId}`)
+    );
 
     // Final safety: never return the current user's own runs in the review queue
     const filteredMerged = merged.filter((m) => m.summary.userId !== resolved.uid);
