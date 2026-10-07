@@ -34,8 +34,10 @@ function project(data: Record<string, unknown>, fields: string[]): Record<string
   for (const f of fields) if (Object.prototype.hasOwnProperty.call(data, f)) out[f] = data[f];
   return out;
 }
-function snapFor(rows: Row[], fields: string[], ownerFilter?: string) {
-  const selected = ownerFilter === undefined ? rows : rows.filter((r) => r.data.userId === ownerFilter);
+function snapFor(rows: Row[], fields: string[], ownerFilter?: string, statusFilter?: string) {
+  const selected = rows
+    .filter((r) => ownerFilter === undefined || r.data.userId === ownerFilter)
+    .filter((r) => statusFilter === undefined || r.data.governanceStatus === statusFilter);
   return { size: selected.length, docs: selected.map((r) => ({ id: r.id, data: () => project(r.data, fields) })) };
 }
 
@@ -44,9 +46,13 @@ const mockAdminDb: any = {
     if (name === "verifications" || name === "videoVerifications") {
       const rows = () => (name === "verifications" ? claimRows : videoRows);
       return {
-        // owner-scoped: where(userId==).select(...).limit().get()
+        // owner-scoped history: where(userId==).select(...).limit().get()
+        // owner-scoped pending (roadmap 4.2b): where(userId==).where(governanceStatus==).select(...).get()
         where: (_f: string, _op: string, owner: string) => ({
           select: (...fields: string[]) => ({ limit: () => ({ get: async () => snapFor(rows(), fields, owner) }) }),
+          where: (_f2: string, _op2: string, status: string) => ({
+            select: (...fields: string[]) => ({ get: async () => snapFor(rows(), fields, owner, status) }),
+          }),
         }),
         // global: orderBy().limit().select(...).get()
         orderBy: () => ({ limit: () => ({ select: (...fields: string[]) => ({ get: async () => snapFor(rows(), fields) }) }) }),
@@ -56,7 +62,10 @@ const mockAdminDb: any = {
     if (name === "runs") {
       const empty = { size: 0, docs: [] };
       return {
-        where: () => ({ orderBy: () => ({ limit: () => ({ select: () => ({ get: async () => empty }) }) }) }),
+        where: () => ({
+          orderBy: () => ({ limit: () => ({ select: () => ({ get: async () => empty }) }) }),
+          where: () => ({ select: () => ({ get: async () => empty }) }),
+        }),
         orderBy: () => ({ limit: () => ({ select: () => ({ get: async () => empty }) }) }),
         limit: () => ({ select: () => ({ get: async () => empty }) }),
       };
@@ -146,6 +155,17 @@ describe.each(VIEWS.map((v) => [v.label, v] as const))("%s", (_label, view) => {
   it("status filter needs_review (default) also excludes unevaluated Team rows", async () => {
     claimRows = [claim("vcl-team-unevaluated", TEAM_CREATOR, { ...TEAM, governanceStatus: undefined }), claim("vcl-personal-unevaluated", PERSONAL_OWNER, { governanceStatus: undefined })];
     const { body } = await queue(view, "?runType=verification");
-    expect(runIds(body)).toEqual(["vcl-personal-unevaluated"]);
+    // Roadmap 4.2b: for an owner-scoped reviewer the pending queue is the
+    // evaluated-governance queue, so an unevaluated row (no governanceStatus) is
+    // outside it entirely. admin_global keeps its previous history-style path.
+    expect(runIds(body)).toEqual(view.visibleUserIds === null ? ["vcl-personal-unevaluated"] : []);
+  });
+
+  it("status filter needs_review: evaluated Team rows are absent, evaluated Personal rows remain, total matches", async () => {
+    claimRows = [claim("vcl-team", TEAM_CREATOR, TEAM), claim("vcl-personal", PERSONAL_OWNER)];
+    videoRows = [video("vid-team", TEAM_CREATOR, TEAM), video("vid-personal", PERSONAL_OWNER)];
+    const { body } = await queue(view, "?status=needs_review&runType=all");
+    expect(runIds(body)).toEqual(["vcl-personal", "vid-personal"]);
+    expect(body.total).toBe(2);
   });
 });

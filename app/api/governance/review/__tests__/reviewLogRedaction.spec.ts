@@ -1079,13 +1079,14 @@ describe("SIBLING SCOPE BRANCHES — every remaining logging branch of the resol
     assertNoSensitiveGovernanceCanaries(output());
   });
 
-  it("truncation: warns with a count and never the owner list", async () => {
-    // 31 assigners forces the >30 branch; OWNER_B is among them, so a leak of
-    // the list would be visible.
+  it("31+ assigners: logs the full count and never the owner list", async () => {
+    // Roadmap 4.2b (Q3): the scope is no longer truncated to 30, so the count
+    // logged is the complete set. OWNER_B is among the 31, so a leak of the list
+    // would be visible.
     assignerUids = [C.ownerBUid, ...Array.from({ length: 30 }, (_, i) => `assigner-${i}`)];
     await post("runs", "other-run");
-    expect(output()).toContain("Truncated visible owner set to 30");  // ANCHOR
-    expect(output()).toContain("owner(s)");
+    expect(output()).toContain("assigners scope, 31 owner(s)");  // ANCHOR
+    expect(output()).not.toContain("Truncated visible owner set");
     assertNoSensitiveGovernanceCanaries(output());
     expect(output()).not.toContain("assigner-0");
   });
