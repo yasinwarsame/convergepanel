@@ -196,19 +196,6 @@ export async function POST(req: NextRequest) {
     }
 
     const assignerRef = adminDb.collection("users").doc(uid);
-    const assignerSnap = await assignerRef.get();
-    const assignerData = (assignerSnap.data() ?? {}) as Partial<UserProfile>;
-    if (assignerData.governanceReviewerUid && assignerData.governanceReviewerEmail) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: {
-            message: `You already have a reviewer assigned (${assignerData.governanceReviewerEmail}). Remove them first before assigning a new one.`,
-          },
-        },
-        { status: 400 }
-      );
-    }
 
     let reviewerUid: string;
     try {
@@ -226,7 +213,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const reviewerDoc = await adminDb.collection("users").doc(reviewerUid).get();
     if (reviewerUid === uid) {
       return NextResponse.json(
         { ok: false, error: { message: "You can't assign yourself as your own reviewer." } },
@@ -247,8 +233,50 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const reviewerData = (reviewerDoc.data() ?? {}) as Partial<UserProfile>;
-    if (reviewerData.governanceReviewerEnabled !== true) {
+    // Roadmap 4.2a (A2) — the "already assigned" check, the availability check
+    // and BOTH writes run in one transaction that re-reads the authoritative
+    // assigner record. Two concurrent assignments therefore serialize: the loser
+    // re-reads the winner's reviewer and is refused, and because the reviewer-
+    // side mirror is written in the same atomic commit, a refused or failed
+    // attempt can never leave a mirror entry behind.
+    const reviewerRef = adminDb.collection("users").doc(reviewerUid);
+    const assignedAt = new Date().toISOString();
+    const outcome = await adminDb.runTransaction(async (txn) => {
+      const [assignerSnap, reviewerSnap] = await Promise.all([txn.get(assignerRef), txn.get(reviewerRef)]);
+      const assignerData = (assignerSnap.data() ?? {}) as Partial<UserProfile>;
+      if (typeof assignerData.governanceReviewerUid === "string" && assignerData.governanceReviewerUid.length > 0) {
+        return { kind: "already_assigned" as const, email: String(assignerData.governanceReviewerEmail ?? "") };
+      }
+      const reviewerData = (reviewerSnap.data() ?? {}) as Partial<UserProfile>;
+      if (reviewerData.governanceReviewerEnabled !== true) {
+        return { kind: "reviewer_unavailable" as const };
+      }
+      txn.set(
+        assignerRef,
+        {
+          governanceReviewerEmail: reviewerEmailNorm,
+          governanceReviewerUid: reviewerUid,
+          governanceReviewerAssignedAt: assignedAt,
+        },
+        { merge: true }
+      );
+      txn.set(reviewerRef, { governanceReviewerFor: FieldValue.arrayUnion(uid) }, { merge: true });
+      return { kind: "assigned" as const };
+    });
+
+    if (outcome.kind === "already_assigned") {
+      const who = outcome.email ? ` (${outcome.email})` : "";
+      return NextResponse.json(
+        {
+          ok: false,
+          error: {
+            message: `You already have a reviewer assigned${who}. Remove them first before assigning a new one.`,
+          },
+        },
+        { status: 400 }
+      );
+    }
+    if (outcome.kind === "reviewer_unavailable") {
       return NextResponse.json(
         {
           ok: false,
@@ -259,23 +287,6 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-
-    const assignedAt = new Date().toISOString();
-    await assignerRef.set(
-      {
-        governanceReviewerEmail: reviewerEmailNorm,
-        governanceReviewerUid: reviewerUid,
-        governanceReviewerAssignedAt: assignedAt,
-      },
-      { merge: true }
-    );
-
-    await adminDb.collection("users").doc(reviewerUid).set(
-      {
-        governanceReviewerFor: FieldValue.arrayUnion(uid),
-      },
-      { merge: true }
-    );
 
     return NextResponse.json({
       ok: true,
@@ -289,32 +300,35 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === "remove_reviewer") {
+    // Roadmap 4.2a (A2) — removal re-reads the authoritative assigner record and
+    // clears it together with the reviewer-side mirror in one atomic commit. The
+    // grant itself is the assigner field alone (A1), so even a mirror that is
+    // stale for any historical reason grants nothing once this commits.
     const assignerRef = adminDb.collection("users").doc(uid);
-    const assignerSnap = await assignerRef.get();
-    const assignerData = (assignerSnap.data() ?? {}) as Partial<UserProfile>;
-    const reviewerUid = assignerData.governanceReviewerUid;
-    if (!reviewerUid || typeof reviewerUid !== "string") {
+    const db = adminDb;
+    const removed = await db.runTransaction(async (txn) => {
+      const assignerSnap = await txn.get(assignerRef);
+      const assignerData = (assignerSnap.data() ?? {}) as Partial<UserProfile>;
+      const reviewerUid = assignerData.governanceReviewerUid;
+      if (!reviewerUid || typeof reviewerUid !== "string") return false;
+      txn.set(
+        assignerRef,
+        {
+          governanceReviewerEmail: FieldValue.delete(),
+          governanceReviewerUid: FieldValue.delete(),
+          governanceReviewerAssignedAt: FieldValue.delete(),
+        },
+        { merge: true }
+      );
+      txn.set(db.collection("users").doc(reviewerUid), { governanceReviewerFor: FieldValue.arrayRemove(uid) }, { merge: true });
+      return true;
+    });
+    if (!removed) {
       return NextResponse.json(
         { ok: false, error: { message: "You don't have a reviewer assigned." } },
         { status: 400 }
       );
     }
-
-    await assignerRef.set(
-      {
-        governanceReviewerEmail: FieldValue.delete(),
-        governanceReviewerUid: FieldValue.delete(),
-        governanceReviewerAssignedAt: FieldValue.delete(),
-      },
-      { merge: true }
-    );
-
-    await adminDb.collection("users").doc(reviewerUid).set(
-      {
-        governanceReviewerFor: FieldValue.arrayRemove(uid),
-      },
-      { merge: true }
-    );
 
     return NextResponse.json({ ok: true, message: "Reviewer removed." });
   }

@@ -42,6 +42,8 @@ const mockAdminDb: any = {
       collection: (sub: string) => ({ add: async (v: unknown) => mockedEventAdd(name, id, sub, v) }),
     }),
   }),
+  runTransaction: async (fn: (txn: unknown) => Promise<unknown>) =>
+    fn({ get: (ref: any) => ref.get(), set: (ref: any, data: unknown, opts?: unknown) => ref.set(data, opts) }),
 };
 jest.mock("@/lib/firebase/admin", () => ({ adminDb: mockAdminDb }));
 

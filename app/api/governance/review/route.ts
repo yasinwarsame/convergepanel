@@ -243,7 +243,66 @@ export async function POST(request: NextRequest) {
     governanceReviewComment: finalComment,
   }) as DocumentData;
 
-  await ref.set(patch, { merge: true });
+  // Roadmap 4.2a (R1) — the status transition is a compare-and-set. Every check
+  // above ran against `prevStatus` from a plain read; the transaction re-reads
+  // the document and commits ONLY if its status is still exactly that value.
+  // Two concurrent decisions that both validated against the same status
+  // therefore serialize: one commits, the other re-reads a different status and
+  // is refused with 409 before any write. The audit row and the governanceEvents
+  // append below run only after a committed transition, so a refused request
+  // produces neither.
+  //
+  // Authority is re-validated in the SAME transaction (A1, closing the TOCTOU
+  // between `resolveGovernanceVisibleUserIds` above and this commit). An
+  // assignment-derived reviewer ("assigners" scope) must still be the reviewer
+  // named on the owner's own record; a removal or reassignment that lands
+  // first makes this request fail 403 with no write. A governance admin
+  // (`admin_global`) holds no assignment and is not re-checked here. Every
+  // other scope was refused above and never reaches this point. All reads
+  // precede the single write.
+  const requiresAssignment = vis.queueScope === "assigners";
+  const ownerRef = adminDb.collection("users").doc(ownerUid);
+  const outcome = await adminDb.runTransaction(async (txn) => {
+    const current = await txn.get(ref);
+    const ownerSnap = requiresAssignment ? await txn.get(ownerRef) : null;
+    if (ownerSnap) {
+      const assigned = (ownerSnap.data() as Record<string, unknown> | undefined)?.governanceReviewerUid;
+      if (assigned !== resolved.uid) return "revoked" as const;
+    }
+    if (!current.exists) return "conflict" as const;
+    const currentData = current.data() as Record<string, unknown>;
+    const currentStatus =
+      typeof currentData.governanceStatus === "string" && currentData.governanceStatus
+        ? currentData.governanceStatus
+        : "needs_review";
+    if (currentStatus !== prevStatus) return "conflict" as const;
+    txn.set(ref, patch, { merge: true });
+    return "committed" as const;
+  });
+  if (outcome === "revoked") {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: {
+          code: "forbidden",
+          message: "You don't have permission to review this run.",
+        },
+      },
+      { status: 403 }
+    );
+  }
+  if (outcome !== "committed") {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: {
+          code: "conflict",
+          message: "This run was reviewed by someone else in the meantime. Refresh and try again.",
+        },
+      },
+      { status: 409 }
+    );
+  }
 
   const runData = data;
   const rowOwnerUid = String(runData.userId ?? runData.uid ?? ownerUid ?? "").trim();

@@ -78,8 +78,11 @@ beforeEach(() => {
   process.env.GOVERNANCE_ADMIN_EMAILS = GOV_ONLY;
   authRecord = { email: "scoped-reviewer@test-invented.example", emailVerified: true };
   planId = "full";
+  // Roadmap 4.2a (A1): the grant is the assigners' own records (the reverse
+  // lookup). `reviewerFor` is the reviewer-side display mirror and grants
+  // nothing; it is left populated so a regression that re-reads it shows up.
   reviewerFor = [ASSIGNED_A];
-  reverseAssigners = [ASSIGNED_B];
+  reverseAssigners = [ASSIGNED_A, ASSIGNED_B];
 });
 
 /**
@@ -129,7 +132,7 @@ describe("a scoped reviewer keeps the owner filter — the C3 P1 regression", ()
   });
 
   it("the reviewer's own uid is never in their own visible set", async () => {
-    reviewerFor = [ASSIGNED_A, REVIEWER];
+    reverseAssigners = [ASSIGNED_A, REVIEWER];
     const vis = await resolveGovernanceVisibleUserIds(REVIEWER);
     if (!vis.ok) throw new Error("expected a scoped grant");
     expect(vis.visibleUserIds).not.toContain(REVIEWER);
@@ -166,8 +169,7 @@ describe("a scoped reviewer keeps the owner filter — the C3 P1 regression", ()
     // mutation returning `null` here — silently granting GLOBAL visibility to a
     // popular reviewer — survived the whole suite. The cap is a bound, not a
     // licence to stop filtering.
-    reviewerFor = Array.from({ length: 35 }, (_, i) => `assigned-owner-${i}`);
-    reverseAssigners = [];
+    reverseAssigners = Array.from({ length: 35 }, (_, i) => `assigned-owner-${i}`);
     const vis = await resolveGovernanceVisibleUserIds(REVIEWER);
     if (!vis.ok) throw new Error("expected a scoped grant");
     expect(vis.visibleUserIds).not.toBeNull();
@@ -183,8 +185,7 @@ describe("a scoped reviewer keeps the owner filter — the C3 P1 regression", ()
   });
 
   it("exactly at the cap is not truncated and is still finite", async () => {
-    reviewerFor = Array.from({ length: 30 }, (_, i) => `assigned-owner-${i}`);
-    reverseAssigners = [];
+    reverseAssigners = Array.from({ length: 30 }, (_, i) => `assigned-owner-${i}`);
     const vis = await resolveGovernanceVisibleUserIds(REVIEWER);
     if (!vis.ok) throw new Error("expected a scoped grant");
     expect(vis.visibleUserIds).not.toBeNull();

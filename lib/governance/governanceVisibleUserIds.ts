@@ -8,7 +8,6 @@ import { NextResponse } from "next/server";
 import { getEffectiveEntitlements } from "@/lib/admin/entitlements";
 import { resolveVerifiedAdminScopes } from "@/lib/admin/verifiedAdminIdentity";
 import { adminDb } from "@/lib/firebase/admin";
-import { parseGovernanceReviewerFor } from "@/lib/governance/reviewerFields";
 
 export type GovernanceQueueScope = "admin_global" | "assigners" | "no_assigners";
 
@@ -49,7 +48,15 @@ export type GovernanceVisibility =
  *
  * Resolves Firestore `userId` values the caller may load in governance queue / audit / review.
  * - Support admins: `visibleUserIds: null` (global queue).
- * - Full plan + assigners: assigner UIDs only (from `governanceReviewerFor` + reverse lookup), never the viewer's uid.
+ * - Full plan + assigners: assigner UIDs only, never the viewer's uid.
+ *
+ * Roadmap 4.2a (A1) — the ONLY source of a reviewer grant is the assigner's own
+ * record: `users/{assigner}.governanceReviewerUid === reviewer` (the reverse
+ * lookup in `getAssignerUids`). The reviewer-side `governanceReviewerFor` array
+ * is a display mirror written in a separate step; it was previously UNIONED in
+ * here, so a mirror left stale by a failed or raced write kept granting
+ * visibility and decision rights after the assigner removed the reviewer. It is
+ * deliberately not read by this module.
  * - Full plan, no assigners: empty array (queue empty; policies/audit still allowed).
  * - Free / lite: plan_required.
  */
@@ -130,9 +137,6 @@ async function resolveVisibilityForTrustedIdentity(
   const entitlements = await getEffectiveEntitlements(uid);
   const userPlan = entitlements.planId;
 
-  const userDoc = await adminDb.collection("users").doc(uid).get();
-  const userData = userDoc.data() as Record<string, unknown> | undefined;
-  const reviewerFor = parseGovernanceReviewerFor(userData);
   const assignersByReviewerField = await getAssignerUids(uid);
 
   // Phase FIRST-ADMIN-C7 — C6 replaced the owner-UID LISTS here with counts but
@@ -140,7 +144,7 @@ async function resolveVisibilityForTrustedIdentity(
   // still wrote a stable per-user correlation identifier into the logs. The
   // plan and the two counts are the operational content; the uid was not.
   console.log(
-    `[governance/queue] User: isAdmin: false, plan: ${userPlan}, reviewerFor: ${reviewerFor.length} users, assignersByReviewerUidField: ${assignersByReviewerField.length}`
+    `[governance/queue] User: isAdmin: false, plan: ${userPlan}, assignersByReviewerUidField: ${assignersByReviewerField.length}`
   );
 
   if (userPlan !== "full") {
@@ -149,7 +153,7 @@ async function resolveVisibilityForTrustedIdentity(
   }
 
   const self = uid.trim();
-  const allAssigners = [...new Set([...reviewerFor, ...assignersByReviewerField])].filter(
+  const allAssigners = [...new Set(assignersByReviewerField)].filter(
     (id) => id.trim() !== self
   );
 
@@ -206,6 +210,13 @@ const governanceVisibilityCache = new Map<string, { entry: GovernanceVisibility;
  * `visibleUserIds: null` — every user's runs, decisions and review records —
  * for the remainder of the TTL. Any future addition to the authority evidence
  * must be added here in the same commit.
+ *
+ * Roadmap 4.2a (A1) — an "assigners" result is NEVER cached. It is a grant
+ * derived from other users' records, which this per-instance cache cannot
+ * observe changing: caching it let a removed reviewer keep queue/audit
+ * visibility for the rest of the TTL. Only results that are not a grant from
+ * another user's record are cached — admin_global (rests on the identity
+ * evidence in the key), no_assigners and plan_required (both fail closed).
  */
 export async function resolveGovernanceVisibleUserIdsCached(uid: string): Promise<GovernanceVisibility> {
   if (!adminDb) {
@@ -225,6 +236,7 @@ export async function resolveGovernanceVisibleUserIdsCached(uid: string): Promis
     return hit.entry;
   }
   const entry = await resolveVisibilityForTrustedIdentity(uid, identity);
+  if (entry.ok && entry.queueScope === "assigners") return entry;
   governanceVisibilityCache.set(key, { entry, expiresAt: now + GOVERNANCE_VISIBILITY_CACHE_TTL_MS });
   return entry;
 }

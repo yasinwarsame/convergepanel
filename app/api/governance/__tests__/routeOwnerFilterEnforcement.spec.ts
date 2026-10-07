@@ -144,7 +144,9 @@ function makeQuery(collection: string) {
   q.count = () => ({ get: async () => ({ data: () => ({ count: 0 }) }) });
   q.add = (...a: unknown[]) => reviewUpdate(...(a as []));
   q.doc = () => ({
-    get: async () => addressedDoc(),
+    // users/{owner}: the owner's own record names this reviewer (roadmap 4.2a —
+    // the decision transaction re-validates the assignment there).
+    get: async () => (collection === "users" ? { exists: true, data: () => ({ governanceReviewerUid: VIEWER_UID }) } : addressedDoc()),
     update: (...a: unknown[]) => reviewUpdate(...(a as [])),
     set: (...a: unknown[]) => reviewUpdate(...(a as [])),
     collection: (n: string) => makeQuery(n),
@@ -154,7 +156,11 @@ function makeQuery(collection: string) {
 
 jest.mock("@/lib/firebase/admin", () => ({
   adminAuth: { getUser: async () => ({ email: "reviewer@test-invented.example", emailVerified: true, disabled: false }) },
-  adminDb: { collection: (name: string) => makeQuery(name) },
+  adminDb: {
+    collection: (name: string) => makeQuery(name),
+    runTransaction: async (fn: (txn: unknown) => Promise<unknown>) =>
+      fn({ get: (ref: any) => ref.get(), set: (ref: any, data: unknown, opts?: unknown) => ref.set(data, opts) }),
+  },
   firebaseAdmin: { firestore: { Timestamp: { now: () => "TS", fromDate: () => "TS" }, FieldValue: { serverTimestamp: () => "TS" } } },
 }));
 jest.mock("@/lib/governance/governanceVisibleUserIds", () => {

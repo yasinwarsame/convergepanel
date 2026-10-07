@@ -48,7 +48,8 @@ const NOW = Date.now();
 let tokenClaims: Record<string, unknown> = {};
 let liveRecord: Record<string, unknown> = {};
 let planId = "full";
-let reviewerFor: string[] = [];
+/** Owners whose OWN record assigns this reviewer — the sole grant (roadmap 4.2a, A1). */
+let assignerUids: string[] = [];
 /** Which documents exist, keyed `collection/id`. Missing => the route 404s. */
 let existingDocs: Record<string, { userId: string }> = {};
 
@@ -65,6 +66,12 @@ function docHandle(collection: string, id: string) {
   return {
     id,
     get: async () => {
+      // users/{assigner}: the assigner's own record names this reviewer — the
+      // grant the decision transaction re-validates (roadmap 4.2a).
+      if (collection === "users") {
+        const assigned = assignerUids.includes(id);
+        return { exists: assigned, id, data: () => (assigned ? { governanceReviewerUid: REVIEWER } : undefined) };
+      }
       const rec = existingDocs[key];
       return {
         exists: Boolean(rec),
@@ -89,8 +96,13 @@ function docHandle(collection: string, id: string) {
 }
 function collectionHandle(name: string) {
   const q: Record<string, unknown> = { };
-  for (const m of ["where", "orderBy", "limit", "select"]) q[m] = () => q;
-  q.get = async () => ({ docs: [], empty: true, size: 0 });
+  let assignerQuery = false;
+  for (const m of ["orderBy", "limit", "select"]) q[m] = () => q;
+  q.where = (f: string) => { if (name === "users" && f === "governanceReviewerUid") assignerQuery = true; return q; };
+  q.get = async () => {
+    if (!assignerQuery) return { docs: [], empty: true, size: 0 };
+    return { docs: assignerUids.map((id) => ({ id, data: () => ({}) })), empty: assignerUids.length === 0, size: assignerUids.length };
+  };
   return Object.assign(q, { doc: (id: string) => docHandle(name, id) });
 }
 
@@ -100,11 +112,16 @@ jest.mock("@/lib/firebase/admin", () => ({
     verifySessionCookie: async () => tokenClaims,
     getUser: async () => liveRecord,
   },
-  adminDb: { collection: (n: string) => collectionHandle(n) },
+  adminDb: {
+    collection: (n: string) => collectionHandle(n),
+    // Transactions delegate to the same recorded doc handles, so every write the
+    // route commits inside one is still captured in `writes`.
+    runTransaction: async (fn: (txn: unknown) => Promise<unknown>) =>
+      fn({ get: (ref: { get: () => Promise<unknown> }) => ref.get(), set: (ref: { set: (p: unknown) => Promise<unknown> }, p: unknown) => ref.set(p) }),
+  },
   firebaseAdmin: { firestore: { Timestamp: { now: () => "TS", fromDate: () => "TS" }, FieldValue: { serverTimestamp: () => "TS" } } },
 }));
 jest.mock("@/lib/admin/entitlements", () => ({ getEffectiveEntitlements: async () => ({ planId }) }));
-jest.mock("@/lib/governance/reviewerFields", () => ({ parseGovernanceReviewerFor: () => reviewerFor }));
 
 import { NextRequest } from "next/server";
 
@@ -163,7 +180,7 @@ beforeEach(() => {
   process.env.ADMIN_EMAILS = "";
   process.env.GOVERNANCE_ADMIN_EMAILS = "";
   planId = "full";
-  reviewerFor = [OWNER_A];
+  assignerUids = [OWNER_A];
   tokenClaims = { uid: REVIEWER, email: "reviewer@test-invented.example", email_verified: true };
   liveRecord = { email: "reviewer@test-invented.example", emailVerified: true, disabled: false };
   writes = [];
@@ -279,7 +296,7 @@ describe.each(COLLECTIONS)("REVIEW WRITE — collection=%s", (collection) => {
   });
 
   it("an empty reviewer scope permits no review", async () => {
-    reviewerFor = [];
+    assignerUids = [];
     const res = await post(collection, "run-a");
     expect(res.status).toBe(403);
     expect(writes).toEqual([]);
@@ -329,7 +346,7 @@ describe.each(COLLECTIONS)("HOSTILE REQUEST BODY — collection=%s", (collection
   });
 
   it("a body-claimed scope cannot widen the reviewer's visibility", async () => {
-    reviewerFor = []; // no assigners: this reviewer may review nothing
+    assignerUids = []; // no assigners: this reviewer may review nothing
     const res = await postHostile(collection, "run-a", hostileBody(OWNER_A));
     expect(res.status).toBe(403);
     expect(writes).toEqual([]);

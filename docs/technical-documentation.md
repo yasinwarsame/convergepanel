@@ -851,6 +851,12 @@ Writes append-only events to the `admin_audit_logs` Firestore collection via `wr
 
 Action types: `evaluated` · `approved` · `blocked` · `changes_requested` · `policy_updated` · `admin_override` · `admin_deleted`
 
+### Personal reviewer assignment and review decisions (`/governance`, roadmap 4.2a)
+
+- **Grant source.** A reviewer's governance visibility and decision rights come only from assigners' own records (`users/{assigner}.governanceReviewerUid === reviewer`, read by `getAssignerUids`). The reviewer-side `governanceReviewerFor` array is a display mirror and never grants anything. An `"assigners"` visibility result is never cached, so a removal takes effect on the next request.
+- **Assign / remove** (`POST /api/governance/reviewer`). Each runs in one Firestore transaction that re-reads the assigner record and writes the assigner fields and the mirror atomically. Concurrent assignments yield one reviewer and leave no orphaned mirror.
+- **Decisions** (`POST /api/governance/review`). The status transition is a compare-and-set in a transaction. A concurrent loser gets `409 conflict` before any write, so it produces no `admin_audit_logs` row and no `governanceEvents` append.
+
 ### Multi-Reviewer Governance (adaptive runs, team plan)
 
 A separate, panel-based review workflow layered on top of the adaptive schema system's `governanceRecord.humanReview`, distinct from the single-reviewer policy engine above. Lives at `runs/{runId}/humanReviewPanel/current` (one active panel per run) plus `runs/{runId}/humanReviewVotes/{revision}:{reviewerUid}` and `runs/{runId}/humanReviewPanelHistory/{revision}:{event}`. Panel lifecycle: create (`PUT`) → reviewers vote (`POST .../votes`) → aggregation reaches `waiting` / `deadlocked` / `ready` → finalize (`POST .../finalize`, majority aggregation) or owner override (`POST .../override`, breaks a deadlock) → cancel (`DELETE`) is available at any open-panel state as a drain operation. Route: `app/api/teams/adaptive-runs/[runId]/review-panel/`.

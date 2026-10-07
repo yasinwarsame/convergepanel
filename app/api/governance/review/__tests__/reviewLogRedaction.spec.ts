@@ -161,7 +161,7 @@ const NOW = Date.now();
 let tokenClaims: Record<string, unknown> = {};
 let liveRecord: Record<string, unknown> = {};
 let planId = "full";
-let reviewerFor: string[] = [];
+let assignerUids: string[] = [];
 let prevStatus = "blocked";
 let integrityClassification: "valid" | "invalid" = "valid";
 
@@ -594,7 +594,13 @@ function docHandle(collection: string, id: string) {
   const rec = existingDocs[`${collection}/${id}`];
   return {
     id,
-    get: async () => ({
+    // users/{assigner}: the assigner's own record names this reviewer — the
+    // grant the decision transaction re-validates (roadmap 4.2a).
+    get: async () => collection === "users" ? ({
+      exists: assignerUids.includes(id),
+      id,
+      data: () => (assignerUids.includes(id) ? { governanceReviewerUid: C.reviewerUid } : undefined),
+    }) : ({
       exists: Boolean(rec),
       id,
       data: () => (rec ? {
@@ -620,8 +626,14 @@ function docHandle(collection: string, id: string) {
 }
 function collectionHandle(name: string) {
   const q: Record<string, unknown> = {};
-  for (const m of ["where", "orderBy", "limit", "select"]) q[m] = () => q;
-  q.get = async () => ({ docs: [], empty: true, size: 0 });
+  let assignerQuery = false;
+  for (const m of ["orderBy", "limit", "select"]) q[m] = () => q;
+  q.where = (f: string) => { if (name === "users" && f === "governanceReviewerUid") assignerQuery = true; return q; };
+  q.get = async () => {
+    // Roadmap 4.2a (A1): the reviewer grant is the assigners' own records.
+    if (!assignerQuery) return { docs: [], empty: true, size: 0 };
+    return { docs: assignerUids.map((id) => ({ id, data: () => ({}) })), empty: assignerUids.length === 0, size: assignerUids.length };
+  };
   return Object.assign(q, {
     doc: (id: string) => docHandle(name, id),
     /**
@@ -664,11 +676,14 @@ jest.mock("@/lib/firebase/admin", () => ({
     verifySessionCookie: async () => tokenClaims,
     getUser: async () => liveRecord,
   },
-  adminDb: { collection: (n: string) => collectionHandle(n) },
+  adminDb: {
+    collection: (n: string) => collectionHandle(n),
+    runTransaction: async (fn: (txn: unknown) => Promise<unknown>) =>
+      fn({ get: (ref: { get: () => Promise<unknown> }) => ref.get(), set: (ref: { set: (p: unknown) => Promise<unknown> }, p: unknown) => ref.set(p) }),
+  },
   firebaseAdmin: { firestore: { Timestamp: { now: () => "TS", fromDate: () => "TS" }, FieldValue: { serverTimestamp: () => "TS" } } },
 }));
 jest.mock("@/lib/admin/entitlements", () => ({ getEffectiveEntitlements: async () => ({ planId }) }));
-jest.mock("@/lib/governance/reviewerFields", () => ({ parseGovernanceReviewerFor: () => reviewerFor }));
 jest.mock("@/lib/workspaces/runWorkspaceIntegrity", () => ({
   validateRunWorkspaceAssociation: async () => ({
     classification: integrityClassification,
@@ -691,7 +706,7 @@ beforeEach(() => {
   process.env.ADMIN_EMAILS = "";
   process.env.GOVERNANCE_ADMIN_EMAILS = "";
   planId = "full";
-  reviewerFor = [C.ownerAUid];
+  assignerUids = [C.ownerAUid];
   prevStatus = "blocked";
   integrityClassification = "valid";
   tokenClaims = { uid: C.reviewerUid, email: C.callerEmail, email_verified: true };
@@ -944,7 +959,7 @@ describe.each(COLLECTIONS)("OWNER_B IS REACHABLE — cross-tenant denial, collec
     // Derived from the fixture the route will actually read.
     expect(existingDocs[`${collection}/other-run`]).toEqual({ userId: C.ownerBUid });
     expect(C.ownerBUid).not.toBe(C.ownerAUid);
-    expect(reviewerFor).toEqual([C.ownerAUid]);
+    expect(assignerUids).toEqual([C.ownerAUid]);
     const snap = await collectionHandle(collection).doc("other-run").get();
     expect(snap.exists).toBe(true);
     expect((snap.data() as { userId: string }).userId).toBe(C.ownerBUid);
@@ -1057,7 +1072,7 @@ describe("SIBLING SCOPE BRANCHES — every remaining logging branch of the resol
   });
 
   it("no_assigners: logs the empty scope without the caller's identity", async () => {
-    reviewerFor = [];
+    assignerUids = [];
     const res = await post("runs", C.runId);
     expect(res.status).toBe(403);
     expect(output()).toContain("no assigners (empty queue scope)");  // ANCHOR
@@ -1067,7 +1082,7 @@ describe("SIBLING SCOPE BRANCHES — every remaining logging branch of the resol
   it("truncation: warns with a count and never the owner list", async () => {
     // 31 assigners forces the >30 branch; OWNER_B is among them, so a leak of
     // the list would be visible.
-    reviewerFor = [C.ownerBUid, ...Array.from({ length: 30 }, (_, i) => `assigner-${i}`)];
+    assignerUids = [C.ownerBUid, ...Array.from({ length: 30 }, (_, i) => `assigner-${i}`)];
     await post("runs", "other-run");
     expect(output()).toContain("Truncated visible owner set to 30");  // ANCHOR
     expect(output()).toContain("owner(s)");
