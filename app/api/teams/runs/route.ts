@@ -306,7 +306,17 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const filteredItems = applyTeamRunListFilters(items, filters);
+    // Roadmap 4.3b (D3) — list/detail authority parity. Every adaptive detail
+    // route (`/api/teams/adaptive-runs/{runId}` and its history, review-panel,
+    // assignment and votes reads) requires Team-admin authority, so a non-admin
+    // member must not be offered adaptive review items they can never open.
+    // Applied after classification (the same classifier decides the kind) and
+    // before filtering/pagination/enrichment, so the items contribute nothing
+    // to `pagination.total` and trigger no canonical review reads. Legacy items
+    // and the unversioned response below are unchanged.
+    const visibleItems = admin ? items : items.filter((item) => item.kind !== "adaptive");
+
+    const filteredItems = applyTeamRunListFilters(visibleItems, filters);
     const sortedItems = sortTeamRunListItems(filteredItems);
     const { pageItems, pagination } = paginateTeamRunListItems(sortedItems, filters.page, filters.limit);
 
