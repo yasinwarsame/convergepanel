@@ -212,3 +212,61 @@ export function canExportWorkspaceAdaptiveResearch(input: CanExportWorkspaceAdap
 
   return { allowed: true, requiresVisibleStatusNotice: requiresVisibleStatusNotice(input.governanceStatusAtExport) };
 }
+
+/**
+ * TEAM_EXPORT_E2_B — historical Team export ACCESS (download of an existing
+ * export), deliberately separate from `canExportWorkspaceAdaptiveResearch()`.
+ *
+ * Creation and historical access are different operations with different
+ * authority. A historical download creates no export record, no reportVersion
+ * and no snapshot, and persists no bytes: it re-renders the export's already
+ * frozen `reportSnapshot` (there is no stored artifact — see
+ * researchExport.ts). So the capability axis is `research.read`, the same
+ * capability that already lists this history (E2-A), and NOT `exports.create`,
+ * which governs creating new export work. This function never receives, and
+ * must never be given, an `exports.create` value.
+ *
+ * Axes:
+ *   - `hasResearchReadCapability` — derived by the route from the CURRENT
+ *     Workspace capability set, never from the request;
+ *   - `planId` — the ACTING caller's CURRENT plan (`getEffectiveEntitlements`),
+ *     so access that was once permitted does not become permanent;
+ *   - `governanceStatusAtExport` — the export record's FROZEN status, decided
+ *     by the same `isGovernanceStateBlocking` policy as creation;
+ *   - `classification` — the record's frozen classification, carried as part of
+ *     the record contract. It is NOT an enforcing axis today: neither this nor
+ *     the creation verdicts block on it.
+ *
+ * Never throws; an unrecognized state fails closed to denied.
+ */
+export interface CanAccessWorkspaceAdaptiveExportInput {
+  /** Derived server-side from `resolveTeamRunWorkspaceAccess().capabilities` — never from the request. */
+  hasResearchReadCapability: boolean;
+  /** The acting caller's CURRENT plan, not the export creator's and not the Workspace's. */
+  planId: PlanId;
+  classification: AdaptiveExportClassification;
+  governanceStatusAtExport: AdaptiveExportGovernanceStatus;
+}
+
+export function canAccessWorkspaceAdaptiveExport(input: CanAccessWorkspaceAdaptiveExportInput): AdaptiveExportVerdict {
+  if (!input.hasResearchReadCapability) {
+    return { allowed: false, reason: "workspace_capability_missing" };
+  }
+
+  const planConfig = getPlanConfig(input.planId);
+  if (!planConfig.advancedExportEnabled) {
+    return { allowed: false, reason: "plan_not_entitled" };
+  }
+
+  // Same currently-always-passing organization-policy point as the other verdicts.
+  const organizationPolicyBlocked = false;
+  if (organizationPolicyBlocked) {
+    return { allowed: false, reason: "organization_policy_blocked" };
+  }
+
+  if (isGovernanceStateBlocking(input.governanceStatusAtExport)) {
+    return { allowed: false, reason: "governance_state_blocked" };
+  }
+
+  return { allowed: true, requiresVisibleStatusNotice: requiresVisibleStatusNotice(input.governanceStatusAtExport) };
+}

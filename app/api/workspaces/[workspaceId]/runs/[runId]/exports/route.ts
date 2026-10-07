@@ -114,8 +114,13 @@
  *           → "E2A-S6 CROSS-WORKSPACE: a run bound to another Workspace is concealed and never listed"
  *           → "E2A-S6 a Project belonging to another Workspace is concealed"
  *           → "E2A-S6/S7 a FORMER member — including the export creator — is concealed"
- *   E2A-S7  Creator identity is not authority: `createdBy` is metadata. A
+ *   E2A-S7  Creator identity is not authority: `createdBy` is never consulted. A
  *           currently authorized NON-creator may list; a removed creator may not.
+ *           E2-B/F1 (owner decision 2026-10-08): `createdBy` is no longer even
+ *           PROJECTED — it is another member's raw uid. The presentation-safe
+ *           frozen `generatedBy` {displayName, maskedEmail} is returned instead,
+ *           only when the record actually carries a well-formed one; it is never
+ *           resolved live and never synthesized for older records.
  *           → "E2A-S7 a current reader who did NOT create the exports receives them"
  *   E2A-S8A SOURCE ACCESS (the primary secrecy invariant). The LIST projection
  *           NEVER READS `reportSnapshot`, nor any other persisted property the
@@ -563,12 +568,28 @@ export interface TeamAdaptiveExportListItem {
   format: string;
   artifactStatus: string;
   createdAt: string;
-  createdBy: string;
+  /** The FROZEN, presentation-safe export generator (E2-B/F1). Absent when the record carries none — never resolved live, never synthesized, never a raw uid. */
+  generatedBy?: { displayName: string | null; maskedEmail: string | null };
   governanceStatusAtExport: unknown;
   classification: string;
   fileHash?: string;
   hashAlgorithm?: "sha256";
   hashReproducible?: boolean;
+}
+
+/**
+ * E2-B/F1 — the frozen `generatedBy`, copied field-by-field ONLY when the record
+ * carries a well-formed one. Like `exportMetadata`, the persisted shape is not
+ * validated on read, so it is checked here: anything other than an object whose
+ * `displayName` and `maskedEmail` are each a string or null is omitted, never
+ * coerced or synthesized.
+ */
+function frozenGeneratedBy(value: unknown): { displayName: string | null; maskedEmail: string | null } | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const v = value as { displayName?: unknown; maskedEmail?: unknown };
+  const okField = (f: unknown) => f === null || typeof f === "string";
+  if (!("displayName" in v) || !("maskedEmail" in v) || !okField(v.displayName) || !okField(v.maskedEmail)) return undefined;
+  return { displayName: v.displayName as string | null, maskedEmail: v.maskedEmail as string | null };
 }
 
 /** Derived purely from `format` — DOCX regeneration cannot reproduce its original whole-file hash. Duplicates the Personal list's one-line derivation; identical today, pinned together by no test (see the header's shared-vs-duplicated note). */
@@ -725,9 +746,10 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
 
   // ── The list itself ──
   // E2A-S7: authority was settled entirely above, from the CURRENT caller's
-  // Workspace standing. Nothing below consults `createdBy`; it is projected as
-  // metadata only, so a current reader who created none of these exports sees
-  // them, and a removed creator sees nothing because they never get here.
+  // Workspace standing. Nothing below consults `createdBy` (and, since E2-B/F1,
+  // nothing projects it either), so a current reader who created none of these
+  // exports sees them, and a removed creator sees nothing because they never
+  // get here.
   const listResult = await listAdaptiveExportRecords(runId, { limit, beforeReportVersion });
   if (!listResult.ok) {
     // R1 normalised this to 503 (one condition, one contract). R2 P3-1/§28 then
@@ -775,7 +797,10 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
     format: r.format,
     artifactStatus: r.artifactStatus,
     createdAt: r.createdAt,
-    createdBy: r.createdBy,
+    ...(() => {
+      const generatedBy = frozenGeneratedBy(r.generatedBy);
+      return generatedBy ? { generatedBy } : {};
+    })(),
     governanceStatusAtExport: r.governanceStatusAtExport,
     classification: r.classification,
     // BLIND_CAST_HARDENING. `exportMetadata` is declared required on
