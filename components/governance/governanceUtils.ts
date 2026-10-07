@@ -29,13 +29,6 @@ export function formatFullDatetime(iso: string): string {
   return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
-/** Audit "Run by": never show a raw UID where an email is expected. */
-export function formatAuditRunOwnerDisplay(runOwnerEmail?: string): string {
-  const e = (runOwnerEmail ?? "").trim();
-  if (e && e.includes("@")) return e;
-  return "Unknown user";
-}
-
 export function truncateText(s: string, max: number): string {
   const t = (s || "").trim();
   if (t.length <= max) return t;

@@ -21,12 +21,12 @@ import { useUserPlan } from "@/hooks/useUserPlan";
 import type { GovernancePolicy } from "@/lib/governance/evaluateGovernance";
 import { getModelDisplayName } from "@/lib/modelInfo";
 import {
-  formatAuditRunOwnerDisplay,
   formatFullDatetime,
   formatRelativeTime,
   readApiErrorMessage,
   truncateText,
 } from "./governanceUtils";
+import { auditActorDisplay, auditRunOwnerDisplay, type AuditIdentityViewer } from "./auditIdentityDisplay";
 import { maskEmail } from "@/lib/utils/maskEmail";
 
 type TabId = "queue" | "policies" | "audit";
@@ -233,8 +233,8 @@ type AuditEvent = {
   runId?: string;
   collection?: string;
   runType?: string;
-  runOwnerUid?: string;
   runOwnerEmail?: string;
+  runOwnerIsViewer?: boolean;
   question?: string;
   consensusScore?: number | null;
 };
@@ -399,24 +399,20 @@ function AuditResultBlock({ ev }: { ev: AuditEvent }) {
   return null;
 }
 
-function AuditLogEventCard(props: {
+/** Exported for the list/trail identity-parity render test only. */
+export function AuditLogEventCard(props: {
   ev: AuditEvent;
   inlineTrail: AuditInlineTrailState;
   onToggleTrail: () => void;
-  currentUserEmail?: string | null;
+  viewer: AuditIdentityViewer;
 }) {
-  const { ev, inlineTrail, onToggleTrail, currentUserEmail } = props;
+  const { ev, inlineTrail, onToggleTrail, viewer } = props;
   const expanded = inlineTrail?.eventId === ev.id;
   const trail = expanded ? inlineTrail : null;
   const rt = runTypeAuditBadge(ev.runType);
-  const runByRaw = formatAuditRunOwnerDisplay(ev.runOwnerEmail);
-  const runBy = runByRaw.includes("@")
-    ? (currentUserEmail && runByRaw.toLowerCase() === currentUserEmail.trim().toLowerCase()
-        ? "You"
-        : maskEmail(runByRaw))
-    : runByRaw;
+  const runBy = auditRunOwnerDisplay(ev, viewer);
   const actorLabel = actorByLabelForAction(ev.action);
-  const actorDisplay = auditActorDisplay(ev, currentUserEmail);
+  const actorDisplay = auditActorDisplay(ev, viewer);
   const border = auditCardLeftBorder(ev.action);
   const score =
     typeof ev.consensusScore === "number" && Number.isFinite(ev.consensusScore)
@@ -550,7 +546,7 @@ function AuditLogEventCard(props: {
                   {auditStatusLine(e) ? (
                     <p className="mt-1 text-cp-muted">{auditStatusLine(e)}</p>
                   ) : null}
-                  <p className="mt-0.5 text-cp-muted">by {auditActorDisplay(e, currentUserEmail)}</p>
+                  <p className="mt-0.5 text-cp-muted">by {auditActorDisplay(e, viewer)}</p>
                   {e.comment?.trim() ? (
                     <p className="mt-1 italic text-cp-muted">&quot;{e.comment}&quot;</p>
                   ) : null}
@@ -562,23 +558,6 @@ function AuditLogEventCard(props: {
       ) : null}
     </li>
   );
-}
-
-function auditActorDisplay(ev: AuditEvent, currentUserEmail?: string | null): string {
-  if (
-    ev.byUid === "system" ||
-    ev.byEmail === "system@convergepanel.com" ||
-    ev.byEmail === "system"
-  ) {
-    return "System";
-  }
-  const email = (ev.byEmail || "").trim();
-  if (!email.includes("@")) return (ev.byUid || "—").trim() || "—";
-
-  if (currentUserEmail && email.toLowerCase() === currentUserEmail.trim().toLowerCase()) {
-    return "You";
-  }
-  return maskEmail(email);
 }
 
 function auditStatusLine(ev: AuditEvent): string | null {
@@ -1893,7 +1872,7 @@ export default function GovernanceDashboard() {
                   ev={ev}
                   inlineTrail={auditInlineTrail}
                   onToggleTrail={() => void toggleAuditInlineTrail(ev)}
-                  currentUserEmail={user?.email}
+                  viewer={{ uid: user?.uid, email: user?.email }}
                 />
               ))}
             </ul>
