@@ -98,9 +98,17 @@ function event(id: string, collection: string, runId: string, extra: Record<stri
   return { id, data: { action: "approved", byUid: VIEWER, byEmail: "r@example.com", at: `2026-09-10T00:00:${id.slice(-2)}.000Z`, collection, runId, runOwnerUid: CREATOR, question: `question ${runId}`, ...extra } };
 }
 
+/** Parent reads for Claim/Video classification only (owner-profile `users/` and, since roadmap 4.3a, `runs/` batches are separate). */
+const verificationParentCalls = () =>
+  mockedGetAll.mock.calls.filter((c) => c.some((a: any) => a && a.__path && (a.__path.startsWith("verifications/") || a.__path.startsWith("videoVerifications/"))));
+const runParentCalls = () => mockedGetAll.mock.calls.filter((c) => c.some((a: any) => a && a.__path && a.__path.startsWith("runs/")));
+
 beforeEach(() => {
   jest.clearAllMocks();
   parents.clear();
+  // Roadmap 4.3a: a research event is listed only when its parent run exists in
+  // the legacy-governance domain; the shared fixture run is legacy.
+  parents.set("runs/research-run", { userId: CREATOR });
   auditRows = [];
   calls.runScopedAuditQuery = 0;
   calls.governanceEventsQuery = 0;
@@ -175,9 +183,10 @@ describe("global audit list", () => {
     expect(JSON.stringify(r.body)).not.toContain("team-video");
   });
 
-  it("classification is ONE batched, field-masked parent read — never per event, never for research runs", async () => {
+  it("classification is ONE batched, field-masked parent read per parent kind — never per event", async () => {
     auditRows = [];
     for (let i = 10; i < 40; i++) {
+      parents.set(`runs/run-${i}`, { userId: CREATOR });
       parents.set(`verifications/claim-${i}`, i % 2 === 0 ? { workspaceId: "ws-1" } : {});
       auditRows.push(event(`e${i}`, "verifications", `claim-${i}`));
       auditRows.push(event(`r${i}`, "runs", `run-${i}`, { at: `2026-09-09T00:00:${i}.000Z` }));
@@ -185,23 +194,27 @@ describe("global audit list", () => {
     asViewer(VIEWER, [CREATOR]);
     const r = await get("?limit=50");
     expect(r.status).toBe(200);
-    const parentCalls = mockedGetAll.mock.calls.filter((c) => c.some((a: any) => a && a.__path && !a.__path.startsWith("users/")));
+    const parentCalls = verificationParentCalls();
     expect(parentCalls).toHaveLength(1);
     const refs = parentCalls[0].filter((a: any) => a && a.__path);
     expect(refs).toHaveLength(30);
     expect(refs.every((ref: any) => ref.__path.startsWith("verifications/"))).toBe(true);
     expect(parentCalls[0][parentCalls[0].length - 1]).toEqual({ fieldMask: ["workspaceId"] });
+    const runCalls = runParentCalls();
+    expect(runCalls).toHaveLength(1);
+    expect(runCalls[0].filter((a: any) => a && a.__path)).toHaveLength(30);
+    expect(runCalls[0][runCalls[0].length - 1]).toEqual({ fieldMask: ["userId", "workspaceId"] });
     const ids: string[] = r.body.events.map((e: any) => e.id);
     expect(ids.some((id) => id.startsWith("e") && Number(id.slice(1)) % 2 === 0)).toBe(false);
     expect(ids.filter((id) => id.startsWith("e"))).toHaveLength(15);
   });
 
-  it("no verification events -> zero parent reads", async () => {
+  it("no verification events -> zero verification parent reads; policy rows read nothing", async () => {
     auditRows = [event("e05", "runs", "research-run"), { id: "p01", data: { action: "policy_updated", byUid: VIEWER, at: "2026-09-10T00:00:01.000Z" } }];
     asViewer(VIEWER, [CREATOR]);
     const r = await get("");
     expect(r.body.events.map((e: any) => e.id)).toEqual(["e05", "p01"]);
-    const parentCalls = mockedGetAll.mock.calls.filter((c) => c.some((a: any) => a && a.__path && !a.__path.startsWith("users/")));
+    const parentCalls = verificationParentCalls();
     expect(parentCalls).toHaveLength(0);
   });
 
@@ -227,7 +240,7 @@ describe("global audit list", () => {
     expect(json).not.toContain(sensitive);
     expect(json).not.toContain("deleted-parent");
     expect(json).not.toContain("Team artifact question");
-    const parentCalls = mockedGetAll.mock.calls.filter((c) => c.some((a: any) => a && a.__path && !a.__path.startsWith("users/")));
+    const parentCalls = verificationParentCalls();
     expect(parentCalls).toHaveLength(1);
     expect(parentCalls[0].filter((a: any) => a && a.__path).map((a: any) => a.__path).sort()).toEqual(
       [`${collection}/deleted-parent`, `${collection}/${personalId}`, `${collection}/${teamId}`].sort()
@@ -317,7 +330,7 @@ describe("global audit list", () => {
     expect(r.status).toBe(200);
     expect(r.body.events.map((e: any) => e.id)).toEqual(["e38"]);
     expect(JSON.stringify(r.body)).not.toContain("NO-RUNID-SECRET");
-    const parentCalls = mockedGetAll.mock.calls.filter((c) => c.some((a: any) => a && a.__path && !a.__path.startsWith("users/")));
+    const parentCalls = verificationParentCalls();
     expect(parentCalls).toHaveLength(0);
   });
 
@@ -331,7 +344,7 @@ describe("global audit list", () => {
     asViewer(VIEWER, [CREATOR]);
     const r = await get("?from=2026-01-01&limit=50");
     expect(r.status).toBe(200);
-    const parentCalls = mockedGetAll.mock.calls.filter((c) => c.some((a: any) => a && a.__path && !a.__path.startsWith("users/")));
+    const parentCalls = verificationParentCalls();
     const sizes = parentCalls.map((c) => c.filter((a: any) => a && a.__path).length);
     expect(sizes).toEqual([100, 100, 30]);
     expect(r.body.events).toHaveLength(50);

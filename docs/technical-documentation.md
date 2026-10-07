@@ -871,6 +871,18 @@ Action types: `evaluated` · `approved` · `blocked` · `changes_requested` · `
   - A failed pending load is shown as an error and is never replaced with snapshot data.
 - **Outside this contract:** documents with no `governanceStatus` (legacy rows or failed evaluations), and the `admin_global` scope.
 
+### Governance Audit Log domain containment (`/governance`, roadmap 4.3a)
+
+The global audit list (`GET /api/governance/audit`) never advertises an event whose trail drilldown is concealed.
+
+- **Run-backed events.** These are events with a real `runId` (not `"policy"`) whose `collection` is `"runs"` or absent; the trail drills into `runs` when the field is absent.
+  - Each parent is classified by the drilldown's own `validateRunWorkspaceAssociation`, through the shared batched integrity cache.
+  - Legacy and personal-bound runs stay.
+  - Team Workspace runs are suppressed, along with malformed, missing or unclassifiable parents and unknown collection values.
+- **Claims/Videos** keep their existing containment, and `policy_updated` rows are untouched.
+- **Reads.** Parents are read in one field-masked `getAll()` batch per parent kind (`userId`/`workspaceId` for runs, `workspaceId` for Claims/Videos). Owner-identity presentation reuses the same run batch.
+- **Read failure.** A failed list classification read answers 500 (fail closed).
+
 ### Multi-Reviewer Governance (adaptive runs, team plan)
 
 A separate, panel-based review workflow layered on top of the adaptive schema system's `governanceRecord.humanReview`, distinct from the single-reviewer policy engine above. Lives at `runs/{runId}/humanReviewPanel/current` (one active panel per run) plus `runs/{runId}/humanReviewVotes/{revision}:{reviewerUid}` and `runs/{runId}/humanReviewPanelHistory/{revision}:{event}`. Panel lifecycle: create (`PUT`) → reviewers vote (`POST .../votes`) → aggregation reaches `waiting` / `deadlocked` / `ready` → finalize (`POST .../finalize`, majority aggregation) or owner override (`POST .../override`, breaks a deadlock) → cancel (`DELETE`) is available at any open-panel state as a drain operation. Route: `app/api/teams/adaptive-runs/[runId]/review-panel/`.
