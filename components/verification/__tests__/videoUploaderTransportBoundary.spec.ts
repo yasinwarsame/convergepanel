@@ -461,7 +461,7 @@ describe("the Personal wrapper owns exactly one endpoint", () => {
 describe("no Team creation surface exists yet", () => {
   it.each([SURFACE, CONTRACT, PERSONAL])("%s adds no Team create affordance", (p) => {
     const code = stripComments(read(p));
-    for (const forbidden of ["videos/new", "New Video", "useTeamVideoVerificationCreate", "TeamVideoComposer", "video-verifications"]) {
+    for (const forbidden of ["videos/new", "New Video", "Verify New Video", "useTeamVideoVerificationCreate", "TeamVideoComposer", "video-verifications"]) {
       expect(code).not.toContain(forbidden);
     }
   });

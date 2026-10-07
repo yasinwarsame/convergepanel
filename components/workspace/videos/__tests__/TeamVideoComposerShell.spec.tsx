@@ -342,3 +342,30 @@ describe("free-plan and quota states come from the shared surface", () => {
     expect(plain(r)).toContain("You've used all 20 video verifications this month.");
   });
 });
+
+describe("roadmap 4.4b — heading and breadcrumb", () => {
+  function breadcrumb(r: TestRenderer.ReactTestRenderer) {
+    const bc = r.root.findAll((n) => n.props?.["aria-label"] === "Breadcrumb")[0];
+    const lis = bc.findAll((n) => n.type === "ol")[0].findAll((n) => n.type === "li");
+    return { lis, labels: lis.map((li) => nodeText(li).replace(/^\//, "")) };
+  }
+
+  it("the page heading is 'Verify a video'", async () => {
+    const r = await mount(null);
+    const h1 = r.root.findAll((n) => n.type === "h1");
+    expect(h1.map((h) => nodeText(h))).toEqual(["Verify a video"]);
+  });
+
+  it("Unfiled: Workspace -> Videos -> Verify a video", async () => {
+    const { lis, labels } = breadcrumb(await mount(null));
+    expect(labels).toEqual(["Acme", "Videos", "Verify a video"]);
+    expect(lis[1].findAll((n) => n.type === "a")[0].props.href).toBe(`/workspace/team/${W}/videos`);
+  });
+
+  it("Project: Workspace -> Projects -> Project -> Verify a video, the same hierarchy as Claims", async () => {
+    const { lis, labels } = breadcrumb(await mount({ id: "p1", name: "Launch Plan" }));
+    expect(labels).toEqual(["Acme", "Projects", "Launch Plan", "Verify a video"]);
+    expect(lis[1].findAll((n) => n.type === "a")[0].props.href).toBe(`/workspace/team/${W}/projects`);
+    expect(lis[2].findAll((n) => n.type === "a")[0].props.href).toBe(`/workspace/team/${W}/projects/p1`);
+  });
+});

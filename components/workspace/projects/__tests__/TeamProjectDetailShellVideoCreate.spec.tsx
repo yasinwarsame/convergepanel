@@ -100,7 +100,7 @@ describe("the Project-filed New Video entry point", () => {
     const links = createLinks(r);
     expect(links).toHaveLength(1);
     expect(links[0].props.href).toBe(`/workspace/team/${W}/projects/${P}/videos/new`);
-    expect(String(links[0].children.join(""))).toContain("New Video");
+    expect(String(links[0].children.join("")).trim()).toBe("Verify New Video");
   });
 
   it("hides it from a viewer who cannot create", async () => {

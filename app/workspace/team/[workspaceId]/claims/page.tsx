@@ -48,7 +48,7 @@ export default async function TeamWorkspaceClaimsPage({ params }: { params: { wo
       workspaceName={access.workspace.name}
       showMembers={access.capabilities.includes("members.read")}
       showAudit={access.capabilities.includes("audit.read")}
-      // R4-I3 — narrow presentation hint for the "New Claim" entry point. The
+      // R4-I3 — narrow presentation hint for the "Verify New Claim" entry point. The
       // POST re-derives `research.create` at both gates; this only decides
       // whether a link that would otherwise 404 is offered.
       canCreateClaim={access.capabilities.includes("research.create")}

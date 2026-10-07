@@ -139,26 +139,26 @@ beforeEach(() => {
 });
 
 describe("route-bound presentation", () => {
-  it("Unfiled: Workspace -> Claims -> New claim, with Claims active", async () => {
+  it("Unfiled: Workspace -> Claims -> Verify a claim, with Claims active", async () => {
     const r = await mount(UNFILED);
     const nav = r.root.findAll((n) => n.props?.["aria-label"] === "Workspace")[0];
     expect(nodeText(nav.findAll((n) => n.props?.["aria-current"] === "page")[0])).toBe("Claims");
 
     const bc = r.root.findAll((n) => n.props?.["aria-label"] === "Breadcrumb")[0];
     const lis = bc.findAll((n) => n.type === "ol")[0].findAll((n) => n.type === "li");
-    expect(lis.map((li) => nodeText(li).replace(/^\//, ""))).toEqual(["Acme Team", "Claims", "New claim"]);
+    expect(lis.map((li) => nodeText(li).replace(/^\//, ""))).toEqual(["Acme Team", "Claims", "Verify a claim"]);
     expect(lis[1].findAll((n) => n.type === "a")[0].props.href).toBe("/workspace/team/ws-1/claims");
     expect(nodeText(byTestId(r, "team-claim-create-scope")[0])).toContain("Unfiled");
   });
 
-  it("Project: Workspace -> Projects -> Project -> New claim, with Projects active", async () => {
+  it("Project: Workspace -> Projects -> Project -> Verify a claim, with Projects active", async () => {
     const r = await mount(FILED);
     const nav = r.root.findAll((n) => n.props?.["aria-label"] === "Workspace")[0];
     expect(nodeText(nav.findAll((n) => n.props?.["aria-current"] === "page")[0])).toBe("Projects");
 
     const bc = r.root.findAll((n) => n.props?.["aria-label"] === "Breadcrumb")[0];
     const lis = bc.findAll((n) => n.type === "ol")[0].findAll((n) => n.type === "li");
-    expect(lis.map((li) => nodeText(li).replace(/^\//, ""))).toEqual(["Acme Team", "Projects", "Launch Plan", "New claim"]);
+    expect(lis.map((li) => nodeText(li).replace(/^\//, ""))).toEqual(["Acme Team", "Projects", "Launch Plan", "Verify a claim"]);
     expect(nodeText(byTestId(r, "team-claim-create-scope")[0])).toContain("Launch Plan");
   });
 

@@ -89,7 +89,7 @@ describe("the Workspace Videos entry point", () => {
     const links = newLinks(r);
     expect(links).toHaveLength(1);
     expect(links[0].props.href).toBe(`/workspace/team/${W}/videos/new`);
-    expect(String(links[0].children.join(""))).toContain("New Video");
+    expect(String(links[0].children.join("")).trim()).toBe("Verify New Video");
   });
 
   it("hides it entirely from a viewer who cannot create", async () => {

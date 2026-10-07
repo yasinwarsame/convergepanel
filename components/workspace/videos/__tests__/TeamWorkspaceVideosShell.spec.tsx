@@ -217,7 +217,7 @@ describe("no creation surface", () => {
     // is pinned in `teamVideoCreateAffordances.spec.tsx`.
     mockedAuthedFetch.mockResolvedValue(response(200, body([])));
     const withHint = text(await mount({ ...PROPS, canCreateVideo: true }));
-    expect(withHint).toContain("New Video");
+    expect(withHint).toContain("Verify New Video");
     expect(withHint).toContain("/videos/new");
   });
 });

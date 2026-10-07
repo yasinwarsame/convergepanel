@@ -71,7 +71,7 @@ export default function TeamWorkspaceClaimsShell({ workspaceId, workspaceName, s
             className="rounded-lg bg-cp-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent"
             data-testid="team-claims-new"
           >
-            New Claim
+            Verify New Claim
           </Link>
         )}
       </div>

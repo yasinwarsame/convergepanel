@@ -258,12 +258,14 @@ describe("boundaries", () => {
 });
 
 describe("R4-I3 create entry point", () => {
-  it("offers New Claim when the viewer holds research.create", async () => {
+  it("offers Verify New Claim when the viewer holds research.create", async () => {
     mockedAuthedFetch.mockResolvedValue(response(200, body([])));
     const r = await mount(PROPS_CREATE);
     const cta = r.root.findAll((n) => n.type === "a" && n.props?.["data-testid"] === "team-claims-new");
     expect(cta).toHaveLength(1);
     expect(cta[0].props.href).toBe("/workspace/team/ws-1/claims/new");
+    // Roadmap 4.4b — the exact label, so a regression to "New Claim" fails.
+    expect(String(cta[0].children.join("")).trim()).toBe("Verify New Claim");
   });
 
   it("omits New Claim entirely without research.create", async () => {

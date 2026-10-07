@@ -352,7 +352,7 @@ export default function TeamProjectDetailShell({
                 className="rounded-lg border border-cp-border px-3 py-1.5 text-sm font-medium text-cp-text hover:bg-cp-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent"
                 data-testid="team-project-claims-new"
               >
-                New Claim
+                Verify New Claim
               </Link>
             )}
           </div>
@@ -391,7 +391,7 @@ export default function TeamProjectDetailShell({
 
       {/*
         R5-I2 — the read-only Project Videos section. Read-only in the strongest
-        sense: there is no New Video control for any role, because R5-I3 owns
+        sense: there is no Verify New Video control for any role, because R5-I3 owns
         Team Video creation. An ARCHIVED Project keeps this section readable —
         archiving withdraws the ability to file NEW work, not the ability to
         read what is already filed.
@@ -406,7 +406,7 @@ export default function TeamProjectDetailShell({
                 className="rounded-lg border border-cp-border px-3 py-1.5 text-sm font-medium text-cp-text hover:bg-cp-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent"
                 data-testid="team-project-videos-new"
               >
-                New Video
+                Verify New Video
               </Link>
             )}
           </div>
