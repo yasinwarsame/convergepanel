@@ -1366,7 +1366,8 @@ const exportRecord = (reportVersion: number, over: Record<string, unknown> = {})
   createdBy: CREATOR_UID,
   // E1 writes this UNCONDITIONALLY (`resolveExportGeneratedBy(uid)`), so every
   // real Team record carries the creator's frozen display name and masked
-  // email. It is NOT in the DTO — Personal excludes it too (identical 13 keys).
+  // email. Since E2-B/F1 it IS the DTO's generator identity (replacing the raw
+  // `createdBy` uid), copied field-by-field from this frozen value.
   generatedBy: { displayName: "SENTINEL_CREATOR_DISPLAY_NAME", maskedEmail: "SENTINEL_MASKED_EMAIL" },
   governanceStatusAtExport: { family: "milestone2", kind: "approved", isOwnerOverride: false },
   classification: "internal",
@@ -1497,12 +1498,13 @@ const listFake = (records = [exportRecord(3), exportRecord(2)], hasMore = false)
  *   | schemaId / schemaFamily   | yes            | → DTO                         |
  *   | format                    | yes            | → DTO + isHashReproducible()  |
  *   | artifactStatus            | yes            | → DTO                         |
- *   | createdAt / createdBy     | yes            | → DTO (metadata, not authority)|
+ *   | createdAt                 | yes            | → DTO                         |
+ *   | createdBy                 | NO             | raw uid — E2-B/F1 removed it  |
  *   | classification            | yes            | → DTO                         |
  *   | governanceStatusAtExport  | yes            | → DTO (copied wholesale)      |
  *   | exportMetadata            | yes            | fileHash trio ONLY            |
  *   | reportSnapshot            | NO             | the frozen report content     |
- *   | generatedBy               | NO             | creator display name + email  |
+ *   | generatedBy               | yes            | displayName + maskedEmail ONLY|
  *   | failureReason             | NO             | internal failure text         |
  *   | version / runId / schemaVersion | NO       | not DTO fields                |
  *   | anything else             | NO             | default deny                  |
@@ -1515,7 +1517,7 @@ const ALLOWED_SOURCE_PROPS: readonly string[] = Object.freeze([
   "format",                   // → DTO.format, and isHashReproducible()
   "artifactStatus",           // → DTO.artifactStatus
   "createdAt",                // → DTO.createdAt
-  "createdBy",                // → DTO.createdBy (metadata, never authority)
+  "generatedBy",              // → DTO.generatedBy (frozen, presentation-safe; E2-B/F1)
   "classification",           // → DTO.classification
   "governanceStatusAtExport", // → DTO.governanceStatusAtExport
   "exportMetadata",           // → fileHash / hashAlgorithm / hashReproducible ONLY
@@ -1523,7 +1525,7 @@ const ALLOWED_SOURCE_PROPS: readonly string[] = Object.freeze([
 /** Every other property `AdaptiveResearchExportV1` actually carries. `reportSnapshot` is the one this invariant is named for; the rest are forbidden because the DTO does not consume them, so a future read is a deliberate contract change rather than a silent one. */
 const FORBIDDEN_SOURCE_PROPS: readonly string[] = Object.freeze([
   "reportSnapshot", // the frozen report content — the whole point
-  "generatedBy",    // the creator's frozen display name + masked email
+  "createdBy",      // the creator's RAW uid — never projected since E2-B/F1
   "failureReason",  // internal failure text
   "version",        // contract version, not a DTO field
   "runId",          // the envelope carries the route's own runId, not the record's
@@ -1651,6 +1653,8 @@ let trapMode: "proxy" | "accessor" | "plain" = "accessor";
  * its own allow-list.
  */
 const ALLOWED_EXPORT_METADATA_PROPS: readonly string[] = Object.freeze(["fileHash"]);
+/** E2-B/F1 — `generatedBy` is allowed as a container, but only its two presentation fields may be read. */
+const ALLOWED_GENERATED_BY_PROPS: readonly string[] = Object.freeze(["displayName", "maskedEmail"]);
 
 const trapContainer = (value: unknown, label: string, allowed: readonly string[], sink: AccessSink): unknown => {
   if (value === null || typeof value !== "object") return value;
@@ -1677,6 +1681,9 @@ const trapRecord = (record: Record<string, unknown>, label: string, sink: Access
         if (FORBIDDEN_SOURCE_PROPS.includes(prop)) { sink.forbidden.push(`${label}.${prop}`); /* witness is per-request now */ }
         if (prop === "exportMetadata") {
           return trapContainer(Reflect.get(target, prop, receiver), `${label}.exportMetadata`, ALLOWED_EXPORT_METADATA_PROPS, sink);
+        }
+        if (prop === "generatedBy") {
+          return trapContainer(Reflect.get(target, prop, receiver), `${label}.generatedBy`, ALLOWED_GENERATED_BY_PROPS, sink);
         }
       }
       return Reflect.get(target, prop, receiver);
@@ -1714,6 +1721,9 @@ const accessorRecord = (record: Record<string, unknown>, label: string, sink: Ac
         if (FORBIDDEN_SOURCE_PROPS.includes(prop)) { sink.forbidden.push(`${label}.${prop}`); /* witness is per-request now */ }
         if (prop === "exportMetadata") {
           return trapContainer(value, `${label}.exportMetadata`, ALLOWED_EXPORT_METADATA_PROPS, sink);
+        }
+        if (prop === "generatedBy") {
+          return trapContainer(value, `${label}.generatedBy`, ALLOWED_GENERATED_BY_PROPS, sink);
         }
         return value;
       },
@@ -2026,8 +2036,9 @@ const runRequiredChecks = (c: RequiredCheckContext): RequiredCheckId[] => {
  * actually guarantee. That is the difference between a check and a wish.
  */
 const S8C_ENVELOPE_KEYS: readonly string[] = Object.freeze(["ok", "runId", "exports", "hasMore", "nextCursor"]);
-const S8C_ITEM_REQUIRED: readonly string[] = Object.freeze(["exportId", "reportVersion", "schemaId", "schemaFamily", "format", "artifactStatus", "createdAt", "createdBy", "governanceStatusAtExport", "classification"]);
-const S8C_ITEM_OPTIONAL: readonly string[] = Object.freeze(["fileHash", "hashAlgorithm", "hashReproducible"]);
+const S8C_ITEM_REQUIRED: readonly string[] = Object.freeze(["exportId", "reportVersion", "schemaId", "schemaFamily", "format", "artifactStatus", "createdAt", "governanceStatusAtExport", "classification"]);
+/** `generatedBy` is optional (E2-B/F1): present only when the frozen record carries a well-formed one. */
+const S8C_ITEM_OPTIONAL: readonly string[] = Object.freeze(["fileHash", "hashAlgorithm", "hashReproducible", "generatedBy"]);
 /**
  * R11 §19/§43 — A DOCUMENTED, BOUNDED TOLERANCE, discovered by this validator and
  * deliberately NOT "fixed" in the route.
@@ -2136,13 +2147,23 @@ const assertApprovedListDto = (json: unknown): void => {
     const absent = S8C_ITEM_REQUIRED.filter((k) => !(k in item));
     expect(`${at}:unexpectedlyAbsentKeys:${absent.filter((k) => !S8C_ITEM_TOLERATED_ABSENT.includes(k)).sort().join(",")}`).toBe(`${at}:unexpectedlyAbsentKeys:`);
     // No raw internal container may ride along inside an approved scalar field.
-    const containers = Object.keys(item).filter((k) => k !== "governanceStatusAtExport" && item[k] !== null && typeof item[k] === "object");
+    const containers = Object.keys(item).filter((k) => k !== "governanceStatusAtExport" && k !== "generatedBy" && item[k] !== null && typeof item[k] === "object");
     expect(`${at}:scalarFieldsCarryingContainers:${containers.sort().join(",")}`).toBe(`${at}:scalarFieldsCarryingContainers:`);
     expect(`${at}.schemaFamily:${item.schemaFamily}`).toBe(`${at}.schemaFamily:${item.schemaFamily === "legacy" ? "legacy" : "milestone2"}`);
     if ("hashAlgorithm" in item) expect(`${at}.hashAlgorithm:${item.hashAlgorithm}`).toBe(`${at}.hashAlgorithm:sha256`);
     if ("hashReproducible" in item) expect(`${at}.hashReproducible:isBoolean:${typeof item.hashReproducible === "boolean"}`).toBe(`${at}.hashReproducible:isBoolean:true`);
     if ("fileHash" in item) expect(`${at}.fileHash:isString:${typeof item.fileHash === "string"}`).toBe(`${at}.fileHash:isString:true`);
     assertApprovedGovernanceStatus(item.governanceStatusAtExport, `${at}.governanceStatusAtExport`);
+    // E2-B/F1 — the frozen generator identity: exactly two fields, each a string or null.
+    if ("generatedBy" in item) {
+      const g = item.generatedBy as Record<string, unknown> | null;
+      const shapeOk =
+        g !== null && typeof g === "object" && !Array.isArray(g) &&
+        Object.keys(g).sort().join(",") === "displayName,maskedEmail" &&
+        (g.displayName === null || typeof g.displayName === "string") &&
+        (g.maskedEmail === null || typeof g.maskedEmail === "string");
+      expect(`${at}.generatedBy:shape:${shapeOk}`).toBe(`${at}.generatedBy:shape:true`);
+    }
   });
 };
 
@@ -2320,8 +2341,7 @@ describe("E2-A — the authorized list path", () => {
     const r = await submit();
     const blob = JSON.stringify(r.json);
     for (const sentinel of [
-      "SENTINEL_CREATOR_DISPLAY_NAME", // generatedBy.displayName
-      "SENTINEL_MASKED_EMAIL",         // generatedBy.maskedEmail
+      CREATOR_UID,                     // createdBy — the raw uid (E2-B/F1)
       "SENTINEL_FAILURE_REASON",       // failureReason
       "SENTINEL_EXPORTED_SECTION",     // exportMetadata.exportedSections
       "SENTINEL_REQUESTING_USER",      // exportMetadata.requestingUser
@@ -2330,13 +2350,17 @@ describe("E2-A — the authorized list path", () => {
       expect(blob).not.toContain(sentinel);
     }
     // container names too: no raw persisted object is forwarded wholesale
-    for (const container of ["reportSnapshot", "exportMetadata", "generatedBy", "failureReason", "schemaVersion", "finalReportVersion"]) {
+    for (const container of ["reportSnapshot", "exportMetadata", "createdBy", "failureReason", "schemaVersion", "finalReportVersion"]) {
       expect(blob).not.toContain(container);
     }
+    // E2-B/F1: the frozen generator identity is copied exactly — both fields, nothing else.
+    for (const item of r.json.exports) {
+      expect(item.generatedBy).toEqual({ displayName: "SENTINEL_CREATOR_DISPLAY_NAME", maskedEmail: "SENTINEL_MASKED_EMAIL" });
+    }
     // the item projection is an allow-list: exactly these keys
-    expect(Object.keys(r.json.exports[0]).sort()).toEqual([...["artifactStatus", "classification", "createdAt", "createdBy", "exportId", "format", "governanceStatusAtExport", "reportVersion", "schemaFamily", "schemaId"], ...["fileHash", "hashAlgorithm", "hashReproducible"]].sort());
+    expect(Object.keys(r.json.exports[0]).sort()).toEqual([...["artifactStatus", "classification", "createdAt", "generatedBy", "exportId", "format", "governanceStatusAtExport", "reportVersion", "schemaFamily", "schemaId"], ...["fileHash", "hashAlgorithm", "hashReproducible"]].sort());
     // the FAILED record produced no bytes, so it carries none of the hash trio
-    expect(Object.keys(r.json.exports[1]).sort()).toEqual(["artifactStatus", "classification", "createdAt", "createdBy", "exportId", "format", "governanceStatusAtExport", "reportVersion", "schemaFamily", "schemaId"].sort());
+    expect(Object.keys(r.json.exports[1]).sort()).toEqual(["artifactStatus", "classification", "createdAt", "generatedBy", "exportId", "format", "governanceStatusAtExport", "reportVersion", "schemaFamily", "schemaId"].sort());
     // R2 (reviewer 1) P3: the TOP-LEVEL envelope is an allow-list too. Without
     // this, emitting the whole run document beside the list passed 35/35.
     expect(Object.keys(r.json).sort()).toEqual(["exports", "hasMore", "nextCursor", "ok", "runId"]);
@@ -2354,8 +2378,10 @@ describe("E2-A — the authorized list path", () => {
     expect(r.json.exports).toHaveLength(2);
     expect(r.json.exports.map((e: { exportId: string }) => e.exportId)).toEqual(["exp-3", "exp-2"]);
     expect(r.json.exports.map((e: { reportVersion: number }) => e.reportVersion)).toEqual([3, 2]);
-    // supporting evidence only: every returned record was created by someone else
-    expect(r.json.exports.map((e: { createdBy: string }) => e.createdBy)).toEqual([CREATOR_UID, CREATOR_UID]);
+    // supporting evidence only: the records were created by someone else — and
+    // since E2-B/F1 that creator's raw uid is not even in the response.
+    expect(JSON.stringify(r.json)).not.toContain(CREATOR_UID);
+    expect(r.json.exports.every((e: Record<string, unknown>) => !("createdBy" in e))).toBe(true);
   });
 
   it("E2A-S9 a role with research.read but WITHOUT exports.create can list", async () => {
@@ -2588,7 +2614,7 @@ describe("E2A-S10 — this route forwards paging and owns no paging policy", () 
     expect(item.fileHash).toBeUndefined();
     expect(item.hashAlgorithm).toBeUndefined();
     expect(item.hashReproducible).toBeUndefined();
-    expect(Object.keys(item).sort()).toEqual(["artifactStatus", "classification", "createdAt", "createdBy", "exportId", "format", "governanceStatusAtExport", "reportVersion", "schemaFamily", "schemaId"].sort());
+    expect(Object.keys(item).sort()).toEqual(["artifactStatus", "classification", "createdAt", "generatedBy", "exportId", "format", "governanceStatusAtExport", "reportVersion", "schemaFamily", "schemaId"].sort());
   });
 
   it("marks docx as non-reproducible and pdf as reproducible", async () => {
@@ -2859,7 +2885,7 @@ describe("R2 P2-4 — a malformed historical record cannot crash the list", () =
     expect(r.status).toBe(200);
     expect(r.json.exports).toHaveLength(2);
     expect(r.json.exports.map((e: { exportId: string }) => e.exportId)).toEqual(["exp-3", "exp-2"]);
-    expect(Object.keys(r.json.exports[0]).sort()).toEqual(["artifactStatus", "classification", "createdAt", "createdBy", "exportId", "format", "governanceStatusAtExport", "reportVersion", "schemaFamily", "schemaId"].sort());
+    expect(Object.keys(r.json.exports[0]).sort()).toEqual(["artifactStatus", "classification", "createdAt", "generatedBy", "exportId", "format", "governanceStatusAtExport", "reportVersion", "schemaFamily", "schemaId"].sort());
     // no synthesized hash, and the sibling record is unaffected
     expect(r.json.exports[0].fileHash).toBeUndefined();
     expect(r.json.exports[1].fileHash).toBe("f".repeat(64));
@@ -3105,7 +3131,7 @@ describe("E2A-S8 — the representative snapshots' sentinels do not reach the re
       // `path` is in the message so a failure names the leaking leaf, not just the value
       expect(`${path}=${blob.includes(needle)}`).toBe(`${path}=false`);
     }
-    expect(Object.keys(r.json.exports[0]).sort()).toEqual([...["artifactStatus", "classification", "createdAt", "createdBy", "exportId", "format", "governanceStatusAtExport", "reportVersion", "schemaFamily", "schemaId"], "fileHash", "hashAlgorithm", "hashReproducible"].sort());
+    expect(Object.keys(r.json.exports[0]).sort()).toEqual([...["artifactStatus", "classification", "createdAt", "generatedBy", "exportId", "format", "governanceStatusAtExport", "reportVersion", "schemaFamily", "schemaId"], "fileHash", "hashAlgorithm", "hashReproducible"].sort());
   });
 
   it("E2A-S8 no legacy fixture sentinel reaches the response", async () => {
@@ -3123,7 +3149,7 @@ describe("E2A-S8 — the representative snapshots' sentinels do not reach the re
     for (const [path, needle] of needles) {
       expect(`${path}=${blob.includes(needle)}`).toBe(`${path}=false`);
     }
-    expect(Object.keys(r.json.exports[0]).sort()).toEqual([...["artifactStatus", "classification", "createdAt", "createdBy", "exportId", "format", "governanceStatusAtExport", "reportVersion", "schemaFamily", "schemaId"], "fileHash", "hashAlgorithm", "hashReproducible"].sort());
+    expect(Object.keys(r.json.exports[0]).sort()).toEqual([...["artifactStatus", "classification", "createdAt", "generatedBy", "exportId", "format", "governanceStatusAtExport", "reportVersion", "schemaFamily", "schemaId"], "fileHash", "hashAlgorithm", "hashReproducible"].sort());
   });
 
   it("BOTH families list together, and neither leaks", async () => {
@@ -3425,7 +3451,7 @@ describe("E2A-S8B — the response is exactly the approved DTO, deeply", () => {
           format: "pdf",
           artifactStatus: "ready",
           createdAt: "2026-09-02T11:00:00.000Z",
-          createdBy: CREATOR_UID,
+          generatedBy: { displayName: "SENTINEL_CREATOR_DISPLAY_NAME", maskedEmail: "SENTINEL_MASKED_EMAIL" },
           governanceStatusAtExport: { family: "milestone2", kind: "approved", isOwnerOverride: false },
           classification: "internal",
           fileHash: "f".repeat(64),
@@ -3450,7 +3476,7 @@ describe("E2A-S8B — the response is exactly the approved DTO, deeply", () => {
         format: "pdf",
         artifactStatus: "ready",
         createdAt: "2026-09-02T11:00:00.000Z",
-        createdBy: CREATOR_UID,
+        generatedBy: { displayName: "SENTINEL_CREATOR_DISPLAY_NAME", maskedEmail: "SENTINEL_MASKED_EMAIL" },
         governanceStatusAtExport: { family: "legacy", status: "needs_review" },
         classification: "internal",
         fileHash: "f".repeat(64),
@@ -3465,7 +3491,7 @@ describe("E2A-S8B — the response is exactly the approved DTO, deeply", () => {
         format: "pdf",
         artifactStatus: "failed",
         createdAt: "2026-09-02T11:00:00.000Z",
-        createdBy: CREATOR_UID,
+        generatedBy: { displayName: "SENTINEL_CREATOR_DISPLAY_NAME", maskedEmail: "SENTINEL_MASKED_EMAIL" },
         governanceStatusAtExport: { family: "milestone2", kind: "approved", isOwnerOverride: false },
         classification: "internal",
       },
@@ -3852,7 +3878,7 @@ describe("R13 — the required-check registry is load-bearing, entry by entry", 
           format: "pdf",
           artifactStatus: "ready",
           createdAt: "2026-09-02T11:00:00.000Z",
-          createdBy: CREATOR_UID,
+          generatedBy: { displayName: "SENTINEL_CREATOR_DISPLAY_NAME", maskedEmail: "SENTINEL_MASKED_EMAIL" },
           governanceStatusAtExport: { family: "milestone2", kind: "approved", isOwnerOverride: false },
           classification: "internal",
         },
@@ -4309,7 +4335,7 @@ describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
         format: "pdf",
         artifactStatus: "ready",
         createdAt: "2026-09-02T11:00:00.000Z",
-        createdBy: CREATOR_UID,
+        generatedBy: { displayName: "SENTINEL_CREATOR_DISPLAY_NAME", maskedEmail: "SENTINEL_MASKED_EMAIL" },
         governanceStatusAtExport: { family: "milestone2", kind: "approved", isOwnerOverride: false },
         classification: "internal",
         fileHash: "f".repeat(64),
@@ -4540,6 +4566,50 @@ describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
     expect(sink.forbidden).toEqual(["probe.exportMetadata:requestingUser", "probe.exportMetadata:exportedSections"]);
   });
 
+  it("E2-B/F1 the generatedBy container allow-list CONTENTS are pinned, and the trap denies the rest", async () => {
+    expect([...ALLOWED_GENERATED_BY_PROPS]).toEqual(["displayName", "maskedEmail"]);
+    const sink = newSink();
+    const rec = trapRecord({ exportId: "x", generatedBy: { displayName: "d", maskedEmail: "m", uid: "raw-uid", email: "raw@x" } }, "probe", sink);
+    const container = rec.generatedBy as Record<string, unknown>;
+    void container.displayName;
+    void container.maskedEmail;
+    expect(sink.forbidden).toEqual([]);
+    void container.uid;
+    void container.email;
+    expect(sink.forbidden).toEqual(["probe.generatedBy:uid", "probe.generatedBy:email"]);
+  });
+
+  it("E2-B/F1 a record with an extra field inside generatedBy lists ONLY the two presentation fields", async () => {
+    mockedListExports.mockImplementation(listFake([exportRecord(3, { generatedBy: { displayName: "D", maskedEmail: "m***@x", uid: CREATOR_UID } })]));
+    const r = await submit();
+    expect(r.json.exports[0].generatedBy).toEqual({ displayName: "D", maskedEmail: "m***@x" });
+    expect(JSON.stringify(r.json)).not.toContain(CREATOR_UID);
+  });
+
+  it.each([
+    ["absent", undefined],
+    ["null", null],
+    ["a string", "Some Name"],
+    ["missing maskedEmail", { displayName: "D" }],
+    ["a non-string displayName", { displayName: 7, maskedEmail: null }],
+  ])("E2-B/F1 generatedBy %s on the frozen record -> no generator identity, never synthesized", async (_l, value) => {
+    const rec = exportRecord(3) as Record<string, unknown>;
+    if (value === undefined) delete rec.generatedBy;
+    else rec.generatedBy = value;
+    mockedListExports.mockImplementation(listFake([rec]));
+    const r = await submit();
+    expect(r.status).toBe(200);
+    expect(r.json.exports).toHaveLength(1);
+    expect("generatedBy" in r.json.exports[0]).toBe(false);
+    expect("createdBy" in r.json.exports[0]).toBe(false);
+  });
+
+  it("E2-B/F1 null fields inside a well-formed generatedBy are kept as null, not filled in", async () => {
+    mockedListExports.mockImplementation(listFake([exportRecord(3, { generatedBy: { displayName: null, maskedEmail: null } })]));
+    const r = await submit();
+    expect(r.json.exports[0].generatedBy).toEqual({ displayName: null, maskedEmail: null });
+  });
+
   it("§19/§20 each enumerated S8C violation is rejected, with its own diagnostic", () => {
     // The history of this count, because it moved three times and each move was a
     // measurement correcting a claim: R11 reported eleven assertions no test could
@@ -4622,7 +4692,7 @@ describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
     // assertion would catch is rejected by a neighbouring assertion anyway. Everything else
     // in the oracle is a direct falsifier.
     const derived: [string, unknown, RegExp][] = [
-      ["governance is not an object", { ...JSON.parse(JSON.stringify({ ok: true, runId: RUN, exports: [], hasMore: false, nextCursor: null })), exports: [{ exportId: "e", reportVersion: 1, schemaId: "s", schemaFamily: "milestone2", format: "pdf", artifactStatus: "ready", createdAt: "t", createdBy: "u", classification: "internal", governanceStatusAtExport: "not-an-object" }] }, /governanceStatusAtExport/],
+      ["governance is not an object", { ...JSON.parse(JSON.stringify({ ok: true, runId: RUN, exports: [], hasMore: false, nextCursor: null })), exports: [{ exportId: "e", reportVersion: 1, schemaId: "s", schemaFamily: "milestone2", format: "pdf", artifactStatus: "ready", createdAt: "t", classification: "internal", governanceStatusAtExport: "not-an-object" }] }, /governanceStatusAtExport/],
       ["envelope is not an object", "not-an-object", /envelope/],
       ["envelope is an array", [], /envelope/],
     ];
@@ -4777,8 +4847,11 @@ describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
    * behavioural falsifiers, so removing this pin does not remove leak protection, and
    * removing the behavioural controls does not remove policy-drift detection.
    */
-  it("§27 ALL TWELVE policy lists have EXACT membership pins", () => {
+  it("§27 ALL THIRTEEN policy lists have EXACT membership pins", () => {
     /**
+     * E2-B/F1 — THIRTEEN since `ALLOWED_GENERATED_BY_PROPS` joined the policy (the
+     * frozen generator identity's two readable fields). The history below is unchanged.
+     *
      * R17-C2 — WHY THIS COVERS TWELVE AND NOT THREE. R17 added exact pins for the three lists
      * R16 had named, and left the other nine on their behavioural protection alone. A reviewer
      * then found a twelfth gap that measurement should have caught and did not:
@@ -4796,18 +4869,19 @@ describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
     const EXPECTED: ReadonlyArray<readonly [string, readonly string[], readonly string[]]> = [
       ["ALLOWED_SOURCE_PROPS", ALLOWED_SOURCE_PROPS, [
         "exportId", "reportVersion", "schemaId", "schemaFamily", "format", "artifactStatus",
-        "createdAt", "createdBy", "classification", "governanceStatusAtExport", "exportMetadata",
+        "createdAt", "generatedBy", "classification", "governanceStatusAtExport", "exportMetadata",
       ]],
       ["FORBIDDEN_SOURCE_PROPS", FORBIDDEN_SOURCE_PROPS, [
-        "reportSnapshot", "generatedBy", "failureReason", "version", "runId", "schemaVersion",
+        "reportSnapshot", "createdBy", "failureReason", "version", "runId", "schemaVersion",
       ]],
       ["ALLOWED_EXPORT_METADATA_PROPS", ALLOWED_EXPORT_METADATA_PROPS, ["fileHash"]],
+      ["ALLOWED_GENERATED_BY_PROPS", ALLOWED_GENERATED_BY_PROPS, ["displayName", "maskedEmail"]],
       ["S8C_ENVELOPE_KEYS", S8C_ENVELOPE_KEYS, ["ok", "runId", "exports", "hasMore", "nextCursor"]],
       ["S8C_ITEM_REQUIRED", S8C_ITEM_REQUIRED, [
         "exportId", "reportVersion", "schemaId", "schemaFamily", "format", "artifactStatus",
-        "createdAt", "createdBy", "governanceStatusAtExport", "classification",
+        "createdAt", "governanceStatusAtExport", "classification",
       ]],
-      ["S8C_ITEM_OPTIONAL", S8C_ITEM_OPTIONAL, ["fileHash", "hashAlgorithm", "hashReproducible"]],
+      ["S8C_ITEM_OPTIONAL", S8C_ITEM_OPTIONAL, ["fileHash", "hashAlgorithm", "hashReproducible", "generatedBy"]],
       ["S8C_ITEM_TOLERATED_ABSENT", S8C_ITEM_TOLERATED_ABSENT, ["reportVersion"]],
       ["S8C_ENVELOPE_ERROR_KEYS", S8C_ENVELOPE_ERROR_KEYS, ["ok", "errorCode", "message"]],
       ["S8C_GOVERNANCE_KEYS.milestone2", S8C_GOVERNANCE_KEYS.milestone2, ["family", "kind", "isOwnerOverride", "conditions"]],
@@ -4815,7 +4889,7 @@ describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
       ["S8C_GOVERNANCE_REQUIRED.milestone2", S8C_GOVERNANCE_REQUIRED.milestone2, ["family", "kind", "isOwnerOverride"]],
       ["S8C_GOVERNANCE_REQUIRED.legacy", S8C_GOVERNANCE_REQUIRED.legacy, ["family", "status"]],
     ];
-    expect(`exactPinCount:${EXPECTED.length}`).toBe("exactPinCount:12");
+    expect(`exactPinCount:${EXPECTED.length}`).toBe("exactPinCount:13");
     for (const [name, actual, expected] of EXPECTED) {
       expect(`${name}:${sorted(actual).join(",")}`).toBe(`${name}:${sorted(expected).join(",")}`);
     }
@@ -4945,7 +5019,7 @@ describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
     // widening either constant is caught HERE as well as by the pin — two independent layers.
     // The literal required set is itself pinned against `S8C_ITEM_REQUIRED` by §27, so it cannot
     // drift away from the contract unnoticed.
-    const CONTRACT_REQUIRED_KEYS = ["exportId", "reportVersion", "schemaId", "schemaFamily", "format", "artifactStatus", "createdAt", "createdBy", "governanceStatusAtExport", "classification"];
+    const CONTRACT_REQUIRED_KEYS = ["exportId", "reportVersion", "schemaId", "schemaFamily", "format", "artifactStatus", "createdAt", "governanceStatusAtExport", "classification"];
     const CONTRACT_TOLERATED_ABSENT = ["reportVersion"];
     expect(`contractRequiredMatchesPolicy:${[...CONTRACT_REQUIRED_KEYS].sort().join(",")}`).toBe(`contractRequiredMatchesPolicy:${[...S8C_ITEM_REQUIRED].sort().join(",")}`);
     expect(`contractToleranceMatchesPolicy:${[...CONTRACT_TOLERATED_ABSENT].sort().join(",")}`).toBe(`contractToleranceMatchesPolicy:${[...S8C_ITEM_TOLERATED_ABSENT].sort().join(",")}`);
