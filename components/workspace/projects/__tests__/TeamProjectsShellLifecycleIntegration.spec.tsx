@@ -53,7 +53,7 @@ async function mountAndSettle() {
   fetchLog.length = 0;
   let renderer!: TestRenderer.ReactTestRenderer;
   await act(async () => {
-    renderer = TestRenderer.create(createElement(TeamProjectsShell, { workspaceId: "ws-1", workspaceName: "Acme", canCreateProject: true, canManageProjects: true, canReadAudit: false }));
+    renderer = TestRenderer.create(createElement(TeamProjectsShell, { workspaceId: "ws-1", workspaceName: "Acme", canCreateProject: true, canManageProjects: true, canReadMembers: true, canReadAudit: false }));
   });
   await act(async () => {
     await flush();

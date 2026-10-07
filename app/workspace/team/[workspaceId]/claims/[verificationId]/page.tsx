@@ -56,6 +56,7 @@ export default async function TeamUnfiledClaimDetailPage({ params }: { params: {
       // Presentation hint from the same server-resolved capability set — not a
       // second authorization decision. The full capability array never reaches
       // the client.
+      showMembers={access.capabilities.includes("members.read")}
       showAudit={access.capabilities.includes("audit.read")}
     />
   );

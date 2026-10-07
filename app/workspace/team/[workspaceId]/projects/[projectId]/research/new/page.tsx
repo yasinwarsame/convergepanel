@@ -84,6 +84,7 @@ export default async function TeamProjectResearchComposerPage({ params }: { para
     <TeamResearchComposerShell
       workspaceId={params.workspaceId}
       workspaceName={access.workspace.name}
+      canReadMembers={access.capabilities.includes("members.read")}
       canReadAudit={access.capabilities.includes("audit.read")}
       project={{ id: result.project.id, name: result.project.name }}
     />

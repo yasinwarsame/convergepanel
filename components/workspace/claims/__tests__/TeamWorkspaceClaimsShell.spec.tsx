@@ -28,7 +28,7 @@ import TeamWorkspaceClaimsShell from "@/components/workspace/claims/TeamWorkspac
 
 const W = "ws-1";
 const P = "proj-1";
-const PROPS = { workspaceId: W, workspaceName: "Acme Team", showAudit: true };
+const PROPS = { workspaceId: W, workspaceName: "Acme Team", showMembers: true, showAudit: true };
 const PROPS_CREATE = { ...PROPS, canCreateClaim: true };
 
 function item(over: Record<string, unknown> = {}) {
@@ -275,7 +275,7 @@ describe("R4-I3 create entry point", () => {
 
   it("defaults to omitting the CTA when the hint is absent", async () => {
     mockedAuthedFetch.mockResolvedValue(response(200, body([])));
-    const r = await mount({ workspaceId: W, workspaceName: "Acme Team", showAudit: true });
+    const r = await mount({ workspaceId: W, workspaceName: "Acme Team", showMembers: true, showAudit: true });
     expect(r.root.findAll((n) => n.props?.["data-testid"] === "team-claims-new")).toHaveLength(0);
   });
 

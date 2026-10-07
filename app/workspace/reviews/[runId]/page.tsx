@@ -25,6 +25,7 @@
  * `notFound()` — no message ever reveals whether a run exists.
  */
 
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { resolveServerComponentIdentity } from "@/lib/auth/resolveServerComponentIdentity";
 import { resolveApprovalWorkflowAdmission } from "@/lib/workspaces/approvalWorkflowRollout";
@@ -54,7 +55,20 @@ export default async function WorkspaceRunDetailPage({ params }: { params: { run
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-10 sm:py-14">
-      <p className="text-sm text-cp-muted">{detail.workspaceName}</p>
+      {/*
+        Roadmap 4.4a — the explicit return path to the SAME Workspace's queue.
+        `detail.workspaceId` is the run's own canonical Workspace (resolved by
+        getWorkspaceRunDetail(), never a route/query param), and the queue
+        page already selects a Workspace via `?workspace=`. Presentation only:
+        the queue re-checks admission and capabilities on its own.
+      */}
+      <Link
+        href={`/workspace/reviews?workspace=${encodeURIComponent(detail.workspaceId)}`}
+        className="text-sm font-medium text-cp-accent underline-offset-2 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent"
+      >
+        ← Back to reviews
+      </Link>
+      <p className="mt-4 text-sm text-cp-muted">{detail.workspaceName}</p>
       <h1 className="mt-1 text-2xl font-semibold text-cp-text">{detail.runLabel || "Untitled research"}</h1>
 
       <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">

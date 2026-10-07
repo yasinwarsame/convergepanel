@@ -53,3 +53,13 @@ describe("TeamWorkspacesLanding — handleCreate success navigates using the aut
     expect(genericErrorBranch![0]).not.toMatch(/router\.push/);
   });
 });
+
+describe("TeamWorkspacesLanding — roadmap 4.4a: list rows open the Workspace overview", () => {
+  it("each Workspace row links to /workspace/team/{id}, which every role can open", () => {
+    expect(source).toContain("href={`/workspace/team/${encodeURIComponent(item.workspaceId)}`}");
+  });
+
+  it("no row links to /members, which Reviewer and Viewer roles cannot open", () => {
+    expect(source).not.toMatch(/href=\{`\/workspace\/team\/\$\{[^}]+\}\/members`\}/);
+  });
+});

@@ -87,10 +87,17 @@ const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffec
 export default function WorkspaceNav({
   workspaceId,
   active,
+  showMembers,
   showAudit,
 }: {
   workspaceId: string;
   active: WorkspaceNavItem;
+  /**
+   * Whether to include the Members link — pass the caller's own `members.read`
+   * capability. Roadmap 4.4a: the Members page 404s without it (Reviewer and
+   * Viewer roles), so the nav must never offer it to them.
+   */
+  showMembers: boolean;
   /** Whether to include the Audit Log link — pass the caller's own `audit.read` capability. */
   showAudit: boolean;
 }) {
@@ -100,7 +107,7 @@ export default function WorkspaceNav({
     { key: "projects", label: "Projects", href: `${base}/projects` },
     { key: "claims", label: "Claims", href: `${base}/claims` },
     { key: "videos", label: "Videos", href: `${base}/videos` },
-    { key: "members", label: "Members", href: `${base}/members` },
+    ...(showMembers ? [{ key: "members" as const, label: "Members", href: `${base}/members` }] : []),
     ...(showAudit ? [{ key: "audit" as const, label: "Audit Log", href: `${base}/audit` }] : []),
   ];
 

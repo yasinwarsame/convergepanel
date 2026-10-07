@@ -76,6 +76,7 @@ export default async function TeamResearchDetailPage({
       project={{ id: projectResult.project.id, name: projectResult.project.name }}
       // Presentation hint from the same server-resolved capability set — not a
       // second authorization decision.
+      showMembers={access.capabilities.includes("members.read")}
       showAudit={access.capabilities.includes("audit.read")}
       // R4-I4 — verifying a claim from a Project-filed run results in a
       // Project-filed Claim, which the POST's gates require `research.organize`

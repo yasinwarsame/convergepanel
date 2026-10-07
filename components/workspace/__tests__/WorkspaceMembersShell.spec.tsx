@@ -522,7 +522,7 @@ describe("WorkspaceMembersShell — canonical Owner and self are never offered C
 describe("WorkspaceMembersShell — Workspace Audit Log, Phase TEAM-GOV-I1/12A.1: nav link", () => {
   it("Phase 12A.1 — renders the shared WorkspaceNav, passing canReadAudit straight through as showAudit (not a locally-duplicated tab strip)", () => {
     expect(source).toMatch(/import WorkspaceNav from ["']@\/components\/workspace\/WorkspaceNav["'];/);
-    expect(source).toMatch(/<WorkspaceNav workspaceId=\{workspaceId\} active="members" showAudit=\{!!canReadAudit\} \/>/);
+    expect(source).toMatch(/<WorkspaceNav workspaceId=\{workspaceId\} active="members" showMembers=\{canReadMembers\} showAudit=\{!!canReadAudit\} \/>/);
     // The old locally-duplicated <nav> markup must be gone — WorkspaceNav owns it now.
     expect(source).not.toMatch(/<nav className="mb-6 flex gap-4/);
   });
@@ -619,7 +619,7 @@ describe("Phase 11B.3 — Members breadcrumb", () => {
           callerRole: "owner" as never,
           canInvite: true,
           canManageInvitations: true,
-          canReadAudit: true,
+          canReadMembers: true, canReadAudit: true,
         })
       );
     });

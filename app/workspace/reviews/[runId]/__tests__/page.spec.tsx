@@ -185,3 +185,26 @@ describe("GET /workspace/reviews/[runId] — content, no mutation controls", () 
     }
   });
 });
+
+describe("GET /workspace/reviews/[runId] — roadmap 4.4a: return path to the same Workspace queue", () => {
+  const { renderToStaticMarkup } = require("react-dom/server") as typeof import("react-dom/server");
+
+  async function renderOk(workspaceId: string) {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: "viewer-1" });
+    approvalGlobal = true;
+    mockedGetWorkspaceRunDetail.mockResolvedValue({ ...VALID_DETAIL, detail: { ...VALID_DETAIL.detail, workspaceId } });
+    jest.doMock("@/components/workspace/WorkspaceRunReviewSection", () => () => null);
+    return renderToStaticMarkup((await callPage()) as any);
+  }
+
+  it("links back to /workspace/reviews scoped to the run's own Workspace", async () => {
+    const html = await renderOk("ws-1");
+    expect(html).toContain('href="/workspace/reviews?workspace=ws-1"');
+    expect(html).toContain("← Back to reviews");
+  });
+
+  it("encodes the Workspace id", async () => {
+    const html = await renderOk("ws/with space");
+    expect(html).toContain(`href="/workspace/reviews?workspace=${encodeURIComponent("ws/with space")}"`);
+  });
+});

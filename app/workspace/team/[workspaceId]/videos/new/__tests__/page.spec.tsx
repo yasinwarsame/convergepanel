@@ -125,7 +125,7 @@ describe("what crosses to the client", () => {
 
   it("never sends the capability set, membership or uid to the client", async () => {
     const props = await shellPropsOf();
-    expect(Object.keys(props).sort()).toEqual(["project", "showAudit", "workspaceId", "workspaceName"]);
+    expect(Object.keys(props).sort()).toEqual(["project", "showAudit", "showMembers", "workspaceId", "workspaceName"]);
     const blob = JSON.stringify(props);
     expect(blob).not.toContain(UID);
     expect(blob).not.toContain("research.create");

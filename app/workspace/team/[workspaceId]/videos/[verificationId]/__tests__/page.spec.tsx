@@ -107,6 +107,6 @@ describe("gate", () => {
 
   it("never hands the capability array to the client", async () => {
     const props = await shellPropsOf();
-    expect(Object.keys(props).sort()).toEqual(["project", "showAudit", "verificationId", "workspaceId", "workspaceName"]);
+    expect(Object.keys(props).sort()).toEqual(["project", "showAudit", "showMembers", "verificationId", "workspaceId", "workspaceName"]);
   });
 });

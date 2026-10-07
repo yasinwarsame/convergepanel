@@ -115,7 +115,7 @@ describe("what crosses to the client", () => {
 
   it("never hands the capability array, role or membership to the client", async () => {
     const props = await shellPropsOf();
-    expect(Object.keys(props).sort()).toEqual(["canCreateVideo", "showAudit", "workspaceId", "workspaceName"]);
+    expect(Object.keys(props).sort()).toEqual(["canCreateVideo", "showAudit", "showMembers", "workspaceId", "workspaceName"]);
     expect(JSON.stringify(props)).not.toContain("research.read");
   });
 

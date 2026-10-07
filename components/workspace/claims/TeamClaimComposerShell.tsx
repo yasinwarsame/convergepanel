@@ -63,6 +63,8 @@ export type TeamClaimComposerShellProps = {
   /** Server-resolved, authorized Workspace display name. */
   workspaceName: string;
   /** Presentation hint from the server-resolved capability set (`audit.read`) — not authorization. */
+  /** The caller's own `members.read` capability (WorkspaceNav Members link). */
+  showMembers: boolean;
   showAudit: boolean;
   /** Server-resolved, active, Workspace-contained Project; `null` for the Unfiled address. */
   project: { id: string; name: string } | null;
@@ -124,7 +126,7 @@ export function teamClaimCreateRejectionCopy(outcome: Extract<TeamClaimCreateOut
   }
 }
 
-export default function TeamClaimComposerShell({ workspaceId, workspaceName, showAudit, project, originTarget = null }: TeamClaimComposerShellProps) {
+export default function TeamClaimComposerShell({ workspaceId, workspaceName, showMembers, showAudit, project, originTarget = null }: TeamClaimComposerShellProps) {
   const router = useRouter();
   const { plan, loading: planLoading } = useUserPlan();
   const normalizedPlan = normalizePlanId((plan as string) || "free");
@@ -266,7 +268,7 @@ export default function TeamClaimComposerShell({ workspaceId, workspaceName, sho
       </div>
 
       {/* A Project Claim is composed beneath its Project; an Unfiled one belongs to the Claims list. */}
-      <WorkspaceNav workspaceId={workspaceId} active={originTarget === null && project ? "projects" : "claims"} showAudit={showAudit} />
+      <WorkspaceNav workspaceId={workspaceId} active={originTarget === null && project ? "projects" : "claims"} showMembers={showMembers} showAudit={showAudit} />
 
       <form onSubmit={handleSubmit} className="mt-6 rounded-xl border border-cp-border bg-cp-surface p-5 shadow-sm">
         {originTarget === null && (

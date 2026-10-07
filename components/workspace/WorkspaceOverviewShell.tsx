@@ -42,6 +42,7 @@ export default function WorkspaceOverviewShell({
   canManageInvitations,
   canCreateProject,
   canStartResearch,
+  canReadMembers,
   canReadAudit,
 }: {
   workspaceId: string;
@@ -50,6 +51,8 @@ export default function WorkspaceOverviewShell({
   canManageInvitations: boolean;
   canCreateProject: boolean;
   canStartResearch: boolean;
+  /** The caller's own `members.read` capability (WorkspaceNav Members link). */
+  canReadMembers: boolean;
   canReadAudit: boolean;
 }) {
   const { user, authReady } = useAuth();
@@ -129,7 +132,7 @@ export default function WorkspaceOverviewShell({
         <h1 className="text-2xl font-semibold text-cp-text">Overview</h1>
       </div>
 
-      <WorkspaceNav workspaceId={workspaceId} active="overview" showAudit={canReadAudit} />
+      <WorkspaceNav workspaceId={workspaceId} active="overview" showMembers={canReadMembers} showAudit={canReadAudit} />
 
       {state.status === "loading" && (
         <div role="status" className="rounded-xl border border-cp-border bg-cp-surface px-6 py-10 text-center text-sm text-cp-muted shadow-sm">

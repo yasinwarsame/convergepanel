@@ -109,7 +109,7 @@ describe("what crosses to the client", () => {
     const props = await shellPropsOf();
     // R4-I3 added `canCreateClaim`; both hints are single booleans derived
     // server-side, never the capability set itself.
-    expect(Object.keys(props).sort()).toEqual(["canCreateClaim", "showAudit", "workspaceId", "workspaceName"]);
+    expect(Object.keys(props).sort()).toEqual(["canCreateClaim", "showAudit", "showMembers", "workspaceId", "workspaceName"]);
     expect(props.workspaceId).toBe(WS_ID);
     expect(props.workspaceName).toBe("Acme Team");
   });

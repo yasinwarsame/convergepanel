@@ -106,6 +106,7 @@ export default function TeamProjectDetailShell({
   workspaceId,
   workspaceName,
   project,
+  canReadMembers,
   canReadAudit,
   canStartResearch,
   canAssignResearch = false,
@@ -118,6 +119,8 @@ export default function TeamProjectDetailShell({
   workspaceId: string;
   workspaceName: string;
   project: TeamProjectDetailMeta;
+  /** The caller's own `members.read` capability (WorkspaceNav Members link). */
+  canReadMembers: boolean;
   canReadAudit: boolean;
   canStartResearch: boolean;
   /** Project/Research Assignment — server-derived `research.organize` capability; UX visibility of the per-row "Assign" action only. The assignee API re-authorizes every call. */
@@ -217,7 +220,7 @@ export default function TeamProjectDetailShell({
         )}
       </div>
 
-      <WorkspaceNav workspaceId={workspaceId} active="projects" showAudit={canReadAudit} />
+      <WorkspaceNav workspaceId={workspaceId} active="projects" showMembers={canReadMembers} showAudit={canReadAudit} />
 
       {assignmentUiEnabled && (
         <label className="mt-4 inline-flex items-center gap-2 text-sm text-cp-muted">
