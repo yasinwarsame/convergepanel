@@ -897,6 +897,20 @@ Every adaptive detail route (`/api/teams/adaptive-runs/{runId}` and its history,
 - **Approval Queue detail (`/workspace/reviews/[runId]`).** The page has a "← Back to reviews" link to `/workspace/reviews?workspace={workspaceId}` for the run's own Workspace.
 - **Scope.** No server gate, capability, route or deep-link change.
 
+### Team export historical download (roadmap Step 5, E2-B)
+
+`GET /api/workspaces/{workspaceId}/runs/{runId}/exports/{exportId}` downloads an existing Team export.
+
+- **What it does.** There is no stored file: it re-renders the record's frozen `reportSnapshot` in the record's stored format and streams it. Current per-format flags are ignored; the master export flag applies.
+- **Authorization.**
+  - Required: current Workspace admission, current `research.read`, the acting caller's current plan (`advancedExportEnabled`, via `getEffectiveEntitlements`), and the record's frozen governance state, which must not be rejected or blocked.
+  - The verdict is the dedicated `canAccessWorkspaceAdaptiveExport()`, never the creation verdict. `exports.create` is not required, because no export record, version or bytes are created.
+- **Status and errors.**
+  - `ready` and `superseded` are downloadable; `generating` and `failed` return 409.
+  - Foreign Workspace, run or export combinations return a concealed 404.
+- **Audit.** Each download writes a best-effort `adaptive_export_regenerated` audit row naming the current caller.
+- **History list.** The Team export history (`GET .../exports`) no longer returns the raw `createdBy` uid. It returns the frozen `generatedBy {displayName, maskedEmail}` only when the record carries a well-formed one; it is never resolved live and never synthesized.
+
 ### Multi-Reviewer Governance (adaptive runs, team plan)
 
 A separate, panel-based review workflow layered on top of the adaptive schema system's `governanceRecord.humanReview`, distinct from the single-reviewer policy engine above. Lives at `runs/{runId}/humanReviewPanel/current` (one active panel per run) plus `runs/{runId}/humanReviewVotes/{revision}:{reviewerUid}` and `runs/{runId}/humanReviewPanelHistory/{revision}:{event}`. Panel lifecycle: create (`PUT`) → reviewers vote (`POST .../votes`) → aggregation reaches `waiting` / `deadlocked` / `ready` → finalize (`POST .../finalize`, majority aggregation) or owner override (`POST .../override`, breaks a deadlock) → cancel (`DELETE`) is available at any open-panel state as a drain operation. Route: `app/api/teams/adaptive-runs/[runId]/review-panel/`.
