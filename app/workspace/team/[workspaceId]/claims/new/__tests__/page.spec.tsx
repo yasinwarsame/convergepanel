@@ -81,7 +81,7 @@ describe("what crosses to the client", () => {
   it("passes a null project and only the audit hint", async () => {
     const props = await propsOf();
     // R4-I4 adds `originTarget`, which is null in ordinary mode.
-    expect(Object.keys(props).sort()).toEqual(["originTarget", "project", "showAudit", "workspaceId", "workspaceName"]);
+    expect(Object.keys(props).sort()).toEqual(["originTarget", "project", "showAudit", "showMembers", "workspaceId", "workspaceName"]);
     expect(props.originTarget).toBeNull();
     expect(props.project).toBeNull();
     expect(props.workspaceName).toBe("Acme Team");

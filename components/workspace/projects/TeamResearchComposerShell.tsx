@@ -52,11 +52,14 @@ export default function TeamResearchComposerShell({
   workspaceId,
   workspaceName,
   project,
+  canReadMembers,
   canReadAudit,
 }: {
   workspaceId: string;
   workspaceName: string;
   project: TeamResearchComposerProject;
+  /** The caller's own `members.read` capability (WorkspaceNav Members link). */
+  canReadMembers: boolean;
   canReadAudit: boolean;
 }) {
   const { plan, loading: planLoading } = useUserPlan();
@@ -156,7 +159,7 @@ export default function TeamResearchComposerShell({
         </h1>
       </div>
 
-      <WorkspaceNav workspaceId={workspaceId} active="projects" showAudit={canReadAudit} />
+      <WorkspaceNav workspaceId={workspaceId} active="projects" showMembers={canReadMembers} showAudit={canReadAudit} />
 
       {!result && (
         <form onSubmit={handleSubmit} className="mt-6 rounded-xl border border-cp-border bg-cp-surface p-5 shadow-sm">

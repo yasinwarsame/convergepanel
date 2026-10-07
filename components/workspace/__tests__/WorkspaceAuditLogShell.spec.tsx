@@ -141,7 +141,7 @@ describe("WorkspaceAuditLogShell — role-changed event card content, Phase 12B"
 describe("WorkspaceAuditLogShell — navigation (T, Q)", () => {
   it("Phase 12A.1 — cross-links back to Members/Overview via the shared WorkspaceNav, not a locally-duplicated tab strip", () => {
     expect(source).toMatch(/import WorkspaceNav from ["']@\/components\/workspace\/WorkspaceNav["'];/);
-    expect(source).toMatch(/<WorkspaceNav workspaceId=\{workspaceId\} active="audit" showAudit \/>/);
+    expect(source).toMatch(/<WorkspaceNav workspaceId=\{workspaceId\} active="audit" showMembers=\{canReadMembers\} showAudit \/>/);
     // The old locally-duplicated <nav> markup must be gone — WorkspaceNav owns it now.
     expect(source).not.toMatch(/<nav className="mb-6 flex gap-4/);
   });
@@ -279,7 +279,7 @@ describe("Phase 11B.3 — Audit Log breadcrumb", () => {
     mockedFetchWorkspaceAuditEvents.mockResolvedValue({ status: "ok", events: [], hasMore: false, nextCursor: undefined });
     let r!: TestRenderer.ReactTestRenderer;
     await act(async () => {
-      r = TestRenderer.create(createElement(WorkspaceAuditLogShell, { workspaceId, workspaceName }));
+      r = TestRenderer.create(createElement(WorkspaceAuditLogShell, { workspaceId, workspaceName, canReadMembers: true }));
     });
     return r;
   }

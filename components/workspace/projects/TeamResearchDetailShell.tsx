@@ -82,6 +82,8 @@ export type TeamResearchDetailShellProps = {
   /** Server-resolved, Workspace-contained Project for a Project address; `null` for the Unfiled address. */
   project: { id: string; name: string } | null;
   /** Presentation hint from the server-resolved capability set (`audit.read`) — not authorization. */
+  /** The caller's own `members.read` capability (WorkspaceNav Members link). */
+  showMembers: boolean;
   showAudit: boolean;
   /**
    * R4-I4 — server-derived creation capability for THIS address. Presentation
@@ -121,7 +123,7 @@ export function teamResearchAncillaryPresentation(review: TeamRunDetailMeta["rev
   };
 }
 
-export default function TeamResearchDetailShell({ workspaceId, workspaceName, runId, project, showAudit, canVerifyClaim = false }: TeamResearchDetailShellProps) {
+export default function TeamResearchDetailShell({ workspaceId, workspaceName, runId, project, showMembers, showAudit, canVerifyClaim = false }: TeamResearchDetailShellProps) {
   const { user, authReady } = useAuth();
   const router = useRouter();
   const [state, setState] = useState<DetailState>({ kind: "loading" });
@@ -295,7 +297,7 @@ export default function TeamResearchDetailShell({ workspaceId, workspaceName, ru
       )}
 
       {/* Research detail sits beneath Projects for a Project address; the Unfiled address belongs to the Workspace overview. */}
-      <WorkspaceNav workspaceId={workspaceId} active={project ? "projects" : "overview"} showAudit={showAudit} />
+      <WorkspaceNav workspaceId={workspaceId} active={project ? "projects" : "overview"} showMembers={showMembers} showAudit={showAudit} />
 
       {state.kind === "loading" && (
         <div role="status" className="mt-6 rounded-xl border border-cp-border bg-cp-surface px-6 py-10 text-center text-sm text-cp-muted shadow-sm">

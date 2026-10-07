@@ -39,7 +39,7 @@ import WorkspaceNav, { type WorkspaceNavItem } from "@/components/workspace/Work
 // ─── structural containment ───────────────────────────────────────────────────
 
 function markup(active: WorkspaceNavItem = "overview", showAudit = true) {
-  return renderToStaticMarkup(createElement(WorkspaceNav, { workspaceId: "ws-1", active, showAudit }));
+  return renderToStaticMarkup(createElement(WorkspaceNav, { workspaceId: "ws-1", active, showMembers: true, showAudit }));
 }
 const navClass = (html: string) => /<nav[^>]*class="([^"]*)"/.exec(html)?.[1] ?? "";
 
@@ -181,14 +181,14 @@ function renderWithGeometry(opts: {
   let renderer!: TestRenderer.ReactTestRenderer;
   act(() => {
     renderer = TestRenderer.create(
-      createElement(WorkspaceNav, { workspaceId: "ws-1", active: opts.active, showAudit: opts.showAudit ?? true }),
+      createElement(WorkspaceNav, { workspaceId: "ws-1", active: opts.active, showMembers: true, showAudit: opts.showAudit ?? true }),
       { createNodeMock }
     );
   });
 
   const rerender = (active: WorkspaceNavItem) => {
     act(() => {
-      renderer.update(createElement(WorkspaceNav, { workspaceId: "ws-1", active, showAudit: opts.showAudit ?? true }));
+      renderer.update(createElement(WorkspaceNav, { workspaceId: "ws-1", active, showMembers: true, showAudit: opts.showAudit ?? true }));
     });
   };
 
@@ -337,7 +337,7 @@ describe("the correction is horizontal-only and nav-local", () => {
     // No node mocks at all: both refs stay null, exactly like SSR/hydration.
     expect(() => {
       act(() => {
-        TestRenderer.create(createElement(WorkspaceNav, { workspaceId: "ws-1", active: "audit", showAudit: true }), { createNodeMock: () => null });
+        TestRenderer.create(createElement(WorkspaceNav, { workspaceId: "ws-1", active: "audit", showMembers: true, showAudit: true }), { createNodeMock: () => null });
       });
     }).not.toThrow();
   });

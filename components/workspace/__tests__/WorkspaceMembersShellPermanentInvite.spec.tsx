@@ -74,7 +74,7 @@ async function mount(props: Partial<React.ComponentProps<typeof WorkspaceMembers
         workspaceId: WS_ID,
         workspaceName: "Acme Team",
         callerRole: "owner",
-        canReadAudit: true,
+        canReadMembers: true, canReadAudit: true,
         ...props,
       })
     );

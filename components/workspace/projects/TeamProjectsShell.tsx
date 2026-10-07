@@ -49,6 +49,7 @@ export default function TeamProjectsShell({
   workspaceName,
   canCreateProject,
   canManageProjects,
+  canReadMembers,
   canReadAudit,
   assignmentUiEnabled = false,
 }: {
@@ -57,6 +58,8 @@ export default function TeamProjectsShell({
   canCreateProject: boolean;
   /** Server-derived `projects.manage` capability — UX visibility only; the archive/restore API re-authorizes every call. */
   canManageProjects: boolean;
+  /** The caller's own `members.read` capability (WorkspaceNav Members link). */
+  canReadMembers: boolean;
   canReadAudit: boolean;
   /** Project/Research Assignment (D10) — server-derived rollout presentation hint (page-computed, zero I/O). Gates the "Manage assignees" action and the "Assigned to me" filter only; never an authorization decision. */
   assignmentUiEnabled?: boolean;
@@ -197,7 +200,7 @@ export default function TeamProjectsShell({
         )}
       </div>
 
-      <WorkspaceNav workspaceId={workspaceId} active="projects" showAudit={canReadAudit} />
+      <WorkspaceNav workspaceId={workspaceId} active="projects" showMembers={canReadMembers} showAudit={canReadAudit} />
 
       {assignmentUiEnabled && (
         <label className="mt-4 inline-flex items-center gap-2 text-sm text-cp-muted">

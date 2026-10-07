@@ -47,6 +47,7 @@ export default async function TeamUnfiledResearchDetailPage({ params }: { params
       workspaceName={access.workspace.name}
       runId={params.runId}
       project={null}
+      showMembers={access.capabilities.includes("members.read")}
       showAudit={access.capabilities.includes("audit.read")}
       // R4-I4 — presentation hint for the per-finding "Verify this claim"
       // action. Viewing research still requires only `research.read`; this

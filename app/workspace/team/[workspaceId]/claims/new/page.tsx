@@ -63,6 +63,7 @@ export default async function TeamUnfiledClaimCreatePage({
     <TeamClaimComposerShell
       workspaceId={params.workspaceId}
       workspaceName={access.workspace.name}
+      showMembers={access.capabilities.includes("members.read")}
       showAudit={access.capabilities.includes("audit.read")}
       project={null}
       originTarget={origin.kind === "origin" ? origin.target : null}

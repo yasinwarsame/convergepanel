@@ -34,7 +34,16 @@ function formatOccurredAt(iso: string): string {
   return parsed.toLocaleString();
 }
 
-export default function WorkspaceAuditLogShell({ workspaceId, workspaceName }: { workspaceId: string; workspaceName: string }) {
+export default function WorkspaceAuditLogShell({
+  workspaceId,
+  workspaceName,
+  canReadMembers,
+}: {
+  workspaceId: string;
+  workspaceName: string;
+  /** The caller's own `members.read` capability (WorkspaceNav Members link). */
+  canReadMembers: boolean;
+}) {
   const { user, authReady } = useAuth();
 
   const [events, setEvents] = useState<WorkspaceAuditEventItem[]>([]);
@@ -98,7 +107,7 @@ export default function WorkspaceAuditLogShell({ workspaceId, workspaceName }: {
         <h1 className="text-2xl font-semibold text-cp-text">Audit Log</h1>
       </div>
 
-      <WorkspaceNav workspaceId={workspaceId} active="audit" showAudit />
+      <WorkspaceNav workspaceId={workspaceId} active="audit" showMembers={canReadMembers} showAudit />
 
       {status === "loading" && (
         <div role="status" className="rounded-xl border border-cp-border bg-cp-surface px-6 py-10 text-center text-sm text-cp-muted shadow-sm">

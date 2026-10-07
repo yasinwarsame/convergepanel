@@ -57,6 +57,8 @@ export type TeamVideoComposerShellProps = {
   /** Server-resolved, authorized Workspace display name. */
   workspaceName: string;
   /** Presentation hint from the server-resolved capability set (`audit.read`) — not authorization. */
+  /** The caller's own `members.read` capability (WorkspaceNav Members link). */
+  showMembers: boolean;
   showAudit: boolean;
   /** Server-resolved, active, Workspace-contained Project; `null` for the Unfiled address. */
   project: { id: string; name: string } | null;
@@ -113,7 +115,7 @@ export function teamVideoCreateRejectionCopy(code: TeamVideoCreateRejectionCode)
   }
 }
 
-export default function TeamVideoComposerShell({ workspaceId, workspaceName, showAudit, project }: TeamVideoComposerShellProps) {
+export default function TeamVideoComposerShell({ workspaceId, workspaceName, showMembers, showAudit, project }: TeamVideoComposerShellProps) {
   const router = useRouter();
   const { user, authReady } = useAuth();
   const { plan, videoLimit, videoRunsThisMonth, loading: planLoading, refresh } = useUserPlan();
@@ -204,7 +206,7 @@ export default function TeamVideoComposerShell({ workspaceId, workspaceName, sho
         </p>
       </div>
 
-      <WorkspaceNav workspaceId={workspaceId} active="videos" showAudit={showAudit} />
+      <WorkspaceNav workspaceId={workspaceId} active="videos" showMembers={showMembers} showAudit={showAudit} />
 
       {planLoading ? (
         <p className="text-sm text-cp-muted" data-testid="team-video-composer-loading">

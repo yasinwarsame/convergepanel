@@ -58,6 +58,8 @@ export type TeamClaimDetailShellProps = {
   /** Server-resolved, Workspace-contained Project for a Project address; `null` for the Unfiled address. */
   project: { id: string; name: string } | null;
   /** Presentation hint from the server-resolved capability set (`audit.read`) — not authorization. */
+  /** The caller's own `members.read` capability (WorkspaceNav Members link). */
+  showMembers: boolean;
   showAudit: boolean;
 };
 
@@ -85,7 +87,7 @@ export function teamClaimProjectLabel(team: TeamClaimDetailTeam): string {
   return team.project.name;
 }
 
-export default function TeamClaimDetailShell({ workspaceId, workspaceName, verificationId, project, showAudit }: TeamClaimDetailShellProps) {
+export default function TeamClaimDetailShell({ workspaceId, workspaceName, verificationId, project, showMembers, showAudit }: TeamClaimDetailShellProps) {
   const { user, authReady } = useAuth();
   const router = useRouter();
   const projectId = project?.id ?? null;
@@ -224,7 +226,7 @@ export default function TeamClaimDetailShell({ workspaceId, workspaceName, verif
         A Project Claim keeps the Project hierarchy (Projects stays active); an
         Unfiled Claim's parent is the Workspace Claims list added in R4-I2.
       */}
-      <WorkspaceNav workspaceId={workspaceId} active={project ? "projects" : "claims"} showAudit={showAudit} />
+      <WorkspaceNav workspaceId={workspaceId} active={project ? "projects" : "claims"} showMembers={showMembers} showAudit={showAudit} />
 
       {state.kind === "loading" && (
         <div role="status" className="mt-6 rounded-xl border border-cp-border bg-cp-surface px-6 py-10 text-center text-sm text-cp-muted shadow-sm">

@@ -60,8 +60,8 @@ import TeamClaimComposerShell, { type TeamClaimComposerShellProps } from "@/comp
 
 const W = "ws-1";
 const P = "proj-1";
-const UNFILED: TeamClaimComposerShellProps = { workspaceId: W, workspaceName: "Acme Team", showAudit: true, project: null };
-const FILED: TeamClaimComposerShellProps = { workspaceId: W, workspaceName: "Acme Team", showAudit: true, project: { id: P, name: "Launch Plan" } };
+const UNFILED: TeamClaimComposerShellProps = { workspaceId: W, workspaceName: "Acme Team", showMembers: true, showAudit: true, project: null };
+const FILED: TeamClaimComposerShellProps = { workspaceId: W, workspaceName: "Acme Team", showMembers: true, showAudit: true, project: { id: P, name: "Launch Plan" } };
 
 const okBody = (over: Record<string, unknown> = {}) => ({ ok: true, verificationId: "vcl-1", workspaceId: W, projectId: null, ...over });
 const response = (status: number, json: unknown = {}) => ({ ok: status >= 200 && status < 300, status, json: async () => json });

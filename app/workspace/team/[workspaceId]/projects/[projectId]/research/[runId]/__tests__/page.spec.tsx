@@ -174,7 +174,7 @@ describe("TeamResearchDetailPage — hands authorized context to the Team detail
     const r = await renderPage();
     expect(r.root.findAllByProps({ "data-testid": "team-research-detail-shell" })).toHaveLength(1);
     expect(shellProps).toHaveLength(1);
-    expect(shellProps[0]).toEqual({ workspaceId: WS_ID, workspaceName: "Acme Team", runId: RUN_ID, project: { id: PROJECT_ID, name: "ABC Acquisition" }, showAudit: true, canVerifyClaim: false });
+    expect(shellProps[0]).toEqual({ workspaceId: WS_ID, workspaceName: "Acme Team", runId: RUN_ID, project: { id: PROJECT_ID, name: "ABC Acquisition" }, showMembers: false, showAudit: true, canVerifyClaim: false });
   });
 
   it("showAudit is false without audit.read, and research.read access is unaffected", async () => {

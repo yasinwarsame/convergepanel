@@ -78,6 +78,7 @@ export default async function TeamProjectDetailPage({ params }: { params: { work
     <TeamProjectDetailShell
       workspaceId={params.workspaceId}
       workspaceName={access.workspace.name}
+      canReadMembers={access.capabilities.includes("members.read")}
       canReadAudit={access.capabilities.includes("audit.read")}
       // R4-I2 — narrow presentation hint for the read-only Claims section. The
       // page gate itself still requires only `projects.read`; the R3 Claim list

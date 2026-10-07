@@ -33,6 +33,8 @@ export type TeamWorkspaceVideosShellProps = {
   /** Server-resolved, authorized Workspace display name. */
   workspaceName: string;
   /** Presentation hint from the server-resolved capability set (`audit.read`) — not authorization. */
+  /** The caller's own `members.read` capability (WorkspaceNav Members link). */
+  showMembers: boolean;
   showAudit: boolean;
   /** R5-I3-B — server-derived `research.create`; offers the Unfiled create entry point only. The POST stays authoritative. */
   canCreateVideo?: boolean;
@@ -45,7 +47,7 @@ const FILTERS: { key: VideoScope; label: string }[] = [
   { key: "unfiled", label: "Unfiled" },
 ];
 
-export default function TeamWorkspaceVideosShell({ workspaceId, workspaceName, showAudit, canCreateVideo = false }: TeamWorkspaceVideosShellProps) {
+export default function TeamWorkspaceVideosShell({ workspaceId, workspaceName, showMembers, showAudit, canCreateVideo = false }: TeamWorkspaceVideosShellProps) {
   const [scope, setScope] = useState<VideoScope>("all");
 
   // Changing `scope` changes the hook's address, which drops the cursor, clears
@@ -75,7 +77,7 @@ export default function TeamWorkspaceVideosShell({ workspaceId, workspaceName, s
         )}
       </div>
 
-      <WorkspaceNav workspaceId={workspaceId} active="videos" showAudit={showAudit} />
+      <WorkspaceNav workspaceId={workspaceId} active="videos" showMembers={showMembers} showAudit={showAudit} />
 
       <div className="flex flex-wrap gap-2" role="group" aria-label="Filter videos">
         {FILTERS.map((f) => (
