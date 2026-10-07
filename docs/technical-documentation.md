@@ -857,6 +857,20 @@ Action types: `evaluated` · `approved` · `blocked` · `changes_requested` · `
 - **Assign / remove** (`POST /api/governance/reviewer`). Each runs in one Firestore transaction that re-reads the assigner record and writes the assigner fields and the mirror atomically. Concurrent assignments yield one reviewer and leave no orphaned mirror.
 - **Decisions** (`POST /api/governance/review`). The status transition is a compare-and-set in a transaction. A concurrent loser gets `409 conflict` before any write, so it produces no `admin_audit_logs` row and no `governanceEvents` append.
 
+### Governance Review Queue completeness (`/governance`, roadmap 4.2b)
+
+- **Pending queue (`status=needs_review`, assigners scope)** is complete.
+  - For each assigned owner and each collection there is one equality query, `userId == owner` and `governanceStatus == "needs_review"`. There is no lookback, no limit, no orderBy and no cross-owner `in`; at most 8 queries run at once.
+  - The existing containment checks then apply: Workspace-bound Claims/Videos are excluded, Research rows pass the Workspace-integrity check, and owners are re-checked against the visible set.
+  - `total` is the exact eligible count. Rows are sorted in memory, and a row without a timestamp sorts last instead of disappearing.
+  - The existing `(userId, governanceStatus, …)` indexes serve these queries; no new index was added.
+- **Reviewer owner set.** `resolveGovernanceVisibleUserIds` no longer truncates the reviewer's owner set to 30. The bounded approved/blocked/all history snapshot keeps its own 30-owner bound and its 7-day window.
+- **Dashboard.** It loads `status=needs_review` (the only source of the pending list and count) and `status=all` (decided history only) independently (`components/governance/queueView.ts`).
+  - The pending view shows up to 50 rows, with "Showing 50 of N pending" when more exist.
+  - The "All" view keeps every returned pending row, and history fills only the remaining space.
+  - A failed pending load is shown as an error and is never replaced with snapshot data.
+- **Outside this contract:** documents with no `governanceStatus` (legacy rows or failed evaluations), and the `admin_global` scope.
+
 ### Multi-Reviewer Governance (adaptive runs, team plan)
 
 A separate, panel-based review workflow layered on top of the adaptive schema system's `governanceRecord.humanReview`, distinct from the single-reviewer policy engine above. Lives at `runs/{runId}/humanReviewPanel/current` (one active panel per run) plus `runs/{runId}/humanReviewVotes/{revision}:{reviewerUid}` and `runs/{runId}/humanReviewPanelHistory/{revision}:{event}`. Panel lifecycle: create (`PUT`) → reviewers vote (`POST .../votes`) → aggregation reaches `waiting` / `deadlocked` / `ready` → finalize (`POST .../finalize`, majority aggregation) or owner override (`POST .../override`, breaks a deadlock) → cancel (`DELETE`) is available at any open-panel state as a drain operation. Route: `app/api/teams/adaptive-runs/[runId]/review-panel/`.
