@@ -32,6 +32,8 @@ export type TeamWorkspaceClaimsShellProps = {
   /** Server-resolved, authorized Workspace display name. */
   workspaceName: string;
   /** Presentation hint from the server-resolved capability set (`audit.read`) — not authorization. */
+  /** The caller's own `members.read` capability (WorkspaceNav Members link). */
+  showMembers: boolean;
   showAudit: boolean;
   /** R4-I3 — server-derived `research.create`; offers the create entry point only. The POST stays authoritative. */
   canCreateClaim?: boolean;
@@ -44,7 +46,7 @@ const FILTERS: { key: ClaimScope; label: string }[] = [
   { key: "unfiled", label: "Unfiled" },
 ];
 
-export default function TeamWorkspaceClaimsShell({ workspaceId, workspaceName, showAudit, canCreateClaim = false }: TeamWorkspaceClaimsShellProps) {
+export default function TeamWorkspaceClaimsShell({ workspaceId, workspaceName, showMembers, showAudit, canCreateClaim = false }: TeamWorkspaceClaimsShellProps) {
   const [scope, setScope] = useState<ClaimScope>("all");
 
   // Changing `scope` changes the hook's address, which drops the cursor, clears
@@ -74,7 +76,7 @@ export default function TeamWorkspaceClaimsShell({ workspaceId, workspaceName, s
         )}
       </div>
 
-      <WorkspaceNav workspaceId={workspaceId} active="claims" showAudit={showAudit} />
+      <WorkspaceNav workspaceId={workspaceId} active="claims" showMembers={showMembers} showAudit={showAudit} />
 
       <div className="flex flex-wrap gap-2" role="group" aria-label="Filter claims">
         {FILTERS.map((f) => (

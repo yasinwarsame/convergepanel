@@ -75,6 +75,7 @@ export default async function TeamProjectVideoCreatePage({
     <TeamVideoComposerShell
       workspaceId={params.workspaceId}
       workspaceName={access.workspace.name}
+      showMembers={access.capabilities.includes("members.read")}
       showAudit={access.capabilities.includes("audit.read")}
       project={{ id: projectResult.project.id, name: projectResult.project.name }}
     />

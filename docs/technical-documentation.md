@@ -890,6 +890,13 @@ Every adaptive detail route (`/api/teams/adaptive-runs/{runId}` and its history,
 - **Order:** the items are dropped after classification and before filtering, pagination and enrichment, so they never count toward `pagination.total`.
 - **Unchanged:** legacy items, the unversioned response, and the detail routes' `403 insufficient_role`.
 
+### Team Workspace navigation reachability (roadmap 4.4a)
+
+- **Members link.** `WorkspaceNav` shows Members only when the caller holds `members.read`, the same pattern as Audit (`audit.read`). Both are required props that every Team page fills from its own server-resolved capabilities. Reviewer and Viewer roles lack `members.read`, and the Members page returns 404 without it.
+- **Team Workspaces landing (`/workspace/team`).** Each Workspace row opens that Workspace's overview, which every role can open.
+- **Approval Queue detail (`/workspace/reviews/[runId]`).** The page has a "← Back to reviews" link to `/workspace/reviews?workspace={workspaceId}` for the run's own Workspace.
+- **Scope.** No server gate, capability, route or deep-link change.
+
 ### Multi-Reviewer Governance (adaptive runs, team plan)
 
 A separate, panel-based review workflow layered on top of the adaptive schema system's `governanceRecord.humanReview`, distinct from the single-reviewer policy engine above. Lives at `runs/{runId}/humanReviewPanel/current` (one active panel per run) plus `runs/{runId}/humanReviewVotes/{revision}:{reviewerUid}` and `runs/{runId}/humanReviewPanelHistory/{revision}:{event}`. Panel lifecycle: create (`PUT`) → reviewers vote (`POST .../votes`) → aggregation reaches `waiting` / `deadlocked` / `ready` → finalize (`POST .../finalize`, majority aggregation) or owner override (`POST .../override`, breaks a deadlock) → cancel (`DELETE`) is available at any open-panel state as a drain operation. Route: `app/api/teams/adaptive-runs/[runId]/review-panel/`.

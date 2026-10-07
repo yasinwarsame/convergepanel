@@ -10,7 +10,7 @@ import WorkspaceNav, { type WorkspaceNavItem } from "@/components/workspace/Work
 
 const ALL_ACTIVE: WorkspaceNavItem[] = ["overview", "projects", "claims", "videos", "members", "audit"];
 const markup = (active: WorkspaceNavItem = "overview", showAudit = true) =>
-  renderToStaticMarkup(createElement(WorkspaceNav, { workspaceId: "ws-1", active, showAudit }));
+  renderToStaticMarkup(createElement(WorkspaceNav, { workspaceId: "ws-1", active, showMembers: true, showAudit }));
 const navClass = (html: string) => /<nav[^>]*class="([^"]*)"/.exec(html)?.[1] ?? "";
 const itemClasses = (html: string) => [...html.matchAll(/<(?:a|span)[^>]*class="([^"]*)"/g)].map((m) => m[1]);
 
@@ -70,7 +70,7 @@ describe("Videos is a PERMANENT destination", () => {
   });
 
   it("encodes the workspaceId in the Videos href", () => {
-    expect(renderToStaticMarkup(createElement(WorkspaceNav, { workspaceId: "ws with space", active: "overview", showAudit: false }))).toContain(
+    expect(renderToStaticMarkup(createElement(WorkspaceNav, { workspaceId: "ws with space", active: "overview", showMembers: true, showAudit: false }))).toContain(
       `href="/workspace/team/${encodeURIComponent("ws with space")}/videos"`
     );
   });

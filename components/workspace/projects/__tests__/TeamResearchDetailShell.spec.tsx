@@ -42,8 +42,8 @@ const WS = "ws-1";
 const PROJECT = "proj-1";
 const RUN = "run-1";
 
-const PROJECT_PROPS: TeamResearchDetailShellProps = { workspaceId: WS, workspaceName: "Acme Team", runId: RUN, project: { id: PROJECT, name: "Launch Plan" }, showAudit: true };
-const UNFILED_PROPS: TeamResearchDetailShellProps = { workspaceId: WS, workspaceName: "Acme Team", runId: RUN, project: null, showAudit: false };
+const PROJECT_PROPS: TeamResearchDetailShellProps = { workspaceId: WS, workspaceName: "Acme Team", runId: RUN, project: { id: PROJECT, name: "Launch Plan" }, showMembers: true, showAudit: true };
+const UNFILED_PROPS: TeamResearchDetailShellProps = { workspaceId: WS, workspaceName: "Acme Team", runId: RUN, project: null, showMembers: true, showAudit: false };
 
 function body(over: Record<string, unknown> = {}, team: Record<string, unknown> = {}) {
   return {

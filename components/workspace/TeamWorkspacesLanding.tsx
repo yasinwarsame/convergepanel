@@ -220,8 +220,9 @@ export default function TeamWorkspacesLanding() {
           <ul>
             {items.map((item) => (
               <li key={item.workspaceId} className="border-b border-cp-border-soft last:border-b-0">
+                {/* Roadmap 4.4a — the Workspace overview is open to every role; /members needs members.read. */}
                 <Link
-                  href={`/workspace/team/${encodeURIComponent(item.workspaceId)}/members`}
+                  href={`/workspace/team/${encodeURIComponent(item.workspaceId)}`}
                   className="flex items-center justify-between px-4 py-3 text-sm font-medium text-cp-text transition-colors hover:bg-cp-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent"
                 >
                   <span className="truncate">{item.name}</span>

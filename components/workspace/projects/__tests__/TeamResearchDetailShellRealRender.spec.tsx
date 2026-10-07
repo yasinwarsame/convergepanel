@@ -134,7 +134,7 @@ function fullProceduralLegacyOutput() {
   };
 }
 
-const PROJECT_PROPS = { workspaceId: FIXTURE_WORKSPACE_ID, workspaceName: "Acme Team", runId: FIXTURE_RUN_ID, project: { id: FIXTURE_PROJECT_ID, name: "Launch Plan" }, showAudit: false };
+const PROJECT_PROPS = { workspaceId: FIXTURE_WORKSPACE_ID, workspaceName: "Acme Team", runId: FIXTURE_RUN_ID, project: { id: FIXTURE_PROJECT_ID, name: "Launch Plan" }, showMembers: true, showAudit: false };
 
 async function r1Body(data: Record<string, unknown>, viewerRole: RunReadViewerRole = "team_member", teamOver: Record<string, unknown> = {}) {
   const payload = await buildRunReadPayload({ runId: FIXTURE_RUN_ID, data: fullTeamRunData(data), viewerRole, mayReadDecisionContent: true, resolveReviewRouting: async () => "in_queue" });

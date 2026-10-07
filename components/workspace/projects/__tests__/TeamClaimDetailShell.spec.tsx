@@ -61,8 +61,8 @@ const P = "proj-1";
 const V = "vcl-1";
 const RUN = "run-9";
 
-const UNFILED_PROPS: TeamClaimDetailShellProps = { workspaceId: W, workspaceName: "Acme Team", verificationId: V, project: null, showAudit: false };
-const PROJECT_PROPS: TeamClaimDetailShellProps = { workspaceId: W, workspaceName: "Acme Team", verificationId: V, project: { id: P, name: "Launch Plan" }, showAudit: true };
+const UNFILED_PROPS: TeamClaimDetailShellProps = { workspaceId: W, workspaceName: "Acme Team", verificationId: V, project: null, showMembers: true, showAudit: false };
+const PROJECT_PROPS: TeamClaimDetailShellProps = { workspaceId: W, workspaceName: "Acme Team", verificationId: V, project: { id: P, name: "Launch Plan" }, showMembers: true, showAudit: true };
 
 function payload(over: Record<string, unknown> = {}) {
   return {

@@ -70,6 +70,7 @@ export default async function TeamProjectClaimDetailPage({
       workspaceName={access.workspace.name}
       verificationId={params.verificationId}
       project={{ id: projectResult.project.id, name: projectResult.project.name }}
+      showMembers={access.capabilities.includes("members.read")}
       showAudit={access.capabilities.includes("audit.read")}
     />
   );

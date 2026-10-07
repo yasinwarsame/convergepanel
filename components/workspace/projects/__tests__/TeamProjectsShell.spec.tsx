@@ -106,7 +106,7 @@ async function mount(props: { canCreateProject: boolean; canManageProjects?: boo
       createElement(TeamProjectsShell, {
         workspaceId: "ws-1",
         workspaceName: "Acme Team",
-        canReadAudit: true,
+        canReadMembers: true, canReadAudit: true,
         canManageProjects: false,
         ...props,
       })
@@ -482,7 +482,7 @@ describe("TeamProjectsShell — shell-owned lifecycle status region + stable foc
   const focusCalls: string[] = [];
   function mountWithFocus(props: { canCreateProject: boolean; canManageProjects?: boolean }) {
     focusCalls.length = 0;
-    const makeElement = () => createElement(TeamProjectsShell, { workspaceId: "ws-1", workspaceName: "Acme Team", canReadAudit: true, canManageProjects: true, ...props });
+    const makeElement = () => createElement(TeamProjectsShell, { workspaceId: "ws-1", workspaceName: "Acme Team", canReadMembers: true, canReadAudit: true, canManageProjects: true, ...props });
     let renderer!: TestRenderer.ReactTestRenderer;
     return {
       async mount() {
@@ -814,7 +814,7 @@ describe("Phase 11B.3 — Projects breadcrumb", () => {
     let r!: TestRenderer.ReactTestRenderer;
     await act(async () => {
       r = TestRenderer.create(
-        createElement(TeamProjectsShell, { workspaceId, workspaceName, canCreateProject: true, canManageProjects: true, canReadAudit: true })
+        createElement(TeamProjectsShell, { workspaceId, workspaceName, canCreateProject: true, canManageProjects: true, canReadMembers: true, canReadAudit: true })
       );
     });
     return r;
@@ -913,7 +913,7 @@ describe("Phase 11B.3-C1 — Projects page composition order", () => {
     let r!: TestRenderer.ReactTestRenderer;
     await act(async () => {
       r = TestRenderer.create(
-        createElement(TeamProjectsShell, { workspaceId: "ws_123", workspaceName: "Acme Risk Lab", canCreateProject: true, canManageProjects: true, canReadAudit: true })
+        createElement(TeamProjectsShell, { workspaceId: "ws_123", workspaceName: "Acme Risk Lab", canCreateProject: true, canManageProjects: true, canReadMembers: true, canReadAudit: true })
       );
     });
     expectFrozenComposition(r);
@@ -923,7 +923,7 @@ describe("Phase 11B.3-C1 — Projects page composition order", () => {
     let r!: TestRenderer.ReactTestRenderer;
     await act(async () => {
       r = TestRenderer.create(
-        createElement(TeamProjectsShell, { workspaceId: "ws_123", workspaceName: "Acme Risk Lab", canCreateProject: true, canManageProjects: true, canReadAudit: true })
+        createElement(TeamProjectsShell, { workspaceId: "ws_123", workspaceName: "Acme Risk Lab", canCreateProject: true, canManageProjects: true, canReadMembers: true, canReadAudit: true })
       );
     });
     const o = documentOrder(r);
@@ -945,7 +945,7 @@ describe("Phase 11B.3-C1 — Projects page composition order", () => {
     let r!: TestRenderer.ReactTestRenderer;
     await act(async () => {
       r = TestRenderer.create(
-        createElement(TeamProjectsShell, { workspaceId: "ws_123", workspaceName: "Acme Risk Lab", canCreateProject: true, canManageProjects: true, canReadAudit: true })
+        createElement(TeamProjectsShell, { workspaceId: "ws_123", workspaceName: "Acme Risk Lab", canCreateProject: true, canManageProjects: true, canReadMembers: true, canReadAudit: true })
       );
     });
     const anchors = r.root.findAll((n) => n.props?.id === "team-active-projects-heading", { deep: true });

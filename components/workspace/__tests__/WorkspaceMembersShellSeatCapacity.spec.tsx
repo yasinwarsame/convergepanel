@@ -74,7 +74,7 @@ async function mount(props: {
         workspaceId: WS_ID,
         workspaceName: "Acme Team",
         callerRole: "owner",
-        canReadAudit: true,
+        canReadMembers: true, canReadAudit: true,
         canInvite: props.canInvite,
         canManageInvitations: props.canManageInvitations,
       })

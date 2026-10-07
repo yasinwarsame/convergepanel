@@ -50,6 +50,8 @@ export type TeamVideoDetailShellProps = {
   /** Server-resolved, Workspace-contained Project for a Project address; `null` for the Unfiled address. */
   project: { id: string; name: string } | null;
   /** Presentation hint from the server-resolved capability set (`audit.read`) — not authorization. */
+  /** The caller's own `members.read` capability (WorkspaceNav Members link). */
+  showMembers: boolean;
   showAudit: boolean;
 };
 
@@ -68,7 +70,7 @@ export function teamVideoProjectLabel(team: TeamVideoDetailTeam): string {
   return team.project.name;
 }
 
-export default function TeamVideoDetailShell({ workspaceId, workspaceName, verificationId, project, showAudit }: TeamVideoDetailShellProps) {
+export default function TeamVideoDetailShell({ workspaceId, workspaceName, verificationId, project, showMembers, showAudit }: TeamVideoDetailShellProps) {
   const projectId = project?.id ?? null;
   const { state, retry } = useTeamVideoVerification({ workspaceId, verificationId, expectedProjectId: projectId });
 
@@ -135,7 +137,7 @@ export default function TeamVideoDetailShell({ workspaceId, workspaceName, verif
         A Project Video keeps the Project hierarchy (Projects stays active); an
         Unfiled Video's parent is the Workspace Videos list.
       */}
-      <WorkspaceNav workspaceId={workspaceId} active={project ? "projects" : "videos"} showAudit={showAudit} />
+      <WorkspaceNav workspaceId={workspaceId} active={project ? "projects" : "videos"} showMembers={showMembers} showAudit={showAudit} />
 
       {state.kind === "loading" && (
         <div role="status" className="mt-6 rounded-xl border border-cp-border bg-cp-surface px-6 py-10 text-center text-sm text-cp-muted shadow-sm">

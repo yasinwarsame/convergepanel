@@ -110,7 +110,7 @@ describe("what crosses to the client", () => {
 
   it("passes only the four expected props, never capabilities", async () => {
     const props = await propsOf();
-    expect(Object.keys(props).sort()).toEqual(["project", "showAudit", "workspaceId", "workspaceName"]);
+    expect(Object.keys(props).sort()).toEqual(["project", "showAudit", "showMembers", "workspaceId", "workspaceName"]);
     expect(JSON.stringify(props)).not.toContain("capabilities");
     expect(CODE).not.toMatch(/capabilities=\{/);
   });

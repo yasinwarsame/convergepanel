@@ -36,5 +36,5 @@ export default async function WorkspaceAuditLogPage({ params }: { params: { work
     notFound();
   }
 
-  return <WorkspaceAuditLogShell workspaceId={params.workspaceId} workspaceName={access.workspace.name} />;
+  return <WorkspaceAuditLogShell workspaceId={params.workspaceId} workspaceName={access.workspace.name} canReadMembers={access.capabilities.includes("members.read")} />;
 }

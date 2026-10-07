@@ -56,7 +56,7 @@ async function mount(props: Partial<{ project: any; canStartResearch: boolean }>
       createElement(TeamProjectDetailShell, {
         workspaceId: "ws-1",
         workspaceName: "Acme Team",
-        canReadAudit: true,
+        canReadMembers: true, canReadAudit: true,
         canStartResearch: true,
         project: { id: "proj-1", name: "ABC Acquisition", status: "active" },
         ...props,

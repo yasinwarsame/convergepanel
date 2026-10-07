@@ -101,7 +101,7 @@ describe("TeamUnfiledResearchDetailPage — renders the shell in Unfiled mode", 
       r = TestRenderer.create(element as never);
     });
     expect(r.root.findAllByProps({ "data-testid": "team-research-detail-shell" })).toHaveLength(1);
-    expect(shellProps[0]).toEqual({ workspaceId: WS_ID, workspaceName: "Acme Team", runId: RUN_ID, project: null, showAudit: true, canVerifyClaim: false });
+    expect(shellProps[0]).toEqual({ workspaceId: WS_ID, workspaceName: "Acme Team", runId: RUN_ID, project: null, showMembers: false, showAudit: true, canVerifyClaim: false });
   });
 
   it("performs no Project lookup and no direct run read, and names no Personal endpoint or address", async () => {

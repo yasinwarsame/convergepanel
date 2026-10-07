@@ -48,6 +48,7 @@ export default async function TeamUnfiledVideoCreatePage({ params }: { params: {
     <TeamVideoComposerShell
       workspaceId={params.workspaceId}
       workspaceName={access.workspace.name}
+      showMembers={access.capabilities.includes("members.read")}
       showAudit={access.capabilities.includes("audit.read")}
       project={null}
     />
