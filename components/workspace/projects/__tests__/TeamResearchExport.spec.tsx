@@ -142,7 +142,8 @@ describe("history — E2-A for every reader, downloads only where E2-B serves", 
   const LIST = [
     row("exp-4", "ready"),
     row("exp-3", "superseded", { generatedBy: { displayName: null, maskedEmail: "ma***@x.example" } }),
-    row("exp-2", "failed", { generatedBy: undefined }),
+    // No frozen generator AND a raw uid present: the only row where a uid fallback could surface.
+    row("exp-2", "failed", { generatedBy: undefined, createdBy: RAW_UID }),
     row("exp-1", "generating", { createdBy: RAW_UID }),
   ];
 
@@ -210,6 +211,8 @@ describe("pure rules", () => {
   it("generator label never falls back to anything but the neutral label", () => {
     expect(teamExportGeneratorLabel({ generatedBy: { displayName: "  ", maskedEmail: "" } })).toBe(TEAM_EXPORT_GENERATOR_UNAVAILABLE);
     expect(teamExportGeneratorLabel({})).toBe(TEAM_EXPORT_GENERATOR_UNAVAILABLE);
+    // A uid smuggled alongside a missing generatedBy is never used.
+    expect(teamExportGeneratorLabel({ createdBy: RAW_UID } as never)).toBe(TEAM_EXPORT_GENERATOR_UNAVAILABLE);
   });
 });
 
