@@ -3911,7 +3911,7 @@ describe("governance-event `.add()` write sites — derived from the repository 
   it("there are exactly FIVE, and they are these — a sixth fails here instead of outdating a comment", () => {
     const sites = countGovernanceEventAddSites();
     expect(sites).toEqual([
-      "app/api/governance/review/route.ts:314",
+      "app/api/governance/review/route.ts:345",
       "lib/firestore/runs.ts:721",
       "lib/governance/evaluateAndStore.ts:88",
       "lib/governance/governanceBackfill.ts:63",
@@ -3923,7 +3923,7 @@ describe("governance-event `.add()` write sites — derived from the repository 
   it("the R8 count of FOUR was wrong because it searched only `lib/` — the app route is the fifth", () => {
     const sites = countGovernanceEventAddSites();
     expect(sites.filter((s) => s.startsWith("lib/")).length).toBe(4);
-    expect(sites.filter((s) => s.startsWith("app/"))).toEqual(["app/api/governance/review/route.ts:314"]);
+    expect(sites.filter((s) => s.startsWith("app/"))).toEqual(["app/api/governance/review/route.ts:345"]);
   });
 
   it("the detector is not vacuously blind: it finds nothing in a tree with no such call, and finds one when there is one", () => {
