@@ -144,7 +144,9 @@ function makeQuery(collection: string) {
   q.count = () => ({ get: async () => ({ data: () => ({ count: 0 }) }) });
   q.add = (...a: unknown[]) => reviewUpdate(...(a as []));
   q.doc = () => ({
-    get: async () => addressedDoc(),
+    // users/{owner}: the owner's own record names this reviewer (roadmap 4.2a —
+    // the decision transaction re-validates the assignment there).
+    get: async () => (collection === "users" ? { exists: true, data: () => ({ governanceReviewerUid: VIEWER_UID }) } : addressedDoc()),
     update: (...a: unknown[]) => reviewUpdate(...(a as [])),
     set: (...a: unknown[]) => reviewUpdate(...(a as [])),
     collection: (n: string) => makeQuery(n),

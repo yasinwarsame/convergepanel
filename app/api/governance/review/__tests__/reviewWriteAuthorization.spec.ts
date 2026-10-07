@@ -66,6 +66,12 @@ function docHandle(collection: string, id: string) {
   return {
     id,
     get: async () => {
+      // users/{assigner}: the assigner's own record names this reviewer — the
+      // grant the decision transaction re-validates (roadmap 4.2a).
+      if (collection === "users") {
+        const assigned = assignerUids.includes(id);
+        return { exists: assigned, id, data: () => (assigned ? { governanceReviewerUid: REVIEWER } : undefined) };
+      }
       const rec = existingDocs[key];
       return {
         exists: Boolean(rec),

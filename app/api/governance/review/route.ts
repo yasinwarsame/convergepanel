@@ -251,19 +251,47 @@ export async function POST(request: NextRequest) {
   // is refused with 409 before any write. The audit row and the governanceEvents
   // append below run only after a committed transition, so a refused request
   // produces neither.
-  const committed = await adminDb.runTransaction(async (txn) => {
+  //
+  // Authority is re-validated in the SAME transaction (A1, closing the TOCTOU
+  // between `resolveGovernanceVisibleUserIds` above and this commit). An
+  // assignment-derived reviewer ("assigners" scope) must still be the reviewer
+  // named on the owner's own record; a removal or reassignment that lands
+  // first makes this request fail 403 with no write. A governance admin
+  // (`admin_global`) holds no assignment and is not re-checked here. Every
+  // other scope was refused above and never reaches this point. All reads
+  // precede the single write.
+  const requiresAssignment = vis.queueScope === "assigners";
+  const ownerRef = adminDb.collection("users").doc(ownerUid);
+  const outcome = await adminDb.runTransaction(async (txn) => {
     const current = await txn.get(ref);
-    if (!current.exists) return false;
+    const ownerSnap = requiresAssignment ? await txn.get(ownerRef) : null;
+    if (ownerSnap) {
+      const assigned = (ownerSnap.data() as Record<string, unknown> | undefined)?.governanceReviewerUid;
+      if (assigned !== resolved.uid) return "revoked" as const;
+    }
+    if (!current.exists) return "conflict" as const;
     const currentData = current.data() as Record<string, unknown>;
     const currentStatus =
       typeof currentData.governanceStatus === "string" && currentData.governanceStatus
         ? currentData.governanceStatus
         : "needs_review";
-    if (currentStatus !== prevStatus) return false;
+    if (currentStatus !== prevStatus) return "conflict" as const;
     txn.set(ref, patch, { merge: true });
-    return true;
+    return "committed" as const;
   });
-  if (!committed) {
+  if (outcome === "revoked") {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: {
+          code: "forbidden",
+          message: "You don't have permission to review this run.",
+        },
+      },
+      { status: 403 }
+    );
+  }
+  if (outcome !== "committed") {
     return NextResponse.json(
       {
         ok: false,

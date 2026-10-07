@@ -42,6 +42,12 @@ const store = new Map<string, Doc>();
 let autoId = 0;
 /** When set, the commit of any transaction writing this path throws (all-or-nothing). */
 let failCommitWritingPath: string | null = null;
+/**
+ * Runs `fn` once, just before the first commit attempt of a transaction that
+ * writes `path` — i.e. after that request's initial authorization and its
+ * transactional reads, before it commits. Models "the owner acts in between".
+ */
+let beforeCommitOf: { path: string; fn: () => Promise<unknown> } | null = null;
 /** Concurrency gate for the FIRST attempt of each transaction. */
 let gate: { size: number; arrived: number; release: () => void; wait: Promise<void> } | null = null;
 
@@ -128,6 +134,11 @@ async function runTransaction<T>(fn: (txn: unknown) => Promise<T>): Promise<T> {
       g.arrived += 1;
       if (g.arrived >= g.size) g.release();
       await g.wait;
+    }
+    if (attempt === 0 && beforeCommitOf && writes.some((w) => w.path === beforeCommitOf!.path)) {
+      const hook = beforeCommitOf;
+      beforeCommitOf = null;
+      await hook.fn();
     }
     const stale = [...reads.entries()].some(([p, v]) => (store.get(p)?.version ?? 0) !== v);
     if (stale) continue;
@@ -227,6 +238,7 @@ beforeEach(() => {
   autoId = 0;
   failCommitWritingPath = null;
   gate = null;
+  beforeCommitOf = null;
   requestUid = "";
   authByEmail = {
     "reviewer.one@test-invented.example": REVIEWER_1,
@@ -357,6 +369,21 @@ describe("failure mode 3 — simultaneous decision (R1)", () => {
 
     const loserBody = await (a.status === 409 ? a : b).json();
     expect(loserBody.error.code).toBe("conflict");
+  });
+
+  it("authorization TOCTOU: removal lands after the decision's initial authorization -> 403, nothing written", async () => {
+    expect(await canSee(REVIEWER_1)).toBe(true);
+    let removalStatus = 0;
+    beforeCommitOf = { path: `runs/${RUN}`, fn: async () => { removalStatus = (await remove()).status; } };
+    const res = await reviewPOST(reviewReq(REVIEWER_1, "approved"));
+    expect(removalStatus).toBe(200);
+    expect(user(ASSIGNER).governanceReviewerUid).toBeUndefined();
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe("forbidden");
+    expect(store.get(`runs/${RUN}`)?.data.governanceStatus).toBe("needs_review");
+    expect(store.get(`runs/${RUN}`)?.data.governanceReviewedBy).toBeUndefined();
+    expect(auditRows()).toHaveLength(0);
+    expect(decisionEvents()).toHaveLength(0);
   });
 
   it("control: two SEQUENTIAL different decisions are both allowed when the transition is legal", async () => {
