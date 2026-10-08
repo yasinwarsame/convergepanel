@@ -82,7 +82,12 @@ The Team list/detail row validators for all three collections:
 
 All three accept `projectId` only when it is **exactly `null`** or an **assigned string**. An absent or malformed `projectId` fails closed, and a Project of another Workspace is concealed. The summary applies the same boundary.
 
-1. **Canonical Project set.** Every `projects` document with `workspaceId == W`, **active and archived**. This is the Workspace's Project listing, not a record scan.
+1. **Canonical Project set.** The Workspace's Project listing (`projects` where `workspaceId == W`) is read. The set contains **only** Project documents that satisfy the same invariants the Team list/detail paths enforce through `getProject()` (`lib/firestore/projects.ts`):
+   - the document passes `isWellFormedProjectV1` (`lib/projects/types.ts`), so `schemaVersion: 1`, `status` is `active` or `archived`, and the required fields are well-formed;
+   - its embedded `id` equals the Firestore document id;
+   - its `workspaceId` equals `W`.
+
+   **Active and archived** Projects are both valid. A malformed Project, or one with an id mismatch, is **not** in the set, even when its `workspaceId` field equals `W`. A record referencing it is therefore not contained and falls into the exact integrity-anomaly count. Reading this listing is a validation of the Workspace's Projects, not a scan of artifact records.
 2. **Contained count.** For a family F, `contained(F) = count(workspaceId == W ∧ F ∧ projectId == null) + Σ_batches count(workspaceId == W ∧ F ∧ projectId in batch)`.
    - The canonical ids are split into disjoint batches no larger than Firestore's `in` limit.
    - `projectId == null` matches only an explicit null, so a missing field is not contained, exactly as the validators treat it.
@@ -95,7 +100,7 @@ All three accept `projectId` only when it is **exactly `null`** or an **assigned
    Only the count is returned, never the ids.
 4. **Outcomes.** Every outcome count in §5–§7 is computed over **contained** records only. An integrity-invalid record never contributes to an ordinary family outcome.
 
-**Residual limitation, disclosed in the response scope.** The row validators also check field shapes such as a `Timestamp` `createdAt` or `timestamp`, and the `userId` type. These cannot be expressed as aggregation predicates. Containment in this summary is the Workspace + Project boundary above; shape validity is not re-checked.
+**Residual limitation, disclosed in the response scope.** For **artifact** rows, the row validators also check field shapes such as a `Timestamp` `createdAt` or `timestamp`, and the `userId` type. These cannot be expressed as aggregation predicates, so `shapeValidationApplied: false` refers to artifact rows only. **Project** documents used to establish containment *are* fully validated (point 1).
 
 ---
 
@@ -125,7 +130,8 @@ These three are **never collapsed**.
 | A | `governanceStatus` (not human-reviewed, §6.3) | `approved` | `cleared` |
 | A | `governanceStatus` (not human-reviewed) | `needs_review` | `needs_attention` |
 | A | `governanceStatus` (not human-reviewed) | `blocked` | `blocked` |
-| A | `governanceStatus` (human-reviewed) | any | `not_recorded`, `subReason: "superseded_by_human_decision"` |
+| A | `governanceStatus` (human-reviewed) | `approved`, `needs_review`, `blocked` | `not_recorded`, `subReason: "superseded_by_human_decision"` |
+| A | `governanceStatus` (human-reviewed) | missing, null or any other value | not an outcome: disclosed as anomaly `reviewed_status_malformed` (§6.3) |
 | A | `governanceStatus` | other non-null value | `unmapped`, `storedStatus: "__other_recorded__"` |
 | A | `governanceStatus` | missing or null | `not_recorded`, `subReason: "missing"` |
 | B | `governanceRecord.automatedGovernance.status` | `passed` | `cleared` |
@@ -151,11 +157,17 @@ So, over contained (and, for research, complete) records, with `reviewed` meanin
 
 **Human-overwritten System A states never contribute to automated `cleared`, `needs_attention` or `blocked` counts.** The pre-review automated outcome is not recovered from `governanceEvents` in v1; that would be per-document reading.
 
+**Precedence.** The human-overwrite rule applies **only** to the three statuses the production writer can create: `approved`, `blocked` and `needs_review`. A record with `governanceReviewedAt > ""` but a missing, null or other `governanceStatus` is **malformed governance state**:
+- `reviewed_status_malformed = count(reviewed) − Σ_X count(governanceStatus == X ∧ reviewed)`, for X in the three recognized values. This is exact.
+- It is disclosed in `anomalies` and is **never** treated as a legitimate approval, block or changes-requested decision.
+- It contributes to no automated bucket and no human decision.
+
 ### 6.4 Unknown stored values and the residual
 
 Firestore `count()` cannot enumerate arbitrary distinct values, so unknown values collapse into one exact row:
-- `other_recorded = count(field not-in <recognized vocabulary>)`. Firestore's `not-in` excludes documents where the field is absent. The implementation verifies against real Firestore how an explicit `null` value is treated; if `null` would match, `null` is added to the excluded list, so null always stays in `missing`;
-- `not_recorded (missing) = total − Σ recognized − other_recorded`;
+- `other_recorded = count(field not-in <recognized vocabulary>)`. Per Firestore's documented semantics, `not-in` returns only documents where the field **exists, is not null**, and differs from every listed value. Missing fields and explicit `null` are therefore already excluded, and remain in the residual.
+- **`null` is never placed in a `not-in` list**: a `not-in` list containing `null` matches no documents.
+- `not_recorded (missing) = total − Σ recognized − other_recorded`. This is exactly the missing-or-null population;
 - for System A, `superseded` is reported separately from `missing`, both in the `not_recorded` bucket.
 
 ---
@@ -226,7 +238,10 @@ type GovernanceSummaryResponse = {
   };
   totals: Array<{ family: Family; sourceSystem: "A" | "B"; total: number; excludedNotComplete?: number; integrityAnomalies: number }>;
   rows: GovernanceSummaryRow[];
-  anomalies: Array<{ kind: "family_overlap"; family: Family; field: string; count: number }>;
+  anomalies: Array<
+    | { kind: "family_overlap"; family: Family; field: string; count: number }
+    | { kind: "reviewed_status_malformed"; family: Family; count: number } // §6.3
+  >;
 };
 ```
 
@@ -242,7 +257,11 @@ The UI may roll `rows` up by `normalizedOutcome` for display. It must keep the p
   - `in`: Project-id batches, split at Firestore's `in` limit into disjoint batches whose counts are summed;
   - `not-in`: the §6.4 recognized vocabularies (System A 3 values, System B 5, human 6, each within Firestore's `not-in` limit);
   - the reviewed-marker range `governanceReviewedAt > ""`.
-- **Unsupported operator combinations.** Where Firestore rejects a combination in one query (for example `not-in` together with `in`), the implementation uses an **equivalent exact decomposition into disjoint `count()` queries**. Example: `count(field != null ∧ …) − Σ recognized(…)`. It never falls back to a scan.
+- **Unsupported operator combinations.** Firestore prohibits combining `not-in` with `in` in one query, so the §6.4 `other_recorded` count is not run with a Project `in` batch. The implementation uses an **equivalent exact decomposition into disjoint `count()` queries over Project equality branches**:
+  - the explicit-null branch, `projectId == null`;
+  - plus one `projectId == P` branch per canonical Project P (or compatible batches, wherever the operator set permits them).
+
+  Each branch carries the `not-in` vocabulary filter, and the branch counts are summed. `!= null` is **not** used as an existence or non-null predicate, because it does not produce that population in Firestore. The implementation never falls back to a scan.
 - **Families stay separate.** Families and source systems are queried separately. Counts are combined only by the §6.2 and §7 mappings.
 - **Index policy.** The implementation determines the required composite indexes **against real Firestore** (emulators do not enforce index requirements). It adds only those Firestore demands, each recorded with the query shape that needs it.
 - **Forbidden.** No `limit`, cursor window, sampling, rollup write, denormalized field, scheduler or backfill.
@@ -268,6 +287,8 @@ The UI may roll `rows` up by `normalizedOutcome` for display. It must keep the p
 - Human-overwritten System A states never contribute to automated `cleared`, `needs_attention` or `blocked` counts.
 - Project-integrity-invalid artifacts never contribute to ordinary family outcomes, and are disclosed separately.
 - Research governance denominators include only completed runs, with non-complete runs disclosed separately.
-- Unknown non-null stored values are one exact `__other_recorded__` row, never folded into a bucket or into `not_recorded`.
+- Unknown non-null stored values are one exact `__other_recorded__` row, never folded into a bucket or into `not_recorded`; `null` is never placed in a `not-in` list.
+- Containment uses only validated canonical Projects (well-formed, embedded `id` equals the document id, `workspaceId` equals W; active or archived).
+- A reviewed System A record with a status the writer cannot create is disclosed as `reviewed_status_malformed`, never as a human decision.
 - Every displayed total has an exact denominator. Every normalization bucket can be exactly rebuilt from persisted predicates, and broken back down into its source family and system counts.
 - No record-window scan, sampling, inferred pass, new write path, rollup document, scheduler or backfill is introduced.
