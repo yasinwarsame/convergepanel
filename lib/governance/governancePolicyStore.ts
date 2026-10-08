@@ -99,6 +99,21 @@ function mergePolicyUpdate(
   return next;
 }
 
+/**
+ * Step 6.0a — POLICY VERSION ATOMICITY.
+ *
+ * The read of the current policy, the version increment and the write are ONE
+ * Firestore transaction. Previously they were a plain read-then-`set`, so two
+ * concurrent successful saves could both read version N and both commit N+1 —
+ * two different policies sharing one version number. Inside the transaction a
+ * concurrent commit invalidates this attempt's read and Firestore retries it
+ * against the newer document, so every successful mutation receives a unique,
+ * monotonically increasing version derived from the current persisted one.
+ *
+ * The per-version `auditEvents` entry is written in the SAME transaction, so a
+ * version number appears in that history exactly once, and only for a commit
+ * that actually happened. Authorization and the returned value are unchanged.
+ */
 export async function saveGovernancePolicyMerge(
   partial: Partial<GovernancePolicy>,
   uid: string,
@@ -107,34 +122,40 @@ export async function saveGovernancePolicyMerge(
   changedFieldNames: string[]
 ): Promise<GovernancePolicy> {
   if (!adminDb) throw new Error("Firestore is not available");
-  const ref = adminDb.collection(GOVERNANCE_POLICY_DOC_PATH.collection).doc(GOVERNANCE_POLICY_DOC_PATH.docId);
-  const currentSnap = await ref.get();
-  const current = currentSnap.exists
-    ? pickPolicyFields(currentSnap.data() as Record<string, unknown>)
-    : getDefaultGovernancePolicy();
+  const db = adminDb;
+  const ref = db.collection(GOVERNANCE_POLICY_DOC_PATH.collection).doc(GOVERNANCE_POLICY_DOC_PATH.docId);
 
-  const next = mergePolicyUpdate(current, partial);
+  return db.runTransaction(async (txn) => {
+    const currentSnap = await txn.get(ref);
+    const current = currentSnap.exists
+      ? pickPolicyFields(currentSnap.data() as Record<string, unknown>)
+      : getDefaultGovernancePolicy();
 
-  await ref.set(
-    {
-      ...next,
-      updatedAt: FieldValue.serverTimestamp(),
-      updatedBy: uid,
-    },
-    { merge: true }
-  );
+    const next = mergePolicyUpdate(current, partial);
 
-  await ref.collection("auditEvents").add(
-    sanitizeForFirestore({
-      action: "policy_updated",
-      byUid: uid,
-      byEmail: email,
-      at: new Date().toISOString(),
-      policyVersion: next.policyVersion,
-      comment,
-      changes: changedFieldNames,
-    }) as DocumentData
-  );
+    txn.set(
+      ref,
+      {
+        ...next,
+        updatedAt: FieldValue.serverTimestamp(),
+        updatedBy: uid,
+      },
+      { merge: true }
+    );
 
-  return next;
+    txn.set(
+      ref.collection("auditEvents").doc(),
+      sanitizeForFirestore({
+        action: "policy_updated",
+        byUid: uid,
+        byEmail: email,
+        at: new Date().toISOString(),
+        policyVersion: next.policyVersion,
+        comment,
+        changes: changedFieldNames,
+      }) as DocumentData
+    );
+
+    return next;
+  });
 }
