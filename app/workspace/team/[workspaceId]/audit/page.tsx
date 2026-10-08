@@ -10,6 +10,7 @@ import { notFound } from "next/navigation";
 import { resolveServerComponentIdentity } from "@/lib/auth/resolveServerComponentIdentity";
 import { resolveWorkspaceAccess } from "@/lib/workspaces/resolveWorkspaceAccess";
 import WorkspaceAuditLogShell from "@/components/workspace/WorkspaceAuditLogShell";
+import { WORKSPACE_GOVERNANCE_SUMMARY_ENABLED } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 
@@ -36,5 +37,5 @@ export default async function WorkspaceAuditLogPage({ params }: { params: { work
     notFound();
   }
 
-  return <WorkspaceAuditLogShell workspaceId={params.workspaceId} workspaceName={access.workspace.name} canReadMembers={access.capabilities.includes("members.read")} />;
+  return <WorkspaceAuditLogShell workspaceId={params.workspaceId} workspaceName={access.workspace.name} canReadMembers={access.capabilities.includes("members.read")} showGovernanceSummary={WORKSPACE_GOVERNANCE_SUMMARY_ENABLED} />;
 }
