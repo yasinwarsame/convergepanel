@@ -126,6 +126,11 @@ export interface RunDocument {
     latencyMs: number;
     tokenUsage: TokenUsageNormalized;
     wasTruncated: boolean;
+    /** Step 6.2a — runtime provenance captured at completion. Absent on runs completed before 6.2a; never backfilled. */
+    provider?: string;
+    requestedModel?: string;
+    /** Present only when this execution actually substituted ("<provider>:<model>"). */
+    substitutedFrom?: string;
   }>;
   synthesizedAnswer?: string;
   totals: {

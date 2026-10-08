@@ -935,6 +935,24 @@ There is no comparison with the current policy.
 - `automatedGovernance: {status, policyVersion?} | null`. Reasons, `evaluatedAt` and `notEvaluatedReason` are never projected.
 - `humanReview.reviewedAt`, released only under the existing `mayReadDecisionContent` gate. A personal reviewer outside the decision's provenance does not receive it.
 
+### Runtime model provenance (roadmap Step 6.2a)
+
+`completeRun` (`lib/firestore/runs.ts`) copies three runtime facts onto each `runDocument.perModel` row, inside the existing completion `update()`:
+
+- `provider`
+- `requestedModel`
+- `substitutedFrom`, only for a DeepSeek substitution, in `"<provider>:<model>"` form
+
+Rules:
+- The values come only from that execution's runtime result, through `runtimeModelProvenance()`. They are never taken from current model configuration or from the model id.
+- A missing value writes no key.
+- Whether a substitution happened is still recorded by `status === "substituted"`.
+- `actualModel` is not persisted, because it currently echoes the requested model and is not identity reported by the provider.
+
+Runs completed before 6.2a have none of these fields, and nothing is backfilled.
+
+**Known follow-up.** The saved-run read path (`runDocumentToPublicResults`) still fills `provider` from current configuration and sets `requestedModel`/`actualModel` to `modelId`. Fixing that is scoped separately, after 6.2b.
+
 ### Multi-Reviewer Governance (adaptive runs, team plan)
 
 A separate, panel-based review workflow layered on top of the adaptive schema system's `governanceRecord.humanReview`, distinct from the single-reviewer policy engine above. Lives at `runs/{runId}/humanReviewPanel/current` (one active panel per run) plus `runs/{runId}/humanReviewVotes/{revision}:{reviewerUid}` and `runs/{runId}/humanReviewPanelHistory/{revision}:{event}`. Panel lifecycle: create (`PUT`) → reviewers vote (`POST .../votes`) → aggregation reaches `waiting` / `deadlocked` / `ready` → finalize (`POST .../finalize`, majority aggregation) or owner override (`POST .../override`, breaks a deadlock) → cancel (`DELETE`) is available at any open-panel state as a drain operation. Route: `app/api/teams/adaptive-runs/[runId]/review-panel/`.
