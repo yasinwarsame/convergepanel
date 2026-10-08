@@ -1012,17 +1012,19 @@ None of the three steps ever falls back to mutable run state or model configurat
 
 E2-A (the export-history list) is unchanged; detailed model provenance lives only in the artifact.
 
-### Workspace governance summary (roadmap Step 6.3, contract only)
+### Workspace governance summary (roadmap Step 6.3)
 
-`docs/governance-workspace-summary-contract.md` defines the normalization contract for a Team Workspace governance-outcome summary:
-- exact Firestore `count()` aggregations of persisted predicates only, per report family and governance source system;
-- six distinct automated buckets;
-- a separate human axis, where System A human reviews (which overwrite `governanceStatus`) are counted only as human decisions;
-- canonical Project containment, with exact integrity-anomaly counts;
-- completed-only research denominators;
-- no numeric scores and no adaptive tiers.
+`docs/governance-workspace-summary-contract.md` defines the normalization contract. The implementation is **behind `WORKSPACE_GOVERNANCE_SUMMARY_ENABLED` (default off)**.
 
-Nothing is implemented yet.
+| Part | Location | What it does |
+|---|---|---|
+| Pure layer | `lib/governance/workspaceGovernanceSummary.ts` | Declarative `count()` specs through an injected executor, run at most 16 concurrently. Handles canonical Project containment, integrity anomalies, completed-only research, System A disjoint arithmetic and System B axes. Refuses unreconcilable residuals. |
+| Firestore adapter | `lib/governance/workspaceGovernanceSummaryFirestore.ts` | Runs `count().get()` only, plus the validated Project listing. |
+| API | `GET /api/workspaces/[workspaceId]/governance-summary` | Requires admission + `audit.read`; flag-concealed after authorization. |
+| UI | Team audit page | Read-only section; does not render a summary that fails to reconcile. |
+| Probe | `lib/governance/workspaceGovernanceSummaryProbe.ts` | Read-only index discovery: one count per distinct shape, with missing-index errors recorded verbatim. |
+
+Production queries and composite indexes require separate owner authorization.
 
 ### Multi-Reviewer Governance (adaptive runs, team plan)
 

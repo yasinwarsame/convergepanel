@@ -412,3 +412,22 @@ export function canonicalProjectIdsFromListing(
     .map((d) => d.id)
     .sort();
 }
+
+/**
+ * A stable, value-abstracted key for a count() spec's SHAPE: the same fields
+ * and operators with Workspace/Project ids and status values abstracted. Used
+ * to enumerate the distinct shapes for index review and the read-only probe.
+ */
+export function countSpecShape(spec: CountSpec): string {
+  const parts = spec.filters.map((f) => {
+    let v: string;
+    if (f.field === "workspaceId") v = "W";
+    else if (f.field === "projectId") v = f.op === "in" ? "[Project batch]" : f.value === null ? "null" : "<Project>";
+    else if (f.op === "not-in") v = JSON.stringify(f.value);
+    else if (f.op === ">") v = '""';
+    else if (f.field === "governanceStatus" || f.field.endsWith(".status")) v = "<status>";
+    else v = JSON.stringify(f.value);
+    return `${f.field} ${f.op} ${v}`;
+  });
+  return `${spec.collection}: ${parts.join(" ∧ ")}`;
+}
