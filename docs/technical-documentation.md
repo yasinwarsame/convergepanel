@@ -966,7 +966,16 @@ None of the three steps ever falls back to mutable run state or model configurat
 **What is frozen:**
 - **Policy version, adaptive (Milestone-2) reports:** `governanceRecord.automatedGovernance.policyVersion`, only for `passed`, `flagged` or `blocked`.
 - **Policy version, legacy reports:** the run's `governanceMeta.policyVersion`, only when the run's legacy `governanceStatus` records an actual evaluation.
-- **Per model:** `provider`, `requestedModel` and `substitutedFrom`, exactly as persisted on the run's `perModel` rows by Step 6.2a. Substitution state comes from `status === "substituted"`, which is authoritative. A `substitutedFrom` that contradicts it is never frozen or rendered.
+- **Per model:** `provider`, `requestedModel` and `substitutedFrom`, exactly as persisted on the run's `perModel` rows by Step 6.2a.
+- **Substitution state** comes from the persisted status and has three values:
+  - `true` only for a persisted `"substituted"`;
+  - `false` only for a persisted non-substitution status (`ok`, `failed`, `error`, `timeout`, `refused`, `rate_limited`);
+  - omitted when there is no row, no status, or an unrecognized one.
+
+  `false` is itself a provenance claim, so it is never inferred from absence. The frozen reader likewise keeps only a literal boolean. `substitutedFrom` is frozen and rendered only when `substituted === true`.
+- **Display of incomplete facts:**
+  - An unknown state reads "substitution not recorded".
+  - A substitution with a persisted `requestedModel` but no `substitutedFrom` shows the requested model and marks only the original provider as not recorded.
 - **Never frozen:** `actualModel`.
 
 **Older runs and exports:**
