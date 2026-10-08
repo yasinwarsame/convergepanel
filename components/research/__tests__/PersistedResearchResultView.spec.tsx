@@ -26,6 +26,7 @@ jest.mock("@/lib/client/authedFetch", () => ({ authedFetch: (...a: unknown[]) =>
 
 import PersistedResearchResultView from "@/components/research/PersistedResearchResultView";
 import type { PersistedResearchPresentation } from "@/lib/research/persistedRunPresentation";
+import { EMPTY_GOVERNANCE_RUN_CONTEXT } from "@/lib/research/governanceRunContext";
 import { interpretPersistedRunReadPayload, MALFORMED_STRUCTURED_RESULT_NOTICE } from "@/lib/research/persistedRunPresentation";
 import { deepResearchAdaptiveOutput, legacyAdaptiveOutput } from "@/lib/runs/__tests__/runReadFixtures";
 
@@ -47,6 +48,7 @@ function presentation(over: Partial<PersistedResearchPresentation> = {}): Persis
     synthesisConsensusSummary: null,
     orgGovernanceStatus: null,
     governance: undefined,
+    governanceContext: EMPTY_GOVERNANCE_RUN_CONTEXT,
     ...over,
   };
 }

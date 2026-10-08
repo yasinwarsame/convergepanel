@@ -66,10 +66,16 @@ export type RunReadPayload = {
     | {
         status: "valid";
         output: PersistedAdaptiveOutputV1;
-        humanReview: { status: string; conditions?: string[]; decidedVia?: string } | null;
+        humanReview: { status: string; conditions?: string[]; reviewedAt?: string; decidedVia?: string } | null;
         reviewRouting: RunReadReviewRouting;
+        /**
+         * Step 6.1 — the run's persisted automated evaluation: its status and
+         * the policy version it was evaluated under, exactly as stored. Never
+         * the evaluation reasons, and never compared to the current policy.
+         */
+        automatedGovernance: { status: string; policyVersion?: number } | null;
       }
-    | { status: "absent" | "unsupported_version" | "malformed"; output: null; humanReview: null; reviewRouting: "unknown" };
+    | { status: "absent" | "unsupported_version" | "malformed"; output: null; humanReview: null; reviewRouting: "unknown"; automatedGovernance: null };
   legacyAdaptive:
     | { status: "valid"; output: PersistedLegacyAdaptiveOutputV1 }
     | { status: "absent" | "unsupported_version" | "malformed"; output: null };
@@ -174,6 +180,12 @@ export async function buildRunReadPayload(args: {
     ? {
         status: parsedGovernance.record.humanReview.status,
         ...(mayReadDecisionContent ? { conditions: parsedGovernance.record.humanReview.conditions } : {}),
+        // Step 6.1 — WHEN the decision was made is decision metadata released
+        // under the same content gate as `conditions`: a personal reviewer
+        // never learns the timing of a decision outside their own capability.
+        ...(mayReadDecisionContent && parsedGovernance.record.humanReview.reviewedAt !== undefined
+          ? { reviewedAt: parsedGovernance.record.humanReview.reviewedAt }
+          : {}),
         ...(viewerMayReadDecisionProvenance(viewerRole)
           ? { decidedVia: parsedGovernance.record.humanReview.decidedVia }
           : {}),
@@ -188,6 +200,16 @@ export async function buildRunReadPayload(args: {
     reviewRouting = await args.resolveReviewRouting({ runId, ownerUid: owner, requestId: args.requestId });
   }
 
+  // Step 6.1 — status and policy version only, field by field; `reasons`,
+  // `evaluatedAt` and `notEvaluatedReason` are never projected.
+  const persistedAutomated = parsedGovernance.ok ? parsedGovernance.record.automatedGovernance : undefined;
+  const automatedGovernance = persistedAutomated
+    ? {
+        status: persistedAutomated.status,
+        ...(persistedAutomated.policyVersion !== undefined ? { policyVersion: persistedAutomated.policyVersion } : {}),
+      }
+    : null;
+
   // Phase 11A.4 — response-time only augmentation; never persisted.
   const adaptive: RunReadPayload["adaptive"] = parsedAdaptive.ok
     ? {
@@ -198,8 +220,9 @@ export async function buildRunReadPayload(args: {
             : parsedAdaptive.output,
         humanReview,
         reviewRouting,
+        automatedGovernance,
       }
-    : { status: parsedAdaptive.reason, output: null, humanReview: null, reviewRouting: "unknown" as const };
+    : { status: parsedAdaptive.reason, output: null, humanReview: null, reviewRouting: "unknown" as const, automatedGovernance: null };
 
   // Batch 3 persistence foundation (2C-1) — the SEPARATE legacyAdaptiveOutput
   // family, validated through its own real runtime parser and never

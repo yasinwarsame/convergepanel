@@ -81,7 +81,7 @@ describe("buildRunReadPayload — envelope interpretation", () => {
     ] as const) {
       const r = resolver();
       const p = await buildRunReadPayload({ mayReadDecisionContent: true, runId: FIXTURE_RUN_ID, data: fullTeamRunData({ adaptiveOutput: raw }), viewerRole: "owner", resolveReviewRouting: r });
-      expect(p.adaptive).toEqual({ status: reason, output: null, humanReview: null, reviewRouting: "unknown" });
+      expect(p.adaptive).toEqual({ status: reason, output: null, humanReview: null, reviewRouting: "unknown", automatedGovernance: null });
       // Without a valid adaptive envelope governance is never consulted, so no review-routing I/O either.
       expect(r).not.toHaveBeenCalled();
     }
@@ -175,5 +175,68 @@ describe("buildRunReadPayload — deep research claim ids and redaction", () => 
       expect(row).toHaveProperty("tokenUsage");
       expect(row).toHaveProperty("latencyMs");
     }
+  });
+});
+
+describe("buildRunReadPayload — Step 6.1 governance context projection", () => {
+  const REVIEWED_AT = "2026-10-05T12:00:00.000Z";
+  const record = (over: Record<string, unknown> = {}) =>
+    governanceRecord("approved", {
+      automatedGovernance: { status: "flagged", reasons: ["REASON-SENTINEL"], evaluatedAt: "2026-09-01T00:00:01.000Z", policyVersion: 7, notEvaluatedReason: "NER-SENTINEL" },
+      humanReview: { status: "approved", reviewedAt: REVIEWED_AT, reviewerId: "rev-secret", comment: "secret comment" },
+      ...over,
+    });
+  async function build(rec: unknown, mayReadDecisionContent = true) {
+    const p = await buildRunReadPayload({ mayReadDecisionContent, runId: FIXTURE_RUN_ID, data: fullTeamRunData({ governanceRecord: rec }), viewerRole: "owner", resolveReviewRouting: resolver() });
+    if (p.adaptive.status !== "valid") throw new Error("expected valid adaptive");
+    return p;
+  }
+
+  it("projects ONLY the persisted automated status and policy version — never reasons, evaluatedAt or notEvaluatedReason", async () => {
+    const p = await build(record());
+    if (p.adaptive.status !== "valid") throw new Error("unreachable");
+    expect(p.adaptive.automatedGovernance).toEqual({ status: "flagged", policyVersion: 7 });
+    expect(Object.keys(p.adaptive.automatedGovernance ?? {})).toEqual(["status", "policyVersion"]);
+    const json = JSON.stringify(p);
+    expect(json).not.toContain("REASON-SENTINEL");
+    expect(json).not.toContain("NER-SENTINEL");
+    expect(json).not.toContain("2026-09-01T00:00:01.000Z");
+  });
+
+  it("a record without a policy version emits no policyVersion key (never a default)", async () => {
+    const p = await build(record({ automatedGovernance: { status: "passed", reasons: [] } }));
+    if (p.adaptive.status !== "valid") throw new Error("unreachable");
+    expect(p.adaptive.automatedGovernance).toEqual({ status: "passed" });
+    expect("policyVersion" in (p.adaptive.automatedGovernance ?? {})).toBe(false);
+  });
+
+  it("no automated evaluation persisted, or an unparseable record → automatedGovernance null", async () => {
+    const rec = record();
+    delete (rec as Record<string, unknown>).automatedGovernance;
+    const none = await build(rec);
+    if (none.adaptive.status !== "valid") throw new Error("unreachable");
+    expect(none.adaptive.automatedGovernance).toBeNull();
+    const malformed = await build({ version: 1 });
+    if (malformed.adaptive.status !== "valid") throw new Error("unreachable");
+    expect(malformed.adaptive.automatedGovernance).toBeNull();
+  });
+
+  it("reviewedAt is released with the decision content, and withheld (no key) when the caller may not read it", async () => {
+    const allowed = await build(record(), true);
+    if (allowed.adaptive.status !== "valid") throw new Error("unreachable");
+    expect(allowed.adaptive.humanReview?.reviewedAt).toBe(REVIEWED_AT);
+
+    const denied = await build(record(), false);
+    if (denied.adaptive.status !== "valid") throw new Error("unreachable");
+    expect(denied.adaptive.humanReview).not.toBeNull();
+    expect("reviewedAt" in (denied.adaptive.humanReview ?? {})).toBe(false);
+    expect(JSON.stringify(denied)).not.toContain(REVIEWED_AT);
+  });
+
+  it("a decision without a persisted reviewedAt emits no reviewedAt key", async () => {
+    const p = await build(record({ humanReview: { status: "approved" } }));
+    if (p.adaptive.status !== "valid") throw new Error("unreachable");
+    expect(p.adaptive.humanReview).toEqual({ status: "approved", decidedVia: undefined, conditions: undefined });
+    expect("reviewedAt" in (p.adaptive.humanReview ?? {})).toBe(false);
   });
 });

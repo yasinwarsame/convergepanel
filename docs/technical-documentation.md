@@ -921,6 +921,20 @@ Team research detail hosts the Team export UI (`components/workspace/projects/Te
 - **Generator.** The frozen `generatedBy` display name, then the masked email, then "Not available". No uid is rendered.
 - **Shared contract.** The ancillary contract gained an optional `exportHistorySurface`, the position below the summary card; existing callers are unchanged.
 
+### Run-level governance context (roadmap Step 6.1)
+
+The Personal research report and the Team research detail show the same governance context for a saved run. One pure helper (`lib/research/governanceRunContext.ts`) derives it; `interpretPersistedRunReadPayload` carries it; the shared `PersistedResearchResultView` renders it. Every value comes from a persisted field, and missing or invalid data shows nothing:
+
+- **"Evaluated under policy v<N>"** comes from the run's `automatedGovernance.policyVersion`. It is shown only when the persisted automated status is `passed`, `flagged` or `blocked`.
+- **"Decided <age> (<date>)"** comes from `humanReview.reviewedAt`. It is shown only when the review status is a decision (`approved`, `approved_with_conditions`, `changes_requested` or `rejected`).
+- **"Time-sensitive question · generated <date>"** comes from the persisted classification `freshness` (`date_sensitive`, `recent` or `live`) plus `generatedAt`. They are read from the envelope the result itself renders from: adaptive first, then legacy-adaptive.
+
+There is no comparison with the current policy.
+
+**Read payload.** `buildRunReadPayload` (shared by `GET /api/user/runs/[runId]` and the Team run-detail GET) now emits, on a valid adaptive envelope:
+- `automatedGovernance: {status, policyVersion?} | null`. Reasons, `evaluatedAt` and `notEvaluatedReason` are never projected.
+- `humanReview.reviewedAt`, released only under the existing `mayReadDecisionContent` gate. A personal reviewer outside the decision's provenance does not receive it.
+
 ### Multi-Reviewer Governance (adaptive runs, team plan)
 
 A separate, panel-based review workflow layered on top of the adaptive schema system's `governanceRecord.humanReview`, distinct from the single-reviewer policy engine above. Lives at `runs/{runId}/humanReviewPanel/current` (one active panel per run) plus `runs/{runId}/humanReviewVotes/{revision}:{reviewerUid}` and `runs/{runId}/humanReviewPanelHistory/{revision}:{event}`. Panel lifecycle: create (`PUT`) → reviewers vote (`POST .../votes`) → aggregation reaches `waiting` / `deadlocked` / `ready` → finalize (`POST .../finalize`, majority aggregation) or owner override (`POST .../override`, breaks a deadlock) → cancel (`DELETE`) is available at any open-panel state as a drain operation. Route: `app/api/teams/adaptive-runs/[runId]/review-panel/`.

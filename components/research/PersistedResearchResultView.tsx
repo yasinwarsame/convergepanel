@@ -29,6 +29,7 @@
 import ResultsDisplay, { type ReadOnlyExecutionTarget } from "@/components/ResultsDisplay";
 import type { AdaptiveAncillaryPresentation } from "@/components/adaptive/adaptiveAncillaryPresentation";
 import type { PersistedResearchPresentation } from "@/lib/research/persistedRunPresentation";
+import { governanceRunContextLines } from "@/lib/research/governanceRunContext";
 
 export type PersistedResearchResultViewProps = {
   presentation: PersistedResearchPresentation;
@@ -57,8 +58,20 @@ export type PersistedResearchResultViewProps = {
 const noExecution = () => {};
 
 export default function PersistedResearchResultView({ presentation, onVerifyClaim, onRunFollowUp, readOnlyExecutionTarget, adaptiveAncillaryPresentation }: PersistedResearchResultViewProps) {
+  // Step 6.1 — persisted run-level governance context. Same lines for Personal
+  // and Team, because both pass the same interpreted presentation.
+  const contextLines = governanceRunContextLines(presentation.governanceContext, Date.now());
   return (
     <>
+      {contextLines.length > 0 && (
+        <ul data-testid="governance-run-context" className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-cp-muted">
+          {contextLines.map((line) => (
+            <li key={line.key} data-testid={`governance-run-context-${line.key}`}>
+              {line.text}
+            </li>
+          ))}
+        </ul>
+      )}
       {presentation.restoreNotice && (
         <p className="mt-3 rounded-lg border border-cp-border bg-cp-raised px-3 py-2 text-sm text-cp-muted">
           {presentation.restoreNotice}

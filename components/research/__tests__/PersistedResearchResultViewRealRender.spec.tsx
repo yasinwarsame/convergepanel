@@ -16,6 +16,7 @@ import { createElement } from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import PersistedResearchResultView from "@/components/research/PersistedResearchResultView";
 import type { PersistedResearchPresentation } from "@/lib/research/persistedRunPresentation";
+import { EMPTY_GOVERNANCE_RUN_CONTEXT } from "@/lib/research/governanceRunContext";
 
 const RUN = "run-team-1";
 function single(role: PersistedResearchPresentation["viewerRole"]): PersistedResearchPresentation {
@@ -30,6 +31,7 @@ function single(role: PersistedResearchPresentation["viewerRole"]): PersistedRes
     synthesisConsensusSummary: null,
     orgGovernanceStatus: null,
     governance: undefined,
+    governanceContext: EMPTY_GOVERNANCE_RUN_CONTEXT,
   };
 }
 async function mount(props: Record<string, unknown>) {
