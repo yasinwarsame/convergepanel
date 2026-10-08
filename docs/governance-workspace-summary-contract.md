@@ -167,8 +167,45 @@ So, over contained (and, for research, complete) records, with `reviewed` meanin
 Firestore `count()` cannot enumerate arbitrary distinct values, so unknown values collapse into one exact row:
 - `other_recorded = count(field not-in <recognized vocabulary>)`. Per Firestore's documented semantics, `not-in` returns only documents where the field **exists, is not null**, and differs from every listed value. Missing fields and explicit `null` are therefore already excluded, and remain in the residual.
 - **`null` is never placed in a `not-in` list**: a `not-in` list containing `null` matches no documents.
-- `not_recorded (missing) = total − Σ recognized − other_recorded`. This is exactly the missing-or-null population;
-- for System A, `superseded` is reported separately from `missing`, both in the `not_recorded` bucket.
+- `not_recorded (missing) = total − Σ recognized − other_recorded`. This is exactly the missing-or-null population. The formula applies **as written to System B**. **System A** uses the disjoint arithmetic in §6.5 instead, because reviewed rows must be removed from every automated population.
+
+### 6.5 System A disjoint arithmetic
+
+Over contained (and, for research, complete) records, with `R = ["approved", "needs_review", "blocked"]` and `reviewed` meaning `governanceReviewedAt > ""`.
+
+**Persisted counts:**
+- `rawRecognized(X) = count(governanceStatus == X)`, for X in R
+- `allOtherRecorded = count(governanceStatus not-in R)`
+- `reviewedRecognized(X) = count(governanceStatus == X ∧ reviewed)`, for X in R
+- `reviewedOther = count(governanceStatus not-in R ∧ reviewed)`
+- `reviewedTotal = count(reviewed)`
+
+**Derived exactly:**
+- `reviewedMalformed = reviewedTotal − Σ reviewedRecognized(X)` (the `reviewed_status_malformed` anomaly, §6.3)
+- `reviewedMissing = reviewedMalformed − reviewedOther`
+- `allMissing = total − Σ rawRecognized(X) − allOtherRecorded`
+- `automated(X) = rawRecognized(X) − reviewedRecognized(X)`
+- `automatedOtherRecorded = allOtherRecorded − reviewedOther`
+- `automatedMissing = allMissing − reviewedMissing`
+- `superseded = Σ reviewedRecognized(X)`
+
+**Disjoint populations.** Every System A record falls in exactly one:
+
+| Record | Reported as |
+|---|---|
+| unreviewed, recognized status X | automated bucket for X (§6.2) |
+| reviewed, recognized status | automated `not_recorded` / `superseded_by_human_decision`, plus its human decision (§7) |
+| unreviewed, unknown non-null status | automated `__other_recorded__` / `unmapped` |
+| unreviewed, missing or null status | automated `not_recorded` / `missing` |
+| reviewed, unknown, missing or null status | **only** the `reviewed_status_malformed` anomaly: no automated bucket, no human decision |
+
+**Automated denominator.** The System A automated-outcome denominator **excludes** `reviewedMalformed`:
+
+`automatedDenominator = total − reviewedMalformed = Σ automated(X) + superseded + automatedOtherRecorded + automatedMissing`
+
+The family's overall record `total` is still returned separately.
+
+**Query shape.** `reviewed` combined with a status `not-in` is an inequality on two fields. Firestore supports this with the appropriate composite index. If real Firestore rejects the exact combination at implementation time, the §10 rule applies: an exact decomposition into disjoint counts, never a scan.
 
 ---
 
@@ -198,7 +235,8 @@ For every family and system, all over **contained** records (and, for research, 
 - `total(F)`;
 - each recognized `count(X)`;
 - `other_recorded`;
-- `not_recorded = total − Σ recognized − other_recorded`, with the System A split into `superseded` and `missing`.
+- `not_recorded = total − Σ recognized − other_recorded` for System B. For System A, `superseded` and `automatedMissing` per §6.5.
+- For System A, the **automated denominator** is `total − reviewedMalformed` (§6.5). Reviewed-malformed rows belong to no automated bucket, and are disclosed as an anomaly.
 
 Beside them: `excludedNotComplete(F)` (research only) and `anomaly(F)` (§4).
 
@@ -236,7 +274,14 @@ type GovernanceSummaryResponse = {
     researchCompletion: "status_complete";                      // §5
     teamWorkspaceOnly: true;
   };
-  totals: Array<{ family: Family; sourceSystem: "A" | "B"; total: number; excludedNotComplete?: number; integrityAnomalies: number }>;
+  totals: Array<{
+    family: Family;
+    sourceSystem: "A" | "B";
+    total: number;                 // all contained (and, for research, complete) records
+    automatedDenominator: number;  // System A: total − reviewedMalformed (§6.5); System B: total
+    excludedNotComplete?: number;  // research only (§5)
+    integrityAnomalies: number;    // §4
+  }>;
   rows: GovernanceSummaryRow[];
   anomalies: Array<
     | { kind: "family_overlap"; family: Family; field: string; count: number }
@@ -290,5 +335,6 @@ The UI may roll `rows` up by `normalizedOutcome` for display. It must keep the p
 - Unknown non-null stored values are one exact `__other_recorded__` row, never folded into a bucket or into `not_recorded`; `null` is never placed in a `not-in` list.
 - Containment uses only validated canonical Projects (well-formed, embedded `id` equals the document id, `workspaceId` equals W; active or archived).
 - A reviewed System A record with a status the writer cannot create is disclosed as `reviewed_status_malformed`, never as a human decision.
+- System A populations are disjoint per §6.5. A reviewed row never also appears in automated `__other_recorded__` or `missing`, and the System A automated denominator excludes `reviewed_status_malformed`.
 - Every displayed total has an exact denominator. Every normalization bucket can be exactly rebuilt from persisted predicates, and broken back down into its source family and system counts.
 - No record-window scan, sampling, inferred pass, new write path, rollup document, scheduler or backfill is introduced.
