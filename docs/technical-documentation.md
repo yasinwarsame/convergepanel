@@ -1014,9 +1014,12 @@ E2-A (the export-history list) is unchanged; detailed model provenance lives onl
 
 ### Workspace governance summary (roadmap Step 6.3, contract only)
 
-`docs/governance-workspace-summary-contract.md` defines the normalization contract for a Team Workspace governance-outcome summary. It covers:
-- exact `count()` aggregations of persisted fields only, per report family and governance source system;
-- six distinct automated buckets, with the human-decision axis kept separate;
+`docs/governance-workspace-summary-contract.md` defines the normalization contract for a Team Workspace governance-outcome summary:
+- exact Firestore `count()` aggregations of persisted predicates only, per report family and governance source system;
+- six distinct automated buckets;
+- a separate human axis, where System A human reviews (which overwrite `governanceStatus`) are counted only as human decisions;
+- canonical Project containment, with exact integrity-anomaly counts;
+- completed-only research denominators;
 - no numeric scores and no adaptive tiers.
 
 Nothing is implemented yet.
