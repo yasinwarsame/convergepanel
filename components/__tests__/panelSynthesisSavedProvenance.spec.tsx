@@ -29,19 +29,30 @@ const ok = { modelId: "chatgpt", status: "ok", rawText: "A long enough answer fr
 const savedSub = (over: Record<string, unknown> = {}) => ({ modelId: "claude", status: "substituted", rawText: "A long enough fallback answer about repositories.", rawTextFull: "A long enough fallback answer about repositories.", latencyMs: 1, ...over });
 
 let copied: string[] = [];
+/** Every renderer this file creates, unmounted after each test: VerificationActions
+ *  schedules a 2s "Copied!" reset timer that only its unmount cleanup clears.
+ *  Leaving it pending let it fire after this file finished — "Cannot log after
+ *  tests are done", which makes `jest --runInBand` exit 1 with every test green. */
+const mounted: TestRenderer.ReactTestRenderer[] = [];
 beforeEach(() => {
   copied = [];
   jest.spyOn(console, "log").mockImplementation(() => {});
   jest.spyOn(console, "warn").mockImplementation(() => {});
   Object.defineProperty(globalThis, "navigator", { value: { clipboard: { writeText: async (t: string) => void copied.push(t) } }, configurable: true });
 });
-afterEach(() => jest.restoreAllMocks());
+afterEach(async () => {
+  await act(async () => {
+    for (const r of mounted.splice(0)) r.unmount();
+  });
+  jest.restoreAllMocks();
+});
 
 async function mount(results: unknown[]) {
   let r!: TestRenderer.ReactTestRenderer;
   await act(async () => {
     r = TestRenderer.create(createElement(PanelSynthesisView, { results: results as never, question: "How do I start?", runId: "run-1", preGeneratedStatus: "complete", preGeneratedReport: REPORT as never }));
   });
+  mounted.push(r);
   return r;
 }
 const textOf = (n: TestRenderer.ReactTestInstance | string): string => (typeof n === "string" ? n : n.children.map(textOf).join(""));
@@ -49,9 +60,14 @@ const chip = (r: TestRenderer.ReactTestRenderer) =>
   r.root.findAll((n) => n.type === "span" && typeof n.props.title === "string" && textOf(n).startsWith("Substituted:"))[0];
 async function copy(r: TestRenderer.ReactTestRenderer) {
   const button = r.root.findAll((n) => n.type === "button" && textOf(n).toLowerCase().includes("copy"))[0];
+  // The handler is fire-and-forget (`void (async () => …)()`); flush its
+  // microtasks inside act so the copy and the "Copied!" state update both land
+  // before asserting, rather than relying on timing.
   await act(async () => {
-    await button.props.onClick();
+    button.props.onClick();
+    for (let i = 0; i < 5; i += 1) await Promise.resolve();
   });
+  expect(copied.length).toBeGreaterThan(0);
   return copied.join("\n");
 }
 
