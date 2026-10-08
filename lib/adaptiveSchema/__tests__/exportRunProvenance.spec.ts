@@ -123,7 +123,13 @@ describe("per-model provenance — persisted perModel rows only", () => {
   it.each([undefined, null, "x", {}, { perModel: "x" }])("runDocument %p → ids only, nothing synthesized (no substitution claim)", (runDocument) => {
     expect(freezeExportRunProvenance({ selectedModels: MODELS, runDocument, policy: m2() }).models).toEqual([{ modelId: "chatgpt" }, { modelId: "claude" }]);
   });
-  it.each(NON_SUBSTITUTED_PERSISTED_STATUSES)("persisted status %s → substituted: false (an explicit recorded fact)", (status) => {
+  // Pinned literally — never iterated from the subject's own list, which would
+  // silently drop a case if a status were removed from it.
+  const EXPECTED_NON_SUBSTITUTED = ["ok", "failed", "error", "timeout", "refused", "rate_limited"];
+  it("the non-substitution allow-list is exactly the persisted ConnectorStatus values other than substituted", () => {
+    expect([...NON_SUBSTITUTED_PERSISTED_STATUSES].sort()).toEqual([...EXPECTED_NON_SUBSTITUTED].sort());
+  });
+  it.each(EXPECTED_NON_SUBSTITUTED)("persisted status %s → substituted: false (an explicit recorded fact)", (status) => {
     expect(withRow(0, (r) => (r.status = status)).substituted).toBe(false);
   });
   it.each([
