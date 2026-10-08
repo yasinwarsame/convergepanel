@@ -52,6 +52,15 @@ guard.
 **Grants:** governance-global visibility (every user's runs), governance policy
 write, audit backfill, and the governance dashboard/policy presentation.
 
+**Governance policy read vs write (Step 6.0b).** `GET /api/governance/policy`
+returns the full policy to a verified Governance Admin **or** a caller whose
+current effective plan is `full` (the governance dashboard audience), via
+`checkGovernancePolicyReadAccess`. Both conditions are derived server-side from
+the caller's uid; client eligibility flags, Firestore role strings and
+request-supplied identity are never consulted. Free and Lite callers receive 403
+before the policy is loaded; an entitlement lookup failure returns 503. Policy
+**write** (`POST`) remains Governance Admin only (`checkAdminOnly`).
+
 ### Disabled accounts hold no email-derived authority (Phase C4)
 
 Both email-derived scopes require ALL of: the live `getUser(uid)` lookup
@@ -400,7 +409,7 @@ operator does; they are not automated.
    | `/api/admin/users/[uid]/stripe/sync` POST | SYSTEM_ADMIN | ✅ `writeAuditLog` | ❌ | **none** (reads Stripe only) |
    | `/api/governance/review` POST | GOVERNANCE_ADMIN / reviewer | ✅ `writeAuditEvent` | ✅ shape only | run's `governanceEvents` |
    | `/api/governance/policy` POST | GOVERNANCE_ADMIN | ✅ `writeAuditEvent` | ✅ | — |
-   | `/api/governance/policy` GET | GOVERNANCE_ADMIN | ❌ | ✅ | — |
+   | `/api/governance/policy` GET | GOVERNANCE_ADMIN or current `full` plan (Step 6.0b) | ❌ | ✅ | — |
    | **`/api/admin/set-admin` POST** | **BOOTSTRAP_SECRET only** | ❌ **NONE** | ❌ **NONE** | **none — see §B.6** |
    | **`/api/admin/set-role` POST** | SYSTEM_ADMIN | ❌ **NONE** | ✅ | — |
    | **`/api/admin/keys` GET, POST** | SYSTEM_ADMIN | ❌ **NONE** | ✅ | — |
