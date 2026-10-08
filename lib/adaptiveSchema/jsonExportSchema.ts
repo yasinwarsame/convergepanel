@@ -113,6 +113,21 @@ export const adaptiveResearchJsonExportV1Schema = z.object({
     models: z.array(modelSummarySchema),
     governanceStatusAtExport: governanceStatusSchema,
     classification: classificationSchema,
+    /** Step 6.2b — absent for every export created before 6.2b, never synthesized. */
+    run: z
+      .object({
+        policyVersion: z.number().int().min(1).optional(),
+        models: z.array(
+          z.object({
+            modelId: z.string(),
+            provider: z.string().optional(),
+            requestedModel: z.string().optional(),
+            substituted: z.boolean().optional(),
+            substitutedFrom: z.string().optional(),
+          })
+        ),
+      })
+      .optional(),
   }),
 });
 

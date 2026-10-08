@@ -163,6 +163,40 @@ export interface AdaptiveExportModelSummary {
 }
 
 /**
+ * Step 6.2b — one model's runtime provenance, frozen at export creation from
+ * the run's persisted `perModel` row (Step 6.2a). These are runtime
+ * ORCHESTRATION facts — what ConvergePanel requested and from which provider —
+ * not provider-attested model identity. Each optional field is present only
+ * when the run persisted it; runs completed before 6.2a carry none of them and
+ * nothing is reconstructed.
+ */
+export interface AdaptiveExportModelProvenance {
+  modelId: ModelId;
+  provider?: string;
+  requestedModel?: string;
+  /**
+   * Tri-state, and absent means unknown: `true` only for a persisted
+   * `status === "substituted"`, `false` only for a persisted non-substitution
+   * status, and OMITTED when the run has no row, no status, or an unrecognized
+   * one. `false` is itself a provenance claim and is never inferred from absence.
+   */
+  substituted?: boolean;
+  /** `"<provider>:<model>"` originally requested — present only on a substituted row that persisted it. */
+  substitutedFrom?: string;
+}
+
+/**
+ * Step 6.2b — run-level provenance frozen into the export snapshot. Absent on
+ * every export record created before 6.2b: readers must render nothing for it,
+ * never synthesize it, and never re-read the run to fill it.
+ */
+export interface AdaptiveExportRunProvenance {
+  /** The governance policy version the run was evaluated under, from its own family's persisted source. */
+  policyVersion?: number;
+  models: AdaptiveExportModelProvenance[];
+}
+
+/**
  * The frozen report content. Exactly one of `milestone2`/`legacy` is
  * populated, matching which persisted-output family the source run
  * actually has — never both, never neither (a run is one schema, one
@@ -175,6 +209,8 @@ export interface AdaptiveExportReportSnapshot {
   consensusLevel: ConsensusLevel;
   sourceGroundingLevel: SourceGroundingLevel;
   reportGeneratedAt: string;
+  /** Step 6.2b — absent on pre-6.2b export records (see `AdaptiveExportRunProvenance`). */
+  runProvenance?: AdaptiveExportRunProvenance;
 
   milestone2?: {
     schemaId: PersistedAdaptiveSchemaId;

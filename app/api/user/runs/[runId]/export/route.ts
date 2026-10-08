@@ -134,6 +134,8 @@ export async function POST(req: NextRequest, context: { params: Promise<{ runId:
     snapshotResult = buildExportSnapshot({
       question,
       selectedModels,
+      // Step 6.2b — the persisted per-model rows, read once with the run above.
+      runDocument: data.runDocument,
       milestone2: {
         output: parsedAdaptive.output,
         governanceRecord: parsedGovernance.ok ? parsedGovernance.record : undefined,
@@ -153,7 +155,9 @@ export async function POST(req: NextRequest, context: { params: Promise<{ runId:
     snapshotResult = buildExportSnapshot({
       question,
       selectedModels,
-      legacy: { output: parsedLegacy.output, governanceStatus },
+      // Step 6.2b — the persisted per-model rows, read once with the run above.
+      runDocument: data.runDocument,
+      legacy: { output: parsedLegacy.output, governanceStatus, governanceMeta: data.governanceMeta },
     });
     schemaId = parsedLegacy.output.schemaId;
     schemaFamily = "legacy";

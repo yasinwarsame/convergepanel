@@ -354,3 +354,21 @@ describe("GET /api/user/runs/[runId]/exports/[exportId] — audit + reliability 
     expect(buf.toString()).toBe("%PDF-regenerated");
   });
 });
+
+describe("Step 6.2b — Personal historical download reproduces the FROZEN provenance", () => {
+  it("the run's current rows have changed since export; the renderer still receives only the frozen provenance", async () => {
+    const FROZEN = { policyVersion: 4, models: [{ modelId: "chatgpt", provider: "openai", requestedModel: "gpt-AT-EXPORT", substituted: false }] };
+    mockedRunGet.mockResolvedValue({
+      exists: true,
+      data: () => ({ userId: UID, governanceMeta: { policyVersion: 99 }, runDocument: { perModel: [{ modelId: "chatgpt", status: "ok", provider: "CURRENT-PROVIDER", requestedModel: "CURRENT-MODEL" }] } }),
+    });
+    const frozen = buildRecord();
+    (frozen.reportSnapshot as Record<string, unknown>).runProvenance = FROZEN;
+    mockedGetAdaptiveExportRecord.mockResolvedValue({ ok: true, record: frozen });
+    const res = await callRoute();
+    expect(res.status).toBe(200);
+    expect(mockedRenderAdaptiveResearchExport).toHaveBeenCalledTimes(1);
+    expect(mockedRenderAdaptiveResearchExport.mock.calls[0][0]).toBe(frozen);
+    expect(JSON.stringify(mockedRenderAdaptiveResearchExport.mock.calls[0][0])).not.toMatch(/CURRENT-PROVIDER|CURRENT-MODEL|"policyVersion":99/);
+  });
+});

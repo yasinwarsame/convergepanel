@@ -55,6 +55,8 @@ import { AdaptiveDecisionReceipt } from "./governanceRecord";
 import { AdaptiveGateResult, AdaptiveModelResult, AdaptiveSynthesisReport, AdaptiveTrustSummary, AlignedClaim } from "./types";
 import { PersistedAdaptiveSchemaId, PersistedLegacyAdaptiveSchemaId } from "./persistedOutput";
 import { AdaptiveExportGeneratedBy } from "./exportGeneratedBy";
+import { readFrozenRunProvenance } from "./exportRunProvenance";
+import type { AdaptiveExportRunProvenance } from "./researchExport";
 
 export const ADAPTIVE_RESEARCH_JSON_EXPORT_FORMAT_VERSION = "1" as const;
 
@@ -125,6 +127,8 @@ export interface AdaptiveResearchJsonExportV1 {
     models: AdaptiveExportModelSummary[];
     governanceStatusAtExport: AdaptiveExportGovernanceStatus;
     classification: AdaptiveExportClassification;
+    /** Step 6.2b — frozen run provenance (policy version, per-model provider / requested model / substitution). Absent for every export created before 6.2b — never synthesized. */
+    run?: AdaptiveExportRunProvenance;
   };
 }
 
@@ -253,6 +257,7 @@ export function buildAdaptiveResearchJsonExport(record: AdaptiveResearchExportV1
   const snapshot = record.reportSnapshot;
   const governanceStatusAtExport = normalizeGovernanceStatus(record.governanceStatusAtExport);
   const models = normalizeModelSummaries(snapshot.models);
+  const runProvenance = readFrozenRunProvenance(snapshot.runProvenance);
 
   const result: AdaptiveResearchJsonExportResult =
     record.schemaFamily === "milestone2" && snapshot.milestone2
@@ -315,6 +320,7 @@ export function buildAdaptiveResearchJsonExport(record: AdaptiveResearchExportV1
       models,
       governanceStatusAtExport,
       classification: record.classification,
+      ...(runProvenance ? { run: runProvenance } : {}),
     },
   };
 }

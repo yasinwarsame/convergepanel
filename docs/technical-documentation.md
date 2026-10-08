@@ -953,6 +953,38 @@ Runs completed before 6.2a have none of these fields, and nothing is backfilled.
 
 **Known follow-up.** The saved-run read path (`runDocumentToPublicResults`) still fills `provider` from current configuration and sets `requestedModel`/`actualModel` to `modelId`. Fixing that is scoped separately, after 6.2b.
 
+### Frozen export provenance (roadmap Step 6.2b)
+
+New Team and Personal exports freeze `reportSnapshot.runProvenance` at creation. `lib/adaptiveSchema/exportRunProvenance.ts` handles it in three separate steps:
+
+1. **Freeze from the run.** `freezeExportRunProvenance` is called inside `buildExportSnapshot`. Both creation routes must pass the run's stored `runDocument`, and the legacy family's `governanceMeta`.
+2. **Read the frozen record back.** `readFrozenRunProvenance` validates the stored value. Nulls and malformed fields count as absent.
+3. **Format the frozen facts.** `exportRunProvenanceLines` produces the lines shown in the PDF and DOCX "Provenance" section. JSON carries the same object as `provenance.run`.
+
+None of the three steps ever falls back to mutable run state or model configuration.
+
+**What is frozen:**
+- **Policy version, adaptive (Milestone-2) reports:** `governanceRecord.automatedGovernance.policyVersion`, only for `passed`, `flagged` or `blocked`.
+- **Policy version, legacy reports:** the run's `governanceMeta.policyVersion`, only when the run's legacy `governanceStatus` records an actual evaluation.
+- **Per model:** `provider`, `requestedModel` and `substitutedFrom`, exactly as persisted on the run's `perModel` rows by Step 6.2a.
+- **Substitution state** comes from the persisted status and has three values:
+  - `true` only for a persisted `"substituted"`;
+  - `false` only for a persisted non-substitution status (`ok`, `failed`, `error`, `timeout`, `refused`, `rate_limited`);
+  - omitted when there is no row, no status, or an unrecognized one.
+
+  `false` is itself a provenance claim, so it is never inferred from absence. The frozen reader likewise keeps only a literal boolean. `substitutedFrom` is frozen and rendered only when `substituted === true`.
+- **Display of incomplete facts:**
+  - An unknown state reads "substitution not recorded".
+  - A substitution with a persisted `requestedModel` but no `substitutedFrom` shows the requested model and marks only the original provider as not recorded.
+- **Never frozen:** `actualModel`.
+
+**Older runs and exports:**
+- **Runs completed before 6.2a.** These know each logical model slot (`modelId`, e.g. `chatgpt`) and its substitution state. They do **not** know which provider or model string was actually requested at runtime. Exports render that as "not recorded", meaning the historical record lacks the field. They never reconstruct it.
+- **Export records created before 6.2b.** These have no `runProvenance` and render exactly as before, byte-for-byte.
+- **Historical downloads.** Both download routes render only the frozen record.
+
+E2-A (the export-history list) is unchanged; detailed model provenance lives only in the artifact.
+
 ### Multi-Reviewer Governance (adaptive runs, team plan)
 
 A separate, panel-based review workflow layered on top of the adaptive schema system's `governanceRecord.humanReview`, distinct from the single-reviewer policy engine above. Lives at `runs/{runId}/humanReviewPanel/current` (one active panel per run) plus `runs/{runId}/humanReviewVotes/{revision}:{reviewerUid}` and `runs/{runId}/humanReviewPanelHistory/{revision}:{event}`. Panel lifecycle: create (`PUT`) → reviewers vote (`POST .../votes`) → aggregation reaches `waiting` / `deadlocked` / `ready` → finalize (`POST .../finalize`, majority aggregation) or owner override (`POST .../override`, breaks a deadlock) → cancel (`DELETE`) is available at any open-panel state as a drain operation. Route: `app/api/teams/adaptive-runs/[runId]/review-panel/`.

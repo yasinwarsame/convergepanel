@@ -322,6 +322,8 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
     snapshotResult = buildExportSnapshot({
       question,
       selectedModels,
+      // Step 6.2b — the persisted per-model rows, read once with the run above.
+      runDocument: data.runDocument,
       milestone2: {
         output: parsedAdaptive.output,
         governanceRecord: parsedGovernance.ok ? parsedGovernance.record : undefined,
@@ -338,9 +340,12 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
     snapshotResult = buildExportSnapshot({
       question,
       selectedModels,
+      // Step 6.2b — the persisted per-model rows, read once with the run above.
+      runDocument: data.runDocument,
       legacy: {
         output: parsedLegacy.output,
         governanceStatus: legacyStatus === "approved" || legacyStatus === "needs_review" || legacyStatus === "blocked" ? legacyStatus : null,
+        governanceMeta: data.governanceMeta,
       },
     });
     schemaId = parsedLegacy.output.schemaId;

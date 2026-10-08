@@ -402,3 +402,39 @@ describe("POST /api/user/runs/[runId]/export — failure path (Part 19: never a 
     expect(auditCall.failureReason).toBe("layout engine exploded");
   });
 });
+
+describe("Step 6.2b — the Personal export hands the run's persisted provenance sources to the snapshot", () => {
+  const RUN_DOCUMENT = { perModel: [{ modelId: "chatgpt", status: "ok", provider: "openai", requestedModel: "gpt-RUN-1" }] };
+  const GOVERNANCE_META = { policyVersion: 4 };
+
+  it("Milestone-2: passes the stored runDocument, never anything from the request body", async () => {
+    mockedRunGet.mockResolvedValue({
+      exists: true,
+      data: () => ({ userId: UID, question: "q", selectedModels: ["chatgpt"], adaptiveOutput: { schemaId: "comparison_matrix" }, governanceRecord: {}, runDocument: RUN_DOCUMENT }),
+    });
+    const res = await callRoute(RUN_ID, { format: "pdf", runDocument: { perModel: [{ modelId: "chatgpt", provider: "forged" }] } });
+    expect(res.status).toBe(200);
+    const arg = mockedBuildExportSnapshot.mock.calls[0][0];
+    expect(arg.runDocument).toBe(RUN_DOCUMENT);
+    expect(JSON.stringify(arg)).not.toContain("forged");
+  });
+
+  it("legacy family: passes the stored runDocument and governanceMeta", async () => {
+    mockedParsePersistedAdaptiveOutput.mockReturnValue({ ok: false, reason: "absent" });
+    mockedParsePersistedLegacyAdaptiveOutput.mockReturnValue({ ok: true, output: { schemaId: "financial_valuation", classification: {}, results: [], alignedClaims: [] } });
+    mockedRunGet.mockResolvedValue({
+      exists: true,
+      data: () => ({ userId: UID, question: "q", selectedModels: ["chatgpt"], legacyAdaptiveOutput: { schemaId: "financial_valuation" }, governanceStatus: "approved", governanceMeta: GOVERNANCE_META, runDocument: RUN_DOCUMENT }),
+    });
+    mockedBuildExportSnapshot.mockReturnValue({
+      ...BASE_SNAPSHOT_RESULT,
+      governanceStatusAtExport: { family: "legacy" as const, status: "approved" as const },
+      reportSnapshot: { ...BASE_SNAPSHOT_RESULT.reportSnapshot, milestone2: undefined, legacy: { schemaId: "financial_valuation", alignedClaims: [] } },
+    });
+    const res = await callRoute();
+    expect(res.status).toBe(200);
+    const arg = mockedBuildExportSnapshot.mock.calls[0][0];
+    expect(arg.runDocument).toBe(RUN_DOCUMENT);
+    expect(arg.legacy.governanceMeta).toBe(GOVERNANCE_META);
+  });
+});
