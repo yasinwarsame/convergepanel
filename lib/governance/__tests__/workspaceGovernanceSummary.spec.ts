@@ -298,3 +298,27 @@ describe("inconsistent counts are refused, never returned", () => {
     expect(calls).toBeGreaterThan(0);
   });
 });
+
+describe("bounded concurrency", () => {
+  it(`a full summary never has more than ${16} count() queries in flight, and still equals the oracle`, async () => {
+    const { MAX_CONCURRENT_COUNTS } = await import("@/lib/governance/workspaceGovernanceSummary");
+    expect(MAX_CONCURRENT_COUNTS).toBe(16);
+    const data = dataset();
+    const inner = fakeCountExecutor(data);
+    let active = 0;
+    let peak = 0;
+    const slow = async (spec: CountSpec) => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((r) => setTimeout(r, 1));
+      const n = await inner(spec);
+      active -= 1;
+      return n;
+    };
+    const projects = Array.from({ length: 12 }, (_, i) => `px${i}`);
+    const s = await computeWorkspaceGovernanceSummary({ workspaceId: W, canonicalProjectIds: [...CANON, ...projects], count: slow });
+    expect(peak).toBeLessThanOrEqual(16);
+    expect(peak).toBeGreaterThan(1); // non-vacuity: work really is parallel
+    expect(reconcileGovernanceSummary(s)).toEqual([]);
+  });
+});

@@ -140,6 +140,29 @@ export function containmentSpecs(collection: CountCollection, filters: CountFilt
   return specs;
 }
 
+/** At most this many count() queries in flight at once (latency without flooding Firestore). */
+export const MAX_CONCURRENT_COUNTS = 16;
+
+/** Bounded concurrency: queues specs so no more than `limit` executor calls run at once. */
+export function limitConcurrency(exec: CountExecutor, limit: number): CountExecutor {
+  let active = 0;
+  const queue: Array<() => void> = [];
+  const release = () => {
+    active -= 1;
+    const next = queue.shift();
+    if (next) next();
+  };
+  return (spec) =>
+    new Promise<number>((resolve, reject) => {
+      const start = () => {
+        active += 1;
+        exec(spec).then(resolve, reject).finally(release);
+      };
+      if (active < limit) start();
+      else queue.push(start);
+    });
+}
+
 /** Memoizes identical specs (the research partition reuses adaptive terms). */
 function memoized(exec: CountExecutor): CountExecutor {
   const cache = new Map<string, Promise<number>>();
@@ -172,8 +195,14 @@ function baseCounter(exec: CountExecutor, collection: CountCollection, base: Cou
 /** §3 partition: `research` = all Workspace runs − adaptive runs, predicate by predicate. */
 function differenceCounter(all: Counter, minus: Counter): Counter {
   return {
-    contained: async (extra) => (await all.contained(extra)) - (await minus.contained(extra)),
-    raw: async (extra) => (await all.raw(extra)) - (await minus.raw(extra)),
+    contained: async (extra) => {
+      const [a, m] = await Promise.all([all.contained(extra), minus.contained(extra)]);
+      return a - m;
+    },
+    raw: async (extra) => {
+      const [a, m] = await Promise.all([all.raw(extra), minus.raw(extra)]);
+      return a - m;
+    },
   };
 }
 
@@ -187,9 +216,8 @@ function nonNegative(label: string, value: number): number {
 type FamilyResult = { total: GovernanceSummaryTotal; rows: GovernanceSummaryRow[]; anomalies: GovernanceSummaryAnomaly[] };
 
 async function completionAndIntegrity(family: Family, counter: Counter, completion: CountFilter[]) {
-  const containedAll = await counter.contained([]);
-  const rawAll = await counter.raw([]);
-  const total = completion.length ? await counter.contained(completion) : containedAll;
+  const [containedAll, rawAll, completed] = await Promise.all([counter.contained([]), counter.raw([]), completion.length ? counter.contained(completion) : Promise.resolve(null)]);
+  const total = completed ?? containedAll;
   return {
     total: nonNegative(`${family}.total`, total),
     integrityAnomalies: nonNegative(`${family}.integrityAnomalies`, rawAll - containedAll),
@@ -199,19 +227,19 @@ async function completionAndIntegrity(family: Family, counter: Counter, completi
 
 /** §6.5 — System A disjoint arithmetic + §7 System A human derivation. */
 async function systemA(family: Family, counter: Counter, completion: CountFilter[]): Promise<FamilyResult> {
-  const head = await completionAndIntegrity(family, counter, completion);
   const R = [...SYSTEM_A_STATUSES];
   const c = (extra: CountFilter[]) => counter.contained([...completion, ...extra]);
 
-  const rawRecognized: Record<string, number> = {};
-  const reviewedRecognized: Record<string, number> = {};
-  for (const x of R) {
-    rawRecognized[x] = await c([{ field: F_GOV_A, op: "==", value: x }]);
-    reviewedRecognized[x] = await c([{ field: F_GOV_A, op: "==", value: x }, REVIEWED]);
-  }
-  const allOtherRecorded = await c([{ field: F_GOV_A, op: "not-in", value: R }]);
-  const reviewedOther = await c([{ field: F_GOV_A, op: "not-in", value: R }, REVIEWED]);
-  const reviewedTotal = await c([REVIEWED]);
+  const [head, rawList, reviewedList, allOtherRecorded, reviewedOther, reviewedTotal] = await Promise.all([
+    completionAndIntegrity(family, counter, completion),
+    Promise.all(R.map((x) => c([{ field: F_GOV_A, op: "==", value: x }]))),
+    Promise.all(R.map((x) => c([{ field: F_GOV_A, op: "==", value: x }, REVIEWED]))),
+    c([{ field: F_GOV_A, op: "not-in", value: R }]),
+    c([{ field: F_GOV_A, op: "not-in", value: R }, REVIEWED]),
+    c([REVIEWED]),
+  ]);
+  const rawRecognized: Record<string, number> = Object.fromEntries(R.map((x, i) => [x, rawList[i]]));
+  const reviewedRecognized: Record<string, number> = Object.fromEntries(R.map((x, i) => [x, reviewedList[i]]));
 
   const sumReviewedRecognized = R.reduce((a, x) => a + reviewedRecognized[x], 0);
   const sumRawRecognized = R.reduce((a, x) => a + rawRecognized[x], 0);
@@ -257,14 +285,24 @@ async function systemA(family: Family, counter: Counter, completion: CountFilter
 
 /** §6.2/§6.4 System B automated axis + §7 System B human axis. */
 async function systemB(family: Family, counter: Counter, completion: CountFilter[]): Promise<FamilyResult> {
-  const head = await completionAndIntegrity(family, counter, completion);
   const c = (extra: CountFilter[]) => counter.contained([...completion, ...extra]);
   const rows: GovernanceSummaryRow[] = [];
 
-  const axis = async (field: string, vocabulary: readonly string[], kind: "automated" | "human") => {
+  type AxisCounts = { recognized: number[]; other: number };
+  const countAxis = async (field: string, vocabulary: readonly string[]): Promise<AxisCounts> => {
+    const [recognized, other] = await Promise.all([Promise.all(vocabulary.map((x) => c([{ field, op: "==", value: x }]))), c([{ field, op: "not-in", value: [...vocabulary] }])]);
+    return { recognized, other };
+  };
+  const [head, autoCounts, humanCounts] = await Promise.all([
+    completionAndIntegrity(family, counter, completion),
+    countAxis(F_GOV_B, SYSTEM_B_STATUSES),
+    countAxis(F_HUMAN_B, SYSTEM_B_HUMAN_STATUSES),
+  ]);
+
+  const axis = (field: string, vocabulary: readonly string[], kind: "automated" | "human", counts: AxisCounts) => {
     let recognized = 0;
-    for (const x of vocabulary) {
-      const n = await c([{ field, op: "==", value: x }]);
+    for (const [i, x] of vocabulary.entries()) {
+      const n = counts.recognized[i];
       recognized += n;
       rows.push(
         kind === "automated"
@@ -272,13 +310,13 @@ async function systemB(family: Family, counter: Counter, completion: CountFilter
           : { family, sourceSystem: "B", axis: kind, storedField: field, storedStatus: x, humanDecision: x, count: n }
       );
     }
-    const other = await c([{ field, op: "not-in", value: [...vocabulary] }]);
+    const other = counts.other;
     const missing = nonNegative(`${family}.${kind}.missing`, head.total - recognized - other);
     rows.push(kind === "automated" ? { family, sourceSystem: "B", axis: kind, storedField: field, storedStatus: OTHER_RECORDED, normalizedOutcome: "unmapped", count: other } : { family, sourceSystem: "B", axis: kind, storedField: field, storedStatus: OTHER_RECORDED, humanDecision: OTHER_RECORDED, count: other });
     rows.push(kind === "automated" ? { family, sourceSystem: "B", axis: kind, storedField: field, storedStatus: null, normalizedOutcome: "not_recorded", subReason: "missing", count: missing } : { family, sourceSystem: "B", axis: kind, storedField: field, storedStatus: null, subReason: "missing", count: missing });
   };
-  await axis(F_GOV_B, SYSTEM_B_STATUSES, "automated");
-  await axis(F_HUMAN_B, SYSTEM_B_HUMAN_STATUSES, "human");
+  axis(F_GOV_B, SYSTEM_B_STATUSES, "automated", autoCounts);
+  axis(F_HUMAN_B, SYSTEM_B_HUMAN_STATUSES, "human", humanCounts);
 
   return {
     total: {
@@ -298,10 +336,15 @@ async function systemB(family: Family, counter: Counter, completion: CountFilter
 async function overlapAnomalies(allRuns: Counter, adaptive: Counter): Promise<GovernanceSummaryAnomaly[]> {
   const complete = [COMPLETE];
   // Adaptive runs carrying any non-null System A governanceStatus.
-  let adaptiveWithA = await adaptive.contained([...complete, { field: F_GOV_A, op: "not-in", value: [...SYSTEM_A_STATUSES] }]);
-  for (const x of SYSTEM_A_STATUSES) adaptiveWithA += await adaptive.contained([...complete, { field: F_GOV_A, op: "==", value: x }]);
-  // Non-adaptive runs carrying a governanceRecord.
-  const researchWithB = (await allRuns.contained([...complete, HAS_GOV_RECORD])) - (await adaptive.contained([...complete, HAS_GOV_RECORD]));
+  const [aOther, aRecognized, allWithRecord, adaptiveWithRecord] = await Promise.all([
+    adaptive.contained([...complete, { field: F_GOV_A, op: "not-in", value: [...SYSTEM_A_STATUSES] }]),
+    Promise.all(SYSTEM_A_STATUSES.map((x) => adaptive.contained([...complete, { field: F_GOV_A, op: "==", value: x }]))),
+    // Non-adaptive runs carrying a governanceRecord.
+    allRuns.contained([...complete, HAS_GOV_RECORD]),
+    adaptive.contained([...complete, HAS_GOV_RECORD]),
+  ]);
+  const adaptiveWithA = aOther + aRecognized.reduce((a, b) => a + b, 0);
+  const researchWithB = allWithRecord - adaptiveWithRecord;
   const out: GovernanceSummaryAnomaly[] = [];
   if (adaptiveWithA > 0) out.push({ kind: "family_overlap", family: "research_adaptive", field: F_GOV_A, count: adaptiveWithA });
   if (nonNegative("research.overlap", researchWithB) > 0) out.push({ kind: "family_overlap", family: "research", field: "governanceRecord", count: researchWithB });
@@ -317,7 +360,7 @@ export type ComputeWorkspaceGovernanceSummaryArgs = {
 };
 
 export async function computeWorkspaceGovernanceSummary(args: ComputeWorkspaceGovernanceSummaryArgs): Promise<WorkspaceGovernanceSummary> {
-  const exec = memoized(args.count);
+  const exec = memoized(limitConcurrency(args.count, MAX_CONCURRENT_COUNTS));
   const ws: CountFilter = { field: "workspaceId", op: "==", value: args.workspaceId };
   const projects = [...args.canonicalProjectIds];
 
@@ -327,12 +370,10 @@ export async function computeWorkspaceGovernanceSummary(args: ComputeWorkspaceGo
   const claims = baseCounter(exec, "verifications", [ws, { field: "type", op: "==", value: "claim_verification" }], projects);
   const videos = baseCounter(exec, "videoVerifications", [ws, { field: "type", op: "==", value: "video_verification" }], projects);
 
-  const results = [
-    await systemA("research", research, [COMPLETE]),
-    await systemB("research_adaptive", adaptive, [COMPLETE]),
-    await systemA("claim_verification", claims, []),
-    await systemA("video_verification", videos, []),
-  ];
+  const [results, overlaps] = await Promise.all([
+    Promise.all([systemA("research", research, [COMPLETE]), systemB("research_adaptive", adaptive, [COMPLETE]), systemA("claim_verification", claims, []), systemA("video_verification", videos, [])]),
+    overlapAnomalies(allRuns, adaptive),
+  ]);
 
   return {
     workspaceId: args.workspaceId,
@@ -346,7 +387,7 @@ export async function computeWorkspaceGovernanceSummary(args: ComputeWorkspaceGo
     },
     totals: results.map((r) => r.total),
     rows: results.flatMap((r) => r.rows),
-    anomalies: [...results.flatMap((r) => r.anomalies), ...(await overlapAnomalies(allRuns, adaptive))],
+    anomalies: [...results.flatMap((r) => r.anomalies), ...overlaps],
   };
 }
 
