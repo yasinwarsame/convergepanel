@@ -1012,6 +1012,15 @@ None of the three steps ever falls back to mutable run state or model configurat
 
 E2-A (the export-history list) is unchanged; detailed model provenance lives only in the artifact.
 
+### Workspace governance summary (roadmap Step 6.3, contract only)
+
+`docs/governance-workspace-summary-contract.md` defines the normalization contract for a Team Workspace governance-outcome summary. It covers:
+- exact `count()` aggregations of persisted fields only, per report family and governance source system;
+- six distinct automated buckets, with the human-decision axis kept separate;
+- no numeric scores and no adaptive tiers.
+
+Nothing is implemented yet.
+
 ### Multi-Reviewer Governance (adaptive runs, team plan)
 
 A separate, panel-based review workflow layered on top of the adaptive schema system's `governanceRecord.humanReview`, distinct from the single-reviewer policy engine above. Lives at `runs/{runId}/humanReviewPanel/current` (one active panel per run) plus `runs/{runId}/humanReviewVotes/{revision}:{reviewerUid}` and `runs/{runId}/humanReviewPanelHistory/{revision}:{event}`. Panel lifecycle: create (`PUT`) → reviewers vote (`POST .../votes`) → aggregation reaches `waiting` / `deadlocked` / `ready` → finalize (`POST .../finalize`, majority aggregation) or owner override (`POST .../override`, breaks a deadlock) → cancel (`DELETE`) is available at any open-panel state as a drain operation. Route: `app/api/teams/adaptive-runs/[runId]/review-panel/`.
