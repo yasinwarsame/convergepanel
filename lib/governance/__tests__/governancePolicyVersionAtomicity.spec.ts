@@ -41,14 +41,32 @@ function write(path: string, fields: Record<string, unknown>, merge: boolean) {
 }
 const snap = (path: string) => ({ exists: store.has(path), data: () => (store.has(path) ? { ...store.get(path)!.data } : undefined) });
 
+/**
+ * Plain (non-transactional) document reads and writes take a network round
+ * trip, as in production: the snapshot is taken and the write applied only
+ * after a macrotask. So concurrent saves that bypass the transaction genuinely
+ * interleave — all of them read before any of them writes — independently of
+ * the transaction gate below. Without this, a non-transactional save would
+ * happen to serialize in the fake and the version assertions could not fail.
+ */
+const tick = () => new Promise((r) => setTimeout(r, 0));
 function docRef(path: string): any {
   return {
     __path: path,
-    get: async () => snap(path),
-    set: async (fields: Record<string, unknown>, opts?: { merge?: boolean }) => write(path, fields, opts?.merge === true),
+    get: async () => {
+      await tick();
+      return snap(path);
+    },
+    set: async (fields: Record<string, unknown>, opts?: { merge?: boolean }) => {
+      await tick();
+      write(path, fields, opts?.merge === true);
+    },
     collection: (sub: string) => ({
       doc: (id?: string) => docRef(`${path}/${sub}/${id ?? `auto-${++autoId}`}`),
-      add: async (fields: Record<string, unknown>) => write(`${path}/${sub}/auto-${++autoId}`, fields, false),
+      add: async (fields: Record<string, unknown>) => {
+        await tick();
+        write(`${path}/${sub}/auto-${++autoId}`, fields, false);
+      },
     }),
   };
 }
