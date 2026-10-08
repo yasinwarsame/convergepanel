@@ -85,7 +85,7 @@ it("keeps human decisions under their own heading, apart from automated outcomes
 
 it("is read-only and shows no score, tier or percentage", async () => {
   const r = await mount(createElement(WorkspaceGovernanceSummary, { workspaceId: W }));
-  expect(r.root.findAll((n) => ["button", "input", "form", "select", "textarea", "a"].includes(n.type as string))).toEqual([]);
+  expect(r.root.findAll((n) => ["button", "input", "form", "select", "textarea", "a"].includes(n.type as string))).toHaveLength(0); // count only: a failing diff of ReactTestInstances (circular fiber graph) hangs the reporter
   const text = textOf(byTestId(r, "governance-summary")[0]);
   expect(text).not.toMatch(/%|score|tier|grade|rating/i);
   expect(fetchCalls).toEqual([{ url: `/api/workspaces/${W}/governance-summary`, method: "GET" }]);
@@ -97,20 +97,20 @@ it("a summary that does not reconcile is never rendered", async () => {
   respond = () => ({ ok: true, status: 200, body: { ok: true, summary: tampered } });
   const r = await mount(createElement(WorkspaceGovernanceSummary, { workspaceId: W }));
   expect(byTestId(r, "governance-summary-error")).toHaveLength(1);
-  expect(byTestId(r, "governance-family-research")).toEqual([]);
+  expect(byTestId(r, "governance-family-research")).toHaveLength(0); // count only: a failing diff of ReactTestInstances (circular fiber graph) hangs the reporter
 });
 
 it("an API refusal shows the server message and no numbers", async () => {
   respond = () => ({ ok: false, status: 503, body: { ok: false, message: "The governance summary is temporarily unavailable. Please try again." } });
   const r = await mount(createElement(WorkspaceGovernanceSummary, { workspaceId: W }));
   expect(textOf(byTestId(r, "governance-summary-error")[0])).toContain("temporarily unavailable");
-  expect(byTestId(r, "governance-summary-rollup")).toEqual([]);
+  expect(byTestId(r, "governance-summary-rollup")).toHaveLength(0); // count only: a failing diff of ReactTestInstances (circular fiber graph) hangs the reporter
 });
 
 describe("audit page shell wiring", () => {
   it("flag off (prop false): no summary section and no governance-summary request", async () => {
     const r = await mount(createElement(WorkspaceAuditLogShell, { workspaceId: W, workspaceName: "WS", canReadMembers: true }));
-    expect(byTestId(r, "governance-summary")).toEqual([]);
+    expect(byTestId(r, "governance-summary")).toHaveLength(0); // count only: a failing diff of ReactTestInstances (circular fiber graph) hangs the reporter
     expect(fetchCalls.some((c) => c.url.includes("governance-summary"))).toBe(false);
   });
   it("flag on (prop true): the summary section renders on the audit page", async () => {
