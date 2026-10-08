@@ -90,6 +90,18 @@ export interface PanelResultPublic {
 }
 
 /**
+ * Saved-run provenance honesty (S1) — a panel result READ BACK FROM STORAGE.
+ * Same shape as `PanelResultPublic` except that runtime provenance is optional
+ * and present only when it was persisted with the run, and `actualModel` is
+ * never carried (it was never provider-reported identity). The logical slot
+ * (`modelId`) is always present and may be displayed as the model name.
+ */
+export type PersistedPanelResultPublic = Omit<PanelResultPublic, "requestedModel" | "provider" | "actualModel"> & {
+  requestedModel?: string;
+  provider?: string;
+};
+
+/**
  * Minimal panel result for synthesis (only text needed)
  */
 export interface PanelForSynthesis {

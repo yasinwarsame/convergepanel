@@ -41,6 +41,7 @@ import { StructuredSynthesis } from "@/lib/synthesis/structuredSchema";
 import { getModelDisplayNameSafe } from "@/lib/panelModels";
 import { isUsableResult } from "@/lib/panel/publicize";
 import { coerceStatus } from "@/lib/panel/normalize";
+import { modelHealthSubstitution, substitutedProviderNames } from "@/lib/panel/substitutionDisplay";
 import {
   buildSynthesisMarkdown,
   copyToClipboardWithFallback,
@@ -310,32 +311,10 @@ function ModelHealthLine({ results }: { results: ModelResult[] }) {
   const failedCount = results.filter((r) => coerceStatus(r.status) === "failed").length;
   const respondedCount = okCount + substitutedCount;
 
-  const substitutedLabels = results
-    .filter((r) => coerceStatus(r.status) === "substituted")
-    .map((r) => getModelDisplayNameSafe((r as { actualModel?: string })?.actualModel || r.modelId))
-    .filter((l, i, arr) => arr.indexOf(l) === i);
-  const substitutedLabel =
-    substitutedCount === 1 && substitutedLabels[0]
-      ? substitutedLabels[0]
-      : substitutedCount > 1
-        ? `${substitutedCount}`
-        : substitutedCount > 0
-          ? "1"
-          : null;
-
-  // Tooltip: slot label (canonical) + requested → actual + short reason (prefix preserved if truncated)
-  const substitutedTooltip = results
-    .filter((r) => coerceStatus(r.status) === "substituted")
-    .map((r) => {
-      const slot = getModelDisplayNameSafe(r.modelId); // slot label, not modelId raw
-      const req = (r as { requestedModel?: string }).requestedModel ?? "?";
-      const act = (r as { actualModel?: string }).actualModel ?? "?";
-      const raw = (r as { substitutionReason?: string }).substitutionReason;
-      const sanitized = raw ? String(raw).replace(/[\n\r]+/g, " ").trim() : "";
-      const shortReason = sanitized ? (sanitized.length > 28 ? `${sanitized.slice(0, 25)}…` : sanitized) : "";
-      return shortReason ? `${slot}: ${req} → ${act} (${shortReason})` : `${slot}: ${req} → ${act}`;
-    })
-    .join("\n");
+  // Saved-run provenance honesty (S1): label and tooltip state only the
+  // substitution facts each row actually carries — never the slot's own name as
+  // the substitute, never "?" placeholders for unrecorded models.
+  const { label: substitutedLabel, tooltip: substitutedTooltip } = modelHealthSubstitution(results);
 
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
@@ -363,24 +342,6 @@ function ModelHealthLine({ results }: { results: ModelResult[] }) {
       )}
     </div>
   );
-}
-
-/** Provider string → display name for Panel note (unique providers, not per-slot) */
-function getProviderDisplayName(provider?: string): string {
-  const raw = typeof provider === "string" ? provider.trim() : "";
-  if (!raw) return "Unknown";
-  const p = raw.toLowerCase();
-  const map: Record<string, string> = {
-    deepseek: "DeepSeek",
-    openai: "OpenAI",
-    anthropic: "Anthropic",
-    xai: "XAI",
-    perplexity: "Perplexity",
-    google: "Google",
-  };
-  if (map[p]) return map[p];
-  // Unknown provider: safe title-case fallback (never render undefined)
-  return p.charAt(0).toUpperCase() + p.slice(1);
 }
 
 /* ─── Source Coverage Meter ─── */
@@ -503,13 +464,8 @@ async function copyStructuredSynthesisMarkdown(
   const substitutedCount = results.filter((r) => coerceStatus(r.status) === "substituted").length;
   const failedCount = results.filter((r) => coerceStatus(r.status) === "failed").length;
   const respondedCount = okCount + substitutedCount;
-  const substitutedProviders = [
-    ...new Set(
-      results
-        .filter((r) => coerceStatus(r.status) === "substituted")
-        .map((r) => getProviderDisplayName((r as { provider?: string }).provider))
-    ),
-  ].filter((p) => p !== "Unknown");
+  // Only providers recorded on the substituted rows (S1).
+  const substitutedProviders = substitutedProviderNames(results);
   const modelHealth: ModelHealthForCopy = {
     total,
     responded: respondedCount,

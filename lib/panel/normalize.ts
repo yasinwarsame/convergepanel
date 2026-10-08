@@ -165,6 +165,124 @@ export function normalizeModelResultPublic<T extends RawResultLike>(
 }
 
 /**
+ * Saved-run provenance honesty (S1) — the ONLY normalizer for a result read
+ * back from storage (`runDocument.perModel` rows and the legacy top-level
+ * `results[]`).
+ *
+ * Unlike `normalizeModelResultPublic` (the LIVE contract, which guarantees
+ * requestedModel/provider/actualModel), this one never manufactures a
+ * historical runtime fact. It coerces status and otherwise keeps only what the
+ * stored row actually carries:
+ *  - `provider` / `requestedModel`: kept when a non-empty string, else absent;
+ *  - `actualModel`: always removed — it was never provider-reported identity;
+ *  - `substitutedFrom`: only on a substituted row, and only when already a
+ *    complete "<provider>:<model>" (or a legacy object with both parts) —
+ *    never completed with a fallback provider or "unknown";
+ *  - `substitutionReason`: only on a substituted row, and only when it is a
+ *    code-like value (never rewritten to "unknown_error").
+ */
+export type PersistedModelResultProvenance = {
+  status: ModelStatus;
+  provider?: string;
+  requestedModel?: string;
+  substitutedFrom?: string;
+  substitutionReason?: string;
+};
+
+function nonEmpty(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function completeSubstitutedFrom(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    const s = value.trim();
+    const idx = s.indexOf(":");
+    return idx > 0 && idx < s.length - 1 ? s : undefined;
+  }
+  if (value && typeof value === "object") {
+    const obj = value as { provider?: unknown; model?: unknown };
+    return nonEmpty(obj.provider) && nonEmpty(obj.model) ? `${obj.provider.trim()}:${obj.model.trim()}` : undefined;
+  }
+  return undefined;
+}
+
+function recordedReason(existing: unknown, rawSubstitutedFrom: unknown): string | undefined {
+  const candidate = nonEmpty(existing)
+    ? existing
+    : rawSubstitutedFrom && typeof rawSubstitutedFrom === "object" && nonEmpty((rawSubstitutedFrom as { reason?: unknown }).reason)
+      ? ((rawSubstitutedFrom as { reason: string }).reason)
+      : undefined;
+  if (candidate === undefined) return undefined;
+  const trimmed = candidate.trim();
+  return REASON_CODE_RE.test(trimmed) ? trimmed : undefined;
+}
+
+export function normalizePersistedModelResult<T extends RawResultLike>(
+  result: T
+): Omit<T, "status" | "provider" | "requestedModel" | "actualModel" | "substitutedFrom" | "substitutionReason"> & PersistedModelResultProvenance {
+  const status = coerceStatus(result.status as ConnectorStatus);
+  const {
+    provider,
+    requestedModel,
+    actualModel: _actualModel,
+    substitutedFrom: rawSubstitutedFrom,
+    substitutionReason: rawReason,
+    status: _status,
+    ...rest
+  } = result;
+  const substituted = status === "substituted";
+  const substitutedFrom = substituted ? completeSubstitutedFrom(rawSubstitutedFrom) : undefined;
+  const substitutionReason = substituted ? recordedReason(rawReason, rawSubstitutedFrom) : undefined;
+  return {
+    ...rest,
+    status,
+    ...(nonEmpty(provider) ? { provider } : {}),
+    ...(nonEmpty(requestedModel) ? { requestedModel } : {}),
+    ...(substitutedFrom !== undefined ? { substitutedFrom } : {}),
+    ...(substitutionReason !== undefined ? { substitutionReason } : {}),
+  };
+}
+
+/** One SUBSTITUTIONS prompt entry: the slot, plus ONLY the facts the request actually supplied. */
+export type SubstitutionBlockEntry = {
+  slot: string;
+  requestedModel?: string;
+  provider?: string;
+  actualModel?: string;
+  reason?: string;
+};
+
+/**
+ * Saved-run provenance honesty (S1) — builds a synthesis substitution entry from
+ * a request row WITHOUT filling anything. Returns null unless the row is
+ * substituted. A live row (which always carries requestedModel/provider/
+ * actualModel/substitutionReason) yields exactly the entry it always did; a
+ * saved/reloaded row with absent provenance yields an entry with those facts
+ * absent — never modelId, "unknown", "deepseek-chat" or "primary_failed".
+ */
+export function substitutionEntryFromSupplied(result: {
+  modelId: string;
+  status?: unknown;
+  requestedModel?: unknown;
+  provider?: unknown;
+  actualModel?: unknown;
+  substitutionReason?: unknown;
+  substitutedFrom?: unknown;
+}): SubstitutionBlockEntry | null {
+  if (coerceStatus(String(result.status ?? "") as ConnectorStatus) !== "substituted") return null;
+  const reason = nonEmpty(result.substitutionReason)
+    ? sanitizeSubstitutionReason(result.substitutionReason)
+    : extractSubstitutionReason(undefined, result.substitutedFrom);
+  return {
+    slot: result.modelId,
+    ...(nonEmpty(result.requestedModel) ? { requestedModel: result.requestedModel } : {}),
+    ...(nonEmpty(result.provider) ? { provider: result.provider } : {}),
+    ...(nonEmpty(result.actualModel) ? { actualModel: result.actualModel } : {}),
+    ...(reason !== undefined ? { reason } : {}),
+  };
+}
+
+/**
  * Strip newlines and carriage returns from a string value.
  */
 function stripNewlines(val: string): string {
@@ -200,23 +318,18 @@ function sanitizeBlockReason(val: string | undefined): string {
  * - Output is valid, minimal JSON
  * - Only metadata, never raw model output
  */
-export function buildSubstitutionBlock(
-  entries: Array<{
-    slot: string;
-    requestedModel: string;
-    provider: string;
-    actualModel: string;
-    reason: string;
-  }>
-): string {
+export function buildSubstitutionBlock(entries: SubstitutionBlockEntry[]): string {
   if (entries.length === 0) return "";
 
+  // Each field is emitted only when the entry carries it (S1): an absent fact
+  // stays absent in the prompt. Key order is unchanged, so a complete (live)
+  // entry serializes exactly as before.
   const capped = entries.slice(0, 5).map((e) => ({
     slot: sanitizeBlockField(e.slot, 80),
-    requestedModel: sanitizeBlockField(e.requestedModel, 80),
-    provider: sanitizeBlockField(e.provider, 80),
-    actualModel: sanitizeBlockField(e.actualModel, 80),
-    reason: sanitizeBlockReason(e.reason),
+    ...(e.requestedModel !== undefined ? { requestedModel: sanitizeBlockField(e.requestedModel, 80) } : {}),
+    ...(e.provider !== undefined ? { provider: sanitizeBlockField(e.provider, 80) } : {}),
+    ...(e.actualModel !== undefined ? { actualModel: sanitizeBlockField(e.actualModel, 80) } : {}),
+    ...(e.reason !== undefined ? { reason: sanitizeBlockReason(e.reason) } : {}),
   }));
 
   return `\nSUBSTITUTIONS:\n${JSON.stringify(capped)}\n`;
