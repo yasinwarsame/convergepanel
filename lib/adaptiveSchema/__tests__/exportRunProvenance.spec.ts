@@ -137,6 +137,11 @@ describe("readFrozenRunProvenance — the record as frozen, defensively", () => 
     const raw = { policyVersion: null, models: [{ modelId: "chatgpt", provider: null, requestedModel: null, substituted: false, substitutedFrom: null }] };
     expect(readFrozenRunProvenance(raw)).toEqual({ models: [{ modelId: "chatgpt", substituted: false }] });
   });
+  it("a frozen substitutedFrom without substituted: true is not read back — substitution state stays authoritative", () => {
+    expect(readFrozenRunProvenance({ models: [{ modelId: "chatgpt", substituted: false, substitutedFrom: "openai:stray" }] })).toEqual({
+      models: [{ modelId: "chatgpt", substituted: false }],
+    });
+  });
   it("malformed entries are skipped, never repaired", () => {
     expect(readFrozenRunProvenance({ models: [null, { provider: "openai" }, { modelId: "", substituted: true }, { modelId: "grok", substituted: "yes" }] })).toEqual({
       models: [{ modelId: "grok", substituted: false }],
