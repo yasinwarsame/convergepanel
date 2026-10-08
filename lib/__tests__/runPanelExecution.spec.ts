@@ -191,3 +191,19 @@ describe("executeOrdinaryRun — debug header decoupling", () => {
     expect(result.status).toBe(200);
   });
 });
+
+describe("executeOrdinaryRun — Step 6.2a runtime provenance reaches completeRun()", () => {
+  it("hands completeRun() the runtime rows with their provider, requestedModel and substitutedFrom intact", async () => {
+    mockedRunPanel.mockResolvedValueOnce([
+      { modelId: "chatgpt", status: "ok", rawText: "Nairobi.", latencyMs: 5, tokenUsage: { totalTokens: 10, promptTokens: 5, completionTokens: 5 }, provider: "openai", requestedModel: "gpt-RUNTIME-1", actualModel: "gpt-RUNTIME-1" },
+      { modelId: "claude", status: "substituted", rawText: "Nairobi.", latencyMs: 6, tokenUsage: { totalTokens: 0, promptTokens: null, completionTokens: null }, provider: "deepseek", requestedModel: "claude-RUNTIME-1", actualModel: "deepseek-chat", substitutedFrom: "anthropic:claude-RUNTIME-1", substitutionReason: "timeout" },
+    ]);
+    await executeOrdinaryRun(baseArgs());
+    expect(mockedCompleteRun).toHaveBeenCalledTimes(1);
+    const passed = mockedCompleteRun.mock.calls[0][0].results as Array<Record<string, unknown>>;
+    expect(passed.map((r) => [r.modelId, r.provider, r.requestedModel, r.substitutedFrom])).toEqual([
+      ["chatgpt", "openai", "gpt-RUNTIME-1", undefined],
+      ["claude", "deepseek", "claude-RUNTIME-1", "anthropic:claude-RUNTIME-1"],
+    ]);
+  });
+});

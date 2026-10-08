@@ -180,6 +180,32 @@ export async function createRun(
 }
 
 /**
+ * Step 6.2a — Runtime Model Provenance Capture.
+ *
+ * The provider, requested model and (for a DeepSeek substitution) the original
+ * `substitutedFrom` that THIS execution's result carried, frozen onto its
+ * `perModel` row inside the one existing completion write. Copied only from the
+ * runtime result — never derived from current model configuration, the model
+ * id, or any other mutable source — and each field is written only when the
+ * runtime result actually carries a non-empty string. Substitution STATE
+ * remains the persisted `status === "substituted"`. `actualModel` is
+ * deliberately not persisted: today it echoes the requested model and is not
+ * provider-reported identity.
+ */
+export function runtimeModelProvenance(result: Pick<ModelResult, "provider" | "requestedModel" | "substitutedFrom">): {
+  provider?: string;
+  requestedModel?: string;
+  substitutedFrom?: string;
+} {
+  const present = (value: unknown): value is string => typeof value === "string" && value.length > 0;
+  return {
+    ...(present(result.provider) ? { provider: result.provider } : {}),
+    ...(present(result.requestedModel) ? { requestedModel: result.requestedModel } : {}),
+    ...(present(result.substitutedFrom) ? { substitutedFrom: result.substitutedFrom } : {}),
+  };
+}
+
+/**
  * Complete run arguments
  */
 export type CompleteRunArgs = {
@@ -300,6 +326,7 @@ export async function completeRun(
       latencyMs: result.latencyMs,
       tokenUsage: tokenUsageNormalized,
       wasTruncated: wasStorageCapped, // Flag indicates if storage was capped
+      ...runtimeModelProvenance(result),
     };
   });
 
