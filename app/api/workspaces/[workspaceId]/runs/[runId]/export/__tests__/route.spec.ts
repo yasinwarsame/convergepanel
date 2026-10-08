@@ -842,3 +842,39 @@ describe("the LEGACY schema family", () => {
     noSideEffects();
   });
 });
+
+describe("Step 6.2b — the Team export freezes the run's persisted provenance", () => {
+  const PERSISTED_ROWS = {
+    perModel: [
+      { modelId: "chatgpt", status: "ok", rawTextTruncated: "a", latencyMs: 1, tokenUsage: { totalTokens: 1, promptTokens: 1, completionTokens: 0 }, wasTruncated: false, provider: "openai", requestedModel: "gpt-RUN-1" },
+      { modelId: "claude", status: "substituted", rawTextTruncated: "b", latencyMs: 1, tokenUsage: { totalTokens: 1, promptTokens: 1, completionTokens: 0 }, wasTruncated: false, provider: "deepseek", requestedModel: "claude-RUN-1", substitutedFrom: "anthropic:claude-RUN-1" },
+    ],
+  };
+  const frozenOf = () => ((mockedCreateRecord.mock.calls[0][0] as { record: { reportSnapshot: Record<string, unknown> } }).record.reportSnapshot.runProvenance);
+
+  it("Milestone-2: policy version from automatedGovernance + per-model facts from the persisted rows", async () => {
+    runDocs.set(RUN, teamRun({ runDocument: PERSISTED_ROWS, governanceRecord: governanceRecord("approved", { automatedGovernance: { status: "flagged", reasons: [], policyVersion: 9 } }) }));
+    const r = await submit({ format: "pdf", runProvenance: { policyVersion: 999, models: [] }, runDocument: { perModel: [] } });
+    expect(r.status).toBe(200);
+    expect(frozenOf()).toEqual({
+      policyVersion: 9,
+      models: [
+        { modelId: "chatgpt", provider: "openai", requestedModel: "gpt-RUN-1", substituted: false },
+        { modelId: "claude", provider: "deepseek", requestedModel: "claude-RUN-1", substituted: true, substitutedFrom: "anthropic:claude-RUN-1" },
+      ],
+    });
+  });
+
+  it("legacy family: policy version from the run's governanceMeta", async () => {
+    runDocs.set(RUN, teamRun({ adaptiveOutput: undefined, governanceRecord: undefined, legacyAdaptiveOutput: legacyAdaptiveOutput(), governanceStatus: "approved", governanceMeta: { policyVersion: 4 }, runDocument: PERSISTED_ROWS }));
+    const r = await submit();
+    expect(r.status).toBe(200);
+    expect((frozenOf() as { policyVersion?: number }).policyVersion).toBe(4);
+  });
+
+  it("a pre-6.2a run freezes ids and substitution state only — nothing reconstructed", async () => {
+    runDocs.set(RUN, teamRun({ governanceRecord: governanceRecord("approved") }));
+    await submit();
+    expect(frozenOf()).toEqual({ models: [{ modelId: "chatgpt", substituted: false }, { modelId: "claude", substituted: false }] });
+  });
+});

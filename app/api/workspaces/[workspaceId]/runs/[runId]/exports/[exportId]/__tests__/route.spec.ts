@@ -358,3 +358,21 @@ describe("ordering, concealment and binding", () => {
     expectNoTargetIO();
   });
 });
+
+describe("Step 6.2b — historical download reproduces the FROZEN provenance", () => {
+  it("the run's current rows have changed since export; the renderer still receives only the frozen provenance", async () => {
+    const FROZEN = { policyVersion: 7, models: [{ modelId: "chatgpt", provider: "openai", requestedModel: "gpt-AT-EXPORT", substituted: false }] };
+    runDocs.set(RUN, teamRun({
+      question: "CURRENT-QUESTION",
+      governanceStatus: "blocked",
+      runDocument: { perModel: [{ modelId: "chatgpt", status: "ok", provider: "CURRENT-PROVIDER", requestedModel: "CURRENT-MODEL" }] },
+      governanceRecord: { automatedGovernance: { status: "passed", reasons: [], policyVersion: 99 } },
+    }));
+    record = frozenRecord({ reportSnapshot: { question: "FROZEN-QUESTION", runProvenance: FROZEN } });
+    const r = await download();
+    expect(r.status).toBe(200);
+    expect(mockedRender.mock.calls[0][0]).toBe(record);
+    expect((mockedRender.mock.calls[0][0] as { reportSnapshot: { runProvenance: unknown } }).reportSnapshot.runProvenance).toEqual(FROZEN);
+    expect(JSON.stringify(mockedRender.mock.calls[0][0])).not.toMatch(/CURRENT-PROVIDER|CURRENT-MODEL|"policyVersion":99/);
+  });
+});

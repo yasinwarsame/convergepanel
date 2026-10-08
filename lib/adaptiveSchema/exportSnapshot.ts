@@ -32,6 +32,7 @@ import {
   classificationFloorFromRiskLevel,
 } from "./researchExport";
 import { ModelId } from "../types";
+import { freezeExportRunProvenance } from "./exportRunProvenance";
 
 function assertNeverSchemaId(schemaId: never): never {
   throw new Error(`Unhandled Milestone-2 schemaId in exportSnapshot: ${String(schemaId)}`);
@@ -75,6 +76,12 @@ export interface BuildExportSnapshotInput {
   selectedModels: ModelId[];
   /** Per-model ok/fail, when available (always for legacy; only on a fresh live run for Milestone-2 — absent on a History-reloaded Milestone-2 envelope, whose `results` field is intentionally empty). */
   modelResultsOkByModelId?: Partial<Record<ModelId, boolean>>;
+  /**
+   * Step 6.2b — the run document's persisted `runDocument` value (untrusted),
+   * the ONLY source of per-model provenance. Required so every creation route
+   * must hand it over; an absent/older value simply freezes no per-model facts.
+   */
+  runDocument: unknown;
 
   milestone2?: {
     output: PersistedAdaptiveOutputV1;
@@ -88,6 +95,8 @@ export interface BuildExportSnapshotInput {
     output: PersistedLegacyAdaptiveOutputV1;
     /** The real 3-value model this family actually has (`data.governanceStatus` on the run document) — `null` when never evaluated. */
     governanceStatus: "approved" | "needs_review" | "blocked" | null;
+    /** Step 6.2b — the run's persisted `governanceMeta` (untrusted): the legacy family's policy-version source. */
+    governanceMeta: unknown;
   };
 }
 
@@ -145,6 +154,11 @@ export function buildExportSnapshot(input: BuildExportSnapshotInput): BuiltExpor
       consensusLevel,
       sourceGroundingLevel,
       reportGeneratedAt: output.generatedAt,
+      runProvenance: freezeExportRunProvenance({
+        selectedModels: input.selectedModels,
+        runDocument: input.runDocument,
+        policy: { family: "milestone2", governanceRecord },
+      }),
       milestone2: {
         schemaId: output.schemaId,
         result: output.result,
@@ -157,7 +171,7 @@ export function buildExportSnapshot(input: BuildExportSnapshotInput): BuiltExpor
   }
 
   if (input.legacy) {
-    const { output, governanceStatus } = input.legacy;
+    const { output, governanceStatus, governanceMeta } = input.legacy;
 
     const consensusLevel = deriveConsensusLevel({ schemaId: output.schemaId, gate: output.gate });
     const sourceGroundingLevel = deriveSourceGrounding({ trustSummary: output.trustSummary });
@@ -177,6 +191,11 @@ export function buildExportSnapshot(input: BuildExportSnapshotInput): BuiltExpor
       consensusLevel,
       sourceGroundingLevel,
       reportGeneratedAt: output.generatedAt,
+      runProvenance: freezeExportRunProvenance({
+        selectedModels: input.selectedModels,
+        runDocument: input.runDocument,
+        policy: { family: "legacy", governanceStatus, governanceMeta },
+      }),
       legacy: {
         schemaId: output.schemaId,
         alignedClaims: output.alignedClaims,

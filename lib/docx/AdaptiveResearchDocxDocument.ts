@@ -39,6 +39,7 @@ import {
   WidthType,
 } from "docx";
 import { AdaptiveResearchExportV1 } from "@/lib/adaptiveSchema/researchExport";
+import { exportRunProvenanceLines, readFrozenRunProvenance } from "@/lib/adaptiveSchema/exportRunProvenance";
 import { CONSENSUS_LABELS, SOURCE_GROUNDING_LABELS } from "@/lib/adaptiveSchema/reportSummary";
 import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
 import { FieldSpec } from "@/lib/adaptiveSchema/types";
@@ -330,6 +331,9 @@ function legacySection(record: AdaptiveResearchExportV1): (Paragraph | Table)[] 
 
 function provenanceSection(record: AdaptiveResearchExportV1): (Paragraph | Table)[] {
   const snapshot = record.reportSnapshot;
+  // Step 6.2b — frozen run provenance; null for every pre-6.2b record, which
+  // therefore renders exactly as before.
+  const runProvenance = readFrozenRunProvenance(snapshot.runProvenance);
   return [
     heading("Provenance"),
     ...fieldGrid([
@@ -340,6 +344,7 @@ function provenanceSection(record: AdaptiveResearchExportV1): (Paragraph | Table
       ["Report generated", formatExportTimestamp(snapshot.reportGeneratedAt)],
       ["Export generated", formatExportTimestamp(record.createdAt)],
     ]),
+    ...(runProvenance ? [muted("Run provenance"), ...bulletList(exportRunProvenanceLines(runProvenance))] : []),
     muted("Generated with ConvergePanel. This document reflects a frozen snapshot of the report at the export timestamp above — later changes to the live run are not reflected here."),
   ];
 }

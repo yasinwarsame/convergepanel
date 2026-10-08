@@ -27,6 +27,7 @@
 
 import { Document, Page, View, Text } from "@react-pdf/renderer";
 import { AdaptiveResearchExportV1 } from "@/lib/adaptiveSchema/researchExport";
+import { exportRunProvenanceLines, readFrozenRunProvenance } from "@/lib/adaptiveSchema/exportRunProvenance";
 import { CONSENSUS_LABELS, SOURCE_GROUNDING_LABELS } from "@/lib/adaptiveSchema/reportSummary";
 import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
 import { FieldSpec } from "@/lib/adaptiveSchema/types";
@@ -369,6 +370,9 @@ function LegacyContent({ record }: { record: AdaptiveResearchExportV1 }) {
 
 function Provenance({ record }: { record: AdaptiveResearchExportV1 }) {
   const snapshot = record.reportSnapshot;
+  // Step 6.2b — frozen run provenance; null for every pre-6.2b record, which
+  // therefore renders exactly as before.
+  const runProvenance = readFrozenRunProvenance(snapshot.runProvenance);
   return (
     <SectionCard label="Provenance">
       <View style={pdfStyles.fieldGrid}>
@@ -397,6 +401,12 @@ function Provenance({ record }: { record: AdaptiveResearchExportV1 }) {
           <Text style={pdfStyles.fieldValue}>{formatTimestamp(record.createdAt)}</Text>
         </View>
       </View>
+      {runProvenance && (
+        <View>
+          <Text style={pdfStyles.fieldLabel}>Run provenance</Text>
+          <Bullets items={exportRunProvenanceLines(runProvenance)} />
+        </View>
+      )}
       <Text style={pdfStyles.mutedText}>
         Generated with ConvergePanel. This document reflects a frozen snapshot of the report at the export timestamp above —
         later changes to the live run are not reflected here.
