@@ -1,5 +1,9 @@
 /**
  * Org governance policy: GET (read) / POST (admin update).
+ *
+ * Step 6.0b: GET is limited to a verified Governance Admin or a caller whose
+ * current effective plan is `full` (the governance dashboard audience), checked
+ * BEFORE the policy is loaded. POST is Governance Admin only.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -7,7 +11,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import type { GovernancePolicy } from "@/lib/governance/evaluateGovernance";
 import { loadGovernancePolicy, saveGovernancePolicyMerge } from "@/lib/governance/governancePolicyStore";
 import { writeAuditEvent } from "@/lib/governance/auditLog";
-import { checkAdminOnly, resolveGovernanceRequestUser } from "@/lib/governance/authCheck";
+import { checkAdminOnly, checkGovernancePolicyReadAccess, resolveGovernanceRequestUser } from "@/lib/governance/authCheck";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -109,6 +113,20 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       { ok: false, error: { code: "unauthorized", message: "Authentication required" } },
       { status: 401 }
+    );
+  }
+
+  const readAccess = await checkGovernancePolicyReadAccess(resolved.uid);
+  if (readAccess === "unavailable") {
+    return NextResponse.json(
+      { ok: false, error: { code: "unavailable", message: "Could not verify access. Please try again." } },
+      { status: 503 }
+    );
+  }
+  if (readAccess !== "allowed") {
+    return NextResponse.json(
+      { ok: false, error: { code: "forbidden", message: "Governance policy is available on the Full plan" } },
+      { status: 403 }
     );
   }
 

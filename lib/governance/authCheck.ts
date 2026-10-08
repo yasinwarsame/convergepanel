@@ -23,6 +23,8 @@ import {
 import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
 import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { adminAuth } from "@/lib/firebase/admin";
+import { getEffectiveEntitlements } from "@/lib/admin/entitlements";
+import { logger } from "@/lib/logger";
 
 /**
  * Governance support admin — grants governance POLICY WRITE and audit backfill.
@@ -37,6 +39,32 @@ import { adminAuth } from "@/lib/firebase/admin";
  */
 export async function checkAdminOnly(uid: string): Promise<boolean> {
   return hasVerifiedGovernanceAdminAuthority(uid);
+}
+
+/**
+ * Step 6.0b — who may READ the full governance policy.
+ *
+ * Exactly the audience that can open the governance dashboard: a verified
+ * Governance Admin, OR a caller whose CURRENT effective plan is `full`. Both are
+ * derived here, server-side, from the caller's own uid — never from a client
+ * `governanceDashboardEligible` flag, a Firestore role string, or any
+ * request-supplied identity. Writes remain `checkAdminOnly()` only.
+ *
+ * An entitlement lookup failure is `unavailable` (fail closed), never `allowed`.
+ */
+export async function checkGovernancePolicyReadAccess(
+  uid: string
+): Promise<"allowed" | "forbidden" | "unavailable"> {
+  if (await hasVerifiedGovernanceAdminAuthority(uid)) return "allowed";
+  try {
+    const entitlements = await getEffectiveEntitlements(uid);
+    return entitlements.planId === "full" ? "allowed" : "forbidden";
+  } catch (err: unknown) {
+    logger.warn("[governance/authCheck] policy read entitlement lookup failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return "unavailable";
+  }
 }
 
 /**
