@@ -123,6 +123,9 @@ beforeEach(() => {
   auth = { user: USER_A, authReady: true };
 });
 
+/** A React element in an ancillary position (type + props only). */
+type TeamSurface = { type: { name?: string }; props: Record<string, unknown> };
+
 describe("transport (§F/§H/§J)", () => {
   it("Project address → exactly one GET to the R1 endpoint WITH ?projectId, via authedFetch, never the Personal endpoint", async () => {
     mockedAuthedFetch.mockResolvedValue(response(200, body()));
@@ -472,11 +475,13 @@ describe("shared view delegation (§Q/§R/§S) + explicit P0 ancillary policy (R
     expect(props.onRunFollowUp).toBeUndefined();
     expect(props.readOnlyExecutionTarget).toBeUndefined();
     expect((props.presentation as { runId: string; question: string }).question).toBe("What changed?");
-    const policy = props.adaptiveAncillaryPresentation as { kind: string; exportSurface: unknown; reviewGovernanceSurface: unknown };
+    const policy = props.adaptiveAncillaryPresentation as { kind: string; exportSurface: TeamSurface; exportHistorySurface: TeamSurface; reviewGovernanceSurface: unknown };
     expect(policy.kind).toBe("delegated_read_only");
-    // Team export intentionally absent: an explicit null, never undefined-by-accident and never a Personal component.
-    expect("exportSurface" in policy).toBe(true);
-    expect(policy.exportSurface).toBeNull();
+    // TEAM_EXPORT_E3: both export positions hold TEAM components bound to THIS address — never a Personal component.
+    expect(policy.exportSurface.type.name).toBe("TeamResearchExportButton");
+    expect(policy.exportSurface.props).toEqual({ workspaceId: PROJECT_PROPS.workspaceId, runId: PROJECT_PROPS.runId, canCreateExport: false });
+    expect(policy.exportHistorySurface.type.name).toBe("TeamResearchExportHistory");
+    expect(policy.exportHistorySurface.props).toEqual({ workspaceId: PROJECT_PROPS.workspaceId, runId: PROJECT_PROPS.runId });
   });
 
   it("the policy is delegated for BOTH Team roles — the caller chooses it, never the viewer role", async () => {
@@ -508,7 +513,18 @@ describe("shared view delegation (§Q/§R/§S) + explicit P0 ancillary policy (R
     mockedAuthedFetch.mockResolvedValue(response(200, unfiledBody()));
     await mount(UNFILED_PROPS);
     expect((lastView().adaptiveAncillaryPresentation as { kind: string; exportSurface: unknown }).kind).toBe("delegated_read_only");
-    expect((lastView().adaptiveAncillaryPresentation as { exportSurface: unknown }).exportSurface).toBeNull();
+    const unfiled = lastView().adaptiveAncillaryPresentation as { exportSurface: TeamSurface; exportHistorySurface: TeamSurface };
+    expect(unfiled.exportSurface.type.name).toBe("TeamResearchExportButton");
+    expect(unfiled.exportHistorySurface.type.name).toBe("TeamResearchExportHistory");
+  });
+
+  it("TEAM_EXPORT_E3: canCreateExport reaches the export action unchanged, and is false by default", async () => {
+    for (const canCreateExport of [true, false]) {
+      viewProps.length = 0;
+      mockedAuthedFetch.mockResolvedValue(response(200, body()));
+      await mount({ ...PROJECT_PROPS, canCreateExport } as never);
+      expect((lastView().adaptiveAncillaryPresentation as { exportSurface: TeamSurface }).exportSurface.props.canCreateExport).toBe(canCreateExport);
+    }
   });
 });
 
@@ -721,8 +737,8 @@ describe("R4-I4 Verify this claim handoff", () => {
   it("leaves the read-only ancillary contract unchanged", async () => {
     mockedAuthedFetch.mockResolvedValue(response(200, body()));
     await mount({ ...PROJECT_PROPS, canVerifyClaim: true } as never);
-    const ancillary = lastView().adaptiveAncillaryPresentation as { kind: string; exportSurface: unknown };
+    const ancillary = lastView().adaptiveAncillaryPresentation as { kind: string; exportSurface: TeamSurface };
     expect(ancillary.kind).toBe("delegated_read_only");
-    expect(ancillary.exportSurface).toBeNull();
+    expect(ancillary.exportSurface.type.name).toBe("TeamResearchExportButton");
   });
 });

@@ -35,7 +35,8 @@
 import { useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { authedFetch } from "@/lib/client/authedFetch";
-import { REPORT_STATUS_LABELS, ReportStatusKind } from "@/lib/adaptiveSchema/reportStatus";
+import type { ReportStatusKind } from "@/lib/adaptiveSchema/reportStatus";
+import { formatCreatedAt, formatLabel, governanceLabel } from "./exportHistoryFormat";
 import { Card, SectionLabel } from "./shared";
 
 const EXPORT_FLAG_ENABLED = process.env.NEXT_PUBLIC_ADAPTIVE_RESEARCH_EXPORT_ENABLED === "true";
@@ -62,38 +63,6 @@ interface AdaptiveExportListItem {
 type ListState = "idle" | "loading" | "loaded" | "error";
 
 /** "pdf" -> "PDF", "docx" -> "DOCX", "json" -> "JSON" — falls back to an uppercased raw value for any future format this component hasn't been taught about yet, rather than rendering nothing. */
-function formatLabel(format: string): string {
-  if (format === "pdf") return "PDF";
-  if (format === "docx") return "DOCX";
-  if (format === "json") return "JSON";
-  return format.toUpperCase();
-}
-
-function formatCreatedAt(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
-}
-
-/** Same family-typed governance vocabulary as the PDF provenance block itself (AdaptiveResearchDocument.tsx's `governanceStatusDisplay`) — never re-labeled between the two surfaces. */
-function governanceLabel(status: AdaptiveExportListItem["governanceStatusAtExport"]): string {
-  if (status.family === "milestone2") {
-    if (status.kind === "superseded") return "Superseded by a newer export";
-    const label = REPORT_STATUS_LABELS[status.kind];
-    return status.isOwnerOverride ? `Owner override — ${label}` : label;
-  }
-  switch (status.status) {
-    case "approved":
-      return "Reviewed and approved";
-    case "needs_review":
-      return "Needs review";
-    case "blocked":
-      return "Blocked by policy";
-    default:
-      return "Not yet evaluated";
-  }
-}
-
 function ExportHistoryRow({ runId, item }: { runId: string; item: AdaptiveExportListItem }) {
   const { user, authReady } = useAuth();
   const [state, setState] = useState<"idle" | "loading" | "error">("idle");

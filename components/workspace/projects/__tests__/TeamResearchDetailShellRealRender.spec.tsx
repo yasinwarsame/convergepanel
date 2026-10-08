@@ -186,8 +186,13 @@ function expectReadOnlyTeamRender(r: TestRenderer.ReactTestRenderer) {
     expect(label).not.toContain("Add Another Model");
   }
   // R3-R1 — no Personal ancillary surface (export flag ON + paid plan, so these would render if leaked).
+  // TEAM_EXPORT_E3: "Previous exports" now legitimately appears — it is the TEAM history, proved by its
+  // own test id, and no Personal export route is ever requested (ANCILLARY_ROUTE below).
   const t = text(r);
-  expect(t).not.toContain("Previous exports");
+  // Every "Previous exports" heading on the page must belong to a TEAM history component, so a
+  // leaked Personal history (an extra heading) fails on adaptive and non-adaptive results alike.
+  const teamHistories = r.root.findAll((n) => n.type === "details" && n.props?.["data-testid"] === "team-export-history").length;
+  expect((t.match(/Previous exports/g) ?? []).length).toBe(teamHistories);
   expect(t).not.toContain("Review & Governance");
   expect(t).not.toContain("Loading review status");
   expect(r.root.findAll((n) => n.type === "button" && typeof n.props["aria-label"] === "string" && n.props["aria-label"].startsWith("Export this report"))).toHaveLength(0);
