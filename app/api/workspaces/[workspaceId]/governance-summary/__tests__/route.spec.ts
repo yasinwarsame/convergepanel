@@ -99,3 +99,12 @@ it("a count query failure (e.g. a missing index) → 500 internal error, nothing
   mockedLoad.mockRejectedValue(new Error("FAILED_PRECONDITION: The query requires an index"));
   expect((await call()).status).toBe(500);
 });
+
+it("a Workspace above the v1 Project ceiling → 409 summary_workspace_too_large, no numbers", async () => {
+  mockedLoad.mockResolvedValue({ ok: false, reason: "workspace_too_large", projectCeiling: 30 });
+  const res = await call();
+  expect(res.status).toBe(409);
+  const body = await res.json();
+  expect(body).toMatchObject({ ok: false, errorCode: "summary_workspace_too_large", projectCeiling: 30 });
+  expect(body.summary).toBeUndefined();
+});

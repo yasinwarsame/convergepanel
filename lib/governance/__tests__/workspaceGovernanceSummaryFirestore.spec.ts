@@ -11,9 +11,11 @@ import type { CountSpec } from "@/lib/governance/workspaceGovernanceSummary";
 
 type Call = { collection: string; wheres: Array<[string, string, unknown]> };
 
-function fakeDb(opts: { countFor?: (c: Call, attempt: number) => number; projects?: Array<{ id: string; data: unknown }> } = {}) {
+function fakeDb(opts: { countFor?: (c: Call, attempt: number) => number; projects?: Array<{ id: string; data: unknown }>; projectCount?: number } = {}) {
   const calls: Call[] = [];
   const projectReads: Array<[string, string, unknown]> = [];
+  const projectListingLimits: number[] = [];
+  let projectCounts = 0;
   let attempt = 0;
   const artifactQuery = (call: Call): Record<string, unknown> => ({
     where: (f: string, op: string, v: unknown) => artifactQuery({ ...call, wheres: [...call.wheres, [f, op, v]] }),
@@ -28,16 +30,28 @@ function fakeDb(opts: { countFor?: (c: Call, attempt: number) => number; project
     collection: (name: string) => {
       if (name === "projects") {
         return {
+          // Only a preflight count() or a LIMITED listing exist: an unbounded .get() is not available.
           where: (f: string, op: string, v: unknown) => {
             projectReads.push([f, op, v]);
-            return { get: async () => ({ docs: (opts.projects ?? []).map((p) => ({ id: p.id, data: () => p.data })) }) };
+            return {
+              count: () => ({
+                get: async () => {
+                  projectCounts += 1;
+                  return { data: () => ({ count: opts.projectCount ?? (opts.projects ?? []).length }) };
+                },
+              }),
+              limit: (n: number) => {
+                projectListingLimits.push(n);
+                return { get: async () => ({ docs: (opts.projects ?? []).slice(0, n).map((p) => ({ id: p.id, data: () => p.data })) }) };
+              },
+            };
           },
         };
       }
       return artifactQuery({ collection: name, wheres: [] });
     },
   };
-  return { db: db as never, calls, projectReads, nextAttempt: () => (attempt += 1) };
+  return { db: db as never, calls, projectReads, projectListingLimits, projectCounts: () => projectCounts, nextAttempt: () => (attempt += 1) };
 }
 
 const project = (id: string, over: Record<string, unknown> = {}) => ({
@@ -61,6 +75,7 @@ describe("loadCanonicalProjectIds", () => {
     });
     expect(await loadCanonicalProjectIds(f.db, "ws-1")).toEqual(["a", "b"]);
     expect(f.projectReads).toEqual([["workspaceId", "==", "ws-1"]]);
+    expect(f.projectListingLimits).toEqual([31]);
   });
 });
 
@@ -82,6 +97,40 @@ describe("loadWorkspaceGovernanceSummary", () => {
     const counting = { collection: (n: string) => (n === "projects" ? (loads += 1, original.collection(n)) : original.collection(n)) };
     const r = await loadWorkspaceGovernanceSummary(counting as never, "ws-1");
     expect(r).toEqual({ ok: false, reason: "inconsistent" });
-    expect(loads).toBe(2);
+    // One preflight count, then exactly two bounded listings (the original attempt + one retry).
+    expect(loads).toBe(3);
+    expect(f.projectCounts()).toBe(1);
+    expect(f.projectListingLimits).toEqual([31, 31]);
+  });
+});
+
+describe("v1 Workspace-size ceiling: 30 RAW Project documents (preflight before any listing or artifact count)", () => {
+  const many = (n: number) => Array.from({ length: n }, (_, i) => project(`p${i}`));
+  it("31 raw Projects: stops with workspace_too_large — no Project listing, no artifact count", async () => {
+    const f = fakeDb({ projects: many(31) });
+    expect(await loadWorkspaceGovernanceSummary(f.db, "ws-1")).toEqual({ ok: false, reason: "workspace_too_large", projectCeiling: 30 });
+    expect(f.projectCounts()).toBe(1);
+    expect(f.projectListingLimits).toEqual([]);
+    expect(f.calls).toEqual([]);
+  });
+  it("the ceiling counts RAW Project documents, including malformed ones", async () => {
+    const f = fakeDb({ projects: [...many(29), project("bad1", { schemaVersion: 9 }), project("bad2", { id: "x" })] });
+    expect(await loadWorkspaceGovernanceSummary(f.db, "ws-1")).toMatchObject({ reason: "workspace_too_large" });
+    expect(f.calls).toEqual([]);
+  });
+  it("exactly 30 raw Projects: proceeds, with a listing bounded to 31 documents", async () => {
+    const f = fakeDb({ projects: many(30) });
+    const r = await loadWorkspaceGovernanceSummary(f.db, "ws-1");
+    expect(r.ok).toBe(true);
+    expect(f.projectListingLimits).toEqual([31]);
+    expect(f.calls.length).toBeGreaterThan(0);
+  });
+  it("a Project created between the preflight and the listing is detected: too large, no artifact count", async () => {
+    const f = fakeDb({ projects: many(31), projectCount: 30 });
+    expect(await loadWorkspaceGovernanceSummary(f.db, "ws-1")).toMatchObject({ reason: "workspace_too_large" });
+    expect(f.calls).toEqual([]);
+  });
+  it("loadCanonicalProjectIds returns null above the ceiling", async () => {
+    expect(await loadCanonicalProjectIds(fakeDb({ projects: many(31) }).db, "ws-1")).toBeNull();
   });
 });

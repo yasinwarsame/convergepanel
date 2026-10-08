@@ -56,6 +56,12 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
 
   try {
     const result = await loadWorkspaceGovernanceSummary(adminDb, workspaceId);
+    if (!result.ok && result.reason === "workspace_too_large") {
+      return NextResponse.json(
+        { ok: false, errorCode: "summary_workspace_too_large", projectCeiling: result.projectCeiling, message: `The governance summary is available for Workspaces with up to ${result.projectCeiling} Projects.` },
+        { status: 409 }
+      );
+    }
     if (!result.ok) {
       logger.warn("[api/workspaces/governance-summary] counts could not be reconciled after retry", { workspaceId });
       return NextResponse.json({ ok: false, errorCode: "summary_unavailable", message: "The governance summary is temporarily unavailable. Please try again." }, { status: 503 });

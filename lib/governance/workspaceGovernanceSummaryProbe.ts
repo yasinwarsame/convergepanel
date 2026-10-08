@@ -10,7 +10,23 @@
  */
 import { computeWorkspaceGovernanceSummary, countSpecShape, type CountExecutor, type CountSpec } from "./workspaceGovernanceSummary";
 
-export type ProbeResult = { shape: string; spec: CountSpec } & ({ ok: true; count: number } | { ok: false; missingIndex: boolean; message: string });
+export type ProbeFailureKind = "missing_index" | "query_shape";
+export type ProbeResult = { shape: string; spec: CountSpec } & ({ ok: true; count: number } | { ok: false; kind: ProbeFailureKind; code: string | number | null; message: string });
+export type ProbeRun = { results: ProbeResult[]; aborted: null | { shape: string; spec: CountSpec; code: string | number | null; message: string } };
+
+/**
+ * Firestore's gRPC status for a missing index is FAILED_PRECONDITION (9) and for
+ * an unsupported query shape INVALID_ARGUMENT (3). Anything else (permissions,
+ * availability, quota, unknown) is NOT an index-discovery result: the probe
+ * stops and reports it rather than continuing against Production.
+ */
+export function classifyProbeError(err: unknown): { kind: ProbeFailureKind | "unexpected"; code: string | number | null; message: string } {
+  const message = err instanceof Error ? err.message : String(err);
+  const code = err && typeof err === "object" && "code" in err ? ((err as { code: string | number }).code ?? null) : null;
+  if (code === 9 || code === "failed-precondition" || code === "FAILED_PRECONDITION" || /^9 FAILED_PRECONDITION/.test(message)) return { kind: "missing_index", code, message };
+  if (code === 3 || code === "invalid-argument" || code === "INVALID_ARGUMENT" || /^3 INVALID_ARGUMENT/.test(message)) return { kind: "query_shape", code, message };
+  return { kind: "unexpected", code, message };
+}
 
 /** A placeholder Project id lets per-Project shapes be probed in a Workspace with no Projects. */
 export const PROBE_PLACEHOLDER_PROJECT_ID = "__governance_summary_probe_placeholder__";
@@ -30,16 +46,17 @@ export async function planDistinctShapes(workspaceId: string, canonicalProjectId
   return shapes;
 }
 
-export async function probeGovernanceSummaryIndexes(exec: CountExecutor, workspaceId: string, canonicalProjectIds: readonly string[]): Promise<ProbeResult[]> {
+export async function probeGovernanceSummaryIndexes(exec: CountExecutor, workspaceId: string, canonicalProjectIds: readonly string[]): Promise<ProbeRun> {
   const shapes = await planDistinctShapes(workspaceId, canonicalProjectIds);
   const results: ProbeResult[] = [];
   for (const [shape, spec] of shapes) {
     try {
       results.push({ shape, spec, ok: true, count: await exec(spec) });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      results.push({ shape, spec, ok: false, missingIndex: /FAILED_PRECONDITION|requires an index|index/i.test(message), message });
+      const c = classifyProbeError(err);
+      if (c.kind === "unexpected") return { results, aborted: { shape, spec, code: c.code, message: c.message } };
+      results.push({ shape, spec, ok: false, kind: c.kind, code: c.code, message: c.message });
     }
   }
-  return results;
+  return { results, aborted: null };
 }
