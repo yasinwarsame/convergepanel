@@ -139,3 +139,26 @@ describe("PersonalResearchDetailShell — R2 interpreted states", () => {
     expect(resultsProps).toHaveLength(0);
   });
 });
+
+describe("Step 6.1 — persisted governance context on the Personal report", () => {
+  const contextItems = (r: TestRenderer.ReactTestRenderer) =>
+    r.root
+      .findAll((n) => typeof n.type === "string" && typeof n.props?.["data-testid"] === "string" && n.props["data-testid"].startsWith("governance-run-context-"))
+      .map((n) => n.props["data-testid"] as string);
+
+  it("renders policy version, decision time and freshness from the persisted run", async () => {
+    const r = await mountWith(
+      okRun({
+        adaptive: { status: "absent", output: null, humanReview: null, reviewRouting: "unknown", automatedGovernance: null },
+        legacyAdaptive: { status: "valid", output: { version: 1, schemaId: "procedural", classification: { queryType: "procedural", freshness: "live" }, generatedAt: "2026-10-01T09:00:00.000Z", results: [{ modelId: "chatgpt", status: "ok" }], alignedClaims: [], gate: { status: "pass" }, synthesisReport: { unifiedAnswer: "U" } } },
+      })
+    );
+    expect(contextItems(r)).toEqual(["governance-run-context-time_sensitive"]);
+    expect(text(r)).toContain("Time-sensitive question · generated ");
+  });
+
+  it("renders no governance context when the persisted run has none", async () => {
+    const r = await mountWith(okRun());
+    expect(contextItems(r)).toEqual([]);
+  });
+});

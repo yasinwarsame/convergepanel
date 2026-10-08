@@ -42,7 +42,7 @@ import { createElement } from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import TeamResearchDetailShell from "@/components/workspace/projects/TeamResearchDetailShell";
 import { buildRunReadPayload, type RunReadViewerRole } from "@/lib/runs/runReadPayload";
-import { FIXTURE_PROJECT_ID, FIXTURE_RUN_ID, FIXTURE_WORKSPACE_ID, fullTeamRunData } from "@/lib/runs/__tests__/runReadFixtures";
+import { FIXTURE_PROJECT_ID, FIXTURE_RUN_ID, FIXTURE_WORKSPACE_ID, fullTeamRunData, governanceRecord } from "@/lib/runs/__tests__/runReadFixtures";
 import { MALFORMED_STRUCTURED_RESULT_NOTICE, NEWER_VERSION_STRUCTURED_RESULT_NOTICE, interpretPersistedRunReadPayload } from "@/lib/research/persistedRunPresentation";
 import PersistedResearchResultView from "@/components/research/PersistedResearchResultView";
 
@@ -325,5 +325,38 @@ describe("Team persisted detail — real render parity matrix", () => {
       expect(reviewerText).not.toContain("340 ms");
     }
     expect(reviewerText).toContain("What should we build?");
+  });
+});
+
+describe("Step 6.1 — persisted governance context on the Team research detail", () => {
+  const contextItems = (r: TestRenderer.ReactTestRenderer) =>
+    r.root
+      .findAll((n) => typeof n.type === "string" && typeof n.props?.["data-testid"] === "string" && n.props["data-testid"].startsWith("governance-run-context-"))
+      .map((n) => n.props["data-testid"] as string);
+
+  it("renders policy version, decision time and freshness from the persisted run, with no extra request", async () => {
+    const output = fullDeepResearchOutput();
+    const body = await r1Body(
+      {
+        adaptiveOutput: { ...output, classification: { ...output.classification, freshness: "recent" } },
+        legacyAdaptiveOutput: undefined,
+        governanceRecord: governanceRecord("approved", {
+          automatedGovernance: { status: "passed", reasons: [], policyVersion: 12 },
+          humanReview: { status: "approved", reviewedAt: "2026-10-05T12:00:00.000Z" },
+        }),
+      },
+      "team_member",
+      { review: TEAM_REVIEW }
+    );
+    const r = await render(body);
+    expect(contextItems(r)).toEqual(["governance-run-context-policy", "governance-run-context-decided", "governance-run-context-time_sensitive"]);
+    expect(text(r)).toContain("Evaluated under policy v12");
+    expect(mockedAuthedFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders no governance context when the persisted run has none", async () => {
+    const r = await render(await r1Body(ORDINARY));
+    expect(text(r)).toContain("What should we build?");
+    expect(contextItems(r)).toEqual([]);
   });
 });

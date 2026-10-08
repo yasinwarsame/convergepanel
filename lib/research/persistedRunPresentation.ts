@@ -36,6 +36,7 @@ import {
   adaptPersistedLegacyOutputToPanelPayload,
 } from "@/lib/user/adaptivePersistedOutputAdapter";
 import type { ModelResult } from "@/lib/types";
+import { deriveGovernanceRunContext, type GovernanceRunContext } from "@/lib/research/governanceRunContext";
 
 export const PERSISTED_RUN_VIEWER_ROLES = ["owner", "personal_reviewer", "team_member", "team_reviewer"] as const;
 export type PersistedRunViewerRole = (typeof PERSISTED_RUN_VIEWER_ROLES)[number];
@@ -58,6 +59,8 @@ export type PersistedResearchPresentation = {
   orgGovernanceStatus: "approved" | "needs_review" | "blocked" | null;
   /** The Team/org governance banner projection, exactly as the read API emitted it (`undefined` when absent). */
   governance: unknown;
+  /** Step 6.1 — persisted run-level governance context (policy version, decision time, freshness). */
+  governanceContext: GovernanceRunContext;
 };
 
 export type PersistedRunInterpretation =
@@ -129,6 +132,7 @@ export function interpretPersistedRunReadPayload(raw: unknown, expectedRunId: st
       synthesisConsensusSummary: data.synthesisCache?.consensusSummary ?? null,
       orgGovernanceStatus: og === "approved" || og === "needs_review" || og === "blocked" ? og : null,
       governance: data.governance ?? undefined,
+      governanceContext: deriveGovernanceRunContext(data),
     },
   };
 }
