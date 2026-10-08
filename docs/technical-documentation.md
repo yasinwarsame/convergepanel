@@ -951,7 +951,34 @@ Rules:
 
 Runs completed before 6.2a have none of these fields, and nothing is backfilled.
 
-**Known follow-up.** The saved-run read path (`runDocumentToPublicResults`) still fills `provider` from current configuration and sets `requestedModel`/`actualModel` to `modelId`. Fixing that is scoped separately, after 6.2b.
+**Resolved follow-up.** The saved-run read path no longer fills provider, requestedModel or actualModel from configuration or `modelId`; see the section on saved-run provenance honesty below.
+
+### Saved-run provenance honesty (S1)
+
+A saved run presents historical runtime provenance only when that fact was persisted with the run. Current configuration, model mappings and `modelId` may name the logical ConvergePanel slot, but they are never presented as what happened at runtime.
+
+**Read.** These read paths share `runDocumentToPublicResults` (for `perModel` rows) and `publicizePanelResults` (for the legacy top-level `results[]`):
+- `buildRunReadPayload`, used by the Personal and Team run-detail APIs;
+- `getTeamWorkspaceRun`, used by the Team project research page.
+
+Both now use `normalizePersistedModelResult`, which never fills a value:
+- `provider` and `requestedModel` are returned only when the run persisted them;
+- `substitutedFrom` is returned only on a substituted row, and only when it is complete;
+- the substitution reason is returned only when it is code-like;
+- `actualModel` is never returned.
+
+The type is `PersistedPanelResultPublic`. The live contract (`normalizeModelResultPublic`) is unchanged.
+
+**Synthesis.** `/api/synthesize-panel` builds its SUBSTITUTIONS prompt block with `substitutionEntryFromSupplied`. The block holds only the facts the request supplied, so a reloaded saved run cannot reintroduce `modelId`, `"unknown"`, `"deepseek-chat"` or `"primary_failed"` into the prompt or the cached synthesis. No run lookup is added. Live requests produce the exact previous block.
+
+**Display.** `lib/panel/substitutionDisplay.ts` drives:
+- the per-card "Substituted" badge;
+- the Model-health chip and its tooltip;
+- the copied synthesis markdown.
+
+Each names a provider, model or reason only when the row carries it. For live rows, output is identical to before.
+
+**Still open (S2).** The semantics and naming of live `actualModel`.
 
 ### Frozen export provenance (roadmap Step 6.2b)
 

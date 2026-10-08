@@ -108,9 +108,13 @@ describe("getTeamWorkspaceRun — completed-run result restoration (C1)", () => 
     expect(r.results[0]).not.toBe(raw[0]);
     // Byte-identical to what the shared publicizer produces for the same rows — one converter, not two.
     expect(JSON.stringify(r.results)).toBe(JSON.stringify(publicizePanelResults(raw)));
-    // The publicizer's guarantees are present on the output and absent on the raw row.
-    expect(r.results[0].requestedModel).toBeDefined();
+    // Saved-run provenance honesty (S1): the publicizer converts status but
+    // never manufactures runtime provenance the stored row lacks — the old
+    // "requestedModel is defined" guarantee was exactly that defect.
     expect((raw[0] as Record<string, unknown>).requestedModel).toBeUndefined();
+    expect("requestedModel" in r.results[0]).toBe(false);
+    expect("provider" in r.results[0]).toBe(false);
+    expect("actualModel" in r.results[0]).toBe(false);
     // Positive control for "never raw": a malformed legacy row (no modelId) is dropped by the publicizer.
     runs.set(RUN_ID, { data: baseRun({ results: [{ status: "ok", rawText: "no model id" }, ...raw] }) });
     const r2 = await read();
@@ -184,5 +188,23 @@ describe("END-TO-END — a legacy-results-only Personal source, snapshotted, rea
     expect(r.results[0].modelId).toBe("chatgpt");
     expect(r.results[0].status).toBe("ok");
     expect(JSON.stringify(r.results)).toContain(LEGACY_TEXT);
+  });
+});
+
+describe("Saved-run provenance honesty (S1) — the Team project research page read", () => {
+  const sub = (over: Record<string, unknown>) => ({ modelId: "claude", status: "substituted", rawTextTruncated: "x", latencyMs: 1, tokenUsage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 }, wasTruncated: false, ...over });
+  it("a pre-6.2a substituted row returns no provenance keys", async () => {
+    runs.set(RUN_ID, { data: baseRun({ runDocument: { perModel: [sub({})] } }) });
+    const r = await read();
+    if (r.status !== "complete") throw new Error("expected complete");
+    for (const key of ["provider", "requestedModel", "actualModel", "substitutedFrom", "substitutionReason"]) expect(key in r.results[0]).toBe(false);
+    expect(r.results[0].status).toBe("substituted");
+  });
+  it("a post-6.2a row returns exactly its persisted provenance", async () => {
+    runs.set(RUN_ID, { data: baseRun({ runDocument: { perModel: [sub({ provider: "deepseek", requestedModel: "claude-RUN-1", substitutedFrom: "anthropic:claude-RUN-1" })] } }) });
+    const r = await read();
+    if (r.status !== "complete") throw new Error("expected complete");
+    expect(r.results[0]).toMatchObject({ provider: "deepseek", requestedModel: "claude-RUN-1", substitutedFrom: "anthropic:claude-RUN-1" });
+    expect("actualModel" in r.results[0]).toBe(false);
   });
 });

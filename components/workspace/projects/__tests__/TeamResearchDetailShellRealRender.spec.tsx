@@ -360,3 +360,22 @@ describe("Step 6.1 — persisted governance context on the Team research detail"
     expect(contextItems(r)).toEqual([]);
   });
 });
+
+describe("Saved-run provenance honesty (S1) — the REAL saved-run page names only recorded substitution facts", () => {
+  const subRow = (over: Record<string, unknown>) => ({ modelId: "claude", status: "substituted", rawTextTruncated: "Answer via fallback", tokenUsage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 }, latencyMs: 95, wasTruncated: false, ...over });
+  const okRow = { modelId: "chatgpt", status: "ok", rawTextTruncated: "Answer from ChatGPT", tokenUsage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 }, latencyMs: 90, wasTruncated: false };
+  const page = async (sub: Record<string, unknown>) =>
+    render(await r1Body({ adaptiveOutput: undefined, legacyAdaptiveOutput: undefined, governanceRecord: undefined, runDocument: { perModel: [okRow, subRow(sub)] } }));
+
+  it("a pre-6.2a substituted row: says Substituted, never names DeepSeek or a model it did not record", async () => {
+    const t = text(await page({}));
+    expect(t).toContain("Substituted");
+    expect(t).not.toContain("Substituted: DeepSeek");
+    expect(t).not.toMatch(/deepseek-chat|primary_failed|claude → claude/);
+  });
+
+  it("a post-6.2a substituted row: names the recorded provider", async () => {
+    const t = text(await page({ provider: "deepseek", requestedModel: "claude-RUN-1", substitutedFrom: "anthropic:claude-RUN-1" }));
+    expect(t).toContain("Substituted: DeepSeek");
+  });
+});

@@ -4,24 +4,26 @@
  * Use these functions at EVERY public boundary (API responses, UI hydration,
  * synthesis input building) to guarantee:
  *  - status ∈ {"ok", "substituted", "failed"}
- *  - requestedModel, provider, actualModel always present
+ *  - saved-run reads never manufacture requestedModel/provider/actualModel (S1)
  *  - substitutedFrom in "<provider>:<model>" format
  *  - substitutionReason is a sanitized code-like string
  *  - No internal/legacy statuses ever leak to consumers
  */
 
 import type { ModelStatus } from "@/lib/types";
-import type { PanelResultPublic } from "./schemas";
-import { normalizeModelResultPublic, assertPublicStatus, coerceStatus } from "./normalize";
+import type { PersistedPanelResultPublic } from "./schemas";
+import { normalizePersistedModelResult, assertPublicStatus, coerceStatus } from "./normalize";
 
 /**
- * Normalize an array of raw result objects to PanelResultPublic[].
- * Applies full normalization: status coercion, metadata defaults,
- * substitutedFrom format, and dev-only assertion.
+ * Normalize a run's legacy stored top-level `results[]` (the pre-`runDocument`
+ * format) for the saved-run read APIs — its only callers.
  *
- * Use at API response boundaries (run-panel, etc.).
+ * Saved-run provenance honesty (S1): status is coerced, but runtime provenance
+ * is kept only as stored and never filled (see `normalizePersistedModelResult`);
+ * `actualModel` is not returned. The LIVE contract that guarantees those fields
+ * is `normalizeModelResultPublic`, used by run execution, not this function.
  */
-export function publicizePanelResults(rawResults: unknown[]): PanelResultPublic[] {
+export function publicizePanelResults(rawResults: unknown[]): PersistedPanelResultPublic[] {
   if (!Array.isArray(rawResults)) return [];
 
   return rawResults
@@ -29,9 +31,9 @@ export function publicizePanelResults(rawResults: unknown[]): PanelResultPublic[
       r != null && typeof r === "object" && typeof (r as any).modelId === "string"
     )
     .map((raw) => {
-      const normalized = normalizeModelResultPublic(raw as any);
-      assertPublicStatus(normalized.status, `publicizePanelResults(${normalized.modelId})`);
-      return normalized as unknown as PanelResultPublic;
+      const normalized = normalizePersistedModelResult(raw as any);
+      assertPublicStatus(normalized.status, `publicizePanelResults(${String(normalized.modelId)})`);
+      return normalized as unknown as PersistedPanelResultPublic;
     });
 }
 

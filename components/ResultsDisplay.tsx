@@ -36,6 +36,7 @@ import {
 } from "@/lib/sectionUtils";
 import { PanelSection } from "@/components/PanelSection";
 import PanelSynthesisView from "@/components/PanelSynthesisView";
+import { substitutionBadgeText } from "@/lib/panel/substitutionDisplay";
 import type { SynthesisConsensusSummaryDetail } from "@/lib/verification/consensusScoring";
 import ModelChip from "@/components/ModelChip";
 import { sanitizeModelText, truncateForSynthesis, MAX_CHARS_SYNTHESIS_PER_MODEL } from "@/lib/panel/sanitizeText";
@@ -2179,7 +2180,7 @@ export default function ResultsDisplay({
                       {result.status === "substituted" && (
                         <div className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1" title={(result as any).substitutionReason || ""}>
                           <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                          <span>Substituted: DeepSeek</span>
+                          <span>{substitutionBadgeText(result)}</span>
                         </div>
                       )}
                     </div>
@@ -2329,7 +2330,7 @@ export default function ResultsDisplay({
                       {result.status === "substituted" && (
                         <div className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1" title={(result as any).substitutionReason || ""}>
                           <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                          <span>Substituted: DeepSeek</span>
+                          <span>{substitutionBadgeText(result)}</span>
                         </div>
                       )}
                   </button>

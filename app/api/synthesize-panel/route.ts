@@ -72,7 +72,7 @@ import { sanitizeModelText, truncateForSynthesis, MAX_CHARS_SYNTHESIS_PER_MODEL 
 import { compressModelResponse, compressClusters, computeInputHash } from "@/lib/synthesis/compressInput";
 import { buildEvidencePack } from "@/lib/synthesis/buildEvidencePack";
 import { logger, redact } from "@/lib/logger";
-import { buildSubstitutionBlock, normalizeModelResultPublic, coerceStatus } from "@/lib/panel/normalize";
+import { buildSubstitutionBlock, substitutionEntryFromSupplied, coerceStatus, type SubstitutionBlockEntry } from "@/lib/panel/normalize";
 import type { UserProfile } from "@/lib/types";
 import { evaluateAndStoreGovernance } from "@/lib/governance/evaluateAndStore";
 import { governanceInputFromResearchRun } from "@/lib/governance/governanceInputFromDocs";
@@ -921,7 +921,7 @@ export async function POST(req: NextRequest) {
     }
 
     const validResults: Array<{ modelId: string; text: string }> = [];
-    const substitutionEntries: Array<{ slot: string; requestedModel: string; provider: string; actualModel: string; reason: string }> = [];
+    const substitutionEntries: SubstitutionBlockEntry[] = [];
     const seenModelIds = new Set<string>();
 
     // IMPORTANT: Keep fullText and synthesisText separate
@@ -960,16 +960,14 @@ export async function POST(req: NextRequest) {
           });
           seenModelIds.add(result.modelId.trim());
 
-          const norm = normalizeModelResultPublic(result as any);
-          if (norm.status === "substituted") {
-            substitutionEntries.push({
-              slot: norm.modelId,
-              requestedModel: norm.requestedModel,
-              provider: norm.provider,
-              actualModel: norm.actualModel,
-              reason: norm.substitutionReason || "primary_failed",
-            });
-          }
+          // Saved-run provenance honesty (S1): only the facts this request
+          // actually supplied enter the SUBSTITUTIONS block. A reloaded saved
+          // run lacking provenance must not have it manufactured here (no
+          // modelId / "unknown" / "deepseek-chat" / "primary_failed"), and no
+          // run lookup is made to recover it. Live rows carry every field and
+          // yield the same entry as before.
+          const entry = substitutionEntryFromSupplied({ ...(result as Record<string, unknown>), modelId: result.modelId.trim() });
+          if (entry) substitutionEntries.push(entry);
         }
       }
     }

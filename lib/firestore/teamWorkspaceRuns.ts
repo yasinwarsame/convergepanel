@@ -44,7 +44,7 @@ import { resolveTeamWorkspaceTargetAdmission } from "@/lib/workspaces/teamWorksp
 import { authorizeTeamWorkspaceMutationInTransaction, type TeamMutationAuthorizationDenialReason } from "@/lib/workspaces/authorizeTeamWorkspaceMutationInTransaction";
 import { roleHasCapability } from "@/lib/workspaces/capabilities";
 import { isWellFormedProjectV1 } from "@/lib/projects/types";
-import type { RunDocument, PanelResultPublic } from "@/lib/panel/schemas";
+import type { RunDocument, PersistedPanelResultPublic } from "@/lib/panel/schemas";
 import type { PanelHistoryGovernanceStatus } from "@/lib/user/panelHistory";
 import { runDocumentToPublicResults } from "@/lib/user/runDocumentToPublicResults";
 import { publicizePanelResults } from "@/lib/panel/publicize";
@@ -190,7 +190,7 @@ export async function createTeamWorkspaceRun(args: {
 export type TeamWorkspaceRunDetailResult =
   | { status: "not_found" }
   | { status: "firestore_unavailable" }
-  | { status: "complete"; runId: string; question: string; governanceStatus?: PanelHistoryGovernanceStatus; results: PanelResultPublic[]; assignee: TeamRunAssigneeDto | null }
+  | { status: "complete"; runId: string; question: string; governanceStatus?: PanelHistoryGovernanceStatus; results: PersistedPanelResultPublic[]; assignee: TeamRunAssigneeDto | null }
   | { status: "pending"; runId: string; question: string; governanceStatus?: PanelHistoryGovernanceStatus; assignee: TeamRunAssigneeDto | null };
 
 /**
@@ -211,7 +211,7 @@ export type TeamWorkspaceRunDetailResult =
  * distinguishable response — this route is not an existence oracle for a
  * run/Project pairing it doesn't have.
  *
- * `runDocument` -> `PanelResultPublic[]` conversion is delegated entirely to
+ * `runDocument` -> `PersistedPanelResultPublic[]` conversion is delegated entirely to
  * the existing, generic `runDocumentToPublicResults()` (already reused by
  * Personal's own `GET /api/user/runs/[runId]` history-reload path) — no
  * duplicate transform logic lives here. Only ever attempted when
