@@ -7,6 +7,7 @@
  * removal of any single provenance source fails a targeted test.
  */
 import {
+  NON_SUBSTITUTED_PERSISTED_STATUSES,
   PROVENANCE_NOT_RECORDED,
   exportRunProvenanceLines,
   freezeExportRunProvenance,
@@ -116,13 +117,30 @@ describe("per-model provenance — persisted perModel rows only", () => {
   it("models follow selectedModels; a model with no persisted row gets only its id", () => {
     const frozen = freezeExportRunProvenance({ selectedModels: ["claude", "gemini"] as never[], runDocument: { perModel: perModel() }, policy: m2() });
     expect(frozen.models.map((m) => m.modelId)).toEqual(["claude", "gemini"]);
-    expect(frozen.models[1]).toEqual({ modelId: "gemini", substituted: false });
+    // No persisted row → no substitution claim either way, not `false`.
+    expect(frozen.models[1]).toEqual({ modelId: "gemini" });
   });
-  it.each([undefined, null, "x", {}, { perModel: "x" }])("runDocument %p → ids only, nothing synthesized", (runDocument) => {
-    expect(freezeExportRunProvenance({ selectedModels: MODELS, runDocument, policy: m2() }).models).toEqual([
-      { modelId: "chatgpt", substituted: false },
-      { modelId: "claude", substituted: false },
-    ]);
+  it.each([undefined, null, "x", {}, { perModel: "x" }])("runDocument %p → ids only, nothing synthesized (no substitution claim)", (runDocument) => {
+    expect(freezeExportRunProvenance({ selectedModels: MODELS, runDocument, policy: m2() }).models).toEqual([{ modelId: "chatgpt" }, { modelId: "claude" }]);
+  });
+  it.each(NON_SUBSTITUTED_PERSISTED_STATUSES)("persisted status %s → substituted: false (an explicit recorded fact)", (status) => {
+    expect(withRow(0, (r) => (r.status = status)).substituted).toBe(false);
+  });
+  it.each([
+    ["missing", undefined],
+    ["null", null],
+    ["unrecognized", "SUBSTITUTED"],
+    ["non-string", 1],
+  ])("persisted status %s → substitution state omitted, never false", (_label, status) => {
+    const row = withRow(0, (r) => {
+      if (status === undefined) delete r.status;
+      else r.status = status;
+    });
+    expect("substituted" in row).toBe(false);
+    expect(row).toEqual({ modelId: "chatgpt", provider: "openai", requestedModel: "gpt-RUN-1" });
+  });
+  it("an unknown substitution state never carries a substitutedFrom", () => {
+    expect(withRow(1, (r) => delete r.status)).toEqual({ modelId: "claude", provider: "deepseek", requestedModel: "claude-RUN-1" });
   });
 });
 
@@ -142,9 +160,25 @@ describe("readFrozenRunProvenance — the record as frozen, defensively", () => 
       models: [{ modelId: "chatgpt", substituted: false }],
     });
   });
+  it.each([
+    ["absent", {}],
+    ["null (Firestore)", { substituted: null }],
+    ["non-boolean", { substituted: "yes" }],
+    ["number", { substituted: 0 }],
+  ])("a frozen substitution state that is %s is omitted, never read as false", (_label, over) => {
+    expect(readFrozenRunProvenance({ models: [{ modelId: "chatgpt", ...over }] })).toEqual({ models: [{ modelId: "chatgpt" }] });
+  });
+  it("literal booleans are preserved", () => {
+    expect(readFrozenRunProvenance({ models: [{ modelId: "a", substituted: false }, { modelId: "b", substituted: true }] })).toEqual({
+      models: [{ modelId: "a", substituted: false }, { modelId: "b", substituted: true }],
+    });
+  });
+  it("a frozen substitutedFrom with an unknown substitution state is not read back", () => {
+    expect(readFrozenRunProvenance({ models: [{ modelId: "chatgpt", substitutedFrom: "openai:x" }] })).toEqual({ models: [{ modelId: "chatgpt" }] });
+  });
   it("malformed entries are skipped, never repaired", () => {
     expect(readFrozenRunProvenance({ models: [null, { provider: "openai" }, { modelId: "", substituted: true }, { modelId: "grok", substituted: "yes" }] })).toEqual({
-      models: [{ modelId: "grok", substituted: false }],
+      models: [{ modelId: "grok" }],
     });
   });
 });
@@ -163,6 +197,17 @@ describe("display lines", () => {
       `Model (chatgpt): requested model ${PROVENANCE_NOT_RECORDED} · provider ${PROVENANCE_NOT_RECORDED}`,
       `Substitution (claude): requested original model ${PROVENANCE_NOT_RECORDED} → answered by provider ${PROVENANCE_NOT_RECORDED}`,
     ]);
+  });
+  it("an unknown substitution state is stated as not recorded — never presented as an ordinary unsubstituted model", () => {
+    expect(exportRunProvenanceLines({ models: [{ modelId: "gemini" as never }, { modelId: "chatgpt" as never, provider: "openai", requestedModel: "gpt-RUN-1" }] }).slice(1)).toEqual([
+      `Model (gemini): requested model ${PROVENANCE_NOT_RECORDED} · provider ${PROVENANCE_NOT_RECORDED} · substitution ${PROVENANCE_NOT_RECORDED}`,
+      `Model (chatgpt): gpt-RUN-1 · openai · substitution ${PROVENANCE_NOT_RECORDED}`,
+    ]);
+  });
+  it("a substitution with a persisted requestedModel but no substitutedFrom keeps the requested model and names only the missing part", () => {
+    expect(exportRunProvenanceLines({ models: [{ modelId: "claude" as never, provider: "deepseek", requestedModel: "claude-RUN-1", substituted: true }] })[1]).toBe(
+      `Substitution (claude): requested claude-RUN-1 (original provider ${PROVENANCE_NOT_RECORDED}) → answered by deepseek`
+    );
   });
   it("makes no trust, verification or scoring claim", () => {
     expect(exportRunProvenanceLines(FULL as never).join("\n").toLowerCase()).not.toMatch(/verif|trust|score|actual|attest|confirmed/);

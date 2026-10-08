@@ -122,7 +122,7 @@ export const adaptiveResearchJsonExportV1Schema = z.object({
             modelId: z.string(),
             provider: z.string().optional(),
             requestedModel: z.string().optional(),
-            substituted: z.boolean(),
+            substituted: z.boolean().optional(),
             substitutedFrom: z.string().optional(),
           })
         ),

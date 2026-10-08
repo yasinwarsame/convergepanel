@@ -174,8 +174,13 @@ export interface AdaptiveExportModelProvenance {
   modelId: ModelId;
   provider?: string;
   requestedModel?: string;
-  /** The persisted `status === "substituted"` fact — recorded for pre-6.2a runs too. */
-  substituted: boolean;
+  /**
+   * Tri-state, and absent means unknown: `true` only for a persisted
+   * `status === "substituted"`, `false` only for a persisted non-substitution
+   * status, and OMITTED when the run has no row, no status, or an unrecognized
+   * one. `false` is itself a provenance claim and is never inferred from absence.
+   */
+  substituted?: boolean;
   /** `"<provider>:<model>"` originally requested — present only on a substituted row that persisted it. */
   substitutedFrom?: string;
 }

@@ -31,6 +31,10 @@ const RUN_PROVENANCE: AdaptiveExportRunProvenance = {
     { modelId: "chatgpt" as never, provider: "openai", requestedModel: "gpt-RUN-1", substituted: false },
     { modelId: "claude" as never, provider: "deepseek", requestedModel: "claude-RUN-1", substituted: true, substitutedFrom: "anthropic:claude-RUN-1" },
     { modelId: "gemini" as never, substituted: false },
+    // Unknown substitution state (no persisted status) — must not read as "not substituted".
+    { modelId: "grok" as never, provider: "xai", requestedModel: "grok-RUN-1" },
+    // Substituted, requestedModel persisted, substitutedFrom not.
+    { modelId: "perplexity" as never, provider: "deepseek", requestedModel: "sonar-RUN-1", substituted: true },
   ],
 };
 const LINES = exportRunProvenanceLines(RUN_PROVENANCE);
@@ -94,6 +98,20 @@ describe("a 6.2b record: the same facts in every format", () => {
     expect(json.provenance.run).toEqual(RUN_PROVENANCE);
     expect(adaptiveResearchJsonExportV1Schema.safeParse(json).success).toBe(true);
     expect(exportRunProvenanceLines(json.provenance.run!)).toEqual(LINES);
+  });
+
+  it("the unknown-substitution and partial-substitution facts read identically in every format", async () => {
+    const unknown = LINES.find((l) => l.startsWith("Model (grok)"))!;
+    const partial = LINES.find((l) => l.startsWith("Substitution (perplexity)"))!;
+    expect(unknown).toContain("substitution not recorded");
+    expect(partial).toContain("requested sonar-RUN-1 (original provider not recorded)");
+    for (const text of [pdfText(record(RUN_PROVENANCE)), await docxText(record(RUN_PROVENANCE, "docx"))]) {
+      expect(text).toContain(unknown);
+      expect(text).toContain(partial);
+    }
+    const run = jsonOf(record(RUN_PROVENANCE, "json")).provenance.run!;
+    expect("substituted" in run.models.find((m) => m.modelId === "grok")!).toBe(false);
+    expect(run.models.find((m) => m.modelId === "perplexity")).toEqual({ modelId: "perplexity", provider: "deepseek", requestedModel: "sonar-RUN-1", substituted: true });
   });
 
   it("creation and Firestore-regeneration JSON are byte-identical", () => {

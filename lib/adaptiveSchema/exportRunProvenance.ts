@@ -30,6 +30,20 @@ import type { ModelId } from "../types";
 
 const EVALUATED_AUTOMATED_STATUSES: readonly string[] = ["passed", "flagged", "blocked"];
 
+/**
+ * Every persisted `perModel.status` (`ConnectorStatus`) that is an explicit
+ * record that this slot was NOT substituted. Anything outside this set — and a
+ * missing row or status — yields no substitution claim at all.
+ */
+export const NON_SUBSTITUTED_PERSISTED_STATUSES: readonly string[] = ["ok", "failed", "error", "timeout", "refused", "rate_limited"];
+
+/** `true` / `false` only from an explicit persisted status; `undefined` (unknown) otherwise. */
+function persistedSubstitutionState(status: unknown): boolean | undefined {
+  if (status === "substituted") return true;
+  if (typeof status === "string" && NON_SUBSTITUTED_PERSISTED_STATUSES.includes(status)) return false;
+  return undefined;
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
@@ -67,15 +81,15 @@ function frozenPolicyVersion(source: ExportRunProvenancePolicySource): number | 
 }
 
 function frozenModel(modelId: ModelId, row: Record<string, unknown> | undefined): AdaptiveExportModelProvenance {
-  const substituted = row?.status === "substituted";
+  const substituted = persistedSubstitutionState(row?.status);
   // Built with conditional spreads only: no `undefined` value is ever written,
   // so a Firestore round-trip cannot turn an absent fact into a `null` one.
   return {
     modelId,
     ...(row && nonEmptyString(row.provider) ? { provider: row.provider } : {}),
     ...(row && nonEmptyString(row.requestedModel) ? { requestedModel: row.requestedModel } : {}),
-    substituted,
-    ...(substituted && row && nonEmptyString(row.substitutedFrom) ? { substitutedFrom: row.substitutedFrom } : {}),
+    ...(substituted !== undefined ? { substituted } : {}),
+    ...(substituted === true && row && nonEmptyString(row.substitutedFrom) ? { substitutedFrom: row.substitutedFrom } : {}),
   };
 }
 
@@ -100,13 +114,14 @@ export function readFrozenRunProvenance(raw: unknown): AdaptiveExportRunProvenan
   const models: AdaptiveExportModelProvenance[] = [];
   for (const entry of raw.models) {
     if (!isPlainObject(entry) || !nonEmptyString(entry.modelId)) continue;
-    const substituted = entry.substituted === true;
+    // A literal boolean is preserved; anything else is an unknown state and omitted.
+    const substituted = typeof entry.substituted === "boolean" ? entry.substituted : undefined;
     models.push({
       modelId: entry.modelId as ModelId,
       ...(nonEmptyString(entry.provider) ? { provider: entry.provider } : {}),
       ...(nonEmptyString(entry.requestedModel) ? { requestedModel: entry.requestedModel } : {}),
-      substituted,
-      ...(substituted && nonEmptyString(entry.substitutedFrom) ? { substitutedFrom: entry.substitutedFrom } : {}),
+      ...(substituted !== undefined ? { substituted } : {}),
+      ...(substituted === true && nonEmptyString(entry.substitutedFrom) ? { substitutedFrom: entry.substitutedFrom } : {}),
     });
   }
   return {
@@ -117,20 +132,30 @@ export function readFrozenRunProvenance(raw: unknown): AdaptiveExportRunProvenan
 
 export const PROVENANCE_NOT_RECORDED = "not recorded";
 
+/** What was originally requested on a substituted row, using every persisted fact and naming only the genuinely missing part. */
+function substitutionOriginal(m: AdaptiveExportModelProvenance): string {
+  if (m.substitutedFrom !== undefined) return m.substitutedFrom;
+  if (m.requestedModel !== undefined) return `${m.requestedModel} (original provider ${PROVENANCE_NOT_RECORDED})`;
+  return `original model ${PROVENANCE_NOT_RECORDED}`;
+}
+
 /**
  * The factual display lines shared by PDF and DOCX. No "verified", "trusted" or
- * scored language; a missing fact is stated as not recorded, never guessed.
+ * scored language. Every positive or negative statement is backed by a frozen
+ * fact; a missing fact is stated as not recorded, never guessed.
  */
 export function exportRunProvenanceLines(provenance: AdaptiveExportRunProvenance): string[] {
   const lines = [`Policy: ${provenance.policyVersion !== undefined ? `v${provenance.policyVersion}` : PROVENANCE_NOT_RECORDED}`];
   for (const m of provenance.models) {
     const provider = m.provider ?? `provider ${PROVENANCE_NOT_RECORDED}`;
-    if (m.substituted) {
-      const original = m.substitutedFrom ?? `original model ${PROVENANCE_NOT_RECORDED}`;
-      lines.push(`Substitution (${m.modelId}): requested ${original} → answered by ${provider}`);
-    } else {
-      lines.push(`Model (${m.modelId}): ${m.requestedModel ?? `requested model ${PROVENANCE_NOT_RECORDED}`} · ${provider}`);
+    if (m.substituted === true) {
+      lines.push(`Substitution (${m.modelId}): requested ${substitutionOriginal(m)} → answered by ${provider}`);
+      continue;
     }
+    const requested = m.requestedModel ?? `requested model ${PROVENANCE_NOT_RECORDED}`;
+    // `false` is a recorded fact and needs no qualifier; an unknown state says so.
+    const substitution = m.substituted === false ? "" : ` · substitution ${PROVENANCE_NOT_RECORDED}`;
+    lines.push(`Model (${m.modelId}): ${requested} · ${provider}${substitution}`);
   }
   return lines;
 }
