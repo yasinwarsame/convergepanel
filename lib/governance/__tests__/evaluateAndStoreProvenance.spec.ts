@@ -131,7 +131,10 @@ describe("evaluateAndStoreGovernance — append-only governanceEvents entry", ()
     expect(event.data.scoreFamily).toBe("claim_verification_v1");
     expect(event.data.scoreThresholdsInEffect).toEqual(provenance);
     expect((parent.data.governanceMeta as Record<string, unknown>).scoreThresholdsInEffect).toEqual(provenance);
-    expect(JSON.stringify(event.data)).not.toContain("97");
+    // The unused general approval threshold (97) appears nowhere in the recorded thresholds.
+    // (Scoped to the threshold object: the event's ISO timestamp can contain any digit run.)
+    expect(JSON.stringify(event.data.scoreThresholdsInEffect)).not.toContain("97");
+    expect(Object.keys(event.data.scoreThresholdsInEffect as object).sort()).toEqual(["minConsensusToAvoidReview", "sensitive"]);
   });
 
   it("a later re-evaluation replaces the parent meta but each event keeps its own family", async () => {

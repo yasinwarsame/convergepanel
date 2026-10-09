@@ -214,7 +214,8 @@ describe("evaluation provenance — GovernanceResult.meta", () => {
   it("the unused general approval threshold is never recorded as in effect", () => {
     const m = meta(clean(), policy({ minConsensusToApprove: 93 }));
     expect(Object.keys(m.scoreThresholdsInEffect)).toEqual(["minConsensusToAvoidReview"]);
-    expect(JSON.stringify(m)).not.toContain("93");
+    // Scoped to the threshold object: `evaluatedAt` is an ISO timestamp that can contain any digit run.
+    expect(JSON.stringify(m.scoreThresholdsInEffect)).not.toContain("93");
   });
 
   it("sensitive: exact family, detected domain, and both sensitive thresholds", () => {
