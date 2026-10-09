@@ -350,6 +350,7 @@ async function executeAndPersistTeamClaimVerification(args: {
           : null;
 
     const verificationGovernanceInput: GovernanceInput = {
+      scoreFamily: "claim_verification_v1",
       consensusScore: governanceConsensusScore,
       evidenceQuality: consensusSummary.evidenceQuality,
       sourceBacked: false,

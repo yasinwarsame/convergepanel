@@ -172,6 +172,8 @@ describe("PERSISTENCE FAILURE FAILS CLOSED — both modes", () => {
     expect(json.ok).toBe(true);
     expect(typeof json.verificationId).toBe("string");
     expect(mockedEvaluateAndStoreGovernance).toHaveBeenCalledTimes(1);
+    // Step 6 D5.1 — the Personal claim path states its score formula.
+    expect(mockedEvaluateAndStoreGovernance.mock.calls[0][0].input.scoreFamily).toBe("claim_verification_v1");
     expect(mockedApplyTeamGovernancePipeline).toHaveBeenCalledTimes(1);
   });
 });

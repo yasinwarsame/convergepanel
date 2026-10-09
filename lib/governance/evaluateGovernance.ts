@@ -2,7 +2,28 @@
  * Org-wide governance evaluation (deterministic). UI / persistence wiring lives in API routes.
  */
 
+/**
+ * Step 6 D5.1 — the closed set of System A score semantics.
+ *
+ * The three System A producers compute their 0–100 consensus score with three
+ * DIFFERENT formulas (claim: verdict-weighted model agreement; video: the
+ * share of models agreeing on any single verdict; research: a text-anchor
+ * support heuristic over key findings). The same number does not mean the
+ * same thing across them, so every evaluation states which formula produced
+ * its score. The value is assigned server-side by the execution path that ran
+ * the formula — never taken from client input, never inferred from the score.
+ */
+export const GOVERNANCE_SCORE_FAMILIES = [
+  "claim_verification_v1",
+  "video_agreement_v1",
+  "research_synthesis_v1",
+] as const;
+
+export type GovernanceScoreFamily = (typeof GOVERNANCE_SCORE_FAMILIES)[number];
+
 export interface GovernanceInput {
+  /** Which System A score formula produced `consensusScore`. Required: a decision with unknown score semantics is the D5 defect. */
+  scoreFamily: GovernanceScoreFamily;
   consensusScore: number | null;
   evidenceQuality: "strong" | "mixed" | "weak" | null;
   sourceBacked: boolean;
@@ -19,6 +40,11 @@ export interface GovernanceInput {
 
 export interface GovernancePolicy {
   policyVersion: number;
+  /**
+   * Stored, validated and editable — but NOT read by `evaluateGovernance`
+   * (true since the evaluator was introduced). Retained for compatibility and
+   * future policy evolution; never record it as a threshold a decision used.
+   */
   minConsensusToApprove: number;
   minConsensusToAvoidReview: number;
   blockIfSourceBackedMissingSources: boolean;
@@ -31,12 +57,37 @@ export interface GovernancePolicy {
   reviewIfVerificationVerdictIn: string[];
 }
 
+/**
+ * Step 6 D5.1 — the score thresholds IN EFFECT for one evaluation, copied from
+ * the runtime policy object that evaluation used (never from defaults).
+ *
+ * "In effect", not "applied": with a null score the general comparison is
+ * never reached (the decision carries "Consensus score not available"
+ * instead), so a threshold can be in effect without having been compared.
+ *
+ * `minConsensusToApprove` is deliberately ABSENT from the general block:
+ * `evaluateGovernance` does not read it, and provenance that listed it would
+ * claim it governed a decision it never touched. The sensitive block exists
+ * only when a sensitive domain was detected with sensitive evaluation enabled
+ * — the only case in which its two thresholds are read.
+ */
+export interface GovernanceScoreThresholdsInEffect {
+  minConsensusToAvoidReview: number;
+  sensitive?: {
+    domain: string;
+    minConsensusToAvoidReview: number;
+    minConsensusToApprove: number;
+  };
+}
+
 export interface GovernanceResult {
   status: "approved" | "needs_review" | "blocked";
   reasons: string[];
   meta: {
     policyVersion: number;
     evaluatedAt: string;
+    scoreFamily: GovernanceScoreFamily;
+    scoreThresholdsInEffect: GovernanceScoreThresholdsInEffect;
   };
 }
 
@@ -129,9 +180,15 @@ export function evaluateGovernance(input: GovernanceInput, policy: GovernancePol
     hasBlocked = true;
   }
 
+  let sensitiveThresholds: GovernanceScoreThresholdsInEffect["sensitive"];
   if (policy.sensitiveDomainsEnabled) {
     const domain = detectSensitiveDomain(input.question);
     if (domain) {
+      sensitiveThresholds = {
+        domain,
+        minConsensusToAvoidReview: policy.sensitiveMinConsensusToAvoidReview,
+        minConsensusToApprove: policy.sensitiveMinConsensusToApprove,
+      };
       const csDisplay = rawScore == null ? "N/A" : String(rawScore);
       if (effectiveScore < policy.sensitiveMinConsensusToAvoidReview) {
         reasons.push(
@@ -190,6 +247,13 @@ export function evaluateGovernance(input: GovernanceInput, policy: GovernancePol
     meta: {
       policyVersion: policy.policyVersion,
       evaluatedAt: new Date().toISOString(),
+      scoreFamily: input.scoreFamily,
+      scoreThresholdsInEffect: {
+        minConsensusToAvoidReview: policy.minConsensusToAvoidReview,
+        // Conditional spread: never an `undefined` key, so a Firestore
+        // round-trip cannot turn "not evaluated" into a `null` block.
+        ...(sensitiveThresholds ? { sensitive: sensitiveThresholds } : {}),
+      },
     },
   };
 }

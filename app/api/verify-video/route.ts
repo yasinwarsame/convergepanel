@@ -580,6 +580,7 @@ export async function POST(request: NextRequest) {
       collection: "videoVerifications",
       ownerUid: uid,
       input: {
+        scoreFamily: "video_agreement_v1",
         consensusScore,
         evidenceQuality,
         sourceBacked: false,

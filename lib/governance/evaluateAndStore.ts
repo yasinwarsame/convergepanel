@@ -95,6 +95,11 @@ export async function evaluateAndStoreGovernance(params: {
           nextStatus: result.status,
           reasons: result.reasons,
           policyVersion: policy.policyVersion,
+          // Step 6 D5.1 — the parent's `governanceMeta` is current state and a
+          // later re-evaluation replaces it; this append-only event is what
+          // keeps the score semantics that governed THIS evaluation.
+          scoreFamily: result.meta.scoreFamily,
+          scoreThresholdsInEffect: result.meta.scoreThresholdsInEffect,
         }) as DocumentData
       );
 
@@ -112,6 +117,8 @@ export async function evaluateAndStoreGovernance(params: {
       nextStatus: result.status,
       reasons: result.reasons,
       policyVersion: policy.policyVersion,
+      scoreFamily: result.meta.scoreFamily,
+      scoreThresholdsInEffect: result.meta.scoreThresholdsInEffect,
       runOwnerUid: ownerUid,
       runOwnerEmail,
       question: (params.input.question || "").substring(0, 200),

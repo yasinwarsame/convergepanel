@@ -70,6 +70,8 @@ export async function ensureDocumentGovernanceEvaluated(
           reasons: result.reasons,
           policyVersion: policy.policyVersion,
           nextStatus: result.status,
+          scoreFamily: result.meta.scoreFamily,
+          scoreThresholdsInEffect: result.meta.scoreThresholdsInEffect,
         }) as DocumentData
       );
 

@@ -737,6 +737,8 @@ describe("POST /api/workspaces/[workspaceId]/video-verifications — Gate 2", ()
     expect(body.capabilities).toBeUndefined();
     expect(mockedEvaluateAndStoreGovernance).toHaveBeenCalledTimes(1);
     expect(mockedEvaluateAndStoreGovernance).toHaveBeenCalledWith(expect.objectContaining({ runId: "vid-team-1", collection: "videoVerifications", ownerUid: UID }));
+    // Step 6 D5.1 — the Team video path states its score formula.
+    expect((mockedEvaluateAndStoreGovernance.mock.calls[0][0] as { input: { scoreFamily: string } }).input.scoreFamily).toBe("video_agreement_v1");
     expect(mockRunTransaction).toHaveBeenCalledTimes(1);
   });
 

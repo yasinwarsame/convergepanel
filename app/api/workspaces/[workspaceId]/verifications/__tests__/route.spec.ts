@@ -345,6 +345,8 @@ describe("POST /api/workspaces/[workspaceId]/verifications — Gate 2 (post-exec
     expect(body.status).toBeUndefined();
     expect(mockedEvaluateAndStoreGovernance).toHaveBeenCalledTimes(1);
     expect(mockedEvaluateAndStoreGovernance).toHaveBeenCalledWith(expect.objectContaining({ runId: "vcl-team-1", collection: "verifications" }));
+    // Step 6 D5.1 — the Team claim path states its score formula.
+    expect((mockedEvaluateAndStoreGovernance.mock.calls[0][0] as { input: { scoreFamily: string } }).input.scoreFamily).toBe("claim_verification_v1");
     expect(mockedApplyTeamGovernancePipeline).toHaveBeenCalledTimes(1);
   });
 

@@ -828,6 +828,7 @@ describe("governance success", () => {
     expect(arg.ownerUid).toBe(UID);
     expect(arg.input).toEqual(
       expect.objectContaining({
+        scoreFamily: "video_agreement_v1",
         consensusScore: 100,
         evidenceQuality: "strong",
         sourceBacked: false,
