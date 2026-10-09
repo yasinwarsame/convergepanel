@@ -2,6 +2,12 @@
  * Org-wide governance evaluation (deterministic). UI / persistence wiring lives in API routes.
  */
 
+import {
+  resolveGeneralReviewThreshold,
+  type FamilyReviewThresholds,
+  type GeneralReviewThresholdSource,
+} from "./familyReviewThresholds";
+
 /**
  * Step 6 D5.1 — the closed set of System A score semantics.
  *
@@ -55,6 +61,12 @@ export interface GovernancePolicy {
   sensitiveMinConsensusToAvoidReview: number;
   reviewIfEvidenceQualityWeak: boolean;
   reviewIfVerificationVerdictIn: string[];
+  /**
+   * Step 6 D5.2A — optional per-score-type override of `minConsensusToAvoidReview`
+   * (video and research only; see ./familyReviewThresholds). Absent = every
+   * family uses the shared value, which is exactly the pre-D5.2A behaviour.
+   */
+  scoreFamilyReviewThresholds?: FamilyReviewThresholds;
 }
 
 /**
@@ -72,7 +84,10 @@ export interface GovernancePolicy {
  * — the only case in which its two thresholds are read.
  */
 export interface GovernanceScoreThresholdsInEffect {
+  /** The general review boundary actually used for this decision's score family. */
   minConsensusToAvoidReview: number;
+  /** D5.2A — "family" when a score-type override supplied it, "shared" for the policy-wide value. */
+  minConsensusToAvoidReviewSource: GeneralReviewThresholdSource;
   sensitive?: {
     domain: string;
     minConsensusToAvoidReview: number;
@@ -169,6 +184,9 @@ export function evaluateGovernance(input: GovernanceInput, policy: GovernancePol
   let hasReview = false;
 
   const rawScore = input.consensusScore;
+  // D5.2A — the only general comparison, now resolved per score family. With no
+  // override this is `policy.minConsensusToAvoidReview`, as before.
+  const generalReview = resolveGeneralReviewThreshold(policy, input.scoreFamily);
   const effectiveScore = rawScore == null ? 0 : rawScore;
 
   if (
@@ -231,8 +249,8 @@ export function evaluateGovernance(input: GovernanceInput, policy: GovernancePol
   if (rawScore == null) {
     reasons.push("Consensus score not available");
     hasReview = true;
-  } else if (rawScore < policy.minConsensusToAvoidReview) {
-    reasons.push(`Consensus ${rawScore} below ${policy.minConsensusToAvoidReview}`);
+  } else if (rawScore < generalReview.value) {
+    reasons.push(`Consensus ${rawScore} below ${generalReview.value}`);
     hasReview = true;
   }
 
@@ -249,7 +267,8 @@ export function evaluateGovernance(input: GovernanceInput, policy: GovernancePol
       evaluatedAt: new Date().toISOString(),
       scoreFamily: input.scoreFamily,
       scoreThresholdsInEffect: {
-        minConsensusToAvoidReview: policy.minConsensusToAvoidReview,
+        minConsensusToAvoidReview: generalReview.value,
+        minConsensusToAvoidReviewSource: generalReview.source,
         // Conditional spread: never an `undefined` key, so a Firestore
         // round-trip cannot turn "not evaluated" into a `null` block.
         ...(sensitiveThresholds ? { sensitive: sensitiveThresholds } : {}),

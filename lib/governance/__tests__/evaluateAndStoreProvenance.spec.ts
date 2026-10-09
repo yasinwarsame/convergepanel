@@ -98,7 +98,7 @@ describe("evaluateAndStoreGovernance — parent document", () => {
       policyVersion: 1,
       evaluatedAt: expect.any(String),
       scoreFamily: "video_agreement_v1",
-      scoreThresholdsInEffect: { minConsensusToAvoidReview: 70 },
+      scoreThresholdsInEffect: { minConsensusToAvoidReview: 70, minConsensusToAvoidReviewSource: "shared" },
     });
     expect(Object.keys(parent.data).sort()).toEqual(["governanceMeta", "governanceReasons", "governanceStatus"]);
   });
@@ -116,7 +116,7 @@ describe("evaluateAndStoreGovernance — append-only governanceEvents entry", ()
       reasons: ["Consensus 60 below 70"],
       policyVersion: 1,
       scoreFamily: "video_agreement_v1",
-      scoreThresholdsInEffect: { minConsensusToAvoidReview: 70 },
+      scoreThresholdsInEffect: { minConsensusToAvoidReview: 70, minConsensusToAvoidReviewSource: "shared" },
     });
   });
 
@@ -125,6 +125,7 @@ describe("evaluateAndStoreGovernance — append-only governanceEvents entry", ()
     const { event, parent } = await run({ ...INPUT, scoreFamily: "claim_verification_v1", question: "Is this medication safe?" }, "vcl-1", "verifications");
     const provenance = {
       minConsensusToAvoidReview: 66,
+      minConsensusToAvoidReviewSource: "shared",
       sensitive: { domain: "medical", minConsensusToAvoidReview: 71, minConsensusToApprove: 91 },
     };
     expect(event.data.policyVersion).toBe(4);
@@ -134,7 +135,7 @@ describe("evaluateAndStoreGovernance — append-only governanceEvents entry", ()
     // The unused general approval threshold (97) appears nowhere in the recorded thresholds.
     // (Scoped to the threshold object: the event's ISO timestamp can contain any digit run.)
     expect(JSON.stringify(event.data.scoreThresholdsInEffect)).not.toContain("97");
-    expect(Object.keys(event.data.scoreThresholdsInEffect as object).sort()).toEqual(["minConsensusToAvoidReview", "sensitive"]);
+    expect(Object.keys(event.data.scoreThresholdsInEffect as object).sort()).toEqual(["minConsensusToAvoidReview", "minConsensusToAvoidReviewSource", "sensitive"]);
   });
 
   it("a later re-evaluation replaces the parent meta but each event keeps its own family", async () => {
@@ -143,6 +144,25 @@ describe("evaluateAndStoreGovernance — append-only governanceEvents entry", ()
     const events = writes.adds.filter((w) => w.path === "runs/run-x/governanceEvents").map((w) => w.data.scoreFamily);
     expect(events).toEqual(["video_agreement_v1", "research_synthesis_v1"]);
     expect((docs.get("runs/run-x")!.governanceMeta as Record<string, unknown>).scoreFamily).toBe("research_synthesis_v1");
+  });
+});
+
+describe("D5.2A — a score-type override is recorded identically on parent, event and audit row", () => {
+  it("video override 75: resolved value + source 'family' everywhere; the decision uses 75", async () => {
+    mockPolicy = { ...getDefaultGovernancePolicy(), scoreFamilyReviewThresholds: { video_agreement_v1: 75 } };
+    const { parent, event, audit } = await run(INPUT); // score 74
+    const expected = { minConsensusToAvoidReview: 75, minConsensusToAvoidReviewSource: "family" };
+    expect(parent.data.governanceStatus).toBe("needs_review");
+    expect(parent.data.governanceReasons).toEqual(["Consensus 74 below 75"]);
+    expect((parent.data.governanceMeta as Record<string, unknown>).scoreThresholdsInEffect).toEqual(expected);
+    expect(event.data.scoreThresholdsInEffect).toEqual(expected);
+    expect(audit.data.scoreThresholdsInEffect).toEqual(expected);
+  });
+  it("the same policy evaluates a research input on the shared value", async () => {
+    mockPolicy = { ...getDefaultGovernancePolicy(), scoreFamilyReviewThresholds: { video_agreement_v1: 75 } };
+    const { event } = await run({ ...INPUT, scoreFamily: "research_synthesis_v1", runType: "research" }, "run-r", "runs");
+    expect(event.data.nextStatus).toBe("approved");
+    expect(event.data.scoreThresholdsInEffect).toEqual({ minConsensusToAvoidReview: 70, minConsensusToAvoidReviewSource: "shared" });
   });
 });
 
@@ -160,7 +180,7 @@ describe("evaluateAndStoreGovernance — admin_audit_logs row (real writeAuditEv
       reasons: [],
       policyVersion: 1,
       scoreFamily: "video_agreement_v1",
-      scoreThresholdsInEffect: { minConsensusToAvoidReview: 70 },
+      scoreThresholdsInEffect: { minConsensusToAvoidReview: 70, minConsensusToAvoidReviewSource: "shared" },
       runOwnerUid: "uid-1",
       runOwnerEmail: "owner@example.test",
       question: "Video verification: clip.mp4 (10s, 1920x1080)",
@@ -182,7 +202,7 @@ describe("legacy shapes without D5.1 provenance remain readable", () => {
   it("the export provenance reader takes the same policyVersion from old and new governanceMeta", () => {
     const { freezeExportRunProvenance } = require("@/lib/adaptiveSchema/exportRunProvenance");
     const legacyMeta = { policyVersion: 3, evaluatedAt: "2026-05-01T00:00:00.000Z" };
-    const d51Meta = { ...legacyMeta, scoreFamily: "research_synthesis_v1", scoreThresholdsInEffect: { minConsensusToAvoidReview: 70 } };
+    const d51Meta = { ...legacyMeta, scoreFamily: "research_synthesis_v1", scoreThresholdsInEffect: { minConsensusToAvoidReview: 70, minConsensusToAvoidReviewSource: "shared" } };
     const freeze = (governanceMeta: unknown) =>
       freezeExportRunProvenance({ selectedModels: [], runDocument: {}, policy: { family: "legacy", governanceStatus: "approved", governanceMeta } });
     expect(freeze(legacyMeta)).toEqual(freeze(d51Meta));
@@ -203,7 +223,7 @@ describe("legacy shapes without D5.1 provenance remain readable", () => {
     await ensureDocumentGovernanceEvaluated("verifications", "vcl-old", { claim: "c", consensusScore: 90, verdict: "confirmed", evidenceQuality: "strong" }, { uid: "a", email: "a@example.test" });
     const ev = writes.adds.find((w) => w.path === "verifications/vcl-old/governanceEvents")!;
     expect(ev.data).toEqual(
-      expect.objectContaining({ action: "evaluated", nextStatus: "approved", scoreFamily: "claim_verification_v1", scoreThresholdsInEffect: { minConsensusToAvoidReview: 70 } })
+      expect.objectContaining({ action: "evaluated", nextStatus: "approved", scoreFamily: "claim_verification_v1", scoreThresholdsInEffect: { minConsensusToAvoidReview: 70, minConsensusToAvoidReviewSource: "shared" } })
     );
   });
 });

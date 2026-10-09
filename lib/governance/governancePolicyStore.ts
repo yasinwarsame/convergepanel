@@ -11,10 +11,35 @@ import {
   type GovernancePolicy,
 } from "./evaluateGovernance";
 import { GOVERNANCE_POLICY_DOC_PATH } from "./governanceFirestore";
+import { logger } from "@/lib/logger";
+import {
+  applyFamilyReviewThresholdsMutation,
+  readPersistedFamilyReviewThresholds,
+  type FamilyReviewThresholdsMutation,
+} from "./familyReviewThresholds";
 
-function pickPolicyFields(d: Record<string, unknown>): GovernancePolicy {
+/**
+ * A policy mutation as accepted by `saveGovernancePolicyMerge`: any legacy
+ * field, plus the D5.2A score-type map in its MUTATION form (number = set,
+ * null = clear). `policyVersion` is never caller-supplied.
+ */
+export type GovernancePolicyMutation = Partial<Omit<GovernancePolicy, "policyVersion" | "scoreFamilyReviewThresholds">> & {
+  scoreFamilyReviewThresholds?: FamilyReviewThresholdsMutation;
+};
+
+/** Exported for tests: the runtime policy read from a persisted document. Never mutates the document. */
+export function pickPolicyFields(d: Record<string, unknown>): GovernancePolicy {
   const def = getDefaultGovernancePolicy();
   const verdictIn = d.reviewIfVerificationVerdictIn;
+  // D5.2A — only recognized score types with valid values become active
+  // overrides; anything else degrades to the shared threshold. Names, never
+  // values, are logged: a malformed entry is a configuration fault, not data.
+  const family = readPersistedFamilyReviewThresholds(d.scoreFamilyReviewThresholds);
+  if (family.discarded.length > 0) {
+    logger.warn("[governance/policy] Ignoring malformed score-type review thresholds; the shared threshold applies", {
+      discarded: family.discarded.slice(0, 10),
+    });
+  }
   return {
     policyVersion: typeof d.policyVersion === "number" ? d.policyVersion : def.policyVersion,
     minConsensusToApprove:
@@ -54,6 +79,8 @@ function pickPolicyFields(d: Record<string, unknown>): GovernancePolicy {
     reviewIfVerificationVerdictIn: Array.isArray(verdictIn)
       ? verdictIn.filter((x): x is string => typeof x === "string")
       : def.reviewIfVerificationVerdictIn,
+    // Conditional spread: absence stays absence (no `undefined` key ever reaches Firestore).
+    ...(family.thresholds ? { scoreFamilyReviewThresholds: family.thresholds } : {}),
   };
 }
 
@@ -85,18 +112,51 @@ export async function loadGovernancePolicy(): Promise<GovernancePolicy> {
 
 function mergePolicyUpdate(
   current: GovernancePolicy,
-  partial: Partial<GovernancePolicy>
+  partial: GovernancePolicyMutation
 ): GovernancePolicy {
   const keys = Object.keys(getDefaultGovernancePolicy()) as (keyof GovernancePolicy)[];
   const next = { ...current };
   for (const k of keys) {
     if (k === "policyVersion") continue;
-    if (partial[k] !== undefined) {
-      (next as Record<string, unknown>)[k] = partial[k] as unknown;
+    const value = (partial as Record<string, unknown>)[k];
+    if (value !== undefined) {
+      (next as Record<string, unknown>)[k] = value;
     }
+  }
+  if (partial.scoreFamilyReviewThresholds !== undefined) {
+    const family = applyFamilyReviewThresholdsMutation(current.scoreFamilyReviewThresholds, partial.scoreFamilyReviewThresholds);
+    if (family) next.scoreFamilyReviewThresholds = family;
+    else delete next.scoreFamilyReviewThresholds;
   }
   next.policyVersion = current.policyVersion + 1;
   return next;
+}
+
+/** The runtime value of one (possibly dotted) policy field, `null` when absent. */
+function policyFieldValue(policy: GovernancePolicy, name: string): unknown {
+  const FAMILY_PREFIX = "scoreFamilyReviewThresholds.";
+  if (name.startsWith(FAMILY_PREFIX)) {
+    const family = name.slice(FAMILY_PREFIX.length) as keyof NonNullable<GovernancePolicy["scoreFamilyReviewThresholds"]>;
+    return policy.scoreFamilyReviewThresholds?.[family] ?? null;
+  }
+  const value = (policy as unknown as Record<string, unknown>)[name];
+  return value === undefined ? null : value;
+}
+
+/**
+ * D5.2A — before/after values of exactly the changed fields, for the
+ * per-version audit event. `null` means "absent" (for a score-type override:
+ * the shared threshold applies). Values are the RUNTIME policy values on each
+ * side of this one committed version.
+ */
+function changeSnapshot(current: GovernancePolicy, next: GovernancePolicy, changedFieldNames: string[]) {
+  const before: Record<string, unknown> = {};
+  const after: Record<string, unknown> = {};
+  for (const name of changedFieldNames) {
+    before[name] = policyFieldValue(current, name);
+    after[name] = policyFieldValue(next, name);
+  }
+  return { before, after };
 }
 
 /**
@@ -113,9 +173,19 @@ function mergePolicyUpdate(
  * The per-version `auditEvents` entry is written in the SAME transaction, so a
  * version number appears in that history exactly once, and only for a commit
  * that actually happened. Authorization and the returned value are unchanged.
+ *
+ * Step 6 D5.2A:
+ * - The score-type map is written as a DELTA: each changed family is set, or
+ *   removed with `FieldValue.delete()`, under a merge write — so changing one
+ *   family can never rewrite or drop the other, and a cleared override leaves
+ *   no `null` behind for a reader to mistake for configuration.
+ * - The audit event also records `before` / `after` values of exactly the
+ *   changed fields, computed from the same transaction's read, so each
+ *   policy version is reconstructable. Prospective only: older events keep
+ *   their names-only shape.
  */
 export async function saveGovernancePolicyMerge(
-  partial: Partial<GovernancePolicy>,
+  partial: GovernancePolicyMutation,
   uid: string,
   email: string,
   comment: string,
@@ -132,11 +202,19 @@ export async function saveGovernancePolicyMerge(
       : getDefaultGovernancePolicy();
 
     const next = mergePolicyUpdate(current, partial);
+    // The family map is never spread whole into the write (see the doc comment).
+    const { scoreFamilyReviewThresholds: _nextFamily, ...legacyNext } = next;
+    void _nextFamily;
+    const familyDelta: Record<string, unknown> = {};
+    for (const [family, value] of Object.entries(partial.scoreFamilyReviewThresholds ?? {})) {
+      familyDelta[family] = value === null ? FieldValue.delete() : value;
+    }
 
     txn.set(
       ref,
       {
-        ...next,
+        ...legacyNext,
+        ...(Object.keys(familyDelta).length > 0 ? { scoreFamilyReviewThresholds: familyDelta } : {}),
         updatedAt: FieldValue.serverTimestamp(),
         updatedBy: uid,
       },
@@ -153,6 +231,7 @@ export async function saveGovernancePolicyMerge(
         policyVersion: next.policyVersion,
         comment,
         changes: changedFieldNames,
+        ...changeSnapshot(current, next, changedFieldNames),
       }) as DocumentData
     );
 

@@ -154,6 +154,18 @@ export const ADAPTIVE_RESEARCH_EXPORT_ENABLED = process.env.ADAPTIVE_RESEARCH_EX
 export const WORKSPACE_GOVERNANCE_SUMMARY_ENABLED = process.env.WORKSPACE_GOVERNANCE_SUMMARY_ENABLED === "true";
 
 /**
+ * Step 6 D5.2A — gates ONLY mutation of the governance policy's score-type
+ * review thresholds (`scoreFamilyReviewThresholds`). Default OFF.
+ *
+ * Code may read, display and evaluate a family override regardless; with the
+ * flag off the policy POST rejects any attempt to set or clear one (403
+ * `family_thresholds_write_disabled`) while every legacy policy field stays
+ * writable. Turning it on is part of the separate owner-approved D5.2B value
+ * change, never of a D5.2A deploy.
+ */
+export const GOVERNANCE_FAMILY_THRESHOLDS_WRITE_ENABLED = process.env.GOVERNANCE_FAMILY_THRESHOLDS_WRITE_ENABLED === "true";
+
+/**
  * Adaptive Research Export, Phase 3 — a SEPARATE release flag for DOCX,
  * deliberately not reusing `ADAPTIVE_RESEARCH_EXPORT_ENABLED`. That flag
  * already gates PDF in production; if DOCX were gated behind the same
