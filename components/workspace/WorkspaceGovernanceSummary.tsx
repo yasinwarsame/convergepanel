@@ -113,7 +113,7 @@ function SummaryBody({ summary }: { summary: Summary }) {
             {f.excludedNotComplete !== undefined && <li>Not yet complete (not counted above): {f.excludedNotComplete}</li>}
             <li>Excluded for Project integrity: {f.integrityAnomalies}</li>
             {f.reviewedMalformed > 0 && <li>Reviewed with an unrecognized status (not counted as a decision): {f.reviewedMalformed}</li>}
-            {f.overlap > 0 && <li>Records with conflicting governance data (not counted): {f.overlap}</li>}
+            {f.overlap > 0 && <li data-testid={`governance-overlap-${f.family}`}>Records with conflicting governance data (counted under their primary family): {f.overlap}</li>}
           </ul>
         </div>
       ))}

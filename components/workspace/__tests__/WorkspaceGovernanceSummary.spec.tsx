@@ -107,6 +107,31 @@ it("an API refusal shows the server message and no numbers", async () => {
   expect(byTestId(r, "governance-summary-rollup")).toHaveLength(0); // count only: a failing diff of ReactTestInstances (circular fiber graph) hangs the reporter
 });
 
+it("an overlap record is disclosed as counted under its primary family — never as excluded", async () => {
+  // One adaptive run that ALSO carries a System A governanceStatus, and one
+  // non-adaptive run that ALSO carries a governanceRecord: each is counted once,
+  // under its primary family, and disclosed as an overlap.
+  const overlapData: Dataset = {
+    runs: [
+      { workspaceId: W, projectId: null, status: "complete", adaptiveOutput: { version: 1 }, governanceRecord: { version: 1, automatedGovernance: { status: "passed" }, humanReview: { status: "unreviewed" } }, governanceStatus: "approved" },
+      { workspaceId: W, projectId: null, status: "complete", governanceStatus: "approved", governanceRecord: { version: 1 } },
+    ],
+    verifications: [],
+    videoVerifications: [],
+  };
+  const overlapSummary = await computeWorkspaceGovernanceSummary({ workspaceId: W, canonicalProjectIds: [], count: fakeCountExecutor(overlapData) });
+  respond = () => ({ ok: true, status: 200, body: { ok: true, summary: overlapSummary } });
+  const r = await mount(createElement(WorkspaceGovernanceSummary, { workspaceId: W }));
+  for (const family of ["research", "research_adaptive"]) {
+    const line = textOf(byTestId(r, `governance-overlap-${family}`)[0]);
+    expect(line).toBe("Records with conflicting governance data (counted under their primary family): 1");
+    expect(line).not.toMatch(/not counted|excluded/i);
+  }
+  // ...and each record really is counted once under its primary family.
+  expect(textOf(byTestId(r, "governance-family-research")[0])).toContain("Research — 1 completed");
+  expect(textOf(byTestId(r, "governance-family-research_adaptive")[0])).toContain("Structured research — 1 completed");
+});
+
 describe("audit page shell wiring", () => {
   it("flag off (prop false): no summary section and no governance-summary request", async () => {
     const r = await mount(createElement(WorkspaceAuditLogShell, { workspaceId: W, workspaceName: "WS", canReadMembers: true }));
