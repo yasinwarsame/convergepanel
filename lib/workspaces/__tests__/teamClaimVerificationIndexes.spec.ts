@@ -15,6 +15,19 @@ type Index = { collectionGroup: string; queryScope: string; fields: Field[] };
 const indexes = (JSON.parse(readFileSync(join(__dirname, "..", "..", "..", "firestore.indexes.json"), "utf8")) as { indexes: Index[] }).indexes;
 const shape = (i: Index) => `${i.collectionGroup}|${i.queryScope}|${i.fields.map((f) => `${f.fieldPath}:${f.order}`).join(",")}`;
 
+/**
+ * Step 6.3 — the four Workspace governance summary indexes on `verifications`,
+ * created in Production from Firestore's own probe requirements
+ * (docs/governance-summary-index-probe-63.md). Pinned literally so the
+ * workspaceId-index set on this collection stays EXACT.
+ */
+const GOVERNANCE_SUMMARY_63 = [
+  "verifications|COLLECTION|governanceStatus:ASCENDING,projectId:ASCENDING,type:ASCENDING,workspaceId:ASCENDING,governanceReviewedAt:ASCENDING",
+  "verifications|COLLECTION|projectId:ASCENDING,type:ASCENDING,workspaceId:ASCENDING,governanceStatus:ASCENDING",
+  "verifications|COLLECTION|projectId:ASCENDING,type:ASCENDING,workspaceId:ASCENDING,governanceReviewedAt:ASCENDING,governanceStatus:ASCENDING",
+  "verifications|COLLECTION|projectId:ASCENDING,type:ASCENDING,workspaceId:ASCENDING,governanceReviewedAt:ASCENDING",
+];
+
 describe("Team Claim verification list indexes", () => {
   it("positive control: the existing Team runs Workspace index is visible", () => {
     expect(indexes.map(shape)).toContain("runs|COLLECTION|workspaceId:ASCENDING,createdAt:DESCENDING");
@@ -29,7 +42,9 @@ describe("Team Claim verification list indexes", () => {
 
   it("no duplicate or explicit __name__ variant of the Team Claim indexes, and no other workspaceId index on verifications", () => {
     const teamClaim = indexes.filter((i) => i.collectionGroup === "verifications" && i.fields.some((f) => f.fieldPath === "workspaceId"));
-    expect(teamClaim).toHaveLength(2);
+    expect(teamClaim.map(shape).sort()).toEqual(
+      ["verifications|COLLECTION|workspaceId:ASCENDING,timestamp:DESCENDING", "verifications|COLLECTION|workspaceId:ASCENDING,projectId:ASCENDING,timestamp:DESCENDING", ...GOVERNANCE_SUMMARY_63].sort()
+    );
     expect(JSON.stringify(teamClaim)).not.toContain("__name__");
     expect(new Set(indexes.map(shape)).size).toBe(indexes.length);
   });

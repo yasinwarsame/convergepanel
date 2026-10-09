@@ -24,6 +24,7 @@ import { useAuth } from "@/components/AuthProvider";
 import { fetchWorkspaceAuditEvents, type WorkspaceAuditEventItem, type WorkspaceAuditPreviousRole } from "@/lib/client/workspaceTeamClient";
 import ReviewErrorState from "@/components/teamGovernance/ReviewErrorState";
 import WorkspaceNav from "@/components/workspace/WorkspaceNav";
+import WorkspaceGovernanceSummary from "@/components/workspace/WorkspaceGovernanceSummary";
 import { Breadcrumb } from "@/components/shared/Breadcrumb";
 
 const ROLE_LABEL: Record<WorkspaceAuditPreviousRole, string> = { admin: "Admin", member: "Member", reviewer: "Reviewer", viewer: "Viewer" };
@@ -38,11 +39,14 @@ export default function WorkspaceAuditLogShell({
   workspaceId,
   workspaceName,
   canReadMembers,
+  showGovernanceSummary = false,
 }: {
   workspaceId: string;
   workspaceName: string;
   /** The caller's own `members.read` capability (WorkspaceNav Members link). */
   canReadMembers: boolean;
+  /** Step 6.3 — set by the server page only when the release flag is on (the page is already `audit.read`-gated). */
+  showGovernanceSummary?: boolean;
 }) {
   const { user, authReady } = useAuth();
 
@@ -108,6 +112,7 @@ export default function WorkspaceAuditLogShell({
       </div>
 
       <WorkspaceNav workspaceId={workspaceId} active="audit" showMembers={canReadMembers} showAudit />
+      {showGovernanceSummary && <WorkspaceGovernanceSummary workspaceId={workspaceId} />}
 
       {status === "loading" && (
         <div role="status" className="rounded-xl border border-cp-border bg-cp-surface px-6 py-10 text-center text-sm text-cp-muted shadow-sm">

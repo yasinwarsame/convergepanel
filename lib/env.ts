@@ -146,6 +146,14 @@ export const MULTI_REVIEWER_GOVERNANCE_ENABLED = process.env.MULTI_REVIEWER_GOVE
 export const ADAPTIVE_RESEARCH_EXPORT_ENABLED = process.env.ADAPTIVE_RESEARCH_EXPORT_ENABLED === "true";
 
 /**
+ * Step 6.3 — Workspace governance summary (docs/governance-workspace-summary-contract.md).
+ * Default OFF. While off, neither the API route nor the audit-page section runs
+ * a single count query, so merging the code cannot touch Production Firestore
+ * before the Production query/index plan is separately authorized.
+ */
+export const WORKSPACE_GOVERNANCE_SUMMARY_ENABLED = process.env.WORKSPACE_GOVERNANCE_SUMMARY_ENABLED === "true";
+
+/**
  * Adaptive Research Export, Phase 3 — a SEPARATE release flag for DOCX,
  * deliberately not reusing `ADAPTIVE_RESEARCH_EXPORT_ENABLED`. That flag
  * already gates PDF in production; if DOCX were gated behind the same
