@@ -600,6 +600,7 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
         collection: "videoVerifications",
         ownerUid: uid,
         input: {
+          scoreFamily: "video_agreement_v1",
           consensusScore,
           evidenceQuality,
           sourceBacked: false,

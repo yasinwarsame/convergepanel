@@ -1027,7 +1027,7 @@ export default function GovernanceDashboard() {
   const policyValidationError = useMemo(() => {
     if (!policy) return null;
     if (policy.minConsensusToApprove < policy.minConsensusToAvoidReview) {
-      return "Auto-approve threshold must be greater than or equal to the review threshold.";
+      return "Approval threshold must be greater than or equal to the review threshold.";
     }
     if (policy.sensitiveDomainsEnabled) {
       if (policy.sensitiveMinConsensusToApprove < policy.sensitiveMinConsensusToAvoidReview) {
@@ -1263,7 +1263,7 @@ export default function GovernanceDashboard() {
           <ul className="mt-5 space-y-2 text-left text-sm text-cp-text">
             <li className="flex gap-2">
               <span className="font-semibold text-emerald-400">✓</span>
-              <span>Set consensus thresholds for auto-approval</span>
+              <span>Configure consensus thresholds for governance review</span>
             </li>
             <li className="flex gap-2">
               <span className="font-semibold text-emerald-400">✓</span>
@@ -1534,7 +1534,7 @@ export default function GovernanceDashboard() {
                   <h2 className="text-lg font-semibold text-cp-text">Consensus Thresholds</h2>
                   <div className="mt-4 grid gap-4 sm:grid-cols-2">
                     <label className="text-sm text-cp-text">
-                      Auto-approve above
+                      Approval threshold (stored, not currently enforced)
                       <input
                         type="number"
                         min={0}
@@ -1569,8 +1569,9 @@ export default function GovernanceDashboard() {
                     </label>
                   </div>
                   <p className="mt-3 text-xs text-cp-text/70">
-                    Runs scoring between these values are auto-approved. Runs below the review threshold go to
-                    the Review Queue.
+                    Automated decisions currently use the review threshold together with the other governance
+                    rules: a run scoring below it goes to the Review Queue. The approval threshold is stored for
+                    compatibility and future policy changes; changing it does not currently change any decision.
                   </p>
                 </section>
 

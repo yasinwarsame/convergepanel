@@ -323,6 +323,8 @@ describe("POST /api/synthesize-panel — adaptive run rejection (Step 6 fix)", (
       const [callArgs] = mockedEvaluateAndStoreGovernance.mock.calls[0];
       expect(callArgs.collection).toBe("runs");
       expect(callArgs.input.runType).toBe("research");
+      // Step 6 D5.1 — the research synthesis path states its score formula.
+      expect(callArgs.input.scoreFamily).toBe("research_synthesis_v1");
     });
 
     it("still writes synthesizedStructuredReport and synthesisConsensusSummary for a genuinely legacy run", async () => {

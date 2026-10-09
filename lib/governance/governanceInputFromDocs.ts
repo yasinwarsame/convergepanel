@@ -113,6 +113,7 @@ export function governanceInputFromResearchRun(data: Record<string, unknown>): G
   }
 
   return {
+    scoreFamily: "research_synthesis_v1",
     consensusScore,
     evidenceQuality: researchEvidenceQuality(data, synthesisSum),
     sourceBacked,
@@ -131,11 +132,16 @@ function modelHealthFromVerificationArrays(data: Record<string, unknown>): Gover
   return { ok: 0, substituted: 0, failed: 0 };
 }
 
-/** Verification document as stored in `verifications` collection. */
+/**
+ * CLAIM verification document as stored in the `verifications` collection.
+ * Video verifications live in `videoVerifications` and are never built here,
+ * which is why the score family is fixed to the claim formula.
+ */
 export function governanceInputFromVerificationDoc(data: Record<string, unknown>): GovernanceInput {
   const verdict = data.verdict as GovernanceInput["verificationVerdict"];
   const eq = data.evidenceQuality as GovernanceInput["evidenceQuality"];
   return {
+    scoreFamily: "claim_verification_v1",
     consensusScore: typeof data.consensusScore === "number" ? data.consensusScore : null,
     evidenceQuality: eq === "strong" || eq === "mixed" || eq === "weak" ? eq : null,
     sourceBacked: typeof data.sourceBacked === "boolean" ? data.sourceBacked : false,
