@@ -24,6 +24,14 @@ const shape = (i: Index) => `${i.collectionGroup}|${i.queryScope}|${i.fields.map
 const WORKSPACE_ALL = "videoVerifications|COLLECTION|workspaceId:ASCENDING,timestamp:DESCENDING";
 const WORKSPACE_PROJECT = "videoVerifications|COLLECTION|workspaceId:ASCENDING,projectId:ASCENDING,timestamp:DESCENDING";
 
+/** Step 6.3 — the four Workspace governance summary indexes on `videoVerifications` (see the probe results doc). */
+const GOVERNANCE_SUMMARY_63 = [
+  "videoVerifications|COLLECTION|governanceStatus:ASCENDING,projectId:ASCENDING,type:ASCENDING,workspaceId:ASCENDING,governanceReviewedAt:ASCENDING",
+  "videoVerifications|COLLECTION|projectId:ASCENDING,type:ASCENDING,workspaceId:ASCENDING,governanceStatus:ASCENDING",
+  "videoVerifications|COLLECTION|projectId:ASCENDING,type:ASCENDING,workspaceId:ASCENDING,governanceReviewedAt:ASCENDING,governanceStatus:ASCENDING",
+  "videoVerifications|COLLECTION|projectId:ASCENDING,type:ASCENDING,workspaceId:ASCENDING,governanceReviewedAt:ASCENDING",
+];
+
 describe("Team Video verification list indexes", () => {
   it("positive control: the existing Team Claim Workspace index is visible", () => {
     expect(indexes.map(shape)).toContain("verifications|COLLECTION|workspaceId:ASCENDING,timestamp:DESCENDING");
@@ -36,9 +44,9 @@ describe("Team Video verification list indexes", () => {
     expect(indexes.map(shape).filter((s) => s === expected)).toHaveLength(1);
   });
 
-  it("exactly two workspaceId indexes on videoVerifications, with no explicit __name__ variant", () => {
+  it("the workspaceId indexes on videoVerifications are exactly the two Team Video ones plus the four 6.3 governance ones, with no explicit __name__ variant", () => {
     const teamVideo = indexes.filter((i) => i.collectionGroup === "videoVerifications" && i.fields.some((f) => f.fieldPath === "workspaceId"));
-    expect(teamVideo.map(shape).sort()).toEqual([WORKSPACE_PROJECT, WORKSPACE_ALL].sort());
+    expect(teamVideo.map(shape).sort()).toEqual([WORKSPACE_PROJECT, WORKSPACE_ALL, ...GOVERNANCE_SUMMARY_63].sort());
     expect(JSON.stringify(teamVideo)).not.toContain("__name__");
   });
 

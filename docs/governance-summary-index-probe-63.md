@@ -108,3 +108,31 @@ The query contains range and inequality filters on multiple fields, please refer
 ```
 9 FAILED_PRECONDITION: The query requires an index. You can create it here: https://console.firebase.google.com/v1/r/project/convergepanel/firestore/indexes?create_composite=Clhwcm9qZWN0cy9jb252ZXJnZXBhbmVsL2RhdGFiYXNlcy8oZGVmYXVsdCkvY29sbGVjdGlvbkdyb3Vwcy92aWRlb1ZlcmlmaWNhdGlvbnMvaW5kZXhlcy9fEAEaDQoJcHJvamVjdElkEAEaCAoEdHlwZRABGg8KC3dvcmtzcGFjZUlkEAEaGAoUZ292ZXJuYW5jZVJldmlld2VkQXQQARoMCghfX25hbWVfXxAB
 ```
+
+## Production creation and post-creation proof (owner-authorized)
+
+- **Re-list before creating.** Production had 32 indexes and none of the 18. A non-vacuity control confirmed the comparison does match an existing index.
+- **Creation.** Each of the 18 was created as its own targeted Firestore Admin v1 `POST`, with no `firebase deploy` and no delete or modify. The feature flag was not set in any Vercel environment.
+- **State.** All 18 reached `READY`. Production now has **50** indexes, and `firestore.indexes.json` holds the identical set: 50 = 50, none only in one, none not READY.
+- **Probe re-run** at `2026-10-09T08:47:13.805Z`, same synthetic Workspace: **68/68 shapes succeeded**. There were 0 missing-index, 0 query-shape and 0 unexpected failures, the probe did not abort, and every count was 0 (no real data). No 19th index was requested.
+
+| # | Production index resource | State |
+|---|---|---|
+| 1 | `collectionGroups/runs/indexes/CICAgNjaxJEK` | READY |
+| 2 | `collectionGroups/runs/indexes/CICAgPj-pYIK` | READY |
+| 3 | `collectionGroups/runs/indexes/CICAgPigw5IK` | READY |
+| 4 | `collectionGroups/runs/indexes/CICAgPigw5IJ` | READY |
+| 5 | `collectionGroups/runs/indexes/CICAgLjy1YQK` | READY |
+| 6 | `collectionGroups/runs/indexes/CICAgNirk5QK` | READY |
+| 7 | `collectionGroups/runs/indexes/CICAgJjm4YQK` | READY |
+| 8 | `collectionGroups/runs/indexes/CICAgLiTpokK` | READY |
+| 9 | `collectionGroups/runs/indexes/CICAgPi9lIEK` | READY |
+| 10 | `collectionGroups/runs/indexes/CICAgPi9ipAK` | READY |
+| 11 | `collectionGroups/verifications/indexes/CICAgNir940K` | READY |
+| 12 | `collectionGroups/verifications/indexes/CICAgNjp84oK` | READY |
+| 13 | `collectionGroups/verifications/indexes/CICAgJjmtZUK` | READY |
+| 14 | `collectionGroups/verifications/indexes/CICAgNjpr5sK` | READY |
+| 15 | `collectionGroups/videoVerifications/indexes/CICAgPi97okK` | READY |
+| 16 | `collectionGroups/videoVerifications/indexes/CICAgPiftYMK` | READY |
+| 17 | `collectionGroups/videoVerifications/indexes/CICAgLjyi5UK` | READY |
+| 18 | `collectionGroups/videoVerifications/indexes/CICAgPi9-ZgK` | READY |

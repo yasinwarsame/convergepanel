@@ -188,6 +188,14 @@ describe("no server or index file was reopened", () => {
     expect(shapes).toContain("workspaceId:ASCENDING,timestamp:DESCENDING");
     expect(shapes).toContain("workspaceId:ASCENDING,projectId:ASCENDING,timestamp:DESCENDING");
     expect(shapes).toContain("FileName:ASCENDING,userId:ASCENDING,timestamp:DESCENDING");
-    expect(shapes).toHaveLength(5);
+    // + the four Step 6.3 Workspace governance summary indexes (probe-derived), pinned literally.
+    for (const s of [
+      "governanceStatus:ASCENDING,projectId:ASCENDING,type:ASCENDING,workspaceId:ASCENDING,governanceReviewedAt:ASCENDING",
+      "projectId:ASCENDING,type:ASCENDING,workspaceId:ASCENDING,governanceStatus:ASCENDING",
+      "projectId:ASCENDING,type:ASCENDING,workspaceId:ASCENDING,governanceReviewedAt:ASCENDING,governanceStatus:ASCENDING",
+      "projectId:ASCENDING,type:ASCENDING,workspaceId:ASCENDING,governanceReviewedAt:ASCENDING",
+    ])
+      expect(shapes).toContain(s);
+    expect(shapes).toHaveLength(9);
   });
 });
