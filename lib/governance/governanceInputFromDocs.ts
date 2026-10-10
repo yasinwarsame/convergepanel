@@ -90,6 +90,9 @@ export function researchEvidenceQualityFromRunDoc(data: Record<string, unknown>)
   const support = detail.aggregateSupportRatio;
   if (typeof low !== "number" || !Number.isInteger(low) || low < 0) return null;
   if (typeof support !== "number" || !Number.isFinite(support) || support < 0 || support > 1) return null;
+  // The real writer counts lowEvidenceClaims over the very keyFindings array it
+  // persists as the report, so a larger count is an impossible document: reject it.
+  if (low > report.keyFindings.length) return null;
   return deriveSynthesisEvidenceQuality({ lowEvidenceClaims: low, aggregateSupportRatio: support }, report.keyFindings.length);
 }
 

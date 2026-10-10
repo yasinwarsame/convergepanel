@@ -171,6 +171,8 @@ describe("historical and malformed run shapes (source precedence)", () => {
     ["INSUFFICIENT: non-integer lowEvidenceClaims → null", { synthesisConsensusSummary: { ...detail, lowEvidenceClaims: 1.5 }, synthesizedStructuredReport: report }, null],
     ["INSUFFICIENT: support out of range → null", { synthesisConsensusSummary: { ...detail, aggregateSupportRatio: 1.2 }, synthesizedStructuredReport: report }, null],
     ["INSUFFICIENT: nothing at all → null", {}, null],
+    ["MALFORMED: lowEvidenceClaims exceeds keyFindings (3 of 2) → null", { synthesisConsensusSummary: { ...detail, lowEvidenceClaims: 3 }, synthesizedStructuredReport: report }, null],
+    ["MALFORMED: positive low count with zero keyFindings → null", { synthesisConsensusSummary: { ...detail, lowEvidenceClaims: 1 }, synthesizedStructuredReport: { keyFindings: [] } }, null],
     ["MALFORMED policy summary → reconstructed", { policyConsensusSummary: { evidenceQuality: "excellent" }, synthesisConsensusSummary: detail, synthesizedStructuredReport: report }, "weak"],
     ["MALFORMED policy summary, nothing to reconstruct → null", { policyConsensusSummary: { evidenceQuality: 7 } }, null],
     ["CONFLICT: policy summary wins over a top-level consensusSummary", { policyConsensusSummary: { evidenceQuality: "strong" }, consensusSummary: { evidenceQuality: "weak" }, synthesisConsensusSummary: detail, synthesizedStructuredReport: report }, "strong"],
