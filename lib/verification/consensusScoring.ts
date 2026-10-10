@@ -246,6 +246,32 @@ function perClaimConfidenceLabel(
   return "Low";
 }
 
+/**
+ * THE research-synthesis evidence-quality rule — the single definition used by
+ * the policy rollup (Team policy input) and by System A research governance
+ * (via `governanceInputFromResearchRun`). Behaviour is exactly the rule the
+ * rollup has applied since it was introduced:
+ *
+ * - strong: no low-evidence key findings AND aggregate support ≥ 0.75;
+ * - weak:   low-evidence findings ≥ half of the key findings (denominator
+ *           floored at 1) OR aggregate support < 0.45;
+ * - mixed:  otherwise.
+ *
+ * `aggregateSupportRatio` is the value persisted in the synthesis detail (the
+ * mean per-finding support, rounded to 3 dp), so a persisted run reproduces
+ * the classification exactly.
+ */
+export function deriveSynthesisEvidenceQuality(
+  detail: Pick<SynthesisConsensusSummaryDetail, "lowEvidenceClaims" | "aggregateSupportRatio">,
+  keyFindingCount: number
+): "strong" | "mixed" | "weak" {
+  const { lowEvidenceClaims, aggregateSupportRatio } = detail;
+  const denom = Math.max(1, keyFindingCount);
+  if (lowEvidenceClaims === 0 && aggregateSupportRatio >= 0.75) return "strong";
+  if (lowEvidenceClaims >= denom * 0.5 || aggregateSupportRatio < 0.45) return "weak";
+  return "mixed";
+}
+
 export function rollupPolicyConsensusSummary(
   detail: SynthesisConsensusSummaryDetail,
   keyFindingCount: number
@@ -257,10 +283,7 @@ export function rollupPolicyConsensusSummary(
   } else if (overallConsensusScore < 45 || modelsHealthy < Math.ceil(modelCount * 0.4)) {
     confidenceLabel = "Low";
   }
-  let evidenceQuality: "strong" | "mixed" | "weak" = "mixed";
-  const denom = Math.max(1, keyFindingCount);
-  if (lowEvidenceClaims === 0 && aggregateSupportRatio >= 0.75) evidenceQuality = "strong";
-  else if (lowEvidenceClaims >= denom * 0.5 || aggregateSupportRatio < 0.45) evidenceQuality = "weak";
+  const evidenceQuality = deriveSynthesisEvidenceQuality(detail, keyFindingCount);
 
   return {
     overallConsensusScore,

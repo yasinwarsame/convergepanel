@@ -3,6 +3,7 @@
  */
 
 import type { GovernanceInput } from "./evaluateGovernance";
+import { deriveSynthesisEvidenceQuality } from "@/lib/verification/consensusScoring";
 
 function modelHealthFromPerModel(perModel: unknown): GovernanceInput["modelHealth"] {
   let ok = 0;
@@ -50,28 +51,46 @@ export function researchConsensusScoreFromRunDoc(data: Record<string, unknown>):
   return null;
 }
 
-function evidenceQualityFromSynthesisSummary(sum: Record<string, unknown> | undefined): GovernanceInput["evidenceQuality"] {
-  if (!sum) return null;
-  const low = Number(sum.lowEvidenceClaims ?? 0);
-  const high = Number(sum.highConfidenceClaims ?? 0);
-  const modelCount = Math.max(1, Number(sum.modelCount ?? 1));
-  if (low >= modelCount * 0.5) return "weak";
-  if (low === 0 && high > 0) return "strong";
-  return "mixed";
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function researchEvidenceQuality(
-  data: Record<string, unknown>,
-  synthesisSum: Record<string, unknown> | undefined
-): GovernanceInput["evidenceQuality"] {
-  const blobs = [data.consensusSummary, data.synthesisConsensusSummary, data.policyConsensusSummary];
-  for (const p of blobs) {
-    if (p && typeof p === "object") {
-      const eq = (p as { evidenceQuality?: unknown }).evidenceQuality;
-      if (eq === "strong" || eq === "mixed" || eq === "weak") return eq;
-    }
-  }
-  return evidenceQualityFromSynthesisSummary(synthesisSum);
+function isEvidenceQuality(value: unknown): value is "strong" | "mixed" | "weak" {
+  return value === "strong" || value === "mixed" || value === "weak";
+}
+
+/**
+ * Research evidence quality for System A — the CANONICAL synthesis rule only
+ * (`deriveSynthesisEvidenceQuality`, the same rule behind the Team policy
+ * summary). Source precedence:
+ *
+ * A. `policyConsensusSummary.evidenceQuality` — persisted by
+ *    /api/synthesize-panel from the very `computeSynthesisConsensusScoring()`
+ *    call that produced the synthesis (runs synthesized after this change).
+ * B. Otherwise, re-derive it with the same function from the persisted facts it
+ *    was computed from: `synthesisConsensusSummary.lowEvidenceClaims` /
+ *    `.aggregateSupportRatio` and the persisted report's key-finding count.
+ *    Every run System A ever evaluated stores these (all three were introduced
+ *    together with System A), so this reproduces the canonical value exactly.
+ * C. Otherwise `null` — nothing is guessed.
+ *
+ * Deliberately NOT consulted: a top-level `consensusSummary.evidenceQuality`
+ * (no writer has ever persisted one on a research run, so its semantics are
+ * unknown) and the former model-count / high-confidence fallback, which
+ * classified the same synthesis differently from the Team policy summary.
+ */
+export function researchEvidenceQualityFromRunDoc(data: Record<string, unknown>): GovernanceInput["evidenceQuality"] {
+  const policy = data.policyConsensusSummary;
+  if (isPlainObject(policy) && isEvidenceQuality(policy.evidenceQuality)) return policy.evidenceQuality;
+
+  const detail = data.synthesisConsensusSummary;
+  const report = data.synthesizedStructuredReport;
+  if (!isPlainObject(detail) || !isPlainObject(report) || !Array.isArray(report.keyFindings)) return null;
+  const low = detail.lowEvidenceClaims;
+  const support = detail.aggregateSupportRatio;
+  if (typeof low !== "number" || !Number.isInteger(low) || low < 0) return null;
+  if (typeof support !== "number" || !Number.isFinite(support) || support < 0 || support > 1) return null;
+  return deriveSynthesisEvidenceQuality({ lowEvidenceClaims: low, aggregateSupportRatio: support }, report.keyFindings.length);
 }
 
 function sourceBackedAndMissingFromReport(report: unknown): { sourceBacked: boolean; missingSourcesCount: number } {
@@ -94,7 +113,6 @@ function sourceBackedAndMissingFromReport(report: unknown): { sourceBacked: bool
 
 /** Research run document as returned by Firestore. */
 export function governanceInputFromResearchRun(data: Record<string, unknown>): GovernanceInput {
-  const synthesisSum = data.synthesisConsensusSummary as Record<string, unknown> | undefined;
   const consensusScore = researchConsensusScoreFromRunDoc(data);
   const report = data.synthesizedStructuredReport;
 
@@ -115,7 +133,7 @@ export function governanceInputFromResearchRun(data: Record<string, unknown>): G
   return {
     scoreFamily: "research_synthesis_v1",
     consensusScore,
-    evidenceQuality: researchEvidenceQuality(data, synthesisSum),
+    evidenceQuality: researchEvidenceQualityFromRunDoc(data),
     sourceBacked,
     missingSourcesCount,
     modelHealth: modelHealthFromRunData(data),

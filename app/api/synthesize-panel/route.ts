@@ -2187,6 +2187,10 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
           synthesizedBy: synthesisProvider === "anthropic" ? CLAUDE_SYNTHESIS_MODEL : model,
           synthesisInputHash: inputHash || null, // Store input hash for cache validation
           synthesisConsensusSummary: synthesisConsensusDetail,
+          // The canonical policy rollup from the SAME scoring call: System A
+          // reads its evidenceQuality, so research governance and the Team
+          // policy pipeline classify this synthesis identically.
+          policyConsensusSummary,
           synthesisConsensusAudit: synthesisAuditBundle,
           synthesisMetadata: {
             inputSizeChars: inputSizeChars || 0,
