@@ -154,6 +154,14 @@ export const ADAPTIVE_RESEARCH_EXPORT_ENABLED = process.env.ADAPTIVE_RESEARCH_EX
 export const WORKSPACE_GOVERNANCE_SUMMARY_ENABLED = process.env.WORKSPACE_GOVERNANCE_SUMMARY_ENABLED === "true";
 
 /**
+ * Order 3 — Workspace review integrity metrics (adaptive Research review states
+ * and decision paths). Default OFF; server-only. While off, neither the API
+ * route nor the audit-page section runs a single Firestore operation, so the
+ * code can merge before the Production index probe is separately authorized.
+ */
+export const WORKSPACE_REVIEW_INTEGRITY_METRICS_ENABLED = process.env.WORKSPACE_REVIEW_INTEGRITY_METRICS_ENABLED === "true";
+
+/**
  * Step 6 D5.2A — gates ONLY mutation of the governance policy's score-type
  * review thresholds (`scoreFamilyReviewThresholds`). Default OFF.
  *

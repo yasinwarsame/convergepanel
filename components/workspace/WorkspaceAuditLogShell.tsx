@@ -25,6 +25,7 @@ import { fetchWorkspaceAuditEvents, type WorkspaceAuditEventItem, type Workspace
 import ReviewErrorState from "@/components/teamGovernance/ReviewErrorState";
 import WorkspaceNav from "@/components/workspace/WorkspaceNav";
 import WorkspaceGovernanceSummary from "@/components/workspace/WorkspaceGovernanceSummary";
+import WorkspaceReviewIntegrityMetrics from "@/components/workspace/WorkspaceReviewIntegrityMetrics";
 import { Breadcrumb } from "@/components/shared/Breadcrumb";
 
 const ROLE_LABEL: Record<WorkspaceAuditPreviousRole, string> = { admin: "Admin", member: "Member", reviewer: "Reviewer", viewer: "Viewer" };
@@ -40,6 +41,7 @@ export default function WorkspaceAuditLogShell({
   workspaceName,
   canReadMembers,
   showGovernanceSummary = false,
+  showReviewIntegrityMetrics = false,
 }: {
   workspaceId: string;
   workspaceName: string;
@@ -47,6 +49,8 @@ export default function WorkspaceAuditLogShell({
   canReadMembers: boolean;
   /** Step 6.3 — set by the server page only when the release flag is on (the page is already `audit.read`-gated). */
   showGovernanceSummary?: boolean;
+  /** Order 3 — same pattern: false (the default) means the section is not mounted, so no request is made. */
+  showReviewIntegrityMetrics?: boolean;
 }) {
   const { user, authReady } = useAuth();
 
@@ -113,6 +117,7 @@ export default function WorkspaceAuditLogShell({
 
       <WorkspaceNav workspaceId={workspaceId} active="audit" showMembers={canReadMembers} showAudit />
       {showGovernanceSummary && <WorkspaceGovernanceSummary workspaceId={workspaceId} />}
+      {showReviewIntegrityMetrics && <WorkspaceReviewIntegrityMetrics workspaceId={workspaceId} />}
 
       {status === "loading" && (
         <div role="status" className="rounded-xl border border-cp-border bg-cp-surface px-6 py-10 text-center text-sm text-cp-muted shadow-sm">
