@@ -3912,10 +3912,10 @@ describe("governance-event `.add()` write sites — derived from the repository 
     const sites = countGovernanceEventAddSites();
     expect(sites).toEqual([
       "app/api/governance/review/route.ts:373",
-      "lib/firestore/runs.ts:748",
+      "lib/firestore/runs.ts:760",
       "lib/governance/evaluateAndStore.ts:88",
       "lib/governance/governanceBackfill.ts:63",
-      "lib/firestore/runs.ts:990",
+      "lib/firestore/runs.ts:1002",
     ].sort());
     expect(`addSiteCount:${sites.length}`).toBe("addSiteCount:5");
   });

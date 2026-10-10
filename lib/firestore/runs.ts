@@ -18,6 +18,7 @@
  *   - completionTokensByProvider?: { [providerKey]: number }
  */
 
+import { persistableQuestionContext } from "@/lib/questionContext";
 import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
 import { ModelResult } from "@/lib/types";
@@ -78,6 +79,12 @@ import { runIsLegacyOnlyForReviewMutation } from "@/lib/governance/legacyReviewR
 
 export interface PanelRun {
   userId: string;
+  /**
+   * F2/R1 — the server-split "Context:" section of the research input (see
+   * lib/questionContext.ts). Server-written once at creation; absent when the
+   * input had no context and on every run created before this field existed.
+   */
+  questionContext?: string;
   /**
    * Workspace-Aware Writes for New Personal Adaptive Runs, Phase 3 — the
    * deterministic `personal-{uid}` id of the owning user's Personal
@@ -159,17 +166,22 @@ export async function createRun(
   question: string,
   selectedModels: string[],
   workspaceId?: string,
-  projectId?: null
+  projectId?: null,
+  questionContext?: string
 ): Promise<void> {
   if (!adminDb) {
     throw new Error("Firestore is not available");
   }
 
+  const persistedContext = persistableQuestionContext(questionContext);
   const runData: Partial<PanelRun> = {
     userId,
     workspaceId,
     projectId,
     question,
+    // F2/R1 — the server-split "Context:" material, in the SAME initial write;
+    // read back only by the authoritative synthesis input extractor.
+    ...(persistedContext ? { questionContext: persistedContext } : {}),
     selectedModels,
     status: "running",
     createdAt: Timestamp.now(),

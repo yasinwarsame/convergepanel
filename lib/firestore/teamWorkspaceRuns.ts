@@ -33,6 +33,7 @@
  * on those already-shipped endpoints.
  */
 
+import { persistableQuestionContext } from "@/lib/questionContext";
 import "server-only";
 import { randomUUID } from "crypto";
 import { Timestamp } from "firebase-admin/firestore";
@@ -86,6 +87,8 @@ export async function createTeamWorkspaceRun(args: {
   uid: string;
   workspaceId: string;
   question: string;
+  /** F2/R1 — the server-split "Context:" material; persisted in the same create. */
+  questionContext?: string;
   selectedModels: ModelId[];
   projectId: string | null;
 }): Promise<CreateTeamWorkspaceRunResult> {
@@ -150,12 +153,14 @@ export async function createTeamWorkspaceRun(args: {
       }
 
       const now = Timestamp.now();
+      const persistedContext = persistableQuestionContext(args.questionContext);
       tx.create(runRef, {
         userId: args.uid,
         workspaceId: args.workspaceId,
         // ALWAYS present — see this module's header comment.
         projectId: args.projectId,
         question: args.question,
+        ...(persistedContext ? { questionContext: persistedContext } : {}),
         selectedModels: args.selectedModels,
         status: "running",
         createdAt: now,

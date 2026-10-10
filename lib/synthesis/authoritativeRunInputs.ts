@@ -12,8 +12,11 @@
  * Persisted shapes (characterized against the writers):
  * - question: `runDocument.question` (written by `completeRun`, the same
  *   trimmed question the models answered), else the top-level `question`
- *   (`createRun` / `createTeamWorkspaceRun`). Neither carries the optional
- *   "Context:" block, which is not persisted anywhere.
+ *   (`createRun` / `createTeamWorkspaceRun`), followed by the top-level
+ *   `questionContext` when the run persisted one (R1: the server-split
+ *   "Context:" material the models also received). Runs created before R1
+ *   have no `questionContext` and synthesize from the question alone — what
+ *   a reloaded saved run always sent.
  * - model output: `runDocument.perModel[]` rows — `{ modelId, status,
  *   rawTextTruncated, provider?, requestedModel?, substitutedFrom? }`, one per
  *   selected model, written by `completeRun` since the initial commit. No other
@@ -24,6 +27,8 @@
  * Pure: no I/O. Never reads anything the caller supplied.
  */
 import { isUsableResult } from "@/lib/panel/publicize";
+import { composeSynthesisQuestion } from "@/lib/questionContext";
+import { MAX_QUESTION_LENGTH } from "@/lib/security/requestValidation";
 
 export type AuthoritativeModelRow = {
   modelId: string;
@@ -62,6 +67,9 @@ export function authoritativeSynthesisInputs(run: Record<string, unknown>): Auth
       ? run.question.trim()
       : null;
   if (question === null) return { ok: false, reason: "question_unavailable" };
+  // Only a server-written context within the request contract's own bound is honoured.
+  const questionContext =
+    nonEmptyString(run.questionContext) && run.questionContext.length <= MAX_QUESTION_LENGTH ? run.questionContext.trim() : undefined;
 
   if (!runDocument || !Array.isArray(runDocument.perModel)) return { ok: false, reason: "results_unavailable" };
 
@@ -87,5 +95,5 @@ export function authoritativeSynthesisInputs(run: Record<string, unknown>): Auth
     });
   }
   if (rows.length < MIN_AUTHORITATIVE_SYNTHESIS_ROWS) return { ok: false, reason: "insufficient_results" };
-  return { ok: true, value: { question, rows } };
+  return { ok: true, value: { question: composeSynthesisQuestion(question, questionContext), rows } };
 }

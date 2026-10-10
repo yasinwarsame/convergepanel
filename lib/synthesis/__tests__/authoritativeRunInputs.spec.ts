@@ -68,3 +68,22 @@ describe("Personal / Team shapes", () => {
     expect(team).toEqual(personal);
   });
 });
+
+describe("R1 — persisted questionContext", () => {
+  const rows = [row("a"), row("b")];
+  it("question + saved context, in that order", () => {
+    const out = authoritativeSynthesisInputs(run(rows, { questionContext: "Context:\nSOURCE TEXT" }));
+    expect(out.ok && out.value.question).toBe("Completed Q\n\nContext:\nSOURCE TEXT");
+  });
+  it.each([["absent", undefined], ["empty", "   "], ["non-string", 42], ["over the 10,000-char contract", "x".repeat(10001)]])(
+    "%s context → question alone",
+    (_l, questionContext) => {
+      const out = authoritativeSynthesisInputs(run(rows, questionContext === undefined ? {} : { questionContext }));
+      expect(out.ok && out.value.question).toBe("Completed Q");
+    }
+  );
+  it("a context inside runDocument (not the server field) is not read", () => {
+    const out = authoritativeSynthesisInputs({ question: "Q", runDocument: { question: "Q", questionContext: "Context:\nX", perModel: rows } });
+    expect(out.ok && out.value.question).toBe("Q");
+  });
+});

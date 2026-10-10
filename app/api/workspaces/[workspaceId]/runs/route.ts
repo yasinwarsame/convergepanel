@@ -390,6 +390,7 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
       uid,
       workspaceId,
       question: trimmedQuestion,
+      questionContext: context ?? undefined,
       selectedModels: selectedModels as ModelId[],
       projectId: targetProjectId,
     });

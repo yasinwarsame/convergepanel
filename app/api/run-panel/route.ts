@@ -477,7 +477,7 @@ export async function POST(req: NextRequest) {
     // established "run creation is for tracking, not critical for
     // execution" degradation for any other createRun() failure.
     try {
-      await createRun(runId, uid, trimmedQuestion, selectedModels, workspaceIdForRun, projectIdForRun);
+      await createRun(runId, uid, trimmedQuestion, selectedModels, workspaceIdForRun, projectIdForRun, context ?? undefined);
     } catch (runError: any) {
       // Log but don't fail - run creation is for tracking, not critical for execution
       logger.error("[run-panel] Failed to create run record", { error: runError });

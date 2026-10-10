@@ -155,3 +155,21 @@ describe("F1 — distinct model ids (Personal Research)", () => {
     expect(mockedRunPanel.mock.calls[0][1]).toEqual(["chatgpt", "claude"]);
   });
 });
+
+describe("F2/R1 — the Personal route persists the server-split context", () => {
+  afterEach(() => jest.clearAllMocks());
+  it("createRun receives the stripped question and the split 'Context:' material; execution input is unchanged", async () => {
+    const raw = "What does Clause 7 require?\nContext:\nCLAUSE-7-TEXT: notify within five business days.";
+    await POST(new NextRequest("http://localhost/api/run-panel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: raw, selectedModels: ["chatgpt", "claude"] }) }));
+    expect(mockedCreateRun).toHaveBeenCalledTimes(1);
+    expect(mockedCreateRun.mock.calls[0][2]).toBe("What does Clause 7 require?");
+    expect(mockedCreateRun.mock.calls[0][6]).toBe("Context:\nCLAUSE-7-TEXT: notify within five business days.");
+    // the models still receive question + context exactly as before
+    expect(mockedRunPanel.mock.calls[0][0]).toBe("What does Clause 7 require?");
+    expect(mockedRunPanel.mock.calls[0][3]).toBe("Context:\nCLAUSE-7-TEXT: notify within five business days.");
+  });
+  it("no context → createRun receives undefined for it", async () => {
+    await POST(new NextRequest("http://localhost/api/run-panel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: "What is the capital of Kenya?", selectedModels: ["chatgpt", "claude"] }) }));
+    expect(mockedCreateRun.mock.calls[0][6]).toBeUndefined();
+  });
+});

@@ -754,3 +754,20 @@ describe("F1 — distinct model ids (Team Research)", () => {
     expect(mockedExecuteOrdinaryRun.mock.calls[0][0]).toEqual(expect.objectContaining({ selectedModels: ["claude", "chatgpt"] }));
   });
 });
+
+describe("F2/R1 — the Team route persists the server-split context", () => {
+  it("createTeamWorkspaceRun receives the stripped question and questionContext; execution input unchanged", async () => {
+    mockedCreateTeamWorkspaceRun.mockResolvedValueOnce({ status: "created", runId: "run-r1", workspaceId: WS_ID, projectId: null });
+    mockedExecuteOrdinaryRun.mockResolvedValueOnce({ status: 200, body: { ok: true, results: [], runId: "run-r1" } });
+    const raw = "What does Clause 7 require?\nContext:\nCLAUSE-7-TEXT: notify within five business days.";
+    await POST(buildPostRequest(buildPostBody({ question: raw })), { params: { workspaceId: WS_ID } });
+    expect(mockedCreateTeamWorkspaceRun.mock.calls[0][0]).toEqual(expect.objectContaining({
+      question: "What does Clause 7 require?",
+      questionContext: "Context:\nCLAUSE-7-TEXT: notify within five business days.",
+    }));
+    expect(mockedExecuteOrdinaryRun.mock.calls[0][0]).toEqual(expect.objectContaining({
+      trimmedQuestion: "What does Clause 7 require?",
+      context: "Context:\nCLAUSE-7-TEXT: notify within five business days.",
+    }));
+  });
+});
