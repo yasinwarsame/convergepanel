@@ -72,6 +72,7 @@ import { sanitizeModelText, truncateForSynthesis, MAX_CHARS_SYNTHESIS_PER_MODEL 
 import { compressModelResponse, compressClusters, computeInputHash } from "@/lib/synthesis/compressInput";
 import { buildEvidencePack } from "@/lib/synthesis/buildEvidencePack";
 import { authoritativeSynthesisInputs } from "@/lib/synthesis/authoritativeRunInputs";
+import { isPathSafeRunId, resolveSynthesisRunAccess, SYNTHESIS_RUN_FORBIDDEN, SYNTHESIS_RUN_UNAVAILABLE } from "@/lib/synthesis/synthesisRunAccess";
 import { synthesizeReport } from "@/lib/consensus";
 import type { ModelResult } from "@/lib/types";
 import { logger, redact } from "@/lib/logger";
@@ -80,7 +81,6 @@ import type { UserProfile } from "@/lib/types";
 import { evaluateAndStoreGovernance } from "@/lib/governance/evaluateAndStore";
 import { governanceInputFromResearchRun } from "@/lib/governance/governanceInputFromDocs";
 import { parsePersistedAdaptiveOutput } from "@/lib/adaptiveSchema/persistedOutput";
-import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
 import { resolveInFlightDisclosureGate } from "@/lib/synthesis/inFlightDisclosureGate";
 import {
   applyTeamGovernancePipeline,
@@ -307,83 +307,41 @@ export async function GET(req: NextRequest) {
   }
   const uid = identityForGet.uid;
 
-  // Verify ownership
-  if (adminDb) {
-    try {
-      const runDoc = await adminDb.collection("runs").doc(runId).get();
-      if (runDoc.exists) {
-        const runData = runDoc.data() as Record<string, unknown>;
-        const runUserId = runData?.userId;
-        if (runUserId !== undefined && runUserId !== uid) {
-          return NextResponse.json(
-            createErrorResponse(
-              ERROR_CODES.FORBIDDEN,
-              "You don't have access to this run.",
-              requestId
-            ),
-            { status: 403 }
-          );
-        }
-
-        // Phase 4B — Mandatory Workspace Integrity, requester-independent,
-        // before any cached content is disclosed below. A run with no
-        // workspaceId is unaffected (zero lookup); a bound-invalid run
-        // denies unconditionally, even for its own owner.
-        const integrity = await validateRunWorkspaceAssociation(runData);
-        if (integrity.classification === "invalid") {
-          logger.warn(`[${requestId}] [synthesize-panel GET] workspace_run_integrity_failed`, { requestId, runId, reason: integrity.reason });
-          return NextResponse.json(
-            createErrorResponse(ERROR_CODES.FORBIDDEN, "You don't have access to this run.", requestId),
-            { status: 403 }
-          );
-        }
-      }
-    } catch (ownershipError: any) {
-      console.error("[synthesize-panel] Ownership check failed, denying access:", ownershipError);
-      return NextResponse.json(
-        createErrorResponse(ERROR_CODES.FORBIDDEN, "Could not verify access to this run.", requestId),
-        { status: 403 }
-      );
-    }
+  // SYNTHESIS_LEGACY_OWNERSHIP_HARDENING — ONE read, positive ownership and
+  // Workspace integrity first; cached content is inspected only on the run
+  // data that check returned. Every denial (malformed runId, missing run,
+  // missing/non-string/foreign owner, invalid Workspace binding) is the same
+  // concealed 403, so the 404 below can only ever mean "you own this run and
+  // it has no cached synthesis" — never an existence probe.
+  const access = await resolveSynthesisRunAccess(runId, uid);
+  if (access.outcome !== "authorized") {
+    const denial = access.outcome === "unavailable" ? SYNTHESIS_RUN_UNAVAILABLE : SYNTHESIS_RUN_FORBIDDEN;
+    logger.warn(`[${requestId}] [synthesize-panel GET] Run access denied`, { requestId, reason: access.reason });
+    return NextResponse.json(createErrorResponse(denial.errorCode, denial.message, requestId), { status: denial.status });
   }
 
-  // Check cache
-  if (adminDb) {
-    try {
-      const runDoc = await adminDb.collection("runs").doc(runId).get();
-      if (runDoc.exists) {
-        const data = runDoc.data();
-        if (data?.synthesizedStructuredReport && data?.schemaVersion === 1) {
-          logger.info(`[${requestId}] [synthesize-panel GET] Cache hit`, {
-            elapsed: Date.now() - startTime,
-            runId,
-            requestId,
-          });
-          const gov = governanceFromRunDoc(data);
-          return NextResponse.json(
-            mergeGovernanceIntoBody(
-              {
-                ok: true,
-                report: data.synthesizedStructuredReport,
-                schemaVersion: 1,
-                synthesizedBy: data.synthesizedBy || "gpt-5.1",
-                cached: true,
-                ...(data?.synthesisConsensusSummary
-                  ? { consensusSummary: data.synthesisConsensusSummary }
-                  : {}),
-                ...(data?.synthesisConsensusAudit ? { auditBundle: data.synthesisConsensusAudit } : {}),
-              },
-              gov
-            )
-          );
-        }
-      }
-    } catch (cacheError: any) {
-      logger.warn(`[${requestId}] [synthesize-panel GET] Cache check failed`, { 
-        requestId,
-        error: cacheError?.message 
-      });
-    }
+  const data = access.runData;
+  if (data.synthesizedStructuredReport && data.schemaVersion === 1) {
+    logger.info(`[${requestId}] [synthesize-panel GET] Cache hit`, {
+      elapsed: Date.now() - startTime,
+      runId,
+      requestId,
+    });
+    const gov = governanceFromRunDoc(data);
+    return NextResponse.json(
+      mergeGovernanceIntoBody(
+        {
+          ok: true,
+          report: data.synthesizedStructuredReport,
+          schemaVersion: 1,
+          synthesizedBy: data.synthesizedBy || "gpt-5.1",
+          cached: true,
+          ...(data.synthesisConsensusSummary ? { consensusSummary: data.synthesisConsensusSummary } : {}),
+          ...(data.synthesisConsensusAudit ? { auditBundle: data.synthesisConsensusAudit } : {}),
+        },
+        gov
+      )
+    );
   }
 
   // Cache miss - return 404 so client can generate
@@ -528,6 +486,26 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // SYNTHESIS_LEGACY_OWNERSHIP_HARDENING — a synthesis is always for a real,
+  // owned run, so the runId is checked HERE, before the in-flight map, the
+  // dedupe key or any Firestore path is touched. Absent / non-string / empty
+  // → the established invalid-request 400 (no requestId-keyed generation can
+  // follow). A slash-containing id would address a nested Firestore document
+  // → the same concealed 403 as any other denied run, with no lookup at all.
+  if (typeof runId !== "string" || runId.trim().length === 0) {
+    return NextResponse.json(
+      createErrorResponse(ERROR_CODES.BAD_REQUEST, "Invalid synthesis request: runId is required and must be a non-empty string", requestId),
+      { status: 400 }
+    );
+  }
+  if (!isPathSafeRunId(runId)) {
+    logger.warn(`[${requestId}] [synthesize-panel] Run access denied`, { requestId, reason: "malformed_run_id" });
+    return NextResponse.json(
+      createErrorResponse(SYNTHESIS_RUN_FORBIDDEN.errorCode, SYNTHESIS_RUN_FORBIDDEN.message, requestId),
+      { status: SYNTHESIS_RUN_FORBIDDEN.status }
+    );
+  }
+
   // If we have a runId and a request is already in flight, check cache then await existing promise and clone response
   if (runId) {
     const existing = inFlightSynthesis.get(runId);
@@ -646,131 +624,23 @@ export async function POST(req: NextRequest) {
     // This ensures we use the same runId throughout the handler
 
     // ============================================
-    // OWNERSHIP VERIFICATION (Security Hardening)
+    // OWNERSHIP VERIFICATION (SYNTHESIS_LEGACY_OWNERSHIP_HARDENING)
     // ============================================
-    // Verify the user owns the run they're trying to synthesize
-    // Use runId from body (already parsed above)
-    // `runLookupStatus` and `runDataForAdaptiveCheck` are hoisted so the
-    // adaptive-run check below (Query-Routing Redesign, Phase 2A, Step 6)
-    // can reuse this SAME document read rather than issuing a second
-    // Firestore read for the same run, and so the two genuinely different
-    // "no data" cases stay distinguishable:
-    //   - "not_found": the run document doesn't exist. Not a read failure —
-    //     the read succeeded and found nothing. Has no adaptiveOutput field
-    //     by construction, so the adaptive check below treats this exactly
-    //     like a run that exists but lacks the field — continue as legacy.
-    //   - "read_failed": the read itself threw, OR runId is present but
-    //     Firestore isn't configured at all. Whether this run has a
-    //     persisted adaptiveOutput could not be determined — the adaptive
-    //     check below fails CLOSED for this state (Step 6, post-review
-    //     correction — see docs/governance-decision-receipts-design.md §16a).
-    // "not_attempted" (no runId at all — nothing to look up) is left out of
-    // this distinction entirely: it isn't a lookup failure, just the
-    // absence of a run reference, so it continues exactly as it always has.
-    let runLookupStatus: "found" | "not_found" | "read_failed" | "not_attempted" = "not_attempted";
-    let runDataForAdaptiveCheck: Record<string, unknown> | undefined;
-    if (runId && adminDb) {
-      try {
-        const runDoc = await adminDb.collection("runs").doc(runId).get();
-        if (runDoc.exists) {
-          const runData = runDoc.data();
-          runDataForAdaptiveCheck = runData;
-          runLookupStatus = "found";
-          const runUserId = runData?.userId;
-
-          // Backward compatibility: if no userId exists in run doc, allow access for now
-          // (old runs may not have userId field)
-          // But log it for monitoring
-          if (runUserId !== undefined && runUserId !== uid) {
-            logger.warn(`[${requestId}] [synthesize-panel] Ownership check failed`, {
-              requestId,
-              runId,
-              runUserId: redact({ uid: runUserId }).uid,
-              requestUserId: redact({ uid }).uid,
-            });
-            return NextResponse.json(
-              createErrorResponse(
-                ERROR_CODES.FORBIDDEN,
-                "You don't have access to this run.",
-                requestId
-              ),
-              { status: 403 }
-            );
-          }
-
-          if (!runUserId) {
-            // Log missing userId for monitoring (old runs)
-            logger.debug(`[${requestId}] [synthesize-panel] Run has no userId field (old run), allowing access`, { requestId, runId });
-          }
-
-          // Phase 4B — Mandatory Workspace Integrity, requester-independent,
-          // before synthesis generation/disclosure proceeds. Only Legacy-
-          // family adaptive runs (and plain Deep Research runs) can reach
-          // this point — Milestone-2 adaptive runs are rejected below — but
-          // Legacy-family runs ARE eligible for Workspace binding under
-          // Phase 3, so this check is not hypothetical.
-          const integrity = await validateRunWorkspaceAssociation(runData as Record<string, unknown>);
-          if (integrity.classification === "invalid") {
-            logger.warn(`[${requestId}] [synthesize-panel] workspace_run_integrity_failed`, { requestId, runId, reason: integrity.reason });
-            return NextResponse.json(
-              createErrorResponse(ERROR_CODES.FORBIDDEN, "You don't have access to this run.", requestId),
-              { status: 403 }
-            );
-          }
-        } else {
-          // Run doesn't exist — a real, successful lookup that found
-          // nothing, NOT a read failure. Continues below as "absent"
-          // (no adaptiveOutput field by construction), same as always.
-          runLookupStatus = "not_found";
-        }
-      } catch (ownershipError: any) {
-        // Query-Routing Redesign, Phase 2A, Step 6, post-review correction:
-        // this used to be non-fatal ("Firestore error shouldn't block
-        // synthesis"). That leniency is no longer applied to the adaptive
-        // check below — whether THIS run has a persisted adaptiveOutput
-        // could not be determined, so it must fail closed, not continue.
-        // Still logged the same way for ownership-monitoring purposes.
-        logger.warn(`[${requestId}] [synthesize-panel] Could not verify run ownership or adaptive status`, {
-          requestId,
-          error: ownershipError?.message,
-        });
-        runLookupStatus = "read_failed";
-      }
+    // One read through the shared access contract: the run must exist, its
+    // `userId` must be a string equal to this caller's uid (no legacy
+    // allowance for a missing or non-string owner), and its Workspace binding
+    // must be valid. Every denial is the same concealed 403; only a genuine
+    // inability to check is 503. The returned run data is reused below for the
+    // adaptive-run check and the authoritative synthesis inputs — no second read.
+    const access = await resolveSynthesisRunAccess(runId, uid);
+    if (access.outcome !== "authorized") {
+      const denial = access.outcome === "unavailable" ? SYNTHESIS_RUN_UNAVAILABLE : SYNTHESIS_RUN_FORBIDDEN;
+      logger.warn(`[${requestId}] [synthesize-panel] Run access denied`, { requestId, reason: access.reason });
+      return NextResponse.json(createErrorResponse(denial.errorCode, denial.message, requestId), { status: denial.status });
     }
+    const runDataForAdaptiveCheck: Record<string, unknown> = access.runData;
+    const runLookupStatus = "found" as const;
 
-    // Governance input authority (F2): a synthesis is generated only from a
-    // persisted, server-written run. A runId with no document must never be
-    // stood in for by the request body — and answers exactly like a run that
-    // belongs to someone else, so existence is not disclosed. With no
-    // Firestore at all the run cannot be read: fail closed as unavailable.
-    if (runId && runLookupStatus === "not_found") {
-      logger.warn(`[${requestId}] [synthesize-panel] Rejected: no persisted run for this runId`, { requestId, runId });
-      return NextResponse.json(
-        createErrorResponse(ERROR_CODES.FORBIDDEN, "You don't have access to this run.", requestId),
-        { status: 403 }
-      );
-    }
-    if (runId && runLookupStatus === "not_attempted") {
-      return NextResponse.json(
-        createErrorResponse(ERROR_CODES.RUN_LOOKUP_UNAVAILABLE, "Could not verify this run right now. Please try again shortly.", requestId),
-        { status: 503 }
-      );
-    }
-
-    if (runLookupStatus === "read_failed") {
-      logger.warn(`[${requestId}] [synthesize-panel] Rejected: run lookup unavailable, cannot verify adaptiveOutput status — failing closed`, {
-        requestId,
-        runId,
-      });
-      return NextResponse.json(
-        createErrorResponse(
-          ERROR_CODES.RUN_LOOKUP_UNAVAILABLE,
-          "Could not verify this run right now. Please try again shortly.",
-          requestId
-        ),
-        { status: 503 }
-      );
-    }
 
     // ============================================
     // QUERY-ROUTING REDESIGN, PHASE 2A, STEP 6 — REJECT ADAPTIVE RUNS
