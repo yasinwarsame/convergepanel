@@ -19,6 +19,9 @@ import { ArrowLeft } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 import { useUserPlan } from "@/hooks/useUserPlan";
 import type { GovernancePolicy } from "@/lib/governance/evaluateGovernance";
+import { isValidReviewThresholdValue } from "@/lib/governance/familyReviewThresholds";
+import ScoreTypeThresholdsSection from "@/components/governance/ScoreTypeThresholdsSection";
+import { buildPolicyPatch } from "@/components/governance/policyPatch";
 import { getModelDisplayName } from "@/lib/modelInfo";
 import {
   formatFullDatetime,
@@ -779,6 +782,8 @@ export default function GovernanceDashboard() {
 
   const [policy, setPolicy] = useState<GovernancePolicy | null>(null);
   const [policyBaseline, setPolicyBaseline] = useState<GovernancePolicy | null>(null);
+  // D5.2A — server capability: may score-type review thresholds be changed? Fail closed until known.
+  const [familyWritesEnabled, setFamilyWritesEnabled] = useState(false);
   const [policyLoading, setPolicyLoading] = useState(false);
   const [policyError, setPolicyError] = useState<string | null>(null);
   const [policySaving, setPolicySaving] = useState(false);
@@ -881,13 +886,18 @@ export default function GovernanceDashboard() {
         setPolicyError(await readApiErrorMessage(res, "Could not load policy."));
         return;
       }
-      const data = (await res.json()) as { ok?: boolean; policy?: GovernancePolicy };
+      const data = (await res.json()) as {
+        ok?: boolean;
+        policy?: GovernancePolicy;
+        capabilities?: { familyReviewThresholdWritesEnabled?: unknown };
+      };
       if (process.env.NODE_ENV !== "production") {
         console.log("[governance/policies] API response:", data);
       }
       if (data.ok && data.policy) {
         setPolicy(data.policy);
         setPolicyBaseline(data.policy);
+        setFamilyWritesEnabled(data.capabilities?.familyReviewThresholdWritesEnabled === true);
         if (process.env.NODE_ENV !== "production") {
           console.log("[governance/policies] Fetched policy:", data.policy);
         }
@@ -1026,8 +1036,15 @@ export default function GovernanceDashboard() {
 
   const policyValidationError = useMemo(() => {
     if (!policy) return null;
-    if (policy.minConsensusToApprove < policy.minConsensusToAvoidReview) {
-      return "Approval threshold must be greater than or equal to the review threshold.";
+    // D5.2A — the legacy approval value is read-only and decides nothing, so it no
+    // longer constrains the review threshold. Score-type overrides must be 0–100.
+    if (!isValidReviewThresholdValue(policy.minConsensusToAvoidReview)) {
+      return "Default review threshold must be a number between 0 and 100.";
+    }
+    for (const value of Object.values(policy.scoreFamilyReviewThresholds ?? {})) {
+      if (!isValidReviewThresholdValue(value)) {
+        return "Score-type review thresholds must be numbers between 0 and 100 (leave blank to use the default).";
+      }
     }
     if (policy.sensitiveDomainsEnabled) {
       if (policy.sensitiveMinConsensusToApprove < policy.sensitiveMinConsensusToAvoidReview) {
@@ -1113,14 +1130,7 @@ export default function GovernanceDashboard() {
 
   const policyPatchPayload = (): Record<string, unknown> => {
     if (!policy || !policyBaseline) return {};
-    const patch: Record<string, unknown> = {};
-    (Object.keys(policyBaseline) as (keyof GovernancePolicy)[]).forEach((k) => {
-      if (k === "policyVersion") return;
-      if (JSON.stringify(policy[k]) !== JSON.stringify(policyBaseline[k])) {
-        patch[k] = policy[k];
-      }
-    });
-    return patch;
+    return buildPolicyPatch(policy, policyBaseline);
   };
 
   const savePolicy = async () => {
@@ -1530,50 +1540,12 @@ export default function GovernanceDashboard() {
                 </p>
               )}
               <div className="space-y-6">
-                <section className="rounded-xl border border-cp-border bg-cp-surface p-6 shadow-sm">
-                  <h2 className="text-lg font-semibold text-cp-text">Consensus Thresholds</h2>
-                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                    <label className="text-sm text-cp-text">
-                      Approval threshold (stored, not currently enforced)
-                      <input
-                        type="number"
-                        min={0}
-                        max={100}
-                        disabled={!isAdminUser}
-                        value={policy.minConsensusToApprove}
-                        onChange={(e) =>
-                          setPolicy((p) =>
-                            p ? { ...p, minConsensusToApprove: Number(e.target.value) } : p
-                          )
-                        }
-                        className="mt-1 w-full rounded-lg border border-cp-border bg-cp-raised px-3 py-2 text-cp-text disabled:opacity-50"
-                      />
-                      <span className="text-cp-muted"> /100</span>
-                    </label>
-                    <label className="text-sm text-cp-text">
-                      Flag for review below
-                      <input
-                        type="number"
-                        min={0}
-                        max={100}
-                        disabled={!isAdminUser}
-                        value={policy.minConsensusToAvoidReview}
-                        onChange={(e) =>
-                          setPolicy((p) =>
-                            p ? { ...p, minConsensusToAvoidReview: Number(e.target.value) } : p
-                          )
-                        }
-                        className="mt-1 w-full rounded-lg border border-cp-border bg-cp-raised px-3 py-2 text-cp-text disabled:opacity-50"
-                      />
-                      <span className="text-cp-muted"> /100</span>
-                    </label>
-                  </div>
-                  <p className="mt-3 text-xs text-cp-text/70">
-                    Automated decisions currently use the review threshold together with the other governance
-                    rules: a run scoring below it goes to the Review Queue. The approval threshold is stored for
-                    compatibility and future policy changes; changing it does not currently change any decision.
-                  </p>
-                </section>
+                <ScoreTypeThresholdsSection
+                  policy={policy}
+                  isAdminUser={isAdminUser}
+                  familyWritesEnabled={familyWritesEnabled}
+                  onChange={(next) => setPolicy(next)}
+                />
 
                 <section className="rounded-xl border border-cp-border bg-cp-surface p-6 shadow-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1593,7 +1565,8 @@ export default function GovernanceDashboard() {
                     </label>
                   </div>
                   <p className="mt-2 text-sm text-cp-text/75">
-                    Apply stricter thresholds for legal, medical, and financial queries.
+                    Apply stricter thresholds for legal, medical, and financial queries. These apply to every score
+                    type.
                   </p>
                   <div
                     className={`mt-4 grid gap-4 sm:grid-cols-2 ${!policy.sensitiveDomainsEnabled ? "opacity-40" : ""}`}
@@ -1615,7 +1588,7 @@ export default function GovernanceDashboard() {
                       />
                     </label>
                     <label className="text-sm text-cp-text">
-                      Review threshold
+                      Additional-reason threshold
                       <input
                         type="number"
                         min={0}
@@ -1631,6 +1604,11 @@ export default function GovernanceDashboard() {
                       />
                     </label>
                   </div>
+                  <p className="mt-3 text-xs text-cp-text/70" data-testid="sensitive-threshold-help">
+                    A sensitive-domain run scoring below the approval threshold goes to the Review Queue. A score
+                    below the additional-reason threshold adds a second reason to the decision, but does not by
+                    itself change the outcome under current rules.
+                  </p>
                 </section>
 
                 <section className="rounded-xl border border-cp-border bg-cp-surface p-6 shadow-sm">

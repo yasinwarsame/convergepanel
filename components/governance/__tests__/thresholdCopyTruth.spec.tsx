@@ -23,6 +23,7 @@ jest.mock("@/hooks/useUserPlan", () => ({ useUserPlan: () => STABLE_PLAN }));
 const GovernanceDashboard = require("@/components/governance/GovernanceDashboard").default;
 
 const SOURCE = readFileSync(join(__dirname, "..", "GovernanceDashboard.tsx"), "utf8");
+const SECTION_SOURCE = readFileSync(join(__dirname, "..", "ScoreTypeThresholdsSection.tsx"), "utf8");
 
 describe("Governance Dashboard threshold copy (D5.1)", () => {
   it("the rendered upsell offers review thresholds, not auto-approval", () => {
@@ -31,17 +32,15 @@ describe("Governance Dashboard threshold copy (D5.1)", () => {
     expect(html.toLowerCase()).not.toContain("auto-approv");
   });
 
-  it("the general approval field says it is stored and not enforced", () => {
-    expect(SOURCE).toContain("Approval threshold (stored, not currently enforced)");
-    expect(SOURCE).toContain("changing it does not currently change any decision.");
+  it("the legacy approval value is shown read-only and described as unused (D5.2A)", () => {
+    expect(SECTION_SOURCE).toContain("Legacy approval value");
+    expect(SECTION_SOURCE).toContain("Stored for backward compatibility. It is not currently used to make a governance decision.");
+    // no input is bound to it any more — the Dashboard cannot edit a value that decides nothing
+    expect(`${SOURCE}\n${SECTION_SOURCE}`).not.toContain("value={policy.minConsensusToApprove}");
   });
 
-  it("no copy in the component says auto-approve / auto-approval / auto-approved", () => {
+  it("no copy in the Dashboard or the score-type section says auto-approve / auto-approval / auto-approved", () => {
     expect(SOURCE.toLowerCase().match(/auto-approv\w*/g)).toBeNull();
-  });
-
-  it("the stored field stays editable and validated (no silent removal)", () => {
-    expect(SOURCE).toContain("value={policy.minConsensusToApprove}");
-    expect(SOURCE).toContain("Approval threshold must be greater than or equal to the review threshold.");
+    expect(SECTION_SOURCE.toLowerCase().match(/auto-approv\w*/g)).toBeNull();
   });
 });

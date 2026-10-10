@@ -208,12 +208,12 @@ describe("evaluation provenance — GovernanceResult.meta", () => {
     expect(m.scoreFamily).toBe("video_agreement_v1");
     expect(m.policyVersion).toBe(1);
     expect(typeof m.evaluatedAt).toBe("string");
-    expect(m.scoreThresholdsInEffect).toEqual({ minConsensusToAvoidReview: 70 });
+    expect(m.scoreThresholdsInEffect).toEqual({ minConsensusToAvoidReview: 70, minConsensusToAvoidReviewSource: "shared" });
   });
 
   it("the unused general approval threshold is never recorded as in effect", () => {
     const m = meta(clean(), policy({ minConsensusToApprove: 93 }));
-    expect(Object.keys(m.scoreThresholdsInEffect)).toEqual(["minConsensusToAvoidReview"]);
+    expect(Object.keys(m.scoreThresholdsInEffect)).toEqual(["minConsensusToAvoidReview", "minConsensusToAvoidReviewSource"]);
     // Scoped to the threshold object: `evaluatedAt` is an ISO timestamp that can contain any digit run.
     expect(JSON.stringify(m.scoreThresholdsInEffect)).not.toContain("93");
   });
@@ -223,6 +223,7 @@ describe("evaluation provenance — GovernanceResult.meta", () => {
     expect(m.scoreFamily).toBe("claim_verification_v1");
     expect(m.scoreThresholdsInEffect).toEqual({
       minConsensusToAvoidReview: 70,
+      minConsensusToAvoidReviewSource: "shared",
       sensitive: { domain: "legal", minConsensusToAvoidReview: 75, minConsensusToApprove: 85 },
     });
   });
@@ -233,19 +234,19 @@ describe("evaluation provenance — GovernanceResult.meta", () => {
       expect.objectContaining({
         policyVersion: 9,
         scoreFamily: "research_synthesis_v1",
-        scoreThresholdsInEffect: { minConsensusToAvoidReview: 61, sensitive: { domain: "financial", minConsensusToAvoidReview: 52, minConsensusToApprove: 88 } },
+        scoreThresholdsInEffect: { minConsensusToAvoidReview: 61, minConsensusToAvoidReviewSource: "shared", sensitive: { domain: "financial", minConsensusToAvoidReview: 52, minConsensusToApprove: 88 } },
       })
     );
   });
 
   it("no sensitive block when the domain is detected but sensitive evaluation is disabled", () => {
-    expect(meta(clean({ question: MEDICAL }), policy({ sensitiveDomainsEnabled: false })).scoreThresholdsInEffect).toEqual({ minConsensusToAvoidReview: 70 });
+    expect(meta(clean({ question: MEDICAL }), policy({ sensitiveDomainsEnabled: false })).scoreThresholdsInEffect).toEqual({ minConsensusToAvoidReview: 70, minConsensusToAvoidReviewSource: "shared" });
   });
 
   it("a null score still records what was in effect (the comparison itself is not reached)", () => {
     const r = evaluateGovernance(clean({ consensusScore: null }), policy());
     expect(r.reasons).toEqual(["Consensus score not available"]);
-    expect(r.meta.scoreThresholdsInEffect).toEqual({ minConsensusToAvoidReview: 70 });
+    expect(r.meta.scoreThresholdsInEffect).toEqual({ minConsensusToAvoidReview: 70, minConsensusToAvoidReviewSource: "shared" });
   });
 
   it("the sensitive block has no undefined-valued key", () => {

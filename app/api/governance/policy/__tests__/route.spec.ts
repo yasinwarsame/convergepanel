@@ -116,7 +116,7 @@ describe("GET — permitted callers receive the full policy", () => {
     planId = "full";
     const res = await get();
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, policy: { policyVersion: 7, minConsensusToApprove: 80 } });
+    expect(await res.json()).toEqual({ ok: true, policy: { policyVersion: 7, minConsensusToApprove: 80 }, capabilities: { familyReviewThresholdWritesEnabled: false } });
     expect(loadPolicy).toHaveBeenCalledTimes(1);
     expect(entitlementCalls).toEqual([CALLER]);
   });

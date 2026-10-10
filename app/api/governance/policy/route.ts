@@ -4,12 +4,27 @@
  * Step 6.0b: GET is limited to a verified Governance Admin or a caller whose
  * current effective plan is `full` (the governance dashboard audience), checked
  * BEFORE the policy is loaded. POST is Governance Admin only.
+ *
+ * Step 6 D5.2A: the optional score-type map `scoreFamilyReviewThresholds`
+ * (video / research only; number = set, null = clear). GET returns it as
+ * stored-and-valid, plus whether family writes are enabled. POST rejects any
+ * family-map mutation while `GOVERNANCE_FAMILY_THRESHOLDS_WRITE_ENABLED` is
+ * off — explicitly, never by silently dropping it — and leaves every legacy
+ * field writable exactly as before.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase/admin";
-import type { GovernancePolicy } from "@/lib/governance/evaluateGovernance";
-import { loadGovernancePolicy, saveGovernancePolicyMerge } from "@/lib/governance/governancePolicyStore";
+import { GOVERNANCE_FAMILY_THRESHOLDS_WRITE_ENABLED } from "@/lib/env";
+import {
+  familyReviewThresholdChangeNames,
+  validateFamilyReviewThresholdsMutation,
+} from "@/lib/governance/familyReviewThresholds";
+import {
+  loadGovernancePolicy,
+  saveGovernancePolicyMerge,
+  type GovernancePolicyMutation,
+} from "@/lib/governance/governancePolicyStore";
 import { writeAuditEvent } from "@/lib/governance/auditLog";
 import { checkAdminOnly, checkGovernancePolicyReadAccess, resolveGovernanceRequestUser } from "@/lib/governance/authCheck";
 
@@ -27,16 +42,17 @@ const ALLOWED_POST_KEYS = new Set([
   "sensitiveDomainsEnabled",
   "reviewIfEvidenceQualityWeak",
   "reviewIfVerificationVerdictIn",
+  "scoreFamilyReviewThresholds",
   "comment",
 ]);
 
 const VERDICT_LABELS = new Set(["Disputed", "Unverifiable", "Partially True", "Confirmed"]);
 
 function validatePolicyPartial(body: Record<string, unknown>):
-  | { ok: true; partial: Partial<GovernancePolicy> }
+  | { ok: true; partial: GovernancePolicyMutation }
   | { ok: false; fields: Record<string, string>; message: string } {
   const fields: Record<string, string> = {};
-  const partial: Partial<GovernancePolicy> = {};
+  const partial: GovernancePolicyMutation = {};
 
   const num = (k: string, v: unknown) => {
     if (v === undefined) return;
@@ -81,6 +97,12 @@ function validatePolicyPartial(body: Record<string, unknown>):
         partial.reviewIfVerificationVerdictIn = arr;
       }
     }
+  }
+
+  if (body.scoreFamilyReviewThresholds !== undefined) {
+    const family = validateFamilyReviewThresholdsMutation(body.scoreFamilyReviewThresholds);
+    if (family.ok) partial.scoreFamilyReviewThresholds = family.mutation;
+    else Object.assign(fields, family.fields);
   }
 
   for (const key of Object.keys(body)) {
@@ -136,7 +158,11 @@ export async function GET(request: NextRequest) {
       policyVersion: policy.policyVersion,
       keys: Object.keys(policy),
     });
-    return NextResponse.json({ ok: true, policy });
+    return NextResponse.json({
+      ok: true,
+      policy,
+      capabilities: { familyReviewThresholdWritesEnabled: GOVERNANCE_FAMILY_THRESHOLDS_WRITE_ENABLED },
+    });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Failed to load policy";
     return NextResponse.json(
@@ -186,6 +212,22 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // D5.2A — checked before validation: while the flag is off, no family-map
+  // mutation of any shape (valid, malformed, set or clear) reaches the store.
+  if (body.scoreFamilyReviewThresholds !== undefined && !GOVERNANCE_FAMILY_THRESHOLDS_WRITE_ENABLED) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: {
+          code: "family_thresholds_write_disabled",
+          message: "Score-type review thresholds cannot be changed yet. Other policy fields can still be updated.",
+          fields: { scoreFamilyReviewThresholds: "Writes are disabled" },
+        },
+      },
+      { status: 403 }
+    );
+  }
+
   const validated = validatePolicyPartial(body);
   if (!validated.ok) {
     return NextResponse.json(
@@ -197,7 +239,12 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const policyKeys = Object.keys(validated.partial) as (keyof GovernancePolicy)[];
+  // Change names for history: a score-type entry is named by its dotted path.
+  const policyKeys = Object.keys(validated.partial).flatMap((key) =>
+    key === "scoreFamilyReviewThresholds" && validated.partial.scoreFamilyReviewThresholds
+      ? familyReviewThresholdChangeNames(validated.partial.scoreFamilyReviewThresholds)
+      : [key]
+  );
   if (policyKeys.length === 0) {
     return NextResponse.json(
       {
@@ -221,7 +268,7 @@ export async function POST(request: NextRequest) {
       resolved.uid,
       resolved.email,
       comment,
-      policyKeys as string[]
+      policyKeys
     );
     await writeAuditEvent({
       runId: "policy",
@@ -232,7 +279,7 @@ export async function POST(request: NextRequest) {
       byEmail: resolved.email,
       comment,
       policyVersion: policy.policyVersion,
-      changes: policyKeys as string[],
+      changes: policyKeys,
     });
     return NextResponse.json({ ok: true, policy });
   } catch (e: unknown) {
