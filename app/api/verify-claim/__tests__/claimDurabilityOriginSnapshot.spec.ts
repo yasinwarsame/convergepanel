@@ -220,3 +220,34 @@ describe("ORIGIN EVIDENCE SNAPSHOT — Personal persistence", () => {
     expect((persistedDoc().evidenceSources as unknown[]).length).toBe(2);
   });
 });
+
+// ===========================================================================
+describe("F1 — distinct model ids (Personal Claim)", () => {
+  it("EXPLOIT SHAPE: ['chatgpt','chatgpt'] is fewer than two distinct models → 400 before quota or execution", async () => {
+    const res = await POST(req({ claim: "a claim to verify", models: ["chatgpt", "chatgpt"] }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).errorCode).toBe("not_enough_models");
+    expect(mockedCheckAndIncrementUsage).not.toHaveBeenCalled();
+    expect(mockedRunClaimVerificationPanel).not.toHaveBeenCalled();
+  });
+  it("unknown + duplicate cannot satisfy the minimum", async () => {
+    const res = await POST(req({ claim: "a claim to verify", models: ["bogus", "chatgpt", "chatgpt"] }));
+    expect(res.status).toBe(400);
+    expect(mockedRunClaimVerificationPanel).not.toHaveBeenCalled();
+  });
+  it("['chatgpt','claude','chatgpt'] → executes and charges exactly ['chatgpt','claude'] (first-occurrence order)", async () => {
+    const res = await POST(req({ claim: "a claim to verify", models: ["chatgpt", "claude", "chatgpt"] }));
+    expect(res.status).toBe(200);
+    expect(mockedCheckAndIncrementUsage).toHaveBeenCalledWith(UID, 2);
+    expect(mockedRunClaimVerificationPanel.mock.calls[0][1]).toEqual(["chatgpt", "claude"]);
+  });
+  it("['bogus','chatgpt','claude'] → ['chatgpt','claude'] (known-id filtering unchanged)", async () => {
+    await POST(req({ claim: "a claim to verify", models: ["bogus", "chatgpt", "claude"] }));
+    expect(mockedRunClaimVerificationPanel.mock.calls[0][1]).toEqual(["chatgpt", "claude"]);
+  });
+  it("an already-distinct list is passed through unchanged", async () => {
+    await POST(req({ claim: "a claim to verify", models: MODELS }));
+    expect(mockedRunClaimVerificationPanel.mock.calls[0][1]).toEqual(MODELS);
+    expect(mockedCheckAndIncrementUsage).toHaveBeenCalledWith(UID, MODELS.length);
+  });
+});

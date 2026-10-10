@@ -133,3 +133,25 @@ describe("POST /api/run-panel — createRun() best-effort failure (Phase 8C-D.0.
     // was called exactly once, already asserted above.
   });
 });
+
+describe("F1 — distinct model ids (Personal Research)", () => {
+  afterEach(() => jest.clearAllMocks());
+  const post = (selectedModels: unknown) =>
+    POST(new NextRequest("http://localhost/api/run-panel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: "What is the capital of Kenya?", selectedModels }) }));
+
+  it("EXPLOIT SHAPE: ['chatgpt','chatgpt'] → 400 not_enough_models before quota, run creation or execution", async () => {
+    const res = await post(["chatgpt", "chatgpt"]);
+    expect(res.status).toBe(400);
+    expect((await res.json()).errorCode).toBe("not_enough_models");
+    expect(mockedCheckAndIncrementUsage).not.toHaveBeenCalled();
+    expect(mockedCreateRun).not.toHaveBeenCalled();
+    expect(mockedRunPanel).not.toHaveBeenCalled();
+  });
+  it("['chatgpt','claude','chatgpt'] → quota, persisted selection and execution all use ['chatgpt','claude']", async () => {
+    const res = await post(["chatgpt", "claude", "chatgpt"]);
+    expect(res.status).toBe(200);
+    expect(mockedCheckAndIncrementUsage.mock.calls[0][1]).toBe(2);
+    expect(mockedCreateRun.mock.calls[0][3]).toEqual(["chatgpt", "claude"]);
+    expect(mockedRunPanel.mock.calls[0][1]).toEqual(["chatgpt", "claude"]);
+  });
+});

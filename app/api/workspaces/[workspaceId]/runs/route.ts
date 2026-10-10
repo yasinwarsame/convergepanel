@@ -30,6 +30,7 @@
  * exist for this route.
  */
 
+import { distinctModelIds } from "@/lib/panel/distinctModelIds";
 import { NextRequest, NextResponse } from "next/server";
 import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
 import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
@@ -246,7 +247,10 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
       );
     }
 
-    const { question, selectedModels } = body ?? {};
+    const { question, selectedModels: requestedModels } = body ?? {};
+    // F1 — duplicates never count: the minimum, the plan/quota model count,
+    // the persisted selection and execution all use the DISTINCT list.
+    const selectedModels: unknown = Array.isArray(requestedModels) ? distinctModelIds(requestedModels) : requestedModels;
 
     if (!question || typeof question !== "string" || question.trim().length === 0) {
       return NextResponse.json(
