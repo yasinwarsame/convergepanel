@@ -145,6 +145,25 @@ const LEGACY_PROSE_TEXT = [
   "It offers a lower total cost of ownership and simpler onboarding than Salesforce for teams under twenty seats.",
 ].join(" ");
 
+/**
+ * F2 — synthesis now reads the PERSISTED run: a completed legacy run as
+ * `completeRun` writes it (question + runDocument.perModel rows).
+ */
+function persistLegacyRun(runId: string, text: string = LEGACY_PROSE_TEXT, extra: Record<string, unknown> = {}) {
+  runDocs.set(runId, {
+    userId: "test-uid",
+    question: "Which CRM should we choose?",
+    runDocument: {
+      question: "Which CRM should we choose?",
+      perModel: [
+        { modelId: "chatgpt", status: "ok", rawTextTruncated: text },
+        { modelId: "claude", status: "ok", rawTextTruncated: text },
+      ],
+    },
+    ...extra,
+  });
+}
+
 function buildSynthesizeRequest(runId: string, resultsText: string) {
   return new NextRequest("http://localhost/api/synthesize-panel", {
     method: "POST",
@@ -305,17 +324,17 @@ describe("POST /api/synthesize-panel — adaptive run rejection (Step 6 fix)", (
   });
 
   describe("absent adaptiveOutput — legacy synthesis continues, unchanged", () => {
-    it("a MISSING run (the document doesn't exist at all — a successful lookup that found nothing, not a lookup failure) still synthesizes successfully (200, ok:true)", async () => {
+    it("F2: a MISSING run (lookup succeeded, found nothing) is refused — perfect client results never stand in for it", async () => {
       const response = await POST(buildSynthesizeRequest("run-legacy-no-doc", LEGACY_PROSE_TEXT));
-      const body = await response.json();
-      expect(response.status).toBe(200);
-      expect(body.ok).toBe(true);
-      expect(mockCreate).toHaveBeenCalledTimes(1);
+      expect(response.status).toBe(403);
+      expect(mockCreate).not.toHaveBeenCalled();
+      expect(mockedEvaluateAndStoreGovernance).not.toHaveBeenCalled();
+      expect(runDocs.has("run-legacy-no-doc")).toBe(false); // no orphan run/synthesis document is created
     });
 
     it("a pre-existing run document with no adaptiveOutput field still synthesizes successfully", async () => {
       const runId = "run-legacy-existing-doc";
-      runDocs.set(runId, { userId: "test-uid", question: "Which CRM should we choose?" });
+      persistLegacyRun(runId);
 
       const response = await POST(buildSynthesizeRequest(runId, LEGACY_PROSE_TEXT));
       const body = await response.json();
@@ -324,6 +343,7 @@ describe("POST /api/synthesize-panel — adaptive run rejection (Step 6 fix)", (
     });
 
     it("still reaches evaluateAndStoreGovernance with runType 'research' for a genuinely legacy run — System A behavior for legacy runs is unchanged", async () => {
+      persistLegacyRun("run-legacy-governance");
       await POST(buildSynthesizeRequest("run-legacy-governance", LEGACY_PROSE_TEXT));
       expect(mockedEvaluateAndStoreGovernance).toHaveBeenCalledTimes(1);
       const [callArgs] = mockedEvaluateAndStoreGovernance.mock.calls[0];
@@ -335,6 +355,7 @@ describe("POST /api/synthesize-panel — adaptive run rejection (Step 6 fix)", (
 
     it("still writes synthesizedStructuredReport and synthesisConsensusSummary for a genuinely legacy run", async () => {
       const runId = "run-legacy-writes";
+      persistLegacyRun(runId);
       await POST(buildSynthesizeRequest(runId, LEGACY_PROSE_TEXT));
       const stored = runDocs.get(runId);
       expect(stored?.synthesizedStructuredReport).toBeDefined();
@@ -425,7 +446,7 @@ describe("POST /api/synthesize-panel — research evidence-quality consistency (
 
   it("persists the canonical policy summary on the SAME synthesis update, and System A uses its evidence quality", async () => {
     const runId = "run-evidence-quality";
-    runDocs.set(runId, { userId: "test-uid", question: "Which CRM should we choose?" });
+    persistLegacyRun(runId);
     const res = await POST(buildSynthesizeRequest(runId, LEGACY_PROSE_TEXT));
     expect(res.status).toBe(200);
 
@@ -467,7 +488,7 @@ describe("POST /api/synthesize-panel — research evidence-quality consistency (
 
   it("the client response keeps its established consensusSummary shape (policy summary not newly exposed)", async () => {
     const runId = "run-evidence-quality-response";
-    runDocs.set(runId, { userId: "test-uid", question: "Which CRM should we choose?" });
+    persistLegacyRun(runId);
     const body = await (await POST(buildSynthesizeRequest(runId, LEGACY_PROSE_TEXT))).json();
     expect(body).not.toHaveProperty("policyConsensusSummary");
     expect(body.consensusSummary).toEqual(runDocs.get(runId)!.synthesisConsensusSummary);

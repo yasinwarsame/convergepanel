@@ -11,6 +11,7 @@
  * 5. Return results with usage information
  */
 
+import { distinctModelIds } from "@/lib/panel/distinctModelIds";
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { ModelId, RunPanelApiResponse } from "@/lib/types";
@@ -179,7 +180,10 @@ export async function POST(req: NextRequest) {
       );
     }
     
-    const { question, selectedModels } = body ?? {};
+    const { question, selectedModels: requestedModels } = body ?? {};
+    // F1 — duplicates never count: the minimum, the plan/quota model count,
+    // the persisted selection and execution all use the DISTINCT list.
+    const selectedModels: unknown = Array.isArray(requestedModels) ? distinctModelIds(requestedModels) : requestedModels;
 
     // Basic input validation: require a non-empty question.
     if (!question || typeof question !== "string" || question.trim().length === 0) {
@@ -473,7 +477,7 @@ export async function POST(req: NextRequest) {
     // established "run creation is for tracking, not critical for
     // execution" degradation for any other createRun() failure.
     try {
-      await createRun(runId, uid, trimmedQuestion, selectedModels, workspaceIdForRun, projectIdForRun);
+      await createRun(runId, uid, trimmedQuestion, selectedModels, workspaceIdForRun, projectIdForRun, context ?? undefined);
     } catch (runError: any) {
       // Log but don't fail - run creation is for tracking, not critical for execution
       logger.error("[run-panel] Failed to create run record", { error: runError });

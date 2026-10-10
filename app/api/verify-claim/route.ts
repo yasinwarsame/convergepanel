@@ -13,6 +13,7 @@
  * execution, scoring, and governance behavior can never drift between them.
  */
 
+import { distinctModelIds } from "@/lib/panel/distinctModelIds";
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { ModelId, ModelResult } from "@/lib/types";
@@ -71,7 +72,8 @@ function totalTokensFromResult(result: ModelResult): number {
 function parseSelectedModels(body: Record<string, unknown>): ModelId[] | null {
   let selectedModels: ModelId[] = DEFAULT_MODELS;
   if (Array.isArray(body.models) && body.models.length > 0) {
-    selectedModels = body.models.filter((m): m is ModelId => ALL_MODELS.has(m as ModelId));
+    // Known ids only, then DISTINCT (F1): a repeated id is one model, not two.
+    selectedModels = distinctModelIds(body.models.filter((m): m is ModelId => ALL_MODELS.has(m as ModelId)));
   }
   if (selectedModels.length < MIN_MODELS) return null;
   return selectedModels;

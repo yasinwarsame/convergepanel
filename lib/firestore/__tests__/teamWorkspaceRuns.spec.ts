@@ -602,3 +602,26 @@ describe("getTeamWorkspaceRun — Team Research Detail, Phase 12A.4", () => {
     expect(result.results).toEqual([]);
   });
 });
+
+describe("createTeamWorkspaceRun — F2/R1 questionContext", () => {
+  it("persists the server-split context in the SAME tx.create as question, models and workspace/project fields", async () => {
+    const result = await createTeamWorkspaceRun(baseArgs({ questionContext: "Context:\nCLAUSE-7-TEXT source material" }));
+    expect(result.status).toBe("created");
+    if (result.status !== "created") throw new Error("expected created");
+    expect(stores.runs.size).toBe(1); // one create, no follow-up write
+    expect(stores.runs.get(result.runId)!.data).toEqual(expect.objectContaining({
+      userId: MEMBER_UID,
+      workspaceId: WS_ID,
+      projectId: null,
+      question: "What is the capital of Kenya?",
+      questionContext: "Context:\nCLAUSE-7-TEXT source material",
+      selectedModels: ["chatgpt", "claude"],
+      status: "running",
+    }));
+  });
+  it("no context → no questionContext field", async () => {
+    const result = await createTeamWorkspaceRun(baseArgs());
+    if (result.status !== "created") throw new Error("expected created");
+    expect(stores.runs.get(result.runId)!.data).not.toHaveProperty("questionContext");
+  });
+});

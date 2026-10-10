@@ -71,6 +71,9 @@ import { validateSynthesisRequest, validateRequestBodySize, MAX_REQUEST_BODY_SIZ
 import { sanitizeModelText, truncateForSynthesis, MAX_CHARS_SYNTHESIS_PER_MODEL } from "@/lib/panel/sanitizeText";
 import { compressModelResponse, compressClusters, computeInputHash } from "@/lib/synthesis/compressInput";
 import { buildEvidencePack } from "@/lib/synthesis/buildEvidencePack";
+import { authoritativeSynthesisInputs } from "@/lib/synthesis/authoritativeRunInputs";
+import { synthesizeReport } from "@/lib/consensus";
+import type { ModelResult } from "@/lib/types";
 import { logger, redact } from "@/lib/logger";
 import { buildSubstitutionBlock, substitutionEntryFromSupplied, coerceStatus, type SubstitutionBlockEntry } from "@/lib/panel/normalize";
 import type { UserProfile } from "@/lib/types";
@@ -735,6 +738,25 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Governance input authority (F2): a synthesis is generated only from a
+    // persisted, server-written run. A runId with no document must never be
+    // stood in for by the request body — and answers exactly like a run that
+    // belongs to someone else, so existence is not disclosed. With no
+    // Firestore at all the run cannot be read: fail closed as unavailable.
+    if (runId && runLookupStatus === "not_found") {
+      logger.warn(`[${requestId}] [synthesize-panel] Rejected: no persisted run for this runId`, { requestId, runId });
+      return NextResponse.json(
+        createErrorResponse(ERROR_CODES.FORBIDDEN, "You don't have access to this run.", requestId),
+        { status: 403 }
+      );
+    }
+    if (runId && runLookupStatus === "not_attempted") {
+      return NextResponse.json(
+        createErrorResponse(ERROR_CODES.RUN_LOOKUP_UNAVAILABLE, "Could not verify this run right now. Please try again shortly.", requestId),
+        { status: 503 }
+      );
+    }
+
     if (runLookupStatus === "read_failed") {
       logger.warn(`[${requestId}] [synthesize-panel] Rejected: run lookup unavailable, cannot verify adaptiveOutput status — failing closed`, {
         requestId,
@@ -855,15 +877,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Extract and validate request payload (runId already extracted above)
-    const question = body.question;
-    const results = body.results || body.responses || []; // Support both names for backward compatibility
+    // Extract and validate request payload (runId already extracted above).
+    // F2: `question` / `results` below are the CLIENT's copies and are only
+    // syntactically validated for backward compatibility — the validated
+    // request shape is NOT a trusted input. Everything the synthesis and
+    // governance use comes from the persisted run (`authoritative`, below).
+    const clientQuestion = body.question;
+    const clientResults = body.results || body.responses || []; // Support both names for backward compatibility
 
     // Build validation details for helpful error messages
     const validationDetails: any = {
       hasRunId: !!runId && typeof runId === "string" && runId.trim().length > 0,
-      hasQuestion: !!question && typeof question === "string" && question.trim().length > 0,
-      resultsCount: Array.isArray(results) ? results.length : 0,
+      hasQuestion: !!clientQuestion && typeof clientQuestion === "string" && clientQuestion.trim().length > 0,
+      resultsCount: Array.isArray(clientResults) ? clientResults.length : 0,
       validResultsCount: 0,
       uniqueModelIdsCount: 0,
       receivedKeys: Object.keys(body || {}),
@@ -904,7 +930,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Validate results array
-    if (!Array.isArray(results)) {
+    if (!Array.isArray(clientResults)) {
       logger.warn(`[${requestId}] [synthesize-panel] Validation failed: results is not an array`, {
         requestId,
         ...redact(validationDetails),
@@ -920,56 +946,54 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // F2 — THE PERSISTED RUN IS THE AUTHORITY. The run was read (and its
+    // ownership, Workspace integrity and adaptive status verified) above.
+    const authoritative = authoritativeSynthesisInputs(runDataForAdaptiveCheck ?? {});
+    if (!authoritative.ok) {
+      logger.warn(`[${requestId}] [synthesize-panel] Rejected: persisted run cannot be synthesized`, { requestId, runId, reason: authoritative.reason });
+      return NextResponse.json(
+        createErrorResponse(
+          ERROR_CODES.SYNTHESIS_SOURCE_UNAVAILABLE,
+          "This run does not have enough saved model responses to synthesize.",
+          requestId,
+          { reason: authoritative.reason }
+        ),
+        { status: 409 }
+      );
+    }
+    const question = authoritative.value.question;
+
     const validResults: Array<{ modelId: string; text: string }> = [];
     const substitutionEntries: SubstitutionBlockEntry[] = [];
     const seenModelIds = new Set<string>();
 
     // IMPORTANT: Keep fullText and synthesisText separate
-    // - fullText: Original unmodified text (used for UI display, never truncated)
+    // - fullText: the server-persisted text (sanitized + storage-capped at write time)
     // - synthesisText: Truncated copy used ONLY for synthesis prompts (cost control)
-    // This ensures Panel Response always shows complete output while synthesis uses truncated copy
-    for (const result of results) {
-      if (
-        result &&
-        typeof result === "object" &&
-        typeof result.modelId === "string" &&
-        result.modelId.trim().length > 0
-      ) {
-        const fullText = (result as any).rawTextFull || result.text || "";
-        
-        if (typeof fullText === "string" && fullText.trim().length > 0) {
-          const sanitizedFullText = sanitizeModelText(fullText.trim());
-          
-          const { text: synthesisText, wasTruncated: wasTruncatedForSynthesis } = truncateForSynthesis(
-            sanitizedFullText,
-            MAX_CHARS_SYNTHESIS_PER_MODEL
-          );
-          
-          logger.debug(`[${requestId}] [synthesize-panel] Text processing`, {
-            requestId,
-            provider: result.modelId.trim(),
-            fullTextLength: sanitizedFullText.length,
-            synthesisTextLength: synthesisText.length,
-            wasTruncatedForSynthesis,
-            truncatedBy: sanitizedFullText.length - synthesisText.length,
-          });
-          
-          validResults.push({
-            modelId: result.modelId.trim(),
-            text: synthesisText,
-          });
-          seenModelIds.add(result.modelId.trim());
+    for (const row of authoritative.value.rows) {
+      const sanitizedFullText = sanitizeModelText(row.text.trim());
+      const { text: synthesisText, wasTruncated: wasTruncatedForSynthesis } = truncateForSynthesis(
+        sanitizedFullText,
+        MAX_CHARS_SYNTHESIS_PER_MODEL
+      );
+      logger.debug(`[${requestId}] [synthesize-panel] Text processing`, {
+        requestId,
+        provider: row.modelId,
+        fullTextLength: sanitizedFullText.length,
+        synthesisTextLength: synthesisText.length,
+        wasTruncatedForSynthesis,
+        truncatedBy: sanitizedFullText.length - synthesisText.length,
+      });
+      if (synthesisText.length === 0) continue;
+      validResults.push({ modelId: row.modelId, text: synthesisText });
+      seenModelIds.add(row.modelId);
 
-          // Saved-run provenance honesty (S1): only the facts this request
-          // actually supplied enter the SUBSTITUTIONS block. A reloaded saved
-          // run lacking provenance must not have it manufactured here (no
-          // modelId / "unknown" / "deepseek-chat" / "primary_failed"), and no
-          // run lookup is made to recover it. Live rows carry every field and
-          // yield the same entry as before.
-          const entry = substitutionEntryFromSupplied({ ...(result as Record<string, unknown>), modelId: result.modelId.trim() });
-          if (entry) substitutionEntries.push(entry);
-        }
-      }
+      // Saved-run provenance honesty (S1): only facts the RUN persisted enter
+      // the SUBSTITUTIONS block — status, provider, requestedModel and the
+      // reason derivable from substitutedFrom. actualModel is never persisted
+      // and is never supplied here, so it is never invented.
+      const entry = substitutionEntryFromSupplied({ modelId: row.modelId, status: row.status, ...row.provenance });
+      if (entry) substitutionEntries.push(entry);
     }
 
     validationDetails.validResultsCount = validResults.length;
@@ -1011,8 +1035,27 @@ export async function POST(req: NextRequest) {
     // Extract model IDs and prepare for cluster-based input (if clusters provided)
     // Otherwise, we'll use the simple results format
     const modelIds = Array.from(seenModelIds);
-    const agreementClusters = body.agreementClusters || [];
-    const clusters = body.clusters || [];
+    // F2 — agreement clusters are recomputed from the persisted rows with the
+    // same pure consensus engine the client uses. Request-supplied
+    // `agreementClusters` / `clusters` are never read: they shaped the prompt
+    // and the cache hash. On any clustering failure the direct-results path
+    // below is used, never the client's clusters.
+    let agreementClusters: any[] = [];
+    let clusters: any[] = [];
+    try {
+      const serverConsensus = synthesizeReport(
+        authoritative.value.rows.map((row) => ({ modelId: row.modelId, status: row.status, rawText: row.text }) as unknown as ModelResult)
+      );
+      agreementClusters = serverConsensus?.consensusAnalysis?.agreementClusters ?? [];
+      clusters = serverConsensus?.consensusAnalysis?.clusters ?? [];
+    } catch (clusterError: unknown) {
+      logger.warn(`[${requestId}] [synthesize-panel] Server-side clustering failed; using direct results`, {
+        requestId,
+        error: clusterError instanceof Error ? clusterError.message : String(clusterError),
+      });
+      agreementClusters = [];
+      clusters = [];
+    }
 
     // Compute input hash for cache validation (before building prompt)
     const inputHash = runId ? computeInputHash(
@@ -2125,28 +2168,13 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
       }
     }
 
-    const scoringResults = results
-      .filter((r: any) => r && typeof r === "object" && typeof r.modelId === "string")
-      .map((r: any) => {
-        const rawText =
-          typeof r.rawTextFull === "string" && r.rawTextFull.trim().length > 0
-            ? r.rawTextFull
-            : typeof r.text === "string"
-              ? r.text
-              : null;
-        const textLen = (rawText ?? "").trim().length;
-        const statusFromBody =
-          r.status !== undefined && r.status !== null && String(r.status).length > 0
-            ? coerceStatus(r.status)
-            : textLen >= 48
-              ? "ok"
-              : "failed";
-        return {
-          modelId: String(r.modelId).trim(),
-          status: statusFromBody,
-          rawText,
-        };
-      });
+    // F2 — consensus scoring (and so System A research governance) scores the
+    // SAME persisted rows the synthesis was built from, never request text.
+    const scoringResults = authoritative.value.rows.map((row) => ({
+      modelId: row.modelId,
+      status: row.status,
+      rawText: row.text,
+    }));
 
     const sourceBacked =
       agreementClusters.length > 0 ||

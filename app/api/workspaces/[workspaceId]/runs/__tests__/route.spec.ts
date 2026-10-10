@@ -734,3 +734,40 @@ describe("GET behavior is unchanged by the POST addition", () => {
     expect(mockedCreateTeamWorkspaceRun).not.toHaveBeenCalled();
   });
 });
+
+describe("F1 — distinct model ids (Team Research)", () => {
+  it("EXPLOIT SHAPE: ['chatgpt','chatgpt'] → 400 not_enough_models, no quota, no run, no execution", async () => {
+    const res = await POST(buildPostRequest(buildPostBody({ selectedModels: ["chatgpt", "chatgpt"] })), { params: { workspaceId: WS_ID } });
+    expect(res.status).toBe(400);
+    expect((await res.json()).errorCode).toBe("not_enough_models");
+    expect(mockedCheckAndIncrementUsage).not.toHaveBeenCalled();
+    expect(mockedCreateTeamWorkspaceRun).not.toHaveBeenCalled();
+    expect(mockedExecuteOrdinaryRun).not.toHaveBeenCalled();
+  });
+  it("['claude','chatgpt','claude'] → the Team run persists and executes ['claude','chatgpt']; quota counts 2", async () => {
+    mockedCreateTeamWorkspaceRun.mockResolvedValueOnce({ status: "created", runId: "run-f1", workspaceId: WS_ID, projectId: null });
+    mockedExecuteOrdinaryRun.mockResolvedValueOnce({ status: 200, body: { ok: true, results: [], runId: "run-f1" } });
+    const res = await POST(buildPostRequest(buildPostBody({ selectedModels: ["claude", "chatgpt", "claude"] })), { params: { workspaceId: WS_ID } });
+    expect(res.status).toBe(200);
+    expect(mockedCheckAndIncrementUsage.mock.calls[0][1]).toBe(2);
+    expect(mockedCreateTeamWorkspaceRun.mock.calls[0][0]).toEqual(expect.objectContaining({ selectedModels: ["claude", "chatgpt"] }));
+    expect(mockedExecuteOrdinaryRun.mock.calls[0][0]).toEqual(expect.objectContaining({ selectedModels: ["claude", "chatgpt"] }));
+  });
+});
+
+describe("F2/R1 — the Team route persists the server-split context", () => {
+  it("createTeamWorkspaceRun receives the stripped question and questionContext; execution input unchanged", async () => {
+    mockedCreateTeamWorkspaceRun.mockResolvedValueOnce({ status: "created", runId: "run-r1", workspaceId: WS_ID, projectId: null });
+    mockedExecuteOrdinaryRun.mockResolvedValueOnce({ status: 200, body: { ok: true, results: [], runId: "run-r1" } });
+    const raw = "What does Clause 7 require?\nContext:\nCLAUSE-7-TEXT: notify within five business days.";
+    await POST(buildPostRequest(buildPostBody({ question: raw })), { params: { workspaceId: WS_ID } });
+    expect(mockedCreateTeamWorkspaceRun.mock.calls[0][0]).toEqual(expect.objectContaining({
+      question: "What does Clause 7 require?",
+      questionContext: "Context:\nCLAUSE-7-TEXT: notify within five business days.",
+    }));
+    expect(mockedExecuteOrdinaryRun.mock.calls[0][0]).toEqual(expect.objectContaining({
+      trimmedQuestion: "What does Clause 7 require?",
+      context: "Context:\nCLAUSE-7-TEXT: notify within five business days.",
+    }));
+  });
+});

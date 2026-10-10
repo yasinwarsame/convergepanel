@@ -46,6 +46,7 @@
  * identical race on the ordinary path.
  */
 
+import { distinctModelIds } from "@/lib/panel/distinctModelIds";
 import { NextRequest, NextResponse } from "next/server";
 import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
 import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
@@ -174,7 +175,8 @@ function classifyVerifyClaimRequestMode(body: Record<string, unknown>): VerifyCl
 function parseSelectedModels(body: Record<string, unknown>): ModelId[] | null {
   let selectedModels: ModelId[] = DEFAULT_MODELS;
   if (Array.isArray(body.models) && body.models.length > 0) {
-    selectedModels = body.models.filter((m: unknown): m is ModelId => ALL_MODELS.has(m as ModelId));
+    // Known ids only, then DISTINCT (F1): a repeated id is one model, not two.
+    selectedModels = distinctModelIds(body.models.filter((m: unknown): m is ModelId => ALL_MODELS.has(m as ModelId)));
   }
   if (selectedModels.length < MIN_MODELS) return null;
   return selectedModels;

@@ -408,3 +408,23 @@ describe("GET — added by TEAM-VERIFICATION-PARITY-R3 beside an unchanged POST"
     );
   });
 });
+
+describe("F1 — distinct model ids (Team Claim)", () => {
+  it("EXPLOIT SHAPE: ['chatgpt','chatgpt'] → 400 not_enough_models, no quota, no execution", async () => {
+    const res = await POST(buildPostRequest(buildBody({ models: ["chatgpt", "chatgpt"] })), { params: { workspaceId: WS_ID } });
+    expect(res.status).toBe(400);
+    expect((await res.json()).errorCode).toBe("not_enough_models");
+    expect(mockedCheckAndIncrementUsage).not.toHaveBeenCalled();
+    expect(mockedRunClaimVerificationPanel).not.toHaveBeenCalled();
+  });
+  it("unknown + duplicate cannot satisfy the minimum", async () => {
+    const res = await POST(buildPostRequest(buildBody({ models: ["bogus", "claude", "claude"] })), { params: { workspaceId: WS_ID } });
+    expect(res.status).toBe(400);
+    expect(mockedRunClaimVerificationPanel).not.toHaveBeenCalled();
+  });
+  it("['claude','gemini','claude'] → executes ['claude','gemini']", async () => {
+    await POST(buildPostRequest(buildBody({ models: ["claude", "gemini", "claude"] })), { params: { workspaceId: WS_ID } });
+    expect(mockedRunClaimVerificationPanel).toHaveBeenCalledTimes(1);
+    expect(mockedRunClaimVerificationPanel.mock.calls[0][1]).toEqual(["claude", "gemini"]);
+  });
+});
