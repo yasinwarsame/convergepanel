@@ -110,34 +110,48 @@ import { POST } from "@/app/api/synthesize-panel/route";
 import { buildSubstitutionBlock } from "@/lib/panel/normalize";
 
 /**
- * Saved-run provenance honesty (S1) — /api/synthesize-panel preserves absence.
+ * Saved-run provenance honesty (S1) under governance input authority (F2).
  *
- * Case 6: a reloaded saved run's substituted row without provenance reaches the
- * prompt with nothing manufactured (no modelId-as-model, "unknown",
- * "deepseek-chat", "primary_failed"). Case 7: the CACHED synthesis cannot carry
- * invented substitution provenance. Case 8 (live half): a live row's complete
- * provenance produces the exact pre-S1 block. No run lookup is added.
+ * The SUBSTITUTIONS block is built from the PERSISTED run rows
+ * (`runDocument.perModel`), never from request rows. A persisted substituted
+ * row carries status, and — for runs completed after 6.2a — provider,
+ * requestedModel and substitutedFrom; actualModel is never persisted (S2), so
+ * it can never reach the block, whatever the request says. Absence stays
+ * absence (no modelId-as-model, "unknown", "deepseek-chat", "primary_failed").
  */
 const PROSE = [
   "Based on the available data, HubSpot appears to be the stronger choice for a small team.",
   "It offers a lower total cost of ownership and simpler onboarding than Salesforce for teams under twenty seats.",
 ].join(" ");
+const QUESTION = "Which CRM should we choose?";
 
-const LIVE_SUB = { modelId: "claude", text: PROSE, status: "substituted", provider: "deepseek", requestedModel: "claude-sonnet-RUN", actualModel: "deepseek-chat", substitutionReason: "timeout", substitutedFrom: "anthropic:claude-sonnet-RUN" };
-/** What a reloaded pre-6.2a saved run sends: status only (S1 read path). */
-const SAVED_SUB = { modelId: "claude", text: PROSE, status: "substituted" };
+/** What a client could send for the substituted slot (complete "live" provenance) — must be ignored. */
+const CLIENT_LIVE_SUB = { modelId: "claude", text: PROSE, status: "substituted", provider: "deepseek", requestedModel: "claude-sonnet-RUN", actualModel: "deepseek-chat", substitutionReason: "timeout", substitutedFrom: "anthropic:claude-sonnet-RUN" };
 
-function request(runId: string, sub: Record<string, unknown>) {
-  return new NextRequest("http://localhost/api/synthesize-panel", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ runId, question: "Which CRM should we choose?", results: [{ modelId: "chatgpt", text: PROSE, status: "ok" }, sub] }),
+/** Persist a completed run whose second slot is a substituted row with exactly `subFacts`. */
+function persistRun(runId: string, subFacts: Record<string, unknown>) {
+  runDocs.set(runId, {
+    userId: "test-uid",
+    question: QUESTION,
+    runDocument: {
+      question: QUESTION,
+      perModel: [
+        { modelId: "chatgpt", status: "ok", rawTextTruncated: PROSE },
+        { modelId: "claude", status: "substituted", rawTextTruncated: PROSE, ...subFacts },
+      ],
+    },
   });
 }
 
-/** The pre-S1 block for a complete live entry, pinned literally (format unchanged). */
-const PRE_S1_LIVE_BLOCK = '[{"slot":"claude","requestedModel":"claude-sonnet-RUN","provider":"deepseek","actualModel":"deepseek-chat","reason":"timeout"}]';
-const INVENTED = /"unknown"|deepseek-chat|primary_failed|"requestedModel":"claude"|"actualModel":"claude"|"provider":"anthropic"/;
+function request(runId: string, clientSub: Record<string, unknown> = { modelId: "claude", text: PROSE, status: "substituted" }) {
+  return new NextRequest("http://localhost/api/synthesize-panel", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ runId, question: QUESTION, results: [{ modelId: "chatgpt", text: PROSE, status: "ok" }, clientSub] }),
+  });
+}
+
+const INVENTED = /"unknown"|deepseek-chat|primary_failed|"requestedModel":"claude"|"actualModel"|"provider":"anthropic"/;
 
 beforeEach(() => {
   runDocs.clear();
@@ -146,52 +160,63 @@ beforeEach(() => {
   runsGetCallCounts.clear();
 });
 
-describe("case 6 — a saved run's absent provenance stays absent in the synthesis prompt", () => {
+describe("case 6 — a persisted run's absent provenance stays absent in the synthesis prompt", () => {
   it("the SUBSTITUTIONS block carries the slot and nothing invented", async () => {
-    const res = await POST(request("run-saved", SAVED_SUB));
+    persistRun("run-saved", {});
+    const res = await POST(request("run-saved"));
     expect(res.status).toBe(200);
     expect(prompts.length).toBeGreaterThan(0);
     expect(blockOf(prompts[0])).toBe('[{"slot":"claude"}]');
     expect(prompts.join("\n")).not.toMatch(INVENTED);
   });
 
-  it("only the individually supplied facts are included", async () => {
-    await POST(request("run-partial", { ...SAVED_SUB, provider: "deepseek", requestedModel: "claude-RUN-1" }));
+  it("only the facts the run persisted are included", async () => {
+    persistRun("run-partial", { provider: "deepseek", requestedModel: "claude-RUN-1" });
+    await POST(request("run-partial"));
     expect(blockOf(prompts[0])).toBe('[{"slot":"claude","requestedModel":"claude-RUN-1","provider":"deepseek"}]');
+  });
+
+  it("F2: complete provenance in the REQUEST is ignored — the block is the persisted facts only", async () => {
+    persistRun("run-client-claims", {});
+    await POST(request("run-client-claims", CLIENT_LIVE_SUB));
+    expect(blockOf(prompts[0])).toBe('[{"slot":"claude"}]');
+    expect(prompts.join("\n")).not.toMatch(INVENTED);
   });
 });
 
 describe("case 7 — the cached synthesis cannot carry invented substitution provenance", () => {
-  it("saved run: the cached report echoes the block, and the block has nothing invented", async () => {
-    await POST(request("run-saved-cache", SAVED_SUB));
+  it("persisted run without provenance: the cached report echoes a block with nothing invented", async () => {
+    persistRun("run-saved-cache", {});
+    await POST(request("run-saved-cache", CLIENT_LIVE_SUB));
     const report = runDocs.get("run-saved-cache")?.synthesizedStructuredReport as { executiveSummary: string };
     expect(report.executiveSummary).toBe('ECHO [{"slot":"claude"}]');
     // ("unknownModels" is a legitimate report field name, so match invented VALUES only.)
     expect(JSON.stringify(report)).not.toMatch(/\\"unknown\\"|deepseek-chat|primary_failed|requestedModel|actualModel|anthropic/);
   });
 
-  it("CONTROL (non-vacuity): a live run's real provenance DOES reach the cache through the same path", async () => {
-    await POST(request("run-live-cache", LIVE_SUB));
+  it("CONTROL (non-vacuity): persisted provenance DOES reach the cache through the same path", async () => {
+    persistRun("run-live-cache", { provider: "deepseek", requestedModel: "claude-sonnet-RUN", substitutedFrom: "anthropic:claude-sonnet-RUN" });
+    await POST(request("run-live-cache"));
     const cached = JSON.stringify(runDocs.get("run-live-cache")?.synthesizedStructuredReport);
-    expect(cached).toContain("deepseek-chat");
     expect(cached).toContain("claude-sonnet-RUN");
+    expect(cached).toContain("deepseek");
+    expect(cached).not.toContain("deepseek-chat"); // actualModel is never persisted, so never present
   });
 });
 
-describe("case 8 (live) — complete live provenance produces the exact pre-S1 block", () => {
-  it("prompt block is byte-identical to the pre-S1 format", async () => {
-    await POST(request("run-live", LIVE_SUB));
-    expect(blockOf(prompts[0])).toBe(PRE_S1_LIVE_BLOCK);
-  });
+describe("case 8 — the block format itself is unchanged", () => {
   it("buildSubstitutionBlock: a complete entry serializes exactly as before", () => {
+    const PRE_S1_LIVE_BLOCK = '[{"slot":"claude","requestedModel":"claude-sonnet-RUN","provider":"deepseek","actualModel":"deepseek-chat","reason":"timeout"}]';
     expect(buildSubstitutionBlock([{ slot: "claude", requestedModel: "claude-sonnet-RUN", provider: "deepseek", actualModel: "deepseek-chat", reason: "timeout" }])).toBe(`\nSUBSTITUTIONS:\n${PRE_S1_LIVE_BLOCK}\n`);
   });
 });
 
-describe("no run lookup is added to recover provenance", () => {
-  it("a saved request reads runs/{runId} exactly as often as a live one", async () => {
-    await POST(request("run-a", LIVE_SUB));
-    await POST(request("run-b", SAVED_SUB));
+describe("no extra run lookup is added to recover provenance", () => {
+  it("a request reads runs/{runId} the same number of times whatever the persisted provenance", async () => {
+    persistRun("run-a", { provider: "deepseek", requestedModel: "claude-sonnet-RUN" });
+    persistRun("run-b", {});
+    await POST(request("run-a"));
+    await POST(request("run-b"));
     expect(runsGetCallCounts.get("run-b")).toBe(runsGetCallCounts.get("run-a"));
   });
 });

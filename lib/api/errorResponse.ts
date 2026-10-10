@@ -77,6 +77,8 @@ export const ERROR_CODES = {
   ADAPTIVE_RUN_INVALID: "ADAPTIVE_RUN_INVALID",
   /** The run's adaptiveOutput marker is a version this server doesn't recognize — never assumed to mean "legacy," fails safe instead. */
   ADAPTIVE_RUN_UNSUPPORTED_VERSION: "ADAPTIVE_RUN_UNSUPPORTED_VERSION",
+  /** Governance input authority (F2) — the persisted run lacks a question or two distinct usable saved model responses; synthesis is never built from request-supplied content instead. */
+  SYNTHESIS_SOURCE_UNAVAILABLE: "SYNTHESIS_SOURCE_UNAVAILABLE",
 
   // Server errors (5xx)
   INTERNAL_ERROR: "INTERNAL_ERROR",
