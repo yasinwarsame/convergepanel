@@ -50,6 +50,9 @@ const readFailureRunIds = new Set<string>();
 // test assert the route makes exactly one lookup attempt per request
 // (no internal retry loop) rather than inferring it indirectly.
 const runsGetCallCounts = new Map<string, number>();
+// Every `runs/{runId}.update()` payload, in order — lets a test prove a field
+// rides on an EXISTING write rather than a new one.
+const runUpdates: Array<{ id: string; fields: Record<string, unknown> }> = [];
 const mockAdminDb = {
   collection: (name: string) => ({
     doc: (id: string) => ({
@@ -67,6 +70,7 @@ const mockAdminDb = {
         return { exists: !!data, data: () => data };
       }),
       update: jest.fn().mockImplementation(async (fields: Record<string, unknown>) => {
+        if (name === "runs") runUpdates.push({ id, fields });
         runDocs.set(id, { ...(runDocs.get(id) || {}), ...fields });
       }),
       set: jest.fn().mockImplementation(async (fields: Record<string, unknown>, opts?: { merge?: boolean }) => {
@@ -120,6 +124,8 @@ jest.mock("@anthropic-ai/sdk", () => {
 
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/synthesize-panel/route";
+import { rollupPolicyConsensusSummary } from "@/lib/verification/consensusScoring";
+import { governanceInputFromResearchRun } from "@/lib/governance/governanceInputFromDocs";
 
 const ADAPTIVE_DECISION_SUPPORT_JSON = JSON.stringify({
   decisionQuestion: "Which CRM should we choose?",
@@ -406,5 +412,64 @@ describe("POST /api/synthesize-panel — adaptive run rejection (Step 6 fix)", (
       await POST(buildSynthesizeRequest(runId, LEGACY_PROSE_TEXT));
       expect(runsGetCallCounts.get(runId)).toBe(1);
     });
+  });
+});
+
+describe("POST /api/synthesize-panel — research evidence-quality consistency (policyConsensusSummary persisted)", () => {
+  beforeEach(() => {
+    runDocs.clear();
+    runUpdates.length = 0;
+    mockedEvaluateAndStoreGovernance.mockClear();
+    mockCreate.mockClear();
+  });
+
+  it("persists the canonical policy summary on the SAME synthesis update, and System A uses its evidence quality", async () => {
+    const runId = "run-evidence-quality";
+    runDocs.set(runId, { userId: "test-uid", question: "Which CRM should we choose?" });
+    const res = await POST(buildSynthesizeRequest(runId, LEGACY_PROSE_TEXT));
+    expect(res.status).toBe(200);
+
+    // exactly one synthesis write to the run, carrying both summaries
+    const synthesisWrites = runUpdates.filter((u) => u.id === runId && "synthesizedStructuredReport" in u.fields);
+    expect(synthesisWrites).toHaveLength(1);
+    const fields = synthesisWrites[0].fields;
+    expect(fields).toHaveProperty("synthesisConsensusSummary");
+    expect(fields).toHaveProperty("policyConsensusSummary");
+    expect(runUpdates.filter((u) => u.id === runId && "policyConsensusSummary" in u.fields)).toHaveLength(1);
+
+    const detail = fields.synthesisConsensusSummary as Parameters<typeof rollupPolicyConsensusSummary>[0];
+    const policy = fields.policyConsensusSummary as Record<string, unknown>;
+    const report = fields.synthesizedStructuredReport as { keyFindings: unknown[] };
+    // it IS the rollup of the persisted detail (not an independent recomputation with other inputs)
+    expect(policy).toEqual(rollupPolicyConsensusSummary(detail, report.keyFindings.length));
+    expect(policy.overallConsensusScore).toBe(detail.overallConsensusScore);
+    expect(["strong", "mixed", "weak"]).toContain(policy.evidenceQuality);
+    expect(Object.keys(policy).sort()).toEqual([
+      "confidenceLabel",
+      "contestedClaims",
+      "evidenceQuality",
+      "highConfidenceClaims",
+      "lowEvidenceClaims",
+      "modelCount",
+      "modelsHealthy",
+      "overallConsensusScore",
+      "supportRatio",
+    ]);
+    // no model text rides along with the new field
+    expect(JSON.stringify(policy)).not.toContain("HubSpot");
+
+    // System A was given exactly that canonical quality, from the refreshed document
+    expect(mockedEvaluateAndStoreGovernance).toHaveBeenCalledTimes(1);
+    const [callArgs] = mockedEvaluateAndStoreGovernance.mock.calls[0];
+    expect(callArgs.input.evidenceQuality).toBe(policy.evidenceQuality);
+    expect(governanceInputFromResearchRun(runDocs.get(runId)!).evidenceQuality).toBe(policy.evidenceQuality);
+  });
+
+  it("the client response keeps its established consensusSummary shape (policy summary not newly exposed)", async () => {
+    const runId = "run-evidence-quality-response";
+    runDocs.set(runId, { userId: "test-uid", question: "Which CRM should we choose?" });
+    const body = await (await POST(buildSynthesizeRequest(runId, LEGACY_PROSE_TEXT))).json();
+    expect(body).not.toHaveProperty("policyConsensusSummary");
+    expect(body.consensusSummary).toEqual(runDocs.get(runId)!.synthesisConsensusSummary);
   });
 });
