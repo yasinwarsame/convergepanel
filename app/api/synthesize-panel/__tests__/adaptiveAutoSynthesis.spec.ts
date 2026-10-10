@@ -228,7 +228,7 @@ describe("POST /api/synthesize-panel — adaptive run rejection (Step 6 fix)", (
     const runId = "run-valid-adaptive";
 
     beforeEach(() => {
-      runDocs.set(runId, { adaptiveOutput: VALID_ADAPTIVE_OUTPUT, governanceRecord: EXISTING_GOVERNANCE_RECORD });
+      runDocs.set(runId, { userId: "test-uid", adaptiveOutput: VALID_ADAPTIVE_OUTPUT, governanceRecord: EXISTING_GOVERNANCE_RECORD });
     });
 
     it("returns a 409 rejection with the documented error code, not schema output or receipt content", async () => {
@@ -285,7 +285,7 @@ describe("POST /api/synthesize-panel — adaptive run rejection (Step 6 fix)", (
     const runId = "run-malformed-adaptive";
 
     beforeEach(() => {
-      runDocs.set(runId, { adaptiveOutput: { version: 1, schemaId: "not_a_real_schema" } });
+      runDocs.set(runId, { userId: "test-uid", adaptiveOutput: { version: 1, schemaId: "not_a_real_schema" } });
     });
 
     it("returns a 409 rejection with ADAPTIVE_RUN_INVALID, not a legacy success", async () => {
@@ -306,7 +306,7 @@ describe("POST /api/synthesize-panel — adaptive run rejection (Step 6 fix)", (
     const runId = "run-unsupported-version-adaptive";
 
     beforeEach(() => {
-      runDocs.set(runId, { adaptiveOutput: { ...VALID_ADAPTIVE_OUTPUT, version: 2 } });
+      runDocs.set(runId, { userId: "test-uid", adaptiveOutput: { ...VALID_ADAPTIVE_OUTPUT, version: 2 } });
     });
 
     it("returns a 409 rejection with ADAPTIVE_RUN_UNSUPPORTED_VERSION, not a legacy success", async () => {
@@ -410,7 +410,7 @@ describe("POST /api/synthesize-panel — adaptive run rejection (Step 6 fix)", (
       // unconditionally), proving the fail-closed path never depends on
       // what the document actually contains — only on whether it could be
       // read at all.
-      runDocs.set(runId, { adaptiveOutput: VALID_ADAPTIVE_OUTPUT, governanceRecord: EXISTING_GOVERNANCE_RECORD });
+      runDocs.set(runId, { userId: "test-uid", adaptiveOutput: VALID_ADAPTIVE_OUTPUT, governanceRecord: EXISTING_GOVERNANCE_RECORD });
 
       await POST(buildSynthesizeRequest(runId, LEGACY_PROSE_TEXT));
 

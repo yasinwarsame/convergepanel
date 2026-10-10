@@ -1,7 +1,5 @@
-import { adminDb } from "@/lib/firebase/admin";
-import { ERROR_CODES } from "@/lib/api/errorResponse";
-import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
 import { mergeGovernanceIntoBody, governanceFromRunDoc } from "@/lib/governance/teamGovernancePipeline";
+import { resolveSynthesisRunAccess, SYNTHESIS_RUN_FORBIDDEN, SYNTHESIS_RUN_UNAVAILABLE } from "@/lib/synthesis/synthesisRunAccess";
 
 export type InFlightDisclosureGateResult =
   | { outcome: "cache_hit"; body: Record<string, unknown> }
@@ -25,57 +23,21 @@ export type InFlightDisclosureGateResult =
  * are ALL treated as "cannot confirm ownership" and therefore denied —
  * never as permission to silently fall through to `await existing` and
  * disclose the in-flight request's result unverified.
+ *
+ * SYNTHESIS_LEGACY_OWNERSHIP_HARDENING: ownership now comes from the shared
+ * `resolveSynthesisRunAccess` contract — a string `userId` equal to `uid`, or
+ * nothing. A run with no (or a non-string) owner is no longer treated as
+ * verified, a malformed (slash-containing) runId is denied before any lookup,
+ * and a missing run is the same concealed 403 as a foreign one (it used to be
+ * a 503, which told the caller the run did not exist). 503 remains only for a
+ * genuine inability to check.
  */
 export async function resolveInFlightDisclosureGate(runId: string, uid: string): Promise<InFlightDisclosureGateResult> {
-  const lookupUnavailable = (reason: string): InFlightDisclosureGateResult => ({
-    outcome: "denied",
-    status: 503,
-    errorCode: ERROR_CODES.RUN_LOOKUP_UNAVAILABLE,
-    message: "Could not verify this run right now. Please try again shortly.",
-    reason,
-  });
-  const forbidden = (reason: string): InFlightDisclosureGateResult => ({
-    outcome: "denied",
-    status: 403,
-    errorCode: ERROR_CODES.FORBIDDEN,
-    message: "You don't have access to this run.",
-    reason,
-  });
+  const access = await resolveSynthesisRunAccess(runId, uid);
+  if (access.outcome === "unavailable") return { outcome: "denied", ...SYNTHESIS_RUN_UNAVAILABLE, reason: access.reason };
+  if (access.outcome === "forbidden") return { outcome: "denied", ...SYNTHESIS_RUN_FORBIDDEN, reason: access.reason };
 
-  if (!adminDb) {
-    return lookupUnavailable("admin_db_unavailable");
-  }
-
-  let runDoc;
-  try {
-    runDoc = await adminDb.collection("runs").doc(runId).get();
-  } catch {
-    return lookupUnavailable("run_lookup_threw");
-  }
-  if (!runDoc.exists) {
-    // A legitimate concurrent request for a genuinely-not-yet-visible run
-    // is indistinguishable, from here, from an attacker racing a runId
-    // that may not even be real — ownership cannot be confirmed either
-    // way, so this fails closed rather than falling through unchecked.
-    return lookupUnavailable("run_not_found");
-  }
-
-  const data = runDoc.data() as Record<string, unknown>;
-  const cachedRunUserId = data?.userId;
-  if (cachedRunUserId !== undefined && cachedRunUserId !== uid) {
-    return forbidden("owner_mismatch");
-  }
-
-  let integrity;
-  try {
-    integrity = await validateRunWorkspaceAssociation(data);
-  } catch {
-    return lookupUnavailable("workspace_integrity_check_threw");
-  }
-  if (integrity.classification === "invalid") {
-    return forbidden(`workspace_run_integrity_failed:${integrity.reason}`);
-  }
-
+  const data = access.runData;
   if (data?.synthesizedStructuredReport && data?.schemaVersion === 1) {
     const gov = governanceFromRunDoc(data);
     return {

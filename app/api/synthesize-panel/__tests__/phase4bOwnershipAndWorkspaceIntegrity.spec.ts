@@ -276,12 +276,15 @@ describe("resolveInFlightDisclosureGate — direct executable coverage of the in
     }
   });
 
-  it("run document does not (yet) exist -> denied, 503, fails closed rather than falling through unchecked", async () => {
-    // Deliberately NOT seeding runDocs for RUN_ID.
+  it("run document does not (yet) exist -> denied with the SAME concealed 403 as a foreign run (no existence oracle), never falling through", async () => {
+    // Deliberately NOT seeding runDocs for RUN_ID. SYNTHESIS_LEGACY_OWNERSHIP_HARDENING:
+    // this used to be a 503, which told the caller the run did not exist.
     const result = await resolveInFlightDisclosureGate(RUN_ID, OWNER_UID);
     expect(result.outcome).toBe("denied");
     if (result.outcome === "denied") {
-      expect(result.status).toBe(503);
+      expect(result.status).toBe(403);
+      expect(result.errorCode).toBe("FORBIDDEN");
+      expect(result.message).toBe("You don't have access to this run.");
       expect(result.reason).toBe("run_not_found");
     }
   });
