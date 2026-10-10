@@ -82,6 +82,20 @@ describe("R1 — persisted questionContext", () => {
       expect(out.ok && out.value.question).toBe("Completed Q");
     }
   );
+  it.each([["null", null], ["an object", { t: "Context:\nX" }], ["an array", ["Context:\nX"]]])("%s context → question alone", (_l, questionContext) => {
+    const out = authoritativeSynthesisInputs(run(rows, { questionContext }));
+    expect(out.ok && out.value.question).toBe("Completed Q");
+  });
+  it("MAX boundary: a stored context of exactly 10,000 chars is honoured (trimmed); 10,001 is ignored, never truncated", () => {
+    const atMax = "Context:\n" + "k".repeat(10000 - 9);
+    expect(atMax).toHaveLength(10000);
+    const ok = authoritativeSynthesisInputs(run(rows, { questionContext: atMax }));
+    expect(ok.ok && ok.value.question).toBe(`Completed Q\n\n${atMax}`);
+    const over = authoritativeSynthesisInputs(run(rows, { questionContext: atMax + "k" }));
+    expect(over.ok && over.value.question).toBe("Completed Q");
+    const padded = authoritativeSynthesisInputs(run(rows, { questionContext: "  Context:\nX  " }));
+    expect(padded.ok && padded.value.question).toBe("Completed Q\n\nContext:\nX");
+  });
   it("a context inside runDocument (not the server field) is not read", () => {
     const out = authoritativeSynthesisInputs({ question: "Q", runDocument: { question: "Q", questionContext: "Context:\nX", perModel: rows } });
     expect(out.ok && out.value.question).toBe("Q");

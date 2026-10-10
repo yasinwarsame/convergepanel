@@ -27,8 +27,7 @@
  * Pure: no I/O. Never reads anything the caller supplied.
  */
 import { isUsableResult } from "@/lib/panel/publicize";
-import { composeSynthesisQuestion } from "@/lib/questionContext";
-import { MAX_QUESTION_LENGTH } from "@/lib/security/requestValidation";
+import { composeSynthesisQuestion, readPersistedQuestionContext } from "@/lib/questionContext";
 
 export type AuthoritativeModelRow = {
   modelId: string;
@@ -68,8 +67,7 @@ export function authoritativeSynthesisInputs(run: Record<string, unknown>): Auth
       : null;
   if (question === null) return { ok: false, reason: "question_unavailable" };
   // Only a server-written context within the request contract's own bound is honoured.
-  const questionContext =
-    nonEmptyString(run.questionContext) && run.questionContext.length <= MAX_QUESTION_LENGTH ? run.questionContext.trim() : undefined;
+  const questionContext = readPersistedQuestionContext(run.questionContext);
 
   if (!runDocument || !Array.isArray(runDocument.perModel)) return { ok: false, reason: "results_unavailable" };
 
