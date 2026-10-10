@@ -51,6 +51,21 @@ export function persistableQuestionContext(context: string | null | undefined): 
 }
 
 /**
+ * The READ side of `persistableQuestionContext`: the one contract every
+ * reader of a stored `questionContext` applies (the synthesis reader, and the
+ * Personal → Team snapshot writer that propagates it). Stored data is untyped,
+ * so only a non-blank string whose STORED length is within the same
+ * 10,000-character contract is honoured, returned trimmed. Anything else —
+ * including an oversized value — is ignored, never truncated: repairing
+ * malformed history would turn a context no reader honoured into a new one.
+ */
+export function readPersistedQuestionContext(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length > MAX_QUESTION_LENGTH) return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+/**
  * The question a synthesis is given: the stored question alone, or — when the
  * run persisted a context — the question followed by that context, as the
  * models saw both. Never adds a "Context:" section that was not persisted.

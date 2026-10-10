@@ -75,6 +75,7 @@ import { buildPersonalResearchSnapshotOrigin, isWellFormedPersonalResearchSnapsh
 import { buildAdaptiveGovernanceRecord } from "@/lib/adaptiveSchema/governanceRecordBuilder";
 import type { PersistedAdaptiveOutputV1 } from "@/lib/adaptiveSchema/persistedOutput";
 import { estimateDocumentSize, MAX_TOTAL_DOC_SIZE } from "@/lib/panel/sanitizeText";
+import { readPersistedQuestionContext } from "@/lib/questionContext";
 
 export type CreateTeamRunSnapshotResult =
   | { status: "created"; runId: string; workspaceId: string; projectId: string }
@@ -166,6 +167,13 @@ export function buildTeamRunSnapshotPayload(args: {
   for (const field of COPIED_CONTENT_FIELDS) {
     if (hasOwn(source, field) && source[field] !== undefined) payload[field] = source[field];
   }
+  // The server-split "Context:" material (R1) travels with the question so a
+  // later synthesis of the snapshot sees what the source's models saw. Read
+  // through the SAME contract the synthesis reader applies — a value that
+  // reader ignores (malformed, blank, oversized) is not copied, never repaired —
+  // and part of this one payload, so it counts toward the size budget below.
+  const questionContext = readPersistedQuestionContext(source.questionContext);
+  if (questionContext !== undefined) payload.questionContext = questionContext;
   if (hasOwn(source, "synthesizedStructuredReport") && source.synthesizedStructuredReport && source.schemaVersion === 1) {
     for (const field of SYNTHESIS_FIELDS) {
       if (hasOwn(source, field) && source[field] !== undefined) payload[field] = source[field];

@@ -185,7 +185,10 @@ jest.mock("@/lib/stripe/usageCheck", () => ({
 }));
 
 import { computeMembershipId } from "@/lib/workspaces/membershipId";
-import { createTeamRunSnapshotFromPersonal } from "@/lib/firestore/teamRunSnapshots";
+import { buildTeamRunSnapshotPayload, createTeamRunSnapshotFromPersonal } from "@/lib/firestore/teamRunSnapshots";
+import { authoritativeSynthesisInputs } from "@/lib/synthesis/authoritativeRunInputs";
+import { composeSynthesisQuestion } from "@/lib/questionContext";
+import { MAX_QUESTION_LENGTH } from "@/lib/security/requestValidation";
 import { computeRunSnapshotLockId } from "@/lib/workspaces/runSnapshotLock";
 import { validateTeamRunRowShape } from "@/lib/workspaces/teamRunRowValidation";
 import { getPersonalWorkspaceId } from "@/lib/workspaces/personalWorkspaceId";
@@ -918,5 +921,224 @@ describe("Z29–Z35 — idempotency", () => {
     stores.runs.set(lock.snapshotRunId, { data: { ...dest, projectId: PROJECT_ID }, updateTime: nextUpdateTime() });
     expect(await createTeamRunSnapshotFromPersonal(args())).toEqual({ status: "already_exists", runId: lock.snapshotRunId, workspaceId: WS_ID, projectId: PROJECT_ID });
     expect(stores.runs.size).toBe(2);
+  });
+});
+
+/**
+ * TEAM_RESEARCH_SNAPSHOT_QUESTION_CONTEXT_PARITY — a Personal run's
+ * server-persisted `questionContext` (R1) travels into the Team snapshot under
+ * the SAME read contract the synthesis reader applies, so the destination
+ * synthesizes from exactly what the source would. The parity oracle is the
+ * REAL `authoritativeSynthesisInputs()` run on both stored documents.
+ */
+describe("QCP — questionContext parity (Personal → Team snapshot)", () => {
+  const CLAUSE_Q = "What does Clause 7 require?";
+  const CLAUSE_CTX = "Context:\nCLAUSE-7-TEXT: The supplier must notify within five business days.";
+
+  /** A context-bearing source WITHOUT a synthesis cache — the regeneration case the defect breaks. */
+  function seedContextSource(questionContext: unknown, extra: Record<string, unknown> = {}) {
+    const rd = { ...runDocument(SRC, MEMBER_UID), question: CLAUSE_Q };
+    return seedSource(SRC, { question: CLAUSE_Q, runDocument: rd, ...(questionContext === undefined ? {} : { questionContext }), ...extra });
+  }
+  const has = (o: Record<string, unknown>, k: string) => Object.prototype.hasOwnProperty.call(o, k);
+  /** A second, independent snapshot inside one test: empty stores, the same Workspace/Project/members as beforeEach. */
+  function reseedDestination() {
+    resetStores();
+    txCreateLog.length = 0;
+    seedWorkspace();
+    seedMembership(OWNER_UID, "owner");
+    seedMembership(MEMBER_UID, "member");
+    seedPersonalWorkspace(MEMBER_UID);
+    seedProject();
+  }
+
+  it("copies a valid context verbatim beside the question (never concatenated into it), inside the ONE transactional create, and nowhere else", async () => {
+    seedContextSource(CLAUSE_CTX);
+    expect((await createTeamRunSnapshotFromPersonal(args())).status).toBe("created");
+    const { id, data } = onlyCreatedRun();
+    expect(data.questionContext).toBe(CLAUSE_CTX);
+    expect(data.question).toBe(CLAUSE_Q);
+    expect((data.runDocument as Record<string, unknown>).question).toBe(CLAUSE_Q);
+    // Atomic: the context is in the transaction's own buffered create of the run.
+    const runCreates = txCreateLog.filter((w) => w.collection === "runs");
+    expect(runCreates).toHaveLength(1);
+    expect(runCreates[0].id).toBe(id);
+    expect(runCreates[0].data.questionContext).toBe(CLAUSE_CTX);
+    // Not disclosed into the lock or the audit event (positive control: the run carries it).
+    expect(JSON.stringify(Array.from(stores.runSnapshotLocks.values()))).not.toContain("CLAUSE-7-TEXT");
+    expect(JSON.stringify(Array.from(stores.workspaceMembershipEvents.values()))).not.toContain("CLAUSE-7-TEXT");
+    expect(JSON.stringify(txSetLog)).not.toContain("CLAUSE-7-TEXT");
+  });
+
+  it("REGENERATION: with no synthesis cache, the destination's authoritative synthesis question carries the source context — identical to the source's", async () => {
+    const src = seedContextSource(CLAUSE_CTX);
+    expect(has(src, "synthesizedStructuredReport")).toBe(false);
+    await createTeamRunSnapshotFromPersonal(args());
+    const { data } = onlyCreatedRun();
+    const dest = authoritativeSynthesisInputs(data);
+    const source = authoritativeSynthesisInputs(src);
+    if (!dest.ok || !source.ok) throw new Error("expected authoritative inputs on both");
+    expect(dest.value.question).toBe(composeSynthesisQuestion(CLAUSE_Q, CLAUSE_CTX));
+    expect(dest.value.question).toContain(CLAUSE_Q);
+    expect(dest.value.question).toContain("Context:");
+    expect(dest.value.question).toContain("CLAUSE-7-TEXT: The supplier must notify within five business days.");
+    // Full semantic parity: question, model ids, text, status and persisted provenance.
+    expect(dest.value).toEqual(source.value);
+  });
+
+  it("source → destination parity holds with substitution provenance on the rows", async () => {
+    const rd = runDocument(SRC, MEMBER_UID) as Record<string, any>;
+    rd.question = CLAUSE_Q;
+    rd.perModel[1] = { ...rd.perModel[1], status: "substituted", provider: "anthropic", requestedModel: "claude", substitutedFrom: "rate_limited" };
+    const src = seedSource(SRC, { question: CLAUSE_Q, runDocument: rd, questionContext: CLAUSE_CTX });
+    await createTeamRunSnapshotFromPersonal(args());
+    const dest = authoritativeSynthesisInputs(onlyCreatedRun().data);
+    const source = authoritativeSynthesisInputs(src);
+    expect(source.ok && source.value.rows.map((r) => [r.modelId, r.status, r.provenance])).toEqual([
+      ["chatgpt", "ok", {}],
+      ["claude", "substituted", { provider: "anthropic", requestedModel: "claude", substitutedFrom: "rate_limited" }],
+    ]);
+    expect(dest).toEqual(source);
+  });
+
+  it("NO CONTEXT: the destination has no questionContext property and synthesizes from the question alone", async () => {
+    const src = seedContextSource(undefined);
+    await createTeamRunSnapshotFromPersonal(args());
+    const { data } = onlyCreatedRun();
+    expect(has(data, "questionContext")).toBe(false);
+    const dest = authoritativeSynthesisInputs(data);
+    expect(dest.ok && dest.value.question).toBe(CLAUSE_Q);
+    expect(dest.ok && dest.value.question).not.toContain("Context:");
+    expect(dest).toEqual(authoritativeSynthesisInputs(src));
+  });
+
+  it.each([
+    ["null", null],
+    ["a number", 42],
+    ["an object", { text: "Context:\nX" }],
+    ["an array", ["Context:\nX"]],
+    ["a whitespace-only string", "   \n\t "],
+    ["a string one char over MAX_QUESTION_LENGTH", "Context:\n" + "o".repeat(MAX_QUESTION_LENGTH - 8)],
+  ])("MALFORMED: %s is not copied, and destination synthesis matches the source reader (context ignored on both)", async (_label, value) => {
+    const src = seedContextSource(value);
+    await createTeamRunSnapshotFromPersonal(args());
+    const { data } = onlyCreatedRun();
+    expect(has(data, "questionContext")).toBe(false);
+    const dest = authoritativeSynthesisInputs(data);
+    expect(dest.ok && dest.value.question).toBe(CLAUSE_Q);
+    expect(dest).toEqual(authoritativeSynthesisInputs(src));
+  });
+
+  it("OVERSIZED history is never truncated into a newly authoritative context", async () => {
+    const oversized = "Context:\n" + "z".repeat(MAX_QUESTION_LENGTH);
+    expect(oversized.length).toBeGreaterThan(MAX_QUESTION_LENGTH);
+    seedContextSource(oversized);
+    await createTeamRunSnapshotFromPersonal(args());
+    const { data } = onlyCreatedRun();
+    expect(has(data, "questionContext")).toBe(false);
+    // No prefix of it was stored anywhere on the destination.
+    expect(JSON.stringify(data)).not.toContain("z".repeat(100));
+    // Positive control: the same material within the limit IS copied.
+    reseedDestination();
+    const within = oversized.slice(0, MAX_QUESTION_LENGTH);
+    seedContextSource(within);
+    await createTeamRunSnapshotFromPersonal(args());
+    expect(onlyCreatedRun().data.questionContext).toBe(within);
+  });
+
+  it("MAX boundary: exactly MAX_QUESTION_LENGTH is copied; MAX + 1 is not (the repository constant, not a second policy)", async () => {
+    const atMax = "Context:\n" + "m".repeat(MAX_QUESTION_LENGTH - 9);
+    expect(atMax).toHaveLength(MAX_QUESTION_LENGTH);
+    seedContextSource(atMax);
+    await createTeamRunSnapshotFromPersonal(args());
+    expect(onlyCreatedRun().data.questionContext).toBe(atMax);
+
+    reseedDestination();
+    seedContextSource(atMax + "m");
+    await createTeamRunSnapshotFromPersonal(args());
+    expect(has(onlyCreatedRun().data, "questionContext")).toBe(false);
+  });
+
+  it("a valid context with surrounding whitespace is copied in the reader's normalized (trimmed) form", async () => {
+    seedContextSource(`  \n${CLAUSE_CTX}\n  `);
+    await createTeamRunSnapshotFromPersonal(args());
+    expect(onlyCreatedRun().data.questionContext).toBe(CLAUSE_CTX);
+  });
+
+  it("SIZE BUDGET: a valid context that pushes an otherwise-fitting snapshot over MAX_TOTAL_DOC_SIZE → snapshot_too_large before any write, nothing truncated or dropped", async () => {
+    const context = "Context:\n" + "c".repeat(5000);
+    const sizeFor = (text: string, ctx?: string) => {
+      const rd = { ...runDocument(SRC, MEMBER_UID, text), question: CLAUSE_Q };
+      const built = buildTeamRunSnapshotPayload({
+        source: { ...stores.runs.get(SRC)!.data, runDocument: rd, ...(ctx ? { questionContext: ctx } : {}) },
+        sourceRunId: SRC, newRunId: `run-${"0".repeat(8)}-0000-4000-8000-${"0".repeat(12)}`, uid: MEMBER_UID, workspaceId: WS_ID, projectId: PROJECT_ID, now: ts(2_000_000_000), nowIso: "2033-05-18T03:33:20.000Z",
+      });
+      if (!built.ok) throw new Error("expected a payload");
+      return JSON.stringify(built.payload).length;
+    };
+    const base = sizeFor("x");
+    // Both perModel rows carry the text, so each extra char costs two.
+    const text = "x".repeat(1 + Math.floor((MAX_TOTAL_DOC_SIZE - 2000 - base) / 2));
+    expect(sizeFor(text)).toBeLessThanOrEqual(MAX_TOTAL_DOC_SIZE - 1000);
+    expect(sizeFor(text, context)).toBeGreaterThan(MAX_TOTAL_DOC_SIZE);
+
+    const src = seedContextSource(context, { runDocument: { ...runDocument(SRC, MEMBER_UID, text), question: CLAUSE_Q } });
+    const before = JSON.stringify(src);
+    expect(await createTeamRunSnapshotFromPersonal(args())).toEqual({ status: "snapshot_too_large" });
+    expect(stores.runs.size).toBe(1);
+    expect(stores.runSnapshotLocks.size).toBe(0);
+    expect(stores.workspaceMembershipEvents.size).toBe(0);
+    expect(txCreateLog).toHaveLength(0);
+    expect(JSON.stringify(stores.runs.get(SRC)!.data)).toBe(before);
+
+    // Positive control: the SAME source without the context fits and is created.
+    delete stores.runs.get(SRC)!.data.questionContext;
+    expect((await createTeamRunSnapshotFromPersonal(args())).status).toBe("created");
+  });
+
+  it("SYNTHESIS CACHE: an existing valid cache is still copied as the same references (hash untouched), now alongside the context", async () => {
+    const src = seedContextSource(CLAUSE_CTX, {
+      synthesizedStructuredReport: { headline: "x" },
+      schemaVersion: 1,
+      synthesizedAt: ts(650),
+      synthesizedBy: "claude",
+      synthesisInputHash: "hash-of-source-inputs",
+      synthesisConsensusSummary: { score: 0.9 },
+      synthesisConsensusAudit: { a: 1 },
+      synthesisMetadata: { cached: false },
+    });
+    await createTeamRunSnapshotFromPersonal(args());
+    const { data } = onlyCreatedRun();
+    for (const f of ["synthesizedStructuredReport", "synthesizedAt", "synthesisConsensusSummary", "synthesisConsensusAudit", "synthesisMetadata"]) {
+      expect(data[f]).toBe(src[f]);
+    }
+    expect(data.schemaVersion).toBe(1);
+    expect(data.synthesizedBy).toBe("claude");
+    expect(data.synthesisInputHash).toBe("hash-of-source-inputs");
+    expect(data.questionContext).toBe(CLAUSE_CTX);
+  });
+
+  it("IDEMPOTENCY: context does not touch the lock identity; the repeat is already_exists with no second run, lock or event", async () => {
+    seedContextSource(CLAUSE_CTX);
+    const first = await createTeamRunSnapshotFromPersonal(args());
+    if (first.status !== "created") throw new Error("expected created");
+    expect(Array.from(stores.runSnapshotLocks.keys())).toEqual([lockIdFor()]);
+    const second = await createTeamRunSnapshotFromPersonal(args());
+    expect(second).toEqual({ status: "already_exists", runId: first.runId, workspaceId: WS_ID, projectId: PROJECT_ID });
+    expect(stores.runs.size).toBe(2);
+    expect(stores.runSnapshotLocks.size).toBe(1);
+    expect(stores.workspaceMembershipEvents.size).toBe(1);
+  });
+
+  it("AUTHORIZATION unchanged: a foreign source's context is never copied (concealed source_not_found, nothing written; positive control: own source → copied)", async () => {
+    seedContextSource(CLAUSE_CTX, { userId: OTHER_UID, workspaceId: personalWs(OTHER_UID) });
+    seedPersonalWorkspace(OTHER_UID);
+    expect(await createTeamRunSnapshotFromPersonal(args())).toEqual({ status: "source_not_found" });
+    expect(stores.runs.size).toBe(1);
+    expect(txCreateLog).toHaveLength(0);
+
+    seedContextSource(CLAUSE_CTX);
+    expect((await createTeamRunSnapshotFromPersonal(args())).status).toBe("created");
+    expect(onlyCreatedRun().data.questionContext).toBe(CLAUSE_CTX);
   });
 });
