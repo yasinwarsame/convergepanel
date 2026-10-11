@@ -76,3 +76,36 @@ it("no banned evaluative wording, no score, no ranking, no aggregate across sour
   expect(byTestId(render(classifiedLinks), "source-publisher-class")).toHaveLength(RAW.length);
   expect(text).not.toMatch(/\d+ (government|intergovernmental|unclassified|open-contribution)/);
 });
+
+describe("B4 — source order is never publisher-ranked", () => {
+  /** Deliberately incompatible with any class ranking: open-contribution, unclassified, government, intergovernmental. */
+  const UNRANKED = ["https://en.wikipedia.org/wiki/X", "https://www.reuters.com/y", "https://www.sec.gov/x", "https://who.int/news"];
+  it("links and badges render in exactly the input order (no GOVERNMENT-first or any class ordering)", () => {
+    const r = render(UNRANKED.map((url) => ({ url, hostname: new URL(url).hostname, publisher: classifySourcePublisher(url) })));
+    expect(links(r).map((l) => l.href)).toEqual(UNRANKED);
+    expect(byTestId(r, "source-publisher-class").map(textOf)).toEqual(["Open-contribution platform", "Unclassified domain", "Government domain", "Intergovernmental domain"]);
+    // Each badge sits in the same <li> as its own link.
+    const items = r.root.findAll((n) => n.type === "li" && n.findAll((c) => c.type === "a").length === 1);
+    expect(items.map((li) => [li.findAll((c) => c.type === "a")[0].props.href, textOf(li.findAll((c) => typeof c.type === "string" && c.props["data-testid"] === "source-publisher-class")[0])])).toEqual([
+      [UNRANKED[0], "Open-contribution platform"],
+      [UNRANKED[1], "Unclassified domain"],
+      [UNRANKED[2], "Government domain"],
+      [UNRANKED[3], "Intergovernmental domain"],
+    ]);
+  });
+});
+
+describe("P2 — inherited / prototype property names on the wire never become labels", () => {
+  it.each(["toString", "constructor", "__defineGetter__", "valueOf", "hasOwnProperty", "__proto__", "isPrototypeOf"])("publisherClass %p → link renders, no badge, no publisher disclaimer, no throw", (hostile) => {
+    // `hostile` is only a string VALUE here — no object is built with that key, so nothing is polluted.
+    let r!: TestRenderer.ReactTestRenderer;
+    expect(() => {
+      r = render([{ ...plainLinks[0], publisher: { publisherClass: hostile, reasonCode: "no_rule_matched", matchedRule: null, host: "www.sec.gov", classifierVersion: 1 } }]);
+    }).not.toThrow();
+    expect(links(r)).toEqual([{ href: plainLinks[0].url, text: plainLinks[0].hostname, target: "_blank", rel: "noopener noreferrer" }]);
+    expect(byTestId(r, "source-publisher-class")).toHaveLength(0);
+    expect(byTestId(r, "source-publisher-disclaimer")).toHaveLength(0);
+    expect(JSON.stringify(r.toJSON())).not.toMatch(/function|\[native code\]|\[object Object\]/);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+});

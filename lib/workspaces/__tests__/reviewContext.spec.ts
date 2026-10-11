@@ -98,6 +98,10 @@ jest.mock("@/lib/sourceAuthority/classifySourcePublisher", () => {
 import { computeMembershipId } from "@/lib/workspaces/membershipId";
 import { buildAdaptiveHumanReviewVoteId } from "@/lib/governance/adaptiveHumanReviewVote";
 import { getReviewContext, decisionReceiptSourceLinks } from "@/lib/workspaces/reviewContext";
+import * as reviewContextModule from "@/lib/workspaces/reviewContext";
+import { classifySourcePublisher as classifierAsSeenByReviewContext } from "@/lib/sourceAuthority/classifySourcePublisher";
+import { readFileSync } from "fs";
+import { join } from "path";
 import { normalizeSourceUrls } from "@/lib/adaptiveSchema/sourceUrlNormalization";
 import type { WorkspaceReviewCandidate } from "@/lib/workspaces/workspaceReviewEligibility";
 
@@ -923,5 +927,43 @@ describe("Order 4 — Source Publisher Class on the Decision Receipt sources", (
     expect(decisionReceiptSourceLinks([], true)).toEqual([]);
     expect(decisionReceiptSourceLinks(["NIST glossary"], true)).toEqual([]);
     expect(mockClassifySourcePublisher).not.toHaveBeenCalled();
+  });
+});
+
+describe("Order 4 — B4: the server never reorders sources by publisher class", () => {
+  beforeEach(() => {
+    mockClassifySourcePublisher.mockReset();
+    mockClassifySourcePublisher.mockImplementation(() => undefined);
+  });
+  it("flag ON keeps exactly the normalizeSourceUrls order for a deliberately unranked input", () => {
+    const UNRANKED = ["https://en.wikipedia.org/wiki/X", "https://www.reuters.com/y", "https://www.sec.gov/x", "https://who.int/news"];
+    const links = decisionReceiptSourceLinks(UNRANKED, true);
+    expect(links.map((l) => l.url)).toEqual(normalizeSourceUrls(UNRANKED).map((l) => l.url));
+    expect(links.map((l) => l.publisher?.publisherClass)).toEqual(["OPEN_CONTRIBUTION_PLATFORM", "UNCLASSIFIED", "GOVERNMENT", "INTERGOVERNMENTAL_ORGANIZATION"]);
+  });
+});
+
+describe("Order 4 — E6: reviewContext never re-exports the raw classifier", () => {
+  const realClassifier = jest.requireActual("@/lib/sourceAuthority/classifySourcePublisher").classifySourcePublisher;
+  const realModule = jest.requireActual("@/lib/sourceAuthority/classifySourcePublisher") as Record<string, unknown>;
+  const realHost = jest.requireActual("@/lib/sourceAuthority/normalizeAuthorityHost") as Record<string, unknown>;
+
+  it("no public export of reviewContext IS the classifier (or another sourceAuthority function), under any name", () => {
+    const forbidden = new Set<unknown>([classifierAsSeenByReviewContext, realClassifier, ...Object.values(realModule), ...Object.values(realHost)].filter((v) => typeof v === "function"));
+    const leaks = Object.entries(reviewContextModule).filter(([, v]) => forbidden.has(v)).map(([k]) => k);
+    expect(leaks).toEqual([]);
+    // Non-vacuity: the intended helper IS exported, and it is not the classifier.
+    expect(typeof reviewContextModule.decisionReceiptSourceLinks).toBe("function");
+    expect(forbidden.has(reviewContextModule.decisionReceiptSourceLinks)).toBe(false);
+  });
+
+  it("no approved read-path module contains value re-export syntax for sourceAuthority symbols", () => {
+    const root = join(__dirname, "..", "..", "..");
+    for (const rel of ["lib/workspaces/reviewContext.ts", "lib/client/workspaceReviewClient.ts", "components/workspace/DecisionReceiptSection.tsx"]) {
+      const code = readFileSync(join(root, rel), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+      expect({ rel, starReexport: /export\s*\*\s*(?:as\s+\w+\s*)?from\s*["'][^"']*sourceAuthority/.test(code) }).toEqual({ rel, starReexport: false });
+      expect({ rel, namedReexportFrom: /export\s*\{[^}]*\}\s*from\s*["'][^"']*sourceAuthority/.test(code) && !/export\s+type\s*\{[^}]*\}\s*from\s*["'][^"']*sourceAuthority/.test(code) }).toEqual({ rel, namedReexportFrom: false });
+      expect({ rel, localReexport: /export\s*\{[^}]*\b(classifySourcePublisher|registryEntryMatches|normalizeAuthorityHost|labelBoundaryMatch|REGISTRY_ENTRIES|RESTRICTED_NAMESPACE_RULES)\b[^}]*\}/.test(code) }).toEqual({ rel, localReexport: false });
+    }
   });
 });
