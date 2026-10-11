@@ -156,6 +156,18 @@ service cloud.firestore {
       allow read, write: if isAdminClaim();
     }
 
+    // Order 4 Slice 2a — Workspace Source Standing (current state + append-only
+    // history). Server-only: written and read exclusively through the Admin SDK
+    // after Team admission + `sources.attest`. Explicit client deny, so this
+    // path never depends on the default rule below staying in place.
+    match /workspaces/{workspaceId}/sourceAuthority/{sourceId} {
+      allow read, write: if false;
+
+      match /events/{eventId} {
+        allow read, write: if false;
+      }
+    }
+
     // Default deny all other documents
     match /{document=**} {
       allow read, write: if false;

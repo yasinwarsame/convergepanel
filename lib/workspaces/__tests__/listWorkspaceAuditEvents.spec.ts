@@ -631,3 +631,39 @@ describe("listWorkspaceAuditEvents — Phase PROJECT-AUDIT-AR-I1: workspace_proj
   });
 });
 
+
+describe("Order 4 Slice 2a — Source Standing audit rows are recognised but not surfaced", () => {
+  const H = "a".repeat(64);
+  const standingEvt = (id: string, seconds: number) => evt(id, { eventType: "workspace_source_standing_changed", targetUid: undefined, previousRole: undefined, sourceIdHash: H, previousStatus: null, newStatus: "ACCEPTED", reasonCode: "primary_document", revision: 1, successorIdHash: null, at: new FakeTimestamp(seconds, 0) });
+
+  it("skipped quietly: never emitted, never logged as malformed, never resolved for identity", async () => {
+    const { logger } = jest.requireMock("@/lib/logger") as { logger: { warn: jest.Mock } };
+    logger.warn.mockClear();
+    eventDocs = [evt("m1", { at: new FakeTimestamp(100, 0) }), standingEvt("s1", 200)];
+    const r = await listWorkspaceAuditEvents({ workspaceId: WS_ID, limit: 20 });
+    if (r.status !== "ok") throw new Error("expected ok");
+    expect(r.items.map((i) => i.eventType)).toEqual(["workspace_member_removed"]); // positive control: the ordinary row IS emitted
+    expect(JSON.stringify(r)).not.toContain(H);
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it("a malformed row of a known surfaced type is still warned about (the skip is type-exact)", async () => {
+    const { logger } = jest.requireMock("@/lib/logger") as { logger: { warn: jest.Mock } };
+    logger.warn.mockClear();
+    eventDocs = [evt("bad", { eventType: "workspace_source_standing_changed_v2" })];
+    await listWorkspaceAuditEvents({ workspaceId: WS_ID, limit: 20 });
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("pagination is unchanged: a skipped standing row still advances the cursor (no row is ever re-served)", async () => {
+    eventDocs = [evt("m1", { at: new FakeTimestamp(100, 0) }), standingEvt("s1", 200), evt("m3", { at: new FakeTimestamp(300, 0) })];
+    const p1 = await listWorkspaceAuditEvents({ workspaceId: WS_ID, limit: 2 });
+    if (p1.status !== "ok") throw new Error("expected ok");
+    expect(p1.items).toHaveLength(1); // m3; s1 consumed the second slot
+    expect(p1.hasMore).toBe(true);
+    const p2 = await listWorkspaceAuditEvents({ workspaceId: WS_ID, limit: 2, cursorRaw: p1.nextCursor });
+    if (p2.status !== "ok") throw new Error("expected ok");
+    expect(p2.items).toHaveLength(1); // m1 — never s1, never m3 again
+    expect(p2.hasMore).toBe(false);
+  });
+});

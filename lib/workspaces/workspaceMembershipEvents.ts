@@ -119,7 +119,8 @@ export type WorkspaceMembershipEventType =
   | "workspace_project_restored"
   | "workspace_research_snapshot_created"
   | "workspace_project_assignees_changed"
-  | "workspace_research_assignee_changed";
+  | "workspace_research_assignee_changed"
+  | "workspace_source_standing_changed";
 
 interface WorkspaceMembershipEventIdentity {
   actorUid: string;
@@ -171,6 +172,24 @@ interface WorkspaceResearchAssignmentEventIdentity {
   assigneeUid: string | null;
 }
 
+/**
+ * Order 4 Slice 2a — a Source Standing change (accept / dispute / supersede /
+ * withdraw), written via `tx.create()` in the SAME transaction as the
+ * standing's current state and its own history event. Minimised: identity
+ * HASHES only — never the cited URL, page content or notes. Statuses are
+ * stored as plain strings here; the standing module owns their vocabulary.
+ */
+interface WorkspaceSourceStandingEventIdentity {
+  actorUid: string;
+  workspaceId: string;
+  sourceIdHash: string;
+  previousStatus: string | null;
+  newStatus: string;
+  reasonCode: string;
+  revision: number;
+  successorIdHash: string | null;
+}
+
 export type WorkspaceMembershipEventArgs =
   | (WorkspaceMembershipEventIdentity & { eventType: "workspace_member_removed"; previousRole: WorkspaceMembershipRole })
   | (WorkspaceMembershipEventIdentity & { eventType: "workspace_ownership_transferred"; previousRole: WorkspaceMembershipRole })
@@ -179,7 +198,8 @@ export type WorkspaceMembershipEventArgs =
   | (WorkspaceProjectEventIdentity & { eventType: "workspace_project_restored" })
   | (WorkspaceResearchSnapshotEventIdentity & { eventType: "workspace_research_snapshot_created" })
   | (WorkspaceProjectAssignmentEventIdentity & { eventType: "workspace_project_assignees_changed" })
-  | (WorkspaceResearchAssignmentEventIdentity & { eventType: "workspace_research_assignee_changed" });
+  | (WorkspaceResearchAssignmentEventIdentity & { eventType: "workspace_research_assignee_changed" })
+  | (WorkspaceSourceStandingEventIdentity & { eventType: "workspace_source_standing_changed" });
 
 export type WorkspaceMembershipEventDocData =
   | (WorkspaceMembershipEventIdentity & { eventType: "workspace_member_removed"; previousRole: WorkspaceMembershipRole; at: Timestamp })
@@ -189,7 +209,8 @@ export type WorkspaceMembershipEventDocData =
   | (WorkspaceProjectEventIdentity & { eventType: "workspace_project_restored"; at: Timestamp })
   | (WorkspaceResearchSnapshotEventIdentity & { eventType: "workspace_research_snapshot_created"; at: Timestamp })
   | (WorkspaceProjectAssignmentEventIdentity & { eventType: "workspace_project_assignees_changed"; at: Timestamp })
-  | (WorkspaceResearchAssignmentEventIdentity & { eventType: "workspace_research_assignee_changed"; at: Timestamp });
+  | (WorkspaceResearchAssignmentEventIdentity & { eventType: "workspace_research_assignee_changed"; at: Timestamp })
+  | (WorkspaceSourceStandingEventIdentity & { eventType: "workspace_source_standing_changed"; at: Timestamp });
 
 /**
  * Pure — no I/O, never throws. `at` is caller-supplied (never generated

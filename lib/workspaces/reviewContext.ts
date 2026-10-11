@@ -55,7 +55,9 @@ import { parsePersistedAdaptiveOutput } from "@/lib/adaptiveSchema/persistedOutp
 import { normalizeSourceUrls, type NormalizedSourceLink } from "@/lib/adaptiveSchema/sourceUrlNormalization";
 import { classifySourcePublisher } from "@/lib/sourceAuthority/classifySourcePublisher";
 import type { SourcePublisherClassification } from "@/lib/sourceAuthority/types";
-import { SOURCE_PUBLISHER_CLASS_ENABLED } from "@/lib/env";
+import { SOURCE_AUTHORITY_METADATA_ENABLED, SOURCE_PUBLISHER_CLASS_ENABLED } from "@/lib/env";
+import { withSourceStanding } from "@/lib/sourceStanding/reviewContextStanding";
+import type { SourceStandingPresentationV1 } from "@/lib/sourceStanding/standingTypes";
 import { buildReviewOverview } from "@/lib/adaptiveSchema/reviewOverviewBuilder";
 import { isCanonicalDueAt, type AdaptiveHumanReviewAssignmentV1 } from "@/lib/governance/adaptiveHumanReviewAssignment";
 import { parseAdaptiveHumanReviewPanel, type AdaptiveHumanReviewPanelV1 } from "@/lib/governance/adaptiveHumanReviewPanel";
@@ -150,8 +152,14 @@ export interface ReviewContextPanelInfo {
  * Order 4 — when SOURCE_PUBLISHER_CLASS_ENABLED is on, each displayed link may
  * carry an optional descriptive `publisher` classification. The key is ABSENT
  * (not null/undefined) while the flag is off.
+ *
+ * Order 4 Slice 2a — when SOURCE_AUTHORITY_METADATA_ENABLED is on, a displayed
+ * link may also carry `standing`: what THIS Workspace has explicitly recorded
+ * for that exact document (current state only). Absent while the flag is off
+ * and whenever nothing is recorded. Independent of `publisher` — publisher
+ * class never implies standing.
  */
-export type ReviewContextSourceLink = NormalizedSourceLink & { publisher?: SourcePublisherClassification };
+export type ReviewContextSourceLink = NormalizedSourceLink & { publisher?: SourcePublisherClassification; standing?: SourceStandingPresentationV1 };
 
 export interface ReviewContextDecisionReceiptInfo {
   conclusion: string;
@@ -448,6 +456,10 @@ export async function getReviewContext(args: { workspaceId: string; runId: strin
     const modelsWithUsableOutput = adaptiveOutputParse.ok ? (adaptiveOutputParse.output.meta.modelsWithUsableOutput ?? null) : null;
     const question = typeof runData.question === "string" ? runData.question : "";
 
+    const displayedSources = decisionReceiptSourceLinks(record.decisionReceipt.sources, SOURCE_PUBLISHER_CLASS_ENABLED);
+    // Flag off: no call, no read, no key — byte-identical to pre-Slice-2a output.
+    const sources = SOURCE_AUTHORITY_METADATA_ENABLED ? await withSourceStanding(target.workspaceId, displayedSources) : displayedSources;
+
     const context: ReviewContextDto = {
       run: { runId: args.runId, workspaceId: target.workspaceId, projectId: target.projectId, label: truncateRunLabel(question) },
       reviewOverview: buildReviewOverview({
@@ -464,7 +476,7 @@ export async function getReviewContext(args: { workspaceId: string; runId: strin
         assumptions: record.decisionReceipt.assumptions,
         uncertainties: record.decisionReceipt.uncertainties,
         limitations: record.decisionReceipt.limitations,
-        sources: decisionReceiptSourceLinks(record.decisionReceipt.sources, SOURCE_PUBLISHER_CLASS_ENABLED),
+        sources,
         sourceBacked: record.decisionReceipt.sourceBacked,
         humanReviewNeeded: record.decisionReceipt.humanReviewNeeded,
       },

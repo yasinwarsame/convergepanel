@@ -111,6 +111,13 @@ const VALID_PROJECT_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_proje
 const VALID_RESEARCH_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_research_snapshot_created"]);
 const VALID_ASSIGNMENT_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_project_assignees_changed", "workspace_research_assignee_changed"]);
 const VALID_EVENT_TYPES: ReadonlySet<string> = new Set([...VALID_MEMBER_EVENT_TYPES, ...VALID_PROJECT_EVENT_TYPES, ...VALID_RESEARCH_EVENT_TYPES, ...VALID_ASSIGNMENT_EVENT_TYPES]);
+/**
+ * Order 4 Slice 2a — RECOGNISED but not surfaced: Source Standing audit rows
+ * are written by the (dark) Source Standing writer and will be presented by a
+ * later UI slice. Until then they are skipped quietly — they are not
+ * malformed, so they must not raise the malformed-row warning.
+ */
+const KNOWN_NOT_SURFACED_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_source_standing_changed"]);
 
 interface WorkspaceAuditEventDtoBase {
   occurredAt: string;
@@ -337,7 +344,9 @@ export async function listWorkspaceAuditEvents(args: { workspaceId: string; limi
 
     const validated: ValidatedRow[] = [];
     for (const doc of pageDocs) {
-      const row = validateRow(doc.id, doc.data() as Record<string, unknown>, args.workspaceId);
+      const data = doc.data() as Record<string, unknown>;
+      if (typeof data?.eventType === "string" && KNOWN_NOT_SURFACED_EVENT_TYPES.has(data.eventType)) continue;
+      const row = validateRow(doc.id, data, args.workspaceId);
       if (!row) {
         logger.warn("[workspaces/listWorkspaceAuditEvents] Skipping malformed workspaceMembershipEvents row — never emitted", {
           workspaceId: args.workspaceId,

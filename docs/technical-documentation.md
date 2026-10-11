@@ -890,6 +890,32 @@ Every adaptive detail route (`/api/teams/adaptive-runs/{runId}` and its history,
 - **Order:** the items are dropped after classification and before filtering, pagination and enrichment, so they never count toward `pagination.total`.
 - **Unchanged:** legacy items, the unversioned response, and the detail routes' `403 insufficient_role`.
 
+### Workspace Source Standing (Order 4 Slice 2a — dark, no UI)
+
+Answers one question: what standing has this Team Workspace explicitly recorded for this exact cited document? It is human-authored Workspace metadata — not truth, verification, publisher reputation, consensus, evidence quality or `sourceBacked`, and never derived from publisher class.
+
+- **Release flag.** `SOURCE_AUTHORITY_METADATA_ENABLED` (server-only; only the literal `"true"` enables it). Not configured in any Vercel environment.
+- **Authority.** The `sources.attest` capability — Owner and Admin only, via `ROLE_CAPABILITIES`. Team Workspaces only.
+- **Identity.** `lib/sourceStanding/sourceIdentity.ts` is the single implementation. The canonical URL is the strict Evidence URL with a hygienic host and no fragment. `idHash` is sha256 of `"v1:" + canonicalUrl`.
+- **Storage.**
+  - Current state lives at `workspaces/{ws}/sourceAuthority/{idHash}`, with status `ACCEPTED`, `DISPUTED` or `SUPERSEDED`.
+  - History is append-only under `.../events/{eventId}`.
+  - Withdrawal deletes the current document and records a `WITHDRAWN` event. It is never an active status.
+  - Every change also writes a hashes-only `workspace_source_standing_changed` row to `workspaceMembershipEvents`. The audit log recognises that row but does not surface it yet.
+  - Firestore rules deny all client access explicitly.
+- **Writes.** `POST /api/workspaces/{workspaceId}/source-authority` makes every change in one transaction.
+  - It re-authorizes `sources.attest`.
+  - It requires an exact `expectedRevision`; `null` means the record must not exist yet. A mismatch returns 409 `SOURCE_AUTHORITY_REVISION_CONFLICT`.
+  - Revisions stay monotonic across withdraw and re-attest.
+  - For `SUPERSEDED`, it validates the successor chain: same Workspace, no missing or malformed links, no cycle, at most 8 edges.
+  - All reads happen before any write, at most 13 in the worst case. The event and audit ids are allocated before the transaction, so a retry cannot duplicate them.
+- **Reads.**
+  - `GET ?url=` returns the management view.
+  - With the flag on, Review Context adds an optional `standing` to each displayed Decision Receipt link. The value is `{status, asOf, successorUrl?}` or `{status: "UNRESOLVED"}`.
+  - These reads fetch exact documents in batches, one batch per chain level. They never reorder or filter links.
+  - With the flag off there are zero reads and no key.
+  - Standing is never written into the run, the Decision Receipt, `governanceRecord` or exports.
+
 ### Team Workspace navigation reachability (roadmap 4.4a)
 
 - **Members link.** `WorkspaceNav` shows Members only when the caller holds `members.read`, the same pattern as Audit (`audit.read`). Both are required props that every Team page fills from its own server-resolved capabilities. Reviewer and Viewer roles lack `members.read`, and the Members page returns 404 without it.

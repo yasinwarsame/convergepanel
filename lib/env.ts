@@ -170,6 +170,15 @@ export const WORKSPACE_REVIEW_INTEGRITY_METRICS_ENABLED = process.env.WORKSPACE_
 export const SOURCE_PUBLISHER_CLASS_ENABLED = process.env.SOURCE_PUBLISHER_CLASS_ENABLED === "true";
 
 /**
+ * Order 4 Slice 2a — Source Standing (Workspace-recorded standing for an exact
+ * cited document). Default OFF; server-only (never a NEXT_PUBLIC variant).
+ * While off: the management API conceals itself after authorization and
+ * Review Context performs no Source Standing work, so its payload is
+ * byte-identical to before.
+ */
+export const SOURCE_AUTHORITY_METADATA_ENABLED = process.env.SOURCE_AUTHORITY_METADATA_ENABLED === "true";
+
+/**
  * Step 6 D5.2A — gates ONLY mutation of the governance policy's score-type
  * review thresholds (`scoreFamilyReviewThresholds`). Default OFF.
  *
