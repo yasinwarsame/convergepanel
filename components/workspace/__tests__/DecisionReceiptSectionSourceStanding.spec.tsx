@@ -224,6 +224,32 @@ describe("hostile wire data", () => {
       expect(locales).toBe("en-US");
       expect(options?.timeZone).toBe("UTC");
     }
+    // The module's formatStandingDate really goes through THAT pinned formatter (not some other date call).
+    const formatCalls: Date[] = [];
+    const spy2 = jest.spyOn(Intl, "DateTimeFormat").mockImplementation(((locales?: string | string[], options?: Intl.DateTimeFormatOptions) => {
+      const real = new RealDTF(locales, options);
+      if (options?.timeZone === "UTC" && options?.month === "short") {
+        const origFormat = real.format.bind(real);
+        // `format` is a prototype getter; shadow it with an own property on this instance.
+        Object.defineProperty(real, "format", {
+          value: (d?: Date | number) => {
+            formatCalls.push(new Date(d as Date));
+            return origFormat(d);
+          },
+        });
+      }
+      return real;
+    }) as unknown as typeof Intl.DateTimeFormat);
+    let fresh!: typeof import("@/components/workspace/DecisionReceiptSection");
+    try {
+      jest.isolateModules(() => {
+        fresh = jest.requireActual("@/components/workspace/DecisionReceiptSection");
+      });
+    } finally {
+      spy2.mockRestore();
+    }
+    expect(fresh.formatStandingDate("2026-10-01T23:30:00.000Z")).toBe("Oct 1, 2026");
+    expect(formatCalls.map((d) => d.toISOString())).toEqual(["2026-10-01T23:30:00.000Z"]);
     // And behaviourally: a late-UTC instant formats as its UTC date.
     expect(formatStandingDate("2026-10-01T23:30:00.000Z")).toBe("Oct 1, 2026");
     expect(formatStandingDate("2026-10-01T00:30:00.000Z")).toBe("Oct 1, 2026");
@@ -274,6 +300,12 @@ describe("terminology and aggregation guards", () => {
       expect(b.props["aria-hidden"]).toBeUndefined();
     }
     expect(textOf(r.root)).not.toMatch(/[✓✔✗✘★☆⚠🛡]/u);
+    // The date line is neutral too: one class set for every valid state, no inline style.
+    const dates = byTestId(r, "source-standing-updated");
+    expect(dates).toHaveLength(3);
+    expect(new Set(dates.map((d) => d.props.className)).size).toBe(1);
+    expect(dates[0].props.className).not.toMatch(/green|red|emerald|rose|amber|yellow|orange|success|danger|warning|cp-orange|cp-accent/);
+    for (const d of dates) expect(d.props.style).toBeUndefined();
   });
 });
 
