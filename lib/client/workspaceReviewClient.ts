@@ -101,7 +101,7 @@ export interface NormalizedSourceLink {
   hostname: string;
   /** Order 4 — present only when the server's SOURCE_PUBLISHER_CLASS_ENABLED is on; a descriptive, server-computed category (never a score). */
   publisher?: SourcePublisherClassification;
-  /** Order 4 Slice 2a — present only when the server-only Source Standing release flag is on AND this Workspace recorded a standing for this exact document. Current state only; UNRESOLVED carries no date. Not consumed by any UI yet. */
+  /** Order 4 Slice 2a — present only when the server-only Source Standing release flag is on AND this Workspace recorded a standing for this exact document. Current state only; UNRESOLVED carries no date. Rendered only by the Team Decision Receipt (Slice 2b), which re-validates it. */
   standing?: SourceStandingPresentationV1;
 }
 

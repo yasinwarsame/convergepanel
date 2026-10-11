@@ -173,6 +173,7 @@ describe("hostile wire data", () => {
     ["valid status non-ISO date string", { status: "ACCEPTED", asOf: "October 1, 2026" }],
     ["inherited status", Object.create({ status: "ACCEPTED", asOf: AS_OF })],
     ["inherited asOf", Object.assign(Object.create({ asOf: AS_OF }), { status: "ACCEPTED" })],
+    ["inherited UNRESOLVED", Object.create({ status: "UNRESOLVED" })],
     ["array", ["ACCEPTED", AS_OF]],
     ["string", "ACCEPTED"],
     ["null", null],
@@ -199,6 +200,33 @@ describe("hostile wire data", () => {
   it("toRenderableStanding returns only status/label(/asOf)", () => {
     expect(toRenderableStanding({ status: "ACCEPTED", asOf: AS_OF, actorUid: "x", successorUrl: "https://a.example.com" })).toEqual({ status: "ACCEPTED", label: "Accepted by this Workspace", asOf: AS_OF });
     expect(toRenderableStanding({ status: "UNRESOLVED", asOf: AS_OF, reasonCode: "x" })).toEqual({ status: "UNRESOLVED", label: "Workspace standing unavailable" });
+  });
+
+  it("the standing date formatter is pinned to en-US + UTC at construction (machine-zone independent — guards UTC CI runners too)", () => {
+    // Jest sandboxes process.env, so changing TZ in-test cannot reach ICU; instead capture the exact options the
+    // module passes when it builds its formatter in a fresh module registry.
+    const RealDTF = Intl.DateTimeFormat;
+    const seen: Array<[unknown, Intl.DateTimeFormatOptions | undefined]> = [];
+    const spy = jest.spyOn(Intl, "DateTimeFormat").mockImplementation(((locales?: string | string[], options?: Intl.DateTimeFormatOptions) => {
+      seen.push([locales, options]);
+      return new RealDTF(locales, options);
+    }) as unknown as typeof Intl.DateTimeFormat);
+    try {
+      jest.isolateModules(() => {
+        jest.requireActual("@/components/workspace/DecisionReceiptSection");
+      });
+    } finally {
+      spy.mockRestore();
+    }
+    const standingFormatters = seen.filter(([, o]) => o && o.year === "numeric" && o.month === "short" && o.day === "numeric" && o.hour === undefined);
+    expect(standingFormatters.length).toBeGreaterThanOrEqual(1);
+    for (const [locales, options] of standingFormatters) {
+      expect(locales).toBe("en-US");
+      expect(options?.timeZone).toBe("UTC");
+    }
+    // And behaviourally: a late-UTC instant formats as its UTC date.
+    expect(formatStandingDate("2026-10-01T23:30:00.000Z")).toBe("Oct 1, 2026");
+    expect(formatStandingDate("2026-10-01T00:30:00.000Z")).toBe("Oct 1, 2026");
   });
 
   it("formatStandingDate: deterministic UTC date, never 'Invalid Date', never today's date for bad input", () => {
@@ -240,6 +268,7 @@ describe("terminology and aggregation guards", () => {
     const publisherClass = render([link("https://www.sec.gov/x", { publisher: classifySourcePublisher("https://www.sec.gov/x") })]);
     expect(byTestId(publisherClass, "source-publisher-class")[0].props.className).toBe(cls);
     for (const b of badges) {
+      expect(b.props.style).toBeUndefined(); // no inline colour either
       expect(b.children.every((c) => typeof c === "string")).toBe(true); // plain visible text, no icon element
       expect(b.props.title).toBeUndefined();
       expect(b.props["aria-hidden"]).toBeUndefined();
