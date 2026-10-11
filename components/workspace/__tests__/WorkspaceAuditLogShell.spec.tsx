@@ -323,3 +323,68 @@ describe("Phase 11B.3 — Audit Log breadcrumb", () => {
     expect(nav.findAll((n) => n.props?.["aria-current"] === "page", { deep: true }).map(visibleTextOf)).toEqual(["Audit Log"]);
   });
 });
+
+describe("Order 4 Slice 2a.1 (P1) — an empty page is not 'no activity' when more pages exist (rendered behaviour)", () => {
+  const TRUE_EMPTY = "No Workspace activity yet.";
+  const PAGE_EMPTY = "No displayable activity on this page. Load more to continue.";
+  const textOf = (r: TestRenderer.ReactTestRenderer) =>
+    r.root
+      .findAll((n) => typeof n.type === "string")
+      .flatMap((n) => n.children.filter((c): c is string => typeof c === "string"))
+      .join(" ");
+  const loadMoreButtons = (r: TestRenderer.ReactTestRenderer) =>
+    r.root.findAll((n) => n.type === "button" && n.children.some((c) => c === "Load more"));
+  const visibleEvent = {
+    eventType: "workspace_member_removed",
+    occurredAt: "2026-10-01T00:00:00.000Z",
+    actor: { displayName: "Owner Person" },
+    target: { displayName: "Removed Person" },
+    previousRole: "member",
+  };
+  async function mount(first: Record<string, unknown>) {
+    mockedUseAuth.mockReturnValue({ user: { uid: "u1" }, authReady: true });
+    mockedFetchWorkspaceAuditEvents.mockReset();
+    mockedFetchWorkspaceAuditEvents.mockResolvedValueOnce(first);
+    let r!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      r = TestRenderer.create(createElement(WorkspaceAuditLogShell, { workspaceId: "ws_1", workspaceName: "Acme", canReadMembers: true }));
+    });
+    return r;
+  }
+
+  it("true empty (events=[], hasMore=false): the 'no activity' message, no paginated-empty message, no Load more", async () => {
+    const r = await mount({ status: "ok", events: [], hasMore: false });
+    expect(textOf(r)).toContain(TRUE_EMPTY);
+    expect(textOf(r)).not.toContain(PAGE_EMPTY);
+    expect(loadMoreButtons(r)).toHaveLength(0);
+  });
+
+  it("empty page with more (events=[], hasMore=true, cursor): neutral message, never 'no activity', Load more offered, no auto-fetch", async () => {
+    const r = await mount({ status: "ok", events: [], hasMore: true, nextCursor: "cursor-1" });
+    expect(textOf(r)).not.toContain(TRUE_EMPTY);
+    expect(textOf(r)).toContain(PAGE_EMPTY);
+    expect(loadMoreButtons(r)).toHaveLength(1);
+    expect(mockedFetchWorkspaceAuditEvents).toHaveBeenCalledTimes(1); // no automatic paging / recursion
+    // The neutral message never names or hints at what was skipped.
+    expect(textOf(r).toLowerCase()).not.toMatch(/source|standing|hidden/);
+  });
+
+  it("Load more from the empty page fetches with the server cursor; the visible event appears and the neutral message disappears", async () => {
+    const r = await mount({ status: "ok", events: [], hasMore: true, nextCursor: "cursor-1" });
+    mockedFetchWorkspaceAuditEvents.mockResolvedValueOnce({ status: "ok", events: [visibleEvent], hasMore: false });
+    await act(async () => {
+      loadMoreButtons(r)[0].props.onClick();
+    });
+    expect(mockedFetchWorkspaceAuditEvents).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: "cursor-1" }));
+    expect(textOf(r)).toContain("Removed Person");
+    expect(textOf(r)).not.toContain(PAGE_EMPTY);
+    expect(textOf(r)).not.toContain(TRUE_EMPTY);
+    expect(loadMoreButtons(r)).toHaveLength(0);
+  });
+
+  it("a page of visible events never shows either empty message", async () => {
+    const r = await mount({ status: "ok", events: [visibleEvent], hasMore: true, nextCursor: "c" });
+    expect(textOf(r)).not.toContain(PAGE_EMPTY);
+    expect(textOf(r)).not.toContain(TRUE_EMPTY);
+  });
+});

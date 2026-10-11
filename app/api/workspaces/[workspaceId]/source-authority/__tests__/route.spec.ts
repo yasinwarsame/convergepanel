@@ -267,7 +267,7 @@ describe("POST — outcome mapping", () => {
   it.each([
     ["successor missing", () => undefined, URL_B, "successor_missing"],
     ["successor is the source", () => undefined, `${URL_A}#other-fragment`, "same_as_source"],
-    ["cycle", () => seedCurrent(B, { status: "SUPERSEDED", reasonCode: "replaced_by_successor", successorIdHash: A.idHash }), URL_B, "cycle"],
+    ["successor chain has a missing link", () => seedCurrent(B, { status: "SUPERSEDED", reasonCode: "replaced_by_successor", successorIdHash: "c".repeat(64) }), URL_B, "successor_missing"],
   ])("%s → 409 SOURCE_AUTHORITY_SUCCESSOR_INVALID (%s)", async (_n, seed, successorUrl, reason) => {
     seed();
     const res = await post({ url: URL_A, operation: "supersede", reasonCode: "replaced_by_successor", successorUrl, expectedRevision: null });
@@ -299,5 +299,157 @@ describe("POST — outcome mapping", () => {
   it("there is no PUT/PATCH/DELETE handler", async () => {
     const mod = await import("@/app/api/workspaces/[workspaceId]/source-authority/route");
     expect(Object.keys(mod).filter((k) => /^[A-Z]+$/.test(k)).sort()).toEqual(["GET", "POST"]);
+  });
+});
+
+describe("Slice 2a.1 (P4) — the POST body is read through a byte-bounded stream reader", () => {
+  const LIMIT = 8192;
+  const enc = new TextEncoder();
+  /** A body stream that records how many chunks were pulled, emitting `chunks` in order. */
+  function trackedStream(chunks: Uint8Array[]) {
+    const state = { pulls: 0, cancelled: false };
+    let i = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        state.pulls += 1;
+        if (i < chunks.length) controller.enqueue(chunks[i++]);
+        else controller.close();
+      },
+      cancel() {
+        state.cancelled = true;
+      },
+    });
+    return { stream, state };
+  }
+  const streamPost = (stream: ReadableStream<Uint8Array>, headers: Record<string, string> = {}) =>
+    POST(new NextRequest(`http://localhost/api/workspaces/${W}/source-authority`, { method: "POST", body: stream, headers: { "content-type": "application/json", ...headers }, duplex: "half" } as RequestInit & { duplex: "half" }), { params: { workspaceId: W } });
+  /** A valid accept body padded (with a JSON-legal whitespace run) to exactly `bytes` UTF-8 bytes. */
+  const paddedAccept = (bytes: number) => {
+    const base = JSON.stringify(accept);
+    return base.slice(0, -1) + " ".repeat(bytes - enc.encode(base).length) + "}";
+  };
+
+  it("a body under the limit parses and writes", async () => {
+    const res = await post(accept);
+    expect(res.status).toBe(200);
+  });
+
+  it("exactly the limit (valid JSON) is accepted; one byte more is rejected without parsing or writing", async () => {
+    const exact = paddedAccept(LIMIT);
+    expect(enc.encode(exact).length).toBe(LIMIT);
+    expect((await streamPost(trackedStream([enc.encode(exact)]).stream)).status).toBe(200);
+    applySpy.mockClear();
+    const over = paddedAccept(LIMIT + 1);
+    const res = await streamPost(trackedStream([enc.encode(over)]).stream);
+    expect(res.status).toBe(400);
+    expect((await res.json()).errorCode).toBe("invalid_request_body");
+    expect(applySpy).not.toHaveBeenCalled();
+  });
+
+  it("an advertised Content-Length above the limit is rejected before the stream is consumed", async () => {
+    const { stream, state } = trackedStream([enc.encode(JSON.stringify(accept))]);
+    const res = await streamPost(stream, { "content-length": String(LIMIT + 1) });
+    expect(res.status).toBe(400);
+    expect(state.pulls).toBeLessThanOrEqual(1); // the runtime may pre-pull one chunk; the reader never asks for it
+    expect(applySpy).not.toHaveBeenCalled();
+  });
+
+  it.each(["abc", "-1", "1e3", "12 34", ""])("a malformed Content-Length (%p) is rejected", async (cl) => {
+    const res = await streamPost(trackedStream([enc.encode(JSON.stringify(accept))]).stream, { "content-length": cl });
+    expect(res.status).toBe(400);
+    expect(applySpy).not.toHaveBeenCalled();
+  });
+
+  it("a forged SMALL Content-Length cannot smuggle an oversized stream: reading stops at the limit and the stream is cancelled", async () => {
+    const chunk = enc.encode("x".repeat(4096));
+    const chunks = Array.from({ length: 100 }, () => chunk); // 400 KiB available
+    const { stream, state } = trackedStream(chunks);
+    const res = await streamPost(stream, { "content-length": "10" });
+    expect(res.status).toBe(400);
+    expect(state.pulls).toBeLessThanOrEqual(4); // 2 chunks fit, the 3rd overflows — never the whole 100
+    expect(state.cancelled).toBe(true);
+    expect(applySpy).not.toHaveBeenCalled();
+  });
+
+  it("no Content-Length at all is still bounded by the streamed byte count", async () => {
+    const chunk = enc.encode("y".repeat(3000));
+    const { stream, state } = trackedStream(Array.from({ length: 50 }, () => chunk));
+    expect((await streamPost(stream)).status).toBe(400);
+    expect(state.pulls).toBeLessThanOrEqual(5);
+    expect(state.cancelled).toBe(true);
+  });
+
+  it("the limit counts UTF-8 BYTES, not UTF-16 characters (multibyte content)", async () => {
+    // "é" is 1 UTF-16 unit but 2 UTF-8 bytes: 5000 of them is 5000 chars (< 8192) yet 10000 bytes (> 8192).
+    const body = JSON.stringify({ ...accept, url: `https://docs.example.com/${"é".repeat(5000)}` });
+    expect(body.length).toBeLessThan(LIMIT);
+    expect(enc.encode(body).length).toBeGreaterThan(LIMIT);
+    expect((await streamPost(trackedStream([enc.encode(body)]).stream)).status).toBe(400);
+    expect(applySpy).not.toHaveBeenCalled();
+  });
+
+  it("invalid UTF-8 bytes are rejected as an invalid body", async () => {
+    expect((await streamPost(trackedStream([new Uint8Array([0x7b, 0xff, 0xfe, 0x7d])]).stream)).status).toBe(400);
+  });
+
+  it("malformed JSON under the limit and an empty body are rejected normally", async () => {
+    expect((await post(undefined, "{not json")).status).toBe(400);
+    expect((await streamPost(trackedStream([]).stream)).status).toBe(400);
+    const empty = await POST(new NextRequest(`http://localhost/api/workspaces/${W}/source-authority`, { method: "POST" }), { params: { workspaceId: W } });
+    expect(empty.status).toBe(400);
+    expect(applySpy).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["unauthenticated", () => mockedIdentity.mockResolvedValue({ status: "unauthenticated", reason: "missing_credentials" }), 401],
+    ["no Team admission", () => mockedAccess.mockResolvedValue({ granted: false, reason: "membership_not_found" }), 404],
+    ["no sources.attest (Member)", () => mockedAccess.mockResolvedValue(grant("member")), 403],
+    ["flag off", () => (flag = false), 404],
+  ])("%s → the body stream is never read", async (_n, arrange, status) => {
+    arrange();
+    const { stream, state } = trackedStream([enc.encode(JSON.stringify(accept))]);
+    expect((await streamPost(stream)).status).toBe(status);
+    expect(state.pulls).toBeLessThanOrEqual(1);
+    expect(stream.locked).toBe(false); // the route never acquired a reader
+  });
+});
+
+describe("Slice 2a.1 — P2 route mapping and DTO privacy", () => {
+  it("source_is_referenced → 409 SOURCE_AUTHORITY_SOURCE_REFERENCED, revealing nothing about the predecessor", async () => {
+    seedCurrent(B);
+    seedCurrent(A, { status: "SUPERSEDED", reasonCode: "replaced_by_successor", successorIdHash: B.idHash });
+    const res = await post({ url: URL_B, operation: "withdraw", reasonCode: "withdrawn", expectedRevision: 1 });
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body).toEqual({ ok: false, errorCode: "SOURCE_AUTHORITY_SOURCE_REFERENCED", message: "This source is currently used as the successor of another source standing and cannot be withdrawn or superseded." });
+    const json = JSON.stringify(body);
+    for (const leak of [A.idHash, URL_A, "docs.example.com/a", "count"]) expect(json).not.toContain(leak);
+  });
+
+  const FORBIDDEN_KEYS = ["actorUid", "actorRole", "updatedByUid", "events", "history", "membership", "role", "uid", "workspaceId"];
+  const allKeys = (v: unknown, out: string[] = []): string[] => {
+    if (Array.isArray(v)) v.forEach((x) => allKeys(x, out));
+    else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) (out.push(k), allKeys(x, out));
+    return out;
+  };
+
+  it.each([
+    ["absent", () => undefined],
+    ["ACCEPTED", () => seedCurrent(A)],
+    ["SUPERSEDED (resolved)", () => (seedCurrent(B), seedCurrent(A, { status: "SUPERSEDED", reasonCode: "replaced_by_successor", successorIdHash: B.idHash }))],
+    ["SUPERSEDED (unresolved)", () => seedCurrent(A, { status: "SUPERSEDED", reasonCode: "replaced_by_successor", successorIdHash: B.idHash })],
+    ["malformed", () => mockDb.put(cur(A), { bogus: true, updatedByUid: ADMIN, actorUid: ADMIN })],
+  ])("management GET (%s) never exposes actor, membership or history keys anywhere in the response", async (_n, seed) => {
+    seed();
+    mockDb.put(`${cur(A)}/events/e1`, { schemaVersion: 1, toStatus: "ACCEPTED", actorUid: ADMIN, actorRole: "admin", revision: 1 });
+    const body = await (await get(`?url=${encodeURIComponent(URL_A)}`)).json();
+    const keys = allKeys(body);
+    for (const k of FORBIDDEN_KEYS) expect({ k, present: keys.includes(k) }).toEqual({ k, present: false });
+    expect(JSON.stringify(body)).not.toContain(ADMIN);
+  });
+
+  it("POST success never echoes actor or record internals", async () => {
+    const body = await (await post(accept)).json();
+    expect(Object.keys(body).sort()).toEqual(["ok", "revision", "status"]);
   });
 });

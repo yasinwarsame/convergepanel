@@ -6,25 +6,44 @@
  *   workspaces/{workspaceId}/sourceAuthority/{idHash}/events/{id}  append-only history
  *   workspaceMembershipEvents/{id}                                 canonical Workspace audit
  *
- * READS are exact-document only (`getAll` by known id, level by level for
- * successor chains). The single query is the creation-time read of the highest
- * recorded event revision for ONE source (single-field `revision` order, limit
- * 1), which keeps revisions monotonic across withdraw → re-attest so a stale
- * client can never mutate a newer standing that reused an old revision (ABA).
+ * READS on the presentation paths are exact-document only (`getAll` by known
+ * id, level by level for successor chains). The writer issues at most two
+ * single-field, limit-1 queries, both answered by Firestore's automatic
+ * single-field indexes (no composite index):
+ *   - history revision: `events` ordered by `revision` desc — on creation only,
+ *     so revisions stay monotonic across withdraw → re-attest (ABA-safe);
+ *   - inbound reference: `sourceAuthority` where `successorIdHash == id` — on
+ *     WITHDRAWN / SUPERSEDED only (Slice 2a.1, P2): a source that is currently
+ *     another standing's successor may not be withdrawn or newly superseded, so
+ *     an ordinary mutation can never make an already-valid predecessor chain
+ *     lose a link or exceed MAX_SUCCESSOR_CHAIN_DEPTH. It may still move between
+ *     ACCEPTED and DISPUTED, or leave SUPERSEDED (which only shortens chains).
  *
  * WRITES happen in ONE transaction: re-authorize (`sources.attest`) through the
  * canonical Team authorizer, read the current state, check `expectedRevision`
- * exactly, validate the successor chain for SUPERSEDED, then write the current
- * state (or delete it for WITHDRAWN), create one history event and create one
- * Workspace audit event. Event and audit document ids are allocated BEFORE the
+ * exactly, run the inbound-reference check, validate the successor chain for
+ * SUPERSEDED, then write the current state (or delete it for WITHDRAWN), create
+ * one history event and create one Workspace audit event. Every read precedes
+ * every write. Event and audit document ids are allocated BEFORE the
  * transaction, so a Firestore retry targets the same documents (`create`) and
  * can never leave duplicates.
  *
- * Bounds — read path: ≤ 1 + MAX_SUCCESSOR_CHAIN_DEPTH `getAll` rounds over at
- * most the displayed-source cap of ids per round. Write path, worst case
- * (create + supersede): 3 authorization reads (workspace, caller membership,
- * canonical owner membership) + 1 current-state read + 1 revision query (limit
- * 1) + MAX_SUCCESSOR_CHAIN_DEPTH successor reads = 13 reads, then 3 writes.
+ * Bounds:
+ *   - Review Context: ≤ 1 + MAX_SUCCESSOR_CHAIN_DEPTH `getAll` rounds, each over
+ *     at most the displayed-source cap of ids.
+ *   - Management GET: 1 head document read, then ≤ MAX_SUCCESSOR_CHAIN_DEPTH
+ *     successor document reads (SUPERSEDED only). The head is never re-read.
+ *   - Write transaction, worst case (create + supersede):
+ *       authorization document reads   ≤ 3 (workspace, caller, canonical owner)
+ *       current-state document read      1
+ *       history revision query           1 (limit 1; create only)
+ *       inbound-reference query          1 (limit 1; withdraw / supersede only)
+ *       successor document reads       ≤ MAX_SUCCESSOR_CHAIN_DEPTH (8; supersede only)
+ *     = ≤ 12 document reads + ≤ 2 queries (each returning ≤ 1 document), then
+ *     3 writes (current set-or-delete, event create, audit create).
+ *   - The `nothing_to_withdraw` result is an internal invariant: the route
+ *     already rejects a withdraw without an expected revision, and the writer
+ *     keeps the defence for any other caller.
  */
 import "server-only";
 import { Timestamp, type DocumentReference, type Firestore, type Transaction } from "firebase-admin/firestore";
@@ -34,7 +53,7 @@ import { authorizeTeamWorkspaceMutationInTransaction, type TeamMutationAuthoriza
 import { buildWorkspaceMembershipEventDocData } from "@/lib/workspaces/workspaceMembershipEvents";
 import type { SourceIdentityV1 } from "./sourceIdentity";
 import { MAX_SUCCESSOR_CHAIN_DEPTH, SOURCE_STANDING_SCHEMA_VERSION, isReasonAllowed, parseSourceStandingCurrent, statusForOperation, type SourceStandingCurrentV1, type SourceStandingOperation, type SourceStandingPresentationV1, type SourceStandingReasonCode, type SourceStandingStatus } from "./standingTypes";
-import { resolveSourceStanding, toStandingPresentation, walkSuccessorChain, type ChainFailure, type SourceStandingResolution, type StandingLookupAnswer } from "./resolveStanding";
+import { resolveFromParsedHead, resolveSourceStanding, toStandingPresentation, walkSuccessorChain, type ChainFailure, type SourceStandingResolution, type StandingLookupAnswer } from "./resolveStanding";
 
 /** Thrown only when the Admin SDK is not configured; routes map it to their generic 500. */
 export class SourceStandingUnavailableError extends Error {
@@ -102,11 +121,21 @@ export async function readStandingForManagement(workspaceId: string, identity: S
     logger.warn("[sourceStanding] malformed current Source Standing", { workspaceId, idHash: identity.idHash, reason: parsed.reason });
     return { kind: "unresolved" };
   }
+  // Everything below derives from this ONE head snapshot; only successors are read further (P3).
   const c = parsed.current;
   let successor: Extract<ManagementStanding, { kind: "current" }>["successor"] = null;
   if (c.status === "SUPERSEDED") {
-    const r = (await resolveMany(db, workspaceId, [c.identity.idHash])).get(c.identity.idHash);
-    successor = r?.kind === "resolved" && r.successorCanonicalUrl ? { resolved: true, url: r.successorCanonicalUrl } : { resolved: false };
+    const cache = new Map<string, StandingLookupAnswer>();
+    const lookup = (id: string): StandingLookupAnswer => cache.get(id) ?? { state: "not_loaded" };
+    let r = resolveFromParsedHead(workspaceId, c, lookup);
+    // Bounded: each round loads one new successor; the walk itself stops after MAX_SUCCESSOR_CHAIN_DEPTH edges.
+    for (let round = 0; r.kind === "needs" && round < MAX_SUCCESSOR_CHAIN_DEPTH; round += 1) {
+      const [snap] = await db.getAll(sourceStandingRef(db, workspaceId, r.idHash));
+      cache.set(r.idHash, snap.exists ? { state: "present", data: snap.data() } : { state: "absent" });
+      r = resolveFromParsedHead(workspaceId, c, lookup);
+    }
+    successor = r.kind === "resolved" && r.successorCanonicalUrl ? { resolved: true, url: r.successorCanonicalUrl } : { resolved: false };
+    if (r.kind === "unresolved") logger.warn("[sourceStanding] unresolved successor chain", { workspaceId, idHash: identity.idHash, reason: r.reason });
   }
   return { kind: "current", status: c.status, reasonCode: c.reasonCode, revision: c.revision, asOf: c.updatedAt.toDate().toISOString(), successor };
 }
@@ -118,6 +147,7 @@ export type ApplyStandingResult =
   | { ok: false; reason: "current_unresolved" }
   | { ok: false; reason: "history_unresolved" }
   | { ok: false; reason: "nothing_to_withdraw" }
+  | { ok: false; reason: "source_is_referenced" }
   | { ok: false; reason: "invalid_operation" }
   | { ok: false; reason: "successor_invalid"; detail: ChainFailure | "same_as_source" };
 
@@ -173,6 +203,13 @@ export async function applySourceStandingOperation(args: ApplyStandingArgs): Pro
       const highest = await highestRecordedRevision(tx, currentRef);
       if (highest === null) return { ok: false, reason: "history_unresolved" };
       nextRevision = highest + 1;
+    }
+
+    if (toStatus === "WITHDRAWN" || toStatus === "SUPERSEDED") {
+      // P2: same-Workspace inbound reference, read inside this transaction before any write. Any
+      // matching document counts — even a malformed one — and nothing about it is returned.
+      const inbound = await tx.get(db.collection("workspaces").doc(args.workspaceId).collection("sourceAuthority").where("successorIdHash", "==", args.identity.idHash).limit(1));
+      if (!inbound.empty) return { ok: false, reason: "source_is_referenced" };
     }
 
     if (toStatus === "SUPERSEDED" && args.successorIdentity) {

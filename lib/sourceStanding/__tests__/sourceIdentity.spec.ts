@@ -86,3 +86,56 @@ describe("SourceIdentityV1 — hash contract", () => {
     for (const bad of ["A".repeat(64), "a".repeat(63), "a".repeat(65), "g".repeat(64), "", null, 1, "__x__"]) expect(isSourceIdHash(bad)).toBe(false);
   });
 });
+
+describe("Slice 2a.1 — committed regression matrix for previously probed hostile identities", () => {
+  it.each([
+    ["*.localhost", "https://foo.localhost/x"],
+    ["bare localhost.", "http://localhost./x"],
+    ["*.internal", "https://svc.internal/x"],
+    ["*.example (reserved TLD)", "https://www.example/x"],
+    ["*.invalid", "https://a.invalid/x"],
+    ["*.home.arpa", "https://printer.home.arpa/x"],
+    ["*.local", "https://nas.local/x"],
+    ["*.test", "https://site.test/x"],
+    ["IPv4 decimal integer", "http://2130706433/x"],
+    ["IPv4 hex + short", "http://0x7f.1/x"],
+    ["IPv4 short form", "http://127.1/x"],
+    ["IPv4 octal", "http://0177.0.0.1/x"],
+    ["public IPv4 literal", "http://8.8.8.8/x"],
+    ["IPv6 literal", "http://[2001:db8::1]/x"],
+    ["userinfo user:pass", "https://user:pass@docs.example.com/x"],
+    ["userinfo empty password", "https://user:@docs.example.com/x"],
+    ["two trailing dots", "https://docs.example.com../x"],
+  ])("%s → no identity", (_n, raw) => {
+    expect(sourceIdentityV1(raw)).toBeNull();
+  });
+
+  it("IDN host is canonicalized to punycode; the Unicode and punycode spellings share one identity", () => {
+    const unicode = sourceIdentityV1("https://bücher.example.com/a");
+    const puny = sourceIdentityV1("https://xn--bcher-kva.example.com/a");
+    expect(unicode?.canonicalUrl).toBe("https://xn--bcher-kva.example.com/a");
+    expect(unicode?.idHash).toBe(puny?.idHash);
+  });
+
+  it("a Unicode look-alike host (Cyrillic а) is a DIFFERENT identity from the Latin original", () => {
+    const latin = sourceIdentityV1("https://apple.com/x");
+    const lookalike = sourceIdentityV1("https://аpple.com/x");
+    expect(lookalike).not.toBeNull();
+    expect(lookalike!.canonicalUrl).toMatch(/^https:\/\/xn--/);
+    expect(lookalike!.idHash).not.toBe(latin!.idHash);
+  });
+
+  it("fragment variants alias to one identity; query variants never do", () => {
+    const ids = ["https://docs.example.com/a", "https://docs.example.com/a#x", "https://docs.example.com/a#y", "https://docs.example.com/a#"].map((u) => sourceIdentityV1(u)?.idHash);
+    expect(new Set(ids).size).toBe(1);
+    expect(sourceIdentityV1("https://docs.example.com/a?v=1")?.idHash).not.toBe(ids[0]);
+  });
+
+  it("exactly one trailing host dot aliases to the dotless host", () => {
+    expect(sourceIdentityV1("https://docs.example.com./a")?.idHash).toBe(sourceIdentityV1("https://docs.example.com/a")?.idHash);
+  });
+
+  it("surrounding whitespace is trimmed by the strict contract (tab/newline included)", () => {
+    expect(sourceIdentityV1("\thttps://docs.example.com/a\n")?.canonicalUrl).toBe("https://docs.example.com/a");
+  });
+});

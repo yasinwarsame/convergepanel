@@ -58,11 +58,20 @@ export function resolveSourceStanding(workspaceId: string, idHash: string, looku
   if (answer.state === "absent") return { kind: "absent" };
   const parsed = parseSourceStandingCurrent(answer.data, { expectedWorkspaceId: workspaceId, docId: idHash });
   if (!parsed.ok) return { kind: "unresolved", reason: parsed.reason };
-  if (parsed.current.status !== "SUPERSEDED") return { kind: "resolved", current: parsed.current };
-  const walk = walkSuccessorChain(workspaceId, idHash, parsed.current.successorIdHash as string, lookup);
+  return resolveFromParsedHead(workspaceId, parsed.current, lookup);
+}
+
+/**
+ * Resolution starting from a head that has ALREADY been read and parsed. The
+ * lookup is consulted only for successors — never for the head itself — so a
+ * caller holding one head snapshot never re-reads it (Slice 2a.1, P3).
+ */
+export function resolveFromParsedHead(workspaceId: string, head: SourceStandingCurrentV1, lookup: StandingLookup): Exclude<SourceStandingResolution, { kind: "absent" }> {
+  if (head.status !== "SUPERSEDED") return { kind: "resolved", current: head };
+  const walk = walkSuccessorChain(workspaceId, head.identity.idHash, head.successorIdHash as string, lookup);
   if (walk.ok === "needs") return { kind: "needs", idHash: walk.idHash };
   if (!walk.ok) return { kind: "unresolved", reason: walk.reason };
-  return { kind: "resolved", current: parsed.current, successorCanonicalUrl: walk.immediateSuccessor.identity.canonicalUrl };
+  return { kind: "resolved", current: head, successorCanonicalUrl: walk.immediateSuccessor.identity.canonicalUrl };
 }
 
 /** Allow-listed client projection. Absent → null (no `standing` key at all). No actor, reason, revision or history. */

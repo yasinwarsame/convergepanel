@@ -161,12 +161,13 @@ describe("no coupling to governance, consensus, evidence quality, exports, Perso
     expect([...new Set(collections)].sort()).toEqual(["events", "sourceAuthority", "workspaceMembershipEvents", "workspaces"].sort());
   });
 
-  it("the writer's only query is the single-field, limit-1 history revision read (no composite index needed)", () => {
+  it("the writer's only queries are the two single-field, limit-1 reads (no composite index needed)", () => {
     const c = code("lib/sourceStanding/standingFirestore.ts");
     expect(c.match(/\.orderBy\(/g)).toHaveLength(1);
     expect(c).toContain('.collection("events").orderBy("revision", "desc").limit(1)');
-    expect(c).not.toMatch(/\.where\(/);
+    expect(c.match(/\.where\(/g)).toHaveLength(1);
+    expect(c).toContain('db.collection("workspaces").doc(args.workspaceId).collection("sourceAuthority").where("successorIdHash", "==", args.identity.idHash).limit(1)');
     expect(c).not.toMatch(/collectionGroup/);
-    expect(readFileSync(join(root, "firestore.indexes.json"), "utf8")).not.toMatch(/sourceAuthority|"events"/);
+    expect(readFileSync(join(root, "firestore.indexes.json"), "utf8")).not.toMatch(/sourceAuthority|"events"|successorIdHash/);
   });
 });

@@ -127,9 +127,20 @@ export default function WorkspaceAuditLogShell({
 
       {status === "error" && <ReviewErrorState message="We couldn't load this Workspace's audit log. Try again." onRetry={loadFirstPage} />}
 
-      {status === "ready" && events.length === 0 && (
+      {/*
+        A page can be empty while older activity exists: the server skips rows it
+        recognises but does not display, and those rows still consume the page.
+        Only an empty list with nothing more to load is "no activity".
+      */}
+      {status === "ready" && events.length === 0 && !hasMore && (
         <div role="status" className="rounded-xl border border-cp-border bg-cp-surface px-6 py-10 text-center text-sm text-cp-muted shadow-sm">
           No Workspace activity yet.
+        </div>
+      )}
+
+      {status === "ready" && events.length === 0 && hasMore && (
+        <div role="status" className="rounded-xl border border-cp-border bg-cp-surface px-6 py-10 text-center text-sm text-cp-muted shadow-sm">
+          No displayable activity on this page. Load more to continue.
         </div>
       )}
 

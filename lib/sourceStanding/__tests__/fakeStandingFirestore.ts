@@ -14,7 +14,9 @@
  */
 type Data = Record<string, unknown>;
 
-export type ReadRecord = { kind: "doc"; path: string; via: "tx" | "get" | "getAll" } | { kind: "query"; path: string; orderBy: string; dir: string; limit: number };
+export type ReadRecord =
+  | { kind: "doc"; path: string; via: "tx" | "get" | "getAll" }
+  | { kind: "query"; path: string; orderBy: string | null; dir: string; limit: number; where: ReadonlyArray<{ field: string; value: unknown }>; via: "tx" | "get" };
 
 export class FakeDocRef {
   constructor(readonly db: FakeDb, readonly path: string) {}
@@ -32,23 +34,42 @@ export class FakeDocRef {
 }
 
 export class FakeQuery {
-  constructor(readonly db: FakeDb, readonly path: string, readonly field: string, readonly dir: "asc" | "desc", readonly lim: number) {}
+  constructor(
+    readonly db: FakeDb,
+    readonly path: string,
+    readonly field: string | null,
+    readonly dir: "asc" | "desc",
+    readonly lim: number,
+    readonly filters: ReadonlyArray<{ field: string; value: unknown }> = []
+  ) {}
   limit(n: number): FakeQuery {
-    return new FakeQuery(this.db, this.path, this.field, this.dir, n);
+    return new FakeQuery(this.db, this.path, this.field, this.dir, n, this.filters);
+  }
+  where(field: string, op: string, value: unknown): FakeQuery {
+    if (op !== "==") throw new Error(`fake supports only ==, got ${op}`);
+    return new FakeQuery(this.db, this.path, this.field, this.dir, this.lim, [...this.filters, { field, value }]);
+  }
+  orderBy(field: string, dir: "asc" | "desc" = "asc"): FakeQuery {
+    return new FakeQuery(this.db, this.path, field, dir, this.lim, this.filters);
   }
   run() {
     const prefix = `${this.path}/`;
-    const rows = [...this.db.store.entries()]
+    const has = (d: Data, f: string) => Object.prototype.hasOwnProperty.call(d, f);
+    let rows = [...this.db.store.entries()]
       .filter(([p]) => p.startsWith(prefix) && !p.slice(prefix.length).includes("/"))
       .map(([p, v]) => ({ p, v }))
-      .filter(({ v }) => Object.prototype.hasOwnProperty.call(v.data, this.field))
-      .sort((a, b) => {
-        const x = a.v.data[this.field] as number;
-        const y = b.v.data[this.field] as number;
-        return this.dir === "desc" ? y - x : x - y;
-      })
-      .slice(0, this.lim);
-    const docs = rows.map(({ p }) => this.db.snap(p));
+      .filter(({ v }) => this.filters.every((f) => has(v.data, f.field) && v.data[f.field] === f.value));
+    if (this.field !== null) {
+      const field = this.field;
+      rows = rows
+        .filter(({ v }) => has(v.data, field))
+        .sort((a, b) => {
+          const x = a.v.data[field] as number;
+          const y = b.v.data[field] as number;
+          return this.dir === "desc" ? y - x : x - y;
+        });
+    }
+    const docs = rows.slice(0, this.lim).map(({ p }) => this.db.snap(p));
     return { empty: docs.length === 0, size: docs.length, docs };
   }
 }
@@ -60,6 +81,9 @@ export class FakeCollectionRef {
   }
   orderBy(field: string, dir: "asc" | "desc" = "asc"): FakeQuery {
     return new FakeQuery(this.db, this.path, field, dir, Number.MAX_SAFE_INTEGER);
+  }
+  where(field: string, op: string, value: unknown): FakeQuery {
+    return new FakeQuery(this.db, this.path, null, "asc", Number.MAX_SAFE_INTEGER).where(field, op, value);
   }
 }
 
@@ -73,7 +97,7 @@ export class FakeTx {
     if (this.writes.length > 0) throw new Error("Firestore transactions require all reads to be executed before all writes.");
     if (this.db.failReads) throw new Error("simulated read failure");
     if (target instanceof FakeQuery) {
-      this.db.reads.push({ kind: "query", path: target.path, orderBy: target.field, dir: target.dir, limit: target.lim });
+      this.db.reads.push({ kind: "query", path: target.path, orderBy: target.field, dir: target.dir, limit: target.lim, where: target.filters, via: "tx" });
       const res = target.run();
       for (const d of res.docs) this.readVersions.set(`${target.path}/${d.id}`, this.db.version(`${target.path}/${d.id}`));
       // A query also conflicts with inserts into its collection (Firestore locks the range).

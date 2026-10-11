@@ -35,7 +35,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const ROUTE = "/api/workspaces/[workspaceId]/source-authority";
-const MAX_BODY_CHARS = 8192;
+/** Request-body ceiling in BYTES (UTF-8), enforced while streaming — never after buffering. */
+const MAX_BODY_BYTES = 8192;
 const BODY_KEYS: readonly string[] = ["url", "operation", "reasonCode", "successorUrl", "expectedRevision"];
 
 type Gate = { ok: true; uid: string; workspaceId: string } | { ok: false; response: NextResponse };
@@ -71,6 +72,42 @@ async function gate(req: NextRequest, method: "GET" | "POST", workspaceId: strin
     return { ok: false, response: json(status, body) };
   }
   return { ok: true, uid: identity.uid, workspaceId };
+}
+
+/**
+ * Read at most `limit` bytes of the request body. Returns null (→ 400) when an
+ * advertised Content-Length exceeds the limit or is not a plain decimal, when
+ * the streamed byte count exceeds the limit (reading stops and the stream is
+ * cancelled at that point — Content-Length is a hint, never the enforcement),
+ * or when the bytes are not valid UTF-8. Bytes land in one fixed buffer of
+ * `limit` bytes; nothing grows with the request.
+ */
+async function readBoundedBody(req: NextRequest, limit: number): Promise<string | null> {
+  const advertised = req.headers.get("content-length");
+  if (advertised !== null && (!/^\d+$/.test(advertised.trim()) || Number(advertised.trim()) > limit)) return null;
+  if (!req.body) return "";
+  const reader = req.body.getReader();
+  const buffer = new Uint8Array(limit);
+  let length = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (length + value.byteLength > limit) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      buffer.set(value, length);
+      length += value.byteLength;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(buffer.subarray(0, length));
+  } catch {
+    return null;
+  }
 }
 
 function invalidUrl(field: "url" | "successorUrl"): NextResponse {
@@ -177,6 +214,9 @@ function mutationResponse(result: ApplyStandingResult): NextResponse {
     case "current_unresolved":
     case "history_unresolved":
       return json(409, { ok: false, errorCode: "SOURCE_AUTHORITY_STATE_UNRESOLVED", message: "This source's stored standing could not be read safely, so it cannot be changed." });
+    case "source_is_referenced":
+      // Never names, hashes or counts the predecessor(s).
+      return json(409, { ok: false, errorCode: "SOURCE_AUTHORITY_SOURCE_REFERENCED", message: "This source is currently used as the successor of another source standing and cannot be withdrawn or superseded." });
     case "successor_invalid":
       return json(409, { ok: false, errorCode: "SOURCE_AUTHORITY_SUCCESSOR_INVALID", reason: result.detail, message: "The successor must be a different document with a valid standing in this Workspace, and the chain must end within 8 steps without a cycle." });
     case "nothing_to_withdraw":
@@ -193,12 +233,12 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
 
   let raw: unknown;
   try {
-    const text = await req.text();
-    if (text.length > MAX_BODY_CHARS) {
+    const bodyText = await readBoundedBody(req, MAX_BODY_BYTES);
+    if (bodyText === null) {
       const { status, body } = invalidRequestBodyResponse();
       return json(status, body);
     }
-    raw = JSON.parse(text);
+    raw = JSON.parse(bodyText);
   } catch {
     const { status, body } = invalidRequestBodyResponse();
     return json(status, body);
