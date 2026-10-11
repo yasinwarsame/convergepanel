@@ -902,15 +902,18 @@ Answers one question: what standing has this Team Workspace explicitly recorded 
   - History is append-only under `.../events/{eventId}`.
   - Withdrawal deletes the current document and records a `WITHDRAWN` event. It is never an active status.
   - Every change also writes a hashes-only `workspace_source_standing_changed` row to `workspaceMembershipEvents`. The audit log recognises that row but does not surface it yet.
+  - Those skipped rows still use page slots, so a page can be empty while older activity exists. In that case the Audit Log shows "No displayable activity on this page. Load more to continue." instead of "No Workspace activity yet."
   - Firestore rules deny all client access explicitly.
 - **Writes.** `POST /api/workspaces/{workspaceId}/source-authority` makes every change in one transaction.
   - It re-authorizes `sources.attest`.
   - It requires an exact `expectedRevision`; `null` means the record must not exist yet. A mismatch returns 409 `SOURCE_AUTHORITY_REVISION_CONFLICT`.
   - Revisions stay monotonic across withdraw and re-attest.
   - For `SUPERSEDED`, it validates the successor chain: same Workspace, no missing or malformed links, no cycle, at most 8 edges.
-  - All reads happen before any write, at most 13 in the worst case. The event and audit ids are allocated before the transaction, so a retry cannot duplicate them.
+  - A source that is currently another standing's successor cannot be withdrawn or newly superseded: the writer queries `successorIdHash == id` (same Workspace, limit 1) inside the transaction and returns 409 `SOURCE_AUTHORITY_SOURCE_REFERENCED` without naming the referencing record. It may still move between ACCEPTED and DISPUTED, or leave SUPERSEDED, which only shortens chains. So an ordinary change can never make an existing chain lose a link or exceed 8 edges.
+  - All reads happen before any write. Worst case (create + supersede): at most 12 document reads (3 authorization, 1 current state, 8 successors) plus 2 limit-1 queries (history revision on create, inbound reference on withdraw/supersede), both served by automatic single-field indexes; then 3 writes. The event and audit ids are allocated before the transaction, so a retry cannot duplicate them.
+  - The request body is read through a stream capped at 8,192 UTF-8 bytes. An oversized `Content-Length` or stream is rejected without buffering the rest, and the body is never read before authentication, admission, `sources.attest` and the flag pass.
 - **Reads.**
-  - `GET ?url=` returns the management view.
+  - `GET ?url=` returns the management view. Status, reason, revision and date all come from one read of the record; only its successors are read afterwards.
   - With the flag on, Review Context adds an optional `standing` to each displayed Decision Receipt link. The value is `{status, asOf, successorUrl?}` or `{status: "UNRESOLVED"}`.
   - These reads fetch exact documents in batches, one batch per chain level. They never reorder or filter links.
   - With the flag off there are zero reads and no key.

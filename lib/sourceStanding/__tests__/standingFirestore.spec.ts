@@ -185,7 +185,6 @@ describe("SUPERSEDED — successor validation inside the transaction", () => {
     ["missing successor record", () => undefined, "successor_missing"],
     ["successor only in ANOTHER Workspace", () => seedCurrent(WS2, B), "successor_missing"],
     ["malformed successor record", () => mockDb.put(cur(WS, B), { junk: true }), "successor_malformed"],
-    ["successor chain loops back to the source", () => seedCurrent(WS, B, { status: "SUPERSEDED", reasonCode: "replaced_by_successor", successorIdHash: A.idHash }), "cycle"],
     [
       "successor chain has a missing link",
       () => seedCurrent(WS, B, { status: "SUPERSEDED", reasonCode: "replaced_by_successor", successorIdHash: C.idHash }),
@@ -198,7 +197,15 @@ describe("SUPERSEDED — successor validation inside the transaction", () => {
     expect(audits()).toHaveLength(0);
   });
 
-  it("chain depth: 8 edges from the new record is accepted; 9 is chain_too_deep — and the read count is bounded (≤ 13)", async () => {
+  it("a would-be cycle back to the source is refused before the walk: the source is already referenced (P2)", async () => {
+    seedCurrent(WS, A);
+    seedCurrent(WS, B, { status: "SUPERSEDED", reasonCode: "replaced_by_successor", successorIdHash: A.idHash });
+    expect(await applySourceStandingOperation(sup(B, 1))).toEqual({ ok: false, reason: "source_is_referenced" });
+    expect(mockDb.read(cur(WS, A))).toMatchObject({ status: "ACCEPTED", revision: 1 });
+    expect(audits()).toHaveLength(0);
+  });
+
+  it("chain depth: 8 edges from the new record is accepted; 9 is chain_too_deep — reads bounded (≤ 12 documents + ≤ 2 limit-1 queries)", async () => {
     const ids = Array.from({ length: 10 }, (_, i) => ident(`s${i}`));
     // ids[1] → ids[2] → … → ids[k] (ACCEPTED). Superseding A by ids[1] adds the A→ids[1] edge.
     const build = (lastIndex: number) => {
@@ -207,17 +214,20 @@ describe("SUPERSEDED — successor validation inside the transaction", () => {
     build(8); // A→1→…→8 = 8 edges
     mockDb.reads = [];
     expect((await applySourceStandingOperation(sup(ids[1]))).ok).toBe(true);
-    expect(mockDb.reads.length).toBeLessThanOrEqual(13);
-    expect(mockDb.reads.filter((r) => r.kind === "query")).toHaveLength(1);
+    expect(mockDb.reads.filter((r) => r.kind === "doc").length).toBeLessThanOrEqual(12);
+    const queries = mockDb.reads.filter((r) => r.kind === "query");
+    expect(queries).toHaveLength(2); // history revision (create) + inbound reference (supersede)
+    expect(queries.every((q) => q.kind === "query" && q.limit === 1 && q.via === "tx")).toBe(true);
 
     mockDb = new FakeDb();
     seedWorkspace(WS, { [OWNER]: "owner", [ADMIN]: "admin" });
     build(9); // A→1→…→9 = 9 edges
     mockDb.reads = [];
     expect(await applySourceStandingOperation(sup(ids[1]))).toEqual({ ok: false, reason: "successor_invalid", detail: "chain_too_deep" });
-    // 2 auth (admin + owner membership: dedup off) + workspace + current + history query + 8 successor reads — never a 9th.
+    // workspace + caller + owner membership + current + 8 successor documents — never a 9th — plus the 2 queries.
     expect(standingReads().filter((r) => r.kind === "doc" && !r.path.endsWith(A.idHash)).length).toBe(8);
-    expect(mockDb.reads.length).toBeLessThanOrEqual(13);
+    expect(mockDb.reads.filter((r) => r.kind === "doc").length).toBe(12);
+    expect(mockDb.reads.filter((r) => r.kind === "query")).toHaveLength(2);
   });
 });
 

@@ -1095,3 +1095,75 @@ describe("Order 4 Slice 2a — Workspace Source Standing on the Decision Receipt
     expect(on.context.decisionReceipt.sources[0].standing?.status).toBe("DISPUTED");
   });
 });
+
+describe("Slice 2a.1 — Review Context standing DTO privacy (recursive)", () => {
+  const { sourceIdentityV1 } = jest.requireActual("@/lib/sourceStanding/sourceIdentity");
+  const AS_OF = Timestamp.fromMillis(Date.UTC(2026, 9, 1));
+  const RAW = ["https://www.sec.gov/a", "https://www.sec.gov/b", "https://www.sec.gov/c", "https://www.sec.gov/d"];
+  const allKeys = (v: unknown, out: string[] = []): string[] => {
+    if (Array.isArray(v)) v.forEach((x) => allKeys(x, out));
+    else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) (out.push(k), allKeys(x, out));
+    return out;
+  };
+  beforeEach(() => {
+    mockPublisherClassEnabled = false;
+    mockSourceAuthorityMetadataEnabled = true;
+    mockClassifySourcePublisher.mockReset();
+    mockClassifySourcePublisher.mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    mockSourceAuthorityMetadataEnabled = false;
+  });
+
+  it("every standing object carries only status / asOf / successorUrl — never actor, reason, revision, identity or history", async () => {
+    const put = (url: string, fields: Record<string, unknown>) => {
+      const identity = sourceIdentityV1(url);
+      stores.sourceAuthority.set(`${WS_ID}::${identity.idHash}`, { schemaVersion: 1, workspaceId: WS_ID, identity, revision: 7, updatedAt: AS_OF, updatedByUid: "secret-actor-uid", ...fields });
+      return identity;
+    };
+    put("https://www.sec.gov/a", { status: "ACCEPTED", reasonCode: "primary_document" });
+    put("https://www.sec.gov/b", { status: "DISPUTED", reasonCode: "inaccurate_or_unreliable_for_workspace" });
+    const d = put("https://www.sec.gov/d", { status: "ACCEPTED", reasonCode: "designated_reference" });
+    put("https://www.sec.gov/c", { status: "SUPERSEDED", reasonCode: "replaced_by_successor", successorIdHash: d.idHash });
+    seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: { conclusion: "Overall risk is moderate.", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: RAW, sourceBacked: true, humanReviewNeeded: true } }) });
+    const result = await call(REVIEWER_UID, "reviewer", true);
+    if (result.status !== "ok") throw new Error("expected ok");
+    const standings = result.context.decisionReceipt.sources.map((s) => s.standing).filter(Boolean);
+    expect(standings).toHaveLength(4);
+    for (const s of standings) expect(Object.keys(s as object).every((k) => ["status", "asOf", "successorUrl"].includes(k))).toBe(true);
+    const keys = allKeys(result.context.decisionReceipt.sources);
+    for (const k of ["actorUid", "actorRole", "updatedByUid", "reasonCode", "revision", "identity", "idHash", "events", "history", "successorIdHash"]) expect({ k, present: keys.includes(k) }).toEqual({ k, present: false });
+    const json = JSON.stringify(result.context);
+    for (const leak of ["secret-actor-uid", d.idHash, "primary_document", "designated_reference"]) expect(json).not.toContain(leak);
+  });
+});
+
+describe("Slice 2a.1 — standing never moves review/governance semantics on the real Review Context path", () => {
+  const { sourceIdentityV1 } = jest.requireActual("@/lib/sourceStanding/sourceIdentity");
+  const RAW = ["https://www.sec.gov/a", "https://en.wikipedia.org/wiki/X"];
+  const seedAll = (status: "ACCEPTED" | "DISPUTED") => {
+    for (const url of RAW) {
+      const identity = sourceIdentityV1(url);
+      stores.sourceAuthority.set(`${WS_ID}::${identity.idHash}`, { schemaVersion: 1, workspaceId: WS_ID, identity, status, reasonCode: status === "ACCEPTED" ? "primary_document" : "inaccurate_or_unreliable_for_workspace", revision: 1, updatedAt: Timestamp.fromMillis(0), updatedByUid: "a" });
+    }
+  };
+  const stripStanding = (ctx: any) => JSON.parse(JSON.stringify({ ...ctx, decisionReceipt: { ...ctx.decisionReceipt, sources: ctx.decisionReceipt.sources.map(({ standing: _s, ...rest }: any) => rest) } }));
+  afterEach(() => {
+    mockSourceAuthorityMetadataEnabled = false;
+  });
+
+  it("flag ON: none / all ACCEPTED / all DISPUTED → identical sourceBacked, reviewOverview, review, assignment, panel and viewer flags", async () => {
+    mockSourceAuthorityMetadataEnabled = true;
+    seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: { conclusion: "Overall risk is moderate.", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: RAW, sourceBacked: true, humanReviewNeeded: true } }) });
+    const none = await call(OWNER_UID, "owner", true);
+    seedAll("ACCEPTED");
+    const acc = await call(OWNER_UID, "owner", true);
+    seedAll("DISPUTED");
+    const dis = await call(OWNER_UID, "owner", true);
+    if (none.status !== "ok" || acc.status !== "ok" || dis.status !== "ok") throw new Error("expected ok");
+    expect(acc.context.decisionReceipt.sources.map((s) => s.standing?.status)).toEqual(["ACCEPTED", "ACCEPTED"]); // non-vacuous: standing really attached
+    expect(dis.context.decisionReceipt.sources.map((s) => s.standing?.status)).toEqual(["DISPUTED", "DISPUTED"]);
+    expect(stripStanding(acc.context)).toEqual(stripStanding(none.context));
+    expect(stripStanding(dis.context)).toEqual(stripStanding(none.context));
+  });
+});
