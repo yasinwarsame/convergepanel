@@ -898,7 +898,9 @@ describe("Order 4 — Source Publisher Class on the Decision Receipt sources", (
     expect(sources[0].publisher).toEqual({ publisherClass: "GOVERNMENT", reasonCode: "matched_restricted_namespace", matchedRule: { kind: "namespace", value: "gov" }, host: "www.sec.gov", classifierVersion: 1 });
     // MUTATION F: the URL cited twice (once with whitespace) is ONE link with ONE classification — classified once.
     expect(sources.filter((s) => s.url === "https://www.sec.gov/cgi-bin/browse-edgar")).toHaveLength(1);
-    expect(mockClassifySourcePublisher.mock.calls.filter(([raw]) => String(raw).includes("sec.gov"))).toHaveLength(1);
+    // Exact raw-string comparison: the URL appears twice in RAW (once whitespace-padded); only the first is classified.
+    expect(mockClassifySourcePublisher.mock.calls.filter(([raw]) => String(raw).trim() === "https://www.sec.gov/cgi-bin/browse-edgar")).toHaveLength(1);
+    expect(mockClassifySourcePublisher.mock.calls.map(([raw]) => raw)).toContain("https://www.sec.gov/cgi-bin/browse-edgar");
     // MUTATION C: labels are neither displayed nor classified nor sent.
     expect(mockClassifySourcePublisher.mock.calls.map(([raw]) => raw)).not.toContain("official government report");
     expect(JSON.stringify(result.context)).not.toContain("official government report");
