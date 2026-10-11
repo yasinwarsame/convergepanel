@@ -308,7 +308,8 @@ describe("versioning, ordering and scope", () => {
 
   it("MUTATION E (import boundary): production code imports lib/sourceAuthority only from the approved read-side path", () => {
     const root = join(__dirname, "..", "..", "..");
-    const allowed = new Set(["lib/workspaces/reviewContext.ts", "lib/client/workspaceReviewClient.ts", "components/workspace/DecisionReceiptSection.tsx"]);
+    // Order 4 Slice 2a: sourceStanding/sourceIdentity.ts reuses ONLY the host-hygiene primitive (pinned in lib/sourceStanding/__tests__/boundaries.spec.ts).
+    const allowed = new Set(["lib/workspaces/reviewContext.ts", "lib/client/workspaceReviewClient.ts", "components/workspace/DecisionReceiptSection.tsx", "lib/sourceStanding/sourceIdentity.ts"]);
     const offenders: string[] = [];
     const walk = (dir: string) => {
       for (const name of readdirSync(dir)) {

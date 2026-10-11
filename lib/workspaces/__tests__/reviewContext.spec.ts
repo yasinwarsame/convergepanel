@@ -14,6 +14,8 @@ const stores: Record<string, Map<string, StoredDoc>> = {
   humanReviewVotes: new Map(),
   workspaceMemberships: new Map(),
   users: new Map(),
+  // Order 4 Slice 2a — keyed `${workspaceId}::${idHash}` by the sub-collection fake below.
+  sourceAuthority: new Map(),
 };
 
 function resetStores() {
@@ -56,6 +58,8 @@ function makeDocRef(collectionName: string, docId: string) {
   };
 }
 
+/** Order 4 Slice 2a — every getAll() batch, so "zero Source Standing reads" is asserted at the db boundary. */
+const mockGetAllCalls: string[][] = [];
 const mockAdminDb: any = {
   collection: (name: string) => ({
     doc: (docId: string) => makeDocRef(name, docId),
@@ -65,6 +69,7 @@ const mockAdminDb: any = {
     },
   }),
   getAll: async (...refs: { __collection: string; __id: string }[]) => {
+    mockGetAllCalls.push(refs.map((r) => `${r.__collection}/${r.__id}`));
     return refs.map((ref) => {
       const data = stores[ref.__collection].get(ref.__id);
       return { exists: data !== undefined, data: () => data, id: ref.__id };
@@ -83,10 +88,15 @@ jest.mock("@/lib/logger", () => ({ logger: { warn: jest.fn(), info: jest.fn(), e
 // Order 4 — SOURCE_PUBLISHER_CLASS_ENABLED defaults OFF here, so every pre-existing test
 // runs exactly as before; the Order 4 block below turns it on explicitly.
 let mockPublisherClassEnabled = false;
+let mockSourceAuthorityMetadataEnabled = false;
 jest.mock("@/lib/env", () => ({
   ...jest.requireActual("@/lib/env"),
   get SOURCE_PUBLISHER_CLASS_ENABLED() {
     return mockPublisherClassEnabled;
+  },
+  // Order 4 Slice 2a — defaults OFF so every pre-existing test is unchanged.
+  get SOURCE_AUTHORITY_METADATA_ENABLED() {
+    return mockSourceAuthorityMetadataEnabled;
   },
 }));
 const mockClassifySourcePublisher = jest.fn();
@@ -965,5 +975,123 @@ describe("Order 4 — E6: reviewContext never re-exports the raw classifier", ()
       expect({ rel, namedReexportFrom: /export\s*\{[^}]*\}\s*from\s*["'][^"']*sourceAuthority/.test(code) && !/export\s+type\s*\{[^}]*\}\s*from\s*["'][^"']*sourceAuthority/.test(code) }).toEqual({ rel, namedReexportFrom: false });
       expect({ rel, localReexport: /export\s*\{[^}]*\b(classifySourcePublisher|registryEntryMatches|normalizeAuthorityHost|labelBoundaryMatch|REGISTRY_ENTRIES|RESTRICTED_NAMESPACE_RULES)\b[^}]*\}/.test(code) }).toEqual({ rel, localReexport: false });
     }
+  });
+});
+
+describe("Order 4 Slice 2a — Workspace Source Standing on the Decision Receipt sources", () => {
+  // Same fixture as the publisher block: labels, a duplicate, a credential-bearing URL, localhost, a non-http scheme.
+  const RAW = [
+    "NIST glossary",
+    "https://www.sec.gov/cgi-bin/browse-edgar",
+    "https://en.wikipedia.org/wiki/Inflation",
+    "  https://www.sec.gov/cgi-bin/browse-edgar  ",
+    "https://user:pw@www.cdc.gov/x",
+    "http://localhost/admin",
+    "javascript:alert(1)",
+    "https://www.reuters.com/world/x#section-2",
+  ];
+  const receipt = (sources: string[]) => ({ conclusion: "Overall risk is moderate.", basis: [], assumptions: [], uncertainties: [], limitations: [], sources, sourceBacked: true, humanReviewNeeded: true });
+  const { sourceIdentityV1 } = jest.requireActual("@/lib/sourceStanding/sourceIdentity");
+  const AS_OF = Timestamp.fromMillis(Date.UTC(2026, 9, 1));
+  function seedStanding(url: string, fields: Record<string, unknown>, workspaceId: string = WS_ID) {
+    const identity = sourceIdentityV1(url);
+    stores.sourceAuthority.set(`${workspaceId}::${identity.idHash}`, { schemaVersion: 1, workspaceId, identity, revision: 1, updatedAt: AS_OF, updatedByUid: ADMIN_UID, ...fields });
+    return identity;
+  }
+  const standingReads = () => mockGetAllCalls.flat().filter((p) => p.startsWith("sourceAuthority/"));
+
+  beforeEach(() => {
+    mockPublisherClassEnabled = false;
+    mockSourceAuthorityMetadataEnabled = false;
+    mockGetAllCalls.length = 0;
+    mockClassifySourcePublisher.mockReset();
+    mockClassifySourcePublisher.mockImplementation(() => undefined);
+  });
+
+  it("ZERO-CHANGE CONTROL: flag OFF → zero Source Standing reads, no `standing` key, payload byte-identical to the links-only payload — even with standing recorded", async () => {
+    seedStanding("https://www.sec.gov/cgi-bin/browse-edgar", { status: "ACCEPTED", reasonCode: "primary_document" });
+    seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: receipt(RAW) }) });
+    const result = await call(REVIEWER_UID, "reviewer", true);
+    if (result.status !== "ok") throw new Error("expected ok");
+    expect(JSON.stringify(result.context.decisionReceipt.sources)).toBe(JSON.stringify(normalizeSourceUrls(RAW)));
+    expect(JSON.stringify(result.context)).not.toContain("standing");
+    expect(standingReads()).toEqual([]);
+  });
+
+  it("flag OFF: the whole context is byte-identical with and without recorded standing (no other field moves)", async () => {
+    seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: receipt(RAW) }) });
+    const before = await call(REVIEWER_UID, "reviewer", true);
+    seedStanding("https://www.sec.gov/cgi-bin/browse-edgar", { status: "DISPUTED", reasonCode: "inaccurate_or_unreliable_for_workspace" });
+    const after = await call(REVIEWER_UID, "reviewer", true);
+    expect(JSON.stringify(after)).toBe(JSON.stringify(before));
+  });
+
+  it("flag ON → same links (URL, hostname, order, dedup, count); recorded standing attached per exact document; absence adds no key", async () => {
+    mockSourceAuthorityMetadataEnabled = true;
+    seedStanding("https://www.sec.gov/cgi-bin/browse-edgar", { status: "ACCEPTED", reasonCode: "primary_document" });
+    seedStanding("https://www.reuters.com/world/x", { status: "DISPUTED", reasonCode: "inaccurate_or_unreliable_for_workspace" }); // fragment-free identity matches the #section-2 citation
+    seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: receipt(RAW) }) });
+    const result = await call(REVIEWER_UID, "reviewer", true);
+    if (result.status !== "ok") throw new Error("expected ok");
+    const sources = result.context.decisionReceipt.sources;
+    expect(JSON.stringify(sources.map(({ url, hostname }) => ({ url, hostname })))).toBe(JSON.stringify(normalizeSourceUrls(RAW)));
+    expect(sources.map((s) => s.standing ?? null)).toEqual([
+      { status: "ACCEPTED", asOf: "2026-10-01T00:00:00.000Z" },
+      null, // wikipedia: nothing recorded → no key, never "accepted"
+      null, // userinfo-bearing URL: displayed (known debt) but has no identity, never looked up
+      null, // localhost: no identity
+      { status: "DISPUTED", asOf: "2026-10-01T00:00:00.000Z" },
+    ]);
+    expect(Object.keys(sources[1])).toEqual(["url", "hostname"]);
+    // Exact-document reads only: wikipedia, sec, reuters — never the userinfo/localhost links.
+    expect(standingReads().length).toBe(3);
+    expect(standingReads().every((p) => p.startsWith(`sourceAuthority/${WS_ID}::`))).toBe(true);
+  });
+
+  it("flag ON: another Workspace's standing for the same document is never used", async () => {
+    mockSourceAuthorityMetadataEnabled = true;
+    seedStanding("https://www.sec.gov/cgi-bin/browse-edgar", { status: "ACCEPTED", reasonCode: "primary_document" }, OTHER_WS_ID);
+    seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: receipt(RAW) }) });
+    const result = await call(REVIEWER_UID, "reviewer", true);
+    if (result.status !== "ok") throw new Error("expected ok");
+    expect(result.context.decisionReceipt.sources.some((s) => s.standing)).toBe(false);
+  });
+
+  it("flag ON: a malformed record is UNRESOLVED with no date, actor, reason or revision", async () => {
+    mockSourceAuthorityMetadataEnabled = true;
+    seedStanding("https://www.sec.gov/cgi-bin/browse-edgar", { status: "ACCEPTED", reasonCode: "replaced_by_successor" });
+    seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: receipt(RAW) }) });
+    const result = await call(REVIEWER_UID, "reviewer", true);
+    if (result.status !== "ok") throw new Error("expected ok");
+    expect(result.context.decisionReceipt.sources[0].standing).toEqual({ status: "UNRESOLVED" });
+    const json = JSON.stringify(result.context);
+    for (const leaked of ["primary_document", "replaced_by_successor", "updatedByUid", ADMIN_UID, "revision"]) expect(json).not.toContain(leaked);
+  });
+
+  it("flag ON: SUPERSEDED carries the successor's canonical URL; the link list itself never grows", async () => {
+    mockSourceAuthorityMetadataEnabled = true;
+    const next = seedStanding("https://www.sec.gov/new-edgar", { status: "ACCEPTED", reasonCode: "designated_reference" });
+    seedStanding("https://www.sec.gov/cgi-bin/browse-edgar", { status: "SUPERSEDED", reasonCode: "replaced_by_successor", successorIdHash: next.idHash });
+    seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: receipt(RAW) }) });
+    const result = await call(REVIEWER_UID, "reviewer", true);
+    if (result.status !== "ok") throw new Error("expected ok");
+    expect(result.context.decisionReceipt.sources[0].standing).toEqual({ status: "SUPERSEDED", asOf: "2026-10-01T00:00:00.000Z", successorUrl: "https://www.sec.gov/new-edgar" });
+    expect(result.context.decisionReceipt.sources).toHaveLength(normalizeSourceUrls(RAW).length);
+  });
+
+  it("flag ON leaves every other field — sourceBacked, publisher, review, viewer — untouched", async () => {
+    mockPublisherClassEnabled = true;
+    seedStanding("https://www.sec.gov/cgi-bin/browse-edgar", { status: "DISPUTED", reasonCode: "inaccurate_or_unreliable_for_workspace" });
+    seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: { ...receipt(RAW), sourceBacked: false } }) });
+    const off = await call(REVIEWER_UID, "reviewer", true);
+    mockSourceAuthorityMetadataEnabled = true;
+    const on = await call(REVIEWER_UID, "reviewer", true);
+    if (off.status !== "ok" || on.status !== "ok") throw new Error("expected ok");
+    const strip = (ctx: typeof on.context) => JSON.parse(JSON.stringify({ ...ctx, decisionReceipt: { ...ctx.decisionReceipt, sources: ctx.decisionReceipt.sources.map(({ standing: _s, ...rest }) => rest) } }));
+    expect(strip(on.context)).toEqual(strip(off.context));
+    expect(on.context.decisionReceipt.sourceBacked).toBe(false);
+    // Publisher class never implies standing: a GOVERNMENT-classified link is DISPUTED because a human said so, and the classes are independent.
+    expect(on.context.decisionReceipt.sources[0].publisher?.publisherClass).toBe("GOVERNMENT");
+    expect(on.context.decisionReceipt.sources[0].standing?.status).toBe("DISPUTED");
   });
 });

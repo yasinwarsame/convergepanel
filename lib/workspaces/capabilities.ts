@@ -62,7 +62,9 @@ export type WorkspaceCapability =
   | "reviews.override"
   | "exports.create"
   | "ownership.transfer"
-  | "admins.manage";
+  | "admins.manage"
+  /** Order 4 Slice 2a — record Workspace standing for an exact cited document (Owner + Admin only). */
+  | "sources.attest";
 
 const OWNER_CAPABILITIES: readonly WorkspaceCapability[] = [
   "workspace.read",
@@ -83,6 +85,7 @@ const OWNER_CAPABILITIES: readonly WorkspaceCapability[] = [
   "exports.create",
   "ownership.transfer",
   "admins.manage",
+  "sources.attest",
 ]; // Owner: reviews.read/submit/manage/override all YES (Phase 8B.2 §14).
 
 const ADMIN_CAPABILITIES: readonly WorkspaceCapability[] = [
@@ -101,6 +104,7 @@ const ADMIN_CAPABILITIES: readonly WorkspaceCapability[] = [
   "reviews.submit",
   "reviews.manage",
   "exports.create",
+  "sources.attest",
   // Deliberately absent: reviews.override, ownership.transfer, admins.manage.
 ];
 

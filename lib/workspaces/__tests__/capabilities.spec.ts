@@ -56,6 +56,23 @@ describe("ROLE_CAPABILITIES", () => {
     });
   });
 
+  /** Order 4 Slice 2a — `sources.attest` is Owner + Admin only. Every cell, positively and negatively. */
+  describe("sources.attest matrix", () => {
+    it.each([
+      ["owner", true],
+      ["admin", true],
+      ["member", false],
+      ["reviewer", false],
+      ["viewer", false],
+    ] as const)("%s.sources.attest === %s", (role, expected) => {
+      expect(roleHasCapability(role, "sources.attest")).toBe(expected);
+      expect(ROLE_CAPABILITIES[role].includes("sources.attest")).toBe(expected);
+    });
+    it("exactly owner and admin hold it (no future role silently inherits it)", () => {
+      expect(WORKSPACE_MEMBERSHIP_ROLES.filter((r) => roleHasCapability(r, "sources.attest"))).toEqual(["owner", "admin"]);
+    });
+  });
+
   describe("owner", () => {
     it("has every capability, including ownership.transfer and admins.manage", () => {
       expect(roleHasCapability("owner", "ownership.transfer")).toBe(true);
