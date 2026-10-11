@@ -210,6 +210,35 @@ describe("P3 — management read uses exactly one head snapshot", () => {
     expect(await readStandingForManagement(WS, A)).toEqual({ kind: "current", status: "SUPERSEDED", reasonCode: "replaced_by_successor", revision: 3, asOf: "1970-01-01T00:33:20.000Z", successor: { resolved: false } });
   });
 
+  function chainFrom(head: SourceIdentityV1, edges: number) {
+    // head → n1 → … → n{edges}; the last node is ACCEPTED.
+    const nodes = Array.from({ length: edges }, (_, i) => ident(`chain-n${i + 1}`));
+    nodes.forEach((n, i) => seedCurrent(WS, n, i < edges - 1 ? supersededBy(nodes[i + 1]) : {}));
+    seedCurrent(WS, head, supersededBy(nodes[0]));
+    return nodes;
+  }
+
+  it("an 8-edge chain (the maximum) resolves to the IMMEDIATE successor: 1 head read + 8 successor reads", async () => {
+    const nodes = chainFrom(A, 8);
+    mockDb.reads = [];
+    expect(await readStandingForManagement(WS, A)).toMatchObject({ kind: "current", status: "SUPERSEDED", successor: { resolved: true, url: nodes[0].canonicalUrl } });
+    expect(mockDb.reads).toHaveLength(9);
+    expect(headReads()).toHaveLength(1);
+  });
+
+  it("a 9-edge chain is unresolved after exactly 9 reads — a 10th document is never loaded", async () => {
+    const nodes = chainFrom(A, 9);
+    mockDb.reads = [];
+    expect(await readStandingForManagement(WS, A)).toMatchObject({ kind: "current", status: "SUPERSEDED", successor: { resolved: false } });
+    expect(mockDb.reads).toHaveLength(9);
+    expect(mockDb.reads.some((r) => r.path === cur(WS, nodes[8]))).toBe(false);
+  });
+
+  it("a 3-edge chain resolves (guards an off-by-small loop bound)", async () => {
+    const nodes = chainFrom(A, 3);
+    expect(await readStandingForManagement(WS, A)).toMatchObject({ successor: { resolved: true, url: nodes[0].canonicalUrl } });
+  });
+
   it("RACE: the head changes after the first read — the response keeps revision 4 / successor B and never resolves from the new successor C", async () => {
     seedCurrent(WS, B, { reasonCode: "designated_reference" });
     seedCurrent(WS, C);

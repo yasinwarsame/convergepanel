@@ -388,8 +388,18 @@ describe("Slice 2a.1 (P4) — the POST body is read through a byte-bounded strea
     expect(applySpy).not.toHaveBeenCalled();
   });
 
-  it("invalid UTF-8 bytes are rejected as an invalid body", async () => {
-    expect((await streamPost(trackedStream([new Uint8Array([0x7b, 0xff, 0xfe, 0x7d])]).stream)).status).toBe(400);
+  it("invalid UTF-8 inside an otherwise VALID JSON body is rejected (only a fatal decoder can catch this)", async () => {
+    // A lenient decoder turns 0xff into U+FFFD inside the url path, which still parses and is a valid identity —
+    // so a 400 here can only come from strict UTF-8 decoding.
+    const prefix = enc.encode('{"url":"https://docs.example.com/a');
+    const suffix = enc.encode('","operation":"accept","reasonCode":"primary_document","expectedRevision":null}');
+    const bytes = new Uint8Array([...prefix, 0xff, ...suffix]);
+    const lenient = new TextDecoder("utf-8").decode(bytes);
+    expect(() => JSON.parse(lenient)).not.toThrow(); // non-vacuity: the payload is valid JSON once decoded leniently
+    const res = await streamPost(trackedStream([bytes]).stream);
+    expect(res.status).toBe(400);
+    expect((await res.json()).errorCode).toBe("invalid_request_body");
+    expect(applySpy).not.toHaveBeenCalled();
   });
 
   it("malformed JSON under the limit and an empty body are rejected normally", async () => {
