@@ -35,6 +35,7 @@
 import type { User } from "firebase/auth";
 import { authedFetch } from "./authedFetch";
 import { isSubstantiveDecisionReceiptConclusion } from "@/lib/adaptiveSchema/decisionReceiptUsability";
+import type { SourcePublisherClassification } from "@/lib/sourceAuthority/types";
 
 // ============================================
 // Client-safe DTO mirrors
@@ -97,6 +98,8 @@ export interface ReviewContextPanelInfo {
 export interface NormalizedSourceLink {
   url: string;
   hostname: string;
+  /** Order 4 — present only when the server's SOURCE_PUBLISHER_CLASS_ENABLED is on; a descriptive, server-computed category (never a score). */
+  publisher?: SourcePublisherClassification;
 }
 
 /**

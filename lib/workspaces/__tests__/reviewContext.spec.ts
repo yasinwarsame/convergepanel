@@ -80,9 +80,25 @@ jest.mock("@/lib/firebase/admin", () => ({
 
 jest.mock("@/lib/logger", () => ({ logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
 
+// Order 4 — SOURCE_PUBLISHER_CLASS_ENABLED defaults OFF here, so every pre-existing test
+// runs exactly as before; the Order 4 block below turns it on explicitly.
+let mockPublisherClassEnabled = false;
+jest.mock("@/lib/env", () => ({
+  ...jest.requireActual("@/lib/env"),
+  get SOURCE_PUBLISHER_CLASS_ENABLED() {
+    return mockPublisherClassEnabled;
+  },
+}));
+const mockClassifySourcePublisher = jest.fn();
+jest.mock("@/lib/sourceAuthority/classifySourcePublisher", () => {
+  const actual = jest.requireActual("@/lib/sourceAuthority/classifySourcePublisher");
+  return { classifySourcePublisher: (...a: unknown[]) => mockClassifySourcePublisher(...a) ?? actual.classifySourcePublisher(...a) };
+});
+
 import { computeMembershipId } from "@/lib/workspaces/membershipId";
 import { buildAdaptiveHumanReviewVoteId } from "@/lib/governance/adaptiveHumanReviewVote";
-import { getReviewContext } from "@/lib/workspaces/reviewContext";
+import { getReviewContext, decisionReceiptSourceLinks } from "@/lib/workspaces/reviewContext";
+import { normalizeSourceUrls } from "@/lib/adaptiveSchema/sourceUrlNormalization";
 import type { WorkspaceReviewCandidate } from "@/lib/workspaces/workspaceReviewEligibility";
 
 const WS_ID = "ws-1";
@@ -826,5 +842,84 @@ describe("getReviewContext — quorum-driven canFinalize", () => {
     if (result.status !== "ok") return;
     expect(result.context.panel?.voteSummary).toEqual({ submittedCount: 1, aggregationState: "waiting" });
     expect(result.context.viewer.canFinalize).toBe(false);
+  });
+});
+
+describe("Order 4 — Source Publisher Class on the Decision Receipt sources", () => {
+  /** Labels, duplicates (incl. a whitespace variant), a credential-bearing URL (still displayed today), a government URL, a platform URL, localhost, a non-http scheme. */
+  const RAW = [
+    "NIST glossary",
+    "https://www.sec.gov/cgi-bin/browse-edgar",
+    "https://en.wikipedia.org/wiki/Inflation",
+    "  https://www.sec.gov/cgi-bin/browse-edgar  ",
+    "https://user:pw@www.cdc.gov/x",
+    "official government report",
+    "http://localhost/admin",
+    "javascript:alert(1)",
+    "https://www.reuters.com/world/x",
+  ];
+  /** The exact payload this fixture produced BEFORE Order 4 (normalizeSourceUrls at fae12ec6), as serialized JSON. */
+  const BASELINE_JSON =
+    '[{"url":"https://www.sec.gov/cgi-bin/browse-edgar","hostname":"www.sec.gov"},{"url":"https://en.wikipedia.org/wiki/Inflation","hostname":"en.wikipedia.org"},{"url":"https://user:pw@www.cdc.gov/x","hostname":"www.cdc.gov"},{"url":"http://localhost/admin","hostname":"localhost"},{"url":"https://www.reuters.com/world/x","hostname":"www.reuters.com"}]';
+  const receipt = (sources: string[]) => ({ conclusion: "Overall risk is moderate.", basis: [], assumptions: [], uncertainties: [], limitations: [], sources, sourceBacked: true, humanReviewNeeded: true });
+
+  beforeEach(() => {
+    mockPublisherClassEnabled = false;
+    mockClassifySourcePublisher.mockReset();
+    mockClassifySourcePublisher.mockImplementation(() => undefined); // pass through to the real classifier
+  });
+
+  it("ZERO-CHANGE CONTROL: flag OFF → the Review Context source payload is byte-identical to the pre-Order-4 payload, and the classifier is never invoked", async () => {
+    expect(JSON.stringify(normalizeSourceUrls(RAW))).toBe(BASELINE_JSON); // the baseline is still what today's normalizer yields
+    seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: receipt(RAW) }) });
+    const result = await call(REVIEWER_UID, "reviewer", true);
+    if (result.status !== "ok") throw new Error("expected ok");
+    expect(JSON.stringify(result.context.decisionReceipt.sources)).toBe(BASELINE_JSON);
+    for (const s of result.context.decisionReceipt.sources) expect(Object.keys(s)).toEqual(["url", "hostname"]);
+    expect(JSON.stringify(result.context)).not.toContain("publisher");
+    expect(mockClassifySourcePublisher).not.toHaveBeenCalled();
+  });
+
+  it("flag ON → the same links (URL, hostname, order, dedup) each carry ONE publisher classification of their first-seen raw source", async () => {
+    mockPublisherClassEnabled = true;
+    seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: receipt(RAW) }) });
+    const result = await call(REVIEWER_UID, "reviewer", true);
+    if (result.status !== "ok") throw new Error("expected ok");
+    const sources = result.context.decisionReceipt.sources;
+    // Links are unchanged.
+    expect(JSON.stringify(sources.map(({ url, hostname }) => ({ url, hostname })))).toBe(BASELINE_JSON);
+    expect(sources.map((s) => [s.hostname, s.publisher?.publisherClass, s.publisher?.reasonCode])).toEqual([
+      ["www.sec.gov", "GOVERNMENT", "matched_restricted_namespace"],
+      ["en.wikipedia.org", "OPEN_CONTRIBUTION_PLATFORM", "matched_registry_entry"],
+      ["www.cdc.gov", "UNCLASSIFIED", "credential_bearing_url"], // MUTATION I: displayed as before, but never classified
+      ["localhost", "UNCLASSIFIED", "non_public_host"], // MUTATION L
+      ["www.reuters.com", "UNCLASSIFIED", "no_rule_matched"],
+    ]);
+    expect(sources[0].publisher).toEqual({ publisherClass: "GOVERNMENT", reasonCode: "matched_restricted_namespace", matchedRule: { kind: "namespace", value: "gov" }, host: "www.sec.gov", classifierVersion: 1 });
+    // MUTATION F: the URL cited twice (once with whitespace) is ONE link with ONE classification — classified once.
+    expect(sources.filter((s) => s.url === "https://www.sec.gov/cgi-bin/browse-edgar")).toHaveLength(1);
+    expect(mockClassifySourcePublisher.mock.calls.filter(([raw]) => String(raw).includes("sec.gov"))).toHaveLength(1);
+    // MUTATION C: labels are neither displayed nor classified nor sent.
+    expect(mockClassifySourcePublisher.mock.calls.map(([raw]) => raw)).not.toContain("official government report");
+    expect(JSON.stringify(result.context)).not.toContain("official government report");
+    expect(JSON.stringify(result.context)).not.toContain("NIST glossary");
+  });
+
+  it("flag ON leaves every other Decision Receipt field — including sourceBacked — untouched (MUTATION H)", async () => {
+    seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: { ...receipt(RAW), sourceBacked: false } }) });
+    const off = await call(REVIEWER_UID, "reviewer", true);
+    mockPublisherClassEnabled = true;
+    const on = await call(REVIEWER_UID, "reviewer", true);
+    if (off.status !== "ok" || on.status !== "ok") throw new Error("expected ok");
+    const strip = (ctx: typeof on.context) => JSON.parse(JSON.stringify({ ...ctx, decisionReceipt: { ...ctx.decisionReceipt, sources: ctx.decisionReceipt.sources.map(({ url, hostname }) => ({ url, hostname })) } }));
+    expect(strip(on.context)).toEqual(strip(off.context));
+    expect(on.context.decisionReceipt.sourceBacked).toBe(false);
+  });
+
+  it("decisionReceiptSourceLinks: flag off returns exactly normalizeSourceUrls (same objects' shape); empty input stays empty either way", () => {
+    expect(decisionReceiptSourceLinks(RAW, false)).toEqual(normalizeSourceUrls(RAW));
+    expect(decisionReceiptSourceLinks([], true)).toEqual([]);
+    expect(decisionReceiptSourceLinks(["NIST glossary"], true)).toEqual([]);
+    expect(mockClassifySourcePublisher).not.toHaveBeenCalled();
   });
 });
