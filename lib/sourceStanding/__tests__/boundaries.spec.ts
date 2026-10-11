@@ -51,6 +51,15 @@ describe("lib/sourceStanding imports — exact per-file allow-list", () => {
     }
   });
 
+  it("authority is capability-only: no role-name comparison anywhere in the subsystem or route", () => {
+    for (const rel of [...productionFiles.map((f) => `lib/sourceStanding/${f}`), ROUTE]) {
+      const c = code(rel);
+      expect({ rel, roleCompare: /role\s*[!=]==?\s*["'](owner|admin|member|reviewer|viewer)["']|["'](owner|admin|member|reviewer|viewer)["']\s*[!=]==?\s*\w*[Rr]ole/.test(c) }).toEqual({ rel, roleCompare: false });
+      expect({ rel, roleTable: /\{\s*owner:\s*true/.test(c) }).toEqual({ rel, roleTable: false });
+    }
+    expect(code("lib/sourceStanding/standingFirestore.ts")).toContain('requiredCapability: "sources.attest"');
+  });
+
   it("no module reads process.env (the flag comes only from lib/env.ts, in the caller)", () => {
     for (const f of productionFiles) expect({ f, env: code(`lib/sourceStanding/${f}`).includes("process.env") }).toEqual({ f, env: false });
   });

@@ -25,7 +25,6 @@ export type SourceStandingStatus = "ACCEPTED" | "DISPUTED" | "SUPERSEDED";
 export type SourceStandingEventStatus = SourceStandingStatus | "WITHDRAWN";
 export type SourceStandingReasonCode = "primary_document" | "designated_reference" | "inaccurate_or_unreliable_for_workspace" | "replaced_by_successor" | "withdrawn";
 export type SourceStandingOperation = "accept" | "dispute" | "supersede" | "withdraw";
-export type SourceStandingActorRole = "owner" | "admin";
 
 /** Own-property allow-lists — `in`/indexing would let "toString", "__proto__" … through. */
 const own = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k);
@@ -40,7 +39,6 @@ const OPERATION_STATUS: Readonly<Record<SourceStandingOperation, SourceStandingE
   supersede: "SUPERSEDED",
   withdraw: "WITHDRAWN",
 });
-const ACTOR_ROLES: Readonly<Record<SourceStandingActorRole, true>> = Object.freeze({ owner: true, admin: true });
 
 export function isSourceStandingStatus(v: unknown): v is SourceStandingStatus {
   return typeof v === "string" && own(STATUS_REASONS, v);
@@ -164,13 +162,10 @@ export type SourceStandingEventV1 = {
   /** The revision this event produced (or, for WITHDRAWN, the revision that was withdrawn). Monotonic across withdraw/re-attest. */
   revision: number;
   actorUid: string;
-  actorRole: SourceStandingActorRole;
+  /** The actor's Workspace membership role at write time — whichever role held `sources.attest` (today Owner or Admin). Recorded, never used for authority. */
+  actorRole: string;
   at: TimestampLike;
 };
-
-export function isSourceStandingActorRole(v: unknown): v is SourceStandingActorRole {
-  return typeof v === "string" && own(ACTOR_ROLES, v);
-}
 
 /** Client-safe presentation. UNRESOLVED carries no timestamp: a malformed record has none that can be trusted. */
 export type SourceStandingPresentationV1 =

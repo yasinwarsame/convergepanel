@@ -4,7 +4,7 @@
  */
 import { Timestamp } from "firebase-admin/firestore";
 import { sourceIdentityV1, type SourceIdentityV1 } from "@/lib/sourceStanding/sourceIdentity";
-import { isReasonAllowed, isSourceStandingOperation, isSourceStandingStatus, MAX_SUCCESSOR_CHAIN_DEPTH, parseSourceStandingCurrent, statusForOperation, isSourceStandingActorRole } from "@/lib/sourceStanding/standingTypes";
+import { isReasonAllowed, isSourceStandingOperation, isSourceStandingStatus, MAX_SUCCESSOR_CHAIN_DEPTH, parseSourceStandingCurrent, statusForOperation} from "@/lib/sourceStanding/standingTypes";
 import { resolveSourceStanding, toStandingPresentation, walkSuccessorChain, type StandingLookup } from "@/lib/sourceStanding/resolveStanding";
 
 const WS = "ws-1";
@@ -49,10 +49,6 @@ describe("vocabulary", () => {
     expect(isReasonAllowed(status, reason)).toBe(ok);
   });
 
-  it("actor roles are exactly owner/admin", () => {
-    expect(["owner", "admin"].every(isSourceStandingActorRole)).toBe(true);
-    for (const r of ["member", "reviewer", "viewer", "system", "model", "toString"]) expect(isSourceStandingActorRole(r)).toBe(false);
-  });
 });
 
 describe("parseSourceStandingCurrent — strict, fail closed", () => {

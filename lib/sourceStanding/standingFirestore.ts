@@ -33,7 +33,7 @@ import { logger } from "@/lib/logger";
 import { authorizeTeamWorkspaceMutationInTransaction, type TeamMutationAuthorizationDenialReason } from "@/lib/workspaces/authorizeTeamWorkspaceMutationInTransaction";
 import { buildWorkspaceMembershipEventDocData } from "@/lib/workspaces/workspaceMembershipEvents";
 import type { SourceIdentityV1 } from "./sourceIdentity";
-import { MAX_SUCCESSOR_CHAIN_DEPTH, SOURCE_STANDING_SCHEMA_VERSION, isReasonAllowed, isSourceStandingActorRole, parseSourceStandingCurrent, statusForOperation, type SourceStandingCurrentV1, type SourceStandingOperation, type SourceStandingPresentationV1, type SourceStandingReasonCode, type SourceStandingStatus } from "./standingTypes";
+import { MAX_SUCCESSOR_CHAIN_DEPTH, SOURCE_STANDING_SCHEMA_VERSION, isReasonAllowed, parseSourceStandingCurrent, statusForOperation, type SourceStandingCurrentV1, type SourceStandingOperation, type SourceStandingPresentationV1, type SourceStandingReasonCode, type SourceStandingStatus } from "./standingTypes";
 import { resolveSourceStanding, toStandingPresentation, walkSuccessorChain, type ChainFailure, type SourceStandingResolution, type StandingLookupAnswer } from "./resolveStanding";
 
 /** Thrown only when the Admin SDK is not configured; routes map it to their generic 500. */
@@ -155,8 +155,8 @@ export async function applySourceStandingOperation(args: ApplyStandingArgs): Pro
   return db.runTransaction(async (tx): Promise<ApplyStandingResult> => {
     const auth = await authorizeTeamWorkspaceMutationInTransaction(tx, { uid: args.uid, workspaceId: args.workspaceId, requiredCapability: "sources.attest" });
     if (!auth.ok) return { ok: false, reason: "denied", denial: auth.reason };
+    // Authority is the capability check above (central ROLE_CAPABILITIES) — never a role-name comparison here.
     const actorRole = auth.membership.role;
-    if (!isSourceStandingActorRole(actorRole)) return { ok: false, reason: "denied", denial: "insufficient_capability" };
 
     const currentSnap = await tx.get(currentRef);
     let current: SourceStandingCurrentV1 | null = null;
