@@ -162,6 +162,14 @@ export const WORKSPACE_GOVERNANCE_SUMMARY_ENABLED = process.env.WORKSPACE_GOVERN
 export const WORKSPACE_REVIEW_INTEGRITY_METRICS_ENABLED = process.env.WORKSPACE_REVIEW_INTEGRITY_METRICS_ENABLED === "true";
 
 /**
+ * Order 4 — Source Publisher Class v1: descriptive publisher-type badges on the
+ * Team Decision Receipt's "Sources cited by the panel". Default OFF;
+ * server-only (never a NEXT_PUBLIC variant). While off, Review Context performs
+ * no classification and its source payload is byte-identical to before.
+ */
+export const SOURCE_PUBLISHER_CLASS_ENABLED = process.env.SOURCE_PUBLISHER_CLASS_ENABLED === "true";
+
+/**
  * Step 6 D5.2A — gates ONLY mutation of the governance policy's score-type
  * review thresholds (`scoreFamilyReviewThresholds`). Default OFF.
  *

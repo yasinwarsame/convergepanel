@@ -26,6 +26,7 @@
 
 import { useState } from "react";
 import { hasUsableDecisionReceipt, type ReviewContextDecisionReceiptInfo } from "@/lib/client/workspaceReviewClient";
+import type { SourcePublisherClass } from "@/lib/sourceAuthority/types";
 
 function CollapsibleReceiptList({ title, items }: { title: string; items: string[] }) {
   const [expanded, setExpanded] = useState(true);
@@ -61,7 +62,27 @@ export const NO_SOURCES_MESSAGE = "No source links were returned for this panel 
 /** Part B/K terminology freeze — never implies independent verification, authority, or fact-checking. */
 export const SOURCES_DISCLAIMER_MESSAGE = "Sources cited by panel responses — not independently verified.";
 
+/**
+ * Order 4 — descriptive publisher-type badges (present only when the server
+ * attached `publisher`). Unordered categories: no score, rank or quality word.
+ */
+export const PUBLISHER_CLASS_LABELS: Record<SourcePublisherClass, string> = {
+  GOVERNMENT: "Government domain",
+  INTERGOVERNMENTAL_ORGANIZATION: "Intergovernmental domain",
+  ACADEMIC_INSTITUTION: "Academic institution domain",
+  OPEN_CONTRIBUTION_PLATFORM: "Open-contribution platform",
+  UNCLASSIFIED: "Unclassified domain",
+};
+export const PUBLISHER_CLASS_DISCLAIMER_MESSAGE =
+  "Publisher type is inferred from the cited web address only — it does not mean the page exists, supports the panel's claim, or is accurate.";
+
+function publisherLabel(source: ReviewContextDecisionReceiptInfo["sources"][number]): string | null {
+  const cls = source.publisher?.publisherClass;
+  return cls !== undefined && Object.prototype.hasOwnProperty.call(PUBLISHER_CLASS_LABELS, cls) ? PUBLISHER_CLASS_LABELS[cls] : null;
+}
+
 function SourcesSection({ sources }: { sources: ReviewContextDecisionReceiptInfo["sources"] }) {
+  const showsPublisherTypes = sources.some((source) => publisherLabel(source) !== null);
   return (
     <div className="mt-4 border-t border-cp-border pt-3">
       <h3 className="text-sm font-semibold text-cp-text">Sources cited by the panel</h3>
@@ -79,11 +100,21 @@ function SourcesSection({ sources }: { sources: ReviewContextDecisionReceiptInfo
               >
                 {source.hostname}
               </a>
+              {publisherLabel(source) !== null && (
+                <span data-testid="source-publisher-class" className="ml-2 rounded border border-cp-border bg-cp-raised px-1.5 py-0.5 text-xs text-cp-muted">
+                  {publisherLabel(source)}
+                </span>
+              )}
             </li>
           ))}
         </ul>
       )}
       <p className="mt-2 text-xs text-cp-faint">{SOURCES_DISCLAIMER_MESSAGE}</p>
+      {showsPublisherTypes && (
+        <p data-testid="source-publisher-disclaimer" className="mt-1 text-xs text-cp-faint">
+          {PUBLISHER_CLASS_DISCLAIMER_MESSAGE}
+        </p>
+      )}
     </div>
   );
 }

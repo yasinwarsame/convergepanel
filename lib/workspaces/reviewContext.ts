@@ -53,6 +53,9 @@ import { roleHasCapability } from "./capabilities";
 import { parseGovernanceRecord, isHumanReviewStatusReviewable } from "@/lib/adaptiveSchema/governanceRecordParser";
 import { parsePersistedAdaptiveOutput } from "@/lib/adaptiveSchema/persistedOutput";
 import { normalizeSourceUrls, type NormalizedSourceLink } from "@/lib/adaptiveSchema/sourceUrlNormalization";
+import { classifySourcePublisher } from "@/lib/sourceAuthority/classifySourcePublisher";
+import type { SourcePublisherClassification } from "@/lib/sourceAuthority/types";
+import { SOURCE_PUBLISHER_CLASS_ENABLED } from "@/lib/env";
 import { buildReviewOverview } from "@/lib/adaptiveSchema/reviewOverviewBuilder";
 import { isCanonicalDueAt, type AdaptiveHumanReviewAssignmentV1 } from "@/lib/governance/adaptiveHumanReviewAssignment";
 import { parseAdaptiveHumanReviewPanel, type AdaptiveHumanReviewPanelV1 } from "@/lib/governance/adaptiveHumanReviewPanel";
@@ -143,16 +146,49 @@ export interface ReviewContextPanelInfo {
  * http(s) URL (`normalizeSourceUrls()`), so nothing non-actionable is
  * transmitted to the client (Phase 10D.1's data-minimization requirement:
  * transmit only what's actually rendered).
+ *
+ * Order 4 — when SOURCE_PUBLISHER_CLASS_ENABLED is on, each displayed link may
+ * carry an optional descriptive `publisher` classification. The key is ABSENT
+ * (not null/undefined) while the flag is off.
  */
+export type ReviewContextSourceLink = NormalizedSourceLink & { publisher?: SourcePublisherClassification };
+
 export interface ReviewContextDecisionReceiptInfo {
   conclusion: string;
   basis: string[];
   assumptions: string[];
   uncertainties: string[];
   limitations: string[];
-  sources: NormalizedSourceLink[];
+  sources: ReviewContextSourceLink[];
   sourceBacked: boolean;
   humanReviewNeeded: boolean;
+}
+
+/**
+ * The Decision Receipt's displayed source links. The link list itself is
+ * ALWAYS exactly `normalizeSourceUrls(rawSources)` — same URLs, hostnames,
+ * order and dedup as before Order 4.
+ *
+ * Flag off: returned as-is; the classifier is never called and no key is added.
+ * Flag on: each displayed link gets the classification of the FIRST raw source
+ * string that produced it (classifying the raw string keeps failure reasons
+ * honest, e.g. a credential-bearing URL that is still displayed stays
+ * UNCLASSIFIED / credential_bearing_url). One displayed URL → one
+ * classification, however many models repeated it. Raw labels that are not
+ * displayed are never sent.
+ */
+export function decisionReceiptSourceLinks(rawSources: string[], publisherClassEnabled: boolean): ReviewContextSourceLink[] {
+  const links = normalizeSourceUrls(rawSources);
+  if (!publisherClassEnabled) return links;
+  const byDisplayedUrl = new Map<string, SourcePublisherClassification>();
+  for (const raw of rawSources) {
+    const displayed = normalizeSourceUrls([raw])[0];
+    if (displayed && !byDisplayedUrl.has(displayed.url)) byDisplayedUrl.set(displayed.url, classifySourcePublisher(raw));
+  }
+  return links.map((link) => {
+    const publisher = byDisplayedUrl.get(link.url);
+    return publisher ? { ...link, publisher } : link;
+  });
 }
 
 export interface ReviewContextViewerInfo {
@@ -428,7 +464,7 @@ export async function getReviewContext(args: { workspaceId: string; runId: strin
         assumptions: record.decisionReceipt.assumptions,
         uncertainties: record.decisionReceipt.uncertainties,
         limitations: record.decisionReceipt.limitations,
-        sources: normalizeSourceUrls(record.decisionReceipt.sources),
+        sources: decisionReceiptSourceLinks(record.decisionReceipt.sources, SOURCE_PUBLISHER_CLASS_ENABLED),
         sourceBacked: record.decisionReceipt.sourceBacked,
         humanReviewNeeded: record.decisionReceipt.humanReviewNeeded,
       },
