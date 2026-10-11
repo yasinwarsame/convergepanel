@@ -1167,3 +1167,59 @@ describe("Slice 2a.1 — standing never moves review/governance semantics on the
     expect(stripStanding(dis.context)).toEqual(stripStanding(none.context));
   });
 });
+
+describe("Slice 2b — real getReviewContext output rendered by the real Decision Receipt component", () => {
+  const { createElement } = jest.requireActual("react");
+  const TestRenderer = jest.requireActual("react-test-renderer");
+  const DRS = jest.requireActual("@/components/workspace/DecisionReceiptSection").default;
+  const { sourceIdentityV1 } = jest.requireActual("@/lib/sourceStanding/sourceIdentity");
+  const textOf = (n: any): string => (typeof n === "string" ? n : n.children.map(textOf).join(""));
+  const URLS = ["https://www.sec.gov/a", "https://en.wikipedia.org/wiki/B", "https://www.reuters.com/c", "https://who.int/d", "https://example.org/e"];
+  const put = (url: string, fields: Record<string, unknown>) => {
+    const identity = sourceIdentityV1(url);
+    stores.sourceAuthority.set(`${WS_ID}::${identity.idHash}`, fields.junk ? fields : { schemaVersion: 1, workspaceId: WS_ID, identity, revision: 2, updatedAt: Timestamp.fromMillis(Date.UTC(2026, 9, 1, 12)), updatedByUid: "uid-admin", ...fields });
+    return identity;
+  };
+  afterEach(() => {
+    mockSourceAuthorityMetadataEnabled = false;
+  });
+
+  async function renderFor(flag: boolean) {
+    mockSourceAuthorityMetadataEnabled = flag;
+    const result = await call(REVIEWER_UID, "reviewer", true);
+    if (result.status !== "ok") throw new Error("expected ok");
+    const r = TestRenderer.create(createElement(DRS, { receipt: result.context.decisionReceipt, reviewOverview: "" }));
+    const rows = r.root.findAll((n: any) => n.type === "li" && n.findAll((c: any) => c.type === "a").length === 1).map((li: any) => li.children.filter((c: any) => typeof c !== "string").map(textOf));
+    const hrefs = r.root.findAll((n: any) => n.type === "a").map((a: any) => a.props.href);
+    return { r, rows, hrefs, json: JSON.stringify(r.toJSON()) };
+  }
+
+  it("flag ON: ACCEPTED / DISPUTED / SUPERSEDED / UNRESOLVED / absent render as specified; the successor is never a link", async () => {
+    put(URLS[0], { status: "ACCEPTED", reasonCode: "primary_document" });
+    put(URLS[1], { status: "DISPUTED", reasonCode: "inaccurate_or_unreliable_for_workspace" });
+    const succ = put("https://www.sec.gov/successor", { status: "ACCEPTED", reasonCode: "designated_reference" });
+    put(URLS[2], { status: "SUPERSEDED", reasonCode: "replaced_by_successor", successorIdHash: succ.idHash });
+    put(URLS[3], { junk: true });
+    seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: { conclusion: "Overall risk is moderate.", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: URLS, sourceBacked: true, humanReviewNeeded: true } }) });
+    const on = await renderFor(true);
+    expect(on.rows).toEqual([
+      ["www.sec.gov", "Accepted by this Workspace", "Workspace standing updated Oct 1, 2026"],
+      ["en.wikipedia.org", "Disputed in this Workspace", "Workspace standing updated Oct 1, 2026"],
+      ["www.reuters.com", "Superseded in this Workspace", "Workspace standing updated Oct 1, 2026"],
+      ["who.int", "Workspace standing unavailable"],
+      ["example.org"],
+    ]);
+    expect(on.hrefs).toEqual(URLS);
+    for (const leak of ["successor", "uid-admin", "primary_document", "inaccurate_or_unreliable_for_workspace", "replaced_by_successor"]) expect(on.json).not.toContain(leak);
+  });
+
+  it("flag OFF: the identical seeded Workspace renders exactly the pre-Slice-2b receipt (no badge, date or standing disclaimer)", async () => {
+    put(URLS[0], { status: "ACCEPTED", reasonCode: "primary_document" });
+    put(URLS[1], { status: "DISPUTED", reasonCode: "inaccurate_or_unreliable_for_workspace" });
+    seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: { conclusion: "Overall risk is moderate.", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: URLS, sourceBacked: true, humanReviewNeeded: true } }) });
+    const off = await renderFor(false);
+    expect(off.rows).toEqual(URLS.map((u) => [new URL(u).hostname]));
+    expect(off.json).not.toMatch(/Workspace standing|by this Workspace|in this Workspace/);
+    expect(off.hrefs).toEqual(URLS);
+  });
+});

@@ -133,7 +133,7 @@ describe("no coupling to governance, consensus, evidence quality, exports, Perso
     for (const l of lines) expect(l).toMatch(/^import type \{/);
   });
 
-  it("no UI component references standing yet (dark, no UI)", () => {
+  it("Slice 2b: the ONLY UI surface that references standing is the Team Decision Receipt (no Personal, Governance, Audit, admin or export UI)", () => {
     const hits: string[] = [];
     const walk = (d: string) => {
       for (const name of readdirSync(d)) {
@@ -145,7 +145,15 @@ describe("no coupling to governance, consensus, evidence quality, exports, Perso
     };
     for (const top of ["components", "hooks"]) walk(join(root, top));
     walk(join(root, "app"));
-    expect(hits.filter((h) => !h.startsWith("app/api/workspaces/[workspaceId]/source-authority/"))).toEqual([]);
+    expect(hits.filter((h) => !h.startsWith("app/api/workspaces/[workspaceId]/source-authority/") && !h.includes("/__tests__/"))).toEqual(["components/workspace/DecisionReceiptSection.tsx"]);
+  });
+
+  it("Slice 2b: the Decision Receipt renders only what the server sent — no server import, no fetch, no client flag, no persistence", () => {
+    const c = code("components/workspace/DecisionReceiptSection.tsx");
+    expect(importsOf(c).filter((i) => /sourceStanding|firebase|firestore|lib\/env|standingFirestore/.test(i))).toEqual([]);
+    for (const banned of ["fetch(", "authedFetch", "source-authority", "NEXT_PUBLIC", "process.env", "localStorage", "sessionStorage", "successorUrl"]) {
+      expect({ banned, present: c.includes(banned) }).toEqual({ banned, present: false });
+    }
   });
 
   it("reviewContext attaches standing only behind the flag and never reorders, filters or reranks links", () => {

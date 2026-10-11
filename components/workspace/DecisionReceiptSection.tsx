@@ -81,8 +81,64 @@ function publisherLabel(source: ReviewContextDecisionReceiptInfo["sources"][numb
   return cls !== undefined && Object.prototype.hasOwnProperty.call(PUBLISHER_CLASS_LABELS, cls) ? PUBLISHER_CLASS_LABELS[cls] : null;
 }
 
+/**
+ * Order 4 Slice 2b — Workspace Source Standing presentation. Present only when
+ * the server attached `standing` (server flag on AND this Workspace recorded a
+ * standing for that exact document). A recorded Workspace decision, current
+ * state only — never a quality score, verification or fact-check. All four
+ * states share one neutral visual treatment.
+ */
+export const SOURCE_STANDING_LABELS = Object.freeze({
+  ACCEPTED: "Accepted by this Workspace",
+  DISPUTED: "Disputed in this Workspace",
+  SUPERSEDED: "Superseded in this Workspace",
+  UNRESOLVED: "Workspace standing unavailable",
+} as const);
+export const SOURCE_STANDING_DISCLAIMER_MESSAGE =
+  "Workspace standing reflects a recorded decision within this Workspace. It does not mean the page exists, supports the panel's claim, or is accurate.";
+export const SOURCE_STANDING_UPDATED_PREFIX = "Workspace standing updated";
+
+export type RenderableStanding =
+  | { status: "ACCEPTED" | "DISPUTED" | "SUPERSEDED"; label: string; asOf: string }
+  | { status: "UNRESOLVED"; label: string };
+
+const ownProp = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k);
+/** Exactly the server's `toISOString()` shape — anything else is not a trusted standing timestamp. */
+const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+/** Fixed locale + UTC: deterministic for every viewer and test machine; date only, no fabricated time zone label. */
+const STANDING_DATE_FORMAT = new Intl.DateTimeFormat("en-US", { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
+
+/** The display date for a trusted standing timestamp, or null — never "Invalid Date", never today's date. */
+export function formatStandingDate(asOf: string): string | null {
+  if (!ISO_UTC.test(asOf)) return null;
+  const ms = Date.parse(asOf);
+  if (Number.isNaN(ms) || new Date(ms).toISOString() !== asOf) return null;
+  return STANDING_DATE_FORMAT.format(new Date(ms));
+}
+
+/**
+ * Validate the untrusted wire `standing` (own properties only; prototype names
+ * never map to a label). A malformed ACCEPTED/DISPUTED/SUPERSEDED renders
+ * NOTHING — it is never relabelled UNRESOLVED, which only the server asserts.
+ * Only status/label/asOf survive: successor, actor, reason or revision fields
+ * are never read.
+ */
+export function toRenderableStanding(raw: unknown): RenderableStanding | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw) || !ownProp(raw, "status")) return null;
+  const status = (raw as { status: unknown }).status;
+  if (typeof status !== "string" || !ownProp(SOURCE_STANDING_LABELS, status)) return null;
+  const known = status as keyof typeof SOURCE_STANDING_LABELS;
+  if (known === "UNRESOLVED") return { status: "UNRESOLVED", label: SOURCE_STANDING_LABELS.UNRESOLVED };
+  if (!ownProp(raw, "asOf")) return null;
+  const asOf = (raw as { asOf: unknown }).asOf;
+  if (typeof asOf !== "string" || formatStandingDate(asOf) === null) return null;
+  return { status: known, label: SOURCE_STANDING_LABELS[known], asOf };
+}
+
 function SourcesSection({ sources }: { sources: ReviewContextDecisionReceiptInfo["sources"] }) {
   const showsPublisherTypes = sources.some((source) => publisherLabel(source) !== null);
+  const standings = sources.map((source) => toRenderableStanding((source as { standing?: unknown }).standing));
+  const showsStanding = standings.some((standing) => standing !== null);
   return (
     <div className="mt-4 border-t border-cp-border pt-3">
       <h3 className="text-sm font-semibold text-cp-text">Sources cited by the panel</h3>
@@ -105,6 +161,16 @@ function SourcesSection({ sources }: { sources: ReviewContextDecisionReceiptInfo
                   {publisherLabel(source)}
                 </span>
               )}
+              {standings[i] !== null && (
+                <span data-testid="source-standing" className="ml-2 rounded border border-cp-border bg-cp-raised px-1.5 py-0.5 text-xs text-cp-muted">
+                  {standings[i]!.label}
+                </span>
+              )}
+              {standings[i] !== null && standings[i]!.status !== "UNRESOLVED" && (
+                <span data-testid="source-standing-updated" className="ml-2 text-xs text-cp-faint">
+                  {SOURCE_STANDING_UPDATED_PREFIX} {formatStandingDate((standings[i] as { asOf: string }).asOf)}
+                </span>
+              )}
             </li>
           ))}
         </ul>
@@ -113,6 +179,11 @@ function SourcesSection({ sources }: { sources: ReviewContextDecisionReceiptInfo
       {showsPublisherTypes && (
         <p data-testid="source-publisher-disclaimer" className="mt-1 text-xs text-cp-faint">
           {PUBLISHER_CLASS_DISCLAIMER_MESSAGE}
+        </p>
+      )}
+      {showsStanding && (
+        <p data-testid="source-standing-disclaimer" className="mt-1 text-xs text-cp-faint">
+          {SOURCE_STANDING_DISCLAIMER_MESSAGE}
         </p>
       )}
     </div>
