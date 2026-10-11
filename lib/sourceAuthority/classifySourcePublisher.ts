@@ -9,8 +9,13 @@
  * model's evidence type, sourceBacked or the label wording influences it.
  */
 import { labelBoundaryMatch, normalizeAuthorityHost } from "./normalizeAuthorityHost";
-import { REGISTRY_ENTRIES, RESTRICTED_NAMESPACE_RULES } from "./registry";
+import { REGISTRY_ENTRIES, RESTRICTED_NAMESPACE_RULES, type RegistryEntry } from "./registry";
 import { SOURCE_PUBLISHER_CLASSIFIER_VERSION, type SourcePublisherClassification } from "./types";
+
+/** Exact domain always; a subdomain only when the entry opts in — label-boundary safe, never a bare `endsWith(domain)`. */
+export function registryEntryMatches(host: string, entry: Pick<RegistryEntry, "domain" | "includeSubdomains">): boolean {
+  return host === entry.domain || (entry.includeSubdomains && host.endsWith(`.${entry.domain}`));
+}
 
 export function classifySourcePublisher(raw: unknown): SourcePublisherClassification {
   const base = { classifierVersion: SOURCE_PUBLISHER_CLASSIFIER_VERSION };
@@ -23,7 +28,7 @@ export function classifySourcePublisher(raw: unknown): SourcePublisherClassifica
     return { ...base, publisherClass: namespace.publisherClass, reasonCode: "matched_restricted_namespace", matchedRule: { kind: "namespace", value: namespace.namespace }, host };
   }
 
-  const entry = REGISTRY_ENTRIES.find((e) => host === e.domain || (e.includeSubdomains && host.endsWith(`.${e.domain}`)));
+  const entry = REGISTRY_ENTRIES.find((e) => registryEntryMatches(host, e));
   if (entry) {
     return { ...base, publisherClass: entry.publisherClass, reasonCode: "matched_registry_entry", matchedRule: { kind: "registry", value: entry.domain }, host };
   }

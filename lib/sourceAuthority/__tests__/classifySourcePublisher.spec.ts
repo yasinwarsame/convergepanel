@@ -8,7 +8,7 @@
  */
 import { readFileSync, readdirSync, statSync } from "fs";
 import { join, relative } from "path";
-import { classifySourcePublisher } from "@/lib/sourceAuthority/classifySourcePublisher";
+import { classifySourcePublisher, registryEntryMatches } from "@/lib/sourceAuthority/classifySourcePublisher";
 import { normalizeAuthorityHost, NON_PUBLIC_HOST_SUFFIXES, MAX_AUTHORITY_SOURCE_URL_LENGTH } from "@/lib/sourceAuthority/normalizeAuthorityHost";
 import { REGISTRY_ENTRIES, RESTRICTED_NAMESPACE_RULES } from "@/lib/sourceAuthority/registry";
 import { SOURCE_PUBLISHER_CLASSIFIER_VERSION, type SourcePublisherReasonCode } from "@/lib/sourceAuthority/types";
@@ -64,6 +64,24 @@ describe("registry", () => {
     ["https://www.youtube.com/watch?v=x", "OPEN_CONTRIBUTION_PLATFORM", "youtube.com"],
   ])("%s → %s via registry %s", (url, expected, domain) => {
     expect(c(url)).toMatchObject({ publisherClass: expected, reasonCode: "matched_registry_entry", matchedRule: { kind: "registry", value: domain }, classifierVersion: 1 });
+  });
+
+  it("registryEntryMatches: exact domain always; subdomains ONLY when includeSubdomains is true; never a bare suffix", () => {
+    const exactOnly = { domain: "example-agency.org", includeSubdomains: false };
+    const withSubs = { domain: "example-agency.org", includeSubdomains: true };
+    expect(registryEntryMatches("example-agency.org", exactOnly)).toBe(true);
+    expect(registryEntryMatches("www.example-agency.org", exactOnly)).toBe(false);
+    expect(registryEntryMatches("www.example-agency.org", withSubs)).toBe(true);
+    expect(registryEntryMatches("deep.sub.example-agency.org", withSubs)).toBe(true);
+    for (const entry of [exactOnly, withSubs]) {
+      expect(registryEntryMatches("evilexample-agency.org", entry)).toBe(false);
+      expect(registryEntryMatches("example-agency.org.evil.com", entry)).toBe(false);
+    }
+  });
+
+  it("the classifier routes every registry decision through registryEntryMatches (no second, divergent matcher)", () => {
+    const src = readFileSync(join(__dirname, "..", "classifySourcePublisher.ts"), "utf8");
+    expect(src).toMatch(/REGISTRY_ENTRIES\.find\(\(e\) => registryEntryMatches\(host, e\)\)/);
   });
 
   it("registry matching is label-boundary safe (no naïve endsWith)", () => {
@@ -143,6 +161,9 @@ describe("canonical host handling (MUTATIONS J, K)", () => {
     expect(c("https://who.int.example.com./x")).toMatchObject({ publisherClass: "UNCLASSIFIED", host: "who.int.example.com" });
     expect(c("https://en.wikipedia.org./wiki/X")).toMatchObject({ publisherClass: "OPEN_CONTRIBUTION_PLATFORM", host: "en.wikipedia.org" });
     expect(normalizeAuthorityHost("https://localhost./")).toEqual({ ok: false, reasonCode: "non_public_host" });
+    // Exactly ONE dot is stripped: a second trailing dot leaves an empty label → never a public host, never a match.
+    expect(c("https://www.sec.gov../x")).toEqual({ publisherClass: "UNCLASSIFIED", reasonCode: "non_public_host", matchedRule: null, host: null, classifierVersion: 1 });
+    expect(c("https://who.int.../x")).toMatchObject({ publisherClass: "UNCLASSIFIED", reasonCode: "non_public_host" });
   });
 
   it("MUTATION J: a Unicode look-alike becomes a different punycode host and is NOT classified by appearance", () => {
@@ -297,7 +318,12 @@ describe("versioning, ordering and scope", () => {
         else if (/\.(ts|tsx)$/.test(name) && !/\.(spec|test)\.tsx?$/.test(name)) {
           const rel = relative(root, p);
           if (rel.startsWith("lib/sourceAuthority/")) continue;
-          if (/["']@\/lib\/sourceAuthority\//.test(readFileSync(p, "utf8")) && !allowed.has(rel)) offenders.push(rel);
+          const text = readFileSync(p, "utf8");
+          // Any import form — "@/lib/sourceAuthority/…", a relative "../sourceAuthority/…", require() or import() — counts.
+          const importsIt = /(?:from|import|require)\s*\(?\s*["'][^"']*sourceAuthority(?:\/|["'])/.test(text);
+          // Nor may another production file reach the classifier through the approved importers' exports.
+          const usesHelper = /\b(decisionReceiptSourceLinks|classifySourcePublisher|registryEntryMatches|PUBLISHER_CLASS_LABELS)\b/.test(text);
+          if ((importsIt || usesHelper) && !allowed.has(rel)) offenders.push(rel);
         }
       }
     };
