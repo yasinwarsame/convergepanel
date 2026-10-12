@@ -1223,3 +1223,54 @@ describe("Slice 2b — real getReviewContext output rendered by the real Decisio
     expect(off.hrefs).toEqual(URLS);
   });
 });
+
+describe("Slice 2b-T2 — real getReviewContext: ACCEPTED / SUPERSEDED standing never changes decisionReceipt.sourceBacked", () => {
+  const { sourceIdentityV1 } = jest.requireActual("@/lib/sourceStanding/sourceIdentity");
+  const URL_A = "https://www.sec.gov/a";
+  const URL_B = "https://en.wikipedia.org/wiki/B";
+  const SUCC = "https://www.sec.gov/successor";
+  const AT = Timestamp.fromMillis(Date.UTC(2026, 9, 1, 12));
+  const put = (url: string, fields: Record<string, unknown>) => {
+    const identity = sourceIdentityV1(url);
+    stores.sourceAuthority.set(`${WS_ID}::${identity.idHash}`, { schemaVersion: 1, workspaceId: WS_ID, identity, revision: 1, updatedAt: AT, updatedByUid: "uid-admin", ...fields });
+    return identity;
+  };
+  const receipt = (sourceBacked: boolean) => ({ conclusion: "Overall risk is moderate.", basis: ["b"], assumptions: [], uncertainties: [], limitations: [], sources: [URL_A, URL_B], sourceBacked, humanReviewNeeded: true });
+  const stripStanding = (ctx: any) => JSON.parse(JSON.stringify({ ...ctx, decisionReceipt: { ...ctx.decisionReceipt, sources: ctx.decisionReceipt.sources.map(({ standing: _s, ...rest }: any) => rest) } }));
+  async function ctxFor(flag: boolean) {
+    mockSourceAuthorityMetadataEnabled = flag;
+    const result = await call(REVIEWER_UID, "reviewer", true);
+    if (result.status !== "ok") throw new Error("expected ok");
+    return result.context;
+  }
+  afterEach(() => {
+    mockSourceAuthorityMetadataEnabled = false;
+  });
+
+  it("ACCEPTED: sourceBacked=false stays false; only the optional standing differs from the no-standing context", async () => {
+    seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: receipt(false) }) });
+    const before = await ctxFor(true); // flag on, nothing recorded yet
+    put(URL_A, { status: "ACCEPTED", reasonCode: "primary_document" });
+    const after = await ctxFor(true);
+    expect(after.decisionReceipt.sources[0].standing?.status).toBe("ACCEPTED"); // non-vacuous: standing really attached
+    expect(before.decisionReceipt.sources[0].standing).toBeUndefined();
+    expect(after.decisionReceipt.sourceBacked).toBe(false);
+    expect(stripStanding(after)).toEqual(stripStanding(before));
+    // and identical to the flag-off context once standing is removed
+    expect(stripStanding(after)).toEqual(stripStanding(await ctxFor(false)));
+  });
+
+  it("SUPERSEDED (successor resolves): sourceBacked=true stays true; only the optional standing differs", async () => {
+    seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: receipt(true) }) });
+    const before = await ctxFor(true);
+    const succ = put(SUCC, { status: "ACCEPTED", reasonCode: "designated_reference" });
+    put(URL_B, { status: "SUPERSEDED", reasonCode: "replaced_by_successor", successorIdHash: succ.idHash });
+    const after = await ctxFor(true);
+    const standing = after.decisionReceipt.sources[1].standing as { status: string; successorUrl?: string };
+    expect(standing.status).toBe("SUPERSEDED"); // non-vacuous: not UNRESOLVED
+    expect(standing.successorUrl).toBe(SUCC); // the successor really resolved
+    expect(after.decisionReceipt.sourceBacked).toBe(true);
+    expect(stripStanding(after)).toEqual(stripStanding(before));
+    expect(stripStanding(after)).toEqual(stripStanding(await ctxFor(false)));
+  });
+});
