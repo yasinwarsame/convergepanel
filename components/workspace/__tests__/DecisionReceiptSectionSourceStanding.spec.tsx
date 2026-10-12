@@ -400,3 +400,77 @@ describe("flag-off zero change (no `standing` on the wire)", () => {
     expect(sha(renderJson(mk(true)))).toBe(BASELINE_PUBLISHER_SHA256);
   });
 });
+
+describe("Slice 2b-T1 — mixed list: the standing disclaimer follows ANY renderable standing", () => {
+  it("absent / ACCEPTED / absent / UNRESOLVED / DISPUTED → exactly one disclaimer; each row keeps only its own badge; order and links unchanged", () => {
+    const standings = [undefined, { status: "ACCEPTED", asOf: AS_OF }, undefined, { status: "UNRESOLVED" }, { status: "DISPUTED", asOf: AS_OF }];
+    const r = render(URLS.map((u, i) => link(u, standings[i] ? { standing: standings[i] } : {})));
+    // Non-vacuity: the fixture really mixes rows with and without standing.
+    expect(standings.filter(Boolean)).toHaveLength(3);
+    expect(standings.filter((s) => !s)).toHaveLength(2);
+    expect(byTestId(r, "source-standing-disclaimer").map(textOf)).toEqual([SOURCE_STANDING_DISCLAIMER_MESSAGE]);
+    expect(rows(r)).toEqual([
+      ["www.sec.gov"],
+      ["en.wikipedia.org", "Accepted by this Workspace", AS_OF_TEXT],
+      ["www.reuters.com"],
+      ["who.int", "Workspace standing unavailable"],
+      ["example.org", "Disputed in this Workspace", AS_OF_TEXT],
+    ]);
+    expect(links(r)).toEqual(expectedLinks(URLS));
+  });
+
+  it("a single standing row among many absent rows still shows the disclaimer exactly once", () => {
+    const r = render(URLS.map((u, i) => link(u, i === 4 ? { standing: { status: "ACCEPTED", asOf: AS_OF } } : {})));
+    expect(byTestId(r, "source-standing")).toHaveLength(1);
+    expect(byTestId(r, "source-standing-disclaimer")).toHaveLength(1);
+  });
+});
+
+describe("Slice 2b-T2 — no standing status ever changes the displayed source-backed state", () => {
+  /** The exact text of the source-backed line in the Panel Conclusion block. */
+  const sourceBackedLine = (r: TestRenderer.ReactTestRenderer) =>
+    r.root.findAll((n) => n.type === "span" && n.children.length === 1 && (n.children[0] === "Source-backed" || n.children[0] === "Not source-backed")).map(textOf);
+  const strip = (r: TestRenderer.ReactTestRenderer) => {
+    const prune = (n: any): any => {
+      if (!n || typeof n !== "object") return n;
+      if (n.props && typeof n.props["data-testid"] === "string" && n.props["data-testid"].startsWith("source-standing")) return null;
+      return { ...n, children: n.children ? n.children.map(prune).filter((c: unknown) => c !== null) : n.children };
+    };
+    return prune(JSON.parse(JSON.stringify(r.toJSON())));
+  };
+
+  it("ACCEPTED never upgrades: sourceBacked=false still reads 'Not source-backed'; everything but the standing nodes is identical", () => {
+    const base = URLS.slice(0, 2).map((u) => link(u));
+    const accepted = URLS.slice(0, 2).map((u, i) => link(u, i === 0 ? { standing: { status: "ACCEPTED", asOf: AS_OF } } : {}));
+    const without = render(base, { sourceBacked: false });
+    const withStanding = render(accepted, { sourceBacked: false });
+    expect(byTestId(withStanding, "source-standing").map(textOf)).toEqual(["Accepted by this Workspace"]); // non-vacuous
+    expect(sourceBackedLine(withStanding)).toEqual(["Not source-backed"]);
+    expect(sourceBackedLine(without)).toEqual(["Not source-backed"]);
+    expect(strip(withStanding)).toEqual(strip(without));
+    expect(links(withStanding)).toEqual(expectedLinks(URLS.slice(0, 2)));
+  });
+
+  it("ACCEPTED with sourceBacked=true stays 'Source-backed' (no inversion either way)", () => {
+    const r = render([link(URLS[0], { standing: { status: "ACCEPTED", asOf: AS_OF } })], { sourceBacked: true });
+    expect(sourceBackedLine(r)).toEqual(["Source-backed"]);
+  });
+
+  it("SUPERSEDED (with a successorUrl) never downgrades: sourceBacked=true still reads 'Source-backed'; successor unrendered; link count unchanged", () => {
+    const successor = "https://successor.example.net/doc";
+    const base = URLS.slice(0, 2).map((u) => link(u));
+    const superseded = URLS.slice(0, 2).map((u, i) => link(u, i === 1 ? { standing: { status: "SUPERSEDED", asOf: AS_OF, successorUrl: successor } } : {}));
+    const without = render(base, { sourceBacked: true });
+    const withStanding = render(superseded, { sourceBacked: true });
+    expect(byTestId(withStanding, "source-standing").map(textOf)).toEqual(["Superseded in this Workspace"]); // non-vacuous
+    expect(sourceBackedLine(withStanding)).toEqual(["Source-backed"]);
+    expect(strip(withStanding)).toEqual(strip(without));
+    expect(links(withStanding)).toEqual(expectedLinks(URLS.slice(0, 2)));
+    expect(JSON.stringify(withStanding.toJSON())).not.toContain("successor.example.net");
+  });
+
+  it("SUPERSEDED with sourceBacked=false stays 'Not source-backed'", () => {
+    const r = render([link(URLS[0], { standing: { status: "SUPERSEDED", asOf: AS_OF } })], { sourceBacked: false });
+    expect(sourceBackedLine(r)).toEqual(["Not source-backed"]);
+  });
+});
