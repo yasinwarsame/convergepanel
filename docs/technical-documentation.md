@@ -918,6 +918,13 @@ Answers one question: what standing has this Team Workspace explicitly recorded 
   - These reads fetch exact documents in batches, one batch per chain level. They never reorder or filter links.
   - With the flag off there are zero reads and no key.
   - Standing is never written into the run, the Decision Receipt, `governanceRecord` or exports.
+- **Presentation (Slice 2b).** The Team Decision Receipt ("Sources cited by the panel") shows each standing the server attached, beside the link and after the publisher badge, in one neutral badge style:
+  - Labels: "Accepted by this Workspace", "Disputed in this Workspace", "Superseded in this Workspace", "Workspace standing unavailable" (UNRESOLVED).
+  - Valid states also show "Workspace standing updated <date>": the current record's `asOf`, as a UTC date. UNRESOLVED never shows a date.
+  - A superseded source's successor is not shown or linked.
+  - When any standing renders, one disclaimer appears: "Workspace standing reflects a recorded decision within this Workspace. It does not mean the page exists, supports the panel's claim, or is accurate."
+  - The component checks the wire data itself. An unknown or inherited status, or a valid status with a missing or malformed timestamp, renders nothing and is never relabelled UNRESOLVED.
+  - With the server flag off no `standing` is sent, so the receipt renders exactly as before. There is no client-side flag.
 
 ### Team Workspace navigation reachability (roadmap 4.4a)
 
