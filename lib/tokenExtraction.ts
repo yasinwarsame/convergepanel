@@ -38,7 +38,7 @@ function safeNumOrNull(val: any): number | null {
 }
 
 /**
- * Extract token usage from OpenAI-compatible response (OpenAI, Perplexity, X.AI/Grok)
+ * Extract token usage from OpenAI-compatible response (OpenAI, X.AI/Grok)
  * 
  * OpenAI format:
  * {
@@ -65,6 +65,43 @@ function extractOpenAIUsage(response: any): TokenUsage {
 
   // If we have total_tokens, use it; otherwise sum prompt + completion (use 0 for null)
   const finalTotalTokens = totalTokens ?? 
+    ((promptTokens ?? 0) + (completionTokens ?? 0));
+
+  return {
+    totalTokens: safeNum(finalTotalTokens), // Always a number (0 if unavailable)
+    promptTokens,
+    completionTokens,
+  };
+}
+
+/**
+ * Extract token usage from a Perplexity Agent API response (`POST /v1/agent`).
+ *
+ * Agent format:
+ * {
+ *   usage: {
+ *     input_tokens: number,
+ *     output_tokens: number,
+ *     total_tokens: number
+ *   }
+ * }
+ */
+function extractPerplexityAgentUsage(response: any): TokenUsage {
+  if (!response || typeof response !== "object") {
+    return { totalTokens: 0, promptTokens: null, completionTokens: null };
+  }
+
+  const usage = response.usage;
+  if (!usage || typeof usage !== "object") {
+    return { totalTokens: 0, promptTokens: null, completionTokens: null };
+  }
+
+  const promptTokens = safeNumOrNull(usage.input_tokens);
+  const completionTokens = safeNumOrNull(usage.output_tokens);
+  const totalTokens = safeNumOrNull(usage.total_tokens);
+
+  // Same convention as extractOpenAIUsage: provider total wins; otherwise input + output.
+  const finalTotalTokens = totalTokens ??
     ((promptTokens ?? 0) + (completionTokens ?? 0));
 
   return {
@@ -196,10 +233,13 @@ export function getTotalTokensFromProviderResponse(
   try {
     switch (providerKey) {
       case "openai":
-      case "perplexity":
       case "xai":
-        // OpenAI-compatible format (OpenAI, Perplexity, X.AI/Grok)
+        // OpenAI-compatible format (OpenAI, X.AI/Grok)
         return extractOpenAIUsage(rawResponse);
+
+      case "perplexity":
+        // Perplexity Agent API format (input_tokens / output_tokens)
+        return extractPerplexityAgentUsage(rawResponse);
       
       case "anthropic":
         // Anthropic format
