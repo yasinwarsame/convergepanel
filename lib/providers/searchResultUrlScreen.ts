@@ -129,6 +129,17 @@ const CREDENTIAL_NAMES = new Set([
   "hmac",
   "otp",
   "passcode",
+  "authenticity_token",
+  "csrfmiddlewaretoken",
+  "secret_access_key",
+  "secretaccesskey",
+  "aws_secret_access_key",
+  "subscription_key",
+  "subscription-key",
+  "ocp-apim-subscription-key",
+  "connect_sid",
+  "asp_net_sessionid",
+  "token_secret",
 ]);
 
 /**
@@ -139,7 +150,7 @@ const CREDENTIAL_NAMES = new Set([
  * timeSignature, forgotPassword, topSecret …) is not a credential name.
  */
 const CREDENTIAL_QUALIFIERS =
-  "access|auth|api|id|refresh|bearer|session|private|client|reset|security|sas|oauth|csrf|xsrf|user|app|admin|account|master|secret|signing|personal|service|login|magic|magic_link|invite|verification|verify|confirmation|upload|download|share|consumer|unsubscribe|bot|github|gitlab|hf|slack|webhook";
+  "access|auth|api|id|refresh|bearer|session|private|client|reset|security|sas|oauth|csrf|xsrf|user|app|admin|account|master|secret|signing|personal|service|login|magic|magic_link|invite|verification|verify|confirmation|upload|download|share|consumer|unsubscribe|bot|github|gitlab|hf|slack|webhook|password|invitation|unlock";
 /** Strong credential nouns: credential-bearing with any qualifier above (up to two chained: personal_access_token). */
 const STRONG_CREDENTIAL_NOUNS = "token|secret|apikey|api_key|signature";
 /** Weak nouns (`key`, `sig`) are everyday words (masterkey, user_key, appSig): credential-bearing only with a strong qualifier. */
@@ -180,6 +191,19 @@ function isTokenShapedValue(value: string): boolean {
   return classes >= 2;
 }
 
+/**
+ * Navigation / prose pieces: every piece is a word optionally followed by
+ * digits (`windows11`, `iPhone15`, `Statistics`, `oauth2`) or digits
+ * optionally followed by letters (`2fa`, `2024`, `365`). Opaque tokens mix
+ * letters and digits inside a piece (`aB3dEfGh`, `6a7b8c9d…`). Syntax, not
+ * entropy: a value made only of word-like pieces is never a credential by
+ * shape alone.
+ */
+function allPiecesWordLike(value: string, separators: RegExp): boolean {
+  const pieces = value.split(separators).filter((p) => p.length > 0);
+  return pieces.length > 0 && pieces.every((p) => /^[A-Za-z]+[0-9]*$/.test(p) || /^[0-9]+[A-Za-z]*$/.test(p));
+}
+
 /** Fully-matching JWT (three base64url parts). */
 const JWT = /^eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}$/;
 
@@ -199,7 +223,9 @@ function isAuthSchemeCredential(scheme: string, payload: string): boolean {
   // Base64 padding.
   if (/[A-Za-z0-9]={1,2}$/.test(payload)) return true;
   // Interior token68 punctuation only inside a long, mixed-class payload ("chemistry/biology" stays prose).
-  if (/[A-Za-z0-9][+/][A-Za-z0-9]/.test(payload) && payload.length >= 16) {
+  // Interior token68 punctuation only inside a long, mixed-class payload that is not word-like prose
+  // ("Statistics/Probability", "COVID19/Vaccines" stay prose).
+  if (/[A-Za-z0-9][+/][A-Za-z0-9]/.test(payload) && payload.length >= 16 && !allPiecesWordLike(payload, /[+/]/)) {
     const classes = [/[a-z]/, /[A-Z]/, /[0-9]/].filter((re) => re.test(payload)).length;
     if (classes >= 2) return true;
   }
@@ -220,6 +246,7 @@ const CREDENTIAL_PREFIXES: readonly RegExp[] = [
   /^gh[pousr]_[A-Za-z0-9]{30,}/,
   /^xox[abpr]-[A-Za-z0-9-]{10,}/,
   /^(AKIA|ASIA)(?=[A-Z0-9]*[0-9])[A-Z0-9]{16}$/,
+  /^ya29\.[A-Za-z0-9_-]{20,}/, // Google OAuth access token
   /^AIza[0-9A-Za-z_-]{35}$/,
   /^SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}$/,
   /^glpat-[A-Za-z0-9_-]{20,}/,
@@ -230,8 +257,9 @@ const CREDENTIAL_HOSTS: ReadonlyArray<{ host: string; pathPrefix: RegExp }> = [
   { host: "hooks.slack.com", pathPrefix: /^\/(services|workflows|triggers)\// },
   { host: "discord.com", pathPrefix: /^\/api\/(v\d{1,3}\/)?webhooks\// },
   { host: "discordapp.com", pathPrefix: /^\/api\/(v\d{1,3}\/)?webhooks\// },
-  { host: "api.telegram.org", pathPrefix: /^\/bot/ },
+  { host: "api.telegram.org", pathPrefix: /^\/(file\/)?bot/ },
   { host: "outlook.office.com", pathPrefix: /^\/webhook\// },
+  { host: "webhook.office.com", pathPrefix: /^\/webhookb2\// },
   { host: "hooks.zapier.com", pathPrefix: /^\/hooks\/catch\// },
   { host: "maker.ifttt.com", pathPrefix: /\/key\// },
 ];
@@ -256,7 +284,8 @@ function normalizeName(rawName: string): string {
     .replace(/[\u0000-\u001f\u007f\u00ad\u200b-\u200f\u2060\ufeff]/g, "")
     .trim()
     .toLowerCase()
-    .replace(/[.+\s_]+/g, "_");
+    .replace(/[.+\s_]+/g, "_")
+    .replace(/^_+|_+$/g, "");
 }
 
 function isCredentialName(rawName: string): boolean {
@@ -271,8 +300,14 @@ function isCredentialName(rawName: string): boolean {
 /** A value is credential-shaped if it (with `+` read as a space, too) is an auth-scheme credential, or it or any sub-token is a JWT or carries an explicit credential prefix. */
 function isCredentialValue(value: string): boolean {
   for (const variant of new Set([value.trim(), value.replace(/\+/g, " ").trim()])) {
-    const scheme = AUTH_SCHEME.exec(variant);
-    if (scheme && isAuthSchemeCredential(scheme[1], scheme[2])) return true;
+    // The scheme may start the value or follow a delimiter (`Authorization: Bearer …`, `"Bearer …"`, `(Bearer …)`).
+    const starts = [0];
+    for (const m of variant.matchAll(/[\s:("'=](?=(bearer|basic|token)\b)/gi)) starts.push((m.index ?? 0) + 1);
+    for (const start of starts) {
+      const candidate = variant.slice(start).replace(/["')\]]+$/, "").trim();
+      const scheme = AUTH_SCHEME.exec(candidate);
+      if (scheme && isAuthSchemeCredential(scheme[1], scheme[2])) return true;
+    }
   }
   const units = new Set<string>([value.trim()]);
   for (const piece of value.split(/[^A-Za-z0-9_.-]+/)) if (piece) units.add(piece);
@@ -286,7 +321,7 @@ function isCredentialValue(value: string): boolean {
 
 /** Host-specific match; the hostname is compared case-insensitively with ONE trailing DNS root dot removed (`discord.com.` ≡ `discord.com`). Comparison only — the URL is never rewritten. */
 function hostMatches(hostname: string, host: string): boolean {
-  const h = hostname.toLowerCase().replace(/\.$/, "");
+  const h = hostname.toLowerCase().replace(/\.+$/, "");
   return h === host || h.endsWith(`.${host}`);
 }
 
@@ -304,6 +339,9 @@ function nestedUrlCandidate(rawValue: string): string | null {
   if (/^https?%3A/i.test(value)) value = decode(value).trim();
   if (/\s/.test(value)) return null;
   if (/^https?:\/\//i.test(value) || /^\/\//.test(value) || /^[/?]/.test(value)) return value;
+  // Other absolute schemes (`ftp://user:pass@…`) and scheme-less userinfo (`user:pass@host/…`).
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) return value;
+  if (/^[^\s/@:]+:[^\s/@]*@[a-z0-9.-]+/i.test(value)) return `https://${value}`;
   if (/^([a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,24}|localhost|\d{1,3}(\.\d{1,3}){3})(:\d{1,5})?[/?#]\S*$/i.test(value)) return `https://${value}`;
   return null;
 }
@@ -335,19 +373,23 @@ const CREDENTIAL_PATH_CONTEXT = new Set([
 function isCredentialPathCandidate(segment: string): boolean {
   if (segment.length < 8) return false;
   if (!/^[A-Za-z0-9._~+=-]+$/.test(segment)) return false;
-  if (/^[A-Za-z]+([-_][A-Za-z]+)*$/.test(segment)) return false;
-  if (/^v?\d+(\.\d+)*$/i.test(segment)) return false;
-  if (/^[A-Za-z0-9_-]+\.[A-Za-z]{1,5}$/.test(segment) && !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{8,}/.test(segment)) return false;
+  // UUIDs and long hex are the canonical reset / access token forms.
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(segment)) return true;
+  if (/^[0-9a-f]{16,}$/i.test(segment)) return true;
+  // Navigation: slugs, versions, dates and file names made only of word-like pieces
+  // (`windows11`, `office-365`, `oauth2-authorization-code`, `2024-01-15`, `index.md`).
+  if (allPiecesWordLike(segment, /[-_.~]/)) return false;
   return true;
 }
 
 /** Credential path context in a `/`-separated path (URL path or hash-route fragment). */
 function screenPathContext(rawSegments: readonly string[]): boolean {
+  const seg = (i: number) => decode((rawSegments[i] ?? "").split(";")[0]);
   for (let i = 0; i < rawSegments.length - 1; i++) {
-    const segment = decode((rawSegments[i] ?? "").split(";")[0]);
-    if (!CREDENTIAL_PATH_CONTEXT.has(normalizeName(segment).replace(/-/g, "_"))) continue;
-    const next = decode((rawSegments[i + 1] ?? "").split(";")[0]);
-    if (isCredentialPathCandidate(next)) return true;
+    const key = normalizeName(seg(i)).replace(/-/g, "_");
+    if (CREDENTIAL_PATH_CONTEXT.has(key) && isCredentialPathCandidate(seg(i + 1))) return true;
+    // Two-segment context: `/password/reset/<token>` (Laravel default).
+    if (key === "password" && normalizeName(seg(i + 1)) === "reset" && isCredentialPathCandidate(seg(i + 2))) return true;
   }
   return false;
 }
@@ -358,11 +400,14 @@ function normalizedHostPath(pathname: string): string {
 }
 
 /** `name=value` pairs separated by `&` or `;`, each part decoded. */
-function splitPairs(raw: string): Array<{ name: string; value: string | null }> {
+function splitPairs(raw: string): Array<{ name: string; value: string | null; formValue: string | null }> {
   if (raw.length === 0) return [];
   return raw.split(/[&;]/).map((pair) => {
     const eq = pair.indexOf("=");
-    return eq === -1 ? { name: decode(pair), value: null } : { name: decode(pair.slice(0, eq)), value: decode(pair.slice(eq + 1)) };
+    if (eq === -1) return { name: decode(pair), value: null, formValue: null };
+    const rawValue = pair.slice(eq + 1);
+    // `formValue` reads `+` as a space BEFORE percent-decoding, so an encoded `%2B` stays a literal `+`.
+    return { name: decode(pair.slice(0, eq)), value: decode(rawValue), formValue: decode(rawValue.replace(/\+/g, " ")) };
   });
 }
 
@@ -379,7 +424,7 @@ function screenPairs(raw: string, nested: boolean, nameSignal: PrivacySignal, va
     if (value === null || value.length === 0) continue;
     if (isCredentialName(name)) return nameSignal;
     if (TOKEN_VALUE_ONLY_NAMES.has(normalizeName(name)) && isTokenShapedValue(value)) return nameSignal;
-    if (isCredentialValue(value)) return valueSignal;
+    if (isCredentialValue(value) || (pair.formValue !== null && isCredentialValue(pair.formValue))) return valueSignal;
     if (!nested && !SEARCH_TEXT_NAMES.has(normalizeName(name))) {
       const candidate = nestedUrlCandidate(value);
       const inner = candidate ? screenNestedValue(candidate) : null;
@@ -412,6 +457,7 @@ function screenParts(url: URL, nested: boolean): PrivacySignal | null {
       for (const { name, value } of splitPairs(pairText)) {
         // Same rule as the query: an absent or empty value carries no secret.
         if (value !== null && value.length > 0 && isCredentialName(name)) return "credential_fragment";
+        if (value !== null && TOKEN_VALUE_ONLY_NAMES.has(normalizeName(name)) && isTokenShapedValue(value)) return "credential_fragment";
       }
     }
     if (screenPathContext(decoded.split("?")[0].replace(/^!/, "").split("/"))) return "credential_fragment";
