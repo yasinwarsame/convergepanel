@@ -44,7 +44,7 @@ import { auditPanelCoverage } from "./coverageAudit";
 import { computeAdaptiveDiagnostics } from "./diagnostics";
 import { findUnrecognizedModelNames, stripUnrecognizedModelNames } from "./modelNameValidator";
 
-const SYNTHESIS_CALL_TIMEOUT_MS = 10000;
+export const SYNTHESIS_CALL_TIMEOUT_MS = 10000;
 const SYNTHESIS_MAX_OUTPUT_TOKENS = 2200;
 const DEFAULT_DISAGREEMENT_EXPLANATION = "Models take different positions on this point — see each model's excerpt below.";
 

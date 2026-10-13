@@ -59,6 +59,9 @@ import { PanelResultPublic } from "@/lib/panel/schemas";
 import { normalizeModelResultPublic, assertPublicStatus } from "@/lib/panel/normalize";
 import { logger } from "@/lib/logger";
 import { finalizeAdaptiveRun, AdaptivePromptPlan } from "@/lib/adaptiveSchema/orchestrate";
+import { computeAdaptiveRetryAccountingWaitMs, monotonicNowMs, type ResearchRequestBudget } from "@/lib/adaptiveSchema/retryBudget";
+import { AdaptiveRetryUsageSink } from "@/lib/adaptiveSchema/retryCorrection";
+import { applyAdaptiveRetryAccounting } from "@/lib/firestore/adaptiveRetryAccounting";
 import { attachDeepResearchClaimIds } from "@/lib/verification/attachDeepResearchClaimIds";
 import {
   trackPanelExecutionStarted,
@@ -93,6 +96,14 @@ export interface ExecuteOrdinaryRunArgs {
    * returned response.
    */
   debugRawResponseRequested: boolean;
+  /**
+   * The request's execution budget, captured by the caller as the first
+   * statement of its POST handler (retryBudget.ts). Bounds the adaptive
+   * corrective retry so it can never push the request past its route
+   * `maxDuration` — auth, quota, the panel and primary accounting have
+   * already spent part of it by the time the retry is considered.
+   */
+  requestBudget: ResearchRequestBudget;
 }
 
 /**
@@ -233,7 +244,7 @@ export type OrdinaryRunExecutionResult = {
 };
 
 export async function executeOrdinaryRun(args: ExecuteOrdinaryRunArgs): Promise<OrdinaryRunExecutionResult> {
-  const { uid, runId, trimmedQuestion, context, selectedModels, adaptivePlan, debugRawResponseRequested } = args;
+  const { uid, runId, trimmedQuestion, context, selectedModels, adaptivePlan, debugRawResponseRequested, requestBudget } = args;
 
   // ============================================
   // RUN PANEL
@@ -363,6 +374,10 @@ export async function executeOrdinaryRun(args: ExecuteOrdinaryRunArgs): Promise<
   };
 
   let totalTokens = 0;
+  // Gates for the supplemental adaptive-retry accounting below: set only
+  // after the corresponding primary write has actually resolved.
+  let completeRunSucceeded = false;
+  let primaryUserAccountingSucceeded = false;
   let panelResultsPublic: PanelResultPublic[] = []; // Declare outside try block for response
   let panelGovernanceStatus: "approved" | "needs_review" | "blocked" | undefined;
   try {
@@ -480,6 +495,7 @@ export async function executeOrdinaryRun(args: ExecuteOrdinaryRunArgs): Promise<
       tokenUsageByModel,
       tokenTotals,
     });
+    completeRunSucceeded = true;
 
     // Org governance for research runs runs after synthesis (see /api/synthesize-panel)
     // so consensus score and evidence quality are available.
@@ -566,6 +582,7 @@ export async function executeOrdinaryRun(args: ExecuteOrdinaryRunArgs): Promise<
         });
 
         const tokenResult = await incrementUserTokenUsage(uid, totalTokens);
+        primaryUserAccountingSucceeded = true;
 
         // Debug: Verify the update by reading back from Firestore (verbose)
         logger.debug(`[run-panel] Token usage update verified`, {
@@ -688,6 +705,7 @@ export async function executeOrdinaryRun(args: ExecuteOrdinaryRunArgs): Promise<
   // ADAPTIVE RESULT SCHEMA — VALIDATION + CLAIM ALIGNMENT (flag-gated)
   // ============================================
   let adaptivePayload: OrdinaryRunAdaptivePayload | null = null;
+  const adaptiveRetryUsageSink = new AdaptiveRetryUsageSink();
 
   if (adaptivePlan) {
     try {
@@ -699,6 +717,8 @@ export async function executeOrdinaryRun(args: ExecuteOrdinaryRunArgs): Promise<
           apiKeys,
           promptOverrides: adaptivePlan.promptOverrides,
           context,
+          budget: requestBudget,
+          usageSink: adaptiveRetryUsageSink,
         },
         adaptivePlan.classification
       );
@@ -1178,6 +1198,38 @@ export async function executeOrdinaryRun(args: ExecuteOrdinaryRunArgs): Promise<
       });
       adaptivePayload = null;
     }
+
+    // Supplemental accounting for the adaptive corrective retries (AR4 /
+    // A2′): outside the adaptive block above, so retry usage captured before
+    // an aggregation failure is still accounted. Freezing first means no
+    // late-resolving provider promise can change the usage being written.
+    // Its own failure boundary: never fails the response, never touches the
+    // primary accounting already committed above, and never holds the
+    // response longer than a bounded foreground wait (≤ 15 s, never into the
+    // last 5 s of the request budget).
+    try {
+      await applyAdaptiveRetryAccounting({
+        runId,
+        uid,
+        usage: adaptiveRetryUsageSink.freeze(),
+        gates: { completeRunSucceeded, primaryUserAccountingSucceeded },
+        foregroundWaitMs: computeAdaptiveRetryAccountingWaitMs({ budget: requestBudget, nowMonoMs: monotonicNowMs() }),
+      });
+    } catch (retryAccountingError: any) {
+      logger.error("[run-panel] Supplemental adaptive retry accounting threw", {
+        runId,
+        error: retryAccountingError?.message,
+      });
+    }
+
+    // Observed request-budget margin at the end of adaptive work, so the
+    // heuristic 20 s write margin inside the 76 s reserve can be checked
+    // against real traffic.
+    logger.info("[run-panel] Adaptive request budget at completion", {
+      runId,
+      elapsedMs: Math.round(monotonicNowMs() - requestBudget.startedAtMonoMs),
+      remainingMs: Math.round(requestBudget.budgetMs - (monotonicNowMs() - requestBudget.startedAtMonoMs)),
+    });
   }
 
   return {

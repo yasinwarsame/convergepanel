@@ -40,9 +40,9 @@ import { slugsMatch, normalizeSlug, UnionFind } from "./textSimilarity";
 
 export { slugsMatch };
 
-const CLUSTER_CALL_TIMEOUT_MS = 8000;
+export const CLUSTER_CALL_TIMEOUT_MS = 8000;
 const CLUSTER_MAX_OUTPUT_TOKENS = 2000;
-const BACKFILL_CALL_TIMEOUT_MS = 6000;
+export const BACKFILL_CALL_TIMEOUT_MS = 6000;
 const BACKFILL_MAX_OUTPUT_TOKENS = 1200;
 
 export interface ModelClaims {

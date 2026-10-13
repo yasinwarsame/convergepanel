@@ -95,7 +95,19 @@ export type CreateTeamRunSnapshotResult =
  * is never mutated and never deep-cloned, which would strip Firestore
  * `Timestamp` prototypes). Each is copied only when present on the source.
  */
-const COPIED_CONTENT_FIELDS = ["selectedModels", "tokenUsage", "totalTokens", "tokensByModel", "tokensByProvider", "adaptiveOutput", "legacyAdaptiveOutput"] as const;
+const COPIED_CONTENT_FIELDS = [
+  "selectedModels",
+  "tokenUsage",
+  "totalTokens",
+  "tokensByModel",
+  "tokensByProvider",
+  // Copied with the token aggregates it was added into, so a snapshot's own
+  // totalTokens = Σ tokensByModel + adaptiveRetryUsage.totals.totalTokens.
+  // Historical data only — a snapshot is never a second billing event.
+  "adaptiveRetryUsage",
+  "adaptiveOutput",
+  "legacyAdaptiveOutput",
+] as const;
 
 /** The synthesis cache written by `POST /api/synthesize-panel`; copied as a unit only when the report itself is present at the schema version readers accept. */
 const SYNTHESIS_FIELDS = ["synthesizedStructuredReport", "schemaVersion", "synthesizedAt", "synthesizedBy", "synthesisInputHash", "synthesisConsensusSummary", "synthesisConsensusAudit", "synthesisMetadata"] as const;

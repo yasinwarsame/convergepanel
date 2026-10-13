@@ -42,10 +42,15 @@ import { trackQueryClassified, trackRoutingOutcome } from "@/lib/adaptiveSchema/
 // persistence-agnostic invariant this route's `createRun()` best-effort
 // behavior depends on.
 import { executeOrdinaryRun } from "@/lib/runPanelExecution";
+import { startResearchRequestBudget } from "@/lib/adaptiveSchema/retryBudget";
 
 // Ensure Node.js runtime (Firebase Admin requires Node.js, not Edge)
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// Explicit research request budget (AR11). Must stay a literal (Next.js
+// segment config is read statically); retryBudget.spec.ts pins it to
+// RESEARCH_ROUTE_MAX_DURATION_SECONDS, which the adaptive retry guard uses.
+export const maxDuration = 300;
 
 const MIN_MODELS = 2; // Minimum number of models required for a panel run
 
@@ -61,6 +66,9 @@ const MIN_MODELS = 2; // Minimum number of models required for a panel run
  * All errors are caught and converted to JSON - this route never throws.
  */
 export async function POST(req: NextRequest) {
+  // Captured first: the adaptive retry budget must include auth, quota,
+  // classification and the panel itself (lib/adaptiveSchema/retryBudget.ts).
+  const requestBudget = startResearchRequestBudget();
   // Top-level try/catch ensures this route ALWAYS returns JSON, never throws
   // This prevents Next.js from showing error pages and allows the client to handle errors gracefully
   try {
@@ -499,6 +507,7 @@ export async function POST(req: NextRequest) {
       selectedModels: selectedModels as ModelId[],
       adaptivePlan,
       debugRawResponseRequested,
+      requestBudget,
     });
 
     return NextResponse.json(

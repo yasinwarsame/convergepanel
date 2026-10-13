@@ -30,7 +30,7 @@ import { logger } from "@/lib/logger";
 import { stripJsonFences, withTimeout } from "./util";
 import { MAX_BIAS_FINDINGS, BIAS_EVIDENCE_EXCERPT_MAX_CHARS } from "./config";
 
-const BIAS_CALL_TIMEOUT_MS = 12000;
+export const BIAS_CALL_TIMEOUT_MS = 12000;
 const BIAS_MAX_OUTPUT_TOKENS = 2000;
 const RAW_TEXT_CHARS_PER_MODEL = 4000;
 
