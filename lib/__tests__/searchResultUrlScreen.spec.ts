@@ -105,6 +105,7 @@ describe("privacy screen — DROP the whole entry", () => {
     ["plus-joined name access+token", "https://example.com/a?access+token=abc", "credential_query_name"],
     ["dot-joined name access.token", "https://example.com/a?access.token=abc", "credential_query_name"],
     ["zero-width inside a name", "https://example.com/a?acc%E2%80%8Bess_token=abc", "credential_query_name"],
+    ["encoded separator next to an invalid byte (auth%FF%2Etoken)", "https://example.com/a?auth%FF%2Etoken=abc", "credential_query_name"],
     ["semicolon-separated query", "https://example.com/a?a=1;token=abc", "credential_query_name"],
     ["Bearer token with + as space", "https://example.com/a?h=Bearer+abc123def456ghi", "credential_value"],
     ["Basic credential", "https://example.com/a?h=Basic%20dXNlcjpwYXNz", "credential_value"],
