@@ -159,7 +159,7 @@ function decode(part: string): string {
 
 function normalizeName(rawName: string): string {
   return rawName
-    .replace(/[\u0000-\u001f\u007f​-‏⁠﻿]/g, "")
+    .replace(/[\u0000-\u001f\u007f\u200b-\u200f\u2060\ufeff]/g, "")
     .trim()
     .toLowerCase()
     .replace(/[.+\s]+/g, "_");
