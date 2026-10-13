@@ -249,7 +249,9 @@ describe("no side effects", () => {
     firestoreCalls.length = 0;
     countersFlag = flag;
     const result = await executeOrdinaryRun(args(adaptive));
-    return { body: JSON.stringify(result), writes: [...firestoreCalls] };
+    // `adaptive.generatedAt` falls back to "now" when no persisted envelope exists — the only time-varying field.
+    const body = JSON.stringify(result, (key, value) => (key === "generatedAt" ? "<time>" : value));
+    return { body, writes: [...firestoreCalls] };
   }
 
   it.each([[false], [true]])("adaptive=%p: identical response body and identical Firestore call sequence with the flag on vs off; rawResponse stays stripped", async (adaptive) => {
