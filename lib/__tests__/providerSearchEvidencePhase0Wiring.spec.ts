@@ -124,11 +124,12 @@ beforeEach(() => {
   firestoreCalls.length = 0;
   countersFlag = false;
   mockedRunPanel.mockImplementation(async () => panelResults());
+  // Adaptive slot data carries the fields sourceBacked/source coverage derive from, so any mutation of it is visible in the response.
   mockedFinalize.mockResolvedValue({
     schemaId: "comparison_matrix",
     adaptiveResults: [
-      { modelId: "claude", schemaId: "comparison_matrix", ok: true, data: {} },
-      { modelId: "perplexity", schemaId: "comparison_matrix", ok: true, data: {} },
+      { modelId: "claude", schemaId: "comparison_matrix", ok: true, data: { directConclusion: "c", sources: ["https://src.test/claude"] } },
+      { modelId: "perplexity", schemaId: "comparison_matrix", ok: true, data: { directConclusion: "p", sources: ["https://src.test/pplx"] } },
     ],
   });
 });
