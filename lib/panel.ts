@@ -10,6 +10,7 @@ import { callDeepSeek, DEEPSEEK_MODEL } from "@/lib/connectors/deepseek";
 import { DEEPSEEK_API_KEY } from "@/lib/env";
 import { getPanelModelConfig } from "@/lib/panelModels";
 import { GROK_MODEL } from "@/lib/env";
+import { PERPLEXITY_AGENT_MODEL } from "@/lib/providers/perplexityAgentResponse";
 
 type ApiKeys = Partial<Record<ModelId, string | undefined>>;
 
@@ -22,7 +23,8 @@ const ACTUAL_MODEL_STRINGS: Record<ModelId, string> = {
   claude: "claude-haiku-4-5-20251001",
   gemini: "gemini-2.0-flash",
   grok: GROK_MODEL || "grok-4-1-fast-reasoning",
-  perplexity: "sonar",
+  // Physical model behind the logical "perplexity" slot (Perplexity Agent API).
+  perplexity: PERPLEXITY_AGENT_MODEL,
 };
 
 // ─── Fallback allowlist ───────────────────────────────────────────────────

@@ -1,19 +1,25 @@
 /**
- * Perplexity Connector
- * 
- * Perplexity connector: calls the /chat/completions endpoint with OpenAI-style messages
- * and logs the full error body if the API returns a non-2xx status for easier debugging.
- * 
- * Implements function-based connector for Perplexity AI.
- * Perplexity is optimized for research and provides citations.
- * Uses the Sonar model with online search capabilities.
- * 
+ * Perplexity Connector — Perplexity Agent API (`POST /v1/agent`).
+ *
+ * ConvergePanel's logical panel member `modelId: "perplexity"` is served by the
+ * native `perplexity/sonar` model with an attached `web_search` tool that is
+ * requested via `tool_choice` (the provider does not echo the choice back, so
+ * every call logs the observed search invocations and a completed run without
+ * any observed search is logged as a warning)
+ * (see lib/providers/perplexityAgentResponse.ts for the exact request contract
+ * and the pure response parser). The retired Sonar Chat Completions transport
+ * (`/chat/completions`) is no longer used.
+ *
  * This connector uses the PERPLEXITY_API_KEY environment variable from @/lib/env.
- * The canonical model ID used across the app is "perplexity".
- * 
- * IMPORTANT: This connector will fail visibly (return error status) if the API key
- * is missing, rather than silently returning a mock response. This prevents silent
- * failures where Perplexity appears selected but never returns results.
+ *
+ * IMPORTANT: This connector never throws and will fail visibly (return an error
+ * status) if the API key is missing, rather than silently returning a mock
+ * response. HTTP 200 is NOT treated as success on its own: the Agent run
+ * `status` decides (see `agentOutcome`).
+ *
+ * Error-message compatibility: HTTP failures keep the exact
+ * `Perplexity API error: HTTP <status>[ - <message>]` form that
+ * lib/panel.ts retry/fallback classification matches on.
  */
 
 import { ModelResult } from "@/lib/types";
@@ -23,15 +29,23 @@ import { MODEL_LIMITS, getModelTimeout } from "@/lib/modelConfig";
 import { PERPLEXITY_API_KEY } from "@/lib/env";
 import { getTotalTokensFromProviderResponse, modelIdToProviderKey, safeNum } from "@/lib/tokenExtraction";
 import { logger } from "@/lib/logger";
+import {
+  PERPLEXITY_AGENT_ENDPOINT,
+  agentOutcome,
+  buildPerplexityAgentRequestBody,
+  parsePerplexityAgentResponse,
+} from "@/lib/providers/perplexityAgentResponse";
+
+const TEMPERATURE = 0.2;
+const NO_CONTENT_MESSAGE = "Perplexity did not return any content.";
 
 /**
- * Call Perplexity API
- * 
- * Perplexity expects a messages array in OpenAI-style format:
- * - messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userQuestion }]
- * 
- * @param question - The user's question to ask Perplexity
- * @param apiKey - Optional API key (for backward compatibility, but we use PERPLEXITY_API_KEY from env)
+ * Call Perplexity (Agent API).
+ *
+ * @param question - The user's question (sent as the Agent `input`)
+ * @param context - Optional supporting material (used only by the default panel prompt)
+ * @param apiKey - Optional API key (for backward compatibility; PERPLEXITY_API_KEY from env is preferred)
+ * @param opts - `systemPromptOverride` replaces the default panel prompt (sent as `instructions`)
  * @returns Promise<ModelResult> - Always returns a result, never throws
  */
 export async function callPerplexity(
@@ -64,52 +78,31 @@ export async function callPerplexity(
   }
 
   try {
-    /**
-     * Make API call to Perplexity
-     * 
-     * Uses OpenAI-compatible chat completions endpoint.
-     * The "online" model variant enables real-time web search.
-     * 
-     * Perplexity expects a messages array in OpenAI-style format:
-     * - messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userQuestion }]
-     */
-    logger.debug("[Perplexity connector] Making API call to Perplexity");
-    
-    // Get token limits and timeout from centralized config
+    logger.debug("[Perplexity connector] Making Agent API call to Perplexity");
+
+    // Token limit and hard timeout from centralized config (single source of truth)
     const perplexityLimits = MODEL_LIMITS.perplexity;
     const perplexityTimeout = getModelTimeout("perplexity");
-    
+
     const systemContent = opts?.systemPromptOverride
       ? opts.systemPromptOverride
       : buildPanelPrompt("perplexity", sanitizedQuestion, sanitizedContext);
 
-    // Build messages array in OpenAI-style format
-    // Perplexity requires messages array, not just a prompt string
-    const messages = [
-      { role: "system" as const, content: systemContent },
-      { role: "user" as const, content: sanitizedQuestion },
-    ];
-    
-    // Use AbortController for timeout handling
-    // This allows us to distinguish between timeout (AbortError) and HTTP/JSON errors
+    const requestBody = buildPerplexityAgentRequestBody({
+      instructions: systemContent,
+      input: sanitizedQuestion,
+      maxOutputTokens: perplexityLimits.maxTokens,
+      temperature: TEMPERATURE,
+    });
+
+    // AbortController distinguishes a client-side timeout (AbortError) from HTTP/JSON errors
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), perplexityTimeout.hardTimeoutMs);
-    
-    const PERPLEXITY_URL = "https://api.perplexity.ai/chat/completions";
-    const requestBody = {
-      // Perplexity valid models: "sonar", "sonar-pro", "sonar-deep-research", etc.
-      // Using "sonar" as the default general-purpose model.
-      model: "sonar", // Valid Perplexity model
-      messages, // OpenAI-style messages array
-      // Use centralized token limits to ensure consistent, deep responses without truncation
-      max_tokens: perplexityLimits.maxTokens,
-      temperature: 0.2,
-    };
-    
+
     let response: Response;
-    
+
     try {
-      response = await fetch(PERPLEXITY_URL, {
+      response = await fetch(PERPLEXITY_AGENT_ENDPOINT, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -118,142 +111,120 @@ export async function callPerplexity(
         body: JSON.stringify(requestBody),
         signal: controller.signal,
       });
-      
+
       clearTimeout(timeoutId);
-      
+
       logger.debug("[Perplexity connector] API response status", { status: response.status, statusText: response.statusText });
 
-      // Check HTTP status and extract detailed error information
       // Never throw from here; return a structured error so the UI can render it safely.
       if (!response.ok) {
         const latencyMs = Date.now() - startTime;
-        
-        // Try to parse error JSON for detailed error message
         const errorJson = await response.json().catch(() => null);
         logger.error("[Perplexity connector] Perplexity API error", { status: response.status, error: errorJson });
-        
-        // Extract error message from Perplexity's response structure
-        // Perplexity typically returns: { error: { message: "...", type: "...", code: ... } }
-        const errorMessage = 
+
+        // Perplexity returns: { error: { message, type, code, param? } }
+        const errorMessage =
           `Perplexity API error: HTTP ${response.status}` +
           (errorJson?.error?.message ? ` - ${errorJson.error.message}` : "");
-        
-        // Return error result with the real Perplexity error message
+
         return {
           modelId: "perplexity",
           status: "error" as const,
           rawText: null,
-          errorMessage, // Real error message from Perplexity API
+          errorMessage,
           latencyMs,
         };
       }
 
-      // Parse response (OpenAI-compatible format)
-      // This normalizes Perplexity output to our internal answer format, matching other models
       const json = await response.json();
-      
-      // Defensive check: ensure data structure is valid
-      if (!json || typeof json !== "object") {
-        const latencyMs = Date.now() - startTime;
-        logger.error("[Perplexity connector] Invalid response structure", { json });
-        
-        return {
-          modelId: "perplexity",
-          status: "error" as const,
-          rawText: null,
-          errorMessage: "Perplexity API returned invalid response format.",
-          latencyMs,
-        };
-      }
-      
-      // Extract response text and metadata
-      const choice = json.choices?.[0];
-      const rawText = choice?.message?.content?.trim() || null;
-      const finishReason = choice?.finish_reason || json.choices?.[0]?.finish_reason || null;
-      const stopReason = choice?.stop_reason || null;
       const latencyMs = Date.now() - startTime;
+      const parsed = parsePerplexityAgentResponse(json);
+      const outcome = agentOutcome(parsed);
 
-      // Log response diagnostics (debug level - verbose)
-      logger.debug("[Perplexity connector] Response diagnostics", {
-        provider: "perplexity",
-        responseTextLength: rawText?.length || 0,
-        finishReason: finishReason || null,
-        stopReason: stopReason || null,
-        hasContent: !!rawText,
-        streamingUsed: false, // Perplexity uses non-streaming by default
-        readingCompleted: !!rawText,
-        latencyMs,
-      });
-      
-      // Warn if response was truncated by token limit
-      if (finishReason === "length" || finishReason === "stop") {
-        logger.warn("[Perplexity connector] Response may be truncated", {
-          finishReason,
-          stopReason,
-          responseLength: rawText?.length || 0,
-        });
-      }
-
-      // Extract token usage from Perplexity response (OpenAI-compatible format)
-      // getTotalTokensFromProviderResponse always returns a TokenUsage object (never null)
+      // Token usage from the Agent `usage` block (input_tokens / output_tokens)
       const providerKey = modelIdToProviderKey("perplexity");
-      const tokenUsage = providerKey 
+      const tokenUsage = providerKey
         ? getTotalTokensFromProviderResponse(providerKey, json)
         : { totalTokens: 0, promptTokens: null, completionTokens: null };
-
-      // Ensure tokenUsage has numeric defaults using safeNum
       const normalizedTokenUsage = {
         totalTokens: safeNum(tokenUsage.totalTokens),
         promptTokens: tokenUsage.promptTokens !== null ? safeNum(tokenUsage.promptTokens) : null,
         completionTokens: tokenUsage.completionTokens !== null ? safeNum(tokenUsage.completionTokens) : null,
       };
 
-      // Log token usage (debug level - verbose)
-      logger.debug(`[Perplexity connector] Token usage`, {
-        modelId: "perplexity",
-        ok: rawText ? true : false,
-        promptTokens: normalizedTokenUsage.promptTokens,
-        completionTokens: normalizedTokenUsage.completionTokens,
-        totalTokens: normalizedTokenUsage.totalTokens,
+      // Provider-reported cost and search usage: diagnostics only (null = not reported; never a fabricated 0)
+      logger.info("[Perplexity connector] Agent run", {
+        shape: parsed.shape,
+        status: parsed.status,
+        incompleteReason: parsed.incompleteReason,
+        model: parsed.model,
+        outcome: outcome.kind,
+        latencyMs,
+        inputTokens: parsed.usage?.inputTokens ?? null,
+        outputTokens: parsed.usage?.outputTokens ?? null,
+        totalTokens: parsed.usage?.totalTokens ?? null,
+        costTotal: parsed.diagnostics.costTotal,
+        costCurrency: parsed.diagnostics.costCurrency,
+        toolCallsCost: parsed.diagnostics.toolCallsCost,
+        searchInvocations: parsed.diagnostics.searchInvocations,
+        searchResultItems: parsed.diagnostics.searchResultItems,
+        searchResultEntries: parsed.diagnostics.searchResultEntries,
+        messageItems: parsed.diagnostics.messageItems,
       });
-      
-      if (normalizedTokenUsage.totalTokens === 0) {
-        logger.warn(`[Perplexity connector] Token usage is 0 or unavailable`);
+
+      // Search is requested via tool_choice, but the provider does not echo the choice back.
+      // A usable answer with no observed web search is logged as a warning (it is not failed).
+      if (outcome.kind !== "error" && parsed.diagnostics.searchResultItems === 0 && !((parsed.diagnostics.searchInvocations ?? 0) >= 1)) {
+        logger.warn("[Perplexity connector] Agent run completed without an observed web search", {
+          status: parsed.status,
+          model: parsed.model,
+          searchInvocations: parsed.diagnostics.searchInvocations,
+          searchResultItems: parsed.diagnostics.searchResultItems,
+        });
       }
 
-      // Build result object
+      if (outcome.kind === "error") {
+        logger.warn("[Perplexity connector] Agent run did not produce a usable answer", { status: parsed.status, shape: parsed.shape });
+        return {
+          modelId: "perplexity",
+          status: "error",
+          // Same visible fallback text as before the migration for an empty answer.
+          rawText: outcome.errorMessage === NO_CONTENT_MESSAGE ? NO_CONTENT_MESSAGE : null,
+          errorMessage: outcome.errorMessage,
+          latencyMs,
+          tokenUsage: normalizedTokenUsage,
+          rawResponse: json, // untouched provider JSON (diagnostics / token extraction)
+        };
+      }
+
       const result: ModelResult = {
         modelId: "perplexity",
-        status: rawText ? "ok" : "error",
-        rawText: rawText ?? "Perplexity did not return any content.",
+        status: "ok",
+        rawText: outcome.text,
         latencyMs,
         tokenUsage: normalizedTokenUsage, // Always include tokenUsage (never undefined)
-        rawResponse: json, // Store raw response for token extraction and debugging
+        rawResponse: json, // untouched provider JSON (token extraction, diagnostics)
       };
-      
-      // Include finish_reason in response if available (for diagnostics)
-      if (finishReason) {
-        (result as any).finishReason = finishReason;
-      }
-      
-      // Warn if response was truncated due to token limit
-      if (finishReason === "length") {
+
+      // finishReason is reconstructed from the Agent status, not from HTTP 200:
+      // "stop" = completed run; "length" = incomplete run stopped by max_output_tokens.
+      (result as any).finishReason = outcome.finishReason;
+
+      if (outcome.kind === "truncated") {
+        logger.warn("[Perplexity connector] Response was truncated by max_output_tokens", {
+          responseLength: outcome.text.length,
+        });
         (result as any).wasTruncated = true;
-        // Only set errorMessage if not already present (don't overwrite other errors)
-        if (!result.errorMessage) {
-          result.errorMessage = "Response was truncated due to token limit. Consider increasing max_tokens for longer responses.";
-        }
+        result.errorMessage = "Response was truncated due to token limit. Consider increasing max_tokens for longer responses.";
       }
-      
+
       return result;
     } catch (err: any) {
       clearTimeout(timeoutId);
-      
-      // Explicitly check for AbortError (timeout)
+
+      // Explicitly check for AbortError (client-side timeout)
       if (err.name === "AbortError" || controller.signal.aborted) {
-        // Explicit timeout error - return friendly message for UI
         const latencyMs = Date.now() - startTime;
-        const perplexityTimeout = getModelTimeout("perplexity");
         logger.warn("[Perplexity connector] Request timed out", {
           hardTimeoutMs: perplexityTimeout.hardTimeoutMs,
           latencyMs,
@@ -266,24 +237,20 @@ export async function callPerplexity(
           latencyMs,
         };
       }
-      
-      // Log other errors for diagnosis
+
       logger.error("[Perplexity connector] Request failed", { error: err?.message });
-      
+
       // Re-throw to be caught by outer catch block for other error types
       throw new Error(err?.message || "Perplexity request failed. Please try again.");
     }
   } catch (error: any) {
     // Never throw from here; return a structured error so the UI can render it safely.
-    // This catch block handles errors that were re-thrown from the inner try/catch
     const latencyMs = Date.now() - startTime;
-    
-    // Log error for diagnosis
+
     logger.error("[Perplexity connector] Request failed", { error: error?.message });
-    
-    // Extract error message - use the message from the thrown error
+
     const errorMessage = error?.message || "Perplexity request failed. Please try again.";
-    
+
     // CRITICAL: All error returns must include tokenUsage with 0 values
     const zeroTokenUsage = { totalTokens: 0, promptTokens: null, completionTokens: null };
 
@@ -307,7 +274,7 @@ export async function callPerplexity(
         rawText: null,
         errorMessage: "Perplexity authentication error. Check your API key.",
         latencyMs,
-        tokenUsage: zeroTokenUsage, // CRITICAL: Always include tokenUsage
+        tokenUsage: zeroTokenUsage,
       };
     }
 
@@ -319,20 +286,17 @@ export async function callPerplexity(
         rawText: null,
         errorMessage: "Perplexity network error. Please check your connection.",
         latencyMs,
-        tokenUsage: zeroTokenUsage, // CRITICAL: Always include tokenUsage
+        tokenUsage: zeroTokenUsage,
       };
     }
 
-    // Return error result with the error message (which may be from inner catch or generic)
     return {
       modelId: "perplexity",
       status: "error" as const,
       rawText: null,
-      errorMessage, // Error message flows through to UI
+      errorMessage,
       latencyMs,
-      tokenUsage: zeroTokenUsage, // CRITICAL: Always include tokenUsage
+      tokenUsage: zeroTokenUsage,
     };
   }
 }
-
-
