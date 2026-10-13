@@ -346,3 +346,22 @@ describe("governance inputs vs governance algorithms", () => {
     expect(results.map((r) => r.status)).toEqual(["ok", "ok"]);
   });
 });
+
+describe("contract-breaking retry responses", () => {
+  it("a connector that resolves nothing still counts as an issued call with unavailable usage", async () => {
+    const conn = install("perplexity", async () => undefined);
+    const c = ctx(["perplexity"]);
+    const out = await finalizeAdaptiveRun(SCHEMA, [slot("perplexity", FIRST_PARTIAL)], "q", c);
+    expect(conn).toHaveBeenCalledTimes(1);
+    expect(out.adaptiveResults[0]).toMatchObject({ retryOutcome: "failed_call", data: { directConclusion: "FIRST conclusion" } });
+    expect(c.usageSink.freeze()).toMatchObject({ calls: 1, usageUnavailableCalls: 1, totals: { totalTokens: 0 } });
+  });
+
+  it("a retry that comes back 'substituted' is not a usable correction (failed_call), its usage still counted", async () => {
+    install("perplexity", async () => ({ ...okRetry(JSON.stringify(FULL)), status: "substituted" }));
+    const c = ctx(["perplexity"]);
+    const out = await finalizeAdaptiveRun(SCHEMA, [slot("perplexity", "{not json")], "q", c);
+    expect(out.adaptiveResults[0]).toMatchObject({ ok: false, retryOutcome: "failed_call" });
+    expect(c.usageSink.freeze()!.totals.totalTokens).toBe(99);
+  });
+});

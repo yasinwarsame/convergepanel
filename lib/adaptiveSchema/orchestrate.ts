@@ -305,7 +305,11 @@ async function retryModelOnce(
       callIssued,
       error: err?.message,
     });
-    return callIssued ? { ...firstAttempt, retryOutcome: "failed_call" } : firstAttempt;
+    if (!callIssued) return firstAttempt;
+    // The provider call was issued, so it counts as a call even though its
+    // usage is unknowable here (no-op if this slot already recorded).
+    retryContext.usageSink.record(slotIndex, modelId, null);
+    return { ...firstAttempt, retryOutcome: "failed_call" };
   }
 }
 

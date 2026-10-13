@@ -59,7 +59,7 @@ import { PanelResultPublic } from "@/lib/panel/schemas";
 import { normalizeModelResultPublic, assertPublicStatus } from "@/lib/panel/normalize";
 import { logger } from "@/lib/logger";
 import { finalizeAdaptiveRun, AdaptivePromptPlan } from "@/lib/adaptiveSchema/orchestrate";
-import type { ResearchRequestBudget } from "@/lib/adaptiveSchema/retryBudget";
+import { monotonicNowMs, type ResearchRequestBudget } from "@/lib/adaptiveSchema/retryBudget";
 import { AdaptiveRetryUsageSink } from "@/lib/adaptiveSchema/retryCorrection";
 import { applyAdaptiveRetryAccounting } from "@/lib/firestore/adaptiveRetryAccounting";
 import { attachDeepResearchClaimIds } from "@/lib/verification/attachDeepResearchClaimIds";
@@ -1218,6 +1218,15 @@ export async function executeOrdinaryRun(args: ExecuteOrdinaryRunArgs): Promise<
         error: retryAccountingError?.message,
       });
     }
+
+    // Observed request-budget margin at the end of adaptive work, so the
+    // heuristic 20 s write margin inside the 76 s reserve can be checked
+    // against real traffic.
+    logger.info("[run-panel] Adaptive request budget at completion", {
+      runId,
+      elapsedMs: Math.round(monotonicNowMs() - requestBudget.startedAtMonoMs),
+      remainingMs: Math.round(requestBudget.budgetMs - (monotonicNowMs() - requestBudget.startedAtMonoMs)),
+    });
   }
 
   return {

@@ -230,6 +230,17 @@ describe("normalizeAdaptiveRetryUsage (AR4)", () => {
     ).toBeNull();
   });
 
+  it("keeps Grok reasoning tokens from the provider usage block", () => {
+    expect(
+      normalizeAdaptiveRetryUsage("grok", {
+        modelId: "grok",
+        status: "ok",
+        rawText: "x",
+        rawResponse: { usage: { prompt_tokens: 5, completion_tokens: 5, total_tokens: 14, completion_tokens_details: { reasoning_tokens: 4 } } },
+      })
+    ).toEqual({ promptTokens: 5, completionTokens: 5, totalTokens: 14, reasoningTokens: 4 });
+  });
+
   it("counts usage reported on a non-ok response (the call happened)", () => {
     expect(
       normalizeAdaptiveRetryUsage("perplexity", { modelId: "perplexity", status: "error", rawText: null, tokenUsage: { totalTokens: 9, promptTokens: 6, completionTokens: 3 } })

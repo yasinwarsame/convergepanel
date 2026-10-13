@@ -63,6 +63,8 @@ export const dynamic = "force-dynamic";
 // Explicit research request budget (AR11). Must stay a literal (Next.js
 // segment config is read statically); retryBudget.spec.ts pins it to
 // RESEARCH_ROUTE_MAX_DURATION_SECONDS, which the adaptive retry guard uses.
+// Segment config applies to the whole file: the GET list handler also gets
+// this 300 s ceiling, which is only a ceiling and changes nothing for it.
 export const maxDuration = 300;
 
 const DEFAULT_LIMIT = 20;
