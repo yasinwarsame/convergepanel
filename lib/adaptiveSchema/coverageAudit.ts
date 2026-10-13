@@ -23,7 +23,7 @@ import { logger } from "@/lib/logger";
 import { stripJsonFences, withTimeout } from "./util";
 import { MAX_COVERAGE_GAPS } from "./config";
 
-const COVERAGE_CALL_TIMEOUT_MS = 10000;
+export const COVERAGE_CALL_TIMEOUT_MS = 10000;
 const COVERAGE_MAX_OUTPUT_TOKENS = 900;
 
 const CoverageGapSchema = z.object({

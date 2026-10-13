@@ -25,6 +25,7 @@ const mockedCallGemini = callGemini as jest.MockedFunction<typeof callGemini>;
 import { finalizeAdaptiveRun } from "@/lib/adaptiveSchema/orchestrate";
 import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
 import { ModelResult } from "@/lib/types";
+import { AdaptiveRetryUsageSink } from "@/lib/adaptiveSchema/retryCorrection";
 
 describe("finalizeAdaptiveRun retry-with-error-feedback", () => {
   afterEach(() => jest.clearAllMocks());
@@ -37,11 +38,19 @@ describe("finalizeAdaptiveRun retry-with-error-feedback", () => {
     { modelId: "gemini", status: "ok", rawText: firstAttemptRawText, latencyMs: 500 },
   ];
 
-  const retryContext = {
+  // A fresh request (plenty of budget) — retryBudget.spec.ts covers the window math.
+  const makeRetryContext = () => ({
     apiKeys: { gemini: "test-key" },
     promptOverrides: { gemini: "BASE SYSTEM PROMPT" },
     context: null,
-  };
+    budget: { startedAtMonoMs: 0, budgetMs: 300_000 },
+    usageSink: new AdaptiveRetryUsageSink(),
+    now: () => 1_000,
+  });
+  let retryContext = makeRetryContext();
+  beforeEach(() => {
+    retryContext = makeRetryContext();
+  });
 
   it("re-calls the connector exactly once and merges the recovered field onto the original salvage", async () => {
     mockedCallGemini.mockResolvedValueOnce({
@@ -65,6 +74,7 @@ describe("finalizeAdaptiveRun retry-with-error-feedback", () => {
     expect(geminiResult.retried).toBe(true);
     expect(geminiResult.data?.caveat).toBe("none");
     expect(geminiResult.invalidFields).toBeUndefined();
+    expect(geminiResult.retryOutcome).toBe("adopted_partial");
   });
 
   it("does not loop: a still-invalid retry response is accepted as final after exactly one call", async () => {
@@ -83,6 +93,7 @@ describe("finalizeAdaptiveRun retry-with-error-feedback", () => {
     expect(geminiResult.retried).toBe(true);
     expect(geminiResult.invalidFields).toEqual(["caveat"]);
     expect(geminiResult.data?.answer).toBe("42");
+    expect(geminiResult.retryOutcome).toBe("no_change");
   });
 
   it("keeps the first attempt's salvage and does not retry a second time when the retry call itself errors", async () => {
@@ -101,6 +112,7 @@ describe("finalizeAdaptiveRun retry-with-error-feedback", () => {
     expect(geminiResult.ok).toBe(true);
     expect(geminiResult.retried).toBeUndefined(); // connector call failed — original (unretried) salvage is kept as-is
     expect(geminiResult.invalidFields).toEqual(["caveat"]);
+    expect(geminiResult.retryOutcome).toBe("failed_call");
   });
 
   it("skips retry entirely when the first attempt already validates cleanly", async () => {
@@ -118,5 +130,7 @@ describe("finalizeAdaptiveRun retry-with-error-feedback", () => {
     expect(mockedCallGemini).not.toHaveBeenCalled();
     expect(output.adaptiveResults[0].ok).toBe(true);
     expect(output.adaptiveResults[0].retried).toBeUndefined();
+    expect(output.adaptiveResults[0].retryOutcome).toBeUndefined();
+    expect(retryContext.usageSink.freeze()).toBeNull();
   });
 });

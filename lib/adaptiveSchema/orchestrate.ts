@@ -30,6 +30,8 @@ import { routeClassifiedQuery, RoutedQuery } from "./routeClassifiedQuery";
 import { buildModelPrompt } from "./promptBuilder";
 import { validateAdaptiveResponse } from "./validator";
 import { withTimeout } from "./util";
+import { computeAdaptiveRetryWindow, monotonicNowMs, ResearchRequestBudget } from "./retryBudget";
+import { AdaptiveRetryUsageSink, mergeAdaptiveRetry, normalizeAdaptiveRetryUsage } from "./retryCorrection";
 import { alignClaims, ModelClaims } from "./alignment";
 import { alignMetrics, alignScenarios, alignSteps, alignScalarField, ScalarComparisonMode } from "./fieldAlignment";
 import { buildRankedEnumerationResult } from "./enumAlignment";
@@ -181,15 +183,18 @@ function attachLegacyAdaptiveEnvelope(
   return { persistedLegacyOutput };
 }
 
-/** Bounds the single retry call so one slow model can't stall the whole run. */
-const RETRY_TIMEOUT_MS = 20000;
-
 /** Everything finalizeAdaptiveRun needs to re-call a single model's connector once, with an augmented prompt, after its first response failed validation. Omit to disable retry (e.g. in tests that only exercise the salvage path). */
 export interface AdaptiveRetryContext {
   apiKeys: Partial<Record<ModelId, string | undefined>>;
   /** Same map planAdaptiveRun() produced — the original per-model system prompt to append error feedback to. */
   promptOverrides: Partial<Record<ModelId, string>>;
   context: string | null;
+  /** The request's execution budget, captured at the start of the research POST handler (retryBudget.ts). */
+  budget: ResearchRequestBudget;
+  /** Receives each issued retry call's provider-reported usage, once per slot; frozen by the caller before accounting. */
+  usageSink: AdaptiveRetryUsageSink;
+  /** Monotonic clock override for tests; defaults to performance.now(). */
+  now?: () => number;
 }
 
 function describeValidationFailure(result: AdaptiveModelResult): string {
@@ -200,108 +205,108 @@ function describeValidationFailure(result: AdaptiveModelResult): string {
   return "Response failed schema validation.";
 }
 
-/** Merge a retry's revalidated result onto the first attempt's salvage: only the fields the first attempt couldn't recover are taken from the retry, so anything already good is never thrown away. */
-function mergeRetriedResult(first: AdaptiveModelResult, retried: AdaptiveModelResult): AdaptiveModelResult {
-  const data: Record<string, any> = { ...(first.data || {}) };
-  const stillInvalid: string[] = [];
-
-  for (const key of first.invalidFields || []) {
-    if (retried.ok && retried.data && retried.data[key] !== undefined) {
-      data[key] = retried.data[key];
-    } else {
-      stillInvalid.push(key);
-    }
-  }
-
-  const coercions = [...(first.coercions || []), ...(retried.coercions || [])];
-  const truncatedFields = Array.from(new Set([...(first.truncatedFields || []), ...(retried.truncatedFields || [])]));
-
-  if (Object.keys(data).length === 0) {
-    return {
-      modelId: first.modelId,
-      schemaId: first.schemaId,
-      ok: false,
-      data: null,
-      parseError: retried.parseError || first.parseError || "Schema validation failed after retry.",
-      retried: true,
-      latencyMs: first.latencyMs,
-      ...(coercions.length > 0 ? { coercions } : {}),
-    };
-  }
-
-  return {
-    modelId: first.modelId,
-    schemaId: first.schemaId,
-    ok: true,
-    data,
-    retried: true,
-    latencyMs: first.latencyMs,
-    ...(truncatedFields.length > 0 ? { truncatedFields } : {}),
-    ...(stillInvalid.length > 0 ? { invalidFields: stillInvalid } : {}),
-    ...(coercions.length > 0 ? { coercions } : {}),
-  };
-}
-
 /**
  * One-shot retry: a model whose first response left required fields invalid
  * (even after coercion + salvage) gets re-prompted once with the original
  * system prompt plus the validation errors and an instruction to return only
- * the corrected JSON. Never loops — on a second failure (timeout, connector
- * error, or still-invalid fields), the caller keeps whatever the first
- * attempt already salvaged.
+ * the corrected JSON. Never loops, and never throws — every failure (budget
+ * skip, guard timeout, connector error, still-invalid fields, or an
+ * unexpected exception) resolves to the first attempt plus a retryOutcome,
+ * so one slot can never reject the Promise.all over its siblings.
  */
 async function retryModelOnce(
   schema: ResultSchema,
   question: string,
   firstAttempt: AdaptiveModelResult,
-  retryContext: AdaptiveRetryContext
+  retryContext: AdaptiveRetryContext,
+  slotIndex: number
 ): Promise<AdaptiveModelResult> {
   const modelId = firstAttempt.modelId;
-  const connector = CONNECTOR_MAP[modelId];
-  const basePrompt = retryContext.promptOverrides[modelId];
-  if (!connector || !basePrompt) return firstAttempt;
-
-  const retryPrompt = `${basePrompt}\n\nYour previous response failed validation with these errors:\n${describeValidationFailure(
-    firstAttempt
-  )}\n\nCorrect these fields and return ONLY the fixed JSON object — no commentary, no markdown fences.`;
-
-  const opts: ConnectorCallOptions = { systemPromptOverride: retryPrompt };
-
-  let retryModelResult: ModelResult;
+  let callIssued = false;
   try {
-    retryModelResult = await withTimeout(
-      connector(question, retryContext.context, retryContext.apiKeys[modelId], opts),
-      RETRY_TIMEOUT_MS,
-      "adaptive retry timeout"
-    );
-  } catch (err: any) {
-    logger.warn("[adaptiveSchema] Retry call failed or timed out, keeping first attempt", {
+    const connector = CONNECTOR_MAP[modelId];
+    const basePrompt = retryContext.promptOverrides[modelId];
+    if (!connector || !basePrompt) return firstAttempt;
+
+    const now = retryContext.now ?? monotonicNowMs;
+    const window = retryContext.budget
+      ? computeAdaptiveRetryWindow({ modelId, budget: retryContext.budget, nowMonoMs: now() })
+      : null;
+    if (!window || window.kind === "skip") {
+      logger.warn("[adaptiveSchema] Retry skipped: remaining request budget below the minimum retry window", {
+        modelId,
+        schemaId: schema.id,
+        availableMs: window ? Math.round(window.availableMs) : null,
+        minimumMs: window ? window.minimumMs : null,
+        budgetPresent: !!retryContext.budget,
+      });
+      return { ...firstAttempt, retryOutcome: "skipped_budget" };
+    }
+
+    const retryPrompt = `${basePrompt}\n\nYour previous response failed validation with these errors:\n${describeValidationFailure(
+      firstAttempt
+    )}\n\nCorrect these fields and return ONLY the fixed JSON object — no commentary, no markdown fences.`;
+
+    const opts: ConnectorCallOptions = { systemPromptOverride: retryPrompt };
+
+    let retryModelResult: ModelResult;
+    const startedAt = now();
+    callIssued = true;
+    try {
+      // Only the race winner is ever read: a call that loses to the guard
+      // keeps running at the provider, but nothing here observes its result.
+      const callPromise = connector(question, retryContext.context, retryContext.apiKeys[modelId], opts);
+      retryModelResult = await withTimeout(callPromise, window.guardMs, "adaptive retry guard timeout");
+    } catch (err: any) {
+      // Guard timeout or a thrown connector: the provider may still finish
+      // and bill, but this process never sees its usage — recorded as
+      // unavailable, never estimated. A late resolution is ignored entirely.
+      retryContext.usageSink.record(slotIndex, modelId, null);
+      logger.warn("[adaptiveSchema] Retry call failed or hit the guard, keeping first attempt", {
+        modelId,
+        schemaId: schema.id,
+        guardMs: Math.round(window.guardMs),
+        retryLatencyMs: Math.round(now() - startedAt),
+        error: err?.message,
+      });
+      return { ...firstAttempt, retryOutcome: "failed_call" };
+    }
+
+    const usage = normalizeAdaptiveRetryUsage(modelId, retryModelResult);
+    retryContext.usageSink.record(slotIndex, modelId, usage);
+
+    if (retryModelResult.status !== "ok") {
+      logger.warn("[adaptiveSchema] Retry call returned a non-ok status, keeping first attempt", {
+        modelId,
+        schemaId: schema.id,
+        status: retryModelResult.status,
+        usageReported: usage !== null,
+      });
+      return { ...firstAttempt, retryOutcome: "failed_call" };
+    }
+
+    const revalidated = validateAdaptiveResponse(modelId, schema, retryModelResult.rawText);
+    const { result, outcome } = mergeAdaptiveRetry(firstAttempt, revalidated);
+    logger.warn("[adaptiveSchema] Retried model after validation failure", {
       modelId,
       schemaId: schema.id,
+      firstAttemptInvalidFields: firstAttempt.invalidFields,
+      retryOk: revalidated.ok,
+      retryInvalidFields: revalidated.invalidFields,
+      retryOutcome: outcome,
+      retryLatencyMs: Math.round(now() - startedAt),
+      usageReported: usage !== null,
+    });
+    return result;
+  } catch (err: any) {
+    logger.error("[adaptiveSchema] Retry path threw unexpectedly, keeping first attempt", {
+      modelId,
+      schemaId: schema.id,
+      callIssued,
       error: err?.message,
     });
-    return firstAttempt;
+    return callIssued ? { ...firstAttempt, retryOutcome: "failed_call" } : firstAttempt;
   }
-
-  if (retryModelResult.status !== "ok" && retryModelResult.status !== "substituted") {
-    logger.warn("[adaptiveSchema] Retry call returned a non-ok status, keeping first attempt", {
-      modelId,
-      schemaId: schema.id,
-      status: retryModelResult.status,
-    });
-    return firstAttempt;
-  }
-
-  const revalidated = validateAdaptiveResponse(modelId, schema, retryModelResult.rawText);
-  logger.warn("[adaptiveSchema] Retried model after validation failure", {
-    modelId,
-    schemaId: schema.id,
-    firstAttemptInvalidFields: firstAttempt.invalidFields,
-    retryOk: revalidated.ok,
-    retryInvalidFields: revalidated.invalidFields,
-  });
-
-  return mergeRetriedResult(firstAttempt, revalidated);
 }
 
 export interface AdaptivePromptPlan {
@@ -538,9 +543,15 @@ export async function finalizeAdaptiveRun(
     adaptiveResults = await Promise.all(
       adaptiveResults.map(async (r, idx) => {
         const needsRetry = !r.ok || (r.invalidFields && r.invalidFields.length > 0);
-        const hadRealResponse = results[idx].status === "ok" || results[idx].status === "substituted";
-        if (!needsRetry || !hadRealResponse) return r;
-        return retryModelOnce(schema, question || "", r, retryContext);
+        if (!needsRetry) return r;
+        // AR3: a substituted slot was answered by a different provider than
+        // its logical modelId — re-calling CONNECTOR_MAP[modelId] would hit
+        // the original (failed) provider, so it is never retried.
+        if (results[idx].status === "substituted") return { ...r, retryOutcome: "ineligible_substituted" as const };
+        // Only a real "ok" primary answer is ever corrected; failed/error/
+        // timeout/refused/rate_limited slots never gain an adaptive retry.
+        if (results[idx].status !== "ok") return r;
+        return retryModelOnce(schema, question || "", r, retryContext, idx);
       })
     );
   }

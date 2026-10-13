@@ -582,6 +582,36 @@ describe("JSON export determinism across the Firestore round-trip (undefined -> 
     expect(parsed.result.modelResponses[1].retried).toBe(true);
   });
 
+  it("ADAPTIVE_RETRY_CORRECTION — legacy.modelResponses[].retryOutcome: a real value survives the round-trip; undefined/null is omitted, never null; absent stays absent (old exports unchanged)", () => {
+    const record = financialValuationRecord();
+    const base = record.reportSnapshot.legacy!.modelResponses![0];
+    const withOutcomes: AdaptiveResearchExportV1 = {
+      ...record,
+      reportSnapshot: {
+        ...record.reportSnapshot,
+        legacy: {
+          ...record.reportSnapshot.legacy!,
+          modelResponses: [
+            { ...base, modelId: "chatgpt" as any, retried: true, retryOutcome: "adopted_full" },
+            { ...base, modelId: "claude" as any, retryOutcome: undefined },
+            { ...base, modelId: "gemini" as any, retryOutcome: null as any },
+            { ...base, modelId: "grok" as any },
+          ],
+        },
+      },
+    };
+    const creation = renderAdaptiveResearchJsonV1(withOutcomes);
+    const regenerated = renderAdaptiveResearchJsonV1(roundTrip(withOutcomes));
+    const parsed = JSON.parse(regenerated.bytes.toString("utf-8"));
+    expect(parsed.result.modelResponses[0].retryOutcome).toBe("adopted_full");
+    for (const idx of [1, 2, 3]) {
+      expect(Object.prototype.hasOwnProperty.call(parsed.result.modelResponses[idx], "retryOutcome")).toBe(false);
+    }
+    expect(JSON.parse(creation.bytes.toString("utf-8")).result.modelResponses[2]).not.toHaveProperty("retryOutcome");
+    // A record without any retryOutcome renders exactly as before this field existed.
+    expect(Buffer.compare(renderAdaptiveResearchJsonV1(record).bytes, renderAdaptiveResearchJsonV1(roundTrip(record)).bytes)).toBe(0);
+  });
+
   it("legacy.modelResponses[].data: null is a LEGITIMATE, distinct value in AdaptiveModelResult's own type — must never be touched by this normalization, survives the round-trip as explicit null", () => {
     const record = financialValuationRecord();
     const withNullData: AdaptiveResearchExportV1 = {

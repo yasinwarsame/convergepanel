@@ -12,6 +12,7 @@
  */
 
 import { ModelId } from "@/lib/types";
+import type { AdaptiveRetryOutcome } from "./retryCorrection";
 
 export type QueryType =
   // Existing production schemas — unchanged, still fully active.
@@ -1111,6 +1112,14 @@ export interface AdaptiveModelResult {
   coercions?: AdaptiveEnumCoercion[];
   /** True when this result reflects the one-shot retry call (original response failed validation, model was re-prompted with the errors). */
   retried?: boolean;
+  /**
+   * What the one-shot corrective retry did for this slot (see
+   * retryCorrection.ts ADAPTIVE_RETRY_OUTCOMES). Absent when no retry was
+   * considered, and on every result persisted before this field existed.
+   * `retried` keeps its legacy meaning: true only when a retry response was
+   * actually validated (adopted_full / adopted_partial / no_change).
+   */
+  retryOutcome?: AdaptiveRetryOutcome;
   /** Wall-clock time for this model's connector call, carried from the panel run (ModelResult.latencyMs) — List View's response-time column/sort reads this directly, no new timing added. */
   latencyMs?: number;
 }

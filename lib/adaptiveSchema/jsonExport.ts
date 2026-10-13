@@ -241,7 +241,7 @@ function normalizeGovernanceStatus(status: AdaptiveExportGovernanceStatus): Adap
  */
 function normalizeModelResponses(modelResponses: AdaptiveModelResult[]): AdaptiveModelResult[] {
   return modelResponses.map((m) => {
-    const { parseError, truncatedFields, invalidFields, coercions, retried, ...rest } = m;
+    const { parseError, truncatedFields, invalidFields, coercions, retried, retryOutcome, ...rest } = m;
     return {
       ...rest,
       ...(omitIfNull(parseError) !== undefined ? { parseError: omitIfNull(parseError) } : {}),
@@ -249,6 +249,7 @@ function normalizeModelResponses(modelResponses: AdaptiveModelResult[]): Adaptiv
       ...(omitIfNull(invalidFields) !== undefined ? { invalidFields: omitIfNull(invalidFields) } : {}),
       ...(omitIfNull(coercions) !== undefined ? { coercions: omitIfNull(coercions) } : {}),
       ...(omitIfNull(retried) !== undefined ? { retried: omitIfNull(retried) } : {}),
+      ...(omitIfNull(retryOutcome) !== undefined ? { retryOutcome: omitIfNull(retryOutcome) } : {}),
     } as AdaptiveModelResult;
   });
 }
