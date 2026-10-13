@@ -2,7 +2,10 @@
  * Perplexity Connector — Perplexity Agent API (`POST /v1/agent`).
  *
  * ConvergePanel's logical panel member `modelId: "perplexity"` is served by the
- * native `perplexity/sonar` model with an explicitly required `web_search` tool
+ * native `perplexity/sonar` model with an attached `web_search` tool that is
+ * requested via `tool_choice` (the provider does not echo the choice back, so
+ * every call logs the observed search invocations and a completed run without
+ * any observed search is logged as a warning)
  * (see lib/providers/perplexityAgentResponse.ts for the exact request contract
  * and the pure response parser). The retired Sonar Chat Completions transport
  * (`/chat/completions`) is no longer used.
@@ -168,6 +171,17 @@ export async function callPerplexity(
         searchResultEntries: parsed.diagnostics.searchResultEntries,
         messageItems: parsed.diagnostics.messageItems,
       });
+
+      // Search is requested via tool_choice, but the provider does not echo the choice back.
+      // A usable answer with no observed web search is logged as a warning (it is not failed).
+      if (outcome.kind !== "error" && parsed.diagnostics.searchResultItems === 0 && !((parsed.diagnostics.searchInvocations ?? 0) >= 1)) {
+        logger.warn("[Perplexity connector] Agent run completed without an observed web search", {
+          status: parsed.status,
+          model: parsed.model,
+          searchInvocations: parsed.diagnostics.searchInvocations,
+          searchResultItems: parsed.diagnostics.searchResultItems,
+        });
+      }
 
       if (outcome.kind === "error") {
         logger.warn("[Perplexity connector] Agent run did not produce a usable answer", { status: parsed.status, shape: parsed.shape });

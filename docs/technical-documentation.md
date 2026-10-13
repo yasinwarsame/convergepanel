@@ -174,7 +174,7 @@ Registered in `CONNECTOR_MAP` (`lib/connectors/index.ts`):
 | GPT 5.2 | `chatgpt` | `gpt-4o-mini` | OpenAI |
 | Claude Opus 4.5 | `claude` | `claude-haiku-4-5-20251001` | Anthropic |
 | Grok 4 | `grok` | `grok-4-1-fast-reasoning` (configurable via `GROK_MODEL` env) | xAI |
-| Perplexity Pro | `perplexity` | `sonar` | Perplexity |
+| Perplexity Pro | `perplexity` | `perplexity/sonar` via the Agent API (`POST /v1/agent`, web search requested; see `lib/providers/perplexityAgentResponse.ts`) | Perplexity |
 | Gemini 2.0 Flash | `gemini` | `gemini-2.0-flash` | Google |
 
 DeepSeek is a fallback provider only — not in `CONNECTOR_MAP` directly.

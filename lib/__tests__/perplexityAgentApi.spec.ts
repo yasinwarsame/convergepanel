@@ -16,6 +16,7 @@ import { callPerplexity } from "@/lib/connectors/perplexity";
 import { CONNECTOR_MAP } from "@/lib/connectors";
 import { getTotalTokensFromProviderResponse } from "@/lib/tokenExtraction";
 import { getModelTimeout, MODEL_LIMITS } from "@/lib/modelConfig";
+import { logger } from "@/lib/logger";
 
 // ── fixtures ────────────────────────────────────────────────────────────────
 
@@ -79,7 +80,7 @@ afterEach(() => {
 // ── request contract ────────────────────────────────────────────────────────
 
 describe("Agent request contract", () => {
-  it("builds the exact pinned key set with perplexity/sonar, required web_search and store:false", () => {
+  it("builds the exact pinned key set with perplexity/sonar, requested web_search and store:false", () => {
     const body = buildPerplexityAgentRequestBody({ instructions: "SYS", input: "Q", maxOutputTokens: 6000, temperature: 0.2 });
     expect(Object.keys(body).sort()).toEqual(["input", "instructions", "max_output_tokens", "max_steps", "model", "store", "temperature", "tool_choice", "tools"]);
     expect(body).toEqual({
@@ -297,6 +298,50 @@ describe("callPerplexity results", () => {
 
   it("CONNECTOR_MAP.perplexity is the Agent connector", () => {
     expect(CONNECTOR_MAP.perplexity).toBe(callPerplexity);
+  });
+});
+
+describe("cost/search diagnostics logging", () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it("logs provider cost and search usage on every Agent run", async () => {
+    const info = jest.spyOn(logger, "info").mockImplementation(() => undefined);
+    mockFetchJson(200, agentResponse());
+    await callPerplexity("Q", null, "test-key");
+    const call = info.mock.calls.find((c: any[]) => c[0] === "[Perplexity connector] Agent run");
+    expect(call).toBeDefined();
+    expect(call![1]).toMatchObject({
+      shape: "agent", status: "completed", model: "perplexity/sonar", outcome: "ok",
+      inputTokens: 1200, outputTokens: 340, totalTokens: 1540,
+      costTotal: 0.00365, costCurrency: "USD", toolCallsCost: 0.0025,
+      searchInvocations: 1, searchResultItems: 1, searchResultEntries: 2, messageItems: 1,
+    });
+  });
+
+  it("logs null (never 0) when the provider omits cost and search usage", async () => {
+    const info = jest.spyOn(logger, "info").mockImplementation(() => undefined);
+    mockFetchJson(200, agentResponse({ usage: { input_tokens: 1, output_tokens: 2, total_tokens: 3 } }));
+    await callPerplexity("Q", null, "test-key");
+    const call = info.mock.calls.find((c: any[]) => c[0] === "[Perplexity connector] Agent run");
+    expect(call![1]).toMatchObject({ costTotal: null, costCurrency: null, toolCallsCost: null, searchInvocations: null });
+  });
+
+  it("warns (without failing the call) when a completed run shows no observed web search", async () => {
+    const warn = jest.spyOn(logger, "warn").mockImplementation(() => undefined);
+    mockFetchJson(200, agentResponse({
+      output: [{ type: "message", content: [{ type: "output_text", text: "answer" }] }],
+      usage: { input_tokens: 1, output_tokens: 2, total_tokens: 3 },
+    }));
+    const r = await callPerplexity("Q", null, "test-key");
+    expect(r.status).toBe("ok");
+    expect(warn.mock.calls.some((c: any[]) => c[0] === "[Perplexity connector] Agent run completed without an observed web search")).toBe(true);
+  });
+
+  it("does not warn when the search was observed", async () => {
+    const warn = jest.spyOn(logger, "warn").mockImplementation(() => undefined);
+    mockFetchJson(200, agentResponse());
+    await callPerplexity("Q", null, "test-key");
+    expect(warn.mock.calls.some((c: any[]) => String(c[0]).includes("without an observed web search"))).toBe(false);
   });
 });
 

@@ -26,7 +26,7 @@ export const PERPLEXITY_WEB_SEARCH_MAX_RESULTS = 10;
  *
  * - `instructions` carries ConvergePanel's system prompt (JSON shape is still
  *   enforced by that prompt; no `response_format`).
- * - `web_search` is attached and required for every call so the Perplexity
+ * - `web_search` is attached and requested for every call (`tool_choice`) so the Perplexity
  *   panel member stays web-grounded (Sonar searched automatically).
  * - `store: false` keeps the response out of Perplexity's retrievable stored
  *   responses (application-state minimization; NOT a zero-retention claim).
