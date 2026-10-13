@@ -11,14 +11,16 @@
  * The screen is signal-based, not entropy-based. It drops on strong,
  * explicit credential signals only:
  *   - userinfo (`user:pass@`);
- *   - credential-oriented parameter NAMES (access/id/refresh tokens, api /
+ *   - credential-oriented parameter NAMES with a non-empty value (access/id/refresh tokens, api /
  *     access / secret / private keys, authorization, credentials, secrets,
  *     passwords, signatures, session ids, signed-URL fields such as
  *     `X-Amz-*`, `X-Goog-*`, Azure SAS `sig`, CloudFront `Signature`), in the
  *     query (split on `&` and `;`), in `;matrix` path parameters, and in
- *     `name=value` path segments;
+ *     `name=value` path segments (bracketed names such as `data[access_token]`
+ *     are tested part by part; a bare `auth` counts only with a token-shaped
+ *     value);
  *   - JWT-shaped values (query value, path segment, fragment piece);
- *   - explicit credential prefixes (`Bearer <token>`, `Basic <token>`,
+ *   - explicit credential prefixes (`Bearer|Basic|Token <token>`,
  *     `sk_live_`, `ghp_`, `AKIA…`, `AIza…`, `xoxb-`, `glpat-`, …);
  *   - credential markers in a fragment (`#access_token=`, `#token=`, …);
  *   - known credential-in-path webhook hosts (Slack/Discord/Telegram/…);
@@ -61,7 +63,6 @@ const CREDENTIAL_NAMES = new Set([
   "id_token",
   "refresh_token",
   "token",
-  "auth",
   "authorization",
   "bearer",
   "api_key",
@@ -76,6 +77,11 @@ const CREDENTIAL_NAMES = new Set([
   "pwd",
   "sessionid",
   "session_id",
+  "sessionkey",
+  "session_key",
+  "sastoken",
+  "sas_token",
+  "sharedaccesssignature",
   "phpsessid",
   "jsessionid",
   "jwt",
@@ -101,13 +107,26 @@ const CREDENTIAL_NAME_PATTERNS: readonly RegExp[] = [
   /^(access|secret|private|auth|signing|client|master|account|api)[_-]?key(_?id)?$/,
   // camelCase credential names (lower-cased here): accessToken, authToken, clientSecret …
   /^(access|auth|api|id|refresh|bearer|session|private|client|reset|security)(token|secret)$/,
+  // Unseparated credential suffixes (xApiKey → xapikey, userPassword → userpassword, OSSAccessKeyId …). Pagination `*token` names are exempted above.
+  /(token|secret|password|passwd|signature|apikey|accesskeyid)$/,
 ];
+
+/**
+ * Names that are credentials only when their value is token-shaped: `auth`
+ * is also used for ordinary flags (NYT share links: `?auth=login-email`).
+ */
+const TOKEN_VALUE_ONLY_NAMES = new Set(["auth"]);
+
+/** An opaque credential-looking value: ≥ 16 token characters including a digit, no whitespace. */
+function isTokenShapedValue(value: string): boolean {
+  return /^[A-Za-z0-9._~+/=-]{16,}$/.test(value) && /[0-9]/.test(value);
+}
 
 /** Fully-matching JWT (three base64url parts). */
 const JWT = /^eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}$/;
 
 /** `Bearer`/`Basic` followed by a token68-shaped credential (the whole value). Prose such as "Bearer authentication explained" never matches. */
-const AUTH_SCHEME = /^(bearer|basic)\s+([A-Za-z0-9\-._~+/]{8,}=*)$/i;
+const AUTH_SCHEME = /^(bearer|basic|token)\s+([A-Za-z0-9\-._~+/]{8,}=*)$/i;
 
 function looksLikeToken68(token: string): boolean {
   if (/[0-9=+/]/.test(token)) return true;
@@ -166,6 +185,8 @@ function normalizeName(rawName: string): string {
 }
 
 function isCredentialName(rawName: string): boolean {
+  // Bracketed names (`access_token[]`, `access_token[0]`, `data[access_token]`): test each part.
+  if (/[[\]]/.test(rawName)) return rawName.split(/[[\]]+/).some((part) => part.length > 0 && isCredentialName(part));
   const name = normalizeName(rawName);
   if (name.length === 0) return false;
   if (CREDENTIAL_NAMES.has(name)) return true;
@@ -203,9 +224,18 @@ function splitPairs(raw: string): Array<{ name: string; value: string | null }> 
 }
 
 function screenPairs(raw: string, nested: boolean, nameSignal: PrivacySignal, valueSignal: PrivacySignal): PrivacySignal | null {
-  for (const { name, value } of splitPairs(raw)) {
-    if (value === null) continue;
+  for (const pair of splitPairs(raw)) {
+    let { name, value } = pair;
+    // A name that decoded to `name=value` (e.g. `?access_token%3Dabc`) is re-split.
+    if (value === null && name.includes("=")) {
+      const eq = name.indexOf("=");
+      value = name.slice(eq + 1);
+      name = name.slice(0, eq);
+    }
+    // No value, or an empty value, carries no secret.
+    if (value === null || value.length === 0) continue;
     if (isCredentialName(name)) return nameSignal;
+    if (TOKEN_VALUE_ONLY_NAMES.has(normalizeName(name)) && isTokenShapedValue(value)) return nameSignal;
     if (isCredentialValue(value)) return valueSignal;
     if (!nested && /^(https?:\/\/|\/|\?)/i.test(value)) {
       const inner = screenNestedValue(value);
@@ -247,10 +277,6 @@ function screenParts(url: URL, nested: boolean): PrivacySignal | null {
     // `name=value` path segments (e.g. /access_token=abc/) and `;matrix` parameters.
     const pairSignal = screenPairs([segment.includes("=") ? segment : "", ...params].filter(Boolean).join(";"), true, "credential_path", "credential_path");
     if (pairSignal) return pairSignal;
-    for (const param of params) {
-      const name = decode(param.split("=")[0]);
-      if (isCredentialName(name)) return "credential_path";
-    }
   }
   return null;
 }
@@ -268,8 +294,10 @@ function screenNestedValue(value: string): PrivacySignal | null {
 
 /**
  * Classify one provider-returned `url` value. Never throws. Exactly one
- * outcome per value, tested in this order: invalid → over_limit →
- * privacy_dropped → usable.
+ * outcome per value, tested in this order: invalid → privacy_dropped →
+ * over_limit → usable. Privacy is screened before the size limit so that
+ * long signed URLs (S3/GCS presigned links routinely exceed 512 bytes) are
+ * counted as privacy drops, not merely as over-limit.
  */
 export function screenSearchResultUrl(raw: unknown): UrlScreenOutcome {
   if (typeof raw !== "string" || raw.length === 0) return { kind: "invalid" };
@@ -281,11 +309,11 @@ export function screenSearchResultUrl(raw: unknown): UrlScreenOutcome {
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") return { kind: "invalid" };
   if (url.hostname.length === 0) return { kind: "invalid" };
-  if (Buffer.byteLength(url.href, "utf8") > SEARCH_RESULT_URL_MAX_BYTES) return { kind: "over_limit" };
   if (url.username !== "" || url.password !== "") return { kind: "privacy_dropped", signal: "userinfo" };
   try {
     const signal = screenParts(url, false);
-    return signal ? { kind: "privacy_dropped", signal } : { kind: "usable" };
+    if (signal) return { kind: "privacy_dropped", signal };
+    return Buffer.byteLength(url.href, "utf8") > SEARCH_RESULT_URL_MAX_BYTES ? { kind: "over_limit" } : { kind: "usable" };
   } catch {
     // Decoding is total, so this is only reachable through an unforeseen runtime error: fail closed.
     return { kind: "privacy_dropped", signal: "screen_error" };

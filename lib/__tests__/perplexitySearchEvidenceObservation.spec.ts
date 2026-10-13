@@ -324,6 +324,14 @@ describe("observation content and purity", () => {
     }
   });
 
+  it("never reads title or snippet (throwing getters)", () => {
+    const hostile: Record<string, unknown> = { url: "https://example.com/a", date: "2026-01-02" };
+    Object.defineProperty(hostile, "title", { enumerable: true, get: () => { throw new Error("title read"); } });
+    Object.defineProperty(hostile, "snippet", { enumerable: true, get: () => { throw new Error("snippet read"); } });
+    const o = observe(slot(agent([{ type: "search_results", results: [hostile] }])));
+    expect(o).toMatchObject({ urlUsable: 1, dateValid: 1, eligible: true });
+  });
+
   it("has exactly the closed key set", () => {
     expect(Object.keys(observe(slot(agent([])))).sort()).toEqual(
       [
