@@ -146,6 +146,19 @@ describe("ordering and wiring", () => {
     expect(retryContext.usageSink.record(5, "grok", { promptTokens: 1, completionTokens: 1, totalTokens: 2 })).toBe(false);
   });
 
+  it("passes a bounded foreground wait derived from the request budget (≤ 15 s)", async () => {
+    await executeOrdinaryRun({ ...args(), requestBudget: { startedAtMonoMs: performance.now(), budgetMs: 300_000 } });
+    const { foregroundWaitMs } = mockedApplyAccounting.mock.calls[0][0];
+    expect(foregroundWaitMs).toBe(15_000);
+  });
+
+  it("near the end of the budget the wait shrinks to remaining − 5 s", async () => {
+    await executeOrdinaryRun({ ...args(), requestBudget: { startedAtMonoMs: performance.now() - 290_000, budgetMs: 300_000 } });
+    const { foregroundWaitMs } = mockedApplyAccounting.mock.calls[0][0];
+    expect(foregroundWaitMs).toBeLessThanOrEqual(5_000);
+    expect(foregroundWaitMs).toBeGreaterThan(4_000);
+  });
+
   it("primary analytics totalTokens is unchanged (primary panel results only)", async () => {
     await executeOrdinaryRun(args());
     expect(mockedTrackCompleted).toHaveBeenCalledWith("uid-1", expect.anything(), expect.objectContaining({ totalTokens: 80 }));

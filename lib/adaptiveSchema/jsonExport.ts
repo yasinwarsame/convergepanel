@@ -57,6 +57,7 @@ import { PersistedAdaptiveSchemaId, PersistedLegacyAdaptiveSchemaId } from "./pe
 import { AdaptiveExportGeneratedBy } from "./exportGeneratedBy";
 import { readFrozenRunProvenance } from "./exportRunProvenance";
 import type { AdaptiveExportRunProvenance } from "./researchExport";
+import { isAdaptiveRetryOutcome } from "./retryCorrection";
 
 export const ADAPTIVE_RESEARCH_JSON_EXPORT_FORMAT_VERSION = "1" as const;
 
@@ -249,7 +250,9 @@ function normalizeModelResponses(modelResponses: AdaptiveModelResult[]): Adaptiv
       ...(omitIfNull(invalidFields) !== undefined ? { invalidFields: omitIfNull(invalidFields) } : {}),
       ...(omitIfNull(coercions) !== undefined ? { coercions: omitIfNull(coercions) } : {}),
       ...(omitIfNull(retried) !== undefined ? { retried: omitIfNull(retried) } : {}),
-      ...(omitIfNull(retryOutcome) !== undefined ? { retryOutcome: omitIfNull(retryOutcome) } : {}),
+      // Fail closed: only a known enum value is exported; absent, null, or any
+      // unknown/malformed runtime value is omitted (never passed through).
+      ...(isAdaptiveRetryOutcome(retryOutcome) ? { retryOutcome } : {}),
     } as AdaptiveModelResult;
   });
 }

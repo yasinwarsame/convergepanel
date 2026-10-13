@@ -5,6 +5,7 @@
  * so every assertion here reflects actual generated output.
  */
 
+import { ADAPTIVE_RETRY_OUTCOMES } from "@/lib/adaptiveSchema/retryCorrection";
 import { createHash } from "crypto";
 import { AdaptiveResearchExportV1 } from "@/lib/adaptiveSchema/researchExport";
 import { buildAdaptiveResearchJsonExport, canonicalJsonStringify, canonicalizeForSerialization, renderAdaptiveResearchJsonV1 } from "@/lib/adaptiveSchema/jsonExport";
@@ -610,6 +611,52 @@ describe("JSON export determinism across the Firestore round-trip (undefined -> 
     expect(JSON.parse(creation.bytes.toString("utf-8")).result.modelResponses[2]).not.toHaveProperty("retryOutcome");
     // A record without any retryOutcome renders exactly as before this field existed.
     expect(Buffer.compare(renderAdaptiveResearchJsonV1(record).bytes, renderAdaptiveResearchJsonV1(roundTrip(record)).bytes)).toBe(0);
+  });
+
+  describe("ADAPTIVE_RETRY_CORRECTION — retryOutcome export fails closed", () => {
+    const render = (retryOutcome: unknown) => {
+      const record = financialValuationRecord();
+      const base = record.reportSnapshot.legacy!.modelResponses![0];
+      const withOutcome: AdaptiveResearchExportV1 = {
+        ...record,
+        reportSnapshot: {
+          ...record.reportSnapshot,
+          legacy: { ...record.reportSnapshot.legacy!, modelResponses: [{ ...base, retryOutcome: retryOutcome as any }] },
+        },
+      };
+      const creation = JSON.parse(renderAdaptiveResearchJsonV1(withOutcome).bytes.toString("utf-8")).result.modelResponses[0];
+      const regenerated = JSON.parse(renderAdaptiveResearchJsonV1(roundTrip(withOutcome)).bytes.toString("utf-8")).result.modelResponses[0];
+      return { creation, regenerated };
+    };
+
+    it.each(ADAPTIVE_RETRY_OUTCOMES.map((o) => [o]))("known outcome %s is exported", (outcome) => {
+      const { creation, regenerated } = render(outcome);
+      expect(creation.retryOutcome).toBe(outcome);
+      expect(regenerated.retryOutcome).toBe(outcome);
+    });
+
+    it.each([
+      ["unknown string", "adopted_everything"],
+      ["wrong case", "ADOPTED_FULL"],
+      ["empty string", ""],
+      ["object", { outcome: "adopted_full" }],
+      ["number", 1],
+      ["boolean", true],
+      ["array", ["no_change"]],
+    ])("malformed value (%s) is omitted, never exported, never throws", (_label, value) => {
+      const { creation, regenerated } = render(value);
+      expect(Object.prototype.hasOwnProperty.call(creation, "retryOutcome")).toBe(false);
+      expect(Object.prototype.hasOwnProperty.call(regenerated, "retryOutcome")).toBe(false);
+    });
+
+    it("an absent value stays absent and the export is byte-identical to one with no retry fields at all", () => {
+      const record = financialValuationRecord();
+      const { creation } = render(undefined);
+      expect(Object.prototype.hasOwnProperty.call(creation, "retryOutcome")).toBe(false);
+      const nullCase = render(null);
+      expect(Object.prototype.hasOwnProperty.call(nullCase.regenerated, "retryOutcome")).toBe(false);
+      expect(Buffer.compare(renderAdaptiveResearchJsonV1(record).bytes, renderAdaptiveResearchJsonV1(roundTrip(record)).bytes)).toBe(0);
+    });
   });
 
   it("legacy.modelResponses[].data: null is a LEGITIMATE, distinct value in AdaptiveModelResult's own type — must never be touched by this normalization, survives the round-trip as explicit null", () => {

@@ -25,12 +25,23 @@
  *   deliberately not fixed here).
  *
  * Idempotency: the transaction reads the run first and does nothing when
- * `adaptiveRetryUsage` is already present, so a transaction retry (or any
- * re-entry) can never apply the increments twice; the run and user writes
- * commit atomically together or not at all.
+ * `adaptiveRetryUsage` is already present, so any re-entry can never apply
+ * the increments twice; the run and user writes commit atomically together
+ * or not at all. It runs with `maxAttempts: 1` (no SDK retry loop): this is
+ * best-effort supplemental accounting, attempted once per request.
  *
- * Never throws: every failure resolves to `{ status: "failed" }` and is
- * logged, and the caller's response is unaffected.
+ * Bounded foreground wait: the caller passes `foregroundWaitMs`
+ * (retryBudget.ts computeAdaptiveRetryAccountingWaitMs — at most 15 s, and
+ * never into the last 5 s of the request budget). When it elapses first the
+ * request continues with `{ status: "foreground_wait_expired" }`. That does
+ * NOT cancel anything: a JavaScript timer cannot abort a Firestore commit
+ * already in flight. The transaction may still commit later (at most once,
+ * by the marker) or, if the runtime is frozen/terminated after the response,
+ * never — supplemental accounting is then simply unapplied. Correctness never
+ * depends on that late completion; nothing is retried or started again.
+ *
+ * Never throws: every outcome resolves to a status and is logged, and the
+ * caller's response is unaffected.
  */
 
 import "server-only";
@@ -39,6 +50,10 @@ import { adminDb } from "@/lib/firebase/admin";
 import { modelIdToProviderKey } from "@/lib/tokenExtraction";
 import { logger } from "@/lib/logger";
 import type { AdaptiveRetryUsageV1 } from "@/lib/adaptiveSchema/retryCorrection";
+import { ADAPTIVE_RETRY_ACCOUNTING_MIN_WAIT_MS } from "@/lib/adaptiveSchema/retryBudget";
+
+/** Firestore transaction attempts for the supplemental write: one, no SDK retry loop. */
+export const ADAPTIVE_RETRY_ACCOUNTING_MAX_ATTEMPTS = 1;
 
 export type AdaptiveRetryUserCounterOutcome = "applied" | "skipped_primary_unconfirmed" | "no_reported_usage";
 
@@ -60,7 +75,11 @@ export type AdaptiveRetryAccountingResult =
   | { status: "run_missing" }
   | { status: "already_applied" }
   | { status: "applied"; userCounter: AdaptiveRetryUserCounterOutcome }
-  | { status: "failed" };
+  | { status: "failed" }
+  /** The request stopped waiting; the in-flight transaction was NOT cancelled and may still commit (at most once). */
+  | { status: "foreground_wait_expired" }
+  /** Too little request budget left to wait for an attempt — none was started. */
+  | { status: "skipped_insufficient_budget" };
 
 function safePositive(n: unknown): number {
   return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : 0;
@@ -71,8 +90,10 @@ export async function applyAdaptiveRetryAccounting(args: {
   uid: string;
   usage: AdaptiveRetryUsageV1 | null;
   gates: AdaptiveRetryAccountingGates;
+  /** Longest the caller will wait for the transaction (see module doc). */
+  foregroundWaitMs: number;
 }): Promise<AdaptiveRetryAccountingResult> {
-  const { runId, uid, usage, gates } = args;
+  const { runId, uid, usage, gates, foregroundWaitMs } = args;
 
   if (!usage || usage.calls <= 0) return { status: "no_retry_calls" };
 
@@ -99,13 +120,23 @@ export async function applyAdaptiveRetryAccounting(args: {
     if (providerKey && modelTotal > 0) byProvider[providerKey] = (byProvider[providerKey] || 0) + modelTotal;
   }
 
+  if (!(foregroundWaitMs >= ADAPTIVE_RETRY_ACCOUNTING_MIN_WAIT_MS)) {
+    logger.warn("[adaptiveRetryAccounting] Supplemental retry accounting not attempted: request budget exhausted", {
+      runId,
+      foregroundWaitMs: Number.isFinite(foregroundWaitMs) ? Math.round(foregroundWaitMs) : null,
+      retryCalls: usage.calls,
+      retryTotalTokens: usage.totals.totalTokens,
+    });
+    return { status: "skipped_insufficient_budget" };
+  }
+
   const userCounter: AdaptiveRetryUserCounterOutcome =
     totalTokens <= 0 ? "no_reported_usage" : gates.primaryUserAccountingSucceeded ? "applied" : "skipped_primary_unconfirmed";
 
   try {
     if (!adminDb) throw new Error("Firestore is not available");
     const db = adminDb;
-    const result = await db.runTransaction<AdaptiveRetryAccountingResult>(async (txn) => {
+    const transaction = db.runTransaction<AdaptiveRetryAccountingResult>(async (txn) => {
       const runRef = db.collection("runs").doc(runId);
       const snap = await txn.get(runRef);
       if (!snap.exists) return { status: "run_missing" };
@@ -133,7 +164,31 @@ export async function applyAdaptiveRetryAccounting(args: {
         );
       }
       return { status: "applied", userCounter };
+    }, { maxAttempts: ADAPTIVE_RETRY_ACCOUNTING_MAX_ATTEMPTS });
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expired = new Promise<"expired">((resolve) => {
+      timer = setTimeout(() => resolve("expired"), foregroundWaitMs);
     });
+    const winner = await Promise.race([transaction, expired]).finally(() => clearTimeout(timer));
+
+    if (winner === "expired") {
+      // Observe the abandoned transaction only to log how it ended (and so a
+      // late rejection is never unhandled). Nothing depends on this.
+      transaction.then(
+        (late) => logger.info("[adaptiveRetryAccounting] Supplemental retry accounting settled after the foreground wait", { runId, status: late.status }),
+        (lateError: any) =>
+          logger.warn("[adaptiveRetryAccounting] Supplemental retry accounting rejected after the foreground wait", { runId, errorCode: lateError?.code, error: lateError?.message })
+      );
+      logger.warn("[adaptiveRetryAccounting] Supplemental retry accounting foreground wait expired (transaction not cancelled; may still commit at most once)", {
+        runId,
+        foregroundWaitMs: Math.round(foregroundWaitMs),
+        retryCalls: usage.calls,
+        retryTotalTokens: totalTokens,
+      });
+      return { status: "foreground_wait_expired" };
+    }
+    const result = winner;
 
     if (result.status === "applied" && userCounter === "skipped_primary_unconfirmed") {
       logger.warn("[adaptiveRetryAccounting] Supplemental user token increment skipped: primary user accounting not confirmed", {

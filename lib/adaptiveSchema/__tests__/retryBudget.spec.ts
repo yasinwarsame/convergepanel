@@ -12,7 +12,11 @@ import {
   ADAPTIVE_RETRY_WRITE_MARGIN_MS,
   RESEARCH_REQUEST_BUDGET_MS,
   RESEARCH_ROUTE_MAX_DURATION_SECONDS,
+  ADAPTIVE_RETRY_ACCOUNTING_MIN_WAIT_MS,
+  ADAPTIVE_RETRY_ACCOUNTING_WAIT_MS,
+  ADAPTIVE_RETRY_RESPONSE_RETURN_RESERVE_MS,
   adaptiveRetryMinimumWindowMs,
+  computeAdaptiveRetryAccountingWaitMs,
   computeAdaptiveRetryWindow,
   startResearchRequestBudget,
 } from "@/lib/adaptiveSchema/retryBudget";
@@ -115,6 +119,30 @@ describe("computeAdaptiveRetryWindow", () => {
   it("measures elapsed time from the request start, not from zero", () => {
     const budget = { startedAtMonoMs: 5_000_000, budgetMs: 300_000 };
     expect(computeAdaptiveRetryWindow({ modelId: "claude", budget, nowMonoMs: 5_180_000 })).toMatchObject({ kind: "run", guardMs: 44_000 });
+  });
+});
+
+describe("supplemental accounting foreground wait", () => {
+  it("is 15 s, and wait + response-return reserve fits inside the 20 s write margin of the post-retry reserve", () => {
+    expect(ADAPTIVE_RETRY_ACCOUNTING_WAIT_MS).toBe(15_000);
+    expect(ADAPTIVE_RETRY_RESPONSE_RETURN_RESERVE_MS).toBe(5_000);
+    expect(ADAPTIVE_RETRY_ACCOUNTING_WAIT_MS + ADAPTIVE_RETRY_RESPONSE_RETURN_RESERVE_MS).toBeLessThanOrEqual(ADAPTIVE_RETRY_WRITE_MARGIN_MS);
+    expect(ADAPTIVE_RETRY_ACCOUNTING_MIN_WAIT_MS).toBe(1_000);
+  });
+
+  it("= min(15 s, remaining − 5 s)", () => {
+    expect(computeAdaptiveRetryAccountingWaitMs({ budget: budgetAt0, nowMonoMs: 100_000 })).toBe(15_000);
+    expect(computeAdaptiveRetryAccountingWaitMs({ budget: budgetAt0, nowMonoMs: 300_000 - 20_000 })).toBe(15_000);
+    expect(computeAdaptiveRetryAccountingWaitMs({ budget: budgetAt0, nowMonoMs: 300_000 - 12_000 })).toBe(7_000);
+    expect(computeAdaptiveRetryAccountingWaitMs({ budget: budgetAt0, nowMonoMs: 300_000 - 5_500 })).toBe(500);
+    expect(computeAdaptiveRetryAccountingWaitMs({ budget: budgetAt0, nowMonoMs: 300_000 })).toBe(-5_000);
+  });
+
+  it("the wait never reaches into the last 5 s of the request budget", () => {
+    for (let elapsed = 0; elapsed <= 300_000; elapsed += 500) {
+      const wait = computeAdaptiveRetryAccountingWaitMs({ budget: budgetAt0, nowMonoMs: elapsed });
+      if (wait >= ADAPTIVE_RETRY_ACCOUNTING_MIN_WAIT_MS) expect(elapsed + wait).toBeLessThanOrEqual(300_000 - 5_000);
+    }
   });
 });
 

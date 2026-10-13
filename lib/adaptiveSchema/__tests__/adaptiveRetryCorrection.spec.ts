@@ -365,3 +365,20 @@ describe("contract-breaking retry responses", () => {
     expect(c.usageSink.freeze()!.totals.totalTokens).toBe(99);
   });
 });
+
+describe("an exception before any retry call is issued", () => {
+  it("keeps the first attempt with no retry metadata and records no call", async () => {
+    const conn = install("perplexity", async () => okRetry(JSON.stringify(FULL)));
+    const c = ctx(["perplexity"], {
+      now: () => {
+        throw new Error("clock exploded");
+      },
+    });
+    const out = await finalizeAdaptiveRun(SCHEMA, [slot("perplexity", FIRST_PARTIAL)], "q", c);
+    expect(conn).not.toHaveBeenCalled();
+    expect(out.adaptiveResults[0]).not.toHaveProperty("retryOutcome");
+    expect(out.adaptiveResults[0]).not.toHaveProperty("retried");
+    expect(out.adaptiveResults[0].data?.directConclusion).toBe("FIRST conclusion");
+    expect(c.usageSink.freeze()).toBeNull();
+  });
+});

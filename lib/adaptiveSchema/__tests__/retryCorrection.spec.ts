@@ -194,6 +194,28 @@ describe("AR2 — partial salvage: valid first values win, the retry only fills 
   });
 });
 
+describe("truncation metadata from the retry is kept only for adopted fields", () => {
+  it("a field the retry truncated but that was not adopted leaves no truncation marker", () => {
+    const first: AdaptiveModelResult = {
+      modelId: "gemini",
+      schemaId: "comparison_matrix",
+      ok: true,
+      data: { directConclusion: "FIRST", uncertainties: ["u"] },
+      invalidFields: ["tradeoffs"],
+    };
+    const retried: AdaptiveModelResult = {
+      modelId: "gemini",
+      schemaId: "comparison_matrix",
+      ok: true,
+      data: { tradeoffs: ["t"], uncertainties: ["retry u"] },
+      truncatedFields: ["uncertainties"], // truncated in the retry, but the first value is kept
+    };
+    const { result } = mergeAdaptiveRetry(first, retried);
+    expect(result.data!.uncertainties).toEqual(["u"]);
+    expect(result).not.toHaveProperty("truncatedFields");
+  });
+});
+
 describe("double failure keeps the first attempt's validation failure", () => {
   it.each([
     ["malformed retry", "nope"],

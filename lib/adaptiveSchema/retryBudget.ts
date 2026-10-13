@@ -48,6 +48,30 @@ export const ADAPTIVE_RETRY_POST_RESERVE_MS = 76_000;
 /** Write margin component of the reserve above (heuristic, not a bound). */
 export const ADAPTIVE_RETRY_WRITE_MARGIN_MS = 20_000;
 
+/**
+ * Longest the request waits, in the foreground, for the supplemental
+ * adaptive-retry accounting transaction (lib/firestore/adaptiveRetryAccounting.ts).
+ * Together with the response-return reserve below it fits inside the 20 s
+ * write margin of the post-retry reserve (pinned by retryBudget.spec.ts).
+ */
+export const ADAPTIVE_RETRY_ACCOUNTING_WAIT_MS = 15_000;
+
+/** Kept free after the accounting wait so the response itself can still be returned. */
+export const ADAPTIVE_RETRY_RESPONSE_RETURN_RESERVE_MS = 5_000;
+
+/** Below this, a supplemental accounting attempt is not started at all (it could not plausibly commit and would only delay the response). */
+export const ADAPTIVE_RETRY_ACCOUNTING_MIN_WAIT_MS = 1_000;
+
+/**
+ * Pure. Foreground wait allowed for supplemental accounting right now:
+ * min(ADAPTIVE_RETRY_ACCOUNTING_WAIT_MS, remaining budget − response reserve).
+ * May be ≤ 0 when the request is already late.
+ */
+export function computeAdaptiveRetryAccountingWaitMs(args: { budget: ResearchRequestBudget; nowMonoMs: number }): number {
+  const remainingMs = args.budget.budgetMs - (args.nowMonoMs - args.budget.startedAtMonoMs);
+  return Math.min(ADAPTIVE_RETRY_ACCOUNTING_WAIT_MS, remainingMs - ADAPTIVE_RETRY_RESPONSE_RETURN_RESERVE_MS);
+}
+
 /** Added to the model's own hard timeout so the guard never cuts a connector that is still inside its own limit. */
 export const ADAPTIVE_RETRY_HARD_TIMEOUT_MARGIN_MS = 5_000;
 

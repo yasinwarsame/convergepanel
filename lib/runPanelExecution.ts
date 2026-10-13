@@ -59,7 +59,7 @@ import { PanelResultPublic } from "@/lib/panel/schemas";
 import { normalizeModelResultPublic, assertPublicStatus } from "@/lib/panel/normalize";
 import { logger } from "@/lib/logger";
 import { finalizeAdaptiveRun, AdaptivePromptPlan } from "@/lib/adaptiveSchema/orchestrate";
-import { monotonicNowMs, type ResearchRequestBudget } from "@/lib/adaptiveSchema/retryBudget";
+import { computeAdaptiveRetryAccountingWaitMs, monotonicNowMs, type ResearchRequestBudget } from "@/lib/adaptiveSchema/retryBudget";
 import { AdaptiveRetryUsageSink } from "@/lib/adaptiveSchema/retryCorrection";
 import { applyAdaptiveRetryAccounting } from "@/lib/firestore/adaptiveRetryAccounting";
 import { attachDeepResearchClaimIds } from "@/lib/verification/attachDeepResearchClaimIds";
@@ -1204,13 +1204,16 @@ export async function executeOrdinaryRun(args: ExecuteOrdinaryRunArgs): Promise<
     // an aggregation failure is still accounted. Freezing first means no
     // late-resolving provider promise can change the usage being written.
     // Its own failure boundary: never fails the response, never touches the
-    // primary accounting already committed above.
+    // primary accounting already committed above, and never holds the
+    // response longer than a bounded foreground wait (≤ 15 s, never into the
+    // last 5 s of the request budget).
     try {
       await applyAdaptiveRetryAccounting({
         runId,
         uid,
         usage: adaptiveRetryUsageSink.freeze(),
         gates: { completeRunSucceeded, primaryUserAccountingSucceeded },
+        foregroundWaitMs: computeAdaptiveRetryAccountingWaitMs({ budget: requestBudget, nowMonoMs: monotonicNowMs() }),
       });
     } catch (retryAccountingError: any) {
       logger.error("[run-panel] Supplemental adaptive retry accounting threw", {

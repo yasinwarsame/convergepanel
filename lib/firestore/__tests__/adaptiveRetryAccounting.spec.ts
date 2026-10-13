@@ -19,6 +19,10 @@ const store = new Map<string, Record<string, any>>();
 let failNextTransaction: Error | null = null;
 let transactionAttempts = 0;
 let commitThenThrowOnce = false;
+let transactionOptions: Array<{ maxAttempts?: number } | undefined> = [];
+/** null = settle immediately; a number = settle (and commit) after that many ms; "never" = hold until released. */
+let transactionDelay: number | "never" | null = null;
+let releaseHeldTransaction: (() => Promise<unknown>) | null = null;
 
 function isOp(v: unknown): v is Op {
   return typeof v === "object" && v !== null && ("__inc" in (v as any) || "__ts" in (v as any));
@@ -68,39 +72,53 @@ function ref(path: string) {
 }
 const fakeDb = {
   collection: (name: string) => ({ doc: (id: string) => ref(`${name}/${id}`) }),
-  runTransaction: async (fn: (txn: any) => Promise<any>) => {
-    // Re-runs the function like the SDK does on a retryable commit failure.
-    for (;;) {
-      transactionAttempts += 1;
-      if (failNextTransaction) {
-        const e = failNextTransaction;
-        failNextTransaction = null;
-        throw e;
+  runTransaction: (fn: (txn: any) => Promise<any>, options?: { maxAttempts?: number }) => {
+    transactionOptions.push(options);
+    const attempt = async () => {
+      // Honors maxAttempts the way the SDK does: re-runs the function only while attempts remain.
+      const maxAttempts = options?.maxAttempts ?? 5;
+      for (let n = 1; ; n++) {
+        transactionAttempts += 1;
+        if (failNextTransaction) {
+          const e = failNextTransaction;
+          failNextTransaction = null;
+          throw e;
+        }
+        const writes: Array<() => void> = [];
+        const result = await fn({
+          get: async (r: { path: string }) => snapshot(r.path),
+          update: (r: { path: string }, data: Record<string, unknown>) =>
+            writes.push(() => {
+              const doc = store.get(r.path);
+              if (!doc) throw new Error("NOT_FOUND");
+              applyUpdate(doc, data);
+            }),
+          set: (r: { path: string }, data: Record<string, unknown>, opts?: { merge?: boolean }) =>
+            writes.push(() => {
+              const doc = opts?.merge ? store.get(r.path) ?? {} : {};
+              applyMergeSet(doc, data);
+              store.set(r.path, doc);
+            }),
+        });
+        writes.forEach((w) => w()); // atomic commit
+        if (commitThenThrowOnce) {
+          // Commit landed but the client saw an error.
+          commitThenThrowOnce = false;
+          if (n < maxAttempts) continue;
+          throw Object.assign(new Error("DEADLINE_EXCEEDED after commit"), { code: 4 });
+        }
+        return result;
       }
-      const writes: Array<() => void> = [];
-      const result = await fn({
-        get: async (r: { path: string }) => snapshot(r.path),
-        update: (r: { path: string }, data: Record<string, unknown>) =>
-          writes.push(() => {
-            const doc = store.get(r.path);
-            if (!doc) throw new Error("NOT_FOUND");
-            applyUpdate(doc, data);
-          }),
-        set: (r: { path: string }, data: Record<string, unknown>, opts?: { merge?: boolean }) =>
-          writes.push(() => {
-            const doc = opts?.merge ? store.get(r.path) ?? {} : {};
-            applyMergeSet(doc, data);
-            store.set(r.path, doc);
-          }),
+    };
+    if (transactionDelay === null) return attempt();
+    if (transactionDelay === "never") {
+      // Never settles on its own; the test may release it later via releaseHeldTransaction().
+      return new Promise((resolve, reject) => {
+        releaseHeldTransaction = () => attempt().then(resolve, reject);
       });
-      writes.forEach((w) => w()); // atomic commit
-      if (commitThenThrowOnce) {
-        // Commit landed but the client saw an error → the SDK retries the whole function.
-        commitThenThrowOnce = false;
-        continue;
-      }
-      return result;
     }
+    const delay = transactionDelay;
+    return new Promise((resolve, reject) => setTimeout(() => attempt().then(resolve, reject), delay));
   },
 };
 
@@ -110,6 +128,10 @@ jest.mock("@/lib/logger", () => ({ logger: { warn: jest.fn(), info: jest.fn(), e
 import { applyAdaptiveRetryAccounting } from "@/lib/firestore/adaptiveRetryAccounting";
 import { incrementUserTokenUsage } from "@/lib/firestore/userTokens";
 import { AdaptiveRetryUsageSink, AdaptiveRetryUsageV1 } from "@/lib/adaptiveSchema/retryCorrection";
+import { ADAPTIVE_RETRY_ACCOUNTING_WAIT_MS } from "@/lib/adaptiveSchema/retryBudget";
+
+const apply = (args: Omit<Parameters<typeof applyAdaptiveRetryAccounting>[0], "foregroundWaitMs"> & { foregroundWaitMs?: number }) =>
+  applyAdaptiveRetryAccounting({ foregroundWaitMs: ADAPTIVE_RETRY_ACCOUNTING_WAIT_MS, ...args });
 
 const BOTH_OK = { completeRunSucceeded: true, primaryUserAccountingSucceeded: true };
 
@@ -152,13 +174,16 @@ beforeEach(() => {
   failNextTransaction = null;
   commitThenThrowOnce = false;
   transactionAttempts = 0;
+  transactionOptions = [];
+  transactionDelay = null;
+  releaseHeldTransaction = null;
 });
 
 describe("run-level supplemental accounting", () => {
   it("no retry → no write at all", async () => {
     seedCompletedRun();
     const before = JSON.stringify(store.get("runs/run-1"));
-    expect(await applyAdaptiveRetryAccounting({ runId: "run-1", uid: "u1", usage: null, gates: BOTH_OK })).toEqual({ status: "no_retry_calls" });
+    expect(await apply({ runId: "run-1", uid: "u1", usage: null, gates: BOTH_OK })).toEqual({ status: "no_retry_calls" });
     expect(JSON.stringify(store.get("runs/run-1"))).toBe(before);
     expect(transactionAttempts).toBe(0);
   });
@@ -166,7 +191,7 @@ describe("run-level supplemental accounting", () => {
   it("two parallel retries aggregate exactly into totals and providers; per-model primary records untouched", async () => {
     seedCompletedRun();
     store.set("users/u1", { tokensUsedCurrentPeriod: 80 });
-    const result = await applyAdaptiveRetryAccounting({ runId: "run-1", uid: "u1", usage: TWO_RETRIES(), gates: BOTH_OK });
+    const result = await apply({ runId: "run-1", uid: "u1", usage: TWO_RETRIES(), gates: BOTH_OK });
     expect(result).toEqual({ status: "applied", userCounter: "applied" });
     const run = store.get("runs/run-1")!;
     expect(run.totalTokens).toBe(80 + 129);
@@ -185,7 +210,7 @@ describe("run-level supplemental accounting", () => {
 
   it("creates a provider key the primary run never had", async () => {
     seedCompletedRun();
-    await applyAdaptiveRetryAccounting({
+    await apply({
       runId: "run-1",
       uid: "u1",
       usage: usageOf([[0, "grok", { promptTokens: 5, completionTokens: 5, totalTokens: 14, reasoningTokens: 4 }]]),
@@ -199,7 +224,7 @@ describe("run-level supplemental accounting", () => {
   it("usage unavailable (guard timeout) → marker records the call, no token increment, no user write", async () => {
     seedCompletedRun();
     store.set("users/u1", { tokensUsedCurrentPeriod: 80 });
-    const result = await applyAdaptiveRetryAccounting({ runId: "run-1", uid: "u1", usage: usageOf([[0, "perplexity", null]]), gates: BOTH_OK });
+    const result = await apply({ runId: "run-1", uid: "u1", usage: usageOf([[0, "perplexity", null]]), gates: BOTH_OK });
     expect(result).toEqual({ status: "applied", userCounter: "no_reported_usage" });
     const run = store.get("runs/run-1")!;
     expect(run.totalTokens).toBe(80);
@@ -210,7 +235,7 @@ describe("run-level supplemental accounting", () => {
 
   it("primary completeRun not confirmed → nothing written (no partial totals on a running doc)", async () => {
     store.set("runs/run-1", { status: "running" });
-    const result = await applyAdaptiveRetryAccounting({
+    const result = await apply({
       runId: "run-1",
       uid: "u1",
       usage: TWO_RETRIES(),
@@ -225,25 +250,34 @@ describe("run-level supplemental accounting", () => {
     seedCompletedRun();
     store.set("users/u1", { tokensUsedCurrentPeriod: 80 });
     const usage = TWO_RETRIES();
-    await applyAdaptiveRetryAccounting({ runId: "run-1", uid: "u1", usage, gates: BOTH_OK });
-    expect(await applyAdaptiveRetryAccounting({ runId: "run-1", uid: "u1", usage, gates: BOTH_OK })).toEqual({ status: "already_applied" });
+    await apply({ runId: "run-1", uid: "u1", usage, gates: BOTH_OK });
+    expect(await apply({ runId: "run-1", uid: "u1", usage, gates: BOTH_OK })).toEqual({ status: "already_applied" });
     expect(store.get("runs/run-1")!.totalTokens).toBe(209);
     expect(store.get("users/u1")!.tokensUsedCurrentPeriod).toBe(209);
   });
 
-  it("a transaction retried after its commit landed never double-increments (marker re-read)", async () => {
+  it("runs the transaction with maxAttempts: 1 — no SDK retry loop in the foreground", async () => {
+    seedCompletedRun();
+    await apply({ runId: "run-1", uid: "u1", usage: TWO_RETRIES(), gates: BOTH_OK });
+    expect(transactionOptions).toEqual([{ maxAttempts: 1 }]);
+    expect(transactionAttempts).toBe(1);
+  });
+
+  it("a commit that landed but surfaced an error is reported as failed, never retried, and any re-entry is a no-op (marker)", async () => {
     seedCompletedRun();
     store.set("users/u1", { tokensUsedCurrentPeriod: 80 });
     commitThenThrowOnce = true;
-    const result = await applyAdaptiveRetryAccounting({ runId: "run-1", uid: "u1", usage: TWO_RETRIES(), gates: BOTH_OK });
-    expect(transactionAttempts).toBe(2);
-    expect(result).toEqual({ status: "already_applied" });
+    const result = await apply({ runId: "run-1", uid: "u1", usage: TWO_RETRIES(), gates: BOTH_OK });
+    expect(result).toEqual({ status: "failed" });
+    expect(transactionAttempts).toBe(1);
+    expect(store.get("runs/run-1")!.totalTokens).toBe(209);
+    expect(await apply({ runId: "run-1", uid: "u1", usage: TWO_RETRIES(), gates: BOTH_OK })).toEqual({ status: "already_applied" });
     expect(store.get("runs/run-1")!.totalTokens).toBe(209);
     expect(store.get("users/u1")!.tokensUsedCurrentPeriod).toBe(209);
   });
 
   it("a missing run document writes nothing", async () => {
-    expect(await applyAdaptiveRetryAccounting({ runId: "run-x", uid: "u1", usage: TWO_RETRIES(), gates: BOTH_OK })).toEqual({ status: "run_missing" });
+    expect(await apply({ runId: "run-x", uid: "u1", usage: TWO_RETRIES(), gates: BOTH_OK })).toEqual({ status: "run_missing" });
     expect(store.size).toBe(0);
   });
 
@@ -251,7 +285,7 @@ describe("run-level supplemental accounting", () => {
     seedCompletedRun();
     store.set("users/u1", { tokensUsedCurrentPeriod: 80 });
     failNextTransaction = Object.assign(new Error("UNAVAILABLE"), { code: 14 });
-    await expect(applyAdaptiveRetryAccounting({ runId: "run-1", uid: "u1", usage: TWO_RETRIES(), gates: BOTH_OK })).resolves.toEqual({ status: "failed" });
+    await expect(apply({ runId: "run-1", uid: "u1", usage: TWO_RETRIES(), gates: BOTH_OK })).resolves.toEqual({ status: "failed" });
     expect(store.get("runs/run-1")!.totalTokens).toBe(80);
     expect(store.get("users/u1")!.tokensUsedCurrentPeriod).toBe(80);
   });
@@ -263,7 +297,7 @@ describe("user-level supplemental accounting", () => {
     // Real helper, primary total 0: its zero branch initializes the field without adding.
     await incrementUserTokenUsage("u-zero", 0);
     expect(store.get("users/u-zero")!.tokensUsedCurrentPeriod).toBe(0);
-    const result = await applyAdaptiveRetryAccounting({
+    const result = await apply({
       runId: "run-1",
       uid: "u-zero",
       usage: usageOf([[0, "perplexity", { promptTokens: 60, completionTokens: 39, totalTokens: 99 }]]),
@@ -277,7 +311,7 @@ describe("user-level supplemental accounting", () => {
   it("primary user accounting failed → run accounted, user increment skipped and recorded", async () => {
     seedCompletedRun();
     store.set("users/u1", { tokensUsedCurrentPeriod: 500 });
-    const result = await applyAdaptiveRetryAccounting({
+    const result = await apply({
       runId: "run-1",
       uid: "u1",
       usage: TWO_RETRIES(),
@@ -295,7 +329,7 @@ describe("user-level supplemental accounting", () => {
     // Primary: the real helper's documented (out-of-scope) reset sets the counter to this run's 80.
     await incrementUserTokenUsage("free", 80);
     expect(store.get("users/free")!.tokensUsedCurrentPeriod).toBe(80);
-    await applyAdaptiveRetryAccounting({ runId: "run-1", uid: "free", usage: TWO_RETRIES(), gates: BOTH_OK });
+    await apply({ runId: "run-1", uid: "free", usage: TWO_RETRIES(), gates: BOTH_OK });
     expect(store.get("users/free")!.tokensUsedCurrentPeriod).toBe(80 + 129);
   });
 
@@ -308,7 +342,108 @@ describe("user-level supplemental accounting", () => {
       billingInterval: "month",
     });
     await incrementUserTokenUsage("paid", 80);
-    await applyAdaptiveRetryAccounting({ runId: "run-1", uid: "paid", usage: TWO_RETRIES(), gates: BOTH_OK });
+    await apply({ runId: "run-1", uid: "paid", usage: TWO_RETRIES(), gates: BOTH_OK });
     expect(store.get("users/paid")!.tokensUsedCurrentPeriod).toBe(6000 + 80 + 129);
+  });
+});
+
+describe("bounded foreground wait (fake timers — no real sleeps)", () => {
+  afterEach(() => jest.useRealTimers());
+
+  async function settle(ms: number) {
+    await jest.advanceTimersByTimeAsync(ms);
+  }
+
+  it("a transaction that never settles releases the caller at the wait bound with foreground_wait_expired; no second transaction; a late commit applies at most once", async () => {
+    jest.useFakeTimers();
+    seedCompletedRun();
+    store.set("users/u1", { tokensUsedCurrentPeriod: 80 });
+    transactionDelay = "never";
+    let outcome: unknown = "pending";
+    const pending = apply({ runId: "run-1", uid: "u1", usage: TWO_RETRIES(), gates: BOTH_OK }).then((r) => (outcome = r));
+    await settle(ADAPTIVE_RETRY_ACCOUNTING_WAIT_MS - 1);
+    expect(outcome).toBe("pending");
+    await settle(1);
+    await pending;
+    expect(outcome).toEqual({ status: "foreground_wait_expired" });
+    expect(transactionOptions).toHaveLength(1); // nothing restarted
+    expect(store.get("runs/run-1")!.totalTokens).toBe(80); // not (yet) applied — and not reported as failed
+
+    // The abandoned transaction is not cancelled: if it later commits, it applies exactly once.
+    await releaseHeldTransaction!();
+    expect(store.get("runs/run-1")!.totalTokens).toBe(209);
+    expect(store.get("users/u1")!.tokensUsedCurrentPeriod).toBe(209);
+    transactionDelay = null;
+    expect(await apply({ runId: "run-1", uid: "u1", usage: TWO_RETRIES(), gates: BOTH_OK })).toEqual({ status: "already_applied" });
+    expect(store.get("runs/run-1")!.totalTokens).toBe(209);
+    expect(store.get("users/u1")!.tokensUsedCurrentPeriod).toBe(209);
+  });
+
+  it("resolving 1 ms before the bound is applied", async () => {
+    jest.useFakeTimers();
+    seedCompletedRun();
+    transactionDelay = 9_999;
+    const pending = apply({ runId: "run-1", uid: "u1", usage: TWO_RETRIES(), gates: BOTH_OK, foregroundWaitMs: 10_000 });
+    await settle(10_000);
+    expect(await pending).toEqual({ status: "applied", userCounter: "applied" });
+  });
+
+  it("resolving exactly at the bound is applied (its timer was scheduled first; timers fire in order)", async () => {
+    jest.useFakeTimers();
+    seedCompletedRun();
+    transactionDelay = 10_000;
+    const pending = apply({ runId: "run-1", uid: "u1", usage: TWO_RETRIES(), gates: BOTH_OK, foregroundWaitMs: 10_000 });
+    await settle(10_000);
+    expect(await pending).toEqual({ status: "applied", userCounter: "applied" });
+  });
+
+  it("resolving 1 ms after the bound is foreground_wait_expired; the late commit still lands once", async () => {
+    jest.useFakeTimers();
+    seedCompletedRun();
+    transactionDelay = 10_001;
+    const pending = apply({ runId: "run-1", uid: "u1", usage: TWO_RETRIES(), gates: BOTH_OK, foregroundWaitMs: 10_000 });
+    await settle(10_000);
+    expect(await pending).toEqual({ status: "foreground_wait_expired" });
+    expect(store.get("runs/run-1")!.totalTokens).toBe(80);
+    await settle(1);
+    expect(store.get("runs/run-1")!.totalTokens).toBe(209);
+    expect(transactionOptions).toHaveLength(1);
+  });
+
+  it("a rejecting transaction inside the bound is failed (not expired)", async () => {
+    jest.useFakeTimers();
+    seedCompletedRun();
+    failNextTransaction = Object.assign(new Error("ABORTED"), { code: 10 });
+    transactionDelay = 500;
+    const pending = apply({ runId: "run-1", uid: "u1", usage: TWO_RETRIES(), gates: BOTH_OK });
+    await settle(500);
+    expect(await pending).toEqual({ status: "failed" });
+  });
+
+  it("already_applied inside the bound is reported as such", async () => {
+    jest.useFakeTimers();
+    seedCompletedRun();
+    await apply({ runId: "run-1", uid: "u1", usage: TWO_RETRIES(), gates: BOTH_OK });
+    transactionDelay = 100;
+    const pending = apply({ runId: "run-1", uid: "u1", usage: TWO_RETRIES(), gates: BOTH_OK });
+    await settle(100);
+    expect(await pending).toEqual({ status: "already_applied" });
+  });
+
+  it.each([0, -5_000, 999, Number.NaN])("insufficient remaining budget (wait %p ms) → no attempt is started", async (wait) => {
+    seedCompletedRun();
+    expect(await apply({ runId: "run-1", uid: "u1", usage: TWO_RETRIES(), gates: BOTH_OK, foregroundWaitMs: wait })).toEqual({
+      status: "skipped_insufficient_budget",
+    });
+    expect(transactionOptions).toHaveLength(0);
+    expect(store.get("runs/run-1")!.totalTokens).toBe(80);
+  });
+
+  it("the minimum wait (1 000 ms) still attempts", async () => {
+    seedCompletedRun();
+    expect(await apply({ runId: "run-1", uid: "u1", usage: TWO_RETRIES(), gates: BOTH_OK, foregroundWaitMs: 1_000 })).toEqual({
+      status: "applied",
+      userCounter: "applied",
+    });
   });
 });
