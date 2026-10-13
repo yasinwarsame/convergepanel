@@ -32,6 +32,13 @@ export const PERPLEXITY_WEB_SEARCH_MAX_RESULTS = 10;
  *   responses (application-state minimization; NOT a zero-retention claim).
  *   Every call is one-shot: no `previous_response_id`, no background mode,
  *   no streaming, no preset, no fallback models.
+ *
+ * Contract verified by the owner-authorized live smoke (2026-10-13, 7 calls):
+ * every request was accepted, served by `perplexity/sonar`, and ran exactly one
+ * web search (`usage.tool_calls_details.search_web.invocation = 1`, one
+ * `search_results` item with 10 results). The API echoes `tool_choice: "auto"`
+ * in responses whatever was requested, so the echo is not evidence; the
+ * per-response search invocation (logged by the connector) is.
  */
 export function buildPerplexityAgentRequestBody(args: { instructions: string; input: string; maxOutputTokens: number; temperature: number }) {
   return {
