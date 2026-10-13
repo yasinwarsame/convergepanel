@@ -238,6 +238,8 @@ describe("privacy screen — DROP the whole entry", () => {
     ["nested ftp userinfo", "https://example.com/r?url=ftp%3A%2F%2Fuser%3Apass%40files.example.org%2F", "userinfo"],
     ["fragment auth with token-shaped value", "https://example.com/p#auth=a1B2c3D4e5F6g7H8i9", "credential_fragment"],
     ["Google OAuth ya29 token", "https://example.com/a?x=ya29.a0AfH6SMBx3kZq7Lp2Rt9", "credential_value"],
+    ["fragment Bearer with + as space", "https://example.com/p#h=Bearer+dGhpc2lzYXRva2VuMTIz%3D%3D", "credential_fragment"],
+    ["digits-then-letters hex after /password/reset/", "https://example.com/password/reset/1234567890abcdef", "credential_path"],
     ["long presigned URL counts as a privacy drop, not over-limit", "https://bucket.s3.amazonaws.com/" + "k".repeat(500) + "?X-Amz-Signature=abc", "credential_query_name"],
   ])("%s", (_label, url, signal) => {
     expect(screenSearchResultUrl(url)).toEqual({ kind: "privacy_dropped", signal });
@@ -365,6 +367,8 @@ describe("privacy screen — KEEP ordinary source URLs (no entropy-only drops)",
     ["Bearer Bonds/Treasuries", "https://example.com/?title=Bearer+Bonds/Treasuries"],
     ["Basic COVID19/Vaccines", "https://example.com/?course=Basic+COVID19/Vaccines"],
     ["prose mentioning the Token standard", "https://example.com/?q=What+is+the+ERC20+Token+standard"],
+    ["Token:/path payload starting with a slash", "https://example.com/?t=Token:/aB3dEfGh/iJ9kLmNoP"],
+    ["short candidate after a credential context (< 8 chars)", "https://example.com/password-reset/a1b2c3"],
     ["NYT share link auth=login-email", "https://www.nytimes.com/2026/10/01/world/story.html?auth=login-email&login=email"],
     ["empty credential values carry no secret", "https://example.com/a?sessionid=&sig=&token="],
     ["value-less credential names", "https://example.com/a?token&access_token"],
