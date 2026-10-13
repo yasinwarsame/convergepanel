@@ -5,7 +5,7 @@
  */
 
 import { randomUUID, randomBytes } from "crypto";
-import { screenSearchResultUrl, SEARCH_RESULT_URL_MAX_BYTES } from "@/lib/providers/searchResultUrlScreen";
+import { screenSearchResultUrl, SEARCH_RESULT_URL_MAX_BYTES, SEARCH_RESULT_URL_MAX_PROCESSING_BYTES } from "@/lib/providers/searchResultUrlScreen";
 
 const JWT = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PjwP2kSf1ZQA";
 
@@ -38,6 +38,16 @@ describe("structural validation", () => {
     expect(screenSearchResultUrl(atLimit + "a").kind).toBe("over_limit");
     // multi-byte characters count as bytes (percent-encoded when serialized)
     expect(screenSearchResultUrl(base + "é".repeat(100)).kind).toBe("over_limit");
+  });
+
+  it("processing-safety ceiling: oversized raw input is over_limit without inspection; long signed URLs below it are still privacy-screened", () => {
+    expect(SEARCH_RESULT_URL_MAX_PROCESSING_BYTES).toBe(16_384);
+    const huge = "https://example.com/a?access_token=abc&pad=" + "a".repeat(SEARCH_RESULT_URL_MAX_PROCESSING_BYTES);
+    expect(screenSearchResultUrl(huge)).toEqual({ kind: "over_limit" });
+    const longSigned = "https://bucket.s3.amazonaws.com/o?X-Amz-Signature=abc&pad=" + "a".repeat(4000);
+    expect(screenSearchResultUrl(longSigned)).toEqual({ kind: "privacy_dropped", signal: "credential_query_name" });
+    const longPlain = "https://example.com/a?pad=" + "a".repeat(4000);
+    expect(screenSearchResultUrl(longPlain)).toEqual({ kind: "over_limit" });
   });
 
   it("never throws on hostile input", () => {
@@ -74,7 +84,7 @@ describe("privacy screen — DROP the whole entry", () => {
     ["camelCase apiKey", "https://example.com/a?apiKey=abc", "credential_query_name"],
     ["x-api-key", "https://example.com/a?x-api-key=abc", "credential_query_name"],
     ["JWT in benign query value", `https://example.com/a?t=${JWT}`, "credential_value"],
-    ["Bearer in query value", "https://example.com/a?h=Bearer%20abc123def456ghi789", "credential_value"],
+    ["Bearer in query value", "https://example.com/a?h=Bearer%20dGhpc2lzYXRva2VuMTIz%3D%3D", "credential_value"],
     ["Stripe live key value", "https://example.com/a?k=sk_live_51HabcdefghijKLMN", "credential_value"],
     ["GitHub token value", "https://example.com/a?x=ghp_abcdefghijklmnopqrstuvwxyz0123456789", "credential_value"],
     ["AWS access key id value", "https://example.com/a?x=AKIAIOSFODNN7EXAMPLE", "credential_value"],
@@ -105,13 +115,12 @@ describe("privacy screen — DROP the whole entry", () => {
     ["plus-joined name access+token", "https://example.com/a?access+token=abc", "credential_query_name"],
     ["dot-joined name access.token", "https://example.com/a?access.token=abc", "credential_query_name"],
     ["zero-width inside a name", "https://example.com/a?acc%E2%80%8Bess_token=abc", "credential_query_name"],
-    ["encoded separator next to an invalid byte (auth%FF%2Etoken)", "https://example.com/a?auth%FF%2Etoken=abc", "credential_query_name"],
     ["dot-joined api.key (normalisation only)", "https://example.com/a?api.key=abc", "credential_query_name"],
     ["plus-joined api+key (normalisation only)", "https://example.com/a?api+key=abc", "credential_query_name"],
     ["zero-width inside passwd (normalisation only)", "https://example.com/a?pass%E2%80%8Bwd=abc", "credential_query_name"],
-    ["encoded '-' next to an invalid byte (x%FF%2Dapi_key, ASCII fallback only)", "https://example.com/a?x%FF%2Dapi_key=abc", "credential_query_name"],
+    ["encoded space next to an invalid byte before a key prefix (ASCII fallback only)", "https://example.com/a?x=%FF%20ghp_abcdefghijklmnopqrstuvwxyz0123456789", "credential_value"],
     ["semicolon-separated query", "https://example.com/a?a=1;token=abc", "credential_query_name"],
-    ["Bearer token with + as space", "https://example.com/a?h=Bearer+abc123def456ghi", "credential_value"],
+    ["Bearer token with + as space", "https://example.com/a?h=Bearer+ghp_abcdefghijklmnopqrstuvwxyz0123456789", "credential_value"],
     ["Basic credential", "https://example.com/a?h=Basic%20dXNlcjpwYXNz", "credential_value"],
     ["path segment access_token=…", "https://example.com/access_token=abc/next", "credential_path"],
     ["path segment token=…", "https://example.com/files/token=abc/", "credential_path"],
@@ -126,8 +135,34 @@ describe("privacy screen — DROP the whole entry", () => {
     ["sharedAccessSignature", "https://example.com/a?sharedAccessSignature=abc", "credential_query_name"],
     ["sessionKey", "https://example.com/a?sessionKey=abc", "credential_query_name"],
     ["auth with a token-shaped value", "https://example.com/a?auth=a1b2c3d4e5f6g7h8i9j0", "credential_query_name"],
-    ["Token auth scheme", "https://example.com/a?h=Token%20abc123def456ghi789", "credential_value"],
+    ["Token auth scheme (token68 punctuation)", "https://example.com/a?h=Token%20abcDEF123%2Fxyz789", "credential_value"],
     ["Google Books sig (signature form, dropped by the owner's rule)", "https://books.google.com/books?id=abc&pg=PA12&sig=ACfU3U0abcdef", "credential_query_name"],
+    // ── Option-B hardening (R3 reproductions) ──
+    ["Discord versioned webhook", "https://discord.com/api/v10/webhooks/1/abcdef", "credential_host"],
+    ["Discord webhook, trailing-dot host", "https://discord.com./api/webhooks/1/abcdef", "credential_host"],
+    ["Slack webhook, trailing-dot host", "https://hooks.slack.com./services/T000/B000/XXXX", "credential_host"],
+    ["Discord webhook, subdomain + version", "https://ptb.discord.com/api/v9/webhooks/1/abc", "credential_host"],
+    ["nested scheme-less host/path value", "https://example.com/login?next=y.com/reset?token=abc", "credential_query_name"],
+    ["nested protocol-relative value", "https://example.com/go?u=%2F%2Fcdn.example.net%2Ff%3Faccess_token%3Dabc", "credential_query_name"],
+    ["nested query-relative value", "https://example.com/go?u=%3Fsig%3Dabc", "credential_query_name"],
+    ["bare credential context path /access_token/<v>", "https://x.com/access_token/ya29.abcdef123456", "credential_path"],
+    ["reset-password context with UUID token", "https://example.com/account/reset-password/3f2b8c1e-9d4a-4f6b-8e2c-1a2b3c4d5e6f", "credential_path"],
+    ["password-reset context with opaque token", "https://example.com/password-reset/Zx81kQp", "credential_path"],
+    ["password-only userinfo", "https://:hunter2@example.com/a", "userinfo"],
+    ["pass", "https://example.com/a?pass=hunter2", "credential_query_name"],
+    ["pw", "https://example.com/a?pw=hunter2", "credential_query_name"],
+    ["sid", "https://example.com/a?sid=9f2b1c", "credential_query_name"],
+    ["fragment credential with a value", "https://example.com/page#token=abc", "credential_fragment"],
+    ["full-width credential name (NFKC)", "https://example.com/a?%EF%BD%81%EF%BD%83%EF%BD%83%EF%BD%85%EF%BD%93%EF%BD%93_%EF%BD%94%EF%BD%8F%EF%BD%8B%EF%BD%85%EF%BD%8E=abc", "credential_query_name"],
+    ["soft hyphen inside a name", "https://example.com/a?access_t%C2%ADoken=abc", "credential_query_name"],
+    ["Bearer: colon syntax", "https://example.com/a?h=Bearer%3A%20eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.c2lnbmF0dXJlMTIzNA", "credential_value"],
+    ["Bearer:token without space", "https://example.com/a?h=Bearer%3AdGhpc2lzYXRva2VuMTIz%3D%3D", "credential_value"],
+    ["Basic base64 user:password", "https://example.com/a?h=Basic%20dXNlcjpwYXNz", "credential_value"],
+    ["key with an independent credential value (JWT)", `https://example.com/a?key=${JWT}`, "credential_value"],
+    ["joined family clientSecret", "https://example.com/a?clientSecret=abc", "credential_query_name"],
+    ["joined family refreshToken", "https://example.com/a?refreshToken=abc", "credential_query_name"],
+    ["joined family adminPassword", "https://example.com/a?adminPassword=abc", "credential_query_name"],
+    ["joined family AWSAccessKeyId", "https://example.com/a?AWSAccessKeyId=abc", "credential_query_name"],
     ["long presigned URL counts as a privacy drop, not over-limit", "https://bucket.s3.amazonaws.com/" + "k".repeat(500) + "?X-Amz-Signature=abc", "credential_query_name"],
   ])("%s", (_label, url, signal) => {
     expect(screenSearchResultUrl(url)).toEqual({ kind: "privacy_dropped", signal });
@@ -172,6 +207,36 @@ describe("privacy screen — KEEP ordinary source URLs (no entropy-only drops)",
     ["pagination continuation_token", "https://example.com/list?continuation_token=abc"],
     ["pagination sync_token", "https://example.com/list?sync_token=abc"],
     ["sort_key (no bare _key suffix rule)", "https://example.com/list?sort_key=date&designer_key=abc"],
+    // ── Option-B hardening: ordinary names / prose / contexts that must stay usable ──
+    ["designToken", "https://example.com/ui?designToken=primary"],
+    ["design_token", "https://example.com/ui?design_token=blue"],
+    ["cryptoToken", "https://example.com/coins?cryptoToken=BTC"],
+    ["crypto-token", "https://example.com/coins?crypto-token=BTC"],
+    ["timeSignature / keySignature", "https://example.com/music?timesignature=4-4&keysignature=Cmajor"],
+    ["mailSignature", "https://example.com/settings?mailsignature=on"],
+    ["forgotPassword / resetPassword flags", "https://example.com/help?forgotpassword=1&resetpassword=true"],
+    ["topSecret / showSecret", "https://example.com/film?topsecret=yes&showsecret=no&songsecret=1"],
+    ["gameOfToken", "https://example.com/game?gameoftoken=1"],
+    ["Bearer prose with a digit", "https://example.com/a?ref=Bearer+authentication2"],
+    ["token prose with a digit", "https://www.google.com/search?q=token+economics2026"],
+    ["Basic prose with a digit", "https://example.com/tag/Basic%20Python3Course"],
+    ["Token conference name", "https://example.com/events?q=Token+2049Dubai"],
+    ["Bearer bonds with a digit", "https://example.com/a?ref=Bearer+Bonds1990s"],
+    ["Token Ring fragment", "https://en.wikipedia.org/wiki/Token_Ring#Token%20passing2"],
+    ["Bearer: colon prose", "https://example.com/a?q=Bearer%3A%20the%20movie"],
+    ["q=/… search for a path with a token is a search, not a link", "https://www.google.com/search?q=%2Fapi%2Fv1%3Ftoken%3Dabc"],
+    ["nested value that is prose, not a URL", "https://example.com/r?next=see%20page.com%2Fdocs%20for%20info"],
+    ["generic key with plain hex", "https://example.com/obj?key=9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"],
+    ["generic key with a UUID", "https://example.com/obj?key=3f2b8c1e-9d4a-4f6b-8e2c-1a2b3c4d5e6f"],
+    ["reset-password page without a token", "https://example.com/account/reset-password"],
+    ["reset-password followed by a slug", "https://example.com/help/reset-password/how-to-reset.html"],
+    ["UUID article path (no credential context)", "https://example.com/articles/3f2b8c1e-9d4a-4f6b-8e2c-1a2b3c4d5e6f"],
+    ["empty fragment credential value", "https://example.com/page#token="],
+    ["absent fragment credential value", "https://example.com/page#token"],
+    ["ordinary Unicode names", "https://example.com/a?caf%C3%A9=cr%C3%A8me&%E6%A4%9C%E7%B4%A2=%E3%83%86%E3%82%B9%E3%83%88"],
+    ["Discord non-webhook API path", "https://discord.com/api/v10/channels/1/messages"],
+    ["lookalike host (not the webhook host)", "https://notdiscord.com/api/webhooks/1/abc"],
+    ["lookalike suffix host", "https://discord.com.evil.example/api/webhooks/1/abc"],
     ["NYT share link auth=login-email", "https://www.nytimes.com/2026/10/01/world/story.html?auth=login-email&login=email"],
     ["empty credential values carry no secret", "https://example.com/a?sessionid=&sig=&token="],
     ["value-less credential names", "https://example.com/a?token&access_token"],
