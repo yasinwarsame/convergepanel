@@ -155,7 +155,7 @@ export function agentSearchResultEntries(output: readonly unknown[]): { items: n
   for (const item of output) {
     if (isPlainObject(item) && item.type === "search_results") {
       items += 1;
-      if (Array.isArray(item.results)) entries.push(...item.results);
+      if (Array.isArray(item.results)) for (const entry of item.results) entries.push(entry);
     }
   }
   return { items, entries };

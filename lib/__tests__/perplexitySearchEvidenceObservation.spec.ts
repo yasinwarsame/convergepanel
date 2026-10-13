@@ -203,6 +203,13 @@ describe("last_updated is never the publication date", () => {
     expect(o).toMatchObject({ lastUpdatedPresent: 1, lastUpdatedAbsent: 2 });
   });
 
+  it("blank strings are absent; any other non-null value (0, false, a string) is present", () => {
+    const o = observe(
+      slot(agent([{ type: "search_results", results: [entry({ last_updated: "" }), entry({ last_updated: "  " }), entry({ last_updated: 0 }), entry({ last_updated: false })] }]))
+    );
+    expect(o).toMatchObject({ lastUpdatedPresent: 2, lastUpdatedAbsent: 2 });
+  });
+
   it("a missing date is not filled from last_updated", () => {
     const o = observe(slot(agent([{ type: "search_results", results: [entry({ date: undefined, last_updated: "2026-03-01" })] }])));
     expect(o).toMatchObject({ dateAbsent: 1, dateValid: 0, lastUpdatedPresent: 1 });

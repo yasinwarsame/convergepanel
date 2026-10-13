@@ -11,26 +11,30 @@
  * The screen is signal-based, not entropy-based. It drops on strong,
  * explicit credential signals only:
  *   - userinfo (`user:pass@`);
- *   - credential-oriented query parameter NAMES (access/id/refresh tokens,
- *     api keys, authorization, secrets, passwords, signatures, session ids,
- *     signed-URL fields such as `X-Amz-*`, `X-Goog-*`, Azure SAS `sig`,
- *     CloudFront `Signature`), also inside `;matrix` path parameters;
+ *   - credential-oriented parameter NAMES (access/id/refresh tokens, api /
+ *     access / secret / private keys, authorization, credentials, secrets,
+ *     passwords, signatures, session ids, signed-URL fields such as
+ *     `X-Amz-*`, `X-Goog-*`, Azure SAS `sig`, CloudFront `Signature`), in the
+ *     query (split on `&` and `;`), in `;matrix` path parameters, and in
+ *     `name=value` path segments;
  *   - JWT-shaped values (query value, path segment, fragment piece);
- *   - explicit credential prefixes (`Bearer …`, `sk_live_`, `ghp_`, `AKIA…`,
- *     `AIza…`, `xoxb-`, `glpat-`, …);
+ *   - explicit credential prefixes (`Bearer <token>`, `Basic <token>`,
+ *     `sk_live_`, `ghp_`, `AKIA…`, `AIza…`, `xoxb-`, `glpat-`, …);
  *   - credential markers in a fragment (`#access_token=`, `#token=`, …);
  *   - known credential-in-path webhook hosts (Slack/Discord/Telegram/…);
  *   - the same rules once inside a nested URL query value (`?next=…`).
  * It deliberately does NOT drop a URL merely because a path segment or value
- * is long, hexadecimal, numeric, a UUID or otherwise high-entropy: false
- * removal of ordinary source URLs (content ids, commit SHAs, article ids,
- * Google Docs ids) is itself a governance defect. Accepted residual: opaque
- * tokens carried under non-credential names or bare in a path pass the
- * screen (these are public web-search results).
+ * is long, hexadecimal, numeric, a UUID or otherwise high-entropy, nor for
+ * malformed percent-encoding: false removal of ordinary source URLs is itself
+ * a governance defect. Accepted residuals: opaque tokens under non-credential
+ * names or bare in a path, OAuth `?code=` values (ambiguous name), names
+ * nested two URL levels deep.
  *
- * Decoding: query strings are split raw on `&` and the first `=`, then each
- * part is `decodeURIComponent`-decoded (`+` is never translated; no
- * URLSearchParams). A decoding error fails closed (drop, `decode_error`).
+ * Decoding is lenient and total: maximal `%XX` runs that form valid UTF-8 are
+ * decoded; anything else keeps its literal text, except that encoded ASCII
+ * bytes are always decoded (so `%61ccess_token` is still a credential name).
+ * Names are compared case-insensitively after removing control / zero-width
+ * characters and mapping `.`, `+` and whitespace to `_`.
  */
 
 /** Serialized-URL byte ceiling (UTF-8) for a usable search-result URL. */
@@ -49,9 +53,9 @@ export type PrivacySignal =
   | "credential_fragment"
   | "credential_path"
   | "credential_host"
-  | "decode_error";
+  | "screen_error";
 
-/** Always-credential query/matrix parameter names (case-insensitive, decoded). */
+/** Always-credential parameter names (after normalization). */
 const CREDENTIAL_NAMES = new Set([
   "access_token",
   "id_token",
@@ -63,6 +67,8 @@ const CREDENTIAL_NAMES = new Set([
   "api_key",
   "apikey",
   "api-key",
+  "credential",
+  "credentials",
   "secret",
   "client_secret",
   "password",
@@ -81,6 +87,9 @@ const CREDENTIAL_NAMES = new Set([
   "x-api-key",
 ]);
 
+/** Pagination / cursor names that end in "token" but carry no credential. */
+const NON_CREDENTIAL_TOKEN_NAMES = /^(page|next|next_page|nextpage|continuation|sync|cursor)[_-]?token$/;
+
 const CREDENTIAL_NAME_PATTERNS: readonly RegExp[] = [
   /^x-amz-[a-z0-9-]+$/, // S3 presigned / SigV4
   /^x-goog-[a-z0-9-]+$/, // GCS signed URLs
@@ -88,16 +97,28 @@ const CREDENTIAL_NAME_PATTERNS: readonly RegExp[] = [
   /^aspsessionid[a-z0-9]*$/,
   // Separated suffix family: reset_token, auth_token, private_token, x-api-key …
   /(^|[_-])(token|secret|signature|password|passwd|api[_-]?key|apikey)$/,
-  // camelCase credential names (lower-cased here): accessToken, authToken, apiKey, clientSecret …
-  /^(access|auth|api|id|refresh|bearer|session|private|client|reset|security)(token|secret|key)$/,
+  // Key family: access_key, secret_key, private_key, accessKeyId, auth_key … (no bare `_key` suffix: sort_key, designer_key stay)
+  /^(access|secret|private|auth|signing|client|master|account|api)[_-]?key(_?id)?$/,
+  // camelCase credential names (lower-cased here): accessToken, authToken, clientSecret …
+  /^(access|auth|api|id|refresh|bearer|session|private|client|reset|security)(token|secret)$/,
 ];
 
 /** Fully-matching JWT (three base64url parts). */
 const JWT = /^eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}$/;
 
+/** `Bearer`/`Basic` followed by a token68-shaped credential (the whole value). Prose such as "Bearer authentication explained" never matches. */
+const AUTH_SCHEME = /^(bearer|basic)\s+([A-Za-z0-9\-._~+/]{8,}=*)$/i;
+
+function looksLikeToken68(token: string): boolean {
+  if (/[0-9=+/]/.test(token)) return true;
+  // Mixed-case opaque token (e.g. base64 "dXNlcjpwYXNz"): at least two lower→upper transitions.
+  let transitions = 0;
+  for (let i = 1; i < token.length; i++) if (/[a-z]/.test(token[i - 1]) && /[A-Z]/.test(token[i])) transitions += 1;
+  return transitions >= 2;
+}
+
 /** Explicit credential prefixes, anchored at the start of a tested unit. */
 const CREDENTIAL_PREFIXES: readonly RegExp[] = [
-  /^bearer\s+\S{8,}/i,
   /^(sk|rk|pk)_(live|test)_[A-Za-z0-9]{10,}/,
   /^whsec_[A-Za-z0-9]{10,}/,
   /^sk-(proj|ant)-[A-Za-z0-9_-]{40,}/,
@@ -122,31 +143,42 @@ const CREDENTIAL_HOSTS: ReadonlyArray<{ host: string; pathPrefix: RegExp }> = [
   { host: "maker.ifttt.com", pathPrefix: /\/key\// },
 ];
 
-/** Credential markers inside a fragment (case-insensitive). */
-const FRAGMENT_MARKERS = /(^|[&#?;/])(access_token|id_token|refresh_token|token|code|api_key|apikey|auth)=/i;
-
-/** A Chrome text fragment (`#:~:text=…`) — exempt from the fragment marker rule, but its pieces are still tested. */
-const TEXT_FRAGMENT = /^:~:text=[^&]*(&text=[^&]*)*$/;
-
-class DecodeError extends Error {}
-
+/** Lenient, total percent-decoding (see module doc). */
 function decode(part: string): string {
-  try {
-    return decodeURIComponent(part);
-  } catch {
-    throw new DecodeError();
-  }
+  return part.replace(/(?:%[0-9A-Fa-f]{2})+/g, (run) => {
+    try {
+      return decodeURIComponent(run);
+    } catch {
+      return run.replace(/%([0-9A-Fa-f]{2})/g, (escape, hex: string) => {
+        const byte = parseInt(hex, 16);
+        return byte < 0x80 ? String.fromCharCode(byte) : escape;
+      });
+    }
+  });
+}
+
+function normalizeName(rawName: string): string {
+  return rawName
+    .replace(/[\u0000-\u001f\u007f​-‏⁠﻿]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[.+\s]+/g, "_");
 }
 
 function isCredentialName(rawName: string): boolean {
-  const name = rawName.trim().toLowerCase();
+  const name = normalizeName(rawName);
   if (name.length === 0) return false;
   if (CREDENTIAL_NAMES.has(name)) return true;
+  if (NON_CREDENTIAL_TOKEN_NAMES.test(name)) return false;
   return CREDENTIAL_NAME_PATTERNS.some((re) => re.test(name));
 }
 
-/** A value (or path segment / fragment piece) is credential-shaped if it, or any of its sub-tokens, is a JWT or carries an explicit credential prefix. */
+/** A value is credential-shaped if it (with `+` read as a space, too) is an auth-scheme credential, or it or any sub-token is a JWT or carries an explicit credential prefix. */
 function isCredentialValue(value: string): boolean {
+  for (const variant of new Set([value.trim(), value.replace(/\+/g, " ").trim()])) {
+    const scheme = AUTH_SCHEME.exec(variant);
+    if (scheme && looksLikeToken68(scheme[2])) return true;
+  }
   const units = new Set<string>([value.trim()]);
   for (const piece of value.split(/[^A-Za-z0-9_.-]+/)) if (piece) units.add(piece);
   for (const piece of value.split(/[^A-Za-z0-9_-]+/)) if (piece) units.add(piece);
@@ -161,13 +193,26 @@ function hostMatches(hostname: string, host: string): boolean {
   return hostname === host || hostname.endsWith(`.${host}`);
 }
 
-function splitQuery(search: string): Array<{ name: string; value: string | null }> {
-  const raw = search.startsWith("?") ? search.slice(1) : search;
+/** `name=value` pairs separated by `&` or `;`, each part decoded. */
+function splitPairs(raw: string): Array<{ name: string; value: string | null }> {
   if (raw.length === 0) return [];
-  return raw.split("&").map((pair) => {
+  return raw.split(/[&;]/).map((pair) => {
     const eq = pair.indexOf("=");
     return eq === -1 ? { name: decode(pair), value: null } : { name: decode(pair.slice(0, eq)), value: decode(pair.slice(eq + 1)) };
   });
+}
+
+function screenPairs(raw: string, nested: boolean, nameSignal: PrivacySignal, valueSignal: PrivacySignal): PrivacySignal | null {
+  for (const { name, value } of splitPairs(raw)) {
+    if (value === null) continue;
+    if (isCredentialName(name)) return nameSignal;
+    if (isCredentialValue(value)) return valueSignal;
+    if (!nested && /^(https?:\/\/|\/|\?)/i.test(value)) {
+      const inner = screenNestedValue(value);
+      if (inner) return inner;
+    }
+  }
+  return null;
 }
 
 /** Screens query, fragment and path of an already-parsed URL. `nested` limits recursion to one level. */
@@ -176,20 +221,19 @@ function screenParts(url: URL, nested: boolean): PrivacySignal | null {
     if (hostMatches(url.hostname.toLowerCase(), host) && pathPrefix.test(url.pathname)) return "credential_host";
   }
 
-  for (const { name, value } of splitQuery(url.search)) {
-    if (isCredentialName(name)) return "credential_query_name";
-    if (value === null) continue;
-    if (isCredentialValue(value)) return "credential_value";
-    if (!nested && /^(https?:\/\/|\/|\?)/i.test(value)) {
-      const inner = screenNestedValue(value);
-      if (inner) return inner;
-    }
-  }
+  const search = url.search.startsWith("?") ? url.search.slice(1) : url.search;
+  const querySignal = screenPairs(search, nested, "credential_query_name", "credential_value");
+  if (querySignal) return querySignal;
 
   const fragment = url.hash.startsWith("#") ? url.hash.slice(1) : url.hash;
   if (fragment.length > 0) {
     const decoded = decode(fragment);
-    if (!TEXT_FRAGMENT.test(decoded) && FRAGMENT_MARKERS.test(decoded)) return "credential_fragment";
+    // Credential names in `name=value` fragment pairs (`#access_token=…`). A text fragment
+    // (`#:~:text=…`) only ever has the names `:~:text` / `text`, so it is never dropped by name.
+    for (const { name, value } of splitPairs(decoded.replace(/^[?/]+/, ""))) {
+      if (value !== null && isCredentialName(name)) return "credential_fragment";
+    }
+    if (isCredentialValue(decoded)) return "credential_fragment";
     for (const piece of decoded.split(/[&=/?;]/)) {
       if (piece && isCredentialValue(piece)) return "credential_fragment";
     }
@@ -200,11 +244,12 @@ function screenParts(url: URL, nested: boolean): PrivacySignal | null {
     const [head, ...params] = rawSegment.split(";");
     const segment = decode(head);
     if (isCredentialValue(segment)) return "credential_path";
+    // `name=value` path segments (e.g. /access_token=abc/) and `;matrix` parameters.
+    const pairSignal = screenPairs([segment.includes("=") ? segment : "", ...params].filter(Boolean).join(";"), true, "credential_path", "credential_path");
+    if (pairSignal) return pairSignal;
     for (const param of params) {
-      const eq = param.indexOf("=");
-      const name = decode(eq === -1 ? param : param.slice(0, eq));
+      const name = decode(param.split("=")[0]);
       if (isCredentialName(name)) return "credential_path";
-      if (eq !== -1 && isCredentialValue(decode(param.slice(eq + 1)))) return "credential_path";
     }
   }
   return null;
@@ -242,7 +287,7 @@ export function screenSearchResultUrl(raw: unknown): UrlScreenOutcome {
     const signal = screenParts(url, false);
     return signal ? { kind: "privacy_dropped", signal } : { kind: "usable" };
   } catch {
-    // DecodeError (malformed percent-encoding) — or anything unexpected — fails closed.
-    return { kind: "privacy_dropped", signal: "decode_error" };
+    // Decoding is total, so this is only reachable through an unforeseen runtime error: fail closed.
+    return { kind: "privacy_dropped", signal: "screen_error" };
   }
 }

@@ -55,8 +55,10 @@ export type Phase0IneligibilityReason = (typeof PHASE0_INELIGIBILITY_REASONS)[nu
 /**
  * The adaptive context of the run, as known to the run-execution layer:
  * - `none`: no adaptive plan (ordinary Research run);
- * - `unavailable`: an adaptive plan existed but finalization produced no
- *   trustworthy per-slot result (fails closed);
+ * - `unavailable`: an adaptive plan existed but the adaptive block produced
+ *   no trustworthy per-slot result — finalization, or a later step of the
+ *   same adaptive block (persistence/governance) failed and the adaptive
+ *   payload was dropped (fails closed);
  * - `result`: the slot's finalized adaptive result (retry metadata only is read).
  */
 export type AdaptiveSlotState =
@@ -210,7 +212,8 @@ export function observeProviderSearchEvidence(args: {
       else if (dateClass === "malformed") counters.dateMalformed += 1;
       else counters.dateFuture += 1;
 
-      if (entry.last_updated !== undefined && entry.last_updated !== null) counters.lastUpdatedPresent += 1;
+      const lastUpdated = entry.last_updated;
+      if (lastUpdated !== undefined && lastUpdated !== null && !(typeof lastUpdated === "string" && lastUpdated.trim() === "")) counters.lastUpdatedPresent += 1;
       else counters.lastUpdatedAbsent += 1;
     }
   }

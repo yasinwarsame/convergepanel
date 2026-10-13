@@ -213,6 +213,19 @@ describe("flag on", () => {
     expect(phase0Events()[0][1]).toMatchObject({ retryEligibility: "unknown", eligible: false, ineligibilityReason: "adaptive_state_unknown" });
   });
 
+  it("a finalized adaptive result not aligned to the Perplexity slot fails closed (adaptive_state_unknown)", async () => {
+    countersFlag = true;
+    mockedFinalize.mockResolvedValue({
+      schemaId: "comparison_matrix",
+      adaptiveResults: [
+        { modelId: "perplexity", schemaId: "comparison_matrix", ok: true, data: {} },
+        { modelId: "claude", schemaId: "comparison_matrix", ok: true, data: {} },
+      ],
+    });
+    await executeOrdinaryRun(args(true));
+    expect(phase0Events()[0][1]).toMatchObject({ retryEligibility: "unknown", ineligibilityReason: "adaptive_state_unknown" });
+  });
+
   it("DeepSeek-substituted Perplexity slot is observed as ineligible", async () => {
     countersFlag = true;
     mockedRunPanel.mockImplementation(async () => {
