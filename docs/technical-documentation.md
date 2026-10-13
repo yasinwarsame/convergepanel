@@ -179,6 +179,16 @@ Registered in `CONNECTOR_MAP` (`lib/connectors/index.ts`):
 
 DeepSeek is a fallback provider only — not in `CONNECTOR_MAP` directly.
 
+### Provider Search Evidence — Phase 0 counters (Order 5; log-only, flag default OFF)
+
+`PROVIDER_SEARCH_EVIDENCE_COUNTERS_ENABLED` (server-only, exact `"true"`, never `NEXT_PUBLIC_`) turns on ONE aggregate log event per Research run with a Perplexity slot: `[provider-search-evidence] Phase0 observation` (`lib/providers/providerSearchEvidencePhase0Emitter.ts`, called at the end of `executeOrdinaryRun()` after adaptive finalization). It is **counters only**: nothing is persisted, displayed, exported or fed to governance, `sources`, `sourceBacked`, the Decision Receipt, Source Authority or Publisher Classification; no provider call is added (cost delta $0). When the flag is off the observer is never invoked.
+
+- **What is observed:** only the supported Agent response's `output[]` items with `type: "search_results"` and their `results[]` entries (`agentSearchResultEntries()` in `perplexityAgentResponse.ts`). The legacy Chat Completions shape, top-level `search_results`/`citations`, model-written source labels and panel `sources` are never evidence.
+- **Meaning:** "Perplexity returned these web-search results for its response in this run" — not panel consensus, not a source endorsement, not proof that any result was used for any statement, no truth/reliability claim. The provider `date` is a provider-reported, unverified publication day; `last_updated` is a separate field counted only as present/absent and never used as the publication date.
+- **Counters** (`lib/providers/perplexitySearchEvidenceObservation.ts`, pure): response shape (`agent`/`legacy_chat`/`malformed`/`absent`), Agent status (closed set), search-result items and entries, URL class per entry (usable / invalid / over 512 bytes / privacy-dropped), publication date class (absent / valid `YYYY-MM-DD` real calendar day / malformed / future = after the observation's UTC day — no "implausibly old" threshold yet), `last_updated` present/absent, the AR9 retry dimension (`retryStateAllowsProviderSearchEvidence()`; `not_applicable` for non-adaptive runs, `unknown` when adaptive finalization produced no trustworthy slot result), and a final eligibility boolean with one closed ineligibility reason. Eligibility requires actual `provider === "perplexity"` (a DeepSeek-substituted slot never qualifies) and a usable `ok` result.
+- **Privacy screen** (`lib/providers/searchResultUrlScreen.ts`): a URL carrying a strong credential signal (userinfo, credential query names, signed-URL fields, JWTs, explicit key/bearer prefixes, credential fragments, credential-in-path webhook hosts, one nested URL level) drops the whole entry (`privacyDroppedEntries`), never a rewritten URL. Long/hex/numeric/UUID ids are deliberately not treated as secrets.
+- **Log content:** counts and closed enums only — no uid, run id, workspace id, question, context, model text, URL, domain, title, snippet or raw date.
+
 ### Token limits and timeouts
 
 Defined in `lib/modelConfig.ts`:
@@ -1216,6 +1226,7 @@ All exported from `lib/env.ts`.
 | `PERPLEXITY_API_KEY` | Perplexity connector |
 | `GEMINI_API_KEY` | Gemini connector + video vision |
 | `DEEPSEEK_API_KEY` | DeepSeek fallback connector |
+| `PROVIDER_SEARCH_EVIDENCE_COUNTERS_ENABLED` | Order 5 Phase 0: aggregate Perplexity search-result counters in logs (exact `"true"`; default off; server-only; no persistence) |
 | `GROK_MODEL` | Override Grok model string (default: `grok-4-1-fast-reasoning`) |
 | `GEMINI_MAX_OUTPUT_TOKENS` | Override Gemini token limit (default: `8192`) |
 | `PANEL_DEEPSEEK_FALLBACK_FOR` | Comma-separated provider names to enable DeepSeek fallback for (default: `openai,anthropic,google`) |

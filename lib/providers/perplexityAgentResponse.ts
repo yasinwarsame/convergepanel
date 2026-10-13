@@ -142,16 +142,28 @@ function finalMessageText(output: readonly unknown[]): { text: string | null; me
   return { text: joined.length > 0 ? joined : null, messageItems: messages.length };
 }
 
-function searchResultCounts(output: readonly unknown[]): { items: number; entries: number } {
+/**
+ * The ONE definition of where Agent web-search results live: `output[]` items
+ * with `type: "search_results"`, and each item's `results[]` entries, in
+ * provider order. Entries are returned as-is (unvalidated, never copied or
+ * mutated). The legacy top-level `search_results` / `citations` fields are
+ * never read.
+ */
+export function agentSearchResultEntries(output: readonly unknown[]): { items: number; entries: unknown[] } {
   let items = 0;
-  let entries = 0;
+  const entries: unknown[] = [];
   for (const item of output) {
     if (isPlainObject(item) && item.type === "search_results") {
       items += 1;
-      if (Array.isArray(item.results)) entries += item.results.length;
+      if (Array.isArray(item.results)) entries.push(...item.results);
     }
   }
   return { items, entries };
+}
+
+function searchResultCounts(output: readonly unknown[]): { items: number; entries: number } {
+  const { items, entries } = agentSearchResultEntries(output);
+  return { items, entries: entries.length };
 }
 
 function parseUsage(raw: unknown): AgentUsage | null {
