@@ -50,6 +50,17 @@ describe("structural validation", () => {
     expect(screenSearchResultUrl(longPlain)).toEqual({ kind: "over_limit" });
   });
 
+  it("an unforeseen runtime error inside the screen fails closed (screen_error)", () => {
+    const spy = jest.spyOn(String.prototype, "normalize").mockImplementation(() => {
+      throw new Error("boom");
+    });
+    try {
+      expect(screenSearchResultUrl("https://example.com/a?x=1")).toEqual({ kind: "privacy_dropped", signal: "screen_error" });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("never throws on hostile input", () => {
     for (const v of ["http://%zz", "https://example.com/%E0%A4%A", "https://exa mple.com", "http://[::1", "https://example.com/?a=%", "\u0000", "h".repeat(100_000)]) {
       expect(() => screenSearchResultUrl(v)).not.toThrow();
@@ -147,7 +158,7 @@ describe("privacy screen — DROP the whole entry", () => {
     ["nested query-relative value", "https://example.com/go?u=%3Fsig%3Dabc", "credential_query_name"],
     ["bare credential context path /access_token/<v>", "https://x.com/access_token/ya29.abcdef123456", "credential_path"],
     ["reset-password context with UUID token", "https://example.com/account/reset-password/3f2b8c1e-9d4a-4f6b-8e2c-1a2b3c4d5e6f", "credential_path"],
-    ["password-reset context with opaque token", "https://example.com/password-reset/Zx81kQp", "credential_path"],
+    ["password-reset context with opaque token", "https://example.com/password-reset/Zx81kQp4Lm", "credential_path"],
     ["password-only userinfo", "https://:hunter2@example.com/a", "userinfo"],
     ["pass", "https://example.com/a?pass=hunter2", "credential_query_name"],
     ["pw", "https://example.com/a?pw=hunter2", "credential_query_name"],
@@ -163,6 +174,42 @@ describe("privacy screen — DROP the whole entry", () => {
     ["joined family refreshToken", "https://example.com/a?refreshToken=abc", "credential_query_name"],
     ["joined family adminPassword", "https://example.com/a?adminPassword=abc", "credential_query_name"],
     ["joined family AWSAccessKeyId", "https://example.com/a?AWSAccessKeyId=abc", "credential_query_name"],
+    // ── Round-4 reproductions (must drop) ──
+    ["hash-route reset link", "https://example.com/#/reset-password?token=abc123XYZ", "credential_fragment"],
+    ["hash-route OAuth callback", "https://app.example.com/#/auth/callback?access_token=abc", "credential_fragment"],
+    ["hashbang route", "https://example.com/#!/cb?token=abc", "credential_fragment"],
+    ["hash-route credential path context", "https://example.com/#/reset-password/3f2b8c1e-9d4a-4f6b-8e2c-1a2b3c4d5e6f", "credential_fragment"],
+    ["nested password-only userinfo", "https://example.com/r?next=https%3A%2F%2F%3Ap%40x.com%2F", "userinfo"],
+    ["nested protocol-relative userinfo", "https://example.com/r?next=%2F%2Fu%3Ap%40x.com%2F", "userinfo"],
+    ["nested host + query, no path", "https://example.com/r?u=x.com%3Ftoken%3D1", "credential_query_name"],
+    ["nested localhost", "https://example.com/r?u=localhost%2Fa%3Ftoken%3D1", "credential_query_name"],
+    ["nested IPv4", "https://example.com/r?u=10.0.0.1%2Fa%3Ftoken%3D1", "credential_query_name"],
+    ["nested value with surrounding whitespace", "https://example.com/r?u=%20https%3A%2F%2Fx.com%2F%3Ftoken%3D1%20", "credential_query_name"],
+    ["double-encoded nested URL", "https://example.com/r?next=https%253A%252F%252Fx.com%252F%253Ftoken%253Dabc", "credential_query_name"],
+    ["Discord webhook, encoded path", "https://discord.com/api/%77ebhooks/1/abc", "credential_host"],
+    ["Discord webhook, doubled slash", "https://discord.com/api//webhooks/1/abc", "credential_host"],
+    ["Discord webhook, upper-case path", "https://discord.com/API/Webhooks/1/abc", "credential_host"],
+    ["Discord webhook, encoded slashes", "https://discord.com/api/webhooks%2F1%2Fabc", "credential_host"],
+    ["personal_access_token", "https://example.com/a?personal_access_token=abc", "credential_query_name"],
+    ["consumer_secret", "https://example.com/a?consumer_secret=abc", "credential_query_name"],
+    ["consumer_key", "https://example.com/a?consumer_key=abc", "credential_query_name"],
+    ["new_password", "https://example.com/a?new_password=abc", "credential_query_name"],
+    ["newPassword", "https://example.com/a?newPassword=abc", "credential_query_name"],
+    ["verify_token", "https://example.com/a?verify_token=abc", "credential_query_name"],
+    ["unsubscribe_token", "https://example.com/a?unsubscribe_token=abc", "credential_query_name"],
+    ["magic_link_token", "https://example.com/a?magic_link_token=abc", "credential_query_name"],
+    ["github_token", "https://example.com/a?github_token=abc", "credential_query_name"],
+    ["hf_token", "https://example.com/a?hf_token=abc", "credential_query_name"],
+    ["bot_token", "https://example.com/a?bot_token=abc", "credential_query_name"],
+    ["hmac", "https://example.com/a?hmac=abc", "credential_query_name"],
+    ["otp", "https://example.com/a?otp=123456", "credential_query_name"],
+    ["passcode", "https://example.com/a?passcode=1234", "credential_query_name"],
+    ["control character inside a name", "https://example.com/a?access%01_token=abc", "credential_query_name"],
+    ["double underscore access__token", "https://example.com/a?access__token=abc", "credential_query_name"],
+    ["Key-Pair-Id alone", "https://d1.cloudfront.net/v.mp4?Key-Pair-Id=K2JCJMDEHXQW5F", "credential_query_name"],
+    ["Basic unpadded base64 user:password", "https://example.com/a?h=Basic%20aGVsbG86d29ybGQ", "credential_value"],
+    ["Bearer + padded base64 (plus read as space)", "https://example.com/a?h=Bearer+dGhpc2lzYXRva2VuMTIz%3D%3D", "credential_value"],
+    ["Bearer: + long mixed token with interior slash", "https://example.com/a?h=Bearer%3A%20AbC123xyz%2FDEF456uvw", "credential_value"],
     ["long presigned URL counts as a privacy drop, not over-limit", "https://bucket.s3.amazonaws.com/" + "k".repeat(500) + "?X-Amz-Signature=abc", "credential_query_name"],
   ])("%s", (_label, url, signal) => {
     expect(screenSearchResultUrl(url)).toEqual({ kind: "privacy_dropped", signal });
@@ -237,6 +284,35 @@ describe("privacy screen — KEEP ordinary source URLs (no entropy-only drops)",
     ["Discord non-webhook API path", "https://discord.com/api/v10/channels/1/messages"],
     ["lookalike host (not the webhook host)", "https://notdiscord.com/api/webhooks/1/abc"],
     ["lookalike suffix host", "https://discord.com.evil.example/api/webhooks/1/abc"],
+    // ── Round-4 reproductions (must stay usable) ──
+    ["colon prose with + space (Bearer:+authentication)", "https://example.com/?title=Bearer%3A+authentication"],
+    ["Token:+The+Movie", "https://example.com/?title=Token:+The+Movie"],
+    ["Basic:+cooking", "https://example.com/?title=Basic:+cooking"],
+    ["q=Bearer:+what+is+it", "https://example.com/?q=Bearer:+what+is+it"],
+    ["search Token: a novel", "https://example.com/search?q=Token%3A+a+novel"],
+    ["path Token:+A+Novel", "https://example.com/book/Token:+A+Novel"],
+    ["slash prose Token economy/web3", "https://example.com/?t=Token+economy%2Fweb3"],
+    ["slash prose Basic chemistry/biology", "https://example.com/?t=Basic+chemistry/biology"],
+    ["masterkey", "https://example.com/music?masterkey=C"],
+    ["id_key", "https://example.com/a?id_key=3"],
+    ["user_key", "https://example.com/a?user_key=alice"],
+    ["account_key", "https://example.com/a?account_key=12345"],
+    ["share_key", "https://example.com/a?share_key=7"],
+    ["download_key", "https://example.com/a?download_key=ebook"],
+    ["confirmation_key", "https://example.com/a?confirmation_key=yes"],
+    ["service_key", "https://example.com/a?service_key=hvac"],
+    ["securityKey", "https://example.com/a?securityKey=yubikey"],
+    ["app_key=public", "https://example.com/a?app_key=public"],
+    ["appSig / idsig", "https://example.com/a?appSig=1&idsig=1"],
+    ["api_key_id (a key identifier)", "https://example.com/a?api_key_id=12345"],
+    ["docs access-token v2", "https://example.com/docs/access-token/v2"],
+    ["docs access-token OAuth2", "https://example.com/docs/access-token/OAuth2"],
+    ["docs api-key Overview", "https://example.com/docs/api-key/Overview"],
+    ["docs reset-password index.md", "https://example.com/docs/reset-password/index.md"],
+    ["tag reset-password page 2", "https://example.com/tag/reset-password/2/"],
+    ["PyPI api-key version", "https://pypi.org/project/api-key/0.1.2/"],
+    ["upper-case slug ASIAPACIFICECONOMICS", "https://example.com/ASIAPACIFICECONOMICS"],
+    ["prose beginning like a path is not a nested URL", "https://example.com/r?note=%2Fa%3Ftoken%3Dx%20for%20details"],
     ["NYT share link auth=login-email", "https://www.nytimes.com/2026/10/01/world/story.html?auth=login-email&login=email"],
     ["empty credential values carry no secret", "https://example.com/a?sessionid=&sig=&token="],
     ["value-less credential names", "https://example.com/a?token&access_token"],

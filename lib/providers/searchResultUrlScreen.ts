@@ -13,12 +13,18 @@
  *   - userinfo (`user:pass@`, `:pass@`);
  *   - credential-oriented parameter NAMES with a non-empty value: an exact
  *     list (token, access_token, api_key, secret, password, pass, pw, pwd,
- *     sid, sessionid, signature, sig, credential(s), …), signed-URL families
- *     (`X-Amz-*`, `X-Goog-*`, `oauth_*`), and bounded qualifier+noun
- *     families (accessToken, clientSecret, x-api-key, accessKeyId,
- *     userPassword …) — never an open-ended suffix, so designToken,
+ *     sid, sessionid, signature, sig, hmac, otp, passcode, credential(s), …),
+ *     signed-URL families (`X-Amz-*`, `X-Goog-*`, `oauth_*`), and bounded
+ *     qualifier+noun families: up to two credential qualifiers + a strong
+ *     noun (accessToken, personal_access_token, clientSecret, x-api-key),
+ *     the weak nouns `key`/`sig` only after a strong qualifier (auth_key,
+ *     secret_key, consumer_key — never masterkey, user_key, appSig),
+ *     password nouns only after an account-holder or new/old qualifier
+ *     (userPassword, new_password — never resetPassword=true), and vendor
+ *     access-key ids. Never an open-ended suffix, so designToken,
  *     timeSignature, forgotPassword stay. Checked in the query (`&`/`;`),
- *     `name=value` path segments, `;matrix` parameters and fragment pairs;
+ *     `name=value` path segments, `;matrix` parameters and fragment pairs
+ *     (hash routes split on `?` too: `#/reset-password?token=…`);
  *     bracketed names are tested part by part; a bare `auth` counts only with
  *     a token-shaped value; the ambiguous `key` and `code` never count by name;
  *   - credential VALUE syntax: JWTs, known secret prefixes (`sk_live_`,
@@ -27,20 +33,26 @@
  *     (JWT, known prefix, token68 punctuation/padding, or Basic base64 of
  *     `user:password`) — never "contains a digit";
  *   - credential path CONTEXT: `/reset-password/<v>`, `/access-token/<v>` …
- *     with a non-empty, non-slug next segment;
+ *     (URL path or hash route) when the next segment is token-shaped (≥ 8
+ *     chars; not a word/slug in any case, version, small number or file name);
  *   - host-specific webhook paths (Slack, Discord incl. `/api/vN/webhooks/`,
  *     Telegram, Outlook, Zapier, IFTTT), host compared with one trailing
- *     DNS dot removed;
- *   - the same rules once inside a clearly URL-like nested query value
- *     (absolute, protocol-relative, relative, query-relative, scheme-less
- *     `host.tld/…`), except for search-text parameters (`q`, `query`, …).
+ *     DNS dot removed, path compared decoded, slash-collapsed, lower-cased;
+ *   - the same rules (userinfo included) once inside a clearly URL-like
+ *     nested query value (trimmed; absolute, double-encoded absolute,
+ *     protocol-relative, relative, query-relative, scheme-less
+ *     `host.tld|localhost|IPv4` followed by `/`, `?` or `#`), except for
+ *     search-text parameters (`q`, `query`, …).
  * It deliberately does NOT drop for long, hexadecimal, numeric, UUID or
  * otherwise high-entropy ids, nor for malformed percent-encoding: false
  * removal of ordinary source URLs is itself a governance defect. Accepted
  * residuals: opaque tokens without credential syntax under non-credential
  * names or bare in a path (incl. opaque `Bearer <hex>`), OAuth `?code=`,
  * generic `?key=` values, names nested two URL levels deep, confusable
- * (non-NFKC) look-alike characters.
+ * (non-NFKC) look-alike characters, zero-width characters inside VALUES
+ * (normalization applies to names only). Accepted false positives: owner-
+ * listed names regardless of value (`sid` e.g. Booking, `sig` e.g. Google
+ * Books, `private_key=false`).
  *
  * Decoding is lenient and total: maximal `%XX` runs that form valid UTF-8 are
  * decoded; anything else keeps its literal text, except that encoded ASCII
@@ -114,6 +126,9 @@ const CREDENTIAL_NAMES = new Set([
   "googleaccessid",
   "key-pair-id",
   "x-api-key",
+  "hmac",
+  "otp",
+  "passcode",
 ]);
 
 /**
@@ -124,19 +139,24 @@ const CREDENTIAL_NAMES = new Set([
  * timeSignature, forgotPassword, topSecret …) is not a credential name.
  */
 const CREDENTIAL_QUALIFIERS =
-  "access|auth|api|id|refresh|bearer|session|private|client|reset|security|sas|oauth|csrf|xsrf|user|app|admin|account|master|secret|signing|personal|service|login|magic|invite|verification|confirmation|upload|download|share";
-const CREDENTIAL_NOUNS = "token|secret|key|apikey|api_key|signature|sig";
-/** Password nouns only with an account-holder qualifier (userPassword, adminPwd …) — never action words (resetPassword=true, forgotPassword=1). */
-const PASSWORD_QUALIFIERS = "user|admin|account|login|client|app|db|database|master|root|service|proxy|smtp|ftp";
+  "access|auth|api|id|refresh|bearer|session|private|client|reset|security|sas|oauth|csrf|xsrf|user|app|admin|account|master|secret|signing|personal|service|login|magic|magic_link|invite|verification|verify|confirmation|upload|download|share|consumer|unsubscribe|bot|github|gitlab|hf|slack|webhook";
+/** Strong credential nouns: credential-bearing with any qualifier above (up to two chained: personal_access_token). */
+const STRONG_CREDENTIAL_NOUNS = "token|secret|apikey|api_key|signature";
+/** Weak nouns (`key`, `sig`) are everyday words (masterkey, user_key, appSig): credential-bearing only with a strong qualifier. */
+const STRONG_QUALIFIERS = "access|api|auth|secret|private|signing|client|session|sas|oauth|consumer";
+/** Password nouns only with an account-holder or new/old qualifier (userPassword, new_password) — never action words (resetPassword=true, forgotPassword=1). */
+const PASSWORD_QUALIFIERS = "user|admin|account|login|client|app|db|database|master|root|service|proxy|smtp|ftp|new|old|current|confirm";
 
 const CREDENTIAL_NAME_PATTERNS: readonly RegExp[] = [
   /^x-amz-[a-z0-9-]+$/, // S3 presigned / SigV4
   /^x-goog-[a-z0-9-]+$/, // GCS signed URLs
   /^oauth_[a-z0-9_]+$/, // OAuth 1.0 parameters
   /^aspsessionid[a-z0-9]*$/,
-  // qualifier + noun, optional `x-` prefix and `_id` suffix: x-api-key, xApiKey, accessToken, refresh_token,
-  // clientSecret, userPassword, sessionKey, auth_key, secret_key, accessKeyId …
-  new RegExp(`^(x[_-]?)?(${CREDENTIAL_QUALIFIERS})[_-]?(${CREDENTIAL_NOUNS})([_-]?id)?$`),
+  // qualifier(s) + strong noun, optional `x-` prefix: x-api-key, xApiKey, accessToken, refresh_token, clientSecret,
+  // personal_access_token, magic_link_token, consumer_secret …
+  new RegExp(`^(x[_-]?)?((${CREDENTIAL_QUALIFIERS})[_-]?){1,2}(${STRONG_CREDENTIAL_NOUNS})$`),
+  // strong qualifier + weak noun: auth_key, secret_key, private_key, consumer_key, sessionKey, oauth_sig …
+  new RegExp(`^(x[_-]?)?(${STRONG_QUALIFIERS})[_-]?(key|sig)$`),
   new RegExp(`^(${PASSWORD_QUALIFIERS})[_-]?(password|passwd|pwd|pass|pw)$`),
   // Vendor access-key ids: AWSAccessKeyId, OSSAccessKeyId, accessKeyId …
   /^([a-z0-9]{1,8}[_-]?)?access[_-]?key[_-]?id$/,
@@ -163,8 +183,8 @@ function isTokenShapedValue(value: string): boolean {
 /** Fully-matching JWT (three base64url parts). */
 const JWT = /^eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}$/;
 
-/** `Bearer`/`Basic`/`Token` scheme (optionally `Scheme:`) followed by a single token68-charset payload (the whole value). */
-const AUTH_SCHEME = /^(bearer|basic|token)(?:\s*:\s*|\s+)([A-Za-z0-9\-._~+/]{8,}=*)$/i;
+/** `Bearer`/`Basic`/`Token` scheme (optionally `Scheme:`) followed by a single token68 payload that starts with an alphanumeric/`-._~` character (never `+` or `/`, which are form-encoded spaces and path separators in prose). */
+const AUTH_SCHEME = /^(bearer|basic|token)(?:\s*:\s*|\s+)([A-Za-z0-9\-._~][A-Za-z0-9\-._~+/]{7,}=*)$/i;
 
 /**
  * Is an auth-scheme payload credential SYNTAX (never "contains a digit")?
@@ -176,8 +196,14 @@ const AUTH_SCHEME = /^(bearer|basic|token)(?:\s*:\s*|\s+)([A-Za-z0-9\-._~+/]{8,}
  */
 function isAuthSchemeCredential(scheme: string, payload: string): boolean {
   if (JWT.test(payload) || CREDENTIAL_PREFIXES.some((re) => re.test(payload))) return true;
-  if (/[+/]/.test(payload) || /=+$/.test(payload)) return true;
-  if (scheme.toLowerCase() === "basic" && /^[A-Za-z0-9+/]+={0,2}$/.test(payload) && payload.length % 4 === 0) {
+  // Base64 padding.
+  if (/[A-Za-z0-9]={1,2}$/.test(payload)) return true;
+  // Interior token68 punctuation only inside a long, mixed-class payload ("chemistry/biology" stays prose).
+  if (/[A-Za-z0-9][+/][A-Za-z0-9]/.test(payload) && payload.length >= 16) {
+    const classes = [/[a-z]/, /[A-Z]/, /[0-9]/].filter((re) => re.test(payload)).length;
+    if (classes >= 2) return true;
+  }
+  if (scheme.toLowerCase() === "basic" && /^[A-Za-z0-9+/]+={0,2}$/.test(payload)) {
     const decoded = Buffer.from(payload, "base64").toString("latin1");
     return /^[\x20-\x7e]+:[\x20-\x7e]*$/.test(decoded);
   }
@@ -193,7 +219,7 @@ const CREDENTIAL_PREFIXES: readonly RegExp[] = [
   /^github_pat_[A-Za-z0-9_]{10,}/,
   /^gh[pousr]_[A-Za-z0-9]{30,}/,
   /^xox[abpr]-[A-Za-z0-9-]{10,}/,
-  /^(AKIA|ASIA)[A-Z0-9]{16}$/,
+  /^(AKIA|ASIA)(?=[A-Z0-9]*[0-9])[A-Z0-9]{16}$/,
   /^AIza[0-9A-Za-z_-]{35}$/,
   /^SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}$/,
   /^glpat-[A-Za-z0-9_-]{20,}/,
@@ -230,7 +256,7 @@ function normalizeName(rawName: string): string {
     .replace(/[\u0000-\u001f\u007f\u00ad\u200b-\u200f\u2060\ufeff]/g, "")
     .trim()
     .toLowerCase()
-    .replace(/[.+\s]+/g, "_");
+    .replace(/[.+\s_]+/g, "_");
 }
 
 function isCredentialName(rawName: string): boolean {
@@ -272,10 +298,13 @@ const SEARCH_TEXT_NAMES = new Set(["q", "query", "search", "search_query", "keyw
  * absolute http(s), protocol-relative `//host/…`, relative `/…`,
  * query-relative `?…`, or a scheme-less `host.tld/…` (no whitespace).
  */
-function nestedUrlCandidate(value: string): string | null {
+function nestedUrlCandidate(rawValue: string): string | null {
+  let value = rawValue.trim();
+  // One extra decode for a double-encoded absolute URL (`https%3A%2F%2F…`).
+  if (/^https?%3A/i.test(value)) value = decode(value).trim();
   if (/\s/.test(value)) return null;
   if (/^https?:\/\//i.test(value) || /^\/\//.test(value) || /^[/?]/.test(value)) return value;
-  if (/^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,24}(:\d{1,5})?\/\S*$/i.test(value)) return `https://${value}`;
+  if (/^([a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,24}|localhost|\d{1,3}(\.\d{1,3}){3})(:\d{1,5})?[/?#]\S*$/i.test(value)) return `https://${value}`;
   return null;
 }
 
@@ -297,9 +326,35 @@ const CREDENTIAL_PATH_CONTEXT = new Set([
   "password_reset",
 ]);
 
-/** A plain lower-case word or slug (optionally with a page extension) is navigation, not a credential value. */
-function isPlainSlug(segment: string): boolean {
-  return /^[a-z]+([-_][a-z]+)*(\.(html?|php|aspx?))?$/.test(segment);
+/**
+ * Is the segment after a credential path context a credential-bearing value?
+ * Navigation is excluded: words or slugs in any case, version strings
+ * (`v2`, `0.1.2`), small numbers (pagination) and file names. What remains —
+ * ≥ 8 token characters such as a UUID, hex or opaque token — is the value.
+ */
+function isCredentialPathCandidate(segment: string): boolean {
+  if (segment.length < 8) return false;
+  if (!/^[A-Za-z0-9._~+=-]+$/.test(segment)) return false;
+  if (/^[A-Za-z]+([-_][A-Za-z]+)*$/.test(segment)) return false;
+  if (/^v?\d+(\.\d+)*$/i.test(segment)) return false;
+  if (/^[A-Za-z0-9_-]+\.[A-Za-z]{1,5}$/.test(segment) && !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{8,}/.test(segment)) return false;
+  return true;
+}
+
+/** Credential path context in a `/`-separated path (URL path or hash-route fragment). */
+function screenPathContext(rawSegments: readonly string[]): boolean {
+  for (let i = 0; i < rawSegments.length - 1; i++) {
+    const segment = decode((rawSegments[i] ?? "").split(";")[0]);
+    if (!CREDENTIAL_PATH_CONTEXT.has(normalizeName(segment).replace(/-/g, "_"))) continue;
+    const next = decode((rawSegments[i + 1] ?? "").split(";")[0]);
+    if (isCredentialPathCandidate(next)) return true;
+  }
+  return false;
+}
+
+/** Webhook path matching on an ASCII-decoded, slash-collapsed, lower-cased path (`/API//%77ebhooks/` ≡ `/api/webhooks/`). */
+function normalizedHostPath(pathname: string): string {
+  return decode(pathname).replace(/\/{2,}/g, "/").toLowerCase();
 }
 
 /** `name=value` pairs separated by `&` or `;`, each part decoded. */
@@ -336,8 +391,9 @@ function screenPairs(raw: string, nested: boolean, nameSignal: PrivacySignal, va
 
 /** Screens query, fragment and path of an already-parsed URL. `nested` limits recursion to one level. */
 function screenParts(url: URL, nested: boolean): PrivacySignal | null {
+  const hostPath = normalizedHostPath(url.pathname);
   for (const { host, pathPrefix } of CREDENTIAL_HOSTS) {
-    if (hostMatches(url.hostname, host) && pathPrefix.test(url.pathname)) return "credential_host";
+    if (hostMatches(url.hostname, host) && pathPrefix.test(hostPath)) return "credential_host";
   }
 
   const search = url.search.startsWith("?") ? url.search.slice(1) : url.search;
@@ -349,10 +405,16 @@ function screenParts(url: URL, nested: boolean): PrivacySignal | null {
     const decoded = decode(fragment);
     // Credential names in `name=value` fragment pairs (`#access_token=…`). A text fragment
     // (`#:~:text=…`) only ever has the names `:~:text` / `text`, so it is never dropped by name.
-    for (const { name, value } of splitPairs(decoded.replace(/^[?/]+/, ""))) {
-      // Same rule as the query: an absent or empty value carries no secret.
-      if (value !== null && value.length > 0 && isCredentialName(name)) return "credential_fragment";
+    // Hash routes (`#/reset-password?token=…`, `#!/cb?access_token=…`): pairs are split on `&`, `;` and `?`,
+    // and the route's `/`-segments get the same credential path-context rule as the URL path.
+    const routeAndQuery = decoded.replace(/^[!?/]+/, "");
+    for (const pairText of routeAndQuery.split("?")) {
+      for (const { name, value } of splitPairs(pairText)) {
+        // Same rule as the query: an absent or empty value carries no secret.
+        if (value !== null && value.length > 0 && isCredentialName(name)) return "credential_fragment";
+      }
     }
+    if (screenPathContext(decoded.split("?")[0].replace(/^!/, "").split("/"))) return "credential_fragment";
     if (isCredentialValue(decoded)) return "credential_fragment";
     for (const piece of decoded.split(/[&=/?;]/)) {
       if (piece && isCredentialValue(piece)) return "credential_fragment";
@@ -360,17 +422,14 @@ function screenParts(url: URL, nested: boolean): PrivacySignal | null {
   }
 
   const rawSegments = url.pathname.split("/");
+  // Credential context: `/reset-password/<token>`, `/access-token/<value>` — a token-shaped next segment.
+  if (screenPathContext(rawSegments)) return "credential_path";
   for (let i = 0; i < rawSegments.length; i++) {
     const rawSegment = rawSegments[i];
     if (!rawSegment) continue;
     const [head, ...params] = rawSegment.split(";");
     const segment = decode(head);
     if (isCredentialValue(segment)) return "credential_path";
-    // Credential context: `/reset-password/<value>`, `/access-token/<value>` — the next non-empty, non-slug segment.
-    if (CREDENTIAL_PATH_CONTEXT.has(normalizeName(segment).replace(/-/g, "_"))) {
-      const next = decode((rawSegments[i + 1] ?? "").split(";")[0]);
-      if (next.length > 0 && !isPlainSlug(next)) return "credential_path";
-    }
     // `name=value` path segments (e.g. /access_token=abc/) and `;matrix` parameters.
     const pairSignal = screenPairs([segment.includes("=") ? segment : "", ...params].filter(Boolean).join(";"), true, "credential_path", "credential_path");
     if (pairSignal) return pairSignal;
@@ -386,13 +445,15 @@ function screenNestedValue(value: string): PrivacySignal | null {
   } catch {
     return null; // not a URL: already tested as a value
   }
+  if (inner.username !== "" || inner.password !== "") return "userinfo";
   return screenParts(inner, true);
 }
 
 /**
  * Classify one provider-returned `url` value. Never throws. Exactly one
- * outcome per value, tested in this order: invalid → privacy_dropped →
- * over_limit → usable. Privacy is screened before the size limit so that
+ * outcome per value: a string above the processing-safety ceiling is
+ * `over_limit` before anything else (not parsed at all); otherwise the order is
+ * invalid → privacy_dropped → over_limit → usable. Privacy is screened before the size limit so that
  * long signed URLs (S3/GCS presigned links routinely exceed 512 bytes) are
  * counted as privacy drops, not merely as over-limit.
  */
