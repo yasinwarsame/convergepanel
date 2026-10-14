@@ -1053,10 +1053,40 @@ None of the three steps ever falls back to mutable run state or model configurat
 
 **Older runs and exports:**
 - **Runs completed before 6.2a.** These know each logical model slot (`modelId`, e.g. `chatgpt`) and its substitution state. They do **not** know which provider or model string was actually requested at runtime. Exports render that as "not recorded", meaning the historical record lacks the field. They never reconstruct it.
-- **Export records created before 6.2b.** These have no `runProvenance` and render exactly as before, byte-for-byte.
+- **Export records created before 6.2b.** These have no `runProvenance`. They render no provenance block, and every model is named "<Family> · model not recorded" (see completed-run model identity below).
 - **Historical downloads.** Both download routes render only the frozen record.
 
 E2-A (the export-history list) is unchanged; detailed model provenance lives only in the artifact.
+
+### Completed-run model identity
+
+`lib/panel/runModelIdentity.ts` is the one place that decides how a completed run, its exports, share text and review surfaces name a model. It is pure and client-safe, and reads no product labels, connector configuration or environment.
+
+- **Slot vs. provenance.** The logical slot (`modelId`) names a product family only: ChatGPT, Claude, Grok, Perplexity, Gemini. The model is identified by the `requestedModel` frozen for that run.
+- **Canonical label:** `runModelIdentityLabel()`.
+  - `ChatGPT · requested: gpt-4o-mini`
+  - `ChatGPT · model not recorded`: no requested model was recorded. A value equal to a slot id counts as a placeholder.
+  - `Claude · requested: claude-haiku-4-5-20251001 · substituted, answered by: DeepSeek`: the original model comes from `requestedModel`, else from the model part of a persisted `substitutedFrom`. A missing provider reads "provider not recorded".
+  - `requestedModel` is an orchestration fact, not provider-attested, so no label says actual, verified or confirmed.
+- **Where the full label appears (identity positions):**
+  - PDF and DOCX: the Models summary and each model-response heading, via `exportModelIdentityLabel()` over the frozen `runProvenance`;
+  - `ResultsDisplay` answer cards;
+  - `TeamResearchResultView`;
+  - adaptive raw-output headers;
+  - the research memo's model list.
+- **Where only the family name appears (slot references):**
+  - `ModelChip` by default;
+  - positions, supporters and claim matrices;
+  - generated synthesis text (`verdict.ts` and `consensus.ts`);
+  - claim-verification views and copy text;
+  - governance dashboard rows and governance queue summaries;
+  - memo fallbacks.
+
+  Synthesis text is persisted with the run, so it must stay true when product labels change.
+- **No false "not recorded".** A surface that was not handed the run's rows shows the family only. `runModelLabels`, and `RunModelProvenanceContext` (provided by `ResultsDisplay`, default `null`), never claim a fact is missing from a record the surface does not hold.
+- **Product surfaces.** Model selection, the in-flight status chips, the About page (`ModelChip labelKind="product"`) and pricing/SEO copy keep the product labels from `lib/panelModels.ts`.
+- **Classification is enforced.** `lib/panel/__tests__/runModelIdentityCallSites.spec.ts` pins the files allowed to read product labels.
+- **Already-persisted text is not rewritten.** Synthesis text and frozen export snapshots created before this change keep whatever labels they were generated with.
 
 ### Workspace governance summary (roadmap Step 6.3)
 

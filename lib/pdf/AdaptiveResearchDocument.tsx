@@ -27,11 +27,10 @@
 
 import { Document, Page, View, Text } from "@react-pdf/renderer";
 import { AdaptiveResearchExportV1 } from "@/lib/adaptiveSchema/researchExport";
-import { exportRunProvenanceLines, readFrozenRunProvenance } from "@/lib/adaptiveSchema/exportRunProvenance";
+import { exportModelIdentityLabel, exportRunProvenanceLines, readFrozenRunProvenance } from "@/lib/adaptiveSchema/exportRunProvenance";
 import { CONSENSUS_LABELS, SOURCE_GROUNDING_LABELS } from "@/lib/adaptiveSchema/reportSummary";
 import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
 import { FieldSpec } from "@/lib/adaptiveSchema/types";
-import { getModelDisplayNameSafe } from "@/lib/panelModels";
 import {
   fieldLabel,
   formatExportTimestamp as formatTimestamp,
@@ -126,7 +125,7 @@ function StatusSummary({ record }: { record: AdaptiveResearchExportV1 }) {
           <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
             {snapshot.models.map((m) => (
               <Text key={m.modelId} style={pdfStyles.modelChip}>
-                {getModelDisplayNameSafe(m.modelId)}
+                {exportModelIdentityLabel(snapshot.runProvenance, m.modelId)}
                 {m.ok === false ? " (failed)" : ""}
               </Text>
             ))}
@@ -345,7 +344,7 @@ function LegacyContent({ record }: { record: AdaptiveResearchExportV1 }) {
         <Text style={pdfStyles.sectionLabel}>{`Model responses (${legacy.modelResponses?.length ?? 0})`}</Text>
         {(legacy.modelResponses ?? []).map((r) => (
           <View key={r.modelId} style={pdfStyles.card} wrap={false}>
-            <Text style={{ ...pdfStyles.fieldLabel, marginBottom: 4 }}>{getModelDisplayNameSafe(r.modelId)}</Text>
+            <Text style={{ ...pdfStyles.fieldLabel, marginBottom: 4 }}>{exportModelIdentityLabel(record.reportSnapshot.runProvenance, r.modelId)}</Text>
             {schema.fields.map((field) => {
               const value = r.data?.[field.key];
               if (value == null) return null;

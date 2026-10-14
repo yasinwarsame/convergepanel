@@ -6,8 +6,13 @@
  * provider / model / reason it did not record. Case 8: live rows render exactly
  * as before — proven against the PRE-S1 algorithms, copied verbatim below as an
  * oracle (not re-derived from the new module).
+ *
+ * Model-identity PR A deliberately changes ONE thing in that oracle: a slot is
+ * now named by its product family (`runModelFamilyName`, "Claude"), never by
+ * the product-selection label ("Claude Opus 4.5"). Everything else is verbatim.
  */
 import { getModelDisplayNameSafe } from "@/lib/panelModels";
+import { runModelFamilyName } from "@/lib/panel/runModelIdentity";
 import { coerceStatus } from "@/lib/panel/normalize";
 import { modelHealthSubstitution, providerDisplayName, substitutedProviderNames, substitutionBadgeText } from "@/lib/panel/substitutionDisplay";
 
@@ -32,7 +37,7 @@ function oldModelHealth(results: Row[]) {
   const tooltip = results
     .filter((r) => coerceStatus(r.status) === "substituted")
     .map((r) => {
-      const slot = getModelDisplayNameSafe(r.modelId);
+      const slot = runModelFamilyName(r.modelId); // PR A: family name, never the product label
       const req = r.requestedModel ?? "?";
       const act = r.actualModel ?? "?";
       const raw = r.substitutionReason;
@@ -88,12 +93,13 @@ describe("case 5 — a saved substituted row names only what it recorded", () =>
     expect(label).not.toBe(getModelDisplayNameSafe("claude"));
     // Pre-S1 behaviour on the same saved row — the defect being fixed.
     expect(oldModelHealth([OLD_SUB]).label).toBe(getModelDisplayNameSafe("claude"));
-    expect(tooltip).toBe(`${getModelDisplayNameSafe("claude")}: substituted`);
+    expect(tooltip).toBe("Claude: substituted");
+    expect(tooltip).not.toContain(getModelDisplayNameSafe("claude"));
     expect(tooltip).not.toContain("?");
     expect(tooltip).not.toContain("→");
   });
   it("tooltip states only recorded facts when some are present", () => {
-    expect(modelHealthSubstitution([{ ...OLD_SUB, requestedModel: "claude-RUN-1", provider: "deepseek" }]).tooltip).toBe(`${getModelDisplayNameSafe("claude")}: substituted (requested claude-RUN-1)`);
+    expect(modelHealthSubstitution([{ ...OLD_SUB, requestedModel: "claude-RUN-1", provider: "deepseek" }]).tooltip).toBe("Claude: substituted (requested claude-RUN-1)");
   });
   it("copied markdown lists no provider that was not recorded", () => {
     expect(substitutedProviderNames([OLD_SUB])).toEqual([]);

@@ -26,7 +26,9 @@ import {
   SynthesizedReport,
   ModelId,
 } from "@/lib/types";
-import { getPanelModelConfig, PanelModelId, getModelDisplayNameSafe } from "@/lib/panelModels";
+import { getPanelModelConfig, PanelModelId } from "@/lib/panelModels";
+import { runModelFamilyName, runModelIdentityDetail, runModelIdentityLabel, runModelProvenanceFromResultRow } from "@/lib/panel/runModelIdentity";
+import { RunModelProvenanceContext } from "@/components/adaptive/RunModelProvenanceContext";
 import { normalizeBullets } from "@/lib/normalizeBullets";
 import { normalizeList } from "@/lib/normalizeList";
 import {
@@ -1095,6 +1097,9 @@ export default function ResultsDisplay({
     return (
       <div className="space-y-4">
         {process.env.NODE_ENV !== "production" && <AdaptiveDebugPanel adaptive={adaptive} />}
+        {/* The run's own per-slot provenance (live or saved rows) for the
+            adaptive surfaces that name a model's identity. */}
+        <RunModelProvenanceContext.Provider value={results.map(runModelProvenanceFromResultRow)}>
         <AdaptivePanelResponse
           schema={getResultSchema(adaptive.schemaId)}
           classification={adaptive.classification}
@@ -1124,6 +1129,7 @@ export default function ResultsDisplay({
           onVerifyClaim={onVerifyClaim}
           ancillaryPresentation={adaptiveAncillaryPresentation}
         />
+        </RunModelProvenanceContext.Provider>
       </div>
     );
   }
@@ -1258,8 +1264,8 @@ export default function ResultsDisplay({
             return (
               <div key={result.modelId} className="mb-4">
                 <h4 className="font-medium text-gray-900 mb-2">
-                  {/* Use safe helper so unknown/missing model IDs never crash the UI. */}
-                  {getModelDisplayNameSafe(result.modelId)}
+                  {/* The run's own recorded identity for this slot — never a product label. */}
+                  {runModelIdentityLabel(runModelProvenanceFromResultRow(result))}
                 </h4>
                 <div className="bg-gray-50 rounded p-4 text-sm text-gray-700 whitespace-pre-wrap">
                   {getModelText(result) || "No response"}
@@ -1278,8 +1284,8 @@ export default function ResultsDisplay({
             {failedResults.map((result) => {
               return (
                 <li key={result.modelId} className="text-red-800">
-                  {/* Use safe helper so unknown/missing model IDs never crash the UI. */}
-                  {getModelDisplayNameSafe(result.modelId)}: {result.status}
+                  {/* The run's own recorded identity for this slot — never a product label. */}
+                  {runModelIdentityLabel(runModelProvenanceFromResultRow(result))}: {result.status}
                 </li>
               );
             })}
@@ -1525,7 +1531,7 @@ export default function ResultsDisplay({
                                       key={modelId}
                                       className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-200"
                                     >
-                                      {getModelDisplayNameSafe(modelId)}
+                                      {runModelFamilyName(modelId)}
                                     </span>
                                   ))}
                                 </div>
@@ -1588,7 +1594,7 @@ export default function ResultsDisplay({
                                       key={modelId}
                                       className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800 border border-orange-200"
                                     >
-                                      {getModelDisplayNameSafe(modelId)}
+                                      {runModelFamilyName(modelId)}
                                     </span>
                                   ))}
                                 </div>
@@ -1904,8 +1910,8 @@ export default function ResultsDisplay({
                                     }`}
                                   >
                                     <span className="font-semibold text-gray-700">
-                                      {/* Use safe helper so unknown/missing model IDs never crash the UI. */}
-                                      {getModelDisplayNameSafe(claim.modelId)}:
+                                      {/* Slot reference: family name only, never a version. */}
+                                      {runModelFamilyName(claim.modelId)}:
                                     </span>{" "}
                                     {claim.text}
                                   </div>
@@ -1992,8 +1998,8 @@ export default function ResultsDisplay({
                                 }`}
                               >
                                 <span className="font-semibold text-gray-700">
-                                  {/* Use safe helper so unknown/missing model IDs never crash the UI. */}
-                                  {getModelDisplayNameSafe(claim.modelId)}:
+                                  {/* Slot reference: family name only, never a version. */}
+                                  {runModelFamilyName(claim.modelId)}:
                                 </span>{" "}
                                 {claim.text}
                               </div>
@@ -2167,6 +2173,9 @@ export default function ResultsDisplay({
                       <div className="flex items-center justify-between gap-3">
                         <div className="flex items-center gap-2">
                           <ModelChip modelId={result.modelId as PanelModelId} variant="outline" size="xs" />
+                          <span className="text-xs text-gray-500" data-testid="run-model-identity-detail">
+                            {runModelIdentityDetail(runModelProvenanceFromResultRow(result))}
+                          </span>
                         </div>
                         <div className="flex items-center gap-3">
                           {renderStatusPill(status)}
@@ -2311,6 +2320,9 @@ export default function ResultsDisplay({
                       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between w-full">
                         <div className="flex items-center gap-3">
                           <ModelChip modelId={result.modelId as PanelModelId} variant="outline" size="xs" />
+                          <span className="text-xs text-gray-500" data-testid="run-model-identity-detail">
+                            {runModelIdentityDetail(runModelProvenanceFromResultRow(result))}
+                          </span>
                         </div>
                         <div className="flex items-center gap-3 text-sm">
                           {renderStatusPill(status)}

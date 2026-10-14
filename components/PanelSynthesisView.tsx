@@ -38,7 +38,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ModelResult, SynthesizedReport } from "@/lib/types";
 import { StructuredSynthesis } from "@/lib/synthesis/structuredSchema";
-import { getModelDisplayNameSafe } from "@/lib/panelModels";
+import { runModelFamilyName, runModelIdentityLabel, runModelProvenanceFromResultRow } from "@/lib/panel/runModelIdentity";
 import { isUsableResult } from "@/lib/panel/publicize";
 import { coerceStatus } from "@/lib/panel/normalize";
 import { modelHealthSubstitution, substitutedProviderNames } from "@/lib/panel/substitutionDisplay";
@@ -1608,7 +1608,7 @@ export default function PanelSynthesisView({
                         )}
                         <div className="flex items-center gap-2 mt-2">
                           <span className="text-xs font-medium text-green-700">
-                            {finding.modelsSupporting.length} model{finding.modelsSupporting.length !== 1 ? "s" : ""}: {finding.modelsSupporting.map(getModelDisplayNameSafe).join(", ")}
+                            {finding.modelsSupporting.length} model{finding.modelsSupporting.length !== 1 ? "s" : ""}: {finding.modelsSupporting.map(runModelFamilyName).join(", ")}
                           </span>
                           <span className="text-xs text-green-600">•</span>
                           <span className="text-xs text-green-600">{finding.confidence} confidence</span>
@@ -1678,7 +1678,7 @@ export default function PanelSynthesisView({
                           {Object.entries(disagreement.positionsByModel).map(([modelId, position], posIdx) => (
                             <div key={posIdx} className="pl-3 border-l-2 border-orange-300">
                               <div className="flex items-center gap-2 mb-1">
-                                <span className="text-sm font-medium text-orange-900">{getModelDisplayNameSafe(modelId)}:</span>
+                                <span className="text-sm font-medium text-orange-900">{runModelFamilyName(modelId)}:</span>
                               </div>
                               <p className="text-sm text-orange-800">{position}</p>
                             </div>
@@ -1740,7 +1740,7 @@ export default function PanelSynthesisView({
                                   key={modelId}
                                   className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200"
                                 >
-                                  {getModelDisplayNameSafe(modelId)}
+                                  {runModelFamilyName(modelId)}
                                 </span>
                               ))}
                             </div>
@@ -1755,7 +1755,7 @@ export default function PanelSynthesisView({
                               {biasItem.evidence.map((ev, evIdx) => (
                                 <div key={evIdx} className="bg-white rounded border border-slate-200 p-3">
                                   <div className="flex items-start gap-2 mb-1">
-                                    <span className="text-sm font-medium text-slate-700">{getModelDisplayNameSafe(ev.modelId)}:</span>
+                                    <span className="text-sm font-medium text-slate-700">{runModelFamilyName(ev.modelId)}:</span>
                                     <span className="text-sm text-slate-600 italic flex-1">&quot;{ev.excerpt}&quot;</span>
                                   </div>
                                   <p className="text-sm text-slate-600 ml-0 mt-1">{ev.rationale}</p>
@@ -1869,7 +1869,7 @@ export default function PanelSynthesisView({
                 synthesisDisagreements: disagreeLines,
                 confidenceAssessment:
                   report.executiveSummary?.trim() || panelVerdict.keyBlindSpot || "",
-                modelsUsed: results.filter(isUsableResult).map((r) => getModelDisplayNameSafe(r.modelId)),
+                modelsUsed: results.filter(isUsableResult).map((r) => runModelIdentityLabel(runModelProvenanceFromResultRow(r))),
                 verificationId: runId ?? "",
               });
               const base = runId?.replace(/[^a-zA-Z0-9-_]+/g, "-").slice(0, 48) || String(Date.now());

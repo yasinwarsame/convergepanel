@@ -124,7 +124,7 @@ export default function AboutPage() {
           <div className="mt-4 space-y-3">
             {PANEL_MODELS.map((m) => (
               <div key={m.id}>
-                <ModelChip modelId={m.id} variant="outline" size="xs" />
+                <ModelChip modelId={m.id} variant="outline" size="xs" labelKind="product" />
                 <p className="ml-0 mt-1 text-sm text-cp-muted">{MODEL_NOTES[m.id]}</p>
               </div>
             ))}

@@ -22,7 +22,7 @@ import type { GovernancePolicy } from "@/lib/governance/evaluateGovernance";
 import { isValidReviewThresholdValue } from "@/lib/governance/familyReviewThresholds";
 import ScoreTypeThresholdsSection from "@/components/governance/ScoreTypeThresholdsSection";
 import { buildPolicyPatch } from "@/components/governance/policyPatch";
-import { getModelDisplayName } from "@/lib/modelInfo";
+import { runModelFamilyName } from "@/lib/panel/runModelIdentity";
 import {
   formatFullDatetime,
   formatRelativeTime,
@@ -2153,7 +2153,7 @@ function FragmentRow(props: {
                       {row.modelVerdicts.map((m, i) => (
                         <tr key={`${m.modelId}-${i}`} className="border-b border-cp-border last:border-0">
                           <td className="px-3 py-2 font-medium text-cp-text align-top">
-                            {getModelDisplayName(m.modelId)}
+                            {runModelFamilyName(m.modelId)}
                           </td>
                           <td className="px-3 py-2 align-top">
                             <span
@@ -2182,7 +2182,7 @@ function FragmentRow(props: {
                       (m, i) =>
                         m.summary && (
                           <li key={`sum-${m.modelId}-${i}`}>
-                            <span className="font-semibold text-cp-text">{getModelDisplayName(m.modelId)}: </span>
+                            <span className="font-semibold text-cp-text">{runModelFamilyName(m.modelId)}: </span>
                             {m.summary}
                           </li>
                         )

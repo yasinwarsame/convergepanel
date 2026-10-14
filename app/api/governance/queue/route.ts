@@ -21,7 +21,7 @@ import {
   governanceInputFromVerificationDoc,
   researchConsensusScoreFromRunDoc,
 } from "@/lib/governance/governanceInputFromDocs";
-import { getModelDisplayName } from "@/lib/modelInfo";
+import { runModelFamilyName } from "@/lib/panel/runModelIdentity";
 import { buildAgreementDisagreementDigest } from "@/lib/verification/agreementDigest";
 import { governanceAdminListShapeForLog } from "@/lib/admin/config";
 import {
@@ -337,7 +337,7 @@ function buildAgreementDissentFromVerification(data: Record<string, unknown>): {
   const parts = outliers.map((o) => {
     const id = String(o.modelId ?? "");
     const v = humanizePerModelVerdict(String(o.verdict ?? ""));
-    return `${getModelDisplayName(id)}: ${v}`;
+    return `${runModelFamilyName(id)}: ${v}`;
   });
   return { agreementSummary, dissentSummary: `Dissent: ${parts.join("; ")}` };
 }
@@ -445,7 +445,7 @@ function buildVerificationQueueReviewExtras(data: Record<string, unknown>): {
       agreementPoints.push(`${models.length}/${total} models rate this as ${humanV.toLowerCase()}`);
     }
     if (models.length === 1 || models.length === 2) {
-      const names = models.map((id) => getModelDisplayName(id)).join(", ");
+      const names = models.map((id) => runModelFamilyName(id)).join(", ");
       disagreementPoints.push(`${names} rated as ${humanV.toLowerCase()} (others disagree)`);
     }
   }
@@ -747,7 +747,7 @@ function buildAgreementDissentFromVideo(data: Record<string, unknown>): {
   const parts = outliers.map((o) => {
     const id = String(o.modelId ?? "");
     const v = humanizeVideoVerdict(String(o.verdict ?? ""));
-    return `${getModelDisplayName(id)}: ${v}`;
+    return `${runModelFamilyName(id)}: ${v}`;
   });
   return { agreementSummary, dissentSummary: `Dissent: ${parts.join("; ")}` };
 }
@@ -812,7 +812,7 @@ function buildVideoQueueReviewExtras(data: Record<string, unknown>): {
       agreementPoints.push(`${models.length}/${total} models rate as ${humanV.toLowerCase()}`);
     }
     if (models.length === 1 && total > 1) {
-      const names = models.map((id) => getModelDisplayName(id)).join(", ");
+      const names = models.map((id) => runModelFamilyName(id)).join(", ");
       disagreementPoints.push(`${names} rated as ${humanV.toLowerCase()} (others disagree)`);
     }
   }
