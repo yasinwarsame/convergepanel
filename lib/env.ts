@@ -179,6 +179,17 @@ export const SOURCE_PUBLISHER_CLASS_ENABLED = process.env.SOURCE_PUBLISHER_CLASS
 export const SOURCE_AUTHORITY_METADATA_ENABLED = process.env.SOURCE_AUTHORITY_METADATA_ENABLED === "true";
 
 /**
+ * Order 5 Phase 0 — Provider Search Evidence COUNTERS. Default OFF;
+ * server-only (never a NEXT_PUBLIC variant). When on, each Research run with
+ * a Perplexity slot emits one aggregate, content-free log event describing the
+ * search-result metadata Perplexity's Agent response carried
+ * (lib/providers/perplexitySearchEvidenceObservation.ts). Nothing is
+ * persisted, displayed or fed to governance; no provider call is added. When
+ * off, the observer is never invoked.
+ */
+export const PROVIDER_SEARCH_EVIDENCE_COUNTERS_ENABLED = process.env.PROVIDER_SEARCH_EVIDENCE_COUNTERS_ENABLED === "true";
+
+/**
  * Step 6 D5.2A — gates ONLY mutation of the governance policy's score-type
  * review thresholds (`scoreFamilyReviewThresholds`). Default OFF.
  *

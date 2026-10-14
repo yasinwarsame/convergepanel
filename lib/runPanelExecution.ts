@@ -28,7 +28,7 @@
 
 import { ModelId, ModelResult } from "@/lib/types";
 import { runPanel } from "@/lib/panel";
-import { OPENAI_API_KEY, ANTHROPIC_API_KEY, XAI_API_KEY, PERPLEXITY_API_KEY, GEMINI_API_KEY } from "@/lib/env";
+import { OPENAI_API_KEY, ANTHROPIC_API_KEY, XAI_API_KEY, PERPLEXITY_API_KEY, GEMINI_API_KEY, PROVIDER_SEARCH_EVIDENCE_COUNTERS_ENABLED } from "@/lib/env";
 import {
   completeRun,
   markRunError,
@@ -62,6 +62,7 @@ import { finalizeAdaptiveRun, AdaptivePromptPlan } from "@/lib/adaptiveSchema/or
 import { computeAdaptiveRetryAccountingWaitMs, monotonicNowMs, type ResearchRequestBudget } from "@/lib/adaptiveSchema/retryBudget";
 import { AdaptiveRetryUsageSink } from "@/lib/adaptiveSchema/retryCorrection";
 import { applyAdaptiveRetryAccounting } from "@/lib/firestore/adaptiveRetryAccounting";
+import { emitProviderSearchEvidencePhase0 } from "@/lib/providers/providerSearchEvidencePhase0Emitter";
 import { attachDeepResearchClaimIds } from "@/lib/verification/attachDeepResearchClaimIds";
 import {
   trackPanelExecutionStarted,
@@ -1229,6 +1230,19 @@ export async function executeOrdinaryRun(args: ExecuteOrdinaryRunArgs): Promise<
       runId,
       elapsedMs: Math.round(monotonicNowMs() - requestBudget.startedAtMonoMs),
       remainingMs: Math.round(requestBudget.budgetMs - (monotonicNowMs() - requestBudget.startedAtMonoMs)),
+    });
+  }
+
+  // Order 5 Phase 0 — Provider Search Evidence COUNTERS (log-only, flag-gated,
+  // default off). Observes the Perplexity slot's already-returned search
+  // metadata after adaptive finalization, when provider identity, status and
+  // retry state are all known. No write, no provider call, no response change.
+  if (PROVIDER_SEARCH_EVIDENCE_COUNTERS_ENABLED) {
+    emitProviderSearchEvidencePhase0({
+      results,
+      adaptiveExpected: adaptivePlan !== null,
+      adaptiveResults: adaptivePayload?.results ?? null,
+      observedAt: new Date(),
     });
   }
 
