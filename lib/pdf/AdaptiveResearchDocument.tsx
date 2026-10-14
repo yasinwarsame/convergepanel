@@ -72,14 +72,24 @@ function Bullets({ items }: { items: string[] }) {
  * (`wrap={false}`): otherwise a heading that only partly fits is split rather
  * than moved, and `minPresenceAhead` is never consulted.
  *
- * Presence distances nest: a heading must guarantee room for the next
+ * How much must follow a heading: react-pdf splits a Text only between its
+ * orphans (default 2) and widows (default 2), so a Text of up to
+ * orphans + widows − 1 = 3 lines is never split — it needs ALL of its lines on
+ * the page at once. A heading must therefore keep its own bottom margin plus
+ * three lines of the tallest content line (body text: 10 pt × 1.5 = 15 pt).
+ * Presence distances also nest: a heading must guarantee room for the next
  * heading's own guarantee, or the inner heading would break away and strand
  * the outer one.
- *   - a field label keeps its label plus two lines of value (orphans = 2);
- *   - a card heading keeps the first field label plus two lines;
- *   - the "Model responses" label keeps the first card heading plus its guarantee.
+ *   - field label:    2 (margin) + 3 × 15 = 47;
+ *   - sub-label:      3 (margin) + 3 × 15 = 48 ("Disagreement");
+ *   - card heading:   first in-body label (field label ≈ 11, sub-label ≈ 15.6)
+ *                     + 3 × 15 → 64 ≥ 60.6;
+ *   - section label:  card heading block (12 + ≈9 + 4 ≈ 25) + 64 → 112 ≥ 89.
  */
-const FIELD_LABEL_PRESENCE_AHEAD = 40;
+const UNSPLITTABLE_TEXT_LINES = 3;
+const BODY_LINE_HEIGHT = 15;
+const FIELD_LABEL_PRESENCE_AHEAD = 2 + UNSPLITTABLE_TEXT_LINES * BODY_LINE_HEIGHT;
+const SUB_LABEL_PRESENCE_AHEAD = 3 + UNSPLITTABLE_TEXT_LINES * BODY_LINE_HEIGHT;
 const CARD_HEADING_PRESENCE_AHEAD = 64;
 const SECTION_LABEL_PRESENCE_AHEAD = 112;
 
@@ -368,16 +378,18 @@ function LegacyContent({ record }: { record: AdaptiveResearchExportV1 }) {
             <Text style={pdfStyles.bodyText}>{synthesis.unifiedAnswer}</Text>
           </SectionCard>
           <SectionCard label="Where models agree / disagree">
-            <Text style={{ ...pdfStyles.mutedText, marginBottom: 3 }}>Agreement</Text>
+            {/* "Agreement" is the body's first child — kept by the card heading's guarantee. "Disagreement" is a
+                sibling of the content before it, so it can be kept with its own text. */}
+            <Text style={pdfStyles.subLabel}>Agreement</Text>
             <Text style={pdfStyles.bodyText}>{synthesis.verdictCard.topConsensus}</Text>
             {synthesis.verdictCard.keyDisagreement && (
-              <View style={{ marginTop: 6 }}>
-                <Text style={{ ...pdfStyles.mutedText, marginBottom: 3 }}>Disagreement</Text>
-                <Text style={pdfStyles.bodyText}>{synthesis.verdictCard.keyDisagreement}</Text>
-                {synthesis.verdictCard.disagreementDetail && (
-                  <Text style={pdfStyles.mutedText}>{synthesis.verdictCard.disagreementDetail}</Text>
-                )}
-              </View>
+              <Text style={pdfStyles.subLabelAfterContent} wrap={false} minPresenceAhead={SUB_LABEL_PRESENCE_AHEAD}>
+                Disagreement
+              </Text>
+            )}
+            {synthesis.verdictCard.keyDisagreement && <Text style={pdfStyles.bodyText}>{synthesis.verdictCard.keyDisagreement}</Text>}
+            {synthesis.verdictCard.keyDisagreement && synthesis.verdictCard.disagreementDetail && (
+              <Text style={pdfStyles.mutedText}>{synthesis.verdictCard.disagreementDetail}</Text>
             )}
             {synthesis.verdictCard.caveat && (
               <Text style={{ ...pdfStyles.mutedText, marginTop: 6, color: COLORS.warning }}>{synthesis.verdictCard.caveat}</Text>

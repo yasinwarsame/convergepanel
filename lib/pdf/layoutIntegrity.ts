@@ -139,7 +139,8 @@ export function documentViolations(
 
 /**
  * Heading glyph size ceiling. Section labels are 8 pt and field / model labels
- * 7.5 pt (lib/pdf/theme.ts); all body text is ≥ 9 pt. The only other text at
+ * 7.5 pt (lib/pdf/theme.ts); body text is ≥ 9 pt. The 9 pt in-card
+ * sub-labels are recognised by text (SUB_LABEL_TEXTS). The only other text at
  * or below 8 pt sits inside the always-unbroken cover header and status
  * summary, which are always followed by body text on their page.
  */
@@ -164,14 +165,21 @@ export function readingLines(page: PdfPageText): PdfTextItem[][] {
   return lines;
 }
 
+/**
+ * In-card sub-labels drawn at body-adjacent size (9 pt muted), which the size
+ * rule alone cannot tell from body text. A run whose ENTIRE text is one of
+ * these is a heading.
+ */
+export const SUB_LABEL_TEXTS: readonly string[] = ["Agreement", "Disagreement"];
+
 export function isHeadingItem(item: PdfTextItem): boolean {
-  return item.height <= HEADING_MAX_FONT_SIZE;
+  return item.height <= HEADING_MAX_FONT_SIZE || SUB_LABEL_TEXTS.includes(item.str.trim());
 }
 
 /**
  * A non-final page must not END with headings: its last body line may not
- * consist only of heading-sized runs (a label whose content starts on the
- * next page). The final page is exempt only for its own last line.
+ * consist only of heading runs — heading-sized labels or in-card sub-labels —
+ * whose content starts on the next page. The final page is exempt.
  */
 export function strandedHeadingViolations(pages: PdfPageText[]): PdfLayoutViolation[] {
   const out: PdfLayoutViolation[] = [];

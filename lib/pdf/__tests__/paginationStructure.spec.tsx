@@ -50,7 +50,26 @@ function walk(node: unknown, visit: (el: El, siblings: El[], index: number) => v
 }
 
 const BOUNDED_CARD_LABELS = ["Report status summary", "Provenance", "Primary synthesis", "Panel conclusion"];
-const HEADING_LABEL_STYLES = new Set<unknown>([pdfStyles.sectionLabel, pdfStyles.fieldLabel, pdfStyles.modelLabel]);
+const HEADING_LABEL_STYLES = new Set<unknown>([pdfStyles.sectionLabel, pdfStyles.fieldLabel, pdfStyles.modelLabel, pdfStyles.subLabelAfterContent]);
+
+/*
+ * Required keep-with-next distances, derived HERE from the theme (not from the
+ * composer's constants): react-pdf never splits a Text of ≤ orphans + widows − 1
+ * = 3 lines, so a heading must keep its own bottom margin plus three of the
+ * tallest content lines (body text), and outer headings must cover the inner
+ * heading's block plus its guarantee (R2 MAJOR: 40 < 47 stranded field labels).
+ */
+const UNSPLITTABLE_LINES = 3;
+const num = (v: unknown) => Number(v ?? 0);
+const BODY_LINE = num(pdfStyles.bodyText.fontSize) * num(pdfStyles.bodyText.lineHeight);
+const REQUIRED_FIELD = num(pdfStyles.fieldLabel.marginBottom) + UNSPLITTABLE_LINES * BODY_LINE;
+const REQUIRED_SUB_LABEL = num(pdfStyles.subLabelAfterContent.marginBottom) + UNSPLITTABLE_LINES * BODY_LINE;
+const FIRST_IN_BODY_LABEL = Math.max(
+  num(pdfStyles.fieldLabel.fontSize) * 1.2 + num(pdfStyles.fieldLabel.marginBottom),
+  num(pdfStyles.subLabel.fontSize) * num(pdfStyles.subLabel.lineHeight) + num(pdfStyles.subLabel.marginBottom)
+);
+const REQUIRED_CARD_HEADING = FIRST_IN_BODY_LABEL + UNSPLITTABLE_LINES * BODY_LINE;
+const CARD_HEAD_BLOCK = num(pdfStyles.cardHead.paddingTop) + num(pdfStyles.modelLabel.fontSize) * 1.2 + num(pdfStyles.modelLabel.marginBottom);
 const MAX_HEADING_CHARS = 140;
 
 /** The reviewed allow-list of non-breaking locations. Anything else is unsafe. */
@@ -86,12 +105,17 @@ describe.each(pdfLayoutFixtures().map((f) => [f.name]))("%s", (name) => {
     });
   });
 
-  it("every kept heading is non-breaking and has an earlier non-fixed sibling (where minPresenceAhead takes effect)", () => {
+  it("every kept heading is non-breaking, has an earlier non-fixed sibling, and keeps enough content for its kind", () => {
     let kept = 0;
     walk(tree(name), (el, siblings, index) => {
       if (!("minPresenceAhead" in el.props)) return;
       kept++;
-      expect(el.props.minPresenceAhead).toBeGreaterThanOrEqual(36);
+      const ahead = el.props.minPresenceAhead as number;
+      if (el.props.style === pdfStyles.fieldLabel) expect(ahead).toBeGreaterThanOrEqual(REQUIRED_FIELD);
+      else if (el.props.style === pdfStyles.subLabelAfterContent) expect(ahead).toBeGreaterThanOrEqual(REQUIRED_SUB_LABEL);
+      else if (el.props.style === pdfStyles.cardHead) expect(ahead).toBeGreaterThanOrEqual(REQUIRED_CARD_HEADING);
+      else if (el.props.style === pdfStyles.sectionLabel) expect(ahead).toBeGreaterThanOrEqual(CARD_HEAD_BLOCK + REQUIRED_CARD_HEADING);
+      else throw new Error(`unclassified kept heading: ${extractPdfElementText(el)}`);
       expect(el.props.wrap).toBe(false);
       expect(index).toBeGreaterThan(0);
       expect(siblings.slice(0, index).some((s) => !("fixed" in s.props))).toBe(true);
@@ -106,12 +130,34 @@ describe.each(pdfLayoutFixtures().map((f) => [f.name]))("%s", (name) => {
   });
 });
 
+it("the derived requirements are the ones R2 established (3 body lines + margin)", () => {
+  expect(BODY_LINE).toBe(15);
+  expect(REQUIRED_FIELD).toBe(47);
+  expect(REQUIRED_SUB_LABEL).toBe(48);
+  expect(REQUIRED_CARD_HEADING).toBeGreaterThan(60);
+});
+
+it("the Disagreement sub-label is a kept heading (non-breaking, after content, with its guarantee)", () => {
+  const found: unknown[] = [];
+  walk(tree("disagreement-label-0-00"), (el, siblings, index) => {
+    if (el.type === "TEXT" && extractPdfElementText(el).trim() === "Disagreement") {
+      found.push(el);
+      expect(el.props.style).toBe(pdfStyles.subLabelAfterContent);
+      expect(el.props.wrap).toBe(false);
+      expect(el.props.minPresenceAhead).toBeGreaterThanOrEqual(REQUIRED_SUB_LABEL);
+      expect(index).toBeGreaterThan(0);
+      expect(extractPdfElementText(siblings[index + 1]).length).toBeGreaterThan(0);
+    }
+  });
+  expect(found).toHaveLength(1);
+});
+
 it("the kept headings cover every heading kind of a long legacy report", () => {
   const texts: string[] = [];
   walk(tree("legacy-contested-long-cards"), (el) => {
     if ("minPresenceAhead" in el.props) texts.push(extractPdfElementText(el).trim());
   });
   expect(texts).toContain("Model responses (5)");
-  expect(texts).toEqual(expect.arrayContaining(["Panel conclusion", "Where models agree / disagree", "Settled Claims", "Disputed Claims", "Key Metrics", "Open Questions"]));
+  expect(texts).toEqual(expect.arrayContaining(["Panel conclusion", "Where models agree / disagree", "Disagreement", "Settled Claims", "Disputed Claims", "Key Metrics", "Open Questions"]));
   expect(texts.filter((t) => / · /.test(t))).toHaveLength(5);
 });

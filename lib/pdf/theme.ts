@@ -105,6 +105,10 @@ export const pdfStyles = StyleSheet.create({
   cardGap: { height: 10 },
   bodyText: { fontSize: 10, lineHeight: 1.5, color: COLORS.text },
   mutedText: { fontSize: 9, lineHeight: 1.4, color: COLORS.muted },
+  /** A small in-card label ("Agreement", "Disagreement") above body text. */
+  subLabel: { fontSize: 9, lineHeight: 1.4, color: COLORS.muted, marginBottom: 3 },
+  /** `subLabel` that follows earlier content in the same card body. */
+  subLabelAfterContent: { fontSize: 9, lineHeight: 1.4, color: COLORS.muted, marginBottom: 3, marginTop: 6 },
   bulletRow: { flexDirection: "row", marginBottom: 3 },
   bulletMark: { width: 10, fontSize: 10, color: COLORS.muted },
   bulletText: { flex: 1, fontSize: 10, lineHeight: 1.4, color: COLORS.text },

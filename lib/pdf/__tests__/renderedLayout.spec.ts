@@ -17,7 +17,9 @@
  *    in composition order; no non-final page ending with a heading; at least
  *    the fixture's minimum page count.
  * The fixtures include single text units taller than a page and heading
- * boundary sweeps (R1 MAJOR 1 and 2, MINOR 3).
+ * boundary sweeps (R1 MAJOR 1 and 2, MINOR 3), three-line field values and
+ * "Disagreement" sub-label grids, page-long verdict texts, and the R2
+ * reviewer's reproduction (R2 MAJOR, MINOR 2, MINOR 3).
  */
 jest.mock("@react-pdf/renderer", () => ({
   Document: "DOCUMENT",
@@ -84,13 +86,13 @@ beforeAll(() => {
     execFileSync(process.execPath, [path.join(process.cwd(), "scripts/verify-pdf-layout.mjs"), "--json", out, "--allow-fail"], {
       cwd: process.cwd(),
       stdio: "pipe",
-      timeout: 240_000,
+      timeout: 480_000,
     });
     report = JSON.parse(readFileSync(out, "utf8")) as Report;
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-}, 300_000);
+}, 600_000);
 
 it("the check is not blind: the known-bad canary has overlapping text, and the script reports it", () => {
   const v = documentViolations(report.canary.pageText, LAYOUT, CANARY_MARKERS.map((marker) => ({ marker, count: 1 })));

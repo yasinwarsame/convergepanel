@@ -1144,9 +1144,18 @@ Headings are kept with their content through react-pdf's `minPresenceAhead`. Tha
 - a paginating card is drawn as a heading block plus a body block, which are siblings;
 - a zero-height anchor precedes each kept heading;
 - field labels are siblings of their values;
-- spacing that follows a kept heading's content is padding or a separate element, never a margin. An element that fits on the page but whose bottom margin does not is moved to the next page, which would strand the heading.
+- spacing that follows a kept heading's content is padding or a separate element, never a margin. An element that fits on the page but whose bottom margin does not is moved to the next page, which would strand the heading;
+- the "Disagreement" sub-label is a non-breaking sibling of its text.
 
-`npm run verify:pdf-layout` (`scripts/verify-pdf-layout.mjs`) renders `lib/pdf/__fixtures__/layoutFixtures.ts` with the real renderer and extracts positioned text with pdfjs. The fixtures cover long cards and sections, single text units taller than a page, and three heading boundary sweeps. It applies `lib/pdf/layoutIntegrity.ts`:
+Each heading keeps its bottom margin plus three body lines (3 × 15 pt), because react-pdf never splits a Text of up to orphans + widows − 1 = 3 lines. That gives field labels 47 pt and sub-labels 48 pt. Card and section headings nest above these: card 64, section 112.
+
+`npm run verify:pdf-layout` (`scripts/verify-pdf-layout.mjs`) renders `lib/pdf/__fixtures__/layoutFixtures.ts` with the real renderer and extracts positioned text with pdfjs. The fixtures cover:
+- long cards and sections;
+- single text units taller than a page, including every verdict text;
+- heading boundary sweeps: whole-line, mixed, first-heading and field-value;
+- a grid of three-line field values;
+- a grid of "Disagreement" sub-label positions;
+- the R2 reviewer's reproduction. It applies `lib/pdf/layoutIntegrity.ts`:
 - no overlapping text;
 - nothing outside the vertical content area or in the footer band;
 - every content marker present exactly once and in composition order;

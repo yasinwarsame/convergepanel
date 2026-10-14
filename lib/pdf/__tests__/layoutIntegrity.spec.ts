@@ -104,6 +104,13 @@ describe("stranded headings", () => {
   it("the final page is exempt", () => {
     expect(strandedHeadingViolations([page([body("x", 700), heading("END", 100)], 1)])).toEqual([]);
   });
+  it("a 9 pt in-card sub-label alone at a page bottom is stranded; body text that merely contains the word is not", () => {
+    const sub = (str: string, y: number) => t(str, 50, y, 60, 9);
+    expect(strandedHeadingViolations([page([body("x", 700), sub("Disagreement", 62)], 1), page([body("y", 780)], 2)])).toEqual([
+      { kind: "stranded_heading", pageNumber: 1, text: "Disagreement" },
+    ]);
+    expect(strandedHeadingViolations([page([body("x", 700), sub("Disagreement remains on scope", 62)], 1), page([body("y", 780)], 2)])).toEqual([]);
+  });
   it("heading size boundary: 8 pt labels are headings, 9 pt body is not", () => {
     expect(isHeadingItem(t("LABEL", 0, 0, 10, 8))).toBe(true);
     expect(isHeadingItem(t("body", 0, 0, 10, 9))).toBe(false);

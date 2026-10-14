@@ -14,6 +14,7 @@
  */
 
 import type { AdaptiveResearchExportV1 } from "@/lib/adaptiveSchema/researchExport";
+import r2ReproRecord from "./r2-repro-bull-case.json";
 
 export interface PdfLayoutFixture {
   name: string;
@@ -503,6 +504,118 @@ function fieldValueSweep(step: number): PdfLayoutFixture {
   };
 }
 
+// ─── R2 corrections ──────────────────────────────────────────────────────
+
+/** The independent R2 reviewer's reproduction (dd5dd913): "BULL CASE" ended page 1 with its 3-line value on page 2. */
+function r2ReproBullCase(): PdfLayoutFixture {
+  const record = r2ReproRecord as unknown as AdaptiveResearchExportV1;
+  const markers = Array.from(new Set(JSON.stringify(record).match(/#[A-Z]+\d{3}#/g) ?? []));
+  return { name: "r2-repro-bull-case", minPages: 2, markers, record };
+}
+
+/**
+ * Field values of exactly-three-line length (react-pdf never splits a Text of
+ * ≤ 3 lines) after a label that is not the card's first, on a 2-D grid of
+ * preamble length × value length, so the label lands in the few-point window
+ * where 2 lines of value would fit but 3 do not.
+ */
+export const THREE_LINE_GRID = { preamble: 12, value: 6 } as const;
+function threeLineValueGrid(a: number, b: number): PdfLayoutFixture {
+  const m = markerFactory("G");
+  const synthesis = legacySynthesis(prose(20 + 4 * a, m.next()), m);
+  const words = 26 + 2 * b;
+  const modelResponses = MODELS.slice(0, 4).map((modelId, k) => ({
+    modelId,
+    schemaId: "financial_valuation",
+    ok: true,
+    data: {
+      thesis: prose(words + k, m.next()),
+      bullCase: prose(words + k + 1, m.next()),
+      bearCase: prose(words + k + 2, m.next()),
+      keyAssumptions: [prose(words, m.next())],
+      riskFactors: [prose(words + 1, m.next()), prose(8, m.next())],
+    },
+  }));
+  return {
+    name: `three-line-values-${String(a).padStart(2, "0")}-${b}`,
+    minPages: 2,
+    markers: m.all,
+    record: baseRecord({
+      schemaId: "financial_valuation",
+      schemaFamily: "legacy",
+      reportSnapshot: {
+        question: "Three-line field values",
+        models: MODELS.slice(0, 4).map((modelId) => ({ modelId, ok: true })),
+        reportTypeLabel: "Financial Analysis",
+        consensusLevel: "moderate",
+        sourceGroundingLevel: "strong",
+        reportGeneratedAt: "2026-10-14T11:00:00.000Z",
+        legacy: { schemaId: "financial_valuation", alignedClaims: [], synthesisReport: synthesis, modelResponses },
+      } as never,
+    }),
+  };
+}
+
+/** "Disagreement" sub-label near page bottoms: question × panel-conclusion length grid; the disagreement text is 3 lines. */
+export const DISAGREEMENT_GRID = { question: 3, answer: 25 } as const;
+function disagreementGrid(a: number, b: number): PdfLayoutFixture {
+  const m = markerFactory("D");
+  const synthesis = legacySynthesis(prose(200 + 4 * b, m.next()), m);
+  synthesis.verdictCard.keyDisagreement = prose(30, m.next());
+  const record = baseRecord({
+    schemaId: "contested_empirical",
+    schemaFamily: "legacy",
+    reportSnapshot: {
+      question: prose(3 + 8 * a, "?"),
+      models: [{ modelId: "chatgpt", ok: true }],
+      reportTypeLabel: "Consensus Analysis",
+      consensusLevel: "moderate",
+      sourceGroundingLevel: "strong",
+      reportGeneratedAt: "2026-10-14T11:00:00.000Z",
+      legacy: {
+        schemaId: "contested_empirical",
+        alignedClaims: [],
+        synthesisReport: synthesis,
+        modelResponses: [{ modelId: "chatgpt", schemaId: "contested_empirical", ok: true, data: { summary: prose(12, m.next()) } }],
+      },
+    } as never,
+  });
+  // The replaced default disagreement text's marker is not in the record.
+  const used = new Set(JSON.stringify(record).match(/#[A-Z]+\d{3}#/g) ?? []);
+  return { name: `disagreement-label-${a}-${String(b).padStart(2, "0")}`, minPages: 1, markers: m.all.filter((x) => used.has(x)), record };
+}
+
+/** Every verdict text (consensus, disagreement, detail, caveat) a single Text taller than a page. */
+function pageLongVerdictTexts(): PdfLayoutFixture {
+  const m = markerFactory("K");
+  const synthesis = legacySynthesis(prose(20, m.next()), m);
+  synthesis.verdictCard.topConsensus = longSingleText(24, 45, m);
+  synthesis.verdictCard.keyDisagreement = longSingleText(24, 45, m);
+  synthesis.verdictCard.disagreementDetail = longSingleText(24, 45, m);
+  synthesis.verdictCard.caveat = longSingleText(24, 45, m);
+  // Markers were minted out of render order above; the canonical order is derived from the record, so keep the set.
+  const record = baseRecord({
+    schemaId: "contested_empirical",
+    schemaFamily: "legacy",
+    reportSnapshot: {
+      question: "Page-long verdict texts",
+      models: [{ modelId: "claude", ok: true }],
+      reportTypeLabel: "Consensus Analysis",
+      consensusLevel: "weak",
+      sourceGroundingLevel: "moderate",
+      reportGeneratedAt: "2026-10-14T11:00:00.000Z",
+      legacy: {
+        schemaId: "contested_empirical",
+        alignedClaims: [],
+        synthesisReport: synthesis,
+        modelResponses: [{ modelId: "claude", schemaId: "contested_empirical", ok: true, data: { summary: prose(12, m.next()) } }],
+      },
+    } as never,
+  });
+  const used = new Set(JSON.stringify(record).match(/#[A-Z]+\d{3}#/g) ?? []);
+  return { name: "page-long-verdict-texts", minPages: 6, markers: m.all.filter((x) => used.has(x)), record };
+}
+
 export function pdfLayoutFixtures(): PdfLayoutFixture[] {
   return [
     legacyLongCards(),
@@ -517,5 +630,9 @@ export function pdfLayoutFixtures(): PdfLayoutFixture[] {
     ...Array.from({ length: HEADING_SWEEP_FIRST_STEPS }, (_, i) => firstHeadingSweep(i, "legacy")),
     ...Array.from({ length: HEADING_SWEEP_FIRST_STEPS }, (_, i) => firstHeadingSweep(i, "milestone2")),
     ...Array.from({ length: HEADING_SWEEP_FIELD_STEPS }, (_, i) => fieldValueSweep(i)),
+    r2ReproBullCase(),
+    ...Array.from({ length: THREE_LINE_GRID.preamble * THREE_LINE_GRID.value }, (_, i) => threeLineValueGrid(Math.floor(i / THREE_LINE_GRID.value), i % THREE_LINE_GRID.value)),
+    ...Array.from({ length: DISAGREEMENT_GRID.question * DISAGREEMENT_GRID.answer }, (_, i) => disagreementGrid(Math.floor(i / DISAGREEMENT_GRID.answer), i % DISAGREEMENT_GRID.answer)),
+    pageLongVerdictTexts(),
   ];
 }
