@@ -22,7 +22,7 @@ import { pdfLayoutFixtures } from "@/lib/pdf/__fixtures__/layoutFixtures";
 import { documentViolations, type PdfPageText } from "@/lib/pdf/layoutIntegrity";
 
 type Row = { fixture: string; pages: number; pageText: PdfPageText[] };
-type Report = { canary: { pageText: PdfPageText[] }; report: Row[] };
+type Report = { canary: { detected: boolean; violationCounts: Record<string, number>; pageText: PdfPageText[] }; report: Row[] };
 
 const LAYOUT = { paddingTop: 48, paddingBottom: 56 };
 const CANARY_MARKERS = Array.from({ length: 90 }, (_, i) => `#C${String(i + 1).padStart(3, "0")}#`);
@@ -43,9 +43,13 @@ beforeAll(() => {
   }
 }, 120_000);
 
-it("the check is not blind: the known-bad canary has overlapping text", () => {
+it("the check is not blind: the known-bad canary has overlapping text, and the script reports exactly that", () => {
   const v = documentViolations(report.canary.pageText, LAYOUT, CANARY_MARKERS.map((marker) => ({ marker, count: 1 })));
   expect(v.filter((x) => x.kind === "overlap").length).toBeGreaterThan(0);
+  const recomputed = v.reduce<Record<string, number>>((acc, x) => ({ ...acc, [x.kind]: (acc[x.kind] ?? 0) + 1 }), {});
+  // The CLI (npm run verify:pdf-layout) exits on its own verdict — it must agree with the independent one.
+  expect(report.canary.violationCounts).toEqual(recomputed);
+  expect(report.canary.detected).toBe(true);
 });
 
 it("renders every fixture", () => {
