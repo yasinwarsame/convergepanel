@@ -99,7 +99,7 @@ function legacyLongCards(): PdfLayoutFixture {
   }));
   return {
     name: "legacy-contested-long-cards",
-    minPages: 8,
+    minPages: 12,
     markers: m.all,
     record: baseRecord({
       schemaId: "contested_empirical",
@@ -161,7 +161,7 @@ function legacyHugeSingleItem(): PdfLayoutFixture {
   };
   return {
     name: "legacy-huge-single-item",
-    minPages: 2,
+    minPages: 3,
     markers: m.all,
     record: baseRecord({
       schemaId: "contested_empirical",
@@ -189,7 +189,7 @@ function milestone2LongReceipt(): PdfLayoutFixture {
   const bullets = (n: number, words: number) => Array.from({ length: n }, () => prose(words, m.next()));
   return {
     name: "milestone2-long-receipt",
-    minPages: 3,
+    minPages: 6,
     markers: m.all,
     record: baseRecord({
       schemaId: "comparison_matrix",

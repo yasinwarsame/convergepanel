@@ -100,18 +100,19 @@ try {
     const violations = mod.documentViolations(pages, LAYOUT, markers.map((marker) => ({ marker, count: 1 })));
     if (doc.numPages < minPages) violations.push({ kind: "too_few_pages", expectedAtLeast: minPages, found: doc.numPages });
     const counts = violations.reduce((acc, v) => ({ ...acc, [v.kind]: (acc[v.kind] ?? 0) + 1 }), {});
-    return { bytes, pages: doc.numPages, violations, counts };
+    return { bytes, pages: doc.numPages, pageText: pages, violations, counts };
   }
 
   // Canary: the check must SEE the known defect, or nothing below can be trusted.
   const canaryResult = await check(React.createElement(mod.LayoutCanaryDocument), mod.CANARY_MARKERS, 1);
   const canaryCounts = canaryResult.counts;
+  const canaryPageText = canaryResult.pageText;
   const canaryDetected = canaryResult.violations.length > 0;
   if (!canaryDetected) failed = true;
   console.log(`${canaryDetected ? "PASS" : "FAIL"} canary (known-bad layout must be detected): ${canaryResult.violations.length} violations ${JSON.stringify(canaryCounts)}`);
 
   for (const fixture of mod.pdfLayoutFixtures()) {
-    const { bytes, pages: numPages, violations, counts } = await check(
+    const { bytes, pages: numPages, pageText, violations, counts } = await check(
       React.createElement(mod.AdaptiveResearchDocument, { record: fixture.record }),
       fixture.markers,
       fixture.minPages
@@ -127,12 +128,14 @@ try {
       markers: fixture.markers.length,
       violationCounts: counts,
       sampleViolations: violations.slice(0, 8),
+      // Raw extracted text geometry, so a consumer can recompute the verdict independently of this script.
+      pageText,
     });
     console.log(`${violations.length === 0 ? "PASS" : "FAIL"} ${fixture.name}: ${doc.numPages} pages, ${violations.length} violations ${JSON.stringify(counts)}`);
   }
 
   const jsonOut = opt("--json");
-  if (jsonOut) writeFileSync(jsonOut, JSON.stringify({ generatedBy: "scripts/verify-pdf-layout.mjs", canary: { detected: canaryDetected, violationCounts: canaryCounts }, report }, null, 1) + "\n");
+  if (jsonOut) writeFileSync(jsonOut, JSON.stringify({ generatedBy: "scripts/verify-pdf-layout.mjs", canary: { detected: canaryDetected, violationCounts: canaryCounts, pageText: canaryPageText }, report }, null, 1) + "\n");
   if (failed && !flag("--allow-fail")) process.exitCode = 1;
 } finally {
   rmSync(workDir, { recursive: true, force: true });
