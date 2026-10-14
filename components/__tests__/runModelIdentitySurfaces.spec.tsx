@@ -31,6 +31,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import TestRenderer, { act } from "react-test-renderer";
 import ResultsDisplay from "@/components/ResultsDisplay";
 import ModelChip from "@/components/ModelChip";
+import ModelPicker from "@/components/ModelPicker";
+import AboutPage from "@/app/about/page";
 import ModelResponsesSection from "@/components/adaptive/ModelResponsesSection";
 import { RunModelProvenanceContext } from "@/components/adaptive/RunModelProvenanceContext";
 import { getResultSchema } from "@/lib/adaptiveSchema/schemaRegistry";
@@ -257,5 +259,16 @@ describe("ModelChip", () => {
   });
   it("keeps the product label only where a product surface opts in", () => {
     expect(renderToStaticMarkup(createElement(ModelChip, { modelId: "chatgpt", labelKind: "product" }))).toContain(PANEL_MODELS[0].label);
+  });
+});
+
+describe("product / selection surfaces keep the product labels (out of PR A scope, must not regress)", () => {
+  it("the About page lists every product label", () => {
+    const html = renderToStaticMarkup(createElement(AboutPage));
+    for (const m of PANEL_MODELS) expect(html).toContain(m.label);
+  });
+  it("the model picker's selection buttons show every product label", () => {
+    const html = renderToStaticMarkup(createElement(ModelPicker, { selectedModels: ["chatgpt"], onSelectionChange: () => {}, plan: "full" }));
+    for (const m of PANEL_MODELS) expect(html).toContain(m.label);
   });
 });
