@@ -53,10 +53,28 @@ function Bullets({ items }: { items: string[] }) {
   );
 }
 
-function SectionCard({ label, children }: { label: string; children: React.ReactNode }) {
+/**
+ * Minimum vertical space (points) that must follow a heading on the same page;
+ * otherwise react-pdf moves the heading to the next page with its content, so
+ * a label is never stranded at the bottom of a page.
+ */
+const HEADING_PRESENCE_AHEAD = 48;
+
+/**
+ * A titled card. Content-bearing cards (model text, receipt sections,
+ * synthesis) PAGINATE: their length is unbounded, and a non-breaking block
+ * taller than the space left on a page is laid out past the page's content
+ * area — react-pdf then draws it over the following content and clips what
+ * does not fit (overlapping, unreadable and lost text in exported reports).
+ * Only cards whose content is structurally bounded and always far shorter
+ * than one page (`bounded`) stay on one page.
+ */
+function SectionCard({ label, bounded = false, children }: { label: string; bounded?: boolean; children: React.ReactNode }) {
   return (
-    <View style={pdfStyles.card} wrap={false}>
-      <Text style={pdfStyles.sectionLabel}>{label}</Text>
+    <View style={pdfStyles.card} wrap={!bounded}>
+      <Text style={pdfStyles.sectionLabel} minPresenceAhead={HEADING_PRESENCE_AHEAD}>
+        {label}
+      </Text>
       {children}
     </View>
   );
@@ -118,7 +136,7 @@ function CoverHeader({ record }: { record: AdaptiveResearchExportV1 }) {
 function StatusSummary({ record }: { record: AdaptiveResearchExportV1 }) {
   const snapshot = record.reportSnapshot;
   return (
-    <SectionCard label="Report status summary">
+    <SectionCard label="Report status summary" bounded>
       <View style={pdfStyles.fieldGrid}>
         <View style={pdfStyles.fieldCell}>
           <Text style={pdfStyles.fieldLabel}>Models</Text>
@@ -158,7 +176,7 @@ function Milestone2Content({ record }: { record: AdaptiveResearchExportV1 }) {
   const m2 = record.reportSnapshot.milestone2!;
   if (!m2.decisionReceipt) {
     return (
-      <SectionCard label="Primary synthesis">
+      <SectionCard label="Primary synthesis" bounded>
         <Text style={pdfStyles.mutedText}>
           No governance record exists yet for this run, so no reviewed conclusion has been composed. The report has not been
           reviewed.
@@ -252,7 +270,7 @@ function MetricRows({ items }: { items: Record<string, unknown>[] }) {
   );
 }
 
-/** Generic fallback for any other array-of-object field (claim[]/step[]/scenario[]/etc.) — one bounded block per item, key: value pairs. Matches ModelResponsesSection.tsx's own GenericObjectArrayList fallback. */
+/** Generic fallback for any other array-of-object field (claim[]/step[]/scenario[]/etc.) — one block per item, key: value pairs. Matches ModelResponsesSection.tsx's own GenericObjectArrayList fallback. An item paginates: a single claim with long competing positions can exceed a page. */
 function GenericObjectArrayPdf({ items }: { items: Record<string, unknown>[] }) {
   return (
     <View>
@@ -260,7 +278,6 @@ function GenericObjectArrayPdf({ items }: { items: Record<string, unknown>[] }) 
         <View
           key={idx}
           style={{ marginBottom: 3, paddingBottom: 3, borderBottomWidth: idx < items.length - 1 ? 1 : 0, borderBottomColor: COLORS.borderSoft }}
-          wrap={false}
         >
           {Object.entries(item).map(([k, v]) => (
             <Text key={k} style={pdfStyles.mutedText}>
@@ -320,7 +337,7 @@ function LegacyContent({ record }: { record: AdaptiveResearchExportV1 }) {
           </SectionCard>
         </View>
       ) : (
-        <SectionCard label="Panel conclusion">
+        <SectionCard label="Panel conclusion" bounded>
           {/* creative_generative and any schema with alignedClaims=[] —
               Part 8: never fabricate a synthesized consensus for a schema
               that never computed one. The per-model outputs below are the
@@ -332,25 +349,27 @@ function LegacyContent({ record }: { record: AdaptiveResearchExportV1 }) {
         </SectionCard>
       )}
 
-      {/* Deliberately NOT a SectionCard here (that component forces
-          wrap={false} on its whole body) — two models' worth of metrics/
-          bull-case/bear-case/assumptions/risk-factors easily exceeds one
-          page, and react-pdf's layout engine visibly mis-measures/overlaps
-          content inside an over-tall non-wrapping block (confirmed during
-          manual PDF inspection). Each MODEL's own card stays non-breaking
-          (a single model's fields are always a bounded, reasonable size),
-          but the section as a whole is free to paginate normally. */}
+      {/* Model responses paginate at every level: the section, each model's
+          card and each field. A single model's response is NOT bounded —
+          long claims with competing positions routinely exceed a page — and
+          a non-breaking card taller than the remaining page space overlaps
+          the next card and loses text (seen in Production exports). Headings
+          keep a minimum of following content on their page instead. */}
       <View style={{ marginBottom: 10 }}>
-        <Text style={pdfStyles.sectionLabel}>{`Model responses (${legacy.modelResponses?.length ?? 0})`}</Text>
+        <Text style={pdfStyles.sectionLabel} minPresenceAhead={HEADING_PRESENCE_AHEAD}>{`Model responses (${legacy.modelResponses?.length ?? 0})`}</Text>
         {(legacy.modelResponses ?? []).map((r) => (
-          <View key={r.modelId} style={pdfStyles.card} wrap={false}>
-            <Text style={{ ...pdfStyles.fieldLabel, marginBottom: 4 }}>{exportModelIdentityLabel(record.reportSnapshot.runProvenance, r.modelId)}</Text>
+          <View key={r.modelId} style={pdfStyles.card}>
+            <Text style={{ ...pdfStyles.fieldLabel, marginBottom: 4 }} minPresenceAhead={HEADING_PRESENCE_AHEAD}>
+              {exportModelIdentityLabel(record.reportSnapshot.runProvenance, r.modelId)}
+            </Text>
             {schema.fields.map((field) => {
               const value = r.data?.[field.key];
               if (value == null) return null;
               return (
                 <View key={field.key} style={{ marginBottom: 6 }}>
-                  <Text style={pdfStyles.fieldLabel}>{fieldLabel(field.key)}</Text>
+                  <Text style={pdfStyles.fieldLabel} minPresenceAhead={HEADING_PRESENCE_AHEAD}>
+                    {fieldLabel(field.key)}
+                  </Text>
                   <FieldValuePdf field={field} value={value} />
                 </View>
               );
@@ -373,7 +392,7 @@ function Provenance({ record }: { record: AdaptiveResearchExportV1 }) {
   // therefore renders exactly as before.
   const runProvenance = readFrozenRunProvenance(snapshot.runProvenance);
   return (
-    <SectionCard label="Provenance">
+    <SectionCard label="Provenance" bounded>
       <View style={pdfStyles.fieldGrid}>
         <View style={pdfStyles.fieldCell}>
           <Text style={pdfStyles.fieldLabel}>Run ID</Text>

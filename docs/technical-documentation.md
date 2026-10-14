@@ -1134,6 +1134,18 @@ Full architecture, JSON schema field documentation, sanitized examples, compatib
 
 Summary: three formats — PDF (Phase 1), DOCX (Phase 3), JSON (Phase 4) — each independently flag-gated (`ADAPTIVE_RESEARCH_EXPORT_ENABLED`, `ADAPTIVE_RESEARCH_DOCX_EXPORT_ENABLED`, `ADAPTIVE_RESEARCH_JSON_EXPORT_ENABLED`, `lib/env.ts`). No object storage exists in this codebase — the durable artifact is a frozen `AdaptiveResearchExportV1` record at `runs/{runId}/exports/{exportId}` (`lib/adaptiveSchema/researchExport.ts`); file bytes are always regenerated on demand, never persisted. Creation: `POST /api/user/runs/[runId]/export`. Regeneration/history-item render: `GET /api/user/runs/[runId]/exports/[exportId]` (current entitlement, frozen classification/governance content). History list (cursor-paginated, `?cursor=`/`?limit=`, max page size 50): `GET /api/user/runs/[runId]/exports`. Single central authorization function: `canExportAdaptiveResearch()` / `resolveAdaptiveExportVerdict()` (`lib/adaptiveSchema/exportAuthorization.ts`).
 
+**PDF pagination.** Content of unbounded length paginates. This covers model-response cards, their fields and generic object items, and the receipt, synthesis and enrichment sections. Headings carry `minPresenceAhead` so they are never stranded at a page bottom.
+
+Only structurally bounded cards stay on one page with `wrap={false}`: the status summary, provenance, and the static notices. A non-breaking block taller than the remaining page space is laid out past the content area; it overlaps the next block and loses text.
+
+`npm run verify:pdf-layout` (`scripts/verify-pdf-layout.mjs`) renders `lib/pdf/__fixtures__/layoutFixtures.ts` with the real renderer, extracts positioned text with pdfjs, and applies `lib/pdf/layoutIntegrity.ts`:
+- no overlapping text;
+- nothing outside the content area;
+- every content marker present exactly once;
+- the minimum page count.
+
+`lib/pdf/__tests__/renderedLayout.spec.ts` runs that script in CI.
+
 ---
 
 ## Workspaces (Personal) — LIVE IN PRODUCTION as of 2026-08-14
