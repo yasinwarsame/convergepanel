@@ -85,10 +85,14 @@ export function runModelFamilyName(modelId: unknown): string {
   return Object.prototype.hasOwnProperty.call(RUN_MODEL_FAMILY_NAMES, id) ? RUN_MODEL_FAMILY_NAMES[id as ModelId] : displayText(id);
 }
 
-/** Display name for a recorded provider; null when none was recorded. */
+/**
+ * Display name for a recorded provider; null when none was recorded. The live
+ * normalizer's placeholder `"unknown"` is not a recorded provider either.
+ */
 export function providerDisplayName(provider: unknown): string | null {
   if (!present(provider)) return null;
   const p = provider.trim().toLowerCase();
+  if (p === "unknown") return null;
   return Object.prototype.hasOwnProperty.call(PROVIDER_LABELS, p) ? PROVIDER_LABELS[p] : displayText(p.charAt(0).toUpperCase() + p.slice(1));
 }
 

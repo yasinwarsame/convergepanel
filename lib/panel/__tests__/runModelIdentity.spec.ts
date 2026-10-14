@@ -204,6 +204,12 @@ describe("providers", () => {
     expect(providerDisplayName(undefined)).toBeNull();
     expect(providerDisplayName("constructor")).toBe("Constructor");
   });
+  it("the live normalizer's 'unknown' placeholder is not a recorded provider", () => {
+    for (const p of ["unknown", " Unknown ", "UNKNOWN"]) expect(providerDisplayName(p)).toBeNull();
+    expect(runModelIdentityLabel({ modelId: "claude", provider: "unknown", requestedModel: "claude-haiku-4-5-20251001", substituted: true })).toBe(
+      "Claude · requested: claude-haiku-4-5-20251001 · substituted, answered by: provider not recorded"
+    );
+  });
 });
 
 describe("frozen history does not move with current configuration", () => {

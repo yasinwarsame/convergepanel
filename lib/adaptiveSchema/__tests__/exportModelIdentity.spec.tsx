@@ -177,15 +177,36 @@ describe("frozen history: regeneration does not move with current configuration"
     }
   });
 
-  it("changing the active model configuration leaves the export identical", async () => {
-    const pdfBefore = pdfText(record(INCIDENT_PROVENANCE));
+  it("changing the active model configuration (set BEFORE the modules load) leaves a historical export identical", async () => {
+    // Frozen values deliberately differ from every current configuration value,
+    // so an implementation that reads current config instead of the frozen
+    // record cannot pass by coincidence.
+    const HISTORICAL: AdaptiveExportRunProvenance = {
+      models: [
+        { modelId: "chatgpt" as never, provider: "openai", requestedModel: "gpt-HISTORICAL-1", substituted: false },
+        { modelId: "grok" as never, provider: "xai", requestedModel: "grok-HISTORICAL-2", substituted: false },
+        { modelId: "perplexity" as never, provider: "perplexity", requestedModel: "perplexity/HISTORICAL-3", substituted: false },
+      ],
+    };
+    const expected = ["ChatGPT · requested: gpt-HISTORICAL-1", "Grok · requested: grok-HISTORICAL-2", "Perplexity · requested: perplexity/HISTORICAL-3"];
     const prev = { g: process.env.GROK_MODEL, p: process.env.PERPLEXITY_AGENT_MODEL };
     try {
       process.env.GROK_MODEL = "grok-CHANGED-LATER";
       process.env.PERPLEXITY_AGENT_MODEL = "perplexity/CHANGED-LATER";
-      const after = pdfText(record(INCIDENT_PROVENANCE));
-      expect(after).toBe(pdfBefore);
-      expect(after).not.toContain("CHANGED-LATER");
+      let pdf = "";
+      let docxBytes: Buffer | null = null;
+      await jest.isolateModulesAsync(async () => {
+        const fresh = require("@/lib/pdf/AdaptiveResearchDocument") as typeof import("@/lib/pdf/AdaptiveResearchDocument");
+        const freshDocx = require("@/lib/docx/renderAdaptiveResearchDocx") as typeof import("@/lib/docx/renderAdaptiveResearchDocx");
+        pdf = extractPdfElementText(fresh.AdaptiveResearchDocument({ record: record(HISTORICAL) }));
+        docxBytes = (await freshDocx.renderAdaptiveResearchDocxV1(record(HISTORICAL, "docx"))).bytes;
+      });
+      const docx = await extractDocxText(docxBytes!);
+      for (const text of [pdf, docx]) {
+        for (const label of expected) expect(count(text, label)).toBe(2);
+        expect(text).not.toMatch(/CHANGED-LATER|grok-4-1-fast-reasoning|gpt-4o-mini|perplexity\/sonar/);
+      }
+      expect(pdf).toBe(pdfText(record(HISTORICAL)));
     } finally {
       if (prev.g === undefined) delete process.env.GROK_MODEL;
       else process.env.GROK_MODEL = prev.g;
