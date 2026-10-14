@@ -93,22 +93,31 @@ try {
     return { doc, pages };
   }
 
+  /** The ONE check, shared by the canary and every fixture: render → extract → rules. */
+  async function check(element, markers, minPages) {
+    const bytes = await renderToBuffer(element);
+    const { doc, pages } = await extract(bytes);
+    const violations = mod.documentViolations(pages, LAYOUT, markers.map((marker) => ({ marker, count: 1 })));
+    if (doc.numPages < minPages) violations.push({ kind: "too_few_pages", expectedAtLeast: minPages, found: doc.numPages });
+    const counts = violations.reduce((acc, v) => ({ ...acc, [v.kind]: (acc[v.kind] ?? 0) + 1 }), {});
+    return { bytes, pages: doc.numPages, violations, counts };
+  }
+
   // Canary: the check must SEE the known defect, or nothing below can be trusted.
-  const canaryBytes = await renderToBuffer(React.createElement(mod.LayoutCanaryDocument));
-  const canary = await extract(canaryBytes);
-  const canaryViolations = mod.documentViolations(canary.pages, LAYOUT, mod.CANARY_MARKERS.map((marker) => ({ marker, count: 1 })));
-  const canaryCounts = canaryViolations.reduce((acc, v) => ({ ...acc, [v.kind]: (acc[v.kind] ?? 0) + 1 }), {});
-  const canaryDetected = canaryViolations.length > 0;
+  const canaryResult = await check(React.createElement(mod.LayoutCanaryDocument), mod.CANARY_MARKERS, 1);
+  const canaryCounts = canaryResult.counts;
+  const canaryDetected = canaryResult.violations.length > 0;
   if (!canaryDetected) failed = true;
-  console.log(`${canaryDetected ? "PASS" : "FAIL"} canary (known-bad layout must be detected): ${canaryViolations.length} violations ${JSON.stringify(canaryCounts)}`);
+  console.log(`${canaryDetected ? "PASS" : "FAIL"} canary (known-bad layout must be detected): ${canaryResult.violations.length} violations ${JSON.stringify(canaryCounts)}`);
 
   for (const fixture of mod.pdfLayoutFixtures()) {
-    const bytes = await renderToBuffer(React.createElement(mod.AdaptiveResearchDocument, { record: fixture.record }));
+    const { bytes, pages: numPages, violations, counts } = await check(
+      React.createElement(mod.AdaptiveResearchDocument, { record: fixture.record }),
+      fixture.markers,
+      fixture.minPages
+    );
     if (pdfDir) writeFileSync(path.join(pdfDir, `${fixture.name}.pdf`), bytes);
-    const { doc, pages } = await extract(bytes);
-    const violations = mod.documentViolations(pages, LAYOUT, fixture.markers.map((marker) => ({ marker, count: 1 })));
-    if (doc.numPages < fixture.minPages) violations.push({ kind: "too_few_pages", expectedAtLeast: fixture.minPages, found: doc.numPages });
-    const counts = violations.reduce((acc, v) => ({ ...acc, [v.kind]: (acc[v.kind] ?? 0) + 1 }), {});
+    const doc = { numPages };
     if (violations.length > 0) failed = true;
     report.push({
       fixture: fixture.name,
