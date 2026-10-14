@@ -4,9 +4,11 @@
  * Synthetic, deterministic export records sized to exercise pagination:
  * model cards and section bodies taller than one A4 page (the shape that
  * produced overlapping, unreadable cards in Production exports), plus
- * ordinary-size controls. Every rendered text unit carries a unique marker
- * `#Mnnnn#` so the rendered-PDF check (scripts/verify-pdf-layout.mjs) can
- * prove nothing was lost or truncated when content paginates.
+ * ordinary-size controls; single text units taller than a page; and heading
+ * boundary sweeps that put every heading kind at or near a page bottom.
+ * Every rendered text unit carries unique markers `#Xnnn#` so the rendered
+ * check (scripts/verify-pdf-layout.mjs, renderedLayout.spec.ts) can prove
+ * nothing was lost, duplicated or reordered when content paginates.
  *
  * Shared by the real-render script and the Jest element-tree specs.
  */
@@ -246,6 +248,224 @@ function legacyShortControl(): PdfLayoutFixture {
   return { name: "legacy-short-control", minPages: 1, markers: m.all, record };
 }
 
+// ─── Single text units taller than a page (R1 MAJOR 2) ───────────────────
+
+/** ONE string carrying many markers: rendered as a single Text unit, so a non-breaking Text would visibly lose its middle. */
+function longSingleText(segments: number, wordsPerSegment: number, m: { next: () => string }): string {
+  return Array.from({ length: segments }, () => prose(wordsPerSegment, m.next())).join(" ");
+}
+
+function legacySynthesis(unifiedAnswer: string, m: { next: () => string }) {
+  return {
+    unifiedAnswer,
+    panelVerdict: "caution",
+    gate: "caution",
+    runCertainty: 0.57,
+    whereModelsAgree: [],
+    whereModelsDisagree: [],
+    certaintyAssessment: "x",
+    narrativeSections: [],
+    executiveSummary: "x",
+    disagreements: [],
+    biasAndBlindSpots: [],
+    biasEmptyReason: "insufficient_models",
+    panelCoverageGaps: [],
+    diagnostics: { citedClaimCount: 0, totalClaimCount: 0, evidenceMix: { empirical: 0, theoretical: 0, anecdotal: 0, authoritative: 0 }, homogeneityFlag: false, meanAgreement: 0.5 },
+    verdictCard: {
+      question: "q",
+      topConsensus: prose(10, m.next()),
+      consensusModelCount: 3,
+      keyDisagreement: prose(10, m.next()),
+      disagreementDetail: prose(10, m.next()),
+      disagreementModelCount: 2,
+      caveat: prose(8, m.next()),
+      recommendedNextSteps: [],
+    },
+    degraded: false,
+  };
+}
+
+/** Legacy family: a page-long synthesis answer, a page-long string field, and one object whose single value is page-long. */
+function singleTextOverPageLegacy(): PdfLayoutFixture {
+  const m = markerFactory("T");
+  const unified = longSingleText(24, 45, m);
+  const synthesis = legacySynthesis(unified, m);
+  const summary = longSingleText(24, 45, m);
+  const hugeClaim = { id: "one", claim: longSingleText(24, 45, m), stance: "asserts", confidence: "contested", evidenceType: "theoretical" };
+  return {
+    name: "single-text-over-page-legacy",
+    minPages: 5,
+    markers: m.all,
+    record: baseRecord({
+      schemaId: "contested_empirical",
+      schemaFamily: "legacy",
+      reportSnapshot: {
+        question: "Single text units taller than a page (legacy)",
+        models: [{ modelId: "claude", ok: true }],
+        reportTypeLabel: "Consensus Analysis",
+        consensusLevel: "weak",
+        sourceGroundingLevel: "moderate",
+        reportGeneratedAt: "2026-10-14T11:00:00.000Z",
+        legacy: {
+          schemaId: "contested_empirical",
+          alignedClaims: [],
+          synthesisReport: synthesis,
+          modelResponses: [{ modelId: "claude", schemaId: "contested_empirical", ok: true, data: { summary, disputedClaims: [hugeClaim] } }],
+        },
+      } as never,
+    }),
+  };
+}
+
+/** Milestone-2: a page-long receipt conclusion and a single page-long bullet. */
+function singleTextOverPageMilestone2(): PdfLayoutFixture {
+  const m = markerFactory("U");
+  const conclusion = longSingleText(24, 45, m);
+  const bullet = longSingleText(24, 45, m);
+  return {
+    name: "single-text-over-page-milestone2",
+    minPages: 4,
+    markers: m.all,
+    record: baseRecord({
+      schemaId: "comparison_matrix",
+      schemaFamily: "milestone2",
+      governanceStatusAtExport: { family: "milestone2", kind: "approved", isOwnerOverride: false } as never,
+      reportSnapshot: {
+        question: "Single text units taller than a page (milestone-2)",
+        models: MODELS.map((modelId) => ({ modelId, ok: true })),
+        reportTypeLabel: "Comparison Report",
+        consensusLevel: "moderate",
+        sourceGroundingLevel: "strong",
+        reportGeneratedAt: "2026-10-14T11:00:00.000Z",
+        milestone2: {
+          schemaId: "comparison_matrix",
+          result: { tradeoffs: [prose(8, m.next())], bestUseRecommendations: [prose(8, m.next())] },
+          meta: {} as never,
+          decisionReceipt: { conclusion, basis: [bullet], assumptions: [prose(8, m.next())], uncertainties: [], limitations: [], sources: [] },
+        },
+      } as never,
+    }),
+  };
+}
+
+// ─── Heading boundary sweeps (R1 MAJOR 1) ────────────────────────────────
+
+/**
+ * Many short headed blocks after a preamble whose length steps by about one
+ * line per variant, so every heading kind (section, model card, field) lands
+ * at or near a page bottom in some variant. A stranded heading in ANY
+ * variant fails the rendered check.
+ */
+export const HEADING_SWEEP_STEPS = 16;
+const SWEEP_WORDS_PER_STEP = 12;
+
+function legacyHeadingSweep(step: number): PdfLayoutFixture {
+  const m = markerFactory("W");
+  const synthesis = legacySynthesis(prose(30 + step * SWEEP_WORDS_PER_STEP, m.next()), m);
+  const modelResponses = MODELS.map((modelId) => ({
+    modelId,
+    schemaId: "contested_empirical",
+    ok: true,
+    data: {
+      summary: prose(14, m.next()),
+      settledClaims: [{ id: `s-${modelId}`, claim: prose(10, m.next()), stance: "asserts", confidence: "settled", evidenceType: "empirical" }],
+      disputedClaims: [{ id: `d-${modelId}`, claim: prose(10, m.next()), stance: "asserts", confidence: "contested", evidenceType: "theoretical" }],
+      keyMetrics: [{ label: `Metric ${m.next()}`, value: 42, unit: "pct", asOf: "2025", source: "Fixture" }],
+      openQuestions: [prose(8, m.next()), prose(8, m.next())],
+    },
+  }));
+  return {
+    name: `heading-sweep-legacy-${String(step).padStart(2, "0")}`,
+    minPages: 2,
+    markers: m.all,
+    record: baseRecord({
+      schemaId: "contested_empirical",
+      schemaFamily: "legacy",
+      reportSnapshot: {
+        question: "Heading boundary sweep (legacy)",
+        models: MODELS.map((modelId) => ({ modelId, ok: true })),
+        reportTypeLabel: "Consensus Analysis",
+        consensusLevel: "moderate",
+        sourceGroundingLevel: "strong",
+        reportGeneratedAt: "2026-10-14T11:00:00.000Z",
+        legacy: { schemaId: "contested_empirical", alignedClaims: [], synthesisReport: synthesis, modelResponses },
+      } as never,
+    }),
+  };
+}
+
+function milestone2HeadingSweep(step: number): PdfLayoutFixture {
+  const m = markerFactory("V");
+  const two = () => [prose(10, m.next()), prose(10, m.next())];
+  return {
+    name: `heading-sweep-milestone2-${String(step).padStart(2, "0")}`,
+    minPages: 2,
+    markers: m.all,
+    record: baseRecord({
+      schemaId: "comparison_matrix",
+      schemaFamily: "milestone2",
+      governanceStatusAtExport: { family: "milestone2", kind: "approved", isOwnerOverride: false } as never,
+      reportSnapshot: {
+        question: "Heading boundary sweep (milestone-2)",
+        models: MODELS.map((modelId) => ({ modelId, ok: true })),
+        reportTypeLabel: "Comparison Report",
+        consensusLevel: "moderate",
+        sourceGroundingLevel: "strong",
+        reportGeneratedAt: "2026-10-14T11:00:00.000Z",
+        milestone2: {
+          schemaId: "comparison_matrix",
+          result: { tradeoffs: two(), bestUseRecommendations: two() },
+          meta: {} as never,
+          decisionReceipt: {
+            conclusion: prose(150 + step * SWEEP_WORDS_PER_STEP, m.next()),
+            basis: two(),
+            assumptions: two(),
+            uncertainties: two(),
+            limitations: two(),
+            sources: two(),
+          },
+        },
+      } as never,
+    }),
+  };
+}
+
+/** A second sweep whose step mixes metric rows (≈21 pt) with half-line preamble steps, so headings land at offsets the whole-line sweeps do not reach. */
+export const HEADING_SWEEP_MIXED_STEPS = 10;
+function legacyHeadingSweepMixed(step: number): PdfLayoutFixture {
+  const fixture = legacyHeadingSweep(0);
+  const m = markerFactory("X");
+  const synthesis = legacySynthesis(prose(24 + step * 6, m.next()), m);
+  const modelResponses = MODELS.slice(0, 3).map((modelId) => ({
+    modelId,
+    schemaId: "contested_empirical",
+    ok: true,
+    data: {
+      summary: prose(16, m.next()),
+      keyMetrics: Array.from({ length: 1 + (step % 5) }, () => ({ label: `Metric ${m.next()}`, value: 7, unit: "pct", asOf: "2025", source: "Fixture" })),
+      disputedClaims: [{ id: `d-${modelId}`, claim: prose(12, m.next()), stance: "asserts", confidence: "contested", evidenceType: "theoretical" }],
+      openQuestions: [prose(10, m.next())],
+    },
+  }));
+  return {
+    ...fixture,
+    name: `heading-sweep-mixed-${String(step).padStart(2, "0")}`,
+    minPages: 1,
+    markers: m.all,
+    record: { ...fixture.record, reportSnapshot: { ...fixture.record.reportSnapshot, models: MODELS.slice(0, 3).map((modelId) => ({ modelId, ok: true })), legacy: { schemaId: "contested_empirical", alignedClaims: [], synthesisReport: synthesis, modelResponses } } as never },
+  };
+}
+
 export function pdfLayoutFixtures(): PdfLayoutFixture[] {
-  return [legacyLongCards(), legacyHugeSingleItem(), milestone2LongReceipt(), legacyShortControl()];
+  return [
+    legacyLongCards(),
+    legacyHugeSingleItem(),
+    milestone2LongReceipt(),
+    legacyShortControl(),
+    singleTextOverPageLegacy(),
+    singleTextOverPageMilestone2(),
+    ...Array.from({ length: HEADING_SWEEP_STEPS }, (_, i) => legacyHeadingSweep(i)),
+    ...Array.from({ length: HEADING_SWEEP_STEPS }, (_, i) => milestone2HeadingSweep(i)),
+    ...Array.from({ length: HEADING_SWEEP_MIXED_STEPS }, (_, i) => legacyHeadingSweepMixed(i)),
+  ];
 }

@@ -47,7 +47,9 @@ export interface PdfLayoutBox {
 export type PdfLayoutViolation =
   | { kind: "overlap"; pageNumber: number; a: string; b: string; overlapRatio: number }
   | { kind: "out_of_bounds"; pageNumber: number; text: string; edge: "top" | "bottom" | "off_page" }
-  | { kind: "missing_marker"; marker: string; expected: number; found: number };
+  | { kind: "missing_marker"; marker: string; expected: number; found: number }
+  | { kind: "stranded_heading"; pageNumber: number; text: string }
+  | { kind: "reading_order"; expected: string[]; found: string[] };
 
 /** Text the fixed page footer draws inside the bottom padding by design. */
 export function isFooterText(str: string): boolean {
@@ -131,4 +133,71 @@ export function documentViolations(
     if (found !== count) out.push({ kind: "missing_marker", marker, expected: count, found });
   }
   return out;
+}
+
+// ─── Headings and reading order ──────────────────────────────────────────
+
+/**
+ * Heading glyph size ceiling. Section labels are 8 pt and field / model labels
+ * 7.5 pt (lib/pdf/theme.ts); all body text is ≥ 9 pt. The only other text at
+ * or below 8 pt sits inside the always-unbroken cover header and status
+ * summary, which are always followed by body text on their page.
+ */
+export const HEADING_MAX_FONT_SIZE = 8.05;
+/** Runs whose baselines differ by at most this much (points) share a line. */
+export const SAME_LINE_TOLERANCE = 1;
+
+function bodyItems(page: PdfPageText): PdfTextItem[] {
+  return page.items.filter((i) => i.str.trim().length > 0 && !isFooterText(i.str));
+}
+
+/** Body text grouped into lines, top to bottom, each line's runs left to right. */
+export function readingLines(page: PdfPageText): PdfTextItem[][] {
+  const items = [...bodyItems(page)].sort((a, b) => b.y - a.y || a.x - b.x);
+  const lines: PdfTextItem[][] = [];
+  for (const item of items) {
+    const line = lines[lines.length - 1];
+    if (line && Math.abs(line[0].y - item.y) <= SAME_LINE_TOLERANCE) line.push(item);
+    else lines.push([item]);
+  }
+  for (const line of lines) line.sort((a, b) => a.x - b.x);
+  return lines;
+}
+
+export function isHeadingItem(item: PdfTextItem): boolean {
+  return item.height <= HEADING_MAX_FONT_SIZE;
+}
+
+/**
+ * A non-final page must not END with headings: its last body line may not
+ * consist only of heading-sized runs (a label whose content starts on the
+ * next page). The final page is exempt only for its own last line.
+ */
+export function strandedHeadingViolations(pages: PdfPageText[]): PdfLayoutViolation[] {
+  const out: PdfLayoutViolation[] = [];
+  pages.forEach((page, idx) => {
+    if (idx === pages.length - 1) return;
+    const lines = readingLines(page);
+    const last = lines[lines.length - 1];
+    if (last && last.every(isHeadingItem)) out.push({ kind: "stranded_heading", pageNumber: page.pageNumber, text: last.map((i) => i.str).join(" ") });
+  });
+  return out;
+}
+
+/** Every `#Xnnn#`-style content marker in rendered reading order (page, then line top-down, then left-right). */
+export function renderedMarkerSequence(pages: PdfPageText[], markerPattern: RegExp = /#[A-Z]+\d{3}#/g): string[] {
+  const seq: string[] = [];
+  for (const page of pages) {
+    const text = readingLines(page)
+      .map((line) => line.map((i) => i.str).join(" "))
+      .join("\n");
+    for (const m of text.matchAll(new RegExp(markerPattern.source, "g"))) seq.push(m[0]);
+  }
+  return seq;
+}
+
+export function readingOrderViolations(pages: PdfPageText[], compositionOrder: readonly string[]): PdfLayoutViolation[] {
+  const found = renderedMarkerSequence(pages);
+  const expected = [...compositionOrder];
+  return found.length === expected.length && found.every((m, i) => m === expected[i]) ? [] : [{ kind: "reading_order", expected, found }];
 }

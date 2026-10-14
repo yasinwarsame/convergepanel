@@ -1134,17 +1134,30 @@ Full architecture, JSON schema field documentation, sanitized examples, compatib
 
 Summary: three formats — PDF (Phase 1), DOCX (Phase 3), JSON (Phase 4) — each independently flag-gated (`ADAPTIVE_RESEARCH_EXPORT_ENABLED`, `ADAPTIVE_RESEARCH_DOCX_EXPORT_ENABLED`, `ADAPTIVE_RESEARCH_JSON_EXPORT_ENABLED`, `lib/env.ts`). No object storage exists in this codebase — the durable artifact is a frozen `AdaptiveResearchExportV1` record at `runs/{runId}/exports/{exportId}` (`lib/adaptiveSchema/researchExport.ts`); file bytes are always regenerated on demand, never persisted. Creation: `POST /api/user/runs/[runId]/export`. Regeneration/history-item render: `GET /api/user/runs/[runId]/exports/[exportId]` (current entitlement, frozen classification/governance content). History list (cursor-paginated, `?cursor=`/`?limit=`, max page size 50): `GET /api/user/runs/[runId]/exports`. Single central authorization function: `canExportAdaptiveResearch()` / `resolveAdaptiveExportVerdict()` (`lib/adaptiveSchema/exportAuthorization.ts`).
 
-**PDF pagination.** Content of unbounded length paginates. This covers model-response cards, their fields and generic object items, and the receipt, synthesis and enrichment sections. Headings carry `minPresenceAhead` so they are never stranded at a page bottom.
+**PDF pagination.** Content of unbounded length paginates. This covers model-response cards, their fields and generic object items, the receipt, synthesis and enrichment sections, and single text units (a conclusion, a bullet, a field value) taller than a page.
 
-Only structurally bounded cards stay on one page with `wrap={false}`: the status summary, provenance, and the static notices. A non-breaking block taller than the remaining page space is laid out past the content area; it overlaps the next block and loses text.
+`wrap={false}` is allowed only at reviewed, bounded locations: the status summary, provenance and static-notice cards, the heading block of a paginating card, and short heading labels.
 
-`npm run verify:pdf-layout` (`scripts/verify-pdf-layout.mjs`) renders `lib/pdf/__fixtures__/layoutFixtures.ts` with the real renderer, extracts positioned text with pdfjs, and applies `lib/pdf/layoutIntegrity.ts`:
+A non-breaking block taller than the remaining page space is laid out past the content area, where it overlaps the next block and loses text.
+
+Headings are kept with their content through react-pdf's `minPresenceAhead`. That prop takes effect only on an element that has an earlier non-fixed sibling in the same parent and is itself non-breaking. So:
+- a paginating card is drawn as a heading block plus a body block, which are siblings;
+- a zero-height anchor precedes each kept heading;
+- field labels are siblings of their values;
+- spacing that follows a kept heading's content is padding or a separate element, never a margin. An element that fits on the page but whose bottom margin does not is moved to the next page, which would strand the heading.
+
+`npm run verify:pdf-layout` (`scripts/verify-pdf-layout.mjs`) renders `lib/pdf/__fixtures__/layoutFixtures.ts` with the real renderer and extracts positioned text with pdfjs. The fixtures cover long cards and sections, single text units taller than a page, and three heading boundary sweeps. It applies `lib/pdf/layoutIntegrity.ts`:
 - no overlapping text;
-- nothing outside the content area;
-- every content marker present exactly once;
+- nothing outside the vertical content area or in the footer band;
+- every content marker present exactly once and in composition order;
+- no non-final page ending with a heading;
 - the minimum page count.
 
-`lib/pdf/__tests__/renderedLayout.spec.ts` runs that script in CI.
+A known-bad canary must be detected. `lib/pdf/__tests__/renderedLayout.spec.ts` runs the script in CI and recomputes every verdict from the raw geometry.
+
+Known limitations, tracked separately:
+- **Horizontal overflow** (`PDF_HORIZONTAL_OVERFLOW_LONG_UNBROKEN_TEXT`): a long unbroken URL or token can run past the right page edge. This is pre-existing, and the vertical oracle does not check left or right bounds.
+- **Byte determinism:** react-pdf's multi-page output bytes vary in object order between renders, while the geometry stays identical.
 
 ---
 

@@ -53,31 +53,79 @@ function Bullets({ items }: { items: string[] }) {
   );
 }
 
-/**
- * Minimum vertical space (points) that must follow a heading on the same page;
- * otherwise react-pdf moves the heading to the next page with its content, so
- * a label is never stranded at the bottom of a page.
+/*
+ * ── Keeping headings with their content ─────────────────────────────────
+ * Content of unbounded length (model text, receipt sections, synthesis) must
+ * PAGINATE: a non-breaking block taller than the space left on a page is laid
+ * out past the page's content area, overlapping the next block and losing
+ * text. But a heading must not be left alone at a page bottom with its
+ * content on the next page.
+ *
+ * react-pdf's keep-with-next is `minPresenceAhead`: it moves an element to the
+ * next page when less than N points would follow it on this one — but ONLY
+ * when the element has an earlier non-fixed sibling in the same parent (it
+ * never breaks before a first child). So every kept heading here is a
+ * SIBLING of its content, never a first child: a zero-height `BreakAnchor`
+ * precedes it, and cards are drawn as a heading block plus a body block.
+ *
+ * Each kept heading is itself a short, bounded, NON-BREAKING unit
+ * (`wrap={false}`): otherwise a heading that only partly fits is split rather
+ * than moved, and `minPresenceAhead` is never consulted.
+ *
+ * Presence distances nest: a heading must guarantee room for the next
+ * heading's own guarantee, or the inner heading would break away and strand
+ * the outer one.
+ *   - a field label keeps its label plus two lines of value (orphans = 2);
+ *   - a card heading keeps the first field label plus two lines;
+ *   - the "Model responses" label keeps the first card heading plus its guarantee.
  */
-const HEADING_PRESENCE_AHEAD = 48;
+const FIELD_LABEL_PRESENCE_AHEAD = 40;
+const CARD_HEADING_PRESENCE_AHEAD = 64;
+const SECTION_LABEL_PRESENCE_AHEAD = 112;
+
+/** Zero-height, non-fixed sibling placed immediately before a kept heading (see above). Draws nothing. */
+function BreakAnchor() {
+  return <View style={{ height: 0 }} />;
+}
 
 /**
- * A titled card. Content-bearing cards (model text, receipt sections,
- * synthesis) PAGINATE: their length is unbounded, and a non-breaking block
- * taller than the space left on a page is laid out past the page's content
- * area — react-pdf then draws it over the following content and clips what
- * does not fit (overlapping, unreadable and lost text in exported reports).
- * Only cards whose content is structurally bounded and always far shorter
- * than one page (`bounded`) stay on one page.
+ * A titled card whose content paginates: heading block + body block as
+ * siblings (together they draw the `card` box), the heading kept with the
+ * first lines of the body.
+ *
+ * The space after the card is its own element, not a margin on the body:
+ * react-pdf moves an element that fits on the page to the next one when its
+ * bottom MARGIN does not fit, which would leave the heading behind alone.
+ */
+function PaginatingCard({ heading, children }: { heading: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <>
+      <BreakAnchor />
+      <View style={pdfStyles.cardHead} wrap={false} minPresenceAhead={CARD_HEADING_PRESENCE_AHEAD}>
+        {heading}
+      </View>
+      <View style={pdfStyles.cardBody}>{children}</View>
+      <View style={pdfStyles.cardGap} />
+    </>
+  );
+}
+
+/**
+ * A titled card. Content-bearing cards paginate (`PaginatingCard`). Only
+ * cards whose content is structurally bounded and always far shorter than
+ * one page (`bounded`) stay on one page as a single non-breaking block —
+ * their heading then moves with them and can never be stranded.
  */
 function SectionCard({ label, bounded = false, children }: { label: string; bounded?: boolean; children: React.ReactNode }) {
-  return (
-    <View style={pdfStyles.card} wrap={!bounded}>
-      <Text style={pdfStyles.sectionLabel} minPresenceAhead={HEADING_PRESENCE_AHEAD}>
-        {label}
-      </Text>
-      {children}
-    </View>
-  );
+  if (bounded) {
+    return (
+      <View style={pdfStyles.card} wrap={false}>
+        <Text style={pdfStyles.sectionLabel}>{label}</Text>
+        {children}
+      </View>
+    );
+  }
+  return <PaginatingCard heading={<Text style={pdfStyles.sectionLabel}>{label}</Text>}>{children}</PaginatingCard>;
 }
 
 function CoverHeader({ record }: { record: AdaptiveResearchExportV1 }) {
@@ -353,28 +401,36 @@ function LegacyContent({ record }: { record: AdaptiveResearchExportV1 }) {
           card and each field. A single model's response is NOT bounded —
           long claims with competing positions routinely exceed a page — and
           a non-breaking card taller than the remaining page space overlaps
-          the next card and loses text (seen in Production exports). Headings
-          keep a minimum of following content on their page instead. */}
+          the next card and loses text (seen in Production exports). Each
+          heading is kept with the first lines of its content (see
+          "Keeping headings with their content" above). */}
       <View style={{ marginBottom: 10 }}>
-        <Text style={pdfStyles.sectionLabel} minPresenceAhead={HEADING_PRESENCE_AHEAD}>{`Model responses (${legacy.modelResponses?.length ?? 0})`}</Text>
+        <BreakAnchor />
+        <Text style={pdfStyles.sectionLabel} wrap={false} minPresenceAhead={SECTION_LABEL_PRESENCE_AHEAD}>{`Model responses (${legacy.modelResponses?.length ?? 0})`}</Text>
         {(legacy.modelResponses ?? []).map((r) => (
-          <View key={r.modelId} style={pdfStyles.card}>
-            <Text style={{ ...pdfStyles.fieldLabel, marginBottom: 4 }} minPresenceAhead={HEADING_PRESENCE_AHEAD}>
-              {exportModelIdentityLabel(record.reportSnapshot.runProvenance, r.modelId)}
-            </Text>
-            {schema.fields.map((field) => {
-              const value = r.data?.[field.key];
-              if (value == null) return null;
-              return (
-                <View key={field.key} style={{ marginBottom: 6 }}>
-                  <Text style={pdfStyles.fieldLabel} minPresenceAhead={HEADING_PRESENCE_AHEAD}>
+          <PaginatingCard
+            key={r.modelId}
+            heading={<Text style={pdfStyles.modelLabel}>{exportModelIdentityLabel(record.reportSnapshot.runProvenance, r.modelId)}</Text>}
+          >
+            {schema.fields
+              .filter((field) => r.data?.[field.key] != null)
+              .map((field, idx) => {
+                const value = r.data?.[field.key];
+                // Label and value are siblings, so every label after the first is kept with its value. The first
+                // label is the body's first child — where react-pdf ignores minPresenceAhead — and is kept by the
+                // card heading's own guarantee instead, so it carries no (inert) prop.
+                const keep = idx > 0 ? { minPresenceAhead: FIELD_LABEL_PRESENCE_AHEAD } : {};
+                return [
+                  <Text key={`${field.key}-label`} style={pdfStyles.fieldLabel} wrap={false} {...keep}>
                     {fieldLabel(field.key)}
-                  </Text>
-                  <FieldValuePdf field={field} value={value} />
-                </View>
-              );
-            })}
-          </View>
+                  </Text>,
+                  // Spacing as padding, not margin: a margin that does not fit would push a fitting value away from its label.
+                  <View key={`${field.key}-value`} style={{ paddingBottom: 6 }}>
+                    <FieldValuePdf field={field} value={value} />
+                  </View>,
+                ];
+              })}
+          </PaginatingCard>
         ))}
         {(!legacy.modelResponses || legacy.modelResponses.length === 0) && (
           <Text style={pdfStyles.mutedText}>

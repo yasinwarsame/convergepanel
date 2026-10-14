@@ -8,7 +8,12 @@ import {
   documentText,
   documentViolations,
   isFooterText,
+  isHeadingItem,
   pageViolations,
+  readingLines,
+  readingOrderViolations,
+  renderedMarkerSequence,
+  strandedHeadingViolations,
   type PdfPageText,
   type PdfTextItem,
 } from "@/lib/pdf/layoutIntegrity";
@@ -74,5 +79,57 @@ describe("completeness", () => {
   });
   it("document text joins pages and normalizes whitespace", () => {
     expect(documentText(pages)).toBe("intro #M001# #M002# split tail #M003#");
+  });
+});
+
+describe("stranded headings", () => {
+  const heading = (str: string, y: number) => t(str, 50, y, 80, 7.5);
+  const body = (str: string, y: number) => t(str, 50, y, 300, 10);
+  it("a non-final page ending with a heading is a violation", () => {
+    const pages = [page([body("text", 700), heading("BASIS", 61)], 1), page([body("first bullet", 780)], 2)];
+    expect(strandedHeadingViolations(pages)).toEqual([{ kind: "stranded_heading", pageNumber: 1, text: "BASIS" }]);
+  });
+  it("two stacked headings at a page bottom are a violation (the last line is still a heading)", () => {
+    const pages = [page([body("text", 700), heading("CLAUDE · REQUESTED: X", 75), heading("SUMMARY", 62)], 1), page([body("x", 780)], 2)];
+    expect(strandedHeadingViolations(pages)).toHaveLength(1);
+  });
+  it("a heading followed by at least one body line on its page is fine", () => {
+    const pages = [page([heading("BASIS", 80), body("first bullet", 64)], 1), page([body("x", 780)], 2)];
+    expect(strandedHeadingViolations(pages)).toEqual([]);
+  });
+  it("the footer never counts as the last line", () => {
+    const pages = [page([heading("BASIS", 80), body("first bullet", 64), t("Page 1 of 2", 500, 26, 40, 8)], 1), page([body("x", 780)], 2)];
+    expect(strandedHeadingViolations(pages)).toEqual([]);
+  });
+  it("the final page is exempt", () => {
+    expect(strandedHeadingViolations([page([body("x", 700), heading("END", 100)], 1)])).toEqual([]);
+  });
+  it("heading size boundary: 8 pt labels are headings, 9 pt body is not", () => {
+    expect(isHeadingItem(t("LABEL", 0, 0, 10, 8))).toBe(true);
+    expect(isHeadingItem(t("body", 0, 0, 10, 9))).toBe(false);
+  });
+});
+
+describe("reading order", () => {
+  it("orders by page, then line top-down, then left to right within a line", () => {
+    const pages = [page([t("#A002#", 300, 700), t("#A001#", 50, 700.4), t("#A003#", 50, 680)], 1), page([t("#A004#", 50, 780)], 2)];
+    expect(readingLines(pages[0]).map((l) => l.map((i) => i.str))).toEqual([["#A001#", "#A002#"], ["#A003#"]]);
+    expect(renderedMarkerSequence(pages)).toEqual(["#A001#", "#A002#", "#A003#", "#A004#"]);
+  });
+  it("matching composition order passes; a swap, a loss or an extra fails", () => {
+    const pages = [page([t("a #A001# b #A002#", 50, 700), t("#A003#", 50, 680)])];
+    expect(readingOrderViolations(pages, ["#A001#", "#A002#", "#A003#"])).toEqual([]);
+    expect(readingOrderViolations(pages, ["#A002#", "#A001#", "#A003#"])).toHaveLength(1);
+    expect(readingOrderViolations(pages, ["#A001#", "#A002#"])).toHaveLength(1);
+    expect(readingOrderViolations(pages, ["#A001#", "#A002#", "#A003#", "#A004#"])).toHaveLength(1);
+  });
+  it("a marker that migrated ahead of an earlier section fails", () => {
+    const pages = [page([t("#B003#", 50, 700), t("#B001#", 50, 680), t("#B002#", 50, 660)])];
+    expect(readingOrderViolations(pages, ["#B001#", "#B002#", "#B003#"])).toEqual([
+      { kind: "reading_order", expected: ["#B001#", "#B002#", "#B003#"], found: ["#B003#", "#B001#", "#B002#"] },
+    ]);
+  });
+  it("body text that merely looks like the footer is still read (only exact footer strings are exempt)", () => {
+    expect(renderedMarkerSequence([page([t("Page 1 of 2 #A001#", 50, 700)])])).toEqual(["#A001#"]);
   });
 });

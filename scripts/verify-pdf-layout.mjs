@@ -9,6 +9,8 @@
  *   - no overlapping body text on any page;
  *   - no body text outside the page content area (the footer band, off page);
  *   - every content marker present exactly once (nothing lost or truncated);
+ *   - content markers in the same order as composed (reading order);
+ *   - no non-final page ending with a heading (heading kept with its content);
  *   - the fixture occupies at least its expected page count.
  * It first renders a known-bad canary (lib/pdf/__fixtures__/layoutCanary.tsx)
  * and fails unless the check reports violations for it, so a broken
@@ -38,7 +40,8 @@ try {
   const entry = `
     export { AdaptiveResearchDocument } from "@/lib/pdf/AdaptiveResearchDocument";
     export { pdfLayoutFixtures } from "@/lib/pdf/__fixtures__/layoutFixtures";
-    export { documentViolations } from "@/lib/pdf/layoutIntegrity";
+    export { documentViolations, strandedHeadingViolations, readingOrderViolations } from "@/lib/pdf/layoutIntegrity";
+    export { extractPdfElementText } from "@/lib/pdf/__tests__/testUtils";
     export { LayoutCanaryDocument, CANARY_MARKERS } from "@/lib/pdf/__fixtures__/layoutCanary";
   `;
   const outfile = path.join(workDir, "bundle.mjs");
@@ -93,11 +96,20 @@ try {
     return { doc, pages };
   }
 
+  /** Content markers in composition order, read from the element tree itself (not from the PDF). */
+  function compositionOrder(element) {
+    return mod.extractPdfElementText(element).match(/#[A-Z]+\d{3}#/g) ?? [];
+  }
+
   /** The ONE check, shared by the canary and every fixture: render → extract → rules. */
   async function check(element, markers, minPages) {
     const bytes = await renderToBuffer(element);
     const { doc, pages } = await extract(bytes);
-    const violations = mod.documentViolations(pages, LAYOUT, markers.map((marker) => ({ marker, count: 1 })));
+    const violations = [
+      ...mod.documentViolations(pages, LAYOUT, markers.map((marker) => ({ marker, count: 1 }))),
+      ...mod.strandedHeadingViolations(pages),
+      ...mod.readingOrderViolations(pages, compositionOrder(element)),
+    ];
     if (doc.numPages < minPages) violations.push({ kind: "too_few_pages", expectedAtLeast: minPages, found: doc.numPages });
     const counts = violations.reduce((acc, v) => ({ ...acc, [v.kind]: (acc[v.kind] ?? 0) + 1 }), {});
     return { bytes, pages: doc.numPages, pageText: pages, violations, counts };

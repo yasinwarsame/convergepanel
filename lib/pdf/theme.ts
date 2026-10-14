@@ -73,6 +73,36 @@ export const pdfStyles = StyleSheet.create({
     marginBottom: 10,
     backgroundColor: COLORS.surface,
   },
+  /**
+   * A paginating card is drawn as two sibling blocks — its heading and its
+   * body — so the heading can be kept with its content (see
+   * AdaptiveResearchDocument.tsx `PaginatingCard`). Together they draw the
+   * same box as `card`.
+   */
+  cardHead: {
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: COLORS.border,
+    borderTopLeftRadius: 6,
+    borderTopRightRadius: 6,
+    paddingTop: 12,
+    paddingHorizontal: 12,
+    backgroundColor: COLORS.surface,
+  },
+  cardBody: {
+    borderBottomWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: COLORS.border,
+    borderBottomLeftRadius: 6,
+    borderBottomRightRadius: 6,
+    paddingBottom: 12,
+    paddingHorizontal: 12,
+    backgroundColor: COLORS.surface,
+  },
+  /** The gap after a paginating card — a separate element, never a margin on the body (see `PaginatingCard`). */
+  cardGap: { height: 10 },
   bodyText: { fontSize: 10, lineHeight: 1.5, color: COLORS.text },
   mutedText: { fontSize: 9, lineHeight: 1.4, color: COLORS.muted },
   bulletRow: { flexDirection: "row", marginBottom: 3 },
@@ -81,6 +111,8 @@ export const pdfStyles = StyleSheet.create({
   fieldGrid: { flexDirection: "row", flexWrap: "wrap", marginBottom: 8 },
   fieldCell: { width: "50%", marginBottom: 8, paddingRight: 8 },
   fieldLabel: { fontSize: 7.5, fontFamily: "Helvetica-Bold", color: COLORS.muted, textTransform: "uppercase", marginBottom: 2 },
+  /** A model card's heading (the model identity label) — `fieldLabel` with more space below. */
+  modelLabel: { fontSize: 7.5, fontFamily: "Helvetica-Bold", color: COLORS.muted, textTransform: "uppercase", marginBottom: 4 },
   fieldValue: { fontSize: 10, color: COLORS.text },
   badge: {
     fontSize: 8,
