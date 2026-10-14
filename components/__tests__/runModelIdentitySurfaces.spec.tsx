@@ -130,6 +130,55 @@ describe("ResultsDisplay answer cards", () => {
   });
 });
 
+describe("ResultsDisplay compare view", () => {
+  const OK_PAIR = [
+    LIVE_ROWS[0],
+    { ...LIVE_ROWS[0], modelId: "gemini", provider: "google", requestedModel: "gemini-2.0-flash", actualModel: "gemini-2.0-flash", rawTextFull: PRE_62A_ROWS[1].rawTextFull, rawText: PRE_62A_ROWS[1].rawText },
+  ];
+  async function openCompare(rows: unknown[]) {
+    const r = await mount(props(rows));
+    const tab = r.root.findAll((n) => n.type === "button" && n.children.includes("Compare view"));
+    expect(tab).toHaveLength(1);
+    await act(async () => {
+      tab[0].props.onClick();
+    });
+    const heading = r.root.findAll((n) => n.type === "h3" && n.children.length === 1 && n.children[0] === "Compare View");
+    expect(heading).toHaveLength(1);
+    await act(async () => {
+      heading[0].parent!.props.onClick();
+    });
+    return r;
+  }
+  it("each compare card shows its own recorded requested model", async () => {
+    const r = await openCompare(OK_PAIR);
+    expect(identityDetails(r)).toEqual(expect.arrayContaining(["requested: gpt-4o-mini", "requested: gemini-2.0-flash"]));
+    expectNoProductLabel(textOf(r));
+  });
+  it("pre-6.2a compare cards say 'model not recorded'", async () => {
+    const r = await openCompare(PRE_62A_ROWS);
+    const details = identityDetails(r);
+    expect(details.length).toBeGreaterThanOrEqual(2);
+    for (const d of details) expect(d).toBe("model not recorded");
+  });
+});
+
+describe("consensus engine's unified answer (persisted synthesis HTML)", () => {
+  it("names models by family at every naming site — never a product or stale label", () => {
+    const mk = (modelId: string, t: string) => ({ modelId, status: "ok", rawTextFull: t, rawText: t, latencyMs: 1 });
+    const html = synthesizeReport([
+      mk("chatgpt", "Remote work increases productivity for most knowledge workers. Hybrid schedules reduce commuting costs significantly. Remote work does not harm collaboration."),
+      mk("claude", "Remote work increases productivity for most knowledge workers. Hybrid schedules reduce commuting costs significantly. Remote work harms collaboration and mentoring."),
+      mk("gemini", "Remote work decreases productivity for most knowledge workers. Hybrid schedules reduce commuting costs significantly. Remote work harms collaboration and mentoring."),
+    ] as never)!.unifiedAnswer;
+    expect(html).toContain("Agreed by 3 models (ChatGPT, Claude, Gemini)");
+    expect(html).toContain("Different perspectives from: ChatGPT, Claude, Gemini");
+    expect(html).toContain("3 models agree — ChatGPT, Claude, Gemini");
+    expect(html).toContain("conflicting views: ChatGPT, Claude, Gemini");
+    for (const name of ["ChatGPT", "Claude", "Gemini"]) expect(html).toContain(`<li class="mb-1"><strong>${name}:</strong>`);
+    expectNoProductLabel(html);
+  });
+});
+
 describe("ResultsDisplay → adaptive surfaces: the run's provenance is handed down", () => {
   const ADAPTIVE = { schemaId: "generic", classification: { queryType: "generic" }, results: [], alignedClaims: [] };
 
