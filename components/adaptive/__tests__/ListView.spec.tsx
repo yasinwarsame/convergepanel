@@ -185,8 +185,12 @@ describe("ListView — inflation fixture", () => {
 
   it("renders one row per model (5 rows)", () => {
     const html = render();
-    for (const label of ["GPT 5.2", "Claude Opus 4.5", "Grok 4", "Perplexity Pro", "Gemini 2.0 Flash"]) {
+    // Run surfaces name each slot by family, never by the product-selection label.
+    for (const label of ["ChatGPT", "Claude", "Grok", "Perplexity", "Gemini"]) {
       expect(html).toContain(label);
+    }
+    for (const productLabel of ["GPT 5.2", "Claude Opus 4.5", "Grok 4", "Perplexity Pro", "Gemini 2.0 Flash"]) {
+      expect(html).not.toContain(productLabel);
     }
     // One expandable row button per ok model.
     expect((html.match(/aria-expanded="false"/g) || []).length).toBe(5);
@@ -289,10 +293,11 @@ describe("ListView — failed model fixture", () => {
       })
     );
 
-    expect(html).toContain("GPT 5.2");
-    expect(html).toContain("Gemini 2.0 Flash");
+    expect(html).toContain("ChatGPT");
+    expect(html).toContain("Gemini");
+    expect(html).not.toContain("Gemini 2.0 Flash");
     expect(html).toContain("parse error · excluded");
-    expect(html).toContain("Gemini 2.0 Flash returned an incompatible format and was excluded from comparison.");
+    expect(html).toContain("Gemini returned an incompatible format and was excluded from comparison.");
     expect(html).toContain("Schema validation failed");
   });
 });

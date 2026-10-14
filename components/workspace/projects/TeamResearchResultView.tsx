@@ -33,15 +33,11 @@
  * unformatted paragraph; any non-JSON text renders exactly as before.
  */
 
-import { PANEL_MODELS, type PanelModelId } from "@/lib/panelModels";
+import { runModelIdentityLabel, runModelProvenanceFromResultRow } from "@/lib/panel/runModelIdentity";
 import { GovernanceChip } from "@/components/shared/GovernanceChip";
 import { stripJsonFences } from "@/lib/adaptiveSchema/util";
 import type { TeamResearchRunResult } from "@/hooks/useTeamProjectResearch";
 import StructuredResearchResult from "@/components/workspace/projects/StructuredResearchResult";
-
-function modelLabel(modelId: string): string {
-  return PANEL_MODELS.find((m) => m.id === (modelId as PanelModelId))?.label ?? modelId;
-}
 
 /**
  * Returns the parsed value if `rawTextFull` (after stripping an optional
@@ -79,7 +75,7 @@ export default function TeamResearchResultView({ run }: { run: TeamResearchRunRe
           return (
             <li key={result.modelId} className="rounded-xl border-2 border-cp-border bg-cp-raised p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-sm font-semibold text-cp-text">{modelLabel(result.modelId)}</span>
+                <span className="text-sm font-semibold text-cp-text">{runModelIdentityLabel(runModelProvenanceFromResultRow(result))}</span>
                 {result.status !== "ok" && (
                   <span className="rounded-full border border-cp-border bg-cp-surface px-2 py-0.5 text-xs font-medium text-cp-muted">
                     {result.status === "substituted" ? "Substituted model" : "Failed"}

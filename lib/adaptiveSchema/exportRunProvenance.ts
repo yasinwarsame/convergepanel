@@ -27,6 +27,7 @@
 import type { GovernanceRecordV1 } from "./governanceRecord";
 import type { AdaptiveExportModelProvenance, AdaptiveExportRunProvenance } from "./researchExport";
 import type { ModelId } from "../types";
+import { runModelIdentityLabel, runModelProvenanceFromExport } from "../panel/runModelIdentity";
 
 const EVALUATED_AUTOMATED_STATUSES: readonly string[] = ["passed", "flagged", "blocked"];
 
@@ -158,4 +159,16 @@ export function exportRunProvenanceLines(provenance: AdaptiveExportRunProvenance
     lines.push(`Model (${m.modelId}): ${requested} · ${provider}${substitution}`);
   }
   return lines;
+}
+
+/**
+ * The model-identity label PDF and DOCX print wherever they name a model
+ * (the Models summary and each model's response heading): the slot's family
+ * plus the requested model FROZEN in this export — "ChatGPT · requested:
+ * gpt-4o-mini". A pre-6.2b export (no frozen provenance) or a slot without a
+ * frozen entry reads "ChatGPT · model not recorded". Never a current product
+ * label or current model configuration.
+ */
+export function exportModelIdentityLabel(rawRunProvenance: unknown, modelId: string): string {
+  return runModelIdentityLabel(runModelProvenanceFromExport(readFrozenRunProvenance(rawRunProvenance), modelId));
 }

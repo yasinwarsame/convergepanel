@@ -8,6 +8,7 @@
  */
 
 import { formatVerdictLabel } from "./shareText";
+import { RUN_MODEL_FAMILY_NAMES } from "@/lib/panel/runModelIdentity";
 
 export interface MemoInput {
   type: "claim" | "video" | "research";
@@ -65,13 +66,8 @@ export interface MemoInput {
   modelsUsed?: string[];
 }
 
-const MEMO_MODEL_FALLBACK: Record<string, string> = {
-  chatgpt: "GPT-4o",
-  claude: "Claude Opus 4.5",
-  grok: "Grok 4",
-  perplexity: "Perplexity Pro",
-  gemini: "Gemini 2.0 Flash",
-};
+/** A slot with no supplied name is named by its family only — never a guessed model version. */
+const MEMO_MODEL_FALLBACK: Readonly<Record<string, string>> = RUN_MODEL_FAMILY_NAMES;
 
 export function downloadTextFile(content: string, filename: string): void {
   const blob = new Blob([content], { type: "text/plain;charset=utf-8" });

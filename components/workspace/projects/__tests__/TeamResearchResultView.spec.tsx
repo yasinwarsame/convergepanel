@@ -25,14 +25,32 @@ function baseResult(overrides: Partial<TeamResearchRunResult["results"][number]>
 }
 
 describe("TeamResearchResultView", () => {
-  it("renders each model's label and text", () => {
+  it("renders each model's recorded identity and text — never a product label", () => {
     const html = renderToStaticMarkup(
-      createElement(TeamResearchResultView, { run: { runId: "run-1", results: [baseResult(), baseResult({ modelId: "claude", rawTextFull: "Roughly $48B." })] } })
+      createElement(TeamResearchResultView, {
+        run: {
+          runId: "run-1",
+          results: [
+            baseResult({ requestedModel: "gpt-4o-mini" }),
+            baseResult({ modelId: "claude", rawTextFull: "Roughly $48B.", requestedModel: "claude-haiku-4-5-20251001", provider: "anthropic" }),
+          ],
+        },
+      })
     );
-    expect(html).toContain("GPT 5.2");
-    expect(html).toContain("Claude Opus 4.5");
+    expect(html).toContain("ChatGPT · requested: gpt-4o-mini");
+    expect(html).toContain("Claude · requested: claude-haiku-4-5-20251001");
+    expect(html).not.toContain("GPT 5.2");
+    expect(html).not.toContain("Claude Opus 4.5");
     expect(html).toContain("The market size is approximately $50B.");
     expect(html).toContain("Roughly $48B.");
+  });
+
+  it("a row with no recorded requested model says so — never the product label", () => {
+    const html = renderToStaticMarkup(
+      createElement(TeamResearchResultView, { run: { runId: "run-1", results: [baseResult({ requestedModel: undefined, provider: undefined, actualModel: undefined })] } })
+    );
+    expect(html).toContain("ChatGPT · model not recorded");
+    expect(html).not.toContain("GPT 5.2");
   });
 
   it("a failed model result shows its error message, not empty text", () => {

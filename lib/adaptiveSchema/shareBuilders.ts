@@ -9,7 +9,7 @@
  */
 
 import { ModelId } from "@/lib/types";
-import { getModelDisplayNameSafe } from "@/lib/panelModels";
+import { RunModelProvenanceFacts, runModelFamilyName, runModelLabels } from "@/lib/panel/runModelIdentity";
 import { MemoInput } from "@/lib/verification/generateMemo";
 import { AdaptiveGateStatus, AdaptiveSynthesisReport } from "./types";
 import { dedupeTextList } from "./textSimilarity";
@@ -57,7 +57,7 @@ export function buildAdaptiveSynthesisMarkdown(question: string, report: Adaptiv
     lines.push("## Where models disagree");
     report.disagreements.forEach((d) => {
       lines.push(`- **${d.topic}** — ${d.whyTheyDiffer}`);
-      d.positions.forEach((p) => lines.push(`  - ${getModelDisplayNameSafe(p.modelId)}: ${p.position}`));
+      d.positions.forEach((p) => lines.push(`  - ${runModelFamilyName(p.modelId)}: ${p.position}`));
     });
     lines.push("");
   }
@@ -82,7 +82,13 @@ export function buildAdaptiveMemoInput(
   question: string,
   report: AdaptiveSynthesisReport,
   modelsUsed: ModelId[],
-  verificationId: string
+  verificationId: string,
+  /**
+   * The run's per-slot provenance (live or saved result rows), when the caller
+   * holds it: each model is then named with its recorded requested model.
+   * Without it, models are named by family only — never by a product label.
+   */
+  modelProvenance?: readonly RunModelProvenanceFacts[] | null
 ): MemoInput {
   return {
     type: "research",
@@ -94,7 +100,7 @@ export function buildAdaptiveMemoInput(
     synthesisAgreements: dedupedAgreementItems(report),
     synthesisDisagreements: report.disagreements.map((d) => `${d.topic}: ${d.whyTheyDiffer}`),
     confidenceAssessment: report.executiveSummary || report.certaintyAssessment,
-    modelsUsed: modelsUsed.map((id) => getModelDisplayNameSafe(id)),
+    modelsUsed: runModelLabels(modelsUsed, modelProvenance),
     verificationId,
   };
 }

@@ -13,7 +13,7 @@
 
 import "server-only";
 import { ModelId } from "@/lib/types";
-import { getModelDisplayNameSafe } from "@/lib/panelModels";
+import { runModelFamilyName } from "@/lib/panel/runModelIdentity";
 import { AlignedClaim } from "./types";
 import { AdaptiveGateResult } from "./gate";
 import { claimSalience } from "./scoring";
@@ -27,14 +27,14 @@ export interface AdaptivePanelVerdict {
 }
 
 /**
- * Resolves a model's display name from panelModels.ts — the single
- * non-deprecated source of truth. Do NOT read lib/modelInfo.ts's MODEL_INFO
- * map directly here: it's stale (e.g. it lists gemini as "Gemini 3 Pro" when
- * the actual configured model is "Gemini 2.0 Flash") and was the root cause
- * of a model-name mismatch bug in generated synthesis text.
+ * Names a slot in generated synthesis text by its product family only
+ * ("ChatGPT"). Neither product label source may be used here: lib/modelInfo.ts's
+ * MODEL_INFO is stale ("Gemini 3 Pro"), and lib/panelModels.ts's labels
+ * ("GPT 5.2") are selection copy that need not match the model this run
+ * requested — this text is persisted with the run and must stay true later.
  */
 function modelLabel(modelId: ModelId): string {
-  return getModelDisplayNameSafe(modelId);
+  return runModelFamilyName(modelId);
 }
 
 /** Exported for reuse by verdictCard.ts's topConsensus field — same "highest-salience consensus/majority claim" rule. */

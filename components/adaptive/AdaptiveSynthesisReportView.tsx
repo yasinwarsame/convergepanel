@@ -56,6 +56,7 @@ import { classifyClaimSeverity } from "@/lib/verificationGate/claimSeverity";
 import { VerificationActions } from "@/components/VerificationActions";
 import { generateVerificationMemo, downloadTextFile } from "@/lib/verification/generateMemo";
 import { copyToClipboardWithFallback } from "@/lib/ui/copyFormats";
+import { useRunModelProvenance } from "./RunModelProvenanceContext";
 import {
   buildAdaptiveSynthesisMarkdown,
   buildAdaptiveMemoInput,
@@ -635,6 +636,7 @@ export default function AdaptiveSynthesisReportView({
   onRunFollowUp?: (question: string) => void;
 }) {
   const rows = alignedClaims || [];
+  const modelProvenance = useRunModelProvenance();
   const [generatedPost, setGeneratedPost] = useState<{ type: "linkedin" | "x"; text: string } | null>(null);
   const dedupedWhereModelsAgree = dedupeTextList(report.whereModelsAgree, {
     ...TEXT_DEDUP_THRESHOLDS,
@@ -648,10 +650,10 @@ export default function AdaptiveSynthesisReportView({
   }, [question, report]);
 
   const handleExportMemo = useCallback(() => {
-    const memoInput = buildAdaptiveMemoInput(question, report, modelsUsed, runId || "");
+    const memoInput = buildAdaptiveMemoInput(question, report, modelsUsed, runId || "", modelProvenance);
     const memo = generateVerificationMemo(memoInput);
     downloadTextFile(memo, `research-memo-${runId || "adaptive"}.txt`);
-  }, [question, report, modelsUsed, runId]);
+  }, [question, report, modelsUsed, runId, modelProvenance]);
 
   const handleGenerateLinkedIn = useCallback(() => {
     setGeneratedPost({ type: "linkedin", text: buildAdaptiveLinkedInPost(question, report) });

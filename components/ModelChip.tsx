@@ -11,9 +11,16 @@
  * - "outline": Outlined pill chip (default, matches "Models in MVP" style)
  * - "solid": Solid background chip
  * - "text": Text-only with color (for headings/labels)
+ *
+ * Naming: by default the chip names the logical slot by product FAMILY
+ * ("ChatGPT") — the honest name on any run/result surface, where a product
+ * label with a version ("GPT 5.2") would misstate what the run requested.
+ * Product/marketing surfaces that describe the offering (not a run) opt in to
+ * the product label with `labelKind="product"`.
  */
 
 import { PanelModelId, getPanelModelConfig } from "@/lib/panelModels";
+import { runModelFamilyName } from "@/lib/panel/runModelIdentity";
 
 interface ModelChipProps {
   modelId: PanelModelId | string;
@@ -21,6 +28,8 @@ interface ModelChipProps {
   size?: "xs" | "sm" | "md";
   className?: string;
   uppercase?: boolean;
+  /** "family" (default): slot family name. "product": the product-selection label from lib/panelModels.ts. */
+  labelKind?: "family" | "product";
 }
 
 // Small 2px identity dot per model — the only place model color shows up.
@@ -39,9 +48,9 @@ export default function ModelChip({
   size = "xs",
   className = "",
   uppercase = true,
+  labelKind = "family",
 }: ModelChipProps) {
-  const config = getPanelModelConfig(modelId);
-  const displayName = config.label;
+  const displayName = labelKind === "product" ? getPanelModelConfig(modelId).label : runModelFamilyName(modelId);
   const dotColor = MODEL_DOT_COLORS[modelId] ?? "bg-cp-faint";
 
   // Size classes

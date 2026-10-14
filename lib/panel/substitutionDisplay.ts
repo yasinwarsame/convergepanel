@@ -8,14 +8,16 @@
  * carries them, so live output is unchanged; a saved row carries only what was
  * persisted with the run (Step 6.2a onward), so an older substituted run may say
  * "Substituted" but never names a provider/model/reason it did not record. The
- * logical slot (`modelId`) is used only as the slot's own name — never as the
- * substitute or the requested model.
+ * logical slot (`modelId`) is used only as the slot's own family name — never
+ * as the substitute or the requested model, and never as a model version.
  *
  * Pure and client-safe.
  */
 
-import { getModelDisplayNameSafe } from "@/lib/panelModels";
 import { coerceStatus } from "./normalize";
+import { providerDisplayName, runModelFamilyName } from "./runModelIdentity";
+
+export { providerDisplayName };
 
 type SubstitutionRow = {
   modelId: string;
@@ -28,22 +30,6 @@ type SubstitutionRow = {
 
 function present(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
-}
-
-const PROVIDER_LABELS: Record<string, string> = {
-  deepseek: "DeepSeek",
-  openai: "OpenAI",
-  anthropic: "Anthropic",
-  xai: "XAI",
-  perplexity: "Perplexity",
-  google: "Google",
-};
-
-/** Display name for a recorded provider; null when none was recorded. */
-export function providerDisplayName(provider: unknown): string | null {
-  if (!present(provider)) return null;
-  const p = provider.trim().toLowerCase();
-  return PROVIDER_LABELS[p] ?? p.charAt(0).toUpperCase() + p.slice(1);
 }
 
 const isSubstituted = (r: SubstitutionRow) => coerceStatus(r.status) === "substituted";
@@ -73,13 +59,13 @@ export function modelHealthSubstitution(rows: SubstitutionRow[]): { label: strin
   const count = substituted.length;
   const actualLabels = substituted
     .filter((r) => present(r.actualModel))
-    .map((r) => getModelDisplayNameSafe(r.actualModel as string))
+    .map((r) => (r.actualModel as string).trim())
     .filter((l, i, arr) => arr.indexOf(l) === i);
   const label = count === 1 && actualLabels.length === 1 ? actualLabels[0] : count > 1 ? `${count}` : count > 0 ? "1" : null;
 
   const tooltip = substituted
     .map((r) => {
-      const slot = getModelDisplayNameSafe(r.modelId);
+      const slot = runModelFamilyName(r.modelId);
       const raw = present(r.substitutionReason) ? String(r.substitutionReason) : "";
       const sanitized = raw.replace(/[\n\r]+/g, " ").trim();
       const reason = sanitized ? (sanitized.length > 28 ? `${sanitized.slice(0, 25)}…` : sanitized) : "";

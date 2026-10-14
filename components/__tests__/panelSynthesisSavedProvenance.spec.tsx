@@ -77,7 +77,10 @@ describe("a saved pre-6.2a substituted row", () => {
     const c = chip(r);
     expect(textOf(c)).toBe("Substituted: 1");
     expect(textOf(c)).not.toContain(getModelDisplayNameSafe("claude"));
-    expect(c.props.title).toBe(`${getModelDisplayNameSafe("claude")}: substituted`);
+    expect(textOf(c)).not.toContain("Claude");
+    // The slot is named by family only (model-identity PR A), never by the product label.
+    expect(c.props.title).toBe("Claude: substituted");
+    expect(c.props.title).not.toContain(getModelDisplayNameSafe("claude"));
   });
 
   it("copied markdown names no substitute provider", async () => {
@@ -94,6 +97,6 @@ describe("a saved post-6.2a substituted row", () => {
   });
   it("tooltip states the recorded requested model only", async () => {
     const c = chip(await mount([ok, savedSub({ provider: "deepseek", requestedModel: "claude-RUN-1" })]));
-    expect(c.props.title).toBe(`${getModelDisplayNameSafe("claude")}: substituted (requested claude-RUN-1)`);
+    expect(c.props.title).toBe("Claude: substituted (requested claude-RUN-1)");
   });
 });

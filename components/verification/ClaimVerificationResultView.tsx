@@ -25,7 +25,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { HelpCircle, CheckCircle, AlertTriangle, AlertCircle } from "lucide-react";
-import { getModelDisplayName } from "@/lib/modelInfo";
+import { runModelFamilyName } from "@/lib/panel/runModelIdentity";
 import type { ModelId } from "@/lib/types";
 import type {
   ClaimVerificationClientPayload,
@@ -168,7 +168,7 @@ function agreementSectionFallbackCopy(data: ClaimVerificationClientPayload): str
     pluralLabel: string
   ) => {
     if (models.length === 0) return;
-    const names = models.map((m) => getModelDisplayName(m.modelId as ModelId));
+    const names = models.map((m) => runModelFamilyName(m.modelId as ModelId));
     const namePhrase =
       names.length === 1
         ? names[0]
@@ -202,7 +202,7 @@ export function buildClaimVerdictClipboardText(data: ClaimVerificationClientPayl
   lines.push("");
   lines.push("Per model:");
   for (const m of data.modelEvidence) {
-    lines.push(`- ${getModelDisplayName(m.modelId as ModelId)}: ${formatVerdictLabel(m.verdict)} — ${m.summary}`);
+    lines.push(`- ${runModelFamilyName(m.modelId as ModelId)}: ${formatVerdictLabel(m.verdict)} — ${m.summary}`);
   }
   if (data.whereModelsAgree.length) {
     lines.push("");
@@ -262,7 +262,7 @@ export function ClaimVerificationAuditTrailDetails({ data }: { data: ClaimVerifi
         {bundle.perModel.map((row) => {
           const ok = row.pipelineStatus === "ok";
           const icon = ok ? "✓" : "✗";
-          const name = getModelDisplayName(row.modelId as ModelId);
+          const name = runModelFamilyName(row.modelId as ModelId);
           let verdictKey: string;
           let verdictDisplay: string;
           if (ok && row.verdictLabel) {
@@ -464,7 +464,7 @@ export default function ClaimVerificationResultView({
                 >
                   <div className="flex flex-wrap items-center gap-2 min-w-0">
                     <span className="font-medium text-cp-text truncate">
-                      {getModelDisplayName(m.modelId as ModelId)}
+                      {runModelFamilyName(m.modelId as ModelId)}
                     </span>
                     <span
                       className={`shrink-0 rounded-full border px-2 py-0.5 text-xs font-medium ${verdictBadgeClass(m.verdict)}`}

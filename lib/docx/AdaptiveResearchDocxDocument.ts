@@ -39,11 +39,10 @@ import {
   WidthType,
 } from "docx";
 import { AdaptiveResearchExportV1 } from "@/lib/adaptiveSchema/researchExport";
-import { exportRunProvenanceLines, readFrozenRunProvenance } from "@/lib/adaptiveSchema/exportRunProvenance";
+import { exportModelIdentityLabel, exportRunProvenanceLines, readFrozenRunProvenance } from "@/lib/adaptiveSchema/exportRunProvenance";
 import { CONSENSUS_LABELS, SOURCE_GROUNDING_LABELS } from "@/lib/adaptiveSchema/reportSummary";
 import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
 import { FieldSpec } from "@/lib/adaptiveSchema/types";
-import { getModelDisplayNameSafe } from "@/lib/panelModels";
 import {
   fieldLabel,
   formatExportTimestamp,
@@ -164,7 +163,7 @@ function coverSection(record: AdaptiveResearchExportV1): (Paragraph | Table)[] {
 
 function statusSummarySection(record: AdaptiveResearchExportV1): (Paragraph | Table)[] {
   const snapshot = record.reportSnapshot;
-  const modelsText = snapshot.models.map((m) => `${getModelDisplayNameSafe(m.modelId)}${m.ok === false ? " (failed)" : ""}`).join(", ");
+  const modelsText = snapshot.models.map((m) => `${exportModelIdentityLabel(snapshot.runProvenance, m.modelId)}${m.ok === false ? " (failed)" : ""}`).join(", ");
   return [
     heading("Report status summary"),
     ...fieldGrid([
@@ -315,7 +314,7 @@ function legacySection(record: AdaptiveResearchExportV1): (Paragraph | Table)[] 
     out.push(muted("Raw per-model responses are not included in this export. Contact your administrator if full model output is needed."));
   } else {
     for (const r of legacy.modelResponses) {
-      out.push(new Paragraph({ children: [new TextRun({ text: getModelDisplayNameSafe(r.modelId), bold: true, size: 20 })], spacing: { before: 120, after: 60 } }));
+      out.push(new Paragraph({ children: [new TextRun({ text: exportModelIdentityLabel(record.reportSnapshot.runProvenance, r.modelId), bold: true, size: 20 })], spacing: { before: 120, after: 60 } }));
       for (const field of schema.fields) {
         const value = r.data?.[field.key];
         if (value == null) continue;

@@ -9,11 +9,18 @@
 
 import { ModelId } from "@/lib/types";
 import { AdaptiveModelResult, AdaptiveStakes } from "@/lib/adaptiveSchema/types";
-import { getPanelModelConfig, getModelDisplayNameSafe } from "@/lib/panelModels";
+import { getPanelModelConfig } from "@/lib/panelModels";
+import { runModelFamilyName } from "@/lib/panel/runModelIdentity";
 import ModelChip from "@/components/ModelChip";
 
+/**
+ * A completed run's slot, named by product family only ("ChatGPT") — never a
+ * product/marketing label with a version ("GPT 5.2"), which says nothing about
+ * what this run actually requested. The run's recorded model is shown
+ * separately, from its own provenance, where the surface holds it.
+ */
 export function getModelLabel(modelId: ModelId | string): string {
-  return getModelDisplayNameSafe(modelId);
+  return runModelFamilyName(modelId);
 }
 
 export function splitResults(results: AdaptiveModelResult[]): {

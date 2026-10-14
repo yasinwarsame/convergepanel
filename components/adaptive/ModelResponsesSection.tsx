@@ -34,6 +34,8 @@ import { FieldSpec, ComparisonCell, ResultSchema } from "@/lib/adaptiveSchema/ty
 import { AdaptiveGateResult, AdaptiveModelResult, AdaptiveSynthesisReport, AdaptiveTrustSummary, AlignedClaim } from "@/lib/adaptiveSchema/types";
 import { Card, SectionLabel, BulletList, FailedResultsNote, splitResults, getModelLabel } from "./shared";
 import ModelChip from "@/components/ModelChip";
+import { runModelIdentityDetail } from "@/lib/panel/runModelIdentity";
+import { useRunModelProvenance } from "./RunModelProvenanceContext";
 import ListView from "./ListView";
 
 function ComparisonCellList({ cells }: { cells: ComparisonCell[] }) {
@@ -108,6 +110,7 @@ function RawResponsesUnavailableNotice() {
 
 function RawModelOutputList({ schema, results }: { schema: ResultSchema; results: AdaptiveModelResult[] }) {
   const { ok, failed } = splitResults(results);
+  const provenance = useRunModelProvenance();
   if (ok.length === 0 && failed.length === 0) return <RawResponsesUnavailableNotice />;
 
   return (
@@ -115,11 +118,19 @@ function RawModelOutputList({ schema, results }: { schema: ResultSchema; results
       <SectionLabel>Raw model output ({ok.length})</SectionLabel>
       <div className="space-y-3">
         <FailedResultsNote failed={failed} />
-        {ok.map((r) => (
+        {ok.map((r) => {
+          // The run's recorded identity for this slot, only when this surface holds that row.
+          const facts = provenance?.find((f) => f.modelId === r.modelId);
+          return (
           <Card key={r.modelId} className="bg-slate-50/60">
             <div className="mb-2">
               <ModelChip modelId={r.modelId} size="xs" />
               <span className="sr-only">{getModelLabel(r.modelId)}</span>
+              {facts && (
+                <span className="ml-2 text-xs text-slate-500" data-testid="run-model-identity-detail">
+                  {runModelIdentityDetail(facts)}
+                </span>
+              )}
             </div>
             <div className="space-y-3">
               {schema.fields.map((field) => (
@@ -130,7 +141,8 @@ function RawModelOutputList({ schema, results }: { schema: ResultSchema; results
               ))}
             </div>
           </Card>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
