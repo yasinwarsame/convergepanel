@@ -456,6 +456,53 @@ function legacyHeadingSweepMixed(step: number): PdfLayoutFixture {
   };
 }
 
+/**
+ * The FIRST heading of a content section is the first child of its wrapper —
+ * the one position where only the zero-height anchor gives react-pdf a
+ * previous sibling. A long question (cover subtitle) pushes that first
+ * heading down to the bottom of page 1, step by step.
+ */
+export const HEADING_SWEEP_FIRST_STEPS = 22;
+function firstHeadingSweep(step: number, family: "legacy" | "milestone2"): PdfLayoutFixture {
+  const base = family === "legacy" ? legacyHeadingSweep(0) : milestone2HeadingSweep(0);
+  const question = prose(340 + step * 5, "?");
+  return {
+    ...base,
+    name: `heading-sweep-first-${family}-${String(step).padStart(2, "0")}`,
+    record: { ...base.record, reportSnapshot: { ...base.record.reportSnapshot, question } as never },
+  };
+}
+
+/**
+ * Fields whose values are two to four lines tall at many offsets: a value
+ * that fits on the page but whose trailing spacing does not would be moved
+ * away from its label if that spacing were a margin.
+ */
+export const HEADING_SWEEP_FIELD_STEPS = 18;
+function fieldValueSweep(step: number): PdfLayoutFixture {
+  const fixture = legacyHeadingSweep(0);
+  const m = markerFactory("F");
+  const synthesis = legacySynthesis(prose(20 + step * 4, m.next()), m);
+  const modelResponses = MODELS.slice(0, 4).map((modelId, k) => ({
+    modelId,
+    schemaId: "contested_empirical",
+    ok: true,
+    data: {
+      summary: prose(22 + ((step + k) % 4) * 10, m.next()),
+      settledClaims: [{ id: `s-${modelId}`, claim: prose(18 + ((step * 3 + k) % 4) * 8, m.next()), stance: "asserts", confidence: "settled", evidenceType: "empirical" }],
+      disputedClaims: [{ id: `d-${modelId}`, claim: prose(20 + ((step + 2 * k) % 3) * 9, m.next()), stance: "asserts", confidence: "contested", evidenceType: "theoretical" }],
+      openQuestions: [prose(16 + ((step + k) % 3) * 10, m.next())],
+    },
+  }));
+  return {
+    ...fixture,
+    name: `heading-sweep-fields-${String(step).padStart(2, "0")}`,
+    minPages: 2,
+    markers: m.all,
+    record: { ...fixture.record, reportSnapshot: { ...fixture.record.reportSnapshot, models: MODELS.slice(0, 4).map((modelId) => ({ modelId, ok: true })), legacy: { schemaId: "contested_empirical", alignedClaims: [], synthesisReport: synthesis, modelResponses } } as never },
+  };
+}
+
 export function pdfLayoutFixtures(): PdfLayoutFixture[] {
   return [
     legacyLongCards(),
@@ -467,5 +514,8 @@ export function pdfLayoutFixtures(): PdfLayoutFixture[] {
     ...Array.from({ length: HEADING_SWEEP_STEPS }, (_, i) => legacyHeadingSweep(i)),
     ...Array.from({ length: HEADING_SWEEP_STEPS }, (_, i) => milestone2HeadingSweep(i)),
     ...Array.from({ length: HEADING_SWEEP_MIXED_STEPS }, (_, i) => legacyHeadingSweepMixed(i)),
+    ...Array.from({ length: HEADING_SWEEP_FIRST_STEPS }, (_, i) => firstHeadingSweep(i, "legacy")),
+    ...Array.from({ length: HEADING_SWEEP_FIRST_STEPS }, (_, i) => firstHeadingSweep(i, "milestone2")),
+    ...Array.from({ length: HEADING_SWEEP_FIELD_STEPS }, (_, i) => fieldValueSweep(i)),
   ];
 }

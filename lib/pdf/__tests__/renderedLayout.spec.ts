@@ -7,8 +7,10 @@
  * canary) with the production renderer and extracts positioned text with
  * pdfjs-dist. The verdict below is RECOMPUTED here from that raw text
  * geometry with lib/pdf/layoutIntegrity.ts — never taken from the script's
- * own summary — and the expected reading order is taken here from the
- * composed element tree, not from the PDF:
+ * own summary — and the expected reading order is derived here from the
+ * export RECORD's own data order (synthesis, then each model in order, each
+ * field in schema order; receipt sections in document order), independent
+ * of both the composer and the PDF:
  *  - the canary (two consecutive over-tall non-breaking cards) MUST fail;
  *  - every fixture: no overlapping text; nothing outside the page content
  *    area (footer band, off page); every content marker exactly once; markers
@@ -32,6 +34,8 @@ import { tmpdir } from "os";
 import path from "path";
 import { AdaptiveResearchDocument } from "@/lib/pdf/AdaptiveResearchDocument";
 import { pdfLayoutFixtures } from "@/lib/pdf/__fixtures__/layoutFixtures";
+import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
+import type { AdaptiveResearchExportV1 } from "@/lib/adaptiveSchema/researchExport";
 import { documentViolations, readingOrderViolations, strandedHeadingViolations, type PdfPageText } from "@/lib/pdf/layoutIntegrity";
 import { extractPdfElementText } from "./testUtils";
 
@@ -40,6 +44,37 @@ type Report = { canary: { detected: boolean; violationCounts: Record<string, num
 
 const LAYOUT = { paddingTop: 48, paddingBottom: 56 };
 const CANARY_MARKERS = Array.from({ length: 90 }, (_, i) => `#C${String(i + 1).padStart(3, "0")}#`);
+
+const MARKER = /#[A-Z]+\d{3}#/g;
+
+/**
+ * The semantic order a reader must meet the content in, from the record's data
+ * alone: JSON serialization keeps array order and object key order, so the
+ * markers of this projection come out in document order.
+ */
+function canonicalMarkerOrder(record: AdaptiveResearchExportV1): string[] {
+  const snap = record.reportSnapshot as unknown as Record<string, any>;
+  let projection: unknown[];
+  if (record.schemaFamily === "legacy") {
+    const legacy = snap.legacy;
+    const synthesis = legacy.synthesisReport;
+    const vc = synthesis?.verdictCard;
+    const fields = SCHEMA_REGISTRY[legacy.schemaId as keyof typeof SCHEMA_REGISTRY].fields;
+    projection = [
+      synthesis?.unifiedAnswer,
+      vc?.topConsensus,
+      vc?.keyDisagreement,
+      vc?.disagreementDetail,
+      vc?.caveat,
+      (legacy.modelResponses ?? []).map((r: { data?: Record<string, unknown> }) => fields.map((f) => r.data?.[f.key])),
+    ];
+  } else {
+    const m2 = snap.milestone2;
+    const r = m2.decisionReceipt;
+    projection = [r?.conclusion, r?.basis, r?.assumptions, r?.uncertainties, r?.limitations, r?.sources, m2.result?.tradeoffs, m2.result?.bestUseRecommendations];
+  }
+  return JSON.stringify(projection).match(MARKER) ?? [];
+}
 
 let report: Report;
 beforeAll(() => {
@@ -81,10 +116,11 @@ describe.each(pdfLayoutFixtures().map((f) => [f.name, f] as const))("%s", (name,
   it("keeps every heading with its content (no non-final page ends with a heading)", () => {
     expect(strandedHeadingViolations(row().pageText)).toEqual([]);
   });
-  it("renders content markers in composition order", () => {
-    const composed = extractPdfElementText(AdaptiveResearchDocument({ record: fixture.record })).match(/#[A-Z]+\d{3}#/g) ?? [];
-    expect(composed).toHaveLength(fixture.markers.length);
-    expect(readingOrderViolations(row().pageText, composed)).toEqual([]);
+  it("renders content markers in the record's semantic order (and composes them in that order)", () => {
+    const canonical = canonicalMarkerOrder(fixture.record);
+    expect([...canonical].sort()).toEqual([...fixture.markers].sort());
+    expect(extractPdfElementText(AdaptiveResearchDocument({ record: fixture.record })).match(MARKER) ?? []).toEqual(canonical);
+    expect(readingOrderViolations(row().pageText, canonical)).toEqual([]);
   });
   it(`paginates to at least ${fixture.minPages} page(s)`, () => {
     expect(row().pages).toBeGreaterThanOrEqual(fixture.minPages);

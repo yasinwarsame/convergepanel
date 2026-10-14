@@ -112,7 +112,8 @@ describe("stranded headings", () => {
 
 describe("reading order", () => {
   it("orders by page, then line top-down, then left to right within a line", () => {
-    const pages = [page([t("#A002#", 300, 700), t("#A001#", 50, 700.4), t("#A003#", 50, 680)], 1), page([t("#A004#", 50, 780)], 2)];
+    // Same line, but the right-hand run has the (slightly) higher baseline: only the x order puts it second.
+    const pages = [page([t("#A002#", 300, 700.4), t("#A001#", 50, 700), t("#A003#", 50, 680)], 1), page([t("#A004#", 50, 780)], 2)];
     expect(readingLines(pages[0]).map((l) => l.map((i) => i.str))).toEqual([["#A001#", "#A002#"], ["#A003#"]]);
     expect(renderedMarkerSequence(pages)).toEqual(["#A001#", "#A002#", "#A003#", "#A004#"]);
   });
