@@ -4,8 +4,9 @@
  * produces it, fail-closed:
  *  - `wrap={false}` on ANY element (View, Text or anything else) is allowed
  *    only at explicitly reviewed, bounded locations: the bounded cards, the
- *    paginating-card heading block, short heading labels, a bullet's mark and
- *    a short metric value. A new non-breaking element anywhere else fails
+ *    paginating-card heading block, a card that is only its model label (a
+ *    failed model), short heading labels, a bullet's mark and a short metric
+ *    value. A new non-breaking element anywhere else fails
  *    here (R1 MAJOR 2: a non-breaking Text taller than a page loses its text);
  *  - every non-breaking element that can move (no non-breaking ancestor) has
  *    an earlier non-fixed sibling: react-pdf keeps a parent whole on the
@@ -15,6 +16,7 @@
  *    minPresenceAhead in that position (R1 MAJOR 1) — and keeps the distance
  *    its kind requires;
  *  - no metric row is non-breaking (R3 MAJOR: a label can be of any length);
+ *    a long metric value splits at any line beside its label (R4 MINOR 2);
  *  - every fixture marker is composed exactly once.
  */
 jest.mock("@react-pdf/renderer", () => ({
@@ -110,6 +112,13 @@ function nonBreakingIsAllowed(el: El): string | null {
   const text = extractPdfElementText(el).trim();
   if (el.type === "VIEW" && el.props.style === pdfStyles.card && BOUNDED_CARD_LABELS.some((l) => text.startsWith(l))) return "bounded card";
   if (el.type === "VIEW" && el.props.style === pdfStyles.cardHead && text.length <= MAX_HEADING_CHARS) return "card heading block";
+  if (
+    el.type === "VIEW" &&
+    el.props.style === pdfStyles.labelOnlyCard &&
+    expand(el.props.children).every((c) => c.type === "TEXT" && c.props.style === pdfStyles.modelLabel) &&
+    text.length <= MAX_HEADING_CHARS
+  )
+    return "label-only card";
   if (el.type === "TEXT" && HEADING_LABEL_STYLES.has(el.props.style) && text.length <= MAX_HEADING_CHARS) return "heading label";
   if (el.type === "TEXT" && el.props.style === pdfStyles.bulletMark && text === "•") return "bullet mark";
   if (
@@ -154,14 +163,19 @@ describe.each(pdfLayoutFixtures().map((f) => [f.name]))("%s", (name) => {
     expect(first).toEqual([]);
   });
 
-  it("no metric row is non-breaking, and each value precedes (is kept with) its label", () => {
+  it("no metric row is non-breaking; a short value precedes (is kept with) its label, a long one splits at any line beside it", () => {
     walk(tree(name), (el) => {
       if (isMetricRow(el)) {
         expect(el.props.wrap).not.toBe(false);
         const content = expand(el.props.children).filter((e) => !isAnchor(e));
         expect(content).toHaveLength(2);
-        expect(content[0].props.wrap).toBe(false);
         expect(content[1].props.wrap).not.toBe(false);
+        if (extractPdfElementText(content[0]).trim().length <= METRIC_VALUE_MAX_CHARS) {
+          expect(content[0].props.wrap).toBe(false);
+        } else {
+          // R4 MINOR 2: both texts start on the same page whenever any line of the row fits.
+          for (const text of content) expect([text.props.wrap, text.props.orphans, text.props.widows]).toEqual([undefined, 1, 1]);
+        }
       }
     });
   });

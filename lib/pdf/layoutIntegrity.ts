@@ -193,15 +193,18 @@ export function isHeadingItem(item: PdfTextItem): boolean {
 /**
  * A non-final page must not END with headings: its last body line may not
  * consist only of heading runs — heading-sized labels or in-card sub-labels —
- * whose content starts on the next page. The final page is exempt.
+ * whose content starts on the next page. The final page is exempt, and so is
+ * a line that is the last content of a complete card (`endsCompleteCard`:
+ * a card that is its heading alone, closed with its padding) when the page's
+ * painted shapes and layout are given.
  */
-export function strandedHeadingViolations(pages: PdfPageText[]): PdfLayoutViolation[] {
+export function strandedHeadingViolations(pages: PdfPageText[], layout?: PdfLayoutBox): PdfLayoutViolation[] {
   const out: PdfLayoutViolation[] = [];
   pages.forEach((page, idx) => {
     if (idx === pages.length - 1) return;
     const lines = readingLines(page);
     const last = lines[lines.length - 1];
-    if (last && last.every(isHeadingItem)) out.push({ kind: "stranded_heading", pageNumber: page.pageNumber, text: last.map((i) => i.str).join(" ") });
+    if (last && last.every(isHeadingItem) && !(layout && page.shapes && endsCompleteCard(page, last, layout, pages[idx + 1]))) out.push({ kind: "stranded_heading", pageNumber: page.pageNumber, text: last.map((i) => i.str).join(" ") });
   });
   return out;
 }
@@ -284,26 +287,78 @@ export const MIN_CARD_WIDTH = 300;
 export const MIN_CARD_CLOSING_GAP = 8;
 
 /**
- * A card that ENDS on a page (its box stops above the page's bottom padding
- * and no other card box continues directly below it — a card head is followed
- * by its body) keeps its closing padding below its last text: a card whose
- * last text lost its closing would draw its bottom edge against that text.
- * Text bottoms are approximated as the baseline minus a quarter of the font size.
+ * The cards painted on a page: every card-wide box, with boxes that abut
+ * vertically merged into one (a paginating card is drawn as a heading block
+ * directly above its body block, so the two are one card).
+ */
+export function cardBoxes(page: PdfPageText): PdfShapeBox[] {
+  const boxes = (page.shapes ?? []).filter((b) => b.x1 - b.x0 >= MIN_CARD_WIDTH).map((b) => ({ ...b }));
+  boxes.sort((a, b) => b.y1 - a.y1);
+  const cards: PdfShapeBox[] = [];
+  for (const b of boxes) {
+    const above = cards.find((c) => Math.abs(c.y0 - b.y1) <= BOUNDARY_TOLERANCE && c.x0 < b.x1 && b.x0 < c.x1);
+    if (above) above.y0 = Math.min(above.y0, b.y0);
+    else cards.push(b);
+  }
+  return cards;
+}
+
+/**
+ * The space between a card's bottom edge and its last text, or null when the
+ * card does not end on this page (it reaches the bottom padding and continues
+ * on the next page) or holds no text (an empty fragment, judged by
+ * `emptyCardFragmentViolations`). Text bottoms are approximated as the
+ * baseline minus a quarter of the font size.
+ */
+function cardClosingGap(card: PdfShapeBox, body: PdfTextItem[], layout: PdfLayoutBox, evenAtPageBottom = false): number | null {
+  if (!evenAtPageBottom && card.y0 <= layout.paddingBottom + BOUNDARY_TOLERANCE) return null;
+  const inside = body.filter((i) => i.x >= card.x0 && i.x <= card.x1 && i.y >= card.y0 && i.y <= card.y1);
+  if (inside.length === 0) return null;
+  return Math.min(...inside.map((i) => i.y - 0.25 * i.height)) - card.y0;
+}
+
+/**
+ * A card that ENDS on a page keeps its closing padding below its last text: a
+ * card whose last text lost its closing — or a card that is a heading alone,
+ * with no body content to carry it — draws its bottom edge against that text.
+ * A card's heading and body blocks are measured as ONE card (`cardBoxes`), so
+ * a heading block is never exempt for having a body block below it.
  */
 export function cardClosingGapViolations(pages: PdfPageText[], layout: PdfLayoutBox): PdfLayoutViolation[] {
   const out: PdfLayoutViolation[] = [];
   for (const page of pages) {
     if (!page.shapes) continue;
-    const cards = page.shapes.filter((b) => b.x1 - b.x0 >= MIN_CARD_WIDTH);
     const body = page.items.filter((i) => i.str.trim().length > 0 && !isFooterText(i.str));
-    for (const box of cards) {
-      if (box.y0 <= layout.paddingBottom + BOUNDARY_TOLERANCE) continue; // split at the page bottom: continues on the next page
-      if (cards.some((o) => o !== box && Math.abs(o.y1 - box.y0) <= BOUNDARY_TOLERANCE && o.x0 < box.x1 && box.x0 < o.x1)) continue; // a card head (its body follows)
-      const inside = body.filter((i) => i.x >= box.x0 && i.x <= box.x1 && i.y >= box.y0 && i.y <= box.y1);
-      if (inside.length === 0) continue;
-      const gap = Math.min(...inside.map((i) => i.y - 0.25 * i.height)) - box.y0;
-      if (gap < MIN_CARD_CLOSING_GAP) out.push({ kind: "card_closing_gap", pageNumber: page.pageNumber, box, gap: Math.round(gap * 10) / 10 });
+    for (const card of cardBoxes(page)) {
+      const gap = cardClosingGap(card, body, layout);
+      if (gap !== null && gap < MIN_CARD_CLOSING_GAP) out.push({ kind: "card_closing_gap", pageNumber: page.pageNumber, box: card, gap: Math.round(gap * 10) / 10 });
     }
   }
   return out;
+}
+
+/**
+ * Whether a page's last body line is the last content of a COMPLETE card: a
+ * card that closes with its padding below that line (a card that is a heading
+ * alone, e.g. a failed model). Such a line is not a stranded heading. A
+ * heading block whose body moved to the next page is not complete: it ends at
+ * its own label, without closing padding.
+ * A card that reaches the page's bottom padding may instead continue on the
+ * next page (painted shapes alone cannot tell the two apart): it is complete
+ * only when the next page opens with new heading content — the content of a
+ * stranded heading opens the next page with body text.
+ */
+export function endsCompleteCard(page: PdfPageText, line: PdfTextItem[], layout: PdfLayoutBox, nextPage?: PdfPageText): boolean {
+  const body = page.items.filter((i) => i.str.trim().length > 0 && !isFooterText(i.str));
+  const nextOpensWithHeading = (() => {
+    const first = nextPage ? readingLines(nextPage)[0] : undefined;
+    return !!first && first.every(isHeadingItem);
+  })();
+  return cardBoxes(page).some((card) => {
+    if (!line.every((i) => i.x >= card.x0 && i.x <= card.x1 && i.y >= card.y0 && i.y <= card.y1)) return false;
+    const atPageBottom = card.y0 <= layout.paddingBottom + BOUNDARY_TOLERANCE;
+    if (atPageBottom && !nextOpensWithHeading) return false;
+    const gap = cardClosingGap(card, body, layout, true);
+    return gap !== null && gap >= MIN_CARD_CLOSING_GAP && line.some((i) => i.y - 0.25 * i.height - card.y0 <= gap + SAME_LINE_TOLERANCE);
+  });
 }

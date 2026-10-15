@@ -940,6 +940,68 @@ function fineSection(j: number, k: number): PdfLayoutFixture {
   return { name: `fine-section-${j}-${k}`, minPages: 2, markers: m.all.filter((x) => used.has(x)), record, pairs: metricPairs(record) };
 }
 
+// ─── Pass 4 (R4): failed / field-less model cards, long metric values, closing metric rows ──
+/**
+ * A lead card of 1 + `t` body lines and `i` one-line bullets shifts every later
+ * card through page bottoms at 1 pt resolution (as `fineOffset`). Positions
+ * come from dense sweeps (t 0..49 × i 0..14, 750 documents each, archived with
+ * the PR evidence):
+ *  - "failed": failed models (`ok: false`, `data: null`) and a model with no
+ *    shown field (`data: {}`): each card is its label alone. Before the
+ *    correction such a card closed 4.6 pt under its label (all 2,250 cards of
+ *    the sweep); the positions here end a page on such a card, three of them
+ *    flush with the bottom padding;
+ *  - "long-value": metric values over METRIC_ROW_MAX_VALUE_CHARS beside 2- to
+ *    6-line labels. As one "label — value" paragraph the value split away from
+ *    the start of its label (107 of 750 documents);
+ *  - "first-closing" / "later-closing": a card whose only (closing) metric row
+ *    holds a 4- to 6-line label beside a ≤ 32-character value, as the card's
+ *    first field or after a text field. Each position strands the "Metrics"
+ *    label when the metric-first card heading keeps only the ordinary card
+ *    distance (82: 29 of 750) or the metric[] field label only the ordinary
+ *    field distance (65: 50 of 750).
+ */
+export const PASS4_CASES: Readonly<Record<string, ReadonlyArray<readonly [number, number]>>> = {
+  failed: [[0, 7], [29, 14], [43, 12], [34, 7], [9, 0]],
+  "long-value": [[5, 14], [11, 6], [13, 11], [16, 9], [19, 6], [22, 3]],
+  "first-closing": [[0, 5], [4, 1], [33, 11], [38, 7], [40, 13], [42, 11]],
+  "later-closing": [[0, 3], [18, 11], [29, 11], [34, 7], [39, 2], [42, 10]],
+};
+function pass4Boundary(kind: string, t: number, i: number): PdfLayoutFixture {
+  const m = markerFactory("V");
+  const metric = (labelLines: number, value: string) => ({ label: lines(labelLines, m.next()), value: `${m.next()} ${value}`, unit: "", asOf: "2025", source: "Fixture" });
+  const bounded = (labelLines: number, chars: number) => ({ label: lines(labelLines, m.next()), value: widest(chars, m.next()), unit: "", asOf: "2025", source: "Fixture" });
+  const long = (n: number) => "14.2x to 16.8x (median 15.1x; dispersion widened after the guidance cut and revised capital plan) ".repeat(3).slice(0, n);
+  const lead = { thesis: lines(1 + t, m.next()), ...(i > 0 ? { keyAssumptions: Array.from({ length: i }, () => `Assumption ${m.next()}`) } : {}) };
+  const cards: Array<Record<string, unknown> | null> =
+    kind === "failed"
+      ? [null, {}, { thesis: lines(1, m.next()) }, null, { thesis: lines(2, m.next()) }]
+      : kind === "long-value"
+        ? [
+            { thesis: lines(1, m.next()), metrics: [metric(3, long(110))] },
+            { metrics: [metric(4, long(60)), metric(2, long(40))] },
+            { thesis: lines(1, m.next()), metrics: [metric(5, long(130)), metric(6, long(45))] },
+          ]
+        : kind === "first-closing"
+          ? [{ metrics: [bounded(4, 28)] }, { metrics: [bounded(5, 30)] }, { metrics: [bounded(6, 24)] }]
+          : [{ thesis: lines(1, m.next()), metrics: [bounded(4, 28)] }, { thesis: lines(1, m.next()), metrics: [bounded(5, 30)] }, { thesis: lines(1, m.next()), metrics: [bounded(6, 24)] }];
+  const modelResponses = [lead, ...cards].map((data, k) => ({ modelId: MODELS[k % MODELS.length] + (k >= MODELS.length ? `-${k}` : ""), schemaId: "financial_valuation", ok: data !== null, data }));
+  const record = baseRecord({
+    schemaId: "financial_valuation",
+    schemaFamily: "legacy",
+    reportSnapshot: {
+      question: "Pass 4 boundary",
+      models: modelResponses.map((r) => ({ modelId: r.modelId, ok: r.ok })),
+      reportTypeLabel: "Financial Analysis",
+      consensusLevel: "moderate",
+      sourceGroundingLevel: "strong",
+      reportGeneratedAt: "2026-10-14T11:00:00.000Z",
+      legacy: { schemaId: "financial_valuation", alignedClaims: [], modelResponses },
+    } as never,
+  });
+  return { name: `${kind}-${t}-${String(i).padStart(2, "0")}`, minPages: 1, markers: m.all, record, pairs: metricPairs(record) };
+}
+
 export function pdfLayoutFixtures(): PdfLayoutFixture[] {
   return [
     legacyLongCards(),
@@ -967,5 +1029,6 @@ export function pdfLayoutFixtures(): PdfLayoutFixture[] {
     ...Array.from({ length: CARD_PRESENCE_GRID.question * CARD_PRESENCE_GRID.first }, (_, i) => cardPresenceGrid(Math.floor(i / CARD_PRESENCE_GRID.first), i % CARD_PRESENCE_GRID.first)),
     ...FINE_OFFSET_CASES.map(([t, i]) => fineOffset(t, i)),
     ...FINE_SECTION_CASES.map(([j, k]) => fineSection(j, k)),
+    ...Object.entries(PASS4_CASES).flatMap(([kind, cases]) => cases.map(([t, i]) => pass4Boundary(kind, t, i))),
   ];
 }

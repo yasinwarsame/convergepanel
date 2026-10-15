@@ -5,6 +5,7 @@
  */
 import {
   BOUNDARY_TOLERANCE,
+  cardBoxes,
   cardClosingGapViolations,
   MIN_CARD_CLOSING_GAP,
   detachedPairViolations,
@@ -215,13 +216,56 @@ describe("card closing gap", () => {
   it("a card split at the page bottom continues on the next page and is not judged", () => {
     expect(cardClosingGapViolations([withShapes([t("last line on page", 57, 60)], [box(44, 551, LAYOUT.paddingBottom, 600)])], LAYOUT)).toEqual([]);
   });
-  it("a card head directly above its body is not a card end", () => {
+  it("a card's heading and body blocks are measured as one card", () => {
     const head = box(44, 551, 575, 600);
     const body = box(44, 551, 400, 575);
     expect(cardClosingGapViolations([withShapes([t("HEADING", 57, 580, 100, 7.5), t("body", 57, 450)], [head, body])], LAYOUT)).toEqual([]);
+    expect(cardBoxes(withShapes([], [head, body]))).toEqual([box(44, 551, 400, 600)]);
+  });
+  it("a heading block above a 1 pt body (a card with no body content) is a card end without its closing padding", () => {
+    // R4 MINOR 1: a failed model's card closed 4.6 pt under its label; the head was exempt for having a body below it.
+    const head = box(44, 551, 223.5, 248.8);
+    const body = box(44, 551, 222.5, 223.5);
+    const v = cardClosingGapViolations([withShapes([t("CLAUDE · MODEL NOT RECORDED", 57, 229, 100, 7.5)], [head, body])], LAYOUT);
+    expect(v).toEqual([{ kind: "card_closing_gap", pageNumber: 1, box: box(44, 551, 222.5, 248.8), gap: 4.6 }]);
   });
   it("narrow shapes (badges, marks) and pages without shapes are ignored", () => {
     expect(cardClosingGapViolations([withShapes([t("badge", 480, 700)], [box(470, 540, 698, 712)])], LAYOUT)).toEqual([]);
     expect(cardClosingGapViolations([page([t("text", 57, 400)])], LAYOUT)).toEqual([]);
+  });
+});
+
+describe("stranded heading versus a complete label-only card", () => {
+  const box = (x0: number, x1: number, y0: number, y1: number): PdfShapeBox => ({ x0, x1, y0, y1 });
+  const at = (items: PdfTextItem[], shapes: PdfShapeBox[], pageNumber: number): PdfPageText => ({ ...page(items, pageNumber), shapes });
+  const next = at([t("next page text", 57, 700)], [box(44, 551, 600, 780)], 2);
+  it("a page ending on a label-only card closed with its padding is not a stranded heading", () => {
+    const label = t("CLAUDE · MODEL NOT RECORDED", 57, 100, 100, 7.5);
+    const card = box(44, 551, 100 - 1.9 - 4 - 12, 125);
+    expect(strandedHeadingViolations([at([t("body", 57, 300), label], [box(44, 551, 280, 320), card], 1), next], LAYOUT)).toEqual([]);
+  });
+  it("a card heading block whose body moved to the next page is stranded (it ends at its label, without closing padding)", () => {
+    const label = t("CLAUDE · MODEL NOT RECORDED", 57, 100, 100, 7.5);
+    const head = box(44, 551, 100 - 1.9 - 4, 125);
+    expect(strandedHeadingViolations([at([t("body", 57, 300), label], [box(44, 551, 280, 320), head], 1), next], LAYOUT)).toHaveLength(1);
+  });
+  it("a field label at the end of a card body that continues on the next page is stranded", () => {
+    const label = t("METRICS", 57, 70, 60, 7.5);
+    expect(strandedHeadingViolations([at([t("body", 57, 300), label], [box(44, 551, LAYOUT.paddingBottom, 320)], 1), next], LAYOUT)).toHaveLength(1);
+  });
+  it("a label-only card that ends flush at the page bottom is complete when the next page opens with new heading content", () => {
+    const label = t("CLAUDE · MODEL NOT RECORDED", 57, 75, 100, 7.5);
+    const card = box(44, 551, 56.5, 94.7);
+    const nextCard = at([t("GROK · MODEL NOT RECORDED", 57, 780, 100, 7.5), t("text", 57, 760)], [box(44, 551, 700, 794)], 2);
+    expect(strandedHeadingViolations([at([t("body", 57, 300), label], [box(44, 551, 280, 320), card], 1), nextCard], LAYOUT)).toEqual([]);
+  });
+  it("a heading at the bottom of a card that reaches the page bottom is stranded when the next page opens with its body text", () => {
+    const label = t("METRICS", 57, 75, 60, 7.5);
+    const continued = at([t("value text", 57, 780), t("more", 57, 765)], [box(44, 551, 700, 794)], 2);
+    expect(strandedHeadingViolations([at([t("body", 57, 300), label], [box(44, 551, 56.5, 320)], 1), continued], LAYOUT)).toHaveLength(1);
+  });
+  it("without shapes or layout the rule is unchanged", () => {
+    const label = t("CLAUDE · MODEL NOT RECORDED", 57, 100, 100, 7.5);
+    expect(strandedHeadingViolations([page([t("body", 57, 300), label]), page([t("x", 57, 700)], 2)])).toHaveLength(1);
   });
 });

@@ -102,6 +102,18 @@ export const pdfStyles = StyleSheet.create({
     paddingHorizontal: 12,
     backgroundColor: COLORS.surface,
   },
+  /**
+   * A paginating card with no body content (a failed model, or a model with no
+   * shown field) is its heading alone: drawn as one bounded box with the
+   * card's own padding (see AdaptiveResearchDocument.tsx `PaginatingCard`).
+   */
+  labelOnlyCard: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 6,
+    padding: 12,
+    backgroundColor: COLORS.surface,
+  },
   /** The gap after a paginating card — a separate element, never a margin on the body (see `PaginatingCard`). */
   cardGap: { height: 10 },
   bodyText: { fontSize: 10, lineHeight: 1.5, color: COLORS.text },

@@ -142,7 +142,7 @@ try {
     const { doc, pages } = await extract(bytes);
     const violations = [
       ...mod.documentViolations(pages, LAYOUT, markers.map((marker) => ({ marker, count: 1 }))),
-      ...mod.strandedHeadingViolations(pages),
+      ...mod.strandedHeadingViolations(pages, LAYOUT),
       ...mod.readingOrderViolations(pages, compositionOrder(element)),
       ...mod.loneBulletViolations(pages),
       ...mod.detachedPairViolations(pages, pairs),

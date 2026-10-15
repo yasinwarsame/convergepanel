@@ -25,6 +25,7 @@
  *   hand-written per-schema branch.
  */
 
+import { Children } from "react";
 import { Document, Page, View, Text } from "@react-pdf/renderer";
 import { AdaptiveResearchExportV1 } from "@/lib/adaptiveSchema/researchExport";
 import { exportModelIdentityLabel, exportRunProvenanceLines, readFrozenRunProvenance } from "@/lib/adaptiveSchema/exportRunProvenance";
@@ -214,8 +215,23 @@ function BreakAnchor() {
  * body's content sits in one wrapper whose −CARD_BORDER margin makes the body's
  * outer edge, border included, end where its content chain ends (`closingBox`):
  * the body can never overflow a page while all of its content fits.
+ *
+ * A card with NO body content (a failed model, or a model with no shown field)
+ * has nothing to paginate and no text to carry the closing padding: it is its
+ * heading alone, drawn as one bounded box (`labelOnlyCard`) that moves whole.
  */
 function PaginatingCard({ heading, children, keepAhead = CARD_HEADING_PRESENCE_AHEAD }: { heading: React.ReactNode; children: React.ReactNode; keepAhead?: number }) {
+  if (Children.toArray(children).length === 0) {
+    return (
+      <>
+        <BreakAnchor />
+        <View style={pdfStyles.labelOnlyCard} wrap={false}>
+          {heading}
+        </View>
+        <View style={pdfStyles.cardGap} />
+      </>
+    );
+  }
   return (
     <>
       <BreakAnchor />
@@ -444,8 +460,15 @@ function ComparisonMatrixEnrichment({ result }: { result: { tradeoffs?: string[]
  *    taller than a page);
  *  - the rule between rows is the top border of the next row, so it always
  *    travels with the row it precedes.
- * A metric whose value is longer is rendered as one paginating paragraph
- * ("label — value").
+ * A metric whose value is longer is the same row with BOTH texts paginating:
+ * the value (still at most METRIC_ROW_MAX_VALUE_WIDTH of the row) and the
+ * label each split at any line (orphans = widows = 1). The two texts of a row
+ * start at the same height, so whenever any line of the row fits on a page,
+ * the label's first line and the value's first line both stay on it; when
+ * none fits, the row moves whole. Label and value never start on different
+ * pages, however long either is. (One "label — value" paragraph, the earlier
+ * rendering, split 2 / 2 across pages and moved the value away from the start
+ * of its label.)
  */
 export const METRIC_ROW_MAX_VALUE_CHARS = 32;
 /** The value column never takes more than this, so the label always keeps the rest of the row's width. */
@@ -478,12 +501,17 @@ function MetricRows({ items, closing = 0 }: { items: Record<string, unknown>[]; 
             </View>
           );
         }
-        const paragraph = { ...pdfStyles.bodyText, paddingTop: 3, paddingBottom: 3, ...rule };
+        const textEnd = closes ? closingBox(closing, 3) : {};
         return (
-          <Text key={idx} style={closes ? { ...paragraph, ...closingBox(closing, 3) } : paragraph} {...(closes ? { orphans: 1 } : {})}>
-            {label}
-            <Text style={{ fontFamily: "Helvetica-Bold" }}>{` — ${valueText}`}</Text>
-          </Text>
+          <View key={idx} style={{ ...pdfStyles.metricRow, ...rule, ...(closes ? { paddingBottom: 0 } : {}) }}>
+            <BreakAnchor />
+            <Text style={{ ...pdfStyles.metricValue, maxWidth: METRIC_ROW_MAX_VALUE_WIDTH, ...textEnd }} orphans={1} widows={1}>
+              {valueText}
+            </Text>
+            <Text style={{ ...pdfStyles.metricLabel, ...textEnd }} orphans={1} widows={1}>
+              {label}
+            </Text>
+          </View>
         );
       })}
     </View>

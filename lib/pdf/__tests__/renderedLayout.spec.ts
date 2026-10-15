@@ -48,11 +48,12 @@ import {
   detachedPairViolations,
   documentViolations,
   cardClosingGapViolations,
-  MIN_CARD_WIDTH,
+  cardBoxes,
   emptyCardFragmentViolations,
   loneBulletViolations,
   readingOrderViolations,
   strandedHeadingViolations,
+  readingLines,
   type PdfPageText,
 } from "@/lib/pdf/layoutIntegrity";
 import { extractPdfElementText } from "./testUtils";
@@ -94,10 +95,7 @@ function canonicalMarkerOrder(record: AdaptiveResearchExportV1): string[] {
   return JSON.stringify(projection).match(MARKER) ?? [];
 }
 
-/** The reviewed bound below which a metric renders as a label/value row (beyond it: one "label — value" paragraph). */
-const METRIC_ROW_VALUE_MAX_CHARS = 32;
-
-/** Every metric row's [label marker, value marker], from the record's own data (legacy model responses). */
+/** Every metric's [label marker, value marker], from the record's own data (legacy model responses), whatever the value's length (R4 MINOR 2). */
 function metricPairsFromRecord(record: AdaptiveResearchExportV1): Array<[string, string]> {
   const snap = record.reportSnapshot as unknown as Record<string, any>;
   if (record.schemaFamily !== "legacy") return [];
@@ -109,7 +107,7 @@ function metricPairsFromRecord(record: AdaptiveResearchExportV1): Array<[string,
         const valueText = item.value != null ? `${item.value} ${item.unit ?? ""}`.trim() : "—";
         const a = String(item.label ?? "").match(MARKER)?.[0];
         const b = valueText.match(MARKER)?.[0];
-        if (a && b && valueText.length <= METRIC_ROW_VALUE_MAX_CHARS) pairs.push([a, b]);
+        if (a && b) pairs.push([a, b]);
       }
     }
   }
@@ -161,7 +159,7 @@ describe.each(pdfLayoutFixtures().map((f) => [f.name, f] as const))("%s", (name,
     expect(documentViolations(row().pageText, LAYOUT, fixture.markers.map((marker) => ({ marker, count: 1 })))).toEqual([]);
   });
   it("keeps every heading with its content (no non-final page ends with a heading)", () => {
-    expect(strandedHeadingViolations(row().pageText)).toEqual([]);
+    expect(strandedHeadingViolations(row().pageText, LAYOUT)).toEqual([]);
   });
   it("renders content markers in the record's semantic order (and composes them in that order)", () => {
     const canonical = canonicalMarkerOrder(fixture.record);
@@ -187,16 +185,32 @@ it("the pair and fragment rules are exercised: many metric pairs, and painted ca
 });
 
 it("the closing rule is exercised: cards end inside pages throughout the corpus, and the script applies the same rule", () => {
-  // A card that ends on its page: a card-wide box stopping above the bottom padding that is not a head (no box directly below).
+  // A card that ends on its page: a card (heading and body blocks merged) stopping above the bottom padding.
   let ending = 0;
   for (const r of report.report) {
-    for (const p of r.pageText) {
-      const cards = (p.shapes ?? []).filter((b) => b.x1 - b.x0 >= MIN_CARD_WIDTH);
-      ending += cards.filter((b) => b.y0 > LAYOUT.paddingBottom + 2 && !cards.some((o) => o !== b && Math.abs(o.y1 - b.y0) <= 2)).length;
-    }
+    for (const p of r.pageText) ending += cardBoxes(p).filter((c) => c.y0 > LAYOUT.paddingBottom + 2).length;
   }
   expect(ending).toBeGreaterThan(1000);
   for (const r of report.report) expect(r.violationCounts.card_closing_gap ?? 0).toBe(0);
+});
+
+it("cards that are their label alone (failed models) close with their padding, and the complete-card exemption is exercised", () => {
+  // R4 MINOR 1: such a card closed 4.6 pt under its label, and the closing rule exempted it.
+  const failed = report.report.filter((r) => r.fixture.startsWith("failed-"));
+  expect(failed.length).toBeGreaterThanOrEqual(5);
+  let endingOnLabelOnlyCard = 0;
+  for (const r of failed) {
+    expect(cardClosingGapViolations(r.pageText, LAYOUT)).toEqual([]);
+    r.pageText.slice(0, -1).forEach((p) => {
+      const lines = readingLines(p);
+      if (lines[lines.length - 1].some((i) => i.str.includes("MODEL NOT RECORDED"))) endingOnLabelOnlyCard++;
+    });
+    // Without the painted shapes the rule cannot see that the card is complete: the same pages would count as stranded.
+    expect(strandedHeadingViolations(r.pageText, LAYOUT)).toEqual([]);
+  }
+  expect(endingOnLabelOnlyCard).toBeGreaterThanOrEqual(4);
+  const withoutShapes = failed.flatMap((r) => strandedHeadingViolations(r.pageText.map(({ shapes: _shapes, ...p }) => p), LAYOUT));
+  expect(withoutShapes.length).toBe(endingOnLabelOnlyCard);
 });
 
 it("a bullet text continued over pages keeps its indent (its mark is not repeated)", () => {
