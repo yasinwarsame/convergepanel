@@ -184,6 +184,17 @@ it("the pair and fragment rules are exercised: many metric pairs, and painted ca
   for (const r of report.report) for (const p of r.pageText) expect((p.shapes ?? []).length).toBeGreaterThan(0);
 });
 
+it("the pair rule covers metrics of every value length: each long-value fixture's pairs are all checked (R4 MINOR 2)", () => {
+  const longValue = pdfLayoutFixtures().filter((f) => f.name.startsWith("long-value-"));
+  expect(longValue.length).toBeGreaterThanOrEqual(6);
+  for (const f of longValue) {
+    const pairs = metricPairsFromRecord(f.record);
+    expect(pairs.length).toBe(5);
+    expect(pairs).toEqual(expect.arrayContaining(f.pairs ?? []));
+    expect((f.pairs ?? []).length).toBe(5);
+  }
+});
+
 it("the closing rule is exercised: cards end inside pages throughout the corpus, and the script applies the same rule", () => {
   // A card that ends on its page: a card (heading and body blocks merged) stopping above the bottom padding.
   let ending = 0;
