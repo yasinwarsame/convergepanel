@@ -44,7 +44,7 @@ try {
   const entry = `
     export { AdaptiveResearchDocument } from "@/lib/pdf/AdaptiveResearchDocument";
     export { pdfLayoutFixtures } from "@/lib/pdf/__fixtures__/layoutFixtures";
-    export { documentViolations, strandedHeadingViolations, readingOrderViolations, loneBulletViolations, detachedPairViolations, emptyCardFragmentViolations } from "@/lib/pdf/layoutIntegrity";
+    export { documentViolations, strandedHeadingViolations, readingOrderViolations, loneBulletViolations, detachedPairViolations, emptyCardFragmentViolations, cardClosingGapViolations } from "@/lib/pdf/layoutIntegrity";
     export { extractPdfElementText } from "@/lib/pdf/__tests__/testUtils";
     export { LayoutCanaryDocument, CANARY_MARKERS } from "@/lib/pdf/__fixtures__/layoutCanary";
   `;
@@ -147,6 +147,7 @@ try {
       ...mod.loneBulletViolations(pages),
       ...mod.detachedPairViolations(pages, pairs),
       ...mod.emptyCardFragmentViolations(pages, LAYOUT),
+      ...mod.cardClosingGapViolations(pages, LAYOUT),
     ];
     if (doc.numPages < minPages) violations.push({ kind: "too_few_pages", expectedAtLeast: minPages, found: doc.numPages });
     const counts = violations.reduce((acc, v) => ({ ...acc, [v.kind]: (acc[v.kind] ?? 0) + 1 }), {});

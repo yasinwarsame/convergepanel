@@ -47,6 +47,8 @@ import type { AdaptiveResearchExportV1 } from "@/lib/adaptiveSchema/researchExpo
 import {
   detachedPairViolations,
   documentViolations,
+  cardClosingGapViolations,
+  MIN_CARD_WIDTH,
   emptyCardFragmentViolations,
   loneBulletViolations,
   readingOrderViolations,
@@ -167,10 +169,11 @@ describe.each(pdfLayoutFixtures().map((f) => [f.name, f] as const))("%s", (name,
     expect(extractPdfElementText(AdaptiveResearchDocument({ record: fixture.record })).match(MARKER) ?? []).toEqual(canonical);
     expect(readingOrderViolations(row().pageText, canonical)).toEqual([]);
   });
-  it("leaves no bullet mark without its text, no metric value apart from its label, and no empty card fragment", () => {
+  it("leaves no bullet mark without its text, no metric value apart from its label, no empty card fragment, and closes every card", () => {
     expect(loneBulletViolations(row().pageText)).toEqual([]);
     expect(detachedPairViolations(row().pageText, metricPairsFromRecord(fixture.record))).toEqual([]);
     expect(emptyCardFragmentViolations(row().pageText, LAYOUT)).toEqual([]);
+    expect(cardClosingGapViolations(row().pageText, LAYOUT)).toEqual([]);
   });
   it(`paginates to at least ${fixture.minPages} page(s)`, () => {
     expect(row().pages).toBeGreaterThanOrEqual(fixture.minPages);
@@ -181,6 +184,19 @@ it("the pair and fragment rules are exercised: many metric pairs, and painted ca
   const pairs = pdfLayoutFixtures().reduce((n, f) => n + metricPairsFromRecord(f.record).length, 0);
   expect(pairs).toBeGreaterThan(1000);
   for (const r of report.report) for (const p of r.pageText) expect((p.shapes ?? []).length).toBeGreaterThan(0);
+});
+
+it("the closing rule is exercised: cards end inside pages throughout the corpus, and the script applies the same rule", () => {
+  // A card that ends on its page: a card-wide box stopping above the bottom padding that is not a head (no box directly below).
+  let ending = 0;
+  for (const r of report.report) {
+    for (const p of r.pageText) {
+      const cards = (p.shapes ?? []).filter((b) => b.x1 - b.x0 >= MIN_CARD_WIDTH);
+      ending += cards.filter((b) => b.y0 > LAYOUT.paddingBottom + 2 && !cards.some((o) => o !== b && Math.abs(o.y1 - b.y0) <= 2)).length;
+    }
+  }
+  expect(ending).toBeGreaterThan(1000);
+  for (const r of report.report) expect(r.violationCounts.card_closing_gap ?? 0).toBe(0);
 });
 
 it("a bullet text continued over pages keeps its indent (its mark is not repeated)", () => {

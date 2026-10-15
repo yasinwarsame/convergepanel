@@ -62,7 +62,8 @@ export type PdfLayoutViolation =
   | { kind: "reading_order"; expected: string[]; found: string[] }
   | { kind: "lone_bullet"; pageNumber: number }
   | { kind: "detached_pair"; first: string; second: string; firstPage: number | null; secondPage: number | null }
-  | { kind: "empty_card_fragment"; pageNumber: number; box: PdfShapeBox };
+  | { kind: "empty_card_fragment"; pageNumber: number; box: PdfShapeBox }
+  | { kind: "card_closing_gap"; pageNumber: number; box: PdfShapeBox; gap: number };
 
 /** Text the fixed page footer draws inside the bottom padding by design. */
 export function isFooterText(str: string): boolean {
@@ -272,6 +273,36 @@ export function emptyCardFragmentViolations(pages: PdfPageText[], layout: PdfLay
     for (const box of page.shapes) {
       if (box.x1 - box.x0 < MIN_FRAGMENT_WIDTH) continue;
       if (box.y0 > firstTextTop + BOUNDARY_TOLERANCE && box.y1 <= contentTop) out.push({ kind: "empty_card_fragment", pageNumber: page.pageNumber, box });
+    }
+  }
+  return out;
+}
+
+/** A card's painted box is at least this wide (narrower shapes are badges, marks and rules). */
+export const MIN_CARD_WIDTH = 300;
+/** The least space between a card's last text and its bottom edge when the card ends on the page (its closing padding is 12 pt). */
+export const MIN_CARD_CLOSING_GAP = 8;
+
+/**
+ * A card that ENDS on a page (its box stops above the page's bottom padding
+ * and no other card box continues directly below it — a card head is followed
+ * by its body) keeps its closing padding below its last text: a card whose
+ * last text lost its closing would draw its bottom edge against that text.
+ * Text bottoms are approximated as the baseline minus a quarter of the font size.
+ */
+export function cardClosingGapViolations(pages: PdfPageText[], layout: PdfLayoutBox): PdfLayoutViolation[] {
+  const out: PdfLayoutViolation[] = [];
+  for (const page of pages) {
+    if (!page.shapes) continue;
+    const cards = page.shapes.filter((b) => b.x1 - b.x0 >= MIN_CARD_WIDTH);
+    const body = page.items.filter((i) => i.str.trim().length > 0 && !isFooterText(i.str));
+    for (const box of cards) {
+      if (box.y0 <= layout.paddingBottom + BOUNDARY_TOLERANCE) continue; // split at the page bottom: continues on the next page
+      if (cards.some((o) => o !== box && Math.abs(o.y1 - box.y0) <= BOUNDARY_TOLERANCE && o.x0 < box.x1 && box.x0 < o.x1)) continue; // a card head (its body follows)
+      const inside = body.filter((i) => i.x >= box.x0 && i.x <= box.x1 && i.y >= box.y0 && i.y <= box.y1);
+      if (inside.length === 0) continue;
+      const gap = Math.min(...inside.map((i) => i.y - 0.25 * i.height)) - box.y0;
+      if (gap < MIN_CARD_CLOSING_GAP) out.push({ kind: "card_closing_gap", pageNumber: page.pageNumber, box, gap: Math.round(gap * 10) / 10 });
     }
   }
   return out;

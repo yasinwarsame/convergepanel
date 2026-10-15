@@ -856,6 +856,90 @@ function cardPresenceGrid(a: number, b: number): PdfLayoutFixture {
   return { name: `card-presence-${String(a).padStart(2, "0")}-${b}`, minPages: 2, markers: m.all, record };
 }
 
+
+// ─── Pass-3 falsifier follow-up: fine-offset positions ──────────────────
+/** Exactly `n` lines of body text (explicit line breaks), the marker on the first line. */
+function lines(n: number, mark: string): string {
+  return [`${mark} Line one`, ...Array.from({ length: n - 1 }, (_, i) => `Line ${i + 2}`)].join("\n");
+}
+/**
+ * A lead card of `t` body lines (15 pt each) and `i` one-line bullets (17 pt
+ * each) shifts everything after it by 15t + 17i (every residue mod 15 for
+ * i = 0..14), so the later cards' metric rows and metric-first headings cross
+ * page bottoms at 1 pt resolution. A dense sweep (t 0..49 × i 0..14, archived
+ * with the PR evidence) found the positions below: each one detaches a metric
+ * value from its label when the value's keep or its row anchor is removed, or
+ * strands a metric-first card heading whose keep falls to 40 pt.
+ */
+export const FINE_OFFSET_CASES: ReadonlyArray<readonly [number, number]> = [
+  [1, 0], [14, 14], [20, 9], [27, 3], [36, 11], [46, 2],
+  [4, 3], [5, 2], [41, 13], [49, 6],
+];
+function fineOffset(t: number, i: number): PdfLayoutFixture {
+  const m = markerFactory("Q");
+  const metric = (labelLines: number, valueChars: number) => {
+    const label = lines(labelLines, m.next());
+    const value = valueChars > 0 ? widest(valueChars, m.next()) : m.next();
+    return { label, value, unit: "", asOf: "2025", source: "Fixture" };
+  };
+  const card1 = { thesis: lines(1 + t, m.next()), ...(i > 0 ? { keyAssumptions: Array.from({ length: i }, () => `Assumption ${m.next()}`) } : {}) };
+  const card2 = { metrics: [metric(2, 28), metric(3, 0), metric(1, 0), metric(4, 18)], bullCase: lines(1, m.next()) };
+  const card3 = { thesis: lines(1, m.next()), metrics: [metric(2, 28), metric(3, 0), metric(5, 0)], riskFactors: [lines(1, m.next()), lines(2, m.next()), lines(3, m.next())] };
+  const card4 = { thesis: lines(2, m.next()), metrics: [metric(1, 28), metric(6, 0)] };
+  const card5 = { metrics: [metric(3, 28), metric(2, 0)] };
+  const modelResponses = [card1, card2, card3, card4, card5].map((data, k) => ({ modelId: MODELS[k], schemaId: "financial_valuation", ok: true, data }));
+  const record = baseRecord({
+    schemaId: "financial_valuation",
+    schemaFamily: "legacy",
+    reportSnapshot: {
+      question: "Fine offset sweep",
+      models: MODELS.map((modelId) => ({ modelId, ok: true })),
+      reportTypeLabel: "Financial Analysis",
+      consensusLevel: "moderate",
+      sourceGroundingLevel: "strong",
+      reportGeneratedAt: "2026-10-14T11:00:00.000Z",
+      legacy: { schemaId: "financial_valuation", alignedClaims: [], modelResponses },
+    } as never,
+  });
+  return { name: `fine-offset-${t}-${String(i).padStart(2, "0")}`, minPages: 2, markers: m.all, record, pairs: metricPairs(record) };
+}
+/**
+ * The "Model responses" label before a metric-first card: the synthesis answer
+ * (15 pt lines) and caveat (12.6 pt muted lines) step the label through page
+ * bottoms at 0.6 pt resolution. From a dense sweep (j 0..49 × k 0..24): each
+ * position strands the label when it keeps only the non-metric distance.
+ */
+export const FINE_SECTION_CASES: ReadonlyArray<readonly [number, number]> = [
+  [5, 24], [9, 19], [13, 15], [17, 10], [21, 5], [25, 0],
+];
+function fineSection(j: number, k: number): PdfLayoutFixture {
+  const m = markerFactory("U");
+  const synthesis = legacySynthesis(lines(30 + j, m.next()), m);
+  synthesis.verdictCard.caveat = [`${m.next()} Caveat`, ...Array.from({ length: k }, (_, x) => `Caveat ${x + 2}`)].join("\n");
+  const label = lines(3, m.next());
+  const value = widest(28, m.next());
+  const record = baseRecord({
+    schemaId: "financial_valuation",
+    schemaFamily: "legacy",
+    reportSnapshot: {
+      question: "Fine section sweep",
+      models: [{ modelId: "chatgpt", ok: true }],
+      reportTypeLabel: "Financial Analysis",
+      consensusLevel: "moderate",
+      sourceGroundingLevel: "strong",
+      reportGeneratedAt: "2026-10-14T11:00:00.000Z",
+      legacy: {
+        schemaId: "financial_valuation",
+        alignedClaims: [],
+        synthesisReport: synthesis,
+        modelResponses: [{ modelId: "chatgpt", schemaId: "financial_valuation", ok: true, data: { metrics: [{ label, value, unit: "", asOf: "2025", source: "x" }], bullCase: lines(2, m.next()) } }],
+      },
+    } as never,
+  });
+  const used = new Set(JSON.stringify(record).match(/#[A-Z]+\d{3}#/g) ?? []);
+  return { name: `fine-section-${j}-${k}`, minPages: 2, markers: m.all.filter((x) => used.has(x)), record, pairs: metricPairs(record) };
+}
+
 export function pdfLayoutFixtures(): PdfLayoutFixture[] {
   return [
     legacyLongCards(),
@@ -881,5 +965,7 @@ export function pdfLayoutFixtures(): PdfLayoutFixture[] {
     metricRowExtremes(),
     ...Array.from({ length: METRIC_FIRST_GRID.question * METRIC_FIRST_GRID.row }, (_, i) => metricFirstGrid(Math.floor(i / METRIC_FIRST_GRID.row), i % METRIC_FIRST_GRID.row)),
     ...Array.from({ length: CARD_PRESENCE_GRID.question * CARD_PRESENCE_GRID.first }, (_, i) => cardPresenceGrid(Math.floor(i / CARD_PRESENCE_GRID.first), i % CARD_PRESENCE_GRID.first)),
+    ...FINE_OFFSET_CASES.map(([t, i]) => fineOffset(t, i)),
+    ...FINE_SECTION_CASES.map(([j, k]) => fineSection(j, k)),
   ];
 }

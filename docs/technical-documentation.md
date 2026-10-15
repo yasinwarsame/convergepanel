@@ -1147,7 +1147,12 @@ Headings are kept with their content through react-pdf's `minPresenceAhead`. Tha
 - spacing that follows a kept heading's content is padding or a separate element, never a margin. An element that fits on the page but whose bottom margin does not is moved to the next page, which would strand the heading;
 - the "Disagreement" sub-label is a non-breaking sibling of its text.
 
-react-pdf measures the distance from below the element's own bottom margin, so the margin is not part of it. react-pdf never splits a Text of up to orphans + widows − 1 = 3 lines, so each heading keeps three body lines (3 × 15 pt) plus the closing padding of the card when its content may be the card's last, plus a small slack: field labels 65 pt, the "Disagreement" sub-label 60, bullet marks 48 (the mark is the text's first line). A metric[] field label keeps its first row instead: 3 pt padding, a value of up to 3 lines with the card's closing box, and the value's own distance — 106. Card and section headings nest above these: card 82 and section 112, or 118 and 148 when the card's first field is a metric[].
+react-pdf measures the distance from below the element's own bottom margin, so the margin is not part of it. react-pdf never splits a Text of up to orphans + widows − 1 = 3 lines, so each heading keeps three body lines (3 × 15 pt) plus the closing padding of the card when its content may be the card's last, plus a small slack: field labels 65 pt, the "Disagreement" sub-label 60, bullet marks 48 (the mark is the text's first line). A metric[] field label keeps its first row instead: 3 pt padding, a value of up to 3 lines with the card's closing box, and the value's own distance — 106. Card and section headings nest above these: card 82 and section 112, or 118 and 148 when the card's first field is a metric[]. The metric distances are conservative, not exact requirements. A rendered sweep at 1 pt resolution over a full page cycle with the largest bounded rows found that:
+- a metric-first card heading strands only when its keep falls to about 40 pt;
+- a metric[] field label never strands even with no keep, because its first row's value keep holds it;
+- a metric-first section label at the non-metric 112 pt does strand.
+
+The values are kept as reviewed.
 
 Bullets and metrics stay with their text:
 - a bullet's mark is a non-breaking sibling of its text, after an anchor, kept with the text's first lines; the text's indent is the row's padding, so a text continued on the next page keeps it;
@@ -1161,6 +1166,7 @@ A paginating card's body has no bottom padding of its own: the last text of the 
 - heading boundary sweeps: whole-line, mixed, first-heading and field-value;
 - grids of three-line field values, "Disagreement" sub-label positions, bullets, metric rows, metric-first cards and card headings;
 - metric rows at their extremes (widest glyph);
+- fine-offset positions (1 pt and 0.6 pt resolution) where a metric value detaches if its keep or row anchor is removed, or where a metric-first card or section heading strands if its keep shrinks. They were chosen by dense sweeps archived with the PR #235 evidence;
 - the R2 and R3 reviewers' reproductions. It applies `lib/pdf/layoutIntegrity.ts`:
 - no overlapping text;
 - nothing outside the vertical content area or in the footer band;
@@ -1168,6 +1174,7 @@ A paginating card's body has no bottom padding of its own: the last text of the 
 - no non-final page ending with a heading;
 - no bullet mark without its text, and each metric's label and value on one page;
 - no empty card fragment (a filled card shape wholly above a page's first text line);
+- every card that ends on its page keeps at least 8 pt between its last text and its bottom edge (its closing padding);
 - the minimum page count.
 
 A known-bad canary must be detected. `lib/pdf/__tests__/renderedLayout.spec.ts` runs the script in CI and recomputes every verdict from the raw geometry (the metric pairs from the record itself). `--only <name>` limits a local run to matching fixtures.

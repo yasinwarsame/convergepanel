@@ -5,6 +5,8 @@
  */
 import {
   BOUNDARY_TOLERANCE,
+  cardClosingGapViolations,
+  MIN_CARD_CLOSING_GAP,
   detachedPairViolations,
   documentText,
   documentViolations,
@@ -192,5 +194,34 @@ describe("empty card fragment", () => {
   });
   it("pages without extracted shapes are not judged", () => {
     expect(emptyCardFragmentViolations([page([t("card text", 57, firstLineY)])], LAYOUT)).toEqual([]);
+  });
+});
+
+describe("card closing gap", () => {
+  const box = (x0: number, x1: number, y0: number, y1: number): PdfShapeBox => ({ x0, x1, y0, y1 });
+  const withShapes = (items: PdfTextItem[], shapes: PdfShapeBox[]): PdfPageText => ({ ...page(items), shapes });
+  it("a card ending on its page with its edge against its last text has lost its closing padding", () => {
+    const card = box(44, 551, 397.5, 600);
+    expect(cardClosingGapViolations([withShapes([t("first line", 57, 580), t("last line", 57, 400)], [card])], LAYOUT)).toEqual([
+      { kind: "card_closing_gap", pageNumber: 1, box: card, gap: 0 },
+    ]);
+  });
+  it("the threshold is real: a 4 pt gap (a closing lost, only a row's padding left) is still a violation", () => {
+    expect(cardClosingGapViolations([withShapes([t("last line", 57, 400)], [box(44, 551, 400 - 2.5 - 4, 600)])], LAYOUT)).toHaveLength(1);
+  });
+  it("a card that keeps its closing padding below its last text is fine", () => {
+    expect(cardClosingGapViolations([withShapes([t("last line", 57, 400)], [box(44, 551, 400 - 2.5 - MIN_CARD_CLOSING_GAP, 600)])], LAYOUT)).toEqual([]);
+  });
+  it("a card split at the page bottom continues on the next page and is not judged", () => {
+    expect(cardClosingGapViolations([withShapes([t("last line on page", 57, 60)], [box(44, 551, LAYOUT.paddingBottom, 600)])], LAYOUT)).toEqual([]);
+  });
+  it("a card head directly above its body is not a card end", () => {
+    const head = box(44, 551, 575, 600);
+    const body = box(44, 551, 400, 575);
+    expect(cardClosingGapViolations([withShapes([t("HEADING", 57, 580, 100, 7.5), t("body", 57, 450)], [head, body])], LAYOUT)).toEqual([]);
+  });
+  it("narrow shapes (badges, marks) and pages without shapes are ignored", () => {
+    expect(cardClosingGapViolations([withShapes([t("badge", 480, 700)], [box(470, 540, 698, 712)])], LAYOUT)).toEqual([]);
+    expect(cardClosingGapViolations([page([t("text", 57, 400)])], LAYOUT)).toEqual([]);
   });
 });
