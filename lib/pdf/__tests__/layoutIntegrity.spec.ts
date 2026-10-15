@@ -5,16 +5,21 @@
  */
 import {
   BOUNDARY_TOLERANCE,
+  detachedPairViolations,
   documentText,
   documentViolations,
+  emptyCardFragmentViolations,
   isFooterText,
   isHeadingItem,
+  loneBulletViolations,
+  MIN_FRAGMENT_WIDTH,
   pageViolations,
   readingLines,
   readingOrderViolations,
   renderedMarkerSequence,
   strandedHeadingViolations,
   type PdfPageText,
+  type PdfShapeBox,
   type PdfTextItem,
 } from "@/lib/pdf/layoutIntegrity";
 
@@ -139,5 +144,53 @@ describe("reading order", () => {
   });
   it("body text that merely looks like the footer is still read (only exact footer strings are exempt)", () => {
     expect(renderedMarkerSequence([page([t("Page 1 of 2 #A001#", 50, 700)])])).toEqual(["#A001#"]);
+  });
+});
+
+describe("lone bullet mark", () => {
+  it("a line holding only a bullet mark is a violation", () => {
+    expect(loneBulletViolations([page([t("body line", 50, 400), t("•", 50, 70, 5)], 1)])).toEqual([{ kind: "lone_bullet", pageNumber: 1 }]);
+  });
+  it("a mark beside its text on the same line is fine", () => {
+    expect(loneBulletViolations([page([t("•", 50, 400, 5), t("bullet text", 60, 400)])])).toEqual([]);
+  });
+  it("a bullet character inside body text is not a lone mark", () => {
+    expect(loneBulletViolations([page([t("a • b", 50, 400)])])).toEqual([]);
+  });
+});
+
+describe("detached pair", () => {
+  const pages = [page([t("Revenue #N001#", 50, 80), t("12 USD #N002#", 400, 80)], 1), page([t("Margin #N003#", 50, 780)], 2), page([t("5 pct #N004#", 400, 760)], 3)];
+  it("a label and value on one page pass", () => {
+    expect(detachedPairViolations(pages, [["#N001#", "#N002#"]])).toEqual([]);
+  });
+  it("a label and value on different pages fail, with both pages", () => {
+    expect(detachedPairViolations(pages, [["#N003#", "#N004#"]])).toEqual([{ kind: "detached_pair", first: "#N003#", second: "#N004#", firstPage: 2, secondPage: 3 }]);
+  });
+  it("a missing half fails", () => {
+    expect(detachedPairViolations(pages, [["#N001#", "#N999#"]])).toEqual([{ kind: "detached_pair", first: "#N001#", second: "#N999#", firstPage: 1, secondPage: null }]);
+  });
+});
+
+describe("empty card fragment", () => {
+  const box = (x0: number, x1: number, y0: number, y1: number): PdfShapeBox => ({ x0, x1, y0, y1 });
+  const withShapes = (items: PdfTextItem[], shapes: PdfShapeBox[]): PdfPageText => ({ ...page(items), shapes });
+  const firstLineY = 770;
+  it("a card fill lying wholly above the page's first text line is an empty fragment", () => {
+    const strip = box(44, 551, 781, 793.9);
+    expect(emptyCardFragmentViolations([withShapes([t("continued text", 57, firstLineY)], [strip])], LAYOUT)).toEqual([{ kind: "empty_card_fragment", pageNumber: 1, box: strip }]);
+  });
+  it("a 1 pt border-only remainder is caught too", () => {
+    expect(emptyCardFragmentViolations([withShapes([t("next card", 57, firstLineY)], [box(44, 551, 792.9, 793.9)])], LAYOUT)).toHaveLength(1);
+  });
+  it("a card fill that reaches down past the first text line holds content and is fine", () => {
+    expect(emptyCardFragmentViolations([withShapes([t("card text", 57, firstLineY)], [box(44, 551, 600, 793.9)])], LAYOUT)).toEqual([]);
+  });
+  it("narrow shapes (marks, rule ends) and shapes in the header band are ignored", () => {
+    const header = box(44, 551, A4.height - 20, A4.height - 10);
+    expect(emptyCardFragmentViolations([withShapes([t("card text", 57, firstLineY)], [box(44, 44 + MIN_FRAGMENT_WIDTH - 1, 781, 793), header])], LAYOUT)).toEqual([]);
+  });
+  it("pages without extracted shapes are not judged", () => {
+    expect(emptyCardFragmentViolations([page([t("card text", 57, firstLineY)])], LAYOUT)).toEqual([]);
   });
 });

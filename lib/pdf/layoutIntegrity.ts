@@ -31,11 +31,21 @@ export interface PdfTextItem {
   height: number;
 }
 
+/** Bounding box of one FILLED vector shape (card backgrounds, rules drawn as fills), PDF user space. */
+export interface PdfShapeBox {
+  x0: number;
+  x1: number;
+  y0: number;
+  y1: number;
+}
+
 export interface PdfPageText {
   pageNumber: number;
   width: number;
   height: number;
   items: PdfTextItem[];
+  /** Painted vector shapes (card borders and backgrounds, rules). Absent when not extracted. */
+  shapes?: PdfShapeBox[];
 }
 
 export interface PdfLayoutBox {
@@ -49,7 +59,10 @@ export type PdfLayoutViolation =
   | { kind: "out_of_bounds"; pageNumber: number; text: string; edge: "top" | "bottom" | "off_page" }
   | { kind: "missing_marker"; marker: string; expected: number; found: number }
   | { kind: "stranded_heading"; pageNumber: number; text: string }
-  | { kind: "reading_order"; expected: string[]; found: string[] };
+  | { kind: "reading_order"; expected: string[]; found: string[] }
+  | { kind: "lone_bullet"; pageNumber: number }
+  | { kind: "detached_pair"; first: string; second: string; firstPage: number | null; secondPage: number | null }
+  | { kind: "empty_card_fragment"; pageNumber: number; box: PdfShapeBox };
 
 /** Text the fixed page footer draws inside the bottom padding by design. */
 export function isFooterText(str: string): boolean {
@@ -208,4 +221,58 @@ export function readingOrderViolations(pages: PdfPageText[], compositionOrder: r
   const found = renderedMarkerSequence(pages);
   const expected = [...compositionOrder];
   return found.length === expected.length && found.every((m, i) => m === expected[i]) ? [] : [{ kind: "reading_order", expected, found }];
+}
+
+// ─── Atomic pairs and card fragments (R3) ────────────────────────────────
+
+/** A bullet mark is a separate run beside its text: a body line that is ONLY marks is a mark left without its text. */
+export function loneBulletViolations(pages: PdfPageText[]): PdfLayoutViolation[] {
+  const out: PdfLayoutViolation[] = [];
+  for (const page of pages) {
+    for (const line of readingLines(page)) {
+      if (line.every((i) => i.str.trim() === "•")) out.push({ kind: "lone_bullet", pageNumber: page.pageNumber });
+    }
+  }
+  return out;
+}
+
+/** Each pair of markers (e.g. a metric's label and value) must be rendered on the same page. */
+export function detachedPairViolations(pages: PdfPageText[], pairs: ReadonlyArray<readonly [string, string]>): PdfLayoutViolation[] {
+  const pageOf = (marker: string): number | null => {
+    for (const page of pages) if (page.items.some((i) => i.str.includes(marker))) return page.pageNumber;
+    return null;
+  };
+  const out: PdfLayoutViolation[] = [];
+  for (const [first, second] of pairs) {
+    const a = pageOf(first);
+    const b = pageOf(second);
+    if (a === null || b === null || a !== b) out.push({ kind: "detached_pair", first, second, firstPage: a, secondPage: b });
+  }
+  return out;
+}
+
+/** Shapes narrower than this (points) are not card fragments (glyph-sized marks, hairlines' ends). */
+export const MIN_FRAGMENT_WIDTH = 20;
+
+/**
+ * A painted shape lying ENTIRELY above the first line of body text on its
+ * page, inside the content area, is a card fragment with no content: the
+ * bottom padding and border of a card whose text ended on the previous page,
+ * carried over alone. Real card tops (headings, continuations) always extend
+ * down past the first text line they hold.
+ */
+export function emptyCardFragmentViolations(pages: PdfPageText[], layout: PdfLayoutBox): PdfLayoutViolation[] {
+  const out: PdfLayoutViolation[] = [];
+  for (const page of pages) {
+    if (!page.shapes) continue;
+    const body = page.items.filter((i) => i.str.trim().length > 0 && !isFooterText(i.str));
+    if (body.length === 0) continue;
+    const firstTextTop = Math.max(...body.map((i) => i.y + 0.8 * i.height));
+    const contentTop = page.height - layout.paddingTop + BOUNDARY_TOLERANCE;
+    for (const box of page.shapes) {
+      if (box.x1 - box.x0 < MIN_FRAGMENT_WIDTH) continue;
+      if (box.y0 > firstTextTop + BOUNDARY_TOLERANCE && box.y1 <= contentTop) out.push({ kind: "empty_card_fragment", pageNumber: page.pageNumber, box });
+    }
+  }
+  return out;
 }

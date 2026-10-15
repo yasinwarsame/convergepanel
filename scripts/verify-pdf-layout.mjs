@@ -11,12 +11,16 @@
  *   - every content marker present exactly once (nothing lost or truncated);
  *   - content markers in the same order as composed (reading order);
  *   - no non-final page ending with a heading (heading kept with its content);
+ *   - no bullet mark without its text; paired markers (a metric's label and
+ *     value) on the same page; no empty card fragment (a card's closing
+ *     padding/border carried alone onto a page, found from the painted shapes);
  *   - the fixture occupies at least its expected page count.
  * It first renders a known-bad canary (lib/pdf/__fixtures__/layoutCanary.tsx)
  * and fails unless the check reports violations for it, so a broken
  * extractor or rule can never pass silently.
  *
- * Usage: node scripts/verify-pdf-layout.mjs [--json <out.json>] [--allow-fail] [--pdf-dir <dir>]
+ * Usage: node scripts/verify-pdf-layout.mjs [--json <out.json>] [--allow-fail] [--pdf-dir <dir>] [--only <name substring>]
+ * (--only is a local debugging aid: the canary still runs; CI and the spec always run every fixture.)
  * Exit code 1 on any violation unless --allow-fail (used to record baselines).
  * Deterministic: no network, no fonts beyond react-pdf's built-in Helvetica.
  */
@@ -40,7 +44,7 @@ try {
   const entry = `
     export { AdaptiveResearchDocument } from "@/lib/pdf/AdaptiveResearchDocument";
     export { pdfLayoutFixtures } from "@/lib/pdf/__fixtures__/layoutFixtures";
-    export { documentViolations, strandedHeadingViolations, readingOrderViolations } from "@/lib/pdf/layoutIntegrity";
+    export { documentViolations, strandedHeadingViolations, readingOrderViolations, loneBulletViolations, detachedPairViolations, emptyCardFragmentViolations } from "@/lib/pdf/layoutIntegrity";
     export { extractPdfElementText } from "@/lib/pdf/__tests__/testUtils";
     export { LayoutCanaryDocument, CANARY_MARKERS } from "@/lib/pdf/__fixtures__/layoutCanary";
   `;
@@ -77,6 +81,36 @@ try {
   const report = [];
   let failed = false;
 
+  const { OPS } = pdfjs;
+  // Background FILLS only: a card's background box spans all of its content, so a background lying wholly
+  // above the first text line of a page holds no content. (Border segments are separate, shorter shapes —
+  // e.g. a rounded top edge — and are not evidence of an empty fragment on their own.)
+  const PAINT_OPS = new Set([OPS.fill, OPS.eoFill, OPS.fillStroke, OPS.eoFillStroke, OPS.closeFillStroke, OPS.closeEOFillStroke]);
+  const mul = (m, n) => [m[0] * n[0] + m[2] * n[1], m[1] * n[0] + m[3] * n[1], m[0] * n[2] + m[2] * n[3], m[1] * n[2] + m[3] * n[3], m[0] * n[4] + m[2] * n[5] + m[4], m[1] * n[4] + m[3] * n[5] + m[5]];
+  const apply = (m, x, y) => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
+
+  /** Bounding boxes of filled vector shapes, in page user space (CTM tracked through save/restore/transform). */
+  async function shapesOf(page) {
+    const ol = await page.getOperatorList();
+    let ctm = [1, 0, 0, 1, 0, 0];
+    const stack = [];
+    const boxes = [];
+    for (let i = 0; i < ol.fnArray.length; i++) {
+      const fn = ol.fnArray[i];
+      const a = ol.argsArray[i];
+      if (fn === OPS.save) stack.push(ctm);
+      else if (fn === OPS.restore) ctm = stack.pop() ?? ctm;
+      else if (fn === OPS.transform) ctm = mul(ctm, a);
+      else if (fn === OPS.constructPath && PAINT_OPS.has(a[0]) && a[2] && a[2].length === 4) {
+        const corners = [apply(ctm, a[2][0], a[2][1]), apply(ctm, a[2][2], a[2][3]), apply(ctm, a[2][0], a[2][3]), apply(ctm, a[2][2], a[2][1])];
+        const xs = corners.map((c) => c[0]);
+        const ys = corners.map((c) => c[1]);
+        boxes.push({ x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) });
+      }
+    }
+    return boxes;
+  }
+
   async function extract(bytes) {
     const doc = await pdfjs.getDocument({ data: new Uint8Array(bytes), isEvalSupported: false, useSystemFonts: false, verbosity: 0 }).promise;
     const pages = [];
@@ -91,6 +125,7 @@ try {
         items: content.items
           .filter((it) => typeof it.str === "string")
           .map((it) => ({ str: it.str, x: it.transform[4], y: it.transform[5], width: it.width, height: it.height })),
+        shapes: await shapesOf(page),
       });
     }
     return { doc, pages };
@@ -102,13 +137,16 @@ try {
   }
 
   /** The ONE check, shared by the canary and every fixture: render → extract → rules. */
-  async function check(element, markers, minPages) {
+  async function check(element, markers, minPages, pairs = []) {
     const bytes = await renderToBuffer(element);
     const { doc, pages } = await extract(bytes);
     const violations = [
       ...mod.documentViolations(pages, LAYOUT, markers.map((marker) => ({ marker, count: 1 }))),
       ...mod.strandedHeadingViolations(pages),
       ...mod.readingOrderViolations(pages, compositionOrder(element)),
+      ...mod.loneBulletViolations(pages),
+      ...mod.detachedPairViolations(pages, pairs),
+      ...mod.emptyCardFragmentViolations(pages, LAYOUT),
     ];
     if (doc.numPages < minPages) violations.push({ kind: "too_few_pages", expectedAtLeast: minPages, found: doc.numPages });
     const counts = violations.reduce((acc, v) => ({ ...acc, [v.kind]: (acc[v.kind] ?? 0) + 1 }), {});
@@ -123,11 +161,13 @@ try {
   if (!canaryDetected) failed = true;
   console.log(`${canaryDetected ? "PASS" : "FAIL"} canary (known-bad layout must be detected): ${canaryResult.violations.length} violations ${JSON.stringify(canaryCounts)}`);
 
-  for (const fixture of mod.pdfLayoutFixtures()) {
+  const only = opt("--only");
+  for (const fixture of mod.pdfLayoutFixtures().filter((f) => !only || f.name.includes(only))) {
     const { bytes, pages: numPages, pageText, violations, counts } = await check(
       React.createElement(mod.AdaptiveResearchDocument, { record: fixture.record }),
       fixture.markers,
-      fixture.minPages
+      fixture.minPages,
+      fixture.pairs ?? []
     );
     if (pdfDir) writeFileSync(path.join(pdfDir, `${fixture.name}.pdf`), bytes);
     const doc = { numPages };

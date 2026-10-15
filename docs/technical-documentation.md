@@ -1134,11 +1134,11 @@ Full architecture, JSON schema field documentation, sanitized examples, compatib
 
 Summary: three formats — PDF (Phase 1), DOCX (Phase 3), JSON (Phase 4) — each independently flag-gated (`ADAPTIVE_RESEARCH_EXPORT_ENABLED`, `ADAPTIVE_RESEARCH_DOCX_EXPORT_ENABLED`, `ADAPTIVE_RESEARCH_JSON_EXPORT_ENABLED`, `lib/env.ts`). No object storage exists in this codebase — the durable artifact is a frozen `AdaptiveResearchExportV1` record at `runs/{runId}/exports/{exportId}` (`lib/adaptiveSchema/researchExport.ts`); file bytes are always regenerated on demand, never persisted. Creation: `POST /api/user/runs/[runId]/export`. Regeneration/history-item render: `GET /api/user/runs/[runId]/exports/[exportId]` (current entitlement, frozen classification/governance content). History list (cursor-paginated, `?cursor=`/`?limit=`, max page size 50): `GET /api/user/runs/[runId]/exports`. Single central authorization function: `canExportAdaptiveResearch()` / `resolveAdaptiveExportVerdict()` (`lib/adaptiveSchema/exportAuthorization.ts`).
 
-**PDF pagination.** Content of unbounded length paginates. This covers model-response cards, their fields and generic object items, the receipt, synthesis and enrichment sections, and single text units (a conclusion, a bullet, a field value) taller than a page.
+**PDF pagination.** Content of unbounded length paginates. This covers model-response cards, their fields and generic object items, metric rows, bullets, the receipt, synthesis and enrichment sections, and single text units (a conclusion, a bullet, a field value, a metric label) taller than a page.
 
-`wrap={false}` is allowed only at reviewed, bounded locations: the status summary, provenance and static-notice cards, the heading block of a paginating card, and short heading labels.
+`wrap={false}` is allowed only at reviewed, bounded locations: the status summary, provenance and static-notice cards, the heading block of a paginating card, short heading labels, a bullet's mark, and a metric value of at most 32 characters (at most 40 % of the row, so at most 3 lines).
 
-A non-breaking block taller than the remaining page space is laid out past the content area, where it overlaps the next block and loses text.
+A non-breaking block taller than the remaining page space is laid out past the content area, where it overlaps the next block and loses text. react-pdf also keeps a parent whole on the current page — overflowing it — when every child of a FIRST child moves to the next page, so every movable non-breaking element has an earlier sibling (a zero-height anchor where needed).
 
 Headings are kept with their content through react-pdf's `minPresenceAhead`. That prop takes effect only on an element that has an earlier non-fixed sibling in the same parent and is itself non-breaking. So:
 - a paginating card is drawn as a heading block plus a body block, which are siblings;
@@ -1147,22 +1147,30 @@ Headings are kept with their content through react-pdf's `minPresenceAhead`. Tha
 - spacing that follows a kept heading's content is padding or a separate element, never a margin. An element that fits on the page but whose bottom margin does not is moved to the next page, which would strand the heading;
 - the "Disagreement" sub-label is a non-breaking sibling of its text.
 
-Each heading keeps its bottom margin plus three body lines (3 × 15 pt), because react-pdf never splits a Text of up to orphans + widows − 1 = 3 lines. That gives field labels 47 pt and sub-labels 48 pt. Card and section headings nest above these: card 64, section 112.
+react-pdf measures the distance from below the element's own bottom margin, so the margin is not part of it. react-pdf never splits a Text of up to orphans + widows − 1 = 3 lines, so each heading keeps three body lines (3 × 15 pt) plus the closing padding of the card when its content may be the card's last, plus a small slack: field labels 65 pt, the "Disagreement" sub-label 60, bullet marks 48 (the mark is the text's first line). A metric[] field label keeps its first row instead: 3 pt padding, a value of up to 3 lines with the card's closing box, and the value's own distance — 106. Card and section headings nest above these: card 82 and section 112, or 118 and 148 when the card's first field is a metric[].
 
-`npm run verify:pdf-layout` (`scripts/verify-pdf-layout.mjs`) renders `lib/pdf/__fixtures__/layoutFixtures.ts` with the real renderer and extracts positioned text with pdfjs. The fixtures cover:
+Bullets and metrics stay with their text:
+- a bullet's mark is a non-breaking sibling of its text, after an anchor, kept with the text's first lines; the text's indent is the row's padding, so a text continued on the next page keeps it;
+- a metric row paginates. Its value is composed first (drawn on the right, `row-reverse`), is non-breaking and keeps 2 × 15 pt: it moves to the next page — and the label, a later sibling, with it — unless the label fits whole or keeps at least its first 2 lines beside it. A metric with a longer value is one paginating "label — value" paragraph.
+
+A paginating card's body has no bottom padding of its own: the last text of the body carries the closing padding (and the body's bottom border width) with orphans = 1, and the body's content sits in a wrapper with a −1 pt (border) margin. Every box between the body and that text then ends at or above the text's own box, so react-pdf only ever splits or moves the text itself; it never carries an empty strip of padding or border onto the next page.
+
+`npm run verify:pdf-layout` (`scripts/verify-pdf-layout.mjs`) renders `lib/pdf/__fixtures__/layoutFixtures.ts` with the real renderer and extracts positioned text and filled shapes with pdfjs. The fixtures cover:
 - long cards and sections;
-- single text units taller than a page, including every verdict text;
+- single text units taller than a page, including every verdict text and a metric label;
 - heading boundary sweeps: whole-line, mixed, first-heading and field-value;
-- a grid of three-line field values;
-- a grid of "Disagreement" sub-label positions;
-- the R2 reviewer's reproduction. It applies `lib/pdf/layoutIntegrity.ts`:
+- grids of three-line field values, "Disagreement" sub-label positions, bullets, metric rows, metric-first cards and card headings;
+- metric rows at their extremes (widest glyph);
+- the R2 and R3 reviewers' reproductions. It applies `lib/pdf/layoutIntegrity.ts`:
 - no overlapping text;
 - nothing outside the vertical content area or in the footer band;
 - every content marker present exactly once and in composition order;
 - no non-final page ending with a heading;
+- no bullet mark without its text, and each metric's label and value on one page;
+- no empty card fragment (a filled card shape wholly above a page's first text line);
 - the minimum page count.
 
-A known-bad canary must be detected. `lib/pdf/__tests__/renderedLayout.spec.ts` runs the script in CI and recomputes every verdict from the raw geometry.
+A known-bad canary must be detected. `lib/pdf/__tests__/renderedLayout.spec.ts` runs the script in CI and recomputes every verdict from the raw geometry (the metric pairs from the record itself). `--only <name>` limits a local run to matching fixtures.
 
 Known limitations, tracked separately:
 - **Horizontal overflow** (`PDF_HORIZONTAL_OVERFLOW_LONG_UNBROKEN_TEXT`): a long unbroken URL or token can run past the right page edge. This is pre-existing, and the vertical oracle does not check left or right bounds.

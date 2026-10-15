@@ -97,7 +97,8 @@ export const pdfStyles = StyleSheet.create({
     borderColor: COLORS.border,
     borderBottomLeftRadius: 6,
     borderBottomRightRadius: 6,
-    paddingBottom: 12,
+    // No bottom padding: the body's LAST text carries it (AdaptiveResearchDocument.tsx `closingBox`), so the
+    // padding and bottom border can never be carried alone onto the next page as an empty strip.
     paddingHorizontal: 12,
     backgroundColor: COLORS.surface,
   },
@@ -109,8 +110,18 @@ export const pdfStyles = StyleSheet.create({
   subLabel: { fontSize: 9, lineHeight: 1.4, color: COLORS.muted, marginBottom: 3 },
   /** `subLabel` that follows earlier content in the same card body. */
   subLabelAfterContent: { fontSize: 9, lineHeight: 1.4, color: COLORS.muted, marginBottom: 3, marginTop: 6 },
-  bulletRow: { flexDirection: "row", marginBottom: 3 },
-  bulletMark: { width: 10, fontSize: 10, color: COLORS.muted },
+  /**
+   * The text's indent is the ROW's left padding and the mark sits in it (negative margin), so a bullet text that
+   * continues on the next page — where its kept mark is not repeated — keeps its indent.
+   */
+  bulletRow: { flexDirection: "row", marginBottom: 3, paddingLeft: 10 },
+  /** `row-reverse`: the value is the row's first child (kept with the label, see `MetricRows`) but is drawn on the right. */
+  metricRow: { flexDirection: "row-reverse", paddingVertical: 3 },
+  /** Both metric texts are top-aligned: never stretched to the row's height (see `MetricRows`). */
+  metricLabel: { fontSize: 10, lineHeight: 1.5, color: COLORS.text, flex: 1, alignSelf: "flex-start" },
+  metricValue: { fontSize: 10, lineHeight: 1.5, color: COLORS.text, fontFamily: "Helvetica-Bold", alignSelf: "flex-start" },
+  /** `alignSelf: flex-start`: never stretched to the row's height — a stretched non-breaking mark beside a page-long text would itself be "taller than a page". */
+  bulletMark: { width: 10, marginLeft: -10, fontSize: 10, color: COLORS.muted, alignSelf: "flex-start" },
   bulletText: { flex: 1, fontSize: 10, lineHeight: 1.4, color: COLORS.text },
   fieldGrid: { flexDirection: "row", flexWrap: "wrap", marginBottom: 8 },
   fieldCell: { width: "50%", marginBottom: 8, paddingRight: 8 },

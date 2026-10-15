@@ -1,0 +1,155 @@
+{
+ "version": 1,
+ "exportId": "exp-r3",
+ "runId": "run-r3",
+ "schemaVersion": 1,
+ "reportVersion": 1,
+ "createdAt": "2026-10-14T12:00:00.000Z",
+ "createdBy": "u",
+ "format": "pdf",
+ "artifactStatus": "ready",
+ "classification": "internal",
+ "governanceStatusAtExport": {
+  "family": "legacy",
+  "status": "needs_review"
+ },
+ "exportMetadata": {
+  "exportId": "exp-r3",
+  "runId": "run-r3",
+  "schemaVersion": 1,
+  "exportedSections": [
+   "reportSnapshot"
+  ],
+  "createdAt": "2026-10-14T12:00:00.000Z",
+  "requestingUser": "u",
+  "finalReportVersion": 1
+ },
+ "schemaId": "financial_valuation",
+ "schemaFamily": "legacy",
+ "reportSnapshot": {
+  "question": "Grid",
+  "models": [
+   {
+    "modelId": "chatgpt",
+    "ok": true
+   },
+   {
+    "modelId": "claude",
+    "ok": true
+   },
+   {
+    "modelId": "grok",
+    "ok": true
+   }
+  ],
+  "reportTypeLabel": "Probe Report",
+  "consensusLevel": "moderate",
+  "sourceGroundingLevel": "strong",
+  "reportGeneratedAt": "2026-10-14T11:00:00.000Z",
+  "legacy": {
+   "schemaId": "financial_valuation",
+   "alignedClaims": [],
+   "synthesisReport": {
+    "unifiedAnswer": "sit sed ut aliqua nostrud aliquip dolor elit #G001#",
+    "panelVerdict": "caution",
+    "gate": "caution",
+    "runCertainty": 0.5,
+    "whereModelsAgree": [],
+    "whereModelsDisagree": [],
+    "certaintyAssessment": "x",
+    "narrativeSections": [],
+    "executiveSummary": "x",
+    "disagreements": [],
+    "biasAndBlindSpots": [],
+    "biasEmptyReason": "insufficient_models",
+    "panelCoverageGaps": [],
+    "diagnostics": {
+     "citedClaimCount": 0,
+     "totalClaimCount": 0,
+     "evidenceMix": {
+      "empirical": 0,
+      "theoretical": 0,
+      "anecdotal": 0,
+      "authoritative": 0
+     },
+     "homogeneityFlag": false,
+     "meanAgreement": 0.5
+    },
+    "verdictCard": {
+     "question": "q",
+     "consensusModelCount": 3,
+     "disagreementModelCount": 2,
+     "recommendedNextSteps": [],
+     "topConsensus": "dolor elit incididunt magna quis nisi ipsum adipiscing #G002#",
+     "caveat": "adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt #G003#"
+    },
+    "degraded": false
+   },
+   "modelResponses": [
+    {
+     "modelId": "chatgpt",
+     "schemaId": "financial_valuation",
+     "ok": true,
+     "data": {
+      "thesis": "lorem consectetur eiusmod et minim ullamco consequat amet #G004#",
+      "metrics": [
+       {
+        "label": "#G005# lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem",
+        "value": 7,
+        "unit": "USD #G006#"
+       },
+       {
+        "label": "#G007# ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum",
+        "value": 7,
+        "unit": "USD #G008#"
+       }
+      ],
+      "bullCase": "lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat #G009#"
+     }
+    },
+    {
+     "modelId": "claude",
+     "schemaId": "financial_valuation",
+     "ok": true,
+     "data": {
+      "thesis": "ipsum adipiscing tempor dolore veniam laboris lorem consectetur #G010#",
+      "metrics": [
+       {
+        "label": "#G011# ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum",
+        "value": 7,
+        "unit": "USD #G012#"
+       },
+       {
+        "label": "#G013# dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor",
+        "value": 7,
+        "unit": "USD #G014#"
+       }
+      ],
+      "bullCase": "ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem #G015#"
+     }
+    },
+    {
+     "modelId": "grok",
+     "schemaId": "financial_valuation",
+     "ok": true,
+     "data": {
+      "thesis": "dolor elit incididunt magna quis nisi ipsum adipiscing #G016#",
+      "metrics": [
+       {
+        "label": "#G017# dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor",
+        "value": 7,
+        "unit": "USD #G018#"
+       },
+       {
+        "label": "#G019# sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit",
+        "value": 7,
+        "unit": "USD #G020#"
+       }
+      ],
+      "bullCase": "dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum #G021#"
+     }
+    }
+   ]
+  }
+ }
+}

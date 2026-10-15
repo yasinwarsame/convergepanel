@@ -14,7 +14,11 @@
  */
 
 import type { AdaptiveResearchExportV1 } from "@/lib/adaptiveSchema/researchExport";
+import { METRIC_ROW_MAX_VALUE_CHARS } from "@/lib/pdf/AdaptiveResearchDocument";
 import r2ReproRecord from "./r2-repro-bull-case.json";
+import r3BulletOrphan from "./r3-repro-bullet-orphan.json";
+import r3MetricSplit from "./r3-repro-metric-split.json";
+import r3CardStub from "./r3-repro-card-stub.json";
 
 export interface PdfLayoutFixture {
   name: string;
@@ -23,6 +27,8 @@ export interface PdfLayoutFixture {
   markers: string[];
   /** Minimum page count the content must occupy (a guard that the fixture really is long). */
   minPages: number;
+  /** Marker pairs that must render on the same page (a metric's label and its value). */
+  pairs?: Array<[string, string]>;
 }
 
 function markerFactory(prefix: string) {
@@ -616,6 +622,240 @@ function pageLongVerdictTexts(): PdfLayoutFixture {
   return { name: "page-long-verdict-texts", minPages: 6, markers: m.all.filter((x) => used.has(x)), record };
 }
 
+// ─── R3 corrections ──────────────────────────────────────────────────────
+
+const MARKER_RE = /#[A-Z]+\d{3}#/g;
+
+/** Every metric whose label and value both carry a marker → that pair must render on one page. */
+function metricPairs(record: unknown): Array<[string, string]> {
+  const pairs: Array<[string, string]> = [];
+  const visit = (node: unknown) => {
+    if (Array.isArray(node)) return node.forEach(visit);
+    if (!node || typeof node !== "object") return;
+    const o = node as Record<string, unknown>;
+    if (typeof o.label === "string" && "value" in o) {
+      const a = o.label.match(MARKER_RE)?.[0];
+      const b = `${String(o.value ?? "")} ${String(o.unit ?? "")}`.match(MARKER_RE)?.[0];
+      if (a && b) pairs.push([a, b]);
+    }
+    Object.values(o).forEach(visit);
+  };
+  visit(record);
+  return pairs;
+}
+
+function fromRecordJson(name: string, json: unknown, minPages: number): PdfLayoutFixture {
+  const record = json as AdaptiveResearchExportV1;
+  const markers = Array.from(new Set(JSON.stringify(record).match(MARKER_RE) ?? []));
+  return { name, minPages, markers, record, pairs: metricPairs(record) };
+}
+
+/** The independent R3 reviewer's reproductions (de38f10): a lone bullet mark, a metric label/value split, an empty card stub. */
+function r3Repros(): PdfLayoutFixture[] {
+  return [fromRecordJson("r3-repro-bullet-orphan", r3BulletOrphan, 2), fromRecordJson("r3-repro-metric-split", r3MetricSplit, 1), fromRecordJson("r3-repro-card-stub", r3CardStub, 2)];
+}
+
+/**
+ * Bullets of 2–4 lines (react-pdf moves a ≤ 3-line text whole) after a
+ * conclusion whose length steps through a page bottom, in every receipt list.
+ */
+export const BULLET_GRID = { conclusion: 16, bullet: 4 } as const;
+function bulletGrid(a: number, b: number): PdfLayoutFixture {
+  const m = markerFactory("B");
+  const items = (n: number) => Array.from({ length: n }, (_, i) => prose(18 + b * 8 + (i % 3) * 4, m.next()));
+  return {
+    name: `bullet-grid-${String(a).padStart(2, "0")}-${b}`,
+    minPages: 2,
+    markers: m.all,
+    record: baseRecord({
+      schemaId: "comparison_matrix",
+      schemaFamily: "milestone2",
+      governanceStatusAtExport: { family: "milestone2", kind: "approved", isOwnerOverride: false } as never,
+      reportSnapshot: {
+        question: "Bullet integrity grid",
+        models: MODELS.map((modelId) => ({ modelId, ok: true })),
+        reportTypeLabel: "Comparison Report",
+        consensusLevel: "moderate",
+        sourceGroundingLevel: "strong",
+        reportGeneratedAt: "2026-10-14T11:00:00.000Z",
+        milestone2: {
+          schemaId: "comparison_matrix",
+          result: { tradeoffs: items(3), bestUseRecommendations: items(2) },
+          meta: {} as never,
+          decisionReceipt: { conclusion: prose(120 + a * 5, m.next()), basis: items(6), assumptions: items(4), uncertainties: items(3), limitations: items(2), sources: items(2) },
+        },
+      } as never,
+    }),
+  };
+}
+
+/** Metric labels of 1–3 lines at offsets that step through page bottoms; every label/value pair must stay on one page. */
+export const METRIC_GRID = { offset: 16, label: 4 } as const;
+function metricGrid(a: number, b: number): PdfLayoutFixture {
+  const m = markerFactory("N");
+  const synthesis = legacySynthesis(prose(20 + 5 * a, m.next()), m);
+  const metric = (k: number) => {
+    const label = `${m.next()} ${prose(6 + b * 9 + (k % 3) * 5, "").trim()}`;
+    return { label, value: 1000 + k, unit: `USD ${m.next()}`, asOf: "2025", source: "Fixture" };
+  };
+  const modelResponses = MODELS.slice(0, 4).map((modelId, k) => ({
+    modelId,
+    schemaId: "financial_valuation",
+    ok: true,
+    data: { thesis: prose(14, m.next()), metrics: Array.from({ length: 5 }, (_, i) => metric(k * 5 + i)) },
+  }));
+  const record = baseRecord({
+    schemaId: "financial_valuation",
+    schemaFamily: "legacy",
+    reportSnapshot: {
+      question: "Metric pairing grid",
+      models: MODELS.slice(0, 4).map((modelId) => ({ modelId, ok: true })),
+      reportTypeLabel: "Financial Analysis",
+      consensusLevel: "moderate",
+      sourceGroundingLevel: "strong",
+      reportGeneratedAt: "2026-10-14T11:00:00.000Z",
+      legacy: { schemaId: "financial_valuation", alignedClaims: [], synthesisReport: synthesis, modelResponses },
+    } as never,
+  });
+  return { name: `metric-grid-${String(a).padStart(2, "0")}-${b}`, minPages: 2, markers: m.all, record, pairs: metricPairs(record) };
+}
+
+/** A metric whose label alone is taller than a page: the paginating paragraph fallback (beyond the row bounds). */
+function pageLongMetricLabel(): PdfLayoutFixture {
+  const m = markerFactory("P");
+  const label = longSingleText(18, 45, m);
+  const record = baseRecord({
+    schemaId: "financial_valuation",
+    schemaFamily: "legacy",
+    reportSnapshot: {
+      question: "Page-long metric label",
+      models: [{ modelId: "chatgpt", ok: true }],
+      reportTypeLabel: "Financial Analysis",
+      consensusLevel: "moderate",
+      sourceGroundingLevel: "strong",
+      reportGeneratedAt: "2026-10-14T11:00:00.000Z",
+      legacy: {
+        schemaId: "financial_valuation",
+        alignedClaims: [],
+        modelResponses: [{ modelId: "chatgpt", schemaId: "financial_valuation", ok: true, data: { thesis: prose(10, m.next()), metrics: [{ label, value: 5, unit: "pct", asOf: "2025", source: "x" }] } }],
+      },
+    } as never,
+  });
+  return { name: "page-long-metric-label", minPages: 2, markers: m.all, record };
+}
+
+/** `n` characters of the widest glyph, breakable every 9 (the tallest wrap a bounded metric row can produce). */
+function widest(n: number, marker: string): string {
+  const head = `${marker} `;
+  let out = head;
+  while (out.length < n) out += (out.length - head.length) % 10 === 9 ? " " : "W";
+  return out.slice(0, n).trimEnd();
+}
+
+/**
+ * Metric rows at their extremes, in the widest glyph: a label taller than a
+ * page beside a value at the value bound (the value is non-breaking), then
+ * long labels beside bound values.
+ */
+function metricRowExtremes(): PdfLayoutFixture {
+  const m = markerFactory("W");
+  const bound = () => widest(METRIC_ROW_MAX_VALUE_CHARS - 4, m.next());
+  const metrics = [
+    // One marker per label: a label's later lines read BELOW its value's line, so further markers would read after it.
+    { label: widest(2400, m.next()), value: bound(), unit: "USD", asOf: "2025", source: "x" },
+    ...Array.from({ length: 3 }, () => ({ label: widest(600, m.next()), value: bound(), unit: "USD", asOf: "2025", source: "x" })),
+  ];
+  const record = baseRecord({
+    schemaId: "financial_valuation",
+    schemaFamily: "legacy",
+    reportSnapshot: {
+      question: "Metric rows at their extremes",
+      models: [{ modelId: "chatgpt", ok: true }],
+      reportTypeLabel: "Financial Analysis",
+      consensusLevel: "moderate",
+      sourceGroundingLevel: "strong",
+      reportGeneratedAt: "2026-10-14T11:00:00.000Z",
+      legacy: {
+        schemaId: "financial_valuation",
+        alignedClaims: [],
+        modelResponses: [{ modelId: "chatgpt", schemaId: "financial_valuation", ok: true, data: { thesis: prose(10, m.next()), metrics } }],
+      },
+    } as never,
+  });
+  return { name: "metric-row-extremes", minPages: 3, markers: m.all, record, pairs: metricPairs(record) };
+}
+
+/**
+ * Cards whose FIRST field is a metric[] (the card and section headings keep
+ * the longer metric distance): first rows with 1–3-line values (widest glyph)
+ * beside 1–8-line labels, behind a question whose length steps through page
+ * bottoms.
+ */
+export const METRIC_FIRST_GRID = { question: 14, row: 4 } as const;
+function metricFirstGrid(a: number, b: number): PdfLayoutFixture {
+  const m = markerFactory("F");
+  const modelResponses = Array.from({ length: 6 }, (_, k) => ({
+    modelId: MODELS[k % MODELS.length],
+    schemaId: "financial_valuation",
+    ok: true,
+    data: {
+      metrics: Array.from({ length: 1 + (k % 3) }, (_, i) => ({
+        label: `${m.next()} ${prose(4 + ((b + k + i) % 4) * 22, "").trim()}`,
+        value: widest(Math.min(METRIC_ROW_MAX_VALUE_CHARS - 4, 8 + ((b + k) % 3) * 10), m.next()),
+        unit: "USD",
+        asOf: "2025",
+        source: "Fixture",
+      })),
+    },
+  }));
+  const record = baseRecord({
+    schemaId: "financial_valuation",
+    schemaFamily: "legacy",
+    reportSnapshot: {
+      question: prose(2 + 9 * a, "?"),
+      models: MODELS.map((modelId) => ({ modelId, ok: true })),
+      reportTypeLabel: "Financial Analysis",
+      consensusLevel: "moderate",
+      sourceGroundingLevel: "strong",
+      reportGeneratedAt: "2026-10-14T11:00:00.000Z",
+      legacy: { schemaId: "financial_valuation", alignedClaims: [], modelResponses },
+    } as never,
+  });
+  return { name: `metric-first-${String(a).padStart(2, "0")}-${b}`, minPages: 2, markers: m.all, record, pairs: metricPairs(record) };
+}
+
+/**
+ * Card and section headings in their critical window: many one-field cards
+ * whose first value is 3 lines, behind a question whose length steps through
+ * page bottoms (a card heading needs the first label + 3 lines + closing; the
+ * "Model responses" label needs a whole card heading block plus that).
+ */
+export const CARD_PRESENCE_GRID = { question: 14, first: 6 } as const;
+function cardPresenceGrid(a: number, b: number): PdfLayoutFixture {
+  const m = markerFactory("C");
+  const modelResponses = Array.from({ length: 10 }, (_, k) => ({
+    modelId: MODELS[k % MODELS.length],
+    schemaId: "financial_valuation",
+    ok: true,
+    // The first field is NOT the card's last (a closing text may split 1 + 2 lines): its 3-line value needs all 3 lines.
+    data: { thesis: prose(k === 0 ? 8 + 28 * b : 34 + (k % 3) * 2, m.next()), bullCase: prose(8, m.next()) },
+  }));
+  const record = baseRecord({
+    schemaId: "financial_valuation",
+    schemaFamily: "legacy",
+    reportSnapshot: {
+      question: prose(2 + 9 * a, "?"),
+      models: MODELS.map((modelId) => ({ modelId, ok: true })),
+      reportTypeLabel: "Financial Analysis",
+      consensusLevel: "moderate",
+      sourceGroundingLevel: "strong",
+      reportGeneratedAt: "2026-10-14T11:00:00.000Z",
+      legacy: { schemaId: "financial_valuation", alignedClaims: [], modelResponses },
+    } as never,
+  });
+  return { name: `card-presence-${String(a).padStart(2, "0")}-${b}`, minPages: 2, markers: m.all, record };
+}
+
 export function pdfLayoutFixtures(): PdfLayoutFixture[] {
   return [
     legacyLongCards(),
@@ -634,5 +874,12 @@ export function pdfLayoutFixtures(): PdfLayoutFixture[] {
     ...Array.from({ length: THREE_LINE_GRID.preamble * THREE_LINE_GRID.value }, (_, i) => threeLineValueGrid(Math.floor(i / THREE_LINE_GRID.value), i % THREE_LINE_GRID.value)),
     ...Array.from({ length: DISAGREEMENT_GRID.question * DISAGREEMENT_GRID.answer }, (_, i) => disagreementGrid(Math.floor(i / DISAGREEMENT_GRID.answer), i % DISAGREEMENT_GRID.answer)),
     pageLongVerdictTexts(),
+    ...r3Repros(),
+    ...Array.from({ length: BULLET_GRID.conclusion * BULLET_GRID.bullet }, (_, i) => bulletGrid(Math.floor(i / BULLET_GRID.bullet), i % BULLET_GRID.bullet)),
+    ...Array.from({ length: METRIC_GRID.offset * METRIC_GRID.label }, (_, i) => metricGrid(Math.floor(i / METRIC_GRID.label), i % METRIC_GRID.label)),
+    pageLongMetricLabel(),
+    metricRowExtremes(),
+    ...Array.from({ length: METRIC_FIRST_GRID.question * METRIC_FIRST_GRID.row }, (_, i) => metricFirstGrid(Math.floor(i / METRIC_FIRST_GRID.row), i % METRIC_FIRST_GRID.row)),
+    ...Array.from({ length: CARD_PRESENCE_GRID.question * CARD_PRESENCE_GRID.first }, (_, i) => cardPresenceGrid(Math.floor(i / CARD_PRESENCE_GRID.first), i % CARD_PRESENCE_GRID.first)),
   ];
 }
