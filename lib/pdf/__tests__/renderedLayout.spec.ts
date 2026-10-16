@@ -241,6 +241,20 @@ it("closing long-value metric rows below the field label's keep start label and 
   }
 });
 
+it("the closing-row gate's distance is exercised: positions a shorter gate detaches start label and value on one page", () => {
+  // Pass-5 falsifier N3b: a gate of 36 pt (3 pt under one line plus the closing padding) detached a pair at each
+  // of these positions while every closing-deep position above still passed.
+  const gate = report.report.filter((r) => r.fixture.startsWith("closing-gate-"));
+  expect(gate.length).toBeGreaterThanOrEqual(4);
+  for (const r of gate) {
+    const fixture = pdfLayoutFixtures().find((f) => f.name === r.fixture)!;
+    const pairs = metricPairsFromRecord(fixture.record);
+    expect(pairs.length).toBeGreaterThanOrEqual(25);
+    expect(detachedPairViolations(r.pageText, pairs)).toEqual([]);
+    expect(readingOrderViolations(r.pageText, canonicalMarkerOrder(fixture.record))).toEqual([]);
+  }
+});
+
 it("the complete-card exemption applies only where the next page opens a new card (R5 MINOR 2)", () => {
   // Exempted pages: heading-only last line, stranded without the painted shapes, not stranded with them.
   let exempted = 0;

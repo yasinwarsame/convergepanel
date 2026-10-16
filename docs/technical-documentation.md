@@ -1173,7 +1173,7 @@ A paginating card's body has no bottom padding of its own: the last text of the 
 - metric rows at their extremes (widest glyph);
 - fine-offset positions (1 pt and 0.6 pt resolution) where a metric value detaches if its keep or row anchor is removed, or where a metric-first card or section heading strands if its keep shrinks. They were chosen by dense sweeps archived with the PR #235 evidence;
 - pass-4 positions from the same kind of sweeps: failed and field-less model cards, several of them ending a page (three flush with the bottom padding); metric values over 32 characters beside 2- to 6-line labels; and closing metric rows with 4- to 6-line labels, as the card's first field or a later one;
-- pass-5 positions: closing metric rows with values over 32 characters after four or six short rows (below the metric[] field label's keep), each of which detached its label and value before the gate, plus passing neighbours one line away; and a card whose last shown field renders no value;
+- pass-5 positions: closing metric rows with values over 32 characters after four or six short rows (below the metric[] field label's keep), each of which detached its label and value before the gate, plus passing neighbours one line away; positions that pass with the gate's 41 pt but detach a pair with a gate of 38 pt or less (measured: the need lies above 38 pt and at most 39 pt, so the gate carries about 2 pt of slack); and a card whose last shown field renders no value;
 - the R2 and R3 reviewers' reproductions. It applies `lib/pdf/layoutIntegrity.ts`:
 - no overlapping text;
 - nothing outside the vertical content area or in the footer band;

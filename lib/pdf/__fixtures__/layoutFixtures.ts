@@ -1014,13 +1014,18 @@ function pass4Boundary(kind: string, t: number, i: number): PdfLayoutFixture {
  * correction: a 2-line label above a 1-line value (the value on the next
  * page), or a 1-line label beside a value of 2, 3 or 8+ lines (the label on
  * the next page, after the value). The "-edge" positions are their passing
- * neighbours one body line away.
+ * neighbours one body line away. The "closing-gate" positions pass with the
+ * gate's 41 pt but detach a pair with a shorter gate: all four at 36 pt, three
+ * at 37 pt, and "b" 37-08 at 38 pt (pass-5 falsifier N3b; the threshold sweeps,
+ * 4 × 750 documents, failed at 38 pt and passed at 39 pt).
  */
 export const PASS5_CASES: Readonly<Record<string, ReadonlyArray<readonly [number, number]>>> = {
   "closing-deep-a": [[0, 5], [12, 0], [49, 9], [10, 13], [21, 6], [30, 0]],
   "closing-deep-a-edge": [[9, 13], [20, 6], [31, 0]],
   "closing-deep-b": [[0, 0], [33, 12], [40, 6], [31, 13], [38, 7], [47, 0]],
   "closing-deep-b-edge": [[1, 0], [41, 6]],
+  "closing-gate-a": [[22, 5]],
+  "closing-gate-b": [[36, 9], [37, 8], [45, 1]],
 };
 const PASS5_SHAPES: Readonly<Record<string, { deep: number; rows: ReadonlyArray<readonly [number, number]> }>> = {
   // [label lines, value characters after the marker]
