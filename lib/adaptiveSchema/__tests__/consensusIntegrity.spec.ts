@@ -416,3 +416,9 @@ describe("comparison_matrix cells keep their own four-value agreement", () => {
     expect(result.cells[0].agreement).toBe("consensus");
   });
 });
+
+describe("legacy status text is unchanged", () => {
+  it("the four pre-existing statuses are labelled with their exact raw value", () => {
+    for (const s of ["consensus", "majority", "split", "single_source"] as const) expect(CONSENSUS_STATUS_LABEL[s]).toBe(s);
+  });
+});
