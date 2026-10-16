@@ -5,8 +5,9 @@
  *  - `wrap={false}` on ANY element (View, Text or anything else) is allowed
  *    only at explicitly reviewed, bounded locations: the bounded cards, the
  *    paginating-card heading block, a card that is only its model label (a
- *    failed model), short heading labels, a bullet's mark and a short metric
- *    value. A new non-breaking element anywhere else fails
+ *    failed model), short heading labels, a bullet's mark, a short metric
+ *    value and the zero-height gate of a closing long-value metric row. A new
+ *    non-breaking element anywhere else fails
  *    here (R1 MAJOR 2: a non-breaking Text taller than a page loses its text);
  *  - every non-breaking element that can move (no non-breaking ancestor) has
  *    an earlier non-fixed sibling: react-pdf keeps a parent whole on the
@@ -16,7 +17,9 @@
  *    minPresenceAhead in that position (R1 MAJOR 1) — and keeps the distance
  *    its kind requires;
  *  - no metric row is non-breaking (R3 MAJOR: a label can be of any length);
- *    a long metric value splits at any line beside its label (R4 MINOR 2);
+ *    a long metric value splits at any line beside its label (R4 MINOR 2),
+ *    and a long-value row that closes its card opens with a gate kept with
+ *    one line plus the texts' closing padding (R5 MINOR 1);
  *  - every fixture marker is composed exactly once.
  */
 jest.mock("@react-pdf/renderer", () => ({
@@ -89,6 +92,20 @@ const REQUIRED_METRIC_FIRST_CARD_HEADING = FIRST_IN_BODY_LABEL + REQUIRED_METRIC
 const CARD_HEAD_BLOCK = num(pdfStyles.cardHead.paddingTop) + num(pdfStyles.modelLabel.fontSize) * 1.2 + num(pdfStyles.modelLabel.marginBottom);
 const MAX_HEADING_CHARS = 140;
 
+/**
+ * Whether an element's style is `base`, or `base` with only a closing box added (`textProps`: the card's closing
+ * padding and margin on its last text — e.g. a closing field label whose value renders nothing, R5 NIT 2).
+ */
+const hasStyle = (el: El, base: object): boolean => {
+  const style = el.props.style as Record<string, unknown> | undefined;
+  if (style === base) return true;
+  if (!style || typeof style !== "object") return false;
+  const closingKeys = new Set(["paddingBottom", "marginBottom"]);
+  const keys = new Set([...Object.keys(base), ...Object.keys(style)]);
+  return [...keys].every((k) => closingKeys.has(k) || style[k] === (base as Record<string, unknown>)[k]) && num(style.paddingBottom) > 0;
+};
+/** The zero-height, childless gate a closing long-value metric row opens with (after its anchor). */
+const isRowGate = (el: El) => el.type === "VIEW" && "minPresenceAhead" in el.props && (el.props.style as { height?: unknown } | undefined)?.height === 0 && expand(el.props.children).length === 0;
 const isAnchor = (el: El) => el.type === "VIEW" && (el.props.style as { height?: unknown } | undefined)?.height === 0 && expand(el.props.children).length === 0;
 /** A metric row: drawn `row-reverse` (value composed first, kept with its label). */
 const isMetricRow = (el: El) => el.type === "VIEW" && (el.props.style as { flexDirection?: unknown } | undefined)?.flexDirection === "row-reverse";
@@ -119,7 +136,8 @@ function nonBreakingIsAllowed(el: El): string | null {
     text.length <= MAX_HEADING_CHARS
   )
     return "label-only card";
-  if (el.type === "TEXT" && HEADING_LABEL_STYLES.has(el.props.style) && text.length <= MAX_HEADING_CHARS) return "heading label";
+  if (el.type === "TEXT" && [...HEADING_LABEL_STYLES].some((style) => hasStyle(el, style as object)) && text.length <= MAX_HEADING_CHARS) return "heading label";
+  if (isRowGate(el)) return "metric row gate (zero height, draws nothing)";
   if (el.type === "TEXT" && el.props.style === pdfStyles.bulletMark && text === "•") return "bullet mark";
   if (
     el.type === "TEXT" &&
@@ -173,8 +191,19 @@ describe.each(pdfLayoutFixtures().map((f) => [f.name]))("%s", (name) => {
         if (extractPdfElementText(content[0]).trim().length <= METRIC_VALUE_MAX_CHARS) {
           expect(content[0].props.wrap).toBe(false);
         } else {
-          // R4 MINOR 2: both texts start on the same page whenever any line of the row fits.
+          // R4 MINOR 2: both texts split at any line.
           for (const text of content) expect([text.props.wrap, text.props.orphans, text.props.widows]).toEqual([undefined, 1, 1]);
+          // R5 MINOR 1: a 1-line text with the closing padding moves whole where a longer one keeps a line, so a row
+          // whose texts carry the card's closing padding opens with a gate kept with one line plus that padding.
+          const closingPadding = Math.max(...content.map((c) => num((c.props.style as { paddingBottom?: unknown }).paddingBottom)));
+          const hosts = expand(el.props.children);
+          const gates = hosts.filter(isRowGate);
+          if (closingPadding > 0) {
+            expect(gates).toHaveLength(1);
+            expect(hosts.indexOf(gates[0])).toBe(1);
+            expect(isAnchor(hosts[0]) && !isRowGate(hosts[0])).toBe(true);
+            expect(gates[0].props.minPresenceAhead).toBeGreaterThanOrEqual(BODY_LINE + closingPadding);
+          } else expect(gates).toHaveLength(0);
         }
       }
     });
@@ -196,7 +225,7 @@ describe.each(pdfLayoutFixtures().map((f) => [f.name]))("%s", (name) => {
       kept++;
       const ahead = el.props.minPresenceAhead as number;
       const cardRequirement = (headIndex: number) => (bodyOpensWithMetrics(siblings[headIndex + 1]) ? REQUIRED_METRIC_FIRST_CARD_HEADING : REQUIRED_CARD_HEADING);
-      if (el.props.style === pdfStyles.fieldLabel) {
+      if (hasStyle(el, pdfStyles.fieldLabel)) {
         const metric = siblings[index + 1] !== undefined && contains(siblings[index + 1], isMetricRow);
         expect(ahead).toBeGreaterThanOrEqual(metric ? REQUIRED_METRIC_FIELD : REQUIRED_FIELD);
       } else if (el.props.style === pdfStyles.subLabelAfterContent) expect(ahead).toBeGreaterThanOrEqual(REQUIRED_SUB_LABEL);
@@ -205,6 +234,10 @@ describe.each(pdfLayoutFixtures().map((f) => [f.name]))("%s", (name) => {
         const head = siblings.findIndex((s, i) => i > index && s.props.style === pdfStyles.cardHead);
         expect(ahead).toBeGreaterThanOrEqual(CARD_HEAD_BLOCK + (head >= 0 ? cardRequirement(head) : REQUIRED_CARD_HEADING));
       } else if (el.props.style === pdfStyles.bulletMark) expect(ahead).toBeGreaterThanOrEqual(REQUIRED_BULLET_MARK);
+      else if (isRowGate(el)) {
+        // Checked against its row's texts in the metric-row test; here: it is one line plus at least the card padding.
+        expect(ahead).toBeGreaterThanOrEqual(BODY_LINE + num(pdfStyles.cardHead.paddingTop));
+      }
       else if ((el.props.style as { maxWidth?: unknown }).maxWidth === "40%") expect(ahead).toBeGreaterThanOrEqual(REQUIRED_METRIC_VALUE);
       else throw new Error(`unclassified kept heading: ${extractPdfElementText(el)}`);
       expect(el.props.wrap).toBe(false);

@@ -463,14 +463,34 @@ function ComparisonMatrixEnrichment({ result }: { result: { tradeoffs?: string[]
  * A metric whose value is longer is the same row with BOTH texts paginating:
  * the value (still at most METRIC_ROW_MAX_VALUE_WIDTH of the row) and the
  * label each split at any line (orphans = widows = 1). The two texts of a row
- * start at the same height, so whenever any line of the row fits on a page,
- * the label's first line and the value's first line both stay on it; when
- * none fits, the row moves whole. Label and value never start on different
- * pages, however long either is. (One "label — value" paragraph, the earlier
- * rendering, split 2 / 2 across pages and moved the value away from the start
- * of its label.)
+ * start at the same height, so in a row that does not close the card, whenever
+ * the first line fits on a page both texts start on it; when it does not, the
+ * row moves whole. (One "label — value" paragraph, the earlier rendering,
+ * split 2 / 2 across pages and moved the value away from the start of its
+ * label.)
+ * A row that CLOSES the card is different: both texts carry the closing box,
+ * and at a page bottom where a line fits but not a line plus that box, a
+ * 1-line text moves whole while a text of 2 or more lines keeps its first
+ * line — so a 1-line label and a 2-line value (or the reverse) would start on
+ * different pages (R5 MINOR 1). The closing row therefore opens with a
+ * zero-height, non-breaking gate after the anchor, kept with
+ * `metricClosingRowPresenceAhead` (one line plus the closing box): unless the
+ * whole row fits, the gate — and with it both texts, its later siblings —
+ * moves to the next page whenever less than that space is left. Where the gate
+ * stays, a 1-line text fits whole with its box and a longer text keeps at
+ * least its first line, so both texts start on the page. Only this window
+ * (under ≈ 41 pt left) moves the row; a longer row still splits at any line.
  */
 export const METRIC_ROW_MAX_VALUE_CHARS = 32;
+/**
+ * The space a closing long-value metric row needs before either text may stay
+ * on a page: one body line plus the closing box's padding (which a 1-line
+ * text needs to fit whole, `closingBox(closing, 3)`), plus CLOSING_REACH
+ * slack — 15 + 24 + 2 = 41 for a model card's last field (closing 18).
+ */
+function metricClosingRowPresenceAhead(closing: number): number {
+  return BODY_LINE_HEIGHT + closingBox(closing, 3).paddingBottom + CLOSING_REACH;
+}
 /** The value column never takes more than this, so the label always keeps the rest of the row's width. */
 const METRIC_ROW_MAX_VALUE_WIDTH = "40%";
 
@@ -505,6 +525,7 @@ function MetricRows({ items, closing = 0 }: { items: Record<string, unknown>[]; 
         return (
           <View key={idx} style={{ ...pdfStyles.metricRow, ...rule, ...(closes ? { paddingBottom: 0 } : {}) }}>
             <BreakAnchor />
+            {closes && <View style={{ height: 0 }} wrap={false} minPresenceAhead={metricClosingRowPresenceAhead(closing)} />}
             <Text style={{ ...pdfStyles.metricValue, maxWidth: METRIC_ROW_MAX_VALUE_WIDTH, ...textEnd }} orphans={1} widows={1}>
               {valueText}
             </Text>

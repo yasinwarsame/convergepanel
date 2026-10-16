@@ -16,6 +16,8 @@ import {
   isHeadingItem,
   loneBulletViolations,
   MIN_FRAGMENT_WIDTH,
+  NEW_CARD_MIN_TOP_INSET,
+  opensNewCard,
   pageViolations,
   readingLines,
   readingOrderViolations,
@@ -253,16 +255,64 @@ describe("stranded heading versus a complete label-only card", () => {
     const label = t("METRICS", 57, 70, 60, 7.5);
     expect(strandedHeadingViolations([at([t("body", 57, 300), label], [box(44, 551, LAYOUT.paddingBottom, 320)], 1), next], LAYOUT)).toHaveLength(1);
   });
-  it("a label-only card that ends flush at the page bottom is complete when the next page opens with new heading content", () => {
+  it("a label-only card that ends flush at the page bottom is complete when the next page opens with a new card", () => {
     const label = t("CLAUDE · MODEL NOT RECORDED", 57, 75, 100, 7.5);
     const card = box(44, 551, 56.5, 94.7);
-    const nextCard = at([t("GROK · MODEL NOT RECORDED", 57, 780, 100, 7.5), t("text", 57, 760)], [box(44, 551, 700, 794)], 2);
+    // A new card's heading sits under its top border and 12 pt padding: glyph top 13.8 pt below the box top (rendered).
+    const nextCard = at([t("GROK · MODEL NOT RECORDED", 57, 774.1, 100, 7.5), t("text", 57, 755)], [box(44, 551, 700, 793.9)], 2);
     expect(strandedHeadingViolations([at([t("body", 57, 300), label], [box(44, 551, 280, 320), card], 1), nextCard], LAYOUT)).toEqual([]);
   });
   it("a heading at the bottom of a card that reaches the page bottom is stranded when the next page opens with its body text", () => {
     const label = t("METRICS", 57, 75, 60, 7.5);
     const continued = at([t("value text", 57, 780), t("more", 57, 765)], [box(44, 551, 700, 794)], 2);
     expect(strandedHeadingViolations([at([t("body", 57, 300), label], [box(44, 551, 56.5, 320)], 1), continued], LAYOUT)).toHaveLength(1);
+  });
+  // R5 MINOR 2: a stranded model heading — head block 63.6–88.9 over a body fragment 56.0–63.6 reaching the bottom
+  // padding (rendered with the card keeps at 0, heading-sweep-legacy-00 p. 3) — whose content opens the next page
+  // with a HEADING-sized text: the card's first field label, or the verdict card's "Agreement".
+  describe("a card reaching the page bottom is complete only when the next page opens a new card (R5 MINOR 2)", () => {
+    const strandedPage = at([t("body", 57, 300), t("GEMINI · MODEL NOT RECORDED", 57, 69.1, 120, 7.5)], [box(44, 551, 280, 320), box(44, 551, 63.6, 88.9), box(44, 551, 56.0, 63.6)], 1);
+    const labelOnlyAtBottom = at([t("body", 57, 300), t("CLAUDE · MODEL NOT RECORDED", 57, 75, 100, 7.5)], [box(44, 551, 280, 320), box(44, 551, 56.5, 94.7)], 1);
+    /** The next page: its first line `first` (size, glyph-top inset below the top of the box holding it, or no box). */
+    const nextWith = (first: string, size: number, inset: number | null) => {
+      const y = 785 - 0.8 * size;
+      const boxes = inset === null ? [box(44, 551, 600, 760)] : [box(44, 551, 600, 785 + inset)];
+      return at([t(first, 57, y, 80, size), t("its content", 57, y - 15)], boxes, 2);
+    };
+    it("next page opens with the card's first field label inside the continued body: stranded", () => {
+      const v = strandedHeadingViolations([strandedPage, nextWith("SUMMARY", 7.5, 0.8)], LAYOUT);
+      expect(v).toEqual([{ kind: "stranded_heading", pageNumber: 1, text: "GEMINI · MODEL NOT RECORDED" }]);
+    });
+    it("next page opens with Agreement inside the continued verdict card: stranded", () => {
+      expect(strandedHeadingViolations([strandedPage, nextWith("Agreement", 9, 0.8)], LAYOUT)).toHaveLength(1);
+    });
+    it("next page opens with a later field label one field gap below the continued body's top: stranded", () => {
+      expect(strandedHeadingViolations([strandedPage, nextWith("BULL CASE", 7.5, 6.8)], LAYOUT)).toHaveLength(1);
+    });
+    it("a heading-sized line just under the inset threshold is not a new card; at the threshold it is", () => {
+      expect(strandedHeadingViolations([strandedPage, nextWith("GROK · MODEL NOT RECORDED", 7.5, NEW_CARD_MIN_TOP_INSET - 0.5)], LAYOUT)).toHaveLength(1);
+      expect(strandedHeadingViolations([labelOnlyAtBottom, nextWith("GROK · MODEL NOT RECORDED", 7.5, NEW_CARD_MIN_TOP_INSET)], LAYOUT)).toEqual([]);
+    });
+    it("a genuine label-only card at the bottom is complete when the next page opens a new card or a section label outside any card", () => {
+      expect(strandedHeadingViolations([labelOnlyAtBottom, nextWith("GROK · MODEL NOT RECORDED", 7.5, 13.8)], LAYOUT)).toEqual([]);
+      expect(strandedHeadingViolations([labelOnlyAtBottom, nextWith("MODEL RESPONSES (4)", 8, null)], LAYOUT)).toEqual([]);
+    });
+    it("the same label-only card is stranded-looking when the next page continues a card (no evidence it is complete)", () => {
+      expect(strandedHeadingViolations([labelOnlyAtBottom, nextWith("SUMMARY", 7.5, 0.8)], LAYOUT)).toHaveLength(1);
+    });
+    it("an ordinary multi-field card whose page ends on a field label is stranded whatever the next page opens with", () => {
+      const fieldEnd = at([t("body", 57, 300), t("METRICS", 57, 70, 60, 7.5)], [box(44, 551, LAYOUT.paddingBottom, 320)], 1);
+      expect(strandedHeadingViolations([fieldEnd, nextWith("METRICS", 7.5, 0.8)], LAYOUT)).toHaveLength(1);
+      expect(strandedHeadingViolations([fieldEnd, nextWith("12.5 x", 10, 0.8)], LAYOUT)).toHaveLength(1);
+    });
+    it("opensNewCard: heading content required; a new card's inset or no card at all", () => {
+      expect(opensNewCard(nextWith("GROK · MODEL NOT RECORDED", 7.5, 13.8))).toBe(true);
+      expect(opensNewCard(nextWith("MODEL RESPONSES (4)", 8, null))).toBe(true);
+      expect(opensNewCard(nextWith("SUMMARY", 7.5, 0.8))).toBe(false);
+      expect(opensNewCard(nextWith("Agreement", 9, 0.8))).toBe(false);
+      expect(opensNewCard(nextWith("body text first", 10, 13.8))).toBe(false);
+      expect(opensNewCard(at([], [], 2))).toBe(false);
+    });
   });
   it("without shapes or layout the rule is unchanged", () => {
     const label = t("CLAUDE · MODEL NOT RECORDED", 57, 100, 100, 7.5);

@@ -1002,6 +1002,81 @@ function pass4Boundary(kind: string, t: number, i: number): PdfLayoutFixture {
   return { name: `${kind}-${t}-${String(i).padStart(2, "0")}`, minPages: 1, markers: m.all, record, pairs: metricPairs(record) };
 }
 
+// ─── Pass 5 (R5): closing long-value metric rows below the field label's keep; a closing bare label ──
+/**
+ * A card's CLOSING metric row with a value over METRIC_ROW_MAX_VALUE_CHARS,
+ * placed after `deep` short rows — below the metric[] field label's keep, so
+ * only the row itself decides where it breaks. A 1-line text beside a text of
+ * 2 or more lines, both with the card's closing padding, started on different
+ * pages (R5 MINOR 1: R5's sweep 48 of 750 documents; the pass-5 sweeps below,
+ * t 0..49 × i 0..14, archived with the PR evidence, 151 of 750 for "a" and 53
+ * of 750 for "b"). Each "a"/"b" position below detached a pair before the
+ * correction: a 2-line label above a 1-line value (the value on the next
+ * page), or a 1-line label beside a value of 2, 3 or 8+ lines (the label on
+ * the next page, after the value). The "-edge" positions are their passing
+ * neighbours one body line away.
+ */
+export const PASS5_CASES: Readonly<Record<string, ReadonlyArray<readonly [number, number]>>> = {
+  "closing-deep-a": [[0, 5], [12, 0], [49, 9], [10, 13], [21, 6], [30, 0]],
+  "closing-deep-a-edge": [[9, 13], [20, 6], [31, 0]],
+  "closing-deep-b": [[0, 0], [33, 12], [40, 6], [31, 13], [38, 7], [47, 0]],
+  "closing-deep-b-edge": [[1, 0], [41, 6]],
+};
+const PASS5_SHAPES: Readonly<Record<string, { deep: number; rows: ReadonlyArray<readonly [number, number]> }>> = {
+  // [label lines, value characters after the marker]
+  a: { deep: 6, rows: [[1, 34], [1, 60], [2, 34], [3, 100]] },
+  b: { deep: 4, rows: [[1, 100], [2, 60], [6, 60], [1, 300], [2, 300]] },
+};
+const PASS5_MODELS = ["chatgpt", "claude", "grok", "perplexity", "gemini", "deepseek"] as const;
+function pass5ClosingDeep(kind: string, t: number, i: number): PdfLayoutFixture {
+  const shape = PASS5_SHAPES[kind.includes("-a") ? "a" : "b"];
+  const m = markerFactory("Z");
+  const long = "14.2x to 16.8x (median 15.1x; dispersion widened after the guidance cut and revised capital plan) ".repeat(4);
+  const metric = (labelLines: number, valueChars: number) => {
+    const label = lines(labelLines, m.next());
+    const mark = m.next();
+    return { label, value: valueChars > 0 ? `${mark} ${long.slice(0, valueChars)}`.trimEnd() : `${mark} 12.5`, unit: "", asOf: "2025", source: "x" };
+  };
+  const lead = { thesis: lines(1 + t, m.next()), ...(i > 0 ? { keyAssumptions: Array.from({ length: i }, () => `Assumption ${m.next()}`) } : {}) };
+  const cards = shape.rows.map(([labelLines, valueChars]) => ({
+    thesis: lines(1, m.next()),
+    metrics: [...Array.from({ length: shape.deep }, () => metric(1, 0)), metric(labelLines, valueChars)],
+  }));
+  const modelResponses = [lead, ...cards].map((data, k) => ({ modelId: PASS5_MODELS[k], schemaId: "financial_valuation", ok: true, data }));
+  const record = baseRecord({
+    schemaId: "financial_valuation",
+    schemaFamily: "legacy",
+    reportSnapshot: {
+      question: "P5 sweep",
+      models: modelResponses.map((r) => ({ modelId: r.modelId, ok: true })),
+      reportTypeLabel: "Financial Analysis",
+      consensusLevel: "moderate",
+      sourceGroundingLevel: "strong",
+      reportGeneratedAt: "2026-10-16T11:00:00.000Z",
+      legacy: { schemaId: "financial_valuation", alignedClaims: [], modelResponses },
+    } as never,
+  });
+  return { name: `${kind}-${t}-${String(i).padStart(2, "0")}`, minPages: 2, markers: m.all, record, pairs: metricPairs(record) };
+}
+/** A card whose LAST shown field renders no value (an empty list): its label closes the card (R5 NIT 2). */
+function bareClosingLabel(): PdfLayoutFixture {
+  const m = markerFactory("Y");
+  const record = baseRecord({
+    schemaId: "financial_valuation",
+    schemaFamily: "legacy",
+    reportSnapshot: {
+      question: "Bare closing label",
+      models: [{ modelId: "chatgpt", ok: true }],
+      reportTypeLabel: "Financial Analysis",
+      consensusLevel: "moderate",
+      sourceGroundingLevel: "strong",
+      reportGeneratedAt: "2026-10-16T11:00:00.000Z",
+      legacy: { schemaId: "financial_valuation", alignedClaims: [], modelResponses: [{ modelId: "chatgpt", schemaId: "financial_valuation", ok: true, data: { thesis: lines(2, m.next()), keyAssumptions: [] } }] },
+    } as never,
+  });
+  return { name: "bare-closing-label", minPages: 1, markers: m.all, record };
+}
+
 export function pdfLayoutFixtures(): PdfLayoutFixture[] {
   return [
     legacyLongCards(),
@@ -1030,5 +1105,7 @@ export function pdfLayoutFixtures(): PdfLayoutFixture[] {
     ...FINE_OFFSET_CASES.map(([t, i]) => fineOffset(t, i)),
     ...FINE_SECTION_CASES.map(([j, k]) => fineSection(j, k)),
     ...Object.entries(PASS4_CASES).flatMap(([kind, cases]) => cases.map(([t, i]) => pass4Boundary(kind, t, i))),
+    ...Object.entries(PASS5_CASES).flatMap(([kind, cases]) => cases.map(([t, i]) => pass5ClosingDeep(kind, t, i))),
+    bareClosingLabel(),
   ];
 }

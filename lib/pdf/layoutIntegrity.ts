@@ -240,7 +240,7 @@ export function loneBulletViolations(pages: PdfPageText[]): PdfLayoutViolation[]
   return out;
 }
 
-/** Each pair of markers (e.g. a metric's label and value) must be rendered on the same page. */
+/** Each pair of markers (e.g. a metric's label and value, each marker at the START of its text) must start on the same page: the page of the run that holds each marker. A text continued onto a later page is not checked past its first run. */
 export function detachedPairViolations(pages: PdfPageText[], pairs: ReadonlyArray<readonly [string, string]>): PdfLayoutViolation[] {
   const pageOf = (marker: string): number | null => {
     for (const page of pages) if (page.items.some((i) => i.str.includes(marker))) return page.pageNumber;
@@ -338,6 +338,34 @@ export function cardClosingGapViolations(pages: PdfPageText[], layout: PdfLayout
 }
 
 /**
+ * The least space between the top edge of a card that STARTS on a page and its
+ * first text: a new card draws its top border and 12 pt top padding above its
+ * heading (≈ 13.8 pt to the glyph top, measured). A card body continued from
+ * the previous page has no top padding: its first content sits at most one
+ * field gap below the box top (≈ 0.8 pt for a field label or "Agreement" that
+ * opens a body fragment, ≈ 6.9 pt for one after a field or text gap, measured
+ * over the PR #235 corpus and sweeps).
+ */
+export const NEW_CARD_MIN_TOP_INSET = 10;
+
+/**
+ * Whether a page opens with a NEW card or container: its first line is
+ * heading content that either lies in no card (a section label, e.g. "Model
+ * responses") or is inset at least NEW_CARD_MIN_TOP_INSET below the top edge
+ * of the card that holds it. Heading-sized text alone is no evidence: a model
+ * card's body opens with a field label and the verdict card's with
+ * "Agreement", so the content of a stranded heading can open the next page
+ * with a heading too (R5 MINOR 2).
+ */
+export function opensNewCard(page: PdfPageText): boolean {
+  const first = readingLines(page)[0];
+  if (!first || !first.every(isHeadingItem)) return false;
+  const top = Math.max(...first.map((i) => i.y + 0.8 * i.height));
+  const holders = cardBoxes(page).filter((card) => first.every((i) => i.x >= card.x0 && i.x <= card.x1 && i.y >= card.y0 && i.y <= card.y1));
+  return holders.every((card) => card.y1 - top >= NEW_CARD_MIN_TOP_INSET);
+}
+
+/**
  * Whether a page's last body line is the last content of a COMPLETE card: a
  * card that closes with its padding below that line (a card that is a heading
  * alone, e.g. a failed model). Such a line is not a stranded heading. A
@@ -345,19 +373,16 @@ export function cardClosingGapViolations(pages: PdfPageText[], layout: PdfLayout
  * its own label, without closing padding.
  * A card that reaches the page's bottom padding may instead continue on the
  * next page (painted shapes alone cannot tell the two apart): it is complete
- * only when the next page opens with new heading content — the content of a
- * stranded heading opens the next page with body text.
+ * only when the next page opens with a new card (`opensNewCard`), not merely
+ * with heading-sized text.
  */
 export function endsCompleteCard(page: PdfPageText, line: PdfTextItem[], layout: PdfLayoutBox, nextPage?: PdfPageText): boolean {
   const body = page.items.filter((i) => i.str.trim().length > 0 && !isFooterText(i.str));
-  const nextOpensWithHeading = (() => {
-    const first = nextPage ? readingLines(nextPage)[0] : undefined;
-    return !!first && first.every(isHeadingItem);
-  })();
+  const nextOpensNewCard = !!nextPage && opensNewCard(nextPage);
   return cardBoxes(page).some((card) => {
     if (!line.every((i) => i.x >= card.x0 && i.x <= card.x1 && i.y >= card.y0 && i.y <= card.y1)) return false;
     const atPageBottom = card.y0 <= layout.paddingBottom + BOUNDARY_TOLERANCE;
-    if (atPageBottom && !nextOpensWithHeading) return false;
+    if (atPageBottom && !nextOpensNewCard) return false;
     const gap = cardClosingGap(card, body, layout, true);
     return gap !== null && gap >= MIN_CARD_CLOSING_GAP && line.some((i) => i.y - 0.25 * i.height - card.y0 <= gap + SAME_LINE_TOLERANCE);
   });

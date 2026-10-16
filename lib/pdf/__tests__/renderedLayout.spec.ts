@@ -224,6 +224,51 @@ it("cards that are their label alone (failed models) close with their padding, a
   expect(withoutShapes.length).toBe(endingOnLabelOnlyCard);
 });
 
+it("closing long-value metric rows below the field label's keep start label and value on one page (R5 MINOR 1)", () => {
+  // Each non-edge position detached a pair before the correction; the gate moves such a row whole to the next page,
+  // so its label and value both open that page.
+  const deep = report.report.filter((r) => r.fixture.startsWith("closing-deep-"));
+  expect(deep.length).toBeGreaterThanOrEqual(17);
+  for (const r of deep) {
+    const fixture = pdfLayoutFixtures().find((f) => f.name === r.fixture)!;
+    const pairs = metricPairsFromRecord(fixture.record);
+    expect(pairs.length).toBeGreaterThanOrEqual(25);
+    expect(detachedPairViolations(r.pageText, pairs)).toEqual([]);
+    expect(readingOrderViolations(r.pageText, canonicalMarkerOrder(fixture.record))).toEqual([]);
+    if (r.fixture.includes("-edge-")) continue;
+    const opensPage = (marker: string) => r.pageText.some((p) => p.pageNumber > 1 && readingLines(p)[0].some((i) => i.str.includes(marker)));
+    expect(pairs.some(([label, value]) => opensPage(label) && opensPage(value))).toBe(true);
+  }
+});
+
+it("the complete-card exemption applies only where the next page opens a new card (R5 MINOR 2)", () => {
+  // Exempted pages: heading-only last line, stranded without the painted shapes, not stranded with them.
+  let exempted = 0;
+  for (const r of report.report) {
+    const withShapes = new Set(strandedHeadingViolations(r.pageText, LAYOUT).map((v) => (v as { pageNumber: number }).pageNumber));
+    for (const v of strandedHeadingViolations(r.pageText.map(({ shapes: _shapes, ...p }) => p), LAYOUT)) {
+      const pageNumber = (v as { pageNumber: number }).pageNumber;
+      if (withShapes.has(pageNumber)) continue;
+      exempted++;
+      // Ground truth from the text alone: the last line is a model's label, and the next page opens with another
+      // model's label or a section label — never with the card's own field label or "Agreement".
+      const last = readingLines(r.pageText[pageNumber - 1]).slice(-1)[0].map((i) => i.str).join(" ");
+      const next = readingLines(r.pageText[pageNumber])[0].map((i) => i.str).join(" ");
+      expect(last).toMatch(/ · /);
+      expect(next).toMatch(/ · |^MODEL RESPONSES/);
+      expect(next).not.toEqual(last);
+    }
+  }
+  expect(exempted).toBeGreaterThanOrEqual(4);
+});
+
+it("a card whose last shown field renders no value closes under that field's label (R5 NIT 2)", () => {
+  const r = report.report.find((x) => x.fixture === "bare-closing-label")!;
+  expect(r.violationCounts).toEqual({});
+  expect(cardClosingGapViolations(r.pageText, LAYOUT)).toEqual([]);
+  expect(r.pageText[0].items.some((i) => i.str.trim() === "KEY ASSUMPTIONS")).toBe(true);
+});
+
 it("a bullet text continued over pages keeps its indent (its mark is not repeated)", () => {
   const fixture = pdfLayoutFixtures().find((f) => f.name === "single-text-over-page-milestone2")!;
   const bullet = (fixture.record.reportSnapshot as unknown as { milestone2: { decisionReceipt: { basis: string[] } } }).milestone2.decisionReceipt.basis[0];

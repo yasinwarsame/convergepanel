@@ -12,7 +12,7 @@
  *   - content markers in the same order as composed (reading order);
  *   - no non-final page ending with a heading (heading kept with its content);
  *   - no bullet mark without its text; paired markers (a metric's label and
- *     value) on the same page; no empty card fragment (a card's closing
+ *     value) starting on the same page; no empty card fragment (a card's closing
  *     padding/border carried alone onto a page, found from the painted shapes);
  *   - the fixture occupies at least its expected page count.
  * It first renders a known-bad canary (lib/pdf/__fixtures__/layoutCanary.tsx)
