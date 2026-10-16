@@ -31,6 +31,7 @@ import {
 } from "@/lib/adaptiveSchema/types";
 import { TRUST_SCORE_CAP_REASON, TEXT_DEDUP_THRESHOLDS, WHERE_MODELS_AGREE_MAX_ITEMS, CITATION_COVERAGE_DANGER_THRESHOLD, BIAS_EMPTY_REASON_LABELS } from "@/lib/adaptiveSchema/config";
 import { dedupeTextList } from "@/lib/adaptiveSchema/textSimilarity";
+import { consensusStatusLabel, consensusStatusRank, describeContested } from "@/lib/adaptiveSchema/consensusIntegrity";
 
 /** Canonical, ordered list of `data-section` values rendered below — the single source of truth the snapshot test asserts against, so a future edit can't silently drop a section without also updating this list. */
 export const ADAPTIVE_SYNTHESIS_SECTION_IDS = [
@@ -220,8 +221,6 @@ function AgreementSegmentBar({ agreeCount, disputeCount, silentCount, total }: {
   );
 }
 
-const STATUS_SORT_ORDER: Record<"consensus" | "majority" | "split", number> = { consensus: 0, majority: 1, split: 2 };
-
 /** Exported — see UnifiedAnswerCard's export doc above. */
 export function AgreementDisagreementMap({ claims, modelsUsed }: { claims: AlignedClaim[]; modelsUsed: ModelId[] }) {
   // Coverage-1 claims (a single model's own claim, never corroborated or
@@ -231,7 +230,7 @@ export function AgreementDisagreementMap({ claims, modelsUsed }: { claims: Align
   if (mapClaims.length === 0) return null;
 
   const sorted = [...mapClaims].sort((a, b) => {
-    const statusDelta = STATUS_SORT_ORDER[a.status as "consensus" | "majority" | "split"] - STATUS_SORT_ORDER[b.status as "consensus" | "majority" | "split"];
+    const statusDelta = consensusStatusRank(a.status) - consensusStatusRank(b.status);
     if (statusDelta !== 0) return statusDelta;
     return b.agreementScore - a.agreementScore;
   });
@@ -243,6 +242,8 @@ export function AgreementDisagreementMap({ claims, modelsUsed }: { claims: Align
         {sorted.map((claim) => {
           const { agreeModels, disputeModels, silentModels } = bucketModelsByStance(claim, modelsUsed);
           const isSplit = claim.status === "split";
+          const isLimitedCoverage = claim.status === "limited_coverage";
+          const contestedNote = describeContested(claim);
           const severity = classifyClaimSeverity(claim.claimText, undefined, agreeModels.length + disputeModels.length, isSplit);
           return (
             <div
@@ -265,8 +266,14 @@ export function AgreementDisagreementMap({ claims, modelsUsed }: { claims: Align
                 <span className="shrink-0 text-xs text-slate-500 whitespace-nowrap">
                   {agreementLabel(agreeModels.length, disputeModels.length, silentModels.length, modelsUsed.length)}
                   {claim.disagreementType ? ` · ${claim.disagreementType.replace(/_/g, " ")}` : ""}
+                  {isLimitedCoverage ? " · limited coverage" : ""}
                 </span>
               </div>
+              {contestedNote && (
+                <p className="text-xs text-amber-700" data-testid="contested-note">
+                  Contested: {contestedNote}
+                </p>
+              )}
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
                 {agreeModels.length > 0 && (
                   <div className="flex items-center gap-1 flex-wrap">
@@ -566,6 +573,7 @@ export function PanelVerdictCard({ report, gate }: { report: AdaptiveSynthesisRe
             {v.consensusModelCount > 0 && (
               <span className="text-slate-500"> — agreed by {v.consensusModelCount} model{v.consensusModelCount === 1 ? "" : "s"}</span>
             )}
+            {v.topConsensusContested && <span className="block text-xs text-amber-700 mt-0.5">Contested: {v.topConsensusContested}</span>}
           </p>
         </div>
         <div className="rounded-lg bg-slate-50 border border-slate-200 p-3">
@@ -744,7 +752,7 @@ export default function AdaptiveSynthesisReportView({
             <ul className="space-y-1 text-sm text-slate-700">
               {gate.loadBearingClaims.map((claim) => (
                 <li key={claim.id}>
-                  {claim.claimText} — <span className="font-medium">{claim.status}</span>
+                  {claim.claimText} — <span className="font-medium">{consensusStatusLabel(claim.status)}</span>
                   {claim.cells.some(Boolean) && (
                     <span className="text-slate-500">
                       {" "}

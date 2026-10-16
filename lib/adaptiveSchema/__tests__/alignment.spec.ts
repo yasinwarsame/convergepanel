@@ -114,6 +114,8 @@ describe("alignClaims", () => {
         stance: "agrees",
         rawStance: "asserts",
         confidence: "settled",
+        // No claimOrigins supplied: the field is unknown, never guessed.
+        origin: { kind: "claim", field: null, fieldClass: "unclassified" },
         excerpt: "Only one model said this.",
         evidenceType: "empirical",
       },

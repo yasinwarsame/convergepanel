@@ -17,6 +17,7 @@ import { runModelFamilyName } from "@/lib/panel/runModelIdentity";
 import { AlignedClaim } from "./types";
 import { AdaptiveGateResult } from "./gate";
 import { claimSalience } from "./scoring";
+import { describeContested } from "./consensusIntegrity";
 
 export interface AdaptivePanelVerdict {
   /** "{N}/{M} models converge on {core finding}; certainty {score}; gate: {pass|caution|fail}." */
@@ -37,10 +38,15 @@ function modelLabel(modelId: ModelId): string {
   return runModelFamilyName(modelId);
 }
 
-/** Exported for reuse by verdictCard.ts's topConsensus field — same "highest-salience consensus/majority claim" rule. */
+/**
+ * Exported for reuse by verdictCard.ts's topConsensus field — same "highest-salience consensus/majority claim" rule.
+ * The no-consensus fallback never picks a limited_coverage row: half or
+ * fewer of the panel took a position on it, so it can't be the panel's core
+ * finding.
+ */
 export function coreFindingClaim(rows: AlignedClaim[]): AlignedClaim | null {
   const candidates = rows.filter((r) => r.status === "consensus" || r.status === "majority");
-  const pool = candidates.length > 0 ? candidates : rows;
+  const pool = candidates.length > 0 ? candidates : rows.filter((r) => r.status !== "limited_coverage");
   if (pool.length === 0) return null;
   return [...pool].sort((a, b) => claimSalience(b) - claimSalience(a))[0];
 }
@@ -93,7 +99,11 @@ export function buildAdaptiveUnifiedAnswer(rows: AlignedClaim[], gate: AdaptiveG
     .slice(0, 4);
 
   if (candidates.length === 0) {
-    return "No consensus or majority claims were identified across the panel.";
+    const limitedCount = rows.filter((r) => r.status === "limited_coverage").length;
+    const base = "No consensus or majority claims were identified across the panel.";
+    return limitedCount > 0
+      ? `${base} ${limitedCount} claim${limitedCount === 1 ? " had" : "s had"} positions from half or fewer of the dispatched models — too few to count as agreement.`
+      : base;
   }
 
   return candidates
@@ -102,7 +112,8 @@ export function buildAdaptiveUnifiedAnswer(rows: AlignedClaim[], gate: AdaptiveG
         .filter((c) => c && (c.stance === "agrees" || c.stance === "partial"))
         .map((c) => modelLabel(c!.modelId));
       const names = supportingModels.length > 0 ? supportingModels.join(", ") : "the panel";
-      return `${row.claimText} (${names}).`;
+      const contested = describeContested(row);
+      return contested ? `${row.claimText} (${names}; ${contested}).` : `${row.claimText} (${names}).`;
     })
     .join(" ");
 }

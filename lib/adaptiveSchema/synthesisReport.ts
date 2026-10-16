@@ -38,6 +38,7 @@ import { stripJsonFences, withTimeout } from "./util";
 import { computeRunCertainty } from "./scoring";
 import { computeAdaptiveGate } from "./gate";
 import { buildAdaptiveVerdict, buildAdaptiveUnifiedAnswer } from "./verdict";
+import { assessedPositionCount, describeContested } from "./consensusIntegrity";
 import { buildAdaptiveVerdictCard } from "./verdictCard";
 import { detectAdaptiveBiases } from "./biasDetection";
 import { auditPanelCoverage } from "./coverageAudit";
@@ -115,7 +116,13 @@ function buildDeterministicDisagreements(disagreeRows: AlignedClaim[]): Omit<Ada
   }));
 }
 
-function buildTemplateExecutiveSummary(unifiedAnswer: string, agreeCount: number, disagreeCount: number, gate: string): string {
+function buildTemplateExecutiveSummary(
+  unifiedAnswer: string,
+  agreeCount: number,
+  disagreeCount: number,
+  limitedCount: number,
+  gate: string
+): string {
   if (gate === "fail") return unifiedAnswer;
   const parts = [unifiedAnswer];
   if (agreeCount > 0 || disagreeCount > 0) {
@@ -123,7 +130,38 @@ function buildTemplateExecutiveSummary(unifiedAnswer: string, agreeCount: number
       `The panel reached consensus or majority agreement on ${agreeCount} claim${agreeCount === 1 ? "" : "s"} and split on ${disagreeCount} claim${disagreeCount === 1 ? "" : "s"}.`
     );
   }
+  if (limitedCount > 0) {
+    parts.push(
+      `${limitedCount} further claim${limitedCount === 1 ? " had" : "s had"} positions from half or fewer of the dispatched models, too few to count as agreement.`
+    );
+  }
   return parts.join(" ");
+}
+
+/** A "Where models agree" line: the claim, plus the canonical contested note when the models marked it contested. */
+function whereModelsAgreeLine(row: AlignedClaim): string {
+  const contested = describeContested(row);
+  return contested ? `${row.claimText} — ${contested}` : row.claimText;
+}
+
+/**
+ * Whether the model's own "Where models agree" sentences may replace the
+ * deterministic lines. Not when:
+ * - it wrote more sentences than there are consensus/majority rows — it was
+ *   asked for one per such row, so the extra ones describe something else
+ *   (a limited_coverage or split claim) as agreement;
+ * - any agree row is contested — its sentences can't be relied on to carry
+ *   the canonical contested note, and the deterministic lines do.
+ */
+function narrativeAgreeLinesUsable(narrativeLines: string[], agreeRows: AlignedClaim[]): boolean {
+  if (narrativeLines.length === 0 || narrativeLines.length > agreeRows.length) return false;
+  return !agreeRows.some((r) => describeContested(r) !== null);
+}
+
+/** One scored row as the narrative prompt sees it: status, coverage and contested note as explicit structured facts. */
+function narrativeRowLine(r: AlignedClaim, dispatchedPanelSize: number): string {
+  const contested = describeContested(r);
+  return `- "${r.claimText}" — status: ${r.status}, positions: ${assessedPositionCount(r)} of ${dispatchedPanelSize} dispatched models, agreement: ${r.agreementScore.toFixed(2)}, certainty: ${r.certaintyScore.toFixed(2)}${r.disagreementType ? `, flagged: ${r.disagreementType}` : ""}${contested ? `, contested note: "${contested}"` : ""}`;
 }
 
 // ─── Narrative quality validators (Synthesis Report Polish, markdown-leak /
@@ -244,6 +282,12 @@ Only refer to models by these exact IDs, verbatim: ${rosterList}. Never invent, 
 
 Write PLAIN TEXT ONLY — no markdown syntax at all (no **bold**, no _italic_, no # headings, no bullet dashes). Every field below is prose or a plain sentence, not formatted text.
 
+The status of every claim is final — never describe the panel as agreeing more than its status says:
+- "limited_coverage": half or fewer of the dispatched models took a position on it. Never call it agreement, consensus or a majority view; if you mention it, say only a few models addressed it.
+- "split": the models disagree. Never call it a majority view or consensus.
+- A claim with a contested note: the models mark the underlying claim contested. Say so whenever you mention it; never present it as settled.
+- A model that was silent on a claim, or failed, did not agree with it. Count only the models the "positions" figure gives — never "all models" unless every dispatched model took that position.
+
 Never include a numeric agreement/certainty value in any sentence (e.g. never write "agreement 1.00" or "certainty 0.85" in prose). Those scores are already shown elsewhere with labeled context — express support in words instead: "all five models", "most models", "a minority", "one model".
 
 ${SCHEMA_NARRATIVE_HINTS[schemaId] ?? SCHEMA_NARRATIVE_HINTS.generic}
@@ -258,7 +302,7 @@ ${disagreementTopics.length > 0 ? disagreementTopics.map((t, i) => `${i + 1}. ${
 Return ONLY JSON in this exact shape:
 {
   "executiveSummary": "...",
-  "whereModelsAgreeNarrative": ["one short sentence per consensus/majority claim, in your own words"],
+  "whereModelsAgreeNarrative": ["one short sentence per consensus/majority claim only (never a limited_coverage or split claim), in your own words; if the claim has a contested note, the sentence must say the underlying claim is contested"],
   "whyModelsDisagree": ${disagreementTopics.length > 0 ? `["exactly ${disagreementTopics.length} entries, same order as the topics above"]` : "[]"},
   "disagreementStakes": ${disagreementTopics.length > 0 ? `["exactly ${disagreementTopics.length} entries: low|important|decision-critical, same order as the topics above"]` : "[]"},
   "certaintyAssessment": "2-3 sentences on how much to trust this run and why, given the certainty score and gate",
@@ -288,6 +332,7 @@ export async function buildAdaptiveSynthesisReport(
 
   const agreeRows = rows.filter((r) => r.status === "consensus" || r.status === "majority");
   const disagreeRows = rows.filter((r) => r.status === "split");
+  const limitedRows = rows.filter((r) => r.status === "limited_coverage");
   const deterministicDisagreements = buildDeterministicDisagreements(disagreeRows);
 
   // Bias & Blind Spots' three tiers — all independent of the narrative call
@@ -314,11 +359,13 @@ export async function buildAdaptiveSynthesisReport(
     panelVerdict: verdict.summary,
     gate: gate.status,
     runCertainty,
-    whereModelsAgree: agreeRows.map((r) => r.claimText),
+    whereModelsAgree: agreeRows.map(whereModelsAgreeLine),
     whereModelsDisagree: disagreeRows.map((r) => r.claimText),
-    certaintyAssessment: `Run certainty ${Math.round(runCertainty * 100)}% (gate: ${gate.status}). ${agreeRows.length} claim(s) at consensus/majority, ${disagreeRows.length} split.`,
+    certaintyAssessment: `Run certainty ${Math.round(runCertainty * 100)}% (gate: ${gate.status}). ${agreeRows.length} claim(s) at consensus/majority, ${
+      limitedRows.length > 0 ? `${limitedRows.length} with limited coverage, ` : ""
+    }${disagreeRows.length} split.`,
     narrativeSections: [],
-    executiveSummary: buildTemplateExecutiveSummary(unifiedAnswer, agreeRows.length, disagreeRows.length, gate.status),
+    executiveSummary: buildTemplateExecutiveSummary(unifiedAnswer, agreeRows.length, disagreeRows.length, limitedRows.length, gate.status),
     disagreements: templateDisagreements,
     biasAndBlindSpots: bias,
     biasEmptyReason: biasResult.emptyReason,
@@ -339,12 +386,7 @@ export async function buildAdaptiveSynthesisReport(
 Schema type: ${schemaId}
 
 Scored claims (already aligned and scored across models — do not re-score, just narrate):
-${rows
-  .map(
-    (r) =>
-      `- "${r.claimText}" — status: ${r.status}, agreement: ${r.agreementScore.toFixed(2)}, certainty: ${r.certaintyScore.toFixed(2)}${r.disagreementType ? `, flagged: ${r.disagreementType}` : ""}`
-  )
-  .join("\n")}
+${rows.map((r) => narrativeRowLine(r, totalModelCount)).join("\n")}
 
 Panel verdict: ${verdict.summary}
 Run certainty: ${(runCertainty * 100).toFixed(0)}%
@@ -431,8 +473,9 @@ Gate: ${gate.status}`;
       panelVerdict: verdict.summary,
       gate: gate.status,
       runCertainty,
-      whereModelsAgree:
-        narrative.whereModelsAgreeNarrative.length > 0 ? narrative.whereModelsAgreeNarrative : baseReport.whereModelsAgree,
+      whereModelsAgree: narrativeAgreeLinesUsable(narrative.whereModelsAgreeNarrative, agreeRows)
+        ? narrative.whereModelsAgreeNarrative
+        : baseReport.whereModelsAgree,
       whereModelsDisagree: baseReport.whereModelsDisagree,
       certaintyAssessment: narrative.certaintyAssessment || baseReport.certaintyAssessment,
       narrativeSections: narrative.narrativeSections,

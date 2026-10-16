@@ -64,11 +64,16 @@ function jaccard(a: Set<string>, b: Set<string>): number {
 }
 
 /**
- * contested_empirical: agreement is measured on stance toward each disputed
- * claim AND on the meta-level ("do models agree that experts disagree?").
- * Models describing the same expert camps count as agreement even when they
- * weight the camps differently — approximated here via camp-label overlap
- * (Jaccard) across every pair of cells that attached camps.
+ * contested_empirical: the row's agreementScore blends stance agreement with
+ * the meta-level ("do models agree that experts disagree?"), approximated
+ * via camp-label overlap (Jaccard) across every pair of cells that attached
+ * camps. That blended score feeds certainty and is unchanged.
+ *
+ * Status, however, is the stance-based status only. Models describing the
+ * same expert camps is agreement about the SHAPE of the dispute, not about
+ * the panel's positions, so it must never turn a "split" into a "majority".
+ * The contested shape is reported on its own axis instead (ContestedDimensions,
+ * consensusIntegrity.ts).
  */
 function contestedEmpiricalComparator(row: AlignedClaim): AlignedClaim {
   const base = defaultStanceBasedScore(row);
@@ -89,13 +94,7 @@ function contestedEmpiricalComparator(row: AlignedClaim): AlignedClaim {
   const metaAgreement = pairCount > 0 ? pairSum / pairCount : 0;
   const blended = 0.5 * base.agreementScore + 0.5 * metaAgreement;
 
-  // High meta-agreement (models converge on the SHAPE of the dispute, e.g.
-  // the same named camps) means the panel is doing its job even though
-  // individual stances differ — don't let that read as a raw "split".
-  let status = base.status;
-  if (base.status === "split" && metaAgreement >= 0.6) status = "majority";
-
-  return { ...base, agreementScore: blended, status };
+  return { ...base, agreementScore: blended };
 }
 
 /**

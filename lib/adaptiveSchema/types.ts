@@ -305,13 +305,12 @@ export interface AggregatedComparisonCell {
   totalModels: number;
   coverageRatio: number;
   /**
-   * Cross-model agreement on VALUE for this cell. Deliberately reuses
-   * AlignedClaimStatus's vocabulary (declared below) — unlike
-   * ranked_enumeration's rank correlation, "do models agree on this data
-   * point" here means exactly the same thing it means for a claim row, so a
-   * separate vocabulary would only obscure that.
+   * Cross-model agreement on VALUE for this cell. Uses the same four words as
+   * a claim row's status (consensus/majority/split/single_source), but is its
+   * own type (ComparisonAgreementStatus, declared below) so claim-row status
+   * values such as "limited_coverage" never reach comparison_matrix cells.
    */
-  agreement: AlignedClaimStatus;
+  agreement: ComparisonAgreementStatus;
   /** Representative value when agreement is "consensus" or "majority" — the modal/longest phrasing among the agreeing models. Undefined for "split" (picking one would misrepresent a genuine disagreement) or "single_source" (valuesByModel's lone entry already is the value). */
   consensusValue?: string;
   /** Tally of verdict calls across contributing models, only for models that supplied one. */
@@ -1139,13 +1138,50 @@ export interface AdaptiveModelResult {
  */
 export type ClaimCellStance = "agrees" | "disputes" | "partial" | "unclear";
 
+/**
+ * Where a claim[] field's claims sit epistemically, by the field's own
+ * definition: "settled" (e.g. contested_empirical.settledClaims),
+ * "disputed" (e.g. contested_empirical.disputedClaims, which must carry
+ * camps), or "unclassified" (a claim[] field whose definition says neither —
+ * its claims carry their own per-claim confidence instead). See
+ * CLAIM_FIELD_CLASS in consensusIntegrity.ts.
+ */
+export type ClaimFieldClass = "settled" | "disputed" | "unclassified";
+
+/**
+ * Where a cell came from.
+ * - "claim": the model's own Claim, from claim[] field `field` (null when the
+ *   caller didn't say which field — then fieldClass is "unclassified").
+ * - "inferred": the stance-extraction backfill (alignment.ts pass 3) found
+ *   the model takes a position it never listed as a Claim. No stated
+ *   confidence, no camps.
+ * - "field_derived": built by a non-claim unitizer (fieldAlignment.ts) from a
+ *   metric/scenario/step/scalar value. No stated confidence.
+ * Optional on the type only because runs persisted before this field existed
+ * lack it; every newly built cell sets it.
+ */
+export type AlignedCellOrigin =
+  | { kind: "claim"; field: string | null; fieldClass: ClaimFieldClass }
+  | { kind: "inferred" }
+  | { kind: "field_derived"; fieldType: "metric" | "scenario" | "step" | "scalar" };
+
 export interface AlignedClaimCell {
   modelId: ModelId;
   /** Stance relative to the cluster's canonicalText — drives agreement scoring and matrix coloring. */
   stance: ClaimCellStance;
   /** The model's own original assertion polarity, kept for audit/debugging. */
   rawStance: ClaimStance;
-  confidence: ClaimConfidence;
+  /**
+   * The model's own stated confidence for its Claim. null when the model
+   * stated none: "inferred" and "field_derived" cells. Runs persisted before
+   * this change carry "majority_view" on those cells instead (a placeholder,
+   * not a stated view). Certainty scores a null exactly like that legacy
+   * placeholder (UNSTATED_CONFIDENCE_CERTAINTY_SCORE, config.ts), so
+   * certainty is unchanged.
+   */
+  confidence: ClaimConfidence | null;
+  /** See AlignedCellOrigin. Absent only on cells persisted before it existed. */
+  origin?: AlignedCellOrigin;
   /** Carried through from the source Claim when present — lets consensus_map expand disputed rows. */
   camps?: { label: string; position: string }[];
   /** The model's own wording (verbatim claim text, or a short paraphrase from the backfill pass) — feeds "Show Positions". */
@@ -1156,9 +1192,8 @@ export interface AlignedClaimCell {
    * True when this cell came from the stance-extraction backfill pass (the
    * model never emitted a claim that clustered here directly, but a
    * dedicated check found it does take a position) rather than from the
-   * model's own clustered claim. Backfilled cells default to
-   * confidence "majority_view" since it's an inferred position, not the
-   * model's stated one.
+   * model's own clustered claim. Same cells as origin.kind "inferred"; kept
+   * because persisted runs and the "(inferred)" chip read it.
    */
   backfilled?: boolean;
   /**
@@ -1170,7 +1205,39 @@ export interface AlignedClaimCell {
   raw?: Metric | Step | Scenario;
 }
 
-export type AlignedClaimStatus = "consensus" | "majority" | "split" | "single_source";
+/**
+ * Every claim-row status, in display rank order (strongest agreement first).
+ * - consensus / majority / split / single_source: the schema's
+ *   AgreementComparator (agreementComparators.ts), from the cells that took a
+ *   position.
+ * - limited_coverage: a row that would otherwise be consensus or majority,
+ *   but only half or fewer of the DISPATCHED panel took an assessable
+ *   position on it (applyConsensusIntegrity, consensusIntegrity.ts). A
+ *   presentation classification only — never an input to certainty, and it
+ *   never replaces split or single_source, so the gate (which counts split)
+ *   is unaffected by it.
+ */
+export const ALIGNED_CLAIM_STATUSES = ["consensus", "majority", "limited_coverage", "split", "single_source"] as const;
+export type AlignedClaimStatus = (typeof ALIGNED_CLAIM_STATUSES)[number];
+
+/** comparison_matrix cell agreement — deliberately NOT AlignedClaimStatus (see ComparisonMatrixCell.agreement). */
+export type ComparisonAgreementStatus = "consensus" | "majority" | "split" | "single_source";
+
+/**
+ * The contested axis of a claim row, kept separate from status (which is
+ * about how far the panel's POSITIONS agree). Counts only "claim" cells —
+ * models that listed this claim themselves; inferred and field-derived cells
+ * carry no stated confidence or camps, so they are never counted.
+ * - assessed: claim cells in the row.
+ * - marked: those whose model marked the underlying claim contested — the
+ *   claim came from a "disputed" field, or its confidence is "contested",
+ *   or it lists camps.
+ * Absent when assessed would be 0, and on rows persisted before it existed.
+ */
+export interface ContestedDimensions {
+  marked: number;
+  assessed: number;
+}
 
 export interface AlignedClaim {
   /** Canonical id — derived from the cluster's canonicalText, or a generated cluster id. */
@@ -1183,8 +1250,10 @@ export interface AlignedClaim {
   agreementScore: number;
   /** 0–1, see scoring.ts. Defaults to 0 until scored. */
   certaintyScore: number;
-  /** Defaults to "single_source" until scored; recomputed from agreementScore + coverage. */
+  /** Defaults to "single_source" until scored by the AgreementComparator, then by applyConsensusIntegrity (coverage). See AlignedClaimStatus. */
   status: AlignedClaimStatus;
+  /** See ContestedDimensions. */
+  contested?: ContestedDimensions;
   /**
    * Schema-specific disagreement classification beyond the generic status
    * enum — e.g. legal_regulatory's "jurisdiction_mismatch", which is a hard
@@ -1283,6 +1352,8 @@ export interface AdaptiveVerdictCard {
   question: string;
   topConsensus: string;
   consensusModelCount: number;
+  /** Canonical contested note for topConsensus (describeContested, consensusIntegrity.ts), e.g. "all mark the underlying claim contested". Absent when not contested, and on reports persisted before it existed. */
+  topConsensusContested?: string;
   keyDisagreement: string | null;
   disagreementDetail: string | null;
   disagreementModelCount: number;

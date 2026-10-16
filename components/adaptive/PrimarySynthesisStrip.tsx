@@ -43,6 +43,9 @@ export default function PrimarySynthesisStrip({ synthesisReport }: { synthesisRe
             {verdictCard.consensusModelCount > 0 && (
               <span className="text-slate-500"> — {verdictCard.consensusModelCount} model{verdictCard.consensusModelCount === 1 ? "" : "s"}</span>
             )}
+            {verdictCard.topConsensusContested && (
+              <span className="block text-xs text-amber-700 mt-0.5">Contested: {verdictCard.topConsensusContested}</span>
+            )}
           </p>
         </div>
         <div>

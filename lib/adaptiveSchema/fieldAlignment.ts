@@ -103,7 +103,8 @@ export function alignMetrics(
         modelId,
         stance,
         rawStance: stance === "disputes" ? "disputes" : stance === "unclear" ? "uncertain" : "asserts",
-        confidence: "majority_view",
+        confidence: null,
+        origin: { kind: "field_derived", fieldType: "metric" },
         excerpt: `${metric.value ?? "unknown"}${metric.unit ? ` ${metric.unit}` : ""} (as of ${metric.asOf}, source: ${metric.source})`,
         raw: metric,
       });
@@ -157,7 +158,8 @@ export function alignScenarios(
         modelId,
         stance,
         rawStance: stance === "disputes" ? "disputes" : stance === "unclear" ? "uncertain" : "asserts",
-        confidence: "majority_view",
+        confidence: null,
+        origin: { kind: "field_derived", fieldType: "scenario" },
         excerpt: `${Math.round(scenario.probability * 100)}% — ${scenario.narrative}`,
         raw: scenario,
       });
@@ -226,7 +228,8 @@ export function alignSteps(
         modelId,
         stance,
         rawStance: stance === "disputes" ? "disputes" : stance === "unclear" ? "uncertain" : "asserts",
-        confidence: "majority_view",
+        confidence: null,
+        origin: { kind: "field_derived", fieldType: "step" },
         excerpt: step.action,
         raw: step,
       });
@@ -323,7 +326,8 @@ export function alignScalarField(
       modelId,
       stance,
       rawStance: stance === "agrees" ? "asserts" : "disputes",
-      confidence: "majority_view",
+      confidence: null,
+      origin: { kind: "field_derived", fieldType: "scalar" },
       excerpt: value.trim(),
     });
   }

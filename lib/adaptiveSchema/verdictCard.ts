@@ -15,6 +15,7 @@ import { AdaptiveBiasFinding, AdaptiveVerdictCard, AlignedClaim } from "./types"
 import { AdaptiveGateResult } from "./gate";
 import { VERDICT_NEXT_STEPS } from "./config";
 import { coreFindingClaim, topSplitClaim } from "./verdict";
+import { describeContested } from "./consensusIntegrity";
 
 export function buildAdaptiveVerdictCard(
   question: string,
@@ -24,6 +25,7 @@ export function buildAdaptiveVerdictCard(
 ): AdaptiveVerdictCard {
   const consensus = coreFindingClaim(rows);
   const split = topSplitClaim(rows);
+  const topConsensusContested = consensus ? describeContested(consensus) : null;
 
   return {
     question,
@@ -31,6 +33,7 @@ export function buildAdaptiveVerdictCard(
     consensusModelCount: consensus
       ? consensus.cells.filter((c) => c && (c.stance === "agrees" || c.stance === "partial")).length
       : 0,
+    ...(topConsensusContested ? { topConsensusContested } : {}),
     keyDisagreement: split?.claimText ?? null,
     disagreementDetail: split
       ? split.disagreementType
