@@ -45,7 +45,15 @@ function collectText(node: unknown, out: string[], depth = 0): void {
       collectText(rendered, out, depth + 1);
       return;
     }
-    if (el.props && "children" in el.props) collectText(el.props.children, out, depth);
+    if (el.props && "children" in el.props) {
+      // A `row-reverse` row is DRAWN in reverse child order (e.g. a metric row: value composed first, drawn right),
+      // so its text reads in reverse composition order.
+      const style = (el.props as { style?: { flexDirection?: unknown } }).style;
+      if (style?.flexDirection === "row-reverse") {
+        const children = ([] as unknown[]).concat(el.props.children).flat(Infinity);
+        for (const child of children.reverse()) collectText(child, out, depth);
+      } else collectText(el.props.children, out, depth);
+    }
   }
 }
 

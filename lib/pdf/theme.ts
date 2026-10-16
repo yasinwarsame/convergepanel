@@ -73,14 +73,73 @@ export const pdfStyles = StyleSheet.create({
     marginBottom: 10,
     backgroundColor: COLORS.surface,
   },
+  /**
+   * A paginating card is drawn as two sibling blocks — its heading and its
+   * body — so the heading can be kept with its content (see
+   * AdaptiveResearchDocument.tsx `PaginatingCard`). Together they draw the
+   * same box as `card`.
+   */
+  cardHead: {
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: COLORS.border,
+    borderTopLeftRadius: 6,
+    borderTopRightRadius: 6,
+    paddingTop: 12,
+    paddingHorizontal: 12,
+    backgroundColor: COLORS.surface,
+  },
+  cardBody: {
+    borderBottomWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: COLORS.border,
+    borderBottomLeftRadius: 6,
+    borderBottomRightRadius: 6,
+    // No bottom padding: the body's LAST text carries it (AdaptiveResearchDocument.tsx `closingBox`), so the
+    // padding and bottom border can never be carried alone onto the next page as an empty strip.
+    paddingHorizontal: 12,
+    backgroundColor: COLORS.surface,
+  },
+  /**
+   * A paginating card with no body content (a failed model, or a model with no
+   * shown field) is its heading alone: drawn as one bounded box with the
+   * card's own padding (see AdaptiveResearchDocument.tsx `PaginatingCard`).
+   */
+  labelOnlyCard: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 6,
+    padding: 12,
+    backgroundColor: COLORS.surface,
+  },
+  /** The gap after a paginating card — a separate element, never a margin on the body (see `PaginatingCard`). */
+  cardGap: { height: 10 },
   bodyText: { fontSize: 10, lineHeight: 1.5, color: COLORS.text },
   mutedText: { fontSize: 9, lineHeight: 1.4, color: COLORS.muted },
-  bulletRow: { flexDirection: "row", marginBottom: 3 },
-  bulletMark: { width: 10, fontSize: 10, color: COLORS.muted },
+  /** A small in-card label ("Agreement", "Disagreement") above body text. */
+  subLabel: { fontSize: 9, lineHeight: 1.4, color: COLORS.muted, marginBottom: 3 },
+  /** `subLabel` that follows earlier content in the same card body. */
+  subLabelAfterContent: { fontSize: 9, lineHeight: 1.4, color: COLORS.muted, marginBottom: 3, marginTop: 6 },
+  /**
+   * The text's indent is the ROW's left padding and the mark sits in it (negative margin), so a bullet text that
+   * continues on the next page — where its kept mark is not repeated — keeps its indent.
+   */
+  bulletRow: { flexDirection: "row", marginBottom: 3, paddingLeft: 10 },
+  /** `row-reverse`: the value is the row's first child (kept with the label, see `MetricRows`) but is drawn on the right. */
+  metricRow: { flexDirection: "row-reverse", paddingVertical: 3 },
+  /** Both metric texts are top-aligned: never stretched to the row's height (see `MetricRows`). */
+  metricLabel: { fontSize: 10, lineHeight: 1.5, color: COLORS.text, flex: 1, alignSelf: "flex-start" },
+  metricValue: { fontSize: 10, lineHeight: 1.5, color: COLORS.text, fontFamily: "Helvetica-Bold", alignSelf: "flex-start" },
+  /** `alignSelf: flex-start`: never stretched to the row's height — a stretched non-breaking mark beside a page-long text would itself be "taller than a page". */
+  bulletMark: { width: 10, marginLeft: -10, fontSize: 10, color: COLORS.muted, alignSelf: "flex-start" },
   bulletText: { flex: 1, fontSize: 10, lineHeight: 1.4, color: COLORS.text },
   fieldGrid: { flexDirection: "row", flexWrap: "wrap", marginBottom: 8 },
   fieldCell: { width: "50%", marginBottom: 8, paddingRight: 8 },
   fieldLabel: { fontSize: 7.5, fontFamily: "Helvetica-Bold", color: COLORS.muted, textTransform: "uppercase", marginBottom: 2 },
+  /** A model card's heading (the model identity label) — `fieldLabel` with more space below. */
+  modelLabel: { fontSize: 7.5, fontFamily: "Helvetica-Bold", color: COLORS.muted, textTransform: "uppercase", marginBottom: 4 },
   fieldValue: { fontSize: 10, color: COLORS.text },
   badge: {
     fontSize: 8,

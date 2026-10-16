@@ -1,0 +1,58 @@
+{
+ "version": 1,
+ "exportId": "exp-r3",
+ "runId": "run-r3",
+ "schemaVersion": 1,
+ "reportVersion": 1,
+ "createdAt": "2026-10-14T12:00:00.000Z",
+ "createdBy": "u",
+ "format": "pdf",
+ "artifactStatus": "ready",
+ "classification": "internal",
+ "governanceStatusAtExport": {
+  "family": "milestone2",
+  "kind": "approved",
+  "isOwnerOverride": false
+ },
+ "exportMetadata": {
+  "exportId": "exp-r3",
+  "runId": "run-r3",
+  "schemaVersion": 1,
+  "exportedSections": [
+   "reportSnapshot"
+  ],
+  "createdAt": "2026-10-14T12:00:00.000Z",
+  "requestingUser": "u",
+  "finalReportVersion": 1
+ },
+ "schemaId": "comparison_matrix",
+ "schemaFamily": "milestone2",
+ "reportSnapshot": {
+  "question": "ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed",
+  "models": [
+   {
+    "modelId": "claude",
+    "ok": true
+   }
+  ],
+  "reportTypeLabel": "Probe M2",
+  "consensusLevel": "moderate",
+  "sourceGroundingLevel": "strong",
+  "reportGeneratedAt": "2026-10-14T11:00:00.000Z",
+  "milestone2": {
+   "schemaId": "comparison_matrix",
+   "result": {},
+   "meta": {},
+   "decisionReceipt": {
+    "conclusion": "dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet #T001#",
+    "basis": [
+     "sit sed ut aliqua nostrud aliquip dolor elit incididunt magna #T002#"
+    ],
+    "assumptions": [],
+    "uncertainties": [],
+    "limitations": [],
+    "sources": []
+   }
+  }
+ }
+}

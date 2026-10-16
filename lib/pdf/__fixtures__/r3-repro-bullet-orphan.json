@@ -1,0 +1,97 @@
+{
+ "version": 1,
+ "exportId": "exp-r3",
+ "runId": "run-r3",
+ "schemaVersion": 1,
+ "reportVersion": 1,
+ "createdAt": "2026-10-14T12:00:00.000Z",
+ "createdBy": "u",
+ "format": "pdf",
+ "artifactStatus": "ready",
+ "classification": "internal",
+ "governanceStatusAtExport": {
+  "family": "milestone2",
+  "kind": "approved",
+  "isOwnerOverride": false
+ },
+ "exportMetadata": {
+  "exportId": "exp-r3",
+  "runId": "run-r3",
+  "schemaVersion": 1,
+  "exportedSections": [
+   "reportSnapshot"
+  ],
+  "createdAt": "2026-10-14T12:00:00.000Z",
+  "requestingUser": "u",
+  "finalReportVersion": 1
+ },
+ "schemaId": "comparison_matrix",
+ "schemaFamily": "milestone2",
+ "reportSnapshot": {
+  "question": "ipsum adipiscing tempor",
+  "models": [
+   {
+    "modelId": "claude",
+    "ok": true
+   }
+  ],
+  "reportTypeLabel": "Probe M2",
+  "consensusLevel": "moderate",
+  "sourceGroundingLevel": "strong",
+  "reportGeneratedAt": "2026-10-14T11:00:00.000Z",
+  "milestone2": {
+   "schemaId": "comparison_matrix",
+   "result": {},
+   "meta": {},
+   "decisionReceipt": {
+    "conclusion": "dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore #B041#",
+    "basis": [
+     "lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt #B001#",
+     "ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam #B002#",
+     "dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor #B003#",
+     "sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et #B004#",
+     "amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation #B005#",
+     "consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore #B006#",
+     "adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua #B007#",
+     "elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi #B008#",
+     "sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna #B009#",
+     "do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam #B010#",
+     "eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat #B011#",
+     "tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim #B012#",
+     "incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation #B013#",
+     "ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor #B014#",
+     "labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud #B015#",
+     "et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi #B016#",
+     "dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur #B017#",
+     "magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris #B018#",
+     "aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat #B019#",
+     "enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed #B020#",
+     "minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo #B021#",
+     "veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor #B022#",
+     "quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor #B023#",
+     "nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum #B024#",
+     "exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur #B025#",
+     "ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore #B026#",
+     "laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet #B027#",
+     "nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed #B028#",
+     "aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna #B029#",
+     "commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit #B030#",
+     "consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor #B031#",
+     "lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim #B032#",
+     "ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod #B033#",
+     "dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore #B034#",
+     "sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud #B035#",
+     "amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut #B036#",
+     "consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna #B037#",
+     "adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris #B038#",
+     "elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim ullamco consequat amet do labore enim exercitation commodo sit sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore #B039#",
+     "sed ut aliqua nostrud aliquip dolor elit incididunt magna quis nisi ipsum adipiscing tempor dolore veniam laboris lorem consectetur eiusmod et minim #B040#"
+    ],
+    "assumptions": [],
+    "uncertainties": [],
+    "limitations": [],
+    "sources": []
+   }
+  }
+ }
+}
