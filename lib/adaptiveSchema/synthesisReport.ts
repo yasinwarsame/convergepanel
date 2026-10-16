@@ -39,6 +39,7 @@ import { computeRunCertainty } from "./scoring";
 import { computeAdaptiveGate } from "./gate";
 import { buildAdaptiveVerdict, buildAdaptiveUnifiedAnswer } from "./verdict";
 import { assessedPositionCount, describeContested } from "./consensusIntegrity";
+import { agreeLinesHonest, overstatingSentences } from "./narrativeIntegrity";
 import { buildAdaptiveVerdictCard } from "./verdictCard";
 import { detectAdaptiveBiases } from "./biasDetection";
 import { auditPanelCoverage } from "./coverageAudit";
@@ -460,11 +461,34 @@ Gate: ${gate.status}`;
       }
     }
 
-    const disagreements: AdaptiveDisagreement[] = deterministicDisagreements.map((d, i) => ({
-      ...d,
-      whyTheyDiffer: narrative.whyModelsDisagree[i] ?? DEFAULT_DISAGREEMENT_EXPLANATION,
-      stakes: narrative.disagreementStakes[i] ?? "important",
-    }));
+    // D9 backstop (narrativeIntegrity.ts): any model-written text that states
+    // more agreement than the structured status of the claim it describes
+    // falls back to the deterministic text for that field. No model re-call.
+    const overstates = (text: string, subjectRow?: AlignedClaim) =>
+      overstatingSentences(text, rows, totalModelCount, subjectRow).length > 0;
+    const executiveSummary =
+      gate.status === "fail" || !narrative.executiveSummary || overstates(narrative.executiveSummary)
+        ? baseReport.executiveSummary
+        : narrative.executiveSummary;
+    const certaintyAssessment =
+      !narrative.certaintyAssessment || overstates(narrative.certaintyAssessment)
+        ? baseReport.certaintyAssessment
+        : narrative.certaintyAssessment;
+    const narrativeSections = narrative.narrativeSections.filter((s) => !overstates(`${s.title}. ${s.body}`));
+    const whereModelsAgree =
+      narrativeAgreeLinesUsable(narrative.whereModelsAgreeNarrative, agreeRows) &&
+      agreeLinesHonest(narrative.whereModelsAgreeNarrative, rows, totalModelCount)
+        ? narrative.whereModelsAgreeNarrative
+        : baseReport.whereModelsAgree;
+
+    const disagreements: AdaptiveDisagreement[] = deterministicDisagreements.map((d, i) => {
+      const why = narrative.whyModelsDisagree[i];
+      return {
+        ...d,
+        whyTheyDiffer: why && !overstates(why, disagreeRows[i]) ? why : DEFAULT_DISAGREEMENT_EXPLANATION,
+        stakes: narrative.disagreementStakes[i] ?? "important",
+      };
+    });
 
     return {
       // Unified Answer + Panel Verdict + Verdict Card + gate/certainty stay
@@ -473,15 +497,13 @@ Gate: ${gate.status}`;
       panelVerdict: verdict.summary,
       gate: gate.status,
       runCertainty,
-      whereModelsAgree: narrativeAgreeLinesUsable(narrative.whereModelsAgreeNarrative, agreeRows)
-        ? narrative.whereModelsAgreeNarrative
-        : baseReport.whereModelsAgree,
+      whereModelsAgree,
       whereModelsDisagree: baseReport.whereModelsDisagree,
-      certaintyAssessment: narrative.certaintyAssessment || baseReport.certaintyAssessment,
-      narrativeSections: narrative.narrativeSections,
+      certaintyAssessment,
+      narrativeSections,
       // On gate "fail", never let the model's prose read as confident — same
       // rule as buildAdaptiveUnifiedAnswer's deterministic override.
-      executiveSummary: gate.status === "fail" ? baseReport.executiveSummary : narrative.executiveSummary || baseReport.executiveSummary,
+      executiveSummary,
       disagreements,
       biasAndBlindSpots: bias,
       biasEmptyReason: biasResult.emptyReason,
