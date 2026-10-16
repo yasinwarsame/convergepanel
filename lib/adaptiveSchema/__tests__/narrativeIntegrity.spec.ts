@@ -227,6 +227,7 @@ describe("legitimate wording is kept", () => {
     ["accurate count", "Two of five models agree central bank credibility drives bond yields.", [A_ONE(), B_TWO()]],
     ["split subgroup", "Two models agree supply shocks explain persistent core inflation, while three disagree.", [A_ONE(), D_FOUR()]],
     ["contested camps", "The models describe competing camps on minimum wage increases reducing employment.", [MARKED()]],
+    ["count after a comma-separated lead-in", "Of the five models, two agree that central bank credibility drives bond yields.", [A_ONE(), B_TWO()]],
     ["negated settledness", "Whether minimum wage increases reduce employment is not settled.", [MARKED()]],
     ["negated consensus", "There is no consensus that supply shocks explain persistent core inflation.", [A_ONE(), D_FOUR()]],
   ])("%s: %s", (_label, sentence, rows) => {

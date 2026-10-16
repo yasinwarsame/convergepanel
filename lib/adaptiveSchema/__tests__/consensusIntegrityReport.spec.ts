@@ -218,6 +218,12 @@ describe("synthesis report: a narrative that overstates agreement can't replace 
     expect(report.whereModelsAgree).toEqual([]);
   });
 
+  it("a contested agree row uses the deterministic line even when the narrative sentence is honest but omits the note", async () => {
+    mockNarrative({ whereModelsAgreeNarrative: ["The models agree polarization has increased."] });
+    const report = await buildAdaptiveSynthesisReport("Q", "contested_empirical", [contestedConsensusRow()], results(FIVE));
+    expect(report.whereModelsAgree).toEqual(["Polarization has increased — all 5 models that listed this claim mark it contested"]);
+  });
+
   it("a contested agree row keeps the canonical note even when the narrative calls it settled", async () => {
     mockNarrative({ whereModelsAgreeNarrative: ["All models agree polarization has increased; this is settled."] });
     const report = await buildAdaptiveSynthesisReport("Q", "contested_empirical", [contestedConsensusRow()], results(FIVE));
