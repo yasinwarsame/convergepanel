@@ -14,7 +14,7 @@ import "server-only";
 import { AdaptiveBiasFinding, AdaptiveVerdictCard, AlignedClaim } from "./types";
 import { AdaptiveGateResult } from "./gate";
 import { VERDICT_NEXT_STEPS } from "./config";
-import { coreFindingClaim, topSplitClaim } from "./verdict";
+import { NO_CONSENSUS_IDENTIFIED, coreFindingClaim, topSplitClaim } from "./verdict";
 import { describeContested } from "./consensusIntegrity";
 
 export function buildAdaptiveVerdictCard(
@@ -29,7 +29,7 @@ export function buildAdaptiveVerdictCard(
 
   return {
     question,
-    topConsensus: consensus?.claimText ?? "No consensus identified.",
+    topConsensus: consensus?.claimText ?? NO_CONSENSUS_IDENTIFIED,
     consensusModelCount: consensus
       ? consensus.cells.filter((c) => c && (c.stance === "agrees" || c.stance === "partial")).length
       : 0,

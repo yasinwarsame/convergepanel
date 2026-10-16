@@ -93,12 +93,12 @@ describe("polarization pattern (P1-A)", () => {
 
     const report = out.synthesisReport!;
     expect(report.unifiedAnswer).toBe(
-      "Political polarization has increased over the last decade. (ChatGPT, Claude, Grok, Gemini; all mark the underlying claim contested)."
+      "Political polarization has increased over the last decade. (ChatGPT, Claude, Grok, Gemini; all 5 models that took a position mark the underlying claim contested)."
     );
     expect(report.whereModelsAgree).toEqual([
-      "Political polarization has increased over the last decade. — all mark the underlying claim contested",
+      "Political polarization has increased over the last decade. — all 5 models that took a position mark the underlying claim contested",
     ]);
-    expect(report.verdictCard.topConsensusContested).toBe("all mark the underlying claim contested");
+    expect(report.verdictCard.topConsensusContested).toBe("all 5 models that took a position mark the underlying claim contested");
   });
 
   it("a settled-field claim the panel agrees on carries no contested note", async () => {
@@ -198,5 +198,10 @@ describe("removed split→majority upgrade (D5)", () => {
     expect(out.gate!.loadBearingSplitCount).toBe(1);
     expect(out.gate!.status).toBe("caution");
     expect(out.synthesisReport!.whereModelsDisagree).toEqual(["Mechanism X dominates."]);
+    // R1 F1: the corrected split is never presented as agreement on the verdict card or panel verdict.
+    expect(out.synthesisReport!.verdictCard.topConsensus).toBe("No consensus identified.");
+    expect(out.synthesisReport!.verdictCard.consensusModelCount).toBe(0);
+    expect(out.synthesisReport!.verdictCard.keyDisagreement).toBe("Mechanism X dominates.");
+    expect(out.synthesisReport!.panelVerdict).toBe(`No consensus identified. Certainty ${Math.round(expectedCertainty * 100)}%; gate: caution.`);
   });
 });

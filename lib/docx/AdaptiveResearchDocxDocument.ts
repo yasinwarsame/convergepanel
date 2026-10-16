@@ -292,6 +292,8 @@ function legacySection(record: AdaptiveResearchExportV1): (Paragraph | Table)[] 
     out.push(heading("Panel conclusion"), body(synthesis.unifiedAnswer));
     out.push(heading("Where models agree / disagree"));
     out.push(muted("Agreement"), body(synthesis.verdictCard.topConsensus));
+    // Consensus Integrity: the canonical contested note (verdictCard.ts). Absent on reports persisted before it existed.
+    if (synthesis.verdictCard.topConsensusContested) out.push(muted(`Contested: ${synthesis.verdictCard.topConsensusContested}`));
     if (synthesis.verdictCard.keyDisagreement) {
       out.push(muted("Disagreement"), body(synthesis.verdictCard.keyDisagreement));
       if (synthesis.verdictCard.disagreementDetail) out.push(muted(synthesis.verdictCard.disagreementDetail));

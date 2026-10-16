@@ -595,7 +595,16 @@ function FieldValuePdf({ field, value, closing = 0 }: { field: FieldSpec; value:
  * content before it, so it is kept with its own text. The LAST text present
  * carries the card's closing padding.
  */
-function VerdictCardBody({ verdictCard }: { verdictCard: { topConsensus: string; keyDisagreement?: string | null; disagreementDetail?: string | null; caveat?: string | null } }) {
+function VerdictCardBody({
+  verdictCard,
+}: {
+  verdictCard: { topConsensus: string; topConsensusContested?: string; keyDisagreement?: string | null; disagreementDetail?: string | null; caveat?: string | null };
+}) {
+  // Consensus Integrity: the canonical contested note (verdictCard.ts) as a second line of the same text — so a
+  // report without the note (every one persisted before it existed) composes exactly the same element tree as before.
+  const agreementText = verdictCard.topConsensusContested
+    ? `${verdictCard.topConsensus}\nContested: ${verdictCard.topConsensusContested}`
+    : verdictCard.topConsensus;
   const showDisagreement = Boolean(verdictCard.keyDisagreement);
   const showDetail = showDisagreement && Boolean(verdictCard.disagreementDetail);
   const showCaveat = Boolean(verdictCard.caveat);
@@ -604,7 +613,7 @@ function VerdictCardBody({ verdictCard }: { verdictCard: { topConsensus: string;
   return (
     <>
       <Text style={pdfStyles.subLabel}>Agreement</Text>
-      <Text {...end("consensus", pdfStyles.bodyText)}>{verdictCard.topConsensus}</Text>
+      <Text {...end("consensus", pdfStyles.bodyText)}>{agreementText}</Text>
       {showDisagreement && (
         <Text style={pdfStyles.subLabelAfterContent} wrap={false} minPresenceAhead={SUB_LABEL_PRESENCE_AHEAD}>
           Disagreement

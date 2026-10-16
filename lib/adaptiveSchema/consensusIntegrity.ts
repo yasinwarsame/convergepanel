@@ -132,6 +132,25 @@ function isKnownStatus(status: string): status is AlignedClaimStatus {
   return (ALIGNED_CLAIM_STATUSES as readonly string[]).includes(status);
 }
 
+/**
+ * Which statuses may be presented as the panel's top consensus ("Top
+ * consensus", "agreed by N", "N/M models converge on"). Only real agreement:
+ * consensus and majority. Exhaustive by type, so a new status must be ruled
+ * on here before it compiles.
+ */
+export const TOP_CONSENSUS_ELIGIBLE: Readonly<Record<AlignedClaimStatus, boolean>> = {
+  consensus: true,
+  majority: true,
+  limited_coverage: false,
+  split: false,
+  single_source: false,
+};
+
+/** True only for a known, eligible status — an unknown (e.g. future or malformed) value is never eligible. */
+export function isTopConsensusEligible(status: string): boolean {
+  return isKnownStatus(status) && TOP_CONSENSUS_ELIGIBLE[status];
+}
+
 /** Rank for a status read from data (possibly persisted). An unknown value ranks last — explicitly, never as NaN. */
 export function consensusStatusRank(status: string): number {
   return isKnownStatus(status) ? CONSENSUS_STATUS_RANK[status] : ALIGNED_CLAIM_STATUSES.length;
@@ -145,10 +164,14 @@ export function consensusStatusLabel(status: string): string {
 // ─── Canonical wording ────────────────────────────────────────────────────
 
 /**
- * The one canonical contested note, from structured counts only:
- * - "all mark the underlying claim contested" when every model with a
- *   position on the row listed the claim itself and marked it;
- * - otherwise "M of N models that listed this claim mark it contested";
+ * The one canonical contested note, from structured counts only. The
+ * denominator is always named — never "all models", since silent and failed
+ * dispatched models are not part of it:
+ * - every model that took a position listed the claim itself and marked it:
+ *   "all N models that took a position mark the underlying claim contested"
+ *   ("the 1 model that took a position marks …" when N is 1);
+ * - otherwise "M of N model(s) that listed this claim mark(s) it contested",
+ *   the verb agreeing with M ("1 of 1 model … marks", "2 of 3 models … mark");
  * - null when none marked it (or no model listed it).
  */
 export function describeContested(row: AlignedClaim): string | null {
@@ -156,9 +179,13 @@ export function describeContested(row: AlignedClaim): string | null {
   if (!contested || contested.marked === 0) return null;
   const positions = row.cells.filter(Boolean).length;
   if (contested.marked === contested.assessed && contested.assessed === positions) {
-    return "all mark the underlying claim contested";
+    return contested.assessed === 1
+      ? "the 1 model that took a position marks the underlying claim contested"
+      : `all ${contested.assessed} models that took a position mark the underlying claim contested`;
   }
-  return `${contested.marked} of ${contested.assessed} model${contested.assessed === 1 ? "" : "s"} that listed this claim mark it contested`;
+  return `${contested.marked} of ${contested.assessed} model${contested.assessed === 1 ? "" : "s"} that listed this claim ${
+    contested.marked === 1 ? "marks" : "mark"
+  } it contested`;
 }
 
 /** "N of M dispatched models took a position" — the coverage note for a limited_coverage row. */

@@ -317,8 +317,13 @@ describe("describeContested / describeCoverage: canonical wording", () => {
     return { id: "r", claimText: "X", cells, agreementScore: 1, certaintyScore: 1, status: "consensus", contested: { marked, assessed } };
   }
 
-  it("'all mark the underlying claim contested' when every model with a position listed and marked it", () => {
-    expect(describeContested(withContested(5, 5, 5))).toBe("all mark the underlying claim contested");
+  it("names the denominator when every model with a position listed and marked it: 'all N models that took a position mark …'", () => {
+    expect(describeContested(withContested(5, 5, 5))).toBe("all 5 models that took a position mark the underlying claim contested");
+    expect(describeContested(withContested(3, 3, 3))).toBe("all 3 models that took a position mark the underlying claim contested");
+  });
+
+  it("singular all-case: the 1 model that took a position marks it", () => {
+    expect(describeContested(withContested(1, 1, 1))).toBe("the 1 model that took a position marks the underlying claim contested");
   });
 
   it("counts when only some marked it", () => {
@@ -329,8 +334,15 @@ describe("describeContested / describeCoverage: canonical wording", () => {
     expect(describeContested(withContested(3, 3, 5))).toBe("3 of 3 models that listed this claim mark it contested");
   });
 
-  it("singular", () => {
-    expect(describeContested(withContested(1, 1, 2))).toBe("1 of 1 model that listed this claim mark it contested");
+  it("singular / plural agreement (R1 N1): 1/1 'model … marks', 1/N 'models … marks', N/M 'models … mark'", () => {
+    expect(describeContested(withContested(1, 1, 2))).toBe("1 of 1 model that listed this claim marks it contested");
+    expect(describeContested(withContested(1, 3, 3))).toBe("1 of 3 models that listed this claim marks it contested");
+    expect(describeContested(withContested(2, 3, 3))).toBe("2 of 3 models that listed this claim mark it contested");
+  });
+
+  it("a mixed panel (some positions inferred, some dispatched models silent) never says 'all'", () => {
+    // 3 listed and marked, 5 positions (2 inferred) of a larger dispatched panel.
+    expect(describeContested(withContested(3, 3, 5))).not.toMatch(/\ball\b/);
   });
 
   it("null when nothing is marked, or the row has no contested axis", () => {

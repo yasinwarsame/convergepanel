@@ -96,7 +96,7 @@ describe("Unified Answer", () => {
   it("appends the canonical contested note to a contested consensus claim", () => {
     const rows = [contestedConsensusRow()];
     expect(buildAdaptiveUnifiedAnswer(rows, passGate(rows))).toBe(
-      "Polarization has increased (ChatGPT, Claude, Grok, Perplexity, Gemini; all mark the underlying claim contested)."
+      "Polarization has increased (ChatGPT, Claude, Grok, Perplexity, Gemini; all 5 models that took a position mark the underlying claim contested)."
     );
   });
 
@@ -121,19 +121,23 @@ describe("Unified Answer", () => {
 });
 
 describe("verdict core finding and verdict card", () => {
-  it("the no-consensus fallback never picks a limited_coverage row", () => {
+  it("no fallback: with no consensus/majority row there is no core finding — limited_coverage, split and single_source are never picked (R1 F1)", () => {
     const split = row("Split claim", "split", [cell("chatgpt"), cell("claude", "disputes")]);
-    expect(coreFindingClaim([limitedRow(), split])!.claimText).toBe("Split claim");
+    const single = row("Lone claim", "single_source", [cell("chatgpt"), null, null, null, null]);
+    expect(coreFindingClaim([limitedRow(), split, single])).toBeNull();
     expect(coreFindingClaim([limitedRow()])).toBeNull();
     const gate = computeAdaptiveGate([limitedRow()], 0.6, "generic");
-    expect(buildAdaptiveVerdict([limitedRow()], gate, 5).coreFinding).toBe("No clear finding across the panel");
+    const verdict = buildAdaptiveVerdict([limitedRow(), split], gate, 5);
+    expect(verdict.coreFinding).toBe("No consensus identified.");
+    expect(verdict.convergingModelCount).toBe(0);
+    expect(verdict.summary).toBe("No consensus identified. Certainty 60%; gate: caution.");
   });
 
   it("topConsensusContested carries the canonical note for a contested top claim, and is absent otherwise", () => {
     const contested = [contestedConsensusRow()];
     const card = buildAdaptiveVerdictCard("Q", contested, computeAdaptiveGate(contested, 0.9, "generic"), []);
     expect(card.topConsensus).toBe("Polarization has increased");
-    expect(card.topConsensusContested).toBe("all mark the underlying claim contested");
+    expect(card.topConsensusContested).toBe("all 5 models that took a position mark the underlying claim contested");
 
     const plain = [row("Plain", "consensus", [cell("chatgpt"), cell("claude"), cell("grok")])];
     const plainCard = buildAdaptiveVerdictCard("Q", plain, computeAdaptiveGate(plain, 0.9, "generic"), []);
@@ -170,7 +174,7 @@ describe("synthesis report: template (degraded) path", () => {
 
   it("a contested agree row's line carries the canonical note", async () => {
     const report = await buildAdaptiveSynthesisReport("Q", "contested_empirical", [contestedConsensusRow()], results(FIVE));
-    expect(report.whereModelsAgree).toEqual(["Polarization has increased — all mark the underlying claim contested"]);
+    expect(report.whereModelsAgree).toEqual(["Polarization has increased — all 5 models that took a position mark the underlying claim contested"]);
   });
 });
 
@@ -193,7 +197,7 @@ describe("synthesis report: narrative prompt construction (D9)", () => {
     const userMessage = String(narrativeCall()![0]);
     expect(userMessage).toContain('- "Only two models said this" — status: limited_coverage, positions: 2 of 5 dispatched models,');
     expect(userMessage).toContain('- "Polarization has increased" — status: consensus, positions: 5 of 5 dispatched models,');
-    expect(userMessage).toContain('contested note: "all mark the underlying claim contested"');
+    expect(userMessage).toContain('contested note: "all 5 models that took a position mark the underlying claim contested"');
   });
 });
 
@@ -217,7 +221,7 @@ describe("synthesis report: a narrative that overstates agreement can't replace 
   it("a contested agree row keeps the canonical note even when the narrative calls it settled", async () => {
     mockNarrative({ whereModelsAgreeNarrative: ["All models agree polarization has increased; this is settled."] });
     const report = await buildAdaptiveSynthesisReport("Q", "contested_empirical", [contestedConsensusRow()], results(FIVE));
-    expect(report.whereModelsAgree).toEqual(["Polarization has increased — all mark the underlying claim contested"]);
+    expect(report.whereModelsAgree).toEqual(["Polarization has increased — all 5 models that took a position mark the underlying claim contested"]);
   });
 
   it("an honest narrative (one sentence per agree row, nothing contested) is still used", async () => {
@@ -233,6 +237,7 @@ describe("synthesis report: a narrative that overstates agreement can't replace 
     const report = await buildAdaptiveSynthesisReport("Q", "generic", rows, results(FIVE));
     expect(report.unifiedAnswer).toContain("too few to count as agreement");
     expect(report.verdictCard.topConsensus).toBe("No consensus identified.");
-    expect(report.panelVerdict).toMatch(/^0\/5 models converge on No clear finding across the panel/);
+    expect(report.panelVerdict).toBe("No consensus identified. Certainty 90%; gate: pass.");
+    expect(report.panelVerdict).not.toMatch(/converge/);
   });
 });
