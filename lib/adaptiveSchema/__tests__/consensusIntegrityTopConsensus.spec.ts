@@ -149,7 +149,7 @@ async function docxText(record: any): Promise<string> {
 }
 
 describe("F2: contested note in DOCX and PDF", () => {
-  const NOTE = "all 5 models that took a position mark the underlying claim contested";
+  const NOTE = "all 5 models that listed this claim mark it contested";
 
   it("DOCX: present → the agreement line is followed by the note; absent → no note", async () => {
     const legacy = legacyRecord();

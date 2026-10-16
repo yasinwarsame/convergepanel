@@ -54,7 +54,7 @@ function contestedConsensusRow(): AlignedClaim {
     "Polarization has increased",
     "consensus",
     FIVE.map((m) => cell(m, "agrees", { origin: DISPUTED, confidence: "contested", camps: [{ label: "A", position: "a" }] })),
-    { contested: { marked: 5, assessed: 5 } }
+    { contested: { marked: true, assessed: false, markedCount: 5, listedCount: 5 } }
   );
 }
 
@@ -96,7 +96,7 @@ describe("Unified Answer", () => {
   it("appends the canonical contested note to a contested consensus claim", () => {
     const rows = [contestedConsensusRow()];
     expect(buildAdaptiveUnifiedAnswer(rows, passGate(rows))).toBe(
-      "Polarization has increased (ChatGPT, Claude, Grok, Perplexity, Gemini; all 5 models that took a position mark the underlying claim contested)."
+      "Polarization has increased (ChatGPT, Claude, Grok, Perplexity, Gemini; all 5 models that listed this claim mark it contested)."
     );
   });
 
@@ -137,7 +137,7 @@ describe("verdict core finding and verdict card", () => {
     const contested = [contestedConsensusRow()];
     const card = buildAdaptiveVerdictCard("Q", contested, computeAdaptiveGate(contested, 0.9, "generic"), []);
     expect(card.topConsensus).toBe("Polarization has increased");
-    expect(card.topConsensusContested).toBe("all 5 models that took a position mark the underlying claim contested");
+    expect(card.topConsensusContested).toBe("all 5 models that listed this claim mark it contested");
 
     const plain = [row("Plain", "consensus", [cell("chatgpt"), cell("claude"), cell("grok")])];
     const plainCard = buildAdaptiveVerdictCard("Q", plain, computeAdaptiveGate(plain, 0.9, "generic"), []);
@@ -174,7 +174,7 @@ describe("synthesis report: template (degraded) path", () => {
 
   it("a contested agree row's line carries the canonical note", async () => {
     const report = await buildAdaptiveSynthesisReport("Q", "contested_empirical", [contestedConsensusRow()], results(FIVE));
-    expect(report.whereModelsAgree).toEqual(["Polarization has increased — all 5 models that took a position mark the underlying claim contested"]);
+    expect(report.whereModelsAgree).toEqual(["Polarization has increased — all 5 models that listed this claim mark it contested"]);
   });
 });
 
@@ -197,7 +197,7 @@ describe("synthesis report: narrative prompt construction (D9)", () => {
     const userMessage = String(narrativeCall()![0]);
     expect(userMessage).toContain('- "Only two models said this" — status: limited_coverage, positions: 2 of 5 dispatched models,');
     expect(userMessage).toContain('- "Polarization has increased" — status: consensus, positions: 5 of 5 dispatched models,');
-    expect(userMessage).toContain('contested note: "all 5 models that took a position mark the underlying claim contested"');
+    expect(userMessage).toContain('contested note: "all 5 models that listed this claim mark it contested"');
   });
 });
 
@@ -221,7 +221,7 @@ describe("synthesis report: a narrative that overstates agreement can't replace 
   it("a contested agree row keeps the canonical note even when the narrative calls it settled", async () => {
     mockNarrative({ whereModelsAgreeNarrative: ["All models agree polarization has increased; this is settled."] });
     const report = await buildAdaptiveSynthesisReport("Q", "contested_empirical", [contestedConsensusRow()], results(FIVE));
-    expect(report.whereModelsAgree).toEqual(["Polarization has increased — all 5 models that took a position mark the underlying claim contested"]);
+    expect(report.whereModelsAgree).toEqual(["Polarization has increased — all 5 models that listed this claim mark it contested"]);
   });
 
   it("an honest narrative (one sentence per agree row, nothing contested) is still used", async () => {

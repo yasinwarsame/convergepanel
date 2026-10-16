@@ -79,11 +79,18 @@ function cellMarksContested(cell: AlignedClaimCell): boolean {
   return cell.origin.fieldClass === "disputed" || cell.confidence === "contested" || (cell.camps?.length ?? 0) > 0;
 }
 
+/** The panel's own assessment is divided: among the assessable positions (not "unclear"), at least one supports the claim and at least one disputes it. */
+function panelAssessesContested(row: AlignedClaim): boolean {
+  const positions = row.cells.filter((c): c is AlignedClaimCell => !!c && c.stance !== "unclear");
+  return positions.some((c) => c.stance === "agrees" || c.stance === "partial") && positions.some((c) => c.stance === "disputes");
+}
+
 /** See ContestedDimensions (types.ts). Undefined when no model listed the claim itself. */
 export function computeContestedDimensions(row: AlignedClaim): ContestedDimensions | undefined {
   const claimCells = row.cells.filter((c): c is AlignedClaimCell => !!c && c.origin?.kind === "claim");
   if (claimCells.length === 0) return undefined;
-  return { marked: claimCells.filter(cellMarksContested).length, assessed: claimCells.length };
+  const markedCount = claimCells.filter(cellMarksContested).length;
+  return { marked: markedCount > 0, assessed: panelAssessesContested(row), markedCount, listedCount: claimCells.length };
 }
 
 // ─── The classification boundary ──────────────────────────────────────────
@@ -164,31 +171,27 @@ export function consensusStatusLabel(status: string): string {
 // ─── Canonical wording ────────────────────────────────────────────────────
 
 /**
- * The one canonical contested note, from structured counts only. The
- * denominator is always named — never "all models", since silent and failed
- * dispatched models are not part of it:
- * - every model that took a position listed the claim itself and marked it:
- *   "all N models that took a position mark the underlying claim contested"
- *   ("the 1 model that took a position marks …" when N is 1);
+ * The one canonical contested note, from structured counts only
+ * (markedCount / listedCount: the models that listed this claim themselves,
+ * and how many of them mark it contested). The denominator is always named,
+ * never "all models": silent and failed dispatched models, and models whose
+ * position was only inferred, are not part of it.
+ * - every model with a cell on this row listed the claim and marked it:
+ *   "all N models that listed this claim mark it contested"
+ *   ("the 1 model that listed this claim marks it contested" when N is 1);
  * - otherwise "M of N model(s) that listed this claim mark(s) it contested",
  *   the verb agreeing with M ("1 of 1 model … marks", "2 of 3 models … mark");
  * - null when none marked it (or no model listed it).
  */
 export function describeContested(row: AlignedClaim): string | null {
   const contested = row.contested;
-  if (!contested || contested.marked === 0) return null;
-  const positions = row.cells.filter(Boolean).length;
-  if (contested.marked === contested.assessed && contested.assessed === positions) {
-    return contested.assessed === 1
-      ? "the 1 model that took a position marks the underlying claim contested"
-      : `all ${contested.assessed} models that took a position mark the underlying claim contested`;
+  if (!contested || !contested.marked || contested.markedCount === 0) return null;
+  const { markedCount, listedCount } = contested;
+  const withCells = row.cells.filter(Boolean).length;
+  if (markedCount === listedCount && listedCount === withCells) {
+    return listedCount === 1
+      ? "the 1 model that listed this claim marks it contested"
+      : `all ${listedCount} models that listed this claim mark it contested`;
   }
-  return `${contested.marked} of ${contested.assessed} model${contested.assessed === 1 ? "" : "s"} that listed this claim ${
-    contested.marked === 1 ? "marks" : "mark"
-  } it contested`;
-}
-
-/** "N of M dispatched models took a position" — the coverage note for a limited_coverage row. */
-export function describeCoverage(row: AlignedClaim, dispatchedPanelSize: number): string {
-  return `${assessedPositionCount(row)} of ${dispatchedPanelSize} dispatched models took a position`;
+  return `${markedCount} of ${listedCount} model${listedCount === 1 ? "" : "s"} that listed this claim ${markedCount === 1 ? "marks" : "mark"} it contested`;
 }

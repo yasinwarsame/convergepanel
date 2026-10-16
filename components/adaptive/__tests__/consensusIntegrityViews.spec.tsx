@@ -53,8 +53,8 @@ describe("AgreementDisagreementMap", () => {
   });
 
   it("shows the canonical contested note on a contested row", () => {
-    const html = renderMap([row("Contested row", "consensus", 5, { contested: { marked: 5, assessed: 5 } })]);
-    expect(html).toContain("Contested: all 5 models that took a position mark the underlying claim contested");
+    const html = renderMap([row("Contested row", "consensus", 5, { contested: { marked: true, assessed: false, markedCount: 5, listedCount: 5 } })]);
+    expect(html).toContain("Contested: all 5 models that listed this claim mark it contested");
   });
 
   it("a persisted legacy row (no contested axis) shows no contested note", () => {
@@ -84,10 +84,10 @@ describe("PrimarySynthesisStrip", () => {
 
   it("shows the top consensus's contested note", () => {
     const html = renderToStaticMarkup(
-      createElement(PrimarySynthesisStrip, { synthesisReport: report({ topConsensusContested: "all 5 models that took a position mark the underlying claim contested" }) })
+      createElement(PrimarySynthesisStrip, { synthesisReport: report({ topConsensusContested: "all 5 models that listed this claim mark it contested" }) })
     );
     expect(html).toContain("Top claim");
-    expect(html).toContain("Contested: all 5 models that took a position mark the underlying claim contested");
+    expect(html).toContain("Contested: all 5 models that listed this claim mark it contested");
   });
 
   it("a persisted legacy verdict card (no topConsensusContested) renders no contested note", () => {

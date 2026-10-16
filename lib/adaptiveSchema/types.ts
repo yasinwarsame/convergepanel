@@ -1224,19 +1224,28 @@ export type AlignedClaimStatus = (typeof ALIGNED_CLAIM_STATUSES)[number];
 export type ComparisonAgreementStatus = "consensus" | "majority" | "split" | "single_source";
 
 /**
- * The contested axis of a claim row, kept separate from status (which is
- * about how far the panel's POSITIONS agree). Counts only "claim" cells —
- * models that listed this claim themselves; inferred and field-derived cells
- * carry no stated confidence or camps, so they are never counted.
- * - assessed: claim cells in the row.
- * - marked: those whose model marked the underlying claim contested — the
- *   claim came from a "disputed" field, or its confidence is "contested",
- *   or it lists camps.
- * Absent when assessed would be 0, and on rows persisted before it existed.
+ * The contested axis of a claim row (D1): two independent dimensions, kept
+ * separate from status.
+ * - marked: some model that listed this claim itself explicitly marked it
+ *   contested — the claim came from a "disputed" field, its confidence is
+ *   "contested", or it lists camps. Inferred and field-derived cells carry no
+ *   stated confidence or camps and never mark.
+ * - assessed: the panel's own assessment is contested — among the assessable
+ *   positions (not "unclear"), at least one model supports the claim and at
+ *   least one disputes it.
+ * All four combinations occur: e.g. every model files the claim as disputed
+ * yet takes the same position (marked only), or models split on a claim none
+ * of them calls contested (assessed only).
+ * markedCount / listedCount are the counts behind `marked`, for the canonical
+ * wording: claim cells that mark it, and claim cells in the row.
+ * Absent when no model listed the claim itself, and on rows persisted before
+ * it existed.
  */
 export interface ContestedDimensions {
-  marked: number;
-  assessed: number;
+  marked: boolean;
+  assessed: boolean;
+  markedCount: number;
+  listedCount: number;
 }
 
 export interface AlignedClaim {

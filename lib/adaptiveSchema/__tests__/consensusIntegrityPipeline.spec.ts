@@ -88,17 +88,17 @@ describe("polarization pattern (P1-A)", () => {
     // Positions: 4 agree + 1 unclear → still a position consensus (the panel does take this position)...
     expect(row.status).toBe("consensus");
     // ...but all five listed it as disputed: the contested axis, separately.
-    expect(row.contested).toEqual({ marked: 5, assessed: 5 });
+    expect(row.contested).toEqual({ marked: true, assessed: false, markedCount: 5, listedCount: 5 });
     for (const c of row.cells) expect(c!.origin).toEqual({ kind: "claim", field: "disputedClaims", fieldClass: "disputed" });
 
     const report = out.synthesisReport!;
     expect(report.unifiedAnswer).toBe(
-      "Political polarization has increased over the last decade. (ChatGPT, Claude, Grok, Gemini; all 5 models that took a position mark the underlying claim contested)."
+      "Political polarization has increased over the last decade. (ChatGPT, Claude, Grok, Gemini; all 5 models that listed this claim mark it contested)."
     );
     expect(report.whereModelsAgree).toEqual([
-      "Political polarization has increased over the last decade. — all 5 models that took a position mark the underlying claim contested",
+      "Political polarization has increased over the last decade. — all 5 models that listed this claim mark it contested",
     ]);
-    expect(report.verdictCard.topConsensusContested).toBe("all 5 models that took a position mark the underlying claim contested");
+    expect(report.verdictCard.topConsensusContested).toBe("all 5 models that listed this claim mark it contested");
   });
 
   it("a settled-field claim the panel agrees on carries no contested note", async () => {
@@ -107,7 +107,7 @@ describe("polarization pattern (P1-A)", () => {
     const out = await finalizeAdaptiveRun(SCHEMA_REGISTRY.contested_empirical, results, "Q");
     const [row] = out.alignedClaims!;
     expect(row.status).toBe("consensus");
-    expect(row.contested).toEqual({ marked: 0, assessed: 3 });
+    expect(row.contested).toEqual({ marked: false, assessed: false, markedCount: 0, listedCount: 3 });
     expect(out.synthesisReport!.unifiedAnswer).toBe("Emissions fell. (ChatGPT, Claude, Grok).");
     expect("topConsensusContested" in out.synthesisReport!.verdictCard).toBe(false);
   });
@@ -203,5 +203,53 @@ describe("removed split→majority upgrade (D5)", () => {
     expect(out.synthesisReport!.verdictCard.consensusModelCount).toBe(0);
     expect(out.synthesisReport!.verdictCard.keyDisagreement).toBe("Mechanism X dominates.");
     expect(out.synthesisReport!.panelVerdict).toBe(`No consensus identified. Certainty ${Math.round(expectedCertainty * 100)}%; gate: caution.`);
+  });
+});
+
+describe("D1: marked and assessed are independent on the real pipeline (all four states)", () => {
+  const claimAs = (stance: ClaimJson["stance"], confidence: string): ClaimJson => ({
+    id: "same-claim",
+    claim: "Same claim about the evidence.",
+    stance,
+    confidence,
+    evidenceType: "empirical",
+  });
+  const four = ["chatgpt", "claude", "grok", "gemini"];
+  async function contestedOf(responses: string[]) {
+    const out = await finalizeAdaptiveRun(SCHEMA_REGISTRY.contested_empirical, responses.map((r, i) => ok(four[i], r)), "Q");
+    return out.alignedClaims![0];
+  }
+
+  it("neither: settled field, everyone asserts", async () => {
+    const row = await contestedOf(four.map(() => contestedResponse({ settled: [claimAs("asserts", "settled")] })));
+    expect(row.contested).toEqual({ marked: false, assessed: false, markedCount: 0, listedCount: 4 });
+  });
+
+  it("marked only: disputed field, everyone asserts — the polarization pattern", async () => {
+    const row = await contestedOf(four.map(() => contestedResponse({ disputed: [claimAs("asserts", "contested")] })));
+    expect(row.status).toBe("consensus");
+    expect(row.contested).toEqual({ marked: true, assessed: false, markedCount: 4, listedCount: 4 });
+  });
+
+  it("assessed only: settled field, 2 assert / 2 dispute", async () => {
+    const row = await contestedOf(four.map((_, i) => contestedResponse({ settled: [claimAs(i < 2 ? "asserts" : "disputes", "settled")] })));
+    expect(row.status).toBe("split");
+    expect(row.contested).toEqual({ marked: false, assessed: true, markedCount: 0, listedCount: 4 });
+  });
+
+  it("both: disputed field, 2 assert / 2 dispute", async () => {
+    const row = await contestedOf(four.map((_, i) => contestedResponse({ disputed: [claimAs(i < 2 ? "asserts" : "disputes", "contested")] })));
+    expect(row.contested).toEqual({ marked: true, assessed: true, markedCount: 4, listedCount: 4 });
+  });
+
+  it("the contested dimensions never move certainty or the gate: same rows with the axis stripped score identically", async () => {
+    const responses = four.map((_, i) => contestedResponse({ disputed: [claimAs(i < 2 ? "asserts" : "disputes", "contested")] }));
+    const out = await finalizeAdaptiveRun(SCHEMA_REGISTRY.contested_empirical, responses.map((r, i) => ok(four[i], r)), "Q");
+    const { computeRunCertainty } = await import("@/lib/adaptiveSchema/scoring");
+    const { computeAdaptiveGate } = await import("@/lib/adaptiveSchema/gate");
+    const stripped = out.alignedClaims!.map(({ contested: _c, ...r }) => r);
+    const certainty = computeRunCertainty(stripped, "contested_empirical");
+    expect(certainty).toBe(out.gate!.runCertainty);
+    expect(computeAdaptiveGate(stripped, certainty, "contested_empirical").status).toBe(out.gate!.status);
   });
 });

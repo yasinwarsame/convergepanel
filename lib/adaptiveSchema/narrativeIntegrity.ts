@@ -1,94 +1,198 @@
 /**
- * Narrative integrity (D9, R1 N3)
+ * Narrative integrity (D9; R1 N3, R2-1)
  *
  * The synthesis narrative is model-written. Its prompt forbids describing a
- * claim more strongly than its structured status allows, but a prompt rule is
- * advisory; this module is the deterministic backstop. It checks each
- * sentence that claims WHOLE-PANEL or MAJORITY agreement against the
- * structured row the sentence is about:
- * - consensus row: whole-panel agreement language is allowed, but unanimity
- *   language ("all models", "every model", "unanimous") only when every
- *   dispatched model took the agreeing position — silent and failed models
- *   did not agree;
- * - majority row: majority language only ("most models", "a majority"),
- *   never whole-panel or unanimity language;
- * - limited_coverage / split / single_source (anything not
- *   TOP_CONSENSUS_ELIGIBLE): no panel or majority agreement language at all;
- * - a sentence that matches no row: rejected only when the run has no
- *   consensus/majority row at all (then no panel agreement exists to describe).
- * Statements about a counted subgroup ("Two models agree that …, while the
- * other assessed models disagree") and negated statements ("there is no
- * consensus", "models do not agree") are not agreement claims and pass.
+ * claim more strongly than its structured result allows, but a prompt rule is
+ * advisory; this module is the deterministic backstop.
  *
- * Detection is lexical (English, the narrative prompt's language) and
- * deliberately scoped: it recognises the common ways a sentence asserts panel
- * or majority agreement, not every possible paraphrase. Callers fall back to
- * the deterministic text on any violation; no model is re-called.
+ * Each sentence is read into zero or more ASSERTIONS — an agreement or
+ * settledness predicate together with the scope its subject gives it — and
+ * each assertion is checked against the structured row the sentence is about:
  *
- * Pure and client-safe.
+ *   predicate   agreement ("agree", "converge", "consensus", "in agreement",
+ *               "one voice", "prevailing view", "no disagreement", …) or
+ *               settledness ("settled", "resolved", "uncontested",
+ *               "undisputed", "beyond dispute", "well established", …)
+ *   scope       panel (the models / the panel / an impersonal "it is …"),
+ *               unanimous (all / every / each / the whole panel),
+ *               majority (most / a majority), counted (N, N of M, all N),
+ *               or subgroup (some / several / a few / a minority / only)
+ *   negation    only a negator that directly governs the predicate counts
+ *               ("do not agree", "no consensus", "lack of agreement", "failed
+ *               to reach consensus"); a negator elsewhere in the sentence
+ *               ("Not surprisingly, …", "Without exception …") does not
+ *
+ * Rules, against the row's structured status and counts (agreeing =
+ * agrees|partial cells; D = dispatched panel; P = assessable positions):
+ *   counted N [of M]   N ≤ agreeing, and M (if given) is D or P — the count
+ *                      itself is checked, never a free pass
+ *   unanimous          consensus status and agreeing = D
+ *   panel              consensus status
+ *   majority           consensus or majority status
+ *   subgroup           always allowed (it claims no panel position)
+ *   settled            not for a row that is split, ineligible, or contested
+ *                      (contested.marked or contested.assessed)
+ * A sentence that matches no row by content is held to the run: with no
+ * consensus/majority row at all, no panel/unanimous/majority/settled
+ * assertion passes; otherwise it cannot be tied to a row and passes.
+ *
+ * Callers fall back to deterministic text on any violation; no model is
+ * re-called. Detection of the predicate itself is lexical (English, the
+ * prompt's language) over a closed set of predicate classes; the acceptance
+ * decision is structural. Pure and client-safe.
  */
 
 import { AlignedClaim } from "./types";
 import { isTopConsensusEligible } from "./consensusIntegrity";
 
-export type AgreementClaimLevel = "panel" | "unanimous" | "majority";
+export type AssertionScope =
+  | { kind: "panel" }
+  | { kind: "unanimous" }
+  | { kind: "majority" }
+  | { kind: "subgroup" }
+  | { kind: "counted"; n: number; of: number | null };
 
-const NUMBER_WORDS = "one|two|three|four|five|six|seven|eight|nine|ten|\\d+";
-/** A counted or partial subject — a subgroup, not the panel. */
-const SUBGROUP_QUANTIFIER = new RegExp(`\\b(?:${NUMBER_WORDS}|some|several|a few|few|both|either|neither|only|individual|certain|other|remaining)\\s*$`, "i");
-const MAJORITY_QUANTIFIER = /\b(?:most|most of|(?:a |the )?majority of)(?: the)?\s*$/i;
-const NEGATION_BEFORE = /\b(?:no|not|never|without|lack(?:s|ing)?|absence of|fail(?:s|ed)? to|little|limited|partial|n't|cannot|can't)\b[^.!?]{0,24}$/i;
+export interface NarrativeAssertion {
+  predicate: "agreement" | "settled";
+  scope: AssertionScope;
+}
 
-const AGREE_VERB = "(?:agree[sd]?|agreeing|converge[sd]?|converging|concur(?:s|red)?|align(?:s|ed)?|are (?:in )?(?:agreement|aligned|unanimous)|reach(?:es|ed)? (?:a |an |broad |full |clear )?(?:consensus|agreement)|share (?:the|a) (?:same )?(?:view|position))";
+// ─── Tokenisation ────────────────────────────────────────────────────────
 
-/** [pattern, claim level]. Subgroup and negation checks are applied to the text before each match. */
-const CLAIM_PATTERNS: Array<[RegExp, AgreementClaimLevel]> = [
-  [new RegExp(`\\b(?:all(?: of)?(?: the)?(?: \\w+)? models|every model|each model|all (?:the )?(?:\\w+ )?panel(?:ists)?|the (?:whole|entire|full) panel)\\b[^.!?]{0,30}?\\b${AGREE_VERB}\\b`, "i"), "unanimous"],
-  [/\b(?:unanimous(?:ly)?|unanimity)\b/i, "unanimous"],
-  [new RegExp(`\\b(?:the panel|the models|models|panel)\\s+(?:\\w+\\s+){0,2}?${AGREE_VERB}\\b`, "i"), "panel"],
-  [/\b(?:consensus)\b/i, "panel"],
-  [/\b(?:broad|strong|clear|general|wide|widespread|overall|panel-wide|near-universal|universal)\s+(?:agreement|accord|alignment)\b/i, "panel"],
-  [new RegExp(`\\b(?:most models|most of the models|a majority(?: of (?:the )?models)?|the majority(?: of (?:the )?models)?|majority view|majority of the panel)\\b`, "i"), "majority"],
+function tokenize(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/n['’]t\b/g, " not")
+    .replace(/[^a-z0-9%/-]+/g, " ")
+    .split(" ")
+    .filter(Boolean);
+}
+
+const NUMBER_WORDS: Record<string, number> = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  both: 2, single: 1,
+};
+
+function toNumber(token: string | undefined): number | null {
+  if (!token) return null;
+  if (/^\d+$/.test(token)) return Number(token);
+  return token in NUMBER_WORDS ? NUMBER_WORDS[token] : null;
+}
+
+// ─── Predicates (closed classes; matched on token sequences) ────────────
+
+/** Agreement predicates (token sequences). Negative-form claims ("no disagreement") are agreement claims in their own right. */
+const AGREEMENT_PREDICATES: string[][] = [
+  ["agree"], ["agrees"], ["agreed"], ["agreeing"],
+  ["concur"], ["concurs"], ["concurred"],
+  ["converge"], ["converges"], ["converged"], ["converging"],
+  ["align"], ["aligns"], ["aligned"],
+  ["endorse"], ["endorses"], ["endorsed"],
+  ["hold"], ["holds"], ["held"],
+  ["united"], ["unite"], ["unites"],
+  ["share", "the", "same", "view"], ["share", "the", "view"], ["share", "a", "view"], ["shared", "view"], ["share", "the", "same", "position"],
+  ["agreement"], ["consensus"], ["accord"], ["unanimity"], ["unanimous"], ["unanimously"],
+  ["one", "voice"], ["of", "one", "mind"], ["same", "conclusion"],
+  ["common", "view"], ["prevailing", "view"], ["dominant", "view"], ["majority", "view"], ["shared", "position"], ["common", "position"],
+  ["no", "disagreement"], ["no", "dissent"], ["without", "dissent"], ["without", "disagreement"],
 ];
 
-const LEVEL_RANK: Record<AgreementClaimLevel, number> = { majority: 1, panel: 2, unanimous: 3 };
+/** Settledness predicates: the question is presented as no longer open. */
+const SETTLED_PREDICATES: string[][] = [
+  ["settled"], ["resolved"], ["uncontested"], ["undisputed"], ["indisputable"], ["incontrovertible"],
+  ["beyond", "dispute"], ["beyond", "doubt"], ["not", "in", "dispute"], ["no", "longer", "debated"],
+  ["well", "established"], ["well-established"], ["firmly", "established"], ["established", "fact"], ["conclusively"],
+];
 
-/**
- * The strongest panel/majority agreement claim a sentence makes, or null.
- * A match preceded by a counted/partial subject (a subgroup) or by a negation
- * is not a claim.
- */
-export function agreementClaimLevel(sentence: string): AgreementClaimLevel | null {
-  let best: AgreementClaimLevel | null = null;
-  for (const [pattern, level] of CLAIM_PATTERNS) {
-    const re = new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : pattern.flags + "g");
-    for (let m = re.exec(sentence); m; m = re.exec(sentence)) {
-      const before = sentence.slice(0, m.index);
-      if (SUBGROUP_QUANTIFIER.test(before)) continue;
-      // "most models agree" / "a majority of the models agree" is a majority claim (its own pattern), not a panel one.
-      if (level === "panel" && MAJORITY_QUANTIFIER.test(before)) continue;
-      if (NEGATION_BEFORE.test(before)) continue;
-      // A negated verb inside the match ("models do not agree", "models don't converge").
-      if (/\b(?:not|never|n't)\b/i.test(m[0])) continue;
-      if (!best || LEVEL_RANK[level] > LEVEL_RANK[best]) best = level;
+/** Longer sequences first, so "no disagreement" wins over a bare "no". */
+const PREDICATES: Array<[string[], NarrativeAssertion["predicate"]]> = [
+  ...AGREEMENT_PREDICATES.map((seq): [string[], NarrativeAssertion["predicate"]] => [seq, "agreement"]),
+  ...SETTLED_PREDICATES.map((seq): [string[], NarrativeAssertion["predicate"]] => [seq, "settled"]),
+].sort((a, b) => b[0].length - a[0].length);
+
+function matchPredicateAt(tokens: string[], i: number): { length: number; predicate: NarrativeAssertion["predicate"] } | null {
+  for (const [seq, predicate] of PREDICATES) {
+    if (i + seq.length > tokens.length) continue;
+    if (seq.every((t, k) => tokens[i + k] === t)) return { length: seq.length, predicate };
+  }
+  return null;
+}
+
+// ─── Negation scoped to the predicate ───────────────────────────────────
+
+const NEGATORS = new Set(["not", "never", "no", "without", "lack", "lacks", "lacked", "lacking", "fail", "fails", "failed", "failing", "cannot", "neither", "nor", "little", "absence"]);
+/** Tokens that may sit between a negator and the predicate it governs ("did not fully agree", "failed to reach a consensus", "lack of agreement"). */
+const NEGATION_BRIDGE = new Set([
+  "do", "does", "did", "is", "are", "was", "were", "be", "been", "being", "has", "have", "had", "will", "would", "could", "can", "should", "yet",
+  "a", "an", "the", "any", "to", "of", "reach", "reached", "reaching", "achieve", "achieved", "find", "found", "come", "came", "arrive", "arrived", "at",
+  "fully", "broadly", "clearly", "really", "quite", "entirely", "completely", "in", "full", "real", "genuine", "clear", "broad",
+]);
+
+function negated(tokens: string[], i: number): boolean {
+  for (let k = i - 1, steps = 0; k >= 0 && steps < 5; k--, steps++) {
+    if (NEGATORS.has(tokens[k])) return true;
+    if (!NEGATION_BRIDGE.has(tokens[k])) return false;
+  }
+  return false;
+}
+
+// ─── Subject scope ───────────────────────────────────────────────────────
+
+const UNANIMOUS_WORDS = new Set(["all", "every", "each", "whole", "entire", "unanimous", "unanimously", "unanimity"]);
+const MAJORITY_WORDS = new Set(["most", "majority"]);
+const SUBGROUP_WORDS = new Set(["some", "several", "few", "minority", "only", "certain", "individual", "other", "remaining", "either"]);
+const CLAUSE_BREAK = /[,;:]|\b(?:but|while|whereas|although|though|however)\b/;
+
+/** The scope of the subject that governs the predicate at token `i`, read from the same clause only. */
+function scopeBefore(clauseTokens: string[], predicate: string[]): AssertionScope {
+  const all = [...clauseTokens, ...predicate];
+  // "N/M"
+  for (const t of clauseTokens) {
+    const slash = /^(\d+)\/(\d+)$/.exec(t);
+    if (slash) return { kind: "counted", n: Number(slash[1]), of: Number(slash[2]) };
+  }
+  // "N of M" / "N out of M" / "all N" / "N models"
+  for (let k = 0; k < clauseTokens.length; k++) {
+    const n = toNumber(clauseTokens[k]);
+    if (n === null) continue;
+    const of = clauseTokens[k + 1] === "of" ? toNumber(clauseTokens[k + 2] === "the" ? clauseTokens[k + 3] : clauseTokens[k + 2])
+      : clauseTokens[k + 1] === "out" && clauseTokens[k + 2] === "of" ? toNumber(clauseTokens[k + 3]) : null;
+    if (clauseTokens[k - 1] === "all") return { kind: "counted", n, of: n }; // "all five models"
+    return { kind: "counted", n, of };
+  }
+  if (all.some((t) => UNANIMOUS_WORDS.has(t))) return { kind: "unanimous" };
+  if (clauseTokens.some((t) => MAJORITY_WORDS.has(t)) || predicate.includes("majority")) return { kind: "majority" };
+  if (clauseTokens.some((t) => SUBGROUP_WORDS.has(t))) return { kind: "subgroup" };
+  return { kind: "panel" };
+}
+
+/** Every non-negated agreement/settledness assertion the sentence makes. */
+export function analyzeSentence(sentence: string): NarrativeAssertion[] {
+  const out: NarrativeAssertion[] = [];
+  for (const clause of sentence.split(CLAUSE_BREAK)) {
+    const tokens = tokenize(clause ?? "");
+    for (let i = 0; i < tokens.length; i++) {
+      const m = matchPredicateAt(tokens, i);
+      if (!m) continue;
+      const seq = tokens.slice(i, i + m.length);
+      // "no disagreement" / "without dissent" are agreement claims in negative form; only a negator BEFORE them negates them.
+      if (!negated(tokens, i)) out.push({ predicate: m.predicate, scope: scopeBefore(tokens.slice(0, i), seq) });
+      i += m.length - 1;
     }
   }
-  return best;
+  return out;
 }
+
+// ─── Attribution ─────────────────────────────────────────────────────────
 
 const STOPWORDS = new Set([
   "the", "a", "an", "of", "and", "or", "in", "on", "to", "is", "are", "was", "were", "be", "been", "for", "with", "by", "vs",
   "that", "this", "it", "its", "as", "at", "from", "than", "more", "less", "models", "model", "panel", "agree", "agrees",
-  "agreed", "consensus", "majority", "most", "all", "every", "each", "claim", "claims", "about", "on", "whether", "which",
+  "agreed", "consensus", "majority", "most", "all", "every", "each", "claim", "claims", "about", "whether", "which",
 ]);
 
 function contentTokens(text: string): Set<string> {
-  return new Set(
-    text
-      .toLowerCase()
-      .split(/[^a-z0-9]+/)
-      .filter((t) => t.length > 2 && !STOPWORDS.has(t))
-  );
+  return new Set(tokenize(text).filter((t) => t.length > 2 && !STOPWORDS.has(t)));
 }
 
 /** The row a sentence is about: the row whose claim's content tokens it covers best (≥ half, and ≥ 2 tokens), or null. */
@@ -110,17 +214,56 @@ export function attributeSentence(sentence: string, rows: AlignedClaim[]): Align
   return best;
 }
 
+// ─── The rules ───────────────────────────────────────────────────────────
+
 function agreeingCount(row: AlignedClaim): number {
   return row.cells.filter((c) => !!c && (c.stance === "agrees" || c.stance === "partial")).length;
 }
 
-/** Whether a claim of `level` about `row` is stronger than its structured status allows. */
-export function overstatesRow(level: AgreementClaimLevel, row: AlignedClaim, dispatchedPanelSize: number): boolean {
-  if (!isTopConsensusEligible(row.status)) return true;
-  if (row.status === "majority") return level !== "majority";
-  // consensus: unanimity only when every dispatched model agreed.
-  if (level === "unanimous") return agreeingCount(row) < dispatchedPanelSize;
-  return false;
+function assessablePositions(row: AlignedClaim): number {
+  return row.cells.filter((c) => !!c && c.stance !== "unclear").length;
+}
+
+function isContested(row: AlignedClaim): boolean {
+  return row.status === "split" || !!row.contested?.marked || !!row.contested?.assessed;
+}
+
+/** Whether `assertion` about `row` states more than the row's structured result supports. */
+export function assertionOverstates(assertion: NarrativeAssertion, row: AlignedClaim, dispatchedPanelSize: number): boolean {
+  const { scope } = assertion;
+  if (assertion.predicate === "settled") {
+    if (!isTopConsensusEligible(row.status) || isContested(row)) return true;
+    // A settledness claim is also a panel-level claim.
+  }
+  switch (scope.kind) {
+    case "subgroup":
+      return false;
+    case "counted": {
+      if (scope.n > agreeingCount(row)) return true;
+      if (scope.of !== null && scope.of !== dispatchedPanelSize && scope.of !== assessablePositions(row)) return true;
+      if (scope.of !== null && scope.n > scope.of) return true;
+      return false;
+    }
+    case "unanimous":
+      return row.status !== "consensus" || agreeingCount(row) < dispatchedPanelSize;
+    case "panel":
+      return row.status !== "consensus";
+    case "majority":
+      return !isTopConsensusEligible(row.status);
+  }
+}
+
+/**
+ * Held to the run when no row matches. With a consensus/majority row present the sentence cannot be tied to a
+ * row and passes. With none: only subgroup assertions, and counts of at most half the dispatched panel, pass —
+ * no row of such a run has more than half the panel agreeing (any such row is a majority).
+ */
+function unattributedOverstates(assertion: NarrativeAssertion, rows: AlignedClaim[], dispatchedPanelSize: number): boolean {
+  if (rows.some((r) => isTopConsensusEligible(r.status))) return false;
+  const { scope } = assertion;
+  if (scope.kind === "subgroup") return false;
+  if (scope.kind === "counted") return scope.n * 2 > dispatchedPanelSize || (scope.of !== null && scope.n === scope.of);
+  return true;
 }
 
 export function splitSentences(text: string): string[] {
@@ -131,10 +274,10 @@ export function splitSentences(text: string): string[] {
 }
 
 /**
- * The sentences of `text` that state more agreement than the structured
- * result allows (see module header). `subjectRow`, when given, is the row the
- * whole text is about (e.g. the split topic a "why models disagree" sentence
- * explains) and is used for any sentence that matches no row by content.
+ * The sentences of `text` that state more than the structured result allows.
+ * `subjectRow`, when given, is the row the whole text is about (e.g. the split
+ * topic a "why models disagree" sentence explains) and is used for sentences
+ * that match no row by content.
  */
 export function overstatingSentences(
   text: string,
@@ -142,29 +285,28 @@ export function overstatingSentences(
   dispatchedPanelSize: number,
   subjectRow?: AlignedClaim
 ): string[] {
-  const anyEligible = rows.some((r) => isTopConsensusEligible(r.status));
   const out: string[] = [];
   for (const sentence of splitSentences(text)) {
-    const level = agreementClaimLevel(sentence);
-    if (!level) continue;
+    const assertions = analyzeSentence(sentence);
+    if (assertions.length === 0) continue;
     const row = attributeSentence(sentence, rows) ?? subjectRow ?? null;
-    if (row ? overstatesRow(level, row, dispatchedPanelSize) : !anyEligible) out.push(sentence);
+    const bad = assertions.some((a) =>
+      row ? assertionOverstates(a, row, dispatchedPanelSize) : unattributedOverstates(a, rows, dispatchedPanelSize)
+    );
+    if (bad) out.push(sentence);
   }
   return out;
 }
 
 /**
  * Whether model-written "Where models agree" sentences may be shown: every
- * sentence must be about a consensus/majority row (by content) and must not
- * overstate it. Any other outcome means the deterministic lines are used.
+ * sentence must be about a consensus/majority row (by content) and none of
+ * its assertions may overstate that row.
  */
 export function agreeLinesHonest(lines: string[], rows: AlignedClaim[], dispatchedPanelSize: number): boolean {
   return lines.every((line) => {
     const row = attributeSentence(line, rows);
     if (!row || !isTopConsensusEligible(row.status)) return false;
-    return splitSentences(line).every((s) => {
-      const level = agreementClaimLevel(s);
-      return !level || !overstatesRow(level, row, dispatchedPanelSize);
-    });
+    return splitSentences(line).every((s) => analyzeSentence(s).every((a) => !assertionOverstates(a, row, dispatchedPanelSize)));
   });
 }

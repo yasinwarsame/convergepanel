@@ -19,7 +19,6 @@ import {
   consensusStatusLabel,
   consensusStatusRank,
   describeContested,
-  describeCoverage,
   isLimitedCoverage,
 } from "@/lib/adaptiveSchema/consensusIntegrity";
 import { scoreAgreement } from "@/lib/adaptiveSchema/agreementComparators";
@@ -248,7 +247,7 @@ describe("certainty and gate are unchanged by the coverage classification (prope
 
 // ─── Contested axis ───────────────────────────────────────────────────────
 
-describe("computeContestedDimensions (marked / assessed)", () => {
+describe("computeContestedDimensions: marked and assessed are independent (D1)", () => {
   const disputed: AlignedCellOrigin = { kind: "claim", field: "disputedClaims", fieldClass: "disputed" };
   const settled: AlignedCellOrigin = { kind: "claim", field: "settledClaims", fieldClass: "settled" };
 
@@ -256,46 +255,56 @@ describe("computeContestedDimensions (marked / assessed)", () => {
     return { id: "r", claimText: "Underlying claim", cells, agreementScore: 0, certaintyScore: 0, status: "consensus" };
   }
 
-  it("neither: settled-field claims with settled confidence and no camps → marked 0 of assessed 3", () => {
+  it("neither: unmarked claims the panel agrees on", () => {
     const r = row([0, 1, 2].map((i) => cell(MODELS[i], "agrees", { origin: settled })));
-    expect(computeContestedDimensions(r)).toEqual({ marked: 0, assessed: 3 });
+    expect(computeContestedDimensions(r)).toEqual({ marked: false, assessed: false, markedCount: 0, listedCount: 3 });
     expect(describeContested({ ...r, contested: computeContestedDimensions(r) })).toBeNull();
   });
 
-  it("marked by field origin alone: disputed-field claims count even with a non-contested confidence", () => {
-    const r = row([0, 1].map((i) => cell(MODELS[i], "agrees", { origin: disputed, confidence: "majority_view" })));
-    expect(computeContestedDimensions(r)).toEqual({ marked: 2, assessed: 2 });
+  it("marked only: every model files the claim as disputed yet takes the same position", () => {
+    const r = row([0, 1, 2].map((i) => cell(MODELS[i], "agrees", { origin: disputed })));
+    expect(computeContestedDimensions(r)).toEqual({ marked: true, assessed: false, markedCount: 3, listedCount: 3 });
   });
 
-  it("marked by confidence alone: a contested confidence in an unclassified field", () => {
-    const r = row([cell(MODELS[0], "agrees", { confidence: "contested" }), cell(MODELS[1], "agrees")]);
-    expect(computeContestedDimensions(r)).toEqual({ marked: 1, assessed: 2 });
+  it("assessed only: the panel divides on a claim no model calls contested", () => {
+    const r = row([cell(MODELS[0], "agrees", { origin: settled }), cell(MODELS[1], "disputes", { origin: settled }), cell(MODELS[2], "partial", { origin: settled })]);
+    expect(computeContestedDimensions(r)).toEqual({ marked: false, assessed: true, markedCount: 0, listedCount: 3 });
   });
 
-  it("marked by camps alone", () => {
-    const r = row([cell(MODELS[0], "agrees", { camps: [{ label: "A", position: "a" }] }), cell(MODELS[1], "agrees")]);
-    expect(computeContestedDimensions(r)).toEqual({ marked: 1, assessed: 2 });
+  it("both: models mark it contested and also divide on it", () => {
+    const r = row([cell(MODELS[0], "agrees", { origin: disputed }), cell(MODELS[1], "disputes", { origin: disputed })]);
+    expect(computeContestedDimensions(r)).toEqual({ marked: true, assessed: true, markedCount: 2, listedCount: 2 });
   });
 
-  it("a contested mark on a cell that is not the model's own claim is not assessed: inferred and field-derived cells never count", () => {
+  it("marked by each signal alone: disputed field, contested confidence, camps", () => {
+    expect(computeContestedDimensions(row([cell(MODELS[0], "agrees", { origin: disputed, confidence: "majority_view" }), cell(MODELS[1], "agrees")]))).toMatchObject({ marked: true, markedCount: 1 });
+    expect(computeContestedDimensions(row([cell(MODELS[0], "agrees", { confidence: "contested" }), cell(MODELS[1], "agrees")]))).toMatchObject({ marked: true, markedCount: 1 });
+    expect(computeContestedDimensions(row([cell(MODELS[0], "agrees", { camps: [{ label: "A", position: "a" }] }), cell(MODELS[1], "agrees")]))).toMatchObject({ marked: true, markedCount: 1 });
+  });
+
+  it("assessed reads assessable positions only: an unclear cell is not a dispute, an inferred dispute is", () => {
+    expect(computeContestedDimensions(row([cell(MODELS[0], "agrees"), cell(MODELS[1], "unclear")]))!.assessed).toBe(false);
+    const inferredDispute = cell(MODELS[1], "disputes", { origin: { kind: "inferred" }, confidence: null, backfilled: true });
+    expect(computeContestedDimensions(row([cell(MODELS[0], "agrees"), inferredDispute]))).toEqual({ marked: false, assessed: true, markedCount: 0, listedCount: 1 });
+  });
+
+  it("a contested mark on a cell that is not the model's own claim never marks: inferred and field-derived cells", () => {
     const inferred = cell(MODELS[0], "agrees", { origin: { kind: "inferred" }, confidence: null, backfilled: true });
-    // Even a (malformed) contested confidence on an inferred cell is ignored.
     const inferredWithMark = cell(MODELS[1], "agrees", { origin: { kind: "inferred" }, confidence: "contested" });
     const field = cell(MODELS[2], "agrees", { origin: { kind: "field_derived", fieldType: "metric" }, confidence: null });
     expect(computeContestedDimensions(row([inferred, inferredWithMark, field]))).toBeUndefined();
-
-    const mixed = row([cell(MODELS[0], "agrees", { origin: disputed }), inferredWithMark, null]);
-    expect(computeContestedDimensions(mixed)).toEqual({ marked: 1, assessed: 1 });
+    const mixed = row([cell(MODELS[0], "agrees", { origin: settled }), inferredWithMark, null]);
+    expect(computeContestedDimensions(mixed)).toEqual({ marked: false, assessed: false, markedCount: 0, listedCount: 1 });
   });
 
-  it("legacy cells without origin (persisted before this change) are never counted", () => {
+  it("legacy cells without origin (persisted before this change) are never counted, so never marked", () => {
     const { origin: _o, ...legacy } = cell(MODELS[0], "agrees", { confidence: "contested" });
     expect(computeContestedDimensions(row([legacy as AlignedClaimCell]))).toBeUndefined();
   });
 
   it("applyConsensusIntegrity attaches contested only when some model listed the claim itself", () => {
     const [withClaim] = applyConsensusIntegrity([row([cell(MODELS[0], "agrees", { origin: disputed }), cell(MODELS[1], "agrees", { origin: disputed })])], 2);
-    expect(withClaim.contested).toEqual({ marked: 2, assessed: 2 });
+    expect(withClaim.contested).toEqual({ marked: true, assessed: false, markedCount: 2, listedCount: 2 });
     const [fieldOnly] = applyConsensusIntegrity(
       [row([cell(MODELS[0], "agrees", { origin: { kind: "field_derived", fieldType: "scalar" }, confidence: null }), cell(MODELS[1], "agrees", { origin: { kind: "field_derived", fieldType: "scalar" }, confidence: null })])],
       2
@@ -307,30 +316,33 @@ describe("computeContestedDimensions (marked / assessed)", () => {
     const allMarked = row([0, 1, 2, 3, 4].map((i) => cell(MODELS[i], "agrees", { origin: disputed })));
     const [out] = applyConsensusIntegrity(scoreAgreement("contested_empirical", [allMarked]), 5);
     expect(out.status).toBe("consensus");
-    expect(out.contested).toEqual({ marked: 5, assessed: 5 });
+    expect(out.contested).toEqual({ marked: true, assessed: false, markedCount: 5, listedCount: 5 });
   });
 });
 
-describe("describeContested / describeCoverage: canonical wording", () => {
-  function withContested(marked: number, assessed: number, positions: number): AlignedClaim {
-    const cells = MODELS.slice(0, 5).map((m, i) => (i < positions ? cell(m, "agrees") : null));
-    return { id: "r", claimText: "X", cells, agreementScore: 1, certaintyScore: 1, status: "consensus", contested: { marked, assessed } };
+describe("describeContested: canonical wording", () => {
+  function withContested(markedCount: number, listedCount: number, withCells: number): AlignedClaim {
+    const cells = MODELS.slice(0, 5).map((m, i) => (i < withCells ? cell(m, "agrees") : null));
+    return {
+      id: "r", claimText: "X", cells, agreementScore: 1, certaintyScore: 1, status: "consensus",
+      contested: { marked: markedCount > 0, assessed: false, markedCount, listedCount },
+    };
   }
 
-  it("names the denominator when every model with a position listed and marked it: 'all N models that took a position mark …'", () => {
-    expect(describeContested(withContested(5, 5, 5))).toBe("all 5 models that took a position mark the underlying claim contested");
-    expect(describeContested(withContested(3, 3, 3))).toBe("all 3 models that took a position mark the underlying claim contested");
+  it("names the denominator when every model on the row listed and marked it: 'all N models that listed this claim mark it contested'", () => {
+    expect(describeContested(withContested(5, 5, 5))).toBe("all 5 models that listed this claim mark it contested");
+    expect(describeContested(withContested(3, 3, 3))).toBe("all 3 models that listed this claim mark it contested");
   });
 
-  it("singular all-case: the 1 model that took a position marks it", () => {
-    expect(describeContested(withContested(1, 1, 1))).toBe("the 1 model that took a position marks the underlying claim contested");
+  it("singular all-case", () => {
+    expect(describeContested(withContested(1, 1, 1))).toBe("the 1 model that listed this claim marks it contested");
   });
 
   it("counts when only some marked it", () => {
     expect(describeContested(withContested(4, 5, 5))).toBe("4 of 5 models that listed this claim mark it contested");
   });
 
-  it("counts (never 'all') when some positions were inferred rather than listed", () => {
+  it("counts (never 'all') when some cells were inferred rather than listed", () => {
     expect(describeContested(withContested(3, 3, 5))).toBe("3 of 3 models that listed this claim mark it contested");
   });
 
@@ -340,8 +352,14 @@ describe("describeContested / describeCoverage: canonical wording", () => {
     expect(describeContested(withContested(2, 3, 3))).toBe("2 of 3 models that listed this claim mark it contested");
   });
 
-  it("a mixed panel (some positions inferred, some dispatched models silent) never says 'all'", () => {
-    // 3 listed and marked, 5 positions (2 inferred) of a larger dispatched panel.
+  it("never says 'took a position' (R2-2): the denominator is the models that listed the claim, unclear ones included", () => {
+    const r = withContested(2, 2, 2);
+    r.cells[1] = { ...r.cells[1]!, stance: "unclear" };
+    expect(describeContested(r)).toBe("all 2 models that listed this claim mark it contested");
+    expect(describeContested(r)).not.toMatch(/took a position/);
+  });
+
+  it("a mixed panel (some cells inferred, some dispatched models silent) never says 'all'", () => {
     expect(describeContested(withContested(3, 3, 5))).not.toMatch(/\ball\b/);
   });
 
@@ -354,10 +372,6 @@ describe("describeContested / describeCoverage: canonical wording", () => {
   it("is a pure function of the structured input", () => {
     const r = withContested(4, 5, 5);
     expect(describeContested(r)).toBe(describeContested(JSON.parse(JSON.stringify(r))));
-  });
-
-  it("describeCoverage states positions against the dispatched panel", () => {
-    expect(describeCoverage(rowOf(["agrees", "agrees", "unclear", null, null], 5), 5)).toBe("2 of 5 dispatched models took a position");
   });
 });
 

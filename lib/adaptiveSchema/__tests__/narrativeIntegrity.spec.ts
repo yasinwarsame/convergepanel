@@ -1,12 +1,12 @@
 /**
- * D9 narrative integrity (R1 N3)
+ * D9 narrative integrity (R1 N3, R2-1)
  *
- * Unit: agreement-claim detection (panel / unanimous / majority vs subgroup
- * and negation), row attribution, and the status rules. Integration: the R1
- * addendum's reproduction — a mocked narrative that calls a limited_coverage
- * row agreement — plus split, single_source and no-consensus variants, each
- * falling back to the deterministic text; legitimate consensus, majority and
- * subgroup wording kept.
+ * Unit: assertion analysis (predicate class, subject scope, counts, scoped
+ * negation), the structured rules, and attribution. R2-1 regressions: counted
+ * claims checked against the row's real counts, non-governing negators,
+ * paraphrased agreement, contested → settled. Integration: every model-written
+ * field falls back to deterministic text on a violation; legitimate consensus,
+ * majority, subgroup and negated wording is kept.
  */
 
 import { callGemini } from "@/lib/connectors/gemini";
@@ -19,9 +19,9 @@ const mockedCallGemini = callGemini as jest.MockedFunction<typeof callGemini>;
 
 import {
   agreeLinesHonest,
-  agreementClaimLevel,
+  analyzeSentence,
+  assertionOverstates,
   attributeSentence,
-  overstatesRow,
   overstatingSentences,
 } from "@/lib/adaptiveSchema/narrativeIntegrity";
 import { buildAdaptiveSynthesisReport } from "@/lib/adaptiveSchema/synthesisReport";
@@ -34,7 +34,7 @@ function cell(m: ModelId, stance: AlignedClaimCell["stance"]): AlignedClaimCell 
   return { modelId: m, stance, rawStance: "asserts", confidence: "settled", excerpt: "e", origin: { kind: "claim", field: "keyClaims", fieldClass: "unclassified" } };
 }
 
-function row(claimText: string, status: AlignedClaim["status"], stances: AlignedClaimCell["stance"][]): AlignedClaim {
+function row(claimText: string, status: AlignedClaim["status"], stances: AlignedClaimCell["stance"][], extra: Partial<AlignedClaim> = {}): AlignedClaim {
   return {
     id: claimText,
     claimText,
@@ -42,67 +42,195 @@ function row(claimText: string, status: AlignedClaim["status"], stances: Aligned
     agreementScore: 0.5,
     certaintyScore: 0.5,
     status,
+    ...extra,
   };
 }
 
-// The R1 addendum's reproduction shape: 5 dispatched, a-one consensus 3/5, b-two limited 2/5, d-four split.
+// 5 dispatched throughout. a-one consensus 3/5, b-two limited 2/5, d-four split, lone single_source.
 const A_ONE = () => row("Inflation expectations anchor wage growth", "consensus", ["agrees", "agrees", "agrees"]);
 const B_TWO = () => row("Central bank credibility drives bond yields", "limited_coverage", ["agrees", "agrees"]);
 const D_FOUR = () => row("Supply shocks explain persistent core inflation", "split", ["agrees", "disputes", "disputes", "agrees", "disputes"]);
 const LONE = () => row("Housing costs lag policy rates by two years", "single_source", ["agrees"]);
 const MAJ = () => row("Tariffs raise consumer prices measurably", "majority", ["agrees", "agrees", "agrees", "disputes", "partial"]);
 const FULL = () => row("Money supply growth preceded the spike", "consensus", ["agrees", "agrees", "agrees", "agrees", "agrees"]);
+/** All five agree but every one marks it contested (D1 marked only). */
+const MARKED = () =>
+  row("Minimum wage increases reduce employment", "consensus", ["agrees", "agrees", "agrees", "agrees", "agrees"], {
+    contested: { marked: true, assessed: false, markedCount: 5, listedCount: 5 },
+  });
+/** Consensus status, but the panel's positions are divided (D1 assessed only). */
+const ASSESSED = () =>
+  row("Remote work raises productivity", "consensus", ["agrees", "agrees", "agrees", "agrees", "partial"], {
+    contested: { marked: false, assessed: true, markedCount: 0, listedCount: 5 },
+  });
 
-describe("agreementClaimLevel: what counts as a panel/majority agreement claim", () => {
+describe("analyzeSentence: predicate, scope and scoped negation", () => {
   it.each([
-    ["The models agree that central bank credibility drives bond yields.", "panel"],
-    ["Models broadly converge on the role of supply shocks.", "panel"],
-    ["There is broad consensus that housing costs lag policy rates.", "panel"],
-    ["The panel agrees supply shocks explain inflation.", "panel"],
-    ["All five models agree tariffs raise prices.", "unanimous"],
-    ["Every model agrees on the claim.", "unanimous"],
-    ["The panel was unanimous about money supply.", "unanimous"],
-    ["Most models agree tariffs raise consumer prices.", "majority"],
-    ["A majority of models hold that tariffs raise prices.", "majority"],
-  ])("%s → %s", (sentence, level) => {
-    expect(agreementClaimLevel(sentence)).toBe(level);
+    ["The models agree that X.", "agreement", "panel"],
+    ["Models broadly converge on X.", "agreement", "panel"],
+    ["There is broad consensus that X.", "agreement", "panel"],
+    ["The panel speaks with one voice on X.", "agreement", "panel"],
+    ["The prevailing view is that X.", "agreement", "panel"],
+    ["There is no disagreement that X.", "agreement", "panel"],
+    ["The models endorse X.", "agreement", "panel"],
+    ["The panel is united on X.", "agreement", "panel"],
+    ["Every model agrees on X.", "agreement", "unanimous"],
+    ["The panel was unanimous about X.", "agreement", "unanimous"],
+    ["Most models agree that X.", "agreement", "majority"],
+    ["A majority of models hold that X.", "agreement", "majority"],
+    ["Some models agree with X.", "agreement", "subgroup"],
+    ["It is settled that X.", "settled", "panel"],
+    ["X is uncontested among the models.", "settled", "panel"],
+    ["X is well established.", "settled", "panel"],
+  ])("%s → %s / %s", (sentence, predicate, scope) => {
+    const a = analyzeSentence(sentence);
+    expect(a).toHaveLength(1);
+    expect(a[0]).toMatchObject({ predicate, scope: { kind: scope } });
   });
 
   it.each([
-    "Two models agree that supply shocks explain inflation, while the other assessed models disagree.",
-    "Three models agree on this, but two dispute it.",
-    "Some models agree with this view.",
-    "There is no consensus on supply shocks.",
-    "The models do not agree on supply shocks.",
-    "The models disagree about supply shocks.",
+    ["Five of five models agree that X.", 5, 5],
+    ["5 of 5 models agree X.", 5, 5],
+    ["Four of the five models agree X.", 4, 5],
+    ["3/5 models agree X.", 3, 5],
+    ["All five models agree X.", 5, 5],
+    ["Two models agree that X.", 2, null],
+    ["Three out of five models converge on X.", 3, 5],
+  ])("counted: %s → %i of %s", (sentence, n, of) => {
+    expect(analyzeSentence(sentence)[0].scope).toEqual({ kind: "counted", n, of });
+  });
+
+  it.each([
+    "There is no consensus on X.",
+    "The models do not agree on X.",
+    "The models don't agree on X.",
     "The panel lacks consensus here.",
-    "ChatGPT and Claude argue that credibility matters.",
-  ])("not a panel claim: %s", (sentence) => {
-    expect(agreementClaimLevel(sentence)).toBeNull();
+    "There is a lack of agreement on X.",
+    "The models failed to reach a consensus on X.",
+    "The models are not in agreement on X.",
+    "The question is not settled.",
+    "The models disagree about X.",
+    "ChatGPT and Claude argue that X matters.",
+  ])("no assertion: %s", (sentence) => {
+    expect(analyzeSentence(sentence)).toEqual([]);
+  });
+
+  it.each([
+    "Not surprisingly, the models agree that X.",
+    "Without exception the models agree that X.",
+    "Not only do the models agree that X, they cite the same data.",
+    "Without hesitation, there is consensus that X.",
+  ])("a negator that does not govern the predicate is not a negation (R2-1): %s", (sentence) => {
+    expect(analyzeSentence(sentence).length).toBeGreaterThan(0);
   });
 });
 
-describe("status rules", () => {
-  it("ineligible rows (limited_coverage, split, single_source) admit no panel or majority agreement claim", () => {
-    for (const r of [B_TWO(), D_FOUR(), LONE()]) {
-      for (const level of ["majority", "panel", "unanimous"] as const) expect(overstatesRow(level, r, 5)).toBe(true);
-    }
+describe("assertionOverstates: structured rules", () => {
+  const panel = { predicate: "agreement" as const, scope: { kind: "panel" as const } };
+  const unanimous = { predicate: "agreement" as const, scope: { kind: "unanimous" as const } };
+  const majority = { predicate: "agreement" as const, scope: { kind: "majority" as const } };
+  const counted = (n: number, of: number | null) => ({ predicate: "agreement" as const, scope: { kind: "counted" as const, n, of } });
+  const settled = { predicate: "settled" as const, scope: { kind: "panel" as const } };
+
+  it("ineligible rows admit no panel, unanimous or majority claim", () => {
+    for (const r of [B_TWO(), D_FOUR(), LONE()]) for (const a of [panel, unanimous, majority]) expect(assertionOverstates(a, r, 5)).toBe(true);
   });
 
-  it("majority rows admit majority language only", () => {
-    expect(overstatesRow("majority", MAJ(), 5)).toBe(false);
-    expect(overstatesRow("panel", MAJ(), 5)).toBe(true);
-    expect(overstatesRow("unanimous", MAJ(), 5)).toBe(true);
+  it("majority rows: majority claims only", () => {
+    expect(assertionOverstates(majority, MAJ(), 5)).toBe(false);
+    expect(assertionOverstates(panel, MAJ(), 5)).toBe(true);
+    expect(assertionOverstates(unanimous, MAJ(), 5)).toBe(true);
   });
 
-  it("consensus rows admit panel language; unanimity only when every dispatched model agreed", () => {
-    expect(overstatesRow("panel", A_ONE(), 5)).toBe(false);
-    expect(overstatesRow("unanimous", A_ONE(), 5)).toBe(true); // 3 of 5 agreed, 2 silent
-    expect(overstatesRow("unanimous", FULL(), 5)).toBe(false);
+  it("consensus rows: panel claims; unanimity only when every dispatched model agreed", () => {
+    expect(assertionOverstates(panel, A_ONE(), 5)).toBe(false);
+    expect(assertionOverstates(unanimous, A_ONE(), 5)).toBe(true);
+    expect(assertionOverstates(unanimous, FULL(), 5)).toBe(false);
+  });
+
+  it("counts are checked: the numerator against the agreeing models, the denominator against the dispatched panel or the positions", () => {
+    expect(assertionOverstates(counted(5, 5), B_TWO(), 5)).toBe(true); // only 2 agree
+    expect(assertionOverstates(counted(2, 5), B_TWO(), 5)).toBe(false); // accurate
+    expect(assertionOverstates(counted(2, null), B_TWO(), 5)).toBe(false); // accurate subgroup
+    expect(assertionOverstates(counted(2, 2), B_TWO(), 5)).toBe(false); // 2 of the 2 that took a position
+    expect(assertionOverstates(counted(2, 3), B_TWO(), 5)).toBe(true); // 3 is neither the panel nor the positions
+    expect(assertionOverstates(counted(3, 5), D_FOUR(), 5)).toBe(true); // only 2 agree on the split
+    expect(assertionOverstates(counted(2, 5), D_FOUR(), 5)).toBe(false);
+    expect(assertionOverstates(counted(5, 5), FULL(), 5)).toBe(false);
+  });
+
+  it("settledness is refused for contested rows — marked, assessed or split — and for ineligible rows", () => {
+    expect(assertionOverstates(settled, MARKED(), 5)).toBe(true);
+    expect(assertionOverstates(settled, ASSESSED(), 5)).toBe(true);
+    expect(assertionOverstates(settled, D_FOUR(), 5)).toBe(true);
+    expect(assertionOverstates(settled, B_TWO(), 5)).toBe(true);
+    expect(assertionOverstates(settled, FULL(), 5)).toBe(false); // uncontested consensus
   });
 
   it("an unknown status is never treated as eligible", () => {
-    expect(overstatesRow("panel", { ...A_ONE(), status: "some_future_status" as any }, 5)).toBe(true);
+    expect(assertionOverstates(panel, { ...A_ONE(), status: "some_future_status" as any }, 5)).toBe(true);
+    expect(assertionOverstates(majority, { ...A_ONE(), status: "some_future_status" as any }, 5)).toBe(true);
+  });
+});
+
+describe("R2-1 regressions: each reproduced bypass is now caught", () => {
+  const rows = [A_ONE(), B_TWO()];
+  it.each([
+    "Five of five models agree that central bank credibility drives bond yields.",
+    "5 of 5 models agree central bank credibility drives bond yields.",
+    "Four of the five models agree central bank credibility drives bond yields.",
+    "Not surprisingly, the models agree that central bank credibility drives bond yields.",
+    "Without exception the models agree that central bank credibility drives bond yields.",
+    "The panel speaks with one voice on central bank credibility driving bond yields.",
+    "The prevailing view is that central bank credibility drives bond yields.",
+    "There is no disagreement that central bank credibility drives bond yields.",
+    "The models are united that central bank credibility drives bond yields.",
+    "The models endorse the view that central bank credibility drives bond yields.",
+  ])("limited row: %s", (sentence) => {
+    expect(overstatingSentences(sentence, rows, 5)).toEqual([sentence]);
+  });
+
+  it.each([
+    "Three of five models agree supply shocks explain persistent core inflation.",
+    "The panel reached agreement that supply shocks explain persistent core inflation.",
+  ])("split row: %s", (sentence) => {
+    expect(overstatingSentences(sentence, [A_ONE(), D_FOUR()], 5)).toEqual([sentence]);
+  });
+
+  it.each([
+    "It is settled that minimum wage increases reduce employment.",
+    "That minimum wage increases reduce employment is uncontested among the models.",
+    "Minimum wage increases reduce employment is well established.",
+  ])("contested (marked) row presented as settled: %s", (sentence) => {
+    expect(overstatingSentences(sentence, [MARKED()], 5)).toEqual([sentence]);
+  });
+
+  it("contested (assessed only) row presented as settled", () => {
+    const s = "It is settled that remote work raises productivity.";
+    expect(overstatingSentences(s, [ASSESSED()], 5)).toEqual([s]);
+  });
+
+  it("no consensus anywhere: an unattributed count above half the panel, or 'all N', is caught; a small count is not", () => {
+    const rows2 = [D_FOUR(), LONE()];
+    expect(overstatingSentences("Four of five models agree on the main question.", rows2, 5)).toHaveLength(1);
+    expect(overstatingSentences("All five models agree on the main question.", rows2, 5)).toHaveLength(1);
+    expect(overstatingSentences("Two models agree on the main question.", rows2, 5)).toHaveLength(0);
+  });
+});
+
+describe("legitimate wording is kept", () => {
+  it.each([
+    ["consensus", "The models agree that inflation expectations anchor wage growth.", [A_ONE()]],
+    ["unanimity when all five agreed", "All five models agree money supply growth preceded the spike.", [FULL()]],
+    ["settled for an uncontested full consensus", "Money supply growth preceding the spike is well established.", [FULL()]],
+    ["majority", "Most models agree tariffs raise consumer prices measurably.", [MAJ()]],
+    ["accurate count", "Two of five models agree central bank credibility drives bond yields.", [A_ONE(), B_TWO()]],
+    ["split subgroup", "Two models agree supply shocks explain persistent core inflation, while three disagree.", [A_ONE(), D_FOUR()]],
+    ["contested camps", "The models describe competing camps on minimum wage increases reducing employment.", [MARKED()]],
+    ["negated settledness", "Whether minimum wage increases reduce employment is not settled.", [MARKED()]],
+    ["negated consensus", "There is no consensus that supply shocks explain persistent core inflation.", [A_ONE(), D_FOUR()]],
+  ])("%s: %s", (_label, sentence, rows) => {
+    expect(overstatingSentences(sentence as string, rows as AlignedClaim[], 5)).toEqual([]);
   });
 });
 
