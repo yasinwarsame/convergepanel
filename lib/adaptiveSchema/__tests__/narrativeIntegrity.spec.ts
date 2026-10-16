@@ -202,6 +202,17 @@ describe("buildAdaptiveSynthesisReport: D9 backstop on every model-written field
     expect(report.whereModelsAgree).toEqual([A_ONE().claimText]);
   });
 
+  it("more agree sentences than consensus/majority rows → deterministic lines, even when each sentence is honest", async () => {
+    mockNarrative({
+      whereModelsAgreeNarrative: [
+        "Models agree inflation expectations anchor wage growth.",
+        "Models also agree inflation expectations anchor wage growth over time.",
+      ],
+    });
+    const report = await buildAdaptiveSynthesisReport("Q", "generic", ROWS(), results(5));
+    expect(report.whereModelsAgree).toEqual([A_ONE().claimText]);
+  });
+
   it("an honest agree sentence for the consensus row is kept", async () => {
     mockNarrative({ whereModelsAgreeNarrative: ["Models agree inflation expectations anchor wage growth."] });
     const report = await buildAdaptiveSynthesisReport("Q", "generic", ROWS(), results(5));
