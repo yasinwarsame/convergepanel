@@ -449,7 +449,7 @@ describe("R6-4..R6-6: load-bearing claims, single-model insights, bias and copie
     // A computed "**Panel result:**" never introduces model text.
     for (const m of md.matchAll(/\*\*Panel result:\*\*\s*(.*)/g)) expect(m[1]).not.toMatch(/there is no real split|^“/);
     const memo = buildAdaptiveMemoInput("Q?", report, M as ModelId[], "run");
-    expect(memo.synthesisDisagreements[0]).toBe(`Claim: ${quoteClaim(split.claimText)} — Panel result: ${statusOf(split)}\n  ${MODEL_EXPLANATION_LABEL}:\n  > ${COPY}`);
+    expect(memo.synthesisDisagreements![0]).toBe(`Claim: ${quoteClaim(split.claimText)} — Panel result: ${statusOf(split)}\n  ${MODEL_EXPLANATION_LABEL}:\n  > ${COPY}`);
   });
 });
 
