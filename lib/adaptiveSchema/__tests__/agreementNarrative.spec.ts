@@ -62,6 +62,12 @@ describe("renderRowAgreement — exact wording per status", () => {
     );
   });
 
+  it("limited coverage counts assessed positions, not listed cells (an unclear cell took no position)", () => {
+    expect(say(row("limited_coverage", ["agrees", "agrees", "unclear", null, null]))).toBe(
+      "limited coverage: only 2 of 5 dispatched models took a position — too few to count as agreement"
+    );
+  });
+
   it("split gives both sides and is never agreement", () => {
     const text = say(row("split", ["agrees", "disputes", "disputes", "agrees", "disputes"]));
     expect(text).toBe("split: 2 of 5 dispatched models support it and 3 dispute it");

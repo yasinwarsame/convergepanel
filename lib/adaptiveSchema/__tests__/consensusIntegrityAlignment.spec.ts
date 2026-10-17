@@ -106,6 +106,15 @@ describe("field origin survives alignment", () => {
 });
 
 describe("pass-2 clusterer input: typed fields, not a folded label", () => {
+  /** JSON.parse as an assertion: a payload that is not JSON fails an expectation, not just a thrown error. */
+  function parseJson(text: string): any {
+    let value: unknown;
+    expect(() => {
+      value = JSON.parse(text);
+    }).not.toThrow();
+    return value;
+  }
+
   const nodes: ClaimNode[] = [
     { modelId: "chatgpt", claim: claim({ id: "x", claim: 'Says "X" holds.', stance: "asserts", confidence: "contested" }), field: "disputedClaims", fieldClass: "disputed" },
     { modelId: "claude", claim: claim({ id: "y", claim: "Y holds.", stance: "uncertain", confidence: "settled" }), field: "settledClaims", fieldClass: "settled" },
@@ -118,7 +127,7 @@ describe("pass-2 clusterer input: typed fields, not a folded label", () => {
     const parsed = lines.map((l) => {
       const m = /^c(\d+): (.*)$/.exec(l);
       expect(m).not.toBeNull();
-      return { key: Number(m![1]), members: JSON.parse(m![2]) };
+      return { key: Number(m![1]), members: parseJson(m![2]) };
     });
     expect(parsed[0]).toEqual({
       key: 0,
@@ -138,7 +147,7 @@ describe("pass-2 clusterer input: typed fields, not a folded label", () => {
     const clusterCall = mockedCallGemini.mock.calls.find(([msg]) => String(msg).startsWith("c0:"));
     expect(clusterCall).toBeDefined();
     const [message, , , opts] = clusterCall!;
-    expect(JSON.parse(String(message).split("\n")[0].replace(/^c0: /, ""))[0]).toMatchObject({ confidence: "contested", fieldClass: "disputed" });
+    expect(parseJson(String(message).split("\n")[0].replace(/^c0: /, ""))[0]).toMatchObject({ confidence: "contested", fieldClass: "disputed" });
     const systemPrompt = String((opts as { systemPromptOverride?: string }).systemPromptOverride);
     expect(systemPrompt).toContain('"confidence"');
     expect(systemPrompt).toContain('"fieldClass"');

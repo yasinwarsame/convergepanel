@@ -62,6 +62,8 @@ const AGREEMENT_CORPUS = [
   "They all cite the same study.",
   "All of them cite the same study.",
   "Four of five models argue X.",
+  "3 models cite the 2023 study.",
+  "3/5 models cite the 2023 study.",
 ];
 
 /** Division words and collective panel references: removed from the panel-free fields, allowed in a disagreement explanation. */
