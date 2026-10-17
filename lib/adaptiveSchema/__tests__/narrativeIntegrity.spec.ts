@@ -144,6 +144,7 @@ describe("withoutAgreementClaims", () => {
     ["a heading kept above its paragraph", "## Evidence\nLine one. The panel agrees.\n\nNext.", "## Evidence\nLine one.\n\nNext."],
     ["an agreement-bearing heading removed with its line", "## The panel agrees\nLine one.", "Line one."],
     ["CRLF kept", "Line one.\r\nThe panel agrees.\r\n\r\nNext para.", "Line one.\r\n\r\nNext para."],
+    ["CRLF kept between two kept lines", "Line one.\r\nThe panel agrees.\r\nLine three.", "Line one.\r\nLine three."],
     ["blank-line runs kept as they were", "First.\n\n\nSecond.", "First.\n\n\nSecond."],
     ["single line breaks kept", "Line one.\nLine two.", "Line one.\nLine two."],
   ])("keeps layout (R4-2): %s", (_name, input, expected) => {

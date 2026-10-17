@@ -166,6 +166,16 @@ describe("R4-1 path A: claim text cannot confer a status", () => {
     for (const text of [s.strip, s.card, s.docx, s.pdf]) expect(text).not.toContain(r.claimText);
   });
 
+  it("gate fail: the unresolved claims in the Unified Answer are quoted", async () => {
+    g.mockResolvedValue(off);
+    const a = row("All models agree supply shocks dominate", "split", ["agrees", "disputes", "disputes", "agrees", "disputes"]);
+    const b = row("Rates lag by a year", "split", ["agrees", "disputes", "disputes", "agrees", "disputes"]);
+    for (const r of [a, b]) r.agreementScore = r.certaintyScore = 0.1;
+    const report = await buildAdaptiveSynthesisReport("q", "generic", [a, b], results());
+    expect(report.gate).toBe("fail");
+    expect(report.unifiedAnswer).toBe(`Panel could not converge on a reliable answer.\nUnresolved claims:\n- ${quoteClaim(a.claimText)}\n- ${quoteClaim(b.claimText)}`);
+  });
+
   it("6. a claim about consensus as its subject is kept verbatim, quoted, with the panel's own result beside it", async () => {
     g.mockResolvedValue(off);
     const subject = row("Scientific consensus holds that recent warming is human-caused", "consensus", ["agrees", "agrees", "agrees", "agrees", "agrees"]);
