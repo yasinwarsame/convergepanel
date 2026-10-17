@@ -250,6 +250,18 @@ describe("R5-1: the disagreement side and the share builders use the same bounda
 
 // ─── 3, 4, 5, 10: limited, single source, contested, mixed ───
 
+describe("R5-2: narrative sections on new reports are labelled model-written explanation", () => {
+  it("view and presenter label each section body", async () => {
+    mockNarrative({ executiveSummary: "Rates matter.", narrativeSections: [{ title: "Evidence", body: "Trials are small. Nobody disputes the lag." }] });
+    const rows = [row("Rates fall within a year", "majority", ["agrees", "agrees", "agrees", "disputes", null])];
+    const report = await buildAdaptiveSynthesisReport("Q?", "generic", rows, results());
+    expect(report.narrativeSections).toEqual([{ title: "Evidence", body: "Trials are small. Nobody disputes the lag." }]);
+    const html = viewHtml(report, rows);
+    expect(sourcesOf(html, "Nobody disputes the lag.")).toEqual(["model_explanation"]);
+    expect(sourcesOf(html, "Trials are small.")).toEqual(["model_explanation"]);
+  });
+});
+
 describe("R5-1: every status keeps its own computed result; claim text never confers one", () => {
   it("mixed report: each agree item carries its own row's result; limited and single-source claims never appear as agreement", async () => {
     mockNarrative(null);
@@ -343,6 +355,13 @@ describe("R5-3: naming a roster model keeps the narrative, its sentences and its
     expect(report.narrativeSections).toEqual([{ title: "Evidence", body: `One.\n\n${name} cites more trials. Two.` }]);
   });
 
+  it("sanitize never joins lines, even before punctuation", async () => {
+    mockNarrative({ executiveSummary: "Gemini 3 Pro says rates fall.\n\nRates fall\n, as the data show." });
+    const report = await buildAdaptiveSynthesisReport("Q?", "generic", rows(), results());
+    expect(narrativeCalls).toBe(2);
+    expect(report.executiveSummary).toBe("Rates fall\n, as the data show.");
+  });
+
   it("a hallucinated name still forces one regenerate and is stripped — and the sanitize pass keeps paragraphs and lists", async () => {
     mockNarrative({
       executiveSummary: "Rates fall within a year.\n\nGemini 3 Pro weighs the trial evidence.\n- First point.\n- Second   point.\n\nThe lag is uncertain.",
@@ -377,6 +396,11 @@ describe("historical reports (no presentation field) render exactly as before", 
       degraded: false,
     };
   }
+
+  it("presenters: every block of a legacy report is the stored text, source legacy, unlabelled", () => {
+    const r = legacyReport();
+    expect(presentExecutiveSummary(r)).toEqual([{ source: "legacy", label: null, text: r.executiveSummary }]);
+  });
 
   it("view: stored text, unlabelled, no attribution blocks; near-duplicate agree lines still merged", () => {
     const html = viewHtml(legacyReport(), []);
