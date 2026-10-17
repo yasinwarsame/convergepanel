@@ -301,3 +301,18 @@ describe("ListView — failed model fixture", () => {
     expect(html).toContain("Schema validation failed");
   });
 });
+
+describe("ListView — limited coverage count (Consensus Integrity)", () => {
+  function header(claims: AlignedClaim[]) {
+    return renderToStaticMarkup(createElement(ListView, { schema, results, alignedClaims: claims, gate, synthesisReport, trustSummary }));
+  }
+
+  it("the run header counts limited_coverage rows when there are any", () => {
+    const limited: AlignedClaim = { ...alignedClaims[0], id: "limited-row", status: "limited_coverage" };
+    expect(header([...alignedClaims, limited])).toContain("1 limited coverage");
+  });
+
+  it("says nothing about limited coverage when there are none (historical runs unchanged)", () => {
+    expect(header(alignedClaims)).not.toContain("limited coverage");
+  });
+});

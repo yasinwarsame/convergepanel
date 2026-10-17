@@ -98,13 +98,13 @@ describe("buildAdaptiveVerdictCard", () => {
     expect(card.keyDisagreement).toBeNull();
   });
 
-  it("falls back to the top split claim (not a neutral message) when there are claims but no consensus/majority among them", () => {
-    // coreFindingClaim's pool falls back to ALL rows when none are consensus/majority —
-    // this mirrors legacy behavior exactly (verdict.spec.ts's equivalent test only
-    // asserts the gate, not a "No consensus" placeholder, for this exact case).
+  it("never presents a split claim as top consensus when there is no consensus/majority (Consensus Integrity R1 F1; previously fell back to the split claim)", () => {
     const rows = [row("Split claim", "split", [cell("chatgpt", "disputes"), cell("claude", "agrees")])];
     const gate = computeAdaptiveGate(rows, 0.2, "generic");
     const card = buildAdaptiveVerdictCard("Q", rows, gate, []);
-    expect(card.topConsensus).toBe("Split claim");
+    expect(card.topConsensus).toBe("No consensus identified.");
+    expect(card.consensusModelCount).toBe(0);
+    // The split is still the key disagreement.
+    expect(card.keyDisagreement).toBe("Split claim");
   });
 });

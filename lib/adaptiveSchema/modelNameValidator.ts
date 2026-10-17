@@ -16,6 +16,7 @@
 
 import { ModelId } from "@/lib/types";
 import { getModelDisplayNameSafe } from "@/lib/panelModels";
+import { runModelFamilyName } from "@/lib/panel/runModelIdentity";
 
 /**
  * Matches common LLM-family name patterns that could plausibly appear as a
@@ -29,7 +30,11 @@ const MODEL_NAME_TOKEN_PATTERN =
 
 /** Returns every model-name-like token in `text` that isn't one of the run's actual display names. */
 export function findUnrecognizedModelNames(text: string, roster: ModelId[]): string[] {
-  const allowed = new Set(roster.map((id) => getModelDisplayNameSafe(id).toLowerCase()));
+  // A roster model may be named by its display name ("Perplexity Pro"), its family name ("Perplexity") or
+  // its ID ("perplexity") — the narrative prompt asks for IDs. Only names outside the roster are flagged.
+  const allowed = new Set(
+    roster.flatMap((id) => [getModelDisplayNameSafe(id), runModelFamilyName(id), id]).map((n) => n.toLowerCase())
+  );
   const matches = text.match(MODEL_NAME_TOKEN_PATTERN) || [];
   const unrecognized = new Set<string>();
   for (const match of matches) {

@@ -33,7 +33,7 @@ import {
   AggregatedComparisonAttribute,
   AggregatedComparisonCell,
   AggregatedComparisonSubject,
-  AlignedClaimStatus,
+  ComparisonAgreementStatus,
   ComparisonCell,
   ComparisonMatrixResult,
 } from "./types";
@@ -287,7 +287,7 @@ export function buildComparisonMatrixResult(
     const modelValuePairs = Array.from(valuesByModel.entries());
     const coverageCount = modelValuePairs.length;
 
-    let agreement: AlignedClaimStatus;
+    let agreement: ComparisonAgreementStatus;
     let consensusValue: string | undefined;
 
     if (coverageCount === 1) {

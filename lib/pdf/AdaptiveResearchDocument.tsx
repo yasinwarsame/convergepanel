@@ -32,6 +32,7 @@ import { exportModelIdentityLabel, exportRunProvenanceLines, readFrozenRunProven
 import { CONSENSUS_LABELS, SOURCE_GROUNDING_LABELS } from "@/lib/adaptiveSchema/reportSummary";
 import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
 import { FieldSpec } from "@/lib/adaptiveSchema/types";
+import { presentVerdictCaveat, presentVerdictClaim } from "@/lib/adaptiveSchema/agreementNarrative";
 import {
   fieldLabel,
   formatExportTimestamp as formatTimestamp,
@@ -595,24 +596,47 @@ function FieldValuePdf({ field, value, closing = 0 }: { field: FieldSpec; value:
  * content before it, so it is kept with its own text. The LAST text present
  * carries the card's closing padding.
  */
-function VerdictCardBody({ verdictCard }: { verdictCard: { topConsensus: string; keyDisagreement?: string | null; disagreementDetail?: string | null; caveat?: string | null } }) {
+function VerdictCardBody({
+  verdictCard,
+}: {
+  verdictCard: {
+    topConsensus: string;
+    topConsensusContested?: string;
+    topConsensusAgreement?: string;
+    keyDisagreement?: string | null;
+    keyDisagreementAgreement?: string;
+    disagreementDetail?: string | null;
+    caveat?: string | null;
+    caveatSource?: "model_bias_check";
+  };
+}) {
+  // Consensus Integrity: the computed status (R4-1) and the canonical contested note (verdictCard.ts) as further
+  // lines of the same text — so a report without them (every one persisted before they existed) composes exactly
+  // the same element tree as before.
+  const top = presentVerdictClaim(verdictCard.topConsensus, verdictCard.topConsensusAgreement);
+  const agreementText = [top.claim, top.result, verdictCard.topConsensusContested ? `Contested: ${verdictCard.topConsensusContested}` : null]
+    .filter(Boolean)
+    .join("\n");
+  const split = verdictCard.keyDisagreement ? presentVerdictClaim(verdictCard.keyDisagreement, verdictCard.keyDisagreementAgreement) : null;
+  const disagreementText = split ? [split.claim, split.result].filter(Boolean).join("\n") : null;
+  const caveat = presentVerdictCaveat({ caveat: verdictCard.caveat ?? null, caveatSource: verdictCard.caveatSource });
   const showDisagreement = Boolean(verdictCard.keyDisagreement);
   const showDetail = showDisagreement && Boolean(verdictCard.disagreementDetail);
-  const showCaveat = Boolean(verdictCard.caveat);
+  const showCaveat = Boolean(caveat);
   const last = showCaveat ? "caveat" : showDetail ? "detail" : showDisagreement ? "disagreement" : "consensus";
   const end = <T extends object>(which: string, style: T) => textProps(style, which === last ? CARD_CLOSING_PADDING : 0);
   return (
     <>
       <Text style={pdfStyles.subLabel}>Agreement</Text>
-      <Text {...end("consensus", pdfStyles.bodyText)}>{verdictCard.topConsensus}</Text>
+      <Text {...end("consensus", pdfStyles.bodyText)}>{agreementText}</Text>
       {showDisagreement && (
         <Text style={pdfStyles.subLabelAfterContent} wrap={false} minPresenceAhead={SUB_LABEL_PRESENCE_AHEAD}>
           Disagreement
         </Text>
       )}
-      {showDisagreement && <Text {...end("disagreement", pdfStyles.bodyText)}>{verdictCard.keyDisagreement}</Text>}
+      {showDisagreement && <Text {...end("disagreement", pdfStyles.bodyText)}>{disagreementText}</Text>}
       {showDetail && <Text {...end("detail", pdfStyles.mutedText)}>{verdictCard.disagreementDetail}</Text>}
-      {showCaveat && <Text {...end("caveat", { ...pdfStyles.mutedText, marginTop: 6, color: COLORS.warning })}>{verdictCard.caveat}</Text>}
+      {showCaveat && <Text {...end("caveat", { ...pdfStyles.mutedText, marginTop: 6, color: COLORS.warning })}>{caveat}</Text>}
     </>
   );
 }

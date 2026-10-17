@@ -43,6 +43,7 @@ import { exportModelIdentityLabel, exportRunProvenanceLines, readFrozenRunProven
 import { CONSENSUS_LABELS, SOURCE_GROUNDING_LABELS } from "@/lib/adaptiveSchema/reportSummary";
 import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
 import { FieldSpec } from "@/lib/adaptiveSchema/types";
+import { presentVerdictCaveat, presentVerdictClaim } from "@/lib/adaptiveSchema/agreementNarrative";
 import {
   fieldLabel,
   formatExportTimestamp,
@@ -291,13 +292,22 @@ function legacySection(record: AdaptiveResearchExportV1): (Paragraph | Table)[] 
   if (synthesis) {
     out.push(heading("Panel conclusion"), body(synthesis.unifiedAnswer));
     out.push(heading("Where models agree / disagree"));
-    out.push(muted("Agreement"), body(synthesis.verdictCard.topConsensus));
-    if (synthesis.verdictCard.keyDisagreement) {
-      out.push(muted("Disagreement"), body(synthesis.verdictCard.keyDisagreement));
-      if (synthesis.verdictCard.disagreementDetail) out.push(muted(synthesis.verdictCard.disagreementDetail));
+    // Consensus Integrity: the quoted claim with its computed status (R4-1), and the canonical contested note
+    // (verdictCard.ts). Each is absent on reports persisted before it existed, which export exactly as before.
+    const card = synthesis.verdictCard;
+    const top = presentVerdictClaim(card.topConsensus, card.topConsensusAgreement);
+    out.push(muted("Agreement"), body(top.claim));
+    if (top.result) out.push(muted(top.result));
+    if (card.topConsensusContested) out.push(muted(`Contested: ${card.topConsensusContested}`));
+    if (card.keyDisagreement) {
+      const split = presentVerdictClaim(card.keyDisagreement, card.keyDisagreementAgreement);
+      out.push(muted("Disagreement"), body(split.claim));
+      if (split.result) out.push(muted(split.result));
+      if (card.disagreementDetail) out.push(muted(card.disagreementDetail));
     }
-    if (synthesis.verdictCard.caveat) {
-      out.push(new Paragraph({ children: [new TextRun({ text: synthesis.verdictCard.caveat, color: COLOR.warning, size: 18 })], spacing: { after: 80 } }));
+    const caveat = presentVerdictCaveat(card);
+    if (caveat) {
+      out.push(new Paragraph({ children: [new TextRun({ text: caveat, color: COLOR.warning, size: 18 })], spacing: { after: 80 } }));
     }
   } else {
     // creative_generative and any schema with alignedClaims=[] — Part 8:

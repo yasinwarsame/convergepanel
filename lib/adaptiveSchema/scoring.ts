@@ -13,7 +13,7 @@
 
 import "server-only";
 import { AlignedClaim, AlignedClaimCell, QueryType } from "./types";
-import { CERTAINTY_WEIGHTS, STATED_CONFIDENCE_SCORE } from "./config";
+import { CERTAINTY_WEIGHTS, cellConfidenceCertaintyScore } from "./config";
 import { rowEvidenceTierWeight } from "./agreementComparators";
 
 function rowCoverage(row: AlignedClaim, totalModels: number): number {
@@ -24,7 +24,7 @@ function rowCoverage(row: AlignedClaim, totalModels: number): number {
 function rowStatedConfidence(row: AlignedClaim): number {
   const cells = row.cells.filter((c): c is AlignedClaimCell => !!c);
   if (cells.length === 0) return 0;
-  const sum = cells.reduce((acc, c) => acc + STATED_CONFIDENCE_SCORE[c.confidence], 0);
+  const sum = cells.reduce((acc, c) => acc + cellConfidenceCertaintyScore(c.confidence), 0);
   return sum / cells.length;
 }
 
