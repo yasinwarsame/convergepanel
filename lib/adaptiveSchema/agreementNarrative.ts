@@ -18,7 +18,7 @@
  * Pure and client-safe: no "server-only", no I/O.
  */
 
-import { ALIGNED_CLAIM_STATUSES, AlignedClaim, AlignedClaimStatus } from "./types";
+import { ALIGNED_CLAIM_STATUSES, AdaptiveVerdictCard, AlignedClaim, AlignedClaimStatus } from "./types";
 import { CONSENSUS_STATUS_RANK, assessedPositionCount, describeContested, isTopConsensusEligible } from "./consensusIntegrity";
 
 /** The canonical no-core-finding text (panel verdict, verdict card, panel agreement statement). */
@@ -68,23 +68,30 @@ export function rowAgreementFacts(row: AlignedClaim, dispatchedPanelSize: number
   };
 }
 
+const disputeVerb = (n: number) => (n === 1 ? "disputes" : "dispute");
+
 export const ROW_AGREEMENT_WORDING: Readonly<Record<AlignedClaimStatus, (f: RowAgreementFacts) => string>> = {
   consensus: (f) =>
     f.supporting === f.dispatched
       ? `consensus: all ${f.dispatched} dispatched models support it`
       : `consensus: ${f.supporting} of ${f.dispatched} dispatched models support it`,
   majority: (f) =>
-    `majority: ${f.supporting} of ${f.dispatched} dispatched models support it${f.disputing > 0 ? `, ${f.disputing} dispute it` : ""}`,
+    `majority: ${f.supporting} of ${f.dispatched} dispatched models support it${f.disputing > 0 ? `, ${f.disputing} ${disputeVerb(f.disputing)} it` : ""}`,
   limited_coverage: (f) => `limited coverage: only ${f.assessed} of ${f.dispatched} dispatched models took a position — too few to count as agreement`,
-  split: (f) => `split: ${f.supporting} of ${f.dispatched} dispatched models support it and ${f.disputing} dispute it`,
+  split: (f) => `split: ${f.supporting} of ${f.dispatched} dispatched models support it and ${f.disputing} ${disputeVerb(f.disputing)} it`,
   single_source: (f) => `single source: only ${f.listed} of ${f.dispatched} dispatched models raised it — not panel agreement`,
 };
 
-/** The authoritative agreement statement for one row, e.g. "majority: 3 of 5 dispatched models support it, 1 disputes it". */
-export function renderRowAgreement(f: RowAgreementFacts): string {
-  const base = isKnownStatus(f.status)
+/** The row's status statement alone, e.g. "majority: 3 of 5 dispatched models support it, 1 disputes it". */
+export function renderRowStatus(f: RowAgreementFacts): string {
+  return isKnownStatus(f.status)
     ? ROW_AGREEMENT_WORDING[f.status](f)
     : `unrecognised status "${f.status}" — not presented as agreement`;
+}
+
+/** The authoritative agreement statement for one row: its status statement plus the canonical contested note. */
+export function renderRowAgreement(f: RowAgreementFacts): string {
+  const base = renderRowStatus(f);
   return f.contestedNote ? `${base}; ${f.contestedNote}` : base;
 }
 
@@ -140,4 +147,38 @@ export function renderPanelAgreement(f: PanelAgreementFacts): string {
   if (f.unrecognised > 0) parts.push(`an unrecognised status on ${f.unrecognised} (not counted as agreement)`);
   const statement = `Of ${f.claims} scored claim${f.claims === 1 ? "" : "s"} across ${f.dispatched} dispatched model${f.dispatched === 1 ? "" : "s"}: ${parts.join("; ")}.`;
   return f.eligible === 0 ? `${NO_CONSENSUS_IDENTIFIED} ${statement}` : statement;
+}
+
+// ─── Claim text and model commentary in deterministic surfaces (R4-1) ────
+
+/**
+ * A row's claimText is model-written (the clusterer's canonicalText, or a
+ * model's own claim): data the panel was asked about, never the panel's
+ * conclusion. Wherever deterministic text embeds it, it is quoted, so a claim
+ * that itself says "all models agree" reads as a quoted claim beside the
+ * computed status. The text is shown verbatim — never rewritten.
+ */
+export function quoteClaim(claimText: string): string {
+  return `“${claimText}”`;
+}
+
+export const CLAIM_LABEL = "Claim";
+export const PANEL_RESULT_LABEL = "Panel result";
+/** How the verdict card's caveat is labelled when it came from the bias-detection model call. */
+export const MODEL_CAVEAT_LABEL = "Model-flagged (bias check, not a verified finding)";
+
+/**
+ * The verdict card's claim + computed status, as every renderer shows them.
+ * Cards persisted before topConsensusAgreement / keyDisagreementAgreement
+ * existed return the stored text alone, exactly as they always rendered.
+ */
+export function presentVerdictClaim(claim: string, agreement: string | undefined): { claim: string; result: string | null } {
+  if (!agreement) return { claim, result: null };
+  return { claim: `${CLAIM_LABEL}: ${quoteClaim(claim)}`, result: `${PANEL_RESULT_LABEL}: ${agreement}` };
+}
+
+/** The verdict card's caveat as every renderer shows it; a card persisted before caveatSource existed returns the stored text alone. */
+export function presentVerdictCaveat(card: Pick<AdaptiveVerdictCard, "caveat" | "caveatSource">): string | null {
+  if (!card.caveat) return null;
+  return card.caveatSource === "model_bias_check" ? `${MODEL_CAVEAT_LABEL}: ${card.caveat}` : card.caveat;
 }

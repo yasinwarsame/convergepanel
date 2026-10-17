@@ -49,11 +49,22 @@ describe("renderRowAgreement — exact wording per status", () => {
 
   it("majority, with and without dissent — never unanimity", () => {
     expect(say(row("majority", ["agrees", "agrees", "agrees", "disputes", null]))).toBe(
-      "majority: 3 of 5 dispatched models support it, 1 dispute it"
+      "majority: 3 of 5 dispatched models support it, 1 disputes it"
     );
     const allFive = say(row("majority", ["agrees", "partial", "partial", "agrees", "partial"]));
     expect(allFive).toBe("majority: 5 of 5 dispatched models support it");
     expect(allFive).not.toMatch(/\ball\b|unanim/);
+  });
+
+  it.each([
+    ["majority, 0 disputing", "majority", ["agrees", "agrees", "agrees", null, null], "majority: 3 of 5 dispatched models support it"],
+    ["majority, 1 disputing", "majority", ["agrees", "agrees", "agrees", "disputes", null], "majority: 3 of 5 dispatched models support it, 1 disputes it"],
+    ["majority, 2 disputing", "majority", ["agrees", "agrees", "agrees", "disputes", "disputes"], "majority: 3 of 5 dispatched models support it, 2 dispute it"],
+    ["split, 0 disputing", "split", ["agrees", "unclear", "unclear", null, null], "split: 1 of 5 dispatched models support it and 0 dispute it"],
+    ["split, 1 disputing", "split", ["agrees", "disputes", null, null, null], "split: 1 of 5 dispatched models support it and 1 disputes it"],
+    ["split, 3 disputing", "split", ["agrees", "disputes", "disputes", "agrees", "disputes"], "split: 2 of 5 dispatched models support it and 3 dispute it"],
+  ])("verb agreement (R4-5): %s", (_name, status, stances, expected) => {
+    expect(say(row(status as string, stances as (AlignedClaimCell["stance"] | null)[]))).toBe(expected);
   });
 
   it("limited coverage names the assessed denominator", () => {

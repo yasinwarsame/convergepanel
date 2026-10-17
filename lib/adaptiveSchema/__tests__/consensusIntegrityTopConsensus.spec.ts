@@ -130,7 +130,7 @@ describe("F1: top-consensus eligibility contract", () => {
         SPLIT(),
       ];
       expect(surfaces(rows).core!.claimText).toBe("M4");
-      expect(surfaces(rows).verdict.summary).toMatch(/^4\/5 models converge on M4;/);
+      expect(surfaces(rows).verdict.summary).toMatch(/^4\/5 models converge on “M4”;/);
     });
   });
 });

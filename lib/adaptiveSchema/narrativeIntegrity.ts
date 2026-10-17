@@ -147,9 +147,42 @@ export function isAgreementBearing(sentence: string, field: NarrativeField): boo
   return false;
 }
 
-/** `text` with every agreement-bearing sentence removed (fail closed); "" when nothing remains. */
-export function withoutAgreementClaims(text: string, field: NarrativeField): string {
-  return splitSentences(text)
+/** A list marker or heading marker at the start of a line ("- ", "* ", "• ", "1. ", "2) ", "## "). */
+const LINE_MARKER = /^(\s*(?:[-*•]|\d+[.)]|#{1,6})\s+)/;
+
+/** One line with its agreement-bearing sentences removed, keeping its list/heading marker; "" when nothing remains. */
+function filterLine(line: string, field: NarrativeField): string {
+  const marker = LINE_MARKER.exec(line)?.[1] ?? "";
+  const kept = splitSentences(line.slice(marker.length))
     .filter((s) => !isAgreementBearing(s, field))
     .join(" ");
+  return kept ? `${marker}${kept}` : "";
+}
+
+/**
+ * `text` with every agreement-bearing sentence removed (fail closed); "" when
+ * nothing remains. Layout is kept (R4-2): sentences are filtered within each
+ * line, so paragraph breaks, single line breaks, list items and headings stay
+ * where they were, with their original newline characters (LF or CRLF). A line
+ * left empty is dropped together with the line break before it, and a
+ * paragraph left empty together with the blank-line separator before it, so
+ * no empty paragraph or stray blank line is introduced and no two paragraphs
+ * are joined.
+ */
+export function withoutAgreementClaims(text: string, field: NarrativeField): string {
+  // Paragraphs and the blank-line runs between them, in order (separators at odd indices).
+  const parts = text.split(/(\r?\n[ \t]*\r?\n(?:[ \t]*\r?\n)*)/);
+  let out = "";
+  for (let i = 0; i < parts.length; i += 2) {
+    const lines = parts[i].split(/(\r?\n)/);
+    let paragraph = "";
+    for (let j = 0; j < lines.length; j += 2) {
+      const kept = filterLine(lines[j], field);
+      if (!kept) continue;
+      paragraph += paragraph ? `${lines[j - 1]}${kept}` : kept;
+    }
+    if (!paragraph) continue;
+    out += out ? `${parts[i - 1]}${paragraph}` : paragraph;
+  }
+  return out;
 }

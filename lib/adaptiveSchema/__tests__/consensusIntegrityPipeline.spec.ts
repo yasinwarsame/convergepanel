@@ -93,10 +93,10 @@ describe("polarization pattern (P1-A)", () => {
 
     const report = out.synthesisReport!;
     expect(report.unifiedAnswer).toBe(
-      "Political polarization has increased over the last decade. (ChatGPT, Claude, Grok, Gemini; all 5 models that listed this claim mark it contested)."
+      "“Political polarization has increased over the last decade.” (ChatGPT, Claude, Grok, Gemini; all 5 models that listed this claim mark it contested)."
     );
     expect(report.whereModelsAgree).toEqual([
-      "Political polarization has increased over the last decade. — all 5 models that listed this claim mark it contested",
+      "“Political polarization has increased over the last decade.” — all 5 models that listed this claim mark it contested",
     ]);
     expect(report.verdictCard.topConsensusContested).toBe("all 5 models that listed this claim mark it contested");
   });
@@ -108,7 +108,7 @@ describe("polarization pattern (P1-A)", () => {
     const [row] = out.alignedClaims!;
     expect(row.status).toBe("consensus");
     expect(row.contested).toEqual({ marked: false, assessed: false, markedCount: 0, listedCount: 3 });
-    expect(out.synthesisReport!.unifiedAnswer).toBe("Emissions fell. (ChatGPT, Claude, Grok).");
+    expect(out.synthesisReport!.unifiedAnswer).toBe("“Emissions fell.” (ChatGPT, Claude, Grok).");
     expect("topConsensusContested" in out.synthesisReport!.verdictCard).toBe(false);
   });
 });
@@ -145,7 +145,7 @@ describe("coverage is measured against the DISPATCHED panel, failed models inclu
     ];
     const out = await finalizeAdaptiveRun(SCHEMA_REGISTRY.contested_empirical, results, "Q");
     expect(out.alignedClaims![0].status).toBe("consensus");
-    expect(out.synthesisReport!.whereModelsAgree).toEqual(["A shared claim."]);
+    expect(out.synthesisReport!.whereModelsAgree).toEqual(["“A shared claim.”"]);
   });
 
   it("the limited relabel does not move certainty or the gate: same certainty as the identical 2-of-5 consensus row", async () => {

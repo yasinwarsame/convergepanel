@@ -39,7 +39,7 @@ import { computeRunCertainty } from "./scoring";
 import { computeAdaptiveGate } from "./gate";
 import { buildAdaptiveVerdict, buildAdaptiveUnifiedAnswer } from "./verdict";
 import { describeContested } from "./consensusIntegrity";
-import { panelAgreementFacts, renderPanelAgreement, renderRowAgreement, rowAgreementFacts } from "./agreementNarrative";
+import { panelAgreementFacts, quoteClaim, renderPanelAgreement, renderRowAgreement, rowAgreementFacts } from "./agreementNarrative";
 import { NarrativeField, isAgreementBearing, withoutAgreementClaims } from "./narrativeIntegrity";
 import { buildAdaptiveVerdictCard } from "./verdictCard";
 import { detectAdaptiveBiases } from "./biasDetection";
@@ -62,11 +62,11 @@ const SCHEMA_NARRATIVE_HINTS: Record<QueryType, string> = {
     "Lead with the metrics: which values are tightly grounded and which are outliers, and what drives the difference.",
   factual_lookup: "Keep the entire synthesis to one tight paragraph — this is a factual lookup, not an essay.",
   procedural:
-    "Describe the step sequence at a high level and call out any point where models diverge on ordering or flatly contradict a step.",
+    "Describe the step sequence at a high level, explain the evidence for any step whose ordering or necessity is uncertain, and name the model when a step comes from one model's response.",
   medical_health:
-    "Organize the narrative by evidence tier, strongest evidence first (RCT/authoritative before observational before anecdotal), and flag any tier-based disagreement explicitly.",
+    "Organize the narrative by evidence tier, strongest evidence first (RCT/authoritative before observational before anecdotal), and explain where the evidence at a tier is weak, conflicting or missing.",
   forecast_speculative:
-    "Describe the scenario spread: where probability estimates cluster and where they diverge sharply.",
+    "Describe the scenarios and the drivers and evidence behind each, what is most uncertain, and which model a given estimate comes from.",
   creative_generative:
     "This is creative output, not a factual comparison — skip agreement/disagreement framing and briefly note stylistic differences instead.",
   generic: "Standard synthesis narrative, no special framing required.",
@@ -122,16 +122,16 @@ function buildTemplateExecutiveSummary(unifiedAnswer: string, panelAgreement: st
   return panelAgreement ? `${unifiedAnswer} ${panelAgreement}` : unifiedAnswer;
 }
 
-/** Model prose followed by the authoritative statement; when no model sentence survives, the template text. */
+/** Model prose, then the authoritative statement as its own paragraph; when no model sentence survives, the template text. */
 function withAuthoritativeStatement(prose: string, statement: string, fallback: string): string {
   if (!prose) return fallback;
-  return statement ? `${prose} ${statement}` : prose;
+  return statement ? `${prose}\n\n${statement}` : prose;
 }
 
-/** A "Where models agree" line: the claim, plus the canonical contested note when the models marked it contested. */
+/** A "Where models agree" line: the quoted (model-written) claim, plus the canonical contested note when the models marked it contested. */
 function whereModelsAgreeLine(row: AlignedClaim): string {
   const contested = describeContested(row);
-  return contested ? `${row.claimText} — ${contested}` : row.claimText;
+  return contested ? `${quoteClaim(row.claimText)} — ${contested}` : quoteClaim(row.claimText);
 }
 
 /** One scored row as the narrative prompt sees it: status and the authoritative agreement statement, as structured facts. */
@@ -314,7 +314,7 @@ export async function buildAdaptiveSynthesisReport(
   const coverageGaps = await auditPanelCoverage(question, schemaId, rows.map((r) => r.claimText));
   const diagnostics = computeAdaptiveDiagnostics(rows);
 
-  const verdictCard = buildAdaptiveVerdictCard(question, rows, gate, bias);
+  const verdictCard = buildAdaptiveVerdictCard(question, rows, gate, bias, totalModelCount);
 
   const templateDisagreements: AdaptiveDisagreement[] = deterministicDisagreements.map((d) => ({
     ...d,

@@ -4,7 +4,10 @@
  * Deterministic, code-enforced — no model call, same rationale as verdict.ts:
  * question restated, top consensus claim, top disagreement, a caveat drawn
  * from the top bias/blind-spot finding, and gate-dependent recommended next
- * steps (VERDICT_NEXT_STEPS in config.ts). Mirrors the legacy
+ * steps (VERDICT_NEXT_STEPS in config.ts). Selection and counts are computed
+ * here; the claim texts and the caveat are model-written (clusterer, bias
+ * call), so the card also carries each claim's computed status and marks the
+ * caveat's source (R4-1) — renderers show them through agreementNarrative.ts. Mirrors the legacy
  * PanelVerdictCard's fields (lib/verificationGate/panelVerdict.ts) but reads
  * AlignedClaim rows instead of StructuredSynthesis — same "separate, parallel
  * implementation" rationale as gate.ts/verdict.ts.
@@ -16,16 +19,24 @@ import { AdaptiveGateResult } from "./gate";
 import { VERDICT_NEXT_STEPS } from "./config";
 import { NO_CONSENSUS_IDENTIFIED, coreFindingClaim, topSplitClaim } from "./verdict";
 import { describeContested } from "./consensusIntegrity";
+import { renderRowStatus, rowAgreementFacts } from "./agreementNarrative";
 
 export function buildAdaptiveVerdictCard(
   question: string,
   rows: AlignedClaim[],
   gate: AdaptiveGateResult,
-  bias: AdaptiveBiasFinding[]
+  bias: AdaptiveBiasFinding[],
+  /** Every dispatched model (the D3 denominator); when given, the card carries each claim's computed status. */
+  dispatchedPanelSize?: number
 ): AdaptiveVerdictCard {
   const consensus = coreFindingClaim(rows);
   const split = topSplitClaim(rows);
   const topConsensusContested = consensus ? describeContested(consensus) : null;
+  const status = (row: AlignedClaim | null) =>
+    row && dispatchedPanelSize !== undefined ? renderRowStatus(rowAgreementFacts(row, dispatchedPanelSize)) : null;
+  const topConsensusAgreement = status(consensus);
+  const keyDisagreementAgreement = status(split);
+  const caveat = bias[0]?.description ?? null;
 
   return {
     question,
@@ -34,14 +45,17 @@ export function buildAdaptiveVerdictCard(
       ? consensus.cells.filter((c) => c && (c.stance === "agrees" || c.stance === "partial")).length
       : 0,
     ...(topConsensusContested ? { topConsensusContested } : {}),
+    ...(topConsensusAgreement ? { topConsensusAgreement } : {}),
     keyDisagreement: split?.claimText ?? null,
+    ...(keyDisagreementAgreement ? { keyDisagreementAgreement } : {}),
     disagreementDetail: split
       ? split.disagreementType
         ? `Flagged as ${split.disagreementType.replace(/_/g, " ")}.`
         : "Models take different positions — see the disagreement card below for each model's stance."
       : null,
     disagreementModelCount: split ? split.cells.filter(Boolean).length : 0,
-    caveat: bias[0]?.description ?? null,
+    caveat,
+    ...(caveat ? { caveatSource: "model_bias_check" as const } : {}),
     recommendedNextSteps: VERDICT_NEXT_STEPS[gate.status].slice(0, 3),
   };
 }

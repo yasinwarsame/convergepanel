@@ -1363,11 +1363,21 @@ export interface AdaptiveVerdictCard {
   consensusModelCount: number;
   /** Canonical contested note for topConsensus (describeContested, consensusIntegrity.ts), e.g. "all mark the underlying claim contested". Absent when not contested, and on reports persisted before it existed. */
   topConsensusContested?: string;
+  /**
+   * The computed status of the topConsensus row (renderRowStatus, agreementNarrative.ts), e.g.
+   * "majority: 4 of 5 dispatched models support it". topConsensus itself is model-written claim text;
+   * this is the panel's result. Absent with no core finding, and on reports persisted before it existed.
+   */
+  topConsensusAgreement?: string;
   keyDisagreement: string | null;
+  /** The computed status of the keyDisagreement row, as topConsensusAgreement. */
+  keyDisagreementAgreement?: string;
   disagreementDetail: string | null;
   disagreementModelCount: number;
   /** Top bias/blind spot description, one sentence; null if none were confidently attributable. */
   caveat: string | null;
+  /** Where caveat came from: "model_bias_check" — the bias-detection model's description, not a computed finding. Absent with no caveat, and on reports persisted before it existed. */
+  caveatSource?: "model_bias_check";
   /** Gate-dependent guidance, max 3 — see VERDICT_NEXT_STEPS in config.ts. */
   recommendedNextSteps: string[];
 }

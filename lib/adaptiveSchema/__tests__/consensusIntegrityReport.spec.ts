@@ -96,13 +96,13 @@ describe("Unified Answer", () => {
   it("appends the canonical contested note to a contested consensus claim", () => {
     const rows = [contestedConsensusRow()];
     expect(buildAdaptiveUnifiedAnswer(rows, passGate(rows))).toBe(
-      "Polarization has increased (ChatGPT, Claude, Grok, Perplexity, Gemini; all 5 models that listed this claim mark it contested)."
+      "“Polarization has increased” (ChatGPT, Claude, Grok, Perplexity, Gemini; all 5 models that listed this claim mark it contested)."
     );
   });
 
   it("is unchanged for an uncontested claim", () => {
     const rows = [row("Carbon pricing works", "consensus", [cell("chatgpt"), cell("claude"), cell("grok")])];
-    expect(buildAdaptiveUnifiedAnswer(rows, passGate(rows))).toBe("Carbon pricing works (ChatGPT, Claude, Grok).");
+    expect(buildAdaptiveUnifiedAnswer(rows, passGate(rows))).toBe("“Carbon pricing works” (ChatGPT, Claude, Grok).");
   });
 
   it("never states a limited_coverage claim", () => {
@@ -158,7 +158,7 @@ describe("synthesis report: template (degraded) path", () => {
   it("limited rows are counted separately and never listed as agreement", async () => {
     const rows = [row("Broad claim", "consensus", [cell("chatgpt"), cell("claude"), cell("grok")]), limitedRow()];
     const report = await buildAdaptiveSynthesisReport("Q", "generic", rows, results(FIVE));
-    expect(report.whereModelsAgree).toEqual(["Broad claim"]);
+    expect(report.whereModelsAgree).toEqual(["“Broad claim”"]);
     const statement =
       "Of 2 scored claims across 5 dispatched models: consensus on 1; limited coverage on 1 (half or fewer of the dispatched models took a position — too few to count as agreement).";
     expect(report.certaintyAssessment).toBe(`Run certainty 90% (gate: pass). ${statement}`);
@@ -174,7 +174,7 @@ describe("synthesis report: template (degraded) path", () => {
 
   it("a contested agree row's line carries the canonical note", async () => {
     const report = await buildAdaptiveSynthesisReport("Q", "contested_empirical", [contestedConsensusRow()], results(FIVE));
-    expect(report.whereModelsAgree).toEqual(["Polarization has increased — all 5 models that listed this claim mark it contested"]);
+    expect(report.whereModelsAgree).toEqual(["“Polarization has increased” — all 5 models that listed this claim mark it contested"]);
   });
 });
 
@@ -215,7 +215,7 @@ describe("synthesis report: a narrative that overstates agreement can't replace 
     const rows = [row("Broad claim", "consensus", [cell("chatgpt"), cell("claude"), cell("grok")]), limitedRow()];
     const report = await buildAdaptiveSynthesisReport("Q", "generic", rows, results(FIVE));
     expect(report.degraded).toBe(false);
-    expect(report.whereModelsAgree).toEqual(["Broad claim"]);
+    expect(report.whereModelsAgree).toEqual(["“Broad claim”"]);
   });
 
   it("agree sentences when there is no consensus/majority row at all → none", async () => {
@@ -227,13 +227,13 @@ describe("synthesis report: a narrative that overstates agreement can't replace 
   it("a contested agree row uses the deterministic line even when the narrative sentence is honest but omits the note", async () => {
     mockNarrative({ whereModelsAgreeNarrative: ["The models agree polarization has increased."] });
     const report = await buildAdaptiveSynthesisReport("Q", "contested_empirical", [contestedConsensusRow()], results(FIVE));
-    expect(report.whereModelsAgree).toEqual(["Polarization has increased — all 5 models that listed this claim mark it contested"]);
+    expect(report.whereModelsAgree).toEqual(["“Polarization has increased” — all 5 models that listed this claim mark it contested"]);
   });
 
   it("a contested agree row keeps the canonical note even when the narrative calls it settled", async () => {
     mockNarrative({ whereModelsAgreeNarrative: ["All models agree polarization has increased; this is settled."] });
     const report = await buildAdaptiveSynthesisReport("Q", "contested_empirical", [contestedConsensusRow()], results(FIVE));
-    expect(report.whereModelsAgree).toEqual(["Polarization has increased — all 5 models that listed this claim mark it contested"]);
+    expect(report.whereModelsAgree).toEqual(["“Polarization has increased” — all 5 models that listed this claim mark it contested"]);
   });
 
   it("even an accurate model agree sentence never replaces the deterministic lines (Option B)", async () => {
@@ -241,7 +241,7 @@ describe("synthesis report: a narrative that overstates agreement can't replace 
     const rows = [row("Broad claim", "consensus", [cell("chatgpt"), cell("claude"), cell("grok")]), limitedRow()];
     const report = await buildAdaptiveSynthesisReport("Q", "generic", rows, results(FIVE));
     expect(report.degraded).toBe(false);
-    expect(report.whereModelsAgree).toEqual(["Broad claim"]);
+    expect(report.whereModelsAgree).toEqual(["“Broad claim”"]);
   });
 
   it("the deterministic surfaces never take the narrative's word: unified answer, verdict, card, gate", async () => {

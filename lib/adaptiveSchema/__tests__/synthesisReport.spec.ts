@@ -91,7 +91,7 @@ describe("buildAdaptiveSynthesisReport", () => {
 
     expect(report.degraded).toBe(true);
     expect(report.unifiedAnswer).toContain("Consensus claim");
-    expect(report.whereModelsAgree).toContain("Consensus claim");
+    expect(report.whereModelsAgree).toContain("“Consensus claim”");
     // Never a blank executive summary, even in the degraded template path.
     expect(report.executiveSummary).toBeTruthy();
   });
@@ -114,7 +114,7 @@ describe("buildAdaptiveSynthesisReport", () => {
 
     expect(report.degraded).toBe(false);
     // Option B: the agreement lines are always the deterministic ones, never the model's.
-    expect(report.whereModelsAgree).toEqual(["Carbon pricing reduces emissions"]);
+    expect(report.whereModelsAgree).toEqual(["“Carbon pricing reduces emissions”"]);
     expect(report.narrativeSections).toEqual([{ title: "Metrics spread", body: "Values cluster tightly." }]);
     expect(report.executiveSummary).toContain("Carbon pricing reduces emissions");
     // Deterministic fields still computed in code, not sourced from the mock response.

@@ -134,6 +134,22 @@ describe("withoutAgreementClaims", () => {
     expect(withoutAgreementClaims("", "panel_free")).toBe("");
   });
 
+  it.each([
+    ["multiple paragraphs, a sentence removed mid-paragraph", "A one. The models agree. A two.\n\nB para.", "A one. A two.\n\nB para."],
+    ["a whole paragraph removed — no empty paragraph left", "A para.\n\nThe panel agrees.\n\nC para.", "A para.\n\nC para."],
+    ["the first paragraph removed", "The models agree.\n\nOnly para.", "Only para."],
+    ["the last paragraph removed", "Only para.\n\nThe models agree.", "Only para."],
+    ["bullet list items", "- Item one.\n- The models agree.\n- Item three.", "- Item one.\n- Item three."],
+    ["numbered list items", "1. Step one.\n2) Most models converge here.\n3. Step three.", "1. Step one.\n3. Step three."],
+    ["a heading kept above its paragraph", "## Evidence\nLine one. The panel agrees.\n\nNext.", "## Evidence\nLine one.\n\nNext."],
+    ["an agreement-bearing heading removed with its line", "## The panel agrees\nLine one.", "Line one."],
+    ["CRLF kept", "Line one.\r\nThe panel agrees.\r\n\r\nNext para.", "Line one.\r\n\r\nNext para."],
+    ["blank-line runs kept as they were", "First.\n\n\nSecond.", "First.\n\n\nSecond."],
+    ["single line breaks kept", "Line one.\nLine two.", "Line one.\nLine two."],
+  ])("keeps layout (R4-2): %s", (_name, input, expected) => {
+    expect(withoutAgreementClaims(input, "panel_free")).toBe(expected);
+  });
+
   it("removes a whole sentence, never just the offending clause", () => {
     expect(withoutAgreementClaims("Wages rise, and the panel agrees prices follow.", "disagreement")).toBe("");
   });

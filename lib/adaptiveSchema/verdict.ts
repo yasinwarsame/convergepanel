@@ -18,7 +18,7 @@ import { AlignedClaim } from "./types";
 import { AdaptiveGateResult } from "./gate";
 import { claimSalience } from "./scoring";
 import { describeContested, isTopConsensusEligible } from "./consensusIntegrity";
-import { NO_CONSENSUS_IDENTIFIED } from "./agreementNarrative";
+import { NO_CONSENSUS_IDENTIFIED, quoteClaim } from "./agreementNarrative";
 
 /** The canonical no-core-finding text, shared by the panel verdict and the verdict card (defined in agreementNarrative.ts). */
 export { NO_CONSENSUS_IDENTIFIED };
@@ -76,7 +76,7 @@ export function buildAdaptiveVerdict(
 
   const certaintyPct = Math.round(gate.runCertainty * 100);
   const summary = core
-    ? `${convergingModelCount}/${totalModelCount} models converge on ${coreFinding}; certainty ${certaintyPct}%; gate: ${gate.status}.`
+    ? `${convergingModelCount}/${totalModelCount} models converge on ${quoteClaim(coreFinding)}; certainty ${certaintyPct}%; gate: ${gate.status}.`
     : `${NO_CONSENSUS_IDENTIFIED} Certainty ${certaintyPct}%; gate: ${gate.status}.`;
 
   return { summary, coreFinding, convergingModelCount, totalModelCount };
@@ -91,7 +91,7 @@ export function buildAdaptiveVerdict(
 export function buildAdaptiveUnifiedAnswer(rows: AlignedClaim[], gate: AdaptiveGateResult): string {
   if (gate.status === "fail") {
     const splitClaims = rows.filter((r) => r.status === "split").slice(0, 5);
-    const bullets = splitClaims.map((r) => `- ${r.claimText}`).join("\n");
+    const bullets = splitClaims.map((r) => `- ${quoteClaim(r.claimText)}`).join("\n");
     return [
       "Panel could not converge on a reliable answer.",
       bullets ? `\nUnresolved claims:\n${bullets}` : "",
@@ -120,7 +120,7 @@ export function buildAdaptiveUnifiedAnswer(rows: AlignedClaim[], gate: AdaptiveG
         .map((c) => modelLabel(c!.modelId));
       const names = supportingModels.length > 0 ? supportingModels.join(", ") : "the panel";
       const contested = describeContested(row);
-      return contested ? `${row.claimText} (${names}; ${contested}).` : `${row.claimText} (${names}).`;
+      return contested ? `${quoteClaim(row.claimText)} (${names}; ${contested}).` : `${quoteClaim(row.claimText)} (${names}).`;
     })
     .join(" ");
 }

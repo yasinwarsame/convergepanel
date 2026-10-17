@@ -32,6 +32,7 @@ import {
 import { TRUST_SCORE_CAP_REASON, TEXT_DEDUP_THRESHOLDS, WHERE_MODELS_AGREE_MAX_ITEMS, CITATION_COVERAGE_DANGER_THRESHOLD, BIAS_EMPTY_REASON_LABELS } from "@/lib/adaptiveSchema/config";
 import { dedupeTextList } from "@/lib/adaptiveSchema/textSimilarity";
 import { consensusStatusLabel, consensusStatusRank, describeContested } from "@/lib/adaptiveSchema/consensusIntegrity";
+import { presentVerdictCaveat, presentVerdictClaim } from "@/lib/adaptiveSchema/agreementNarrative";
 
 /** Canonical, ordered list of `data-section` values rendered below — the single source of truth the snapshot test asserts against, so a future edit can't silently drop a section without also updating this list. */
 export const ADAPTIVE_SYNTHESIS_SECTION_IDS = [
@@ -546,6 +547,10 @@ export function BiasBlindSpotsSection({
 /** Exported — see UnifiedAnswerCard's export doc above. */
 export function PanelVerdictCard({ report, gate }: { report: AdaptiveSynthesisReport; gate: AdaptiveGateResult }) {
   const v = report.verdictCard;
+  // R4-1: claim text is model-written; cards that carry the computed status show it beside the quoted claim.
+  const top = presentVerdictClaim(v.topConsensus, v.topConsensusAgreement);
+  const split = v.keyDisagreement ? presentVerdictClaim(v.keyDisagreement, v.keyDisagreementAgreement) : null;
+  const caveat = presentVerdictCaveat(v);
   return (
     <div className="relative rounded-xl border border-slate-200 bg-white p-6 overflow-hidden">
       <div className={`absolute left-0 top-0 h-1.5 w-full ${GATE_ACCENT[gate.status]}`} />
@@ -569,10 +574,11 @@ export function PanelVerdictCard({ report, gate }: { report: AdaptiveSynthesisRe
           <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">Top consensus</span>
           <p className="text-sm text-slate-800 mt-1">
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 mr-1.5" />
-            {v.topConsensus}
+            {top.claim}
             {v.consensusModelCount > 0 && (
               <span className="text-slate-500"> — agreed by {v.consensusModelCount} model{v.consensusModelCount === 1 ? "" : "s"}</span>
             )}
+            {top.result && <span className="block text-xs text-slate-600 mt-0.5">{top.result}</span>}
             {v.topConsensusContested && <span className="block text-xs text-amber-700 mt-0.5">Contested: {v.topConsensusContested}</span>}
           </p>
         </div>
@@ -581,7 +587,8 @@ export function PanelVerdictCard({ report, gate }: { report: AdaptiveSynthesisRe
           {v.keyDisagreement ? (
             <p className="text-sm text-slate-800 mt-1">
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-orange-500 mr-1.5" />
-              {v.keyDisagreement}
+              {split!.claim}
+              {split!.result && <span className="block text-xs text-slate-600 mt-0.5">{split!.result}</span>}
               {v.disagreementDetail && <span className="block text-slate-500 mt-0.5">{v.disagreementDetail}</span>}
             </p>
           ) : (
@@ -590,10 +597,10 @@ export function PanelVerdictCard({ report, gate }: { report: AdaptiveSynthesisRe
         </div>
       </div>
 
-      {v.caveat && (
+      {caveat && (
         <div className="mb-4">
           <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">Caveat</span>
-          <p className="text-sm text-slate-700 mt-1">{v.caveat}</p>
+          <p className="text-sm text-slate-700 mt-1">{caveat}</p>
         </div>
       )}
 
