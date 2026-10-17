@@ -186,8 +186,13 @@ export function presentVerdictClaim(claim: string, agreement: string | undefined
   return { claim: `${CLAIM_LABEL}: ${quoteClaim(claim)}`, result: `${PANEL_RESULT_LABEL}: ${agreement}` };
 }
 
-/** The verdict card's caveat as every renderer shows it; a card persisted before caveatSource existed returns the stored text alone. */
+/**
+ * The verdict card's caveat as every renderer shows it. A caveat from the bias-detection call is model-written: it
+ * is labelled, and its line breaks — every one joinLines knows — are shown as spaces (R8-1), so a line break in it
+ * cannot start a separate line that reads like a panel result where a renderer honours breaks (the PDF). Display
+ * only: the stored caveat is unchanged. A card persisted before caveatSource existed returns the stored text alone.
+ */
 export function presentVerdictCaveat(card: Pick<AdaptiveVerdictCard, "caveat" | "caveatSource">): string | null {
   if (!card.caveat) return null;
-  return card.caveatSource === "model_bias_check" ? `${MODEL_CAVEAT_LABEL}: ${card.caveat}` : card.caveat;
+  return card.caveatSource === "model_bias_check" ? `${MODEL_CAVEAT_LABEL}: ${joinLines(card.caveat, "whitespace").trim()}` : card.caveat;
 }
