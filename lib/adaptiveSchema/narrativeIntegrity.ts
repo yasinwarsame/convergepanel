@@ -147,8 +147,8 @@ export function isAgreementBearing(sentence: string, field: NarrativeField): boo
   return false;
 }
 
-/** A list marker or heading marker at the start of a line ("- ", "* ", "• ", "1. ", "2) ", "## "). */
-const LINE_MARKER = /^(\s*(?:[-*•]|\d+[.)]|#{1,6})\s+)/;
+/** Leading indentation plus an optional list or heading marker ("- ", "* ", "• ", "1. ", "2) ", "## "), kept as written. */
+const LINE_MARKER = /^([ \t]*(?:(?:[-*•]|\d+[.)]|#{1,6})[ \t]+)?)/;
 
 /** One line with its agreement-bearing sentences removed, keeping its list/heading marker; "" when nothing remains. */
 function filterLine(line: string, field: NarrativeField): string {

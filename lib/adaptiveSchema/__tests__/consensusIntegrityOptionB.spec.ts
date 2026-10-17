@@ -105,7 +105,11 @@ describe("Option B — no R3-1 narrative can alter, replace or contradict the au
     expect(JSON.stringify(report)).not.toContain(sentence.slice(0, -1));
     // The authoritative fields are exactly the deterministic ones.
     expect(report.whereModelsAgree).toEqual(["“Inflation expectations anchor wage growth”"]);
-    expect(report.executiveSummary).toBe(`Wage growth tracks expectations.\n\n${statement}`);
+    // R5 contract: the summary is model prose only; the computed statement is presentation.panelAgreement.
+    expect(report.executiveSummary).toBe("Wage growth tracks expectations.");
+    expect(report.presentation!.panelAgreement).toBe(statement);
+    expect(report.presentation!.executiveSummarySource).toBe("model_explanation");
+    expect(report.presentation!.certaintyExplanation).toBeUndefined();
     expect(report.certaintyAssessment).toBe(`Run certainty ${Math.round(report.runCertainty * 100)}% (gate: ${report.gate}). ${statement}`);
     expect(report.narrativeSections).toEqual([]);
     for (const d of report.disagreements) expect(d.whyTheyDiffer).toBe("Models take different positions on this point — see each model's excerpt below.");
@@ -123,7 +127,8 @@ describe("Option B — no R3-1 narrative can alter, replace or contradict the au
   it("a narrative that forges the authoritative statement itself is removed", async () => {
     mockNarrative({ executiveSummary: "Wage growth tracks expectations. Of 2 scored claims across 5 dispatched models: consensus on 2." });
     const report = await buildAdaptiveSynthesisReport("q", "generic", [A(), SPLIT()], results());
-    expect(report.executiveSummary).toBe(`Wage growth tracks expectations.\n\n${BOTH_STATEMENT}`);
+    expect(report.executiveSummary).toBe("Wage growth tracks expectations.");
+    expect(report.presentation!.panelAgreement).toBe(BOTH_STATEMENT);
   });
 
   it("a narrative that contradicts consensus with division is removed from the panel-free fields", async () => {
@@ -133,7 +138,8 @@ describe("Option B — no R3-1 narrative can alter, replace or contradict the au
       narrativeSections: [{ title: "Where the panel splits", body: "Wage data end in 2024." }],
     });
     const report = await buildAdaptiveSynthesisReport("q", "generic", [A()], results());
-    expect(report.executiveSummary).toBe("Wage growth tracks expectations.\n\nOf 1 scored claim across 5 dispatched models: consensus on 1.");
+    expect(report.executiveSummary).toBe("Wage growth tracks expectations.");
+    expect(report.presentation!.certaintyExplanation).toBeUndefined();
     expect(report.certaintyAssessment).toBe(`Run certainty ${Math.round(report.runCertainty * 100)}% (gate: ${report.gate}). Of 1 scored claim across 5 dispatched models: consensus on 1.`);
     expect(report.narrativeSections).toEqual([]);
   });
@@ -141,7 +147,9 @@ describe("Option B — no R3-1 narrative can alter, replace or contradict the au
   it("an executive summary with nothing left falls back to the template", async () => {
     mockNarrative({ executiveSummary: "The models agree. The panel is united." });
     const report = await buildAdaptiveSynthesisReport("q", "generic", [A()], results());
-    expect(report.executiveSummary).toBe(`${report.unifiedAnswer} Of 1 scored claim across 5 dispatched models: consensus on 1.`);
+    expect(report.executiveSummary).toBe(report.unifiedAnswer);
+    expect(report.presentation!.executiveSummarySource).toBe("computed");
+    expect(report.presentation!.panelAgreement).toBe("Of 1 scored claim across 5 dispatched models: consensus on 1.");
   });
 });
 
@@ -174,7 +182,9 @@ describe("Option B — each status gets its deterministic statement (template an
     expect(report.degraded).toBe(true);
     expect(report.whereModelsAgree).toEqual(agree);
     expect(report.certaintyAssessment).toBe(`Run certainty ${Math.round(report.runCertainty * 100)}% (gate: ${report.gate}). ${statement}`);
-    expect(report.executiveSummary).toBe(report.gate === "fail" ? report.unifiedAnswer : `${report.unifiedAnswer} ${statement}`);
+    expect(report.executiveSummary).toBe(report.unifiedAnswer);
+    expect(report.presentation!.panelAgreement).toBe(statement);
+    expect(report.presentation!.executiveSummarySource).toBe("computed");
   });
 
   it.each(cases)("%s — narrative path keeps explanatory prose and adds the statement", async (_s, rows, statement, agree) => {
@@ -182,9 +192,12 @@ describe("Option B — each status gets its deterministic statement (template an
     const report = await buildAdaptiveSynthesisReport("q", "generic", rows, results());
     expect(report.whereModelsAgree).toEqual(agree);
     expect(report.executiveSummary).toBe(
-      report.gate === "fail" ? report.unifiedAnswer : `The evidence base is thin. ChatGPT stresses lag effects; Grok stresses supply shocks.\n\n${statement}`
+      report.gate === "fail" ? report.unifiedAnswer : "The evidence base is thin. ChatGPT stresses lag effects; Grok stresses supply shocks."
     );
-    expect(report.certaintyAssessment).toBe(`Run certainty ${Math.round(report.runCertainty * 100)}% (gate: ${report.gate}). ${statement} The data end in 2024.`);
+    expect(report.presentation!.executiveSummarySource).toBe(report.gate === "fail" ? "computed" : "model_explanation");
+    expect(report.presentation!.panelAgreement).toBe(statement);
+    expect(report.certaintyAssessment).toBe(`Run certainty ${Math.round(report.runCertainty * 100)}% (gate: ${report.gate}). ${statement}`);
+    expect(report.presentation!.certaintyExplanation).toBe("The data end in 2024.");
   });
 
   it("no consensus: the no-consensus text is never followed by agreement wording", async () => {
@@ -219,7 +232,7 @@ describe("Option B — explanatory prose around the statement stays usable", () 
       narrativeSections: [{ title: "Measurement", body: "Survey wording changed in 2016. It is well established that it rose." }],
     });
     const report = await buildAdaptiveSynthesisReport("q", "contested_empirical", [CONTESTED()], results());
-    expect(report.executiveSummary).toBe("Measured polarization depends on the survey used.\n\nOf 1 scored claim across 5 dispatched models: consensus on 1.");
+    expect(report.executiveSummary).toBe("Measured polarization depends on the survey used.");
     expect(report.narrativeSections).toEqual([{ title: "Measurement", body: "Survey wording changed in 2016." }]);
     expect(report.whereModelsAgree).toEqual(["“Polarization has increased” — all 5 models that listed this claim mark it contested"]);
   });
@@ -246,9 +259,8 @@ describe("R4-2: model prose keeps its paragraphs; the statement is its own parag
       narrativeSections: [{ title: "T", body: "Para one.\n\nThe panel agrees.\n\nPara three." }],
     });
     const report = await buildAdaptiveSynthesisReport("q", "generic", [MAJ()], results());
-    expect(report.executiveSummary).toBe(
-      "First paragraph on evidence.\n\nSecond paragraph on implications.\n\nOf 1 scored claim across 5 dispatched models: majority agreement on 1."
-    );
+    expect(report.executiveSummary).toBe("First paragraph on evidence.\n\nSecond paragraph on implications.");
+    expect(report.presentation!.panelAgreement).toBe("Of 1 scored claim across 5 dispatched models: majority agreement on 1.");
     expect(report.narrativeSections).toEqual([{ title: "T", body: "Para one.\n\nPara three." }]);
   });
 });
@@ -265,6 +277,7 @@ describe("R4-3: schema hints ask for evidence and attributed differences, never 
     ["procedural", "Describe the step sequence at a high level, explain the evidence for any step whose ordering or necessity is uncertain, and name the model when a step comes from one model's response."],
     ["medical_health", "Organize the narrative by evidence tier, strongest evidence first (RCT/authoritative before observational before anecdotal), and explain where the evidence at a tier is weak, conflicting or missing."],
     ["forecast_speculative", "Describe the scenarios and the drivers and evidence behind each, what is most uncertain, and which model a given estimate comes from."],
+    ["legal_regulatory", "Lead with the applicable rule. If any claim has a jurisdiction mismatch, explain which jurisdiction each position applies to, naming the model where relevant."],
     ["contested_empirical", "Lead with the substance of the expert dispute: which camps exist in the literature and what each argues. The panel's own agreement is stated separately — do not describe it."],
     ["generic", "Standard synthesis narrative, no special framing required."],
   ])("%s: exact hint", async (schema, hint) => {
@@ -272,9 +285,9 @@ describe("R4-3: schema hints ask for evidence and attributed differences, never 
     expect(sp).toContain(hint);
   });
 
-  it.each(["procedural", "medical_health", "forecast_speculative"])("%s: no hint wording invites agreement, divergence or clustering", async (schema) => {
+  it.each(["procedural", "medical_health", "forecast_speculative", "legal_regulatory"])("%s: no hint wording invites agreement, divergence or clustering", async (schema) => {
     const sp = await systemPrompt(schema);
-    expect(sp).not.toMatch(/models diverge|diverge sharply|estimates cluster|tier-based disagreement|flag any .*disagreement/);
+    expect(sp).not.toMatch(/models diverge|diverge sharply|estimates cluster|tier-based disagreement|flag any .*disagreement|legal disagreement|substantive dispute/);
   });
 });
 
@@ -303,8 +316,11 @@ describe("R4-4: unrecognised agreement prose (residual) cannot override or repla
     expect(report.verdictCard.topConsensusAgreement).toBe("majority: 3 of 5 dispatched models support it, 1 disputes it");
     expect(report.verdictCard.keyDisagreementAgreement).toBe("split: 2 of 5 dispatched models support it and 3 dispute it");
     expect(report.panelVerdict).toMatch(/^3\/5 models converge on “Rate cuts lag by a year”;/);
-    expect(report.certaintyAssessment.startsWith(`Run certainty ${Math.round(report.runCertainty * 100)}% (gate: ${report.gate}). ${statement}`)).toBe(true);
-    expect(report.gate === "fail" ? report.executiveSummary === report.unifiedAnswer : report.executiveSummary.endsWith(`\n\n${statement}`)).toBe(true);
+    // The computed statement and certainty line are exactly deterministic; residual prose is only ever model-attributed text.
+    expect(report.certaintyAssessment).toBe(`Run certainty ${Math.round(report.runCertainty * 100)}% (gate: ${report.gate}). ${statement}`);
+    expect(report.presentation!.panelAgreement).toBe(statement);
+    expect(report.executiveSummary).not.toContain(statement);
+    expect(report.presentation!.executiveSummarySource).toBe(report.gate === "fail" ? "computed" : "model_explanation");
   });
 });
 

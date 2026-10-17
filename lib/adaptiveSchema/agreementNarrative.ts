@@ -156,10 +156,22 @@ export function renderPanelAgreement(f: PanelAgreementFacts): string {
  * model's own claim): data the panel was asked about, never the panel's
  * conclusion. Wherever deterministic text embeds it, it is quoted, so a claim
  * that itself says "all models agree" reads as a quoted claim beside the
- * computed status. The text is shown verbatim — never rewritten.
+ * computed status.
+ *
+ * The quote is the boundary, so the claim cannot close it (R5-4): double
+ * quotes inside the claim are shown as single quotes (" → ', “ → ‘, ” → ’)
+ * and line breaks as spaces. This is display only — the stored claimText,
+ * and every identity or hash computed from it, are unchanged. Format-specific
+ * escaping (HTML, Markdown, JSON) happens in each renderer, never here.
  */
 export function quoteClaim(claimText: string): string {
-  return `“${claimText}”`;
+  const inner = claimText
+    .replace(/"/g, "'")
+    .replace(/“/g, "‘")
+    .replace(/”/g, "’")
+    .replace(/\s*\r?\n\s*/g, " ")
+    .trim();
+  return `“${inner}”`;
 }
 
 export const CLAIM_LABEL = "Claim";

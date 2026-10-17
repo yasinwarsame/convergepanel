@@ -1382,7 +1382,52 @@ export interface AdaptiveVerdictCard {
   recommendedNextSteps: string[];
 }
 
+// ─── Report presentation contract (R5: Consensus Integrity trust boundary) ─────
+
+/**
+ * Who wrote a piece of report text: the application from structured results
+ * ("computed"), or a model — as the claim the panel assessed ("model_claim"),
+ * as explanatory narrative ("model_explanation") or as the bias check's
+ * observation ("model_bias").
+ */
+export type ReportTextSource = "computed" | "model_claim" | "model_explanation" | "model_bias";
+
+/** One claim as every surface presents it: the model-written claim text (verbatim) and its computed result. */
+export interface PresentedClaim {
+  /** The row's claimText, verbatim (model-written). */
+  claim: string;
+  /** renderRowStatus (agreementNarrative.ts) — computed. */
+  result: string;
+  /** describeContested — computed; absent when the claim is not marked contested. */
+  contested?: string;
+}
+
+export interface PresentedDisagreement extends PresentedClaim {
+  /** Whether the paired whyTheyDiffer came from the narrative model or is the deterministic default. */
+  whySource: "model_explanation" | "computed";
+}
+
+/**
+ * Written by buildAdaptiveSynthesisReport on new reports only (optional: a
+ * report persisted before it existed renders exactly as before). Renderers
+ * read it through reportPresentation.ts, which labels every block by source.
+ */
+export interface AdaptiveReportPresentation {
+  /** renderPanelAgreement — the computed panel agreement statement. */
+  panelAgreement: string;
+  /** One per Where Models Agree line, same order. */
+  agree: PresentedClaim[];
+  /** One per disagreements[] entry, same order. */
+  disagree: PresentedDisagreement[];
+  /** Whether executiveSummary is model-written explanation or computed (template / gate fail). */
+  executiveSummarySource: "model_explanation" | "computed";
+  /** The narrative model's certainty explanation, shown labelled after the computed certaintyAssessment; absent when none. */
+  certaintyExplanation?: string;
+}
+
 export interface AdaptiveSynthesisReport {
+  /** R5 presentation contract; absent on reports persisted before it existed. */
+  presentation?: AdaptiveReportPresentation;
   unifiedAnswer: string;
   panelVerdict: string;
   gate: AdaptiveGateStatus;

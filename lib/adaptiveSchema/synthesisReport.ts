@@ -25,10 +25,12 @@ import { z } from "zod";
 import { ModelId, ModelResult } from "@/lib/types";
 import {
   AdaptiveDisagreement,
+  AdaptiveReportPresentation,
   AdaptiveStakes,
   AdaptiveSynthesisReport,
   AlignedClaim,
   AlignedClaimCell,
+  PresentedClaim,
   QueryType,
 } from "./types";
 import { callGemini } from "@/lib/connectors/gemini";
@@ -39,7 +41,7 @@ import { computeRunCertainty } from "./scoring";
 import { computeAdaptiveGate } from "./gate";
 import { buildAdaptiveVerdict, buildAdaptiveUnifiedAnswer } from "./verdict";
 import { describeContested } from "./consensusIntegrity";
-import { panelAgreementFacts, quoteClaim, renderPanelAgreement, renderRowAgreement, rowAgreementFacts } from "./agreementNarrative";
+import { panelAgreementFacts, quoteClaim, renderPanelAgreement, renderRowAgreement, renderRowStatus, rowAgreementFacts } from "./agreementNarrative";
 import { NarrativeField, isAgreementBearing, withoutAgreementClaims } from "./narrativeIntegrity";
 import { buildAdaptiveVerdictCard } from "./verdictCard";
 import { detectAdaptiveBiases } from "./biasDetection";
@@ -57,7 +59,7 @@ const SCHEMA_NARRATIVE_HINTS: Record<QueryType, string> = {
   contested_empirical:
     "Lead with the substance of the expert dispute: which camps exist in the literature and what each argues. The panel's own agreement is stated separately — do not describe it.",
   legal_regulatory:
-    "Lead with the applicable rule. If any claim has a jurisdiction mismatch, call it out explicitly and separately from ordinary legal disagreement — it's a scope mismatch, not a substantive dispute.",
+    "Lead with the applicable rule. If any claim has a jurisdiction mismatch, explain which jurisdiction each position applies to, naming the model where relevant.",
   financial_valuation:
     "Lead with the metrics: which values are tightly grounded and which are outliers, and what drives the difference.",
   factual_lookup: "Keep the entire synthesis to one tight paragraph — this is a factual lookup, not an essay.",
@@ -117,15 +119,16 @@ function buildDeterministicDisagreements(disagreeRows: AlignedClaim[]): Omit<Ada
   }));
 }
 
-function buildTemplateExecutiveSummary(unifiedAnswer: string, panelAgreement: string, gate: string): string {
-  if (gate === "fail") return unifiedAnswer;
-  return panelAgreement ? `${unifiedAnswer} ${panelAgreement}` : unifiedAnswer;
-}
+type PresentedDisagreementSource = AdaptiveReportPresentation["disagree"][number]["whySource"];
 
-/** Model prose, then the authoritative statement as its own paragraph; when no model sentence survives, the template text. */
-function withAuthoritativeStatement(prose: string, statement: string, fallback: string): string {
-  if (!prose) return fallback;
-  return statement ? `${prose}\n\n${statement}` : prose;
+/** A row as the presentation contract carries it: the model-written claim text verbatim, its computed status and contested note. */
+function presentedClaim(row: AlignedClaim, dispatchedPanelSize: number): PresentedClaim {
+  const contested = describeContested(row);
+  return {
+    claim: row.claimText,
+    result: renderRowStatus(rowAgreementFacts(row, dispatchedPanelSize)),
+    ...(contested ? { contested } : {}),
+  };
 }
 
 /** A "Where models agree" line: the quoted (model-written) claim, plus the canonical contested note when the models marked it contested. */
@@ -222,8 +225,9 @@ function stripMetricTuples(text: string): string {
   return text
     .replace(/\(\s*[^)]*\b(agreement|certainty)\b[^)]*\)/gi, "")
     .replace(/\b(agreement|certainty)\b\s*[:=]?\s*[\d.]+%?/gi, "")
-    .replace(/\s{2,}/g, " ")
-    .replace(/\s+([,.;])/g, "$1")
+    // Spaces and tabs only — line breaks are layout (paragraphs, lists) and are kept (R5-3).
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/[ \t]+([,.;])/g, "$1")
     .trim();
 }
 
@@ -253,7 +257,7 @@ Only refer to models by these exact IDs, verbatim: ${rosterList}. Never invent, 
 
 Write PLAIN TEXT ONLY — no markdown syntax at all (no **bold**, no _italic_, no # headings, no bullet dashes). Every field below is prose or a plain sentence, not formatted text.
 
-How far the panel agrees is ALREADY stated, deterministically, from the scoring: each claim's "panel agreement (authoritative)" text and the panel agreement statement below are shown to the user verbatim, next to your prose. They are final. Your prose explains — evidence, reasoning, implications, source quality, why positions differ — and never characterises the panel's agreement itself:
+How far the panel agrees is ALREADY computed, deterministically, from the scoring: each claim's "panel agreement (authoritative)" text and the panel agreement statement below are final. The panel agreement statement and each agreed or disputed claim's result are shown to the user as the panel's result; your prose is shown separately, labelled as model-written explanation. Your prose explains — evidence, reasoning, implications, source quality, why positions differ — and never characterises the panel's agreement itself:
 - Never say whether, or how many, models or the panel agree, disagree, converge, split, form a majority or are unanimous, and never call a claim settled, uncontested, established or contested. Any sentence that does is removed before the user sees it.
 - Never count models ("two models", "most models", "all five models"). To describe a subgroup position, name the models: "ChatGPT and Grok weigh the survey data more heavily".
 
@@ -322,7 +326,16 @@ export async function buildAdaptiveSynthesisReport(
     stakes: "important" as AdaptiveStakes,
   }));
 
+  const presentation = (executiveSummarySource: AdaptiveReportPresentation["executiveSummarySource"], whySources: PresentedDisagreementSource[], certaintyExplanation?: string): AdaptiveReportPresentation => ({
+    panelAgreement,
+    agree: agreeRows.map((r) => presentedClaim(r, totalModelCount)),
+    disagree: disagreeRows.map((r, i) => ({ ...presentedClaim(r, totalModelCount), whySource: whySources[i] ?? "computed" })),
+    executiveSummarySource,
+    ...(certaintyExplanation ? { certaintyExplanation } : {}),
+  });
+
   const baseReport: AdaptiveSynthesisReport = {
+    presentation: presentation("computed", []),
     unifiedAnswer,
     panelVerdict: verdict.summary,
     gate: gate.status,
@@ -331,7 +344,8 @@ export async function buildAdaptiveSynthesisReport(
     whereModelsDisagree: disagreeRows.map((r) => r.claimText),
     certaintyAssessment: `Run certainty ${Math.round(runCertainty * 100)}% (gate: ${gate.status}).${panelAgreement ? ` ${panelAgreement}` : ""}`,
     narrativeSections: [],
-    executiveSummary: buildTemplateExecutiveSummary(unifiedAnswer, panelAgreement, gate.status),
+    // The computed panel statement is presentation.panelAgreement, shown beside the summary; the template summary is the Unified Answer.
+    executiveSummary: unifiedAnswer,
     disagreements: templateDisagreements,
     biasAndBlindSpots: bias,
     biasEmptyReason: biasResult.emptyReason,
@@ -427,25 +441,28 @@ Gate: ${gate.status}`;
       }
     }
 
-    // D9 (Option B): the panel's agreement is stated only by the
-    // deterministic text — the Where Models Agree lines, the panel agreement
-    // statement and the certainty line. Model prose keeps only sentences that
-    // don't characterise the panel's agreement (narrativeIntegrity.ts); a
-    // field with nothing left falls back to its template. No model re-call.
+    // D9 (Option B, R5 presentation contract): the panel's agreement is
+    // stated only by computed text — presentation.panelAgreement, each
+    // claim's computed result, the certainty line. Model prose is kept apart
+    // from it and labelled as model-written explanation by every renderer
+    // (reportPresentation.ts); it never populates a computed field. Sentences
+    // that characterise the panel's agreement are still removed
+    // (narrativeIntegrity.ts, defense in depth); a field with nothing left
+    // falls back to computed text. No model re-call.
     const prose = (text: string, field: NarrativeField) => withoutAgreementClaims(text, field);
-    const executiveSummary =
-      gate.status === "fail"
-        ? baseReport.executiveSummary
-        : withAuthoritativeStatement(prose(narrative.executiveSummary, "panel_free"), panelAgreement, baseReport.executiveSummary);
-    const certaintyProse = prose(narrative.certaintyAssessment, "panel_free");
-    const certaintyAssessment = certaintyProse ? `${baseReport.certaintyAssessment} ${certaintyProse}` : baseReport.certaintyAssessment;
+    const summaryProse = gate.status === "fail" ? "" : prose(narrative.executiveSummary, "panel_free");
+    const executiveSummary = summaryProse || baseReport.executiveSummary;
+    const certaintyExplanation = prose(narrative.certaintyAssessment, "panel_free");
+    const certaintyAssessment = baseReport.certaintyAssessment;
     const narrativeSections = narrative.narrativeSections.flatMap((s) => {
       const body = prose(s.body, "panel_free");
       return body && !isAgreementBearing(s.title, "panel_free") ? [{ title: s.title, body }] : [];
     });
 
+    const whySources: PresentedDisagreementSource[] = [];
     const disagreements: AdaptiveDisagreement[] = deterministicDisagreements.map((d, i) => {
       const why = prose(narrative.whyModelsDisagree[i] ?? "", "disagreement");
+      whySources.push(why ? "model_explanation" : "computed");
       return {
         ...d,
         whyTheyDiffer: why || DEFAULT_DISAGREEMENT_EXPLANATION,
@@ -454,6 +471,7 @@ Gate: ${gate.status}`;
     });
 
     return {
+      presentation: presentation(summaryProse ? "model_explanation" : "computed", whySources, certaintyExplanation || undefined),
       // Unified Answer + Panel Verdict + Verdict Card + gate/certainty stay
       // deterministic — never overwritten by the model's narrative call.
       unifiedAnswer,

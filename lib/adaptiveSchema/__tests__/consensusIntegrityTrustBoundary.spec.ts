@@ -239,6 +239,28 @@ describe("R4-1 path B: the bias-detection description is labelled as model comme
     }
   });
 
+  it("with several bias findings the caveat is the first (top) one (R5-8 / X15)", async () => {
+    const finding = (description: string) => ({
+      biasType: "Shared framing",
+      description,
+      modelsImplicated: ["chatgpt", "claude"],
+      evidence: [
+        { modelId: "chatgpt", excerpt: "e", rationale: "r" },
+        { modelId: "claude", excerpt: "e", rationale: "r" },
+      ],
+      likelyCauses: ["c"],
+      impact: "i",
+      mitigationSteps: ["m"],
+    });
+    g.mockImplementation(async (_q: any, _c: any, _k: any, opts: any) =>
+      String(opts?.systemPromptOverride ?? "").includes("shared biases") ? ok({ biasAndBlindSpots: [finding("First finding."), finding("Second finding.")] }) : off
+    );
+    const full = M.map((m) => ({ modelId: m as ModelId, status: "ok", rawText: "A long full response ".repeat(30), latencyMs: 1 })) as ModelResult[];
+    const report = await buildAdaptiveSynthesisReport("q", "generic", [row("X", "consensus", ["agrees", "agrees", "agrees", "agrees", "agrees"])], full);
+    expect(report.biasAndBlindSpots.map((b) => b.description)).toEqual(["First finding.", "Second finding."]);
+    expect(report.verdictCard.caveat).toBe("First finding.");
+  });
+
   it("no bias finding → no caveat and no source", async () => {
     g.mockResolvedValue(off);
     const report = await buildAdaptiveSynthesisReport("q", "generic", [row("X", "consensus", ["agrees", "agrees", "agrees", "agrees", "agrees"])], results());

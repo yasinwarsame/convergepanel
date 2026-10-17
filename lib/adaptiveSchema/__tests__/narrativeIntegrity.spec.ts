@@ -147,6 +147,7 @@ describe("withoutAgreementClaims", () => {
     ["CRLF kept between two kept lines", "Line one.\r\nThe panel agrees.\r\nLine three.", "Line one.\r\nLine three."],
     ["blank-line runs kept as they were", "First.\n\n\nSecond.", "First.\n\n\nSecond."],
     ["single line breaks kept", "Line one.\nLine two.", "Line one.\nLine two."],
+    ["leading indentation kept (R5-7)", "Intro.\n    indented keeps.\n\tTabbed keeps. The panel agrees.", "Intro.\n    indented keeps.\n\tTabbed keeps."],
   ])("keeps layout (R4-2): %s", (_name, input, expected) => {
     expect(withoutAgreementClaims(input, "panel_free")).toBe(expected);
   });

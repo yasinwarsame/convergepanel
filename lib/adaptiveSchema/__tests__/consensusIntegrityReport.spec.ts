@@ -162,7 +162,8 @@ describe("synthesis report: template (degraded) path", () => {
     const statement =
       "Of 2 scored claims across 5 dispatched models: consensus on 1; limited coverage on 1 (half or fewer of the dispatched models took a position — too few to count as agreement).";
     expect(report.certaintyAssessment).toBe(`Run certainty 90% (gate: pass). ${statement}`);
-    expect(report.executiveSummary).toBe(`${report.unifiedAnswer} ${statement}`);
+    expect(report.executiveSummary).toBe(report.unifiedAnswer);
+    expect(report.presentation!.panelAgreement).toBe(statement);
   });
 
   it("with no limited rows the panel agreement statement names only what is there", async () => {
@@ -183,8 +184,9 @@ describe("synthesis report: narrative prompt construction (D9)", () => {
     mockNarrative();
     await buildAdaptiveSynthesisReport("Q", "generic", [limitedRow()], results(FIVE));
     const systemPrompt = String((narrativeCall()![3] as any).systemPromptOverride);
-    expect(systemPrompt).toContain("How far the panel agrees is ALREADY stated, deterministically");
-    expect(systemPrompt).toContain("They are final.");
+    expect(systemPrompt).toContain("How far the panel agrees is ALREADY computed, deterministically");
+    expect(systemPrompt).toContain("are final.");
+    expect(systemPrompt).toContain("your prose is shown separately, labelled as model-written explanation");
     expect(systemPrompt).toContain("never characterises the panel's agreement itself");
     expect(systemPrompt).toContain("never call a claim settled, uncontested, established or contested");
     expect(systemPrompt).toContain("Any sentence that does is removed before the user sees it.");

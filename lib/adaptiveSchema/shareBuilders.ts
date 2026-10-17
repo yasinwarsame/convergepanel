@@ -14,6 +14,35 @@ import { MemoInput } from "@/lib/verification/generateMemo";
 import { AdaptiveGateStatus, AdaptiveSynthesisReport } from "./types";
 import { dedupeTextList } from "./textSimilarity";
 import { TEXT_DEDUP_THRESHOLDS, WHERE_MODELS_AGREE_MAX_ITEMS } from "./config";
+import {
+  ClaimBlock,
+  TextBlock,
+  blockText,
+  claimLine,
+  escapeMarkdown,
+  presentAgreeItems,
+  presentCertainty,
+  presentDisagreements,
+  presentExecutiveSummary,
+  shortClaimWithResult,
+} from "./reportPresentation";
+
+// R5 presentation contract: a report that carries `presentation` is rendered through reportPresentation.ts, so
+// every block keeps its source label (Panel result / Claim / Model-written explanation). A report persisted
+// before it existed takes the original code path below, unchanged.
+
+/** One attributed block as Markdown: "**Label:**" on its own line, then the text (paragraphs kept). */
+function markdownBlock(block: TextBlock): string[] {
+  return block.label ? [`**${block.label}:**`, block.text] : [block.text];
+}
+
+/** A claim block as one Markdown line: the claim's text is model-written, so it is escaped. */
+function markdownClaim(item: ClaimBlock): string {
+  return [item.claim, item.result, item.contested]
+    .filter((b): b is TextBlock => !!b)
+    .map((b) => (b.source === "model_claim" ? `**${b.label}:** ${escapeMarkdown(b.text)}` : `**${b.label}:** ${b.text}`))
+    .join(" — ");
+}
 
 /** Same merge pass the Synthesis Report view applies to "Where models agree" (Bias & Blind Spots Tiers fix, Part 4) — keeps exported markdown/memo/social copy free of the same near-duplicate paraphrases. */
 function dedupedAgreementItems(report: AdaptiveSynthesisReport): string[] {
@@ -32,6 +61,7 @@ function truncate(text: string, max: number): string {
 }
 
 export function buildAdaptiveSynthesisMarkdown(question: string, report: AdaptiveSynthesisReport): string {
+  if (report.presentation) return buildPresentedMarkdown(question, report);
   const lines: string[] = [];
   lines.push("# Synthesis Report");
   lines.push("");
@@ -78,6 +108,62 @@ export function buildAdaptiveSynthesisMarkdown(question: string, report: Adaptiv
   return lines.join("\n");
 }
 
+function buildPresentedMarkdown(question: string, report: AdaptiveSynthesisReport): string {
+  const lines: string[] = [];
+  lines.push("# Synthesis Report");
+  lines.push("");
+  lines.push(`**Question:** ${question}`);
+  lines.push("");
+  lines.push(`**Panel verdict:** ${report.panelVerdict}`);
+  lines.push("");
+  lines.push("## Unified Answer");
+  lines.push(report.unifiedAnswer);
+  lines.push("");
+  lines.push("## Executive Summary");
+  for (const block of presentExecutiveSummary(report)) {
+    lines.push(...markdownBlock(block));
+    lines.push("");
+  }
+
+  const agreeItems = presentAgreeItems(report);
+  if (agreeItems.length > 0) {
+    lines.push("## Where models agree");
+    agreeItems.forEach((a) => lines.push(`- ${markdownClaim(a)}`));
+    lines.push("");
+  }
+
+  const disagreements = presentDisagreements(report);
+  if (disagreements.length > 0) {
+    lines.push("## Where models disagree");
+    disagreements.forEach((d, i) => {
+      lines.push(`- ${markdownClaim(d)}`);
+      lines.push(`  - ${d.why.label ? `**${d.why.label}:** ` : ""}${d.why.text}`);
+      report.disagreements[i].positions.forEach((p) => lines.push(`  - ${runModelFamilyName(p.modelId)}: ${p.position}`));
+    });
+    lines.push("");
+  }
+
+  if (report.biasAndBlindSpots.length > 0) {
+    lines.push("## Bias & blind spots");
+    report.biasAndBlindSpots.forEach((b) => {
+      lines.push(`- **${b.biasType}** — ${b.description}`);
+    });
+    lines.push("");
+  }
+
+  lines.push("## Certainty");
+  const [certaintyLine, ...certaintyRest] = presentCertainty(report);
+  lines.push(`${Math.round(report.runCertainty * 100)}% (gate: ${report.gate}) — ${certaintyLine.text}`);
+  for (const block of certaintyRest) {
+    lines.push("");
+    lines.push(...markdownBlock(block));
+  }
+  lines.push("");
+  lines.push("Source: convergepanel.com");
+
+  return lines.join("\n");
+}
+
 export function buildAdaptiveMemoInput(
   question: string,
   report: AdaptiveSynthesisReport,
@@ -90,6 +176,23 @@ export function buildAdaptiveMemoInput(
    */
   modelProvenance?: readonly RunModelProvenanceFacts[] | null
 ): MemoInput {
+  if (report.presentation) {
+    const agree = presentAgreeItems(report).map(claimLine);
+    const summary = presentExecutiveSummary(report).map(blockText).join("\n\n");
+    return {
+      type: "research",
+      question,
+      consensusScore: Math.round(report.runCertainty * 100),
+      confidenceLabel: GATE_CONFIDENCE_LABEL[report.gate],
+      evidenceQuality: "mixed",
+      keyFindings: agree.slice(0, 8),
+      synthesisAgreements: agree,
+      synthesisDisagreements: presentDisagreements(report).map((d) => `${claimLine(d)} — ${blockText(d.why)}`),
+      confidenceAssessment: summary || presentCertainty(report).map(blockText).join("\n\n"),
+      modelsUsed: runModelLabels(modelsUsed, modelProvenance),
+      verificationId,
+    };
+  }
   return {
     type: "research",
     question,
@@ -112,16 +215,19 @@ export function buildAdaptiveLinkedInPost(question: string, report: AdaptiveSynt
   lines.push(`Certainty: ${Math.round(report.runCertainty * 100)}% (gate: ${report.gate})`);
   lines.push("");
 
-  const agreementItems = dedupedAgreementItems(report);
-  if (agreementItems.length > 0) {
+  const presented = report.presentation;
+  const agreementItems = presented ? [] : dedupedAgreementItems(report);
+  if (presented ? presented.agree.length > 0 : agreementItems.length > 0) {
     lines.push("Where models agree:");
-    agreementItems.slice(0, 2).forEach((a) => lines.push(`→ ${truncate(a, 140)}`));
+    if (presented) presented.agree.slice(0, 2).forEach((a) => lines.push(`→ ${shortClaimWithResult(a, 100)}`));
+    else agreementItems.slice(0, 2).forEach((a) => lines.push(`→ ${truncate(a, 140)}`));
     lines.push("");
   }
 
   if (report.disagreements.length > 0) {
     lines.push("Where models disagree:");
-    report.disagreements.slice(0, 2).forEach((d) => lines.push(`→ ${truncate(d.topic, 140)}`));
+    if (presented) presented.disagree.slice(0, 2).forEach((d) => lines.push(`→ ${shortClaimWithResult(d, 100)}`));
+    else report.disagreements.slice(0, 2).forEach((d) => lines.push(`→ ${truncate(d.topic, 140)}`));
     lines.push("");
   }
 
@@ -136,7 +242,13 @@ export function buildAdaptiveXPost(question: string, report: AdaptiveSynthesisRe
   const parts: string[] = [];
   parts.push(`Asked a multi-model AI panel: "${truncate(question, 80)}"`);
   parts.push(`Certainty: ${Math.round(report.runCertainty * 100)}% (${report.gate})`);
-  if (report.disagreements.length > 0) {
+  const split = report.presentation?.disagree[0];
+  if (split) {
+    // The post is capped at 280 characters: the claim gives way, the computed result never does.
+    const fixed = [...parts, "via ConvergePanel"].join("\n\n").length + 2;
+    const room = 280 - fixed - `Models split on: `.length - shortClaimWithResult({ ...split, claim: "" }, 0).length;
+    parts.push(`Models split on: ${shortClaimWithResult(split, Math.max(12, Math.min(60, room)))}`);
+  } else if (report.disagreements.length > 0) {
     parts.push(`Models split on: ${truncate(report.disagreements[0].topic, 80)}`);
   }
   parts.push("via ConvergePanel");

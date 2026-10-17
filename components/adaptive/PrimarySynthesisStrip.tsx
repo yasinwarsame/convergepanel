@@ -44,11 +44,11 @@ export default function PrimarySynthesisStrip({ synthesisReport }: { synthesisRe
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Models agree</p>
           <p className="mt-0.5 text-sm text-slate-800">
-            {top.claim}
+            {top.result ? <span data-source="model_claim">{top.claim}</span> : top.claim}
             {verdictCard.consensusModelCount > 0 && (
               <span className="text-slate-500"> — {verdictCard.consensusModelCount} model{verdictCard.consensusModelCount === 1 ? "" : "s"}</span>
             )}
-            {top.result && <span className="block text-xs text-slate-600 mt-0.5">{top.result}</span>}
+            {top.result && <span data-source="computed" className="block text-xs text-slate-600 mt-0.5">{top.result}</span>}
             {verdictCard.topConsensusContested && (
               <span className="block text-xs text-amber-700 mt-0.5">Contested: {verdictCard.topConsensusContested}</span>
             )}
@@ -58,8 +58,8 @@ export default function PrimarySynthesisStrip({ synthesisReport }: { synthesisRe
           <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Models disagree</p>
           {verdictCard.keyDisagreement ? (
             <p className="mt-0.5 text-sm text-slate-800">
-              {split!.claim}
-              {split!.result && <span className="block text-xs text-slate-600 mt-0.5">{split!.result}</span>}
+              {split!.result ? <span data-source="model_claim">{split!.claim}</span> : split!.claim}
+              {split!.result && <span data-source="computed" className="block text-xs text-slate-600 mt-0.5">{split!.result}</span>}
               {verdictCard.disagreementDetail && <span className="block text-xs text-slate-500 mt-0.5">{verdictCard.disagreementDetail}</span>}
             </p>
           ) : (
@@ -69,7 +69,7 @@ export default function PrimarySynthesisStrip({ synthesisReport }: { synthesisRe
       </div>
 
       {caveat && (
-        <p className="mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">{caveat}</p>
+        <p {...(verdictCard.caveatSource ? { "data-source": "model_bias" } : {})} className="mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">{caveat}</p>
       )}
     </Card>
   );
