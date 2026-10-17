@@ -84,6 +84,8 @@ async function build(rows: AlignedClaim[], narrative: Record<string, unknown> | 
   return buildAdaptiveSynthesisReport("Q?", "generic", rows, results());
 }
 const statusOf = (r: AlignedClaim) => renderRowStatus(rowAgreementFacts(r, M.length));
+/** Literal text inside a RegExp: every metacharacter, backslash included, escaped. */
+const reText = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const unent = (s: string) => s.replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 
 /** Rendered text grouped by the nearest enclosing data-source ("unattributed" outside any). */
@@ -130,7 +132,7 @@ async function exportsOf(report: AdaptiveSynthesisReport) {
   record.reportSnapshot.legacy.synthesisReport = report;
   const { bytes } = await renderAdaptiveResearchDocxV1(record);
   const xml = await (await JSZip.loadAsync(bytes)).file("word/document.xml")!.async("string");
-  const docx = unent(xml.replace(/<\/w:p>/g, "\n").replace(/<[^>]+>/g, "").replace(/&apos;/g, "'"));
+  const docx = unent(xml.replace(/<\/w:p>/g, "\n").split(/<[^>]*>/).join("").replace(/&apos;/g, "'"));
   const pdf = extractPdfElementText(AdaptiveResearchDocument({ record } as any));
   return { docx, pdf };
 }
@@ -252,8 +254,8 @@ describe("R6-1: each Unified Answer claim carries its own computed result; the f
     for (const t of [docx, pdf]) {
       const card = t.slice(t.indexOf("Where models agree / disagree"));
       expect(card.indexOf("Where models agree / disagree")).toBe(0);
-      expect(card).toMatch(new RegExp(`Agreement\\s+Claim: ${quoteClaim(UNAN)}\\s+Panel result: ${statusOf(top)}`));
-      expect(card).toMatch(new RegExp(`Disagreement\\s+Claim: ${quoteClaim(split.claimText)}\\s+Panel result: ${statusOf(split).replace(/[()]/g, "\\$&")}`));
+      expect(card).toMatch(new RegExp(`Agreement\\s+Claim: ${reText(quoteClaim(UNAN))}\\s+Panel result: ${reText(statusOf(top))}`));
+      expect(card).toMatch(new RegExp(`Disagreement\\s+Claim: ${reText(quoteClaim(split.claimText))}\\s+Panel result: ${reText(statusOf(split))}`));
     }
   });
 
@@ -320,7 +322,7 @@ describe("R6-2: model prose cannot become report structure in Markdown or the me
       expect(lines[at]).toMatch(/^ *> /);
       let k = at;
       while (/^ *>/.test(lines[k - 1]) || lines[k - 1] === "") k--;
-      expect(lines[k - 1]).toMatch(new RegExp(`\\*\\*${MODEL_EXPLANATION_LABEL.replace(/[()]/g, "\\$&")}:\\*\\*$`));
+      expect(lines[k - 1].endsWith(`**${MODEL_EXPLANATION_LABEL}:**`)).toBe(true);
     }
     expect(md).not.toContain("\r");
     expect(md).not.toMatch(/(^|[^\\])\]\(http/m);
