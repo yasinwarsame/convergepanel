@@ -1402,6 +1402,24 @@ export interface PresentedClaim {
   contested?: string;
 }
 
+/** A Unified Answer claim (R6-1): the presented claim plus the models backing it — computed from its cells. */
+export interface PresentedAnswerClaim extends PresentedClaim {
+  /** Family names of the models that support it (agrees/partial), comma-separated; absent when none. */
+  supporters?: string;
+}
+
+/**
+ * The Unified Answer as structured data (R6-1): the computed note (gate fail /
+ * nothing to answer with) and the claims it rests on, each with its own
+ * computed result. `unifiedAnswer` keeps the same content as one string.
+ */
+export interface PresentedUnifiedAnswer {
+  /** Computed, no claim text: "Panel could not converge on a reliable answer." / "No consensus or majority claims …"; null when the answer is its claims. */
+  note: string | null;
+  /** The answer's claims in Unified Answer order — consensus/majority rows, or on gate fail the unresolved split rows. */
+  claims: PresentedAnswerClaim[];
+}
+
 export interface PresentedDisagreement extends PresentedClaim {
   /** Whether the paired whyTheyDiffer came from the narrative model or is the deterministic default. */
   whySource: "model_explanation" | "computed";
@@ -1419,8 +1437,15 @@ export interface AdaptiveReportPresentation {
   agree: PresentedClaim[];
   /** One per disagreements[] entry, same order. */
   disagree: PresentedDisagreement[];
-  /** Whether executiveSummary is model-written explanation or computed (template / gate fail). */
-  executiveSummarySource: "model_explanation" | "computed";
+  /** The Unified Answer's claims, each with its computed result (R6-1). */
+  answer: PresentedUnifiedAnswer;
+  /**
+   * Whether executiveSummary is the narrative model's explanation, or the
+   * template fallback (no prose, all prose filtered, or gate fail) — which is
+   * the Unified Answer and is shown only as `answer` (claims with results),
+   * never as one computed paragraph.
+   */
+  executiveSummarySource: "model_explanation" | "unified_answer";
   /** The narrative model's certainty explanation, shown labelled after the computed certaintyAssessment; absent when none. */
   certaintyExplanation?: string;
 }

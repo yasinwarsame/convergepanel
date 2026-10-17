@@ -32,8 +32,9 @@ import {
 import { TRUST_SCORE_CAP_REASON, TEXT_DEDUP_THRESHOLDS, WHERE_MODELS_AGREE_MAX_ITEMS, CITATION_COVERAGE_DANGER_THRESHOLD, BIAS_EMPTY_REASON_LABELS } from "@/lib/adaptiveSchema/config";
 import { dedupeTextList } from "@/lib/adaptiveSchema/textSimilarity";
 import { consensusStatusLabel, consensusStatusRank, describeContested } from "@/lib/adaptiveSchema/consensusIntegrity";
-import { presentVerdictCaveat, presentVerdictClaim } from "@/lib/adaptiveSchema/agreementNarrative";
+import { CLAIM_LABEL, MODEL_CAVEAT_LABEL, PANEL_RESULT_LABEL, presentVerdictCaveat, presentVerdictClaim, quoteClaim } from "@/lib/adaptiveSchema/agreementNarrative";
 import {
+  AnswerClaimBlock,
   ClaimBlock,
   TextBlock,
   presentAgreeItems,
@@ -41,6 +42,7 @@ import {
   presentDisagreements,
   presentExecutiveSummary,
   presentNarrativeSections,
+  presentUnifiedAnswer,
 } from "@/lib/adaptiveSchema/reportPresentation";
 
 /** Canonical, ordered list of `data-section` values rendered below — the single source of truth the snapshot test asserts against, so a future edit can't silently drop a section without also updating this list. */
@@ -105,12 +107,56 @@ function agreementColorClass(score: number): string {
 }
 
 /** Exported for reuse by PanelEvidenceSection.tsx (Adaptive Synthesis Report, Phase 2 pilot) — same unmodified rendering, relocated as curated "supporting synthesis context" rather than the primary landing view for procedural/generic. */
-export function UnifiedAnswerCard({ answer }: { answer: string }) {
+export function UnifiedAnswerCard({ answer, report }: { answer: string; report?: AdaptiveSynthesisReport }) {
   return (
     <Card className="bg-sky-50/60 border-sky-200">
       <SectionLabel>Unified answer</SectionLabel>
-      <p className="text-sm leading-relaxed text-slate-900 whitespace-pre-line">{answer}</p>
+      {report?.presentation?.answer ? (
+        <UnifiedAnswerClaims report={report} />
+      ) : (
+        <p className="text-sm leading-relaxed text-slate-900 whitespace-pre-line">{answer}</p>
+      )}
     </Card>
+  );
+}
+
+/**
+ * The Unified Answer of a report that carries presentation.answer (R6-1): the computed note, then each claim
+ * with its own computed result and supporting models. Reports persisted before it render their stored string.
+ */
+export function UnifiedAnswerClaims({ report }: { report: AdaptiveSynthesisReport }) {
+  const answer = presentUnifiedAnswer(report);
+  return (
+    <div className="space-y-2 text-sm leading-relaxed text-slate-900">
+      {answer.note && <p data-source={answer.note.source}>{answer.note.text}</p>}
+      {answer.claimsHeading && (
+        <p data-source="computed" className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+          {answer.claimsHeading}
+        </p>
+      )}
+      {answer.claims.length > 0 && (
+        <ul className="list-disc list-outside pl-5 space-y-1">
+          {answer.claims.map((item, idx) => (
+            <li key={idx}>
+              <AnswerClaim item={item} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function AnswerClaim({ item }: { item: AnswerClaimBlock }) {
+  return (
+    <>
+      <ClaimWithResult item={item} />
+      {item.supporters && (
+        <span data-source="computed" className="block text-xs text-slate-500 mt-0.5">
+          {item.supporters.label}: {item.supporters.text}
+        </span>
+      )}
+    </>
   );
 }
 
@@ -381,7 +427,7 @@ export function AgreementDisagreementMap({ claims, modelsUsed }: { claims: Align
 
 /** Coverage-1 claims — a single model's own observation, never corroborated or disputed by any other model — pulled out of the Agreement/Disagreement Map since a lone claim isn't agreement data. */
 /** Exported — see UnifiedAnswerCard's export doc above. */
-export function SingleModelInsightsList({ claims }: { claims: AlignedClaim[] }) {
+export function SingleModelInsightsList({ claims, labelled = false }: { claims: AlignedClaim[]; labelled?: boolean }) {
   const singleSource = claims.filter((c) => c.status === "single_source");
   if (singleSource.length === 0) return null;
 
@@ -397,7 +443,14 @@ export function SingleModelInsightsList({ claims }: { claims: AlignedClaim[] }) 
           return (
             <li key={claim.id} className="flex items-start gap-2 text-sm">
               {soleCell && <ModelChip modelId={soleCell.modelId} size="xs" className="mt-0.5 shrink-0" />}
-              <span className="text-slate-700">{claim.claimText}</span>
+              {labelled ? (
+                // New reports (presentation present): the claim is model-written — quoted and labelled; the card's heading is its result.
+                <span data-source="model_claim" className="text-slate-700">
+                  {CLAIM_LABEL}: {quoteClaim(claim.claimText)}
+                </span>
+              ) : (
+                <span className="text-slate-700">{claim.claimText}</span>
+              )}
             </li>
           );
         })}
@@ -605,7 +658,16 @@ export function BiasBlindSpotsSection({
         <p className="text-sm text-slate-500 italic">{biasSectionEmptyMessage(report)}</p>
       ) : (
         <div className="space-y-4">
-          {hasT1 && <BiasFindingCards findings={report.biasAndBlindSpots} />}
+          {hasT1 &&
+            (report.presentation ? (
+              // New reports: the bias check is a model's observation — labelled as on the verdict card (R6-5).
+              <div data-source="model_bias">
+                <p className="text-[11px] font-semibold uppercase tracking-wide mb-2 text-amber-700">{MODEL_CAVEAT_LABEL}</p>
+                <BiasFindingCards findings={report.biasAndBlindSpots} />
+              </div>
+            ) : (
+              <BiasFindingCards findings={report.biasAndBlindSpots} />
+            ))}
           {hasT2 && (
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-sky-700 mb-2">What the panel didn&apos;t cover</p>
@@ -713,6 +775,29 @@ export function PanelVerdictCard({ report, gate }: { report: AdaptiveSynthesisRe
   );
 }
 
+/**
+ * A load-bearing claim on a new report (R6-4): the model-written claim quoted and labelled, then its computed
+ * status with the models that support and dispute it — not every listed model beside the status.
+ */
+function LoadBearingClaim({ claim }: { claim: AlignedClaim }) {
+  const named = (stances: string[]) =>
+    claim.cells.filter((c): c is AlignedClaimCell => !!c && stances.includes(c.stance)).map((c) => getModelLabel(c.modelId));
+  const supports = named(["agrees", "partial"]);
+  const disputes = named(["disputes"]);
+  const who = [supports.length > 0 ? `supported by ${supports.join(", ")}` : "", disputes.length > 0 ? `disputed by ${disputes.join(", ")}` : ""].filter(Boolean);
+  return (
+    <>
+      <span data-source="model_claim">
+        {CLAIM_LABEL}: {quoteClaim(claim.claimText)}
+      </span>
+      <span data-source="computed" className="block text-xs text-slate-500 mt-0.5">
+        {PANEL_RESULT_LABEL}: <span className="font-medium">{consensusStatusLabel(claim.status)}</span>
+        {who.length > 0 ? ` (${who.join("; ")})` : ""}
+      </span>
+    </>
+  );
+}
+
 export default function AdaptiveSynthesisReportView({
   report,
   gate,
@@ -765,7 +850,7 @@ export default function AdaptiveSynthesisReportView({
       </div>
 
       <div data-section="unified-answer">
-        <UnifiedAnswerCard answer={report.unifiedAnswer} />
+        <UnifiedAnswerCard answer={report.unifiedAnswer} report={report} />
       </div>
 
       <div data-section="executive-summary">
@@ -805,7 +890,7 @@ export default function AdaptiveSynthesisReportView({
       </div>
 
       <div data-section="single-model-insights">
-        <SingleModelInsightsList claims={rows} />
+        <SingleModelInsightsList claims={rows} labelled={!!report.presentation} />
       </div>
 
       {agreeItems.length > 0 && (
@@ -855,7 +940,12 @@ export default function AdaptiveSynthesisReportView({
           <Card className="bg-slate-50">
             <SectionLabel>Load-bearing claims (top by salience)</SectionLabel>
             <ul className="space-y-1 text-sm text-slate-700">
-              {gate.loadBearingClaims.map((claim) => (
+              {gate.loadBearingClaims.map((claim) =>
+                report.presentation ? (
+                  <li key={claim.id}>
+                    <LoadBearingClaim claim={claim} />
+                  </li>
+                ) : (
                 <li key={claim.id}>
                   {claim.claimText} — <span className="font-medium">{consensusStatusLabel(claim.status)}</span>
                   {claim.cells.some(Boolean) && (
@@ -865,7 +955,8 @@ export default function AdaptiveSynthesisReportView({
                     </span>
                   )}
                 </li>
-              ))}
+                )
+              )}
             </ul>
           </Card>
         </div>

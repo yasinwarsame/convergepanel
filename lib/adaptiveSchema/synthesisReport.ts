@@ -30,6 +30,7 @@ import {
   AdaptiveSynthesisReport,
   AlignedClaim,
   AlignedClaimCell,
+  PresentedAnswerClaim,
   PresentedClaim,
   QueryType,
 } from "./types";
@@ -39,7 +40,7 @@ import { logger } from "@/lib/logger";
 import { stripJsonFences, withTimeout } from "./util";
 import { computeRunCertainty } from "./scoring";
 import { computeAdaptiveGate } from "./gate";
-import { buildAdaptiveVerdict, buildAdaptiveUnifiedAnswer } from "./verdict";
+import { buildAdaptiveVerdict, buildAdaptiveUnifiedAnswer, selectUnifiedAnswer, unifiedAnswerSupporters } from "./verdict";
 import { describeContested } from "./consensusIntegrity";
 import { panelAgreementFacts, quoteClaim, renderPanelAgreement, renderRowAgreement, renderRowStatus, rowAgreementFacts } from "./agreementNarrative";
 import { NarrativeField, isAgreementBearing, withoutAgreementClaims } from "./narrativeIntegrity";
@@ -129,6 +130,12 @@ function presentedClaim(row: AlignedClaim, dispatchedPanelSize: number): Present
     result: renderRowStatus(rowAgreementFacts(row, dispatchedPanelSize)),
     ...(contested ? { contested } : {}),
   };
+}
+
+/** A Unified Answer claim: the presented claim plus the models backing it (R6-1) — named only for an answer claim, not for a gate-fail unresolved split. */
+function presentedAnswerClaim(row: AlignedClaim, dispatchedPanelSize: number, nameSupporters: boolean): PresentedAnswerClaim {
+  const supporters = nameSupporters ? unifiedAnswerSupporters(row) : [];
+  return { ...presentedClaim(row, dispatchedPanelSize), ...(supporters.length > 0 ? { supporters: supporters.join(", ") } : {}) };
 }
 
 /** A "Where models agree" line: the quoted (model-written) claim, plus the canonical contested note when the models marked it contested. */
@@ -301,6 +308,7 @@ export async function buildAdaptiveSynthesisReport(
   const gate = computeAdaptiveGate(rows, runCertainty, schemaId);
   const verdict = buildAdaptiveVerdict(rows, gate, totalModelCount);
   const unifiedAnswer = buildAdaptiveUnifiedAnswer(rows, gate);
+  const answerSelection = selectUnifiedAnswer(rows, gate);
 
   const agreeRows = rows.filter((r) => r.status === "consensus" || r.status === "majority");
   const disagreeRows = rows.filter((r) => r.status === "split");
@@ -328,6 +336,7 @@ export async function buildAdaptiveSynthesisReport(
 
   const presentation = (executiveSummarySource: AdaptiveReportPresentation["executiveSummarySource"], whySources: PresentedDisagreementSource[], certaintyExplanation?: string): AdaptiveReportPresentation => ({
     panelAgreement,
+    answer: { note: answerSelection.note, claims: answerSelection.rows.map((r) => presentedAnswerClaim(r, totalModelCount, gate.status !== "fail")) },
     agree: agreeRows.map((r) => presentedClaim(r, totalModelCount)),
     disagree: disagreeRows.map((r, i) => ({ ...presentedClaim(r, totalModelCount), whySource: whySources[i] ?? "computed" })),
     executiveSummarySource,
@@ -335,7 +344,7 @@ export async function buildAdaptiveSynthesisReport(
   });
 
   const baseReport: AdaptiveSynthesisReport = {
-    presentation: presentation("computed", []),
+    presentation: presentation("unified_answer", []),
     unifiedAnswer,
     panelVerdict: verdict.summary,
     gate: gate.status,
@@ -344,7 +353,9 @@ export async function buildAdaptiveSynthesisReport(
     whereModelsDisagree: disagreeRows.map((r) => r.claimText),
     certaintyAssessment: `Run certainty ${Math.round(runCertainty * 100)}% (gate: ${gate.status}).${panelAgreement ? ` ${panelAgreement}` : ""}`,
     narrativeSections: [],
-    // The computed panel statement is presentation.panelAgreement, shown beside the summary; the template summary is the Unified Answer.
+    // The template summary is the Unified Answer (stored as before). Renderers never show it as one computed
+    // paragraph: they show presentation.panelAgreement and the answer's note, and the answer's claims each with
+    // its own result (presentation.answer, R6-1).
     executiveSummary: unifiedAnswer,
     disagreements: templateDisagreements,
     biasAndBlindSpots: bias,
@@ -471,7 +482,7 @@ Gate: ${gate.status}`;
     });
 
     return {
-      presentation: presentation(summaryProse ? "model_explanation" : "computed", whySources, certaintyExplanation || undefined),
+      presentation: presentation(summaryProse ? "model_explanation" : "unified_answer", whySources, certaintyExplanation || undefined),
       // Unified Answer + Panel Verdict + Verdict Card + gate/certainty stay
       // deterministic — never overwritten by the model's narrative call.
       unifiedAnswer,

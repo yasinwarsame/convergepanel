@@ -148,7 +148,7 @@ describe("Option B — no R3-1 narrative can alter, replace or contradict the au
     mockNarrative({ executiveSummary: "The models agree. The panel is united." });
     const report = await buildAdaptiveSynthesisReport("q", "generic", [A()], results());
     expect(report.executiveSummary).toBe(report.unifiedAnswer);
-    expect(report.presentation!.executiveSummarySource).toBe("computed");
+    expect(report.presentation!.executiveSummarySource).toBe("unified_answer");
     expect(report.presentation!.panelAgreement).toBe("Of 1 scored claim across 5 dispatched models: consensus on 1.");
   });
 });
@@ -184,7 +184,7 @@ describe("Option B — each status gets its deterministic statement (template an
     expect(report.certaintyAssessment).toBe(`Run certainty ${Math.round(report.runCertainty * 100)}% (gate: ${report.gate}). ${statement}`);
     expect(report.executiveSummary).toBe(report.unifiedAnswer);
     expect(report.presentation!.panelAgreement).toBe(statement);
-    expect(report.presentation!.executiveSummarySource).toBe("computed");
+    expect(report.presentation!.executiveSummarySource).toBe("unified_answer");
   });
 
   it.each(cases)("%s — narrative path keeps explanatory prose and adds the statement", async (_s, rows, statement, agree) => {
@@ -194,7 +194,7 @@ describe("Option B — each status gets its deterministic statement (template an
     expect(report.executiveSummary).toBe(
       report.gate === "fail" ? report.unifiedAnswer : "The evidence base is thin. ChatGPT stresses lag effects; Grok stresses supply shocks."
     );
-    expect(report.presentation!.executiveSummarySource).toBe(report.gate === "fail" ? "computed" : "model_explanation");
+    expect(report.presentation!.executiveSummarySource).toBe(report.gate === "fail" ? "unified_answer" : "model_explanation");
     expect(report.presentation!.panelAgreement).toBe(statement);
     expect(report.certaintyAssessment).toBe(`Run certainty ${Math.round(report.runCertainty * 100)}% (gate: ${report.gate}). ${statement}`);
     expect(report.presentation!.certaintyExplanation).toBe("The data end in 2024.");
@@ -320,7 +320,7 @@ describe("R4-4: unrecognised agreement prose (residual) cannot override or repla
     expect(report.certaintyAssessment).toBe(`Run certainty ${Math.round(report.runCertainty * 100)}% (gate: ${report.gate}). ${statement}`);
     expect(report.presentation!.panelAgreement).toBe(statement);
     expect(report.executiveSummary).not.toContain(statement);
-    expect(report.presentation!.executiveSummarySource).toBe(report.gate === "fail" ? "computed" : "model_explanation");
+    expect(report.presentation!.executiveSummarySource).toBe(report.gate === "fail" ? "unified_answer" : "model_explanation");
   });
 });
 

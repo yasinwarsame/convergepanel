@@ -18,11 +18,19 @@
  * Model-written text is never promoted to a computed block, and computed text
  * never comes from a model. A report persisted before `presentation` existed
  * returns its stored text as "legacy" blocks with no label, so it renders
- * exactly as it always did. Pure and client-safe; formats (HTML, Markdown,
- * plain text) apply their own escaping.
+ * exactly as it always did. Pure and client-safe; formats apply their own
+ * escaping (Markdown and plain text: textSerialization.ts).
+ *
+ * Coverage: the report view's summary, certainty, Unified Answer, Where
+ * Models Agree, Disagreements and narrative sections; the Answer strip's
+ * answer; Markdown, memo, LinkedIn and X; the DOCX/PDF Unified Answer. The
+ * verdict card and its strip / DOCX / PDF agreement lines use
+ * agreementNarrative.presentVerdictClaim / presentVerdictCaveat; the view's
+ * single-model insights, load-bearing claims and bias section label their own
+ * model text. Not every surface goes through this module.
  */
 
-import { AdaptiveSynthesisReport, PresentedClaim, ReportTextSource } from "./types";
+import { AdaptiveSynthesisReport, PresentedAnswerClaim, PresentedClaim, ReportTextSource } from "./types";
 import { CLAIM_LABEL, MODEL_CAVEAT_LABEL, PANEL_RESULT_LABEL, quoteClaim } from "./agreementNarrative";
 import { dedupeTextList } from "./textSimilarity";
 import { TEXT_DEDUP_THRESHOLDS, WHERE_MODELS_AGREE_MAX_ITEMS } from "./config";
@@ -59,6 +67,22 @@ export interface DisagreementBlock extends ClaimBlock {
   why: TextBlock;
 }
 
+/** A Unified Answer claim: the claim with its own computed result, and the models backing it (computed). */
+export interface AnswerClaimBlock extends ClaimBlock {
+  supporters: TextBlock | null;
+}
+
+/** The Unified Answer (R6-1): a computed note, then each claim with its own result. Legacy: the stored string as one block. */
+export interface UnifiedAnswerBlocks {
+  note: TextBlock | null;
+  /** "Unresolved claims" on a gate fail; null otherwise. */
+  claimsHeading: string | null;
+  claims: AnswerClaimBlock[];
+}
+
+export const SUPPORTED_BY_LABEL = "Supported by";
+export const UNRESOLVED_CLAIMS_HEADING = "Unresolved claims";
+
 const legacy = (text: string): TextBlock => ({ source: "legacy", label: null, text });
 
 function presentClaim(c: PresentedClaim): ClaimBlock {
@@ -69,18 +93,43 @@ function presentClaim(c: PresentedClaim): ClaimBlock {
   };
 }
 
-/** The executive summary: the computed panel statement, then the summary text attributed to its source. */
+function presentAnswerClaim(c: PresentedAnswerClaim): AnswerClaimBlock {
+  return {
+    ...presentClaim(c),
+    supporters: c.supporters ? { source: "computed", label: SUPPORTED_BY_LABEL, text: c.supporters } : null,
+  };
+}
+
+/**
+ * The Unified Answer: its computed note (gate fail, nothing to answer with), then each claim it rests on with
+ * that claim's own computed result — never the claims run together as one computed paragraph. Legacy: the
+ * stored string, unlabelled, as it always rendered.
+ */
+export function presentUnifiedAnswer(report: AdaptiveSynthesisReport): UnifiedAnswerBlocks {
+  const answer = report.presentation?.answer;
+  if (!answer) return { note: legacy(report.unifiedAnswer), claimsHeading: null, claims: [] };
+  return {
+    note: answer.note ? { source: "computed", label: null, text: answer.note } : null,
+    claimsHeading: report.gate === "fail" && answer.claims.length > 0 ? UNRESOLVED_CLAIMS_HEADING : null,
+    claims: answer.claims.map(presentAnswerClaim),
+  };
+}
+
+/**
+ * The executive summary: the computed panel statement, then the model's summary (labelled). Without model prose
+ * (template, all filtered, gate fail) the stored summary is the Unified Answer, which carries claim text: it is
+ * not repeated here as computed text — the summary is the panel statement and the answer's computed note only,
+ * and the claims appear in the Unified Answer with their own results (R6-1).
+ */
 export function presentExecutiveSummary(report: AdaptiveSynthesisReport): TextBlock[] {
   const p = report.presentation;
   if (!p) return [legacy(report.executiveSummary)];
   const blocks: TextBlock[] = [];
   if (p.panelAgreement) blocks.push({ source: "computed", label: PANEL_RESULT_LABEL, text: p.panelAgreement });
-  if (report.executiveSummary) {
-    blocks.push(
-      p.executiveSummarySource === "model_explanation"
-        ? { source: "model_explanation", label: MODEL_EXPLANATION_LABEL, text: report.executiveSummary }
-        : { source: "computed", label: null, text: report.executiveSummary }
-    );
+  if (p.executiveSummarySource === "model_explanation") {
+    if (report.executiveSummary) blocks.push({ source: "model_explanation", label: MODEL_EXPLANATION_LABEL, text: report.executiveSummary });
+  } else if (p.answer?.note) {
+    blocks.push({ source: "computed", label: null, text: p.answer.note });
   }
   return blocks;
 }
@@ -137,6 +186,11 @@ export function blockText(block: TextBlock): string {
   return block.label ? `${block.label}: ${block.text}` : block.text;
 }
 
+/** A Unified Answer claim as plain-text lines (DOCX / PDF): the claim, then its computed result, contested note and supporters. */
+export function answerClaimLines(item: AnswerClaimBlock): string[] {
+  return [item.claim, item.result, item.contested, item.supporters].filter((b): b is TextBlock => !!b).map(blockText);
+}
+
 /** A claim block as one line of plain text: `Claim: “…” — Panel result: … — Contested: …`; legacy: the stored line. */
 export function claimLine(block: ClaimBlock): string {
   return [block.claim, block.result, block.contested]
@@ -150,9 +204,4 @@ export function shortClaimWithResult(item: PresentedClaim, maxClaimChars: number
   const raw = item.claim.trim();
   const short = raw.length <= maxClaimChars ? raw : `${raw.slice(0, maxClaimChars - 1).trimEnd()}…`;
   return `${quoteClaim(short)} — ${PANEL_RESULT_LABEL.toLowerCase()}: ${item.result}`;
-}
-
-/** Markdown-escapes model-written text placed inside Markdown structure (claim text in share output). */
-export function escapeMarkdown(text: string): string {
-  return text.replace(/([\\`*_[\]#<>|])/g, "\\$1");
 }

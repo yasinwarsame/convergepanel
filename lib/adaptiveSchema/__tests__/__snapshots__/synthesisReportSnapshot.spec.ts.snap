@@ -47,6 +47,16 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "result": "consensus: 3 of 5 dispatched models support it",
       },
     ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
     "disagree": [
       {
         "claim": "Split claim",
@@ -54,7 +64,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "whySource": "computed",
       },
     ],
-    "executiveSummarySource": "computed",
+    "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   },
   "runCertainty": 0.66,
@@ -131,6 +141,16 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "result": "consensus: 3 of 5 dispatched models support it",
       },
     ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
     "disagree": [
       {
         "claim": "Split claim",
@@ -138,7 +158,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "whySource": "computed",
       },
     ],
-    "executiveSummarySource": "computed",
+    "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   },
   "runCertainty": 0.66,
@@ -215,6 +235,16 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "result": "consensus: 3 of 5 dispatched models support it",
       },
     ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
     "disagree": [
       {
         "claim": "Split claim",
@@ -222,7 +252,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "whySource": "computed",
       },
     ],
-    "executiveSummarySource": "computed",
+    "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   },
   "runCertainty": 0.66,
@@ -299,6 +329,16 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "result": "consensus: 3 of 5 dispatched models support it",
       },
     ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
     "disagree": [
       {
         "claim": "Split claim",
@@ -306,7 +346,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "whySource": "computed",
       },
     ],
-    "executiveSummarySource": "computed",
+    "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   },
   "runCertainty": 0.66,
@@ -383,6 +423,16 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "result": "consensus: 3 of 5 dispatched models support it",
       },
     ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
     "disagree": [
       {
         "claim": "Split claim",
@@ -390,7 +440,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "whySource": "computed",
       },
     ],
-    "executiveSummarySource": "computed",
+    "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   },
   "runCertainty": 0.66,
@@ -467,6 +517,16 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "result": "consensus: 3 of 5 dispatched models support it",
       },
     ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
     "disagree": [
       {
         "claim": "Split claim",
@@ -474,7 +534,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "whySource": "computed",
       },
     ],
-    "executiveSummarySource": "computed",
+    "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   },
   "runCertainty": 0.66,
@@ -551,6 +611,16 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "result": "consensus: 3 of 5 dispatched models support it",
       },
     ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
     "disagree": [
       {
         "claim": "Split claim",
@@ -558,7 +628,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "whySource": "computed",
       },
     ],
-    "executiveSummarySource": "computed",
+    "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   },
   "runCertainty": 0.66,
@@ -635,6 +705,16 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "result": "consensus: 3 of 5 dispatched models support it",
       },
     ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
     "disagree": [
       {
         "claim": "Split claim",
@@ -642,7 +722,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "whySource": "computed",
       },
     ],
-    "executiveSummarySource": "computed",
+    "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   },
   "runCertainty": 0.66,
@@ -719,6 +799,16 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "result": "consensus: 3 of 5 dispatched models support it",
       },
     ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
     "disagree": [
       {
         "claim": "Split claim",
@@ -726,7 +816,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "whySource": "computed",
       },
     ],
-    "executiveSummarySource": "computed",
+    "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   },
   "runCertainty": 0.66,
@@ -803,6 +893,16 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "result": "consensus: 3 of 5 dispatched models support it",
       },
     ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
     "disagree": [
       {
         "claim": "Split claim",
@@ -810,7 +910,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "whySource": "computed",
       },
     ],
-    "executiveSummarySource": "computed",
+    "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   },
   "runCertainty": 0.66,
@@ -887,6 +987,16 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "result": "consensus: 3 of 5 dispatched models support it",
       },
     ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
     "disagree": [
       {
         "claim": "Split claim",
@@ -894,7 +1004,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "whySource": "computed",
       },
     ],
-    "executiveSummarySource": "computed",
+    "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   },
   "runCertainty": 0.66,
@@ -971,6 +1081,16 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "result": "consensus: 3 of 5 dispatched models support it",
       },
     ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
     "disagree": [
       {
         "claim": "Split claim",
@@ -978,7 +1098,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "whySource": "computed",
       },
     ],
-    "executiveSummarySource": "computed",
+    "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   },
   "runCertainty": 0.66,
@@ -1055,6 +1175,16 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "result": "consensus: 3 of 5 dispatched models support it",
       },
     ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
     "disagree": [
       {
         "claim": "Split claim",
@@ -1062,7 +1192,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "whySource": "computed",
       },
     ],
-    "executiveSummarySource": "computed",
+    "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   },
   "runCertainty": 0.66,
@@ -1139,6 +1269,16 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "result": "consensus: 3 of 5 dispatched models support it",
       },
     ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
     "disagree": [
       {
         "claim": "Split claim",
@@ -1146,7 +1286,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "whySource": "computed",
       },
     ],
-    "executiveSummarySource": "computed",
+    "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   },
   "runCertainty": 0.66,
@@ -1223,6 +1363,16 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "result": "consensus: 3 of 5 dispatched models support it",
       },
     ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
     "disagree": [
       {
         "claim": "Split claim",
@@ -1230,7 +1380,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "whySource": "computed",
       },
     ],
-    "executiveSummarySource": "computed",
+    "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   },
   "runCertainty": 0.66,
@@ -1307,6 +1457,16 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "result": "consensus: 3 of 5 dispatched models support it",
       },
     ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
     "disagree": [
       {
         "claim": "Split claim",
@@ -1314,7 +1474,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "whySource": "computed",
       },
     ],
-    "executiveSummarySource": "computed",
+    "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   },
   "runCertainty": 0.66,
@@ -1391,6 +1551,16 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "result": "consensus: 3 of 5 dispatched models support it",
       },
     ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
     "disagree": [
       {
         "claim": "Split claim",
@@ -1398,7 +1568,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "whySource": "computed",
       },
     ],
-    "executiveSummarySource": "computed",
+    "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   },
   "runCertainty": 0.66,
@@ -1475,6 +1645,16 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "result": "consensus: 3 of 5 dispatched models support it",
       },
     ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
     "disagree": [
       {
         "claim": "Split claim",
@@ -1482,7 +1662,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "whySource": "computed",
       },
     ],
-    "executiveSummarySource": "computed",
+    "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   },
   "runCertainty": 0.66,
@@ -1559,6 +1739,16 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "result": "consensus: 3 of 5 dispatched models support it",
       },
     ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
     "disagree": [
       {
         "claim": "Split claim",
@@ -1566,7 +1756,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "whySource": "computed",
       },
     ],
-    "executiveSummarySource": "computed",
+    "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   },
   "runCertainty": 0.66,
@@ -1643,6 +1833,16 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "result": "consensus: 3 of 5 dispatched models support it",
       },
     ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
     "disagree": [
       {
         "claim": "Split claim",
@@ -1650,7 +1850,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "whySource": "computed",
       },
     ],
-    "executiveSummarySource": "computed",
+    "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   },
   "runCertainty": 0.66,
@@ -1727,6 +1927,16 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "result": "consensus: 3 of 5 dispatched models support it",
       },
     ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
     "disagree": [
       {
         "claim": "Split claim",
@@ -1734,7 +1944,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "whySource": "computed",
       },
     ],
-    "executiveSummarySource": "computed",
+    "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   },
   "runCertainty": 0.66,
@@ -1811,6 +2021,16 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "result": "consensus: 3 of 5 dispatched models support it",
       },
     ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
     "disagree": [
       {
         "claim": "Split claim",
@@ -1818,7 +2038,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "whySource": "computed",
       },
     ],
-    "executiveSummarySource": "computed",
+    "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   },
   "runCertainty": 0.66,
@@ -1895,6 +2115,16 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "result": "consensus: 3 of 5 dispatched models support it",
       },
     ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
     "disagree": [
       {
         "claim": "Split claim",
@@ -1902,7 +2132,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "whySource": "computed",
       },
     ],
-    "executiveSummarySource": "computed",
+    "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   },
   "runCertainty": 0.6599999999999999,
@@ -1979,6 +2209,16 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "result": "consensus: 3 of 5 dispatched models support it",
       },
     ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
     "disagree": [
       {
         "claim": "Split claim",
@@ -1986,7 +2226,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "whySource": "computed",
       },
     ],
-    "executiveSummarySource": "computed",
+    "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   },
   "runCertainty": 0.66,
@@ -2063,6 +2303,16 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "result": "consensus: 3 of 5 dispatched models support it",
       },
     ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
     "disagree": [
       {
         "claim": "Split claim",
@@ -2070,7 +2320,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "whySource": "computed",
       },
     ],
-    "executiveSummarySource": "computed",
+    "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   },
   "runCertainty": 0.66,
@@ -2147,6 +2397,16 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "result": "consensus: 3 of 5 dispatched models support it",
       },
     ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
     "disagree": [
       {
         "claim": "Split claim",
@@ -2154,7 +2414,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "whySource": "computed",
       },
     ],
-    "executiveSummarySource": "computed",
+    "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   },
   "runCertainty": 0.66,
@@ -2231,6 +2491,16 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "result": "consensus: 3 of 5 dispatched models support it",
       },
     ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
     "disagree": [
       {
         "claim": "Split claim",
@@ -2238,7 +2508,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "whySource": "computed",
       },
     ],
-    "executiveSummarySource": "computed",
+    "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   },
   "runCertainty": 0.66,
@@ -2315,6 +2585,16 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "result": "consensus: 3 of 5 dispatched models support it",
       },
     ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
     "disagree": [
       {
         "claim": "Split claim",
@@ -2322,7 +2602,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
         "whySource": "computed",
       },
     ],
-    "executiveSummarySource": "computed",
+    "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   },
   "runCertainty": 0.66,

@@ -28,7 +28,8 @@ import { finalizeAdaptiveRun } from "@/lib/adaptiveSchema/orchestrate";
 import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
 import { buildAdaptiveSynthesisReport } from "@/lib/adaptiveSchema/synthesisReport";
 import { buildAdaptiveLinkedInPost, buildAdaptiveMemoInput, buildAdaptiveSynthesisMarkdown, buildAdaptiveXPost } from "@/lib/adaptiveSchema/shareBuilders";
-import { MODEL_EXPLANATION_LABEL, escapeMarkdown, presentAgreeItems, presentExecutiveSummary } from "@/lib/adaptiveSchema/reportPresentation";
+import { MODEL_EXPLANATION_LABEL, presentAgreeItems, presentExecutiveSummary } from "@/lib/adaptiveSchema/reportPresentation";
+import { escapeMarkdownInline as escapeMarkdown } from "@/lib/adaptiveSchema/textSerialization";
 import { quoteClaim } from "@/lib/adaptiveSchema/agreementNarrative";
 import AdaptiveSynthesisReportView, { AgreementDisagreementMap, DisagreementsSection } from "@/components/adaptive/AdaptiveSynthesisReportView";
 import { renderAdaptiveResearchDocxV1 } from "@/lib/docx/renderAdaptiveResearchDocx";
@@ -190,9 +191,10 @@ describe("R5-1/R5-2: a 4/5 majority with a 5/5 claim and contradictory prose (re
       const at = md.indexOf(c);
       expect(md.lastIndexOf(`**${MODEL_EXPLANATION_LABEL}:**`, at)).toBeGreaterThan(md.lastIndexOf("**Panel result:**", at));
     }
-    expect(md).toContain(`**${MODEL_EXPLANATION_LABEL}:**\nEvidence is strong. ${CONTRADICTIONS[3]}`);
+    // R6-2: model prose is a blockquote under its label (Markdown) / quoted lines under its label (memo).
+    expect(md).toContain(`**${MODEL_EXPLANATION_LABEL}:**\n> Evidence is strong. ${CONTRADICTIONS[3]}`);
     expect(sh.memo.confidenceAssessment.startsWith("Panel result: Of 1 scored claim")).toBe(true);
-    expect(sh.memo.confidenceAssessment).toContain(`${MODEL_EXPLANATION_LABEL}: Rates matter.`);
+    expect(sh.memo.confidenceAssessment).toContain(`${MODEL_EXPLANATION_LABEL}:\n> Rates matter.`);
   });
 });
 
@@ -231,8 +233,8 @@ describe("R5-1: the disagreement side and the share builders use the same bounda
     const sh = shares(report);
     const result = "split: 2 of 5 dispatched models support it and 3 dispute it";
     expect(sh.markdown).toContain(`- **Claim:** ${escapeMarkdown(quoteClaim(SPLIT_CLAIM))} — **Panel result:** ${result}`);
-    expect(sh.markdown).toContain(`  - **${MODEL_EXPLANATION_LABEL}:** ${DENIAL}`);
-    expect(sh.memo.synthesisDisagreements).toEqual([`Claim: ${quoteClaim(SPLIT_CLAIM)} — Panel result: ${result} — ${MODEL_EXPLANATION_LABEL}: ${DENIAL}`]);
+    expect(sh.markdown).toContain(`  - **${MODEL_EXPLANATION_LABEL}:**\n\n    > ${escapeMarkdown(DENIAL)}`);
+    expect(sh.memo.synthesisDisagreements).toEqual([`Claim: ${quoteClaim(SPLIT_CLAIM)} — Panel result: ${result}\n  ${MODEL_EXPLANATION_LABEL}:\n  > ${DENIAL}`]);
     expect(sh.linkedin).toContain(`→ ${quoteClaim(SPLIT_CLAIM)} — panel result: ${result}`);
     expect(sh.x).toContain(`Models split on: ${quoteClaim(SPLIT_CLAIM)} — panel result: ${result}`);
     expect(sh.x.length).toBeLessThanOrEqual(280);
@@ -319,7 +321,7 @@ describe("R5-4: claim text with quotes is quoted safely on every format; the sto
     expect(html).not.toContain("<b>x</b>");
 
     const md = buildAdaptiveSynthesisMarkdown("Q?", report);
-    expect(md).toContain("\\*more\\* \\<b\\>x\\</b\\> & so\\_on”");
+    expect(md).toContain("\\*more\\* \\<b\\>x\\</b\\> \\& so\\_on”");
 
     const record = JSON.parse(JSON.stringify(pdfLayoutFixtures().find((x) => (x.record as any).reportSnapshot?.legacy?.synthesisReport?.verdictCard)!.record));
     record.reportSnapshot.legacy.synthesisReport = report;

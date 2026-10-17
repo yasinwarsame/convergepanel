@@ -31,8 +31,9 @@ import { AdaptiveResearchExportV1 } from "@/lib/adaptiveSchema/researchExport";
 import { exportModelIdentityLabel, exportRunProvenanceLines, readFrozenRunProvenance } from "@/lib/adaptiveSchema/exportRunProvenance";
 import { CONSENSUS_LABELS, SOURCE_GROUNDING_LABELS } from "@/lib/adaptiveSchema/reportSummary";
 import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
-import { FieldSpec } from "@/lib/adaptiveSchema/types";
+import { AdaptiveSynthesisReport, FieldSpec } from "@/lib/adaptiveSchema/types";
 import { presentVerdictCaveat, presentVerdictClaim } from "@/lib/adaptiveSchema/agreementNarrative";
+import { answerClaimLines, presentUnifiedAnswer } from "@/lib/adaptiveSchema/reportPresentation";
 import {
   fieldLabel,
   formatExportTimestamp as formatTimestamp,
@@ -641,6 +642,13 @@ function VerdictCardBody({
   );
 }
 
+/** The Unified Answer of a report carrying presentation.answer, as text: note, then each claim's lines, claims separated by a blank line. */
+function unifiedAnswerText(synthesis: AdaptiveSynthesisReport): string {
+  const answer = presentUnifiedAnswer(synthesis);
+  const head = [answer.note?.text, answer.claimsHeading ? `${answer.claimsHeading}:` : null].filter(Boolean).join("\n");
+  return [head, ...answer.claims.map((item) => answerClaimLines(item).join("\n"))].filter(Boolean).join("\n\n");
+}
+
 function LegacyContent({ record }: { record: AdaptiveResearchExportV1 }) {
   const legacy = record.reportSnapshot.legacy!;
   const schema = SCHEMA_REGISTRY[legacy.schemaId];
@@ -653,9 +661,17 @@ function LegacyContent({ record }: { record: AdaptiveResearchExportV1 }) {
     <View>
       {synthesis ? (
         <View>
-          <SectionCard label="Panel conclusion">
-            <Text {...textProps(pdfStyles.bodyText, CARD_CLOSING_PADDING)}>{synthesis.unifiedAnswer}</Text>
-          </SectionCard>
+          {synthesis.presentation?.answer ? (
+            // R6-1: the Unified Answer's computed note, then each claim with its own computed result, as one text
+            // (one paginating element, like the verdict card's lines). Reports persisted before it: unchanged.
+            <SectionCard label="Unified answer">
+              <Text {...textProps(pdfStyles.bodyText, CARD_CLOSING_PADDING)}>{unifiedAnswerText(synthesis)}</Text>
+            </SectionCard>
+          ) : (
+            <SectionCard label="Panel conclusion">
+              <Text {...textProps(pdfStyles.bodyText, CARD_CLOSING_PADDING)}>{synthesis.unifiedAnswer}</Text>
+            </SectionCard>
+          )}
           <SectionCard label="Where models agree / disagree">
             <VerdictCardBody verdictCard={synthesis.verdictCard} />
           </SectionCard>

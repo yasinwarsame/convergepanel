@@ -82,22 +82,19 @@ export function buildAdaptiveVerdict(
   return { summary, coreFinding, convergingModelCount, totalModelCount };
 }
 
-/**
- * 2–4 sentences, only from consensus/majority claims, each citing which
- * models back it. On gate "fail", replaced entirely by "Panel could not
- * converge" plus the split claims — the whole point of R1d's gate rule is
- * that a low-certainty run must never read as a confident synthesis.
- */
-export function buildAdaptiveUnifiedAnswer(rows: AlignedClaim[], gate: AdaptiveGateResult): string {
+export const UNIFIED_ANSWER_FAIL_NOTE = "Panel could not converge on a reliable answer.";
+
+/** What the Unified Answer rests on (R6-1): its computed note and its claims, in order. One selection for the string and for presentation.answer. */
+export interface UnifiedAnswerSelection {
+  /** Computed text with no claim in it; null when the answer is its claims. */
+  note: string | null;
+  /** Gate fail: the unresolved split rows; otherwise the consensus/majority rows by salience. */
+  rows: AlignedClaim[];
+}
+
+export function selectUnifiedAnswer(rows: AlignedClaim[], gate: AdaptiveGateResult): UnifiedAnswerSelection {
   if (gate.status === "fail") {
-    const splitClaims = rows.filter((r) => r.status === "split").slice(0, 5);
-    const bullets = splitClaims.map((r) => `- ${quoteClaim(r.claimText)}`).join("\n");
-    return [
-      "Panel could not converge on a reliable answer.",
-      bullets ? `\nUnresolved claims:\n${bullets}` : "",
-    ]
-      .join("")
-      .trim();
+    return { note: UNIFIED_ANSWER_FAIL_NOTE, rows: rows.filter((r) => r.status === "split").slice(0, 5) };
   }
 
   const candidates = rows
@@ -108,16 +105,39 @@ export function buildAdaptiveUnifiedAnswer(rows: AlignedClaim[], gate: AdaptiveG
   if (candidates.length === 0) {
     const limitedCount = rows.filter((r) => r.status === "limited_coverage").length;
     const base = "No consensus or majority claims were identified across the panel.";
-    return limitedCount > 0
-      ? `${base} ${limitedCount} claim${limitedCount === 1 ? " had" : "s had"} positions from half or fewer of the dispatched models — too few to count as agreement.`
-      : base;
+    return {
+      note:
+        limitedCount > 0
+          ? `${base} ${limitedCount} claim${limitedCount === 1 ? " had" : "s had"} positions from half or fewer of the dispatched models — too few to count as agreement.`
+          : base,
+      rows: [],
+    };
   }
+  return { note: null, rows: candidates };
+}
 
-  return candidates
+/** The models backing a Unified Answer claim (agrees/partial cells), by family name. */
+export function unifiedAnswerSupporters(row: AlignedClaim): string[] {
+  return row.cells.filter((c) => c && (c.stance === "agrees" || c.stance === "partial")).map((c) => modelLabel(c!.modelId));
+}
+
+/**
+ * 2–4 sentences, only from consensus/majority claims, each citing which
+ * models back it. On gate "fail", replaced entirely by "Panel could not
+ * converge" plus the split claims — the whole point of R1d's gate rule is
+ * that a low-certainty run must never read as a confident synthesis.
+ */
+export function buildAdaptiveUnifiedAnswer(rows: AlignedClaim[], gate: AdaptiveGateResult): string {
+  const selection = selectUnifiedAnswer(rows, gate);
+  if (gate.status === "fail") {
+    const bullets = selection.rows.map((r) => `- ${quoteClaim(r.claimText)}`).join("\n");
+    return [selection.note, bullets ? `\nUnresolved claims:\n${bullets}` : ""].join("").trim();
+  }
+  if (selection.note !== null) return selection.note;
+
+  return selection.rows
     .map((row) => {
-      const supportingModels = row.cells
-        .filter((c) => c && (c.stance === "agrees" || c.stance === "partial"))
-        .map((c) => modelLabel(c!.modelId));
+      const supportingModels = unifiedAnswerSupporters(row);
       const names = supportingModels.length > 0 ? supportingModels.join(", ") : "the panel";
       const contested = describeContested(row);
       return contested ? `${quoteClaim(row.claimText)} (${names}; ${contested}).` : `${quoteClaim(row.claimText)} (${names}).`;

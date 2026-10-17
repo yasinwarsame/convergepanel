@@ -44,6 +44,7 @@ import { CONSENSUS_LABELS, SOURCE_GROUNDING_LABELS } from "@/lib/adaptiveSchema/
 import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
 import { FieldSpec } from "@/lib/adaptiveSchema/types";
 import { presentVerdictCaveat, presentVerdictClaim } from "@/lib/adaptiveSchema/agreementNarrative";
+import { answerClaimLines, presentUnifiedAnswer } from "@/lib/adaptiveSchema/reportPresentation";
 import {
   fieldLabel,
   formatExportTimestamp,
@@ -290,7 +291,20 @@ function legacySection(record: AdaptiveResearchExportV1): (Paragraph | Table)[] 
   const out: (Paragraph | Table)[] = [];
 
   if (synthesis) {
-    out.push(heading("Panel conclusion"), body(synthesis.unifiedAnswer));
+    if (synthesis.presentation?.answer) {
+      // R6-1: the Unified Answer's computed note, then each claim with its own computed result — not one
+      // "Panel conclusion" paragraph. Reports persisted before it export exactly as before.
+      const answer = presentUnifiedAnswer(synthesis);
+      out.push(heading("Unified answer"));
+      if (answer.note) out.push(body(answer.note.text));
+      if (answer.claimsHeading) out.push(muted(answer.claimsHeading));
+      for (const item of answer.claims) {
+        const [claim, ...computed] = answerClaimLines(item);
+        out.push(body(claim), ...computed.map((line) => muted(line)));
+      }
+    } else {
+      out.push(heading("Panel conclusion"), body(synthesis.unifiedAnswer));
+    }
     out.push(heading("Where models agree / disagree"));
     // Consensus Integrity: the quoted claim with its computed status (R4-1), and the canonical contested note
     // (verdictCard.ts). Each is absent on reports persisted before it existed, which export exactly as before.
