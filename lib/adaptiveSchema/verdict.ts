@@ -18,9 +18,10 @@ import { AlignedClaim } from "./types";
 import { AdaptiveGateResult } from "./gate";
 import { claimSalience } from "./scoring";
 import { describeContested, isTopConsensusEligible } from "./consensusIntegrity";
+import { NO_CONSENSUS_IDENTIFIED } from "./agreementNarrative";
 
-/** The canonical no-core-finding text, shared by the panel verdict and the verdict card. */
-export const NO_CONSENSUS_IDENTIFIED = "No consensus identified.";
+/** The canonical no-core-finding text, shared by the panel verdict and the verdict card (defined in agreementNarrative.ts). */
+export { NO_CONSENSUS_IDENTIFIED };
 
 export interface AdaptivePanelVerdict {
   /** "{N}/{M} models converge on {core finding}; certainty {score}; gate: {pass|caution|fail}." */

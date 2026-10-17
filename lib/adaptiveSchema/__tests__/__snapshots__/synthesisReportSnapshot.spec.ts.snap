@@ -4,7 +4,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -35,7 +35,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -69,7 +69,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -100,7 +100,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -134,7 +134,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -165,7 +165,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -199,7 +199,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -230,7 +230,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -264,7 +264,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -295,7 +295,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -329,7 +329,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -360,7 +360,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -394,7 +394,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -425,7 +425,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -459,7 +459,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -490,7 +490,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -524,7 +524,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -555,7 +555,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -589,7 +589,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -620,7 +620,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -654,7 +654,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -685,7 +685,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -719,7 +719,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -750,7 +750,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -784,7 +784,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -815,7 +815,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -849,7 +849,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -880,7 +880,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -914,7 +914,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -945,7 +945,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -979,7 +979,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -1010,7 +1010,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -1044,7 +1044,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -1075,7 +1075,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -1109,7 +1109,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -1140,7 +1140,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -1174,7 +1174,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -1205,7 +1205,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -1239,7 +1239,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -1270,7 +1270,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -1304,7 +1304,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -1335,7 +1335,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -1369,7 +1369,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -1400,7 +1400,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -1434,7 +1434,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -1465,7 +1465,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -1499,7 +1499,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -1530,7 +1530,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -1564,7 +1564,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -1595,7 +1595,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -1629,7 +1629,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -1660,7 +1660,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -1694,7 +1694,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -1725,7 +1725,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -1759,7 +1759,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -1790,7 +1790,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
