@@ -20,6 +20,7 @@
 
 import { ALIGNED_CLAIM_STATUSES, AdaptiveVerdictCard, AlignedClaim, AlignedClaimStatus } from "./types";
 import { CONSENSUS_STATUS_RANK, assessedPositionCount, describeContested, isTopConsensusEligible } from "./consensusIntegrity";
+import { joinLines } from "./textSerialization";
 
 /** The canonical no-core-finding text (panel verdict, verdict card, panel agreement statement). */
 export const NO_CONSENSUS_IDENTIFIED = "No consensus identified.";
@@ -160,18 +161,14 @@ export function renderPanelAgreement(f: PanelAgreementFacts): string {
  *
  * The quote is the boundary, so the claim cannot close it (R5-4): double
  * quotes inside the claim are shown as single quotes (" → ', “ → ‘, ” → ’)
- * and line breaks as spaces. This is display only — the stored claimText,
+ * and line breaks — every one textSerialization.joinLines knows, a lone CR
+ * included (R7-1) — as spaces. This is display only — the stored claimText,
  * and every identity or hash computed from it, are unchanged. Format-specific
  * escaping (HTML, Markdown, JSON) happens in each renderer, never here.
  */
 export function quoteClaim(claimText: string): string {
-  const inner = claimText
-    .replace(/"/g, "'")
-    .replace(/“/g, "‘")
-    .replace(/”/g, "’")
-    .replace(/\s*\r?\n\s*/g, " ")
-    .trim();
-  return `“${inner}”`;
+  const inner = claimText.replace(/"/g, "'").replace(/“/g, "‘").replace(/”/g, "’");
+  return `“${joinLines(inner, "whitespace").trim()}”`;
 }
 
 export const CLAIM_LABEL = "Claim";

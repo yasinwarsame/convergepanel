@@ -14,6 +14,8 @@
  *                          under its label, never a report heading
  *   plainTextQuote         the same block for plain text (memo) — every line
  *                          prefixed, so the block stays visibly one quoted unit
+ *   splitLines / joinLines the one line-break policy (R7-1) every text boundary
+ *                          uses, quoteClaim included
  *
  * Escaping is applied once, here, at serialization. Stored text, claim
  * identity and the HTML / DOCX / PDF renderers (which escape for their own
@@ -22,11 +24,41 @@
  * Pure and client-safe.
  */
 
+/**
+ * Line breaks (R7-1): every sequence a Markdown parser or a plain-text viewer may end a line at — CRLF, a lone CR
+ * and LF (CommonMark's line endings), and NEL, LINE SEPARATOR and PARAGRAPH SEPARATOR (Unicode line breaks some
+ * viewers honour). The one definition every boundary below, and quoteClaim, applies: model text that must stay on
+ * one line has each break turned into a space; model prose keeps its lines, each one quoted.
+ */
+const LINE_BREAK_SOURCE = String.raw`\r\n|[\r\n\u0085\u2028\u2029]`;
+const LINE_BREAK = new RegExp(LINE_BREAK_SOURCE);
+/** A line break with the spaces and tabs around it. */
+const LINE_BREAK_IN_BLANKS = new RegExp(String.raw`[ \t]*(?:${LINE_BREAK_SOURCE})[ \t]*`, "g");
+/** A line break with any whitespace around it, other line breaks included. */
+const LINE_BREAK_IN_WHITESPACE = new RegExp(String.raw`[\s\u0085]*(?:${LINE_BREAK_SOURCE})[\s\u0085]*`, "g");
+
+/** Text split into its lines at every line break. */
+export function splitLines(text: string): string[] {
+  return text.split(LINE_BREAK);
+}
+
+/**
+ * Text that must stay on one line: each line break becomes one space — with the spaces and tabs around it
+ * ("blanks"), or with every whitespace character around it, so a run of breaks is one space ("whitespace").
+ */
+export function joinLines(text: string, absorb: "blanks" | "whitespace" = "blanks"): string {
+  return text.replace(absorb === "blanks" ? LINE_BREAK_IN_BLANKS : LINE_BREAK_IN_WHITESPACE, " ");
+}
+
 /** CommonMark/GFM characters that can start inline structure or HTML anywhere in a line ("@": GFM email autolinks). */
 const INLINE_SPECIAL = /([\\`*_[\]#<>|~&@])/g;
 
-/** GFM autolink literals ("http://…", "www.…"): the URL stays visible as text but is not made a link. */
-const AUTOLINK_LITERAL = /(\b[A-Za-z][A-Za-z0-9+.-]*):(?=\/\/)|\b(www)\.(?=\S)/gi;
+/**
+ * GFM autolink literals ("http://…", "www.…"): the URL stays visible as text but is not made a link. Matched
+ * wherever they occur, not only at a word boundary (R7-2): parsers link a URL after "_", a digit or a letter too.
+ * The scheme is bounded (URI schemes are short), so the scan stays linear.
+ */
+const AUTOLINK_LITERAL = /([A-Za-z][A-Za-z0-9+.-]{0,31}):(?=\/\/)|(www)\.(?=\S)/gi;
 
 /** Line-start block markers left after INLINE_SPECIAL: list bullets, setext underlines / thematic breaks, ordered-list numbers. */
 const LINE_START_MARKER = /^([ \t]*)(?:([-+=])|(\d{1,9})([.)]))/;
@@ -42,17 +74,15 @@ function escapeMarkdownLine(line: string): string {
 
 /** Model-written text placed inside one Markdown line: escaped, line breaks collapsed to a space. */
 export function escapeMarkdownInline(text: string): string {
-  return escapeMarkdownLine(text.replace(/[ \t]*\r?\n[ \t]*/g, " "));
+  return escapeMarkdownLine(joinLines(text));
 }
-
-const lines = (text: string) => text.replace(/\r\n?/g, "\n").split("\n");
 
 /**
  * Model-written prose as a Markdown blockquote: every line quoted and escaped; blank lines stay inside the quote
  * (paragraphs), and a line followed by another line ends in a hard break so the model's line breaks are kept.
  */
 export function markdownQuote(text: string, indent = ""): string[] {
-  const all = lines(text);
+  const all = splitLines(text);
   return all.map((line, i) => {
     if (!line.trim()) return `${indent}>`;
     const next = all[i + 1];
@@ -62,5 +92,5 @@ export function markdownQuote(text: string, indent = ""): string[] {
 
 /** Model-written prose for plain text: every line prefixed with "> " so the block stays one quoted unit. */
 export function plainTextQuote(text: string, indent = ""): string[] {
-  return lines(text).map((line) => (line.trim() ? `${indent}> ${line}` : `${indent}>`));
+  return splitLines(text).map((line) => (line.trim() ? `${indent}> ${line}` : `${indent}>`));
 }
