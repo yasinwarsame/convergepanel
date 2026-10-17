@@ -244,6 +244,19 @@ describe("R6-1: each Unified Answer claim carries its own computed result; the f
     }
   });
 
+  it("DOCX and PDF: the verdict card's Agreement / Disagreement lines keep their own Claim / Panel result, separate from the Unified Answer", async () => {
+    const top = row(UNAN, "majority", MAJ45);
+    const split = row("Tariffs raise prices", "split", SPLIT23);
+    const report = await build([top, split], null);
+    const { docx, pdf } = await exportsOf(report);
+    for (const t of [docx, pdf]) {
+      const card = t.slice(t.indexOf("Where models agree / disagree"));
+      expect(card.indexOf("Where models agree / disagree")).toBe(0);
+      expect(card).toMatch(new RegExp(`Agreement\\s+Claim: ${quoteClaim(UNAN)}\\s+Panel result: ${statusOf(top)}`));
+      expect(card).toMatch(new RegExp(`Disagreement\\s+Claim: ${quoteClaim(split.claimText)}\\s+Panel result: ${statusOf(split).replace(/[()]/g, "\\$&")}`));
+    }
+  });
+
   it("the Panel verdict line in Markdown: computed figures, then the top claim with its own result", async () => {
     const rs = rows();
     const report = await build(rs, null);
@@ -353,7 +366,10 @@ describe("R6-3: model text is escaped once at every Markdown interpolation", () 
 
   it("verdict, Unified Answer, agree/disagree, positions and bias lines: escaped; the stored claim unchanged; repeat serialization identical", async () => {
     const claim = `${RAW}\n## Conclusion`;
-    const rs = [row(claim, "majority", MAJ45), row(`Split ${RAW}`, "split", SPLIT23)];
+    const splitRow = row(`Split ${RAW}`, "split", SPLIT23);
+    // Per-model positions are model-written too: give one markup.
+    (splitRow.cells[0] as AlignedClaimCell).excerpt = "<b>pos</b> [Verified](http://e.x) *it*";
+    const rs = [row(claim, "majority", MAJ45), splitRow];
     const report = await build(rs, null, [
       { biasType: "## Bias <b>", description: `All five agree ${RAW}`, modelsImplicated: ["chatgpt"], evidence: [{ modelId: "chatgpt", excerpt: "e", rationale: "r" }], likelyCauses: [], impact: "", mitigationSteps: [] },
     ]);
@@ -369,7 +385,9 @@ describe("R6-3: model text is escaped once at every Markdown interpolation", () 
     expect(md).toContain(`- **Claim:** ${q} — **Panel result:** ${statusOf(rs[0])} — **Supported by:**`); // Unified Answer
     expect(md).toContain(`- **Claim:** ${q} — **Panel result:** ${statusOf(rs[0])}\n`); // where agree
     expect(md).toContain(`**${MODEL_CAVEAT_LABEL}:**\n- \\#\\# Bias \\<b\\> — All five agree ${escapeMarkdownInline(RAW)}`);
-    for (const p of report.disagreements[0].positions) expect(md).toContain(`: ${escapeMarkdownInline(p.position)}`);
+    expect(report.disagreements[0].positions.some((p) => p.position.includes("<b>pos</b>"))).toBe(true);
+    for (const p of report.disagreements[0].positions) expect(md).toContain(`: ${escapeMarkdownInline(p.position)}\n`);
+    expect(md).toContain("ChatGPT: \\<b\\>pos\\</b\\> \\[Verified\\](http\\://e.x) \\*it\\*");
     expect(shown(q)).toBe(quoteClaim(claim));
   });
 });
@@ -382,7 +400,8 @@ describe("R6-4..R6-6: load-bearing claims, single-model insights, bias and copie
     const report = await build([r], null);
     const parts = bySource(section(view(report, [r], [r]), "load-bearing-claims"));
     const at = parts.findIndex((t) => t.text === `Claim: ${quoteClaim(UNAN)}`);
-    expect(parts[at].source).toBe("model_claim");
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(parts[at]?.source).toBe("model_claim");
     expect(parts.slice(at + 1).map((t) => t.source)).toEqual(["computed", "computed", "computed"]);
     expect(parts.slice(at + 1).map((t) => t.text).join(" ")).toBe("Panel result: majority (supported by ChatGPT, Claude, Grok, Perplexity; disputed by Gemini)");
     const legacy = section(view(asLegacy(report), [r], [r]), "load-bearing-claims");
