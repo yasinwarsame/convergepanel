@@ -148,6 +148,9 @@ describe("R8-1: the bias caveat's line breaks are shown as spaces on cards from 
       expect(result).toBeGreaterThan(0);
       expect(at).toBeGreaterThan(result);
       expect(card.slice(at, at + shown.length)).not.toMatch(ANY_SEPARATOR);
+      // Exactly once, in its own text right after the computed split result and detail — never folded into a computed line.
+      expect(card.split(shown)).toHaveLength(2);
+      expect(card).toContain(`Disagreement Claim: “${SPLIT.claimText}”\n${PANEL_RESULT_LABEL}: ${statusOf(SPLIT)} ${report.verdictCard.disagreementDetail} ${shown}`);
       expect(pdf).not.toContain(caveat);
       expect(pdf).not.toMatch(new RegExp(`[\\r\\n\\u0085\\u2028\\u2029]${PANEL_RESULT_LABEL}: consensus`));
     });
