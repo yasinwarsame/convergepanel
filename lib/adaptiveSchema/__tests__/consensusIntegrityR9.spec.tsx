@@ -282,6 +282,29 @@ describe("R9 through the pipeline: 400 spaces in the majority claim, tabs in the
     for (const t of owners) expect(t.text).toContain(`Claim: ${shownTop}\nPanel result: ${report.verdictCard.topConsensusAgreement}`);
   });
 
+  it("PDF: a contested note on a new card is its own computed line after the result, with its bold label, outside the model run", () => {
+    const NOTE = "all 5 models that listed this claim mark it contested";
+    const contested = JSON.parse(JSON.stringify(report));
+    contested.verdictCard.topConsensusContested = NOTE;
+    const texts = pdfTexts(AdaptiveResearchDocument({ record: recordOf(contested) } as any));
+    const owner = texts.find((t) => t.nested && t.text.startsWith(`Claim: ${shownTop}\nPanel result:`) && !t.text.includes("Supported by"))!;
+    expect(owner.text).toBe(`Claim: ${shownTop}\nPanel result: ${report.verdictCard.topConsensusAgreement}\nContested: ${NOTE}`);
+    expect(labelRuns(texts).map((r) => r.text)).toContain("Contested: ");
+    expect(modelRuns(texts).some((r) => r.text.includes(NOTE))).toBe(false);
+    const without = pdfTexts(AdaptiveResearchDocument({ record: recordOf(report) } as any));
+    expect(without.some((t) => t.text.includes("Contested:"))).toBe(false);
+  });
+
+  it("PDF Unified answer: each claim's lines are one group, separated from the next claim by a blank line", () => {
+    const two = JSON.parse(JSON.stringify(report));
+    const first = two.presentation.answer.claims[0];
+    two.presentation.answer.claims.push({ ...first, claim: SPLIT });
+    const texts = pdfTexts(AdaptiveResearchDocument({ record: recordOf(two) } as any));
+    const owner = texts.find((t) => t.nested && t.text.includes("Supported by:"))!;
+    const group = (claim: string) => [`Claim: ${claim}`, `Panel result: ${first.result}`, ...(first.contested ? [`Contested: ${first.contested}`] : []), `Supported by: ${first.supporters}`].join("\n");
+    expect(owner.text).toContain(`${group(shownTop)}\n\n${group(`“${SPLIT}”`)}`);
+  });
+
   it("legacy record (persisted before this PR): no model runs, no label runs, stored text exactly as written", async () => {
     const legacy = asLegacy(report);
     const texts = pdfTexts(AdaptiveResearchDocument({ record: recordOf(legacy) } as any));
