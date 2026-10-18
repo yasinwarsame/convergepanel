@@ -694,11 +694,12 @@ function unifiedAnswerText(synthesis: AdaptiveSynthesisReport): React.ReactNode[
     answerLeadBlocks(answer).map(fromBlock),
     [...(answer.note ? [fromBlock(answer.note)] : []), ...(answer.claimsHeading ? [{ label: null, text: `${answer.claimsHeading}:`, model: false }] : [])],
     ...answer.claims.map((item) => [item.claim, item.result, item.contested, item.supporters].filter((b): b is TextBlock => !!b).map(fromBlock)),
+    // The heading stays in its first claim's group, so it is never separated from it by a blank line.
     ...(answer.unresolvedHeading && answer.unresolved
-      ? [
-          [{ label: null, text: `${answer.unresolvedHeading}:`, model: false }],
-          ...answer.unresolved.map((item) => unresolvedClaimParts(item).map(fromBlock)),
-        ]
+      ? answer.unresolved.map((item, i) => [
+          ...(i === 0 ? [{ label: null, text: `${answer.unresolvedHeading}:`, model: false }] : []),
+          ...unresolvedClaimParts(item).map(fromBlock),
+        ])
       : []),
   ].filter((g) => g.length > 0);
   const lines = groups.flat();
