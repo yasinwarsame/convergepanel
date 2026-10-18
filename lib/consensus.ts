@@ -47,6 +47,7 @@ import {
 import { buildAgreementMap, ClaimCluster as AgreementClaimCluster } from "@/lib/agreementMap";
 import { runModelFamilyName } from "@/lib/panel/runModelIdentity";
 import { isUsableResult } from "@/lib/panel/publicize";
+import { escapeHtml } from "@/lib/security/escapeHtml";
 
 const SYSTEM_WRAPPER =
   "Answer clearly. Provide your key claims and any relevant figures. If unsure, say so.";
@@ -609,7 +610,10 @@ export function synthesizeReport(
     singleModelInsightsCount: singleClusters.length,
   };
 
-  // Generate unified answer with explicit consensus identification
+  // Generate unified answer with explicit consensus identification.
+  // Security (S0, CodeQL #3/#6): this is HTML rendered with dangerouslySetInnerHTML (ResultsDisplay). Every
+  // interpolated string — model-written claim text and model names — is HTML-encoded (escapeHtml), so it is
+  // shown as text and can never become markup; only the template's own tags are markup.
   // Note: Trust Summary is displayed as visual pills in the UI, but we include it in HTML for fallback
   let unifiedAnswer = "<h2>Trust Summary</h2>\n\n";
   
@@ -623,7 +627,7 @@ export function synthesizeReport(
       const modelNames = Array.from(new Set(cluster.claims.map((c) => c.modelId)))
         .map((id) => runModelFamilyName(id))
         .join(", ");
-      unifiedAnswer += `<li><strong>${cluster.representativeText}</strong> — <em>Agreed by ${modelCount} models (${modelNames})</em></li>\n`;
+      unifiedAnswer += `<li><strong>${escapeHtml(cluster.representativeText)}</strong> — <em>Agreed by ${modelCount} models (${escapeHtml(modelNames)})</em></li>\n`;
     });
     unifiedAnswer += "</ul>\n\n";
   } else {
@@ -638,7 +642,7 @@ export function synthesizeReport(
       const modelNames = cluster.modelIds
         .map((id) => runModelFamilyName(id))
         .join(", ");
-      unifiedAnswer += `<li class="bg-orange-50 border-l-4 border-orange-400 pl-4 py-2 rounded-r-md my-2"><strong>${cluster.representativeText}</strong> — <em>Different perspectives from: ${modelNames}</em></li>\n`;
+      unifiedAnswer += `<li class="bg-orange-50 border-l-4 border-orange-400 pl-4 py-2 rounded-r-md my-2"><strong>${escapeHtml(cluster.representativeText)}</strong> — <em>Different perspectives from: ${escapeHtml(modelNames)}</em></li>\n`;
     });
     unifiedAnswer += "</ul>\n\n";
   } else {
@@ -667,7 +671,7 @@ export function synthesizeReport(
       const modelNames = Array.from(new Set(cluster.claims.map((c) => c.modelId)))
         .map((id) => runModelFamilyName(id))
         .join(", ");
-      unifiedAnswer += `<p class="bg-green-50 border-l-4 border-green-400 pl-4 py-2 rounded-r-md my-2"><strong>• ${representativeClaim.text}</strong> <em>(Consensus: ${modelCount} models agree — ${modelNames})</em></p>\n`;
+      unifiedAnswer += `<p class="bg-green-50 border-l-4 border-green-400 pl-4 py-2 rounded-r-md my-2"><strong>• ${escapeHtml(representativeClaim.text)}</strong> <em>(Consensus: ${modelCount} models agree — ${escapeHtml(modelNames)})</em></p>\n`;
     });
     unifiedAnswer += "\n";
   }
@@ -682,8 +686,8 @@ export function synthesizeReport(
       const modelNames = models.map((id) => runModelFamilyName(id)).join(", ");
       // Wrap entire disagreement cluster in light orange container
       unifiedAnswer += `<div class="bg-orange-50 border-l-4 border-orange-400 pl-4 py-3 rounded-r-md my-2">\n`;
-      unifiedAnswer += `<p class="mb-2"><strong>Different perspectives on:</strong> ${cluster.representativeText}</p>\n`;
-      unifiedAnswer += `<p class="text-sm text-slate-700 mb-2"><em>Models with conflicting views: ${modelNames}</em></p>\n`;
+      unifiedAnswer += `<p class="mb-2"><strong>Different perspectives on:</strong> ${escapeHtml(cluster.representativeText)}</p>\n`;
+      unifiedAnswer += `<p class="text-sm text-slate-700 mb-2"><em>Models with conflicting views: ${escapeHtml(modelNames)}</em></p>\n`;
       
       // Show individual claims from different models if available
       const uniqueModelClaims = new Map<ModelId, string>();
@@ -696,7 +700,7 @@ export function synthesizeReport(
         unifiedAnswer += "<ul class=\"ml-4 mt-2 space-y-1\">\n";
         uniqueModelClaims.forEach((text, modelId) => {
           const modelName = runModelFamilyName(modelId);
-          unifiedAnswer += `<li class="mb-1"><strong>${modelName}:</strong> ${text}</li>\n`;
+          unifiedAnswer += `<li class="mb-1"><strong>${escapeHtml(modelName)}:</strong> ${escapeHtml(text)}</li>\n`;
         });
         unifiedAnswer += "</ul>\n";
       }
