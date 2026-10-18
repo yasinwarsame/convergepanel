@@ -140,6 +140,19 @@ describe("S0 root cause A: model text in the legacy synthesis HTML is data, neve
     expect(foreignMarkup(html)).toEqual([]);
   });
 
+  it("an unknown model id is encoded in every model-name slot (consensus paragraph, disagreement list, conflicting-views line, per-model label)", () => {
+    const evil = `<svg onload=alert(16)>`;
+    const mk = (modelId: string, text: string) => ({ modelId, status: "ok", rawText: text, rawTextFull: text, tokenUsage: { totalTokens: 3 }, latencyMs: 12 });
+    const agree = synthesizeReport([mk(evil, `- ${TAIL}\n- Housing costs respond slowest over several quarters`), mk("claude", `- ${TAIL}\n- Housing costs respond slowest over several quarters`), mk("grok", `- ${TAIL} unlike the alternative view that tariffs dominate\n- Energy shocks dominate headline inflation readings`)] as never)!.unifiedAnswer;
+    const disagree = synthesizeReport([mk(evil, `- ${TAIL} falls by 25 percent`), mk("claude", `- ${TAIL} falls by 75 percent`)] as never)!.unifiedAnswer;
+    expect(agree).toMatch(/\(Consensus: 2 models agree — [^)]*&lt;svg onload=alert\(16\)&gt;/);
+    expect(disagree).toContain(`Different perspectives from: ${escapeHtml(evil)}`);
+    expect(disagree).toContain(`Models with conflicting views: ${escapeHtml(evil)}`);
+    expect(disagree).toContain(`<strong>${escapeHtml(evil)}:</strong>`);
+    expect(foreignMarkup(agree)).toEqual([]);
+    expect(foreignMarkup(disagree)).toEqual([]);
+  });
+
   it("model names and the template's own structure are unchanged for ordinary text", () => {
     const html = synthesizeReport(results(TAIL) as never)!.unifiedAnswer;
     expect(html).toContain("<h2>Trust Summary</h2>");
