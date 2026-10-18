@@ -193,6 +193,9 @@ const TRUST_STYLES = {
  * - Open Questions  
  * - Methodology
  * - Other structured synthesis sections
+ *
+ * Security contract (S0): `html` is application-authored markup from lib/consensus.ts synthesizeReport, in which
+ * every untrusted (model-written) value is HTML-encoded. Never pass model text or other untrusted HTML here.
  */
 function CollapsibleUnifiedAnswer({ html }: { html: string }) {
   // Process HTML to remove duplicate sections that are already shown in Trust Summary
@@ -277,12 +280,9 @@ function CollapsibleUnifiedAnswer({ html }: { html: string }) {
     '<h4 class="text-base md:text-lg font-semibold tracking-tight text-slate-900 mb-2 mt-4"$1>$2</h4>'
   );
   
-  // CSP compliance: Remove inline style attributes from HTML content
-  // This prevents CSP violations from LLM-generated HTML that might contain style="..."
-  processedHtml = processedHtml.replace(/\s+style\s*=\s*["'][^"']*["']/gi, '');
-  
-  // CSP compliance: Remove any <script> tags (defense in depth)
-  processedHtml = processedHtml.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+  // Security (S0, CodeQL #3/#6): the only markup here is lib/consensus.ts's own template; every model-written
+  // value in it is HTML-encoded at construction (escapeHtml), so model text cannot add a tag, attribute,
+  // script or style. The former <script>/style regex filters were not a sanitizer and are not needed.
   
   // Render the cleaned HTML with only non-duplicate content (bias, methodology, etc.)
   // Agreement/disagreement sections have been removed to avoid duplication with Trust Summary above.

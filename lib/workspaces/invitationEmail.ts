@@ -18,7 +18,25 @@
 
 import "server-only";
 
-const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** RFC 5321's practical maximum address length. Longer request input is rejected before it is examined (S0, CodeQL #1). */
+export const MAX_INVITATION_EMAIL_LENGTH = 254;
+
+const WHITESPACE = /\s/;
+
+/**
+ * The "local@domain.tld" shape guard: exactly one "@", no whitespace, a non-empty local part, and a "." in the
+ * domain with at least one character on each side. It accepts exactly what the former
+ * `/^[^\s@]+@[^\s@]+\.[^\s@]+$/` accepted, in linear time: that regex backtracked polynomially on long
+ * non-matching input (CodeQL js/polynomial-redos).
+ */
+function hasEmailShape(value: string): boolean {
+  if (WHITESPACE.test(value)) return false;
+  const at = value.indexOf("@");
+  if (at <= 0 || value.indexOf("@", at + 1) !== -1) return false;
+  const domain = value.slice(at + 1);
+  const dot = domain.indexOf(".", 1);
+  return dot !== -1 && dot < domain.length - 1;
+}
 
 export type NormalizeInvitationEmailResult = { ok: true; normalizedEmail: string } | { ok: false };
 
@@ -27,8 +45,9 @@ export function normalizeInvitationEmail(input: unknown): NormalizeInvitationEma
   if (typeof input !== "string") return { ok: false };
   const trimmed = input.trim();
   if (trimmed.length === 0) return { ok: false };
+  if (trimmed.length > MAX_INVITATION_EMAIL_LENGTH) return { ok: false };
   const normalized = trimmed.toLowerCase();
-  if (!EMAIL_SHAPE.test(normalized)) return { ok: false };
+  if (!hasEmailShape(normalized)) return { ok: false };
   return { ok: true, normalizedEmail: normalized };
 }
 
@@ -36,5 +55,5 @@ export function normalizeInvitationEmail(input: unknown): NormalizeInvitationEma
 export function isValidNormalizedInvitationEmail(value: unknown): value is string {
   if (typeof value !== "string") return false;
   if (value !== value.trim().toLowerCase()) return false;
-  return EMAIL_SHAPE.test(value);
+  return hasEmailShape(value);
 }
