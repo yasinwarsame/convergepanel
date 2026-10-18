@@ -93,7 +93,8 @@ async function docxParagraphs(report: AdaptiveSynthesisReport): Promise<string[]
   const xml = await (await JSZip.loadAsync(bytes)).file("word/document.xml")!.async("string");
   return xml
     .split("</w:p>")
-    .map((p) => (p.match(/<w:t[^>]*>[^<]*<\/w:t>/g) ?? []).map((t) => t.replace(/<[^>]*>/g, "")).join(""))
+    // Each run's text is the capture between <w:t …> and </w:t> (no tag stripping).
+    .map((p) => Array.from(p.matchAll(/<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/g), (m) => m[1]).join(""))
     .filter(Boolean);
 }
 
