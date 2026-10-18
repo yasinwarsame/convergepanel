@@ -24,12 +24,55 @@ import { escapeHtml } from "@/lib/security/escapeHtml";
 const TEMPLATE_TAGS = new Set(["h2", "h3", "h4", "p", "strong", "em", "ul", "li", "div"]);
 const TEMPLATE_ATTRS = new Set(["class"]);
 
-/** Every element in an HTML string: tag name and attribute names (a tokenizer for the test, not a sanitizer). */
+/**
+ * Every element in an HTML string: tag name and attribute names. A linear, single-pass tokenizer for the test (not
+ * a sanitizer): after "<" (optionally "/") and a letter it reads the tag name, then attributes — a name, and an
+ * optional "=" value that is double-quoted, single-quoted or unquoted — up to the closing ">".
+ */
 function elements(html: string): { tag: string; attrs: string[] }[] {
   const out: { tag: string; attrs: string[] }[] = [];
-  for (const m of html.matchAll(/<\/?([A-Za-z][A-Za-z0-9-]*)((?:\s+[^\s=>/]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?)*)\s*\/?>/g)) {
-    const attrs = Array.from(m[2].matchAll(/\s+([^\s=>/]+)(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?/g), (a) => a[1].toLowerCase());
-    out.push({ tag: m[1].toLowerCase(), attrs });
+  const isSpace = (c: string) => c === " " || c === "\t" || c === "\n" || c === "\r" || c === "\f";
+  const isNameStart = (c: string) => /^[A-Za-z]$/.test(c);
+  let i = 0;
+  while (i < html.length) {
+    if (html[i] !== "<") {
+      i++;
+      continue;
+    }
+    let j = i + 1;
+    if (html[j] === "/") j++;
+    if (!isNameStart(html[j] ?? "")) {
+      i++;
+      continue;
+    }
+    let tag = "";
+    while (j < html.length && /^[A-Za-z0-9-]$/.test(html[j])) tag += html[j++];
+    const attrs: string[] = [];
+    while (j < html.length && html[j] !== ">") {
+      if (isSpace(html[j]) || html[j] === "/") {
+        j++;
+        continue;
+      }
+      let name = "";
+      while (j < html.length && !isSpace(html[j]) && html[j] !== "=" && html[j] !== ">" && html[j] !== "/") name += html[j++];
+      if (name) attrs.push(name.toLowerCase());
+      while (j < html.length && isSpace(html[j])) j++;
+      if (html[j] === "=") {
+        j++;
+        while (j < html.length && isSpace(html[j])) j++;
+        const q = html[j];
+        if (q === '"' || q === "'") {
+          const close = html.indexOf(q, j + 1);
+          j = close === -1 ? html.length : close + 1;
+        } else {
+          while (j < html.length && !isSpace(html[j]) && html[j] !== ">") j++;
+        }
+      } else if (!name) {
+        j++;
+      }
+    }
+    out.push({ tag: tag.toLowerCase(), attrs });
+    i = j + 1;
   }
   return out;
 }
