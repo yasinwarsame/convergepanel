@@ -94,6 +94,21 @@ describe("S0 root cause A: model text in the legacy synthesis HTML is data, neve
     expect(html).toContain(escapeHtml(line.split(" Rate cuts")[0]));
   });
 
+  it.each(PAYLOADS)("%s: in a DISAGREEMENT cluster (numeric conflict) — the contested topic and each model's own claim are encoded", (_n, line) => {
+    const mk = (modelId: string, text: string) => ({ modelId, status: "ok", rawText: text, rawTextFull: text, tokenUsage: { totalTokens: 3 }, latencyMs: 12 });
+    const html = synthesizeReport([mk("chatgpt", `- ${line} falls by 25 percent`), mk("claude", `- ${line} falls by 75 percent`)] as never)!.unifiedAnswer;
+    expect(html).toContain("Different perspectives on:");
+    expect(html).toContain("<li class=\"mb-1\"><strong>ChatGPT:</strong>");
+    expect(foreignMarkup(html)).toEqual([]);
+  });
+
+  it.each(PAYLOADS)("%s: in a DISAGREEMENT cluster (polarity conflict) — encoded", (_n, line) => {
+    const mk = (modelId: string, text: string) => ({ modelId, status: "ok", rawText: text, rawTextFull: text, tokenUsage: { totalTokens: 3 }, latencyMs: 12 });
+    const html = synthesizeReport([mk("chatgpt", `- ${line} and rate cuts reduce inflation`), mk("claude", `- ${line} and rate cuts do not reduce inflation`)] as never)!.unifiedAnswer;
+    expect(html).toContain("Different perspectives on:");
+    expect(foreignMarkup(html)).toEqual([]);
+  });
+
   it.each(PAYLOADS)("%s: the real ResultsDisplay sink receives no foreign markup", async (_n, line) => {
     // Before S0 the payload's own heading ended the sink's duplicate-section removal and the payload reached the
     // sink as live markup. Encoded, it cannot: the agreement sections are removed whole (no sink is rendered for

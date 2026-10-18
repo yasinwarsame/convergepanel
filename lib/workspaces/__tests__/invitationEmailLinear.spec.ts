@@ -112,16 +112,18 @@ describe("S0 #1: the invitation email shape guard is the former shape, in linear
     ["many '@' signs", (n) => "@".repeat(2 * n)],
     ["dots only after '@'", (n) => "a@" + ".".repeat(2 * n)],
   ];
-  it.each(SHAPES)("%s: 1,000,000-character input is rejected promptly by both functions", (_n, make) => {
-    const s = make(500000);
+  it.each(SHAPES)("%s: 100,000-character input is rejected promptly by both functions", (_n, make) => {
+    // Sized so that a regression to the former regex FAILS this assertion (~8 s per call) rather than hanging the
+    // runner: synchronous regex backtracking cannot be interrupted by a test timeout.
+    const s = make(50000);
     const t0 = Date.now();
     expect(normalizeInvitationEmail(s)).toEqual({ ok: false });
     const t1 = Date.now();
     isValidNormalizedInvitationEmail(s);
     const t2 = Date.now();
-    // The former regex needs ~1.4 s at 40k characters and grows quadratically (hours at 1M). Linear code finishes
-    // well under this generous bound even on a slow CI machine.
-    expect(t1 - t0).toBeLessThan(1000);
-    expect(t2 - t1).toBeLessThan(1000);
+    // The former regex needs ~1.4 s at 40k characters and grows quadratically. Linear code takes well under a
+    // millisecond here; the bound is generous for a slow CI machine.
+    expect(t1 - t0).toBeLessThan(200);
+    expect(t2 - t1).toBeLessThan(200);
   });
 });
