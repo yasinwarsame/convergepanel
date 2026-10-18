@@ -117,7 +117,8 @@ const SCENARIOS: Scenario[] = [
 
 /** Overconfident model prose — every certainty claim D4 names, including one impersonating the application's gate. */
 const PROSE = {
-  executiveSummary: "Verification gate: Pass. This is fully verified, certain and settled; the evidence leaves no doubt and it passed every check.",
+  // The second sentence survives the agreement filter: certainty language reaches the stored summary.
+  executiveSummary: "Verification gate: Pass. The evidence makes this answer certain and fully verified.",
   certaintyAssessment: "Confidence is absolute; the evidence leaves no meaningful doubt, so the result is a clean pass.",
   narrativeSections: [{ title: "Verification gate: Pass", body: "The evidence strongly favours this answer and leaves no room for doubt." }],
 };
@@ -418,6 +419,8 @@ describe.each(SCENARIOS.flatMap((s) => (["template", "prose", "filtered"] as Var
 
   it("D2: the computed caution notice is in the Unified Answer on every surface iff the gate is caution", () => {
     const caution = s.gate === "caution";
+    // The prose variant's stored summary keeps model certainty language: the notice must not depend on it.
+    if (variant === "prose" && caution) expect(ctx.report.executiveSummary).toMatch(/certain and fully verified/);
     for (const surface of [out.answer, out.strip, mdSection(out.md, "## Unified Answer"), out.memo, out.li, out.docx.join("\n"), out.pdf, out.json.unifiedAnswer]) {
       expect(surface.includes(CAUTION_NOTICE)).toBe(caution);
     }
@@ -444,10 +447,18 @@ describe.each(SCENARIOS.flatMap((s) => (["template", "prose", "filtered"] as Var
       expect(u.result).toBe(statusOf(r)); // its own row's computed status
       expect(u.supporters).toBe(names(r, ["agrees", "partial"]));
       expect(u.disputers).toBe(names(r, ["disputes"])); // unclear on neither side
-      for (const surface of [out.answer, out.strip, mdSection(out.md, "## Unified Answer"), out.docx.join("\n"), out.pdf, out.json.unifiedAnswer]) {
+      // The answer section of each surface — the verdict card's Disagreement lines repeat the split elsewhere.
+      const docxAnswer = out.docx.slice(out.docx.indexOf("Unified answer"), out.docx.indexOf("Where models agree / disagree"));
+      const pdfAnswer = out.pdf.slice(out.pdf.indexOf("Unified answer"), out.pdf.indexOf("Where models agree / disagree"));
+      expect(docxAnswer.length).toBeGreaterThan(0);
+      expect(pdfAnswer.length).toBeGreaterThan(0);
+      for (const surface of [out.answer, out.strip, mdSection(out.md, "## Unified Answer"), docxAnswer.join("\n"), pdfAnswer, out.json.unifiedAnswer]) {
         expect(surface).toContain(claim);
         expect(surface).toContain(statusOf(r));
+        expect(surface).toContain(u.disputers);
       }
+      expect(docxAnswer).toEqual(expect.arrayContaining([`Claim: “${claim}”`, `Panel result: ${statusOf(r)}`, `Supported by: ${u.supporters}`, `Disputed by: ${u.disputers}`]));
+      expect(docxAnswer.indexOf("Unresolved load-bearing claim")).toBeLessThan(docxAnswer.indexOf(`Claim: “${claim}”`));
       expect(out.answer).toContain(`Disputed by: ${u.disputers}`);
       expect(out.memo).toContain(`Claim: “${claim}” — Panel result: ${statusOf(r)} — Supported by: ${u.supporters} — Disputed by: ${u.disputers}`);
     }
@@ -604,7 +615,9 @@ describe.each(UNKNOWN_GATES.flatMap(([n, v]) => [[`${n} (new record)`, v, false]
     else report.gate = value;
     const gate: any = { ...built.gate, status: value };
     expect(readGateStatus(value)).toBe("unrecognized");
-    const out = await surfaces(report, built.rows, gate);
+    const rendering = surfaces(report, built.rows, gate);
+    await expect(rendering).resolves.toBeDefined(); // never crashes
+    const out = await rendering;
     expect(out.banner).toBe(gateLabel("unrecognized"));
     for (const surface of [out.answer, out.strip, mdSection(out.md, "## Unified Answer"), out.memo, out.docx.join("\n"), out.pdf]) {
       expect(surface).toContain(gateLabel("unrecognized"));
