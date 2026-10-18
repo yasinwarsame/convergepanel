@@ -9,6 +9,7 @@
  * deterministic lines.
  */
 
+import { CAUTION_NOTICE } from "@/lib/adaptiveSchema/gatePresentation";
 import { callGemini } from "@/lib/connectors/gemini";
 
 jest.mock("@/lib/connectors/gemini", () => ({
@@ -114,8 +115,9 @@ describe("Unified Answer", () => {
 
   it("when every claim has limited coverage, says so instead of presenting one as agreement", () => {
     const rows = [limitedRow()];
-    expect(buildAdaptiveUnifiedAnswer(rows, computeAdaptiveGate(rows, 0.6, "generic"))).toBe(
-      "No consensus or majority claims were identified across the panel. 1 claim had positions from half or fewer of the dispatched models — too few to count as agreement."
+    // Order 4 (D2): the gate at 0.6 is caution, so the computed gate and notice lead the stored answer.
+    expect(buildAdaptiveUnifiedAnswer(rows, computeAdaptiveGate(rows, 0.6, "generic"), 5)).toBe(
+      `Verification gate: Caution. ${CAUTION_NOTICE}\n\nNo consensus or majority claims were identified across the panel. 1 claim had positions from half or fewer of the dispatched models — too few to count as agreement.`
     );
   });
 });

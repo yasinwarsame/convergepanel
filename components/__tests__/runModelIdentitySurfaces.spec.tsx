@@ -315,7 +315,7 @@ describe("generated synthesis text persisted with the run", () => {
         cells: [{ modelId: "chatgpt", stance: "agrees" }, { modelId: "claude", stance: "agrees" }, { modelId: "gemini", stance: "partial" }],
       },
     ];
-    const answer = buildAdaptiveUnifiedAnswer(rows as never, { status: "pass", runCertainty: 0.9 } as never);
+    const answer = buildAdaptiveUnifiedAnswer(rows as never, { status: "pass", runCertainty: 0.9 } as never, 3);
     expect(answer).toContain("(ChatGPT, Claude, Gemini)");
     expectNoProductLabel(answer);
   });

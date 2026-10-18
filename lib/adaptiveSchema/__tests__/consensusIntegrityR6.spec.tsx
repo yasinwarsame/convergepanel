@@ -27,7 +27,8 @@ import JSZip from "jszip";
 import { callGemini } from "@/lib/connectors/gemini";
 import { buildAdaptiveSynthesisReport } from "@/lib/adaptiveSchema/synthesisReport";
 import { buildAdaptiveMemoInput, buildAdaptiveSynthesisMarkdown } from "@/lib/adaptiveSchema/shareBuilders";
-import { MODEL_EXPLANATION_LABEL, presentExecutiveSummary, presentUnifiedAnswer } from "@/lib/adaptiveSchema/reportPresentation";
+import { MODEL_EXPLANATION_LABEL, blockText, presentExecutiveSummary, presentUnifiedAnswer } from "@/lib/adaptiveSchema/reportPresentation";
+import { CAUTION_NOTICE } from "@/lib/adaptiveSchema/gatePresentation";
 import { escapeMarkdownInline, markdownQuote, plainTextQuote } from "@/lib/adaptiveSchema/textSerialization";
 import { MODEL_CAVEAT_LABEL, quoteClaim, renderRowStatus, rowAgreementFacts } from "@/lib/adaptiveSchema/agreementNarrative";
 import { computeContestedDimensions } from "@/lib/adaptiveSchema/consensusIntegrity";
@@ -173,9 +174,12 @@ describe("R6-1: each Unified Answer claim carries its own computed result; the f
     for (const c of p.answer.claims) expect(c.result).toBe(statusOf(rs.find((r) => r.claimText === c.claim)!));
     expect(p.answer.claims.find((c) => c.claim === UNAN)!.supporters).toBe("ChatGPT, Claude, Grok, Perplexity");
 
-    // Executive summary: computed blocks only, and none of them holds claim text.
+    // Executive summary: computed blocks only, and none of them holds claim text. Order 4 (D4): this run's gate
+    // is caution, so the computed gate and notice lead the summary.
     const summary = presentExecutiveSummary(report);
-    expect(summary.map((b) => b.source)).toEqual(["computed"]);
+    expect(report.gate).toBe("caution");
+    expect(summary.map((b) => b.source)).toEqual(["computed", "computed", "computed"]);
+    expect(summary.slice(0, 2).map(blockText)).toEqual(["Verification gate: Caution", CAUTION_NOTICE]);
     for (const r of rs) for (const b of summary) expect(b.text).not.toContain(r.claimText);
   });
 
@@ -207,7 +211,8 @@ describe("R6-1: each Unified Answer claim carries its own computed result; the f
     }
     const memo = buildAdaptiveMemoInput("Q?", report, M as ModelId[], "run");
     for (const r of rs) expect(memo.confidenceAssessment).not.toContain(r.claimText);
-    expect(memo.confidenceAssessment).toBe(`Panel result: ${report.presentation!.panelAgreement}`);
+    // Order 4 (D4/D5): the caution gate and notice lead the memo's assessment.
+    expect(memo.confidenceAssessment).toBe(`Verification gate: Caution\n\n${CAUTION_NOTICE}\n\nPanel result: ${report.presentation!.panelAgreement}`);
   });
 
   it("gate fail: the note is computed; unresolved claims each carry their split result, no supporters", async () => {
@@ -218,7 +223,8 @@ describe("R6-1: each Unified Answer claim carries its own computed result; the f
     expect(a.note).toEqual({ source: "computed", label: null, text: "Panel could not converge on a reliable answer." });
     expect(a.claimsHeading).toBe("Unresolved claims");
     expect(a.claims.map((c) => [c.claim.text, c.result!.text, c.supporters])).toEqual(rs.map((r) => [quoteClaim(r.claimText), statusOf(r), null]));
-    expect(presentExecutiveSummary(report).map((b) => b.text)).toEqual([report.presentation!.panelAgreement, "Panel could not converge on a reliable answer."]);
+    // Order 4 (D4): the computed gate leads the fail summary.
+    expect(presentExecutiveSummary(report).map(blockText)).toEqual(["Verification gate: Fail", `Panel result: ${report.presentation!.panelAgreement}`, "Panel could not converge on a reliable answer."]);
   });
 
   it("no answer claims: the computed note alone", async () => {
@@ -239,10 +245,16 @@ describe("R6-1: each Unified Answer claim carries its own computed result; the f
       expect(t).not.toContain(report.unifiedAnswer);
       for (const c of report.presentation!.answer.claims) expect(t).toContain(`Claim: ${quoteClaim(c.claim)}\nPanel result: ${c.result}`);
     }
-    const legacy = await exportsOf(asLegacy(report));
+    // A historical report: no presentation, and its stored answer as persisted before Order 4 — the claims alone
+    // (the caution lead and the load-bearing split are Order 4 additions to the stored string).
+    const historical = asLegacy(report);
+    historical.unifiedAnswer = report.unifiedAnswer.split("\n\n")[1];
+    expect(historical.unifiedAnswer.startsWith("“")).toBe(true);
+    const legacy = await exportsOf(historical);
     for (const t of [legacy.docx, legacy.pdf]) {
       expect(t).toContain("Panel conclusion");
-      expect(t).toContain(report.unifiedAnswer);
+      expect(t).toContain(historical.unifiedAnswer);
+      expect(t).not.toContain("Verification gate");
     }
   });
 
@@ -265,7 +277,7 @@ describe("R6-1: each Unified Answer claim carries its own computed result; the f
     const md = buildAdaptiveSynthesisMarkdown("Q?", report);
     const top = rs.find((r) => r.claimText === report.verdictCard.topConsensus)!;
     expect(md).toContain(
-      `**Panel verdict:** certainty ${Math.round(report.runCertainty * 100)}%; gate: ${report.gate}. Top claim:\n**Claim:** ${escapeMarkdownInline(quoteClaim(top.claimText))} — **Panel result:** ${statusOf(top)}`
+      `**Panel verdict:** certainty ${Math.round(report.runCertainty * 100)}%; Verification gate: Caution. Top claim:\n**Claim:** ${escapeMarkdownInline(quoteClaim(top.claimText))} — **Panel result:** ${statusOf(top)}`
     );
     expect(md).not.toContain(report.panelVerdict);
   });

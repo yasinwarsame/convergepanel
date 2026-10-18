@@ -155,7 +155,9 @@ describe("R5-1/R5-2: a 4/5 majority with a 5/5 claim and contradictory prose (re
     expect(sourcesOf(html, "Panel result: majority: 4 of 5 dispatched models support it, 1 disputes it").every((s) => s === "computed")).toBe(true);
     const sh = shares(report);
     expect(sh.markdown).toContain(`- **Claim:** ${escapeMarkdown(quoteClaim(UNAN))} — **Panel result:** majority: 4 of 5 dispatched models support it, 1 disputes it`);
-    expect(sh.memo.keyFindings[0]).toBe(`Claim: ${quoteClaim(UNAN)} — Panel result: majority: 4 of 5 dispatched models support it, 1 disputes it`);
+    // Order 4 (D5): the memo's findings lead with the computed gate; the claim follows with its own result.
+    expect(sh.memo.keyFindings[0]).toMatch(/^Verification gate: (Pass|Caution|Fail)\b/);
+    expect(sh.memo.keyFindings[1]).toBe(`Claim: ${quoteClaim(UNAN)} — Panel result: majority: 4 of 5 dispatched models support it, 1 disputes it`);
     expect(sh.linkedin).toContain("— panel result: majority: 4 of 5 dispatched models support it, 1 disputes it");
     for (const t of [sh.markdown, sh.memo.keyFindings.join("\n"), sh.linkedin]) expect(onlyQuoted(t, UNAN)).toBe(true);
   });
