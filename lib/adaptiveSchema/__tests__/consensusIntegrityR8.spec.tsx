@@ -115,10 +115,10 @@ describe("R8-1: the bias caveat's line breaks are shown as spaces on cards from 
     expect(presentVerdictCaveat({ caveat: flatten(caveat), caveatSource: "model_bias_check" })).toBe(shown);
   });
 
-  it("LF and CRLF give the same text; spacing inside a line is kept", () => {
+  it("LF and CRLF give the same text; a run of spaces inside a line is one space (R9-2)", () => {
     expect(presentVerdictCaveat({ caveat: "a\nb", caveatSource: "model_bias_check" })).toBe(`${MODEL_CAVEAT_LABEL}: a b`);
     expect(presentVerdictCaveat({ caveat: "a\r\nb", caveatSource: "model_bias_check" })).toBe(`${MODEL_CAVEAT_LABEL}: a b`);
-    expect(presentVerdictCaveat({ caveat: "a  b", caveatSource: "model_bias_check" })).toBe(`${MODEL_CAVEAT_LABEL}: a  b`);
+    expect(presentVerdictCaveat({ caveat: "a  b", caveatSource: "model_bias_check" })).toBe(`${MODEL_CAVEAT_LABEL}: a b`);
   });
 
   it.each(SEPARATORS)("%s: a card persisted without caveatSource shows its stored text as before", (_n, sep) => {

@@ -46,6 +46,19 @@ function collectText(node: unknown, out: string[], depth = 0): void {
       return;
     }
     if (el.props && "children" in el.props) {
+      // A text with nested texts is ONE run of inline text (react-pdf draws the runs back to back, e.g. a bold label
+      // then its value): its pieces are concatenated as drawn, not joined with a space.
+      const kids = ([] as unknown[]).concat(el.props.children).flat(Infinity);
+      if (el.type === "TEXT" && kids.some((k) => !!k && typeof k === "object" && (k as { type?: unknown }).type === "TEXT")) {
+        const inline: string[] = [];
+        for (const k of kids) {
+          const part: string[] = [];
+          collectText(k, part, depth);
+          inline.push(part.join(" "));
+        }
+        out.push(inline.join(""));
+        return;
+      }
       // A `row-reverse` row is DRAWN in reverse child order (e.g. a metric row: value composed first, drawn right),
       // so its text reads in reverse composition order.
       const style = (el.props as { style?: { flexDirection?: unknown } }).style;

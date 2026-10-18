@@ -20,7 +20,7 @@
 
 import { ALIGNED_CLAIM_STATUSES, AdaptiveVerdictCard, AlignedClaim, AlignedClaimStatus } from "./types";
 import { CONSENSUS_STATUS_RANK, assessedPositionCount, describeContested, isTopConsensusEligible } from "./consensusIntegrity";
-import { joinLines } from "./textSerialization";
+import { singleLineText } from "./textSerialization";
 
 /** The canonical no-core-finding text (panel verdict, verdict card, panel agreement statement). */
 export const NO_CONSENSUS_IDENTIFIED = "No consensus identified.";
@@ -160,15 +160,19 @@ export function renderPanelAgreement(f: PanelAgreementFacts): string {
  * computed status.
  *
  * The quote is the boundary, so the claim cannot close it (R5-4): double
- * quotes inside the claim are shown as single quotes (" → ', “ → ‘, ” → ’)
- * and line breaks — every one textSerialization.joinLines knows, a lone CR
- * included (R7-1) — as spaces. This is display only — the stored claimText,
- * and every identity or hash computed from it, are unchanged. Format-specific
- * escaping (HTML, Markdown, JSON) happens in each renderer, never here.
+ * quotes inside the claim are shown as single quotes (" → ', “ → ‘, ” → ’),
+ * and it is one run of words (textSerialization.singleLineText): line breaks
+ * — every one joinLines knows, a lone CR included (R7-1) — and runs of
+ * whitespace (R9-1) are one space, so neither can push model words to the
+ * start of a line. This is display only — the stored claimText, and every
+ * identity or hash computed from it, are unchanged; the derived strings
+ * built with it (unifiedAnswer, panelVerdict, whereModelsAgree) carry the
+ * single-line form. Format-specific escaping (HTML, Markdown, JSON) happens
+ * in each renderer, never here.
  */
 export function quoteClaim(claimText: string): string {
   const inner = claimText.replace(/"/g, "'").replace(/“/g, "‘").replace(/”/g, "’");
-  return `“${joinLines(inner, "whitespace").trim()}”`;
+  return `“${singleLineText(inner)}”`;
 }
 
 export const CLAIM_LABEL = "Claim";
@@ -176,23 +180,50 @@ export const PANEL_RESULT_LABEL = "Panel result";
 /** How the verdict card's caveat is labelled when it came from the bias-detection model call. */
 export const MODEL_CAVEAT_LABEL = "Model-flagged (bias check, not a verified finding)";
 
+/** A label and its text, as the parts a renderer that styles them separately (the PDF) draws. */
+export interface LabelledText {
+  label: string;
+  text: string;
+}
+
+/**
+ * The verdict card's claim + computed status as parts: the quoted, model-written claim and the computed result,
+ * each with its label. Null on cards persisted before topConsensusAgreement / keyDisagreementAgreement existed.
+ */
+export function verdictClaimParts(claim: string, agreement: string | undefined): { claim: LabelledText; result: LabelledText } | null {
+  if (!agreement) return null;
+  return { claim: { label: CLAIM_LABEL, text: quoteClaim(claim) }, result: { label: PANEL_RESULT_LABEL, text: agreement } };
+}
+
 /**
  * The verdict card's claim + computed status, as every renderer shows them.
  * Cards persisted before topConsensusAgreement / keyDisagreementAgreement
  * existed return the stored text alone, exactly as they always rendered.
  */
 export function presentVerdictClaim(claim: string, agreement: string | undefined): { claim: string; result: string | null } {
-  if (!agreement) return { claim, result: null };
-  return { claim: `${CLAIM_LABEL}: ${quoteClaim(claim)}`, result: `${PANEL_RESULT_LABEL}: ${agreement}` };
+  const parts = verdictClaimParts(claim, agreement);
+  if (!parts) return { claim, result: null };
+  return { claim: `${parts.claim.label}: ${parts.claim.text}`, result: `${parts.result.label}: ${parts.result.text}` };
 }
 
 /**
- * The verdict card's caveat as every renderer shows it. A caveat from the bias-detection call is model-written: it
- * is labelled, and its line breaks — every one joinLines knows — are shown as spaces (R8-1), so a line break in it
- * cannot start a separate line that reads like a panel result where a renderer honours breaks (the PDF). Display
- * only: the stored caveat is unchanged. A card persisted before caveatSource existed returns the stored text alone.
+ * The verdict card's model-written caveat as parts: its label and its text as one run of words
+ * (textSerialization.singleLineText — line breaks, R8-1, and whitespace runs, R9-2, are one space), so neither can
+ * start a separate line that reads like a panel result where a renderer honours breaks or wraps by width (the PDF).
+ * Display only: the stored caveat is unchanged. Null when the card has no caveat or was persisted before
+ * caveatSource existed (that caveat is shown as stored — see presentVerdictCaveat).
+ */
+export function modelCaveatParts(card: Pick<AdaptiveVerdictCard, "caveat" | "caveatSource">): LabelledText | null {
+  if (!card.caveat || card.caveatSource !== "model_bias_check") return null;
+  return { label: MODEL_CAVEAT_LABEL, text: singleLineText(card.caveat) };
+}
+
+/**
+ * The verdict card's caveat as every renderer shows it: a caveat from the bias-detection call is labelled and shown
+ * as one run of words (modelCaveatParts). A card persisted before caveatSource existed returns the stored text alone.
  */
 export function presentVerdictCaveat(card: Pick<AdaptiveVerdictCard, "caveat" | "caveatSource">): string | null {
   if (!card.caveat) return null;
-  return card.caveatSource === "model_bias_check" ? `${MODEL_CAVEAT_LABEL}: ${joinLines(card.caveat, "whitespace").trim()}` : card.caveat;
+  const parts = modelCaveatParts(card);
+  return parts ? `${parts.label}: ${parts.text}` : card.caveat;
 }

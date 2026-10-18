@@ -32,8 +32,8 @@ import { exportModelIdentityLabel, exportRunProvenanceLines, readFrozenRunProven
 import { CONSENSUS_LABELS, SOURCE_GROUNDING_LABELS } from "@/lib/adaptiveSchema/reportSummary";
 import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
 import { AdaptiveSynthesisReport, FieldSpec } from "@/lib/adaptiveSchema/types";
-import { presentVerdictCaveat, presentVerdictClaim } from "@/lib/adaptiveSchema/agreementNarrative";
-import { answerClaimLines, presentUnifiedAnswer } from "@/lib/adaptiveSchema/reportPresentation";
+import { modelCaveatParts, presentVerdictCaveat, presentVerdictClaim, verdictClaimParts } from "@/lib/adaptiveSchema/agreementNarrative";
+import { TextBlock, presentUnifiedAnswer } from "@/lib/adaptiveSchema/reportPresentation";
 import {
   fieldLabel,
   formatExportTimestamp as formatTimestamp,
@@ -612,15 +612,29 @@ function VerdictCardBody({
   };
 }) {
   // Consensus Integrity: the computed status (R4-1) and the canonical contested note (verdictCard.ts) as further
-  // lines of the same text — so a report without them (every one persisted before they existed) composes exactly
-  // the same element tree as before.
-  const top = presentVerdictClaim(verdictCard.topConsensus, verdictCard.topConsensusAgreement);
-  const agreementText = [top.claim, top.result, verdictCard.topConsensusContested ? `Contested: ${verdictCard.topConsensusContested}` : null]
-    .filter(Boolean)
-    .join("\n");
-  const split = verdictCard.keyDisagreement ? presentVerdictClaim(verdictCard.keyDisagreement, verdictCard.keyDisagreementAgreement) : null;
-  const disagreementText = split ? [split.claim, split.result].filter(Boolean).join("\n") : null;
-  const caveat = presentVerdictCaveat({ caveat: verdictCard.caveat ?? null, caveatSource: verdictCard.caveatSource });
+  // lines of the same text, labels bold and the quoted claim oblique (R9, see sourcedLines) — so a report without
+  // them (every one persisted before they existed) composes exactly the same element tree as before.
+  const topParts = verdictClaimParts(verdictCard.topConsensus, verdictCard.topConsensusAgreement);
+  const agreementText = topParts
+    ? sourcedLines([
+        { ...topParts.claim, model: true },
+        { ...topParts.result, model: false },
+        ...(verdictCard.topConsensusContested ? [{ label: "Contested", text: verdictCard.topConsensusContested, model: false }] : []),
+      ])
+    : [presentVerdictClaim(verdictCard.topConsensus, undefined).claim, verdictCard.topConsensusContested ? `Contested: ${verdictCard.topConsensusContested}` : null]
+        .filter(Boolean)
+        .join("\n");
+  const splitParts = verdictCard.keyDisagreement ? verdictClaimParts(verdictCard.keyDisagreement, verdictCard.keyDisagreementAgreement) : null;
+  const disagreementText = !verdictCard.keyDisagreement
+    ? null
+    : splitParts
+      ? sourcedLines([
+          { ...splitParts.claim, model: true },
+          { ...splitParts.result, model: false },
+        ])
+      : presentVerdictClaim(verdictCard.keyDisagreement, undefined).claim;
+  const caveatParts = modelCaveatParts({ caveat: verdictCard.caveat ?? null, caveatSource: verdictCard.caveatSource });
+  const caveat = caveatParts ? sourcedLines([{ ...caveatParts, model: true }], undefined, pdfStyles.modelCaveatText) : presentVerdictCaveat({ caveat: verdictCard.caveat ?? null, caveatSource: verdictCard.caveatSource });
   const showDisagreement = Boolean(verdictCard.keyDisagreement);
   const showDetail = showDisagreement && Boolean(verdictCard.disagreementDetail);
   const showCaveat = Boolean(caveat);
@@ -642,11 +656,46 @@ function VerdictCardBody({
   );
 }
 
-/** The Unified Answer of a report carrying presentation.answer, as text: note, then each claim's lines, claims separated by a blank line. */
-function unifiedAnswerText(synthesis: AdaptiveSynthesisReport): string {
+/** One line of a new-format claim / result / caveat text: its label (application text) and its text, model-written or not. */
+interface SourcedLine {
+  label: string | null;
+  text: string;
+  model: boolean;
+}
+
+/**
+ * Consensus Integrity (R9): the lines of a new-format text as inline runs of ONE react-pdf text — the label of each
+ * line in bold, model-written text (a quoted claim, the bias caveat) oblique on a tinted band (`modelText`), computed
+ * text in the text's own face — joined by line breaks. Model text wraps by width like any text; whatever it says,
+ * every line it wraps onto lies inside the band and never starts with the bold label of a computed line. One text,
+ * as before: pagination is unchanged.
+ */
+function sourcedLines(lines: SourcedLine[], separator: (index: number) => string = () => "\n", modelStyle = pdfStyles.modelText): React.ReactNode[] {
+  return lines.flatMap((line, i) => [
+    ...(i > 0 ? [separator(i)] : []),
+    ...(line.label ? [<Text key={`l${i}`} style={pdfStyles.appLabel}>{`${line.label}: `}</Text>] : []),
+    line.model ? (
+      <Text key={`t${i}`} style={modelStyle}>
+        {line.text}
+      </Text>
+    ) : (
+      line.text
+    ),
+  ]);
+}
+
+const fromBlock = (block: TextBlock): SourcedLine => ({ label: block.label, text: block.text, model: block.source.startsWith("model_") });
+
+/** The Unified Answer of a report carrying presentation.answer: note, then each claim's lines, claims separated by a blank line. */
+function unifiedAnswerText(synthesis: AdaptiveSynthesisReport): React.ReactNode[] {
   const answer = presentUnifiedAnswer(synthesis);
-  const head = [answer.note?.text, answer.claimsHeading ? `${answer.claimsHeading}:` : null].filter(Boolean).join("\n");
-  return [head, ...answer.claims.map((item) => answerClaimLines(item).join("\n"))].filter(Boolean).join("\n\n");
+  const groups: SourcedLine[][] = [
+    [...(answer.note ? [fromBlock(answer.note)] : []), ...(answer.claimsHeading ? [{ label: null, text: `${answer.claimsHeading}:`, model: false }] : [])],
+    ...answer.claims.map((item) => [item.claim, item.result, item.contested, item.supporters].filter((b): b is TextBlock => !!b).map(fromBlock)),
+  ].filter((g) => g.length > 0);
+  const lines = groups.flat();
+  const groupStarts = new Set(groups.map((g) => lines.indexOf(g[0])));
+  return sourcedLines(lines, (i) => (groupStarts.has(i) ? "\n\n" : "\n"));
 }
 
 function LegacyContent({ record }: { record: AdaptiveResearchExportV1 }) {

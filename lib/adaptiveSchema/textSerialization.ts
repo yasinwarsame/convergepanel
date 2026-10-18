@@ -15,7 +15,10 @@
  *   plainTextQuote         the same block for plain text (memo) — every line
  *                          prefixed, so the block stays visibly one quoted unit
  *   splitLines / joinLines the one line-break policy (R7-1) every text boundary
- *                          uses, quoteClaim included
+ *                          uses
+ *   singleLineText         model text shown as one run of words (R9-1, R9-2):
+ *                          the line-break policy, then every whitespace run
+ *                          as one space — quoteClaim and the bias caveat
  *
  * Escaping is applied once, here, at serialization. Stored text, claim
  * identity and the HTML / DOCX / PDF renderers (which escape for their own
@@ -48,6 +51,19 @@ export function splitLines(text: string): string[] {
  */
 export function joinLines(text: string, absorb: "blanks" | "whitespace" = "blanks"): string {
   return text.replace(absorb === "blanks" ? LINE_BREAK_IN_BLANKS : LINE_BREAK_IN_WHITESPACE, " ");
+}
+
+/** A run of whitespace: every character JavaScript's \s matches (tab, VT, FF, NBSP, U+2000–U+200A, U+3000, BOM, …) and NEL. */
+const WHITESPACE_RUN = /[\s\u0085]+/gu;
+
+/**
+ * Model text shown as one run of words (R9-1, R9-2): every line break (joinLines), then every run of whitespace, is
+ * one ordinary space, and the ends are trimmed. A renderer that wraps by width (react-pdf) cannot break inside a run
+ * of spaces or tabs, so a long run would push the words after it to the start of a new line — the same effect as a
+ * line break. Display only: callers keep the stored text.
+ */
+export function singleLineText(text: string): string {
+  return joinLines(text, "whitespace").replace(WHITESPACE_RUN, " ").trim();
 }
 
 /** CommonMark/GFM characters that can start inline structure or HTML anywhere in a line ("@": GFM email autolinks). */
