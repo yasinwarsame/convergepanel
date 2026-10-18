@@ -33,7 +33,7 @@ import { CONSENSUS_LABELS, SOURCE_GROUNDING_LABELS } from "@/lib/adaptiveSchema/
 import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
 import { AdaptiveSynthesisReport, FieldSpec } from "@/lib/adaptiveSchema/types";
 import { modelCaveatParts, presentVerdictCaveat, presentVerdictClaim, verdictClaimParts } from "@/lib/adaptiveSchema/agreementNarrative";
-import { TextBlock, presentUnifiedAnswer } from "@/lib/adaptiveSchema/reportPresentation";
+import { TextBlock, answerLeadBlocks, presentUnifiedAnswer, unresolvedClaimParts } from "@/lib/adaptiveSchema/reportPresentation";
 import {
   fieldLabel,
   formatExportTimestamp as formatTimestamp,
@@ -690,12 +690,27 @@ const fromBlock = (block: TextBlock): SourcedLine => ({ label: block.label, text
 function unifiedAnswerText(synthesis: AdaptiveSynthesisReport): React.ReactNode[] {
   const answer = presentUnifiedAnswer(synthesis);
   const groups: SourcedLine[][] = [
+    // Order 4 (D5): the computed gate and notice lead the answer; a caution answer ends with its load-bearing splits.
+    answerLeadBlocks(answer).map(fromBlock),
     [...(answer.note ? [fromBlock(answer.note)] : []), ...(answer.claimsHeading ? [{ label: null, text: `${answer.claimsHeading}:`, model: false }] : [])],
     ...answer.claims.map((item) => [item.claim, item.result, item.contested, item.supporters].filter((b): b is TextBlock => !!b).map(fromBlock)),
+    ...(answer.unresolvedHeading && answer.unresolved
+      ? [
+          [{ label: null, text: `${answer.unresolvedHeading}:`, model: false }],
+          ...answer.unresolved.map((item) => unresolvedClaimParts(item).map(fromBlock)),
+        ]
+      : []),
   ].filter((g) => g.length > 0);
   const lines = groups.flat();
   const groupStarts = new Set(groups.map((g) => lines.indexOf(g[0])));
   return sourcedLines(lines, (i) => (groupStarts.has(i) ? "\n\n" : "\n"));
+}
+
+/** A historical report's stored Unified Answer, led by the unrecognized-gate lines when its stored gate is unrecognized (D8). */
+function legacyConclusionText(synthesis: AdaptiveSynthesisReport): React.ReactNode {
+  const lead = answerLeadBlocks(presentUnifiedAnswer(synthesis));
+  if (lead.length === 0) return synthesis.unifiedAnswer;
+  return [...sourcedLines(lead.map(fromBlock)), "\n\n", synthesis.unifiedAnswer];
 }
 
 function LegacyContent({ record }: { record: AdaptiveResearchExportV1 }) {
@@ -718,7 +733,8 @@ function LegacyContent({ record }: { record: AdaptiveResearchExportV1 }) {
             </SectionCard>
           ) : (
             <SectionCard label="Panel conclusion">
-              <Text {...textProps(pdfStyles.bodyText, CARD_CLOSING_PADDING)}>{synthesis.unifiedAnswer}</Text>
+              {/* D8: an unrecognized stored gate is stated first, in the same text; a known gate exports exactly as before. */}
+              <Text {...textProps(pdfStyles.bodyText, CARD_CLOSING_PADDING)}>{legacyConclusionText(synthesis)}</Text>
             </SectionCard>
           )}
           <SectionCard label="Where models agree / disagree">

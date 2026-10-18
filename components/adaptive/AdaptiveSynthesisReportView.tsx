@@ -37,6 +37,8 @@ import {
   AnswerClaimBlock,
   ClaimBlock,
   TextBlock,
+  UnresolvedClaimBlock,
+  answerLeadBlocks,
   presentAgreeItems,
   presentCertainty,
   presentDisagreements,
@@ -44,6 +46,7 @@ import {
   presentNarrativeSections,
   presentUnifiedAnswer,
 } from "@/lib/adaptiveSchema/reportPresentation";
+import { GATE_LABEL, GateTone, gateBadgeText, gateBannerText, gateTone } from "@/lib/adaptiveSchema/gatePresentation";
 
 /** Canonical, ordered list of `data-section` values rendered below — the single source of truth the snapshot test asserts against, so a future edit can't silently drop a section without also updating this list. */
 export const ADAPTIVE_SYNTHESIS_SECTION_IDS = [
@@ -77,27 +80,31 @@ import {
   buildAdaptiveXPost,
 } from "@/lib/adaptiveSchema/shareBuilders";
 
-const GATE_STYLES: Record<AdaptiveGateResult["status"], { label: string; className: string }> = {
-  pass: { label: "Verified — panel converges", className: "bg-green-50 text-green-800 border-green-200" },
-  caution: { label: "Caution — partial convergence", className: "bg-amber-50 text-amber-800 border-amber-200" },
-  fail: { label: "Could not verify — panel split", className: "bg-red-50 text-red-800 border-red-200" },
+// Gate wording comes from gatePresentation.ts (D6); these maps only style it. "neutral": an unrecognized stored gate (D8).
+export const GATE_BANNER_STYLES: Record<GateTone, string> = {
+  pass: "bg-green-50 text-green-800 border-green-200",
+  caution: "bg-amber-50 text-amber-800 border-amber-200",
+  fail: "bg-red-50 text-red-800 border-red-200",
+  neutral: "bg-slate-50 text-slate-700 border-slate-200",
 };
 
-const GATE_BADGE_STYLES: Record<AdaptiveGateResult["status"], string> = {
+const GATE_BADGE_STYLES: Record<GateTone, string> = {
   pass: "bg-green-50 text-green-700 border-green-200",
   caution: "bg-amber-50 text-amber-700 border-amber-200",
   fail: "bg-red-50 text-red-700 border-red-200",
+  neutral: "bg-slate-50 text-slate-600 border-slate-200",
 };
 
-const GATE_ACCENT: Record<AdaptiveGateResult["status"], string> = {
+const GATE_ACCENT: Record<GateTone, string> = {
   pass: "bg-emerald-400",
   caution: "bg-amber-400",
   fail: "bg-red-400",
+  neutral: "bg-slate-300",
 };
 
-function GateBanner({ gate }: { gate: AdaptiveGateResult["status"] }) {
-  const style = GATE_STYLES[gate];
-  return <div className={`rounded-xl border px-4 py-3 text-sm font-medium ${style.className}`}>{style.label}</div>;
+/** The gate banner: worded by gatePresentation.gateBannerText (historical reports keep their wording, D7). */
+export function GateBanner({ report, gate }: { report: AdaptiveSynthesisReport | null; gate: unknown }) {
+  return <div className={`rounded-xl border px-4 py-3 text-sm font-medium ${GATE_BANNER_STYLES[gateTone(gate)]}`}>{gateBannerText(report, gate)}</div>;
 }
 
 function agreementColorClass(score: number): string {
@@ -114,7 +121,11 @@ export function UnifiedAnswerCard({ answer, report }: { answer: string; report?:
       {report?.presentation?.answer ? (
         <UnifiedAnswerClaims report={report} />
       ) : (
-        <p className="text-sm leading-relaxed text-slate-900 whitespace-pre-line">{answer}</p>
+        <>
+          {/* D8: an unrecognized stored gate is stated first; a known gate renders exactly as before. */}
+          {report && <AnswerLead report={report} />}
+          <p className="text-sm leading-relaxed text-slate-900 whitespace-pre-line">{answer}</p>
+        </>
       )}
     </Card>
   );
@@ -128,6 +139,7 @@ export function UnifiedAnswerClaims({ report }: { report: AdaptiveSynthesisRepor
   const answer = presentUnifiedAnswer(report);
   return (
     <div className="space-y-2 text-sm leading-relaxed text-slate-900">
+      <AnswerLeadBlocks blocks={answerLeadBlocks(answer)} />
       {answer.note && <p data-source={answer.note.source}>{answer.note.text}</p>}
       {answer.claimsHeading && (
         <p data-source="computed" className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
@@ -143,7 +155,61 @@ export function UnifiedAnswerClaims({ report }: { report: AdaptiveSynthesisRepor
           ))}
         </ul>
       )}
+      {answer.unresolvedHeading && answer.unresolved && answer.unresolved.length > 0 && (
+        <div data-answer-part="unresolved-load-bearing">
+          <p data-source="computed" className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">
+            {answer.unresolvedHeading}
+          </p>
+          <ul className="list-disc list-outside pl-5 space-y-1 mt-1">
+            {answer.unresolved.map((item, idx) => (
+              <li key={idx}>
+                <UnresolvedClaim item={item} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
+  );
+}
+
+/** The Unified Answer's computed lead (Order 4): the stored gate in its neutral wording, then the caution / unrecognized notice. */
+function AnswerLeadBlocks({ blocks }: { blocks: TextBlock[] }) {
+  if (blocks.length === 0) return null;
+  return (
+    <div data-answer-part="gate" className="rounded-lg border border-slate-200 bg-white/70 px-3 py-2 space-y-1">
+      {blocks.map((b, idx) =>
+        b.label ? (
+          <p key={idx} data-source={b.source} className="text-xs font-semibold text-slate-700">
+            {b.label}: {b.text}
+          </p>
+        ) : (
+          <p key={idx} data-source={b.source} className="text-sm text-slate-800">
+            {b.text}
+          </p>
+        )
+      )}
+    </div>
+  );
+}
+
+function AnswerLead({ report }: { report: AdaptiveSynthesisReport }) {
+  return <AnswerLeadBlocks blocks={answerLeadBlocks(presentUnifiedAnswer(report))} />;
+}
+
+function UnresolvedClaim({ item }: { item: UnresolvedClaimBlock }) {
+  return (
+    <>
+      <ClaimWithResult item={item} />
+      {[item.supporters, item.disputers].map(
+        (b, idx) =>
+          b && (
+            <span key={idx} data-source="computed" className="block text-xs text-slate-500 mt-0.5">
+              {b.label}: {b.text}
+            </span>
+          )
+      )}
+    </>
   );
 }
 
@@ -239,6 +305,14 @@ function blockParagraphs(text: string): string[] {
  * model-written explanation are always separate elements with their own label — never one paragraph.
  */
 function AttributedBlock({ block, className = "" }: { block: TextBlock; className?: string }) {
+  // Order 4: the computed gate is one line, "Verification gate: Caution", wherever it appears.
+  if (block.source === "computed" && block.label === GATE_LABEL) {
+    return (
+      <p data-source="computed" className={`text-xs font-semibold text-slate-700 ${className}`}>
+        {block.label}: {block.text}
+      </p>
+    );
+  }
   const model = block.source === "model_explanation" || block.source === "model_bias";
   return (
     <div data-source={block.source} className={className}>
@@ -283,6 +357,8 @@ function ExecutiveSummaryCard({ report }: { report: AdaptiveSynthesisReport }) {
     return (
       <Card>
         <SectionLabel>Executive summary</SectionLabel>
+        {/* D8: an unrecognized stored gate is stated first; a known gate renders exactly as before. */}
+        <AnswerLeadBlocks blocks={presentExecutiveSummary(report).filter((b) => b.source === "computed")} />
         <div className="space-y-3 text-sm leading-relaxed text-slate-800">
           {(paragraphs.length > 0 ? paragraphs : [summary]).map((p, idx) => (
             <p key={idx} className="whitespace-pre-line">
@@ -698,7 +774,7 @@ export function PanelVerdictCard({ report, gate }: { report: AdaptiveSynthesisRe
   const caveat = presentVerdictCaveat(v);
   return (
     <div className="relative rounded-xl border border-slate-200 bg-white p-6 overflow-hidden">
-      <div className={`absolute left-0 top-0 h-1.5 w-full ${GATE_ACCENT[gate.status]}`} />
+      <div className={`absolute left-0 top-0 h-1.5 w-full ${GATE_ACCENT[gateTone(gate.status)]}`} />
 
       <div className="rounded-lg bg-sky-50 border border-sky-200 px-4 py-3 text-xs text-sky-800 mb-4">
         ConvergePanel is an AI-assisted research tool, not a forensic or fact-checking authority. Synthesis informs
@@ -707,8 +783,8 @@ export function PanelVerdictCard({ report, gate }: { report: AdaptiveSynthesisRe
 
       <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
         <h3 className="text-lg font-semibold text-slate-900">Panel Verdict</h3>
-        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${GATE_BADGE_STYLES[gate.status]}`}>
-          {gate.status}
+        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${GATE_BADGE_STYLES[gateTone(gate.status)]}`}>
+          {gateBadgeText(report, gate.status)}
         </span>
       </div>
 
@@ -846,7 +922,7 @@ export default function AdaptiveSynthesisReportView({
   return (
     <div className="space-y-4">
       <div data-section="gate-banner">
-        <GateBanner gate={gate.status} />
+        <GateBanner report={report} gate={gate.status} />
       </div>
 
       <div data-section="unified-answer">
@@ -874,7 +950,11 @@ export default function AdaptiveSynthesisReportView({
               ))}
             </div>
           ) : (
-            <p className="mt-2 text-sm text-slate-600">{report.certaintyAssessment}</p>
+            <>
+              <p className="mt-2 text-sm text-slate-600">{report.certaintyAssessment}</p>
+              {/* D8: an unrecognized stored gate is stated after the stored line; a known gate renders exactly as before. */}
+              <AnswerLeadBlocks blocks={presentCertainty(report).filter((b) => b.source === "computed")} />
+            </>
           )}
         </Card>
       </div>
@@ -924,18 +1004,35 @@ export default function AdaptiveSynthesisReportView({
         <div data-section="narrative-sections" className="space-y-4">
           {presentNarrativeSections(report).map((section, idx) => (
             <Card key={idx}>
+              {section.titleSource === "model_explanation" ? (
+                // D4: the title is model-written — shown inside the attributed block, never as an application heading.
+                <div data-source="model_explanation" className="text-sm leading-relaxed text-slate-800">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide mb-1 text-amber-700">{section.body.label}</p>
+                  <p className="font-semibold">{section.title}</p>
+                  <div className="space-y-3 mt-1">
+                    {blockParagraphs(section.body.text).map((p, pIdx) => (
+                      <p key={pIdx} className="whitespace-pre-line">
+                        {p}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+              <>
               <SectionLabel>{section.title}</SectionLabel>
               {section.body.source === "legacy" ? (
                 <p className="text-sm leading-relaxed text-slate-800 whitespace-pre-line">{section.body.text}</p>
               ) : (
                 <AttributedBlock block={section.body} className="text-sm leading-relaxed text-slate-800" />
               )}
+              </>
+              )}
             </Card>
           ))}
         </div>
       )}
 
-      {gate.loadBearingClaims.length > 0 && (
+      {Array.isArray(gate.loadBearingClaims) && gate.loadBearingClaims.length > 0 && (
         <div data-section="load-bearing-claims">
           <Card className="bg-slate-50">
             <SectionLabel>Load-bearing claims (top by salience)</SectionLabel>

@@ -34,11 +34,14 @@ import {
 import { TRUST_SCORE_CAP_REASON } from "@/lib/adaptiveSchema/config";
 import { Card, SectionLabel, BulletList, ConfidencePill, ProbabilityBar, TintBadge, getModelLabel } from "./shared";
 import ModelChip from "@/components/ModelChip";
+import { GateTone, gateChipText, gateTone } from "@/lib/adaptiveSchema/gatePresentation";
 
-const GATE_CHIP_STYLES: Record<AdaptiveGateResult["status"], string> = {
+// Wording: gatePresentation.gateChipText (D6/D7); "neutral": an unrecognized stored gate (D8).
+const GATE_CHIP_STYLES: Record<GateTone, string> = {
   pass: "bg-green-50 text-green-700 border-green-200",
   caution: "bg-amber-50 text-amber-700 border-amber-200",
   fail: "bg-red-50 text-red-700 border-red-200",
+  neutral: "bg-slate-50 text-slate-600 border-slate-200",
 };
 
 type ParseHealth = ModelTrustSummary["parseHealth"];
@@ -284,8 +287,8 @@ function RunHeaderStrip({
         <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600">
           {schema.id.replace(/_/g, " ")}
         </span>
-        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${GATE_CHIP_STYLES[gate.status]}`}>
-          gate: {gate.status}
+        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${GATE_CHIP_STYLES[gateTone(gate.status)]}`}>
+          {gateChipText(synthesisReport, gate.status)}
         </span>
       </div>
       <div className="text-xs text-slate-500">

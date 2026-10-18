@@ -18,7 +18,8 @@ import { AlignedClaim } from "./types";
 import { AdaptiveGateResult } from "./gate";
 import { claimSalience } from "./scoring";
 import { describeContested, isTopConsensusEligible } from "./consensusIntegrity";
-import { NO_CONSENSUS_IDENTIFIED, quoteClaim } from "./agreementNarrative";
+import { NO_CONSENSUS_IDENTIFIED, quoteClaim, renderRowStatus, rowAgreementFacts } from "./agreementNarrative";
+import { CAUTION_NOTICE, gateLabel, unresolvedLoadBearingHeading } from "./gatePresentation";
 
 /** The canonical no-core-finding text, shared by the panel verdict and the verdict card (defined in agreementNarrative.ts). */
 export { NO_CONSENSUS_IDENTIFIED };
@@ -121,26 +122,58 @@ export function unifiedAnswerSupporters(row: AlignedClaim): string[] {
   return row.cells.filter((c) => c && (c.stance === "agrees" || c.stance === "partial")).map((c) => modelLabel(c!.modelId));
 }
 
+/** The models disputing a claim (disputes cells only — an unclear position is neither side), by family name. */
+export function claimDisputers(row: AlignedClaim): string[] {
+  return row.cells.filter((c) => c && c.stance === "disputes").map((c) => modelLabel(c!.modelId));
+}
+
+/**
+ * Order 4 (D3): the gate's own load-bearing claims whose computed status is split, in the gate's order. Read from
+ * the gate result as computed — nothing is re-ranked or re-classified here — and disclosed as findings, never as
+ * the cause of the gate (which is not stored: D1 deferred).
+ */
+export function unresolvedLoadBearingRows(gate: AdaptiveGateResult): AlignedClaim[] {
+  return gate.loadBearingClaims.filter((r) => r.status === "split");
+}
+
 /**
  * 2–4 sentences, only from consensus/majority claims, each citing which
  * models back it. On gate "fail", replaced entirely by "Panel could not
  * converge" plus the split claims — the whole point of R1d's gate rule is
  * that a low-certainty run must never read as a confident synthesis.
  */
-export function buildAdaptiveUnifiedAnswer(rows: AlignedClaim[], gate: AdaptiveGateResult): string {
+export function buildAdaptiveUnifiedAnswer(
+  rows: AlignedClaim[],
+  gate: AdaptiveGateResult,
+  /** Every dispatched model (the D3 denominator) — the computed status of a disclosed load-bearing split. */
+  dispatchedPanelSize: number
+): string {
   const selection = selectUnifiedAnswer(rows, gate);
   if (gate.status === "fail") {
     const bullets = selection.rows.map((r) => `- ${quoteClaim(r.claimText)}`).join("\n");
     return [selection.note, bullets ? `\nUnresolved claims:\n${bullets}` : ""].join("").trim();
   }
-  if (selection.note !== null) return selection.note;
+  const answer =
+    selection.note !== null
+      ? selection.note
+      : selection.rows
+          .map((row) => {
+            const supportingModels = unifiedAnswerSupporters(row);
+            const names = supportingModels.length > 0 ? supportingModels.join(", ") : "the panel";
+            const contested = describeContested(row);
+            return contested ? `${quoteClaim(row.claimText)} (${names}; ${contested}).` : `${quoteClaim(row.claimText)} (${names}).`;
+          })
+          .join(" ");
+  if (gate.status !== "caution") return answer;
 
-  return selection.rows
-    .map((row) => {
-      const supportingModels = unifiedAnswerSupporters(row);
-      const names = supportingModels.length > 0 ? supportingModels.join(", ") : "the panel";
-      const contested = describeContested(row);
-      return contested ? `${quoteClaim(row.claimText)} (${names}; ${contested}).` : `${quoteClaim(row.claimText)} (${names}).`;
-    })
-    .join(" ");
+  // Order 4 (D2/D3): a caution answer leads with the computed gate and notice, and discloses the gate's
+  // load-bearing split claims with their own computed status. Pass and fail answers are unchanged.
+  const unresolved = unresolvedLoadBearingRows(gate);
+  const unresolvedText =
+    unresolved.length > 0
+      ? `\n\n${unresolvedLoadBearingHeading(unresolved.length)}:\n${unresolved
+          .map((r) => `- ${quoteClaim(r.claimText)} (${renderRowStatus(rowAgreementFacts(r, dispatchedPanelSize))})`)
+          .join("\n")}`
+      : "";
+  return `${gateLabel("caution")}. ${CAUTION_NOTICE}\n\n${answer}${unresolvedText}`;
 }

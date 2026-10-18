@@ -16,7 +16,7 @@
 import "server-only";
 import { AdaptiveBiasFinding, AdaptiveVerdictCard, AlignedClaim } from "./types";
 import { AdaptiveGateResult } from "./gate";
-import { VERDICT_NEXT_STEPS } from "./config";
+import { CAUTION_NEXT_STEP_WITHOUT_DISAGREEMENT, VERDICT_NEXT_STEPS } from "./config";
 import { NO_CONSENSUS_IDENTIFIED, coreFindingClaim, topSplitClaim } from "./verdict";
 import { describeContested } from "./consensusIntegrity";
 import { renderRowStatus, rowAgreementFacts } from "./agreementNarrative";
@@ -56,6 +56,13 @@ export function buildAdaptiveVerdictCard(
     disagreementModelCount: split ? split.cells.filter(Boolean).length : 0,
     caveat,
     ...(caveat ? { caveatSource: "model_bias_check" as const } : {}),
-    recommendedNextSteps: VERDICT_NEXT_STEPS[gate.status].slice(0, 3),
+    recommendedNextSteps: recommendedNextSteps(gate, split),
   };
+}
+
+/** VERDICT_NEXT_STEPS for the gate; a caution run with no split claim gets a first step that names no disagreement (D3). */
+function recommendedNextSteps(gate: AdaptiveGateResult, split: AlignedClaim | null): string[] {
+  const steps = VERDICT_NEXT_STEPS[gate.status];
+  if (gate.status === "caution" && !split) return [CAUTION_NEXT_STEP_WITHOUT_DISAGREEMENT, ...steps.slice(1)].slice(0, 3);
+  return steps.slice(0, 3);
 }

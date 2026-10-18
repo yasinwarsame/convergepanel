@@ -30,8 +30,20 @@
  * model text. Not every surface goes through this module.
  */
 
-import { AdaptiveSynthesisReport, PresentedAnswerClaim, PresentedClaim, ReportTextSource } from "./types";
+import { AdaptiveSynthesisReport, PresentedAnswerClaim, PresentedClaim, PresentedUnresolvedClaim, ReportTextSource } from "./types";
 import { CLAIM_LABEL, MODEL_CAVEAT_LABEL, PANEL_RESULT_LABEL, quoteClaim } from "./agreementNarrative";
+import {
+  DISPUTED_BY_LABEL,
+  GATE_LABEL,
+  GATE_STATUS_WORD,
+  GateDisplayStatus,
+  MODEL_PROSE_DOES_NOT_CHANGE_GATE,
+  gateLabel,
+  gateNotice,
+  hasGatePresentation,
+  readGateStatus,
+  unresolvedLoadBearingHeading,
+} from "./gatePresentation";
 import { dedupeTextList } from "./textSimilarity";
 import { TEXT_DEDUP_THRESHOLDS, WHERE_MODELS_AGREE_MAX_ITEMS } from "./config";
 
@@ -72,18 +84,39 @@ export interface AnswerClaimBlock extends ClaimBlock {
   supporters: TextBlock | null;
 }
 
-/** The Unified Answer (R6-1): a computed note, then each claim with its own result. Legacy: the stored string as one block. */
+/** A load-bearing split claim in a caution answer (Order 4, D3): the claim, its computed result and the models on each side. */
+export interface UnresolvedClaimBlock extends ClaimBlock {
+  supporters: TextBlock | null;
+  disputers: TextBlock | null;
+}
+
+/**
+ * The Unified Answer (R6-1): a computed note, then each claim with its own result. Legacy: the stored string as one block.
+ *
+ * Order 4: a report with the gate presentation (and any report whose stored gate is unrecognized, D8) also carries
+ * `gate` — "Verification gate: Caution", computed from the stored gate — and `notice`, the computed caution or
+ * unrecognized notice (D2), both shown before the note and claims; a caution answer then discloses the gate's
+ * load-bearing split claims under `unresolvedHeading` (D3). A historical report with a known gate has none of these
+ * fields and renders exactly as before (D7).
+ */
 export interface UnifiedAnswerBlocks {
+  gate?: TextBlock;
+  notice?: TextBlock | null;
   note: TextBlock | null;
   /** "Unresolved claims" on a gate fail; null otherwise. */
   claimsHeading: string | null;
   claims: AnswerClaimBlock[];
+  unresolvedHeading?: string | null;
+  unresolved?: UnresolvedClaimBlock[];
 }
 
 export const SUPPORTED_BY_LABEL = "Supported by";
 export const UNRESOLVED_CLAIMS_HEADING = "Unresolved claims";
 
 const legacy = (text: string): TextBlock => ({ source: "legacy", label: null, text });
+
+/** A stored list read defensively: anything but an array is empty (a corrupted record never crashes a renderer). */
+const arrayOrEmpty = <T,>(value: T[] | undefined): T[] => (Array.isArray(value) ? value : []);
 
 function presentClaim(c: PresentedClaim): ClaimBlock {
   return {
@@ -100,18 +133,59 @@ function presentAnswerClaim(c: PresentedAnswerClaim): AnswerClaimBlock {
   };
 }
 
+function presentUnresolvedClaim(c: PresentedUnresolvedClaim): UnresolvedClaimBlock {
+  return {
+    ...presentClaim(c),
+    supporters: c.supporters ? { source: "computed", label: SUPPORTED_BY_LABEL, text: c.supporters } : null,
+    disputers: c.disputers ? { source: "computed", label: DISPUTED_BY_LABEL, text: c.disputers } : null,
+  };
+}
+
+/** The stored gate as a computed block: "Verification gate: Caution" (blockText). */
+function gateBlock(status: GateDisplayStatus): TextBlock {
+  return { source: "computed", label: GATE_LABEL, text: GATE_STATUS_WORD[status] };
+}
+
+function noticeBlock(status: GateDisplayStatus): TextBlock | null {
+  const notice = gateNotice(status);
+  return notice ? { source: "computed", label: null, text: notice } : null;
+}
+
+/**
+ * Whether the report shows the Order 4 gate presentation: it carries it (new reports), or its stored gate is
+ * unrecognized (D8 — error handling, on every report). Null: render as before.
+ */
+function shownGate(report: AdaptiveSynthesisReport): GateDisplayStatus | null {
+  const status = readGateStatus(report.gate);
+  return hasGatePresentation(report) || status === "unrecognized" ? status : null;
+}
+
+/** D8 on a historical surface: the unrecognized gate and its notice, as computed blocks; empty for a known gate. */
+function unrecognizedGateBlocks(report: AdaptiveSynthesisReport): TextBlock[] {
+  return readGateStatus(report.gate) === "unrecognized" ? [gateBlock("unrecognized"), noticeBlock("unrecognized")!] : [];
+}
+
 /**
  * The Unified Answer: its computed note (gate fail, nothing to answer with), then each claim it rests on with
  * that claim's own computed result — never the claims run together as one computed paragraph. Legacy: the
  * stored string, unlabelled, as it always rendered.
+ *
+ * Order 4: led by the computed gate and notice, and on caution followed by the load-bearing split claims — see
+ * UnifiedAnswerBlocks.
  */
 export function presentUnifiedAnswer(report: AdaptiveSynthesisReport): UnifiedAnswerBlocks {
   const answer = report.presentation?.answer;
-  if (!answer) return { note: legacy(report.unifiedAnswer), claimsHeading: null, claims: [] };
+  const status = shownGate(report);
+  const gated = status ? { gate: gateBlock(status), notice: noticeBlock(status) } : {};
+  if (!answer) return { ...gated, note: legacy(report.unifiedAnswer), claimsHeading: null, claims: [] };
+  const unresolved =
+    status === "caution" ? arrayOrEmpty(report.presentation?.verificationGate?.unresolvedLoadBearing).map(presentUnresolvedClaim) : [];
   return {
+    ...gated,
     note: answer.note ? { source: "computed", label: null, text: answer.note } : null,
     claimsHeading: report.gate === "fail" && answer.claims.length > 0 ? UNRESOLVED_CLAIMS_HEADING : null,
     claims: answer.claims.map(presentAnswerClaim),
+    ...(status ? { unresolvedHeading: unresolved.length > 0 ? unresolvedLoadBearingHeading(unresolved.length) : null, unresolved } : {}),
   };
 }
 
@@ -123,8 +197,16 @@ export function presentUnifiedAnswer(report: AdaptiveSynthesisReport): UnifiedAn
  */
 export function presentExecutiveSummary(report: AdaptiveSynthesisReport): TextBlock[] {
   const p = report.presentation;
-  if (!p) return [legacy(report.executiveSummary)];
+  if (!p) return [...unrecognizedGateBlocks(report), legacy(report.executiveSummary)];
   const blocks: TextBlock[] = [];
+  // Order 4 (D4): on caution, fail or an unrecognized gate, the computed gate (and notice) comes before any model
+  // prose, so no narrative can stand in for it. A pass summary is unchanged.
+  const status = shownGate(report);
+  if (status && status !== "pass") {
+    blocks.push(gateBlock(status));
+    const notice = noticeBlock(status);
+    if (notice) blocks.push(notice);
+  }
   if (p.panelAgreement) blocks.push({ source: "computed", label: PANEL_RESULT_LABEL, text: p.panelAgreement });
   if (p.executiveSummarySource === "model_explanation") {
     if (report.executiveSummary) blocks.push({ source: "model_explanation", label: MODEL_EXPLANATION_LABEL, text: report.executiveSummary });
@@ -137,9 +219,16 @@ export function presentExecutiveSummary(report: AdaptiveSynthesisReport): TextBl
 /** The certainty assessment: the computed certainty line, then the model's explanation (labelled) if any. */
 export function presentCertainty(report: AdaptiveSynthesisReport): TextBlock[] {
   const p = report.presentation;
-  if (!p) return [legacy(report.certaintyAssessment)];
+  if (!p) return [legacy(report.certaintyAssessment), ...unrecognizedGateBlocks(report)];
   const blocks: TextBlock[] = [{ source: "computed", label: null, text: report.certaintyAssessment }];
-  if (p.certaintyExplanation) blocks.push({ source: "model_explanation", label: MODEL_EXPLANATION_LABEL, text: p.certaintyExplanation });
+  const status = shownGate(report);
+  if (status === "unrecognized" && !p.certaintyExplanation) blocks.push(...unrecognizedGateBlocks(report));
+  if (p.certaintyExplanation) {
+    // Order 4 (D4): model certainty prose on caution / fail / unrecognized follows a computed statement that it
+    // does not change the gate.
+    if (status && status !== "pass") blocks.push({ source: "computed", label: null, text: `${gateLabel(status)}. ${MODEL_PROSE_DOES_NOT_CHANGE_GATE}` });
+    blocks.push({ source: "model_explanation", label: MODEL_EXPLANATION_LABEL, text: p.certaintyExplanation });
+  }
   return blocks;
 }
 
@@ -172,11 +261,18 @@ export function presentDisagreements(report: AdaptiveSynthesisReport): Disagreem
   });
 }
 
-/** Narrative sections: model-written on new reports (labelled); stored text on legacy ones. */
-export function presentNarrativeSections(report: AdaptiveSynthesisReport): { title: string; body: TextBlock }[] {
+/**
+ * Narrative sections: model-written on new reports (labelled); stored text on legacy ones. The title is model-written
+ * too: on a report with the Order 4 gate presentation it is marked so (titleSource), and renderers show it inside the
+ * attributed block rather than as an application heading (D4) — a title such as "Verification gate: Pass" cannot
+ * read as the application's result.
+ */
+export function presentNarrativeSections(report: AdaptiveSynthesisReport): { title: string; titleSource: "model_explanation" | "heading"; body: TextBlock }[] {
   const modelWritten = !!report.presentation;
+  const titleSource = hasGatePresentation(report) ? ("model_explanation" as const) : ("heading" as const);
   return report.narrativeSections.map((s) => ({
     title: s.title,
+    titleSource,
     body: modelWritten ? { source: "model_explanation", label: MODEL_EXPLANATION_LABEL, text: s.body } : legacy(s.body),
   }));
 }
@@ -189,6 +285,16 @@ export function blockText(block: TextBlock): string {
 /** A Unified Answer claim as plain-text lines (DOCX / PDF): the claim, then its computed result, contested note and supporters. */
 export function answerClaimLines(item: AnswerClaimBlock): string[] {
   return [item.claim, item.result, item.contested, item.supporters].filter((b): b is TextBlock => !!b).map(blockText);
+}
+
+/** An unresolved load-bearing claim's blocks, in display order: the claim, its computed result, contested note, supporters, disputers. */
+export function unresolvedClaimParts(item: UnresolvedClaimBlock): TextBlock[] {
+  return [item.claim, item.result, item.contested, item.supporters, item.disputers].filter((b): b is TextBlock => !!b);
+}
+
+/** The Unified Answer's computed lead — gate, then notice — as blocks; empty when the report shows neither (D7). */
+export function answerLeadBlocks(answer: UnifiedAnswerBlocks): TextBlock[] {
+  return [answer.gate, answer.notice].filter((b): b is TextBlock => !!b);
 }
 
 /** A claim block as one line of plain text: `Claim: “…” — Panel result: … — Contested: …`; legacy: the stored line. */

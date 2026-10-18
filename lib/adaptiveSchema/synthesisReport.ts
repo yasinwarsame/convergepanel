@@ -32,6 +32,7 @@ import {
   AlignedClaimCell,
   PresentedAnswerClaim,
   PresentedClaim,
+  PresentedUnresolvedClaim,
   QueryType,
 } from "./types";
 import { callGemini } from "@/lib/connectors/gemini";
@@ -40,7 +41,7 @@ import { logger } from "@/lib/logger";
 import { stripJsonFences, withTimeout } from "./util";
 import { computeRunCertainty } from "./scoring";
 import { computeAdaptiveGate } from "./gate";
-import { buildAdaptiveVerdict, buildAdaptiveUnifiedAnswer, selectUnifiedAnswer, unifiedAnswerSupporters } from "./verdict";
+import { buildAdaptiveVerdict, buildAdaptiveUnifiedAnswer, claimDisputers, selectUnifiedAnswer, unifiedAnswerSupporters, unresolvedLoadBearingRows } from "./verdict";
 import { describeContested } from "./consensusIntegrity";
 import { panelAgreementFacts, quoteClaim, renderPanelAgreement, renderRowAgreement, renderRowStatus, rowAgreementFacts } from "./agreementNarrative";
 import { NarrativeField, isAgreementBearing, withoutAgreementClaims } from "./narrativeIntegrity";
@@ -136,6 +137,17 @@ function presentedClaim(row: AlignedClaim, dispatchedPanelSize: number): Present
 function presentedAnswerClaim(row: AlignedClaim, dispatchedPanelSize: number, nameSupporters: boolean): PresentedAnswerClaim {
   const supporters = nameSupporters ? unifiedAnswerSupporters(row) : [];
   return { ...presentedClaim(row, dispatchedPanelSize), ...(supporters.length > 0 ? { supporters: supporters.join(", ") } : {}) };
+}
+
+/** A load-bearing split claim (Order 4, D3): the presented claim and the models on each side, from its own cells. */
+function presentedUnresolvedClaim(row: AlignedClaim, dispatchedPanelSize: number): PresentedUnresolvedClaim {
+  const supporters = unifiedAnswerSupporters(row);
+  const disputers = claimDisputers(row);
+  return {
+    ...presentedClaim(row, dispatchedPanelSize),
+    ...(supporters.length > 0 ? { supporters: supporters.join(", ") } : {}),
+    ...(disputers.length > 0 ? { disputers: disputers.join(", ") } : {}),
+  };
 }
 
 /** A "Where models agree" line: the quoted (model-written) claim, plus the canonical contested note when the models marked it contested. */
@@ -307,7 +319,7 @@ export async function buildAdaptiveSynthesisReport(
   const runCertainty = computeRunCertainty(rows, schemaId);
   const gate = computeAdaptiveGate(rows, runCertainty, schemaId);
   const verdict = buildAdaptiveVerdict(rows, gate, totalModelCount);
-  const unifiedAnswer = buildAdaptiveUnifiedAnswer(rows, gate);
+  const unifiedAnswer = buildAdaptiveUnifiedAnswer(rows, gate, totalModelCount);
   const answerSelection = selectUnifiedAnswer(rows, gate);
 
   const agreeRows = rows.filter((r) => r.status === "consensus" || r.status === "majority");
@@ -341,6 +353,8 @@ export async function buildAdaptiveSynthesisReport(
     disagree: disagreeRows.map((r, i) => ({ ...presentedClaim(r, totalModelCount), whySource: whySources[i] ?? "computed" })),
     executiveSummarySource,
     ...(certaintyExplanation ? { certaintyExplanation } : {}),
+    // Order 4: the gate presentation boundary (D7) and the load-bearing split disclosure (D3). No gate reason (D1).
+    verificationGate: { unresolvedLoadBearing: unresolvedLoadBearingRows(gate).map((r) => presentedUnresolvedClaim(r, totalModelCount)) },
   });
 
   const baseReport: AdaptiveSynthesisReport = {

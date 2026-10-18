@@ -175,3 +175,10 @@ export const VERDICT_NEXT_STEPS: Record<AdaptiveGateStatus, string[]> = {
     "Consider rephrasing the question or supplying more context, then re-running the panel.",
   ],
 };
+
+/**
+ * Order 4 (D3): the first caution step when the run has no split claim. VERDICT_NEXT_STEPS.caution starts from a
+ * key disagreement, which a caution from certainty alone does not have — it is never invented.
+ */
+export const CAUTION_NEXT_STEP_WITHOUT_DISAGREEMENT =
+  "Review the findings and limitations below before relying on this synthesis — the verification gate did not pass.";

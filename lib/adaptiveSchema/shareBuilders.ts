@@ -11,7 +11,7 @@
 import { ModelId } from "@/lib/types";
 import { RunModelProvenanceFacts, runModelFamilyName, runModelLabels } from "@/lib/panel/runModelIdentity";
 import { MemoInput } from "@/lib/verification/generateMemo";
-import { AdaptiveGateStatus, AdaptiveSynthesisReport } from "./types";
+import { AdaptiveSynthesisReport } from "./types";
 import { dedupeTextList } from "./textSimilarity";
 import { TEXT_DEDUP_THRESHOLDS, WHERE_MODELS_AGREE_MAX_ITEMS } from "./config";
 import { CLAIM_LABEL, MODEL_CAVEAT_LABEL, PANEL_RESULT_LABEL, quoteClaim } from "./agreementNarrative";
@@ -19,6 +19,8 @@ import {
   AnswerClaimBlock,
   ClaimBlock,
   TextBlock,
+  UnresolvedClaimBlock,
+  answerLeadBlocks,
   blockText,
   claimLine,
   presentAgreeItems,
@@ -27,7 +29,9 @@ import {
   presentExecutiveSummary,
   presentUnifiedAnswer,
   shortClaimWithResult,
+  unresolvedClaimParts,
 } from "./reportPresentation";
+import { CAUTION_NOTICE, CAUTION_NOTICE_SHORT, GATE_CONFIDENCE_LABEL, GATE_LABEL, gateLabel, hasGatePresentation, legacyGateWord, readGateStatus } from "./gatePresentation";
 import { escapeMarkdownInline, markdownQuote, plainTextQuote } from "./textSerialization";
 
 // R5 presentation contract: a report that carries `presentation` is rendered through reportPresentation.ts, so
@@ -38,10 +42,14 @@ import { escapeMarkdownInline, markdownQuote, plainTextQuote } from "./textSeria
 // short model text escaped inline, model prose as an escaped blockquote under its label — so model text cannot
 // become a report heading, list, link or HTML. Headings and computed lines are written here.
 
+/** The computed "Verification gate: …" block (reportPresentation): written as one line wherever it appears. */
+const isGateBlock = (b: TextBlock) => b.source === "computed" && b.label === GATE_LABEL;
+
 const isModelText = (b: TextBlock) => b.source === "model_claim" || b.source === "model_explanation" || b.source === "model_bias";
 
-/** One attributed block as Markdown: "**Label:**" on its own line, then the text — model prose as an escaped blockquote. */
+/** One attributed block as Markdown: "**Label:**" on its own line, then the text — model prose as an escaped blockquote. The computed gate is one bold line. */
 function markdownBlock(block: TextBlock, indent = ""): string[] {
+  if (isGateBlock(block)) return [`${indent}**${blockText(block)}**`];
   const body = isModelText(block) ? markdownQuote(block.text, indent) : [`${indent}${block.text}`];
   return block.label ? [`${indent}**${block.label}:**`, ...body] : body;
 }
@@ -70,16 +78,43 @@ function markdownPanelVerdict(report: AdaptiveSynthesisReport): string[] {
     `**${PANEL_RESULT_LABEL}:** ${card.topConsensusAgreement}`,
     ...(card.topConsensusContested ? [`**Contested:** ${card.topConsensusContested}`] : []),
   ];
-  return [`**Panel verdict:** certainty ${Math.round(report.runCertainty * 100)}%; gate: ${report.gate}. Top claim:`, parts.join(" — ")];
+  return [`**Panel verdict:** certainty ${Math.round(report.runCertainty * 100)}%; ${markdownGate(report)}. Top claim:`, parts.join(" — ")];
 }
 
-/** The Unified Answer for Markdown: its computed note, then each claim with its own result. */
+/** The gate inside a Markdown line: "Verification gate: Caution" on reports with the Order 4 presentation, else "gate: caution" as before. */
+function markdownGate(report: AdaptiveSynthesisReport): string {
+  return hasGatePresentation(report) ? gateLabel(readGateStatus(report.gate)) : `gate: ${legacyGateWord(report.gate)}`;
+}
+
+/** An unresolved load-bearing claim as one Markdown line: the claim's text is model-written, so it is escaped. */
+function markdownUnresolvedClaim(item: UnresolvedClaimBlock): string {
+  return unresolvedClaimParts(item)
+    .map((b) => `**${b.label}:** ${b.source === "model_claim" ? escapeMarkdownInline(b.text) : b.text}`)
+    .join(" — ");
+}
+
+/** An unresolved load-bearing claim as one plain-text line (memo). */
+function plainUnresolvedClaim(item: UnresolvedClaimBlock): string {
+  return unresolvedClaimParts(item).map(blockText).join(" — ");
+}
+
+/** The Unified Answer's computed lead (gate, notice) as one line of plain text: "Verification gate: Caution. This result …". */
+function leadText(blocks: TextBlock[]): string {
+  return blocks.map(blockText).join(". ");
+}
+
+/** The Unified Answer for Markdown: the computed gate and notice, its computed note, each claim with its own result, then (caution) the load-bearing splits. */
 function markdownUnifiedAnswer(report: AdaptiveSynthesisReport): string[] {
   const answer = presentUnifiedAnswer(report);
   const out: string[] = [];
+  answerLeadBlocks(answer).forEach((b) => out.push(...markdownBlock(b)));
   if (answer.note) out.push(answer.note.text);
   if (answer.claimsHeading) out.push(`${answer.claimsHeading}:`);
   answer.claims.forEach((c) => out.push(`- ${markdownClaim(c)}`));
+  if (answer.unresolvedHeading && answer.unresolved) {
+    out.push(`${answer.unresolvedHeading}:`);
+    answer.unresolved.forEach((c) => out.push(`- ${markdownUnresolvedClaim(c)}`));
+  }
   return out;
 }
 
@@ -87,12 +122,6 @@ function markdownUnifiedAnswer(report: AdaptiveSynthesisReport): string[] {
 function dedupedAgreementItems(report: AdaptiveSynthesisReport): string[] {
   return dedupeTextList(report.whereModelsAgree, { ...TEXT_DEDUP_THRESHOLDS, cap: WHERE_MODELS_AGREE_MAX_ITEMS });
 }
-
-const GATE_CONFIDENCE_LABEL: Record<AdaptiveGateStatus, string> = {
-  pass: "High",
-  caution: "Medium",
-  fail: "Low",
-};
 
 function truncate(text: string, max: number): string {
   const trimmed = text.trim();
@@ -109,6 +138,8 @@ export function buildAdaptiveSynthesisMarkdown(question: string, report: Adaptiv
   lines.push(`**Panel verdict:** ${report.panelVerdict}`);
   lines.push("");
   lines.push("## Unified Answer");
+  // D8: an unrecognized stored gate is stated before the stored answer; a known gate exports exactly as before.
+  answerLeadBlocks(presentUnifiedAnswer(report)).forEach((b) => lines.push(...markdownBlock(b)));
   lines.push(report.unifiedAnswer);
   lines.push("");
   lines.push("## Executive Summary");
@@ -140,7 +171,7 @@ export function buildAdaptiveSynthesisMarkdown(question: string, report: Adaptiv
   }
 
   lines.push("## Certainty");
-  lines.push(`${Math.round(report.runCertainty * 100)}% (gate: ${report.gate}) — ${report.certaintyAssessment}`);
+  lines.push(`${Math.round(report.runCertainty * 100)}% (gate: ${legacyGateWord(report.gate)}) — ${report.certaintyAssessment}`);
   lines.push("");
   lines.push("Source: convergepanel.com");
 
@@ -200,7 +231,7 @@ function buildPresentedMarkdown(question: string, report: AdaptiveSynthesisRepor
 
   lines.push("## Certainty");
   const [certaintyLine, ...certaintyRest] = presentCertainty(report);
-  lines.push(`${Math.round(report.runCertainty * 100)}% (gate: ${report.gate}) — ${certaintyLine.text}`);
+  lines.push(`${Math.round(report.runCertainty * 100)}% (${markdownGate(report)}) — ${certaintyLine.text}`);
   for (const block of certaintyRest) {
     lines.push("");
     lines.push(...markdownBlock(block));
@@ -223,16 +254,22 @@ export function buildAdaptiveMemoInput(
    */
   modelProvenance?: readonly RunModelProvenanceFacts[] | null
 ): MemoInput {
+  const confidenceLabel = GATE_CONFIDENCE_LABEL[readGateStatus(report.gate)];
   if (report.presentation) {
     const agree = presentAgreeItems(report).map(claimLine);
     const summary = presentExecutiveSummary(report).map((b) => plainTextBlock(b)).join("\n\n");
+    // Order 4 (D5): the memo's findings lead with the computed gate (and on caution its notice and the load-bearing
+    // splits) — mapped here, so the shared memo generator is unchanged. Historical reports: as before.
+    const answer = presentUnifiedAnswer(report);
+    const lead = answerLeadBlocks(answer);
+    const gateFindings = lead.length > 0 ? [leadText(lead), ...(answer.unresolved ?? []).map(plainUnresolvedClaim)] : [];
     return {
       type: "research",
       question,
       consensusScore: Math.round(report.runCertainty * 100),
-      confidenceLabel: GATE_CONFIDENCE_LABEL[report.gate],
+      confidenceLabel,
       evidenceQuality: "mixed",
-      keyFindings: agree.slice(0, 8),
+      keyFindings: [...gateFindings, ...agree.slice(0, 8)],
       synthesisAgreements: agree,
       synthesisDisagreements: presentDisagreements(report).map((d) =>
         isModelText(d.why) ? `${claimLine(d)}\n${plainTextBlock(d.why, "  ")}` : `${claimLine(d)} — ${blockText(d.why)}`
@@ -246,9 +283,13 @@ export function buildAdaptiveMemoInput(
     type: "research",
     question,
     consensusScore: Math.round(report.runCertainty * 100),
-    confidenceLabel: GATE_CONFIDENCE_LABEL[report.gate],
+    confidenceLabel,
     evidenceQuality: "mixed",
-    keyFindings: dedupedAgreementItems(report).slice(0, 8),
+    keyFindings: [
+      // D8: an unrecognized stored gate leads the findings; a known gate exports exactly as before.
+      ...(readGateStatus(report.gate) === "unrecognized" ? [leadText(answerLeadBlocks(presentUnifiedAnswer(report)))] : []),
+      ...dedupedAgreementItems(report).slice(0, 8),
+    ],
     synthesisAgreements: dedupedAgreementItems(report),
     synthesisDisagreements: report.disagreements.map((d) => `${d.topic}: ${d.whyTheyDiffer}`),
     confidenceAssessment: report.executiveSummary || report.certaintyAssessment,
@@ -261,7 +302,14 @@ export function buildAdaptiveLinkedInPost(question: string, report: AdaptiveSynt
   const lines: string[] = [];
   lines.push(`I researched "${truncate(question, 120)}" across a multi-model AI panel using ConvergePanel.`);
   lines.push("");
-  lines.push(`Certainty: ${Math.round(report.runCertainty * 100)}% (gate: ${report.gate})`);
+  if (hasGatePresentation(report)) {
+    // Order 4 (D5/D6): the gate in its neutral wording, the certainty as its own figure, and on caution the notice.
+    const status = readGateStatus(report.gate);
+    lines.push(`${gateLabel(status)} · Certainty: ${Math.round(report.runCertainty * 100)}%`);
+    if (status === "caution") lines.push(CAUTION_NOTICE);
+  } else {
+    lines.push(`Certainty: ${Math.round(report.runCertainty * 100)}% (gate: ${legacyGateWord(report.gate)})`);
+  }
   lines.push("");
 
   const presented = report.presentation;
@@ -290,7 +338,12 @@ export function buildAdaptiveLinkedInPost(question: string, report: AdaptiveSynt
 export function buildAdaptiveXPost(question: string, report: AdaptiveSynthesisReport): string {
   const parts: string[] = [];
   parts.push(`Asked a multi-model AI panel: "${truncate(question, 80)}"`);
-  parts.push(`Certainty: ${Math.round(report.runCertainty * 100)}% (${report.gate})`);
+  if (hasGatePresentation(report)) {
+    const status = readGateStatus(report.gate);
+    parts.push(`${gateLabel(status)}${status === "caution" ? ` (${CAUTION_NOTICE_SHORT})` : ""} · Certainty: ${Math.round(report.runCertainty * 100)}%`);
+  } else {
+    parts.push(`Certainty: ${Math.round(report.runCertainty * 100)}% (${legacyGateWord(report.gate)})`);
+  }
   const split = report.presentation?.disagree[0];
   if (split) {
     // The post is capped at 280 characters: the claim gives way, the computed result never does.
