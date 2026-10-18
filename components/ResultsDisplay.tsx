@@ -66,7 +66,7 @@ import type {
   DecisionSupportResult,
 } from "@/lib/adaptiveSchema/types";
 import { getResultSchema } from "@/lib/adaptiveSchema/schemaRegistry";
-import { STATED_CONFIDENCE_SCORE as CONFIDENCE_SCORE_MAP, BIAS_EMPTY_REASON_LABELS } from "@/lib/adaptiveSchema/config";
+import { cellConfidenceCertaintyScore, BIAS_EMPTY_REASON_LABELS } from "@/lib/adaptiveSchema/config";
 import { ReportStatusInput } from "@/lib/adaptiveSchema/reportStatus";
 import AdaptivePanelResponse from "@/components/adaptive/AdaptivePanelResponse";
 
@@ -472,7 +472,7 @@ function claimScoreBreakdown(claim: AlignedClaim, totalModels: number) {
   const cells = claim.cells.filter((c): c is NonNullable<typeof c> => !!c);
   const coverage = totalModels > 0 ? cells.length / totalModels : 0;
   const statedConfidence =
-    cells.length > 0 ? cells.reduce((sum, c) => sum + (CONFIDENCE_SCORE_MAP[c.confidence] ?? 0), 0) / cells.length : 0;
+    cells.length > 0 ? cells.reduce((sum, c) => sum + (cellConfidenceCertaintyScore(c.confidence) || 0), 0) / cells.length : 0;
   return { coverage, statedConfidence };
 }
 

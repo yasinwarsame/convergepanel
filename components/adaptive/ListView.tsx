@@ -269,12 +269,14 @@ function RunHeaderStrip({
   synthesisReport,
   alignedClaimsCount,
   splitCount,
+  limitedCoverageCount,
 }: {
   schema: ResultSchema;
   gate: AdaptiveGateResult;
   synthesisReport: AdaptiveSynthesisReport;
   alignedClaimsCount: number;
   splitCount: number;
+  limitedCoverageCount: number;
 }) {
   return (
     <Card className="flex items-center justify-between flex-wrap gap-3">
@@ -292,6 +294,12 @@ function RunHeaderStrip({
         {alignedClaimsCount} aligned claim{alignedClaimsCount === 1 ? "" : "s"}
         {" · "}
         {splitCount} split
+        {limitedCoverageCount > 0 && (
+          <>
+            {" · "}
+            {limitedCoverageCount} limited coverage
+          </>
+        )}
       </div>
     </Card>
   );
@@ -583,6 +591,7 @@ export default function ListView({
 
   const consensusCount = countByStatus(rows, "consensus");
   const splitCount = countByStatus(rows, "split");
+  const limitedCoverageCount = countByStatus(rows, "limited_coverage");
   const singleModelCount = countByStatus(rows, "single_source");
 
   const sortedVMs = useMemo(() => {
@@ -606,6 +615,7 @@ export default function ListView({
         synthesisReport={synthesisReport}
         alignedClaimsCount={rows.length}
         splitCount={splitCount}
+        limitedCoverageCount={limitedCoverageCount}
       />
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

@@ -17,6 +17,11 @@ import { runModelFamilyName } from "@/lib/panel/runModelIdentity";
 import { AlignedClaim } from "./types";
 import { AdaptiveGateResult } from "./gate";
 import { claimSalience } from "./scoring";
+import { describeContested, isTopConsensusEligible } from "./consensusIntegrity";
+import { NO_CONSENSUS_IDENTIFIED, quoteClaim } from "./agreementNarrative";
+
+/** The canonical no-core-finding text, shared by the panel verdict and the verdict card (defined in agreementNarrative.ts). */
+export { NO_CONSENSUS_IDENTIFIED };
 
 export interface AdaptivePanelVerdict {
   /** "{N}/{M} models converge on {core finding}; certainty {score}; gate: {pass|caution|fail}." */
@@ -37,12 +42,18 @@ function modelLabel(modelId: ModelId): string {
   return runModelFamilyName(modelId);
 }
 
-/** Exported for reuse by verdictCard.ts's topConsensus field — same "highest-salience consensus/majority claim" rule. */
+/**
+ * Exported for reuse by verdictCard.ts's topConsensus field: the
+ * highest-salience row whose status may be presented as agreement
+ * (TOP_CONSENSUS_ELIGIBLE — consensus or majority only). There is no
+ * fallback: with no eligible row the panel has no core finding (null), so a
+ * split, single_source or limited_coverage row is never presented as "top
+ * consensus" / "N models converge on".
+ */
 export function coreFindingClaim(rows: AlignedClaim[]): AlignedClaim | null {
-  const candidates = rows.filter((r) => r.status === "consensus" || r.status === "majority");
-  const pool = candidates.length > 0 ? candidates : rows;
-  if (pool.length === 0) return null;
-  return [...pool].sort((a, b) => claimSalience(b) - claimSalience(a))[0];
+  const eligible = rows.filter((r) => isTopConsensusEligible(r.status));
+  if (eligible.length === 0) return null;
+  return [...eligible].sort((a, b) => claimSalience(b) - claimSalience(a))[0];
 }
 
 /** Exported for reuse by verdictCard.ts's keyDisagreement field — highest-salience split claim. */
@@ -58,15 +69,56 @@ export function buildAdaptiveVerdict(
   totalModelCount: number
 ): AdaptivePanelVerdict {
   const core = coreFindingClaim(rows);
-  const coreFinding = core?.claimText ?? "No clear finding across the panel";
+  const coreFinding = core?.claimText ?? NO_CONSENSUS_IDENTIFIED;
   const convergingModelCount = core
     ? core.cells.filter((c) => c && (c.stance === "agrees" || c.stance === "partial")).length
     : 0;
 
   const certaintyPct = Math.round(gate.runCertainty * 100);
-  const summary = `${convergingModelCount}/${totalModelCount} models converge on ${coreFinding}; certainty ${certaintyPct}%; gate: ${gate.status}.`;
+  const summary = core
+    ? `${convergingModelCount}/${totalModelCount} models converge on ${quoteClaim(coreFinding)}; certainty ${certaintyPct}%; gate: ${gate.status}.`
+    : `${NO_CONSENSUS_IDENTIFIED} Certainty ${certaintyPct}%; gate: ${gate.status}.`;
 
   return { summary, coreFinding, convergingModelCount, totalModelCount };
+}
+
+export const UNIFIED_ANSWER_FAIL_NOTE = "Panel could not converge on a reliable answer.";
+
+/** What the Unified Answer rests on (R6-1): its computed note and its claims, in order. One selection for the string and for presentation.answer. */
+export interface UnifiedAnswerSelection {
+  /** Computed text with no claim in it; null when the answer is its claims. */
+  note: string | null;
+  /** Gate fail: the unresolved split rows; otherwise the consensus/majority rows by salience. */
+  rows: AlignedClaim[];
+}
+
+export function selectUnifiedAnswer(rows: AlignedClaim[], gate: AdaptiveGateResult): UnifiedAnswerSelection {
+  if (gate.status === "fail") {
+    return { note: UNIFIED_ANSWER_FAIL_NOTE, rows: rows.filter((r) => r.status === "split").slice(0, 5) };
+  }
+
+  const candidates = rows
+    .filter((r) => r.status === "consensus" || r.status === "majority")
+    .sort((a, b) => claimSalience(b) - claimSalience(a))
+    .slice(0, 4);
+
+  if (candidates.length === 0) {
+    const limitedCount = rows.filter((r) => r.status === "limited_coverage").length;
+    const base = "No consensus or majority claims were identified across the panel.";
+    return {
+      note:
+        limitedCount > 0
+          ? `${base} ${limitedCount} claim${limitedCount === 1 ? " had" : "s had"} positions from half or fewer of the dispatched models — too few to count as agreement.`
+          : base,
+      rows: [],
+    };
+  }
+  return { note: null, rows: candidates };
+}
+
+/** The models backing a Unified Answer claim (agrees/partial cells), by family name. */
+export function unifiedAnswerSupporters(row: AlignedClaim): string[] {
+  return row.cells.filter((c) => c && (c.stance === "agrees" || c.stance === "partial")).map((c) => modelLabel(c!.modelId));
 }
 
 /**
@@ -76,33 +128,19 @@ export function buildAdaptiveVerdict(
  * that a low-certainty run must never read as a confident synthesis.
  */
 export function buildAdaptiveUnifiedAnswer(rows: AlignedClaim[], gate: AdaptiveGateResult): string {
+  const selection = selectUnifiedAnswer(rows, gate);
   if (gate.status === "fail") {
-    const splitClaims = rows.filter((r) => r.status === "split").slice(0, 5);
-    const bullets = splitClaims.map((r) => `- ${r.claimText}`).join("\n");
-    return [
-      "Panel could not converge on a reliable answer.",
-      bullets ? `\nUnresolved claims:\n${bullets}` : "",
-    ]
-      .join("")
-      .trim();
+    const bullets = selection.rows.map((r) => `- ${quoteClaim(r.claimText)}`).join("\n");
+    return [selection.note, bullets ? `\nUnresolved claims:\n${bullets}` : ""].join("").trim();
   }
+  if (selection.note !== null) return selection.note;
 
-  const candidates = rows
-    .filter((r) => r.status === "consensus" || r.status === "majority")
-    .sort((a, b) => claimSalience(b) - claimSalience(a))
-    .slice(0, 4);
-
-  if (candidates.length === 0) {
-    return "No consensus or majority claims were identified across the panel.";
-  }
-
-  return candidates
+  return selection.rows
     .map((row) => {
-      const supportingModels = row.cells
-        .filter((c) => c && (c.stance === "agrees" || c.stance === "partial"))
-        .map((c) => modelLabel(c!.modelId));
+      const supportingModels = unifiedAnswerSupporters(row);
       const names = supportingModels.length > 0 ? supportingModels.join(", ") : "the panel";
-      return `${row.claimText} (${names}).`;
+      const contested = describeContested(row);
+      return contested ? `${quoteClaim(row.claimText)} (${names}; ${contested}).` : `${quoteClaim(row.claimText)} (${names}).`;
     })
     .join(" ");
 }

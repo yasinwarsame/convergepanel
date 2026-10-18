@@ -34,7 +34,7 @@ import { ModelId } from "@/lib/types";
 import { callGemini } from "@/lib/connectors/gemini";
 import { GEMINI_API_KEY } from "@/lib/env";
 import { logger } from "@/lib/logger";
-import { AlignedClaim, AlignedClaimCell, Claim, ClaimCellStance, ClaimStance } from "./types";
+import { AlignedClaim, AlignedClaimCell, Claim, ClaimCellStance, ClaimFieldClass, ClaimStance } from "./types";
 import { stripJsonFences, withTimeout } from "./util";
 import { slugsMatch, normalizeSlug, UnionFind } from "./textSimilarity";
 
@@ -45,9 +45,23 @@ const CLUSTER_MAX_OUTPUT_TOKENS = 2000;
 export const BACKFILL_CALL_TIMEOUT_MS = 6000;
 const BACKFILL_MAX_OUTPUT_TOKENS = 1200;
 
+/** Which claim[] field a Claim came from, and that field's epistemic class (claimFieldClass, consensusIntegrity.ts). */
+export interface ClaimFieldOrigin {
+  field: string;
+  fieldClass: ClaimFieldClass;
+}
+
 export interface ModelClaims {
   modelId: ModelId;
   claims: Claim[];
+  /**
+   * claimOrigins[i] is the field claims[i] came from (orchestrate.ts builds
+   * both from the same loop). Optional for callers that only have a flat
+   * Claim list; without it, or if its length doesn't match claims, every
+   * cell gets field null / fieldClass "unclassified" — never a guessed
+   * "disputed".
+   */
+  claimOrigins?: ClaimFieldOrigin[];
   /**
    * The model's full validated response data (every schema field — summary,
    * scalar answers, string[] lists — not just its claim[] fields). Passed
@@ -82,9 +96,11 @@ function formatFullResponseForPrompt(data: Record<string, unknown> | null | unde
   return lines.join("\n");
 }
 
-interface ClaimNode {
+export interface ClaimNode {
   modelId: ModelId;
   claim: Claim;
+  field: string | null;
+  fieldClass: ClaimFieldClass;
 }
 
 interface StanceAnswer {
@@ -136,6 +152,28 @@ interface SemanticCluster {
 }
 
 /**
+ * The pass-2 user message: one line per group, `c<i>: <JSON array>`. Each
+ * claim's stance, confidence and fieldClass are separate typed JSON fields —
+ * never folded into one label string — so the clusterer sees how settled a
+ * model says a question is without that being mistaken for its position.
+ * Exported for prompt-construction tests.
+ */
+export function formatClusterGroupsForPrompt(groups: number[][], nodes: ClaimNode[]): string {
+  return groups
+    .map((idxs, i) => {
+      const members = idxs.map((idx) => ({
+        model: nodes[idx].modelId,
+        claim: nodes[idx].claim.claim,
+        stance: nodes[idx].claim.stance,
+        confidence: nodes[idx].claim.confidence,
+        fieldClass: nodes[idx].fieldClass,
+      }));
+      return `c${i}: ${JSON.stringify(members)}`;
+    })
+    .join("\n");
+}
+
+/**
  * Best-effort semantic reconciliation of ALL pass-1 groups (not just
  * singletons) into final clusters, with an explicit instruction to cluster
  * by proposition rather than by stance. Never throws; on any failure, keeps
@@ -149,19 +187,20 @@ async function semanticClusterGroups(
     return null; // nothing to reconcile — 0 or 1 group already covers everything
   }
 
-  const keyed = groups.map((idxs, i) => ({
-    key: `c${i}`,
-    idxs,
-    label: idxs
-      .map((idx) => `[${nodes[idx].modelId}] "${nodes[idx].claim.claim}" (stance: ${nodes[idx].claim.stance})`)
-      .join(" | "),
-  }));
+  const keyed = groups.map((idxs, i) => ({ key: `c${i}`, idxs }));
 
-  const userMessage = keyed.map((k) => `${k.key}: ${k.label}`).join("\n");
+  const userMessage = formatClusterGroupsForPrompt(groups, nodes);
 
   const systemPrompt = `You are reconciling claims raised independently by different AI models answering the same research question, so they can be compared side by side in one table.
 
-Each line below is one GROUP of claims (already merged if the models used near-identical wording).
+Each line below is one GROUP of claims (already merged if the models used near-identical wording): its key, then a JSON array of the group's claims. Each claim has separate fields:
+- "model": which model raised it.
+- "claim": the claim text.
+- "stance": the model's own polarity on its claim text — "asserts", "disputes" or "uncertain".
+- "confidence": how settled the model says the underlying question is — "settled", "majority_view", "contested" or "speculative".
+- "fieldClass": the kind of list the model put it in — "settled" (well-established claims), "disputed" (claims where experts genuinely disagree) or "unclassified".
+
+Confidence and fieldClass describe how settled the model says the question is. They are NOT the model's position: never cluster by them, and never treat "contested" or "disputed" as agreeing or disagreeing with anything. A model can take a clear position on a question it says is contested.
 
 Your job:
 1. Cluster GROUPS that are about the SAME underlying proposition into one cluster — even when they take OPPOSING positions on it. Cluster by PROPOSITION, not by stance. Example: "cap-and-trade achieves similar emissions reductions" and "carbon taxes often outperform emissions trading systems" are the SAME proposition (relative effectiveness of carbon-pricing mechanisms) argued from opposite sides, and MUST land in one cluster.
@@ -254,7 +293,7 @@ function buildAlignedClaim(
   const cellByModel = new Map<ModelId, AlignedClaimCell>();
 
   for (const idx of idxs) {
-    const { modelId, claim } = nodes[idx];
+    const { modelId, claim, field, fieldClass } = nodes[idx];
     if (cellByModel.has(modelId)) continue; // first claim wins if a model raised >1 claim in this cluster
     const resolved = stanceByIdx.get(idx) ?? fallbackRelativeStance(claim);
     cellByModel.set(modelId, {
@@ -262,6 +301,7 @@ function buildAlignedClaim(
       stance: resolved.stance,
       rawStance: claim.stance,
       confidence: claim.confidence,
+      origin: { kind: "claim", field, fieldClass },
       excerpt: resolved.excerpt || claim.claim,
       evidenceType: claim.evidenceType,
       ...(claim.camps ? { camps: claim.camps } : {}),
@@ -413,7 +453,8 @@ async function backfillSilentCells(
           modelId,
           stance: answer.stance,
           rawStance: rawStanceFromRelative(answer.stance),
-          confidence: "majority_view", // inferred position, not the model's stated one
+          confidence: null, // an inferred position: the model stated no confidence for it
+          origin: { kind: "inferred" },
           excerpt: answer.excerpt,
           backfilled: true,
         };
@@ -433,10 +474,19 @@ export async function alignClaims(perModelClaims: ModelClaims[]): Promise<Aligne
   const modelOrder = perModelClaims.map((m) => m.modelId);
 
   const nodes: ClaimNode[] = [];
-  for (const { modelId, claims } of perModelClaims) {
-    for (const claim of claims) {
-      nodes.push({ modelId, claim });
+  for (const { modelId, claims, claimOrigins } of perModelClaims) {
+    const originsUsable = !!claimOrigins && claimOrigins.length === claims.length;
+    if (claimOrigins && !originsUsable) {
+      logger.warn("[adaptiveSchema] claimOrigins length does not match claims, treating field origin as unknown", {
+        modelId,
+        claims: claims.length,
+        claimOrigins: claimOrigins.length,
+      });
     }
+    claims.forEach((claim, i) => {
+      const origin = originsUsable ? claimOrigins![i] : null;
+      nodes.push({ modelId, claim, field: origin?.field ?? null, fieldClass: origin?.fieldClass ?? "unclassified" });
+    });
   }
 
   if (nodes.length === 0) return [];

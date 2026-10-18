@@ -4,7 +4,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -35,19 +35,47 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
-  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "panelVerdict": "3/5 models converge on “Consensus claim”; certainty 66%; gate: caution.",
+  "presentation": {
+    "agree": [
+      {
+        "claim": "Consensus claim",
+        "result": "consensus: 3 of 5 dispatched models support it",
+      },
+    ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
+    "disagree": [
+      {
+        "claim": "Split claim",
+        "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+        "whySource": "computed",
+      },
+    ],
+    "executiveSummarySource": "unified_answer",
+    "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+  },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Consensus claim (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
     "disagreementDetail": "Models take different positions — see the disagreement card below for each model's stance.",
     "disagreementModelCount": 2,
     "keyDisagreement": "Split claim",
+    "keyDisagreementAgreement": "split: 1 of 5 dispatched models support it and 1 disputes it",
     "question": "Test question",
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
@@ -55,9 +83,10 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
+    "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
   },
   "whereModelsAgree": [
-    "Consensus claim",
+    "“Consensus claim”",
   ],
   "whereModelsDisagree": [
     "Split claim",
@@ -69,7 +98,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -100,19 +129,47 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
-  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "panelVerdict": "3/5 models converge on “Consensus claim”; certainty 66%; gate: caution.",
+  "presentation": {
+    "agree": [
+      {
+        "claim": "Consensus claim",
+        "result": "consensus: 3 of 5 dispatched models support it",
+      },
+    ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
+    "disagree": [
+      {
+        "claim": "Split claim",
+        "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+        "whySource": "computed",
+      },
+    ],
+    "executiveSummarySource": "unified_answer",
+    "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+  },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Consensus claim (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
     "disagreementDetail": "Models take different positions — see the disagreement card below for each model's stance.",
     "disagreementModelCount": 2,
     "keyDisagreement": "Split claim",
+    "keyDisagreementAgreement": "split: 1 of 5 dispatched models support it and 1 disputes it",
     "question": "Test question",
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
@@ -120,9 +177,10 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
+    "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
   },
   "whereModelsAgree": [
-    "Consensus claim",
+    "“Consensus claim”",
   ],
   "whereModelsDisagree": [
     "Split claim",
@@ -134,7 +192,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -165,19 +223,47 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
-  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "panelVerdict": "3/5 models converge on “Consensus claim”; certainty 66%; gate: caution.",
+  "presentation": {
+    "agree": [
+      {
+        "claim": "Consensus claim",
+        "result": "consensus: 3 of 5 dispatched models support it",
+      },
+    ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
+    "disagree": [
+      {
+        "claim": "Split claim",
+        "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+        "whySource": "computed",
+      },
+    ],
+    "executiveSummarySource": "unified_answer",
+    "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+  },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Consensus claim (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
     "disagreementDetail": "Models take different positions — see the disagreement card below for each model's stance.",
     "disagreementModelCount": 2,
     "keyDisagreement": "Split claim",
+    "keyDisagreementAgreement": "split: 1 of 5 dispatched models support it and 1 disputes it",
     "question": "Test question",
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
@@ -185,9 +271,10 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
+    "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
   },
   "whereModelsAgree": [
-    "Consensus claim",
+    "“Consensus claim”",
   ],
   "whereModelsDisagree": [
     "Split claim",
@@ -199,7 +286,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -230,19 +317,47 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
-  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "panelVerdict": "3/5 models converge on “Consensus claim”; certainty 66%; gate: caution.",
+  "presentation": {
+    "agree": [
+      {
+        "claim": "Consensus claim",
+        "result": "consensus: 3 of 5 dispatched models support it",
+      },
+    ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
+    "disagree": [
+      {
+        "claim": "Split claim",
+        "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+        "whySource": "computed",
+      },
+    ],
+    "executiveSummarySource": "unified_answer",
+    "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+  },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Consensus claim (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
     "disagreementDetail": "Models take different positions — see the disagreement card below for each model's stance.",
     "disagreementModelCount": 2,
     "keyDisagreement": "Split claim",
+    "keyDisagreementAgreement": "split: 1 of 5 dispatched models support it and 1 disputes it",
     "question": "Test question",
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
@@ -250,9 +365,10 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
+    "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
   },
   "whereModelsAgree": [
-    "Consensus claim",
+    "“Consensus claim”",
   ],
   "whereModelsDisagree": [
     "Split claim",
@@ -264,7 +380,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -295,19 +411,47 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
-  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "panelVerdict": "3/5 models converge on “Consensus claim”; certainty 66%; gate: caution.",
+  "presentation": {
+    "agree": [
+      {
+        "claim": "Consensus claim",
+        "result": "consensus: 3 of 5 dispatched models support it",
+      },
+    ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
+    "disagree": [
+      {
+        "claim": "Split claim",
+        "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+        "whySource": "computed",
+      },
+    ],
+    "executiveSummarySource": "unified_answer",
+    "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+  },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Consensus claim (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
     "disagreementDetail": "Models take different positions — see the disagreement card below for each model's stance.",
     "disagreementModelCount": 2,
     "keyDisagreement": "Split claim",
+    "keyDisagreementAgreement": "split: 1 of 5 dispatched models support it and 1 disputes it",
     "question": "Test question",
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
@@ -315,9 +459,10 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
+    "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
   },
   "whereModelsAgree": [
-    "Consensus claim",
+    "“Consensus claim”",
   ],
   "whereModelsDisagree": [
     "Split claim",
@@ -329,7 +474,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -360,19 +505,47 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
-  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "panelVerdict": "3/5 models converge on “Consensus claim”; certainty 66%; gate: caution.",
+  "presentation": {
+    "agree": [
+      {
+        "claim": "Consensus claim",
+        "result": "consensus: 3 of 5 dispatched models support it",
+      },
+    ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
+    "disagree": [
+      {
+        "claim": "Split claim",
+        "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+        "whySource": "computed",
+      },
+    ],
+    "executiveSummarySource": "unified_answer",
+    "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+  },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Consensus claim (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
     "disagreementDetail": "Models take different positions — see the disagreement card below for each model's stance.",
     "disagreementModelCount": 2,
     "keyDisagreement": "Split claim",
+    "keyDisagreementAgreement": "split: 1 of 5 dispatched models support it and 1 disputes it",
     "question": "Test question",
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
@@ -380,9 +553,10 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
+    "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
   },
   "whereModelsAgree": [
-    "Consensus claim",
+    "“Consensus claim”",
   ],
   "whereModelsDisagree": [
     "Split claim",
@@ -394,7 +568,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -425,19 +599,47 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
-  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "panelVerdict": "3/5 models converge on “Consensus claim”; certainty 66%; gate: caution.",
+  "presentation": {
+    "agree": [
+      {
+        "claim": "Consensus claim",
+        "result": "consensus: 3 of 5 dispatched models support it",
+      },
+    ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
+    "disagree": [
+      {
+        "claim": "Split claim",
+        "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+        "whySource": "computed",
+      },
+    ],
+    "executiveSummarySource": "unified_answer",
+    "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+  },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Consensus claim (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
     "disagreementDetail": "Models take different positions — see the disagreement card below for each model's stance.",
     "disagreementModelCount": 2,
     "keyDisagreement": "Split claim",
+    "keyDisagreementAgreement": "split: 1 of 5 dispatched models support it and 1 disputes it",
     "question": "Test question",
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
@@ -445,9 +647,10 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
+    "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
   },
   "whereModelsAgree": [
-    "Consensus claim",
+    "“Consensus claim”",
   ],
   "whereModelsDisagree": [
     "Split claim",
@@ -459,7 +662,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -490,19 +693,47 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
-  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "panelVerdict": "3/5 models converge on “Consensus claim”; certainty 66%; gate: caution.",
+  "presentation": {
+    "agree": [
+      {
+        "claim": "Consensus claim",
+        "result": "consensus: 3 of 5 dispatched models support it",
+      },
+    ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
+    "disagree": [
+      {
+        "claim": "Split claim",
+        "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+        "whySource": "computed",
+      },
+    ],
+    "executiveSummarySource": "unified_answer",
+    "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+  },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Consensus claim (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
     "disagreementDetail": "Models take different positions — see the disagreement card below for each model's stance.",
     "disagreementModelCount": 2,
     "keyDisagreement": "Split claim",
+    "keyDisagreementAgreement": "split: 1 of 5 dispatched models support it and 1 disputes it",
     "question": "Test question",
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
@@ -510,9 +741,10 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
+    "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
   },
   "whereModelsAgree": [
-    "Consensus claim",
+    "“Consensus claim”",
   ],
   "whereModelsDisagree": [
     "Split claim",
@@ -524,7 +756,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -555,19 +787,47 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
-  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "panelVerdict": "3/5 models converge on “Consensus claim”; certainty 66%; gate: caution.",
+  "presentation": {
+    "agree": [
+      {
+        "claim": "Consensus claim",
+        "result": "consensus: 3 of 5 dispatched models support it",
+      },
+    ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
+    "disagree": [
+      {
+        "claim": "Split claim",
+        "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+        "whySource": "computed",
+      },
+    ],
+    "executiveSummarySource": "unified_answer",
+    "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+  },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Consensus claim (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
     "disagreementDetail": "Models take different positions — see the disagreement card below for each model's stance.",
     "disagreementModelCount": 2,
     "keyDisagreement": "Split claim",
+    "keyDisagreementAgreement": "split: 1 of 5 dispatched models support it and 1 disputes it",
     "question": "Test question",
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
@@ -575,9 +835,10 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
+    "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
   },
   "whereModelsAgree": [
-    "Consensus claim",
+    "“Consensus claim”",
   ],
   "whereModelsDisagree": [
     "Split claim",
@@ -589,7 +850,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -620,19 +881,47 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
-  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "panelVerdict": "3/5 models converge on “Consensus claim”; certainty 66%; gate: caution.",
+  "presentation": {
+    "agree": [
+      {
+        "claim": "Consensus claim",
+        "result": "consensus: 3 of 5 dispatched models support it",
+      },
+    ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
+    "disagree": [
+      {
+        "claim": "Split claim",
+        "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+        "whySource": "computed",
+      },
+    ],
+    "executiveSummarySource": "unified_answer",
+    "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+  },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Consensus claim (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
     "disagreementDetail": "Models take different positions — see the disagreement card below for each model's stance.",
     "disagreementModelCount": 2,
     "keyDisagreement": "Split claim",
+    "keyDisagreementAgreement": "split: 1 of 5 dispatched models support it and 1 disputes it",
     "question": "Test question",
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
@@ -640,9 +929,10 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
+    "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
   },
   "whereModelsAgree": [
-    "Consensus claim",
+    "“Consensus claim”",
   ],
   "whereModelsDisagree": [
     "Split claim",
@@ -654,7 +944,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -685,19 +975,47 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
-  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "panelVerdict": "3/5 models converge on “Consensus claim”; certainty 66%; gate: caution.",
+  "presentation": {
+    "agree": [
+      {
+        "claim": "Consensus claim",
+        "result": "consensus: 3 of 5 dispatched models support it",
+      },
+    ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
+    "disagree": [
+      {
+        "claim": "Split claim",
+        "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+        "whySource": "computed",
+      },
+    ],
+    "executiveSummarySource": "unified_answer",
+    "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+  },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Consensus claim (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
     "disagreementDetail": "Models take different positions — see the disagreement card below for each model's stance.",
     "disagreementModelCount": 2,
     "keyDisagreement": "Split claim",
+    "keyDisagreementAgreement": "split: 1 of 5 dispatched models support it and 1 disputes it",
     "question": "Test question",
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
@@ -705,9 +1023,10 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
+    "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
   },
   "whereModelsAgree": [
-    "Consensus claim",
+    "“Consensus claim”",
   ],
   "whereModelsDisagree": [
     "Split claim",
@@ -719,7 +1038,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -750,19 +1069,47 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
-  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "panelVerdict": "3/5 models converge on “Consensus claim”; certainty 66%; gate: caution.",
+  "presentation": {
+    "agree": [
+      {
+        "claim": "Consensus claim",
+        "result": "consensus: 3 of 5 dispatched models support it",
+      },
+    ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
+    "disagree": [
+      {
+        "claim": "Split claim",
+        "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+        "whySource": "computed",
+      },
+    ],
+    "executiveSummarySource": "unified_answer",
+    "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+  },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Consensus claim (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
     "disagreementDetail": "Models take different positions — see the disagreement card below for each model's stance.",
     "disagreementModelCount": 2,
     "keyDisagreement": "Split claim",
+    "keyDisagreementAgreement": "split: 1 of 5 dispatched models support it and 1 disputes it",
     "question": "Test question",
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
@@ -770,9 +1117,10 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
+    "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
   },
   "whereModelsAgree": [
-    "Consensus claim",
+    "“Consensus claim”",
   ],
   "whereModelsDisagree": [
     "Split claim",
@@ -784,7 +1132,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -815,19 +1163,47 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
-  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "panelVerdict": "3/5 models converge on “Consensus claim”; certainty 66%; gate: caution.",
+  "presentation": {
+    "agree": [
+      {
+        "claim": "Consensus claim",
+        "result": "consensus: 3 of 5 dispatched models support it",
+      },
+    ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
+    "disagree": [
+      {
+        "claim": "Split claim",
+        "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+        "whySource": "computed",
+      },
+    ],
+    "executiveSummarySource": "unified_answer",
+    "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+  },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Consensus claim (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
     "disagreementDetail": "Models take different positions — see the disagreement card below for each model's stance.",
     "disagreementModelCount": 2,
     "keyDisagreement": "Split claim",
+    "keyDisagreementAgreement": "split: 1 of 5 dispatched models support it and 1 disputes it",
     "question": "Test question",
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
@@ -835,9 +1211,10 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
+    "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
   },
   "whereModelsAgree": [
-    "Consensus claim",
+    "“Consensus claim”",
   ],
   "whereModelsDisagree": [
     "Split claim",
@@ -849,7 +1226,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -880,19 +1257,47 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
-  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "panelVerdict": "3/5 models converge on “Consensus claim”; certainty 66%; gate: caution.",
+  "presentation": {
+    "agree": [
+      {
+        "claim": "Consensus claim",
+        "result": "consensus: 3 of 5 dispatched models support it",
+      },
+    ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
+    "disagree": [
+      {
+        "claim": "Split claim",
+        "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+        "whySource": "computed",
+      },
+    ],
+    "executiveSummarySource": "unified_answer",
+    "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+  },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Consensus claim (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
     "disagreementDetail": "Models take different positions — see the disagreement card below for each model's stance.",
     "disagreementModelCount": 2,
     "keyDisagreement": "Split claim",
+    "keyDisagreementAgreement": "split: 1 of 5 dispatched models support it and 1 disputes it",
     "question": "Test question",
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
@@ -900,9 +1305,10 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
+    "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
   },
   "whereModelsAgree": [
-    "Consensus claim",
+    "“Consensus claim”",
   ],
   "whereModelsDisagree": [
     "Split claim",
@@ -914,7 +1320,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -945,19 +1351,47 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
-  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "panelVerdict": "3/5 models converge on “Consensus claim”; certainty 66%; gate: caution.",
+  "presentation": {
+    "agree": [
+      {
+        "claim": "Consensus claim",
+        "result": "consensus: 3 of 5 dispatched models support it",
+      },
+    ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
+    "disagree": [
+      {
+        "claim": "Split claim",
+        "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+        "whySource": "computed",
+      },
+    ],
+    "executiveSummarySource": "unified_answer",
+    "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+  },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Consensus claim (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
     "disagreementDetail": "Models take different positions — see the disagreement card below for each model's stance.",
     "disagreementModelCount": 2,
     "keyDisagreement": "Split claim",
+    "keyDisagreementAgreement": "split: 1 of 5 dispatched models support it and 1 disputes it",
     "question": "Test question",
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
@@ -965,9 +1399,10 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
+    "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
   },
   "whereModelsAgree": [
-    "Consensus claim",
+    "“Consensus claim”",
   ],
   "whereModelsDisagree": [
     "Split claim",
@@ -979,7 +1414,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -1010,19 +1445,47 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
-  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "panelVerdict": "3/5 models converge on “Consensus claim”; certainty 66%; gate: caution.",
+  "presentation": {
+    "agree": [
+      {
+        "claim": "Consensus claim",
+        "result": "consensus: 3 of 5 dispatched models support it",
+      },
+    ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
+    "disagree": [
+      {
+        "claim": "Split claim",
+        "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+        "whySource": "computed",
+      },
+    ],
+    "executiveSummarySource": "unified_answer",
+    "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+  },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Consensus claim (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
     "disagreementDetail": "Models take different positions — see the disagreement card below for each model's stance.",
     "disagreementModelCount": 2,
     "keyDisagreement": "Split claim",
+    "keyDisagreementAgreement": "split: 1 of 5 dispatched models support it and 1 disputes it",
     "question": "Test question",
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
@@ -1030,9 +1493,10 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
+    "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
   },
   "whereModelsAgree": [
-    "Consensus claim",
+    "“Consensus claim”",
   ],
   "whereModelsDisagree": [
     "Split claim",
@@ -1044,7 +1508,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -1075,19 +1539,47 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
-  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "panelVerdict": "3/5 models converge on “Consensus claim”; certainty 66%; gate: caution.",
+  "presentation": {
+    "agree": [
+      {
+        "claim": "Consensus claim",
+        "result": "consensus: 3 of 5 dispatched models support it",
+      },
+    ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
+    "disagree": [
+      {
+        "claim": "Split claim",
+        "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+        "whySource": "computed",
+      },
+    ],
+    "executiveSummarySource": "unified_answer",
+    "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+  },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Consensus claim (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
     "disagreementDetail": "Models take different positions — see the disagreement card below for each model's stance.",
     "disagreementModelCount": 2,
     "keyDisagreement": "Split claim",
+    "keyDisagreementAgreement": "split: 1 of 5 dispatched models support it and 1 disputes it",
     "question": "Test question",
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
@@ -1095,9 +1587,10 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
+    "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
   },
   "whereModelsAgree": [
-    "Consensus claim",
+    "“Consensus claim”",
   ],
   "whereModelsDisagree": [
     "Split claim",
@@ -1109,7 +1602,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -1140,19 +1633,47 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
-  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "panelVerdict": "3/5 models converge on “Consensus claim”; certainty 66%; gate: caution.",
+  "presentation": {
+    "agree": [
+      {
+        "claim": "Consensus claim",
+        "result": "consensus: 3 of 5 dispatched models support it",
+      },
+    ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
+    "disagree": [
+      {
+        "claim": "Split claim",
+        "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+        "whySource": "computed",
+      },
+    ],
+    "executiveSummarySource": "unified_answer",
+    "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+  },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Consensus claim (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
     "disagreementDetail": "Models take different positions — see the disagreement card below for each model's stance.",
     "disagreementModelCount": 2,
     "keyDisagreement": "Split claim",
+    "keyDisagreementAgreement": "split: 1 of 5 dispatched models support it and 1 disputes it",
     "question": "Test question",
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
@@ -1160,9 +1681,10 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
+    "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
   },
   "whereModelsAgree": [
-    "Consensus claim",
+    "“Consensus claim”",
   ],
   "whereModelsDisagree": [
     "Split claim",
@@ -1174,7 +1696,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -1205,19 +1727,47 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
-  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "panelVerdict": "3/5 models converge on “Consensus claim”; certainty 66%; gate: caution.",
+  "presentation": {
+    "agree": [
+      {
+        "claim": "Consensus claim",
+        "result": "consensus: 3 of 5 dispatched models support it",
+      },
+    ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
+    "disagree": [
+      {
+        "claim": "Split claim",
+        "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+        "whySource": "computed",
+      },
+    ],
+    "executiveSummarySource": "unified_answer",
+    "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+  },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Consensus claim (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
     "disagreementDetail": "Models take different positions — see the disagreement card below for each model's stance.",
     "disagreementModelCount": 2,
     "keyDisagreement": "Split claim",
+    "keyDisagreementAgreement": "split: 1 of 5 dispatched models support it and 1 disputes it",
     "question": "Test question",
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
@@ -1225,9 +1775,10 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
+    "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
   },
   "whereModelsAgree": [
-    "Consensus claim",
+    "“Consensus claim”",
   ],
   "whereModelsDisagree": [
     "Split claim",
@@ -1239,7 +1790,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -1270,19 +1821,47 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
-  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "panelVerdict": "3/5 models converge on “Consensus claim”; certainty 66%; gate: caution.",
+  "presentation": {
+    "agree": [
+      {
+        "claim": "Consensus claim",
+        "result": "consensus: 3 of 5 dispatched models support it",
+      },
+    ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
+    "disagree": [
+      {
+        "claim": "Split claim",
+        "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+        "whySource": "computed",
+      },
+    ],
+    "executiveSummarySource": "unified_answer",
+    "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+  },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Consensus claim (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
     "disagreementDetail": "Models take different positions — see the disagreement card below for each model's stance.",
     "disagreementModelCount": 2,
     "keyDisagreement": "Split claim",
+    "keyDisagreementAgreement": "split: 1 of 5 dispatched models support it and 1 disputes it",
     "question": "Test question",
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
@@ -1290,9 +1869,10 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
+    "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
   },
   "whereModelsAgree": [
-    "Consensus claim",
+    "“Consensus claim”",
   ],
   "whereModelsDisagree": [
     "Split claim",
@@ -1304,7 +1884,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -1335,19 +1915,47 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
-  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "panelVerdict": "3/5 models converge on “Consensus claim”; certainty 66%; gate: caution.",
+  "presentation": {
+    "agree": [
+      {
+        "claim": "Consensus claim",
+        "result": "consensus: 3 of 5 dispatched models support it",
+      },
+    ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
+    "disagree": [
+      {
+        "claim": "Split claim",
+        "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+        "whySource": "computed",
+      },
+    ],
+    "executiveSummarySource": "unified_answer",
+    "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+  },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Consensus claim (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
     "disagreementDetail": "Models take different positions — see the disagreement card below for each model's stance.",
     "disagreementModelCount": 2,
     "keyDisagreement": "Split claim",
+    "keyDisagreementAgreement": "split: 1 of 5 dispatched models support it and 1 disputes it",
     "question": "Test question",
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
@@ -1355,9 +1963,10 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
+    "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
   },
   "whereModelsAgree": [
-    "Consensus claim",
+    "“Consensus claim”",
   ],
   "whereModelsDisagree": [
     "Split claim",
@@ -1369,7 +1978,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -1400,19 +2009,47 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
-  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "panelVerdict": "3/5 models converge on “Consensus claim”; certainty 66%; gate: caution.",
+  "presentation": {
+    "agree": [
+      {
+        "claim": "Consensus claim",
+        "result": "consensus: 3 of 5 dispatched models support it",
+      },
+    ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
+    "disagree": [
+      {
+        "claim": "Split claim",
+        "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+        "whySource": "computed",
+      },
+    ],
+    "executiveSummarySource": "unified_answer",
+    "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+  },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Consensus claim (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
     "disagreementDetail": "Models take different positions — see the disagreement card below for each model's stance.",
     "disagreementModelCount": 2,
     "keyDisagreement": "Split claim",
+    "keyDisagreementAgreement": "split: 1 of 5 dispatched models support it and 1 disputes it",
     "question": "Test question",
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
@@ -1420,9 +2057,10 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
+    "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
   },
   "whereModelsAgree": [
-    "Consensus claim",
+    "“Consensus claim”",
   ],
   "whereModelsDisagree": [
     "Split claim",
@@ -1434,7 +2072,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -1465,19 +2103,47 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
-  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "panelVerdict": "3/5 models converge on “Consensus claim”; certainty 66%; gate: caution.",
+  "presentation": {
+    "agree": [
+      {
+        "claim": "Consensus claim",
+        "result": "consensus: 3 of 5 dispatched models support it",
+      },
+    ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
+    "disagree": [
+      {
+        "claim": "Split claim",
+        "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+        "whySource": "computed",
+      },
+    ],
+    "executiveSummarySource": "unified_answer",
+    "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+  },
   "runCertainty": 0.6599999999999999,
-  "unifiedAnswer": "Consensus claim (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
     "disagreementDetail": "Models take different positions — see the disagreement card below for each model's stance.",
     "disagreementModelCount": 2,
     "keyDisagreement": "Split claim",
+    "keyDisagreementAgreement": "split: 1 of 5 dispatched models support it and 1 disputes it",
     "question": "Test question",
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
@@ -1485,9 +2151,10 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
+    "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
   },
   "whereModelsAgree": [
-    "Consensus claim",
+    "“Consensus claim”",
   ],
   "whereModelsDisagree": [
     "Split claim",
@@ -1499,7 +2166,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -1530,19 +2197,47 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
-  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "panelVerdict": "3/5 models converge on “Consensus claim”; certainty 66%; gate: caution.",
+  "presentation": {
+    "agree": [
+      {
+        "claim": "Consensus claim",
+        "result": "consensus: 3 of 5 dispatched models support it",
+      },
+    ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
+    "disagree": [
+      {
+        "claim": "Split claim",
+        "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+        "whySource": "computed",
+      },
+    ],
+    "executiveSummarySource": "unified_answer",
+    "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+  },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Consensus claim (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
     "disagreementDetail": "Models take different positions — see the disagreement card below for each model's stance.",
     "disagreementModelCount": 2,
     "keyDisagreement": "Split claim",
+    "keyDisagreementAgreement": "split: 1 of 5 dispatched models support it and 1 disputes it",
     "question": "Test question",
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
@@ -1550,9 +2245,10 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
+    "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
   },
   "whereModelsAgree": [
-    "Consensus claim",
+    "“Consensus claim”",
   ],
   "whereModelsDisagree": [
     "Split claim",
@@ -1564,7 +2260,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -1595,19 +2291,47 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
-  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "panelVerdict": "3/5 models converge on “Consensus claim”; certainty 66%; gate: caution.",
+  "presentation": {
+    "agree": [
+      {
+        "claim": "Consensus claim",
+        "result": "consensus: 3 of 5 dispatched models support it",
+      },
+    ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
+    "disagree": [
+      {
+        "claim": "Split claim",
+        "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+        "whySource": "computed",
+      },
+    ],
+    "executiveSummarySource": "unified_answer",
+    "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+  },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Consensus claim (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
     "disagreementDetail": "Models take different positions — see the disagreement card below for each model's stance.",
     "disagreementModelCount": 2,
     "keyDisagreement": "Split claim",
+    "keyDisagreementAgreement": "split: 1 of 5 dispatched models support it and 1 disputes it",
     "question": "Test question",
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
@@ -1615,9 +2339,10 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
+    "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
   },
   "whereModelsAgree": [
-    "Consensus claim",
+    "“Consensus claim”",
   ],
   "whereModelsDisagree": [
     "Split claim",
@@ -1629,7 +2354,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -1660,19 +2385,47 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
-  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "panelVerdict": "3/5 models converge on “Consensus claim”; certainty 66%; gate: caution.",
+  "presentation": {
+    "agree": [
+      {
+        "claim": "Consensus claim",
+        "result": "consensus: 3 of 5 dispatched models support it",
+      },
+    ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
+    "disagree": [
+      {
+        "claim": "Split claim",
+        "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+        "whySource": "computed",
+      },
+    ],
+    "executiveSummarySource": "unified_answer",
+    "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+  },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Consensus claim (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
     "disagreementDetail": "Models take different positions — see the disagreement card below for each model's stance.",
     "disagreementModelCount": 2,
     "keyDisagreement": "Split claim",
+    "keyDisagreementAgreement": "split: 1 of 5 dispatched models support it and 1 disputes it",
     "question": "Test question",
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
@@ -1680,9 +2433,10 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
+    "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
   },
   "whereModelsAgree": [
-    "Consensus claim",
+    "“Consensus claim”",
   ],
   "whereModelsDisagree": [
     "Split claim",
@@ -1694,7 +2448,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -1725,19 +2479,47 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
-  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "panelVerdict": "3/5 models converge on “Consensus claim”; certainty 66%; gate: caution.",
+  "presentation": {
+    "agree": [
+      {
+        "claim": "Consensus claim",
+        "result": "consensus: 3 of 5 dispatched models support it",
+      },
+    ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
+    "disagree": [
+      {
+        "claim": "Split claim",
+        "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+        "whySource": "computed",
+      },
+    ],
+    "executiveSummarySource": "unified_answer",
+    "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+  },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Consensus claim (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
     "disagreementDetail": "Models take different positions — see the disagreement card below for each model's stance.",
     "disagreementModelCount": 2,
     "keyDisagreement": "Split claim",
+    "keyDisagreementAgreement": "split: 1 of 5 dispatched models support it and 1 disputes it",
     "question": "Test question",
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
@@ -1745,9 +2527,10 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
+    "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
   },
   "whereModelsAgree": [
-    "Consensus claim",
+    "“Consensus claim”",
   ],
   "whereModelsDisagree": [
     "Split claim",
@@ -1759,7 +2542,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
 {
   "biasAndBlindSpots": [],
   "biasEmptyReason": "call_failed",
-  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "certaintyAssessment": "Run certainty 66% (gate: caution). Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
   "degraded": true,
   "diagnostics": {
     "citedClaimCount": 0,
@@ -1790,19 +2573,47 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Consensus claim (ChatGPT, Claude, Grok). The panel reached consensus or majority agreement on 1 claim and split on 1 claim.",
+  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
-  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "panelVerdict": "3/5 models converge on “Consensus claim”; certainty 66%; gate: caution.",
+  "presentation": {
+    "agree": [
+      {
+        "claim": "Consensus claim",
+        "result": "consensus: 3 of 5 dispatched models support it",
+      },
+    ],
+    "answer": {
+      "claims": [
+        {
+          "claim": "Consensus claim",
+          "result": "consensus: 3 of 5 dispatched models support it",
+          "supporters": "ChatGPT, Claude, Grok",
+        },
+      ],
+      "note": null,
+    },
+    "disagree": [
+      {
+        "claim": "Split claim",
+        "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+        "whySource": "computed",
+      },
+    ],
+    "executiveSummarySource": "unified_answer",
+    "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+  },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Consensus claim (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
     "disagreementDetail": "Models take different positions — see the disagreement card below for each model's stance.",
     "disagreementModelCount": 2,
     "keyDisagreement": "Split claim",
+    "keyDisagreementAgreement": "split: 1 of 5 dispatched models support it and 1 disputes it",
     "question": "Test question",
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
@@ -1810,9 +2621,10 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
+    "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
   },
   "whereModelsAgree": [
-    "Consensus claim",
+    "“Consensus claim”",
   ],
   "whereModelsDisagree": [
     "Split claim",

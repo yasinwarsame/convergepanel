@@ -27,7 +27,7 @@ describe("buildAdaptiveVerdict", () => {
     const gate = computeAdaptiveGate(rows, 0.9, "generic");
     const verdict = buildAdaptiveVerdict(rows, gate, 5);
 
-    expect(verdict.summary).toBe("3/5 models converge on Carbon pricing works; certainty 90%; gate: pass.");
+    expect(verdict.summary).toBe("3/5 models converge on “Carbon pricing works”; certainty 90%; gate: pass.");
     expect(verdict.coreFinding).toBe("Carbon pricing works");
     expect(verdict.convergingModelCount).toBe(3);
   });

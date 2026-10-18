@@ -91,7 +91,7 @@ describe("buildAdaptiveSynthesisReport", () => {
 
     expect(report.degraded).toBe(true);
     expect(report.unifiedAnswer).toContain("Consensus claim");
-    expect(report.whereModelsAgree).toContain("Consensus claim");
+    expect(report.whereModelsAgree).toContain("“Consensus claim”");
     // Never a blank executive summary, even in the degraded template path.
     expect(report.executiveSummary).toBeTruthy();
   });
@@ -113,7 +113,8 @@ describe("buildAdaptiveSynthesisReport", () => {
     );
 
     expect(report.degraded).toBe(false);
-    expect(report.whereModelsAgree).toEqual(["Models broadly agree carbon pricing reduces emissions."]);
+    // Option B: the agreement lines are always the deterministic ones, never the model's.
+    expect(report.whereModelsAgree).toEqual(["“Carbon pricing reduces emissions”"]);
     expect(report.narrativeSections).toEqual([{ title: "Metrics spread", body: "Values cluster tightly." }]);
     expect(report.executiveSummary).toContain("Carbon pricing reduces emissions");
     // Deterministic fields still computed in code, not sourced from the mock response.
@@ -183,13 +184,13 @@ describe("buildAdaptiveSynthesisReport", () => {
       .mockResolvedValueOnce({
         modelId: "gemini",
         status: "ok",
-        rawText: narrativeResponse({ executiveSummary: "Gemini 3 Pro and GPT 5.2 agree on this." }),
+        rawText: narrativeResponse({ executiveSummary: "Gemini 3 Pro cites survey data. GPT 5.2 cites the same emissions data." }),
         latencyMs: 5,
       }) // narrative, 1st attempt — hallucinates
       .mockResolvedValueOnce({
         modelId: "gemini",
         status: "ok",
-        rawText: narrativeResponse({ executiveSummary: "Gemini 3 Pro and GPT 5.2 agree on this, still." }),
+        rawText: narrativeResponse({ executiveSummary: "Gemini 3 Pro cites survey data, still. GPT 5.2 cites the same emissions data, still." }),
         latencyMs: 5,
       }); // narrative, regenerate attempt — still hallucinates
 
@@ -210,13 +211,13 @@ describe("buildAdaptiveSynthesisReport", () => {
       .mockResolvedValueOnce({
         modelId: "gemini",
         status: "ok",
-        rawText: narrativeResponse({ executiveSummary: "Models **strongly** agree carbon pricing reduces emissions." }),
+        rawText: narrativeResponse({ executiveSummary: "Carbon pricing **strongly** reduces emissions." }),
         latencyMs: 5,
       }) // narrative, 1st attempt — markdown leak
       .mockResolvedValueOnce({
         modelId: "gemini",
         status: "ok",
-        rawText: narrativeResponse({ executiveSummary: "Models **still strongly** agree carbon pricing reduces emissions." }),
+        rawText: narrativeResponse({ executiveSummary: "Carbon pricing **still strongly** reduces emissions." }),
         latencyMs: 5,
       }); // narrative, regenerate attempt — still leaks
 
@@ -225,7 +226,7 @@ describe("buildAdaptiveSynthesisReport", () => {
 
     expect(mockedCallGemini).toHaveBeenCalledTimes(4);
     expect(report.executiveSummary).not.toContain("**");
-    expect(report.executiveSummary).toContain("still strongly agree carbon pricing");
+    expect(report.executiveSummary).toContain("Carbon pricing still strongly reduces emissions");
   });
 
   it("regenerates once, then strips, when the narrative call leaks an internal agreement/certainty tuple", async () => {
@@ -236,7 +237,7 @@ describe("buildAdaptiveSynthesisReport", () => {
         modelId: "gemini",
         status: "ok",
         rawText: narrativeResponse({
-          executiveSummary: "Models converge (consensus, agreement 1.00, certainty 0.92) on this claim.",
+          executiveSummary: "Carbon pricing works (consensus, agreement 1.00, certainty 0.92) in this case.",
         }),
         latencyMs: 5,
       }) // narrative, 1st attempt — metric tuple leak
@@ -244,7 +245,7 @@ describe("buildAdaptiveSynthesisReport", () => {
         modelId: "gemini",
         status: "ok",
         rawText: narrativeResponse({
-          executiveSummary: "Models still converge (consensus, agreement 1.00, certainty 0.92) on this claim.",
+          executiveSummary: "Carbon pricing still works (consensus, agreement 1.00, certainty 0.92) in this case.",
         }),
         latencyMs: 5,
       }); // narrative, regenerate attempt — still leaks
@@ -255,7 +256,7 @@ describe("buildAdaptiveSynthesisReport", () => {
     expect(mockedCallGemini).toHaveBeenCalledTimes(4);
     expect(report.executiveSummary).not.toMatch(/agreement\s*1\.00/i);
     expect(report.executiveSummary).not.toMatch(/certainty\s*0\.92/i);
-    expect(report.executiveSummary).toContain("Models still converge");
+    expect(report.executiveSummary).toContain("Carbon pricing still works in this case.");
   });
 
   it("returns bias findings and threads them into the verdict card's caveat", async () => {

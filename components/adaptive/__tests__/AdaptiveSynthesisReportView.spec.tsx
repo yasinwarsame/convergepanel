@@ -438,3 +438,37 @@ describe("AdaptiveSynthesisReportView — Where models agree dedup (Part 4)", ()
     expect(agreeHtml).toContain("supply chain disruption");
   });
 });
+
+describe("AdaptiveSynthesisReportView — load-bearing status labels (Consensus Integrity)", () => {
+  function loadBearing(claims: AlignedClaim[]): string {
+    const html = renderToStaticMarkup(
+      createElement(AdaptiveSynthesisReportView, {
+        report,
+        gate: { ...gate, loadBearingClaims: claims },
+        alignedClaims,
+        trustSummary,
+        question: QUESTION,
+        modelsUsed: MODELS as unknown as any[],
+        runId: "test-run-id",
+      })
+    );
+    const start = html.indexOf('data-section="load-bearing-claims"');
+    expect(start).toBeGreaterThan(-1);
+    return html.slice(start, html.indexOf("</ul>", start));
+  }
+
+  it("the four pre-existing statuses keep their exact historical text (single_source shown verbatim)", () => {
+    const html = loadBearing([
+      { ...alignedClaims[0], id: "a", status: "consensus" },
+      { ...alignedClaims[0], id: "b", status: "majority" },
+      { ...alignedClaims[1], id: "c", status: "split" },
+      { ...alignedClaims[0], id: "d", status: "single_source" },
+    ]);
+    for (const s of ["consensus", "majority", "split", "single_source"]) expect(html).toContain(`<span class="font-medium">${s}</span>`);
+    expect(html).not.toContain("single source");
+  });
+
+  it("limited_coverage is shown as readable text", () => {
+    expect(loadBearing([{ ...alignedClaims[0], id: "e", status: "limited_coverage" }])).toContain('<span class="font-medium">limited coverage</span>');
+  });
+});

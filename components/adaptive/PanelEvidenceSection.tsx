@@ -532,7 +532,7 @@ function SynthesisDrivenEvidence({
     <div className="space-y-4">
       {trustSummary && <TrustSummaryTable trustSummary={trustSummary} />}
       <AgreementDisagreementMap claims={rows} modelsUsed={modelsUsed} />
-      <SingleModelInsightsList claims={rows} />
+      <SingleModelInsightsList claims={rows} labelled={!!synthesisReport.presentation} />
       {showClaimMatrix && alignedClaims && alignedClaims.length > 0 && (
         <Card>
           <SectionLabel>Cross-model comparison</SectionLabel>

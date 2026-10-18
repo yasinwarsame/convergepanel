@@ -31,7 +31,9 @@ import { AdaptiveResearchExportV1 } from "@/lib/adaptiveSchema/researchExport";
 import { exportModelIdentityLabel, exportRunProvenanceLines, readFrozenRunProvenance } from "@/lib/adaptiveSchema/exportRunProvenance";
 import { CONSENSUS_LABELS, SOURCE_GROUNDING_LABELS } from "@/lib/adaptiveSchema/reportSummary";
 import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
-import { FieldSpec } from "@/lib/adaptiveSchema/types";
+import { AdaptiveSynthesisReport, FieldSpec } from "@/lib/adaptiveSchema/types";
+import { modelCaveatParts, presentVerdictCaveat, presentVerdictClaim, verdictClaimParts } from "@/lib/adaptiveSchema/agreementNarrative";
+import { TextBlock, presentUnifiedAnswer } from "@/lib/adaptiveSchema/reportPresentation";
 import {
   fieldLabel,
   formatExportTimestamp as formatTimestamp,
@@ -595,26 +597,105 @@ function FieldValuePdf({ field, value, closing = 0 }: { field: FieldSpec; value:
  * content before it, so it is kept with its own text. The LAST text present
  * carries the card's closing padding.
  */
-function VerdictCardBody({ verdictCard }: { verdictCard: { topConsensus: string; keyDisagreement?: string | null; disagreementDetail?: string | null; caveat?: string | null } }) {
+function VerdictCardBody({
+  verdictCard,
+}: {
+  verdictCard: {
+    topConsensus: string;
+    topConsensusContested?: string;
+    topConsensusAgreement?: string;
+    keyDisagreement?: string | null;
+    keyDisagreementAgreement?: string;
+    disagreementDetail?: string | null;
+    caveat?: string | null;
+    caveatSource?: "model_bias_check";
+  };
+}) {
+  // Consensus Integrity: the computed status (R4-1) and the canonical contested note (verdictCard.ts) as further
+  // lines of the same text, labels bold and the quoted claim oblique (R9, see sourcedLines) — so a report without
+  // them (every one persisted before they existed) composes exactly the same element tree as before.
+  const topParts = verdictClaimParts(verdictCard.topConsensus, verdictCard.topConsensusAgreement);
+  const agreementText = topParts
+    ? sourcedLines([
+        { ...topParts.claim, model: true },
+        { ...topParts.result, model: false },
+        ...(verdictCard.topConsensusContested ? [{ label: "Contested", text: verdictCard.topConsensusContested, model: false }] : []),
+      ])
+    : [presentVerdictClaim(verdictCard.topConsensus, undefined).claim, verdictCard.topConsensusContested ? `Contested: ${verdictCard.topConsensusContested}` : null]
+        .filter(Boolean)
+        .join("\n");
+  const splitParts = verdictCard.keyDisagreement ? verdictClaimParts(verdictCard.keyDisagreement, verdictCard.keyDisagreementAgreement) : null;
+  const disagreementText = !verdictCard.keyDisagreement
+    ? null
+    : splitParts
+      ? sourcedLines([
+          { ...splitParts.claim, model: true },
+          { ...splitParts.result, model: false },
+        ])
+      : presentVerdictClaim(verdictCard.keyDisagreement, undefined).claim;
+  const caveatParts = modelCaveatParts({ caveat: verdictCard.caveat ?? null, caveatSource: verdictCard.caveatSource });
+  const caveat = caveatParts ? sourcedLines([{ ...caveatParts, model: true }], undefined, pdfStyles.modelCaveatText) : presentVerdictCaveat({ caveat: verdictCard.caveat ?? null, caveatSource: verdictCard.caveatSource });
   const showDisagreement = Boolean(verdictCard.keyDisagreement);
   const showDetail = showDisagreement && Boolean(verdictCard.disagreementDetail);
-  const showCaveat = Boolean(verdictCard.caveat);
+  const showCaveat = Boolean(caveat);
   const last = showCaveat ? "caveat" : showDetail ? "detail" : showDisagreement ? "disagreement" : "consensus";
   const end = <T extends object>(which: string, style: T) => textProps(style, which === last ? CARD_CLOSING_PADDING : 0);
   return (
     <>
       <Text style={pdfStyles.subLabel}>Agreement</Text>
-      <Text {...end("consensus", pdfStyles.bodyText)}>{verdictCard.topConsensus}</Text>
+      <Text {...end("consensus", pdfStyles.bodyText)}>{agreementText}</Text>
       {showDisagreement && (
         <Text style={pdfStyles.subLabelAfterContent} wrap={false} minPresenceAhead={SUB_LABEL_PRESENCE_AHEAD}>
           Disagreement
         </Text>
       )}
-      {showDisagreement && <Text {...end("disagreement", pdfStyles.bodyText)}>{verdictCard.keyDisagreement}</Text>}
+      {showDisagreement && <Text {...end("disagreement", pdfStyles.bodyText)}>{disagreementText}</Text>}
       {showDetail && <Text {...end("detail", pdfStyles.mutedText)}>{verdictCard.disagreementDetail}</Text>}
-      {showCaveat && <Text {...end("caveat", { ...pdfStyles.mutedText, marginTop: 6, color: COLORS.warning })}>{verdictCard.caveat}</Text>}
+      {showCaveat && <Text {...end("caveat", { ...pdfStyles.mutedText, marginTop: 6, color: COLORS.warning })}>{caveat}</Text>}
     </>
   );
+}
+
+/** One line of a new-format claim / result / caveat text: its label (application text) and its text, model-written or not. */
+interface SourcedLine {
+  label: string | null;
+  text: string;
+  model: boolean;
+}
+
+/**
+ * Consensus Integrity (R9): the lines of a new-format text as inline runs of ONE react-pdf text — the label of each
+ * line in bold, model-written text (a quoted claim, the bias caveat) oblique on a tinted band (`modelText`), computed
+ * text in the text's own face — joined by line breaks. Model text wraps by width like any text; whatever it says,
+ * every line it wraps onto lies inside the band and never starts with the bold label of a computed line. One text,
+ * as before: pagination is unchanged.
+ */
+function sourcedLines(lines: SourcedLine[], separator: (index: number) => string = () => "\n", modelStyle = pdfStyles.modelText): React.ReactNode[] {
+  return lines.flatMap((line, i) => [
+    ...(i > 0 ? [separator(i)] : []),
+    ...(line.label ? [<Text key={`l${i}`} style={pdfStyles.appLabel}>{`${line.label}: `}</Text>] : []),
+    line.model ? (
+      <Text key={`t${i}`} style={modelStyle}>
+        {line.text}
+      </Text>
+    ) : (
+      line.text
+    ),
+  ]);
+}
+
+const fromBlock = (block: TextBlock): SourcedLine => ({ label: block.label, text: block.text, model: block.source.startsWith("model_") });
+
+/** The Unified Answer of a report carrying presentation.answer: note, then each claim's lines, claims separated by a blank line. */
+function unifiedAnswerText(synthesis: AdaptiveSynthesisReport): React.ReactNode[] {
+  const answer = presentUnifiedAnswer(synthesis);
+  const groups: SourcedLine[][] = [
+    [...(answer.note ? [fromBlock(answer.note)] : []), ...(answer.claimsHeading ? [{ label: null, text: `${answer.claimsHeading}:`, model: false }] : [])],
+    ...answer.claims.map((item) => [item.claim, item.result, item.contested, item.supporters].filter((b): b is TextBlock => !!b).map(fromBlock)),
+  ].filter((g) => g.length > 0);
+  const lines = groups.flat();
+  const groupStarts = new Set(groups.map((g) => lines.indexOf(g[0])));
+  return sourcedLines(lines, (i) => (groupStarts.has(i) ? "\n\n" : "\n"));
 }
 
 function LegacyContent({ record }: { record: AdaptiveResearchExportV1 }) {
@@ -629,9 +710,17 @@ function LegacyContent({ record }: { record: AdaptiveResearchExportV1 }) {
     <View>
       {synthesis ? (
         <View>
-          <SectionCard label="Panel conclusion">
-            <Text {...textProps(pdfStyles.bodyText, CARD_CLOSING_PADDING)}>{synthesis.unifiedAnswer}</Text>
-          </SectionCard>
+          {synthesis.presentation?.answer ? (
+            // R6-1: the Unified Answer's computed note, then each claim with its own computed result, as one text
+            // (one paginating element, like the verdict card's lines). Reports persisted before it: unchanged.
+            <SectionCard label="Unified answer">
+              <Text {...textProps(pdfStyles.bodyText, CARD_CLOSING_PADDING)}>{unifiedAnswerText(synthesis)}</Text>
+            </SectionCard>
+          ) : (
+            <SectionCard label="Panel conclusion">
+              <Text {...textProps(pdfStyles.bodyText, CARD_CLOSING_PADDING)}>{synthesis.unifiedAnswer}</Text>
+            </SectionCard>
+          )}
           <SectionCard label="Where models agree / disagree">
             <VerdictCardBody verdictCard={synthesis.verdictCard} />
           </SectionCard>

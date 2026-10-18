@@ -19,6 +19,8 @@ export const COLORS = {
   accentSoft: "#EEF3FE",
   warning: "#B45309",
   warningSoft: "#FCF0E6",
+  /** The band behind model-written text in a claim / result text (see `modelText`). */
+  modelSoft: "#EDECE6",
   danger: "#B91C1C",
   dangerSoft: "#FEF2F2",
   success: "#15803D",
@@ -118,6 +120,16 @@ export const pdfStyles = StyleSheet.create({
   cardGap: { height: 10 },
   bodyText: { fontSize: 10, lineHeight: 1.5, color: COLORS.text },
   mutedText: { fontSize: 9, lineHeight: 1.4, color: COLORS.muted },
+  /**
+   * Consensus Integrity (R9): inside a new-format claim / result / caveat text, an application label ("Claim:",
+   * "Panel result:", …) is bold, and model-written text is oblique on a tinted band — react-pdf draws a run's
+   * background over its whole line box, so every line model text wraps onto, wherever it starts, lies inside one
+   * shaded region that computed lines never have. Size, leading and colour are the text's: layout is unchanged.
+   */
+  appLabel: { fontFamily: "Helvetica-Bold" },
+  modelText: { fontFamily: "Helvetica-Oblique", backgroundColor: COLORS.modelSoft },
+  /** `modelText` for the amber bias caveat. */
+  modelCaveatText: { fontFamily: "Helvetica-Oblique", backgroundColor: COLORS.warningSoft },
   /** A small in-card label ("Agreement", "Disagreement") above body text. */
   subLabel: { fontSize: 9, lineHeight: 1.4, color: COLORS.muted, marginBottom: 3 },
   /** `subLabel` that follows earlier content in the same card body. */

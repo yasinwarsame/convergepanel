@@ -25,10 +25,13 @@ import { z } from "zod";
 import { ModelId, ModelResult } from "@/lib/types";
 import {
   AdaptiveDisagreement,
+  AdaptiveReportPresentation,
   AdaptiveStakes,
   AdaptiveSynthesisReport,
   AlignedClaim,
   AlignedClaimCell,
+  PresentedAnswerClaim,
+  PresentedClaim,
   QueryType,
 } from "./types";
 import { callGemini } from "@/lib/connectors/gemini";
@@ -37,7 +40,10 @@ import { logger } from "@/lib/logger";
 import { stripJsonFences, withTimeout } from "./util";
 import { computeRunCertainty } from "./scoring";
 import { computeAdaptiveGate } from "./gate";
-import { buildAdaptiveVerdict, buildAdaptiveUnifiedAnswer } from "./verdict";
+import { buildAdaptiveVerdict, buildAdaptiveUnifiedAnswer, selectUnifiedAnswer, unifiedAnswerSupporters } from "./verdict";
+import { describeContested } from "./consensusIntegrity";
+import { panelAgreementFacts, quoteClaim, renderPanelAgreement, renderRowAgreement, renderRowStatus, rowAgreementFacts } from "./agreementNarrative";
+import { NarrativeField, isAgreementBearing, withoutAgreementClaims } from "./narrativeIntegrity";
 import { buildAdaptiveVerdictCard } from "./verdictCard";
 import { detectAdaptiveBiases } from "./biasDetection";
 import { auditPanelCoverage } from "./coverageAudit";
@@ -52,18 +58,18 @@ export type { AdaptiveSynthesisReport };
 
 const SCHEMA_NARRATIVE_HINTS: Record<QueryType, string> = {
   contested_empirical:
-    "Lead with a short narrative of the disagreement map: describe the SHAPE of the expert dispute (which camps exist, how the panel split) before anything else.",
+    "Lead with the substance of the expert dispute: which camps exist in the literature and what each argues. The panel's own agreement is stated separately — do not describe it.",
   legal_regulatory:
-    "Lead with the applicable rule. If any claim has a jurisdiction mismatch, call it out explicitly and separately from ordinary legal disagreement — it's a scope mismatch, not a substantive dispute.",
+    "Lead with the applicable rule. If any claim has a jurisdiction mismatch, explain which jurisdiction each position applies to, naming the model where relevant.",
   financial_valuation:
-    "Lead with the metrics spread: which numbers cluster tightly across models and which are outliers, and what that implies about consensus on the valuation.",
+    "Lead with the metrics: which values are tightly grounded and which are outliers, and what drives the difference.",
   factual_lookup: "Keep the entire synthesis to one tight paragraph — this is a factual lookup, not an essay.",
   procedural:
-    "Describe the step sequence at a high level and call out any point where models diverge on ordering or flatly contradict a step.",
+    "Describe the step sequence at a high level, explain the evidence for any step whose ordering or necessity is uncertain, and name the model when a step comes from one model's response.",
   medical_health:
-    "Organize the narrative by evidence tier, strongest evidence first (RCT/authoritative before observational before anecdotal), and flag any tier-based disagreement explicitly.",
+    "Organize the narrative by evidence tier, strongest evidence first (RCT/authoritative before observational before anecdotal), and explain where the evidence at a tier is weak, conflicting or missing.",
   forecast_speculative:
-    "Describe the scenario spread: where probability estimates cluster and where they diverge sharply.",
+    "Describe the scenarios and the drivers and evidence behind each, what is most uncertain, and which model a given estimate comes from.",
   creative_generative:
     "This is creative output, not a factual comparison — skip agreement/disagreement framing and briefly note stylistic differences instead.",
   generic: "Standard synthesis narrative, no special framing required.",
@@ -96,7 +102,6 @@ const StakesEnum = z.enum(["low", "important", "decision-critical"]);
 
 const NarrativeResponseSchema = z.object({
   executiveSummary: z.string(),
-  whereModelsAgreeNarrative: z.array(z.string()),
   /** One explanation per deterministic disagreement topic, same order/length as the topics list sent in the prompt. */
   whyModelsDisagree: z.array(z.string()),
   /** One stakes tag per deterministic disagreement topic, same order/length. */
@@ -115,15 +120,33 @@ function buildDeterministicDisagreements(disagreeRows: AlignedClaim[]): Omit<Ada
   }));
 }
 
-function buildTemplateExecutiveSummary(unifiedAnswer: string, agreeCount: number, disagreeCount: number, gate: string): string {
-  if (gate === "fail") return unifiedAnswer;
-  const parts = [unifiedAnswer];
-  if (agreeCount > 0 || disagreeCount > 0) {
-    parts.push(
-      `The panel reached consensus or majority agreement on ${agreeCount} claim${agreeCount === 1 ? "" : "s"} and split on ${disagreeCount} claim${disagreeCount === 1 ? "" : "s"}.`
-    );
-  }
-  return parts.join(" ");
+type PresentedDisagreementSource = AdaptiveReportPresentation["disagree"][number]["whySource"];
+
+/** A row as the presentation contract carries it: the model-written claim text verbatim, its computed status and contested note. */
+function presentedClaim(row: AlignedClaim, dispatchedPanelSize: number): PresentedClaim {
+  const contested = describeContested(row);
+  return {
+    claim: row.claimText,
+    result: renderRowStatus(rowAgreementFacts(row, dispatchedPanelSize)),
+    ...(contested ? { contested } : {}),
+  };
+}
+
+/** A Unified Answer claim: the presented claim plus the models backing it (R6-1) — named only for an answer claim, not for a gate-fail unresolved split. */
+function presentedAnswerClaim(row: AlignedClaim, dispatchedPanelSize: number, nameSupporters: boolean): PresentedAnswerClaim {
+  const supporters = nameSupporters ? unifiedAnswerSupporters(row) : [];
+  return { ...presentedClaim(row, dispatchedPanelSize), ...(supporters.length > 0 ? { supporters: supporters.join(", ") } : {}) };
+}
+
+/** A "Where models agree" line: the quoted (model-written) claim, plus the canonical contested note when the models marked it contested. */
+function whereModelsAgreeLine(row: AlignedClaim): string {
+  const contested = describeContested(row);
+  return contested ? `${quoteClaim(row.claimText)} — ${contested}` : quoteClaim(row.claimText);
+}
+
+/** One scored row as the narrative prompt sees it: status and the authoritative agreement statement, as structured facts. */
+function narrativeRowLine(r: AlignedClaim, dispatchedPanelSize: number): string {
+  return `- "${r.claimText}" — status: ${r.status}, panel agreement (authoritative): "${renderRowAgreement(rowAgreementFacts(r, dispatchedPanelSize))}", agreement: ${r.agreementScore.toFixed(2)}, certainty: ${r.certaintyScore.toFixed(2)}${r.disagreementType ? `, flagged: ${r.disagreementType}` : ""}`;
 }
 
 // ─── Narrative quality validators (Synthesis Report Polish, markdown-leak /
@@ -142,7 +165,6 @@ const METRIC_TUPLE_PATTERN = /\bagreement\b[\s:=]*\d|\bcertainty\b[\s:=]*\d/i;
 
 interface NormalizedNarrative {
   executiveSummary: string;
-  whereModelsAgreeNarrative: string[];
   whyModelsDisagree: string[];
   disagreementStakes: AdaptiveStakes[];
   certaintyAssessment: string;
@@ -165,7 +187,6 @@ function normalizeNarrative(
 
   return {
     executiveSummary: parsed.executiveSummary,
-    whereModelsAgreeNarrative: parsed.whereModelsAgreeNarrative,
     whyModelsDisagree,
     disagreementStakes,
     certaintyAssessment: parsed.certaintyAssessment,
@@ -178,7 +199,6 @@ function collectNarrativeTexts(n: NormalizedNarrative): string[] {
   return [
     n.executiveSummary,
     n.certaintyAssessment,
-    ...n.whereModelsAgreeNarrative,
     ...n.whyModelsDisagree,
     ...n.narrativeSections.flatMap((s) => [s.title, s.body]),
   ];
@@ -212,8 +232,9 @@ function stripMetricTuples(text: string): string {
   return text
     .replace(/\(\s*[^)]*\b(agreement|certainty)\b[^)]*\)/gi, "")
     .replace(/\b(agreement|certainty)\b\s*[:=]?\s*[\d.]+%?/gi, "")
-    .replace(/\s{2,}/g, " ")
-    .replace(/\s+([,.;])/g, "$1")
+    // Spaces and tabs only — line breaks are layout (paragraphs, lists) and are kept (R5-3).
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/[ \t]+([,.;])/g, "$1")
     .trim();
 }
 
@@ -225,7 +246,6 @@ function sanitizeNarrativeText(text: string, modelRoster: ModelId[]): string {
 function sanitizeNarrative(n: NormalizedNarrative, modelRoster: ModelId[]): NormalizedNarrative {
   return {
     executiveSummary: sanitizeNarrativeText(n.executiveSummary, modelRoster),
-    whereModelsAgreeNarrative: n.whereModelsAgreeNarrative.map((t) => sanitizeNarrativeText(t, modelRoster)),
     whyModelsDisagree: n.whyModelsDisagree.map((t) => sanitizeNarrativeText(t, modelRoster)),
     disagreementStakes: n.disagreementStakes,
     certaintyAssessment: sanitizeNarrativeText(n.certaintyAssessment, modelRoster),
@@ -244,13 +264,17 @@ Only refer to models by these exact IDs, verbatim: ${rosterList}. Never invent, 
 
 Write PLAIN TEXT ONLY — no markdown syntax at all (no **bold**, no _italic_, no # headings, no bullet dashes). Every field below is prose or a plain sentence, not formatted text.
 
-Never include a numeric agreement/certainty value in any sentence (e.g. never write "agreement 1.00" or "certainty 0.85" in prose). Those scores are already shown elsewhere with labeled context — express support in words instead: "all five models", "most models", "a minority", "one model".
+How far the panel agrees is ALREADY computed, deterministically, from the scoring: each claim's "panel agreement (authoritative)" text and the panel agreement statement below are final. The panel agreement statement and each agreed or disputed claim's result are shown to the user as the panel's result; your prose is shown separately, labelled as model-written explanation. Your prose explains — evidence, reasoning, implications, source quality, why positions differ — and never characterises the panel's agreement itself:
+- Never say whether, or how many, models or the panel agree, disagree, converge, split, form a majority or are unanimous, and never call a claim settled, uncontested, established or contested. Any sentence that does is removed before the user sees it.
+- Never count models ("two models", "most models", "all five models"). To describe a subgroup position, name the models: "ChatGPT and Grok weigh the survey data more heavily".
+
+Never include a numeric agreement/certainty value in any sentence (e.g. never write "agreement 1.00" or "certainty 0.85" in prose). Those scores are already shown elsewhere with labeled context.
 
 ${SCHEMA_NARRATIVE_HINTS[schemaId] ?? SCHEMA_NARRATIVE_HINTS.generic}
 
-For "executiveSummary": answer the user's question in the first sentence, then 2-3 paragraphs total covering where models converge, where they diverge and why, and an overall confidence statement. Write prose, not stitched claims — do not append a parenthetical model-name list after every sentence.
+For "executiveSummary": answer the user's question in the first sentence, then 2-3 paragraphs total on the substance: the evidence, the reasoning, what is still uncertain and what it implies. Write prose, not stitched claims — do not append a parenthetical model-name list after every sentence.
 
-For "whyModelsDisagree" and "disagreementStakes": you will be given a list of disagreement topics, in order. Return exactly one explanation and exactly one stakes tag per topic, in the SAME order. "whyModelsDisagree[i]" is one sentence on WHY models diverge on topic i (evidence base, framing, jurisdiction — whatever applies). "disagreementStakes[i]" is one of "low" | "important" | "decision-critical" — would topic i's resolution change a decision the asker is likely making?
+For "whyModelsDisagree" and "disagreementStakes": you will be given a list of disagreement topics, in order. Return exactly one explanation and exactly one stakes tag per topic, in the SAME order. "whyModelsDisagree[i]" is one sentence on WHY the positions on topic i differ (evidence base, framing, jurisdiction — whatever applies), naming models rather than counting them. "disagreementStakes[i]" is one of "low" | "important" | "decision-critical" — would topic i's resolution change a decision the asker is likely making?
 
 Disagreement topics, in order:
 ${disagreementTopics.length > 0 ? disagreementTopics.map((t, i) => `${i + 1}. ${t}`).join("\n") : "(none — the panel had no split claims this run)"}
@@ -258,10 +282,9 @@ ${disagreementTopics.length > 0 ? disagreementTopics.map((t, i) => `${i + 1}. ${
 Return ONLY JSON in this exact shape:
 {
   "executiveSummary": "...",
-  "whereModelsAgreeNarrative": ["one short sentence per consensus/majority claim, in your own words"],
   "whyModelsDisagree": ${disagreementTopics.length > 0 ? `["exactly ${disagreementTopics.length} entries, same order as the topics above"]` : "[]"},
   "disagreementStakes": ${disagreementTopics.length > 0 ? `["exactly ${disagreementTopics.length} entries: low|important|decision-critical, same order as the topics above"]` : "[]"},
-  "certaintyAssessment": "2-3 sentences on how much to trust this run and why, given the certainty score and gate",
+  "certaintyAssessment": "2-3 sentences on what limits or supports trust in this answer (evidence quality, recency, scope), given the certainty score and gate",
   "narrativeSections": [{ "title": "...", "body": "..." }]
 }
 No markdown fences, no commentary outside the JSON.`;
@@ -285,9 +308,11 @@ export async function buildAdaptiveSynthesisReport(
   const gate = computeAdaptiveGate(rows, runCertainty, schemaId);
   const verdict = buildAdaptiveVerdict(rows, gate, totalModelCount);
   const unifiedAnswer = buildAdaptiveUnifiedAnswer(rows, gate);
+  const answerSelection = selectUnifiedAnswer(rows, gate);
 
   const agreeRows = rows.filter((r) => r.status === "consensus" || r.status === "majority");
   const disagreeRows = rows.filter((r) => r.status === "split");
+  const panelAgreement = renderPanelAgreement(panelAgreementFacts(rows, totalModelCount));
   const deterministicDisagreements = buildDeterministicDisagreements(disagreeRows);
 
   // Bias & Blind Spots' three tiers — all independent of the narrative call
@@ -301,7 +326,7 @@ export async function buildAdaptiveSynthesisReport(
   const coverageGaps = await auditPanelCoverage(question, schemaId, rows.map((r) => r.claimText));
   const diagnostics = computeAdaptiveDiagnostics(rows);
 
-  const verdictCard = buildAdaptiveVerdictCard(question, rows, gate, bias);
+  const verdictCard = buildAdaptiveVerdictCard(question, rows, gate, bias, totalModelCount);
 
   const templateDisagreements: AdaptiveDisagreement[] = deterministicDisagreements.map((d) => ({
     ...d,
@@ -309,16 +334,29 @@ export async function buildAdaptiveSynthesisReport(
     stakes: "important" as AdaptiveStakes,
   }));
 
+  const presentation = (executiveSummarySource: AdaptiveReportPresentation["executiveSummarySource"], whySources: PresentedDisagreementSource[], certaintyExplanation?: string): AdaptiveReportPresentation => ({
+    panelAgreement,
+    answer: { note: answerSelection.note, claims: answerSelection.rows.map((r) => presentedAnswerClaim(r, totalModelCount, gate.status !== "fail")) },
+    agree: agreeRows.map((r) => presentedClaim(r, totalModelCount)),
+    disagree: disagreeRows.map((r, i) => ({ ...presentedClaim(r, totalModelCount), whySource: whySources[i] ?? "computed" })),
+    executiveSummarySource,
+    ...(certaintyExplanation ? { certaintyExplanation } : {}),
+  });
+
   const baseReport: AdaptiveSynthesisReport = {
+    presentation: presentation("unified_answer", []),
     unifiedAnswer,
     panelVerdict: verdict.summary,
     gate: gate.status,
     runCertainty,
-    whereModelsAgree: agreeRows.map((r) => r.claimText),
+    whereModelsAgree: agreeRows.map(whereModelsAgreeLine),
     whereModelsDisagree: disagreeRows.map((r) => r.claimText),
-    certaintyAssessment: `Run certainty ${Math.round(runCertainty * 100)}% (gate: ${gate.status}). ${agreeRows.length} claim(s) at consensus/majority, ${disagreeRows.length} split.`,
+    certaintyAssessment: `Run certainty ${Math.round(runCertainty * 100)}% (gate: ${gate.status}).${panelAgreement ? ` ${panelAgreement}` : ""}`,
     narrativeSections: [],
-    executiveSummary: buildTemplateExecutiveSummary(unifiedAnswer, agreeRows.length, disagreeRows.length, gate.status),
+    // The template summary is the Unified Answer (stored as before). Renderers never show it as one computed
+    // paragraph: they show presentation.panelAgreement and the answer's note, and the answer's claims each with
+    // its own result (presentation.answer, R6-1).
+    executiveSummary: unifiedAnswer,
     disagreements: templateDisagreements,
     biasAndBlindSpots: bias,
     biasEmptyReason: biasResult.emptyReason,
@@ -339,13 +377,9 @@ export async function buildAdaptiveSynthesisReport(
 Schema type: ${schemaId}
 
 Scored claims (already aligned and scored across models — do not re-score, just narrate):
-${rows
-  .map(
-    (r) =>
-      `- "${r.claimText}" — status: ${r.status}, agreement: ${r.agreementScore.toFixed(2)}, certainty: ${r.certaintyScore.toFixed(2)}${r.disagreementType ? `, flagged: ${r.disagreementType}` : ""}`
-  )
-  .join("\n")}
+${rows.map((r) => narrativeRowLine(r, totalModelCount)).join("\n")}
 
+Panel agreement statement (authoritative): ${panelAgreement || "(no scored claims)"}
 Panel verdict: ${verdict.summary}
 Run certainty: ${(runCertainty * 100).toFixed(0)}%
 Gate: ${gate.status}`;
@@ -418,27 +452,50 @@ Gate: ${gate.status}`;
       }
     }
 
-    const disagreements: AdaptiveDisagreement[] = deterministicDisagreements.map((d, i) => ({
-      ...d,
-      whyTheyDiffer: narrative.whyModelsDisagree[i] ?? DEFAULT_DISAGREEMENT_EXPLANATION,
-      stakes: narrative.disagreementStakes[i] ?? "important",
-    }));
+    // D9 (Option B, R5 presentation contract): the panel's agreement is
+    // stated only by computed text — presentation.panelAgreement, each
+    // claim's computed result, the certainty line. Model prose is kept apart
+    // from it and labelled as model-written explanation by every renderer
+    // (reportPresentation.ts); it never populates a computed field. Sentences
+    // that characterise the panel's agreement are still removed
+    // (narrativeIntegrity.ts, defense in depth); a field with nothing left
+    // falls back to computed text. No model re-call.
+    const prose = (text: string, field: NarrativeField) => withoutAgreementClaims(text, field);
+    const summaryProse = gate.status === "fail" ? "" : prose(narrative.executiveSummary, "panel_free");
+    const executiveSummary = summaryProse || baseReport.executiveSummary;
+    const certaintyExplanation = prose(narrative.certaintyAssessment, "panel_free");
+    const certaintyAssessment = baseReport.certaintyAssessment;
+    const narrativeSections = narrative.narrativeSections.flatMap((s) => {
+      const body = prose(s.body, "panel_free");
+      return body && !isAgreementBearing(s.title, "panel_free") ? [{ title: s.title, body }] : [];
+    });
+
+    const whySources: PresentedDisagreementSource[] = [];
+    const disagreements: AdaptiveDisagreement[] = deterministicDisagreements.map((d, i) => {
+      const why = prose(narrative.whyModelsDisagree[i] ?? "", "disagreement");
+      whySources.push(why ? "model_explanation" : "computed");
+      return {
+        ...d,
+        whyTheyDiffer: why || DEFAULT_DISAGREEMENT_EXPLANATION,
+        stakes: narrative.disagreementStakes[i] ?? "important",
+      };
+    });
 
     return {
+      presentation: presentation(summaryProse ? "model_explanation" : "unified_answer", whySources, certaintyExplanation || undefined),
       // Unified Answer + Panel Verdict + Verdict Card + gate/certainty stay
       // deterministic — never overwritten by the model's narrative call.
       unifiedAnswer,
       panelVerdict: verdict.summary,
       gate: gate.status,
       runCertainty,
-      whereModelsAgree:
-        narrative.whereModelsAgreeNarrative.length > 0 ? narrative.whereModelsAgreeNarrative : baseReport.whereModelsAgree,
+      whereModelsAgree: baseReport.whereModelsAgree,
       whereModelsDisagree: baseReport.whereModelsDisagree,
-      certaintyAssessment: narrative.certaintyAssessment || baseReport.certaintyAssessment,
-      narrativeSections: narrative.narrativeSections,
+      certaintyAssessment,
+      narrativeSections,
       // On gate "fail", never let the model's prose read as confident — same
       // rule as buildAdaptiveUnifiedAnswer's deterministic override.
-      executiveSummary: gate.status === "fail" ? baseReport.executiveSummary : narrative.executiveSummary || baseReport.executiveSummary,
+      executiveSummary,
       disagreements,
       biasAndBlindSpots: bias,
       biasEmptyReason: biasResult.emptyReason,

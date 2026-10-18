@@ -24,6 +24,21 @@ export const STATED_CONFIDENCE_SCORE: Record<ClaimConfidence, number> = {
   speculative: 0.2,
 };
 
+/**
+ * Certainty input for a cell with no stated confidence (confidence null:
+ * inferred and field-derived cells). Those cells used to carry the
+ * placeholder confidence "majority_view"; scoring a null as that same value
+ * keeps every certainty number — and so every gate outcome — exactly what it
+ * was. It is a certainty weight, not a claim that the model holds a majority
+ * view.
+ */
+export const UNSTATED_CONFIDENCE_CERTAINTY_SCORE = STATED_CONFIDENCE_SCORE.majority_view;
+
+/** A cell's stated-confidence input to certainty (scoring.ts, and the dev score breakdown in ResultsDisplay.tsx). */
+export function cellConfidenceCertaintyScore(confidence: ClaimConfidence | null): number {
+  return confidence === null ? UNSTATED_CONFIDENCE_CERTAINTY_SCORE : STATED_CONFIDENCE_SCORE[confidence];
+}
+
 // ─── Verification gate thresholds (R1d) ────────────────────────────────
 export const GATE_THRESHOLDS = {
   /** Run certainty >= this AND no split load-bearing claim -> "pass". */

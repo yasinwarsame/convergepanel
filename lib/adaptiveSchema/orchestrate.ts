@@ -32,7 +32,7 @@ import { validateAdaptiveResponse } from "./validator";
 import { withTimeout } from "./util";
 import { computeAdaptiveRetryWindow, monotonicNowMs, ResearchRequestBudget } from "./retryBudget";
 import { AdaptiveRetryUsageSink, mergeAdaptiveRetry, normalizeAdaptiveRetryUsage } from "./retryCorrection";
-import { alignClaims, ModelClaims } from "./alignment";
+import { alignClaims, ClaimFieldOrigin, ModelClaims } from "./alignment";
 import { alignMetrics, alignScenarios, alignSteps, alignScalarField, ScalarComparisonMode } from "./fieldAlignment";
 import { buildRankedEnumerationResult } from "./enumAlignment";
 import { buildComparisonMatrixResult } from "./comparisonAlignment";
@@ -53,6 +53,7 @@ import {
   SCHEMA_ANSWER_SHAPE,
 } from "./persistedOutput";
 import { scoreAgreement } from "./agreementComparators";
+import { applyConsensusIntegrity, claimFieldClass } from "./consensusIntegrity";
 import { scoreClaimCertainty, computeRunCertainty } from "./scoring";
 import { computeAdaptiveGate, AdaptiveGateResult } from "./gate";
 import { buildAdaptiveSynthesisReport, AdaptiveSynthesisReport } from "./synthesisReport";
@@ -716,12 +717,24 @@ export async function finalizeAdaptiveRun(
 
   if (claimFieldKeys.length > 0) {
     const perModelClaims: ModelClaims[] = adaptiveResults.map((r) => {
-      const claims: Claim[] = r.ok && r.data ? claimFieldKeys.flatMap((key) => (r.data![key] as Claim[] | undefined) || []) : [];
+      const claims: Claim[] = [];
+      // claimOrigins[i] records which field claims[i] came from (settled vs
+      // disputed, see claimFieldClass) — built in the same loop so the two
+      // can't drift apart.
+      const claimOrigins: ClaimFieldOrigin[] = [];
+      if (r.ok && r.data) {
+        for (const key of claimFieldKeys) {
+          for (const claim of (r.data[key] as Claim[] | undefined) || []) {
+            claims.push(claim);
+            claimOrigins.push({ field: key, fieldClass: claimFieldClass(schema.id, key) });
+          }
+        }
+      }
       // Full response (not just claim[] fields) so the stance-extraction
       // backfill (alignment.ts pass 3) can catch a stance implied only in
       // prose — e.g. a `summary` field — that the model never separately
       // listed as a Claim.
-      return { modelId: r.modelId, claims, fullResponseData: r.ok ? r.data : null };
+      return { modelId: r.modelId, claims, claimOrigins, fullResponseData: r.ok ? r.data : null };
     });
     alignedClaims.push(...(await alignClaims(perModelClaims)));
   }
@@ -747,7 +760,9 @@ export async function finalizeAdaptiveRun(
     return { schemaId: schema.id, adaptiveResults, alignedClaims };
   }
 
-  const scoredForAgreement = scoreAgreement(schema.id, alignedClaims);
+  // results holds one entry per DISPATCHED model, failures included — the
+  // panel size limited_coverage is measured against (consensusIntegrity.ts).
+  const scoredForAgreement = applyConsensusIntegrity(scoreAgreement(schema.id, alignedClaims), results.length);
   const scored = scoreClaimCertainty(scoredForAgreement, results.length);
 
   const runCertainty = computeRunCertainty(scored, schema.id);

@@ -84,7 +84,7 @@ describe("defaultStanceBasedScore", () => {
 });
 
 describe("scoreAgreement: contested_empirical meta-level camp agreement", () => {
-  it("boosts a stance-split row to majority when models describe the same camps", () => {
+  it("keeps a stance-split row split when models describe the same camps — camp overlap moves the score, never the status", () => {
     const camps = [
       { label: "Monetarist view", position: "Money supply growth drives it." },
       { label: "Structuralist view", position: "Supply chains drive it." },
@@ -98,9 +98,12 @@ describe("scoreAgreement: contested_empirical meta-level camp agreement", () => 
       }),
     ])[0];
 
-    // Plain stance split would read as "split"; identical camps across
-    // models is exactly the meta-agreement the comparator should reward.
-    expect(r.status).toBe("majority");
+    // Identical camps is agreement about the SHAPE of the dispute, not about
+    // the positions: the panel is split 1–1, so the status stays "split"
+    // (before Consensus Integrity this read "majority").
+    expect(r.status).toBe("split");
+    // The blended score is unchanged: 0.5 × stance score (0.5) + 0.5 × camp Jaccard (1).
+    expect(r.agreementScore).toBeCloseTo(0.75, 10);
   });
 
   it("does not change rows with fewer than 2 camp-bearing cells", () => {

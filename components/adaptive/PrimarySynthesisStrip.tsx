@@ -25,23 +25,38 @@
  */
 
 import { AdaptiveSynthesisReport } from "@/lib/adaptiveSchema/types";
+import { presentVerdictCaveat, presentVerdictClaim } from "@/lib/adaptiveSchema/agreementNarrative";
 import { Card, SectionLabel } from "./shared";
+import { UnifiedAnswerClaims } from "./AdaptiveSynthesisReportView";
 
 export default function PrimarySynthesisStrip({ synthesisReport }: { synthesisReport: AdaptiveSynthesisReport }) {
   const { unifiedAnswer, verdictCard } = synthesisReport;
+  // R4-1: claim text is model-written; cards that carry the computed status show it beside the quoted claim.
+  const top = presentVerdictClaim(verdictCard.topConsensus, verdictCard.topConsensusAgreement);
+  const split = verdictCard.keyDisagreement ? presentVerdictClaim(verdictCard.keyDisagreement, verdictCard.keyDisagreementAgreement) : null;
+  const caveat = presentVerdictCaveat(verdictCard);
 
   return (
     <Card className="bg-sky-50/60 border-sky-200">
       <SectionLabel>Answer</SectionLabel>
-      <p className="text-sm leading-relaxed text-slate-900 whitespace-pre-line">{unifiedAnswer}</p>
+      {synthesisReport.presentation?.answer ? (
+        // R6-1: each Unified Answer claim with its own computed result; reports persisted before it: the stored string.
+        <UnifiedAnswerClaims report={synthesisReport} />
+      ) : (
+        <p className="text-sm leading-relaxed text-slate-900 whitespace-pre-line">{unifiedAnswer}</p>
+      )}
 
       <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-sky-200 pt-3">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Models agree</p>
           <p className="mt-0.5 text-sm text-slate-800">
-            {verdictCard.topConsensus}
+            {top.result ? <span data-source="model_claim">{top.claim}</span> : top.claim}
             {verdictCard.consensusModelCount > 0 && (
               <span className="text-slate-500"> — {verdictCard.consensusModelCount} model{verdictCard.consensusModelCount === 1 ? "" : "s"}</span>
+            )}
+            {top.result && <span data-source="computed" className="block text-xs text-slate-600 mt-0.5">{top.result}</span>}
+            {verdictCard.topConsensusContested && (
+              <span className="block text-xs text-amber-700 mt-0.5">Contested: {verdictCard.topConsensusContested}</span>
             )}
           </p>
         </div>
@@ -49,7 +64,8 @@ export default function PrimarySynthesisStrip({ synthesisReport }: { synthesisRe
           <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Models disagree</p>
           {verdictCard.keyDisagreement ? (
             <p className="mt-0.5 text-sm text-slate-800">
-              {verdictCard.keyDisagreement}
+              {split!.result ? <span data-source="model_claim">{split!.claim}</span> : split!.claim}
+              {split!.result && <span data-source="computed" className="block text-xs text-slate-600 mt-0.5">{split!.result}</span>}
               {verdictCard.disagreementDetail && <span className="block text-xs text-slate-500 mt-0.5">{verdictCard.disagreementDetail}</span>}
             </p>
           ) : (
@@ -58,8 +74,8 @@ export default function PrimarySynthesisStrip({ synthesisReport }: { synthesisRe
         </div>
       </div>
 
-      {verdictCard.caveat && (
-        <p className="mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">{verdictCard.caveat}</p>
+      {caveat && (
+        <p {...(verdictCard.caveatSource ? { "data-source": "model_bias" } : {})} className="mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">{caveat}</p>
       )}
     </Card>
   );
