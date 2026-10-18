@@ -116,6 +116,15 @@ describe("S0 root cause A: model text in the legacy synthesis HTML is data, neve
     expect(foreignMarkup(html)).toEqual([]);
   });
 
+  it("a model id outside the known set is encoded too: runModelFamilyName returns unknown ids as written, and /api/run-panel does not allow-list them", () => {
+    const evil = `<img src=x onerror=alert(15)>`;
+    const mk = (modelId: string, text: string) => ({ modelId, status: "ok", rawText: text, rawTextFull: text, tokenUsage: { totalTokens: 3 }, latencyMs: 12 });
+    const rs = [mk(evil, `- ${TAIL}\n- Housing costs respond slowest over several quarters`), mk("claude", `- ${TAIL}\n- Housing costs respond slowest over several quarters`), mk("grok", `- ${TAIL} unlike the alternative view that tariffs dominate\n- Energy shocks dominate headline inflation readings`)];
+    const html = synthesizeReport(rs as never)!.unifiedAnswer;
+    expect(html).toContain(escapeHtml(evil));
+    expect(foreignMarkup(html)).toEqual([]);
+  });
+
   it("model names and the template's own structure are unchanged for ordinary text", () => {
     const html = synthesizeReport(results(TAIL) as never)!.unifiedAnswer;
     expect(html).toContain("<h2>Trust Summary</h2>");

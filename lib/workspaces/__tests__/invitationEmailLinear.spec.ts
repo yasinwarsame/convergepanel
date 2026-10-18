@@ -98,6 +98,14 @@ describe("S0 #1: the invitation email shape guard is the former shape, in linear
     expect(formerIsValid(stored)).toBe(true);
   });
 
+  it("60,000-character trim-surviving input is rejected in well under 100 ms (the former regex needs ~3 s here)", () => {
+    const s = "!@!." + "!.".repeat(30000) + "@";
+    const t0 = Date.now();
+    expect(normalizeInvitationEmail(s)).toEqual({ ok: false });
+    expect(isValidNormalizedInvitationEmail(s)).toBe(false);
+    expect(Date.now() - t0).toBeLessThan(100);
+  });
+
   const SHAPES: [string, (n: number) => string][] = [
     ["CodeQL shape with a trailing '@'", (n) => "!@!." + "!.".repeat(n) + "@"],
     ["CodeQL shape with an inner space", (n) => "!@!." + "!.".repeat(n) + " x"],
