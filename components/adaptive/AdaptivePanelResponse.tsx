@@ -205,6 +205,7 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
       humanReview={props.humanReview}
       reviewRouting={props.reviewRouting}
       gate={gate}
+      synthesisReport={synthesisReport}
       trustSummary={trustSummary}
       meta={props.meta}
       ancillaryPresentation={ancillary}

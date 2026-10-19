@@ -48,9 +48,18 @@ export function gateLabel(status: GateDisplayStatus): string {
   return `${GATE_LABEL}: ${GATE_STATUS_WORD[status]}`;
 }
 
-/** D2: the computed caution notice — the owner's canonical wording. It states the gate's result and names no cause. */
-export const CAUTION_NOTICE =
-  "Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.";
+/**
+ * The caution condition — the one wording of what a caution gate means, shared by the notice and the caution next
+ * step (N2). It names no cause.
+ */
+export const CAUTION_CONDITION = "did not meet the conditions for a clean verification pass";
+
+/**
+ * D2: the computed caution notice — the owner's canonical wording, exactly: "Caution: This result requires further
+ * review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations
+ * before relying on this answer." It states the gate's result and names no cause.
+ */
+export const CAUTION_NOTICE = `Caution: This result requires further review. The panel ${CAUTION_CONDITION}. Review the findings and limitations before relying on this answer.`;
 
 /** D2, for length-limited text (the X post). */
 export const CAUTION_NOTICE_SHORT = "requires further review";
@@ -102,6 +111,15 @@ export const LEGACY_GATE_BANNER_LABEL: Readonly<Record<AdaptiveGateStatus, strin
  */
 export function pageGateValue(report: Pick<AdaptiveSynthesisReport, "gate"> | null | undefined, gateStatus: unknown): unknown {
   return report ? report.gate : gateStatus;
+}
+
+/**
+ * R2-1: the gate object with its status read through pageGateValue, for consumers that take the whole object
+ * (deriveConsensusLevel: the top-summary consensus badge, the export snapshot's consensus level). Nothing else in the
+ * object changes, nothing is recomputed, and without a gate there is still none.
+ */
+export function withPageGateStatus<G extends { status: unknown }>(gate: G | undefined, report: Pick<AdaptiveSynthesisReport, "gate"> | null | undefined): G | undefined {
+  return gate ? { ...gate, status: pageGateValue(report, gate.status) } : gate;
 }
 
 /** The gate banner (report view, governance section). */

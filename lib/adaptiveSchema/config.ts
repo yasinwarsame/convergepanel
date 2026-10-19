@@ -8,6 +8,7 @@
  */
 
 import { AdaptiveGateStatus, BiasEmptyReason, ClaimConfidence, ClaimEvidenceType, ModelTrustSummary } from "./types";
+import { CAUTION_CONDITION } from "./gatePresentation";
 
 // ─── Certainty formula (R1b) ────────────────────────────────────────────
 // certaintyScore = coverageWeight*coverage + agreementWeight*agreement + statedConfidenceWeight*statedConfidence
@@ -178,10 +179,10 @@ export const VERDICT_NEXT_STEPS: Record<AdaptiveGateStatus, string[]> = {
 
 /**
  * Order 4 (D3): the first caution step when the run has no split claim. VERDICT_NEXT_STEPS.caution starts from a
- * key disagreement, which a caution from certainty alone does not have — it is never invented.
+ * key disagreement, which a caution from certainty alone does not have — it is never invented. Its condition wording
+ * is gatePresentation's CAUTION_CONDITION, the same words as the caution notice (N2).
  */
-export const CAUTION_NEXT_STEP_WITHOUT_DISAGREEMENT =
-  "Review the findings and limitations below before relying on this synthesis — the panel did not meet the conditions for a clean verification pass.";
+export const CAUTION_NEXT_STEP_WITHOUT_DISAGREEMENT = `Review the findings and limitations below before relying on this synthesis — the panel ${CAUTION_CONDITION}.`;
 
 /**
  * Order 4 (F5): the second fail step when the Unified Answer lists no unresolved claims. VERDICT_NEXT_STEPS.fail

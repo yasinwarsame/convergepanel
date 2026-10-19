@@ -32,6 +32,7 @@ import {
   classificationFloorFromRiskLevel,
 } from "./researchExport";
 import { ModelId } from "../types";
+import { withPageGateStatus } from "./gatePresentation";
 import { freezeExportRunProvenance } from "./exportRunProvenance";
 
 function assertNeverSchemaId(schemaId: never): never {
@@ -173,7 +174,9 @@ export function buildExportSnapshot(input: BuildExportSnapshotInput): BuiltExpor
   if (input.legacy) {
     const { output, governanceStatus, governanceMeta } = input.legacy;
 
-    const consensusLevel = deriveConsensusLevel({ schemaId: output.schemaId, gate: output.gate });
+    // R2-1: the gate-scored consensus level reads the report's stored gate, as the exported answer and banner do
+    // (pageGateValue). The raw gate object and report are exported unchanged.
+    const consensusLevel = deriveConsensusLevel({ schemaId: output.schemaId, gate: withPageGateStatus(output.gate, output.synthesisReport) });
     const sourceGroundingLevel = deriveSourceGrounding({ trustSummary: output.trustSummary });
     const reportTypeLabel = getReportTypeLabel(output.schemaId);
 
