@@ -31,9 +31,10 @@ import { computeRunCertainty } from "@/lib/adaptiveSchema/scoring";
 import { computeContestedDimensions } from "@/lib/adaptiveSchema/consensusIntegrity";
 import { renderRowStatus, rowAgreementFacts } from "@/lib/adaptiveSchema/agreementNarrative";
 import { buildAdaptiveLinkedInPost, buildAdaptiveMemoInput, buildAdaptiveSynthesisMarkdown, buildAdaptiveXPost } from "@/lib/adaptiveSchema/shareBuilders";
-import { presentUnifiedAnswer } from "@/lib/adaptiveSchema/reportPresentation";
+import { UNRESOLVED_DETAILS_UNREADABLE, presentUnifiedAnswer, unreadableUnresolvedNotice } from "@/lib/adaptiveSchema/reportPresentation";
 import { deriveConsensusLevel } from "@/lib/adaptiveSchema/reportSummary";
-import { CAUTION_NEXT_STEP_WITHOUT_DISAGREEMENT, VERDICT_NEXT_STEPS } from "@/lib/adaptiveSchema/config";
+import { CAUTION_NEXT_STEP_WITHOUT_DISAGREEMENT, FAIL_NEXT_STEP_WITHOUT_UNRESOLVED_CLAIMS, VERDICT_NEXT_STEPS } from "@/lib/adaptiveSchema/config";
+import { buildAdaptiveVerdictCard } from "@/lib/adaptiveSchema/verdictCard";
 import {
   CAUTION_NOTICE,
   CAUTION_NOTICE_SHORT,
@@ -469,14 +470,24 @@ describe.each(SCENARIOS.flatMap((s) => (["template", "prose", "filtered"] as Var
     for (const surface of [out.view, out.md, out.memo, out.li, out.docx.join("\n"), out.pdf]) expect(surface).not.toMatch(/caution (because|due to|caused by)/i);
   });
 
-  it("D3: a caution with no split names no disagreement in its next steps", () => {
+  it("D3/F5: the next steps never refer to a disagreement, caveat or unresolved claim the report does not have", () => {
     const steps = ctx.report.verdictCard.recommendedNextSteps;
-    if (s.gate === "caution" && !ctx.rows.some((r) => r.status === "split")) {
-      expect(steps[0]).toBe(CAUTION_NEXT_STEP_WITHOUT_DISAGREEMENT);
-      for (const step of steps) expect(step).not.toMatch(/disagreement/i);
-    } else {
-      expect(steps).toEqual(VERDICT_NEXT_STEPS[s.gate].slice(0, 3));
-    }
+    const hasSplit = ctx.rows.some((r) => r.status === "split");
+    const hasCaveat = !!ctx.report.verdictCard.caveat;
+    const answerClaims = ctx.report.presentation!.answer!.claims.length;
+    // The expected steps, written out per rule (not derived from the implementation).
+    const expected =
+      s.gate === "pass"
+        ? VERDICT_NEXT_STEPS.pass
+        : s.gate === "caution"
+          ? [hasSplit ? VERDICT_NEXT_STEPS.caution[0] : CAUTION_NEXT_STEP_WITHOUT_DISAGREEMENT, VERDICT_NEXT_STEPS.caution[1], ...(hasCaveat ? [VERDICT_NEXT_STEPS.caution[2]] : [])]
+          : [VERDICT_NEXT_STEPS.fail[0], answerClaims > 0 ? VERDICT_NEXT_STEPS.fail[1] : FAIL_NEXT_STEP_WITHOUT_UNRESOLVED_CLAIMS, VERDICT_NEXT_STEPS.fail[2]];
+    expect(steps).toEqual(expected);
+    if (!hasSplit) for (const step of steps) expect(step).not.toMatch(/disagreement/i);
+    if (!hasCaveat) for (const step of steps) expect(step).not.toMatch(/caveat/i);
+    if (s.gate === "fail" && answerClaims === 0) for (const step of steps) expect(step).not.toMatch(/unresolved claims/i);
+    // The card shows them as stored.
+    for (const step of steps) expect(out.card).toContain(step);
   });
 
   it("fail keeps its fail-specific protection; pass gets no notice", () => {
@@ -607,10 +618,12 @@ const UNKNOWN_GATES: [string, unknown][] = [
   ["future status", "escalated"],
 ];
 
-describe.each(UNKNOWN_GATES.flatMap(([n, v]) => [[`${n} (new record)`, v, false], [`${n} (historical record)`, v, true]] as const))("D8 unknown gate — %s", (_n, value, isHistorical) => {
+describe.each(
+  UNKNOWN_GATES.flatMap(([n, v]) => [[`${n} (new record)`, v, false, false], [`${n} (Order 3 record)`, v, true, false], [`${n} (pre-presentation record)`, v, true, true]] as const)
+)("D8 unknown gate — %s", (_n, value, isHistorical, prePresentation) => {
   it("never crashes, is never a known status, and every surface shows the controlled unrecognized state", async () => {
     const built = await build(SCENARIOS[0], "prose"); // a pass report: an unknown gate must not read as its old pass
-    const report: any = isHistorical ? historical(built.report) : JSON.parse(JSON.stringify(built.report));
+    const report: any = isHistorical ? historical(built.report, { prePresentation }) : JSON.parse(JSON.stringify(built.report));
     if (value === undefined) delete report.gate;
     else report.gate = value;
     const gate: any = { ...built.gate, status: value };
@@ -635,7 +648,10 @@ describe.each(UNKNOWN_GATES.flatMap(([n, v]) => [[`${n} (new record)`, v, false]
       expect(surface).not.toContain(CAUTION_NOTICE);
       expect(surface).not.toContain("undefined");
     }
-    expect(out.memoInput.confidenceLabel).toBe("Unrecognized");
+    // F6: the shared memo header states no confidence level for an unrecognized gate.
+    expect(out.memoInput.confidenceLabel).toBe("No gate-based");
+    expect(out.memo).toContain("(No gate-based confidence)");
+    expect(out.memo).not.toMatch(/\((High|Medium|Low|Unrecognized) confidence\)/);
     // Stored computed strings (panelVerdict, certaintyAssessment) keep the gate word they were created with — shown
     // as stored (no rewrite); every gate the application words at render time is "unrecognized".
     const storedStrings = [report.panelVerdict, report.certaintyAssessment];
@@ -684,9 +700,114 @@ describe("gate wording source (D6)", () => {
     expect(gateBannerText(framed, "pass")).not.toMatch(/verified|converge/i);
   });
 
-  it("a corrupted verificationGate never crashes the answer", () => {
+  it("a corrupted verificationGate never crashes the answer, and says its details could not be read (F3)", () => {
     const report = { gate: "caution", unifiedAnswer: "x", presentation: { answer: { note: null, claims: [] }, verificationGate: { unresolvedLoadBearing: "bad" } } } as any;
-    expect(presentUnifiedAnswer(report).unresolved).toEqual([]);
+    const answer = presentUnifiedAnswer(report);
+    expect(answer.unresolved).toEqual([]);
+    expect(answer.unresolvedHeading).toBe("Unresolved load-bearing claim");
+    expect(answer.unresolvedUnreadable).toEqual({ source: "computed", label: null, text: UNRESOLVED_DETAILS_UNREADABLE });
+  });
+
+  it("F1: the caution notice is the owner's canonical wording; the gate label is unchanged", () => {
+    expect(CAUTION_NOTICE).toBe(
+      "Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer."
+    );
+    expect(gateLabel("caution")).toBe("Verification gate: Caution");
+    expect(CAUTION_NEXT_STEP_WITHOUT_DISAGREEMENT).not.toMatch(/did not pass/);
+  });
+});
+
+// ─── F3: malformed stored load-bearing split entries ──────────────────────
+
+const SCENARIO_CAUTION_SPLIT = SCENARIOS.find((x) => x.name === "caution-split")!;
+
+/** [name, mutate(verificationGate, validEntry), readable entries kept, expected unreadable note]. */
+const MALFORMED_UNRESOLVED: [string, (vg: any, v: any) => unknown, number, string][] = [
+  ["[null]", (vg) => ({ ...vg, unresolvedLoadBearing: [null] }), 0, unreadableUnresolvedNotice(1)],
+  ["[{}]", (vg) => ({ ...vg, unresolvedLoadBearing: [{}] }), 0, unreadableUnresolvedNotice(1)],
+  ["[{claim: 42}]", (vg) => ({ ...vg, unresolvedLoadBearing: [{ claim: 42 }] }), 0, unreadableUnresolvedNotice(1)],
+  ["entry without a result", (vg, v) => ({ ...vg, unresolvedLoadBearing: [{ claim: v.claim }] }), 0, unreadableUnresolvedNotice(1)],
+  ["empty claim text", (vg, v) => ({ ...vg, unresolvedLoadBearing: [{ ...v, claim: "  " }] }), 0, unreadableUnresolvedNotice(1)],
+  ["disputers not text", (vg, v) => ({ ...vg, unresolvedLoadBearing: [{ ...v, disputers: 7 }] }), 0, unreadableUnresolvedNotice(1)],
+  ["supporters not text", (vg, v) => ({ ...vg, unresolvedLoadBearing: [{ ...v, supporters: ["Claude"] }] }), 0, unreadableUnresolvedNotice(1)],
+  ["an array entry", (vg, v) => ({ ...vg, unresolvedLoadBearing: [[v]] }), 0, unreadableUnresolvedNotice(1)],
+  ["valid, then null", (vg, v) => ({ ...vg, unresolvedLoadBearing: [v, null] }), 1, unreadableUnresolvedNotice(1)],
+  ["two bad, then valid", (vg, v) => ({ ...vg, unresolvedLoadBearing: [{}, 0, v] }), 1, unreadableUnresolvedNotice(2)],
+  ["list is a string", (vg) => ({ ...vg, unresolvedLoadBearing: "x" }), 0, UNRESOLVED_DETAILS_UNREADABLE],
+  ["list is an object", (vg, v) => ({ ...vg, unresolvedLoadBearing: { 0: v } }), 0, UNRESOLVED_DETAILS_UNREADABLE],
+  ["list missing", () => ({}), 0, UNRESOLVED_DETAILS_UNREADABLE],
+  ["verificationGate is a string", () => "x", 0, UNRESOLVED_DETAILS_UNREADABLE],
+  ["verificationGate is true", () => true, 0, UNRESOLVED_DETAILS_UNREADABLE],
+];
+
+describe.each(MALFORMED_UNRESOLVED)("F3 malformed unresolvedLoadBearing — %s", (_n, mutate, kept, note) => {
+  it("never crashes; keeps every readable entry intact, invents nothing, says what could not be read; the gate stays authoritative", async () => {
+    const built = await build(SCENARIO_CAUTION_SPLIT, "prose");
+    const report: any = JSON.parse(JSON.stringify(built.report));
+    const valid = report.presentation.verificationGate.unresolvedLoadBearing[0];
+    expect(valid.claim).toBe(SCENARIO_CAUTION_SPLIT.unresolved[0]);
+    report.presentation.verificationGate = mutate(report.presentation.verificationGate, valid);
+    const before = JSON.stringify(report);
+    const rendering = surfaces(report, built.rows, built.gate);
+    await expect(rendering).resolves.toBeDefined(); // never crashes
+    const out = await rendering;
+    expect(JSON.stringify(report)).toBe(before); // nothing is repaired in place
+    expect(out.json.presentation!.verificationGate).toEqual(JSON.parse(before).presentation.verificationGate); // raw value kept
+    // Markdown labels are bold ("**Disputed by:** …"): compared without the emphasis markers.
+    const answerSurfaces = { view: out.answer, strip: out.strip, md: mdSection(out.md, "## Unified Answer").split("**").join(""), memo: out.memo, docx: out.docx.join("\n"), pdf: out.pdf };
+    for (const [name, surface] of Object.entries(answerSurfaces)) {
+      // The stored gate is authoritative: the computed gate and caution notice still lead the answer.
+      expect([name, surface.includes(gateLabel("caution")), surface.includes(CAUTION_NOTICE)]).toEqual([name, true, true]);
+      // The heading and the unreadable note: a dropped entry never reads as "no load-bearing split".
+      // (The memo's findings list each split as its own finding, with no heading — as for readable entries.)
+      expect([name, name === "memo" || surface.includes("Unresolved load-bearing claim"), surface.includes(note)]).toEqual([name, true, true]);
+      // Only the readable entries are shown, each with its stored sides; nothing else is attributed to a side.
+      expect([name, surface.split(`Disputed by: ${valid.disputers}`).length - 1]).toEqual([name, kept]);
+      expect([name, surface.split("Disputed by").length - 1]).toEqual([name, kept]);
+      if (kept > 0) expect([name, surface.includes(valid.result)]).toEqual([name, true]);
+    }
+    expect(out.view).not.toContain("undefined");
+    expect(out.md).not.toContain("undefined");
+    expect(out.docxXmlErrors).toEqual([]);
+  });
+});
+
+// ─── F4: one gate source per page ─────────────────────────────────────────
+
+describe("F4: the report's stored gate is the one gate the page shows", () => {
+  it.each([
+    ["report caution, gate object pass", "caution-split", "pass"],
+    ["report pass, gate object caution", "pass", "caution"],
+  ] as const)("%s — banner, card, list chip, governance and answer agree", async (_n, scenario, objectStatus) => {
+    const built = await build(SCENARIOS.find((x) => x.name === scenario)!, "template");
+    const shown = built.report.gate;
+    const other = objectStatus;
+    expect(shown).not.toBe(other);
+    const out = await surfaces(built.report, built.rows, { ...built.gate, status: objectStatus });
+    for (const [name, surface] of Object.entries({ banner: out.banner, card: out.card, list: out.list, governance: out.governance, answer: out.answer })) {
+      expect([name, surface.includes(gateLabel(shown))]).toEqual([name, true]);
+      expect([name, surface.includes(gateLabel(other))]).toEqual([name, false]);
+    }
+  });
+});
+
+// ─── F5: next steps refer only to content the report has ─────────────────
+
+describe("F5: verdict-card next steps", () => {
+  it("caution keeps 'Flag the caveat' only when there is a caveat; fail names unresolved claims only when the answer lists them", async () => {
+    const caution = await build(SCENARIO_CAUTION_SPLIT, "template");
+    const bias = [{ description: "Models share a training-data bias." }] as any;
+    expect(buildAdaptiveVerdictCard("Q?", caution.rows, caution.gate, bias, 5, 2).recommendedNextSteps).toEqual(VERDICT_NEXT_STEPS.caution);
+    expect(buildAdaptiveVerdictCard("Q?", caution.rows, caution.gate, [], 5, 2).recommendedNextSteps).toEqual(VERDICT_NEXT_STEPS.caution.slice(0, 2));
+    const fail = await build(SCENARIOS.find((x) => x.name === "fail-splits")!, "template");
+    expect(buildAdaptiveVerdictCard("Q?", fail.rows, fail.gate, [], 5, 2).recommendedNextSteps).toEqual(VERDICT_NEXT_STEPS.fail);
+    expect(buildAdaptiveVerdictCard("Q?", fail.rows, fail.gate, [], 5, 0).recommendedNextSteps).toEqual([
+      VERDICT_NEXT_STEPS.fail[0],
+      FAIL_NEXT_STEP_WITHOUT_UNRESOLVED_CLAIMS,
+      VERDICT_NEXT_STEPS.fail[2],
+    ]);
+    // Without the count (no caller passes none today) the fail steps are unchanged.
+    expect(buildAdaptiveVerdictCard("Q?", fail.rows, fail.gate, [], 5).recommendedNextSteps).toEqual(VERDICT_NEXT_STEPS.fail);
   });
 });
 

@@ -35,7 +35,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -83,7 +83,7 @@ Unresolved load-bearing claim:
     },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -100,7 +100,6 @@ Unresolved load-bearing claim:
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -149,7 +148,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -197,7 +196,7 @@ Unresolved load-bearing claim:
     },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -214,7 +213,6 @@ Unresolved load-bearing claim:
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -263,7 +261,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -311,7 +309,7 @@ Unresolved load-bearing claim:
     },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -328,7 +326,6 @@ Unresolved load-bearing claim:
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -377,7 +374,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -425,7 +422,7 @@ Unresolved load-bearing claim:
     },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -442,7 +439,6 @@ Unresolved load-bearing claim:
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -491,7 +487,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -539,7 +535,7 @@ Unresolved load-bearing claim:
     },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -556,7 +552,6 @@ Unresolved load-bearing claim:
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -605,7 +600,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -653,7 +648,7 @@ Unresolved load-bearing claim:
     },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -670,7 +665,6 @@ Unresolved load-bearing claim:
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -719,7 +713,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -767,7 +761,7 @@ Unresolved load-bearing claim:
     },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -784,7 +778,6 @@ Unresolved load-bearing claim:
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -833,7 +826,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -881,7 +874,7 @@ Unresolved load-bearing claim:
     },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -898,7 +891,6 @@ Unresolved load-bearing claim:
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -947,7 +939,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -995,7 +987,7 @@ Unresolved load-bearing claim:
     },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -1012,7 +1004,6 @@ Unresolved load-bearing claim:
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -1061,7 +1052,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -1109,7 +1100,7 @@ Unresolved load-bearing claim:
     },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -1126,7 +1117,6 @@ Unresolved load-bearing claim:
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -1175,7 +1165,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -1223,7 +1213,7 @@ Unresolved load-bearing claim:
     },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -1240,7 +1230,6 @@ Unresolved load-bearing claim:
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -1289,7 +1278,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -1337,7 +1326,7 @@ Unresolved load-bearing claim:
     },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -1354,7 +1343,6 @@ Unresolved load-bearing claim:
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -1403,7 +1391,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -1451,7 +1439,7 @@ Unresolved load-bearing claim:
     },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -1468,7 +1456,6 @@ Unresolved load-bearing claim:
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -1517,7 +1504,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -1565,7 +1552,7 @@ Unresolved load-bearing claim:
     },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -1582,7 +1569,6 @@ Unresolved load-bearing claim:
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -1631,7 +1617,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -1679,7 +1665,7 @@ Unresolved load-bearing claim:
     },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -1696,7 +1682,6 @@ Unresolved load-bearing claim:
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -1745,7 +1730,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -1793,7 +1778,7 @@ Unresolved load-bearing claim:
     },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -1810,7 +1795,6 @@ Unresolved load-bearing claim:
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -1859,7 +1843,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -1907,7 +1891,7 @@ Unresolved load-bearing claim:
     },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -1924,7 +1908,6 @@ Unresolved load-bearing claim:
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -1973,7 +1956,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -2021,7 +2004,7 @@ Unresolved load-bearing claim:
     },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -2038,7 +2021,6 @@ Unresolved load-bearing claim:
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -2087,7 +2069,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -2135,7 +2117,7 @@ Unresolved load-bearing claim:
     },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -2152,7 +2134,6 @@ Unresolved load-bearing claim:
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -2201,7 +2182,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -2249,7 +2230,7 @@ Unresolved load-bearing claim:
     },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -2266,7 +2247,6 @@ Unresolved load-bearing claim:
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -2315,7 +2295,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -2363,7 +2343,7 @@ Unresolved load-bearing claim:
     },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -2380,7 +2360,6 @@ Unresolved load-bearing claim:
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -2429,7 +2408,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -2477,7 +2456,7 @@ Unresolved load-bearing claim:
     },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -2494,7 +2473,6 @@ Unresolved load-bearing claim:
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -2543,7 +2521,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -2591,7 +2569,7 @@ Unresolved load-bearing claim:
     },
   },
   "runCertainty": 0.6599999999999999,
-  "unifiedAnswer": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -2608,7 +2586,6 @@ Unresolved load-bearing claim:
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -2657,7 +2634,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -2705,7 +2682,7 @@ Unresolved load-bearing claim:
     },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -2722,7 +2699,6 @@ Unresolved load-bearing claim:
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -2771,7 +2747,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -2819,7 +2795,7 @@ Unresolved load-bearing claim:
     },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -2836,7 +2812,6 @@ Unresolved load-bearing claim:
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -2885,7 +2860,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -2933,7 +2908,7 @@ Unresolved load-bearing claim:
     },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -2950,7 +2925,6 @@ Unresolved load-bearing claim:
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -2999,7 +2973,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -3047,7 +3021,7 @@ Unresolved load-bearing claim:
     },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -3064,7 +3038,6 @@ Unresolved load-bearing claim:
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -3113,7 +3086,7 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -3161,7 +3134,7 @@ Unresolved load-bearing claim:
     },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "Verification gate: Caution. This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
 
 “Consensus claim” (ChatGPT, Claude, Grok).
 
@@ -3178,7 +3151,6 @@ Unresolved load-bearing claim:
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
