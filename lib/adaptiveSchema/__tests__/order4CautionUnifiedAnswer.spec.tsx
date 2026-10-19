@@ -50,6 +50,9 @@ import AdaptiveSynthesisReportView, { PanelVerdictCard } from "@/components/adap
 import PrimarySynthesisStrip from "@/components/adaptive/PrimarySynthesisStrip";
 import { ReviewGovernanceBody } from "@/components/adaptive/ReviewGovernanceSection";
 import ListView from "@/components/adaptive/ListView";
+import TopSummaryBar from "@/components/adaptive/TopSummaryBar";
+import { buildExportSnapshot } from "@/lib/adaptiveSchema/exportSnapshot";
+import { CONSENSUS_LABELS } from "@/lib/adaptiveSchema/reportSummary";
 import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
 import { renderAdaptiveResearchDocxV1 } from "@/lib/docx/renderAdaptiveResearchDocx";
 import { AdaptiveResearchDocument } from "@/lib/pdf/AdaptiveResearchDocument";
@@ -470,6 +473,19 @@ describe.each(SCENARIOS.flatMap((s) => (["template", "prose", "filtered"] as Var
     for (const surface of [out.view, out.md, out.memo, out.li, out.docx.join("\n"), out.pdf]) expect(surface).not.toMatch(/caution (because|due to|caused by)/i);
   });
 
+  it("N1: no consumer repeats the notice — each section carries the gate label and the canonical notice once (the page and memo twice: answer and summary, D4)", () => {
+    const n = (t: string, x: string) => t.split(x).length - 1;
+    const caution = s.gate === "caution" ? 1 : 0;
+    const once = { answer: out.answer, exec: out.exec, strip: out.strip, mdAnswer: mdSection(out.md, "## Unified Answer"), li: out.li, docx: out.docx.join("\n"), pdf: out.pdf, storedAnswer: out.json.unifiedAnswer };
+    for (const [name, surface] of Object.entries(once)) {
+      expect([name, n(surface, CAUTION_NOTICE)]).toEqual([name, caution]);
+      expect([name, n(surface, gateLabel("caution"))]).toEqual([name, s.gate === "caution" ? 1 : 0]);
+    }
+    for (const [name, surface] of Object.entries({ view: out.view, md: out.md, memo: out.memo })) expect([name, n(surface, CAUTION_NOTICE)]).toEqual([name, 2 * caution]);
+    // X carries the short form only; the verdict card states the gate, not the notice.
+    expect(n(out.x, CAUTION_NOTICE) + n(out.card, CAUTION_NOTICE)).toBe(0);
+  });
+
   it("D3/F5: the next steps never refer to a disagreement, caveat or unresolved claim the report does not have", () => {
     const steps = ctx.report.verdictCard.recommendedNextSteps;
     const hasSplit = ctx.rows.some((r) => r.status === "split");
@@ -788,6 +804,77 @@ describe("F4: the report's stored gate is the one gate the page shows", () => {
       expect([name, surface.includes(gateLabel(shown))]).toEqual([name, true]);
       expect([name, surface.includes(gateLabel(other))]).toEqual([name, false]);
     }
+  });
+});
+
+// ─── R2-1: the gate-derived consensus tier follows the page's gate ────────
+
+/** The top summary bar's Consensus value, as AdaptivePanelResponse renders it. */
+function topSummaryConsensus(props: Record<string, unknown>): string {
+  const texts = renderToStaticMarkup(createElement(TopSummaryBar as any, { schemaId: "generic", results: [], ...props }))
+    .replace(/<[^>]+>/g, "\n").split("\n").map((t) => t.trim()).filter(Boolean);
+  return texts[texts.indexOf("Consensus") + 1];
+}
+
+const EXPORT_CLASSIFICATION = { queryType: "generic", domain: "t", answerShape: "sections", quantExpected: false, timeSensitivity: "low", userIntent: "get_answer", confidence: 0.9, riskLevel: "professional", evidenceRequirement: "medium", freshness: "timeless", inputType: "text", verificationMethod: "cross_model_consistency", requestedCount: null, requiresClarification: false, rationale: "t" };
+
+function exportSnapshotOf(report: unknown, gate: unknown, rows: AlignedClaim[]) {
+  return buildExportSnapshot({
+    question: "Q?",
+    selectedModels: M as unknown as ModelId[],
+    runDocument: null,
+    legacy: { output: { version: 1, schemaId: "generic", classification: EXPORT_CLASSIFICATION, generatedAt: "2026-01-01T00:00:00.000Z", results: [], alignedClaims: rows, gate, synthesisReport: report } as any, governanceStatus: null, governanceMeta: null },
+  }).reportSnapshot;
+}
+
+/** The gate-scored consensus tier, written out per status (not derived from the implementation). */
+const TIER_OF_GATE: Record<string, string> = { pass: "Strong consensus", caution: "Moderate consensus", fail: "Weak consensus", unrecognized: "Not scored" };
+
+describe("R2-1: one stored gate behind the banner, answer, top-summary consensus and export consensus", () => {
+  it.each([
+    ["report caution, object pass", "caution-split", undefined, "pass"],
+    ["report pass, object caution", "pass", undefined, "caution"],
+    ["report fail, object pass", "fail-splits", undefined, "pass"],
+    ["report pass, object fail", "pass", undefined, "fail"],
+    ["report unknown, object pass", "pass", "bogus", "pass"],
+    ["report pass, object unknown", "pass", undefined, "bogus"],
+    ["report missing, object caution", "caution-split", null, "caution"],
+    ["consistent caution", "caution-split", undefined, "caution"],
+  ] as const)("%s", async (_n, scenario, reportGate, objectStatus) => {
+    const built = await build(SCENARIOS.find((x) => x.name === scenario)!, "template");
+    const report: any = JSON.parse(JSON.stringify(built.report));
+    if (reportGate === null) delete report.gate;
+    else if (reportGate !== undefined) report.gate = reportGate;
+    const gate: any = { ...built.gate, status: objectStatus };
+    const shown = readGateStatus(report.gate);
+    const out = await surfaces(report, built.rows, gate);
+    // Every gate statement on the page is the report's stored gate.
+    for (const [name, surface] of Object.entries({ banner: out.banner, answer: out.answer, card: out.card, list: out.list })) {
+      expect([name, surface.includes(gateLabel(shown))]).toEqual([name, true]);
+      for (const other of (["pass", "caution", "fail", "unrecognized"] as const).filter((x) => x !== shown)) expect([name, other, surface.includes(gateLabel(other))]).toEqual([name, other, false]);
+    }
+    // The gate-scored consensus tier is worded from that same gate, on the page and in the export header.
+    expect(topSummaryConsensus({ gate, synthesisReport: report })).toBe(TIER_OF_GATE[shown]);
+    const snapshot = exportSnapshotOf(report, gate, built.rows);
+    expect(CONSENSUS_LABELS[snapshot.consensusLevel]).toBe(TIER_OF_GATE[shown]);
+    // Raw stored values are exported as stored: neither copy is rewritten.
+    expect((snapshot.legacy!.gate as any).status).toEqual(objectStatus);
+    expect((snapshot.legacy!.synthesisReport as any).gate).toEqual(report.gate);
+  });
+
+  it("without a report, the gate object is the gate (unchanged); without a gate, nothing is scored", () => {
+    expect(topSummaryConsensus({ gate: { status: "pass" } })).toBe("Strong consensus");
+    expect(topSummaryConsensus({ gate: { status: "caution" }, synthesisReport: null })).toBe("Moderate consensus");
+    expect(topSummaryConsensus({ synthesisReport: { gate: "pass" } })).toBe("Not scored");
+  });
+
+  it("consensus measured on its own is not rewritten to match the gate: high consensus beside caution, low consensus beside pass", () => {
+    const cell = (agreement: string) => ({ subject: "A", attribute: "x", valuesByModel: {}, coverageCount: 2, coverageRatio: 1, agreement });
+    const matrix = (agreements: string[]) => ({ subjects: [], attributes: [], cells: agreements.map(cell), totalModels: 2, lowConfidenceSubjects: [], lowConfidenceAttributes: [], hasVerifiedSourceData: false });
+    const strong = matrix(["consensus", "consensus", "majority", "consensus"]);
+    const weak = matrix(["split", "split", "split", "consensus"]);
+    expect(topSummaryConsensus({ schemaId: "comparison_matrix", comparisonMatrix: strong, gate: { status: "caution" }, synthesisReport: { gate: "caution" } })).toBe("Strong consensus");
+    expect(topSummaryConsensus({ schemaId: "comparison_matrix", comparisonMatrix: weak, gate: { status: "pass" }, synthesisReport: { gate: "pass" } })).not.toBe("Strong consensus");
   });
 });
 
