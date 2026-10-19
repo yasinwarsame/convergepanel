@@ -33,7 +33,7 @@ import { CONSENSUS_LABELS, SOURCE_GROUNDING_LABELS } from "@/lib/adaptiveSchema/
 import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
 import { AdaptiveSynthesisReport, FieldSpec } from "@/lib/adaptiveSchema/types";
 import { modelCaveatParts, presentVerdictCaveat, presentVerdictClaim, verdictClaimParts } from "@/lib/adaptiveSchema/agreementNarrative";
-import { TextBlock, answerLeadBlocks, presentUnifiedAnswer, unresolvedClaimParts } from "@/lib/adaptiveSchema/reportPresentation";
+import { TextBlock, answerLeadBlocks, presentUnifiedAnswer, unresolvedGroups } from "@/lib/adaptiveSchema/reportPresentation";
 import {
   fieldLabel,
   formatExportTimestamp as formatTimestamp,
@@ -695,12 +695,10 @@ function unifiedAnswerText(synthesis: AdaptiveSynthesisReport): React.ReactNode[
     [...(answer.note ? [fromBlock(answer.note)] : []), ...(answer.claimsHeading ? [{ label: null, text: `${answer.claimsHeading}:`, model: false }] : [])],
     ...answer.claims.map((item) => [item.claim, item.result, item.contested, item.supporters].filter((b): b is TextBlock => !!b).map(fromBlock)),
     // The heading stays in its first claim's group, so it is never separated from it by a blank line.
-    ...(answer.unresolvedHeading && answer.unresolved
-      ? answer.unresolved.map((item, i) => [
-          ...(i === 0 ? [{ label: null, text: `${answer.unresolvedHeading}:`, model: false }] : []),
-          ...unresolvedClaimParts(item).map(fromBlock),
-        ])
-      : []),
+    ...unresolvedGroups(answer).map((parts, i) => [
+      ...(i === 0 ? [{ label: null, text: `${answer.unresolvedHeading}:`, model: false }] : []),
+      ...parts.map(fromBlock),
+    ]),
   ].filter((g) => g.length > 0);
   const lines = groups.flat();
   const groupStarts = new Set(groups.map((g) => lines.indexOf(g[0])));

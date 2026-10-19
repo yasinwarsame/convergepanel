@@ -114,6 +114,7 @@ function markdownUnifiedAnswer(report: AdaptiveSynthesisReport): string[] {
   if (answer.unresolvedHeading && answer.unresolved) {
     out.push(`${answer.unresolvedHeading}:`);
     answer.unresolved.forEach((c) => out.push(`- ${markdownUnresolvedClaim(c)}`));
+    if (answer.unresolvedUnreadable) out.push(answer.unresolvedUnreadable.text);
   }
   return out;
 }
@@ -262,7 +263,10 @@ export function buildAdaptiveMemoInput(
     // splits) — mapped here, so the shared memo generator is unchanged. Historical reports: as before.
     const answer = presentUnifiedAnswer(report);
     const lead = answerLeadBlocks(answer);
-    const gateFindings = lead.length > 0 ? [leadText(lead), ...(answer.unresolved ?? []).map(plainUnresolvedClaim)] : [];
+    const gateFindings =
+      lead.length > 0
+        ? [leadText(lead), ...(answer.unresolved ?? []).map(plainUnresolvedClaim), ...(answer.unresolvedUnreadable ? [answer.unresolvedUnreadable.text] : [])]
+        : [];
     return {
       type: "research",
       question,

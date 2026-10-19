@@ -181,4 +181,10 @@ export const VERDICT_NEXT_STEPS: Record<AdaptiveGateStatus, string[]> = {
  * key disagreement, which a caution from certainty alone does not have — it is never invented.
  */
 export const CAUTION_NEXT_STEP_WITHOUT_DISAGREEMENT =
-  "Review the findings and limitations below before relying on this synthesis — the verification gate did not pass.";
+  "Review the findings and limitations below before relying on this synthesis — the panel did not meet the conditions for a clean verification pass.";
+
+/**
+ * Order 4 (F5): the second fail step when the Unified Answer lists no unresolved claims. VERDICT_NEXT_STEPS.fail
+ * refers to "the unresolved claims", which a fail without answer claims does not show — they are never implied.
+ */
+export const FAIL_NEXT_STEP_WITHOUT_UNRESOLVED_CLAIMS = "Independently verify any claim in this synthesis before using it.";

@@ -108,15 +108,17 @@ export interface UnifiedAnswerBlocks {
   claims: AnswerClaimBlock[];
   unresolvedHeading?: string | null;
   unresolved?: UnresolvedClaimBlock[];
+  /**
+   * F3: a computed note that stored load-bearing split entries could not be read (a corrupted record) — shown under
+   * unresolvedHeading so a missing entry never reads as "no load-bearing split". Null when every entry was read.
+   */
+  unresolvedUnreadable?: TextBlock | null;
 }
 
 export const SUPPORTED_BY_LABEL = "Supported by";
 export const UNRESOLVED_CLAIMS_HEADING = "Unresolved claims";
 
 const legacy = (text: string): TextBlock => ({ source: "legacy", label: null, text });
-
-/** A stored list read defensively: anything but an array is empty (a corrupted record never crashes a renderer). */
-const arrayOrEmpty = <T,>(value: T[] | undefined): T[] => (Array.isArray(value) ? value : []);
 
 function presentClaim(c: PresentedClaim): ClaimBlock {
   return {
@@ -131,6 +133,43 @@ function presentAnswerClaim(c: PresentedAnswerClaim): AnswerClaimBlock {
     ...presentClaim(c),
     supporters: c.supporters ? { source: "computed", label: SUPPORTED_BY_LABEL, text: c.supporters } : null,
   };
+}
+
+const isText = (v: unknown): v is string => typeof v === "string" && v.trim().length > 0;
+const isOptionalText = (v: unknown): boolean => v === undefined || isText(v);
+
+/**
+ * F3: a stored load-bearing split entry read without trusting it. It is used only when its claim and computed result
+ * are text and every detail it carries (contested, supporters, disputers) is text — a corrupted detail would otherwise
+ * be dropped and read as "none". Nothing is filled in: an unreadable entry is not shown, and is counted instead.
+ */
+function readUnresolvedClaim(value: unknown): PresentedUnresolvedClaim | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const v = value as Record<string, unknown>;
+  if (!isText(v.claim) || !isText(v.result) || !isOptionalText(v.contested) || !isOptionalText(v.supporters) || !isOptionalText(v.disputers)) return null;
+  return {
+    claim: v.claim,
+    result: v.result,
+    ...(v.contested !== undefined ? { contested: v.contested as string } : {}),
+    ...(v.supporters !== undefined ? { supporters: v.supporters as string } : {}),
+    ...(v.disputers !== undefined ? { disputers: v.disputers as string } : {}),
+  };
+}
+
+export const UNRESOLVED_DETAILS_UNREADABLE = "The stored load-bearing claim details could not be read, so they are not shown.";
+
+export function unreadableUnresolvedNotice(count: number): string {
+  return count === 1
+    ? "1 stored load-bearing claim could not be read, so it is not shown."
+    : `${count} stored load-bearing claims could not be read, so they are not shown.`;
+}
+
+/** The stored load-bearing splits of a caution answer: the readable entries, and a note when any could not be read (F3). */
+function readUnresolvedClaims(stored: unknown): { claims: PresentedUnresolvedClaim[]; unreadable: TextBlock | null; count: number } {
+  if (!Array.isArray(stored)) return { claims: [], unreadable: { source: "computed", label: null, text: UNRESOLVED_DETAILS_UNREADABLE }, count: 1 };
+  const claims = stored.map(readUnresolvedClaim).filter((c): c is PresentedUnresolvedClaim => c !== null);
+  const dropped = stored.length - claims.length;
+  return { claims, unreadable: dropped > 0 ? { source: "computed", label: null, text: unreadableUnresolvedNotice(dropped) } : null, count: stored.length };
 }
 
 function presentUnresolvedClaim(c: PresentedUnresolvedClaim): UnresolvedClaimBlock {
@@ -178,14 +217,24 @@ export function presentUnifiedAnswer(report: AdaptiveSynthesisReport): UnifiedAn
   const status = shownGate(report);
   const gated = status ? { gate: gateBlock(status), notice: noticeBlock(status) } : {};
   if (!answer) return { ...gated, note: legacy(report.unifiedAnswer), claimsHeading: null, claims: [] };
-  const unresolved =
-    status === "caution" ? arrayOrEmpty(report.presentation?.verificationGate?.unresolvedLoadBearing).map(presentUnresolvedClaim) : [];
+  // F3: the stored entries are read without trusting them; a report without the Order 4 presentation stores none.
+  const stored =
+    status === "caution" && hasGatePresentation(report)
+      ? readUnresolvedClaims((report.presentation?.verificationGate as { unresolvedLoadBearing?: unknown } | undefined)?.unresolvedLoadBearing)
+      : { claims: [], unreadable: null, count: 0 };
+  const unresolved = stored.claims.map(presentUnresolvedClaim);
   return {
     ...gated,
     note: answer.note ? { source: "computed", label: null, text: answer.note } : null,
     claimsHeading: report.gate === "fail" && answer.claims.length > 0 ? UNRESOLVED_CLAIMS_HEADING : null,
     claims: answer.claims.map(presentAnswerClaim),
-    ...(status ? { unresolvedHeading: unresolved.length > 0 ? unresolvedLoadBearingHeading(unresolved.length) : null, unresolved } : {}),
+    ...(status
+      ? {
+          unresolvedHeading: stored.count > 0 ? unresolvedLoadBearingHeading(stored.count) : null,
+          unresolved,
+          unresolvedUnreadable: stored.unreadable,
+        }
+      : {}),
   };
 }
 
@@ -290,6 +339,15 @@ export function answerClaimLines(item: AnswerClaimBlock): string[] {
 /** An unresolved load-bearing claim's blocks, in display order: the claim, its computed result, contested note, supporters, disputers. */
 export function unresolvedClaimParts(item: UnresolvedClaimBlock): TextBlock[] {
   return [item.claim, item.result, item.contested, item.supporters, item.disputers].filter((b): b is TextBlock => !!b);
+}
+
+/**
+ * The caution answer's load-bearing split disclosure as groups, in display order: each readable claim's parts, then
+ * (F3) the computed note that stored entries could not be read. Empty when the answer has no disclosure.
+ */
+export function unresolvedGroups(answer: UnifiedAnswerBlocks): TextBlock[][] {
+  if (!answer.unresolvedHeading) return [];
+  return [...(answer.unresolved ?? []).map(unresolvedClaimParts), ...(answer.unresolvedUnreadable ? [[answer.unresolvedUnreadable]] : [])];
 }
 
 /** The Unified Answer's computed lead — gate, then notice — as blocks; empty when the report shows neither (D7). */

@@ -27,7 +27,7 @@
 import { AdaptiveSynthesisReport } from "@/lib/adaptiveSchema/types";
 import { presentVerdictCaveat, presentVerdictClaim } from "@/lib/adaptiveSchema/agreementNarrative";
 import { Card, SectionLabel } from "./shared";
-import { UnifiedAnswerClaims } from "./AdaptiveSynthesisReportView";
+import { AnswerLead, UnifiedAnswerClaims } from "./AdaptiveSynthesisReportView";
 
 export default function PrimarySynthesisStrip({ synthesisReport }: { synthesisReport: AdaptiveSynthesisReport }) {
   const { unifiedAnswer, verdictCard } = synthesisReport;
@@ -43,7 +43,11 @@ export default function PrimarySynthesisStrip({ synthesisReport }: { synthesisRe
         // R6-1: each Unified Answer claim with its own computed result; reports persisted before it: the stored string.
         <UnifiedAnswerClaims report={synthesisReport} />
       ) : (
-        <p className="text-sm leading-relaxed text-slate-900 whitespace-pre-line">{unifiedAnswer}</p>
+        <>
+          {/* F2 (D8): an unrecognized stored gate is stated first, as in the Unified Answer card; a known gate renders exactly as before. */}
+          <AnswerLead report={synthesisReport} />
+          <p className="text-sm leading-relaxed text-slate-900 whitespace-pre-line">{unifiedAnswer}</p>
+        </>
       )}
 
       <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-sky-200 pt-3">

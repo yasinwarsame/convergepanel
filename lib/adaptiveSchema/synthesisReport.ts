@@ -338,7 +338,7 @@ export async function buildAdaptiveSynthesisReport(
   const coverageGaps = await auditPanelCoverage(question, schemaId, rows.map((r) => r.claimText));
   const diagnostics = computeAdaptiveDiagnostics(rows);
 
-  const verdictCard = buildAdaptiveVerdictCard(question, rows, gate, bias, totalModelCount);
+  const verdictCard = buildAdaptiveVerdictCard(question, rows, gate, bias, totalModelCount, answerSelection.rows.length);
 
   const templateDisagreements: AdaptiveDisagreement[] = deterministicDisagreements.map((d) => ({
     ...d,

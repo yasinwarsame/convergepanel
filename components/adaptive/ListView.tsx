@@ -34,7 +34,7 @@ import {
 import { TRUST_SCORE_CAP_REASON } from "@/lib/adaptiveSchema/config";
 import { Card, SectionLabel, BulletList, ConfidencePill, ProbabilityBar, TintBadge, getModelLabel } from "./shared";
 import ModelChip from "@/components/ModelChip";
-import { GateTone, gateChipText, gateTone } from "@/lib/adaptiveSchema/gatePresentation";
+import { GateTone, gateChipText, gateTone, pageGateValue } from "@/lib/adaptiveSchema/gatePresentation";
 
 // Wording: gatePresentation.gateChipText (D6/D7); "neutral": an unrecognized stored gate (D8).
 const GATE_CHIP_STYLES: Record<GateTone, string> = {
@@ -287,8 +287,8 @@ function RunHeaderStrip({
         <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600">
           {schema.id.replace(/_/g, " ")}
         </span>
-        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${GATE_CHIP_STYLES[gateTone(gate.status)]}`}>
-          {gateChipText(synthesisReport, gate.status)}
+        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${GATE_CHIP_STYLES[gateTone(pageGateValue(synthesisReport, gate.status))]}`}>
+          {gateChipText(synthesisReport, pageGateValue(synthesisReport, gate.status))}
         </span>
       </div>
       <div className="text-xs text-slate-500">

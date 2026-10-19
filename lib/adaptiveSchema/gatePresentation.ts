@@ -48,9 +48,9 @@ export function gateLabel(status: GateDisplayStatus): string {
   return `${GATE_LABEL}: ${GATE_STATUS_WORD[status]}`;
 }
 
-/** D2: the computed caution notice. It states the gate's result and names no cause. */
+/** D2: the computed caution notice — the owner's canonical wording. It states the gate's result and names no cause. */
 export const CAUTION_NOTICE =
-  "This result requires further review: the verification gate did not pass. Review the findings and limitations before relying on this answer.";
+  "Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.";
 
 /** D2, for length-limited text (the X post). */
 export const CAUTION_NOTICE_SHORT = "requires further review";
@@ -94,6 +94,16 @@ export const LEGACY_GATE_BANNER_LABEL: Readonly<Record<AdaptiveGateStatus, strin
   fail: "Could not verify — panel split",
 };
 
+/**
+ * The stored gate a page shows (F4): the report's own copy (AdaptiveSynthesisReport.gate) whenever a report is
+ * present — the value the Unified Answer, summary and every export read — so one page never states two gates. The
+ * gate object's copy (AdaptiveGateResult.status) is used only where there is no report. Both are written from the same
+ * computed value, so they differ only on a corrupted record. Nothing is recomputed.
+ */
+export function pageGateValue(report: Pick<AdaptiveSynthesisReport, "gate"> | null | undefined, gateStatus: unknown): unknown {
+  return report ? report.gate : gateStatus;
+}
+
 /** The gate banner (report view, governance section). */
 export function gateBannerText(report: Pick<AdaptiveSynthesisReport, "presentation"> | null | undefined, stored: unknown): string {
   const status = readGateStatus(stored);
@@ -124,12 +134,15 @@ export function legacyGateWord(stored: unknown): string {
   return status === "unrecognized" ? "unrecognized" : status;
 }
 
-/** The memo's confidence word (shared memo generator: "(… confidence)"). Unrecognized is never High. */
+/**
+ * The memo's confidence word (shared memo generator: "(… confidence)"). An unrecognized gate supports no confidence
+ * level, so its header reads "(No gate-based confidence)" — never High, and no level is implied.
+ */
 export const GATE_CONFIDENCE_LABEL: Readonly<Record<GateDisplayStatus, string>> = {
   pass: "High",
   caution: "Medium",
   fail: "Low",
-  unrecognized: "Unrecognized",
+  unrecognized: "No gate-based",
 };
 
 /** The tone a renderer styles a gate with; "neutral" for an unrecognized value. */

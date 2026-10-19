@@ -46,7 +46,7 @@ import {
   presentNarrativeSections,
   presentUnifiedAnswer,
 } from "@/lib/adaptiveSchema/reportPresentation";
-import { GATE_LABEL, GateTone, gateBadgeText, gateBannerText, gateTone } from "@/lib/adaptiveSchema/gatePresentation";
+import { GATE_LABEL, GateTone, gateBadgeText, gateBannerText, gateTone, pageGateValue } from "@/lib/adaptiveSchema/gatePresentation";
 
 /** Canonical, ordered list of `data-section` values rendered below — the single source of truth the snapshot test asserts against, so a future edit can't silently drop a section without also updating this list. */
 export const ADAPTIVE_SYNTHESIS_SECTION_IDS = [
@@ -102,9 +102,13 @@ const GATE_ACCENT: Record<GateTone, string> = {
   neutral: "bg-slate-300",
 };
 
-/** The gate banner: worded by gatePresentation.gateBannerText (historical reports keep their wording, D7). */
+/**
+ * The gate banner: worded by gatePresentation.gateBannerText (historical reports keep their wording, D7). With a report
+ * it shows the report's stored gate — the one the Unified Answer and exports show (F4, pageGateValue).
+ */
 export function GateBanner({ report, gate }: { report: AdaptiveSynthesisReport | null; gate: unknown }) {
-  return <div className={`rounded-xl border px-4 py-3 text-sm font-medium ${GATE_BANNER_STYLES[gateTone(gate)]}`}>{gateBannerText(report, gate)}</div>;
+  const shown = pageGateValue(report, gate);
+  return <div className={`rounded-xl border px-4 py-3 text-sm font-medium ${GATE_BANNER_STYLES[gateTone(shown)]}`}>{gateBannerText(report, shown)}</div>;
 }
 
 function agreementColorClass(score: number): string {
@@ -155,18 +159,26 @@ export function UnifiedAnswerClaims({ report }: { report: AdaptiveSynthesisRepor
           ))}
         </ul>
       )}
-      {answer.unresolvedHeading && answer.unresolved && answer.unresolved.length > 0 && (
+      {answer.unresolvedHeading && answer.unresolved && (answer.unresolved.length > 0 || answer.unresolvedUnreadable) && (
         <div data-answer-part="unresolved-load-bearing">
           <p data-source="computed" className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">
             {answer.unresolvedHeading}
           </p>
-          <ul className="list-disc list-outside pl-5 space-y-1 mt-1">
-            {answer.unresolved.map((item, idx) => (
-              <li key={idx}>
-                <UnresolvedClaim item={item} />
-              </li>
-            ))}
-          </ul>
+          {answer.unresolved.length > 0 && (
+            <ul className="list-disc list-outside pl-5 space-y-1 mt-1">
+              {answer.unresolved.map((item, idx) => (
+                <li key={idx}>
+                  <UnresolvedClaim item={item} />
+                </li>
+              ))}
+            </ul>
+          )}
+          {/* F3: stored entries that could not be read are counted, never silently dropped. */}
+          {answer.unresolvedUnreadable && (
+            <p data-source="computed" className="mt-1 text-xs text-slate-600">
+              {answer.unresolvedUnreadable.text}
+            </p>
+          )}
         </div>
       )}
     </div>
@@ -193,7 +205,8 @@ function AnswerLeadBlocks({ blocks }: { blocks: TextBlock[] }) {
   );
 }
 
-function AnswerLead({ report }: { report: AdaptiveSynthesisReport }) {
+/** Exported for PrimarySynthesisStrip: the D8 lead of a report persisted before presentation.answer (F2). */
+export function AnswerLead({ report }: { report: AdaptiveSynthesisReport }) {
   return <AnswerLeadBlocks blocks={answerLeadBlocks(presentUnifiedAnswer(report))} />;
 }
 
@@ -772,9 +785,11 @@ export function PanelVerdictCard({ report, gate }: { report: AdaptiveSynthesisRe
   const top = presentVerdictClaim(v.topConsensus, v.topConsensusAgreement);
   const split = v.keyDisagreement ? presentVerdictClaim(v.keyDisagreement, v.keyDisagreementAgreement) : null;
   const caveat = presentVerdictCaveat(v);
+  // F4: the card shows the report's stored gate, as the Unified Answer does.
+  const shownGate = pageGateValue(report, gate.status);
   return (
     <div className="relative rounded-xl border border-slate-200 bg-white p-6 overflow-hidden">
-      <div className={`absolute left-0 top-0 h-1.5 w-full ${GATE_ACCENT[gateTone(gate.status)]}`} />
+      <div className={`absolute left-0 top-0 h-1.5 w-full ${GATE_ACCENT[gateTone(shownGate)]}`} />
 
       <div className="rounded-lg bg-sky-50 border border-sky-200 px-4 py-3 text-xs text-sky-800 mb-4">
         ConvergePanel is an AI-assisted research tool, not a forensic or fact-checking authority. Synthesis informs
@@ -783,8 +798,8 @@ export function PanelVerdictCard({ report, gate }: { report: AdaptiveSynthesisRe
 
       <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
         <h3 className="text-lg font-semibold text-slate-900">Panel Verdict</h3>
-        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${GATE_BADGE_STYLES[gateTone(gate.status)]}`}>
-          {gateBadgeText(report, gate.status)}
+        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${GATE_BADGE_STYLES[gateTone(shownGate)]}`}>
+          {gateBadgeText(report, shownGate)}
         </span>
       </div>
 
