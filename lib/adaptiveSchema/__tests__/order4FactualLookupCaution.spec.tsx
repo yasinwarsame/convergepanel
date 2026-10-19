@@ -19,7 +19,7 @@ import { buildAdaptiveSynthesisReport } from "@/lib/adaptiveSchema/synthesisRepo
 import { computeAdaptiveGate } from "@/lib/adaptiveSchema/gate";
 import { computeRunCertainty } from "@/lib/adaptiveSchema/scoring";
 import { getResultSchema } from "@/lib/adaptiveSchema/schemaRegistry";
-import { presentAnswerGate, presentUnifiedAnswer } from "@/lib/adaptiveSchema/reportPresentation";
+import { UNRESOLVED_DETAILS_UNREADABLE, presentAnswerGate, presentUnifiedAnswer, unreadableUnresolvedNotice } from "@/lib/adaptiveSchema/reportPresentation";
 import { CAUTION_NOTICE, UNRECOGNIZED_GATE_NOTICE, gateLabel } from "@/lib/adaptiveSchema/gatePresentation";
 import AdaptivePanelResponse from "@/components/adaptive/AdaptivePanelResponse";
 import { AdaptiveGateResult, AdaptiveModelResult, AdaptiveSynthesisReport, AlignedClaim, QueryType } from "@/lib/adaptiveSchema/types";
@@ -388,6 +388,131 @@ describe("O-1: the other stored gates on the factual_lookup page", () => {
     const html = page({ ...c, gate: undefined });
     expect(html).toContain(gateLabel("caution"));
     expect(html).toContain(CAUTION_NOTICE);
+  });
+});
+
+// ─── m-1: stored split claims when presentation.answer is missing ────────────────────────────────────────────
+
+describe("m-1: a caution card without a stored presentation.answer still discloses the stored split claims", () => {
+  /** A new-format caution report whose presentation.answer is missing (a corrupted record: the builder always writes it). */
+  function withoutAnswer(r: AdaptiveSynthesisReport, unresolved?: unknown): AdaptiveSynthesisReport {
+    const c = JSON.parse(JSON.stringify(r));
+    delete c.presentation.answer;
+    if (arguments.length > 1) c.presentation.verificationGate.unresolvedLoadBearing = unresolved;
+    return c;
+  }
+  /** The card's split disclosure: heading, then each claim's parts, as a reader sees them. */
+  function disclosure(html: string): { el: El | undefined; items: string[][]; note: string | null } {
+    const root = parse(html);
+    const el = all(root, (e) => e.attrs["data-answer-part"] === "unresolved-load-bearing")[0];
+    if (!el) return { el, items: [], note: null };
+    expect(ancestors(el)).toContain(answerCard(root));
+    expect(hiddenOnLoad(el)).toBe(false);
+    const items = all(el, (e) => e.name === "li").map((li) => li.children.map(textOf));
+    const p = el.children.filter((c): c is El => typeof c !== "string" && c.name === "p").map(textOf);
+    return { el, items, note: p.length > 1 ? p[p.length - 1] : null };
+  }
+
+  it("valid stored splits: the same disclosure as with the answer stored — claim, its result, both sides — before the answer", async () => {
+    const c = await cautionSplit();
+    const stored = (c.report.presentation!.verificationGate as any).unresolvedLoadBearing;
+    expect(stored).toHaveLength(1);
+    const withAnswer = disclosure(page(c));
+    const html = page({ ...c, report: withoutAnswer(c.report) });
+    const got = disclosure(html);
+    expect(got.items).toEqual(withAnswer.items);
+    expect(got.items).toEqual([[`Claim: “${stored[0].claim}”`, `Panel result: ${stored[0].result}`, `Supported by: ${stored[0].supporters}`, `Disputed by: ${stored[0].disputers}`]]);
+    expect(count(html, CAUTION_NOTICE)).toBe(1);
+    const root = parse(html);
+    const pos = order(root);
+    const heading = visible(root, "Unresolved load-bearing claim");
+    const answer = holding(answerCard(root), "Paris").find((e) => e.name === "p" && /\btext-base\b/.test(e.attrs.class ?? ""))!;
+    expect(pos.get(visible(root, CAUTION_NOTICE))!).toBeLessThan(pos.get(heading)!);
+    expect(pos.get(heading)!).toBeLessThan(pos.get(answer)!);
+  });
+
+  it("an unclear model is on neither side: the stored sides are shown as stored, nothing is added", async () => {
+    const M5 = ["chatgpt", "claude", "grok", "perplexity", "gemini"] as const;
+    const st = ["agrees", "agrees", "unclear", "disputes", "disputes"];
+    const row: AlignedClaim = { id: "answer", claimText: "Paris", cells: M5.map((m, i) => ({ modelId: m as ModelId, stance: st[i], rawStance: "asserts", confidence: null, excerpt: "x", origin: { kind: "field_derived", fieldType: "scalar" } })) as any, agreementScore: 0.5, certaintyScore: 0.8, status: "split" as any };
+    g.mockImplementation(async () => off);
+    const report = await buildAdaptiveSynthesisReport("Q?", "factual_lookup" as QueryType, [row], M5.map((m) => ({ modelId: m as ModelId, status: "ok", rawText: "{}", latencyMs: 1 })));
+    const gate = computeAdaptiveGate([row], computeRunCertainty([row], "factual_lookup"), "factual_lookup");
+    expect(report.gate).toBe("caution");
+    const results = M5.map((m) => ({ modelId: m as ModelId, schemaId: "factual_lookup", ok: true, data: { answer: "Paris", source: "Atlas", caveat: "none" }, latencyMs: 1 }) as any);
+    const got = disclosure(page({ rows: [row], results, gate, report: withoutAnswer(report) }));
+    expect(got.items).toHaveLength(1);
+    expect(got.items[0]).toContain("Supported by: ChatGPT, Claude");
+    expect(got.items[0]).toContain("Disputed by: Perplexity, Gemini");
+    expect(got.items[0].join(" ")).not.toContain("Grok");
+  });
+
+  it("mixed valid and unreadable entries: the valid one shown once, the unreadable ones counted", async () => {
+    const c = await cautionSplit();
+    const stored = (c.report.presentation!.verificationGate as any).unresolvedLoadBearing;
+    const got = disclosure(page({ ...c, report: withoutAnswer(c.report, [...stored, null, { claim: 1, result: "r" }]) }));
+    expect(got.items).toHaveLength(1);
+    expect(got.items[0][0]).toBe(`Claim: “${stored[0].claim}”`);
+    expect(got.note).toBe(unreadableUnresolvedNotice(2));
+  });
+
+  it.each([
+    ["only unreadable entries", [null, {}, { claim: "c" }], unreadableUnresolvedNotice(3)],
+    ["a non-array value", "corrupt", UNRESOLVED_DETAILS_UNREADABLE],
+    ["no stored list at all", undefined, UNRESOLVED_DETAILS_UNREADABLE],
+  ])("%s: the details are stated as unavailable — never read as no split, never invented", async (_n, bad, note) => {
+    const c = await cautionSplit();
+    const html = page({ ...c, report: withoutAnswer(c.report, bad) });
+    const got = disclosure(html);
+    expect(got.items).toEqual([]);
+    expect(got.note).toBe(note);
+    expect(html).not.toContain("Disputed by");
+    expect(count(html, CAUTION_NOTICE)).toBe(1);
+  });
+
+  it("an empty stored list: no disclosure and no note (no fabricated disagreement)", async () => {
+    const c = await cautionSplit();
+    const html = page({ ...c, report: withoutAnswer(c.report, []) });
+    expect(disclosure(html).el).toBeUndefined();
+    expect(html).not.toContain("could not be read");
+    expect(html).toContain(CAUTION_NOTICE);
+  });
+
+  it.each([["pass"], ["fail"], ["unknown_status"]])("gate %s with unreadable entries and no answer: no split disclosure, the gate's own lead only", async (g2) => {
+    const c = await cautionSplit();
+    const r: any = withoutAnswer(c.report, [null, "x"]);
+    r.gate = g2;
+    const html = page({ ...c, report: r });
+    expect(html).not.toContain("Unresolved load-bearing");
+    expect(html).not.toContain("could not be read");
+    expect(html).not.toContain(CAUTION_NOTICE);
+    expect(count(html, gateLabel(g2 === "unknown_status" ? "unrecognized" : (g2 as "pass" | "fail")))).toBe(1);
+  });
+
+  it("historical (no verificationGate) without an answer: unchanged, no lead", async () => {
+    const c = await cautionSplit();
+    const r: any = withoutAnswer(historical(c.report));
+    const html = page({ ...c, report: r });
+    expect(html).not.toContain("Verification gate");
+    expect(html).not.toContain("Unresolved load-bearing");
+  });
+
+  it("the Unified Answer of the same record is unchanged: it shows its stored answer string and adds no disclosure", async () => {
+    const c = await cautionSplit();
+    const r = withoutAnswer(c.report);
+    const ua = presentUnifiedAnswer(r);
+    expect(Object.keys(ua).sort()).toEqual(["claims", "claimsHeading", "gate", "note", "notice"]);
+    expect(ua.note).toEqual({ source: "legacy", label: null, text: c.report.unifiedAnswer });
+    expect(presentAnswerGate(r).unresolved).toHaveLength(1);
+  });
+
+  it("rendering never changes the stored record", async () => {
+    const c = await cautionSplit();
+    const r = withoutAnswer(c.report, [...(c.report.presentation!.verificationGate as any).unresolvedLoadBearing, null]);
+    const before = JSON.stringify(r);
+    page({ ...c, report: r });
+    presentAnswerGate(r);
+    expect(JSON.stringify(r)).toBe(before);
   });
 });
 
