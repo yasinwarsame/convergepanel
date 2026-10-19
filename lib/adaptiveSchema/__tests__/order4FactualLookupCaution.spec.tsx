@@ -315,6 +315,7 @@ describe("O-1: factual_lookup caution on the live page", () => {
     for (const bad of [[null], "x", [{}], [{ claim: 1, result: "r" }]]) {
       const r = JSON.parse(JSON.stringify(c.report));
       r.presentation.verificationGate.unresolvedLoadBearing = bad;
+      expect(() => page({ ...c, report: r })).not.toThrow();
       const html = page({ ...c, report: r });
       expect(html).toContain(CAUTION_NOTICE);
       expect(html).toMatch(/could not be read, so (it is|they are) not shown\./);
@@ -325,6 +326,7 @@ describe("O-1: factual_lookup caution on the live page", () => {
     const c = await cautionSplit();
     const r = JSON.parse(JSON.stringify(c.report));
     r.presentation.answer.claims = "corrupt";
+    expect(() => page({ ...c, report: r })).not.toThrow();
     const html = page({ ...c, report: r });
     expect(html).toContain(CAUTION_NOTICE);
     expect(html).toContain("Paris");
