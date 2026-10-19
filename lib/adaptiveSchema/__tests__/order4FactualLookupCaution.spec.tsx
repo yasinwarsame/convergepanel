@@ -391,6 +391,35 @@ describe("O-1: the other stored gates on the factual_lookup page", () => {
   });
 });
 
+// ─── Other schemas (the lead is the factual_lookup card's only) ──────────────────────────────────────────────
+
+describe("O-1: no other schema's page changes", () => {
+  const GENERIC_ROWS = (): AlignedClaim[] => [
+    { id: "g-1", claimText: "Rate cuts reach inflation within a year", cells: M.map((m) => ({ modelId: m as ModelId, stance: "agrees", rawStance: "asserts", confidence: "settled", excerpt: "x", origin: { kind: "claim", field: "keyClaims", fieldClass: "unclassified" } })) as any, agreementScore: 0.9, certaintyScore: 0.6, status: "majority" as any },
+  ];
+  it.each([["generic"], ["procedural"]])("%s caution page: no factual_lookup lead, the notice count stays 3 (strip + collapsed report view)", async (schemaId) => {
+    g.mockImplementation(async () => off);
+    const rows = GENERIC_ROWS();
+    const report = await buildAdaptiveSynthesisReport("Q?", schemaId as QueryType, rows, raw());
+    const gate = computeAdaptiveGate(rows, computeRunCertainty(rows, schemaId as QueryType), schemaId as QueryType);
+    expect(report.gate).toBe("caution");
+    const html = renderToStaticMarkup(
+      createElement(AdaptivePanelResponse, {
+        schema: getResultSchema(schemaId as QueryType),
+        classification: { ...CLASSIFICATION, queryType: schemaId, answerShape: getResultSchema(schemaId as QueryType).renderHint },
+        results: M.map((m) => ({ modelId: m as ModelId, schemaId, ok: true, data: {}, latencyMs: 1 }) as any),
+        alignedClaims: rows,
+        gate,
+        synthesisReport: report,
+        question: "Q?",
+        runId: "run-o1",
+      } as any)
+    );
+    expect(html).not.toContain('data-answer-part="answer-gate-lead"');
+    expect(count(html, CAUTION_NOTICE)).toBe(3);
+  });
+});
+
 // ─── Historical (D7) ────────────────────────────────────────────────────────────────────────────────────────
 
 describe("O-1: historical factual_lookup reports keep their page (D7)", () => {
