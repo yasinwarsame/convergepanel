@@ -215,6 +215,7 @@ function unrecognizedGateBlocks(report: AdaptiveSynthesisReport): TextBlock[] {
 export function presentUnifiedAnswer(report: AdaptiveSynthesisReport): UnifiedAnswerBlocks {
   const answer = report.presentation?.answer;
   const { gated, disclosure } = answerGateParts(report);
+  // Without presentation.answer the stored answer string is shown, and it carries the split disclosure itself.
   if (!answer) return { ...gated, note: legacy(report.unifiedAnswer), claimsHeading: null, claims: [] };
   return {
     ...gated,
@@ -232,9 +233,9 @@ function answerGateParts(report: AdaptiveSynthesisReport): { gated: Pick<AnswerG
   const status = shownGate(report);
   if (!status) return { gated: {}, disclosure: {} };
   const gated = { gate: gateBlock(status), notice: noticeBlock(status) };
-  // The disclosure belongs to a stored presentation.answer; a report without one renders its stored string only.
-  if (!report.presentation?.answer) return { gated, disclosure: {} };
   // F3: the stored entries are read without trusting them; a report without the Order 4 presentation stores none.
+  // m-1: read whether or not presentation.answer is stored — presentUnifiedAnswer omits the disclosure without one
+  // (its stored answer string carries it), but a page that shows its own answer has no other place to show it.
   const stored =
     status === "caution" && hasGatePresentation(report)
       ? readUnresolvedClaims((report.presentation?.verificationGate as { unresolvedLoadBearing?: unknown } | undefined)?.unresolvedLoadBearing)
