@@ -36,6 +36,7 @@ import { CLAIM_LABEL, MODEL_CAVEAT_LABEL, PANEL_RESULT_LABEL, presentVerdictCave
 import {
   AnswerClaimBlock,
   ClaimBlock,
+  AnswerGateBlocks,
   TextBlock,
   UnresolvedClaimBlock,
   answerLeadBlocks,
@@ -43,6 +44,7 @@ import {
   presentCertainty,
   presentDisagreements,
   presentExecutiveSummary,
+  presentAnswerGate,
   presentNarrativeSections,
   presentUnifiedAnswer,
 } from "@/lib/adaptiveSchema/reportPresentation";
@@ -159,28 +161,52 @@ export function UnifiedAnswerClaims({ report }: { report: AdaptiveSynthesisRepor
           ))}
         </ul>
       )}
-      {answer.unresolvedHeading && answer.unresolved && (answer.unresolved.length > 0 || answer.unresolvedUnreadable) && (
-        <div data-answer-part="unresolved-load-bearing">
-          <p data-source="computed" className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">
-            {answer.unresolvedHeading}
-          </p>
-          {answer.unresolved.length > 0 && (
-            <ul className="list-disc list-outside pl-5 space-y-1 mt-1">
-              {answer.unresolved.map((item, idx) => (
-                <li key={idx}>
-                  <UnresolvedClaim item={item} />
-                </li>
-              ))}
-            </ul>
-          )}
-          {/* F3: stored entries that could not be read are counted, never silently dropped. */}
-          {answer.unresolvedUnreadable && (
-            <p data-source="computed" className="mt-1 text-xs text-slate-600">
-              {answer.unresolvedUnreadable.text}
-            </p>
-          )}
-        </div>
+      <UnresolvedLoadBearing answer={answer} />
+    </div>
+  );
+}
+
+/** D3: a caution answer's stored load-bearing split claims, under their heading; nothing when the answer has none. */
+function UnresolvedLoadBearing({ answer }: { answer: AnswerGateBlocks }) {
+  if (!(answer.unresolvedHeading && answer.unresolved && (answer.unresolved.length > 0 || answer.unresolvedUnreadable))) return null;
+  return (
+    <div data-answer-part="unresolved-load-bearing">
+      <p data-source="computed" className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">
+        {answer.unresolvedHeading}
+      </p>
+      {answer.unresolved.length > 0 && (
+        <ul className="list-disc list-outside pl-5 space-y-1 mt-1">
+          {answer.unresolved.map((item, idx) => (
+            <li key={idx}>
+              <UnresolvedClaim item={item} />
+            </li>
+          ))}
+        </ul>
       )}
+      {/* F3: stored entries that could not be read are counted, never silently dropped. */}
+      {answer.unresolvedUnreadable && (
+        <p data-source="computed" className="mt-1 text-xs text-slate-600">
+          {answer.unresolvedUnreadable.text}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * O-1: the gate part of the Unified Answer for a page that shows its own answer instead of the Unified Answer (the
+ * factual_lookup card) — the stored gate, its notice, and on caution the load-bearing split claims (presentAnswerGate,
+ * the same blocks UnifiedAnswerClaims leads with). Nothing for a historical report with a known gate (D7).
+ */
+export function AnswerGateLead({ report }: { report: AdaptiveSynthesisReport }) {
+  const answer = presentAnswerGate(report);
+  const blocks = answerLeadBlocks(answer);
+  // The load-bearing disclosure exists only where the gate is shown, so no gate means nothing to show.
+  if (blocks.length === 0) return null;
+  return (
+    <div data-answer-part="answer-gate-lead" className="mb-2 space-y-2 text-sm leading-relaxed text-slate-900">
+      <AnswerLeadBlocks blocks={blocks} />
+      <UnresolvedLoadBearing answer={answer} />
     </div>
   );
 }

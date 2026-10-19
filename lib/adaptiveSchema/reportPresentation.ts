@@ -214,28 +214,49 @@ function unrecognizedGateBlocks(report: AdaptiveSynthesisReport): TextBlock[] {
  */
 export function presentUnifiedAnswer(report: AdaptiveSynthesisReport): UnifiedAnswerBlocks {
   const answer = report.presentation?.answer;
-  const status = shownGate(report);
-  const gated = status ? { gate: gateBlock(status), notice: noticeBlock(status) } : {};
+  const { gated, disclosure } = answerGateParts(report);
   if (!answer) return { ...gated, note: legacy(report.unifiedAnswer), claimsHeading: null, claims: [] };
-  // F3: the stored entries are read without trusting them; a report without the Order 4 presentation stores none.
-  const stored =
-    status === "caution" && hasGatePresentation(report)
-      ? readUnresolvedClaims((report.presentation?.verificationGate as { unresolvedLoadBearing?: unknown } | undefined)?.unresolvedLoadBearing)
-      : { claims: [], unreadable: null, count: 0 };
-  const unresolved = stored.claims.map(presentUnresolvedClaim);
   return {
     ...gated,
     note: answer.note ? { source: "computed", label: null, text: answer.note } : null,
     claimsHeading: report.gate === "fail" && answer.claims.length > 0 ? UNRESOLVED_CLAIMS_HEADING : null,
     claims: answer.claims.map(presentAnswerClaim),
-    ...(status
-      ? {
-          unresolvedHeading: stored.count > 0 ? unresolvedLoadBearingHeading(stored.count) : null,
-          unresolved,
-          unresolvedUnreadable: stored.unreadable,
-        }
-      : {}),
+    ...disclosure,
   };
+}
+
+/** The gate part of the Unified Answer (Order 4): the computed gate and notice, and a caution answer's load-bearing split disclosure. */
+export type AnswerGateBlocks = Pick<UnifiedAnswerBlocks, "gate" | "notice" | "unresolvedHeading" | "unresolved" | "unresolvedUnreadable">;
+
+function answerGateParts(report: AdaptiveSynthesisReport): { gated: Pick<AnswerGateBlocks, "gate" | "notice">; disclosure: Omit<AnswerGateBlocks, "gate" | "notice"> } {
+  const status = shownGate(report);
+  if (!status) return { gated: {}, disclosure: {} };
+  const gated = { gate: gateBlock(status), notice: noticeBlock(status) };
+  // The disclosure belongs to a stored presentation.answer; a report without one renders its stored string only.
+  if (!report.presentation?.answer) return { gated, disclosure: {} };
+  // F3: the stored entries are read without trusting them; a report without the Order 4 presentation stores none.
+  const stored =
+    status === "caution" && hasGatePresentation(report)
+      ? readUnresolvedClaims((report.presentation?.verificationGate as { unresolvedLoadBearing?: unknown } | undefined)?.unresolvedLoadBearing)
+      : { claims: [], unreadable: null, count: 0 };
+  return {
+    gated,
+    disclosure: {
+      unresolvedHeading: stored.count > 0 ? unresolvedLoadBearingHeading(stored.count) : null,
+      unresolved: stored.claims.map(presentUnresolvedClaim),
+      unresolvedUnreadable: stored.unreadable,
+    },
+  };
+}
+
+/**
+ * O-1: exactly the gate part presentUnifiedAnswer leads with, for a page that shows its own answer instead of the
+ * Unified Answer (the factual_lookup card). It reads no answer claims, so it adds no new way for a stored answer to
+ * fail. Empty for a report presentUnifiedAnswer would show no gate for (D7: a historical report with a known gate).
+ */
+export function presentAnswerGate(report: AdaptiveSynthesisReport): AnswerGateBlocks {
+  const { gated, disclosure } = answerGateParts(report);
+  return { ...gated, ...disclosure };
 }
 
 /**
@@ -351,7 +372,7 @@ export function unresolvedGroups(answer: UnifiedAnswerBlocks): TextBlock[][] {
 }
 
 /** The Unified Answer's computed lead — gate, then notice — as blocks; empty when the report shows neither (D7). */
-export function answerLeadBlocks(answer: UnifiedAnswerBlocks): TextBlock[] {
+export function answerLeadBlocks(answer: Pick<UnifiedAnswerBlocks, "gate" | "notice">): TextBlock[] {
   return [answer.gate, answer.notice].filter((b): b is TextBlock => !!b);
 }
 

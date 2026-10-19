@@ -15,6 +15,7 @@
  * (schemaRegistry.ts) — no new fields were added for this component.
  */
 
+import type { ReactNode } from "react";
 import { AdaptiveGateResult, AdaptiveModelResult, AlignedClaim } from "@/lib/adaptiveSchema/types";
 import { Card, SectionLabel, FailedResultsNote, ProbabilityBar, getModelLabel, splitResults } from "./shared";
 import ModelChip from "@/components/ModelChip";
@@ -29,10 +30,16 @@ export default function DirectAnswerCard({
   results,
   alignedClaims,
   gate,
+  gateLead,
 }: {
   results: AdaptiveModelResult[];
   alignedClaims?: AlignedClaim[];
   gate?: AdaptiveGateResult;
+  /**
+   * O-1: the stored verification gate and its notice, built by the caller from the report (AnswerGateLead) and shown
+   * before the answer. This card reads no gate status itself.
+   */
+  gateLead?: ReactNode;
 }) {
   const { ok, failed } = splitResults(results);
 
@@ -50,6 +57,7 @@ export default function DirectAnswerCard({
 
       <Card className="bg-sky-50/60 border-sky-200">
         <SectionLabel>Answer</SectionLabel>
+        {gateLead}
         <p className="text-base leading-relaxed text-slate-900 font-medium whitespace-pre-line">{headlineAnswer}</p>
 
         {gate && (
