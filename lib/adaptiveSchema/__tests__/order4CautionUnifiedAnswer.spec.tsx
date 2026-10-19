@@ -51,6 +51,7 @@ import PrimarySynthesisStrip from "@/components/adaptive/PrimarySynthesisStrip";
 import { ReviewGovernanceBody } from "@/components/adaptive/ReviewGovernanceSection";
 import ListView from "@/components/adaptive/ListView";
 import TopSummaryBar from "@/components/adaptive/TopSummaryBar";
+import AdaptivePanelResponse from "@/components/adaptive/AdaptivePanelResponse";
 import { buildExportSnapshot } from "@/lib/adaptiveSchema/exportSnapshot";
 import { CONSENSUS_LABELS } from "@/lib/adaptiveSchema/reportSummary";
 import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
@@ -860,6 +861,27 @@ describe("R2-1: one stored gate behind the banner, answer, top-summary consensus
     // Raw stored values are exported as stored: neither copy is rewritten.
     expect((snapshot.legacy!.gate as any).status).toEqual(objectStatus);
     expect((snapshot.legacy!.synthesisReport as any).gate).toEqual(report.gate);
+  });
+
+  it("wiring: the real panel passes its report to the summary bar, so the page's consensus badge follows the same stored gate", async () => {
+    const built = await build(SCENARIOS.find((x) => x.name === "caution-split")!, "template");
+    const consensusOn = (objectStatus: string) => {
+      const texts = renderToStaticMarkup(
+        createElement(AdaptivePanelResponse as any, {
+          schema: SCHEMA_REGISTRY.generic,
+          classification: EXPORT_CLASSIFICATION,
+          results: [],
+          alignedClaims: built.rows,
+          gate: { ...built.gate, status: objectStatus },
+          synthesisReport: built.report,
+          question: "Q?",
+        })
+      ).replace(/<[^>]+>/g, "\n").split("\n").map((t) => t.trim()).filter(Boolean);
+      return texts[texts.indexOf("Consensus") + 1];
+    };
+    expect(built.report.gate).toBe("caution");
+    expect(consensusOn("caution")).toBe("Moderate consensus");
+    expect(consensusOn("pass")).toBe("Moderate consensus"); // the stale object copy does not decide the badge
   });
 
   it("without a report, the gate object is the gate (unchanged); without a gate, nothing is scored", () => {
