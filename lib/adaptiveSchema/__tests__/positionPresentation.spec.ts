@@ -438,3 +438,45 @@ describe("presentPositionSafeReport", () => {
     expect(v.presentation!.disagree.map((d) => d.result)).toEqual([POSITION_DETAILS_UNAVAILABLE, POSITION_DETAILS_UNAVAILABLE]);
   });
 });
+
+describe("malformed and unsupported records (Phase 5 / 8)", () => {
+  it("never throws, and a malformed entry keeps its neighbours' valid joins", () => {
+    const r = markedReport();
+    r.presentation.answer.claims = [null, 7, { claim: 5 }, r.presentation.answer.claims[0]];
+    r.presentation.agree = [null, r.presentation.agree[0]];
+    r.disagreements = [null, r.disagreements[1]];
+    r.presentation.disagree = [{ nope: true }, r.presentation.disagree[1]];
+    r.presentation.verificationGate.unresolvedLoadBearing = [null, { claim: "Tariffs", result: "x" }];
+    const v = presentPositionSafeReport(r, { rows: ROWS, roster: ROSTER });
+    expect(v.presentation!.answer.claims[3].result).toBe("consensus: all 5 dispatched models support it");
+    expect(v.presentation!.answer.claims.slice(0, 3)).toEqual([null, 7, { claim: 5 }]);
+    expect(v.presentation!.agree[1].result).toBe("consensus: all 5 dispatched models support it");
+    // disagreements[1] is "Rates" at index 1, but the split rows' index 1 is "Rates" only if the entry matches: it does.
+    expect(v.presentation!.disagree[1].result).toBe("No clear supporting or disputing position is recorded; 5 unclear.");
+    expect(v.presentation!.verificationGate!.unresolvedLoadBearing[1].result).toMatch(/^1 panel slot supporting/);
+  });
+
+  it("malformed rows and cells read as unavailable or unreadable, never as a position", () => {
+    expect(rowView(null, ROSTER)).toMatchObject({ heading: "Position details unavailable", isOpposition: false });
+    expect(rowView({ cells: "x", status: "split" }, ROSTER)).toMatchObject({ heading: "Position details unavailable" });
+    expect(rowView({ cells: [{ modelId: "chatgpt", stance: "agrees", origin: { kind: "claim" } }, "junk"], status: "split" }, ROSTER).rowType).toBe("unknown");
+    const v = rowView(row("C", "consensus", [claimCell("chatgpt", "agrees"), { modelId: "claude", stance: 9, origin: { kind: "claim" } }]), ROSTER);
+    expect(v.text).toContain("1 position could not be read");
+    expect(v.slots[1].position).toBe("Unrecognized position");
+  });
+
+  it("a malformed verdict card is not restated, and nothing is joined from it", () => {
+    const r = markedReport({ verdictCard: "corrupt" });
+    const v = presentPositionSafeReport(r, { rows: ROWS, roster: ROSTER });
+    expect(v.verdictCard).toBe("corrupt");
+    expect(positionView(v)!.verdict.topHeading).toBe("Top claim");
+  });
+
+  it("contested notes are restated only from well-formed stored dimensions", () => {
+    const ok = rowView(row("C", "consensus", ROSTER.map((m) => claimCell(m, "agrees")), { contested: { marked: true, assessed: false, markedCount: 2, listedCount: 5 } }), ROSTER);
+    expect(ok.contested).toBe("2 of 5 models that listed this claim mark it contested");
+    for (const contested of [{ marked: true, markedCount: "2", listedCount: 5 }, { marked: true, markedCount: 6, listedCount: 5 }, { marked: "yes", markedCount: 1, listedCount: 1 }, null]) {
+      expect(rowView(row("C", "consensus", ROSTER.map((m) => claimCell(m, "agrees")), { contested }), ROSTER).contested).toBeNull();
+    }
+  });
+});

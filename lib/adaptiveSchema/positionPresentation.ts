@@ -556,6 +556,7 @@ export function coverageWithheldNotice(n: number): string {
 export const NO_RECORDED_OPPOSING_POSITIONS = "No recorded opposing positions.";
 export const NEUTRAL_KEY_CLAIM_STEP = "Treat the key claim as unresolved — independently verify it before relying on it.";
 export const NEUTRAL_KEY_VALUES_STEP = "Treat the key value comparison as unresolved — independently verify the values before relying on them.";
+export const NEUTRAL_TOP_RESULT_STEP = "Use this synthesis as a starting point — spot-check the top result against one primary source before acting on it.";
 
 // ─── The position-safe report view ──────────────────────────────────────────
 
@@ -593,12 +594,15 @@ function joinedResult(join: RowJoin, roster: readonly string[], provenance: Posi
 }
 
 function presentedAnswer(c: PresentedAnswerClaim, rows: readonly unknown[] | null, input: PositionSafeInput, statuses: readonly string[], nameSupporters: boolean): PresentedAnswerClaim {
+  // A malformed stored entry is kept as stored: the presenters read it without trusting it, as on historical reports.
+  if (!isPlainObject(c) || typeof c.claim !== "string") return c;
   const { view, result } = joinedResult(uniqueRowByClaim(rows, c.claim, statuses), input.roster, input.provenance);
   const supporters = nameSupporters && view && view.rowType === "claim" && view.supporters.length > 0 ? view.supporters.join(", ") : undefined;
   return { claim: c.claim, result, ...(view?.contested ? { contested: view.contested } : {}), ...(supporters ? { supporters } : {}) };
 }
 
 function presentedClaim(c: PresentedClaim, join: RowJoin, input: PositionSafeInput): PresentedClaim {
+  if (!isPlainObject(c) || typeof c.claim !== "string") return c;
   const { view, result } = joinedResult(join, input.roster, input.provenance);
   return { claim: c.claim, result, ...(view?.contested ? { contested: view.contested } : {}) };
 }
@@ -625,9 +629,9 @@ export function presentPositionSafeReport<R extends AdaptiveSynthesisReport | nu
   const disagreements = Array.isArray(src.disagreements) ? src.disagreements : [];
   const disagreementViews: (RowView | null)[] = [];
   const disagree: PresentedDisagreement[] = disagreements.map((d, i) => {
-    const join = splitRowAt(rows, i, d?.topic);
+    const join = splitRowAt(rows, i, isPlainObject(d) ? d.topic : undefined);
     const stored = storedDisagree[i];
-    const entryJoin = join.row && stored && stored.claim !== d.topic ? ({ row: null, reason: "mismatch" } as RowJoin) : join;
+    const entryJoin = join.row && (!isPlainObject(stored) || stored.claim !== d.topic) ? ({ row: null, reason: "mismatch" } as RowJoin) : join;
     const { view, result } = joinedResult(entryJoin, roster, input.provenance);
     disagreementViews.push(view);
     return { claim: typeof d?.topic === "string" ? d.topic : "", result, ...(view?.contested ? { contested: view.contested } : {}), whySource: "computed" };
@@ -693,7 +697,7 @@ export function presentPositionSafeReport<R extends AdaptiveSynthesisReport | nu
     // Model-written: withheld (the view shows the Unified Answer's claims and the computed panel statement instead).
     executiveSummary: "",
     narrativeSections: [],
-    disagreements: disagreements.map((d) => ({ ...d, whyTheyDiffer: "", positions: [] })),
+    disagreements: disagreements.map((d) => (isPlainObject(d) ? { ...d, whyTheyDiffer: "", positions: [] } : d)),
     biasAndBlindSpots: [],
     panelCoverageGaps: [],
     verdictCard,
@@ -703,6 +707,9 @@ export function presentPositionSafeReport<R extends AdaptiveSynthesisReport | nu
 }
 
 function presentVerdict(src: AdaptiveSynthesisReport, rows: readonly unknown[] | null, input: PositionSafeInput): { verdictCard: AdaptiveVerdictCard; panelVerdict: string; verdict: PositionView["verdict"] } {
+  const neutral = { topHeading: "Top claim", keyHeading: "Key unresolved claim", noKeyText: NO_RECORDED_OPPOSING_POSITIONS, topIsClaim: false };
+  // A malformed stored card: nothing is joined or restated from it, and its model-written caveat is still withheld.
+  if (!isPlainObject(src.verdictCard)) return { verdictCard: src.verdictCard, panelVerdict: src.panelVerdict, verdict: neutral };
   const card = src.verdictCard;
   const certainty = `certainty ${Math.round((typeof src.runCertainty === "number" ? src.runCertainty : 0) * 100)}%; gate: ${src.gate}.`;
   let topHeading = "Top consensus";
@@ -744,7 +751,9 @@ function presentVerdict(src: AdaptiveSynthesisReport, rows: readonly unknown[] |
   }
   const steps = (Array.isArray(card.recommendedNextSteps) ? card.recommendedNextSteps : [])
     .filter((s) => s !== VERDICT_NEXT_STEPS.caution[2])
-    .map((s) => (s === VERDICT_NEXT_STEPS.caution[0] && !keyIsOpposition ? (card.keyDisagreement ? (keyIsField ? NEUTRAL_KEY_VALUES_STEP : NEUTRAL_KEY_CLAIM_STEP) : CAUTION_NEXT_STEP_WITHOUT_DISAGREEMENT) : s));
+    .map((s) => (s === VERDICT_NEXT_STEPS.caution[0] && !keyIsOpposition ? (card.keyDisagreement ? (keyIsField ? NEUTRAL_KEY_VALUES_STEP : NEUTRAL_KEY_CLAIM_STEP) : CAUTION_NEXT_STEP_WITHOUT_DISAGREEMENT) : s))
+    // The pass step names "the top consensus claim": only a consensus or majority CLAIM row is one.
+    .map((s) => (s === VERDICT_NEXT_STEPS.pass[0] && !topIsClaim ? NEUTRAL_TOP_RESULT_STEP : s));
   const verdictCard: AdaptiveVerdictCard = { ...card, ...top, ...key, caveat: null, recommendedNextSteps: steps };
   // The contested note is restated from the joined row only; the caveat is model-written and withheld.
   if (card.topConsensus !== NO_CONSENSUS_IDENTIFIED && !top.topConsensusContested) delete verdictCard.topConsensusContested;

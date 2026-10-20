@@ -219,6 +219,9 @@ describe("finding-specific marked outputs", () => {
     expect(view).toMatch(/2 different wordings at this position among 4 panel slots/);
     expect(view).not.toMatch(/Supported by[^<]*Grok/);
     expect(out["text.markdown"]).not.toMatch(/Supported by/);
+    // The pass step names "the top consensus claim": not when the top row is a value comparison.
+    expect(view).not.toContain("spot-check the top consensus claim");
+    expect(view).toContain("spot-check the top result against one primary source");
     expect(out["text.memo"]).not.toMatch(/\bconverg(e|ed|es|ing|ence)\b|diverg/i);
     const mixed = await outputs("generic-mixed");
     expect(mixed.out["ui.synthesisView"]).toMatch(/Consensus<\/span>/);

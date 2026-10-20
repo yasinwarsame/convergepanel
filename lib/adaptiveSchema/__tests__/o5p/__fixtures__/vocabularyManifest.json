@@ -1,0 +1,1794 @@
+[
+ {
+  "file": "components/adaptive/AdaptiveExportButton.tsx",
+  "literal": "`convergepanel-export-${runId}.${format}`",
+  "count": 1,
+  "category": "brand",
+  "rule": "product name"
+ },
+ {
+  "file": "components/adaptive/AdaptiveExportHistorySection.tsx",
+  "literal": "`convergepanel-export-${runId}-v${item.reportVersion}.${item.format}`",
+  "count": 1,
+  "category": "brand",
+  "rule": "product name"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": "\"Consensus and majority rows\"",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "marked Where-agree heading"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": "\"Key disagreement\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "marked: PositionView.verdict.keyHeading"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": "\"Models share training data — strong consensus is not independent verification.\"",
+  "count": 1,
+  "category": "residual-minor",
+  "rule": "homogeneity diagnostic tooltip (computed) — residual"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": "\"No major disagreements detected.\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "marked: 'No recorded opposing positions.'"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": "\"Top consensus\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "marked: PositionView.verdict.topHeading"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": "\"Where models agree\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "marked: 'Consensus and majority rows'"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": "\"agreement-disagreement-map\"",
+  "count": 2,
+  "category": "non-user",
+  "rule": "CSS class, anchor, test id, React key or comparator flag label"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": "\"contested-note\"",
+  "count": 2,
+  "category": "non-user",
+  "rule": "CSS class, anchor, test id, React key or comparator flag label"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": "\"ml-1 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-amber-100 text-[9px] font-bold text-amber-700 cursor-help align-text-top\"",
+  "count": 1,
+  "category": "non-user",
+  "rule": "CSS class, anchor, test id, React key or comparator flag label"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": "\"unresolved-load-bearing\"",
+  "count": 1,
+  "category": "non-user",
+  "rule": "CSS class, anchor, test id, React key or comparator flag label"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": "\"where-models-agree\"",
+  "count": 2,
+  "category": "non-user",
+  "rule": "CSS class, anchor, test id, React key or comparator flag label"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": ">Agree<",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "legacy agree chips; marked: SlotPositionsList"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": ">Agreement / disagreement map<",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "marked: 'Recorded positions and value comparisons'"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": ">Disagreements<",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "marked: 'Unresolved claims and value differences'"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": ">Dispute<",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "legacy dispute chips; marked: SlotPositionsList"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": ">Majority align<",
+  "count": 1,
+  "category": "residual-minor",
+  "rule": "Trust summary column (computed trust metric, field rows included) — not a model-position statement; residual"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": ">Unresolved claims and value differences<",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "marked Disagreements section heading"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": "` · ${claim.disagreementType.replace(/_/g, \" \")}`",
+  "count": 1,
+  "category": "non-user",
+  "rule": "CSS class, anchor, test id, React key or comparator flag label"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": "`${agreeCount} of ${total} agree`",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "legacy agreement map; marked: MarkedPositionMap (rowView)"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": "`${disputeCount} dispute${disputeCount === 1 ? \"\" : \"s\"}`",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "legacy agreement map; marked: MarkedPositionMap"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": "`${pct(agreeCount)}%`",
+  "count": 1,
+  "category": "non-user",
+  "rule": "CSS class, anchor, test id, React key or comparator flag label"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": "`${pct(disputeCount)}%`",
+  "count": 1,
+  "category": "non-user",
+  "rule": "CSS class, anchor, test id, React key or comparator flag label"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": "`agree-${m}`",
+  "count": 1,
+  "category": "non-user",
+  "rule": "CSS class, anchor, test id, React key or comparator flag label"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": "`dispute-${m}`",
+  "count": 1,
+  "category": "non-user",
+  "rule": "CSS class, anchor, test id, React key or comparator flag label"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": "`disputed by ${disputes.join(\", \")}`",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "legacy load-bearing claim; marked: rowView disputers"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": "`disputed by ${view.disputers.join(\", \")}`",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "marked load-bearing claim: claim rows only, slot labels"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": "`supported by ${supports.join(\", \")}`",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "legacy load-bearing claim; marked: rowView supporters"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": "`supported by ${view.supporters.join(\", \")}`",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "marked load-bearing claim: claim rows only, slot labels"
+ },
+ {
+  "file": "components/adaptive/CausalExplanationView.tsx",
+  "literal": "\"The panel itself flagged genuine disagreement about this factor\"",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
+ },
+ {
+  "file": "components/adaptive/CausalExplanationView.tsx",
+  "literal": ">Disputed interpretations<",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
+ },
+ {
+  "file": "components/adaptive/ClaimMatrix.tsx",
+  "literal": "\"Agrees\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "legacy stance chip; marked: MarkedClaimMatrix (rowView positions)"
+ },
+ {
+  "file": "components/adaptive/ClaimMatrix.tsx",
+  "literal": "\"Disputes\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "legacy stance chip; marked: MarkedClaimMatrix"
+ },
+ {
+  "file": "components/adaptive/ClaimMatrix.tsx",
+  "literal": "\"border-b border-slate-100 align-top\"",
+  "count": 2,
+  "category": "non-user",
+  "rule": "CSS class, anchor, test id, React key or comparator flag label"
+ },
+ {
+  "file": "components/adaptive/ClaimMatrix.tsx",
+  "literal": "`camp-${i}`",
+  "count": 1,
+  "category": "non-user",
+  "rule": "CSS class, anchor, test id, React key or comparator flag label"
+ },
+ {
+  "file": "components/adaptive/ComparisonMatrixView.tsx",
+  "literal": "\"Models disagree on this value\"",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
+ },
+ {
+  "file": "components/adaptive/ComparisonMatrixView.tsx",
+  "literal": "\"Models disagree\"",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
+ },
+ {
+  "file": "components/adaptive/ComparisonMatrixView.tsx",
+  "literal": "\"The panel didn't converge on enough shared subjects and attributes for a comparison grid.\"",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
+ },
+ {
+  "file": "components/adaptive/ComparisonMatrixView.tsx",
+  "literal": "\"border-b border-slate-100 p-2 align-top\"",
+  "count": 1,
+  "category": "non-user",
+  "rule": "CSS class"
+ },
+ {
+  "file": "components/adaptive/ComparisonMatrixView.tsx",
+  "literal": "\"sticky left-0 z-10 min-w-[6rem] max-w-[9rem] whitespace-normal break-words border-b border-slate-100 bg-white p-2 align-top text-sm font-medium text-slate-700\"",
+  "count": 1,
+  "category": "non-user",
+  "rule": "CSS class"
+ },
+ {
+  "file": "components/adaptive/DecisionSupportView.tsx",
+  "literal": "\"Contributing models' own recommendations did not converge\"",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
+ },
+ {
+  "file": "components/adaptive/DecisionSupportView.tsx",
+  "literal": "\"border-b border-slate-100 p-2 align-top text-sm font-medium text-slate-700 whitespace-nowrap\"",
+  "count": 1,
+  "category": "non-user",
+  "rule": "CSS class"
+ },
+ {
+  "file": "components/adaptive/DecisionSupportView.tsx",
+  "literal": "\"border-b border-slate-100 p-2 align-top\"",
+  "count": 1,
+  "category": "non-user",
+  "rule": "CSS class"
+ },
+ {
+  "file": "components/adaptive/DeepResearchView.tsx",
+  "literal": ">Areas of disagreement<",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
+ },
+ {
+  "file": "components/adaptive/DeepResearchView.tsx",
+  "literal": ">Contested<",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
+ },
+ {
+  "file": "components/adaptive/LimitationNotice.tsx",
+  "literal": "\"A different ConvergePanel workflow handles this\"",
+  "count": 1,
+  "category": "brand",
+  "rule": "product name"
+ },
+ {
+  "file": "components/adaptive/ListView.tsx",
+  "literal": "\"Consensus claims\"",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "Pulse card; marked: consensus CLAIM rows only (field rows excluded)"
+ },
+ {
+  "file": "components/adaptive/ListView.tsx",
+  "literal": "\"Recorded opposing positions\"",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "marked Pulse card"
+ },
+ {
+  "file": "components/adaptive/ListView.tsx",
+  "literal": "\"Split claims\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "marked: 'Recorded opposing positions'"
+ },
+ {
+  "file": "components/adaptive/ListView.tsx",
+  "literal": "\"agreement-disagreement-map\"",
+  "count": 1,
+  "category": "non-user",
+  "rule": "CSS class, anchor, test id, React key or comparator flag label"
+ },
+ {
+  "file": "components/adaptive/ListView.tsx",
+  "literal": "\"ml-1 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-amber-100 text-[9px] font-bold text-amber-700 cursor-help align-text-top\"",
+  "count": 1,
+  "category": "non-user",
+  "rule": "CSS class, anchor, test id, React key or comparator flag label"
+ },
+ {
+  "file": "components/adaptive/ListView.tsx",
+  "literal": "` · ${counts.rows} scored row${counts.rows === 1 ? \"\" : \"s\"} · ${counts.opposing} with recorded opposing positions · ${counts.unresolved} unresolved · ${counts.valuesDiffer} value comparison${counts.valuesDiffer === 1 ? \"\" : \"s\"} differing`",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "marked run header counts (panelCounts)"
+ },
+ {
+  "file": "components/adaptive/ListView.tsx",
+  "literal": "`mt-1 text-2xl font-semibold ${accent === \"split\" ? \"text-orange-600\" : \"text-slate-900\"}`",
+  "count": 1,
+  "category": "non-user",
+  "rule": "CSS class, anchor, test id, React key or comparator flag label"
+ },
+ {
+  "file": "components/adaptive/PanelEvidenceSection.tsx",
+  "literal": "\"Consensus\"",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 evidence tallies (comparison_matrix, deep_research, decision_support, causal)"
+ },
+ {
+  "file": "components/adaptive/PanelEvidenceSection.tsx",
+  "literal": "\"Contested\"",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 evidence tallies (comparison_matrix, deep_research, decision_support, causal)"
+ },
+ {
+  "file": "components/adaptive/PanelEvidenceSection.tsx",
+  "literal": "\"Majority\"",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 evidence tallies (comparison_matrix, deep_research, decision_support, causal)"
+ },
+ {
+  "file": "components/adaptive/PanelEvidenceSection.tsx",
+  "literal": "\"Split\"",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 evidence tallies (comparison_matrix, deep_research, decision_support, causal)"
+ },
+ {
+  "file": "components/adaptive/PanelEvidenceSection.tsx",
+  "literal": "\"alignedClaims\"",
+  "count": 1,
+  "category": "non-user",
+  "rule": "prop key"
+ },
+ {
+  "file": "components/adaptive/PanelEvidenceSection.tsx",
+  "literal": ">Panel agreement<",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 evidence tallies (comparison_matrix, deep_research, decision_support, causal)"
+ },
+ {
+  "file": "components/adaptive/PanelEvidenceSection.tsx",
+  "literal": ">The panel did not flag any disputed interpretations of this causal account.<",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 evidence tallies (comparison_matrix, deep_research, decision_support, causal)"
+ },
+ {
+  "file": "components/adaptive/PanelEvidenceSection.tsx",
+  "literal": ">The panel did not flag any material disagreements for this research.<",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 evidence tallies (comparison_matrix, deep_research, decision_support, causal)"
+ },
+ {
+  "file": "components/adaptive/PanelEvidenceSection.tsx",
+  "literal": ">The panel&apos;s recommended actions converged — no material split.<",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 evidence tallies (comparison_matrix, deep_research, decision_support, causal)"
+ },
+ {
+  "file": "components/adaptive/PanelEvidenceSection.tsx",
+  "literal": ">Where the panel disagrees<",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 evidence tallies (comparison_matrix, deep_research, decision_support, causal)"
+ },
+ {
+  "file": "components/adaptive/PrimarySynthesisStrip.tsx",
+  "literal": "\"Models agree\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "marked: topHeading"
+ },
+ {
+  "file": "components/adaptive/PrimarySynthesisStrip.tsx",
+  "literal": "\"Models disagree\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "marked: keyHeading"
+ },
+ {
+  "file": "components/adaptive/PrimarySynthesisStrip.tsx",
+  "literal": "\"No major disagreements detected.\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "marked: noKeyText"
+ },
+ {
+  "file": "components/adaptive/ReviewGovernanceSection.tsx",
+  "literal": "\"Awaiting vote\"",
+  "count": 1,
+  "category": "governance-human-review",
+  "rule": "human reviewer panel (votes are reviewers', not models')"
+ },
+ {
+  "file": "components/adaptive/ReviewGovernanceSection.tsx",
+  "literal": "\"Reviewer panel (majority)\"",
+  "count": 1,
+  "category": "governance-human-review",
+  "rule": "human reviewer panel (votes are reviewers', not models')"
+ },
+ {
+  "file": "components/adaptive/RiskAnalysisView.tsx",
+  "literal": "\"How many models flagged this risk — a consensus/disagreement signal, not a certainty score.\"",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
+ },
+ {
+  "file": "components/adaptive/TopSummaryBar.tsx",
+  "literal": "\"Consensus\"",
+  "count": 1,
+  "category": "residual-minor",
+  "rule": "gate-derived consensus level label (R1.4 minor 6) — residual"
+ },
+ {
+  "file": "components/adaptive/shared.tsx",
+  "literal": "\"converged on this\"",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "ModelCoverageMode for Milestone-2 coverage badges"
+ },
+ {
+  "file": "lib/adaptiveSchema/agreementNarrative.ts",
+  "literal": "\"No consensus identified.\"",
+  "count": 1,
+  "category": "computed-status",
+  "rule": "stored-status wording; on marked records used only for non-split CLAIM rows, counted from validated slots"
+ },
+ {
+  "file": "lib/adaptiveSchema/agreementNarrative.ts",
+  "literal": "\"half or fewer of the dispatched models took a position — too few to count as agreement\"",
+  "count": 1,
+  "category": "computed-status",
+  "rule": "stored-status wording; on marked records used only for non-split CLAIM rows, counted from validated slots"
+ },
+ {
+  "file": "lib/adaptiveSchema/agreementNarrative.ts",
+  "literal": "`a split on ${n}`",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "panel statement; marked: renderPositionPanelStatement"
+ },
+ {
+  "file": "lib/adaptiveSchema/agreementNarrative.ts",
+  "literal": "`an unrecognised status on ${f.unrecognised} (not counted as agreement)`",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "panel statement; marked: renderPositionPanelStatement"
+ },
+ {
+  "file": "lib/adaptiveSchema/agreementNarrative.ts",
+  "literal": "`consensus on ${n}`",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "panel statement; marked: renderPositionPanelStatement"
+ },
+ {
+  "file": "lib/adaptiveSchema/agreementNarrative.ts",
+  "literal": "`consensus: ${f.supporting} of ${f.dispatched} dispatched models support it`",
+  "count": 1,
+  "category": "computed-status",
+  "rule": "stored-status wording; on marked records used only for non-split CLAIM rows, counted from validated slots"
+ },
+ {
+  "file": "lib/adaptiveSchema/agreementNarrative.ts",
+  "literal": "`consensus: all ${f.dispatched} dispatched models support it`",
+  "count": 1,
+  "category": "computed-status",
+  "rule": "stored-status wording; on marked records used only for non-split CLAIM rows, counted from validated slots"
+ },
+ {
+  "file": "lib/adaptiveSchema/agreementNarrative.ts",
+  "literal": "`limited coverage: only ${f.assessed} of ${f.dispatched} dispatched models took a position — too few to count as agreement`",
+  "count": 1,
+  "category": "computed-status",
+  "rule": "stored-status wording; on marked records used only for non-split CLAIM rows, counted from validated slots"
+ },
+ {
+  "file": "lib/adaptiveSchema/agreementNarrative.ts",
+  "literal": "`majority agreement on ${n}`",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "panel statement; marked: renderPositionPanelStatement"
+ },
+ {
+  "file": "lib/adaptiveSchema/agreementNarrative.ts",
+  "literal": "`majority: ${f.supporting} of ${f.dispatched} dispatched models support it${f.disputing > 0 ? `",
+  "count": 1,
+  "category": "computed-status",
+  "rule": "stored-status wording; on marked records used only for non-split CLAIM rows, counted from validated slots"
+ },
+ {
+  "file": "lib/adaptiveSchema/agreementNarrative.ts",
+  "literal": "`single source: only ${f.listed} of ${f.dispatched} dispatched models raised it — not panel agreement`",
+  "count": 1,
+  "category": "computed-status",
+  "rule": "stored-status wording; on marked records used only for non-split CLAIM rows, counted from validated slots"
+ },
+ {
+  "file": "lib/adaptiveSchema/agreementNarrative.ts",
+  "literal": "`split: ${f.supporting} of ${f.dispatched} dispatched models support it and ${f.disputing} ${disputeVerb(f.disputing)} it`",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "split row status wording; marked: claim kind (split rows)"
+ },
+ {
+  "file": "lib/adaptiveSchema/agreementNarrative.ts",
+  "literal": "`unrecognised status \"${f.status}\" — not presented as agreement`",
+  "count": 1,
+  "category": "computed-status",
+  "rule": "stored-status wording; on marked records used only for non-split CLAIM rows, counted from validated slots"
+ },
+ {
+  "file": "lib/adaptiveSchema/alignment.ts",
+  "literal": "'s stance toward the canonicalText: \"agrees\" (supports it as stated), \"disputes\" (opposes or contradicts it), \"partial\" (partially agrees or adds a material condition), or \"unclear\". Include a short \"excerpt\" (<=15 words) paraphrasing that group'",
+  "count": 1,
+  "category": "prompt",
+  "rule": "model prompt / schema field description (unchanged)"
+ },
+ {
+  "file": "lib/adaptiveSchema/biasBlindspotAlignment.ts",
+  "literal": "\"Unusually uniform agreement. Models may share training data, source patterns, or assumptions, so strong consensus is not independent verification.\"",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
+ },
+ {
+  "file": "lib/adaptiveSchema/classifierPrompt.ts",
+  "literal": "\"Do experts disagree on whether minimum wage raises unemployment?\"",
+  "count": 1,
+  "category": "prompt",
+  "rule": "model prompt / schema field description (unchanged)"
+ },
+ {
+  "file": "lib/adaptiveSchema/classifierPrompt.ts",
+  "literal": "\"Why do these models disagree?\"",
+  "count": 1,
+  "category": "prompt",
+  "rule": "model prompt / schema field description (unchanged)"
+ },
+ {
+  "file": "lib/adaptiveSchema/commonResponseMeta.ts",
+  "literal": "\"Panel agreement was unusually uniform, which is not independent verification.\"",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
+ },
+ {
+  "file": "lib/adaptiveSchema/commonResponseMeta.ts",
+  "literal": "\"The causal picture includes interpretations models disagree on.\"",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
+ },
+ {
+  "file": "lib/adaptiveSchema/commonResponseMeta.ts",
+  "literal": "`${r.lowConfidenceFindings.length} finding${r.lowConfidenceFindings.length === 1 ? \" is\" : \"s are\"} supported by only 1-2 models.`",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
+ },
+ {
+  "file": "lib/adaptiveSchema/commonResponseMeta.ts",
+  "literal": "`${r.lowConfidenceItems.length} item${r.lowConfidenceItems.length === 1 ? \" is\" : \"s are\"} supported by only 1-2 models.`",
+  "count": 2,
+  "category": "other-schema",
+  "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
+ },
+ {
+  "file": "lib/adaptiveSchema/config.ts",
+  "literal": "\"Don't act on this synthesis as-is — the panel did not converge on a reliable answer.\"",
+  "count": 1,
+  "category": "owner-decision-D1",
+  "rule": "fail step kept as stored (D-1 open)"
+ },
+ {
+  "file": "lib/adaptiveSchema/config.ts",
+  "literal": "\"Independently verify the unresolved claims before using any of them.\"",
+  "count": 1,
+  "category": "computed-status",
+  "rule": "fail step; accurate on marked"
+ },
+ {
+  "file": "lib/adaptiveSchema/config.ts",
+  "literal": "\"Treat the key disagreement as unresolved — don't rely on either side without independent verification.\"",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "caution step; marked: neutral unless recorded opposition"
+ },
+ {
+  "file": "lib/adaptiveSchema/config.ts",
+  "literal": "\"Use this synthesis as a starting point — spot-check the top consensus claim against one primary source before acting on it.\"",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "pass step; marked: neutral unless the top row is a claim"
+ },
+ {
+  "file": "lib/adaptiveSchema/consensusIntegrity.ts",
+  "literal": "\"the 1 model that listed this claim marks it contested\"",
+  "count": 1,
+  "category": "claim-contested-note",
+  "rule": "canonical contested note (marked: from well-formed stored dimensions only)"
+ },
+ {
+  "file": "lib/adaptiveSchema/consensusIntegrity.ts",
+  "literal": "`${markedCount} of ${listedCount} model${listedCount === 1 ? \"\" : \"s\"} that listed this claim ${markedCount === 1 ? \"marks\" : \"mark\"} it contested`",
+  "count": 1,
+  "category": "claim-contested-note",
+  "rule": "canonical contested note (marked: from well-formed stored dimensions only)"
+ },
+ {
+  "file": "lib/adaptiveSchema/consensusIntegrity.ts",
+  "literal": "`all ${listedCount} models that listed this claim mark it contested`",
+  "count": 1,
+  "category": "claim-contested-note",
+  "rule": "canonical contested note (marked: from well-formed stored dimensions only)"
+ },
+ {
+  "file": "lib/adaptiveSchema/decisionReceiptBuilder.ts",
+  "literal": "\"The panel did not converge on enough shared subjects and attributes for a comparison.\"",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
+ },
+ {
+  "file": "lib/adaptiveSchema/decisionReceiptBuilder.ts",
+  "literal": "\"The panel's own recommendations did not converge on this outcome.\"",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
+ },
+ {
+  "file": "lib/adaptiveSchema/decisionReceiptBuilder.ts",
+  "literal": "`${item.label} — supported by only ${item.coverageCount} of ${item.totalModels} models.`",
+  "count": 2,
+  "category": "other-schema",
+  "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
+ },
+ {
+  "file": "lib/adaptiveSchema/decisionReceiptBuilder.ts",
+  "literal": "`Attribute \"${a.label}\" is supported by only ${a.coverageCount} of ${a.totalModels} models.`",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
+ },
+ {
+  "file": "lib/adaptiveSchema/decisionReceiptBuilder.ts",
+  "literal": "`Disagreement: ${d.label}`",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
+ },
+ {
+  "file": "lib/adaptiveSchema/decisionReceiptBuilder.ts",
+  "literal": "`Disputed interpretation: ${d.label}`",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
+ },
+ {
+  "file": "lib/adaptiveSchema/decisionReceiptBuilder.ts",
+  "literal": "`Subject \"${s.label}\" is supported by only ${s.coverageCount} of ${s.totalModels} models.`",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
+ },
+ {
+  "file": "lib/adaptiveSchema/decisionSupportAlignment.ts",
+  "literal": "\"Models agree a specific option should be chosen but did not name one this system could confidently resolve.\"",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
+ },
+ {
+  "file": "lib/adaptiveSchema/decisionSupportAlignment.ts",
+  "literal": "`Models agree an option should be chosen but disagree on which one (${tally}).`",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
+ },
+ {
+  "file": "lib/adaptiveSchema/decisionSupportAlignment.ts",
+  "literal": "`Models disagree on the recommended action (${tally}). See caveats and risks for what would resolve this.`",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
+ },
+ {
+  "file": "lib/adaptiveSchema/decisionSupportAlignment.ts",
+  "literal": "`Panel split on which option: ${tally}.`",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
+ },
+ {
+  "file": "lib/adaptiveSchema/decisionSupportAlignment.ts",
+  "literal": "`Panel split: ${tally}.`",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
+ },
+ {
+  "file": "lib/adaptiveSchema/exportGeneratedBy.ts",
+  "literal": "\"ConvergePanel user\"",
+  "count": 1,
+  "category": "brand",
+  "rule": "product name"
+ },
+ {
+  "file": "lib/adaptiveSchema/exportPositionView.ts",
+  "literal": "\"Top claim and key unresolved claim\"",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "marked PDF/DOCX verdict heading"
+ },
+ {
+  "file": "lib/adaptiveSchema/gatePresentation.ts",
+  "literal": "\"Caution — partial convergence\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "legacy gate banner (D7)"
+ },
+ {
+  "file": "lib/adaptiveSchema/gatePresentation.ts",
+  "literal": "\"Could not verify — panel split\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "legacy gate banner (D7)"
+ },
+ {
+  "file": "lib/adaptiveSchema/gatePresentation.ts",
+  "literal": "\"Disputed by\"",
+  "count": 1,
+  "category": "computed-status",
+  "rule": "gate / load-bearing labels; marked: supporters / disputers are slot labels of claim rows"
+ },
+ {
+  "file": "lib/adaptiveSchema/gatePresentation.ts",
+  "literal": "\"Unresolved load-bearing claim\"",
+  "count": 1,
+  "category": "computed-status",
+  "rule": "gate / load-bearing labels; marked: supporters / disputers are slot labels of claim rows"
+ },
+ {
+  "file": "lib/adaptiveSchema/gatePresentation.ts",
+  "literal": "\"Unresolved load-bearing claims\"",
+  "count": 1,
+  "category": "computed-status",
+  "rule": "gate / load-bearing labels; marked: supporters / disputers are slot labels of claim rows"
+ },
+ {
+  "file": "lib/adaptiveSchema/gatePresentation.ts",
+  "literal": "\"Verified — panel converges\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "legacy gate banner (D7), reports without the Order 4 presentation"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "\"Consensus\"",
+  "count": 2,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; claim kinds for split claim rows, statuses for other claim rows"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "\"Disputes\"",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; claim kinds for split claim rows, statuses for other claim rows"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "\"Key unresolved claim\"",
+  "count": 2,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; claim kinds for split claim rows, statuses for other claim rows"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "\"Majority support\"",
+  "count": 2,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; claim kinds for split claim rows, statuses for other claim rows"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "\"No recorded opposing positions.\"",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; claim kinds for split claim rows, statuses for other claim rows"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "\"Recorded opposing positions\"",
+  "count": 2,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; claim kinds for split claim rows, statuses for other claim rows"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "\"Top consensus\"",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; claim kinds for split claim rows, statuses for other claim rows"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "\"Treat the key claim as unresolved — independently verify it before relying on it.\"",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; claim kinds for split claim rows, statuses for other claim rows"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "\"Treat the key value comparison as unresolved — independently verify the values before relying on them.\"",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; claim kinds for split claim rows, statuses for other claim rows"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "\"Unresolved claim\"",
+  "count": 3,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; claim kinds for split claim rows, statuses for other claim rows"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "\"convergepanel.positionView\"",
+  "count": 1,
+  "category": "brand",
+  "rule": "product name"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "\"disagreementPositionVersion\"",
+  "count": 1,
+  "category": "non-user",
+  "rule": "marker key"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "\"the 1 model that listed this claim marks it contested\"",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; claim kinds for split claim rows, statuses for other claim rows"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "`${dis} disputing and no supporting position recorded${amongReadable}${t}; not a split between panel slots.`",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; claim kinds for split claim rows, statuses for other claim rows"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "`${m} of ${l} model${l === 1 ? \"\" : \"s\"} that listed this claim ${m === 1 ? \"marks\" : \"mark\"} it contested`",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; claim kinds for split claim rows, statuses for other claim rows"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "`${plural(sup, \"panel slot\")} supporting or partially supporting and ${dis} disputing${conflicting ? \" (including conflicting stored positions)\" : \"\"}${t}.`",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; claim kinds for split claim rows, statuses for other claim rows"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "`${sup} supporting or partially supporting; no disputing position recorded${amongReadable}${t}; not a split between panel slots.`",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; claim kinds for split claim rows, statuses for other claim rows"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "`Conflicting stored positions within ${plural(conflicting, \"panel slot\")}; no opposition between different panel slots is recorded${t}; not a split between panel slots.`",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; claim kinds for split claim rows, statuses for other claim rows"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "`Every panel slot with a position disputes the claim (${dis}); recorded opposition to the claim, not a split between panel slots.`",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; claim kinds for split claim rows, statuses for other claim rows"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "`Flagged as ${String((join.row as Record<string, unknown>).disagreementType).replace(/_/g, \" \")}.`",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; claim kinds for split claim rows, statuses for other claim rows"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "`No clear supporting or disputing position is recorded${t}.`",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; claim kinds for split claim rows, statuses for other claim rows"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "`Partial or qualified positions only (${sup}); no disputing position recorded${amongReadable}${t}; not a split between panel slots.`",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; claim kinds for split claim rows, statuses for other claim rows"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "`all ${l} models that listed this claim mark it contested`",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; claim kinds for split claim rows, statuses for other claim rows"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "`an unrecognised status on ${claims(c.unrecognised)} (not counted as agreement)`",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; claim kinds for split claim rows, statuses for other claim rows"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "`consensus on ${claims(c.claimByStatus.consensus)}`",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; claim kinds for split claim rows, statuses for other claim rows"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "`majority support on ${claims(c.claimByStatus.majority)}`",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; claim kinds for split claim rows, statuses for other claim rows"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "`recorded opposing positions on ${claims(c.opposing)}`",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; claim kinds for split claim rows, statuses for other claim rows"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "`unrecognised status — not presented as agreement${readingTail(reading).length ? `",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; claim kinds for split claim rows, statuses for other claim rows"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "`unresolved positions on ${claims(c.unresolved)}`",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; claim kinds for split claim rows, statuses for other claim rows"
+ },
+ {
+  "file": "lib/adaptiveSchema/promptBuilder.ts",
+  "literal": "\"data-processing-agreement\"",
+  "count": 1,
+  "category": "prompt",
+  "rule": "model prompt / schema field description (unchanged)"
+ },
+ {
+  "file": "lib/adaptiveSchema/reportPresentation.ts",
+  "literal": "\"Contested\"",
+  "count": 1,
+  "category": "computed-status",
+  "rule": "block labels"
+ },
+ {
+  "file": "lib/adaptiveSchema/reportPresentation.ts",
+  "literal": "\"Supported by\"",
+  "count": 1,
+  "category": "computed-status",
+  "rule": "block labels"
+ },
+ {
+  "file": "lib/adaptiveSchema/reportPresentation.ts",
+  "literal": "\"Unresolved claims\"",
+  "count": 1,
+  "category": "computed-status",
+  "rule": "block labels"
+ },
+ {
+  "file": "lib/adaptiveSchema/reportSummary.ts",
+  "literal": "\"Consensus Analysis\"",
+  "count": 1,
+  "category": "non-user",
+  "rule": "report type label (schema name)"
+ },
+ {
+  "file": "lib/adaptiveSchema/reportSummary.ts",
+  "literal": "\"Moderate consensus\"",
+  "count": 1,
+  "category": "residual-minor",
+  "rule": "gate-derived consensus level labels (R1.4 minor 6) — residual"
+ },
+ {
+  "file": "lib/adaptiveSchema/reportSummary.ts",
+  "literal": "\"Split\"",
+  "count": 1,
+  "category": "residual-minor",
+  "rule": "gate-derived consensus level labels (R1.4 minor 6) — residual"
+ },
+ {
+  "file": "lib/adaptiveSchema/reportSummary.ts",
+  "literal": "\"Strong consensus\"",
+  "count": 1,
+  "category": "residual-minor",
+  "rule": "gate-derived consensus level labels (R1.4 minor 6) — residual"
+ },
+ {
+  "file": "lib/adaptiveSchema/reportSummary.ts",
+  "literal": "\"Weak consensus\"",
+  "count": 1,
+  "category": "residual-minor",
+  "rule": "gate-derived consensus level labels (R1.4 minor 6) — residual"
+ },
+ {
+  "file": "lib/adaptiveSchema/reviewGovernanceViewModel.ts",
+  "literal": "\"Reviewer panel (majority)\"",
+  "count": 1,
+  "category": "governance-human-review",
+  "rule": "human reviewer panel"
+ },
+ {
+  "file": "lib/adaptiveSchema/routeClassifiedQuery.ts",
+  "literal": "\"This request needs to be handled by a different ConvergePanel workflow, but the handoff target isn't configured.\"",
+  "count": 1,
+  "category": "brand",
+  "rule": "product name"
+ },
+ {
+  "file": "lib/adaptiveSchema/schemaRegistry.ts",
+  "literal": "\"Causal interpretations where genuine expert disagreement exists — state the interpretation itself, not just that disagreement exists. Empty array if the causal picture is settled.\"",
+  "count": 1,
+  "category": "prompt",
+  "rule": "model prompt / schema field description (unchanged)"
+ },
+ {
+  "file": "lib/adaptiveSchema/schemaRegistry.ts",
+  "literal": "\"Document comparison isn't available yet — there's no way to align sections across multiple documents or preserve page/clause references for the differences found.\"",
+  "count": 1,
+  "category": "prompt",
+  "rule": "model prompt / schema field description (unchanged)"
+ },
+ {
+  "file": "lib/adaptiveSchema/schemaRegistry.ts",
+  "literal": "\"Generate a short kebab-case `id` slug from the claim's core concept (e.g. \\\"demand-pull-driver\\\") so claims can be aligned across models.\"",
+  "count": 1,
+  "category": "prompt",
+  "rule": "model prompt / schema field description (unchanged)"
+ },
+ {
+  "file": "lib/adaptiveSchema/schemaRegistry.ts",
+  "literal": "\"High-level synthesis of the debate: what's being asked and why experts disagree.\"",
+  "count": 1,
+  "category": "prompt",
+  "rule": "model prompt / schema field description (unchanged)"
+ },
+ {
+  "file": "lib/adaptiveSchema/schemaRegistry.ts",
+  "literal": "\"Questions that remain unresolved even among informed experts.\"",
+  "count": 1,
+  "category": "prompt",
+  "rule": "model prompt / schema field description (unchanged)"
+ },
+ {
+  "file": "lib/adaptiveSchema/schemaRegistry.ts",
+  "literal": "\"The major research findings, each a distinct, well-formed idea — never a vague catch-all. Distinguish primary evidence, reviews, commentary, and speculation where relevant, and separate established findings from disputed ones (put genuine disagreement in `disagreements` instead).\"",
+  "count": 1,
+  "category": "prompt",
+  "rule": "model prompt / schema field description (unchanged)"
+ },
+ {
+  "file": "lib/adaptiveSchema/schemaRegistry.ts",
+  "literal": "\"What remains genuinely unknown or unresolved about the causal picture. Empty array if nothing notable is unresolved.\"",
+  "count": 1,
+  "category": "prompt",
+  "rule": "model prompt / schema field description (unchanged)"
+ },
+ {
+  "file": "lib/adaptiveSchema/schemaRegistry.ts",
+  "literal": "\"What's uncertain, unresolved, or under-explored about this answer.\"",
+  "count": 1,
+  "category": "prompt",
+  "rule": "model prompt / schema field description (unchanged)"
+ },
+ {
+  "file": "lib/adaptiveSchema/schemaRegistry.ts",
+  "literal": "\"Where the evidence or expert opinion genuinely disagrees, one sentence each stating the disagreement itself (not just that disagreement exists). Empty array if the research is largely settled.\"",
+  "count": 1,
+  "category": "prompt",
+  "rule": "model prompt / schema field description (unchanged)"
+ },
+ {
+  "file": "lib/adaptiveSchema/schemaRegistry.ts",
+  "literal": "\"disputedClaims\"",
+  "count": 2,
+  "category": "prompt",
+  "rule": "model prompt / schema field description (unchanged)"
+ },
+ {
+  "file": "lib/adaptiveSchema/schemaRegistry.ts",
+  "literal": "\"disputedInterpretations\"",
+  "count": 1,
+  "category": "prompt",
+  "rule": "model prompt / schema field description (unchanged)"
+ },
+ {
+  "file": "lib/adaptiveSchema/schemaRegistry.ts",
+  "literal": "`Claims that are well-established or hold majority expert support (confidence must be \"settled\" or \"majority_view\"). ${CLAIM_INTERFACE_NOTE}`",
+  "count": 1,
+  "category": "prompt",
+  "rule": "model prompt / schema field description (unchanged)"
+ },
+ {
+  "file": "lib/adaptiveSchema/schemaRegistry.ts",
+  "literal": "`Claims where reputable experts genuinely disagree. Each disputed claim MUST include \\`camps\\` describing the competing positions. ${CLAIM_INTERFACE_NOTE}`",
+  "count": 1,
+  "category": "prompt",
+  "rule": "model prompt / schema field description (unchanged)"
+ },
+ {
+  "file": "lib/adaptiveSchema/schemaRegistry.ts",
+  "literal": "`Points of unsettled law. In this schema, confidence \"settled\" means black-letter law, \"majority_view\" means the majority rule among jurisdictions, and \"contested\" means a circuit split or jurisdictional divergence. ${CLAIM_INTERFACE_NOTE}`",
+  "count": 1,
+  "category": "prompt",
+  "rule": "model prompt / schema field description (unchanged)"
+ },
+ {
+  "file": "lib/adaptiveSchema/shareBuilders.ts",
+  "literal": "\"## Consensus and majority rows\"",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "marked Markdown heading"
+ },
+ {
+  "file": "lib/adaptiveSchema/shareBuilders.ts",
+  "literal": "\"## Unresolved claims and value differences\"",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "marked Markdown heading"
+ },
+ {
+  "file": "lib/adaptiveSchema/shareBuilders.ts",
+  "literal": "\"## Where models agree\"",
+  "count": 2,
+  "category": "historical-path",
+  "rule": "marked: 'Consensus and majority rows'"
+ },
+ {
+  "file": "lib/adaptiveSchema/shareBuilders.ts",
+  "literal": "\"## Where models disagree\"",
+  "count": 2,
+  "category": "historical-path",
+  "rule": "marked: 'Unresolved claims and value differences'"
+ },
+ {
+  "file": "lib/adaptiveSchema/shareBuilders.ts",
+  "literal": "\"Consensus and majority rows:\"",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "marked LinkedIn heading"
+ },
+ {
+  "file": "lib/adaptiveSchema/shareBuilders.ts",
+  "literal": "\"Models split on: \"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "marked X: 'Unresolved: '"
+ },
+ {
+  "file": "lib/adaptiveSchema/shareBuilders.ts",
+  "literal": "\"Source: convergepanel.com\"",
+  "count": 2,
+  "category": "brand",
+  "rule": "product name"
+ },
+ {
+  "file": "lib/adaptiveSchema/shareBuilders.ts",
+  "literal": "\"The disagreements tell you more than any single answer.\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "omitted on marked LinkedIn"
+ },
+ {
+  "file": "lib/adaptiveSchema/shareBuilders.ts",
+  "literal": "\"Unresolved claims and value differences:\"",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "marked LinkedIn heading"
+ },
+ {
+  "file": "lib/adaptiveSchema/shareBuilders.ts",
+  "literal": "\"Unresolved: \"",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "marked X label"
+ },
+ {
+  "file": "lib/adaptiveSchema/shareBuilders.ts",
+  "literal": "\"Where models agree:\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "marked: 'Consensus and majority rows'"
+ },
+ {
+  "file": "lib/adaptiveSchema/shareBuilders.ts",
+  "literal": "\"Where models disagree:\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "marked: 'Unresolved claims and value differences'"
+ },
+ {
+  "file": "lib/adaptiveSchema/shareBuilders.ts",
+  "literal": "\"via ConvergePanel\"",
+  "count": 2,
+  "category": "brand",
+  "rule": "product name"
+ },
+ {
+  "file": "lib/adaptiveSchema/shareBuilders.ts",
+  "literal": "\"→ convergepanel.com\"",
+  "count": 1,
+  "category": "brand",
+  "rule": "product name"
+ },
+ {
+  "file": "lib/adaptiveSchema/shareBuilders.ts",
+  "literal": "`${splitLabel}${shortClaimWithResult(split, Math.max(12, Math.min(60, room)))}`",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "X line built with the marked/unmarked label"
+ },
+ {
+  "file": "lib/adaptiveSchema/shareBuilders.ts",
+  "literal": "`**Contested:** ${card.topConsensusContested}`",
+  "count": 1,
+  "category": "claim-contested-note",
+  "rule": "contested note (marked: restated from the joined claim row)"
+ },
+ {
+  "file": "lib/adaptiveSchema/shareBuilders.ts",
+  "literal": "`I researched \"${truncate(question, 120)}\" across a multi-model AI panel using ConvergePanel.`",
+  "count": 1,
+  "category": "brand",
+  "rule": "product name"
+ },
+ {
+  "file": "lib/adaptiveSchema/shareBuilders.ts",
+  "literal": "`Models split on: ${truncate(report.disagreements[0].topic, 80)}`",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "marked X: 'Unresolved: '"
+ },
+ {
+  "file": "lib/adaptiveSchema/synthesisReport.ts",
+  "literal": "\"(none — the panel had no split claims this run)\"",
+  "count": 1,
+  "category": "prompt",
+  "rule": "narrative prompt text (unchanged; no prompt change)"
+ },
+ {
+  "file": "lib/adaptiveSchema/synthesisReport.ts",
+  "literal": "\"Lead with the substance of the expert dispute: which camps exist in the literature and what each argues. The panel's own agreement is stated separately — do not describe it.\"",
+  "count": 1,
+  "category": "prompt",
+  "rule": "narrative prompt text (unchanged; no prompt change)"
+ },
+ {
+  "file": "lib/adaptiveSchema/synthesisReport.ts",
+  "literal": "\"Models take different positions on this point — see each model's excerpt below.\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "computed default whyTheyDiffer; marked: withheld (M-2)"
+ },
+ {
+  "file": "lib/adaptiveSchema/synthesisReport.ts",
+  "literal": "\"This is creative output, not a factual comparison — skip agreement/disagreement framing and briefly note stylistic differences instead.\"",
+  "count": 1,
+  "category": "prompt",
+  "rule": "narrative prompt text (unchanged; no prompt change)"
+ },
+ {
+  "file": "lib/adaptiveSchema/synthesisReport.ts",
+  "literal": "\"agreement 1.00\"",
+  "count": 1,
+  "category": "prompt",
+  "rule": "narrative prompt text (unchanged; no prompt change)"
+ },
+ {
+  "file": "lib/adaptiveSchema/synthesisReport.ts",
+  "literal": "\"disagreementStakes\"",
+  "count": 2,
+  "category": "non-user",
+  "rule": "CSS class, anchor, test id, React key or comparator flag label"
+ },
+ {
+  "file": "lib/adaptiveSchema/synthesisReport.ts",
+  "literal": "\"disagreementStakes[i]\"",
+  "count": 1,
+  "category": "non-user",
+  "rule": "CSS class, anchor, test id, React key or comparator flag label"
+ },
+ {
+  "file": "lib/adaptiveSchema/synthesisReport.ts",
+  "literal": "'s \"panel agreement (authoritative)\" text and the panel agreement statement below are final. The panel agreement statement and each agreed or disputed claim'",
+  "count": 1,
+  "category": "prompt",
+  "rule": "narrative prompt text (unchanged; no prompt change)"
+ },
+ {
+  "file": "lib/adaptiveSchema/synthesisReport.ts",
+  "literal": "`${quoteClaim(row.claimText)} — ${contested}`",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "stored whereModelsAgree line; marked never reads it"
+ },
+ {
+  "file": "lib/adaptiveSchema/synthesisReport.ts",
+  "literal": "`- \"${r.claimText}\" — status: ${r.status}, panel agreement (authoritative): \"${renderRowAgreement(rowAgreementFacts(r, dispatchedPanelSize))}\", agreement: ${r.agreementScore.toFixed(2)}, certainty: ${r.certaintyScore.toFixed(2)}${r.disagreementType ? `",
+  "count": 1,
+  "category": "prompt",
+  "rule": "narrative prompt text (unchanged; no prompt change)"
+ },
+ {
+  "file": "lib/adaptiveSchema/synthesisReport.ts",
+  "literal": "`[\"exactly ${disagreementTopics.length} entries, same order as the topics above\"]`",
+  "count": 1,
+  "category": "prompt",
+  "rule": "narrative prompt text (unchanged; no prompt change)"
+ },
+ {
+  "file": "lib/adaptiveSchema/synthesisReport.ts",
+  "literal": "`[\"exactly ${disagreementTopics.length} entries: low|important|decision-critical, same order as the topics above\"]`",
+  "count": 1,
+  "category": "prompt",
+  "rule": "narrative prompt text (unchanged; no prompt change)"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdict.ts",
+  "literal": "\"No consensus or majority claims were identified across the panel.\"",
+  "count": 1,
+  "category": "computed-status",
+  "rule": "stored Unified Answer note from statuses; accurate on marked"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdict.ts",
+  "literal": "\"Panel could not converge on a reliable answer.\"",
+  "count": 1,
+  "category": "owner-decision-D1",
+  "rule": "stored fail note, kept as stored (D-1 open)"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdict.ts",
+  "literal": "`${base} ${limitedCount} claim${limitedCount === 1 ? \" had\" : \"s had\"} positions from half or fewer of the dispatched models — too few to count as agreement.`",
+  "count": 1,
+  "category": "computed-status",
+  "rule": "stored Unified Answer note from statuses"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdict.ts",
+  "literal": "`${convergingModelCount}/${totalModelCount} models converge on ${quoteClaim(coreFinding)}; certainty ${certaintyPct}%; gate: ${gate.status}.`",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "stored panelVerdict; marked: restated for field / unjoined top rows, shown only without topConsensusAgreement"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdict.ts",
+  "literal": "`${quoteClaim(row.claimText)} (${names}; ${contested}).`",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "stored unifiedAnswer string; marked renders presentation.answer"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictCard.ts",
+  "literal": "\"Models take different positions — see the disagreement card below for each model's stance.\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "stored disagreementDetail; marked: null"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictCard.ts",
+  "literal": "`Flagged as ${split.disagreementType.replace(/_/g, \" \")}.`",
+  "count": 1,
+  "category": "computed-status",
+  "rule": "comparator flag (disagreementType); kept on marked"
+ },
+ {
+  "file": "lib/docx/AdaptiveResearchDocxDocument.ts",
+  "literal": "\"Agreement\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "marked: topHeading"
+ },
+ {
+  "file": "lib/docx/AdaptiveResearchDocxDocument.ts",
+  "literal": "\"Consensus reflects panel agreement, not factual correctness. Source grounding reflects citation coverage, not evidence strength.\"",
+  "count": 1,
+  "category": "residual-minor",
+  "rule": "gate-derived consensus disclaimer — residual"
+ },
+ {
+  "file": "lib/docx/AdaptiveResearchDocxDocument.ts",
+  "literal": "\"Consensus\"",
+  "count": 1,
+  "category": "residual-minor",
+  "rule": "gate-derived consensus level label (R1.4 minor 6) — residual"
+ },
+ {
+  "file": "lib/docx/AdaptiveResearchDocxDocument.ts",
+  "literal": "\"ConvergePanel — Adaptive Research Export\"",
+  "count": 1,
+  "category": "brand",
+  "rule": "product name"
+ },
+ {
+  "file": "lib/docx/AdaptiveResearchDocxDocument.ts",
+  "literal": "\"ConvergePanel\"",
+  "count": 2,
+  "category": "brand",
+  "rule": "product name"
+ },
+ {
+  "file": "lib/docx/AdaptiveResearchDocxDocument.ts",
+  "literal": "\"Disagreement\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "marked: keyHeading"
+ },
+ {
+  "file": "lib/docx/AdaptiveResearchDocxDocument.ts",
+  "literal": "\"Generated with ConvergePanel. This document reflects a frozen snapshot of the report at the export timestamp above — later changes to the live run are not reflected here.\"",
+  "count": 1,
+  "category": "brand",
+  "rule": "product name"
+ },
+ {
+  "file": "lib/docx/AdaptiveResearchDocxDocument.ts",
+  "literal": "\"This schema does not produce a single synthesized panel conclusion — each model's own output below is the complete result. No consensus/disagreement scoring applies.\"",
+  "count": 1,
+  "category": "computed-status",
+  "rule": "creative/no-row schema note"
+ },
+ {
+  "file": "lib/docx/AdaptiveResearchDocxDocument.ts",
+  "literal": "\"Where models agree / disagree\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "marked: 'Top claim and key unresolved claim'"
+ },
+ {
+  "file": "lib/docx/AdaptiveResearchDocxDocument.ts",
+  "literal": "`${record.reportSnapshot.reportTypeLabel} — ConvergePanel Export`",
+  "count": 1,
+  "category": "brand",
+  "rule": "product name"
+ },
+ {
+  "file": "lib/docx/AdaptiveResearchDocxDocument.ts",
+  "literal": "`Contested: ${card.topConsensusContested}`",
+  "count": 1,
+  "category": "claim-contested-note",
+  "rule": "contested note"
+ },
+ {
+  "file": "lib/pdf/AdaptiveResearchDocument.tsx",
+  "literal": "\"Agreement\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "marked: topHeading"
+ },
+ {
+  "file": "lib/pdf/AdaptiveResearchDocument.tsx",
+  "literal": "\"Contested\"",
+  "count": 1,
+  "category": "claim-contested-note",
+  "rule": "contested note label"
+ },
+ {
+  "file": "lib/pdf/AdaptiveResearchDocument.tsx",
+  "literal": "\"ConvergePanel\"",
+  "count": 1,
+  "category": "brand",
+  "rule": "product name"
+ },
+ {
+  "file": "lib/pdf/AdaptiveResearchDocument.tsx",
+  "literal": "\"Disagreement\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "marked: keyHeading"
+ },
+ {
+  "file": "lib/pdf/AdaptiveResearchDocument.tsx",
+  "literal": "\"Where models agree / disagree\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "marked: 'Top claim and key unresolved claim'"
+ },
+ {
+  "file": "lib/pdf/AdaptiveResearchDocument.tsx",
+  "literal": ">Consensus<",
+  "count": 1,
+  "category": "residual-minor",
+  "rule": "gate-derived consensus level label (R1.4 minor 6) — residual"
+ },
+ {
+  "file": "lib/pdf/AdaptiveResearchDocument.tsx",
+  "literal": ">ConvergePanel — Adaptive Research Export<",
+  "count": 1,
+  "category": "brand",
+  "rule": "product name"
+ },
+ {
+  "file": "lib/pdf/AdaptiveResearchDocument.tsx",
+  "literal": ">ConvergePanel<",
+  "count": 1,
+  "category": "brand",
+  "rule": "product name"
+ },
+ {
+  "file": "lib/pdf/AdaptiveResearchDocument.tsx",
+  "literal": "`${record.reportSnapshot.reportTypeLabel} — ConvergePanel Export`",
+  "count": 1,
+  "category": "brand",
+  "rule": "product name"
+ },
+ {
+  "file": "lib/pdf/AdaptiveResearchDocument.tsx",
+  "literal": "`Contested: ${verdictCard.topConsensusContested}`",
+  "count": 1,
+  "category": "claim-contested-note",
+  "rule": "contested note"
+ },
+ {
+  "file": "lib/pdf/layoutIntegrity.ts",
+  "literal": "\"Agreement\"",
+  "count": 1,
+  "category": "non-user",
+  "rule": "PDF layout checker sub-label list"
+ },
+ {
+  "file": "lib/pdf/layoutIntegrity.ts",
+  "literal": "\"ConvergePanel — Adaptive Research Export\"",
+  "count": 1,
+  "category": "brand",
+  "rule": "product name"
+ },
+ {
+  "file": "lib/pdf/layoutIntegrity.ts",
+  "literal": "\"Disagreement\"",
+  "count": 1,
+  "category": "non-user",
+  "rule": "PDF layout checker sub-label list"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"CONSENSUS AND MAJORITY ROWS\"",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "adaptive-only memo path (validated boundary)"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"ConvergePanel Multi-Model Claim Verification\"",
+  "count": 1,
+  "category": "brand",
+  "rule": "product name"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"ConvergePanel Multi-Model Research Report\"",
+  "count": 2,
+  "category": "brand",
+  "rule": "product name"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"ConvergePanel Video Authenticity Review\"",
+  "count": 1,
+  "category": "brand",
+  "rule": "product name"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"Models converged on several themes with comparatively strong evidentiary support.\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "research memo original path; marked: adaptive-only path"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"Models could not verify the claim with sufficient independent evidence or agreement.\"",
+  "count": 1,
+  "category": "shared-claim-video",
+  "rule": "claim memo (unchanged; byte-pinned)"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"Models diverged on important aspects of this claim; treat conclusions as contested.\"",
+  "count": 1,
+  "category": "shared-claim-video",
+  "rule": "claim memo (unchanged; byte-pinned)"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"Models produced overlapping and diverging themes; use findings as a starting point for review.\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "research memo original path"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"Models showed meaningful convergence on major themes in this research pass.\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "research memo original path"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"Source: convergepanel.com\"",
+  "count": 4,
+  "category": "brand",
+  "rule": "product name"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"The models largely supported the claim, with meaningful alignment on the core statement.\"",
+  "count": 1,
+  "category": "shared-claim-video",
+  "rule": "claim memo (unchanged; byte-pinned)"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"Themes are contested or thinly evidenced; further reporting and sourcing are advised.\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "research memo original path"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"UNRESOLVED CLAIMS AND VALUE DIFFERENCES\"",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "adaptive-only memo path (validated boundary)"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"WHERE MODELS AGREE\"",
+  "count": 3,
+  "category": "historical-or-shared",
+  "rule": "claim / video / original research memos"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"WHERE MODELS DISAGREE\"",
+  "count": 3,
+  "category": "historical-or-shared",
+  "rule": "claim / video / original research memos"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"disagreementPositionVersion\"",
+  "count": 1,
+  "category": "non-user",
+  "rule": "boundary key"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "`${frames || \"Multiple\"} frames were extracted at regular intervals from the uploaded video and sent to ${n} vision-capable AI model${n === 1 ? \"\" : \"s\"}${namesPhrase} via ConvergePanel. Each model independently analyzed frames for signs of AI generation, deepfake artifacts, and manipulation indicators. Models were not shown each other's responses. Video metadata was extracted from the file container and included in the analysis.`",
+  "count": 1,
+  "category": "brand",
+  "rule": "product name"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "`CONSENSUS SCORE: ${input.consensusScore}/100 (${input.confidenceLabel} confidence)`",
+  "count": 3,
+  "category": "historical-or-shared",
+  "rule": "claim / video / original research memos; marked: 'RUN CERTAINTY'"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "`This claim was independently evaluated by ${nn} large language model${nn === 1 ? \"\" : \"s\"}${namesPhrase} via ConvergePanel. Each model received the claim with identical instructions to evaluate accuracy, identify correct and incorrect parts, and provide evidence. Models were not shown each other's responses. The consensus score reflects the degree of agreement across models weighted by evidence quality.`",
+  "count": 1,
+  "category": "shared-claim-video",
+  "rule": "claim memo methodology"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "`This question was independently researched by ${n} large language model${n === 1 ? \"\" : \"s\"} via ConvergePanel. Each model received identical instructions. Models were not shown each other's responses. Results were synthesized to identify areas of agreement and disagreement. The consensus score reflects the degree of convergence across models weighted by evidence quality and source backing.`",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "research memo original methodology"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "`This question was researched by ${n} panel slot${n === 1 ? \"\" : \"s\"} via ConvergePanel. Each slot received identical instructions and was not shown the others' responses. Each slot's recorded position on a claim is shown as recorded; comparisons of stated values are computed. The run certainty is computed from the scored rows and does not by itself establish factual accuracy.`",
+  "count": 1,
+  "category": "brand",
+  "rule": "product name"
+ }
+]
