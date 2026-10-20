@@ -20,6 +20,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { callGemini } from "@/lib/connectors/gemini";
 import { finalizeAdaptiveRun } from "@/lib/adaptiveSchema/orchestrate";
+import { buildAdaptiveSynthesisReport } from "@/lib/adaptiveSchema/synthesisReport";
 import { getResultSchema } from "@/lib/adaptiveSchema/schemaRegistry";
 import { AdaptiveRetryUsageSink } from "@/lib/adaptiveSchema/retryCorrection";
 import { CLASSIFICATION_BASE, DEFAULT_MODE, MockMode, SCENARIOS, SEEDED_SCHEMAS, SEEDS, geminiMockImpl, seededResults } from "./o5pScenarios";
@@ -97,5 +98,19 @@ describe("Contract P builder purity vs the 2c17feee pipeline", () => {
     expect(sha(canon(out.connectorCalls))).toBe(b.connectorCalls);
     expect(out.inputMutated).toBe(false);
     expect(b.inputMutated).toBe(false);
+  });
+});
+
+describe("marker eligibility at the real builder placement", () => {
+  it("a report built over zero rows is not marked; over one row it is, with every other presentation field unchanged", async () => {
+    gem.mockReset();
+    gem.mockImplementation(geminiMockImpl(DEFAULT_MODE));
+    const results = [{ modelId: "chatgpt", status: "ok", rawText: "{}", latencyMs: 1 }, { modelId: "claude", status: "ok", rawText: "{}", latencyMs: 1 }] as any[];
+    const empty = await buildAdaptiveSynthesisReport("Q?", "generic", [], results);
+    expect(empty.presentation).toBeDefined();
+    expect(MARKER in (empty.presentation as object)).toBe(false);
+    const row = { id: "r", claimText: "C", cells: [{ modelId: "chatgpt", stance: "agrees", rawStance: "asserts", confidence: "settled", origin: { kind: "claim", field: null, fieldClass: "unclassified" }, excerpt: "e" }, null], agreementScore: 1, certaintyScore: 1, status: "single_source" } as any;
+    const one = await buildAdaptiveSynthesisReport("Q?", "generic", [row], results);
+    expect((one.presentation as any)[MARKER]).toBe(1);
   });
 });
