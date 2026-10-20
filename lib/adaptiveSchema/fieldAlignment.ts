@@ -34,6 +34,7 @@ import {
   SCENARIO_DISPUTE_MULTIPLIER,
   SCENARIO_PROBABILITY_TOLERANCE,
 } from "./config";
+import { normalizeForComparison } from "./comparisonNormalization";
 
 export function normalizeLabel(label: string): string {
   return label.trim().toLowerCase().replace(/\s+/g, " ");
@@ -245,10 +246,6 @@ export function alignSteps(
 // ─── scalar string fields (factual_lookup's answer, legal's jurisdiction) ─
 
 export type ScalarComparisonMode = "exact_normalized" | "hard_key";
-
-function normalizeForComparison(value: string): string {
-  return value.trim().toLowerCase().replace(/[.,;:!?'"]/g, "").replace(/\s+/g, " ");
-}
 
 /**
  * Aligns a single scalar string field (not an array) into ONE AlignedClaim

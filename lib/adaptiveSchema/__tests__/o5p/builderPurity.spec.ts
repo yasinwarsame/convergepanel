@@ -84,8 +84,14 @@ describe("Contract P builder purity vs the 2c17feee pipeline", () => {
     const c = CASES.find((x) => x.name === name)!;
     const b = baseline[name];
     const out = await run(c.schemaId, c.input(), c.mode, c.retry);
-    const { value } = comparable(out.res);
+    const { value, markers } = comparable(out.res);
     expect(sha(canon(value))).toBe(b.result);
+    // The marker is the number 1, on the live report and its persisted copy, exactly when the builder produced a
+    // presentation over at least one row; nowhere else.
+    const eligible = !!out.res.synthesisReport?.presentation && (out.res.alignedClaims?.length ?? 0) > 0;
+    const copies = [out.res.synthesisReport, out.res.persistedLegacyOutput?.synthesisReport].filter(Boolean).length;
+    expect(markers).toEqual(eligible ? Array(copies).fill(1) : []);
+    expect(JSON.stringify(value)).not.toContain(MARKER);
     expect(out.geminiCalls.length).toBe(b.geminiCallCount);
     expect(sha(canon(out.geminiCalls))).toBe(b.geminiCalls);
     expect(sha(canon(out.connectorCalls))).toBe(b.connectorCalls);
