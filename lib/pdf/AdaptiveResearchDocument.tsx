@@ -41,6 +41,7 @@ import {
   governanceStatusDisplay,
 } from "@/lib/adaptiveSchema/exportContentDerivation";
 import { COLORS, badgeStyle, pdfStyles } from "./theme";
+import { MARKED_VERDICT_SECTION_HEADING, exportPositionSafeReport } from "@/lib/adaptiveSchema/exportPositionView";
 
 /**
  * A bulleted list. Each row is mark + text side by side. The text paginates
@@ -599,7 +600,10 @@ function FieldValuePdf({ field, value, closing = 0 }: { field: FieldSpec; value:
  */
 function VerdictCardBody({
   verdictCard,
+  headings,
 }: {
+  /** Order 5 (Contract P): a marked report's sub-labels, from its rows; absent → "Agreement" / "Disagreement" as before. */
+  headings?: { top: string; key: string };
   verdictCard: {
     topConsensus: string;
     topConsensusContested?: string;
@@ -642,11 +646,11 @@ function VerdictCardBody({
   const end = <T extends object>(which: string, style: T) => textProps(style, which === last ? CARD_CLOSING_PADDING : 0);
   return (
     <>
-      <Text style={pdfStyles.subLabel}>Agreement</Text>
+      <Text style={pdfStyles.subLabel}>{headings ? headings.top : "Agreement"}</Text>
       <Text {...end("consensus", pdfStyles.bodyText)}>{agreementText}</Text>
       {showDisagreement && (
         <Text style={pdfStyles.subLabelAfterContent} wrap={false} minPresenceAhead={SUB_LABEL_PRESENCE_AHEAD}>
-          Disagreement
+          {headings ? headings.key : "Disagreement"}
         </Text>
       )}
       {showDisagreement && <Text {...end("disagreement", pdfStyles.bodyText)}>{disagreementText}</Text>}
@@ -715,7 +719,8 @@ function legacyConclusionText(synthesis: AdaptiveSynthesisReport): React.ReactNo
 function LegacyContent({ record }: { record: AdaptiveResearchExportV1 }) {
   const legacy = record.reportSnapshot.legacy!;
   const schema = SCHEMA_REGISTRY[legacy.schemaId];
-  const synthesis = legacy.synthesisReport;
+  // Order 5 (Contract P): a marked report is composed from its position-safe view; unmarked reports are unchanged.
+  const { report: synthesis, view: positions } = exportPositionSafeReport(record);
 
   const shownFields = (r: { data?: Record<string, unknown> | null } | undefined) => schema.fields.filter((field) => r?.data?.[field.key] != null);
   const firstShownField = (r: { data?: Record<string, unknown> | null } | undefined) => shownFields(r)[0];
@@ -736,9 +741,15 @@ function LegacyContent({ record }: { record: AdaptiveResearchExportV1 }) {
               <Text {...textProps(pdfStyles.bodyText, CARD_CLOSING_PADDING)}>{legacyConclusionText(synthesis)}</Text>
             </SectionCard>
           )}
-          <SectionCard label="Where models agree / disagree">
-            <VerdictCardBody verdictCard={synthesis.verdictCard} />
-          </SectionCard>
+          {positions ? (
+            <SectionCard label={MARKED_VERDICT_SECTION_HEADING}>
+              <VerdictCardBody verdictCard={synthesis.verdictCard} headings={{ top: positions.verdict.topHeading, key: positions.verdict.keyHeading }} />
+            </SectionCard>
+          ) : (
+            <SectionCard label="Where models agree / disagree">
+              <VerdictCardBody verdictCard={synthesis.verdictCard} />
+            </SectionCard>
+          )}
         </View>
       ) : (
         <SectionCard label="Panel conclusion" bounded>

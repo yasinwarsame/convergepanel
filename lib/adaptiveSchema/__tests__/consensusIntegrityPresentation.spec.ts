@@ -38,6 +38,7 @@ import { extractPdfElementText } from "@/lib/pdf/__tests__/testUtils";
 import { pdfLayoutFixtures } from "@/lib/pdf/__fixtures__/layoutFixtures";
 import { AdaptiveSynthesisReport, AlignedClaim, AlignedClaimCell } from "@/lib/adaptiveSchema/types";
 import { ModelId, ModelResult } from "@/lib/types";
+import { historicalBuild, historicalFinalize } from "./historicalPresentationHelpers";
 
 const g = callGemini as jest.MockedFunction<typeof callGemini>;
 const M = ["chatgpt", "claude", "grok", "perplexity", "gemini"];
@@ -141,7 +142,7 @@ describe("R5-1/R5-2: a 4/5 majority with a 5/5 claim and contradictory prose (re
       return off;
     });
     const rs = [A, A, A, A, C].map((c, i) => ({ modelId: M[i] as ModelId, status: "ok", rawText: resp(c), latencyMs: 5 }));
-    const out = await finalizeAdaptiveRun(SCHEMA_REGISTRY.contested_empirical, rs as any, "Q");
+    const out = await historicalFinalize(SCHEMA_REGISTRY.contested_empirical, rs as any, "Q");
     return { report: out.synthesisReport!, rows: out.alignedClaims! };
   }
 
@@ -209,7 +210,7 @@ describe("R5-1: the disagreement side and the share builders use the same bounda
   async function build() {
     mockNarrative({ executiveSummary: "Tariff pass-through varies.", whyModelsDisagree: [DENIAL], disagreementStakes: ["important"] });
     const rows = [row(SPLIT_CLAIM, "split", ["agrees", "agrees", "disputes", "disputes", "disputes"])];
-    return { report: await buildAdaptiveSynthesisReport("Q?", "generic", rows, results()), rows };
+    return { report: await historicalBuild("Q?", "generic", rows, results()), rows };
   }
 
   it("view: the disagreement heading is the quoted claim with its computed split; the explanation is labelled model-written", async () => {
@@ -246,7 +247,7 @@ describe("R5-1: the disagreement side and the share builders use the same bounda
   it("X keeps the computed result even with a long question and claim", async () => {
     mockNarrative(null);
     const long = "Tariffs on intermediate goods raise downstream consumer prices by more than the tariff rate in every sector studied";
-    const report = await buildAdaptiveSynthesisReport("Q?".repeat(60), "generic", [row(long, "split", ["agrees", "agrees", "disputes", "disputes", "disputes"])], results());
+    const report = await historicalBuild("Q?".repeat(60), "generic", [row(long, "split", ["agrees", "agrees", "disputes", "disputes", "disputes"])], results());
     const x = buildAdaptiveXPost("A very long question ".repeat(10), report);
     expect(x).toContain("panel result: split: 2 of 5 dispatched models support it and 3 dispute it");
   });
@@ -258,7 +259,7 @@ describe("R5-2: narrative sections on new reports are labelled model-written exp
   it("view and presenter label each section body", async () => {
     mockNarrative({ executiveSummary: "Rates matter.", narrativeSections: [{ title: "Evidence", body: "Trials are small. Nobody disputes the lag." }] });
     const rows = [row("Rates fall within a year", "majority", ["agrees", "agrees", "agrees", "disputes", null])];
-    const report = await buildAdaptiveSynthesisReport("Q?", "generic", rows, results());
+    const report = await historicalBuild("Q?", "generic", rows, results());
     expect(report.narrativeSections).toEqual([{ title: "Evidence", body: "Trials are small. Nobody disputes the lag." }]);
     const html = viewHtml(report, rows);
     expect(sourcesOf(html, "Nobody disputes the lag.")).toEqual(["model_explanation"]);
@@ -278,7 +279,7 @@ describe("R5-1: every status keeps its own computed result; claim text never con
         contested: { marked: true, assessed: false, markedCount: 5, listedCount: 5 },
       }),
     ];
-    const report = await buildAdaptiveSynthesisReport("Q?", "generic", rows, results());
+    const report = await historicalBuild("Q?", "generic", rows, results());
     expect(presentAgreeItems(report).map((a) => [a.claim.text, a.result?.text, a.contested?.text ?? null])).toEqual([
       [quoteClaim("Wages lag prices by a year"), "consensus: all 5 dispatched models support it", null],
       [quoteClaim("Rate cuts reach inflation in a year"), "majority: 3 of 5 dispatched models support it, 1 disputes it", null],
@@ -312,7 +313,7 @@ describe("R5-4: claim text with quotes is quoted safely on every format; the sto
   it("raw claim data, JSON, HTML, Markdown, DOCX and PDF: stored verbatim; displayed once-escaped and quoted", async () => {
     mockNarrative(null);
     const rows = [row(RAW, "majority", ["agrees", "agrees", "agrees", "agrees", "disputes"])];
-    const report = await buildAdaptiveSynthesisReport("Q?", "generic", rows, results());
+    const report = await historicalBuild("Q?", "generic", rows, results());
     expect(report.presentation!.agree[0].claim).toBe(RAW);
     expect(report.verdictCard.topConsensus).toBe(RAW);
     expect(JSON.parse(JSON.stringify(report)).presentation.agree[0].claim).toBe(RAW);
@@ -353,7 +354,7 @@ describe("R5-3: naming a roster model keeps the narrative, its sentences and its
       executiveSummary: `Rates fall within a year.\n\n${name} weighs the trial evidence.\r\n- First point.\r\n- Second point.\n\nThe lag is uncertain.`,
       narrativeSections: [{ title: "Evidence", body: `One.\n\n${name} cites more trials. Two.` }],
     });
-    const report = await buildAdaptiveSynthesisReport("Q?", "generic", rows(), results());
+    const report = await historicalBuild("Q?", "generic", rows(), results());
     expect(narrativeCalls).toBe(1);
     expect(report.executiveSummary).toBe(`Rates fall within a year.\n\n${name} weighs the trial evidence.\r\n- First point.\r\n- Second point.\n\nThe lag is uncertain.`);
     expect(report.narrativeSections).toEqual([{ title: "Evidence", body: `One.\n\n${name} cites more trials. Two.` }]);
@@ -361,7 +362,7 @@ describe("R5-3: naming a roster model keeps the narrative, its sentences and its
 
   it("sanitize never joins lines, even before punctuation", async () => {
     mockNarrative({ executiveSummary: "Gemini 3 Pro says rates fall.\n\nRates fall\n, as the data show." });
-    const report = await buildAdaptiveSynthesisReport("Q?", "generic", rows(), results());
+    const report = await historicalBuild("Q?", "generic", rows(), results());
     expect(narrativeCalls).toBe(2);
     expect(report.executiveSummary).toBe("Rates fall\n, as the data show.");
   });
@@ -370,7 +371,7 @@ describe("R5-3: naming a roster model keeps the narrative, its sentences and its
     mockNarrative({
       executiveSummary: "Rates fall within a year.\n\nGemini 3 Pro weighs the trial evidence.\n- First point.\n- Second   point.\n\nThe lag is uncertain.",
     });
-    const report = await buildAdaptiveSynthesisReport("Q?", "generic", rows(), results());
+    const report = await historicalBuild("Q?", "generic", rows(), results());
     expect(narrativeCalls).toBe(2);
     expect(report.executiveSummary).toBe("Rates fall within a year.\n\n- First point.\n- Second point.\n\nThe lag is uncertain.");
     expect(report.executiveSummary).not.toContain("Gemini 3 Pro");

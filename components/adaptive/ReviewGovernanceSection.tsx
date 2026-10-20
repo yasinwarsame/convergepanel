@@ -53,6 +53,8 @@ import { decidedViaLabel, ReviewGovernanceReviewerView, ReviewGovernanceViewMode
 import { AdaptiveGateResult, AdaptiveSynthesisReport } from "@/lib/adaptiveSchema/types";
 import { Card, SectionLabel } from "./shared";
 import AdaptiveSynthesisReportView, { GateBanner, PanelVerdictCard } from "./AdaptiveSynthesisReportView";
+import { presentPositionSafeReport } from "@/lib/adaptiveSchema/positionPresentation";
+import { PositionPresentationBoundary } from "./PositionPresentationContext";
 
 const TERMINAL_STATUS_KINDS = new Set(["approved", "approved_with_conditions", "changes_requested", "rejected"]);
 
@@ -452,7 +454,7 @@ export function ReviewGovernanceBody({
   persistenceStatus,
   runId,
   gate,
-  synthesisReport,
+  synthesisReport: storedReport,
   trustSummary,
   alignedClaims,
   modelsUsed,
@@ -463,6 +465,8 @@ export function ReviewGovernanceBody({
   detail,
   historyScope,
 }: ReviewGovernanceBodyProps) {
+  // Order 5 (Contract P): normally already the position-safe view (AdaptivePanelResponse); unmarked reports are unchanged.
+  const synthesisReport = presentPositionSafeReport(storedReport, { rows: alignedClaims, roster: modelsUsed ?? [] });
   const status = deriveReportStatus({ humanReview, reviewRouting, persistenceStatus });
   const canonicalTerminal = TERMINAL_STATUS_KINDS.has(status.kind);
   const isIncomplete = persistenceStatus === "failed" || persistenceStatus === "omitted_size_limit";
@@ -470,6 +474,7 @@ export function ReviewGovernanceBody({
   const summaryLabel = collapsedSummaryLabel({ loading, unavailable, detail, humanReview, reviewRouting, persistenceStatus });
 
   return (
+    <PositionPresentationBoundary report={synthesisReport} roster={modelsUsed ?? []}>
     <details className="rounded-xl border border-slate-200 bg-white px-4 py-3">
       <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-slate-500">{summaryLabel}</summary>
       <div className="mt-3 space-y-3">
@@ -533,6 +538,7 @@ export function ReviewGovernanceBody({
         )}
       </div>
     </details>
+    </PositionPresentationBoundary>
   );
 }
 

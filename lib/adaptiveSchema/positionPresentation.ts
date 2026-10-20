@@ -29,6 +29,7 @@ import { ALIGNED_CLAIM_STATUSES } from "./types";
 import { NO_CONSENSUS_IDENTIFIED, LIMITED_COVERAGE_REASON, ROW_AGREEMENT_WORDING } from "./agreementNarrative";
 import { normalizeForComparison } from "./comparisonNormalization";
 import { CAUTION_NEXT_STEP_WITHOUT_DISAGREEMENT, VERDICT_NEXT_STEPS } from "./config";
+import { singleLineText } from "./textSerialization";
 import { providerDisplayName, runModelFamilyName, type RunModelProvenanceFacts } from "@/lib/panel/runModelIdentity";
 
 // ─── Marker ─────────────────────────────────────────────────────────────────
@@ -127,7 +128,8 @@ export function readSlots(cells: unknown, roster: readonly string[]): RowReading
       }
       if (!isStance(stored[0])) return { slot, kind: "unrecognized" };
       const c = own[0];
-      return { slot, kind: "position", stance: stored[0], origin: originOf(c), excerpt: typeof c.excerpt === "string" && c.excerpt.trim() ? c.excerpt : null, raw: c.raw };
+      // Model-written text is one run of words wherever it is shown (textSerialization.singleLineText).
+      return { slot, kind: "position", stance: stored[0], origin: originOf(c), excerpt: typeof c.excerpt === "string" && c.excerpt.trim() ? singleLineText(c.excerpt) : null, raw: c.raw };
     }
     const atIndex = cells[i];
     if (atIndex === null || atIndex === undefined) return { slot, kind: "none" };
@@ -288,7 +290,7 @@ function fieldPresentation(type: (typeof FIELD_TYPES)[number], r: RowReading): F
     const values = positions.map((s) => {
       const raw = isPlainObject(s.raw) ? s.raw : {};
       const v = type === "metric" ? raw.value : raw.probability;
-      const unit = type === "metric" && typeof raw.unit === "string" ? raw.unit.trim() : "";
+      const unit = type === "metric" && typeof raw.unit === "string" ? singleLineText(raw.unit) : "";
       return { slot: s.slot, v, unit };
     });
     const numeric = values.filter((x): x is { slot: string; v: number; unit: string } => finite(x.v));
@@ -313,6 +315,7 @@ function fieldPresentation(type: (typeof FIELD_TYPES)[number], r: RowReading): F
     return typeof t === "string" && t.trim() ? t : null;
   };
   const groups = new Map<string, string[]>();
+  const stated = new Map<string, string>();
   let missing = 0;
   for (const s of positions) {
     const t = textOf(s);
@@ -323,10 +326,12 @@ function fieldPresentation(type: (typeof FIELD_TYPES)[number], r: RowReading): F
     }
     const key = normalizeForComparison(t);
     groups.set(key, [...(groups.get(key) ?? []), s.slot]);
+    stated.set(s.slot, singleLineText(t));
   }
   const noun = type === "step" ? "step" : "answer";
+  // Each slot's stated value (verbatim from its response field, shown unquoted), then how it compares.
   for (const slots of groups.values())
-    for (const sl of slots) slotValue.set(sl, slots.length > 1 ? `Same ${type === "step" ? "wording" : "answer"} as ${plural(slots.length - 1, "other panel slot")}` : `${type === "step" ? "Wording" : "Answer"} given by no other panel slot`);
+    for (const sl of slots) slotValue.set(sl, `${stated.get(sl)} — ${slots.length > 1 ? `same ${type === "step" ? "wording" : "answer"} as ${plural(slots.length - 1, "other panel slot")}` : `${type === "step" ? "wording" : "answer"} given by no other panel slot`}`);
   const given = [...groups.values()].reduce((n, g) => n + g.length, 0);
   const sizes = [...groups.values()].map((g) => g.length).sort((a, b) => b - a);
   if (given === 0) return { heading: "Comparison", text: type === "step" ? "Not comparable: no step text was given at this position." : "No answers to compare.", slotValue };
@@ -655,9 +660,10 @@ export function presentPositionSafeReport<R extends AdaptiveSynthesisReport | nu
 
   const { verdictCard, panelVerdict, verdict } = presentVerdict(src, rows, input);
 
+  const panelAgreement = rows ? renderPositionPanelStatement(panelCounts(rows, roster)) : "Position details are unavailable: the scored rows are not available to this view.";
   const presentation = {
     ...p,
-    panelAgreement: rows ? renderPositionPanelStatement(panelCounts(rows, roster)) : "Position details are unavailable: the scored rows are not available to this view.",
+    panelAgreement,
     answer: answer as typeof p.answer,
     agree: agree as typeof p.agree,
     disagree,
@@ -681,6 +687,11 @@ export function presentPositionSafeReport<R extends AdaptiveSynthesisReport | nu
     ...src,
     presentation,
     panelVerdict,
+    // The stored certainty line embeds the stored panel statement: restated in its exact format from the stored
+    // certainty and gate, with the panel statement restated from the rows.
+    certaintyAssessment: `Run certainty ${Math.round((typeof src.runCertainty === "number" ? src.runCertainty : 0) * 100)}% (gate: ${src.gate}).${panelAgreement ? ` ${panelAgreement}` : ""}`,
+    // Model-written: withheld (the view shows the Unified Answer's claims and the computed panel statement instead).
+    executiveSummary: "",
     narrativeSections: [],
     disagreements: disagreements.map((d) => ({ ...d, whyTheyDiffer: "", positions: [] })),
     biasAndBlindSpots: [],

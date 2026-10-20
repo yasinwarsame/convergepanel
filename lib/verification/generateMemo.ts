@@ -64,6 +64,31 @@ export interface MemoInput {
   synthesisDisagreements?: string[];
   confidenceAssessment?: string;
   modelsUsed?: string[];
+
+  /**
+   * Order 5 (Contract P): set ONLY by shareBuilders.buildAdaptiveMemoInput for an adaptive research report marked
+   * presentation.disagreementPositionVersion === 1. Its findings, agreements and disagreements are then already stated
+   * from the report's rows; the memo takes the adaptive-only path (isMarkedAdaptiveResearchMemo). Claim, video and
+   * every other research memo never set it and are generated exactly as before.
+   */
+  adaptivePositionPresentation?: { reportKind: typeof ADAPTIVE_RESEARCH_REPORT_KIND; disagreementPositionVersion: 1 };
+}
+
+/** The report type of an adaptive research memo (Contract P boundary). */
+export const ADAPTIVE_RESEARCH_REPORT_KIND = "adaptive_research" as const;
+
+/**
+ * The validated boundary for the adaptive-only memo path: a research memo whose boundary object is exactly
+ * { reportKind: "adaptive_research", disagreementPositionVersion: 1 } (own properties, nothing else). A claim or video
+ * memo never takes it, whatever it carries; a malformed or partial boundary is ignored (the original path).
+ */
+export function isMarkedAdaptiveResearchMemo(input: MemoInput): boolean {
+  if (input.type !== "research") return false;
+  const b = (input as { adaptivePositionPresentation?: unknown }).adaptivePositionPresentation;
+  if (!b || typeof b !== "object" || Array.isArray(b)) return false;
+  const keys = Object.keys(b).sort();
+  const o = b as Record<string, unknown>;
+  return keys.length === 2 && keys[0] === "disagreementPositionVersion" && keys[1] === "reportKind" && o.reportKind === ADAPTIVE_RESEARCH_REPORT_KIND && o.disagreementPositionVersion === 1;
 }
 
 /** A slot with no supplied name is named by its family only — never a guessed model version. */
@@ -496,8 +521,80 @@ function generateResearchMemo(input: MemoInput): string {
   return lines.join("\n").trimEnd() + "\n";
 }
 
+/**
+ * Order 5 (Contract P): the memo of a marked adaptive research report. Its sections carry what buildAdaptiveMemoInput
+ * stated from the report's rows; nothing here characterizes the panel (no "converged" / "diverging themes", no
+ * "where models agree / disagree"). The figure shown is the run certainty, as computed and stored — renamed from
+ * "consensus score", never recomputed.
+ */
+function generateMarkedAdaptiveResearchMemo(input: MemoInput): string {
+  const lines: string[] = [];
+  const q = (input.question ?? "").trim() || "—";
+  const findings = dedupeCap(input.keyFindings ?? []);
+  const agree = dedupeCap(input.synthesisAgreements ?? []);
+  const unresolved = dedupeCap(input.synthesisDisagreements ?? []);
+  const slots = input.modelsUsed ?? [];
+  const n = Math.max(1, slots.length);
+
+  lines.push("VERIFICATION MEMO");
+  lines.push("ConvergePanel Multi-Model Research Report");
+  lines.push(`Generated: ${formatMemoGeneratedAt()}`);
+  lines.push("");
+  lines.push("RESEARCH QUERY");
+  lines.push(`"${q}"`);
+  lines.push("");
+  lines.push(`RUN CERTAINTY: ${input.consensusScore}/100 (${input.confidenceLabel} confidence)`);
+  lines.push(`EVIDENCE QUALITY: ${input.evidenceQuality}`);
+  lines.push("");
+  lines.push("SUMMARY");
+  lines.push(`${n} panel slot${n === 1 ? "" : "s"} answered this question independently. Positions below are stated from the recorded panel rows; value comparisons are computed, not model positions.`);
+  lines.push("");
+
+  if (findings.length) {
+    lines.push("KEY FINDINGS");
+    findings.forEach((f) => lines.push(`- ${f}`));
+    lines.push("");
+  }
+  if (agree.length) {
+    lines.push("CONSENSUS AND MAJORITY ROWS");
+    agree.forEach((p) => lines.push(`- ${p}`));
+    lines.push("");
+  }
+  if (unresolved.length) {
+    lines.push("UNRESOLVED CLAIMS AND VALUE DIFFERENCES");
+    unresolved.forEach((p) => lines.push(`- ${p}`));
+    lines.push("");
+  }
+  const assess = (input.confidenceAssessment ?? "").trim();
+  if (assess) {
+    lines.push("CERTAINTY AND LIMITS");
+    lines.push(assess);
+    lines.push("");
+  }
+
+  lines.push("PANEL SLOTS (AS RECORDED)");
+  lines.push(formatModelsConsultedGrid(slots));
+  lines.push("");
+
+  lines.push("METHODOLOGY");
+  lines.push(
+    `This question was researched by ${n} panel slot${n === 1 ? "" : "s"} via ConvergePanel. Each slot received identical instructions and was not shown the others' responses. Each slot's recorded position on a claim is shown as recorded; comparisons of stated values are computed. The run certainty is computed from the scored rows and does not by itself establish factual accuracy.`
+  );
+  lines.push("");
+  lines.push("DISCLAIMER");
+  lines.push(
+    "This is an AI-assisted research synthesis, not professional advice. Results should inform human judgment and further investigation, not replace professional counsel. AI models have known limitations including training data cutoffs, potential biases, and the possibility of confident but incorrect outputs."
+  );
+  lines.push("");
+  lines.push(`Report ID: ${input.verificationId || "—"}`);
+  lines.push("Source: convergepanel.com");
+
+  return lines.join("\n").trimEnd() + "\n";
+}
+
 export function generateVerificationMemo(input: MemoInput): string {
   if (input.type === "claim") return generateClaimMemo(input);
   if (input.type === "video") return generateVideoMemo(input);
+  if (isMarkedAdaptiveResearchMemo(input)) return generateMarkedAdaptiveResearchMemo(input);
   return generateResearchMemo(input);
 }

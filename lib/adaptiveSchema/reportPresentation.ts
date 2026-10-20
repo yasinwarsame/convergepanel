@@ -46,6 +46,7 @@ import {
 } from "./gatePresentation";
 import { dedupeTextList } from "./textSimilarity";
 import { TEXT_DEDUP_THRESHOLDS, WHERE_MODELS_AGREE_MAX_ITEMS } from "./config";
+import { MODEL_PROSE_WITHHELD, positionView } from "./positionPresentation";
 
 export const MODEL_EXPLANATION_LABEL = "Model-written explanation (not a verified finding)";
 
@@ -76,7 +77,8 @@ export interface ClaimBlock {
 }
 
 export interface DisagreementBlock extends ClaimBlock {
-  why: TextBlock;
+  /** Null on a report marked for the disagreement-position presentation (Order 5): the explanation is withheld. */
+  why: TextBlock | null;
 }
 
 /** A Unified Answer claim: the claim with its own computed result, and the models backing it (computed). */
@@ -284,6 +286,8 @@ export function presentExecutiveSummary(report: AdaptiveSynthesisReport): TextBl
   } else if (p.answer?.note) {
     blocks.push({ source: "computed", label: null, text: p.answer.note });
   }
+  // Order 5 (Contract P): a marked report's model-written explanation is withheld; the summary says so once.
+  if (positionView(report)?.modelProseWithheld) blocks.push({ source: "computed", label: null, text: MODEL_PROSE_WITHHELD });
   return blocks;
 }
 
@@ -322,6 +326,8 @@ export function presentDisagreements(report: AdaptiveSynthesisReport): Disagreem
   return report.disagreements.map((d, i) => {
     const presented = p?.disagree[i];
     if (!presented) return { claim: legacy(d.topic), result: null, contested: null, why: legacy(d.whyTheyDiffer) };
+    // Order 5 (Contract P): a marked report withholds every explanation of why positions differ, the computed default included.
+    if (positionView(report)) return { ...presentClaim(presented), why: null };
     return {
       ...presentClaim(presented),
       why:

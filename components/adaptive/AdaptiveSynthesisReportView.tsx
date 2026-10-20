@@ -19,7 +19,7 @@
  * nothing that rendered before Part A may be dropped by a later change.
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ModelId } from "@/lib/types";
 import {
   AlignedClaim,
@@ -49,6 +49,17 @@ import {
   presentUnifiedAnswer,
 } from "@/lib/adaptiveSchema/reportPresentation";
 import { GATE_LABEL, GateTone, gateBadgeText, gateBannerText, gateTone, pageGateValue } from "@/lib/adaptiveSchema/gatePresentation";
+import {
+  POSITIONS_BY_SLOT_HEADING,
+  PresentedSlotPosition,
+  RowView,
+  biasWithheldNotice,
+  coverageWithheldNotice,
+  positionView,
+  presentPositionSafeReport,
+  rowView,
+} from "@/lib/adaptiveSchema/positionPresentation";
+import { PositionPresentationBoundary, usePositionPresentation } from "./PositionPresentationContext";
 
 /** Canonical, ordered list of `data-section` values rendered below — the single source of truth the snapshot test asserts against, so a future edit can't silently drop a section without also updating this list. */
 export const ADAPTIVE_SYNTHESIS_SECTION_IDS = [
@@ -453,8 +464,75 @@ function AgreementSegmentBar({ agreeCount, disputeCount, silentCount, total }: {
   );
 }
 
+/**
+ * Order 5 (Contract P): one stored row's recorded positions, by panel slot — claim rows by their validated stances,
+ * field rows by each slot's stated value. Never a vote count or an agree / dispute chip for a value comparison.
+ */
+export function SlotPositionsList({ slots, className = "" }: { slots: PresentedSlotPosition[]; className?: string }) {
+  if (slots.length === 0) return null;
+  return (
+    <div data-source="computed" className={className}>
+      <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">{POSITIONS_BY_SLOT_HEADING}</p>
+      <ul className="mt-0.5 space-y-0.5 text-xs text-slate-700">
+        {slots.map((s) => (
+          <li key={s.slot}>
+            <span className="font-medium">{s.label}:</span> {s.position}
+            {s.excerpt && (
+              <span className="text-slate-500">
+                {" "}
+                — {s.excerpt.text} ({s.excerpt.note})
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** Order 5 (Contract P): a stored row's computed statement, under its heading. */
+function RowStatement({ view }: { view: RowView }) {
+  return (
+    <p data-source="computed" className="text-xs text-slate-600">
+      <span className="font-medium">{view.heading}:</span> {view.text}
+    </p>
+  );
+}
+
+/** Order 5 (Contract P): the agreement map of a marked report — each row's own statement and its positions by slot. */
+function MarkedPositionMap({ claims, roster, provenance }: { claims: AlignedClaim[]; roster: readonly string[]; provenance: Parameters<typeof rowView>[2] }) {
+  const mapClaims = claims.filter((c) => c.status !== "single_source");
+  if (mapClaims.length === 0) return null;
+  return (
+    <Card>
+      <SectionLabel>Recorded positions and value comparisons</SectionLabel>
+      <div className="space-y-3">
+        {mapClaims.map((claim, idx) => {
+          const view = rowView(claim, roster, provenance);
+          return (
+            <div key={`${claim.id}-${idx}`} className="space-y-1.5" data-row-type={view.rowType}>
+              <p data-source="model_claim" className="text-sm text-slate-800">
+                {CLAIM_LABEL}: {quoteClaim(claim.claimText)}
+              </p>
+              <RowStatement view={view} />
+              {view.contested && (
+                <p className="text-xs text-amber-700" data-testid="contested-note">
+                  Contested: {view.contested}
+                </p>
+              )}
+              <SlotPositionsList slots={view.slots} />
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
 /** Exported — see UnifiedAnswerCard's export doc above. */
 export function AgreementDisagreementMap({ claims, modelsUsed }: { claims: AlignedClaim[]; modelsUsed: ModelId[] }) {
+  const position = usePositionPresentation();
+  if (position) return <MarkedPositionMap claims={claims} roster={position.roster} provenance={position.provenance} />;
   // Coverage-1 claims (a single model's own claim, never corroborated or
   // disputed by anyone else) aren't agreement data — they're rendered
   // separately by SingleModelInsightsList below this section.
@@ -578,6 +656,29 @@ export function SingleModelInsightsList({ claims, labelled = false }: { claims: 
 export function DisagreementsSection({ report }: { report: AdaptiveSynthesisReport }) {
   if (report.disagreements.length === 0) return null;
   const presentedDisagreements = presentDisagreements(report);
+  const view = positionView(report);
+  if (view) {
+    // Order 5 (Contract P): each split row's own computed statement and its positions by slot, from the joined stored
+    // row; no model explanation and no model-assigned stakes.
+    return (
+      <Card>
+        <SectionLabel>Unresolved claims and value differences</SectionLabel>
+        <div className="space-y-3">
+          {presentedDisagreements.map((presented, idx) => {
+            const rv = view.disagreements[idx];
+            return (
+              <div key={idx} className="rounded-lg bg-slate-50 border border-slate-200 p-4">
+                <h3 className="text-slate-900 font-semibold mb-2">
+                  <ClaimWithResult item={presented} />
+                </h3>
+                {rv ? <SlotPositionsList slots={rv.slots} className="mt-2" /> : <p data-source="computed" className="text-xs text-slate-500">Position details are unavailable in this view.</p>}
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+    );
+  }
 
   return (
     <Card>
@@ -598,7 +699,7 @@ export function DisagreementsSection({ report }: { report: AdaptiveSynthesisRepo
                     <h3 className="text-orange-900 font-semibold mb-2">
                       <ClaimWithResult item={presented} />
                     </h3>
-                    <AttributedBlock block={presented.why} className="text-orange-800 mb-3 text-sm" />
+                    {presented.why && <AttributedBlock block={presented.why} className="text-orange-800 mb-3 text-sm" />}
                   </>
                 ) : (
                   <>
@@ -761,10 +862,13 @@ export function BiasBlindSpotsSection({
   report: AdaptiveSynthesisReport;
   onRunFollowUp?: (question: string) => void;
 }) {
+  const view = positionView(report);
   const hasT1 = report.biasAndBlindSpots.length > 0;
   const hasT2 = report.panelCoverageGaps.length > 0;
   const hasT3 = report.diagnostics.totalClaimCount > 0;
-  const allEmpty = !hasT1 && !hasT2 && !hasT3;
+  // Order 5 (Contract P): a marked report withholds the model-written Tier 1 and Tier 2 text and says how much.
+  const withheld = view ? [view.biasFindingsWithheld > 0 ? biasWithheldNotice(view.biasFindingsWithheld) : "", view.coverageGapsWithheld > 0 ? coverageWithheldNotice(view.coverageGapsWithheld) : ""].filter(Boolean) : [];
+  const allEmpty = !hasT1 && !hasT2 && !hasT3 && withheld.length === 0;
 
   return (
     <Card>
@@ -773,6 +877,11 @@ export function BiasBlindSpotsSection({
         <p className="text-sm text-slate-500 italic">{biasSectionEmptyMessage(report)}</p>
       ) : (
         <div className="space-y-4">
+          {withheld.map((notice, idx) => (
+            <p key={idx} data-source="computed" className="text-sm text-slate-600">
+              {notice}
+            </p>
+          ))}
           {hasT1 &&
             (report.presentation ? (
               // New reports: the bias check is a model's observation — labelled as on the verdict card (R6-5).
@@ -807,6 +916,8 @@ export function BiasBlindSpotsSection({
 /** Exported — see UnifiedAnswerCard's export doc above. */
 export function PanelVerdictCard({ report, gate }: { report: AdaptiveSynthesisReport; gate: AdaptiveGateResult }) {
   const v = report.verdictCard;
+  // Order 5 (Contract P): a marked report's headings come from its rows (a value comparison is never "top consensus").
+  const positions = positionView(report)?.verdict ?? null;
   // R4-1: claim text is model-written; cards that carry the computed status show it beside the quoted claim.
   const top = presentVerdictClaim(v.topConsensus, v.topConsensusAgreement);
   const split = v.keyDisagreement ? presentVerdictClaim(v.keyDisagreement, v.keyDisagreementAgreement) : null;
@@ -833,19 +944,22 @@ export function PanelVerdictCard({ report, gate }: { report: AdaptiveSynthesisRe
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
         <div className="rounded-lg bg-slate-50 border border-slate-200 p-3">
-          <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">Top consensus</span>
+          <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">{positions ? positions.topHeading : "Top consensus"}</span>
           <p className="text-sm text-slate-800 mt-1">
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 mr-1.5" />
             {top.result ? <span data-source="model_claim">{top.claim}</span> : top.claim}
-            {v.consensusModelCount > 0 && (
-              <span className="text-slate-500"> — agreed by {v.consensusModelCount} model{v.consensusModelCount === 1 ? "" : "s"}</span>
-            )}
+            {v.consensusModelCount > 0 &&
+              (positions ? (
+                <span className="text-slate-500"> — supported or partially supported by {v.consensusModelCount} panel slot{v.consensusModelCount === 1 ? "" : "s"}</span>
+              ) : (
+                <span className="text-slate-500"> — agreed by {v.consensusModelCount} model{v.consensusModelCount === 1 ? "" : "s"}</span>
+              ))}
             {top.result && <span data-source="computed" className="block text-xs text-slate-600 mt-0.5">{top.result}</span>}
             {v.topConsensusContested && <span className="block text-xs text-amber-700 mt-0.5">Contested: {v.topConsensusContested}</span>}
           </p>
         </div>
         <div className="rounded-lg bg-slate-50 border border-slate-200 p-3">
-          <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">Key disagreement</span>
+          <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">{positions ? positions.keyHeading : "Key disagreement"}</span>
           {v.keyDisagreement ? (
             <p className="text-sm text-slate-800 mt-1">
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-orange-500 mr-1.5" />
@@ -854,7 +968,7 @@ export function PanelVerdictCard({ report, gate }: { report: AdaptiveSynthesisRe
               {v.disagreementDetail && <span className="block text-slate-500 mt-0.5">{v.disagreementDetail}</span>}
             </p>
           ) : (
-            <p className="text-sm text-slate-500 italic mt-1">No major disagreements detected.</p>
+            <p className="text-sm text-slate-500 italic mt-1">{positions ? positions.noKeyText : "No major disagreements detected."}</p>
           )}
         </div>
       </div>
@@ -897,6 +1011,23 @@ export function PanelVerdictCard({ report, gate }: { report: AdaptiveSynthesisRe
  * status with the models that support and dispute it — not every listed model beside the status.
  */
 function LoadBearingClaim({ claim }: { claim: AlignedClaim }) {
+  const position = usePositionPresentation();
+  if (position) {
+    // Order 5 (Contract P): the row's own computed statement; supporting / disputing slots for a claim row only.
+    const view = rowView(claim, position.roster, position.provenance);
+    const who = view.rowType === "claim" ? [view.supporters.length > 0 ? `supported by ${view.supporters.join(", ")}` : "", view.disputers.length > 0 ? `disputed by ${view.disputers.join(", ")}` : ""].filter(Boolean) : [];
+    return (
+      <>
+        <span data-source="model_claim">
+          {CLAIM_LABEL}: {quoteClaim(claim.claimText)}
+        </span>
+        <span data-source="computed" className="block text-xs text-slate-500 mt-0.5">
+          {PANEL_RESULT_LABEL}: <span className="font-medium">{view.heading}</span> — {view.text}
+          {who.length > 0 ? ` (${who.join("; ")})` : ""}
+        </span>
+      </>
+    );
+  }
   const named = (stances: string[]) =>
     claim.cells.filter((c): c is AlignedClaimCell => !!c && stances.includes(c.stance)).map((c) => getModelLabel(c.modelId));
   const supports = named(["agrees", "partial"]);
@@ -916,7 +1047,7 @@ function LoadBearingClaim({ claim }: { claim: AlignedClaim }) {
 }
 
 export default function AdaptiveSynthesisReportView({
-  report,
+  report: storedReport,
   gate,
   alignedClaims,
   trustSummary,
@@ -937,6 +1068,13 @@ export default function AdaptiveSynthesisReportView({
 }) {
   const rows = alignedClaims || [];
   const modelProvenance = useRunModelProvenance();
+  const position = usePositionPresentation();
+  // Order 5 (Contract P): normally already the position-safe view (AdaptivePanelResponse); a marked stored report
+  // reaching this view directly is presented the same way. Unmarked reports are unchanged.
+  const report = useMemo(
+    () => presentPositionSafeReport(storedReport, { rows: alignedClaims, roster: position?.roster ?? modelsUsed, provenance: position?.provenance ?? modelProvenance }),
+    [storedReport, alignedClaims, position, modelsUsed, modelProvenance]
+  );
   const [generatedPost, setGeneratedPost] = useState<{ type: "linkedin" | "x"; text: string } | null>(null);
   const agreeItems = presentAgreeItems(report);
 
@@ -961,6 +1099,7 @@ export default function AdaptiveSynthesisReportView({
   }, [question, report]);
 
   return (
+    <PositionPresentationBoundary report={report} roster={position?.roster ?? modelsUsed} provenance={position?.provenance ?? modelProvenance}>
     <div className="space-y-4">
       <div data-section="gate-banner">
         <GateBanner report={report} gate={gate.status} />
@@ -1017,7 +1156,7 @@ export default function AdaptiveSynthesisReportView({
       {agreeItems.length > 0 && (
         <div data-section="where-models-agree">
           <Card>
-            <SectionLabel>Where models agree</SectionLabel>
+            <SectionLabel>{positionView(report) ? "Consensus and majority rows" : "Where models agree"}</SectionLabel>
             <ul className="list-disc list-outside pl-5 space-y-1 text-sm leading-relaxed text-slate-800">
               {agreeItems.map((item, idx) =>
                 report.presentation ? (
@@ -1138,5 +1277,6 @@ export default function AdaptiveSynthesisReportView({
         </Card>
       )}
     </div>
+    </PositionPresentationBoundary>
   );
 }

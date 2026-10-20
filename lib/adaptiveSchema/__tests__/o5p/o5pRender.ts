@@ -127,10 +127,13 @@ export async function renderRecord(rec: RecordUnderTest, rows: ModelResult[]): P
     createElement(ReviewGovernanceBody as any, { loading: false, unavailable: false, detail: null, gate, synthesisReport: report, trustSummary: rec.trustSummary, alignedClaims: rec.alignedClaims, modelsUsed: modelIds, question: QUESTION, runId: "run-o5p", persistenceStatus: "saved" })
   );
   if (report) {
-    out["text.markdown"] = buildAdaptiveSynthesisMarkdown(QUESTION, report);
-    out["text.linkedin"] = buildAdaptiveLinkedInPost(QUESTION, report);
-    out["text.x"] = buildAdaptiveXPost(QUESTION, report);
-    const memoInput = buildAdaptiveMemoInput(QUESTION, report, modelIds, "run-o5p", prov);
+    // The share / memo builders receive the rows, roster and provenance their real call site holds (a marked report is
+    // presented from them; an unmarked one ignores them). Added after the 2c17feee capture: unmarked output unchanged.
+    const positionInput = { rows: rec.alignedClaims ?? null, roster: modelIds, provenance: prov };
+    out["text.markdown"] = (buildAdaptiveSynthesisMarkdown as any)(QUESTION, report, positionInput);
+    out["text.linkedin"] = (buildAdaptiveLinkedInPost as any)(QUESTION, report, positionInput);
+    out["text.x"] = (buildAdaptiveXPost as any)(QUESTION, report, positionInput);
+    const memoInput = (buildAdaptiveMemoInput as any)(QUESTION, report, modelIds, "run-o5p", prov, rec.alignedClaims ?? null);
     out["text.memoInput"] = JSON.stringify(memoInput);
     out["text.memo"] = normalizeMemo(generateVerificationMemo(memoInput));
   } else {

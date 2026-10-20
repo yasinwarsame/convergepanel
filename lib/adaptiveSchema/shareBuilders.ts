@@ -33,6 +33,24 @@ import {
 } from "./reportPresentation";
 import { CAUTION_NOTICE, CAUTION_NOTICE_SHORT, GATE_CONFIDENCE_LABEL, GATE_LABEL, gateLabel, hasGatePresentation, legacyGateWord, readGateStatus } from "./gatePresentation";
 import { escapeMarkdownInline, markdownQuote, plainTextQuote } from "./textSerialization";
+import { ADAPTIVE_RESEARCH_REPORT_KIND } from "@/lib/verification/generateMemo";
+import { POSITIONS_BY_SLOT_HEADING, PositionSafeInput, PresentedSlotPosition, biasWithheldNotice, coverageWithheldNotice, isPositionMarked, positionView, presentPositionSafeReport } from "./positionPresentation";
+
+/**
+ * Order 5 (Contract P): every builder below states positions only through the position-safe view. A report the caller
+ * already presented (positionPresentation.presentPositionSafeReport) is used as is; a marked stored report reaching a
+ * builder directly is presented here, from the rows and roster the caller holds — without them no position is derived.
+ */
+function shown(report: AdaptiveSynthesisReport, input?: PositionSafeInput): AdaptiveSynthesisReport {
+  return isPositionMarked(report) ? presentPositionSafeReport(report, input ?? { rows: null, roster: [] }) : report;
+}
+
+/** A row's positions by slot as plain lines (never quoted as verbatim model text). */
+function slotLines(slots: PresentedSlotPosition[], escape: (t: string) => string): string[] {
+  return slots.map((s) => `${escape(s.label)}: ${escape(s.position)}${s.excerpt ? ` — ${escape(s.excerpt.text)} (${s.excerpt.note})` : ""}`);
+}
+
+const POSITIONS_UNAVAILABLE_IN_FORMAT = "Position details are unavailable in this format.";
 
 // R5 presentation contract: a report that carries `presentation` is rendered through reportPresentation.ts, so
 // every block keeps its source label (Panel result / Claim / Model-written explanation). A report persisted
@@ -129,7 +147,8 @@ function truncate(text: string, max: number): string {
   return trimmed.length <= max ? trimmed : `${trimmed.slice(0, max - 1).trimEnd()}…`;
 }
 
-export function buildAdaptiveSynthesisMarkdown(question: string, report: AdaptiveSynthesisReport): string {
+export function buildAdaptiveSynthesisMarkdown(question: string, storedReport: AdaptiveSynthesisReport, positionInput?: PositionSafeInput): string {
+  const report = shown(storedReport, positionInput);
   if (report.presentation) return buildPresentedMarkdown(question, report);
   const lines: string[] = [];
   lines.push("# Synthesis Report");
@@ -196,18 +215,33 @@ function buildPresentedMarkdown(question: string, report: AdaptiveSynthesisRepor
     lines.push("");
   }
 
+  const view = positionView(report);
   const agreeItems = presentAgreeItems(report);
   if (agreeItems.length > 0) {
-    lines.push("## Where models agree");
+    lines.push(view ? "## Consensus and majority rows" : "## Where models agree");
     agreeItems.forEach((a) => lines.push(`- ${markdownClaim(a)}`));
     lines.push("");
   }
 
   const disagreements = presentDisagreements(report);
-  if (disagreements.length > 0) {
+  if (disagreements.length > 0 && view) {
+    // Order 5 (Contract P): each split row's computed statement and its positions by slot; no explanation.
+    lines.push("## Unresolved claims and value differences");
+    disagreements.forEach((d, i) => {
+      lines.push(`- ${markdownClaim(d)}`);
+      const rv = view.disagreements[i];
+      if (!rv) lines.push(`  - ${POSITIONS_UNAVAILABLE_IN_FORMAT}`);
+      else {
+        lines.push(`  - **${POSITIONS_BY_SLOT_HEADING}:**`);
+        slotLines(rv.slots, escapeMarkdownInline).forEach((l) => lines.push(`    - ${l}`));
+      }
+    });
+    lines.push("");
+  } else if (disagreements.length > 0) {
     lines.push("## Where models disagree");
     disagreements.forEach((d, i) => {
       lines.push(`- ${markdownClaim(d)}`);
+      if (!d.why) return;
       if (isModelText(d.why)) {
         lines.push(`  - **${d.why.label}:**`);
         lines.push("");
@@ -221,6 +255,12 @@ function buildPresentedMarkdown(question: string, report: AdaptiveSynthesisRepor
     lines.push("");
   }
 
+  const withheld = view ? [view.biasFindingsWithheld > 0 ? biasWithheldNotice(view.biasFindingsWithheld) : "", view.coverageGapsWithheld > 0 ? coverageWithheldNotice(view.coverageGapsWithheld) : ""].filter(Boolean) : [];
+  if (withheld.length > 0) {
+    lines.push("## Bias & blind spots");
+    withheld.forEach((w) => lines.push(w));
+    lines.push("");
+  }
   if (report.biasAndBlindSpots.length > 0) {
     lines.push("## Bias & blind spots");
     lines.push(`**${MODEL_CAVEAT_LABEL}:**`);
@@ -245,7 +285,7 @@ function buildPresentedMarkdown(question: string, report: AdaptiveSynthesisRepor
 
 export function buildAdaptiveMemoInput(
   question: string,
-  report: AdaptiveSynthesisReport,
+  storedReport: AdaptiveSynthesisReport,
   modelsUsed: ModelId[],
   verificationId: string,
   /**
@@ -253,9 +293,39 @@ export function buildAdaptiveMemoInput(
    * holds it: each model is then named with its recorded requested model.
    * Without it, models are named by family only — never by a product label.
    */
-  modelProvenance?: readonly RunModelProvenanceFacts[] | null
+  modelProvenance?: readonly RunModelProvenanceFacts[] | null,
+  positionRows?: readonly unknown[] | null
 ): MemoInput {
+  const report = shown(storedReport, { rows: positionRows ?? null, roster: modelsUsed, provenance: modelProvenance });
   const confidenceLabel = GATE_CONFIDENCE_LABEL[readGateStatus(report.gate)];
+  const view = positionView(report);
+  if (view) {
+    // Order 5 (Contract P): a marked adaptive report's memo — validated report type and marker, positions by slot from
+    // the joined rows, no model-written explanation. The shared generator takes its adaptive-only path for it.
+    const agree = presentAgreeItems(report).map(claimLine);
+    const summary = presentExecutiveSummary(report).map((b) => plainTextBlock(b)).join("\n\n");
+    const answer = presentUnifiedAnswer(report);
+    const lead = answerLeadBlocks(answer);
+    const gateFindings = lead.length > 0 ? [leadText(lead), ...(answer.unresolved ?? []).map(plainUnresolvedClaim), ...(answer.unresolvedUnreadable ? [answer.unresolvedUnreadable.text] : [])] : [];
+    const withheld = [view.biasFindingsWithheld > 0 ? biasWithheldNotice(view.biasFindingsWithheld) : "", view.coverageGapsWithheld > 0 ? coverageWithheldNotice(view.coverageGapsWithheld) : ""].filter(Boolean);
+    return {
+      type: "research",
+      adaptivePositionPresentation: { reportKind: ADAPTIVE_RESEARCH_REPORT_KIND, disagreementPositionVersion: 1 },
+      question,
+      consensusScore: Math.round(report.runCertainty * 100),
+      confidenceLabel,
+      evidenceQuality: "mixed",
+      keyFindings: [...gateFindings, ...agree.slice(0, 8)],
+      synthesisAgreements: agree,
+      synthesisDisagreements: presentDisagreements(report).map((d, i) => {
+        const rv = view.disagreements[i];
+        return [claimLine(d), ...(rv ? [`  ${POSITIONS_BY_SLOT_HEADING}:`, ...slotLines(rv.slots, (t) => t).map((l) => `    ${l}`)] : [`  ${POSITIONS_UNAVAILABLE_IN_FORMAT}`])].join("\n");
+      }),
+      confidenceAssessment: [summary || presentCertainty(report).map((b) => plainTextBlock(b)).join("\n\n"), ...withheld].filter(Boolean).join("\n\n"),
+      modelsUsed: runModelLabels(modelsUsed, modelProvenance),
+      verificationId,
+    };
+  }
   if (report.presentation) {
     const agree = presentAgreeItems(report).map(claimLine);
     const summary = presentExecutiveSummary(report).map((b) => plainTextBlock(b)).join("\n\n");
@@ -276,7 +346,7 @@ export function buildAdaptiveMemoInput(
       keyFindings: [...gateFindings, ...agree.slice(0, 8)],
       synthesisAgreements: agree,
       synthesisDisagreements: presentDisagreements(report).map((d) =>
-        isModelText(d.why) ? `${claimLine(d)}\n${plainTextBlock(d.why, "  ")}` : `${claimLine(d)} — ${blockText(d.why)}`
+        !d.why ? claimLine(d) : isModelText(d.why) ? `${claimLine(d)}\n${plainTextBlock(d.why, "  ")}` : `${claimLine(d)} — ${blockText(d.why)}`
       ),
       confidenceAssessment: summary || presentCertainty(report).map((b) => plainTextBlock(b)).join("\n\n"),
       modelsUsed: runModelLabels(modelsUsed, modelProvenance),
@@ -302,7 +372,10 @@ export function buildAdaptiveMemoInput(
   };
 }
 
-export function buildAdaptiveLinkedInPost(question: string, report: AdaptiveSynthesisReport): string {
+export function buildAdaptiveLinkedInPost(question: string, storedReport: AdaptiveSynthesisReport, positionInput?: PositionSafeInput): string {
+  const report = shown(storedReport, positionInput);
+  // Order 5 (Contract P): a compact format — no per-slot positions, no model names; rows are stated by their own result.
+  const marked = !!positionView(report);
   const lines: string[] = [];
   lines.push(`I researched "${truncate(question, 120)}" across a multi-model AI panel using ConvergePanel.`);
   lines.push("");
@@ -319,27 +392,31 @@ export function buildAdaptiveLinkedInPost(question: string, report: AdaptiveSynt
   const presented = report.presentation;
   const agreementItems = presented ? [] : dedupedAgreementItems(report);
   if (presented ? presented.agree.length > 0 : agreementItems.length > 0) {
-    lines.push("Where models agree:");
+    lines.push(marked ? "Consensus and majority rows:" : "Where models agree:");
     if (presented) presented.agree.slice(0, 2).forEach((a) => lines.push(`→ ${shortClaimWithResult(a, 100)}`));
     else agreementItems.slice(0, 2).forEach((a) => lines.push(`→ ${truncate(a, 140)}`));
     lines.push("");
   }
 
   if (report.disagreements.length > 0) {
-    lines.push("Where models disagree:");
+    lines.push(marked ? "Unresolved claims and value differences:" : "Where models disagree:");
     if (presented) presented.disagree.slice(0, 2).forEach((d) => lines.push(`→ ${shortClaimWithResult(d, 100)}`));
     else report.disagreements.slice(0, 2).forEach((d) => lines.push(`→ ${truncate(d.topic, 140)}`));
     lines.push("");
   }
 
-  lines.push("The disagreements tell you more than any single answer.");
-  lines.push("");
+  if (!marked) {
+    lines.push("The disagreements tell you more than any single answer.");
+    lines.push("");
+  }
   lines.push("→ convergepanel.com");
 
   return lines.join("\n");
 }
 
-export function buildAdaptiveXPost(question: string, report: AdaptiveSynthesisReport): string {
+export function buildAdaptiveXPost(question: string, storedReport: AdaptiveSynthesisReport, positionInput?: PositionSafeInput): string {
+  const report = shown(storedReport, positionInput);
+  const splitLabel = positionView(report) ? "Unresolved: " : "Models split on: ";
   const parts: string[] = [];
   parts.push(`Asked a multi-model AI panel: "${truncate(question, 80)}"`);
   if (hasGatePresentation(report)) {
@@ -352,8 +429,8 @@ export function buildAdaptiveXPost(question: string, report: AdaptiveSynthesisRe
   if (split) {
     // The post is capped at 280 characters: the claim gives way, the computed result never does.
     const fixed = [...parts, "via ConvergePanel"].join("\n\n").length + 2;
-    const room = 280 - fixed - `Models split on: `.length - shortClaimWithResult({ ...split, claim: "" }, 0).length;
-    parts.push(`Models split on: ${shortClaimWithResult(split, Math.max(12, Math.min(60, room)))}`);
+    const room = 280 - fixed - splitLabel.length - shortClaimWithResult({ ...split, claim: "" }, 0).length;
+    parts.push(`${splitLabel}${shortClaimWithResult(split, Math.max(12, Math.min(60, room)))}`);
   } else if (report.disagreements.length > 0) {
     parts.push(`Models split on: ${truncate(report.disagreements[0].topic, 80)}`);
   }

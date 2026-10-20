@@ -32,6 +32,7 @@ import PrimarySynthesisStrip from "@/components/adaptive/PrimarySynthesisStrip";
 import { getModelLabel } from "@/components/adaptive/shared";
 import { AdaptiveSynthesisReport, AlignedClaim, AlignedClaimCell } from "@/lib/adaptiveSchema/types";
 import { ModelId, ModelResult } from "@/lib/types";
+import { historicalBuild, historicalFinalize } from "./historicalPresentationHelpers";
 
 const g = callGemini as jest.MockedFunction<typeof callGemini>;
 const M = ["chatgpt", "claude", "grok", "perplexity", "gemini"];
@@ -69,7 +70,7 @@ async function build(rows: AlignedClaim[], narrative: Record<string, unknown> | 
     if (bias && sp.includes("shared biases")) return ok({ biasAndBlindSpots: bias });
     return off;
   });
-  return buildAdaptiveSynthesisReport("Q?", "generic", rows, results());
+  return historicalBuild("Q?", "generic", rows, results());
 }
 const statusOf = (r: AlignedClaim) => renderRowStatus(rowAgreementFacts(r, M.length));
 const unent = (s: string) => s.replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");

@@ -35,6 +35,8 @@ import { TRUST_SCORE_CAP_REASON } from "@/lib/adaptiveSchema/config";
 import { Card, SectionLabel, BulletList, ConfidencePill, ProbabilityBar, TintBadge, getModelLabel } from "./shared";
 import ModelChip from "@/components/ModelChip";
 import { GateTone, gateChipText, gateTone, pageGateValue } from "@/lib/adaptiveSchema/gatePresentation";
+import { PanelCounts, panelCounts, readSlots, rowTypeOf } from "@/lib/adaptiveSchema/positionPresentation";
+import { PositionPresentationBoundary, PositionPresentationState, usePositionPresentation } from "./PositionPresentationContext";
 
 // Wording: gatePresentation.gateChipText (D6/D7); "neutral": an unrecognized stored gate (D8).
 const GATE_CHIP_STYLES: Record<GateTone, string> = {
@@ -92,7 +94,10 @@ function computeAlignment(modelId: ModelId, rows: AlignedClaim[]): { matched: nu
   return { matched, participated };
 }
 
-function countDisputes(modelId: ModelId, rows: AlignedClaim[]): number {
+function countDisputes(modelId: ModelId, rows: AlignedClaim[], position?: PositionPresentationState | null): number {
+  // Order 5 (Contract P): on a marked report only CLAIM rows count, by the slot's own validated position — a value
+  // comparison's stored stance is never a disputed claim.
+  if (position) return rows.filter((row) => rowTypeOf(row.cells) === "claim" && readSlots(row.cells, position.roster).slots.some((s) => s.slot === modelId && s.kind === "position" && s.stance === "disputes")).length;
   return rows.filter((row) => row.cells.some((c) => c?.modelId === modelId && c.stance === "disputes")).length;
 }
 
@@ -203,7 +208,8 @@ function buildRowVM(
   schema: ResultSchema,
   result: AdaptiveModelResult,
   rows: AlignedClaim[],
-  trustSummary?: AdaptiveTrustSummary
+  trustSummary?: AdaptiveTrustSummary,
+  position?: PositionPresentationState | null
 ): RowVM {
   const failed = !result.ok || !result.data;
   const trustEntry = trustSummary?.perModel.find((m) => m.modelId === result.modelId);
@@ -228,7 +234,7 @@ function buildRowVM(
   }
 
   const alignment = computeAlignment(result.modelId, rows);
-  const disputes = countDisputes(result.modelId, rows);
+  const disputes = countDisputes(result.modelId, rows, position);
   const uniqueClaims = countUniqueClaims(result.modelId, rows);
   const citations = countCitations(schema, result);
   const headline = headlineText(schema, result.data);
@@ -273,6 +279,7 @@ function RunHeaderStrip({
   alignedClaimsCount,
   splitCount,
   limitedCoverageCount,
+  counts,
 }: {
   schema: ResultSchema;
   gate: AdaptiveGateResult;
@@ -280,6 +287,8 @@ function RunHeaderStrip({
   alignedClaimsCount: number;
   splitCount: number;
   limitedCoverageCount: number;
+  /** Order 5 (Contract P): a marked report's rows counted by what they are (positionPresentation.panelCounts). */
+  counts?: PanelCounts | null;
 }) {
   return (
     <Card className="flex items-center justify-between flex-wrap gap-3">
@@ -291,6 +300,12 @@ function RunHeaderStrip({
           {gateChipText(synthesisReport, pageGateValue(synthesisReport, gate.status))}
         </span>
       </div>
+      {counts ? (
+        <div className="text-xs text-slate-500">
+          Answer certainty <span className="font-semibold text-slate-800">{Math.round(synthesisReport.runCertainty * 100)}%</span>
+          {` · ${counts.rows} scored row${counts.rows === 1 ? "" : "s"} · ${counts.opposing} with recorded opposing positions · ${counts.unresolved} unresolved · ${counts.valuesDiffer} value comparison${counts.valuesDiffer === 1 ? "" : "s"} differing`}
+        </div>
+      ) : (
       <div className="text-xs text-slate-500">
         Answer certainty <span className="font-semibold text-slate-800">{Math.round(synthesisReport.runCertainty * 100)}%</span>
         {" · "}
@@ -304,6 +319,7 @@ function RunHeaderStrip({
           </>
         )}
       </div>
+      )}
     </Card>
   );
 }
@@ -579,7 +595,16 @@ export interface ListViewProps {
   onNavigateToSynthesis?: (sectionId: string) => void;
 }
 
-export default function ListView({
+/** Order 5 (Contract P): a marked report rendered on its own gets the same row semantics as under AdaptivePanelResponse. */
+export default function ListView(props: ListViewProps) {
+  return (
+    <PositionPresentationBoundary report={props.synthesisReport} roster={props.results.map((r) => r.modelId)}>
+      <ListViewBody {...props} />
+    </PositionPresentationBoundary>
+  );
+}
+
+function ListViewBody({
   schema,
   results,
   alignedClaims,
@@ -589,6 +614,8 @@ export default function ListView({
   onNavigateToSynthesis,
 }: ListViewProps) {
   const rows = useMemo(() => alignedClaims || [], [alignedClaims]);
+  const position = usePositionPresentation();
+  const counts = useMemo(() => (position ? panelCounts(rows, position.roster) : null), [position, rows]);
   const [sortMode, setSortMode] = useState<SortMode>("trust");
   const [expandedModels, setExpandedModels] = useState<Set<ModelId>>(new Set());
 
@@ -598,9 +625,9 @@ export default function ListView({
   const singleModelCount = countByStatus(rows, "single_source");
 
   const sortedVMs = useMemo(() => {
-    const vms = results.map((result) => buildRowVM(schema, result, rows, trustSummary));
+    const vms = results.map((result) => buildRowVM(schema, result, rows, trustSummary, position));
     return sortRows(vms, sortMode);
-  }, [schema, results, rows, trustSummary, sortMode]);
+  }, [schema, results, rows, trustSummary, sortMode, position]);
 
   const toggle = (modelId: ModelId) => {
     setExpandedModels((prev) => {
@@ -619,17 +646,18 @@ export default function ListView({
         alignedClaimsCount={rows.length}
         splitCount={splitCount}
         limitedCoverageCount={limitedCoverageCount}
+        counts={counts}
       />
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <PulseCard
           label="Consensus claims"
-          value={consensusCount}
+          value={counts ? counts.claimByStatus.consensus : consensusCount}
           onClick={() => onNavigateToSynthesis?.("agreement-disagreement-map")}
         />
         <PulseCard
-          label="Split claims"
-          value={splitCount}
+          label={counts ? "Recorded opposing positions" : "Split claims"}
+          value={counts ? counts.opposing : splitCount}
           accent="split"
           onClick={() => onNavigateToSynthesis?.("disagreements")}
         />
