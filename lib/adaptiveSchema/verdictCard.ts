@@ -16,7 +16,7 @@
 import "server-only";
 import { AdaptiveBiasFinding, AdaptiveVerdictCard, AlignedClaim } from "./types";
 import { AdaptiveGateResult } from "./gate";
-import { VERDICT_NEXT_STEPS } from "./config";
+import { CAUTION_NEXT_STEP_WITHOUT_DISAGREEMENT, FAIL_NEXT_STEP_WITHOUT_UNRESOLVED_CLAIMS, VERDICT_NEXT_STEPS } from "./config";
 import { NO_CONSENSUS_IDENTIFIED, coreFindingClaim, topSplitClaim } from "./verdict";
 import { describeContested } from "./consensusIntegrity";
 import { renderRowStatus, rowAgreementFacts } from "./agreementNarrative";
@@ -27,7 +27,9 @@ export function buildAdaptiveVerdictCard(
   gate: AdaptiveGateResult,
   bias: AdaptiveBiasFinding[],
   /** Every dispatched model (the D3 denominator); when given, the card carries each claim's computed status. */
-  dispatchedPanelSize?: number
+  dispatchedPanelSize?: number,
+  /** The number of claims the Unified Answer lists (on a fail: its unresolved claims); when given, no step refers to claims it lacks (F5). */
+  answerClaimCount?: number
 ): AdaptiveVerdictCard {
   const consensus = coreFindingClaim(rows);
   const split = topSplitClaim(rows);
@@ -56,6 +58,27 @@ export function buildAdaptiveVerdictCard(
     disagreementModelCount: split ? split.cells.filter(Boolean).length : 0,
     caveat,
     ...(caveat ? { caveatSource: "model_bias_check" as const } : {}),
-    recommendedNextSteps: VERDICT_NEXT_STEPS[gate.status].slice(0, 3),
+    recommendedNextSteps: recommendedNextSteps(gate, split, caveat, answerClaimCount),
   };
 }
+
+/**
+ * VERDICT_NEXT_STEPS for the gate, never referring to content the report does not have:
+ * - caution with no split claim: a first step that names no disagreement (D3);
+ * - caution with no caveat: no "Flag the caveat below" step (F5);
+ * - fail whose Unified Answer lists no unresolved claims: a second step that names none (F5).
+ */
+function recommendedNextSteps(gate: AdaptiveGateResult, split: AlignedClaim | null, caveat: string | null, answerClaimCount: number | undefined): string[] {
+  const steps = [...VERDICT_NEXT_STEPS[gate.status]];
+  if (gate.status === "caution") {
+    if (!split) steps[0] = CAUTION_NEXT_STEP_WITHOUT_DISAGREEMENT;
+    if (!caveat) steps.splice(CAUTION_CAVEAT_STEP_INDEX, 1);
+  }
+  if (gate.status === "fail" && answerClaimCount === 0) steps[FAIL_UNRESOLVED_CLAIMS_STEP_INDEX] = FAIL_NEXT_STEP_WITHOUT_UNRESOLVED_CLAIMS;
+  return steps.slice(0, 3);
+}
+
+/** VERDICT_NEXT_STEPS.caution[2]: "Flag the caveat below …". */
+const CAUTION_CAVEAT_STEP_INDEX = 2;
+/** VERDICT_NEXT_STEPS.fail[1]: "Independently verify the unresolved claims …". */
+const FAIL_UNRESOLVED_CLAIMS_STEP_INDEX = 1;

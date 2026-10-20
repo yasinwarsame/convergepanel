@@ -255,8 +255,10 @@ describe("R9 through the pipeline: 400 spaces in the majority claim, tabs in the
   it("PDF: each model-written text is its own oblique run on the band, holding exactly the single-line text", () => {
     const texts = pdfTexts(AdaptiveResearchDocument({ record: recordOf(report) } as any));
     const runs = modelRuns(texts);
-    // Unified answer + Agreement: the top claim twice; Disagreement: the split claim; the caveat once.
-    expect(runs.map((r) => r.text).sort()).toEqual([`${CAV} ${VER}`, shownSplit, shownTop, shownTop].sort());
+    // Unified answer + Agreement: the top claim twice; Disagreement: the split claim; the caveat once. Order 4 (D3):
+    // this caution run's answer also discloses its load-bearing split — the split claim's second run.
+    expect(report.gate).toBe("caution");
+    expect(runs.map((r) => r.text).sort()).toEqual([`${CAV} ${VER}`, shownSplit, shownSplit, shownTop, shownTop].sort());
     expect(runs.filter((r) => r.text !== `${CAV} ${VER}`).every((r) => r.style === pdfStyles.modelText)).toBe(true);
     expect(runs.filter((r) => r.text === `${CAV} ${VER}`).every((r) => r.style === pdfStyles.modelCaveatText)).toBe(true);
   });

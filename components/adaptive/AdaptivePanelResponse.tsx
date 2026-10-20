@@ -26,7 +26,7 @@ import { ReportStatusInput } from "@/lib/adaptiveSchema/reportStatus";
 import { AdaptiveRendererProps } from "./types";
 import TopSummaryBar from "./TopSummaryBar";
 import AdaptiveResultsView from "./AdaptiveResultsView";
-import AdaptiveSynthesisReportView from "./AdaptiveSynthesisReportView";
+import AdaptiveSynthesisReportView, { AnswerGateLead } from "./AdaptiveSynthesisReportView";
 import ClaimMatrix from "./ClaimMatrix";
 import ListView from "./ListView";
 import DirectAnswerCard from "./DirectAnswerCard";
@@ -205,6 +205,7 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
       humanReview={props.humanReview}
       reviewRouting={props.reviewRouting}
       gate={gate}
+      synthesisReport={synthesisReport}
       trustSummary={trustSummary}
       meta={props.meta}
       ancillaryPresentation={ancillary}
@@ -230,8 +231,14 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
   // synthesis-report shell. Fields/prompt/parser/verification are
   // unchanged — only this rendering choice differs from every other active
   // schema below.
+  //
+  // O-1: this page shows no Unified Answer, so the report's stored gate, its notice and (caution) the load-bearing
+  // split claims lead the answer card here — presentAnswerGate, the gate part presentUnifiedAnswer leads with, with
+  // the same D7 boundary the Answer strip uses. Without a report there is no stored gate to state, and nothing is shown.
   if (schema.renderHint === "direct_answer") {
-    return withBar(<DirectAnswerCard results={results} alignedClaims={alignedClaims} gate={gate} />);
+    return withBar(
+      <DirectAnswerCard results={results} alignedClaims={alignedClaims} gate={gate} gateLead={synthesisReport ? <AnswerGateLead report={synthesisReport} /> : undefined} />
+    );
   }
 
   // ranked_enumeration (Milestone 2): its own standalone view — coverage/

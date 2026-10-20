@@ -44,7 +44,7 @@ import { CONSENSUS_LABELS, SOURCE_GROUNDING_LABELS } from "@/lib/adaptiveSchema/
 import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
 import { FieldSpec } from "@/lib/adaptiveSchema/types";
 import { presentVerdictCaveat, presentVerdictClaim } from "@/lib/adaptiveSchema/agreementNarrative";
-import { answerClaimLines, presentUnifiedAnswer } from "@/lib/adaptiveSchema/reportPresentation";
+import { answerClaimLines, answerLeadBlocks, blockText, presentUnifiedAnswer, unresolvedGroups } from "@/lib/adaptiveSchema/reportPresentation";
 import {
   fieldLabel,
   formatExportTimestamp,
@@ -296,14 +296,26 @@ function legacySection(record: AdaptiveResearchExportV1): (Paragraph | Table)[] 
       // "Panel conclusion" paragraph. Reports persisted before it export exactly as before.
       const answer = presentUnifiedAnswer(synthesis);
       out.push(heading("Unified answer"));
+      // Order 4 (D5): the computed gate and notice lead the answer; a caution answer ends with its load-bearing splits.
+      for (const block of answerLeadBlocks(answer)) out.push(body(blockText(block)));
       if (answer.note) out.push(body(answer.note.text));
       if (answer.claimsHeading) out.push(muted(answer.claimsHeading));
       for (const item of answer.claims) {
         const [claim, ...computed] = answerClaimLines(item);
         out.push(body(claim), ...computed.map((line) => muted(line)));
       }
+      const unresolved = unresolvedGroups(answer);
+      if (unresolved.length > 0) out.push(muted(answer.unresolvedHeading!));
+      for (const parts of unresolved) {
+        const [first, ...computed] = parts.map(blockText);
+        // A claim's text is body; its computed lines, and the F3 unreadable note, are muted.
+        out.push(parts[0].source === "model_claim" ? body(first) : muted(first), ...computed.map((line) => muted(line)));
+      }
     } else {
-      out.push(heading("Panel conclusion"), body(synthesis.unifiedAnswer));
+      out.push(heading("Panel conclusion"));
+      // D8: an unrecognized stored gate is stated first; a known gate exports exactly as before.
+      for (const block of answerLeadBlocks(presentUnifiedAnswer(synthesis))) out.push(body(blockText(block)));
+      out.push(body(synthesis.unifiedAnswer));
     }
     out.push(heading("Where models agree / disagree"));
     // Consensus Integrity: the quoted claim with its computed status (R4-1), and the canonical contested note

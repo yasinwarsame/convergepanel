@@ -118,6 +118,8 @@ AdaptiveResearchJsonExportV1
 
 `level` is one of `"strong" | "moderate" | "weak" | "split" | "unscored"` (consensus) or `"strong" | "moderate" | "weak" | "unscored"` (source grounding). **`"unscored"` is a real, honestly-computed value** — it means this schema (e.g. `creative_generative`) has no consensus/grounding concept at all, not that scoring failed or was skipped. It is never coerced to `0`, which would falsely imply a measured score of zero.
 
+For the legacy schemas that are scored by the verification gate (the original 9 and `factual_lookup`), `consensus.level` is the stored gate mapped to a tier (pass → `strong`, caution → `moderate`, fail → `weak`, an unrecognized value → `unscored`), read from `result.synthesisReport.gate` when a report is present (Order 4). It is not a measurement, and `result.gate` / `result.synthesisReport.gate` keep the raw stored values. Only a record whose two stored gate copies disagree, or hold an unrecognized value, exports a different level than before Order 4, and an export already created keeps its frozen level.
+
 **Consensus does not prove factual correctness.** A `"strong"` consensus level means multiple models agreed with each other — it says nothing about whether that agreement reflects ground truth. Models trained on similar data, or sharing a common blind spot, can produce strong agreement on an incorrect answer.
 
 **Source grounding is a distinct signal from consensus**, not a component of it. A response can have strong consensus (models agree) with weak source grounding (little cited evidence), or the reverse (well-sourced but models disagree on interpretation). Consumers should not average or conflate the two into a single "trust score."

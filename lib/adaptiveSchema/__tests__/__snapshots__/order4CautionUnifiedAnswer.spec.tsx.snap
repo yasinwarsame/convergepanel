@@ -1,0 +1,36 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`claim-verification memo (shared generator) is unaffected generates exactly the claim memo it did before Order 4 1`] = `
+"VERIFICATION MEMO
+ConvergePanel Multi-Model Claim Verification
+Generated: <t>
+
+CLAIM VERIFIED
+"The bridge opened in 1932"
+
+VERDICT: MOSTLY_TRUE
+CONSENSUS SCORE: 74/100 (Medium confidence)
+EVIDENCE QUALITY: strong
+
+SUMMARY
+1 AI models evaluated this claim independently. Models evaluated this claim independently; review per-model detail below.
+
+MODEL VERDICTS
+  ChatGPT:    TRUE (high confidence)
+
+WHERE MODELS AGREE
+- Opened in 1932
+
+WHERE MODELS DISAGREE
+- Exact day differs
+
+METHODOLOGY
+This claim was independently evaluated by 1 large language model (ChatGPT) via ConvergePanel. Each model received the claim with identical instructions to evaluate accuracy, identify correct and incorrect parts, and provide evidence. Models were not shown each other's responses. The consensus score reflects the degree of agreement across models weighted by evidence quality.
+
+DISCLAIMER
+This is an AI-assisted verification, not a definitive fact-check. Results should inform editorial judgment, not replace it. AI models have known limitations including training data cutoffs, potential biases, and the possibility of confident but incorrect outputs.
+
+Report ID: v-1
+Source: convergepanel.com
+"
+`;

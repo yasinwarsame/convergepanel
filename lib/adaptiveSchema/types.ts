@@ -1420,6 +1420,28 @@ export interface PresentedUnifiedAnswer {
   claims: PresentedAnswerClaim[];
 }
 
+/** A load-bearing split claim (Order 4, D3): the presented claim and the models on each side — unclear positions on neither. */
+export interface PresentedUnresolvedClaim extends PresentedClaim {
+  /** Family names of the models that support it (agrees/partial), comma-separated; absent when none. */
+  supporters?: string;
+  /** Family names of the models that dispute it, comma-separated; absent when none. */
+  disputers?: string;
+}
+
+/**
+ * Order 4 (D2/D3/D7): written by buildAdaptiveSynthesisReport on new reports only. Its presence is the boundary
+ * between the Order 4 gate presentation and historical rendering (gatePresentation.hasGatePresentation). It holds
+ * no gate reason (D1 deferred): the caution notice is worded at render time from the stored gate alone.
+ */
+export interface PresentedVerificationGate {
+  /**
+   * The gate's load-bearing claims (its top-N by salience) whose computed status is split, in the gate's order —
+   * the same rows as the persisted gate's loadBearingClaims. Shown in a caution answer (D3); empty when none.
+   * Disclosed as findings, never as the cause of the gate.
+   */
+  unresolvedLoadBearing: PresentedUnresolvedClaim[];
+}
+
 export interface PresentedDisagreement extends PresentedClaim {
   /** Whether the paired whyTheyDiffer came from the narrative model or is the deterministic default. */
   whySource: "model_explanation" | "computed";
@@ -1448,6 +1470,8 @@ export interface AdaptiveReportPresentation {
   executiveSummarySource: "model_explanation" | "unified_answer";
   /** The narrative model's certainty explanation, shown labelled after the computed certaintyAssessment; absent when none. */
   certaintyExplanation?: string;
+  /** Order 4 gate presentation (D2/D3/D7); absent on reports persisted before it existed. */
+  verificationGate?: PresentedVerificationGate;
 }
 
 export interface AdaptiveSynthesisReport {

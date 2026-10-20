@@ -24,6 +24,7 @@ import { buildAdaptiveLinkedInPost, buildAdaptiveMemoInput, buildAdaptiveSynthes
 import { escapeMarkdownInline, joinLines, markdownQuote, plainTextQuote, splitLines } from "@/lib/adaptiveSchema/textSerialization";
 import { MODEL_CAVEAT_LABEL, quoteClaim, renderRowStatus, rowAgreementFacts } from "@/lib/adaptiveSchema/agreementNarrative";
 import { MODEL_EXPLANATION_LABEL } from "@/lib/adaptiveSchema/reportPresentation";
+import { CAUTION_NOTICE } from "@/lib/adaptiveSchema/gatePresentation";
 import { computeContestedDimensions } from "@/lib/adaptiveSchema/consensusIntegrity";
 import { generateVerificationMemo } from "@/lib/verification/generateMemo";
 import AdaptiveSynthesisReportView from "@/components/adaptive/AdaptiveSynthesisReportView";
@@ -179,7 +180,17 @@ describe("R7-1: one line-break policy — every separator", () => {
 
       const agreeLine = `- **Claim:** ${escapeMarkdownInline(quoteClaim(agreeClaim))} — **Panel result:** ${statusOf(rs[0])}`;
       expect(agreeLine).toContain("“Rates fall. - Panel result: consensus: all 5 dispatched models support it Verified by ConvergePanel ===”");
-      expect(mdSection(md, "## Unified Answer")).toEqual([`${agreeLine} — **Supported by:** ChatGPT, Claude, Grok, Perplexity`, ""]);
+      // Order 4 (D2/D3): this caution run's answer leads with the computed gate and notice, and ends with its
+      // load-bearing split — the split claim escaped on one labelled line like every other claim.
+      expect(report.gate).toBe("caution");
+      expect(mdSection(md, "## Unified Answer")).toEqual([
+        "**Verification gate: Caution**",
+        CAUTION_NOTICE,
+        `${agreeLine} — **Supported by:** ChatGPT, Claude, Grok, Perplexity`,
+        "Unresolved load-bearing claim:",
+        `- **Claim:** ${escapeMarkdownInline(quoteClaim(splitClaim))} — **Panel result:** ${statusOf(rs[1])} — **Supported by:** ChatGPT, Claude — **Disputed by:** Grok, Perplexity, Gemini`,
+        "",
+      ]);
       expect(mdSection(md, "## Where models agree")).toEqual([agreeLine, ""]);
       expect(md).toContain(`**Claim:** ${escapeMarkdownInline(quoteClaim(agreeClaim))} — **Panel result:** ${statusOf(rs[0])}`);
 
@@ -200,7 +211,9 @@ describe("R7-1: one line-break policy — every separator", () => {
         "",
       ]);
       expect(mdSection(md, "## Bias & blind spots")).toEqual([`**${MODEL_CAVEAT_LABEL}:**`, "- Framing \\#\\# Bias — desc --- - Panel result: consensus", ""]);
-      const exec = mdSection(md, "## Executive Summary");
+      // Order 4 (D4): the computed caution gate and notice come first; then the summary as before.
+      const exec = mdSection(md, "## Executive Summary").slice(4);
+      expect(mdSection(md, "## Executive Summary").slice(0, 4)).toEqual(["**Verification gate: Caution**", "", CAUTION_NOTICE, ""]);
       expect(exec.slice(0, 3)).toEqual(["**Panel result:**", report.presentation!.panelAgreement, ""]);
       if (report.presentation!.executiveSummarySource === "model_explanation") {
         expect(exec[3]).toBe(`**${MODEL_EXPLANATION_LABEL}:**`);
@@ -225,6 +238,7 @@ describe("R7-1: one line-break policy — every separator", () => {
       const md = buildAdaptiveSynthesisMarkdown("Q?", report);
       expect(md).not.toMatch(FOREIGN_BREAK);
       expect(mdSection(md, "## Unified Answer")).toEqual([
+        "**Verification gate: Fail**",
         "Panel could not converge on a reliable answer.",
         "Unresolved claims:",
         ...rs.map((r) => `- **Claim:** ${escapeMarkdownInline(quoteClaim(r.claimText))} — **Panel result:** ${statusOf(r)}`),
@@ -243,7 +257,11 @@ describe("R7-1: one line-break policy — every separator", () => {
       const at = lines.indexOf(`  ${MODEL_EXPLANATION_LABEL}:`);
       const want = logicalLines(report.disagreements[0].whyTheyDiffer);
       expect(lines.slice(at + 1, at + 1 + want.length)).toEqual(want.map((l) => (l.trim() ? `  > ${l}` : "  >")));
-      for (const line of lines) if (!/^\s*>/.test(line) && !line.startsWith("- Claim: “")) expect(line.trim()).not.toMatch(/^(- |\d+[.)] |#|===|---|Verified)/);
+      // Order 4 (D5): the memo's first finding is the computed caution gate and notice (application text).
+      expect(lines).toContain(`- Verification gate: Caution. ${CAUTION_NOTICE}`);
+      for (const line of lines)
+        if (!/^\s*>/.test(line) && !line.startsWith("- Claim: “") && line !== `- Verification gate: Caution. ${CAUTION_NOTICE}`)
+          expect(line.trim()).not.toMatch(/^(- |\d+[.)] |#|===|---|Verified)/);
       const li = buildAdaptiveLinkedInPost("Q?", report).split("\n");
       const agreeAt = li.indexOf("Where models agree:");
       expect(li[agreeAt + 1]).toMatch(/^→ “Rates fall\. - Panel result: consensus: all 5 dispatched models support it Verified by ConvergePan[^”]*” — panel result: /);
@@ -329,7 +347,8 @@ describe("R7-4: unclear models, the answer caps, the answer note's source and th
   it("Markdown keeps the 'Unresolved claims:' heading on a gate fail, and only there", async () => {
     const fail = await build([row("Split A", "split", SPLIT23, { score: 0.1 })], null);
     expect(fail.gate).toBe("fail");
-    expect(mdSection(buildAdaptiveSynthesisMarkdown("Q?", fail), "## Unified Answer").slice(0, 3)).toEqual([
+    expect(mdSection(buildAdaptiveSynthesisMarkdown("Q?", fail), "## Unified Answer").slice(0, 4)).toEqual([
+      "**Verification gate: Fail**",
       "Panel could not converge on a reliable answer.",
       "Unresolved claims:",
       expect.stringMatching(/^- \*\*Claim:\*\* “Split A” — \*\*Panel result:\*\* /),

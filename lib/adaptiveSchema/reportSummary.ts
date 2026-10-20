@@ -21,6 +21,7 @@
  * runs, so it has no report to summarize).
  */
 
+import { readGateStatus } from "./gatePresentation";
 import {
   AdaptiveGateResult,
   AdaptiveTrustSummary,
@@ -186,7 +187,10 @@ export function deriveConsensusLevel(input: ConsensusInput): ConsensusLevel {
   // Original-9 / factual_lookup family — the only schema-agnostic signal
   // this pipeline computes for them.
   if (gate) {
-    return gate.status === "pass" ? "strong" : gate.status === "caution" ? "moderate" : "weak";
+    // D8: a stored gate value this version does not know is not scored — never read as a pass, caution or fail tier.
+    const status = readGateStatus(gate.status);
+    if (status === "unrecognized") return "unscored";
+    return status === "pass" ? "strong" : status === "caution" ? "moderate" : "weak";
   }
 
   return "unscored";

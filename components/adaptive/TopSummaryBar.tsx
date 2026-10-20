@@ -18,6 +18,7 @@
 import {
   AdaptiveGateResult,
   AdaptiveModelResult,
+  AdaptiveSynthesisReport,
   AdaptiveTrustSummary,
   BiasBlindspotAuditResult,
   CausalExplanationResult,
@@ -32,6 +33,7 @@ import {
   RankedEnumerationResult,
 } from "@/lib/adaptiveSchema/types";
 import { deriveReportStatus, REPORT_STATUS_LABELS, ReportStatusInput } from "@/lib/adaptiveSchema/reportStatus";
+import { withPageGateStatus } from "@/lib/adaptiveSchema/gatePresentation";
 import {
   CONSENSUS_LABELS,
   deriveConsensusLevel,
@@ -49,6 +51,11 @@ type ReportStatusKind = ReturnType<typeof deriveReportStatus>["kind"];
 
 export interface TopSummaryBarProps {
   schemaId: QueryType;
+  /**
+   * R2-1: the report whose stored gate the rest of the page shows (pageGateValue). The consensus badge of a gate-scored
+   * schema is worded from that gate, so it never follows a different stored copy than the banner and answer.
+   */
+  synthesisReport?: Pick<AdaptiveSynthesisReport, "gate"> | null;
   results: AdaptiveModelResult[];
   /** Adaptive Research Export, Phase 1 — threaded through only so AdaptiveExportButton can target the right run; TopSummaryBar itself does nothing else with it. */
   runId?: string | null;
@@ -120,7 +127,7 @@ export default function TopSummaryBar(props: TopSummaryBarProps) {
   const status = deriveReportStatus({ humanReview, reviewRouting, persistenceStatus });
   const consensus = deriveConsensusLevel({
     schemaId,
-    gate,
+    gate: withPageGateStatus(gate, props.synthesisReport),
     comparisonMatrix: props.comparisonMatrix,
     checklistTaxonomy: props.checklistTaxonomy,
     decisionSupport: props.decisionSupport,

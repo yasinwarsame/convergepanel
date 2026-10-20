@@ -35,7 +35,12 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -66,9 +71,24 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     ],
     "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+    "verificationGate": {
+      "unresolvedLoadBearing": [
+        {
+          "claim": "Split claim",
+          "disputers": "ChatGPT",
+          "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+          "supporters": "Claude",
+        },
+      ],
+    },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
@@ -80,7 +100,6 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -129,7 +148,12 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -160,9 +184,24 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     ],
     "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+    "verificationGate": {
+      "unresolvedLoadBearing": [
+        {
+          "claim": "Split claim",
+          "disputers": "ChatGPT",
+          "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+          "supporters": "Claude",
+        },
+      ],
+    },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
@@ -174,7 +213,6 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -223,7 +261,12 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -254,9 +297,24 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     ],
     "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+    "verificationGate": {
+      "unresolvedLoadBearing": [
+        {
+          "claim": "Split claim",
+          "disputers": "ChatGPT",
+          "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+          "supporters": "Claude",
+        },
+      ],
+    },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
@@ -268,7 +326,6 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -317,7 +374,12 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -348,9 +410,24 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     ],
     "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+    "verificationGate": {
+      "unresolvedLoadBearing": [
+        {
+          "claim": "Split claim",
+          "disputers": "ChatGPT",
+          "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+          "supporters": "Claude",
+        },
+      ],
+    },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
@@ -362,7 +439,6 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -411,7 +487,12 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -442,9 +523,24 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     ],
     "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+    "verificationGate": {
+      "unresolvedLoadBearing": [
+        {
+          "claim": "Split claim",
+          "disputers": "ChatGPT",
+          "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+          "supporters": "Claude",
+        },
+      ],
+    },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
@@ -456,7 +552,6 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -505,7 +600,12 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -536,9 +636,24 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     ],
     "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+    "verificationGate": {
+      "unresolvedLoadBearing": [
+        {
+          "claim": "Split claim",
+          "disputers": "ChatGPT",
+          "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+          "supporters": "Claude",
+        },
+      ],
+    },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
@@ -550,7 +665,6 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -599,7 +713,12 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -630,9 +749,24 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     ],
     "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+    "verificationGate": {
+      "unresolvedLoadBearing": [
+        {
+          "claim": "Split claim",
+          "disputers": "ChatGPT",
+          "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+          "supporters": "Claude",
+        },
+      ],
+    },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
@@ -644,7 +778,6 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -693,7 +826,12 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -724,9 +862,24 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     ],
     "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+    "verificationGate": {
+      "unresolvedLoadBearing": [
+        {
+          "claim": "Split claim",
+          "disputers": "ChatGPT",
+          "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+          "supporters": "Claude",
+        },
+      ],
+    },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
@@ -738,7 +891,6 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -787,7 +939,12 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -818,9 +975,24 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     ],
     "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+    "verificationGate": {
+      "unresolvedLoadBearing": [
+        {
+          "claim": "Split claim",
+          "disputers": "ChatGPT",
+          "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+          "supporters": "Claude",
+        },
+      ],
+    },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
@@ -832,7 +1004,6 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -881,7 +1052,12 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -912,9 +1088,24 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     ],
     "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+    "verificationGate": {
+      "unresolvedLoadBearing": [
+        {
+          "claim": "Split claim",
+          "disputers": "ChatGPT",
+          "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+          "supporters": "Claude",
+        },
+      ],
+    },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
@@ -926,7 +1117,6 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -975,7 +1165,12 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -1006,9 +1201,24 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     ],
     "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+    "verificationGate": {
+      "unresolvedLoadBearing": [
+        {
+          "claim": "Split claim",
+          "disputers": "ChatGPT",
+          "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+          "supporters": "Claude",
+        },
+      ],
+    },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
@@ -1020,7 +1230,6 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -1069,7 +1278,12 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -1100,9 +1314,24 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     ],
     "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+    "verificationGate": {
+      "unresolvedLoadBearing": [
+        {
+          "claim": "Split claim",
+          "disputers": "ChatGPT",
+          "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+          "supporters": "Claude",
+        },
+      ],
+    },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
@@ -1114,7 +1343,6 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -1163,7 +1391,12 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -1194,9 +1427,24 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     ],
     "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+    "verificationGate": {
+      "unresolvedLoadBearing": [
+        {
+          "claim": "Split claim",
+          "disputers": "ChatGPT",
+          "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+          "supporters": "Claude",
+        },
+      ],
+    },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
@@ -1208,7 +1456,6 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -1257,7 +1504,12 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -1288,9 +1540,24 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     ],
     "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+    "verificationGate": {
+      "unresolvedLoadBearing": [
+        {
+          "claim": "Split claim",
+          "disputers": "ChatGPT",
+          "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+          "supporters": "Claude",
+        },
+      ],
+    },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
@@ -1302,7 +1569,6 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -1351,7 +1617,12 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -1382,9 +1653,24 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     ],
     "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+    "verificationGate": {
+      "unresolvedLoadBearing": [
+        {
+          "claim": "Split claim",
+          "disputers": "ChatGPT",
+          "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+          "supporters": "Claude",
+        },
+      ],
+    },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
@@ -1396,7 +1682,6 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -1445,7 +1730,12 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -1476,9 +1766,24 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     ],
     "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+    "verificationGate": {
+      "unresolvedLoadBearing": [
+        {
+          "claim": "Split claim",
+          "disputers": "ChatGPT",
+          "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+          "supporters": "Claude",
+        },
+      ],
+    },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
@@ -1490,7 +1795,6 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -1539,7 +1843,12 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -1570,9 +1879,24 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     ],
     "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+    "verificationGate": {
+      "unresolvedLoadBearing": [
+        {
+          "claim": "Split claim",
+          "disputers": "ChatGPT",
+          "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+          "supporters": "Claude",
+        },
+      ],
+    },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
@@ -1584,7 +1908,6 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -1633,7 +1956,12 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -1664,9 +1992,24 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     ],
     "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+    "verificationGate": {
+      "unresolvedLoadBearing": [
+        {
+          "claim": "Split claim",
+          "disputers": "ChatGPT",
+          "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+          "supporters": "Claude",
+        },
+      ],
+    },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
@@ -1678,7 +2021,6 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -1727,7 +2069,12 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -1758,9 +2105,24 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     ],
     "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+    "verificationGate": {
+      "unresolvedLoadBearing": [
+        {
+          "claim": "Split claim",
+          "disputers": "ChatGPT",
+          "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+          "supporters": "Claude",
+        },
+      ],
+    },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
@@ -1772,7 +2134,6 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -1821,7 +2182,12 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -1852,9 +2218,24 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     ],
     "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+    "verificationGate": {
+      "unresolvedLoadBearing": [
+        {
+          "claim": "Split claim",
+          "disputers": "ChatGPT",
+          "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+          "supporters": "Claude",
+        },
+      ],
+    },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
@@ -1866,7 +2247,6 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -1915,7 +2295,12 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -1946,9 +2331,24 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     ],
     "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+    "verificationGate": {
+      "unresolvedLoadBearing": [
+        {
+          "claim": "Split claim",
+          "disputers": "ChatGPT",
+          "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+          "supporters": "Claude",
+        },
+      ],
+    },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
@@ -1960,7 +2360,6 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -2009,7 +2408,12 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -2040,9 +2444,24 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     ],
     "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+    "verificationGate": {
+      "unresolvedLoadBearing": [
+        {
+          "claim": "Split claim",
+          "disputers": "ChatGPT",
+          "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+          "supporters": "Claude",
+        },
+      ],
+    },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
@@ -2054,7 +2473,6 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -2103,7 +2521,12 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -2134,9 +2557,24 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     ],
     "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+    "verificationGate": {
+      "unresolvedLoadBearing": [
+        {
+          "claim": "Split claim",
+          "disputers": "ChatGPT",
+          "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+          "supporters": "Claude",
+        },
+      ],
+    },
   },
   "runCertainty": 0.6599999999999999,
-  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
@@ -2148,7 +2586,6 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -2197,7 +2634,12 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -2228,9 +2670,24 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     ],
     "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+    "verificationGate": {
+      "unresolvedLoadBearing": [
+        {
+          "claim": "Split claim",
+          "disputers": "ChatGPT",
+          "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+          "supporters": "Claude",
+        },
+      ],
+    },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
@@ -2242,7 +2699,6 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -2291,7 +2747,12 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -2322,9 +2783,24 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     ],
     "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+    "verificationGate": {
+      "unresolvedLoadBearing": [
+        {
+          "claim": "Split claim",
+          "disputers": "ChatGPT",
+          "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+          "supporters": "Claude",
+        },
+      ],
+    },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
@@ -2336,7 +2812,6 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -2385,7 +2860,12 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -2416,9 +2896,24 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     ],
     "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+    "verificationGate": {
+      "unresolvedLoadBearing": [
+        {
+          "claim": "Split claim",
+          "disputers": "ChatGPT",
+          "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+          "supporters": "Claude",
+        },
+      ],
+    },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
@@ -2430,7 +2925,6 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -2479,7 +2973,12 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -2510,9 +3009,24 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     ],
     "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+    "verificationGate": {
+      "unresolvedLoadBearing": [
+        {
+          "claim": "Split claim",
+          "disputers": "ChatGPT",
+          "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+          "supporters": "Claude",
+        },
+      ],
+    },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
@@ -2524,7 +3038,6 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",
@@ -2573,7 +3086,12 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
       "whyTheyDiffer": "Models take different positions on this point — see each model's excerpt below.",
     },
   ],
-  "executiveSummary": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "executiveSummary": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "gate": "caution",
   "narrativeSections": [],
   "panelCoverageGaps": [],
@@ -2604,9 +3122,24 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     ],
     "executiveSummarySource": "unified_answer",
     "panelAgreement": "Of 2 scored claims across 5 dispatched models: consensus on 1; a split on 1.",
+    "verificationGate": {
+      "unresolvedLoadBearing": [
+        {
+          "claim": "Split claim",
+          "disputers": "ChatGPT",
+          "result": "split: 1 of 5 dispatched models support it and 1 disputes it",
+          "supporters": "Claude",
+        },
+      ],
+    },
   },
   "runCertainty": 0.66,
-  "unifiedAnswer": "“Consensus claim” (ChatGPT, Claude, Grok).",
+  "unifiedAnswer": "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.
+
+“Consensus claim” (ChatGPT, Claude, Grok).
+
+Unresolved load-bearing claim:
+- “Split claim” (split: 1 of 5 dispatched models support it and 1 disputes it)",
   "verdictCard": {
     "caveat": null,
     "consensusModelCount": 3,
@@ -2618,7 +3151,6 @@ exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has 
     "recommendedNextSteps": [
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
       "Re-run with additional models or a narrower question if this decision is time-sensitive.",
-      "Flag the caveat below to anyone else relying on this synthesis.",
     ],
     "topConsensus": "Consensus claim",
     "topConsensusAgreement": "consensus: 3 of 5 dispatched models support it",

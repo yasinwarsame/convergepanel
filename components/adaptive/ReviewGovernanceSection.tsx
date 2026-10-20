@@ -52,15 +52,9 @@ import { deriveReportStatus, REPORT_STATUS_LABELS, ReportStatusInput } from "@/l
 import { decidedViaLabel, ReviewGovernanceReviewerView, ReviewGovernanceViewModel } from "@/lib/adaptiveSchema/reviewGovernanceViewModel";
 import { AdaptiveGateResult, AdaptiveSynthesisReport } from "@/lib/adaptiveSchema/types";
 import { Card, SectionLabel } from "./shared";
-import AdaptiveSynthesisReportView, { PanelVerdictCard } from "./AdaptiveSynthesisReportView";
+import AdaptiveSynthesisReportView, { GateBanner, PanelVerdictCard } from "./AdaptiveSynthesisReportView";
 
 const TERMINAL_STATUS_KINDS = new Set(["approved", "approved_with_conditions", "changes_requested", "rejected"]);
-
-const GATE_STYLES: Record<AdaptiveGateResult["status"], { label: string; className: string }> = {
-  pass: { label: "Verified — panel converges", className: "bg-green-50 text-green-800 border-green-200" },
-  caution: { label: "Caution — partial convergence", className: "bg-amber-50 text-amber-800 border-amber-200" },
-  fail: { label: "Could not verify — panel split", className: "bg-red-50 text-red-800 border-red-200" },
-};
 
 const LEGACY_STATUS_LABELS: Record<"approved" | "needs_review" | "blocked", string> = {
   approved: "Approved",
@@ -510,7 +504,7 @@ export function ReviewGovernanceBody({
           </>
         )}
 
-        {gate && <VerificationGate gate={gate.status} />}
+        {gate && <VerificationGate report={synthesisReport} gate={gate.status} />}
         {gate && synthesisReport && <PanelVerdictCard report={synthesisReport} gate={gate} />}
 
         {/* GovernanceRecordV1 only exists for Milestone-2 schemas — skip the
@@ -542,12 +536,12 @@ export function ReviewGovernanceBody({
   );
 }
 
-function VerificationGate({ gate }: { gate: AdaptiveGateResult["status"] }) {
-  const style = GATE_STYLES[gate];
+/** The governance section's gate: the report view's banner — one wording source (gatePresentation.ts, D6). */
+function VerificationGate({ report, gate }: { report: AdaptiveSynthesisReport | undefined; gate: unknown }) {
   return (
     <div>
       <SectionLabel>Verification gate</SectionLabel>
-      <div className={`rounded-xl border px-4 py-3 text-sm font-medium ${style.className}`}>{style.label}</div>
+      <GateBanner report={report ?? null} gate={gate} />
     </div>
   );
 }
