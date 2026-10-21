@@ -181,6 +181,19 @@ describe("H-1: X weighted length follows twitter-text v3 (oracle: twitter-text 3
     }
     // "example.community" cut to "example.com…" would be a new link: never produced
     for (let b = 1; b <= 90; b += 1) expect(xFit(t, b)).not.toMatch(/example\.com(?![/m])/);
+    // A cut never falls inside a URL: each of the original's URLs is either whole at its place or entirely gone.
+    for (let b = 1; b <= 90; b += 1) {
+      const kept = xFit(t, b).replace(/…$/, "");
+      for (const u of xUrlSpans(t)) expect([b, kept.length <= u.start || kept.slice(u.start, u.end) === u.url]).toEqual([b, true]);
+    }
+  });
+
+  it("xFit never shortens a word into a link that was not there ('example.comx' is no URL; 'example.com…' is)", () => {
+    for (const t of ["visit example.comx notes on wages", "averyveryverylongdomainname.comx notes"]) {
+      expect(xUrlSpans(t)).toEqual([]);
+      // the second: "averyveryverylongdomainname.com…" would weigh 24 (a link) where its raw prefix weighs more
+      for (let b = 1; b <= 40; b += 1) expect([t, b, xUrlSpans(xFit(t, b))]).toEqual([t, b, []]);
+    }
   });
 
   const QUESTIONS: [string, string][] = [
@@ -327,6 +340,7 @@ describe("H-3: no source count or column implies support that was not establishe
     expect(t).not.toMatch(/>Citations</);
     expect(out["ui.synthesisView"]).toContain(">Sources named<");
     expect(t).toContain("which is not checked; 100% when the schema asks for no source");
+    if (d.totalClaimCount > 0) expect(t).toContain("sources are not checked"); // literal, not via the presenter
   });
 
   it("negative control: unmarked keeps 'claims cite a source' and the Citations column", async () => {
@@ -403,6 +417,11 @@ describe("N-6: value comparisons disclose values, not positions", () => {
 });
 
 describe("N-8: no repeated prefixes", () => {
+  it("two matching steps read 'Both panel slots', never 'All 2'", () => {
+    const st = (m: string) => ({ modelId: m, stance: "agrees", origin: { kind: "field_derived", fieldType: "step" }, excerpt: "Install the package", raw: { order: 1, action: "Install the package" } });
+    const v = rowView({ id: "r", claimText: "Step 1", status: "consensus", agreementScore: 1, cells: [st("chatgpt"), st("claude"), null, null] } as any, ["chatgpt", "claude", "grok", "perplexity"], null)!;
+    expect(v.text).toMatch(/^Both panel slots that gave a step at this position use the same wording/);
+  });
   it("statementAfterHeading drops a repeated heading only", () => {
     expect(statementAfterHeading("Consensus", "consensus: all 5 dispatched models support it")).toBe("all 5 dispatched models support it");
     expect(statementAfterHeading("Values differ", "Values differ: 3 numeric values")).toBe("3 numeric values");
