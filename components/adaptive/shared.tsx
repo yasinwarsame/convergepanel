@@ -12,6 +12,8 @@ import { AdaptiveModelResult, AdaptiveStakes } from "@/lib/adaptiveSchema/types"
 import { getPanelModelConfig } from "@/lib/panelModels";
 import { runModelFamilyName } from "@/lib/panel/runModelIdentity";
 import ModelChip from "@/components/ModelChip";
+import { substitutedSlotLabel } from "@/lib/adaptiveSchema/positionPresentation";
+import { usePositionPresentation } from "./PositionPresentationContext";
 
 /**
  * A completed run's slot, named by product family only ("ChatGPT") — never a
@@ -21,6 +23,33 @@ import ModelChip from "@/components/ModelChip";
  */
 export function getModelLabel(modelId: ModelId | string): string {
   return runModelFamilyName(modelId);
+}
+
+/**
+ * Order 5 Contract P (H-2): a slot's name where a surface shows that slot's recorded output. On a marked report whose
+ * recorded provenance says the slot was substituted, the full slot label — "Claude slot (substituted; answered by
+ * DeepSeek)" — so the requested model is never named as the author of the substitute's response. Otherwise (and on
+ * every unmarked report) exactly `getModelLabel`. Nothing is inferred: without recorded provenance the slot keeps its
+ * family name.
+ */
+export function SlotName({ modelId }: { modelId: ModelId | string }) {
+  const position = usePositionPresentation();
+  return <>{(position && substitutedSlotLabel(String(modelId), position.provenance)) || getModelLabel(modelId)}</>;
+}
+
+/** `ModelChip`, followed on a marked report by the recorded substitution of a substituted slot (H-2); otherwise exactly `ModelChip`. */
+export function SlotChip(props: React.ComponentProps<typeof ModelChip>) {
+  const position = usePositionPresentation();
+  const substituted = position ? substitutedSlotLabel(String(props.modelId), position.provenance) : null;
+  if (!substituted) return <ModelChip {...props} />;
+  return (
+    <>
+      <ModelChip {...props} />
+      <span data-source="recorded" className="text-xs text-slate-500 whitespace-nowrap">
+        {substituted}
+      </span>
+    </>
+  );
 }
 
 export function splitResults(results: AdaptiveModelResult[]): {
@@ -65,7 +94,7 @@ export function FailedResultsNote({ failed }: { failed: AdaptiveModelResult[] })
           <li key={r.modelId} className="flex items-start gap-2">
             <ModelChip modelId={r.modelId} size="xs" />
             <div className="text-red-700">
-              <p>{getModelLabel(r.modelId)} returned an incompatible format and was excluded from comparison.</p>
+              <p><SlotName modelId={r.modelId} /> returned an incompatible format and was excluded from comparison.</p>
               {r.parseError && (
                 <details className="mt-0.5">
                   <summary className="cursor-pointer text-xs text-red-600">Details</summary>
@@ -93,7 +122,7 @@ export function PerModelCardGrid({
       {results.map((r) => (
         <Card key={r.modelId}>
           <div className="mb-2">
-            <ModelChip modelId={r.modelId} size="xs" />
+            <SlotChip modelId={r.modelId} size="xs" />
           </div>
           {r.data ? renderBody(r.data, r.modelId) : null}
         </Card>

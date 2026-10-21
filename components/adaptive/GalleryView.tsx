@@ -7,7 +7,7 @@
  */
 
 import { AdaptiveRendererProps } from "./types";
-import { Card, FailedResultsNote, splitResults, getModelLabel } from "./shared";
+import { Card, FailedResultsNote, splitResults, SlotName } from "./shared";
 
 export default function GalleryView({ results }: AdaptiveRendererProps) {
   const { ok, failed } = splitResults(results);
@@ -18,7 +18,7 @@ export default function GalleryView({ results }: AdaptiveRendererProps) {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {ok.map((r) => (
           <Card key={r.modelId}>
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">{getModelLabel(r.modelId)}</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2"><SlotName modelId={r.modelId} /></p>
             <div className="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">{r.data?.output as string}</div>
             {Array.isArray(r.data?.styleNotes) && r.data.styleNotes.length > 0 && (
               <p className="mt-3 text-xs text-slate-400 italic">{r.data.styleNotes.join(" · ")}</p>

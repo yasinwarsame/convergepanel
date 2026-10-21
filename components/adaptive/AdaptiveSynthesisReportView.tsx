@@ -56,6 +56,7 @@ import {
   RowView,
   biasWithheldNotice,
   coverageWithheldNotice,
+  markedSourceCountText,
   positionView,
   presentPositionSafeReport,
   presentedRowKind,
@@ -63,6 +64,7 @@ import {
   rowKindsHeading,
   rowView,
   slotLabel,
+  statementAfterHeading,
 } from "@/lib/adaptiveSchema/positionPresentation";
 import { PositionPresentationBoundary, usePositionPresentation } from "./PositionPresentationContext";
 
@@ -84,8 +86,7 @@ export const ADAPTIVE_SYNTHESIS_SECTION_IDS = [
   "disclaimer",
   "export-actions",
 ] as const;
-import { Card, SectionLabel, ProbabilityBar, StakesBadge, TintBadge, getModelLabel } from "./shared";
-import ModelChip from "@/components/ModelChip";
+import { Card, SectionLabel, ProbabilityBar, StakesBadge, TintBadge, getModelLabel, SlotName, SlotChip } from "./shared";
 import { classifyClaimSeverity } from "@/lib/verificationGate/claimSeverity";
 import { VerificationActions } from "@/components/VerificationActions";
 import { generateVerificationMemo, downloadTextFile } from "@/lib/verification/generateMemo";
@@ -287,7 +288,12 @@ const PARSE_HEALTH_STYLES: Record<ModelTrustSummary["parseHealth"], string> = {
   failed: "bg-red-50 text-red-700 border-red-200",
 };
 
-export const TRUST_INPUTS_NOTE = "Trust inputs are computed over every scored row, value comparisons included; they are not claim positions.";
+/**
+ * Marked trust table (F-2, N-1, N-7, H-3): what each stored input counts, stated exactly. The values are the stored
+ * ones (trustSummary.ts) — changing them, including the slot-order tie-break, is Contract C.
+ */
+export const TRUST_INPUTS_NOTE =
+  "Computed from the stored rows and responses, value comparisons included; these are not claim positions. Stance match: the share of the rows where the slot has a position whose stance is the row's most common one (a tie is decided by slot order; 100% when the slot has no position). Contradictions: split rows where the slot disputes. Items contributed: items in the slot's own response. Sources named: the share of the slot's metric values and factual answer that name a source, which is not checked; 100% when the schema asks for no source.";
 
 /** Exported — see UnifiedAnswerCard's export doc above. */
 export function TrustSummaryTable({ trustSummary }: { trustSummary: AdaptiveTrustSummary }) {
@@ -312,8 +318,8 @@ export function TrustSummaryTable({ trustSummary }: { trustSummary: AdaptiveTrus
               <th className="py-2 pr-4 font-medium">Model</th>
               <th className="py-2 pr-4 font-medium">Trust</th>
               <th className="py-2 pr-4 font-medium">{marked ? "Items contributed" : "Claims"}</th>
-              <th className="py-2 pr-4 font-medium">{marked ? "Stance match (all rows)" : "Majority align"}</th>
-              <th className="py-2 pr-4 font-medium">Citations</th>
+              <th className="py-2 pr-4 font-medium">{marked ? "Stance match" : "Majority align"}</th>
+              <th className="py-2 pr-4 font-medium">{marked ? "Sources named" : "Citations"}</th>
               <th className="py-2 pr-4 font-medium">Contradictions</th>
               <th className="py-2 pr-4 font-medium">Health</th>
             </tr>
@@ -322,7 +328,7 @@ export function TrustSummaryTable({ trustSummary }: { trustSummary: AdaptiveTrus
             {trustSummary.perModel.map((m) => (
               <tr key={m.modelId} className="border-b border-slate-100 last:border-0">
                 <td className="py-2 pr-4">
-                  <ModelChip modelId={m.modelId} size="xs" />
+                  <SlotChip modelId={m.modelId} size="xs" />
                 </td>
                 <td className="py-2 pr-4 font-medium text-slate-800">
                   {Math.round(m.trustScore * 100)}%
@@ -505,7 +511,7 @@ export function SlotPositionsList({ slots, className = "" }: { slots: PresentedS
 function RowStatement({ view }: { view: RowView }) {
   return (
     <p data-source="computed" className="text-xs text-slate-600">
-      <span className="font-medium">{view.heading}:</span> {view.text}
+      <span className="font-medium">{view.heading}:</span> {statementAfterHeading(view.heading, view.text)}
     </p>
   );
 }
@@ -601,7 +607,7 @@ export function AgreementDisagreementMap({ claims, modelsUsed }: { claims: Align
                   <div className="flex items-center gap-1 flex-wrap">
                     <span className="text-[10px] font-medium uppercase tracking-wide text-emerald-600">Agree</span>
                     {agreeModels.map((m) => (
-                      <ModelChip key={`agree-${m}`} modelId={m} size="xs" className="ring-1 ring-emerald-300" />
+                      <SlotChip key={`agree-${m}`} modelId={m} size="xs" className="ring-1 ring-emerald-300" />
                     ))}
                   </div>
                 )}
@@ -609,7 +615,7 @@ export function AgreementDisagreementMap({ claims, modelsUsed }: { claims: Align
                   <div className="flex items-center gap-1 flex-wrap">
                     <span className="text-[10px] font-medium uppercase tracking-wide text-rose-600">Dispute</span>
                     {disputeModels.map((m) => (
-                      <ModelChip key={`dispute-${m}`} modelId={m} size="xs" className="ring-1 ring-rose-300" />
+                      <SlotChip key={`dispute-${m}`} modelId={m} size="xs" className="ring-1 ring-rose-300" />
                     ))}
                   </div>
                 )}
@@ -617,7 +623,7 @@ export function AgreementDisagreementMap({ claims, modelsUsed }: { claims: Align
                   <div className="flex items-center gap-1 flex-wrap">
                     <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400">Silent</span>
                     {silentModels.map((m) => (
-                      <ModelChip key={`silent-${m}`} modelId={m} size="xs" className="opacity-50" />
+                      <SlotChip key={`silent-${m}`} modelId={m} size="xs" className="opacity-50" />
                     ))}
                   </div>
                 )}
@@ -649,7 +655,7 @@ export function SingleModelInsightsList({ claims, labelled = false }: { claims: 
           const soleCell = claim.cells.find((c): c is AlignedClaimCell => !!c);
           return (
             <li key={claim.id} className="flex items-start gap-2 text-sm">
-              {soleCell && <ModelChip modelId={soleCell.modelId} size="xs" className="mt-0.5 shrink-0" />}
+              {soleCell && <SlotChip modelId={soleCell.modelId} size="xs" className="mt-0.5 shrink-0" />}
               {labelled ? (
                 // New reports (presentation present): the claim is model-written — quoted and labelled; the card's heading is its result.
                 <span data-source="model_claim" className="text-slate-700">
@@ -757,7 +763,7 @@ export function DisagreementsSection({ report }: { report: AdaptiveSynthesisRepo
                   {d.positions.map((p, posIdx) => (
                     <div key={posIdx} className="pl-3 border-l-2 border-orange-300">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="text-sm font-medium text-orange-900">{getModelLabel(p.modelId)}:</span>
+                        <span className="text-sm font-medium text-orange-900"><SlotName modelId={p.modelId} />:</span>
                       </div>
                       <p className="text-sm text-orange-800">&ldquo;{p.position}&rdquo;</p>
                     </div>
@@ -783,7 +789,7 @@ export function BiasFindingCards({ findings }: { findings: AdaptiveSynthesisRepo
           <div className="pl-4">
             <div className="flex flex-wrap items-center gap-2 mb-2">
               {b.modelsImplicated.map((m) => (
-                <ModelChip key={m} modelId={m} size="xs" />
+                <SlotChip key={m} modelId={m} size="xs" />
               ))}
             </div>
             <h3 className="text-slate-900 font-semibold mb-1">{b.biasType}</h3>
@@ -794,7 +800,7 @@ export function BiasFindingCards({ findings }: { findings: AdaptiveSynthesisRepo
                 {b.evidence.map((e, evIdx) => (
                   <div key={evIdx} className="pl-3 border-l-2 border-slate-300">
                     <p className="text-sm text-slate-700">
-                      <span className="font-medium">{getModelLabel(e.modelId)}:</span> &ldquo;{e.excerpt}&rdquo;
+                      <span className="font-medium"><SlotName modelId={e.modelId} />:</span> &ldquo;{e.excerpt}&rdquo;
                     </p>
                     <p className="text-xs text-slate-500 mt-0.5">{e.rationale}</p>
                   </div>
@@ -854,6 +860,7 @@ function CoverageGapCard({
 
 /** T3: a single compact strip of inline stats — never cards, per spec. */
 function DiagnosticsStrip({ diagnostics }: { diagnostics: AdaptiveSynthesisReport["diagnostics"] }) {
+  const marked = !!usePositionPresentation();
   const citationPct = diagnostics.totalClaimCount > 0 ? diagnostics.citedClaimCount / diagnostics.totalClaimCount : null;
   const citationDanger = citationPct !== null && citationPct < CITATION_COVERAGE_DANGER_THRESHOLD;
 
@@ -872,7 +879,7 @@ function DiagnosticsStrip({ diagnostics }: { diagnostics: AdaptiveSynthesisRepor
     <div className="flex flex-wrap items-center gap-2">
       {citationPct !== null && (
         <TintBadge tone={citationDanger ? "danger" : "accent"}>
-          Citations: {diagnostics.citedClaimCount} of {diagnostics.totalClaimCount} claims cite a source
+          {marked ? markedSourceCountText(diagnostics.citedClaimCount, diagnostics.totalClaimCount) : <>Citations: {diagnostics.citedClaimCount} of {diagnostics.totalClaimCount} claims cite a source</>}
         </TintBadge>
       )}
       {evidenceParts.length > 0 && <TintBadge tone="accent">Evidence mix: {evidenceParts.join(", ")}</TintBadge>}
@@ -1068,7 +1075,7 @@ function LoadBearingClaim({ claim }: { claim: AlignedClaim }) {
           {rowKindLabel(presentedRowKind(view), CLAIM_LABEL)}: {quoteClaim(claim.claimText)}
         </span>
         <span data-source="computed" className="block text-xs text-slate-500 mt-0.5">
-          {PANEL_RESULT_LABEL}: <span className="font-medium">{view.heading}</span> — {view.text}
+          {PANEL_RESULT_LABEL}: <span className="font-medium">{view.heading}</span> — {statementAfterHeading(view.heading, view.text)}
           {who.length > 0 ? ` (${who.join("; ")})` : ""}
         </span>
       </>

@@ -9,7 +9,7 @@
 
 import { ModelId } from "@/lib/types";
 import { AdaptiveRendererProps } from "./types";
-import { Card, SectionLabel, BulletList, FailedResultsNote, ProbabilityBar, splitResults, getModelLabel } from "./shared";
+import { Card, SectionLabel, BulletList, FailedResultsNote, ProbabilityBar, splitResults, SlotName } from "./shared";
 
 function normalizeLabel(label: string): string {
   return label.trim().toLowerCase();
@@ -66,7 +66,7 @@ export default function ScenarioTreeView({ results }: AdaptiveRendererProps) {
                     const s = byModel.get(modelId);
                     return (
                       <div key={modelId} className="flex items-center gap-2 text-xs">
-                        <span className="w-24 shrink-0 text-slate-500">{getModelLabel(modelId)}</span>
+                        <span className="w-24 shrink-0 text-slate-500"><SlotName modelId={modelId} /></span>
                         {s ? (
                           <>
                             <div className="flex-1">

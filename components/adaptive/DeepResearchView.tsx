@@ -15,8 +15,7 @@
 
 import { useEffect, useRef } from "react";
 import { AggregatedResearchFinding, DeepResearchResult } from "@/lib/adaptiveSchema/types";
-import { Card, EmptyStateCard, SectionLabel, TintBadge, formatModelCoverage } from "./shared";
-import ModelChip from "@/components/ModelChip";
+import { Card, EmptyStateCard, SectionLabel, TintBadge, formatModelCoverage, SlotChip } from "./shared";
 
 const GENERAL_CATEGORY = "General";
 
@@ -90,7 +89,7 @@ function FindingRow({
       <div className="mt-1.5 flex flex-wrap items-center gap-2">
         <div className="flex flex-wrap gap-1">
           {finding.contributingModels.map((modelId) => (
-            <ModelChip key={modelId} modelId={modelId} size="xs" />
+            <SlotChip key={modelId} modelId={modelId} size="xs" />
           ))}
         </div>
         {canVerify && (
@@ -211,7 +210,7 @@ export default function DeepResearchView({
                   {d.label}
                   <div className="mt-1 flex flex-wrap gap-1">
                     {d.supportingModels.map((modelId) => (
-                      <ModelChip key={modelId} modelId={modelId} size="xs" />
+                      <SlotChip key={modelId} modelId={modelId} size="xs" />
                     ))}
                   </div>
                 </li>
@@ -308,7 +307,7 @@ export default function DeepResearchView({
           {contributingModels.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1">
               {contributingModels.map((modelId) => (
-                <ModelChip key={modelId} modelId={modelId} size="xs" />
+                <SlotChip key={modelId} modelId={modelId} size="xs" />
               ))}
             </div>
           )}

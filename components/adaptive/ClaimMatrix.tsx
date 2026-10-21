@@ -9,8 +9,8 @@
 import { Fragment, useState } from "react";
 import { ModelId } from "@/lib/types";
 import { AlignedClaim, ClaimCellStance } from "@/lib/adaptiveSchema/types";
-import { getModelLabel } from "./shared";
-import { POSITIONS_BY_SLOT_HEADING, rowView, slotLabel } from "@/lib/adaptiveSchema/positionPresentation";
+import { SlotName } from "./shared";
+import { POSITIONS_BY_SLOT_HEADING, rowView, slotLabel, statementAfterHeading } from "@/lib/adaptiveSchema/positionPresentation";
 import { PositionPresentationState, usePositionPresentation } from "./PositionPresentationContext";
 
 const STANCE_STYLES: Record<ClaimCellStance, { label: string; className: string }> = {
@@ -67,7 +67,7 @@ function MarkedClaimMatrix({ claims, modelIds, position }: { claims: AlignedClai
                   <td className="py-3 pr-4 text-slate-900">
                     {claim.claimText}
                     <span data-source="computed" className="block text-xs text-slate-500 mt-0.5">
-                      {view.heading}: {view.text}
+                      {view.heading}: {statementAfterHeading(view.heading, view.text)}
                     </span>
                     <button type="button" onClick={() => toggle(i)} className="mt-0.5 text-xs font-medium text-sky-600 hover:underline">
                       {isExpanded ? "Hide positions" : "Show positions"}
@@ -135,7 +135,7 @@ export default function ClaimMatrix({
             <th className="text-left font-semibold text-slate-600 py-2 pr-4">Claim</th>
             {modelIds.map((modelId) => (
               <th key={modelId} className="text-left font-semibold text-slate-600 py-2 px-2 whitespace-nowrap">
-                {getModelLabel(modelId)}
+                <SlotName modelId={modelId} />
               </th>
             ))}
           </tr>
@@ -175,7 +175,7 @@ export default function ClaimMatrix({
                           .filter((entry): entry is { cell: NonNullable<typeof claim.cells[number]>; modelId: ModelId } => !!entry)
                           .map(({ cell, modelId }) => (
                             <div key={modelId} className="text-xs text-slate-700">
-                              <span className="font-semibold text-slate-900">{getModelLabel(modelId)}: </span>
+                              <span className="font-semibold text-slate-900"><SlotName modelId={modelId} />: </span>
                               {cell.excerpt}
                               {cell.backfilled && <span className="ml-1 text-slate-400">(inferred)</span>}
                             </div>

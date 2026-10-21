@@ -21,8 +21,7 @@ import {
   CausalFactorCategory,
   RiskLevel,
 } from "@/lib/adaptiveSchema/types";
-import { Card, EmptyStateCard, SectionLabel, TintBadge, formatModelCoverage } from "./shared";
-import ModelChip from "@/components/ModelChip";
+import { Card, EmptyStateCard, SectionLabel, TintBadge, formatModelCoverage, SlotChip } from "./shared";
 import { ModelId } from "@/lib/types";
 
 const CATEGORY_LABEL: Record<CausalFactorCategory, string> = {
@@ -209,7 +208,7 @@ export default function CausalExplanationView({
                   {d.label}
                   <div className="mt-1 flex flex-wrap gap-1">
                     {d.supportingModels.map((modelId) => (
-                      <ModelChip key={modelId} modelId={modelId} size="xs" />
+                      <SlotChip key={modelId} modelId={modelId} size="xs" />
                     ))}
                   </div>
                 </li>
@@ -254,7 +253,7 @@ export default function CausalExplanationView({
           {contributingModels.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1">
               {contributingModels.map((modelId) => (
-                <ModelChip key={modelId} modelId={modelId} size="xs" />
+                <SlotChip key={modelId} modelId={modelId} size="xs" />
               ))}
             </div>
           )}

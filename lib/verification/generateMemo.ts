@@ -534,15 +534,19 @@ function generateResearchMemo(input: MemoInput): string {
  */
 function generateMarkedAdaptiveResearchMemo(input: MemoInput): string {
   const lines: string[] = [];
-  const q = (input.question ?? "").trim() || "—";
-  const findings = dedupeCap(input.keyFindings ?? []);
+  const q = (typeof input.question === "string" ? input.question : "").trim() || "—";
+  // N-4: on this path a malformed input (non-string items) loses those items rather than throwing.
+  const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((i): i is string => typeof i === "string") : []);
+  const findings = dedupeCap(strings(input.keyFindings));
   // F-1: grouped by the builder; an input without groups (not built by buildAdaptiveMemoInput) lists its entries
   // under a neutral heading, never as consensus.
   const agreeGroups = Array.isArray(input.adaptiveAgreeGroups)
-    ? input.adaptiveAgreeGroups.map((g) => ({ heading: String(g?.heading ?? ""), items: dedupeCap(Array.isArray(g?.items) ? g.items : []) })).filter((g) => g.heading && g.items.length)
-    : [{ heading: "Scored rows", items: dedupeCap(input.synthesisAgreements ?? []) }].filter((g) => g.items.length);
-  const unresolved = dedupeCap(input.synthesisDisagreements ?? []);
-  const slots = input.modelsUsed ?? [];
+    ? input.adaptiveAgreeGroups
+        .map((g) => ({ heading: typeof g?.heading === "string" ? g.heading : "", items: dedupeCap(strings(g?.items)) }))
+        .filter((g) => g.heading && g.items.length)
+    : [{ heading: "Scored rows", items: dedupeCap(strings(input.synthesisAgreements)) }].filter((g) => g.items.length);
+  const unresolved = dedupeCap(strings(input.synthesisDisagreements));
+  const slots = strings(input.modelsUsed);
   const n = Math.max(1, slots.length);
 
   lines.push("VERIFICATION MEMO");
@@ -575,7 +579,7 @@ function generateMarkedAdaptiveResearchMemo(input: MemoInput): string {
     unresolved.forEach((p) => lines.push(`- ${p}`));
     lines.push("");
   }
-  const assess = (input.confidenceAssessment ?? "").trim();
+  const assess = (typeof input.confidenceAssessment === "string" ? input.confidenceAssessment : "").trim();
   if (assess) {
     lines.push("CERTAINTY AND LIMITS");
     lines.push(assess);

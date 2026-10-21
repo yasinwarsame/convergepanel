@@ -54,7 +54,8 @@ import { AdaptiveGateResult, AdaptiveSynthesisReport } from "@/lib/adaptiveSchem
 import { Card, SectionLabel } from "./shared";
 import AdaptiveSynthesisReportView, { GateBanner, PanelVerdictCard } from "./AdaptiveSynthesisReportView";
 import { presentPositionSafeReport } from "@/lib/adaptiveSchema/positionPresentation";
-import { PositionPresentationBoundary } from "./PositionPresentationContext";
+import { PositionPresentationBoundary, usePositionPresentation } from "./PositionPresentationContext";
+import { useRunModelProvenance } from "./RunModelProvenanceContext";
 
 const TERMINAL_STATUS_KINDS = new Set(["approved", "approved_with_conditions", "changes_requested", "rejected"]);
 
@@ -466,7 +467,10 @@ export function ReviewGovernanceBody({
   historyScope,
 }: ReviewGovernanceBodyProps) {
   // Order 5 (Contract P): normally already the position-safe view (AdaptivePanelResponse); unmarked reports are unchanged.
-  const synthesisReport = presentPositionSafeReport(storedReport, { rows: alignedClaims, roster: modelsUsed ?? [] });
+  // H-2: a standalone section names a substituted slot with its recorded substitution (the page's provenance).
+  const position = usePositionPresentation();
+  const pageProvenance = useRunModelProvenance();
+  const synthesisReport = presentPositionSafeReport(storedReport, { rows: alignedClaims, roster: modelsUsed ?? [], provenance: position?.provenance ?? pageProvenance });
   const status = deriveReportStatus({ humanReview, reviewRouting, persistenceStatus });
   const canonicalTerminal = TERMINAL_STATUS_KINDS.has(status.kind);
   const isIncomplete = persistenceStatus === "failed" || persistenceStatus === "omitted_size_limit";

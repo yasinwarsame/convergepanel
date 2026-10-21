@@ -12,8 +12,7 @@
  */
 
 import { AggregatedEvidenceDimension, EvidenceReviewResult, RiskLevel } from "@/lib/adaptiveSchema/types";
-import { Card, EmptyStateCard, SectionLabel, TintBadge, formatModelCoverage } from "./shared";
-import ModelChip from "@/components/ModelChip";
+import { Card, EmptyStateCard, SectionLabel, TintBadge, formatModelCoverage, SlotChip } from "./shared";
 
 function StrengthBadge({ strength }: { strength: AggregatedEvidenceDimension["strength"] }) {
   if (strength === "unknown") return null;
@@ -53,7 +52,7 @@ function DimensionRow({ dimension }: { dimension: AggregatedEvidenceDimension })
       <p className="mt-1 text-sm text-slate-700">{dimension.assessment}</p>
       <div className="mt-1 flex flex-wrap gap-1">
         {dimension.contributingModels.map((modelId) => (
-          <ModelChip key={modelId} modelId={modelId} size="xs" />
+          <SlotChip key={modelId} modelId={modelId} size="xs" />
         ))}
       </div>
     </li>
@@ -191,7 +190,7 @@ export default function EvidenceReviewView({
           {contributingModels.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1">
               {contributingModels.map((modelId) => (
-                <ModelChip key={modelId} modelId={modelId} size="xs" />
+                <SlotChip key={modelId} modelId={modelId} size="xs" />
               ))}
             </div>
           )}

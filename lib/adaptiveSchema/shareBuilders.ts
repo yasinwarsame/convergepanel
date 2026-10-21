@@ -35,6 +35,7 @@ import {
 } from "./reportPresentation";
 import { CAUTION_NOTICE, CAUTION_NOTICE_SHORT, GATE_CONFIDENCE_LABEL, GATE_LABEL, gateLabel, hasGatePresentation, legacyGateWord, readGateStatus } from "./gatePresentation";
 import { escapeMarkdownInline, markdownQuote, plainTextQuote, singleLineText } from "./textSerialization";
+import { X_MAX_WEIGHTED_LENGTH, XUrlSpan, parseXText, xPostableText, xUrlSpans } from "./xWeightedText";
 import { ADAPTIVE_RESEARCH_REPORT_KIND } from "@/lib/verification/generateMemo";
 import { POSITIONS_BY_SLOT_HEADING, PositionSafeInput, PresentedSlotPosition, biasWithheldNotice, coverageWithheldNotice, isPositionMarked, positionView, presentPositionSafeReport } from "./positionPresentation";
 
@@ -465,71 +466,66 @@ export function buildAdaptiveXPost(question: string, storedReport: AdaptiveSynth
   return truncate(parts.join("\n\n"), 280);
 }
 
-// ─── X (Order 5, Contract P, m-1) ───────────────────────────────────────────
+// ─── X (Order 5, Contract P, m-1 / H-1) ─────────────────────────────────────
 
-export const X_POST_LIMIT = 280;
-/** X counts every URL as this many characters, whatever its length (twitter-text v3 transformedURLLength). */
-const X_URL_WEIGHT = 23;
-/** twitter-text v3: code points in these ranges weigh 1; every other code point (CJK, emoji, …) weighs 2. */
-const X_LIGHT_RANGES: readonly [number, number][] = [
-  [0, 4351],
-  [8192, 8205],
-  [8208, 8223],
-  [8242, 8247],
-];
-const X_URLISH = /(?:https?:\/\/)?(?:[\p{L}\p{N}-]+\.)+\p{L}{2,}(?:\/\S*)?/gu;
+export const X_POST_LIMIT = X_MAX_WEIGHTED_LENGTH;
 
-function xCodePointWeight(cp: number): number {
-  return X_LIGHT_RANGES.some(([lo, hi]) => cp >= lo && cp <= hi) ? 1 : 2;
+/** X's weighted length of `text` (twitter-text v3 rules: URLs 23, emoji 2, CJK and other heavy code points 2). Never `string.length`. */
+export function xWeightedLength(text: string): number {
+  return parseXText(text).weightedLength;
 }
 
-function xRawWeight(text: string): number {
-  let w = 0;
-  let last = 0;
-  for (const m of text.matchAll(X_URLISH)) {
-    const at = m.index ?? 0;
-    for (const ch of text.slice(last, at)) w += xCodePointWeight(ch.codePointAt(0)!);
-    let own = 0;
-    for (const ch of m[0]) own += xCodePointWeight(ch.codePointAt(0)!);
-    w += Math.max(X_URL_WEIGHT, own);
-    last = at + m[0].length;
-  }
-  for (const ch of text.slice(last)) w += xCodePointWeight(ch.codePointAt(0)!);
-  return w;
+/** Whether X accepts `text` as a post: weighted length 1–280 and no invalid characters. */
+export function xPostFits(text: string): boolean {
+  return parseXText(text).valid;
 }
+
+function graphemeEnds(text: string): number[] {
+  const Seg = (Intl as unknown as { Segmenter?: new (l?: string, o?: { granularity: string }) => { segment(t: string): Iterable<{ segment: string; index: number }> } }).Segmenter;
+  if (Seg) return Array.from(new Seg(undefined, { granularity: "grapheme" }).segment(text), (x) => x.index + x.segment.length);
+  const ends: number[] = [];
+  let at = 0;
+  for (const ch of Array.from(text)) ends.push((at += ch.length));
+  return ends;
+}
+
+const urlKey = (u: XUrlSpan) => `${u.start}\u0000${u.url}`;
 
 /**
- * An upper bound on X's weighted length of `text` (twitter-text v3: NFC-normalized; light code points 1, others 2;
- * every URL 23). Conservative by construction: a URL-like token counts as at least 23 and as much as its own text,
- * every emoji code point counts 2, and the larger of the raw and NFC weights is taken — so a post within the limit
- * here is within it on X. Never `string.length`.
+ * `text` shortened to at most `budget` weighted characters, with "…" when shortened. The cut falls at a grapheme
+ * boundary and never inside a URL: every URL X would see in the result is one of the original's, whole and at the
+ * same place — a URL is kept entire or left out, and no shortened word turns into a different link.
  */
-export function xWeightedLength(text: string): number {
-  return Math.max(xRawWeight(text), xRawWeight(text.normalize("NFC")));
-}
-
-function graphemes(text: string): string[] {
-  const Seg = (Intl as unknown as { Segmenter?: new (l?: string, o?: { granularity: string }) => { segment(t: string): Iterable<{ segment: string }> } }).Segmenter;
-  return Seg ? Array.from(new Seg(undefined, { granularity: "grapheme" }).segment(text), (x) => x.segment) : Array.from(text);
-}
-
-/** `text` shortened to at most `budget` weighted characters, at a grapheme boundary, with "…" when shortened. */
 export function xFit(text: string, budget: number): string {
-  if (xWeightedLength(text) <= budget) return text;
-  const g = graphemes(text);
-  let n = g.length;
-  while (n > 0 && xWeightedLength(`${g.slice(0, n).join("").trimEnd()}…`) > budget) n -= 1;
-  return n > 0 ? `${g.slice(0, n).join("").trimEnd()}…` : "";
+  const whole = text.normalize("NFC");
+  if (xWeightedLength(whole) <= budget) return whole;
+  const urls = xUrlSpans(whole);
+  const original = new Set(urls.map(urlKey));
+  const ends = graphemeEnds(whole);
+  for (let i = ends.length - 2; i >= 0; i -= 1) {
+    const cut = ends[i];
+    if (urls.some((u) => cut > u.start && cut < u.end)) continue;
+    const kept = whole.slice(0, cut).trimEnd();
+    if (!kept) continue;
+    const candidate = `${kept}…`;
+    if (xWeightedLength(candidate) > budget) continue;
+    if (!xUrlSpans(candidate).every((u) => original.has(urlKey(u)))) continue;
+    return candidate;
+  }
+  return "";
 }
 
 const X_BRAND = "via ConvergePanel";
 const X_UNRESOLVED_LABEL = "Unresolved: ";
+const X_ASKED = "Asked a multi-model AI panel";
 
 /**
- * A marked report's X post, within X's weighted 280-character limit. The computed parts — the gate, the certainty,
- * a row's computed result, the brand — are never cut: the model-written claim gives way first (down to a short
- * quote), then the question; if the row's computed result still cannot fit whole, the row is left out and the post
- * says how many unresolved rows the full report has. It names no panel slot.
+ * A marked report's X post, valid on X by weighted length (twitter-text v3 rules, checked on the finished post). The
+ * computed parts — the gate, the certainty, a row's computed result, the brand — are never cut: the model-written
+ * claim gives way first (down to a short quote), then the question; if the row's computed result still cannot fit
+ * whole, the row is left out and the post says how many unresolved rows the full report has. It names no panel slot,
+ * so no attribution can be wrong. Every URL in the post is one of the question's, the claim's or the computed result's, whole. If even the
+ * shortest form is not a valid post, the defined fallback — the panel line, the gate line and the brand — is used.
  */
 function buildMarkedXPost(question: string, report: AdaptiveSynthesisReport): string {
   const gateLine = hasGatePresentation(report)
@@ -538,17 +534,20 @@ function buildMarkedXPost(question: string, report: AdaptiveSynthesisReport): st
         return `${gateLabel(status)}${status === "caution" ? ` (${CAUTION_NOTICE_SHORT})` : ""} · Certainty: ${Math.round(report.runCertainty * 100)}%`;
       })()
     : `Certainty: ${Math.round(report.runCertainty * 100)}% (${legacyGateWord(report.gate)})`;
-  const asked = (q: string) => `Asked a multi-model AI panel: "${q}"`;
-  const post = (q: string, row: string | null) => [asked(q), gateLine, ...(row ? [row] : []), X_BRAND].join("\n\n");
+  const questionText = singleLineText(xPostableText(question));
   const split = report.presentation?.disagree[0];
+  const claimText = split ? singleLineText(xPostableText(split.claim)) : "";
+  const allowed = new Set([questionText, claimText, split?.result ?? ""].flatMap((t) => xUrlSpans(t.normalize("NFC")).map((u) => u.url)));
+  const asked = (q: string) => (q ? `${X_ASKED}: "${q}"` : X_ASKED);
+  const post = (q: string, row: string | null) => [asked(q), gateLine, ...(row ? [row] : []), X_BRAND].join("\n\n");
   const rowLine = (claimBudget: number) => {
     if (!split) return null;
-    const claim = xFit(singleLineText(split.claim), claimBudget);
+    const claim = xFit(claimText, claimBudget);
     return claim ? `${X_UNRESOLVED_LABEL}${quoteClaim(claim)} — ${PANEL_RESULT_LABEL.toLowerCase()}: ${split.result}` : null;
   };
-  const fits = (t: string) => xWeightedLength(t) <= X_POST_LIMIT;
+  const fits = (t: string) => xPostFits(t) && xUrlSpans(t.normalize("NFC")).every((u) => allowed.has(u.url));
   for (const qBudget of [80, 48, 24]) {
-    const q = xFit(singleLineText(question), qBudget);
+    const q = xFit(questionText, qBudget);
     for (const cBudget of [60, 40, 24, 12]) {
       const candidate = post(q, rowLine(cBudget));
       if (fits(candidate)) return candidate;
@@ -557,9 +556,14 @@ function buildMarkedXPost(question: string, report: AdaptiveSynthesisReport): st
   }
   const n = report.disagreements.length;
   const pointer = n > 0 ? `${n} unresolved row${n === 1 ? "" : "s"} — see the full report` : null;
-  for (const qBudget of [80, 48, 24]) {
-    const candidate = post(xFit(singleLineText(question), qBudget), pointer);
+  for (const qBudget of [80, 48, 24, 0]) {
+    const candidate = post(qBudget ? xFit(questionText, qBudget) : "", pointer);
     if (fits(candidate)) return candidate;
   }
-  return post(xFit(singleLineText(question), 24), null);
+  return markedXFallback(gateLine);
+}
+
+/** The defined safe fallback: no question, no row — only computed and fixed text, always a valid post. */
+export function markedXFallback(gateLine: string): string {
+  return [X_ASKED, gateLine, X_BRAND].join("\n\n");
 }

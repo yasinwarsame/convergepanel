@@ -289,14 +289,14 @@ describe("F-2: per-slot list counts — claim rows and value comparisons counted
 // ─── m-1 ────────────────────────────────────────────────────────────────────
 
 describe("m-1: marked X posts fit X's weighted 280 limit; the computed result is never cut", () => {
-  it("weighted length: light code points 1, others 2, URLs 23 (at least), NFC considered; never string.length", () => {
+  it("weighted length: light code points 1, others 2, URLs 23, NFC-normalized (twitter-text v3); never string.length", () => {
     expect(xWeightedLength("abc")).toBe(3);
     expect(xWeightedLength("日本")).toBe(4);
     expect(xWeightedLength("😀")).toBe(2);
     expect(xWeightedLength("see https://example.com/a")).toBe(4 + 23);
     expect(xWeightedLength("convergepanel.com")).toBe(23);
-    expect(xWeightedLength(`https://example.com/${"a".repeat(60)}`)).toBeGreaterThan(23);
-    expect(xWeightedLength("é")).toBe(2);
+    expect(xWeightedLength(`https://example.com/${"a".repeat(60)}`)).toBe(23); // H-1: a URL is 23 whatever its length
+    expect(xWeightedLength("é")).toBe(1); // H-1: NFC "é", as X normalizes
     // Negative control: 200 CJK characters are 200 by string.length — within 280 — but weigh 400 on X.
     const cjk = "日".repeat(200);
     expect(cjk.length).toBeLessThanOrEqual(280);
@@ -360,21 +360,21 @@ describe("m-2 / m-3: statements disclose what could not be read", () => {
     const row = R("Step 3", "single_source", [{ ...fc("chatgpt", "Write a config file"), stance: "agrees" }, { ...fc("chatgpt", "Write a config file"), stance: "disputes" }, null, null]);
     const v = rowView(row, ROSTER);
     expect(v.text).not.toContain("no step text was given");
-    expect(v.text).toContain("Not comparable: no readable step text at this position; 1 panel slot with conflicting stored positions.");
+    expect(v.text).toContain("Not comparable: no readable step text at this position; 1 panel slot with conflicting stored values."); // N-6: values, not positions
   });
 
   it("m-2: a scalar comparison with a conflicting duplicate states it in the comparison", () => {
     const sc = (m: string, v: string, stance = "agrees") => ({ modelId: m, stance, origin: { kind: "field_derived", fieldType: "scalar" }, excerpt: v });
     const row = R("Paris", "split", [sc("chatgpt", "Paris"), sc("claude", "Paris"), sc("grok", "Lyon"), sc("perplexity", "Lyon"), sc("perplexity", "Lyon", "disputes")]);
     const v = rowView(row, ROSTER);
-    expect(v.text).toBe("Answers differ: 2 different answers; the most common was given by 2 of 3 panel slots (ignoring case and punctuation); 1 panel slot with conflicting stored positions.");
+    expect(v.text).toBe("Answers differ: 2 different answers; the most common was given by 2 of 3 panel slots (ignoring case and punctuation); 1 panel slot with conflicting stored values."); // N-6
   });
 
   it("m-2: a metric comparison keeps its trailing computed sentence after the disclosure", () => {
     const mc = (m: string, value: unknown) => ({ modelId: m, stance: "agrees", origin: { kind: "field_derived", fieldType: "metric" }, excerpt: String(value), raw: { value, unit: "x" } });
     const v = rowView(R("P/E", "majority", [mc("chatgpt", 10), mc("claude", 12), { ...mc("nobody", 11) }, null]), ROSTER);
     // The entry naming no slot sits at the Grok slot's index, so that slot reads as unreadable too (readSlots).
-    expect(v.text).toBe("Values differ: 2 numeric values, 2 distinct, from 10 x to 12 x; 1 stored position could not be attributed to a panel slot; 1 position could not be read. A computed comparison of the stated values, not model positions.");
+    expect(v.text).toBe("Values differ: 2 numeric values, 2 distinct, from 10 x to 12 x; 1 stored value could not be attributed to a panel slot; 1 value could not be read. A computed comparison of the stated values, not model positions."); // N-6
   });
 
   it("negative control: the same rows without the unreadable entries read as before", () => {
@@ -514,8 +514,8 @@ describe("F-2 (related surface): the trust table's computed inputs are labelled 
     const { record, out } = await outputs("procedural");
     const t = section(out["ui.synthesisView"]!, "trust-summary");
     expect(t).toContain("Items contributed");
-    expect(t).toContain("Stance match (all rows)");
-    expect(t).toContain("value comparisons included; they are not claim positions");
+    expect(t).toContain("Stance match"); // N-7: defined in the note
+    expect(t).toContain("value comparisons included; these are not claim positions");
     expect(t).not.toMatch(/Majority align|\bClaims\b/);
     for (const m of record.trustSummary.perModel) expect(t).toContain(`${Math.round(m.majorityAlignment * 100)}%`);
   });

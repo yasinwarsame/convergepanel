@@ -93,7 +93,8 @@ import { Card, SectionLabel, TintBadge, BadgeTone } from "./shared";
 import ClaimMatrix from "./ClaimMatrix";
 import { TrustSummaryTable, AgreementDisagreementMap, SingleModelInsightsList, DisagreementsSection } from "./AdaptiveSynthesisReportView";
 import { presentPositionSafeReport } from "@/lib/adaptiveSchema/positionPresentation";
-import { PositionPresentationBoundary } from "./PositionPresentationContext";
+import { PositionPresentationBoundary, usePositionPresentation } from "./PositionPresentationContext";
+import { useRunModelProvenance } from "./RunModelProvenanceContext";
 import { RANK_DISAGREEMENT_MIN_VARIANCE } from "./RankedListView";
 
 export interface PanelEvidenceSectionProps {
@@ -531,7 +532,10 @@ function SynthesisDrivenEvidence({
   Pick<PanelEvidenceSectionProps, "trustSummary" | "alignedClaims" | "showClaimMatrix">) {
   const rows = alignedClaims || [];
   // Order 5 (Contract P): normally already the position-safe view (AdaptivePanelResponse); unmarked reports are unchanged.
-  const synthesisReport = presentPositionSafeReport(stored, { rows: alignedClaims, roster: modelsUsed });
+  // H-2: a standalone section names a substituted slot with its recorded substitution (the page's provenance).
+  const position = usePositionPresentation();
+  const pageProvenance = useRunModelProvenance();
+  const synthesisReport = presentPositionSafeReport(stored, { rows: alignedClaims, roster: modelsUsed, provenance: position?.provenance ?? pageProvenance });
   return (
     <PositionPresentationBoundary report={synthesisReport} roster={modelsUsed}>
     <div className="space-y-4">

@@ -8,8 +8,7 @@
 
 import { useState } from "react";
 import { AdaptiveRendererProps } from "./types";
-import { Card, SectionLabel, FailedResultsNote, splitResults, getModelLabel } from "./shared";
-import ModelChip from "@/components/ModelChip";
+import { Card, SectionLabel, FailedResultsNote, splitResults, SlotName, SlotChip } from "./shared";
 
 function normalizeAnswer(answer: string): string {
   return answer.trim().toLowerCase().replace(/\s+/g, " ");
@@ -45,7 +44,7 @@ export default function VerdictCardView({ results }: AdaptiveRendererProps) {
         <p className="text-lg text-slate-900 font-medium">{modal.display}</p>
         <div className="mt-3 flex flex-wrap gap-1.5">
           {modal.modelIds.map((id) => (
-            <ModelChip key={id} modelId={id} size="xs" />
+            <SlotChip key={id} modelId={id} size="xs" />
           ))}
         </div>
 
@@ -65,7 +64,7 @@ export default function VerdictCardView({ results }: AdaptiveRendererProps) {
                     <p className="text-sm text-slate-800">{group.display}</p>
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {group.modelIds.map((id) => (
-                        <ModelChip key={id} modelId={id} size="xs" />
+                        <SlotChip key={id} modelId={id} size="xs" />
                       ))}
                     </div>
                   </div>
@@ -79,7 +78,7 @@ export default function VerdictCardView({ results }: AdaptiveRendererProps) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {ok.map((r) => (
           <div key={r.modelId} className="text-xs text-slate-500">
-            <span className="font-semibold text-slate-700">{getModelLabel(r.modelId)}: </span>
+            <span className="font-semibold text-slate-700"><SlotName modelId={r.modelId} />: </span>
             {r.data?.source as string}
             {r.data?.caveat && r.data.caveat !== "none" && (
               <span className="block mt-0.5 text-slate-400">Caveat: {r.data.caveat as string}</span>

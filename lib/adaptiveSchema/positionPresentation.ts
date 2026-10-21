@@ -69,6 +69,27 @@ export function slotLabel(slot: string, provenance: readonly RunModelProvenanceF
   return format === "full" ? `${family} slot` : family;
 }
 
+/** The full slot label when the slot's recorded provenance says it was substituted; null otherwise (nothing inferred). */
+export function substitutedSlotLabel(slot: string, provenance: readonly RunModelProvenanceFacts[] | null | undefined): string | null {
+  const facts = provenance?.find((f) => f && f.modelId === slot);
+  return facts?.substituted === true ? slotLabel(slot, provenance, "full") : null;
+}
+
+/**
+ * H-3 (N-2): the Tier 3 source count on a marked report. The stored counts (diagnostics.ts) are over every scored row —
+ * claim rows and value comparisons — and a row counts when a panel slot's structured metric value names a source
+ * (claim rows have no source field). Nothing checks that the source supports the row, so the text says so.
+ */
+export function markedSourceCountText(cited: number, total: number): string {
+  return `Named sources: ${cited} of ${total} scored ${total === 1 ? "row" : "rows"} — counted where a panel slot gave a source with a metric value; sources are not checked`;
+}
+
+/** N-8: a row statement shown after its heading, without repeating the heading ("Consensus: consensus: …"). Display only. */
+export function statementAfterHeading(heading: string, text: string): string {
+  const prefix = `${heading}:`.toLowerCase();
+  return text.toLowerCase().startsWith(prefix) ? text.slice(prefix.length).trimStart() : text;
+}
+
 // ─── Read-side validator ────────────────────────────────────────────────────
 
 const STANCES = ["agrees", "partial", "disputes", "unclear"] as const;
@@ -78,7 +99,7 @@ const isStance = (v: unknown): v is Stance => typeof v === "string" && (STANCES 
 export type CellOrigin = "claim" | "inferred" | "computed" | "not_recorded" | "unrecognized";
 
 export type SlotReading =
-  | { slot: string; kind: "position"; stance: Stance; origin: CellOrigin; excerpt: string | null; raw: unknown }
+  | { slot: string; kind: "position"; stance: Stance; origin: CellOrigin; excerpt: string | null; raw: unknown; moreStoredValues?: true }
   | { slot: string; kind: "conflicting"; stances: Stance[] }
   | { slot: string; kind: "unrecognized" }
   | { slot: string; kind: "unreadable" }
@@ -128,8 +149,17 @@ export function readSlots(cells: unknown, roster: readonly string[]): RowReading
       }
       if (!isStance(stored[0])) return { slot, kind: "unrecognized" };
       const c = own[0];
+      // N-6: same-stance duplicates holding different stored values — the first is shown, and that is disclosed.
+      const rawKey = (v: unknown, i: number) => {
+        try {
+          return JSON.stringify(v) ?? "undefined";
+        } catch {
+          return `\u0000unserializable:${i}`;
+        }
+      };
+      const moreStoredValues = new Set(own.map((o, i) => rawKey(o.raw, i))).size > 1;
       // Model-written text is one run of words wherever it is shown (textSerialization.singleLineText).
-      return { slot, kind: "position", stance: stored[0], origin: originOf(c), excerpt: typeof c.excerpt === "string" && c.excerpt.trim() ? singleLineText(c.excerpt) : null, raw: c.raw };
+      return { slot, kind: "position", stance: stored[0], origin: originOf(c), excerpt: typeof c.excerpt === "string" && c.excerpt.trim() ? singleLineText(c.excerpt) : null, raw: c.raw, ...(moreStoredValues ? { moreStoredValues: true as const } : {}) };
     }
     const atIndex = cells[i];
     if (atIndex === null || atIndex === undefined) return { slot, kind: "none" };
@@ -144,13 +174,16 @@ const isOpaque = (r: RowReading) => r.unattributable > 0 || r.slots.some((s) => 
 const plural = (n: number, word: string, pluralWord = `${word}s`) => `${n} ${n === 1 ? word : pluralWord}`;
 
 /** Disclosures for anything the reading could not attribute or read — appended to every row statement that has any. */
-function readingTail(r: RowReading): string[] {
+/** What a row's reading could not state cleanly. N-6: a value comparison's cells are values, never positions. */
+function readingTail(r: RowReading, noun: "position" | "value" = "position"): string[] {
   const conflicting = r.slots.filter((s) => s.kind === "conflicting").length;
   const unreadable = r.slots.filter((s) => s.kind === "unreadable" || s.kind === "unrecognized").length;
+  const moreValues = noun === "value" ? r.slots.filter((s) => s.kind === "position" && s.moreStoredValues).length : 0;
   return [
-    conflicting ? `${plural(conflicting, "panel slot")} with conflicting stored positions` : "",
-    r.unattributable ? `${plural(r.unattributable, "stored position")} could not be attributed to a panel slot` : "",
-    unreadable ? `${plural(unreadable, "position")} could not be read` : "",
+    conflicting ? `${plural(conflicting, "panel slot")} with conflicting stored ${noun}s` : "",
+    moreValues ? `${plural(moreValues, "panel slot")} with more than one stored value (the first is shown)` : "",
+    r.unattributable ? `${plural(r.unattributable, `stored ${noun}`)} could not be attributed to a panel slot` : "",
+    unreadable ? `${plural(unreadable, noun)} could not be read` : "",
   ].filter(Boolean);
 }
 
@@ -284,7 +317,7 @@ interface FieldResult {
 
 function fieldPresentation(type: (typeof FIELD_TYPES)[number], r: RowReading): FieldResult {
   const result = fieldComparison(type, r);
-  const tail = readingTail(r);
+  const tail = readingTail(r, "value");
   if (tail.length === 0) return result;
   // m-2: a cell that could not be read or attributed is disclosed in the statement, never silently left out of it —
   // and "no value was given" becomes "no readable value", since a value may have been stored.
@@ -352,7 +385,9 @@ function fieldComparison(type: (typeof FIELD_TYPES)[number], r: RowReading): Fie
   if (given === 0) return { heading: "Comparison", text: type === "step" ? "Not comparable: no step text was given at this position." : "No answers to compare.", slotValue };
   if (given === 1) return { heading: "Comparison", text: `Only 1 panel slot gave ${type === "step" ? "a step at this position" : "an answer"}; there is nothing to compare it with${notStated(missing)}.`, slotValue };
   const ignoring = "ignoring case and punctuation";
-  if (groups.size === 1) return { heading: "Values match", text: type === "step" ? `All ${given} panel slots that gave a step at this position use the same wording (${ignoring})${notStated(missing)}.` : `All ${given} answers match (${ignoring})${notStated(missing)}.`, slotValue };
+  // N-8: "Both", not "All 2".
+  const all = given === 2 ? "Both" : `All ${given}`;
+  if (groups.size === 1) return { heading: "Values match", text: type === "step" ? `${all} panel slots that gave a step at this position use the same wording (${ignoring})${notStated(missing)}.` : `${all} answers match (${ignoring})${notStated(missing)}.`, slotValue };
   if (type === "step") return { heading: "Values differ", text: `${groups.size} different wordings at this position among ${given} panel slots (compared by wording only, ${ignoring})${notStated(missing)}. A computed comparison, not model positions.`, slotValue };
   if (sizes[0] === 1) return { heading: "Values differ", text: `No two panel slots gave the same ${noun} (${groups.size} different ${noun}s, ${ignoring})${notStated(missing)}.`, slotValue };
   if (sizes[0] === sizes[1]) return { heading: "Values differ", text: `Answers differ: ${groups.size} different answers, with no single most common answer (${ignoring})${notStated(missing)}.`, slotValue };
@@ -644,6 +679,8 @@ export function coverageWithheldNotice(n: number): string {
   return `${plural(n, "model-written coverage note")} not shown: ${n === 1 ? "it cannot" : "they cannot"} be checked against the recorded panel positions.`;
 }
 export const NO_RECORDED_OPPOSING_POSITIONS = "No recorded opposing positions.";
+/** N-5: the empty key slot on a record without claim rows (value comparisons hold no positions to oppose). */
+export const NO_UNRESOLVED_ROW = "No unresolved row recorded.";
 export const NEUTRAL_KEY_CLAIM_STEP = "Treat the key claim as unresolved — independently verify it before relying on it.";
 export const NEUTRAL_KEY_VALUES_STEP = "Treat the key value comparison as unresolved — independently verify the values before relying on them.";
 export const NEUTRAL_TOP_RESULT_STEP = "Use this synthesis as a starting point — spot-check the top result against one primary source before acting on it.";
@@ -852,7 +889,14 @@ function presentVerdict(src: AdaptiveSynthesisReport, rows: readonly unknown[] |
   if (!isPlainObject(src.verdictCard)) return { verdictCard: src.verdictCard, panelVerdict: src.panelVerdict, verdict: neutral };
   const card = src.verdictCard;
   const certainty = `certainty ${Math.round((typeof src.runCertainty === "number" ? src.runCertainty : 0) * 100)}%; gate: ${shownGateWord(src.gate)}.`;
-  let topHeading = "Top consensus";
+  // N-5: an empty top / key slot on a record without claim rows is headed as a row, never as a claim or consensus.
+  const recordKinds = (Array.isArray(rows) ? rows : []).map((r) => {
+    const t = rowTypeOf(isPlainObject(r) ? (r as Record<string, unknown>).cells : null);
+    return t === "claim" ? "claim" : (FIELD_TYPES as readonly string[]).includes(t) ? "field" : "other";
+  }) as PresentedRowKind[];
+  // Rows not available to this view (a standalone strip): the record's kinds are unknown, so the empty slots are rows too.
+  const noClaimRows = !Array.isArray(rows) || !recordKinds.includes("claim");
+  let topHeading = noClaimRows ? UNJOINED_TOP_HEADING : "Top consensus";
   let topIsClaim = false;
   let topKind: PresentedRowKind = "other";
   let panelVerdict = src.panelVerdict;
@@ -876,7 +920,7 @@ function presentVerdict(src: AdaptiveSynthesisReport, rows: readonly unknown[] |
       panelVerdict = `Top claim: position details unavailable. Run ${certainty}`;
     }
   }
-  let keyHeading = "Key unresolved claim";
+  let keyHeading = noClaimRows ? UNJOINED_KEY_HEADING : "Key unresolved claim";
   let key: Partial<AdaptiveVerdictCard> = {};
   let keyIsOpposition = false;
   let keyIsField = false;
@@ -906,8 +950,8 @@ function presentVerdict(src: AdaptiveSynthesisReport, rows: readonly unknown[] |
   if (card.topConsensus !== NO_CONSENSUS_IDENTIFIED && !top.topConsensusContested) delete verdictCard.topConsensusContested;
   delete verdictCard.caveatSource;
   const shownKinds = [...(card.topConsensus !== NO_CONSENSUS_IDENTIFIED ? [topKind] : []), ...(card.keyDisagreement ? [keyKind] : [])];
-  const sectionHeading = shownKinds.length === 0 ? VERDICT_SECTION_HEADINGS.claim : rowKindsHeading(shownKinds, VERDICT_SECTION_HEADINGS);
-  return { verdictCard, panelVerdict, verdict: { topHeading, keyHeading, noKeyText: NO_RECORDED_OPPOSING_POSITIONS, topIsClaim, topLabel: rowKindLabel(topKind, CLAIM_LABEL), keyLabel: rowKindLabel(keyKind, CLAIM_LABEL), sectionHeading } };
+  const sectionHeading = shownKinds.length > 0 ? rowKindsHeading(shownKinds, VERDICT_SECTION_HEADINGS) : noClaimRows ? VERDICT_SECTION_HEADINGS.other : VERDICT_SECTION_HEADINGS.claim;
+  return { verdictCard, panelVerdict, verdict: { topHeading, keyHeading, noKeyText: noClaimRows ? NO_UNRESOLVED_ROW : NO_RECORDED_OPPOSING_POSITIONS, topIsClaim, topLabel: rowKindLabel(topKind, CLAIM_LABEL), keyLabel: rowKindLabel(keyKind, CLAIM_LABEL), sectionHeading } };
 }
 
 export const TOP_MAJORITY_HEADING = "Top majority-supported claim";

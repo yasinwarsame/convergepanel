@@ -32,7 +32,7 @@ import {
   ResultSchema,
 } from "@/lib/adaptiveSchema/types";
 import { TRUST_SCORE_CAP_REASON } from "@/lib/adaptiveSchema/config";
-import { Card, SectionLabel, BulletList, ConfidencePill, ProbabilityBar, TintBadge, getModelLabel } from "./shared";
+import { Card, SectionLabel, BulletList, ConfidencePill, ProbabilityBar, TintBadge, SlotName } from "./shared";
 import ModelChip from "@/components/ModelChip";
 import { GateTone, gateChipText, gateTone, pageGateValue } from "@/lib/adaptiveSchema/gatePresentation";
 import { PanelCounts, ROW_COUNTS_UNAVAILABLE, SlotRowCounts, hasReadableRowBreakdown, panelCounts, readSlots, rowTypeOf, slotLabel, slotRowCounts } from "@/lib/adaptiveSchema/positionPresentation";
@@ -537,7 +537,7 @@ function ModelRow({
           <span className="ml-auto text-xs text-slate-400">{formatLatency(result.latencyMs)}</span>
         </div>
         <p className="mt-1.5 text-sm text-red-700">
-          {getModelLabel(result.modelId)} returned an incompatible format and was excluded from comparison.
+          <SlotName modelId={result.modelId} /> returned an incompatible format and was excluded from comparison.
         </p>
         {result.parseError && (
           <details className="mt-1">

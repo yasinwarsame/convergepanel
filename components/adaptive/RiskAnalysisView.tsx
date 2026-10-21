@@ -17,8 +17,7 @@
  */
 
 import { AggregatedChecklistItem, ChecklistItemSeverity, ChecklistTaxonomyResult } from "@/lib/adaptiveSchema/types";
-import { Card, EmptyStateCard, SectionLabel, TintBadge, BadgeTone, formatModelCoverage } from "./shared";
-import ModelChip from "@/components/ModelChip";
+import { Card, EmptyStateCard, SectionLabel, TintBadge, BadgeTone, formatModelCoverage, SlotChip } from "./shared";
 import { ModelId } from "@/lib/types";
 
 const SEVERITY_TONE: Record<ChecklistItemSeverity, BadgeTone> = {
@@ -73,7 +72,7 @@ function RiskRegisterRow({ item }: { item: AggregatedChecklistItem }) {
       {item.rationale && <p className="mt-1 text-xs text-slate-500 italic">{item.rationale}</p>}
       <div className="mt-1.5 flex flex-wrap items-center gap-1">
         {modelIds.map((modelId) => (
-          <ModelChip key={modelId} modelId={modelId} size="xs" />
+          <SlotChip key={modelId} modelId={modelId} size="xs" />
         ))}
       </div>
     </li>

@@ -13,8 +13,7 @@
  */
 
 import { AggregatedEnumItem, RankedEnumerationResult } from "@/lib/adaptiveSchema/types";
-import { Card, EmptyStateCard, SectionLabel, TintBadge, formatModelCoverage } from "./shared";
-import ModelChip from "@/components/ModelChip";
+import { Card, EmptyStateCard, SectionLabel, TintBadge, formatModelCoverage, SlotChip } from "./shared";
 import { ModelId } from "@/lib/types";
 
 /**
@@ -69,7 +68,7 @@ function RankItemRow({ item }: { item: AggregatedEnumItem }) {
         {item.rationale && <p className="mt-1 text-xs text-slate-600">{item.rationale}</p>}
         <div className="mt-1.5 flex flex-wrap items-center gap-1">
           {modelIds.map((modelId) => (
-            <ModelChip key={modelId} modelId={modelId} size="xs" />
+            <SlotChip key={modelId} modelId={modelId} size="xs" />
           ))}
         </div>
         {/* Milestone 2 UI consistency cleanup — sources were already collected

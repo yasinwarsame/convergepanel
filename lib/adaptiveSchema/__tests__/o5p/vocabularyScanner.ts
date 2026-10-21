@@ -17,7 +17,7 @@ import * as ts from "typescript";
 export const SCANNED_ROOTS = ["components/adaptive", "lib/adaptiveSchema", "lib/pdf", "lib/docx", "lib/verification/generateMemo.ts", "lib/panel/runModelIdentity.ts"];
 
 export const VOCAB =
-  /\b(agree\w*|consensus|majority|diverg\w*|contested|camps?|split|disagree\w*|disput\w*|different positions|converg\w*|oppos\w*|supported by|disputed by|supporters?|disputers?|unresolved|vote\w*|align\w*)\b/i;
+  /\b(agree\w*|consensus|majority|diverg\w*|contested|camps?|split|disagree\w*|disput\w*|different positions|converg\w*|oppos\w*|supported by|disputed by|supporters?|disputers?|unresolved|vote\w*|align\w*|contradict\w*|unanim\w*|concur\w*|dissent\w*|corroborat\w*|endorse\w*|unique claims?|same answers?)\b/i;
 const BARE_ENUM = /^["'`][a-z_]+["'`]$/;
 
 export interface Literal {
