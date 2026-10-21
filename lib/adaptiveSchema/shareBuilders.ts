@@ -36,6 +36,7 @@ import {
 import { CAUTION_NOTICE, CAUTION_NOTICE_SHORT, GATE_CONFIDENCE_LABEL, GATE_LABEL, gateLabel, hasGatePresentation, legacyGateWord, readGateStatus } from "./gatePresentation";
 import { escapeMarkdownInline, markdownQuote, plainTextQuote, singleLineText } from "./textSerialization";
 import { X_MAX_WEIGHTED_LENGTH, XUrlSpan, parseXText, xPostableText, xUrlSpans } from "./xWeightedText";
+import { EMOJI } from "./xTextRules.generated";
 import { ADAPTIVE_RESEARCH_REPORT_KIND } from "@/lib/verification/generateMemo";
 import { POSITIONS_BY_SLOT_HEADING, PositionSafeInput, PresentedSlotPosition, biasWithheldNotice, coverageWithheldNotice, isPositionMarked, positionView, presentPositionSafeReport } from "./positionPresentation";
 
@@ -491,28 +492,115 @@ function graphemeEnds(text: string): number[] {
 
 const urlKey = (u: XUrlSpan) => `${u.start}\u0000${u.url}`;
 
+const X_ELLIPSIS = "…";
+const X_ELLIPSIS_WEIGHT = xWeightedLength(X_ELLIPSIS);
+const X_URL_WEIGHT = xWeightedLength("https://example.com");
+
 /**
  * `text` shortened to at most `budget` weighted characters, with "…" when shortened. The cut falls at a grapheme
  * boundary and never inside a URL: every URL X would see in the result is one of the original's, whole and at the
  * same place — a URL is kept entire or left out, and no shortened word turns into a different link.
  */
 export function xFit(text: string, budget: number): string {
+  return xFitter(text)(budget);
+}
+
+/**
+ * How much of a question or claim a marked X post reads (Order 5, Contract P, MINOR 2): the run API's question limit.
+ * The shown part is at most 80 weighted characters, but finding X's URLs is superlinear on some degenerate text (a long
+ * run of "a.a.a."), so a longer text is cut first — at its last whitespace before the limit, so never inside a word or
+ * a URL — and is then always shown as cut ("…"). No question the API accepts is affected.
+ */
+export const X_TEXT_LIMIT = 5000;
+
+function boundedXText(text: string): { text: string; truncated: boolean } {
+  if (text.length <= X_TEXT_LIMIT) return { text, truncated: false };
+  let at = X_TEXT_LIMIT;
+  while (at > 0 && !/\s/.test(text[at])) at -= 1;
+  return { text: text.slice(0, at).trimEnd(), truncated: true };
+}
+
+/** The spans twemoji-parser matches in `text`, as the weighted-length loop finds them (each weighs 2 on X). */
+function emojiSpans(text: string): [number, number][] {
+  const spans: [number, number][] = [];
+  const e = new RegExp(EMOJI.source, EMOJI.flags);
+  let m: RegExpExecArray | null;
+  while ((m = e.exec(text))) {
+    if (m[0] === "") {
+      e.lastIndex += 1;
+      continue;
+    }
+    spans.push([m.index, m.index + m[0].length]);
+  }
+  return spans;
+}
+
+/**
+ * `(budget) => xFit(text, budget)`, with `text` read once (Order 5, Contract P, MINOR 2). The text is read once —
+ * its URLs, emoji and grapheme ends — and per budget the cuts are tried longest first, as before; but a cut is checked
+ * as a post only where a lower bound on the kept text's weight leaves room for "…". The bound counts 1 per grapheme,
+ * except a grapheme that continues an emoji begun before it (an emoji weighs 2 whatever its length) and the graphemes
+ * of a URL past its 23rd (a link weighs 23 whatever its length); every grapheme it counts weighs at least that on X.
+ * A cut the bound rules out could not have fitted, so the result is the a3416c37 result; and the bound rises by 1 at
+ * each cut outside a URL's interior (bar emoji continuations), so at most about `budget` cuts are checked, each a
+ * candidate of about `budget` weighted characters — the whole text is never re-parsed per cut. Results are kept per
+ * budget. The text is still read once whole, which is superlinear on degenerate input; see X_TEXT_LIMIT.
+ */
+function xFitter(text: string, truncated = false): ((budget: number) => string) & { urls: XUrlSpan[] } {
   const whole = text.normalize("NFC");
-  if (xWeightedLength(whole) <= budget) return whole;
   const urls = xUrlSpans(whole);
   const original = new Set(urls.map(urlKey));
-  const ends = graphemeEnds(whole);
-  for (let i = ends.length - 2; i >= 0; i -= 1) {
-    const cut = ends[i];
-    if (urls.some((u) => cut > u.start && cut < u.end)) continue;
-    const kept = whole.slice(0, cut).trimEnd();
-    if (!kept) continue;
-    const candidate = `${kept}…`;
-    if (xWeightedLength(candidate) > budget) continue;
-    if (!xUrlSpans(candidate).every((u) => original.has(urlKey(u)))) continue;
-    return candidate;
-  }
-  return "";
+  let wholeWeight: number | null = null;
+  let read: { ends: number[]; atLeast: number[]; insideUrl: Uint8Array } | null = null;
+  const readText = () => {
+    const ends = graphemeEnds(whole);
+    const insideUrl = new Uint8Array(whole.length + 1);
+    for (const x of urls) insideUrl.fill(1, x.start + 1, x.end);
+    const emojiContinues = new Uint8Array(whole.length + 1);
+    for (const [s, e] of emojiSpans(whole)) emojiContinues.fill(1, s + 1, e);
+    const atLeast: number[] = [];
+    let u = 0;
+    let start = 0;
+    let urlGraphemes = 0;
+    let weight = 0;
+    for (const end of ends) {
+      while (u < urls.length && urls[u].end <= start) {
+        u += 1;
+        urlGraphemes = 0;
+      }
+      const inUrl = u < urls.length && urls[u].start < end;
+      if (inUrl) urlGraphemes += 1;
+      if (!emojiContinues[start] && (!inUrl || urlGraphemes <= X_URL_WEIGHT)) weight += 1;
+      atLeast.push(weight);
+      start = end;
+    }
+    return { ends, atLeast, insideUrl };
+  };
+  const fitted = new Map<number, string>();
+  const fit = (budget: number): string => {
+    read ??= readText();
+    const { ends, atLeast, insideUrl } = read;
+    // The whole text, unless it was cut to X_TEXT_LIMIT or cannot fit (its lower bound alone is over the budget).
+    if (!truncated && (atLeast[atLeast.length - 1] ?? 0) <= budget && (wholeWeight ??= xWeightedLength(whole)) <= budget) return whole;
+    const room = budget - X_ELLIPSIS_WEIGHT;
+    for (let i = truncated ? ends.length - 1 : ends.length - 2; i >= 0; i -= 1) {
+      if (atLeast[i] > room || insideUrl[ends[i]]) continue;
+      const kept = whole.slice(0, ends[i]).trimEnd();
+      if (!kept) continue;
+      const candidate = `${kept}${X_ELLIPSIS}`;
+      if (xWeightedLength(candidate) > budget) continue;
+      if (!xUrlSpans(candidate).every((u) => original.has(urlKey(u)))) continue;
+      return candidate;
+    }
+    return "";
+  };
+  return Object.assign(
+    (budget: number) => {
+      if (!fitted.has(budget)) fitted.set(budget, fit(budget));
+      return fitted.get(budget)!;
+    },
+    { urls }
+  );
 }
 
 const X_BRAND = "via ConvergePanel";
@@ -522,8 +610,9 @@ const X_ASKED = "Asked a multi-model AI panel";
 /**
  * A marked report's X post, valid on X by weighted length (twitter-text v3 rules, checked on the finished post). The
  * computed parts — the gate, the certainty, a row's computed result, the brand — are never cut: the model-written
- * claim gives way first (down to a short quote), then the question; if the row's computed result still cannot fit
- * whole, the row is left out and the post says how many unresolved rows the full report has. It names no panel slot,
+ * claim gives way first (down to a short quote), then the question; if no quotable part of the claim fits with the
+ * row's whole computed result (the claim is too long, empty, or only a URL), the row is left out and the post says how
+ * many unresolved rows the full report has — never a post that silently drops both. It names no panel slot,
  * so no attribution can be wrong. Every URL in the post is one of the question's, the claim's or the computed result's, whole. If even the
  * shortest form is not a valid post, the defined fallback — the panel line, the gate line and the brand — is used.
  */
@@ -534,30 +623,38 @@ function buildMarkedXPost(question: string, report: AdaptiveSynthesisReport): st
         return `${gateLabel(status)}${status === "caution" ? ` (${CAUTION_NOTICE_SHORT})` : ""} · Certainty: ${Math.round(report.runCertainty * 100)}%`;
       })()
     : `Certainty: ${Math.round(report.runCertainty * 100)}% (${legacyGateWord(report.gate)})`;
-  const questionText = singleLineText(xPostableText(question));
+  const questionText = boundedXText(singleLineText(xPostableText(question)));
   const split = report.presentation?.disagree[0];
-  const claimText = split ? singleLineText(xPostableText(split.claim)) : "";
-  const allowed = new Set([questionText, claimText, split?.result ?? ""].flatMap((t) => xUrlSpans(t.normalize("NFC")).map((u) => u.url)));
+  const claimText = boundedXText(split ? singleLineText(xPostableText(split.claim)) : "");
+  const fitQuestion = xFitter(questionText.text, questionText.truncated);
+  const fitClaim = xFitter(claimText.text, claimText.truncated);
+  const allowed = new Set([...fitQuestion.urls, ...fitClaim.urls, ...xUrlSpans((split?.result ?? "").normalize("NFC"))].map((u) => u.url));
   const asked = (q: string) => (q ? `${X_ASKED}: "${q}"` : X_ASKED);
   const post = (q: string, row: string | null) => [asked(q), gateLine, ...(row ? [row] : []), X_BRAND].join("\n\n");
   const rowLine = (claimBudget: number) => {
     if (!split) return null;
-    const claim = xFit(claimText, claimBudget);
+    const claim = fitClaim(claimBudget);
     return claim ? `${X_UNRESOLVED_LABEL}${quoteClaim(claim)} — ${PANEL_RESULT_LABEL.toLowerCase()}: ${split.result}` : null;
   };
   const fits = (t: string) => xPostFits(t) && xUrlSpans(t.normalize("NFC")).every((u) => allowed.has(u.url));
   for (const qBudget of [80, 48, 24]) {
-    const q = xFit(questionText, qBudget);
+    const q = fitQuestion(qBudget);
+    if (!split) {
+      if (fits(post(q, null))) return post(q, null);
+      continue;
+    }
     for (const cBudget of [60, 40, 24, 12]) {
-      const candidate = post(q, rowLine(cBudget));
+      // MINOR 1: a claim that cannot be quoted at this budget gives no row — it is not a post without the row.
+      const row = rowLine(cBudget);
+      if (!row) continue;
+      const candidate = post(q, row);
       if (fits(candidate)) return candidate;
     }
-    if (!split && fits(post(q, null))) return post(q, null);
   }
   const n = report.disagreements.length;
   const pointer = n > 0 ? `${n} unresolved row${n === 1 ? "" : "s"} — see the full report` : null;
   for (const qBudget of [80, 48, 24, 0]) {
-    const candidate = post(qBudget ? xFit(questionText, qBudget) : "", pointer);
+    const candidate = post(qBudget ? fitQuestion(qBudget) : "", pointer);
     if (fits(candidate)) return candidate;
   }
   return markedXFallback(gateLine);

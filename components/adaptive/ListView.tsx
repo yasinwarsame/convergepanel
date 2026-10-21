@@ -115,6 +115,9 @@ function isRealSource(value: string | null | undefined): boolean {
   return normalized.length > 0 && normalized !== "unknown" && normalized !== "none" && normalized !== "n/a";
 }
 
+export const NAMED_SOURCE_VALUES_TITLE =
+  "Counted where this panel slot gave a source with a value: a source named on several values counts once per value, and sources are not checked.";
+
 /** Mirrors trustSummary.ts's computeCitationScore's sourcing scope, but returns the raw sourced count (badge shows "7 citations", not a percentage). */
 function countCitations(schema: ResultSchema, result: AdaptiveModelResult): number {
   if (!result.ok || !result.data) return 0;
@@ -595,11 +598,18 @@ function ModelRow({
                 +{vm.uniqueClaims} unique claim{vm.uniqueClaims === 1 ? "" : "s"}
               </TintBadge>
             ))}
-          {vm.citations > 0 && (
-            <TintBadge tone="accent">
-              {vm.citations} citation{vm.citations === 1 ? "" : "s"}
-            </TintBadge>
-          )}
+          {vm.citations > 0 &&
+            (vm.marked ? (
+              // Order 5 (Contract P, MINOR 3): the count is of values that name a source — one per value, not unique
+              // sources, and never checked — so a marked record does not call them citations.
+              <TintBadge tone="accent" title={NAMED_SOURCE_VALUES_TITLE}>
+                {vm.citations} value{vm.citations === 1 ? "" : "s"} with a named source
+              </TintBadge>
+            ) : (
+              <TintBadge tone="accent">
+                {vm.citations} citation{vm.citations === 1 ? "" : "s"}
+              </TintBadge>
+            ))}
           {vm.capped && <TintBadge tone="warning">degraded · trust capped</TintBadge>}
           <span className="ml-auto flex items-center gap-2 shrink-0">
             <span className="text-xs text-slate-400">{formatLatency(result.latencyMs)}</span>
