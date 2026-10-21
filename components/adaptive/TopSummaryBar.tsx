@@ -43,6 +43,7 @@ import {
   SOURCE_GROUNDING_LABELS,
 } from "@/lib/adaptiveSchema/reportSummary";
 import { BadgeTone, Card, TintBadge } from "./shared";
+import { MARKED_GATE_LEVEL_FIELD, MARKED_GATE_LEVEL_WORD, isPositionMarked } from "@/lib/adaptiveSchema/positionPresentation";
 import AdaptiveExportButton from "./AdaptiveExportButton";
 import AdaptiveExportHistorySection from "./AdaptiveExportHistorySection";
 import { resolveAdaptiveAncillaryPresentation, type AdaptiveAncillaryPresentation } from "./adaptiveAncillaryPresentation";
@@ -138,6 +139,10 @@ export default function TopSummaryBar(props: TopSummaryBarProps) {
     evidenceReview: props.evidenceReview,
     biasBlindspotAudit: props.biasBlindspotAudit,
   });
+  // m-5: the level is the gate's own tier only when no schema-specific result fed it (deriveConsensusLevel's last branch).
+  const gateLevelOnMarked =
+    isPositionMarked(props.synthesisReport) &&
+    !props.comparisonMatrix && !props.checklistTaxonomy && !props.decisionSupport && !props.causalExplanation && !props.definitionExplanation && !props.rankedEnumeration && !props.deepResearch && !props.evidenceReview && !props.biasBlindspotAudit;
   const sourceGrounding = deriveSourceGrounding({ meta, trustSummary });
 
   const reportType = getReportTypeLabel(schemaId, props.checklistTaxonomy);
@@ -198,9 +203,16 @@ export default function TopSummaryBar(props: TopSummaryBarProps) {
           </span>
         </SummaryField>
 
+        {gateLevelOnMarked ? (
+          // Order 5 (Contract P, m-5): a gate-derived level on a marked report is labelled as the gate it is.
+          <SummaryField label={MARKED_GATE_LEVEL_FIELD}>
+            <TintBadge tone={LEVEL_TONE[consensus]}>{MARKED_GATE_LEVEL_WORD[consensus]}</TintBadge>
+          </SummaryField>
+        ) : (
         <SummaryField label="Consensus">
           <TintBadge tone={LEVEL_TONE[consensus]}>{CONSENSUS_LABELS[consensus]}</TintBadge>
         </SummaryField>
+        )}
 
         <SummaryField label="Source grounding">
           <TintBadge tone={LEVEL_TONE[sourceGrounding]}>{SOURCE_GROUNDING_LABELS[sourceGrounding]}</TintBadge>

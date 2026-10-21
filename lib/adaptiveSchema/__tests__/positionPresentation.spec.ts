@@ -10,6 +10,7 @@ import {
   NEUTRAL_KEY_CLAIM_STEP,
   NO_RECORDED_POSITIONS,
   POSITION_DETAILS_UNAVAILABLE,
+  POSITION_ROWS_UNAVAILABLE,
   claimKind,
   isPositionMarked,
   panelCounts,
@@ -425,10 +426,10 @@ describe("presentPositionSafeReport", () => {
 
   it("without rows nothing is derived: every position reads unavailable, no kind is shown", () => {
     const v = presentPositionSafeReport(markedReport(), { rows: null, roster: ROSTER });
-    expect(v.presentation!.answer.claims.every((c) => c.result === POSITION_DETAILS_UNAVAILABLE && !c.supporters)).toBe(true);
-    expect(v.presentation!.disagree.every((d) => d.result === POSITION_DETAILS_UNAVAILABLE)).toBe(true);
+    expect(v.presentation!.answer.claims.every((c) => c.result === POSITION_ROWS_UNAVAILABLE && !c.supporters)).toBe(true);
+    expect(v.presentation!.disagree.every((d) => d.result === POSITION_ROWS_UNAVAILABLE)).toBe(true);
     expect(v.presentation!.panelAgreement).toMatch(/unavailable/);
-    expect(v.verdictCard.topConsensusAgreement).toBe(POSITION_DETAILS_UNAVAILABLE);
+    expect(v.verdictCard.topConsensusAgreement).toBe(POSITION_ROWS_UNAVAILABLE);
   });
 
   it("a shifted or mismatched per-index entry is not joined", () => {

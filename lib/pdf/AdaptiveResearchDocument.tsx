@@ -41,7 +41,8 @@ import {
   governanceStatusDisplay,
 } from "@/lib/adaptiveSchema/exportContentDerivation";
 import { COLORS, badgeStyle, pdfStyles } from "./theme";
-import { MARKED_VERDICT_SECTION_HEADING, exportPositionSafeReport } from "@/lib/adaptiveSchema/exportPositionView";
+import { exportPositionSafeReport } from "@/lib/adaptiveSchema/exportPositionView";
+import { MARKED_GATE_LEVEL_FIELD, MARKED_GATE_LEVEL_NOTE, MARKED_GATE_LEVEL_WORD, isPositionMarked } from "@/lib/adaptiveSchema/positionPresentation";
 
 /**
  * A bulleted list. Each row is mark + text side by side. The text paginates
@@ -333,6 +334,8 @@ function CoverHeader({ record }: { record: AdaptiveResearchExportV1 }) {
 
 function StatusSummary({ record }: { record: AdaptiveResearchExportV1 }) {
   const snapshot = record.reportSnapshot;
+  // Order 5 (Contract P, m-5): a legacy-family (gate-scored) marked report's level is its gate, labelled so.
+  const gateLevel = isPositionMarked(snapshot.legacy?.synthesisReport);
   return (
     <SectionCard label="Report status summary" bounded>
       <View style={pdfStyles.fieldGrid}>
@@ -348,8 +351,8 @@ function StatusSummary({ record }: { record: AdaptiveResearchExportV1 }) {
           </View>
         </View>
         <View style={pdfStyles.fieldCell}>
-          <Text style={pdfStyles.fieldLabel}>Consensus</Text>
-          <Text style={pdfStyles.fieldValue}>{CONSENSUS_LABELS[snapshot.consensusLevel]}</Text>
+          <Text style={pdfStyles.fieldLabel}>{gateLevel ? MARKED_GATE_LEVEL_FIELD : "Consensus"}</Text>
+          <Text style={pdfStyles.fieldValue}>{gateLevel ? MARKED_GATE_LEVEL_WORD[snapshot.consensusLevel] : CONSENSUS_LABELS[snapshot.consensusLevel]}</Text>
         </View>
         <View style={pdfStyles.fieldCell}>
           <Text style={pdfStyles.fieldLabel}>Source grounding</Text>
@@ -360,10 +363,14 @@ function StatusSummary({ record }: { record: AdaptiveResearchExportV1 }) {
           correctness, evidence strength, or valuation confidence; the
           labels above are exactly the same "Not scored"/"Weak"/etc. tiers
           the live UI shows, never a fabricated precise number. */}
+      {gateLevel ? (
+        <Text style={pdfStyles.mutedText}>{MARKED_GATE_LEVEL_NOTE}</Text>
+      ) : (
       <Text style={pdfStyles.mutedText}>
         Consensus reflects panel agreement, not factual correctness. Source grounding reflects citation coverage, not evidence
         strength.
       </Text>
+      )}
     </SectionCard>
   );
 }
@@ -603,7 +610,7 @@ function VerdictCardBody({
   headings,
 }: {
   /** Order 5 (Contract P): a marked report's sub-labels, from its rows; absent → "Agreement" / "Disagreement" as before. */
-  headings?: { top: string; key: string };
+  headings?: { top: string; key: string; topLabel?: string; keyLabel?: string };
   verdictCard: {
     topConsensus: string;
     topConsensusContested?: string;
@@ -618,7 +625,7 @@ function VerdictCardBody({
   // Consensus Integrity: the computed status (R4-1) and the canonical contested note (verdictCard.ts) as further
   // lines of the same text, labels bold and the quoted claim oblique (R9, see sourcedLines) — so a report without
   // them (every one persisted before they existed) composes exactly the same element tree as before.
-  const topParts = verdictClaimParts(verdictCard.topConsensus, verdictCard.topConsensusAgreement);
+  const topParts = verdictClaimParts(verdictCard.topConsensus, verdictCard.topConsensusAgreement, headings?.topLabel);
   const agreementText = topParts
     ? sourcedLines([
         { ...topParts.claim, model: true },
@@ -628,7 +635,7 @@ function VerdictCardBody({
     : [presentVerdictClaim(verdictCard.topConsensus, undefined).claim, verdictCard.topConsensusContested ? `Contested: ${verdictCard.topConsensusContested}` : null]
         .filter(Boolean)
         .join("\n");
-  const splitParts = verdictCard.keyDisagreement ? verdictClaimParts(verdictCard.keyDisagreement, verdictCard.keyDisagreementAgreement) : null;
+  const splitParts = verdictCard.keyDisagreement ? verdictClaimParts(verdictCard.keyDisagreement, verdictCard.keyDisagreementAgreement, headings?.keyLabel) : null;
   const disagreementText = !verdictCard.keyDisagreement
     ? null
     : splitParts
@@ -742,8 +749,8 @@ function LegacyContent({ record }: { record: AdaptiveResearchExportV1 }) {
             </SectionCard>
           )}
           {positions ? (
-            <SectionCard label={MARKED_VERDICT_SECTION_HEADING}>
-              <VerdictCardBody verdictCard={synthesis.verdictCard} headings={{ top: positions.verdict.topHeading, key: positions.verdict.keyHeading }} />
+            <SectionCard label={positions.verdict.sectionHeading}>
+              <VerdictCardBody verdictCard={synthesis.verdictCard} headings={{ top: positions.verdict.topHeading, key: positions.verdict.keyHeading, topLabel: positions.verdict.topLabel, keyLabel: positions.verdict.keyLabel }} />
             </SectionCard>
           ) : (
             <SectionCard label="Where models agree / disagree">

@@ -26,7 +26,7 @@
 
 import type { AdaptiveSynthesisReport, AdaptiveVerdictCard, AlignedClaimStatus, PresentedAnswerClaim, PresentedClaim, PresentedDisagreement, PresentedUnresolvedClaim } from "./types";
 import { ALIGNED_CLAIM_STATUSES } from "./types";
-import { NO_CONSENSUS_IDENTIFIED, LIMITED_COVERAGE_REASON, ROW_AGREEMENT_WORDING } from "./agreementNarrative";
+import { CLAIM_LABEL, NO_CONSENSUS_IDENTIFIED, LIMITED_COVERAGE_REASON, ROW_AGREEMENT_WORDING } from "./agreementNarrative";
 import { normalizeForComparison } from "./comparisonNormalization";
 import { CAUTION_NEXT_STEP_WITHOUT_DISAGREEMENT, VERDICT_NEXT_STEPS } from "./config";
 import { singleLineText } from "./textSerialization";
@@ -260,6 +260,8 @@ function claimStatusText(status: AlignedClaimStatus, r: RowReading, claimText: s
     contestedNote: null,
   };
   const tail = readingTail(r);
+  // m-3: no readable, attributable position at all — never "only 0 of N raised it".
+  if (positions.length === 0) return `${status.replace(/_/g, " ")}: no readable, attributable position is recorded for this row${tail.length ? `; ${tail.join("; ")}` : ""}`;
   return `${ROW_AGREEMENT_WORDING[status](facts)}${tail.length ? `; ${tail.join("; ")}` : ""}`;
 }
 
@@ -281,6 +283,19 @@ interface FieldResult {
 }
 
 function fieldPresentation(type: (typeof FIELD_TYPES)[number], r: RowReading): FieldResult {
+  const result = fieldComparison(type, r);
+  const tail = readingTail(r);
+  if (tail.length === 0) return result;
+  // m-2: a cell that could not be read or attributed is disclosed in the statement, never silently left out of it —
+  // and "no value was given" becomes "no readable value", since a value may have been stored.
+  const text = result.text.replace(/^Not comparable: no numeric values were given\.$/, "Not comparable: no readable numeric values.").replace(/^Not comparable: no step text was given at this position\.$/, "Not comparable: no readable step text at this position.").replace(/^No answers to compare\.$/, "No readable answers to compare.");
+  // The disclosure belongs to the comparison sentence, before any trailing "A computed comparison …" sentence.
+  const cut = text.indexOf(". A computed comparison");
+  const [first, rest] = cut >= 0 ? [text.slice(0, cut), text.slice(cut)] : [text.replace(/\.$/, ""), "."];
+  return { ...result, text: `${first}; ${tail.join("; ")}${rest}` };
+}
+
+function fieldComparison(type: (typeof FIELD_TYPES)[number], r: RowReading): FieldResult {
   const slotValue = new Map<string, string>();
   for (const s of r.slots) slotValue.set(s.slot, s.kind === "none" ? "No value" : s.kind === "position" ? "" : s.kind === "conflicting" ? "Conflicting stored values" : "Unreadable value");
   const positions = r.slots.filter((s): s is Extract<SlotReading, { kind: "position" }> => s.kind === "position");
@@ -388,6 +403,8 @@ export interface RowView {
 }
 
 export const POSITION_DETAILS_UNAVAILABLE = "Position details unavailable: the stored claim could not be matched to a unique recorded row.";
+/** n-1: the same, when the view holds no scored rows at all (a consumer called without them). */
+export const POSITION_ROWS_UNAVAILABLE = "Position details unavailable: the scored rows are not available to this view.";
 export const ROW_TYPE_UNRECORDED = "Position details unavailable: this row's comparison type was not recorded.";
 
 const EXCERPT_NOTE: Readonly<Record<CellOrigin, string>> = {
@@ -515,6 +532,79 @@ export function renderPositionPanelStatement(c: PanelCounts): string {
   return c.claimByStatus.consensus + c.claimByStatus.majority === 0 ? `${NO_CONSENSUS_IDENTIFIED} ${statement}` : statement;
 }
 
+// ─── Gate-derived summary level (m-5) ───────────────────────────────────────
+
+/**
+ * m-5: on a marked report of a gate-scored schema, the summary level (reportSummary.deriveConsensusLevel) is the
+ * stored gate and nothing else (pass → strong, caution → moderate, fail → weak). It is shown as what it is — the
+ * verification gate — never as "Strong / Moderate / Weak consensus", which would assert panel agreement. The level
+ * itself is not changed; only its label.
+ */
+export const MARKED_GATE_LEVEL_FIELD = "Verification gate";
+export const MARKED_GATE_LEVEL_WORD: Readonly<Record<"strong" | "moderate" | "weak" | "split" | "unscored", string>> = {
+  strong: "Pass",
+  moderate: "Caution",
+  weak: "Fail",
+  split: "Not scored",
+  unscored: "Not scored",
+};
+export const MARKED_GATE_LEVEL_NOTE = "The verification gate reflects computed checks on the scored rows, not factual correctness. Source grounding reflects citation coverage, not evidence strength.";
+
+// ─── Per-slot row counts (list view) ────────────────────────────────────────
+
+/**
+ * F-2: one panel slot's rows, counted for display only — never stored, never fed to scoring. Claim rows and value
+ * comparisons are counted apart, by the rows' recorded types (rowTypeOf) and the slot's validated reading (readSlots):
+ * a value comparison's stored stance is never a claim position, and a row of unrecorded type counts as neither.
+ *  - claimRows: claim rows where the slot holds one readable position;
+ *  - claimRowsMatching: of those, the rows whose single most common readable position the slot holds (a tie has no
+ *    most common position, so it never counts as matching — the count never overstates agreement);
+ *  - singleSourceClaims: claim rows stored as single source where the slot holds the only readable position and no
+ *    other slot has anything stored (no conflicting, unreadable or unattributable entry);
+ *  - valueComparisons: field-derived rows where the slot gave a readable value.
+ */
+export interface SlotRowCounts {
+  claimRows: number;
+  claimRowsMatching: number;
+  singleSourceClaims: number;
+  valueComparisons: number;
+}
+
+export function slotRowCounts(slot: string, rows: readonly unknown[], roster: readonly string[]): SlotRowCounts {
+  const c: SlotRowCounts = { claimRows: 0, claimRowsMatching: 0, singleSourceClaims: 0, valueComparisons: 0 };
+  for (const row of rows) {
+    if (!isPlainObject(row)) continue;
+    const type = rowTypeOf(row.cells);
+    if (type !== "claim" && !(FIELD_TYPES as readonly string[]).includes(type)) continue;
+    const reading = readSlots(row.cells, roster);
+    const own = reading.slots.find((s) => s.slot === slot);
+    if (!own || own.kind !== "position") continue;
+    if (type !== "claim") {
+      c.valueComparisons += 1;
+      continue;
+    }
+    c.claimRows += 1;
+    const tally = new Map<Stance, number>();
+    for (const s of reading.slots) if (s.kind === "position") tally.set(s.stance, (tally.get(s.stance) ?? 0) + 1);
+    const top = Math.max(...tally.values());
+    const leaders = [...tally.entries()].filter(([, n]) => n === top).map(([st]) => st);
+    if (leaders.length === 1 && leaders[0] === own.stance) c.claimRowsMatching += 1;
+    if (row.status === "single_source" && reading.unattributable === 0 && reading.slots.every((s) => s.slot === slot || s.kind === "none")) c.singleSourceClaims += 1;
+  }
+  return c;
+}
+
+/** F-2: whether the rows give any readable breakdown at all — at least one claim row or value comparison. */
+export function hasReadableRowBreakdown(rows: readonly unknown[]): boolean {
+  return rows.some((row) => {
+    if (!isPlainObject(row)) return false;
+    const type = rowTypeOf(row.cells);
+    return type === "claim" || (FIELD_TYPES as readonly string[]).includes(type);
+  });
+}
+
+export const ROW_COUNTS_UNAVAILABLE = "row counts unavailable";
+
 // ─── Joins ──────────────────────────────────────────────────────────────────
 
 export type RowJoin = { row: Record<string, unknown> } | { row: null; reason: "no_rows" | "not_found" | "ambiguous" | "unreadable_entry" | "mismatch" };
@@ -560,6 +650,38 @@ export const NEUTRAL_TOP_RESULT_STEP = "Use this synthesis as a starting point �
 
 // ─── The position-safe report view ──────────────────────────────────────────
 
+/**
+ * What a stored per-row entry turned out to be once joined: a claim row, a field-derived value comparison, or neither
+ * (not joined, empty or of unrecorded type). Consumers use it to keep claims and value comparisons apart — headings
+ * and labels — never to count anything.
+ */
+export type PresentedRowKind = "claim" | "field" | "other";
+
+export const VALUE_COMPARISON_LABEL = "Value comparison";
+export const SCORED_ROW_LABEL = "Scored row";
+
+/** The label of a stored row's text on a marked report: a claim is a "Claim", a field row a "Value comparison", anything not joined a "Scored row". */
+export function rowKindLabel(kind: PresentedRowKind, claimLabel: string): string {
+  return kind === "claim" ? claimLabel : kind === "field" ? VALUE_COMPARISON_LABEL : SCORED_ROW_LABEL;
+}
+
+/**
+ * A heading over stored rows of the given kinds, from its claim-only, field-only, claims-and-fields and fallback
+ * wordings: claims and value comparisons are never put under a claim-only heading together.
+ */
+export function rowKindsHeading(kinds: readonly PresentedRowKind[], h: { claim: string; field: string; mixed: string; other: string }): string {
+  const set = new Set(kinds);
+  if (set.has("other") || set.size === 0) return h.other;
+  if (set.size === 2) return h.mixed;
+  return set.has("claim") ? h.claim : h.field;
+}
+
+export function presentedRowKind(view: RowView | null): PresentedRowKind {
+  if (!view) return "other";
+  if (view.rowType === "claim") return "claim";
+  return (FIELD_TYPES as readonly string[]).includes(view.rowType) ? "field" : "other";
+}
+
 /** Read-time data the view carries for consumers (never serialized: a symbol-keyed property is dropped by JSON). */
 export interface PositionView {
   version: typeof DISAGREEMENT_POSITION_VERSION;
@@ -568,10 +690,15 @@ export interface PositionView {
   rowsAvailable: boolean;
   /** One per report.disagreements entry, same order: the joined row's view and positions, or null (unavailable). */
   disagreements: (RowView | null)[];
+  /** Per entry, same order as presentation.answer.claims / presentation.agree / verificationGate.unresolvedLoadBearing. */
+  answerClaimKinds: PresentedRowKind[];
+  agreeKinds: PresentedRowKind[];
+  unresolvedKinds: PresentedRowKind[];
   modelProseWithheld: boolean;
   biasFindingsWithheld: number;
   coverageGapsWithheld: number;
-  verdict: { topHeading: string; keyHeading: string; noKeyText: string; topIsClaim: boolean };
+  /** topLabel / keyLabel: the label of the card's top / key row text — "Claim" only for a claim row (m-6). */
+  verdict: { topHeading: string; keyHeading: string; noKeyText: string; topIsClaim: boolean; topLabel: string; keyLabel: string; sectionHeading: string };
 }
 
 const POSITION_VIEW = Symbol.for("convergepanel.positionView");
@@ -587,24 +714,29 @@ export interface PositionSafeInput {
   provenance?: readonly RunModelProvenanceFacts[] | null;
 }
 
+/** Why a stored entry has no position details (n-1): the rows are absent, or the entry matched no unique row. */
+function joinUnavailableText(join: RowJoin): string {
+  return !join.row && join.reason === "no_rows" ? POSITION_ROWS_UNAVAILABLE : POSITION_DETAILS_UNAVAILABLE;
+}
+
 function joinedResult(join: RowJoin, roster: readonly string[], provenance: PositionSafeInput["provenance"]): { view: RowView | null; result: string } {
-  if (!join.row) return { view: null, result: POSITION_DETAILS_UNAVAILABLE };
+  if (!join.row) return { view: null, result: joinUnavailableText(join) };
   const view = rowView(join.row, roster, provenance);
   return { view, result: view.text };
 }
 
-function presentedAnswer(c: PresentedAnswerClaim, rows: readonly unknown[] | null, input: PositionSafeInput, statuses: readonly string[], nameSupporters: boolean): PresentedAnswerClaim {
+function presentedAnswer(c: PresentedAnswerClaim, rows: readonly unknown[] | null, input: PositionSafeInput, statuses: readonly string[], nameSupporters: boolean): { entry: PresentedAnswerClaim; kind: PresentedRowKind } {
   // A malformed stored entry is kept as stored: the presenters read it without trusting it, as on historical reports.
-  if (!isPlainObject(c) || typeof c.claim !== "string") return c;
+  if (!isPlainObject(c) || typeof c.claim !== "string") return { entry: c, kind: "other" };
   const { view, result } = joinedResult(uniqueRowByClaim(rows, c.claim, statuses), input.roster, input.provenance);
   const supporters = nameSupporters && view && view.rowType === "claim" && view.supporters.length > 0 ? view.supporters.join(", ") : undefined;
-  return { claim: c.claim, result, ...(view?.contested ? { contested: view.contested } : {}), ...(supporters ? { supporters } : {}) };
+  return { entry: { claim: c.claim, result, ...(view?.contested ? { contested: view.contested } : {}), ...(supporters ? { supporters } : {}) }, kind: presentedRowKind(view) };
 }
 
-function presentedClaim(c: PresentedClaim, join: RowJoin, input: PositionSafeInput): PresentedClaim {
-  if (!isPlainObject(c) || typeof c.claim !== "string") return c;
+function presentedClaim(c: PresentedClaim, join: RowJoin, input: PositionSafeInput): { entry: PresentedClaim; kind: PresentedRowKind } {
+  if (!isPlainObject(c) || typeof c.claim !== "string") return { entry: c, kind: "other" };
   const { view, result } = joinedResult(join, input.roster, input.provenance);
-  return { claim: c.claim, result, ...(view?.contested ? { contested: view.contested } : {}) };
+  return { entry: { claim: c.claim, result, ...(view?.contested ? { contested: view.contested } : {}) }, kind: presentedRowKind(view) };
 }
 
 /**
@@ -621,10 +753,11 @@ export function presentPositionSafeReport<R extends AdaptiveSynthesisReport | nu
   const failed = src.gate === "fail";
 
   const answerStatuses = failed ? ["split"] : ["consensus", "majority"];
-  const answer = isPlainObject(p.answer) && Array.isArray(p.answer.claims)
-    ? { note: p.answer.note ?? null, claims: p.answer.claims.map((c) => presentedAnswer(c, rows, input, answerStatuses, !failed)) }
-    : p.answer;
-  const agree = Array.isArray(p.agree) ? p.agree.map((c) => presentedClaim(c, uniqueRowByClaim(rows, c?.claim, ["consensus", "majority"]), input)) : p.agree;
+  const answerClaims = isPlainObject(p.answer) && Array.isArray(p.answer.claims) ? p.answer.claims.map((c) => presentedAnswer(c, rows, input, answerStatuses, !failed)) : null;
+  const answer = answerClaims ? { note: p.answer!.note ?? null, claims: answerClaims.map((a) => a.entry) } : p.answer;
+  const agreeEntries = Array.isArray(p.agree) ? p.agree.map((c) => presentedClaim(c, uniqueRowByClaim(rows, c?.claim, ["consensus", "majority"]), input)) : null;
+  const agree = agreeEntries ? agreeEntries.map((a) => a.entry) : p.agree;
+  const unresolvedKinds: PresentedRowKind[] = [];
   const storedDisagree = Array.isArray(p.disagree) ? p.disagree : [];
   const disagreements = Array.isArray(src.disagreements) ? src.disagreements : [];
   const disagreementViews: (RowView | null)[] = [];
@@ -641,8 +774,12 @@ export function presentPositionSafeReport<R extends AdaptiveSynthesisReport | nu
     ? {
         unresolvedLoadBearing: Array.isArray(storedUnresolved)
           ? storedUnresolved.map((u: PresentedUnresolvedClaim) => {
-              if (!isPlainObject(u) || typeof u.claim !== "string") return u;
+              if (!isPlainObject(u) || typeof u.claim !== "string") {
+                unresolvedKinds.push("other");
+                return u;
+              }
               const { view, result } = joinedResult(uniqueRowByClaim(rows, u.claim, ["split"]), roster, input.provenance);
+              unresolvedKinds.push(presentedRowKind(view));
               const claimRow = view && view.rowType === "claim";
               return {
                 claim: u.claim,
@@ -681,6 +818,9 @@ export function presentPositionSafeReport<R extends AdaptiveSynthesisReport | nu
     roster,
     rowsAvailable: !!rows,
     disagreements: disagreementViews,
+    answerClaimKinds: answerClaims ? answerClaims.map((a) => a.kind) : [],
+    agreeKinds: agreeEntries ? agreeEntries.map((a) => a.kind) : [],
+    unresolvedKinds,
     modelProseWithheld,
     biasFindingsWithheld: Array.isArray(src.biasAndBlindSpots) ? src.biasAndBlindSpots.length : 0,
     coverageGapsWithheld: Array.isArray(src.panelCoverageGaps) ? src.panelCoverageGaps.length : 0,
@@ -693,7 +833,7 @@ export function presentPositionSafeReport<R extends AdaptiveSynthesisReport | nu
     panelVerdict,
     // The stored certainty line embeds the stored panel statement: restated in its exact format from the stored
     // certainty and gate, with the panel statement restated from the rows.
-    certaintyAssessment: `Run certainty ${Math.round((typeof src.runCertainty === "number" ? src.runCertainty : 0) * 100)}% (gate: ${src.gate}).${panelAgreement ? ` ${panelAgreement}` : ""}`,
+    certaintyAssessment: `Run certainty ${Math.round((typeof src.runCertainty === "number" ? src.runCertainty : 0) * 100)}% (gate: ${shownGateWord(src.gate)}).${panelAgreement ? ` ${panelAgreement}` : ""}`,
     // Model-written: withheld (the view shows the Unified Answer's claims and the computed panel statement instead).
     executiveSummary: "",
     narrativeSections: [],
@@ -707,28 +847,32 @@ export function presentPositionSafeReport<R extends AdaptiveSynthesisReport | nu
 }
 
 function presentVerdict(src: AdaptiveSynthesisReport, rows: readonly unknown[] | null, input: PositionSafeInput): { verdictCard: AdaptiveVerdictCard; panelVerdict: string; verdict: PositionView["verdict"] } {
-  const neutral = { topHeading: "Top claim", keyHeading: "Key unresolved claim", noKeyText: NO_RECORDED_OPPOSING_POSITIONS, topIsClaim: false };
+  const neutral = { topHeading: "Top claim", keyHeading: "Key unresolved claim", noKeyText: NO_RECORDED_OPPOSING_POSITIONS, topIsClaim: false, topLabel: SCORED_ROW_LABEL, keyLabel: SCORED_ROW_LABEL, sectionHeading: VERDICT_SECTION_HEADINGS.other };
   // A malformed stored card: nothing is joined or restated from it, and its model-written caveat is still withheld.
   if (!isPlainObject(src.verdictCard)) return { verdictCard: src.verdictCard, panelVerdict: src.panelVerdict, verdict: neutral };
   const card = src.verdictCard;
-  const certainty = `certainty ${Math.round((typeof src.runCertainty === "number" ? src.runCertainty : 0) * 100)}%; gate: ${src.gate}.`;
+  const certainty = `certainty ${Math.round((typeof src.runCertainty === "number" ? src.runCertainty : 0) * 100)}%; gate: ${shownGateWord(src.gate)}.`;
   let topHeading = "Top consensus";
   let topIsClaim = false;
+  let topKind: PresentedRowKind = "other";
   let panelVerdict = src.panelVerdict;
   let top: Partial<AdaptiveVerdictCard> = {};
   if (card.topConsensus !== NO_CONSENSUS_IDENTIFIED) {
     const join = uniqueRowByClaim(rows, card.topConsensus, ["consensus", "majority"]);
     const view = join.row ? rowView(join.row, input.roster, input.provenance) : null;
+    topKind = presentedRowKind(view);
     if (view && view.rowType === "claim") {
       topIsClaim = true;
+      if (view.claimStatus !== "consensus") topHeading = TOP_MAJORITY_HEADING;
       top = { topConsensusAgreement: view.text, consensusModelCount: view.supporters.length, ...(view.contested ? { topConsensusContested: view.contested } : {}) };
     } else if (view) {
       topHeading = "Top value comparison";
       top = { topConsensusAgreement: view.text, consensusModelCount: 0 };
       panelVerdict = `Top value comparison: ${quoteText(card.topConsensus)} — ${view.text} Run ${certainty}`;
     } else {
-      topHeading = "Top claim";
-      top = { topConsensusAgreement: POSITION_DETAILS_UNAVAILABLE, consensusModelCount: 0 };
+      // Not joined: what the row is cannot be read, so it is headed and labelled as a scored row, never as a claim.
+      topHeading = UNJOINED_TOP_HEADING;
+      top = { topConsensusAgreement: joinUnavailableText(join), consensusModelCount: 0 };
       panelVerdict = `Top claim: position details unavailable. Run ${certainty}`;
     }
   }
@@ -736,9 +880,11 @@ function presentVerdict(src: AdaptiveSynthesisReport, rows: readonly unknown[] |
   let key: Partial<AdaptiveVerdictCard> = {};
   let keyIsOpposition = false;
   let keyIsField = false;
+  let keyKind: PresentedRowKind = "other";
   if (card.keyDisagreement) {
     const join = uniqueRowByClaim(rows, card.keyDisagreement, ["split"]);
     const view = join.row ? rowView(join.row, input.roster, input.provenance) : null;
+    keyKind = presentedRowKind(view);
     if (view) {
       keyHeading = view.rowType === "claim" ? view.heading : `Key value comparison: ${view.heading.toLowerCase()}`;
       keyIsOpposition = view.isOpposition;
@@ -746,7 +892,8 @@ function presentVerdict(src: AdaptiveSynthesisReport, rows: readonly unknown[] |
       const flagged = typeof (join.row as Record<string, unknown>).disagreementType === "string" ? `Flagged as ${String((join.row as Record<string, unknown>).disagreementType).replace(/_/g, " ")}.` : null;
       key = { keyDisagreementAgreement: view.text, disagreementDetail: flagged, disagreementModelCount: view.slots.filter((s) => s.position !== "No position recorded" && s.position !== "No value").length };
     } else {
-      key = { keyDisagreementAgreement: POSITION_DETAILS_UNAVAILABLE, disagreementDetail: null };
+      keyHeading = UNJOINED_KEY_HEADING;
+      key = { keyDisagreementAgreement: joinUnavailableText(join), disagreementDetail: null };
     }
   }
   const steps = (Array.isArray(card.recommendedNextSteps) ? card.recommendedNextSteps : [])
@@ -758,7 +905,25 @@ function presentVerdict(src: AdaptiveSynthesisReport, rows: readonly unknown[] |
   // The contested note is restated from the joined row only; the caveat is model-written and withheld.
   if (card.topConsensus !== NO_CONSENSUS_IDENTIFIED && !top.topConsensusContested) delete verdictCard.topConsensusContested;
   delete verdictCard.caveatSource;
-  return { verdictCard, panelVerdict, verdict: { topHeading, keyHeading, noKeyText: NO_RECORDED_OPPOSING_POSITIONS, topIsClaim } };
+  const shownKinds = [...(card.topConsensus !== NO_CONSENSUS_IDENTIFIED ? [topKind] : []), ...(card.keyDisagreement ? [keyKind] : [])];
+  const sectionHeading = shownKinds.length === 0 ? VERDICT_SECTION_HEADINGS.claim : rowKindsHeading(shownKinds, VERDICT_SECTION_HEADINGS);
+  return { verdictCard, panelVerdict, verdict: { topHeading, keyHeading, noKeyText: NO_RECORDED_OPPOSING_POSITIONS, topIsClaim, topLabel: rowKindLabel(topKind, CLAIM_LABEL), keyLabel: rowKindLabel(keyKind, CLAIM_LABEL), sectionHeading } };
+}
+
+export const TOP_MAJORITY_HEADING = "Top majority-supported claim";
+export const UNJOINED_TOP_HEADING = "Top row";
+/** The PDF / DOCX section heading over the verdict card's top and key rows, by what they are (F-1 / m-6). */
+export const VERDICT_SECTION_HEADINGS = {
+  claim: "Top claim and key unresolved claim",
+  field: "Top value comparison and key value comparison",
+  mixed: "Top and key rows: claims and value comparisons",
+  other: "Top row and key unresolved row",
+} as const;
+export const UNJOINED_KEY_HEADING = "Key unresolved row";
+
+/** n-2: the stored gate as text — a value this version does not know is never echoed into computed text. */
+function shownGateWord(gate: unknown): string {
+  return gate === "pass" || gate === "caution" || gate === "fail" ? gate : "unrecognized";
 }
 
 /** Model-written claim text inside computed text: quoted, internal double quotes softened (same boundary as quoteClaim). */

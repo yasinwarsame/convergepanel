@@ -12,7 +12,7 @@ import type { AdaptiveResearchExportV1 } from "./researchExport";
 import type { AdaptiveSynthesisReport } from "./types";
 import { readFrozenRunProvenance } from "./exportRunProvenance";
 import { runModelProvenanceFromExport } from "@/lib/panel/runModelIdentity";
-import { PositionView, positionView, presentPositionSafeReport } from "./positionPresentation";
+import { PositionView, VERDICT_SECTION_HEADINGS, positionView, presentPositionSafeReport } from "./positionPresentation";
 
 export function exportPositionSafeReport(record: AdaptiveResearchExportV1): { report: AdaptiveSynthesisReport | undefined; view: PositionView | null } {
   const legacy = record.reportSnapshot.legacy;
@@ -26,5 +26,5 @@ export function exportPositionSafeReport(record: AdaptiveResearchExportV1): { re
   return { report, view: positionView(report) };
 }
 
-/** The section heading the composers use for the verdict card's two claims on a marked report. */
-export const MARKED_VERDICT_SECTION_HEADING = "Top claim and key unresolved claim";
+/** The composers' verdict section heading on a marked report whose top and key rows are claims (otherwise PositionView.verdict.sectionHeading names what they are). */
+export const MARKED_VERDICT_SECTION_HEADING = VERDICT_SECTION_HEADINGS.claim;

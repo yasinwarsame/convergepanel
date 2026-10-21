@@ -67,4 +67,10 @@ describe("vocabulary coverage gate", () => {
     expect(has("lib/verification/generateMemo.ts", '"WHERE MODELS DISAGREE"')).toBe(true);
     expect(has("lib/adaptiveSchema/synthesisReport.ts", '"Models take different positions on this point — see each model\'s excerpt below."')).toBe(true);
   });
+
+  it("m-7: the scan sees the multi-line and expression-adjacent JSX text the eae6c897 reviewer cited", () => {
+    const has = (file: string, literal: string) => found.has(key(file, literal));
+    expect(has("components/adaptive/AdaptiveSynthesisReportView.tsx", ">Raised by only one model in this run — not corroborated or disputed by any other model.<")).toBe(true);
+    expect(has("components/adaptive/ListView.tsx", ">aligns<")).toBe(true);
+  });
 });

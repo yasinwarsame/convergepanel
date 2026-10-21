@@ -35,7 +35,7 @@ import { TRUST_SCORE_CAP_REASON } from "@/lib/adaptiveSchema/config";
 import { Card, SectionLabel, BulletList, ConfidencePill, ProbabilityBar, TintBadge, getModelLabel } from "./shared";
 import ModelChip from "@/components/ModelChip";
 import { GateTone, gateChipText, gateTone, pageGateValue } from "@/lib/adaptiveSchema/gatePresentation";
-import { PanelCounts, panelCounts, readSlots, rowTypeOf } from "@/lib/adaptiveSchema/positionPresentation";
+import { PanelCounts, ROW_COUNTS_UNAVAILABLE, SlotRowCounts, hasReadableRowBreakdown, panelCounts, readSlots, rowTypeOf, slotLabel, slotRowCounts } from "@/lib/adaptiveSchema/positionPresentation";
 import { PositionPresentationBoundary, PositionPresentationState, usePositionPresentation } from "./PositionPresentationContext";
 
 // Wording: gatePresentation.gateChipText (D6/D7); "neutral": an unrecognized stored gate (D8).
@@ -199,6 +199,8 @@ interface RowVM {
   alignment: { matched: number; participated: number } | null;
   disputes: number;
   uniqueClaims: number;
+  /** Order 5 (Contract P, F-2): a marked report's per-slot counts — claim rows and value comparisons apart; null otherwise. */
+  marked: { counts: SlotRowCounts; readable: boolean; substitutedLabel: string | null } | null;
   citations: number;
   headline: string;
   isOutlier: boolean;
@@ -227,20 +229,26 @@ function buildRowVM(
       alignment: null,
       disputes: 0,
       uniqueClaims: 0,
+      marked: null,
       citations: 0,
       headline: "",
       isOutlier: true,
     };
   }
 
-  const alignment = computeAlignment(result.modelId, rows);
+  // F-2: on a marked report "aligns" / "unique claims" are not computed from stored stances at all — the slot's claim
+  // rows and value comparisons are counted apart from its validated readings (display only; trust is unchanged).
+  const markedCounts = position ? slotRowCounts(result.modelId, rows, position.roster) : null;
+  const alignment = markedCounts ? null : computeAlignment(result.modelId, rows);
   const disputes = countDisputes(result.modelId, rows, position);
-  const uniqueClaims = countUniqueClaims(result.modelId, rows);
+  const uniqueClaims = markedCounts ? markedCounts.singleSourceClaims : countUniqueClaims(result.modelId, rows);
   const citations = countCitations(schema, result);
   const headline = headlineText(schema, result.data);
   const isOutlier = disputes > 0 || uniqueClaims > 0 || citations > 0 || capped;
+  const label = position ? slotLabel(result.modelId, position.provenance, "full") : null;
+  const marked = markedCounts ? { counts: markedCounts, readable: hasReadableRowBreakdown(rows), substitutedLabel: label && label.includes("(substituted") ? label : null } : null;
 
-  return { result, failed: false, parseHealth, trustScore, capped, alignment, disputes, uniqueClaims, citations, headline, isOutlier };
+  return { result, failed: false, parseHealth, trustScore, capped, alignment, disputes, uniqueClaims, marked, citations, headline, isOutlier };
 }
 
 export type SortMode = "trust" | "outliers" | "response_time";
@@ -271,6 +279,26 @@ function sortRows(rows: RowVM[], mode: SortMode): RowVM[] {
 }
 
 // ─── Presentational pieces ──────────────────────────────────────────────────
+
+/** Order 5 (Contract P, F-2): a marked slot's claim rows and value comparisons, each counted apart; neutral when the rows give no readable breakdown. */
+function MarkedSlotCounts({ marked }: { marked: NonNullable<RowVM["marked"]> }) {
+  if (!marked.readable) return <span className="text-xs text-slate-500 whitespace-nowrap">{ROW_COUNTS_UNAVAILABLE}</span>;
+  const { claimRows, claimRowsMatching, valueComparisons } = marked.counts;
+  return (
+    <>
+      {claimRows > 0 && (
+        <span className="text-xs text-slate-600 whitespace-nowrap">
+          same as the most common position on {claimRowsMatching}/{claimRows} claim row{claimRows === 1 ? "" : "s"}
+        </span>
+      )}
+      {valueComparisons > 0 && (
+        <span className="text-xs text-slate-600 whitespace-nowrap">
+          gave values in {valueComparisons} value comparison{valueComparisons === 1 ? "" : "s"}
+        </span>
+      )}
+    </>
+  );
+}
 
 function RunHeaderStrip({
   schema,
@@ -545,21 +573,28 @@ function ModelRow({
               )}
             </span>
           )}
+          {vm.marked?.substitutedLabel && <span className="text-xs text-slate-500 whitespace-nowrap">{vm.marked.substitutedLabel}</span>}
           {vm.alignment && vm.alignment.participated > 0 && (
             <span className="text-xs text-slate-600 whitespace-nowrap">
               aligns {vm.alignment.matched}/{vm.alignment.participated}
             </span>
           )}
+          {vm.marked && <MarkedSlotCounts marked={vm.marked} />}
           {vm.disputes > 0 && (
             <TintBadge tone="warning">
               disputes {vm.disputes} claim{vm.disputes === 1 ? "" : "s"}
             </TintBadge>
           )}
-          {vm.uniqueClaims > 0 && (
-            <TintBadge tone="accent">
-              +{vm.uniqueClaims} unique claim{vm.uniqueClaims === 1 ? "" : "s"}
-            </TintBadge>
-          )}
+          {vm.uniqueClaims > 0 &&
+            (vm.marked ? (
+              <TintBadge tone="accent">
+                +{vm.uniqueClaims} single-source claim{vm.uniqueClaims === 1 ? "" : "s"}
+              </TintBadge>
+            ) : (
+              <TintBadge tone="accent">
+                +{vm.uniqueClaims} unique claim{vm.uniqueClaims === 1 ? "" : "s"}
+              </TintBadge>
+            ))}
           {vm.citations > 0 && (
             <TintBadge tone="accent">
               {vm.citations} citation{vm.citations === 1 ? "" : "s"}
@@ -662,8 +697,8 @@ function ListViewBody({
           onClick={() => onNavigateToSynthesis?.("disagreements")}
         />
         <PulseCard
-          label="Single-model insights"
-          value={singleModelCount}
+          label={counts ? "Single-source claims" : "Single-model insights"}
+          value={counts ? counts.claimByStatus.single_source : singleModelCount}
           onClick={() => onNavigateToSynthesis?.("single-model-insights")}
         />
       </div>

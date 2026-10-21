@@ -37,8 +37,8 @@ export default function PrimarySynthesisStrip({ synthesisReport: stored }: { syn
   const positions = positionView(synthesisReport)?.verdict ?? null;
   const { unifiedAnswer, verdictCard } = synthesisReport;
   // R4-1: claim text is model-written; cards that carry the computed status show it beside the quoted claim.
-  const top = presentVerdictClaim(verdictCard.topConsensus, verdictCard.topConsensusAgreement);
-  const split = verdictCard.keyDisagreement ? presentVerdictClaim(verdictCard.keyDisagreement, verdictCard.keyDisagreementAgreement) : null;
+  const top = presentVerdictClaim(verdictCard.topConsensus, verdictCard.topConsensusAgreement, positions?.topLabel);
+  const split = verdictCard.keyDisagreement ? presentVerdictClaim(verdictCard.keyDisagreement, verdictCard.keyDisagreementAgreement, positions?.keyLabel) : null;
   const caveat = presentVerdictCaveat(verdictCard);
 
   return (

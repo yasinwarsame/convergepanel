@@ -72,6 +72,11 @@ export interface MemoInput {
    * every other research memo never set it and are generated exactly as before.
    */
   adaptivePositionPresentation?: { reportKind: typeof ADAPTIVE_RESEARCH_REPORT_KIND; disagreementPositionVersion: 1 };
+  /**
+   * Order 5 (Contract P, F-1): read ONLY on the adaptive-only path — the consensus / majority entries grouped by what
+   * their rows are (claims, value comparisons, rows not joined), each group under its own heading.
+   */
+  adaptiveAgreeGroups?: { heading: string; items: string[] }[];
 }
 
 /** The report type of an adaptive research memo (Contract P boundary). */
@@ -531,7 +536,11 @@ function generateMarkedAdaptiveResearchMemo(input: MemoInput): string {
   const lines: string[] = [];
   const q = (input.question ?? "").trim() || "—";
   const findings = dedupeCap(input.keyFindings ?? []);
-  const agree = dedupeCap(input.synthesisAgreements ?? []);
+  // F-1: grouped by the builder; an input without groups (not built by buildAdaptiveMemoInput) lists its entries
+  // under a neutral heading, never as consensus.
+  const agreeGroups = Array.isArray(input.adaptiveAgreeGroups)
+    ? input.adaptiveAgreeGroups.map((g) => ({ heading: String(g?.heading ?? ""), items: dedupeCap(Array.isArray(g?.items) ? g.items : []) })).filter((g) => g.heading && g.items.length)
+    : [{ heading: "Scored rows", items: dedupeCap(input.synthesisAgreements ?? []) }].filter((g) => g.items.length);
   const unresolved = dedupeCap(input.synthesisDisagreements ?? []);
   const slots = input.modelsUsed ?? [];
   const n = Math.max(1, slots.length);
@@ -547,7 +556,8 @@ function generateMarkedAdaptiveResearchMemo(input: MemoInput): string {
   lines.push(`EVIDENCE QUALITY: ${input.evidenceQuality}`);
   lines.push("");
   lines.push("SUMMARY");
-  lines.push(`${n} panel slot${n === 1 ? "" : "s"} answered this question independently. Positions below are stated from the recorded panel rows; value comparisons are computed, not model positions.`);
+  // m-4: the record says how many slots were dispatched, not that each answered (a slot may have failed or been retried).
+  lines.push(`${n} panel slot${n === 1 ? " was" : "s were"} dispatched for this question. Positions below are stated from the recorded panel rows; value comparisons are computed, not model positions.`);
   lines.push("");
 
   if (findings.length) {
@@ -555,9 +565,9 @@ function generateMarkedAdaptiveResearchMemo(input: MemoInput): string {
     findings.forEach((f) => lines.push(`- ${f}`));
     lines.push("");
   }
-  if (agree.length) {
-    lines.push("CONSENSUS AND MAJORITY ROWS");
-    agree.forEach((p) => lines.push(`- ${p}`));
+  for (const g of agreeGroups) {
+    lines.push(g.heading.toUpperCase());
+    g.items.forEach((p) => lines.push(`- ${p}`));
     lines.push("");
   }
   if (unresolved.length) {
@@ -578,7 +588,7 @@ function generateMarkedAdaptiveResearchMemo(input: MemoInput): string {
 
   lines.push("METHODOLOGY");
   lines.push(
-    `This question was researched by ${n} panel slot${n === 1 ? "" : "s"} via ConvergePanel. Each slot received identical instructions and was not shown the others' responses. Each slot's recorded position on a claim is shown as recorded; comparisons of stated values are computed. The run certainty is computed from the scored rows and does not by itself establish factual accuracy.`
+    `This question was dispatched to ${n} panel slot${n === 1 ? "" : "s"} via ConvergePanel. Each slot's recorded position on a claim is shown as recorded; comparisons of stated values are computed. The run certainty is computed from the scored rows and does not by itself establish factual accuracy.`
   );
   lines.push("");
   lines.push("DISCLAIMER");

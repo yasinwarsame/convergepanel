@@ -190,9 +190,9 @@ export interface LabelledText {
  * The verdict card's claim + computed status as parts: the quoted, model-written claim and the computed result,
  * each with its label. Null on cards persisted before topConsensusAgreement / keyDisagreementAgreement existed.
  */
-export function verdictClaimParts(claim: string, agreement: string | undefined): { claim: LabelledText; result: LabelledText } | null {
+export function verdictClaimParts(claim: string, agreement: string | undefined, claimLabel: string = CLAIM_LABEL): { claim: LabelledText; result: LabelledText } | null {
   if (!agreement) return null;
-  return { claim: { label: CLAIM_LABEL, text: quoteClaim(claim) }, result: { label: PANEL_RESULT_LABEL, text: agreement } };
+  return { claim: { label: claimLabel, text: quoteClaim(claim) }, result: { label: PANEL_RESULT_LABEL, text: agreement } };
 }
 
 /**
@@ -200,8 +200,8 @@ export function verdictClaimParts(claim: string, agreement: string | undefined):
  * Cards persisted before topConsensusAgreement / keyDisagreementAgreement
  * existed return the stored text alone, exactly as they always rendered.
  */
-export function presentVerdictClaim(claim: string, agreement: string | undefined): { claim: string; result: string | null } {
-  const parts = verdictClaimParts(claim, agreement);
+export function presentVerdictClaim(claim: string, agreement: string | undefined, claimLabel?: string): { claim: string; result: string | null } {
+  const parts = verdictClaimParts(claim, agreement, claimLabel);
   if (!parts) return { claim, result: null };
   return { claim: `${parts.claim.label}: ${parts.claim.text}`, result: `${parts.result.label}: ${parts.result.text}` };
 }

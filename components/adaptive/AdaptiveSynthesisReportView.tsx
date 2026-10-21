@@ -40,6 +40,7 @@ import {
   TextBlock,
   UnresolvedClaimBlock,
   answerLeadBlocks,
+  presentAgreeGroups,
   presentAgreeItems,
   presentCertainty,
   presentDisagreements,
@@ -57,7 +58,11 @@ import {
   coverageWithheldNotice,
   positionView,
   presentPositionSafeReport,
+  presentedRowKind,
+  rowKindLabel,
+  rowKindsHeading,
   rowView,
+  slotLabel,
 } from "@/lib/adaptiveSchema/positionPresentation";
 import { PositionPresentationBoundary, usePositionPresentation } from "./PositionPresentationContext";
 
@@ -282,8 +287,13 @@ const PARSE_HEALTH_STYLES: Record<ModelTrustSummary["parseHealth"], string> = {
   failed: "bg-red-50 text-red-700 border-red-200",
 };
 
+export const TRUST_INPUTS_NOTE = "Trust inputs are computed over every scored row, value comparisons included; they are not claim positions.";
+
 /** Exported — see UnifiedAnswerCard's export doc above. */
 export function TrustSummaryTable({ trustSummary }: { trustSummary: AdaptiveTrustSummary }) {
+  // Order 5 (Contract P, F-2): on a marked report the computed trust inputs are labelled for what they count — every
+  // scored row, value comparisons included — never as claim positions. The values are the stored ones, unchanged.
+  const marked = !!usePositionPresentation();
   if (trustSummary.perModel.length === 0) return null;
   return (
     <Card>
@@ -294,14 +304,15 @@ export function TrustSummaryTable({ trustSummary }: { trustSummary: AdaptiveTrus
         </span>
       </div>
       <p className="text-xs text-slate-500 mb-2">How well the models behaved — citations, consistency, contradictions — not how sure the panel is about the answer.</p>
+      {marked && <p data-source="computed" className="text-xs text-slate-500 mb-2">{TRUST_INPUTS_NOTE}</p>}
       <div className="overflow-x-auto">
         <table className="w-full text-sm border-collapse">
           <thead>
             <tr className="text-left text-xs uppercase tracking-wide text-slate-500 border-b border-slate-200">
               <th className="py-2 pr-4 font-medium">Model</th>
               <th className="py-2 pr-4 font-medium">Trust</th>
-              <th className="py-2 pr-4 font-medium">Claims</th>
-              <th className="py-2 pr-4 font-medium">Majority align</th>
+              <th className="py-2 pr-4 font-medium">{marked ? "Items contributed" : "Claims"}</th>
+              <th className="py-2 pr-4 font-medium">{marked ? "Stance match (all rows)" : "Majority align"}</th>
               <th className="py-2 pr-4 font-medium">Citations</th>
               <th className="py-2 pr-4 font-medium">Contradictions</th>
               <th className="py-2 pr-4 font-medium">Health</th>
@@ -501,18 +512,19 @@ function RowStatement({ view }: { view: RowView }) {
 
 /** Order 5 (Contract P): the agreement map of a marked report — each row's own statement and its positions by slot. */
 function MarkedPositionMap({ claims, roster, provenance }: { claims: AlignedClaim[]; roster: readonly string[]; provenance: Parameters<typeof rowView>[2] }) {
-  const mapClaims = claims.filter((c) => c.status !== "single_source");
-  if (mapClaims.length === 0) return null;
+  // F-1: only a single-source CLAIM row is listed apart (MarkedSingleSourceClaims); a field row stored as single source
+  // is a value comparison like any other, shown here.
+  const mapRows = claims.map((claim) => ({ claim, view: rowView(claim, roster, provenance) })).filter(({ claim, view }) => !(view.rowType === "claim" && claim.status === "single_source"));
+  if (mapRows.length === 0) return null;
   return (
     <Card>
       <SectionLabel>Recorded positions and value comparisons</SectionLabel>
       <div className="space-y-3">
-        {mapClaims.map((claim, idx) => {
-          const view = rowView(claim, roster, provenance);
+        {mapRows.map(({ claim, view }, idx) => {
           return (
             <div key={`${claim.id}-${idx}`} className="space-y-1.5" data-row-type={view.rowType}>
               <p data-source="model_claim" className="text-sm text-slate-800">
-                {CLAIM_LABEL}: {quoteClaim(claim.claimText)}
+                {rowKindLabel(presentedRowKind(view), CLAIM_LABEL)}: {quoteClaim(claim.claimText)}
               </p>
               <RowStatement view={view} />
               {view.contested && (
@@ -621,6 +633,8 @@ export function AgreementDisagreementMap({ claims, modelsUsed }: { claims: Align
 /** Coverage-1 claims — a single model's own observation, never corroborated or disputed by any other model — pulled out of the Agreement/Disagreement Map since a lone claim isn't agreement data. */
 /** Exported — see UnifiedAnswerCard's export doc above. */
 export function SingleModelInsightsList({ claims, labelled = false }: { claims: AlignedClaim[]; labelled?: boolean }) {
+  const position = usePositionPresentation();
+  if (position) return <MarkedSingleSourceClaims claims={claims} roster={position.roster} provenance={position.provenance} />;
   const singleSource = claims.filter((c) => c.status === "single_source");
   if (singleSource.length === 0) return null;
 
@@ -651,6 +665,38 @@ export function SingleModelInsightsList({ claims, labelled = false }: { claims: 
     </Card>
   );
 }
+
+/**
+ * Order 5 (Contract P, F-1): a marked report's single-source CLAIM rows — each with its own computed statement and its
+ * recorded positions by panel slot (slot labels, never a model chip). Field rows are value comparisons, shown in the
+ * position map, never here.
+ */
+function MarkedSingleSourceClaims({ claims, roster, provenance }: { claims: AlignedClaim[]; roster: readonly string[]; provenance: Parameters<typeof rowView>[2] }) {
+  const rows = claims.filter((c) => c.status === "single_source").map((claim) => ({ claim, view: rowView(claim, roster, provenance) })).filter(({ view }) => view.rowType === "claim");
+  if (rows.length === 0) return null;
+  return (
+    <Card className="bg-slate-50">
+      <SectionLabel>{SINGLE_SOURCE_CLAIMS_HEADING}</SectionLabel>
+      <p data-source="computed" className="text-xs text-slate-500 mb-2">
+        {SINGLE_SOURCE_CLAIMS_NOTE}
+      </p>
+      <ul className="space-y-2">
+        {rows.map(({ claim, view }, idx) => (
+          <li key={`${claim.id}-${idx}`} className="space-y-1 text-sm" data-row-type={view.rowType}>
+            <p data-source="model_claim" className="text-slate-700">
+              {CLAIM_LABEL}: {quoteClaim(claim.claimText)}
+            </p>
+            <RowStatement view={view} />
+            <SlotPositionsList slots={view.slots.filter((sl) => sl.position !== "No position recorded")} />
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
+export const SINGLE_SOURCE_CLAIMS_HEADING = "Single-source claims";
+export const SINGLE_SOURCE_CLAIMS_NOTE = "Claim rows with the computed status single source: listed in the recorded rows by one panel slot only.";
 
 /** Exported — see UnifiedAnswerCard's export doc above. */
 export function DisagreementsSection({ report }: { report: AdaptiveSynthesisReport }) {
@@ -919,8 +965,8 @@ export function PanelVerdictCard({ report, gate }: { report: AdaptiveSynthesisRe
   // Order 5 (Contract P): a marked report's headings come from its rows (a value comparison is never "top consensus").
   const positions = positionView(report)?.verdict ?? null;
   // R4-1: claim text is model-written; cards that carry the computed status show it beside the quoted claim.
-  const top = presentVerdictClaim(v.topConsensus, v.topConsensusAgreement);
-  const split = v.keyDisagreement ? presentVerdictClaim(v.keyDisagreement, v.keyDisagreementAgreement) : null;
+  const top = presentVerdictClaim(v.topConsensus, v.topConsensusAgreement, positions?.topLabel);
+  const split = v.keyDisagreement ? presentVerdictClaim(v.keyDisagreement, v.keyDisagreementAgreement, positions?.keyLabel) : null;
   const caveat = presentVerdictCaveat(v);
   // F4: the card shows the report's stored gate, as the Unified Answer does.
   const shownGate = pageGateValue(report, gate.status);
@@ -1019,7 +1065,7 @@ function LoadBearingClaim({ claim }: { claim: AlignedClaim }) {
     return (
       <>
         <span data-source="model_claim">
-          {CLAIM_LABEL}: {quoteClaim(claim.claimText)}
+          {rowKindLabel(presentedRowKind(view), CLAIM_LABEL)}: {quoteClaim(claim.claimText)}
         </span>
         <span data-source="computed" className="block text-xs text-slate-500 mt-0.5">
           {PANEL_RESULT_LABEL}: <span className="font-medium">{view.heading}</span> — {view.text}
@@ -1043,6 +1089,14 @@ function LoadBearingClaim({ claim }: { claim: AlignedClaim }) {
         {who.length > 0 ? ` (${who.join("; ")})` : ""}
       </span>
     </>
+  );
+}
+
+/** Order 5 (Contract P, marked reports): the load-bearing section's heading by what its rows are (m-6). */
+function loadBearingHeading(claims: AlignedClaim[], roster: readonly string[]): string {
+  return rowKindsHeading(
+    claims.map((c) => presentedRowKind(rowView(c, roster))),
+    { claim: "Load-bearing claims (top by salience)", field: "Load-bearing value comparisons (top by salience)", mixed: "Load-bearing claims and value comparisons (top by salience)", other: "Load-bearing rows (top by salience)" }
   );
 }
 
@@ -1077,6 +1131,8 @@ export default function AdaptiveSynthesisReportView({
   );
   const [generatedPost, setGeneratedPost] = useState<{ type: "linkedin" | "x"; text: string } | null>(null);
   const agreeItems = presentAgreeItems(report);
+  // Order 5 (Contract P, F-1): a marked report's entries in groups — claims, value comparisons, rows not joined.
+  const agreeGroups = presentAgreeGroups(report);
 
   const handleCopy = useCallback(async () => {
     const markdown = buildAdaptiveSynthesisMarkdown(question, report);
@@ -1153,10 +1209,31 @@ export default function AdaptiveSynthesisReportView({
         <SingleModelInsightsList claims={rows} labelled={!!report.presentation} />
       </div>
 
-      {agreeItems.length > 0 && (
+      {agreeGroups && agreeGroups.length > 0 && (
         <div data-section="where-models-agree">
           <Card>
-            <SectionLabel>{positionView(report) ? "Consensus and majority rows" : "Where models agree"}</SectionLabel>
+            <div className="space-y-3">
+              {agreeGroups.map((g) => (
+                <div key={g.kind} data-agree-group={g.kind}>
+                  <SectionLabel>{g.heading}</SectionLabel>
+                  <ul className="list-disc list-outside pl-5 space-y-1 text-sm leading-relaxed text-slate-800">
+                    {g.items.map((item, idx) => (
+                      <li key={idx}>
+                        <ClaimWithResult item={item} />
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {!agreeGroups && agreeItems.length > 0 && (
+        <div data-section="where-models-agree">
+          <Card>
+            <SectionLabel>Where models agree</SectionLabel>
             <ul className="list-disc list-outside pl-5 space-y-1 text-sm leading-relaxed text-slate-800">
               {agreeItems.map((item, idx) =>
                 report.presentation ? (
@@ -1215,7 +1292,7 @@ export default function AdaptiveSynthesisReportView({
       {Array.isArray(gate.loadBearingClaims) && gate.loadBearingClaims.length > 0 && (
         <div data-section="load-bearing-claims">
           <Card className="bg-slate-50">
-            <SectionLabel>Load-bearing claims (top by salience)</SectionLabel>
+            <SectionLabel>{positionView(report) ? loadBearingHeading(gate.loadBearingClaims, positionView(report)!.roster) : "Load-bearing claims (top by salience)"}</SectionLabel>
             <ul className="space-y-1 text-sm text-slate-700">
               {gate.loadBearingClaims.map((claim) =>
                 report.presentation ? (

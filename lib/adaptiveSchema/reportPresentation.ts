@@ -46,7 +46,7 @@ import {
 } from "./gatePresentation";
 import { dedupeTextList } from "./textSimilarity";
 import { TEXT_DEDUP_THRESHOLDS, WHERE_MODELS_AGREE_MAX_ITEMS } from "./config";
-import { MODEL_PROSE_WITHHELD, positionView } from "./positionPresentation";
+import { MODEL_PROSE_WITHHELD, PresentedRowKind, positionView, presentedRowKind as presentedRowKindOf, rowKindLabel, rowKindsHeading } from "./positionPresentation";
 
 export const MODEL_EXPLANATION_LABEL = "Model-written explanation (not a verified finding)";
 
@@ -120,19 +120,52 @@ export interface UnifiedAnswerBlocks {
 export const SUPPORTED_BY_LABEL = "Supported by";
 export const UNRESOLVED_CLAIMS_HEADING = "Unresolved claims";
 
+/** Order 5 (Contract P, marked reports): the fail answer's heading by what its rows are (m-6). */
+export const MARKED_UNRESOLVED_HEADINGS = {
+  claim: UNRESOLVED_CLAIMS_HEADING,
+  field: "Unresolved value comparisons",
+  mixed: "Unresolved claims and value comparisons",
+  other: "Unresolved rows",
+} as const;
+
+/** Order 5 (Contract P, marked reports): the caution answer's load-bearing heading by what its rows are (m-6). */
+function markedLoadBearingHeading(kinds: readonly PresentedRowKind[], count: number): string {
+  const one = count === 1;
+  return rowKindsHeading(kinds, {
+    claim: unresolvedLoadBearingHeading(count),
+    field: one ? "Unresolved load-bearing value comparison" : "Unresolved load-bearing value comparisons",
+    mixed: "Unresolved load-bearing claims and value comparisons",
+    other: one ? "Unresolved load-bearing row" : "Unresolved load-bearing rows",
+  });
+}
+
+/** Order 5 (Contract P, marked reports): the consensus / majority entries, claims and value comparisons apart (F-1). */
+export const AGREE_GROUP_HEADINGS: Readonly<Record<PresentedRowKind, string>> = {
+  claim: "Consensus and majority claims",
+  field: "Value comparisons",
+  other: "Rows without position details",
+};
+
+export interface AgreeGroup {
+  kind: PresentedRowKind;
+  heading: string;
+  items: ClaimBlock[];
+}
+
 const legacy = (text: string): TextBlock => ({ source: "legacy", label: null, text });
 
-function presentClaim(c: PresentedClaim): ClaimBlock {
+/** kind: on a marked report (Order 5), what the entry's joined row is — a value comparison is never labelled a claim. */
+function presentClaim(c: PresentedClaim, kind?: PresentedRowKind): ClaimBlock {
   return {
-    claim: { source: "model_claim", label: CLAIM_LABEL, text: quoteClaim(c.claim) },
+    claim: { source: "model_claim", label: kind ? rowKindLabel(kind, CLAIM_LABEL) : CLAIM_LABEL, text: quoteClaim(c.claim) },
     result: { source: "computed", label: PANEL_RESULT_LABEL, text: c.result },
     contested: c.contested ? { source: "computed", label: "Contested", text: c.contested } : null,
   };
 }
 
-function presentAnswerClaim(c: PresentedAnswerClaim): AnswerClaimBlock {
+function presentAnswerClaim(c: PresentedAnswerClaim, kind?: PresentedRowKind): AnswerClaimBlock {
   return {
-    ...presentClaim(c),
+    ...presentClaim(c, kind),
     supporters: c.supporters ? { source: "computed", label: SUPPORTED_BY_LABEL, text: c.supporters } : null,
   };
 }
@@ -166,17 +199,21 @@ export function unreadableUnresolvedNotice(count: number): string {
     : `${count} stored load-bearing claims could not be read, so they are not shown.`;
 }
 
-/** The stored load-bearing splits of a caution answer: the readable entries, and a note when any could not be read (F3). */
-function readUnresolvedClaims(stored: unknown): { claims: PresentedUnresolvedClaim[]; unreadable: TextBlock | null; count: number } {
-  if (!Array.isArray(stored)) return { claims: [], unreadable: { source: "computed", label: null, text: UNRESOLVED_DETAILS_UNREADABLE }, count: 1 };
-  const claims = stored.map(readUnresolvedClaim).filter((c): c is PresentedUnresolvedClaim => c !== null);
+/**
+ * The stored load-bearing splits of a caution answer: the readable entries, and a note when any could not be read (F3).
+ * kinds (Order 5, marked reports only): per stored entry; kept for the readable entries, in the same order.
+ */
+function readUnresolvedClaims(stored: unknown, kinds?: readonly PresentedRowKind[]): { claims: PresentedUnresolvedClaim[]; claimKinds: (PresentedRowKind | undefined)[]; unreadable: TextBlock | null; count: number } {
+  if (!Array.isArray(stored)) return { claims: [], claimKinds: [], unreadable: { source: "computed", label: null, text: UNRESOLVED_DETAILS_UNREADABLE }, count: 1 };
+  const read = stored.map((v, i) => ({ claim: readUnresolvedClaim(v), kind: kinds?.[i] })).filter((r): r is { claim: PresentedUnresolvedClaim; kind: PresentedRowKind | undefined } => r.claim !== null);
+  const claims = read.map((r) => r.claim);
   const dropped = stored.length - claims.length;
-  return { claims, unreadable: dropped > 0 ? { source: "computed", label: null, text: unreadableUnresolvedNotice(dropped) } : null, count: stored.length };
+  return { claims, claimKinds: read.map((r) => r.kind), unreadable: dropped > 0 ? { source: "computed", label: null, text: unreadableUnresolvedNotice(dropped) } : null, count: stored.length };
 }
 
-function presentUnresolvedClaim(c: PresentedUnresolvedClaim): UnresolvedClaimBlock {
+function presentUnresolvedClaim(c: PresentedUnresolvedClaim, kind?: PresentedRowKind): UnresolvedClaimBlock {
   return {
-    ...presentClaim(c),
+    ...presentClaim(c, kind),
     supporters: c.supporters ? { source: "computed", label: SUPPORTED_BY_LABEL, text: c.supporters } : null,
     disputers: c.disputers ? { source: "computed", label: DISPUTED_BY_LABEL, text: c.disputers } : null,
   };
@@ -219,11 +256,12 @@ export function presentUnifiedAnswer(report: AdaptiveSynthesisReport): UnifiedAn
   const { gated, disclosure } = answerGateParts(report);
   // Without presentation.answer the stored answer string is shown, and it carries the split disclosure itself.
   if (!answer) return { ...gated, note: legacy(report.unifiedAnswer), claimsHeading: null, claims: [] };
+  const kinds = positionView(report)?.answerClaimKinds;
   return {
     ...gated,
     note: answer.note ? { source: "computed", label: null, text: answer.note } : null,
-    claimsHeading: report.gate === "fail" && answer.claims.length > 0 ? UNRESOLVED_CLAIMS_HEADING : null,
-    claims: answer.claims.map(presentAnswerClaim),
+    claimsHeading: report.gate === "fail" && answer.claims.length > 0 ? (kinds ? rowKindsHeading(kinds, MARKED_UNRESOLVED_HEADINGS) : UNRESOLVED_CLAIMS_HEADING) : null,
+    claims: answer.claims.map((c, i) => presentAnswerClaim(c, kinds?.[i])),
     ...disclosure,
   };
 }
@@ -240,13 +278,14 @@ function answerGateParts(report: AdaptiveSynthesisReport): { gated: Pick<AnswerG
   // (its stored answer string carries it), but a page that shows its own answer has no other place to show it.
   const stored =
     status === "caution" && hasGatePresentation(report)
-      ? readUnresolvedClaims((report.presentation?.verificationGate as { unresolvedLoadBearing?: unknown } | undefined)?.unresolvedLoadBearing)
-      : { claims: [], unreadable: null, count: 0 };
+      ? readUnresolvedClaims((report.presentation?.verificationGate as { unresolvedLoadBearing?: unknown } | undefined)?.unresolvedLoadBearing, positionView(report)?.unresolvedKinds)
+      : { claims: [], claimKinds: [], unreadable: null, count: 0 };
+  const kinds = positionView(report)?.unresolvedKinds;
   return {
     gated,
     disclosure: {
-      unresolvedHeading: stored.count > 0 ? unresolvedLoadBearingHeading(stored.count) : null,
-      unresolved: stored.claims.map(presentUnresolvedClaim),
+      unresolvedHeading: stored.count > 0 ? (kinds ? markedLoadBearingHeading(kinds, stored.count) : unresolvedLoadBearingHeading(stored.count)) : null,
+      unresolved: stored.claims.map((c, i) => presentUnresolvedClaim(c, stored.claimKinds[i])),
       unresolvedUnreadable: stored.unreadable,
     },
   };
@@ -317,7 +356,22 @@ export function presentAgreeItems(report: AdaptiveSynthesisReport): ClaimBlock[]
       contested: null,
     }));
   }
-  return p.agree.slice(0, WHERE_MODELS_AGREE_MAX_ITEMS).map(presentClaim);
+  const kinds = positionView(report)?.agreeKinds;
+  return p.agree.slice(0, WHERE_MODELS_AGREE_MAX_ITEMS).map((c, i) => presentClaim(c, kinds?.[i]));
+}
+
+/**
+ * Order 5 (Contract P, F-1): a marked report's consensus / majority entries as groups — claim rows under the consensus
+ * heading, field-derived rows as value comparisons, rows that could not be joined under neither — in that order, each
+ * keeping the stored order. Null for an unmarked report (one list, as before).
+ */
+export function presentAgreeGroups(report: AdaptiveSynthesisReport): AgreeGroup[] | null {
+  const view = positionView(report);
+  if (!view || !report.presentation) return null;
+  const items = presentAgreeItems(report);
+  return (["claim", "field", "other"] as const)
+    .map((kind) => ({ kind, heading: AGREE_GROUP_HEADINGS[kind], items: items.filter((_, i) => (view.agreeKinds[i] ?? "other") === kind) }))
+    .filter((g) => g.items.length > 0);
 }
 
 /** Disagreements: each claim quoted with its computed result, and its explanation attributed to its source. */
@@ -327,7 +381,8 @@ export function presentDisagreements(report: AdaptiveSynthesisReport): Disagreem
     const presented = p?.disagree[i];
     if (!presented) return { claim: legacy(d.topic), result: null, contested: null, why: legacy(d.whyTheyDiffer) };
     // Order 5 (Contract P): a marked report withholds every explanation of why positions differ, the computed default included.
-    if (positionView(report)) return { ...presentClaim(presented), why: null };
+    const view = positionView(report);
+    if (view) return { ...presentClaim(presented, view.disagreements[i] ? presentedRowKindOf(view.disagreements[i]) : "other"), why: null };
     return {
       ...presentClaim(presented),
       why:

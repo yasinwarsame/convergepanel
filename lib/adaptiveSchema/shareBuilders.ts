@@ -23,16 +23,18 @@ import {
   answerLeadBlocks,
   blockText,
   claimLine,
+  presentAgreeGroups,
   presentAgreeItems,
   presentCertainty,
   presentDisagreements,
   presentExecutiveSummary,
   presentUnifiedAnswer,
+  AGREE_GROUP_HEADINGS,
   shortClaimWithResult,
   unresolvedClaimParts,
 } from "./reportPresentation";
 import { CAUTION_NOTICE, CAUTION_NOTICE_SHORT, GATE_CONFIDENCE_LABEL, GATE_LABEL, gateLabel, hasGatePresentation, legacyGateWord, readGateStatus } from "./gatePresentation";
-import { escapeMarkdownInline, markdownQuote, plainTextQuote } from "./textSerialization";
+import { escapeMarkdownInline, markdownQuote, plainTextQuote, singleLineText } from "./textSerialization";
 import { ADAPTIVE_RESEARCH_REPORT_KIND } from "@/lib/verification/generateMemo";
 import { POSITIONS_BY_SLOT_HEADING, PositionSafeInput, PresentedSlotPosition, biasWithheldNotice, coverageWithheldNotice, isPositionMarked, positionView, presentPositionSafeReport } from "./positionPresentation";
 
@@ -91,12 +93,14 @@ function plainTextBlock(block: TextBlock, indent = ""): string {
 function markdownPanelVerdict(report: AdaptiveSynthesisReport): string[] {
   const card = report.verdictCard;
   if (!card.topConsensusAgreement) return [`**Panel verdict:** ${escapeMarkdownInline(report.panelVerdict)}`];
+  // Order 5 (Contract P, m-6): on a marked report the top row is labelled and headed by what it is.
+  const verdict = positionView(report)?.verdict;
   const parts = [
-    `**${CLAIM_LABEL}:** ${escapeMarkdownInline(quoteClaim(card.topConsensus))}`,
+    `**${verdict ? verdict.topLabel : CLAIM_LABEL}:** ${escapeMarkdownInline(quoteClaim(card.topConsensus))}`,
     `**${PANEL_RESULT_LABEL}:** ${card.topConsensusAgreement}`,
     ...(card.topConsensusContested ? [`**Contested:** ${card.topConsensusContested}`] : []),
   ];
-  return [`**Panel verdict:** certainty ${Math.round(report.runCertainty * 100)}%; ${markdownGate(report)}. Top claim:`, parts.join(" — ")];
+  return [`**Panel verdict:** certainty ${Math.round(report.runCertainty * 100)}%; ${markdownGate(report)}. ${verdict ? verdict.topHeading : "Top claim"}:`, parts.join(" — ")];
 }
 
 /** The gate inside a Markdown line: "Verification gate: Caution" on reports with the Order 4 presentation, else "gate: caution" as before. */
@@ -216,11 +220,21 @@ function buildPresentedMarkdown(question: string, report: AdaptiveSynthesisRepor
   }
 
   const view = positionView(report);
-  const agreeItems = presentAgreeItems(report);
-  if (agreeItems.length > 0) {
-    lines.push(view ? "## Consensus and majority rows" : "## Where models agree");
-    agreeItems.forEach((a) => lines.push(`- ${markdownClaim(a)}`));
-    lines.push("");
+  const agreeGroups = presentAgreeGroups(report);
+  if (agreeGroups) {
+    // Order 5 (Contract P, F-1): claims, value comparisons and rows not joined, each under its own heading.
+    agreeGroups.forEach((g) => {
+      lines.push(`## ${g.heading}`);
+      g.items.forEach((a) => lines.push(`- ${markdownClaim(a)}`));
+      lines.push("");
+    });
+  } else {
+    const agreeItems = presentAgreeItems(report);
+    if (agreeItems.length > 0) {
+      lines.push("## Where models agree");
+      agreeItems.forEach((a) => lines.push(`- ${markdownClaim(a)}`));
+      lines.push("");
+    }
   }
 
   const disagreements = presentDisagreements(report);
@@ -303,6 +317,7 @@ export function buildAdaptiveMemoInput(
     // Order 5 (Contract P): a marked adaptive report's memo — validated report type and marker, positions by slot from
     // the joined rows, no model-written explanation. The shared generator takes its adaptive-only path for it.
     const agree = presentAgreeItems(report).map(claimLine);
+    const agreeGroups = (presentAgreeGroups(report) ?? []).map((g) => ({ heading: g.heading, items: g.items.map(claimLine) }));
     const summary = presentExecutiveSummary(report).map((b) => plainTextBlock(b)).join("\n\n");
     const answer = presentUnifiedAnswer(report);
     const lead = answerLeadBlocks(answer);
@@ -317,6 +332,7 @@ export function buildAdaptiveMemoInput(
       evidenceQuality: "mixed",
       keyFindings: [...gateFindings, ...agree.slice(0, 8)],
       synthesisAgreements: agree,
+      adaptiveAgreeGroups: agreeGroups,
       synthesisDisagreements: presentDisagreements(report).map((d, i) => {
         const rv = view.disagreements[i];
         return [claimLine(d), ...(rv ? [`  ${POSITIONS_BY_SLOT_HEADING}:`, ...slotLines(rv.slots, (t) => t).map((l) => `    ${l}`)] : [`  ${POSITIONS_UNAVAILABLE_IN_FORMAT}`])].join("\n");
@@ -391,8 +407,18 @@ export function buildAdaptiveLinkedInPost(question: string, storedReport: Adapti
 
   const presented = report.presentation;
   const agreementItems = presented ? [] : dedupedAgreementItems(report);
-  if (presented ? presented.agree.length > 0 : agreementItems.length > 0) {
-    lines.push(marked ? "Consensus and majority rows:" : "Where models agree:");
+  const view = positionView(report);
+  if (view && presented) {
+    // Order 5 (Contract P, F-1): claims and value comparisons under their own headings, up to two of each.
+    (["claim", "field", "other"] as const).forEach((kind) => {
+      const entries = presented.agree.filter((_, i) => (view.agreeKinds[i] ?? "other") === kind);
+      if (entries.length === 0) return;
+      lines.push(`${AGREE_GROUP_HEADINGS[kind]}:`);
+      entries.slice(0, 2).forEach((a) => lines.push(`→ ${shortClaimWithResult(a, 100)}`));
+      lines.push("");
+    });
+  } else if (presented ? presented.agree.length > 0 : agreementItems.length > 0) {
+    lines.push("Where models agree:");
     if (presented) presented.agree.slice(0, 2).forEach((a) => lines.push(`→ ${shortClaimWithResult(a, 100)}`));
     else agreementItems.slice(0, 2).forEach((a) => lines.push(`→ ${truncate(a, 140)}`));
     lines.push("");
@@ -416,7 +442,8 @@ export function buildAdaptiveLinkedInPost(question: string, storedReport: Adapti
 
 export function buildAdaptiveXPost(question: string, storedReport: AdaptiveSynthesisReport, positionInput?: PositionSafeInput): string {
   const report = shown(storedReport, positionInput);
-  const splitLabel = positionView(report) ? "Unresolved: " : "Models split on: ";
+  if (positionView(report)) return buildMarkedXPost(question, report);
+  const splitLabel = "Models split on: ";
   const parts: string[] = [];
   parts.push(`Asked a multi-model AI panel: "${truncate(question, 80)}"`);
   if (hasGatePresentation(report)) {
@@ -436,4 +463,103 @@ export function buildAdaptiveXPost(question: string, storedReport: AdaptiveSynth
   }
   parts.push("via ConvergePanel");
   return truncate(parts.join("\n\n"), 280);
+}
+
+// ─── X (Order 5, Contract P, m-1) ───────────────────────────────────────────
+
+export const X_POST_LIMIT = 280;
+/** X counts every URL as this many characters, whatever its length (twitter-text v3 transformedURLLength). */
+const X_URL_WEIGHT = 23;
+/** twitter-text v3: code points in these ranges weigh 1; every other code point (CJK, emoji, …) weighs 2. */
+const X_LIGHT_RANGES: readonly [number, number][] = [
+  [0, 4351],
+  [8192, 8205],
+  [8208, 8223],
+  [8242, 8247],
+];
+const X_URLISH = /(?:https?:\/\/)?(?:[\p{L}\p{N}-]+\.)+\p{L}{2,}(?:\/\S*)?/gu;
+
+function xCodePointWeight(cp: number): number {
+  return X_LIGHT_RANGES.some(([lo, hi]) => cp >= lo && cp <= hi) ? 1 : 2;
+}
+
+function xRawWeight(text: string): number {
+  let w = 0;
+  let last = 0;
+  for (const m of text.matchAll(X_URLISH)) {
+    const at = m.index ?? 0;
+    for (const ch of text.slice(last, at)) w += xCodePointWeight(ch.codePointAt(0)!);
+    let own = 0;
+    for (const ch of m[0]) own += xCodePointWeight(ch.codePointAt(0)!);
+    w += Math.max(X_URL_WEIGHT, own);
+    last = at + m[0].length;
+  }
+  for (const ch of text.slice(last)) w += xCodePointWeight(ch.codePointAt(0)!);
+  return w;
+}
+
+/**
+ * An upper bound on X's weighted length of `text` (twitter-text v3: NFC-normalized; light code points 1, others 2;
+ * every URL 23). Conservative by construction: a URL-like token counts as at least 23 and as much as its own text,
+ * every emoji code point counts 2, and the larger of the raw and NFC weights is taken — so a post within the limit
+ * here is within it on X. Never `string.length`.
+ */
+export function xWeightedLength(text: string): number {
+  return Math.max(xRawWeight(text), xRawWeight(text.normalize("NFC")));
+}
+
+function graphemes(text: string): string[] {
+  const Seg = (Intl as unknown as { Segmenter?: new (l?: string, o?: { granularity: string }) => { segment(t: string): Iterable<{ segment: string }> } }).Segmenter;
+  return Seg ? Array.from(new Seg(undefined, { granularity: "grapheme" }).segment(text), (x) => x.segment) : Array.from(text);
+}
+
+/** `text` shortened to at most `budget` weighted characters, at a grapheme boundary, with "…" when shortened. */
+export function xFit(text: string, budget: number): string {
+  if (xWeightedLength(text) <= budget) return text;
+  const g = graphemes(text);
+  let n = g.length;
+  while (n > 0 && xWeightedLength(`${g.slice(0, n).join("").trimEnd()}…`) > budget) n -= 1;
+  return n > 0 ? `${g.slice(0, n).join("").trimEnd()}…` : "";
+}
+
+const X_BRAND = "via ConvergePanel";
+const X_UNRESOLVED_LABEL = "Unresolved: ";
+
+/**
+ * A marked report's X post, within X's weighted 280-character limit. The computed parts — the gate, the certainty,
+ * a row's computed result, the brand — are never cut: the model-written claim gives way first (down to a short
+ * quote), then the question; if the row's computed result still cannot fit whole, the row is left out and the post
+ * says how many unresolved rows the full report has. It names no panel slot.
+ */
+function buildMarkedXPost(question: string, report: AdaptiveSynthesisReport): string {
+  const gateLine = hasGatePresentation(report)
+    ? (() => {
+        const status = readGateStatus(report.gate);
+        return `${gateLabel(status)}${status === "caution" ? ` (${CAUTION_NOTICE_SHORT})` : ""} · Certainty: ${Math.round(report.runCertainty * 100)}%`;
+      })()
+    : `Certainty: ${Math.round(report.runCertainty * 100)}% (${legacyGateWord(report.gate)})`;
+  const asked = (q: string) => `Asked a multi-model AI panel: "${q}"`;
+  const post = (q: string, row: string | null) => [asked(q), gateLine, ...(row ? [row] : []), X_BRAND].join("\n\n");
+  const split = report.presentation?.disagree[0];
+  const rowLine = (claimBudget: number) => {
+    if (!split) return null;
+    const claim = xFit(singleLineText(split.claim), claimBudget);
+    return claim ? `${X_UNRESOLVED_LABEL}${quoteClaim(claim)} — ${PANEL_RESULT_LABEL.toLowerCase()}: ${split.result}` : null;
+  };
+  const fits = (t: string) => xWeightedLength(t) <= X_POST_LIMIT;
+  for (const qBudget of [80, 48, 24]) {
+    const q = xFit(singleLineText(question), qBudget);
+    for (const cBudget of [60, 40, 24, 12]) {
+      const candidate = post(q, rowLine(cBudget));
+      if (fits(candidate)) return candidate;
+    }
+    if (!split && fits(post(q, null))) return post(q, null);
+  }
+  const n = report.disagreements.length;
+  const pointer = n > 0 ? `${n} unresolved row${n === 1 ? "" : "s"} — see the full report` : null;
+  for (const qBudget of [80, 48, 24]) {
+    const candidate = post(xFit(singleLineText(question), qBudget), pointer);
+    if (fits(candidate)) return candidate;
+  }
+  return post(xFit(singleLineText(question), 24), null);
 }

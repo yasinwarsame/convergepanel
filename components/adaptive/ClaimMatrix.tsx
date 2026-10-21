@@ -10,7 +10,7 @@ import { Fragment, useState } from "react";
 import { ModelId } from "@/lib/types";
 import { AlignedClaim, ClaimCellStance } from "@/lib/adaptiveSchema/types";
 import { getModelLabel } from "./shared";
-import { POSITIONS_BY_SLOT_HEADING, rowView } from "@/lib/adaptiveSchema/positionPresentation";
+import { POSITIONS_BY_SLOT_HEADING, rowView, slotLabel } from "@/lib/adaptiveSchema/positionPresentation";
 import { PositionPresentationState, usePositionPresentation } from "./PositionPresentationContext";
 
 const STANCE_STYLES: Record<ClaimCellStance, { label: string; className: string }> = {
@@ -50,7 +50,8 @@ function MarkedClaimMatrix({ claims, modelIds, position }: { claims: AlignedClai
             <th className="text-left font-semibold text-slate-600 py-2 pr-4">Claim or value</th>
             {modelIds.map((modelId) => (
               <th key={modelId} className="text-left font-semibold text-slate-600 py-2 px-2 whitespace-nowrap">
-                {getModelLabel(modelId)}
+                {/* n-4: the recorded panel slot, with its recorded substitution — never a model's authorship. */}
+                {slotLabel(modelId, position.provenance, "full")}
               </th>
             ))}
           </tr>

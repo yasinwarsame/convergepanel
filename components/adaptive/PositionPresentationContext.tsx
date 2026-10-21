@@ -11,6 +11,7 @@
 import { createContext, createElement, useContext, type ReactNode } from "react";
 import type { RunModelProvenanceFacts } from "@/lib/panel/runModelIdentity";
 import { isPositionMarked } from "@/lib/adaptiveSchema/positionPresentation";
+import { RunModelProvenanceContext } from "./RunModelProvenanceContext";
 
 export interface PositionPresentationState {
   marked: true;
@@ -31,8 +32,11 @@ export function usePositionPresentation(): PositionPresentationState | null {
  */
 export function PositionPresentationBoundary({ report, roster, provenance, children }: { report: unknown; roster: readonly string[]; provenance?: readonly RunModelProvenanceFacts[] | null; children: ReactNode }) {
   const existing = useContext(PositionPresentationContext);
+  // Without explicit provenance, the page's recorded per-slot provenance (RunModelProvenanceContext) names the slots —
+  // so a substituted slot is never named without its substitution on a standalone surface.
+  const pageProvenance = useContext(RunModelProvenanceContext);
   if (existing || !isPositionMarked(report)) return createElement(PositionPresentationContextFragment, null, children);
-  return createElement(PositionPresentationContext.Provider, { value: { marked: true, roster, provenance: provenance ?? null } }, children);
+  return createElement(PositionPresentationContext.Provider, { value: { marked: true, roster, provenance: provenance ?? pageProvenance ?? null } }, children);
 }
 
 function PositionPresentationContextFragment({ children }: { children?: ReactNode }) {

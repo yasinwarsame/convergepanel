@@ -238,9 +238,14 @@ describe("finding-specific marked outputs", () => {
 
   it("exports: PDF and DOCX use the marked headings and keep the Unified Answer", async () => {
     const { record, out } = await outputs("contested-empirical");
-    expect(out["export.pdfTree"]).toContain("Top claim and key unresolved claim");
-    expect(out["export.docxXml"]).toContain("Top claim and key unresolved claim");
+    // Correction round (F-1 / m-6): the top row is a claim and the key row a metric, so the section names both kinds.
+    expect(out["export.pdfTree"]).toContain("Top and key rows: claims and value comparisons");
+    expect(out["export.docxXml"]).toContain("Top and key rows: claims and value comparisons");
+    expect(out["export.pdfTree"]).not.toContain("Top claim and key unresolved claim");
     expect(out["export.pdfTree"]).not.toContain("Where models agree / disagree");
+    const claimsOnly = await outputs("generic-mixed");
+    expect(claimsOnly.out["export.pdfTree"]).toContain("Top claim and key unresolved claim");
+    expect(claimsOnly.out["export.docxXml"]).toContain("Top claim and key unresolved claim");
     for (const c of record.synthesisReport.presentation.answer.claims) expect(out["export.docxXml"]).toContain(c.claim.slice(0, 15));
   });
 });

@@ -39,7 +39,8 @@ import {
   WidthType,
 } from "docx";
 import { AdaptiveResearchExportV1 } from "@/lib/adaptiveSchema/researchExport";
-import { MARKED_VERDICT_SECTION_HEADING, exportPositionSafeReport } from "@/lib/adaptiveSchema/exportPositionView";
+import { exportPositionSafeReport } from "@/lib/adaptiveSchema/exportPositionView";
+import { MARKED_GATE_LEVEL_FIELD, MARKED_GATE_LEVEL_NOTE, MARKED_GATE_LEVEL_WORD, isPositionMarked } from "@/lib/adaptiveSchema/positionPresentation";
 import { exportModelIdentityLabel, exportRunProvenanceLines, readFrozenRunProvenance } from "@/lib/adaptiveSchema/exportRunProvenance";
 import { CONSENSUS_LABELS, SOURCE_GROUNDING_LABELS } from "@/lib/adaptiveSchema/reportSummary";
 import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
@@ -167,6 +168,18 @@ function coverSection(record: AdaptiveResearchExportV1): (Paragraph | Table)[] {
 function statusSummarySection(record: AdaptiveResearchExportV1): (Paragraph | Table)[] {
   const snapshot = record.reportSnapshot;
   const modelsText = snapshot.models.map((m) => `${exportModelIdentityLabel(snapshot.runProvenance, m.modelId)}${m.ok === false ? " (failed)" : ""}`).join(", ");
+  // Order 5 (Contract P, m-5): a legacy-family (gate-scored) marked report's level is its gate, labelled so.
+  if (isPositionMarked(snapshot.legacy?.synthesisReport)) {
+    return [
+      heading("Report status summary"),
+      ...fieldGrid([
+        ["Models", modelsText || "—"],
+        [MARKED_GATE_LEVEL_FIELD, MARKED_GATE_LEVEL_WORD[snapshot.consensusLevel]],
+        ["Source grounding", SOURCE_GROUNDING_LABELS[snapshot.sourceGroundingLevel]],
+      ]),
+      muted(MARKED_GATE_LEVEL_NOTE),
+    ];
+  }
   return [
     heading("Report status summary"),
     ...fieldGrid([
@@ -319,16 +332,16 @@ function legacySection(record: AdaptiveResearchExportV1): (Paragraph | Table)[] 
       for (const block of answerLeadBlocks(presentUnifiedAnswer(synthesis))) out.push(body(blockText(block)));
       out.push(body(synthesis.unifiedAnswer));
     }
-    out.push(heading(positions ? MARKED_VERDICT_SECTION_HEADING : "Where models agree / disagree"));
+    out.push(heading(positions ? positions.verdict.sectionHeading : "Where models agree / disagree"));
     // Consensus Integrity: the quoted claim with its computed status (R4-1), and the canonical contested note
     // (verdictCard.ts). Each is absent on reports persisted before it existed, which export exactly as before.
     const card = synthesis.verdictCard;
-    const top = presentVerdictClaim(card.topConsensus, card.topConsensusAgreement);
+    const top = presentVerdictClaim(card.topConsensus, card.topConsensusAgreement, positions?.verdict.topLabel);
     out.push(muted(positions ? positions.verdict.topHeading : "Agreement"), body(top.claim));
     if (top.result) out.push(muted(top.result));
     if (card.topConsensusContested) out.push(muted(`Contested: ${card.topConsensusContested}`));
     if (card.keyDisagreement) {
-      const split = presentVerdictClaim(card.keyDisagreement, card.keyDisagreementAgreement);
+      const split = presentVerdictClaim(card.keyDisagreement, card.keyDisagreementAgreement, positions?.verdict.keyLabel);
       out.push(muted(positions ? positions.verdict.keyHeading : "Disagreement"), body(split.claim));
       if (split.result) out.push(muted(split.result));
       if (card.disagreementDetail) out.push(muted(card.disagreementDetail));
