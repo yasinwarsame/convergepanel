@@ -30,6 +30,7 @@ import * as XW from "@/lib/adaptiveSchema/xWeightedText";
 import ListView, { NAMED_SOURCE_VALUES_TITLE } from "@/components/adaptive/ListView";
 import { CLASSIFICATION_BASE, DEFAULT_MODE, SCENARIOS, Scenario, geminiMockImpl } from "./o5pScenarios";
 import { QUESTION } from "./o5pRender";
+import { htmlText } from "./htmlText";
 
 const gem = callGemini as unknown as jest.Mock;
 
@@ -46,8 +47,7 @@ async function build(s: Scenario): Promise<Record<string, any>> {
 }
 const scenario = (name: string) => SCENARIOS.find((s) => s.name === name)!;
 const SUB = { status: "substituted", provider: "deepseek", requestedModel: "deepseek-chat", substitutedFrom: "anthropic:claude-model-1", substitutionReason: "timeout" };
-const unescape = (s: string) => s.replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
-const text = (html: string) => unescape(html.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+const text = htmlText;
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 const SLOT_NAME = /\b(ChatGPT|Claude|Grok|Perplexity|Gemini|DeepSeek)\b/;
 

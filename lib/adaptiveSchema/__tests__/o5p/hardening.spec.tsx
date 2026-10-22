@@ -40,6 +40,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { CLASSIFICATION_BASE, DEFAULT_MODE, SCENARIOS, Scenario, geminiMockImpl } from "./o5pScenarios";
 import { QUESTION, renderRecord, RecordUnderTest } from "./o5pRender";
+import { htmlText } from "./htmlText";
 
 const gem = callGemini as unknown as jest.Mock;
 
@@ -66,8 +67,7 @@ const outputs = async (name: string, unmark = false) => {
   return { record, input, out: await renderRecord(record, input) };
 };
 
-const unescape = (s: string) => s.replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
-const text = (html: string) => unescape(html.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+const text = htmlText;
 /** The text of one data-section of a rendered page (up to the next data-section). */
 const section = (html: string, name: string) => {
   const m = html.match(new RegExp(`data-section="${name}"[^>]*>([\\s\\S]*?)(?=<[^<>]*data-section=|$)`));
