@@ -42,6 +42,7 @@ import PrimarySynthesisStrip from "@/components/adaptive/PrimarySynthesisStrip";
 import { PanelVerdictCard } from "@/components/adaptive/AdaptiveSynthesisReportView";
 import { AdaptiveSynthesisReport, AlignedClaim, AlignedClaimCell } from "@/lib/adaptiveSchema/types";
 import { ModelId, ModelResult } from "@/lib/types";
+import { historicalBuild, historicalFinalize } from "./historicalPresentationHelpers";
 
 const g = callGemini as jest.MockedFunction<typeof callGemini>;
 const M = ["chatgpt", "claude", "grok", "perplexity", "gemini"];
@@ -111,7 +112,7 @@ describe("R4-1 path A: model-written claim text never reads as the panel's concl
       return off;
     });
     const rs = [A, A, A, A, C].map((c, i) => ({ modelId: M[i] as ModelId, status: "ok", rawText: resp(c), latencyMs: 5 }));
-    return finalizeAdaptiveRun(SCHEMA_REGISTRY.contested_empirical, rs as any, "Q");
+    return historicalFinalize(SCHEMA_REGISTRY.contested_empirical, rs as any, "Q");
   }
 
   it("the row is majority; the claim text is kept verbatim; every surface quotes it and states the computed 4-of-5", async () => {
@@ -140,7 +141,7 @@ describe("R4-1 path A: claim text cannot confer a status", () => {
   it("2. a split row whose text claims consensus is the key disagreement, with the split result; no top consensus", async () => {
     g.mockResolvedValue(off);
     const split = row("There is full consensus that tariffs raise prices", "split", ["agrees", "disputes", "disputes", "agrees", "disputes"]);
-    const report = await buildAdaptiveSynthesisReport("q", "generic", [split], results());
+    const report = await historicalBuild("q", "generic", [split], results());
     expect(report.whereModelsAgree).toEqual([]);
     expect(report.verdictCard.topConsensus).toBe("No consensus identified.");
     expect("topConsensusAgreement" in report.verdictCard).toBe(false);
@@ -157,7 +158,7 @@ describe("R4-1 path A: claim text cannot confer a status", () => {
     ["4. limited_coverage with unanimous text", row("Every model unanimously endorses wage-led inflation", "limited_coverage", ["agrees", "agrees", null, null, null])],
   ])("%s is never presented as agreement on any surface", async (_name, r) => {
     g.mockResolvedValue(off);
-    const report = await buildAdaptiveSynthesisReport("q", "generic", [r], results());
+    const report = await historicalBuild("q", "generic", [r], results());
     expect(report.whereModelsAgree).toEqual([]);
     expect(report.verdictCard.topConsensus).toBe("No consensus identified.");
     expect(report.panelVerdict.startsWith("No consensus identified.")).toBe(true);
@@ -171,7 +172,7 @@ describe("R4-1 path A: claim text cannot confer a status", () => {
     const a = row("All models agree supply shocks dominate", "split", ["agrees", "disputes", "disputes", "agrees", "disputes"]);
     const b = row("Rates lag by a year", "split", ["agrees", "disputes", "disputes", "agrees", "disputes"]);
     for (const r of [a, b]) r.agreementScore = r.certaintyScore = 0.1;
-    const report = await buildAdaptiveSynthesisReport("q", "generic", [a, b], results());
+    const report = await historicalBuild("q", "generic", [a, b], results());
     expect(report.gate).toBe("fail");
     expect(report.unifiedAnswer).toBe(`Panel could not converge on a reliable answer.\nUnresolved claims:\n- ${quoteClaim(a.claimText)}\n- ${quoteClaim(b.claimText)}`);
   });
@@ -179,7 +180,7 @@ describe("R4-1 path A: claim text cannot confer a status", () => {
   it("6. a claim about consensus as its subject is kept verbatim, quoted, with the panel's own result beside it", async () => {
     g.mockResolvedValue(off);
     const subject = row("Scientific consensus holds that recent warming is human-caused", "consensus", ["agrees", "agrees", "agrees", "agrees", "agrees"]);
-    const report = await buildAdaptiveSynthesisReport("q", "generic", [subject], results());
+    const report = await historicalBuild("q", "generic", [subject], results());
     expect(report.whereModelsAgree).toEqual([quoteClaim(subject.claimText)]);
     expect(report.verdictCard.topConsensus).toBe(subject.claimText);
     expect(presentVerdictClaim(report.verdictCard.topConsensus, report.verdictCard.topConsensusAgreement)).toEqual({
@@ -192,7 +193,7 @@ describe("R4-1 path A: claim text cannot confer a status", () => {
     g.mockResolvedValue(off);
     const a = row("Claim B is unanimously agreed by every model", "consensus", ["agrees", "agrees", "agrees", "agrees", "agrees"]);
     const b = row("Claim B", "split", ["agrees", "disputes", "disputes", "agrees", "disputes"]);
-    const report = await buildAdaptiveSynthesisReport("q", "generic", [a, b], results());
+    const report = await historicalBuild("q", "generic", [a, b], results());
     expect(report.verdictCard.topConsensus).toBe(a.claimText);
     expect(report.verdictCard.topConsensusAgreement).toBe("consensus: all 5 dispatched models support it");
     expect(report.verdictCard.keyDisagreement).toBe("Claim B");
@@ -229,7 +230,7 @@ describe("R4-1 path B: the bias-detection description is labelled as model comme
     );
     const full = M.map((m) => ({ modelId: m as ModelId, status: "ok", rawText: "A long full response ".repeat(30), latencyMs: 1 })) as ModelResult[];
     const split = row("Supply shocks explain persistent core inflation", "split", ["agrees", "disputes", "disputes", "agrees", "disputes"]);
-    const report = await buildAdaptiveSynthesisReport("q", "generic", [split], full);
+    const report = await historicalBuild("q", "generic", [split], full);
     expect(report.verdictCard.caveat).toBe(DESC);
     expect(report.verdictCard.caveatSource).toBe("model_bias_check");
     const s = await surfaces(report);
@@ -256,14 +257,14 @@ describe("R4-1 path B: the bias-detection description is labelled as model comme
       String(opts?.systemPromptOverride ?? "").includes("shared biases") ? ok({ biasAndBlindSpots: [finding("First finding."), finding("Second finding.")] }) : off
     );
     const full = M.map((m) => ({ modelId: m as ModelId, status: "ok", rawText: "A long full response ".repeat(30), latencyMs: 1 })) as ModelResult[];
-    const report = await buildAdaptiveSynthesisReport("q", "generic", [row("X", "consensus", ["agrees", "agrees", "agrees", "agrees", "agrees"])], full);
+    const report = await historicalBuild("q", "generic", [row("X", "consensus", ["agrees", "agrees", "agrees", "agrees", "agrees"])], full);
     expect(report.biasAndBlindSpots.map((b) => b.description)).toEqual(["First finding.", "Second finding."]);
     expect(report.verdictCard.caveat).toBe("First finding.");
   });
 
   it("no bias finding → no caveat and no source", async () => {
     g.mockResolvedValue(off);
-    const report = await buildAdaptiveSynthesisReport("q", "generic", [row("X", "consensus", ["agrees", "agrees", "agrees", "agrees", "agrees"])], results());
+    const report = await historicalBuild("q", "generic", [row("X", "consensus", ["agrees", "agrees", "agrees", "agrees", "agrees"])], results());
     expect(report.verdictCard.caveat).toBeNull();
     expect("caveatSource" in report.verdictCard).toBe(false);
     expect(presentVerdictCaveat(report.verdictCard)).toBeNull();

@@ -9,7 +9,7 @@
 
 import { ModelId } from "@/lib/types";
 import { AdaptiveRendererProps } from "./types";
-import { Card, SectionLabel, BulletList, FailedResultsNote, PerModelCardGrid, splitResults, getModelLabel } from "./shared";
+import { Card, SectionLabel, BulletList, FailedResultsNote, PerModelCardGrid, splitResults, SlotName } from "./shared";
 
 function normalizeLabel(label: string): string {
   return label.trim().toLowerCase();
@@ -97,7 +97,7 @@ export default function MetricsGridView({ results }: AdaptiveRendererProps) {
                       scope="col"
                       className="text-left font-semibold text-slate-600 py-2 px-2 whitespace-nowrap"
                     >
-                      {getModelLabel(modelId)}
+                      <SlotName modelId={modelId} />
                     </th>
                   ))}
                 </tr>

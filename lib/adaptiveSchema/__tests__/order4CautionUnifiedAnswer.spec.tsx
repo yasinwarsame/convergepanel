@@ -61,6 +61,7 @@ import { extractPdfElementText } from "@/lib/pdf/__tests__/testUtils";
 import { pdfLayoutFixtures } from "@/lib/pdf/__fixtures__/layoutFixtures";
 import { AdaptiveGateResult, AdaptiveSynthesisReport, AlignedClaim, QueryType } from "@/lib/adaptiveSchema/types";
 import { ModelId, ModelResult } from "@/lib/types";
+import { historicalBuild, historicalFinalize } from "./historicalPresentationHelpers";
 
 const g = callGemini as jest.MockedFunction<typeof callGemini>;
 const M = ["chatgpt", "claude", "grok", "perplexity", "gemini"] as const;
@@ -143,7 +144,7 @@ function mockNarrative(variant: Variant, splits: number) {
 async function build(s: Scenario, variant: Variant = "template"): Promise<{ report: AdaptiveSynthesisReport; rows: AlignedClaim[]; gate: AdaptiveGateResult }> {
   const rows = s.rows();
   mockNarrative(variant, rows.filter((r) => r.status === "split").length);
-  const report = await buildAdaptiveSynthesisReport("Q?", s.schema, rows, results());
+  const report = await historicalBuild("Q?", s.schema, rows, results());
   const gate = computeAdaptiveGate(rows, computeRunCertainty(rows, s.schema), s.schema);
   return { report, rows, gate };
 }
@@ -928,7 +929,7 @@ describe("degraded run (2 of 5 models failed) — Order 7, out of scope", () => 
     const resp = (c: unknown) => JSON.stringify({ summary: "s", settledClaims: [c], disputedClaims: [], keyMetrics: [], openQuestions: [] });
     const claim = { id: "a", claim: "Rate cuts reach inflation within about a year.", stance: "asserts", confidence: "settled", evidenceType: "empirical" };
     const rs = M.map((m, i) => (i < 3 ? { modelId: m, status: "ok", rawText: resp(claim), latencyMs: 5 } : { modelId: m, status: "error", rawText: null, errorMessage: "provider error", latencyMs: 5 }));
-    const out: any = await finalizeAdaptiveRun(SCHEMA_REGISTRY.contested_empirical, rs as any, "Q");
+    const out: any = await historicalFinalize(SCHEMA_REGISTRY.contested_empirical, rs as any, "Q");
     const report: AdaptiveSynthesisReport = out.synthesisReport;
     // The gate is what the unchanged gate computes from the run's own rows and certainty.
     const recomputed = computeAdaptiveGate(out.alignedClaims, computeRunCertainty(out.alignedClaims, "contested_empirical"), "contested_empirical");

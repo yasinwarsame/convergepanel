@@ -92,6 +92,9 @@ import {
 import { Card, SectionLabel, TintBadge, BadgeTone } from "./shared";
 import ClaimMatrix from "./ClaimMatrix";
 import { TrustSummaryTable, AgreementDisagreementMap, SingleModelInsightsList, DisagreementsSection } from "./AdaptiveSynthesisReportView";
+import { presentPositionSafeReport } from "@/lib/adaptiveSchema/positionPresentation";
+import { PositionPresentationBoundary, usePositionPresentation } from "./PositionPresentationContext";
+import { useRunModelProvenance } from "./RunModelProvenanceContext";
 import { RANK_DISAGREEMENT_MIN_VARIANCE } from "./RankedListView";
 
 export interface PanelEvidenceSectionProps {
@@ -520,7 +523,7 @@ function BiasBlindspotAuditEvidence({ biasBlindspotAudit }: { biasBlindspotAudit
 }
 
 function SynthesisDrivenEvidence({
-  synthesisReport,
+  synthesisReport: stored,
   trustSummary,
   alignedClaims,
   modelsUsed,
@@ -528,7 +531,13 @@ function SynthesisDrivenEvidence({
 }: Required<Pick<PanelEvidenceSectionProps, "synthesisReport" | "modelsUsed">> &
   Pick<PanelEvidenceSectionProps, "trustSummary" | "alignedClaims" | "showClaimMatrix">) {
   const rows = alignedClaims || [];
+  // Order 5 (Contract P): normally already the position-safe view (AdaptivePanelResponse); unmarked reports are unchanged.
+  // H-2: a standalone section names a substituted slot with its recorded substitution (the page's provenance).
+  const position = usePositionPresentation();
+  const pageProvenance = useRunModelProvenance();
+  const synthesisReport = presentPositionSafeReport(stored, { rows: alignedClaims, roster: modelsUsed, provenance: position?.provenance ?? pageProvenance });
   return (
+    <PositionPresentationBoundary report={synthesisReport} roster={modelsUsed}>
     <div className="space-y-4">
       {trustSummary && <TrustSummaryTable trustSummary={trustSummary} />}
       <AgreementDisagreementMap claims={rows} modelsUsed={modelsUsed} />
@@ -541,6 +550,7 @@ function SynthesisDrivenEvidence({
       )}
       <DisagreementsSection report={synthesisReport} />
     </div>
+    </PositionPresentationBoundary>
   );
 }
 

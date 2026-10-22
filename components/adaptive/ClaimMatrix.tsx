@@ -9,7 +9,9 @@
 import { Fragment, useState } from "react";
 import { ModelId } from "@/lib/types";
 import { AlignedClaim, ClaimCellStance } from "@/lib/adaptiveSchema/types";
-import { getModelLabel } from "./shared";
+import { SlotName } from "./shared";
+import { POSITIONS_BY_SLOT_HEADING, rowView, slotLabel, statementAfterHeading } from "@/lib/adaptiveSchema/positionPresentation";
+import { PositionPresentationState, usePositionPresentation } from "./PositionPresentationContext";
 
 const STANCE_STYLES: Record<ClaimCellStance, { label: string; className: string }> = {
   agrees: { label: "Agrees", className: "bg-green-50 text-green-700 border-green-200" },
@@ -27,6 +29,81 @@ function StanceChip({ stance }: { stance: ClaimCellStance }) {
   );
 }
 
+/**
+ * Order 5 (Contract P): the matrix of a marked report. Each cell is the column slot's own validated position (by
+ * modelId, never by array index); a value comparison shows each slot's stated value, never an agree / dispute chip.
+ */
+function MarkedClaimMatrix({ claims, modelIds, position }: { claims: AlignedClaim[]; modelIds: ModelId[]; position: PositionPresentationState }) {
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  if (claims.length === 0) return <p className="text-sm text-slate-500">No claims to compare.</p>;
+  const toggle = (i: number) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      next.has(i) ? next.delete(i) : next.add(i);
+      return next;
+    });
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm border-collapse">
+        <thead>
+          <tr className="border-b border-slate-200">
+            <th className="text-left font-semibold text-slate-600 py-2 pr-4">Claim or value</th>
+            {modelIds.map((modelId) => (
+              <th key={modelId} className="text-left font-semibold text-slate-600 py-2 px-2 whitespace-nowrap">
+                {/* n-4: the recorded panel slot, with its recorded substitution — never a model's authorship. */}
+                {slotLabel(modelId, position.provenance, "full")}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {claims.map((claim, i) => {
+            const view = rowView(claim, position.roster, position.provenance);
+            const bySlot = new Map(view.slots.map((s) => [s.slot, s]));
+            const isExpanded = expanded.has(i);
+            return (
+              <Fragment key={`${claim.id}-${i}`}>
+                <tr className="border-b border-slate-100 align-top" data-row-type={view.rowType}>
+                  <td className="py-3 pr-4 text-slate-900">
+                    {claim.claimText}
+                    <span data-source="computed" className="block text-xs text-slate-500 mt-0.5">
+                      {view.heading}: {statementAfterHeading(view.heading, view.text)}
+                    </span>
+                    <button type="button" onClick={() => toggle(i)} className="mt-0.5 text-xs font-medium text-sky-600 hover:underline">
+                      {isExpanded ? "Hide positions" : "Show positions"}
+                    </button>
+                  </td>
+                  {modelIds.map((modelId) => (
+                    <td key={modelId} className="py-3 px-2 text-xs text-slate-700">
+                      {bySlot.get(modelId)?.position ?? "—"}
+                    </td>
+                  ))}
+                </tr>
+                {isExpanded && (
+                  <tr className="border-b border-slate-100 bg-slate-50">
+                    <td colSpan={modelIds.length + 1} className="py-3 px-4">
+                      <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 mb-1">{POSITIONS_BY_SLOT_HEADING}</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {view.slots.map((s) => (
+                          <div key={s.slot} className="text-xs text-slate-700">
+                            <span className="font-semibold text-slate-900">{s.label}: </span>
+                            {s.position}
+                            {s.excerpt && <span className="text-slate-500"> — {s.excerpt.text} ({s.excerpt.note})</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function ClaimMatrix({
   claims,
   modelIds,
@@ -34,7 +111,9 @@ export default function ClaimMatrix({
   claims: AlignedClaim[];
   modelIds: ModelId[];
 }) {
+  const position = usePositionPresentation();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  if (position) return <MarkedClaimMatrix claims={claims} modelIds={modelIds} position={position} />;
 
   if (claims.length === 0) {
     return <p className="text-sm text-slate-500">No claims to compare.</p>;
@@ -56,7 +135,7 @@ export default function ClaimMatrix({
             <th className="text-left font-semibold text-slate-600 py-2 pr-4">Claim</th>
             {modelIds.map((modelId) => (
               <th key={modelId} className="text-left font-semibold text-slate-600 py-2 px-2 whitespace-nowrap">
-                {getModelLabel(modelId)}
+                <SlotName modelId={modelId} />
               </th>
             ))}
           </tr>
@@ -96,7 +175,7 @@ export default function ClaimMatrix({
                           .filter((entry): entry is { cell: NonNullable<typeof claim.cells[number]>; modelId: ModelId } => !!entry)
                           .map(({ cell, modelId }) => (
                             <div key={modelId} className="text-xs text-slate-700">
-                              <span className="font-semibold text-slate-900">{getModelLabel(modelId)}: </span>
+                              <span className="font-semibold text-slate-900"><SlotName modelId={modelId} />: </span>
                               {cell.excerpt}
                               {cell.backfilled && <span className="ml-1 text-slate-400">(inferred)</span>}
                             </div>

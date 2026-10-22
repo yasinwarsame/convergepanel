@@ -17,8 +17,7 @@
 
 import type { ReactNode } from "react";
 import { AdaptiveGateResult, AdaptiveModelResult, AlignedClaim } from "@/lib/adaptiveSchema/types";
-import { Card, SectionLabel, FailedResultsNote, ProbabilityBar, getModelLabel, splitResults } from "./shared";
-import ModelChip from "@/components/ModelChip";
+import { Card, SectionLabel, FailedResultsNote, ProbabilityBar, getModelLabel, splitResults, SlotChip } from "./shared";
 
 function agreementColorClass(score: number): string {
   if (score >= 0.7) return "bg-green-500";
@@ -83,7 +82,7 @@ export default function DirectAnswerCard({
               const caveat = r.data?.["caveat"] as string | undefined;
               return (
                 <div key={r.modelId} className="flex items-start gap-2 text-sm">
-                  <ModelChip modelId={r.modelId} size="xs" className="mt-0.5 shrink-0" />
+                  <SlotChip modelId={r.modelId} size="xs" className="mt-0.5 shrink-0" />
                   <div>
                     <p className="text-slate-800">{(r.data?.["answer"] as string) ?? "—"}</p>
                     {source && source.toLowerCase() !== "unknown" && (

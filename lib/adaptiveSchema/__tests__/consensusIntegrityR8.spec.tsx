@@ -37,6 +37,7 @@ import { extractPdfElementText } from "@/lib/pdf/__tests__/testUtils";
 import { pdfLayoutFixtures } from "@/lib/pdf/__fixtures__/layoutFixtures";
 import { AdaptiveSynthesisReport, AlignedClaim } from "@/lib/adaptiveSchema/types";
 import { ModelId, ModelResult } from "@/lib/types";
+import { historicalBuild, historicalFinalize } from "./historicalPresentationHelpers";
 
 const g = callGemini as jest.MockedFunction<typeof callGemini>;
 const M = ["chatgpt", "claude", "grok", "perplexity", "gemini"];
@@ -67,7 +68,7 @@ async function build(caveat: string): Promise<AdaptiveSynthesisReport> {
       ? ok({ biasAndBlindSpots: [{ biasType: "Regional framing", description: caveat, modelsImplicated: ["chatgpt", "claude"], evidence: [{ modelId: "chatgpt", excerpt: "US data", rationale: "r" }], likelyCauses: [], impact: "i", mitigationSteps: [] }] })
       : off
   );
-  return buildAdaptiveSynthesisReport("Q?", "generic", [MAJ, SPLIT], results());
+  return historicalBuild("Q?", "generic", [MAJ, SPLIT], results());
 }
 const asLegacyCard = (report: AdaptiveSynthesisReport): AdaptiveSynthesisReport => {
   const legacy = JSON.parse(JSON.stringify(report));

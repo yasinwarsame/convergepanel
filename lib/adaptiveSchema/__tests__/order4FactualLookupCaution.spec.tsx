@@ -24,6 +24,7 @@ import { CAUTION_NOTICE, UNRECOGNIZED_GATE_NOTICE, gateLabel } from "@/lib/adapt
 import AdaptivePanelResponse from "@/components/adaptive/AdaptivePanelResponse";
 import { AdaptiveGateResult, AdaptiveModelResult, AdaptiveSynthesisReport, AlignedClaim, QueryType } from "@/lib/adaptiveSchema/types";
 import { ModelId, ModelResult } from "@/lib/types";
+import { historicalBuild, historicalFinalize } from "./historicalPresentationHelpers";
 
 const g = callGemini as jest.MockedFunction<typeof callGemini>;
 const off = { modelId: "gemini", status: "error", rawText: null, errorMessage: "off", latencyMs: 1 } as any;
@@ -76,7 +77,7 @@ async function build(rows: AlignedClaim[], answers: string[], narrative?: Record
   g.mockImplementation(async (_q: any, _c: any, _k: any, opts: any) =>
     narrative && String(opts?.systemPromptOverride ?? "").includes("narrative portion") ? okText(narrative) : off
   );
-  const report = await buildAdaptiveSynthesisReport("What is the capital of France?", "factual_lookup" as QueryType, rows, raw());
+  const report = await historicalBuild("What is the capital of France?", "factual_lookup" as QueryType, rows, raw());
   const gate = computeAdaptiveGate(rows, computeRunCertainty(rows, "factual_lookup"), "factual_lookup");
   return { report, gate, rows, results: modelResults(answers) };
 }
@@ -436,7 +437,7 @@ describe("m-1: a caution card without a stored presentation.answer still disclos
     const st = ["agrees", "agrees", "unclear", "disputes", "disputes"];
     const row: AlignedClaim = { id: "answer", claimText: "Paris", cells: M5.map((m, i) => ({ modelId: m as ModelId, stance: st[i], rawStance: "asserts", confidence: null, excerpt: "x", origin: { kind: "field_derived", fieldType: "scalar" } })) as any, agreementScore: 0.5, certaintyScore: 0.8, status: "split" as any };
     g.mockImplementation(async () => off);
-    const report = await buildAdaptiveSynthesisReport("Q?", "factual_lookup" as QueryType, [row], M5.map((m) => ({ modelId: m as ModelId, status: "ok", rawText: "{}", latencyMs: 1 })));
+    const report = await historicalBuild("Q?", "factual_lookup" as QueryType, [row], M5.map((m) => ({ modelId: m as ModelId, status: "ok", rawText: "{}", latencyMs: 1 })));
     const gate = computeAdaptiveGate([row], computeRunCertainty([row], "factual_lookup"), "factual_lookup");
     expect(report.gate).toBe("caution");
     const results = M5.map((m) => ({ modelId: m as ModelId, schemaId: "factual_lookup", ok: true, data: { answer: "Paris", source: "Atlas", caveat: "none" }, latencyMs: 1 }) as any);
@@ -525,7 +526,7 @@ describe("O-1: no other schema's page changes", () => {
   it.each([["generic"], ["procedural"]])("%s caution page: no factual_lookup lead, the notice count stays 3 (strip + collapsed report view)", async (schemaId) => {
     g.mockImplementation(async () => off);
     const rows = GENERIC_ROWS();
-    const report = await buildAdaptiveSynthesisReport("Q?", schemaId as QueryType, rows, raw());
+    const report = await historicalBuild("Q?", schemaId as QueryType, rows, raw());
     const gate = computeAdaptiveGate(rows, computeRunCertainty(rows, schemaId as QueryType), schemaId as QueryType);
     expect(report.gate).toBe("caution");
     const html = renderToStaticMarkup(

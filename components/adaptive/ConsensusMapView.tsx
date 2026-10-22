@@ -9,7 +9,7 @@
 
 import { ModelId } from "@/lib/types";
 import { AdaptiveRendererProps } from "./types";
-import { Card, SectionLabel, BulletList, FailedResultsNote, splitResults, getModelLabel } from "./shared";
+import { Card, SectionLabel, BulletList, FailedResultsNote, splitResults, SlotName } from "./shared";
 import ClaimMatrix from "./ClaimMatrix";
 
 export default function ConsensusMapView({ results, alignedClaims }: AdaptiveRendererProps) {
@@ -30,7 +30,7 @@ export default function ConsensusMapView({ results, alignedClaims }: AdaptiveRen
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
           {ok.map((r) => (
             <div key={r.modelId} className="text-sm">
-              <span className="font-semibold text-slate-900">{getModelLabel(r.modelId)}: </span>
+              <span className="font-semibold text-slate-900"><SlotName modelId={r.modelId} />: </span>
               <span className="text-slate-700">{r.data?.summary as string}</span>
             </div>
           ))}
@@ -47,7 +47,7 @@ export default function ConsensusMapView({ results, alignedClaims }: AdaptiveRen
               if (metrics.length === 0) return null;
               return (
                 <div key={r.modelId} className="flex flex-wrap items-center gap-2 text-xs">
-                  <span className="font-semibold text-slate-700">{getModelLabel(r.modelId)}:</span>
+                  <span className="font-semibold text-slate-700"><SlotName modelId={r.modelId} />:</span>
                   {metrics.map((m, i) => (
                     <span key={i} className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-slate-700">
                       {m.label}: {m.value ?? "—"} {m.unit} <span className="text-slate-400">({m.asOf})</span>

@@ -1472,6 +1472,13 @@ export interface AdaptiveReportPresentation {
   certaintyExplanation?: string;
   /** Order 4 gate presentation (D2/D3/D7); absent on reports persisted before it existed. */
   verificationGate?: PresentedVerificationGate;
+  /**
+   * Order 5 (Contract P): the disagreement-position presentation version. Written as the number 1 by
+   * buildAdaptiveSynthesisReport on new reports over at least one row, and read only by presentation
+   * (positionPresentation.isPositionMarked — any other value, or none, renders as before). Never read by computation;
+   * never written retroactively.
+   */
+  disagreementPositionVersion?: 1;
 }
 
 export interface AdaptiveSynthesisReport {

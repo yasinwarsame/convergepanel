@@ -32,9 +32,11 @@ import {
   ResultSchema,
 } from "@/lib/adaptiveSchema/types";
 import { TRUST_SCORE_CAP_REASON } from "@/lib/adaptiveSchema/config";
-import { Card, SectionLabel, BulletList, ConfidencePill, ProbabilityBar, TintBadge, getModelLabel } from "./shared";
+import { Card, SectionLabel, BulletList, ConfidencePill, ProbabilityBar, TintBadge, SlotName } from "./shared";
 import ModelChip from "@/components/ModelChip";
 import { GateTone, gateChipText, gateTone, pageGateValue } from "@/lib/adaptiveSchema/gatePresentation";
+import { PanelCounts, ROW_COUNTS_UNAVAILABLE, SlotRowCounts, hasReadableRowBreakdown, panelCounts, readSlots, rowTypeOf, slotLabel, slotRowCounts } from "@/lib/adaptiveSchema/positionPresentation";
+import { PositionPresentationBoundary, PositionPresentationState, usePositionPresentation } from "./PositionPresentationContext";
 
 // Wording: gatePresentation.gateChipText (D6/D7); "neutral": an unrecognized stored gate (D8).
 const GATE_CHIP_STYLES: Record<GateTone, string> = {
@@ -92,7 +94,10 @@ function computeAlignment(modelId: ModelId, rows: AlignedClaim[]): { matched: nu
   return { matched, participated };
 }
 
-function countDisputes(modelId: ModelId, rows: AlignedClaim[]): number {
+function countDisputes(modelId: ModelId, rows: AlignedClaim[], position?: PositionPresentationState | null): number {
+  // Order 5 (Contract P): on a marked report only CLAIM rows count, by the slot's own validated position — a value
+  // comparison's stored stance is never a disputed claim.
+  if (position) return rows.filter((row) => rowTypeOf(row.cells) === "claim" && readSlots(row.cells, position.roster).slots.some((s) => s.slot === modelId && s.kind === "position" && s.stance === "disputes")).length;
   return rows.filter((row) => row.cells.some((c) => c?.modelId === modelId && c.stance === "disputes")).length;
 }
 
@@ -109,6 +114,9 @@ function isRealSource(value: string | null | undefined): boolean {
   const normalized = value.trim().toLowerCase();
   return normalized.length > 0 && normalized !== "unknown" && normalized !== "none" && normalized !== "n/a";
 }
+
+export const NAMED_SOURCE_VALUES_TITLE =
+  "Counted where this panel slot gave a source with a value: a source named on several values counts once per value, and sources are not checked.";
 
 /** Mirrors trustSummary.ts's computeCitationScore's sourcing scope, but returns the raw sourced count (badge shows "7 citations", not a percentage). */
 function countCitations(schema: ResultSchema, result: AdaptiveModelResult): number {
@@ -194,6 +202,8 @@ interface RowVM {
   alignment: { matched: number; participated: number } | null;
   disputes: number;
   uniqueClaims: number;
+  /** Order 5 (Contract P, F-2): a marked report's per-slot counts — claim rows and value comparisons apart; null otherwise. */
+  marked: { counts: SlotRowCounts; readable: boolean; substitutedLabel: string | null } | null;
   citations: number;
   headline: string;
   isOutlier: boolean;
@@ -203,7 +213,8 @@ function buildRowVM(
   schema: ResultSchema,
   result: AdaptiveModelResult,
   rows: AlignedClaim[],
-  trustSummary?: AdaptiveTrustSummary
+  trustSummary?: AdaptiveTrustSummary,
+  position?: PositionPresentationState | null
 ): RowVM {
   const failed = !result.ok || !result.data;
   const trustEntry = trustSummary?.perModel.find((m) => m.modelId === result.modelId);
@@ -221,20 +232,26 @@ function buildRowVM(
       alignment: null,
       disputes: 0,
       uniqueClaims: 0,
+      marked: null,
       citations: 0,
       headline: "",
       isOutlier: true,
     };
   }
 
-  const alignment = computeAlignment(result.modelId, rows);
-  const disputes = countDisputes(result.modelId, rows);
-  const uniqueClaims = countUniqueClaims(result.modelId, rows);
+  // F-2: on a marked report "aligns" / "unique claims" are not computed from stored stances at all — the slot's claim
+  // rows and value comparisons are counted apart from its validated readings (display only; trust is unchanged).
+  const markedCounts = position ? slotRowCounts(result.modelId, rows, position.roster) : null;
+  const alignment = markedCounts ? null : computeAlignment(result.modelId, rows);
+  const disputes = countDisputes(result.modelId, rows, position);
+  const uniqueClaims = markedCounts ? markedCounts.singleSourceClaims : countUniqueClaims(result.modelId, rows);
   const citations = countCitations(schema, result);
   const headline = headlineText(schema, result.data);
   const isOutlier = disputes > 0 || uniqueClaims > 0 || citations > 0 || capped;
+  const label = position ? slotLabel(result.modelId, position.provenance, "full") : null;
+  const marked = markedCounts ? { counts: markedCounts, readable: hasReadableRowBreakdown(rows), substitutedLabel: label && label.includes("(substituted") ? label : null } : null;
 
-  return { result, failed: false, parseHealth, trustScore, capped, alignment, disputes, uniqueClaims, citations, headline, isOutlier };
+  return { result, failed: false, parseHealth, trustScore, capped, alignment, disputes, uniqueClaims, marked, citations, headline, isOutlier };
 }
 
 export type SortMode = "trust" | "outliers" | "response_time";
@@ -266,6 +283,26 @@ function sortRows(rows: RowVM[], mode: SortMode): RowVM[] {
 
 // ─── Presentational pieces ──────────────────────────────────────────────────
 
+/** Order 5 (Contract P, F-2): a marked slot's claim rows and value comparisons, each counted apart; neutral when the rows give no readable breakdown. */
+function MarkedSlotCounts({ marked }: { marked: NonNullable<RowVM["marked"]> }) {
+  if (!marked.readable) return <span className="text-xs text-slate-500 whitespace-nowrap">{ROW_COUNTS_UNAVAILABLE}</span>;
+  const { claimRows, claimRowsMatching, valueComparisons } = marked.counts;
+  return (
+    <>
+      {claimRows > 0 && (
+        <span className="text-xs text-slate-600 whitespace-nowrap">
+          same as the most common position on {claimRowsMatching}/{claimRows} claim row{claimRows === 1 ? "" : "s"}
+        </span>
+      )}
+      {valueComparisons > 0 && (
+        <span className="text-xs text-slate-600 whitespace-nowrap">
+          gave values in {valueComparisons} value comparison{valueComparisons === 1 ? "" : "s"}
+        </span>
+      )}
+    </>
+  );
+}
+
 function RunHeaderStrip({
   schema,
   gate,
@@ -273,6 +310,7 @@ function RunHeaderStrip({
   alignedClaimsCount,
   splitCount,
   limitedCoverageCount,
+  counts,
 }: {
   schema: ResultSchema;
   gate: AdaptiveGateResult;
@@ -280,6 +318,8 @@ function RunHeaderStrip({
   alignedClaimsCount: number;
   splitCount: number;
   limitedCoverageCount: number;
+  /** Order 5 (Contract P): a marked report's rows counted by what they are (positionPresentation.panelCounts). */
+  counts?: PanelCounts | null;
 }) {
   return (
     <Card className="flex items-center justify-between flex-wrap gap-3">
@@ -291,6 +331,12 @@ function RunHeaderStrip({
           {gateChipText(synthesisReport, pageGateValue(synthesisReport, gate.status))}
         </span>
       </div>
+      {counts ? (
+        <div className="text-xs text-slate-500">
+          Answer certainty <span className="font-semibold text-slate-800">{Math.round(synthesisReport.runCertainty * 100)}%</span>
+          {` · ${counts.rows} scored row${counts.rows === 1 ? "" : "s"} · ${counts.opposing} with recorded opposing positions · ${counts.unresolved} unresolved · ${counts.valuesDiffer} value comparison${counts.valuesDiffer === 1 ? "" : "s"} differing`}
+        </div>
+      ) : (
       <div className="text-xs text-slate-500">
         Answer certainty <span className="font-semibold text-slate-800">{Math.round(synthesisReport.runCertainty * 100)}%</span>
         {" · "}
@@ -304,6 +350,7 @@ function RunHeaderStrip({
           </>
         )}
       </div>
+      )}
     </Card>
   );
 }
@@ -493,7 +540,7 @@ function ModelRow({
           <span className="ml-auto text-xs text-slate-400">{formatLatency(result.latencyMs)}</span>
         </div>
         <p className="mt-1.5 text-sm text-red-700">
-          {getModelLabel(result.modelId)} returned an incompatible format and was excluded from comparison.
+          <SlotName modelId={result.modelId} /> returned an incompatible format and was excluded from comparison.
         </p>
         {result.parseError && (
           <details className="mt-1">
@@ -529,26 +576,40 @@ function ModelRow({
               )}
             </span>
           )}
+          {vm.marked?.substitutedLabel && <span className="text-xs text-slate-500 whitespace-nowrap">{vm.marked.substitutedLabel}</span>}
           {vm.alignment && vm.alignment.participated > 0 && (
             <span className="text-xs text-slate-600 whitespace-nowrap">
               aligns {vm.alignment.matched}/{vm.alignment.participated}
             </span>
           )}
+          {vm.marked && <MarkedSlotCounts marked={vm.marked} />}
           {vm.disputes > 0 && (
             <TintBadge tone="warning">
               disputes {vm.disputes} claim{vm.disputes === 1 ? "" : "s"}
             </TintBadge>
           )}
-          {vm.uniqueClaims > 0 && (
-            <TintBadge tone="accent">
-              +{vm.uniqueClaims} unique claim{vm.uniqueClaims === 1 ? "" : "s"}
-            </TintBadge>
-          )}
-          {vm.citations > 0 && (
-            <TintBadge tone="accent">
-              {vm.citations} citation{vm.citations === 1 ? "" : "s"}
-            </TintBadge>
-          )}
+          {vm.uniqueClaims > 0 &&
+            (vm.marked ? (
+              <TintBadge tone="accent">
+                +{vm.uniqueClaims} single-source claim{vm.uniqueClaims === 1 ? "" : "s"}
+              </TintBadge>
+            ) : (
+              <TintBadge tone="accent">
+                +{vm.uniqueClaims} unique claim{vm.uniqueClaims === 1 ? "" : "s"}
+              </TintBadge>
+            ))}
+          {vm.citations > 0 &&
+            (vm.marked ? (
+              // Order 5 (Contract P, MINOR 3): the count is of values that name a source — one per value, not unique
+              // sources, and never checked — so a marked record does not call them citations.
+              <TintBadge tone="accent" title={NAMED_SOURCE_VALUES_TITLE}>
+                {vm.citations} value{vm.citations === 1 ? "" : "s"} with a named source
+              </TintBadge>
+            ) : (
+              <TintBadge tone="accent">
+                {vm.citations} citation{vm.citations === 1 ? "" : "s"}
+              </TintBadge>
+            ))}
           {vm.capped && <TintBadge tone="warning">degraded · trust capped</TintBadge>}
           <span className="ml-auto flex items-center gap-2 shrink-0">
             <span className="text-xs text-slate-400">{formatLatency(result.latencyMs)}</span>
@@ -579,7 +640,16 @@ export interface ListViewProps {
   onNavigateToSynthesis?: (sectionId: string) => void;
 }
 
-export default function ListView({
+/** Order 5 (Contract P): a marked report rendered on its own gets the same row semantics as under AdaptivePanelResponse. */
+export default function ListView(props: ListViewProps) {
+  return (
+    <PositionPresentationBoundary report={props.synthesisReport} roster={props.results.map((r) => r.modelId)}>
+      <ListViewBody {...props} />
+    </PositionPresentationBoundary>
+  );
+}
+
+function ListViewBody({
   schema,
   results,
   alignedClaims,
@@ -589,6 +659,8 @@ export default function ListView({
   onNavigateToSynthesis,
 }: ListViewProps) {
   const rows = useMemo(() => alignedClaims || [], [alignedClaims]);
+  const position = usePositionPresentation();
+  const counts = useMemo(() => (position ? panelCounts(rows, position.roster) : null), [position, rows]);
   const [sortMode, setSortMode] = useState<SortMode>("trust");
   const [expandedModels, setExpandedModels] = useState<Set<ModelId>>(new Set());
 
@@ -598,9 +670,9 @@ export default function ListView({
   const singleModelCount = countByStatus(rows, "single_source");
 
   const sortedVMs = useMemo(() => {
-    const vms = results.map((result) => buildRowVM(schema, result, rows, trustSummary));
+    const vms = results.map((result) => buildRowVM(schema, result, rows, trustSummary, position));
     return sortRows(vms, sortMode);
-  }, [schema, results, rows, trustSummary, sortMode]);
+  }, [schema, results, rows, trustSummary, sortMode, position]);
 
   const toggle = (modelId: ModelId) => {
     setExpandedModels((prev) => {
@@ -619,23 +691,24 @@ export default function ListView({
         alignedClaimsCount={rows.length}
         splitCount={splitCount}
         limitedCoverageCount={limitedCoverageCount}
+        counts={counts}
       />
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <PulseCard
           label="Consensus claims"
-          value={consensusCount}
+          value={counts ? counts.claimByStatus.consensus : consensusCount}
           onClick={() => onNavigateToSynthesis?.("agreement-disagreement-map")}
         />
         <PulseCard
-          label="Split claims"
-          value={splitCount}
+          label={counts ? "Recorded opposing positions" : "Split claims"}
+          value={counts ? counts.opposing : splitCount}
           accent="split"
           onClick={() => onNavigateToSynthesis?.("disagreements")}
         />
         <PulseCard
-          label="Single-model insights"
-          value={singleModelCount}
+          label={counts ? "Single-source claims" : "Single-model insights"}
+          value={counts ? counts.claimByStatus.single_source : singleModelCount}
           onClick={() => onNavigateToSynthesis?.("single-model-insights")}
         />
       </div>

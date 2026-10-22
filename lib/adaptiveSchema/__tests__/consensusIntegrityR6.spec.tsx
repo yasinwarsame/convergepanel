@@ -41,6 +41,7 @@ import { extractPdfElementText } from "@/lib/pdf/__tests__/testUtils";
 import { pdfLayoutFixtures } from "@/lib/pdf/__fixtures__/layoutFixtures";
 import { AdaptiveSynthesisReport, AlignedClaim, AlignedClaimCell } from "@/lib/adaptiveSchema/types";
 import { ModelId, ModelResult } from "@/lib/types";
+import { historicalBuild, historicalFinalize } from "./historicalPresentationHelpers";
 
 const g = callGemini as jest.MockedFunction<typeof callGemini>;
 const M = ["chatgpt", "claude", "grok", "perplexity", "gemini"];
@@ -82,7 +83,7 @@ function mockCalls(narrative: Record<string, unknown> | null, bias: unknown[] | 
 }
 async function build(rows: AlignedClaim[], narrative: Record<string, unknown> | null, bias: unknown[] | null = null) {
   mockCalls(narrative, bias);
-  return buildAdaptiveSynthesisReport("Q?", "generic", rows, results());
+  return historicalBuild("Q?", "generic", rows, results());
 }
 const statusOf = (r: AlignedClaim) => renderRowStatus(rowAgreementFacts(r, M.length));
 /** Literal text inside a RegExp: every metacharacter, backslash included, escaped. */

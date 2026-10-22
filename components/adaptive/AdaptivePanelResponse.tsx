@@ -50,7 +50,10 @@ import SchemaKeyFactsStrip from "./SchemaKeyFactsStrip";
 import { Card, SectionLabel } from "./shared";
 import PanelViewTabs, { PanelViewMode } from "./PanelViewTabs";
 import { routeClassifiedQuery } from "@/lib/adaptiveSchema/routeClassifiedQuery";
-import { useEffect, useState } from "react";
+import { isPositionMarked, presentPositionSafeReport } from "@/lib/adaptiveSchema/positionPresentation";
+import { useRunModelProvenance } from "./RunModelProvenanceContext";
+import { PositionPresentationContext, PositionPresentationState } from "./PositionPresentationContext";
+import { useEffect, useMemo, useState } from "react";
 
 const RENDER_HINTS_WITHOUT_MATRIX = new Set<AnswerShape>(["metrics_grid", "verdict_card", "step_diff", "scenario_tree"]);
 
@@ -130,7 +133,31 @@ export interface AdaptivePanelResponseProps extends AdaptiveRendererProps {
   ancillaryPresentation?: AdaptiveAncillaryPresentation;
 }
 
+/**
+ * Order 5 (Contract P): the one UI root for adaptive results. A report marked presentation.disagreementPositionVersion
+ * === 1 is replaced, for every surface below, by its read-time position-safe view (positionPresentation.ts), and the
+ * row-level surfaces receive the roster and recorded slot provenance through PositionPresentationContext. An unmarked
+ * report is passed through unchanged (the same object) with no context: everything renders exactly as before.
+ */
 export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps) {
+  const provenance = useRunModelProvenance();
+  const { synthesisReport, alignedClaims, results } = props;
+  const marked = isPositionMarked(synthesisReport);
+  const roster = useMemo(() => results.map((r) => r.modelId as string), [results]);
+  const shownReport = useMemo(
+    () => (marked ? presentPositionSafeReport(synthesisReport, { rows: alignedClaims, roster, provenance }) : synthesisReport),
+    [marked, synthesisReport, alignedClaims, roster, provenance]
+  );
+  const position = useMemo<PositionPresentationState | null>(() => (marked ? { marked: true, roster, provenance } : null), [marked, roster, provenance]);
+  if (!position) return <AdaptivePanelResponseBody {...props} />;
+  return (
+    <PositionPresentationContext.Provider value={position}>
+      <AdaptivePanelResponseBody {...props} synthesisReport={shownReport} />
+    </PositionPresentationContext.Provider>
+  );
+}
+
+function AdaptivePanelResponseBody(props: AdaptivePanelResponseProps) {
   const {
     schema,
     classification,

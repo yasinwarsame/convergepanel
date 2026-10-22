@@ -50,6 +50,7 @@ import { detectAdaptiveBiases } from "./biasDetection";
 import { auditPanelCoverage } from "./coverageAudit";
 import { computeAdaptiveDiagnostics } from "./diagnostics";
 import { findUnrecognizedModelNames, stripUnrecognizedModelNames } from "./modelNameValidator";
+import { DISAGREEMENT_POSITION_MARKER, DISAGREEMENT_POSITION_VERSION } from "./positionPresentation";
 
 export const SYNTHESIS_CALL_TIMEOUT_MS = 10000;
 const SYNTHESIS_MAX_OUTPUT_TOKENS = 2200;
@@ -355,6 +356,9 @@ export async function buildAdaptiveSynthesisReport(
     ...(certaintyExplanation ? { certaintyExplanation } : {}),
     // Order 4: the gate presentation boundary (D7) and the load-bearing split disclosure (D3). No gate reason (D1).
     verificationGate: { unresolvedLoadBearing: unresolvedLoadBearingRows(gate).map((r) => presentedUnresolvedClaim(r, totalModelCount)) },
+    // Order 5 (Contract P): marks a new report over at least one row for the disagreement-position presentation. Written
+    // after every computed value above exists and never read by computation.
+    ...(rows.length > 0 ? { [DISAGREEMENT_POSITION_MARKER]: DISAGREEMENT_POSITION_VERSION } : {}),
   });
 
   const baseReport: AdaptiveSynthesisReport = {

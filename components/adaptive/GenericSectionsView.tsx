@@ -17,7 +17,7 @@
 
 import { ModelId } from "@/lib/types";
 import { AdaptiveRendererProps } from "./types";
-import { Card, SectionLabel, BulletList, FailedResultsNote, splitResults, getModelLabel } from "./shared";
+import { Card, SectionLabel, BulletList, FailedResultsNote, splitResults, SlotName } from "./shared";
 import ClaimMatrix from "./ClaimMatrix";
 import { mergeAndRankTextItems, TextItemSource } from "@/lib/adaptiveSchema/textSimilarity";
 import { TEXT_DEDUP_THRESHOLDS, UNCERTAINTIES_MAX_ITEMS, FOLLOW_UPS_MAX_ITEMS } from "@/lib/adaptiveSchema/config";
@@ -49,7 +49,7 @@ export default function GenericSectionsView({ results, alignedClaims }: Adaptive
         <div className="space-y-2">
           {ok.map((r) => (
             <p key={r.modelId} className="text-sm">
-              <span className="font-semibold text-slate-900">{getModelLabel(r.modelId)}: </span>
+              <span className="font-semibold text-slate-900"><SlotName modelId={r.modelId} />: </span>
               <span className="text-slate-700">{r.data?.summary as string}</span>
             </p>
           ))}

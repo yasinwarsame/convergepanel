@@ -18,8 +18,7 @@
  */
 
 import { AggregatedDecisionAssessment, AggregatedDecisionCriterion, AggregatedDecisionOption, DecisionRecommendationAction, DecisionSupportResult } from "@/lib/adaptiveSchema/types";
-import { Card, EmptyStateCard, SectionLabel, TintBadge, formatModelCoverage } from "./shared";
-import ModelChip from "@/components/ModelChip";
+import { Card, EmptyStateCard, SectionLabel, TintBadge, formatModelCoverage, SlotChip } from "./shared";
 
 const ACTION_LABELS: Record<DecisionRecommendationAction, string> = {
   go: "Go",
@@ -285,7 +284,7 @@ export default function DecisionSupportView({ decisionSupport }: { decisionSuppo
           </p>
           <div className="mt-2 flex flex-wrap gap-1">
             {Array.from(new Set(options.flatMap((o) => o.contributingModels))).map((modelId) => (
-              <ModelChip key={modelId} modelId={modelId} size="xs" />
+              <SlotChip key={modelId} modelId={modelId} size="xs" />
             ))}
           </div>
         </details>

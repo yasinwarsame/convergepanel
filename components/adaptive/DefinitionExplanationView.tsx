@@ -15,8 +15,7 @@
  */
 
 import { AggregatedDefinitionInterpretation, DefinitionExplanationResult } from "@/lib/adaptiveSchema/types";
-import { Card, EmptyStateCard, SectionLabel, TintBadge, formatModelCoverage } from "./shared";
-import ModelChip from "@/components/ModelChip";
+import { Card, EmptyStateCard, SectionLabel, TintBadge, formatModelCoverage, SlotChip } from "./shared";
 
 function CoverageBadge({ interpretation }: { interpretation: AggregatedDefinitionInterpretation }) {
   const label = formatModelCoverage({ covered: interpretation.coverageCount, total: interpretation.totalModels, mode: "covered" });
@@ -144,7 +143,7 @@ function PrimaryInterpretation({ interpretation }: { interpretation: AggregatedD
               <summary className="cursor-pointer text-xs text-slate-500">Contributing models ({interpretation.contributingModels.length})</summary>
               <div className="mt-1 flex flex-wrap gap-1">
                 {interpretation.contributingModels.map((modelId) => (
-                  <ModelChip key={modelId} modelId={modelId} size="xs" />
+                  <SlotChip key={modelId} modelId={modelId} size="xs" />
                 ))}
               </div>
             </details>

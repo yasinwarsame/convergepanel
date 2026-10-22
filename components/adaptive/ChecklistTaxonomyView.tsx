@@ -13,8 +13,7 @@
  */
 
 import { AggregatedChecklistItem, ChecklistTaxonomyResult } from "@/lib/adaptiveSchema/types";
-import { Card, EmptyStateCard, SectionLabel, TintBadge, formatModelCoverage } from "./shared";
-import ModelChip from "@/components/ModelChip";
+import { Card, EmptyStateCard, SectionLabel, TintBadge, formatModelCoverage, SlotChip } from "./shared";
 import { ModelId } from "@/lib/types";
 
 function ChecklistItemRow({ item }: { item: AggregatedChecklistItem }) {
@@ -33,7 +32,7 @@ function ChecklistItemRow({ item }: { item: AggregatedChecklistItem }) {
         {item.rationale && <p className="mt-0.5 text-xs text-slate-600">{item.rationale}</p>}
         <div className="mt-1 flex flex-wrap items-center gap-1">
           {modelIds.map((modelId) => (
-            <ModelChip key={modelId} modelId={modelId} size="xs" />
+            <SlotChip key={modelId} modelId={modelId} size="xs" />
           ))}
         </div>
       </div>

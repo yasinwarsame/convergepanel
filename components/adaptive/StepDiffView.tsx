@@ -8,7 +8,7 @@
  */
 
 import { AdaptiveRendererProps } from "./types";
-import { Card, SectionLabel, BulletList, FailedResultsNote, splitResults, getModelLabel } from "./shared";
+import { Card, SectionLabel, BulletList, FailedResultsNote, splitResults, SlotName } from "./shared";
 
 export default function StepDiffView({ results }: AdaptiveRendererProps) {
   const { ok, failed } = splitResults(results);
@@ -23,7 +23,7 @@ export default function StepDiffView({ results }: AdaptiveRendererProps) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {ok.map((r) => (
           <div key={r.modelId} className="text-sm">
-            <span className="font-semibold text-slate-900">{getModelLabel(r.modelId)}: </span>
+            <span className="font-semibold text-slate-900"><SlotName modelId={r.modelId} />: </span>
             <span className="text-slate-700">{r.data?.goal as string}</span>
           </div>
         ))}
@@ -69,13 +69,13 @@ export default function StepDiffView({ results }: AdaptiveRendererProps) {
                     if (!step) {
                       return (
                         <p key={r.modelId} className="text-xs text-slate-300">
-                          {getModelLabel(r.modelId)}: —
+                          <SlotName modelId={r.modelId} />: —
                         </p>
                       );
                     }
                     return (
                       <p key={r.modelId} className="text-sm text-slate-800">
-                        <span className="font-medium text-slate-600">{getModelLabel(r.modelId)}: </span>
+                        <span className="font-medium text-slate-600"><SlotName modelId={r.modelId} />: </span>
                         {step.action}
                         {step.failureMode && (
                           <span className="block text-xs text-red-600 mt-0.5">Failure mode: {step.failureMode}</span>
