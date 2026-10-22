@@ -506,12 +506,15 @@ export function xFit(text: string, budget: number): string {
 }
 
 /**
- * How much of a question or claim a marked X post reads (Order 5, Contract P, MINOR 2): the run API's question limit.
- * The shown part is at most 80 weighted characters, but finding X's URLs is superlinear on some degenerate text (a long
- * run of "a.a.a."), so a longer text is cut first — at its last whitespace before the limit, so never inside a word or
- * a URL — and is then always shown as cut ("…"). No question the API accepts is affected.
+ * How much of a question or claim a marked X post reads (Order 5, Contract P, MINOR 2 / N-A): /api/run-panel's question
+ * limit, MAX_QUESTION_LENGTH in lib/security/requestValidation.ts — 10,000 UTF-16 code units (`string.length`), counted
+ * the same way here, after invalid characters are removed and whitespace collapsed (which only shortens the text). The
+ * shown part is at most 80 weighted characters, but finding X's URLs is superlinear on some degenerate text (a long run
+ * of "a.a.a."), so a longer text (a model's claim can be one) is cut first, at its last whitespace before the limit
+ * (never inside a word, a URL or a surrogate pair), and is then always shown as cut ("…").
+ * No question run-panel accepts is cut.
  */
-export const X_TEXT_LIMIT = 5000;
+export const X_TEXT_LIMIT = 10000;
 
 function boundedXText(text: string): { text: string; truncated: boolean } {
   if (text.length <= X_TEXT_LIMIT) return { text, truncated: false };

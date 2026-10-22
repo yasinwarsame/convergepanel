@@ -3,9 +3,10 @@
  *
  * MINOR 1: a marked X post never drops both the unresolved row and the pointer to it.
  * MINOR 2: xFit reads the text once; the number of cuts it checks is bounded by the budget, not the text length.
+ * N-A: the marked X post reads up to run-panel's question limit (10,000), so no accepted question is cut early.
  * MINOR 3: on a marked record, ListView does not call a count of values that name a source "citations".
  *
- * Each correction has a negative control: the a3416c37 behaviour fails the same check.
+ * Each correction has a negative control: the a3416c37 behaviour (for N-A, the 2b0d1c7 limit) fails the same check.
  */
 process.env.TZ = "UTC";
 
@@ -24,6 +25,7 @@ import { finalizeAdaptiveRun } from "@/lib/adaptiveSchema/orchestrate";
 import { getResultSchema } from "@/lib/adaptiveSchema/schemaRegistry";
 import { presentPositionSafeReport } from "@/lib/adaptiveSchema/positionPresentation";
 import { buildAdaptiveXPost, markedXFallback, xFit, xPostFits, xWeightedLength, X_TEXT_LIMIT } from "@/lib/adaptiveSchema/shareBuilders";
+import { MAX_QUESTION_LENGTH } from "@/lib/security/requestValidation";
 import * as XW from "@/lib/adaptiveSchema/xWeightedText";
 import ListView, { NAMED_SOURCE_VALUES_TITLE } from "@/components/adaptive/ListView";
 import { CLASSIFICATION_BASE, DEFAULT_MODE, SCENARIOS, Scenario, geminiMockImpl } from "./o5pScenarios";
@@ -248,13 +250,14 @@ describe("MINOR 2: xFit's work is bounded by the budget, not the text length", (
   });
 
   it("text over X_TEXT_LIMIT is read only up to its last whitespace before the limit, and shown as cut", async () => {
-    expect(X_TEXT_LIMIT).toBe(5000); // the run API's question limit (lib/panel/schemas.ts)
+    expect(X_TEXT_LIMIT).toBe(10000); // /api/run-panel's question limit
+    expect(X_TEXT_LIMIT).toBe(MAX_QUESTION_LENGTH);
     const record = await build(scenario("generic-mixed"));
     const cases: [string, string, (post: string) => void][] = [
       ["20,000 degenerate, no whitespace", "a.".repeat(10_000), (post) => expect(post).toMatch(/unresolved rows? — see the full report/)],
-      ["6,000 of words", "employment falls in small firms ".repeat(190), (post) => expect(post).toMatch(/Unresolved: “employment[^”]*…” — panel result: /)],
-      ["URL across the limit", `${"word ".repeat(995)}https://example.com/${"x".repeat(200)} tail`, (post) => expect(post).not.toMatch(/example\.com/)],
-      ["whole-fitting head of a long text", `${"https://example.com/" + "p".repeat(1500)} ${"https://example.org/" + "q".repeat(1500)} ${"z".repeat(3000)}`, (post) => expect(post).not.toMatch(/q{1500}”/)],
+      ["12,000 of words", "employment falls in small firms ".repeat(380), (post) => expect(post).toMatch(/Unresolved: “employment[^”]*…” — panel result: /)],
+      ["URL across the limit", `${"word ".repeat(1995)}https://example.com/${"x".repeat(200)} tail`, (post) => expect(post).not.toMatch(/example\.com/)],
+      ["whole-fitting head of a long text", `${"https://example.com/" + "p".repeat(1500)} ${"https://example.org/" + "q".repeat(1500)} ${"z".repeat(8000)}`, (post) => expect(post).not.toMatch(/q{1500}”/)],
     ];
     for (const [label, claim, check] of cases) {
       const { report, rows, roster } = withClaim(record, claim);
@@ -271,8 +274,8 @@ describe("MINOR 2: xFit's work is bounded by the budget, not the text length", (
 
   it("a question at exactly X_TEXT_LIMIT is not cut (same post as without the limit)", async () => {
     const record = await build(scenario("generic-mixed"));
-    const q = "Does raising the minimum wage reduce employment? ".repeat(103).slice(0, 5000);
-    expect(q.length).toBe(5000);
+    const q = "Does raising the minimum wage reduce employment? ".repeat(205).slice(0, 10000);
+    expect(q.length).toBe(10000);
     const post = buildAdaptiveXPost(q, record.synthesisReport, { rows: record.alignedClaims, roster: record.results.map((r: any) => r.modelId) });
     const one = q.replace(/\s+/g, " ").trim();
     expect([80, 48, 24].map((b) => `Asked a multi-model AI panel: "${legacyXFit(one, b)}"`)).toContain(post.split("\n\n")[0]);
@@ -329,6 +332,103 @@ describe("MINOR 2: xFit's work is bounded by the budget, not the text length", (
     } finally {
       (Intl as any).Segmenter = Seg;
     }
+  });
+});
+
+// ─── N-A ────────────────────────────────────────────────────────────────────
+
+describe("N-A: the marked X post reads up to run-panel's question limit, so no accepted question is cut early", () => {
+  const ASKED = "Asked a multi-model AI panel";
+  const FAMILY = "👨‍👩‍👧‍👦";
+  const fill = (unit: string, n: number) => unit.repeat(Math.floor(n / unit.length)) + "x".repeat(n % unit.length);
+  const SHAPES: [string, (n: number) => string][] = [
+    ["long word", (n) => "x".repeat(n)],
+    ["unspaced CJK", (n) => "最低工资会减少就业吗".repeat(Math.ceil(n / 10)).slice(0, n)],
+    ["joined emoji", (n) => fill(FAMILY, n)],
+    ["flags and accents", (n) => fill("🇫🇷é", n)],
+    ["degenerate a.", (n) => "a.".repeat(Math.ceil(n / 2)).slice(0, n)],
+    ["words", (n) => "employment falls in small firms ".repeat(Math.ceil(n / 32)).slice(0, n)],
+    ["several URLs", (n) => Array.from({ length: Math.ceil(n / 20) }, (_, i) => `https://site${i}.com/p${i}`).join(" ").slice(0, n)],
+    ["URL first", (n) => `https://example.com/${"p".repeat(n - 20)}`],
+  ];
+  const LENGTHS = [5000, 5001, 9999, 10000, 10001];
+  const one = (t: string) => t.replace(/\s+/g, " ").trim();
+  const quoted = (line: string) => line.match(/^Asked a multi-model AI panel: "(.*)"$/s)?.[1] ?? null;
+  const graphemeEnds = (t: string) => new Set(Array.from(new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(t), (x) => x.index + x.segment.length));
+
+  /** Valid on X, no lone surrogate, every URL whole and from the inputs, and a shown cut ends at a grapheme boundary of the input. */
+  function checkPost(label: string, post: string, sources: string[], cutOf: [string, string | null][]) {
+    expect([label, xPostFits(post)]).toEqual([label, true]);
+    expect([label, LONE_SURROGATE.test(post)]).toEqual([label, false]);
+    const whole = new Set(sources.flatMap((s) => XW.xUrlSpans(one(s).normalize("NFC")).map((u) => u.url)));
+    for (const u of XW.xUrlSpans(post.normalize("NFC"))) expect([label, u.url, whole.has(u.url)]).toEqual([label, u.url, true]);
+    for (const [input, shown] of cutOf) {
+      if (!shown || !shown.endsWith("…")) continue;
+      const body = shown.slice(0, -1);
+      expect([label, one(input).startsWith(body)]).toEqual([label, true]);
+      expect([label, graphemeEnds(one(input)).has(body.length) || /\s/.test(one(input)[body.length])]).toEqual([label, true]);
+    }
+  }
+
+  it("X_TEXT_LIMIT is run-panel's MAX_QUESTION_LENGTH, and both count UTF-16 code units", () => {
+    expect(X_TEXT_LIMIT).toBe(10000);
+    expect(X_TEXT_LIMIT).toBe(MAX_QUESTION_LENGTH);
+    expect(FAMILY.length).toBe(11); // string.length, as requestValidation counts
+  });
+
+  it.each(LENGTHS)("question of %i code units, every shape: within the limit it is read whole; above it, cut at whitespace or left out", async (n) => {
+    const record = await build(scenario("generic-mixed"));
+    const split = record.synthesisReport.presentation.disagree[0];
+    for (const [shape, make] of SHAPES) {
+      const q = make(n);
+      expect([shape, q.length]).toEqual([shape, n]);
+      const label = `${shape}@${n}`;
+      const t0 = Date.now();
+      const post = buildAdaptiveXPost(q, record.synthesisReport, { rows: record.alignedClaims, roster: record.results.map((r: any) => r.modelId) });
+      expect([label, Date.now() - t0 < 3_000]).toEqual([label, true]);
+      const first = post.split("\n\n")[0];
+      checkPost(label, post, [q, split.claim, split.result], [[q, quoted(first)]]);
+      expect([label, /Unresolved: “|unresolved rows? — see the full report/.test(post)]).toEqual([label, true]);
+      if (n <= MAX_QUESTION_LENGTH) {
+        // Read whole: the shown question is xFit of the whole question — never empty (the 5,000 limit left these out).
+        expect([label, first]).not.toEqual([label, ASKED]);
+        expect([label, [80, 48, 24].map((b) => `${ASKED}: "${xFit(one(q), b)}"`).includes(first)]).toEqual([label, true]);
+      } else if (/\s/.test(q.slice(0, MAX_QUESTION_LENGTH))) {
+        expect([label, quoted(first)?.endsWith("…")]).toEqual([label, true]);
+      } else {
+        expect([label, first]).toEqual([label, ASKED]);
+      }
+    }
+  });
+
+  it.each(LENGTHS)("claim of %i code units, every shape, substituted slot: the row (or the pointer) is shown, nothing named", async (n) => {
+    const s = scenario("generic-mixed");
+    const record = await build({ ...s, name: "generic-mixed+sub", results: () => s.results().map((r: any) => (r.modelId === "claude" ? { ...r, ...SUB } : r)) });
+    for (const [shape, make] of SHAPES) {
+      const claim = make(n);
+      const label = `${shape}@${n}`;
+      const { report, rows, roster } = withClaim(record, claim);
+      const t0 = Date.now();
+      const post = buildAdaptiveXPost("Does raising the minimum wage reduce employment?", report, { rows, roster });
+      expect([label, Date.now() - t0 < 3_000]).toEqual([label, true]);
+      const row = post.match(/Unresolved: “(.*)” — panel result: /s)?.[1] ?? null;
+      checkPost(label, post, [claim, report.presentation.disagree[0].result], [[claim, row]]);
+      expect([label, row !== null || /unresolved rows? — see the full report/.test(post)]).toEqual([label, true]);
+      expect([label, post]).not.toEqual([label, expect.stringMatching(/Claude|DeepSeek|substitut/i)]);
+      // Within the limit an unspaced claim is quoted, not replaced by the pointer (the 5,000 limit emptied it).
+      if (n <= MAX_QUESTION_LENGTH && shape !== "degenerate a." && xFit(one(claim), 24)) expect([label, row !== null]).toEqual([label, true]);
+      if (n > MAX_QUESTION_LENGTH && !/\s/.test(claim.slice(0, MAX_QUESTION_LENGTH))) expect([label, row]).toEqual([label, null]);
+    }
+  });
+
+  it("10,000-character degenerate question and claim together: valid, and quick", async () => {
+    const record = await build(scenario("generic-mixed"));
+    const t = "a.".repeat(5000);
+    const { report, rows, roster } = withClaim(record, t);
+    const t0 = Date.now();
+    const post = buildAdaptiveXPost(t, report, { rows, roster });
+    expect(Date.now() - t0).toBeLessThan(10_000);
+    expect(xPostFits(post)).toBe(true);
   });
 });
 
