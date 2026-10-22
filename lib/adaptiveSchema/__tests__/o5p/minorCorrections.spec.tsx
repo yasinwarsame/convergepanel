@@ -8,7 +8,6 @@
  *
  * Each correction has a negative control: the a3416c37 behaviour (for N-A, the 2b0d1c7 limit) fails the same check.
  */
-process.env.TZ = "UTC";
 
 jest.mock("@/lib/env", () => ({ ADAPTIVE_VERIFICATION_ENABLED: true, GEMINI_API_KEY: "k" }));
 jest.mock("@/lib/connectors/gemini", () => ({ callGemini: jest.fn() }));

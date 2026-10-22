@@ -10,7 +10,6 @@
  * (M-1); the scalar normalizer is the shipped one (M-4); no median or tolerance basis is stated (M-5); the memo takes
  * the adaptive-only path (M-3); the primary answer, the computed gate and the raw JSON stay (O5-R14-2).
  */
-process.env.TZ = "UTC";
 
 jest.mock("@/lib/env", () => ({ ADAPTIVE_VERIFICATION_ENABLED: true, GEMINI_API_KEY: "k" }));
 jest.mock("@/lib/connectors/gemini", () => ({ callGemini: jest.fn() }));

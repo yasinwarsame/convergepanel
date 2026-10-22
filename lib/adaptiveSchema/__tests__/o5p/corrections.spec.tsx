@@ -9,7 +9,6 @@
  * procedural (step), forecast (scenario), factual-* (scalar); mixed — contested-empirical (claims + metric),
  * legal-regulatory (claim + scalar, gate fail).
  */
-process.env.TZ = "UTC";
 
 jest.mock("@/lib/env", () => ({ ADAPTIVE_VERIFICATION_ENABLED: true, GEMINI_API_KEY: "k" }));
 jest.mock("@/lib/connectors/gemini", () => ({ callGemini: jest.fn() }));

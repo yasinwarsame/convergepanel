@@ -6,7 +6,6 @@
  * __fixtures__/xOracleCorpus.json with the package integrity hashes; the library is not a dependency. Every behaviour
  * change has a negative control: the a49f2172 behaviour, or the unmarked rendering, fails the same check.
  */
-process.env.TZ = "UTC";
 
 jest.mock("@/lib/env", () => ({ ADAPTIVE_VERIFICATION_ENABLED: true, GEMINI_API_KEY: "k" }));
 jest.mock("@/lib/connectors/gemini", () => ({ callGemini: jest.fn() }));
@@ -76,7 +75,6 @@ const section = (html: string, name: string) => {
 const FIELD = ["metric", "scenario", "step", "scalar"];
 const fieldTexts = (record: any) => (record.alignedClaims ?? []).filter((r: any) => FIELD.includes(rowTypeOf(r.cells))).map((r: any) => r.claimText as string);
 const claimTexts = (record: any) => (record.alignedClaims ?? []).filter((r: any) => rowTypeOf(r.cells) === "claim").map((r: any) => r.claimText as string);
-
 
 const SUB = { status: "substituted", provider: "deepseek", requestedModel: "deepseek-chat", substitutedFrom: "anthropic:claude-model-1", substitutionReason: "timeout" };
 /** The scenario with its Claude slot answered by a substitute (DeepSeek), recorded as such in the result row. */
