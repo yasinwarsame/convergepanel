@@ -8,6 +8,18 @@
  * eligible new reports (a builder-produced presentation over at least one row). It is removed before comparison;
  * everything else — alignment, statuses, scores, certainty, trust, gate, every stored string, the persisted envelope —
  * must hash identically, with the same model calls (count, order, arguments) and no input mutation.
+ *
+ * Order 5 Contract C1 (owner ruling O-P, claim-tie attribution): on a case whose rows include an eligible claim-origin
+ * tie — decided by the test-side predicate (o5c/claimTieOracle.ts), never the candidate's — the trust summary is the
+ * one permitted computed difference. There, and only there:
+ *   1. every trust summary in the output is replaced by the frozen 625773767 algorithm's value over the output's own
+ *      rows and results (claimTieOracle.legacyTrust), and the result must still hash to the unchanged 2c17feee
+ *      baseline — every other byte is held exactly as before, and the oracle's fidelity is proven by the hash;
+ *   2. the candidate's trust summary must exactly equal the independent claim-tie reference
+ *      (claimTieOracle.claimTieReference), with attributionRule === "claim_tie_no_majority_credit_v1";
+ *   3. it must not be more favourable than the oracle: per slot, overall, or grounding level.
+ * Every other case is compared exactly as before, and must carry no attributionRule. builderHashes.json is never
+ * re-captured.
  */
 jest.mock("@/lib/env", () => ({ ADAPTIVE_VERIFICATION_ENABLED: true, GEMINI_API_KEY: "k" }));
 jest.mock("@/lib/connectors/gemini", () => ({ callGemini: jest.fn() }));
@@ -24,6 +36,7 @@ import { buildAdaptiveSynthesisReport } from "@/lib/adaptiveSchema/synthesisRepo
 import { getResultSchema } from "@/lib/adaptiveSchema/schemaRegistry";
 import { AdaptiveRetryUsageSink } from "@/lib/adaptiveSchema/retryCorrection";
 import { CLASSIFICATION_BASE, DEFAULT_MODE, MockMode, SCENARIOS, SEEDED_SCHEMAS, SEEDS, geminiMockImpl, seededResults } from "./o5pScenarios";
+import { GROUNDING_RANK, claimTieReference, groundingTier, legacyTrust, oracleIsEligibleClaimTie } from "../o5c/claimTieOracle";
 
 const gem = callGemini as unknown as jest.Mock;
 const baseline: Record<string, { schemaId: string; result: string; geminiCalls: string; connectorCalls: string; geminiCallCount: number; inputMutated: boolean }> = JSON.parse(
@@ -86,7 +99,35 @@ describe("Contract P builder purity vs the 2c17feee pipeline", () => {
     const b = baseline[name];
     const out = await run(c.schemaId, c.input(), c.mode, c.retry);
     const { value, markers } = comparable(out.res);
-    expect(sha(canon(value))).toBe(b.result);
+    const rows = out.res.alignedClaims ?? [];
+    const results = out.res.adaptiveResults ?? [];
+    const claimTie = rows.some((r: any) => oracleIsEligibleClaimTie(r, results));
+    if (!claimTie) {
+      expect(sha(canon(value))).toBe(b.result);
+      expect(JSON.stringify(value)).not.toContain("attributionRule");
+    } else {
+      const schema = getResultSchema(c.schemaId as any) as any;
+      const oracle = JSON.parse(JSON.stringify(legacyTrust(schema, results, rows)));
+      const { ties: _ties, ...reference } = claimTieReference(schema, results, rows);
+      const copies = [value, value?.persistedLegacyOutput].filter((v) => v && v.trustSummary);
+      expect(copies.length).toBeGreaterThan(0);
+      for (const holder of copies) {
+        const candidate = holder.trustSummary;
+        expect(candidate.attributionRule).toBe("claim_tie_no_majority_credit_v1");
+        const { attributionRule: _rule, ...candidateValues } = candidate;
+        expect(candidateValues).toEqual(JSON.parse(JSON.stringify(reference)));
+        const byId = new Map(oracle.perModel.map((m: any) => [m.modelId, m]));
+        for (const m of candidate.perModel) {
+          const o: any = byId.get(m.modelId);
+          expect(m.trustScore).toBeLessThanOrEqual(o.trustScore + 1e-12);
+          expect(m.capped && !o.capped).toBe(false);
+        }
+        expect(candidate.overallTrust).toBeLessThanOrEqual(oracle.overallTrust + 1e-12);
+        expect(GROUNDING_RANK[groundingTier(candidate.overallTrust)]).toBeLessThanOrEqual(GROUNDING_RANK[groundingTier(oracle.overallTrust)]);
+        holder.trustSummary = oracle;
+      }
+      expect(sha(canon(value))).toBe(b.result);
+    }
     // The marker is the number 1, on the live report and its persisted copy, exactly when the builder produced a
     // presentation over at least one row; nowhere else.
     const eligible = !!out.res.synthesisReport?.presentation && (out.res.alignedClaims?.length ?? 0) > 0;

@@ -1516,11 +1516,18 @@ export interface ModelTrustSummary {
   modelId: ModelId;
   /** Count of claim[]/metric[]/step[]/scenario[] items this model raised in its own response. */
   claimsContributed: number;
-  /** 0–1: fraction of comparable rows where this model's stance matched the row's majority stance. 1 when the model had no comparable rows. */
+  /**
+   * 0–1: fraction of comparable rows where this model's stance matched the row's majority stance. 1 when the model had
+   * no comparable rows. On an eligible claim-origin tie (see CLAIM_TIE_ATTRIBUTION_RULE) no model is credited; any other
+   * tie is decided by slot order (first-seen stance).
+   */
   majorityAlignment: number;
   /** 0–1: fraction of sourceable fields (Metric.source, factual_lookup's `source`) with a real, non-generic source. 1 when the schema has no sourceable field. */
   citationScore: number;
-  /** Count of rows where this model disputed a row that the panel otherwise resolved as "split". */
+  /**
+   * Count of "split" rows where this model's stance is "disputes" and it was not credited as matching the majority
+   * stance. On an eligible claim-origin tie nobody is credited, so every slot recorded as "disputes" there counts.
+   */
   contradictionCount: number;
   parseHealth: "ok" | "degraded" | "failed";
   /**
@@ -1534,10 +1541,29 @@ export interface ModelTrustSummary {
   capped: boolean;
 }
 
+/**
+ * Order 5 Contract C1: the trust-attribution rule for claim-origin ties. A row is an eligible claim-origin tie when it
+ * has at least two positions, every one a model's own claim or an inferred (backfill) claim position with a known
+ * stance, from distinct slots that each name exactly one result, and two or more stances share the top count. On such a
+ * row the row still counts as participated, no slot is credited as matching the majority stance, and only a slot whose
+ * stance is "disputes" on a "split" row counts a contradiction. Every other row — value (scalar), metric, scenario and
+ * step comparisons, mixed or unknown origins, untied rows — keeps the original rule, slot-order tie-break included.
+ */
+export const CLAIM_TIE_ATTRIBUTION_RULE = "claim_tie_no_majority_credit_v1" as const;
+export type TrustAttributionRule = typeof CLAIM_TIE_ATTRIBUTION_RULE;
+
 export interface AdaptiveTrustSummary {
   perModel: ModelTrustSummary[];
   /** Mean trustScore across models with parseHealth !== "failed"; 0 if every model failed to parse. */
   overallTrust: number;
+  /**
+   * Set only on a newly computed summary whose rows include at least one eligible claim-origin tie, i.e. when
+   * CLAIM_TIE_ATTRIBUTION_RULE changed how a row was attributed. It names the attribution rule only: it says nothing
+   * about source verification, and value comparisons and every other row kept the original rule. Absent on summaries
+   * with no such row (whose values are exactly the original rule's) and on every record computed before it existed.
+   * Never added on read.
+   */
+  attributionRule?: TrustAttributionRule;
 }
 
 // ─── Common response envelope (query-routing redesign, Milestone 1) ────────
