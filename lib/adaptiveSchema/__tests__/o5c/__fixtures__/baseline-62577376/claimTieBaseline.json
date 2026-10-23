@@ -2145,6 +2145,115 @@
   },
   "rowsSha256": "ebc5bf9f4ce1d009c9211e63312a3f4152e3b547658554ac98620b6d8e475dc2"
  },
+ "duplicate-slot-cells-forming-tie": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0.3,
+     "capped": false
+    },
+    {
+     "modelId": "grok",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0.3,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.5333333333333333
+  },
+  "grounding": "moderate",
+  "trustRank": [
+   "chatgpt",
+   "claude",
+   "grok"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "r",
+     "claimText": "r",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      },
+      {
+       "modelId": "claude",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "claude disputes"
+      },
+      {
+       "modelId": "grok",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "grok disputes"
+      },
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      }
+     ],
+     "agreementScore": 0.5,
+     "certaintyScore": 0.5,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "2f9311bf4edb98830f2a794d9b9c3a56d851ec42963b471a0338ca6db65fe31f"
+ },
  "duplicate-result-slot": {
   "trustSummary": {
    "perModel": [

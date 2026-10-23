@@ -106,6 +106,14 @@ export const FIXTURES: Fixture[] = [
     rows: () => [row("r", "split", [claimCell("chatgpt", "agrees"), claimCell("claude", "disputes"), claimCell("claude", "agrees")])],
     tie: false,
   },
+  {
+    // Two chatgpt cells would make agrees 2 vs disputes 2 if counted as votes: ineligible, so the shipped rule applies.
+    name: "duplicate-slot-cells-forming-tie",
+    schemaId: "generic",
+    results: ok(3),
+    rows: () => [row("r", "split", [claimCell("chatgpt", "agrees"), claimCell("claude", "disputes"), claimCell("grok", "disputes"), claimCell("chatgpt", "agrees")])],
+    tie: false,
+  },
   { name: "duplicate-result-slot", schemaId: "generic", results: () => [okResult("chatgpt"), okResult("claude"), okResult("claude")], rows: () => [claimRow("r", "split", ["agrees", "disputes"])], tie: false },
   { name: "cell-slot-not-in-results", schemaId: "generic", results: () => [okResult("chatgpt")], rows: () => [claimRow("r", "split", ["agrees", "disputes"])], tie: false },
   { name: "unknown-origin-tie", schemaId: "generic", results: ok(2), rows: () => [row("r", "split", [unknownCell("chatgpt", "agrees"), unknownCell("claude", "disputes")])], tie: false },
