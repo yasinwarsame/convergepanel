@@ -22,6 +22,13 @@
  },
  {
   "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": "\"Computed from the stored rows and responses, value comparisons included; these are not claim positions. Stance match: the share of the rows where the slot has a position whose stance is the row's most common one (100% when the slot has no position). On a claim row where two or more stances tie for most common, no slot is credited; any other tie, including on a value, metric, scenario or step comparison, is decided by slot order. Contradictions: split rows where the slot disputes and is not credited, so on a tied claim row every slot that disputes. Items contributed: items in the slot's own response. Sources named: the share of the slot's metric values and factual answer that name a source, which is not checked; 100% when the schema asks for no source.\"",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Order 5 Contract C1: marked trust note for a summary whose attributionRule is claim_tie_no_majority_credit_v1 (selected by that field, never the marker); claim-origin ties credit no slot, every other tie is still slot order"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
   "literal": "\"Key disagreement\"",
   "count": 1,
   "category": "historical-path",

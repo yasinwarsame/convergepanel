@@ -27,6 +27,7 @@ import {
   AdaptiveGateResult,
   AdaptiveSynthesisReport,
   AdaptiveTrustSummary,
+  CLAIM_TIE_ATTRIBUTION_RULE,
   ModelTrustSummary,
 } from "@/lib/adaptiveSchema/types";
 import { TRUST_SCORE_CAP_REASON, TEXT_DEDUP_THRESHOLDS, WHERE_MODELS_AGREE_MAX_ITEMS, CITATION_COVERAGE_DANGER_THRESHOLD, BIAS_EMPTY_REASON_LABELS } from "@/lib/adaptiveSchema/config";
@@ -295,6 +296,19 @@ const PARSE_HEALTH_STYLES: Record<ModelTrustSummary["parseHealth"], string> = {
 export const TRUST_INPUTS_NOTE =
   "Computed from the stored rows and responses, value comparisons included; these are not claim positions. Stance match: the share of the rows where the slot has a position whose stance is the row's most common one (a tie is decided by slot order; 100% when the slot has no position). Contradictions: split rows where the slot disputes. Items contributed: items in the slot's own response. Sources named: the share of the slot's metric values and factual answer that name a source, which is not checked; 100% when the schema asks for no source.";
 
+/**
+ * Order 5 Contract C1: the marked trust note for a summary computed under CLAIM_TIE_ATTRIBUTION_RULE (its
+ * attributionRule field, never the Contract P marker). Claim-origin ties credit no slot; every other tie, value
+ * comparisons included, is still decided by slot order. A summary without the field keeps TRUST_INPUTS_NOTE.
+ */
+export const TRUST_INPUTS_NOTE_CLAIM_TIE =
+  "Computed from the stored rows and responses, value comparisons included; these are not claim positions. Stance match: the share of the rows where the slot has a position whose stance is the row's most common one (100% when the slot has no position). On a claim row where two or more stances tie for most common, no slot is credited; any other tie, including on a value, metric, scenario or step comparison, is decided by slot order. Contradictions: split rows where the slot disputes and is not credited, so on a tied claim row every slot that disputes. Items contributed: items in the slot's own response. Sources named: the share of the slot's metric values and factual answer that name a source, which is not checked; 100% when the schema asks for no source.";
+
+/** The marked trust note for this summary — selected by its own attributionRule, never by the presentation marker. */
+export function trustInputsNoteFor(trustSummary: AdaptiveTrustSummary): string {
+  return trustSummary.attributionRule === CLAIM_TIE_ATTRIBUTION_RULE ? TRUST_INPUTS_NOTE_CLAIM_TIE : TRUST_INPUTS_NOTE;
+}
+
 /** Exported — see UnifiedAnswerCard's export doc above. */
 export function TrustSummaryTable({ trustSummary }: { trustSummary: AdaptiveTrustSummary }) {
   // Order 5 (Contract P, F-2): on a marked report the computed trust inputs are labelled for what they count — every
@@ -310,7 +324,7 @@ export function TrustSummaryTable({ trustSummary }: { trustSummary: AdaptiveTrus
         </span>
       </div>
       <p className="text-xs text-slate-500 mb-2">How well the models behaved — citations, consistency, contradictions — not how sure the panel is about the answer.</p>
-      {marked && <p data-source="computed" className="text-xs text-slate-500 mb-2">{TRUST_INPUTS_NOTE}</p>}
+      {marked && <p data-source="computed" className="text-xs text-slate-500 mb-2">{trustInputsNoteFor(trustSummary)}</p>}
       <div className="overflow-x-auto">
         <table className="w-full text-sm border-collapse">
           <thead>

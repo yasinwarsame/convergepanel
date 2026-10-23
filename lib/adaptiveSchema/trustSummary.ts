@@ -10,11 +10,26 @@
  *
  * Operates on rows already scored by agreementComparators.ts/scoring.ts —
  * this module reads agreementScore/status but never writes them.
+ *
+ * Order 5 Contract C1: on an eligible claim-origin tie (isEligibleClaimTie,
+ * CLAIM_TIE_ATTRIBUTION_RULE in types.ts) no slot is credited and only an
+ * explicit "disputes" on a split row is a contradiction. Every other row keeps
+ * the original rule, including majorityStance's first-seen tie-break.
  */
 
 import "server-only";
 import { ModelId } from "@/lib/types";
-import { AdaptiveModelResult, AdaptiveTrustSummary, AlignedClaim, Metric, ModelTrustSummary, ResultSchema } from "./types";
+import {
+  AdaptiveModelResult,
+  AdaptiveTrustSummary,
+  AlignedClaim,
+  AlignedClaimCell,
+  CLAIM_TIE_ATTRIBUTION_RULE,
+  ClaimCellStance,
+  Metric,
+  ModelTrustSummary,
+  ResultSchema,
+} from "./types";
 import { getTrustWeights, TRUST_SCORE_CAP_BY_HEALTH } from "./config";
 
 export type { AdaptiveTrustSummary, ModelTrustSummary };
@@ -72,7 +87,7 @@ function computeCitationScore(schema: ResultSchema, result: AdaptiveModelResult)
   return sourced / sourceableValues.length;
 }
 
-/** Majority stance among a row's non-null cells (mode; ties broken by first-seen order). */
+/** Majority stance among a row's non-null cells (mode; ties broken by first-seen order). Not used on eligible claim-origin ties. */
 function majorityStance(row: AlignedClaim): string | null {
   const counts = new Map<string, number>();
   for (const cell of row.cells) {
@@ -90,9 +105,47 @@ function majorityStance(row: AlignedClaim): string | null {
   return best;
 }
 
+const CLAIM_CELL_STANCES: ReadonlySet<ClaimCellStance> = new Set<ClaimCellStance>(["agrees", "disputes", "partial", "unclear"]);
+
+/**
+ * A model's own claim (origin "claim", not backfilled) or an inferred claim position (origin "inferred", backfilled),
+ * with no structured field value. Anything else — field-derived (scalar/metric/scenario/step), unknown or
+ * contradictory provenance — is not a claim-origin cell.
+ */
+function isClaimOriginCell(cell: AlignedClaimCell): boolean {
+  if (cell.raw !== undefined) return false;
+  const kind = cell.origin?.kind;
+  if (kind === "claim") return cell.backfilled !== true;
+  if (kind === "inferred") return cell.backfilled === true;
+  return false;
+}
+
+/**
+ * Eligible claim-origin tie (Order 5 Contract C1), fail closed: at least two positions, every one claim-origin with a
+ * known stance, from distinct slots that each name exactly one result, and at least two stances sharing the top count.
+ * Order-free: it depends only on the multiset of stances, never on which cell comes first.
+ */
+function isEligibleClaimTie(row: AlignedClaim, slotResultCounts: ReadonlyMap<ModelId, number>): boolean {
+  const slots = new Set<ModelId>();
+  const counts = new Map<ClaimCellStance, number>();
+  for (const cell of row.cells) {
+    if (!cell) continue;
+    if (!isClaimOriginCell(cell) || !CLAIM_CELL_STANCES.has(cell.stance)) return false;
+    if (slots.has(cell.modelId) || slotResultCounts.get(cell.modelId) !== 1) return false;
+    slots.add(cell.modelId);
+    counts.set(cell.stance, (counts.get(cell.stance) ?? 0) + 1);
+  }
+  if (slots.size < 2) return false;
+  const top = Math.max(...counts.values());
+  let stancesAtTop = 0;
+  for (const count of counts.values()) if (count === top) stancesAtTop += 1;
+  return stancesAtTop >= 2;
+}
+
 function computeConsistencyAndContradiction(
   modelId: ModelId,
-  rows: AlignedClaim[]
+  rows: AlignedClaim[],
+  claimTieRows: ReadonlySet<AlignedClaim>
 ): { majorityAlignment: number; contradictionCount: number; participatedRows: number } {
   let participatedRows = 0;
   let aligned = 0;
@@ -102,6 +155,12 @@ function computeConsistencyAndContradiction(
     const cell = row.cells.find((c) => c?.modelId === modelId);
     if (!cell) continue;
     participatedRows += 1;
+
+    if (claimTieRows.has(row)) {
+      // No majority stance exists, so no slot is credited; only a recorded dispute on a split row is a contradiction.
+      if (row.status === "split" && cell.stance === "disputes") contradictions += 1;
+      continue;
+    }
 
     const dominant = majorityStance(row);
     if (dominant && cell.stance === dominant) {
@@ -125,6 +184,9 @@ export function buildAdaptiveTrustSummary(
   alignedClaims: AlignedClaim[]
 ): AdaptiveTrustSummary {
   const weights = getTrustWeights(schema.id);
+  const slotResultCounts = new Map<ModelId, number>();
+  for (const result of adaptiveResults) slotResultCounts.set(result.modelId, (slotResultCounts.get(result.modelId) ?? 0) + 1);
+  const claimTieRows = new Set(alignedClaims.filter((row) => isEligibleClaimTie(row, slotResultCounts)));
 
   const perModel: ModelTrustSummary[] = adaptiveResults.map((result) => {
     const parseHealth = parseHealthFor(result);
@@ -132,7 +194,8 @@ export function buildAdaptiveTrustSummary(
     const citationScore = computeCitationScore(schema, result);
     const { majorityAlignment, contradictionCount, participatedRows } = computeConsistencyAndContradiction(
       result.modelId,
-      alignedClaims
+      alignedClaims,
+      claimTieRows
     );
     const contradictionRate = participatedRows > 0 ? contradictionCount / participatedRows : 0;
     const contradictionSubScore = 1 - contradictionRate;
@@ -162,5 +225,5 @@ export function buildAdaptiveTrustSummary(
   const scored = perModel.filter((m) => m.parseHealth !== "failed");
   const overallTrust = scored.length > 0 ? scored.reduce((sum, m) => sum + m.trustScore, 0) / scored.length : 0;
 
-  return { perModel, overallTrust };
+  return claimTieRows.size > 0 ? { perModel, overallTrust, attributionRule: CLAIM_TIE_ATTRIBUTION_RULE } : { perModel, overallTrust };
 }

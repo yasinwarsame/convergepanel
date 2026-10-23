@@ -1,0 +1,3591 @@
+{
+ "claim-1-1-agrees-disputes-split": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0.3,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.6499999999999999
+  },
+  "grounding": "strong",
+  "trustRank": [
+   "chatgpt",
+   "claude"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "r",
+     "claimText": "r",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      },
+      {
+       "modelId": "claude",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "claude disputes"
+      }
+     ],
+     "agreementScore": 0.5,
+     "certaintyScore": 0.5,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "bdac96f91cb9ea80e030467f08bed8714579b9b26ad1627363e0af9aebf93964"
+ },
+ "claim-1-1-disputes-agrees-split": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.6499999999999999,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.825
+  },
+  "grounding": "strong",
+  "trustRank": [
+   "chatgpt",
+   "claude"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "r",
+     "claimText": "r",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt disputes"
+      },
+      {
+       "modelId": "claude",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "claude agrees"
+      }
+     ],
+     "agreementScore": 0.5,
+     "certaintyScore": 0.5,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "d3e0ce7526fc7456457e8333e31e3d93c98a1b881368b81cbd760ddff7805cd3"
+ },
+ "claim-three-way-split": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0.3,
+     "capped": false
+    },
+    {
+     "modelId": "grok",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.6499999999999999,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.6499999999999999
+  },
+  "grounding": "strong",
+  "trustRank": [
+   "chatgpt",
+   "grok",
+   "claude"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "r",
+     "claimText": "r",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      },
+      {
+       "modelId": "claude",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "claude disputes"
+      },
+      {
+       "modelId": "grok",
+       "stance": "partial",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "grok partial"
+      }
+     ],
+     "agreementScore": 0.5,
+     "certaintyScore": 0.5,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "022b0e08eca50e0ffa9c4a0201448283772d00bbf3311a1445253a0a2ad00384"
+ },
+ "claim-2-2-agrees-disputes-split": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0.3,
+     "capped": false
+    },
+    {
+     "modelId": "grok",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "perplexity",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0.3,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.6499999999999999
+  },
+  "grounding": "strong",
+  "trustRank": [
+   "chatgpt",
+   "grok",
+   "claude",
+   "perplexity"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "r",
+     "claimText": "r",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      },
+      {
+       "modelId": "claude",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "claude disputes"
+      },
+      {
+       "modelId": "grok",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "grok agrees"
+      },
+      {
+       "modelId": "perplexity",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "perplexity disputes"
+      }
+     ],
+     "agreementScore": 0.5,
+     "certaintyScore": 0.5,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "d15f4f1fe7a686de61b1a2287fa8c928a94bc21abf4be1e83bfea575fcf0ce6b"
+ },
+ "claim-1-1-partial-disputes-split": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 1,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0.15,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.575
+  },
+  "grounding": "moderate",
+  "trustRank": [
+   "chatgpt",
+   "claude"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "r",
+     "claimText": "r",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "partial",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt partial"
+      },
+      {
+       "modelId": "claude",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "claude disputes"
+      }
+     ],
+     "agreementScore": 0.5,
+     "certaintyScore": 0.5,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "32f2f2d07271a2f0515b31a997f0c724094ba60eab185c51c802db705487db16"
+ },
+ "claim-1-1-agrees-unclear-majority": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.6499999999999999,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.825
+  },
+  "grounding": "strong",
+  "trustRank": [
+   "chatgpt",
+   "claude"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 0,
+   "loadBearingClaims": [
+    {
+     "id": "r",
+     "claimText": "r",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      },
+      {
+       "modelId": "claude",
+       "stance": "unclear",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "claude unclear"
+      }
+     ],
+     "agreementScore": 1,
+     "certaintyScore": 0.5,
+     "status": "limited_coverage"
+    }
+   ]
+  },
+  "rowsSha256": "6268128d647f1880b9d34737aad8900c341df637048fca26919be00f077a2acf"
+ },
+ "claim-2-2-agrees-partial-majority": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.6499999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "grok",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "perplexity",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.6499999999999999,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.825
+  },
+  "grounding": "strong",
+  "trustRank": [
+   "chatgpt",
+   "grok",
+   "claude",
+   "perplexity"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 0,
+   "loadBearingClaims": [
+    {
+     "id": "r",
+     "claimText": "r",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      },
+      {
+       "modelId": "claude",
+       "stance": "partial",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "claude partial"
+      },
+      {
+       "modelId": "grok",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "grok agrees"
+      },
+      {
+       "modelId": "perplexity",
+       "stance": "partial",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "perplexity partial"
+      }
+     ],
+     "agreementScore": 1,
+     "certaintyScore": 0.5,
+     "status": "majority"
+    }
+   ]
+  },
+  "rowsSha256": "9c8360b3540331c3a76422520cfa1e8150cbe8ae617f519229d4f8a14eb84304"
+ },
+ "claim-nonsplit-tie-with-dispute": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "grok",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.6499999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "perplexity",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.6499999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "gemini",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.6499999999999999,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.7899999999999998
+  },
+  "grounding": "strong",
+  "trustRank": [
+   "chatgpt",
+   "claude",
+   "grok",
+   "perplexity",
+   "gemini"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 0,
+   "loadBearingClaims": [
+    {
+     "id": "r",
+     "claimText": "r",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      },
+      {
+       "modelId": "claude",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "claude agrees"
+      },
+      {
+       "modelId": "grok",
+       "stance": "partial",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "grok partial"
+      },
+      {
+       "modelId": "perplexity",
+       "stance": "partial",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "perplexity partial"
+      },
+      {
+       "modelId": "gemini",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "gemini disputes"
+      }
+     ],
+     "agreementScore": 1,
+     "certaintyScore": 0.5,
+     "status": "majority"
+    }
+   ]
+  },
+  "rowsSha256": "b2ec86abed3a93ee043adb2b77785025ba531a91fc5c730480f62a3fd96f187d"
+ },
+ "claim-untied-3-1-split": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "grok",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0.3,
+     "capped": false
+    },
+    {
+     "modelId": "perplexity",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.825
+  },
+  "grounding": "strong",
+  "trustRank": [
+   "chatgpt",
+   "claude",
+   "perplexity",
+   "grok"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "r",
+     "claimText": "r",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      },
+      {
+       "modelId": "claude",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "claude agrees"
+      },
+      {
+       "modelId": "grok",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "grok disputes"
+      },
+      {
+       "modelId": "perplexity",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "perplexity agrees"
+      }
+     ],
+     "agreementScore": 0.5,
+     "certaintyScore": 0.5,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "e5e8315b8e5f5df85d4e4d607732bd4df1231f2dcba55017b29e2da367613d32"
+ },
+ "claim-untied-disputes-mode-split": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.6499999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "grok",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "perplexity",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.9125
+  },
+  "grounding": "strong",
+  "trustRank": [
+   "claude",
+   "grok",
+   "perplexity",
+   "chatgpt"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "r",
+     "claimText": "r",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      },
+      {
+       "modelId": "claude",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "claude disputes"
+      },
+      {
+       "modelId": "grok",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "grok disputes"
+      },
+      {
+       "modelId": "perplexity",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "perplexity disputes"
+      }
+     ],
+     "agreementScore": 0.5,
+     "certaintyScore": 0.5,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "909785e6cec6c99c024bd1f925a1c23a89cf9d4fbc5c5b2972ce238545b1c5c1"
+ },
+ "claim-single-cell": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.9999999999999999
+  },
+  "grounding": "strong",
+  "trustRank": [
+   "chatgpt",
+   "claude"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 0,
+   "loadBearingClaims": [
+    {
+     "id": "r",
+     "claimText": "r",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt disputes"
+      },
+      null
+     ],
+     "agreementScore": 1,
+     "certaintyScore": 0.5,
+     "status": "single_source"
+    }
+   ]
+  },
+  "rowsSha256": "938206560dbf824ddd186732774fca9b5f4a1e0032ad370cf80acf4902b1b462"
+ },
+ "claim-inferred-mixed-tie": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0.3,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.6499999999999999
+  },
+  "grounding": "strong",
+  "trustRank": [
+   "chatgpt",
+   "claude"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "r",
+     "claimText": "r",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      },
+      {
+       "modelId": "claude",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": null,
+       "origin": {
+        "kind": "inferred"
+       },
+       "excerpt": "claude inferred disputes",
+       "backfilled": true
+      }
+     ],
+     "agreementScore": 0.5,
+     "certaintyScore": 0.5,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "1300133b7747a0cad9f9b809574bca3d1d211e82d9ed5d781c312aee3959a9cc"
+ },
+ "scalar-2-2-tie": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 0,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.5,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 0,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0,
+     "capped": false
+    },
+    {
+     "modelId": "grok",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 0,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.5,
+     "capped": false
+    },
+    {
+     "modelId": "perplexity",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 0,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.25
+  },
+  "grounding": "weak",
+  "trustRank": [
+   "chatgpt",
+   "grok",
+   "claude",
+   "perplexity"
+  ],
+  "certainty": 0,
+  "gate": {
+   "status": "fail",
+   "runCertainty": 0,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "answer",
+     "claimText": "Paris",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "scalar"
+       },
+       "excerpt": "Paris"
+      },
+      {
+       "modelId": "claude",
+       "stance": "disputes",
+       "rawStance": "disputes",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "scalar"
+       },
+       "excerpt": "Lyon"
+      },
+      {
+       "modelId": "grok",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "scalar"
+       },
+       "excerpt": "paris"
+      },
+      {
+       "modelId": "perplexity",
+       "stance": "disputes",
+       "rawStance": "disputes",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "scalar"
+       },
+       "excerpt": "Lyon"
+      }
+     ],
+     "agreementScore": 0,
+     "certaintyScore": 0,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "fc0feb3434a84531e74e8708f758a815c5db030610e7baca47bc5f2be239e768"
+ },
+ "scalar-1-1-tie": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 0,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.5,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 0,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.25
+  },
+  "grounding": "weak",
+  "trustRank": [
+   "chatgpt",
+   "claude"
+  ],
+  "certainty": 0,
+  "gate": {
+   "status": "fail",
+   "runCertainty": 0,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "answer",
+     "claimText": "Paris",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "scalar"
+       },
+       "excerpt": "Paris"
+      },
+      {
+       "modelId": "claude",
+       "stance": "disputes",
+       "rawStance": "disputes",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "scalar"
+       },
+       "excerpt": "Lyon"
+      }
+     ],
+     "agreementScore": 0,
+     "certaintyScore": 0,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "45cfc5bab41f7b3d113a1b4222fa60d64223794f73fd5d1843a3f21920422d5e"
+ },
+ "scalar-3-2-untied": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 0,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.5,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 0,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0,
+     "capped": false
+    },
+    {
+     "modelId": "grok",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 0,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.5,
+     "capped": false
+    },
+    {
+     "modelId": "perplexity",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 0,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0,
+     "capped": false
+    },
+    {
+     "modelId": "gemini",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 0,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.5,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.3
+  },
+  "grounding": "weak",
+  "trustRank": [
+   "chatgpt",
+   "grok",
+   "gemini",
+   "claude",
+   "perplexity"
+  ],
+  "certainty": 0,
+  "gate": {
+   "status": "fail",
+   "runCertainty": 0,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "answer",
+     "claimText": "Paris",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "scalar"
+       },
+       "excerpt": "Paris"
+      },
+      {
+       "modelId": "claude",
+       "stance": "disputes",
+       "rawStance": "disputes",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "scalar"
+       },
+       "excerpt": "Lyon"
+      },
+      {
+       "modelId": "grok",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "scalar"
+       },
+       "excerpt": "Paris"
+      },
+      {
+       "modelId": "perplexity",
+       "stance": "disputes",
+       "rawStance": "disputes",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "scalar"
+       },
+       "excerpt": "Lyon"
+      },
+      {
+       "modelId": "gemini",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "scalar"
+       },
+       "excerpt": "Paris"
+      }
+     ],
+     "agreementScore": 0,
+     "certaintyScore": 0,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "3a12fb4ae5b5583cf162d4f81ad308d321799e7578ea24a8746fb9e269de9eba"
+ },
+ "scalar-2-1-1-c1t2-class": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 0,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.5,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 0,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.2,
+     "capped": false
+    },
+    {
+     "modelId": "grok",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 0,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.5,
+     "capped": false
+    },
+    {
+     "modelId": "perplexity",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 0,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.2,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.35
+  },
+  "grounding": "moderate",
+  "trustRank": [
+   "chatgpt",
+   "grok",
+   "claude",
+   "perplexity"
+  ],
+  "certainty": 0,
+  "gate": {
+   "status": "fail",
+   "runCertainty": 0,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "answer",
+     "claimText": "Paris",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "disputes",
+       "rawStance": "disputes",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "scalar"
+       },
+       "excerpt": "Lyon"
+      },
+      {
+       "modelId": "claude",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "scalar"
+       },
+       "excerpt": "Paris"
+      },
+      {
+       "modelId": "grok",
+       "stance": "disputes",
+       "rawStance": "disputes",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "scalar"
+       },
+       "excerpt": "Rome"
+      },
+      {
+       "modelId": "perplexity",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "scalar"
+       },
+       "excerpt": "Paris"
+      }
+     ],
+     "agreementScore": 0,
+     "certaintyScore": 0,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "250e21513a1edb96b065dcb3239a21dbb4125c6cfaeedfaeb0aaf44d2ecb9a0c"
+ },
+ "metric-2-2-tie": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 1,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0.2,
+     "capped": false
+    },
+    {
+     "modelId": "grok",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 1,
+     "capped": false
+    },
+    {
+     "modelId": "perplexity",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0.2,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.6000000000000001
+  },
+  "grounding": "strong",
+  "trustRank": [
+   "chatgpt",
+   "grok",
+   "claude",
+   "perplexity"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "m",
+     "claimText": "m",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "metric"
+       },
+       "excerpt": "chatgpt metric"
+      },
+      {
+       "modelId": "claude",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "metric"
+       },
+       "excerpt": "claude metric"
+      },
+      {
+       "modelId": "grok",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "metric"
+       },
+       "excerpt": "grok metric"
+      },
+      {
+       "modelId": "perplexity",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "metric"
+       },
+       "excerpt": "perplexity metric"
+      }
+     ],
+     "agreementScore": 0.5,
+     "certaintyScore": 0.5,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "6176b7cd75c0e9137e53fdcef159e836511ab6a53314e6dbff85af48aa1f8f17"
+ },
+ "scenario-1-1-tie": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 1,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0.2,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.6
+  },
+  "grounding": "strong",
+  "trustRank": [
+   "chatgpt",
+   "claude"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "s",
+     "claimText": "s",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "scenario"
+       },
+       "excerpt": "chatgpt scenario"
+      },
+      {
+       "modelId": "claude",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "scenario"
+       },
+       "excerpt": "claude scenario"
+      }
+     ],
+     "agreementScore": 0.5,
+     "certaintyScore": 0.5,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "4f8ac2904bafe806b94776efeb66592bc4027a94f730518c8a9989ba351e3a2a"
+ },
+ "step-1-1-tie": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 1,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0.15,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.575
+  },
+  "grounding": "moderate",
+  "trustRank": [
+   "chatgpt",
+   "claude"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "st",
+     "claimText": "st",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "step"
+       },
+       "excerpt": "chatgpt step"
+      },
+      {
+       "modelId": "claude",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "step"
+       },
+       "excerpt": "claude step"
+      }
+     ],
+     "agreementScore": 0.5,
+     "certaintyScore": 0.5,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "dc3fde5a897de72213d0a2ff62d7e78c06d2a2cfdd030c0afc5a5eda845c37dd"
+ },
+ "missing-and-failed-slots": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0.3,
+     "capped": false
+    },
+    {
+     "modelId": "grok",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 0,
+     "contradictionCount": 0,
+     "parseHealth": "failed",
+     "trustScore": 0,
+     "capped": true
+    },
+    {
+     "modelId": "perplexity",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.7666666666666666
+  },
+  "grounding": "strong",
+  "trustRank": [
+   "chatgpt",
+   "perplexity",
+   "claude",
+   "grok"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "r",
+     "claimText": "r",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      },
+      {
+       "modelId": "claude",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "claude disputes"
+      },
+      null,
+      null
+     ],
+     "agreementScore": 0.5,
+     "certaintyScore": 0.5,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "7558e2c2aec1c0332b4205b2225de15f0c8332651e9c435e0167fc07c45a9c8b"
+ },
+ "substituted-slot": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0.3,
+     "capped": false
+    },
+    {
+     "modelId": "grok",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.6499999999999999,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.6499999999999999
+  },
+  "grounding": "strong",
+  "trustRank": [
+   "chatgpt",
+   "grok",
+   "claude"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "r",
+     "claimText": "r",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      },
+      {
+       "modelId": "claude",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "claude disputes"
+      },
+      {
+       "modelId": "grok",
+       "stance": "partial",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "grok partial"
+      }
+     ],
+     "agreementScore": 0.5,
+     "certaintyScore": 0.5,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "022b0e08eca50e0ffa9c4a0201448283772d00bbf3311a1445253a0a2ad00384"
+ },
+ "duplicate-slot-cells": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0.3,
+     "capped": false
+    },
+    {
+     "modelId": "grok",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.7666666666666666
+  },
+  "grounding": "strong",
+  "trustRank": [
+   "chatgpt",
+   "grok",
+   "claude"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "r",
+     "claimText": "r",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      },
+      {
+       "modelId": "claude",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "claude disputes"
+      },
+      {
+       "modelId": "claude",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "claude agrees"
+      }
+     ],
+     "agreementScore": 0.5,
+     "certaintyScore": 0.5,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "ebc5bf9f4ce1d009c9211e63312a3f4152e3b547658554ac98620b6d8e475dc2"
+ },
+ "duplicate-slot-cells-forming-tie": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0.3,
+     "capped": false
+    },
+    {
+     "modelId": "grok",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0.3,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.5333333333333333
+  },
+  "grounding": "moderate",
+  "trustRank": [
+   "chatgpt",
+   "claude",
+   "grok"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "r",
+     "claimText": "r",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      },
+      {
+       "modelId": "claude",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "claude disputes"
+      },
+      {
+       "modelId": "grok",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "grok disputes"
+      },
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      }
+     ],
+     "agreementScore": 0.5,
+     "certaintyScore": 0.5,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "2f9311bf4edb98830f2a794d9b9c3a56d851ec42963b471a0338ca6db65fe31f"
+ },
+ "duplicate-result-slot": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0.3,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0.3,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.5333333333333333
+  },
+  "grounding": "moderate",
+  "trustRank": [
+   "chatgpt",
+   "claude",
+   "claude"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "r",
+     "claimText": "r",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      },
+      {
+       "modelId": "claude",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "claude disputes"
+      }
+     ],
+     "agreementScore": 0.5,
+     "certaintyScore": 0.5,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "bdac96f91cb9ea80e030467f08bed8714579b9b26ad1627363e0af9aebf93964"
+ },
+ "cell-slot-not-in-results": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.9999999999999999
+  },
+  "grounding": "strong",
+  "trustRank": [
+   "chatgpt"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "r",
+     "claimText": "r",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      },
+      {
+       "modelId": "claude",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "claude disputes"
+      }
+     ],
+     "agreementScore": 0.5,
+     "certaintyScore": 0.5,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "bdac96f91cb9ea80e030467f08bed8714579b9b26ad1627363e0af9aebf93964"
+ },
+ "unknown-origin-tie": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0.3,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.6499999999999999
+  },
+  "grounding": "strong",
+  "trustRank": [
+   "chatgpt",
+   "claude"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "r",
+     "claimText": "r",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "excerpt": "chatgpt legacy"
+      },
+      {
+       "modelId": "claude",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "excerpt": "claude legacy"
+      }
+     ],
+     "agreementScore": 0.5,
+     "certaintyScore": 0.5,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "999e4552f2c9f3440950677295db16d096c231aa34f3ceb1f3cc35460a323d7b"
+ },
+ "mixed-origin-tie": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0.3,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.6499999999999999
+  },
+  "grounding": "strong",
+  "trustRank": [
+   "chatgpt",
+   "claude"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "r",
+     "claimText": "r",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      },
+      {
+       "modelId": "claude",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "metric"
+       },
+       "excerpt": "claude metric"
+      }
+     ],
+     "agreementScore": 0.5,
+     "certaintyScore": 0.5,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "7349116e6096c97515ceb44cf6cb9c5dde6084795956f71fa73555f3b42ddaeb"
+ },
+ "claim-origin-but-backfilled": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0.3,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.6499999999999999
+  },
+  "grounding": "strong",
+  "trustRank": [
+   "chatgpt",
+   "claude"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "r",
+     "claimText": "r",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      },
+      {
+       "modelId": "claude",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "claude disputes",
+       "backfilled": true
+      }
+     ],
+     "agreementScore": 0.5,
+     "certaintyScore": 0.5,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "d97548e752ef07ce3fee5a946c9d0b4b094363cae19336f8d4be87c405a24143"
+ },
+ "inferred-without-backfill-flag": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0.3,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.6499999999999999
+  },
+  "grounding": "strong",
+  "trustRank": [
+   "chatgpt",
+   "claude"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "r",
+     "claimText": "r",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      },
+      {
+       "modelId": "claude",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": null,
+       "origin": {
+        "kind": "inferred"
+       },
+       "excerpt": "claude inferred disputes"
+      }
+     ],
+     "agreementScore": 0.5,
+     "certaintyScore": 0.5,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "e0f5f34848e9bb7a39e5eedd8916d7305f0dc2f48fd97c895f222dbc8dd55086"
+ },
+ "claim-cell-with-raw-value": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0.3,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.6499999999999999
+  },
+  "grounding": "strong",
+  "trustRank": [
+   "chatgpt",
+   "claude"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "r",
+     "claimText": "r",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      },
+      {
+       "modelId": "claude",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "claude disputes",
+       "raw": {
+        "label": "x",
+        "value": 1
+       }
+      }
+     ],
+     "agreementScore": 0.5,
+     "certaintyScore": 0.5,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "06f1f856140e8bb5fb7b20379633bb85508af0d192a8119fe068b49579d6f7f4"
+ },
+ "unknown-stance-value": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.6499999999999999,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.825
+  },
+  "grounding": "strong",
+  "trustRank": [
+   "chatgpt",
+   "claude"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "r",
+     "claimText": "r",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      },
+      {
+       "modelId": "claude",
+       "stance": "rejects",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "claude disputes"
+      }
+     ],
+     "agreementScore": 0.5,
+     "certaintyScore": 0.5,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "b3479fd3fd00604c9776037ded45245a41efd6a407ee1a29937ca8ecd055ab2d"
+ },
+ "degraded-cap-transition": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "degraded",
+     "trustScore": 0.75,
+     "capped": true
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0.3,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.525
+  },
+  "grounding": "moderate",
+  "trustRank": [
+   "chatgpt",
+   "claude"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "r",
+     "claimText": "r",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      },
+      {
+       "modelId": "claude",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "claude disputes"
+      }
+     ],
+     "agreementScore": 0.5,
+     "certaintyScore": 0.5,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "bdac96f91cb9ea80e030467f08bed8714579b9b26ad1627363e0af9aebf93964"
+ },
+ "degraded-cap-still-binding": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "degraded",
+     "trustScore": 0.75,
+     "capped": true
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0.75,
+     "citationScore": 1,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0.825,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.7875
+  },
+  "grounding": "strong",
+  "trustRank": [
+   "claude",
+   "chatgpt"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 0,
+   "loadBearingClaims": [
+    {
+     "id": "a",
+     "claimText": "a",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      },
+      {
+       "modelId": "claude",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "claude agrees"
+      }
+     ],
+     "agreementScore": 1,
+     "certaintyScore": 0.5,
+     "status": "consensus"
+    },
+    {
+     "id": "b",
+     "claimText": "b",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      },
+      {
+       "modelId": "claude",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "claude agrees"
+      }
+     ],
+     "agreementScore": 1,
+     "certaintyScore": 0.5,
+     "status": "consensus"
+    },
+    {
+     "id": "c",
+     "claimText": "c",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      },
+      {
+       "modelId": "claude",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "claude agrees"
+      }
+     ],
+     "agreementScore": 1,
+     "certaintyScore": 0.5,
+     "status": "consensus"
+    }
+   ]
+  },
+  "rowsSha256": "d4968f06b725cbf409324aba6f4406a82858a34765e02a735e8a5360b44d7312"
+ },
+ "run-964": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 1,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0.15,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.575
+  },
+  "grounding": "moderate",
+  "trustRank": [
+   "chatgpt",
+   "claude"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "c1",
+     "claimText": "c1",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "partial",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt partial"
+      },
+      {
+       "modelId": "claude",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "claude disputes"
+      }
+     ],
+     "agreementScore": 0.5,
+     "certaintyScore": 0.5,
+     "status": "split"
+    },
+    {
+     "id": "c0",
+     "claimText": "c0",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      },
+      null
+     ],
+     "agreementScore": 1,
+     "certaintyScore": 0.5,
+     "status": "single_source"
+    },
+    {
+     "id": "step-1",
+     "claimText": "step-1",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "unclear",
+       "rawStance": "asserts",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "step"
+       },
+       "excerpt": "chatgpt step"
+      },
+      null
+     ],
+     "agreementScore": 1,
+     "certaintyScore": 0.5,
+     "status": "single_source"
+    }
+   ]
+  },
+  "rowsSha256": "3ad819656df392a7ede6e7170aaf630cfd0c2e2e178a72a768e3ea55316492f0"
+ },
+ "run-964-reversed": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 1,
+     "capped": false
+    },
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 0.6666666666666666,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.8166666666666667,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.9083333333333333
+  },
+  "grounding": "strong",
+  "trustRank": [
+   "claude",
+   "chatgpt"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "caution",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "c1",
+     "claimText": "c1",
+     "cells": [
+      {
+       "modelId": "claude",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "claude disputes"
+      },
+      {
+       "modelId": "chatgpt",
+       "stance": "partial",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt partial"
+      }
+     ],
+     "agreementScore": 0.5,
+     "certaintyScore": 0.5,
+     "status": "split"
+    },
+    {
+     "id": "c0",
+     "claimText": "c0",
+     "cells": [
+      null,
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      }
+     ],
+     "agreementScore": 1,
+     "certaintyScore": 0.5,
+     "status": "single_source"
+    },
+    {
+     "id": "step-1",
+     "claimText": "step-1",
+     "cells": [
+      null,
+      {
+       "modelId": "chatgpt",
+       "stance": "unclear",
+       "rawStance": "asserts",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "step"
+       },
+       "excerpt": "chatgpt step"
+      }
+     ],
+     "agreementScore": 1,
+     "certaintyScore": 0.5,
+     "status": "single_source"
+    }
+   ]
+  },
+  "rowsSha256": "f4cf2228d5b3ad1341b599d36f831f0a182390ac09f84fc1bab21f93baccfa7e"
+ },
+ "run-3811": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 1,
+     "capped": false
+    },
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 1,
+     "parseHealth": "ok",
+     "trustScore": 0.15,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.575
+  },
+  "grounding": "moderate",
+  "trustRank": [
+   "claude",
+   "chatgpt"
+  ],
+  "certainty": 0,
+  "gate": {
+   "status": "fail",
+   "runCertainty": 0,
+   "loadBearingSplitCount": 1,
+   "loadBearingClaims": [
+    {
+     "id": "answer",
+     "claimText": "Turin",
+     "cells": [
+      {
+       "modelId": "claude",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "scalar"
+       },
+       "excerpt": "Turin"
+      },
+      {
+       "modelId": "chatgpt",
+       "stance": "disputes",
+       "rawStance": "disputes",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "scalar"
+       },
+       "excerpt": "rome"
+      }
+     ],
+     "agreementScore": 0,
+     "certaintyScore": 0,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "ddc590b5fb23ebe783133c0debfb481165bf1db761b675c43c8db4fb1a3b2840"
+ },
+ "multi-row-mixed-run": {
+  "trustSummary": {
+   "perModel": [
+    {
+     "modelId": "chatgpt",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "claude",
+     "claimsContributed": 0,
+     "majorityAlignment": 0.25,
+     "citationScore": 1,
+     "contradictionCount": 2,
+     "parseHealth": "ok",
+     "trustScore": 0.5625,
+     "capped": false
+    },
+    {
+     "modelId": "grok",
+     "claimsContributed": 0,
+     "majorityAlignment": 1,
+     "citationScore": 1,
+     "contradictionCount": 0,
+     "parseHealth": "ok",
+     "trustScore": 0.9999999999999999,
+     "capped": false
+    },
+    {
+     "modelId": "perplexity",
+     "claimsContributed": 0,
+     "majorityAlignment": 0,
+     "citationScore": 1,
+     "contradictionCount": 3,
+     "parseHealth": "ok",
+     "trustScore": 0.3,
+     "capped": false
+    }
+   ],
+   "overallTrust": 0.715625
+  },
+  "grounding": "strong",
+  "trustRank": [
+   "chatgpt",
+   "grok",
+   "claude",
+   "perplexity"
+  ],
+  "certainty": 0.5,
+  "gate": {
+   "status": "fail",
+   "runCertainty": 0.5,
+   "loadBearingSplitCount": 3,
+   "loadBearingClaims": [
+    {
+     "id": "t1",
+     "claimText": "t1",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      },
+      {
+       "modelId": "claude",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "claude disputes"
+      },
+      {
+       "modelId": "grok",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "grok agrees"
+      },
+      {
+       "modelId": "perplexity",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "perplexity disputes"
+      }
+     ],
+     "agreementScore": 0.5,
+     "certaintyScore": 0.5,
+     "status": "split"
+    },
+    {
+     "id": "u1",
+     "claimText": "u1",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "chatgpt agrees"
+      },
+      {
+       "modelId": "claude",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "claude agrees"
+      },
+      {
+       "modelId": "grok",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "grok agrees"
+      },
+      {
+       "modelId": "perplexity",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": "settled",
+       "origin": {
+        "kind": "claim",
+        "field": "keyClaims",
+        "fieldClass": "unclassified"
+       },
+       "excerpt": "perplexity disputes"
+      }
+     ],
+     "agreementScore": 0.5,
+     "certaintyScore": 0.5,
+     "status": "split"
+    },
+    {
+     "id": "m1",
+     "claimText": "m1",
+     "cells": [
+      {
+       "modelId": "chatgpt",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "metric"
+       },
+       "excerpt": "chatgpt metric"
+      },
+      {
+       "modelId": "claude",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "metric"
+       },
+       "excerpt": "claude metric"
+      },
+      {
+       "modelId": "grok",
+       "stance": "agrees",
+       "rawStance": "asserts",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "metric"
+       },
+       "excerpt": "grok metric"
+      },
+      {
+       "modelId": "perplexity",
+       "stance": "disputes",
+       "rawStance": "asserts",
+       "confidence": null,
+       "origin": {
+        "kind": "field_derived",
+        "fieldType": "metric"
+       },
+       "excerpt": "perplexity metric"
+      }
+     ],
+     "agreementScore": 0.5,
+     "certaintyScore": 0.5,
+     "status": "split"
+    }
+   ]
+  },
+  "rowsSha256": "16d084d89d434a9fc7fbb2aec117fa0c0a0e0983012c3626dc0b6a13e22f01ec"
+ }
+}
