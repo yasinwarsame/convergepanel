@@ -2182,5 +2182,12 @@
   "count": 1,
   "category": "historical-path",
   "rule": "research memo original methodology"
+ },
+ {
+  "file": "lib/adaptiveSchema/dsProvenanceViewMin.ts",
+  "literal": "\"Options were grouped by text similarity. Different options with similar wording (for example 3.5% vs 35%, or Approve vs Disapprove) can be merged; agreement on an option is not established.\"",
+  "count": 1,
+  "category": "non-user",
+  "rule": "S-1a-min provenance builder constant (option_clustering_unverified, U-02(1)); not rendered by any consumer in S-1a-min; exact owner-approved known-defect text, never reworded"
  }
 ]
