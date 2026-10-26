@@ -96,8 +96,20 @@ jest.mock("@/lib/workspaces/workspaceResolver", () => {
 });
 
 const mockLoggerWarn = jest.fn();
+// Every logger level is recorded with its full structured payload, so the
+// pre-authorization-oracle tests below can compare what an unauthorized
+// request writes to the server log, not just the message text.
+const mockLoggerCalls: Array<[string, ...unknown[]]> = [];
 jest.mock("@/lib/logger", () => ({
-  logger: { warn: (...args: unknown[]) => mockLoggerWarn(...args), info: jest.fn(), error: jest.fn(), debug: jest.fn() },
+  logger: {
+    warn: (...args: unknown[]) => {
+      mockLoggerCalls.push(["warn", ...args]);
+      mockLoggerWarn(...args);
+    },
+    info: (...args: unknown[]) => mockLoggerCalls.push(["info", ...args]),
+    error: (...args: unknown[]) => mockLoggerCalls.push(["error", ...args]),
+    debug: (...args: unknown[]) => mockLoggerCalls.push(["debug", ...args]),
+  },
 }));
 
 import { NextRequest } from "next/server";
@@ -892,11 +904,14 @@ describe("GET /api/user/runs/[runId]/governance — pre-authorization oracle (re
         workspace: mockedResolveWorkspace.mock.calls.length,
       },
       warns: mockLoggerWarn.mock.calls.map((c) => c[0]),
+      // Every server-log call at every level, with its full structured payload.
+      logs: mockLoggerCalls.map((c) => [...c]),
     };
   }
 
   function resetCallCounts() {
     jest.clearAllMocks();
+    mockLoggerCalls.length = 0;
     mockedGetPanel.mockResolvedValue({ status: "absent" });
     mockedGetVote.mockResolvedValue({ status: "absent" });
     mockedLoadUserAndTeam.mockResolvedValue({ user: { email: "x@example.com" }, team: null });
@@ -929,9 +944,17 @@ describe("GET /api/user/runs/[runId]/governance — pre-authorization oracle (re
           workspace: kind === "personal_workspace" ? 1 : 0,
         });
         for (const [state, o] of Object.entries(seen)) {
+          // Includes `logs`: every server-log call, at every level, with its full
+          // payload, must be identical across record states.
           expect({ state, ...o }).toEqual({ state, ...reference });
           // An unauthorized caller can never trigger the unreadable-record warning.
           expect(o.warns).not.toContain("[user/runs/governance] Unreadable governanceRecord");
+          // Nor put anything about the governance record into any log payload:
+          // no parser outcome, no review status, no record content.
+          const logged = JSON.stringify(o.logs);
+          for (const token of ["malformed", "unsupported_version", "absent", "unreviewed", "approved", "garbage", "governanceRecord", "humanReview"]) {
+            expect({ state, token, found: logged.includes(token) }).toEqual({ state, token, found: false });
+          }
         }
       });
     }
