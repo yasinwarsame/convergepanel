@@ -283,6 +283,22 @@ describe("scope and viewer context", () => {
     }
   });
 
+  it("a VALID adaptive output of another schema (parser ok) → input_not_decision_support, on every surface", () => {
+    const ds = STD_INPUT(SEM.contextCatalog[0]).publicAdaptiveOutput as Record<string, unknown>;
+    const ranked = {
+      version: 1,
+      schemaId: "ranked_enumeration",
+      answerShape: "ranked_list",
+      classification: ds.classification,
+      meta: ds.meta,
+      generatedAt: ds.generatedAt,
+      result: { items: [], lowConfidenceItems: [], totalModels: 3 },
+    };
+    for (const ctx of SEM.contextCatalog) {
+      expect(buildDsProvenanceViewMin({ ...STD_INPUT(ctx), publicAdaptiveOutput: ranked })).toEqual({ kind: "not_built", version: 1, reason: "input_not_decision_support" });
+    }
+  });
+
   it("not_built carries no run data", () => {
     const v = buildDsProvenanceViewMin({ ...STD_INPUT({ surfaceId: "P3" }) });
     expect(Object.keys(v).sort()).toEqual(["kind", "reason", "version"]);
