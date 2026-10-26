@@ -165,8 +165,19 @@ function present(obj: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(obj, key) && obj[key] !== undefined;
 }
 
+/** Own-property read only: an inherited (e.g. prototype-polluted) key is never input. */
+function own(obj: Record<string, unknown>, key: string): unknown {
+  return Object.prototype.hasOwnProperty.call(obj, key) ? obj[key] : undefined;
+}
+
+/** A count printable in plain base-10 digits (D-2): a safe, non-negative integer; -0 is normalised to 0. */
 function nonNegativeInteger(value: unknown): number | Unknown {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : "unknown";
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? (value === 0 ? 0 : value) : "unknown";
+}
+
+/** Maps every index, holes included (a hole reads as `undefined`), so sparse input never yields a sparse output. */
+function mapDense<T>(arr: unknown[], fn: (value: unknown) => T): T[] {
+  return Array.from({ length: arr.length }, (_, i) => fn(Object.prototype.hasOwnProperty.call(arr, i) ? arr[i] : undefined));
 }
 
 function copiedString(value: unknown): string | Unknown {
@@ -190,27 +201,37 @@ function exactKeys(obj: Record<string, unknown>, keys: string[]): boolean {
   return own.length === keys.length && keys.every((k) => Object.prototype.hasOwnProperty.call(obj, k));
 }
 
-function validContext(ctx: Record<string, unknown>): DsSurfaceRequestMin | null {
-  switch (ctx.surfaceId) {
+/**
+ * Validates the exact context shape and returns a FRESH literal built from values read once, so nothing
+ * the caller's object does after validation (getters, later mutation) can change what the builder uses.
+ */
+function validContext(ctx: Record<string, unknown>, surfaceId: string): DsSurfaceRequestMin | null {
+  switch (surfaceId) {
     case "P1": {
       if (!exactKeys(ctx, ["surfaceId", "path", "role", "mayReadDecisionContent"])) return null;
-      const { path, role, mayReadDecisionContent: m } = ctx;
-      if (path === "personal" && role === "owner" && m === true) return ctx as DsSurfaceRequestMin;
-      if (path === "personal" && role === "personal_reviewer" && typeof m === "boolean") return ctx as DsSurfaceRequestMin;
-      if (path === "team_bound" && (role === "team_member" || role === "team_reviewer") && m === true) return ctx as DsSurfaceRequestMin;
+      const path = own(ctx, "path"), role = own(ctx, "role"), m = own(ctx, "mayReadDecisionContent");
+      if (path === "personal" && role === "owner" && m === true) return { surfaceId: "P1", path: "personal", role: "owner", mayReadDecisionContent: true };
+      if (path === "personal" && role === "personal_reviewer" && typeof m === "boolean") return { surfaceId: "P1", path: "personal", role: "personal_reviewer", mayReadDecisionContent: m };
+      if (path === "team_bound" && (role === "team_member" || role === "team_reviewer") && m === true) return { surfaceId: "P1", path: "team_bound", role, mayReadDecisionContent: true };
       return null;
     }
     case "P2": {
       if (!exactKeys(ctx, ["surfaceId", "role", "mayReadDecisionReviewer"])) return null;
-      const { role, mayReadDecisionReviewer: m } = ctx;
-      if (role === "owner" && m === true) return ctx as DsSurfaceRequestMin;
-      if (role === "personal_reviewer" && typeof m === "boolean") return ctx as DsSurfaceRequestMin;
+      const role = own(ctx, "role"), m = own(ctx, "mayReadDecisionReviewer");
+      if (role === "owner" && m === true) return { surfaceId: "P2", role: "owner", mayReadDecisionReviewer: true };
+      if (role === "personal_reviewer" && typeof m === "boolean") return { surfaceId: "P2", role: "personal_reviewer", mayReadDecisionReviewer: m };
       return null;
     }
-    case "W1":
-      return exactKeys(ctx, ["surfaceId", "role"]) && (ctx.role === "team_member" || ctx.role === "team_reviewer") ? (ctx as DsSurfaceRequestMin) : null;
-    case "W2":
-      return exactKeys(ctx, ["surfaceId", "admission"]) && (ctx.admission === "normal" || ctx.admission === "drain") ? (ctx as DsSurfaceRequestMin) : null;
+    case "W1": {
+      if (!exactKeys(ctx, ["surfaceId", "role"])) return null;
+      const role = own(ctx, "role");
+      return role === "team_member" || role === "team_reviewer" ? { surfaceId: "W1", role } : null;
+    }
+    case "W2": {
+      if (!exactKeys(ctx, ["surfaceId", "admission"])) return null;
+      const admission = own(ctx, "admission");
+      return admission === "normal" || admission === "drain" ? { surfaceId: "W2", admission } : null;
+    }
     default:
       return null;
   }
@@ -220,7 +241,7 @@ function validContext(ctx: Record<string, unknown>): DsSurfaceRequestMin | null 
 
 function recordedField(row: Record<string, unknown>, key: string): string {
   if (!present(row, key)) return "not_recorded";
-  const value = row[key];
+  const value = own(row, key);
   return typeof value === "string" && value.trim() !== "" ? value : "unknown";
 }
 
@@ -228,9 +249,11 @@ function buildSlot(row: unknown): DsProvenanceSlotMin {
   if (!isPlainObject(row)) {
     return { slotId: "unknown", status: "unknown", requestedModel: "unknown", answeredByProvider: "unknown", contributedRecommendation: "unknown" };
   }
-  const status = typeof row.status === "string" && PUBLIC_STATUSES.has(row.status) ? (row.status as DsProvenanceSlotMin["status"]) : "unknown";
+  const rowStatus = own(row, "status");
+  const modelId = own(row, "modelId");
+  const status = typeof rowStatus === "string" && PUBLIC_STATUSES.has(rowStatus) ? (rowStatus as DsProvenanceSlotMin["status"]) : "unknown";
   const slot: DsProvenanceSlotMin = {
-    slotId: typeof row.modelId === "string" ? row.modelId : "unknown",
+    slotId: typeof modelId === "string" ? modelId : "unknown",
     status,
     requestedModel: recordedField(row, "requestedModel"),
     answeredByProvider: recordedField(row, "provider"),
@@ -251,7 +274,7 @@ function buildSlot(row: unknown): DsProvenanceSlotMin {
 
 function buildL1(publicResults: unknown): DsProvenanceSlotMin[] | { slots: Unknown } {
   if (!Array.isArray(publicResults)) return { slots: "unknown" };
-  return publicResults.map(buildSlot);
+  return mapDense(publicResults, buildSlot);
 }
 
 // ─── L2 (P1/W1): projected DS recommendation, verbatim, with D-2 counts ────
@@ -261,21 +284,26 @@ function denominatorStatement(m: number | Unknown, k: number | Unknown, n: numbe
   return `${m} ${m === 1 ? "model" : "models"} dispatched; ${k} gave a recommendation; largest group recommending the same action: ${n}.`;
 }
 
+function recommendationOf(result: Record<string, unknown>): Record<string, unknown> {
+  const rec = own(result, "recommendation");
+  return isPlainObject(rec) ? rec : {};
+}
+
 function dsCounts(result: Record<string, unknown>): { m: number | Unknown; k: number | Unknown; n: number | Unknown } {
-  const rec = isPlainObject(result.recommendation) ? result.recommendation : {};
+  const rec = recommendationOf(result);
   return {
-    m: nonNegativeInteger(result.totalModels),
-    k: nonNegativeInteger(rec.totalModelsWithRecommendation),
-    n: nonNegativeInteger(rec.supportCount),
+    m: nonNegativeInteger(own(result, "totalModels")),
+    k: nonNegativeInteger(own(rec, "totalModelsWithRecommendation")),
+    n: nonNegativeInteger(own(rec, "supportCount")),
   };
 }
 
 function buildL2(output: Record<string, unknown>, result: Record<string, unknown>): DsProvenanceL2Min {
-  const rec = isPlainObject(result.recommendation) ? result.recommendation : {};
+  const rec = recommendationOf(result);
   const { m, k, n } = dsCounts(result);
   const recommendation: DsProvenanceL2Min["recommendation"] = present(rec, "recommendedOptionId")
-    ? { action: copiedString(rec.action), recommendedOptionId: copiedString(rec.recommendedOptionId), isContested: copiedBoolean(rec.isContested) }
-    : { action: copiedString(rec.action), isContested: copiedBoolean(rec.isContested) };
+    ? { action: copiedString(own(rec, "action")), recommendedOptionId: copiedString(own(rec, "recommendedOptionId")), isContested: copiedBoolean(own(rec, "isContested")) }
+    : { action: copiedString(own(rec, "action")), isContested: copiedBoolean(own(rec, "isContested")) };
   return {
     recommendation,
     dispatchedModels: m,
@@ -285,29 +313,30 @@ function buildL2(output: Record<string, unknown>, result: Record<string, unknown
     recommendingModelsLabel: RECOMMENDING_MODELS_LABEL,
     largestAgreeingGroupLabel: LARGEST_AGREEING_GROUP_LABEL,
     denominatorStatement: denominatorStatement(m, k, n),
-    humanReviewNeeded: copiedBoolean(result.humanReviewNeeded),
+    humanReviewNeeded: copiedBoolean(own(result, "humanReviewNeeded")),
     rules: { envelopeVersion: 1, aggregation: "not_recorded", optionMatcher: "not_recorded", thresholds: "not_recorded", prompt: "not_recorded" },
-    computedAt: copiedString(output.generatedAt),
+    computedAt: copiedString(own(output, "generatedAt")),
   };
 }
 
 // ─── L3 (P1/W1): model-listed sources and self-reported strength only ──────
 
 function buildL3(result: Record<string, unknown>): DsProvenanceL3Min {
-  let sourcesListedByModels: DsProvenanceL3Min["sourcesListedByModels"];
-  if (!present(result, "sources")) sourcesListedByModels = { list: [], count: 0 };
-  else if (Array.isArray(result.sources)) sourcesListedByModels = { list: result.sources.map((s) => copiedString(s)), count: result.sources.length };
-  else sourcesListedByModels = { list: "unknown", count: "unknown" };
+  // An absent or non-array value is "unknown", never an empty list: DS outputs persisted before the result carried
+  // `sources` (b8e3e62, 2026-08-29) have no projected value, and "0 sources listed" would be a fact the projection lacks.
+  const sources = own(result, "sources");
+  const sourcesListedByModels: DsProvenanceL3Min["sourcesListedByModels"] = Array.isArray(sources)
+    ? { list: mapDense(sources, copiedString), count: sources.length }
+    : { list: "unknown", count: "unknown" };
 
-  let strength: DsProvenanceL3Min["modelSelfReportedEvidenceStrength"];
-  if (!present(result, "assessments")) strength = [];
-  else if (Array.isArray(result.assessments)) {
-    strength = result.assessments.map((a) =>
-      isPlainObject(a)
-        ? { optionId: copiedString(a.optionId), criterionId: copiedString(a.criterionId), evidenceStrength: copiedString(a.evidenceStrength) }
-        : { optionId: "unknown", criterionId: "unknown", evidenceStrength: "unknown" },
-    );
-  } else strength = "unknown";
+  const assessments = own(result, "assessments");
+  const strength: DsProvenanceL3Min["modelSelfReportedEvidenceStrength"] = Array.isArray(assessments)
+    ? mapDense(assessments, (a) =>
+        isPlainObject(a)
+          ? { optionId: copiedString(own(a, "optionId")), criterionId: copiedString(own(a, "criterionId")), evidenceStrength: copiedString(own(a, "evidenceStrength")) }
+          : { optionId: "unknown", criterionId: "unknown", evidenceStrength: "unknown" },
+      )
+    : "unknown";
 
   return {
     sourcesListedByModels,
@@ -336,9 +365,8 @@ function buildL4(result: Record<string, unknown> | null): DsProvenanceL4Min {
   };
   if (result === null) return l4;
   const { m, k } = dsCounts(result);
-  const rec = isPlainObject(result.recommendation) ? result.recommendation : {};
   l4.coverage_partial = m === "unknown" || k === "unknown" ? "unknown" : k < m;
-  l4.contested = copiedBoolean(rec.isContested);
+  l4.contested = copiedBoolean(own(recommendationOf(result), "isContested"));
   return l4;
 }
 
@@ -347,12 +375,12 @@ function buildL4(result: Record<string, unknown> | null): DsProvenanceL4Min {
 function p2ReviewedAtGate(hr: Record<string, unknown>, mayReadDecisionReviewer: unknown): boolean {
   // Exactly the baseline singleReviewer gate (reviewGovernanceViewModel.ts:227): reviewerId truthy (NOT trimmed),
   // decidedVia absent or "single_reviewer", and the route-derived reviewer-identity authority.
-  const reviewerId = hr.reviewerId;
+  const reviewerId = own(hr, "reviewerId");
   return (
     mayReadDecisionReviewer === true &&
     typeof reviewerId === "string" &&
     reviewerId.length > 0 &&
-    (!present(hr, "decidedVia") || hr.decidedVia === "single_reviewer")
+    (!present(hr, "decidedVia") || own(hr, "decidedVia") === "single_reviewer")
   );
 }
 
@@ -361,8 +389,8 @@ function buildL5(governanceRecord: unknown, ctx: DsSurfaceRequestMin): { humanRe
   if (!parsed.ok) {
     return parsed.reason === "absent" ? { humanReview: { state: "none" } } : { humanReviewUnavailable: true };
   }
-  const hr = parsed.record.humanReview as unknown as Record<string, unknown>;
-  const status = hr.status;
+  const hr = own(parsed.record as unknown as Record<string, unknown>, "humanReview") as Record<string, unknown>;
+  const status = own(hr, "status");
   if (typeof status === "string" && PENDING_REVIEW_STATUSES.has(status)) {
     return { humanReview: { state: "pending", decision: status as "unreviewed" | "pending", reviewedContent: "run_result_by_id_only" } };
   }
@@ -381,20 +409,23 @@ function buildL5(governanceRecord: unknown, ctx: DsSurfaceRequestMin): { humanRe
 
   // decidedVia: P1 owner / team roles, W1, W2. Never P2, never a personal reviewer (D-11(A)).
   if ((s === "P1" && (role === "owner" || role === "team_member" || role === "team_reviewer")) || s === "W1" || s === "W2") {
+    const decidedVia = own(hr, "decidedVia");
     decided.decidedVia = !present(hr, "decidedVia")
       ? "single_or_legacy"
-      : typeof hr.decidedVia === "string" && DECIDED_VIA_VALUES.has(hr.decidedVia)
-        ? (hr.decidedVia as "single_reviewer" | "multi_reviewer_panel" | "multi_reviewer_owner_override")
+      : typeof decidedVia === "string" && DECIDED_VIA_VALUES.has(decidedVia)
+        ? (decidedVia as "single_reviewer" | "multi_reviewer_panel" | "multi_reviewer_owner_override")
         : "unknown";
   }
 
   const mayReadContent = (s === "P1" && "mayReadDecisionContent" in ctx && ctx.mayReadDecisionContent === true) || s === "W1" || s === "W2";
   const p2Gate = s === "P2" && p2ReviewedAtGate(hr, "mayReadDecisionReviewer" in ctx ? ctx.mayReadDecisionReviewer : false);
-  if (present(hr, "reviewedAt") && typeof hr.reviewedAt === "string" && (mayReadContent || p2Gate)) {
-    decided.reviewedAt = hr.reviewedAt;
+  const reviewedAt = own(hr, "reviewedAt");
+  if (typeof reviewedAt === "string" && (mayReadContent || p2Gate)) {
+    decided.reviewedAt = reviewedAt;
   }
-  if (present(hr, "conditions") && Array.isArray(hr.conditions) && mayReadContent) {
-    decided.conditions = hr.conditions.filter((c): c is string => typeof c === "string");
+  const conditions = own(hr, "conditions");
+  if (Array.isArray(conditions) && mayReadContent) {
+    decided.conditions = conditions.filter((c): c is string => typeof c === "string");
   }
   return { humanReview: decided };
 }
@@ -415,29 +446,35 @@ export function buildDsProvenanceViewMin(input: unknown): DsProvenanceViewMin {
 }
 
 function build(input: unknown): DsProvenanceViewMin {
+  // Each input field is read exactly once, as an own property.
   const inp = isPlainObject(input) ? input : {};
-  const rawCtx = inp.surfaceRequest;
-  if (!isPlainObject(rawCtx) || typeof rawCtx.surfaceId !== "string" || !SURFACES_IN_SCOPE.has(rawCtx.surfaceId)) {
+  const rawCtx = own(inp, "surfaceRequest");
+  const publicResults = own(inp, "publicResults");
+  const publicAdaptiveOutput = own(inp, "publicAdaptiveOutput");
+  const governanceRecord = own(inp, "governanceRecord");
+
+  const surfaceId = isPlainObject(rawCtx) ? own(rawCtx, "surfaceId") : undefined;
+  if (!isPlainObject(rawCtx) || typeof surfaceId !== "string" || !SURFACES_IN_SCOPE.has(surfaceId)) {
     return notBuilt("surface_not_in_initial_scope");
   }
-  const ctx = validContext(rawCtx);
+  const ctx = validContext(rawCtx, surfaceId);
   if (ctx === null) return notBuilt("viewer_context_mismatch");
 
   // D-1(a): Decision Support only, validated by the canonical parser (P2/W2 use the same viewer's P1/W1 projection only for this gate).
-  const parsedOutput = parsePersistedAdaptiveOutput(inp.publicAdaptiveOutput);
+  const parsedOutput = parsePersistedAdaptiveOutput(publicAdaptiveOutput);
   if (!parsedOutput.ok || parsedOutput.output.schemaId !== "decision_support") return notBuilt("input_not_decision_support");
   const output = parsedOutput.output as unknown as Record<string, unknown>;
-  const result = output.result as Record<string, unknown>;
+  const result = own(output, "result") as Record<string, unknown>;
 
   const projectionSurface = ctx.surfaceId === "P1" || ctx.surfaceId === "W1";
-  const l5 = buildL5(inp.governanceRecord, ctx);
+  const l5 = buildL5(governanceRecord, ctx);
 
   if (projectionSurface) {
     return {
       kind: "ds_provenance_min",
       version: DS_PROVENANCE_MIN_VERSION,
       surfaceId: ctx.surfaceId,
-      l1: buildL1(inp.publicResults),
+      l1: buildL1(publicResults),
       l2: buildL2(output, result),
       l3: buildL3(result),
       l4: buildL4(result),

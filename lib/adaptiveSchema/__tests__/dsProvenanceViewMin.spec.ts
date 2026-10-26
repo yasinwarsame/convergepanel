@@ -165,6 +165,14 @@ describe("S-1a-min goldens (sealed R17 protected inventory, executable records)"
 
 // ─── 2. Statement rules: closed vocabulary, claim semantics, keys (I-7, I-12) ─
 
+const STRUCTURAL_PATHS = new Set([
+  "version", "surfaceId", "humanReviewUnavailable",
+  "l2.rules.envelopeVersion", "l2.dispatchedModels", "l2.recommendingModels", "l2.largestAgreeingGroup", "l2.recommendation.isContested", "l2.humanReviewNeeded",
+  "l3.sourcesListedByModels.count",
+  "l4.option_clustering_unverified", "l4.evidence_self_reported", "l4.sources_unchecked", "l4.freshness_not_evaluated", "l4.retry_text_not_retained",
+  "l4.rules_unversioned", "l4.historical_rules_unknown", "l4.review_history_not_shown", "l4.coverage_partial", "l4.contested",
+]);
+
 describe("statement rules over every golden view", () => {
   const views = G.cases.map((c) => buildDsProvenanceViewMin(inputOf(c)));
   const d2 = new RegExp(SEM.d2Regex);
@@ -177,7 +185,12 @@ describe("statement rules over every golden view", () => {
         if (STORED_PATHS.has(p)) continue;
         const key = vocabPath(p);
         const allowed = vocab[key];
-        if (!allowed) continue; // booleans/integers and structural constants are checked by the goldens
+        if (!allowed) {
+          // S1R-9: a generated path without a vocabulary entry must be a listed structural number/boolean field.
+          const ok = p === "surfaceId" ? ["P1", "P2", "W1", "W2"].includes(val as string) : STRUCTURAL_PATHS.has(p) && (typeof val === "boolean" || typeof val === "number" || val === "unknown");
+          if (!ok) misses.push(`unlisted ${p}=${JSON.stringify(val)}`);
+          continue;
+        }
         if (allowed.includes("<D2_RE>") && typeof val === "string" && d2.test(val)) continue;
         if (allowed.includes(val as string)) continue;
         if (allowed.includes("<stored>")) continue;
@@ -198,6 +211,10 @@ describe("statement rules over every golden view", () => {
       }
     }
     expect(hits).toEqual([]);
+  });
+
+  it("surfaceId is always one of the four in-scope surfaces", () => {
+    for (const v of views) if (v.kind === "ds_provenance_min") expect(["P1", "P2", "W1", "W2"]).toContain(v.surfaceId);
   });
 
   it("the D-2 statement never forms an N-of-M ratio", () => {
@@ -413,7 +430,12 @@ describe("purity (ITEM3-PURITY)", () => {
       { ...STD_INPUT(ctx), surfaceRequest: throwing },
     ];
     for (const x of cases) expect(() => buildDsProvenanceViewMin(x)).not.toThrow();
-    expect(buildDsProvenanceViewMin(throwing)).toEqual({ kind: "not_built", version: 1, reason: "input_not_decision_support" });
+    // own-property reads go through the descriptor trap, which this proxy does not override: fail closed by scope
+    expect(buildDsProvenanceViewMin(throwing)).toEqual({ kind: "not_built", version: 1, reason: "surface_not_in_initial_scope" });
+    // a proxy that throws on every trap reaches the catch path: fail closed with no run data
+    const allTraps = new Proxy({}, new Proxy({}, { get: () => () => { throw new Error("boom"); } }));
+    expect(buildDsProvenanceViewMin(allTraps)).toEqual({ kind: "not_built", version: 1, reason: "input_not_decision_support" });
+    expect(buildDsProvenanceViewMin({ ...STD_INPUT(ctx), governanceRecord: allTraps })).toEqual({ kind: "not_built", version: 1, reason: "input_not_decision_support" });
   });
 });
 
@@ -684,5 +706,103 @@ describe("Decision Support integrity", () => {
     expect(v.useAuthorization).toBe("not_authorized_no_policy");
     expect(allKeys(v)).not.toContain("consensusLevelShown");
     expect(allKeys(v)).not.toContain("authorizedForUse");
+  });
+});
+
+// ─── 8. Independent-review corrections (S1R-1 … S1R-7) ────────────────────
+
+describe("independent-review corrections", () => {
+  const ctx = { surfaceId: "W1", role: "team_member" };
+  const dsWith = (mutate: (result: Record<string, unknown>, rec: Record<string, unknown>) => void) => {
+    const input = STD_INPUT(ctx);
+    const out = input.publicAdaptiveOutput as { result: Record<string, unknown> & { recommendation: Record<string, unknown> } };
+    mutate(out.result, out.result.recommendation);
+    const v = buildDsProvenanceViewMin(input);
+    if (v.kind !== "ds_provenance_min") throw new Error("not built");
+    return v;
+  };
+
+  it("S1R-1: a DS output persisted without `sources` / `assessments` (pre-b8e3e62 shape) shows 'unknown', never '0 sources listed'", () => {
+    const v = dsWith((r) => {
+      delete r.sources;
+      delete r.assessments;
+      r.sourceBacked = true;
+    });
+    expect(v.l3!.sourcesListedByModels).toEqual({ list: "unknown", count: "unknown" });
+    expect(v.l3!.modelSelfReportedEvidenceStrength).toBe("unknown");
+    expect(allKeys(v)).not.toContain("sourceBacked");
+  });
+
+  it("S1R-2 / S1R-5: counts must print in plain base-10 digits; -0 is normalised to 0", () => {
+    for (const big of [1e21, Number.MAX_SAFE_INTEGER + 1, Infinity, NaN]) {
+      const v = dsWith((r) => {
+        r.totalModels = big;
+      });
+      expect(v.l2!.dispatchedModels).toBe("unknown");
+      expect(v.l2!.denominatorStatement).toBe("unknown");
+    }
+    const z = dsWith((r, rec) => {
+      r.totalModels = 2;
+      rec.totalModelsWithRecommendation = -0;
+      rec.supportCount = -0;
+    });
+    expect(Object.is(z.l2!.recommendingModels, 0)).toBe(true);
+    expect(Object.is(z.l2!.largestAgreeingGroup, 0)).toBe(true);
+    expect(z.l2!.denominatorStatement).toMatch(new RegExp(SEM.d2Regex));
+  });
+
+  it("S1R-3: the context is read once; a getter that changes after validation cannot widen disclosure or relabel the surface", () => {
+    let reads = 0;
+    const flipping = {
+      surfaceId: "P1",
+      path: "personal",
+      role: "personal_reviewer",
+      get mayReadDecisionContent() {
+        reads += 1;
+        return reads > 1;
+      },
+    };
+    const v = buildDsProvenanceViewMin(STD_INPUT(flipping, clone(DECIDED_FULL)));
+    if (v.kind !== "ds_provenance_min") throw new Error("not built");
+    expect(v.humanReview).toEqual({ state: "decided", decision: "approved_with_conditions", reviewedContent: "run_result_by_id_only" });
+    let sReads = 0;
+    const relabel = {
+      get surfaceId() {
+        sReads += 1;
+        return sReads > 1 ? "P2" : "W1";
+      },
+      role: "team_member",
+    };
+    const w = buildDsProvenanceViewMin(STD_INPUT(relabel, clone(DECIDED_FULL)));
+    expect(w.kind === "ds_provenance_min" && w.surfaceId).toBe("W1");
+  });
+
+  it("S1R-4: holes in sparse arrays become explicit unknown entries (dense output)", () => {
+    const rows: unknown[] = [];
+    rows[2] = { modelId: "c", status: "ok", provider: "p" };
+    const v = buildDsProvenanceViewMin({ ...STD_INPUT(ctx), publicResults: rows });
+    if (v.kind !== "ds_provenance_min" || !Array.isArray(v.l1)) throw new Error("no l1");
+    expect(v.l1).toHaveLength(3);
+    expect(Object.keys(v.l1)).toEqual(["0", "1", "2"]);
+    expect(v.l1[0]).toEqual({ slotId: "unknown", status: "unknown", requestedModel: "unknown", answeredByProvider: "unknown", contributedRecommendation: "unknown" });
+    const sparseSources: unknown[] = [];
+    sparseSources[1] = "s";
+    const s = dsWith((r) => {
+      r.sources = sparseSources;
+    });
+    expect(s.l3!.sourcesListedByModels).toEqual({ list: ["unknown", "s"], count: 2 });
+  });
+
+  it("S1R-7: inherited (prototype-polluted) keys are never read as input", () => {
+    const proto = Object.prototype as Record<string, unknown>;
+    proto.surfaceRequest = { surfaceId: "P1", path: "personal", role: "owner", mayReadDecisionContent: true };
+    proto.publicAdaptiveOutput = STD_INPUT(ctx).publicAdaptiveOutput;
+    try {
+      expect(buildDsProvenanceViewMin(null)).toEqual({ kind: "not_built", version: 1, reason: "surface_not_in_initial_scope" });
+      expect(buildDsProvenanceViewMin({})).toEqual({ kind: "not_built", version: 1, reason: "surface_not_in_initial_scope" });
+    } finally {
+      delete proto.surfaceRequest;
+      delete proto.publicAdaptiveOutput;
+    }
   });
 });
