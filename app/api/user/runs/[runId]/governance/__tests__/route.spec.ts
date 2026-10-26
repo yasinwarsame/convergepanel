@@ -77,6 +77,24 @@ jest.mock("@/lib/governance/reviewerIdentity", () => ({
   REVIEWER_UNAVAILABLE_LABEL: "Reviewer unavailable",
 }));
 
+// Personal-workspace runs (`workspaceId: personal-<owner>`) resolve as the
+// owner's own personal workspace; any other workspace id is not found. Legacy
+// runs (no `workspaceId`) never reach the resolver.
+const mockedResolveWorkspace = jest.fn();
+jest.mock("@/lib/workspaces/workspaceResolver", () => {
+  const { getPersonalWorkspaceId } = jest.requireActual("@/lib/workspaces/personalWorkspaceId");
+  return {
+    resolveWorkspaceContextForResource: async (args: { workspaceId: string; legacyOwnerUserId: string }) => {
+      mockedResolveWorkspace(args);
+      const personal = getPersonalWorkspaceId(args.legacyOwnerUserId);
+      if (personal.ok && personal.workspaceId === args.workspaceId) {
+        return { kind: "resolved", context: { mode: "workspace", workspaceId: args.workspaceId, workspaceType: "personal", ownerUserId: args.legacyOwnerUserId } };
+      }
+      return { kind: "not_found" };
+    },
+  };
+});
+
 const mockLoggerWarn = jest.fn();
 jest.mock("@/lib/logger", () => ({
   logger: { warn: (...args: unknown[]) => mockLoggerWarn(...args), info: jest.fn(), error: jest.fn(), debug: jest.fn() },
@@ -790,5 +808,236 @@ describe("GET /api/user/runs/[runId]/governance — personal reviewer access", (
     expect(res.status).toBe(200);
     expect(json.governance.singleReviewer).toBeDefined();
     expect(json.governance.singleReviewer).not.toHaveProperty("userId");
+  });
+});
+
+// ─── Order 6: P2_PREAUTH_GOVERNANCE_ERROR_ORACLE_REVIEW_REQUIRED ───────────
+//
+// An unauthorized caller must not be able to tell an unreadable governance
+// record from an absent or readable one: same status, body, headers, read
+// sequence and logging for every record state. Authorized viewers (owner,
+// current personal reviewer) keep the existing semantics, including the 500
+// for an unreadable record.
+describe("GET /api/user/runs/[runId]/governance — pre-authorization oracle (record state is invisible to unauthorized callers)", () => {
+  const REVIEWER_UID = "reviewer-1";
+
+  const RECORD_STATES: Record<string, { present: boolean; value?: unknown }> = {
+    absent: { present: false },
+    null: { present: true, value: null },
+    valid: { present: true, value: baseGovernanceRecord() },
+    decided: { present: true, value: baseGovernanceRecord({ humanReview: { status: "approved", reviewerId: REVIEWER_UID, reviewedAt: "2026-08-12T10:00:00.000Z", decidedVia: "single_reviewer" } }) },
+    malformed: { present: true, value: { version: 1 } },
+    unsupported_version: { present: true, value: { ...baseGovernanceRecord(), version: 2 } },
+    non_object: { present: true, value: "garbage" },
+    array: { present: true, value: [baseGovernanceRecord()] },
+  };
+  const UNREADABLE = ["malformed", "unsupported_version", "non_object", "array"];
+
+  const RUN_KINDS: Record<string, Record<string, unknown>> = {
+    legacy: {},
+    personal_workspace: { workspaceId: `personal-${UID}` },
+  };
+
+  function assignment(overrides: Record<string, unknown> = {}) {
+    return {
+      schemaVersion: 1,
+      teamId: null,
+      runId: RUN_ID,
+      assignedReviewerUserId: REVIEWER_UID,
+      assignedAt: "2026-08-12T18:00:00.000Z",
+      assignedByUserId: UID,
+      updatedAt: "2026-08-12T18:00:00.000Z",
+      updatedByUserId: UID,
+      revision: 1,
+      ...overrides,
+    };
+  }
+
+  // Every unauthorized shape the route can see. "Former reviewer" and
+  // "unrelated reviewer" both reach the route as an assignment that names
+  // someone else; they are kept as separate rows to document both scenarios.
+  const UNAUTHORIZED: Record<string, { uid: string; assignmentResult: unknown }> = {
+    unrelated_signed_in: { uid: "stranger-9", assignmentResult: { status: "unassigned" } },
+    former_reviewer: { uid: "former-reviewer", assignmentResult: { status: "found", assignment: assignment() } },
+    unrelated_reviewer: { uid: "reviewer-of-another-run", assignmentResult: { status: "found", assignment: assignment() } },
+    team_assignee: { uid: REVIEWER_UID, assignmentResult: { status: "found", assignment: assignment({ teamId: "team-abc" }) } },
+    stranger_assignment_read_failed: { uid: "stranger-9", assignmentResult: { status: "read_failed" } },
+  };
+
+  const FORBIDDEN_BODY = { ok: false, errorCode: "forbidden", message: "You do not have access to this run." };
+
+  function setRun(kind: string, state: string) {
+    const doc: Record<string, unknown> = { userId: UID, ...RUN_KINDS[kind] };
+    if (RECORD_STATES[state].present) doc.governanceRecord = RECORD_STATES[state].value;
+    mockedRunGet.mockResolvedValue({ exists: true, data: () => doc });
+  }
+
+  /** Calls the route and records everything an unauthorized caller could observe, plus every dependency the route touched. */
+  async function observe() {
+    const res = await GET(buildRequest(), { params: Promise.resolve({ runId: RUN_ID }) });
+    const body = await res.json();
+    const headers = Object.fromEntries(res.headers.entries());
+    delete headers["content-length"];
+    return {
+      status: res.status,
+      body,
+      headers,
+      reads: {
+        run: mockedRunGet.mock.calls.length,
+        assignment: mockedGetAssignment.mock.calls.length,
+        panel: mockedGetPanel.mock.calls.length,
+        vote: mockedGetVote.mock.calls.length,
+        team: mockedLoadUserAndTeam.mock.calls.length,
+        displayNames: mockedResolveReviewerDisplayNames.mock.calls.length,
+        workspace: mockedResolveWorkspace.mock.calls.length,
+      },
+      warns: mockLoggerWarn.mock.calls.map((c) => c[0]),
+    };
+  }
+
+  function resetCallCounts() {
+    jest.clearAllMocks();
+    mockedGetPanel.mockResolvedValue({ status: "absent" });
+    mockedGetVote.mockResolvedValue({ status: "absent" });
+    mockedLoadUserAndTeam.mockResolvedValue({ user: { email: "x@example.com" }, team: null });
+    mockedResolveReviewerDisplayNames.mockImplementation(async (uids: string[]) => new Map(uids.map((u) => [u, `Name-${u}`])));
+  }
+
+  for (const kind of Object.keys(RUN_KINDS)) {
+    for (const [caller, setup] of Object.entries(UNAUTHORIZED)) {
+      it(`${kind} run, ${caller}: every record state gives the identical 403 — status, body, headers, reads and logging`, async () => {
+        const seen: Record<string, Awaited<ReturnType<typeof observe>>> = {};
+        for (const state of Object.keys(RECORD_STATES)) {
+          resetCallCounts();
+          mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: setup.uid });
+          mockedGetAssignment.mockResolvedValue(setup.assignmentResult);
+          setRun(kind, state);
+          seen[state] = await observe();
+        }
+        const reference = seen.valid;
+        expect(reference.status).toBe(403);
+        expect(reference.body).toEqual(FORBIDDEN_BODY);
+        // Authorization needs exactly the run read and the assignment read — no panel,
+        // vote, team or identity lookups for a caller who is denied.
+        expect(reference.reads).toEqual({
+          run: 1,
+          assignment: 1,
+          panel: 0,
+          vote: 0,
+          team: 0,
+          displayNames: 0,
+          workspace: kind === "personal_workspace" ? 1 : 0,
+        });
+        for (const [state, o] of Object.entries(seen)) {
+          expect({ state, ...o }).toEqual({ state, ...reference });
+          // An unauthorized caller can never trigger the unreadable-record warning.
+          expect(o.warns).not.toContain("[user/runs/governance] Unreadable governanceRecord");
+        }
+      });
+    }
+  }
+
+  for (const kind of Object.keys(RUN_KINDS)) {
+    describe(`${kind} run — authorized viewers keep the existing semantics`, () => {
+      const AUTHORIZED: Record<string, { uid: string; assignmentResult: unknown; role: string }> = {
+        owner: { uid: UID, assignmentResult: { status: "unassigned" }, role: "owner" },
+        current_personal_reviewer: { uid: REVIEWER_UID, assignmentResult: { status: "found", assignment: assignment() }, role: "personal_reviewer" },
+      };
+
+      for (const [who, setup] of Object.entries(AUTHORIZED)) {
+        for (const state of UNREADABLE) {
+          it(`${who} + ${state} record → 500 governance_data_invalid, logged once with runId and reason only, after the access check`, async () => {
+            resetCallCounts();
+            mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: setup.uid });
+            mockedGetAssignment.mockResolvedValue(setup.assignmentResult);
+            setRun(kind, state);
+            const o = await observe();
+            expect(o.status).toBe(500);
+            expect(o.body).toEqual({ ok: false, errorCode: "governance_data_invalid", message: "Review information unavailable." });
+            expect(o.warns).toEqual(["[user/runs/governance] Unreadable governanceRecord"]);
+            expect(Object.keys(mockLoggerWarn.mock.calls[0][1] as object).sort()).toEqual(["reason", "runId"]);
+            // Authorization (which needs the assignment) is resolved before the 500.
+            expect(o.reads.assignment).toBe(1);
+            expect(o.reads.panel).toBe(0);
+            expect(o.reads.displayNames).toBe(0);
+          });
+        }
+
+        for (const state of ["absent", "null"]) {
+          it(`${who} + ${state} record → 200 not_configured (the absent-record exemption)`, async () => {
+            resetCallCounts();
+            mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: setup.uid });
+            mockedGetAssignment.mockResolvedValue(setup.assignmentResult);
+            setRun(kind, state);
+            const o = await observe();
+            expect(o.status).toBe(200);
+            expect(o.body.governance).toEqual({ family: "not_configured" });
+            expect(o.body.viewerRole).toBe(setup.role);
+            expect(o.warns).not.toContain("[user/runs/governance] Unreadable governanceRecord");
+          });
+        }
+
+        it(`${who} + valid record → 200 milestone2`, async () => {
+          resetCallCounts();
+          mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: setup.uid });
+          mockedGetAssignment.mockResolvedValue(setup.assignmentResult);
+          setRun(kind, "valid");
+          const o = await observe();
+          expect(o.status).toBe(200);
+          expect(o.body.governance.family).toBe("milestone2");
+          expect(o.body.viewerRole).toBe(setup.role);
+          expect(o.warns).toEqual([]);
+        });
+      }
+    });
+  }
+
+  it("unauthenticated caller → the same 401 before any read, whatever the record holds", async () => {
+    for (const state of Object.keys(RECORD_STATES)) {
+      resetCallCounts();
+      mockedResolveRequestIdentity.mockResolvedValue({ status: "unauthenticated", reason: "missing_credentials" });
+      setRun("legacy", state);
+      const o = await observe();
+      expect(o.status).toBe(401);
+      expect(o.body).toEqual({ ok: false, errorCode: "unauthorized", message: "Please sign in." });
+      expect(o.reads.run).toBe(0);
+      expect(o.reads.assignment).toBe(0);
+    }
+  });
+
+  it("a Team-bound run (workspaceId that is not the owner's personal workspace) is still 404 for owner and stranger alike, before the record or the assignment is touched", async () => {
+    for (const uid of [UID, "stranger-9"]) {
+      for (const state of Object.keys(RECORD_STATES)) {
+        resetCallCounts();
+        mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid });
+        mockedGetAssignment.mockResolvedValue({ status: "unassigned" });
+        const doc: Record<string, unknown> = { userId: UID, workspaceId: "team-ws-abc" };
+        if (RECORD_STATES[state].present) doc.governanceRecord = RECORD_STATES[state].value;
+        mockedRunGet.mockResolvedValue({ exists: true, data: () => doc });
+        const o = await observe();
+        expect(o.status).toBe(404);
+        expect(o.body).toEqual({ ok: false, errorCode: "not_found", message: "Run not found." });
+        expect(o.reads.assignment).toBe(0);
+        expect(o.warns).toEqual(["[user/runs/governance] workspace_run_integrity_failed"]);
+      }
+    }
+  });
+
+  it("authorization does not depend on the record: across every record state a stranger is always denied and the current reviewer is never denied", async () => {
+    for (const kind of Object.keys(RUN_KINDS)) {
+      for (const state of Object.keys(RECORD_STATES)) {
+        resetCallCounts();
+        mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: "stranger-9" });
+        mockedGetAssignment.mockResolvedValue({ status: "found", assignment: assignment() });
+        setRun(kind, state);
+        expect((await observe()).status).toBe(403);
+
+        resetCallCounts();
+        mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: REVIEWER_UID });
+        mockedGetAssignment.mockResolvedValue({ status: "found", assignment: assignment() });
+        setRun(kind, state);
+        expect((await observe()).status).not.toBe(403);
+      }
+    }
   });
 });
