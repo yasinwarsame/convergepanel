@@ -108,10 +108,6 @@ const STORED_PATHS = new Set([
   "l3.modelSelfReportedEvidenceStrength.evidenceStrength",
   "humanReview.decision", "humanReview.reviewedAt", "humanReview.conditions",
 ]);
-const vocabPath = (p: string) =>
-  p
-    .replace(/^l4\.option_clustering_unverified_text$/, "l4.option_clustering_unverified_text")
-    .replace(/^l3\.modelSelfReportedEvidenceStrengthLabel$/, "l3.modelSelfReportedEvidenceStrengthLabel");
 /** Generated string values (not copied from the projection or parser). */
 function generatedStrings(view: unknown): Array<[string, string]> {
   return leaves(view).filter(([p, v]) => typeof v === "string" && !STORED_PATHS.has(p)) as Array<[string, string]>;
@@ -183,7 +179,7 @@ describe("statement rules over every golden view", () => {
     for (const v of views) {
       for (const [p, val] of leaves(v)) {
         if (STORED_PATHS.has(p)) continue;
-        const key = vocabPath(p);
+        const key = p;
         const allowed = vocab[key];
         if (!allowed) {
           // S1R-9: a generated path without a vocabulary entry must be a listed structural number/boolean field.
