@@ -13,6 +13,7 @@
 
 import { readFileSync } from "fs";
 import { join } from "path";
+import { getPersonalWorkspaceId } from "@/lib/workspaces/personalWorkspaceId";
 
 const GOLDENS = JSON.parse(readFileSync(join(process.cwd(), "lib/adaptiveSchema/__tests__/fixtures/dsProvenanceViewMin.goldens.json"), "utf-8")) as {
   semantics: { flagText: string; historyText: string };
@@ -27,6 +28,10 @@ export const STRANGER = "uid-stranger";
 export const TEAM_UID = "uid-team-member";
 export const WS_ID = "aTeamWorkspaceAutoId12345";
 export const PROJECT_ID = "projAutoId0001";
+/** The owner's deterministic Personal Workspace: a run bound to it classifies as `personal`, not `legacy` (R4 F-1). */
+const personalWs = getPersonalWorkspaceId(OWNER);
+if (!personalWs.ok) throw new Error("fixture owner uid has no Personal Workspace id");
+export const OWNER_PERSONAL_WS = personalWs.workspaceId;
 
 // ─── Adaptive outputs ──────────────────────────────────────────────────────
 
@@ -92,7 +97,7 @@ export interface Viewer {
   capabilities?: string[];
   assignedTeamReviewer?: boolean;
   teamAccess?: { granted: false; reason: string };
-  integrity?: { classification: "invalid"; reason: string };
+  integrity?: { classification: "invalid"; reason: string } | { classification: "valid"; workspaceId: string };
   runAbsent?: true;
   runOverrides?: Record<string, unknown>;
   dropRunKeys?: string[];
@@ -109,6 +114,19 @@ export const SUCCESS_VIEWERS: Viewer[] = [
   { key: "p1.rev.absent_row", route: "P1", runKind: "personal", uid: REVIEWER, role: "personal_reviewer", history: "absent" },
   { key: "p1.rev.team_row", route: "P1", runKind: "personal", uid: REVIEWER, role: "personal_reviewer", history: "team_row" },
   { key: "p1.rev.read_throws", route: "P1", runKind: "personal", uid: REVIEWER, role: "personal_reviewer", history: "throws" },
+  // The same viewers on a run bound to the owner's Personal Workspace (`personal` classification).
+  ...(["owner", "rev.qualifying_row", "rev.absent_row", "rev.team_row", "rev.read_throws"] as const).map(
+    (k): Viewer => ({
+      key: `p1ws.${k}`,
+      route: "P1",
+      runKind: "personal",
+      uid: k === "owner" ? OWNER : REVIEWER,
+      role: k === "owner" ? "owner" : "personal_reviewer",
+      ...(k === "owner" ? {} : { history: ({ "rev.qualifying_row": "qualifying", "rev.absent_row": "absent", "rev.team_row": "team_row", "rev.read_throws": "throws" } as const)[k] }),
+      runOverrides: { workspaceId: OWNER_PERSONAL_WS },
+      integrity: { classification: "valid", workspaceId: OWNER_PERSONAL_WS },
+    }),
+  ),
   { key: "p1.team.member", route: "P1", runKind: "team", uid: TEAM_UID, role: "team_member", capabilities: MEMBER_CAPS },
   { key: "p1.team.reviewer", route: "P1", runKind: "team", uid: TEAM_UID, role: "team_reviewer", capabilities: REVIEWER_CAPS, assignedTeamReviewer: true },
   { key: "w1.member", route: "W1", runKind: "team", uid: TEAM_UID, role: "team_member", capabilities: MEMBER_CAPS, project: "found" },
@@ -122,6 +140,8 @@ export const DENIAL_VIEWERS: Viewer[] = [
   { key: "p1.run_absent", route: "P1", runKind: "personal", uid: OWNER, role: null, runAbsent: true },
   { key: "p1.integrity_invalid", route: "P1", runKind: "personal", uid: OWNER, role: null, integrity: { classification: "invalid", reason: "deterministic_id_mismatch" } },
   { key: "p1.integrity_lookup_failed", route: "P1", runKind: "personal", uid: OWNER, role: null, integrity: { classification: "invalid", reason: "workspace_lookup_failed" } },
+  { key: "p1ws.stranger", route: "P1", runKind: "personal", uid: STRANGER, role: null, runOverrides: { workspaceId: OWNER_PERSONAL_WS }, integrity: { classification: "valid", workspaceId: OWNER_PERSONAL_WS } },
+  { key: "p1ws.integrity_invalid", route: "P1", runKind: "personal", uid: OWNER, role: null, runOverrides: { workspaceId: OWNER_PERSONAL_WS }, integrity: { classification: "invalid", reason: "workspace_owner_mismatch" } },
   { key: "p1.team.membership_not_found", route: "P1", runKind: "team", uid: TEAM_UID, role: null, teamAccess: { granted: false, reason: "membership_not_found" } },
   { key: "p1.team.workspace_not_found", route: "P1", runKind: "team", uid: TEAM_UID, role: null, teamAccess: { granted: false, reason: "workspace_not_found" } },
   { key: "p1.team.no_research_read", route: "P1", runKind: "team", uid: TEAM_UID, role: null, capabilities: ["workspace.read"] },

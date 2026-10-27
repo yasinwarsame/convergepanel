@@ -436,7 +436,9 @@ run("frozen baseline (oracle b)", () => {
     // Not vacuous: real 200s, real denials of every status, and real DS reviews in the matrix.
     const statuses = new Set(Object.values(BASELINE.cases).map((b) => b.status));
     for (const s of [200, 401, 403, 404, 500, 503]) expect(statuses.has(s)).toBe(true);
-    expect(CASES.filter((c) => oracleA(c).built).length).toBe(240);
+    expect(CASES.filter((c) => oracleA(c).built).length).toBe(360);
+    // Not vacuous: Personal Workspace runs really take the `personal` path (workspace integrity is consulted).
+    expect(BASELINE.cases["p1ws.owner|team_panel_awc|ds_split"].io).toEqual(["runDoc", "workspaceIntegrity"]);
   });
 });
 
@@ -605,7 +607,7 @@ run("R3-style flawed variants fail the acceptance assertions", () => {
 
   it("an explicit `dsProvenance: null` on any not-built 200 is rejected (R2 F-1)", () => {
     const cases = CASES.filter((c) => !oracleA(c).built && observations.get(c.id)!.on.status === 200);
-    expect(cases.length).toBe(660);
+    expect(cases.length).toBe(990);
     for (const c of cases) {
       const on = observations.get(c.id)!.on;
       const text = on.text.slice(0, -1) + ',"dsProvenance":null}';
