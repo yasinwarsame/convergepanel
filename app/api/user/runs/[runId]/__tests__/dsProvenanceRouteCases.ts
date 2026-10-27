@@ -69,6 +69,9 @@ export const RECORDS: Record<string, { make: () => unknown; parses: boolean; abs
   team_override_awc: { make: g("L5T:TEAM_OVERRIDE_AWC"), parses: true },
   decided_via_unknown: { make: g("R12T:decidedVia_unknown_string_NON_WRITER"), parses: true },
   decided_via_null: { make: g("R12T:decidedVia_null_NON_WRITER"), parses: true },
+  // `single_reviewer` is the value the builder's P2 reviewer-identity gate keys on (R3 review F-1).
+  single_reviewer_personal: { make: g("R12P2:decidedVia_single_reviewer"), parses: true },
+  single_reviewer_team: { make: g("R12T:decidedVia_single_reviewer_NON_WRITER"), parses: true },
 };
 export type RecordKey = keyof typeof RECORDS;
 export const UNREADABLE_OR_ABSENT: RecordKey[] = ["absent", "null", "malformed_status", "unsupported_version", "non_object", "array"];
