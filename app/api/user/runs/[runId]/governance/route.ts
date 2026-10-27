@@ -95,15 +95,6 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
   }
 
   const govParse = parseGovernanceRecord(data.governanceRecord);
-  if (!govParse.ok && govParse.reason !== "absent") {
-    // A genuinely corrupted/unsupported Milestone-2 record is a real data
-    // problem, not "no review configured" — surfacing it as not_configured
-    // would make a false claim. The client renders this as "unavailable",
-    // per the same discipline as a fetch failure (never flashed as
-    // not_configured).
-    logger.warn("[user/runs/governance] Unreadable governanceRecord", { runId, reason: govParse.reason });
-    return NextResponse.json({ ok: false, errorCode: "governance_data_invalid", message: "Review information unavailable." }, { status: 500 });
-  }
 
   let assignment: AdaptiveHumanReviewAssignmentV1 | null = null;
   let panel: AdaptiveHumanReviewPanelV1 | null = null;
@@ -134,6 +125,24 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
       return NextResponse.json({ ok: false, errorCode: "forbidden", message: "You do not have access to this run." }, { status: 403 });
     }
     viewerRole = "personal_reviewer";
+  }
+
+  // Order 6 P2_PREAUTH_GOVERNANCE_ERROR_ORACLE_REVIEW_REQUIRED — this check
+  // used to run before authorization, so a caller with no access to the run
+  // got 500 for an unreadable record but 403 for an absent or readable one:
+  // a pre-authorization oracle on the record's state. It now runs only for an
+  // authorized viewer (owner or current personal reviewer); every
+  // unauthorized caller gets the same 403 above, whatever the record holds.
+  // The role never depends on the parsed status (resolveAdaptiveRunAccess
+  // uses it only for canSubmitReview).
+  if (!govParse.ok && govParse.reason !== "absent") {
+    // A genuinely corrupted/unsupported Milestone-2 record is a real data
+    // problem, not "no review configured" — surfacing it as not_configured
+    // would make a false claim. The client renders this as "unavailable",
+    // per the same discipline as a fetch failure (never flashed as
+    // not_configured).
+    logger.warn("[user/runs/governance] Unreadable governanceRecord", { runId, reason: govParse.reason });
+    return NextResponse.json({ ok: false, errorCode: "governance_data_invalid", message: "Review information unavailable." }, { status: 500 });
   }
 
   const rawLegacyStatus = data.governanceStatus;
