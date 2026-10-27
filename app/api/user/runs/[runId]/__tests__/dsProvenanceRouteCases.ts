@@ -15,6 +15,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 
 const GOLDENS = JSON.parse(readFileSync(join(process.cwd(), "lib/adaptiveSchema/__tests__/fixtures/dsProvenanceViewMin.goldens.json"), "utf-8")) as {
+  semantics: { flagText: string; historyText: string };
   fixtures: { governance: Record<string, { record?: unknown; absent?: true }>; adaptive: Record<string, unknown> };
 };
 const clone = <T>(v: T): T => (v === undefined ? v : JSON.parse(JSON.stringify(v)));
@@ -208,3 +209,99 @@ export function oracleA(c: RouteCase): OracleA {
 
 /** Values that identify a reviewer, panel member, finalizer or overriding owner, or carry review text, in any fixture record. */
 export const RESTRICTED_RECORD_VALUES = ["uid-admin", "uid-ws-owner", "uid-reviewer", "uid-rev-r", "Rita Recorder", "rita comment", "R-COMMENT", "OWNER-JUSTIFICATION", "fix"];
+
+/**
+ * The role the route derives for this viewer. A viewer configured as an assigned Team reviewer is `team_reviewer`
+ * only while the record's human-review status is still reviewable (unreviewed / pending); otherwise `team_member`.
+ */
+export function expectedViewerRole(c: RouteCase): string | null {
+  const v = c.viewer;
+  if (v.role !== "team_reviewer") return v.role;
+  const reviewable = RECORDS[c.record].parses && PENDING.has(storedHumanReview(c.record).status as string);
+  return reviewable ? "team_reviewer" : "team_member";
+}
+
+// ─── Oracle (a), whole view: L1–L4 transcribed from the sealed S-1a-min contract (B §3.5) ───
+//
+// Computed from the SAME response body the view is attached to (its `results` and `adaptive.output`), never from the
+// builder. Combined with `oracleA(...).humanReview`, it is the exact expected view: any key the view carries beyond
+// this, at any depth, fails the suite.
+
+const PUBLIC_SLOT_STATUSES = new Set(["ok", "substituted", "failed"]);
+const own = (o: unknown, k: string): unknown => (o && typeof o === "object" && Object.prototype.hasOwnProperty.call(o, k) ? (o as Record<string, unknown>)[k] : undefined);
+const str = (x: unknown) => (typeof x === "string" ? x : "unknown");
+const bool = (x: unknown) => (typeof x === "boolean" ? x : "unknown");
+const count = (x: unknown) => (typeof x === "number" && Number.isSafeInteger(x) && x >= 0 ? x : "unknown");
+const recorded = (row: unknown, k: string) => {
+  const x = own(row, k);
+  if (x === undefined) return "not_recorded";
+  return typeof x === "string" && x.trim() !== "" ? x : "unknown";
+};
+
+export function expectedFullView(a: Extract<OracleA, { built: true }>, body: { results: unknown[]; adaptive: { output: Record<string, unknown> } }): Record<string, unknown> {
+  const l1 = body.results.map((row) => {
+    const status = PUBLIC_SLOT_STATUSES.has(own(row, "status") as string) ? own(row, "status") : "unknown";
+    const slot: Record<string, unknown> = {
+      slotId: str(own(row, "modelId")),
+      status,
+      requestedModel: recorded(row, "requestedModel"),
+      answeredByProvider: recorded(row, "provider"),
+      contributedRecommendation: "unknown",
+    };
+    if (status === "substituted") slot.substitutedFrom = recorded(row, "substitutedFrom");
+    return slot;
+  });
+
+  const output = body.adaptive.output;
+  const result = own(output, "result");
+  const rec = own(result, "recommendation") ?? {};
+  const m = count(own(result, "totalModels"));
+  const k = count(own(rec, "totalModelsWithRecommendation"));
+  const n = count(own(rec, "supportCount"));
+  const recommendation: Record<string, unknown> = { action: str(own(rec, "action")), isContested: bool(own(rec, "isContested")) };
+  if (own(rec, "recommendedOptionId") !== undefined) recommendation.recommendedOptionId = str(own(rec, "recommendedOptionId"));
+  const l2 = {
+    recommendation,
+    dispatchedModels: m,
+    recommendingModels: k,
+    largestAgreeingGroup: n,
+    dispatchedModelsLabel: "models dispatched",
+    recommendingModelsLabel: "models that gave a recommendation",
+    largestAgreeingGroupLabel: "largest group of models recommending the same action",
+    denominatorStatement:
+      m === "unknown" || k === "unknown" || n === "unknown" ? "unknown" : `${m} ${m === 1 ? "model" : "models"} dispatched; ${k} gave a recommendation; largest group recommending the same action: ${n}.`,
+    humanReviewNeeded: bool(own(result, "humanReviewNeeded")),
+    rules: { envelopeVersion: 1, aggregation: "not_recorded", optionMatcher: "not_recorded", thresholds: "not_recorded", prompt: "not_recorded" },
+    computedAt: str(own(output, "generatedAt")),
+  };
+
+  const sources = own(result, "sources");
+  const assessments = own(result, "assessments");
+  const l3 = {
+    sourcesListedByModels: Array.isArray(sources) ? { list: sources.map(str), count: sources.length } : { list: "unknown", count: "unknown" },
+    modelSelfReportedEvidenceStrength: Array.isArray(assessments)
+      ? assessments.map((x) => ({ optionId: str(own(x, "optionId")), criterionId: str(own(x, "criterionId")), evidenceStrength: str(own(x, "evidenceStrength")) }))
+      : "unknown",
+    modelSelfReportedEvidenceStrengthLabel: "self-reported by models",
+    sourceCheck: "not_evaluated",
+    freshness: "not_evaluated",
+  };
+
+  const l4 = {
+    option_clustering_unverified: true,
+    option_clustering_unverified_text: GOLDENS.semantics.flagText,
+    option_clustering_unverified_knownDefect: "R5-P1-08",
+    evidence_self_reported: true,
+    sources_unchecked: true,
+    freshness_not_evaluated: true,
+    retry_text_not_retained: true,
+    rules_unversioned: true,
+    historical_rules_unknown: true,
+    review_history_not_shown: true,
+    review_history_not_shown_text: GOLDENS.semantics.historyText,
+    coverage_partial: m === "unknown" || k === "unknown" ? "unknown" : k < m,
+    contested: bool(own(rec, "isContested")),
+  };
+
+  return { kind: "ds_provenance_min", version: 1, surfaceId: a.surfaceId, l1, l2, l3, l4, humanReview: a.humanReview, useAuthorization: "not_authorized_no_policy" };
+}

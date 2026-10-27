@@ -152,6 +152,8 @@ import {
   TEAM_UID,
   UNREADABLE_OR_ABSENT,
   WS_ID,
+  expectedFullView,
+  expectedViewerRole,
   oracleA,
   storedHumanReview,
   type RouteCase,
@@ -356,6 +358,9 @@ function assertFlagOn(c: RouteCase, on: Observation, b: Baseline): void {
   expect(view!.surfaceId).toBe(a.surfaceId);
   expect(view!.useAuthorization).toBe("not_authorized_no_policy");
   expect(view!.humanReview).toEqual(a.humanReview);
+  expect(body.viewerRole).toBe(expectedViewerRole(c));
+  // The whole view, at every depth, equals oracle (a): no key beyond the contract can ride along (R1 M-1).
+  expect(view).toStrictEqual(expectedFullView(a, body));
 
   // Oracle (a) ↔ oracle (b): the baseline body releases a human-review field to this viewer exactly when (a) allows it.
   const hr = storedHumanReview(c.record);
@@ -411,7 +416,9 @@ beforeAll(async () => {
   if (CAPTURE) {
     const cases: Record<string, Baseline> = {};
     for (const c of CASES) cases[c.id] = baselineOf(observations.get(c.id)!.off);
-    writeFileSync(CAPTURE, JSON.stringify({ baseCommit: process.env.DS_PROVENANCE_BASELINE_COMMIT ?? "", cases }, null, 1) + "\n");
+    // The committed layout: one case per line.
+    const lines = Object.entries(cases).map(([id, b]) => `${JSON.stringify(id)}: ${JSON.stringify(b)}`);
+    writeFileSync(CAPTURE, `{\n"baseCommit": ${JSON.stringify(process.env.DS_PROVENANCE_BASELINE_COMMIT ?? "")},\n"cases": {\n${lines.join(",\n")}\n}\n}\n`);
   }
 });
 
@@ -439,6 +446,7 @@ run("flag OFF (AC-1): byte-identical to 45df2ea, builder never called", () => {
     expect(sha(off.logs)).toBe(b.logsSha256);
     expect(off.builderCalls).toBe(0);
     expect(off.text).not.toContain("dsProvenance");
+    if (off.status === 200) expect(JSON.parse(off.text).viewerRole).toBe(expectedViewerRole(c));
   });
 });
 
@@ -567,6 +575,26 @@ run("R3-style flawed variants fail the acceptance assertions", () => {
       const parsed = JSON.parse(on.text);
       parsed.dsProvenance.humanReview.decidedVia = "multi_reviewer_panel";
       expect(() => assertFlagOn(c, { ...on, text: JSON.stringify(parsed) }, BASELINE.cases[c.id])).toThrow();
+    }
+  });
+
+  it("a view carrying any key beyond the contract is rejected, at any depth (R1 M-1: M6 / M12)", () => {
+    const additions: Array<[string, (v: Record<string, any>) => void]> = [
+      ["l4.decision_team_scoped", (v) => (v.l4.decision_team_scoped = true)],
+      ["l2.recommendation.reviewHadConditions", (v) => (v.l2.recommendation.reviewHadConditions = true)],
+      ["l2.rules.extra", (v) => (v.l2.rules.extra = "not_recorded")],
+      ["l1[0].extra", (v) => (v.l1[0].extra = "unknown")],
+      ["l3.sourcesListedByModels.extra", (v) => (v.l3.sourcesListedByModels.extra = false)],
+      ["humanReview.extra", (v) => (v.humanReview.extra = false)],
+    ];
+    const cases = CASES.filter((c) => oracleA(c).built);
+    for (const [name, add] of additions) {
+      for (const c of cases) {
+        const on = observations.get(c.id)!.on;
+        const parsed = JSON.parse(on.text);
+        add(parsed.dsProvenance);
+        expect([name, c.id, (() => { try { assertFlagOn(c, { ...on, text: JSON.stringify(parsed) }, BASELINE.cases[c.id]); return "accepted"; } catch { return "rejected"; } })()]).toEqual([name, c.id, "rejected"]);
+      }
     }
   });
 
