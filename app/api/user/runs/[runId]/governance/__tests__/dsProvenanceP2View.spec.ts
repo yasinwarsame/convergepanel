@@ -182,6 +182,7 @@ import {
   ADAPTIVE,
   CASES,
   DENIAL_VIEWERS,
+  MALFORMED_PERMODEL_VIEWERS,
   DS_ADAPTIVE,
   OWNER,
   P2_RESTRICTED_VALUES,
@@ -225,6 +226,7 @@ function runDocument(c: P2Case): Record<string, unknown> {
   if (adaptive !== undefined) doc.adaptiveOutput = adaptive;
   if (!RECORDS[c.record].absentKey) doc.governanceRecord = RECORDS[c.record].make();
   Object.assign(doc, c.viewer.runOverrides ?? {});
+  if (c.viewer.perModelDefect) doc.runDocument = { perModel: c.viewer.perModelDefect.value };
   return doc;
 }
 
@@ -311,14 +313,47 @@ async function observe(c: P2Case, flag: boolean): Promise<Observation> {
   };
 }
 
+interface P1Observation {
+  /** The HTTP status, or "threw" when the handler rejected (the runtime turns that into a 500). */
+  status: number | "threw";
+  body: Record<string, any> | null;
+  error: { name: string; message: string; stack: string } | null;
+  io: string[];
+}
+
 /** Oracle (c): the same caller and run document on the real P1 handler (flag off: P1's own projection only). */
-async function observeP1(c: P2Case): Promise<{ status: number; body: Record<string, any> | null }> {
+async function observeP1(c: P2Case): Promise<P1Observation> {
   arrange(c, false);
   const runId = c.viewer.runIdParam ?? RUN_ID;
-  const res = await p1Get(new NextRequest(`http://localhost/api/user/runs/${encodeURIComponent(runId)}`, { headers: { "x-vercel-id": "vid-1" } }), { params: Promise.resolve({ runId }) });
-  const text = await res.text();
-  return { status: res.status, body: res.status === 200 ? JSON.parse(text) : null };
+  try {
+    const res = await p1Get(new NextRequest(`http://localhost/api/user/runs/${encodeURIComponent(runId)}`, { headers: { "x-vercel-id": "vid-1" } }), { params: Promise.resolve({ runId }) });
+    const text = await res.text();
+    return { status: res.status, body: res.status === 200 ? JSON.parse(text) : null, error: null, io: [...mockIo] };
+  } catch (e) {
+    const err = e as Error;
+    return { status: "threw", body: null, error: { name: err?.constructor?.name ?? "unknown", message: String(err?.message), stack: String(err?.stack) }, io: [...mockIo] };
+  }
 }
+
+/**
+ * Owner ruling A2: a P1 failure is excused ONLY when it is one of the two documented malformed-perModel mechanisms
+ * inside `runDocumentToPublicResults`, identified by its exact TypeError and the throwing frame, never by the HTTP
+ * status. Anything else (another message, another frame, a non-TypeError, a 500 response, a denial) is not excused.
+ */
+const PERMODEL_MECHANISMS = {
+  null_row: "Cannot read properties of null (reading 'rawTextTruncated')",
+  non_array: "runDocument.perModel.map is not a function",
+} as const;
+function attributedPerModelMechanism(o: Pick<P1Observation, "status" | "error">): keyof typeof PERMODEL_MECHANISMS | null {
+  if (o.status !== "threw" || !o.error || o.error.name !== "TypeError") return null;
+  const topFrame = o.error.stack.split("\n").find((l) => /^\s+at /.test(l)) ?? "";
+  if (!/lib\/user\/runDocumentToPublicResults\.ts/.test(topFrame)) return null;
+  for (const [kind, message] of Object.entries(PERMODEL_MECHANISMS)) if (o.error.message === message) return kind as keyof typeof PERMODEL_MECHANISMS;
+  return null;
+}
+
+/** The same caller and run with a well-formed perModel: the P1 response the malformed data prevented. */
+const counterfactual = (c: P2Case): P2Case => ({ ...c, id: `${c.id}#wellFormedPerModel`, viewer: { ...c.viewer, perModelDefect: undefined } });
 
 interface Baseline {
   status: number;
@@ -443,11 +478,13 @@ function assertFlagOn(c: P2Case, on: Observation, b: Baseline): void {
 // ─── Run every case once per flag state, plus P1 for the cross-route oracle ───
 
 const observations = new Map<string, { off: Observation; on: Observation }>();
-const p1 = new Map<string, { status: number; body: Record<string, any> | null }>();
+const p1 = new Map<string, P1Observation>();
+const p1Counterfactual = new Map<string, P1Observation>();
 
 beforeAll(async () => {
   for (const c of CASES) observations.set(c.id, { off: await observe(c, false), on: await observe(c, true) });
   if (!CAPTURE) for (const c of CASES) p1.set(c.id, await observeP1(c));
+  if (!CAPTURE) for (const c of CASES) if (c.viewer.perModelDefect) p1Counterfactual.set(c.id, await observeP1(counterfactual(c)));
   mockFlag = false;
   if (CAPTURE) {
     const lines = CASES.map((c) => `${JSON.stringify(c.id)}: ${JSON.stringify(baselineOf(observations.get(c.id)!.off))}`);
@@ -499,39 +536,61 @@ run("flag ON (AC-2..AC-8): denials frozen, reads and logs unchanged, view per or
   });
 });
 
-// ─── D-P2-X: the cross-route condition (oracle c) ─────────────────────────
+// ─── D-P2-X: the cross-route condition (oracle c), as qualified by owner ruling A2 ───
+//
+// A. no view for a caller P1 would deny (authorization or workspace integrity);
+// B. where P1 returns its Decision Support output, the view is backed by exactly that output;
+// C/D. a P1 200 is not required ONLY when P1 threw one of the two documented malformed-perModel TypeErrors, and then
+//      the same caller and run with a well-formed perModel must be a P1 200 that satisfies A and B;
+// E. no other P1 failure is excused.
 
-const P1_DS_WITH_REVIEW = (c: P2Case) => {
+const dsWithReview = (r: P1Observation | undefined) =>
+  !!r && r.status === 200 && r.body!.adaptive?.status === "valid" && r.body!.adaptive.output?.schemaId === "decision_support" && r.body!.adaptive.humanReview !== null;
+
+/** The P1 response that backs this case: P1 itself, or (A2 exception only) the well-formed-perModel counterfactual. */
+function backingP1(c: P2Case): { r: P1Observation; via: "p1" | "a2_exception" } | null {
   const r = p1.get(c.id)!;
-  return r.status === 200 && r.body!.adaptive?.status === "valid" && r.body!.adaptive.output?.schemaId === "decision_support" && r.body!.adaptive.humanReview !== null;
-};
+  if (r.status === 200) return { r, via: "p1" };
+  const kind = attributedPerModelMechanism(r);
+  if (kind === null || kind !== c.viewer.perModelDefect?.kind) return null;
+  const cf = p1Counterfactual.get(c.id);
+  return cf && cf.status === 200 ? { r: cf, via: "a2_exception" } : null;
+}
+const P1_DS_WITH_REVIEW = (c: P2Case) => dsWithReview(backingP1(c)?.r);
 
-run("D-P2-X: every P2 view is backed by the same viewer's P1 Decision Support output (oracle c)", () => {
-  it("every P2 response carrying dsProvenance has a P1 200 with the same valid Decision Support output and a usable review", () => {
-    let checked = 0;
+run("D-P2-X: every P2 view is backed by the same viewer's P1 Decision Support output (oracle c, ruling A2)", () => {
+  it("every P2 response carrying dsProvenance is backed by a P1 200 with the same valid Decision Support output and a usable review", () => {
+    const via = { p1: 0, a2_exception: 0 };
     for (const c of CASES) {
       if (!Object.prototype.hasOwnProperty.call(JSON.parse(observations.get(c.id)!.on.text || "{}"), "dsProvenance")) continue;
-      const r = p1.get(c.id)!;
-      expect([c.id, r.status]).toEqual([c.id, 200]);
-      expect([c.id, P1_DS_WITH_REVIEW(c)]).toEqual([c.id, true]);
+      const backing = backingP1(c);
+      expect([c.id, backing !== null]).toEqual([c.id, true]);
+      expect([c.id, dsWithReview(backing!.r)]).toEqual([c.id, true]);
       const stored = realParseOutput(runDocument(c).adaptiveOutput);
-      expect(r.body!.adaptive.output).toEqual(JSON.parse(JSON.stringify(stored.output)));
-      checked++;
+      expect(backing!.r.body!.adaptive.output).toEqual(JSON.parse(JSON.stringify(stored.output)));
+      expect([c.id, backing!.r.body!.viewerRole]).toEqual([c.id, c.viewer.role]);
+      via[backing!.via]++;
     }
-    expect(checked).toBe(PINNED_BUILT);
+    expect(via.p1 + via.a2_exception).toBe(PINNED_BUILT);
+    // The exception is used exactly by the malformed-perModel viewers' built cases, and by nothing else.
+    expect(via.a2_exception).toBe(builtCases().filter((c) => c.viewer.perModelDefect).length);
+    expect(via.a2_exception).toBeGreaterThan(100);
   });
 
-  it("admission equivalence: every authorized P2 200 is a P1 200 for the same caller, with the same role", () => {
-    let checked = 0;
+  it("admission equivalence: every authorized P2 200 is a P1 200 for the same caller and role (A2: on the well-formed counterfactual)", () => {
+    let direct = 0;
+    let exception = 0;
     for (const c of CASES) {
       const p2 = observations.get(c.id)!.on;
       if (p2.status !== 200) continue;
-      const r = p1.get(c.id)!;
-      expect([c.id, r.status]).toEqual([c.id, 200]);
-      expect([c.id, r.body!.viewerRole]).toEqual([c.id, JSON.parse(p2.text).viewerRole]);
-      checked++;
+      const backing = backingP1(c);
+      expect([c.id, backing?.r.status]).toEqual([c.id, 200]);
+      expect([c.id, backing!.r.body!.viewerRole]).toEqual([c.id, JSON.parse(p2.text).viewerRole]);
+      if (backing!.via === "p1") direct++;
+      else exception++;
     }
-    expect(checked).toBeGreaterThan(900);
+    expect(direct).toBeGreaterThan(900);
+    expect(exception).toBe(MALFORMED_PERMODEL_VIEWERS.length * 80);
   });
 
   it("the view appears exactly when P2 answers 200 and P1 shows this viewer a valid Decision Support output with a usable review", () => {
@@ -548,15 +607,115 @@ run("D-P2-X: every P2 view is backed by the same viewer's P1 Decision Support ou
   });
 });
 
+run("owner ruling A2: the malformed-perModel exception and its limits", () => {
+  it("R1's counterexample reproduces: P1 throws the documented TypeError while P2 returns 200 with the view", () => {
+    for (const [id, kind] of [
+      ["p2.owner.permodel_null_row|approved_single_no_via|ds_split", "null_row"],
+      ["p2.rev.qualifying_row.permodel_null_row|personal_self_awc|ds_split", "null_row"],
+      ["p2.owner.permodel_string|team_panel_awc|ds_sources", "non_array"],
+      ["p2.rev.absent_row.permodel_object|approved_single_no_via|ds_split", "non_array"],
+    ] as const) {
+      const r = p1.get(id)!;
+      expect([id, r.status, r.error?.name, r.error?.message]).toEqual([id, "threw", "TypeError", PERMODEL_MECHANISMS[kind]]);
+      expect([id, attributedPerModelMechanism(r)]).toEqual([id, kind]);
+      const on = observations.get(id)!.on;
+      expect([id, on.status, Object.prototype.hasOwnProperty.call(JSON.parse(on.text), "dsProvenance")]).toEqual([id, 200, true]);
+    }
+  });
+
+  it("every P1 failure in the malformed-perModel cases is one of the two mechanisms, matching the case's defect", () => {
+    for (const c of CASES.filter((x) => x.viewer.perModelDefect && x.viewer.role !== null)) {
+      const r = p1.get(c.id)!;
+      expect([c.id, r.status, attributedPerModelMechanism(r)]).toEqual([c.id, "threw", c.viewer.perModelDefect!.kind]);
+    }
+  });
+
+  it("P1 threw only after it authorized the caller: its reads are the counterfactual 200's authorization reads, in order", () => {
+    for (const c of CASES.filter((x) => x.viewer.perModelDefect && x.viewer.role !== null)) {
+      const thrown = p1.get(c.id)!.io;
+      const ok = p1Counterfactual.get(c.id)!;
+      expect([c.id, ok.status]).toEqual([c.id, 200]);
+      expect([c.id, ok.io.slice(0, thrown.length)]).toEqual([c.id, thrown]);
+      expect(thrown[0]).toBe("runDoc");
+      if (c.viewer.workspace) expect(thrown).toContain("workspaceResolve");
+      if (c.viewer.role === "personal_reviewer") expect(thrown).toContain("assignment");
+    }
+  });
+
+  it("the persisted Decision Support output is exactly what the well-formed P1 response exposes", () => {
+    let checked = 0;
+    for (const c of CASES.filter((x) => x.viewer.perModelDefect && x.viewer.role !== null && DS_ADAPTIVE.has(x.adaptive))) {
+      const ok = p1Counterfactual.get(c.id)!;
+      expect(ok.body!.adaptive.output).toEqual(JSON.parse(JSON.stringify(realParseOutput(runDocument(c).adaptiveOutput).output)));
+      checked++;
+    }
+    expect(checked).toBe(MALFORMED_PERMODEL_VIEWERS.length * Object.keys(RECORDS).length * 2);
+  });
+
+  it("the attribution rejects every unrelated P1 failure", () => {
+    const real = p1.get("p2.owner.permodel_null_row|approved_single_no_via|ds_split")!;
+    const stringReal = p1.get("p2.owner.permodel_string|approved_single_no_via|ds_split")!;
+    expect(attributedPerModelMechanism(real)).toBe("null_row");
+    expect(attributedPerModelMechanism(stringReal)).toBe("non_array");
+    const otherFrame = real.error!.stack.replace(/lib\/user\/runDocumentToPublicResults\.ts/g, "lib/runs/runReadPayload.ts");
+    const rejected: Array<[string, Pick<P1Observation, "status" | "error">]> = [
+      ["a 500 response", { status: 500, error: null }],
+      ["a 403 denial", { status: 403, error: null }],
+      ["a 404 integrity failure", { status: 404, error: null }],
+      ["another TypeError message", { status: "threw", error: { ...real.error!, message: "Cannot read properties of undefined (reading 'x')" } }],
+      ["the same message from another frame", { status: "threw", error: { ...real.error!, stack: otherFrame } }],
+      ["a non-TypeError with the same message", { status: "threw", error: { ...real.error!, name: "Error" } }],
+      ["an unrelated thrown error", { status: "threw", error: { name: "Error", message: "history read failed", stack: "Error: history read failed\n    at x (lib/firestore/runs.ts:1:1)" } }],
+    ];
+    for (const [name, o] of rejected) expect([name, attributedPerModelMechanism(o)]).toEqual([name, null]);
+    // A real unrelated P1 500 (workspace lookup failure) is a response, not an excused throw, and P2 builds nothing.
+    const lookup = CASES.find((c) => c.id === "p2ws.owner.lookup_failed|approved_single_no_via|ds_split")!;
+    expect(p1.get(lookup.id)!.status).toBe(500);
+    expect(attributedPerModelMechanism(p1.get(lookup.id)!)).toBeNull();
+    expect(observations.get(lookup.id)!.on.text).not.toContain("dsProvenance");
+  });
+
+  it("a mismatched mechanism is not excused: the case's own defect must be the one P1 threw", () => {
+    const c = CASES.find((x) => x.id === "p2.owner.permodel_string|approved_single_no_via|ds_split")!;
+    const forged: P2Case = { ...c, viewer: { ...c.viewer, perModelDefect: { kind: "null_row", value: c.viewer.perModelDefect!.value } } };
+    const r = p1.get(c.id)!;
+    expect(attributedPerModelMechanism(r)).toBe("non_array");
+    expect(attributedPerModelMechanism(r) === forged.viewer.perModelDefect!.kind).toBe(false);
+  });
+
+  it("authorization and workspace-integrity failures still suppress the view on malformed-perModel runs", () => {
+    const denials = CASES.filter((c) => c.viewer.perModelDefect && c.viewer.role === null);
+    expect(denials.length).toBe(4 * Object.keys(RECORDS).length * 2);
+    for (const c of denials) {
+      const on = observations.get(c.id)!.on;
+      expect([c.id, on.status === 200, on.text.includes("dsProvenance")]).toEqual([c.id, false, false]);
+      expect(sha(on.text)).toBe(BASELINE.cases[c.id].bodySha256);
+      // P1 denies these callers before it ever reaches the per-model rows, so the A2 exception is unreachable for them.
+      expect([c.id, typeof p1.get(c.id)!.status]).toEqual([c.id, "number"]);
+      expect([c.id, p1.get(c.id)!.status === 200]).toEqual([c.id, false]);
+    }
+  });
+
+  it("P2 never reads perModel: a malformed perModel leaves every P2 response byte-identical to the well-formed run", () => {
+    for (const c of CASES.filter((x) => x.viewer.perModelDefect && x.viewer.role !== null)) {
+      const twinKey = c.viewer.key.replace(/\.permodel_(null_row|string|object)$/, "");
+      const twin = observations.get(`${twinKey}|${c.record}|${c.adaptive}`);
+      expect([c.id, twin !== undefined]).toEqual([c.id, true]);
+      expect([c.id, observations.get(c.id)!.on.text]).toEqual([c.id, twin!.on.text]);
+      expect([c.id, observations.get(c.id)!.on.io]).toEqual([c.id, twin!.on.io]);
+    }
+  });
+});
+
 // ─── Denial and record-state preservation ─────────────────────────────────
 
 run("PR #259 and record states (AC-2, AC-6, AC-7)", () => {
   it("every unauthorized 403 is one byte-identical response, whatever the record holds", () => {
     const forbidden = DENIAL_VIEWERS.filter((v) => CASES.some((c) => c.viewer === v && observations.get(c.id)!.on.status === 403));
-    expect(forbidden.map((v) => v.key).sort()).toEqual(["p2.rev.assignment_read_failed", "p2.rev.team_assignment", "p2.rev.unassigned", "p2.stranger", "p2.stranger.panel_present", "p2ws.stranger"]);
+    expect(forbidden.map((v) => v.key).sort()).toEqual(["p2.rev.assignment_read_failed", "p2.rev.team_assignment", "p2.rev.unassigned", "p2.rev.unassigned.permodel_string", "p2.stranger", "p2.stranger.panel_present", "p2.stranger.permodel_null_row", "p2ws.stranger"]);
     for (const v of forbidden) {
       const obs = CASES.filter((c) => c.viewer === v).map((c) => observations.get(c.id)!.on);
-      expect(obs.length).toBe(36);
+      expect(obs.length).toBe(Object.keys(RECORDS).length * 2);
       expect(new Set(obs.map((o) => `${o.status}|${o.headers}|${o.text}|${JSON.stringify(o.io)}|${o.logs}`)).size).toBe(1);
       expect(obs[0].status).toBe(403);
     }
@@ -758,8 +917,8 @@ function expectedOwnerHumanReview(c: P2Case): Record<string, unknown> {
   return a.built ? a.humanReview : {};
 }
 
-const PINNED_BUILT = 312;
-const PINNED_NOT_BUILT_200 = 598;
+const PINNED_BUILT = 532;
+const PINNED_NOT_BUILT_200 = 988;
 
 it("the case matrix includes every DS output, every record state and every viewer class", () => {
   expect(new Set(CASES.map((c) => c.adaptive))).toEqual(new Set(Object.keys(ADAPTIVE)));

@@ -12,9 +12,32 @@
  * the adapter or a route.
  */
 
-import { ADAPTIVE, DS_ADAPTIVE, OWNER, OWNER_PERSONAL_WS, RECORDS, REVIEWER, RESTRICTED_RECORD_VALUES, STRANGER, WS_ID, storedHumanReview, type AdaptiveKey, type RecordKey } from "../../__tests__/dsProvenanceRouteCases";
+import { ADAPTIVE, DS_ADAPTIVE, OWNER, OWNER_PERSONAL_WS, RECORDS as S1B1_RECORDS, REVIEWER, RESTRICTED_RECORD_VALUES, STRANGER, WS_ID, type AdaptiveKey } from "../../__tests__/dsProvenanceRouteCases";
 
-export { ADAPTIVE, DS_ADAPTIVE, OWNER, OWNER_PERSONAL_WS, RECORDS, REVIEWER, STRANGER, storedHumanReview, type AdaptiveKey, type RecordKey };
+export { ADAPTIVE, DS_ADAPTIVE, OWNER, OWNER_PERSONAL_WS, REVIEWER, STRANGER, type AdaptiveKey };
+
+const withHumanReview = (base: string, edit: (hr: Record<string, unknown>) => void) => () => {
+  const record = S1B1_RECORDS[base].make() as { humanReview: Record<string, unknown> };
+  edit(record.humanReview);
+  return record;
+};
+
+/**
+ * The S-1b.1 record states plus the two shapes R1 found only the builder's own suite covered (R1 NIT-3): a
+ * whitespace-only `reviewerId` (truthy, so the baseline `singleReviewer` gate admits it) and a pending review that
+ * already carries `reviewedAt`. Both parse (`parses: true` verified against the real parser by the baseline).
+ */
+export const RECORDS: Record<string, { make: () => unknown; parses: boolean; absentKey?: true }> = {
+  ...S1B1_RECORDS,
+  whitespace_reviewer_id: { make: withHumanReview("approved_single_no_via", (hr) => (hr.reviewerId = "   ")), parses: true },
+  pending_with_reviewed_at: { make: withHumanReview("pending", (hr) => Object.assign(hr, { reviewerId: REVIEWER, reviewedAt: "2026-10-20T00:00:00.000Z" })), parses: true },
+};
+export type RecordKey = keyof typeof RECORDS;
+
+/** The stored humanReview of a parse-ok fixture record (raw, as persisted). */
+export function storedHumanReview(record: RecordKey): Record<string, unknown> {
+  return (RECORDS[record].make() as { humanReview: Record<string, unknown> }).humanReview;
+}
 
 export const RUN_ID = "run-parity-1";
 
@@ -36,6 +59,11 @@ export interface P2Viewer {
   runAbsent?: true;
   runIdParam?: string;
   runOverrides?: Record<string, unknown>;
+  /**
+   * A malformed stored `runDocument.perModel` (owner ruling A2): `null_row` is O6-OBS-5; `non_array` is the separate
+   * inherited `.map is not a function` defect. P2 never reads it; P1 throws on it after authorization.
+   */
+  perModelDefect?: { kind: "null_row" | "non_array"; value: unknown };
 }
 
 const PWS = (mode: WorkspaceMode = "resolved") => ({ workspaceId: OWNER_PERSONAL_WS, mode });
@@ -59,6 +87,21 @@ export const SUCCESS_VIEWERS: P2Viewer[] = [
   ...REVIEWER_HISTORIES.map(([k, history]): P2Viewer => ({ key: `p2ws.rev.${k}`, uid: REVIEWER, role: "personal_reviewer", history, workspace: PWS() })),
 ];
 
+const ROW = { modelId: "chatgpt", status: "ok", rawTextTruncated: "A", latencyMs: 120, wasTruncated: false, provider: "openai", requestedModel: "gpt-5" };
+export const NULL_ROW = { kind: "null_row" as const, value: [null, ROW] };
+export const NON_ARRAY_STRING = { kind: "non_array" as const, value: "corrupt-per-model" };
+export const NON_ARRAY_OBJECT = { kind: "non_array" as const, value: { length: 1, 0: ROW } };
+
+/** Authorized viewers on runs whose stored perModel is malformed: P1 throws; the A2 exception must cover each one. */
+export const MALFORMED_PERMODEL_VIEWERS: P2Viewer[] = [
+  { key: "p2.owner.permodel_null_row", uid: OWNER, role: "owner", perModelDefect: NULL_ROW },
+  { key: "p2.rev.qualifying_row.permodel_null_row", uid: REVIEWER, role: "personal_reviewer", history: "qualifying", perModelDefect: NULL_ROW },
+  { key: "p2ws.owner.permodel_null_row", uid: OWNER, role: "owner", workspace: PWS(), perModelDefect: NULL_ROW },
+  { key: "p2.owner.permodel_string", uid: OWNER, role: "owner", perModelDefect: NON_ARRAY_STRING },
+  { key: "p2.rev.absent_row.permodel_object", uid: REVIEWER, role: "personal_reviewer", history: "absent", perModelDefect: NON_ARRAY_OBJECT },
+  { key: "p2ws.rev.qualifying_row.permodel_string", uid: REVIEWER, role: "personal_reviewer", history: "qualifying", workspace: PWS(), perModelDefect: NON_ARRAY_STRING },
+];
+
 export const DENIAL_VIEWERS: P2Viewer[] = [
   { key: "p2.unauthenticated", uid: null, role: null, identityFailure: "missing_credentials" },
   { key: "p2.auth_error", uid: null, role: null, identityFailure: "invalid_token" },
@@ -76,6 +119,11 @@ export const DENIAL_VIEWERS: P2Viewer[] = [
   { key: "p2ws.owner.owner_mismatch", uid: OWNER, role: null, workspace: PWS("owner_mismatch") },
   { key: "p2ws.rev.lookup_failed", uid: REVIEWER, role: null, history: "qualifying", workspace: PWS("lookup_failed") },
   { key: "p2.owner.malformed_workspace_id", uid: OWNER, role: null, runOverrides: { workspaceId: "" } },
+  // A malformed perModel never excuses an authorization or integrity failure: these still deny, with no view.
+  { key: "p2.stranger.permodel_null_row", uid: STRANGER, role: null, perModelDefect: NULL_ROW },
+  { key: "p2.rev.unassigned.permodel_string", uid: REVIEWER, role: null, assignment: "unassigned", history: "qualifying", perModelDefect: NON_ARRAY_STRING },
+  { key: "p2.owner.team_bound_run.permodel_null_row", uid: OWNER, role: null, workspace: { workspaceId: WS_ID, mode: "resolved" }, perModelDefect: NULL_ROW },
+  { key: "p2ws.owner.lookup_failed.permodel_string", uid: OWNER, role: null, workspace: PWS("lookup_failed"), perModelDefect: NON_ARRAY_STRING },
 ];
 
 export interface P2Case {
@@ -90,7 +138,7 @@ const ALL_ADAPTIVE = Object.keys(ADAPTIVE) as AdaptiveKey[];
 const DENIAL_ADAPTIVE: AdaptiveKey[] = ["ds_split", "absent"];
 
 export const CASES: P2Case[] = [
-  ...SUCCESS_VIEWERS.flatMap((viewer) => ALL_RECORDS.flatMap((record) => ALL_ADAPTIVE.map((adaptive) => ({ id: `${viewer.key}|${record}|${adaptive}`, viewer, record, adaptive })))),
+  ...[...SUCCESS_VIEWERS, ...MALFORMED_PERMODEL_VIEWERS].flatMap((viewer) => ALL_RECORDS.flatMap((record) => ALL_ADAPTIVE.map((adaptive) => ({ id: `${viewer.key}|${record}|${adaptive}`, viewer, record, adaptive })))),
   // Every record state for every denial: the #259 403 must not depend on the record.
   ...DENIAL_VIEWERS.flatMap((viewer) => ALL_RECORDS.flatMap((record) => DENIAL_ADAPTIVE.map((adaptive) => ({ id: `${viewer.key}|${record}|${adaptive}`, viewer, record, adaptive })))),
 ];
