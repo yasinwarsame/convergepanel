@@ -50,6 +50,8 @@ import { buildRunReadPayload, type RunReadPayload } from "@/lib/runs/runReadPayl
 import { resolveRunReviewRouting } from "@/lib/runs/resolveRunReviewRouting";
 import { parseGovernanceRecord } from "@/lib/adaptiveSchema/governanceRecordParser";
 import { PERSONAL_RESEARCH_SNAPSHOT_ORIGIN_TYPE } from "@/lib/workspaces/personalResearchSnapshotOrigin";
+import { buildDsProvenanceRouteView, type DsProvenanceRouteView } from "@/lib/adaptiveSchema/dsProvenanceRouteAdapter";
+import { DS_PROVENANCE_ROUTE_VIEW_ENABLED } from "@/lib/env";
 import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -82,6 +84,8 @@ export type TeamRunDetailResponse = RunReadPayload & {
     origin: TeamRunDetailOriginDto | null;
     review: TeamRunDetailReviewDto | null;
   };
+  /** Order 6 S-1b.1 — present only when the flag is on and the view was built; never null. */
+  dsProvenance?: DsProvenanceRouteView;
 };
 
 async function getUid(req: NextRequest): Promise<string | NextResponse> {
@@ -244,5 +248,15 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
       review: presentReview(data.governanceRecord),
     },
   };
+
+  // Order 6 S-1b.1 — after every denial, including the Project-integrity
+  // 404/503 above. The route's own viewer context is passed unchanged.
+  const dsProvenance = buildDsProvenanceRouteView({
+    enabled: DS_PROVENANCE_ROUTE_VIEW_ENABLED,
+    surfaceRequest: { surfaceId: "W1", role: viewerRole },
+    payload,
+    governanceRecord: data.governanceRecord,
+  });
+  if (dsProvenance) response.dsProvenance = dsProvenance;
   return NextResponse.json(response);
 }
