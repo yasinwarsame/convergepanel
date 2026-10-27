@@ -642,6 +642,25 @@ run("field-level disclosure ceiling (D-11(A) on P2)", () => {
   });
 });
 
+run("builder inputs: the route hands over exactly what D-P2 allows", () => {
+  it("the raw stored record and the stored output's parse, the route's own context, and no results", async () => {
+    const targets = builtCases().filter((_, k) => k % 5 === 0);
+    expect(targets.length).toBeGreaterThan(50);
+    for (const c of targets) {
+      await observe(c, true);
+      expect([c.id, mockBuilderCalls.length]).toEqual([c.id, 1]);
+      const input = mockBuilderCalls[0] as Record<string, any>;
+      const stored = mockRunDocs.get(RUN_ID)!;
+      expect(Object.keys(input).sort()).toEqual(["governanceRecord", "publicAdaptiveOutput", "publicResults", "surfaceRequest"]);
+      // The very object read from the run document, never the route's parsed copy (M15).
+      expect([c.id, input.governanceRecord === stored.governanceRecord]).toEqual([c.id, true]);
+      expect(input.publicAdaptiveOutput).toEqual(realParseOutput(stored.adaptiveOutput).output);
+      expect(input.publicResults).toBeNull();
+      expect(input.surfaceRequest).toEqual({ surfaceId: "P2", role: c.viewer.role, mayReadDecisionReviewer: identityAllowed(c) });
+    }
+  });
+});
+
 // ─── The suite detects flawed variants (AC-9) ─────────────────────────────
 
 const rejects = (c: P2Case, on: Observation): "accepted" | "rejected" => {
