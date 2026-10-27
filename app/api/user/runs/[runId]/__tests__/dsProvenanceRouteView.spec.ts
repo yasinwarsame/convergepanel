@@ -345,7 +345,10 @@ function assertFlagOn(c: RouteCase, on: Observation, b: Baseline): void {
   const { base, view } = splitView(on.text);
   expect(sha(base)).toBe(b.bodySha256);
   if (!a.built) {
+    // Omitted entirely, never `"dsProvenance": null` (R2 F-1): the whole body is the baseline body.
     expect(view).toBeNull();
+    expect(Object.prototype.hasOwnProperty.call(JSON.parse(on.text), "dsProvenance")).toBe(false);
+    expect(sha(on.text)).toBe(b.bodySha256);
     return;
   }
   expect(view).not.toBeNull();
@@ -361,6 +364,8 @@ function assertFlagOn(c: RouteCase, on: Observation, b: Baseline): void {
   expect(body.viewerRole).toBe(expectedViewerRole(c));
   // The whole view, at every depth, equals oracle (a): no key beyond the contract can ride along (R1 M-1).
   expect(view).toStrictEqual(expectedFullView(a, body));
+  // ...and in contract key order at every depth, so key order cannot carry data either (R2 F-2).
+  expect(JSON.stringify(view)).toBe(JSON.stringify(expectedFullView(a, body)));
 
   // Oracle (a) ↔ oracle (b): the baseline body releases a human-review field to this viewer exactly when (a) allows it.
   const hr = storedHumanReview(c.record);
@@ -594,6 +599,28 @@ run("R3-style flawed variants fail the acceptance assertions", () => {
         const parsed = JSON.parse(on.text);
         add(parsed.dsProvenance);
         expect([name, c.id, (() => { try { assertFlagOn(c, { ...on, text: JSON.stringify(parsed) }, BASELINE.cases[c.id]); return "accepted"; } catch { return "rejected"; } })()]).toEqual([name, c.id, "rejected"]);
+      }
+    }
+  });
+
+  it("an explicit `dsProvenance: null` on any not-built 200 is rejected (R2 F-1)", () => {
+    const cases = CASES.filter((c) => !oracleA(c).built && observations.get(c.id)!.on.status === 200);
+    expect(cases.length).toBe(600);
+    for (const c of cases) {
+      const on = observations.get(c.id)!.on;
+      const text = on.text.slice(0, -1) + ',"dsProvenance":null}';
+      expect([c.id, (() => { try { assertFlagOn(c, { ...on, text }, BASELINE.cases[c.id]); return "accepted"; } catch { return "rejected"; } })()]).toEqual([c.id, "rejected"]);
+    }
+  });
+
+  it("a view whose nested key order differs is rejected (R2 F-2)", () => {
+    const reorder = (o: Record<string, unknown>) => Object.fromEntries(Object.entries(o).reverse());
+    for (const c of CASES.filter((x) => oracleA(x).built)) {
+      for (const part of ["l4", "humanReview", "l2"] as const) {
+        const on = observations.get(c.id)!.on;
+        const parsed = JSON.parse(on.text);
+        parsed.dsProvenance[part] = reorder(parsed.dsProvenance[part]);
+        expect([c.id, part, (() => { try { assertFlagOn(c, { ...on, text: JSON.stringify(parsed) }, BASELINE.cases[c.id]); return "accepted"; } catch { return "rejected"; } })()]).toEqual([c.id, part, "rejected"]);
       }
     }
   });

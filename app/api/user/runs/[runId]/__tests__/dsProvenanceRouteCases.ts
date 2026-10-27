@@ -224,8 +224,8 @@ export function expectedViewerRole(c: RouteCase): string | null {
 // ─── Oracle (a), whole view: L1–L4 transcribed from the sealed S-1a-min contract (B §3.5) ───
 //
 // Computed from the SAME response body the view is attached to (its `results` and `adaptive.output`), never from the
-// builder. Combined with `oracleA(...).humanReview`, it is the exact expected view: any key the view carries beyond
-// this, at any depth, fails the suite.
+// builder. Combined with `oracleA(...).humanReview`, it is the exact expected view, in the contract's key order (the
+// order of the B §3.5 types): any key beyond this, or any reordering, at any depth, fails the suite.
 
 const PUBLIC_SLOT_STATUSES = new Set(["ok", "substituted", "failed"]);
 const own = (o: unknown, k: string): unknown => (o && typeof o === "object" && Object.prototype.hasOwnProperty.call(o, k) ? (o as Record<string, unknown>)[k] : undefined);
@@ -246,9 +246,9 @@ export function expectedFullView(a: Extract<OracleA, { built: true }>, body: { r
       status,
       requestedModel: recorded(row, "requestedModel"),
       answeredByProvider: recorded(row, "provider"),
-      contributedRecommendation: "unknown",
     };
     if (status === "substituted") slot.substitutedFrom = recorded(row, "substitutedFrom");
+    slot.contributedRecommendation = "unknown";
     return slot;
   });
 
@@ -258,8 +258,9 @@ export function expectedFullView(a: Extract<OracleA, { built: true }>, body: { r
   const m = count(own(result, "totalModels"));
   const k = count(own(rec, "totalModelsWithRecommendation"));
   const n = count(own(rec, "supportCount"));
-  const recommendation: Record<string, unknown> = { action: str(own(rec, "action")), isContested: bool(own(rec, "isContested")) };
+  const recommendation: Record<string, unknown> = { action: str(own(rec, "action")) };
   if (own(rec, "recommendedOptionId") !== undefined) recommendation.recommendedOptionId = str(own(rec, "recommendedOptionId"));
+  recommendation.isContested = bool(own(rec, "isContested"));
   const l2 = {
     recommendation,
     dispatchedModels: m,
