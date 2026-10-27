@@ -19,8 +19,15 @@
  *       from that commit: DS_PROVENANCE_BASELINE_CAPTURE=<out.json> with this
  *       spec and dsProvenanceP2Cases.ts copied into a 0b540a7 checkout.
  *   (c) the real P1 handler on the same run document and caller: the D-P2-X
- *       condition. Every P2 viewer who receives the view must get a P1 200 that
- *       carries the same valid Decision Support output and a usable review.
+ *       condition, as qualified by owner ruling A2. Every P2 viewer who receives
+ *       the view must pass P1's own authorization and workspace-integrity checks
+ *       for that run, and wherever P1 returns its Decision Support output the view
+ *       must be backed by exactly that output (same role, usable review). A P1
+ *       HTTP 200 is NOT required only when P1 throws one of the two documented
+ *       malformed-perModel TypeErrors inside `runDocumentToPublicResults` (a null
+ *       row, O6-OBS-5; a non-array perModel); then P1's admission is shown by the
+ *       same caller and run with a well-formed perModel returning a P1 200 with the
+ *       same role and output. Every other P1 failure is excluded.
  */
 
 let mockFlag = false;
@@ -337,18 +344,44 @@ async function observeP1(c: P2Case): Promise<P1Observation> {
 
 /**
  * Owner ruling A2: a P1 failure is excused ONLY when it is one of the two documented malformed-perModel mechanisms
- * inside `runDocumentToPublicResults`, identified by its exact TypeError and the throwing frame, never by the HTTP
- * status. Anything else (another message, another frame, a non-TypeError, a 500 response, a denial) is not excused.
+ * inside `runDocumentToPublicResults`, identified by its exact TypeError message and by the throwing (first) stack
+ * frame, never by the HTTP status. Anything else (another message, another frame, a non-TypeError, a 500 response,
+ * a denial) is not excused.
+ *
+ * The rule is a parameter only so the suite can prove its own negative tests fail against deliberately weakened
+ * matching (`WEAKENED_RULES`); every oracle decision uses `STRICT_RULE`.
  */
 const PERMODEL_MECHANISMS = {
   null_row: "Cannot read properties of null (reading 'rawTextTruncated')",
   non_array: "runDocument.perModel.map is not a function",
 } as const;
-function attributedPerModelMechanism(o: Pick<P1Observation, "status" | "error">): keyof typeof PERMODEL_MECHANISMS | null {
-  if (o.status !== "threw" || !o.error || o.error.name !== "TypeError") return null;
-  const topFrame = o.error.stack.split("\n").find((l) => /^\s+at /.test(l)) ?? "";
-  if (!/lib\/user\/runDocumentToPublicResults\.ts/.test(topFrame)) return null;
-  for (const [kind, message] of Object.entries(PERMODEL_MECHANISMS)) if (o.error.message === message) return kind as keyof typeof PERMODEL_MECHANISMS;
+type Mechanism = keyof typeof PERMODEL_MECHANISMS;
+interface AttributionRule {
+  requireTypeError: boolean;
+  /** "first": only the first stack frame may be in the target file; "any": any frame (weakened). */
+  frame: "first" | "any";
+  /** "exact": the documented message verbatim; "loose": shared prefix / suffix (weakened). */
+  message: "exact" | "loose";
+  /** Whether the thrown mechanism must be the case's own seeded defect. */
+  requireKindMatch: boolean;
+}
+const STRICT_RULE: AttributionRule = { requireTypeError: true, frame: "first", message: "exact", requireKindMatch: true };
+const WEAKENED_RULES: Record<string, AttributionRule> = {
+  any_frame: { ...STRICT_RULE, frame: "any" },
+  loose_message: { ...STRICT_RULE, message: "loose" },
+  any_error_type: { ...STRICT_RULE, requireTypeError: false },
+  no_kind_match: { ...STRICT_RULE, requireKindMatch: false },
+};
+const TARGET_FILE = /lib[\\/]user[\\/]runDocumentToPublicResults\.ts:\d+:\d+/;
+function attributedPerModelMechanism(o: Pick<P1Observation, "status" | "error">, rule: AttributionRule = STRICT_RULE): Mechanism | null {
+  if (o.status !== "threw" || !o.error) return null;
+  if (rule.requireTypeError && o.error.name !== "TypeError") return null;
+  const frames = o.error.stack.split("\n").filter((l) => /^\s+at /.test(l));
+  if (!(rule.frame === "first" ? TARGET_FILE.test(frames[0] ?? "") : frames.some((f) => TARGET_FILE.test(f)))) return null;
+  for (const [kind, message] of Object.entries(PERMODEL_MECHANISMS) as Array<[Mechanism, string]>) {
+    const loose = o.error.message.startsWith(message.slice(0, 30)) || (message.endsWith("is not a function") && o.error.message.endsWith("is not a function"));
+    if (rule.message === "exact" ? o.error.message === message : loose) return kind;
+  }
   return null;
 }
 
@@ -548,18 +581,18 @@ const dsWithReview = (r: P1Observation | undefined) =>
   !!r && r.status === 200 && r.body!.adaptive?.status === "valid" && r.body!.adaptive.output?.schemaId === "decision_support" && r.body!.adaptive.humanReview !== null;
 
 /** The P1 response that backs this case: P1 itself, or (A2 exception only) the well-formed-perModel counterfactual. */
-function backingP1(c: P2Case): { r: P1Observation; via: "p1" | "a2_exception" } | null {
+function backingP1(c: P2Case, rule: AttributionRule = STRICT_RULE): { r: P1Observation; via: "p1" | "a2_exception" } | null {
   const r = p1.get(c.id)!;
   if (r.status === 200) return { r, via: "p1" };
-  const kind = attributedPerModelMechanism(r);
-  if (kind === null || kind !== c.viewer.perModelDefect?.kind) return null;
+  const kind = attributedPerModelMechanism(r, rule);
+  if (kind === null || (rule.requireKindMatch && kind !== c.viewer.perModelDefect?.kind)) return null;
   const cf = p1Counterfactual.get(c.id);
   return cf && cf.status === 200 ? { r: cf, via: "a2_exception" } : null;
 }
 const P1_DS_WITH_REVIEW = (c: P2Case) => dsWithReview(backingP1(c)?.r);
 
 run("D-P2-X: every P2 view is backed by the same viewer's P1 Decision Support output (oracle c, ruling A2)", () => {
-  it("every P2 response carrying dsProvenance is backed by a P1 200 with the same valid Decision Support output and a usable review", () => {
+  it("every P2 response carrying dsProvenance is backed by P1 under A2 (a P1 200, or for the two malformed-perModel throws only, the well-formed counterfactual's P1 200) with the same valid Decision Support output and a usable review", () => {
     const via = { p1: 0, a2_exception: 0 };
     for (const c of CASES) {
       if (!Object.prototype.hasOwnProperty.call(JSON.parse(observations.get(c.id)!.on.text || "{}"), "dsProvenance")) continue;
@@ -577,7 +610,7 @@ run("D-P2-X: every P2 view is backed by the same viewer's P1 Decision Support ou
     expect(via.a2_exception).toBeGreaterThan(100);
   });
 
-  it("admission equivalence: every authorized P2 200 is a P1 200 for the same caller and role (A2: on the well-formed counterfactual)", () => {
+  it("admission equivalence: every authorized P2 200 passes P1 for the same caller and role (a P1 200, or under A2 the well-formed counterfactual's P1 200)", () => {
     let direct = 0;
     let exception = 0;
     for (const c of CASES) {
@@ -675,12 +708,58 @@ run("owner ruling A2: the malformed-perModel exception and its limits", () => {
     expect(observations.get(lookup.id)!.on.text).not.toContain("dsProvenance");
   });
 
-  it("a mismatched mechanism is not excused: the case's own defect must be the one P1 threw", () => {
-    const c = CASES.find((x) => x.id === "p2.owner.permodel_string|approved_single_no_via|ds_split")!;
-    const forged: P2Case = { ...c, viewer: { ...c.viewer, perModelDefect: { kind: "null_row", value: c.viewer.perModelDefect!.value } } };
-    const r = p1.get(c.id)!;
-    expect(attributedPerModelMechanism(r)).toBe("non_array");
-    expect(attributedPerModelMechanism(r) === forged.viewer.perModelDefect!.kind).toBe(false);
+  it("a mismatched mechanism is not excused: the case's own defect must be the one P1 threw (R2 NIT-2)", () => {
+    // Each real case relabelled with the OTHER mechanism: P1 really threw its own TypeError, so the A2 backing must vanish.
+    const pairs: Array<[string, Mechanism]> = [
+      ["p2.owner.permodel_string|approved_single_no_via|ds_split", "null_row"],
+      ["p2.owner.permodel_null_row|approved_single_no_via|ds_split", "non_array"],
+    ];
+    for (const [id, otherKind] of pairs) {
+      const c = CASES.find((x) => x.id === id)!;
+      const forged: P2Case = { ...c, viewer: { ...c.viewer, perModelDefect: { kind: otherKind, value: c.viewer.perModelDefect!.value } } };
+      // Positive control: the true label is backed through the exception.
+      expect([id, backingP1(c)?.via]).toEqual([id, "a2_exception"]);
+      // The assertion under test: the mislabelled case is not backed at all.
+      expect([id, backingP1(forged)]).toEqual([id, null]);
+      // Falsification: with the kind check removed the same forged case WOULD be backed, so the assertion above fails.
+      expect([id, backingP1(forged, WEAKENED_RULES.no_kind_match)?.via]).toEqual([id, "a2_exception"]);
+    }
+  });
+
+  it("the throwing-frame and message rules: accepted only for the documented message from the first frame in runDocumentToPublicResults (R2 NIT-3)", () => {
+    const at = (fn: string, file: string, line = 18) => `    at ${fn} (/any/checkout/${file}:${line}:24)`;
+    const stack = (message: string, ...frames: string[]) => [`TypeError: ${message}`, ...frames].join("\n");
+    const NULL_MSG = PERMODEL_MECHANISMS.null_row;
+    const MAP_MSG = PERMODEL_MECHANISMS.non_array;
+    const threw = (name: string, message: string, s: string): Pick<P1Observation, "status" | "error"> => ({ status: "threw", error: { name, message, stack: s } });
+    // Literal expected outcomes under the strict rule (never computed from the predicate under test).
+    const table: Array<[string, Pick<P1Observation, "status" | "error">, Mechanism | null]> = [
+      ["null row, thrown in the map callback inside the target", threw("TypeError", NULL_MSG, stack(NULL_MSG, at("<anonymous>", "lib/user/runDocumentToPublicResults.ts", 19), "    at Array.map (<anonymous>)", at("runDocumentToPublicResults", "lib/user/runDocumentToPublicResults.ts"))), "null_row"],
+      ["non-array, thrown by the target itself", threw("TypeError", MAP_MSG, stack(MAP_MSG, at("runDocumentToPublicResults", "lib/user/runDocumentToPublicResults.ts"), at("buildRunReadPayload", "lib/runs/runReadPayload.ts", 103))), "non_array"],
+      ["same path with Windows separators", threw("TypeError", MAP_MSG, stack(MAP_MSG, "    at runDocumentToPublicResults (C:\\checkout\\lib\\user\\runDocumentToPublicResults.ts:18:24)")), "non_array"],
+      ["same null-row message, first frame elsewhere, target only second", threw("TypeError", NULL_MSG, stack(NULL_MSG, at("normalizePersistedModelResult", "lib/panel/normalize.ts", 5), at("runDocumentToPublicResults", "lib/user/runDocumentToPublicResults.ts"))), null],
+      ["same map message from another function entirely", threw("TypeError", MAP_MSG, stack(MAP_MSG, at("publicizePanelResults", "lib/panel/publicize.ts", 9), at("buildRunReadPayload", "lib/runs/runReadPayload.ts", 105))), null],
+      ["unrelated null read inside the target", threw("TypeError", "Cannot read properties of null (reading 'tokenUsage')", stack("Cannot read properties of null (reading 'tokenUsage')", at("runDocumentToPublicResults", "lib/user/runDocumentToPublicResults.ts", 20))), null],
+      ["unrelated 'not a function' inside the target", threw("TypeError", "p.rawTextTruncated.trim is not a function", stack("p.rawTextTruncated.trim is not a function", at("runDocumentToPublicResults", "lib/user/runDocumentToPublicResults.ts", 19))), null],
+      ["documented message, not a TypeError", threw("Error", NULL_MSG, stack(NULL_MSG, at("runDocumentToPublicResults", "lib/user/runDocumentToPublicResults.ts"))), null],
+      ["target file named only in the message, no frame", threw("TypeError", MAP_MSG, `TypeError: ${MAP_MSG} (lib/user/runDocumentToPublicResults.ts)`), null],
+      ["a similarly named file", threw("TypeError", MAP_MSG, stack(MAP_MSG, at("runDocumentToPublicResults", "lib/user/runDocumentToPublicResultsLegacy.ts"))), null],
+    ];
+    for (const [name, o, expected] of table) expect([name, attributedPerModelMechanism(o)]).toEqual([name, expected]);
+    // Falsification: every weakened rule disagrees with the literal table on at least one row, so the loop above fails.
+    for (const [ruleName, rule] of Object.entries(WEAKENED_RULES).filter(([n]) => n !== "no_kind_match")) {
+      const disagreements = table.filter(([, o, expected]) => attributedPerModelMechanism(o, rule) !== expected).map(([n]) => n);
+      expect([ruleName, disagreements.length > 0]).toEqual([ruleName, true]);
+    }
+    // ...and each one specifically: "any frame" admits the second-frame row; "loose" admits the unrelated messages;
+    // "any error type" admits the plain Error.
+    expect(attributedPerModelMechanism(table[3][1], WEAKENED_RULES.any_frame)).toBe("null_row");
+    expect(attributedPerModelMechanism(table[5][1], WEAKENED_RULES.loose_message)).toBe("null_row");
+    expect(attributedPerModelMechanism(table[6][1], WEAKENED_RULES.loose_message)).toBe("non_array");
+    expect(attributedPerModelMechanism(table[7][1], WEAKENED_RULES.any_error_type)).toBe("null_row");
+    // The real thrown stacks (whatever this machine's paths look like) are accepted by the strict rule.
+    expect(attributedPerModelMechanism(p1.get("p2.owner.permodel_null_row|approved_single_no_via|ds_split")!)).toBe("null_row");
+    expect(attributedPerModelMechanism(p1.get("p2.owner.permodel_string|approved_single_no_via|ds_split")!)).toBe("non_array");
   });
 
   it("authorization and workspace-integrity failures still suppress the view on malformed-perModel runs", () => {
@@ -811,7 +890,10 @@ run("builder inputs: the route hands over exactly what D-P2 allows", () => {
       const input = mockBuilderCalls[0] as Record<string, any>;
       const stored = mockRunDocs.get(RUN_ID)!;
       expect(Object.keys(input).sort()).toEqual(["governanceRecord", "publicAdaptiveOutput", "publicResults", "surfaceRequest"]);
-      // The very object read from the run document, never the route's parsed copy (M15).
+      // The very object read from the run document. This does NOT kill mutant M15 (route passes its parsed record):
+      // parseGovernanceRecord returns that same object (governanceRecordParser.ts:177), so M15 is an equivalent
+      // mutant and survives (32/33 author mutants killed). What this test does pin is the input set, `publicResults:
+      // null`, the stored output's parse and the route's own context, including mayReadDecisionReviewer vs oracle (a).
       expect([c.id, input.governanceRecord === stored.governanceRecord]).toEqual([c.id, true]);
       expect(input.publicAdaptiveOutput).toEqual(realParseOutput(stored.adaptiveOutput).output);
       expect(input.publicResults).toBeNull();
