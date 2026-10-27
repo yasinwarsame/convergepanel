@@ -179,6 +179,16 @@ export const SOURCE_PUBLISHER_CLASS_ENABLED = process.env.SOURCE_PUBLISHER_CLASS
 export const SOURCE_AUTHORITY_METADATA_ENABLED = process.env.SOURCE_AUTHORITY_METADATA_ENABLED === "true";
 
 /**
+ * Order 6 S-1b.1 — the Decision Support provenance view on the run detail
+ * reads (P1 `GET /api/user/runs/[runId]`, W1
+ * `GET /api/workspaces/[workspaceId]/runs/[runId]`). Default OFF; server-only
+ * (never a NEXT_PUBLIC variant). While off, the view builder is never called
+ * and both responses are byte-identical to before. Turning it on needs a
+ * separate owner activation decision.
+ */
+export const DS_PROVENANCE_ROUTE_VIEW_ENABLED = process.env.DS_PROVENANCE_ROUTE_VIEW_ENABLED === "true";
+
+/**
  * Order 5 Phase 0 — Provider Search Evidence COUNTERS. Default OFF;
  * server-only (never a NEXT_PUBLIC variant). When on, each Research run with
  * a Perplexity slot emits one aggregate, content-free log event describing the

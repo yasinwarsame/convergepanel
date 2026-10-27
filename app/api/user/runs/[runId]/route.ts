@@ -18,6 +18,8 @@ import { classifyProjectIdFieldState } from "@/lib/projects/runProjectNormalizat
 import { deriveTeamRunViewerRole } from "@/lib/workspaces/deriveTeamRunViewerRole";
 import { buildRunReadPayload, type RunReadViewerRole } from "@/lib/runs/runReadPayload";
 import { resolveRunReviewRouting } from "@/lib/runs/resolveRunReviewRouting";
+import { buildDsProvenanceRouteView } from "@/lib/adaptiveSchema/dsProvenanceRouteAdapter";
+import { DS_PROVENANCE_ROUTE_VIEW_ENABLED } from "@/lib/env";
 import { logger } from "@/lib/logger";
 
 type TeamAccessDenied = Extract<ResolveTeamRunWorkspaceAccessResult, { granted: false }>;
@@ -366,5 +368,20 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
     resolveReviewRouting: resolveRunReviewRouting,
   });
 
-  return NextResponse.json(payload);
+  // Order 6 S-1b.1 — every denial has already returned. The route's own
+  // viewer context is passed unchanged; the adapter omits the field unless
+  // the flag is on and this response already carries a usable review.
+  const dsProvenance = buildDsProvenanceRouteView({
+    enabled: DS_PROVENANCE_ROUTE_VIEW_ENABLED,
+    surfaceRequest: {
+      surfaceId: "P1",
+      path: classified.kind === "non_personal_bound" ? "team_bound" : "personal",
+      role: viewerRole,
+      mayReadDecisionContent,
+    },
+    payload,
+    governanceRecord: data.governanceRecord,
+  });
+
+  return NextResponse.json(dsProvenance ? { ...payload, dsProvenance } : payload);
 }
