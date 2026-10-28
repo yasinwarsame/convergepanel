@@ -70,7 +70,7 @@ describe("TeamResearchReviewSummary", () => {
       'import { getReviewStatusBadgeClass, getReviewStatusLabel } from "@/lib/workspaces/reviewQueuePresentation";',
       'import type { TeamRunDetailReview } from "@/lib/research/teamRunDetailPresentation";',
       // Order 6 / S-E.1: the pure, owner-approved DS wording module (no I/O).
-      'import { DS_NOT_FLAGGED_FOR_REVIEW, dsReceiptSourcesLabel, isDecisionSupportSchema } from "@/lib/adaptiveSchema/dsLabelWording";',
+      'import { DS_NOT_FLAGGED_FOR_REVIEW, DS_OPTION_GROUPING_DISCLOSURE, dsReceiptSourcesLabel, isDecisionSupportSchema } from "@/lib/adaptiveSchema/dsLabelWording";',
     ]);
   });
 });

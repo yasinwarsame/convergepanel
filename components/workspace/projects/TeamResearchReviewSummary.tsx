@@ -25,7 +25,7 @@
 
 import { getReviewStatusBadgeClass, getReviewStatusLabel } from "@/lib/workspaces/reviewQueuePresentation";
 import type { TeamRunDetailReview } from "@/lib/research/teamRunDetailPresentation";
-import { DS_NOT_FLAGGED_FOR_REVIEW, dsReceiptSourcesLabel, isDecisionSupportSchema } from "@/lib/adaptiveSchema/dsLabelWording";
+import { DS_NOT_FLAGGED_FOR_REVIEW, DS_OPTION_GROUPING_DISCLOSURE, dsReceiptSourcesLabel, isDecisionSupportSchema } from "@/lib/adaptiveSchema/dsLabelWording";
 
 /**
  * Order 6 / S-E.1 (K-3: Decision Support only): the receipt flags for a DS run. The source claim needs a reference list
@@ -64,7 +64,10 @@ export default function TeamResearchReviewSummary({ review, schemaId }: { review
           <p className="text-xs font-medium uppercase tracking-wide text-cp-faint">Decision receipt</p>
           <p className="mt-1 text-sm text-cp-text">{receipt.conclusion}</p>
           {isDecisionSupportSchema(schemaId) ? (
-            <p className="mt-1 text-xs text-cp-muted">{decisionSupportReceiptFlags(receipt)}</p>
+            <>
+              <p className="mt-1 text-xs leading-relaxed text-cp-muted">{DS_OPTION_GROUPING_DISCLOSURE}</p>
+              <p className="mt-1 text-xs text-cp-muted">{decisionSupportReceiptFlags(receipt)}</p>
+            </>
           ) : (
           <p className="mt-1 text-xs text-cp-muted">
             {receipt.sourceBacked ? "Source-backed" : "Not source-backed"} · {receipt.humanReviewNeeded ? "Human review needed" : "Human review not required"}

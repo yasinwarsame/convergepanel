@@ -91,8 +91,13 @@ describe("AdaptiveReviewListItem — base rendering (unchanged)", () => {
 
   it("never renders a decision/mutation control", () => {
     const html = renderToStaticMarkup(createElement(AdaptiveReviewListItem, { item: adaptiveItem() }));
+    // Order 6 S-E.1: a Decision Support item carries the sealed D-9 disclosure, whose example names "Approve vs
+    // Disapprove" as option text. Remove exactly that sealed sentence (it must be present), then no control word remains.
+    const D9 = "Options were grouped by text similarity. Different options with similar wording (for example 3.5% vs 35%, or Approve vs Disapprove) can be merged; agreement on an option is not established.";
+    expect(html.split(D9).length - 1).toBe(1);
+    const controls = html.split(D9).join("");
     for (const forbidden of ["Approve", "Reject", "Request Changes", "Submit"]) {
-      expect(html).not.toContain(forbidden);
+      expect(controls).not.toContain(forbidden);
     }
     expect(html).not.toMatch(/<button/);
   });

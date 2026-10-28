@@ -66,7 +66,7 @@ function SourcesListedBadge({ sources }: { sources: unknown }) {
   const text = dsSourcesBadge(sources);
   if (text === null) return null;
   return (
-    <TintBadge tone={text === DS_NO_SOURCES_LISTED ? "warning" : "accent"} title="Source references are listed as the models gave them; none were fetched or checked">
+    <TintBadge tone={text === DS_NO_SOURCES_LISTED ? "warning" : "accent"} title={text === DS_NO_SOURCES_LISTED ? "No model listed a source reference" : "Source references are listed as the models gave them; none were fetched or checked"}>
       {text}
     </TintBadge>
   );
@@ -128,7 +128,7 @@ export default function DecisionSupportView({ decisionSupport }: { decisionSuppo
       {humanReviewNeeded && (
         <Card className="bg-amber-50 border-amber-200">
           <p className="text-xs text-amber-900 leading-relaxed">
-            This decision needs human review — either the stakes are high, the panel&apos;s own recommendations genuinely conflicted, or the
+            This decision needs human review — either the stakes are high, the current grouping found a split in the panel&apos;s recommendations, or the
             evidence behind the recommended option is weak or unclear. Treat this as a starting point, not a final call.
           </p>
         </Card>

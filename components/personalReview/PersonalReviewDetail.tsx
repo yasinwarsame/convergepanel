@@ -24,6 +24,7 @@ import type { PersonalReviewInboxStatus } from "@/lib/governance/personalReviewI
 import { personalReviewInboxStatus } from "@/lib/governance/personalReviewInbox";
 import type { ReviewGovernanceViewModel } from "@/lib/adaptiveSchema/reviewGovernanceViewModel";
 import ReceiptSourcesFlag from "@/components/adaptive/ReceiptSourcesFlag";
+import { ReceiptGroupingDisclosure, ReceiptReviewFlag } from "@/components/adaptive/DsReceiptWording";
 
 function formatDatetime(iso: string | undefined): string {
   if (!iso) return "—";
@@ -315,9 +316,10 @@ export default function PersonalReviewDetail({ runId }: { runId: string }) {
           <section className="rounded-xl border border-cp-border bg-cp-surface p-5 shadow-sm">
             <h2 className="text-base font-bold text-cp-text">Decision Receipt</h2>
             <p className="mt-3 text-sm leading-relaxed text-cp-text">{data.decisionReceipt.conclusion}</p>
+            <ReceiptGroupingDisclosure schemaId={data.schemaId} className="mt-2 text-xs leading-relaxed text-cp-muted" />
             <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-cp-muted">
               <ReceiptSourcesFlag schemaId={data.schemaId} sourceBacked={data.decisionReceipt.sourceBacked} />
-              <span>{data.decisionReceipt.humanReviewNeeded ? "Human review needed" : "Human review not flagged as needed"}</span>
+              <ReceiptReviewFlag schemaId={data.schemaId} humanReviewNeeded={data.decisionReceipt.humanReviewNeeded} />
             </div>
             <div className="mt-4 space-y-3">
               <CollapsibleList title="Basis" items={data.decisionReceipt.basis} />

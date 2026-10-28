@@ -16,6 +16,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import AdaptivePanelResponse from "@/components/adaptive/AdaptivePanelResponse";
 import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
 import { buildDecisionSupportResult, type DecisionSupportFields } from "@/lib/adaptiveSchema/decisionSupportAlignment";
+import { buildAdaptiveDecisionReceipt } from "@/lib/adaptiveSchema/decisionReceiptBuilder";
 import type { AdaptiveModelResult, DecisionSupportResult, QueryClassification, QueryType } from "@/lib/adaptiveSchema/types";
 import type { ModelId } from "@/lib/types";
 
@@ -172,7 +173,32 @@ export function dsPageElement(fixture: DsFixture, ancillaryPresentation: unknown
   } as never);
 }
 
+/**
+ * The receipt every DS receipt surface shows, built by the real producer (`buildAdaptiveDecisionReceipt`) from the
+ * fixture's DS result, so the receipt carries the real application text and the grouped option label exactly as stored.
+ * A receipt-only stand-in (no DS result, used by the non-DS baseline) gets opaque model-style receipt text instead.
+ */
 export function receiptFor(fixture: DsFixture) {
+  const result = fixture.result as Partial<DecisionSupportResult>;
+  if (result.recommendation) {
+    const receipt = buildAdaptiveDecisionReceipt({
+      schemaId: "decision_support",
+      answerShape: "decision_support_view",
+      // A legacy run (no `sources` field on the stored result) had its receipt stored at creation; the builder needs a
+      // list, so the legacy fixture's receipt is built with an empty one.
+      result: Array.isArray(result.sources) ? fixture.result : { ...fixture.result, sources: [] },
+      meta: META(fixture.result.sourceBacked, fixture.result.humanReviewNeeded),
+    } as never);
+    return {
+      conclusion: receipt.conclusion,
+      basis: receipt.basis,
+      assumptions: receipt.assumptions,
+      uncertainties: receipt.uncertainties,
+      limitations: receipt.limitations,
+      sourceBacked: receipt.sourceBacked,
+      humanReviewNeeded: receipt.humanReviewNeeded,
+    };
+  }
   return {
     conclusion: S("Receipt conclusion text."),
     basis: [S("Receipt basis text.")],

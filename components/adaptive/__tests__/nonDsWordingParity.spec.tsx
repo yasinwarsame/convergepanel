@@ -47,6 +47,8 @@ if (OUT) {
   describe("non-Decision Support surfaces are unchanged from main (f207e1a)", () => {
     it("the baseline covers every non-DS schema and was not captured from failed renders", () => {
       for (const q of NON_DS_SCHEMAS) expect([q, Object.keys(baseline).some((k) => k.includes(`:${q}:`))]).toEqual([q, true]);
+      // Populated results too (o5p historical records), not only the empty state.
+      expect(Object.keys(baseline).filter((k) => k.startsWith("populated:")).length).toBe(44);
       expect(Object.values(baseline).filter((c) => c.text.startsWith("RENDER ERROR"))).toEqual([]);
       expect(Object.values(baseline).filter((c) => c.text.length < 20)).toEqual([]);
     });

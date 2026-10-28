@@ -51,7 +51,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { dsFixtures, S, surfaceFromHtml, type Surface } from "./seSurfaces/seSurfaceHarness";
 import { allDsSurfaces, dsPageSurface } from "./seSurfaces/seSurfaceRenderers";
-import { EXEMPTIONS, FAMILIES, assertNotBlind, scanSurface, usedExemptions, validateExemptions } from "./seSurfaces/dsWordingScanner";
+import { EXEMPTIONS, FAMILIES, FIELD_LABELS, assertNotBlind, scanSurface, usedExemptions, validateExemptions } from "./seSurfaces/dsWordingScanner";
 
 const fixtures = dsFixtures();
 const fixturesAtLoad = JSON.stringify(fixtures);
@@ -220,7 +220,8 @@ describe("literal oracle: each surface shows the approved string for its stored 
       if (e.counts) expect(s.textNodes).toContain(e.counts);
       if (e.e4) expect(s.textNodes).toContain(e.e4);
       else expect(all).toMatch(/recommendation is contested/);
-      expect([name, kind, all.includes(D9)]).toEqual([name, kind, e.d9]);
+      // The Team page also carries the receipt summary, which always shows D-9 (see the receipt checks below).
+      expect([name, kind, all.includes(D9)]).toEqual([name, kind, kind === "page_team" ? true : e.d9]);
       expect(all).toContain("Based on the currently grouped recommendations. Opposing options may have been grouped together.");
     }
   });
@@ -249,14 +250,31 @@ describe("literal oracle: each surface shows the approved string for its stored 
       const s = of(name, kind);
       if (sourcesText) expect(s.textNodes).toContain(sourcesText);
       else expect(s.textNodes.filter((t) => t === NONE || t === LISTED)).toEqual([]);
-      expect(s.textNodes).toContain(f.result.humanReviewNeeded ? "Human review needed" : "Human review not flagged as needed");
+      // E-6 on every DS receipt surface, never the shared "not flagged as needed" wording.
+      expect([kind, s.textNodes.includes(f.result.humanReviewNeeded ? "Human review needed" : "System did not flag this for human review.")]).toEqual([kind, true]);
+      expect([kind, textOf(s).includes("Human review not flagged as needed")]).toEqual([kind, false]);
+    }
+  });
+
+  it.each(Object.keys(ORACLE))("%s — D-9 travels with the receipt's grouped option on every receipt surface", (name) => {
+    for (const kind of ["page_team", "list_item", "personal_review", "team_review"]) {
+      expect([kind, of(name, kind).textNodes.filter((t) => t === D9).length]).toEqual([kind, kind === "page_team" && ORACLE[name].d9 ? 2 : 1]);
+    }
+  });
+
+  it("receipts come from the real builder: a chosen option is named in the receipt conclusion, as stored", () => {
+    const f = fixtures.find((x) => x.name === "merged_opposite_options")!;
+    const option = f.result.options.find((o) => o.id === f.result.recommendation.recommendedOptionId)!;
+    expect(option.label).toMatch(/^⟦.*⟧$/);
+    for (const kind of ["list_item", "personal_review", "team_review"]) {
+      expect([kind, of(f.name, kind).textNodes.some((t) => t.startsWith(`Choose option: ${option.label}`))]).toEqual([kind, true]);
     }
   });
 });
 
 describe("falsification: the gate fails when a prohibited label is reintroduced (one module mock per E-label)", () => {
-  // Each override re-plants an old E-label (or removes the D-9 text) at its real site, re-renders the real components in
-  // an isolated module registry, and requires the gate to catch it.
+  // Each override re-plants an old E-label (or removes the D-9 text) at its real site through the shared wording module
+  // (see `withWording`), re-renders the real components for that one case, and requires the gate to catch it.
   const PLANTS: [string, Record<string, unknown>, string, string[]][] = [
     ["E-1 Strong consensus", { dsModelAgreement: () => ({ text: "Strong consensus", kind: "no_disagreement" }) }, "page", ["F1-consensus-tier"]],
     ["E-2 Source grounding", { DS_SOURCES_FIELD: "Source grounding" }, "page", ["F3-source-assurance"]],
@@ -306,7 +324,7 @@ describe("falsification: the gate fails when a prohibited label is reintroduced 
     });
 
     it("(a') the consumers read wording at render time, not at module load", () => {
-      const consumers = ["TopSummaryBar.tsx", "DecisionSupportView.tsx", "PanelEvidenceSection.tsx", "ReceiptSourcesFlag.tsx"].map((f) => join(__dirname, "..", f));
+      const consumers = ["TopSummaryBar.tsx", "DecisionSupportView.tsx", "PanelEvidenceSection.tsx", "ReceiptSourcesFlag.tsx", "DsReceiptWording.tsx"].map((f) => join(__dirname, "..", f));
       consumers.push(join(__dirname, "..", "..", "workspace", "projects", "TeamResearchReviewSummary.tsx"));
       for (const p of consumers) {
         const src = readFileSync(p, "utf8");
@@ -342,8 +360,10 @@ describe("falsification: the gate fails when a prohibited label is reintroduced 
       const forward = CASES.map(fingerprint);
       const reverse = [...CASES].reverse().map(fingerprint).reverse();
       expect(reverse).toEqual(forward);
-      // Each plant's effect is its own: no case shows a family that only another case planted.
-      for (const f of forward) expect([f.label, f.html.length > 0]).toEqual([f.label, true]);
+      // Each plant's effect is its own: every case reports exactly the families its own plant introduces, nothing another
+      // case planted (the D-9 removal introduces no wording, so none).
+      const expected = new Map(CASES.map(([label]) => [label, [...(PLANTS.find((pl) => pl[0] === label)?.[3] ?? [])].sort()]));
+      for (const f of forward) expect([f.label, f.families]).toEqual([f.label, expected.get(f.label)]);
     });
 
     it("(e) repetition does not accumulate state: three full cycles are identical and leave nothing behind", () => {
@@ -396,6 +416,24 @@ describe("falsification: scanner mechanics", () => {
     expect(scanSurface(beside).map((h) => h.family)).toContain("F1-consensus-tier");
   });
 
+  it("(2b) a phrase split across inline elements or JSX children is still caught (joined reader-order scan)", () => {
+    const split = surfaceFromHtml("split", "<p>Human review <b>not required</b></p><p>Source<em>-backed</em></p>");
+    expect(split.textNodes).toEqual(["Human review", "not required", "Source", "-backed"]);
+    expect(scanSurface(split, { joined: false })).toEqual([]);
+    expect(scanSurface(split).map((h) => h.family).sort()).toEqual(["F3-source-assurance", "F4-review-necessity", "F7-old-e-strings"]);
+    // An exempt phrase stays exempt however it is split.
+    const exemptSplit: Surface = { id: "exempt-split", textNodes: ["Sources listed;", "not independently verified"], attributes: [] };
+    expect(scanSurface(exemptSplit)).toEqual([]);
+  });
+
+  it("(2c) the approved field label is exempt only as an exact whole node", () => {
+    expect(FIELD_LABELS).toEqual(["Model agreement"]);
+    expect(scanSurface({ id: "label", textNodes: ["Model agreement"], attributes: [] })).toEqual([]);
+    expect(scanSurface({ id: "label+claim", textNodes: ["Model agreement: unanimous"], attributes: [] }).map((h) => h.family)).toContain("F2-convergence");
+    expect(scanSurface({ id: "label-in-prose", textNodes: ["Model agreement was reached."], attributes: [] }).map((h) => h.family)).toContain("F2-convergence");
+    for (const s of surfaces.filter((x) => x.kind.startsWith("page"))) expect([s.id, s.textNodes.includes("Model agreement")]).toEqual([s.id, true]);
+  });
+
   it("(5) a broadened exemption is rejected by the validator, and would otherwise hide a violation", () => {
     const broad = [...EXEMPTIONS, "converge"];
     expect(validateExemptions(broad)).not.toEqual([]);
@@ -415,6 +453,21 @@ describe("falsification: scanner mechanics", () => {
       "F7-old-e-strings": "Assessment evidence strength",
     };
     for (const f of FAMILIES) expect([f.id, scanSurface({ id: f.id, textNodes: [examples[f.id]], attributes: [] }).map((h) => h.family)]).toEqual([f.id, expect.arrayContaining([f.id])]);
+  });
+
+  it("(1c) the families cover claim classes, not only the old strings", () => {
+    const claims: [string, string][] = [
+      ["The models agree on this option.", "F2-convergence"],
+      ["The panel agreed.", "F2-convergence"],
+      ["Agreement: high", "F2-convergence"],
+      ["the panel's own recommendations genuinely conflicted", "F2-convergence"],
+      ["Consensus", "F1-consensus-tier"],
+      ["Sources verified", "F3-source-assurance"],
+      ["Well-sourced recommendation", "F3-source-assurance"],
+      ["This decision does not need human review", "F4-review-necessity"],
+      ["A definitive answer", "F6-certainty"],
+    ];
+    for (const [text, family] of claims) expect([text, scanSurface({ id: "c", textNodes: [text], attributes: [] }).map((h) => h.family)]).toEqual([text, expect.arrayContaining([family])]);
   });
 });
 
@@ -436,12 +489,25 @@ describe("wiring", () => {
     expect(src("components/teamGovernance/AdaptiveReviewListItem.tsx")).toContain("<ReceiptSourcesFlag schemaId={item.schemaId} sourceBacked={item.sourceBacked} />");
   });
 
+  it("the three receipt surfaces route review wording and the D-9 disclosure through DsReceiptWording with the run's own schema", () => {
+    const personal = src("components/personalReview/PersonalReviewDetail.tsx");
+    expect(personal).toContain("<ReceiptReviewFlag schemaId={data.schemaId} humanReviewNeeded={data.decisionReceipt.humanReviewNeeded} />");
+    expect(personal).toContain("<ReceiptGroupingDisclosure schemaId={data.schemaId}");
+    const team = src("components/teamGovernance/AdaptiveReviewDetail.tsx");
+    expect(team).toContain("<ReceiptReviewFlag schemaId={data.review.schemaId} humanReviewNeeded={data.review.decisionReceipt.humanReviewNeeded} />");
+    expect(team).toContain("<ReceiptGroupingDisclosure schemaId={data.review.schemaId}");
+    const list = src("components/teamGovernance/AdaptiveReviewListItem.tsx");
+    expect(list).toContain("<ReceiptReviewFlag schemaId={item.schemaId} humanReviewNeeded={item.humanReviewNeeded} />");
+    expect(list).toContain("<ReceiptGroupingDisclosure schemaId={item.schemaId}");
+  });
+
   it("no touched component reads the provenance field", () => {
     for (const p of [
       "components/adaptive/TopSummaryBar.tsx",
       "components/adaptive/DecisionSupportView.tsx",
       "components/adaptive/PanelEvidenceSection.tsx",
       "components/adaptive/ReceiptSourcesFlag.tsx",
+      "components/adaptive/DsReceiptWording.tsx",
       "components/workspace/projects/TeamResearchReviewSummary.tsx",
       "lib/adaptiveSchema/dsLabelWording.ts",
     ]) {

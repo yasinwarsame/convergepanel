@@ -17,19 +17,31 @@ import { SENTINEL_SPAN, type Surface } from "./seSurfaceHarness";
 export type Family = { id: string; description: string; pattern: RegExp };
 
 export const FAMILIES: Family[] = [
-  { id: "F1-consensus-tier", description: "consensus tier word", pattern: /\b(strong|moderate|weak)\s+consensus\b/i },
-  { id: "F2-convergence", description: "convergence / unanimity claim", pattern: /\bconverg\w*|\bunanim\w*|\buncontested\b|\ball models agree\b|\bno material split\b|\bgenuine(ly)? agree\w*/i },
-  { id: "F3-source-assurance", description: "source assurance", pattern: /\bsource[- ]backed\b|\bevidence[- ]backed\b|\bverified sources?\b|\bfully supported\b|\bsource support captured\b|\bsource grounding\b/i },
-  { id: "F4-review-necessity", description: "review necessity", pattern: /\breview (is )?not required\b|\bno (human )?review (is )?(needed|required)\b/i },
+  { id: "F1-consensus-tier", description: "consensus claim (any consensus wording, tiered or bare)", pattern: /\bconsensus\b/i },
+  {
+    id: "F2-convergence",
+    description: "convergence / agreement / unanimity / genuineness claim",
+    pattern: /\bconverg\w*|\bunanim\w*|\buncontested\b|\bagree(s|d|ing)?\b|\bagreement\b|\bconcur\w*|\bno material split\b|\bgenuine(ly)?\b/i,
+  },
+  {
+    id: "F3-source-assurance",
+    description: "source assurance",
+    pattern: /\bsource[- ]backed\b|\bevidence[- ]backed\b|\bverified\b|\bfully supported\b|\bsource support captured\b|\bsource grounding\b|\bwell[- ]sourced\b|\bcorroborated\b/i,
+  },
+  {
+    id: "F4-review-necessity",
+    description: "review necessity",
+    pattern: /\breview (is )?not (required|needed|necessary)\b|\bno (human )?review (is )?(needed|required|necessary)\b|\b(does not|doesn't) (need|require) (human )?review\b/i,
+  },
   { id: "F5-option-distinctness", description: "option distinctness", pattern: /\b(kept|remain|remains|stay|stays)\s+(distinct|separate)\b|\boptions are (distinct|separate)\b|\bnever (merged|grouped)\b/i },
-  { id: "F6-certainty", description: "certainty claim", pattern: /\bcertain(ty)?\b|\bconfiden(t|ce)\b|\bguarantee\w*/i },
+  { id: "F6-certainty", description: "certainty claim", pattern: /\bcertain(ty|ly)?\b|\bconfiden(t|ce)\b|\bguarantee\w*|\bdefinitive(ly)?\b|\bproven\b/i },
   { id: "F7-old-e-strings", description: "old E-1…E-8 wording", pattern: /reflects only genuine agreement|converged on this|assessment evidence strength|human review not required|no source support captured/i },
 ];
 
 /**
- * Pinned exemptions: whole phrases that state a limitation, a detected split or the product name, never a favourable claim. Each must be
- * at least three words (validated) and must actually occur on a scanned surface (asserted by the spec), so an exemption
- * cannot silently widen into a bare word.
+ * Pinned exemptions: whole phrases that state a limitation, a detected split or the product name, never a favourable
+ * claim. Each must be at least three words (validated) and must actually occur on a scanned surface (asserted by the
+ * spec), so an exemption cannot silently widen into a bare word.
  */
 export const EXEMPTIONS: string[] = [
   // "Panel split" badge tooltip — states a detected split.
@@ -41,7 +53,20 @@ export const EXEMPTIONS: string[] = [
   "not a certainty score",
   // Personal review page back link: the product name, not a convergence claim (F2 matches "converg…").
   "Back to ConvergePanel",
+  // E-2 / E-3 (owner-approved): denies verification.
+  "not independently verified",
+  // D-9 (owner-approved sealed text): denies agreement.
+  "agreement on an option is not established",
+  // Stored rationale written by the producer for a split on the option (decisionSupportAlignment.ts:498). It states a
+  // detected split; S-E.1 may not change stored data or the matcher, so the whole phrase is pinned (recorded debt).
+  "Models agree an option should be chosen but disagree on which one",
 ];
+
+/**
+ * Pinned field labels: a text node exactly equal to one of these is a heading the owner approved (K-6), not a claim.
+ * Only an exact whole node is removed — "Model agreement: unanimous" is still scanned.
+ */
+export const FIELD_LABELS: string[] = ["Model agreement"];
 
 export function validateExemptions(exemptions: readonly string[]): string[] {
   const problems: string[] = [];
@@ -59,17 +84,45 @@ export type Hit = { surface: string; family: string; text: string };
 
 export function scanSurface(
   surface: Surface,
-  opts: { exemptions?: readonly string[]; stripSentinels?: boolean; families?: readonly Family[] } = {}
+  opts: { exemptions?: readonly string[]; stripSentinels?: boolean; families?: readonly Family[]; joined?: boolean } = {}
 ): Hit[] {
   const exemptions = opts.exemptions ?? EXEMPTIONS;
   const families = opts.families ?? FAMILIES;
   const strip = opts.stripSentinels ?? true;
-  const hits: Hit[] = [];
-  for (const raw of [...surface.textNodes, ...surface.attributes]) {
+  const clean = (raw: string) => {
     let text = strip ? raw.replace(SENTINEL_SPAN, " ") : raw;
     for (const e of exemptions) text = text.split(e).join(" ");
+    return text;
+  };
+  const hits: Hit[] = [];
+  const nodes = [...surface.textNodes, ...surface.attributes].filter((raw) => !FIELD_LABELS.includes(raw.trim()));
+  for (const raw of nodes) {
+    const text = clean(raw);
     for (const f of families) if (f.pattern.test(text)) hits.push({ surface: surface.id, family: f.id, text: raw });
     if (BARE_STRENGTH.test(text.trim())) hits.push({ surface: surface.id, family: "F8-bare-strength", text: raw });
+  }
+  // A phrase split across inline elements ("Human review <b>not required</b>") or JSX string children is one sentence
+  // to a reader: scan the reader-order text of the whole surface too, nodes joined by a space. Exemptions apply to the
+  // joined text as well, so an exempt phrase stays exempt however it is split. Only families the per-node pass did not
+  // already report are added, so one violation is not counted twice.
+  // Two reader-order views: the whole surface joined with a space (words split across elements), and every run of two
+  // or three adjacent nodes glued with nothing (one word split across elements, "Source<em>-backed</em>"). A run starts
+  // and ends on node edges, so gluing never fuses the last word of one sentence onto the first word of the next.
+  if (opts.joined ?? true) {
+    const seen = new Set(hits.map((h) => h.family));
+    const nodes = surface.textNodes.filter((t) => !FIELD_LABELS.includes(t.trim()));
+    const views = [nodes.join(" ")];
+    for (const size of [2, 3]) for (let i = 0; i + size <= nodes.length; i += 1) views.push(nodes.slice(i, i + size).join(""));
+    for (const view of views) {
+      const joined = clean(view);
+      for (const f of families) {
+        const m = joined.match(f.pattern);
+        if (m && !seen.has(f.id)) {
+          seen.add(f.id);
+          hits.push({ surface: surface.id, family: f.id, text: `[joined] …${joined.slice(Math.max(0, (m.index ?? 0) - 40), (m.index ?? 0) + m[0].length + 40)}…` });
+        }
+      }
+    }
   }
   return hits;
 }
