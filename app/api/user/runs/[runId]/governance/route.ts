@@ -46,6 +46,8 @@ import {
 import { loadUserAndTeam } from "@/lib/teams/teamApiAuth";
 import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
 import { logger } from "@/lib/logger";
+import { buildDsProvenanceP2View } from "@/lib/adaptiveSchema/dsProvenanceRouteAdapter";
+import { DS_PROVENANCE_ROUTE_VIEW_ENABLED } from "@/lib/env";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -317,6 +319,18 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
   // when nothing is configured yet, where there is no history to fetch.
   const historyScope: "team" | "personal" | "unknown" = panel ? "team" : assignment ? (assignment.teamId === null ? "personal" : "team") : "unknown";
 
+  // Order 6 S-1b.2 — the optional Decision Support provenance view, built
+  // only here: after every denial (including the #259 uniform 403 and the
+  // unreadable-record 500) and from this viewer's own role and identity gate.
+  // No read: the stored output comes from the run document read above. Absent
+  // (never null) whenever it is not built; with the flag off nothing is parsed.
+  const dsProvenance = buildDsProvenanceP2View({
+    enabled: DS_PROVENANCE_ROUTE_VIEW_ENABLED,
+    surfaceRequest: { surfaceId: "P2", role: viewerRole, mayReadDecisionReviewer },
+    storedAdaptiveOutput: data.adaptiveOutput,
+    governanceRecord: data.governanceRecord,
+  });
+
   return NextResponse.json({
     ok: true,
     viewerRole,
@@ -362,5 +376,6 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
           }
         : undefined,
     governance,
+    ...(dsProvenance ? { dsProvenance } : {}),
   });
 }
