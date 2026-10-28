@@ -51,7 +51,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { dsFixtures, S, surfaceFromHtml, type Surface } from "./seSurfaces/seSurfaceHarness";
 import { allDsSurfaces, dsPageSurface } from "./seSurfaces/seSurfaceRenderers";
-import { EXEMPTIONS, FAMILIES, FIELD_LABELS, assertNotBlind, scanSurface, usedExemptions, validateExemptions } from "./seSurfaces/dsWordingScanner";
+import { EXEMPTIONS, FAMILIES, FIELD_LABELS, STORED_DATA_DEBT, type StoredData, assertNotBlind, scanSurface, usedExemptions, validateExemptions } from "./seSurfaces/dsWordingScanner";
 
 const fixtures = dsFixtures();
 const fixturesAtLoad = JSON.stringify(fixtures);
@@ -117,6 +117,8 @@ const ORACLE: Record<string, Expect> = {
   no_sources: { agreement: NO_DISAGREEMENT, sources: NONE, badge: NONE, counts: counts(1, 1, 1), e4: `${NO_DISAGREEMENT}.`, d9: true },
   high_stakes_review_needed: { agreement: NO_DISAGREEMENT, sources: PROVIDED, badge: LISTED, counts: counts(1, 1, 1), e4: `${NO_DISAGREEMENT}.`, d9: true },
   legacy_no_sources_field: { agreement: NO_DISAGREEMENT, sources: "—", badge: null, counts: counts(2, 2, 2), e4: `${NO_DISAGREEMENT}.`, d9: true },
+  legacy_unsourced: { agreement: NO_DISAGREEMENT, sources: NONE, badge: NONE, counts: counts(2, 2, 2), e4: `${NO_DISAGREEMENT}.`, d9: true },
+  unresolved_option: { agreement: "Split", sources: PROVIDED, badge: LISTED, counts: counts(2, 2, 2), e4: null, d9: true },
 };
 
 /** Text immediately following a field label in TopSummaryBar's extraction. */
@@ -126,6 +128,18 @@ function fieldValue(s: Surface, label: string): string | undefined {
 }
 
 const PAGE_ANCHORS = ["Model agreement", "Sources", "Options considered", "Panel detail", "Model-assigned evidence strength, not independently checked"];
+
+/**
+ * Stored-data debt per surface: the fixture's own stored rationale, if it is one of the producer's debt sentences, with
+ * the exact number of places each surface kind renders that field (page: the recommendation; Team page: that plus the
+ * receipt summary's conclusion; each receipt surface: its conclusion). Anything beyond that count is still scanned.
+ */
+const RATIONALE_RENDERS: Record<string, number> = { page: 1, page_team: 2, list_item: 1, personal_review: 1, team_review: 1 };
+function storedDataFor(s: { fixture: string; kind: string }): StoredData[] {
+  const rationale = fixtures.find((x) => x.name === s.fixture)!.result.recommendation.rationale;
+  return STORED_DATA_DEBT.some((re) => re.test(rationale)) ? [{ text: rationale, count: RATIONALE_RENDERS[s.kind] }] : [];
+}
+const scanDs = (s: Surface & { fixture: string; kind: string }) => scanSurface(s, { storedData: storedDataFor(s) });
 
 /** What each surface must contain to count as whole: the page sections its state renders, and its review slot. */
 function anchorsFor(s: Surface & { fixture: string; kind: string }): string[] {
@@ -184,7 +198,7 @@ describe("whole-surface scan: no prohibited wording on any Decision Support surf
         const raw = dsPageSurface(`raw:${mode}:${f.name}`, f, mode, "unwrapped");
         const bare = raw.textNodes.flatMap((t, i) => (/^(strong|moderate|weak)$/i.test(t) ? [raw.textNodes[i - 1]] : []));
         expect([f.name, mode, bare.filter((prev) => prev !== "evidenceStrength:")]).toEqual([f.name, mode, []]);
-        expect([f.name, mode, scanSurface(raw).filter((h) => h.family !== "F8-bare-strength")]).toEqual([f.name, mode, []]);
+        expect([f.name, mode, scanDs({ ...raw, fixture: f.name, kind: mode === "team" ? "page_team" : "page" }).filter((h) => h.family !== "F8-bare-strength")]).toEqual([f.name, mode, []]);
         const expectedRaw = f.perModel.reduce((n, p) => n + p.fields.assessments.length, 0);
         expect([f.name, mode, bare.length]).toEqual([f.name, mode, expectedRaw]);
       }
@@ -192,7 +206,14 @@ describe("whole-surface scan: no prohibited wording on any Decision Support surf
   });
 
   it("finds zero hits across all surfaces", () => {
-    expect(surfaces.flatMap((s) => scanSurface(s))).toEqual([]);
+    expect(surfaces.flatMap((s) => scanDs(s))).toEqual([]);
+  });
+
+  it("stored-data debt is exercised exactly where the producer writes it, and nowhere else", () => {
+    const withDebt = fixtures.filter((f) => STORED_DATA_DEBT.some((re) => re.test(f.result.recommendation.rationale))).map((f) => f.name).sort();
+    expect(withDebt).toEqual(["contested_on_option", "unresolved_option"]);
+    // Without it, those surfaces fail: the debt is real wording a reader sees, recorded rather than hidden.
+    for (const s of surfaces.filter((x) => withDebt.includes(x.fixture))) expect([s.id, scanSurface(s).length > 0]).toEqual([s.id, true]);
   });
 
   it("every exemption is phrase-level and is actually exercised by a rendered surface", () => {
@@ -437,6 +458,22 @@ describe("falsification: scanner mechanics", () => {
     for (const s of surfaces.filter((x) => x.kind.startsWith("page"))) expect([s.id, s.textNodes.includes("Model agreement")]).toEqual([s.id, true]);
   });
 
+  it("(2d) stored-data debt is restricted to the stored field: an extra application copy, a wrong count or a non-debt value is caught", () => {
+    const debt = "Models agree a specific option should be chosen but did not name one this system could confidently resolve.";
+    const page = (nodes: string[]): Surface => ({ id: "p", textNodes: nodes, attributes: [] });
+    // The stored field rendered once, passed with count 1: exempt.
+    expect(scanSurface(page([`Conditional go — ${debt}`]), { storedData: [{ text: debt, count: 1 }] })).toEqual([]);
+    // The application repeats the sentence elsewhere on the same surface: the extra copy is scanned.
+    expect(scanSurface(page([`Conditional go — ${debt}`, debt]), { storedData: [{ text: debt, count: 1 }] }).map((h) => h.family)).toContain("F2-convergence");
+    // Not where the caller says the field renders: reported.
+    expect(scanSurface(page(["Nothing here."]), { storedData: [{ text: debt, count: 1 }] }).map((h) => h.family)).toEqual(["stored-data-count"]);
+    // A value that is not recorded debt gets no exemption at all.
+    expect(scanSurface(page(["All models agree."]), { storedData: [{ text: "All models agree.", count: 1 }] }).map((h) => h.family)).toContain("stored-data-not-debt");
+    // No phrase exemption exists for either debt sentence: on a surface without the stored field it is always caught.
+    for (const e of EXEMPTIONS) expect([e, /Models agree/.test(e)]).toEqual([e, false]);
+    expect(scanSurface(page([debt])).map((h) => h.family)).toContain("F2-convergence");
+  });
+
   it("(5) a broadened exemption is rejected by the validator, and would otherwise hide a violation", () => {
     const broad = [...EXEMPTIONS, "converge"];
     expect(validateExemptions(broad)).not.toEqual([]);
@@ -469,6 +506,18 @@ describe("falsification: scanner mechanics", () => {
       ["Well-sourced recommendation", "F3-source-assurance"],
       ["This decision does not need human review", "F4-review-necessity"],
       ["A definitive answer", "F6-certainty"],
+      ["No disagreement.", "F2-convergence"],
+      ["No disagreement among models", "F2-convergence"],
+      ["No split.", "F2-convergence"],
+      ["All models recommended the same action", "F2-convergence"],
+      ["Models aligned on Go", "F2-convergence"],
+      ["The panel is aligned", "F2-convergence"],
+      ["Sources checked", "F3-source-assurance"],
+      ["Sources confirmed", "F3-source-assurance"],
+      ["Strongly supported by sources", "F3-source-assurance"],
+      ["Human review is optional", "F4-review-necessity"],
+      ["Human review not flagged as needed", "F4-review-necessity"],
+      ["could confidently resolve", "F6-certainty"],
     ];
     for (const [text, family] of claims) expect([text, scanSurface({ id: "c", textNodes: [text], attributes: [] }).map((h) => h.family)]).toEqual([text, expect.arrayContaining([family])]);
   });

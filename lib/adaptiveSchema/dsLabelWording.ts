@@ -91,17 +91,21 @@ export function dsHasListedSources(sources: unknown): boolean | null {
   return sources.some((s) => typeof s === "string" && s.trim().length > 0);
 }
 
-/** E-2 summary-field value, or null to omit (no reference list recorded). */
+/**
+ * E-2 summary-field value, or null to omit. With no reference list recorded (a legacy result), only the stored flag is
+ * left: false still establishes "No sources listed" (as on receipts); true establishes nothing (K-5), so the claim is
+ * omitted.
+ */
 export function dsSourcesSummary(decisionSupport: DecisionSupportResult | null | undefined): string | null {
   const listed = dsHasListedSources(decisionSupport?.sources);
-  if (listed === null) return null;
+  if (listed === null) return dsReceiptSourcesLabel(decisionSupport?.sourceBacked);
   return listed ? DS_SOURCES_PROVIDED : DS_NO_SOURCES_LISTED;
 }
 
-/** E-3 DS badge text, or null to omit. */
-export function dsSourcesBadge(sources: unknown): string | null {
+/** E-3 DS badge text, or null to omit; the same legacy fallback as `dsSourcesSummary`. */
+export function dsSourcesBadge(sources: unknown, sourceBacked?: unknown): string | null {
   const listed = dsHasListedSources(sources);
-  if (listed === null) return null;
+  if (listed === null) return dsReceiptSourcesLabel(sourceBacked);
   return listed ? DS_SOURCES_LISTED : DS_NO_SOURCES_LISTED;
 }
 

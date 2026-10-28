@@ -103,6 +103,11 @@ export function dsFixtures(): DsFixture[] {
   const disapprove = S("Disapprove the vendor contract");
   const legacy = make("legacy_no_sources_field", models(choose(OPT_A), choose(OPT_A)));
   delete (legacy.result as { sources?: unknown }).sources;
+  // Legacy result with no list and a stored sourceBacked === false (no model returned any source entry).
+  const legacyUnsourced = make("legacy_unsourced", models(choose(OPT_A, { sources: [] }), choose(OPT_A, { sources: [] })));
+  delete (legacyUnsourced.result as { sources?: unknown }).sources;
+  // choose_option naming an option no model listed: the matcher cannot resolve it (decisionSupportAlignment.ts:484-488).
+  const unlisted = S("An option nobody listed");
   return [
     make("uncontested_choose_option", models(choose(OPT_A), choose(OPT_A), choose(OPT_A))),
     make("uncontested_go_with_failed_slots", models(fields({ recommendationAction: "go", options: [OPT_A] }), fields({ recommendationAction: "go", options: [OPT_A] })), 5),
@@ -121,7 +126,9 @@ export function dsFixtures(): DsFixture[] {
     make("blank_source_list", models(fields({ recommendationAction: "go", options: [OPT_A], sources: [""] }), fields({ recommendationAction: "go", options: [OPT_A], sources: ["  "] }))),
     make("no_sources", models(fields({ recommendationAction: "go", options: [OPT_A], sources: [] }))),
     make("high_stakes_review_needed", models(fields({ recommendationAction: "go", options: [OPT_A] })), 1, "safety_critical"),
+    make("unresolved_option", models(choose(unlisted), choose(unlisted))),
     legacy,
+    legacyUnsourced,
   ];
 }
 

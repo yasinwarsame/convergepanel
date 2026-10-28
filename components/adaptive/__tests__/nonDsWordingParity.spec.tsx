@@ -27,6 +27,8 @@ jest.mock("next/link", () => {
 import { readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { DATETIME_TOKEN, LOCAL_DATETIME, NON_DS_SCHEMAS, captureNonDs, tokeniseDates, type Capture } from "./seSurfaces/nonDsSurfaces";
+import { listItemSurface, teamReviewDetailSurface } from "./seSurfaces/seSurfaceRenderers";
+import { surfaceText, type DsFixture } from "./seSurfaces/seSurfaceHarness";
 
 const BASELINE = join(__dirname, "seSurfaces", "__fixtures__", "nonDsBaseline.json");
 const OUT = process.env.SE_NON_DS_BASELINE_OUT;
@@ -34,6 +36,42 @@ const OUT = process.env.SE_NON_DS_BASELINE_OUT;
 let current: Record<string, Capture>;
 beforeAll(async () => {
   current = await captureNonDs(mockFetch);
+});
+
+/**
+ * Separate timestamp coverage (the parity captures tokenise local date-times). The receipt surfaces must render the
+ * stored instant in the process's local time: checked against the instant's own local calendar fields, not against
+ * the component's formatter, so it holds in any timezone and fails if the timestamp is dropped, shifted or mis-sourced.
+ */
+describe("receipt-surface timestamps render the stored instant in local time", () => {
+  const fixture = { name: "ts", perModel: [], result: { sourceBacked: true, humanReviewNeeded: false } } as unknown as DsFixture;
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const expected = (iso: string) => {
+    const d = new Date(iso);
+    const hour = d.getHours() % 12 === 0 ? 12 : d.getHours() % 12;
+    return { date: `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`, time: `${hour}:${String(d.getMinutes()).padStart(2, "0")}`, meridiem: d.getHours() < 12 ? "AM" : "PM" };
+  };
+  const check = (text: string, iso: string) => {
+    const shown = text.match(LOCAL_DATETIME);
+    expect(shown).not.toBeNull();
+    expect(shown).toHaveLength(1);
+    const e = expected(iso);
+    expect(shown![0]).toContain(e.date);
+    expect(shown![0]).toMatch(new RegExp(`\\b${e.time}\\s?${e.meridiem}\\b`));
+  };
+
+  for (const schemaId of ["deep_research", "decision_support"]) {
+    it(`${schemaId}: review queue item shows the item's updatedAt`, () => {
+      check(surfaceText(listItemSurface("ts", fixture, schemaId)), "2026-10-28T00:00:00.000Z");
+    });
+    it(`${schemaId}: Team review detail shows "Updated" with the review's updatedAt`, async () => {
+      mockFetch.mockReset();
+      const text = surfaceText(await teamReviewDetailSurface("ts", fixture, schemaId, mockFetch));
+      // "Updated" and the date-time are separate text nodes (newline-joined in surfaceText).
+      expect(text).toMatch(/Updated\s+[A-Z][a-z]{2} \d/);
+      check(text, "2026-10-28T00:00:00.000Z");
+    });
+  }
 });
 
 if (OUT) {

@@ -59,11 +59,11 @@ function StrengthBadge({ strength }: { strength: AggregatedDecisionAssessment["e
 
 /**
  * Milestone 2 UI consistency cleanup, reworded by Order 6 / S-E.1 (E-3, K-5): states only whether the models listed source
- * references. "Listed" needs at least one non-blank reference in the stored `sources` list; with no list recorded the badge
- * is omitted rather than guessed.
+ * references. "Listed" needs at least one non-blank reference in the stored `sources` list; with no list recorded only a
+ * stored `sourceBacked === false` establishes "No sources listed", and otherwise the badge is omitted rather than guessed.
  */
-function SourcesListedBadge({ sources }: { sources: unknown }) {
-  const text = dsSourcesBadge(sources);
+function SourcesListedBadge({ sources, sourceBacked }: { sources: unknown; sourceBacked: unknown }) {
+  const text = dsSourcesBadge(sources, sourceBacked);
   if (text === null) return null;
   return (
     <TintBadge tone={text === DS_NO_SOURCES_LISTED ? "warning" : "accent"} title={text === DS_NO_SOURCES_LISTED ? "No model listed a source reference" : "Source references are listed as the models gave them; none were fetched or checked"}>
@@ -147,7 +147,7 @@ export default function DecisionSupportView({ decisionSupport }: { decisionSuppo
               Panel split
             </TintBadge>
           )}
-          <SourcesListedBadge sources={sources} />
+          <SourcesListedBadge sources={sources} sourceBacked={decisionSupport.sourceBacked} />
         </div>
 
         {/* 3. Why this recommendation. */}

@@ -8,8 +8,10 @@
  * S-2a's later obligation is different and is NOT asserted here: on a surface that renders the provenance block, every
  * remaining favourable statement must meet its §4.1 condition with the limitation visible on the same surface.
  *
- * Matching runs per text node and per reader-visible attribute, after removing sentinel spans (model-authored text,
- * see seSurfaceHarness.ts) and after removing the pinned, phrase-level exemptions below.
+ * Matching runs on every text node and every reader-visible attribute, and again on the surface in reader order (all
+ * text nodes joined by a space, and every run of two or three adjacent nodes glued), so a phrase split across inline
+ * elements is still one phrase. Before matching, sentinel spans (model-authored text, see seSurfaceHarness.tsx), the
+ * pinned phrase-level exemptions, exact-node field labels and the caller's stored-data occurrences are removed.
  */
 
 import { SENTINEL_SPAN, type Surface } from "./seSurfaceHarness";
@@ -20,21 +22,24 @@ export const FAMILIES: Family[] = [
   { id: "F1-consensus-tier", description: "consensus claim (any consensus wording, tiered or bare)", pattern: /\bconsensus\b/i },
   {
     id: "F2-convergence",
-    description: "convergence / agreement / unanimity / genuineness claim",
-    pattern: /\bconverg\w*|\bunanim\w*|\buncontested\b|\bagree(s|d|ing)?\b|\bagreement\b|\bconcur\w*|\bno material split\b|\bgenuine(ly)?\b/i,
+    description: "convergence / agreement / unanimity / genuineness / no-disagreement claim",
+    pattern:
+      /\bconverg\w*|\bunanim\w*|\buncontested\b|\bagree(s|d|ing)?\b|\bagreement\b|\bconcur\w*|\bno (material )?(disagreement|split|dissent)\b|\baligned\b|\bsame (action|recommendation|option)\b|\bin accord\b|\bgenuine(ly)?\b/i,
   },
   {
     id: "F3-source-assurance",
     description: "source assurance",
-    pattern: /\bsource[- ]backed\b|\bevidence[- ]backed\b|\bverified\b|\bfully supported\b|\bsource support captured\b|\bsource grounding\b|\bwell[- ]sourced\b|\bcorroborated\b/i,
+    pattern:
+      /\bsource[- ]backed\b|\bevidence[- ]backed\b|\bverified\b|\bfully supported\b|\bsource support captured\b|\bsource grounding\b|\bwell[- ]sourced\b|\bcorroborated\b|\bsources? (were |are |have been )?(checked|confirmed|validated)\b|\bsupported by (the )?sources\b/i,
   },
   {
     id: "F4-review-necessity",
     description: "review necessity",
-    pattern: /\breview (is )?not (required|needed|necessary)\b|\bno (human )?review (is )?(needed|required|necessary)\b|\b(does not|doesn't) (need|require) (human )?review\b/i,
+    pattern:
+      /\breview (is )?not (required|needed|necessary)\b|\bno (human )?review (is )?(needed|required|necessary)\b|\b(does not|doesn't) (need|require) (human )?review\b|\breview (is )?optional\b|\bnot flagged as needed\b/i,
   },
   { id: "F5-option-distinctness", description: "option distinctness", pattern: /\b(kept|remain|remains|stay|stays)\s+(distinct|separate)\b|\boptions are (distinct|separate)\b|\bnever (merged|grouped)\b/i },
-  { id: "F6-certainty", description: "certainty claim", pattern: /\bcertain(ty|ly)?\b|\bconfiden(t|ce)\b|\bguarantee\w*|\bdefinitive(ly)?\b|\bproven\b/i },
+  { id: "F6-certainty", description: "certainty claim", pattern: /\bcertain(ty|ly)?\b|\bconfiden(t|ce|tly)\b|\bguarantee\w*|\bdefinitive(ly)?\b|\bproven\b/i },
   { id: "F7-old-e-strings", description: "old E-1…E-8 wording", pattern: /reflects only genuine agreement|converged on this|assessment evidence strength|human review not required|no source support captured/i },
 ];
 
@@ -57,10 +62,25 @@ export const EXEMPTIONS: string[] = [
   "not independently verified",
   // D-9 (owner-approved sealed text): denies agreement.
   "agreement on an option is not established",
-  // Stored rationale written by the producer for a split on the option (decisionSupportAlignment.ts:498). It states a
-  // detected split; S-E.1 may not change stored data or the matcher, so the whole phrase is pinned (recorded debt).
-  "Models agree an option should be chosen but disagree on which one",
+  // E-1 / E-4 (owner-approved): the qualified form; a bare "No disagreement" is still caught.
+  "No disagreement identified by current grouping",
+  // E-7 (owner-approved D-2 template).
+  "largest group recommending the same action",
 ];
+
+/**
+ * Stored-data debt: rationales the producer writes into the stored DS result (decisionSupportAlignment.ts:488, :498).
+ * S-E.1 may not change stored data or the matcher, so these are recorded debt. They are NOT phrase exemptions: the
+ * caller passes the fixture's own stored rationale with the exact number of places a surface renders that field
+ * (`storedData`), and only that many occurrences are removed. Application wording that repeats the sentence anywhere
+ * else is an extra occurrence and is still scanned; a stored value that matches no pattern here is not exempt at all.
+ */
+export const STORED_DATA_DEBT: RegExp[] = [
+  /^Models agree an option should be chosen but disagree on which one \(.+\)\.$/,
+  /^Models agree a specific option should be chosen but did not name one this system could confidently resolve\.$/,
+];
+
+export type StoredData = { text: string; count: number };
 
 /**
  * Pinned field labels: a text node exactly equal to one of these is a heading the owner approved (K-6), not a claim.
@@ -84,7 +104,7 @@ export type Hit = { surface: string; family: string; text: string };
 
 export function scanSurface(
   surface: Surface,
-  opts: { exemptions?: readonly string[]; stripSentinels?: boolean; families?: readonly Family[]; joined?: boolean } = {}
+  opts: { exemptions?: readonly string[]; stripSentinels?: boolean; families?: readonly Family[]; joined?: boolean; storedData?: readonly StoredData[] } = {}
 ): Hit[] {
   const exemptions = opts.exemptions ?? EXEMPTIONS;
   const families = opts.families ?? FAMILIES;
@@ -95,7 +115,25 @@ export function scanSurface(
     return text;
   };
   const hits: Hit[] = [];
-  const nodes = [...surface.textNodes, ...surface.attributes].filter((raw) => !FIELD_LABELS.includes(raw.trim()));
+  // Stored-data debt: remove exactly `count` occurrences of the stored field value, in reader order, and nothing else.
+  let textNodes = [...surface.textNodes];
+  for (const d of opts.storedData ?? []) {
+    if (!STORED_DATA_DEBT.some((re) => re.test(d.text))) {
+      hits.push({ surface: surface.id, family: "stored-data-not-debt", text: d.text });
+      continue;
+    }
+    let left = d.count;
+    textNodes = textNodes.map((t) => {
+      let out = t;
+      while (left > 0 && out.includes(d.text)) {
+        out = out.replace(d.text, " ");
+        left -= 1;
+      }
+      return out;
+    });
+    if (left !== 0) hits.push({ surface: surface.id, family: "stored-data-count", text: `${d.count - left} of ${d.count}: ${d.text}` });
+  }
+  const nodes = [...textNodes, ...surface.attributes].filter((raw) => !FIELD_LABELS.includes(raw.trim()));
   for (const raw of nodes) {
     const text = clean(raw);
     for (const f of families) if (f.pattern.test(text)) hits.push({ surface: surface.id, family: f.id, text: raw });
@@ -110,7 +148,7 @@ export function scanSurface(
   // and ends on node edges, so gluing never fuses the last word of one sentence onto the first word of the next.
   if (opts.joined ?? true) {
     const seen = new Set(hits.map((h) => h.family));
-    const nodes = surface.textNodes.filter((t) => !FIELD_LABELS.includes(t.trim()));
+    const nodes = textNodes.filter((t) => !FIELD_LABELS.includes(t.trim()));
     const views = [nodes.join(" ")];
     for (const size of [2, 3]) for (let i = 0; i + size <= nodes.length; i += 1) views.push(nodes.slice(i, i + size).join(""));
     for (const view of views) {

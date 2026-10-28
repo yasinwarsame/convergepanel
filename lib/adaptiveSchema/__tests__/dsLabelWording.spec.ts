@@ -146,6 +146,19 @@ describe("K-5 sources: a non-blank reference list is the only basis for 'listed'
     expect(dsSourcesBadge(undefined)).toBeNull();
   });
 
+  it("legacy result with no list: only a stored sourceBacked === false establishes 'No sources listed'; anything else omits", () => {
+    const legacy = (sourceBacked: unknown) => ({ ...ds({ sources: undefined }), sourceBacked }) as DecisionSupportResult;
+    expect(dsSourcesSummary(legacy(false))).toBe("No sources listed");
+    expect(dsSourcesSummary(legacy(true))).toBeNull();
+    expect(dsSourcesSummary(legacy(undefined))).toBeNull();
+    expect(dsSourcesBadge(undefined, false)).toBe("No sources listed");
+    expect(dsSourcesBadge(undefined, true)).toBeNull();
+    expect(dsSourcesBadge(undefined, "false")).toBeNull();
+    // A recorded list always wins over the flag.
+    expect(dsSourcesBadge(["Vendor report"], false)).toBe("Sources listed; not independently verified");
+    expect(dsSourcesSummary({ ...ds({ sources: [""] }), sourceBacked: true } as DecisionSupportResult)).toBe("No sources listed");
+  });
+
   it("receipt flag: true cannot establish listed sources (omit); false establishes none; anything else omits", () => {
     expect(dsReceiptSourcesLabel(true)).toBeNull();
     expect(dsReceiptSourcesLabel(false)).toBe("No sources listed");
