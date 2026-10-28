@@ -18,7 +18,7 @@ jest.mock("@react-pdf/renderer", () => ({
   renderToBuffer: jest.fn(),
 }));
 
-import historicalRecords from "@/lib/adaptiveSchema/__tests__/dsExport/__fixtures__/historicalRecords.json";
+import { EVIDENCE_RECORDS, historicalOf } from "@/lib/adaptiveSchema/__tests__/dsExport/dsExportHistory";
 import { asStored, exportCases, exportRecord } from "@/lib/adaptiveSchema/__tests__/dsExport/dsExportFixtures";
 import { D9, LABEL_AGREEMENT, LABEL_SOURCES, OLD_CAPTION, ORACLE, PROVENANCE_MARKERS, SHOWN_488, STORED_488, stateOf } from "@/lib/adaptiveSchema/__tests__/dsExport/dsExportOracle";
 import { S, SENTINEL_SPAN } from "@/components/adaptive/__tests__/seSurfaces/seSurfaceHarness";
@@ -28,7 +28,6 @@ import { governanceStatusDisplay } from "@/lib/adaptiveSchema/exportContentDeriv
 import type { AdaptiveResearchExportV1 } from "@/lib/adaptiveSchema/researchExport";
 import { extractPdfTextNodes } from "./testUtils";
 
-const HISTORICAL = historicalRecords as unknown as Record<string, AdaptiveResearchExportV1>;
 const nodes = (r: AdaptiveResearchExportV1) => extractPdfTextNodes(AdaptiveResearchDocument({ record: r }));
 const norm = (t: string) => t.replace(/\s+/g, " ").trim();
 const dsCases = exportCases().filter((c) => c.schemaId === "decision_support");
@@ -83,7 +82,7 @@ describe("version-1 Decision Support PDF", () => {
 
   it.each(dsCases.map((c) => [c.name]))("%s: nothing outside the status region and the conclusion differs from the historical PDF", (name) => {
     const v1 = nodes(marked(name));
-    const old = nodes(HISTORICAL[`${name}.pdf`]);
+    const old = nodes(historicalOf(`${name}.pdf`));
     const [s1, e1] = statusRegion(v1);
     const [s0, e0] = statusRegion(old);
     expect(v1.slice(0, s1)).toEqual(old.slice(0, s0));
@@ -97,13 +96,51 @@ describe("version-1 Decision Support PDF", () => {
   });
 
   it("the historical status region is exactly what version 1 replaces: Consensus, Source grounding, caption", () => {
-    const old = nodes(HISTORICAL["ds.uncontested_choose_option.unreviewed_in_queue.pdf"]);
+    const old = nodes(historicalOf("ds.uncontested_choose_option.unreviewed_in_queue.pdf"));
     const [s, e] = statusRegion(old);
     const region = old.slice(s, e).map(norm);
     expect(region).toContain("Consensus");
     expect(region).toContain("Source grounding");
     expect(region).toContain(norm(OLD_CAPTION));
     expect(region).not.toContain(norm(D9));
+  });
+});
+
+describe("R1 NIT-4: identity-bearing provenance fields", () => {
+  const plainName = "ds.uncontested_choose_option.unreviewed_in_queue";
+  const idName = `${plainName}.synthetic_identities`;
+
+  it("the synthetic identities are frozen and rendered (the fixture is not inert)", () => {
+    const record = marked(idName);
+    const models = (record.reportSnapshot.runProvenance?.models ?? []) as { modelId: string; provider?: string; requestedModel?: string; substituted?: boolean }[];
+    expect(models.map((m) => [m.modelId, m.provider, m.requestedModel, m.substituted])).toEqual([
+      ["chatgpt", "openai", "openai:synthetic-model-a", false],
+      ["claude", "anthropic", "anthropic:synthetic-model-b", true],
+      ["gemini", "google", "google:synthetic-model-c", false],
+    ]);
+    const text = nodes(record).join(" ");
+    expect(text).toContain("synthetic-model-a");
+    expect(text).toContain("synthetic-model-b-prior");
+  });
+
+  it("identities change only the identity text: marker, selection, agreement, sources, D-9 and conclusion are as without them", () => {
+    const withIds = marked(idName);
+    const without = marked(plainName);
+    expect(withIds.reportSnapshot.presentation).toEqual(without.reportSnapshot.presentation);
+    const region = (r: AdaptiveResearchExportV1) => {
+      const n = nodes(r);
+      const [s, e] = statusRegion(n);
+      return { agreement: n[n.indexOf(LABEL_AGREEMENT) + 1], sources: n[n.indexOf(LABEL_SOURCES, s) + 1], d9: n.filter((t) => norm(t) === norm(D9)).length, last: norm(n[e - 1]), conclusion: n[e + 1] };
+    };
+    expect(region(withIds)).toEqual(region(without));
+  });
+
+  it("the version-1 identity text is exactly the historical identity text for the same record", () => {
+    const v1 = nodes(marked(idName));
+    const old = nodes(historicalOf(`${idName}.pdf`));
+    const ids = (n: string[]) => n.filter((t) => /synthetic-model|model not recorded/.test(t));
+    expect(ids(v1).length).toBeGreaterThan(0);
+    expect(ids(v1)).toEqual(ids(old));
   });
 });
 
@@ -120,7 +157,7 @@ describe("historical and invalid markers render the historical PDF", () => {
   ];
   const keys = ["ds.uncontested_choose_option.unreviewed_in_queue", "ds.unresolved_option_488.unreviewed_in_queue", "ds.no_recommendation_no_options.unreviewed_in_queue"];
   it.each(keys.flatMap((k) => variants.map(([label, p]) => [k, label, p] as [string, string, unknown])))("%s with %s", (key, label, presentation) => {
-    const historical = HISTORICAL[`${key}.pdf`];
+    const historical = historicalOf(`${key}.pdf`);
     const record = label === "absent" ? historical : ({ ...historical, reportSnapshot: { ...historical.reportSnapshot, presentation } } as AdaptiveResearchExportV1);
     const n = nodes(record);
     expect(n).toEqual(nodes(historical));
@@ -130,7 +167,7 @@ describe("historical and invalid markers render the historical PDF", () => {
 
   it("a version-1 marker on a non-DS record changes nothing", () => {
     for (const key of ["nonds.comparison_matrix.unreviewed_in_queue.pdf", "nonds.financial_valuation.approved.pdf"]) {
-      const historical = HISTORICAL[key];
+      const historical = historicalOf(key);
       const forged = { ...historical, reportSnapshot: { ...historical.reportSnapshot, presentation: { dsLabelWordingVersion: 1 } } } as AdaptiveResearchExportV1;
       expect(nodes(forged)).toEqual(nodes(historical));
     }
@@ -138,7 +175,7 @@ describe("historical and invalid markers render the historical PDF", () => {
 
   it("newly built non-DS records compose exactly as their historical baseline", () => {
     for (const c of exportCases().filter((x) => x.schemaId !== "decision_support")) {
-      expect(nodes(asStored(exportRecord(c, "pdf")))).toEqual(nodes(HISTORICAL[`${c.name}.pdf`]));
+      expect(nodes(asStored(exportRecord(c, "pdf")))).toEqual(nodes(historicalOf(`${c.name}.pdf`)));
     }
   });
 });
@@ -175,13 +212,13 @@ describe("wording scanner and provenance boundary on version-1 PDFs", () => {
   });
 
   it("the scanner is not blind to the historical wording on the same documents", () => {
-    const record = HISTORICAL["ds.uncontested_choose_option.unreviewed_in_queue.pdf"];
+    const record = historicalOf("ds.uncontested_choose_option.unreviewed_in_queue.pdf");
     const hits = scanSurface({ id: "historical", textNodes: scanNodes(nodes(record)), attributes: [] }, { exemptions: EXPORT_EXEMPTIONS });
     expect(hits.map((h) => h.family)).toEqual(expect.arrayContaining(["F1-consensus-tier"]));
   });
 
   it("no provenance view key or text in any version-1 or historical PDF record or composition", () => {
-    const all = [...dsCases.map((c) => marked(c.name)), ...Object.values(HISTORICAL).filter((r) => r.format === "pdf")];
+    const all = [...dsCases.map((c) => marked(c.name)), ...Object.values(EVIDENCE_RECORDS).filter((r) => r.format === "pdf")];
     for (const r of all) {
       const text = nodes(r).join(" ") + JSON.stringify(r);
       for (const m of PROVENANCE_MARKERS) expect(text).not.toContain(m);

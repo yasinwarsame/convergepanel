@@ -170,16 +170,28 @@ export const GOVERNANCE_VARIANTS: GovernanceVariant[] = [
 
 export type ExportCase = { name: string; schemaId: string; input: BuildExportSnapshotInput };
 
-function dsCase(s: DsState, g: GovernanceVariant): ExportCase {
+/**
+ * R1 NIT-4: a synthetic run document with the real persisted shape (`runDocument.perModel[]`, read by
+ * freezeExportRunProvenance): providers, requested models and one substitution. Synthetic values only.
+ */
+export const SYNTHETIC_RUN_DOCUMENT = {
+  perModel: [
+    { modelId: "chatgpt", status: "ok", provider: "openai", requestedModel: "openai:synthetic-model-a" },
+    { modelId: "claude", status: "substituted", provider: "anthropic", requestedModel: "anthropic:synthetic-model-b", substitutedFrom: "anthropic:synthetic-model-b-prior" },
+    { modelId: "gemini", status: "ok", provider: "google", requestedModel: "google:synthetic-model-c" },
+  ],
+};
+
+function dsCase(s: DsState, g: GovernanceVariant, runDocument?: unknown, suffix = ""): ExportCase {
   const selected = MODEL_IDS.slice(0, Math.max(s.totalModels, 1));
   return {
-    name: `ds.${s.name}.${g.name}`,
+    name: `ds.${s.name}.${g.name}${suffix}`,
     schemaId: "decision_support",
     input: {
       question: "Which vendor should we choose for the platform migration?",
       selectedModels: selected,
       modelResultsOkByModelId: Object.fromEntries(selected.map((m, i) => [m, i < s.perModel.length])),
-      runDocument: undefined,
+      runDocument,
       milestone2: { output: dsOutput(s), governanceRecord: g.record, reviewRouting: g.reviewRouting },
     },
   };
@@ -227,6 +239,8 @@ export function exportCases(wrap: Wrap = plain): ExportCase[] {
     const s = states.find((x) => x.name === name)!;
     for (const g of GOVERNANCE_VARIANTS.slice(1)) cases.push(dsCase(s, g));
   }
+  // R1 NIT-4: identity-bearing provenance on a version-1-eligible run.
+  cases.push(dsCase(states.find((x) => x.name === "uncontested_choose_option")!, GOVERNANCE_VARIANTS[0], SYNTHETIC_RUN_DOCUMENT, ".synthetic_identities"));
   return [...cases, ...nonDsCases()];
 }
 

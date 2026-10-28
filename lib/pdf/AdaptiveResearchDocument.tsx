@@ -348,6 +348,9 @@ function CoverHeader({ record }: { record: AdaptiveResearchExportV1 }) {
  * and E-2 values from the frozen result, no Part 8 caption (owner O-2: both of its subjects are renamed), and the D-9
  * disclosure directly after the card (not inside: the card is bounded) when the result lists options.
  */
+/** R1 NIT-1: version-1 status values and D-9 wrap at word boundaries only (no "ver-/ified" in the half-width cell). */
+const keepWordsWhole = (word: string): string[] => [word];
+
 function DsStatusSummaryV1({ record }: { record: AdaptiveResearchExportV1 }) {
   const snapshot = record.reportSnapshot;
   const result = snapshot.milestone2?.result as DecisionSupportResult | undefined;
@@ -368,16 +371,24 @@ function DsStatusSummaryV1({ record }: { record: AdaptiveResearchExportV1 }) {
           </View>
           <View style={pdfStyles.fieldCell}>
             <Text style={pdfStyles.fieldLabel}>{DS_MODEL_AGREEMENT_FIELD}</Text>
-            <Text style={pdfStyles.fieldValue}>{dsModelAgreement(result).text}</Text>
+            <Text style={pdfStyles.fieldValue} hyphenationCallback={keepWordsWhole}>
+              {dsModelAgreement(result).text}
+            </Text>
           </View>
           <View style={pdfStyles.fieldCell}>
             <Text style={pdfStyles.fieldLabel}>{DS_SOURCES_FIELD}</Text>
-            <Text style={pdfStyles.fieldValue}>{dsSourcesSummary(result) ?? "—"}</Text>
+            <Text style={pdfStyles.fieldValue} hyphenationCallback={keepWordsWhole}>
+              {dsSourcesSummary(result) ?? "—"}
+            </Text>
           </View>
         </View>
       </SectionCard>
       {/* The card gap (theme.ts card.marginBottom) below the disclosure too, so it does not touch the next card. */}
-      {dsExportShowsGroupingDisclosure(result) && <Text style={[pdfStyles.mutedText, { marginBottom: 10 }]}>{DS_OPTION_GROUPING_DISCLOSURE}</Text>}
+      {dsExportShowsGroupingDisclosure(result) && (
+        <Text style={[pdfStyles.mutedText, { marginBottom: 10 }]} hyphenationCallback={keepWordsWhole}>
+          {DS_OPTION_GROUPING_DISCLOSURE}
+        </Text>
+      )}
     </>
   );
 }

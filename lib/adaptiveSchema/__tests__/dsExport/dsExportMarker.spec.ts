@@ -1,12 +1,16 @@
 /**
  * Order 6 / S-E.2 (H1-A): the presentation-version marker, its strict selection, the export conclusion presenter, and
- * the JSON boundary. Historical records come from the baseline captured at unchanged main 0249a4e5
- * (__fixtures__/historicalRecords.json, committed before any production change).
+ * the JSON boundary. Historical records are the evidence records built by unchanged main 0249a4e5
+ * (__fixtures__/historicalRecords.json): captured and committed in 413e14b, before the implementation commit 82fc7fb,
+ * then recaptured once from the unchanged base worktree in 82fc7fb to add two legacy source states (every digest
+ * present in both captures was identical). The PDF hashes in historicalBaseline.json are specific to the capture
+ * runtime (macOS x64, Node 26.6.0); that was found after the CI run of 82fc7fb (see dsExportRendered.spec.ts).
  */
 jest.mock("firebase-admin/firestore", () => ({ FieldValue: class FieldValue {}, Timestamp: class Timestamp {} }));
 
 import historicalRecords from "./__fixtures__/historicalRecords.json";
 import { asStored, exportCases, exportRecord, FORMATS, dsStates, dsOutput } from "./dsExportFixtures";
+import { ADDED_AFTER_CAPTURE } from "./dsExportHistory";
 import { buildExportSnapshot } from "@/lib/adaptiveSchema/exportSnapshot";
 import { sanitizeForFirestore } from "@/lib/firestore/sanitizeForFirestore";
 import { buildAdaptiveResearchJsonExport, renderAdaptiveResearchJsonV1 } from "@/lib/adaptiveSchema/jsonExport";
@@ -28,7 +32,9 @@ const withPresentation = (r: AdaptiveResearchExportV1, presentation: unknown): A
 
 describe("baseline fixture integrity", () => {
   it("the historical records are the unmarked, stored form for every case and format", () => {
-    const keys = exportCases().flatMap((c) => FORMATS.map((f) => `${c.name}.${f}`));
+    const keys = exportCases()
+      .filter((c) => !ADDED_AFTER_CAPTURE.includes(c.name))
+      .flatMap((c) => FORMATS.map((f) => `${c.name}.${f}`));
     expect(Object.keys(HISTORICAL).sort()).toEqual(keys.sort());
     for (const r of Object.values(HISTORICAL)) {
       expect(Object.prototype.hasOwnProperty.call(r.reportSnapshot, "presentation")).toBe(false);
@@ -88,7 +94,7 @@ describe("marker assignment (buildExportSnapshot)", () => {
   });
 
   it("the snapshot is otherwise unchanged: head output, stored, equals the historical stored snapshot plus only the marker", () => {
-    for (const c of exportCases()) {
+    for (const c of exportCases().filter((x) => !ADDED_AFTER_CAPTURE.includes(x.name))) {
       for (const f of FORMATS) {
         const head = asStored(exportRecord(c, f));
         const historical = HISTORICAL[`${c.name}.${f}`];

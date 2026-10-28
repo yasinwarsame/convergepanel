@@ -1,21 +1,30 @@
 /**
- * Order 6 / S-E.2 (H1-A): Decision Support wording in the REAL generated DOCX (document.xml text, one line per paragraph).
- * Same contract as the PDF spec: version-1 records get the corrected status block, D-9 directly after it, the :488
- * conclusion only in its own state, and nothing else changed; historical and invalid markers keep the historical text.
- * Normalized-XML equality against the baseline is in dsExportRendered.spec.ts.
+ * Order 6 / S-E.2 (H1-A): Decision Support wording in the REAL generated DOCX, read through the structured reader
+ * (docxText.ts: mammoth over the package; no regular expressions over XML), one entry per paragraph.
+ *
+ *  - version-1 records get the corrected status block, D-9 directly after it, the :488 conclusion only in its own
+ *    state, and nothing else changed; historical and invalid markers keep the historical text;
+ *  - R1 MINOR-1: the S-E.1 scanner families run over every paragraph of every version-1 DOCX (model text
+ *    sentinel-wrapped), and a deterministic regression injects an unsupported claim ("All models agreed …", split
+ *    across differently formatted runs) into a real version-1 DOCX: the scanner must catch it, and the unmodified
+ *    document must pass.
+ * Normalized-part equality against unchanged main is in dsExportRendered.spec.ts.
  */
 jest.mock("firebase-admin/firestore", () => ({ FieldValue: class FieldValue {}, Timestamp: class Timestamp {} }));
 
-import historicalRecords from "@/lib/adaptiveSchema/__tests__/dsExport/__fixtures__/historicalRecords.json";
+import JSZip from "jszip";
 import { asStored, exportCases, exportRecord } from "@/lib/adaptiveSchema/__tests__/dsExport/dsExportFixtures";
+import { historicalOf } from "@/lib/adaptiveSchema/__tests__/dsExport/dsExportHistory";
 import { D9, LABEL_AGREEMENT, LABEL_SOURCES, OLD_CAPTION, ORACLE, PROVENANCE_MARKERS, SHOWN_488, STORED_488, stateOf } from "@/lib/adaptiveSchema/__tests__/dsExport/dsExportOracle";
+import { DocxTextError, docxParagraphs } from "@/lib/adaptiveSchema/__tests__/dsExport/docxText";
+import { S, SENTINEL_SPAN } from "@/components/adaptive/__tests__/seSurfaces/seSurfaceHarness";
+import { EXEMPTIONS, FIELD_LABELS, scanSurface, validateExemptions } from "@/components/adaptive/__tests__/seSurfaces/dsWordingScanner";
 import { renderAdaptiveResearchDocxV1 } from "@/lib/docx/renderAdaptiveResearchDocx";
 import { governanceStatusDisplay } from "@/lib/adaptiveSchema/exportContentDerivation";
 import type { AdaptiveResearchExportV1 } from "@/lib/adaptiveSchema/researchExport";
-import { extractDocxText } from "./testUtils";
 
-const HISTORICAL = historicalRecords as unknown as Record<string, AdaptiveResearchExportV1>;
-const lines = async (r: AdaptiveResearchExportV1) => (await extractDocxText((await renderAdaptiveResearchDocxV1(r)).bytes)).split("\n");
+const bytesOf = async (r: AdaptiveResearchExportV1) => (await renderAdaptiveResearchDocxV1(r)).bytes;
+const lines = async (r: AdaptiveResearchExportV1) => docxParagraphs(await bytesOf(r));
 const dsCases = exportCases().filter((c) => c.schemaId === "decision_support");
 const marked = (name: string) => asStored(exportRecord(dsCases.find((c) => c.name === name)!, "docx"));
 
@@ -25,6 +34,20 @@ function statusRegion(l: string[]): [number, number] {
   expect(start).toBeGreaterThanOrEqual(0);
   expect(end).toBeGreaterThan(start);
   return [start, end];
+}
+
+/** Export-only pinned exemptions (the product name in the header and closing note; F2 matches "converg…"). */
+const EXPORT_EXEMPTIONS = [...EXEMPTIONS, "ConvergePanel — Adaptive Research Export", "Generated with ConvergePanel. This document reflects"];
+const BRAND = /^ConvergePanel(?=\s{2,}|$)/;
+function scanDocx(name: string, paragraphs: string[], record: AdaptiveResearchExportV1) {
+  const receipt = record.reportSnapshot.milestone2?.decisionReceipt;
+  const result = record.reportSnapshot.milestone2?.result as { recommendation: { rationale: string } };
+  // The header paragraph is the brand followed by the status badge; only the brand word is dropped. DOCX field labels
+  // are written upper-case: a paragraph that is exactly a pinned field label upper-cased is that label (exact node only).
+  const upperLabels = new Map(FIELD_LABELS.map((l) => [l.toUpperCase(), l]));
+  const textNodes = paragraphs.map((t) => upperLabels.get(t) ?? t.replace(BRAND, ""));
+  const fields = paragraphs.map((t) => (receipt && t === receipt.conclusion ? "receipt.conclusion" : null));
+  return scanSurface({ id: name, textNodes, attributes: [], fields }, { exemptions: EXPORT_EXEMPTIONS, storedRationales: [result.recommendation.rationale] });
 }
 
 describe("version-1 Decision Support DOCX", () => {
@@ -47,8 +70,7 @@ describe("version-1 Decision Support DOCX", () => {
       else if (o.conclusion488 === "stored") expect(shown).toBe(`Conditional go — ${STORED_488}`);
       else expect(shown).toBe(receipt.conclusion);
     }
-    // Everything outside the status block and the conclusion line equals the historical document.
-    const old = await lines(HISTORICAL[`${name}.docx`]);
+    const old = await lines(historicalOf(`${name}.docx`));
     const [s0, e0] = statusRegion(old);
     expect(l.slice(0, start)).toEqual(old.slice(0, s0));
     const after = l.slice(end);
@@ -61,9 +83,76 @@ describe("version-1 Decision Support DOCX", () => {
   });
 
   it("the historical status block carries the wording version 1 replaces", async () => {
-    const old = await lines(HISTORICAL["ds.uncontested_choose_option.unreviewed_in_queue.docx"]);
+    const old = await lines(historicalOf("ds.uncontested_choose_option.unreviewed_in_queue.docx"));
     const [s, e] = statusRegion(old);
     expect(old.slice(s, e)).toEqual(expect.arrayContaining(["CONSENSUS", "SOURCE GROUNDING", OLD_CAPTION]));
+  });
+});
+
+describe("R1 MINOR-1: the wording scanner on real version-1 DOCX text", () => {
+  const wrapped = exportCases(S).filter((c) => c.schemaId === "decision_support");
+
+  it("the export exemptions are narrow (S-E.1 rules)", () => {
+    expect(validateExemptions(EXPORT_EXEMPTIONS)).toEqual([]);
+  });
+
+  it.each(wrapped.map((c) => [c.name]))("%s: no F1–F8 hit in any paragraph", async (name) => {
+    const record = asStored(exportRecord(wrapped.find((c) => c.name === name)!, "docx"));
+    const paragraphs = await lines(record);
+    expect(scanDocx(name, paragraphs, record)).toEqual([]);
+    // Not blind: the corrected labels and, where the receipt carries model text, the model text itself are read.
+    expect(paragraphs).toContain(LABEL_AGREEMENT.toUpperCase());
+    const modelTextInReceipt = JSON.stringify(record.reportSnapshot.milestone2?.decisionReceipt ?? {}).includes("⟦");
+    expect((paragraphs.join(" ").match(SENTINEL_SPAN)?.length ?? 0) > 0).toBe(modelTextInReceipt);
+  });
+
+  it("the scanner is not blind to the historical DOCX wording", async () => {
+    const record = historicalOf("ds.uncontested_choose_option.unreviewed_in_queue.docx");
+    const hits = scanDocx("historical", await lines(record), record);
+    expect(hits.map((h) => h.family)).toEqual(expect.arrayContaining(["F1-consensus-tier"]));
+  });
+
+  /** Inserts a paragraph whose text is split across two runs with different formatting, after the D-9 paragraph. */
+  async function withInjectedClaim(bytes: Buffer, first: string, second: string): Promise<Buffer> {
+    const zip = await JSZip.loadAsync(bytes);
+    const xml = await zip.file("word/document.xml")!.async("string");
+    const anchor = "agreement on an option is not established.</w:t></w:r></w:p>";
+    expect(xml.split(anchor).length - 1).toBe(1);
+    const injected = `<w:p><w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">${first}</w:t></w:r><w:r><w:rPr><w:i/></w:rPr><w:t xml:space="preserve">${second}</w:t></w:r></w:p>`;
+    zip.file("word/document.xml", xml.replace(anchor, anchor + injected));
+    return zip.generateAsync({ type: "nodebuffer" });
+  }
+
+  it("M5 regression: an unsupported claim injected into a real version-1 DOCX is caught; the unmodified DOCX passes", async () => {
+    const name = "ds.uncontested_choose_option.unreviewed_in_queue";
+    const record = asStored(exportRecord(wrapped.find((c) => c.name === name)!, "docx"));
+    const bytes = await bytesOf(record);
+    expect(scanDocx(name, await docxParagraphs(bytes), record)).toEqual([]);
+    const mutated = await docxParagraphs(await withInjectedClaim(bytes, "All models ", "agreed on this option."));
+    expect(mutated).toContain("All models agreed on this option.");
+    expect(scanDocx(name, mutated, record).map((h) => h.family)).toContain("F2-convergence");
+  });
+});
+
+describe("structured reader input handling", () => {
+  it("rejects empty, non-zip, document-less, DOCTYPE-bearing and ENTITY-bearing packages", async () => {
+    await expect(docxParagraphs(Buffer.alloc(0))).rejects.toBeInstanceOf(DocxTextError);
+    await expect(docxParagraphs(Buffer.from("not a zip"))).rejects.toBeInstanceOf(DocxTextError);
+    const empty = new JSZip();
+    empty.file("other.xml", "<a/>");
+    await expect(docxParagraphs(await empty.generateAsync({ type: "nodebuffer" }))).rejects.toThrow(/document.xml missing/);
+    const real = await bytesOf(marked("ds.uncontested_choose_option.unreviewed_in_queue"));
+    for (const decl of ['<!DOCTYPE w [<!ENTITY x "y">]>', '<!ENTITY x SYSTEM "file:///etc/passwd">']) {
+      const zip = await JSZip.loadAsync(real);
+      const xml = await zip.file("word/document.xml")!.async("string");
+      zip.file("word/document.xml", xml.replace("?>", `?>${decl}`));
+      await expect(docxParagraphs(await zip.generateAsync({ type: "nodebuffer" }))).rejects.toThrow(/DOCTYPE or ENTITY/);
+    }
+  });
+
+  it("extraction is deterministic", async () => {
+    const bytes = await bytesOf(marked("ds.unresolved_option_488.unreviewed_in_queue"));
+    expect(await docxParagraphs(bytes)).toEqual(await docxParagraphs(bytes));
   });
 });
 
@@ -78,7 +167,7 @@ describe("historical and invalid markers render the historical DOCX text", () =>
   ];
   it.each(variants)("%s", async (label, presentation) => {
     for (const key of ["ds.uncontested_choose_option.unreviewed_in_queue.docx", "ds.unresolved_option_488.unreviewed_in_queue.docx"]) {
-      const historical = HISTORICAL[key];
+      const historical = historicalOf(key);
       const record = label === "absent" ? historical : ({ ...historical, reportSnapshot: { ...historical.reportSnapshot, presentation } } as AdaptiveResearchExportV1);
       const l = await lines(record);
       expect(l).toEqual(await lines(historical));
@@ -89,12 +178,12 @@ describe("historical and invalid markers render the historical DOCX text", () =>
 
   it("a version-1 marker on a non-DS record changes nothing; new non-DS records match their baseline text", async () => {
     for (const key of ["nonds.comparison_matrix.unreviewed_in_queue.docx", "nonds.financial_valuation.approved.docx"]) {
-      const historical = HISTORICAL[key];
+      const historical = historicalOf(key);
       const forged = { ...historical, reportSnapshot: { ...historical.reportSnapshot, presentation: { dsLabelWordingVersion: 1 } } } as AdaptiveResearchExportV1;
       expect(await lines(forged)).toEqual(await lines(historical));
     }
     for (const c of exportCases().filter((x) => x.schemaId !== "decision_support")) {
-      expect(await lines(asStored(exportRecord(c, "docx")))).toEqual(await lines(HISTORICAL[`${c.name}.docx`]));
+      expect(await lines(asStored(exportRecord(c, "docx")))).toEqual(await lines(historicalOf(`${c.name}.docx`)));
     }
   });
 });
