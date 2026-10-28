@@ -380,6 +380,12 @@ describe("falsification: scanner mechanics", () => {
     const empty: Surface = { id: "empty", textNodes: [], attributes: [] };
     expect(scanSurface(empty)).toEqual([]);
     expect(assertNotBlind(empty, PAGE_ANCHORS)).not.toEqual([]);
+ 
+    // The length floor is load-bearing on its own: an extraction holding only the anchor words (nothing between them)
+    // passes every anchor check and must still be rejected as too thin to be a whole page.
+    const anchorsOnly: Surface = { id: "anchors-only", textNodes: [...PAGE_ANCHORS], attributes: [] };
+    expect(PAGE_ANCHORS.join("\n").length).toBeLessThan(200);
+    expect(assertNotBlind(anchorsOnly, PAGE_ANCHORS)).toEqual([expect.stringContaining("characters extracted")]);
   });
 
   it("(4) model-text isolation is load-bearing: a model quoting 'the models converged' is ignored only while isolation is on, and application text beside it is still scanned", () => {

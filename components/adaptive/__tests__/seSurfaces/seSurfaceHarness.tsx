@@ -131,7 +131,7 @@ export function dsFixtures(): DsFixture[] {
  * `rawStrength: "unwrapped"` keeps the bare enum, which the spec uses to prove the raw dump is the only site that
  * prints an unqualified rating.
  */
-export function modelResults(fixture: DsFixture, rawStrength: "model_content" | "unwrapped" = "model_content"): AdaptiveModelResult[] {
+export function modelResults(fixture: DsFixture, rawStrength: "model_content" | "unwrapped"): AdaptiveModelResult[] {
   return fixture.perModel.map((p) => {
     const data = { ...p.fields };
     if (rawStrength === "model_content") {
