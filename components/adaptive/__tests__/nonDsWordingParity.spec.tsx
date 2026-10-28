@@ -26,7 +26,7 @@ jest.mock("next/link", () => {
 
 import { readFileSync, writeFileSync } from "fs";
 import { join } from "path";
-import { NON_DS_SCHEMAS, captureNonDs, type Capture } from "./seSurfaces/nonDsSurfaces";
+import { DATETIME_TOKEN, LOCAL_DATETIME, NON_DS_SCHEMAS, captureNonDs, tokeniseDates, type Capture } from "./seSurfaces/nonDsSurfaces";
 
 const BASELINE = join(__dirname, "seSurfaces", "__fixtures__", "nonDsBaseline.json");
 const OUT = process.env.SE_NON_DS_BASELINE_OUT;
@@ -51,6 +51,14 @@ if (OUT) {
       expect(Object.keys(baseline).filter((k) => k.startsWith("populated:")).length).toBe(44);
       expect(Object.values(baseline).filter((c) => c.text.startsWith("RENDER ERROR"))).toEqual([]);
       expect(Object.values(baseline).filter((c) => c.text.length < 20)).toEqual([]);
+    });
+
+    it("local date-times are tokenised (timezone-independent), and only where a real date-time was rendered", () => {
+      const tokenised = Object.entries(baseline).filter(([, c]) => c.text.includes(DATETIME_TOKEN));
+      expect(tokenised.map(([id]) => id.split(":")[0]).sort()).toEqual(expect.arrayContaining(["listItem", "teamReview"]));
+      for (const [, c] of Object.entries(baseline)) expect(c.text).not.toMatch(LOCAL_DATETIME);
+      expect(tokeniseDates("Updated Oct 28, 2026, 3:00 AM")).toBe(`Updated ${DATETIME_TOKEN}`);
+      expect(tokeniseDates("Oct 28, 2026, 12:00 AM")).toBe(DATETIME_TOKEN);
     });
 
     it("renders exactly the same set of surfaces", () => {

@@ -18,6 +18,15 @@ import { listItemSurface, personalReviewSurface, teamReview, teamReviewDetailSur
 
 export type Capture = { text: string; html?: string; fetches?: string[] };
 
+/**
+ * Receipt surfaces format timestamps in the process's local timezone ("Oct 28, 2026, 3:00 AM"), which differs between a
+ * laptop and CI. S-E.1 does not touch date formatting, so each local date-time is replaced by a fixed token; every
+ * other character is still compared exactly.
+ */
+export const DATETIME_TOKEN = "⟨datetime⟩";
+export const LOCAL_DATETIME = /\b[A-Z][a-z]{2} \d{1,2}, \d{4}, \d{1,2}:\d{2}\s?[AP]M\b/g;
+export const tokeniseDates = (text: string) => text.replace(LOCAL_DATETIME, DATETIME_TOKEN);
+
 const FLAGS: [boolean, boolean][] = [
   [true, false],
   [false, false],
@@ -123,13 +132,13 @@ export async function captureNonDs(fetchMock: jest.Mock): Promise<Record<string,
       out[`teamSummary:${String(schemaId)}:${tag}`] = { text: surfaceText(teamSummarySurface("s", f, schemaId as string | null)) };
     }
     for (const schemaId of ["deep_research", "generic"]) {
-      out[`listItem:${schemaId}:${tag}`] = { text: surfaceText(listItemSurface("l", f, schemaId)) };
+      out[`listItem:${schemaId}:${tag}`] = { text: tokeniseDates(surfaceText(listItemSurface("l", f, schemaId))) };
       fetchMock.mockReset();
       const personal = await personalReviewSurface("p", f, schemaId, fetchMock);
-      out[`personalReview:${schemaId}:${tag}`] = { text: surfaceText(personal), fetches: fetchLog(fetchMock) };
+      out[`personalReview:${schemaId}:${tag}`] = { text: tokeniseDates(surfaceText(personal)), fetches: fetchLog(fetchMock) };
       fetchMock.mockReset();
       const team = await teamReviewDetailSurface("t", f, schemaId, fetchMock);
-      out[`teamReview:${schemaId}:${tag}`] = { text: surfaceText(team), fetches: fetchLog(fetchMock) };
+      out[`teamReview:${schemaId}:${tag}`] = { text: tokeniseDates(surfaceText(team)), fetches: fetchLog(fetchMock) };
     }
   }
   fetchMock.mockReset();

@@ -430,6 +430,9 @@ describe("falsification: scanner mechanics", () => {
     expect(FIELD_LABELS).toEqual(["Model agreement"]);
     expect(scanSurface({ id: "label", textNodes: ["Model agreement"], attributes: [] })).toEqual([]);
     expect(scanSurface({ id: "label+claim", textNodes: ["Model agreement: unanimous"], attributes: [] }).map((h) => h.family)).toContain("F2-convergence");
+    // Each layer holds on its own: the per-node pass alone (joined off) and the joined pass alone (via the attribute-free
+    // reader-order text) both reject a label carrying a claim.
+    expect(scanSurface({ id: "label+claim", textNodes: ["Model agreement: unanimous"], attributes: [] }, { joined: false }).map((h) => h.family)).toContain("F2-convergence");
     expect(scanSurface({ id: "label-in-prose", textNodes: ["Model agreement was reached."], attributes: [] }).map((h) => h.family)).toContain("F2-convergence");
     for (const s of surfaces.filter((x) => x.kind.startsWith("page"))) expect([s.id, s.textNodes.includes("Model agreement")]).toEqual([s.id, true]);
   });

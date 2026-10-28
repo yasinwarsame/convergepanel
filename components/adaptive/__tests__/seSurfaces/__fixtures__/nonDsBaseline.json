@@ -1052,7 +1052,7 @@
   "text": "Review\nUnder review\nDecision receipt\n⟦Receipt conclusion text.⟧\nSource-backed · Human review not required\nReview"
  },
  "listItem:deep_research:sb=true:hr=false": {
-  "text": "Adaptive\nDeep Research\nPassed\nUnreviewed\nOct 28, 2026, 3:00 AM\n⟦Receipt conclusion text.⟧\nSource-backed\n·\nHuman review not flagged as needed\nOpen review →"
+  "text": "Adaptive\nDeep Research\nPassed\nUnreviewed\n⟨datetime⟩\n⟦Receipt conclusion text.⟧\nSource-backed\n·\nHuman review not flagged as needed\nOpen review →"
  },
  "personalReview:deep_research:sb=true:hr=false": {
   "text": "Back to my reviews\n·\nBack to ConvergePanel\nDeep Research\nDeep Research View\nAssigned\nDecision Receipt\n⟦Receipt conclusion text.⟧\nSource-backed\n·\nHuman review not flagged as needed\nBasis\n(\n1\n)\n−\n⟦Receipt basis text.⟧\nAssumptions\n(\n1\n)\n−\n⟦Receipt assumption text.⟧\nUncertainties\n(\n1\n)\n−\n⟦Receipt uncertainty text.⟧\nLimitations\n(\n1\n)\n−\n⟦Receipt limitation text.⟧\nSubmit a Decision\nDecision\nApprove\nAccept this result as-is.\nApprove with Conditions\nAccept, with one or more caveats attached.\nRequest Changes\nAsk for revisions before this can be approved.\nReject\nThis result should not be used.\nSubmit Decision\nReview history\nReview history is temporarily unavailable.\nReviewer navigation\nSubmit review decision",
@@ -1063,7 +1063,7 @@
   ]
  },
  "teamReview:deep_research:sb=true:hr=false": {
-  "text": "Back to review queue\nDeep Research\nDeep Research View\nUnknown\nPending\nReviewable\nUpdated\nOct 28, 2026, 3:00 AM\nDecision Receipt\n⟦Receipt conclusion text.⟧\nSource-backed\n·\nHuman review not flagged as needed\nBasis\n(\n1\n)\n−\n⟦Receipt basis text.⟧\nAssumptions\n(\n1\n)\n−\n⟦Receipt assumption text.⟧\nUncertainties\n(\n1\n)\n−\n⟦Receipt uncertainty text.⟧\nLimitations\n(\n1\n)\n−\n⟦Receipt limitation text.⟧\nAutomated Governance\nStatus\nNot evaluated\nHuman Review\nStatus\nPending\nMulti-Reviewer Panel\nLoading review panel…\nReviewer\nReviewer assignment is temporarily unavailable.\nReview History\nReview history is temporarily unavailable.\nSubmit a Decision\nDecision\nApprove\nAccept this result as-is.\nApprove with Conditions\nAccept, with one or more caveats attached.\nRequest Changes\nAsk for revisions before this can be approved.\nReject\nThis result should not be used.\nSubmit Decision\nSubmit review decision",
+  "text": "Back to review queue\nDeep Research\nDeep Research View\nUnknown\nPending\nReviewable\nUpdated\n⟨datetime⟩\nDecision Receipt\n⟦Receipt conclusion text.⟧\nSource-backed\n·\nHuman review not flagged as needed\nBasis\n(\n1\n)\n−\n⟦Receipt basis text.⟧\nAssumptions\n(\n1\n)\n−\n⟦Receipt assumption text.⟧\nUncertainties\n(\n1\n)\n−\n⟦Receipt uncertainty text.⟧\nLimitations\n(\n1\n)\n−\n⟦Receipt limitation text.⟧\nAutomated Governance\nStatus\nNot evaluated\nHuman Review\nStatus\nPending\nMulti-Reviewer Panel\nLoading review panel…\nReviewer\nReviewer assignment is temporarily unavailable.\nReview History\nReview history is temporarily unavailable.\nSubmit a Decision\nDecision\nApprove\nAccept this result as-is.\nApprove with Conditions\nAccept, with one or more caveats attached.\nRequest Changes\nAsk for revisions before this can be approved.\nReject\nThis result should not be used.\nSubmit Decision\nSubmit review decision",
   "fetches": [
    "GET /api/teams/adaptive-runs/run-1",
    "GET /api/teams/adaptive-runs/run-1/review-panel",
@@ -1073,7 +1073,7 @@
   ]
  },
  "listItem:generic:sb=true:hr=false": {
-  "text": "Adaptive\nUnknown\nPassed\nUnreviewed\nOct 28, 2026, 3:00 AM\n⟦Receipt conclusion text.⟧\nSource-backed\n·\nHuman review not flagged as needed\nOpen review →"
+  "text": "Adaptive\nUnknown\nPassed\nUnreviewed\n⟨datetime⟩\n⟦Receipt conclusion text.⟧\nSource-backed\n·\nHuman review not flagged as needed\nOpen review →"
  },
  "personalReview:generic:sb=true:hr=false": {
   "text": "Back to my reviews\n·\nBack to ConvergePanel\nUnknown\nDeep Research View\nAssigned\nDecision Receipt\n⟦Receipt conclusion text.⟧\nSource-backed\n·\nHuman review not flagged as needed\nBasis\n(\n1\n)\n−\n⟦Receipt basis text.⟧\nAssumptions\n(\n1\n)\n−\n⟦Receipt assumption text.⟧\nUncertainties\n(\n1\n)\n−\n⟦Receipt uncertainty text.⟧\nLimitations\n(\n1\n)\n−\n⟦Receipt limitation text.⟧\nSubmit a Decision\nDecision\nApprove\nAccept this result as-is.\nApprove with Conditions\nAccept, with one or more caveats attached.\nRequest Changes\nAsk for revisions before this can be approved.\nReject\nThis result should not be used.\nSubmit Decision\nReview history\nReview history is temporarily unavailable.\nReviewer navigation\nSubmit review decision",
@@ -1084,7 +1084,7 @@
   ]
  },
  "teamReview:generic:sb=true:hr=false": {
-  "text": "Back to review queue\nUnknown\nDeep Research View\nUnknown\nPending\nReviewable\nUpdated\nOct 28, 2026, 3:00 AM\nDecision Receipt\n⟦Receipt conclusion text.⟧\nSource-backed\n·\nHuman review not flagged as needed\nBasis\n(\n1\n)\n−\n⟦Receipt basis text.⟧\nAssumptions\n(\n1\n)\n−\n⟦Receipt assumption text.⟧\nUncertainties\n(\n1\n)\n−\n⟦Receipt uncertainty text.⟧\nLimitations\n(\n1\n)\n−\n⟦Receipt limitation text.⟧\nAutomated Governance\nStatus\nNot evaluated\nHuman Review\nStatus\nPending\nMulti-Reviewer Panel\nLoading review panel…\nReviewer\nReviewer assignment is temporarily unavailable.\nReview History\nReview history is temporarily unavailable.\nSubmit a Decision\nDecision\nApprove\nAccept this result as-is.\nApprove with Conditions\nAccept, with one or more caveats attached.\nRequest Changes\nAsk for revisions before this can be approved.\nReject\nThis result should not be used.\nSubmit Decision\nSubmit review decision",
+  "text": "Back to review queue\nUnknown\nDeep Research View\nUnknown\nPending\nReviewable\nUpdated\n⟨datetime⟩\nDecision Receipt\n⟦Receipt conclusion text.⟧\nSource-backed\n·\nHuman review not flagged as needed\nBasis\n(\n1\n)\n−\n⟦Receipt basis text.⟧\nAssumptions\n(\n1\n)\n−\n⟦Receipt assumption text.⟧\nUncertainties\n(\n1\n)\n−\n⟦Receipt uncertainty text.⟧\nLimitations\n(\n1\n)\n−\n⟦Receipt limitation text.⟧\nAutomated Governance\nStatus\nNot evaluated\nHuman Review\nStatus\nPending\nMulti-Reviewer Panel\nLoading review panel…\nReviewer\nReviewer assignment is temporarily unavailable.\nReview History\nReview history is temporarily unavailable.\nSubmit a Decision\nDecision\nApprove\nAccept this result as-is.\nApprove with Conditions\nAccept, with one or more caveats attached.\nRequest Changes\nAsk for revisions before this can be approved.\nReject\nThis result should not be used.\nSubmit Decision\nSubmit review decision",
   "fetches": [
    "GET /api/teams/adaptive-runs/run-1",
    "GET /api/teams/adaptive-runs/run-1/review-panel",
@@ -1106,7 +1106,7 @@
   "text": "Review\nUnder review\nDecision receipt\n⟦Receipt conclusion text.⟧\nNot source-backed · Human review not required\nReview"
  },
  "listItem:deep_research:sb=false:hr=false": {
-  "text": "Adaptive\nDeep Research\nPassed\nUnreviewed\nOct 28, 2026, 3:00 AM\n⟦Receipt conclusion text.⟧\nNot source-backed\n·\nHuman review not flagged as needed\nOpen review →"
+  "text": "Adaptive\nDeep Research\nPassed\nUnreviewed\n⟨datetime⟩\n⟦Receipt conclusion text.⟧\nNot source-backed\n·\nHuman review not flagged as needed\nOpen review →"
  },
  "personalReview:deep_research:sb=false:hr=false": {
   "text": "Back to my reviews\n·\nBack to ConvergePanel\nDeep Research\nDeep Research View\nAssigned\nDecision Receipt\n⟦Receipt conclusion text.⟧\nNot source-backed\n·\nHuman review not flagged as needed\nBasis\n(\n1\n)\n−\n⟦Receipt basis text.⟧\nAssumptions\n(\n1\n)\n−\n⟦Receipt assumption text.⟧\nUncertainties\n(\n1\n)\n−\n⟦Receipt uncertainty text.⟧\nLimitations\n(\n1\n)\n−\n⟦Receipt limitation text.⟧\nSubmit a Decision\nDecision\nApprove\nAccept this result as-is.\nApprove with Conditions\nAccept, with one or more caveats attached.\nRequest Changes\nAsk for revisions before this can be approved.\nReject\nThis result should not be used.\nSubmit Decision\nReview history\nReview history is temporarily unavailable.\nReviewer navigation\nSubmit review decision",
@@ -1117,7 +1117,7 @@
   ]
  },
  "teamReview:deep_research:sb=false:hr=false": {
-  "text": "Back to review queue\nDeep Research\nDeep Research View\nUnknown\nPending\nReviewable\nUpdated\nOct 28, 2026, 3:00 AM\nDecision Receipt\n⟦Receipt conclusion text.⟧\nNot source-backed\n·\nHuman review not flagged as needed\nBasis\n(\n1\n)\n−\n⟦Receipt basis text.⟧\nAssumptions\n(\n1\n)\n−\n⟦Receipt assumption text.⟧\nUncertainties\n(\n1\n)\n−\n⟦Receipt uncertainty text.⟧\nLimitations\n(\n1\n)\n−\n⟦Receipt limitation text.⟧\nAutomated Governance\nStatus\nNot evaluated\nHuman Review\nStatus\nPending\nMulti-Reviewer Panel\nLoading review panel…\nReviewer\nReviewer assignment is temporarily unavailable.\nReview History\nReview history is temporarily unavailable.\nSubmit a Decision\nDecision\nApprove\nAccept this result as-is.\nApprove with Conditions\nAccept, with one or more caveats attached.\nRequest Changes\nAsk for revisions before this can be approved.\nReject\nThis result should not be used.\nSubmit Decision\nSubmit review decision",
+  "text": "Back to review queue\nDeep Research\nDeep Research View\nUnknown\nPending\nReviewable\nUpdated\n⟨datetime⟩\nDecision Receipt\n⟦Receipt conclusion text.⟧\nNot source-backed\n·\nHuman review not flagged as needed\nBasis\n(\n1\n)\n−\n⟦Receipt basis text.⟧\nAssumptions\n(\n1\n)\n−\n⟦Receipt assumption text.⟧\nUncertainties\n(\n1\n)\n−\n⟦Receipt uncertainty text.⟧\nLimitations\n(\n1\n)\n−\n⟦Receipt limitation text.⟧\nAutomated Governance\nStatus\nNot evaluated\nHuman Review\nStatus\nPending\nMulti-Reviewer Panel\nLoading review panel…\nReviewer\nReviewer assignment is temporarily unavailable.\nReview History\nReview history is temporarily unavailable.\nSubmit a Decision\nDecision\nApprove\nAccept this result as-is.\nApprove with Conditions\nAccept, with one or more caveats attached.\nRequest Changes\nAsk for revisions before this can be approved.\nReject\nThis result should not be used.\nSubmit Decision\nSubmit review decision",
   "fetches": [
    "GET /api/teams/adaptive-runs/run-1",
    "GET /api/teams/adaptive-runs/run-1/review-panel",
@@ -1127,7 +1127,7 @@
   ]
  },
  "listItem:generic:sb=false:hr=false": {
-  "text": "Adaptive\nUnknown\nPassed\nUnreviewed\nOct 28, 2026, 3:00 AM\n⟦Receipt conclusion text.⟧\nNot source-backed\n·\nHuman review not flagged as needed\nOpen review →"
+  "text": "Adaptive\nUnknown\nPassed\nUnreviewed\n⟨datetime⟩\n⟦Receipt conclusion text.⟧\nNot source-backed\n·\nHuman review not flagged as needed\nOpen review →"
  },
  "personalReview:generic:sb=false:hr=false": {
   "text": "Back to my reviews\n·\nBack to ConvergePanel\nUnknown\nDeep Research View\nAssigned\nDecision Receipt\n⟦Receipt conclusion text.⟧\nNot source-backed\n·\nHuman review not flagged as needed\nBasis\n(\n1\n)\n−\n⟦Receipt basis text.⟧\nAssumptions\n(\n1\n)\n−\n⟦Receipt assumption text.⟧\nUncertainties\n(\n1\n)\n−\n⟦Receipt uncertainty text.⟧\nLimitations\n(\n1\n)\n−\n⟦Receipt limitation text.⟧\nSubmit a Decision\nDecision\nApprove\nAccept this result as-is.\nApprove with Conditions\nAccept, with one or more caveats attached.\nRequest Changes\nAsk for revisions before this can be approved.\nReject\nThis result should not be used.\nSubmit Decision\nReview history\nReview history is temporarily unavailable.\nReviewer navigation\nSubmit review decision",
@@ -1138,7 +1138,7 @@
   ]
  },
  "teamReview:generic:sb=false:hr=false": {
-  "text": "Back to review queue\nUnknown\nDeep Research View\nUnknown\nPending\nReviewable\nUpdated\nOct 28, 2026, 3:00 AM\nDecision Receipt\n⟦Receipt conclusion text.⟧\nNot source-backed\n·\nHuman review not flagged as needed\nBasis\n(\n1\n)\n−\n⟦Receipt basis text.⟧\nAssumptions\n(\n1\n)\n−\n⟦Receipt assumption text.⟧\nUncertainties\n(\n1\n)\n−\n⟦Receipt uncertainty text.⟧\nLimitations\n(\n1\n)\n−\n⟦Receipt limitation text.⟧\nAutomated Governance\nStatus\nNot evaluated\nHuman Review\nStatus\nPending\nMulti-Reviewer Panel\nLoading review panel…\nReviewer\nReviewer assignment is temporarily unavailable.\nReview History\nReview history is temporarily unavailable.\nSubmit a Decision\nDecision\nApprove\nAccept this result as-is.\nApprove with Conditions\nAccept, with one or more caveats attached.\nRequest Changes\nAsk for revisions before this can be approved.\nReject\nThis result should not be used.\nSubmit Decision\nSubmit review decision",
+  "text": "Back to review queue\nUnknown\nDeep Research View\nUnknown\nPending\nReviewable\nUpdated\n⟨datetime⟩\nDecision Receipt\n⟦Receipt conclusion text.⟧\nNot source-backed\n·\nHuman review not flagged as needed\nBasis\n(\n1\n)\n−\n⟦Receipt basis text.⟧\nAssumptions\n(\n1\n)\n−\n⟦Receipt assumption text.⟧\nUncertainties\n(\n1\n)\n−\n⟦Receipt uncertainty text.⟧\nLimitations\n(\n1\n)\n−\n⟦Receipt limitation text.⟧\nAutomated Governance\nStatus\nNot evaluated\nHuman Review\nStatus\nPending\nMulti-Reviewer Panel\nLoading review panel…\nReviewer\nReviewer assignment is temporarily unavailable.\nReview History\nReview history is temporarily unavailable.\nSubmit a Decision\nDecision\nApprove\nAccept this result as-is.\nApprove with Conditions\nAccept, with one or more caveats attached.\nRequest Changes\nAsk for revisions before this can be approved.\nReject\nThis result should not be used.\nSubmit Decision\nSubmit review decision",
   "fetches": [
    "GET /api/teams/adaptive-runs/run-1",
    "GET /api/teams/adaptive-runs/run-1/review-panel",
@@ -1160,7 +1160,7 @@
   "text": "Review\nUnder review\nDecision receipt\n⟦Receipt conclusion text.⟧\nSource-backed · Human review needed\nReview"
  },
  "listItem:deep_research:sb=true:hr=true": {
-  "text": "Adaptive\nDeep Research\nPassed\nUnreviewed\nOct 28, 2026, 3:00 AM\n⟦Receipt conclusion text.⟧\nSource-backed\n·\nHuman review needed\nOpen review →"
+  "text": "Adaptive\nDeep Research\nPassed\nUnreviewed\n⟨datetime⟩\n⟦Receipt conclusion text.⟧\nSource-backed\n·\nHuman review needed\nOpen review →"
  },
  "personalReview:deep_research:sb=true:hr=true": {
   "text": "Back to my reviews\n·\nBack to ConvergePanel\nDeep Research\nDeep Research View\nAssigned\nDecision Receipt\n⟦Receipt conclusion text.⟧\nSource-backed\n·\nHuman review needed\nBasis\n(\n1\n)\n−\n⟦Receipt basis text.⟧\nAssumptions\n(\n1\n)\n−\n⟦Receipt assumption text.⟧\nUncertainties\n(\n1\n)\n−\n⟦Receipt uncertainty text.⟧\nLimitations\n(\n1\n)\n−\n⟦Receipt limitation text.⟧\nSubmit a Decision\nDecision\nApprove\nAccept this result as-is.\nApprove with Conditions\nAccept, with one or more caveats attached.\nRequest Changes\nAsk for revisions before this can be approved.\nReject\nThis result should not be used.\nSubmit Decision\nReview history\nReview history is temporarily unavailable.\nReviewer navigation\nSubmit review decision",
@@ -1171,7 +1171,7 @@
   ]
  },
  "teamReview:deep_research:sb=true:hr=true": {
-  "text": "Back to review queue\nDeep Research\nDeep Research View\nUnknown\nPending\nReviewable\nUpdated\nOct 28, 2026, 3:00 AM\nDecision Receipt\n⟦Receipt conclusion text.⟧\nSource-backed\n·\nHuman review needed\nBasis\n(\n1\n)\n−\n⟦Receipt basis text.⟧\nAssumptions\n(\n1\n)\n−\n⟦Receipt assumption text.⟧\nUncertainties\n(\n1\n)\n−\n⟦Receipt uncertainty text.⟧\nLimitations\n(\n1\n)\n−\n⟦Receipt limitation text.⟧\nAutomated Governance\nStatus\nNot evaluated\nHuman Review\nStatus\nPending\nMulti-Reviewer Panel\nLoading review panel…\nReviewer\nReviewer assignment is temporarily unavailable.\nReview History\nReview history is temporarily unavailable.\nSubmit a Decision\nDecision\nApprove\nAccept this result as-is.\nApprove with Conditions\nAccept, with one or more caveats attached.\nRequest Changes\nAsk for revisions before this can be approved.\nReject\nThis result should not be used.\nSubmit Decision\nSubmit review decision",
+  "text": "Back to review queue\nDeep Research\nDeep Research View\nUnknown\nPending\nReviewable\nUpdated\n⟨datetime⟩\nDecision Receipt\n⟦Receipt conclusion text.⟧\nSource-backed\n·\nHuman review needed\nBasis\n(\n1\n)\n−\n⟦Receipt basis text.⟧\nAssumptions\n(\n1\n)\n−\n⟦Receipt assumption text.⟧\nUncertainties\n(\n1\n)\n−\n⟦Receipt uncertainty text.⟧\nLimitations\n(\n1\n)\n−\n⟦Receipt limitation text.⟧\nAutomated Governance\nStatus\nNot evaluated\nHuman Review\nStatus\nPending\nMulti-Reviewer Panel\nLoading review panel…\nReviewer\nReviewer assignment is temporarily unavailable.\nReview History\nReview history is temporarily unavailable.\nSubmit a Decision\nDecision\nApprove\nAccept this result as-is.\nApprove with Conditions\nAccept, with one or more caveats attached.\nRequest Changes\nAsk for revisions before this can be approved.\nReject\nThis result should not be used.\nSubmit Decision\nSubmit review decision",
   "fetches": [
    "GET /api/teams/adaptive-runs/run-1",
    "GET /api/teams/adaptive-runs/run-1/review-panel",
@@ -1181,7 +1181,7 @@
   ]
  },
  "listItem:generic:sb=true:hr=true": {
-  "text": "Adaptive\nUnknown\nPassed\nUnreviewed\nOct 28, 2026, 3:00 AM\n⟦Receipt conclusion text.⟧\nSource-backed\n·\nHuman review needed\nOpen review →"
+  "text": "Adaptive\nUnknown\nPassed\nUnreviewed\n⟨datetime⟩\n⟦Receipt conclusion text.⟧\nSource-backed\n·\nHuman review needed\nOpen review →"
  },
  "personalReview:generic:sb=true:hr=true": {
   "text": "Back to my reviews\n·\nBack to ConvergePanel\nUnknown\nDeep Research View\nAssigned\nDecision Receipt\n⟦Receipt conclusion text.⟧\nSource-backed\n·\nHuman review needed\nBasis\n(\n1\n)\n−\n⟦Receipt basis text.⟧\nAssumptions\n(\n1\n)\n−\n⟦Receipt assumption text.⟧\nUncertainties\n(\n1\n)\n−\n⟦Receipt uncertainty text.⟧\nLimitations\n(\n1\n)\n−\n⟦Receipt limitation text.⟧\nSubmit a Decision\nDecision\nApprove\nAccept this result as-is.\nApprove with Conditions\nAccept, with one or more caveats attached.\nRequest Changes\nAsk for revisions before this can be approved.\nReject\nThis result should not be used.\nSubmit Decision\nReview history\nReview history is temporarily unavailable.\nReviewer navigation\nSubmit review decision",
@@ -1192,7 +1192,7 @@
   ]
  },
  "teamReview:generic:sb=true:hr=true": {
-  "text": "Back to review queue\nUnknown\nDeep Research View\nUnknown\nPending\nReviewable\nUpdated\nOct 28, 2026, 3:00 AM\nDecision Receipt\n⟦Receipt conclusion text.⟧\nSource-backed\n·\nHuman review needed\nBasis\n(\n1\n)\n−\n⟦Receipt basis text.⟧\nAssumptions\n(\n1\n)\n−\n⟦Receipt assumption text.⟧\nUncertainties\n(\n1\n)\n−\n⟦Receipt uncertainty text.⟧\nLimitations\n(\n1\n)\n−\n⟦Receipt limitation text.⟧\nAutomated Governance\nStatus\nNot evaluated\nHuman Review\nStatus\nPending\nMulti-Reviewer Panel\nLoading review panel…\nReviewer\nReviewer assignment is temporarily unavailable.\nReview History\nReview history is temporarily unavailable.\nSubmit a Decision\nDecision\nApprove\nAccept this result as-is.\nApprove with Conditions\nAccept, with one or more caveats attached.\nRequest Changes\nAsk for revisions before this can be approved.\nReject\nThis result should not be used.\nSubmit Decision\nSubmit review decision",
+  "text": "Back to review queue\nUnknown\nDeep Research View\nUnknown\nPending\nReviewable\nUpdated\n⟨datetime⟩\nDecision Receipt\n⟦Receipt conclusion text.⟧\nSource-backed\n·\nHuman review needed\nBasis\n(\n1\n)\n−\n⟦Receipt basis text.⟧\nAssumptions\n(\n1\n)\n−\n⟦Receipt assumption text.⟧\nUncertainties\n(\n1\n)\n−\n⟦Receipt uncertainty text.⟧\nLimitations\n(\n1\n)\n−\n⟦Receipt limitation text.⟧\nAutomated Governance\nStatus\nNot evaluated\nHuman Review\nStatus\nPending\nMulti-Reviewer Panel\nLoading review panel…\nReviewer\nReviewer assignment is temporarily unavailable.\nReview History\nReview history is temporarily unavailable.\nSubmit a Decision\nDecision\nApprove\nAccept this result as-is.\nApprove with Conditions\nAccept, with one or more caveats attached.\nRequest Changes\nAsk for revisions before this can be approved.\nReject\nThis result should not be used.\nSubmit Decision\nSubmit review decision",
   "fetches": [
    "GET /api/teams/adaptive-runs/run-1",
    "GET /api/teams/adaptive-runs/run-1/review-panel",
@@ -1214,7 +1214,7 @@
   "text": "Review\nUnder review\nDecision receipt\n⟦Receipt conclusion text.⟧\nNot source-backed · Human review needed\nReview"
  },
  "listItem:deep_research:sb=false:hr=true": {
-  "text": "Adaptive\nDeep Research\nPassed\nUnreviewed\nOct 28, 2026, 3:00 AM\n⟦Receipt conclusion text.⟧\nNot source-backed\n·\nHuman review needed\nOpen review →"
+  "text": "Adaptive\nDeep Research\nPassed\nUnreviewed\n⟨datetime⟩\n⟦Receipt conclusion text.⟧\nNot source-backed\n·\nHuman review needed\nOpen review →"
  },
  "personalReview:deep_research:sb=false:hr=true": {
   "text": "Back to my reviews\n·\nBack to ConvergePanel\nDeep Research\nDeep Research View\nAssigned\nDecision Receipt\n⟦Receipt conclusion text.⟧\nNot source-backed\n·\nHuman review needed\nBasis\n(\n1\n)\n−\n⟦Receipt basis text.⟧\nAssumptions\n(\n1\n)\n−\n⟦Receipt assumption text.⟧\nUncertainties\n(\n1\n)\n−\n⟦Receipt uncertainty text.⟧\nLimitations\n(\n1\n)\n−\n⟦Receipt limitation text.⟧\nSubmit a Decision\nDecision\nApprove\nAccept this result as-is.\nApprove with Conditions\nAccept, with one or more caveats attached.\nRequest Changes\nAsk for revisions before this can be approved.\nReject\nThis result should not be used.\nSubmit Decision\nReview history\nReview history is temporarily unavailable.\nReviewer navigation\nSubmit review decision",
@@ -1225,7 +1225,7 @@
   ]
  },
  "teamReview:deep_research:sb=false:hr=true": {
-  "text": "Back to review queue\nDeep Research\nDeep Research View\nUnknown\nPending\nReviewable\nUpdated\nOct 28, 2026, 3:00 AM\nDecision Receipt\n⟦Receipt conclusion text.⟧\nNot source-backed\n·\nHuman review needed\nBasis\n(\n1\n)\n−\n⟦Receipt basis text.⟧\nAssumptions\n(\n1\n)\n−\n⟦Receipt assumption text.⟧\nUncertainties\n(\n1\n)\n−\n⟦Receipt uncertainty text.⟧\nLimitations\n(\n1\n)\n−\n⟦Receipt limitation text.⟧\nAutomated Governance\nStatus\nNot evaluated\nHuman Review\nStatus\nPending\nMulti-Reviewer Panel\nLoading review panel…\nReviewer\nReviewer assignment is temporarily unavailable.\nReview History\nReview history is temporarily unavailable.\nSubmit a Decision\nDecision\nApprove\nAccept this result as-is.\nApprove with Conditions\nAccept, with one or more caveats attached.\nRequest Changes\nAsk for revisions before this can be approved.\nReject\nThis result should not be used.\nSubmit Decision\nSubmit review decision",
+  "text": "Back to review queue\nDeep Research\nDeep Research View\nUnknown\nPending\nReviewable\nUpdated\n⟨datetime⟩\nDecision Receipt\n⟦Receipt conclusion text.⟧\nNot source-backed\n·\nHuman review needed\nBasis\n(\n1\n)\n−\n⟦Receipt basis text.⟧\nAssumptions\n(\n1\n)\n−\n⟦Receipt assumption text.⟧\nUncertainties\n(\n1\n)\n−\n⟦Receipt uncertainty text.⟧\nLimitations\n(\n1\n)\n−\n⟦Receipt limitation text.⟧\nAutomated Governance\nStatus\nNot evaluated\nHuman Review\nStatus\nPending\nMulti-Reviewer Panel\nLoading review panel…\nReviewer\nReviewer assignment is temporarily unavailable.\nReview History\nReview history is temporarily unavailable.\nSubmit a Decision\nDecision\nApprove\nAccept this result as-is.\nApprove with Conditions\nAccept, with one or more caveats attached.\nRequest Changes\nAsk for revisions before this can be approved.\nReject\nThis result should not be used.\nSubmit Decision\nSubmit review decision",
   "fetches": [
    "GET /api/teams/adaptive-runs/run-1",
    "GET /api/teams/adaptive-runs/run-1/review-panel",
@@ -1235,7 +1235,7 @@
   ]
  },
  "listItem:generic:sb=false:hr=true": {
-  "text": "Adaptive\nUnknown\nPassed\nUnreviewed\nOct 28, 2026, 3:00 AM\n⟦Receipt conclusion text.⟧\nNot source-backed\n·\nHuman review needed\nOpen review →"
+  "text": "Adaptive\nUnknown\nPassed\nUnreviewed\n⟨datetime⟩\n⟦Receipt conclusion text.⟧\nNot source-backed\n·\nHuman review needed\nOpen review →"
  },
  "personalReview:generic:sb=false:hr=true": {
   "text": "Back to my reviews\n·\nBack to ConvergePanel\nUnknown\nDeep Research View\nAssigned\nDecision Receipt\n⟦Receipt conclusion text.⟧\nNot source-backed\n·\nHuman review needed\nBasis\n(\n1\n)\n−\n⟦Receipt basis text.⟧\nAssumptions\n(\n1\n)\n−\n⟦Receipt assumption text.⟧\nUncertainties\n(\n1\n)\n−\n⟦Receipt uncertainty text.⟧\nLimitations\n(\n1\n)\n−\n⟦Receipt limitation text.⟧\nSubmit a Decision\nDecision\nApprove\nAccept this result as-is.\nApprove with Conditions\nAccept, with one or more caveats attached.\nRequest Changes\nAsk for revisions before this can be approved.\nReject\nThis result should not be used.\nSubmit Decision\nReview history\nReview history is temporarily unavailable.\nReviewer navigation\nSubmit review decision",
@@ -1246,7 +1246,7 @@
   ]
  },
  "teamReview:generic:sb=false:hr=true": {
-  "text": "Back to review queue\nUnknown\nDeep Research View\nUnknown\nPending\nReviewable\nUpdated\nOct 28, 2026, 3:00 AM\nDecision Receipt\n⟦Receipt conclusion text.⟧\nNot source-backed\n·\nHuman review needed\nBasis\n(\n1\n)\n−\n⟦Receipt basis text.⟧\nAssumptions\n(\n1\n)\n−\n⟦Receipt assumption text.⟧\nUncertainties\n(\n1\n)\n−\n⟦Receipt uncertainty text.⟧\nLimitations\n(\n1\n)\n−\n⟦Receipt limitation text.⟧\nAutomated Governance\nStatus\nNot evaluated\nHuman Review\nStatus\nPending\nMulti-Reviewer Panel\nLoading review panel…\nReviewer\nReviewer assignment is temporarily unavailable.\nReview History\nReview history is temporarily unavailable.\nSubmit a Decision\nDecision\nApprove\nAccept this result as-is.\nApprove with Conditions\nAccept, with one or more caveats attached.\nRequest Changes\nAsk for revisions before this can be approved.\nReject\nThis result should not be used.\nSubmit Decision\nSubmit review decision",
+  "text": "Back to review queue\nUnknown\nDeep Research View\nUnknown\nPending\nReviewable\nUpdated\n⟨datetime⟩\nDecision Receipt\n⟦Receipt conclusion text.⟧\nNot source-backed\n·\nHuman review needed\nBasis\n(\n1\n)\n−\n⟦Receipt basis text.⟧\nAssumptions\n(\n1\n)\n−\n⟦Receipt assumption text.⟧\nUncertainties\n(\n1\n)\n−\n⟦Receipt uncertainty text.⟧\nLimitations\n(\n1\n)\n−\n⟦Receipt limitation text.⟧\nAutomated Governance\nStatus\nNot evaluated\nHuman Review\nStatus\nPending\nMulti-Reviewer Panel\nLoading review panel…\nReviewer\nReviewer assignment is temporarily unavailable.\nReview History\nReview history is temporarily unavailable.\nSubmit a Decision\nDecision\nApprove\nAccept this result as-is.\nApprove with Conditions\nAccept, with one or more caveats attached.\nRequest Changes\nAsk for revisions before this can be approved.\nReject\nThis result should not be used.\nSubmit Decision\nSubmit review decision",
   "fetches": [
    "GET /api/teams/adaptive-runs/run-1",
    "GET /api/teams/adaptive-runs/run-1/review-panel",
