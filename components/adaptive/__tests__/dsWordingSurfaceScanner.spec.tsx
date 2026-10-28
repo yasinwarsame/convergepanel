@@ -266,8 +266,10 @@ describe("literal oracle: each surface shows the approved string for its stored 
       expect([name, kind, fieldValue(s, "Sources")]).toEqual([name, kind, e.sources]);
       expect(s.textNodes).not.toContain("Consensus");
       expect(s.textNodes).not.toContain("Source grounding");
-      if (e.badge) expect(s.textNodes).toContain(e.badge);
-      else expect(s.textNodes.filter((t) => t === LISTED || t === NONE)).toEqual([]);
+      // The badge itself, not the Sources summary value that can carry the same words: exactly one node beyond the summary's.
+      const badgeNodes = (text: string) => s.textNodes.filter((t) => t === text).length - (fieldValue(s, "Sources") === text ? 1 : 0);
+      if (e.badge) expect([name, kind, badgeNodes(e.badge)]).toEqual([name, kind, 1]);
+      else expect([name, kind, badgeNodes(LISTED) + badgeNodes(NONE)]).toEqual([name, kind, 0]);
       if (e.counts) expect(s.textNodes).toContain(e.counts);
       if (e.e4) expect(s.textNodes).toContain(e.e4);
       else expect(all).toMatch(/recommendation is contested/);
