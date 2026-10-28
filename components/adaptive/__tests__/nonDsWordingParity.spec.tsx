@@ -97,6 +97,11 @@ if (OUT) {
       for (const [, c] of Object.entries(baseline)) expect(c.text).not.toMatch(LOCAL_DATETIME);
       expect(tokeniseDates("Updated Oct 28, 2026, 3:00 AM")).toBe(`Updated ${DATETIME_TOKEN}`);
       expect(tokeniseDates("Oct 28, 2026, 12:00 AM")).toBe(DATETIME_TOKEN);
+      // The normaliser touches the date-time only: wording around it, and wording that merely looks date-like, is kept.
+      expect(tokeniseDates("Oct 28, 2026, 3:00 AM Source-backed · Human review not required")).toBe(`${DATETIME_TOKEN} Source-backed · Human review not required`);
+      for (const text of ["Updated Oct 28 2026 3:00 AM", "Oct 28, 2026", "3:00 AM", "Source-backed", "October 28, 2026, 3:00 AM", "Strong consensus"]) expect([text, tokeniseDates(text)]).toEqual([text, text]);
+      // Every token in the baseline replaced exactly one date-time: stripping tokens leaves identical text on both sides.
+      for (const [id, c] of Object.entries(baseline)) expect([id, current[id].text.split(DATETIME_TOKEN).length]).toEqual([id, c.text.split(DATETIME_TOKEN).length]);
     });
 
     it("renders exactly the same set of surfaces", () => {

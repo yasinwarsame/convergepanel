@@ -17,7 +17,7 @@ import { schemaLabel, humanReviewStatusLabel } from "@/lib/governance/teamReview
 import GovernanceStatusBadge from "./GovernanceStatusBadge";
 import HumanReviewStatusBadge from "./HumanReviewStatusBadge";
 import ReceiptSourcesFlag from "@/components/adaptive/ReceiptSourcesFlag";
-import { ReceiptGroupingDisclosure, ReceiptReviewFlag } from "@/components/adaptive/DsReceiptWording";
+import { ReceiptConclusion, ReceiptGroupingDisclosure, ReceiptReviewFlag } from "@/components/adaptive/DsReceiptWording";
 
 function formatUpdatedAt(iso: string): string {
   const d = new Date(iso);
@@ -125,7 +125,7 @@ export default function AdaptiveReviewListItem({ item }: { item: EnrichedAdaptiv
         </time>
       </div>
 
-      <p className="mt-3 text-sm leading-snug text-cp-text">{item.receiptConclusion}</p>
+      <ReceiptConclusion schemaId={item.schemaId} conclusion={item.receiptConclusion} className="mt-3 text-sm leading-snug text-cp-text" />
       <ReceiptGroupingDisclosure schemaId={item.schemaId} className="mt-2 text-xs leading-relaxed text-cp-muted" />
 
       <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-cp-muted">

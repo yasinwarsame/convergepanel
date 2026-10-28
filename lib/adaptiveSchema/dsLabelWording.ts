@@ -97,16 +97,25 @@ export function dsHasListedSources(sources: unknown): boolean | null {
  * omitted.
  */
 export function dsSourcesSummary(decisionSupport: DecisionSupportResult | null | undefined): string | null {
-  const listed = dsHasListedSources(decisionSupport?.sources);
-  if (listed === null) return dsReceiptSourcesLabel(decisionSupport?.sourceBacked);
-  return listed ? DS_SOURCES_PROVIDED : DS_NO_SOURCES_LISTED;
+  if (!decisionSupport) return null;
+  return dsSourcesBadgeOrSummary(decisionSupport.sources, decisionSupport.sourceBacked, DS_SOURCES_PROVIDED);
 }
 
 /** E-3 DS badge text, or null to omit; the same legacy fallback as `dsSourcesSummary`. */
 export function dsSourcesBadge(sources: unknown, sourceBacked?: unknown): string | null {
+  return dsSourcesBadgeOrSummary(sources, sourceBacked, DS_SOURCES_LISTED);
+}
+
+/**
+ * A recorded list decides (K-5). With the field absent (a legacy result, recorded before the list existed) only the
+ * stored flag is left, and only `false` establishes absence. A list that is present but malformed (not an array) is
+ * unknown, so the claim is omitted whatever the flag says.
+ */
+function dsSourcesBadgeOrSummary(sources: unknown, sourceBacked: unknown, listedText: string): string | null {
+  if (sources === undefined) return dsReceiptSourcesLabel(sourceBacked);
   const listed = dsHasListedSources(sources);
-  if (listed === null) return dsReceiptSourcesLabel(sourceBacked);
-  return listed ? DS_SOURCES_LISTED : DS_NO_SOURCES_LISTED;
+  if (listed === null) return null;
+  return listed ? listedText : DS_NO_SOURCES_LISTED;
 }
 
 /**
@@ -141,6 +150,50 @@ export function dsUncontestedStatement(decisionSupport: DecisionSupportResult): 
   if (!isCount(recommendation.totalModelsWithRecommendation)) return null;
   return `${DS_NO_DISAGREEMENT_IDENTIFIED}.`;
 }
+
+/**
+ * R2-m1 (owner ruling 2026-10-28): the producer stores this rationale when every model chose "choose an option" but none
+ * named an option the matcher could resolve (decisionSupportAlignment.ts:488, action conditional_go, contested, no
+ * recommended option). The stored record is kept byte-identical; on screen it is replaced, because "Models agree…"
+ * reads as verified agreement on an actionable review surface.
+ */
+export const DS_UNRESOLVED_OPTION_STORED_RATIONALE =
+  "Models agree a specific option should be chosen but did not name one this system could confidently resolve.";
+export const DS_UNRESOLVED_OPTION_EXPLANATION =
+  "The current grouping could not reliably identify the recommended option. Review the individual model recommendations before deciding.";
+/** The receipt builder's conclusion for that state (`${actionLabel} — ${rationale}`, no recommended option). */
+const UNRESOLVED_OPTION_RECEIPT_PREFIX = "Conditional go — ";
+
+/**
+ * The rationale a DS result view shows. Substituted only when the identity (the exact stored sentence, whole field) and
+ * the state that produces it (conditional_go, contested, no recommended option) are both established; any other
+ * rationale, including model-written text, is shown as stored.
+ */
+export function dsPresentedRationale(decisionSupport: DecisionSupportResult): string {
+  const r = decisionSupport.recommendation;
+  const unresolved =
+    r.rationale === DS_UNRESOLVED_OPTION_STORED_RATIONALE && r.action === "conditional_go" && r.isContested === true && !r.recommendedOptionId;
+  return unresolved ? DS_UNRESOLVED_OPTION_EXPLANATION : r.rationale;
+}
+
+/**
+ * The receipt conclusion a DS receipt surface shows. A stored receipt carries only its conclusion string, so the
+ * substitution needs the whole conclusion to equal exactly what the receipt builder writes for the unresolved state
+ * ("Conditional go — " + the stored sentence) on a Decision Support run; any other conclusion is shown as stored.
+ */
+export function dsPresentedReceiptConclusion(schemaId: unknown, conclusion: string): string {
+  if (!isDecisionSupportSchema(schemaId)) return conclusion;
+  return conclusion === `${UNRESOLVED_OPTION_RECEIPT_PREFIX}${DS_UNRESOLVED_OPTION_STORED_RATIONALE}`
+    ? `${UNRESOLVED_OPTION_RECEIPT_PREFIX}${DS_UNRESOLVED_OPTION_EXPLANATION}`
+    : conclusion;
+}
+
+/**
+ * Rendering markers for the scanner's stored-data boundary (test-visible, DS only): the element that renders a stored
+ * DS field carries `data-ds-field` with one of these values, and nothing else may carry it (pinned by the wiring test).
+ */
+export const DS_FIELD_RATIONALE = "recommendation.rationale";
+export const DS_FIELD_RECEIPT_CONCLUSION = "receipt.conclusion";
 
 /** E-8: a strength value with its visible qualifier. `contested` is a disagreement marker and `unknown` is hidden or "Unrated", so neither gets one. */
 export const DS_STRENGTH_LABEL: Record<string, string> = {

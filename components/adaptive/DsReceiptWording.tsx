@@ -9,7 +9,25 @@
  * Every other schema keeps its existing markup exactly.
  */
 
-import { DS_NOT_FLAGGED_FOR_REVIEW, DS_OPTION_GROUPING_DISCLOSURE, isDecisionSupportSchema } from "@/lib/adaptiveSchema/dsLabelWording";
+import {
+  DS_FIELD_RECEIPT_CONCLUSION,
+  DS_NOT_FLAGGED_FOR_REVIEW,
+  DS_OPTION_GROUPING_DISCLOSURE,
+  dsPresentedReceiptConclusion,
+  isDecisionSupportSchema,
+} from "@/lib/adaptiveSchema/dsLabelWording";
+
+/**
+ * The stored receipt conclusion. On a DS run the known unresolved-option conclusion is presented with its qualified
+ * explanation (R2-m1), and the element carries the stored-field marker; every other schema renders exactly as before.
+ */
+export function ReceiptConclusion({ schemaId, conclusion, className }: { schemaId: unknown; conclusion: string; className: string }) {
+  return (
+    <p className={className} data-ds-field={isDecisionSupportSchema(schemaId) ? DS_FIELD_RECEIPT_CONCLUSION : undefined}>
+      {dsPresentedReceiptConclusion(schemaId, conclusion)}
+    </p>
+  );
+}
 
 export function ReceiptReviewFlag({ schemaId, humanReviewNeeded }: { schemaId: unknown; humanReviewNeeded: boolean }) {
   if (humanReviewNeeded) return <span>Human review needed</span>;

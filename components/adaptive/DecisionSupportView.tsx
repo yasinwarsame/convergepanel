@@ -27,6 +27,8 @@ import {
   DS_STRENGTH_LABEL,
   dsRecommendationCounts,
   dsSourcesBadge,
+  dsPresentedRationale,
+  DS_FIELD_RATIONALE,
 } from "@/lib/adaptiveSchema/dsLabelWording";
 
 const ACTION_LABELS: Record<DecisionRecommendationAction, string> = {
@@ -151,7 +153,13 @@ export default function DecisionSupportView({ decisionSupport }: { decisionSuppo
         </div>
 
         {/* 3. Why this recommendation. */}
-        {recommendation.rationale && <p className="mt-2 text-sm text-slate-700">{recommendation.rationale}</p>}
+        {recommendation.rationale && (
+          // R2-m1: the known unresolved-option rationale is presented with its qualified explanation; the marker bounds the
+          // scanner's stored-data handling to this field.
+          <p className="mt-2 text-sm text-slate-700" data-ds-field={DS_FIELD_RATIONALE}>
+            {dsPresentedRationale(decisionSupport)}
+          </p>
+        )}
         {recommendation.caveats.length > 0 && (
           <ul className="mt-2 list-disc list-outside pl-5 space-y-1 text-xs text-slate-600">
             {recommendation.caveats.map((c, idx) => (

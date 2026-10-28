@@ -217,7 +217,11 @@ export function receiptFor(fixture: DsFixture) {
   };
 }
 
-export type Surface = { id: string; textNodes: string[]; attributes: string[] };
+/**
+ * `fields[i]` is the stored DS field (`data-ds-field` on the nearest enclosing element) text node `i` renders, or null.
+ * Only the scanner's stored-data boundary reads it; absent means "no node is in a stored field".
+ */
+export type Surface = { id: string; textNodes: string[]; attributes: string[]; fields?: (string | null)[] };
 
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", middot: "·", mdash: "—", ndash: "–", times: "×" };
 function decode(s: string): string {
@@ -227,14 +231,30 @@ function decode(s: string): string {
   });
 }
 
-/** Every text node and every reader-visible attribute of a static render. */
+const VOID = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"]);
+
+/** Every text node and every reader-visible attribute of a static render, with the stored field each text node is in. */
 export function surfaceFromHtml(id: string, html: string): Surface {
   const attributes = [...html.matchAll(/\s(?:title|aria-label|alt)="([^"]*)"/g)].map((m) => decode(m[1]));
-  const textNodes = html
-    .split(/<[^>]*>/)
-    .map((t) => decode(t).replace(/\s+/g, " ").trim())
-    .filter((t) => t.length > 0);
-  return { id, textNodes, attributes };
+  const textNodes: string[] = [];
+  const fields: (string | null)[] = [];
+  const stack: (string | null)[] = [];
+  for (const m of html.matchAll(/<[^>]*>|[^<]+/g)) {
+    const token = m[0];
+    if (token.startsWith("<")) {
+      if (token.startsWith("</")) stack.pop();
+      else if (!token.startsWith("<!") && !token.endsWith("/>") && !VOID.has((/^<([a-zA-Z0-9-]+)/.exec(token)?.[1] ?? "").toLowerCase())) {
+        const marker = /\sdata-ds-field="([^"]*)"/.exec(token)?.[1];
+        stack.push(marker ?? stack[stack.length - 1] ?? null);
+      }
+      continue;
+    }
+    const t = decode(token).replace(/\s+/g, " ").trim();
+    if (t.length === 0) continue;
+    textNodes.push(t);
+    fields.push(stack[stack.length - 1] ?? null);
+  }
+  return { id, textNodes, attributes, fields };
 }
 
 type TreeNode = { type: string; props: Record<string, unknown>; children: (TreeNode | string)[] | null };
@@ -243,21 +263,26 @@ type TreeNode = { type: string; props: Record<string, unknown>; children: (TreeN
 export function surfaceFromTree(id: string, tree: TreeNode | TreeNode[] | null): Surface {
   const textNodes: string[] = [];
   const attributes: string[] = [];
-  const walk = (node: TreeNode | string | null) => {
+  const fields: (string | null)[] = [];
+  const walk = (node: TreeNode | string | null, field: string | null) => {
     if (node === null) return;
     if (typeof node === "string") {
       const t = node.replace(/\s+/g, " ").trim();
-      if (t) textNodes.push(t);
+      if (t) {
+        textNodes.push(t);
+        fields.push(field);
+      }
       return;
     }
     for (const key of ["title", "aria-label", "alt"]) {
       const v = node.props?.[key];
       if (typeof v === "string") attributes.push(v);
     }
-    for (const child of node.children ?? []) walk(child);
+    const marker = node.props?.["data-ds-field"];
+    for (const child of node.children ?? []) walk(child, typeof marker === "string" ? marker : field);
   };
-  for (const n of Array.isArray(tree) ? tree : [tree]) walk(n);
-  return { id, textNodes, attributes };
+  for (const n of Array.isArray(tree) ? tree : [tree]) walk(n, null);
+  return { id, textNodes, attributes, fields };
 }
 
 export function renderStatic(id: string, element: ReactElement): Surface & { html: string } {

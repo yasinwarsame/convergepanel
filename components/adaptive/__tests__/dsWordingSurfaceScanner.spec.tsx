@@ -49,9 +49,9 @@ jest.mock("@/lib/adaptiveSchema/dsLabelWording", () => {
 
 import { readFileSync } from "fs";
 import { join } from "path";
-import { dsFixtures, S, surfaceFromHtml, type Surface } from "./seSurfaces/seSurfaceHarness";
+import { dsFixtures, receiptFor, S, surfaceFromHtml, type Surface } from "./seSurfaces/seSurfaceHarness";
 import { allDsSurfaces, dsPageSurface } from "./seSurfaces/seSurfaceRenderers";
-import { EXEMPTIONS, FAMILIES, FIELD_LABELS, STORED_DATA_DEBT, type StoredData, assertNotBlind, scanSurface, usedExemptions, validateExemptions } from "./seSurfaces/dsWordingScanner";
+import { EXEMPTIONS, FAMILIES, FIELD_LABELS, STORED_FIELDS, STORED_RATIONALE_DEBT, assertNotBlind, scanSurface, usedExemptions, validateExemptions } from "./seSurfaces/dsWordingScanner";
 
 const fixtures = dsFixtures();
 const fixturesAtLoad = JSON.stringify(fixtures);
@@ -129,17 +129,12 @@ function fieldValue(s: Surface, label: string): string | undefined {
 
 const PAGE_ANCHORS = ["Model agreement", "Sources", "Options considered", "Panel detail", "Model-assigned evidence strength, not independently checked"];
 
-/**
- * Stored-data debt per surface: the fixture's own stored rationale, if it is one of the producer's debt sentences, with
- * the exact number of places each surface kind renders that field (page: the recommendation; Team page: that plus the
- * receipt summary's conclusion; each receipt surface: its conclusion). Anything beyond that count is still scanned.
- */
-const RATIONALE_RENDERS: Record<string, number> = { page: 1, page_team: 2, list_item: 1, personal_review: 1, team_review: 1 };
-function storedDataFor(s: { fixture: string; kind: string }): StoredData[] {
-  const rationale = fixtures.find((x) => x.name === s.fixture)!.result.recommendation.rationale;
-  return STORED_DATA_DEBT.some((re) => re.test(rationale)) ? [{ text: rationale, count: RATIONALE_RENDERS[s.kind] }] : [];
-}
-const scanDs = (s: Surface & { fixture: string; kind: string }) => scanSurface(s, { storedData: storedDataFor(s) });
+/** The scanner's default: stored-data debt is handled only inside its own marked stored field (see STORED_RATIONALE_DEBT). */
+const scanDs = (s: Surface) => scanSurface(s);
+
+// R2-m1 (owner ruling): the stored :488 rationale is kept; screens show this instead (literal oracle).
+const STORED_488 = "Models agree a specific option should be chosen but did not name one this system could confidently resolve.";
+const SHOWN_488 = "The current grouping could not reliably identify the recommended option. Review the individual model recommendations before deciding.";
 
 /** What each surface must contain to count as whole: the page sections its state renders, and its review slot. */
 function anchorsFor(s: Surface & { fixture: string; kind: string }): string[] {
@@ -198,7 +193,7 @@ describe("whole-surface scan: no prohibited wording on any Decision Support surf
         const raw = dsPageSurface(`raw:${mode}:${f.name}`, f, mode, "unwrapped");
         const bare = raw.textNodes.flatMap((t, i) => (/^(strong|moderate|weak)$/i.test(t) ? [raw.textNodes[i - 1]] : []));
         expect([f.name, mode, bare.filter((prev) => prev !== "evidenceStrength:")]).toEqual([f.name, mode, []]);
-        expect([f.name, mode, scanDs({ ...raw, fixture: f.name, kind: mode === "team" ? "page_team" : "page" }).filter((h) => h.family !== "F8-bare-strength")]).toEqual([f.name, mode, []]);
+        expect([f.name, mode, scanDs(raw).filter((h) => h.family !== "F8-bare-strength")]).toEqual([f.name, mode, []]);
         const expectedRaw = f.perModel.reduce((n, p) => n + p.fields.assessments.length, 0);
         expect([f.name, mode, bare.length]).toEqual([f.name, mode, expectedRaw]);
       }
@@ -209,11 +204,46 @@ describe("whole-surface scan: no prohibited wording on any Decision Support surf
     expect(surfaces.flatMap((s) => scanDs(s))).toEqual([]);
   });
 
-  it("stored-data debt is exercised exactly where the producer writes it, and nowhere else", () => {
-    const withDebt = fixtures.filter((f) => STORED_DATA_DEBT.some((re) => re.test(f.result.recommendation.rationale))).map((f) => f.name).sort();
-    expect(withDebt).toEqual(["contested_on_option", "unresolved_option"]);
-    // Without it, those surfaces fail: the debt is real wording a reader sees, recorded rather than hidden.
-    for (const s of surfaces.filter((x) => withDebt.includes(x.fixture))) expect([s.id, scanSurface(s).length > 0]).toEqual([s.id, true]);
+  it("the :498 stored rationale is the only debt, shown only in its stored fields, with D-9 visible beside it", () => {
+    const withDebt = fixtures.filter((f) => STORED_RATIONALE_DEBT.test(f.result.recommendation.rationale)).map((f) => f.name);
+    expect(withDebt).toEqual(["contested_on_option"]);
+    for (const s of surfaces.filter((x) => x.fixture === "contested_on_option")) {
+      const where = s.textNodes.flatMap((t, i) => (t.includes("Models agree an option should be chosen") ? [s.fields?.[i] ?? null] : []));
+      // Page: the rationale field; Team page: that plus the receipt summary; each receipt surface: its conclusion.
+      const expected = { page: [STORED_FIELDS.rationale], page_team: [STORED_FIELDS.rationale, STORED_FIELDS.receiptConclusion] }[s.kind as "page" | "page_team"] ?? [STORED_FIELDS.receiptConclusion];
+      expect([s.id, where]).toEqual([s.id, expected]);
+      expect([s.id, s.textNodes.includes(D9)]).toEqual([s.id, true]);
+      // The debt is real wording a reader sees: with the field boundary off, the same surface fails.
+      expect([s.id, scanSurface(s, { storedFieldDebt: false }).map((h) => h.family)]).toEqual([s.id, expect.arrayContaining(["F2-convergence"])]);
+    }
+  });
+
+  it("R2-m1: the :488 stored rationale is kept in the record but never shown; every surface shows the qualified explanation", () => {
+    const f = fixtures.find((x) => x.name === "unresolved_option")!;
+    expect(f.result.recommendation).toMatchObject({ action: "conditional_go", isContested: true, rationale: STORED_488 });
+    expect(f.result.recommendation.recommendedOptionId).toBeFalsy();
+    for (const kind of ["page", "page_team", "list_item", "personal_review", "team_review"]) {
+      const s = of(f.name, kind);
+      expect([kind, textOf(s).includes("did not name one this system could confidently resolve")]).toEqual([kind, false]);
+      expect([kind, s.textNodes.filter((t) => t.includes(SHOWN_488)).length]).toEqual([kind, kind === "page_team" ? 2 : 1]);
+      expect([kind, s.textNodes.includes(D9)]).toEqual([kind, true]);
+    }
+    // Receipts: the real builder wrote the stored sentence into the conclusion; the screen shows the explanation in its place.
+    expect(receiptFor(f).conclusion).toBe(`Conditional go — ${STORED_488}`);
+    for (const kind of ["list_item", "personal_review", "team_review"]) expect([kind, of(f.name, kind).textNodes.includes(`Conditional go — ${SHOWN_488}`)]).toEqual([kind, true]);
+  });
+
+  it("stored-field markers cover exactly the stored text: every marked node is the fixture's presented field value", () => {
+    for (const s of surfaces) {
+      expect([s.id, s.fields?.length]).toEqual([s.id, s.textNodes.length]);
+      const f = fixtures.find((x) => x.name === s.fixture)!;
+      const presented = f.result.recommendation.rationale === STORED_488 ? SHOWN_488 : f.result.recommendation.rationale;
+      for (const [i, field] of (s.fields ?? []).entries()) {
+        if (field === STORED_FIELDS.rationale) expect([s.id, s.textNodes[i]]).toEqual([s.id, presented]);
+        else if (field === STORED_FIELDS.receiptConclusion) expect([s.id, s.textNodes[i].endsWith(presented)]).toEqual([s.id, true]);
+        else expect([s.id, field]).toEqual([s.id, null]);
+      }
+    }
   });
 
   it("every exemption is phrase-level and is actually exercised by a rendered surface", () => {
@@ -458,20 +488,37 @@ describe("falsification: scanner mechanics", () => {
     for (const s of surfaces.filter((x) => x.kind.startsWith("page"))) expect([s.id, s.textNodes.includes("Model agreement")]).toEqual([s.id, true]);
   });
 
-  it("(2d) stored-data debt is restricted to the stored field: an extra application copy, a wrong count or a non-debt value is caught", () => {
-    const debt = "Models agree a specific option should be chosen but did not name one this system could confidently resolve.";
-    const page = (nodes: string[]): Surface => ({ id: "p", textNodes: nodes, attributes: [] });
-    // The stored field rendered once, passed with count 1: exempt.
-    expect(scanSurface(page([`Conditional go — ${debt}`]), { storedData: [{ text: debt, count: 1 }] })).toEqual([]);
-    // The application repeats the sentence elsewhere on the same surface: the extra copy is scanned.
-    expect(scanSurface(page([`Conditional go — ${debt}`, debt]), { storedData: [{ text: debt, count: 1 }] }).map((h) => h.family)).toContain("F2-convergence");
-    // Not where the caller says the field renders: reported.
-    expect(scanSurface(page(["Nothing here."]), { storedData: [{ text: debt, count: 1 }] }).map((h) => h.family)).toEqual(["stored-data-count"]);
-    // A value that is not recorded debt gets no exemption at all.
-    expect(scanSurface(page(["All models agree."]), { storedData: [{ text: "All models agree.", count: 1 }] }).map((h) => h.family)).toContain("stored-data-not-debt");
-    // No phrase exemption exists for either debt sentence: on a surface without the stored field it is always caught.
+  it("(2d) stored-data debt is bounded to its own marked field: the same sentences planted as application text are caught", () => {
+    const d498 = "Models agree an option should be chosen but disagree on which one (2 of 3 pick A; 1 of 3 pick B).";
+    const at = (nodes: [string, string | null][]): Surface => ({ id: "p", textNodes: nodes.map((n) => n[0]), attributes: [], fields: nodes.map((n) => n[1]) });
+    // In its stored fields: handled.
+    expect(scanSurface(at([[d498, STORED_FIELDS.rationale]]))).toEqual([]);
+    expect(scanSurface(at([[`Conditional go — ${d498}`, STORED_FIELDS.receiptConclusion]]))).toEqual([]);
+    // The same sentence outside the field, unmarked, or with application text added inside the field: caught.
+    expect(scanSurface(at([[d498, null]])).map((h) => h.family)).toContain("F2-convergence");
+    expect(scanSurface(at([[d498, "something.else"]])).map((h) => h.family)).toContain("F2-convergence");
+    expect(scanSurface(at([[`${d498} All models agree.`, STORED_FIELDS.rationale]])).map((h) => h.family)).toContain("F2-convergence");
+    expect(scanSurface(at([[`Models agreed — ${d498}`, STORED_FIELDS.receiptConclusion]])).map((h) => h.family)).toContain("F2-convergence");
+    // The :488 sentence has no debt entry anywhere: inside the rationale field or a receipt conclusion it is caught.
+    expect(scanSurface(at([[STORED_488, STORED_FIELDS.rationale]])).map((h) => h.family)).toContain("F2-convergence");
+    expect(scanSurface(at([[`Conditional go — ${STORED_488}`, STORED_FIELDS.receiptConclusion]])).map((h) => h.family)).toContain("F2-convergence");
+    // No phrase exemption exists for either sentence.
     for (const e of EXEMPTIONS) expect([e, /Models agree/.test(e)]).toEqual([e, false]);
-    expect(scanSurface(page([debt])).map((h) => h.family)).toContain("F2-convergence");
+  });
+
+  it("(2e) on the real page, both sentences planted as application wording outside their field are caught", () => {
+    const f = fixtures.find((x) => x.name === "contested_on_option")!;
+    const stored498 = f.result.recommendation.rationale;
+    for (const planted of [stored498, STORED_488]) {
+      const s = withWording({ DS_GROUPING_BASIS: planted }, () => dsPageSurface("planted", f, "personal"));
+      expect([planted, scanSurface(s).map((h) => h.family)]).toEqual([planted, expect.arrayContaining(["F2-convergence"])]);
+    }
+    // Presentation identity removed: the :488 sentence reaches every surface and is caught on each.
+    const u = fixtures.find((x) => x.name === "unresolved_option")!;
+    const unsub = withWording({ dsPresentedRationale: (d: { recommendation: { rationale: string } }) => d.recommendation.rationale }, () => dsPageSurface("unsub", u, "personal"));
+    expect(scanSurface(unsub).map((h) => h.family)).toContain("F2-convergence");
+    const unsubReceipt = withWording({ dsPresentedReceiptConclusion: (_s: unknown, c: string) => c }, () => dsPageSurface("unsub-r", u, "team"));
+    expect(scanSurface(unsubReceipt).map((h) => h.family)).toContain("F2-convergence");
   });
 
   it("(5) a broadened exemption is rejected by the validator, and would otherwise hide a violation", () => {
@@ -495,6 +542,29 @@ describe("falsification: scanner mechanics", () => {
     for (const f of FAMILIES) expect([f.id, scanSurface({ id: f.id, textNodes: [examples[f.id]], attributes: [] }).map((h) => h.family)]).toEqual([f.id, expect.arrayContaining([f.id])]);
   });
 
+  it("(1d) context: cautionary and approved wording is not a claim", () => {
+    for (const text of [
+      "The system could not confidently identify the option.",
+      "We cannot confidently resolve which option was meant.",
+      "No disagreement identified by current grouping.",
+      "largest group recommending the same action: 2.",
+      "Sources listed; not independently verified",
+      "agreement on an option is not established.",
+      "The current grouping could not reliably identify the recommended option. Review the individual model recommendations before deciding.",
+      "System did not flag this for human review.",
+    ]) expect([text, scanSurface({ id: "neg", textNodes: [text], attributes: [] })]).toEqual([text, []]);
+  });
+
+  it("(1e) claims split across nested elements are caught", () => {
+    for (const html of [
+      "<p>No <b>disagreement</b>.</p>",
+      "<p>Sources <em><b>confirmed</b></em></p>",
+      "<p>Human review <span>is <i>optional</i></span></p>",
+      "<p>The models are <a>aligned</a>.</p>",
+      "<p>The panel <b>confidently</b> recommends Go.</p>",
+    ]) expect([html, scanSurface(surfaceFromHtml("n", html)).length > 0]).toEqual([html, true]);
+  });
+
   it("(1c) the families cover claim classes, not only the old strings", () => {
     const claims: [string, string][] = [
       ["The models agree on this option.", "F2-convergence"],
@@ -506,6 +576,13 @@ describe("falsification: scanner mechanics", () => {
       ["Well-sourced recommendation", "F3-source-assurance"],
       ["This decision does not need human review", "F4-review-necessity"],
       ["A definitive answer", "F6-certainty"],
+      // Owner-listed variants (R3 ruling), verbatim.
+      ["No split.", "F2-convergence"],
+      ["All models recommended the same action.", "F2-convergence"],
+      ["The models are aligned.", "F2-convergence"],
+      ["Sources checked.", "F3-source-assurance"],
+      ["Sources confirmed.", "F3-source-assurance"],
+      ["Human review is optional.", "F4-review-necessity"],
       ["No disagreement.", "F2-convergence"],
       ["No disagreement among models", "F2-convergence"],
       ["No split.", "F2-convergence"],
@@ -517,7 +594,8 @@ describe("falsification: scanner mechanics", () => {
       ["Strongly supported by sources", "F3-source-assurance"],
       ["Human review is optional", "F4-review-necessity"],
       ["Human review not flagged as needed", "F4-review-necessity"],
-      ["could confidently resolve", "F6-certainty"],
+      ["The system could confidently resolve the option", "F6-certainty"],
+      ["The panel confidently recommends Go", "F6-certainty"],
     ];
     for (const [text, family] of claims) expect([text, scanSurface({ id: "c", textNodes: [text], attributes: [] }).map((h) => h.family)]).toEqual([text, expect.arrayContaining([family])]);
   });
@@ -551,6 +629,27 @@ describe("wiring", () => {
     const list = src("components/teamGovernance/AdaptiveReviewListItem.tsx");
     expect(list).toContain("<ReceiptReviewFlag schemaId={item.schemaId} humanReviewNeeded={item.humanReviewNeeded} />");
     expect(list).toContain("<ReceiptGroupingDisclosure schemaId={item.schemaId}");
+  });
+
+  it("the stored-field marker is set only on the two stored-field sites, from the wording module's constants", () => {
+    const { execSync } = jest.requireActual("child_process") as typeof import("child_process");
+    const hits = execSync("git grep -n data-ds-field -- components app lib ':!**/__tests__/**'", { cwd: ROOT, encoding: "utf8" }).trim().split("\n").sort();
+    expect(hits.map((h) => h.replace(/:\d+:\s*/, ":"))).toEqual([
+      "components/adaptive/DecisionSupportView.tsx:<p className=\"mt-2 text-sm text-slate-700\" data-ds-field={DS_FIELD_RATIONALE}>",
+      "components/adaptive/DsReceiptWording.tsx:<p className={className} data-ds-field={isDecisionSupportSchema(schemaId) ? DS_FIELD_RECEIPT_CONCLUSION : undefined}>",
+      "lib/adaptiveSchema/dsLabelWording.ts:* DS field carries `data-ds-field` with one of these values, and nothing else may carry it (pinned by the wiring test).",
+    ]);
+    const wordingSrc = src("lib/adaptiveSchema/dsLabelWording.ts");
+    expect(wordingSrc).toContain('export const DS_FIELD_RATIONALE = "recommendation.rationale";');
+    expect(wordingSrc).toContain('export const DS_FIELD_RECEIPT_CONCLUSION = "receipt.conclusion";');
+    expect(STORED_FIELDS).toEqual({ rationale: "recommendation.rationale", receiptConclusion: "receipt.conclusion" });
+  });
+
+  it("the four receipt surfaces render their conclusion through ReceiptConclusion with the run's own schema", () => {
+    expect(src("components/personalReview/PersonalReviewDetail.tsx")).toContain("<ReceiptConclusion schemaId={data.schemaId} conclusion={data.decisionReceipt.conclusion}");
+    expect(src("components/teamGovernance/AdaptiveReviewDetail.tsx")).toContain("<ReceiptConclusion schemaId={data.review.schemaId} conclusion={data.review.decisionReceipt.conclusion}");
+    expect(src("components/teamGovernance/AdaptiveReviewListItem.tsx")).toContain("<ReceiptConclusion schemaId={item.schemaId} conclusion={item.receiptConclusion}");
+    expect(src("components/workspace/projects/TeamResearchReviewSummary.tsx")).toContain("<ReceiptConclusion schemaId={schemaId} conclusion={receipt.conclusion}");
   });
 
   it("no touched component reads the provenance field", () => {

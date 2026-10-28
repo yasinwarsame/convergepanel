@@ -2231,5 +2231,12 @@
   "count": 1,
   "category": "other-schema",
   "rule": "Order 6 S-E.1 owner-approved Decision Support wording (D-10 (b), K-1, 2026-10-28); asserted by the S-E.1 whole-surface scanner"
+ },
+ {
+  "file": "lib/adaptiveSchema/dsLabelWording.ts",
+  "literal": "\"Models agree a specific option should be chosen but did not name one this system could confidently resolve.\"",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Order 6 S-E.1 R2-m1 (owner ruling 2026-10-28): identity of the producer's stored :488 rationale, used only to recognise and replace it on screen; never rendered (asserted by the S-E.1 whole-surface scanner)"
  }
 ]

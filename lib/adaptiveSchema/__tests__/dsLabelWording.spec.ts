@@ -154,6 +154,11 @@ describe("K-5 sources: a non-blank reference list is the only basis for 'listed'
     expect(dsSourcesBadge(undefined, false)).toBe("No sources listed");
     expect(dsSourcesBadge(undefined, true)).toBeNull();
     expect(dsSourcesBadge(undefined, "false")).toBeNull();
+    // Present but malformed (not an array) is unknown: omitted whatever the flag says.
+    expect(dsSourcesSummary({ ...ds({ sources: "Vendor report" }), sourceBacked: false } as DecisionSupportResult)).toBeNull();
+    expect(dsSourcesSummary({ ...ds({ sources: null }), sourceBacked: false } as DecisionSupportResult)).toBeNull();
+    expect(dsSourcesBadge(null, false)).toBeNull();
+    expect(dsSourcesBadge({}, false)).toBeNull();
     // A recorded list always wins over the flag.
     expect(dsSourcesBadge(["Vendor report"], false)).toBe("Sources listed; not independently verified");
     expect(dsSourcesSummary({ ...ds({ sources: [""] }), sourceBacked: true } as DecisionSupportResult)).toBe("No sources listed");
@@ -204,5 +209,42 @@ describe("E-4 dsUncontestedStatement", () => {
     ["K invalid", ds({ k: "3" }), null],
   ])("%s → %p", (_name, input, expected) => {
     expect(dsUncontestedStatement(input)).toBe(expected);
+  });
+});
+
+describe("R2-m1: the unresolved-option rationale is presented, not shown as stored", () => {
+  const STORED = "Models agree a specific option should be chosen but did not name one this system could confidently resolve.";
+  const SHOWN = "The current grouping could not reliably identify the recommended option. Review the individual model recommendations before deciding.";
+  const result = (over: Record<string, unknown>) =>
+    ({ recommendation: { action: "conditional_go", isContested: true, rationale: STORED, caveats: [], supportCount: 2, totalModelsWithRecommendation: 2, ...over } }) as unknown as DecisionSupportResult;
+
+  it("substitutes only when the exact stored sentence and its producing state are both established", () => {
+    expect(wording.dsPresentedRationale(result({}))).toBe(SHOWN);
+    expect(wording.DS_UNRESOLVED_OPTION_STORED_RATIONALE).toBe(STORED);
+    expect(wording.DS_UNRESOLVED_OPTION_EXPLANATION).toBe(SHOWN);
+  });
+
+  it.each([
+    ["another action", { action: "go" }],
+    ["not contested", { isContested: false }],
+    ["a recommended option exists", { recommendedOptionId: "o1" }],
+    ["substring only (model text quoting it)", { rationale: `Analyst: ${STORED}` }],
+    ["trailing text", { rationale: `${STORED} Extra.` }],
+    ["the :498 sentence", { rationale: "Models agree an option should be chosen but disagree on which one (1 of 2 pick A; 1 of 2 pick B)." }],
+  ])("keeps the stored rationale when %s", (_name, over) => {
+    const r = result(over);
+    expect(wording.dsPresentedRationale(r)).toBe(r.recommendation.rationale);
+  });
+
+  it("receipt conclusion: whole-string identity on a Decision Support run only", () => {
+    expect(wording.dsPresentedReceiptConclusion("decision_support", `Conditional go — ${STORED}`)).toBe(`Conditional go — ${SHOWN}`);
+    for (const [schemaId, conclusion] of [
+      ["deep_research", `Conditional go — ${STORED}`],
+      [null, `Conditional go — ${STORED}`],
+      ["decision_support", `Go — ${STORED}`],
+      ["decision_support", `Conditional go: Option A — ${STORED}`],
+      ["decision_support", `Conditional go — ${STORED} More.`],
+      ["decision_support", STORED],
+    ] as [unknown, string][]) expect([schemaId, conclusion, wording.dsPresentedReceiptConclusion(schemaId, conclusion)]).toEqual([schemaId, conclusion, conclusion]);
   });
 });

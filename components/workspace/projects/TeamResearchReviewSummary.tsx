@@ -26,6 +26,7 @@
 import { getReviewStatusBadgeClass, getReviewStatusLabel } from "@/lib/workspaces/reviewQueuePresentation";
 import type { TeamRunDetailReview } from "@/lib/research/teamRunDetailPresentation";
 import { DS_NOT_FLAGGED_FOR_REVIEW, DS_OPTION_GROUPING_DISCLOSURE, dsReceiptSourcesLabel, isDecisionSupportSchema } from "@/lib/adaptiveSchema/dsLabelWording";
+import { ReceiptConclusion } from "@/components/adaptive/DsReceiptWording";
 
 /**
  * Order 6 / S-E.1 (K-3: Decision Support only): the receipt flags for a DS run. The source claim needs a reference list
@@ -62,7 +63,7 @@ export default function TeamResearchReviewSummary({ review, schemaId }: { review
       {receipt && (
         <div className="mt-3">
           <p className="text-xs font-medium uppercase tracking-wide text-cp-faint">Decision receipt</p>
-          <p className="mt-1 text-sm text-cp-text">{receipt.conclusion}</p>
+          <ReceiptConclusion schemaId={schemaId} conclusion={receipt.conclusion} className="mt-1 text-sm text-cp-text" />
           {isDecisionSupportSchema(schemaId) ? (
             <>
               <p className="mt-1 text-xs leading-relaxed text-cp-muted">{DS_OPTION_GROUPING_DISCLOSURE}</p>
