@@ -534,6 +534,8 @@ describe("falsification: scanner mechanics", () => {
       "Models agree an option should be chosen but disagree on which one (3 of 3 pick A).",
       "Models agree an option should be chosen but disagree on which one (2 of 3 pick A; 2 of 3 pick B).",
       "Models agree an option should be chosen but disagree on which one (2 of 3 pick A; 1 of 4 pick B).",
+      // Counts sum to the last denominator, so only the shared-denominator rule rejects it.
+      "Models agree an option should be chosen but disagree on which one (1 of 3 pick A; 1 of 2 pick B).",
       "Models agree an option should be chosen but disagree on which one (2 of 3 pick A; 1 of 3 pick B). Unanimous.",
       "All models agree (2 of 3 pick A; 1 of 3 pick B).",
     ]) {
