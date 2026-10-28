@@ -34,9 +34,13 @@ const BASELINE = join(__dirname, "seSurfaces", "__fixtures__", "nonDsBaseline.js
 const OUT = process.env.SE_NON_DS_BASELINE_OUT;
 
 let current: Record<string, Capture>;
+// 300 captures (88 static pages plus 16 effect-driven review renders) take about 2-3 s alone; R4 saw this hook exceed
+// Jest's default 5 s once under a heavily loaded broad run (cause unconfirmed). An explicit bound keeps the expectation
+// unchanged while allowing for load.
+const CAPTURE_TIMEOUT_MS = 60_000;
 beforeAll(async () => {
   current = await captureNonDs(mockFetch);
-});
+}, CAPTURE_TIMEOUT_MS);
 
 /**
  * Separate timestamp coverage (the parity captures tokenise local date-times). The receipt surfaces must render the

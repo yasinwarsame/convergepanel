@@ -127,6 +127,9 @@ export function dsFixtures(): DsFixture[] {
     make("no_sources", models(fields({ recommendationAction: "go", options: [OPT_A], sources: [] }))),
     make("high_stakes_review_needed", models(fields({ recommendationAction: "go", options: [OPT_A] })), 1, "safety_critical"),
     make("unresolved_option", models(choose(unlisted), choose(unlisted))),
+    // One model names an option nobody listed: the tally counts only resolved options, so the stored :498 rationale has a
+    // single pick, "(2 of 2 pick …)." (R4 NIT; decisionSupportAlignment.ts:494-498).
+    make("partial_option_resolution", models(choose(OPT_A), choose(OPT_A), choose(unlisted))),
     legacy,
     legacyUnsourced,
   ];

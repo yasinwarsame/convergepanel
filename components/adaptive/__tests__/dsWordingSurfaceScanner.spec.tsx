@@ -50,6 +50,7 @@ jest.mock("@/lib/adaptiveSchema/dsLabelWording", () => {
 import { readFileSync } from "fs";
 import { join } from "path";
 import { conditionalGoCollisionFixture, dsFixtures, receiptFor, S, surfaceFromHtml, type Surface } from "./seSurfaces/seSurfaceHarness";
+import { CLAIM_MATRIX, LEGITIMATE_MATRIX } from "./seSurfaces/scannerContract";
 import { allDsSurfaces, dsPageSurface } from "./seSurfaces/seSurfaceRenderers";
 import { EXEMPTIONS, FAMILIES, FIELD_LABELS, STORED_FIELDS, isStoredSplitRationale, assertNotBlind, scanSurface, usedExemptions, validateExemptions } from "./seSurfaces/dsWordingScanner";
 
@@ -119,6 +120,7 @@ const ORACLE: Record<string, Expect> = {
   legacy_no_sources_field: { agreement: NO_DISAGREEMENT, sources: "—", badge: null, counts: counts(2, 2, 2), e4: `${NO_DISAGREEMENT}.`, d9: true },
   legacy_unsourced: { agreement: NO_DISAGREEMENT, sources: NONE, badge: NONE, counts: counts(2, 2, 2), e4: `${NO_DISAGREEMENT}.`, d9: true },
   unresolved_option: { agreement: "Split", sources: PROVIDED, badge: LISTED, counts: counts(2, 2, 2), e4: null, d9: true },
+  partial_option_resolution: { agreement: "Split", sources: PROVIDED, badge: LISTED, counts: counts(3, 3, 3), e4: null, d9: true },
 };
 
 /** Text immediately following a field label in TopSummaryBar's extraction. */
@@ -207,8 +209,14 @@ describe("whole-surface scan: no prohibited wording on any Decision Support surf
 
   it("the :498 stored rationale is the only debt, shown only in its stored fields, with D-9 visible beside it", () => {
     const withDebt = fixtures.filter((f) => isStoredSplitRationale(f.result.recommendation.rationale)).map((f) => f.name);
-    expect(withDebt).toEqual(["contested_on_option"]);
-    for (const s of surfaces.filter((x) => x.fixture === "contested_on_option")) {
+    expect(withDebt).toEqual(["contested_on_option", "partial_option_resolution"]);
+    // R4 NIT: the real producer writes a single-pick tally when one model's option is unresolved.
+    expect(fixtures.find((x) => x.name === "partial_option_resolution")!.result.recommendation).toMatchObject({
+      action: "conditional_go",
+      isContested: true,
+      rationale: "Models agree an option should be chosen but disagree on which one (2 of 2 pick ⟦Option Alpha plan⟧).",
+    });
+    for (const s of surfaces.filter((x) => withDebt.includes(x.fixture))) {
       const where = s.textNodes.flatMap((t, i) => (t.includes("Models agree an option should be chosen") ? [s.fields?.[i] ?? null] : []));
       // Page: the rationale field; Team page: that plus the receipt summary; each receipt surface: its conclusion.
       const expected = { page: [STORED_FIELDS.rationale], page_team: [STORED_FIELDS.rationale, STORED_FIELDS.receiptConclusion] }[s.kind as "page" | "page_team"] ?? [STORED_FIELDS.receiptConclusion];
@@ -530,8 +538,22 @@ describe("falsification: scanner mechanics", () => {
     const changed = "Models agree an option should be chosen but disagree on which one (2 of 3 pick A; 1 of 3 pick C).";
     expect(scan([[changed, STORED_FIELDS.rationale]])).toContain("F2-convergence");
     // Rejected: a stored value outside the producer grammar, even when the caller passes it.
+    // Valid producer forms: one pick (reachable, R4 NIT), several picks, a label containing "; ".
+    for (const good of [
+      "Models agree an option should be chosen but disagree on which one (2 of 2 pick A).",
+      "Models agree an option should be chosen but disagree on which one (3 of 3 pick Option A).",
+      "Models agree an option should be chosen but disagree on which one (1 of 3 pick A; 1 of 3 pick B; 1 of 3 pick C).",
+      "Models agree an option should be chosen but disagree on which one (1 of 2 pick Plan A; phased; 1 of 2 pick B).",
+    ]) {
+      expect([good, isStoredSplitRationale(good)]).toEqual([good, true]);
+      expect([good, scan([[good, STORED_FIELDS.rationale]], [good])]).toEqual([good, []]);
+      expect([good, scan([[good, null]], [good]).length > 0]).toEqual([good, true]);
+      expect([good, scan([[`${good} Unanimous (all models).`, STORED_FIELDS.rationale]], [good]).length > 0]).toEqual([good, true]);
+    }
     for (const bad of [
-      "Models agree an option should be chosen but disagree on which one (3 of 3 pick A).",
+      "Models agree an option should be chosen but disagree on which one (2 of 3 pick A).",
+      "Models agree an option should be chosen but disagree on which one (0 of 2 pick A; 2 of 2 pick B).",
+      "Models agree an option should be chosen but disagree on which one ().",
       "Models agree an option should be chosen but disagree on which one (2 of 3 pick A; 2 of 3 pick B).",
       "Models agree an option should be chosen but disagree on which one (2 of 3 pick A; 1 of 4 pick B).",
       // Counts sum to the last denominator, so only the shared-denominator rule rejects it.
@@ -609,6 +631,52 @@ describe("falsification: scanner mechanics", () => {
       "<p>The models are <a>aligned</a>.</p>",
       "<p>The panel <b>confidently</b> recommends Go.</p>",
     ]) expect([html, scanSurface(surfaceFromHtml("n", html)).length > 0]).toEqual([html, true]);
+  });
+
+  describe("finite scanner contract (owner R5): CLAIM_MATRIX rejected, LEGITIMATE_MATRIX accepted", () => {
+    const claims = Object.entries(CLAIM_MATRIX).flatMap(([family, texts]) => texts.map((text) => [family, text] as const));
+
+    it.each(claims)("%s rejects %p — as a node, on the real page, and split across inline elements", (family, text) => {
+      expect(scanSurface({ id: "c", textNodes: [text], attributes: [] }).map((h) => h.family)).toEqual(expect.arrayContaining([family]));
+      const f = fixtures.find((x) => x.name === "uncontested_choose_option")!;
+      const planted = withWording({ DS_GROUPING_BASIS: text }, () => dsPageSurface("planted", f, "personal"));
+      expect(scanDs(planted, f.name).map((h) => h.family)).toEqual(expect.arrayContaining([family]));
+      // Split after the first word, inside nested inline elements, through the real HTML extraction.
+      const [first, ...rest] = text.split(" ");
+      const html = `<p>${first} <span><b>${rest.join(" ")}</b></span></p>`;
+      expect(scanSurface(surfaceFromHtml("split", html)).map((h) => h.family)).toEqual(expect.arrayContaining([family]));
+      // A model quoting the same claim is model content, not application wording.
+      expect(scanSurface({ id: "q", textNodes: [S(text)], attributes: [] })).toEqual([]);
+    });
+
+    it.each(LEGITIMATE_MATRIX.map((t) => [t]))("accepts %p — as a node and on the real page", (text) => {
+      expect(scanSurface({ id: "n", textNodes: [text], attributes: [] })).toEqual([]);
+      const f = fixtures.find((x) => x.name === "uncontested_choose_option")!;
+      expect(scanDs(withWording({ DS_GROUPING_BASIS: text }, () => dsPageSurface("legit", f, "personal")), f.name)).toEqual([]);
+    });
+
+    it("quantifier and negation scope: a qualifier on the subject is accepted, a trailing negation does not qualify a positive claim", () => {
+      const fam = (t: string) => scanSurface({ id: "s", textNodes: [t], attributes: [] }).map((h) => h.family);
+      expect(fam("Not all sources were confirmed.")).toEqual([]);
+      expect(fam("Sources were confirmed, not merely listed.")).toContain("F3-source-assurance");
+      expect(fam("Only some sources were checked.")).toEqual([]);
+      expect(fam("Some sources were checked, and all sources were confirmed.")).toContain("F3-source-assurance");
+      expect(fam("Not all models recommended an action.")).toEqual([]);
+      expect(fam("2 of 3 models recommended Go.")).toEqual([]);
+      expect(fam("3 of 3 models recommended Go")).toContain("F2-convergence");
+    });
+
+    it("the matrices are literal and disjoint, and every R4 counterexample in the owner's R5 list is present", () => {
+      const all = Object.values(CLAIM_MATRIX).flat();
+      expect(new Set(all).size).toBe(all.length);
+      for (const t of LEGITIMATE_MATRIX) expect([t, all.includes(t)]).toEqual([t, false]);
+      for (const t of [
+        "Human review — optional", "Human review - optional", "Human review: not required", "Human review isn't needed", "No need for human review", "Human review can be skipped",
+        "Sources — confirmed", "Sources: all confirmed", "Sources (confirmed)", "Sources were cross-checked", "Sources were fact-checked",
+        "All three models recommended Go", "All panel models recommended Go", "Every single model chose Option A", "All models recommend Go", "Every model picks Option A", "3 of 3 models recommended Go",
+      ]) expect([t, all.includes(t)]).toEqual([t, true]);
+      for (const t of ["Not all sources were confirmed.", "Only some sources were checked.", "Few sources were confirmed."]) expect([t, LEGITIMATE_MATRIX.includes(t)]).toEqual([t, true]);
+    });
   });
 
   describe("R3 MINOR: F2 / F3 / F4 claim variants (bounded structures, not word bans)", () => {

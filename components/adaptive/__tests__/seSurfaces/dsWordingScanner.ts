@@ -24,19 +24,19 @@ export const FAMILIES: Family[] = [
     id: "F2-convergence",
     description: "convergence / agreement / unanimity / genuineness / no-disagreement claim",
     pattern:
-      /\bconverg\w*|\bunanim\w*|\buncontested\b|\bagree(s|d|ing)?\b|\bagreement\b|\bconcur\w*|\bno (material )?(disagreement|split|dissent)\b|\baligned\b|\bsame (action|recommendation|option)\b|\bin accord\b|\bgenuine(ly)?\b|(?<!\bnot\s+)\b(all|every|each)(\s+(of the|the|\d+))?\s+models?\s+(recommended|chose|picked|selected|preferred|favou?red|backed|endorsed)\b/i,
+      /\bconverg\w*|\bunanim\w*|\buncontested\b|\bagree(s|d|ing)?\b|\bagreement\b|\bconcur\w*|\bno (material )?(disagreement|split|dissent)\b|\baligned\b|\bsame (action|recommendation|option)\b|\bin accord\b|\bgenuine(ly)?\b|(?<!\bnot\s+)\b(?:(?:all|every|each)(?:\s+(?:of the|the|single|panel|contributing|\d+|two|three|four|five|six|seven|eight|nine|ten))*|(?<n>\d+|two|three|four|five|six|seven|eight|nine|ten) of \k<n>)\s+models?\s+(?:recommend(?:s|ed)?|cho(?:se|oses?)|pick(?:s|ed)?|select(?:s|ed)?|prefer(?:s|red)?|favou?r(?:s|ed)?|back(?:s|ed)?|endorse(?:s|d)?)\b/i,
   },
   {
     id: "F3-source-assurance",
     description: "source assurance",
     pattern:
-      /\bsource[- ]backed\b|\bevidence[- ]backed\b|\bverified\b|\bfully supported\b|\bsource support captured\b|\bsource grounding\b|\bwell[- ]sourced\b|\bcorroborated\b|(?<!\b(?:no|none of the)\s+)\b(sources?|references?|citations?)\s*:?\s+((were|are|have been|was|is|has been)\s+)?(\w+ly\s+)?(checked|confirmed|validated)\b|\bsupported by (the )?sources\b/i,
+      /\bsource[- ]backed\b|\bevidence[- ]backed\b|\bverified\b|\bfully supported\b|\bsource support captured\b|\bsource grounding\b|\bwell[- ]sourced\b|\bcorroborated\b|(?<!\b(?:no|none of the|not all(?: of the)?|not every|only some(?: of the)?|only (?:a )?few|few|some of the)\s+)\b(?:sources?|references?|citations?)\s*(?:[:—–-]|\()?\s*(?:(?:were|are|have been|was|is|has been)\s+)?(?:(?:all|\w+ly)\s+)?(?:cross-checked|fact-checked|checked|confirmed|validated)\b|\bsupported by (the )?sources\b/i,
   },
   {
     id: "F4-review-necessity",
     description: "review necessity",
     pattern:
-      /\breview (is )?not (required|needed|necessary)\b|\bno (human )?review (is )?(needed|required|necessary)\b|\b(does not|doesn't) (need|require) (human )?review\b|\breview\s*(:|is)?\s*(optional|unnecessary)\b|\boptional\s+(human\s+)?review\b|\bnot flagged as needed\b/i,
+      /\breview (is )?not (required|needed|necessary)\b|\bno (human )?review (is )?(needed|required|necessary)\b|\b(does not|doesn't) (need|require) (human )?review\b|\breview\s*(?:[:—–-]\s*|is\s+)?(?:optional|unnecessary|not (?:required|needed|necessary))\b|\breview\s+(?:isn['’]t|is not|wasn['’]t|was not)\s+(?:required|needed|necessary)\b|\boptional\s+(?:human\s+)?review\b|\bno need (?:for|of) (?:a |any )?(?:human )?review\b|\breview (?:can|may|could) be (?:skipped|omitted|waived|bypassed)\b|\bnot flagged as needed\b/i,
   },
   { id: "F5-option-distinctness", description: "option distinctness", pattern: /\b(kept|remain|remains|stay|stays)\s+(distinct|separate)\b|\boptions are (distinct|separate)\b|\bnever (merged|grouped)\b/i },
   { id: "F6-certainty", description: "certainty claim", pattern: /\bcertain(ty|ly)?\b|\bconfiden(t|ce)\b|(?<!\b(?:not|never|cannot|can't|couldn't|unable to)\s+)\bconfidently\b|\bguarantee\w*|\bdefinitive(ly)?\b|\bproven\b/i },
@@ -75,8 +75,11 @@ export const EXEMPTIONS: string[] = [
  *      (the tail after the builder's first " — ");
  *   2. that text is exactly equal to a stored rationale value the caller passes (`storedRationales`, the fixture's own
  *      stored field), so nothing appended or changed is exempt, whatever it ends with;
- *   3. that stored value parses under the producer's exact grammar (`isStoredSplitRationale`): the fixed sentence, then
- *      "(n of m pick X; n of m pick Y…)." with at least two picks, one shared m, and counts summing to m.
+ *   3. that stored value parses under the producer's grammar (`isStoredSplitRationale`): the fixed sentence, then
+ *      "(n of m pick X[; n of m pick Y…])." with one or more picks (one pick is reachable: the tally counts only
+ *      resolved options, decisionSupportAlignment.ts:494-498), every n >= 1, one shared m, and counts summing to m.
+ *      Picks are split only at "; <n> of <m> pick ", so a label containing "; " parses; a label that itself contains
+ *      "; <n> of <m> pick " would not, and fails closed (scanned).
  * The same sentence anywhere else, any other stored value, and the :488 sentence (replaced on screen by
  * dsPresentedRationale / dsPresentedReceiptConclusion) are scanned like any other text.
  */
@@ -85,8 +88,7 @@ export const STORED_FIELDS = { rationale: "recommendation.rationale", receiptCon
 
 export function isStoredSplitRationale(value: string): boolean {
   if (!value.startsWith(SPLIT_RATIONALE_HEAD) || !value.endsWith(").")) return false;
-  const picks = value.slice(SPLIT_RATIONALE_HEAD.length, -2).split("; ");
-  if (picks.length < 2) return false;
+  const picks = value.slice(SPLIT_RATIONALE_HEAD.length, -2).split(/; (?=\d+ of \d+ pick )/);
   let total: number | null = null;
   let sum = 0;
   for (const pick of picks) {
