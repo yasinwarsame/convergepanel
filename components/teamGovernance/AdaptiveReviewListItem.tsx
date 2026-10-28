@@ -16,6 +16,8 @@ import type { EnrichedAdaptiveTeamRunListItemV1 } from "@/lib/governance/teamRev
 import { schemaLabel, humanReviewStatusLabel } from "@/lib/governance/teamReviewLabels";
 import GovernanceStatusBadge from "./GovernanceStatusBadge";
 import HumanReviewStatusBadge from "./HumanReviewStatusBadge";
+import ReceiptSourcesFlag from "@/components/adaptive/ReceiptSourcesFlag";
+import { ReceiptConclusion, ReceiptGroupingDisclosure, ReceiptReviewFlag } from "@/components/adaptive/DsReceiptWording";
 
 function formatUpdatedAt(iso: string): string {
   const d = new Date(iso);
@@ -123,12 +125,12 @@ export default function AdaptiveReviewListItem({ item }: { item: EnrichedAdaptiv
         </time>
       </div>
 
-      <p className="mt-3 text-sm leading-snug text-cp-text">{item.receiptConclusion}</p>
+      <ReceiptConclusion schemaId={item.schemaId} conclusion={item.receiptConclusion} className="mt-3 text-sm leading-snug text-cp-text" />
+      <ReceiptGroupingDisclosure schemaId={item.schemaId} className="mt-2 text-xs leading-relaxed text-cp-muted" />
 
       <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-cp-muted">
-        <span>{item.sourceBacked ? "Source-backed" : "Not source-backed"}</span>
-        <span aria-hidden>&middot;</span>
-        <span>{item.humanReviewNeeded ? "Human review needed" : "Human review not flagged as needed"}</span>
+        <ReceiptSourcesFlag schemaId={item.schemaId} sourceBacked={item.sourceBacked} />
+        <ReceiptReviewFlag schemaId={item.schemaId} humanReviewNeeded={item.humanReviewNeeded} />
       </div>
 
       <ReviewerBlock item={item} />

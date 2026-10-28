@@ -316,7 +316,8 @@ describe("AdaptivePanelResponse — Phase 2A batch 1 renderer selection and cont
 
       it("keeps report-level consensus visible via TopSummaryBar", () => {
         const html = renderLive();
-        expect(html).toMatch(/consensus/i);
+        // Order 6 / S-E.1 (K-6): Decision Support labels the field "Model agreement" and never shows a consensus tier.
+        expect(html).toMatch(fixture.schemaId === "decision_support" ? /Model agreement/ : /consensus/i);
       });
 
       it("surfaces material disagreement in the primary report, reusing already-computed data (no second scoring pass)", () => {

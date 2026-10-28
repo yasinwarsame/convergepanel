@@ -406,13 +406,6 @@
   "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
  },
  {
-  "file": "components/adaptive/DecisionSupportView.tsx",
-  "literal": ">The recommendation reflects only genuine agreement across contributing models&apos; own recommended actions — a real split falls back to a conservative action rather than a vote-counted winner. Coverage badges show how many models raised each option, criterion, or assessment, not a certainty score.<",
-  "count": 1,
-  "category": "other-schema",
-  "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
- },
- {
   "file": "components/adaptive/DeepResearchView.tsx",
   "literal": ">Areas of disagreement<",
   "count": 1,
@@ -597,13 +590,6 @@
  {
   "file": "components/adaptive/PanelEvidenceSection.tsx",
   "literal": ">The panel&apos;s recommendation is contested — models did not fully converge, whether on the action itself or on which option to choose. See the rationale and caveats above for the specific split.<",
-  "count": 1,
-  "category": "other-schema",
-  "rule": "Milestone-2 evidence tallies (comparison_matrix, deep_research, decision_support, causal)"
- },
- {
-  "file": "components/adaptive/PanelEvidenceSection.tsx",
-  "literal": ">The panel&apos;s recommended actions converged — no material split.<",
   "count": 1,
   "category": "other-schema",
   "rule": "Milestone-2 evidence tallies (comparison_matrix, deep_research, decision_support, causal)"
@@ -2189,5 +2175,68 @@
   "count": 1,
   "category": "non-user",
   "rule": "S-1a-min provenance builder constant (option_clustering_unverified, U-02(1)); not rendered by any consumer in S-1a-min; exact owner-approved known-defect text, never reworded"
+ },
+ {
+  "file": "components/adaptive/DecisionSupportView.tsx",
+  "literal": ">When the current grouping finds a split, the panel falls back to a conservative action rather than a vote-counted winner. Coverage badges show how many models raised each option, criterion, or assessment, not a certainty score.<",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Order 6 S-E.1 owner-approved Decision Support wording (D-10 (b), K-1, 2026-10-28); asserted by the S-E.1 whole-surface scanner"
+ },
+ {
+  "file": "components/adaptive/DecisionSupportView.tsx",
+  "literal": ">This decision needs human review — either the stakes are high, the current grouping found a split in the panel&apos;s recommendations, or the evidence behind the recommended option is weak or unclear. Treat this as a starting point, not a final call.<",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Order 6 S-E.1 review R1 (m3): states what the current grouping found, not that a split is genuine (D-10 (b)); asserted by the S-E.1 whole-surface scanner"
+ },
+ {
+  "file": "lib/adaptiveSchema/dsLabelWording.ts",
+  "literal": "\"Model agreement\"",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Order 6 S-E.1 owner-approved Decision Support wording (D-10 (b), K-1, 2026-10-28); asserted by the S-E.1 whole-surface scanner"
+ },
+ {
+  "file": "lib/adaptiveSchema/dsLabelWording.ts",
+  "literal": "\"No disagreement identified by current grouping\"",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Order 6 S-E.1 owner-approved Decision Support wording (D-10 (b), K-1, 2026-10-28); asserted by the S-E.1 whole-surface scanner"
+ },
+ {
+  "file": "lib/adaptiveSchema/dsLabelWording.ts",
+  "literal": "\"Split\"",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Order 6 S-E.1 owner-approved Decision Support wording (D-10 (b), K-1, 2026-10-28); asserted by the S-E.1 whole-surface scanner"
+ },
+ {
+  "file": "lib/adaptiveSchema/dsLabelWording.ts",
+  "literal": "\"Based on the currently grouped recommendations. Opposing options may have been grouped together.\"",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Order 6 S-E.1 owner-approved Decision Support wording (D-10 (b), K-1, 2026-10-28); asserted by the S-E.1 whole-surface scanner"
+ },
+ {
+  "file": "lib/adaptiveSchema/dsLabelWording.ts",
+  "literal": "\"Options were grouped by text similarity. Different options with similar wording (for example 3.5% vs 35%, or Approve vs Disapprove) can be merged; agreement on an option is not established.\"",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Order 6 S-E.1 owner-approved Decision Support wording (D-10 (b), K-1, 2026-10-28); asserted by the S-E.1 whole-surface scanner"
+ },
+ {
+  "file": "lib/adaptiveSchema/dsLabelWording.ts",
+  "literal": "\"Contested\"",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Order 6 S-E.1 owner-approved Decision Support wording (D-10 (b), K-1, 2026-10-28); asserted by the S-E.1 whole-surface scanner"
+ },
+ {
+  "file": "lib/adaptiveSchema/dsLabelWording.ts",
+  "literal": "\"Models agree a specific option should be chosen but did not name one this system could confidently resolve.\"",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Order 6 S-E.1 R2-m1 (owner ruling 2026-10-28): identity of the producer's stored :488 rationale, used only to recognise and replace it on screen; never rendered (asserted by the S-E.1 whole-surface scanner)"
  }
 ]

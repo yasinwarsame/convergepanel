@@ -24,6 +24,8 @@ import AdaptiveReviewDecisionForm from "./AdaptiveReviewDecisionForm";
 import AdaptiveReviewHistorySection from "./AdaptiveReviewHistorySection";
 import AdaptiveReviewAssignmentSection from "./AdaptiveReviewAssignmentSection";
 import AdaptiveMultiReviewerPanelSection from "./AdaptiveMultiReviewerPanelSection";
+import ReceiptSourcesFlag from "@/components/adaptive/ReceiptSourcesFlag";
+import { ReceiptConclusion, ReceiptGroupingDisclosure, ReceiptReviewFlag } from "@/components/adaptive/DsReceiptWording";
 
 function formatDatetime(iso: string | undefined): string {
   if (!iso) return "—";
@@ -205,13 +207,11 @@ export default function AdaptiveReviewDetail({ runId }: { runId: string }) {
 
           <section className="rounded-xl border border-cp-border bg-cp-surface p-5 shadow-sm">
             <h2 className="text-base font-bold text-cp-text">Decision Receipt</h2>
-            <p className="mt-3 text-sm leading-relaxed text-cp-text">{data.review.decisionReceipt.conclusion}</p>
+            <ReceiptConclusion schemaId={data.review.schemaId} conclusion={data.review.decisionReceipt.conclusion} className="mt-3 text-sm leading-relaxed text-cp-text" />
+            <ReceiptGroupingDisclosure schemaId={data.review.schemaId} className="mt-2 text-xs leading-relaxed text-cp-muted" />
             <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-cp-muted">
-              <span>{data.review.decisionReceipt.sourceBacked ? "Source-backed" : "Not source-backed"}</span>
-              <span aria-hidden>&middot;</span>
-              <span>
-                {data.review.decisionReceipt.humanReviewNeeded ? "Human review needed" : "Human review not flagged as needed"}
-              </span>
+              <ReceiptSourcesFlag schemaId={data.review.schemaId} sourceBacked={data.review.decisionReceipt.sourceBacked} />
+              <ReceiptReviewFlag schemaId={data.review.schemaId} humanReviewNeeded={data.review.decisionReceipt.humanReviewNeeded} />
             </div>
             <div className="mt-4 space-y-3">
               <CollapsibleList title="Basis" items={data.review.decisionReceipt.basis} />

@@ -321,7 +321,7 @@ describe("PanelEvidenceSection — Phase 2A batch 1 (deep_research/decision_supp
     };
   }
 
-  it("decision_support: tallies option×criterion assessments by evidence strength and reports convergence", () => {
+  it("decision_support: tallies option×criterion assessments by model-assigned evidence strength and reports what the current grouping found", () => {
     const html = renderToStaticMarkup(
       createElement(PanelEvidenceSection, {
         schemaId: "decision_support",
@@ -329,9 +329,12 @@ describe("PanelEvidenceSection — Phase 2A batch 1 (deep_research/decision_supp
         modelsUsed: ["chatgpt", "claude"] as ModelId[],
       })
     );
-    expect(html).toMatch(/assessment evidence strength/i);
-    expect(html).toMatch(/strong.*1/i);
-    expect(html).toMatch(/converged.*no material split/i);
+    // Order 6 / S-E.1 (E-8, E-4): the ratings are labelled as the models' own, and the uncontested branch states only what
+    // the current grouping found.
+    expect(html).toContain("Model-assigned evidence strength, not independently checked");
+    expect(html).toContain("Strong (model-assigned): 1");
+    expect(html).toContain("No disagreement identified by current grouping.");
+    expect(html).not.toMatch(/converged|no material split/i);
   });
 
   it("decision_support: surfaces a contested recommendation without misrepresenting supportCount as support for the shown recommendation", () => {

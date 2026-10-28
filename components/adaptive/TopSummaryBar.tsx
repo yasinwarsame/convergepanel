@@ -44,6 +44,7 @@ import {
 } from "@/lib/adaptiveSchema/reportSummary";
 import { BadgeTone, Card, TintBadge } from "./shared";
 import { MARKED_GATE_LEVEL_FIELD, MARKED_GATE_LEVEL_WORD, isPositionMarked } from "@/lib/adaptiveSchema/positionPresentation";
+import { DS_MODEL_AGREEMENT_FIELD, DS_SOURCES_FIELD, dsModelAgreement, dsSourcesSummary, isDecisionSupportSchema } from "@/lib/adaptiveSchema/dsLabelWording";
 import AdaptiveExportButton from "./AdaptiveExportButton";
 import AdaptiveExportHistorySection from "./AdaptiveExportHistorySection";
 import { resolveAdaptiveAncillaryPresentation, type AdaptiveAncillaryPresentation } from "./adaptiveAncillaryPresentation";
@@ -144,6 +145,11 @@ export default function TopSummaryBar(props: TopSummaryBarProps) {
     isPositionMarked(props.synthesisReport) &&
     !props.comparisonMatrix && !props.checklistTaxonomy && !props.decisionSupport && !props.causalExplanation && !props.definitionExplanation && !props.rankedEnumeration && !props.deepResearch && !props.evidenceReview && !props.biasBlindspotAudit;
   const sourceGrounding = deriveSourceGrounding({ meta, trustSummary });
+  // Order 6 / S-E.1 (D-10 (b), K-1, K-6): Decision Support states what its stored result shows — never a consensus tier or
+  // a grounding tier. Other schemas keep the shared labels below unchanged.
+  const isDecisionSupport = isDecisionSupportSchema(schemaId);
+  const dsAgreement = isDecisionSupport ? dsModelAgreement(props.decisionSupport) : null;
+  const dsSources = isDecisionSupport ? dsSourcesSummary(props.decisionSupport) : null;
 
   const reportType = getReportTypeLabel(schemaId, props.checklistTaxonomy);
   const modelCount = results.length;
@@ -203,7 +209,12 @@ export default function TopSummaryBar(props: TopSummaryBarProps) {
           </span>
         </SummaryField>
 
-        {gateLevelOnMarked ? (
+        {dsAgreement ? (
+          // S-E.1: wrapping text, not a pill — the DS wording is longer than a tier word and pills do not wrap.
+          <SummaryField label={DS_MODEL_AGREEMENT_FIELD}>
+            <span className="text-sm text-slate-800">{dsAgreement.text}</span>
+          </SummaryField>
+        ) : gateLevelOnMarked ? (
           // Order 5 (Contract P, m-5): a gate-derived level on a marked report is labelled as the gate it is.
           <SummaryField label={MARKED_GATE_LEVEL_FIELD}>
             <TintBadge tone={LEVEL_TONE[consensus]}>{MARKED_GATE_LEVEL_WORD[consensus]}</TintBadge>
@@ -214,9 +225,15 @@ export default function TopSummaryBar(props: TopSummaryBarProps) {
         </SummaryField>
         )}
 
+        {isDecisionSupport ? (
+          <SummaryField label={DS_SOURCES_FIELD}>
+            <span className="text-sm text-slate-800">{dsSources ?? "—"}</span>
+          </SummaryField>
+        ) : (
         <SummaryField label="Source grounding">
           <TintBadge tone={LEVEL_TONE[sourceGrounding]}>{SOURCE_GROUNDING_LABELS[sourceGrounding]}</TintBadge>
         </SummaryField>
+        )}
 
         <SummaryField label="Generated">
           <span className="text-sm text-slate-800">{formatGeneratedAt(generatedAt)}</span>

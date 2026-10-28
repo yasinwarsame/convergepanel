@@ -69,6 +69,10 @@ describe("TeamResearchReviewSummary", () => {
     expect(imports).toEqual([
       'import { getReviewStatusBadgeClass, getReviewStatusLabel } from "@/lib/workspaces/reviewQueuePresentation";',
       'import type { TeamRunDetailReview } from "@/lib/research/teamRunDetailPresentation";',
+      // Order 6 / S-E.1: the pure, owner-approved DS wording module (no I/O).
+      'import { DS_NOT_FLAGGED_FOR_REVIEW, DS_OPTION_GROUPING_DISCLOSURE, dsReceiptSourcesLabel, isDecisionSupportSchema } from "@/lib/adaptiveSchema/dsLabelWording";',
+      // Order 6 / S-E.1 R2-m1: the presentational receipt-conclusion component (no I/O).
+      'import { ReceiptConclusion } from "@/components/adaptive/DsReceiptWording";',
     ]);
   });
 });
