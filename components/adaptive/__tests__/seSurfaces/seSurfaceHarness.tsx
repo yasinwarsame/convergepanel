@@ -158,7 +158,7 @@ const META = (sourceBacked: boolean, humanReviewNeeded: boolean) =>
   }) as never;
 
 /** The DS result page body every DS page mounts (dashboard, personal research, Team research): TopSummaryBar + DecisionSupportView + ModelResponsesSection + PanelEvidenceSection + review slot. */
-export function dsPageElement(fixture: DsFixture, ancillaryPresentation?: unknown, rawStrength: "model_content" | "unwrapped" = "model_content"): ReactElement {
+export function dsPageElement(fixture: DsFixture, ancillaryPresentation: unknown, rawStrength: "model_content" | "unwrapped"): ReactElement {
   return createElement(AdaptivePanelResponse, {
     schema: SCHEMA_REGISTRY.decision_support,
     classification: classification("decision_support"),
