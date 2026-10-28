@@ -196,6 +196,12 @@ export interface AdaptiveExportRunProvenance {
   models: AdaptiveExportModelProvenance[];
 }
 
+/** Order 6 / S-E.2 — frozen presentation-version markers (see `AdaptiveExportReportSnapshot.presentation`). */
+export interface AdaptiveExportPresentation {
+  /** Version 1 = the S-E.2 Decision Support export wording. A change to that wording needs a new version (owner O-6). */
+  dsLabelWordingVersion?: 1;
+}
+
 /**
  * The frozen report content. Exactly one of `milestone2`/`legacy` is
  * populated, matching which persisted-output family the source run
@@ -211,6 +217,14 @@ export interface AdaptiveExportReportSnapshot {
   reportGeneratedAt: string;
   /** Step 6.2b — absent on pre-6.2b export records (see `AdaptiveExportRunProvenance`). */
   runProvenance?: AdaptiveExportRunProvenance;
+  /**
+   * Order 6 / S-E.2 (H1-A) — which presentation version a document renders with. Written at creation only, and only on
+   * Decision Support snapshots (`{ dsLabelWordingVersion: 1 }`); the key is absent on every other snapshot and on every
+   * export created before S-E.2. Renderers select the corrected Decision Support wording only when it is exactly
+   * version 1 on a Decision Support record (`isDsLabelWordingMarked`); anything else renders the historical wording.
+   * Never copied into the JSON export.
+   */
+  presentation?: AdaptiveExportPresentation;
 
   milestone2?: {
     schemaId: PersistedAdaptiveSchemaId;

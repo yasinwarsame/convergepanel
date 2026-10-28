@@ -34,6 +34,7 @@ import {
 import { ModelId } from "../types";
 import { withPageGateStatus } from "./gatePresentation";
 import { freezeExportRunProvenance } from "./exportRunProvenance";
+import { DS_LABEL_WORDING_VERSION } from "./dsLabelWording";
 
 function assertNeverSchemaId(schemaId: never): never {
   throw new Error(`Unhandled Milestone-2 schemaId in exportSnapshot: ${String(schemaId)}`);
@@ -166,6 +167,9 @@ export function buildExportSnapshot(input: BuildExportSnapshotInput): BuiltExpor
         meta: output.meta,
         decisionReceipt,
       },
+      // Order 6 / S-E.2 (H1-A): new Decision Support exports render the version-1 wording. The key is omitted, never
+      // undefined, on every other schema: sanitizeForFirestore would store an undefined value as null.
+      ...(output.schemaId === "decision_support" ? { presentation: { dsLabelWordingVersion: DS_LABEL_WORDING_VERSION } } : {}),
     };
 
     return { reportSnapshot, governanceStatusAtExport, classification };

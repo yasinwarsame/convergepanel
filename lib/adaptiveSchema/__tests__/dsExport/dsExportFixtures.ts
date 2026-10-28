@@ -51,7 +51,7 @@ const MODEL_IDS = ["chatgpt", "claude", "gemini", "grok", "perplexity"] as Model
 type PerModel = { modelId: ModelId; fields: DecisionSupportFields }[];
 
 /** One DS state: per-model producer inputs, the dispatched-slot count, and the risk level. */
-export type DsState = { name: string; perModel: PerModel; totalModels: number; risk?: "safety_critical" };
+export type DsState = { name: string; perModel: PerModel; totalModels: number; risk?: "safety_critical"; legacyNoSourcesField?: boolean };
 
 /** The S-E.1 state matrix (same producer inputs as seSurfaceHarness.dsFixtures), plus the :488 collision state. */
 export function dsStates(wrap: Wrap = plain): DsState[] {
@@ -92,6 +92,8 @@ export function dsStates(wrap: Wrap = plain): DsState[] {
     });
   const models = (...f: DecisionSupportFields[]): PerModel => f.map((fl, i) => ({ modelId: MODEL_IDS[i], fields: fl }));
   const state = (name: string, perModel: PerModel, totalModels = perModel.length, risk?: "safety_critical"): DsState => ({ name, perModel, totalModels, risk });
+  // A result recorded before the producer kept a source list (S-E.1 legacy fixtures): the field is absent.
+  const legacy = (name: string, perModel: PerModel): DsState => ({ ...state(name, perModel), legacyNoSourcesField: true });
   const approve = wrap("Approve the vendor contract");
   const disapprove = wrap("Disapprove the vendor contract");
   const unlisted = wrap("An option nobody listed");
@@ -122,16 +124,20 @@ export function dsStates(wrap: Wrap = plain): DsState[] {
     state(
       "conditional_go_collision_488",
       models(
-        fields({ recommendationAction: "conditional_go", options: [OPT_A], recommendationRationale: stored488 }),
-        fields({ recommendationAction: "conditional_go", options: [OPT_A], recommendationRationale: stored488 })
+        fields({ recommendationAction: "conditional_go", options: [OPT_A], recommendationRationale: wrap(stored488) }),
+        fields({ recommendationAction: "conditional_go", options: [OPT_A], recommendationRationale: wrap(stored488) })
       )
     ),
+    legacy("legacy_no_sources_field", models(choose(OPT_A), choose(OPT_A))),
+    // No list recorded and the stored sourceBacked === false: no model returned any source entry.
+    legacy("legacy_unsourced", models(choose(OPT_A, { sources: [] }), choose(OPT_A, { sources: [] }))),
   ];
 }
 
 /** The DS persisted output, through the real producer and the real meta builder (generatedAt fixed afterwards). */
 export function dsOutput(s: DsState): PersistedAdaptiveOutputV1 {
   const result = buildDecisionSupportResult(s.perModel, s.totalModels, s.risk);
+  if (s.legacyNoSourcesField) delete (result as { sources?: unknown }).sources;
   const cls = classification("decision_support", s.risk ?? "professional");
   const modelResults: ModelResult[] = Array.from({ length: s.totalModels }, (_, i) => ({
     modelId: MODEL_IDS[i],
@@ -139,7 +145,7 @@ export function dsOutput(s: DsState): PersistedAdaptiveOutputV1 {
     rawText: null,
     latencyMs: 1,
   }));
-  const adaptiveResults: AdaptiveModelResult[] = s.perModel.map((p) => ({ modelId: p.modelId, schemaId: "decision_support", ok: true, data: p.fields }) as AdaptiveModelResult);
+  const adaptiveResults: AdaptiveModelResult[] = s.perModel.map((p) => ({ modelId: p.modelId, schemaId: "decision_support", ok: true, data: p.fields }) as unknown as AdaptiveModelResult);
   const meta = { ...buildCommonResponseMeta({ schema: SCHEMA_REGISTRY.decision_support, classification: cls, modelResults, adaptiveResults, schemaResult: result }), generatedAt: FIXED_AT };
   return { version: 1, schemaId: "decision_support", answerShape: "decision_support_view", classification: cls, meta, generatedAt: FIXED_AT, result } as PersistedAdaptiveOutputV1;
 }
@@ -198,7 +204,7 @@ function nonDsCases(): ExportCase[] {
     results: [
       { modelId: "chatgpt" as ModelId, schemaId: "financial_valuation", ok: true, data: { thesis: "Thesis A", metrics: [{ label: "P/E", value: 18, unit: "x", asOf: "2026" }] } },
       { modelId: "claude" as ModelId, schemaId: "financial_valuation", ok: true, data: { thesis: "Thesis B", metrics: [{ label: "P/E", value: 22, unit: "x", asOf: "2026" }] } },
-    ] as AdaptiveModelResult[],
+    ] as unknown as AdaptiveModelResult[],
     alignedClaims: [],
   } as PersistedLegacyAdaptiveOutputV1;
   const selected = ["chatgpt", "claude"] as ModelId[];
@@ -212,7 +218,11 @@ function nonDsCases(): ExportCase[] {
 /** Every state with the in-queue review; every review state on two representative DS states; the non-DS controls. */
 export function exportCases(wrap: Wrap = plain): ExportCase[] {
   const states = dsStates(wrap);
-  const cases: ExportCase[] = states.map((s) => dsCase(s, GOVERNANCE_VARIANTS[0]));
+  // A legacy result (no `sources` field) cannot get a receipt: the receipt builder reads `result.sources` and throws
+  // (inherited, decisionReceiptBuilder.ts:398; pinned in dsExportMarker.spec.ts). Those states are exported without a
+  // governance record, the only way such a run exports at all.
+  const noRecord = GOVERNANCE_VARIANTS[GOVERNANCE_VARIANTS.length - 1];
+  const cases: ExportCase[] = states.map((s) => dsCase(s, s.legacyNoSourcesField ? noRecord : GOVERNANCE_VARIANTS[0]));
   for (const name of ["uncontested_choose_option", "unresolved_option_488"]) {
     const s = states.find((x) => x.name === name)!;
     for (const g of GOVERNANCE_VARIANTS.slice(1)) cases.push(dsCase(s, g));

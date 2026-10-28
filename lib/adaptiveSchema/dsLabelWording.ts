@@ -194,6 +194,48 @@ export function dsPresentedReceiptConclusion(schemaId: unknown, conclusion: stri
 }
 
 /**
+ * Order 6 / S-E.2 (H1-A, owner O-1/O-6): the presentation version written into NEW Decision Support export snapshots
+ * (`reportSnapshot.presentation.dsLabelWordingVersion`). Version 1 is the only corrected-wording version; any change to
+ * the version-1 document wording needs a new version and a separate owner ruling.
+ */
+export const DS_LABEL_WORDING_VERSION = 1 as const;
+
+/**
+ * Whether a stored export record renders the version-1 Decision Support wording: only a Milestone-2 Decision Support
+ * record whose frozen `presentation.dsLabelWordingVersion` is exactly the number 1. Anything else (absent, null, "1", 2,
+ * true, malformed `presentation`, a marker on another schema) renders the historical wording. The decision rests on
+ * the stored record alone, never on dates, deployments or download time.
+ */
+export function isDsLabelWordingMarked(record: { schemaFamily?: unknown; reportSnapshot?: unknown } | null | undefined): boolean {
+  if (!record || record.schemaFamily !== "milestone2") return false;
+  const snapshot = record.reportSnapshot as { milestone2?: { schemaId?: unknown } | null; presentation?: unknown } | null | undefined;
+  if (!snapshot || !isDecisionSupportSchema(snapshot.milestone2?.schemaId)) return false;
+  const presentation = snapshot.presentation;
+  if (typeof presentation !== "object" || presentation === null || Array.isArray(presentation)) return false;
+  return (presentation as { dsLabelWordingVersion?: unknown }).dsLabelWordingVersion === DS_LABEL_WORDING_VERSION;
+}
+
+/**
+ * Owner O-3: the receipt conclusion a version-1 Decision Support export shows. Unlike a receipt surface, an export has
+ * the frozen result beside its receipt, so the substitution needs both the exact conclusion the receipt builder writes
+ * for the unresolved state AND that state in the result (the exact stored sentence, conditional_go, contested, no
+ * recommended option; `dsPresentedRationale`). Model-written text, including a model that wrote the same sentence in an
+ * uncontested run, is shown as stored.
+ */
+export function dsPresentedExportConclusion(decisionSupport: DecisionSupportResult | null | undefined, conclusion: string): string {
+  const stateIsUnresolved =
+    !!decisionSupport?.recommendation && dsPresentedRationale(decisionSupport) === DS_UNRESOLVED_OPTION_EXPLANATION;
+  return stateIsUnresolved && conclusion === `${UNRESOLVED_OPTION_RECEIPT_PREFIX}${DS_UNRESOLVED_OPTION_STORED_RATIONALE}`
+    ? `${UNRESOLVED_OPTION_RECEIPT_PREFIX}${DS_UNRESOLVED_OPTION_EXPLANATION}`
+    : conclusion;
+}
+
+/** D-9 in a version-1 Decision Support export: shown when the frozen result lists at least one option. */
+export function dsExportShowsGroupingDisclosure(decisionSupport: DecisionSupportResult | null | undefined): boolean {
+  return Array.isArray(decisionSupport?.options) && decisionSupport.options.length > 0;
+}
+
+/**
  * Rendering markers for the scanner's stored-data boundary (test-visible, DS only): the element that renders a stored
  * DS field carries `data-ds-field` with one of these values, and nothing else may carry it (pinned by the wiring test).
  */

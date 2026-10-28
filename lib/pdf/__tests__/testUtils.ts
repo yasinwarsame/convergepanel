@@ -76,3 +76,10 @@ export function extractPdfElementText(element: unknown): string {
   collectText(element, out);
   return out.join(" ");
 }
+
+/** The same extraction as `extractPdfElementText`, as the ordered list of text runs (one per drawn text). */
+export function extractPdfTextNodes(element: unknown): string[] {
+  const out: string[] = [];
+  collectText(element, out);
+  return out;
+}
