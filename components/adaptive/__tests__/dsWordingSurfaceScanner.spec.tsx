@@ -49,9 +49,9 @@ jest.mock("@/lib/adaptiveSchema/dsLabelWording", () => {
 
 import { readFileSync } from "fs";
 import { join } from "path";
-import { dsFixtures, receiptFor, S, surfaceFromHtml, type Surface } from "./seSurfaces/seSurfaceHarness";
+import { conditionalGoCollisionFixture, dsFixtures, receiptFor, S, surfaceFromHtml, type Surface } from "./seSurfaces/seSurfaceHarness";
 import { allDsSurfaces, dsPageSurface } from "./seSurfaces/seSurfaceRenderers";
-import { EXEMPTIONS, FAMILIES, FIELD_LABELS, STORED_FIELDS, STORED_RATIONALE_DEBT, assertNotBlind, scanSurface, usedExemptions, validateExemptions } from "./seSurfaces/dsWordingScanner";
+import { EXEMPTIONS, FAMILIES, FIELD_LABELS, STORED_FIELDS, isStoredSplitRationale, assertNotBlind, scanSurface, usedExemptions, validateExemptions } from "./seSurfaces/dsWordingScanner";
 
 const fixtures = dsFixtures();
 const fixturesAtLoad = JSON.stringify(fixtures);
@@ -129,8 +129,9 @@ function fieldValue(s: Surface, label: string): string | undefined {
 
 const PAGE_ANCHORS = ["Model agreement", "Sources", "Options considered", "Panel detail", "Model-assigned evidence strength, not independently checked"];
 
-/** The scanner's default: stored-data debt is handled only inside its own marked stored field (see STORED_RATIONALE_DEBT). */
-const scanDs = (s: Surface) => scanSurface(s);
+/** Scan a DS surface with its fixture's own stored rationale: the only value the stored-data debt can match exactly. */
+const scanDs = (s: Surface, fixtureName: string) =>
+  scanSurface(s, { storedRationales: [fixtures.find((x) => x.name === fixtureName)!.result.recommendation.rationale] });
 
 // R2-m1 (owner ruling): the stored :488 rationale is kept; screens show this instead (literal oracle).
 const STORED_488 = "Models agree a specific option should be chosen but did not name one this system could confidently resolve.";
@@ -193,7 +194,7 @@ describe("whole-surface scan: no prohibited wording on any Decision Support surf
         const raw = dsPageSurface(`raw:${mode}:${f.name}`, f, mode, "unwrapped");
         const bare = raw.textNodes.flatMap((t, i) => (/^(strong|moderate|weak)$/i.test(t) ? [raw.textNodes[i - 1]] : []));
         expect([f.name, mode, bare.filter((prev) => prev !== "evidenceStrength:")]).toEqual([f.name, mode, []]);
-        expect([f.name, mode, scanDs(raw).filter((h) => h.family !== "F8-bare-strength")]).toEqual([f.name, mode, []]);
+        expect([f.name, mode, scanDs(raw, f.name).filter((h) => h.family !== "F8-bare-strength")]).toEqual([f.name, mode, []]);
         const expectedRaw = f.perModel.reduce((n, p) => n + p.fields.assessments.length, 0);
         expect([f.name, mode, bare.length]).toEqual([f.name, mode, expectedRaw]);
       }
@@ -201,11 +202,11 @@ describe("whole-surface scan: no prohibited wording on any Decision Support surf
   });
 
   it("finds zero hits across all surfaces", () => {
-    expect(surfaces.flatMap((s) => scanDs(s))).toEqual([]);
+    expect(surfaces.flatMap((s) => scanDs(s, s.fixture))).toEqual([]);
   });
 
   it("the :498 stored rationale is the only debt, shown only in its stored fields, with D-9 visible beside it", () => {
-    const withDebt = fixtures.filter((f) => STORED_RATIONALE_DEBT.test(f.result.recommendation.rationale)).map((f) => f.name);
+    const withDebt = fixtures.filter((f) => isStoredSplitRationale(f.result.recommendation.rationale)).map((f) => f.name);
     expect(withDebt).toEqual(["contested_on_option"]);
     for (const s of surfaces.filter((x) => x.fixture === "contested_on_option")) {
       const where = s.textNodes.flatMap((t, i) => (t.includes("Models agree an option should be chosen") ? [s.fields?.[i] ?? null] : []));
@@ -213,8 +214,8 @@ describe("whole-surface scan: no prohibited wording on any Decision Support surf
       const expected = { page: [STORED_FIELDS.rationale], page_team: [STORED_FIELDS.rationale, STORED_FIELDS.receiptConclusion] }[s.kind as "page" | "page_team"] ?? [STORED_FIELDS.receiptConclusion];
       expect([s.id, where]).toEqual([s.id, expected]);
       expect([s.id, s.textNodes.includes(D9)]).toEqual([s.id, true]);
-      // The debt is real wording a reader sees: with the field boundary off, the same surface fails.
-      expect([s.id, scanSurface(s, { storedFieldDebt: false }).map((h) => h.family)]).toEqual([s.id, expect.arrayContaining(["F2-convergence"])]);
+      // The debt is real wording a reader sees: without its exact stored value, the same surface fails.
+      expect([s.id, scanSurface(s).map((h) => h.family)]).toEqual([s.id, expect.arrayContaining(["F2-convergence"])]);
     }
   });
 
@@ -231,6 +232,24 @@ describe("whole-surface scan: no prohibited wording on any Decision Support surf
     // Receipts: the real builder wrote the stored sentence into the conclusion; the screen shows the explanation in its place.
     expect(receiptFor(f).conclusion).toBe(`Conditional go — ${STORED_488}`);
     for (const kind of ["list_item", "personal_review", "team_review"]) expect([kind, of(f.name, kind).textNodes.includes(`Conditional go — ${SHOWN_488}`)]).toEqual([kind, true]);
+  });
+
+  it("R3 NIT (pinned limit): a model-written conditional_go rationale equal to the :488 sentence is replaced on receipts only", () => {
+    const f = conditionalGoCollisionFixture(STORED_488);
+    // Real producer: no split, no recommended option, the models' own sentence stored as the rationale.
+    expect(f.result.recommendation).toMatchObject({ action: "conditional_go", isContested: false, rationale: STORED_488 });
+    expect(f.result.recommendation.recommendedOptionId).toBeFalsy();
+    // Real builder: the conclusion is byte-identical to the unresolved state's, which is why a receipt cannot tell them apart.
+    expect(receiptFor(f).conclusion).toBe(`Conditional go — ${STORED_488}`);
+    // Result view (sees the state): the model's sentence is shown as written, inside the rationale field.
+    const page = dsPageSurface("collision", f, "personal");
+    expect(page.textNodes.filter((t, i) => t === STORED_488 && page.fields?.[i] === STORED_FIELDS.rationale)).toHaveLength(1);
+    expect(page.textNodes.some((t) => t.includes(SHOWN_488))).toBe(false);
+    // Receipt surfaces (conclusion only): the cautionary explanation, with D-9 beside it; the stored sentence is not shown.
+    const team = dsPageSurface("collision-team", f, "team");
+    const receiptNodes = team.textNodes.filter((_t, i) => team.fields?.[i] === STORED_FIELDS.receiptConclusion);
+    expect(receiptNodes).toEqual([`Conditional go — ${SHOWN_488}`]);
+    expect(team.textNodes).toContain(D9);
   });
 
   it("stored-field markers cover exactly the stored text: every marked node is the fixture's presented field value", () => {
@@ -490,20 +509,41 @@ describe("falsification: scanner mechanics", () => {
     for (const s of surfaces.filter((x) => x.kind.startsWith("page"))) expect([s.id, s.textNodes.includes("Model agreement")]).toEqual([s.id, true]);
   });
 
-  it("(2d) stored-data debt is bounded to its own marked field: the same sentences planted as application text are caught", () => {
+  it("(2d) stored-data debt is exact: only the stored value, in its own marked field, under the producer grammar", () => {
     const d498 = "Models agree an option should be chosen but disagree on which one (2 of 3 pick A; 1 of 3 pick B).";
     const at = (nodes: [string, string | null][]): Surface => ({ id: "p", textNodes: nodes.map((n) => n[0]), attributes: [], fields: nodes.map((n) => n[1]) });
-    // In its stored fields: handled.
-    expect(scanSurface(at([[d498, STORED_FIELDS.rationale]]))).toEqual([]);
-    expect(scanSurface(at([[`Conditional go — ${d498}`, STORED_FIELDS.receiptConclusion]]))).toEqual([]);
-    // The same sentence outside the field, unmarked, or with application text added inside the field: caught.
-    expect(scanSurface(at([[d498, null]])).map((h) => h.family)).toContain("F2-convergence");
-    expect(scanSurface(at([[d498, "something.else"]])).map((h) => h.family)).toContain("F2-convergence");
-    expect(scanSurface(at([[`${d498} All models agree.`, STORED_FIELDS.rationale]])).map((h) => h.family)).toContain("F2-convergence");
-    expect(scanSurface(at([[`Models agreed — ${d498}`, STORED_FIELDS.receiptConclusion]])).map((h) => h.family)).toContain("F2-convergence");
+    const scan = (nodes: [string, string | null][], stored: string[] = [d498]) => scanSurface(at(nodes), { storedRationales: stored }).map((h) => h.family);
+    // Accepted: the exact stored value in either stored field.
+    expect(scan([[d498, STORED_FIELDS.rationale]])).toEqual([]);
+    expect(scan([[`Conditional go — ${d498}`, STORED_FIELDS.receiptConclusion]])).toEqual([]);
+    // Rejected: outside the field, unmarked, or in another field.
+    expect(scan([[d498, null]])).toContain("F2-convergence");
+    expect(scan([[d498, "something.else"]])).toContain("F2-convergence");
+    // Rejected: anything appended, including a suffix that itself ends in ")." (R3 NIT).
+    expect(scan([[`${d498} All models agree.`, STORED_FIELDS.rationale]])).toContain("F2-convergence");
+    expect(scan([[`${d498} All sources verified and models are unanimous (consensus).`, STORED_FIELDS.rationale]])).toEqual(expect.arrayContaining(["F2-convergence", "F3-source-assurance"]));
+    expect(scan([[`Conditional go — ${d498} Consensus confirmed (all models agree).`, STORED_FIELDS.receiptConclusion]])).toEqual(expect.arrayContaining(["F1-consensus-tier", "F2-convergence"]));
+    const inner = "Models agree an option should be chosen but disagree on which one (none; sources verified; review not required).";
+    expect(scan([[inner, STORED_FIELDS.rationale]], [inner])).toEqual(expect.arrayContaining(["F2-convergence", "F3-source-assurance", "F4-review-necessity"]));
+    expect(scan([[`Models agreed — ${d498}`, STORED_FIELDS.receiptConclusion]])).toContain("F2-convergence");
+    // Rejected: a changed rationale is not automatically exempt (the rendered text must equal the stored value).
+    const changed = "Models agree an option should be chosen but disagree on which one (2 of 3 pick A; 1 of 3 pick C).";
+    expect(scan([[changed, STORED_FIELDS.rationale]])).toContain("F2-convergence");
+    // Rejected: a stored value outside the producer grammar, even when the caller passes it.
+    for (const bad of [
+      "Models agree an option should be chosen but disagree on which one (3 of 3 pick A).",
+      "Models agree an option should be chosen but disagree on which one (2 of 3 pick A; 2 of 3 pick B).",
+      "Models agree an option should be chosen but disagree on which one (2 of 3 pick A; 1 of 4 pick B).",
+      "Models agree an option should be chosen but disagree on which one (2 of 3 pick A; 1 of 3 pick B). Unanimous.",
+      "All models agree (2 of 3 pick A; 1 of 3 pick B).",
+    ]) {
+      expect([bad, isStoredSplitRationale(bad)]).toEqual([bad, false]);
+      expect([bad, scan([[bad, STORED_FIELDS.rationale]], [bad]).length > 0]).toEqual([bad, true]);
+    }
+    expect(isStoredSplitRationale(d498)).toBe(true);
     // The :488 sentence has no debt entry anywhere: inside the rationale field or a receipt conclusion it is caught.
-    expect(scanSurface(at([[STORED_488, STORED_FIELDS.rationale]])).map((h) => h.family)).toContain("F2-convergence");
-    expect(scanSurface(at([[`Conditional go — ${STORED_488}`, STORED_FIELDS.receiptConclusion]])).map((h) => h.family)).toContain("F2-convergence");
+    expect(scan([[STORED_488, STORED_FIELDS.rationale]], [STORED_488])).toContain("F2-convergence");
+    expect(scan([[`Conditional go — ${STORED_488}`, STORED_FIELDS.receiptConclusion]], [STORED_488])).toContain("F2-convergence");
     // No phrase exemption exists for either sentence.
     for (const e of EXEMPTIONS) expect([e, /Models agree/.test(e)]).toEqual([e, false]);
   });
@@ -513,7 +553,9 @@ describe("falsification: scanner mechanics", () => {
     const stored498 = f.result.recommendation.rationale;
     for (const planted of [stored498, STORED_488]) {
       const s = withWording({ DS_GROUPING_BASIS: planted }, () => dsPageSurface("planted", f, "personal"));
-      expect([planted, scanSurface(s).map((h) => h.family)]).toEqual([planted, expect.arrayContaining(["F2-convergence"])]);
+      // The page's real stored rationale stays exempt (it is passed); only the planted application copy is caught.
+      expect([planted, scanSurface(s, { storedRationales: [stored498] }).map((h) => h.family)]).toEqual([planted, expect.arrayContaining(["F2-convergence"])]);
+      expect(scanSurface(dsPageSurface("clean", f, "personal"), { storedRationales: [stored498] })).toEqual([]);
     }
     // Presentation identity removed: the :488 sentence reaches every surface and is caught on each.
     const u = fixtures.find((x) => x.name === "unresolved_option")!;
@@ -565,6 +607,52 @@ describe("falsification: scanner mechanics", () => {
       "<p>The models are <a>aligned</a>.</p>",
       "<p>The panel <b>confidently</b> recommends Go.</p>",
     ]) expect([html, scanSurface(surfaceFromHtml("n", html)).length > 0]).toEqual([html, true]);
+  });
+
+  describe("R3 MINOR: F2 / F3 / F4 claim variants (bounded structures, not word bans)", () => {
+    const CASES: { family: string; claims: string[]; legitimate: string[] }[] = [
+      {
+        family: "F2-convergence",
+        claims: ["All models recommended Go.", "Every model chose Option A.", "All 3 models recommended Defer", "Each of the models selected Option B", "all models   recommended   no go"],
+        legitimate: ["Not all models recommended an action.", "All models were dispatched.", "Each model's full response is shown below.", "3 models dispatched; 3 gave a recommendation; largest group recommending the same action: 3.", "Recommended next step: review each model's answer."],
+      },
+      {
+        family: "F3-source-assurance",
+        claims: ["Sources were independently confirmed.", "Sources: confirmed.", "References checked.", "Citations confirmed.", "Source has been validated", "References were carefully checked"],
+        legitimate: ["Sources listed; not independently verified", "No sources were checked.", "Sources were not checked.", "None of the sources were confirmed.", "Source references are listed as the models gave them; none were fetched or checked", "Confirm the citations before relying on them."],
+      },
+      {
+        family: "F4-review-necessity",
+        claims: ["Human review unnecessary.", "Optional human review.", "Human review: optional.", "Review: unnecessary", "Optional review"],
+        legitimate: ["Human review needed", "System did not flag this for human review.", "Human review completed: approved by a reviewer.", "Review status: Approved", "Optional: add a comment for the reviewer."],
+      },
+    ];
+
+    it.each(CASES.map((c) => [c.family, c] as const))("%s: each claim is caught as a text node, and each legitimate statement is not", (_f, c) => {
+      for (const text of c.claims) expect([text, scanSurface({ id: "c", textNodes: [text], attributes: [] }).map((h) => h.family)]).toEqual([text, expect.arrayContaining([c.family])]);
+      for (const text of c.legitimate) expect([text, scanSurface({ id: "n", textNodes: [text], attributes: [] })]).toEqual([text, []]);
+    });
+
+    it.each(CASES.map((c) => [c.family, c] as const))("%s: each claim planted as application wording on the real page fails the gate; a model quoting it does not", (_f, c) => {
+      const f = fixtures.find((x) => x.name === "uncontested_choose_option")!;
+      for (const text of c.claims) {
+        const planted = withWording({ DS_GROUPING_BASIS: text }, () => dsPageSurface("planted", f, "personal"));
+        expect([text, scanDs(planted, f.name).map((h) => h.family)]).toEqual([text, expect.arrayContaining([c.family])]);
+        expect([text, scanSurface({ id: "quoted", textNodes: [S(text)], attributes: [] })]).toEqual([text, []]);
+      }
+      expect(scanDs(dsPageSurface("clean", f, "personal"), f.name)).toEqual([]);
+    });
+
+    it("claims split across inline and nested elements are caught through the real extraction", () => {
+      for (const [html, family] of [
+        ["<p>Every <b>model</b> chose <i>Option A</i>.</p>", "F2-convergence"],
+        ["<p>All <span>models <em>recommended</em></span> Go.</p>", "F2-convergence"],
+        ["<p>Sources<b>:</b> <i>confirmed</i>.</p>", "F3-source-assurance"],
+        ["<p><span>References</span> <span>checked</span></p>", "F3-source-assurance"],
+        ["<p>Human review<b>:</b> <i>optional</i></p>", "F4-review-necessity"],
+        ["<p><b>Optional</b> human review</p>", "F4-review-necessity"],
+      ]) expect([html, scanSurface(surfaceFromHtml("n", html)).map((h) => h.family)]).toEqual([html, expect.arrayContaining([family])]);
+    });
   });
 
   it("(1c) the families cover claim classes, not only the old strings", () => {

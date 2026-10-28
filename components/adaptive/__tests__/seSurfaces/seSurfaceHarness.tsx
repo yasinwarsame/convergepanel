@@ -139,6 +139,19 @@ export function dsFixtures(): DsFixture[] {
  * `rawStrength: "unwrapped"` keeps the bare enum, which the spec uses to prove the raw dump is the only site that
  * prints an unqualified rating.
  */
+/**
+ * R3 NIT (receipt-side state): every model recommends conditional_go (no split) and writes, verbatim, the producer's
+ * :488 sentence as its own rationale. Built through the real producer; kept out of the scanned matrix because the
+ * rationale is model-authored text deliberately left unwrapped, to reproduce the collision exactly.
+ */
+export function conditionalGoCollisionFixture(storedSentence: string): DsFixture {
+  const perModel = models(
+    fields({ recommendationAction: "conditional_go", options: [OPT_A], recommendationRationale: storedSentence }),
+    fields({ recommendationAction: "conditional_go", options: [OPT_A], recommendationRationale: storedSentence })
+  );
+  return { name: "conditional_go_collision", perModel, result: buildDecisionSupportResult(perModel, perModel.length) };
+}
+
 export function modelResults(fixture: DsFixture, rawStrength: "model_content" | "unwrapped"): AdaptiveModelResult[] {
   return fixture.perModel.map((p) => {
     const data = { ...p.fields };

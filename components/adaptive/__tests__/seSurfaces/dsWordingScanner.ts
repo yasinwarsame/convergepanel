@@ -11,7 +11,7 @@
  * Matching runs on every text node and every reader-visible attribute, and again on the surface in reader order (all
  * text nodes joined by a space, and every run of two or three adjacent nodes glued), so a phrase split across inline
  * elements is still one phrase. Before matching, sentinel spans (model-authored text, see seSurfaceHarness.tsx), the
- * pinned phrase-level exemptions, exact-node field labels and stored-data debt inside its own marked field are removed.
+ * pinned phrase-level exemptions, exact-node field labels and stored-data debt (exact stored value, own marked field) are removed.
  */
 
 import { SENTINEL_SPAN, type Surface } from "./seSurfaceHarness";
@@ -24,19 +24,19 @@ export const FAMILIES: Family[] = [
     id: "F2-convergence",
     description: "convergence / agreement / unanimity / genuineness / no-disagreement claim",
     pattern:
-      /\bconverg\w*|\bunanim\w*|\buncontested\b|\bagree(s|d|ing)?\b|\bagreement\b|\bconcur\w*|\bno (material )?(disagreement|split|dissent)\b|\baligned\b|\bsame (action|recommendation|option)\b|\bin accord\b|\bgenuine(ly)?\b/i,
+      /\bconverg\w*|\bunanim\w*|\buncontested\b|\bagree(s|d|ing)?\b|\bagreement\b|\bconcur\w*|\bno (material )?(disagreement|split|dissent)\b|\baligned\b|\bsame (action|recommendation|option)\b|\bin accord\b|\bgenuine(ly)?\b|(?<!\bnot\s+)\b(all|every|each)(\s+(of the|the|\d+))?\s+models?\s+(recommended|chose|picked|selected|preferred|favou?red|backed|endorsed)\b/i,
   },
   {
     id: "F3-source-assurance",
     description: "source assurance",
     pattern:
-      /\bsource[- ]backed\b|\bevidence[- ]backed\b|\bverified\b|\bfully supported\b|\bsource support captured\b|\bsource grounding\b|\bwell[- ]sourced\b|\bcorroborated\b|\bsources? (were |are |have been )?(checked|confirmed|validated)\b|\bsupported by (the )?sources\b/i,
+      /\bsource[- ]backed\b|\bevidence[- ]backed\b|\bverified\b|\bfully supported\b|\bsource support captured\b|\bsource grounding\b|\bwell[- ]sourced\b|\bcorroborated\b|(?<!\b(?:no|none of the)\s+)\b(sources?|references?|citations?)\s*:?\s+((were|are|have been|was|is|has been)\s+)?(\w+ly\s+)?(checked|confirmed|validated)\b|\bsupported by (the )?sources\b/i,
   },
   {
     id: "F4-review-necessity",
     description: "review necessity",
     pattern:
-      /\breview (is )?not (required|needed|necessary)\b|\bno (human )?review (is )?(needed|required|necessary)\b|\b(does not|doesn't) (need|require) (human )?review\b|\breview (is )?optional\b|\bnot flagged as needed\b/i,
+      /\breview (is )?not (required|needed|necessary)\b|\bno (human )?review (is )?(needed|required|necessary)\b|\b(does not|doesn't) (need|require) (human )?review\b|\breview\s*(:|is)?\s*(optional|unnecessary)\b|\boptional\s+(human\s+)?review\b|\bnot flagged as needed\b/i,
   },
   { id: "F5-option-distinctness", description: "option distinctness", pattern: /\b(kept|remain|remains|stay|stays)\s+(distinct|separate)\b|\boptions are (distinct|separate)\b|\bnever (merged|grouped)\b/i },
   { id: "F6-certainty", description: "certainty claim", pattern: /\bcertain(ty|ly)?\b|\bconfiden(t|ce)\b|(?<!\b(?:not|never|cannot|can't|couldn't|unable to)\s+)\bconfidently\b|\bguarantee\w*|\bdefinitive(ly)?\b|\bproven\b/i },
@@ -69,21 +69,43 @@ export const EXEMPTIONS: string[] = [
 ];
 
 /**
- * Stored-data debt (owner ruling 2026-10-28): the producer's stored split rationale (decisionSupportAlignment.ts:498) is
- * kept byte-identical and is still shown. It is handled only where it is stored: inside an element marked
- * `data-ds-field` (DS_FIELD_RATIONALE: the whole node must be the sentence; DS_FIELD_RECEIPT_CONCLUSION: only the
- * builder's " — <sentence>" tail). The same sentence anywhere else, or with anything added inside the field, is scanned
- * like any other text. The :488 sentence has no entry: it is replaced on screen (dsPresentedRationale /
- * dsPresentedReceiptConclusion), so if it is ever rendered it is caught.
+ * Stored-data debt (owner rulings 2026-10-28, R2 and R3): the producer's stored split rationale
+ * (decisionSupportAlignment.ts:498) is kept byte-identical and still shown. A text node is exempt only when all of:
+ *   1. it is inside an element marked `data-ds-field` — the DS rationale (the whole node) or a DS receipt conclusion
+ *      (the tail after the builder's first " — ");
+ *   2. that text is exactly equal to a stored rationale value the caller passes (`storedRationales`, the fixture's own
+ *      stored field), so nothing appended or changed is exempt, whatever it ends with;
+ *   3. that stored value parses under the producer's exact grammar (`isStoredSplitRationale`): the fixed sentence, then
+ *      "(n of m pick X; n of m pick Y…)." with at least two picks, one shared m, and counts summing to m.
+ * The same sentence anywhere else, any other stored value, and the :488 sentence (replaced on screen by
+ * dsPresentedRationale / dsPresentedReceiptConclusion) are scanned like any other text.
  */
-export const STORED_RATIONALE_DEBT = /^Models agree an option should be chosen but disagree on which one \(.+\)\.$/;
+const SPLIT_RATIONALE_HEAD = "Models agree an option should be chosen but disagree on which one (";
 export const STORED_FIELDS = { rationale: "recommendation.rationale", receiptConclusion: "receipt.conclusion" } as const;
 
-function withoutStoredDebt(text: string, field: string | null | undefined): string {
-  if (field === STORED_FIELDS.rationale) return STORED_RATIONALE_DEBT.test(text) ? " " : text;
+export function isStoredSplitRationale(value: string): boolean {
+  if (!value.startsWith(SPLIT_RATIONALE_HEAD) || !value.endsWith(").")) return false;
+  const picks = value.slice(SPLIT_RATIONALE_HEAD.length, -2).split("; ");
+  if (picks.length < 2) return false;
+  let total: number | null = null;
+  let sum = 0;
+  for (const pick of picks) {
+    const m = /^(\d+) of (\d+) pick (.+)$/.exec(pick);
+    if (!m) return false;
+    const [n, of] = [Number(m[1]), Number(m[2])];
+    if (n < 1 || (total !== null && of !== total)) return false;
+    total = of;
+    sum += n;
+  }
+  return sum === total;
+}
+
+function withoutStoredDebt(text: string, field: string | null | undefined, stored: readonly string[]): string {
+  const exempt = (value: string) => stored.includes(value) && isStoredSplitRationale(value);
+  if (field === STORED_FIELDS.rationale) return exempt(text) ? " " : text;
   if (field === STORED_FIELDS.receiptConclusion) {
     const cut = text.indexOf(" — ");
-    if (cut >= 0 && STORED_RATIONALE_DEBT.test(text.slice(cut + 3))) return text.slice(0, cut);
+    if (cut >= 0 && exempt(text.slice(cut + 3))) return text.slice(0, cut);
   }
   return text;
 }
@@ -110,7 +132,7 @@ export type Hit = { surface: string; family: string; text: string };
 
 export function scanSurface(
   surface: Surface,
-  opts: { exemptions?: readonly string[]; stripSentinels?: boolean; families?: readonly Family[]; joined?: boolean; storedFieldDebt?: boolean } = {}
+  opts: { exemptions?: readonly string[]; stripSentinels?: boolean; families?: readonly Family[]; joined?: boolean; storedRationales?: readonly string[] } = {}
 ): Hit[] {
   const exemptions = opts.exemptions ?? EXEMPTIONS;
   const families = opts.families ?? FAMILIES;
@@ -121,8 +143,9 @@ export function scanSurface(
     return text;
   };
   const hits: Hit[] = [];
-  // Stored-data debt, bounded to its stored field (see STORED_RATIONALE_DEBT).
-  const textNodes = (opts.storedFieldDebt ?? true) ? surface.textNodes.map((t, i) => withoutStoredDebt(t, surface.fields?.[i])) : [...surface.textNodes];
+  // Stored-data debt: the exact stored value, in its own marked field only (see isStoredSplitRationale).
+  const stored = opts.storedRationales ?? [];
+  const textNodes = surface.textNodes.map((t, i) => withoutStoredDebt(t, surface.fields?.[i], stored));
   const nodes = [...textNodes, ...surface.attributes].filter((raw) => !FIELD_LABELS.includes(raw.trim()));
   for (const raw of nodes) {
     const text = clean(raw);

@@ -180,6 +180,11 @@ export function dsPresentedRationale(decisionSupport: DecisionSupportResult): st
  * The receipt conclusion a DS receipt surface shows. A stored receipt carries only its conclusion string, so the
  * substitution needs the whole conclusion to equal exactly what the receipt builder writes for the unresolved state
  * ("Conditional go — " + the stored sentence) on a Decision Support run; any other conclusion is shown as stored.
+ *
+ * Known limit (R3, owner-accepted; pinned by the scanner spec's collision regression): a receipt cannot see the run's
+ * state. If every model recommended conditional_go and wrote that exact system sentence as its own rationale, the
+ * builder writes the same conclusion: receipts then show the cautionary explanation while the result view (which can
+ * see the state) shows the model's sentence as written. No database read or builder change is made for this case.
  */
 export function dsPresentedReceiptConclusion(schemaId: unknown, conclusion: string): string {
   if (!isDecisionSupportSchema(schemaId)) return conclusion;
