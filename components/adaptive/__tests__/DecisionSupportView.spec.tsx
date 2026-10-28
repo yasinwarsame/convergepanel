@@ -210,14 +210,21 @@ describe("DecisionSupportView", () => {
     expect(html).toMatch(/no model responses were available/i);
   });
 
-  it("surfaces sourceBacked near the recommendation metadata in both directions — false is never silently omitted", () => {
+  it("surfaces the source signal near the recommendation metadata in both directions — none listed is never silently omitted", () => {
+    // Order 6 / S-E.1 (E-3, K-5): "listed" needs a non-blank reference; a blank list is "No sources listed".
     const sourced = buildDecisionSupportResult(
       perModel([["chatgpt", fields({ options: ["HubSpot"], recommendationAction: "go", sources: ["Vendor comparison report"] })]])
     );
-    expect(renderToStaticMarkup(createElement(DecisionSupportView, { decisionSupport: sourced }))).toContain("Source-backed");
+    expect(renderToStaticMarkup(createElement(DecisionSupportView, { decisionSupport: sourced }))).toContain("Sources listed; not independently verified");
 
     const unsourced = buildDecisionSupportResult(perModel([["chatgpt", fields({ options: ["HubSpot"], recommendationAction: "go" })]]));
-    expect(renderToStaticMarkup(createElement(DecisionSupportView, { decisionSupport: unsourced }))).toContain("No source support captured");
+    expect(renderToStaticMarkup(createElement(DecisionSupportView, { decisionSupport: unsourced }))).toContain("No sources listed");
+
+    const blank = buildDecisionSupportResult(perModel([["chatgpt", fields({ options: ["HubSpot"], recommendationAction: "go", sources: [""] })]]));
+    expect(blank.sourceBacked).toBe(true);
+    const blankHtml = renderToStaticMarkup(createElement(DecisionSupportView, { decisionSupport: blank }));
+    expect(blankHtml).toContain("No sources listed");
+    expect(blankHtml).not.toContain("Sources listed;");
   });
 
   it("phrases the source signal as evidence support, never a confidence/certainty percentage", () => {

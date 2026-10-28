@@ -16,6 +16,7 @@ import type { EnrichedAdaptiveTeamRunListItemV1 } from "@/lib/governance/teamRev
 import { schemaLabel, humanReviewStatusLabel } from "@/lib/governance/teamReviewLabels";
 import GovernanceStatusBadge from "./GovernanceStatusBadge";
 import HumanReviewStatusBadge from "./HumanReviewStatusBadge";
+import ReceiptSourcesFlag from "@/components/adaptive/ReceiptSourcesFlag";
 
 function formatUpdatedAt(iso: string): string {
   const d = new Date(iso);
@@ -126,8 +127,7 @@ export default function AdaptiveReviewListItem({ item }: { item: EnrichedAdaptiv
       <p className="mt-3 text-sm leading-snug text-cp-text">{item.receiptConclusion}</p>
 
       <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-cp-muted">
-        <span>{item.sourceBacked ? "Source-backed" : "Not source-backed"}</span>
-        <span aria-hidden>&middot;</span>
+        <ReceiptSourcesFlag schemaId={item.schemaId} sourceBacked={item.sourceBacked} />
         <span>{item.humanReviewNeeded ? "Human review needed" : "Human review not flagged as needed"}</span>
       </div>
 

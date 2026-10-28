@@ -24,6 +24,7 @@ import AdaptiveReviewDecisionForm from "./AdaptiveReviewDecisionForm";
 import AdaptiveReviewHistorySection from "./AdaptiveReviewHistorySection";
 import AdaptiveReviewAssignmentSection from "./AdaptiveReviewAssignmentSection";
 import AdaptiveMultiReviewerPanelSection from "./AdaptiveMultiReviewerPanelSection";
+import ReceiptSourcesFlag from "@/components/adaptive/ReceiptSourcesFlag";
 
 function formatDatetime(iso: string | undefined): string {
   if (!iso) return "—";
@@ -207,8 +208,7 @@ export default function AdaptiveReviewDetail({ runId }: { runId: string }) {
             <h2 className="text-base font-bold text-cp-text">Decision Receipt</h2>
             <p className="mt-3 text-sm leading-relaxed text-cp-text">{data.review.decisionReceipt.conclusion}</p>
             <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-cp-muted">
-              <span>{data.review.decisionReceipt.sourceBacked ? "Source-backed" : "Not source-backed"}</span>
-              <span aria-hidden>&middot;</span>
+              <ReceiptSourcesFlag schemaId={data.review.schemaId} sourceBacked={data.review.decisionReceipt.sourceBacked} />
               <span>
                 {data.review.decisionReceipt.humanReviewNeeded ? "Human review needed" : "Human review not flagged as needed"}
               </span>

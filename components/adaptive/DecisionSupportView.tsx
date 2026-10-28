@@ -19,6 +19,15 @@
 
 import { AggregatedDecisionAssessment, AggregatedDecisionCriterion, AggregatedDecisionOption, DecisionRecommendationAction, DecisionSupportResult } from "@/lib/adaptiveSchema/types";
 import { Card, EmptyStateCard, SectionLabel, TintBadge, formatModelCoverage, SlotChip } from "./shared";
+import {
+  DS_GROUPING_BASIS,
+  DS_NO_SOURCES_LISTED,
+  DS_OPTION_GROUPING_DISCLOSURE,
+  DS_STRENGTH_CAPTION,
+  DS_STRENGTH_LABEL,
+  dsRecommendationCounts,
+  dsSourcesBadge,
+} from "@/lib/adaptiveSchema/dsLabelWording";
 
 const ACTION_LABELS: Record<DecisionRecommendationAction, string> = {
   go: "Go",
@@ -43,18 +52,22 @@ const ACTION_TONES: Record<DecisionRecommendationAction, "accent" | "warning" | 
 function StrengthBadge({ strength }: { strength: AggregatedDecisionAssessment["evidenceStrength"] }) {
   if (strength === "unknown") return null;
   const tone = strength === "strong" ? "accent" : strength === "contested" ? "danger" : "warning";
-  const label = strength.charAt(0).toUpperCase() + strength.slice(1);
+  // S-E.1 E-8: a stored strength is the models' own rating, so it is never shown bare.
+  const label = DS_STRENGTH_LABEL[strength] ?? strength;
   return <TintBadge tone={tone}>{label}</TintBadge>;
 }
 
-/** Milestone 2 UI consistency cleanup — sourceBacked was already computed but never rendered. Placed near the recommendation metadata, phrased as an evidence-support signal (not a confidence/certainty score). */
-function SourceBackedBadge({ sourceBacked }: { sourceBacked: boolean }) {
+/**
+ * Milestone 2 UI consistency cleanup, reworded by Order 6 / S-E.1 (E-3, K-5): states only whether the models listed source
+ * references. "Listed" needs at least one non-blank reference in the stored `sources` list; with no list recorded the badge
+ * is omitted rather than guessed.
+ */
+function SourcesListedBadge({ sources }: { sources: unknown }) {
+  const text = dsSourcesBadge(sources);
+  if (text === null) return null;
   return (
-    <TintBadge
-      tone={sourceBacked ? "accent" : "warning"}
-      title="Whether at least one contributing model cited a source for this decision — not a measure of how strong that source is"
-    >
-      {sourceBacked ? "Source-backed" : "No source support captured"}
+    <TintBadge tone={text === DS_NO_SOURCES_LISTED ? "warning" : "accent"} title="Source references are listed as the models gave them; none were fetched or checked">
+      {text}
     </TintBadge>
   );
 }
@@ -97,9 +110,10 @@ export default function DecisionSupportView({ decisionSupport }: { decisionSuppo
     sensitivityFindings,
     reversibleNextStep,
     humanReviewNeeded,
-    sourceBacked,
+    sources,
     totalModels,
   } = decisionSupport;
+  const recommendationCounts = dsRecommendationCounts(decisionSupport);
 
   if (totalModels === 0) {
     return <EmptyStateCard state="no_models" />;
@@ -133,7 +147,7 @@ export default function DecisionSupportView({ decisionSupport }: { decisionSuppo
               Panel split
             </TintBadge>
           )}
-          <SourceBackedBadge sourceBacked={sourceBacked} />
+          <SourcesListedBadge sources={sources} />
         </div>
 
         {/* 3. Why this recommendation. */}
@@ -145,10 +159,8 @@ export default function DecisionSupportView({ decisionSupport }: { decisionSuppo
             ))}
           </ul>
         )}
-        <p className="mt-1 text-xs text-slate-400">
-          {formatModelCoverage({ covered: recommendation.supportCount, total: recommendation.totalModelsWithRecommendation, mode: "converged" })} —
-          not a certainty score.
-        </p>
+        {/* S-E.1 E-7: the owner-approved D-2 counts, never an N-of-M ratio; omitted when a count is not recorded. */}
+        {recommendationCounts && <p className="mt-1 text-xs text-slate-400">{recommendationCounts}</p>}
 
         {/* 4. Options considered. */}
         {options.length > 0 && (
@@ -165,6 +177,8 @@ export default function DecisionSupportView({ decisionSupport }: { decisionSuppo
                 </TintBadge>
               ))}
             </div>
+            {/* S-E.1 D-9 (c): the known grouping limitation, wherever grouped options are shown. */}
+            <p className="mt-1.5 text-xs text-slate-500">{DS_OPTION_GROUPING_DISCLOSURE}</p>
           </div>
         )}
 
@@ -172,6 +186,7 @@ export default function DecisionSupportView({ decisionSupport }: { decisionSuppo
         {criteria.length > 0 && options.length > 0 && (
           <div className="mt-3">
             <SectionLabel>Decision criteria</SectionLabel>
+            <p className="mb-1.5 text-xs text-slate-500">{DS_STRENGTH_CAPTION}</p>
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-left">
                 <thead>
@@ -278,9 +293,8 @@ export default function DecisionSupportView({ decisionSupport }: { decisionSuppo
             Panel detail ({totalModels} model{totalModels === 1 ? "" : "s"})
           </summary>
           <p className="mt-1.5 text-xs text-slate-500">
-            The recommendation reflects only genuine agreement across contributing models&apos; own recommended actions — a real split falls
-            back to a conservative action rather than a vote-counted winner. Coverage badges show how many models raised each option,
-            criterion, or assessment, not a certainty score.
+            {DS_GROUPING_BASIS} When the current grouping finds a split, the panel falls back to a conservative action rather than a
+            vote-counted winner. Coverage badges show how many models raised each option, criterion, or assessment, not a certainty score.
           </p>
           <div className="mt-2 flex flex-wrap gap-1">
             {Array.from(new Set(options.flatMap((o) => o.contributingModels))).map((modelId) => (

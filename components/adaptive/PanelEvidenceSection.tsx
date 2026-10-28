@@ -90,6 +90,7 @@ import {
   isRiskShapedChecklistResult,
 } from "@/lib/adaptiveSchema/types";
 import { Card, SectionLabel, TintBadge, BadgeTone } from "./shared";
+import { DS_STRENGTH_LABEL, DS_STRENGTH_TALLY_HEADING, dsUncontestedStatement } from "@/lib/adaptiveSchema/dsLabelWording";
 import ClaimMatrix from "./ClaimMatrix";
 import { TrustSummaryTable, AgreementDisagreementMap, SingleModelInsightsList, DisagreementsSection } from "./AdaptiveSynthesisReportView";
 import { presentPositionSafeReport } from "@/lib/adaptiveSchema/positionPresentation";
@@ -260,14 +261,18 @@ function DeepResearchEvidence({ deepResearch }: { deepResearch: DeepResearchResu
 
 function DecisionSupportEvidence({ decisionSupport }: { decisionSupport: DecisionSupportResult }) {
   const { assessments, recommendation } = decisionSupport;
+  const uncontested = dsUncontestedStatement(decisionSupport);
   const tally: Record<string, number> = { strong: 0, moderate: 0, weak: 0, contested: 0, unknown: 0 };
   for (const a of assessments) tally[a.evidenceStrength] += 1;
 
   return (
     <div className="space-y-3">
       <Card>
-        <SectionLabel>Assessment evidence strength ({assessments.length} option × criterion cell{assessments.length === 1 ? "" : "s"})</SectionLabel>
-        <CoverageTally tally={tally} toneMap={EVIDENCE_STRENGTH_TONE} labelMap={EVIDENCE_STRENGTH_LABEL} />
+        {/* S-E.1 E-8: the models' own ratings, labelled as such (DS-only label map; the shared one is unchanged). */}
+        <SectionLabel>
+          {DS_STRENGTH_TALLY_HEADING} ({assessments.length} option × criterion cell{assessments.length === 1 ? "" : "s"})
+        </SectionLabel>
+        <CoverageTally tally={tally} toneMap={EVIDENCE_STRENGTH_TONE} labelMap={DS_STRENGTH_LABEL} />
       </Card>
 
       {recommendation.isContested ? (
@@ -277,11 +282,12 @@ function DecisionSupportEvidence({ decisionSupport }: { decisionSupport: Decisio
             choose. See the rationale and caveats above for the specific split.
           </p>
         </Card>
-      ) : (
+      ) : uncontested ? (
+        // S-E.1 E-4: what the current grouping found, never a claim that disagreement was ruled out.
         <Card>
-          <p className="text-sm text-slate-500 italic">The panel&apos;s recommended actions converged — no material split.</p>
+          <p className="text-sm text-slate-500 italic">{uncontested}</p>
         </Card>
-      )}
+      ) : null}
     </div>
   );
 }

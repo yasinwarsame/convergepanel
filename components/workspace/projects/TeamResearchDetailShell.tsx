@@ -126,13 +126,15 @@ const STATE_BOX = "mt-6 rounded-xl border-2 border-cp-border bg-cp-raised p-6";
  */
 export function teamResearchAncillaryPresentation(
   review: TeamRunDetailMeta["review"],
-  exportTarget?: { workspaceId: string; runId: string; canCreateExport: boolean }
+  exportTarget?: { workspaceId: string; runId: string; canCreateExport: boolean },
+  /** Order 6 / S-E.1: the run's adaptive schema, so the review summary can word a Decision Support receipt (K-3). */
+  schemaId?: string | null
 ): AdaptiveAncillaryPresentation {
   return {
     kind: "delegated_read_only",
     exportSurface: exportTarget ? <TeamResearchExportButton {...exportTarget} /> : null,
     exportHistorySurface: exportTarget ? <TeamResearchExportHistory workspaceId={exportTarget.workspaceId} runId={exportTarget.runId} /> : null,
-    reviewGovernanceSurface: review ? <TeamResearchReviewSummary review={review} /> : null,
+    reviewGovernanceSurface: review ? <TeamResearchReviewSummary review={review} schemaId={schemaId} /> : null,
   };
 }
 
@@ -377,7 +379,7 @@ export default function TeamResearchDetailShell({ workspaceId, workspaceName, ru
         <TeamExportRefreshProvider>
           <PersistedResearchResultView
             presentation={state.presentation}
-            adaptiveAncillaryPresentation={teamResearchAncillaryPresentation(state.meta.review, { workspaceId, runId, canCreateExport })}
+            adaptiveAncillaryPresentation={teamResearchAncillaryPresentation(state.meta.review, { workspaceId, runId, canCreateExport }, state.presentation.adaptive?.schemaId ?? null)}
             // Absent handler => DeepResearchView renders no action at all, which
             // is exactly what Reviewers and Viewers must see.
             onVerifyClaim={canVerifyClaim ? handleVerifyClaim : undefined}

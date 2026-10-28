@@ -69,6 +69,8 @@ describe("TeamResearchReviewSummary", () => {
     expect(imports).toEqual([
       'import { getReviewStatusBadgeClass, getReviewStatusLabel } from "@/lib/workspaces/reviewQueuePresentation";',
       'import type { TeamRunDetailReview } from "@/lib/research/teamRunDetailPresentation";',
+      // Order 6 / S-E.1: the pure, owner-approved DS wording module (no I/O).
+      'import { DS_NOT_FLAGGED_FOR_REVIEW, dsReceiptSourcesLabel, isDecisionSupportSchema } from "@/lib/adaptiveSchema/dsLabelWording";',
     ]);
   });
 });
