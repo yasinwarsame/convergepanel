@@ -1,0 +1,36 @@
+{
+ "sourceCommit": "0249a4e5fb8c3eba2adaab432935fad9335571eb",
+ "purpose": "The five production files S-E.2 changes, exactly as they are at main 0249a4e5 (git show <commit>:<path>). The export suite bundles the current tree with these substituted, which is the unchanged-main renderer: every other production file is identical between 0249a4e5 and the S-E.2 head. Verify with `git hash-object <vendored file>` == blob.",
+ "files": [
+  {
+   "path": "lib/adaptiveSchema/researchExport.ts",
+   "vendored": "lib_adaptiveSchema_researchExport.ts.base",
+   "blob": "1d9d6e02b1d748459cdfd21515e754ea42c782f2",
+   "sha256": "005e63ce0d45cc232a3b1df695b2eebfee4366ed8aa65040f41bbc5e144089c7"
+  },
+  {
+   "path": "lib/adaptiveSchema/exportSnapshot.ts",
+   "vendored": "lib_adaptiveSchema_exportSnapshot.ts.base",
+   "blob": "40b67194dc0bc688e7c37d899a5119e839bcb174",
+   "sha256": "55e206f7c7bbd4ae4e08eb88b1d709e4f1e1aed0b98361c96144d1d59c28bd53"
+  },
+  {
+   "path": "lib/adaptiveSchema/dsLabelWording.ts",
+   "vendored": "lib_adaptiveSchema_dsLabelWording.ts.base",
+   "blob": "72a48162971ec16cbd5419ace6cdc1e4c45b4581",
+   "sha256": "4cc060db5dc9849d2101a9cb4e60f58f4d8aca3a9dbd573a23e45e10c4daddbc"
+  },
+  {
+   "path": "lib/pdf/AdaptiveResearchDocument.tsx",
+   "vendored": "lib_pdf_AdaptiveResearchDocument.tsx.base",
+   "blob": "72c31cba28e76936754ce38cb5cf1877faf2b2a7",
+   "sha256": "080ccbb4b9265a64d352295c3fe03edc1750d7f40b5f15e8e61790455ee851fa"
+  },
+  {
+   "path": "lib/docx/AdaptiveResearchDocxDocument.ts",
+   "vendored": "lib_docx_AdaptiveResearchDocxDocument.ts.base",
+   "blob": "c59bf8ea7eb2eca57a4118d24a99960e7e754421",
+   "sha256": "82cb576730966897c046e93d4ca4866723ea8631108a08d6c9d5386348c701bd"
+  }
+ ]
+}

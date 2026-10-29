@@ -44,7 +44,17 @@ import { MARKED_GATE_LEVEL_FIELD, MARKED_GATE_LEVEL_NOTE, MARKED_GATE_LEVEL_WORD
 import { exportModelIdentityLabel, exportRunProvenanceLines, readFrozenRunProvenance } from "@/lib/adaptiveSchema/exportRunProvenance";
 import { CONSENSUS_LABELS, SOURCE_GROUNDING_LABELS } from "@/lib/adaptiveSchema/reportSummary";
 import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
-import { FieldSpec } from "@/lib/adaptiveSchema/types";
+import { DecisionSupportResult, FieldSpec } from "@/lib/adaptiveSchema/types";
+import {
+  DS_MODEL_AGREEMENT_FIELD,
+  DS_OPTION_GROUPING_DISCLOSURE,
+  DS_SOURCES_FIELD,
+  dsExportShowsGroupingDisclosure,
+  dsModelAgreement,
+  dsPresentedExportConclusion,
+  dsSourcesSummary,
+  isDsLabelWordingMarked,
+} from "@/lib/adaptiveSchema/dsLabelWording";
 import { presentVerdictCaveat, presentVerdictClaim } from "@/lib/adaptiveSchema/agreementNarrative";
 import { answerClaimLines, answerLeadBlocks, blockText, presentUnifiedAnswer, unresolvedGroups } from "@/lib/adaptiveSchema/reportPresentation";
 import {
@@ -165,7 +175,29 @@ function coverSection(record: AdaptiveResearchExportV1): (Paragraph | Table)[] {
   ];
 }
 
+/**
+ * Order 6 / S-E.2 (H1-A): the status block of a version-1 Decision Support export, used only for records
+ * `isDsLabelWordingMarked` accepts; the historical block below is unchanged. Same content as the PDF: K-6 field names,
+ * E-1 and E-2 values from the frozen result, no Part 8 caption (owner O-2), then the D-9 disclosure as a muted paragraph
+ * when the result lists options.
+ */
+function dsStatusSummarySectionV1(record: AdaptiveResearchExportV1): (Paragraph | Table)[] {
+  const snapshot = record.reportSnapshot;
+  const result = snapshot.milestone2?.result as DecisionSupportResult | undefined;
+  const modelsText = snapshot.models.map((m) => `${exportModelIdentityLabel(snapshot.runProvenance, m.modelId)}${m.ok === false ? " (failed)" : ""}`).join(", ");
+  return [
+    heading("Report status summary"),
+    ...fieldGrid([
+      ["Models", modelsText || "—"],
+      [DS_MODEL_AGREEMENT_FIELD, dsModelAgreement(result).text],
+      [DS_SOURCES_FIELD, dsSourcesSummary(result) ?? "—"],
+    ]),
+    ...(dsExportShowsGroupingDisclosure(result) ? [muted(DS_OPTION_GROUPING_DISCLOSURE)] : []),
+  ];
+}
+
 function statusSummarySection(record: AdaptiveResearchExportV1): (Paragraph | Table)[] {
+  if (isDsLabelWordingMarked(record)) return dsStatusSummarySectionV1(record);
   const snapshot = record.reportSnapshot;
   const modelsText = snapshot.models.map((m) => `${exportModelIdentityLabel(snapshot.runProvenance, m.modelId)}${m.ok === false ? " (failed)" : ""}`).join(", ");
   // Order 5 (Contract P, m-5): a legacy-family (gate-scored) marked report's level is its gate, labelled so.
@@ -202,7 +234,8 @@ function milestone2Section(record: AdaptiveResearchExportV1): (Paragraph | Table
     return [heading("Primary synthesis"), muted("No governance record exists yet for this run, so no reviewed conclusion has been composed. The report has not been reviewed.")];
   }
   const r = m2.decisionReceipt;
-  const out: (Paragraph | Table)[] = [heading("Conclusion"), body(r.conclusion)];
+  const conclusion = isDsLabelWordingMarked(record) ? dsPresentedExportConclusion(m2.result as DecisionSupportResult, r.conclusion) : r.conclusion;
+  const out: (Paragraph | Table)[] = [heading("Conclusion"), body(conclusion)];
   if (r.basis.length > 0) out.push(heading("Basis"), ...bulletList(r.basis));
   if (r.assumptions.length > 0) out.push(heading("Assumptions"), ...bulletList(r.assumptions));
   if (r.uncertainties.length > 0) out.push(heading("Uncertainties"), ...bulletList(r.uncertainties));

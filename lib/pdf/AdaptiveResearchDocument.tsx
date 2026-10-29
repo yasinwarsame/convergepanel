@@ -31,7 +31,17 @@ import { AdaptiveResearchExportV1 } from "@/lib/adaptiveSchema/researchExport";
 import { exportModelIdentityLabel, exportRunProvenanceLines, readFrozenRunProvenance } from "@/lib/adaptiveSchema/exportRunProvenance";
 import { CONSENSUS_LABELS, SOURCE_GROUNDING_LABELS } from "@/lib/adaptiveSchema/reportSummary";
 import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
-import { AdaptiveSynthesisReport, FieldSpec } from "@/lib/adaptiveSchema/types";
+import { AdaptiveSynthesisReport, DecisionSupportResult, FieldSpec } from "@/lib/adaptiveSchema/types";
+import {
+  DS_MODEL_AGREEMENT_FIELD,
+  DS_OPTION_GROUPING_DISCLOSURE,
+  DS_SOURCES_FIELD,
+  dsExportShowsGroupingDisclosure,
+  dsModelAgreement,
+  dsPresentedExportConclusion,
+  dsSourcesSummary,
+  isDsLabelWordingMarked,
+} from "@/lib/adaptiveSchema/dsLabelWording";
 import { modelCaveatParts, presentVerdictCaveat, presentVerdictClaim, verdictClaimParts } from "@/lib/adaptiveSchema/agreementNarrative";
 import { TextBlock, answerLeadBlocks, presentUnifiedAnswer, unresolvedGroups } from "@/lib/adaptiveSchema/reportPresentation";
 import {
@@ -332,7 +342,59 @@ function CoverHeader({ record }: { record: AdaptiveResearchExportV1 }) {
   );
 }
 
+/**
+ * Order 6 / S-E.2 (H1-A): the status summary of a version-1 Decision Support export. The historical summary below is
+ * left exactly as it was; this one replaces it only for records `isDsLabelWordingMarked` accepts. K-6 field names, E-1
+ * and E-2 values from the frozen result, no Part 8 caption (owner O-2: both of its subjects are renamed), and the D-9
+ * disclosure directly after the card (not inside: the card is bounded) when the result lists options.
+ */
+/** R1 NIT-1: version-1 status values and D-9 wrap at word boundaries only (no "ver-/ified" in the half-width cell). */
+const keepWordsWhole = (word: string): string[] => [word];
+
+function DsStatusSummaryV1({ record }: { record: AdaptiveResearchExportV1 }) {
+  const snapshot = record.reportSnapshot;
+  const result = snapshot.milestone2?.result as DecisionSupportResult | undefined;
+  return (
+    <>
+      <SectionCard label="Report status summary" bounded>
+        <View style={pdfStyles.fieldGrid}>
+          <View style={pdfStyles.fieldCell}>
+            <Text style={pdfStyles.fieldLabel}>Models</Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+              {snapshot.models.map((m) => (
+                <Text key={m.modelId} style={pdfStyles.modelChip}>
+                  {exportModelIdentityLabel(snapshot.runProvenance, m.modelId)}
+                  {m.ok === false ? " (failed)" : ""}
+                </Text>
+              ))}
+            </View>
+          </View>
+          <View style={pdfStyles.fieldCell}>
+            <Text style={pdfStyles.fieldLabel}>{DS_MODEL_AGREEMENT_FIELD}</Text>
+            <Text style={pdfStyles.fieldValue} hyphenationCallback={keepWordsWhole}>
+              {dsModelAgreement(result).text}
+            </Text>
+          </View>
+          <View style={pdfStyles.fieldCell}>
+            <Text style={pdfStyles.fieldLabel}>{DS_SOURCES_FIELD}</Text>
+            <Text style={pdfStyles.fieldValue} hyphenationCallback={keepWordsWhole}>
+              {dsSourcesSummary(result) ?? "—"}
+            </Text>
+          </View>
+        </View>
+      </SectionCard>
+      {/* The card gap (theme.ts card.marginBottom) below the disclosure too, so it does not touch the next card. */}
+      {dsExportShowsGroupingDisclosure(result) && (
+        <Text style={[pdfStyles.mutedText, { marginBottom: 10 }]} hyphenationCallback={keepWordsWhole}>
+          {DS_OPTION_GROUPING_DISCLOSURE}
+        </Text>
+      )}
+    </>
+  );
+}
+
 function StatusSummary({ record }: { record: AdaptiveResearchExportV1 }) {
+  if (isDsLabelWordingMarked(record)) return <DsStatusSummaryV1 record={record} />;
   const snapshot = record.reportSnapshot;
   // Order 5 (Contract P, m-5): a legacy-family (gate-scored) marked report's level is its gate, labelled so.
   const gateLevel = isPositionMarked(snapshot.legacy?.synthesisReport);
@@ -393,7 +455,9 @@ function Milestone2Content({ record }: { record: AdaptiveResearchExportV1 }) {
   return (
     <View>
       <SectionCard label="Conclusion">
-        <Text {...textProps(pdfStyles.bodyText, CARD_CLOSING_PADDING)}>{r.conclusion}</Text>
+        <Text {...textProps(pdfStyles.bodyText, CARD_CLOSING_PADDING)}>
+          {isDsLabelWordingMarked(record) ? dsPresentedExportConclusion(m2.result as DecisionSupportResult, r.conclusion) : r.conclusion}
+        </Text>
       </SectionCard>
       {r.basis.length > 0 && (
         <SectionCard label="Basis">
