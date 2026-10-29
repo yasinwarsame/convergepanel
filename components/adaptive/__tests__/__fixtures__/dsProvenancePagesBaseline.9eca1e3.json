@@ -1,0 +1,1084 @@
+{
+ "baseCommit": "9eca1e3420b526973b6ff872c6e04e1a390eea46",
+ "tz": "UTC",
+ "now": "2026-10-29T12:00:00.000Z",
+ "caseCount": 110,
+ "cases": {
+  "p1.owner|uncontested_choose_option|awc": {
+   "domSha256": "309b4e5010332364e634f7be5973c97aa474e08e6e2841d6b0c9162856a5eb75",
+   "domLength": 15806,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.owner|merged_opposite_options|awc": {
+   "domSha256": "a393c0bcbf0e0cab4308b993a43c6a95eb29aa9d8ecf7301beea9f3729ebdca4",
+   "domLength": 11315,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.owner|all_models_failed|awc": {
+   "domSha256": "4afad5e0ab29bceefa525637e3f823a4653f272b948c374227883e0f667a5063",
+   "domLength": 8226,
+   "d9": 0,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.owner|legacy_no_sources_field|awc": {
+   "domSha256": "173751e4e25fb9dce7fdcae02f28388453eb65518ad31ed206b7d1ce9d7288c5",
+   "domLength": 15190,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.owner|no_sources|awc": {
+   "domSha256": "2164aad1886baf47c876f3660c01d875ce7360a49c39ed5e4675a0ccc335687e",
+   "domLength": 10815,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.owner|blank_source_list|awc": {
+   "domSha256": "1d1d817b7dd7e76618ea8c1c4c281dc31788a30f88a54a16ecad0a3376d65e61",
+   "domLength": 11091,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.owner|high_stakes_review_needed|awc": {
+   "domSha256": "83ec79cfffbeff1b822517711c63a3bbea610c2912b38f556a370edd60185f92",
+   "domLength": 11327,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.owner|unresolved_option_488|awc": {
+   "domSha256": "cb594327091208a2880b894573d85b451a79ae864c377029ce8ccb9cd851839c",
+   "domLength": 16338,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.owner|split_option_498|awc": {
+   "domSha256": "5555fee2bc266f4a1a9edeebf6d11d9eb3a9de7e961ca32405fa1ccf8542e678",
+   "domLength": 16707,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.owner|uncontested_choose_option|pending": {
+   "domSha256": "1cbc02d2ad6309ff0f860f4b24f1ae42a8553f7988df3b9b8c8b53ab386347b0",
+   "domLength": 15348,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.owner|uncontested_choose_option|single": {
+   "domSha256": "a03f588416bde47e975b7b3b8d4305ae18f0cf4df17eb4afb994a16fc63d4098",
+   "domLength": 15611,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.owner|merged_opposite_options|pending": {
+   "domSha256": "cf5b6bb924cbc8000f6c6de52065b5cdd9d41268453c09b58ae5a6f668b4db8c",
+   "domLength": 10857,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.owner|merged_opposite_options|single": {
+   "domSha256": "072e36453667a3314421ada71c9b10d9991a9447b117e42880cea980e6047ea1",
+   "domLength": 11120,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.owner|legacy_no_sources_field|pending": {
+   "domSha256": "bd27bae1276e03d259f8dee9639075e67a9e08711abf65e547367ad13176ab44",
+   "domLength": 14732,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.owner|legacy_no_sources_field|single": {
+   "domSha256": "4bd61a52c2c9ddb56654f3ae83cc443f19cd7e35911af1e7d15ca3997d661fe0",
+   "domLength": 14995,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.rev.content|uncontested_choose_option|awc": {
+   "domSha256": "309b4e5010332364e634f7be5973c97aa474e08e6e2841d6b0c9162856a5eb75",
+   "domLength": 15806,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.rev.content|merged_opposite_options|awc": {
+   "domSha256": "a393c0bcbf0e0cab4308b993a43c6a95eb29aa9d8ecf7301beea9f3729ebdca4",
+   "domLength": 11315,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.rev.content|all_models_failed|awc": {
+   "domSha256": "4afad5e0ab29bceefa525637e3f823a4653f272b948c374227883e0f667a5063",
+   "domLength": 8226,
+   "d9": 0,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.rev.content|legacy_no_sources_field|awc": {
+   "domSha256": "173751e4e25fb9dce7fdcae02f28388453eb65518ad31ed206b7d1ce9d7288c5",
+   "domLength": 15190,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.rev.content|no_sources|awc": {
+   "domSha256": "2164aad1886baf47c876f3660c01d875ce7360a49c39ed5e4675a0ccc335687e",
+   "domLength": 10815,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.rev.content|blank_source_list|awc": {
+   "domSha256": "1d1d817b7dd7e76618ea8c1c4c281dc31788a30f88a54a16ecad0a3376d65e61",
+   "domLength": 11091,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.rev.content|high_stakes_review_needed|awc": {
+   "domSha256": "83ec79cfffbeff1b822517711c63a3bbea610c2912b38f556a370edd60185f92",
+   "domLength": 11327,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.rev.content|unresolved_option_488|awc": {
+   "domSha256": "cb594327091208a2880b894573d85b451a79ae864c377029ce8ccb9cd851839c",
+   "domLength": 16338,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.rev.content|split_option_498|awc": {
+   "domSha256": "5555fee2bc266f4a1a9edeebf6d11d9eb3a9de7e961ca32405fa1ccf8542e678",
+   "domLength": 16707,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.rev.content|uncontested_choose_option|pending": {
+   "domSha256": "1cbc02d2ad6309ff0f860f4b24f1ae42a8553f7988df3b9b8c8b53ab386347b0",
+   "domLength": 15348,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.rev.content|uncontested_choose_option|single": {
+   "domSha256": "1d1304d2ee6749dce002a3b8035525918951f76ddde63de51e3566740994cfd6",
+   "domLength": 15532,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.rev.content|merged_opposite_options|pending": {
+   "domSha256": "cf5b6bb924cbc8000f6c6de52065b5cdd9d41268453c09b58ae5a6f668b4db8c",
+   "domLength": 10857,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.rev.content|merged_opposite_options|single": {
+   "domSha256": "4b2be3b81bd1f3766abde054f0f8748eb4b71f7b5a59b5577181f19f8ee3f640",
+   "domLength": 11041,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.rev.content|legacy_no_sources_field|pending": {
+   "domSha256": "bd27bae1276e03d259f8dee9639075e67a9e08711abf65e547367ad13176ab44",
+   "domLength": 14732,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.rev.content|legacy_no_sources_field|single": {
+   "domSha256": "312a85207482bae68dbd5cf06017c56c4e81b4b75fc1397505e4e88accece411",
+   "domLength": 14916,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.rev.reduced|uncontested_choose_option|awc": {
+   "domSha256": "52533172900c065deaddf3736df81a1ad51f9778cffe473ea30fea45e7af3986",
+   "domLength": 15351,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.rev.reduced|merged_opposite_options|awc": {
+   "domSha256": "d7a63c60cf08ca61117f68ad4d664e900c5f4e6861e71a476d353242eedb534c",
+   "domLength": 10860,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.rev.reduced|all_models_failed|awc": {
+   "domSha256": "74f9319553602d0ef67b2514d3bf9cbec95c3487e7332ffb58c18fd198fb9cc2",
+   "domLength": 7771,
+   "d9": 0,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.rev.reduced|legacy_no_sources_field|awc": {
+   "domSha256": "7ad94b6f0bd25cad3f2f450319d7ee877e794d2425f12704875726ff233197a7",
+   "domLength": 14735,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.rev.reduced|no_sources|awc": {
+   "domSha256": "c5d5795925f6ce90714db5522615cd1229fdb01c20177370d0557de49f4e8916",
+   "domLength": 10360,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.rev.reduced|blank_source_list|awc": {
+   "domSha256": "6cef19a2e0903f57be8d96f250162e9c82ee4aa58a6da0919c21c102a133dfb8",
+   "domLength": 10636,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.rev.reduced|high_stakes_review_needed|awc": {
+   "domSha256": "1d09ebb05cb4e29303857c185f0f542d20ad45ad1947c6d68a46c422ff12e3d3",
+   "domLength": 10872,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.rev.reduced|unresolved_option_488|awc": {
+   "domSha256": "243031360e04b7bc683ed07b7d218a5a11352b7ed309b85c5f08c969dbff2d65",
+   "domLength": 15883,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.rev.reduced|split_option_498|awc": {
+   "domSha256": "db2a063225d932d87d5e5be982b2157d869c559ba5074669fb9d6ab59a2ed1c3",
+   "domLength": 16252,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.rev.reduced|uncontested_choose_option|pending": {
+   "domSha256": "1cbc02d2ad6309ff0f860f4b24f1ae42a8553f7988df3b9b8c8b53ab386347b0",
+   "domLength": 15348,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.rev.reduced|uncontested_choose_option|single": {
+   "domSha256": "23f507c3df3e03a60c2617bc2e5c24bb12fb84c18ad5646712e3b834233cdeff",
+   "domLength": 15333,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.rev.reduced|merged_opposite_options|pending": {
+   "domSha256": "cf5b6bb924cbc8000f6c6de52065b5cdd9d41268453c09b58ae5a6f668b4db8c",
+   "domLength": 10857,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.rev.reduced|merged_opposite_options|single": {
+   "domSha256": "fe837009611362b06cc651a511b4fa0c48887e5480445a5007bb9023e966069e",
+   "domLength": 10842,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.rev.reduced|legacy_no_sources_field|pending": {
+   "domSha256": "bd27bae1276e03d259f8dee9639075e67a9e08711abf65e547367ad13176ab44",
+   "domLength": 14732,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.rev.reduced|legacy_no_sources_field|single": {
+   "domSha256": "788fa1feeea27bdd866b0fc4c7d21d2f1b003d2bf9c5e5499a04a56b45579682",
+   "domLength": 14717,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "w1.member|uncontested_choose_option|awc": {
+   "domSha256": "6003a4c7c59fd2ae30925a43fb2fd806782542da56f21933d860be7fd49a06e1",
+   "domLength": 18841,
+   "d9": 2,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.member|merged_opposite_options|awc": {
+   "domSha256": "df56b60936c624f30c20cda23566f95e2a84bffe4e45c35bbc8f4243544acb31",
+   "domLength": 14363,
+   "d9": 2,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.member|all_models_failed|awc": {
+   "domSha256": "4c12344fb354027da396b2866797180b562c6eb58a9f915e685de9bbad893c7b",
+   "domLength": 11310,
+   "d9": 1,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.member|legacy_no_sources_field|awc": {
+   "domSha256": "a31b9c6be5d2375c9290f4910e866ca04a42db365b5e2097898191e7097dcd03",
+   "domLength": 18225,
+   "d9": 2,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.member|no_sources|awc": {
+   "domSha256": "0a3f2559846ca009ffb97f97572d749f51e36fd18dd00a4f046fbf2e0232f2d9",
+   "domLength": 13840,
+   "d9": 2,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.member|blank_source_list|awc": {
+   "domSha256": "28f5cccf41b4fb45c995491bb71424003bb9487ffa0e0f16cc9ed4b10d696776",
+   "domLength": 14096,
+   "d9": 2,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.member|high_stakes_review_needed|awc": {
+   "domSha256": "2daee2d75ff794cd052e0e8e5af4cc0fc07217738bf60858455fa1982a091859",
+   "domLength": 14309,
+   "d9": 2,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.member|unresolved_option_488|awc": {
+   "domSha256": "8f7ea37a269ce33145d680a50adbe86ea7ed094edc0576a5db726bc3fbd115e9",
+   "domLength": 19444,
+   "d9": 2,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.member|split_option_498|awc": {
+   "domSha256": "95b9c079984b97884b685c9d990441b6ec6e10c1413a3747e5e0f8654813f02d",
+   "domLength": 19810,
+   "d9": 2,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.member|uncontested_choose_option|pending": {
+   "domSha256": "71278cdc7c4b1edc6a5cb2aed7acad0d53c7aa63aba28083a7225866fc069f69",
+   "domLength": 18345,
+   "d9": 2,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.member|uncontested_choose_option|single": {
+   "domSha256": "52b29a255c603ecae3b63d01d024b62483a8f02a156981f0a7d5a57f86b4a826",
+   "domLength": 18544,
+   "d9": 2,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.member|merged_opposite_options|pending": {
+   "domSha256": "5c59d5c795c479832b780e733314e367309882d66fc6d25860c920f8c2e2d6ab",
+   "domLength": 13867,
+   "d9": 2,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.member|merged_opposite_options|single": {
+   "domSha256": "82003b77877c8385bdbb0dcb8ebb85c646540438fa4fa351c68c02308208d70c",
+   "domLength": 14066,
+   "d9": 2,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.member|legacy_no_sources_field|pending": {
+   "domSha256": "f5801b51131e9d759a7811946921fc28d7f72644fa7d7401ae52e70d2b8310ee",
+   "domLength": 17729,
+   "d9": 2,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.member|legacy_no_sources_field|single": {
+   "domSha256": "8b1aba0d71bc2c3907f51882891b7e52c291f50064ee5ebc5ee5fe115eebd850",
+   "domLength": 17928,
+   "d9": 2,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.reviewer|uncontested_choose_option|awc": {
+   "domSha256": "6003a4c7c59fd2ae30925a43fb2fd806782542da56f21933d860be7fd49a06e1",
+   "domLength": 18841,
+   "d9": 2,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.reviewer|merged_opposite_options|awc": {
+   "domSha256": "df56b60936c624f30c20cda23566f95e2a84bffe4e45c35bbc8f4243544acb31",
+   "domLength": 14363,
+   "d9": 2,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.reviewer|all_models_failed|awc": {
+   "domSha256": "4c12344fb354027da396b2866797180b562c6eb58a9f915e685de9bbad893c7b",
+   "domLength": 11310,
+   "d9": 1,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.reviewer|legacy_no_sources_field|awc": {
+   "domSha256": "a31b9c6be5d2375c9290f4910e866ca04a42db365b5e2097898191e7097dcd03",
+   "domLength": 18225,
+   "d9": 2,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.reviewer|no_sources|awc": {
+   "domSha256": "0a3f2559846ca009ffb97f97572d749f51e36fd18dd00a4f046fbf2e0232f2d9",
+   "domLength": 13840,
+   "d9": 2,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.reviewer|blank_source_list|awc": {
+   "domSha256": "28f5cccf41b4fb45c995491bb71424003bb9487ffa0e0f16cc9ed4b10d696776",
+   "domLength": 14096,
+   "d9": 2,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.reviewer|high_stakes_review_needed|awc": {
+   "domSha256": "2daee2d75ff794cd052e0e8e5af4cc0fc07217738bf60858455fa1982a091859",
+   "domLength": 14309,
+   "d9": 2,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.reviewer|unresolved_option_488|awc": {
+   "domSha256": "8f7ea37a269ce33145d680a50adbe86ea7ed094edc0576a5db726bc3fbd115e9",
+   "domLength": 19444,
+   "d9": 2,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.reviewer|split_option_498|awc": {
+   "domSha256": "95b9c079984b97884b685c9d990441b6ec6e10c1413a3747e5e0f8654813f02d",
+   "domLength": 19810,
+   "d9": 2,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.reviewer|uncontested_choose_option|pending": {
+   "domSha256": "71278cdc7c4b1edc6a5cb2aed7acad0d53c7aa63aba28083a7225866fc069f69",
+   "domLength": 18345,
+   "d9": 2,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.reviewer|uncontested_choose_option|single": {
+   "domSha256": "52b29a255c603ecae3b63d01d024b62483a8f02a156981f0a7d5a57f86b4a826",
+   "domLength": 18544,
+   "d9": 2,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.reviewer|merged_opposite_options|pending": {
+   "domSha256": "5c59d5c795c479832b780e733314e367309882d66fc6d25860c920f8c2e2d6ab",
+   "domLength": 13867,
+   "d9": 2,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.reviewer|merged_opposite_options|single": {
+   "domSha256": "82003b77877c8385bdbb0dcb8ebb85c646540438fa4fa351c68c02308208d70c",
+   "domLength": 14066,
+   "d9": 2,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.reviewer|legacy_no_sources_field|pending": {
+   "domSha256": "f5801b51131e9d759a7811946921fc28d7f72644fa7d7401ae52e70d2b8310ee",
+   "domLength": 17729,
+   "d9": 2,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.reviewer|legacy_no_sources_field|single": {
+   "domSha256": "8b1aba0d71bc2c3907f51882891b7e52c291f50064ee5ebc5ee5fe115eebd850",
+   "domLength": 17928,
+   "d9": 2,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "inbox.rev.identity|uncontested_choose_option|awc": {
+   "domSha256": "8b7491c97d5a396e96c59c1fe50d7ccce571ef15c6c551459810076e4416d1f1",
+   "domLength": 5750,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.identity|merged_opposite_options|awc": {
+   "domSha256": "178538136e996812a232c9fd735fe0b51854f325cded57950c9493dc39140979",
+   "domLength": 4825,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.identity|all_models_failed|awc": {
+   "domSha256": "3c7d3b460ae972774ae38117684e98255d8ce93b17f831786aa520c3a1de32c2",
+   "domLength": 3632,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.identity|legacy_no_sources_field|awc": {
+   "domSha256": "8b7491c97d5a396e96c59c1fe50d7ccce571ef15c6c551459810076e4416d1f1",
+   "domLength": 5750,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.identity|no_sources|awc": {
+   "domSha256": "53d5ee97413cddf2d9e99a98daf7540d8dd50044bf9168fd7b8b098f4f1e2efc",
+   "domLength": 4847,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.identity|blank_source_list|awc": {
+   "domSha256": "32317942b88fb5db4d98b6973555493bb217ddca996a1417b260cc8f24e89b46",
+   "domLength": 4782,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.identity|high_stakes_review_needed|awc": {
+   "domSha256": "5fe2026199b042d21d65ad779cb7046a9fa5e3c59d92d032ab52003a65a30b34",
+   "domLength": 4759,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.identity|unresolved_option_488|awc": {
+   "domSha256": "f320a50e969e4212d648c09d627756af9d3217c496c35a798d157f555e9f4a60",
+   "domLength": 5897,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.identity|split_option_498|awc": {
+   "domSha256": "9850a5200624dfbdee582db91bc025a57028791ad18fa40435d1fa43d0761b0f",
+   "domLength": 5996,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.identity|uncontested_choose_option|pending": {
+   "domSha256": "9466ce59de15f227d1edf7d7e63b075dd25cf392b3523dc89edc80b78135c789",
+   "domLength": 8600,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.identity|uncontested_choose_option|single": {
+   "domSha256": "f8f812617e27fe269bfbfdd4495474d2ed0af9cd90e615119e5457a687ac3dc2",
+   "domLength": 5734,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.identity|merged_opposite_options|pending": {
+   "domSha256": "0e23f3e9772170b96b9adf3a17f7ab05d8ebd2fcf9beba4325cbec18764b67dd",
+   "domLength": 7675,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.identity|merged_opposite_options|single": {
+   "domSha256": "df6e730059d1c6b401b7c378ecce7a5566fc9f7d9c6e4a187789326c1611165f",
+   "domLength": 4809,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.identity|legacy_no_sources_field|pending": {
+   "domSha256": "9466ce59de15f227d1edf7d7e63b075dd25cf392b3523dc89edc80b78135c789",
+   "domLength": 8600,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.identity|legacy_no_sources_field|single": {
+   "domSha256": "f8f812617e27fe269bfbfdd4495474d2ed0af9cd90e615119e5457a687ac3dc2",
+   "domLength": 5734,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.reduced|uncontested_choose_option|awc": {
+   "domSha256": "8b7491c97d5a396e96c59c1fe50d7ccce571ef15c6c551459810076e4416d1f1",
+   "domLength": 5750,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.reduced|merged_opposite_options|awc": {
+   "domSha256": "178538136e996812a232c9fd735fe0b51854f325cded57950c9493dc39140979",
+   "domLength": 4825,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.reduced|all_models_failed|awc": {
+   "domSha256": "3c7d3b460ae972774ae38117684e98255d8ce93b17f831786aa520c3a1de32c2",
+   "domLength": 3632,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.reduced|legacy_no_sources_field|awc": {
+   "domSha256": "8b7491c97d5a396e96c59c1fe50d7ccce571ef15c6c551459810076e4416d1f1",
+   "domLength": 5750,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.reduced|no_sources|awc": {
+   "domSha256": "53d5ee97413cddf2d9e99a98daf7540d8dd50044bf9168fd7b8b098f4f1e2efc",
+   "domLength": 4847,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.reduced|blank_source_list|awc": {
+   "domSha256": "32317942b88fb5db4d98b6973555493bb217ddca996a1417b260cc8f24e89b46",
+   "domLength": 4782,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.reduced|high_stakes_review_needed|awc": {
+   "domSha256": "5fe2026199b042d21d65ad779cb7046a9fa5e3c59d92d032ab52003a65a30b34",
+   "domLength": 4759,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.reduced|unresolved_option_488|awc": {
+   "domSha256": "f320a50e969e4212d648c09d627756af9d3217c496c35a798d157f555e9f4a60",
+   "domLength": 5897,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.reduced|split_option_498|awc": {
+   "domSha256": "9850a5200624dfbdee582db91bc025a57028791ad18fa40435d1fa43d0761b0f",
+   "domLength": 5996,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.reduced|uncontested_choose_option|pending": {
+   "domSha256": "9466ce59de15f227d1edf7d7e63b075dd25cf392b3523dc89edc80b78135c789",
+   "domLength": 8600,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.reduced|uncontested_choose_option|single": {
+   "domSha256": "f8f812617e27fe269bfbfdd4495474d2ed0af9cd90e615119e5457a687ac3dc2",
+   "domLength": 5734,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.reduced|merged_opposite_options|pending": {
+   "domSha256": "0e23f3e9772170b96b9adf3a17f7ab05d8ebd2fcf9beba4325cbec18764b67dd",
+   "domLength": 7675,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.reduced|merged_opposite_options|single": {
+   "domSha256": "df6e730059d1c6b401b7c378ecce7a5566fc9f7d9c6e4a187789326c1611165f",
+   "domLength": 4809,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.reduced|legacy_no_sources_field|pending": {
+   "domSha256": "9466ce59de15f227d1edf7d7e63b075dd25cf392b3523dc89edc80b78135c789",
+   "domLength": 8600,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.reduced|legacy_no_sources_field|single": {
+   "domSha256": "f8f812617e27fe269bfbfdd4495474d2ed0af9cd90e615119e5457a687ac3dc2",
+   "domLength": 5734,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.stranger|uncontested_choose_option|awc": {
+   "domSha256": "b07f2d76fd3406a4afba4a386c6234e3c05881845478d62b740c1ef8cce8c005",
+   "domLength": 480,
+   "d9": 0,
+   "requests": [
+    "GET /api/user/runs/run-parity-1"
+   ]
+  },
+  "inbox.stranger|uncontested_choose_option|awc": {
+   "domSha256": "22873e7a1ef1ecb52f33649b68ca5262661a9bcf52751d15f67e8abc59495c0f",
+   "domLength": 1218,
+   "d9": 0,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance"
+   ]
+  },
+  "w1.membership_not_found|uncontested_choose_option|awc": {
+   "domSha256": "53118f8a8398d1194fc55f19feed16c98529a1f1490d10832f6045f1c54bc05b",
+   "domLength": 1685,
+   "d9": 0,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.foreign_workspace_run|uncontested_choose_option|awc": {
+   "domSha256": "53118f8a8398d1194fc55f19feed16c98529a1f1490d10832f6045f1c54bc05b",
+   "domLength": 1685,
+   "d9": 0,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "p1.owner|uncontested_choose_option|awc|null_permodel_row": {
+   "domSha256": "6042534084cd0c29fe9798126bb6f7f33f3ff33a68b1c32a66bf83e0685ad06c",
+   "domLength": 732,
+   "d9": 0,
+   "requests": [
+    "GET /api/user/runs/run-parity-1"
+   ]
+  }
+ }
+}
