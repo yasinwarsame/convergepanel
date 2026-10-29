@@ -25,6 +25,8 @@ import { personalReviewInboxStatus } from "@/lib/governance/personalReviewInbox"
 import type { ReviewGovernanceViewModel } from "@/lib/adaptiveSchema/reviewGovernanceViewModel";
 import ReceiptSourcesFlag from "@/components/adaptive/ReceiptSourcesFlag";
 import { ReceiptConclusion, ReceiptGroupingDisclosure, ReceiptReviewFlag } from "@/components/adaptive/DsReceiptWording";
+import DsProvenanceSection from "@/components/adaptive/DsProvenanceSection";
+import { readDsProvenanceForPage, type DsProvenanceDisplay } from "@/lib/research/dsProvenanceClientView";
 
 function formatDatetime(iso: string | undefined): string {
   if (!iso) return "—";
@@ -174,6 +176,11 @@ type LoadedData = {
    */
   automatedGovernance: { status: "passed" | "flagged" | "blocked" | "not_evaluated" | "error" } | null;
   reviewer: ReviewerIdentity;
+  /**
+   * Order 6 / S-2a — the provenance section, read strictly from the GOVERNANCE response's own P2 view (OD-4). The
+   * report response this page also fetches may carry a P1 view; it is never read here. Null → no section.
+   */
+  dsProvenance: DsProvenanceDisplay | null;
 };
 
 export default function PersonalReviewDetail({ runId }: { runId: string }) {
@@ -244,6 +251,7 @@ export default function PersonalReviewDetail({ runId }: { runId: string }) {
           decisionReceipt: govJson.decisionReceipt,
           automatedGovernance: govJson.automatedGovernance ?? null,
           reviewer: deriveReviewerIdentity(govJson.governance),
+          dsProvenance: readDsProvenanceForPage(govJson.dsProvenance, "P2"),
         });
         setError(null);
       } catch {
@@ -328,6 +336,8 @@ export default function PersonalReviewDetail({ runId }: { runId: string }) {
               <CollapsibleList title="Limitations" items={data.decisionReceipt.limitations} />
             </div>
           </section>
+
+          {data.dsProvenance ? <DsProvenanceSection display={data.dsProvenance} /> : null}
 
           {!data.reviewable ? (
             <section className="rounded-xl border border-cp-border bg-cp-surface p-5 shadow-sm">

@@ -107,6 +107,7 @@ import { buildPersonalReviewDecisionId } from "@/lib/governance/adaptiveHumanRev
 import PersonalResearchDetailShell from "@/components/workspace/PersonalResearchDetailShell";
 import TeamResearchDetailShell from "@/components/workspace/projects/TeamResearchDetailShell";
 import PersonalReviewDetail from "@/components/personalReview/PersonalReviewDetail";
+import { scanSurface } from "./seSurfaces/dsWordingScanner";
 import { CASES, D9, OWNER, PER_MODEL_ROWS, PROJECT_ID, REVIEWER, RUN_ID, TEAM_UID, WS_ID, governanceRecord, stateOutput, storedHumanReview, type PageCase } from "./dsProvenanceUi/pageCases";
 
 const FIXED_NOW = new Date("2026-10-29T12:00:00.000Z");
@@ -307,4 +308,108 @@ if (CAPTURE) {
       expect({ sha: sha(on.baselineDom), d9: on.d9, requests: on.requests }).toEqual({ sha: base.domSha256, d9: base.d9, requests: base.requests });
     });
   });
+
+  describe("flag ON: the section shows exactly the approved text for this viewer and record (literal oracle)", () => {
+    it.each(CASES.map((c) => [c.id, c] as const))("%s", async (_id, c) => {
+      const off = await renderPage(c, false);
+      expect(sections(off.tree)).toHaveLength(0);
+      const on = await renderPage(c, true);
+      const found = sections(on.tree);
+      const expected = expectedSection(c);
+      if (expected === null) {
+        expect(found).toHaveLength(0);
+        return;
+      }
+      expect(found).toHaveLength(1);
+      expect(texts(found[0]).map((t) => t.trim()).filter(Boolean)).toEqual(expected);
+      // The real S-E.1 scanner: the section itself has no hit (its D-2 sentence included), and the whole page has
+      // exactly the hits it had with the flag off.
+      const rationale = (stateOutput(c.state).result as unknown as { recommendation?: { rationale?: string } }).recommendation?.rationale;
+      const scan = (nodes: string[]) => scanSurface({ id: c.id, textNodes: nodes, attributes: [] }, { storedRationales: rationale ? [rationale] : [] }).map((h) => h.family);
+      expect(scan(texts(found[0]))).toEqual([]);
+      expect(scan(texts(on.tree))).toEqual(scan(texts(off.tree)));
+      // Collapsed by default: the toggle reports collapsed and the panel is hidden.
+      const button = find(found[0], (n) => n.type === "button")!;
+      const panel = find(found[0], (n) => n.props?.role === "region")!;
+      expect([button.props["aria-expanded"], button.props["aria-controls"], panel.props.id, panel.props.hidden]).toEqual([false, panel.props.id, button.props["aria-controls"], true]);
+    });
+  });
+}
+
+// ─── Flag-ON oracle (independent of the mapper and the builder) ───────────
+
+function sections(tree: Node | null): Node[] {
+  const out: Node[] = [];
+  const walk = (n: Node | string) => {
+    if (typeof n === "string") return;
+    if (n.props && SECTION_ATTR in n.props) out.push(n);
+    for (const ch of n.children ?? []) walk(ch);
+  };
+  if (tree) walk(tree);
+  return out;
+}
+
+function find(node: Node, pred: (n: Node) => boolean): Node | null {
+  if (pred(node)) return node;
+  for (const ch of node.children ?? []) {
+    if (typeof ch === "string") continue;
+    const hit = find(ch, pred);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+const TEAM_SCOPED_VIA = new Set(["multi_reviewer_panel", "multi_reviewer_owner_override"]);
+const nonEmpty = (v: unknown) => typeof v === "string" && v.length > 0;
+const isCount = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+const utcMinute = (iso: string) => `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
+
+/**
+ * The section's text, in order, from the stored fixture alone: the owner-approved strings (written out here), the
+ * stored result's own sources and counts, and the D-11(A) ceilings for this viewer (transcribed from the S-1b.1 and
+ * S-1b.2 route oracles). Null: no section (denied, O6-OBS-5 500).
+ */
+function expectedSection(c: PageCase): string[] | null {
+  const v = c.viewer;
+  if (v.denied || c.nullPerModelRow) return null;
+  const result = stateOutput(c.state).result as unknown as Record<string, any>;
+  const hr = storedHumanReview(v.runKind, c.record);
+  const decided = ["approved", "approved_with_conditions", "changes_requested", "rejected"].includes(hr.status as string);
+  const lines = ["Provenance and review details", "+", "Recorded evidence and review details"];
+
+  let reviewedAtAllowed: boolean;
+  let conditionsAllowed: boolean;
+  if (v.page === "INBOX") {
+    const identity = hr.reviewerId === REVIEWER || (v.history === "qualifying" && !TEAM_SCOPED_VIA.has(hr.decidedVia as string) && nonEmpty(hr.reviewerId) && nonEmpty(hr.reviewedAt));
+    reviewedAtAllowed = identity && nonEmpty(hr.reviewerId) && (!("decidedVia" in hr) || hr.decidedVia === "single_reviewer");
+    conditionsAllowed = false;
+  } else {
+    const personalProven = v.history === "qualifying" && !TEAM_SCOPED_VIA.has(hr.decidedVia as string) && nonEmpty(hr.reviewerId) && nonEmpty(hr.reviewedAt);
+    const content = v.page === "W1" || v.key === "p1.owner" || personalProven;
+    reviewedAtAllowed = content;
+    conditionsAllowed = content;
+
+    lines.push("Sources");
+    const listed = Array.isArray(result.sources) ? (result.sources as string[]).filter((x) => x.trim() !== "") : null;
+    if (listed === null) lines.push("Unknown");
+    else if (listed.length === 0) lines.push("No sources listed");
+    else lines.push("Sources listed; not independently verified", ...listed);
+    if (Array.isArray(result.assessments) && result.assessments.length > 0) {
+      lines.push("Model-assigned strength", "Evidence-strength ratings are assigned by the models and were not independently checked.");
+    }
+    const m = result.totalModels, k = result.recommendation?.totalModelsWithRecommendation, n = result.recommendation?.supportCount;
+    if (isCount(m) && isCount(k) && isCount(n) && k <= m && n <= k) {
+      lines.push("Model recommendations", `${m} ${m === 1 ? "model" : "models"} dispatched; ${k} gave a recommendation; largest group recommending the same action: ${n}.`, "These counts are not a certainty measure.");
+    }
+    lines.push("Review status", result.humanReviewNeeded ? "Flagged for human review" : "System did not flag this for human review.");
+  }
+  if (decided) {
+    if (v.page === "INBOX") lines.push("Review status");
+    lines.push("Review recorded");
+    if (reviewedAtAllowed && typeof hr.reviewedAt === "string") lines.push("Reviewed at", utcMinute(hr.reviewedAt));
+    const conds = Array.isArray(hr.conditions) ? (hr.conditions as string[]).filter((x) => x.trim() !== "") : [];
+    if (conditionsAllowed && conds.length > 0) lines.push("Review conditions", ...conds);
+  }
+  lines.push("Use authorization", "Not authorized for use");
+  return lines;
 }

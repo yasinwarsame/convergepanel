@@ -37,6 +37,7 @@ import {
 } from "@/lib/user/adaptivePersistedOutputAdapter";
 import type { ModelResult } from "@/lib/types";
 import { deriveGovernanceRunContext, type GovernanceRunContext } from "@/lib/research/governanceRunContext";
+import { readDsProvenanceForPage, type DsProvenanceDisplay, type RecordedDsCounts } from "@/lib/research/dsProvenanceClientView";
 
 export const PERSISTED_RUN_VIEWER_ROLES = ["owner", "personal_reviewer", "team_member", "team_reviewer"] as const;
 export type PersistedRunViewerRole = (typeof PERSISTED_RUN_VIEWER_ROLES)[number];
@@ -61,6 +62,12 @@ export type PersistedResearchPresentation = {
   governance: unknown;
   /** Step 6.1 — persisted run-level governance context (policy version, decision time, freshness). */
   governanceContext: GovernanceRunContext;
+  /**
+   * Order 6 / S-2a — the provenance section's display model, read strictly from THIS response's own `dsProvenance`
+   * field for the page's surface (P1 or W1). Present only when the route attached a well-formed view for that surface
+   * (server flag on, authorized viewer); absent otherwise.
+   */
+  dsProvenance?: DsProvenanceDisplay;
 };
 
 export type PersistedRunInterpretation =
@@ -73,7 +80,19 @@ function isViewerRole(value: unknown): value is PersistedRunViewerRole {
   return typeof value === "string" && (PERSISTED_RUN_VIEWER_ROLES as readonly string[]).includes(value);
 }
 
-export function interpretPersistedRunReadPayload(raw: unknown, expectedRunId: string): PersistedRunInterpretation {
+/** The recorded Decision Support counts in the same response, against which the provenance counts row is checked. */
+function recordedDsCounts(data: Record<string, any>): RecordedDsCounts | null {
+  const result = data.adaptive?.output?.result;
+  if (!result || typeof result !== "object") return null;
+  const rec = result.recommendation && typeof result.recommendation === "object" ? result.recommendation : {};
+  return { totalModels: result.totalModels, totalModelsWithRecommendation: rec.totalModelsWithRecommendation, supportCount: rec.supportCount };
+}
+
+export function interpretPersistedRunReadPayload(
+  raw: unknown,
+  expectedRunId: string,
+  options: { dsProvenanceSurface?: "P1" | "W1" } = {},
+): PersistedRunInterpretation {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { kind: "malformed" };
   const data = raw as Record<string, any>;
   if (data.ok !== true) return { kind: "malformed" };
@@ -119,6 +138,9 @@ export function interpretPersistedRunReadPayload(raw: unknown, expectedRunId: st
   if (!adaptive && results.length === 0) return { kind: "malformed" };
 
   const og = data.governanceStatus;
+  // Order 6 / S-2a: only for a valid structured result, and only this response's own view for this page's surface.
+  const dsProvenance =
+    data.adaptive?.status === "valid" && adaptive ? readDsProvenanceForPage(data.dsProvenance, options.dsProvenanceSurface ?? "P1", recordedDsCounts(data)) : null;
   return {
     kind: "ready",
     presentation: {
@@ -133,6 +155,7 @@ export function interpretPersistedRunReadPayload(raw: unknown, expectedRunId: st
       orgGovernanceStatus: og === "approved" || og === "needs_review" || og === "blocked" ? og : null,
       governance: data.governance ?? undefined,
       governanceContext: deriveGovernanceRunContext(data),
+      ...(dsProvenance ? { dsProvenance } : {}),
     },
   };
 }

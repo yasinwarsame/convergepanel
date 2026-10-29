@@ -41,6 +41,8 @@ import DeepResearchView from "./DeepResearchView";
 import EvidenceReviewView from "./EvidenceReviewView";
 import BiasBlindspotAuditView from "./BiasBlindspotAuditView";
 import DecisionSupportView from "./DecisionSupportView";
+import DsProvenanceSection from "./DsProvenanceSection";
+import type { DsProvenanceDisplay } from "@/lib/research/dsProvenanceClientView";
 import ModelResponsesSection from "./ModelResponsesSection";
 import PanelEvidenceSection from "./PanelEvidenceSection";
 import ReviewGovernanceSection, { type ReviewGovernanceSectionProps } from "./ReviewGovernanceSection";
@@ -131,6 +133,11 @@ export interface AdaptivePanelResponseProps extends AdaptiveRendererProps {
    * default, byte-for-byte today's behaviour. See `adaptiveAncillaryPresentation.ts`.
    */
   ancillaryPresentation?: AdaptiveAncillaryPresentation;
+  /**
+   * Order 6 / S-2a — the provenance section's display model, read by the persisted page from its own route's view.
+   * Rendered only in the Decision Support branch, after Panel Evidence. Absent → nothing (every other caller).
+   */
+  dsProvenance?: DsProvenanceDisplay;
 }
 
 /**
@@ -518,6 +525,7 @@ function AdaptivePanelResponseBody(props: AdaptivePanelResponseProps) {
           <DecisionSupportView decisionSupport={decisionSupport} />
           <ModelResponsesSection schema={schema} results={results} />
           <PanelEvidenceSection schemaId={schema.id} decisionSupport={decisionSupport} modelsUsed={results.map((r) => r.modelId)} />
+          {props.dsProvenance ? <DsProvenanceSection display={props.dsProvenance} /> : null}
           {renderReviewGovernance({
             humanReview: props.humanReview,
             reviewRouting: props.reviewRouting,

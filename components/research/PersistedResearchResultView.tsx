@@ -97,6 +97,7 @@ export default function PersistedResearchResultView({ presentation, onVerifyClai
           onVerifyClaim={onVerifyClaim}
           onRunFollowUp={onRunFollowUp}
           adaptiveAncillaryPresentation={adaptiveAncillaryPresentation}
+          dsProvenance={presentation.dsProvenance}
         />
       </div>
     </>

@@ -130,7 +130,8 @@ export function interpretTeamRunDetailResponse(raw: unknown, scope: TeamRunDetai
   if (!isTeamRole(raw.viewerRole)) return { kind: "malformed" };
 
   // Canonical research body + response run identity (shared with Personal).
-  const shared = interpretPersistedRunReadPayload(raw, scope.runId);
+  // Order 6 / S-2a: the Team page reads only a W1 provenance view.
+  const shared = interpretPersistedRunReadPayload(raw, scope.runId, { dsProvenanceSurface: "W1" });
   if (shared.kind === "malformed") return { kind: "malformed" };
 
   // Route containment — exactly where the address says, or not on this surface.

@@ -45,6 +45,7 @@ import { sanitizeModelText, truncateForSynthesis, MAX_CHARS_SYNTHESIS_PER_MODEL 
 import { classifyClusterType, isAnalysisReady } from "@/lib/synthesis/trustSummary";
 import { shouldAutoTriggerSynthesis } from "@/lib/synthesis/autoSynthesisTrigger";
 import type { AdaptiveAncillaryPresentation } from "@/components/adaptive/adaptiveAncillaryPresentation";
+import type { DsProvenanceDisplay } from "@/lib/research/dsProvenanceClientView";
 import { useAuth } from "@/components/AuthProvider";
 import type {
   AdaptiveGateResult,
@@ -736,6 +737,8 @@ interface ResultsDisplayProps {
    * and the Personal durable report pass nothing. Never derived here.
    */
   adaptiveAncillaryPresentation?: AdaptiveAncillaryPresentation;
+  /** Order 6 / S-2a — the persisted page's provenance display model (P1/W1 only); absent everywhere else. */
+  dsProvenance?: DsProvenanceDisplay;
 }
 
 /**
@@ -775,6 +778,7 @@ export default function ResultsDisplay({
   readOnlyExecutionTarget = null,
   allowSynthesisGeneration = true,
   adaptiveAncillaryPresentation,
+  dsProvenance,
 }: ResultsDisplayProps) {
   const { user, authReady } = useAuth();
   const results = Array.isArray(resultsProp) ? resultsProp : [];
@@ -1128,6 +1132,7 @@ export default function ResultsDisplay({
           onRunFollowUp={onRunFollowUp}
           onVerifyClaim={onVerifyClaim}
           ancillaryPresentation={adaptiveAncillaryPresentation}
+          dsProvenance={dsProvenance}
         />
         </RunModelProvenanceContext.Provider>
       </div>
