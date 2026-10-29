@@ -69,6 +69,12 @@ describe("well-formed views map to the approved display model", () => {
     expect([d.reviewRecorded, d.reviewedAt, d.conditions]).toEqual([false, null, []]);
   });
 
+  it("blank recorded conditions are not shown", async () => {
+    const { view, recorded } = await p1View();
+    view.humanReview.conditions = ["", "   ", "Confirm the SLA."];
+    expect(readDsProvenanceForPage(view, "P1", recorded)!.conditions).toEqual(["Confirm the SLA."]);
+  });
+
   it("humanReviewNeeded true / unknown", async () => {
     const { view, recorded } = await p1View("high_stakes_review_needed");
     expect(readDsProvenanceForPage(view, "P1", recorded)!.reviewNeeded).toBe("flagged");

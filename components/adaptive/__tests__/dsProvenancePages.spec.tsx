@@ -153,13 +153,20 @@ function stage(c: PageCase): void {
   );
 }
 
+/** Optional per-render rewrite of a route's JSON body (isolation tests only); null in every parity and oracle case. */
+let mockRewrite: ((path: string, body: Record<string, unknown>) => Record<string, unknown>) | null = null;
+
 /** As the runtime does: a handler that throws becomes a 500 (O6-OBS-5 throws inside P1/W1 after authorization). */
 async function serve(url: string, init: { method?: string } = {}): Promise<Response> {
+  let res: Response;
   try {
-    return await route(url, init);
+    res = await route(url, init);
   } catch {
     return new Response("Internal Server Error", { status: 500 });
   }
+  if (!mockRewrite || res.status !== 200) return res;
+  const body = mockRewrite(new URL(url, "http://localhost").pathname, await res.json());
+  return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
 }
 
 async function route(url: string, init: { method?: string }): Promise<Response> {
@@ -338,6 +345,44 @@ if (CAPTURE) {
     });
   });
 }
+
+describe("view isolation: a page never borrows another route's view (OD-4)", () => {
+  const inbox = CASES.find((c) => c.id === "inbox.rev.identity|uncontested_choose_option|awc")!;
+  const p1 = CASES.find((c) => c.id === "p1.owner|uncontested_choose_option|awc")!;
+  afterEach(() => {
+    mockRewrite = null;
+  });
+
+  it("the inbox with no P2 view renders no section, although its report response carries a P1 view", async () => {
+    let p1ViewSeen = false;
+    mockRewrite = (path, body) => {
+      if (path.endsWith("/governance")) {
+        const { dsProvenance: _dropped, ...rest } = body;
+        return rest;
+      }
+      p1ViewSeen = p1ViewSeen || "dsProvenance" in body;
+      return body;
+    };
+    const on = await renderPage(inbox, true);
+    expect(p1ViewSeen).toBe(true);
+    expect(sections(on.tree)).toHaveLength(0);
+  });
+
+  it("the P1 page with no P1 view renders no section, although its governance response carries a P2 view", async () => {
+    let p2ViewSeen = false;
+    mockRewrite = (path, body) => {
+      if (path.endsWith("/governance")) {
+        p2ViewSeen = p2ViewSeen || "dsProvenance" in body;
+        return body;
+      }
+      const { dsProvenance: _dropped, ...rest } = body;
+      return rest;
+    };
+    const on = await renderPage(p1, true);
+    expect(p2ViewSeen).toBe(true);
+    expect(sections(on.tree)).toHaveLength(0);
+  });
+});
 
 // ─── Flag-ON oracle (independent of the mapper and the builder) ───────────
 
