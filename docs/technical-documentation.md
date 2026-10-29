@@ -146,11 +146,15 @@ Sentry reports only to a destination that is **explicitly configured** in the en
 | Edge | `sentry.edge.config.ts` | `SENTRY_DSN` | `Sentry.init` is never called |
 | Tunnel | `app/monitoring/route.ts` (`tunnelRoute: "/monitoring"`) | `NEXT_PUBLIC_SENTRY_DSN` — the only allowed DSN | `404`, body not read, nothing forwarded |
 
-Both are additionally gated on `NODE_ENV === "production"` as before. `SENTRY_AUTH_TOKEN` is build-time only (source-map upload via `withSentryConfig`) and is not a runtime destination.
+The three `Sentry.init` surfaces (browser, Node server, edge) are additionally gated on `NODE_ENV === "production"` as before; the tunnel is not. `SENTRY_AUTH_TOKEN` is build-time only (source-map upload via `withSentryConfig`) and is not a runtime destination.
 
-**Production monitoring is preserved by configuration, not by code.** Before this change, browser telemetry used a literal DSN in `instrumentation-client.ts` and the server/edge used `process.env.SENTRY_DSN ?? <literal>`. Production must therefore have `NEXT_PUBLIC_SENTRY_DSN` set (the existing public browser DSN) **before** a build of this change is deployed, or browser monitoring and the tunnel stop silently; `SENTRY_DSN` is already set for Production. Verify after deploy with a bundle scan of the Production build (ingest host present) and one test event.
+**Production monitoring is preserved by configuration, not by code.** Before this change, browser telemetry used a literal DSN in `instrumentation-client.ts` and the server/edge used `process.env.SENTRY_DSN ?? <literal>`. Production must therefore have `NEXT_PUBLIC_SENTRY_DSN` set (the existing public browser DSN) **before** a build of this change is deployed, or browser monitoring and the tunnel stop silently; `SENTRY_DSN` is already set for Production. Verify after deploy with a bundle scan of the Production build for the **Production public key** (not merely an ingest host — SDK-internal modules can carry Sentry's own ingest host) and one test event.
 
-**Isolated and non-production builds** (local isolated verification, Preview without these variables) carry no Sentry destination at all: the client bundle contains no DSN and no ingest host, and the server never initializes Sentry. Never set a Production DSN in an isolated build.
+**Isolated and non-production builds** (local isolated verification, Preview without these variables) are *expected* to carry no Sentry destination: with both variables absent the client never initializes Sentry, the server never initializes Sentry, and the tunnel answers 404. That is a property of the build artifact, so it is established per build by a bundle scan (Production public key, org and project ids, full DSN, ingest hosts with any SDK-owned hits attributed) with a synthetic-DSN positive control — not by these source-level tests alone.
+
+**Isolated verification must assert that `SENTRY_DSN` and `NEXT_PUBLIC_SENTRY_DSN` are both absent** from the environment it builds and runs with. Vercel's Development environment currently defines `SENTRY_DSN`; an isolated run that pulled that environment and ran `next build && next start` (`NODE_ENV=production`) would initialize server Sentry with it. Never use a Production DSN in an isolated build.
+
+`withSentryConfig({ tunnelRoute: "/monitoring" })` also registers SDK rewrites from `/monitoring?o=&p=` to Sentry ingest hosts; they are shadowed by `app/monitoring/route.ts`. Do not remove that route without also removing `tunnelRoute`, or `/monitoring` becomes an open relay.
 
 ## Plans and Billing
 

@@ -3,6 +3,7 @@
  * configs that use it, and a source-level guard that no Sentry destination is
  * hard-coded anywhere Sentry is initialized or tunnelled.
  */
+import { execFileSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import { resolveSentryDsn } from "../sentryDsn";
@@ -48,10 +49,25 @@ describe.each([["sentry.server.config"], ["sentry.edge.config"]])("%s — teleme
     require(path.join(ROOT, moduleName));
   };
 
-  it("does not initialize Sentry when SENTRY_DSN is missing (no Production fallback)", () => {
+  const ORIGINAL_PUBLIC_DSN = process.env.NEXT_PUBLIC_SENTRY_DSN;
+  afterEach(() => {
+    if (ORIGINAL_PUBLIC_DSN === undefined) delete process.env.NEXT_PUBLIC_SENTRY_DSN;
+    else process.env.NEXT_PUBLIC_SENTRY_DSN = ORIGINAL_PUBLIC_DSN;
+  });
+
+  it("does not initialize Sentry when SENTRY_DSN is missing — even with a browser NEXT_PUBLIC_SENTRY_DSN configured (no fallback)", () => {
     delete process.env.SENTRY_DSN;
+    process.env.NEXT_PUBLIC_SENTRY_DSN = "https://33333333333333333333333333333333@o3.ingest.example.invalid/3";
     load();
     expect(mockedInit).not.toHaveBeenCalled();
+  });
+
+  it("initializes disabled outside a production build even with SENTRY_DSN configured (NODE_ENV gate preserved)", () => {
+    process.env.SENTRY_DSN = ISOLATED_DSN;
+    (process.env as Record<string, string | undefined>).NODE_ENV = "development";
+    load();
+    expect(mockedInit).toHaveBeenCalledTimes(1);
+    expect(mockedInit.mock.calls[0][0]).toMatchObject({ dsn: ISOLATED_DSN, enabled: false });
   });
 
   it.each([[""], ["   "]])("does not initialize Sentry when SENTRY_DSN is empty or blank (%j)", (value) => {
@@ -91,8 +107,22 @@ describe("no hard-coded Sentry destination in any Sentry init or tunnel source",
     expect(src).not.toMatch(/SENTRY_DSN\s*(\?\?|\|\|)/);
   });
 
-  it("the guard itself detects a DSN literal (self-check)", () => {
+  it("the tunnel reads the browser DSN through the literal reference (same value the client inlines)", () => {
+    expect(fs.readFileSync(path.join(ROOT, "app/monitoring/route.ts"), "utf8")).toContain("resolveSentryDsn(process.env.NEXT_PUBLIC_SENTRY_DSN)");
+  });
+
+  it("no tracked non-test source or env file anywhere in the repository contains a DSN literal", () => {
+    const tracked = execFileSync("git", ["ls-files", "-z"], { cwd: ROOT, encoding: "utf8" }).split("\0").filter(Boolean);
+    const scanned = tracked.filter((f) => /\.(ts|tsx|js|jsx|mjs|cjs|json)$|(^|\/)\.env[^/]*$/.test(f) && !/(^|\/)__tests__\/|\.(spec|test)\.[jt]sx?$|^package-lock\.json$/.test(f));
+    expect(scanned.length).toBeGreaterThan(100);
+    const hits = scanned.filter((f) => DSN_LITERAL.test(fs.readFileSync(path.join(ROOT, f), "utf8")));
+    expect(hits).toEqual([]);
+  });
+
+  it("the guards themselves detect what they target (self-check)", () => {
     expect("dsn: \"https://0123456789abcdef0123456789abcdef@o1.ingest.us.sentry.io/12345\"").toMatch(DSN_LITERAL);
+    expect("https://o1.ingest.us.sentry.io/api/1/envelope/").toMatch(INGEST_HOST);
+    expect("https://o1.ingest.sentry.io/api/1/envelope/").toMatch(INGEST_HOST);
     expect("process.env.SENTRY_DSN ?? x").toMatch(/SENTRY_DSN\s*(\?\?|\|\|)/);
   });
 });

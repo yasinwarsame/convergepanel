@@ -229,6 +229,23 @@ describe("POST /monitoring — telemetry isolation (Order 6)", () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
+  it("never allows the server SENTRY_DSN — only the browser DSN the client initializes with", async () => {
+    const serverDsn = "https://44444444444444444444444444444444@o4.ingest.us.sentry.io/4";
+    const originalServerDsn = process.env.SENTRY_DSN;
+    process.env.NEXT_PUBLIC_SENTRY_DSN = DSN;
+    process.env.SENTRY_DSN = serverDsn;
+    try {
+      const mockFetch = jest.fn();
+      global.fetch = mockFetch as unknown as typeof fetch;
+      const res = await post(envelopeOf({ dsn: serverDsn }, [{ header: { type: "event" }, payload: { message: "x" } }]));
+      expect(res.status).toBe(403);
+      expect(mockFetch).not.toHaveBeenCalled();
+    } finally {
+      if (originalServerDsn === undefined) delete process.env.SENTRY_DSN;
+      else process.env.SENTRY_DSN = originalServerDsn;
+    }
+  });
+
   it("forwards only to the configured DSN's project and rejects every other DSN", async () => {
     process.env.NEXT_PUBLIC_SENTRY_DSN = DSN;
     const { fn: mockFetch } = mockFetchCapturingBody(200);
