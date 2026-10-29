@@ -2174,7 +2174,7 @@
   "literal": "\"Options were grouped by text similarity. Different options with similar wording (for example 3.5% vs 35%, or Approve vs Disapprove) can be merged; agreement on an option is not established.\"",
   "count": 1,
   "category": "non-user",
-  "rule": "S-1a-min provenance builder constant (option_clustering_unverified, U-02(1)); not rendered by any consumer in S-1a-min; exact owner-approved known-defect text, never reworded"
+  "rule": "S-1a-min provenance builder constant (option_clustering_unverified, U-02(1)); exact owner-approved known-defect text, never reworded. Not rendered by S-1a-min, and not rendered by the S-2a provenance section either: the section omits it because the page already shows the identical S-E.1 D-9 disclosure (owner Q1 / OD-3, 2026-10-29). The S-2a section's own strings (lib/adaptiveSchema/dsProvenanceDisplayText.ts, visible only when DS_PROVENANCE_ROUTE_VIEW_ENABLED is on; absent in Production) carry no vocabulary this gate scans; they are classified by origin in components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts"
  },
  {
   "file": "components/adaptive/DecisionSupportView.tsx",
