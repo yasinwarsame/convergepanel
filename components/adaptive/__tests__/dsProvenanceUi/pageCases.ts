@@ -70,10 +70,13 @@ export const DENIED_VIEWERS: PageViewer[] = [
   { key: "w1.foreign_workspace_run", page: "W1", runKind: "team", uid: TEAM_UID, denied: true, capabilities: MEMBER_CAPS, runOverrides: { workspaceId: "anotherTeamWorkspace00001" } },
 ];
 
-/** Governance records by run kind: a pending review, a decided review with conditions, a single-reviewer decision. */
+/**
+ * Governance records by run kind: a pending review, a decided review with conditions, a single-reviewer decision, and
+ * a decision recorded by a reviewer other than the inbox viewer (so the P2 identity gate depends on the history row).
+ */
 const RECORD_KEYS = {
-  personal: { pending: "R12P:unreviewed_writer", awc: "L5P:PERSONAL_SELF_AWC", single: "R12P2:decidedVia_single_reviewer" },
-  team: { pending: "R12P:unreviewed_writer", awc: "L5T:TEAM_PANEL_AWC", single: "R12T:approved" },
+  personal: { pending: "R12P:unreviewed_writer", awc: "L5P:PERSONAL_SELF_AWC", single: "R12P2:decidedVia_single_reviewer", other: "R12T:approved" },
+  team: { pending: "R12P:unreviewed_writer", awc: "L5T:TEAM_PANEL_AWC", single: "R12T:approved", other: "R12T:approved" },
 } as const;
 export type RecordKind = keyof (typeof RECORD_KEYS)["personal"];
 
@@ -104,13 +107,14 @@ export interface PageCase {
   nullPerModelRow?: true;
 }
 
-/** Every state with the decided-with-conditions record, three states with the other records, every viewer. */
+/** Every state with the decided-with-conditions record, three states with the pending and single-reviewer records, one with the other-reviewer record; every viewer. */
 export const CASES: PageCase[] = [
   ...VIEWERS.flatMap((viewer) => [
     ...STATES.map((state): PageCase => ({ id: `${viewer.key}|${state}|awc`, viewer, state, record: "awc" })),
     ...(["uncontested_choose_option", "merged_opposite_options", "legacy_no_sources_field"] as const).flatMap((state) =>
       (["pending", "single"] as const).map((record): PageCase => ({ id: `${viewer.key}|${state}|${record}`, viewer, state, record })),
     ),
+    { id: `${viewer.key}|uncontested_choose_option|other`, viewer, state: "uncontested_choose_option", record: "other" } as PageCase,
   ]),
   ...DENIED_VIEWERS.map((viewer): PageCase => ({ id: `${viewer.key}|uncontested_choose_option|awc`, viewer, state: "uncontested_choose_option", record: "awc" })),
   { id: "p1.owner|uncontested_choose_option|awc|null_permodel_row", viewer: VIEWERS[0], state: "uncontested_choose_option", record: "awc", nullPerModelRow: true },
