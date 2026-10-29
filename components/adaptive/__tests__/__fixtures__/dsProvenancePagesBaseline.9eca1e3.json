@@ -2,7 +2,7 @@
  "baseCommit": "9eca1e3420b526973b6ff872c6e04e1a390eea46",
  "tz": "UTC",
  "now": "2026-10-29T12:00:00.000Z",
- "caseCount": 117,
+ "caseCount": 124,
  "cases": {
   "p1.owner|uncontested_choose_option|awc": {
    "domSha256": "309b4e5010332364e634f7be5973c97aa474e08e6e2841d6b0c9162856a5eb75",
@@ -95,6 +95,17 @@
   "p1.owner|split_option_498|awc": {
    "domSha256": "5555fee2bc266f4a1a9edeebf6d11d9eb3a9de7e961ca32405fa1ccf8542e678",
    "domLength": 16707,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "p1.owner|contested_on_action|awc": {
+   "domSha256": "bcaa53c819311ab8fbb2f2cfc31d8e4565f64fe2e658e396973da5d1659cbfdf",
+   "domLength": 12474,
    "d9": 1,
    "requests": [
     "GET /api/teams/adaptive-runs/run-parity-1/history",
@@ -279,6 +290,17 @@
     "GET /api/user/runs/run-parity-1/review-history"
    ]
   },
+  "p1.rev.content|contested_on_action|awc": {
+   "domSha256": "bcaa53c819311ab8fbb2f2cfc31d8e4565f64fe2e658e396973da5d1659cbfdf",
+   "domLength": 12474,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
   "p1.rev.content|uncontested_choose_option|pending": {
    "domSha256": "1cbc02d2ad6309ff0f860f4b24f1ae42a8553f7988df3b9b8c8b53ab386347b0",
    "domLength": 15348,
@@ -455,6 +477,17 @@
     "GET /api/user/runs/run-parity-1/review-history"
    ]
   },
+  "p1.rev.reduced|contested_on_action|awc": {
+   "domSha256": "30eee609d5e89b7d11bd0f385ec84bb52737de99cb51ab9d86fddc15feb06ebf",
+   "domLength": 12019,
+   "d9": 1,
+   "requests": [
+    "GET /api/teams/adaptive-runs/run-parity-1/history",
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
   "p1.rev.reduced|uncontested_choose_option|pending": {
    "domSha256": "1cbc02d2ad6309ff0f860f4b24f1ae42a8553f7988df3b9b8c8b53ab386347b0",
    "domLength": 15348,
@@ -604,6 +637,14 @@
     "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
    ]
   },
+  "w1.member|contested_on_action|awc": {
+   "domSha256": "4122c7ea2f1710e6805108ecad07fd14cdf3ddd931ab6e91e231cd40fc25b0c8",
+   "domLength": 15601,
+   "d9": 2,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
   "w1.member|uncontested_choose_option|pending": {
    "domSha256": "71278cdc7c4b1edc6a5cb2aed7acad0d53c7aa63aba28083a7225866fc069f69",
    "domLength": 18345,
@@ -727,6 +768,14 @@
   "w1.reviewer|split_option_498|awc": {
    "domSha256": "95b9c079984b97884b685c9d990441b6ec6e10c1413a3747e5e0f8654813f02d",
    "domLength": 19810,
+   "d9": 2,
+   "requests": [
+    "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
+   ]
+  },
+  "w1.reviewer|contested_on_action|awc": {
+   "domSha256": "4122c7ea2f1710e6805108ecad07fd14cdf3ddd931ab6e91e231cd40fc25b0c8",
+   "domLength": 15601,
    "d9": 2,
    "requests": [
     "GET /api/workspaces/aTeamWorkspaceAutoId12345/runs/run-parity-1?projectId=projAutoId0001"
@@ -871,6 +920,16 @@
   "inbox.rev.identity|split_option_498|awc": {
    "domSha256": "9850a5200624dfbdee582db91bc025a57028791ad18fa40435d1fa43d0761b0f",
    "domLength": 5996,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.identity|contested_on_action|awc": {
+   "domSha256": "51a6eb39542d7520b4f2a01adc8472093b778de61de34f454ec9eb743969ff61",
+   "domLength": 5072,
    "d9": 1,
    "requests": [
     "GET /api/user/runs/run-parity-1",
@@ -1031,6 +1090,16 @@
   "inbox.rev.reduced|split_option_498|awc": {
    "domSha256": "9850a5200624dfbdee582db91bc025a57028791ad18fa40435d1fa43d0761b0f",
    "domLength": 5996,
+   "d9": 1,
+   "requests": [
+    "GET /api/user/runs/run-parity-1",
+    "GET /api/user/runs/run-parity-1/governance",
+    "GET /api/user/runs/run-parity-1/review-history"
+   ]
+  },
+  "inbox.rev.reduced|contested_on_action|awc": {
+   "domSha256": "51a6eb39542d7520b4f2a01adc8472093b778de61de34f454ec9eb743969ff61",
+   "domLength": 5072,
    "d9": 1,
    "requests": [
     "GET /api/user/runs/run-parity-1",

@@ -83,7 +83,8 @@ export type RecordKind = keyof (typeof RECORD_KEYS)["personal"];
 /**
  * Decision Support states (real producer). D-9-eligible states have options; `all_models_failed` has none. Also: the
  * real opposing-options case, a legacy output without `sources`, an empty and a blank source list, a result that asks
- * for human review, the :488 unresolved option and the :498 split.
+ * for human review, the :488 unresolved option, the :498 split and a contested action (3 dispatched, 3 recommending,
+ * largest group 1).
  */
 export const STATES = [
   "uncontested_choose_option",
@@ -95,6 +96,8 @@ export const STATES = [
   "high_stakes_review_needed",
   "unresolved_option_488",
   "split_option_498",
+  // R1 MINOR-1: a contested result whose largest group (1) is smaller than its recommending count (3).
+  "contested_on_action",
 ] as const;
 export type StateName = (typeof STATES)[number];
 
