@@ -52,7 +52,7 @@ export default function TeamResearchReviewSummary({ review, schemaId }: { review
       </div>
       {review.conditions.length > 0 && (
         <div className="mt-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-cp-faint">Conditions</p>
+          <p className="text-xs font-medium uppercase tracking-wide text-cp-muted">Conditions</p>
           <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-cp-text">
             {review.conditions.map((condition, index) => (
               <li key={`${index}-${condition}`}>{condition}</li>
@@ -62,7 +62,7 @@ export default function TeamResearchReviewSummary({ review, schemaId }: { review
       )}
       {receipt && (
         <div className="mt-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-cp-faint">Decision receipt</p>
+          <p className="text-xs font-medium uppercase tracking-wide text-cp-muted">Decision receipt</p>
           <ReceiptConclusion schemaId={schemaId} conclusion={receipt.conclusion} className="mt-1 text-sm text-cp-text" />
           {isDecisionSupportSchema(schemaId) ? (
             <>

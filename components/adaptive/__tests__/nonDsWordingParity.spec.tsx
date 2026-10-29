@@ -24,6 +24,7 @@ jest.mock("next/link", () => {
   return { __esModule: true, default: ({ href, children, ...rest }: { href: string; children: unknown }) => createElement("a", { href, ...rest }, children) };
 });
 
+import { undoCriticalContrastClasses } from "./criticalContrastSlice";
 import { readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { DATETIME_TOKEN, LOCAL_DATETIME, NON_DS_SCHEMAS, captureNonDs, tokeniseDates, type Capture } from "./seSurfaces/nonDsSurfaces";
@@ -113,7 +114,8 @@ if (OUT) {
     });
 
     it.each(Object.keys(baseline).sort())("%s is identical", (id) => {
-      expect(current[id]).toEqual(baseline[id]);
+      // Order 6 critical-contrast slice: the baseline predates it; compare with its class changes reversed.
+      expect({ ...current[id], html: current[id].html === undefined ? undefined : undoCriticalContrastClasses(current[id].html).markup }).toEqual(baseline[id]);
     });
 
     it("the review pages make the same requests as before (AC-8), and some were made", () => {

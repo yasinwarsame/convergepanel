@@ -40,12 +40,14 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   "lib/adaptiveSchema/persistedOutput.ts": "9f9ca552d033bcdabe5fcb52862356e5f638e8b5",
   "lib/runs/runReadPayload.ts": "3b4868c206dfb252f9931c075953b3c0e139b371",
   "lib/user/runDocumentToPublicResults.ts": "d1ed5a2d6d9caafa3d7e63d18307919ca7cb4cf1",
-  "components/adaptive/DecisionSupportView.tsx": "49c7924bbb7bf9466ab7cc8b7cd23a0f2294db85",
+  // Order 6 critical-contrast slice (class-only; see criticalContrastSlice.ts): was 49c7924bbb7bf9466ab7cc8b7cd23a0f2294db85 at 9eca1e3.
+  "components/adaptive/DecisionSupportView.tsx": "e3beb32c1161f42d84222b1633a6bd8b1bb98939",
   "components/adaptive/DsReceiptWording.tsx": "71b1542ecc11532f26f0bf8a758fffe311775ac6",
   "components/adaptive/PanelEvidenceSection.tsx": "01fa50175cc4a014ad17d2abad806b8eec999170",
   "components/adaptive/ReviewGovernanceSection.tsx": "c5298d27bb4e52562fc9865b17875ee87fc04d5c",
   "components/adaptive/TopSummaryBar.tsx": "ea8b059bbafe1589fe79f1a3824c298d5a68926b",
-  "components/workspace/projects/TeamResearchReviewSummary.tsx": "52464f6b4c8d3d330ac1764ff711297e2c31ecbe",
+  // Order 6 critical-contrast slice (class-only; see criticalContrastSlice.ts): was 52464f6b4c8d3d330ac1764ff711297e2c31ecbe at 9eca1e3.
+  "components/workspace/projects/TeamResearchReviewSummary.tsx": "16a12b9d0f15c5297a8745958126cdd6ea50d263",
   "app/page.tsx": "6dbe9b1f924731e1417655a68f41cd232f7cd16a",
   "firestore.rules": "2fb80a11bfa6c55fe94e0438a980a3b0794aeafd",
 };
