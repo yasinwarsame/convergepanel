@@ -14,10 +14,15 @@
  * and every version-1 PDF hash must equal it. An unpinned runtime fails here: PDF bytes, and so every stored PDF
  * `fileHash`, depend on that runtime.
  *
- * Original evidence: __fixtures__/historicalBaseline.json and historicalRecords.json were captured in commit 413e14b,
- * before the implementation commit 82fc7fb, from unchanged main, on macOS x64 / Node 26.6.0 (zlib 1.2.12). Their PDF
- * hashes are specific to that runtime (CI runs Node 24, zlib 1.3.2.1). They are kept unchanged as evidence; their
- * record content is checked below and their PDF hashes are the golden of that runtime.
+ * Original evidence: __fixtures__/historicalBaseline.json and historicalRecords.json were first captured in commit
+ * 413e14b, before any production edit, from unchanged main on macOS x64 / Node 26.6.0 (zlib 1.2.12); that commit stays
+ * in Git history as the original capture. Commit 82fc7fb recaptured both files from the unchanged base worktree: it
+ * added six entries (two legacy source states x PDF/DOCX/JSON, 99 -> 105), and the 33 DOCX entries got new zip-level
+ * hashes (baseline `sha256`/`creationSha256`, eight `length`s, and the record's `exportMetadata.fileHash`) because
+ * docProps/core.xml carries the capture time. Every PDF and JSON hash, every normalized DOCX part digest, and every
+ * other record field present in both captures is identical. The files have not changed since 82fc7fb. Their PDF hashes
+ * are specific to the capture runtime (CI runs Node 24, zlib 1.3.2.1); record content is checked below and the PDF
+ * hashes are the golden of that runtime.
  */
 import { execFileSync } from "child_process";
 import { createHash } from "crypto";
@@ -27,7 +32,7 @@ import path from "path";
 import historicalRecords from "./__fixtures__/historicalRecords.json";
 import historicalBaseline from "./__fixtures__/historicalBaseline.json";
 import { D9, ORACLE, OLD_CAPTION, SHOWN_488, stateOf } from "./dsExportOracle";
-import { provenanceViolations, type BundleIdentity } from "./bundleProvenance";
+import { CANDIDATE_SECTIONS, provenanceViolations, type BundleIdentity } from "./bundleProvenance";
 
 type Digest = { format: string; sha256: string; length: number; bundle?: string; parts?: Record<string, string>; text?: string; pages?: number; layoutViolations?: unknown[]; paragraphs?: string[] };
 type Suite = {
@@ -131,6 +136,29 @@ describe("render provenance (R6): each render came from the bundle its role requ
     const miswired = clone();
     miswired.historical[key] = digest;
     expect(provenanceViolations(miswired, expected())).toEqual([`historical.${key}: rendered by BASE, expected HEAD`]);
+  });
+
+  it("R2 NIT-1: every candidate section rejects a real BASE render in its slot, though the bytes match", () => {
+    // The candidate sections, written out here rather than read from the checker's own list.
+    const SECTIONS = ["historical", "variants", "created", "redownload"] as const;
+    expect([...CANDIDATE_SECTIONS].sort()).toEqual([...SECTIONS].sort());
+    // For each section, one entry whose expected output equals a real BASE render (historical: the control render;
+    // the others: non-DS and forged non-DS outputs, which unchanged main renders identically).
+    const slots: Record<(typeof SECTIONS)[number], [string, Digest]> = {
+      historical: [suite.provenanceControl.key, suite.provenanceControl.digest],
+      variants: ["forged.nonds.comparison_matrix.unreviewed_in_queue.pdf", suite.base["nonds.comparison_matrix.unreviewed_in_queue.pdf"]],
+      created: ["nonds.comparison_matrix.unreviewed_in_queue.pdf", suite.base["nonds.comparison_matrix.unreviewed_in_queue.pdf"]],
+      redownload: ["nonds.financial_valuation.approved.json", suite.base["nonds.financial_valuation.approved.json"]],
+    };
+    for (const section of SECTIONS) {
+      const [key, baseRender] = slots[section];
+      expect(baseRender.bundle).toBe(suite.bundles.base.id);
+      expect(suite[section][key].bundle).toBe(suite.bundles.head.id);
+      expect(baseRender.sha256).toBe(suite[section][key].sha256);
+      const miswired = clone();
+      miswired[section][key] = baseRender;
+      expect(provenanceViolations(miswired, expected())).toEqual([`${section}.${key}: rendered by BASE, expected HEAD`]);
+    }
   });
 
   it("falsification: a HEAD render in the unchanged-main slot, swapped identities and name-only labels are rejected", () => {

@@ -43,3 +43,46 @@ export const PROVENANCE_MARKERS = ["dsProvenance", "ds_provenance_min", "useAuth
 
 /** "ds.<state>.<governance>" → state name. */
 export const stateOf = (caseName: string): string => caseName.split(".")[1];
+
+/**
+ * R2 MINOR-1: the complete version-1 DOCX status region, literal and in order, so any change to version-1 DOCX wording
+ * (an added paragraph, a renamed row, a different value, D-9 moved, duplicated or dropped) fails, not only a claim the
+ * scanner families catch. The labels are written out upper-case here, never derived from the wording module or from
+ * LABEL_* above. The Models value is the fixture's panel through the shared identity rendering (unchanged from
+ * historical exports), written out per state.
+ */
+const NR = (name: string, failed = false) => `${name} · model not recorded${failed ? " (failed)" : ""}`;
+const THREE = [NR("ChatGPT"), NR("Claude"), NR("Gemini")].join(", ");
+const TWO = [NR("ChatGPT"), NR("Claude")].join(", ");
+const ONE = NR("ChatGPT");
+export const DOCX_V1_MODELS: Record<string, string> = {
+  uncontested_choose_option: THREE,
+  uncontested_go_with_failed_slots: [NR("ChatGPT"), NR("Claude"), NR("Gemini", true), NR("Grok", true), NR("Perplexity", true)].join(", "),
+  contested_on_action: THREE,
+  contested_on_option: THREE,
+  no_recommendation: TWO,
+  no_recommendation_no_options: TWO,
+  all_models_failed: [NR("ChatGPT", true), NR("Claude", true), NR("Gemini", true)].join(", "),
+  single_model: ONE,
+  merged_opposite_options: TWO,
+  blank_source_list: TWO,
+  no_sources: ONE,
+  high_stakes_review_needed: ONE,
+  unresolved_option_488: TWO,
+  split_option_498: THREE,
+  partial_option_resolution_498: THREE,
+  conditional_go_collision_488: TWO,
+  legacy_no_sources_field: TWO,
+  legacy_unsourced: TWO,
+};
+/** The R1 NIT-4 synthetic-identities case: requested models and one substitution, from its synthetic run document. */
+export const DOCX_V1_MODELS_SYNTHETIC =
+  "ChatGPT · requested: openai:synthetic-model-a, Claude · requested: anthropic:synthetic-model-b · substituted, answered by: Anthropic, Gemini · requested: google:synthetic-model-c";
+
+/** Exact paragraphs from "Report status summary" up to (not including) "Conclusion" / "Primary synthesis". */
+export function docxStatusRegionV1(caseName: string): string[] {
+  const o = ORACLE[stateOf(caseName)];
+  const models = caseName.endsWith(".synthetic_identities") ? DOCX_V1_MODELS_SYNTHETIC : DOCX_V1_MODELS[stateOf(caseName)];
+  if (!o || !models) throw new Error(`no version-1 DOCX oracle for ${caseName}`);
+  return ["Report status summary", "MODELS", models, "MODEL AGREEMENT", o.agreement, "SOURCES", o.sources, ...(o.d9 ? [D9] : [])];
+}

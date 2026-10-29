@@ -2,8 +2,9 @@
  * Order 6 / S-E.2 (H1-A): the presentation-version marker, its strict selection, the export conclusion presenter, and
  * the JSON boundary. Historical records are the evidence records built by unchanged main 0249a4e5
  * (__fixtures__/historicalRecords.json): captured and committed in 413e14b, before the implementation commit 82fc7fb,
- * then recaptured once from the unchanged base worktree in 82fc7fb to add two legacy source states (every digest
- * present in both captures was identical). The PDF hashes in historicalBaseline.json are specific to the capture
+ * then recaptured once from the unchanged base worktree in 82fc7fb to add two legacy source states (six entries; every
+ * PDF/JSON hash and normalized DOCX part digest present in both captures was identical, while the DOCX zip-level hashes
+ * and DOCX fileHash changed with the core.xml capture time; see dsExportRendered.spec.ts). The PDF hashes in historicalBaseline.json are specific to the capture
  * runtime (macOS x64, Node 26.6.0); that was found after the CI run of 82fc7fb (see dsExportRendered.spec.ts).
  */
 jest.mock("firebase-admin/firestore", () => ({ FieldValue: class FieldValue {}, Timestamp: class Timestamp {} }));

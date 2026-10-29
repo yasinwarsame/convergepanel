@@ -24,7 +24,7 @@ export type ProvenanceSuite = {
   redownload: Record<string, Rendered>;
 };
 
-const CANDIDATE_SECTIONS = ["historical", "variants", "created", "redownload"] as const;
+export const CANDIDATE_SECTIONS = ["historical", "variants", "created", "redownload"] as const;
 
 export function provenanceViolations(suite: ProvenanceSuite, expected: { head: Record<string, string>; base: Record<string, string> }): string[] {
   const out: string[] = [];

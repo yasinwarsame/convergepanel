@@ -15,7 +15,7 @@ jest.mock("firebase-admin/firestore", () => ({ FieldValue: class FieldValue {}, 
 import JSZip from "jszip";
 import { asStored, exportCases, exportRecord } from "@/lib/adaptiveSchema/__tests__/dsExport/dsExportFixtures";
 import { historicalOf } from "@/lib/adaptiveSchema/__tests__/dsExport/dsExportHistory";
-import { D9, LABEL_AGREEMENT, LABEL_SOURCES, OLD_CAPTION, ORACLE, PROVENANCE_MARKERS, SHOWN_488, STORED_488, stateOf } from "@/lib/adaptiveSchema/__tests__/dsExport/dsExportOracle";
+import { D9, LABEL_AGREEMENT, LABEL_SOURCES, OLD_CAPTION, ORACLE, PROVENANCE_MARKERS, SHOWN_488, STORED_488, docxStatusRegionV1, stateOf } from "@/lib/adaptiveSchema/__tests__/dsExport/dsExportOracle";
 import { DocxTextError, docxParagraphs } from "@/lib/adaptiveSchema/__tests__/dsExport/docxText";
 import { S, SENTINEL_SPAN } from "@/components/adaptive/__tests__/seSurfaces/seSurfaceHarness";
 import { EXEMPTIONS, FIELD_LABELS, scanSurface, validateExemptions } from "@/components/adaptive/__tests__/seSurfaces/dsWordingScanner";
@@ -72,6 +72,8 @@ describe("version-1 Decision Support DOCX", () => {
     const l = await lines(record);
     const [start, end] = statusRegion(l);
     const region = l.slice(start, end);
+    // R2 MINOR-1: the whole region, literal and in order (no extra, renamed, reordered or missing paragraph).
+    expect(region).toEqual(docxStatusRegionV1(name));
     expect(region[region.indexOf(LABEL_AGREEMENT.toUpperCase()) + 1]).toBe(o.agreement);
     expect(region[region.indexOf(LABEL_SOURCES.toUpperCase()) + 1]).toBe(o.sources);
     for (const old of ["CONSENSUS", "SOURCE GROUNDING", OLD_CAPTION]) expect(l).not.toContain(old);
@@ -101,6 +103,92 @@ describe("version-1 Decision Support DOCX", () => {
     const old = await lines(historicalOf("ds.uncontested_choose_option.unreviewed_in_queue.docx"));
     const [s, e] = statusRegion(old);
     expect(old.slice(s, e)).toEqual(expect.arrayContaining(["CONSENSUS", "SOURCE GROUNDING", OLD_CAPTION]));
+  });
+});
+
+describe("R2 MINOR-1: the literal status-region oracle fails on any change to version-1 DOCX wording", () => {
+  const name = "ds.uncontested_choose_option.unreviewed_in_queue";
+  const regionOf = (l: string[]) => {
+    const [start, end] = statusRegion(l);
+    return l.slice(start, end);
+  };
+  /** Start and end offsets of the one `<w:p>` whose single text run is exactly `text`. */
+  function paragraphAt(xml: string, text: string): [number, number] {
+    const marker = `>${text}</w:t></w:r></w:p>`;
+    expect(xml.split(marker).length - 1).toBe(1);
+    const at = xml.indexOf(marker);
+    return [xml.lastIndexOf("<w:p>", at), at + marker.length];
+  }
+  async function edited(edit: (xml: string) => string): Promise<string[]> {
+    const zip = await JSZip.loadAsync(await bytesOf(marked(name)));
+    const xml = await zip.file("word/document.xml")!.async("string");
+    const next = edit(xml);
+    expect(next).not.toBe(xml);
+    zip.file("word/document.xml", next);
+    return docxParagraphs(await zip.generateAsync({ type: "nodebuffer" }));
+  }
+  const cut = (xml: string, text: string) => {
+    const [a, b] = paragraphAt(xml, text);
+    return { xml: xml.slice(0, a) + xml.slice(b), para: xml.slice(a, b) };
+  };
+  const insertAfter = (xml: string, text: string, para: string) => {
+    const [, b] = paragraphAt(xml, text);
+    return xml.slice(0, b) + para + xml.slice(b);
+  };
+  const replaceText = (xml: string, from: string, to: string) => {
+    const [a, b] = paragraphAt(xml, from);
+    return xml.slice(0, a) + xml.slice(a, b).replace(`>${from}<`, `>${to}<`) + xml.slice(b);
+  };
+
+  it("baseline: the unmodified version-1 DOCX region equals the oracle", async () => {
+    expect(regionOf(await lines(marked(name)))).toEqual(docxStatusRegionV1(name));
+  });
+
+  it("A: an extra benign paragraph inside the region fails (reviewer X1)", async () => {
+    const l = await edited((x) => {
+      const d9 = paragraphAt(x, D9);
+      return x.slice(0, d9[0]) + x.slice(d9[0], d9[1]).replace(`>${D9}<`, ">Panel review complete.<") + x.slice(d9[0]);
+    });
+    expect(regionOf(l)).toContain("Panel review complete.");
+    expect(regionOf(l)).not.toEqual(docxStatusRegionV1(name));
+  });
+
+  it('B: "Models" renamed to "Panel models" fails (reviewer X2)', async () => {
+    const l = await edited((x) => replaceText(x, "MODELS", "PANEL MODELS"));
+    expect(regionOf(l)[1]).toBe("PANEL MODELS");
+    expect(regionOf(l)).not.toEqual(docxStatusRegionV1(name));
+  });
+
+  it("C: a valid value of another state in place of this state's agreement value fails", async () => {
+    const l = await edited((x) => replaceText(x, ORACLE[stateOf(name)].agreement, "Split"));
+    expect(regionOf(l)).toContain("Split");
+    expect(regionOf(l)).not.toEqual(docxStatusRegionV1(name));
+  });
+
+  it("D: D-9 duplicated, removed, or moved outside the region fails", async () => {
+    const duplicated = await edited((x) => insertAfter(x, D9, cut(x, D9).para));
+    const removed = await edited((x) => cut(x, D9).xml);
+    const moved = await edited((x) => {
+      const { xml, para } = cut(x, D9);
+      return insertAfter(xml, "Conclusion", para);
+    });
+    expect(regionOf(duplicated).filter((t) => t === D9).length).toBe(2);
+    expect(regionOf(removed)).not.toContain(D9);
+    expect(regionOf(moved)).not.toContain(D9);
+    expect(moved).toContain(D9);
+    for (const l of [duplicated, removed, moved]) expect(regionOf(l)).not.toEqual(docxStatusRegionV1(name));
+  });
+
+  it("E: reordered paragraphs fail (Sources pair before the Model agreement pair)", async () => {
+    const o = ORACLE[stateOf(name)];
+    const l = await edited((x) => {
+      const label = cut(x, "SOURCES");
+      const value = cut(label.xml, o.sources);
+      const [a] = paragraphAt(value.xml, "MODEL AGREEMENT");
+      return value.xml.slice(0, a) + label.para + value.para + value.xml.slice(a);
+    });
+    expect(regionOf(l).slice(3, 7)).toEqual(["SOURCES", o.sources, "MODEL AGREEMENT", o.agreement]);
+    expect(regionOf(l)).not.toEqual(docxStatusRegionV1(name));
   });
 });
 
