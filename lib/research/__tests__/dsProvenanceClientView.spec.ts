@@ -119,6 +119,21 @@ describe("Q5: counts only when every number is supported", () => {
     const v2 = clone(view); v2.l2.denominatorStatement = "3 models dispatched; 3 gave a recommendation; 3 agreed."; expect(counts(v2)).toBeNull();
     const v3 = clone(view); v3.l2.largestAgreeingGroup = 4; v3.l2.denominatorStatement = d2Sentence(3, 3, 4); expect(counts(v3, { ...recorded, supportCount: 4 })).toBeNull();
   });
+  it("R1 MINOR-1: a contested result (largest group smaller than the recommending count) keeps its exact row", async () => {
+    const { view, recorded, result } = await p1View("contested_on_action");
+    expect([result.totalModels, result.recommendation.totalModelsWithRecommendation, result.recommendation.supportCount]).toEqual([3, 3, 1]);
+    const counts = (r: RecordedDsCounts) => readDsProvenanceForPage(view, "P1", r)?.counts;
+    expect(counts(recorded)).toBe("3 models dispatched; 3 gave a recommendation; largest group recommending the same action: 1.");
+    // Each recorded field is compared with its own count: a recorded value equal to a DIFFERENT count is a mismatch.
+    expect(counts({ ...recorded, supportCount: 3 })).toBeNull();
+    expect(counts({ ...recorded, totalModelsWithRecommendation: 1 })).toBeNull();
+    expect(counts({ ...recorded, totalModels: 1 })).toBeNull();
+    // The sentence must be the template for exactly these counts, in this order.
+    const swapped = clone(view);
+    swapped.l2.denominatorStatement = d2Sentence(3, 1, 3);
+    expect(readDsProvenanceForPage(swapped, "P1", recorded)?.counts).toBeNull();
+  });
+
   it("the builder label for the largest group is never part of the display model", async () => {
     const { view, recorded } = await p1View();
     expect(JSON.stringify(readDsProvenanceForPage(view, "P1", recorded))).not.toContain("largest group of models");
@@ -139,6 +154,11 @@ describe("reviewedAt: valid ISO instants only, formatted in UTC", () => {
       for (const s of spies) s.mockRestore();
     }
   });
+  it.each(["2026-02-30T10:00:00Z", "2026-04-31T00:00:00Z", "2025-02-29T00:00:00Z", "2026-10-02T24:00:00Z", "2026-10-02T10:60:00Z", "2026-10-02T10:00:60Z", "2026-10-02T10:00:00+24:00", "2026-00-10T00:00:00Z"])(
+    "R1 NIT-1: calendar-impossible %j → not shown (never rolled into another date)",
+    (bad) => expect(formatReviewedAtUtc(bad)).toBeNull(),
+  );
+  it("a leap day in a leap year is a real date", () => expect(formatReviewedAtUtc("2028-02-29T12:00:00Z")).toBe("2028-02-29 12:00 UTC"));
   it.each(["2026-10-02", "2026-13-45T00:00:00Z", "yesterday", "", "2026-10-02T00:00:00", "Thu, 02 Oct 2026 00:00:00 GMT"])("%j → not shown", (bad) => expect(formatReviewedAtUtc(bad)).toBeNull());
 });
 
@@ -153,6 +173,7 @@ describe("fail closed: anything outside the route-view schema renders nothing", 
     ["useAuthorization missing", (v) => delete v.useAuthorization],
     ["humanReviewUnavailable", (v) => { delete v.humanReview; v.humanReviewUnavailable = true; }],
     ["review state none", (v) => (v.humanReview = { state: "none" })],
+    ["R1 NIT-2: humanReviewUnavailable beside humanReview", (v) => (v.humanReviewUnavailable = true)],
     ["unknown decision", (v) => (v.humanReview.decision = "approved_by_magic")],
     ["unknown decidedVia", (v) => (v.humanReview.decidedVia = "committee")],
     ["reviewedAt object", (v) => (v.humanReview.reviewedAt = { at: "x" })],

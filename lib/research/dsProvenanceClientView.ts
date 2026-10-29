@@ -154,12 +154,22 @@ function validReview(hr: unknown, surface: DsProvenancePageSurface): Obj | null 
   return hr;
 }
 
-const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})$/;
+const ISO_INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?(?:Z|([+-])(\d{2}):(\d{2}))$/;
 const pad = (n: number) => String(n).padStart(2, "0");
 
-/** `YYYY-MM-DD HH:mm UTC`, or null when the value is not a valid ISO 8601 instant (with an explicit offset). */
+/**
+ * `YYYY-MM-DD HH:mm UTC`, or null when the value is not a valid ISO 8601 instant with an explicit offset. Calendar
+ * fields are checked before parsing (R1 NIT-1): `Date.parse` would roll "2026-02-30" into March, showing a date that
+ * was never stored.
+ */
 export function formatReviewedAtUtc(value: string): string | null {
-  if (!ISO_INSTANT.test(value)) return null;
+  const m = ISO_INSTANT.exec(value);
+  if (!m) return null;
+  const [year, month, day, hour, minute] = [1, 2, 3, 4, 5].map((i) => Number(m[i]));
+  const second = m[6] === undefined ? 0 : Number(m[6]);
+  const daysInMonth = month >= 1 && month <= 12 ? new Date(Date.UTC(year, month, 0)).getUTCDate() : 0;
+  if (day < 1 || day > daysInMonth || hour > 23 || minute > 59 || second > 59) return null;
+  if (m[7] !== undefined && (Number(m[8]) > 23 || Number(m[9]) > 59)) return null;
   const t = Date.parse(value);
   if (!Number.isFinite(t)) return null;
   const d = new Date(t);
