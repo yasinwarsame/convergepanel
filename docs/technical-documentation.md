@@ -135,6 +135,23 @@ All logging uses `logger` from `@/lib/logger` — never `console.error`.
 
 ---
 
+## Error Monitoring (Sentry) — explicit configuration only (Order 6 telemetry isolation)
+
+Sentry reports only to a destination that is **explicitly configured** in the environment. There is no hard-coded DSN and no fallback in source (`lib/telemetry/sentryDsn.ts` is the single rule; a missing, empty or whitespace-only value means disabled).
+
+| Surface | File | Reads | Unset / empty |
+|---|---|---|---|
+| Browser | `instrumentation-client.ts` | `NEXT_PUBLIC_SENTRY_DSN` — **inlined at build time**, so it must be set before the build that should report | `Sentry.init` is never called; no browser telemetry |
+| Node server | `sentry.server.config.ts` (via `instrumentation.ts`) | `SENTRY_DSN` at process start | `Sentry.init` is never called |
+| Edge | `sentry.edge.config.ts` | `SENTRY_DSN` | `Sentry.init` is never called |
+| Tunnel | `app/monitoring/route.ts` (`tunnelRoute: "/monitoring"`) | `NEXT_PUBLIC_SENTRY_DSN` — the only allowed DSN | `404`, body not read, nothing forwarded |
+
+Both are additionally gated on `NODE_ENV === "production"` as before. `SENTRY_AUTH_TOKEN` is build-time only (source-map upload via `withSentryConfig`) and is not a runtime destination.
+
+**Production monitoring is preserved by configuration, not by code.** Before this change, browser telemetry used a literal DSN in `instrumentation-client.ts` and the server/edge used `process.env.SENTRY_DSN ?? <literal>`. Production must therefore have `NEXT_PUBLIC_SENTRY_DSN` set (the existing public browser DSN) **before** a build of this change is deployed, or browser monitoring and the tunnel stop silently; `SENTRY_DSN` is already set for Production. Verify after deploy with a bundle scan of the Production build (ingest host present) and one test event.
+
+**Isolated and non-production builds** (local isolated verification, Preview without these variables) carry no Sentry destination at all: the client bundle contains no DSN and no ingest host, and the server never initializes Sentry. Never set a Production DSN in an isolated build.
+
 ## Plans and Billing
 
 Plan configurations live in `lib/plans.ts` and `lib/billing/planConfig.ts`.
