@@ -39,14 +39,29 @@ function statusRegion(l: string[]): [number, number] {
 /** Export-only pinned exemptions (the product name in the header and closing note; F2 matches "converg…"). */
 const EXPORT_EXEMPTIONS = [...EXEMPTIONS, "ConvergePanel — Adaptive Research Export", "Generated with ConvergePanel. This document reflects"];
 const BRAND = /^ConvergePanel(?=\s{2,}|$)/;
+/**
+ * DOCX field labels are written upper-case ("MODEL AGREEMENT"). Bounded label recognition (R1 MINOR-1, R11): a
+ * paragraph that is a pinned field label in any letter case is that label; a paragraph that STARTS with one followed by
+ * ":" is that label plus the text after the colon, and that text is scanned like any other node. Nothing else is
+ * treated as a label: a label word elsewhere in a paragraph exempts nothing.
+ */
+const escapeRe = (l: string) => l.replace(/[.*+?^$|()[\]{}\\]/g, "\\$&");
+const LABEL_LEAD = new RegExp("^(" + FIELD_LABELS.map(escapeRe).join("|") + ")(?:\\s*:\\s*([\\s\\S]*))?$", "i");
+function docxScanNodes(paragraphs: string[]): string[][] {
+  return paragraphs.map((t) => {
+    const m = LABEL_LEAD.exec(t);
+    if (!m) return [t.replace(BRAND, "")];
+    const label = FIELD_LABELS.find((l) => l.toLowerCase() === m[1].toLowerCase())!;
+    return m[2] === undefined ? [label] : [label, m[2]];
+  });
+}
 function scanDocx(name: string, paragraphs: string[], record: AdaptiveResearchExportV1) {
   const receipt = record.reportSnapshot.milestone2?.decisionReceipt;
   const result = record.reportSnapshot.milestone2?.result as { recommendation: { rationale: string } };
-  // The header paragraph is the brand followed by the status badge; only the brand word is dropped. DOCX field labels
-  // are written upper-case: a paragraph that is exactly a pinned field label upper-cased is that label (exact node only).
-  const upperLabels = new Map(FIELD_LABELS.map((l) => [l.toUpperCase(), l]));
-  const textNodes = paragraphs.map((t) => upperLabels.get(t) ?? t.replace(BRAND, ""));
-  const fields = paragraphs.map((t) => (receipt && t === receipt.conclusion ? "receipt.conclusion" : null));
+  // The header paragraph is the brand followed by the status badge; only the brand word is dropped.
+  const nodes = docxScanNodes(paragraphs);
+  const textNodes = nodes.flat();
+  const fields = paragraphs.flatMap((t, i) => nodes[i].map(() => (receipt && t === receipt.conclusion ? "receipt.conclusion" : null)));
   return scanSurface({ id: name, textNodes, attributes: [], fields }, { exemptions: EXPORT_EXEMPTIONS, storedRationales: [result.recommendation.rationale] });
 }
 
@@ -131,6 +146,60 @@ describe("R1 MINOR-1: the wording scanner on real version-1 DOCX text", () => {
     const mutated = await docxParagraphs(await withInjectedClaim(bytes, "All models ", "agreed on this option."));
     expect(mutated).toContain("All models agreed on this option.");
     expect(scanDocx(name, mutated, record).map((h) => h.family)).toContain("F2-convergence");
+  });
+
+  /**
+   * Appends runs to the real version-1 "MODEL AGREEMENT" label paragraph (its own run and formatting untouched), so the
+   * paragraph reads "MODEL AGREEMENT: <claim>" with the label and the claim in separately formatted runs.
+   */
+  async function withClaimAfterLabel(bytes: Buffer, runs: string[]): Promise<Buffer> {
+    const zip = await JSZip.loadAsync(bytes);
+    const xml = await zip.file("word/document.xml")!.async("string");
+    const label = `>${LABEL_AGREEMENT.toUpperCase()}</w:t></w:r>`;
+    expect(xml.split(label).length - 1).toBe(1);
+    const fmt = ["<w:i/>", "", "<w:u w:val=\"single\"/>"];
+    const added = [": ", ...runs].map((t, i) => `<w:r><w:rPr>${fmt[i % fmt.length]}</w:rPr><w:t xml:space="preserve">${t}</w:t></w:r>`).join("");
+    zip.file("word/document.xml", xml.replace(label, label + added));
+    return zip.generateAsync({ type: "nodebuffer" });
+  }
+
+  it("R11 falsification: an unsupported claim after the upper-case label, across formatted runs, is caught; the label alone is not", async () => {
+    const name = "ds.uncontested_choose_option.unreviewed_in_queue";
+    const record = asStored(exportRecord(wrapped.find((c) => c.name === name)!, "docx"));
+    const bytes = await bytesOf(record);
+    // Baseline: the unmodified version-1 document passes and its label paragraph is the bare upper-case label.
+    const clean = await docxParagraphs(bytes);
+    expect(clean).toContain("MODEL AGREEMENT");
+    expect(scanDocx(name, clean, record)).toEqual([]);
+    // Mutated: application-authored claim after the label, split over three differently formatted runs.
+    const mutated = await docxParagraphs(await withClaimAfterLabel(bytes, ["all ", "models ", "agreed"]));
+    expect(mutated).toContain("MODEL AGREEMENT: all models agreed");
+    expect(mutated).not.toContain("MODEL AGREEMENT");
+    const hits = scanDocx(name, mutated, record);
+    expect(hits.filter((h) => h.family === "F2-convergence").map((h) => h.text)).toContain("all models agreed");
+    // The hit is the claim, not the label word: the same paragraph with an approved value is clean.
+    const approved = await docxParagraphs(await withClaimAfterLabel(bytes, ["Not ", "scored"]));
+    expect(approved).toContain("MODEL AGREEMENT: Not scored");
+    expect(scanDocx(name, approved, record)).toEqual([]);
+    // Model-authored text (sentinel-wrapped) after the label stays distinct from application wording.
+    const quoted = await docxParagraphs(await withClaimAfterLabel(bytes, [S("all models agreed")]));
+    expect(quoted).toContain(`MODEL AGREEMENT: ${S("all models agreed")}`);
+    expect(scanDocx(name, quoted, record)).toEqual([]);
+  });
+
+  it("label recognition is bounded: exact label in any case, or label then colon; a label word elsewhere exempts nothing", () => {
+    expect(docxScanNodes(["MODEL AGREEMENT", "Model agreement", "model AGREEMENT"])).toEqual([["Model agreement"], ["Model agreement"], ["Model agreement"]]);
+    expect(docxScanNodes(["MODEL AGREEMENT: all models agreed", "Model agreement:all models agreed"])).toEqual([
+      ["Model agreement", "all models agreed"],
+      ["Model agreement", "all models agreed"],
+    ]);
+    for (const t of ["ALL MODELS AGREED. MODEL AGREEMENT", "MODEL AGREEMENT all models agreed", "THE MODEL AGREEMENT: unanimous", "MODEL: all models agreed", "SOURCES: verified"]) {
+      expect(docxScanNodes([t])).toEqual([[t]]);
+    }
+    const record = asStored(exportRecord(wrapped.find((c) => c.name === "ds.uncontested_choose_option.unreviewed_in_queue")!, "docx"));
+    for (const t of ["MODEL AGREEMENT: all models agreed", "Model agreement: unanimous", "ALL MODELS AGREED. MODEL AGREEMENT", "MODEL AGREEMENT all models agreed"]) {
+      expect(scanDocx("bounded", [t], record).map((h) => h.family)).toContain("F2-convergence");
+    }
   });
 });
 

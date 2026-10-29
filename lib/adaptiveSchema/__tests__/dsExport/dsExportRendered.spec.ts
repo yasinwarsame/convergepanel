@@ -27,12 +27,15 @@ import path from "path";
 import historicalRecords from "./__fixtures__/historicalRecords.json";
 import historicalBaseline from "./__fixtures__/historicalBaseline.json";
 import { D9, ORACLE, OLD_CAPTION, SHOWN_488, stateOf } from "./dsExportOracle";
+import { provenanceViolations, type BundleIdentity } from "./bundleProvenance";
 
-type Digest = { format: string; sha256: string; length: number; parts?: Record<string, string>; text?: string; pages?: number; layoutViolations?: unknown[]; paragraphs?: string[] };
+type Digest = { format: string; sha256: string; length: number; bundle?: string; parts?: Record<string, string>; text?: string; pages?: number; layoutViolations?: unknown[]; paragraphs?: string[] };
 type Suite = {
   fingerprint: Record<string, unknown>;
   fingerprintId: string;
   baseManifest: { sourceCommit: string; files: { path: string; vendored: string; blob: string; sha256: string }[] };
+  bundles: { head: BundleIdentity; base: BundleIdentity };
+  provenanceControl: { key: string; digest: Digest };
   base: Record<string, Digest>;
   baseRecords: Record<string, Record<string, unknown>>;
   historical: Record<string, Digest>;
@@ -44,6 +47,7 @@ type Suite = {
 type Golden = { fingerprintId: string; base: Record<string, string>; versionOne: Record<string, string> };
 
 const HERE = __dirname;
+const ROOT = path.resolve(HERE, "../../../..");
 const SUITE = path.join(HERE, "exportSuite.mjs");
 const BASE_DIR = path.join(HERE, "__fixtures__", "base-0249a4e5");
 const GOLDENS = path.join(HERE, "__fixtures__", "goldens");
@@ -103,6 +107,49 @@ describe("unchanged-main renderer and runtime", () => {
     expect(common.length).toBe(105);
     for (const k of common) expect(strip(suite.baseRecords[k])).toEqual(strip(OLD_RECORDS[k]));
     expect(Object.keys(suite.baseRecords).filter((k) => !OLD_RECORDS[k]).sort()).toEqual(["pdf", "docx", "json"].map((f) => `ds.uncontested_choose_option.unreviewed_in_queue.synthetic_identities.${f}`).sort());
+  });
+});
+
+describe("render provenance (R6): each render came from the bundle its role requires", () => {
+  // Expected sources, read independently of the suite: HEAD = the five working-tree files; BASE = the pinned 0249a4e5
+  // blobs of the files unchanged main's export graph compiles (at 0249a4e5 no export module imports dsLabelWording.ts,
+  // so BASE must not compile any copy of it).
+  const BASE_GRAPH = Object.fromEntries(Object.entries(BASE_BLOBS).filter(([p]) => p !== "lib/adaptiveSchema/dsLabelWording.ts"));
+  const expected = () => ({ head: Object.fromEntries(Object.keys(BASE_BLOBS).map((p) => [p, gitBlob(readFileSync(path.join(ROOT, p)))])), base: BASE_GRAPH });
+  const clone = (): Suite => JSON.parse(JSON.stringify(suite));
+
+  it("HEAD compiled the working tree, BASE compiled the vendored 0249a4e5 files; unchanged-main renders are BASE's, candidate renders are HEAD's", () => {
+    expect(provenanceViolations(suite, expected())).toEqual([]);
+    expect(suite.bundles.head.sources.map((s) => s.path).sort()).toEqual(Object.keys(BASE_BLOBS).sort());
+  });
+
+  it("falsification: a real historical render by the BASE bundle in the candidate slot is rejected, though its bytes match", () => {
+    const { key, digest } = suite.provenanceControl;
+    // The miswiring is invisible to output comparison: unchanged main renders a historical record identically.
+    expect(digest.bundle).toBe(suite.bundles.base.id);
+    expect(digest.sha256).toBe(suite.historical[key].sha256);
+    const miswired = clone();
+    miswired.historical[key] = digest;
+    expect(provenanceViolations(miswired, expected())).toEqual([`historical.${key}: rendered by BASE, expected HEAD`]);
+  });
+
+  it("falsification: a HEAD render in the unchanged-main slot, swapped identities and name-only labels are rejected", () => {
+    const key = suite.provenanceControl.key;
+    const s1 = clone();
+    s1.base[key] = suite.historical[key];
+    expect(provenanceViolations(s1, expected())).toEqual([`base.${key}: rendered by HEAD, expected BASE`]);
+    const s2 = clone();
+    s2.bundles.head = suite.bundles.base;
+    expect(provenanceViolations(s2, expected())).toEqual(expect.arrayContaining(["HEAD and BASE bundles are the same build"]));
+    const s3 = clone();
+    s3.bundles.head = { ...suite.bundles.head, sources: suite.bundles.base.sources };
+    expect(provenanceViolations(s3, expected()).some((v) => v.startsWith("head: lib/"))).toBe(true);
+    // A caller-provided name is not an identity.
+    const s4 = clone();
+    s4.historical[key] = { ...suite.historical[key], bundle: "head" };
+    expect(provenanceViolations(s4, expected())).toEqual([`historical.${key}: rendered by "head", expected HEAD`]);
+    // The expectation is read from the tree, so a BASE expected as HEAD (an unchanged candidate) fails too.
+    expect(provenanceViolations(suite, { head: BASE_BLOBS, base: BASE_GRAPH })).toEqual(expect.arrayContaining([expect.stringMatching(/candidate and baseline sources are identical/)]));
   });
 });
 
