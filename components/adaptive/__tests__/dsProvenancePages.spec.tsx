@@ -328,6 +328,9 @@ if (CAPTURE) {
       const scan = (nodes: string[]) => scanSurface({ id: c.id, textNodes: nodes, attributes: [] }, { storedRationales: rationale ? [rationale] : [] }).map((h) => h.family);
       expect(scan(texts(found[0]))).toEqual([]);
       expect(scan(texts(on.tree))).toEqual(scan(texts(off.tree)));
+      // Placement (OD-6): directly after Panel Evidence on P1/W1, directly after the Decision Receipt on the inbox.
+      const previous = previousSibling(on.tree!, found[0]);
+      expect(previous && texts(previous).map((t) => t.trim()).find(Boolean)).toBe(c.viewer.page === "INBOX" ? "Decision Receipt" : "Panel Evidence");
       // Collapsed by default: the toggle reports collapsed and the panel is hidden.
       const button = find(found[0], (n) => n.type === "button")!;
       const panel = find(found[0], (n) => n.props?.role === "region")!;
@@ -347,6 +350,21 @@ function sections(tree: Node | null): Node[] {
   };
   if (tree) walk(tree);
   return out;
+}
+
+/** The element sibling immediately before `target` in its parent; null when it is the first child or not in the tree. */
+function previousSibling(root: Node, target: Node): Node | null {
+  const search = (node: Node): { found: boolean; prev: Node | null } => {
+    const kids = (node.children ?? []).filter((k): k is Node => typeof k !== "string");
+    const i = kids.indexOf(target);
+    if (i >= 0) return { found: true, prev: i > 0 ? kids[i - 1] : null };
+    for (const k of kids) {
+      const r = search(k);
+      if (r.found) return r;
+    }
+    return { found: false, prev: null };
+  };
+  return search(root).prev;
 }
 
 function find(node: Node, pred: (n: Node) => boolean): Node | null {

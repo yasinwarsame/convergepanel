@@ -125,6 +125,14 @@ describe("reviewedAt: valid ISO instants only, formatted in UTC", () => {
     ["2026-10-02T23:30:00-05:00", "2026-10-03 04:30 UTC"],
     ["2026-10-02T01:05+03:00", "2026-10-01 22:05 UTC"],
   ])("%s → %s", (iso, shown) => expect(formatReviewedAtUtc(iso)).toBe(shown));
+  it("uses UTC fields only (the local-time getters are never consulted)", () => {
+    const spies = (["getFullYear", "getMonth", "getDate", "getHours", "getMinutes"] as const).map((m) => jest.spyOn(Date.prototype, m).mockReturnValue(7));
+    try {
+      expect(formatReviewedAtUtc("2026-10-02T23:30:00-05:00")).toBe("2026-10-03 04:30 UTC");
+    } finally {
+      for (const s of spies) s.mockRestore();
+    }
+  });
   it.each(["2026-10-02", "2026-13-45T00:00:00Z", "yesterday", "", "2026-10-02T00:00:00", "Thu, 02 Oct 2026 00:00:00 GMT"])("%j → not shown", (bad) => expect(formatReviewedAtUtc(bad)).toBeNull());
 });
 
