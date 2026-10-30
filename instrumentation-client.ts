@@ -3,18 +3,27 @@
 // https://docs.sentry.io/platforms/javascript/guides/nextjs/
 
 import * as Sentry from "@sentry/nextjs";
+import { resolveSentryDsn } from "./lib/telemetry/sentryDsn";
 
-Sentry.init({
-  dsn: "https://0d1785e8cafc519f0e99ecc4501ffc06@o4511503698624512.ingest.us.sentry.io/4511503843065856",
-  enabled: process.env.NODE_ENV === "production",
-  integrations: [Sentry.replayIntegration()],
-  tracesSampleRate: 0.1,
-  enableLogs: true,
-  replaysSessionSampleRate: 0.05,
-  replaysOnErrorSampleRate: 1.0,
-  sendDefaultPii: true,
-  beforeBreadcrumb: stripFragmentFromBreadcrumb,
-});
+// Telemetry isolation: only an explicitly configured DSN is used. Missing or
+// empty means browser Sentry is never initialized (see lib/telemetry/sentryDsn.ts).
+// The literal `process.env.NEXT_PUBLIC_SENTRY_DSN` reference is required for
+// Next.js build-time inlining.
+const dsn = resolveSentryDsn(process.env.NEXT_PUBLIC_SENTRY_DSN);
+
+if (dsn !== undefined) {
+  Sentry.init({
+    dsn,
+    enabled: process.env.NODE_ENV === "production",
+    integrations: [Sentry.replayIntegration()],
+    tracesSampleRate: 0.1,
+    enableLogs: true,
+    replaysSessionSampleRate: 0.05,
+    replaysOnErrorSampleRate: 1.0,
+    sendDefaultPii: true,
+    beforeBreadcrumb: stripFragmentFromBreadcrumb,
+  });
+}
 
 /**
  * Team Workspace Invitations, Phase 8D.3.1 — URL-fragment redaction.
