@@ -168,7 +168,7 @@ export default function DecisionSupportView({ decisionSupport }: { decisionSuppo
           </ul>
         )}
         {/* S-E.1 E-7: the owner-approved D-2 counts, never an N-of-M ratio; omitted when a count is not recorded. */}
-        {recommendationCounts && <p className="mt-1 text-xs text-slate-400">{recommendationCounts}</p>}
+        {recommendationCounts && <p className="mt-1 text-xs text-slate-600">{recommendationCounts}</p>}
 
         {/* 4. Options considered. */}
         {options.length > 0 && (

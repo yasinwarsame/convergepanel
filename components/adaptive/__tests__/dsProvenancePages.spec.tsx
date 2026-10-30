@@ -93,6 +93,7 @@ const mockRequests: string[] = [];
 const mockAuthedFetch = jest.fn();
 jest.mock("@/lib/client/authedFetch", () => ({ authedFetch: (...a: unknown[]) => mockAuthedFetch(...a) }));
 
+import { undoCriticalContrastClasses } from "./criticalContrastSlice";
 import { createHash } from "crypto";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
@@ -308,11 +309,12 @@ if (CAPTURE) {
     it.each(CASES.map((c) => [c.id, c] as const))("%s", async (_id, c) => {
       const base = BASELINE.cases[c.id];
       const off = await renderPage(c, false);
-      expect({ sha: sha(off.dom), d9: off.d9, requests: off.requests }).toEqual({ sha: base.domSha256, d9: base.d9, requests: base.requests });
+      // Order 6 critical-contrast slice: the baseline predates it; compare with its class changes reversed.
+      expect({ sha: sha(undoCriticalContrastClasses(off.dom).markup), d9: off.d9, requests: off.requests }).toEqual({ sha: base.domSha256, d9: base.d9, requests: base.requests });
       // Flag OFF: no section anywhere.
       expect(off.dom).toBe(off.baselineDom);
       const on = await renderPage(c, true);
-      expect({ sha: sha(on.baselineDom), d9: on.d9, requests: on.requests }).toEqual({ sha: base.domSha256, d9: base.d9, requests: base.requests });
+      expect({ sha: sha(undoCriticalContrastClasses(on.baselineDom).markup), d9: on.d9, requests: on.requests }).toEqual({ sha: base.domSha256, d9: base.d9, requests: base.requests });
     });
   });
 

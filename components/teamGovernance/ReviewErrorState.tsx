@@ -15,7 +15,7 @@ export default function ReviewErrorState({
 }) {
   return (
     <div className="rounded-xl border border-cp-border bg-cp-surface px-6 py-10 text-center shadow-sm" role="alert" aria-live="polite">
-      <p className="text-sm font-medium text-red-400">{message}</p>
+      <p className="text-sm font-medium text-red-700">{message}</p>
       {onRetry ? (
         <button
           type="button"
