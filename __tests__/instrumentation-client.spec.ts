@@ -37,12 +37,24 @@ jest.mock("@sentry/nextjs", () => ({
   captureRouterTransitionStart: mockedCaptureRouterTransitionStart,
 }));
 
+// Order 6 telemetry isolation: browser Sentry initializes only with an
+// explicitly configured NEXT_PUBLIC_SENTRY_DSN. A synthetic DSN (never a real
+// project) keeps the redaction suites below exercising an initialized client.
+const SYNTHETIC_DSN = "https://00000000000000000000000000000000@o0.ingest.example.invalid/0";
+const ORIGINAL_PUBLIC_DSN = process.env.NEXT_PUBLIC_SENTRY_DSN;
+
 beforeEach(() => {
   jest.resetModules();
   jest.clearAllMocks();
   capturedInitConfig = undefined;
   capturedProcessor = undefined;
   capturedBeforeBreadcrumb = undefined;
+  process.env.NEXT_PUBLIC_SENTRY_DSN = SYNTHETIC_DSN;
+});
+
+afterAll(() => {
+  if (ORIGINAL_PUBLIC_DSN === undefined) delete process.env.NEXT_PUBLIC_SENTRY_DSN;
+  else process.env.NEXT_PUBLIC_SENTRY_DSN = ORIGINAL_PUBLIC_DSN;
 });
 
 function load() {
@@ -150,5 +162,69 @@ describe("instrumentation-client — ordinary event fields", () => {
     const fixture = { message: "hello" };
     const result = capturedProcessor!(fixture);
     expect(result).toEqual({ message: "hello" });
+  });
+});
+
+describe("instrumentation-client — telemetry isolation (Order 6)", () => {
+  const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
+  afterEach(() => {
+    (process.env as Record<string, string | undefined>).NODE_ENV = ORIGINAL_NODE_ENV;
+  });
+
+  const ORIGINAL_SERVER_DSN = process.env.SENTRY_DSN;
+  afterEach(() => {
+    if (ORIGINAL_SERVER_DSN === undefined) delete process.env.SENTRY_DSN;
+    else process.env.SENTRY_DSN = ORIGINAL_SERVER_DSN;
+  });
+
+  it("does not initialize Sentry when NEXT_PUBLIC_SENTRY_DSN is missing — even with a server SENTRY_DSN configured", () => {
+    delete process.env.NEXT_PUBLIC_SENTRY_DSN;
+    process.env.SENTRY_DSN = "https://33333333333333333333333333333333@o3.ingest.example.invalid/3";
+    load();
+    expect(mockedInit).not.toHaveBeenCalled();
+    expect(mockedReplayIntegration).not.toHaveBeenCalled();
+  });
+
+  it("initializes disabled outside a production build even with a DSN configured (NODE_ENV gate preserved)", () => {
+    (process.env as Record<string, string | undefined>).NODE_ENV = "development";
+    load();
+    expect(mockedInit).toHaveBeenCalledTimes(1);
+    expect(capturedInitConfig.dsn).toBe(SYNTHETIC_DSN);
+    expect(capturedInitConfig.enabled).toBe(false);
+  });
+
+  it("reads NEXT_PUBLIC_SENTRY_DSN through the literal `process.env.NEXT_PUBLIC_SENTRY_DSN` reference Next.js inlines at build time", () => {
+    const src = require("fs").readFileSync(require("path").join(__dirname, "..", "instrumentation-client.ts"), "utf8");
+    expect(src).toContain("resolveSentryDsn(process.env.NEXT_PUBLIC_SENTRY_DSN)");
+  });
+
+  it.each([[""], ["   "], ["\t\n"]])("does not initialize Sentry when NEXT_PUBLIC_SENTRY_DSN is empty or blank (%j)", (value) => {
+    process.env.NEXT_PUBLIC_SENTRY_DSN = value;
+    load();
+    expect(mockedInit).not.toHaveBeenCalled();
+  });
+
+  it("initializes with exactly the configured isolated DSN and nothing else", () => {
+    const isolated = "https://11111111111111111111111111111111@o1.ingest.example.invalid/1";
+    process.env.NEXT_PUBLIC_SENTRY_DSN = `  ${isolated}  `;
+    load();
+    expect(mockedInit).toHaveBeenCalledTimes(1);
+    expect(capturedInitConfig.dsn).toBe(isolated);
+  });
+
+  it("initializes enabled with the configured DSN in a production build (explicit Production configuration)", () => {
+    const configured = "https://22222222222222222222222222222222@o2.ingest.example.invalid/2";
+    process.env.NEXT_PUBLIC_SENTRY_DSN = configured;
+    (process.env as Record<string, string | undefined>).NODE_ENV = "production";
+    load();
+    expect(mockedInit).toHaveBeenCalledTimes(1);
+    expect(capturedInitConfig.dsn).toBe(configured);
+    expect(capturedInitConfig.enabled).toBe(true);
+  });
+
+  it("keeps the fragment-redaction event processor registered even when disabled (no client, so nothing is sent)", () => {
+    delete process.env.NEXT_PUBLIC_SENTRY_DSN;
+    load();
+    expect(mockedAddEventProcessor).toHaveBeenCalledTimes(1);
   });
 });

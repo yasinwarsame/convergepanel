@@ -17,8 +17,10 @@
 
 import { NextRequest } from "next/server";
 
-const DSN = "https://0d1785e8cafc519f0e99ecc4501ffc06@o4511503698624512.ingest.us.sentry.io/4511503843065856";
-const WRONG_DSN = "https://0d1785e8cafc519f0e99ecc4501ffc06@o9999999999999999.ingest.us.sentry.io/9999999999";
+// Synthetic DSNs only (Order 6 telemetry isolation): the tunnel allows exactly
+// the configured NEXT_PUBLIC_SENTRY_DSN, which each test sets explicitly.
+const DSN = "https://00000000000000000000000000000000@o0.ingest.us.sentry.io/0";
+const WRONG_DSN = "https://99999999999999999999999999999999@o9.ingest.us.sentry.io/9";
 const TUNNEL_URL = "http://localhost/monitoring";
 
 function envelopeOf(header: object, items: Array<{ header: object; payload: Buffer | object }>): Uint8Array {
@@ -64,6 +66,16 @@ function mockFetchCapturingBody(status = 200) {
 
 describe("POST /monitoring — Sentry tunnel (Phase 8D.3.4-O2E.1)", () => {
   const originalFetch = global.fetch;
+  const originalPublicDsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
+
+  beforeEach(() => {
+    process.env.NEXT_PUBLIC_SENTRY_DSN = DSN;
+  });
+
+  afterAll(() => {
+    if (originalPublicDsn === undefined) delete process.env.NEXT_PUBLIC_SENTRY_DSN;
+    else process.env.NEXT_PUBLIC_SENTRY_DSN = originalPublicDsn;
+  });
 
   afterEach(() => {
     global.fetch = originalFetch;
@@ -184,5 +196,68 @@ describe("POST /monitoring — Sentry tunnel (Phase 8D.3.4-O2E.1)", () => {
     const res = await POST(new NextRequest(TUNNEL_URL, { method: "POST", body: envelope }));
 
     expect(res.status).toBe(500);
+  });
+});
+
+describe("POST /monitoring — telemetry isolation (Order 6)", () => {
+  const originalFetch = global.fetch;
+  const originalPublicDsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.resetAllMocks();
+    jest.resetModules();
+  });
+
+  afterAll(() => {
+    if (originalPublicDsn === undefined) delete process.env.NEXT_PUBLIC_SENTRY_DSN;
+    else process.env.NEXT_PUBLIC_SENTRY_DSN = originalPublicDsn;
+  });
+
+  async function post(envelope: Uint8Array) {
+    const { POST } = await import("../route");
+    return POST(new NextRequest(TUNNEL_URL, { method: "POST", body: envelope }));
+  }
+
+  it.each([["missing", undefined], ["empty", ""], ["blank", "   "]])("is disabled (404, nothing forwarded) when NEXT_PUBLIC_SENTRY_DSN is %s", async (_label, value) => {
+    if (value === undefined) delete process.env.NEXT_PUBLIC_SENTRY_DSN;
+    else process.env.NEXT_PUBLIC_SENTRY_DSN = value;
+    const mockFetch = jest.fn();
+    global.fetch = mockFetch as unknown as typeof fetch;
+    const res = await post(envelopeOf({ dsn: DSN }, [{ header: { type: "event" }, payload: { message: "x" } }]));
+    expect(res.status).toBe(404);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("never allows the server SENTRY_DSN — only the browser DSN the client initializes with", async () => {
+    const serverDsn = "https://44444444444444444444444444444444@o4.ingest.us.sentry.io/4";
+    const originalServerDsn = process.env.SENTRY_DSN;
+    process.env.NEXT_PUBLIC_SENTRY_DSN = DSN;
+    process.env.SENTRY_DSN = serverDsn;
+    try {
+      const mockFetch = jest.fn();
+      global.fetch = mockFetch as unknown as typeof fetch;
+      const res = await post(envelopeOf({ dsn: serverDsn }, [{ header: { type: "event" }, payload: { message: "x" } }]));
+      expect(res.status).toBe(403);
+      expect(mockFetch).not.toHaveBeenCalled();
+    } finally {
+      if (originalServerDsn === undefined) delete process.env.SENTRY_DSN;
+      else process.env.SENTRY_DSN = originalServerDsn;
+    }
+  });
+
+  it("forwards only to the configured DSN's project and rejects every other DSN", async () => {
+    process.env.NEXT_PUBLIC_SENTRY_DSN = DSN;
+    const { fn: mockFetch } = mockFetchCapturingBody(200);
+    global.fetch = mockFetch as unknown as typeof fetch;
+
+    const rejected = await post(envelopeOf({ dsn: WRONG_DSN }, [{ header: { type: "event" }, payload: { message: "x" } }]));
+    expect(rejected.status).toBe(403);
+    expect(mockFetch).not.toHaveBeenCalled();
+
+    const accepted = await post(envelopeOf({ dsn: DSN }, [{ header: { type: "event" }, payload: { message: "x" } }]));
+    expect(accepted.status).toBe(200);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(String(mockFetch.mock.calls[0][0])).toContain("o0.ingest.us.sentry.io/api/0/envelope/");
   });
 });
