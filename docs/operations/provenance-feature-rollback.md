@@ -403,9 +403,8 @@ vinventory() {  # vinventory <PROJECT_ID> <WINDOW_START_MS> [<REMOVAL_MS>]   (pa
 **Transient CLI failures (fail closed).**
 - **Transient** means only this: a read-only helper (`vapi`, `vinventory`, `vlogs`) whose result names a CLI exit. That is `vercel exited N` from `vapi` or `vinventory`, or `vercel logs exited N` from `vlogs`. Such a check may be re-run **once, by hand, after at least 30 seconds**, with identical arguments. If it fails again, record NOT VERIFIED and STOP. Record both attempts, with their UTC times and the helper output; the helpers never print response bodies or values.
 - **Every other failure is not transient** and must not be retried as one. That covers exits 2, 3, 4, 7 and 8; `vinventory` exit 6 without a CLI exit; and `vlogs` exit 5 (INCOMPLETE).
-- These two procedural re-runs are unchanged and are **not** transient retries:
-  - `vinventory` exit 9: wait, then re-run the barrier (§6.1);
-  - `vlogs` INCOMPLETE because rows reached the limit: split the window (§7.2).
+- One procedural re-run is unchanged and is **not** a transient retry: `vinventory` exit 9: wait, then re-run the barrier (§6.1).
+- A `vlogs` run that is INCOMPLETE because rows reached the limit is a **STOP** (§7.2 rule C). It is never split, shortened or re-run.
 - **Never retry a mutating command** (`vercel env rm`, `vercel redeploy`, `vercel rollback`, `vercel promote`, a protection change), automatically or by hand. After a failed or uncertain mutation, re-read the state with the read-only helpers and escalate before any further action.
 - A failure is never a success: a check that did not complete is NOT VERIFIED.
 
@@ -784,9 +783,9 @@ What the API's `level` and `statusCode` filters select is [INFERRED]. `vlogs` th
 - **Reports INCOMPLETE** when:
   - any row is malformed;
   - any row belongs to another deployment;
-  - any row falls outside the window (this also catches substituted timestamps, because the end is in the past). The window is **half-open, `[START, END)`**: a row stamped exactly at `END` is not counted here and is reported as `at_end_excluded`, because it belongs to the next window;
+  - any row falls outside the window (this also catches substituted timestamps, because the end is in the past);
   - any row does not match the requested filter;
-  - the rows returned reach the limit (`truncated: true`);
+  - the row count reaches the limit;
   - `vercel` exits nonzero.
 - **Prints** one JSON line of counts, and never log contents.
 
@@ -830,7 +829,7 @@ if mode == "window":
         emit({"result": "INVALID_WINDOW", "errors": errors}); sys.exit(8)
     sys.exit(0)
 dpl, limit = a[0], int(limit)
-rows = malformed = other = outside = mismatch = at_end = 0
+rows = malformed = other = outside = mismatch = 0
 for line in sys.stdin:
     s = line.strip()
     if not s:
@@ -842,20 +841,17 @@ for line in sys.stdin:
     ts = r.get("timestamp") if isinstance(r, dict) else None
     if not isinstance(r, dict) or isinstance(ts, bool) or not isinstance(ts, (int, float)) or not isinstance(r.get("deploymentId"), str):
         malformed += 1; continue
-    if ts == hi:
-        at_end += 1; continue
     rows += 1
     other += r["deploymentId"] != dpl
-    outside += not (lo <= ts < hi)
+    outside += not (lo <= ts <= hi)
     if status and not status_ok(r.get("responseStatusCode"), status):
         mismatch += 1
     elif levels and r.get("level") not in levels:
         mismatch += 1
-truncated = rows + at_end + malformed >= limit
-complete = malformed == 0 and other == 0 and outside == 0 and mismatch == 0 and not truncated
+complete = malformed == 0 and other == 0 and outside == 0 and mismatch == 0 and rows < limit
 emit({"deployment": dpl, "window": [start, end], "limit": limit, "status_filter": status or None, "level_filter": levels or None,
-      "rows": rows, "at_end_excluded": at_end, "malformed": malformed, "other_deployment": other, "outside_window": outside,
-      "filter_mismatch": mismatch, "truncated": truncated, "result": "COMPLETE" if complete else "INCOMPLETE"})
+      "rows": rows, "malformed": malformed, "other_deployment": other, "outside_window": outside, "filter_mismatch": mismatch,
+      "result": "COMPLETE" if complete else "INCOMPLETE"})
 sys.exit(0 if complete else 5)
 PY
 )
@@ -900,53 +896,18 @@ vlogs <DPL_ID> <START> <END> 1000 --level error                    # requests wi
 vlogs <DPL_ID> <START> <END> 1000 --level fatal                    # requests with a fatal-level log entry
 ```
 
-- **Window:** `<START>` is when the custom domains switched to `<DPL_ID>`. `<END>` is at least 15 minutes later and at least 60 seconds in the past.
+- **Window:** `<START>` is at least 60 seconds **before** the custom domains switched to `<DPL_ID>`. `<END>` is at least 15 minutes after the switch and at least 60 seconds in the past. Whether the API includes a row stamped exactly at `startDate` or `endDate` is not verified [INFERRED]. Starting before the switch keeps the observed period clear of either boundary. The query is scoped to `<DPL_ID>`, so the earlier start only adds that deployment's own rows.
 - **Levels:** a single `--level error --level fatal` query is also accepted, and the CLI sends it comma-joined. Separate queries keep each count attributable.
 - **Valid only if every run** prints `"result": "COMPLETE"` and returns 0. Record the four JSON lines and the exact commands.
-- **When a run is not COMPLETE**, apply exactly one of these rules (the same contract as "Transient CLI failures" in §2.2). **Never claim zero errors, and never substitute a zero count, for a window that is not COMPLETE.**
-  - **A. Transient CLI read failure:** the line is `{"result":"INCOMPLETE","reason":"vercel logs exited N; output withheld"}`. Record it as INCOMPLETE. One manual re-run of the **same** command, after at least 30 seconds, is allowed. If that fails in any way, STOP: the window is NOT VERIFIED. Retry exhaustion is never success.
-  - **B. Row-limit truncation only:** `truncated: true`, **and** `malformed`, `other_deployment`, `outside_window` and `filter_mismatch` are all 0.
-    1. Split the original `[START, END)` into consecutive, non-overlapping, half-open sub-windows that share exact boundaries. Generate and check the boundaries with `vwindows` (below) first.
-    2. Run the same `vlogs` command for every sub-window. Every sub-window must be COMPLETE.
-    3. The window's counts are the sums over the sub-windows. Rows at a shared boundary are counted once, in the later sub-window, because each window excludes its `END`.
-    4. A sub-window that is itself only truncated may be split again by the same rule. A sub-window of one second that is still truncated: STOP.
-    5. If `vwindows` rejects the partition, or any sub-window is not COMPLETE for another reason: STOP.
-  - **C. Any other INCOMPLETE or unexpected result** (malformed, other-deployment, outside-window or filter-mismatch rows, truncation combined with any of those, a CLI failure after the one re-run, or output that is not one JSON line): **STOP.** Do not split, do not re-run, and record the window as NOT VERIFIED.
-  - **D. Mutations:** this section runs read-only commands only. A failed or uncertain Production mutation is never retried automatically; repeating one needs a separate authorization (§2.2, §9).
-
-```bash
-VWIN=$(cat <<'PY'
-import datetime, json, re, sys
-ISO = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
-def ms(s):
-    if not ISO.fullmatch(s):
-        return None
-    try:
-        return int(datetime.datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc).timestamp() * 1000)
-    except ValueError:
-        return None
-a = sys.argv[1:]
-points = [a[0]] + a[2:] + [a[1]] if len(a) >= 3 else []
-vals = [ms(x) for x in points]
-errors = []
-if len(a) < 3:
-    errors.append("usage: vwindows <START> <END> <T1> [<T2> ...]")
-elif any(v is None for v in vals):
-    errors.append("every boundary must be absolute UTC YYYY-MM-DDTHH:MM:SSZ")
-elif any(vals[i] >= vals[i + 1] for i in range(len(vals) - 1)):
-    errors.append("boundaries must be strictly increasing from START to END: no gap, overlap or empty window")
-if errors:
-    print(json.dumps({"result": "INVALID_PARTITION", "errors": errors})); sys.exit(8)
-print(json.dumps({"result": "PARTITION", "windows": [[points[i], points[i + 1]] for i in range(len(points) - 1)]}))
-PY
-)
-vwindows() {  # vwindows <START> <END> <T1> [<T2> ...]   (checks the half-open partition of [START, END))
-  [ -n "${BASH_VERSION:-}" ] || { echo '{"status":"STOP","reason":"bash required"}' >&2; return 2; }
-  python3 -I -B -c "$VWIN" "$@"
-}
-```
-
-  `vwindows` prints the sub-windows to run, in order. The first starts at `START`, the last ends at `END`, and each starts where the previous one ends. Any non-increasing, duplicate or malformed boundary gives `INVALID_PARTITION` (exit 8): STOP.
+- **When a run is not COMPLETE**, apply exactly one of these rules (the same contract as "Transient CLI failures" in §2.2). **Never claim zero errors, and never substitute a zero count, for a run that is not COMPLETE.**
+  - **A. Complete:** accept a run only if it printed `"result": "COMPLETE"` and returned 0, with the window and limit defined above.
+  - **B. Transient CLI read failure:** the line is `{"result":"INCOMPLETE","reason":"vercel logs exited N; output withheld"}`. Record it as INCOMPLETE. One manual re-run of the **same** command, after at least 30 seconds, is allowed. If that fails in any way, STOP: the check is NOT VERIFIED. Retry exhaustion is never success.
+  - **C. Row-limit truncation** (`rows` reached the limit): INCOMPLETE. **STOP immediately.**
+    - Do not split the window, and do not combine counts from several windows.
+    - Do not shorten the window, or raise the limit and re-run, to obtain a passing result.
+    - Record the monitoring check as NOT VERIFIED, and escalate.
+  - **D. Any other INCOMPLETE or unexpected result** (malformed, other-deployment, outside-window or filter-mismatch rows, or output that is not one JSON line): **STOP.** Do not re-run, and record the check as NOT VERIFIED.
+  - **E. Mutations:** this section runs read-only commands only. A failed or uncertain Production mutation is never retried automatically; repeating one needs a separate authorization (§2.2, §9).
 - **Zero total rows** for a window in which traffic was expected is **INCOMPLETE**, not "no errors".
 
 **Bot checkpoint.** Scripted requests to `convergepanel.com` received a Vercel bot-checkpoint `403` during the Order 6 release verification [OBSERVED: `order6-release-2026-10-30/RELEASE-270.md`, live bundle check]. Keep requests to a handful, pause about two minutes and retry once. Never bypass the checkpoint. A checkpoint `403` is INCONCLUSIVE, not an application result.
