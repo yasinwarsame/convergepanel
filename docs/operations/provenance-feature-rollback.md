@@ -141,7 +141,7 @@ Run every CLI command from a checkout linked to the `convergepanel` project, wit
   - a gate decision of STOP [7];
   - an invalid log window or filter [8];
   - a deployment that has not reached a terminal state [9].
-- **Failure messages:** they go to stderr as JSON and never contain values from the response.
+- **Failure messages:** `vapi` and `vprobe` write failures to stderr as JSON. `vinventory` and `vlogs` report `INCOMPLETE` (or `INVALID_WINDOW`) as their one-line JSON result on stdout. None of them contains values from the response.
 - **CLI failure:** if `vercel` exits nonzero, the helper **withholds** stdout entirely, prints `STOP` with both exit codes, and returns nonzero.
 
 **What the helpers do not guarantee:**
@@ -239,21 +239,6 @@ elif mode == "list" and len(args) == 2:
     complete = not more_pages(doc)
     emit({"items": [{c: scalar(i, c) for c in cols} for i in items], "count": len(items), "complete": complete})
     sys.exit(0 if complete else 6)
-elif mode == "deployments" and len(args) in (1, 2) and all(a.isdigit() for a in args):
-    doc = load(); since = int(args[0]); removal = int(args[1]) if len(args) == 2 else None
-    items = doc.get("deployments")
-    if not isinstance(items, list) or not all(isinstance(i, dict) for i in items):
-        fail(4, "deployments is not a list of objects")
-    rows = [{c: scalar(i, c) for c in ("uid", "url", "created", "state")} for i in items]
-    if not all(is_num(r["created"]) for r in rows):
-        fail(4, "created is not a number")
-    covered = (not more_pages(doc)) or any(r["created"] < since for r in rows)
-    window = [r for r in rows if r["created"] >= since]
-    for r in window:
-        r["flag_on_candidate"] = removal is None or r["created"] < removal
-    pending = [r["uid"] for r in window if r["state"] not in ("READY", "ERROR", "CANCELED")]
-    emit({"items": window, "covers_window": covered, "non_terminal": pending})
-    sys.exit(6 if not covered else (9 if pending else 0))
 elif mode == "env-gate" and len(args) == 1:
     rows = [r for r in env_rows(load()) if r["key"] == args[0]]
     reasons = []
@@ -333,6 +318,75 @@ vprobe() {  # vprobe <host>   (signed-out GET, bounded timeouts, classification 
         -w '%{http_code}\t%{content_type}\t%{redirect_url}' \
         "https://$host/api/user/runs/runbook-reachability-probe" 2>/dev/null); rc=$?
   printf '%s' "$w" | python3 -I -B -c "$VPROBE" "$host" "$rc"
+}
+VINV=$(cat <<'PY'
+import hashlib, json, subprocess, sys
+TERMINAL = ("READY", "ERROR", "CANCELED")
+def emit(o):
+    sys.stdout.write(json.dumps(o, ensure_ascii=True, sort_keys=True) + "\n")
+def stop(reason):
+    emit({"result": "INCOMPLETE", "reason": reason}); sys.exit(6)
+def is_int(v):
+    return isinstance(v, int) and not isinstance(v, bool)
+a = sys.argv[1:]
+if len(a) not in (2, 3) or not a[0].replace("_", "").isalnum() or not all(x.isdigit() for x in a[1:]):
+    sys.stderr.write('{"status":"STOP","reason":"usage: vinventory <PROJECT_ID> <WINDOW_START_MS> [<REMOVAL_MS>]"}\n'); sys.exit(2)
+pid, start, removal = a[0], int(a[1]), (int(a[2]) if len(a) == 3 else None)
+until, seen, rows, pages = None, set(), [], 0
+while True:
+    path = "/v6/deployments?projectId=%s&limit=100" % pid + ("" if until is None else "&until=%d" % until)
+    p = subprocess.run(["vercel", "api", path, "--scope", "convergepanel-ai"], stdout=subprocess.PIPE)
+    pages += 1
+    if p.returncode != 0:
+        stop("vercel exited %d on page %d; output withheld" % (p.returncode, pages))
+    body = p.stdout.decode("utf-8", "replace").strip()
+    try:
+        doc, end = json.JSONDecoder().raw_decode(body)
+    except ValueError:
+        stop("page %d is not a JSON document" % pages)
+    if body[end:].strip() or not isinstance(doc, dict) or "error" in doc:
+        stop("page %d: unexpected output or API error" % pages)
+    items, pg = doc.get("deployments"), doc.get("pagination")
+    if not isinstance(items, list) or not (pg is None or isinstance(pg, dict)):
+        stop("page %d: malformed listing" % pages)
+    if pg is None and len(items) >= 100:
+        stop("page %d: full page without pagination information" % pages)
+    nxt = pg.get("next") if pg else None
+    if nxt is not None and not is_int(nxt):
+        stop("page %d: malformed continuation cursor" % pages)
+    last = None
+    for i in items:
+        if not isinstance(i, dict) or not isinstance(i.get("uid"), str) or not isinstance(i.get("url"), str) \
+                or not is_int(i.get("created")) or not isinstance(i.get("state"), str):
+            stop("page %d: malformed deployment" % pages)
+        if i["uid"] in seen:
+            stop("page %d: deployment repeated across pages" % pages)
+        if (until is not None and i["created"] > until) or (last is not None and i["created"] > last):
+            stop("page %d: deployments out of newest-first order" % pages)
+        last = i["created"]; seen.add(i["uid"])
+        rows.append({k: i[k] for k in ("uid", "url", "created", "state")})
+    if not items:
+        if nxt:
+            stop("page %d: empty page with a continuation cursor" % pages)
+        break
+    if last < start or not nxt:
+        break
+    if until is not None and nxt >= until:
+        stop("page %d: continuation cursor did not advance" % pages)
+    until = nxt
+window = [r for r in rows if r["created"] >= start]
+for r in window:
+    r["flag_on_candidate"] = removal is None or r["created"] < removal
+pending = sorted(r["uid"] for r in window if r["state"] not in TERMINAL)
+digest = hashlib.sha256("\n".join("%s %s %d" % (r["uid"], r["state"], r["created"])
+                                  for r in sorted(window, key=lambda r: r["uid"])).encode()).hexdigest()
+emit({"result": "NON_TERMINAL" if pending else "COMPLETE", "pages": pages, "deployments": window,
+      "non_terminal": pending, "inventory_digest": digest})
+sys.exit(9 if pending else 0)
+PY
+)
+vinventory() {  # vinventory <PROJECT_ID> <WINDOW_START_MS> [<REMOVAL_MS>]   (pages the whole inventory itself)
+  python3 -I -B -c "$VINV" "$@"
 }
 ```
 
@@ -578,36 +632,43 @@ This is a conservative superset. It is not an estimate of the activation time.
 
 **Inventory: all targets.** The query omits `target`, so every deployment is listed: Production, Preview and custom environments. When `target` is omitted the CLI sends none [SOURCE: `vercel list` and the CLI's other `/v6/deployments` callers].
 
-- **Pre-removal phase** (§4.4), up to now:
+`vinventory` (§2.2) reads the **whole** inventory itself, page by page, the same way the CLI pages this endpoint [SOURCE: `fetchPaginated` sends `until=<pagination.next>` and stops when `next` is empty]:
 
-  ```bash
-  vapi deployments "/v6/deployments?projectId=<PROJECT_ID>&limit=100" <WINDOW_START_MS>
-  ```
-
-- **Post-removal phase** (§3.6, §5.7, §7), up to now, with the removal time:
-
-  ```bash
-  vapi deployments "/v6/deployments?projectId=<PROJECT_ID>&limit=100" <WINDOW_START_MS> <REMOVAL_MS>
-  ```
+- **Pre-removal phase** (§4.4): `vinventory <PROJECT_ID> <WINDOW_START_MS>`
+- **Post-removal phase** (§3.6, §5.7, §7): `vinventory <PROJECT_ID> <WINDOW_START_MS> <REMOVAL_MS>`
 
 `<PROJECT_ID>` is the `id` from §2.3 step 1. The `projectId`, `until` and `limit` parameters and the `uid`, `url`, `created` and `state` fields are those the CLI itself uses with this endpoint [SOURCE].
 
-**How `vapi deployments` reports [HARNESS]:**
-- It returns every deployment with `created` at or after `<WINDOW_START_MS>`.
-- **Coverage:** `covers_window` is `true` only when the listing is complete, or already reaches an older deployment. Otherwise it exits **6**. Re-run with `&until=<oldest created returned>` added, and combine the pages, until coverage is reached.
-- **Flag-ON candidates:** `flag_on_candidate` is `true` for every deployment in the pre-removal phase, and for every deployment created before `<REMOVAL_MS>` in the post-removal phase.
-- **Completion barrier:** `non_terminal` lists every deployment whose `state` is not `READY`, `ERROR` or `CANCELED`, and the helper then exits **9**.
+**How `vinventory` decides [HARNESS]:**
+- **It stops paging** only when the API returns no continuation cursor, or when a page reaches a deployment older than `<WINDOW_START_MS>`. There is **no page or time cap**: a deployment of any age inside the window is included.
+- **It returns INCOMPLETE (exit 6)**, and never a partial result, when:
+  - `vercel` exits nonzero on any page;
+  - a page is not exactly one JSON object, or carries an API error;
+  - a deployment row is malformed;
+  - a deployment repeats across pages;
+  - rows are not newest-first, or are newer than the cursor;
+  - the cursor is malformed or does not advance;
+  - a full page (100 rows) arrives with no `pagination` object;
+  - an empty page arrives with a cursor.
+- **Barrier state:** every deployment in the window, across **all** pages, is checked. Any `state` other than `READY`, `ERROR` or `CANCELED`, including unknown values, gives `result: NON_TERMINAL` and **exit 9**.
   - The CLI's state vocabulary is `INITIALIZING`, `QUEUED`, `BUILDING`, `DEPLOYING`, `ANALYZING`, `READY`, `ERROR` and `CANCELED` [SOURCE: `vercel list`].
   - The CLI treats `ERROR` and `CANCELED` as non-live terminal states [SOURCE: `isNonLiveTerminalDeployment`].
-  - An unknown state counts as non-terminal.
+- **Flag-ON candidates:** `flag_on_candidate` is `true` for every deployment in the pre-removal phase, and for every deployment created before `<REMOVAL_MS>` in the post-removal phase.
+- **`inventory_digest`:** a SHA-256 over every in-window deployment's `uid`, `state` and `created`. It identifies this exact snapshot.
 
-**Passing the completion barrier.** Run the inventory and require exit 0, which means coverage was reached and no deployment is non-terminal.
-- On exit 9, wait and re-run.
-- If a deployment stays non-terminal, or anything other than exit 0 or 9 occurs, STOP and escalate.
+**Running the barrier and the exposure checks on one snapshot:**
+
+1. **Barrier.** Run `vinventory`.
+   - Exit 0 passes the barrier. Record the output and its `inventory_digest` as **D1**.
+   - On exit 9, wait and re-run step 1.
+   - On anything else, or a deployment that stays non-terminal: STOP and escalate. Report INCOMPLETE, never success.
+2. **Exposure checks on D1 only.** Run "Addresses" below and §6.2–§6.4 for exactly the `flag_on_candidate` deployments listed in D1, and nothing else.
+3. **Consistency re-check.** Run `vinventory` again with the same arguments. It must exit 0 with an `inventory_digest` equal to D1.
+   - If it differs, the inventory changed during the checks: STOP. Treat any new deployment as a merge-freeze violation, and escalate. Restart only from step 1, after the freeze is restored.
 
 **A terminal state is not a safe state.** A `READY` flag-ON deployment is exactly what §6.2–§6.4 must contain. Every flag-ON candidate is probed whatever its state.
 
-**Concurrency.** The merge freeze (§3.1, §4) prevents new deployments. If a later run lists any deployment that was not in an earlier run, repeat the barrier, §6.2–§6.4 and §2.3 step 2 before continuing.
+**Merge freeze.** The freeze (§3.1, §4) must hold from step 1 to step 3.
 
 **Addresses.** For each flag-ON candidate `<DPL_ID>`, list its aliases. The `aliases[].alias` shape is [OBSERVED: rehearsal `steps/07` field `deploymentAliases`]:
 
@@ -669,7 +730,7 @@ Record the UTC time of each check and the deployment ID it applies to.
 
 | Check | How | Expected |
 |---|---|---|
-| Completion barrier (first) | §6.1 post-removal inventory | exit 0: coverage reached, no non-terminal deployment |
+| Completion barrier (first) | §6.1 step 1, post-removal phase | exit 0; record D1 |
 | Domains | §2.3 step 2 | both custom domains → the intended deployment |
 | Deployment identity | §2.3 step 3 | `readyState` READY, `target` production, expected commit |
 | Flag configuration | `vapi env-absent …` (§2.3 step 4) | `absent: true` |
@@ -678,7 +739,7 @@ Record the UTC time of each check and the deployment ID it applies to.
 | Signed-out access | `vprobe convergepanel.com` | `class: APP_401` (the application's own `401`) [OBSERVED: HTTP 401 in `order6-release-2026-10-30/deploy-270-verification.json` field `signed_out_api_user_runs`; SOURCE: P1 `getUid`] |
 | Browser monitoring relay | `curl -sS -o /dev/null --connect-timeout 10 --max-time 20 -w '%{http_code}\n' -X POST https://convergepanel.com/monitoring` | `400` (configured) [OBSERVED: `order6-release-2026-10-30/deploy-270-verification.json` field `monitoring_empty_post`; SOURCE: `app/monitoring/route.ts`]. `404` means `NEXT_PUBLIC_SENTRY_DSN` did not resolve in the serving build [SOURCE]. A curl error is INCONCLUSIVE |
 | Monitoring configuration | §2.3 step 5 | `all_present_for_production: true` |
-| Final re-check (last) | §6.1 inventory again, then §2.3 step 2 | the same deployments as the first barrier, all terminal; domains unchanged. Otherwise repeat §7.1 |
+| Final re-check (last) | §6.1 step 3, then §2.3 step 2 | exit 0 with `inventory_digest` equal to D1; domains unchanged. Otherwise STOP (§6.1 step 3) |
 
 ### 7.2 Errors and 5xx: deployment-scoped, bounded, completeness-checked
 
@@ -882,7 +943,7 @@ Order 6 rollback rehearsal 2 ran on 2026-10-29 in the disposable Vercel project 
 
 ### 8.3 Helper test evidence [HARNESS]
 
-The helpers above were extracted verbatim from this document and run in `bash`, with stand-in `vercel` and `curl` functions and no network. The harness and its results are archived outside the repository, in `order6-rollback-runbook-pr272/r2-correction/`.
+The helpers above were extracted verbatim from this document and run in `bash`, with stand-in `vercel` and `curl` functions and no network. The harness and its results are archived outside the repository, in `ConvergePanel-Controlled-Verification-Evidence/order6-rollback-runbook-pr272/r4-correction/` (`helper-test-harness.sh`, `helper-test-results.txt`).
 
 | Area | Cases |
 |---|---|
@@ -890,7 +951,7 @@ The helpers above were extracted verbatim from this document and run in `bash`, 
 | CLI exit | nonzero CLI exit with valid JSON (output withheld) |
 | Output safety | embedded newlines and control characters (one output line); secret-bearing `value` fields in every mode (never output); refused `value`/`decrypted` paths; JSON booleans |
 | Env gate | production-only records with `configurationId: null` (pass); multi-target, string-target, `gitBranch`, `configurationId`, custom-environment, `system`/`secret` type, missing `id`, duplicate and absent records, and unrecognized scope-like fields such as `applyToAllCustomEnvironments: true` (STOP); paginated listings (INCOMPLETE) |
-| Deployment inventory | coverage and pagination; all targets; flag-ON candidates before and after `<REMOVAL_MS>`; non-terminal and unknown states (exit 9); terminal `READY`/`ERROR`/`CANCELED` (pass) |
+| Deployment inventory (`vinventory`, multi-page stand-in `vercel` executable) | single and multiple pages; a `BUILDING` deployment on a later page (exit 9); a deployment older than earlier pages but inside the window; missing, repeated, non-advancing and malformed cursors; empty intermediate page; out-of-order and repeated rows; unknown states; nonzero CLI exit on a later page; a deployment added between two runs (digest differs); flag-ON candidates; no page cap |
 | Logs | malformed, reversed, future and naive UTC windows; zero and non-integer limits; invalid filters; truncation at the limit; missing timestamps; other-deployment rows; out-of-window rows; filter mismatches; repeated `--level` flags passed through intact; nonzero CLI exit |
 | Probes | curl timeout (INCONCLUSIVE); application JSON 401 (`APP_401`); a Vercel redirect; a non-JSON 401; a bot-checkpoint 403 (INCONCLUSIVE); invalid host |
 
@@ -928,7 +989,7 @@ Pre-state (UTC):     domains -> ______ / ______   commit ______   autoAssign ___
 Actions (each: UTC, exact command, exit code):
 REMOVAL_MS ______    env-absent JSON ______   New dark deployment ______ createdAt ______
 Post-state (UTC):    domains -> ______ / ______   commit ______   autoAssign ______
-§6 (phase, window, covers_window): flag-ON deployments ______; per address: vprobe JSON + CONTAINED | NOT CONTAINED | UNKNOWN; barrier passes (UTC) ______
+§6 (phase, WINDOW_START_MS, vinventory JSON, D1, re-check digest): ______; per address: vprobe JSON + CONTAINED | NOT CONTAINED | UNKNOWN
 §7.1: vprobe convergepanel.com ______   /monitoring ______
 §7.2 four vlogs JSON lines: ______
 Authenticated dark state: NOT VERIFIED (reason) | VERIFIED (separately authorized method + evidence)
