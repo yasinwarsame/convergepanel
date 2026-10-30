@@ -80,11 +80,17 @@ Each of these is a **separate** owner authorization. Approval for one does not e
 | Code | Action | Changes |
 |---|---|---|
 | **AUTH-ENV** | Delete the single `DS_PROVENANCE_ROUTE_VIEW_ENABLED` record that passed the §3.2 gate (production-only) | Production configuration |
-| **AUTH-ENV-SHARED** | Any change to a record that **failed** the §3.2 gate. The authorization must list every affected target, branch, custom environment and integration (§3.7) | Every listed environment |
 | **AUTH-DEPLOY** | Create a new Production deployment (redeploy) | Production deployment |
 | **AUTH-ROLLBACK** | `vercel rollback` to a named deployment | Production domains |
 | **AUTH-PROMOTE** | `vercel promote` a named deployment | Production domains and auto-assignment |
-| **AUTH-CONTAIN** | One named containment action from §6.4 | Project protection settings, an alias, or (last resort) a deployment |
+| **AUTH-CONTAIN** | Enable or extend Deployment Protection (§6.4), with its project-wide scope stated | Project protection settings |
+
+**Not executable under this runbook:**
+- any change to a variable record that fails the §3.2 gate (§3.7);
+- removing aliases;
+- deleting deployments.
+
+Each needs a separate procedure and a separate owner decision.
 
 Read-only checks need no mutation authorization. They must still never print environment values or log contents; the helpers in §2.2 enforce this for their own output.
 
@@ -133,7 +139,8 @@ Run every CLI command from a checkout linked to the `convergepanel` project, wit
   - a missing or null required field, a wrong type, or a non-scalar where a scalar is required [4];
   - an incomplete listing [6];
   - a gate decision of STOP [7];
-  - an invalid log window or filter [8].
+  - an invalid log window or filter [8];
+  - a deployment that has not reached a terminal state [9].
 - **Failure messages:** they go to stderr as JSON and never contain values from the response.
 - **CLI failure:** if `vercel` exits nonzero, the helper **withholds** stdout entirely, prints `STOP` with both exit codes, and returns nonzero.
 
@@ -232,16 +239,21 @@ elif mode == "list" and len(args) == 2:
     complete = not more_pages(doc)
     emit({"items": [{c: scalar(i, c) for c in cols} for i in items], "count": len(items), "complete": complete})
     sys.exit(0 if complete else 6)
-elif mode == "deployments" and len(args) == 1 and args[0].isdigit():
-    doc = load(); since = int(args[0]); items = doc.get("deployments")
-    if not isinstance(items, list):
-        fail(4, "deployments is not a list")
+elif mode == "deployments" and len(args) in (1, 2) and all(a.isdigit() for a in args):
+    doc = load(); since = int(args[0]); removal = int(args[1]) if len(args) == 2 else None
+    items = doc.get("deployments")
+    if not isinstance(items, list) or not all(isinstance(i, dict) for i in items):
+        fail(4, "deployments is not a list of objects")
     rows = [{c: scalar(i, c) for c in ("uid", "url", "created", "state")} for i in items]
     if not all(is_num(r["created"]) for r in rows):
         fail(4, "created is not a number")
     covered = (not more_pages(doc)) or any(r["created"] < since for r in rows)
-    emit({"items": [r for r in rows if r["created"] >= since], "covers_window": covered})
-    sys.exit(0 if covered else 6)
+    window = [r for r in rows if r["created"] >= since]
+    for r in window:
+        r["flag_on_candidate"] = removal is None or r["created"] < removal
+    pending = [r["uid"] for r in window if r["state"] not in ("READY", "ERROR", "CANCELED")]
+    emit({"items": window, "covers_window": covered, "non_terminal": pending})
+    sys.exit(6 if not covered else (9 if pending else 0))
 elif mode == "env-gate" and len(args) == 1:
     rows = [r for r in env_rows(load()) if r["key"] == args[0]]
     reasons = []
@@ -255,6 +267,11 @@ elif mode == "env-gate" and len(args) == 1:
         if s["configurationId_set"]: reasons.append("configurationId set (integration-managed)")
         if s["customEnvironmentIds_count"] != 0: reasons.append("custom environments attached or unreadable")
         if s["type"] not in ("encrypted", "sensitive", "plain"): reasons.append("type is not encrypted, sensitive or plain")
+        checked = {"target", "gitBranch", "configurationId", "customEnvironmentIds"}
+        for k, v in rows[0].items():
+            if k not in checked and isinstance(k, str) and v not in (None, False, "", [], {}) and \
+                    any(w in k.lower() for w in ("custom", "environment", "branch", "shared", "configuration", "integration", "apply", "target")):
+                reasons.append("unrecognized scope-like field set: " + json.dumps(k))
     emit({"name": args[0], "records": [summary(r) for r in rows], "reasons": reasons,
           "decision": "PRODUCTION_ONLY_RECORD" if not reasons else "STOP"})
     sys.exit(0 if not reasons else 7)
@@ -336,13 +353,17 @@ A timeout is **never** evidence of containment.
 
 Record each of these, with the UTC time, before **any** mutation.
 
-1. **Project identity and auto-assignment.** STOP if `name` is not `convergepanel`. Response fields `name`, `id` and `autoAssignCustomDomains` [OBSERVED: Order 6 release verification, 2026-10-30]:
+1. **Project identity and auto-assignment.** STOP if `name` is not `convergepanel`. Evidence for these response fields:
+   - `name`, `id` and `autoAssignCustomDomains` [OBSERVED: rehearsal `steps/03` field `project`, disposable project];
+   - `autoAssignCustomDomains` for the Production project [OBSERVED: `order6-provenance-isolated-918c3a2-remediation/cleanup/production-control-plane-post.json`, 2026-10-29].
+
+   The rehearsal's own lookup of the Production project recorded no `id` (`steps/01`), cause unexplained (§8.2). A `missing required field` STOP here is therefore possible, and means NOT VERIFIED.
 
    ```bash
    vapi fields /v9/projects/convergepanel name id autoAssignCustomDomains
    ```
 
-2. **Serving deployment for each custom domain** (`deploymentId` [OBSERVED: Order 6 release verification]):
+2. **Serving deployment for each custom domain.** The `deploymentId` field [OBSERVED: rehearsal `steps/03` field `alias`]; the Production domain-to-deployment mapping [OBSERVED: `order6-release-2026-10-30/deploy-270-verification.json` field `aliases`]:
 
    ```bash
    vapi fields /v4/aliases/convergepanel.com deploymentId
@@ -355,8 +376,9 @@ Record each of these, with the UTC time, before **any** mutation.
    vapi fields /v13/deployments/<SERVING_DPL_ID> id url readyState target createdAt meta.githubCommitSha
    ```
 
-   - `readyState`, `target` and `meta.githubCommitSha` [OBSERVED: Order 6 release verification].
-   - `id`, `url` and `createdAt` [SOURCE: the CLI reads these from the same endpoint].
+   - `id`, `readyState`, `target` and `createdAt` for a Production deployment [OBSERVED: `order6-release-2026-10-30/deploy-270-verification.json` field `deployment`].
+   - `meta.githubCommitSha` [OBSERVED: `order6-release-2026-10-30/RELEASE-271.md`, Deployment row].
+   - `url` [SOURCE: the CLI reads it from this endpoint].
 
 4. **Flag record scope (never values).** `env-gate` inspects the complete project listing. The fields it reads (`key`, `type`, `target` as a string or list, `gitBranch`, `configurationId`, `customEnvironmentIds`, `id`, `createdAt`, `updatedAt`) are the ones the CLI itself reads from this endpoint [SOURCE: `dist/commands/env/index.js`]:
 
@@ -365,6 +387,7 @@ Record each of these, with the UTC time, before **any** mutation.
    ```
 
    - Before deactivation, the expected result is `decision: PRODUCTION_ONLY_RECORD`.
+   - Record the earliest `createdAt` among the records in this output as `<RECORD_CREATED_MS>` (needed for §6.1), whatever the decision. If there is no record or any `createdAt` is `null`, §6.1 cannot establish its window: STOP.
    - After removal, use `vapi env-absent /v10/projects/convergepanel/env DS_PROVENANCE_ROUTE_VIEW_ENABLED`, which expects `absent: true`.
 
    The CLI reads this listing in a single request with no paging [SOURCE: `getEnvRecords`]. The helper still STOPs (exit 6) if the response carries a `pagination.next` cursor. Note that the listing returns plaintext values for `plain`-type records [SOURCE: `env ls`]. The helper never outputs them.
@@ -413,11 +436,11 @@ Use this path when there is time for one build. It changes no domain-assignment 
 
 | Step | Action | Authorization |
 |---|---|---|
-| 3.1 | Capture §2.3 | none |
+| 3.1 | Capture §2.3. **Merge freeze starts:** no merge to `main` and no other deployment until §7 is complete | none |
 | 3.2 | **Gate:** `vapi env-gate …` (§2.3 step 4) must return `decision: PRODUCTION_ONLY_RECORD` and exit 0. On anything else, go to §3.7 | none |
 | 3.3 | Delete that record: `vercel env rm DS_PROVENANCE_ROUTE_VIEW_ENABLED production --scope convergepanel-ai --yes` [UNTESTED IN PRODUCTION] | AUTH-ENV |
 | 3.4 | `vapi env-absent …` must return `absent: true`. Record the UTC removal time as `<REMOVAL_MS>` | none |
-| 3.5 | Create a new Production deployment of the commit currently serving: `vercel redeploy <SERVING_DPL_ID> --target production --scope convergepanel-ai` [UNTESTED IN PRODUCTION]. Wait for READY. Confirm that its `createdAt` is after `<REMOVAL_MS>`, and that both custom domains now serve it (§2.3 steps 2–3) | AUTH-DEPLOY |
+| 3.5 | Create a new Production deployment of the commit currently serving: `vercel redeploy <SERVING_DPL_ID> --target production --scope convergepanel-ai` [UNTESTED IN PRODUCTION]. Wait for READY. Confirm that its `createdAt` is after `<REMOVAL_MS>`. Then pass the **completion barrier** (§6.1). Only then check that both custom domains serve it (§2.3 steps 2–3) | AUTH-DEPLOY |
 | 3.6 | Run §6, post-removal phase, then §7 | AUTH-CONTAIN for any containment |
 
 **What `vercel env rm … production` deletes [SOURCE: `dist/commands/env/index.js`]:**
@@ -426,6 +449,16 @@ Use this path when there is time for one build. It changes no domain-assignment 
 3. It sends `DELETE /v10/projects/<id>/env/<record id>`, which deletes the **whole record**: every target, branch and custom environment that record covers, not only Production.
 
 That is why 3.2 requires a production-only record. For such a record, whole-record deletion affects Production only.
+
+**What each check proves.** Use this table to keep these claims apart:
+
+| Claim | Evidence required | What it does **not** prove |
+|---|---|---|
+| The record is removed from Project configuration | 3.4 `env-absent` returns `absent: true` from a complete listing | that any existing deployment changed |
+| Existing deployments are unchanged by the removal | none needed: a deployment keeps its creation-time environment [OBSERVED: rehearsal steps C, E and G2] | — |
+| A new deployment was built without the flag | its `createdAt` is after `<REMOVAL_MS>`, and 3.4 passed before it was created | its authenticated behaviour, which is NOT VERIFIED (§7.2) |
+| The custom domains serve a dark build | completion barrier passed, then §2.3 step 2 shows the new deployment | anything about generated addresses |
+| Older flag-ON deployments are no longer exposed | §6: every address CONTAINED | — (they still exist, with the flag ON) |
 
 **Why 3.5 is required [OBSERVED: rehearsal]:**
 - **Step B0:** a variable added without a redeploy had no effect.
@@ -447,13 +480,14 @@ The flag goes dark only once a deployment created **after** the removal serves t
 
 ### 3.7 Shared, multi-target or unclear records: STOP
 
-If the gate STOPs (several records, a target other than exactly `production`, a branch, custom environments, a `configurationId`, an unexpected type, or an incomplete listing), **do not run `vercel env rm`**. It would delete the whole record across every scope it covers.
+If the gate STOPs (several records, a target other than exactly `production`, a branch, custom environments, a `configurationId`, an unexpected type, an unrecognized scope-like field, or an incomplete listing), **do not run `vercel env rm`**. It would delete the whole record across every scope it covers.
 
-1. **Record the gate output.** It lists every affected target, branch flag, custom-environment count and integration flag, and no values.
-2. **Escalate for AUTH-ENV-SHARED.** That authorization must list each affected environment and the effect on it.
-3. **Safer alternative to propose:** edit the record so that it no longer targets Production, keeping its other targets, in the Vercel dashboard (Project → Settings → Environment Variables → edit the record's environments). Then redeploy (3.5) [INFERRED, UNTESTED; the CLI's `env update` always writes a new value, so it is **not** used].
-4. **Integration-managed record** (`configurationId` set): change it only through that integration's owner.
-5. **If no environment-specific change can be shown safe:** STOP and use §4 if the situation is an emergency. A rollback changes no environment configuration.
+This runbook has **no** procedure for such a record. Do not attempt an environment-specific edit: none has been shown safe or verifiable here.
+
+1. **STOP.** Make no change to the record.
+2. **Record the gate output.** It lists each record's targets, branch flag, custom-environment count, integration flag, unrecognized scope-like fields and field names, and no values.
+3. **Escalate** for a separate operational decision and procedure. That decision must cover every target, branch, custom environment, integration and team scope the record affects. Whole-record deletion would affect all of them.
+4. **Emergency only:** if the flag-ON build must stop serving the custom domains now, §4 (rollback) is still available, because it changes no environment configuration. §5 cannot complete until the escalated decision resolves the record. Keep the merge freeze until then.
 
 ---
 
@@ -466,14 +500,14 @@ Use this path only when the flag-ON deployment must stop serving the custom doma
 - §2.3 captured;
 - `<DARK_DPL_ID>` and `<ACTIVATION_MS>` from the activation record (§2.4).
 
-**Merge freeze:** from 4.1 until 5.6, **no merge to `main`**. While the record still applies, any new Production build is flag-ON.
+**Merge freeze:** from 4.1 until §7 is complete, **no merge to `main` and no other deployment**. While the record still applies, any new build is flag-ON.
 
 | Step | Action | Authorization |
 |---|---|---|
 | 4.1 | `vercel rollback <DARK_DPL_ID> --scope convergepanel-ai --yes` [OBSERVED in the rehearsal only; UNTESTED IN PRODUCTION] | AUTH-ROLLBACK |
 | 4.2 | `vercel rollback status --scope convergepanel-ai`; then confirm both custom domains → `<DARK_DPL_ID>` (§2.3 step 2) | none |
 | 4.3 | Re-read `autoAssignCustomDomains` (§2.3 step 1) and record it. The rehearsal showed `false` after a rollback [OBSERVED: step C] | none |
-| 4.4 | Run §6 **pre-removal phase** (no `<REMOVAL_MS>` exists yet) | AUTH-CONTAIN for any containment |
+| 4.4 | Run §6 **pre-removal phase**: inventory with the completion barrier, then §6.2–§6.4 (no `<REMOVAL_MS>` exists yet) | AUTH-CONTAIN for any containment |
 | 4.5 | **Continue immediately with §5.** A rollback alone is not a finished recovery | — |
 
 **What the rollback did in the rehearsal [OBSERVED: steps C and E]:**
@@ -504,12 +538,12 @@ Every step is required after §4. The order matters.
 
 | Step | Action | Authorization |
 |---|---|---|
-| 5.1 | §3.2 gate; if it passes, §3.3 and §3.4 (record `<REMOVAL_MS>`). If it fails, §3.7 | AUTH-ENV (or AUTH-ENV-SHARED) |
+| 5.1 | §3.2 gate; if it passes, §3.3 and §3.4 (record `<REMOVAL_MS>`). If it fails, §3.7: STOP and escalate | AUTH-ENV |
 | 5.2 | Create a fresh dark deployment: `vercel redeploy <MAIN_DPL_ID> --target production --scope convergepanel-ai`, where `<MAIN_DPL_ID>` is the most recent READY Production deployment of current `main` [UNTESTED IN PRODUCTION]. While auto-assignment is off, it is expected **not** to take the custom domains [INFERRED from step F] | AUTH-DEPLOY |
 | 5.3 | Confirm the new deployment's `createdAt` is **after** `<REMOVAL_MS>` (§2.3 step 3) | none |
-| 5.4 | `vercel promote <NEW_DARK_DPL_ID> --scope convergepanel-ai --yes` [OBSERVED: step G, rehearsal] | AUTH-PROMOTE |
+| 5.4 | Pass the **completion barrier** (§6.1). Then `vercel promote <NEW_DARK_DPL_ID> --scope convergepanel-ai --yes` [OBSERVED: step G, rehearsal] | AUTH-PROMOTE |
 | 5.5 | Confirm both custom domains → `<NEW_DARK_DPL_ID>` (§2.3 step 2) | none |
-| 5.6 | Confirm `autoAssignCustomDomains` is `true` (§2.3 step 1) [OBSERVED: step G]. The merge freeze ends here | none |
+| 5.6 | Confirm `autoAssignCustomDomains` is `true` (§2.3 step 1) [OBSERVED: step G]. The merge freeze continues until §7 is complete | none |
 | 5.7 | Run §6 **post-removal phase**, then all of §7 against `<NEW_DARK_DPL_ID>` | AUTH-CONTAIN for any containment |
 | 5.8 | At the **next** ordinary merge to `main`, confirm with §2.3 steps 2–3 that its deployment took both custom domains automatically. The rehearsal showed an auto-assigned deploy after a promote, for the project alias only and via `vercel deploy --prod` [OBSERVED: step G2]. For a Git merge and for custom domains this is [INFERRED] until 5.8 is done | none |
 
@@ -523,7 +557,7 @@ Every step is required after §4. The order matters.
 
 ## 6. Generated deployment address exposure and containment
 
-**Hazard.** A build created while the flag record applied to Production may remain reachable through its own deployment URL and generated aliases, even after the custom domains are restored to a dark deployment.
+**Hazard.** A build created while the flag record applied may remain reachable through its own deployment URL and generated aliases, even after the custom domains are restored to a dark deployment. This applies to builds for **any** target the record covered.
 
 | Label | Basis |
 |---|---|
@@ -534,39 +568,54 @@ Because the routes accept a Bearer token (§1.2), any signed-in user could call 
 
 **Checking the custom domains cannot rule this out.**
 
-### 6.1 Identify flag-ON deployments and their addresses (read-only)
+### 6.1 Deployment inventory and completion barrier (read-only)
 
-**Pre-removal phase** (from §4.4): the window is `<ACTIVATION_MS>` to now. Omit `until`:
+**Window start.** `<WINDOW_START_MS>` is the **earlier** of:
+- `<ACTIVATION_MS>` (activation record, §2.4);
+- `<RECORD_CREATED_MS>` (§2.3 step 4).
 
-```bash
-vapi deployments "/v6/deployments?projectId=<PROJECT_ID>&target=production&limit=100" <ACTIVATION_MS>
-```
+This is a conservative superset. It is not an estimate of the activation time.
 
-**Post-removal phase** (from §3.6 or §5.7): the window is `<ACTIVATION_MS>` to `<REMOVAL_MS>`:
+**Inventory: all targets.** The query omits `target`, so every deployment is listed: Production, Preview and custom environments. When `target` is omitted the CLI sends none [SOURCE: `vercel list` and the CLI's other `/v6/deployments` callers].
 
-```bash
-vapi deployments "/v6/deployments?projectId=<PROJECT_ID>&target=production&until=<REMOVAL_MS>&limit=100" <ACTIVATION_MS>
-```
+- **Pre-removal phase** (§4.4), up to now:
 
-How `vapi deployments` reports [HARNESS]:
-- It returns the deployments whose `created` is at or after `<ACTIVATION_MS>`.
-- It sets `covers_window: true` only when the listing is complete, or when it already reaches a deployment older than `<ACTIVATION_MS>`.
-- Otherwise it exits 6. Re-run with `until=<oldest created returned>` until coverage is reached.
+  ```bash
+  vapi deployments "/v6/deployments?projectId=<PROJECT_ID>&limit=100" <WINDOW_START_MS>
+  ```
 
-The `projectId`, `target` and `until` parameters and the `uid`, `url`, `created` and `state` fields are those the CLI itself uses with this endpoint [SOURCE].
+- **Post-removal phase** (§3.6, §5.7, §7), up to now, with the removal time:
 
-**Which deployments count as flag-ON:**
-- every listed deployment;
-- any deployment the activation record names;
-- in the post-removal phase, any deployment that **started** before `<REMOVAL_MS>`, even if it finished after.
+  ```bash
+  vapi deployments "/v6/deployments?projectId=<PROJECT_ID>&limit=100" <WINDOW_START_MS> <REMOVAL_MS>
+  ```
 
-For each flag-ON `<DPL_ID>`, list its aliases. The `aliases[].alias` shape is [OBSERVED: rehearsal step F record]:
+`<PROJECT_ID>` is the `id` from §2.3 step 1. The `projectId`, `until` and `limit` parameters and the `uid`, `url`, `created` and `state` fields are those the CLI itself uses with this endpoint [SOURCE].
+
+**How `vapi deployments` reports [HARNESS]:**
+- It returns every deployment with `created` at or after `<WINDOW_START_MS>`.
+- **Coverage:** `covers_window` is `true` only when the listing is complete, or already reaches an older deployment. Otherwise it exits **6**. Re-run with `&until=<oldest created returned>` added, and combine the pages, until coverage is reached.
+- **Flag-ON candidates:** `flag_on_candidate` is `true` for every deployment in the pre-removal phase, and for every deployment created before `<REMOVAL_MS>` in the post-removal phase.
+- **Completion barrier:** `non_terminal` lists every deployment whose `state` is not `READY`, `ERROR` or `CANCELED`, and the helper then exits **9**.
+  - The CLI's state vocabulary is `INITIALIZING`, `QUEUED`, `BUILDING`, `DEPLOYING`, `ANALYZING`, `READY`, `ERROR` and `CANCELED` [SOURCE: `vercel list`].
+  - The CLI treats `ERROR` and `CANCELED` as non-live terminal states [SOURCE: `isNonLiveTerminalDeployment`].
+  - An unknown state counts as non-terminal.
+
+**Passing the completion barrier.** Run the inventory and require exit 0, which means coverage was reached and no deployment is non-terminal.
+- On exit 9, wait and re-run.
+- If a deployment stays non-terminal, or anything other than exit 0 or 9 occurs, STOP and escalate.
+
+**A terminal state is not a safe state.** A `READY` flag-ON deployment is exactly what §6.2–§6.4 must contain. Every flag-ON candidate is probed whatever its state.
+
+**Concurrency.** The merge freeze (§3.1, §4) prevents new deployments. If a later run lists any deployment that was not in an earlier run, repeat the barrier, §6.2–§6.4 and §2.3 step 2 before continuing.
+
+**Addresses.** For each flag-ON candidate `<DPL_ID>`, list its aliases. The `aliases[].alias` shape is [OBSERVED: rehearsal `steps/07` field `deploymentAliases`]:
 
 ```bash
 vapi list /v2/deployments/<DPL_ID>/aliases aliases alias
 ```
 
-The address list is the deployment's `url` plus every alias, excluding the two custom domains.
+Exit 6 (`complete: false`) means the alias list is incomplete: STOP and escalate. The address list is the deployment's `url` plus every alias, excluding the two custom domains.
 
 ### 6.2 Determine reachability (read-only, signed-out only)
 
@@ -584,33 +633,31 @@ For every address, run `vprobe <HOST>` (§2.2).
 
 An address is **CONTAINED** only if both hold:
 - its `vprobe` class is `VERCEL_REDIRECT` or `NON_APP_401`;
-- §2.3 step 6 shows a Deployment Protection setting that covers production deployment URLs.
+- §2.3 step 6 shows `ssoProtection.deploymentType` of `all`, `all_except_custom_domains` or `prod_deployment_urls_and_all_previews`.
 
-Per Vercel's documentation [INFERRED; not verified for this project], `ssoProtection.deploymentType` values `all`, `all_except_custom_domains` and `prod_deployment_urls_and_all_previews` cover them. `preview` does not.
+Per Vercel's documentation, those values cover both production and preview deployment URLs [INFERRED; not verified for this project]. Any other value, including `preview`, a missing setting, or password protection alone, does not establish containment.
 
-An address is **NOT REACHABLE** only if the deployment is confirmed deleted: `vapi fields /v13/deployments/<DPL_ID> id` returns `API error "not_found"`.
+**Every other combination is NOT CONTAINED**, including:
+- a deployment that has been deleted;
+- a `404`;
+- a timeout.
 
-Every other combination is **NOT CONTAINED**.
+This runbook has no procedure that proves a deployment or address is gone, so it never records an address as unreachable.
 
-### 6.4 Containment (each action needs its own AUTH-CONTAIN)
+### 6.4 Containment (AUTH-CONTAIN)
 
-Use the least destructive option that contains every exposed or unknown address:
+The only containment action under this runbook is to **enable or extend Deployment Protection** (Vercel Authentication) to one of the §6.3 values (Vercel dashboard → Project → Settings → Deployment Protection) [INFERRED, UNTESTED]:
+- It is project-wide: it also affects Preview deployments and their testers. The authorization must state that scope.
+- After the change, re-read §2.3 step 6 and repeat §6.2–§6.3 for every flag-ON address.
 
-1. **Enable or extend Deployment Protection** so production deployment URLs require Vercel authentication (Vercel dashboard → Project → Settings → Deployment Protection).
-   - This is project-wide: it also affects Preview deployments and their testers.
-   - The authorization must state that scope.
-   - [INFERRED, UNTESTED]
-2. **Remove a generated alias:** `vercel alias rm <ALIAS_HOST> --scope convergepanel-ai`.
-   - The deployment's own URL stays, so this is never sufficient alone.
-3. **Last resort, destructive and irreversible:** `vercel remove <DPL_ID> --safe --scope convergepanel-ai`.
-   - `--safe` skips deployments that still hold an active alias [SOURCE: help]. If it skips, STOP.
-   - Never routine and never a first step.
-   - Never the dark target or any rollback target in the activation record.
-   - The authorization must name the exact deployment ID.
+**Containment is effective only when every flag-ON address is CONTAINED.**
 
-After each action, repeat §6.2 and §6.3 for every affected address. **Containment is effective only when every flag-ON address is CONTAINED or NOT REACHABLE.**
+If any address remains NOT CONTAINED or UNKNOWN:
+- record **GENERATED_ADDRESS_EXPOSURE: NOT CONTAINED / NOT VERIFIED**, with the address, the UTC time and the `vprobe` output;
+- escalate (§9);
+- do not report the deactivation as complete.
 
-If any address remains otherwise, record **GENERATED_ADDRESS_EXPOSURE: NOT CONTAINED / NOT VERIFIED**, with the address, the UTC time and the probe output, and escalate (§9). Do not report the deactivation as complete.
+Removing aliases or deleting deployments are **not** part of this runbook (§1.4).
 
 ---
 
@@ -622,14 +669,16 @@ Record the UTC time of each check and the deployment ID it applies to.
 
 | Check | How | Expected |
 |---|---|---|
+| Completion barrier (first) | §6.1 post-removal inventory | exit 0: coverage reached, no non-terminal deployment |
 | Domains | §2.3 step 2 | both custom domains → the intended deployment |
 | Deployment identity | §2.3 step 3 | `readyState` READY, `target` production, expected commit |
 | Flag configuration | `vapi env-absent …` (§2.3 step 4) | `absent: true` |
 | Flag effective state | the serving deployment's `createdAt` is after `<REMOVAL_MS>`, **or** it is the activation record's dark deployment | dark by configuration |
-| Generated addresses | §6 post-removal phase | every flag-ON address CONTAINED or NOT REACHABLE |
-| Signed-out access | `vprobe convergepanel.com` | `class: APP_401` (the application's own `401`) [OBSERVED: Order 6 release verification, HTTP 401] |
-| Browser monitoring relay | `curl -sS -o /dev/null --connect-timeout 10 --max-time 20 -w '%{http_code}\n' -X POST https://convergepanel.com/monitoring` | `400` (configured) [OBSERVED: Order 6 release verification; SOURCE: `app/monitoring/route.ts`]. `404` means `NEXT_PUBLIC_SENTRY_DSN` did not resolve in the serving build [SOURCE]. A curl error is INCONCLUSIVE |
+| Generated addresses | §6 post-removal phase | every flag-ON address CONTAINED |
+| Signed-out access | `vprobe convergepanel.com` | `class: APP_401` (the application's own `401`) [OBSERVED: HTTP 401 in `order6-release-2026-10-30/deploy-270-verification.json` field `signed_out_api_user_runs`; SOURCE: P1 `getUid`] |
+| Browser monitoring relay | `curl -sS -o /dev/null --connect-timeout 10 --max-time 20 -w '%{http_code}\n' -X POST https://convergepanel.com/monitoring` | `400` (configured) [OBSERVED: `order6-release-2026-10-30/deploy-270-verification.json` field `monitoring_empty_post`; SOURCE: `app/monitoring/route.ts`]. `404` means `NEXT_PUBLIC_SENTRY_DSN` did not resolve in the serving build [SOURCE]. A curl error is INCONCLUSIVE |
 | Monitoring configuration | §2.3 step 5 | `all_present_for_production: true` |
+| Final re-check (last) | §6.1 inventory again, then §2.3 step 2 | the same deployments as the first barrier, all terminal; domains unchanged. Otherwise repeat §7.1 |
 
 ### 7.2 Errors and 5xx: deployment-scoped, bounded, completeness-checked
 
@@ -773,7 +822,7 @@ vlogs <DPL_ID> <START> <END> 1000 --level fatal                    # requests wi
 - **INCOMPLETE** for any reason: split the window into smaller absolute windows and re-run, or record it as INCOMPLETE. **Never claim zero errors from an INCOMPLETE run.**
 - **Zero total rows** for a window in which traffic was expected is **INCOMPLETE**, not "no errors".
 
-**Bot checkpoint.** Scripted requests to `convergepanel.com` received a Vercel bot-checkpoint `403` during the Order 6 release verification [OBSERVED]. Keep requests to a handful, pause about two minutes and retry once. Never bypass the checkpoint. A checkpoint `403` is INCONCLUSIVE, not an application result.
+**Bot checkpoint.** Scripted requests to `convergepanel.com` received a Vercel bot-checkpoint `403` during the Order 6 release verification [OBSERVED: `order6-release-2026-10-30/RELEASE-270.md`, live bundle check]. Keep requests to a handful, pause about two minutes and retry once. Never bypass the checkpoint. A checkpoint `403` is INCONCLUSIVE, not an application result.
 
 **Authenticated dark behaviour is not verifiable by this runbook today.** No Production test identity is authorized. The presence or absence of `dsProvenance` on an authorized response cannot be observed signed-out. Record **PRODUCTION_AUTHENTICATED_DARK_STATE: NOT VERIFIED** unless a separately authorized method exists. Dark state in Production is established by configuration and deployment-creation time, not by observation.
 
@@ -825,6 +874,7 @@ Order 6 rollback rehearsal 2 ran on 2026-10-29 in the disposable Vercel project 
 
   Statements about these are [INFERRED].
 - **Missing project ID:** the rehearsal recorded no Production project ID, and the cause is **unexplained**.
+- **No proof of removal for deployments:** `vercel api` exits 1 with empty stdout on a not-found response [SOURCE; OBSERVED: rehearsal `steps/14`]. This runbook therefore has no way to prove a deployment or address is gone, and never deletes deployments or aliases. Containment is established only by protection plus a probe (§6.3).
 - **CLI version:** the rehearsal archive does not record the local CLI version (its build logs show the build container's CLI 65.4.0). [SOURCE] statements refer to Vercel CLI 54.4.1.
 - **No Production change has been performed:** no rollback, promote, redeploy, record change, protection change or containment. All Production steps are [UNTESTED IN PRODUCTION].
 - **Authenticated Production dark state is NOT VERIFIED.** Authenticated OFF and ON behaviour was verified in the isolated Firebase project `convergepanel-sa-verify-y0ibg9`, with a local production build: 718/718 browser checks and 447/447 API checks. That is not a Production observation.
@@ -839,8 +889,8 @@ The helpers above were extracted verbatim from this document and run in `bash`, 
 | Parsing | missing required fields; unexpected schema variants (string `target`, non-object `pagination`, top-level array); empty stdout; text before or after the JSON; two JSON documents; an `error` object; the hint on **stderr** with valid stdout (accepted); the hint on **stdout** (rejected) |
 | CLI exit | nonzero CLI exit with valid JSON (output withheld) |
 | Output safety | embedded newlines and control characters (one output line); secret-bearing `value` fields in every mode (never output); refused `value`/`decrypted` paths; JSON booleans |
-| Env gate | production-only records with `configurationId: null` (pass); multi-target, string-target, `gitBranch`, `configurationId`, custom-environment, `system`/`secret` type, missing `id`, duplicate and absent records (STOP); paginated listings (INCOMPLETE) |
-| Deployment window | coverage and pagination |
+| Env gate | production-only records with `configurationId: null` (pass); multi-target, string-target, `gitBranch`, `configurationId`, custom-environment, `system`/`secret` type, missing `id`, duplicate and absent records, and unrecognized scope-like fields such as `applyToAllCustomEnvironments: true` (STOP); paginated listings (INCOMPLETE) |
+| Deployment inventory | coverage and pagination; all targets; flag-ON candidates before and after `<REMOVAL_MS>`; non-terminal and unknown states (exit 9); terminal `READY`/`ERROR`/`CANCELED` (pass) |
 | Logs | malformed, reversed, future and naive UTC windows; zero and non-integer limits; invalid filters; truncation at the limit; missing timestamps; other-deployment rows; out-of-window rows; filter mismatches; repeated `--level` flags passed through intact; nonzero CLI exit |
 | Probes | curl timeout (INCONCLUSIVE); application JSON 401 (`APP_401`); a Vercel redirect; a non-JSON 401; a bot-checkpoint 403 (INCONCLUSIVE); invalid host |
 
@@ -854,10 +904,10 @@ In every row: **STOP**, record the observed state with UTC times, and take only 
 |---|---|---|---|
 | Rollback succeeded but a custom domain is not on `<DARK_DPL_ID>` | rollback still pending, or a domain is assigned separately | `vercel rollback status`; re-read both aliases after the `--timeout` (default 3m) [SOURCE: help]. If still wrong, escalate | none to re-read; AUTH-ROLLBACK or AUTH-PROMOTE for any change |
 | Record removed but the custom domains still serve a flag-ON build | no new deployment since the removal (§3, "Why 3.5 is required") | §3.5, or §4 in an emergency | AUTH-DEPLOY or AUTH-ROLLBACK |
-| §3.2 gate STOPs | shared, multi-target, branch-scoped, integration-managed, unexpected or incompletely listed record | §3.7. Never `vercel env rm` on it | AUTH-ENV-SHARED, or the integration owner |
+| §3.2 gate STOPs | shared, multi-target, branch-scoped, integration-managed, unexpected or incompletely listed record | §3.7: STOP, record the gate output, escalate. Never `vercel env rm` on it | separate owner decision (outside this runbook) |
 | New deployment READY but not serving the custom domains | auto-assignment suspended after a rollback (step F) | Check `autoAssignCustomDomains`. If `false`, confirm `createdAt` is after `<REMOVAL_MS>`, then §5.4. Keep the merge freeze | AUTH-PROMOTE |
 | `autoAssignCustomDomains` still `false` after §5.4 | promote not completed | Re-read after a few minutes, then escalate. Keep the merge freeze | — |
-| A flag-ON address is EXPOSED, NOT CONTAINED or UNKNOWN (§6) | generated URL or alias not covered by protection | §6.4, least destructive option first; re-check §6.2–§6.3 | AUTH-CONTAIN (one per action) |
+| A flag-ON address is EXPOSED, NOT CONTAINED or UNKNOWN (§6) | generated URL or alias not covered by protection | §6.4 (Deployment Protection); re-check §6.2–§6.3. Anything else (alias removal, deletion) is escalated | AUTH-CONTAIN; other actions need a separate owner decision |
 | `/monitoring` returns `404`, or `all_present_for_production` is false | `NEXT_PUBLIC_SENTRY_DSN` absent when the serving build was created, or a record removed. Builds before `2b97443` use a different relay configuration, not covered by this check | Record it. Do not re-add values from memory or logs. Escalate | separate owner decision |
 | Signed-out probe of a custom domain is not `APP_401`, or any authorization result differs from expectation | unexpected build or regression, unless INCONCLUSIVE | If INCONCLUSIVE, retry once. Otherwise STOP all changes and escalate immediately as a security incident. No code fix under this runbook | owner / incident process |
 | §7.2 COMPLETE run shows 5xx, error or fatal rows | regression in the serving build | Record the counts and window, then escalate. If the serving build is flag-ON, §4 may be authorized | AUTH-ROLLBACK |
@@ -878,7 +928,7 @@ Pre-state (UTC):     domains -> ______ / ______   commit ______   autoAssign ___
 Actions (each: UTC, exact command, exit code):
 REMOVAL_MS ______    env-absent JSON ______   New dark deployment ______ createdAt ______
 Post-state (UTC):    domains -> ______ / ______   commit ______   autoAssign ______
-§6 (phase, window, covers_window): flag-ON deployments ______; per address: vprobe JSON + CONTAINED | NOT REACHABLE | NOT CONTAINED
+§6 (phase, window, covers_window): flag-ON deployments ______; per address: vprobe JSON + CONTAINED | NOT CONTAINED | UNKNOWN; barrier passes (UTC) ______
 §7.1: vprobe convergepanel.com ______   /monitoring ______
 §7.2 four vlogs JSON lines: ______
 Authenticated dark state: NOT VERIFIED (reason) | VERIFIED (separately authorized method + evidence)
