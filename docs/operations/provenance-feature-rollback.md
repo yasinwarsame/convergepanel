@@ -18,7 +18,7 @@ Every behavioural statement carries one of these labels:
 | **[INFERRED]** | Expected from Vercel documentation or reasoning, but not demonstrated |
 | **[UNTESTED IN PRODUCTION]** | Never executed against the `convergepanel` project |
 
-**Shell:** the helpers in §2.2 are written for `bash` (tested with GNU bash 3.2). Run them in `bash`, not `zsh` or `sh`.
+**Shell:** the helpers require `bash`. Start a clean shell explicitly with `bash --noprofile --norc` before loading them; do not paste them into `zsh` (the macOS default) or `sh`. They were tested with GNU bash 3.2.57 only; other bash versions are NOT VERIFIED. Every helper refuses to run outside bash (`{"status":"STOP","reason":"bash required"}`, return 2).
 
 ---
 
@@ -201,6 +201,11 @@ def env_rows(doc):
         fail(4, "envs is not a list")
     if more_pages(doc):
         emit({"complete": False}); sys.exit(6)
+    hidden = doc.get("hiddenProductionEnvCount")
+    if isinstance(hidden, bool) or not isinstance(hidden, int):
+        fail(4, "hiddenProductionEnvCount missing or not an integer")
+    if hidden != 0:
+        emit({"complete": False, "hiddenProductionEnvCount": hidden}); sys.exit(6)
     for r in rows:
         if not isinstance(r, dict) or not isinstance(r.get("key"), str):
             fail(4, "malformed env record")
@@ -277,6 +282,7 @@ else:
 PY
 )
 vapi() {  # vapi <mode> <api-path> [args...]   (read-only GET via `vercel api`)
+  [ -n "${BASH_VERSION:-}" ] || { echo '{"status":"STOP","reason":"bash required"}' >&2; return 2; }
   local mode="$1" api_path="$2"; shift 2
   local res codes vc pc
   res=$(vercel api "$api_path" --scope convergepanel-ai | python3 -I -B -c "$VJSON" "$mode" "$@"; printf '\n#rc %s %s' "${PIPESTATUS[0]}" "${PIPESTATUS[1]}")
@@ -312,6 +318,7 @@ print(json.dumps(res, ensure_ascii=True, sort_keys=True))
 PY
 )
 vprobe() {  # vprobe <host>   (signed-out GET, bounded timeouts, classification only)
+  [ -n "${BASH_VERSION:-}" ] || { echo '{"status":"STOP","reason":"bash required"}' >&2; return 2; }
   local host="$1" w rc
   case "$host" in ""|*[!a-z0-9.-]*) echo '{"status":"STOP","reason":"invalid host"}' >&2; return 2;; esac
   w=$(curl -sS -o /dev/null --proto '=https' --connect-timeout 10 --max-time 20 \
@@ -386,11 +393,20 @@ sys.exit(9 if pending else 0)
 PY
 )
 vinventory() {  # vinventory <PROJECT_ID> <WINDOW_START_MS> [<REMOVAL_MS>]   (pages the whole inventory itself)
+  [ -n "${BASH_VERSION:-}" ] || { echo '{"status":"STOP","reason":"bash required"}' >&2; return 2; }
   python3 -I -B -c "$VINV" "$@"
 }
 ```
 
 **How to read helper results:** any `STOP`, `INCOMPLETE` or `INVALID_WINDOW` line, or a nonzero return, means that check is **NOT VERIFIED**. Never fall back to printing a raw response, and never re-run with stderr merged into stdout.
+
+**Transient CLI failures (fail closed).**
+- **Transient** means only this: a read-only helper (`vapi`, `vinventory`, `vlogs`) whose result names a CLI exit. That is `vercel exited N` from `vapi` or `vinventory`, or `vercel logs exited N` from `vlogs`. Such a check may be re-run **once, by hand, after at least 30 seconds**, with identical arguments. If it fails again, record NOT VERIFIED and STOP. Record both attempts, with their UTC times and the helper output; the helpers never print response bodies or values.
+- **Every other failure is not transient** and must not be retried as one. That covers exits 2, 3, 4, 7 and 8; `vinventory` exit 6 without a CLI exit; and `vlogs` exit 5 (INCOMPLETE).
+- One procedural re-run is unchanged and is **not** a transient retry: `vinventory` exit 9: wait, then re-run the barrier (§6.1).
+- A `vlogs` run that is INCOMPLETE because rows reached the limit is a **STOP** (§7.2 rule C). It is never split, shortened or re-run.
+- **Never retry a mutating command** (`vercel env rm`, `vercel redeploy`, `vercel rollback`, `vercel promote`, a protection change), automatically or by hand. After a failed or uncertain mutation, re-read the state with the read-only helpers and escalate before any further action.
+- A failure is never a success: a check that did not complete is NOT VERIFIED.
 
 **`vprobe` classes**, used in §6.2 and §7.1:
 
@@ -444,7 +460,9 @@ Record each of these, with the UTC time, before **any** mutation.
    - Record the earliest `createdAt` among the records in this output as `<RECORD_CREATED_MS>` (needed for §6.1), whatever the decision. If there is no record or any `createdAt` is `null`, §6.1 cannot establish its window: STOP.
    - After removal, use `vapi env-absent /v10/projects/convergepanel/env DS_PROVENANCE_ROUTE_VIEW_ENABLED`, which expects `absent: true`.
 
-   The CLI reads this listing in a single request with no paging [SOURCE: `getEnvRecords`]. The helper still STOPs (exit 6) if the response carries a `pagination.next` cursor. Note that the listing returns plaintext values for `plain`-type records [SOURCE: `env ls`]. The helper never outputs them.
+   The CLI reads this listing in a single request with no paging [SOURCE: `getEnvRecords`]. The helper still STOPs (exit 6) if the response carries a `pagination.next` cursor.
+
+   **Hidden Production records.** The listing carries a top-level `hiddenProductionEnvCount` [OBSERVED: Phase A/B metadata reads, value 0]. Its meaning, Production records the caller cannot see in this listing, is [INFERRED]. Every `env-*` mode STOPs if it is missing or not an integer (exit 4) or non-zero (exit 6). A non-zero count means the listing cannot prove absence or scope: STOP and escalate until the hidden records are accounted for. Note that the listing returns plaintext values for `plain`-type records [SOURCE: `env ls`]. The helper never outputs them.
 
 5. **Monitoring configuration (names only):**
 
@@ -838,6 +856,7 @@ sys.exit(0 if complete else 5)
 PY
 )
 vlogs() {  # vlogs <DPL_ID> <START> <END> <LIMIT> [--status-code S | --level L [--level L ...]]
+  [ -n "${BASH_VERSION:-}" ] || { echo '{"status":"STOP","reason":"bash required"}' >&2; return 2; }
   local dpl="$1" start="$2" end="$3" limit="$4"; shift 4
   local status="" levels="" expect="" a res codes vc pc
   for a in "$@"; do
@@ -877,10 +896,18 @@ vlogs <DPL_ID> <START> <END> 1000 --level error                    # requests wi
 vlogs <DPL_ID> <START> <END> 1000 --level fatal                    # requests with a fatal-level log entry
 ```
 
-- **Window:** `<START>` is when the custom domains switched to `<DPL_ID>`. `<END>` is at least 15 minutes later and at least 60 seconds in the past.
+- **Window:** `<START>` is at least 60 seconds **before** the custom domains switched to `<DPL_ID>`. `<END>` is at least 15 minutes after the switch and at least 60 seconds in the past. Whether the API includes a row stamped exactly at `startDate` or `endDate` is not verified [INFERRED]. Starting before the switch keeps the observed period clear of either boundary. The query is scoped to `<DPL_ID>`, so the earlier start only adds that deployment's own rows.
 - **Levels:** a single `--level error --level fatal` query is also accepted, and the CLI sends it comma-joined. Separate queries keep each count attributable.
 - **Valid only if every run** prints `"result": "COMPLETE"` and returns 0. Record the four JSON lines and the exact commands.
-- **INCOMPLETE** for any reason: split the window into smaller absolute windows and re-run, or record it as INCOMPLETE. **Never claim zero errors from an INCOMPLETE run.**
+- **When a run is not COMPLETE**, apply exactly one of these rules (the same contract as "Transient CLI failures" in §2.2). **Never claim zero errors, and never substitute a zero count, for a run that is not COMPLETE.**
+  - **A. Complete:** accept a run only if it printed `"result": "COMPLETE"` and returned 0, with the window and limit defined above.
+  - **B. Transient CLI read failure:** the line is `{"result":"INCOMPLETE","reason":"vercel logs exited N; output withheld"}`. Record it as INCOMPLETE. One manual re-run of the **same** command, after at least 30 seconds, is allowed. If that fails in any way, STOP: the check is NOT VERIFIED. Retry exhaustion is never success.
+  - **C. Row-limit truncation** (`rows` reached the limit): INCOMPLETE. **STOP immediately.**
+    - Do not split the window, and do not combine counts from several windows.
+    - Do not shorten the window, or raise the limit and re-run, to obtain a passing result.
+    - Record the monitoring check as NOT VERIFIED, and escalate.
+  - **D. Any other INCOMPLETE or unexpected result** (malformed, other-deployment, outside-window or filter-mismatch rows, or output that is not one JSON line): **STOP.** Do not re-run, and record the check as NOT VERIFIED.
+  - **E. Mutations:** this section runs read-only commands only. A failed or uncertain Production mutation is never retried automatically; repeating one needs a separate authorization (§2.2, §9).
 - **Zero total rows** for a window in which traffic was expected is **INCOMPLETE**, not "no errors".
 
 **Bot checkpoint.** Scripted requests to `convergepanel.com` received a Vercel bot-checkpoint `403` during the Order 6 release verification [OBSERVED: `order6-release-2026-10-30/RELEASE-270.md`, live bundle check]. Keep requests to a handful, pause about two minutes and retry once. Never bypass the checkpoint. A checkpoint `403` is INCONCLUSIVE, not an application result.
@@ -943,16 +970,17 @@ Order 6 rollback rehearsal 2 ran on 2026-10-29 in the disposable Vercel project 
 
 ### 8.3 Helper test evidence [HARNESS]
 
-The helpers above were extracted verbatim from this document and run in `bash`, with stand-in `vercel` and `curl` functions and no network. The harness and its results are archived outside the repository, in `ConvergePanel-Controlled-Verification-Evidence/order6-rollback-runbook-pr272/r4-correction/` (`helper-test-harness.sh`, `helper-test-results.txt`).
+The helpers above were extracted verbatim from this document and run in `bash`, with stand-in `vercel` and `curl` functions and no network. The harness and its results are archived outside the repository. For the helpers as amended (hidden Production count and bash guard), they are in `ConvergePanel-Controlled-Verification-Evidence/order6-activation-readiness-phaseC-2026-10-31/c-pr/` (`helper-test-harness.sh`, `helper-test-results.txt`). The earlier rounds are in `order6-rollback-runbook-pr272/r4-correction/`.
 
 | Area | Cases |
 |---|---|
 | Parsing | missing required fields; unexpected schema variants (string `target`, non-object `pagination`, top-level array); empty stdout; text before or after the JSON; two JSON documents; an `error` object; the hint on **stderr** with valid stdout (accepted); the hint on **stdout** (rejected) |
 | CLI exit | nonzero CLI exit with valid JSON (output withheld) |
 | Output safety | embedded newlines and control characters (one output line); secret-bearing `value` fields in every mode (never output); refused `value`/`decrypted` paths; JSON booleans |
-| Env gate | production-only records with `configurationId: null` (pass); multi-target, string-target, `gitBranch`, `configurationId`, custom-environment, `system`/`secret` type, missing `id`, duplicate and absent records, and unrecognized scope-like fields such as `applyToAllCustomEnvironments: true` (STOP); paginated listings (INCOMPLETE) |
+| Env gate | hidden Production count missing, non-integer or non-zero (STOP); production-only records with `configurationId: null` (pass); multi-target, string-target, `gitBranch`, `configurationId`, custom-environment, `system`/`secret` type, missing `id`, duplicate and absent records, and unrecognized scope-like fields such as `applyToAllCustomEnvironments: true` (STOP); paginated listings (INCOMPLETE) |
 | Deployment inventory (`vinventory`, multi-page stand-in `vercel` executable) | single and multiple pages; a `BUILDING` deployment on a later page (exit 9); a deployment older than earlier pages but inside the window; missing, repeated, non-advancing and malformed cursors; empty intermediate page; out-of-order and repeated rows; unknown states; nonzero CLI exit on a later page; a deployment added between two runs (digest differs); flag-ON candidates; no page cap |
 | Logs | malformed, reversed, future and naive UTC windows; zero and non-integer limits; invalid filters; truncation at the limit; missing timestamps; other-deployment rows; out-of-window rows; filter mismatches; repeated `--level` flags passed through intact; nonzero CLI exit |
+| Shell | each helper returns 2 (`bash required`) under zsh |
 | Probes | curl timeout (INCONCLUSIVE); application JSON 401 (`APP_401`); a Vercel redirect; a non-JSON 401; a bot-checkpoint 403 (INCONCLUSIVE); invalid host |
 
 ---
