@@ -92,6 +92,37 @@ describe("heuristicClassify: the owner's example questions map to existing answe
     expect(heuristicClassify(q)).toBeNull();
   });
 
+  it.each([
+    "What are the risks of taking ibuprofen every day?",
+    "top 5 pills for depression",
+    "Why does my chest hurt when I breathe?",
+    "Bitcoin vs Ethereum",
+    "How do I bring down a fever fast?",
+    "How do I file for divorce?",
+    "How do I get custody of my kids?",
+    "How do I stop an eviction?",
+    "How can I get out of debt?",
+    "How do I lower my blood pressure?",
+  ])("review R2 MINOR-B: an everyday sensitive question is never routed by a rule: %j", (q) => {
+    expect(sensitiveTopic(q)).not.toBeNull();
+    expect(heuristicClassify(q)).toBeNull();
+  });
+
+  it.each([
+    "How do I diagnose a memory leak in Node?",
+    "Compare smart contracts on Solana and Ethereum",
+    "How do I resurface a basketball court?",
+    "How do I integrate the Visa API?",
+    "What did Sue say about the roadmap?",
+  ])("review R2 NIT-1: an ordinary question is not flagged sensitive by an ambiguous word: %j", (q) => {
+    if (q.includes("Ethereum")) {
+      // Ethereum is a finance term on purpose; the point here is that "contracts" alone no longer flags.
+      expect(sensitiveTopic("Compare smart contracts on Solana and Cardano")).toBeNull();
+    } else {
+      expect(sensitiveTopic(q)).toBeNull();
+    }
+  });
+
   it("Ruling A: no rule can ever choose decision_support", () => {
     expect(HEURISTIC_RULES.map((r) => r.queryType)).not.toContain("decision_support");
     for (const q of ["Should our company expand into Kenya?", "Should we hire a CFO?", "Is it worth refinancing now?", "Would it be wise to sell?"]) {

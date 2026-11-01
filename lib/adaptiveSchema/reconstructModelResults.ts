@@ -16,9 +16,9 @@ import type { AdaptiveModelResult } from "./types";
 import type { ModelId } from "@/lib/types";
 import { SCHEMA_REGISTRY, getResultSchema } from "./schemaRegistry";
 import { validateAdaptiveResponse } from "./validator";
-import { SAVED_COPY_SHORTENED } from "./savedCopyNotice";
+import { SAVED_COPY_SHORTENED, SAVED_COPY_UNSTRUCTURED } from "./savedCopyNotice";
 
-export { SAVED_COPY_SHORTENED };
+export { SAVED_COPY_SHORTENED, SAVED_COPY_UNSTRUCTURED };
 
 export type SavedPanelRow = { modelId: string; status?: unknown; rawText?: unknown; wasTruncatedForStorage?: unknown };
 
@@ -34,6 +34,8 @@ export function reconstructModelResults(schemaId: string, rows: readonly SavedPa
     // Silent: a read emits no log lines (the parse-error message can quote model text).
     const result = validateAdaptiveResponse(modelId, schema, text, { silent: true });
     if (!result.ok && row.wasTruncatedForStorage === true) return { ...result, parseError: SAVED_COPY_SHORTENED };
+    // Review R2 MINOR-A: a live corrective retry is never saved, so a non-validating saved copy proves nothing about exclusion.
+    if (!result.ok) return { ...result, parseError: SAVED_COPY_UNSTRUCTURED };
     return result;
   });
 }

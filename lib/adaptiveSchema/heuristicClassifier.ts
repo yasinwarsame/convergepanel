@@ -23,8 +23,26 @@ import type { QueryType } from "./types";
 export type HeuristicRule = { id: string; queryType: QueryType; test: (query: string) => boolean };
 
 /** Health, legal and financial subject matter: never routed by the fallback (owner ruling, see the header). */
-export const SENSITIVE =
-  /\b(suicid\w*|kill (myself|himself|herself|themselves)|medic(al|ine|ation)s?|doses?|dosage|insulin|symptoms?|diagnos\w*|treatments?|therap\w*|pregnan\w*|surger\w*|cancer|disease|prescri\w*|drugs?|vaccin\w*|mental health|suicid\w*|self-harm|overdose|legal(ly)?|lawsuit|sue|contracts?|attorney|lawyer|court|visa|immigration|taxe?s?|invest(ing|ment)?s?|stocks?|loans?|mortgage|retirement|pension)\b/i;
+export const SENSITIVE = new RegExp(
+  "\\b(" +
+    [
+      // health (review R2 MINOR-B: everyday symptoms, conditions and medicines too)
+      "health", "medic(al|ine|ines|ation|ations)", "doctors?", "hospital", "pills?", "dose", "doses", "dosage", "insulin", "ibuprofen", "aspirin",
+      "paracetamol", "acetaminophen", "antibiotics?", "antidepressants?", "symptoms?", "diagnosis", "diagnosed with", "treatments?", "therapy", "therapist",
+      "pregnan\\w*", "surger(y|ies)", "cancer", "disease", "prescri(be|bed|ption|ptions)", "drugs?", "vaccin\\w*", "fever", "chest (pain|hurts?)",
+      "blood pressure", "heart (attack|condition|disease|rate)", "diabetes", "depression", "anxiety", "mental health", "suicid\\w*", "self-harm",
+      "overdose", "kill (myself|himself|herself|themselves)", "side effects?", "allerg\\w*", "infection", "injur(y|ies)",
+      // legal (NIT-1: specific phrases, not "sue", "court" or "visa" alone)
+      "legal(ly)?", "illegal", "lawsuit", "suing", "sued", "attorney", "lawyer", "court (case|order|date|hearing)", "in court", "custody", "divorce",
+      "evict(ion|ed)?", "landlord", "tenant rights", "immigration", "deport\\w*", "visa (application|status|denied|overstay)", "green card",
+      "employment contract", "lease", "will and testament", "criminal (record|charges?)", "arrest(ed)?",
+      // finance
+      "tax(es)?", "invest(ing|ment|ments)?", "stocks?", "shares", "bitcoin", "ethereum", "crypto(currency|currencies)?", "loans?", "mortgage",
+      "retirement", "pension", "debt", "bankrupt(cy)?", "credit (card|score)", "insurance", "savings",
+    ].join("|") +
+    ")\\b",
+  "i"
+);
 
 /** Self-harm and acute-danger terms: the highest risk level. A subset of SENSITIVE. */
 const SAFETY_CRITICAL = /\b(suicid\w*|self-harm|overdose|kill (myself|himself|herself|themselves))\b/i;

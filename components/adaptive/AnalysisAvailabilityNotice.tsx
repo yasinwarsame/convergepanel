@@ -25,7 +25,7 @@ export const ANALYSIS_NOTICE_LINES = {
   heuristic: "Automatic question classification was unavailable, so this report format was chosen by fallback rules.",
   generalFormat: "Automatic question classification was unavailable, so a general report format is used.",
   degraded: "The written synthesis could not be generated for this run. The summary is assembled directly from the panel's scored claims.",
-  sensitive: "This question involves health, legal or financial matters. The responses are general information, not professional advice.",
+  sensitive: "This question may involve health, legal or financial matters. The responses are general information, not professional advice.",
 } as const;
 
 export function analysisAvailabilityLines(classification: QueryClassification | undefined | null, synthesisReport: AdaptiveSynthesisReport | undefined | null): string[] {

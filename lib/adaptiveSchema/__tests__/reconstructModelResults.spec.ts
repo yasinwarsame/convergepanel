@@ -4,7 +4,7 @@
  */
 const mockWarn = jest.fn();
 jest.mock("@/lib/logger", () => ({ logger: { warn: (...a: unknown[]) => mockWarn(...a), info: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
-import { reconstructModelResults, SAVED_COPY_SHORTENED } from "@/lib/adaptiveSchema/reconstructModelResults";
+import { reconstructModelResults, SAVED_COPY_SHORTENED, SAVED_COPY_UNSTRUCTURED } from "@/lib/adaptiveSchema/reconstructModelResults";
 import { validateAdaptiveResponse } from "@/lib/adaptiveSchema/validator";
 import { getResultSchema } from "@/lib/adaptiveSchema/schemaRegistry";
 import { buildRunReadPayload } from "@/lib/runs/runReadPayload";
@@ -23,13 +23,14 @@ describe("reconstructModelResults", () => {
     expect(r).toEqual({ modelId: "gemini", schemaId: "comparison_matrix", ok: false, data: null, parseError: "Empty response" });
   });
 
-  it("a saved copy shortened by the storage cap says so, instead of implying a format failure; an unshortened bad copy keeps its parse error", () => {
+  it("a saved copy shortened by the storage cap says so; an unshortened non-validating copy gets the neutral saved-copy notice (never a format verdict)", () => {
     const cut = body("claude").slice(0, 25);
     const [short] = reconstructModelResults("comparison_matrix", [{ modelId: "claude", status: "ok", rawText: cut, wasTruncatedForStorage: true }]);
     expect([short.ok, short.parseError]).toEqual([false, SAVED_COPY_SHORTENED]);
     const [bad] = reconstructModelResults("comparison_matrix", [{ modelId: "claude", status: "ok", rawText: cut }]);
     expect(bad.ok).toBe(false);
-    expect(bad.parseError).not.toBe(SAVED_COPY_SHORTENED);
+    // Review R2 MINOR-A: a live retry is never saved, so a non-validating saved copy gets the neutral notice, never parse details.
+    expect(bad.parseError).toBe(SAVED_COPY_UNSTRUCTURED);
   });
 
   it("a read logs nothing, even for unparseable text that a parse error would quote; live validation still logs", () => {

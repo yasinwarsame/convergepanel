@@ -11,6 +11,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { FailedResultsNote } from "@/components/adaptive/shared";
 import { RunSlotStatusContext, didNotRespondText, slotDidNotRespond } from "@/components/adaptive/RunSlotStatusContext";
 import AnalysisAvailabilityNotice, { ANALYSIS_NOTICE_LINES, analysisAvailabilityLines } from "@/components/adaptive/AnalysisAvailabilityNotice";
+import { SAVED_COPY_SHORTENED, SAVED_COPY_UNSTRUCTURED } from "@/lib/adaptiveSchema/savedCopyNotice";
 
 const failedRow = (modelId: string, parseError = "Empty response") => ({ modelId, schemaId: "generic", ok: false, data: null, parseError }) as never;
 const html = (el: ReturnType<typeof createElement>, statuses?: Map<string, string>) =>
@@ -40,6 +41,17 @@ describe("D-4 failure labels", () => {
     expect(out).toContain("returned an incompatible format");
     expect(out).toContain("Unexpected token");
     expect(out).not.toContain("did not respond");
+  });
+
+  it.each([
+    ["shortened", SAVED_COPY_SHORTENED],
+    ["unstructured", SAVED_COPY_UNSTRUCTURED],
+  ])("review R2 MINOR-A: a reopened response whose saved copy is %s is described as such: never 'incompatible format', 'excluded' or parse details", (_l, notice) => {
+    const out = html(createElement(FailedResultsNote, { failed: [failedRow("claude", notice)] }), new Map([["claude", "ok"]]));
+    expect(out).toContain(notice.replaceAll("'", "&#x27;"));
+    expect(out).not.toContain("incompatible format");
+    expect(out).not.toContain("excluded");
+    expect(out).not.toContain("Details");
   });
 
   it("without the run's record (no provider) the original wording is kept: it cannot tell a failure from a format problem", () => {
