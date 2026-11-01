@@ -12,6 +12,8 @@ import {
 } from "@/lib/adaptiveSchema/persistedOutput";
 import { parseGovernanceRecord } from "@/lib/adaptiveSchema/governanceRecordParser";
 import { attachDeepResearchClaimIds } from "@/lib/verification/attachDeepResearchClaimIds";
+import { reconstructModelResults } from "@/lib/adaptiveSchema/reconstructModelResults";
+import type { AdaptiveModelResult } from "@/lib/adaptiveSchema/types";
 
 /**
  * Team Research Parity, Phase R1 — the ONE canonical interpretation of a
@@ -74,6 +76,11 @@ export type RunReadPayload = {
          * the evaluation reasons, and never compared to the current policy.
          */
         automatedGovernance: { status: string; policyVersion?: number } | null;
+        /**
+         * Ruling B (2026-11-02): each model's structured result, rebuilt from the saved responses already in this
+         * payload (`results`) with the live validator. Response-time only, never persisted. Additive.
+         */
+        modelResults: AdaptiveModelResult[];
       }
     | { status: "absent" | "unsupported_version" | "malformed"; output: null; humanReview: null; reviewRouting: "unknown"; automatedGovernance: null };
   legacyAdaptive:
@@ -221,6 +228,7 @@ export async function buildRunReadPayload(args: {
         humanReview,
         reviewRouting,
         automatedGovernance,
+        modelResults: reconstructModelResults(parsedAdaptive.output.schemaId, results),
       }
     : { status: parsedAdaptive.reason, output: null, humanReview: null, reviewRouting: "unknown" as const, automatedGovernance: null };
 

@@ -19,7 +19,9 @@ const html = (el: ReturnType<typeof createElement>, statuses?: Map<string, strin
 describe("D-4 failure labels", () => {
   it("a provider failure (recorded status error) says 'did not respond', never 'incompatible format', and shows no Details", () => {
     const out = html(createElement(FailedResultsNote, { failed: [failedRow("gemini")] }), new Map([["gemini", "error"], ["chatgpt", "ok"]]));
-    expect(out).toContain("did not respond (the provider returned an error)");
+    expect(out).toContain("did not respond and was excluded from comparison.");
+    // Review MINOR-1: the default claims no cause ("failed" covers timeouts, refusals and errors alike).
+    expect(out).not.toContain("provider returned an error");
     expect(out).not.toContain("incompatible format");
     expect(out).not.toContain("Empty response");
   });
@@ -28,7 +30,7 @@ describe("D-4 failure labels", () => {
     ["timeout", "did not respond in time"],
     ["refused", "declined to answer"],
     ["rate_limited", "rate-limited by its provider"],
-    ["failed", "did not respond (the provider returned an error)"],
+    ["failed (what saved rows actually record)", "did not respond and was excluded from comparison."],
   ])("recorded status %s → %s", (status, phrase) => {
     expect(html(createElement(FailedResultsNote, { failed: [failedRow("gemini")] }), new Map([["gemini", status]]))).toContain(phrase);
   });
@@ -49,7 +51,7 @@ describe("D-4 failure labels", () => {
     const m = new Map([["a", "ok"], ["b", "substituted"], ["c", ""], ["d", "error"]]);
     expect([slotDidNotRespond(m, "a"), slotDidNotRespond(m, "b"), slotDidNotRespond(m, "c"), slotDidNotRespond(m, "zz"), slotDidNotRespond(null, "d")]).toEqual([null, null, null, null, null]);
     expect(slotDidNotRespond(m, "d")).toBe("error");
-    expect(didNotRespondText("anything-else")).toBe("did not respond (the provider returned an error) and was excluded from comparison.");
+    expect(didNotRespondText("anything-else")).toBe("did not respond and was excluded from comparison.");
   });
 });
 

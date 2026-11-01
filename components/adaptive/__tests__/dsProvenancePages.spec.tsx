@@ -158,6 +158,14 @@ function stage(c: PageCase): void {
 let mockRewrite: ((path: string, body: Record<string, unknown>) => Record<string, unknown>) | null = null;
 
 /** As the runtime does: a handler that throws becomes a 500 (O6-OBS-5 throws inside P1/W1 after authorization). */
+/**
+ * Shared Adaptive Schema Ruling B (owner-approved 2026-11-02): the read routes now add `adaptive.modelResults` (per-model
+ * results rebuilt from the saved responses), which fills the report's "Model Responses" section. The frozen 9eca1e3
+ * comparison runs with ONLY that field removed, so every other byte is still held to the oracle. A separate assertion
+ * proves that the field's only effect is inside the Model Responses section.
+ */
+let mockStripModelResults = true;
+
 async function serve(url: string, init: { method?: string } = {}): Promise<Response> {
   let res: Response;
   try {
@@ -165,9 +173,29 @@ async function serve(url: string, init: { method?: string } = {}): Promise<Respo
   } catch {
     return new Response("Internal Server Error", { status: 500 });
   }
-  if (!mockRewrite || res.status !== 200) return res;
-  const body = mockRewrite(new URL(url, "http://localhost").pathname, await res.json());
+  if (res.status !== 200 || (!mockRewrite && !mockStripModelResults)) return res;
+  let body = (await res.json()) as Record<string, unknown>;
+  if (mockStripModelResults && body.adaptive && typeof body.adaptive === "object") {
+    const { modelResults: _mr, ...adaptive } = body.adaptive as Record<string, unknown>;
+    body = { ...body, adaptive };
+  }
+  if (mockRewrite) body = mockRewrite(new URL(url, "http://localhost").pathname, body);
   return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+}
+
+/**
+ * The report's collapsed "Model Responses" block (ModelResponsesSection), removed to compare everything outside it.
+ * Also removes ResultsDisplay's AdaptiveDebugPanel, which renders only when NODE_ENV !== "production" (never in
+ * Production) and lists the same per-model statuses.
+ */
+function withoutModelResponses(node: Node | string): Node | string | null {
+  if (typeof node === "string") return node;
+  if (node.type === "details" && String(node.props.className ?? "").includes("border-purple-300")) return null;
+  if (node.type === "details") {
+    const summary = (node.children ?? []).find((c) => typeof c !== "string" && c.type === "summary") as Node | undefined;
+    if (summary && (summary.children ?? []).join("") === "Model Responses") return null;
+  }
+  return { ...node, children: node.children ? (node.children.map(withoutModelResponses).filter((c) => c !== null) as (Node | string)[]) : null };
 }
 
 async function route(url: string, init: { method?: string }): Promise<Response> {
@@ -315,6 +343,18 @@ if (CAPTURE) {
       expect(off.dom).toBe(off.baselineDom);
       const on = await renderPage(c, true);
       expect({ sha: sha(undoCriticalContrastClasses(on.baselineDom).markup), d9: on.d9, requests: on.requests }).toEqual({ sha: base.domSha256, d9: base.d9, requests: base.requests });
+    });
+
+    it.each(CASES.map((c) => [c.id, c] as const))("Ruling B: %s — with modelResults served, the page differs ONLY inside the Model Responses section", async (_id, c) => {
+      const frozen = await renderPage(c, false);
+      mockStripModelResults = false;
+      try {
+        const withResults = await renderPage(c, false);
+        expect(serialize(withResults.tree ? withoutModelResponses(withResults.tree) : null)).toBe(serialize(frozen.tree ? withoutModelResponses(frozen.tree) : null));
+        expect(withResults.requests).toEqual(frozen.requests);
+      } finally {
+        mockStripModelResults = true;
+      }
     });
   });
 

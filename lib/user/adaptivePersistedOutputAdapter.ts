@@ -20,6 +20,7 @@
 import type { AdaptivePanelPayload } from "@/components/ResultsDisplay";
 import type { PersistedAdaptiveOutput, PersistedLegacyAdaptiveOutputV1 } from "@/lib/adaptiveSchema/persistedOutput";
 import type { ReportStatusInput } from "@/lib/adaptiveSchema/reportStatus";
+import type { AdaptiveModelResult } from "@/lib/adaptiveSchema/types";
 
 /**
  * Adaptive Synthesis Report, Phase 1 (docs/adaptive-synthesis-report-design.md
@@ -37,12 +38,17 @@ export interface AdaptiveGovernanceContext {
 
 export function adaptPersistedOutputToPanelPayload(
   output: PersistedAdaptiveOutput,
-  governance?: AdaptiveGovernanceContext
+  governance?: AdaptiveGovernanceContext,
+  /** Ruling B: per-model results rebuilt by the read API from the saved responses. Absent keeps the old empty list. */
+  modelResults?: AdaptiveModelResult[]
 ): AdaptivePanelPayload {
   const base = {
     classification: output.classification,
     schemaId: output.schemaId,
+    // Ruling B: `results` stays the envelope's own (empty) per-model list, so every count/summary keeps reading what it
+    // read before. The rebuilt per-model results feed ONLY the Model Responses section, via savedModelResults.
     results: [],
+    ...(modelResults ? { savedModelResults: modelResults } : {}),
     generatedAt: output.generatedAt,
     meta: output.meta,
     persistenceStatus: "saved" as const,

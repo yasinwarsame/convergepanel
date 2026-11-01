@@ -33,6 +33,10 @@ export interface TeamResearchRunResult {
   runId: string;
   results: PanelResultPublic[];
   governanceStatus?: PanelHistoryGovernanceStatus;
+  /** `false` only when the server reports the run was NOT durably saved; absent (older server) is treated as saved. */
+  runPersisted?: boolean;
+  /** The adaptive report's own save outcome, when the run produced one (e.g. "saved", "failed", "omitted_size_limit"). */
+  adaptivePersistence?: string;
 }
 
 export type TeamResearchSubmitResult = { status: "ok"; run: TeamResearchRunResult } | { status: "error"; errorCode: string; message: string };
@@ -52,9 +56,18 @@ function readErrorMessage(body: unknown): string {
 function parseRunResponse(body: unknown): TeamResearchRunResult | null {
   if (typeof body !== "object" || body === null) return null;
   const d = body as Record<string, unknown>;
-  if (d.ok !== true || typeof d.runId !== "string" || !Array.isArray(d.results)) return null;
+  if (d.ok !== true || typeof d.runId !== "string" || d.runId.trim().length === 0 || !Array.isArray(d.results)) return null;
   const governanceStatus = d.governanceStatus === "approved" || d.governanceStatus === "needs_review" || d.governanceStatus === "blocked" ? d.governanceStatus : undefined;
-  return { runId: d.runId, results: d.results as PanelResultPublic[], governanceStatus };
+  const runPersisted = typeof d.runPersisted === "boolean" ? d.runPersisted : undefined;
+  const adaptive = d.adaptive && typeof d.adaptive === "object" ? (d.adaptive as Record<string, unknown>) : null;
+  const adaptivePersistence = adaptive && typeof adaptive.persistenceStatus === "string" ? adaptive.persistenceStatus : undefined;
+  return {
+    runId: d.runId,
+    results: d.results as PanelResultPublic[],
+    governanceStatus,
+    ...(runPersisted !== undefined ? { runPersisted } : {}),
+    ...(adaptivePersistence !== undefined ? { adaptivePersistence } : {}),
+  };
 }
 
 export interface UseTeamProjectResearchResult {

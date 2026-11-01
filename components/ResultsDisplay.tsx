@@ -77,6 +77,8 @@ export interface AdaptivePanelPayload {
   classification: QueryClassification;
   schemaId: QueryType;
   results: AdaptiveModelResult[];
+  /** Ruling B: per-model results rebuilt from a reopened run's saved responses; read only by the Model Responses section. */
+  savedModelResults?: AdaptiveModelResult[];
   alignedClaims?: AlignedClaim[];
   /** Present only when ADAPTIVE_VERIFICATION_ENABLED was on for this run. */
   gate?: AdaptiveGateResult;
@@ -1112,6 +1114,7 @@ export default function ResultsDisplay({
           schema={getResultSchema(adaptive.schemaId)}
           classification={adaptive.classification}
           results={adaptive.results}
+          savedModelResults={adaptive.savedModelResults}
           alignedClaims={adaptive.alignedClaims}
           gate={adaptive.gate}
           synthesisReport={adaptive.synthesisReport}

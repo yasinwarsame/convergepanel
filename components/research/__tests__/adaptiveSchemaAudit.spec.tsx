@@ -11,12 +11,9 @@
  * Asserted for all 18 (Individual and Team): the run reads as ready; the adaptive view for THAT schema renders; the
  * envelope family is right; never the no-analysis fallback, never "No unified answer yet", never "incompatible format"
  * for a provider failure; the panel's content is reachable.
- * Asserted for the 9 legacy-active schemas: every responding model's own response is reachable, and the failed model
- * is disclosed as "did not respond".
- *
- * OPEN AUDIT FINDING (reported to the owner, fix NOT made in this PR, per D-5): the 9 Milestone-2 views render the
- * aggregated result only. A second model's own response is not reachable, and a model that did not respond is not
- * disclosed. Pinned below as a tripwire (OPEN_FINDING_SCHEMAS) until the owner approves the fix.
+ * Asserted for ALL 18 (Ruling B, 2026-11-02): every responding model's own response is reachable under its model
+ * name, and the failed model is disclosed as "did not respond". The 9 Milestone-2 formats rebuild each model's
+ * result on reopen from the saved responses (reconstructModelResults.ts), so this holds for reopened research too.
  */
 jest.mock("react-markdown", () => ({ __esModule: true, default: ({ children }: { children?: unknown }) => require("react").createElement("div", null, children as never) }));
 jest.mock("remark-gfm", () => ({ __esModule: true, default: () => null }));
@@ -56,8 +53,6 @@ const text = (n: unknown): string => {
 /** Every executing schema: active and not the non-executing limitation. Pinned to 18, so a new schema joins the audit. */
 const EXECUTING = (Object.keys(SCHEMA_REGISTRY) as (keyof typeof SCHEMA_REGISTRY)[]).filter((id) => SCHEMA_REGISTRY[id].implementationStatus === "active" && id !== "graceful_limitation").sort();
 const LEGACY = new Set<string>(PERSISTED_LEGACY_ADAPTIVE_SCHEMA_IDS);
-/** D-5 open finding (reported to the owner 2026-11-02; fix not authorized yet): views that show the aggregate only. */
-const OPEN_FINDING_SCHEMAS = new Set<string>(["ranked_enumeration", "comparison_matrix", "definition_explanation", "causal_explanation", "checklist_taxonomy", "deep_research", "evidence_review", "bias_blindspot_audit", "decision_support"]);
 const M2 = new Set<string>(Object.keys(SCHEMA_ANSWER_SHAPE));
 
 /** Two answering models with per-model marker text in every string field; Gemini's slot failed, as in Production. */
@@ -141,29 +136,14 @@ describe.each(EXECUTING)("%s", (id) => {
     }
   });
 
-  if (LEGACY.has(id)) {
-    it("legacy-active: every responding model's own response is reachable, and the failed model is disclosed as not having responded", async () => {
-      const { views } = await audit(id);
-      for (const [surface, r] of Object.entries(views)) {
-        const t = text(r.toJSON());
-        expect([surface, reachable(id, t, "chatgpt"), reachable(id, t, "claude")]).toEqual([surface, true, true]);
-        expect([surface, t.includes("did not respond")]).toEqual([surface, true]);
-      }
-    });
-  } else {
-    it("OPEN FINDING (tripwire, owner approval pending): this Milestone-2 view shows the aggregate only, so a second model's own response and the non-responding model are not disclosed", async () => {
-      // This pins the MEASURED gap so it cannot change silently. A fix will make this test fail: then move the schema
-      // out of OPEN_FINDING_SCHEMAS and into the legacy-style assertions above.
-      expect(OPEN_FINDING_SCHEMAS.has(id)).toBe(true);
-      const { views } = await audit(id);
-      for (const [surface, r] of Object.entries(views)) {
-        const t = text(r.toJSON());
-        expect([surface, reachable(id, t, "claude"), t.includes("did not respond")]).toEqual([surface, false, false]);
-      }
-    });
-  }
-});
-
-it("the open-finding list is exactly the 9 Milestone-2 schemas: no executing schema is outside both assertion sets", () => {
-  expect([...OPEN_FINDING_SCHEMAS].sort()).toEqual(EXECUTING.filter((id) => M2.has(id)).sort());
+  it("every responding model's own response is reachable, and the failed model is disclosed as not having responded (Ruling B: all 18 formats)", async () => {
+    const { views } = await audit(id);
+    for (const [surface, r] of Object.entries(views)) {
+      const t = text(r.toJSON());
+      expect([surface, reachable(id, t, "chatgpt"), reachable(id, t, "claude")]).toEqual([surface, true, true]);
+      expect([surface, t.includes("did not respond")]).toEqual([surface, true]);
+      // Ruling B: never the old "raw responses aren't saved" notice when they are saved on the run.
+      expect([surface, /aren.?t saved for this schema/.test(t)]).toEqual([surface, false]);
+    }
+  });
 });

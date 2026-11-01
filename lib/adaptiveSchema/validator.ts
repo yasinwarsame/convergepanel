@@ -325,8 +325,16 @@ function salvageFields(
 export function validateAdaptiveResponse(
   modelId: ModelId,
   schema: ResultSchema,
-  rawText: string | null
+  rawText: string | null,
+  /**
+   * `silent` (Ruling B, 2026-11-02): emit no log lines. Used ONLY when a saved run is re-read to rebuild per-model
+   * results. A read must not log, and the parse-error message can quote model text. Live validation is unchanged.
+   */
+  opts?: { silent?: boolean }
 ): AdaptiveModelResult {
+  const warn = (message: string, data?: Record<string, unknown>) => {
+    if (!opts?.silent) logger.warn(message, data);
+  };
   if (!rawText || !rawText.trim()) {
     return { modelId, schemaId: schema.id, ok: false, data: null, parseError: "Empty response" };
   }
@@ -335,7 +343,7 @@ export function validateAdaptiveResponse(
   try {
     parsedJson = JSON.parse(stripJsonFences(rawText));
   } catch (err: any) {
-    logger.warn("[adaptiveSchema] Response was not valid JSON", {
+    warn("[adaptiveSchema] Response was not valid JSON", {
       modelId,
       schemaId: schema.id,
       error: err?.message,
@@ -357,7 +365,7 @@ export function validateAdaptiveResponse(
   // ever sees it, e.g. Gemini's `"stance": "Agrees"` -> `"asserts"`.
   const { patched, coercions } = coerceEnumDrift(modelId, schema, parsedJson as Record<string, unknown>);
   if (coercions.length > 0) {
-    logger.warn("[adaptiveSchema] Coerced enum drift before validation", {
+    warn("[adaptiveSchema] Coerced enum drift before validation", {
       modelId,
       schemaId: schema.id,
       coercions: coercions.map((c) => ({ field: c.field, path: c.path, raw: c.raw, coerced: c.coerced })),
@@ -381,7 +389,7 @@ export function validateAdaptiveResponse(
     invalidFields = salvaged.invalidFields;
 
     if (Object.keys(data).length === 0) {
-      logger.warn("[adaptiveSchema] Response failed schema validation", {
+      warn("[adaptiveSchema] Response failed schema validation", {
         modelId,
         schemaId: schema.id,
         issues: salvaged.issues,
@@ -397,7 +405,7 @@ export function validateAdaptiveResponse(
       };
     }
 
-    logger.warn("[adaptiveSchema] Salvaged partial response after schema validation failure", {
+    warn("[adaptiveSchema] Salvaged partial response after schema validation failure", {
       modelId,
       schemaId: schema.id,
       invalidFields,
@@ -419,7 +427,7 @@ export function validateAdaptiveResponse(
       if (truncated) {
         data[field.key] = text;
         markTruncated(field.key);
-        logger.warn("[adaptiveSchema] Soft-truncated string field over word cap", {
+        warn("[adaptiveSchema] Soft-truncated string field over word cap", {
           modelId,
           schemaId: schema.id,
           field: field.key,
@@ -433,7 +441,7 @@ export function validateAdaptiveResponse(
       if (field.maxItems && value.length > field.maxItems) {
         data[field.key] = value.slice(0, field.maxItems);
         markTruncated(field.key);
-        logger.warn("[adaptiveSchema] Truncated array field over item cap", {
+        warn("[adaptiveSchema] Truncated array field over item cap", {
           modelId,
           schemaId: schema.id,
           field: field.key,
@@ -443,7 +451,7 @@ export function validateAdaptiveResponse(
       }
 
       if (field.minItems && value.length < field.minItems) {
-        logger.warn("[adaptiveSchema] Array field below minimum item count (not fabricated)", {
+        warn("[adaptiveSchema] Array field below minimum item count (not fabricated)", {
           modelId,
           schemaId: schema.id,
           field: field.key,

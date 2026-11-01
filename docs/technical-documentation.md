@@ -726,9 +726,18 @@ This slice closes the remaining gaps without a new taxonomy, provider or schema 
   - There is no navigation if the composer has unmounted.
   - `TeamResearchResultView` is no longer rendered by the composer; the file and its spec remain.
 - **D-2, classification resilience:** `classifyQuery()` no longer caches failure fallbacks (connector error, timeout, malformed or schema-invalid answer), so a recovered provider is asked again.
-  - On those failures, `lib/adaptiveSchema/heuristicClassifier.ts` (pure, no provider call) maps unambiguous question patterns to EXISTING answer types: comparison, risks and trade-offs, decision, causal, forecast (a time horizon, or "Will …" with a change verb), procedure, ranking, definition. Anything else stays `generic`.
-  - The result is marked `classificationSource: "heuristic"` with `heuristicRule`, keeps `fallbackReason`, has confidence 0.4, and must pass the same `ClassificationSchema` and route to an active schema. Both new fields are additive and optional.
-  - A low-confidence model verdict is unchanged (generic, cached).
+  - On those failures, `lib/adaptiveSchema/heuristicClassifier.ts` (pure, no provider call) maps unambiguous question patterns to EXISTING answer types:
+    - comparison: anchored "compare…", "vs/versus", "what are the differences between";
+    - risks and trade-offs;
+    - causal;
+    - forecast: a future-year or "next N years" horizon, or "Will …" with a change verb;
+    - procedure;
+    - ranking ("top N", with `requestedCount` carried);
+    - definition.
+  - Anything else stays `generic`. The result is marked `classificationSource: "heuristic"` with `heuristicRule`, keeps `fallbackReason`, has confidence 0.4, and must pass `ClassificationSchema` and route to an active schema.
+  - **Owner Ruling A:** the fallback never chooses `decision_support`, whose governance record, decision receipt, Team review and Decision Support export all hang off the Milestone-2 envelope, created only inside `if (adaptiveOutput.persistedOutput)` in `runPanelExecution.ts`.
+  - A health-, legal- or finance-sensitive question (`sensitiveTopic()`) stays `generic` but keeps its risk signal: `riskLevel` `high_stakes`, or `safety_critical` for self-harm terms, and `evidenceRequirement: "high"`, marked `heuristicRule: "sensitive_topic"`. It is never downgraded to `professional`, so the riskLevel-driven safeguards (export classification floor, view warnings, analytics) stay active.
+  - A validated model classification may still choose Decision Support through its normal path. A low-confidence model verdict is unchanged (generic, cached).
 - **D-3, availability notice:** `components/adaptive/AnalysisAvailabilityNotice.tsx`, rendered at the top of every adaptive report, names what did not run:
   - a heuristic or default classification after a classifier failure;
   - `synthesisReport.degraded === true` (the written synthesis could not be generated, and the summary is assembled from the panel's scored claims).
@@ -740,7 +749,16 @@ This slice closes the remaining gaps without a new taxonomy, provider or schema 
 - **D-5, per-schema audit:** `components/research/__tests__/adaptiveSchemaAudit.spec.tsx` runs every executing schema, with Gemini failing, through the real builder, envelope, read, the Personal and Team interpreters and the shared view.
   - It asserts the schema's own view renders, never the no-analysis fallback or "incompatible format" for a provider failure, and that content is reachable.
   - For the 9 legacy-active schemas it also asserts that every responding model's response is reachable and the failed model is disclosed.
-  - **Open finding** (owner decision; pinned as a tripwire, `OPEN_FINDING_SCHEMAS`): the 9 Milestone-2 views show only the aggregated result. A second model's own response is not reachable, and a non-responding model is not disclosed.
+- **Owner Ruling B, all 18 formats show each model's response:** the Milestone-2 envelope stores the aggregate, not per-model answers, so a reopened report's Model Responses section used to say raw responses "aren't saved".
+  - `buildRunReadPayload` now adds a response-time `adaptive.modelResults`, rebuilt from the run's saved responses with the live validator in `silent` mode (`lib/adaptiveSchema/reconstructModelResults.ts`). It adds no provider call, no write, no log line (a parse error can quote model text) and no new data: it is derived from `results` in the same payload. The Order 6 route AC suite (`dsProvenanceRouteView.spec.ts`) holds the field out of its 45df2ea byte comparison and asserts that it is flag-independent and present only with a valid Milestone-2 envelope.
+  - The adapter passes it as `savedModelResults`, read ONLY by `ModelResponsesSection` in the 9 Milestone-2 branches. Counts and summaries keep reading the envelope as before.
+  - A model that did not respond is a failed slot, labelled "did not respond". A response shortened by the 20k storage cap is labelled as shortened, not as a format failure.
+  - Residual: if a model's first answer failed validation and a retry fixed it live, only the first answer is saved, so the reopened view shows that answer's parse error.
+- **Review corrections:**
+  - The Team composer navigates only when `runPersisted` (new additive response field) is not false and the adaptive report was not `failed` / `omitted_size_limit`. Otherwise it keeps the in-memory responses on the page with a notice.
+  - The default failure wording claims no cause.
+  - The frozen-baseline strip matches the exact notice only, with exactly one notice per affected output.
+  - `dsProvenancePages.spec.tsx` compares the frozen 9eca1e3 pages with `modelResults` removed, and proves the field changes nothing outside the Model Responses section (and the dev-only debug panel).
 
 ---
 

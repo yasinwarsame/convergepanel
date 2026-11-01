@@ -28,10 +28,16 @@ export function slotDidNotRespond(statuses: ReadonlyMap<string, string> | null, 
   return status === "ok" || status === "substituted" ? null : status;
 }
 
-/** Fixed, system-authored wording for a recorded non-response. Never provider error text. */
+/**
+ * Fixed, system-authored wording for a recorded non-response. Never provider error text.
+ *
+ * Saved and live rows normally reach this point only as ok / substituted / failed (panel.ts's failedPlaceholder,
+ * normalize.ts). "failed" covers timeouts, refusals and errors alike, so the default claims no cause (review MINOR-1).
+ * The specific wordings apply only when a row records that specific status.
+ */
 export function didNotRespondText(status: string): string {
   if (status === "timeout") return "did not respond in time and was excluded from comparison.";
   if (status === "refused") return "declined to answer and was excluded from comparison.";
   if (status === "rate_limited") return "was rate-limited by its provider and was excluded from comparison.";
-  return "did not respond (the provider returned an error) and was excluded from comparison.";
+  return "did not respond and was excluded from comparison.";
 }

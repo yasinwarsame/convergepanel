@@ -31,7 +31,7 @@ import {
 } from "./types";
 import { CLASSIFIER_SYSTEM_PROMPT } from "./classifierPrompt";
 import { stripJsonFences, withTimeout } from "./util";
-import { heuristicClassify } from "./heuristicClassifier";
+import { heuristicClassify, sensitiveTopic } from "./heuristicClassifier";
 import { SCHEMA_REGISTRY } from "./schemaRegistry";
 
 // Was 3000ms — far tighter than every other Gemini call in this module
@@ -222,6 +222,19 @@ const HEURISTIC_CONFIDENCE = 0.4;
  */
 function fallbackAfterFailure(reason: "connector_error" | "timeout" | "malformed_json" | "schema_invalid", query: string): QueryClassification {
   const base = genericFallback(reason);
+  // Ruling A: a health/legal/financial question stays generic, with its risk signal kept, never downgraded to "professional".
+  const sensitivity = sensitiveTopic(query);
+  if (sensitivity) {
+    const guarded: QueryClassification = {
+      ...base,
+      riskLevel: sensitivity,
+      evidenceRequirement: "high",
+      classificationSource: "heuristic",
+      heuristicRule: "sensitive_topic",
+      rationale: `Heuristic fallback (sensitive_topic) after ${reason}: general format, risk level kept; not a model classification.`,
+    };
+    return ClassificationSchema.safeParse(guarded).success ? guarded : base;
+  }
   const hit = heuristicClassify(query);
   if (!hit) return base;
   const entry = SCHEMA_REGISTRY[hit.queryType];
@@ -231,6 +244,7 @@ function fallbackAfterFailure(reason: "connector_error" | "timeout" | "malformed
     queryType: hit.queryType,
     answerShape: entry.renderHint,
     confidence: HEURISTIC_CONFIDENCE,
+    requestedCount: hit.requestedCount ?? base.requestedCount,
     classificationSource: "heuristic",
     heuristicRule: hit.ruleId,
     rationale: `Heuristic fallback (${hit.ruleId}) after ${reason}; not a model classification.`,

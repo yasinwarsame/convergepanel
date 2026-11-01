@@ -16,7 +16,7 @@ jest.mock("@/lib/connectors/gemini", () => ({ callGemini: jest.fn() }));
 const mockedCallGemini = callGemini as jest.MockedFunction<typeof callGemini>;
 
 import { classifyQuery } from "@/lib/adaptiveSchema/classifier";
-import { HEURISTIC_RULES, heuristicClassify } from "@/lib/adaptiveSchema/heuristicClassifier";
+import { HEURISTIC_RULES, heuristicClassify, sensitiveTopic } from "@/lib/adaptiveSchema/heuristicClassifier";
 import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
 import { routeClassifiedQuery } from "@/lib/adaptiveSchema/routeClassifiedQuery";
 
@@ -36,7 +36,6 @@ describe("heuristicClassify: the owner's example questions map to existing answe
   it.each([
     ["Will AI eliminate more jobs than it creates in the next 10 years?", "forecast_speculative"],
     ["Will AI eliminate more jobs than it creates?", "forecast_speculative"],
-    ["Should our company expand into Kenya?", "decision_support"],
     ["Compare GPT, Claude and Gemini", "comparison_matrix"],
     ["What caused inflation to rise?", "causal_explanation"],
     ["What are the risks of adopting AI agents?", "checklist_taxonomy"],
@@ -50,6 +49,15 @@ describe("heuristicClassify: the owner's example questions map to existing answe
 
   it.each([
     "Will this code compile?",
+    // Ruling A: a business decision is never routed to Decision Support by the fallback.
+    "Should our company expand into Kenya?",
+    "Should I stop taking my insulin?",
+    "Is it legal to break my lease early?",
+    // Review MINOR-2: incidental "comparing"/"compare" and past years are not comparisons or forecasts.
+    "Write a poem comparing love and war",
+    "Is this video real? compare frames",
+    "Is the claim that inflation fell true? Compare sources",
+    "What happened to the economy by 2020?",
     "Will you help me write an email?",
     "What is the capital of France?",
     "Tell me about the Roman Empire",
@@ -69,19 +77,54 @@ describe("heuristicClassify: the owner's example questions map to existing answe
     expect(new Set(HEURISTIC_RULES.map((r) => r.id)).size).toBe(HEURISTIC_RULES.length);
   });
 
-  it("the first matching rule wins (order pinned): a 'should we compare' question is a comparison", () => {
-    expect(heuristicClassify("Should we compare vendors A and B?")?.ruleId).toBe("comparison");
+  it("the first matching rule wins (order pinned): a comparison that asks about risks is a comparison", () => {
+    expect(heuristicClassify("Compare the risks of vendors A and B")?.ruleId).toBe("comparison");
+  });
+
+  it.each([
+    ["How should I invest my retirement savings?", "procedure"],
+    ["Compare the side effects of two blood-pressure medications", "comparison"],
+    ["What are the risks of stopping insulin?", "risks_or_tradeoffs"],
+    ["What caused my symptoms to get worse?", "causal"],
+  ])("Ruling A: a sensitive question that WOULD match the %s rule is never routed by it", (q, wouldMatch) => {
+    // Precondition: without the sensitivity guard this question matches a rule, so the guard is what keeps it generic.
+    expect(HEURISTIC_RULES.find((r) => r.id === wouldMatch)!.test(q)).toBe(true);
+    expect(heuristicClassify(q)).toBeNull();
+  });
+
+  it("Ruling A: no rule can ever choose decision_support", () => {
+    expect(HEURISTIC_RULES.map((r) => r.queryType)).not.toContain("decision_support");
+    for (const q of ["Should our company expand into Kenya?", "Should we hire a CFO?", "Is it worth refinancing now?", "Would it be wise to sell?"]) {
+      expect([q, heuristicClassify(q)?.queryType ?? null]).not.toEqual([q, "decision_support"]);
+    }
+  });
+
+  it("a future-year horizon is a forecast, a past one is not; 'top N' carries its count", () => {
+    const next = new Date().getUTCFullYear() + 5;
+    expect(heuristicClassify(`What will EV adoption look like by ${next}?`)?.queryType).toBe("forecast_speculative");
+    expect(heuristicClassify("What did EV adoption look like by 2019?")).toBeNull();
+    expect(heuristicClassify("What are the top 5 CRM tools for small businesses?")).toEqual({ queryType: "ranked_enumeration", ruleId: "ranking", requestedCount: 5 });
+  });
+
+  it.each([
+    ["Should I stop taking my insulin?", "high_stakes"],
+    ["Is it legal to break my lease early?", "high_stakes"],
+    ["How should I invest my retirement savings?", "high_stakes"],
+    ["I keep thinking about suicide, what should I do?", "safety_critical"],
+    ["Compare GPT, Claude and Gemini", null],
+  ])("sensitiveTopic(%j) → %s", (q, want) => {
+    expect(sensitiveTopic(q)).toBe(want);
   });
 });
 
 describe("classifyQuery: the heuristic runs only when classification could not complete", () => {
   it("provider error (the Production 402 shape) → heuristic answer type, marked as a fallback, routable to an active schema", async () => {
     mockedCallGemini.mockResolvedValue(providerError);
-    const c = await classifyQuery(uniq("Should our company expand into Kenya?"));
-    expect(c.queryType).toBe("decision_support");
-    expect(c.answerShape).toBe(SCHEMA_REGISTRY.decision_support.renderHint);
+    const c = await classifyQuery(uniq("What caused the 2008 financial crisis?"));
+    expect(c.queryType).toBe("causal_explanation");
+    expect(c.answerShape).toBe(SCHEMA_REGISTRY.causal_explanation.renderHint);
     expect(c.classificationSource).toBe("heuristic");
-    expect(c.heuristicRule).toBe("decision");
+    expect(c.heuristicRule).toBe("causal");
     expect(c.fallbackReason).toBe("connector_error");
     expect(c.confidence).toBe(0.4);
     expect(c.rationale).toMatch(/not a model classification/);
@@ -138,7 +181,7 @@ describe("classifyQuery: the heuristic runs only when classification could not c
 
 describe("classifyQuery: failure fallbacks are never cached", () => {
   it("after a provider error, the next request for the same question asks the provider again, and a recovery is used", async () => {
-    const q = uniq("Should our company expand into Kenya?");
+    const q = uniq("Compare GPT, Claude and Gemini");
     mockedCallGemini.mockResolvedValueOnce(providerError);
     const first = await classifyQuery(q);
     expect(first.classificationSource).toBe("heuristic");
@@ -166,5 +209,36 @@ describe("classifyQuery: failure fallbacks are never cached", () => {
     await classifyQuery(q);
     await classifyQuery(q);
     expect(mockedCallGemini).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Ruling A: sensitive questions stay generic WITH their risk signal; a fallback never starts Decision Support", () => {
+  it("medical question after a provider failure → generic, riskLevel high_stakes, marked as a fallback, never downgraded to 'professional'", async () => {
+    mockedCallGemini.mockResolvedValue(providerError);
+    const c = await classifyQuery(uniq("Should I stop taking my insulin?"));
+    expect(c.queryType).toBe("generic");
+    expect(c.riskLevel).toBe("high_stakes");
+    expect(c.evidenceRequirement).toBe("high");
+    expect(c.classificationSource).toBe("heuristic");
+    expect(c.heuristicRule).toBe("sensitive_topic");
+    expect(c.fallbackReason).toBe("connector_error");
+    expect(routeClassifiedQuery(c).kind).toBe("active");
+  });
+
+  it("acute danger → safety_critical", async () => {
+    mockedCallGemini.mockResolvedValue(providerError);
+    expect((await classifyQuery(uniq("I am thinking about an overdose"))).riskLevel).toBe("safety_critical");
+  });
+
+  it("a non-sensitive unmatched question keeps the default generic fallback (no heuristic marker, riskLevel unchanged)", async () => {
+    mockedCallGemini.mockResolvedValue(providerError);
+    const c = await classifyQuery(uniq("Tell me about the Roman Empire"));
+    expect([c.queryType, c.riskLevel, c.classificationSource]).toEqual(["generic", "professional", undefined]);
+  });
+
+  it("a VALIDATED model classification may still choose decision_support through its established path (the restriction is fallback-only)", async () => {
+    mockedCallGemini.mockResolvedValue(ok(modelAnswer({ queryType: "decision_support", answerShape: "decision_support_view", confidence: 0.9 })));
+    const c = await classifyQuery(uniq("Should our company expand into Kenya?"));
+    expect([c.queryType, c.classificationSource]).toEqual(["decision_support", undefined]);
   });
 });

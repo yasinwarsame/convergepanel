@@ -118,7 +118,11 @@ if (OUT) {
       const withNotice = Object.keys(current).filter((id) => current[id].html !== undefined && stripAnalysisNoticeHtml(current[id].html!).count > 0).sort();
       expect(withNotice.length).toBeGreaterThan(0);
       expect(withNotice).toEqual(Object.keys(current).filter((id) => id.startsWith("populated:") && id.includes("narrative-fail") && current[id].html !== undefined).sort());
-      for (const id of withNotice) expect(stripAnalysisNoticeText(current[id].text).count).toBeGreaterThan(0);
+      // Review MINOR-5: exactly one notice (one degraded line) per affected surface, in markup and in reader text.
+      for (const id of withNotice) {
+        expect([id, stripAnalysisNoticeHtml(current[id].html!).count]).toEqual([id, 1]);
+        expect([id, stripAnalysisNoticeText(current[id].text).count]).toEqual([id, 1]);
+      }
     });
 
     it.each(Object.keys(baseline).sort())("%s is identical", (id) => {

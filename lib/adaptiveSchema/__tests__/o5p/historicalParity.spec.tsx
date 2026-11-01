@@ -71,6 +71,8 @@ describe("Contract P historical parity (2c17feee oracles)", () => {
       Object.entries(outputs).map(([k, v]) => {
         if (v === null) return [k, null];
         const stripped = stripAnalysisNoticeHtml(v);
+        // Review MINOR-5: never more than one notice in one rendered output.
+        expect([name, k, stripped.count <= 1]).toEqual([name, k, true]);
         notices += stripped.count;
         return [k, sha(stripped.markup)];
       })

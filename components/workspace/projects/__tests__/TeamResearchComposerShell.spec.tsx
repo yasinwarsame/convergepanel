@@ -511,6 +511,32 @@ describe("D-1 — a completed Team run opens on its canonical page, which render
     expect(JSON.stringify(r.toJSON())).not.toContain("UNIQUE-MODEL-TEXT");
   });
 
+  it.each([
+    ["the run was not saved", { runPersisted: false }],
+    ["the adaptive report failed to save", { runPersisted: true, adaptivePersistence: "failed" }],
+    ["the adaptive report was too large to save", { runPersisted: true, adaptivePersistence: "omitted_size_limit" }],
+  ])("review MINOR-4: %s → no navigation; the in-memory responses stay on this page with an honest notice", async (_l, flags) => {
+    const submit = jest.fn().mockResolvedValue({ status: "ok", run: { runId: "run-ns", results: [{ modelId: "chatgpt", status: "ok", rawTextFull: "KEPT-IN-MEMORY", latencyMs: 1, tokenUsage: {} }], ...flags } });
+    const r = await submitWith(submit);
+    expect(mockedReplace).not.toHaveBeenCalled();
+    const text = JSON.stringify(r.toJSON());
+    expect(text).toContain("its report could not be saved");
+    expect(text).toContain("KEPT-IN-MEMORY");
+    expect(r.root.findAll((n) => typeof n.type === "string" && n.props["data-testid"] === "team-research-complete")).toHaveLength(0);
+  });
+
+  it("an older server that sends neither flag is treated as saved (navigates)", async () => {
+    const submit = jest.fn().mockResolvedValue({ status: "ok", run: { runId: "run-old", results: [] } });
+    await submitWith(submit);
+    expect(mockedReplace).toHaveBeenCalledTimes(1);
+  });
+
+  it("a saved adaptive report navigates", async () => {
+    const submit = jest.fn().mockResolvedValue({ status: "ok", run: { runId: "run-s", results: [], runPersisted: true, adaptivePersistence: "saved" } });
+    await submitWith(submit);
+    expect(mockedReplace).toHaveBeenCalledTimes(1);
+  });
+
   it("an error never navigates", async () => {
     const submit = jest.fn().mockResolvedValue({ status: "error", errorCode: "x", message: "Nope." });
     await submitWith(submit);
