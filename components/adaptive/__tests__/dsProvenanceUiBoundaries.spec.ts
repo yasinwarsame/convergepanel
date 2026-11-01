@@ -37,7 +37,9 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   "lib/adaptiveSchema/decisionSupportAlignment.ts": "b19e49caacc05c52c17a4676a7321dca654d132c",
   "lib/adaptiveSchema/decisionReceiptBuilder.ts": "e32c42b64d7d1d05f41dee95c548dacc76668640",
   "lib/adaptiveSchema/governanceRecordParser.ts": "2a195deca74df74c0f4701743bf1f78033ffc5e2",
-  "lib/adaptiveSchema/persistedOutput.ts": "9f9ca552d033bcdabe5fcb52862356e5f638e8b5",
+  // P0 research-results restoration (owner-approved 2026-11-01): `generic` added to the legacy persisted allowlist
+  // and its comment only; no provenance code. Was 9f9ca552d033bcdabe5fcb52862356e5f638e8b5 at 9eca1e3.
+  "lib/adaptiveSchema/persistedOutput.ts": "f570388ba819d8fa49096b1bf2405a2525ad6494",
   "lib/runs/runReadPayload.ts": "3b4868c206dfb252f9931c075953b3c0e139b371",
   "lib/user/runDocumentToPublicResults.ts": "d1ed5a2d6d9caafa3d7e63d18307919ca7cb4cf1",
   // Order 6 critical-contrast slice (class-only; see criticalContrastSlice.ts): was 49c7924bbb7bf9466ab7cc8b7cd23a0f2294db85 at 9eca1e3.

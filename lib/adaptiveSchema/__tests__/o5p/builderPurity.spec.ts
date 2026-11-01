@@ -34,6 +34,7 @@ import { callGemini } from "@/lib/connectors/gemini";
 import { finalizeAdaptiveRun } from "@/lib/adaptiveSchema/orchestrate";
 import { buildAdaptiveSynthesisReport } from "@/lib/adaptiveSchema/synthesisReport";
 import { getResultSchema } from "@/lib/adaptiveSchema/schemaRegistry";
+import { isPersistedLegacyAdaptiveSchemaId } from "@/lib/adaptiveSchema/persistedOutput";
 import { AdaptiveRetryUsageSink } from "@/lib/adaptiveSchema/retryCorrection";
 import { CLASSIFICATION_BASE, DEFAULT_MODE, MockMode, SCENARIOS, SEEDED_SCHEMAS, SEEDS, geminiMockImpl, seededResults } from "./o5pScenarios";
 import { GROUNDING_RANK, claimTieReference, groundingTier, legacyTrust, oracleIsEligibleClaimTie } from "../o5c/claimTieOracle";
@@ -70,8 +71,15 @@ async function run(schemaId: string, input: any[], mode: MockMode, retry?: { mod
   };
 }
 
-/** The result as compared: JSON form, persisted timestamp normalized, the permitted marker removed (and counted). */
-function comparable(res: any): { value: any; markers: number[] } {
+/**
+ * The result as compared: JSON form, persisted timestamp normalized, the permitted marker removed (and counted).
+ *
+ * P0 restoration (2026-11-01, owner-approved): `generic` now also persists the legacy envelope. 2c17feee produced none
+ * for it, so for generic only the envelope is removed before the frozen-hash comparison. Every other byte is still held
+ * to the 2c17feee baseline. The envelope itself is proven separately to be nothing but a copy of the builder's own
+ * outputs (see `expectGenericEnvelopeIsACopy`).
+ */
+function comparable(res: any, schemaId: string): { value: any; markers: number[] } {
   const value = JSON.parse(JSON.stringify(res));
   const markers: number[] = [];
   if (value?.persistedLegacyOutput?.generatedAt) value.persistedLegacyOutput.generatedAt = "<normalized>";
@@ -81,7 +89,25 @@ function comparable(res: any): { value: any; markers: number[] } {
       delete p[MARKER];
     }
   }
+  if (schemaId === "generic") delete value.persistedLegacyOutput;
   return { value, markers };
+}
+
+/** The generic envelope adds no computed value: it equals, field for field, what the builder already returned live. */
+function expectGenericEnvelopeIsACopy(res: any, classification: any) {
+  const env = res.persistedLegacyOutput;
+  expect(env).toBeDefined();
+  expect(Object.keys(env).sort()).toEqual(["alignedClaims", "classification", "gate", "generatedAt", "results", "schemaId", "synthesisReport", "trustSummary", "version"]);
+  expect(env.version).toBe(1);
+  expect(env.schemaId).toBe("generic");
+  expect(typeof env.generatedAt).toBe("string");
+  expect(env.classification).toEqual(classification);
+  expect(env.results).toEqual(res.adaptiveResults);
+  // On the all-failed early return the live payload omits alignedClaims; the envelope stores the empty list it was handed.
+  expect(env.alignedClaims).toEqual(res.alignedClaims ?? []);
+  expect(env.gate).toEqual(res.gate);
+  expect(env.synthesisReport).toEqual(res.synthesisReport);
+  expect(env.trustSummary).toEqual(res.trustSummary);
 }
 
 const CASES: { name: string; schemaId: string; input: () => any[]; mode: MockMode; retry?: { modelId: string; data: unknown }[] }[] = [
@@ -98,7 +124,9 @@ describe("Contract P builder purity vs the 2c17feee pipeline", () => {
     const c = CASES.find((x) => x.name === name)!;
     const b = baseline[name];
     const out = await run(c.schemaId, c.input(), c.mode, c.retry);
-    const { value, markers } = comparable(out.res);
+    const { value, markers } = comparable(out.res, c.schemaId);
+    if (c.schemaId === "generic") expectGenericEnvelopeIsACopy(out.res, { ...CLASSIFICATION_BASE, queryType: "generic", answerShape: getResultSchema("generic" as any).renderHint });
+    else expect(!!out.res.persistedLegacyOutput).toBe(isPersistedLegacyAdaptiveSchemaId(c.schemaId));
     const rows = out.res.alignedClaims ?? [];
     const results = out.res.adaptiveResults ?? [];
     const claimTie = rows.some((r: any) => oracleIsEligibleClaimTie(r, results));

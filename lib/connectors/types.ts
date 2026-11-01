@@ -15,4 +15,20 @@ export type ConnectorCallOptions = {
    * where thinking has no benefit and only risks starving the real answer.
    */
   thinkingBudget?: number;
+  /**
+   * Gemini-only, diagnostics only: which stage made the call. It goes into the
+   * sanitized failure log and changes no request behaviour. Absent means a
+   * panel call.
+   */
+  diagnosticOperation?: GeminiDiagnosticOperation;
 };
+
+/** Closed set, so a log can never carry free text through this field. */
+export type GeminiDiagnosticOperation =
+  | "panel"
+  | "classification"
+  | "claim_cluster"
+  | "stance_backfill"
+  | "bias_detection"
+  | "coverage_audit"
+  | "synthesis_narrative";

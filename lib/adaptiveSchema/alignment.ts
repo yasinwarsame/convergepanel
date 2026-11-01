@@ -215,6 +215,7 @@ Every input key must appear exactly once across all clusters. No prose, no markd
   try {
     const result = await withTimeout(
       callGemini(userMessage, null, GEMINI_API_KEY, {
+        diagnosticOperation: "claim_cluster",
         systemPromptOverride: systemPrompt,
         maxOutputTokens: CLUSTER_MAX_OUTPUT_TOKENS,
       }),
@@ -373,6 +374,7 @@ Every question key must appear exactly once. No prose, no markdown fences.`;
   try {
     const result = await withTimeout(
       callGemini(userMessage, null, GEMINI_API_KEY, {
+        diagnosticOperation: "stance_backfill",
         systemPromptOverride: systemPrompt,
         maxOutputTokens: BACKFILL_MAX_OUTPUT_TOKENS,
       }),

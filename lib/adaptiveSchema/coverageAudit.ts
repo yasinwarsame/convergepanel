@@ -78,6 +78,7 @@ ${claimsList}`;
   try {
     const result = await withTimeout(
       callGemini(userMessage, null, GEMINI_API_KEY, {
+        diagnosticOperation: "coverage_audit",
         systemPromptOverride: systemPrompt,
         maxOutputTokens: COVERAGE_MAX_OUTPUT_TOKENS,
       }),
