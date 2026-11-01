@@ -16,7 +16,7 @@
  *
  * OPEN AUDIT FINDING (reported to the owner, fix NOT made in this PR, per D-5): the 9 Milestone-2 views render the
  * aggregated result only. A second model's own response is not reachable, and a model that did not respond is not
- * disclosed. Recorded as it.todo below until the owner approves the fix.
+ * disclosed. Pinned below as a tripwire (OPEN_FINDING_SCHEMAS) until the owner approves the fix.
  */
 jest.mock("react-markdown", () => ({ __esModule: true, default: ({ children }: { children?: unknown }) => require("react").createElement("div", null, children as never) }));
 jest.mock("remark-gfm", () => ({ __esModule: true, default: () => null }));
@@ -56,6 +56,8 @@ const text = (n: unknown): string => {
 /** Every executing schema: active and not the non-executing limitation. Pinned to 18, so a new schema joins the audit. */
 const EXECUTING = (Object.keys(SCHEMA_REGISTRY) as (keyof typeof SCHEMA_REGISTRY)[]).filter((id) => SCHEMA_REGISTRY[id].implementationStatus === "active" && id !== "graceful_limitation").sort();
 const LEGACY = new Set<string>(PERSISTED_LEGACY_ADAPTIVE_SCHEMA_IDS);
+/** D-5 open finding (reported to the owner 2026-11-02; fix not authorized yet): views that show the aggregate only. */
+const OPEN_FINDING_SCHEMAS = new Set<string>(["ranked_enumeration", "comparison_matrix", "definition_explanation", "causal_explanation", "checklist_taxonomy", "deep_research", "evidence_review", "bias_blindspot_audit", "decision_support"]);
 const M2 = new Set<string>(Object.keys(SCHEMA_ANSWER_SHAPE));
 
 /** Two answering models with per-model marker text in every string field; Gemini's slot failed, as in Production. */
@@ -149,7 +151,19 @@ describe.each(EXECUTING)("%s", (id) => {
       }
     });
   } else {
-    it.todo(`OPEN FINDING (owner approval pending): ${id} should make each responding model's own response reachable`);
-    it.todo(`OPEN FINDING (owner approval pending): ${id} should disclose a model that did not respond`);
+    it("OPEN FINDING (tripwire, owner approval pending): this Milestone-2 view shows the aggregate only, so a second model's own response and the non-responding model are not disclosed", async () => {
+      // This pins the MEASURED gap so it cannot change silently. A fix will make this test fail: then move the schema
+      // out of OPEN_FINDING_SCHEMAS and into the legacy-style assertions above.
+      expect(OPEN_FINDING_SCHEMAS.has(id)).toBe(true);
+      const { views } = await audit(id);
+      for (const [surface, r] of Object.entries(views)) {
+        const t = text(r.toJSON());
+        expect([surface, reachable(id, t, "claude"), t.includes("did not respond")]).toEqual([surface, false, false]);
+      }
+    });
   }
+});
+
+it("the open-finding list is exactly the 9 Milestone-2 schemas: no executing schema is outside both assertion sets", () => {
+  expect([...OPEN_FINDING_SCHEMAS].sort()).toEqual(EXECUTING.filter((id) => M2.has(id)).sort());
 });

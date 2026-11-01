@@ -68,6 +68,6 @@ describe("D-3 analysis-availability notice", () => {
     expect(analysisAvailabilityLines(classification as never, synthesisReport as never)).toEqual(want);
     const out = renderToStaticMarkup(createElement(AnalysisAvailabilityNotice, { classification: classification as never, synthesisReport: synthesisReport as never }));
     if ((want as string[]).length === 0) expect(out).toBe("");
-    else for (const line of want as string[]) expect(out).toContain(line.replace("'", "&#x27;"));
+    else for (const line of want as string[]) expect(out).toContain(line.replaceAll("'", "&#x27;"));
   });
 });

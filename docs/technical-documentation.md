@@ -740,7 +740,7 @@ This slice closes the remaining gaps without a new taxonomy, provider or schema 
 - **D-5, per-schema audit:** `components/research/__tests__/adaptiveSchemaAudit.spec.tsx` runs every executing schema, with Gemini failing, through the real builder, envelope, read, the Personal and Team interpreters and the shared view.
   - It asserts the schema's own view renders, never the no-analysis fallback or "incompatible format" for a provider failure, and that content is reachable.
   - For the 9 legacy-active schemas it also asserts that every responding model's response is reachable and the failed model is disclosed.
-  - **Open finding** (owner decision; recorded as `it.todo`): the 9 Milestone-2 views show only the aggregated result. A second model's own response is not reachable, and a non-responding model is not disclosed.
+  - **Open finding** (owner decision; pinned as a tripwire, `OPEN_FINDING_SCHEMAS`): the 9 Milestone-2 views show only the aggregated result. A second model's own response is not reachable, and a non-responding model is not disclosed.
 
 ---
 
