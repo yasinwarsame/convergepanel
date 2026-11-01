@@ -30,6 +30,7 @@ import { join } from "path";
 import { DATETIME_TOKEN, LOCAL_DATETIME, NON_DS_SCHEMAS, captureNonDs, tokeniseDates, type Capture } from "./seSurfaces/nonDsSurfaces";
 import { listItemSurface, teamReviewDetailSurface } from "./seSurfaces/seSurfaceRenderers";
 import { surfaceText, type DsFixture } from "./seSurfaces/seSurfaceHarness";
+import { stripAnalysisNoticeHtml, stripAnalysisNoticeText } from "./analysisNoticeStrip";
 
 const BASELINE = join(__dirname, "seSurfaces", "__fixtures__", "nonDsBaseline.json");
 const OUT = process.env.SE_NON_DS_BASELINE_OUT;
@@ -113,9 +114,19 @@ if (OUT) {
       expect(Object.keys(current).sort()).toEqual(Object.keys(baseline).sort());
     });
 
+    it("D-3: the analysis-availability notice appears exactly on the populated records whose synthesis is degraded (narrative failed), nowhere else", () => {
+      const withNotice = Object.keys(current).filter((id) => current[id].html !== undefined && stripAnalysisNoticeHtml(current[id].html!).count > 0).sort();
+      expect(withNotice.length).toBeGreaterThan(0);
+      expect(withNotice).toEqual(Object.keys(current).filter((id) => id.startsWith("populated:") && id.includes("narrative-fail") && current[id].html !== undefined).sort());
+      for (const id of withNotice) expect(stripAnalysisNoticeText(current[id].text).count).toBeGreaterThan(0);
+    });
+
     it.each(Object.keys(baseline).sort())("%s is identical", (id) => {
       // Order 6 critical-contrast slice: the baseline predates it; compare with its class changes reversed.
-      expect({ ...current[id], html: current[id].html === undefined ? undefined : undoCriticalContrastClasses(current[id].html).markup }).toEqual(baseline[id]);
+      // D-3 (2026-11-02): the owner-approved analysis-availability notice is removed before the frozen comparison; where it
+      // appears is pinned by the test below, so nothing else can hide behind the removal.
+      const html = current[id].html === undefined ? undefined : stripAnalysisNoticeHtml(undoCriticalContrastClasses(current[id].html).markup).markup;
+      expect({ ...current[id], text: stripAnalysisNoticeText(current[id].text).text, html }).toEqual(baseline[id]);
     });
 
     it("the review pages make the same requests as before (AC-8), and some were made", () => {

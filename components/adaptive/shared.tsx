@@ -14,6 +14,7 @@ import { runModelFamilyName } from "@/lib/panel/runModelIdentity";
 import ModelChip from "@/components/ModelChip";
 import { substitutedSlotLabel } from "@/lib/adaptiveSchema/positionPresentation";
 import { usePositionPresentation } from "./PositionPresentationContext";
+import { didNotRespondText, slotDidNotRespond, useRunSlotStatus } from "@/components/adaptive/RunSlotStatusContext";
 
 /**
  * A completed run's slot, named by product family only ("ChatGPT") — never a
@@ -83,6 +84,8 @@ export function BulletList({ items }: { items: string[] }) {
 
 /** Failed / parseError models: rendered as a small non-blocking notice, never crashes the comparison. */
 export function FailedResultsNote({ failed }: { failed: AdaptiveModelResult[] }) {
+  // D-4: a slot the run records as not having responded is described as such, never as an "incompatible format".
+  const slotStatuses = useRunSlotStatus();
   if (failed.length === 0) return null;
   return (
     <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
@@ -94,8 +97,12 @@ export function FailedResultsNote({ failed }: { failed: AdaptiveModelResult[] })
           <li key={r.modelId} className="flex items-start gap-2">
             <ModelChip modelId={r.modelId} size="xs" />
             <div className="text-red-700">
-              <p><SlotName modelId={r.modelId} /> returned an incompatible format and was excluded from comparison.</p>
-              {r.parseError && (
+              {slotDidNotRespond(slotStatuses, r.modelId) ? (
+                <p><SlotName modelId={r.modelId} /> {didNotRespondText(slotDidNotRespond(slotStatuses, r.modelId)!)}</p>
+              ) : (
+                <p><SlotName modelId={r.modelId} /> returned an incompatible format and was excluded from comparison.</p>
+              )}
+              {r.parseError && !slotDidNotRespond(slotStatuses, r.modelId) && (
                 <details className="mt-0.5">
                   <summary className="cursor-pointer text-xs text-red-600">Details</summary>
                   <p className="mt-0.5 text-xs text-red-600">{r.parseError}</p>

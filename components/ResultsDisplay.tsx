@@ -29,6 +29,7 @@ import {
 import { getPanelModelConfig, PanelModelId } from "@/lib/panelModels";
 import { runModelFamilyName, runModelIdentityDetail, runModelIdentityLabel, runModelProvenanceFromResultRow } from "@/lib/panel/runModelIdentity";
 import { RunModelProvenanceContext } from "@/components/adaptive/RunModelProvenanceContext";
+import { RunSlotStatusContext } from "@/components/adaptive/RunSlotStatusContext";
 import { normalizeBullets } from "@/lib/normalizeBullets";
 import { normalizeList } from "@/lib/normalizeList";
 import {
@@ -1105,6 +1106,8 @@ export default function ResultsDisplay({
         {/* The run's own per-slot provenance (live or saved rows) for the
             adaptive surfaces that name a model's identity. */}
         <RunModelProvenanceContext.Provider value={results.map(runModelProvenanceFromResultRow)}>
+        {/* D-4: each slot's recorded call status, so a provider failure is never labelled an incompatible format. */}
+        <RunSlotStatusContext.Provider value={new Map(results.map((r) => [r.modelId, String(r.status ?? "")]))}>
         <AdaptivePanelResponse
           schema={getResultSchema(adaptive.schemaId)}
           classification={adaptive.classification}
@@ -1135,6 +1138,7 @@ export default function ResultsDisplay({
           ancillaryPresentation={adaptiveAncillaryPresentation}
           dsProvenance={dsProvenance}
         />
+        </RunSlotStatusContext.Provider>
         </RunModelProvenanceContext.Provider>
       </div>
     );

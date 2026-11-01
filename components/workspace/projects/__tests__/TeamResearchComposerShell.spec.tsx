@@ -15,6 +15,9 @@ jest.mock("next/link", () => {
   return { __esModule: true, default: MockLink };
 });
 
+const mockedReplace = jest.fn();
+jest.mock("next/navigation", () => ({ useRouter: () => ({ replace: mockedReplace, push: jest.fn() }) }));
+
 const mockedUseUserPlan = jest.fn();
 jest.mock("@/hooks/useUserPlan", () => ({
   useUserPlan: (...args: any[]) => mockedUseUserPlan(...args),
@@ -475,5 +478,64 @@ describe("Phase 11B.3-C1 — Research composer page composition order", () => {
     await act(async () => { await r.root.findByType("form").props.onSubmit({ preventDefault() {} }); });
     expect(h1Texts(r)).toEqual(["What changed in the source evidence?"]);
     expectFrozenComposition(r);
+  });
+});
+
+describe("D-1 — a completed Team run opens on its canonical page, which renders the shared full report", () => {
+  async function submitWith(submit: jest.Mock, props: Record<string, unknown> = {}) {
+    mockedUseTeamProjectResearch.mockReturnValue(researchResult({ submit }));
+    const renderer = await mount(props as never);
+    await act(async () => {
+      renderer.root.findByProps({ id: "team-research-question" }).props.onChange({ target: { value: "Will AI eliminate more jobs than it creates?" } });
+    });
+    await act(async () => {
+      await renderer.root.findByType("form").props.onSubmit({ preventDefault: () => {} });
+    });
+    return renderer;
+  }
+
+  it("success → router.replace to the project-bound Team research detail address (every segment percent-encoded once)", async () => {
+    const submit = jest.fn().mockResolvedValue({ status: "ok", run: { runId: "run/ä 1", results: [] } });
+    const r = await submitWith(submit, { workspaceId: "ws/1", project: { id: "proj 1", name: "P" } });
+    expect(mockedReplace).toHaveBeenCalledTimes(1);
+    expect(mockedReplace).toHaveBeenCalledWith("/workspace/team/ws%2F1/projects/proj%201/research/run%2F%C3%A4%201");
+    // The bridging panel links to the same canonical page; no reduced per-model result is rendered.
+    const link = r.root.findAll((n) => n.type === "a" && n.props.href === "/workspace/team/ws%2F1/projects/proj%201/research/run%2F%C3%A4%201");
+    expect(link).toHaveLength(1);
+    expect(r.root.findAll((n) => typeof n.type === "string" && n.props["data-testid"] === "team-research-complete")).toHaveLength(1);
+  });
+
+  it("no model text is rendered in the composer: the report lives only on the shared detail page", async () => {
+    const submit = jest.fn().mockResolvedValue({ status: "ok", run: { runId: "run-1", results: [{ modelId: "chatgpt", status: "ok", rawTextFull: "UNIQUE-MODEL-TEXT", latencyMs: 1, tokenUsage: {} }] } });
+    const r = await submitWith(submit);
+    expect(JSON.stringify(r.toJSON())).not.toContain("UNIQUE-MODEL-TEXT");
+  });
+
+  it("an error never navigates", async () => {
+    const submit = jest.fn().mockResolvedValue({ status: "error", errorCode: "x", message: "Nope." });
+    await submitWith(submit);
+    expect(mockedReplace).not.toHaveBeenCalled();
+  });
+
+  it("a run finishing after the user has left the composer never drags them to its report", async () => {
+    let resolve!: (v: unknown) => void;
+    const submit = jest.fn().mockReturnValue(new Promise((res) => (resolve = res)));
+    mockedUseTeamProjectResearch.mockReturnValue(researchResult({ submit }));
+    const renderer = await mount();
+    await act(async () => {
+      renderer.root.findByProps({ id: "team-research-question" }).props.onChange({ target: { value: "Q" } });
+    });
+    let pending!: Promise<unknown>;
+    await act(async () => {
+      pending = renderer.root.findByType("form").props.onSubmit({ preventDefault: () => {} });
+    });
+    await act(async () => {
+      renderer.unmount();
+    });
+    await act(async () => {
+      resolve({ status: "ok", run: { runId: "run-late", results: [] } });
+      await pending;
+    });
+    expect(mockedReplace).not.toHaveBeenCalled();
   });
 });

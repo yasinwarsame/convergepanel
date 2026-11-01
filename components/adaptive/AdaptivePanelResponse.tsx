@@ -56,6 +56,7 @@ import { isPositionMarked, presentPositionSafeReport } from "@/lib/adaptiveSchem
 import { useRunModelProvenance } from "./RunModelProvenanceContext";
 import { PositionPresentationContext, PositionPresentationState } from "./PositionPresentationContext";
 import { useEffect, useMemo, useState } from "react";
+import AnalysisAvailabilityNotice from "@/components/adaptive/AnalysisAvailabilityNotice";
 
 const RENDER_HINTS_WITHOUT_MATRIX = new Set<AnswerShape>(["metrics_grid", "verdict_card", "step_diff", "scenario_tree"]);
 
@@ -156,9 +157,19 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
     [marked, synthesisReport, alignedClaims, roster, provenance]
   );
   const position = useMemo<PositionPresentationState | null>(() => (marked ? { marked: true, roster, provenance } : null), [marked, roster, provenance]);
-  if (!position) return <AdaptivePanelResponseBody {...props} />;
+  // D-2/D-3: one notice naming the automated steps that did not run for this run (nothing when all ran).
+  const notice = <AnalysisAvailabilityNotice classification={props.classification} synthesisReport={synthesisReport} />;
+  if (!position) {
+    return (
+      <>
+        {notice}
+        <AdaptivePanelResponseBody {...props} />
+      </>
+    );
+  }
   return (
     <PositionPresentationContext.Provider value={position}>
+      {notice}
       <AdaptivePanelResponseBody {...props} synthesisReport={shownReport} />
     </PositionPresentationContext.Provider>
   );

@@ -712,6 +712,36 @@ Tests: `classifier.spec.ts` (+2 — `thinkingBudget: 0` is passed to `callGemini
 
 **Tests.** `components/research/__tests__/p0SavedRunResults.spec.tsx` (Personal and Team chains, refresh, saved synthesis, saved envelope, all-failed, in-progress and failed, live pending and unchanged POST). `lib/adaptiveSchema/__tests__/p0GenericPersistenceChain.spec.tsx` (real finalize with Gemini healthy and fully failing, through the saved read to render). `lib/connectors/__tests__/geminiFailureDiagnostic.spec.ts` (classification, sanitization, real connector).
 
+#### Shared Adaptive Schema architecture, D-1 to D-5 (2026-11-02)
+
+Design record: `p0-adaptive-schema-design-2026-11-02/DESIGN-SHARED-ADAPTIVE-SCHEMA.md` (evidence folder). Individual research and Team Workspaces already share one engine:
+- **Execute:** `planAdaptiveRun()` and `executeOrdinaryRun()` are called by both POST routes.
+- **Taxonomy:** one `SCHEMA_REGISTRY` and one set of envelopes (`adaptiveOutput` / `legacyAdaptiveOutput` v1; all 18 executing schemas persist).
+- **Saved read:** one path, `PersistedResearchResultView`.
+
+This slice closes the remaining gaps without a new taxonomy, provider or schema migration:
+
+- **D-1, Team live result:** `TeamResearchComposerShell` no longer renders the reduced `TeamResearchResultView`.
+  - On success it `router.replace`s to `teamResearchDetailHref(...)`, the canonical Team research page. That page renders the same full adaptive report as Individual research, with the Team chrome around it.
+  - There is no navigation if the composer has unmounted.
+  - `TeamResearchResultView` is no longer rendered by the composer; the file and its spec remain.
+- **D-2, classification resilience:** `classifyQuery()` no longer caches failure fallbacks (connector error, timeout, malformed or schema-invalid answer), so a recovered provider is asked again.
+  - On those failures, `lib/adaptiveSchema/heuristicClassifier.ts` (pure, no provider call) maps unambiguous question patterns to EXISTING answer types: comparison, risks and trade-offs, decision, causal, forecast (a time horizon, or "Will …" with a change verb), procedure, ranking, definition. Anything else stays `generic`.
+  - The result is marked `classificationSource: "heuristic"` with `heuristicRule`, keeps `fallbackReason`, has confidence 0.4, and must pass the same `ClassificationSchema` and route to an active schema. Both new fields are additive and optional.
+  - A low-confidence model verdict is unchanged (generic, cached).
+- **D-3, availability notice:** `components/adaptive/AnalysisAvailabilityNotice.tsx`, rendered at the top of every adaptive report, names what did not run:
+  - a heuristic or default classification after a classifier failure;
+  - `synthesisReport.degraded === true` (the written synthesis could not be generated, and the summary is assembled from the panel's scored claims).
+  - It renders nothing otherwise. The frozen parity suites strip only this notice and pin where it must appear (`components/adaptive/__tests__/analysisNoticeStrip.ts`).
+- **D-4, accurate failure labels:** `RunSlotStatusContext` (provided by `ResultsDisplay` from the run's own rows) lets `FailedResultsNote` and `ListView` say "<Model> did not respond…" for a recorded provider failure. Builder output is unchanged.
+  - A model that responded with invalid output keeps "returned an incompatible format".
+  - With no record, the original wording is kept. No provider error text is shown.
+  - Gemini diagnostics map HTTP 402 and `BILLING_DISABLED` to the category `billing`.
+- **D-5, per-schema audit:** `components/research/__tests__/adaptiveSchemaAudit.spec.tsx` runs every executing schema, with Gemini failing, through the real builder, envelope, read, the Personal and Team interpreters and the shared view.
+  - It asserts the schema's own view renders, never the no-analysis fallback or "incompatible format" for a provider failure, and that content is reachable.
+  - For the 9 legacy-active schemas it also asserts that every responding model's response is reachable and the failed model is disclosed.
+  - **Open finding** (owner decision; recorded as `it.todo`): the 9 Milestone-2 views show only the aggregated result. A second model's own response is not reachable, and a non-responding model is not disclosed.
+
 ---
 
 ## Synthesis
