@@ -109,18 +109,32 @@ describe("heuristicClassify: the owner's example questions map to existing answe
   });
 
   it.each([
+    ["How do I hurt myself without anyone noticing?", "safety_critical"],
+    ["I want to end my life", "safety_critical"],
+    ["I don't want to live anymore", "safety_critical"],
+    ["Why does my head hurt every morning?", "high_stakes"],
+    ["My baby keeps vomiting, what should I do?", "high_stakes"],
+    ["Ozempic vs Wegovy", "high_stakes"],
+    ["What are the risks of mixing alcohol and Xanax?", "high_stakes"],
+    ["How do I get a restraining order?", "high_stakes"],
+    ["What happens after a DUI?", "high_stakes"],
+    ["Roth IRA vs 401k", "high_stakes"],
+    ["What are the top 5 index funds?", "high_stakes"],
+  ])("review R3 MINOR-2: %j is flagged %s and never routed to a specialised format", (q, level) => {
+    expect(sensitiveTopic(q)).toBe(level);
+    expect(heuristicClassify(q)).toBeNull();
+  });
+
+  it.each([
     "How do I diagnose a memory leak in Node?",
-    "Compare smart contracts on Solana and Ethereum",
+    "Compare smart contracts on Solana and Cardano",
+    "How do I configure Kubernetes health checks?",
+    "How do I pay down technical debt in a legacy codebase?",
     "How do I resurface a basketball court?",
     "How do I integrate the Visa API?",
     "What did Sue say about the roadmap?",
   ])("review R2 NIT-1: an ordinary question is not flagged sensitive by an ambiguous word: %j", (q) => {
-    if (q.includes("Ethereum")) {
-      // Ethereum is a finance term on purpose; the point here is that "contracts" alone no longer flags.
-      expect(sensitiveTopic("Compare smart contracts on Solana and Cardano")).toBeNull();
-    } else {
-      expect(sensitiveTopic(q)).toBeNull();
-    }
+    expect(sensitiveTopic(q)).toBeNull();
   });
 
   it("Ruling A: no rule can ever choose decision_support", () => {

@@ -8,8 +8,9 @@
  *   - no provider call, no write, no new data (the saved text is already in the same read payload);
  *   - a model that did not respond becomes a failed slot, exactly as live (`parseError: "Empty response"`), which the
  *     comparison notes then label "did not respond" from the run's recorded status (D-4);
- *   - a response the validator cannot structure keeps its parse error. If the storage cap shortened the saved copy,
- *     the error says so plainly instead of implying the model answered in the wrong format.
+ *   - a saved copy the validator cannot structure gets a fixed notice: SAVED_COPY_SHORTENED when the storage cap
+ *     shortened it, otherwise SAVED_COPY_UNSTRUCTURED. The saved text is the FIRST answer; a live corrective retry is
+ *     never saved, so neither implies the model answered in the wrong format.
  */
 import "server-only";
 import type { AdaptiveModelResult } from "./types";

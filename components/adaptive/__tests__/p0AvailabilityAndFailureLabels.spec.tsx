@@ -52,6 +52,16 @@ describe("D-4 failure labels", () => {
     expect(out).not.toContain("incompatible format");
     expect(out).not.toContain("excluded");
     expect(out).not.toContain("Details");
+    // Review R3 MINOR-1: the heading does not call a saved-copy row uncompared.
+    expect(out).toContain("1 saved response can&#x27;t be shown here");
+    expect(out).not.toContain("couldn&#x27;t be compared");
+  });
+
+  it("a mixed list (a real failure plus a saved-copy row) keeps the original heading for the real failure", () => {
+    const out = html(createElement(FailedResultsNote, { failed: [failedRow("gemini"), failedRow("claude", SAVED_COPY_UNSTRUCTURED)] }), new Map([["gemini", "failed"], ["claude", "ok"]]));
+    expect(out).toContain("2 models couldn&#x27;t be compared");
+    expect(out).toContain("did not respond and was excluded from comparison.");
+    expect(out).toContain(SAVED_COPY_UNSTRUCTURED.replaceAll("'", "&#x27;"));
   });
 
   it("without the run's record (no provider) the original wording is kept: it cannot tell a failure from a format problem", () => {

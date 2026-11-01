@@ -88,10 +88,14 @@ export function FailedResultsNote({ failed }: { failed: AdaptiveModelResult[] })
   // D-4: a slot the run records as not having responded is described as such, never as an "incompatible format".
   const slotStatuses = useRunSlotStatus();
   if (failed.length === 0) return null;
+  // Review R3 MINOR-1: saved-copy rows describe the stored copy, not the model; the heading must not call them uncompared.
+  const savedCopyOnly = failed.every((r) => !!r.parseError && SAVED_COPY_NOTICES.has(r.parseError));
   return (
     <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
       <p className="font-semibold mb-1">
-        {failed.length} model{failed.length === 1 ? "" : "s"} couldn&apos;t be compared
+        {savedCopyOnly
+          ? `${failed.length} saved response${failed.length === 1 ? "" : "s"} can't be shown here`
+          : `${failed.length} model${failed.length === 1 ? "" : "s"} couldn't be compared`}
       </p>
       <ul className="space-y-1">
         {failed.map((r) => (
@@ -101,7 +105,7 @@ export function FailedResultsNote({ failed }: { failed: AdaptiveModelResult[] })
               {slotDidNotRespond(slotStatuses, r.modelId) ? (
                 <p><SlotName modelId={r.modelId} /> {didNotRespondText(slotDidNotRespond(slotStatuses, r.modelId)!)}</p>
               ) : r.parseError && SAVED_COPY_NOTICES.has(r.parseError) ? (
-                // Ruling B: the model answered; only its stored copy is too short to re-read. Not a format failure.
+                // Ruling B: a statement about the stored copy (shortened, or unstructured first answer), never a format verdict.
                 <p><SlotName modelId={r.modelId} />: {r.parseError}</p>
               ) : (
                 <p><SlotName modelId={r.modelId} /> returned an incompatible format and was excluded from comparison.</p>
