@@ -26,7 +26,12 @@ import { buildGeminiEmptyResponseDiagnostic, buildGeminiFailureDiagnostic } from
 
 /** The one Production failure log line (sanitized: see geminiFailureDiagnostic.ts). Never pass error.message here. */
 function logGeminiFailure(diagnostic: object): void {
-  logger.warn("[Gemini connector] call failed", diagnostic);
+  // Connectors must never throw: a logging failure is swallowed, never surfaced.
+  try {
+    logger.warn("[Gemini connector] call failed", diagnostic);
+  } catch {
+    /* diagnostics are best-effort */
+  }
 }
 
 /**

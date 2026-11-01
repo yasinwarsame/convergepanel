@@ -23,6 +23,7 @@ jest.mock("@/lib/client/authedFetch", () => ({ authedFetch: (...a: unknown[]) =>
 import { createElement } from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import ResultsDisplay from "@/components/ResultsDisplay";
+import AdaptivePanelResponse from "@/components/adaptive/AdaptivePanelResponse";
 import PersistedResearchResultView from "@/components/research/PersistedResearchResultView";
 import { UNAVAILABLE_ANALYSIS_SECTIONS } from "@/components/research/ResponsesWithoutAnalysis";
 import { buildRunReadPayload } from "@/lib/runs/runReadPayload";
@@ -121,7 +122,7 @@ function expectResponsesShown(r: TestRenderer.ReactTestRenderer) {
   const shown = byTestId(r, "saved-model-response").map((n) => n.props["data-model-id"]);
   expect(shown).toEqual(["chatgpt", "claude", "grok", "perplexity"]);
   for (const answer of Object.values(ANSWERS)) expect(text).toContain(answer);
-  expect(text).toMatch(/4 of 5 models responded/);
+  expect(text).toMatch(/4 of 5 models returned a response/);
   // Each analysis section is named and labelled unavailable, inside the status list. Nothing is inferred.
   const sections = instText(byTestId(r, "unavailable-analysis-sections")[0]);
   for (const name of UNAVAILABLE_ANALYSIS_SECTIONS) expect(sections).toContain(`${name}: unavailable`);
@@ -167,6 +168,10 @@ describe("P0 — saved run with model responses but no saved analysis", () => {
   it("with a saved synthesis the original comprehensive view renders unchanged, and the fallback does not appear", async () => {
     const r = await renderPersonal(savedRun({ synthesizedStructuredReport: { headline: "Saved synthesis headline" }, schemaVersion: 1, synthesizedBy: "chatgpt" }));
     expect(byTestId(r, "responses-without-analysis")).toHaveLength(0);
+    // Positive: the comprehensive view itself rendered (its own headings), not merely "the fallback is absent".
+    const text = textOf(r);
+    expect(text).toContain("Unified Answer");
+    expect(text).toContain("Trust Summary");
     expectNoExecutionOrSynthesisCall();
   });
 
@@ -181,6 +186,30 @@ describe("P0 — saved run with model responses but no saved analysis", () => {
     };
     const r = await renderPersonal(savedRun({ legacyAdaptiveOutput: env }));
     expect(byTestId(r, "responses-without-analysis")).toHaveLength(0);
+    // Positive: the adaptive renderer is the one mounted, with the saved schema.
+    const adaptive = r.root.findAllByType(AdaptivePanelResponse as never);
+    expect(adaptive).toHaveLength(1);
+    expect((adaptive[0].props as { schema: { id: string } }).schema.id).toBe("procedural");
+  });
+
+  it("a model that succeeded with no text is listed, not hidden, and the heading counts exactly the responses shown", async () => {
+    const doc = savedRun();
+    (doc.runDocument as { perModel: { modelId: string; rawTextTruncated: string }[] }).perModel[3].rawTextTruncated = "";
+    const r = await renderPersonal(doc);
+    expect(byTestId(r, "saved-model-response").map((n) => n.props["data-model-id"])).toEqual(["chatgpt", "claude", "grok"]);
+    expect(textOf(r)).toMatch(/3 of 5 models returned a response/);
+    const missing = instText(byTestId(r, "failed-models")[0]);
+    expect(missing).toMatch(/returned no text/);
+    expect(missing).toMatch(/: failed/);
+  });
+
+  it("a governance-flagged run keeps its Team banner and org status above the saved responses", async () => {
+    const r = await renderPersonal(savedRun({ teamGovernance: { governanceReviewRequired: true, blocked: true, blockMessage: "Blocked: contains regulated data", policyFlags: ["pii"] }, governanceStatus: "blocked" }));
+    const text = textOf(r);
+    expect(text).toContain("Blocked by your team's governance policy");
+    expect(text).toContain("Blocked: contains regulated data");
+    expect(instText(byTestId(r, "org-governance-status")[0])).toMatch(/blocked by your organization's governance policy/);
+    expect(byTestId(r, "saved-model-response")).toHaveLength(4);
   });
 
   it("every model failed: says no usable response, lists every model, never invites re-running a completed run", async () => {
@@ -222,8 +251,12 @@ describe("P0 — the live composer (default synthesis policy) is unchanged apart
 
   it("idle with no report still makes exactly the one established synthesis POST (unchanged behaviour)", async () => {
     mockedAuthedFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true }) });
-    await mount(createElement(ResultsDisplay as never, live({ synthesisStatus: "idle" }) as never));
+    const r = await mount(createElement(ResultsDisplay as never, live({ synthesisStatus: "idle" }) as never));
     expect(mockedAuthedFetch).toHaveBeenCalledTimes(1);
+    // The live page may still produce the synthesis: it must say "not available yet", never "not available for this run".
+    expect(byTestId(r, "responses-without-analysis")[0].props["data-state"]).toBe("analysis-not-yet");
+    expect(textOf(r)).toContain("Unified Answer: not available yet");
+    expect(textOf(r)).not.toContain("exactly as they were saved");
     expect(mockedAuthedFetch.mock.calls[0][0]).toBe("/api/synthesize-panel");
   });
 });

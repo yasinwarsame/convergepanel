@@ -1,25 +1,21 @@
 /**
  * P0 research-results restoration (2026-11-01).
  *
- * `ResultsDisplay` renders this when a run has model rows but nothing to put
- * in the comprehensive view: no adaptive result, no consensus report and no
- * persisted synthesis. That view needs a Unified Answer.
+ * `ResultsDisplay` renders this when a run has model rows but nothing to put in the comprehensive view: no adaptive
+ * result, no consensus report and no persisted synthesis. That view needs a Unified Answer.
  *
- * Before this existed, that state showed "No unified answer yet. Run the
- * panel…", which hid saved model responses behind copy meant for a question
- * that was never run. This is what users saw for completed saved runs whose
- * analysis was never persisted.
+ * Before this existed, that state showed "No unified answer yet. Run the panel…". It hid saved model responses behind
+ * copy meant for a question that was never run, and that is what users saw for completed saved runs whose analysis was
+ * never persisted.
  *
  * Contract (owner ruling, P0):
- *   - Every model response with text is shown, under the run's own recorded
- *     identity for that slot.
- *   - Unified Answer, consensus, Agreement / Disagreement Map and synthesis are
- *     each explicitly labelled unavailable. Nothing is inferred, merged or
- *     presented as a multi-model conclusion.
- *   - Models that failed are listed with their recorded status.
- *   - With no usable response at all, it says so; it never invites re-running a
- *     run that already completed.
- *   - Pure presentation: no fetch, no synthesis trigger, no model call.
+ *   - Every model response with text is shown, under the run's own recorded identity for that slot.
+ *   - Unified Answer, consensus, Agreement / Disagreement Map and synthesis are each labelled explicitly as unavailable,
+ *     not available yet, or pending. Nothing is inferred, merged or presented as a multi-model conclusion.
+ *   - Models that failed, or that succeeded with no text, are listed with their recorded status. The count in the
+ *     heading is exactly the number of responses shown.
+ *   - With no usable response at all it says so, and never invites re-running a run that already completed.
+ *   - Pure presentation: no fetch, no synthesis trigger, no model call. The governance banner is the caller's.
  */
 
 import type { ModelResult } from "@/lib/types";
@@ -33,20 +29,45 @@ export type ResponsesWithoutAnalysisProps = {
   /** Reads a row's text the same way the comprehensive view does. */
   textOf: (result: ModelResult) => string;
   synthesisStatus: "idle" | "loading" | "complete" | "error";
+  /**
+   * The caller's synthesis policy (`allowSynthesisGeneration`). True only on the live composer, where the renderer
+   * itself may still start the synthesis. False on durable reads, which never generate one.
+   */
+  analysisMayStillBeGenerated?: boolean;
+  orgGovernanceStatus?: "approved" | "needs_review" | "blocked" | null;
 };
 
 export const UNAVAILABLE_ANALYSIS_SECTIONS = ["Unified Answer", "Consensus", "Agreement / Disagreement Map", "Synthesis Report"] as const;
 
-function analysisStatusLine(status: ResponsesWithoutAnalysisProps["synthesisStatus"]): string {
-  if (status === "loading") return "The Unified Answer and synthesis are being generated. The model responses are shown below in the meantime.";
-  if (status === "error") return "The Unified Answer and synthesis could not be generated for this run. The model responses are shown below.";
-  return "The Unified Answer, consensus, Agreement / Disagreement Map and synthesis are not available for this run. The model responses are shown below exactly as they were saved.";
+type AnalysisState = "pending" | "not_yet" | "failed" | "unavailable";
+
+function analysisState(status: ResponsesWithoutAnalysisProps["synthesisStatus"], mayStillBeGenerated: boolean): AnalysisState {
+  if (status === "loading") return "pending";
+  if (status === "error") return "failed";
+  return mayStillBeGenerated ? "not_yet" : "unavailable";
 }
 
-export default function ResponsesWithoutAnalysis({ results, responses, textOf, synthesisStatus }: ResponsesWithoutAnalysisProps) {
-  const failed = results.filter((r) => r.status !== "ok" && r.status !== "substituted");
-  const responded = results.length - failed.length;
+const STATE_LINE: Record<AnalysisState, string> = {
+  pending: "The Unified Answer and synthesis are being generated. The model responses are shown below in the meantime.",
+  not_yet: "The Unified Answer, consensus, Agreement / Disagreement Map and synthesis have not been generated yet. The model responses are shown below.",
+  failed: "The Unified Answer and synthesis could not be generated for this run. The model responses are shown below.",
+  unavailable: "The Unified Answer, consensus, Agreement / Disagreement Map and synthesis are not available for this run. The model responses are shown below exactly as they were saved.",
+};
+
+const SECTION_LABEL: Record<AnalysisState, string> = { pending: "pending", not_yet: "not available yet", failed: "unavailable", unavailable: "unavailable" };
+
+const ORG_STATUS_LINE: Record<"needs_review" | "blocked", string> = {
+  needs_review: "Governance status: needs review before acting on this result.",
+  blocked: "Governance status: blocked by your organization's governance policy.",
+};
+
+export default function ResponsesWithoutAnalysis({ results, responses, textOf, synthesisStatus, analysisMayStillBeGenerated = false, orgGovernanceStatus = null }: ResponsesWithoutAnalysisProps) {
+  const shown = new Set(responses);
+  // Every row that is not displayed is accounted for: a failure, or a success that carried no text.
+  const notShown = results.filter((r) => !shown.has(r));
   const label = (r: ModelResult) => runModelIdentityLabel(runModelProvenanceFromResultRow(r));
+  const state = analysisState(synthesisStatus, analysisMayStillBeGenerated);
+  const orgLine = orgGovernanceStatus === "needs_review" || orgGovernanceStatus === "blocked" ? ORG_STATUS_LINE[orgGovernanceStatus] : null;
 
   if (responses.length === 0) {
     return (
@@ -56,23 +77,25 @@ export default function ResponsesWithoutAnalysis({ results, responses, textOf, s
           <p className="mt-1">
             This run finished, but none of its {results.length} model{results.length === 1 ? "" : "s"} returned a response that can be shown, so there is no Unified Answer.
           </p>
+          {orgLine && <p className="mt-2 font-medium text-slate-900" data-testid="org-governance-status">{orgLine}</p>}
         </div>
-        {failed.length > 0 && <FailedModels failed={failed} label={label} />}
+        {notShown.length > 0 && <ModelsWithoutResponse rows={notShown} label={label} />}
       </section>
     );
   }
 
   return (
-    <section data-testid="responses-without-analysis" data-state={synthesisStatus === "loading" ? "analysis-pending" : "analysis-unavailable"} className="space-y-6">
+    <section data-testid="responses-without-analysis" data-state={`analysis-${state === "not_yet" ? "not-yet" : state}`} className="space-y-6">
       <div className="rounded-xl border border-amber-200 bg-amber-50 px-6 py-5 text-sm text-amber-900" role="status">
         <h3 className="text-sm font-semibold">
-          {responded} of {results.length} models responded
+          {responses.length} of {results.length} models returned a response
         </h3>
-        <p className="mt-1">{analysisStatusLine(synthesisStatus)}</p>
+        <p className="mt-1">{STATE_LINE[state]}</p>
+        {orgLine && <p className="mt-2 font-medium" data-testid="org-governance-status">{orgLine}</p>}
         <ul className="mt-3 space-y-0.5" data-testid="unavailable-analysis-sections">
           {UNAVAILABLE_ANALYSIS_SECTIONS.map((name) => (
             <li key={name}>
-              {name}: {synthesisStatus === "loading" ? "pending" : "unavailable"}
+              {name}: {SECTION_LABEL[state]}
             </li>
           ))}
         </ul>
@@ -89,19 +112,20 @@ export default function ResponsesWithoutAnalysis({ results, responses, textOf, s
         ))}
       </div>
 
-      {failed.length > 0 && <FailedModels failed={failed} label={label} />}
+      {notShown.length > 0 && <ModelsWithoutResponse rows={notShown} label={label} />}
     </section>
   );
 }
 
-function FailedModels({ failed, label }: { failed: ModelResult[]; label: (r: ModelResult) => string }) {
+/** Rows not displayed as a response: their recorded status, or "returned no text" for a success with empty text. */
+function ModelsWithoutResponse({ rows, label }: { rows: ModelResult[]; label: (r: ModelResult) => string }) {
   return (
     <div className="rounded-xl border border-red-200 bg-red-50 p-6" data-testid="failed-models">
-      <h3 className="mb-2 text-sm font-semibold text-red-900">Models that did not respond</h3>
+      <h3 className="mb-2 text-sm font-semibold text-red-900">Models without a response</h3>
       <ul className="space-y-1 text-sm text-red-800">
-        {failed.map((r) => (
+        {rows.map((r) => (
           <li key={r.modelId}>
-            {label(r)}: {r.status}
+            {label(r)}: {r.status === "ok" || r.status === "substituted" ? "returned no text" : r.status}
           </li>
         ))}
       </ul>

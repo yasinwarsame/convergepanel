@@ -1316,17 +1316,8 @@ export default function ResultsDisplay({
   const hasUnifiedAnswer = !!unifiedHtml && okResults.length > 0;
   const hasPreGeneratedReport = !!preGeneratedSynthesisReport && okResults.length > 0;
 
-  // No usable Unified Answer from either source. P0 restoration: show the
-  // run's own model responses and state plainly what analysis is missing,
-  // rather than presenting a completed run as one that was never executed.
-  if (!hasUnifiedAnswer && !hasPreGeneratedReport) {
-    return <ResponsesWithoutAnalysis results={results} responses={okResults} textOf={getModelText} synthesisStatus={synthesisStatus} />;
-  }
-
-  // Show full results when a synthesized report is available
-    return (
-      <div className="space-y-6">
-        {showGovBanner && teamGovernance && (
+  // The Team governance banner, identical in the full view and the no-analysis view (a flagged run keeps its notice).
+  const governanceBanner = showGovBanner && teamGovernance && (
           <div
             className={`rounded-xl border px-4 py-3 text-sm ${
               teamGovernance.blockedByPolicy
@@ -1352,7 +1343,30 @@ export default function ResultsDisplay({
               </ul>
             )}
           </div>
-        )}
+  );
+
+  // No usable Unified Answer from either source (P0 restoration): show the run's own model responses and state plainly
+  // what analysis is missing, rather than presenting a completed run as one that was never executed.
+  if (!hasUnifiedAnswer && !hasPreGeneratedReport) {
+    return (
+      <div className="space-y-6">
+        {governanceBanner}
+        <ResponsesWithoutAnalysis
+          results={results}
+          responses={okResults}
+          textOf={getModelText}
+          synthesisStatus={synthesisStatus}
+          analysisMayStillBeGenerated={allowSynthesisGeneration}
+          orgGovernanceStatus={orgGovernanceStatus ?? null}
+        />
+      </div>
+    );
+  }
+
+  // Show full results when a synthesized report is available
+    return (
+      <div className="space-y-6">
+        {governanceBanner}
         {/* Main Unified Answer section */}
       {/* Heading hierarchy: H2 (Unified Answer) to H3 (Trust Summary) to H3 (Overall Synthesis) to H4s (Areas of Agreement, etc.) */}
         {/* Trust metrics are presented as visual pills for quick scanning.
