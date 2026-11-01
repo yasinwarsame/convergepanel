@@ -405,6 +405,7 @@ Gate: ${gate.status}`;
   async function callNarrative(): Promise<z.infer<typeof NarrativeResponseSchema> | null> {
     const result = await withTimeout(
       callGemini(userMessage, null, GEMINI_API_KEY, {
+        diagnosticOperation: "synthesis_narrative",
         systemPromptOverride: systemPrompt,
         maxOutputTokens: SYNTHESIS_MAX_OUTPUT_TOKENS,
       }),

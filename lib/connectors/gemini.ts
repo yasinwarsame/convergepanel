@@ -21,6 +21,13 @@ import { buildPanelPrompt } from "@/lib/panelPrompt";
 import { MODEL_LIMITS, getModelTimeout } from "@/lib/modelConfig";
 import { getTotalTokensFromProviderResponse, modelIdToProviderKey, safeNum } from "@/lib/tokenExtraction";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { logger } from "@/lib/logger";
+import { buildGeminiEmptyResponseDiagnostic, buildGeminiFailureDiagnostic } from "./geminiFailureDiagnostic";
+
+/** The one Production failure log line (sanitized: see geminiFailureDiagnostic.ts). Never pass error.message here. */
+function logGeminiFailure(diagnostic: object): void {
+  logger.warn("[Gemini connector] call failed", diagnostic);
+}
 
 /**
  * Sleep for a given number of milliseconds
@@ -267,6 +274,8 @@ export async function callGemini(
         // Handle 400 Bad Request errors (invalid contents format)
         if (fetchError?.status === 400 || fetchError?.message?.includes("Invalid value at 'contents'")) {
           const latencyMs = Date.now() - startTime;
+          // Google also answers an invalid/expired key with 400; the reason code tells them apart.
+          logGeminiFailure(buildGeminiFailureDiagnostic(fetchError, { model: GEMINI_MODEL, operation: opts?.diagnosticOperation, attempt: attempt + 1, maxAttempts: maxRetries + 1, latencyMs }));
           // Log request shape for debugging (dev-only, never log full text)
           if (process.env.NODE_ENV !== "production") {
             console.error(`[Gemini connector] 400 Bad Request - Invalid contents:`, {
@@ -298,6 +307,7 @@ export async function callGemini(
         // Handle timeout errors
         if (fetchError?.message === "timeout") {
           const latencyMs = Date.now() - startTime;
+          logGeminiFailure(buildGeminiFailureDiagnostic(fetchError, { model: GEMINI_MODEL, operation: opts?.diagnosticOperation, attempt: attempt + 1, maxAttempts: maxRetries + 1, latencyMs, isTimeout: true }));
           if (process.env.NODE_ENV !== "production") {
             console.warn("[Gemini connector] Request timed out", {
               runId,
@@ -364,7 +374,8 @@ export async function callGemini(
       // If empty, return provider error (do not silently return empty string)
       if (!text || text.length === 0) {
         const latencyMs = Date.now() - startTime;
-        
+        logGeminiFailure(buildGeminiEmptyResponseDiagnostic({ model: GEMINI_MODEL, operation: opts?.diagnosticOperation, finishReason, attempt: attempt + 1, maxAttempts: maxRetries + 1, latencyMs }));
+
         if (process.env.NODE_ENV !== "production") {
           console.error(`[Gemini connector] Empty response:`, {
             runId,
@@ -538,7 +549,10 @@ export async function callGemini(
       }
 
       const latencyMs = Date.now() - startTime;
-      
+      // Final failure of this call (no retry left, or not retryable): one sanitized Production record.
+      const isTimeoutError = error?.message === "timeout" || error?.message?.includes("timeout") || error?.name === "AbortError";
+      logGeminiFailure(buildGeminiFailureDiagnostic(error, { model: GEMINI_MODEL, operation: opts?.diagnosticOperation, attempt: attempt + 1, maxAttempts: maxRetries + 1, latencyMs, isTimeout: isTimeoutError }));
+
       if (process.env.NODE_ENV !== "production") {
         console.error("[Gemini connector] API error:", {
           runId,

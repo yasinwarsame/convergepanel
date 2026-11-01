@@ -70,6 +70,7 @@ import { getResultSchema } from "@/lib/adaptiveSchema/schemaRegistry";
 import { cellConfidenceCertaintyScore, BIAS_EMPTY_REASON_LABELS } from "@/lib/adaptiveSchema/config";
 import { ReportStatusInput } from "@/lib/adaptiveSchema/reportStatus";
 import AdaptivePanelResponse from "@/components/adaptive/AdaptivePanelResponse";
+import ResponsesWithoutAnalysis from "@/components/research/ResponsesWithoutAnalysis";
 
 export interface AdaptivePanelPayload {
   classification: QueryClassification;
@@ -1315,16 +1316,11 @@ export default function ResultsDisplay({
   const hasUnifiedAnswer = !!unifiedHtml && okResults.length > 0;
   const hasPreGeneratedReport = !!preGeneratedSynthesisReport && okResults.length > 0;
 
-  // Fallback if no usable unified answer yet (check both sources)
+  // No usable Unified Answer from either source. P0 restoration: show the
+  // run's own model responses and state plainly what analysis is missing,
+  // rather than presenting a completed run as one that was never executed.
   if (!hasUnifiedAnswer && !hasPreGeneratedReport) {
-    return (
-      <section className="rounded-xl border border-slate-200 bg-white px-6 py-8 text-sm text-slate-600">
-        <h3 className="text-sm font-semibold text-slate-900">No unified answer yet</h3>
-        <p className="mt-1">
-          Run the panel to generate the trust summary, Agreement / Disagreement Map, and panel responses.
-        </p>
-      </section>
-    );
+    return <ResponsesWithoutAnalysis results={results} responses={okResults} textOf={getModelText} synthesisStatus={synthesisStatus} />;
   }
 
   // Show full results when a synthesized report is available

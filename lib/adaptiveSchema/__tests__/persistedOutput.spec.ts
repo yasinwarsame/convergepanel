@@ -345,7 +345,6 @@ describe("isPersistedLegacyAdaptiveSchemaId — Batch 3 persistence foundation (
 
   it.each([
     ["a Milestone-2 schema (comparison_matrix)", "comparison_matrix"],
-    ["generic", "generic"],
     ["graceful_limitation", "graceful_limitation"],
     ["an arbitrary unrecognized string", "not_a_real_schema"],
     ["a non-string value", 42],
@@ -355,7 +354,7 @@ describe("isPersistedLegacyAdaptiveSchemaId — Batch 3 persistence foundation (
     expect(isPersistedLegacyAdaptiveSchemaId(value)).toBe(false);
   });
 
-  it("exposes exactly the 8 documented schema IDs — procedural plus the 7 remaining Batch 3 schemas, no more, no fewer", () => {
+  it("exposes exactly the 9 documented schema IDs — procedural, the 7 Batch 3 schemas, and generic (P0 restoration), no more, no fewer", () => {
     expect([...PERSISTED_LEGACY_ADAPTIVE_SCHEMA_IDS].sort()).toEqual(
       [
         "procedural",
@@ -366,8 +365,13 @@ describe("isPersistedLegacyAdaptiveSchemaId — Batch 3 persistence foundation (
         "medical_health",
         "forecast_speculative",
         "creative_generative",
+        "generic",
       ].sort()
     );
+  });
+
+  it("P0 restoration — generic, the classifier's fallback for every failure, is persisted (it was not, so every generic run reloaded with no analysis)", () => {
+    expect(isPersistedLegacyAdaptiveSchemaId("generic")).toBe(true);
   });
 });
 
@@ -414,10 +418,9 @@ describe("parsePersistedLegacyAdaptiveOutput — legacy-active schema family env
 
   it.each([
     ["a Milestone-2 schema (comparison_matrix)", "comparison_matrix"],
-    ["generic", "generic"],
     ["graceful_limitation", "graceful_limitation"],
     ["an arbitrary unrecognized string", "not_a_real_schema"],
-  ])("rejects a schemaId outside the supported allowlist (%s) — this envelope is deliberately scoped to the 8-member legacy-active family, not every QueryType", (_label, schemaId) => {
+  ])("rejects a schemaId outside the supported allowlist (%s) — this envelope is deliberately scoped to the 9-member legacy-active family, not every QueryType", (_label, schemaId) => {
     expect(parsePersistedLegacyAdaptiveOutput(buildLegacyEnvelope({ schemaId }))).toEqual({ ok: false, reason: "malformed" });
   });
 

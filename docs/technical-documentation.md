@@ -696,6 +696,22 @@ Tests: `classifier.spec.ts` (+2 — `thinkingBudget: 0` is passed to `callGemini
 
 **Live production verification, same day.** Merged (PR #5, `92120c0`) and deployed. A live run against convergepanel.com of the original reported Comparison query still showed the legacy Unified Answer/Trust Summary shell — traced to `adaptive.status: "absent"` on the run record, i.e. `ADAPTIVE_SCHEMAS_ENABLED`/`ADAPTIVE_VERIFICATION_ENABLED` were never set in production at all (see this section's status note above), so the fix above had never actually been exercised there. Both flags were added to production and the deployment redeployed; both original queries were then re-run live and confirmed correct: the Comparison query renders Direct Conclusion/comparison grid/Best-Use Recommendations/Trade-offs/Uncertainties (`ComparisonMatrixView`), and the Risk Analysis query renders Executive Risk Conclusion/Risk Register with per-item severity/likelihood/impact/evidence/mitigation/monitoring-signal/residual-risk and model-coverage badges (`RiskAnalysisView`) — neither shows any Unified Answer/Trust Summary/Verification Gate/List-Compare-Synthesis-tabs content.
 
+#### P0 saved research results restoration (2026-11-01)
+
+**Symptom.** Completed research opened, both right after the run and later, as "No unified answer yet. Run the panel to generate…", with every saved model response hidden. This affected Personal and Team Project research alike.
+
+**Cause.**
+1. After a run, the composer replaces the address with the saved report (`/workspace/research/:runId`, C1). That page renders the saved read through the shared `PersistedResearchResultView`, which never generates a synthesis (`allowSynthesisGeneration={false}`, R2 §L).
+2. The `generic` schema persisted no envelope. A saved generic run therefore had no adaptive result and no synthesis, and the legacy branch of `ResultsDisplay` showed the empty state even though its responses were saved (`runDocument.perModel`).
+3. `generic` is the classifier's fallback for every failure. When every Gemini call failed in Production, every run became generic.
+
+**Fix.**
+- **Display.** `ResultsDisplay`'s no-Unified-Answer branch now renders `components/research/ResponsesWithoutAnalysis.tsx`. It shows every saved response under the run's own recorded model identity and lists the failed models with their recorded status. It labels the Unified Answer, Consensus, Agreement / Disagreement Map and Synthesis Report as unavailable, or as pending while the live composer is generating them. It never infers analysis and never calls anything. The comprehensive and adaptive views are unchanged when their data exists.
+- **Persistence.** `generic` joins `PERSISTED_LEGACY_ADAPTIVE_SCHEMA_IDS` (`lib/adaptiveSchema/persistedOutput.ts`): same `legacyAdaptiveOutput` envelope, same version 1, holding only what the builder generated. Older runs are not backfilled or re-run; they show their responses. A saved generic run is now exportable through the existing legacy-family export branch, with authorization re-checked.
+- **Diagnostics.** `lib/connectors/geminiFailureDiagnostic.ts` adds one sanitized Production line per failed Gemini call, `[Gemini connector] call failed`. Each line carries the provider, model, a closed-set `operation` (`panel`, `classification`, `claim_cluster`, `stance_backfill`, `bias_detection`, `coverage_audit`, `synthesis_narrative`, from `ConnectorCallOptions.diagnosticOperation`, which is never sent to Google), the category, HTTP status and status text, enum-shaped Google reason codes, the error class, attempt counts and latency. It never carries the message, prompt, response, key, URL, errorDetails metadata or user data. Google answers an invalid or expired key with HTTP 400 (`API_KEY_INVALID`), so the category uses reason codes before status. Request and fallback behaviour are unchanged.
+
+**Tests.** `components/research/__tests__/p0SavedRunResults.spec.tsx` (Personal and Team chains, refresh, saved synthesis, saved envelope, all-failed, in-progress and failed, live pending and unchanged POST). `lib/adaptiveSchema/__tests__/p0GenericPersistenceChain.spec.tsx` (real finalize with Gemini healthy and fully failing, through the saved read to render). `lib/connectors/__tests__/geminiFailureDiagnostic.spec.ts` (classification, sanitization, real connector).
+
 ---
 
 ## Synthesis

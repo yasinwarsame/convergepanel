@@ -105,6 +105,7 @@ No markdown fences, no commentary outside the JSON.`;
   try {
     const result = await withTimeout(
       callGemini(`Question: "${question}"\n\n${responsesBlock}`, null, GEMINI_API_KEY, {
+        diagnosticOperation: "bias_detection",
         systemPromptOverride: systemPrompt,
         maxOutputTokens: BIAS_MAX_OUTPUT_TOKENS,
       }),

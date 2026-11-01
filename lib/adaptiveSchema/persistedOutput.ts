@@ -211,10 +211,21 @@ export function parsePersistedAdaptiveOutput(raw: unknown): ParsePersistedAdapti
  * total, `procedural` plus these 7) — deliberately NOT "every QueryType."
  * `factual_lookup` already has its own dedicated primary-view renderer
  * (DirectAnswerCard) but persists through this exact same envelope, since
- * its structured result has the identical claims-matrix shape. The 9
- * Milestone-2 schemas, `generic`, and `graceful_limitation` are
- * intentionally excluded — widening this set to a new schema requires a
- * conscious edit here, never an accidental default.
+ * its structured result has the identical claims-matrix shape.
+ *
+ * `generic` (P0 restoration, 2026-11-01, owner-approved): the Batch 3 audit
+ * excluded it as having "no query classification to fall back from". But it
+ * IS the classifier's fallback for every failure (classifier.ts
+ * genericFallback): connector error, timeout, parse failure, low confidence.
+ * It reaches the same claims-matrix fall-through in orchestrate.ts as the
+ * schemas above. Unpersisted, every generic run reloaded with no analysis,
+ * and during a Gemini outage that was every run. Same envelope, same
+ * version 1: only the allowlist widens.
+ *
+ * The 9 Milestone-2 schemas (their own `adaptiveOutput` envelope) and
+ * `graceful_limitation` (never executes a panel) stay excluded. Widening this
+ * set to a new schema requires a conscious edit here, never an accidental
+ * default.
  */
 export const PERSISTED_LEGACY_ADAPTIVE_SCHEMA_IDS = [
   "procedural",
@@ -225,6 +236,7 @@ export const PERSISTED_LEGACY_ADAPTIVE_SCHEMA_IDS = [
   "medical_health",
   "forecast_speculative",
   "creative_generative",
+  "generic",
 ] as const;
 
 export type PersistedLegacyAdaptiveSchemaId = (typeof PERSISTED_LEGACY_ADAPTIVE_SCHEMA_IDS)[number];

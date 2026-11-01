@@ -267,6 +267,7 @@ export async function classifyQuery(query: string): Promise<QueryClassification>
   try {
     const result = await withTimeout(
       callGemini(trimmedQuery, null, GEMINI_API_KEY, {
+        diagnosticOperation: "classification",
         systemPromptOverride: CLASSIFIER_SYSTEM_PROMPT,
         maxOutputTokens: CLASSIFIER_MAX_OUTPUT_TOKENS,
         // Classification is a short structured-JSON task with no benefit
