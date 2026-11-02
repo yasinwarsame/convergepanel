@@ -10,7 +10,7 @@
  *
  * Contract (owner ruling, P0):
  *   - Every model response with text is shown, under the run's own recorded identity for that slot.
- *   - Unified Answer, consensus, Agreement / Disagreement Map and synthesis are each labelled explicitly as unavailable,
+ *   - Unified Answer, consensus, Agreement / Disagreement Map and synthesis are each named, in one notice, as unavailable,
  *     not available yet, or pending. Nothing is inferred, merged or presented as a multi-model conclusion.
  *   - Models that failed, or that succeeded with no text, are listed with their recorded status. The count in the
  *     heading is exactly the number of responses shown.
@@ -50,14 +50,44 @@ function analysisState(status: ResponsesWithoutAnalysisProps["synthesisStatus"],
   return mayStillBeGenerated ? "not_yet" : "unavailable";
 }
 
-const STATE_LINE: Record<AnalysisState, string> = {
-  pending: "The Unified Answer and synthesis are being generated. The model responses are shown below in the meantime.",
-  not_yet: "The Unified Answer, consensus, Agreement / Disagreement Map and synthesis have not been generated yet. The model responses are shown below.",
-  failed: "The Unified Answer and synthesis could not be generated for this run. The model responses are shown below.",
-  unavailable: "The Unified Answer, consensus, Agreement / Disagreement Map and synthesis are not available for this run. The model responses are shown below from their saved text.",
+/**
+ * One notice (owner follow-up to #276): the state, then every analysis section named once, then where the responses
+ * are. Every section shares the same state, so naming each one after the state keeps each section's status
+ * discoverable without repeating it four times.
+ */
+const STATE_LEAD: Record<AnalysisState, string> = {
+  pending: "Being generated:",
+  not_yet: "Not generated yet:",
+  failed: "Could not be generated for this run:",
+  unavailable: "Not available for this run:",
 };
 
-const SECTION_LABEL: Record<AnalysisState, string> = { pending: "pending", not_yet: "not available yet", failed: "unavailable", unavailable: "unavailable" };
+const STATE_TAIL: Record<AnalysisState, string> = {
+  pending: "The model responses are shown below in the meantime.",
+  not_yet: "The model responses are shown below.",
+  failed: "The model responses are shown below.",
+  unavailable: "The model responses are shown below from their saved text.",
+};
+
+/** Machine-readable per-section status, kept on each named section. */
+const SECTION_STATUS: Record<AnalysisState, string> = { pending: "pending", not_yet: "not-yet", failed: "failed", unavailable: "unavailable" };
+
+/** "A, B, C and D", each name its own element carrying its status. */
+function SectionNames({ state }: { state: AnalysisState }) {
+  const last = UNAVAILABLE_ANALYSIS_SECTIONS.length - 1;
+  return (
+    <span data-testid="unavailable-analysis-sections">
+      {UNAVAILABLE_ANALYSIS_SECTIONS.map((name, i) => (
+        <span key={name}>
+          {i === 0 ? "" : i === last ? " and " : ", "}
+          <span data-section={name} data-status={SECTION_STATUS[state]}>
+            {name}
+          </span>
+        </span>
+      ))}
+    </span>
+  );
+}
 
 const ORG_STATUS_LINE: Record<"needs_review" | "blocked", string> = {
   needs_review: "Governance status: needs review before acting on this result.",
@@ -93,15 +123,10 @@ export default function ResponsesWithoutAnalysis({ results, responses, textOf, s
         <h3 className="text-sm font-semibold">
           {responses.length} of {results.length} models returned a response
         </h3>
-        <p className="mt-1">{STATE_LINE[state]}</p>
+        <p className="mt-1" data-testid="analysis-state-notice">
+          {STATE_LEAD[state]} <SectionNames state={state} />. {STATE_TAIL[state]}
+        </p>
         {orgLine && <p className="mt-2 font-medium" data-testid="org-governance-status">{orgLine}</p>}
-        <ul className="mt-3 space-y-0.5" data-testid="unavailable-analysis-sections">
-          {UNAVAILABLE_ANALYSIS_SECTIONS.map((name) => (
-            <li key={name}>
-              {name}: {SECTION_LABEL[state]}
-            </li>
-          ))}
-        </ul>
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white p-6">

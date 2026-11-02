@@ -123,14 +123,23 @@ function expectResponsesShown(r: TestRenderer.ReactTestRenderer) {
   expect(shown).toEqual(["chatgpt", "claude", "grok", "perplexity"]);
   for (const answer of Object.values(ANSWERS)) expect(text).toContain(answer);
   expect(text).toMatch(/4 of 5 models returned a response/);
-  // Each analysis section is named and labelled unavailable, inside the status list. Nothing is inferred.
-  const sections = instText(byTestId(r, "unavailable-analysis-sections")[0]);
-  for (const name of UNAVAILABLE_ANALYSIS_SECTIONS) expect(sections).toContain(`${name}: unavailable`);
+  // One notice names every analysis section once, each carrying its status. Nothing is inferred.
+  expect(sectionStatuses(r)).toEqual(UNAVAILABLE_ANALYSIS_SECTIONS.map((name) => [name, "unavailable"]));
+  expect(instText(byTestId(r, "analysis-state-notice")[0])).toBe(
+    "Not available for this run: Unified Answer, Consensus, Agreement / Disagreement Map and Synthesis Report. The model responses are shown below from their saved text."
+  );
   // The failed model is listed with its recorded status, and its error text is not presented as an answer.
   expect(byTestId(r, "failed-models")).toHaveLength(1);
   // The saved read normalizes a stored "error" row to "failed"; the UI describes it as "did not respond" (owner wording).
   expect(instText(byTestId(r, "failed-models")[0])).toMatch(/: did not respond$/);
   expect(text).not.toContain("Gemini request failed");
+}
+
+/** [section name, status] for every section the analysis notice names, in order. */
+function sectionStatuses(r: TestRenderer.ReactTestRenderer): [string, string][] {
+  const list = byTestId(r, "unavailable-analysis-sections");
+  expect(list).toHaveLength(1);
+  return list[0].findAll((n) => typeof n.type === "string" && n.props["data-section"] !== undefined).map((n) => [n.props["data-section"], n.props["data-status"]]);
 }
 
 /** Text content of one rendered node. */
@@ -245,7 +254,8 @@ describe("P0 — the live composer (default synthesis policy) is unchanged apart
   it("while synthesis is generating, the responses are shown with the analysis marked pending", async () => {
     const r = await mount(createElement(ResultsDisplay as never, live({ synthesisStatus: "loading" }) as never));
     expect(byTestId(r, "responses-without-analysis")[0].props["data-state"]).toBe("analysis-pending");
-    expect(textOf(r)).toContain("Unified Answer: pending");
+    expect(sectionStatuses(r)).toEqual(UNAVAILABLE_ANALYSIS_SECTIONS.map((name) => [name, "pending"]));
+    expect(textOf(r)).toContain("Being generated: Unified Answer, Consensus, Agreement / Disagreement Map and Synthesis Report. The model responses are shown below in the meantime.");
     expect(byTestId(r, "saved-model-response")).toHaveLength(4);
   });
 
@@ -253,9 +263,11 @@ describe("P0 — the live composer (default synthesis policy) is unchanged apart
     mockedAuthedFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true }) });
     const r = await mount(createElement(ResultsDisplay as never, live({ synthesisStatus: "idle" }) as never));
     expect(mockedAuthedFetch).toHaveBeenCalledTimes(1);
-    // The live page may still produce the synthesis: it must say "not available yet", never "not available for this run".
+    // The live page may still produce the synthesis: it must say "not generated yet", never "not available for this run".
     expect(byTestId(r, "responses-without-analysis")[0].props["data-state"]).toBe("analysis-not-yet");
-    expect(textOf(r)).toContain("Unified Answer: not available yet");
+    expect(sectionStatuses(r)).toEqual(UNAVAILABLE_ANALYSIS_SECTIONS.map((name) => [name, "not-yet"]));
+    expect(textOf(r)).toContain("Not generated yet: Unified Answer, Consensus, Agreement / Disagreement Map and Synthesis Report. The model responses are shown below.");
+    expect(textOf(r)).not.toContain("Not available for this run");
     expect(textOf(r)).not.toContain("exactly as they were saved");
     expect(mockedAuthedFetch.mock.calls[0][0]).toBe("/api/synthesize-panel");
   });
