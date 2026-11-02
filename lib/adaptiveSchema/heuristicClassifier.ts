@@ -87,14 +87,26 @@ function futureYearHorizon(q: string): boolean {
  * SENSITIVE / SAFETY_CRITICAL only raise the independent risk flag and keep a sensitive forecast generic. They are not
  * expanded to chase examples (owner ruling).
  */
+/**
+ * Final verification MINOR-1 / MINOR-2 (structural guards, not keyword lists):
+ *   - a question that opens as a procedure or decision request is not a forecast (owner table: procedure/decision →
+ *     Generic), e.g. "How do I forecast revenue?" or "Should we raise prices by 2030?";
+ *   - a first-person question is about the asker's own situation (health, safety, money), not a public forecast. It
+ *     stays Generic whether or not it names a listed term, e.g. "Will my lump grow in the next 6 months?".
+ */
+const PROCEDURE_OR_DECISION = /^\s*(how|why|should|shall|what should|what can|what do|what would you|can (i|we|you)|could (i|we|you)|do (i|we))\b/i;
+const FIRST_PERSON = /\b(i|i'm|i've|i'd|i'll|im|me|my|mine|myself)\b/i;
+
 export const HEURISTIC_RULES: readonly HeuristicRule[] = [
   // A future time horizon, or "Will …" with a change verb. A bare "Will this compile?" or "Will you help?" is not a forecast.
   {
     id: "forecast",
     queryType: "forecast_speculative",
     test: (q) =>
-      futureYearHorizon(q) ||
-      /\bin the next \d+ (years?|months?|decades?)\b|\bforecast\b|^\s*will\b.*\b(eliminate|replace|increase|decrease|rise|fall|grow|decline|overtake|surpass|outnumber|collapse|recover|disappear)\b/i.test(q),
+      !PROCEDURE_OR_DECISION.test(q) &&
+      !FIRST_PERSON.test(q) &&
+      (futureYearHorizon(q) ||
+      /\bin the next \d+ (years?|months?|decades?)\b|\bforecast\b|^\s*will\b.*\b(eliminate|replace|increase|decrease|rise|fall|grow|decline|overtake|surpass|outnumber|collapse|recover|disappear)\b/i.test(q)),
   },
 ];
 

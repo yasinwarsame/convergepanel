@@ -48,7 +48,7 @@ describe("final fallback boundaries: Forecast or Generic only", () => {
     [FORECAST_Q, "forecast_speculative"],
     ["Will AI eliminate more jobs than it creates?", "forecast_speculative"],
     [`What will EV adoption look like by ${new Date().getUTCFullYear() + 5}?`, "forecast_speculative"],
-    ["Give me a forecast of global solar capacity", "forecast_speculative"],
+    ["What is the forecast for global solar capacity?", "forecast_speculative"],
   ])("clear forecast → forecast: %j", (q, want) => {
     expect(heuristicClassify(q)?.queryType).toBe(want);
   });
@@ -77,6 +77,26 @@ describe("final fallback boundaries: Forecast or Generic only", () => {
   });
 
   it.each([
+    // Final verification MINOR-1: procedure and decision requests are Generic even when they mention a forecast or a year.
+    "How do I forecast revenue?",
+    "Should we raise prices by 2030?",
+    "What should we do about the layoffs forecast for next year?",
+    "Why will interest rates rise in the next 2 years?",
+    // Final verification MINOR-2: first-person questions are about the asker, not a public forecast.
+    "Will I feel better if I stop existing in the next 2 years?",
+    "Will my lump grow in the next 6 months?",
+    "Will anyone notice if I disappear in the next few months?",
+    "Will my savings grow by 2040?",
+  ])("a procedure, decision or first-person question is never a forecast, even with a horizon: %j", (q) => {
+    expect(heuristicClassify(q)).toBeNull();
+  });
+
+  it("the guards do not swallow ordinary forecasts: third-person and organisational questions still route", () => {
+    expect(heuristicClassify("Will AI eliminate more jobs than it creates?")?.queryType).toBe("forecast_speculative");
+    expect(heuristicClassify("Will our revenue grow in the next 2 years?")?.queryType).toBe("forecast_speculative");
+  });
+
+  it.each([
     // Health, legal and financial questions WITHOUT any listed keyword: generic by construction (no rule matches).
     "Why do I feel dizzy every time I stand up?",
     "How do I tell if my mole is getting worse?",
@@ -88,7 +108,7 @@ describe("final fallback boundaries: Forecast or Generic only", () => {
   });
 
   it.each([
-    "Will my insulin dose increase in the next 5 years?",
+    "Will insulin prices rise in the next 5 years?",
     "Will mortgage rates rise in the next 2 years?",
   ])("a sensitive forecast is kept generic by the risk guard: %j", (q) => {
     // Precondition: the forecast rule alone would match, so the guard is what keeps it generic.
