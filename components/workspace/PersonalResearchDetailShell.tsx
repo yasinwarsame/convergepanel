@@ -26,6 +26,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { displayResearchQuestion } from "@/lib/research/savedResponseDisplay";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
@@ -381,7 +382,7 @@ export default function PersonalResearchDetailShell({ runId }: { runId: string }
 
       {state.kind === "in_progress" && (
         <>
-          <h1 className="mt-4 text-xl font-semibold text-cp-text break-words">{state.question}</h1>
+          <h1 className="mt-4 text-xl font-semibold text-cp-text break-words">{displayResearchQuestion(state.question)}</h1>
           <section className="mt-6 rounded-xl border-2 border-cp-border bg-cp-raised p-5 text-sm text-cp-muted">
             This research is still in progress. Refresh this page to check again.
           </section>
@@ -390,7 +391,7 @@ export default function PersonalResearchDetailShell({ runId }: { runId: string }
 
       {state.kind === "failed" && (
         <>
-          <h1 className="mt-4 text-xl font-semibold text-cp-text break-words">{state.question}</h1>
+          <h1 className="mt-4 text-xl font-semibold text-cp-text break-words">{displayResearchQuestion(state.question)}</h1>
           <section role="alert" className="mt-6 rounded-xl border-2 border-cp-border bg-cp-raised p-5 text-sm text-cp-muted">
             This research run didn&apos;t finish successfully. Nothing was saved for it.
           </section>
@@ -399,7 +400,7 @@ export default function PersonalResearchDetailShell({ runId }: { runId: string }
 
       {state.kind === "ready" && (
         <>
-          <h1 className="mt-4 text-xl font-semibold text-cp-text break-words">{state.payload.question}</h1>
+          <h1 className="mt-4 text-xl font-semibold text-cp-text break-words">{displayResearchQuestion(state.payload.question)}</h1>
           {state.payload.viewerRole === "owner" && teamWorkspacesUiEnabled && (
             <div className="mt-3">
               <button

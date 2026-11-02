@@ -35,29 +35,9 @@
 
 import { runModelIdentityLabel, runModelProvenanceFromResultRow } from "@/lib/panel/runModelIdentity";
 import { GovernanceChip } from "@/components/shared/GovernanceChip";
-import { stripJsonFences } from "@/lib/adaptiveSchema/util";
+import { parseStructuredResponse } from "@/lib/research/savedResponseDisplay";
 import type { TeamResearchRunResult } from "@/hooks/useTeamProjectResearch";
 import StructuredResearchResult from "@/components/workspace/projects/StructuredResearchResult";
-
-/**
- * Returns the parsed value if `rawTextFull` (after stripping an optional
- * markdown fence) parses as a JSON object/array, else `null` — a bare
- * JSON-parseable scalar (e.g. a quoted string or a number) is deliberately
- * NOT treated as "structured" here, since real model output in this shape
- * is always an object/array.
- */
-function parseIfStructuredJson(rawTextFull: string): unknown | null {
-  const candidate = stripJsonFences(rawTextFull);
-  try {
-    const parsed: unknown = JSON.parse(candidate);
-    if (parsed !== null && typeof parsed === "object") {
-      return parsed;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
 
 export default function TeamResearchResultView({ run }: { run: TeamResearchRunResult }) {
   return (
@@ -71,7 +51,7 @@ export default function TeamResearchResultView({ run }: { run: TeamResearchRunRe
 
       <ul className="mt-4 space-y-4">
         {run.results.map((result) => {
-          const structured = result.status === "failed" ? null : parseIfStructuredJson(result.rawTextFull);
+          const structured = result.status === "failed" ? null : parseStructuredResponse(result.rawTextFull);
           return (
             <li key={result.modelId} className="rounded-xl border-2 border-cp-border bg-cp-raised p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">

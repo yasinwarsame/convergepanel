@@ -28,6 +28,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { displayResearchQuestion } from "@/lib/research/savedResponseDisplay";
 import Link from "next/link";
 import WorkspaceNav from "@/components/workspace/WorkspaceNav";
 import { AssigneeChips, type AssigneeChipItem } from "@/components/workspace/projects/AssigneeChips";
@@ -294,7 +295,7 @@ export default function TeamProjectDetailShell({
                   <div className="flex items-start justify-between gap-2">
                     <span className="min-w-0 flex-1">
                       <span className="text-xs font-medium text-cp-faint">{new Date(item.at).toLocaleString()}</span>
-                      <span className="mt-1 block text-sm font-medium text-cp-text line-clamp-2">{item.question}</span>
+                      <span className="mt-1 block text-sm font-medium text-cp-text line-clamp-2">{displayResearchQuestion(item.question)}</span>
                       <span className="mt-1 block text-xs text-cp-muted">{teamRunStatusLine(item)}</span>
                       {item.assignee !== null && (
                         <span className="mt-1 block text-xs text-cp-muted" data-testid="team-run-row-assignee">

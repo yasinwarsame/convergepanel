@@ -128,8 +128,8 @@ function expectResponsesShown(r: TestRenderer.ReactTestRenderer) {
   for (const name of UNAVAILABLE_ANALYSIS_SECTIONS) expect(sections).toContain(`${name}: unavailable`);
   // The failed model is listed with its recorded status, and its error text is not presented as an answer.
   expect(byTestId(r, "failed-models")).toHaveLength(1);
-  // The saved read normalizes a stored "error" row to its public status, "failed"; the UI shows the recorded status.
-  expect(instText(byTestId(r, "failed-models")[0])).toMatch(/: failed$/);
+  // The saved read normalizes a stored "error" row to "failed"; the UI describes it as "did not respond" (owner wording).
+  expect(instText(byTestId(r, "failed-models")[0])).toMatch(/: did not respond$/);
   expect(text).not.toContain("Gemini request failed");
 }
 
@@ -200,7 +200,7 @@ describe("P0 — saved run with model responses but no saved analysis", () => {
     expect(textOf(r)).toMatch(/3 of 5 models returned a response/);
     const missing = instText(byTestId(r, "failed-models")[0]);
     expect(missing).toMatch(/returned no text/);
-    expect(missing).toMatch(/: failed/);
+    expect(missing).toMatch(/: did not respond/);
   });
 
   it("a governance-flagged run keeps its Team banner and org status above the saved responses", async () => {
@@ -220,7 +220,7 @@ describe("P0 — saved run with model responses but no saved analysis", () => {
     expect(byTestId(r, "responses-without-analysis")[0].props["data-state"]).toBe("no-usable-response");
     expect(text).toMatch(/No model returned a usable response/);
     expect(byTestId(r, "saved-model-response")).toHaveLength(0);
-    expect(text.match(/: failed/g)).toHaveLength(3);
+    expect(text.match(/: did not respond/g)).toHaveLength(3);
   });
 
   it("a saved run still in progress or failed is not rendered as a result (the shells show their own state)", async () => {
