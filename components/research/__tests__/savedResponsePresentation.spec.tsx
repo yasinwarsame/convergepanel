@@ -124,7 +124,7 @@ const responseOf = (r: TestRenderer.ReactTestRenderer, modelId: string) => {
   expect(hits).toHaveLength(1);
   return hits[0];
 };
-/** Visible text of a response, excluding the collapsed "saved text exactly as returned" disclosure. */
+/** Visible text of a response, excluding the collapsed original-text disclosure. */
 const visibleOf = (inst: TestRenderer.ReactTestInstance) => {
   const structured = inst.findAll((n) => n.props["data-testid"] === "saved-response-structured");
   const plain = inst.findAll((n) => n.props["data-testid"] === "saved-response-text");
@@ -153,7 +153,7 @@ function expectReadableReport(r: TestRenderer.ReactTestRenderer) {
     const details = inst.findAll((n) => n.type === "details");
     expect(details).toHaveLength(1);
     expect(details[0].props.open).toBeFalsy(); // collapsed by default
-    expect(text(details[0].findByType("summary"))).toBe("Show the saved text exactly as stored");
+    expect(text(details[0].findByType("summary"))).toBe("Show the original response text");
     // Byte-for-byte the saved text: ChatGPT saved bare JSON, Claude saved a fenced block.
     expect(text(details[0].findByType("pre"))).toBe(modelId === "chatgpt" ? JSON.stringify(a) : fenced(a));
   }

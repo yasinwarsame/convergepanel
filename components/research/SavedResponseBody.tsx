@@ -19,7 +19,7 @@ export default function SavedResponseBody({ text }: { text: string }) {
         <StructuredResearchResult value={structured} />
       </div>
       <details className="text-xs text-slate-500">
-        <summary className="cursor-pointer">Show the saved text exactly as stored</summary>
+        <summary className="cursor-pointer">Show the original response text</summary>
         <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded bg-slate-50 p-3 text-xs text-slate-700">{text}</pre>
       </details>
     </div>
