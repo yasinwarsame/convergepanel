@@ -80,7 +80,7 @@ import type { AdaptiveReviewDecisionStatus } from "@/lib/governance/adaptiveHuma
 /** `"open"` blocks; `"invalid"` (malformed/unsupported-version) fails closed identically to `"open"`, mirroring the legacy decision route's own asymmetry from assignment-lookup fail-open behavior; everything else (`absent`/`cancelled`/`finalized`) never blocks. */
 type PanelGate = "clear" | "open" | "invalid";
 
-async function readPanelGate(tx: FirebaseFirestore.Transaction, runRef: FirebaseFirestore.DocumentReference, runId: string): Promise<PanelGate> {
+export async function readPanelGate(tx: FirebaseFirestore.Transaction, runRef: FirebaseFirestore.DocumentReference, runId: string): Promise<PanelGate> {
   const panelSnap = await tx.get(runRef.collection("humanReviewPanel").doc("current"));
   const parsed = parseAdaptiveHumanReviewPanel(panelSnap.exists ? panelSnap.data() : undefined, { expectedRunId: runId });
   if (parsed.status === "absent") return "clear";
