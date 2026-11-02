@@ -72,6 +72,7 @@ import { cellConfidenceCertaintyScore, BIAS_EMPTY_REASON_LABELS } from "@/lib/ad
 import { ReportStatusInput } from "@/lib/adaptiveSchema/reportStatus";
 import AdaptivePanelResponse from "@/components/adaptive/AdaptivePanelResponse";
 import ResponsesWithoutAnalysis from "@/components/research/ResponsesWithoutAnalysis";
+import SavedResponseBody, { notRespondedText } from "@/components/research/SavedResponseBody";
 
 export interface AdaptivePanelPayload {
   classification: QueryClassification;
@@ -1272,17 +1273,20 @@ export default function ResultsDisplay({
         </div>
 
         <div className="bg-white rounded-lg border border-gray-200 p-6">
-          <h3 className="text-lg font-semibold mb-4">Raw Response</h3>
+          <h3 className="text-lg font-semibold mb-4">Model Response</h3>
           {successfulResults.map((result) => {
             return (
-              <div key={result.modelId} className="mb-4">
+              <div key={result.modelId} className="mb-4" data-testid="single-model-response" data-model-id={result.modelId}>
                 <h4 className="font-medium text-gray-900 mb-2">
                   {/* The run's own recorded identity for this slot — never a product label. */}
                   {runModelIdentityLabel(runModelProvenanceFromResultRow(result))}
                 </h4>
-                <div className="bg-gray-50 rounded p-4 text-sm text-gray-700 whitespace-pre-wrap">
-                  {getModelText(result) || "No response"}
-                </div>
+                {/* Readable sections for a structured response; the saved text otherwise (presentation fix 2026-11-02). */}
+                {getModelText(result) ? (
+                  <SavedResponseBody text={getModelText(result)} />
+                ) : (
+                  <div className="bg-gray-50 rounded p-4 text-sm text-gray-700 whitespace-pre-wrap">No response</div>
+                )}
               </div>
             );
           })}
@@ -1298,7 +1302,7 @@ export default function ResultsDisplay({
               return (
                 <li key={result.modelId} className="text-red-800">
                   {/* The run's own recorded identity for this slot — never a product label. */}
-                  {runModelIdentityLabel(runModelProvenanceFromResultRow(result))}: {result.status}
+                  {runModelIdentityLabel(runModelProvenanceFromResultRow(result))}: {notRespondedText(result.status)}
                 </li>
               );
             })}

@@ -11,6 +11,7 @@
  */
 
 import Link from "next/link";
+import { displayResearchQuestion } from "@/lib/research/savedResponseDisplay";
 import { personalResearchHref } from "@/lib/user/personalResearchHref";
 import type { ReactNode } from "react";
 import { GovernanceChip } from "@/components/shared/GovernanceChip";
@@ -69,7 +70,7 @@ export function WorkspaceRunCard({ item, actions }: { item: WorkspaceRunSummary;
           <span className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-medium text-cp-faint">{new Date(item.at).toLocaleString()}</span>
           </span>
-          <span className="mt-1 block text-sm font-medium text-cp-text line-clamp-2">{item.question}</span>
+          <span className="mt-1 block text-sm font-medium text-cp-text line-clamp-2">{displayResearchQuestion(item.question)}</span>
           <span className="mt-1 block text-xs text-cp-muted">{workspaceRunStatusLine(item)}</span>
         </span>
         <GovernanceChip status={item.governanceStatus} />

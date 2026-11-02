@@ -199,6 +199,20 @@ describe("TeamProjectDetailShell", () => {
     expect(runs.resetAndReloadFromStart).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(r.toJSON())).toContain("Research assignment updated.");
   });
+  it("presentation fix 2026-11-02: the list row and the Assign dialog show the question once, without the trailing legacy empty-state copy", async () => {
+    const legacy = "Run the panel to generate the trust summary, Agreement / Disagreement Map, and panel responses.";
+    mockedUseTeamProjectRuns.mockReturnValue(listResult({ items: [run({ question: `What is the TAM? ${legacy} ${legacy}` })] }));
+    const r = await mount({ assignmentUiEnabled: true, canAssignResearch: true });
+    const rowLink = r.root.findAllByType("a").find((a) => a.props.href === "/workspace/team/ws-1/projects/p1/research/run-1")!;
+    expect(JSON.stringify(TestRenderer.create(createElement("div", null, rowLink.props.children)).toJSON())).toContain('"What is the TAM?"');
+    await act(async () => {
+      buttons(r, "Assign")[0].props.onClick();
+    });
+    const all = JSON.stringify(r.toJSON());
+    expect(all).not.toContain("Run the panel to generate");
+    expect(r.root.findAll((n) => n.props?.role === "dialog")).toHaveLength(1);
+    expect(all).toContain('"What is the TAM?"');
+  });
   it("'Assigned to me' filter drives the runs hook and yields an honest empty state", async () => {
     mockedUseTeamProjectRuns.mockReturnValue(listResult({ items: [] }));
     const r = await mount({ assignmentUiEnabled: true });

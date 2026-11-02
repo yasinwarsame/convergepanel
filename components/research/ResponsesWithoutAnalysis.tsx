@@ -20,6 +20,9 @@
 
 import type { ModelResult } from "@/lib/types";
 import { runModelIdentityLabel, runModelProvenanceFromResultRow } from "@/lib/panel/runModelIdentity";
+import SavedResponseBody, { notRespondedText } from "@/components/research/SavedResponseBody";
+
+export { notRespondedText };
 
 export type ResponsesWithoutAnalysisProps = {
   /** Every row of the run, in recorded order: successful and failed. */
@@ -51,7 +54,7 @@ const STATE_LINE: Record<AnalysisState, string> = {
   pending: "The Unified Answer and synthesis are being generated. The model responses are shown below in the meantime.",
   not_yet: "The Unified Answer, consensus, Agreement / Disagreement Map and synthesis have not been generated yet. The model responses are shown below.",
   failed: "The Unified Answer and synthesis could not be generated for this run. The model responses are shown below.",
-  unavailable: "The Unified Answer, consensus, Agreement / Disagreement Map and synthesis are not available for this run. The model responses are shown below exactly as they were saved.",
+  unavailable: "The Unified Answer, consensus, Agreement / Disagreement Map and synthesis are not available for this run. The model responses are shown below from their saved text.",
 };
 
 const SECTION_LABEL: Record<AnalysisState, string> = { pending: "pending", not_yet: "not available yet", failed: "unavailable", unavailable: "unavailable" };
@@ -107,7 +110,7 @@ export default function ResponsesWithoutAnalysis({ results, responses, textOf, s
           <div key={result.modelId} className="mb-5 last:mb-0" data-testid="saved-model-response" data-model-id={result.modelId}>
             {/* The run's own recorded identity for this slot, never a product label. */}
             <h4 className="mb-2 font-medium text-slate-900">{label(result)}</h4>
-            <div className="whitespace-pre-wrap rounded bg-slate-50 p-4 text-sm text-slate-700">{textOf(result)}</div>
+            <SavedResponseBody text={textOf(result)} />
           </div>
         ))}
       </div>
@@ -125,7 +128,7 @@ function ModelsWithoutResponse({ rows, label }: { rows: ModelResult[]; label: (r
       <ul className="space-y-1 text-sm text-red-800">
         {rows.map((r) => (
           <li key={r.modelId}>
-            {label(r)}: {r.status === "ok" || r.status === "substituted" ? "returned no text" : r.status}
+            {label(r)}: {r.status === "ok" || r.status === "substituted" ? "returned no text" : notRespondedText(r.status)}
           </li>
         ))}
       </ul>

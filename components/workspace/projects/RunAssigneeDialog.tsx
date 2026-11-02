@@ -24,6 +24,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { displayResearchQuestion } from "@/lib/research/savedResponseDisplay";
 import { ProjectDialogFrame } from "@/components/projects/ProjectDialogFrame";
 import { useWorkspaceMembers } from "@/hooks/useWorkspaceMembers";
 import type { TeamRunAssigneeErrorCode, TeamRunAssigneeView, UseTeamRunAssigneeResult } from "@/hooks/useTeamRunAssignee";
@@ -129,7 +130,7 @@ export function RunAssigneeDialog({
       {({ requestClose }) => (
         <div className="mt-4">
           <p className="break-words text-sm text-cp-muted">
-            <span className="font-medium text-cp-text">{run.question}</span>
+            <span className="font-medium text-cp-text">{displayResearchQuestion(run.question)}</span>
           </p>
           <p className="mt-2 text-xs text-cp-faint">Only members who can create research are listed (a mirror of the server rule; the server re-checks on save). Assignment does not change what anyone can see or do.</p>
 

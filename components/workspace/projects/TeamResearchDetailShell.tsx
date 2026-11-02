@@ -65,6 +65,7 @@ import { createGenerationGuard } from "@/lib/client/authGeneration";
 import { Breadcrumb } from "@/components/shared/Breadcrumb";
 import WorkspaceNav from "@/components/workspace/WorkspaceNav";
 import PersistedResearchResultView from "@/components/research/PersistedResearchResultView";
+import { displayResearchQuestion } from "@/lib/research/savedResponseDisplay";
 import TeamResearchReviewSummary from "@/components/workspace/projects/TeamResearchReviewSummary";
 import { TeamExportRefreshProvider, TeamResearchExportButton, TeamResearchExportHistory } from "@/components/workspace/projects/TeamResearchExport";
 import type { AdaptiveAncillaryPresentation } from "@/components/adaptive/adaptiveAncillaryPresentation";
@@ -263,7 +264,9 @@ export default function TeamResearchDetailShell({ workspaceId, workspaceName, ru
   const workspaceHref = `/workspace/team/${encodeURIComponent(workspaceId)}`;
   const projectHref = project ? `${workspaceHref}/projects/${encodeURIComponent(project.id)}` : null;
 
-  const question = state.kind === "ready" ? state.presentation.question : state.kind === "in_progress" || state.kind === "failed" ? state.question : null;
+  const storedQuestion = state.kind === "ready" ? state.presentation.question : state.kind === "in_progress" || state.kind === "failed" ? state.question : null;
+  // Display only: the stored question is never modified.
+  const question = storedQuestion === null ? null : displayResearchQuestion(storedQuestion);
   const meta = state.kind === "ready" || state.kind === "in_progress" || state.kind === "failed" ? state.meta : null;
 
   return (
