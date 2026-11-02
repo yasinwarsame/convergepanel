@@ -17,11 +17,13 @@ jest.mock("@/lib/firebase/admin", () => ({
   },
 }));
 const flags = { REPORT_REVIEW_ENABLED: true };
-jest.mock("@/lib/env", () => ({
-  ...jest.requireActual("@/lib/env"),
+jest.mock("@/lib/workspaces/reportReviewRollout", () => ({
   get REPORT_REVIEW_ENABLED() {
     return flags.REPORT_REVIEW_ENABLED;
   },
+}));
+jest.mock("@/lib/env", () => ({
+  ...jest.requireActual("@/lib/env"),
   TEAM_WORKSPACES_ENABLED: true,
   TEAM_WORKSPACES_CANARY_UIDS: undefined,
   TEAM_WORKSPACES_CANARY_WORKSPACE_IDS: undefined,

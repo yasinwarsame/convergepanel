@@ -91,3 +91,16 @@ describe("2. the dual-record invariant's assumptions are pinned", () => {
     expect(code).toMatch(/const newRunId = `run-\$\{randomUUID\(\)\}`/);
   });
 });
+
+describe("3. dark by construction", () => {
+  it("the shipped switch is the compile-time constant false (enabling needs a reviewed code change)", async () => {
+    const actual = jest.requireActual("@/lib/workspaces/reportReviewRollout") as { REPORT_REVIEW_ENABLED: boolean };
+    expect(actual.REPORT_REVIEW_ENABLED).toBe(false);
+    const src = stripComments(readFileSync(join(ROOT, "lib/workspaces/reportReviewRollout.ts"), "utf8"));
+    expect(src).not.toMatch(/process\.env/);
+  });
+
+  it("lib/env.ts is untouched by B1 (Order 6 boundary suites pin it)", () => {
+    expect(stripComments(readFileSync(join(ROOT, "lib/env.ts"), "utf8"))).not.toMatch(/REPORT_REVIEW/);
+  });
+});

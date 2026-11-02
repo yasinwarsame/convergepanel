@@ -498,13 +498,6 @@ export const APPROVAL_WORKFLOW_CANARY_UIDS = process.env.APPROVAL_WORKFLOW_CANAR
 export const PROJECT_ASSIGNMENT_ENABLED = process.env.PROJECT_ASSIGNMENT_ENABLED === "true";
 
 /**
- * Order B, Stage B1 — Report Review (explicit submission of non-governed Team research for human approval).
- * Server-only, default OFF, unset in every environment until a separate owner enablement decision. While OFF, both
- * report-review routes return the ordinary concealed 404 and nothing is read or written.
- */
-export const REPORT_REVIEW_ENABLED = process.env.REPORT_REVIEW_ENABLED === "true";
-
-/**
  * Project/Research Assignment account-scoped canary — structural sibling of
  * `APPROVAL_WORKFLOW_CANARY_UIDS`: an optional, server-only comma-separated
  * Firebase uid allowlist (max 10) admitting a few named accounts while

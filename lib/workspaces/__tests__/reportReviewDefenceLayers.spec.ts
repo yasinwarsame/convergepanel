@@ -15,7 +15,8 @@ jest.mock("@/lib/firebase/admin", () => ({
     return db;
   },
 }));
-jest.mock("@/lib/env", () => ({ ...jest.requireActual("@/lib/env"), REPORT_REVIEW_ENABLED: true, TEAM_WORKSPACES_ENABLED: true, TEAM_WORKSPACES_CANARY_UIDS: undefined, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS: undefined }));
+jest.mock("@/lib/workspaces/reportReviewRollout", () => ({ REPORT_REVIEW_ENABLED: true }));
+jest.mock("@/lib/env", () => ({ ...jest.requireActual("@/lib/env"), TEAM_WORKSPACES_ENABLED: true, TEAM_WORKSPACES_CANARY_UIDS: undefined, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS: undefined }));
 jest.mock("@/lib/logger", () => ({ logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
 const legacyAllowlistAcceptsEverything = { on: false };
 jest.mock("@/lib/adaptiveSchema/persistedOutput", () => {
