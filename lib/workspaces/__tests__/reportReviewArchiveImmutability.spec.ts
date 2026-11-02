@@ -24,6 +24,16 @@ function sourceFiles(dir: string): string[] {
   }
   return out;
 }
+function scriptFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name);
+    if (name === "node_modules" || name.startsWith(".")) continue;
+    if (statSync(p).isDirectory()) out.push(...scriptFiles(p));
+    else if (/\.(js|mjs|cjs)$/.test(name)) out.push(p);
+  }
+  return out;
+}
 const FILES = [...sourceFiles(join(ROOT, "lib")), ...sourceFiles(join(ROOT, "app")), ...sourceFiles(join(ROOT, "components")), ...sourceFiles(join(ROOT, "scripts"))];
 const rel = (p: string) => relative(ROOT, p);
 const stripComments = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
@@ -95,13 +105,53 @@ describe("2. the dual-record invariant's assumptions are pinned", () => {
       .sort();
     // Why each is safe for the dual-record invariant (docs/workspaces/approval-b1-dual-record-proof.md §1):
     expect(writers).toEqual([
-      "lib/firestore/runs.ts", // persistGovernanceRecord (G1, only from the run's own execution) + dotted humanReview updates behind parseGovernanceRecord of an EXISTING record
+      "lib/firestore/runs.ts", // persistGovernanceRecord (G1) + dotted humanReview updates behind parseGovernanceRecord of an EXISTING record + persistAutomatedGovernanceUpdate (dotted, called only by runPanelExecution AFTER G1 in the same execution)
       "lib/firestore/teamRunSnapshots.ts", // G2: a brand-new run id, in one tx.create with its copied adaptiveOutput
       "lib/governance/adaptiveGovernanceSeedPlan.ts", // test-seeding plan: legacy-Team run docs (teamId, no workspaceId) that can never pass the report-review workspace binding
       "lib/workspaces/resubmitWorkspaceReview.ts", // dotted humanReview update behind parseGovernanceRecord of an EXISTING record
       "lib/workspaces/workspaceReviewMutations.ts", // same
       "lib/workspaces/workspaceReviewPanelMutations.ts", // same
     ]);
+  });
+
+  it("TRIPWIRE (review B1-m1 residual): every governanceRecord key, assignment or field-path token in all source files is pinned per file", () => {
+    // Broad and deliberately over-inclusive: it also counts reads (DTO keys, type annotations). Any new occurrence —
+    // a new writer of ANY shape (payload variables, chained refs, nested literals, variadic updates, computed keys),
+    // in ANY file, including the allow-listed ones and .js/.mjs/.cjs scripts — changes a count and fails this test.
+    // Whoever changes a count must re-check docs/workspaces/approval-b1-dual-record-proof.md §1 before updating it.
+    const TOKEN = /\bgovernanceRecord\b\s*[:=]|\[\s*["'`]governanceRecord["'`]|["'`]governanceRecord\./g;
+    const all = [...FILES, ...sourceFiles(join(ROOT, "hooks")), ...scriptFiles(join(ROOT, "scripts"))];
+    const counts: Record<string, number> = {};
+    for (const f of all) {
+      const n = (stripComments(readFileSync(f, "utf8")).match(TOKEN) ?? []).length;
+      if (n > 0) counts[rel(f)] = n;
+    }
+    expect(counts).toEqual({
+      "app/api/teams/adaptive-runs/[runId]/review-panel/route.ts": 1,
+      "app/api/teams/adaptive-runs/[runId]/votes/route.ts": 1,
+      "app/api/teams/runs/route.ts": 2,
+      "app/api/user/runs/[runId]/export/route.ts": 1,
+      "app/api/user/runs/[runId]/governance/route.ts": 2,
+      "app/api/user/runs/[runId]/route.ts": 2,
+      "app/api/workspaces/[workspaceId]/runs/[runId]/export/route.ts": 1,
+      "app/api/workspaces/[workspaceId]/runs/[runId]/route.ts": 3,
+      "lib/adaptiveSchema/dsProvenanceRouteAdapter.ts": 4,
+      "lib/adaptiveSchema/dsProvenanceViewMin.ts": 3,
+      "lib/adaptiveSchema/reviewGovernanceViewModel.ts": 1,
+      "lib/firestore/runs.ts": 9,
+      "lib/firestore/teamRunSnapshots.ts": 1,
+      "lib/governance/adaptiveGovernanceSeedPlan.ts": 1,
+      "lib/governance/evaluateAdaptiveGovernance.ts": 2,
+      "lib/governance/reviewIntegrityMetrics.ts": 2,
+      "lib/governance/teamReviewQueueEnrichment.ts": 2,
+      "lib/governance/workspaceGovernanceSummary.ts": 3,
+      "lib/runPanelExecution.ts": 1,
+      "lib/workspaces/deriveTeamRunViewerRole.ts": 1,
+      "lib/workspaces/resubmitWorkspaceReview.ts": 2,
+      "lib/workspaces/reviewQueue.ts": 5,
+      "lib/workspaces/workspaceReviewMutations.ts": 2,
+      "lib/workspaces/workspaceReviewPanelMutations.ts": 4,
+    });
   });
 
   it("the seed plan's run documents are legacy-Team shaped (no workspaceId), so they can never be report-review targets", () => {

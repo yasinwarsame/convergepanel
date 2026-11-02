@@ -215,8 +215,9 @@ export async function resubmitReportReview(args: { uid: string; workspaceId: str
         eventDoc({ type: "report_review_resubmitted", runId: args.runId, workspaceId: pre.workspaceId, projectId: pre.projectId, actorUid: args.uid, fromCycle: current.record.cycle, toCycle: next.cycle, purposeCode: next.purpose.code, at: now })
       );
       const previousReviewerUserId = typeof assignment?.assignedReviewerUserId === "string" ? assignment.assignedReviewerUserId : null;
+      // History only when a reviewer is actually removed (no no-op "unassigned" entries).
       const historyEntry =
-        assignment === null
+        assignment === null || previousReviewerUserId === null
           ? null
           : buildAdaptiveHumanReviewAssignmentHistoryEntry({
               teamId: null,

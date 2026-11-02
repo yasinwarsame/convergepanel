@@ -8,7 +8,12 @@
 
 A whole record is created at only two production sites.
 
-`reportReviewArchiveImmutability.spec.ts` pins **every** write that can put a `governanceRecord` on a run, across `lib/`, `app/` and `scripts/`, against an explicit allow-list with the reason each entry is safe. It checks four write shapes: whole-record writes, dotted-path payload keys, assignments into a write payload, and seed-plan documents. A new writer of any of these shapes fails the test, and the proof must then be redone.
+`reportReviewArchiveImmutability.spec.ts` guards this in two layers:
+
+1. **Allow-list.** The files with recognisable `governanceRecord` writes (whole-record payloads, dotted payload keys, payload assignments, seed documents) are pinned, with the reason each is safe.
+2. **Tripwire.** Every `governanceRecord` key, assignment or field-path token in every source file is counted and pinned per file. That covers `lib/`, `app/`, `components/`, `hooks/` and `scripts/`, including `.js`, `.mjs` and `.cjs`.
+
+The tripwire is deliberately over-inclusive and also counts reads. Any new occurrence of any shape, in any file, fails the test until it is checked against this proof.
 
 The allow-list also contains the test-seeding plan (`lib/governance/adaptiveGovernanceSeedPlan.ts`). It writes legacy-Team run documents (`teamId`, no `workspaceId`), which can never pass the report-review workspace binding.
 
@@ -18,6 +23,8 @@ The allow-list also contains the test-seeding plan (`lib/governance/adaptiveGove
 | G2 | `lib/firestore/teamRunSnapshots.ts` → `buildAdaptiveGovernanceRecord` | When a run is copied into a Team project, and only from a copied `adaptiveOutput` | A **brand-new** run id (`run-${randomUUID()}`), written in one transaction together with that `adaptiveOutput` |
 
 All other governance writes are partial updates of `governanceRecord.humanReview`, made by the decision, panel, override and resubmit routes. Each of them first reads and parses an **existing** governance record in its transaction, so none can create one on a run that has none.
+
+There is one further partial writer. `persistAutomatedGovernanceUpdate` (`lib/firestore/runs.ts`) writes `governanceRecord.automatedGovernance` and is not behind a parse. It is called only by `runPanelExecution.ts`, after G1 in the same execution, so it never runs on a run that G1 did not just give a record.
 
 **Facts each step relies on, all checked in code:**
 - **One execution per run id.** Every execution uses a fresh `run-${randomUUID()}` (`app/api/run-panel/route.ts:291`), and Team runs are created with `tx.create()` (`teamWorkspaceRuns.ts`). No path re-executes an existing run id.
