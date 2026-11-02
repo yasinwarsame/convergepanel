@@ -59,9 +59,16 @@ export interface ReviewQueueCursor {
   projectFilter: string | null | undefined;
   sort: ReviewQueueSortValue;
   docPath: string;
+  /**
+   * Order B, Stage B2 — true for a cursor issued by the MERGED status-view scan (governed + report-review streams).
+   * Encoded as cursor version 2; version-1 cursors (merged absent/false) are byte-identical to before. The route
+   * rejects a cursor whose mode does not match the current scan mode, so a page link never changes meaning.
+   */
+  merged?: boolean;
 }
 
 const CURSOR_VERSION = 1;
+const MERGED_CURSOR_VERSION = 2;
 const MAX_CURSOR_BYTES = 768;
 const MAX_NANOSECONDS = 999_999_999;
 const MAX_DOC_PATH_LENGTH = 1500;
@@ -72,7 +79,7 @@ const VALID_VIEWS: ReadonlySet<string> = new Set<ReviewQueueView>(["assigned_to_
 
 export function encodeReviewQueueCursor(cursor: ReviewQueueCursor): string {
   const payload: Record<string, unknown> = {
-    v: CURSOR_VERSION,
+    v: cursor.merged === true ? MERGED_CURSOR_VERSION : CURSOR_VERSION,
     w: cursor.workspaceId,
     view: cursor.view,
     i: cursor.docPath,
@@ -125,7 +132,7 @@ export function decodeReviewQueueCursor(raw: string | null | undefined): DecodeR
   }
   const p = parsed as Record<string, unknown>;
 
-  if (p.v !== CURSOR_VERSION) {
+  if (p.v !== CURSOR_VERSION && p.v !== MERGED_CURSOR_VERSION) {
     return { ok: false, reason: "unsupported_version" };
   }
   if (typeof p.w !== "string" || p.w.length === 0 || p.w.length > MAX_WORKSPACE_ID_LENGTH) {
@@ -166,5 +173,6 @@ export function decodeReviewQueueCursor(raw: string | null | undefined): DecodeR
     return { ok: false, reason: "invalid_fields" };
   }
 
-  return { ok: true, cursor: { workspaceId: p.w, view: p.view as ReviewQueueView, projectFilter, sort, docPath: p.i } };
+  const merged = p.v === MERGED_CURSOR_VERSION;
+  return { ok: true, cursor: { workspaceId: p.w, view: p.view as ReviewQueueView, projectFilter, sort, docPath: p.i, ...(merged ? { merged: true } : {}) } };
 }

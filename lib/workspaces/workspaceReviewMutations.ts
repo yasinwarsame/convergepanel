@@ -51,6 +51,7 @@ import { resolveTeamWorkspaceTargetAdmission } from "./teamWorkspaceTargetAdmiss
 import { authorizeTeamWorkspaceMutationInTransaction, type TeamMutationAuthorizationDenialReason } from "./authorizeTeamWorkspaceMutationInTransaction";
 import { roleHasCapability } from "./capabilities";
 import { resolveWorkspaceReviewTarget } from "./resolveWorkspaceReviewTarget";
+import { reportReviewAssignmentContext, writeReportReviewAssignmentEvent } from "./reportReviewAssignmentAudit";
 import { isValidAssignmentTarget, isOrdinaryReviewerAuthorized, type WorkspaceReviewCandidate, type AssignmentTargetIneligibilityReason, type OrdinaryReviewerAuthorizationDenialReason } from "./workspaceReviewEligibility";
 import { computeMembershipId } from "./membershipId";
 import { validateMembershipBinding } from "./membershipBinding";
@@ -257,6 +258,14 @@ export async function putWorkspaceReviewAssignment(args: {
         if (!eligibility.eligible) return { ok: false, reason: { kind: "target_not_eligible" as const, reason: eligibility.reason } };
       }
 
+      // Order B, Stage B2 — report-review runs only (governed runs return "not_report_review" and are unaffected):
+      // the submitter is never assignable, and the change is audited in this same transaction below.
+      const reportReviewContext = reportReviewAssignmentContext(runData);
+      if (reportReviewContext.kind === "malformed") return { ok: false, reason: "run_not_found" as const };
+      if (reportReviewContext.kind === "report_review" && args.assignedReviewerUserId === reportReviewContext.submitterUid) {
+        return { ok: false, reason: { kind: "target_not_eligible" as const, reason: "self_review" as const } };
+      }
+
       // ---- dueAt resolution (§18-21) — reads only, no write yet. ----
       let resolvedDueAt: string | null;
       if (current === null) {
@@ -328,6 +337,9 @@ export async function putWorkspaceReviewAssignment(args: {
       }
 
       tx.set(assignmentRef, nextAssignment);
+      if (reportReviewContext.kind === "report_review") {
+        writeReportReviewAssignmentEvent(tx, runRef, { runId: args.runId, workspaceId: target.workspaceId, projectId: target.projectId, actorUid: args.uid, cycle: reportReviewContext.cycle, previousReviewerUserId: current?.assignedReviewerUserId ?? null, newReviewerUserId: args.assignedReviewerUserId, revision: nextAssignment.revision, at: now });
+      }
 
       const dto = toDto(nextAssignment);
       if (!dto) {
@@ -412,6 +424,8 @@ export async function deleteWorkspaceReviewAssignment(args: { uid: string; works
       const panelGate = await readPanelGate(tx, runRef, args.runId);
       if (panelGate === "open") return { ok: false, reason: "active_panel" as const };
       if (panelGate === "invalid") return { ok: false, reason: "panel_unreadable" as const };
+      const reportReviewContext = reportReviewAssignmentContext(runData);
+      if (reportReviewContext.kind === "malformed") return { ok: false, reason: "run_not_found" as const };
 
       const assignmentRef = runRef.collection("humanReviewAssignment").doc("current");
       const assignmentSnap = await tx.get(assignmentRef);
@@ -442,6 +456,9 @@ export async function deleteWorkspaceReviewAssignment(args: { uid: string; works
       });
 
       tx.set(assignmentRef, nextAssignment);
+      if (reportReviewContext.kind === "report_review") {
+        writeReportReviewAssignmentEvent(tx, runRef, { runId: args.runId, workspaceId: target.workspaceId, projectId: target.projectId, actorUid: args.uid, cycle: reportReviewContext.cycle, previousReviewerUserId: current?.assignedReviewerUserId ?? null, newReviewerUserId: null, revision: nextAssignment.revision, at: now });
+      }
       return { ok: true, historyEntry };
     });
   } catch (err) {

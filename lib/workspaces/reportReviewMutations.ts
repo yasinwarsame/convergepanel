@@ -43,8 +43,8 @@ import {
   type ReportReviewRecordV1,
 } from "@/lib/governance/reportReview";
 
-export const REPORT_REVIEW_CYCLES_COLLECTION = "reportReviewCycles";
-export const REPORT_REVIEW_EVENTS_COLLECTION = "reportReviewEvents";
+import { REPORT_REVIEW_CYCLES_COLLECTION, REPORT_REVIEW_EVENTS_COLLECTION } from "./reportReviewCollections";
+export { REPORT_REVIEW_CYCLES_COLLECTION, REPORT_REVIEW_EVENTS_COLLECTION };
 
 export type ReportReviewMutationFailure =
   | { ok: false; reason: "disabled" | "team_workspaces_disabled" | "firestore_unavailable" | "write_failed" }

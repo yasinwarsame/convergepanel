@@ -40,22 +40,31 @@ const stripComments = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(
 const WRITER = "lib/workspaces/reportReviewMutations.ts";
 
 describe("1. archive and event history is write-once in every write path", () => {
-  it("only the B1 writer references the archive and event collections", () => {
-    const users = FILES.filter((f) => /reportReviewCycles|reportReviewEvents|REPORT_REVIEW_CYCLES_COLLECTION|REPORT_REVIEW_EVENTS_COLLECTION/.test(stripComments(readFileSync(f, "utf8")))).map(rel);
-    expect(users).toEqual([WRITER]);
+  // B2 adds the decision writer and the assignment-audit writer (both create-only), a constants module, and a
+  // read-only context reader. Each role is pinned.
+  const COLLECTION_USERS = {
+    constants: ["lib/workspaces/reportReviewCollections.ts"],
+    writers: ["lib/workspaces/reportReviewAssignmentAudit.ts", "lib/workspaces/reportReviewDecisionMutation.ts", WRITER],
+    readers: ["lib/workspaces/reportReviewContext.ts"],
+  };
+
+  it("only the pinned modules reference the archive and event collections", () => {
+    const users = FILES.filter((f) => /reportReviewCycles|reportReviewEvents|REPORT_REVIEW_CYCLES_COLLECTION|REPORT_REVIEW_EVENTS_COLLECTION/.test(stripComments(readFileSync(f, "utf8")))).map(rel).sort();
+    expect(users).toEqual([...COLLECTION_USERS.constants, ...COLLECTION_USERS.readers, ...COLLECTION_USERS.writers].sort());
   });
 
-  it("inside the writer, every archive or event write is tx.create (never set/update/delete)", () => {
-    const code = stripComments(readFileSync(join(ROOT, WRITER), "utf8"));
-    const uses = code.split("\n").filter((l) => /REPORT_REVIEW_(CYCLES|EVENTS)_COLLECTION\)/.test(l));
-    expect(uses.length).toBe(3); // submit event, resubmit archive, resubmit event
-    // Each use is the argument line of a tx.create( call.
+  it.each(["lib/workspaces/reportReviewAssignmentAudit.ts", "lib/workspaces/reportReviewDecisionMutation.ts", WRITER])("%s writes archives/events only with tx.create (never set/update/delete)", (file) => {
+    const code = stripComments(readFileSync(join(ROOT, file), "utf8"));
     const lines = code.split("\n");
-    for (const u of uses) {
-      const i = lines.indexOf(u);
-      expect(lines.slice(Math.max(0, i - 1), i + 1).join("\n")).toMatch(/tx\.create\(/);
-    }
-    expect(code).not.toMatch(/REPORT_REVIEW_(CYCLES|EVENTS)_COLLECTION[\s\S]{0,120}\.(update|delete)\(/);
+    const uses = lines.map((l, i) => [l, i] as const).filter(([l]) => /REPORT_REVIEW_(CYCLES|EVENTS)_COLLECTION\)/.test(l));
+    expect(uses.length).toBeGreaterThan(0);
+    for (const [, i] of uses) expect(lines.slice(Math.max(0, i - 1), i + 1).join("\n")).toMatch(/tx\.create\(/);
+    expect(code).not.toMatch(/REPORT_REVIEW_(CYCLES|EVENTS)_COLLECTION[\s\S]{0,120}\.(update|delete|set)\(/);
+  });
+
+  it("the context reader never writes", () => {
+    const code = stripComments(readFileSync(join(ROOT, "lib/workspaces/reportReviewContext.ts"), "utf8"));
+    expect(code).not.toMatch(/\.(set|update|create|delete)\(|runTransaction/);
   });
 
   it("no client Firestore rule exposes runs or their subcollections", () => {
@@ -68,8 +77,13 @@ describe("2. the dual-record invariant's assumptions are pinned", () => {
   it("reportReview is written only by the B1 writer", () => {
     // A Firestore write whose payload names reportReview: tx.update/set/create(ref, {…reportReview…}) or ref.update/set({…}).
     const WRITE = /\.(update|set|create)\(\s*(?:[\w.!]+(?:\([^)]*\))*\s*,\s*)?\{[^}]*?["']?\breportReview\b/;
-    const writers = FILES.filter((f) => WRITE.test(stripComments(readFileSync(f, "utf8")))).map(rel);
-    expect(writers).toEqual([WRITER]);
+    const DOTTED = /["']reportReview\.[\w.]+["']\s*:/;
+    const writers = FILES.filter((f) => {
+      const code = stripComments(readFileSync(f, "utf8"));
+      return WRITE.test(code) || DOTTED.test(code);
+    }).map(rel);
+    // B2: the decision writer updates reportReview.humanReview (dotted payload key).
+    expect(writers.sort()).toEqual(["lib/workspaces/reportReviewDecisionMutation.ts", WRITER].sort());
     // Positive control: the pattern does match the writer's real write.
     expect(WRITE.test("tx.update(pre.runRef, { reportReview: record });")).toBe(true);
     expect(WRITE.test("NextResponse.json({ ok: true, reportReview: result.record })")).toBe(false);
@@ -186,9 +200,11 @@ describe("2. the dual-record invariant's assumptions are pinned", () => {
       "lib/runPanelExecution.ts": 4,
       "lib/runs/runReadPayload.ts": 2,
       "lib/workspaces/deriveTeamRunViewerRole.ts": 3,
+      "lib/workspaces/reportReviewContext.ts": 2, // B2: read-only "both records ⇒ integrity_violation" check
+      "lib/workspaces/reportReviewDecisionMutation.ts": 2, // B2: read-only "both records ⇒ integrity_violation" check
       "lib/workspaces/resubmitWorkspaceReview.ts": 5,
       "lib/workspaces/reviewContext.ts": 3,
-      "lib/workspaces/reviewQueue.ts": 9,
+      "lib/workspaces/reviewQueue.ts": 14, // B2: +5 reads (governed-stream query field paths; fail-closed both-records check)
       "lib/workspaces/workspaceReviewMutations.ts": 6,
       "lib/workspaces/workspaceReviewPanelMutations.ts": 13,
       "lib/workspaces/workspaceRunDetail.ts": 2
