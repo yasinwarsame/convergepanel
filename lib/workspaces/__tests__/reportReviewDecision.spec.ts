@@ -211,6 +211,16 @@ describe("concurrency, retries, OCC", () => {
     expect(rr().humanReview.status).toBe("approved");
   });
 
+  it("a decided cycle can never be re-decided, even with the CURRENT cycle and updatedAt (no in-place overwrite)", async () => {
+    await submitted();
+    await assign(REVIEWER);
+    await decide(REVIEWER, { status: "approved" });
+    const res = await decide(REVIEWER, { status: "rejected" }); // decide() passes the current cycle and updatedAt
+    expect(res).toEqual({ ok: false, reason: "not_authorized", denial: "not_open" });
+    expect(rr().humanReview.status).toBe("approved");
+    expect(events("report_review_decided")).toHaveLength(1);
+  });
+
   it("two simultaneous decisions: exactly one commits; the other retries and is replayed or refused, never both written", async () => {
     await submitted();
     await assign(REVIEWER);

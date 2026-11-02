@@ -34,7 +34,8 @@ import { resolveTeamRunWorkspaceAccess } from "@/lib/workspaces/resolveTeamRunWo
 import { teamRunAccessDeniedResponse, teamRunWorkspaceNotFoundConcealedResponse, teamRunInsufficientCapabilityResponse } from "@/lib/workspaces/teamRunAccessResponse";
 import { internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
 import { decodeReviewQueueCursor, type ReviewQueueView } from "@/lib/workspaces/reviewQueueCursor";
-import { getReviewQueue, isMergedReviewQueueView } from "@/lib/workspaces/reviewQueue";
+import { getReviewQueue } from "@/lib/workspaces/reviewQueue";
+import { isMergedReviewQueueView } from "@/lib/workspaces/reviewQueueMode";
 import type { WorkspaceReviewCandidate } from "@/lib/workspaces/workspaceReviewEligibility";
 
 export const runtime = "nodejs";

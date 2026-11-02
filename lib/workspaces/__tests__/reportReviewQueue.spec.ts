@@ -61,6 +61,15 @@ describe("status views: every eligible item exactly once, deterministic order, a
     for (const r of rows) expect(r.recordKind === "report_review").toBe(r.runId.startsWith("rr-"));
   });
 
+  it("the seed contains cross-stream ties in every view (so document-id tie-breaking across streams is exercised)", () => {
+    for (const view of VIEWS) {
+      const rows = seed.filter((r) => r.eligible && r.workspaceId === W && expectedStatusView(seed, view).includes(r.id));
+      const key = (r: SeedRun) => (view === "needs_review" ? `${r.createdAt.seconds}` : r.reviewedAt);
+      const crossTie = rows.some((a) => rows.some((b) => a.kind !== b.kind && key(a) === key(b)));
+      expect(crossTie).toBe(true);
+    }
+  });
+
   it("the same page size twice returns byte-identical pages (deterministic)", async () => {
     const a = await pageAll(queue, "needs_review", OWNER, "owner", 3);
     const b = await pageAll(queue, "needs_review", OWNER, "owner", 3);

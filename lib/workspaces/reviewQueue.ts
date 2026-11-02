@@ -598,10 +598,6 @@ const MERGED_ORDER_FIELDS: Record<"needs_review" | "changes_requested" | "recent
   recently_approved: { governance: "governanceRecord.humanReview.reviewedAt", report_review: "reportReview.humanReview.reviewedAt" },
 };
 
-/** Whether this view's cursors are merged-mode (version 2) under the current rollout. */
-export function isMergedReviewQueueView(view: ReviewQueueView): boolean {
-  return REPORT_REVIEW_ENABLED && (view === "needs_review" || view === "changes_requested" || view === "recently_approved");
-}
 
 async function scanStatusViewMerged(args: {
   view: "needs_review" | "changes_requested" | "recently_approved";

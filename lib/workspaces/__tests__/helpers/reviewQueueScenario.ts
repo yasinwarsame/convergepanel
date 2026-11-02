@@ -67,10 +67,12 @@ export function buildSeed(): SeedRun[] {
   const runs: SeedRun[] = [];
   let n = 0;
   for (const kind of ["gov", "rr"] as Kind[]) {
+    let k = 0; // per-kind index: governed and report-review rows SHARE sort values, so ties cross streams
     for (let rep = 0; rep < 3; rep++) {
       for (const status of STATUSES) {
         n++;
-        const tick = Math.floor(n / 3); // ties
+        k++;
+        const tick = Math.floor(k / 3); // ties within AND across streams
         runs.push({
           id: `${kind}-${String(n).padStart(3, "0")}`,
           kind,
