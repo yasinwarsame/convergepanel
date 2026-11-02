@@ -150,7 +150,10 @@ function expectReadableReport(r: TestRenderer.ReactTestRenderer) {
     // The exact saved text stays available, collapsed.
     const details = inst.findAll((n) => n.type === "details");
     expect(details).toHaveLength(1);
-    expect(text(details[0])).toContain('"summary"');
+    expect(details[0].props.hidden).toBeUndefined();
+    expect(text(details[0].findByType("summary"))).toBe("Show the saved text exactly as returned");
+    // Byte-for-byte the saved text: ChatGPT saved bare JSON, Claude saved a fenced block.
+    expect(text(details[0].findByType("pre"))).toBe(modelId === "chatgpt" ? JSON.stringify(a) : fenced(a));
   }
   // Malformed structured text and plain text are shown exactly as saved, never dropped.
   expect(visibleOf(responseOf(r, "grok"))).toBe(MALFORMED);
