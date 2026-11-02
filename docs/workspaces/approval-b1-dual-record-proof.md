@@ -11,9 +11,9 @@ A whole record is created at only two production sites.
 `reportReviewArchiveImmutability.spec.ts` guards this in two layers:
 
 1. **Allow-list.** The files with recognisable `governanceRecord` writes (whole-record payloads, dotted payload keys, payload assignments, seed documents) are pinned, with the reason each is safe.
-2. **Tripwire.** Every `governanceRecord` key, assignment or field-path token in every source file is counted and pinned per file. That covers `lib/`, `app/`, `components/`, `hooks/` and `scripts/`, including `.js`, `.mjs` and `.cjs`.
+2. **Tripwire.** Every textual occurrence of `governanceRecord` (comments excluded) is counted and pinned per file. That covers `lib/`, `app/`, `components/`, `hooks/`, `scripts/` and the repository root, in `.ts`, `.tsx`, `.js`, `.mjs` and `.cjs` files.
 
-The tripwire is deliberately over-inclusive and also counts reads. Any new occurrence of any shape, in any file, fails the test until it is checked against this proof.
+The tripwire is maximally over-inclusive. It counts reads, types, keys, string paths, `FieldPath` arguments, variadic `update` arguments and constants used as computed keys. Any change to how any of these files references `governanceRecord` fails the test until it is checked against this proof. Files outside those directories, and generated or vendored code, are not scanned.
 
 The allow-list also contains the test-seeding plan (`lib/governance/adaptiveGovernanceSeedPlan.ts`). It writes legacy-Team run documents (`teamId`, no `workspaceId`), which can never pass the report-review workspace binding.
 

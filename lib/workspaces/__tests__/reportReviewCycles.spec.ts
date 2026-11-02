@@ -338,6 +338,17 @@ describe("D-B6: resubmission is a new cycle; history is preserved and write-once
     expect(db.paths(`runs/${RUN}/humanReviewAssignmentHistory/`).sort()).toEqual([`runs/${RUN}/humanReviewAssignmentHistory/1`, `runs/${RUN}/humanReviewAssignmentHistory/2`]);
   });
 
+  it("no history entry when no reviewer is removed: no assignment document, or one with nobody assigned (review N2)", async () => {
+    await submit();
+    await decide("approved");
+    await resubmit(1); // no assignment document existed → reset writes revision 1, no history
+    expect(db.paths(`runs/${RUN}/humanReviewAssignmentHistory/`)).toEqual([]);
+    await decide("rejected");
+    await resubmit(2, ADMIN); // the cycle-reset document has nobody assigned → still no history
+    expect(db.paths(`runs/${RUN}/humanReviewAssignmentHistory/`)).toEqual([]);
+    expect(db.read(`runs/${RUN}/humanReviewAssignment/current`)).toEqual(expect.objectContaining({ assignedReviewerUserId: null, revision: 2, cycle: 3 }));
+  });
+
   it("a stale manual assignment attempt after the reset is refused (revision moved)", async () => {
     await decidedCycle1WithAssignment();
     await resubmit(1);

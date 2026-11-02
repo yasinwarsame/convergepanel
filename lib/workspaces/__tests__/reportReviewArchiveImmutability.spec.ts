@@ -114,43 +114,84 @@ describe("2. the dual-record invariant's assumptions are pinned", () => {
     ]);
   });
 
-  it("TRIPWIRE (review B1-m1 residual): every governanceRecord key, assignment or field-path token in all source files is pinned per file", () => {
-    // Broad and deliberately over-inclusive: it also counts reads (DTO keys, type annotations). Any new occurrence —
-    // a new writer of ANY shape (payload variables, chained refs, nested literals, variadic updates, computed keys),
-    // in ANY file, including the allow-listed ones and .js/.mjs/.cjs scripts — changes a count and fails this test.
-    // Whoever changes a count must re-check docs/workspaces/approval-b1-dual-record-proof.md §1 before updating it.
-    const TOKEN = /\bgovernanceRecord\b\s*[:=]|\[\s*["'`]governanceRecord["'`]|["'`]governanceRecord\./g;
-    const all = [...FILES, ...sourceFiles(join(ROOT, "hooks")), ...scriptFiles(join(ROOT, "scripts"))];
+  it("TRIPWIRE (final B1 review MINOR): EVERY occurrence of governanceRecord in every source file is counted and pinned per file", () => {
+    // Deliberately maximal: every textual occurrence (reads, types, keys, string paths, FieldPath arguments, variadic
+    // update arguments, constants for computed keys) in lib/, app/, components/, hooks/, scripts/ and the repository
+    // root, for .ts/.tsx/.js/.mjs/.cjs. Comments are excluded. ANY change to how governanceRecord is referenced changes
+    // a count and fails here; whoever updates a count must re-check docs/workspaces/approval-b1-dual-record-proof.md §1.
+    const EXT = /\.(ts|tsx|js|mjs|cjs)$/;
+    const walk = (dir: string): string[] =>
+      readdirSync(dir).flatMap((name) => {
+        const p = join(dir, name);
+        if (name === "node_modules" || name === "__tests__" || name.startsWith(".")) return [];
+        return statSync(p).isDirectory() ? walk(p) : EXT.test(name) ? [p] : [];
+      });
+    const rootFiles = readdirSync(ROOT).filter((n) => EXT.test(n) && statSync(join(ROOT, n)).isFile()).map((n) => join(ROOT, n));
+    const all = [...["lib", "app", "components", "hooks", "scripts"].flatMap((d) => walk(join(ROOT, d))), ...rootFiles];
     const counts: Record<string, number> = {};
     for (const f of all) {
-      const n = (stripComments(readFileSync(f, "utf8")).match(TOKEN) ?? []).length;
+      const n = (stripComments(readFileSync(f, "utf8")).match(/governanceRecord/g) ?? []).length;
       if (n > 0) counts[rel(f)] = n;
     }
     expect(counts).toEqual({
-      "app/api/teams/adaptive-runs/[runId]/review-panel/route.ts": 1,
-      "app/api/teams/adaptive-runs/[runId]/votes/route.ts": 1,
-      "app/api/teams/runs/route.ts": 2,
-      "app/api/user/runs/[runId]/export/route.ts": 1,
-      "app/api/user/runs/[runId]/governance/route.ts": 2,
-      "app/api/user/runs/[runId]/route.ts": 2,
-      "app/api/workspaces/[workspaceId]/runs/[runId]/export/route.ts": 1,
-      "app/api/workspaces/[workspaceId]/runs/[runId]/route.ts": 3,
-      "lib/adaptiveSchema/dsProvenanceRouteAdapter.ts": 4,
-      "lib/adaptiveSchema/dsProvenanceViewMin.ts": 3,
-      "lib/adaptiveSchema/reviewGovernanceViewModel.ts": 1,
-      "lib/firestore/runs.ts": 9,
-      "lib/firestore/teamRunSnapshots.ts": 1,
-      "lib/governance/adaptiveGovernanceSeedPlan.ts": 1,
-      "lib/governance/evaluateAdaptiveGovernance.ts": 2,
+      "app/api/teams/adaptive-runs/[runId]/decision/route.ts": 3,
+      "app/api/teams/adaptive-runs/[runId]/review-panel/finalize/route.ts": 2,
+      "app/api/teams/adaptive-runs/[runId]/review-panel/override/route.ts": 1,
+      "app/api/teams/adaptive-runs/[runId]/review-panel/route.ts": 10,
+      "app/api/teams/adaptive-runs/[runId]/route.ts": 2,
+      "app/api/teams/adaptive-runs/[runId]/votes/route.ts": 6,
+      "app/api/teams/runs/route.ts": 4,
+      "app/api/user/runs/[runId]/decision/route.ts": 3,
+      "app/api/user/runs/[runId]/export/route.ts": 3,
+      "app/api/user/runs/[runId]/governance/route.ts": 6,
+      "app/api/user/runs/[runId]/review-history/route.ts": 2,
+      "app/api/user/runs/[runId]/route.ts": 7,
+      "app/api/workspaces/[workspaceId]/runs/[runId]/export/route.ts": 3,
+      "app/api/workspaces/[workspaceId]/runs/[runId]/review-panel/finalize/route.ts": 1,
+      "app/api/workspaces/[workspaceId]/runs/[runId]/route.ts": 8,
+      "lib/adaptiveSchema/decisionReceiptBuilder.ts": 1,
+      "lib/adaptiveSchema/dsProvenanceRouteAdapter.ts": 8,
+      "lib/adaptiveSchema/dsProvenanceViewMin.ts": 7,
+      "lib/adaptiveSchema/exportRunProvenance.ts": 3,
+      "lib/adaptiveSchema/exportSnapshot.ts": 9,
+      "lib/adaptiveSchema/governanceInitialization.ts": 3,
+      "lib/adaptiveSchema/governanceRecordBuilder.ts": 1,
+      "lib/adaptiveSchema/governanceRecordParser.ts": 1,
+      "lib/adaptiveSchema/jsonExport.ts": 1,
+      "lib/adaptiveSchema/reportStatus.ts": 1,
+      "lib/adaptiveSchema/researchExport.ts": 1,
+      "lib/adaptiveSchema/reviewGovernanceViewModel.ts": 5,
+      "lib/firestore/runs.ts": 26,
+      "lib/firestore/teamRunSnapshots.ts": 2,
+      "lib/governance/adaptiveGovernanceSeedPlan.ts": 3,
+      "lib/governance/adaptiveHumanReviewHistory.ts": 5,
+      "lib/governance/adaptiveHumanReviewPanel.ts": 1,
+      "lib/governance/adaptiveHumanReviewRequest.ts": 1,
+      "lib/governance/adaptiveHumanReviewVote.ts": 1,
+      "lib/governance/adaptivePanelFinalization.ts": 1,
+      "lib/governance/adaptivePanelFinalizationRepair.ts": 3,
+      "lib/governance/adaptivePanelOverride.ts": 2,
+      "lib/governance/adaptivePanelOverrideRepair.ts": 3,
+      "lib/governance/adaptiveReviewArtifactRepair.ts": 4,
+      "lib/governance/adaptiveReviewDetail.ts": 2,
+      "lib/governance/adaptiveRunAccess.ts": 1,
+      "lib/governance/evaluateAdaptiveGovernance.ts": 7,
+      "lib/governance/personalReviewInbox.ts": 3,
+      "lib/governance/reportReview.ts": 3,
       "lib/governance/reviewIntegrityMetrics.ts": 2,
-      "lib/governance/teamReviewQueueEnrichment.ts": 2,
-      "lib/governance/workspaceGovernanceSummary.ts": 3,
-      "lib/runPanelExecution.ts": 1,
-      "lib/workspaces/deriveTeamRunViewerRole.ts": 1,
-      "lib/workspaces/resubmitWorkspaceReview.ts": 2,
-      "lib/workspaces/reviewQueue.ts": 5,
-      "lib/workspaces/workspaceReviewMutations.ts": 2,
-      "lib/workspaces/workspaceReviewPanelMutations.ts": 4,
+      "lib/governance/teamReviewLabels.ts": 1,
+      "lib/governance/teamReviewQueueEnrichment.ts": 6,
+      "lib/governance/teamRunListContract.ts": 1,
+      "lib/governance/workspaceGovernanceSummary.ts": 4,
+      "lib/runPanelExecution.ts": 4,
+      "lib/runs/runReadPayload.ts": 2,
+      "lib/workspaces/deriveTeamRunViewerRole.ts": 3,
+      "lib/workspaces/resubmitWorkspaceReview.ts": 5,
+      "lib/workspaces/reviewContext.ts": 3,
+      "lib/workspaces/reviewQueue.ts": 9,
+      "lib/workspaces/workspaceReviewMutations.ts": 6,
+      "lib/workspaces/workspaceReviewPanelMutations.ts": 13,
+      "lib/workspaces/workspaceRunDetail.ts": 2
     });
   });
 
