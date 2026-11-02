@@ -712,6 +712,48 @@ Tests: `classifier.spec.ts` (+2 — `thinkingBudget: 0` is passed to `callGemini
 
 **Tests.** `components/research/__tests__/p0SavedRunResults.spec.tsx` (Personal and Team chains, refresh, saved synthesis, saved envelope, all-failed, in-progress and failed, live pending and unchanged POST). `lib/adaptiveSchema/__tests__/p0GenericPersistenceChain.spec.tsx` (real finalize with Gemini healthy and fully failing, through the saved read to render). `lib/connectors/__tests__/geminiFailureDiagnostic.spec.ts` (classification, sanitization, real connector).
 
+#### Shared Adaptive Schema architecture, D-1 to D-5 (2026-11-02)
+
+Design record: `p0-adaptive-schema-design-2026-11-02/DESIGN-SHARED-ADAPTIVE-SCHEMA.md` (evidence folder). Individual research and Team Workspaces already share one engine:
+- **Execute:** `planAdaptiveRun()` and `executeOrdinaryRun()` are called by both POST routes.
+- **Taxonomy:** one `SCHEMA_REGISTRY` and one set of envelopes (`adaptiveOutput` / `legacyAdaptiveOutput` v1; all 18 executing schemas persist).
+- **Saved read:** one path, `PersistedResearchResultView`.
+
+This slice closes the remaining gaps without a new taxonomy, provider or schema migration:
+
+- **D-1, Team live result:** `TeamResearchComposerShell` no longer renders the reduced `TeamResearchResultView`.
+  - On success it `router.replace`s to `teamResearchDetailHref(...)`, the canonical Team research page. That page renders the same full adaptive report as Individual research, with the Team chrome around it.
+  - There is no navigation if the composer has unmounted.
+  - `TeamResearchResultView` is no longer rendered by the composer; the file and its spec remain.
+- **D-2, classification resilience (owner final ruling, option A, 2026-11-02):** `classifyQuery()` no longer caches failure fallbacks (connector error, timeout, malformed or schema-invalid answer), so a recovered provider is asked again.
+  - **Every** classifier failure falls back to **Generic**. No rule, keyword list or phrase matcher selects a specialised answer type: repeated reviews showed no heuristic reliably tells a safe forecast or comparison from a medical, legal, financial or decision question.
+  - Generic is an intentional degraded mode. A successful classification still selects any of the 18 executing answer types.
+  - No fallback can create a Milestone-2 envelope, so none can create a governance record, decision receipt, Team review or Decision Support export.
+  - The independent risk check (`lib/adaptiveSchema/heuristicClassifier.ts`, `sensitiveTopic()`, which exports no routing) keeps `riskLevel` `high_stakes`, or `safety_critical` for self-harm phrasings, with `evidenceRequirement: "high"`, recorded as `classificationSource: "heuristic"` / `heuristicRule: "sensitive_topic"`.
+  - This is not proof of safety: an unlisted sensitive question keeps the default level.
+  - Provenance is `fallbackReason`. The notice reads "a general report format is used", plus a caution line when the risk check fired.
+- **D-3, availability notice:** `components/adaptive/AnalysisAvailabilityNotice.tsx`, rendered at the top of every adaptive report, names what did not run:
+  - a heuristic or default classification after a classifier failure;
+  - `synthesisReport.degraded === true` (the written synthesis could not be generated, and the summary is assembled from the panel's scored claims).
+  - It renders nothing otherwise. The frozen parity suites strip only this notice and pin where it must appear (`components/adaptive/__tests__/analysisNoticeStrip.ts`).
+- **D-4, accurate failure labels:** `RunSlotStatusContext` (provided by `ResultsDisplay` from the run's own rows) lets `FailedResultsNote` and `ListView` say "<Model> did not respond…" for a recorded provider failure. Builder output is unchanged.
+  - A model that responded with invalid output keeps "returned an incompatible format".
+  - With no record, the original wording is kept. No provider error text is shown.
+  - Gemini diagnostics map HTTP 402 and `BILLING_DISABLED` to the category `billing`.
+- **D-5, per-schema audit:** `components/research/__tests__/adaptiveSchemaAudit.spec.tsx` runs every executing schema, with Gemini failing, through the real builder, envelope, read, the Personal and Team interpreters and the shared view.
+  - It asserts the schema's own view renders, never the no-analysis fallback or "incompatible format" for a provider failure, and that content is reachable.
+  - For the 9 legacy-active schemas it also asserts that every responding model's response is reachable and the failed model is disclosed.
+- **Owner Ruling B, all 18 formats show each model's response:** the Milestone-2 envelope stores the aggregate, not per-model answers, so a reopened report's Model Responses section used to say raw responses "aren't saved".
+  - `buildRunReadPayload` now adds a response-time `adaptive.modelResults`, rebuilt from the run's saved responses with the live validator in `silent` mode (`lib/adaptiveSchema/reconstructModelResults.ts`). It adds no provider call, no write, no log line (a parse error can quote model text) and no new data: it is derived from `results` in the same payload. The Order 6 route AC suite (`dsProvenanceRouteView.spec.ts`) holds the field out of its 45df2ea byte comparison and asserts that it is flag-independent and present only with a valid Milestone-2 envelope.
+  - The adapter passes it as `savedModelResults`, read ONLY by `ModelResponsesSection` in the 9 Milestone-2 branches. Counts and summaries keep reading the envelope as before.
+  - A model that did not respond is a failed slot, labelled "did not respond". A response shortened by the 20k storage cap is labelled as shortened, not as a format failure.
+  - Only the first answer is saved; a corrective retry adopted live is not. So a saved copy that does not validate is shown with a neutral fixed notice ("can't be shown in this format; its contribution, if any, is reflected in the report above"), never "incompatible format", "excluded" or parse details (review R2 MINOR-A).
+- **Review corrections:**
+  - The Team composer navigates only when `runPersisted` (new additive response field) is not false and the adaptive report was not `failed` / `omitted_size_limit`. Otherwise it keeps the in-memory responses on the page with a notice.
+  - The default failure wording claims no cause.
+  - The frozen-baseline strip matches the exact notice only, with exactly one notice per affected output.
+  - `dsProvenancePages.spec.tsx` compares the frozen 9eca1e3 pages with `modelResults` removed, and proves the field changes nothing outside the Model Responses section (and the dev-only debug panel).
+
 ---
 
 ## Synthesis

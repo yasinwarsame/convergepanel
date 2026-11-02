@@ -10,7 +10,9 @@
  * Workspace picker, no Project picker anywhere in this tree).
  *
  * Deliberately ORDINARY Team research only (Section D): question + model
- * selection + `POST /api/workspaces/{workspaceId}/runs` + result. No Deep
+ * selection + `POST /api/workspaces/{workspaceId}/runs`. On success the run
+ * opens on its canonical Team research page, which renders the shared full
+ * adaptive report (D-1, shared Adaptive Schema architecture, 2026-11-02). No Deep
  * Research UI, no Claim/Video orchestration — those are separate product
  * surfaces this phase does not touch. `projectId` sent with every request
  * is always `project.id` — this component has no state that could produce
@@ -23,14 +25,16 @@
  * never an independently invented Team-only default.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useUserPlan } from "@/hooks/useUserPlan";
 import { getPlanConfigById, type PlanId } from "@/lib/plans";
 import { getDefaultModelSelection } from "@/lib/utils/normalizeSelectedModels";
 import ModelPicker from "@/components/ModelPicker";
 import WorkspaceNav from "@/components/workspace/WorkspaceNav";
 import { Breadcrumb } from "@/components/shared/Breadcrumb";
+import { teamResearchDetailHref } from "@/lib/workspaces/teamResearchDetailHref";
 import TeamResearchResultView from "@/components/workspace/projects/TeamResearchResultView";
 import { useTeamProjectResearch, type TeamResearchRunResult } from "@/hooks/useTeamProjectResearch";
 import type { ModelId } from "@/lib/types";
@@ -41,6 +45,12 @@ function normalizePlanId(raw: string): PlanId {
   if (raw === "pro") return "full";
   if (raw === "free" || raw === "lite" || raw === "full") return raw;
   return "free";
+}
+
+/** The run and its adaptive report were saved, so the canonical page can show them. An older server sends neither flag. */
+function reportWasSaved(run: TeamResearchRunResult): boolean {
+  if (run.runPersisted === false) return false;
+  return run.adaptivePersistence !== "failed" && run.adaptivePersistence !== "omitted_size_limit";
 }
 
 export interface TeamResearchComposerProject {
@@ -73,6 +83,15 @@ export default function TeamResearchComposerShell({
   const [result, setResult] = useState<TeamResearchRunResult | null>(null);
 
   const { isSubmitting, submit } = useTeamProjectResearch({ workspaceId, projectId: project.id });
+  const router = useRouter();
+  // D-1: a run finishing after the user has left this page must never drag them back to its report.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!planLoading && selectedModels.length === 0) {
@@ -102,6 +121,13 @@ export default function TeamResearchComposerShell({
     const outcome = await submit({ question: trimmed, selectedModels });
     if (outcome.status === "ok") {
       setResult(outcome.run);
+      // Review MINOR-4: open the saved report only if it was saved. Otherwise the in-memory result stays on this page.
+      if (!reportWasSaved(outcome.run)) return;
+      // D-1 (shared Adaptive Schema architecture): the completed run opens on its canonical Team research page. That
+      // page renders the SAME full report as Individual research (PersistedResearchResultView → ResultsDisplay →
+      // adaptive schema views) with the Team chrome around it. `replace`, not `push`: submission and report are one
+      // interaction, the same convention the Individual composer uses.
+      if (mountedRef.current) router.replace(teamResearchDetailHref({ workspaceId, projectId: project.id, runId: outcome.run.runId }));
     } else {
       setSubmitError(outcome.message);
     }
@@ -206,7 +232,27 @@ export default function TeamResearchComposerShell({
 
       {result && (
         <>
-          <TeamResearchResultView run={result} />
+          {/* D-1: no reduced Team-only result. The full shared report is on the run's own page; this panel only bridges the navigation. */}
+          {!reportWasSaved(result) ? (
+            // The report could not be saved, so its page would have nothing to show. Keep the in-memory result here.
+            <section className="mt-6" data-testid="team-research-not-saved">
+              <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                This research finished, but its report could not be saved, so it may not appear correctly in the project. The model responses from this run are shown below.
+              </p>
+              <TeamResearchResultView run={result} />
+            </section>
+          ) : (
+          <section className="mt-6 rounded-xl border border-cp-border bg-cp-surface p-5 shadow-sm" data-testid="team-research-complete">
+            <h2 className="text-base font-semibold text-cp-text">Research complete</h2>
+            <p className="mt-1 text-sm text-cp-muted">Opening the full report…</p>
+            <Link
+              href={teamResearchDetailHref({ workspaceId, projectId: project.id, runId: result.runId })}
+              className="mt-3 inline-block text-sm font-medium text-cp-accent underline hover:no-underline"
+            >
+              Open the full report
+            </Link>
+          </section>
+          )}
           <div className="mt-4 flex gap-2">
             <Link
               href={projectHref}

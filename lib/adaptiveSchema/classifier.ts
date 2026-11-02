@@ -31,6 +31,7 @@ import {
 } from "./types";
 import { CLASSIFIER_SYSTEM_PROMPT } from "./classifierPrompt";
 import { stripJsonFences, withTimeout } from "./util";
+import { sensitiveTopic } from "./heuristicClassifier";
 
 // Was 3000ms — far tighter than every other Gemini call in this module
 // (cluster 8000ms, backfill 6000ms, synthesis 10000ms, bias 12000ms) despite
@@ -209,6 +210,34 @@ function genericFallback(reason: QueryClassificationFallbackReason, confidence =
   };
 }
 
+/** Heuristic confidence: deliberately below CONFIDENCE_THRESHOLD, so it never reads as a confident model verdict. */
+/**
+ * Owner final ruling, option A (2026-11-02): GENERIC-ONLY fallback. When the classifier could not complete
+ * (connector error, timeout, malformed or schema-invalid answer), the run ALWAYS uses Generic. No rule, keyword list or
+ * phrase matcher selects a specialised answer type. Repeated reviews showed no heuristic can reliably tell a safe
+ * forecast or comparison from a medical, legal, financial or decision question. Generic is an intentional degraded
+ * mode: a successful classification still selects any of the 18 answer types.
+ *
+ * The independent risk check (sensitiveTopic) still runs. A sensitive question keeps an elevated riskLevel instead of
+ * the default "professional", so the riskLevel-driven safeguards stay active. This is NOT proof that the question was
+ * safely classified: an unlisted sensitive question simply keeps the default level. Provenance is `fallbackReason`
+ * (plus heuristicRule "sensitive_topic" when the risk check fired). The result is never cached.
+ */
+function fallbackAfterFailure(reason: "connector_error" | "timeout" | "malformed_json" | "schema_invalid", query: string): QueryClassification {
+  const base = genericFallback(reason);
+  const sensitivity = sensitiveTopic(query);
+  if (!sensitivity) return base;
+  const guarded: QueryClassification = {
+    ...base,
+    riskLevel: sensitivity,
+    evidenceRequirement: "high",
+    classificationSource: "heuristic",
+    heuristicRule: "sensitive_topic",
+    rationale: `Fell back to generic: ${reason}. Risk level kept by the independent sensitivity check; not a model classification.`,
+  };
+  return ClassificationSchema.safeParse(guarded).success ? guarded : base;
+}
+
 /** Simple LRU cache keyed by normalized query string. */
 class LRUCache<V> {
   private map = new Map<string, V>();
@@ -286,9 +315,8 @@ export async function classifyQuery(query: string): Promise<QueryClassification>
         latencyMs,
         reason: result.status,
       });
-      const fallback = genericFallback("connector_error");
-      classificationCache.set(cacheKey, fallback);
-      return fallback;
+      // D-2: never cached (transient), and the heuristic picks an existing answer type where it can.
+      return fallbackAfterFailure("connector_error", trimmedQuery);
     }
 
     let parsedJson: unknown;
@@ -299,9 +327,7 @@ export async function classifyQuery(query: string): Promise<QueryClassification>
         queryHash,
         latencyMs,
       });
-      const fallback = genericFallback("malformed_json");
-      classificationCache.set(cacheKey, fallback);
-      return fallback;
+      return fallbackAfterFailure("malformed_json", trimmedQuery);
     }
 
     const parsed = ClassificationSchema.safeParse(parsedJson);
@@ -311,9 +337,7 @@ export async function classifyQuery(query: string): Promise<QueryClassification>
         latencyMs,
         issues: parsed.error.issues.map((i) => i.path.join(".")),
       });
-      const fallback = genericFallback("schema_invalid");
-      classificationCache.set(cacheKey, fallback);
-      return fallback;
+      return fallbackAfterFailure("schema_invalid", trimmedQuery);
     }
 
     // zod v4 types a .catch()'d field as optional on the inferred object type
@@ -361,6 +385,6 @@ export async function classifyQuery(query: string): Promise<QueryClassification>
       error: err?.message,
     });
     // Never cache transient failures — a later call might succeed.
-    return genericFallback("timeout");
+    return fallbackAfterFailure("timeout", trimmedQuery);
   }
 }

@@ -41,9 +41,10 @@ describe("buildGeminiFailureDiagnostic: classification", () => {
     ["expired key", fetchError(400, "Bad Request", ["API_KEY_EXPIRED"]), "authentication"],
     ["401", fetchError(401, "Unauthorized", []), "authentication"],
     ["API not enabled / service disabled", fetchError(403, "Forbidden", ["SERVICE_DISABLED"]), "permission"],
-    ["billing disabled", fetchError(403, "Forbidden", ["BILLING_DISABLED"]), "permission"],
+    ["billing disabled (403 + BILLING_DISABLED)", fetchError(403, "Forbidden", ["BILLING_DISABLED"]), "billing"],
     ["key restricted by referrer", fetchError(403, "Forbidden", ["API_KEY_HTTP_REFERRER_BLOCKED"]), "permission"],
     ["plain 403", fetchError(403, "Forbidden", []), "permission"],
+    ["Payment Required (the Production failure, 2026-11-01)", fetchError(402, "Payment Required", []), "billing"],
     ["quota", fetchError(429, "Too Many Requests", ["RATE_LIMIT_EXCEEDED"]), "quota_or_rate_limit"],
     ["plain 429", fetchError(429, "Too Many Requests", []), "quota_or_rate_limit"],
     ["model retired / not found", fetchError(404, "Not Found", []), "model_unavailable"],
@@ -143,10 +144,10 @@ describe("callGemini (real connector): one sanitized Production log line per fai
     expect(onlyLog()).toMatchObject({ operation: "panel", category: "model_unavailable", httpStatus: 404 });
   });
 
-  it("billing or API disabled (403) is logged as permission", async () => {
+  it("billing disabled (403 + BILLING_DISABLED) is logged as billing", async () => {
     mockGenerateContent.mockRejectedValue(fetchError(403, "Forbidden", ["BILLING_DISABLED"]));
     await callGemini(PROMPT, null, undefined, { diagnosticOperation: "bias_detection" });
-    expect(onlyLog()).toMatchObject({ operation: "bias_detection", category: "permission", httpStatus: 403, reasons: ["BILLING_DISABLED"] });
+    expect(onlyLog()).toMatchObject({ operation: "bias_detection", category: "billing", httpStatus: 403, reasons: ["BILLING_DISABLED"] });
   });
 
   it("a rate limit is retried, and only the final failure is logged, with its attempt count", async () => {

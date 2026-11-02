@@ -116,6 +116,41 @@ describe("useTeamProjectResearch — request shape", () => {
     expect(result.status).toBe("error");
   });
 
+  it.each([
+    ["saved run with a saved adaptive report", { runPersisted: true, adaptive: { persistenceStatus: "saved" } }, { runPersisted: true, adaptivePersistence: "saved" }],
+    ["run not saved", { runPersisted: false }, { runPersisted: false }],
+    ["adaptive report failed to save", { runPersisted: true, adaptive: { persistenceStatus: "failed" } }, { runPersisted: true, adaptivePersistence: "failed" }],
+    ["older server: neither flag", {}, {}],
+    ["non-boolean runPersisted is ignored, never coerced", { runPersisted: "yes", adaptive: { persistenceStatus: 7 } }, {}],
+  ])("D-1 / review MINOR-4: parses the save signals (%s)", async (_l, extra, want) => {
+    authedFetchMock.mockImplementation((url: string, options: any) => {
+      callLog.push({ url, options });
+      return Promise.resolve({ ok: true, json: async () => ({ ok: true, runId: "run-1", results: [], ...extra }) });
+    });
+    const { latest } = await mount();
+    let result!: TeamResearchSubmitResult;
+    await act(async () => {
+      result = await latest().submit({ question: "Q", selectedModels: ["chatgpt", "claude"] });
+    });
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("unreachable");
+    const { runId: _r, results: _x, governanceStatus: _g, ...flags } = result.run;
+    expect(flags).toEqual(want);
+  });
+
+  it("an empty-string runId is a malformed success, never a navigable run", async () => {
+    authedFetchMock.mockImplementation((url: string, options: any) => {
+      callLog.push({ url, options });
+      return Promise.resolve({ ok: true, json: async () => ({ ok: true, runId: "  ", results: [] }) });
+    });
+    const { latest } = await mount();
+    let result!: TeamResearchSubmitResult;
+    await act(async () => {
+      result = await latest().submit({ question: "Q", selectedModels: ["chatgpt", "claude"] });
+    });
+    expect(result.status).toBe("error");
+  });
+
   it("a thrown fetch maps to network_error, never throws out of the hook", async () => {
     authedFetchMock.mockImplementation(() => {
       throw new Error("network down");

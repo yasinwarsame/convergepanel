@@ -29,6 +29,7 @@ import type { GeminiDiagnosticOperation } from "./types";
 export type GeminiFailureCategory =
   | "authentication"
   | "permission"
+  | "billing"
   | "quota_or_rate_limit"
   | "model_unavailable"
   | "invalid_request"
@@ -56,7 +57,7 @@ const ENUM_SHAPE = /^[A-Z][A-Z0-9_]{1,63}$/;
 const IDENTIFIER_SHAPE = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
 const STATUS_TEXT_SHAPE = /^[A-Za-z][A-Za-z ]{0,40}$/;
 const AUTH_REASONS = new Set(["API_KEY_INVALID", "API_KEY_EXPIRED", "API_KEY_NOT_FOUND", "CREDENTIALS_MISSING", "ACCESS_TOKEN_EXPIRED"]);
-const PERMISSION_REASONS = new Set(["SERVICE_DISABLED", "API_KEY_SERVICE_BLOCKED", "API_KEY_HTTP_REFERRER_BLOCKED", "API_KEY_IP_ADDRESS_BLOCKED", "API_KEY_ANDROID_APP_BLOCKED", "API_KEY_IOS_APP_BLOCKED", "BILLING_DISABLED", "CONSUMER_INVALID", "USER_PROJECT_DENIED", "ACCESS_DENIED", "LOCATION_POLICY_VIOLATED", "FAILED_PRECONDITION"]);
+const PERMISSION_REASONS = new Set(["SERVICE_DISABLED", "API_KEY_SERVICE_BLOCKED", "API_KEY_HTTP_REFERRER_BLOCKED", "API_KEY_IP_ADDRESS_BLOCKED", "API_KEY_ANDROID_APP_BLOCKED", "API_KEY_IOS_APP_BLOCKED", "CONSUMER_INVALID", "USER_PROJECT_DENIED", "ACCESS_DENIED", "LOCATION_POLICY_VIOLATED", "FAILED_PRECONDITION"]);
 const QUOTA_REASONS = new Set(["RATE_LIMIT_EXCEEDED", "RESOURCE_EXHAUSTED", "QUOTA_EXCEEDED"]);
 
 function safeReasons(details: unknown): string[] {
@@ -72,6 +73,8 @@ function safeReasons(details: unknown): string[] {
 function categorize(httpStatus: number | null, reasons: string[], errorName: string | null, isTimeout: boolean): GeminiFailureCategory {
   if (isTimeout) return "timeout";
   if (reasons.some((r) => AUTH_REASONS.has(r)) || httpStatus === 401) return "authentication";
+  // 402 Payment Required: the project is not in good billing standing (observed in Production 2026-11-01 on every call).
+  if (httpStatus === 402 || reasons.includes("BILLING_DISABLED")) return "billing";
   if (reasons.some((r) => PERMISSION_REASONS.has(r)) || httpStatus === 403) return "permission";
   if (reasons.some((r) => QUOTA_REASONS.has(r)) || httpStatus === 429) return "quota_or_rate_limit";
   if (httpStatus === 404) return "model_unavailable";

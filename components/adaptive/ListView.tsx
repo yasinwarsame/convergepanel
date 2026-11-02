@@ -37,6 +37,7 @@ import ModelChip from "@/components/ModelChip";
 import { GateTone, gateChipText, gateTone, pageGateValue } from "@/lib/adaptiveSchema/gatePresentation";
 import { PanelCounts, ROW_COUNTS_UNAVAILABLE, SlotRowCounts, hasReadableRowBreakdown, panelCounts, readSlots, rowTypeOf, slotLabel, slotRowCounts } from "@/lib/adaptiveSchema/positionPresentation";
 import { PositionPresentationBoundary, PositionPresentationState, usePositionPresentation } from "./PositionPresentationContext";
+import { didNotRespondText, slotDidNotRespond, useRunSlotStatus } from "@/components/adaptive/RunSlotStatusContext";
 
 // Wording: gatePresentation.gateChipText (D6/D7); "neutral": an unrecognized stored gate (D8).
 const GATE_CHIP_STYLES: Record<GateTone, string> = {
@@ -530,19 +531,21 @@ function ModelRow({
   onToggle: () => void;
 }) {
   const { result } = vm;
+  // D-4: a recorded provider failure is never described as a parse/format failure.
+  const notResponded = slotDidNotRespond(useRunSlotStatus(), result.modelId);
 
   if (vm.failed) {
     return (
       <div className="px-4 py-3">
         <div className="flex items-center gap-2 flex-wrap">
           <ModelChip modelId={result.modelId} size="xs" />
-          <TintBadge tone="danger">parse error · excluded</TintBadge>
+          <TintBadge tone="danger">{notResponded ? "no response · excluded" : "parse error · excluded"}</TintBadge>
           <span className="ml-auto text-xs text-slate-400">{formatLatency(result.latencyMs)}</span>
         </div>
         <p className="mt-1.5 text-sm text-red-700">
-          <SlotName modelId={result.modelId} /> returned an incompatible format and was excluded from comparison.
+          <SlotName modelId={result.modelId} /> {notResponded ? didNotRespondText(notResponded) : "returned an incompatible format and was excluded from comparison."}
         </p>
-        {result.parseError && (
+        {result.parseError && !notResponded && (
           <details className="mt-1">
             <summary className="cursor-pointer text-xs text-red-600">Details</summary>
             <p className="mt-0.5 text-xs text-red-600">{result.parseError}</p>

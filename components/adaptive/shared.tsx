@@ -14,6 +14,8 @@ import { runModelFamilyName } from "@/lib/panel/runModelIdentity";
 import ModelChip from "@/components/ModelChip";
 import { substitutedSlotLabel } from "@/lib/adaptiveSchema/positionPresentation";
 import { usePositionPresentation } from "./PositionPresentationContext";
+import { didNotRespondText, slotDidNotRespond, useRunSlotStatus } from "@/components/adaptive/RunSlotStatusContext";
+import { SAVED_COPY_NOTICES } from "@/lib/adaptiveSchema/savedCopyNotice";
 
 /**
  * A completed run's slot, named by product family only ("ChatGPT") — never a
@@ -83,19 +85,38 @@ export function BulletList({ items }: { items: string[] }) {
 
 /** Failed / parseError models: rendered as a small non-blocking notice, never crashes the comparison. */
 export function FailedResultsNote({ failed }: { failed: AdaptiveModelResult[] }) {
+  // D-4: a slot the run records as not having responded is described as such, never as an "incompatible format".
+  const slotStatuses = useRunSlotStatus();
   if (failed.length === 0) return null;
+  // Verification of 4d5429b MINOR-3: a saved-copy row describes the stored copy (its live retry may have succeeded), not
+  // a model that failed. Each group is counted and headed separately, so the "couldn't be compared" count is exactly
+  // the genuine failures listed, and a recovered model is never counted as failed.
+  const isSavedCopy = (r: AdaptiveModelResult) => !!r.parseError && SAVED_COPY_NOTICES.has(r.parseError);
+  const genuine = failed.filter((r) => !isSavedCopy(r));
+  const savedCopies = failed.filter(isSavedCopy);
+  const headings = [
+    ...(genuine.length > 0 ? [`${genuine.length} model${genuine.length === 1 ? "" : "s"} couldn't be compared`] : []),
+    ...(savedCopies.length > 0 ? [`${savedCopies.length} saved response${savedCopies.length === 1 ? "" : "s"} can't be shown here`] : []),
+  ];
   return (
     <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
       <p className="font-semibold mb-1">
-        {failed.length} model{failed.length === 1 ? "" : "s"} couldn&apos;t be compared
+        {headings.join(" · ")}
       </p>
       <ul className="space-y-1">
-        {failed.map((r) => (
+        {[...genuine, ...savedCopies].map((r) => (
           <li key={r.modelId} className="flex items-start gap-2">
             <ModelChip modelId={r.modelId} size="xs" />
             <div className="text-red-700">
-              <p><SlotName modelId={r.modelId} /> returned an incompatible format and was excluded from comparison.</p>
-              {r.parseError && (
+              {slotDidNotRespond(slotStatuses, r.modelId) ? (
+                <p><SlotName modelId={r.modelId} /> {didNotRespondText(slotDidNotRespond(slotStatuses, r.modelId)!)}</p>
+              ) : r.parseError && SAVED_COPY_NOTICES.has(r.parseError) ? (
+                // Ruling B: a statement about the stored copy (shortened, or unstructured first answer), never a format verdict.
+                <p><SlotName modelId={r.modelId} />: {r.parseError}</p>
+              ) : (
+                <p><SlotName modelId={r.modelId} /> returned an incompatible format and was excluded from comparison.</p>
+              )}
+              {r.parseError && !slotDidNotRespond(slotStatuses, r.modelId) && !SAVED_COPY_NOTICES.has(r.parseError) && (
                 <details className="mt-0.5">
                   <summary className="cursor-pointer text-xs text-red-600">Details</summary>
                   <p className="mt-0.5 text-xs text-red-600">{r.parseError}</p>

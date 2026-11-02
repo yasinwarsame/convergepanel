@@ -21,7 +21,7 @@
  */
 
 import { AnswerShape, BiasBlindspotAuditResult, CausalExplanationResult, ChecklistTaxonomyResult, CommonResponseMeta, ComparisonMatrixResult, DecisionSupportResult, DeepResearchResult, DefinitionExplanationResult, EvidenceReviewResult, QueryType, RankedEnumerationResult, isRiskShapedChecklistResult } from "@/lib/adaptiveSchema/types";
-import { AdaptiveGateResult, AdaptiveSynthesisReport, AdaptiveTrustSummary } from "@/lib/adaptiveSchema/types";
+import { AdaptiveGateResult, AdaptiveModelResult, AdaptiveSynthesisReport, AdaptiveTrustSummary } from "@/lib/adaptiveSchema/types";
 import { ReportStatusInput } from "@/lib/adaptiveSchema/reportStatus";
 import { AdaptiveRendererProps } from "./types";
 import TopSummaryBar from "./TopSummaryBar";
@@ -56,6 +56,7 @@ import { isPositionMarked, presentPositionSafeReport } from "@/lib/adaptiveSchem
 import { useRunModelProvenance } from "./RunModelProvenanceContext";
 import { PositionPresentationContext, PositionPresentationState } from "./PositionPresentationContext";
 import { useEffect, useMemo, useState } from "react";
+import AnalysisAvailabilityNotice from "@/components/adaptive/AnalysisAvailabilityNotice";
 
 const RENDER_HINTS_WITHOUT_MATRIX = new Set<AnswerShape>(["metrics_grid", "verdict_card", "step_diff", "scenario_tree"]);
 
@@ -89,6 +90,8 @@ const PHASE2_PILOT_SCHEMAS = new Set<QueryType>([
 export interface AdaptivePanelResponseProps extends AdaptiveRendererProps {
   gate?: AdaptiveGateResult;
   synthesisReport?: AdaptiveSynthesisReport;
+  /** Ruling B: a reopened Milestone-2 run's per-model results, rebuilt from its saved responses (Model Responses only). */
+  savedModelResults?: AdaptiveModelResult[];
   trustSummary?: AdaptiveTrustSummary;
   /** Present only for schema.renderHint === "ranked_list" (Milestone 2). */
   rankedEnumeration?: RankedEnumerationResult;
@@ -156,9 +159,19 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
     [marked, synthesisReport, alignedClaims, roster, provenance]
   );
   const position = useMemo<PositionPresentationState | null>(() => (marked ? { marked: true, roster, provenance } : null), [marked, roster, provenance]);
-  if (!position) return <AdaptivePanelResponseBody {...props} />;
+  // D-2/D-3: one notice naming the automated steps that did not run for this run (nothing when all ran).
+  const notice = <AnalysisAvailabilityNotice classification={props.classification} synthesisReport={synthesisReport} />;
+  if (!position) {
+    return (
+      <>
+        {notice}
+        <AdaptivePanelResponseBody {...props} />
+      </>
+    );
+  }
   return (
     <PositionPresentationContext.Provider value={position}>
+      {notice}
       <AdaptivePanelResponseBody {...props} synthesisReport={shownReport} />
     </PositionPresentationContext.Provider>
   );
@@ -188,6 +201,9 @@ function AdaptivePanelResponseBody(props: AdaptivePanelResponseProps) {
     onVerifyClaim,
     focusClaimId,
   } = props;
+  // Ruling B: the Model Responses section shows the live per-model results, or on a reopened run the ones rebuilt from
+  // its saved responses. Nothing else reads savedModelResults, so counts and summaries are unchanged.
+  const responseRows = results.length > 0 ? results : (props.savedModelResults ?? []);
   const [viewMode, setViewMode] = useState<PanelViewMode>("list");
   const [pendingScrollSection, setPendingScrollSection] = useState<string | null>(null);
 
@@ -288,7 +304,7 @@ function AdaptivePanelResponseBody(props: AdaptivePanelResponseProps) {
       return withBar(
         <div className="space-y-4">
           <RankedListView rankedEnumeration={rankedEnumeration} />
-          <ModelResponsesSection schema={schema} results={results} />
+          <ModelResponsesSection schema={schema} results={responseRows} />
           <PanelEvidenceSection schemaId={schema.id} rankedEnumeration={rankedEnumeration} modelsUsed={results.map((r) => r.modelId)} />
           {renderReviewGovernance({
             humanReview: props.humanReview,
@@ -316,7 +332,7 @@ function AdaptivePanelResponseBody(props: AdaptivePanelResponseProps) {
       return withBar(
         <div className="space-y-4">
           <ComparisonMatrixView comparisonMatrix={comparisonMatrix} />
-          <ModelResponsesSection schema={schema} results={results} />
+          <ModelResponsesSection schema={schema} results={responseRows} />
           <PanelEvidenceSection schemaId={schema.id} comparisonMatrix={comparisonMatrix} modelsUsed={results.map((r) => r.modelId)} />
           {renderReviewGovernance({
             humanReview: props.humanReview,
@@ -345,7 +361,7 @@ function AdaptivePanelResponseBody(props: AdaptivePanelResponseProps) {
       return withBar(
         <div className="space-y-4">
           <DefinitionExplanationView definitionExplanation={definitionExplanation} />
-          <ModelResponsesSection schema={schema} results={results} />
+          <ModelResponsesSection schema={schema} results={responseRows} />
           <PanelEvidenceSection schemaId={schema.id} definitionExplanation={definitionExplanation} modelsUsed={results.map((r) => r.modelId)} />
           {renderReviewGovernance({
             humanReview: props.humanReview,
@@ -374,7 +390,7 @@ function AdaptivePanelResponseBody(props: AdaptivePanelResponseProps) {
       return withBar(
         <div className="space-y-4">
           <CausalExplanationView causalExplanation={causalExplanation} riskLevel={classification.riskLevel} />
-          <ModelResponsesSection schema={schema} results={results} />
+          <ModelResponsesSection schema={schema} results={responseRows} />
           <PanelEvidenceSection schemaId={schema.id} causalExplanation={causalExplanation} modelsUsed={results.map((r) => r.modelId)} />
           {renderReviewGovernance({
             humanReview: props.humanReview,
@@ -416,7 +432,7 @@ function AdaptivePanelResponseBody(props: AdaptivePanelResponseProps) {
           ) : (
             <ChecklistTaxonomyView checklistTaxonomy={checklistTaxonomy} />
           )}
-          <ModelResponsesSection schema={schema} results={results} />
+          <ModelResponsesSection schema={schema} results={responseRows} />
           <PanelEvidenceSection schemaId={schema.id} checklistTaxonomy={checklistTaxonomy} modelsUsed={results.map((r) => r.modelId)} />
           {renderReviewGovernance({
             humanReview: props.humanReview,
@@ -443,7 +459,7 @@ function AdaptivePanelResponseBody(props: AdaptivePanelResponseProps) {
       return withBar(
         <div className="space-y-4">
           <DeepResearchView deepResearch={deepResearch} runId={runId} onVerifyClaim={onVerifyClaim} focusClaimId={focusClaimId} />
-          <ModelResponsesSection schema={schema} results={results} />
+          <ModelResponsesSection schema={schema} results={responseRows} />
           <PanelEvidenceSection schemaId={schema.id} deepResearch={deepResearch} modelsUsed={results.map((r) => r.modelId)} />
           {renderReviewGovernance({
             humanReview: props.humanReview,
@@ -470,7 +486,7 @@ function AdaptivePanelResponseBody(props: AdaptivePanelResponseProps) {
       return withBar(
         <div className="space-y-4">
           <EvidenceReviewView evidenceReview={evidenceReview} riskLevel={classification.riskLevel} />
-          <ModelResponsesSection schema={schema} results={results} />
+          <ModelResponsesSection schema={schema} results={responseRows} />
           <PanelEvidenceSection schemaId={schema.id} evidenceReview={evidenceReview} modelsUsed={results.map((r) => r.modelId)} />
           {renderReviewGovernance({
             humanReview: props.humanReview,
@@ -497,7 +513,7 @@ function AdaptivePanelResponseBody(props: AdaptivePanelResponseProps) {
       return withBar(
         <div className="space-y-4">
           <BiasBlindspotAuditView biasBlindspotAudit={biasBlindspotAudit} onRunFollowUp={onRunFollowUp} />
-          <ModelResponsesSection schema={schema} results={results} />
+          <ModelResponsesSection schema={schema} results={responseRows} />
           <PanelEvidenceSection schemaId={schema.id} biasBlindspotAudit={biasBlindspotAudit} modelsUsed={results.map((r) => r.modelId)} />
           {renderReviewGovernance({
             humanReview: props.humanReview,
@@ -523,7 +539,7 @@ function AdaptivePanelResponseBody(props: AdaptivePanelResponseProps) {
       return withBar(
         <div className="space-y-4">
           <DecisionSupportView decisionSupport={decisionSupport} />
-          <ModelResponsesSection schema={schema} results={results} />
+          <ModelResponsesSection schema={schema} results={responseRows} />
           <PanelEvidenceSection schemaId={schema.id} decisionSupport={decisionSupport} modelsUsed={results.map((r) => r.modelId)} />
           {props.dsProvenance ? <DsProvenanceSection display={props.dsProvenance} /> : null}
           {renderReviewGovernance({

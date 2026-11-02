@@ -239,6 +239,11 @@ export type OrdinaryRunExecutionResult = {
     ok: true;
     results: Array<PanelResultPublic & { rawTextFull: string; rawText: string }>;
     runId: string;
+    /**
+     * Whether `completeRun()` durably saved this run (results and run document). Additive (D-1 review, MINOR-4): a
+     * client that would open the saved report must not navigate to a report that was never saved.
+     */
+    runPersisted: boolean;
     governanceStatus?: "approved" | "needs_review" | "blocked";
     adaptive?: OrdinaryRunAdaptivePayload;
   };
@@ -1252,6 +1257,7 @@ export async function executeOrdinaryRun(args: ExecuteOrdinaryRunArgs): Promise<
       ok: true,
       results: normalizedResults,
       runId,
+      runPersisted: completeRunSucceeded,
       ...(panelGovernanceStatus ? { governanceStatus: panelGovernanceStatus } : {}),
       ...(adaptivePayload ? { adaptive: adaptivePayload } : {}),
     },

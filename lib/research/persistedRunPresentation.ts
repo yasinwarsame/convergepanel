@@ -38,6 +38,7 @@ import {
 import type { ModelResult } from "@/lib/types";
 import { deriveGovernanceRunContext, type GovernanceRunContext } from "@/lib/research/governanceRunContext";
 import { readDsProvenanceForPage, type DsProvenanceDisplay, type RecordedDsCounts } from "@/lib/research/dsProvenanceClientView";
+import type { AdaptiveModelResult } from "@/lib/adaptiveSchema/types";
 
 export const PERSISTED_RUN_VIEWER_ROLES = ["owner", "personal_reviewer", "team_member", "team_reviewer"] as const;
 export type PersistedRunViewerRole = (typeof PERSISTED_RUN_VIEWER_ROLES)[number];
@@ -88,6 +89,20 @@ function recordedDsCounts(data: Record<string, any>): RecordedDsCounts | null {
   return { totalModels: result.totalModels, totalModelsWithRecommendation: rec.totalModelsWithRecommendation, supportCount: rec.supportCount };
 }
 
+/**
+ * Ruling B: the read API's per-model results for a Milestone-2 report, accepted only in the AdaptiveModelResult shape
+ * the renderer reads (modelId string, ok boolean, data object or null). Anything else is dropped, never guessed at.
+ */
+function readModelResults(raw: unknown): AdaptiveModelResult[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const ok = raw.filter(
+    (r): r is AdaptiveModelResult =>
+      !!r && typeof r === "object" && typeof (r as { modelId?: unknown }).modelId === "string" && typeof (r as { ok?: unknown }).ok === "boolean" &&
+      ((r as { data?: unknown }).data === null || (typeof (r as { data?: unknown }).data === "object" && !Array.isArray((r as { data?: unknown }).data)))
+  );
+  return ok.length === raw.length ? ok : undefined;
+}
+
 export function interpretPersistedRunReadPayload(
   raw: unknown,
   expectedRunId: string,
@@ -120,10 +135,14 @@ export function interpretPersistedRunReadPayload(
   let adaptive: AdaptivePanelPayload | null = null;
   let restoreNotice: string | null = null;
   if (data.adaptive?.status === "valid" && data.adaptive.output) {
-    adaptive = adaptPersistedOutputToPanelPayload(data.adaptive.output, {
-      humanReview: data.adaptive.humanReview,
-      reviewRouting: data.adaptive.reviewRouting,
-    });
+    adaptive = adaptPersistedOutputToPanelPayload(
+      data.adaptive.output,
+      {
+        humanReview: data.adaptive.humanReview,
+        reviewRouting: data.adaptive.reviewRouting,
+      },
+      readModelResults(data.adaptive.modelResults)
+    );
   } else if (data.legacyAdaptive?.status === "valid" && data.legacyAdaptive.output) {
     adaptive = adaptPersistedLegacyOutputToPanelPayload(data.legacyAdaptive.output);
   } else if (data.adaptive?.status === "malformed" || data.legacyAdaptive?.status === "malformed") {

@@ -148,6 +148,14 @@ export interface QueryClassification {
    * classifier ran fine and generic was the right call.
    */
   fallbackReason?: QueryClassificationFallbackReason;
+  /**
+   * Owner final ruling (2026-11-02): present ONLY on a generic fallback (`fallbackReason` set) whose independent
+   * sensitivity check fired. It records that the elevated riskLevel came from that check, not from a model
+   * classification. The answer type is always generic. Additive and optional: v1 envelope readers ignore it.
+   */
+  classificationSource?: "heuristic";
+  /** The risk check that fired ("sensitive_topic"), present only with `classificationSource: "heuristic"`. */
+  heuristicRule?: string;
 
   // ── Cross-cutting metadata (Milestone 1) ──
   riskLevel: RiskLevel;

@@ -220,9 +220,28 @@ interface Observation {
   status: number;
   headers: string;
   text: string;
+  /**
+   * Shared Adaptive Schema Ruling B (owner-approved 2026-11-02): the read payload's additive `adaptive.modelResults`
+   * (per-model results rebuilt from the saved responses), held out of `text` so every AC above still compares the body
+   * byte for byte against 45df2ea. Its own invariants (flag-independent, Milestone-2 only) are asserted separately.
+   */
+  modelResults: string | null;
   io: string[];
   logs: string;
   builderCalls: number;
+}
+
+/** Removes `adaptive.modelResults` and returns the body exactly as the route would serialise it without the field. */
+function holdOutModelResults(raw: string): { text: string; modelResults: string | null } {
+  let body: any;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    return { text: raw, modelResults: null };
+  }
+  if (!body || typeof body !== "object" || !body.adaptive || typeof body.adaptive !== "object" || !("modelResults" in body.adaptive)) return { text: raw, modelResults: null };
+  const { modelResults, ...adaptive } = body.adaptive;
+  return { text: JSON.stringify({ ...body, adaptive }), modelResults: JSON.stringify(modelResults) };
 }
 
 async function observe(c: RouteCase, flag: boolean): Promise<Observation> {
@@ -251,11 +270,13 @@ async function observe(c: RouteCase, flag: boolean): Promise<Observation> {
     v.route === "P1"
       ? await p1Get(new NextRequest(`http://localhost/api/user/runs/${RUN_ID}`, { headers }), { params: Promise.resolve({ runId: RUN_ID }) })
       : await w1Get(new NextRequest(`http://localhost/api/workspaces/${WS_ID}/runs/${RUN_ID}${v.query ?? ""}`, { headers }), { params: { workspaceId: WS_ID, runId: RUN_ID } });
-  const text = await res.text();
+  const raw = await res.text();
+  const { text, modelResults } = holdOutModelResults(raw);
   return {
     status: res.status,
     headers: JSON.stringify([...res.headers.entries()].sort()),
     text,
+    modelResults,
     io: [...mockIo],
     logs: JSON.stringify(mockLogs),
     builderCalls: mockBuilderCalls.length,
@@ -454,6 +475,23 @@ run("flag OFF (AC-1): byte-identical to 45df2ea, builder never called", () => {
     expect(off.builderCalls).toBe(0);
     expect(off.text).not.toContain("dsProvenance");
     if (off.status === 200) expect(JSON.parse(off.text).viewerRole).toBe(expectedViewerRole(c));
+  });
+});
+
+run("Ruling B: adaptive.modelResults is flag-independent and present only with a valid Milestone-2 envelope", () => {
+  it("the held-out field is the same with the provenance flag on and off, on every case", () => {
+    let present = 0;
+    for (const c of CASES) {
+      const { off, on } = observations.get(c.id)!;
+      expect([c.id, on.modelResults]).toEqual([c.id, off.modelResults]);
+      if (off.modelResults !== null) {
+        present++;
+        expect(off.status).toBe(200);
+        expect(JSON.parse(off.text).adaptive.status).toBe("valid");
+        expect(off.modelResults).not.toContain("dsProvenance");
+      }
+    }
+    expect(present).toBeGreaterThan(0); // not vacuous: the matrix includes valid Milestone-2 (Decision Support) records
   });
 });
 

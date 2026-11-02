@@ -23,6 +23,7 @@ import { join } from "path";
 import { generateVerificationMemo } from "@/lib/verification/generateMemo";
 import { SCENARIOS } from "./o5pScenarios";
 import { SHARED_MEMO_INPUTS, normalizeMemo, renderRecord } from "./o5pRender";
+import { stripAnalysisNoticeHtml } from "@/components/adaptive/__tests__/analysisNoticeStrip";
 
 const FIXTURES = join(__dirname, "__fixtures__", "baseline-2c17fee");
 const records: Record<string, any> = JSON.parse(readFileSync(join(FIXTURES, "records.json"), "utf8"));
@@ -63,7 +64,20 @@ describe("Contract P historical parity (2c17feee oracles)", () => {
   it.each(SCENARIOS.map((s) => s.name))("%s: every consumer renders the unmarked record byte-identically", async (name) => {
     const scenario = SCENARIOS.find((s) => s.name === name)!;
     const outputs = await renderRecord(JSON.parse(JSON.stringify(records[name])), scenario.results());
-    const actual = Object.fromEntries(Object.entries(outputs).map(([k, v]) => [k, v === null ? null : sha(v)]));
+    // D-3 (2026-11-02): the owner-approved analysis-availability notice is removed before hashing against the 2c17feee
+    // oracle, and required exactly where the record's synthesis is degraded (the narrative-failure scenario) and nowhere else.
+    let notices = 0;
+    const actual = Object.fromEntries(
+      Object.entries(outputs).map(([k, v]) => {
+        if (v === null) return [k, null];
+        const stripped = stripAnalysisNoticeHtml(v);
+        // Review MINOR-5: never more than one notice in one rendered output.
+        expect([name, k, stripped.count <= 1]).toEqual([name, k, true]);
+        notices += stripped.count;
+        return [k, sha(stripped.markup)];
+      })
+    );
+    expect([name, notices > 0]).toEqual([name, records[name]?.synthesisReport?.degraded === true]);
     expect(renderHashes).toBeDefined();
     expect(actual).toEqual(renderHashes![name]);
   });

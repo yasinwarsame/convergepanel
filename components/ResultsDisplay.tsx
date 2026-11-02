@@ -29,6 +29,7 @@ import {
 import { getPanelModelConfig, PanelModelId } from "@/lib/panelModels";
 import { runModelFamilyName, runModelIdentityDetail, runModelIdentityLabel, runModelProvenanceFromResultRow } from "@/lib/panel/runModelIdentity";
 import { RunModelProvenanceContext } from "@/components/adaptive/RunModelProvenanceContext";
+import { RunSlotStatusContext } from "@/components/adaptive/RunSlotStatusContext";
 import { normalizeBullets } from "@/lib/normalizeBullets";
 import { normalizeList } from "@/lib/normalizeList";
 import {
@@ -76,6 +77,8 @@ export interface AdaptivePanelPayload {
   classification: QueryClassification;
   schemaId: QueryType;
   results: AdaptiveModelResult[];
+  /** Ruling B: per-model results rebuilt from a reopened run's saved responses; read only by the Model Responses section. */
+  savedModelResults?: AdaptiveModelResult[];
   alignedClaims?: AlignedClaim[];
   /** Present only when ADAPTIVE_VERIFICATION_ENABLED was on for this run. */
   gate?: AdaptiveGateResult;
@@ -1105,10 +1108,13 @@ export default function ResultsDisplay({
         {/* The run's own per-slot provenance (live or saved rows) for the
             adaptive surfaces that name a model's identity. */}
         <RunModelProvenanceContext.Provider value={results.map(runModelProvenanceFromResultRow)}>
+        {/* D-4: each slot's recorded call status, so a provider failure is never labelled an incompatible format. */}
+        <RunSlotStatusContext.Provider value={new Map(results.map((r) => [r.modelId, String(r.status ?? "")]))}>
         <AdaptivePanelResponse
           schema={getResultSchema(adaptive.schemaId)}
           classification={adaptive.classification}
           results={adaptive.results}
+          savedModelResults={adaptive.savedModelResults}
           alignedClaims={adaptive.alignedClaims}
           gate={adaptive.gate}
           synthesisReport={adaptive.synthesisReport}
@@ -1135,6 +1141,7 @@ export default function ResultsDisplay({
           ancillaryPresentation={adaptiveAncillaryPresentation}
           dsProvenance={dsProvenance}
         />
+        </RunSlotStatusContext.Provider>
         </RunModelProvenanceContext.Provider>
       </div>
     );
