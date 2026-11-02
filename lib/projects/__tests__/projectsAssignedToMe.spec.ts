@@ -348,3 +348,25 @@ describe("integrity: fails closed like the rest of the list", () => {
     expect((await listAs(ME)).status).toBe(500);
   });
 });
+
+describe("bounds: large inputs are read in full or fail closed, never truncated silently", () => {
+  it("4,999 assigned runs across pages are all read (the scan pages past 500)", async () => {
+    store.projects = [project("p-first", 20), project("p-last", 10)];
+    // The oldest run (read on the last page) is the only link to p-last.
+    store.runs = [run("p-last", ME), ...Array.from({ length: 4998 }, () => run("p-first", ME))];
+    const r = await listAs(ME);
+    expect(r.status).toBe(200);
+    expect(r.ids).toEqual(["p-first", "p-last"]);
+  });
+
+  it("more assigned runs than the scan bound fails the page (500) rather than listing a partial set", async () => {
+    store.projects = [project("p-first", 20)];
+    store.runs = Array.from({ length: 5001 }, () => run("p-first", ME));
+    expect((await listAs(ME)).status).toBe(500);
+  });
+
+  it("more directly assigned Projects than the bound fails the page (500)", async () => {
+    store.projects = Array.from({ length: 501 }, (_, i) => project(`p-${String(i).padStart(3, "0")}`, 10 + i, { assigneeUids: [ME] }));
+    expect((await listAs(ME)).status).toBe(500);
+  });
+});
