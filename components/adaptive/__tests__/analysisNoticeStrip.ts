@@ -15,8 +15,8 @@ const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;")
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
 const p = (line: string) => `<p>${escapeRe(escapeHtml(line))}</p>`;
 
-/** The only emitted sequences: an optional classification line (heuristic XOR general format), then the optional degraded line. */
-const CLASSIFICATION = `(?:${p(ANALYSIS_NOTICE_LINES.heuristic)}(?:${p(ANALYSIS_NOTICE_LINES.sensitive)})?|${p(ANALYSIS_NOTICE_LINES.generalFormat)})`;
+/** The only emitted sequences: an optional classification block (general format, optionally followed by the sensitive caution), then the optional degraded line. */
+const CLASSIFICATION = `${p(ANALYSIS_NOTICE_LINES.generalFormat)}(?:${p(ANALYSIS_NOTICE_LINES.sensitive)})?`;
 const DEGRADED = p(ANALYSIS_NOTICE_LINES.degraded);
 const BODY = `(?:${CLASSIFICATION}${DEGRADED}|${CLASSIFICATION}|${DEGRADED})`;
 const NOTICE_HTML = new RegExp(

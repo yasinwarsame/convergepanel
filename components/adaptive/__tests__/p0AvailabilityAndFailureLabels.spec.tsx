@@ -57,11 +57,27 @@ describe("D-4 failure labels", () => {
     expect(out).not.toContain("couldn&#x27;t be compared");
   });
 
-  it("a mixed list (a real failure plus a saved-copy row) keeps the original heading for the real failure", () => {
+  it("verification MINOR-3: a recovered model (saved-copy row) is never counted as failed; each group has its own exact count", () => {
+    // Gemini genuinely failed; Claude's first answer was invalid but its live retry succeeded (only the first answer is saved).
     const out = html(createElement(FailedResultsNote, { failed: [failedRow("gemini"), failedRow("claude", SAVED_COPY_UNSTRUCTURED)] }), new Map([["gemini", "failed"], ["claude", "ok"]]));
-    expect(out).toContain("2 models couldn&#x27;t be compared");
-    expect(out).toContain("did not respond and was excluded from comparison.");
+    expect(out).toContain("1 model couldn&#x27;t be compared · 1 saved response can&#x27;t be shown here");
+    expect(out).not.toContain("2 models couldn&#x27;t be compared");
+    expect(out).toContain("did not respond and was excluded from comparison."); // the genuine failure is still accurately identified
     expect(out).toContain(SAVED_COPY_UNSTRUCTURED.replaceAll("'", "&#x27;"));
+    expect(out.indexOf("did not respond")).toBeLessThan(out.indexOf("saved copy")); // genuine failures listed first
+  });
+
+  it.each([
+    [2, 0, "2 models couldn&#x27;t be compared"],
+    [1, 0, "1 model couldn&#x27;t be compared"],
+    [0, 2, "2 saved responses can&#x27;t be shown here"],
+    [2, 1, "2 models couldn&#x27;t be compared · 1 saved response can&#x27;t be shown here"],
+  ])("heading counts: %i genuine + %i saved-copy → %s", (g, c, want) => {
+    const ids = ["gemini", "grok", "perplexity", "claude", "chatgpt"];
+    const rows = [...ids.slice(0, g).map((m) => failedRow(m)), ...ids.slice(g, g + c).map((m) => failedRow(m, SAVED_COPY_UNSTRUCTURED))];
+    const statuses = new Map([...ids.slice(0, g).map((m) => [m, "failed"] as [string, string]), ...ids.slice(g, g + c).map((m) => [m, "ok"] as [string, string])]);
+    const out = html(createElement(FailedResultsNote, { failed: rows }), statuses);
+    expect(out).toContain(`<p class="font-semibold mb-1">${want}</p>`);
   });
 
   it("without the run's record (no provider) the original wording is kept: it cannot tell a failure from a format problem", () => {
@@ -80,14 +96,14 @@ describe("D-4 failure labels", () => {
 describe("D-3 analysis-availability notice", () => {
   const base = { queryType: "generic", confidence: 0 } as never;
   it.each([
-    ["heuristic classification", { ...(base as object), queryType: "decision_support", classificationSource: "heuristic", fallbackReason: "connector_error" }, null, [ANALYSIS_NOTICE_LINES.heuristic]],
+    ["generic fallback whose independent risk check fired", { ...(base as object), fallbackReason: "connector_error", classificationSource: "heuristic", heuristicRule: "sensitive_topic", riskLevel: "high_stakes" }, null, [ANALYSIS_NOTICE_LINES.generalFormat, ANALYSIS_NOTICE_LINES.sensitive]],
     ["default generic after a provider failure", { ...(base as object), fallbackReason: "connector_error" }, null, [ANALYSIS_NOTICE_LINES.generalFormat]],
     ["default generic after a timeout", { ...(base as object), fallbackReason: "timeout" }, null, [ANALYSIS_NOTICE_LINES.generalFormat]],
     ["low confidence (a model verdict, not a failure)", { ...(base as object), fallbackReason: "low_confidence" }, null, []],
     ["empty input", { ...(base as object), fallbackReason: "empty_query" }, null, []],
     ["model classification, synthesis ran", { queryType: "comparison_matrix", confidence: 0.9 }, { degraded: false }, []],
     ["degraded synthesis only", { queryType: "comparison_matrix", confidence: 0.9 }, { degraded: true }, [ANALYSIS_NOTICE_LINES.degraded]],
-    ["heuristic + degraded", { ...(base as object), queryType: "causal_explanation", classificationSource: "heuristic", fallbackReason: "connector_error" }, { degraded: true }, [ANALYSIS_NOTICE_LINES.heuristic, ANALYSIS_NOTICE_LINES.degraded]],
+    ["generic fallback + degraded", { ...(base as object), fallbackReason: "connector_error" }, { degraded: true }, [ANALYSIS_NOTICE_LINES.generalFormat, ANALYSIS_NOTICE_LINES.degraded]],
   ])("%s", (_label, classification, synthesisReport, want) => {
     expect(analysisAvailabilityLines(classification as never, synthesisReport as never)).toEqual(want);
     const out = renderToStaticMarkup(createElement(AnalysisAvailabilityNotice, { classification: classification as never, synthesisReport: synthesisReport as never }));

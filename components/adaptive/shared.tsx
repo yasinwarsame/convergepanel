@@ -88,17 +88,23 @@ export function FailedResultsNote({ failed }: { failed: AdaptiveModelResult[] })
   // D-4: a slot the run records as not having responded is described as such, never as an "incompatible format".
   const slotStatuses = useRunSlotStatus();
   if (failed.length === 0) return null;
-  // Review R3 MINOR-1: saved-copy rows describe the stored copy, not the model; the heading must not call them uncompared.
-  const savedCopyOnly = failed.every((r) => !!r.parseError && SAVED_COPY_NOTICES.has(r.parseError));
+  // Verification of 4d5429b MINOR-3: a saved-copy row describes the stored copy (its live retry may have succeeded), not
+  // a model that failed. Each group is counted and headed separately, so the "couldn't be compared" count is exactly
+  // the genuine failures listed, and a recovered model is never counted as failed.
+  const isSavedCopy = (r: AdaptiveModelResult) => !!r.parseError && SAVED_COPY_NOTICES.has(r.parseError);
+  const genuine = failed.filter((r) => !isSavedCopy(r));
+  const savedCopies = failed.filter(isSavedCopy);
+  const headings = [
+    ...(genuine.length > 0 ? [`${genuine.length} model${genuine.length === 1 ? "" : "s"} couldn't be compared`] : []),
+    ...(savedCopies.length > 0 ? [`${savedCopies.length} saved response${savedCopies.length === 1 ? "" : "s"} can't be shown here`] : []),
+  ];
   return (
     <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
       <p className="font-semibold mb-1">
-        {savedCopyOnly
-          ? `${failed.length} saved response${failed.length === 1 ? "" : "s"} can't be shown here`
-          : `${failed.length} model${failed.length === 1 ? "" : "s"} couldn't be compared`}
+        {headings.join(" · ")}
       </p>
       <ul className="space-y-1">
-        {failed.map((r) => (
+        {[...genuine, ...savedCopies].map((r) => (
           <li key={r.modelId} className="flex items-start gap-2">
             <ModelChip modelId={r.modelId} size="xs" />
             <div className="text-red-700">

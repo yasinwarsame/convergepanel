@@ -725,13 +725,13 @@ This slice closes the remaining gaps without a new taxonomy, provider or schema 
   - On success it `router.replace`s to `teamResearchDetailHref(...)`, the canonical Team research page. That page renders the same full adaptive report as Individual research, with the Team chrome around it.
   - There is no navigation if the composer has unmounted.
   - `TeamResearchResultView` is no longer rendered by the composer; the file and its spec remain.
-- **D-2, classification resilience (owner final ruling, 2026-11-02):** `classifyQuery()` no longer caches failure fallbacks (connector error, timeout, malformed or schema-invalid answer), so a recovered provider is asked again.
-  - On those failures the fallback (`lib/adaptiveSchema/heuristicClassifier.ts`, pure, no provider call) may select ONLY **Forecast** (a future-year or "next N years" horizon, or "Will …" with a change verb) or **Generic**. A question that opens as a procedure or decision request (how/why/should/what should…), or that is first-person (I/me/my), is never a forecast: it stays Generic. These are structural guards, not keyword lists.
-  - Comparison is excluded on purpose: `comparison_matrix` is Milestone-2, and its envelope creates a governance record (decision receipt, automated governance, Team review routing). The owner ruled fallbacks must be presentation-only. `forecast_speculative` is legacy-active (legacy envelope only).
-  - A structural test requires every fallback target to be a legacy-active, non-Milestone-2 schema. Procedure, causal, risks, ranking, definition and Decision Support are never fallback targets.
-  - Fallbacks are marked `classificationSource: "heuristic"` with `heuristicRule`, keep `fallbackReason`, have confidence 0.4, and must pass `ClassificationSchema` and route active.
-  - Independent risk flags (`sensitiveTopic()`): a health-, legal-, finance- or safety-sensitive question stays generic with `riskLevel` `high_stakes`, or `safety_critical` for self-harm phrasings, `evidenceRequirement: "high"` and `heuristicRule: "sensitive_topic"`. It is never downgraded. The term list is deliberately not chased: an unlisted sensitive question is still generic, because no specialised fallback format exists for it.
-  - Validated model classifications are unchanged, Decision Support included. A low-confidence model verdict stays generic and cached.
+- **D-2, classification resilience (owner final ruling, option A, 2026-11-02):** `classifyQuery()` no longer caches failure fallbacks (connector error, timeout, malformed or schema-invalid answer), so a recovered provider is asked again.
+  - **Every** classifier failure falls back to **Generic**. No rule, keyword list or phrase matcher selects a specialised answer type: repeated reviews showed no heuristic reliably tells a safe forecast or comparison from a medical, legal, financial or decision question.
+  - Generic is an intentional degraded mode. A successful classification still selects any of the 18 executing answer types.
+  - No fallback can create a Milestone-2 envelope, so none can create a governance record, decision receipt, Team review or Decision Support export.
+  - The independent risk check (`lib/adaptiveSchema/heuristicClassifier.ts`, `sensitiveTopic()`, which exports no routing) keeps `riskLevel` `high_stakes`, or `safety_critical` for self-harm phrasings, with `evidenceRequirement: "high"`, recorded as `classificationSource: "heuristic"` / `heuristicRule: "sensitive_topic"`.
+  - This is not proof of safety: an unlisted sensitive question keeps the default level.
+  - Provenance is `fallbackReason`. The notice reads "a general report format is used", plus a caution line when the risk check fired.
 - **D-3, availability notice:** `components/adaptive/AnalysisAvailabilityNotice.tsx`, rendered at the top of every adaptive report, names what did not run:
   - a heuristic or default classification after a classifier failure;
   - `synthesisReport.degraded === true` (the written synthesis could not be generated, and the summary is assembled from the panel's scored claims).

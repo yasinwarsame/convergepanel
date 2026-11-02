@@ -149,13 +149,12 @@ export interface QueryClassification {
    */
   fallbackReason?: QueryClassificationFallbackReason;
   /**
-   * D-2 (2026-11-02): present ONLY when the model classifier could not complete (`fallbackReason` names why) and the
-   * deterministic heuristic (heuristicClassifier.ts) chose an existing answer type instead. It is never a verified
-   * classification. Absent means the model classified (no `fallbackReason`) or the default generic fallback applied
-   * (`fallbackReason` set). Additive and optional: v1 envelope readers ignore it.
+   * Owner final ruling (2026-11-02): present ONLY on a generic fallback (`fallbackReason` set) whose independent
+   * sensitivity check fired. It records that the elevated riskLevel came from that check, not from a model
+   * classification. The answer type is always generic. Additive and optional: v1 envelope readers ignore it.
    */
   classificationSource?: "heuristic";
-  /** The heuristic rule that fired (stable id), present only with `classificationSource: "heuristic"`. */
+  /** The risk check that fired ("sensitive_topic"), present only with `classificationSource: "heuristic"`. */
   heuristicRule?: string;
 
   // ── Cross-cutting metadata (Milestone 1) ──
