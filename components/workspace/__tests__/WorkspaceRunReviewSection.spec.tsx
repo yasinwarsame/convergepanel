@@ -99,7 +99,9 @@ describe("WorkspaceRunReviewSection — loading/error/not_found", () => {
   it("not_found: generic concealed message, no internal reason exposed", async () => {
     const renderer = await render(null, "not_found");
     const text = JSON.stringify(renderer.toJSON());
-    expect(text).toContain("This review is no longer available.");
+    // One message for every not-found cause (missing, no access, no review record): which one applies is never revealed.
+    expect(text).toContain("This review isn’t available. It may have been removed, you may not have access to it, or this research result can’t be submitted for approval.");
+    expect(text).not.toContain("no review record");
   });
 
   it("error: generic message with retry, underlying report page (outside this section) remains untouched", async () => {

@@ -29,6 +29,7 @@ import { ProjectDialogFrame } from "@/components/projects/ProjectDialogFrame";
 import { useWorkspaceMembers } from "@/hooks/useWorkspaceMembers";
 import type { TeamRunAssigneeErrorCode, TeamRunAssigneeView, UseTeamRunAssigneeResult } from "@/hooks/useTeamRunAssignee";
 import { isRunAssigneeEligibleRoleMirror } from "@/lib/workspaces/assignmentTargetEligibilityClient";
+import { RESEARCH_ASSIGNMENT_EXPLANATION } from "@/lib/workspaces/approvalAssignmentCopy";
 
 export function teamRunAssigneeErrorCopy(code: TeamRunAssigneeErrorCode): string {
   switch (code) {
@@ -132,7 +133,8 @@ export function RunAssigneeDialog({
           <p className="break-words text-sm text-cp-muted">
             <span className="font-medium text-cp-text">{displayResearchQuestion(run.question)}</span>
           </p>
-          <p className="mt-2 text-xs text-cp-faint">Only members who can create research are listed (a mirror of the server rule; the server re-checks on save). Assignment does not change what anyone can see or do.</p>
+          <p className="mt-2 text-sm text-cp-muted" data-testid="research-assignment-explanation">{RESEARCH_ASSIGNMENT_EXPLANATION}</p>
+          <p className="mt-1 text-xs text-cp-faint">Only members who can create research are listed (a mirror of the server rule; the server re-checks on save).</p>
 
           {(members.status === "loading" || current.status === "loading") && (
             <p role="status" className="mt-3 text-sm text-cp-muted">
