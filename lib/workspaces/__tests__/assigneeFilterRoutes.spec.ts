@@ -101,6 +101,25 @@ describe("GET /workspaces/{W}/projects/{P}/runs", () => {
 });
 
 describe("GET /workspaces/{W}/projects", () => {
+  it("'assigned to me' includes the research link only for a caller who can currently be a research assignee AND read research", async () => {
+    const cases: [string[], boolean][] = [
+      [MEMBER_CAPS, true],
+      [VIEWER_CAPS, false], // no research.create (D4)
+      [["workspace.read", "projects.read", "research.create"], false], // no research.read
+    ];
+    for (const [caps, expected] of cases) {
+      mockedListProjects.mockClear();
+      mockedWsAccess.mockResolvedValue(access(caps));
+      await projectsGet(req(`/api/workspaces/${WS_ID}/projects?assignee=me`), { params: { workspaceId: WS_ID } });
+      expect(mockedListProjects).toHaveBeenCalledWith(expect.objectContaining({ assigneeUid: UID, includeAssignedResearch: expected }));
+    }
+    // Without the filter the research link is never requested.
+    mockedListProjects.mockClear();
+    mockedWsAccess.mockResolvedValue(access(MEMBER_CAPS));
+    await projectsGet(req(`/api/workspaces/${WS_ID}/projects`), { params: { workspaceId: WS_ID } });
+    expect(mockedListProjects).toHaveBeenCalledWith(expect.objectContaining({ assigneeUid: undefined, includeAssignedResearch: false }));
+  });
+
   it("substitutes the caller uid (any active member is an eligible Project assignee — even a Viewer queries); rejects other values; items are ENRICHED", async () => {
     mockedWsAccess.mockResolvedValue(access(VIEWER_CAPS));
     mockedListProjects.mockResolvedValue({ status: "ok", items: [{ project: { id: "p1" }, documentUpdateTime: null }], hasMore: false });

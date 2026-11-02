@@ -99,7 +99,15 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
   }
 
   const assigneeUid = assigneeFilter.kind === "uid" ? assigneeFilter.uid : undefined;
-  const result = await listTeamProjects({ workspaceId, limit, cursorRaw, status: statusResult.status, assigneeUid });
+  // Owner contract (2026-11-02): "assigned to me" also includes Projects containing research assigned to the caller.
+  // That second link counts only while the caller could currently be a research assignee and read research (the same
+  // D4 rule as the research "assigned to me" view): otherwise those run assignments are stale and add nothing. This
+  // narrows a list the caller can already read in full; it grants nothing.
+  const includeAssignedResearch =
+    assigneeUid !== undefined &&
+    access.capabilities.includes("research.read") &&
+    resolveAssigneeFilterForCaller({ filter: assigneeResult.filter, uid, capabilities: access.capabilities, target: "run" }).kind === "uid";
+  const result = await listTeamProjects({ workspaceId, limit, cursorRaw, status: statusResult.status, assigneeUid, includeAssignedResearch });
   switch (result.status) {
     case "ok":
       return NextResponse.json({
