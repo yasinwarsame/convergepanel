@@ -169,7 +169,11 @@ function expectReadableReport(r: TestRenderer.ReactTestRenderer) {
   expect(failed).not.toMatch(/incompatible format/);
   expect(all).not.toContain("Gemini request failed");
   // Combined analysis is labelled unavailable; nothing is presented as panel consensus.
-  for (const name of ["Unified Answer", "Consensus", "Agreement / Disagreement Map", "Synthesis Report"]) expect(all).toContain(`${name}: unavailable`);
+  expect(all).toContain("Not available for this run: Unified Answer, Consensus, Agreement / Disagreement Map and Synthesis Report.");
+  const named = byId(r, "unavailable-analysis-sections")[0].findAll((n) => typeof n.type === "string" && n.props["data-section"] !== undefined);
+  expect(named.map((n) => [n.props["data-section"], n.props["data-status"]])).toEqual(
+    ["Unified Answer", "Consensus", "Agreement / Disagreement Map", "Synthesis Report"].map((name) => [name, "unavailable"])
+  );
   expect(all).not.toMatch(/Trust Summary|Strong consensus|Panel verdict/);
 }
 
@@ -331,5 +335,96 @@ describe("displayResearchQuestion: display-only, exact legacy copy only", () => 
   it("the stored record is untouched: the read payload still carries the original question", async () => {
     const b = await body(historicalRun());
     expect(b.question).toBe(POLLUTED);
+  });
+});
+
+/**
+ * Presentation follow-up (owner-approved 2026-11-02): schema-exact claims and camps in a saved response, on the real
+ * Team and Individual paths. Original response text stays byte-exact in the collapsed disclosure.
+ */
+describe("follow-up: claims, camps and labels on saved responses (Team and Individual)", () => {
+  const schemaAnswer = (who: string) => ({
+    summary: `${who} summary.`,
+    keyClaims: [
+      {
+        id: `${who}-c1`,
+        claim: `${who} claim one.`,
+        stance: "asserts",
+        confidence: "majority_view",
+        evidenceType: "empirical",
+        camps: [
+          { label: `${who} optimists`, position: `${who} optimists: within a decade.` },
+          { label: `${who} skeptics`, position: `${who} skeptics: not before 2040.` },
+        ],
+      },
+      { id: `${who}-c2`, claim: `${who} claim two.`, stance: "disputes", confidence: "speculative", evidenceType: "anecdotal" },
+    ],
+    uncertainties: [`${who} uncertainty.`],
+    followUps: [`${who} follow-up.`],
+  });
+  const OFF_SCHEMA = { summary: "Grok summary.", keyClaims: [{ claim: "Grok claim.", confidence: "Very High", notes: "Grok note." }] };
+  const ROWS: [string, string, string][] = [
+    ["chatgpt", "ok", JSON.stringify(schemaAnswer("ChatGPT"))],
+    ["claude", "ok", fenced(schemaAnswer("Claude"))],
+    ["grok", "ok", JSON.stringify(OFF_SCHEMA)],
+    ["perplexity", "ok", PLAIN],
+    ["gemini", "error", "Gemini request failed. Please try again."],
+  ];
+
+  function expectClaimLayout(r: TestRenderer.ReactTestRenderer) {
+    for (const [modelId, who, saved] of [
+      ["chatgpt", "ChatGPT", ROWS[0][2]],
+      ["claude", "Claude", ROWS[1][2]],
+    ] as const) {
+      const inst = responseOf(r, modelId);
+      const claims = inst.findAll((n) => n.props["data-testid"] === "structured-claim" && typeof n.type === "string");
+      expect(claims.map((c) => text(c.findByProps({ "data-testid": "structured-claim-text" })))).toEqual([`${who} claim one.`, `${who} claim two.`]);
+      const meta = (c: TestRenderer.ReactTestInstance) =>
+        c.findAll((n) => n.props["data-testid"] === "claim-meta" && typeof n.type === "string").map((m) => [m.findByType("dd").children[0], m.findByType("dd").props["data-value"]]);
+      expect(meta(claims[0])).toEqual([["Asserts", "asserts"], ["Majority view", "majority_view"], ["Empirical", "empirical"]]);
+      expect(meta(claims[1])).toEqual([["Disputes", "disputes"], ["Speculative", "speculative"], ["Anecdotal", "anecdotal"]]);
+      expect(claims[0].findAll((n) => n.props["data-testid"] === "structured-camp" && typeof n.type === "string").map((c) => c.findAllByType("span").map(text))).toEqual([
+        [`${who} optimists`, `${who} optimists: within a decade.`],
+        [`${who} skeptics`, `${who} skeptics: not before 2040.`],
+      ]);
+      expect(text(claims[1].findByProps({ "data-testid": "structured-claim-id" }))).toBe(`Claim ID: ${who}-c2`);
+      const visible = visibleOf(inst);
+      expect(visible).toContain("Model-reported confidence:");
+      expect(visible).not.toContain("majority_view");
+      // E: the original response text is unchanged and byte-exact, collapsed.
+      const details = inst.findAllByType("details");
+      expect(details).toHaveLength(1);
+      expect(details[0].props.open).toBeFalsy();
+      expect(text(details[0].findByType("summary"))).toBe("Show the original response text");
+      expect(text(details[0].findByType("pre"))).toBe(saved);
+    }
+    // Off-schema claim: generic layout, every stored value visible.
+    const grok = responseOf(r, "grok");
+    expect(grok.findAll((n) => n.props["data-testid"] === "structured-claim")).toHaveLength(0);
+    for (const v of ["Grok claim.", "Very High", "Notes", "Grok note."]) expect(visibleOf(grok)).toContain(v);
+    expect(visibleOf(responseOf(r, "perplexity"))).toBe(PLAIN);
+    // C: one notice, counts unchanged.
+    expect(text(r)).toContain("4 of 5 models returned a response");
+    expect(byId(r, "analysis-state-notice")).toHaveLength(1);
+  }
+
+  it("Team project research", async () => {
+    const r = await renderTeam(await body(historicalRun(ROWS)));
+    expectClaimLayout(r);
+    expectNoWriteOrModelCall();
+  });
+
+  it("Individual research", async () => {
+    const r = await renderIndividual(historicalRun(ROWS));
+    expectClaimLayout(r);
+    expectNoWriteOrModelCall();
+  });
+
+  it("the single-response view uses the same layout", async () => {
+    const rows: [string, string, string][] = [ROWS[0], ["gemini", "error", "x"]];
+    const r = await renderIndividual(historicalRun(rows));
+    const single = byId(r, "single-model-response");
+    expect(single).toHaveLength(1);
+    expect(single[0].findAll((n) => n.props["data-testid"] === "structured-claim" && typeof n.type === "string")).toHaveLength(2);
   });
 });
