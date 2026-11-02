@@ -534,7 +534,8 @@ describe("Team chrome (§N/§AA)", () => {
     const r = await mount(PROJECT_PROPS);
     const main = r.toJSON() as TestRenderer.ReactTestRendererJSON;
     const kinds = (main.children as TestRenderer.ReactTestRendererJSON[]).map((c) => (c.props["aria-label"] ? `${c.type}:${c.props["aria-label"]}` : c.props["data-testid"] ? c.props["data-testid"] : c.type));
-    expect(kinds).toEqual(["nav:Breadcrumb", "div", "nav:Workspace", "persisted-result-view"]);
+    // This fixture has no review record, so the Order A approval notice (2026-11-02) follows the result view.
+    expect(kinds).toEqual(["nav:Breadcrumb", "div", "nav:Workspace", "persisted-result-view", "approval-not-available-notice"]);
     const hrefs = r.root.findAll((n) => n.type === "a").map((n) => n.props.href);
     expect(hrefs).toEqual(expect.arrayContaining([`/workspace/team/${WS}`, `/workspace/team/${WS}/projects`, `/workspace/team/${WS}/projects/${PROJECT}`, `/workspace/team/${WS}/members`, `/workspace/team/${WS}/audit`]));
     const h1 = r.root.findAll((n) => n.type === "h1");

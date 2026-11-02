@@ -166,3 +166,14 @@ describe("outcomes", () => {
     expect(setRunAssignee).not.toHaveBeenCalled();
   });
 });
+
+// Owner Order A (2026-11-02): research assignment is responsibility, never an approval request.
+describe("approval clarity", () => {
+  it("explains that research assignment is not an approval request and names the control that is", async () => {
+    const { renderer } = await setup(assignment());
+    const textOf = (n: TestRenderer.ReactTestInstance): string => n.children.map((c) => (typeof c === "string" ? c : textOf(c))).join("");
+    expect(textOf(renderer.root.findByProps({ "data-testid": "research-assignment-explanation" }))).toBe(
+      "Assigning research marks who is responsible for it. It is not an approval request: to ask someone to approve research, use “Assign reviewer” on its review page. Assignment does not change what anyone can see or do."
+    );
+  });
+});

@@ -67,6 +67,7 @@ import WorkspaceNav from "@/components/workspace/WorkspaceNav";
 import PersistedResearchResultView from "@/components/research/PersistedResearchResultView";
 import { displayResearchQuestion } from "@/lib/research/savedResponseDisplay";
 import TeamResearchReviewSummary from "@/components/workspace/projects/TeamResearchReviewSummary";
+import { APPROVAL_NOT_AVAILABLE_HEADING, APPROVAL_NOT_AVAILABLE_MESSAGE } from "@/lib/workspaces/approvalAssignmentCopy";
 import { TeamExportRefreshProvider, TeamResearchExportButton, TeamResearchExportHistory } from "@/components/workspace/projects/TeamResearchExport";
 import type { AdaptiveAncillaryPresentation } from "@/components/adaptive/adaptiveAncillaryPresentation";
 import {
@@ -387,6 +388,16 @@ export default function TeamResearchDetailShell({ workspaceId, workspaceName, ru
             // is exactly what Reviewers and Viewers must see.
             onVerifyClaim={canVerifyClaim ? handleVerifyClaim : undefined}
           />
+          {/* Owner Order A (2026-11-02): the reader is already authorized here, and `review` is null exactly when the run
+              has no usable review record, so stating why approval is unavailable reveals nothing new. */}
+          {state.meta.review === null && (
+            <section data-testid="approval-not-available-notice" aria-labelledby="approval-not-available-heading" className="mt-6 rounded-xl border border-cp-border bg-cp-raised p-5 text-sm">
+              <h2 id="approval-not-available-heading" className="text-sm font-semibold text-cp-text">
+                {APPROVAL_NOT_AVAILABLE_HEADING}
+              </h2>
+              <p className="mt-1 text-cp-muted">{APPROVAL_NOT_AVAILABLE_MESSAGE}</p>
+            </section>
+          )}
         </TeamExportRefreshProvider>
       )}
     </main>

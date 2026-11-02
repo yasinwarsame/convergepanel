@@ -32,6 +32,7 @@ import {
 } from "@/lib/client/workspaceReviewClient";
 import { getAssignmentPresentation, formatDueDate } from "@/lib/workspaces/reviewQueuePresentation";
 import { ProjectDialogFrame } from "@/components/projects/ProjectDialogFrame";
+import { REVIEWER_ASSIGNMENT_EXPLANATION, REVIEWER_ASSIGNMENT_HEADING } from "@/lib/workspaces/approvalAssignmentCopy";
 
 function toDatetimeLocalValue(iso: string | null): string {
   if (!iso) return "";
@@ -144,7 +145,8 @@ export default function ReviewAssignmentCard({
 
   return (
     <div className="rounded-xl border border-cp-border bg-cp-surface p-5 shadow-sm">
-      <h3 className="text-sm font-semibold text-cp-text">Assignment</h3>
+      <h3 className="text-sm font-semibold text-cp-text">{REVIEWER_ASSIGNMENT_HEADING}</h3>
+      <p className="mt-1 text-xs text-cp-muted" data-testid="reviewer-assignment-explanation">{REVIEWER_ASSIGNMENT_EXPLANATION}</p>
 
       <div className="mt-2 flex items-baseline gap-2">
         <span className={presentation.tone === "warning" ? "text-sm font-medium text-cp-orange" : "text-sm font-medium text-cp-text"}>{presentation.label}</span>

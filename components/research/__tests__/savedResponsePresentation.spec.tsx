@@ -428,3 +428,35 @@ describe("follow-up: claims, camps and labels on saved responses (Team and Indiv
     expect(single[0].findAll((n) => n.props["data-testid"] === "structured-claim" && typeof n.type === "string")).toHaveLength(2);
   });
 });
+
+
+/** Owner Order A (2026-11-02): Team research without a review record says approval is unavailable, and why. */
+describe("approval clarity on Team research", () => {
+  const NOTICE = "This research result can’t be submitted for approval: it has no review record, so a reviewer can’t be assigned and it won’t appear in the Approval Queue. Assigning it with “Assign” marks responsibility only.";
+
+  it("a run with no review record shows one accessible 'Approval review' notice with the exact explanation", async () => {
+    const r = await renderTeam(await body(historicalRun()));
+    const notices = byId(r, "approval-not-available-notice");
+    expect(notices).toHaveLength(1);
+    const heading = notices[0].findByType("h2");
+    expect(text(heading)).toBe("Approval review");
+    expect(notices[0].props["aria-labelledby"]).toBe(heading.props.id);
+    expect(text(notices[0].findByType("p"))).toBe(NOTICE);
+  });
+
+  it("a run WITH a review record never shows the 'not available' notice", async () => {
+    // Saved-synthesis shape (renders in this harness) that keeps its governance record.
+    // body() sets team.review to null; give it the route's DTO for an unreviewed governance record (presentReview shape).
+    const b = await body({ ...fullTeamRunData({ question: QUESTION }), adaptiveOutput: undefined, legacyAdaptiveOutput: undefined });
+    b.team.review = { humanReviewStatus: "unreviewed", conditions: null, decidedVia: null, decisionReceipt: null };
+    const r = await renderTeam(b);
+    expect(text(r)).toContain("Unified Answer");
+    expect(byId(r, "approval-not-available-notice")).toHaveLength(0);
+  });
+
+  it("a denied reader sees neither the notice nor any review state", async () => {
+    const r = await renderTeam({ ok: false, errorCode: "not_found" }, 404);
+    expect(byId(r, "approval-not-available-notice")).toHaveLength(0);
+    expect(text(r)).not.toContain("review record");
+  });
+});
