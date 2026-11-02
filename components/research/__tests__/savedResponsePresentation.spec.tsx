@@ -31,6 +31,8 @@ import { createElement } from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import TeamResearchDetailShell from "@/components/workspace/projects/TeamResearchDetailShell";
 import PersistedResearchResultView from "@/components/research/PersistedResearchResultView";
+import PersonalResearchDetailShell from "@/components/workspace/PersonalResearchDetailShell";
+import { WorkspaceRunCard } from "@/components/workspace/WorkspaceRunCard";
 import { buildRunReadPayload, type RunReadViewerRole } from "@/lib/runs/runReadPayload";
 import { interpretPersistedRunReadPayload } from "@/lib/research/persistedRunPresentation";
 import { FIXTURE_PROJECT_ID, FIXTURE_RUN_ID, FIXTURE_WORKSPACE_ID, fullTeamRunData } from "@/lib/runs/__tests__/runReadFixtures";
@@ -150,8 +152,8 @@ function expectReadableReport(r: TestRenderer.ReactTestRenderer) {
     // The exact saved text stays available, collapsed.
     const details = inst.findAll((n) => n.type === "details");
     expect(details).toHaveLength(1);
-    expect(details[0].props.hidden).toBeUndefined();
-    expect(text(details[0].findByType("summary"))).toBe("Show the saved text exactly as returned");
+    expect(details[0].props.open).toBeFalsy(); // collapsed by default
+    expect(text(details[0].findByType("summary"))).toBe("Show the saved text exactly as stored");
     // Byte-for-byte the saved text: ChatGPT saved bare JSON, Claude saved a fenced block.
     expect(text(details[0].findByType("pre"))).toBe(modelId === "chatgpt" ? JSON.stringify(a) : fenced(a));
   }
@@ -214,6 +216,49 @@ describe("Individual research: the same shared view", () => {
   it("the same document renders the same readable report", async () => {
     expectReadableReport(await renderIndividual(historicalRun()));
   });
+
+  it("the Individual page (real shell) shows the question once as its heading, and the readable report", async () => {
+    const p = await buildRunReadPayload({ runId: FIXTURE_RUN_ID, data: historicalRun(), viewerRole: "owner", mayReadDecisionContent: true, resolveReviewRouting: async () => "not_configured" });
+    mockedAuthedFetch.mockResolvedValue({ ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(p)) });
+    const r = await settle(createElement(PersonalResearchDetailShell, { runId: FIXTURE_RUN_ID }));
+    const h1 = r.root.findAll((n) => n.type === "h1");
+    expect(h1.map((h) => text(h))).toEqual([QUESTION]);
+    expect(text(r)).not.toContain("Run the panel to generate");
+    expectReadableReport(r);
+  });
+
+  it("the Individual workspace list card shows the cleaned question", async () => {
+    const item = { id: "run-1", at: "2026-01-01T00:00:00.000Z", question: POLLUTED, selectedModels: [], status: "complete", modelsOk: 4, modelsTotal: 5 } as never;
+    const r = await settle(createElement("ul", null, createElement(WorkspaceRunCard, { item })));
+    expect(text(r)).toContain(QUESTION);
+    expect(text(r)).not.toContain("Run the panel to generate");
+  });
+});
+
+describe("only one model responded (review M1): the single-response view is readable too", () => {
+  const ONE_OF_FOUR: [string, string, string][] = [
+    ["chatgpt", "ok", fenced(genericAnswer("ChatGPT"))],
+    ["claude", "error", ""],
+    ["grok", "timeout", ""],
+    ["gemini", "error", "Gemini request failed. Please try again."],
+  ];
+  for (const surface of ["Team", "Individual"] as const) {
+    it(`${surface}: readable sections, saved text kept, failures read "did not respond", read-only`, async () => {
+      const r = surface === "Team" ? await renderTeam(await body(historicalRun(ONE_OF_FOUR))) : await renderIndividual(historicalRun(ONE_OF_FOUR));
+      const one = byId(r, "single-model-response");
+      expect(one.map((n) => n.props["data-model-id"])).toEqual(["chatgpt"]);
+      const visible = text(one[0].findAll((n) => n.props["data-testid"] === "saved-response-structured")[0]);
+      const a = genericAnswer("ChatGPT");
+      for (const v of [a.summary, a.keyClaims[0].claim, a.keyClaims[0].evidence, a.uncertainties[0], a.followUps[0], a.camps[0].position]) expect(visible).toContain(v);
+      expect(visible).not.toMatch(/[{}]|```/);
+      const all = text(r);
+      expect(all).toMatch(/Claude[^\n]*: did not respond/);
+      // The saved read reports every non-response as "failed" (its public status), so a stored timeout also reads "did not respond".
+      expect(all).toMatch(/Failed ModelsClaude[^:]*: did not respondGrok[^:]*: did not respondGemini[^:]*: did not respond/);
+      expect(all).not.toMatch(/: failed|: timeout|incompatible format|Gemini request failed|Re-run Same Panel/);
+      expectNoWriteOrModelCall();
+    });
+  }
 });
 
 describe("runs WITH persisted analysis are unaffected", () => {
