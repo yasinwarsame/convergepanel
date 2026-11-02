@@ -144,6 +144,7 @@ describe("anything outside the exact shape keeps the generic layout, every value
     ["no metadata at all", { id: "c9", claim: "Bare claim." }, ["Bare claim.", "c9"]],
     ["a camp with an extra field", { ...CLAIM, camps: [{ label: "L", position: "P", models: ["x"] }] }, ["Models"]],
     ["camps that are not a list", { ...CLAIM, camps: "a camp" }, ["a camp"]],
+    ["null camps", { ...CLAIM, camps: null }, [CLAIM.claim, "majority_view"]],
   ])("%s", (_k, claim, expected) => {
     const r = render({ keyClaims: [claim] });
     expect(byId(r, "structured-claim")).toHaveLength(0);
