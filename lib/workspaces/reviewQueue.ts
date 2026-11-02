@@ -662,6 +662,8 @@ async function scanStatusViewMerged(args: {
       }
       const head = heads.reduce((a, b) => (compareMergedQueueOrder(a.buffer[0].pos, b.buffer[0].pos) <= 0 ? a : b));
       const next = head.buffer[0];
+      // Defensive (mutation-tested as equivalent): every non-exhausted stream was refilled above, so its buffer is
+      // non-empty and `next` (the minimum head) is never past the frontier. Kept so a future loop change fails safe.
       if (frontier !== null && compareMergedQueueOrder(next.pos, frontier) > 0) {
         // Cannot consume past a stream that has not fetched this far: refill that stream (its buffer must be empty).
         if (streams.some((st) => !st.exhausted && st.buffer.length === 0)) continue;
@@ -671,6 +673,8 @@ async function scanStatusViewMerged(args: {
       pos = next.pos; // consumed
       const data = next.doc.data();
       const revalidated = revalidateRun(next.doc.id, args.workspaceId, data);
+      // Defensive (mutation-tested as equivalent): revalidateRun already drops any run whose records disagree with the
+      // stream that fetched it (both records, or a malformed governed record beside a report review).
       const kindMatches = revalidated && ((head.name === "report_review") === (revalidated.reportReview !== undefined));
       if (revalidated && kindMatches && spec.statuses.includes(revalidated.humanReview.status)) {
         const rawAssignment = assignmentsByRunId.get(next.doc.id);
