@@ -1,128 +1,145 @@
-# Order C: project-level approvers (design only)
+# Order C: project-level approvers (design only, rev 2)
 
-**Status:** DESIGN. Implementation is NOT authorized (owner, 2026-11-02).
+**Status:** DESIGN. Implementation is NOT authorized.
 
 **Baseline:** main `900aec72`.
 
-**Owner target:** an explicitly assigned project reviewer finds that project's outstanding approval work under Approval Queue → Assigned to me. Project assignees (responsibility) never become approvers.
+**Rev 2** applies the owner rulings D-C1 to D-C5 (2026-11-02). Open decisions are in §9.
 
 ## 1. Today
 
 - `projects/{id}.assigneeUids` records responsibility only.
-- An approval assignment is per research item: `runs/{id}/humanReviewAssignment/current`, written by `putWorkspaceReviewAssignment`, which requires `reviews.manage` and `research.read`. The assignee must pass `isValidAssignmentTarget`: active member, same workspace, `research.read` and `reviews.submit`, and not the creator.
-- The queue's Assigned to me tab reads only those assignment documents.
-- There is no project-level reviewer concept.
+- An approval assignment is per research item, `runs/{id}/humanReviewAssignment/current`, written by `putWorkspaceReviewAssignment`:
+  - the caller needs `reviews.manage` and `research.read`;
+  - the assignee must pass `isValidAssignmentTarget` (active member, same workspace, `research.read` and `reviews.submit`, not the creator).
+- The queue's Assigned to me view reads only these documents.
+- There is no project-level reviewer.
 
-## 2. Recommended model: project default reviewer, materialized as ordinary assignments
+## 2. Model: one designated project reviewer, applied on explicit submission
 
-**Data:** `projects/{id}.reviewerUid: string | null`. This is one default reviewer per project, stored separately from `assigneeUids`.
+### D-C1: one reviewer
 
-**Set by:** `POST /projects/{P}/reviewer`.
-- Requires `reviews.manage` and `projects.read`.
-- The target must pass the same review-eligibility rule, without the creator check, which is run-specific.
-- Uses optimistic concurrency on the project's `updateTime`.
-- Writes a workspace audit event, `workspace_project_reviewer_changed`.
+`projects/{id}.reviewerUid: string | null`, stored separately from `assigneeUids`.
 
-**How it reaches the queue: materialization, not a new query.**
+To allow more reviewers later without a schema break:
+- every reader goes through one accessor, `projectDefaultReviewers(project): string[]`, which today returns `[reviewerUid]` or `[]`;
+- audit events carry `reviewerUids: string[]`.
 
-When research in project P becomes reviewable and has no research-specific assignment, the system writes an ordinary `humanReviewAssignment/current` for P's reviewer. It does this in the same transaction and with the same history and audit as a manual assignment. The triggers are:
-- a governance record or `reportReview` record is created (Order B);
-- research is filed into P;
-- research is resubmitted.
+### D-C5: who configures it
 
-Each assignment records `source: "project_default"`.
+`POST /api/workspaces/{W}/projects/{P}/reviewer`:
+- requires an active membership and `reviews.manage`, which today means Owner and Admin only;
+- requires `projects.read`;
+- body is exactly `{ reviewerUid: string | null, expectedUpdateTime }`;
+- uses optimistic concurrency on the project's `updateTime`.
 
-The only exception is self-review. If the project reviewer created the research, nothing is assigned. The research shows as "Unassigned" in Needs review for a manager to assign, and the reason is logged.
+The target must:
+- be an active member of W;
+- hold `research.read` and `reviews.submit` (the ordinary review-eligibility capabilities);
+- have no run-specific self-review check here (that is applied per run in §3).
 
-### Why materialize
+The route writes the audit event `workspace_project_reviewer_changed`, carrying `projectId`, `previousReviewerUids` and `reviewerUids`.
 
-- The Approval Queue, its indexes, eligibility checks, pagination, counts and decision routes stay **unchanged**.
-- Every review is assigned to exactly one person. There is no duplication and no second "derived" path to secure.
-- The audit trail shows who was assigned and why.
-- This is least privilege: the project reviewer can review only what was actually assigned, and only while eligible. The existing stale-assignee rule already hides an assignment after the reviewer loses eligibility.
+### D-C2: when it applies
 
-### Rejected alternative: query-time derivation
+The project reviewer becomes the default reviewer only when research in the project is **explicitly submitted for approval**. Nothing is submitted silently.
 
-"Assigned to me" would also list every reviewable research item in projects where I am the reviewer.
+| Research type | Explicit submission event |
+|---|---|
+| Report review (Order B) | `POST /runs/{R}/report-review` |
+| Governed, Milestone-2 | A new explicit action, **"Request approval"**, at `POST /runs/{R}/request-approval`. It needs `research.organize` and a reviewable governance record. It changes no governance status; it only applies the project default. |
 
-- It needs a new query, new indexes, union pagination and dedupe against explicit assignments.
-- It creates a second authority path.
-- Precedence becomes implicit, and audit is weak because nothing records that the person was assigned.
+Milestone-2 research keeps its existing behaviour: it is already listed in Needs review, and managers can still assign reviewers manually as today. See D-C6 for the alternative.
 
-## 3. Precedence and lifecycle
+## 3. Materialization rule
+
+Within the submission transaction:
+
+1. Read the project and its `reviewerUid`, plus the run's `humanReviewAssignment/current`.
+2. If an assignment with a reviewer already exists, **do nothing**. Explicit assignments override project defaults.
+3. Otherwise, evaluate `isValidAssignmentTarget` for `reviewerUid` against this run. That covers active membership, same workspace, capabilities, and **no self-review** (`reviewerUid` must not be the run's creator).
+   - **Eligible:** write an ordinary assignment through `buildNextAdaptiveHumanReviewAssignment` with `source: "project_default"` and the existing history entry, plus the audit event `workspace_research_reviewer_defaulted`.
+   - **Not eligible, or no project reviewer:** write nothing. The item shows as Unassigned in Needs review, and the reason is logged without identities.
+
+**Results:**
+- one assignment document per run, so no duplicate queue entries;
+- the existing queue, indexes, eligibility rules, decision routes and audit are reused unchanged;
+- no new authority: the default reviewer gets exactly what a manual assignment would give.
+
+`source` is added only to new writes. A missing value reads as `manual`.
+
+## 4. Lifecycle (D-C3, D-C4, ruled)
 
 | Event | Behaviour |
 |---|---|
-| Research becomes reviewable in P, no assignment exists | Assign to P's reviewer (`source: project_default`). |
-| A manual research-specific assignment exists | It always wins. A project default never overwrites a manual assignment. |
-| A manager reassigns manually | Normal reassignment. `source` becomes `manual`. |
-| P's reviewer changes from A to B | **Recommended:** reassign only *pending, project-default* assignments from A to B, in bounded batches with audit events (D-C3). Manual assignments are untouched. |
-| P's reviewer is cleared | Pending project-default assignments are cleared and return to Unassigned in Needs review. Nothing is deleted from history. |
-| Reviewer removed from workspace, or loses `reviews.submit` | The existing stale rule hides the work from their Assigned to me. It shows "Needs reassignment" to managers. P's `reviewerUid` shows as stale in the project UI. |
-| Review completed (approved, rejected, changes requested) | Leaves the pending queue by status, exactly as today. |
-| Research moved out of P | The assignment stays as it is (it was a real assignment). Optional: clear it if `source` is still `project_default` (D-C4). |
-| Cross-workspace | Impossible. The reviewer must be a member of P's workspace, and the assignment carries the run's `workspaceId`. |
+| Project reviewer changes A → B (D-C3) | Reassign only assignments that are pending, have `source: "project_default"`, and belong to research in this project. Re-check each against B (eligibility, self-review). If B is ineligible for a run, clear that default assignment so it becomes Unassigned. Never touch manual assignments, completed decisions or history. Work in bounded transactional batches, with one audit event per item. The confirm dialog shows a dry-run count. |
+| Project reviewer cleared | The same batch clears pending project-default assignments, which become Unassigned. History is kept. |
+| Research moves P → Q (D-C4) | Inside `associateTeamRunWithProject`'s existing transaction: if the current assignment is pending with `source: "project_default"`, clear it, then apply Q's reviewer under §3 (with eligibility and self-review checks) and audit both steps. Manual assignments stay under existing rules. |
+| Assigned reviewer loses access, is removed, or changes role | The existing stale rule hides it from their Assigned to me. Managers see "Needs reassignment". The project's `reviewerUid` shows as stale in the project UI and is never applied to new submissions while ineligible. |
+| Review completed | Leaves pending views by status, as today. The assignment and its history remain. |
+| Cross-workspace | Impossible. The reviewer and the run must share `workspaceId`, which is checked in every transaction. |
 
-## 4. Automatic or explicit submission (owner question)
+## 5. Rules carried through
 
-**Recommended: automatic for research that is already reviewable.**
+- No self-review.
+- No duplicate queue entries.
+- No escalation through assignment.
+- Explicit assignments override project defaults.
+- Existing approval records and decisions are preserved.
+- Every write is audited.
 
-- Today, Milestone-2 runs become reviewable automatically at creation. If Order B ships with explicit "Submit for approval", report-review runs become reviewable only when submitted.
-- A project default is applied at the moment research becomes reviewable, however that happens. So the project reviewer never sees unsubmitted Generic research, which keeps things least-privilege, while governed research reaches them without anyone having to remember to assign it.
+`assigneeUids` (responsibility) is never read by any part of this design. A structural test enforces that.
 
-**Alternative:** apply the project default only when a manager clicks "Request approval". This is more conservative but reproduces today's "forgot to assign" failure.
-
-## 5. Changes, by component (implementation phase only)
+## 6. Changes, by component (implementation phase only)
 
 | Component | Change |
 |---|---|
-| `ProjectV1` | Optional `reviewerUid`. The well-formedness check is not tightened. Absent means none. |
-| New route plus UI "Project reviewer" control | Separate from "Manage assignees". Copy states that it assigns approval work. |
-| New `lib/workspaces/applyProjectDefaultReviewer.ts` | Pure decision plus a transactional writer. Reuses `isValidAssignmentTarget` and the assignment builders. |
-| Call sites | Governance record initialization (`runPanelExecution`); Order B submit; `associateTeamRunWithProject`; resubmit. Each is idempotent and skips existing assignments. |
-| Assignment documents | Add `source: "manual" \| "project_default"` to new writes only. A missing value reads as manual. |
-| Unchanged | Queue queries, indexes, decision routes, eligibility rules, `assigneeUids`, `runs.assigneeUid`. |
+| `ProjectV1` | Optional `reviewerUid`. The well-formedness check is not tightened. |
+| `lib/workspaces/projectDefaultReviewer.ts` (new) | Accessor, pure decision function, transactional applier and batch reassigner. |
+| Routes | `POST /projects/{P}/reviewer` (new). `POST /runs/{R}/request-approval` (new, governed research). The Order B submit route calls the applier. |
+| `associateTeamRunWithProject` | Adds the D-C4 re-evaluation inside its existing transaction. |
+| Assignment documents | Optional `source`. |
+| UI | A "Project reviewer" control in project settings, separate from Manage assignees, with copy stating it assigns approval work. A "Request approval" button on governed research. |
+| Unchanged | Queue queries and indexes, decision routes, eligibility functions, capabilities, `assigneeUids`, `runs.assigneeUid`. |
 
-## 6. Tests required (implementation phase)
+## 7. Tests required (implementation phase)
 
-1. A project default creates an ordinary assignment, and it appears in Assigned to me.
-2. Project assignees (responsibility) never receive review work.
-3. A manual assignment wins and is never overwritten.
-4. A reviewer change moves only pending project-default assignments.
-5. A completed review leaves the queue.
-6. The self-review case is skipped and shows as Unassigned.
-7. A removed or ineligible reviewer is hidden (stale rule).
-8. No cross-workspace effects.
-9. Pagination and counts are unchanged.
-10. Projects → Assigned to me (#278) is unchanged.
-11. Audit events fire for every materialized assignment and every reviewer change.
+1. Explicit submission with a project reviewer creates one ordinary assignment, and it appears in Assigned to me.
+2. Without submission, nothing is assigned.
+3. Project assignees never receive review work.
+4. An existing manual assignment is never overwritten.
+5. A reviewer change moves only pending project-default items, with eligibility and self-review re-checked.
+6. A completed decision is untouched.
+7. A move P → Q clears the P default and applies the Q default.
+8. The self-review case is skipped and the item shows as Unassigned.
+9. A removed or ineligible reviewer is hidden (stale rule) and not applied to new submissions.
+10. No cross-workspace effects.
+11. Queue pagination and counts are unchanged.
+12. Projects → Assigned to me (#278) is unchanged.
+13. Audit events fire for each write.
+14. Concealed denials for every new route.
 
-## 7. Risks and rollback
+## 8. Risks and rollback
 
 | Risk | Mitigation |
 |---|---|
-| Unexpected bulk reassignment on reviewer change | Bounded batches, a dry-run count shown in the confirm dialog, audit per item, D-C3 gate. |
-| Hidden authority | None added. Assignment still requires an eligible reviewer, and the reviewer still needs `reviews.submit`. |
-| Partial failures | A materialization failure leaves the item Unassigned, which is today's behaviour, and logs it. It never blocks run creation. |
-| Rollback | Behind the flag `PROJECT_DEFAULT_REVIEWER_ENABLED`. When off, no new materializations happen, and existing assignments remain valid ordinary assignments. |
+| Bulk reassignment surprises | Dry-run count, bounded batches, per-item audit. Only pending project-default items are affected. |
+| A partial batch failure | Each batch is its own transaction. A retry resumes the work and is idempotent, because it only touches items whose `source` is still `project_default` with the old reviewer. |
+| Hidden authority | None. Every assignment passes the existing eligibility function, and the reviewer still needs `reviews.submit`. |
+| Rollback | Server flag `PROJECT_DEFAULT_REVIEWER_ENABLED`. When off, the routes return a concealed 404, no new materialization happens, and existing assignments remain ordinary valid assignments. |
 
-## 8. Sequencing
+## 9. Remaining owner decisions
 
-- C depends on nothing in B for governed (Milestone-2) research.
-- C becomes fully useful for Generic research once B ships.
+- **D-C6:** for governed (Milestone-2) research, require the explicit "Request approval" action to apply the project default (recommended, consistent with D-C2), or apply it automatically at governance-record creation. The latter is not "silent submission", because governed research is already reviewable, but it is an automatic assignment.
+- **D-C7:** who may press "Request approval" on governed research. Proposed: `research.organize` (Owner, Admin, Member), the same as Order B submission.
 
-Recommended order:
-1. C0: decisions.
-2. C1: data model, route and audit (dark).
-3. C2: materialization at governance-record creation (dark).
-4. C3: UI.
-5. B1 to B3 (with C's hook added to Order B's submit).
-6. Canary, then enable.
+## 10. Sequencing
 
-## 9. Owner decisions
+The order is B1 and C1 together, then B2 and C2, then B3 and C3, as follows:
 
-- D-C1: one default reviewer per project (recommended), or several. Several would need round-robin or "first to claim", which adds complexity.
-- D-C2: automatic application when research becomes reviewable (recommended), or explicit "Request approval".
-- D-C3: on reviewer change, move pending project-default assignments (recommended) or leave them.
-- D-C4: on research moved out of the project, keep (recommended) or clear project-default assignments.
-- D-C5: who may set the project reviewer: `reviews.manage` (recommended: owner and admin).
+1. **C1:** model, reviewer route and audit (dark).
+2. **B1:** submission (dark).
+3. **C2:** applier wired into B's submit route and "Request approval", plus the D-C3 and D-C4 lifecycle (dark), with tests and an independent review.
+4. **C3:** UI.
+
+Then canary on one workspace and enable alongside B3.

@@ -1,154 +1,186 @@
-# Order B: human approval for Generic and other non-Milestone-2 research (design only)
+# Order B: human approval for Generic and other non-Milestone-2 research (design only, rev 2)
 
-**Status:** DESIGN. Implementation is NOT authorized (owner, 2026-11-02).
+**Status:** DESIGN. Implementation is NOT authorized.
 
 **Baseline:** main `900aec72`.
 
-**Owner target:** every research type can be submitted for human approval, Generic included. Approval must not depend on whether the AI classifier succeeded. An approval must state exactly what it certifies.
+**Rev 2** applies the owner rulings D-B1 to D-B5 (2026-11-02). The open decisions are in §10.
 
 ## 1. Today
 
-### Which runs have a review record
+- **Which runs get a review record.** A run gets `runs/{id}.governanceRecord` (`GovernanceRecordV1`) only when it produced a Milestone-2 envelope, which covers 9 result types. The record is created by `initializeAdaptiveGovernanceRecord`, inside `if (adaptiveOutput.persistedOutput)` in `lib/runPanelExecution.ts`. Generic and the 9 other legacy-active types never get one.
+- **Shape limits.** `GovernanceRecordV1.schemaId` is limited to the Milestone-2 ids. Its `decisionReceipt` is required and is built from the adaptive analysis.
+- **Shared readers.** `parseGovernanceRecord` is shared by:
+  - the Approval Queue and the review page;
+  - the decision, override, resubmit and panel routes;
+  - the Team review summary;
+  - exports, Decision Support wording and the Order 6 surfaces.
+- **Decision UI.** The reviewer decision UI requires a usable receipt.
+- **Consequence.** A run without that record cannot be assigned a reviewer, and never appears in Needs review or Assigned to me.
 
-- A run gets `runs/{id}.governanceRecord` (`GovernanceRecordV1`) only when it produced a Milestone-2 envelope. That covers 9 result types. Generic and the other 9 legacy-active types never get one.
-- The record is created by `initializeAdaptiveGovernanceRecord` inside `if (adaptiveOutput.persistedOutput)` in `lib/runPanelExecution.ts`.
-- `GovernanceRecordV1.schemaId` is limited to the Milestone-2 ids.
-- `decisionReceipt` (`AdaptiveDecisionReceipt`: conclusion, basis, assumptions, uncertainties, limitations, sources, sourceBacked, humanReviewNeeded) is required. It is built from the adaptive analysis.
+## 2. What approval means (D-B1, ruled)
 
-### Who reads the record
+A report-review approval means:
 
-`parseGovernanceRecord` is shared by:
-- the Approval Queue;
-- the review page (`reviewContext`);
-- the decision, override, resubmit and panel routes;
-- the Team detail review summary;
-- exports;
-- Decision Support wording;
-- the Order 6 surfaces.
-
-The reviewer decision UI also requires a usable decision receipt (`REVIEW_DECISION_UI_REQUIRES_DECISION_RECEIPT`).
-
-### Consequence
-
-A run without that record:
-- cannot be assigned a reviewer, because the review page returns not-found;
-- never appears in Needs review or in Assigned to me.
-
-## 2. What an approval certifies (proposed wording, owner to confirm)
-
-A **report review** approval certifies:
-
-> "A named reviewer read this research report as saved, including its stated limitations, and found it acceptable for [stated purpose], on [date], [with conditions]."
+> The report was reviewed and found acceptable for an explicitly stated purpose.
 
 It does **not** certify:
-- that the report's factual claims are true;
-- that a model's confidence is warranted;
-- that missing analysis exists;
-- that sources were checked;
-- that the panel agreed.
+- factual correctness;
+- claim verification;
+- model confidence;
+- that missing AI analysis exists.
 
-These rules hold everywhere the approval appears:
-- the review page;
-- the Team detail summary;
-- the queue row;
-- exports;
-- the audit trail.
+**Approval purpose.** The purpose is structured, with an optional short explanation of at most 280 characters, shown as plain text. Proposed values (owner to confirm, §10):
 
-## 3. Recommended design: a separate, versioned "report review" record
+| Value | Shown as |
+|---|---|
+| `internal_discussion` | Internal discussion |
+| `team_decision_input` | Input to a team decision |
+| `external_sharing` | Sharing outside the team |
+| `record_keeping` | Record keeping |
+| `other` | Other (explanation required) |
 
-**Do not widen `GovernanceRecordV1`.** Widening it would:
-- change what every existing parser and export accepts;
-- risk altering existing governance classifications and Order 6 surfaces;
-- force a fabricated `decisionReceipt`, which the owner prohibits.
+**The purpose cannot redefine approval.**
+- It is stored and displayed only as context.
+- No code path branches on it for authorization, governance status or export content.
+- The disclaimer is fixed text. It is rendered next to every approval and pinned by tests: the review page, the Team summary, queue rows, exports and the audit trail.
+- The explanation can never replace or suppress the disclaimer.
 
-Instead, add `runs/{id}.reportReview` (`ReportReviewRecordV1`):
+## 3. Data model: a separate record (D-B5, ruled)
+
+The new record is `runs/{id}.reportReview` (`ReportReviewRecordV1`). It never touches or widens `GovernanceRecordV1`.
 
 ```ts
 {
   version: 1,
   kind: "report_review",
-  // Scope disclosure, copied from what the saved run actually has. Never synthesized.
-  analysis: {
-    schemaId: string | null,              // e.g. "generic"; null if unknown
+  // What the saved run actually has, copied at submission. Never synthesized, never upgraded later.
+  scope: {
+    schemaId: string | null,                    // e.g. "generic"; null when not recorded
     unifiedAnswer: "present" | "absent",
     synthesis: "present" | "absent",
     consensus: "present" | "absent",
     respondedModels: number,
     requestedModels: number,
   },
-  humanReview: { /* same shape and statuses as GovernanceRecordV1.humanReview */ },
+  purpose: { code: "internal_discussion" | "team_decision_input" | "external_sharing" | "record_keeping" | "other", note: string | null },
+  humanReview: { /* same statuses and fields as GovernanceRecordV1.humanReview */ },
   submittedAt: string, submittedByUserId: string,
   createdAt: string, updatedAt: string,
 }
 ```
 
-Properties:
-- **Mutually exclusive with `governanceRecord`.** A run has one or the other, never both. Milestone-2 runs are untouched.
-- **No receipt.** There is no `decisionReceipt`, conclusion, confidence, consensus or citation. The review page shows the saved report itself, with its existing missing-analysis notices.
-- **Explicit submission.** The record is created by an explicit **"Submit for approval"** action (`research.organize`, or the creator with `research.create`). It is not created automatically at run time. This keeps new runs unchanged and avoids an unbounded backlog of unreviewed records.
-- **Same assignment path.** It reuses the existing assignment subdocument `humanReviewAssignment/current`, the same eligibility rule (`isValidAssignmentTarget`: active member, same workspace, `research.read` and `reviews.submit`, no self-review), the same history and the same audit events.
+**Invariants:**
+- **Exclusive with `governanceRecord`.** A run has at most one of the two. Submission refuses a run that already has a `governanceRecord`. Run completion for Milestone-2 types refuses to create a `governanceRecord` when a `reportReview` exists, which can only happen if the run was unfinished; it fails closed and logs.
+- **No receipt and no fabricated analysis.** There is no conclusion, confidence, consensus, citation or evidence. `scope` is copied from saved fields only, and the review page shows the saved report with its existing missing-analysis notices.
+- **Canonical status checks.** A new parser, `parseReportReviewRecord`, sits next to `parseGovernanceRecord`. It is strict, fails closed, and reuses `isHumanReviewStatusReviewable` for the status vocabulary.
 
-## 4. Changes, by component (implementation phase only)
+## 4. Submission (D-B2, D-B3, ruled)
 
-| Component | Change |
+**Explicit only.** `POST /api/workspaces/{W}/runs/{R}/report-review`. New research is never submitted automatically.
+
+**Exact capability mapping (D-B3):**
+
+| Requirement | Rule |
 |---|---|
-| New `lib/governance/reportReview.ts` | Builder, parser and validator for `ReportReviewRecordV1`. Parse failures fail closed. |
-| New route `POST /runs/{R}/report-review` (submit) | Team access with `research.organize`. The run is complete and has no `governanceRecord` and no `reportReview`. Creates the record (`unreviewed`) and writes an audit event. Idempotent. |
-| `reviewContext.ts` | Accept either record. Returns `kind: "governance" \| "report_review"`. |
-| `reviewQueue.ts` (`revalidateRun`, status views) | Accept a reviewable `reportReview` status. Status views need `reportReview.humanReview.status` queries plus 2 new indexes, or a shared top-level `reviewStatus` mirror (§6). |
-| Decision route | For `report_review`: the same statuses, comment and conditions. No receipt requirement. Wording from §2. |
-| UI | Review page shows a "Report review" header and the §2 disclaimer. Team detail shows "Submit for approval" in place of the Order A notice. Queue rows show a "Report review" label. |
-| Exports | Add a "Report review" section with status, reviewer, date, conditions and the §2 disclaimer. Milestone-2 export sections unchanged. |
-| Unchanged | `GovernanceRecordV1`, `parseGovernanceRecord`, Decision Support, Order 6, automated governance, Milestone-2 flows. |
+| Identity | Authenticated caller with an active membership in W, through `authorizeTeamWorkspaceMutationInTransaction`. |
+| Capability | `research.read` AND `research.organize`. Today that is Owner, Admin and Member. Reviewer and Viewer cannot submit. |
+| Research access | The run passes `resolveWorkspaceReviewTarget` for W: same workspace, a valid creator, a valid project reference. |
+| Run state | Complete, with saved model output. No `governanceRecord`, no `reportReview`. No open review panel. |
+| Body | Exactly `{ purpose: { code, note } }`, validated. |
+| Effect | One transaction creates the record (`humanReview.status: "unreviewed"`) and writes an audit event, `workspace_report_review_submitted`. If Order C ships, the project default reviewer is applied in the same transaction. |
+| Concealment | Every denial maps to the existing concealed 404 or 403 shapes. |
 
-## 5. Historical runs (optional, audited backfill)
+Read-only access never confers submission. Being the run's creator adds nothing beyond `research.organize`.
 
-- **Default: no backfill.** Older runs can be submitted one at a time through the same "Submit for approval" action. That action creates the record on demand and leaves no other trace in the run.
-- **If a bulk backfill is ever wanted:**
-  - an admin-only, dry-run-first script;
-  - per workspace;
-  - creates only `unreviewed` `reportReview` records;
-  - never touches runs that have `governanceRecord`;
-  - writes an audit event per run;
-  - reversible by deleting records that are still `unreviewed` with no assignment.
+## 5. Queue: bounded combined query (D-B5, ruled)
 
-  This would be a migration and needs separate owner approval.
+### Assigned to me and Overdue
 
-## 6. Queue query options
+No query change. Both read the shared `humanReviewAssignment/current` subdocument. Only `revalidateRun` changes, so that it accepts a reviewable `reportReview` as well as a `governanceRecord`. Each run carries at most one record, so it is listed at most once.
 
-**(a) Recommended: a top-level mirror field `reviewStatus`.**
-- Written on every record create and every decision.
-- One status query covers both kinds.
-- Needs one new index, `runs(workspaceId, reviewStatus, createdAt)`.
-- Historical Milestone-2 runs lack the mirror until touched, so either Needs review keeps its current query and unions a second `reportReview` query, or a mirror backfill is run (a migration).
+### Needs review, Changes requested, Recently approved
 
-**(b) Two queries unioned in memory.**
-- No mirror field.
-- Needs pagination merge logic (as in #278) and 2 new indexes.
+These become two `runs` queries over the same collection, with mutually exclusive predicates and an **identical total order**:
 
-**Recommendation:** (b) for the first release (no migration), with (a) considered later.
+- Q1: `workspaceId == W` AND `governanceRecord.humanReview.status in S`, ordered by `createdAt desc`, then `__name__ desc` (unchanged).
+- Q2: `workspaceId == W` AND `reportReview.humanReview.status in S`, with the same ordering.
 
-## 7. Risks and rollback
+### Why pagination stays complete and stable
+
+1. The cursor is the last *emitted* `(createdAt, docId)`, which is the existing `ReviewQueueCursor` format.
+2. Both queries `startAfter` that same position and fetch `limit + 1`.
+3. The results are merged by the same comparator, and the first `limit` are emitted.
+4. `hasMore` is true if either stream has an unemitted row.
+
+Because both streams are subsets of one collection under one complete order, and no run can match both predicates (the §3 exclusivity invariant):
+- every row is emitted exactly once;
+- no row is skipped between pages.
+
+The behaviour under concurrent writes is identical to today's single query.
+
+### Cost and indexes
+
+- Cost: two bounded reads per page.
+- Indexes: two new composite indexes on `runs` (`workspaceId`, `reportReview.humanReview.status`, `createdAt desc`), with and without `projectId`.
+- Shared status field: none.
+- Historical records: untouched.
+
+If testing finds a case where (1) to (4) cannot hold, implementation stops and returns to the owner, as ruled.
+
+### Recently approved
+
+Today this view orders by `governanceRecord.humanReview.reviewedAt`. Q2 orders by `reportReview.humanReview.reviewedAt`, with the same merge rule. The cursor format already carries its sort kind.
+
+## 6. Review, decision and display
+
+- **`reviewContext`:** returns `kind: "governance" | "report_review"`. For a report review it returns `scope`, `purpose` and `humanReview`.
+- **Decision route:**
+  - The same statuses, comment and conditions as today.
+  - It requires the same reviewer eligibility as today: `isValidAssignmentTarget`, no self-review.
+  - No receipt requirement.
+  - The §2 disclaimer is stored nowhere, because it is fixed text, but it is rendered everywhere.
+- **Display:**
+  - The Team detail page shows "Submit for approval" (for callers with `research.organize`) in place of the #281 notice.
+  - After submission it shows the report-review status, purpose and disclaimer.
+  - Queue rows carry a "Report review" label.
+- **Exports:** a new "Report review" section with status, reviewer, date, purpose, conditions and the disclaimer. Milestone-2 export sections are unchanged.
+
+## 7. Historical research (D-B4, ruled)
+
+- **No automatic backfill.** Older research is unchanged.
+- **Opt-in path** (needs separate authorization): the same per-run "Submit for approval" action works on older runs. It is audited, explicit, and touches only the one run.
+- Any bulk path would be a separately reviewed migration.
+
+## 8. Unchanged
+
+- `GovernanceRecordV1` and `parseGovernanceRecord`.
+- Automated governance and decision receipts.
+- Decision Support and Order 6.
+- Milestone-2 flows.
+- Reviewer eligibility, roles and capabilities: no new capability.
+- Concealment.
+- `assigneeUids` and `runs.assigneeUid`.
+
+## 9. Risks, mitigations and rollback
 
 | Risk | Mitigation |
 |---|---|
-| Approval misread as fact-checking | §2 disclaimer on every surface. Pinned copy tests. Owner-approved wording. |
-| Existing governance changed | Separate record. `GovernanceRecordV1` and its parser untouched. A structural test fails if `reportReview` is ever read by Decision Support or Order 6 code. |
-| Self-review and authority widening | Same eligibility function and capabilities. No new role or capability. |
-| Queue duplication | One assignment subdocument per run. A run has one record kind. |
-| Rollback | Behind a server flag, `REPORT_REVIEW_ENABLED`. When off, routes return not-found, the queue ignores `reportReview`, and records stay in place, inert. |
+| Approval read as fact-checking | Fixed disclaimer on every surface, with pinned tests. The purpose cannot alter it. |
+| A run ends up with both record kinds | Exclusivity checks on both writers, plus a structural test. The queue revalidation treats "both present" as an integrity failure and fails closed. |
+| Pagination defects in the merged view | Property-style test: random interleavings and page sizes give each row exactly once, in order. Mutation testing on the merge comparator and cursor. |
+| Authority widening | Uses existing capabilities only. Reviewer and Viewer cannot submit. Eligibility is unchanged. |
+| New indexes not ready at launch | Indexes are deployed and READY before the flag is enabled. Until then, the second query is off. |
+| Rollback | Server flag `REPORT_REVIEW_ENABLED`. When off, the submit route returns the concealed 404, Q2 is skipped, and `reviewContext` ignores `reportReview`. Records stay in place, inert. |
 
-## 8. Milestones
+## 10. Remaining owner decisions
 
-1. **B0:** owner approves the §2 wording, the explicit-submit model, the no-backfill default and query option (b).
-2. **B1:** record, parser, submit route and audit (dark, behind the flag), with tests.
-3. **B2:** review page, decision route, queue union (dark), with tests. Independent review.
-4. **B3:** UI and exports. Canary on one workspace, then enable.
+- **D-B1a:** confirm the five purpose values and the 280-character note limit.
+- **D-B3a:** confirm that Member (with `research.organize`) may submit, alongside Owner and Admin.
+- **D-B6:** whether a decided report review (approved, rejected or changes requested) can be resubmitted. Proposed: yes, through the existing resubmit semantics, which return it to `pending` with audit.
 
-## 9. Owner decisions
+## 11. Milestones
 
-- D-B1: the approval wording in §2, and whether the "stated purpose" is free text or picked from a list.
-- D-B2: explicit "Submit for approval" (recommended) or automatic creation for every new run.
-- D-B3: who may submit: `research.organize` (recommended) and/or the run's creator.
-- D-B4: no backfill (recommended), or an audited bulk backfill (a migration).
-- D-B5: queue option (b) now (recommended), or (a) with a mirror backfill.
+1. **B1:** record, parser, submit route, audit and exclusivity (dark), with tests.
+2. **B2:** review context, decision route and queue merge (dark), with property tests and an independent review.
+3. **B3:** UI and exports. Indexes deployed. Canary on one workspace, then enable.
