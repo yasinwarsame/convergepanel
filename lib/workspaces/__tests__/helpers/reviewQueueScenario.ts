@@ -175,3 +175,36 @@ export async function pageAll(queue: QueueFn, view: string, uid: string, role: s
   }
   throw new Error("pager did not terminate");
 }
+
+/**
+ * B2 review MINOR-4: a long CONTIGUOUS block of rows that the scan must drop (malformed report reviews), all newer than
+ * every eligible row, so small pages hit the per-page fetch budget (MAX_FETCHES) and must stop with an honest cursor.
+ */
+export async function seedDroppedBlock(db: MinimalDb, count = 40): Promise<string[]> {
+  const ids: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const id = `drop-${String(i).padStart(3, "0")}`;
+    ids.push(id);
+    await db.collection("runs").doc(id).set({ userId: CREATOR, workspaceId: W, projectId: null, question: "d", status: "complete", createdAt: Timestamp.fromMillis(Date.UTC(2027, 0, 1) + i * 1000), reportReview: { version: 1, kind: "report_review", humanReview: { status: "unreviewed" } } });
+  }
+  return ids;
+}
+
+/** Pages to the end and also asserts progress: every page either emits an item or moves the cursor. */
+export async function pageAllWithProgress(queue: QueueFn, view: string, uid: string, role: string, limit: number) {
+  const seen: string[] = [];
+  let cursor: string | null = null;
+  let emptyPages = 0;
+  for (let page = 0; page < 1000; page++) {
+    const r = await queue({ view, uid, role, limit, cursor });
+    for (const it of r.items) {
+      if (seen.includes(it.runId)) throw new Error(`duplicate ${it.runId}`);
+      seen.push(it.runId);
+    }
+    if (r.items.length === 0) emptyPages++;
+    if (!r.hasMore) return { ids: seen, emptyPages };
+    if (!r.nextCursor || r.nextCursor === cursor) throw new Error("no progress");
+    cursor = r.nextCursor;
+  }
+  throw new Error("pager did not terminate");
+}

@@ -41,7 +41,8 @@ A decision requires **all** of the following:
 - A run carrying both records is never listed while Report Review is on.
 - A report review assigned to its submitter shows as `stale`, never `actionable`.
 - Report-review rows carry `recordKind: "report_review"`. Governed rows are byte-identical to before.
-- A failed query returns an explicit 500, never a silently truncated page.
+- A failed query returns an explicit 500, never a silently truncated page. A sort value of an unexpected type (a non-Timestamp `createdAt`, or a non-string `reviewedAt`) also fails explicitly.
+- **Known scope:** `rejected` items, governed or report review, appear in no Approval Queue view, exactly as governed rejections do today.
 
 **Indexes.** Four composite indexes are declared in `firestore.indexes.json`: (`workspaceId`[, `projectId`], `reportReview.humanReview.status`, `createdAt` | `reportReview.humanReview.reviewedAt` desc). They are **not deployed**; deploying them is a precondition for enablement.
 

@@ -37,7 +37,7 @@ import { GET } from "@/app/api/workspaces/[workspaceId]/review-queue/route";
 import { submitReportReview } from "@/lib/workspaces/reportReviewMutations";
 import { decideReportReview } from "@/lib/workspaces/reportReviewDecisionMutation";
 import { putWorkspaceReviewAssignment } from "@/lib/workspaces/workspaceReviewMutations";
-import { buildSeed, seedDb, expectedStatusView, expectedAssignedToMe, pageAll, type QueueFn, type SeedRun, W, OWNER, REVIEWER, SUBMITTER, CREATOR } from "./helpers/reviewQueueScenario";
+import { buildSeed, seedDb, seedDroppedBlock, pageAllWithProgress, expectedStatusView, expectedAssignedToMe, pageAll, type QueueFn, type SeedRun, W, OWNER, REVIEWER, SUBMITTER, CREATOR } from "./helpers/reviewQueueScenario";
 import { Timestamp } from "firebase-admin/firestore";
 
 const maybe = EMULATOR ? describe : describe.skip;
@@ -68,6 +68,17 @@ maybe("REAL Firestore: combined queue completeness and order", () => {
     const { ids } = await pageAll(queue, view, OWNER, "owner", limit);
     expect(ids).toEqual(expectedStatusView(seed, view as never));
   }, 60_000);
+
+  it.each([1, 2])("fetch budget: a long block of dropped rows at limit %i (honest empty pages, complete coverage)", async (limit) => {
+    const dropped = await seedDroppedBlock(db as never, 40);
+    try {
+      const { ids, emptyPages } = await pageAllWithProgress(queue, "needs_review", OWNER, "owner", limit);
+      expect(ids).toEqual(expectedStatusView(seed, "needs_review"));
+      expect(emptyPages).toBeGreaterThan(0);
+    } finally {
+      for (const id of dropped) await db.collection("runs").doc(id).delete();
+    }
+  }, 120_000);
 
   it.each([1, 2, 25])("Assigned to me, limit %i", async (limit) => {
     const { ids } = await pageAll(queue, "assigned_to_me", REVIEWER, "reviewer", limit);

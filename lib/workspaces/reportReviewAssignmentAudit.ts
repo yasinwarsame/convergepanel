@@ -13,11 +13,16 @@
  */
 import { parseReportReviewRecord } from "@/lib/governance/reportReview";
 import { REPORT_REVIEW_EVENTS_COLLECTION } from "./reportReviewCollections";
+import { REPORT_REVIEW_ENABLED } from "./reportReviewRollout";
 
 export type ReportReviewAssignmentContext = { kind: "not_report_review" } | { kind: "report_review"; cycle: number; submitterUid: string } | { kind: "malformed" };
 
 export function reportReviewAssignmentContext(runData: Record<string, unknown>): ReportReviewAssignmentContext {
+  // Dormant while Report Review is OFF: assignment behaviour is then exactly as before B2, whatever the run carries.
+  if (!REPORT_REVIEW_ENABLED) return { kind: "not_report_review" };
   if (runData.reportReview === undefined || runData.reportReview === null) return { kind: "not_report_review" };
+  // A run carrying BOTH records violates the B1 invariant: fail closed, as the decision path and the queue do.
+  if (runData.governanceRecord !== undefined && runData.governanceRecord !== null) return { kind: "malformed" };
   const parsed = parseReportReviewRecord(runData.reportReview);
   if (!parsed.ok) return { kind: "malformed" };
   return { kind: "report_review", cycle: parsed.record.cycle, submitterUid: parsed.record.submittedByUserId };

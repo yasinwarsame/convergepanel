@@ -17,6 +17,7 @@ import { resolveWorkspaceReviewTarget } from "./resolveWorkspaceReviewTarget";
 import { REPORT_REVIEW_CYCLES_COLLECTION } from "./reportReviewCollections";
 import { parseReportReviewRecord, REPORT_REVIEW_DISCLAIMER, type ReportReviewRecordV1 } from "@/lib/governance/reportReview";
 import { evaluateReportReviewDecisionAuthority, type ReportReviewDecisionDenial } from "@/lib/governance/reportReviewDecision";
+import { parseAdaptiveHumanReviewPanel } from "@/lib/governance/adaptiveHumanReviewPanel";
 
 export interface ReportReviewCycleSummary {
   cycle: number;
@@ -33,7 +34,7 @@ export type ReportReviewContextResult =
       record: ReportReviewRecordV1;
       previousCycles: ReportReviewCycleSummary[];
       assignment: { assignedReviewerUserId: string | null; revision: number };
-      viewer: { canDecide: boolean; denial: ReportReviewDecisionDenial | null };
+      viewer: { canDecide: boolean; denial: ReportReviewDecisionDenial | "active_panel" | "panel_unreadable" | null };
       disclaimer: string;
     }
   | { status: "not_found" }
@@ -63,7 +64,14 @@ export async function getReportReviewContext(args: { uid: string; workspaceId: s
     if (!parsed.ok) return { status: "not_found" };
     if (run.governanceRecord !== undefined && run.governanceRecord !== null) return { status: "integrity_violation" };
 
-    const [assignmentSnap, cyclesSnap] = await Promise.all([runRef.collection("humanReviewAssignment").doc("current").get(), runRef.collection(REPORT_REVIEW_CYCLES_COLLECTION).get()]);
+    const [assignmentSnap, cyclesSnap, panelSnap] = await Promise.all([
+      runRef.collection("humanReviewAssignment").doc("current").get(),
+      runRef.collection(REPORT_REVIEW_CYCLES_COLLECTION).get(),
+      runRef.collection("humanReviewPanel").doc("current").get(),
+    ]);
+    // The same panel gate the decision transaction applies (readPanelGate), so the verdict matches the server.
+    const panel = parseAdaptiveHumanReviewPanel(panelSnap.exists ? panelSnap.data() : undefined, { expectedRunId: args.runId });
+    const panelDenial = panel.status === "absent" ? null : panel.status === "valid" ? (panel.panel.status === "open" ? ("active_panel" as const) : null) : ("panel_unreadable" as const);
     const assignment = assignmentSnap.exists ? (assignmentSnap.data() as { assignedReviewerUserId?: unknown; revision?: unknown; cycle?: unknown }) : null;
     const reviewer = { uid: args.uid, workspaceId: access.membership.workspaceId, role: access.membership.role, status: access.membership.status };
     const authority = evaluateReportReviewDecisionAuthority({ reviewer, workspaceId: args.workspaceId, creatorUid: target.creatorUid, record: parsed.record, assignment });
@@ -90,7 +98,7 @@ export async function getReportReviewContext(args: { uid: string; workspaceId: s
       record: parsed.record,
       previousCycles,
       assignment: { assignedReviewerUserId: typeof assignment?.assignedReviewerUserId === "string" ? assignment.assignedReviewerUserId : null, revision: typeof assignment?.revision === "number" ? assignment.revision : 0 },
-      viewer: authority.authorized ? { canDecide: true, denial: null } : { canDecide: false, denial: authority.reason },
+      viewer: panelDenial ? { canDecide: false, denial: panelDenial } : authority.authorized ? { canDecide: true, denial: null } : { canDecide: false, denial: authority.reason },
       disclaimer: REPORT_REVIEW_DISCLAIMER,
     };
   } catch (err) {

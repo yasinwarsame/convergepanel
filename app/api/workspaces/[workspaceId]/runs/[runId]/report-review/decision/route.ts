@@ -34,6 +34,7 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
       return reportReviewErrorBody(400, "conditions_required", "Approving with conditions requires at least one condition.");
     case "cycle_conflict":
     case "stale_expected_updated_at":
+    case "decision_conflict":
       return reportReviewErrorBody(409, r.reason, "This review changed since you last viewed it. Refresh and try again.");
     case "active_panel":
       return reportReviewErrorBody(409, "active_panel", "This research has an open review panel.");

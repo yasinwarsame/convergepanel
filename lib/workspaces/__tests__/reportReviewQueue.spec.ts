@@ -27,7 +27,7 @@ jest.mock("@/lib/workspaces/approvalWorkflowRollout", () => ({ resolveApprovalWo
 import { NextRequest } from "next/server";
 import { Timestamp } from "firebase-admin/firestore";
 import { GET } from "@/app/api/workspaces/[workspaceId]/review-queue/route";
-import { buildSeed, seedDb, expectedStatusView, expectedAssignedToMe, pageAll, type QueueFn, type SeedRun, W, W2, OWNER, REVIEWER, SUBMITTER, CREATOR } from "./helpers/reviewQueueScenario";
+import { buildSeed, seedDb, seedDroppedBlock, pageAllWithProgress, expectedStatusView, expectedAssignedToMe, pageAll, type QueueFn, type SeedRun, W, W2, OWNER, REVIEWER, SUBMITTER, CREATOR } from "./helpers/reviewQueueScenario";
 import { buildReportReviewRecord } from "@/lib/governance/reportReview";
 
 async function call(view: string, uid: string, limit: number, cursor: string | null, workspaceId = W) {
@@ -88,6 +88,20 @@ describe("status views: every eligible item exactly once, deterministic order, a
     const submitterAssigned = seed.filter((r) => r.kind === "rr" && r.assignedTo === SUBMITTER && ["unreviewed", "pending"].includes(r.status)).map((r) => r.id);
     expect(submitterAssigned.length).toBeGreaterThan(0);
     for (const id of submitterAssigned) expect(rows.find((r) => r.runId === id)!.assignment.state).toBe("stale");
+  });
+});
+
+describe("fetch budget (B2 review MINOR-4): a long block of dropped rows at small page sizes", () => {
+  it.each([1, 2])("limit %i: honest empty pages advance the cursor; every eligible item exactly once", async (limit) => {
+    await seedDroppedBlock(db as never, 40);
+    const { ids, emptyPages } = await pageAllWithProgress(queue, "needs_review", OWNER, "owner", limit);
+    expect(ids).toEqual(expectedStatusView(seed, "needs_review"));
+    expect(emptyPages).toBeGreaterThan(0); // the budget stop was actually exercised
+  });
+
+  it("a non-Timestamp createdAt on a candidate fails the page explicitly (500), never mis-ordered", async () => {
+    await db.collection("runs").doc("rr-badts").set({ userId: CREATOR, workspaceId: W, projectId: null, question: "x", status: "complete", createdAt: "2026-10-01", reportReview: seed.length ? (await db.collection("runs").doc("rr-020").get()).data()!.reportReview : null });
+    expect((await call("needs_review", OWNER, 50, null)).status).toBe(500);
   });
 });
 

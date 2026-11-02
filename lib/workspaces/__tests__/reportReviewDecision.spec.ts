@@ -316,6 +316,43 @@ describe("assignment audit (durable, same transaction) — report-review runs on
   });
 });
 
+describe("B2 review fixes", () => {
+  it("MINOR-1: an open review panel makes the context say no (active_panel), matching the server's 409", async () => {
+    await submitted();
+    await assign(REVIEWER);
+    const { buildNextAdaptiveHumanReviewPanel } = jest.requireActual("@/lib/governance/adaptiveHumanReviewPanel");
+    db.seed(`runs/${RUN}/humanReviewPanel/current`, buildNextAdaptiveHumanReviewPanel({ teamId: null, runId: RUN, reviewerUserIds: [REVIEWER, REVIEWER2], actorUserId: OWNER, now: "2026-11-02T11:30:00.000Z", current: null, workspaceMetadata: { workspaceId: W, projectId: null } }));
+    const ctx = await getReportReviewContext({ uid: REVIEWER, workspaceId: W, runId: RUN });
+    expect(ctx.status === "ok" && ctx.viewer).toEqual({ canDecide: false, denial: "active_panel" });
+    expect(await decide(REVIEWER)).toEqual({ ok: false, reason: "active_panel" });
+  });
+
+  it("MINOR-2: with Report Review OFF, assignment on a run carrying a stray reportReview behaves exactly as before (no guard, no event)", async () => {
+    await submitted();
+    flags.REPORT_REVIEW_ENABLED = false;
+    expect((await assign(MEMBER)).ok).toBe(true); // the submitter guard is dormant when OFF
+    expect(events("report_review_assignment_changed")).toEqual([]);
+  });
+
+  it("MINOR-2: with Report Review ON, a run carrying both records refuses assignment changes (fail closed)", async () => {
+    await submitted();
+    await db.doc(`runs/${RUN}`).update({ governanceRecord: { version: 1 } });
+    expect(await assign(REVIEWER)).toEqual({ ok: false, reason: "run_not_found" });
+  });
+
+  it("MINOR-3: a 'replay' with a different comment or conditions is a conflict, never a silent success", async () => {
+    await submitted();
+    await assign(REVIEWER);
+    await decide(REVIEWER, { status: "approved_with_conditions", conditions: ["A"], comment: "ok" });
+    const stale = { expectedCycle: 1, expectedUpdatedAt: "2026-11-02T11:00:00.000Z" };
+    expect(await decide(REVIEWER, { status: "approved_with_conditions", conditions: ["B"], comment: "ok" }, stale)).toEqual({ ok: false, reason: "decision_conflict" });
+    expect(await decide(REVIEWER, { status: "approved_with_conditions", conditions: ["A"], comment: "changed" }, stale)).toEqual({ ok: false, reason: "decision_conflict" });
+    const same = await decide(REVIEWER, { status: "approved_with_conditions", conditions: ["A"], comment: "ok" }, stale);
+    expect(same.ok && same.replayed).toBe(true);
+    expect(rr().humanReview.conditions).toEqual(["A"]);
+  });
+});
+
 describe("integrity and dark", () => {
   it("a run carrying both records fails closed on decision and context", async () => {
     await submitted();

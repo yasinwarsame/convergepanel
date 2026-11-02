@@ -582,14 +582,21 @@ export function compareMergedQueueOrder(a: MergedPos, b: MergedPos): number {
   return -byteCompare(a.docId, b.docId);
 }
 
+/**
+ * The row's sort value. Firestore orders mixed value TYPES by type, which this comparator does not model, so a sort
+ * value of an unexpected type fails the page explicitly (500) instead of being mis-ordered. Production writes
+ * createdAt as a Timestamp and reviewedAt as an ISO string.
+ */
 function mergedSortOf(kind: "timestamp" | "iso", data: Record<string, unknown>, orderField: string): MergedSort {
   if (kind === "timestamp") {
     const v = data.createdAt;
-    return v instanceof Timestamp ? { kind: "timestamp", seconds: v.seconds, nanoseconds: v.nanoseconds } : { kind: "timestamp", seconds: 0, nanoseconds: 0 };
+    if (!(v instanceof Timestamp)) throw new Error("merged queue: non-Timestamp createdAt");
+    return { kind: "timestamp", seconds: v.seconds, nanoseconds: v.nanoseconds };
   }
   const [root] = orderField.split(".");
   const hr = (data[root] as Record<string, unknown> | undefined)?.humanReview as Record<string, unknown> | undefined;
-  return { kind: "iso", value: typeof hr?.reviewedAt === "string" ? hr.reviewedAt : new Date(0).toISOString() };
+  if (typeof hr?.reviewedAt !== "string") throw new Error("merged queue: non-string reviewedAt");
+  return { kind: "iso", value: hr.reviewedAt };
 }
 
 const MERGED_ORDER_FIELDS: Record<"needs_review" | "changes_requested" | "recently_approved", { governance: string; report_review: string }> = {

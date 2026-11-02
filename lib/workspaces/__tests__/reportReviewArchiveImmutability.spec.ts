@@ -200,6 +200,7 @@ describe("2. the dual-record invariant's assumptions are pinned", () => {
       "lib/runPanelExecution.ts": 4,
       "lib/runs/runReadPayload.ts": 2,
       "lib/workspaces/deriveTeamRunViewerRole.ts": 3,
+      "lib/workspaces/reportReviewAssignmentAudit.ts": 2, // B2 review fix: read-only "both records ⇒ fail closed" check
       "lib/workspaces/reportReviewContext.ts": 2, // B2: read-only "both records ⇒ integrity_violation" check
       "lib/workspaces/reportReviewDecisionMutation.ts": 2, // B2: read-only "both records ⇒ integrity_violation" check
       "lib/workspaces/resubmitWorkspaceReview.ts": 5,

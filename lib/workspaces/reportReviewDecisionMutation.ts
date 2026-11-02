@@ -37,7 +37,7 @@ export type DecideReportReviewFailure =
   | { ok: false; reason: "disabled" | "team_workspaces_disabled" | "firestore_unavailable" | "write_failed" }
   | { ok: false; reason: TeamMutationAuthorizationDenialReason | "insufficient_capability" }
   | { ok: false; reason: "run_not_found" | "active_panel" | "panel_unreadable" | "record_malformed" | "integrity_violation" }
-  | { ok: false; reason: "invalid_decision" | "conditions_required" | "cycle_conflict" | "stale_expected_updated_at" }
+  | { ok: false; reason: "invalid_decision" | "conditions_required" | "cycle_conflict" | "stale_expected_updated_at" | "decision_conflict" }
   | { ok: false; reason: "not_authorized"; denial: ReportReviewDecisionDenial };
 
 export type DecideReportReviewResult = { ok: true; replayed: boolean; record: ReportReviewRecordV1 } | DecideReportReviewFailure;
@@ -103,7 +103,12 @@ export async function decideReportReview(args: {
       // Idempotent replay: the same reviewer already recorded the same decision on this cycle.
       const hr = record.humanReview;
       if (isReportReviewDecided(record) && hr.reviewerId === args.uid && hr.status === decision.update.status) {
-        return { ok: true, replayed: true, record };
+        // A replay must be the SAME decision: same comment and same conditions. Anything else is a conflict, never a
+        // silent "success" that drops the caller's new text.
+        const sameComment = (hr.comment ?? null) === decision.update.comment;
+        const sameConditions = JSON.stringify(hr.conditions ?? null) === JSON.stringify(decision.update.conditions);
+        if (sameComment && sameConditions) return { ok: true, replayed: true, record };
+        return { ok: false, reason: "decision_conflict" };
       }
       if (record.updatedAt !== args.expectedUpdatedAt) return { ok: false, reason: "stale_expected_updated_at" };
 
