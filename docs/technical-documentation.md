@@ -725,19 +725,13 @@ This slice closes the remaining gaps without a new taxonomy, provider or schema 
   - On success it `router.replace`s to `teamResearchDetailHref(...)`, the canonical Team research page. That page renders the same full adaptive report as Individual research, with the Team chrome around it.
   - There is no navigation if the composer has unmounted.
   - `TeamResearchResultView` is no longer rendered by the composer; the file and its spec remain.
-- **D-2, classification resilience:** `classifyQuery()` no longer caches failure fallbacks (connector error, timeout, malformed or schema-invalid answer), so a recovered provider is asked again.
-  - On those failures, `lib/adaptiveSchema/heuristicClassifier.ts` (pure, no provider call) maps unambiguous question patterns to EXISTING answer types:
-    - comparison: anchored "compare…", "vs/versus", "what are the differences between";
-    - risks and trade-offs;
-    - causal;
-    - forecast: a future-year or "next N years" horizon, or "Will …" with a change verb;
-    - procedure;
-    - ranking ("top N", with `requestedCount` carried);
-    - definition.
-  - Anything else stays `generic`. The result is marked `classificationSource: "heuristic"` with `heuristicRule`, keeps `fallbackReason`, has confidence 0.4, and must pass `ClassificationSchema` and route to an active schema.
-  - **Owner Ruling A:** the fallback never chooses `decision_support`, whose governance record, decision receipt, Team review and Decision Support export all hang off the Milestone-2 envelope, created only inside `if (adaptiveOutput.persistedOutput)` in `runPanelExecution.ts`.
-  - A health-, legal- or finance-sensitive question (`sensitiveTopic()`, covering everyday symptoms, medicines, family and tenancy law and personal finance; ambiguous words such as a bare "sue", "court" or "visa" are excluded) stays `generic` but keeps its risk signal: `riskLevel` `high_stakes`, or `safety_critical` for self-harm terms, and `evidenceRequirement: "high"`, marked `heuristicRule: "sensitive_topic"`. It is never downgraded to `professional`, so the riskLevel-driven safeguards (export classification floor, view warnings, analytics) stay active.
-  - A validated model classification may still choose Decision Support through its normal path. A low-confidence model verdict is unchanged (generic, cached).
+- **D-2, classification resilience (owner final ruling, 2026-11-02):** `classifyQuery()` no longer caches failure fallbacks (connector error, timeout, malformed or schema-invalid answer), so a recovered provider is asked again.
+  - On those failures the fallback (`lib/adaptiveSchema/heuristicClassifier.ts`, pure, no provider call) may select ONLY **Forecast** (a future-year or "next N years" horizon, or "Will …" with a change verb) or **Generic**.
+  - Comparison is excluded on purpose: `comparison_matrix` is Milestone-2, and its envelope creates a governance record (decision receipt, automated governance, Team review routing). The owner ruled fallbacks must be presentation-only. `forecast_speculative` is legacy-active (legacy envelope only).
+  - A structural test requires every fallback target to be a legacy-active, non-Milestone-2 schema. Procedure, causal, risks, ranking, definition and Decision Support are never fallback targets.
+  - Fallbacks are marked `classificationSource: "heuristic"` with `heuristicRule`, keep `fallbackReason`, have confidence 0.4, and must pass `ClassificationSchema` and route active.
+  - Independent risk flags (`sensitiveTopic()`): a health-, legal-, finance- or safety-sensitive question stays generic with `riskLevel` `high_stakes`, or `safety_critical` for self-harm phrasings, `evidenceRequirement: "high"` and `heuristicRule: "sensitive_topic"`. It is never downgraded. The term list is deliberately not chased: an unlisted sensitive question is still generic, because no specialised fallback format exists for it.
+  - Validated model classifications are unchanged, Decision Support included. A low-confidence model verdict stays generic and cached.
 - **D-3, availability notice:** `components/adaptive/AnalysisAvailabilityNotice.tsx`, rendered at the top of every adaptive report, names what did not run:
   - a heuristic or default classification after a classifier failure;
   - `synthesisReport.degraded === true` (the written synthesis could not be generated, and the summary is assembled from the panel's scored claims).

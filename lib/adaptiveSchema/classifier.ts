@@ -244,7 +244,6 @@ function fallbackAfterFailure(reason: "connector_error" | "timeout" | "malformed
     queryType: hit.queryType,
     answerShape: entry.renderHint,
     confidence: HEURISTIC_CONFIDENCE,
-    requestedCount: hit.requestedCount ?? base.requestedCount,
     classificationSource: "heuristic",
     heuristicRule: hit.ruleId,
     rationale: `Heuristic fallback (${hit.ruleId}) after ${reason}; not a model classification.`,

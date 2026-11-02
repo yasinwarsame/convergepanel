@@ -69,12 +69,25 @@ function futureYearHorizon(q: string): boolean {
   return false;
 }
 
-/** Ordered. "What are the risks of …" must reach checklist before any later rule could claim it. */
+/**
+ * Owner final ruling (2026-11-02, PR #275 closeout): the fallback may select only Forecast or Generic.
+ *
+ *   - Owner's table: Comparison and Forecast, and only as PRESENTATION-ONLY fallbacks. "If an existing comparison or
+ *     forecast schema has such side effects, the fallback must use Generic instead."
+ *   - comparison_matrix is a Milestone-2 schema. Its envelope triggers initializeAdaptiveGovernanceRecord: a governance
+ *     record with a decision receipt, automated governance, and Team review routing when the receipt needs human
+ *     review (runPanelExecution.ts, `if (adaptiveOutput.persistedOutput)`). A fallback comparison therefore stays
+ *     Generic, and no comparison rule exists.
+ *   - forecast_speculative is legacy-active: it persists only the legacy envelope (no governance record, receipt or
+ *     Team review) and exports through the same legacy family as generic. So it is presentation-only, and it is the
+ *     one fallback target.
+ *   - Procedure, causal, risks, ranking, definition and Decision Support are never fallback targets.
+ *   - The structural test requires every target to be a legacy-active (non-Milestone-2) schema.
+ *
+ * SENSITIVE / SAFETY_CRITICAL only raise the independent risk flag and keep a sensitive forecast generic. They are not
+ * expanded to chase examples (owner ruling).
+ */
 export const HEURISTIC_RULES: readonly HeuristicRule[] = [
-  // Review MINOR-2: anchored. "Write a poem comparing…" or "Is this real? compare frames" is not a comparison grid.
-  { id: "comparison", queryType: "comparison_matrix", test: re(/^\s*compare\b|\b(vs\.?|versus)\b|^\s*what (is|are) the differences? between\b/i) },
-  { id: "risks_or_tradeoffs", queryType: "checklist_taxonomy", test: re(/^\s*(what are the (main |key |biggest )?risks\b|what are the pros and cons\b|pros and cons of\b)/i) },
-  { id: "causal", queryType: "causal_explanation", test: re(/^\s*(why (did|do|does|is|are|was|were|has|have)\b|what (caused|causes|led to|drives|drove)\b)/i) },
   // A future time horizon, or "Will …" with a change verb. A bare "Will this compile?" or "Will you help?" is not a forecast.
   {
     id: "forecast",
@@ -83,21 +96,15 @@ export const HEURISTIC_RULES: readonly HeuristicRule[] = [
       futureYearHorizon(q) ||
       /\bin the next \d+ (years?|months?|decades?)\b|\bforecast\b|^\s*will\b.*\b(eliminate|replace|increase|decrease|rise|fall|grow|decline|overtake|surpass|outnumber|collapse|recover|disappear)\b/i.test(q),
   },
-  { id: "procedure", queryType: "procedural", test: re(/^\s*(how (do|can|should) (i|we|you)\b|how to\b|what are the steps\b|steps to\b)/i) },
-  { id: "ranking", queryType: "ranked_enumeration", test: re(/^\s*(what are the |list the |name the )?(top|best) \d+\b/i) },
-  { id: "definition", queryType: "definition_explanation", test: re(/^\s*(define\b|definition of\b|what does .{1,80} mean\b)/i) },
 ];
 
-/** The rule that matches, or null (keep generic). Pure. `requestedCount` is carried for a "top N" ranking (review MINOR-3). */
-export function heuristicClassify(query: string): { queryType: QueryType; ruleId: string; requestedCount: number | null } | null {
+/** The rule that matches, or null (keep generic). Pure. */
+export function heuristicClassify(query: string): { queryType: QueryType; ruleId: string } | null {
   const q = query.trim();
   // Review R3: the routing guard covers the safety-critical list as well as SENSITIVE.
   if (!q || sensitiveTopic(q) !== null) return null;
   for (const rule of HEURISTIC_RULES) {
-    if (rule.test(q)) {
-      const n = rule.queryType === "ranked_enumeration" ? /\b(?:top|best) (\d+)\b/i.exec(q) : null;
-      return { queryType: rule.queryType, ruleId: rule.id, requestedCount: n ? Number(n[1]) : null };
-    }
+    if (rule.test(q)) return { queryType: rule.queryType, ruleId: rule.id };
   }
   return null;
 }
