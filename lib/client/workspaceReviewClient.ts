@@ -608,7 +608,11 @@ export const GENERIC_CONTEXT_ERROR_MESSAGE = "We couldn't load review details. T
 export const GENERIC_CANDIDATES_ERROR_MESSAGE = "We couldn't load eligible reviewers. Try again.";
 export const GENERIC_MUTATION_ERROR_MESSAGE = "Something went wrong. Try again.";
 export const ACTION_UNAVAILABLE_MESSAGE = "This review changed and this action is no longer available.";
-export const REVIEW_UNAVAILABLE_MESSAGE = "This review is no longer available.";
+/**
+ * One message for every "not found" outcome (missing run, no access, or research with no review record), so the page
+ * never reveals which applies. Owner Order A (2026-11-02) replaced the ambiguous "no longer available".
+ */
+export const REVIEW_UNAVAILABLE_MESSAGE = "This review isn’t available. It may have been removed, you may not have access to it, or this research result can’t be submitted for approval.";
 export const NO_ELIGIBLE_REVIEWERS_MESSAGE = "No eligible reviewers are available.";
 /** Phase 9C.3 — deliberately distinct wording from CONFLICT_MESSAGE so a panel conflict never reads as a single-review one. No OCC/revision/transaction jargon. */
 export const PANEL_CONFLICT_MESSAGE = "This panel changed while you were editing. We refreshed the latest version. Review your changes before submitting again.";

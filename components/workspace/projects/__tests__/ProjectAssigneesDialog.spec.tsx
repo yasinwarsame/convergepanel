@@ -135,3 +135,12 @@ it("busy: Save is disabled and shows 'Saving…'; the dialog never retries on it
   });
   expect(setAssignees).not.toHaveBeenCalled();
 });
+
+// Owner Order A (2026-11-02): project assignment is responsibility, never approval.
+it("explains that Project assignment marks responsibility and is not an approval request", () => {
+  const { renderer } = setup(lifecycle());
+  const textOf = (n: TestRenderer.ReactTestInstance): string => n.children.map((c) => (typeof c === "string" ? c : textOf(c))).join("");
+  expect(textOf(renderer.root.findByProps({ "data-testid": "project-assignment-explanation" }))).toBe(
+    "Assigning people here marks who is responsible for this Project. It does not make anyone an approver or request approval, and it does not change what anyone can see or do."
+  );
+});
