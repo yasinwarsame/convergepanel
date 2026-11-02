@@ -142,9 +142,9 @@ describe("A/B/C: submission at every point, with every remaining writer suffix i
           }
           if (label === "governed") expect(final.governanceRecord).toBeDefined(); // the governed writer still completes, unchanged
           if (label === "legacy") {
-            // Accepted exactly when the legacy envelope was visible to the (possibly retried) transaction.
-            const envelopeBeforeCommit = m === steps.length || k === steps.length;
-            expect(final.reportReview !== undefined).toBe(envelopeBeforeCommit);
+            // Accepted exactly when the legacy envelope existed when the submission read the run. An envelope that lands
+            // after that read leaves the (read-only, ineligible) transaction's answer unchanged, as in production.
+            expect(final.reportReview !== undefined).toBe(k === steps.length);
           }
           if (label === "legacy, envelope failed") expect(final.reportReview).toBeUndefined();
         });

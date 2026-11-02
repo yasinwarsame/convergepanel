@@ -15,6 +15,7 @@ import { resolveApprovalWorkflowAdmission } from "./approvalWorkflowRollout";
 import { teamRunWorkspaceNotFoundConcealedResponse } from "./teamRunAccessResponse";
 import { internalErrorResponse } from "./teamWorkspaceErrorResponse";
 import type { ReportReviewMutationFailure } from "./reportReviewMutations";
+import { REPORT_REVIEW_ENABLED } from "./reportReviewRollout";
 
 export function reportReviewErrorBody(status: number, code: string, message: string) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
@@ -33,6 +34,8 @@ export async function reportReviewCaller(req: NextRequest, route: string): Promi
     return reportReviewErrorBody(401, "auth_error", "Authentication failed.");
   }
   // Report review is review machinery: it also requires Approval Workflow admission (concealed when not admitted).
+  // Dark: concealed before anything else about the request (body shape included) is evaluated.
+  if (!REPORT_REVIEW_ENABLED) return concealed();
   const admission = resolveApprovalWorkflowAdmission({ uid: identity.uid, globalEnabled: APPROVAL_WORKFLOW_ENABLED, canaryUidsRaw: APPROVAL_WORKFLOW_CANARY_UIDS });
   if (!admission.admitted) return concealed();
   return identity.uid;

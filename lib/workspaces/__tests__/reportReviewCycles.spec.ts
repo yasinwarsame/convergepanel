@@ -31,6 +31,7 @@ jest.mock("@/lib/env", () => ({
 jest.mock("@/lib/logger", () => ({ logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
 
 import { submitReportReview, resubmitReportReview } from "@/lib/workspaces/reportReviewMutations";
+import { putWorkspaceReviewAssignment } from "@/lib/workspaces/workspaceReviewMutations";
 import { computeMembershipId } from "@/lib/workspaces/membershipId";
 import { buildTeamRunSnapshotPayload } from "@/lib/firestore/teamRunSnapshots";
 import type { ReportReviewRecordV1 } from "@/lib/governance/reportReview";
@@ -309,6 +310,39 @@ describe("D-B6: resubmission is a new cycle; history is preserved and write-once
     expect(results.filter((r) => !r.ok)).toEqual([{ ok: false, reason: "cycle_conflict" }]);
     expect(rr()!.cycle).toBe(2);
     expect(db.paths(`runs/${RUN}/reportReviewCycles/`)).toEqual([`runs/${RUN}/reportReviewCycles/1`]);
+  });
+
+  it("the reset is recorded in the shared assignment history (review B1-m3): reviewer → unassigned at the new revision", async () => {
+    await decidedCycle1WithAssignment("rejected");
+    await resubmit(1);
+    expect(db.read(`runs/${RUN}/humanReviewAssignmentHistory/4`)).toEqual(
+      expect.objectContaining({ runId: RUN, previousReviewerUserId: REVIEWER, newReviewerUserId: null, changedByUserId: MEMBER, workspaceId: W })
+    );
+  });
+
+  it("a manual assignment racing the resubmission belongs to the DECIDED cycle: archived with it, then reset; both history entries kept", async () => {
+    await submit();
+    await decide("changes_requested", ADMIN);
+    db.hooks.afterTxReads = async (attempt) => {
+      if (attempt > 0) return;
+      db.hooks.afterTxReads = undefined;
+      // A manager assigns a reviewer between the resubmission's reads and its commit.
+      const put = await putWorkspaceReviewAssignment({ uid: OWNER, workspaceId: W, runId: RUN, assignedReviewerUserId: REVIEWER, expectedRevision: 0, dueAt: null, now: "2026-11-02T11:50:00.000Z" });
+      expect(put.ok).toBe(true);
+    };
+    const res = await resubmit(1);
+    expect(res.ok).toBe(true);
+    expect(db.stats.retries).toBeGreaterThan(0); // the resubmission re-ran on the new state
+    expect((db.read(`runs/${RUN}/reportReviewCycles/1`)!.assignment as { assignedReviewerUserId: string }).assignedReviewerUserId).toBe(REVIEWER);
+    expect(db.read(`runs/${RUN}/humanReviewAssignment/current`)).toEqual(expect.objectContaining({ assignedReviewerUserId: null, revision: 2, cycle: 2, source: "cycle_reset" }));
+    expect(db.paths(`runs/${RUN}/humanReviewAssignmentHistory/`).sort()).toEqual([`runs/${RUN}/humanReviewAssignmentHistory/1`, `runs/${RUN}/humanReviewAssignmentHistory/2`]);
+  });
+
+  it("a stale manual assignment attempt after the reset is refused (revision moved)", async () => {
+    await decidedCycle1WithAssignment();
+    await resubmit(1);
+    const stale = await putWorkspaceReviewAssignment({ uid: OWNER, workspaceId: W, runId: RUN, assignedReviewerUserId: REVIEWER, expectedRevision: 3, dueAt: null });
+    expect(stale).toEqual({ ok: false, reason: "stale_revision" });
   });
 
   it("resubmission still enforces authority: Reviewer and Viewer cannot; a run that became governed cannot", async () => {

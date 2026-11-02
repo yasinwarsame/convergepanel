@@ -3,9 +3,10 @@
  * models the parts of Firestore that decide whether two writers can interleave badly:
  *
  *   - Every document has a version; every committed write bumps it.
- *   - Transactions record the version of every document they read. At commit, if ANY read document changed (or a
- *     document read as missing now exists), the attempt is discarded and the callback is RE-RUN, like Firestore's
- *     contention retry. Up to MAX_ATTEMPTS, then ABORTED.
+ *   - Transactions record the version of every document they read. At commit, if the attempt has writes and ANY read
+ *     document changed (or a document read as missing now exists), the attempt is discarded and the callback is RE-RUN.
+ *     That is serializable-equivalent to the Admin SDK's server-side locking (where the competing write waits instead):
+ *     either way the committed writes are based on the current state. Read-only attempts commit as-is.
  *   - Reads must precede writes inside a transaction (Firestore rejects a read after a write).
  *   - `tx.create` / `ref.create` fail with ALREADY_EXISTS if the document exists at commit (not retried).
  *   - `update` fails with NOT_FOUND on a missing document; dotted field paths update nested maps.
@@ -194,7 +195,9 @@ export class FakeTransactionalFirestore {
       const tx = new FakeTransaction(this);
       const result = await fn(tx);
       await this.hooks.afterTxReads?.(attempt);
-      const conflict = Array.from(tx.reads.entries()).some(([p, v]) => (this.docs.get(p)?.version ?? -1) !== v);
+      // A transaction that wrote nothing commits as-is (production: a read-only transaction has nothing to conflict on,
+      // and its result reflects the state it read). Only attempts with writes are validated and retried.
+      const conflict = tx.writes.length > 0 && Array.from(tx.reads.entries()).some(([p, v]) => (this.docs.get(p)?.version ?? -1) !== v);
       if (conflict) {
         this.stats.retries++;
         continue;

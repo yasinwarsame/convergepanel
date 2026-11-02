@@ -17,7 +17,10 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
   const body = await readJsonObject(req);
   if (!body || !Object.keys(body).every((k) => k === "purpose" || k === "expectedCycle")) return reportReviewErrorBody(400, "bad_request", "Body must be exactly { purpose, expectedCycle }.");
 
-  const result = await resubmitReportReview({ uid: uidOrRes, workspaceId: params.workspaceId, runId: params.runId, purpose: body.purpose, expectedCycle: body.expectedCycle });
+  const expectedCycle = body.expectedCycle;
+  if (typeof expectedCycle !== "number" || !Number.isInteger(expectedCycle) || expectedCycle < 1) return reportReviewErrorBody(400, "bad_request", "expectedCycle must be a positive whole number.");
+
+  const result = await resubmitReportReview({ uid: uidOrRes, workspaceId: params.workspaceId, runId: params.runId, purpose: body.purpose, expectedCycle });
   if (!result.ok) return reportReviewFailureResponse(result);
   return NextResponse.json({ ok: true, reportReview: result.record, archivedCycle: result.archivedCycle, disclaimer: REPORT_REVIEW_DISCLAIMER });
 }

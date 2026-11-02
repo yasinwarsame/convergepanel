@@ -29,6 +29,8 @@ import { authorizeTeamWorkspaceMutationInTransaction, type TeamMutationAuthoriza
 import { resolveWorkspaceReviewTarget } from "./resolveWorkspaceReviewTarget";
 import { roleHasCapability } from "./capabilities";
 import { readPanelGate } from "./workspaceReviewMutations";
+import { createAdaptiveHumanReviewAssignmentHistory } from "@/lib/firestore/runs";
+import { buildAdaptiveHumanReviewAssignmentHistoryEntry, type AdaptiveHumanReviewAssignmentHistoryV1 } from "@/lib/governance/adaptiveHumanReviewAssignment";
 import {
   buildReportReviewCycleArchive,
   buildReportReviewRecord,
@@ -53,6 +55,7 @@ export type ReportReviewMutationFailure =
 
 export type SubmitReportReviewResult = { ok: true; created: boolean; record: ReportReviewRecordV1 } | ReportReviewMutationFailure;
 export type ResubmitReportReviewResult = { ok: true; record: ReportReviewRecordV1; archivedCycle: number } | ReportReviewMutationFailure;
+type ResubmitTxResult = { ok: true; record: ReportReviewRecordV1; archivedCycle: number; historyEntry: AdaptiveHumanReviewAssignmentHistoryV1 | null } | ReportReviewMutationFailure;
 
 type Gate = { ok: true } | { ok: false; reason: "disabled" | "team_workspaces_disabled" | "firestore_unavailable" };
 
@@ -148,7 +151,10 @@ export async function submitReportReview(args: { uid: string; workspaceId: strin
  *   - The decided cycle and its assignment are archived with `tx.create()` at `reportReviewCycles/{cycle}`: if that
  *     archive already exists the transaction fails, so history can never be overwritten.
  *   - The new cycle starts `unreviewed`; the assignment document is reset to unassigned for the new cycle
- *     (`source: "cycle_reset"`), so no reviewer is carried over silently.
+ *     (`source: "cycle_reset"`), so no reviewer is carried over silently. The reset is recorded in the shared
+ *     assignment history (best-effort, post-commit, exactly like every other assignment writer).
+ *   - Ownership rule: an assignment made after the decision but before resubmission belongs to the DECIDED cycle; it is
+ *     archived with that cycle (a concurrent assignment makes this transaction retry on the new state) and then reset.
  *   - The run must still pass the exclusion rule (no governance record can have appeared).
  */
 export async function resubmitReportReview(args: { uid: string; workspaceId: string; runId: string; purpose: unknown; expectedCycle: unknown; now?: string }): Promise<ResubmitReportReviewResult> {
@@ -161,7 +167,7 @@ export async function resubmitReportReview(args: { uid: string; workspaceId: str
   const now = args.now ?? new Date().toISOString();
 
   try {
-    return await adminDb!.runTransaction<ResubmitReportReviewResult>(async (tx) => {
+    const txResult = await adminDb!.runTransaction<ResubmitTxResult>(async (tx) => {
       const pre = await authorizeAndReadRun(tx, args);
       if (!pre.ok) return pre;
 
@@ -208,8 +214,32 @@ export async function resubmitReportReview(args: { uid: string; workspaceId: str
         pre.runRef.collection(REPORT_REVIEW_EVENTS_COLLECTION).doc(),
         eventDoc({ type: "report_review_resubmitted", runId: args.runId, workspaceId: pre.workspaceId, projectId: pre.projectId, actorUid: args.uid, fromCycle: current.record.cycle, toCycle: next.cycle, purposeCode: next.purpose.code, at: now })
       );
-      return { ok: true, record: next, archivedCycle: current.record.cycle };
+      const previousReviewerUserId = typeof assignment?.assignedReviewerUserId === "string" ? assignment.assignedReviewerUserId : null;
+      const historyEntry =
+        assignment === null
+          ? null
+          : buildAdaptiveHumanReviewAssignmentHistoryEntry({
+              teamId: null,
+              runId: args.runId,
+              previousReviewerUserId,
+              newReviewerUserId: null,
+              assignmentRevision: currentRevision + 1,
+              changedAt: now,
+              changedByUserId: args.uid,
+              workspaceMetadata: { workspaceId: pre.workspaceId, projectId: pre.projectId, dueAt: null },
+            });
+      return { ok: true, record: next, archivedCycle: current.record.cycle, historyEntry };
     });
+    if (!txResult.ok) return txResult;
+    if (txResult.historyEntry) {
+      try {
+        const h = await createAdaptiveHumanReviewAssignmentHistory(args.runId, txResult.historyEntry);
+        if (h.status === "failed") logger.warn("[workspaces/reportReviewMutations] cycle-reset assignment history did not save", { workspaceId: args.workspaceId, runId: args.runId });
+      } catch {
+        logger.warn("[workspaces/reportReviewMutations] cycle-reset assignment history threw", { workspaceId: args.workspaceId, runId: args.runId });
+      }
+    }
+    return { ok: true, record: txResult.record, archivedCycle: txResult.archivedCycle };
   } catch (err) {
     logger.warn("[workspaces/reportReviewMutations] resubmitReportReview transaction failed", { workspaceId: args.workspaceId, runId: args.runId, error: err instanceof Error ? err.message : String(err) });
     return { ok: false, reason: "write_failed" };

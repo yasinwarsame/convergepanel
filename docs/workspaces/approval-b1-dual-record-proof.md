@@ -6,7 +6,11 @@
 
 ## 1. Every way a `governanceRecord` comes into existence
 
-A whole record is created at only two sites. This is pinned by `reportReviewArchiveImmutability.spec.ts`, which fails if a third creator appears.
+A whole record is created at only two production sites.
+
+`reportReviewArchiveImmutability.spec.ts` pins **every** write that can put a `governanceRecord` on a run, across `lib/`, `app/` and `scripts/`, against an explicit allow-list with the reason each entry is safe. It checks four write shapes: whole-record writes, dotted-path payload keys, assignments into a write payload, and seed-plan documents. A new writer of any of these shapes fails the test, and the proof must then be redone.
+
+The allow-list also contains the test-seeding plan (`lib/governance/adaptiveGovernanceSeedPlan.ts`). It writes legacy-Team run documents (`teamId`, no `workspaceId`), which can never pass the report-review workspace binding.
 
 | # | Site | When it runs | Which run |
 |---|---|---|---|
@@ -50,11 +54,15 @@ Therefore no `governanceRecord` can appear later.
 
 So it can never commit a `reportReview`.
 
-**Firestore concurrency.** The submission reads the run inside a transaction. If any write lands between that read and the commit, Firestore re-runs the transaction on the new state. The two cases above hold for **every** state a run passes through, not just the final one, so no interleaving can produce both records. Report-review state is decided only by a successful transactional read of the current document.
+**Firestore concurrency.** Firestore transactions are serializable. The Admin SDK locks the documents a transaction reads, so a competing plain write waits until the transaction ends. A transaction may also be retried on contention. Either way, a committed submission's writes are based on the run as it stood at commit, not on an outdated read.
+
+The two cases above hold for **every** state a run passes through, not just the final one, so no serial order of the writers and the submission can produce both records.
+
+The proof does not depend on retries. A read-only (ineligible) submission simply returns its answer, and a writer that lands afterwards changes nothing about it.
 
 ## 4. Evidence (`lib/workspaces/__tests__/reportReviewExclusion.spec.ts`)
 
-**The harness.** The real production writers run against a transactional in-memory Firestore: `createRun`, `completeRun`, `persistAdaptiveOutput`, `persistLegacyAdaptiveOutput`, `readGovernanceRecordForInitialization` and `initializeAdaptiveGovernanceRecord`, with a complete Decision Support fixture so the real governance record is actually written.
+**The harness.** The real production writers run against a transactional in-memory Firestore. Attempts that write are validated at commit and retried; read-only attempts commit as-is, matching production. The writers are: `createRun`, `completeRun`, `persistAdaptiveOutput`, `persistLegacyAdaptiveOutput`, `readGovernanceRecordForInitialization` and `initializeAdaptiveGovernanceRecord`, with a complete Decision Support fixture so the real governance record is actually written.
 
 The fake Firestore (`helpers/fakeTransactionalFirestore.ts`):
 - detects read conflicts and **retries** transactions;
@@ -77,6 +85,8 @@ The fake Firestore (`helpers/fakeTransactionalFirestore.ts`):
 
 - **Excluded runs.** Non-Milestone-2 runs created after #274 without a saved legacy envelope cannot be submitted. That covers verification off, no classification, and an oversized or failed envelope write. A fixed reason is shown.
 - **Old Milestone-2 runs.** A pre-#274 Milestone-2 run whose `adaptiveOutput` failed to save meets (d) through the cutoff branch. It can never gain a governance record, because its execution is finished, so the invariant still holds. It would be reviewable as a report review.
+
+- **Copies into a Team project.** Personal Generic runs created before the cutoff and later added to a Team project get a new `createdAt` (now). Without an envelope they are therefore excluded, failing closed.
 
 ## 6. Conclusion
 

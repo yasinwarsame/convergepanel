@@ -24,7 +24,7 @@ function sourceFiles(dir: string): string[] {
   }
   return out;
 }
-const FILES = [...sourceFiles(join(ROOT, "lib")), ...sourceFiles(join(ROOT, "app")), ...sourceFiles(join(ROOT, "components"))];
+const FILES = [...sourceFiles(join(ROOT, "lib")), ...sourceFiles(join(ROOT, "app")), ...sourceFiles(join(ROOT, "components")), ...sourceFiles(join(ROOT, "scripts"))];
 const rel = (p: string) => relative(ROOT, p);
 const stripComments = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 const WRITER = "lib/workspaces/reportReviewMutations.ts";
@@ -75,6 +75,40 @@ describe("2. the dual-record invariant's assumptions are pinned", () => {
     expect(init).toEqual(["lib/runPanelExecution.ts"]);
     const persist = FILES.filter((f) => /persistGovernanceRecord\(/.test(stripComments(readFileSync(f, "utf8")))).map(rel).sort();
     expect(persist).toEqual(["lib/adaptiveSchema/governanceInitialization.ts", "lib/firestore/runs.ts"]);
+  });
+
+  it("EVERY write that can put a governanceRecord on a run is in this reviewed allow-list (review B1-m1)", () => {
+    // Whole-record writes (set/update/create payloads naming governanceRecord), dotted-path updates used as payload
+    // keys ("governanceRecord.x": …, which Firestore would create on a run without a record), assignments into a
+    // write payload (x.governanceRecord = …), and seed plans ({ mode: "set", data: { …governanceRecord… } }).
+    const PATTERNS = [
+      /\.(set|update|create)\(\s*(?:[\w.!]+(?:\([^)]*\))*\s*,\s*)?\{[^}]*\bgovernanceRecord\b/,
+      /["']governanceRecord\.[\w.]+["']\s*:/,
+      /\.governanceRecord\s*=[^=]/,
+      /mode:\s*"set"[\s\S]{0,600}\bgovernanceRecord\b/,
+    ];
+    const writers = FILES.filter((f) => {
+      const code = stripComments(readFileSync(f, "utf8"));
+      return PATTERNS.some((p) => p.test(code));
+    })
+      .map(rel)
+      .sort();
+    // Why each is safe for the dual-record invariant (docs/workspaces/approval-b1-dual-record-proof.md §1):
+    expect(writers).toEqual([
+      "lib/firestore/runs.ts", // persistGovernanceRecord (G1, only from the run's own execution) + dotted humanReview updates behind parseGovernanceRecord of an EXISTING record
+      "lib/firestore/teamRunSnapshots.ts", // G2: a brand-new run id, in one tx.create with its copied adaptiveOutput
+      "lib/governance/adaptiveGovernanceSeedPlan.ts", // test-seeding plan: legacy-Team run docs (teamId, no workspaceId) that can never pass the report-review workspace binding
+      "lib/workspaces/resubmitWorkspaceReview.ts", // dotted humanReview update behind parseGovernanceRecord of an EXISTING record
+      "lib/workspaces/workspaceReviewMutations.ts", // same
+      "lib/workspaces/workspaceReviewPanelMutations.ts", // same
+    ]);
+  });
+
+  it("the seed plan's run documents are legacy-Team shaped (no workspaceId), so they can never be report-review targets", () => {
+    const code = stripComments(readFileSync(join(ROOT, "lib/governance/adaptiveGovernanceSeedPlan.ts"), "utf8"));
+    const runDoc = code.slice(code.indexOf("function runDoc("), code.indexOf("function runDoc(") + 900);
+    expect(runDoc).toMatch(/teamId: SEED_TEAM_ID/);
+    expect(runDoc).not.toMatch(/workspaceId/);
   });
 
   it("the run-execution initializer runs only for a saved Milestone-2 adaptive output", () => {

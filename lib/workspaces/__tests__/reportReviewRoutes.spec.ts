@@ -7,6 +7,12 @@ jest.mock("@/lib/auth/resolveRequestIdentity", () => ({ resolveRequestIdentity: 
 jest.mock("@/lib/auth/identityResolutionTelemetry", () => ({ logIdentityResolutionFailure: jest.fn() }));
 const admission = { admitted: true };
 jest.mock("@/lib/workspaces/approvalWorkflowRollout", () => ({ resolveApprovalWorkflowAdmission: () => admission }));
+const rollout = { REPORT_REVIEW_ENABLED: true };
+jest.mock("@/lib/workspaces/reportReviewRollout", () => ({
+  get REPORT_REVIEW_ENABLED() {
+    return rollout.REPORT_REVIEW_ENABLED;
+  },
+}));
 const mockedSubmit = jest.fn();
 const mockedResubmit = jest.fn();
 jest.mock("@/lib/workspaces/reportReviewMutations", () => ({ submitReportReview: (...a: unknown[]) => mockedSubmit(...a), resubmitReportReview: (...a: unknown[]) => mockedResubmit(...a) }));
@@ -26,6 +32,7 @@ const RECORD = { version: 1, kind: "report_review", cycle: 1 };
 beforeEach(() => {
   jest.clearAllMocks();
   admission.admitted = true;
+  rollout.REPORT_REVIEW_ENABLED = true;
   mockedIdentity.mockResolvedValue({ status: "authenticated", uid: "u1", source: "session_cookie" });
   mockedSubmit.mockResolvedValue({ ok: true, created: true, record: RECORD });
   mockedResubmit.mockResolvedValue({ ok: true, record: { ...RECORD, cycle: 2 }, archivedCycle: 1 });
@@ -53,7 +60,24 @@ describe("identity and admission", () => {
   });
 });
 
+describe("dark first (review B1 NIT): with the switch off, every request is the concealed 404 before its body is read", () => {
+  it.each([["valid body", { purpose: { code: "other" } }], ["malformed body", "{"], ["extra key", { x: 1 }]])("%s → 404, nothing called", async (_k, body) => {
+    rollout.REPORT_REVIEW_ENABLED = false;
+    const a = await json(await submitPost(req(body), params));
+    const b = await json(await resubmitPost(req(body, "report-review/resubmit"), params));
+    expect([a.status, b.status]).toEqual([404, 404]);
+    expect(mockedSubmit).not.toHaveBeenCalled();
+    expect(mockedResubmit).not.toHaveBeenCalled();
+  });
+});
+
 describe("bodies are exact", () => {
+  it.each([["missing", undefined], ["string", "1"], ["zero", 0], ["fraction", 1.5], ["negative", -1]])("resubmit with expectedCycle %s → 400, no call (review B1-m4)", async (_k, expectedCycle) => {
+    const body = expectedCycle === undefined ? { purpose: { code: "other" } } : { purpose: { code: "other" }, expectedCycle };
+    expect((await json(await resubmitPost(req(body, "report-review/resubmit"), params))).status).toBe(400);
+    expect(mockedResubmit).not.toHaveBeenCalled();
+  });
+
   it.each([["not json", "{"], ["array", [1]], ["extra key", { purpose: { code: "other" }, cycle: 2 }], ["null", null]])("submit rejects %s with 400 and no call", async (_k, body) => {
     expect((await submitPost(req(body), params)).status).toBe(400);
     expect(mockedSubmit).not.toHaveBeenCalled();

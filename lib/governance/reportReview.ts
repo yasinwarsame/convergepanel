@@ -173,6 +173,8 @@ function deriveScope(run: Record<string, unknown>, schemaId: string | null): Rep
   }).length;
   const selected = Array.isArray(run.selectedModels) ? run.selectedModels.length : rows.length;
   const legacy = run.legacyAdaptiveOutput as Record<string, unknown> | undefined;
+  // The Unified Answer is produced by the synthesis in this product, so the two flags currently always agree; both are
+  // recorded because the design keeps them as separate disclosures.
   return {
     schemaId,
     unifiedAnswer: present(run.synthesizedStructuredReport ?? legacy?.synthesisReport),
@@ -189,9 +191,11 @@ function deriveScope(run: Record<string, unknown>, schemaId: string | null): Rep
 
 export type ReportReviewParse = { ok: true; record: ReportReviewRecordV1 } | { ok: false; reason: "absent" | "malformed" };
 
+const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?Z$/;
 function isIso(v: unknown): v is string {
-  return typeof v === "string" && v.length > 0 && !Number.isNaN(Date.parse(v));
+  return typeof v === "string" && ISO.test(v) && !Number.isNaN(Date.parse(v));
 }
+const isCount = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0;
 
 export function parseReportReviewRecord(raw: unknown): ReportReviewParse {
   if (raw === undefined || raw === null) return { ok: false, reason: "absent" };
@@ -212,12 +216,45 @@ export function parseReportReviewRecord(raw: unknown): ReportReviewParse {
     !pa(sc.unifiedAnswer) ||
     !pa(sc.synthesis) ||
     !pa(sc.consensus) ||
-    typeof sc.respondedModels !== "number" ||
-    typeof sc.requestedModels !== "number"
+    !isCount(sc.respondedModels) ||
+    !isCount(sc.requestedModels)
   )
     return { ok: false, reason: "malformed" };
   if (!isIso(r.submittedAt) || !isIso(r.createdAt) || !isIso(r.updatedAt) || typeof r.submittedByUserId !== "string" || r.submittedByUserId.length === 0) return { ok: false, reason: "malformed" };
-  return { ok: true, record: r as unknown as ReportReviewRecordV1 };
+  // A decided cycle must name who decided and when.
+  const decided = !OPEN_STATUSES.has(hr.status);
+  if (decided && (typeof hr.reviewerId !== "string" || hr.reviewerId.length === 0 || !isIso(hr.reviewedAt))) return { ok: false, reason: "malformed" };
+  if (hr.comment !== undefined && typeof hr.comment !== "string") return { ok: false, reason: "malformed" };
+  if (hr.conditions !== undefined && !(Array.isArray(hr.conditions) && hr.conditions.every((c) => typeof c === "string"))) return { ok: false, reason: "malformed" };
+
+  // Rebuilt from validated fields only: unknown keys are never carried into responses or archives.
+  const humanReview: ReportReviewHumanReview = { status: hr.status as ReportReviewStatus };
+  if (typeof hr.reviewerId === "string") humanReview.reviewerId = hr.reviewerId;
+  if (typeof hr.reviewedAt === "string") humanReview.reviewedAt = hr.reviewedAt;
+  if (typeof hr.comment === "string") humanReview.comment = hr.comment;
+  if (Array.isArray(hr.conditions)) humanReview.conditions = [...(hr.conditions as string[])];
+  return {
+    ok: true,
+    record: {
+      version: 1,
+      kind: "report_review",
+      cycle: r.cycle,
+      scope: {
+        schemaId: sc.schemaId as string | null,
+        unifiedAnswer: sc.unifiedAnswer as "present" | "absent",
+        synthesis: sc.synthesis as "present" | "absent",
+        consensus: sc.consensus as "present" | "absent",
+        respondedModels: sc.respondedModels as number,
+        requestedModels: sc.requestedModels as number,
+      },
+      purpose: purpose.purpose,
+      humanReview,
+      submittedAt: r.submittedAt as string,
+      submittedByUserId: r.submittedByUserId as string,
+      createdAt: r.createdAt as string,
+      updatedAt: r.updatedAt as string,
+    },
+  };
 }
 
 export function isReportReviewDecided(record: ReportReviewRecordV1): boolean {
