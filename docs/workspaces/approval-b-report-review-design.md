@@ -1,10 +1,10 @@
-# Order B: human approval for Generic and other non-Milestone-2 research (design only, rev 3)
+# Order B: human approval for Generic and other non-Milestone-2 research (design only, rev 4)
 
 **Status:** DESIGN. Implementation is NOT authorized.
 
 **Baseline:** main `900aec72`.
 
-**Rev 2** applied the owner rulings D-B1 to D-B5 (2026-11-02). **Rev 3** answers the independent design review of rev 2, which was NOT CLEAN (0 BLOCKER / 4 MAJOR / 5 MINOR / 6 NIT). The changes are marked **[R3]**. The open decisions are in §10.
+**Rev 2** applied the owner rulings D-B1 to D-B5 (2026-11-02). **Rev 3** answers the independent design review of rev 2, which was NOT CLEAN (0 BLOCKER / 4 MAJOR / 5 MINOR / 6 NIT). The changes are marked **[R3]**. **Rev 4** applies the rev 3 re-verification findings: it discloses the exclusions and corrects two references. The open decisions are in §10.
 
 ## 1. Today
 
@@ -80,7 +80,7 @@ The new record is `runs/{id}.reportReview` (`ReportReviewRecordV1`). It never to
   Rev 3 closes the window **without changing Milestone-2 flows**. Submission requires *positive evidence* that the run is not, and will never become, a governed run. Inside the submission transaction, the run must have **all** of the following:
   1. `status == "complete"`;
   2. **no** `adaptiveOutput` field;
-  3. a saved legacy envelope `legacyAdaptiveOutput` whose `schemaId` is **not** a Milestone-2 id, **or** a `createdAt` from before #274 (`5165761c`, when legacy envelopes began), when no envelope could ever be written.
+  3. a saved legacy envelope `legacyAdaptiveOutput` whose `schemaId` is **not** a Milestone-2 id, **or** a `createdAt` from before #274 (`5165761c`). **[R4]** Correction: legacy envelopes date from August 2026 (#12/#19). #274 only added `generic` to their allowlist, so before #274 a Generic run could never have an envelope. The cutoff is valid for exclusivity on that basis.
 
   Because `persistAdaptiveOutput` writes the Milestone-2 `adaptiveOutput` before any governance record, and a Milestone-2 run never writes a non-Milestone-2 legacy envelope, condition 3 cannot hold for a run that will later get a `governanceRecord`. Condition 3's first branch is only true after persistence has finished.
 
@@ -162,7 +162,7 @@ Today's status views scan raw candidates and drop rows that fail revalidation (m
 - Shared status field: none.
 - Historical records: untouched.
 
-If testing finds a case where (1) to (4) cannot hold, implementation stops and returns to the owner, as ruled.
+If testing finds a case where the merge algorithm's guarantees (no skips, no duplicates, no stuck pager) cannot hold, implementation stops and returns to the owner, as ruled. **[R4]** The rev 3 re-verification found the algorithm sound: no skips, no duplicates, no stuck pager, an honest `hasMore` at `MAX_SCAN_ROUNDS`, and a byte-wise comparator that matches Firestore order.
 
 ### Flag changes during paging
 
@@ -218,6 +218,12 @@ If testing finds a case where (1) to (4) cannot hold, implementation stops and r
 - **[R3] D-B7:** how to guarantee the two record kinds never coexist.
   - **(a) Recommended.** The §3 positive-evidence submission rule. No Milestone-2 change. Milestone-2-schema runs whose governance initialization failed stay outside report review.
   - **(b)** Also make governance initialization a transaction that refuses when a `reportReview` exists. This is stronger, but it changes a Milestone-2 flow.
+  - **[R4] Disclosed exclusions under (a).** Post-#274 non-Milestone-2 runs **without** a saved legacy envelope cannot be submitted. That covers:
+    - runs from when `ADAPTIVE_VERIFICATION_ENABLED` was off (`env.ts:106`, `orchestrate.ts:758-761`);
+    - runs with no classification (`orchestrate.ts:171`);
+    - runs whose legacy-envelope write was oversized or failed (`runPanelExecution.ts:778-792`).
+
+    These are safe for exclusivity, but they cannot be reviewed under (a). They stay on today's path unless the owner picks (b). Owner to accept as **D-B8**.
   - Residual edge for (a): a pre-#274 Milestone-2 run whose `adaptiveOutput` failed to save (for example, oversized) has neither envelope and an old `createdAt`, so it could be submitted. It can never gain a `governanceRecord` later, because initialization only happens at completion, so no record coexistence results. Such a run would be reviewable as a report review. Owner to accept or exclude.
 
 ## 11. Milestones
