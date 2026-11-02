@@ -1,10 +1,10 @@
-# Order C: project-level approvers (design only, rev 2)
+# Order C: project-level approvers (design only, rev 3)
 
 **Status:** DESIGN. Implementation is NOT authorized.
 
 **Baseline:** main `900aec72`.
 
-**Rev 2** applies the owner rulings D-C1 to D-C5 (2026-11-02). Open decisions are in §9.
+**Rev 2** applied the owner rulings D-C1 to D-C5 (2026-11-02). **Rev 3** answers the independent design review of rev 2, which was NOT CLEAN (0 BLOCKER / 4 MAJOR / 5 MINOR / 6 NIT). The changes are marked **[R3]**. Open decisions are in §9.
 
 ## 1. Today
 
@@ -56,9 +56,15 @@ Milestone-2 research keeps its existing behaviour: it is already listed in Needs
 Within the submission transaction:
 
 1. Read the project and its `reviewerUid`, plus the run's `humanReviewAssignment/current`.
-2. If an assignment with a reviewer already exists, **do nothing**. Explicit assignments override project defaults.
+2. **[R3]** If an assignment document exists **at all**, **do nothing**. That includes a cleared one, with `assignedReviewerUserId: null` and revision > 0, which is what DELETE leaves (`workspaceReviewMutations.ts:422-433`).
+   - Explicit assignments override project defaults.
+   - A manager's deliberate unassignment is also an explicit decision, so a Member pressing "Request approval" can never re-apply a reviewer a manager removed.
+   - The default is applied once per run: only where no assignment document has ever been written.
+   - **Open-panel gate:** materialization is skipped when `readPanelGate` reports an open review panel (`workspaceReviewMutations.ts:83-90`), the same rule as manual assignment.
 3. Otherwise, evaluate `isValidAssignmentTarget` for `reviewerUid` against this run. That covers active membership, same workspace, capabilities, and **no self-review** (`reviewerUid` must not be the run's creator).
    - **Eligible:** write an ordinary assignment through `buildNextAdaptiveHumanReviewAssignment` with `source: "project_default"` and the existing history entry, plus the audit event `workspace_research_reviewer_defaulted`.
+     - **[R3]** `assignedByUserId` is the submitting member, as the actor who triggered it. The history entry and the audit event also carry `source: "project_default"` and the project id, so the audit trail never reads as a Member choosing a reviewer.
+     - **[R3]** The submitter may be the project reviewer when they did not create the run. Self-review is defined as reviewing one's own research, and that is unchanged.
    - **Not eligible, or no project reviewer:** write nothing. The item shows as Unassigned in Needs review, and the reason is logged without identities.
 
 **Results:**
@@ -68,13 +74,23 @@ Within the submission transaction:
 
 `source` is added only to new writes. A missing value reads as `manual`.
 
+**[R3]** Any manager action on an assignment converts it to `source: "manual"`, because it is then an explicit decision. That covers a reassignment, a `dueAt` change through `buildAdaptiveHumanReviewAssignmentMetadataUpdate` (which currently spreads the existing document), and a clear. So a manager-touched item is never moved by a later project-reviewer change.
+
+### [R3] Stale-default rule (closes the unfinished-batch gap)
+
+A `project_default` assignment is actionable **only while** its `assignedReviewerUserId` equals the run's project's *current* `reviewerUid`. Two places enforce this on read:
+- the Assigned to me and Overdue scans, using one batched `getAll` of the page's projects;
+- the decision route, checked inside its transaction.
+
+So if a reviewer-change batch is interrupted, the old reviewer immediately stops seeing and deciding those items. The batch then only moves already-inert items to the new reviewer, and it can be resumed or retried at any time without risk.
+
 ## 4. Lifecycle (D-C3, D-C4, ruled)
 
 | Event | Behaviour |
 |---|---|
-| Project reviewer changes A → B (D-C3) | Reassign only assignments that are pending, have `source: "project_default"`, and belong to research in this project. Re-check each against B (eligibility, self-review). If B is ineligible for a run, clear that default assignment so it becomes Unassigned. Never touch manual assignments, completed decisions or history. Work in bounded transactional batches, with one audit event per item. The confirm dialog shows a dry-run count. |
+| Project reviewer changes A → B (D-C3) | **[R3]** The project write also records `reviewerChange: { reviewerUid: B, revision }` as a durable marker that work is still owed. Batches then select assignments where `projectId == P`, `source == "project_default"`, status is pending **or changes_requested**, and `assignedReviewerUserId != P.reviewerUid`. Each batch re-reads the project inside its own transaction and targets the *current* reviewer, so retries after A→B→C are idempotent and always converge on C. Each item is re-checked for eligibility and self-review. Ineligible items are cleared, becoming Unassigned. Manual assignments, completed decisions and history are never touched. The marker is cleared when a selection returns nothing. Any project-settings or queue load resumes owed batches, so no extra infrastructure is needed. Until reassignment finishes, the stale-default rule keeps items inert. Batches use the existing collection-group index on (`workspaceId`, `projectId`, `assignedReviewerUserId`, `assignedAt`), and a filter on `source` is applied in memory. |
 | Project reviewer cleared | The same batch clears pending project-default assignments, which become Unassigned. History is kept. |
-| Research moves P → Q (D-C4) | Inside `associateTeamRunWithProject`'s existing transaction: if the current assignment is pending with `source: "project_default"`, clear it, then apply Q's reviewer under §3 (with eligibility and self-review checks) and audit both steps. Manual assignments stay under existing rules. |
+| Research moves P → Q (D-C4) | **[R3]** A move authorizes only `research.organize` (`associateTeamRunWithProject.ts:167-171`), which Members hold. If a move could *apply* Q's reviewer, a Member could pick a reviewer by choosing the project, which is authority Members don't have today. Rev 3 therefore splits it. (1) The move always **clears** a pending `project_default` assignment derived from P, satisfying D-C4's "do not retain". (2) It **applies** Q's default only when the mover holds `reviews.manage`. Otherwise the item becomes Unassigned in Needs review for a manager (D-C8). Every read happens before any write in the transaction, including Q's reviewer membership. The move transaction's documented invariants (projection-only, no revision bump, no history) are explicitly superseded for this branch only. Audit stays post-commit and best-effort, as everywhere else in this codebase, so "transaction-safe" covers the authorization and state change, not the audit write. A run that was submitted but is unassigned and moves P→Q receives Q's default only under the same `reviews.manage` rule. |
 | Assigned reviewer loses access, is removed, or changes role | The existing stale rule hides it from their Assigned to me. Managers see "Needs reassignment". The project's `reviewerUid` shows as stale in the project UI and is never applied to new submissions while ineligible. |
 | Review completed | Leaves pending views by status, as today. The assignment and its history remain. |
 | Cross-workspace | Impossible. The reviewer and the run must share `workspaceId`, which is checked in every transaction. |
@@ -100,7 +116,7 @@ Within the submission transaction:
 | `associateTeamRunWithProject` | Adds the D-C4 re-evaluation inside its existing transaction. |
 | Assignment documents | Optional `source`. |
 | UI | A "Project reviewer" control in project settings, separate from Manage assignees, with copy stating it assigns approval work. A "Request approval" button on governed research. |
-| Unchanged | Queue queries and indexes, decision routes, eligibility functions, capabilities, `assigneeUids`, `runs.assigneeUid`. |
+| Unchanged | Eligibility functions, capabilities, `assigneeUids`, `runs.assigneeUid`. **[R3]** The queue scans and the decision route gain only the stale-default check, and no new index is needed. |
 
 ## 7. Tests required (implementation phase)
 
@@ -132,6 +148,7 @@ Within the submission transaction:
 
 - **D-C6:** for governed (Milestone-2) research, require the explicit "Request approval" action to apply the project default (recommended, consistent with D-C2), or apply it automatically at governance-record creation. The latter is not "silent submission", because governed research is already reviewable, but it is an automatic assignment.
 - **D-C7:** who may press "Request approval" on governed research. Proposed: `research.organize` (Owner, Admin, Member), the same as Order B submission.
+- **[R3] D-C8:** on a move P→Q, apply Q's default reviewer only when the mover holds `reviews.manage` (recommended, which prevents Members choosing reviewers by moving research), or for any mover with `research.organize`, as rev 2 literally said.
 
 ## 10. Sequencing
 
