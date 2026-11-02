@@ -211,3 +211,15 @@ describe("ReviewAssignmentCard — 409 conflict handling (§31-§34/§46/§47, n
     expect(text).toContain("no longer eligible");
   });
 });
+
+// Owner Order A (2026-11-02): this is the control that creates an explicit approval assignment.
+describe("approval clarity", () => {
+  it.each([true, false])("canManageAssignment=%s: headed 'Reviewer assignment' and says it asks the reviewer to approve", (canManageAssignment) => {
+    const { renderer } = setup({ assignment: null, assignmentRevision: 0, canManageAssignment });
+    const textOf = (n: TestRenderer.ReactTestInstance): string => n.children.map((c) => (typeof c === "string" ? c : textOf(c))).join("");
+    expect(textOf(renderer.root.findByType("h3"))).toBe("Reviewer assignment");
+    expect(textOf(renderer.root.findByProps({ "data-testid": "reviewer-assignment-explanation" }))).toBe(
+      "Assigning a reviewer here asks them to approve this research. While the review is pending, it appears in their Approval Queue under “Assigned to me”."
+    );
+  });
+});

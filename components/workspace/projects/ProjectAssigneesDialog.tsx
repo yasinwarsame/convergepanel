@@ -30,6 +30,7 @@ import { teamProjectMutationErrorCopy, shouldRefreshAfterTeamProjectMutationErro
 import { useWorkspaceMembers } from "@/hooks/useWorkspaceMembers";
 import type { TeamProjectSummary } from "@/hooks/useTeamProjects";
 import type { UseTeamProjectLifecycleResult } from "@/hooks/useTeamProjectLifecycle";
+import { PROJECT_ASSIGNMENT_EXPLANATION } from "@/lib/workspaces/approvalAssignmentCopy";
 
 export const MAX_PROJECT_ASSIGNEES_CLIENT_MIRROR = 20;
 
@@ -100,7 +101,7 @@ export function ProjectAssigneesDialog({
     <ProjectDialogFrame title={`Assignees for "${project.name}"`} triggerRef={triggerRef} onClose={onClose} initialFocusRef={saveButtonRef}>
       {({ requestClose }) => (
         <div className="mt-4">
-          <p className="text-sm text-cp-muted">Assignment is a label for who is working on this Project. It does not change what anyone can see or do.</p>
+          <p className="text-sm text-cp-muted" data-testid="project-assignment-explanation">{PROJECT_ASSIGNMENT_EXPLANATION}</p>
 
           {members.status === "loading" && (
             <p role="status" className="mt-3 text-sm text-cp-muted">
