@@ -30,7 +30,8 @@
  *
  * Two shapes get a dedicated layout (presentation follow-up to #276, owner-approved 2026-11-02), recognised by their
  * whole shape, never by a field name alone:
- *   - a list of claims whose fields and values exactly match the generic schema's claim (ClaimZod): the claim text
+ *   - a list of claims using only ClaimZod's fields and enum values (id and each metadata field optional, at least one
+ *     metadata field present): the claim text
  *     leads, stance / model-reported confidence / evidence type follow as readable secondary metadata, the claim id
  *     stays visible in small print, and any camps are grouped as label + position;
  *   - a list of camps with exactly `label` and `position`: each label is grouped with its position.
@@ -190,17 +191,19 @@ function CampListBlock({ camps }: { camps: Camp[] }) {
 }
 
 /** One metadata item: a readable label, with the stored value kept on the element. */
-function ClaimMeta({ term, value, label, title }: { term: string; value: string; label: string; title: string }) {
+function ClaimMeta({ term, value, label, title, srNote }: { term: string; value: string; label: string; title: string; srNote?: string }) {
   return (
     <div className="flex gap-1" data-testid="claim-meta">
       <dt>{term}:</dt>
       <dd className="font-medium text-cp-text" data-value={value} title={title}>
         {label}
+        {srNote && <span className="sr-only"> ({srNote})</span>}
       </dd>
     </div>
   );
 }
 
+const CONFIDENCE_SR_NOTE = "the model's own label, not verified by the panel";
 const CONFIDENCE_TITLE = "The answering model's own label for this claim, not a confidence verified by the panel.";
 
 /** A claim list: the claim text leads; its metadata, camps and id are secondary. */
@@ -219,7 +222,7 @@ function ClaimListBlock({ claims }: { claims: Claim[] }) {
             <dl className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-cp-muted">
               {stance && c.stance && <ClaimMeta term="Stance" value={c.stance} label={stance} title={`Stored value: ${c.stance}`} />}
               {confidence && c.confidence && (
-                <ClaimMeta term="Model-reported confidence" value={c.confidence} label={confidence} title={`${CONFIDENCE_TITLE} Stored value: ${c.confidence}`} />
+                <ClaimMeta term="Model-reported confidence" value={c.confidence} label={confidence} title={`${CONFIDENCE_TITLE} Stored value: ${c.confidence}`} srNote={CONFIDENCE_SR_NOTE} />
               )}
               {evidence && c.evidenceType && <ClaimMeta term="Evidence type" value={c.evidenceType} label={evidence} title={`Stored value: ${c.evidenceType}`} />}
             </dl>

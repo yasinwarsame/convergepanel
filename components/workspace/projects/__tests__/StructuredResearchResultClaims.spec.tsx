@@ -64,7 +64,7 @@ describe("A + D: a schema-exact claim", () => {
       ["Stance:", "Asserts", "asserts", "Stored value: asserts"],
       [
         "Model-reported confidence:",
-        "Majority view",
+        "Majority view (the model's own label, not verified by the panel)",
         "majority_view",
         "The answering model's own label for this claim, not a confidence verified by the panel. Stored value: majority_view",
       ],
@@ -86,7 +86,11 @@ describe("A + D: a schema-exact claim", () => {
   it("only the metadata a claim carries is shown", () => {
     const r = render({ keyClaims: [{ claim: "Only confidence.", confidence: "speculative" }] });
     const li = byId(r, "structured-claim")[0];
-    expect(metaOf(li).map((m) => m.slice(0, 3))).toEqual([["Model-reported confidence:", "Speculative", "speculative"]]);
+    expect(metaOf(li).map((m) => m.slice(0, 3))).toEqual([["Model-reported confidence:", "Speculative (the model's own label, not verified by the panel)", "speculative"]]);
+    // The caveat is for assistive technology; the visible label is the readable value alone.
+    const dd = byId(li, "claim-meta")[0].findByType("dd");
+    expect(dd.children[0]).toBe("Speculative");
+    expect(dd.findByType("span").props.className).toBe("sr-only");
     expect(byId(li, "structured-claim-id")).toHaveLength(0);
     expect(byId(li, "structured-camps")).toHaveLength(0);
   });
@@ -97,8 +101,8 @@ describe("A + D: a schema-exact claim", () => {
     ...Object.entries(EVIDENCE_TYPE_LABELS).map(([v, l]) => ["evidenceType", v, l]),
   ])("%s %s is shown as %s", (field, value, label) => {
     const r = render({ keyClaims: [{ claim: "x", [field]: value }] });
-    const [[, shown, stored]] = metaOf(byId(r, "structured-claim")[0]);
-    expect([shown, stored]).toEqual([label, value]);
+    const dd = byId(byId(r, "structured-claim")[0], "claim-meta")[0].findByType("dd");
+    expect([dd.children[0], dd.props["data-value"]]).toEqual([label, value]);
   });
 
   it("every schema value has exactly one label, and the tables cover exactly the schema", () => {

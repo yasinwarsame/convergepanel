@@ -6,7 +6,7 @@
  * never changed. Confidence here is the answering model's own label for its claim. It is not a verified finding of the
  * panel, and the UI says so.
  *
- * Values mirror ClaimZod in lib/adaptiveSchema/schemas.
+ * Values mirror ClaimZod in lib/adaptiveSchema/validator.ts.
  */
 
 export const STANCE_LABELS: Readonly<Record<string, string>> = Object.freeze({

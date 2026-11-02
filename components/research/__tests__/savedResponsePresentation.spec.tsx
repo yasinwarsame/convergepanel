@@ -380,7 +380,7 @@ describe("follow-up: claims, camps and labels on saved responses (Team and Indiv
       const claims = inst.findAll((n) => n.props["data-testid"] === "structured-claim" && typeof n.type === "string");
       expect(claims.map((c) => text(c.findByProps({ "data-testid": "structured-claim-text" })))).toEqual([`${who} claim one.`, `${who} claim two.`]);
       const meta = (c: TestRenderer.ReactTestInstance) =>
-        c.findAll((n) => n.props["data-testid"] === "claim-meta" && typeof n.type === "string").map((m) => [text(m.findByType("dd")), m.findByType("dd").props["data-value"]]);
+        c.findAll((n) => n.props["data-testid"] === "claim-meta" && typeof n.type === "string").map((m) => [m.findByType("dd").children[0], m.findByType("dd").props["data-value"]]);
       expect(meta(claims[0])).toEqual([["Asserts", "asserts"], ["Majority view", "majority_view"], ["Empirical", "empirical"]]);
       expect(meta(claims[1])).toEqual([["Disputes", "disputes"], ["Speculative", "speculative"], ["Anecdotal", "anecdotal"]]);
       expect(claims[0].findAll((n) => n.props["data-testid"] === "structured-camp" && typeof n.type === "string").map((c) => c.findAllByType("span").map(text))).toEqual([

@@ -58,7 +58,7 @@ function analysisState(status: ResponsesWithoutAnalysisProps["synthesisStatus"],
 const STATE_LEAD: Record<AnalysisState, string> = {
   pending: "Being generated:",
   not_yet: "Not generated yet:",
-  failed: "Could not be generated for this run:",
+  failed: "Unavailable for this run (the synthesis could not be generated):",
   unavailable: "Not available for this run:",
 };
 
@@ -70,7 +70,7 @@ const STATE_TAIL: Record<AnalysisState, string> = {
 };
 
 /** Machine-readable per-section status, kept on each named section. */
-const SECTION_STATUS: Record<AnalysisState, string> = { pending: "pending", not_yet: "not-yet", failed: "failed", unavailable: "unavailable" };
+const SECTION_STATUS: Record<AnalysisState, string> = { pending: "pending", not_yet: "not-yet", failed: "unavailable", unavailable: "unavailable" };
 
 /** "A, B, C and D", each name its own element carrying its status. */
 function SectionNames({ state }: { state: AnalysisState }) {

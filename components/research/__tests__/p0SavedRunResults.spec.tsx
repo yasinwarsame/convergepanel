@@ -259,6 +259,16 @@ describe("P0 — the live composer (default synthesis policy) is unchanged apart
     expect(byTestId(r, "saved-model-response")).toHaveLength(4);
   });
 
+  it("when synthesis failed, every analysis section is named unavailable, with the failure stated once", async () => {
+    const r = await mount(createElement(ResultsDisplay as never, live({ synthesisStatus: "error" }) as never));
+    expect(byTestId(r, "responses-without-analysis")[0].props["data-state"]).toBe("analysis-failed");
+    expect(sectionStatuses(r)).toEqual(UNAVAILABLE_ANALYSIS_SECTIONS.map((name) => [name, "unavailable"]));
+    expect(instText(byTestId(r, "analysis-state-notice")[0])).toBe(
+      "Unavailable for this run (the synthesis could not be generated): Unified Answer, Consensus, Agreement / Disagreement Map and Synthesis Report. The model responses are shown below."
+    );
+    expect(byTestId(r, "saved-model-response")).toHaveLength(4);
+  });
+
   it("idle with no report still makes exactly the one established synthesis POST (unchanged behaviour)", async () => {
     mockedAuthedFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true }) });
     const r = await mount(createElement(ResultsDisplay as never, live({ synthesisStatus: "idle" }) as never));
