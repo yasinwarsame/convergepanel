@@ -139,14 +139,14 @@ describe("ResultsDisplay single-response view (raw response heading + failed lis
   it("live: the heading and the failed entry carry each slot's recorded requested model", async () => {
     const r = await mount(props([LIVE_ROWS[0], FAILED]));
     expect(headings(r)).toContain("ChatGPT · requested: gpt-4o-mini");
-    expect(failedItems(r)).toEqual(["Claude · requested: claude-haiku-4-5-20251001: failed"]);
+    expect(failedItems(r)).toEqual(["Claude · requested: claude-haiku-4-5-20251001: did not respond"]);
     expectNoProductLabel(textOf(r));
   });
 
   it("saved pre-6.2a: 'model not recorded' in both positions", async () => {
     const r = await mount(props([PRE_62A_ROWS[0], { modelId: "claude", status: "failed", rawTextFull: "", rawText: "", tokenUsage: { totalTokens: 0 }, latencyMs: 1 }]));
     expect(headings(r)).toContain("ChatGPT · model not recorded");
-    expect(failedItems(r)).toEqual(["Claude · model not recorded: failed"]);
+    expect(failedItems(r)).toEqual(["Claude · model not recorded: did not respond"]);
     expectNoProductLabel(textOf(r));
   });
 });
