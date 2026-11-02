@@ -10,14 +10,14 @@
  * never an authorization decision. The uid is the caller's own authenticated uid, substituted by the route.
  *
  * Query shape is the one the existing research "assigned to me" view already uses (workspaceId ==, assigneeUid ==,
- * createdAt desc, documentId desc), so it runs on the existing composite index. Only `projectId` is read.
+ * createdAt desc, documentId desc), so it runs on the existing composite index.
  *
- * Bounded: at most MAX_ASSIGNED_RUNS_SCANNED runs. Reaching the bound returns `too_many`; the caller fails closed
- * rather than silently showing a partial list.
+ * Bounded: at most MAX_ASSIGNED_RUNS_SCANNED runs are read. More than that returns `too_many`; the caller fails closed
+ * rather than silently showing a partial list. Only `projectId` and `createdAt` (the cursor) are read.
  */
 
 import "server-only";
-import { FieldPath, type QueryDocumentSnapshot } from "firebase-admin/firestore";
+import { FieldPath, Timestamp } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
 
@@ -34,7 +34,9 @@ export async function listAssignedResearchProjectIds(args: { workspaceId: string
   if (!adminDb) return { status: "read_failed" };
   const projectIds = new Set<string>();
   let scanned = 0;
-  let last: QueryDocumentSnapshot | undefined;
+  // Cursor by explicit values (createdAt, id): a document-snapshot cursor on a projected read would need every
+  // ordering field in the projection, and the SDK throws if one is missing.
+  let after: { createdAt: Timestamp; id: string } | undefined;
   try {
     for (;;) {
       let query = adminDb
@@ -43,26 +45,35 @@ export async function listAssignedResearchProjectIds(args: { workspaceId: string
         .where("assigneeUid", "==", args.assigneeUid)
         .orderBy("createdAt", "desc")
         .orderBy(FieldPath.documentId(), "desc")
-        .select("projectId");
-      if (last) query = query.startAfter(last);
-      const snap = await query.limit(ASSIGNED_RUNS_PAGE_SIZE).get();
-      for (const doc of snap.docs) {
+        .select("projectId", "createdAt");
+      if (after) query = query.startAfter(after.createdAt, after.id);
+      // Peek one past the page so "exactly at the bound" is not mistaken for "past the bound".
+      const snap = await query.limit(ASSIGNED_RUNS_PAGE_SIZE + 1).get();
+      const page = snap.docs.slice(0, ASSIGNED_RUNS_PAGE_SIZE);
+      for (const doc of page) {
         const projectId = doc.get("projectId");
-        // Unfiled research (no Project) adds no Project.
-        if (projectId === null || projectId === undefined) continue;
+        // Unfiled research (projectId null) adds no Project. An absent or malformed projectId is an integrity
+        // anomaly, as in the Team run lists (validateTeamRunRowShape).
+        if (projectId === null) continue;
         if (typeof projectId !== "string" || projectId.length === 0) {
-          logger.warn("[projects/assignedResearchProjectIds] integrity_violation — malformed projectId on an assigned run", { workspaceId: args.workspaceId, runId: doc.id });
+          logger.warn("[projects/assignedResearchProjectIds] integrity_violation — missing or malformed projectId on an assigned run", { workspaceId: args.workspaceId, runId: doc.id });
           return { status: "integrity_violation" };
         }
         projectIds.add(projectId);
       }
-      scanned += snap.docs.length;
-      if (snap.docs.length < ASSIGNED_RUNS_PAGE_SIZE) break;
+      scanned += page.length;
+      if (snap.docs.length <= ASSIGNED_RUNS_PAGE_SIZE) break;
       if (scanned >= MAX_ASSIGNED_RUNS_SCANNED) {
-        logger.warn("[projects/assignedResearchProjectIds] assigned-run scan bound reached; failing closed", { workspaceId: args.workspaceId, scanned });
+        logger.warn("[projects/assignedResearchProjectIds] assigned-run scan bound exceeded; failing closed", { workspaceId: args.workspaceId, scanned });
         return { status: "too_many" };
       }
-      last = snap.docs[snap.docs.length - 1];
+      const last = page[page.length - 1];
+      const createdAt = last.get("createdAt");
+      if (!(createdAt instanceof Timestamp)) {
+        logger.warn("[projects/assignedResearchProjectIds] integrity_violation — malformed createdAt on an assigned run", { workspaceId: args.workspaceId, runId: last.id });
+        return { status: "integrity_violation" };
+      }
+      after = { createdAt, id: last.id };
     }
   } catch (err) {
     logger.warn("[projects/assignedResearchProjectIds] read failed", { workspaceId: args.workspaceId, error: err instanceof Error ? err.message : String(err) });

@@ -68,10 +68,17 @@ class FakeQuery {
     return this.clone({ orders: [...this.orders, { field: typeof field === "string" ? field : DOC_ID, dir }] });
   }
   startAfter(...vals: unknown[]) {
-    // A document snapshot cursor resolves to its ordering values.
+    // A document snapshot cursor resolves to its ordering values FROM THE SNAPSHOT AS READ (projection applied), and
+    // throws when one is missing — as @google-cloud/firestore's Query._extractFieldValues does.
     if (vals.length === 1 && vals[0] && typeof vals[0] === "object" && "__snap" in (vals[0] as object)) {
-      const d = (vals[0] as { __snap: Doc }).__snap;
-      return this.clone({ after: this.orders.map((o) => (o.field === DOC_ID ? d.id : d.data[o.field])) });
+      const snap = vals[0] as { id: string; __read: Record<string, unknown> };
+      return this.clone({
+        after: this.orders.map((o) => {
+          if (o.field === DOC_ID) return snap.id;
+          if (snap.__read[o.field] === undefined) throw new Error(`Field "${o.field}" is missing in the provided DocumentSnapshot. Please provide a document that contains values for all specified orderBy() and where() constraints.`);
+          return snap.__read[o.field];
+        }),
+      });
     }
     return this.clone({ after: vals });
   }
@@ -101,7 +108,7 @@ class FakeQuery {
     return {
       docs: docs.map((d) => {
         const data = fields ? Object.fromEntries(fields.filter((f) => f in d.data).map((f) => [f, d.data[f]])) : d.data;
-        return { __snap: d, id: d.id, data: () => data, get: (f: string) => data[f], updateTime: new Timestamp(1, 0) };
+        return { __snap: true, __read: data, id: d.id, data: () => data, get: (f: string) => data[f], updateTime: new Timestamp(1, 0) };
       }),
     };
   }
@@ -357,6 +364,28 @@ describe("bounds: large inputs are read in full or fail closed, never truncated 
     const r = await listAs(ME);
     expect(r.status).toBe(200);
     expect(r.ids).toEqual(["p-first", "p-last"]);
+  });
+
+  it.each([500, 501, 1000, 5000])("exactly %i assigned runs are read in full (page boundaries and the bound itself)", async (count) => {
+    store.projects = [project("p-first", 20), project("p-last", 10)];
+    store.runs = [run("p-last", ME), ...Array.from({ length: count - 1 }, () => run("p-first", ME))];
+    const r = await listAs(ME);
+    expect([r.status, r.ids]).toEqual([200, ["p-first", "p-last"]]);
+  });
+
+  it("a projected snapshot cursor missing an ordering field is rejected by the fake, as by the SDK", async () => {
+    const q = (fakeDb.collection("runs") as FakeQuery).orderBy("createdAt", "desc").select("projectId");
+    store.runs = [run("p", ME)];
+    const [doc] = (await q.get()).docs;
+    expect(() => q.startAfter(doc)).toThrow(/Field "createdAt" is missing/);
+  });
+
+  it("an assigned run with no projectId field fails the page (500), as in the Team run lists", async () => {
+    store.projects = [project("p-direct", 20, { assigneeUids: [ME] })];
+    const r1 = run("p-direct", ME);
+    delete r1.data.projectId;
+    store.runs = [r1];
+    expect((await listAs(ME)).status).toBe(500);
   });
 
   it("more assigned runs than the scan bound fails the page (500) rather than listing a partial set", async () => {
