@@ -1,10 +1,10 @@
-# Order C: project-level approvers (design only, rev 4)
+# Order C: project-level approvers (design only, rev 5: final for owner implementation decision)
 
 **Status:** DESIGN. Implementation is NOT authorized.
 
 **Baseline:** main `900aec72`.
 
-**Rev 2** applied the owner rulings D-C1 to D-C5 (2026-11-02). **Rev 3** answers the independent design review of rev 2, which was NOT CLEAN (0 BLOCKER / 4 MAJOR / 5 MINOR / 6 NIT). The changes are marked **[R3]**. **Rev 4** answers the rev 3 re-verification, which was NOT CLEAN (0 BLOCKER / 1 MAJOR / 4 MINOR / 2 NIT). Those changes are marked **[R4]**. Open decisions are in §9.
+**Rev 2** applied the owner rulings D-C1 to D-C5 (2026-11-02). **Rev 3** answers the independent design review of rev 2, which was NOT CLEAN (0 BLOCKER / 4 MAJOR / 5 MINOR / 6 NIT). The changes are marked **[R3]**. **Rev 4** answers the rev 3 re-verification, which was NOT CLEAN (0 BLOCKER / 1 MAJOR / 4 MINOR / 2 NIT). Those changes are marked **[R4]**. **Rev 5** records the owner's final rulings on D-C6, D-C7 and D-C8 (2026-11-02), marked **[R5]**. See §9.
 
 ## 1. Today
 
@@ -149,11 +149,20 @@ So if a reviewer-change batch is interrupted, the old reviewer immediately stops
 | Hidden authority | None. Every assignment passes the existing eligibility function, and the reviewer still needs `reviews.submit`. |
 | Rollback | Server flag `PROJECT_DEFAULT_REVIEWER_ENABLED`. When off, the routes return a concealed 404, no new materialization happens, and existing assignments remain ordinary valid assignments. |
 
-## 9. Remaining owner decisions
+## 9. Owner decisions ([R5]: all ruled 2026-11-02)
 
-- **D-C6:** for governed (Milestone-2) research, require the explicit "Request approval" action to apply the project default (recommended, consistent with D-C2), or apply it automatically at governance-record creation. The latter is not "silent submission", because governed research is already reviewable, but it is an automatic assignment.
-- **D-C7:** who may press "Request approval" on governed research. Proposed: `research.organize` (Owner, Admin, Member), the same as Order B submission.
-- **[R3] D-C8:** on a move P→Q, apply Q's default reviewer only when the mover holds `reviews.manage` (recommended, which prevents Members choosing reviewers by moving research), or for any mover with `research.organize`, as rev 2 literally said.
+| Decision | Ruling |
+|---|---|
+| D-C1 | One designated project reviewer. Extensible through the `projectDefaultReviewers()` accessor. |
+| D-C2 / D-C6 | The default applies only on explicit submission. Governed research needs an explicit **"Request approval"**. Project membership or a reviewer designation never submits work. |
+| D-C3 | A reviewer change reassigns only **pending** project-default items (§4). Decided items pick up the current default only on resubmission or a new cycle. |
+| D-C4 / D-C8 | A move clears a project-default assignment derived from the old project. It applies the new project's default only when the mover holds `reviews.manage`. Unauthorized moves never assign reviewers. |
+| D-C5 | Only Owners and Admins (`reviews.manage`) configure project reviewers. |
+| D-C7 | "Request approval" requires an active membership, `research.read` AND `research.organize`, and authorization over the run (`resolveWorkspaceReviewTarget`). It grants no reviewer authority. |
+
+**[R5] Interaction with Order B review cycles (D-B6).** §3's "assignment document exists at all" check is **per cycle**. A new report-review cycle writes a fresh unassigned assignment document tagged with the new `cycle`, so the project default can apply once in each cycle and never overrides a manual assignment made within that cycle.
+
+Exact predicate: the default may be applied only when the assignment document is absent, **or** it is the untouched cycle-reset document (`cycle == reportReview.cycle`, `source: "cycle_reset"`, `assignedReviewerUserId: null`). Any later manual write sets `source: "manual"` and blocks the default for that cycle, and a manager clear counts as such a write. Governed runs have no cycles, so the "absent only" rule from §3 applies to them unchanged.
 
 ## 10. Sequencing
 

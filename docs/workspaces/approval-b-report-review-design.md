@@ -1,10 +1,10 @@
-# Order B: human approval for Generic and other non-Milestone-2 research (design only, rev 4)
+# Order B: human approval for Generic and other non-Milestone-2 research (design only, rev 5: final for owner implementation decision)
 
 **Status:** DESIGN. Implementation is NOT authorized.
 
 **Baseline:** main `900aec72`.
 
-**Rev 2** applied the owner rulings D-B1 to D-B5 (2026-11-02). **Rev 3** answers the independent design review of rev 2, which was NOT CLEAN (0 BLOCKER / 4 MAJOR / 5 MINOR / 6 NIT). The changes are marked **[R3]**. **Rev 4** applies the rev 3 re-verification findings: it discloses the exclusions and corrects two references. The open decisions are in §10.
+**Rev 2** applied the owner rulings D-B1 to D-B5 (2026-11-02). **Rev 3** answers the independent design review of rev 2, which was NOT CLEAN (0 BLOCKER / 4 MAJOR / 5 MINOR / 6 NIT). The changes are marked **[R3]**. **Rev 4** applied the rev 3 re-verification findings: it disclosed the exclusions and corrected two references. **Rev 5** records the owner's final rulings (2026-11-02) on D-B1a, D-B3a, D-B6, D-B7 and D-B8, marked **[R5]**. The decisions are recorded in §10.
 
 ## 1. Today
 
@@ -31,15 +31,16 @@ It does **not** certify:
 - model confidence;
 - that missing AI analysis exists.
 
-**Approval purpose.** The purpose is structured, with an optional short explanation of at most 280 characters, shown as plain text. Proposed values (owner to confirm, §10):
+**[R5] Approval purpose (D-B1a, ruled).** A fixed category, plus an optional note of **at most 280 characters**, shown as plain text:
 
 | Value | Shown as |
 |---|---|
-| `internal_discussion` | Internal discussion |
-| `team_decision_input` | Input to a team decision |
-| `external_sharing` | Sharing outside the team |
-| `record_keeping` | Record keeping |
-| `other` | Other (explanation required) |
+| `internal_review` | Internal review |
+| `client_delivery` | Client delivery |
+| `publication_review` | Publication review |
+| `other` | Other |
+
+These are workflow labels. They are not certifications of accuracy or factual verification.
 
 **The purpose cannot redefine approval.**
 - It is stored and displayed only as context.
@@ -64,7 +65,9 @@ The new record is `runs/{id}.reportReview` (`ReportReviewRecordV1`). It never to
     respondedModels: number,
     requestedModels: number,
   },
-  purpose: { code: "internal_discussion" | "team_decision_input" | "external_sharing" | "record_keeping" | "other", note: string | null },
+  // [R5] D-B6: the CURRENT review cycle only. Earlier cycles live, immutable, in runs/{id}/reportReviewCycles/{n}.
+  cycle: number,                                // 1, 2, 3, …
+  purpose: { code: "internal_review" | "client_delivery" | "publication_review" | "other", note: string | null },
   humanReview: { /* same statuses and fields as GovernanceRecordV1.humanReview */ },
   submittedAt: string, submittedByUserId: string,
   createdAt: string, updatedAt: string,
@@ -168,6 +171,26 @@ If testing finds a case where the merge algorithm's guarantees (no skips, no dup
 
 **[R3]** Toggling `REPORT_REVIEW_ENABLED` mid-pagination would change what a cursor means. To prevent that, the merged view bumps the cursor version. A cursor of the other version is rejected as `invalid_cursor`, so the client restarts from page one, as it already does for invalid cursors.
 
+## 5a. [R5] Review cycles and resubmission (D-B6, ruled)
+
+**Rule.** Resubmission after a completed decision (approved, approved with conditions, changes requested, or rejected) starts a **new review cycle**. It never resets an existing decision to pending.
+
+**One transaction:** `POST /runs/{R}/report-review/resubmit` with `{ purpose }`, under the same capability as submission (§4).
+
+1. Re-read `reportReview`. It must be at a completed status, and its `cycle == expectedCycle` from the request; otherwise `409 conflict`.
+2. **Archive** the current cycle, unchanged, to `runs/{R}/reportReviewCycles/{cycle}`. That stores the full `reportReview`, plus a copy of `humanReviewAssignment/current` as it stood, and `archivedAt` and `archivedByUserId`. Archived cycle documents are create-only. No route updates or deletes them; enforced by code and by a structural test.
+3. Write a new `reportReview` with `cycle + 1`, a fresh `scope` copied again from the saved run (never upgraded), the new `purpose`, and `humanReview.status: "unreviewed"`.
+4. Reset the assignment for the new cycle. Write `humanReviewAssignment/current` as a **fresh** document (`revision` keeps increasing, `assignedReviewerUserId: null`, `cycle: n+1`, `source: "cycle_reset"`). The previous cycle's assignment is kept only in the archived cycle. If Order C applies, the project default is applied under its §3 rules, which use a per-cycle "exists" check, so a new cycle starts unassigned.
+5. Append the audit event `workspace_report_review_resubmitted`, with `{ runId, fromCycle, toCycle, purpose }`.
+
+**Reading.**
+- The queue, the review page and exports show the **current** cycle's status.
+- The review page lists earlier cycles, read-only, with their decision, reviewer, date and purpose.
+- Exports include a "Previous review cycles" table.
+- An earlier approval is never presented as current.
+
+**Unchanged.** Governed (Milestone-2) runs keep their existing `changes_requested → unreviewed` resubmission (`resubmitWorkspaceReview.ts`). D-B6 applies to report reviews only.
+
 ## 6. Review, decision and display
 
 - **`reviewContext`:** returns `kind: "governance" | "report_review"`. For a report review it returns `scope`, `purpose` and `humanReview`.
@@ -179,6 +202,14 @@ If testing finds a case where the merge algorithm's guarantees (no skips, no dup
 - **[R3] History and audit for report reviews.** The existing decision side-writes require a Milestone-2 `schemaId`, an `answerShape` and `governanceRecordUpdatedAt` (`workspaceReviewMutations.ts:593-624`, `adaptiveHumanReviewHistory.ts:121,147`). Report reviews need their own history and event shape: `kind: "report_review"`, `scope.schemaId` (may be null), and `reportReviewUpdatedAt`. It is written by new builders, and the existing builders stay unchanged. The audit reader accepts both shapes.
 - **Display:**
   - The Team detail page shows "Submit for approval" (for callers with `research.organize`) in place of the "Approval review" notice that PR #281 adds (not yet in baseline `900aec72`).
+  - **[R5] D-B8: a clear reason when submission is unavailable.** It is shown only to an already-authorized reader of the run, with one fixed sentence per reason:
+    - "This research already has a review record and uses the standard approval workflow." (governed run)
+    - "This research is already submitted for approval." (`reportReview` exists and is not decided)
+    - "This research can't be submitted: it was saved without the information approval review needs." (the D-B8 exclusions)
+    - "This research isn't finished yet." (not complete)
+    - "Only members who can organize research can submit it for approval." (missing capability)
+
+    The reason never reveals anything about other runs or users. Nothing is backfilled, rewritten, reclassified or fabricated to make a run eligible.
   - After submission it shows the report-review status, purpose and disclaimer.
   - Queue rows carry a "Report review" label.
 - **Exports:** a new "Report review" section with status, reviewer, date, purpose, conditions and the disclaimer. Milestone-2 export sections are unchanged.
@@ -210,24 +241,29 @@ If testing finds a case where the merge algorithm's guarantees (no skips, no dup
 | New indexes not ready at launch | Indexes are deployed and READY before the flag is enabled. Until then, the second query is off. |
 | Rollback | Server flag `REPORT_REVIEW_ENABLED`. When off, the submit route returns the concealed 404, Q2 is skipped, and `reviewContext` ignores `reportReview`. Records stay in place, inert. |
 
-## 10. Remaining owner decisions
+## 10. Owner decisions ([R5]: all ruled 2026-11-02)
 
-- **D-B1a:** confirm the five purpose values and the 280-character note limit.
-- **D-B3a:** confirm that Member (with `research.organize`) may submit, alongside Owner and Admin.
-- **D-B6:** whether a decided report review (approved, rejected or changes requested) can be resubmitted. Proposed: yes, through the existing resubmit semantics, which return it to `pending` with audit.
-- **[R3] D-B7:** how to guarantee the two record kinds never coexist.
-  - **(a) Recommended.** The §3 positive-evidence submission rule. No Milestone-2 change. Milestone-2-schema runs whose governance initialization failed stay outside report review.
-  - **(b)** Also make governance initialization a transaction that refuses when a `reportReview` exists. This is stronger, but it changes a Milestone-2 flow.
-  - **[R4] Disclosed exclusions under (a).** Post-#274 non-Milestone-2 runs **without** a saved legacy envelope cannot be submitted. That covers:
-    - runs from when `ADAPTIVE_VERIFICATION_ENABLED` was off (`env.ts:106`, `orchestrate.ts:758-761`);
-    - runs with no classification (`orchestrate.ts:171`);
-    - runs whose legacy-envelope write was oversized or failed (`runPanelExecution.ts:778-792`).
-
-    These are safe for exclusivity, but they cannot be reviewed under (a). They stay on today's path unless the owner picks (b). Owner to accept as **D-B8**.
-  - Residual edge for (a): a pre-#274 Milestone-2 run whose `adaptiveOutput` failed to save (for example, oversized) has neither envelope and an old `createdAt`, so it could be submitted. It can never gain a `governanceRecord` later, because initialization only happens at completion, so no record coexistence results. Such a run would be reviewable as a report review. Owner to accept or exclude.
+| Decision | Ruling |
+|---|---|
+| D-B1 | Approval = reviewed and acceptable for an explicitly stated purpose. Never factual verification, claim verification, model confidence, or the existence of missing analysis. |
+| D-B1a | Fixed purpose categories: Internal review, Client delivery, Publication review, Other. Optional note of at most 280 characters. |
+| D-B2 | Explicit submission only. |
+| D-B3 / D-B3a | Active member with `research.read` AND `research.organize` (Owner, Admin, Member). Reviewer and Viewer can never submit. |
+| D-B4 | No automatic backfill. |
+| D-B5 | Separate record and a bounded combined query (§5 merge algorithm). |
+| D-B6 | Resubmission is a new review cycle (§5a). Earlier decisions are immutable. |
+| D-B7 | Option (a), the strict submission eligibility in §3. The governed-run writer is unchanged. **Conditional:** B1 must prove with concurrency and retry tests that no run can hold both record kinds (§11). If that proof fails, STOP and return to the owner for writer-level enforcement. |
+| D-B8 | The documented exclusions are accepted for the initial release, with a clear reason shown (§6). No silent conversion. |
 
 ## 11. Milestones
 
-1. **B1:** record, parser, submit route, audit and exclusivity (dark), with tests.
+1. **B1:** record, parser, submit route, audit and exclusivity (dark), with tests. **[R5] The D-B7 proof is a B1 exit criterion.** Deterministic interleaving tests against the transaction and order seams must show that no run ends up holding both record kinds. They cover:
+   - completion racing submission;
+   - envelope persistence racing submission;
+   - governance initialization retry racing submission;
+   - double submission;
+   - submission retry after a lost response.
+
+   Each run is checked for the invariant "never both", plus mutation tests on every eligibility condition. If any interleaving can produce both records, B1 stops for the owner.
 2. **B2:** review context, decision route and queue merge (dark), with property tests and an independent review.
 3. **B3:** UI and exports. Indexes deployed. Canary on one workspace, then enable.
