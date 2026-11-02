@@ -32,6 +32,7 @@ import { submitReportReview, resubmitReportReview } from "@/lib/workspaces/repor
 import { computeMembershipId } from "@/lib/workspaces/membershipId";
 import { buildTeamRunSnapshotPayload } from "@/lib/firestore/teamRunSnapshots";
 import type { ReportReviewRecordV1 } from "@/lib/governance/reportReview";
+import { buildNextAdaptiveHumanReviewPanel, buildCancelledAdaptiveHumanReviewPanel } from "@/lib/governance/adaptiveHumanReviewPanel";
 
 const W = "wsTeamB1";
 const W2 = "wsTeamOther";
@@ -170,11 +171,16 @@ describe("authorization (D-B3a): who may submit", () => {
     expect(rr()).toBeUndefined();
   });
 
-  it("an open review panel blocks submission", async () => {
-    db.seed(`runs/${RUN}/humanReviewPanel/current`, { status: "open" });
-    const res = await submit();
-    expect(res.ok).toBe(false);
+  it("a valid OPEN review panel blocks submission (409 active_panel); a cancelled one does not; a malformed one fails closed", async () => {
+    const open = buildNextAdaptiveHumanReviewPanel({ teamId: null, runId: RUN, reviewerUserIds: [REVIEWER, ADMIN], actorUserId: OWNER, now: "2026-11-02T10:30:00.000Z", current: null, workspaceMetadata: { workspaceId: W, projectId: null } });
+    db.seed(`runs/${RUN}/humanReviewPanel/current`, open);
+    expect(await submit()).toEqual({ ok: false, reason: "active_panel" });
     expect(rr()).toBeUndefined();
+    db.seed(`runs/${RUN}/humanReviewPanel/current`, buildCancelledAdaptiveHumanReviewPanel({ current: open, actorUserId: OWNER, now: "2026-11-02T10:40:00.000Z" }));
+    expect((await submit()).ok).toBe(true);
+    legacyRun("run-p");
+    db.seed("runs/run-p/humanReviewPanel/current", { status: "open" });
+    expect(await submit(MEMBER, "run-p")).toEqual({ ok: false, reason: "panel_unreadable" });
   });
 });
 
