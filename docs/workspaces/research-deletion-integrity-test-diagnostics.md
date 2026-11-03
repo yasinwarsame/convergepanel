@@ -80,3 +80,26 @@ The first version of the correction wrote a research run's `admin_audit_logs` ro
 - the request still returns 200;
 - the failure is logged by shape only;
 - no identifier and no `admin_audit_logs/` path reaches the log.
+
+## 4. Second round: independent review M-1 (MAJOR) and m-1 (MINOR)
+
+**Findings.** The fresh independent review of `b32b476` was NOT CLEAN: 0 blocker, 1 major, 1 minor, 7 nits.
+- **M-1.** The transactional review, panel, vote, assignment, decision, resubmission, assignee and project-association writers, and the governance-review decision transaction, read the run but not the barrier. They committed after deletion started, and could hold a deletion at `incomplete`. The reviewer reproduced this.
+- **m-1.** The admin DELETE `admin_deleted` row carried the question, before the deletion ran.
+
+**Fixes.** Both are fixed in production code (research-deletion-integrity.md §3.C).
+
+**Effect on tests.** The fix made 16 specs fail (546 tests). Every one is the same class: **test infrastructure**.
+- Doubles that route by collection had no `runDeletionJobs` collection, so they threw and returned `transaction_failed`.
+- Doubles that route by id answered the tombstone read with the run document, so the tombstone looked present and they returned `run_missing` or 404.
+
+**How the doubles were fixed:**
+- **Store-map doubles** (`workspaceReviewMutations`, `workspaceReviewPanelMutations`, `resubmitWorkspaceReview`, `associateRunWithProject`, `associateTeamRunWithProject`, `setTeamRunAssignee`, `assignmentSeatCapacityIndependence`, `assignmentAuditContract`): an empty `runDeletionJobs` store.
+- **Id-routed doubles** (the runs.ts panel, vote, finalization, override, end-to-end and decision-persistence specs, `activeTeamPanelWriteGuard`, `workspaceIntegrity`): `helpers/deletionTombstoneCollection.ts` installs a real, seedable, read-only tombstone collection. It does not stub the barrier, and the spec's own transaction model is untouched.
+- **Fidelity gap found while adding tests.** Four doubles' document references had no `id`. A real `DocumentReference` has one, and the barrier identifies the run by `runRef.id`. Without it, the tombstone read silently looked up `runDeletionJobs/undefined`, which passes vacuously. Each was fixed. Every writer family now has a positive refusal test (tombstone and mark) with a control showing the same call succeeds without them.
+- **Deliberate pins updated** in `workspaceReviewPanelMutations.spec.ts`:
+  - the import list goes from 24 to 25, with the barrier import classified read-only;
+  - the `runAbsent` guard text;
+  - the review route's add-site line.
+
+**Mutation testing.** Twelve new mutants, each removing the guard from every transaction in one file or weakening the helper, are all killed.
