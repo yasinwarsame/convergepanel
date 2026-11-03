@@ -237,6 +237,13 @@ describe("the barrier itself", () => {
     seedState("normal");
     for (const id of ["", "a/b", `${R}/exports`]) await expect(db.runTransaction((tx) => assertResearchWritable(tx as never, db as never, id))).rejects.toMatchObject({ refusal: "missing" });
   });
+  it("a path-like id that names an EXISTING subtree document (no deletion mark, no tombstone at that path) is still refused", async () => {
+    // Without the id check, `runs/${R}/exports/e1` would be read as "the run" (it exists and carries no deletion mark),
+    // and `runDeletionJobs/${R}/exports/e1` as "its tombstone" (absent), so the write would be allowed.
+    seedState("normal");
+    db.seed(`runs/${R}/exports/e1`, { reportSnapshot: { body: SECRET } });
+    await expect(db.runTransaction((tx) => assertResearchWritable(tx as never, db as never, `${R}/exports/e1`))).rejects.toMatchObject({ refusal: "missing" });
+  });
   it("the tombstone state does not matter: in_progress and failed jobs block writes too", async () => {
     for (const state of ["in_progress", "failed"]) {
       seedState("normal");

@@ -36,6 +36,8 @@ describe("afterTxReads hook", () => {
     const calls: number[] = [];
     db.hooks.afterTxReads = async (attempt) => {
       calls.push(attempt);
+      // Fail fast (a clean assertion failure, not an unbounded recursion) if the hook is ever re-entered.
+      if (calls.length > 4) throw new Error(`afterTxReads re-entered: ${calls.length} calls`);
       if (attempt === 0) await guardedLikeWriter("runs/r", 1); // the injected concurrent writer (its own transaction)
     };
     let outerAttempts = 0;
@@ -53,7 +55,10 @@ describe("afterTxReads hook", () => {
   it("a hook that keeps injecting on every attempt still terminates: the outer transaction aborts after its retry budget", async () => {
     db.seed("runs/r", { value: 0 });
     let n = 0;
-    db.hooks.afterTxReads = async () => guardedLikeWriter("runs/r", ++n);
+    db.hooks.afterTxReads = async () => {
+      if (n >= 20) throw new Error(`afterTxReads re-entered: ${n} injections`); // fail fast instead of recursing
+      await guardedLikeWriter("runs/r", ++n);
+    };
     await expect(
       db.runTransaction(async (tx) => {
         await tx.get(db.doc("runs/r") as never);

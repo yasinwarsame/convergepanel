@@ -158,13 +158,17 @@ Every result type, field, value, version assignment and failure code is unchange
   - Malformed ids.
   - Export lifecycle.
   - Verification and non-run paths are unchanged.
-- **`researchDeletionBarrier.emulator.spec.ts` (real Firestore emulator).**
-  - Six writers racing a deletion, 8 rounds each.
+- **`researchDeletionBarrier.emulator.spec.ts` (real Firestore emulator, 13 tests).**
+  - Seven writers racing a deletion, 8 rounds each, including a stale assignment-history writer.
   - A delayed writer holding its transaction open across the deletion.
   - A delayed export completion.
+  - An interrupted deletion (crash right after the tombstone), which already blocks every writer, then recovery.
   - Tombstone persistence, duplicate requests and id reuse.
   - Missing run documents.
   - A run in another workspace stays writable.
+- **`backfillDeletionBarrier.spec.ts`:** the audit backfill skips deleted and deleting runs, never un-redacts a row, and refuses a write whose run got a tombstone between read and commit. Verifications are unchanged.
+- **`fakeTransactionalFirestoreHooks.spec.ts`:** regression for the recursive test hook (see the diagnostics record).
+- **Barrier cases in each writer's own spec:** export, verification, Team claim, Team snapshot, Team projection, governance record, events, histories, evaluateAndStore, governance review, admin PATCH. Twenty-one legacy specs moved to transactional doubles (from non-transactional stubs, or from doubles missing `create`, query reads or the tombstone collection), with assertions kept. The per-spec classification is in [`research-deletion-integrity-test-diagnostics.md`](./research-deletion-integrity-test-diagnostics.md).
 - **Existing suites:**
   - S1 deletion: normal, purge, interrupted and retried, partial failure, concurrent, orphan, isolation, archive and governed;
   - report review (B1/B2/B3) and the allow-list;
