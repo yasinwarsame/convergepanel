@@ -385,3 +385,29 @@ describe("admin DELETE route resumes an unfinished deletion by runId (review S1-
     expect((await del("never-existed")).status).toBe(404);
   });
 });
+
+describe("verification ordering (review S1-M-1 mutation gaps)", () => {
+  it("a copy that appears before the pre-check makes the deletion incomplete while the run document is STILL present (ordinary retry)", async () => {
+    await reviewedRun();
+    db.seed(`teamRuns/t_${RUN}`, { runId: RUN });
+    db.hooks = {
+      failWrite: (w) => {
+        if (w.kind === "delete" && w.path === `teamRuns/t_${RUN}`) db.seed("workspaceMembershipEvents/latePre", { eventType: "workspace_research_assignee_changed", workspaceId: W, runId: RUN, runQuestion: SECRET_Q, at: Timestamp.now() });
+      },
+    };
+    expect(await deleteResearchRun({ runId: RUN, actorUid: "uid-sysadmin", reason: "admin_delete" })).toMatchObject({ status: "incomplete", step: "verify" });
+    expect(db.read(`runs/${RUN}`)).toBeDefined(); // never removed while a copy still carries research text
+    db.hooks = {};
+    expect((await deleteResearchRun({ runId: RUN, actorUid: "uid-sysadmin", reason: "admin_delete" })).status).toBe("deleted");
+    assertNothingLeft(RUN);
+  });
+
+  it("a snapshot lock that reappears at the end is caught by the final verification", async () => {
+    await reviewedRun();
+    db.hooks = { failWrite: (w) => { if (w.kind === "delete" && w.path === `runs/${RUN}`) db.seed("runSnapshotLocks/lateLock", { snapshotRunId: RUN }); } };
+    expect(await deleteResearchRun({ runId: RUN, actorUid: "uid-sysadmin", reason: "admin_delete" })).toMatchObject({ status: "incomplete", step: "verify" });
+    db.hooks = {};
+    expect((await deleteResearchRun({ runId: RUN, actorUid: "uid-sysadmin", reason: "admin_delete" })).status).toBe("deleted");
+    expect(db.read("runSnapshotLocks/lateLock")).toBeUndefined();
+  });
+});
