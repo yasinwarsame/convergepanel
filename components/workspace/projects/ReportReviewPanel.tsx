@@ -400,7 +400,9 @@ export default function ReportReviewPanel({ workspaceId, runId, canCreateExport 
             ? decided
               ? `This research has changed since review cycle ${record.cycle} was submitted. The decision above applies only to the version that was submitted, not to the current research.`
               : "This research has changed since it was submitted, so no decision can be recorded for this cycle. It must be submitted again for a new review."
-            : viewer.canResubmit
+            : decided
+              ? `The decision above can't be checked against the current research, because the content of review cycle ${record.cycle} can't be verified. It applies only to the version that was submitted.`
+              : viewer.canResubmit
               ? "The submitted content of this cycle can't be verified, so no decision can be recorded. Submit it again to start a new review."
               : "The content of this cycle can't be verified, so no decision can be recorded."}
         </p>

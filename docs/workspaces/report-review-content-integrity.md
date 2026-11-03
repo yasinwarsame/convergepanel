@@ -42,7 +42,7 @@ Tests check every listed exclusion, plus a non-content change made in normal use
 - **Null and absent:** `null` is kept, and an absent field stays absent; the two are distinct. `undefined` (never stored by Firestore) is treated as absent.
 - **Numbers:** must be finite, serialized per ECMAScript. `-0` becomes `0`; `1` and `1.0` are the same value, as in Firestore.
 - **Timestamps and Dates:** become `{"$timestamp":"<seconds>.<9-digit ns>"}`, so one instant is always the same text.
-- **Anything else fails closed** as `unsupported_value`: GeoPoint, DocumentReference, bytes, NaN, Infinity, bigint and functions. Submission is refused with `content_unfingerprintable` rather than recording a fingerprint that does not cover the content.
+- **Anything else fails closed** as `unsupported_value`: GeoPoint, DocumentReference, bytes, NaN, Infinity, bigint, functions, and any stored map with a `$timestamp` key (so the encoding is unambiguous). Submission is refused with `content_unfingerprintable` rather than recording a fingerprint that does not cover the content.
 - **Bound:** canonical content over 4 MiB fails closed (`too_large`). A Firestore document is at most 1 MiB, so real runs are well inside this.
 - **Fingerprint:** `{ version: "rrc-v1", algorithm: "sha256", digest: hex(SHA-256("rrc-v1\n" + canonical)), canonicalBytes }`.
 - **Golden test:** a fixed fixture's digest is pinned. It was computed by an **independent** implementation (Python `json.dumps(sort_keys=True, separators=(",",":"), ensure_ascii=False)`), not by the code under test.
@@ -61,9 +61,11 @@ Tests check every listed exclusion, plus a non-content change made in normal use
   - the Audit Log records `workspace_report_review_resubmitted` with `closedReason: "content_changed"`;
   - a new cycle starts on the new content.
 - **Open cycle with unchanged content:** still cannot be resubmitted (`not_decided`).
+- **Open cycle with no stored fingerprint** (written before Order A): it can never be decided. It can always be resubmitted, which closes it undecided with `closedReason: "content_unverifiable"`.
+- **Current content that can no longer be fingerprinted:** no decision can be recorded and no resubmission is offered, because the resubmit transaction would refuse with `content_unfingerprintable`.
 - **Previous decisions:** a decided cycle's record, and its archive after resubmission, keep their original fingerprint forever. Later research changes never rewrite or broaden them.
 - **Context, panel and export:** they show `contentIntegrity` (`matches`, `changed` or `unverifiable`). When it is not `matches`:
-  - no decision is offered, and the panel explains why and offers resubmission;
+  - no decision is offered, and the panel explains why, offering resubmission only when the resubmit transaction would accept it;
   - a decided cycle is marked as applying only to the version submitted;
   - the export states plainly that the content shown is the **current** research, **not** the reviewed version.
 - **Governed review:** unchanged. No governed decision, assignment or panel module references the fingerprint (pinned statically).

@@ -292,6 +292,14 @@ describe("Audit Log client accepts report-review rows (one unrecognised row woul
     { eventType: "workspace_report_review_decided", occurredAt: "2026-11-02T11:00:00.000Z", actor: { displayName: "Rae" }, research: { question: "Q" }, cycle: 1, status: "approved", purpose: "other" },
     { eventType: "workspace_member_removed", occurredAt: "2026-11-02T11:00:00.000Z", actor: { displayName: "Ada" }, target: { displayName: "Bo" }, previousRole: "member" },
   ];
+  it.each(["decided", "content_changed", "content_unverifiable"])("the client accepts a resubmission row closed as %s, and the row explains it", async (closedReason) => {
+    const row = { ...rows[1], closedReason };
+    mockedAuthedFetch.mockResolvedValueOnce(response(200, { ok: true, events: [row], hasMore: false }));
+    expect((await fetchWorkspaceAuditEvents({ user: null, authReady: true, workspaceId: WS })).status).toBe("ok");
+    const r = TestRenderer.create(createElement(ReportReviewAuditEntry, { event: row as never }));
+    expect(text(r)).toContain(closedReason === "decided" ? "was archived and cycle 2 started" : "closed without a decision");
+  });
+
   it("a mixed page parses", async () => {
     mockedAuthedFetch.mockResolvedValueOnce(response(200, { ok: true, events: rows, hasMore: false }));
     const res = await fetchWorkspaceAuditEvents({ user: null, authReady: true, workspaceId: WS });

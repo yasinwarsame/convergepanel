@@ -233,6 +233,12 @@ describe("Audit Log reader", () => {
     expect(res.status === "ok" && res.items[0]).toMatchObject({ change: "reassigned", previousReviewer: { displayName: "Sam" }, reviewer: { displayName: "Sam" } });
   });
 
+  it.each(["decided", "content_changed", "content_unverifiable"])("a resubmission row closed as %s is projected (never silently dropped)", async (closedReason) => {
+    db.seed("workspaceMembershipEvents/rs", { workspaceId: W, actorUid: MEMBER, runId: RUN, projectId: null, runQuestion: "Q", eventType: "workspace_report_review_resubmitted", cycle: 2, fromCycle: 1, purposeCode: "other", clearedReviewerUid: null, closedReason, at: Timestamp.fromDate(new Date("2026-11-02T11:00:00Z")) });
+    const res = await listWorkspaceAuditEvents({ workspaceId: W, limit: 20 });
+    expect(res.status === "ok" && res.items.map((i) => (i as { closedReason?: string }).closedReason)).toEqual([closedReason]);
+  });
+
   it("another Workspace's rows are never returned (query scope + row check)", async () => {
     await submit();
     const res = await listWorkspaceAuditEvents({ workspaceId: W2, limit: 20 });
