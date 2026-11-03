@@ -193,6 +193,9 @@ describe("AR11 — explicit 300 s route duration on exactly the research executi
         "app/api/synthesize-panel/route.ts",
         "app/api/verify-video/route.ts",
         "app/api/workspaces/[workspaceId]/video-verifications/route.ts",
+        // Order A / S1 (owner-approved 2026-11-03): durable research deletion makes purge slower than a batch delete;
+        // the purge route runs under a 240 s budget inside a 300 s function limit (not a research execution route).
+        "app/api/admin/purge-runs/route.ts",
       ].sort()
     );
   });
