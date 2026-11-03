@@ -621,9 +621,11 @@ function makeSubDocRef(subCollectionName: string, parentCollectionName: string, 
  * call today. `add()`, `Transaction.create`/`delete` and `batch()` were absent — so a write through
  * any of them threw a `TypeError`, and the module's own established house style for post-commit
  * audit writes (`try { await write } catch { logger.warn(...) }`) swallowed it. `.add()` is in fact
- * used at FIVE [[count:addSites=5]] `.collection("governanceEvents").add(` sites in this repo: two in
- * `lib/firestore/runs.ts`, one in `lib/governance/governanceBackfill.ts`, one in
- * `lib/governance/evaluateAndStore.ts`, and one in `app/api/governance/review/route.ts`.
+ * used at THREE [[count:addSites=3]] `.collection("governanceEvents").add(` sites in this repo: one in
+ * `lib/governance/governanceBackfill.ts`, one in `lib/governance/evaluateAndStore.ts` and one in
+ * `app/api/governance/review/route.ts` (the last two for verification/video documents only). The research deletion
+ * integrity correction (2026-11-03) removed the two `lib/firestore/runs.ts` sites and the research-run paths of the
+ * other two: those events are now created inside a transaction guarded by the deletion barrier.
  *
  * R9 §60 — this count has now been wrong twice (see RETRACTED_PHRASES entry 5, then "FOUR", which missed
  * the `app/` route because the search was scoped to `lib/`). It is no longer a
@@ -3908,22 +3910,22 @@ describe("documented counts and retracted claims (§59/§60)", () => {
 });
 
 describe("governance-event `.add()` write sites — derived from the repository (§60)", () => {
-  it("there are exactly FIVE, and they are these — a sixth fails here instead of outdating a comment", () => {
+  it("there are exactly THREE, and they are these — a fourth fails here instead of outdating a comment", () => {
+    // Research deletion integrity (2026-11-03): the two runs.ts sites and the research-run paths of evaluateAndStore and
+    // the governance review route now create the event in a transaction guarded by the deletion barrier.
     const sites = countGovernanceEventAddSites();
     expect(sites).toEqual([
-      "app/api/governance/review/route.ts:373",
-      "lib/firestore/runs.ts:760",
-      "lib/governance/evaluateAndStore.ts:88",
+      "app/api/governance/review/route.ts:401",
+      "lib/governance/evaluateAndStore.ts:127",
       "lib/governance/governanceBackfill.ts:63",
-      "lib/firestore/runs.ts:1002",
     ].sort());
-    expect(`addSiteCount:${sites.length}`).toBe("addSiteCount:5");
+    expect(`addSiteCount:${sites.length}`).toBe("addSiteCount:3");
   });
 
-  it("the R8 count of FOUR was wrong because it searched only `lib/` — the app route is the fifth", () => {
+  it("the walker searches `app/` as well as `lib/` (the R8 count missed the app route)", () => {
     const sites = countGovernanceEventAddSites();
-    expect(sites.filter((s) => s.startsWith("lib/")).length).toBe(4);
-    expect(sites.filter((s) => s.startsWith("app/"))).toEqual(["app/api/governance/review/route.ts:373"]);
+    expect(sites.filter((s) => s.startsWith("lib/")).length).toBe(2);
+    expect(sites.filter((s) => s.startsWith("app/"))).toEqual(["app/api/governance/review/route.ts:401"]);
   });
 
   it("the detector is not vacuously blind: it finds nothing in a tree with no such call, and finds one when there is one", () => {

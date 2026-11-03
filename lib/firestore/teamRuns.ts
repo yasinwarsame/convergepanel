@@ -23,6 +23,7 @@
 import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
+import { guardedResearchCreate } from "@/lib/firestore/researchDeletionBarrier";
 import { AdaptiveTeamRunProjection, buildAdaptiveTeamRunProjectionId } from "@/lib/governance/adaptiveTeamReview";
 
 export type CreateAdaptiveTeamRunProjectionResult =
@@ -41,7 +42,9 @@ export async function createAdaptiveTeamRunProjection(
   const projectionId = buildAdaptiveTeamRunProjectionId(projection.teamId, projection.runId);
 
   try {
-    await adminDb.collection("teamRuns").doc(projectionId).create(projection);
+    // Deletion barrier: the projection carries the receipt conclusion, so it is created only while the run is writable.
+    const created = await guardedResearchCreate(adminDb, projection.runId, adminDb.collection("teamRuns").doc(projectionId), projection as unknown as FirebaseFirestore.DocumentData);
+    if (created === "already_exists") return { status: "already_exists", projectionId };
     return { status: "created", projectionId };
   } catch (err: unknown) {
     // Firestore's Admin SDK surfaces "document already exists" as an

@@ -3,30 +3,24 @@
  * writeAdaptiveHumanReviewEvent() tests (docs/governance-decision-receipts-design.md §21.10).
  */
 
-const eventsByRunId = new Map<string, Record<string, unknown>[]>();
+// Research deletion integrity (2026-11-03): the event is now created in a transaction guarded by the deletion barrier,
+// so the spec uses the shared transactional fake. `addCalls()` lists the applied event writes as
+// [collection, runId, subcollection, event], the same tuple the old add() spy recorded.
+import { FakeTransactionalFirestore } from "@/lib/workspaces/__tests__/helpers/fakeTransactionalFirestore";
+const db = new FakeTransactionalFirestore();
 const firestoreUnavailableFlag = { value: false };
-const addMock = jest.fn();
-
-const mockAdminDb: any = {
-  collection: (name: string) => ({
-    doc: (id: string) => ({
-      collection: (subName: string) => ({
-        add: jest.fn().mockImplementation(async (event: Record<string, unknown>) => {
-          addMock(name, id, subName, event);
-          const key = `${id}/${subName}`;
-          const existing = eventsByRunId.get(key) || [];
-          existing.push(event);
-          eventsByRunId.set(key, existing);
-          return { id: `event-${existing.length}` };
-        }),
-      }),
-    }),
-  }),
-};
+const addCalls = () =>
+  db.writeLog
+    .filter((w) => w.kind === "create")
+    .map((w) => {
+      const [collectionName, docId, subName] = w.path.split("/");
+      return [collectionName, docId, subName, w.data] as [string, string, string, Record<string, unknown>];
+    });
+const addMock = { get mock() { return { calls: addCalls() }; } };
 
 jest.mock("@/lib/firebase/admin", () => ({
   get adminDb() {
-    return firestoreUnavailableFlag.value ? null : mockAdminDb;
+    return firestoreUnavailableFlag.value ? null : db;
   },
 }));
 
@@ -38,9 +32,11 @@ jest.mock("@/lib/logger", () => ({
 import { writeAdaptiveHumanReviewEvent } from "@/lib/firestore/runs";
 
 beforeEach(() => {
-  eventsByRunId.clear();
+  db.docs.clear();
+  db.hooks = {};
+  db.writeLog = [];
+  db.seed("runs/run-1", { userId: "owner" });
   firestoreUnavailableFlag.value = false;
-  addMock.mockClear();
   mockLoggerWarn.mockClear();
 });
 
@@ -59,7 +55,7 @@ describe("writeAdaptiveHumanReviewEvent", () => {
   it("writes to runs/{runId}/governanceEvents with action 'human_review_decided'", async () => {
     const result = await writeAdaptiveHumanReviewEvent(BASE_ARGS);
     expect(result).toEqual({ written: true });
-    expect(addMock).toHaveBeenCalledTimes(1);
+    expect(addCalls()).toHaveLength(1);
     const [collectionName, docId, subName, event] = addMock.mock.calls[0];
     expect(collectionName).toBe("runs");
     expect(docId).toBe("run-1");
@@ -108,17 +104,13 @@ describe("writeAdaptiveHumanReviewEvent", () => {
     firestoreUnavailableFlag.value = true;
     const result = await writeAdaptiveHumanReviewEvent(BASE_ARGS);
     expect(result).toEqual({ written: false, reason: "firestore_unavailable" });
-    expect(addMock).not.toHaveBeenCalled();
+    expect(addCalls()).toHaveLength(0);
   });
 
   it("returns write_failed without throwing on an unexpected Firestore error", async () => {
-    (mockAdminDb as any).collection = () => ({
-      doc: () => ({
-        collection: () => ({
-          add: jest.fn().mockRejectedValue(new Error("boom")),
-        }),
-      }),
-    });
+    db.hooks.failCommit = () => {
+      throw new Error("boom");
+    };
     const result = await writeAdaptiveHumanReviewEvent(BASE_ARGS);
     expect(result).toEqual({ written: false, reason: "write_failed" });
     expect(mockLoggerWarn).toHaveBeenCalled();
@@ -128,6 +120,18 @@ describe("writeAdaptiveHumanReviewEvent", () => {
     await writeAdaptiveHumanReviewEvent(BASE_ARGS);
     for (const call of addMock.mock.calls) {
       expect(call[2]).not.toBe("admin_audit_logs");
+    }
+    expect(db.writeLog.filter((w) => w.path.startsWith("admin_audit_logs/"))).toEqual([]);
+  });
+
+  it("deletion barrier: a run that is deleted, being deleted or missing gets no event", async () => {
+    for (const setup of [() => db.seed("runDeletionJobs/run-1", { state: "complete" }), () => db.seed("runs/run-1", { deletion: { state: "pending" } }), () => db.docs.delete("runs/run-1")]) {
+      db.docs.clear();
+      db.writeLog = [];
+      db.seed("runs/run-1", { userId: "owner" });
+      setup();
+      expect(await writeAdaptiveHumanReviewEvent(BASE_ARGS)).toEqual({ written: false, reason: "write_failed" });
+      expect(addCalls()).toHaveLength(0);
     }
   });
 });

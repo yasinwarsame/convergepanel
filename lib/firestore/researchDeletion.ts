@@ -32,7 +32,13 @@ import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
 
-export const RUN_DELETION_JOBS_COLLECTION = "runDeletionJobs";
+import { RESEARCH_DELETION_TOMBSTONE_COLLECTION } from "@/lib/firestore/researchDeletionBarrier";
+
+/**
+ * The job record doubles as the PERMANENT deletion tombstone (researchDeletionBarrier.ts): it is written first and never
+ * deleted, and every research writer refuses a run that has one.
+ */
+export const RUN_DELETION_JOBS_COLLECTION = RESEARCH_DELETION_TOMBSTONE_COLLECTION;
 export const REDACTED_ADMIN_AUDIT_QUESTION = "[deleted research]";
 const PAGE = 300;
 

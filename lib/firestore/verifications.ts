@@ -4,6 +4,7 @@
 
 import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
+import { runResearchWrite } from "@/lib/firestore/researchDeletionBarrier";
 import { Timestamp } from "firebase-admin/firestore";
 import type { AuditBundle } from "@/lib/verification/auditBundle";
 import type { ClaimVerdict } from "@/lib/verification/claimVerdict";
@@ -93,5 +94,13 @@ export async function saveClaimVerification(
     timestamp: doc.timestamp ?? Timestamp.now(),
   };
   const safe = sanitizeForFirestore(payload) as ClaimVerificationFirestoreDoc;
-  await adminDb.collection("verifications").doc(verificationId).set(safe);
+  const ref = adminDb.collection("verifications").doc(verificationId);
+  // Research deletion integrity: an origin-linked verification copies the source run's evidence sources, so it is written
+  // only while that run is writable, checked in the same transaction. A deleted source refuses the save (it throws).
+  const originRunId = (doc as { origin?: { runId?: unknown } }).origin?.runId;
+  if (typeof originRunId === "string") {
+    await runResearchWrite(adminDb, originRunId, (tx) => void tx.set(ref, safe));
+    return;
+  }
+  await ref.set(safe);
 }

@@ -61,6 +61,7 @@ import "server-only";
 import { randomUUID } from "crypto";
 import { Timestamp } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase/admin";
+import { assertResearchWritable, isResearchWriteRefusedError } from "@/lib/firestore/researchDeletionBarrier";
 import { logger } from "@/lib/logger";
 import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS, WORKSPACES_ENABLED } from "@/lib/env";
 import { resolveTeamWorkspaceTargetAdmission } from "@/lib/workspaces/teamWorkspaceTargetAdmission";
@@ -281,9 +282,14 @@ export async function createTeamRunSnapshotFromPersonal(args: {
       }
 
       // 4. Source — shape BEFORE owner, owner BEFORE status; one concealed outcome.
-      const sourceSnap = await tx.get(sourceRef);
-      if (!sourceSnap.exists) {
-        return { kind: "source_not_found" };
+      // Research deletion integrity: a source that is deleted or being deleted (tombstone or mark) is never copied. It is
+      // the same concealed outcome as a missing source.
+      let sourceSnap: FirebaseFirestore.DocumentSnapshot;
+      try {
+        sourceSnap = await assertResearchWritable(tx, adminDb!, sourceRef.id);
+      } catch (err) {
+        if (isResearchWriteRefusedError(err)) return { kind: "source_not_found" };
+        throw err;
       }
       const source = sourceSnap.data() as Record<string, unknown> | undefined;
       if (!source) {

@@ -45,6 +45,8 @@ async function auditActorEmail(uid: string): Promise<string> {
 }
 import { adminDb } from "@/lib/firebase/admin";
 import { writeAuditEvent } from "@/lib/governance/auditLog";
+import { createGovernanceAuditRowInTx } from "@/lib/governance/governanceAuditRow";
+import { isResearchWriteRefusedError, runResearchWrite } from "@/lib/firestore/researchDeletionBarrier";
 import { sanitizeForFirestore } from "@/lib/firestore/sanitizeForFirestore";
 import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
 import { logger } from "@/lib/logger";
@@ -167,39 +169,58 @@ export async function PATCH(
       : "Admin governance override";
 
   const ref = adminDb.collection(collection).doc(runId);
-  const snap = await ref.get();
-  if (!snap.exists) {
-    return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
-  }
-  const prev = snap.data() as Record<string, unknown>;
-  const prevStatus = typeof prev.governanceStatus === "string" ? prev.governanceStatus : null;
-
-  await ref.set(
+  const statusPatch = (): DocumentData =>
     sanitizeForFirestore({
       governanceStatus: status,
       governanceReviewedBy: auth.uid,
       governanceReviewedAt: new Date().toISOString(),
       governanceReviewComment: comment,
-    }) as DocumentData,
-    { merge: true }
-  );
+    }) as DocumentData;
+  const overrideAudit = (prev: Record<string, unknown>, byEmail: unknown) => {
+    const prevStatus = typeof prev.governanceStatus === "string" ? prev.governanceStatus : null;
+    return {
+      action: "admin_override",
+      runId,
+      collection,
+      runType: auditRunType(collection),
+      byUid: auth.uid,
+      byEmail,
+      comment,
+      prevStatus: prevStatus ?? undefined,
+      nextStatus: status,
+      runOwnerUid: String(prev.userId ?? prev.uid ?? ""),
+      runOwnerEmail: typeof prev.userEmail === "string" ? prev.userEmail : "",
+      question: auditQuestionFromDoc(collection, prev),
+      consensusScore: typeof prev.consensusScore === "number" ? prev.consensusScore : null,
+    };
+  };
 
-  const question = auditQuestionFromDoc(collection, prev);
-  await writeAuditEvent({
-    action: "admin_override",
-    runId,
-    collection,
-    runType: auditRunType(collection),
-    byUid: auth.uid,
-    byEmail: await auditActorEmail(auth.uid),
-    comment,
-    prevStatus: prevStatus ?? undefined,
-    nextStatus: status,
-    runOwnerUid: String(prev.userId ?? prev.uid ?? ""),
-    runOwnerEmail: typeof prev.userEmail === "string" ? prev.userEmail : "",
-    question,
-    consensusScore: typeof prev.consensusScore === "number" ? prev.consensusScore : null,
-  });
+  if (collection === "runs") {
+    // Research deletion integrity: the override and its audit row (question, comment) are written in one transaction
+    // guarded by the deletion barrier, from the run as read inside it. A deleted or deleting run is Not found.
+    const db = adminDb;
+    const byEmail = await auditActorEmail(auth.uid);
+    try {
+      await runResearchWrite(db, runId, (tx, run) => {
+        tx.set(ref, statusPatch(), { merge: true });
+        createGovernanceAuditRowInTx(tx, db, overrideAudit(run.data() as Record<string, unknown>, byEmail));
+      });
+    } catch (err) {
+      if (isResearchWriteRefusedError(err)) return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
+      throw err;
+    }
+    return NextResponse.json({ ok: true, runId, collection, governanceStatus: status });
+  }
+
+  const snap = await ref.get();
+  if (!snap.exists) {
+    return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
+  }
+  const prev = snap.data() as Record<string, unknown>;
+
+  await ref.set(statusPatch(), { merge: true });
+
+  await writeAuditEvent(overrideAudit(prev, await auditActorEmail(auth.uid)));
 
   return NextResponse.json({ ok: true, runId, collection, governanceStatus: status });
 }

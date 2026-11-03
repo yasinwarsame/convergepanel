@@ -203,10 +203,37 @@ function makeFakeAdminDb() {
     };
   }
 
+  /**
+   * Research deletion integrity (2026-11-03): the deletion tombstone collection the barrier reads inside every export
+   * transaction. Version-tracked like every other document, so a tombstone written between a transaction's read and its
+   * commit forces the retry, as in real Firestore.
+   */
+  const tombstones = new Map<string, Record<string, any>>();
+  function tombstoneRef(runId: string) {
+    const key = `runDeletionJobs/${runId}`;
+    return {
+      __key: key,
+      id: runId,
+      async get() {
+        const snapshot = tombstones.has(runId) ? { ...tombstones.get(runId) } : undefined;
+        return { exists: tombstones.has(runId), data: () => snapshot };
+      },
+      set(data: any) {
+        tombstones.set(runId, data);
+        bumpVersion(key);
+      },
+    };
+  }
+
   const adminDb: any = {
     collection(name: string) {
+      if (name === "runDeletionJobs") return { doc: (runId: string) => tombstoneRef(runId) };
       if (name !== "runs") throw new Error(`unexpected collection ${name}`);
       return { doc: (runId: string) => runDocRef(runId) };
+    },
+    /** Test fixture: an existing run (exports are only ever created for one). */
+    seedRun(runId: string, data: Record<string, any> = { userId: "uid-1" }) {
+      if (!runs.has(runId)) runDocRef(runId).set(data);
     },
     /**
      * Real optimistic-concurrency simulation: each attempt tracks the
@@ -224,6 +251,13 @@ function makeFakeAdminDb() {
         const pendingWrites: Array<{ ref: any; data: any; opts?: any }> = [];
         const txn = {
           get: async (ref: any) => {
+            if (ref.__key === undefined) {
+              // A query read inside the transaction (supersedeOlderAdaptiveExports): every returned document joins the
+              // read set, as in real Firestore.
+              const snap = await ref.get();
+              for (const d of snap.docs) if (!readVersions.has(d.ref.__key)) readVersions.set(d.ref.__key, currentVersion(d.ref.__key));
+              return snap;
+            }
             if (!readVersions.has(ref.__key)) readVersions.set(ref.__key, currentVersion(ref.__key));
             return ref.get();
           },
@@ -273,6 +307,8 @@ import {
 } from "@/lib/firestore/adaptiveExports";
 
 function buildInput(runId: string, exportId: string, question: string): CreateAdaptiveExportInput {
+  // Research deletion integrity: an export is only ever created for an existing run, so the fixture seeds it.
+  (fakeAdminDb as any).seedRun(runId);
   return {
     runId,
     exportId,
@@ -739,5 +775,50 @@ describe("listAdaptiveExportRecords (Phase 2 — historical export listing)", ()
       expect(new Set(allSeen).size).toBe(allSeen.length); // no duplicates across the two pages
       expect(allSeen).not.toContain(7); // the newly-inserted head item never leaks into an already-cursored older page
     });
+  });
+});
+
+describe("research deletion integrity — the export writers refuse a deleted, deleting or missing run (Order 6 exact-file exception)", () => {
+  it("a tombstone, a deletion mark or a missing run refuses create / ready / failed / supersede, and writes nothing", async () => {
+    const { markAdaptiveExportFailed } = require("@/lib/firestore/adaptiveExports");
+    const tomb = "run-del-tomb";
+    const mark = "run-del-mark";
+    const inputTomb = buildInput(tomb, "exp-1", "Q");
+    const inputMark = buildInput(mark, "exp-1", "Q");
+    fakeAdminDb.collection("runDeletionJobs").doc(tomb).set({ state: "complete" });
+    fakeAdminDb.collection("runs").doc(mark).set({ deletion: { state: "pending" } }, { merge: true });
+    // A run that was never seeded (or was deleted before tombstones existed): same input shape, different run id.
+    const inputMissing = { ...inputTomb, runId: "run-del-never-seeded" };
+    for (const input of [inputTomb, inputMark, inputMissing]) {
+      expect(await createAdaptiveExportRecord(input)).toEqual({ ok: false, reason: "write_failed" });
+      expect(await markAdaptiveExportReady(input.runId, "exp-1", "h")).toEqual({ ok: false, reason: "write_failed" });
+      expect(await markAdaptiveExportFailed(input.runId, "exp-1", "x")).toEqual({ ok: false, reason: "write_failed" });
+      expect(await supersedeOlderAdaptiveExports(input.runId, "exp-1")).toEqual({ ok: false, reason: "write_failed" });
+      expect(exportDocs.get(input.runId)?.size ?? 0).toBe(0);
+    }
+    expect((await fakeAdminDb.collection("runs").doc("run-del-never-seeded").get()).exists).toBe(false); // no counter stub
+  });
+
+  it("a tombstone written between the export transaction's read and its commit forces a retry that refuses (no stub, no snapshot)", async () => {
+    const runId = "run-del-race";
+    const input = buildInput(runId, "exp-1", "Q");
+    const realRun = fakeAdminDb.runTransaction.bind(fakeAdminDb);
+    let injected = false;
+    (fakeAdminDb as any).runTransaction = (fn: (txn: any) => Promise<any>) =>
+      realRun(async (txn: any) => {
+        const r = await fn(txn);
+        if (!injected) {
+          injected = true;
+          fakeAdminDb.collection("runDeletionJobs").doc(runId).set({ state: "in_progress" }); // the deletion starts now
+        }
+        return r;
+      });
+    try {
+      expect(await createAdaptiveExportRecord(input)).toEqual({ ok: false, reason: "write_failed" });
+    } finally {
+      (fakeAdminDb as any).runTransaction = realRun;
+    }
+    expect(injected).toBe(true);
+    expect(exportDocs.get(runId)?.size ?? 0).toBe(0);
   });
 });

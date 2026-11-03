@@ -3,94 +3,40 @@
  * / createAdaptiveHumanReviewAssignmentHistory() tests.
  */
 
-const runDocs = new Map<string, Record<string, any>>();
-const assignmentDocs = new Map<string, Record<string, any>>();
-const assignmentHistoryDocs = new Map<string, Record<string, any>>();
+// Research deletion integrity (2026-11-03): the assignment-history writer now creates its entry in a transaction guarded
+// by the deletion barrier. The previous double was a single-attempt transaction that told refs apart by tags, and it
+// could not represent the tombstone or the run read. It is replaced by the shared transactional fake, which models
+// read-before-write, conflicts, retries and create() exclusivity. The three stores keep their original keys
+// (`${runId}/${docId}`) as views over it.
+import { FakeTransactionalFirestore } from "@/lib/workspaces/__tests__/helpers/fakeTransactionalFirestore";
+import { runDocView, storeView } from "@/lib/workspaces/__tests__/helpers/fakeStoreViews";
+const db = new FakeTransactionalFirestore();
+const subView = (sub: string) =>
+  storeView(
+    db,
+    (k) => {
+      const [runId, docId] = k.split("/");
+      return `runs/${runId}/${sub}/${docId}`;
+    },
+    (p) => {
+      const m = /^runs\/([^/]+)\/([^/]+)\/([^/]+)$/.exec(p);
+      return m && m[2] === sub ? `${m[1]}/${m[3]}` : null;
+    }
+  );
+const runDocs = runDocView(db);
+const assignmentDocs = subView("humanReviewAssignment");
+const assignmentHistoryDocs = subView("humanReviewAssignmentHistory");
 const firestoreUnavailableFlag = { value: false };
-
-function alreadyExistsError() {
-  const err: any = new Error("6 ALREADY_EXISTS");
-  err.code = 6;
-  return err;
-}
-
-const mockAdminDb: any = {
-  collection: (name: string) => ({
-    doc: (runId: string) => ({
-      id: runId,
-      get: jest.fn().mockImplementation(async () => ({ exists: runDocs.has(runId), data: () => runDocs.get(runId) })),
-      collection: (subName: string) => ({
-        doc: (docId: string) => ({
-          get: jest.fn().mockImplementation(async () => {
-            const store = subName === "humanReviewAssignment" ? assignmentDocs : assignmentHistoryDocs;
-            const key = `${runId}/${docId}`;
-            return { exists: store.has(key), data: () => store.get(key) };
-          }),
-          create: jest.fn().mockImplementation(async (value: Record<string, unknown>) => {
-            const key = `${runId}/${docId}`;
-            if (assignmentHistoryDocs.has(key)) throw alreadyExistsError();
-            assignmentHistoryDocs.set(key, value);
-          }),
-        }),
-      }),
-    }),
-  }),
-  runTransaction: jest.fn().mockImplementation(async (fn: (txn: any) => Promise<any>) => {
-    const txn = {
-      get: async (ref: { id: string }) => {
-        // Distinguish run refs from assignment refs by whether the id has been seeded as a run.
-        if (runDocs.has(ref.id) || !assignmentDocs.has(`${ref.id}/current`)) {
-          // Heuristic won't work generically; instead route via a tagged ref.
-        }
-        return (ref as any).__isAssignmentRef
-          ? { exists: assignmentDocs.has(`${(ref as any).__runId}/current`), data: () => assignmentDocs.get(`${(ref as any).__runId}/current`) }
-          : { exists: runDocs.has(ref.id), data: () => runDocs.get(ref.id) };
-      },
-      set: (ref: { id: string }, value: Record<string, unknown>) => {
-        assignmentDocs.set(`${(ref as any).__runId}/current`, value);
-      },
-    };
-    return fn(txn);
-  }),
-};
 
 jest.mock("@/lib/firebase/admin", () => ({
   get adminDb() {
-    return firestoreUnavailableFlag.value ? null : mockAdminDb;
+    return firestoreUnavailableFlag.value ? null : db;
   },
 }));
 
 jest.mock("@/lib/logger", () => ({
   logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() },
 }));
-
-// Patch collection().doc().collection().doc() to tag assignment refs so the
-// transaction fake above can distinguish "runs/{id}" refs from
-// "runs/{id}/humanReviewAssignment/current" refs without over-engineering a
-// full generic path-aware fake (this file only needs those two ref shapes).
-const originalCollection = mockAdminDb.collection;
-mockAdminDb.collection = (name: string) => {
-  const base = originalCollection(name);
-  return {
-    doc: (runId: string) => {
-      const runRef = base.doc(runId);
-      return {
-        ...runRef,
-        id: runId,
-        collection: (subName: string) => {
-          const subCollection = runRef.collection(subName);
-          return {
-            ...subCollection,
-            doc: (docId: string) => {
-              const docRef = subCollection.doc(docId);
-              return { ...docRef, id: docId, __isAssignmentRef: subName === "humanReviewAssignment" && docId === "current", __runId: runId };
-            },
-          };
-        },
-      };
-    },
-  };
-};
 
 import {
   submitAdaptiveHumanReviewAssignment,
@@ -437,6 +383,22 @@ describe("getAdaptiveHumanReviewAssignment", () => {
 });
 
 describe("createAdaptiveHumanReviewAssignmentHistory", () => {
+  // History is written only for an existing, writable run (deletion barrier).
+  beforeEach(() => {
+    runDocs.set(RUN_ID, { governanceRecord: governanceRecord() });
+  });
+
+  it("deletion barrier: a run that is deleted, being deleted or missing gets no history entry", async () => {
+    db.seed(`runDeletionJobs/${RUN_ID}`, { state: "in_progress" });
+    expect(await createAdaptiveHumanReviewAssignmentHistory(RUN_ID, entry())).toEqual({ status: "failed" });
+    db.docs.delete(`runDeletionJobs/${RUN_ID}`);
+    runDocs.set(RUN_ID, { governanceRecord: governanceRecord(), deletion: { state: "pending" } });
+    expect(await createAdaptiveHumanReviewAssignmentHistory(RUN_ID, entry())).toEqual({ status: "failed" });
+    runDocs.delete(RUN_ID);
+    expect(await createAdaptiveHumanReviewAssignmentHistory(RUN_ID, entry())).toEqual({ status: "failed" });
+    expect(assignmentHistoryDocs.size).toBe(0);
+  });
+
   function entry(overrides: Record<string, unknown> = {}) {
     return buildAdaptiveHumanReviewAssignmentHistoryEntry({
       teamId: TEAM_ID,

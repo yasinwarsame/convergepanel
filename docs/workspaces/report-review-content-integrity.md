@@ -141,23 +141,9 @@ Admin user deletion removes the account but has never deleted research. That is 
 
 **Governed review.** Governed runs are deleted through the same workflow, and the report-review steps are no-ops for them. As a deliberate improvement, their subcollections and projections are no longer orphaned.
 
-**STOP: concurrent writers outside report review (owner authorization required).** Report-review writers check the deletion mark inside their transactions. A few **existing** writers that are not part of report review do not:
-- the export record writer `lib/firestore/adaptiveExports.ts` (`createAdaptiveExportRecord`, `markAdaptiveExportReady`/`Failed`, which use set-merge);
-- the governed-run writers in `lib/firestore/runs.ts` (`adaptiveOutput`, `legacyAdaptiveOutput`, `governanceRecord`, set-merge);
-- `lib/governance/teamGovernancePipeline.ts`;
-- `/api/governance/review` (its audit row and `governanceEvents`);
-- `setTeamRunAssignee`.
+**Concurrent writers outside report review: resolved (owner decision 2026-11-03).** S1 stopped here, because existing writers outside report review could recreate content after a completed deletion. The owner authorized a correction: a permanent deletion **tombstone** (`runDeletionJobs/{runId}`), checked by every research writer inside the same transaction as its write. The writer inventory, barrier, race proof, Order 6 exact-file exception and tombstone policy are in [`research-deletion-integrity.md`](./research-deletion-integrity.md).
 
-If one of them commits **after** a deletion has completed, it can recreate a run document or subtree, for example an export record holding a frozen report snapshot. Closing that completely means making each of them require `exists && !deletion` inside its transaction (and using `update`, not set-merge). That touches:
-- an Order 6 byte-pinned file (`adaptiveExports.ts`);
-- the governed-run writer, which needs separate authorization.
-
-So it is **not built**. Until it is:
-- **Detection.** `findResearchDeletionOrphans()` re-runs the **full** deletion verification for the most recent completed jobs (newest first, bounded). It flags a recreated run document, a recreated subtree, a Workspace Audit row carrying research text, an unredacted admin audit row (for example a late governance review comment), a projection, or a lock.
-- **Remedy.** `DELETE /api/admin/runs/{id}?collection=runs` re-runs the deletion for a flagged run even when the run document is absent.
-- **Residual risk.** Detection is not scheduled, because no job runner is authorized. It must be run on demand until the writers are fixed.
-
-Owner options are in the PR record.
+Orphan detection (`findResearchDeletionOrphans()`) and resume-by-runId remain as **recovery** tools. They are no longer the guarantee.
 
 **Open owner and legal decisions (not built, not assumed):**
 - **Legal hold.** No legal-hold mechanism exists; an authorized deletion proceeds unconditionally. If records must sometimes be retained, a hold flag that blocks the workflow is a separate design.
@@ -167,6 +153,6 @@ Owner options are in the PR record.
 
 ## 6. Not changed
 
-- `REPORT_REVIEW_ENABLED`, `lib/env.ts`, `firestore.rules`, indexes, Production settings and Order 6 files are unchanged.
+- `REPORT_REVIEW_ENABLED`, `lib/env.ts`, `firestore.rules`, indexes and Production settings are unchanged. One Order 6 file, `lib/firestore/adaptiveExports.ts`, changes under the owner's exact-file exception for the deletion barrier (research-deletion-integrity.md §4). No other Order 6 file changes.
 - No migration or backfill: Production has no report-review records, because the feature has never been enabled.
 - Records written before Order A have no fingerprint. They parse, and a decision on them fails closed.

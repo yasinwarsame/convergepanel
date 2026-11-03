@@ -3,76 +3,26 @@
  * repairAdaptivePanelFinalizationArtifacts() tests.
  */
 
-const runDocs = new Map<string, Record<string, any>>();
-const panelDocs = new Map<string, Record<string, any>>();
-const voteDocs = new Map<string, Record<string, any>>();
-const historyDocs = new Map<string, Record<string, any>>();
-const panelHistoryDocs = new Map<string, Record<string, any>>();
-const eventDocs = new Map<string, Record<string, any>>();
-const auditDocs = new Map<string, Record<string, any>>();
-const teamRunDocs = new Map<string, Record<string, any>>();
+// Research deletion integrity (2026-11-03): the history, panel-history and governance-event writers now create their
+// documents in transactions guarded by the deletion barrier, so the hand-written create()/update() stubs are replaced by
+// the shared transactional fake. Each store keeps its original keys as a view over it (helpers/fakeStoreViews.ts),
+// including the old routing: every run subcollection not named below landed in panelHistoryDocs.
+import { FakeTransactionalFirestore } from "@/lib/workspaces/__tests__/helpers/fakeTransactionalFirestore";
+import { runDocView, runSubView, topLevelView } from "@/lib/workspaces/__tests__/helpers/fakeStoreViews";
+const db = new FakeTransactionalFirestore();
+const runDocs = runDocView(db);
+const panelDocs = runSubView(db, { include: ["humanReviewPanel"] });
+const voteDocs = runSubView(db, { include: ["humanReviewVotes"] });
+const historyDocs = runSubView(db, { include: ["humanReviewHistory"] });
+const panelHistoryDocs = runSubView(db, { exclude: ["humanReviewPanel", "humanReviewVotes", "humanReviewHistory"] });
+const eventDocs = runSubView(db, { include: [] }); // was never written by the old stub (governance events landed in panelHistoryDocs)
+const auditDocs = topLevelView(db, "admin_audit_logs", true);
+const teamRunDocs = topLevelView(db, "teamRuns", false);
 const firestoreUnavailableFlag = { value: false };
-
-function alreadyExistsError() {
-  const err: any = new Error("6 ALREADY_EXISTS");
-  err.code = 6;
-  return err;
-}
-function notFoundError() {
-  const err: any = new Error("5 NOT_FOUND: No document to update");
-  err.code = 5;
-  return err;
-}
-
-const mockAdminDb: any = {
-  collection: (name: string) => {
-    if (name === "admin_audit_logs") {
-      return {
-        doc: (docId: string) => ({
-          create: jest.fn().mockImplementation(async (value: Record<string, unknown>) => {
-            const key = `${name}/${docId}`;
-            if (auditDocs.has(key)) throw alreadyExistsError();
-            auditDocs.set(key, value);
-          }),
-        }),
-      };
-    }
-    if (name === "teamRuns") {
-      return {
-        doc: (docId: string) => ({
-          update: jest.fn().mockImplementation(async (fields: Record<string, unknown>) => {
-            if (!teamRunDocs.has(docId)) throw notFoundError();
-            teamRunDocs.set(docId, { ...teamRunDocs.get(docId), ...fields });
-          }),
-        }),
-      };
-    }
-    // "runs"
-    return {
-      doc: (runId: string) => ({
-        id: runId,
-        get: jest.fn().mockImplementation(async () => ({ exists: runDocs.has(runId), data: () => runDocs.get(runId) })),
-        collection: (subName: string) => ({
-          doc: (docId: string) => {
-            const store = subName === "humanReviewPanel" ? panelDocs : subName === "humanReviewVotes" ? voteDocs : subName === "humanReviewHistory" ? historyDocs : panelHistoryDocs;
-            const key = `${runId}/${subName}/${docId}`;
-            return {
-              get: jest.fn().mockImplementation(async () => ({ exists: store.has(key), data: () => store.get(key) })),
-              create: jest.fn().mockImplementation(async (value: Record<string, unknown>) => {
-                if (store.has(key)) throw alreadyExistsError();
-                store.set(key, value);
-              }),
-            };
-          },
-        }),
-      }),
-    };
-  },
-};
 
 jest.mock("@/lib/firebase/admin", () => ({
   get adminDb() {
-    return firestoreUnavailableFlag.value ? null : mockAdminDb;
+    return firestoreUnavailableFlag.value ? null : db;
   },
 }));
 

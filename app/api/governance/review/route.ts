@@ -13,6 +13,8 @@ import {
   runOwnerVisibleInGovernance,
 } from "@/lib/governance/governanceVisibleUserIds";
 import { writeAuditEvent } from "@/lib/governance/auditLog";
+import { createGovernanceAuditRowInTx } from "@/lib/governance/governanceAuditRow";
+import { isResearchWriteRefusedError, runResearchWrite } from "@/lib/firestore/researchDeletionBarrier";
 import { resolveGovernanceRequestUser } from "@/lib/governance/authCheck";
 import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
 import { logger } from "@/lib/logger";
@@ -353,7 +355,7 @@ export async function POST(request: NextRequest) {
         })()
       : String(runData.question ?? runData.claim ?? runData.query ?? "").substring(0, 200);
 
-  await writeAuditEvent({
+  const auditEvent = {
     runId: docId,
     collection,
     runType:
@@ -368,10 +370,8 @@ export async function POST(request: NextRequest) {
     runOwnerEmail,
     question: auditQuestion,
     consensusScore: consensusScore ?? null,
-  });
-
-  await ref.collection("governanceEvents").add(
-    sanitizeForFirestore({
+  };
+  const governanceEventDoc = sanitizeForFirestore({
       action: reviewAction,
       byUid: resolved.uid,
       byEmail: resolved.email,
@@ -379,8 +379,27 @@ export async function POST(request: NextRequest) {
       comment: finalComment,
       prevStatus,
       nextStatus: nextGovernanceStatus,
-    }) as DocumentData
-  );
+    }) as DocumentData;
+
+  if (collection === "runs") {
+    // Research deletion integrity: the audit row (question, comment) and the governance event (comment) are written in
+    // one transaction guarded by the deletion barrier. If the run was deleted after the decision committed, they are not
+    // written; the decision itself committed before the deletion and is removed by it.
+    const db = adminDb;
+    try {
+      await runResearchWrite(db, docId, (tx) => {
+        createGovernanceAuditRowInTx(tx, db, auditEvent);
+        tx.create(ref.collection("governanceEvents").doc(), governanceEventDoc);
+      });
+    } catch (err) {
+      if (!isResearchWriteRefusedError(err)) throw err;
+      logger.warn("[governance/review] run deleted after the decision; audit row and event not written", { refusal: err.refusal });
+    }
+  } else {
+    await writeAuditEvent(auditEvent);
+
+    await ref.collection("governanceEvents").add(governanceEventDoc);
+  }
 
   return NextResponse.json({
     ok: true,
