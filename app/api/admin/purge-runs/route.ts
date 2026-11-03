@@ -163,7 +163,7 @@ function getStatusFilter(status: "any" | "success" | "failed"): string | null {
  *   - a time budget stops STARTING new deletions well before the function limit; matched runs not started are reported
  *     in `notStartedRunIds` (counted in errorsCount; purge again to continue) — never silently skipped, never "deleted".
  */
-export const PURGE_TIME_BUDGET_MS = 240_000;
+const PURGE_TIME_BUDGET_MS = 240_000;
 async function deleteRunsDurably(
   refs: FirebaseFirestore.DocumentReference[],
   actorUid: string,
