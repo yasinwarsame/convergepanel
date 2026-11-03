@@ -149,6 +149,7 @@ describe("rrc-v1 canonical form and fingerprint (pure)", () => {
     ["bytes", { blob: Buffer.from("x") }],
     ["bigint", { big: BigInt(1) }],
     ["an invalid Date", { at: new Date("nope") }],
+    ["a stored map that mimics the Timestamp encoding", { at: { $timestamp: "1.000000000" } }],
   ])("unsupported value fails closed (%s)", (_l, over) => {
     expect(computeReportReviewContentFingerprint(storedRun(over))).toEqual({ ok: false, reason: "unsupported_value" });
   });
@@ -208,9 +209,9 @@ describe("submission and decision bind to the exact submitted content", () => {
     expect(r).toEqual({ ok: false, reason: "invalid_purpose" }); // purpose is exactly { code, note? }; the route body is exactly { purpose }
   });
 
-  it("unchanged content (only non-content fields changed: export counter, assignee, Project move, tokens): the decision succeeds", async () => {
+  it("unchanged content (only non-content fields changed: export counter, assignee, Project move, tokens, late governance evaluation, retry accounting): the decision succeeds", async () => {
     await submitted();
-    setRun({ adaptiveExportCounter: 4, assigneeUid: OWNER, projectId: null, totalTokens: 99, completedAt: Timestamp.now() });
+    setRun({ adaptiveExportCounter: 4, assigneeUid: OWNER, projectId: null, totalTokens: 99, completedAt: Timestamp.now(), governanceStatus: "approved", governanceReasons: ["r"], governanceMeta: { evaluatedAt: "2026-11-02T11:30:00.000Z" }, adaptiveRetryUsage: { calls: 1 } });
     const res = await decide();
     expect(res.ok && !res.replayed).toBe(true);
   });
@@ -228,12 +229,26 @@ describe("submission and decision bind to the exact submitted content", () => {
     expect(snapshotState()).toBe(before); // assignment, record, events, audit and cycles untouched; fingerprint never replaced
   });
 
-  it("a cycle without a fingerprint is never decided (content_unverifiable)", async () => {
+  it("a cycle without a fingerprint is never decided (content_unverifiable) — and can always be superseded (no dead end)", async () => {
     await submitted();
     const { contentFingerprint: _f, ...noFp } = rr();
     void _f;
     setRun({ reportReview: noFp });
     expect(await decide()).toEqual({ ok: false, reason: "content_unverifiable" });
+    const ctx = await getReportReviewContext({ uid: MEMBER, workspaceId: W, runId: RUN });
+    expect(ctx.status === "ok" && [ctx.contentIntegrity.status, ctx.viewer.canResubmit]).toEqual(["unverifiable", true]);
+    expect((await resubmitReportReview({ uid: MEMBER, workspaceId: W, runId: RUN, purpose: { code: "other" }, expectedCycle: 1, now: "2026-11-02T13:00:00.000Z" })).ok).toBe(true);
+    expect(db.read(`runs/${RUN}/reportReviewCycles/1`)!.closedReason).toBe("content_unverifiable");
+    expect(rr().contentFingerprint!.digest).toBe(GOLDEN_DIGEST);
+  });
+
+  it("an open cycle whose CURRENT content can no longer be fingerprinted: no decision, and the context does not offer an impossible resubmission", async () => {
+    await submitted();
+    setRun({ score: NaN });
+    expect(await decide()).toEqual({ ok: false, reason: "content_unverifiable" });
+    const ctx = await getReportReviewContext({ uid: MEMBER, workspaceId: W, runId: RUN });
+    expect(ctx.status === "ok" && [ctx.contentIntegrity.status, ctx.viewer.canResubmit]).toEqual(["unverifiable", false]);
+    expect(await resubmitReportReview({ uid: MEMBER, workspaceId: W, runId: RUN, purpose: { code: "other" }, expectedCycle: 1 })).toEqual({ ok: false, reason: "content_unfingerprintable" });
   });
 
   it("race: content written after the decision read its run makes the transaction retry and refuse", async () => {

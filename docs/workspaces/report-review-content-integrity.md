@@ -30,6 +30,8 @@ A field nobody has classified, for example one a future writer adds, is **includ
 | `adaptiveExportCounter` | Export count; it increments on every export |
 | `reportReview`, `governanceRecord`, `teamGovernance` | Review and governance state, not report content |
 | `errorMessage` | Failure text. Runs that did not complete are not eligible. |
+| `governanceStatus`, `governanceReasons`, `governanceMeta` | Organization policy evaluation (governance state, like `teamGovernance`), written after synthesis |
+| `adaptiveRetryUsage` | Retry usage accounting, written after completion |
 | Per-model `tokenUsage`, `latencyMs`, `usage`, `costUsd`, `timing`, `elapsedMs` | Metrics |
 
 Tests check every listed exclusion, plus a non-content change made in normal use (export counter, assignee, Project move, tokens): each leaves the fingerprint unchanged. Every included class (question, context, responses, truncation, structured result, synthesis with no timestamp, consensus, legacy results, an unclassified field) changes it.

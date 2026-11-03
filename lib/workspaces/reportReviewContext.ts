@@ -62,7 +62,7 @@ export interface ReportReviewHistoryItem {
   purposeCode?: string;
   previousReviewerDisplayName?: string | null;
   reviewerDisplayName?: string | null;
-  closedReason?: "decided" | "content_changed";
+  closedReason?: "decided" | "content_changed" | "content_unverifiable";
 }
 
 export interface ReportReviewAssignmentInfo {
@@ -213,7 +213,7 @@ export async function getReportReviewContext(args: { uid: string; workspaceId: s
           cycle: typeof e.cycle === "number" ? e.cycle : typeof e.toCycle === "number" ? e.toCycle : record.cycle,
         };
         if (e.type === "report_review_decided" && typeof e.status === "string") item.status = e.status;
-        if (e.type === "report_review_resubmitted" && (e.closedReason === "decided" || e.closedReason === "content_changed")) item.closedReason = e.closedReason;
+        if (e.type === "report_review_resubmitted" && (e.closedReason === "decided" || e.closedReason === "content_changed" || e.closedReason === "content_unverifiable")) item.closedReason = e.closedReason;
         if (typeof e.purposeCode === "string") item.purposeCode = e.purposeCode;
         if (e.type === "report_review_assignment_changed") {
           item.previousReviewerDisplayName = nameOf(str(e.previousReviewerUserId));
@@ -250,7 +250,8 @@ export async function getReportReviewContext(args: { uid: string; workspaceId: s
     const integrity: "matches" | "changed" | "unverifiable" = !record.contentFingerprint || !currentFp.ok ? "unverifiable" : sameReportReviewContent(record.contentFingerprint, currentFp.fingerprint) ? "matches" : "changed";
     const contentDenial: ContentDenial | null = decided ? null : integrity === "changed" ? "content_changed" : integrity === "unverifiable" ? "content_unverifiable" : null;
     // A new cycle may start after a decision, or (the resubmit transaction's own rule) when an open cycle's content changed.
-    const canResubmit = (decided || integrity === "changed") && mayOrganize && panelDenial === null && currentFp.ok && evaluateReportReviewEligibility(withoutRecord).eligible;
+    // …or when the open cycle has no stored fingerprint (written before Order A): it can never be decided, so it must be closeable.
+    const canResubmit = (decided || integrity === "changed" || (integrity === "unverifiable" && !record.contentFingerprint)) && mayOrganize && panelDenial === null && currentFp.ok && evaluateReportReviewEligibility(withoutRecord).eligible;
     const canManageAssignment = !decided && roleHasCapability(role, "reviews.manage") && roleHasCapability(role, "research.read") && panelDenial === null;
 
     return {

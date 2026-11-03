@@ -194,8 +194,10 @@ export async function resubmitReportReview(args: { uid: string; workspaceId: str
       // then superseded undecided; it can never be decided on content it was not submitted with).
       const decided = isReportReviewDecided(current.record);
       const contentChanged = current.record.contentFingerprint !== undefined && !sameReportReviewContent(current.record.contentFingerprint, fp.fingerprint);
-      if (!decided && !contentChanged) return { ok: false, reason: "not_decided" };
-      const closedReason = decided ? ("decided" as const) : ("content_changed" as const);
+      // A cycle written without a fingerprint (before Order A) can never be decided; it may always be superseded.
+      const unverifiable = current.record.contentFingerprint === undefined;
+      if (!decided && !contentChanged && !unverifiable) return { ok: false, reason: "not_decided" };
+      const closedReason = decided ? ("decided" as const) : contentChanged ? ("content_changed" as const) : ("content_unverifiable" as const);
 
       // The exclusion rule must still hold (evaluated as if no report review existed yet).
       const { reportReview: _ignored, ...withoutReportReview } = pre.run;

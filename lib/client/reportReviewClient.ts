@@ -38,7 +38,7 @@ export interface ReportReviewClientHistoryItem {
   purposeCode?: string;
   previousReviewerDisplayName?: string | null;
   reviewerDisplayName?: string | null;
-  closedReason?: "decided" | "content_changed";
+  closedReason?: "decided" | "content_changed" | "content_unverifiable";
 }
 
 export interface ReportReviewClientCycle {

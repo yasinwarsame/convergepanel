@@ -292,10 +292,10 @@ export interface ReportReviewCycleArchiveV1 {
    * "content_changed" — the research changed while the cycle was open, so it was superseded UNDECIDED (its record keeps
    * the original fingerprint; nothing about the new content is attributed to it). Absent on archives written before Order A.
    */
-  closedReason?: "decided" | "content_changed";
+  closedReason?: "decided" | "content_changed" | "content_unverifiable";
 }
 
-export function buildReportReviewCycleArchive(args: { runId: string; record: ReportReviewRecordV1; assignment: Record<string, unknown> | null; actorUid: string; now: string; closedReason: "decided" | "content_changed" }): ReportReviewCycleArchiveV1 {
+export function buildReportReviewCycleArchive(args: { runId: string; record: ReportReviewRecordV1; assignment: Record<string, unknown> | null; actorUid: string; now: string; closedReason: "decided" | "content_changed" | "content_unverifiable" }): ReportReviewCycleArchiveV1 {
   return { version: 1, runId: args.runId, cycle: args.record.cycle, record: args.record, assignment: args.assignment, archivedAt: args.now, archivedByUserId: args.actorUid, closedReason: args.closedReason };
 }
 

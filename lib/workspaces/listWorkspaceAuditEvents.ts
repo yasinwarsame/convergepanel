@@ -206,7 +206,7 @@ export type WorkspaceAuditReportReviewEventDto =
       purpose: string;
       clearedReviewer: { displayName: string } | null;
       /** Order A: "decided" — the previous cycle closed with a decision; "content_changed" — it was superseded undecided because the research changed. */
-      closedReason: "decided" | "content_changed";
+      closedReason: "decided" | "content_changed" | "content_unverifiable";
     })
   | (WorkspaceAuditReportReviewDtoBase & {
       eventType: "workspace_report_review_reviewer_changed";
@@ -247,7 +247,7 @@ type ValidatedRow =
 type ReportReviewRowBase = { occurredAtIso: string; actorUid: string; runQuestion: string | null; cycle: number };
 type ReportReviewValidatedRow =
   | (ReportReviewRowBase & { eventType: "workspace_report_review_submitted"; purposeCode: string })
-  | (ReportReviewRowBase & { eventType: "workspace_report_review_resubmitted"; fromCycle: number; purposeCode: string; clearedReviewerUid: string | null; closedReason: "decided" | "content_changed" })
+  | (ReportReviewRowBase & { eventType: "workspace_report_review_resubmitted"; fromCycle: number; purposeCode: string; clearedReviewerUid: string | null; closedReason: "decided" | "content_changed" | "content_unverifiable" })
   | (ReportReviewRowBase & { eventType: "workspace_report_review_reviewer_changed"; previousReviewerUid: string | null; reviewerUid: string | null })
   | (ReportReviewRowBase & { eventType: "workspace_report_review_decided"; status: string; purposeCode: string });
 
@@ -275,7 +275,7 @@ function validateReportReviewRow(eventType: string, raw: Record<string, unknown>
       if (typeof raw.purposeCode !== "string" || !VALID_RR_PURPOSES.has(raw.purposeCode)) return null;
       if (!isCycle(raw.fromCycle) || raw.cycle !== raw.fromCycle + 1) return null;
       if (!isUidOrNull(raw.clearedReviewerUid)) return null;
-      if (raw.closedReason !== "decided" && raw.closedReason !== "content_changed") return null;
+      if (raw.closedReason !== "decided" && raw.closedReason !== "content_changed" && raw.closedReason !== "content_unverifiable") return null;
       return { ...base, eventType, fromCycle: raw.fromCycle, purposeCode: raw.purposeCode, clearedReviewerUid: raw.clearedReviewerUid, closedReason: raw.closedReason };
     case "workspace_report_review_reviewer_changed":
       if (!isUidOrNull(raw.previousReviewerUid) || !isUidOrNull(raw.reviewerUid)) return null;

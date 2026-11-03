@@ -65,6 +65,10 @@ export const REPORT_REVIEW_CONTENT_EXCLUDED_FIELDS: Readonly<Record<string, stri
   governanceRecord: "governed-review record (a report-review run never has one; B1 invariant)",
   teamGovernance: "Team policy evaluation snapshot (governance state, not report content)",
   errorMessage: "failure text of a run that did not complete (such runs are not eligible)",
+  governanceStatus: "organization policy evaluation result (governance state, like teamGovernance), written after synthesis",
+  governanceReasons: "organization policy evaluation reasons (governance state), written after synthesis",
+  governanceMeta: "organization policy evaluation metadata (incl. evaluatedAt), written after synthesis",
+  adaptiveRetryUsage: "usage accounting for adaptive retries, written after completion",
 });
 
 /** Per-model fields that are usage/timing metrics, excluded wherever a model result appears. */
@@ -115,6 +119,8 @@ function canonicalValue(v: unknown, stripModelMetrics: boolean): unknown {
   }
   const proto = Object.getPrototypeOf(o);
   if (proto !== Object.prototype && proto !== null) throw new Unsupported(); // GeoPoint, DocumentReference, Buffer, …
+  // A stored map can never be mistaken for a Timestamp's encoding: a "$timestamp" key fails closed (unambiguous form).
+  if (Object.prototype.hasOwnProperty.call(o, "$timestamp")) throw new Unsupported();
   const out: Record<string, unknown> = {};
   for (const k of Object.keys(o).sort()) {
     const val = (o as Record<string, unknown>)[k];

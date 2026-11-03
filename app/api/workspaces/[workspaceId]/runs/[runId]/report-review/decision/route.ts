@@ -41,7 +41,7 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
     case "content_changed":
       return reportReviewErrorBody(409, "content_changed", "This research changed after it was submitted, so this decision was not recorded. It must be resubmitted for a new review.");
     case "content_unverifiable":
-      return reportReviewErrorBody(409, "content_unverifiable", "This review can't be decided because the submitted content can't be verified. It must be resubmitted for a new review.");
+      return reportReviewErrorBody(409, "content_unverifiable", "This review can't be decided because the content it was submitted with can't be verified.");
     case "not_authorized":
     case "insufficient_capability": {
       const { status, body: b } = teamRunInsufficientCapabilityResponse();
