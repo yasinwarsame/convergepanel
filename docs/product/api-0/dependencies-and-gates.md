@@ -20,6 +20,8 @@
 | DEP-12 | Non-Production Firebase project for load and isolation tests (no test records in Production governance data) | API-3 load test | Owner | Open (known infra gap) |
 | DEP-13 | Secret-scanning registration for `cpk_` | API-7 | Owner (OD-17) | Not started |
 | DEP-14 | Metrics backend decision from pilot load | API-7 | Owner (OD-18) | Deferred by ruling |
+| DEP-15 | **Model-selection independence (owner-recorded dependency A, 2026-11-03).** Research classification (`classifyQuery`) and the other auxiliary pipeline calls send the question to Gemini whatever models the customer selected (threat model R7). This must be **corrected** (an auxiliary provider that respects the selection) **or deliberately constrained** (no such claim is made, and Gemini is disclosed as a pipeline provider for every research job, per DEP-10) before the API, its documentation or its sales material claims that a customer's model selection controls which providers receive their content. API-0 does **not** change Gemini routing | Any external claim of model-selection independence; API-6 at the latest | Owner (separate decision; it changes the shared web pipeline) | Open |
+| DEP-16 | **Secret-management design (owner-recorded dependency B, 2026-11-03).** API-1 secrets (DEP-2) must respect the frozen Order 6 environment boundary. They need a **separately approved configuration design** that names each secret, where it is read, and how the Order 6 evidence is re-baselined. API-0 does **not** change `lib/env.ts`, and no secret is created before that approval | API-1 | Owner (OD-21; OQ-1) | Open |
 
 ## 2. Web-capacity protection gate (CR-2)
 

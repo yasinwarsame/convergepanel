@@ -4,6 +4,7 @@
 |---|---|
 | **Status** | Planning draft, Rev 3. API-0 (design) is authorized to begin (OD-20). Nothing in this document is implemented, and no implementation stage (API-1 to API-7) is authorized. |
 | 3.1 | 2026-11-03 | **Rev 3.1, confirmation-review fixes.** Auxiliary Gemini permits are sized to the real stance-backfill concurrency and never serialized inside timed call sites. Call records store the outcome the call site observed (timeouts included), and parallel auxiliary calls are keyed by slot. `loadGovernancePolicy` is a write in API mode: it goes through a non-writing port and fails closed. The `track*` call-site count is corrected. |
+| 3.2 | 2026-11-03 | **Rev 3.2, owner acceptance.** The owner accepted the PRD and the API-0 package as design artifacts. API-1 is not authorized. Two owner-recorded design dependencies are added in `api-0/dependencies-and-gates.md`. DEP-15: Gemini receives every research question whatever models are selected, so this must be corrected or deliberately constrained before claiming model-selection independence. DEP-16: API-1 secrets need a separately approved configuration design within the Order 6 environment boundary. Gemini routing and `lib/env.ts` are unchanged. |
 | **Author** | Planning workstream (docs-only), 2026-11-03 |
 | **Baseline** | `main` at `2f70d1f` |
 | **Workstream** | Dedicated future roadmap item, stages API-0 to API-7 |
