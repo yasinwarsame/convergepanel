@@ -383,3 +383,25 @@ describe("review round 2 m-2: a path-like run id never passes the in-transaction
     expect(await db.runTransaction(async (tx) => isResearchDeletedInTx(tx as never, db as never, R, { exists: true, data: () => ({}) }))).toBe(false); // control
   });
 });
+
+describe("review round 3 m-1: applyTeamGovernancePipeline's second write (runs.teamGovernance) is guarded on its own", () => {
+  it("a deletion that starts between the teamRuns write and the runs write: the run gets no teamGovernance", async () => {
+    seedState("normal");
+    const realRun = db.runTransaction.bind(db);
+    let calls = 0;
+    (db as any).runTransaction = async (fn: any) => {
+      const call = ++calls; // counted on entry: the refused second transaction rejects
+      const r = await realRun(fn);
+      if (call === 1) db.seed(`${RESEARCH_DELETION_TOMBSTONE_COLLECTION}/${R}`, { state: "in_progress" }); // deletion starts now
+      return r;
+    };
+    try {
+      await applyTeamGovernancePipeline({ uid: "u1", userEmail: "u1@x.test", consensusSummary: {} as never, consensusScore: 90, type: "research", query: SECRET, auditBundle: {} as never, runId: R });
+    } finally {
+      (db as any).runTransaction = realRun;
+    }
+    expect(calls).toBe(2); // the second (runs) transaction ran, and was refused
+    expect(db.paths("teamRuns/")).toHaveLength(1); // committed before the deletion started; the deletion sweeps it
+    expect(db.read(`runs/${R}`)!.teamGovernance).toBeUndefined();
+  });
+});

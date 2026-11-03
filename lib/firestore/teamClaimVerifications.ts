@@ -220,8 +220,9 @@ export async function saveTeamClaimVerification(args: {
   /**
    * Phase 11A.3 — server-derived from `resolveClaimVerificationOrigin()`
    * BEFORE this function is ever called (the resolver performs its own
-   * Firestore read and must not run inside this transaction). `undefined`
-   * for an ordinary Team verification — never set by this function on its
+   * Firestore read and must not run inside this transaction). `null`
+   * for an ordinary Team verification (the deletion-barrier check below relies on
+   * `!== null`) — never set by this function on its
    * own, never accepted as a pass-through of caller-supplied request data.
    */
   originSnapshot: TeamOriginSnapshot;
