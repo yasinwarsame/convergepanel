@@ -21,6 +21,7 @@ jest.mock("@/lib/workspaces/reportReviewRollout", () => ({
   get REPORT_REVIEW_ENABLED() {
     return flags.REPORT_REVIEW_ENABLED;
   },
+  REPORT_REVIEW_WORKSPACE_ALLOWLIST: ["wsTeamB1"],
 }));
 jest.mock("@/lib/env", () => ({
   ...jest.requireActual("@/lib/env"),

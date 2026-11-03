@@ -2,7 +2,7 @@
  * Order B, Stage B2 (owner-authorized 2026-11-03): the report-review DECISION writer.
  *
  * One Firestore transaction, all reads before writes:
- *   admission (compile-time REPORT_REVIEW_ENABLED + Team Workspaces) → membership with `reviews.submit` (+ research.read)
+ *   admission (isReportReviewEnabledForWorkspace: switch + allow-list; + Team Workspaces) → membership with `reviews.submit` (+ research.read)
  *   → run bound to THIS Workspace → no open panel → a valid reportReview and NO governanceRecord (fail closed) →
  *   OCC on cycle and updatedAt → the shared decision contract (lib/governance/reportReviewDecision.ts: current
  *   canonical assignment for the current cycle, not the run creator, not the submitter, cycle open) → writes.
@@ -22,7 +22,7 @@ import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
 import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS } from "@/lib/env";
-import { REPORT_REVIEW_ENABLED } from "./reportReviewRollout";
+import { isReportReviewEnabledForWorkspace } from "./reportReviewActivation";
 import { resolveTeamWorkspaceTargetAdmission } from "./teamWorkspaceTargetAdmission";
 import { authorizeTeamWorkspaceMutationInTransaction, type TeamMutationAuthorizationDenialReason } from "./authorizeTeamWorkspaceMutationInTransaction";
 import { resolveWorkspaceReviewTarget } from "./resolveWorkspaceReviewTarget";
@@ -59,7 +59,7 @@ export async function decideReportReview(args: {
   expectedUpdatedAt: string;
   now?: string;
 }): Promise<DecideReportReviewResult> {
-  if (!REPORT_REVIEW_ENABLED) return { ok: false, reason: "disabled" };
+  if (!isReportReviewEnabledForWorkspace(args.workspaceId)) return { ok: false, reason: "disabled" };
   const admission = resolveTeamWorkspaceTargetAdmission({
     uid: args.uid,
     workspaceId: args.workspaceId,

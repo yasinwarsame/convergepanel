@@ -6,7 +6,7 @@
  *   resubmitReportReview — D-B6: after a DECIDED cycle, archives it write-once and starts cycle n+1.
  *
  * Every decision is made inside ONE Firestore transaction from documents read in that transaction:
- *   admission (REPORT_REVIEW_ENABLED compile-time switch + Team Workspaces) → membership + `research.organize` + `research.read`
+ *   admission (isReportReviewEnabledForWorkspace: compile-time switch + single-workspace allow-list; + Team Workspaces) → membership + `research.organize` + `research.read`
  *   (D-B3a; Reviewer/Viewer never) → run bound to THIS Workspace → no open review panel → eligibility
  *   (`evaluateReportReviewEligibility`, the D-B7 option (a) exclusion rule) → writes.
  *
@@ -23,7 +23,7 @@ import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
 import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS } from "@/lib/env";
-import { REPORT_REVIEW_ENABLED } from "./reportReviewRollout";
+import { isReportReviewEnabledForWorkspace } from "./reportReviewActivation";
 import { resolveTeamWorkspaceTargetAdmission } from "./teamWorkspaceTargetAdmission";
 import { authorizeTeamWorkspaceMutationInTransaction, type TeamMutationAuthorizationDenialReason } from "./authorizeTeamWorkspaceMutationInTransaction";
 import { resolveWorkspaceReviewTarget } from "./resolveWorkspaceReviewTarget";
@@ -64,7 +64,7 @@ type ResubmitTxResult = { ok: true; record: ReportReviewRecordV1; archivedCycle:
 type Gate = { ok: true } | { ok: false; reason: "disabled" | "team_workspaces_disabled" | "firestore_unavailable" };
 
 function admissionGate(uid: string, workspaceId: string): Gate {
-  if (!REPORT_REVIEW_ENABLED) return { ok: false, reason: "disabled" };
+  if (!isReportReviewEnabledForWorkspace(workspaceId)) return { ok: false, reason: "disabled" };
   const admission = resolveTeamWorkspaceTargetAdmission({
     uid,
     workspaceId,

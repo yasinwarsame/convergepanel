@@ -39,7 +39,7 @@ import { isCanonicalDueAt, type AdaptiveHumanReviewAssignmentV1 } from "@/lib/go
 import { resolveWorkspaceReviewerDisplayNames, REVIEWER_UNAVAILABLE_LABEL } from "./workspaceReviewerIdentity";
 import type { GovernanceRecordV1 } from "@/lib/adaptiveSchema/governanceRecord";
 import { encodeReviewQueueCursor, type ReviewQueueView, type ReviewQueueCursor } from "./reviewQueueCursor";
-import { REPORT_REVIEW_ENABLED } from "./reportReviewRollout";
+import { isReportReviewEnabledForWorkspace } from "./reportReviewActivation";
 import { parseReportReviewRecord } from "@/lib/governance/reportReview";
 
 const MAX_SCAN_ROUNDS = 3;
@@ -138,7 +138,7 @@ function revalidateRun(runId: string, workspaceId: string, runData: Record<strin
   if (!parsed.ok) {
     // Order B, Stage B2 — only while Report Review is enabled: a run without a governance record may be a
     // report-review run. When disabled, this branch is never reached and behaviour is unchanged.
-    if (!REPORT_REVIEW_ENABLED) return null;
+    if (!isReportReviewEnabledForWorkspace(workspaceId)) return null;
     if (runData.governanceRecord !== undefined && runData.governanceRecord !== null) return null; // malformed governed record: unchanged (excluded)
     const rr = parseReportReviewRecord(runData.reportReview);
     if (!rr.ok) return null;
@@ -154,7 +154,7 @@ function revalidateRun(runId: string, workspaceId: string, runData: Record<strin
     };
   }
   // A run carrying BOTH records violates the B1 invariant: fail closed (never listed) while Report Review is enabled.
-  if (REPORT_REVIEW_ENABLED && runData.reportReview !== undefined && runData.reportReview !== null) return null;
+  if (isReportReviewEnabledForWorkspace(workspaceId) && runData.reportReview !== undefined && runData.reportReview !== null) return null;
 
   return {
     runId,
@@ -786,7 +786,7 @@ export async function getReviewQueue(args: {
     case "needs_review":
     case "changes_requested":
     case "recently_approved":
-      result = REPORT_REVIEW_ENABLED
+      result = isReportReviewEnabledForWorkspace(args.workspaceId)
         ? await scanStatusViewMerged({ view: args.view, workspaceId: args.workspaceId, uid: args.uid, projectFilter: args.projectFilter, limit: args.limit, cursor: args.cursor })
         : await scanStatusView({ view: args.view, workspaceId: args.workspaceId, uid: args.uid, projectFilter: args.projectFilter, limit: args.limit, cursor: args.cursor });
       break;

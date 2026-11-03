@@ -6,7 +6,7 @@ import { concealed, reportReviewCaller } from "./reportReviewRouteSupport";
 import { internalErrorResponse } from "./teamWorkspaceErrorResponse";
 
 export async function handleReportReviewContextGet(req: NextRequest, params: { workspaceId: string; runId: string }) {
-  const uidOrRes = await reportReviewCaller(req, "/api/workspaces/[workspaceId]/runs/[runId]/report-review", "GET");
+  const uidOrRes = await reportReviewCaller(req, "/api/workspaces/[workspaceId]/runs/[runId]/report-review", params.workspaceId, "GET");
   if (uidOrRes instanceof NextResponse) return uidOrRes;
   const r = await getReportReviewContext({ uid: uidOrRes, workspaceId: params.workspaceId, runId: params.runId });
   if (r.status === "ok") {
