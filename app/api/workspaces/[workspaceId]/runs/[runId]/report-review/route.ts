@@ -1,7 +1,7 @@
 /**
  * Order B, Stage B1 — POST /api/workspaces/{W}/runs/{R}/report-review
  * Explicit submission of non-governed Team research for human approval (D-B2). Body exactly `{ purpose: { code, note? } }`.
- * Dark: REPORT_REVIEW_ENABLED (compile-time false, lib/workspaces/reportReviewRollout.ts) and Approval Workflow admission; otherwise the concealed 404.
+ * Dark unless activated for this Workspace (lib/workspaces/reportReviewActivation.ts: switch + single-workspace allow-list), plus Approval Workflow admission and Workspace membership; otherwise the concealed 404.
  * See lib/workspaces/reportReviewMutations.ts for the transaction and docs/workspaces/approval-b-report-review-design.md.
  */
 import { NextRequest, NextResponse } from "next/server";

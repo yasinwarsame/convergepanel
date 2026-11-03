@@ -16,6 +16,7 @@ import { teamRunWorkspaceNotFoundConcealedResponse } from "./teamRunAccessRespon
 import { internalErrorResponse } from "./teamWorkspaceErrorResponse";
 import type { ReportReviewMutationFailure } from "./reportReviewMutations";
 import { isReportReviewEnabledForWorkspace } from "./reportReviewActivation";
+import { resolveWorkspaceAccess } from "./resolveWorkspaceAccess";
 import { REPORT_REVIEW_INELIGIBLE_EXPLANATIONS } from "@/lib/governance/reportReviewCopy";
 
 export function reportReviewErrorBody(status: number, code: string, message: string) {
@@ -43,6 +44,15 @@ export async function reportReviewCaller(req: NextRequest, route: string, worksp
   if (!isReportReviewEnabledForWorkspace(workspaceId)) return concealed();
   const admission = resolveApprovalWorkflowAdmission({ uid: identity.uid, globalEnabled: APPROVAL_WORKFLOW_ENABLED, canaryUidsRaw: APPROVAL_WORKFLOW_CANARY_UIDS });
   if (!admission.admitted) return concealed();
+  // Order B review MINOR-1: an active member of THIS Team Workspace only, before the body is read. Otherwise a non-member
+  // could tell the activated Workspace apart (malformed body → 400 there, concealed 404 everywhere else). Every
+  // operation still re-authorizes its exact capability inside its own transaction; this check only conceals.
+  try {
+    const access = await resolveWorkspaceAccess({ uid: identity.uid, workspaceId });
+    if (!access.granted || access.workspaceType !== "team") return concealed();
+  } catch {
+    return concealed();
+  }
   return identity.uid;
 }
 

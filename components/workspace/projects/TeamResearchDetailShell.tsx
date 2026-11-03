@@ -103,7 +103,7 @@ export type TeamResearchDetailShellProps = {
    */
   canCreateExport?: boolean;
   /**
-   * Order B, Stage B3 — the server's compile-time `REPORT_REVIEW_ENABLED`. When false (Production today) the page keeps
+   * Order B, Stage B3 — the server's isReportReviewEnabledForWorkspace(this Workspace) (switch + allow-list). When false (Production today) the page keeps
    * the Order A "Approval review" notice exactly as before; when true, research without a governed review record shows
    * the Report Review panel instead. Presentation only: every report-review route is itself dark while the switch is off.
    */

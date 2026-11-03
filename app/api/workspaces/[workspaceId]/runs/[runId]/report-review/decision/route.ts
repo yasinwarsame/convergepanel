@@ -1,7 +1,7 @@
 /**
  * Order B, Stage B2 — POST /api/workspaces/{W}/runs/{R}/report-review/decision
  * Body exactly `{ decision: { status, comment?, conditions? }, expectedCycle, expectedUpdatedAt }`.
- * Dark (compile-time REPORT_REVIEW_ENABLED) and Approval Workflow admission; otherwise the concealed 404.
+ * Dark unless report review is activated for this Workspace (isReportReviewEnabledForWorkspace: switch + single-workspace allow-list), plus Approval Workflow admission and Workspace membership; otherwise the concealed 404.
  * Every "not authorized" sub-reason collapses to the same external 403 as the governed decision route.
  */
 import { NextRequest, NextResponse } from "next/server";

@@ -6,7 +6,7 @@
  *   resubmitReportReview — D-B6: after a DECIDED cycle, archives it write-once and starts cycle n+1.
  *
  * Every decision is made inside ONE Firestore transaction from documents read in that transaction:
- *   admission (REPORT_REVIEW_ENABLED compile-time switch + Team Workspaces) → membership + `research.organize` + `research.read`
+ *   admission (isReportReviewEnabledForWorkspace: compile-time switch + single-workspace allow-list; + Team Workspaces) → membership + `research.organize` + `research.read`
  *   (D-B3a; Reviewer/Viewer never) → run bound to THIS Workspace → no open review panel → eligibility
  *   (`evaluateReportReviewEligibility`, the D-B7 option (a) exclusion rule) → writes.
  *

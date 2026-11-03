@@ -1,7 +1,7 @@
 /**
  * Order B, Stage B1 — POST /api/workspaces/{W}/runs/{R}/report-review/resubmit
  * D-B6: after a decided cycle, archive it write-once and start a new cycle. Body exactly `{ purpose, expectedCycle }`.
- * Dark: REPORT_REVIEW_ENABLED (compile-time false, lib/workspaces/reportReviewRollout.ts) and Approval Workflow admission; otherwise the concealed 404.
+ * Dark unless activated for this Workspace (lib/workspaces/reportReviewActivation.ts: switch + single-workspace allow-list), plus Approval Workflow admission and Workspace membership; otherwise the concealed 404.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { resubmitReportReview } from "@/lib/workspaces/reportReviewMutations";

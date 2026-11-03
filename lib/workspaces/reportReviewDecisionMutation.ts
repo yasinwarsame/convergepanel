@@ -2,7 +2,7 @@
  * Order B, Stage B2 (owner-authorized 2026-11-03): the report-review DECISION writer.
  *
  * One Firestore transaction, all reads before writes:
- *   admission (compile-time REPORT_REVIEW_ENABLED + Team Workspaces) → membership with `reviews.submit` (+ research.read)
+ *   admission (isReportReviewEnabledForWorkspace: switch + allow-list; + Team Workspaces) → membership with `reviews.submit` (+ research.read)
  *   → run bound to THIS Workspace → no open panel → a valid reportReview and NO governanceRecord (fail closed) →
  *   OCC on cycle and updatedAt → the shared decision contract (lib/governance/reportReviewDecision.ts: current
  *   canonical assignment for the current cycle, not the run creator, not the submitter, cycle open) → writes.

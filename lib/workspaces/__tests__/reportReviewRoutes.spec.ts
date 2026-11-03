@@ -6,6 +6,11 @@ const mockedIdentity = jest.fn();
 jest.mock("@/lib/auth/resolveRequestIdentity", () => ({ resolveRequestIdentity: (...a: unknown[]) => mockedIdentity(...a) }));
 jest.mock("@/lib/auth/identityResolutionTelemetry", () => ({ logIdentityResolutionFailure: jest.fn() }));
 const admission = { admitted: true };
+// Order B review MINOR-1: the route gate also requires active Team Workspace membership before reading the body.
+const memberOf = { granted: true };
+jest.mock("@/lib/workspaces/resolveWorkspaceAccess", () => ({
+  resolveWorkspaceAccess: async () => (memberOf.granted ? { granted: true, workspaceType: "team" } : { granted: false, reason: "membership_not_found" }),
+}));
 jest.mock("@/lib/workspaces/approvalWorkflowRollout", () => ({ resolveApprovalWorkflowAdmission: () => admission }));
 const rollout = { REPORT_REVIEW_ENABLED: true };
 jest.mock("@/lib/workspaces/reportReviewRollout", () => ({
@@ -33,6 +38,7 @@ const RECORD = { version: 1, kind: "report_review", cycle: 1 };
 beforeEach(() => {
   jest.clearAllMocks();
   admission.admitted = true;
+  memberOf.granted = true;
   rollout.REPORT_REVIEW_ENABLED = true;
   mockedIdentity.mockResolvedValue({ status: "authenticated", uid: "u1", source: "session_cookie" });
   mockedSubmit.mockResolvedValue({ ok: true, created: true, record: RECORD });
@@ -159,5 +165,20 @@ describe("failure mapping", () => {
   ])("%s → %i", async (reason, status) => {
     mockedResubmit.mockResolvedValueOnce({ ok: false, reason });
     expect((await resubmitPost(req({ purpose: { code: "other" }, expectedCycle: 1 }, "report-review/resubmit"), params)).status).toBe(status);
+  });
+});
+
+describe("Order B review MINOR-1: a non-member cannot tell the activated Workspace apart", () => {
+  it("non-member of the activated Workspace: malformed body → the same concealed 404 as any unlisted Workspace (body never read)", async () => {
+    memberOf.granted = false;
+    const listed = await submitPost(req({ extra: 1 }), params);
+    const unlistedParams = { params: { workspaceId: "w-unlisted", runId: "r1" } };
+    const unlisted = await submitPost(req({ extra: 1 }), unlistedParams);
+    expect([listed.status, unlisted.status]).toEqual([404, 404]);
+    expect(await listed.json()).toEqual(await unlisted.json());
+    expect(mockedSubmit).not.toHaveBeenCalled();
+  });
+  it("member of the activated Workspace: a malformed body is a 400 (they already know their own Workspace)", async () => {
+    expect((await submitPost(req({ extra: 1 }), params)).status).toBe(400);
   });
 });

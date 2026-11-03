@@ -46,6 +46,8 @@ import { isMergedReviewQueueView } from "@/lib/workspaces/reviewQueueMode";
 import { getReviewQueue } from "@/lib/workspaces/reviewQueue";
 import { buildReportReviewRecord } from "@/lib/governance/reportReview";
 import { computeMembershipId } from "@/lib/workspaces/membershipId";
+import { decodeReviewQueueCursor } from "@/lib/workspaces/reviewQueueCursor";
+import { buildSeed, seedDb, W as Q, OWNER as Q_OWNER } from "./helpers/reviewQueueScenario";
 import { POST as submitPost, GET as contextGet } from "@/app/api/workspaces/[workspaceId]/runs/[runId]/report-review/route";
 import { POST as decisionPost } from "@/app/api/workspaces/[workspaceId]/runs/[runId]/report-review/decision/route";
 import { POST as resubmitPost } from "@/app/api/workspaces/[workspaceId]/runs/[runId]/report-review/resubmit/route";
@@ -205,6 +207,46 @@ describe("every surface is restricted to the activated Workspace", () => {
     // The queue for the unlisted Workspace is the governed-only scan: the leftover report review is not listed.
     const q = await getReviewQueue({ view: "needs_review", workspaceId: O, uid: OWNER, callerCandidate: { uid: OWNER, workspaceId: O, role: "owner", status: "active" }, projectFilter: undefined, limit: 10, cursor: null });
     expect(q.status === "ok" && q.items.map((i) => i.runId)).toEqual([]);
+  });
+
+  it("an unlisted Workspace's leftover report review: the route gate, context, export and Assigned-to-me each refuse it on their own", async () => {
+    db.seed("runs/rO", { ...db.read("runs/rO")!, reportReview: legacyRecord() });
+    // Each surface is checked directly, so a missing gate cannot be hidden by a later check.
+    expect((await contextGet(new NextRequest(base(O, "rO")), params(O, "rO"))).status).toBe(404);
+    expect(await getReportReviewContext({ uid: OWNER, workspaceId: O, runId: "rO" })).toEqual({ status: "not_found" });
+    expect((await exportGet(new NextRequest(`${base(O, "rO")}/export?format=json`), params(O, "rO"))).status).toBe(404);
+    expect((await putWorkspaceReviewAssignment({ uid: OWNER, workspaceId: O, runId: "rO", assignedReviewerUserId: REVIEWER, expectedRevision: 0, dueAt: null })).ok).toBe(true);
+    const caller = { uid: REVIEWER, workspaceId: O, role: "reviewer" as const, status: "active" as const };
+    for (const view of ["assigned_to_me", "needs_review"] as const) {
+      const q = await getReviewQueue({ view, workspaceId: O, uid: REVIEWER, callerCandidate: caller, projectFilter: undefined, limit: 10, cursor: null });
+      expect(q.status === "ok" && q.items.map((i) => i.runId)).toEqual([]);
+    }
+  });
+
+  it("an unlisted Workspace's queue (real governed + report-review seed, paginated) is byte-identical with the feature on elsewhere and fully off", async () => {
+    // The B2 scenario seeds valid governed runs AND report reviews in scenario Workspace Q; the trial Workspace is T.
+    const seed = buildSeed();
+    await seedDb(db as never, seed);
+    const caller = { uid: Q_OWNER, workspaceId: Q, role: "owner" as const, status: "active" as const };
+    const pages = async () => {
+      const out: string[] = [];
+      for (const view of ["needs_review", "changes_requested", "recently_approved", "assigned_to_me", "overdue"] as const) {
+        let cursor: string | null = null;
+        for (let i = 0; i < 50; i++) {
+          const decoded = cursor ? decodeReviewQueueCursor(cursor) : null;
+          const r = await getReviewQueue({ view, workspaceId: Q, uid: Q_OWNER, callerCandidate: caller, projectFilter: undefined, limit: 2, cursor: decoded && decoded.ok ? decoded.cursor : null });
+          out.push(JSON.stringify(r));
+          if (r.status !== "ok" || !r.nextCursor) break;
+          cursor = r.nextCursor;
+        }
+      }
+      return out;
+    };
+    const on = await pages();
+    expect(on.some((p) => p.includes('"nextCursor"'))).toBe(true); // genuinely paginated
+    expect(on.some((p) => p.includes('"recordKind"'))).toBe(false); // the seeded report reviews stay dormant
+    cfg.enabled = false;
+    expect(await pages()).toEqual(on);
   });
 
   it("queue: a report review in the trial Workspace is listed there; governed rows are listed in both Workspaces exactly as before", async () => {
