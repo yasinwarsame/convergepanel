@@ -245,9 +245,28 @@ type AuditEvent = {
   runType?: string;
   runOwnerEmail?: string;
   runOwnerIsViewer?: boolean;
+  /** Server-decided: this viewer may open the row's trail. Only `true` offers the control (fail closed). */
+  trailAvailable?: boolean;
   question?: string;
   consensusScore?: number | null;
 };
+
+/** Shown instead of the trail control when the trail can't be opened. Names no owner and no reason beyond scope. */
+export const AUDIT_TRAIL_UNAVAILABLE_COPY = "Trail unavailable: this run is outside your current review access.";
+
+/**
+ * The drilldown target for a row: the SAME trimmed `runId` / `collection` the server classified the row by
+ * (`auditParentOf` in app/api/governance/audit/route.ts), so the request reads the parent the list judged.
+ * `null` for rows that have no trail (no run id, policy rows, unknown collections).
+ */
+export function auditTrailTarget(ev: { runId?: string; collection?: string }): { runId: string; collection: "runs" | "verifications" | "videoVerifications" } | null {
+  const runId = (ev.runId ?? "").trim();
+  if (!runId || runId === "policy") return null;
+  const collection = (ev.collection ?? "").trim();
+  if (collection === "" || collection === "runs") return { runId, collection: "runs" };
+  if (collection === "verifications" || collection === "videoVerifications") return { runId, collection };
+  return null;
+}
 
 type AuditInlineTrailState = {
   eventId: string;
@@ -428,7 +447,8 @@ export function AuditLogEventCard(props: {
     typeof ev.consensusScore === "number" && Number.isFinite(ev.consensusScore)
       ? Math.round(ev.consensusScore)
       : null;
-  const showTrailBtn = Boolean(ev.runId && ev.runId !== "policy");
+  const hasTrail = auditTrailTarget(ev) !== null;
+  const showTrailBtn = hasTrail && ev.trailAvailable === true;
   const actionLabel = (governanceAuditActionDisplayLabel(ev.action) ?? ev.action.replace(/_/g, " ")).toUpperCase();
 
   return (
@@ -518,6 +538,8 @@ export function AuditLogEventCard(props: {
               >
                 {expanded ? "Hide trail" : "Open trail →"}
               </button>
+            ) : hasTrail ? (
+              <span className="text-xs text-cp-muted">{AUDIT_TRAIL_UNAVAILABLE_COPY}</span>
             ) : (
               <span />
             )}
@@ -1175,10 +1197,9 @@ export default function GovernanceDashboard() {
   const toggleAuditInlineTrail = useCallback(
     async (ev: AuditEvent) => {
       if (!user || !authReady) return;
-      if (!ev.runId || ev.runId === "policy") return;
-      const coll =
-        (ev.collection as "runs" | "verifications" | "videoVerifications") ||
-        ("runs" as const);
+      const target = auditTrailTarget(ev);
+      if (!target) return;
+      const { runId, collection: coll } = target;
 
       if (auditInlineTrail?.eventId === ev.id) {
         setAuditInlineTrail(null);
@@ -1187,7 +1208,7 @@ export default function GovernanceDashboard() {
 
       setAuditInlineTrail({
         eventId: ev.id,
-        runId: ev.runId,
+        runId,
         collection: coll,
         events: [],
         loading: true,
@@ -1196,7 +1217,7 @@ export default function GovernanceDashboard() {
 
       try {
         const { authedFetch } = await import("@/lib/client/authedFetch");
-        const q = new URLSearchParams({ runId: ev.runId, collection: coll, limit: "100" });
+        const q = new URLSearchParams({ runId, collection: coll, limit: "100" });
         const res = await authedFetch(`/api/governance/audit?${q}`, {
           user,
           authReady,
