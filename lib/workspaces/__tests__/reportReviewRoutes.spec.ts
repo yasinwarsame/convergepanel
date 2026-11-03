@@ -12,6 +12,7 @@ jest.mock("@/lib/workspaces/reportReviewRollout", () => ({
   get REPORT_REVIEW_ENABLED() {
     return rollout.REPORT_REVIEW_ENABLED;
   },
+  REPORT_REVIEW_WORKSPACE_ALLOWLIST: ["w1"],
 }));
 const mockedSubmit = jest.fn();
 const mockedResubmit = jest.fn();

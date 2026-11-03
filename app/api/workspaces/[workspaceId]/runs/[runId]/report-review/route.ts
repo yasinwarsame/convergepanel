@@ -14,7 +14,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest, { params }: { params: { workspaceId: string; runId: string } }) {
-  const uidOrRes = await reportReviewCaller(req, "/api/workspaces/[workspaceId]/runs/[runId]/report-review");
+  const uidOrRes = await reportReviewCaller(req, "/api/workspaces/[workspaceId]/runs/[runId]/report-review", params.workspaceId);
   if (uidOrRes instanceof NextResponse) return uidOrRes;
   const body = await readJsonObject(req);
   if (!body || !Object.keys(body).every((k) => k === "purpose")) return reportReviewErrorBody(400, "bad_request", "Body must be exactly { purpose }.");

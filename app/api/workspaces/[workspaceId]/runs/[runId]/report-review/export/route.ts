@@ -47,7 +47,7 @@ function internal() {
 }
 
 export async function GET(req: NextRequest, { params }: { params: { workspaceId: string; runId: string } }) {
-  const uidOrRes = await reportReviewCaller(req, ROUTE, "GET");
+  const uidOrRes = await reportReviewCaller(req, ROUTE, params.workspaceId, "GET");
   if (uidOrRes instanceof NextResponse) return uidOrRes;
   const uid = uidOrRes;
   const { workspaceId } = params;

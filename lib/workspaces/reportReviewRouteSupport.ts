@@ -15,7 +15,7 @@ import { resolveApprovalWorkflowAdmission } from "./approvalWorkflowRollout";
 import { teamRunWorkspaceNotFoundConcealedResponse } from "./teamRunAccessResponse";
 import { internalErrorResponse } from "./teamWorkspaceErrorResponse";
 import type { ReportReviewMutationFailure } from "./reportReviewMutations";
-import { REPORT_REVIEW_ENABLED } from "./reportReviewRollout";
+import { isReportReviewEnabledForWorkspace } from "./reportReviewActivation";
 import { REPORT_REVIEW_INELIGIBLE_EXPLANATIONS } from "@/lib/governance/reportReviewCopy";
 
 export function reportReviewErrorBody(status: number, code: string, message: string) {
@@ -27,7 +27,11 @@ export function concealed(): NextResponse {
   return NextResponse.json(body, { status });
 }
 
-export async function reportReviewCaller(req: NextRequest, route: string, method: "GET" | "POST" = "POST"): Promise<string | NextResponse> {
+/**
+ * `workspaceId` is the route's Workspace: report review must be activated for exactly that Workspace (Order B allow-list),
+ * checked before anything else about the request is evaluated. Normal authorization then still applies in full.
+ */
+export async function reportReviewCaller(req: NextRequest, route: string, workspaceId: string, method: "GET" | "POST" = "POST"): Promise<string | NextResponse> {
   const identity = await resolveRequestIdentity(req);
   if (identity.status !== "authenticated") {
     logIdentityResolutionFailure({ route, method, failureCategory: identity.reason });
@@ -36,7 +40,7 @@ export async function reportReviewCaller(req: NextRequest, route: string, method
   }
   // Report review is review machinery: it also requires Approval Workflow admission (concealed when not admitted).
   // Dark: concealed before anything else about the request (body shape included) is evaluated.
-  if (!REPORT_REVIEW_ENABLED) return concealed();
+  if (!isReportReviewEnabledForWorkspace(workspaceId)) return concealed();
   const admission = resolveApprovalWorkflowAdmission({ uid: identity.uid, globalEnabled: APPROVAL_WORKFLOW_ENABLED, canaryUidsRaw: APPROVAL_WORKFLOW_CANARY_UIDS });
   if (!admission.admitted) return concealed();
   return identity.uid;
