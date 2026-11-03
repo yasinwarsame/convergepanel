@@ -454,9 +454,10 @@ describe("purge scope, budget and resume reporting (review S1 confirmation MINOR
 
 describe("resume is research-only", () => {
   it("a missing document in another collection never triggers the research-deletion resume", async () => {
-    db.seed(`runDeletionJobs/${RUN}`, { runId: RUN, state: "failed" });
-    const res = await adminDelete(new NextRequest(`http://localhost/api/admin/runs/${RUN}-x?collection=verifications`, { method: "DELETE", body: JSON.stringify({ confirm: true }), headers: { "content-type": "application/json" } }), { params: { runId: `${RUN}-x` } } as never);
+    db.docs.delete(`runs/${RUN}`);
+    db.seed(`runDeletionJobs/${RUN}`, { runId: RUN, state: "failed" }); // an unfinished RESEARCH deletion with this id exists
+    const res = await adminDelete(new NextRequest(`http://localhost/api/admin/runs/${RUN}?collection=verifications`, { method: "DELETE", body: JSON.stringify({ confirm: true }), headers: { "content-type": "application/json" } }), { params: { runId: RUN } } as never);
     expect(res.status).toBe(404);
-    expect(db.read(`runDeletionJobs/${RUN}`)).toMatchObject({ state: "failed" });
+    expect(db.read(`runDeletionJobs/${RUN}`)).toMatchObject({ state: "failed" }); // untouched: not resumed through another collection
   });
 });
