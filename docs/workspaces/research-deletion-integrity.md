@@ -147,16 +147,63 @@ Every result type, field, value, version assignment and failure code is unchange
 
 ## 6. Privacy and deletion guarantees, and their limits
 
-**Guaranteed by the application:**
-- active research content and its snapshots, exports, review records, projections and locks are removed;
-- research text in kept audit rows is redacted;
-- no application writer can write any of it again after the deletion starts.
+**Scope.** A research deletion deletes **one research run**: `runs/{runId}` and the records that depend on it.
+- A successful deletion means only that. This applies to the `{ ok: true, deleted: runId }` response, the admin "delete this run" action and a purge row.
+- It does **not** mean every record derived from the run is erased.
+- The separately owned records in §6.1 are not deleted. Nothing in the deletion response, the job record or the admin UI says they are.
 
-**Limits:**
-- **Firestore managed backups and point-in-time recovery** keep deleted data until their own retention expires. The application cannot erase them immediately.
-- **Origin-linked claim verifications that already exist** keep the source run id and evidence-source URLs. Deletion of the source run does not delete or redact them. New ones are refused once the source is deleted. Whether deletion should cascade to existing verifications is an owner decision.
-- **Team snapshot copies** made before the deletion are separate Team research and are not deleted with the personal source. Their snapshot locks keyed by `sourceRunId` remain. New copies are refused.
-- **`projectEvents`** rows keep the run id (metadata only).
+**Guaranteed by the application, for the deleted run:**
+- The run document and its whole subtree are removed: report-review snapshots, cycles and events; export records; review assignments, histories and panels; governance events; and anything else under the run.
+- Its `teamRuns` projections, which are a derived listing index, are removed.
+- Research text in the kept audit rows (`admin_audit_logs`, `workspaceMembershipEvents`) is redacted.
+- No application writer can write any of it again after the deletion starts.
+- No new claim verification or Team snapshot can be created from the run.
+
+### 6.1 Deletion boundary: what a run deletion does not erase
+
+**Origin-linked claim verification** (`verifications/{id}`, Personal or Team)
+- **Holds from the run:**
+  - one claim sentence taken from the run;
+  - the evidence-source references (URL and title) the run cited;
+  - `origin` (`runId`, `claimId`).
+
+  Its verdict, models and scores are its own.
+- **Classification: independently owned.** A separate, explicit "verify this claim" action creates it. It runs its own model panel and produces new content.
+- **Owner and access:**
+  - Owned by the verification's own owner (`userId`) or its Team workspace, and read through the verification read routes.
+  - Reading it never depends on the source run. After the deletion its source link resolves to nothing (`resolvePersonalSourceResearchLink` and `resolveTeamSourceResearchLink` return `null` for a missing run), and the verification still reads.
+- **Deleted by:** its own deletion, `DELETE /api/admin/runs/{id}?collection=verifications` (`SYSTEM_ADMIN`). It can be found by `origin.runId`. The run deletion does not cascade to it.
+
+**Team snapshot** (`runs/{snapshotRunId}` in a Team workspace)
+- **Holds from the run:** a full copy of the run's question, results and synthesis, made when the owner explicitly chose "Add to Team".
+- **Classification: independently owned, by design ("copy, never move").** It is new Team research with its own id, workspace binding, Team access rules, and review and governance records. Reading it does not read the personal source.
+- **Owner and access:** the Team workspace, under Team roles.
+- **Deleted by:** the same research deletion workflow, run by its own id (`SYSTEM_ADMIN`). It gets its own tombstone and full subtree deletion. It can be found through `runSnapshotLocks` (`sourceRunId` → `snapshotRunId`). The run deletion does not cascade to it.
+
+**`runSnapshotLocks` keyed by `sourceRunId`**
+- **Holds:** ids, `createdBy` and `createdAt`; no research text.
+- **Classification:** a metadata index of the Team copies.
+- **Access:** no client access (Firestore rules default deny).
+- **Kept,** because it is how the Team copies of a deleted source are found.
+
+**Redacted audit metadata** (`admin_audit_logs`, `workspaceMembershipEvents`, `projectEvents`, and the metadata-only adaptive audit rows)
+- **Holds:** who, what, when, status and the run id. Research text is redacted or was never present.
+- **Classification:** audit evidence, read by the governance and admin audit readers.
+- **Kept.** No retention period is set (an open owner decision).
+
+**Firestore managed backups and point-in-time recovery**
+- **Holds:** everything, as of the backup or recovery point.
+- **Outside the application;** controlled by the Google Cloud project's administrators.
+- **Expires by its own retention.** The application cannot erase it, and nothing claims it does.
+
+**Why the deletion does not cascade.** The verifications and Team snapshots are independently owned, so a cascade would delete other owners' records: a Team's research, or a verification's own result. This change does not cascade.
+
+**Erasing every copy.** Erasing every copy of a piece of research takes:
+1. the run deletion;
+2. separate deletions of the verifications found by `origin.runId`;
+3. separate deletions of the Team snapshots found through `runSnapshotLocks`.
+
+Whether some cases should cascade automatically, for example a legal erasure request, is an open owner and legal decision. It would need its own reviewed change.
 
 ## 7. Tests
 
