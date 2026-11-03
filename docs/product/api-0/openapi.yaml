@@ -1,0 +1,753 @@
+# DRAFT — NOT IMPLEMENTED. API-0 design artifact only (owner ruling OD-20, 2026-11-03).
+# No route, credential, host, queue or billing object described here exists.
+# Source of truth for result semantics: docs/product/api-0/result-schema.md.
+openapi: 3.1.0
+info:
+  title: ConvergePanel Verification API (DRAFT)
+  version: 0.1.0-draft
+  summary: Draft contract for claim and research verification. Not implemented.
+  description: |
+    **Status: DRAFT, NOT IMPLEMENTED.** This document is an API-0 design artifact.
+
+    Results measure **model consensus**, not factual verification (CR-1). Every verdict
+    and rating carries `methodology` and `limitations`. Citations are model- or
+    provider-reported and are not fetched by ConvergePanel.
+
+    First release scope: `type: claim` and `type: research` only.
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+servers:
+  - url: https://api.convergepanel.com/v1
+    description: Dedicated API host (OD-4). Not provisioned.
+security:
+  - ApiKeyBearer: []
+tags:
+  - name: Verifications
+  - name: Usage
+  - name: Models
+paths:
+  /verifications:
+    post:
+      tags: [Verifications]
+      operationId: createVerification
+      summary: Create a verification job
+      description: |
+        Validates, authorizes scope and applies the rate limit, then runs ONE Firestore
+        transaction that checks idempotency, org state, caps and the spend ceiling, reserves
+        credits, and writes the job (internal state pending_dispatch, reported as `queued`)
+        together with the idempotency record. The queue publish happens AFTER commit
+        (transactional outbox); if it fails, a sweeper re-publishes, so the 202 never depends
+        on it. Returns 202 with the job. With `Prefer: wait=60` on a claim, may return 200 with
+        the completed result. Requires scope `verifications:write`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/PreferWait'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateVerificationRequest'
+      responses:
+        '200':
+          description: Synchronous wait succeeded (claims only).
+          headers:
+            RateLimit-Limit: { $ref: '#/components/headers/RateLimitLimit' }
+            RateLimit-Remaining: { $ref: '#/components/headers/RateLimitRemaining' }
+            RateLimit-Reset: { $ref: '#/components/headers/RateLimitReset' }
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificationResult'
+        '202':
+          description: Accepted and queued. Credits reserved.
+          headers:
+            Location:
+              description: URL of the created verification.
+              schema: { type: string }
+            Idempotent-Replayed:
+              description: Present and `true` when this response replays an earlier request.
+              schema: { type: string, enum: ['true'] }
+            RateLimit-Limit: { $ref: '#/components/headers/RateLimitLimit' }
+            RateLimit-Remaining: { $ref: '#/components/headers/RateLimitRemaining' }
+            RateLimit-Reset: { $ref: '#/components/headers/RateLimitReset' }
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificationAccepted'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '410': { $ref: '#/components/responses/Gone' }
+        '413': { $ref: '#/components/responses/TooLarge' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /verifications/{id}:
+    parameters:
+      - $ref: '#/components/parameters/VerificationId'
+    get:
+      tags: [Verifications]
+      operationId: getVerification
+      summary: Get job status and structured result
+      description: |
+        Requires `verifications:read`. Another organization's ID returns 404, never 403.
+        A job-level failure is `status: failed` in a 200 response, not an HTTP error.
+      responses:
+        '200':
+          description: Current state. Result sections are present once terminal.
+          headers:
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificationResult'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '410': { $ref: '#/components/responses/Gone' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    delete:
+      tags: [Verifications]
+      operationId: deleteVerification
+      summary: Delete a verification and all associated records (OD-11)
+      description: |
+        Requires `verifications:delete`. Deletes data classes (a) operational inputs,
+        (b) customer-visible results and (d) auditable evidence for this verification,
+        including model results and webhook delivery records. Class (c) billing records
+        remain with no content. Idempotent. A queued or running job is canceled first.
+      responses:
+        '202':
+          description: Deletion accepted. Completes asynchronously (target 24 h, placeholder).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeletionAccepted'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /verifications/{id}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/VerificationId'
+    post:
+      tags: [Verifications]
+      operationId: cancelVerification
+      summary: Cancel a job
+      description: |
+        Requires `verifications:write`. A queued job is canceled and its reservation released.
+        A running job stops at its next step boundary and settles for work already done.
+      responses:
+        '200':
+          description: Cancellation recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificationAccepted'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /verifications/{id}/report:
+    parameters:
+      - $ref: '#/components/parameters/VerificationId'
+    get:
+      tags: [Verifications]
+      operationId: getVerificationReport
+      summary: Narrative layer (decision receipt, unified answer, synthesis, schema result)
+      description: Requires `verifications:read`.
+      responses:
+        '200':
+          description: Report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificationReport'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '410': { $ref: '#/components/responses/Gone' }
+  /verifications/{id}/models:
+    parameters:
+      - $ref: '#/components/parameters/VerificationId'
+    get:
+      tags: [Verifications]
+      operationId: listVerificationModels
+      summary: Per-model results (compact by default)
+      description: |
+        Requires `verifications:read`. Compact by default.
+        Full sanitized response text (OD-19, default OFF) is returned only when ALL hold:
+        (1) org model-response access is enabled; (2) the job was created with
+        `options.retain_model_responses: true` while it was enabled; (3) the key has scope
+        `model_responses:read`; (4) the request sets `include=response_text`.
+        Otherwise `response_text` is a section with `not_requested` or `unavailable`.
+      security:
+        - ApiKeyBearer: []
+      parameters:
+        - name: include
+          in: query
+          required: false
+          description: Set to `response_text` to request full text (see conditions above).
+          schema:
+            type: string
+            enum: [response_text]
+      responses:
+        '200':
+          description: One entry per selected slot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelResultList'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '410': { $ref: '#/components/responses/Gone' }
+  /usage:
+    get:
+      tags: [Usage]
+      operationId: getUsage
+      summary: Current period usage, limits and per-application breakdown
+      description: Requires `usage:read`. Values come from the authoritative customer ledger.
+      responses:
+        '200':
+          description: Usage.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Usage'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /models:
+    get:
+      tags: [Models]
+      operationId: listModels
+      summary: Selectable models, observed availability, credit weights, schemas
+      description: |
+        Requires `models:read`. Availability is observed from provider health; ConvergePanel
+        does not change provider configuration (e.g. Gemini) through this API.
+      responses:
+        '200':
+          description: Model list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelList'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+webhooks:
+  verificationEvent:
+    post:
+      summary: Signed verification lifecycle event (thin payload)
+      description: |
+        Header `ConvergePanel-Signature: t=<unix>,v1=<hex HMAC-SHA256(secret, "<t>.<raw body>")>`.
+        Receivers must reject timestamps outside ±300 s, compare in constant time, and
+        dedupe on `id`. During secret rotation two `v1` values are sent for 24 h.
+        Payloads never contain input, model text or result data.
+      parameters:
+        - name: ConvergePanel-Signature
+          in: header
+          required: true
+          schema: { type: string, pattern: '^t=\d+(,v1=[0-9a-f]{64})+$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookEvent'
+      responses:
+        '2XX':
+          description: Any 2xx acknowledges. Other codes and timeouts (10 s) are retried.
+components:
+  securitySchemes:
+    ApiKeyBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: 'cpk_{live|test}_{keyId}_{secret}'
+      description: |
+        Organization API key. Shown once at creation. Management of keys and webhooks
+        is session-authenticated on the main app and not part of this API.
+  parameters:
+    VerificationId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, pattern: '^ver_[A-Za-z0-9]{24}$' }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: |
+        Required for live keys. 1–255 printable ASCII characters. Scoped to
+        (organization, application, mode), so test and live keys never collide. Retained 24 h.
+        Same key + same body replays the original 202 response; same key + different body
+        returns 409 `idempotency_key_reused`. A request rejected before or inside the create
+        transaction stores nothing, so the key may be reused.
+      schema: { type: string, minLength: 1, maxLength: 255 }
+    PreferWait:
+      name: Prefer
+      in: header
+      required: false
+      description: '`wait=<seconds>` (max 60). Claims only; research always returns 202.'
+      schema: { type: string, pattern: '^wait=([1-9]|[1-5][0-9]|60)$' }
+  headers:
+    RateLimitLimit:
+      description: Requests allowed in the current window.
+      schema: { type: integer }
+    RateLimitRemaining:
+      description: Requests remaining in the current window.
+      schema: { type: integer }
+    RateLimitReset:
+      description: Seconds until the window resets.
+      schema: { type: integer }
+    RetryAfter:
+      description: Seconds to wait before retrying.
+      schema: { type: integer }
+    RequestId:
+      description: Request identifier for support.
+      schema: { type: string, pattern: '^req_[A-Za-z0-9]+$' }
+  responses:
+    BadRequest:
+      description: Invalid request.
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Unauthorized:
+      description: '`invalid_api_key` for every key failure.'
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    PaymentRequired:
+      description: '`quota_exceeded`, `spend_limit_reached`, `payment_required`.'
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Forbidden:
+      description: '`insufficient_scope`, `org_suspended`, `live_key_requires_plan` (authenticated live key, org without an active API plan; same response on every route), `failed_job_threshold_exceeded`, `model_response_access_disabled`.'
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    NotFound:
+      description: '`verification_not_found`. Also returned for other organizations'' IDs.'
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Conflict:
+      description: '`idempotency_key_reused`; `request_in_progress` (the create transaction exhausted its contention retries on the idempotency record without reading a committed one; nothing was written; a retry gets the replay or creates the job); `not_cancelable`.'
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Gone:
+      description: '`verification_deleted`.'
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    TooLarge:
+      description: '`request_too_large` (body > 64 KB).'
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Unprocessable:
+      description: '`model_unavailable`, `too_few_models`, `model_limit_exceeded`, `type_unavailable`, `synthesis_not_supported`, `synthesis_unavailable`, `fallback_unavailable`, `repeated_failing_input`.'
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    TooManyRequests:
+      description: '`rate_limited`, `concurrency_limit`.'
+      headers:
+        Retry-After: { $ref: '#/components/headers/RetryAfter' }
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    InternalError:
+      description: '`internal_error`.'
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    ServiceUnavailable:
+      description: '`queue_unavailable` (pre-write queue health check only; nothing written), `capacity_protection` (CR-2), `platform_spend_ceiling`, `maintenance`.'
+      headers:
+        Retry-After: { $ref: '#/components/headers/RetryAfter' }
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [type, code, message, request_id]
+          properties:
+            type:
+              type: string
+              description: >-
+                Open enum. Known: invalid_request_error, authentication_error, billing_error,
+                permission_error, not_found, idempotency_error, gone, request_too_large,
+                unprocessable, rate_limit_error, api_error, service_unavailable.
+            code: { type: string }
+            message: { type: string }
+            param: { type: [string, 'null'] }
+            request_id: { type: string }
+            doc_url: { type: string, format: uri }
+    CreateVerificationRequest:
+      type: object
+      required: [type, input]
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          enum: [claim, research]
+        input:
+          type: object
+          additionalProperties: false
+          properties:
+            claim: { type: string, minLength: 1, maxLength: 4000 }
+            question: { type: string, minLength: 1, maxLength: 4000 }
+            context: { type: string, maxLength: 20000 }
+          description: '`claim` for type claim; `question` (+ optional `context`) for type research. Limits are placeholders.'
+        models:
+          type: array
+          minItems: 2
+          maxItems: 5
+          uniqueItems: true
+          items: { type: string }
+          description: IDs from GET /models. Defaults to the plan default panel.
+        options:
+          type: object
+          additionalProperties: false
+          properties:
+            synthesis:
+              type: boolean
+              default: false
+              description: Research only. `true` on a claim returns 422 `synthesis_not_supported`.
+            allow_fallback:
+              type: boolean
+              default: false
+              description: |
+                Opt in to provider fallback: DeepSeek substitution for a failed research slot and
+                the Claude synthesis fallback. Default false: a failed slot stays `failed` and the
+                content is never sent to a provider the customer did not select. A substituted slot
+                reports the provider that actually answered. Claim slots never fall back.
+            retain_input:
+              type: boolean
+              default: false
+              description: Keep input text for the result retention period (OD-10 class a). Org may forbid.
+            retain_model_responses:
+              type: boolean
+              default: false
+              description: Store full sanitized model text. Rejected with 403 `model_response_access_disabled` unless org model-response access is enabled (OD-19).
+        metadata:
+          type: object
+          maxProperties: 20
+          additionalProperties: { type: string, maxLength: 500 }
+    VerificationAccepted:
+      type: object
+      required: [object, id, status, type, format_version, usage]
+      properties:
+        object: { const: verification }
+        id: { type: string }
+        status: { $ref: '#/components/schemas/JobStatus' }
+        type: { type: string }
+        format_version: { const: '1' }
+        usage:
+          type: object
+          properties:
+            credits_reserved: { type: integer, minimum: 0 }
+        poll_after_ms: { type: integer, minimum: 0 }
+    DeletionAccepted:
+      type: object
+      required: [object, id, verification_id, status]
+      properties:
+        object: { const: deletion }
+        id: { type: string, pattern: '^del_[A-Za-z0-9]+$' }
+        verification_id: { type: string }
+        status:
+          type: string
+          description: 'Open enum. Known: pending, completed.'
+    JobStatus:
+      type: string
+      description: 'Open enum. Known: queued, running, synthesizing, completed, partial, failed, canceled, expired.'
+    Availability:
+      type: string
+      description: 'Open enum. Known: completed, partial, failed, unavailable, not_requested.'
+    Reason:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string }
+        message: { type: string }
+    Methodology:
+      type: object
+      required: [id, version, basis]
+      properties:
+        id: { type: string, pattern: '^cp\.[a-z0-9_]+$' }
+        version: { type: string }
+        basis:
+          type: string
+          description: 'Open enum. Known: model_consensus, model_reported_citations, model_generated_summary.'
+        doc_url: { type: string, format: uri }
+    Limitation:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          description: >-
+            Open enum. Known: model_agreement_not_independent_evidence, citations_not_fetched,
+            model_failed, model_substituted, model_refused, reduced_panel, parse_degraded,
+            synthesis_failed, limited_coverage, pipeline_limitation.
+        message: { type: string }
+        model: { type: string }
+        substituted_by: { type: string }
+        usable_models: { type: integer }
+        selected_models: { type: integer }
+    Section:
+      type: object
+      description: |
+        Availability wrapper. `reason` is always present (null only when completed).
+        When availability is completed or partial, `data` and `methodology` are non-null and
+        `limitations` contains the CR-1 code matching `methodology.basis`:
+        model_agreement_not_independent_evidence for model_consensus and
+        model_generated_summary; citations_not_fetched for model_reported_citations.
+        When failed, unavailable or not_requested, `data` and `methodology` are null and
+        (except not_requested) `reason` is required. Full rules: result-schema.md §3.1, §9.
+      required: [availability, reason, methodology, limitations, data]
+      properties:
+        availability: { $ref: '#/components/schemas/Availability' }
+        reason:
+          oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/Reason'
+        methodology:
+          oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/Methodology'
+        limitations:
+          type: array
+          items: { $ref: '#/components/schemas/Limitation' }
+        data: {}
+    VerificationBasis:
+      type: object
+      required: [kind, independent_source_check, statement]
+      properties:
+        kind: { type: string, description: 'Open enum. v1: model_consensus.' }
+        independent_source_check: { type: string, description: 'Open enum. v1: not_performed.' }
+        statement: { type: string }
+    VerificationResult:
+      type: object
+      description: ApiVerificationResultV1. Full JSON Schema in result-schema.md §9.
+      required: [object, id, format_version, type, status, mode, created_at, application_id,
+                 input, research_schema, verification_basis, verdict, certainty, consensus,
+                 trust, disagreements, synthesis, evidence, limitations, uncertainties,
+                 human_review_recommended, verification_status, failure, models, report, usage]
+      properties:
+        object: { const: verification }
+        id: { type: string }
+        format_version: { const: '1' }
+        type: { type: string, enum: [claim, research] }
+        status: { $ref: '#/components/schemas/JobStatus' }
+        mode: { type: string, enum: [live, test] }
+        created_at: { type: string, format: date-time }
+        completed_at: { type: [string, 'null'], format: date-time }
+        application_id: { type: string }
+        metadata:
+          type: object
+          additionalProperties: { type: string }
+        input:
+          type: object
+          required: [char_count, fingerprint, retained]
+          properties:
+            char_count: { type: integer }
+            context_char_count: { type: integer }
+            fingerprint: { type: string }
+            retained: { type: boolean }
+        research_schema:
+          oneOf:
+            - type: 'null'
+            - type: object
+              required: [id, family]
+              properties:
+                id: { type: string }
+                family: { type: string, description: 'Open enum. Known: dedicated, claims_matrix.' }
+        progress:
+          type: object
+          properties:
+            models_done: { type: integer }
+            models_total: { type: integer }
+        verification_basis: { $ref: '#/components/schemas/VerificationBasis' }
+        verdict: { $ref: '#/components/schemas/Section' }
+        certainty: { $ref: '#/components/schemas/Section' }
+        consensus: { $ref: '#/components/schemas/Section' }
+        trust: { $ref: '#/components/schemas/Section' }
+        disagreements: { $ref: '#/components/schemas/Section' }
+        synthesis: { $ref: '#/components/schemas/Section' }
+        evidence: { $ref: '#/components/schemas/Section' }
+        limitations:
+          type: array
+          items: { $ref: '#/components/schemas/Limitation' }
+        uncertainties:
+          oneOf:
+            - type: 'null'
+            - type: array
+              items: { type: string }
+        human_review_recommended: { type: [boolean, 'null'] }
+        verification_status:
+          type: object
+          required: [state, governance]
+          properties:
+            state: { $ref: '#/components/schemas/JobStatus' }
+            governance:
+              type: object
+              properties:
+                automated_status: { type: string }
+                human_review: { const: not_available_via_api }
+        failure:
+          oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/Reason'
+        models: { $ref: '#/components/schemas/Link' }
+        report: { $ref: '#/components/schemas/Link' }
+        usage:
+          type: object
+          properties:
+            credits_reserved: { type: integer }
+            credits_charged: { type: [integer, 'null'] }
+    VerificationReport:
+      type: object
+      required: [object, verification_id, verification_basis, decision_receipt, unified_answer, synthesis, schema_result]
+      properties:
+        object: { const: verification_report }
+        verification_id: { type: string }
+        verification_basis: { $ref: '#/components/schemas/VerificationBasis' }
+        decision_receipt:
+          $ref: '#/components/schemas/Section'
+          description: AdaptiveDecisionReceipt re-keyed (research); unavailable for claims.
+        unified_answer:
+          $ref: '#/components/schemas/Section'
+        synthesis:
+          $ref: '#/components/schemas/Section'
+          description: Full StructuredSynthesis re-keyed to snake_case.
+        schema_result:
+          $ref: '#/components/schemas/Section'
+          description: Research only; `data` has `schema_id` and `result`.
+    ModelResult:
+      type: object
+      required: [model, status]
+      properties:
+        model: { type: string }
+        status:
+          type: string
+          description: 'Public ModelStatus. Open enum. Known: ok, substituted, failed.'
+        failure_class:
+          type: [string, 'null']
+          description: 'Open enum. Known: error, timeout, refused, rate_limited.'
+        provider:
+          type: string
+          description: The provider that actually answered (a substituted slot reports e.g. `deepseek`).
+        requested_model: { type: [string, 'null'] }
+        actual_model: { type: [string, 'null'] }
+        substituted_from: { type: [string, 'null'] }
+        latency_ms: { type: [integer, 'null'] }
+        tokens:
+          type: object
+          properties:
+            prompt: { type: [integer, 'null'] }
+            completion: { type: [integer, 'null'] }
+        parse_status: { type: [string, 'null'] }
+        verdict: { type: [string, 'null'] }
+        confidence: { type: [string, 'null'] }
+        parts:
+          type: object
+          properties:
+            correct: { type: integer }
+            incorrect: { type: integer }
+            unverifiable: { type: integer }
+        summary_char_count: { type: [integer, 'null'] }
+        response_text:
+          $ref: '#/components/schemas/Section'
+          description: not_requested by default (OD-19).
+    ModelResultList:
+      type: object
+      required: [object, data]
+      properties:
+        object: { const: list }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ModelResult' }
+    Usage:
+      type: object
+      required: [object, period, plan, credits, hard_cap_reached]
+      properties:
+        object: { const: usage }
+        period:
+          type: object
+          properties:
+            start: { type: string, format: date }
+            end: { type: string, format: date }
+        plan: { type: string }
+        credits:
+          type: object
+          properties:
+            included: { type: integer }
+            used: { type: integer }
+            reserved: { type: integer }
+            overage: { type: integer }
+        spend_limit_usd: { type: [number, 'null'] }
+        hard_cap_reached: { type: boolean }
+        by_application:
+          type: array
+          items:
+            type: object
+            properties:
+              application_id: { type: string }
+              credits_used: { type: integer }
+    Model:
+      type: object
+      required: [id, availability, credit_weight, supports]
+      properties:
+        id: { type: string }
+        display_name: { type: string }
+        provider: { type: string }
+        availability:
+          type: string
+          description: 'Open enum. Known: available, degraded, unavailable.'
+        availability_reason: { type: [string, 'null'] }
+        credit_weight: { type: number }
+        supports:
+          type: array
+          items: { type: string }
+    ModelList:
+      type: object
+      required: [object, data, types, pipeline_providers, min_models, max_models]
+      properties:
+        object: { const: list }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Model' }
+        types:
+          type: array
+          description: Verification types currently offered. `research` is absent while an adaptive pipeline switch is off.
+          items: { type: string }
+        schemas:
+          type: array
+          items: { type: string }
+        pipeline_providers:
+          type: array
+          description: Providers that can receive request content besides the selected models (P-2, P-9).
+          items:
+            type: object
+            required: [provider, role, used]
+            properties:
+              provider: { type: string }
+              role: { type: string, description: 'Open enum. Known: research_auxiliary, synthesis, slot_fallback, synthesis_fallback.' }
+              used: { type: string }
+        min_models: { type: integer }
+        max_models: { type: integer }
+    Link:
+      type: object
+      required: [href]
+      properties:
+        href: { type: string }
+    WebhookEvent:
+      type: object
+      required: [id, type, created, api_version, data]
+      additionalProperties: false
+      properties:
+        id: { type: string, pattern: '^evt_[A-Za-z0-9]+$' }
+        type:
+          type: string
+          description: >-
+            Open enum. Known: verification.completed, verification.partial, verification.failed,
+            verification.canceled, verification.expired, verification.deleted,
+            usage.threshold_reached, org.suspended, api_key.revoked, webhook.test.
+        created: { type: integer, description: Unix seconds. }
+        api_version: { const: v1 }
+        livemode: { type: boolean }
+        data:
+          type: object
+          additionalProperties: false
+          properties:
+            verification_id: { type: string }
+            status: { $ref: '#/components/schemas/JobStatus' }
+            application_id: { type: string }
+            threshold_percent: { type: integer }
+            key_prefix: { type: string }
