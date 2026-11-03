@@ -15,7 +15,7 @@
 | DEP-7 | Managed KMS key for webhook secrets (separately authorized) | API-5 | Owner (OD-12) | Not started |
 | DEP-8 | Vercel function duration and concurrency limits confirmed for step budgets | API-3 | Engineering | Open |
 | DEP-9 | Web baseline measured (p95 latency, error rate, provider-limit errors on web routes) | Web-capacity gate (API-3) | Engineering (OD-18 tools) | Not started |
-| DEP-10 | Provider terms confirmed for each provider in `CONNECTOR_MAP` and the DeepSeek fallback | API-6 | Owner + counsel (PRD §21A P-9) | Not started |
+| DEP-10 | Provider terms confirmed for each provider that can receive customer content: every `CONNECTOR_MAP` provider, the pipeline providers (Gemini auxiliary for research, OpenAI synthesis) and the fallback providers (DeepSeek, Claude synthesis fallback) | API-6 | Owner + counsel (PRD §21A P-9) | Not started |
 | DEP-11 | API ToS, DPA, acceptable-use policy, subprocessor list, backup-retention statement | API-6 | Owner + counsel | Not started |
 | DEP-12 | Non-Production Firebase project for load and isolation tests (no test records in Production governance data) | API-3 load test | Owner | Open (known infra gap) |
 | DEP-13 | Secret-scanning registration for `cpk_` | API-7 | Owner (OD-17) | Not started |
@@ -27,7 +27,7 @@
 
 | # | Criterion | Evidence |
 |---|---|---|
-| WG-1 | API-only per-provider concurrency pools live, sized `api_share × provider_capacity` (placeholder 40 %), permits leased with TTL | Unit + integration tests; config review |
+| WG-1 | API-only per-provider concurrency pools live, sized `api_share × provider_capacity` (placeholder 40 %), permit sets acquired all-or-nothing per step with TTL, yields capped (`MAX_YIELDS_PER_JOB`) | Unit + integration tests; config review |
 | WG-2 | Global and per-org queue depth ceilings enforced (`429` / `503 capacity_protection`) | Boundary tests |
 | WG-3 | API daily provider-spend ceiling and failed-job cost thresholds enforced from the internal cost ledger | Tests T-L6 |
 | WG-4 | Load-shedding order implemented and tested: synthesis + research → claims → pause at step boundary → shrink `api_share`; web never shed | Failure-injection test |
@@ -50,9 +50,9 @@
 - **Tests:** T-L2..T-L6; Stripe event replay and ordering; read-failure-vs-absence cases.
 
 ### API-3 — Verification job submission and retrieval
-- **Scope:** mechanical extractions (`lib/verification/executeClaimVerification.ts`, `lib/synthesis/executeSynthesis.ts`, `RunPersistencePort` + `governanceMode` on `executeOrdinaryRun`) each as its own PR; queue, worker, leases, sweeper; CR-2 controls; `POST/GET /v1/verifications`, cancel, `DELETE`; idempotency; class (a) deletion; sandbox fixtures; `lib/apiPlatform/resultSchema.ts` (verdict-level projection).
+- **Scope:** behaviour-equivalent PRs, each its own PR and review, in this order: **PR A** provider-call instrumentation (`ProviderCallHooks`: per-call observer, permit/replay hook, `allowFallback`; PRD §6.5); **PR B** execution ports on `executeOrdinaryRun` (persistence, usage accounting, analytics, governance mode, diagnostics; PRD §6.1); then the claim and synthesis extractions (`lib/verification/executeClaimVerification.ts`, `lib/synthesis/executeSynthesis.ts`). After those: transactional-outbox create, sweeper, queue, worker, leases, step-start checks, all-or-nothing permits with yield cap, per-call records; CR-2 controls; `POST/GET /v1/verifications`, cancel, `DELETE`; idempotency; class (a) deletion; sandbox fixtures; `lib/apiPlatform/resultSchema.ts` (verdict-level projection).
 - **Entry:** API-2 released; DEP-5, DEP-8, DEP-12.
-- **Exit:** existing route suites pass **unmodified** after each extraction, with golden diffs; **web-capacity protection gate (§2) passed** before live provider traffic; canary jobs reach terminal states; sandbox spends $0 (connector spies); independent review CLEAN per PR.
+- **Exit:** existing route suites pass **unmodified** after each of PR A, PR B and the extractions, with golden diffs and spy equivalence (connector call sequence for PR A; Firestore/PostHog/log for PR B); T-W4 API-mode spy test green and mutation-proven per side-effect row; **web-capacity protection gate (§2) passed** before live provider traffic; canary jobs reach terminal states; sandbox spends $0 (connector spies); independent review CLEAN per PR.
 - **Tests:** T-D2..T-D6, T-W1..T-W5, T-P2, T-P3, T-C1, idempotency races, deletion completeness.
 
 ### API-4 — Structured verdict, rating and synthesis output

@@ -24,14 +24,27 @@ Deterministic entry IDs (`reserve_{verId}`, `settle_{verId}`, `release_{verId}`)
 `periods/{YYYY-MM}`: `included`, `used`, `reserved`, `overage` (always 0 in the pilot), `hardCapCredits`, `spendLimitUsd`. Updated only inside the same transaction as the ledger entry. High-volume orgs use N sharded counter documents summed on read (N fixed per org, placeholder 10).
 
 ### 2.3 Reserve (at create)
-One Firestore transaction, modelled on the transactional TOCTOU protection of `checkAndIncrementUsageForRun` (`lib/stripe/usageCheck.ts`) but org-scoped and amount-based:
-1. Read org: `status = active`, plan entitles live use, `abuseState` permits creates.
-2. Read period: require `used + reserved + estimate ≤ hardCapCredits` and, where applicable, within `spendLimitUsd`.
-3. Write `reserve_{verId}`, `reserved += estimate`, job document, idempotency record.
-4. Any read failure aborts (fail closed); no partial state.
+This is the T-create transaction of the transactional outbox (`jobs-and-idempotency.md` §2). It is modelled on the transactional TOCTOU protection of `checkAndIncrementUsageForRun` (`lib/stripe/usageCheck.ts`), but org-scoped and amount-based:
+1. Read the idempotency record. If it exists, replay or reject (`jobs-and-idempotency.md` §5) and write nothing else.
+2. Read org: `status = active`; a live key requires an active API plan (otherwise `403 live_key_requires_plan`); `abuseState` permits creates; the failed-job count limit is not exceeded (§4.3).
+3. Read period: require `used + reserved + estimate ≤ hardCapCredits` and, where applicable, within `spendLimitUsd`. Read the platform daily spend counter: require it below the ceiling.
+4. Write `reserve_{verId}`, `reserved += estimate`, the job document in internal state `pending_dispatch`, and the idempotency record. Dispatch happens **after** commit, never inside the transaction.
+5. Any read failure aborts the transaction (fail closed). Nothing is written, so there is no partial state.
 
 ### 2.4 Settle (at finalize)
-`charged = Σ credit_weight[m] × type_factor` over slots **that consumed provider work** + synthesis credits if synthesis produced provider work + retry charges actually incurred, capped at `estimate`. Write `settle_{verId}` (charged) and, if `charged < estimate`, the remainder is released in the same entry. `reserved −= estimate`, `used += charged`. Invariant: `charged ≤ estimate`, always (property-tested).
+All amounts are **integer credits** (§2.6 rounding rule).
+
+```
+charged = min( estimate,
+               ceil( Σ_{charged slots} credit_weight[m] × type_factor )
+             + (synthesis produced a result ? synthesis_credits : 0)
+             + retries_charged )
+```
+
+- A slot is **charged** when its connector status after retries is `ok` or `substituted` (it returned usable provider output). That includes a slot whose output then failed schema validation, because provider work happened. A `failed` slot is not charged. Its provider cost is still recorded internally (§3).
+- `retries_charged` = `retry_allowance` if at least one transient retry, fallback or corrective retry produced the slot's final usable output, else 0.
+
+Write `settle_{verId}` (charged). If `charged < estimate`, the same entry releases the remainder. `reserved −= estimate`, `used += charged`. Invariant: `charged ≤ estimate`, always (property-tested).
 
 ### 2.5 Release
 `failed`, `canceled` (before execution), `expired`: `release_{verId}` for the whole estimate, `charged = 0` (OD-8). Canceled during execution settles for work done.
@@ -49,14 +62,34 @@ Defined in **new** compile-time module `lib/apiPlatform/rateCard.ts` (OD-21) wit
 
 All placeholders; calibrated from the internal cost ledger during API-6.
 
+**Rounding rule.** Credits are integers everywhere: ledger entries, counters, `usage` fields and API responses. The only fractional term is `Σ credit_weight × type_factor` (for example research `type_factor` 1.5). It is rounded **up** (`ceil`) once, at reservation and again at settlement, before the integer synthesis and retry terms are added:
+
+```
+estimate = ceil( Σ_selected credit_weight[m] × type_factor ) + (synthesis ? synthesis_credits : 0) + retry_allowance
+```
+
+Worked placeholder examples (same numbers as `pricing-and-cost-model.md` §2):
+- Claim, 3 standard models: `ceil(3 × 1) + 0 + 1` = **4** reserved.
+- Research, 3 standard models + 1 premium, synthesis on: `ceil((3 × 1 + 1 × 2) × 1.5) + 3 + 1` = `ceil(7.5) + 4` = **12** reserved. If the premium slot fails and no retry produced output, settlement is `ceil(3 × 1.5) + 3 + 0` = `ceil(4.5) + 3` = **8** charged and 4 released.
+
 ## 3. Internal cost ledger (OD-8)
 
 ### 3.1 What is recorded
-One entry per provider call attempt (including retries, DeepSeek fallback substitutions, adaptive classification and corrective retries, synthesis calls), written by the worker **whether the call succeeded or failed**:
+One entry per provider call attempt, written by the worker **whether the call succeeded or failed**. That covers primary calls, transient retries, fallback substitutions (only with `allow_fallback`), the adaptive classification and the other auxiliary Gemini calls, corrective retries, and synthesis calls including their retries and fallback. The entries come from the per-call observer that PRD §6.5 adds to every provider call site. Without it, `runPanel` returns only each slot's final result: `failedPlaceholder()` and the substituted result both carry zeroed `tokenUsage`, and intermediate attempts are discarded.
 
-`entryId`, `orgId`, `verificationId`, `step`, `slot`, `provider`, `requestedModel`, `actualModel`, `attempt`, `outcome` (`ok | error | timeout | refused | rate_limited`), `promptTokens`, `completionTokens`, `searchRequests`, `costUsd` (computed from `rateCard`), `rateCardVersion`, `jobOutcome` (filled at finalize), `customerCharged` (credits), `createdAt`.
+`entryId` (= `{verId}:{step}:{callKey}`, created with `tx.create()` together with the per-call record, `jobs-and-idempotency.md` §4.4), `orgId`, `verificationId`, `step`, `callKey`, `site`, `slot`, `provider`, `requestedModel`, `actualModel`, `attempt`, `outcome` (`ok | error | timeout | refused | rate_limited`), `promptTokens`, `completionTokens`, `searchRequests`, `costUsd` (computed from `rateCard`), `costEstimated` (boolean), `rateCardVersion`, `jobOutcome` (filled at finalize), `customerCharged` (credits), `createdAt`.
 
-Token counts come from the existing normalization (`lib/panel/normalizeTokens.ts`; adaptive retry usage as accounted by `lib/firestore/adaptiveRetryAccounting.ts`). When a provider returns no usage for a failed call, `costUsd` is recorded as the rate card's documented minimum for that failure class (placeholder 0) with `costEstimated: true`; it is never silently omitted.
+**Reported usage.** Token counts come from the attempt's own connector result, through the existing normalization (`lib/panel/normalizeTokens.ts`, and `normalizeAdaptiveRetryUsage` in `lib/adaptiveSchema/retryCorrection.ts` for corrective retries). `costEstimated: false`.
+
+**Unreported usage is estimated, never 0.** A call whose result carries no usable token counts gets `costEstimated: true`. This covers every DeepSeek call (`DeepSeekResult` has no usage field), timeouts, thrown or aborted calls, and errors without usage. Its cost is computed as:
+
+```
+promptTokens_est     = ceil( UTF-8 bytes of (system prompt + user message + context) actually sent / 3 )   // conservative local count
+completionTokens_est = the call's effective output cap
+costUsd              = promptTokens_est × p_in[model] + completionTokens_est × p_out[model] + search_fee[model] (if search-enabled)
+```
+
+The effective output cap is the limit the connector sends with that request, recorded per model in `rateCard.ts` as `max_output_tokens` and pinned by a test against the connector constant: for example `chatgptLimits.maxTokens` (`lib/connectors/chatgpt.ts`), `claudeLimits.maxTokens` (`lib/connectors/claude.ts`), `DEEPSEEK_MAX_TOKENS` (`lib/connectors/deepseek.ts`), and Gemini's requested `maxOutputTokens`, capped at 32,768 (`lib/connectors/gemini.ts`). A connector that sends no explicit cap uses the rate card's `assumed_max_output_tokens` for that model, and the test requires that value to be > 0. A timeout is charged at the full output cap: the provider may have generated the whole response. The estimate is an upper bound, so failed-job cost controls (§4.3) can never be blind.
 
 ### 3.2 Uses
 - Per-org, per-day margin = revenue (settled credits × credit price) − Σ `costUsd`.
@@ -79,10 +112,15 @@ Because fully failed jobs are free to the customer, repeated failures could othe
 | Control | Rule (placeholder) | Action |
 |---|---|---|
 | Failed-job ratio | > 30 % of an org's live jobs in a rolling 24 h with ≥ 20 jobs | Soft: concurrency → 1, alert operator and org owner |
-| Failed-job provider cost | Σ `costUsd` of released jobs > $5 / 24 h or > 10 % of the org's monthly plan price | Hard: live creates `403 failed_job_threshold_exceeded`; `abuseState = review` |
-| Repeated failing input | Same input fingerprint failed 3× in 1 h | Further creates with that fingerprint fail fast (`422`) without provider calls for 1 h |
+| **Failed-job count** | ≥ 25 released (failed) live jobs per org in a rolling 24 h, or ≥ 10 in a rolling 1 h | Hard: live creates `403 failed_job_threshold_exceeded`; `abuseState = review`. Independent of cost, so it holds even if every cost estimate were low |
+| Failed-job provider cost | Σ `costUsd` (reported **and** estimated, §3.1) of released jobs > $5 / 24 h or > 10 % of the org's monthly plan price | Hard: as above |
+| Repeated failing input | Same input fingerprint failed 3× in 1 h | Further creates with that fingerprint fail fast (`422 repeated_failing_input`) without provider calls for 1 h |
 | Provider circuit breaker | Platform-wide provider error rate > 50 % over 5 min | Stop dispatching to that provider; slots shown `failed` / model `degraded`; reservations for those slots released |
-| Platform daily API spend ceiling | Σ today's `costUsd` ≥ ceiling | `503 platform_spend_ceiling` for new live jobs |
+| Platform daily API spend ceiling | Σ today's `costUsd` (reported + estimated) ≥ ceiling, kept in sharded `apiPlatformCounters/{YYYY-MM-DD}` incremented in the same transaction as each cost entry | `503 platform_spend_ceiling` for new live jobs; queued and running jobs stop at their next step start (`jobs-and-idempotency.md` §4.2) |
+
+**What counts.** The failed-job count and ratio count customer-attributable failures: `insufficient_usable_models`, `worker_timeout`, `persistence_failed`, and the repeated-failing-input short-circuit. They exclude platform-caused terminal states that make no or negligible provider calls: `capacity_unavailable`, `pipeline_disabled`, `canceled` by suspension or ceiling, and `expired`. `query_not_executable`, `no_comparable_claims` and `adaptive_finalize_failed` are excluded from the count and ratio, but their provider cost is included in the failed-job cost, so the cost limit still bounds them.
+
+**Where enforced.** Hard states and the platform ceiling are checked at create (T-create, §2.3) **and at every step start** (`jobs-and-idempotency.md` §4.2), so already-queued and running jobs stop spending. A job that has not started its panel step is `canceled` with a full release. A job past its panel step skips synthesis and finalizes `partial`, settling the panel work.
 
 Lifting a hard state needs SYSTEM_ADMIN review, recorded in `apiAuditEvents` (`abuse.suspended`, `org.reactivated`).
 

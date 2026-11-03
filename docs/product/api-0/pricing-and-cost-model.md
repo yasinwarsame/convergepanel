@@ -12,10 +12,10 @@ Per job:
 provider_cost(job) =
     Σ over panel slots s, attempts a:
         prompt_tokens[s,a] × p_in[model(s,a)] + completion_tokens[s,a] × p_out[model(s,a)]
-  + Σ over substitutions (DeepSeek fallback):     same, at the substitute's rates
-  + classification_call                          (research: adaptive classification)
+  + Σ over substitutions (DeepSeek fallback):     same, at the substitute's rates (only with allow_fallback)
+  + classification_call + auxiliary Gemini calls (research: classification, alignment, bias, coverage, narrative)
   + Σ corrective retries                         (research: bounded by retryBudget.ts)
-  + synthesis_call                               (if requested and run)
+  + synthesis_call(s) incl. retries / fallback   (research, if requested and run; fallback only with allow_fallback)
   + Σ search_requests[s] × search_fee[model(s)]  (where a provider charges per search)
 
 platform_cost(job) = worker_compute + firestore_ops + queue_ops + redis_ops + egress
@@ -23,17 +23,32 @@ platform_cost(job) = worker_compute + firestore_ops + queue_ops + redis_ops + eg
 unit_cost(job) = provider_cost(job) + platform_cost(job)
 ```
 
+Any attempt whose provider reports no usage is costed at `ceil(prompt bytes / 3)` input tokens plus the call's full output-token cap (`ledger-and-billing.md` §3.1), never 0.
+
 Inputs that drive cost: number and choice of **selected models**; input length (prompt tokens); response length (completion tokens, capped by existing connector limits); **retries** and fallbacks (`lib/panel.ts`, `lib/adaptiveSchema/retryBudget.ts`); **synthesis**; provider **search fees**. Every term is recorded per call in the internal cost ledger with `rateCardVersion`, so the formula is evaluated on measured data, not estimates.
 
 ### 1.1 Rate card
 **New** `lib/apiPlatform/rateCard.ts` (compile-time, reviewed PR, OD-21): per model `p_in`, `p_out` (USD per 1M tokens), `search_fee`, `credit_weight`, plus `type_factor`, `synthesis_credits`, `retry_allowance`, `credit_price_usd` per plan. Every value is a placeholder until API-6 calibration.
 
 ### 1.2 Credit estimate and charge
+**One placeholder set**, used identically here, in PRD §10.2/§11.3 and in `ledger-and-billing.md` §2.6:
+
+| Placeholder | Value |
+|---|---|
+| Scenario A price / included credits | $199 / month, 1,000 credits → included-credit value **$0.199 per credit** |
+| `credit_weight` | 1 standard model; 2 premium or search-enabled model (e.g. `claude`, `perplexity` in the PRD examples) |
+| `type_factor` | claim 1; research 1.5 |
+| `synthesis_credits` | 3 (research only) |
+| `retry_allowance` | 1 per job |
+
 ```
-estimate = Σ_selected credit_weight[m] × type_factor + (synthesis ? synthesis_credits : 0) + retry_allowance
-charged  = Σ_slots_with_provider_work credit_weight[m] × type_factor + synthesis_used + retries_used   (≤ estimate)
+estimate = ceil( Σ_selected credit_weight[m] × type_factor ) + (synthesis ? synthesis_credits : 0) + retry_allowance
+charged  = min( estimate,
+                ceil( Σ_charged_slots credit_weight[m] × type_factor )
+              + (synthesis produced a result ? synthesis_credits : 0)
+              + (a retry/fallback produced a slot's final output ? retry_allowance : 0) )
 ```
-Failed / canceled-before-start / expired jobs: `charged = 0`, provider cost still recorded (OD-8).
+**Rounding rule:** credits are integers everywhere. The only fractional term, `Σ weight × type_factor`, is rounded **up** once, at reservation and again at settlement. A charged slot is one whose connector status is `ok` or `substituted`. Failed / canceled-before-start / expired jobs: `charged = 0`, provider cost still recorded (OD-8).
 
 ## 2. Scenario A — pilot (ruled)
 
@@ -52,7 +67,11 @@ Failed / canceled-before-start / expired jobs: `charged = 0`, provider cost stil
 | Model-response access | Off by default (OD-19) | |
 | Orgs | 3–5 design partners, manually approved | |
 
-**Worked placeholder example.** Claim, 3 models at weight 1, no synthesis: estimate = 3 × 1 + 1 = 4 credits. One model fails without tokens. Charged = 2 credits; 2 released. If placeholder provider cost is $0.02 per successful slot and the placeholder credit price is $0.199 (= $199 / 1,000), the job's provider cost is ≈ $0.04 against ≈ $0.40 of included-credit value. **Illustrative only.**
+**Worked placeholder examples.**
+- Claim, 3 standard models, no synthesis: estimate = `ceil(3 × 1) + 1` = 4 credits. One model fails. Charged = 2 credits; 2 released. If placeholder provider cost is $0.02 per successful slot, the job's provider cost is ≈ $0.04 (plus the failed slot's recorded, possibly estimated, cost) against ≈ $0.40 of included-credit value (2 × $0.199).
+- Research, 3 standard + 1 premium model, synthesis on: estimate = `ceil(5 × 1.5) + 3 + 1` = `ceil(7.5) + 4` = 12 credits. The premium slot fails and no retry produced output: charged = `ceil(3 × 1.5) + 3` = `5 + 3` = 8 credits; 4 released.
+
+**Illustrative only.**
 
 **What the pilot must measure (exit evidence for OD-6):**
 1. Distribution of `unit_cost` by type, model set, input-length band and synthesis flag (p50, p90, p99).

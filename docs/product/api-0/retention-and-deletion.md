@@ -6,7 +6,7 @@
 
 ### (a) Operational inputs
 - **Contents:** claim, question and context text; worker scratch state; per-step intermediate outputs that contain raw model text.
-- **Location:** `apiOrganizations/{orgId}/verifications/{verId}/inputs/current`, `…/steps/*`.
+- **Location:** `apiOrganizations/{orgId}/verifications/{verId}/inputs/current`, `…/steps/{step}` and the per-provider-call records `…/steps/{step}/calls/{callKey}` (raw model text and usage, `jobs-and-idempotency.md` §4.4).
 - **Retention:** deleted when the job reaches any terminal state (finalize, failure, cancel, expiry). Hard maximum 72 h for jobs stuck in a non-terminal state (sweeper fails and purges them).
 - **Opt-in:** `options.retain_input: true` keeps input text for the class (b) period, so the customer can see it alongside the result. The org may forbid this (`retention.inputsRetainAllowed: false`). Intermediate step outputs are never retained beyond terminal state.
 - **What remains:** the input fingerprint (`HMAC-SHA-256` with an org-scoped key) and character counts, which move to class (d).
@@ -74,7 +74,7 @@ Firestore managed backups / point-in-time recovery (if enabled for the project) 
 
 ## 5. Provider-side retention
 
-Customer content (class a) is sent to the providers the customer selected. Each provider's own retention, logging and training rules govern its copy. ConvergePanel cannot delete it. Before the pilot, owner and counsel confirm each provider's terms (PRD §21A P-9); customer terms and the DPA list subprocessors and their stated retention. A provider whose terms are not confirmed is not selectable via the API. This document makes no statement about any provider's terms.
+Customer content (class a) is sent to the models the customer selected; to the pipeline providers the request type uses (Gemini for research classification and auxiliary calls, OpenAI for opted-in synthesis); and to fallback providers (DeepSeek, the Claude synthesis fallback) **only** when the request set `allow_fallback: true` (default `false`). `GET /v1/models` `pipeline_providers` lists them. Each provider's own retention, logging and training rules govern its copy. ConvergePanel cannot delete it. Before the pilot, owner and counsel confirm each provider's terms (PRD §21A P-9); customer terms and the DPA list subprocessors and their stated retention. A provider whose terms are not confirmed is not selectable via the API. This document makes no statement about any provider's terms.
 
 ## 6. Customer export
 
@@ -89,4 +89,4 @@ SYSTEM_ADMIN support view shows metadata only: status, timings, credits, model s
 
 ## 8. Test obligations
 
-Class (a) absent after each terminal path; TTL and sweeper per class; `DELETE` leaves only class (c) + tombstone (enumerate every subcollection); full text never stored without both opt-ins; disabling model-response access purges text; restore runbook replays tombstones (rehearsal in API-7).
+Class (a) absent after each terminal path, including `steps/*/calls/*`; TTL and sweeper per class; `DELETE` leaves only class (c) + tombstone (enumerate every subcollection); full text never stored without both opt-ins; disabling model-response access purges text; restore runbook replays tombstones (rehearsal in API-7).

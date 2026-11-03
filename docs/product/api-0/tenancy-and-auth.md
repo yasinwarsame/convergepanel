@@ -38,15 +38,33 @@ Roles follow the pattern of `lib/workspaces/capabilities.ts` (`ROLE_CAPABILITIES
 | `data.delete` (dashboard deletion) | ✅ | ✅ | — | — | — |
 | `audit.view` | ✅ | ✅ | — | — | — |
 
-Exactly one or more `owner`; the last owner cannot be removed or demoted. Role changes are audited.
+Every org has at least one `owner` at all times; the last owner cannot be removed or demoted. Role changes are audited.
+
+### 2.1 Joining an org (invite flow)
+
+Membership is created **only** by accepting an invitation. The flow mirrors the Team Workspace invitation modules (`lib/workspaces/invitationEmail.ts`, `invitationKey.ts`, `invitationToken.ts`, `invitationRoleAuthority.ts`, `lib/firestore/workspaceInvitations.ts`), implemented as **new** API-specific modules with their own domain separators.
+
+1. **Invite.** An owner (any role), or an admin (non-owner roles only, checked like `invitationRoleAuthority.ts`), with a fresh session, invites an email address with a role. The email is normalized with trim + lowercase only (no dot or plus stripping, as `invitationEmail.ts`). The server writes `apiOrgInvites/{inviteId}` (`orgId`, `role`, `emailNormalized`, `tokenHash` = SHA-256 of a 256-bit random token, `invitedBy`, `expiresAt` = now + 7 days placeholder, `status: pending`) and a guard document keyed by `(orgId, emailNormalized)`, so there is at most one pending invite per address. Audit `member.invited`.
+2. **Delivery.** The raw token is sent only in the invitation email (existing `RESEND_API_KEY` path). It is never persisted, logged or shown in the dashboard.
+3. **Accept.** Allowed only when **all** of these hold:
+   - the invitee is signed in with a fresh session (`auth_time` ≤ 15 min);
+   - the Firebase account is not disabled;
+   - the server-read Firebase user record has `emailVerified === true` (the same check `lib/firestore/workspaceInvitations.ts` makes);
+   - the account's normalized email **equals** `emailNormalized`;
+   - the presented token's SHA-256 equals `tokenHash`;
+   - the invite is `pending` and not expired.
+
+   One transaction sets the invite to `accepted` and creates `apiOrgMemberships/{membershipId}` with `tx.create()`. A replayed or concurrent acceptance fails. Audit `member.added`.
+4. **Revoke / expire.** Inviters can revoke a pending invite (`member.invite_revoked`). Expired invites cannot be accepted, and a new invite replaces the guard.
+5. **Limits.** An invite never grants `owner`. Ownership moves only by an existing owner promoting an existing member, with a fresh session (`member.role_changed`). There is no domain auto-join and no link-only join without the email match.
 
 ## 3. Management-plane authentication
 
 - Routes under `/api/developer/*` (**new**) on the main app domain authenticate **only** with the existing Firebase session through `resolveRequestIdentity()` (`lib/auth/resolveRequestIdentity.ts`: cookie `__session` or bearer ID token, fails closed on mismatch).
 - Any `Authorization: Bearer cpk_…` on a management route is rejected with 401 before identity resolution. A leaked API key can never create keys, webhooks or change settings.
 - **Disabled Firebase accounts** obtain nothing (consistent with `docs/operations/admin-authority-tiers.md`).
-- **Fresh session** (`auth_time` ≤ 15 min) for: live key creation, webhook create/update, spend-limit change, retention change, enabling model-response access, deletion, member role change, org deletion.
-- Membership is read server-side from `apiOrgMemberships/{sha256(orgId + ":" + uid)}`, the deterministic-ID approach used for `workspaceMemberships`. Client-supplied org or role values are ignored.
+- **Fresh session** (`auth_time` ≤ 15 min) for: live key creation, webhook create/update, spend-limit change, retention change, enabling model-response access, deletion, member invite, invite acceptance, member role change, ownership transfer, org deletion.
+- Membership is read server-side from `apiOrgMemberships/{membershipId}`, where the ID is a domain-separated, length-prefixed SHA-256 of `(orgId, uid)`, the construction of `lib/workspaces/membershipId.ts` with its own domain separator. Client-supplied org or role values are ignored.
 - The platform admin tiers do not grant org roles. SYSTEM_ADMIN has a separate metadata-only support view (OD-13) and no org membership.
 
 ## 4. API keys
@@ -73,8 +91,8 @@ Example prefix shown in dashboards and logs: `cpk_live_7Hk2mQ9xLp3A`.
 1. Parse the bearer with a strict regex; reject on mismatch (same 401).
 2. Single read `apiKeys/{keyId}`; if missing, still compute an HMAC over a dummy value so timing does not reveal existence.
 3. Compute HMAC of the presented secret; compare with `crypto.timingSafeEqual` on equal-length buffers.
-4. Reject if `revokedAt` set, `expiresAt` passed, `mode` mismatch (test key on a live-only operation, or live key without an active plan), org `suspended`/`canceled`, or application disabled.
-5. Every failure returns the same `401 invalid_api_key` (except `403 org_suspended` after a successful match, which reveals only what the key holder already knows).
+4. Reject with `401 invalid_api_key` if `revokedAt` is set, `expiresAt` has passed, the key's `mode` does not match the operation (e.g. a test key on a live-only operation), the org is `canceled`, or the application is disabled.
+5. Every failure in steps 1–4 returns the same `401 invalid_api_key`. After a successful match, two states return a `403` that reveals only what the key holder already knows: `403 org_suspended`, and, for a **live** key whose org has no active API plan, `403 live_key_requires_plan`. That second response is the same on every data-plane route; test keys are unaffected.
 6. `lastUsedAt` is written at most once per minute per key (sampled) to avoid hot documents.
 
 ### 4.4 Scopes
@@ -88,7 +106,7 @@ Example prefix shown in dashboards and logs: `cpk_live_7Hk2mQ9xLp3A`.
 | `usage:read` | `GET /v1/usage` | — |
 | `models:read` | `GET /v1/models` | ✅ |
 
-Disabling org model-response access strips `model_responses:read` from every key in the same transaction (audited).
+`model_responses:read` is effective only while the org's `modelResponseAccess` is enabled. Every `include=response_text` read checks the org setting at **read time**, a single org-document read the request already makes. Disabling access therefore takes effect on the next request, with no key documents edited and no bound on key count. The scope stays on the keys and becomes effective again only if an owner/admin re-enables access (audited `settings.model_response_access_changed`). Stored full text is purged within 24 h of disabling (`retention-and-deletion.md` §1(b)).
 
 ### 4.5 Lifecycle
 - **Create:** secret shown once; never retrievable; audit event `api_key.created`.
@@ -113,7 +131,7 @@ Written in the **same transaction** as the mutation. Fields: `eventType`, `orgId
 | Event | Trigger |
 |---|---|
 | `org.created`, `org.deleted`, `org.suspended`, `org.reactivated` | management, billing, abuse controls |
-| `member.added`, `member.role_changed`, `member.removed` | management |
+| `member.invited`, `member.invite_revoked`, `member.added`, `member.role_changed`, `member.removed` | management |
 | `api_key.created`, `api_key.revoked`, `api_key.expired`, `api_key.auto_revoked` | management, system |
 | `webhook.created`, `webhook.updated`, `webhook.disabled`, `webhook.secret_rotated` | management, dispatcher |
 | `settings.spend_limit_changed`, `settings.retention_changed`, `settings.model_response_access_changed` | management |
@@ -128,7 +146,8 @@ Retention: 7 years placeholder (counsel to confirm).
 | Path | Key fields | Writers |
 |---|---|---|
 | `apiOrganizations/{orgId}` | `name`, `status`, `plan`, `stripeCustomerId`, `spendLimitUsd`, `retention { inputsRetainAllowed, resultsDays, evidenceDays }`, `modelResponseAccess`, `developersMayCreateLiveKeys`, `abuseState`, `createdBy`, `createdAt` | management, billing webhook, abuse controls |
-| `apiOrgMemberships/{sha256(orgId:uid)}` | `orgId`, `uid`, `role`, `status`, `addedBy`, `addedAt` | management |
+| `apiOrgMemberships/{membershipId}` | `orgId`, `uid`, `role`, `status`, `addedBy`, `addedAt`, `inviteId` | management (invite acceptance) |
+| `apiOrgInvites/{inviteId}` + guard doc per `(orgId, emailNormalized)` | `orgId`, `role`, `emailNormalized`, `tokenHash`, `invitedBy`, `expiresAt`, `status` | management |
 | `apiApplications/{appId}` | `orgId`, `name`, `status`, `createdAt` | management |
 | `apiKeys/{keyId}` | `orgId`, `appId`, `mode`, `scopes[]`, `appScoped`, `hash`, `hashVersion`, `prefix`, `createdBy`, `createdAt`, `lastUsedAt`, `expiresAt?`, `revokedAt?`, `revokedBy?` | management; `lastUsedAt` by data plane |
 | `apiWebhookEndpoints/{endpointId}` | `orgId`, `appId`, `url`, `events[]`, `secretCiphertext`, `kmsKeyVersion`, `status`, `failureSince` | management, dispatcher |
