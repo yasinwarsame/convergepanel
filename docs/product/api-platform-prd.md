@@ -3,6 +3,7 @@
 | | |
 |---|---|
 | **Status** | Planning draft, Rev 3. API-0 (design) is authorized to begin (OD-20). Nothing in this document is implemented, and no implementation stage (API-1 to API-7) is authorized. |
+| 3.1 | 2026-11-03 | **Rev 3.1, confirmation-review fixes.** Auxiliary Gemini permits are sized to the real stance-backfill concurrency and never serialized inside timed call sites. Call records store the outcome the call site observed (timeouts included), and parallel auxiliary calls are keyed by slot. `loadGovernancePolicy` is a write in API mode: it goes through a non-writing port and fails closed. The `track*` call-site count is corrected. |
 | **Author** | Planning workstream (docs-only), 2026-11-03 |
 | **Baseline** | `main` at `2f70d1f` |
 | **Workstream** | Dedicated future roadmap item, stages API-0 to API-7 |
@@ -217,7 +218,7 @@ The API worker becomes a **third caller**. The function is uid-bound in many mor
 | # | Side effect in `executeOrdinaryRun` (baseline) | What it touches | Web (default port) | API mode |
 |---|---|---|---|---|
 | 1 | `trackPanelExecutionStarted` / `trackPanelExecutionCompleted` / `trackPanelExecutionFailed` (uid) | PostHog `capture` with `distinctId: uid` (`lib/adaptiveSchema/analytics.ts` `safeCapture`) | unchanged | `AnalyticsPort` **no-op**. API metrics come from `logger` fields (OD-18) |
-| 2 | 13 schema-gap events: `trackRankedListShortfall`, `trackComparisonMatrixGap`, `trackDefinitionAmbiguity`, `trackCausalExplanationGap`, `trackChecklistTaxonomyGap`, `trackDeepResearchGap`, `trackEvidenceReviewGap`, `trackBiasAuditNoAttribution`, `trackBiasAuditPanelGapFound`, `trackBiasAuditHomogeneityFlagged`, `trackDecisionSupportContested`, `trackDecisionSupportHighSensitivity`, `trackDecisionSupportMissingCriteria` (uid) | PostHog | unchanged | `AnalyticsPort` **no-op** (16 `track*` calls in total with row 1) |
+| 2 | 13 schema-gap events: `trackRankedListShortfall`, `trackComparisonMatrixGap`, `trackDefinitionAmbiguity`, `trackCausalExplanationGap`, `trackChecklistTaxonomyGap`, `trackDeepResearchGap`, `trackEvidenceReviewGap`, `trackBiasAuditNoAttribution`, `trackBiasAuditPanelGapFound`, `trackBiasAuditHomogeneityFlagged`, `trackDecisionSupportContested`, `trackDecisionSupportHighSensitivity`, `trackDecisionSupportMissingCriteria` (uid) | PostHog | unchanged | `AnalyticsPort` **no-op** (16 `track*` functions in total with row 1, 18 call sites; `trackCausalExplanationGap` and `trackDeepResearchGap` are each called twice) |
 | 3 | `runPanel(...)` | provider calls (up to 4 per slot) | unchanged | provider hooks + `allowFallback: false` unless opted in (§6.5) |
 | 4 | `markRunError(runId, …)` | `runs/{runId}` update | unchanged | `RunPersistencePort` → the org's job document |
 | 5 | `completeRun({ runId, userId: uid, … })` | `runs/{runId}` read + update | unchanged | `RunPersistencePort` → `apiOrganizations/{orgId}/verifications/{verId}` step output |
@@ -227,7 +228,7 @@ The API worker becomes a **third caller**. The function is uid-bound in many mor
 | 9 | `persistAdaptiveOutput(runId, …)` | `runs/{runId}.adaptiveOutput` | unchanged | `RunPersistencePort` → org namespace |
 | 10 | `readGovernanceRecordForInitialization(runId)` | `runs/{runId}` read | unchanged | `RunPersistencePort` reads the org job document |
 | 11 | `initializeAdaptiveGovernanceRecord({ runId, … })`, which calls `persistGovernanceRecord(runId)` from `lib/firestore/runs.ts` internally | `runs/{runId}.governanceRecord` | unchanged | `RunPersistencePort.initializeGovernance`. The initializer gains an injected writer whose default is `persistGovernanceRecord`; the API writer targets the org namespace |
-| 12 | `loadGovernancePolicy()` | **read** `appConfig/governancePolicy` | unchanged | unchanged read, never written: the same automated policy, no second engine |
+| 12 | `loadGovernancePolicy()` | **read** `appConfig/governancePolicy`; **creates** it with `ref.set` when missing (`lib/governance/governancePolicyStore.ts`) | unchanged | API mode reads through a port that **never writes**. A missing policy document fails the step closed with `policy_unavailable`, never a write to web configuration. T-W4 fixtures seed the document, and a separate test asserts the missing-document case writes nothing |
 | 13 | `evaluateAdaptiveGovernance`, `applyAutomatedGovernanceUpdate` | pure | unchanged | unchanged |
 | 14 | `persistAutomatedGovernanceUpdate(runId, …)` | `runs/{runId}` | unchanged | `RunPersistencePort` → org namespace |
 | 15 | `writeAdaptiveGovernanceEvent(runId, …)` | `runs/{runId}/governanceEvents` | unchanged | `RunPersistencePort` → `…/verifications/{verId}/governanceEvents` |
