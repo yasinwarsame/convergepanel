@@ -29,7 +29,8 @@ jest.mock("@/lib/workspaces/reportReviewRollout", () => ({
 jest.mock("@/lib/env", () => ({ ...jest.requireActual("@/lib/env"), TEAM_WORKSPACES_ENABLED: true, TEAM_WORKSPACES_CANARY_UIDS: undefined, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS: undefined }));
 jest.mock("@/lib/logger", () => ({ logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
 jest.mock("@/lib/workspaces/workspaceReviewerIdentity", () => ({
-  resolveWorkspaceReviewerDisplayNames: async (_ws: string, uids: string[]) => new Map(uids.map((u) => [u, `Name(${u})`])),
+  // uid-x and uid-y deliberately share a display name (two different people called "Sam").
+  resolveWorkspaceReviewerDisplayNames: async (_ws: string, uids: string[]) => new Map(uids.map((u) => [u, u === "uid-x" || u === "uid-y" ? "Sam" : `Name(${u})`])),
 }));
 
 import { readFileSync } from "fs";
@@ -229,7 +230,7 @@ describe("Audit Log reader", () => {
   it("review m-1: two reviewers with the SAME display name are still 'reassigned' (uids decide, never names)", async () => {
     db.seed("workspaceMembershipEvents/same-name", { workspaceId: W, actorUid: ADMIN, runId: RUN, projectId: null, runQuestion: "Q", cycle: 1, eventType: "workspace_report_review_reviewer_changed", previousReviewerUid: "uid-x", reviewerUid: "uid-y", revision: 2, at: Timestamp.fromDate(new Date("2026-11-02T11:00:00Z")) });
     const res = await listWorkspaceAuditEvents({ workspaceId: W, limit: 20 });
-    expect(res.status === "ok" && (res.items[0] as { change: string }).change).toBe("reassigned");
+    expect(res.status === "ok" && res.items[0]).toMatchObject({ change: "reassigned", previousReviewer: { displayName: "Sam" }, reviewer: { displayName: "Sam" } });
   });
 
   it("another Workspace's rows are never returned (query scope + row check)", async () => {

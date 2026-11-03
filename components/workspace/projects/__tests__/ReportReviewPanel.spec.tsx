@@ -122,7 +122,7 @@ describe("not yet submitted", () => {
     mockedAuthedFetch.mockResolvedValueOnce(response(200, { ok: true, state: "not_submitted", eligibility: { eligible: false, reason: "no_review_information" }, viewer: { canSubmit: false }, disclaimer: REPORT_REVIEW_DISCLAIMER }));
     const r = await mount();
     expect(byTestId(r, "report-review-unavailable-reason")[0].children.join("")).toBe(REPORT_REVIEW_INELIGIBLE_EXPLANATIONS.no_review_information);
-    expect(r.root.findAllByType("form")).toEqual([]);
+    expect(r.root.findAllByType("form").length).toBe(0);
   });
 
   it("eligible but the viewer may not submit: explanation and disclaimer, no form", async () => {
@@ -130,7 +130,7 @@ describe("not yet submitted", () => {
     const r = await mount();
     expect(text(r)).toContain("Only members who can organize research can submit it.");
     expect(byTestId(r, "report-review-disclaimer")).toHaveLength(1);
-    expect(r.root.findAllByType("form")).toEqual([]);
+    expect(r.root.findAllByType("form").length).toBe(0);
   });
 
   it("not authorized to read reviews (404): the unchanged Order A notice", async () => {
@@ -161,10 +161,10 @@ describe("submitted", () => {
     expect(byTestId(r, "report-review-disclaimer").map((n) => n.children.join(""))).toEqual([REPORT_REVIEW_DISCLAIMER]);
     expect(byTestId(r, "report-review-previous-cycles")).toHaveLength(1);
     expect(byTestId(r, "report-review-history")).toHaveLength(1);
-    expect(r.root.findAll((n) => n.props["data-testid"] === "report-review-decision-form")).toEqual([]);
+    expect(r.root.findAll((n) => n.props["data-testid"] === "report-review-decision-form").length).toBe(0);
     expect(cardProps).toEqual([]); // a decided cycle's assignment is not managed here
-    expect(byTestId(r, "report-review-content-added")).toEqual([]);
-    expect(byTestId(r, "report-review-history-incomplete")).toEqual([]);
+    expect(byTestId(r, "report-review-content-added").length).toBe(0);
+    expect(byTestId(r, "report-review-history-incomplete").length).toBe(0);
   });
 
   it("review M-2 / n-1: content added after submission and an incomplete history are stated", async () => {
@@ -194,7 +194,7 @@ describe("submitted", () => {
   it("not allowed to decide: no form, and the reason (e.g. the submitter) is stated", async () => {
     mockedAuthedFetch.mockResolvedValueOnce(response(200, submitted({ humanReview: { status: "unreviewed" } }, { canDecide: false, denial: "submitter" })));
     const r = await mount();
-    expect(r.root.findAll((n) => n.props["data-testid"] === "report-review-decision-form")).toEqual([]);
+    expect(r.root.findAll((n) => n.props["data-testid"] === "report-review-decision-form").length).toBe(0);
     expect(byTestId(r, "report-review-decision-unavailable")[0].children.join("")).toBe("You submitted this report for approval, so another reviewer must decide it.");
   });
 
@@ -225,7 +225,7 @@ describe("Audit Log row and queue row", () => {
     expect(decided.root.findAll((n) => n.props["data-testid"] === "report-review-disclaimer" && typeof n.type === "string")[0].children.join("")).toBe(REPORT_REVIEW_DISCLAIMER);
     const removed = mountEl(createElement(ReportReviewAuditEntry, { event: { eventType: "workspace_report_review_reviewer_changed", occurredAt: "2026-11-02T12:00:00.000Z", actor: { displayName: "Ada" }, research: { question: "Q" }, cycle: 1, change: "removed", previousReviewer: { displayName: "Rae" }, reviewer: null } }));
     expect(text(removed)).toContain("Report reviewer removed");
-    expect(removed.root.findAll((n) => n.props["data-testid"] === "report-review-disclaimer")).toEqual([]);
+    expect(removed.root.findAll((n) => n.props["data-testid"] === "report-review-disclaimer").length).toBe(0);
     const updated = mountEl(createElement(ReportReviewAuditEntry, { event: { eventType: "workspace_report_review_reviewer_changed", occurredAt: "2026-11-02T12:00:00.000Z", actor: { displayName: "Ada" }, research: { question: "Q" }, cycle: 1, change: "updated", previousReviewer: { displayName: "Rae" }, reviewer: { displayName: "Rae" } } }));
     expect(text(updated)).toContain("Report review assignment updated");
     expect(text(updated)).toContain("the reviewer is unchanged");
@@ -258,7 +258,7 @@ describe("Audit Log row and queue row", () => {
     expect(rr.root.findAll((n) => n.props["data-testid"] === "queue-report-review-tag" && typeof n.type === "string")).toHaveLength(2);
     const gov = mountEl(createElement(ReviewQueueRow, { row: row(), projectNameById: new Map(), canManageReviews: false }));
     expect(gov.root.findAllByType("a").map((a) => a.props.href)).toEqual([`/workspace/reviews/${RUN}`, `/workspace/reviews/${RUN}`]);
-    expect(gov.root.findAll((n) => n.props["data-testid"] === "queue-report-review-tag")).toEqual([]);
+    expect(gov.root.findAll((n) => n.props["data-testid"] === "queue-report-review-tag").length).toBe(0);
   });
 });
 
