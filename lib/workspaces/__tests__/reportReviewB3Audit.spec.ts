@@ -207,11 +207,29 @@ describe("Audit Log reader", () => {
     expect(res.items).toEqual([
       { eventType: "workspace_report_review_resubmitted", occurredAt: "2026-11-02T13:00:00.000Z", actor: { displayName: `Name(${MEMBER})` }, research: { question: "Is the <b>supply</b> plan sound?" }, cycle: 2, fromCycle: 1, purpose: "publication_review", clearedReviewer: { displayName: `Name(${REVIEWER})` } },
       { eventType: "workspace_report_review_decided", occurredAt: "2026-11-02T12:00:00.000Z", actor: { displayName: `Name(${REVIEWER})` }, research: { question: "Is the <b>supply</b> plan sound?" }, cycle: 1, status: "approved", purpose: "client_delivery" },
-      { eventType: "workspace_report_review_reviewer_changed", occurredAt: "2026-11-02T11:01:00.000Z", actor: { displayName: `Name(${ADMIN})` }, research: { question: "Is the <b>supply</b> plan sound?" }, cycle: 1, previousReviewer: null, reviewer: { displayName: `Name(${REVIEWER})` } },
+      { eventType: "workspace_report_review_reviewer_changed", occurredAt: "2026-11-02T11:01:00.000Z", actor: { displayName: `Name(${ADMIN})` }, research: { question: "Is the <b>supply</b> plan sound?" }, cycle: 1, change: "assigned", previousReviewer: null, reviewer: { displayName: `Name(${REVIEWER})` } },
       { eventType: "workspace_report_review_submitted", occurredAt: "2026-11-02T11:00:00.000Z", actor: { displayName: `Name(${MEMBER})` }, research: { question: "Is the <b>supply</b> plan sound?" }, cycle: 1, purpose: "client_delivery" },
     ]);
     const serialized = JSON.stringify(res.items);
     for (const secret of [RUN, MEMBER, REVIEWER, ADMIN, "uid-"]) expect(serialized.includes(`"${secret}"`) || serialized.includes(`:"${secret}`)).toBe(false);
+  });
+
+  it("review m-1: the change kind comes from uids — reassigned, removed, and a same-reviewer (due date) update", async () => {
+    await submit();
+    await assign(REVIEWER, 0, "2026-11-02T11:01:00.000Z");
+    await putWorkspaceReviewAssignment({ uid: ADMIN, workspaceId: W, runId: RUN, assignedReviewerUserId: REVIEWER, expectedRevision: 1, dueAt: "2026-11-10T00:00:00.000Z", now: "2026-11-02T11:02:00.000Z" });
+    await assign(REVIEWER2, 2, "2026-11-02T11:03:00.000Z").catch(() => null);
+    await deleteWorkspaceReviewAssignment({ uid: ADMIN, workspaceId: W, runId: RUN, expectedRevision: 3, now: "2026-11-02T11:04:00.000Z" });
+    const res = await listWorkspaceAuditEvents({ workspaceId: W, limit: 20 });
+    if (res.status !== "ok") throw new Error(res.status);
+    const changes = res.items.filter((i) => i.eventType === "workspace_report_review_reviewer_changed").map((i) => (i as { change: string }).change);
+    expect(changes).toEqual(["removed", "reassigned", "updated", "assigned"]);
+  });
+
+  it("review m-1: two reviewers with the SAME display name are still 'reassigned' (uids decide, never names)", async () => {
+    db.seed("workspaceMembershipEvents/same-name", { workspaceId: W, actorUid: ADMIN, runId: RUN, projectId: null, runQuestion: "Q", cycle: 1, eventType: "workspace_report_review_reviewer_changed", previousReviewerUid: "uid-x", reviewerUid: "uid-y", revision: 2, at: Timestamp.fromDate(new Date("2026-11-02T11:00:00Z")) });
+    const res = await listWorkspaceAuditEvents({ workspaceId: W, limit: 20 });
+    expect(res.status === "ok" && (res.items[0] as { change: string }).change).toBe("reassigned");
   });
 
   it("another Workspace's rows are never returned (query scope + row check)", async () => {

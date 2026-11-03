@@ -512,7 +512,7 @@ export type WorkspaceAuditEventItem =
 export type WorkspaceAuditReportReviewEventItem =
   | { eventType: "workspace_report_review_submitted"; occurredAt: string; actor: { displayName: string }; research: { question: string | null }; cycle: number; purpose: string }
   | { eventType: "workspace_report_review_resubmitted"; occurredAt: string; actor: { displayName: string }; research: { question: string | null }; cycle: number; fromCycle: number; purpose: string; clearedReviewer: { displayName: string } | null }
-  | { eventType: "workspace_report_review_reviewer_changed"; occurredAt: string; actor: { displayName: string }; research: { question: string | null }; cycle: number; previousReviewer: { displayName: string } | null; reviewer: { displayName: string } | null }
+  | { eventType: "workspace_report_review_reviewer_changed"; occurredAt: string; actor: { displayName: string }; research: { question: string | null }; cycle: number; change: "assigned" | "reassigned" | "removed" | "updated"; previousReviewer: { displayName: string } | null; reviewer: { displayName: string } | null }
   | { eventType: "workspace_report_review_decided"; occurredAt: string; actor: { displayName: string }; research: { question: string | null }; cycle: number; status: string; purpose: string };
 
 const VALID_AUDIT_PREVIOUS_ROLES: ReadonlySet<string> = new Set(["admin", "member", "reviewer", "viewer"]);
@@ -541,7 +541,7 @@ function isValidReportReviewAuditEvent(v: Record<string, unknown>): boolean {
     case "workspace_report_review_resubmitted":
       return typeof v.purpose === "string" && typeof v.fromCycle === "number" && nameOrNull(v.clearedReviewer);
     case "workspace_report_review_reviewer_changed":
-      return nameOrNull(v.previousReviewer) && nameOrNull(v.reviewer);
+      return (v.change === "assigned" || v.change === "reassigned" || v.change === "removed" || v.change === "updated") && nameOrNull(v.previousReviewer) && nameOrNull(v.reviewer);
     case "workspace_report_review_decided":
       return typeof v.purpose === "string" && typeof v.status === "string";
     default:

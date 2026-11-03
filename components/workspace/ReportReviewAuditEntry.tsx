@@ -56,11 +56,16 @@ export default function ReportReviewAuditEntry({ event }: { event: WorkspaceAudi
       if (event.clearedReviewer) details.push(<span key="c">Reviewer cleared: <span className="font-medium text-cp-muted">{event.clearedReviewer.displayName}</span></span>);
       break;
     case "workspace_report_review_reviewer_changed":
-      title = event.reviewer ? (event.previousReviewer && event.previousReviewer.displayName !== event.reviewer.displayName ? "Report reviewer reassigned" : "Report reviewer assigned") : "Report reviewer removed";
+      // The kind of change is decided by the server from uids (never from display names, which can coincide).
+      title = { assigned: "Report reviewer assigned", reassigned: "Report reviewer reassigned", removed: "Report reviewer removed", updated: "Report review assignment updated" }[event.change];
       body = (
         <>
           <span className="font-medium text-cp-text">{question}</span>
-          {event.reviewer ? (
+          {event.change === "updated" ? (
+            <>
+              {" "}(cycle {event.cycle}): the assignment details (such as the due date) changed; the reviewer is unchanged.
+            </>
+          ) : event.reviewer ? (
             <>
               {" "}(cycle {event.cycle}): reviewer is now <span className="font-medium text-cp-text">{event.reviewer.displayName}</span>.
             </>
@@ -69,7 +74,7 @@ export default function ReportReviewAuditEntry({ event }: { event: WorkspaceAudi
           )}
         </>
       );
-      if (event.previousReviewer) details.push(<span key="pr">Previously: <span className="font-medium text-cp-muted">{event.previousReviewer.displayName}</span></span>);
+      if (event.previousReviewer && event.change !== "updated") details.push(<span key="pr">Previously: <span className="font-medium text-cp-muted">{event.previousReviewer.displayName}</span></span>);
       break;
     case "workspace_report_review_decided":
       title = `Report review decision: ${reportReviewStatusLabel(event.status)}`;
@@ -93,7 +98,8 @@ export default function ReportReviewAuditEntry({ event }: { event: WorkspaceAudi
         </span>
         <span>{formatOccurredAt(event.occurredAt)}</span>
       </div>
-      {event.eventType === "workspace_report_review_decided" && (
+      {/* Review m-2: wherever approval is requested (submission, resubmission) or recorded (decision). */}
+      {event.eventType !== "workspace_report_review_reviewer_changed" && (
         <p className="mt-2 text-xs text-cp-muted" data-testid="report-review-disclaimer">
           {REPORT_REVIEW_DISCLAIMER}
         </p>

@@ -26,7 +26,7 @@ import { getAdaptiveHumanReviewAssignment } from "@/lib/firestore/runs";
 import { deriveTeamRunViewerRole } from "@/lib/workspaces/deriveTeamRunViewerRole";
 import { buildRunReadPayload } from "@/lib/runs/runReadPayload";
 import { resolveRunReviewRouting } from "@/lib/runs/resolveRunReviewRouting";
-import { parseReportReviewRecord, type ReportReviewRecordV1 } from "@/lib/governance/reportReview";
+import { compareReportReviewScope, parseReportReviewRecord, type ReportReviewRecordV1 } from "@/lib/governance/reportReview";
 import { reportReviewCaller, reportReviewErrorBody } from "@/lib/workspaces/reportReviewRouteSupport";
 import { REPORT_REVIEW_CYCLES_COLLECTION } from "@/lib/workspaces/reportReviewCollections";
 import { internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
@@ -119,7 +119,8 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
   const viewerRole = deriveTeamRunViewerRole({ uid, capabilities: caps, assignmentResult, governanceRecord: data.governanceRecord });
   const payload = await buildRunReadPayload({ runId, data, viewerRole, mayReadDecisionContent: true, resolveReviewRouting: resolveRunReviewRouting });
 
-  const doc = buildReportReviewExport({ generatedAt: new Date().toISOString(), runId, payload, record, archivedCycles: history.cycles });
+  const drift = compareReportReviewScope(record.scope, data);
+  const doc = buildReportReviewExport({ generatedAt: new Date().toISOString(), runId, payload, record, archivedCycles: history.cycles, drift });
   const filename = `report-review-${runId}-cycle-${record.cycle}.${format}`;
   const headers = { "Content-Disposition": `attachment; filename="${filename}"`, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
   if (format === "json") return new NextResponse(JSON.stringify(doc, null, 2), { status: 200, headers: { ...headers, "Content-Type": "application/json; charset=utf-8" } });

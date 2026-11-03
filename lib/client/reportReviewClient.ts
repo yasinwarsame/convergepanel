@@ -58,6 +58,8 @@ export type ReportReviewContext =
       viewer: { canDecide: boolean; denial: ReportReviewViewerDenial; canResubmit: boolean; canManageAssignment: boolean };
       names: Record<string, string>;
       history: ReportReviewClientHistoryItem[];
+      content: { absentNow: string[]; addedSinceSubmission: string[] };
+      historyIncomplete: boolean;
       disclaimer: string;
     }
   | { state: "not_submitted"; eligibility: { eligible: true } | { eligible: false; reason: string }; viewer: { canSubmit: boolean }; disclaimer: string };
@@ -90,6 +92,9 @@ export function parseReportReviewContextResponse(json: unknown): ReportReviewCon
   for (const h of json.history) if (!isObj(h) || !isStr(h.type) || !isStr(h.at) || !isStr(h.actorDisplayName) || !isInt(h.cycle)) return null;
   for (const c of json.previousCycles) if (!isObj(c) || !isInt(c.cycle) || !isStr(c.status) || !isStr(c.purposeCode)) return null;
   for (const v of Object.values(json.names)) if (!isStr(v)) return null;
+  const content = json.content;
+  const strArr = (v: unknown): v is string[] => Array.isArray(v) && v.every(isStr);
+  if (!isObj(content) || !strArr(content.absentNow) || !strArr(content.addedSinceSubmission) || typeof json.historyIncomplete !== "boolean") return null;
   return {
     state: "submitted",
     record: r as unknown as ReportReviewClientRecord,
@@ -98,6 +103,8 @@ export function parseReportReviewContextResponse(json: unknown): ReportReviewCon
     viewer: { canDecide: viewer.canDecide, denial: isStr(viewer.denial) ? viewer.denial : null, canResubmit: viewer.canResubmit, canManageAssignment: viewer.canManageAssignment },
     names: json.names as Record<string, string>,
     history: json.history as ReportReviewClientHistoryItem[],
+    content: { absentNow: content.absentNow as string[], addedSinceSubmission: content.addedSinceSubmission as string[] },
+    historyIncomplete: json.historyIncomplete,
     disclaimer: json.disclaimer,
   };
 }

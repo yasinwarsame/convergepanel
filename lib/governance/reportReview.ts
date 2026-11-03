@@ -150,7 +150,7 @@ export function evaluateReportReviewEligibility(run: Record<string, unknown>): R
 }
 
 /** Copies what the saved run has. Never synthesizes, never upgrades. */
-function deriveScope(run: Record<string, unknown>, schemaId: string | null): ReportReviewScope {
+export function deriveScope(run: Record<string, unknown>, schemaId: string | null): ReportReviewScope {
   const present = (v: unknown) => (v !== undefined && v !== null ? "present" : "absent") as "present" | "absent";
   const perModel = (run.runDocument as { perModel?: unknown } | undefined)?.perModel;
   const rows = Array.isArray(perModel) ? perModel : [];
@@ -295,4 +295,25 @@ export interface ReportReviewEventV1 {
   toCycle: number;
   purposeCode: ReportReviewPurposeCode;
   at: string;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// B3 (review M-2): content drift since submission
+// ---------------------------------------------------------------------------------------------------------------------
+
+export type ReportReviewAnalysis = "unifiedAnswer" | "synthesis" | "consensus";
+const ANALYSES: readonly ReportReviewAnalysis[] = ["unifiedAnswer", "synthesis", "consensus"];
+
+/**
+ * A cycle's `scope` is frozen at submission, but some analyses can still be saved on the run afterwards (for example the
+ * run owner generating a synthesis). Compares the run as it is NOW with what was submitted, so every surface can say
+ * truthfully what is absent, and flag anything added after submission as NOT covered by the review decision.
+ */
+export function compareReportReviewScope(submitted: ReportReviewScope, run: Record<string, unknown>): { current: ReportReviewScope; addedSinceSubmission: ReportReviewAnalysis[]; absentNow: ReportReviewAnalysis[] } {
+  const current = deriveScope(run, submitted.schemaId);
+  return {
+    current,
+    addedSinceSubmission: ANALYSES.filter((a) => submitted[a] === "absent" && current[a] === "present"),
+    absentNow: ANALYSES.filter((a) => current[a] === "absent"),
+  };
 }

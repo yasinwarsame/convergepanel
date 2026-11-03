@@ -47,7 +47,7 @@ A submitted review shows:
 - the panel;
 - the decision form;
 - the Approval Queue, when report-review rows are listed;
-- every Audit Log decision row;
+- every Audit Log submission, resubmission and decision row;
 - both export formats.
 
 It replaces B1's longer wording, so the API, UI and exports all carry the same sentence.
@@ -82,6 +82,7 @@ Guarantees, each tested in `reportReviewB3Audit.spec.ts` and, under real content
   Five concurrent submissions or decisions on the emulator produce exactly one row.
 - **Immutability.** Rows are created only, never set, updated or deleted. This is pinned statically, and clients cannot read or write them.
 - **No cross-workspace visibility.** The reader query is `workspaceId ==`, every row is re-checked, and the route requires `audit.read`.
+- **Reviewer-change kinds.** The reader decides from uids whether a change is assigned, reassigned, removed or updated (reviewer unchanged, for example a due-date change). Display names, which can coincide, are never used for this (review m-1).
 - **Reader and client.** The DTO exposes question, cycle, purpose, status and display names only, never a uid, `runId` or `projectId`. Malformed rows are skipped, never repaired. Nine malformed shapes are tested.
 - **Latent defect fixed.** The client Audit Log validator rejects a whole page containing any unrecognised event type. Without the client change, the first report-review row would have broken the Audit Log for that workspace. It is now covered by a regression test.
 - **Governed and off paths.** Governed runs, and every run while the switch is off, write no report-review row.
@@ -104,6 +105,16 @@ No governed export file changed; the Order 6 suites pass unmodified.
 - Purpose (code, label, note), status, submission and decision timestamps, the current cycle, and conditions.
 - The full decision history (archived cycles plus the current one).
 - The disclaimer.
+
+**Content saved after submission** (independent review M-2).
+
+- The research content is the run **as saved now**, while each cycle's scope is frozen when that cycle is submitted.
+- Some analyses can still be saved later; for example, the run owner can generate a synthesis.
+- The export therefore states analysis presence from the run as it is now.
+- `addedSinceSubmission` lists anything saved after the current cycle was submitted. The HTML document marks it as **not covered by the decision**.
+- Each history entry carries its own `scopeAtSubmission`.
+- The page panel shows the same disclosure.
+- The saved structured (legacy Adaptive Schema) result is rendered in the HTML document as well as in the JSON (M-1).
 
 **Reviewer identity and comments are withheld.** This is the same boundary as the governed Team export (E1-S6b: an export carries no reviewer identity or private reviewer text). See owner decision OD-B3-2.
 
@@ -203,4 +214,5 @@ Nothing else B3 adds needs a composite index:
 - **OD-B3-1, export placement.** Accept the separate report-review record export (JSON and HTML) as B3's export support. The alternative is to separately authorize re-baselining the Order 6 export evidence, so a report-review section can be added inside the frozen PDF and DOCX exports.
 - **OD-B3-2, reviewer identity in exports.** Withheld, matching the governed export boundary. The owner may instead permit the reviewer's display name in report-review exports only.
 - **OD-B3-3, disclaimer wording.** B1's longer disclaimer is replaced by the owner's exact text everywhere.
+- **OD-B3-5, content under review.** B3 *discloses* any analysis saved after submission and does not block it. The owner may instead require that a run under report review cannot gain new analysis, for example through `/api/synthesize-panel`. That would change an existing route, so it needs separate authorization.
 - **OD-B3-4, activation.** Index deployment, the trial workspace, the switch PR and signed-in acceptance each need a separate GO.

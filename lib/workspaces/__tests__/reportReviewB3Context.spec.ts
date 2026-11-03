@@ -145,6 +145,7 @@ describe("submitted: abilities, names, history", () => {
     expect(c.viewer).toMatchObject({ canResubmit: false, canManageAssignment: true });
     expect(c.names[MEMBER]).toBe(`Name(${MEMBER})`);
     expect(c.history).toEqual([{ type: "report_review_submitted", at: "2026-11-02T11:00:00.000Z", actorDisplayName: `Name(${MEMBER})`, cycle: 1, purposeCode: "internal_review" }]);
+    expect([c.content, c.historyIncomplete]).toEqual([{ absentNow: ["unifiedAnswer", "synthesis", "consensus"], addedSinceSubmission: [] }, false]);
     const m = await ctx(MEMBER);
     expect(m.status === "ok" && m.viewer.canManageAssignment).toBe(false); // Member lacks reviews.manage
   });
@@ -183,6 +184,29 @@ describe("submitted: abilities, names, history", () => {
     if (after.status !== "ok") throw new Error(after.status);
     expect(after.previousCycles).toEqual([{ cycle: 1, status: "rejected", reviewerId: REVIEWER, reviewedAt: "2026-11-02T12:00:00.000Z", purposeCode: "internal_review", assignedReviewerUserId: REVIEWER }]);
     expect(after.viewer.canManageAssignment).toBe(true); // new open cycle
+  });
+});
+
+describe("review M-2 / n-1: content drift and incomplete history are stated, never hidden", () => {
+  it("a synthesis saved after submission is reported as added (not reviewed) and no longer absent", async () => {
+    await submit();
+    db.seed(`runs/${RUN}`, { ...db.read(`runs/${RUN}`)!, synthesizedStructuredReport: { summary: "later" } });
+    const c = await ctx(OWNER);
+    expect(c.status === "ok" && c.content).toEqual({ absentNow: ["consensus"], addedSinceSubmission: ["unifiedAnswer", "synthesis"] });
+  });
+  it("an unreadable or missing archived cycle sets historyIncomplete", async () => {
+    await submit();
+    await putWorkspaceReviewAssignment({ uid: ADMIN, workspaceId: W, runId: RUN, assignedReviewerUserId: REVIEWER, expectedRevision: 0, dueAt: null, now: "2026-11-02T11:01:00.000Z" });
+    await decideReportReview({ uid: REVIEWER, workspaceId: W, runId: RUN, decision: { status: "rejected" }, expectedCycle: 1, expectedUpdatedAt: rr().updatedAt, now: "2026-11-02T12:00:00.000Z" });
+    await resubmitReportReview({ uid: MEMBER2, workspaceId: W, runId: RUN, purpose: { code: "other" }, expectedCycle: 1, now: "2026-11-02T13:00:00.000Z" });
+    let c = await ctx(OWNER);
+    expect(c.status === "ok" && c.historyIncomplete).toBe(false);
+    db.seed(`runs/${RUN}/reportReviewCycles/1`, { cycle: 1 });
+    c = await ctx(OWNER);
+    expect(c.status === "ok" && c.historyIncomplete).toBe(true);
+    db.docs.delete(`runs/${RUN}/reportReviewCycles/1`);
+    c = await ctx(OWNER);
+    expect(c.status === "ok" && c.historyIncomplete).toBe(true);
   });
 });
 

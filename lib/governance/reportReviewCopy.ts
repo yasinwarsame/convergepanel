@@ -64,3 +64,10 @@ export function reportReviewStatusLabel(status: string): string {
 export function reportReviewPurposeLabel(code: string): string {
   return (REPORT_REVIEW_PURPOSE_LABELS as Record<string, string>)[code] ?? "Unknown purpose";
 }
+
+/** The analyses a report-review scope tracks, worded for sentences ("This report does not contain …"). */
+export const REPORT_REVIEW_ANALYSIS_LABELS: Readonly<Record<"unifiedAnswer" | "synthesis" | "consensus", string>> = Object.freeze({
+  unifiedAnswer: "a Unified Answer",
+  consensus: "a consensus summary",
+  synthesis: "a synthesis",
+});

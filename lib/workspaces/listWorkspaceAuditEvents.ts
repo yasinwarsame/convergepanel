@@ -201,7 +201,13 @@ interface WorkspaceAuditReportReviewDtoBase extends WorkspaceAuditEventDtoBase {
 export type WorkspaceAuditReportReviewEventDto =
   | (WorkspaceAuditReportReviewDtoBase & { eventType: "workspace_report_review_submitted"; purpose: string })
   | (WorkspaceAuditReportReviewDtoBase & { eventType: "workspace_report_review_resubmitted"; fromCycle: number; purpose: string; clearedReviewer: { displayName: string } | null })
-  | (WorkspaceAuditReportReviewDtoBase & { eventType: "workspace_report_review_reviewer_changed"; previousReviewer: { displayName: string } | null; reviewer: { displayName: string } | null })
+  | (WorkspaceAuditReportReviewDtoBase & {
+      eventType: "workspace_report_review_reviewer_changed";
+      /** Decided from uids on the server (never from display names): a same-reviewer write is an assignment update (e.g. due date). */
+      change: "assigned" | "reassigned" | "removed" | "updated";
+      previousReviewer: { displayName: string } | null;
+      reviewer: { displayName: string } | null;
+    })
   | (WorkspaceAuditReportReviewDtoBase & { eventType: "workspace_report_review_decided"; status: string; purpose: string });
 
 export type WorkspaceAuditEventDto =
@@ -480,7 +486,13 @@ export async function listWorkspaceAuditEvents(args: { workspaceId: string; limi
           case "workspace_report_review_resubmitted":
             return { ...base, eventType: r.eventType, fromCycle: r.fromCycle, purpose: r.purposeCode, clearedReviewer: toName(r.clearedReviewerUid) };
           case "workspace_report_review_reviewer_changed":
-            return { ...base, eventType: r.eventType, previousReviewer: toName(r.previousReviewerUid), reviewer: toName(r.reviewerUid) };
+            return {
+              ...base,
+              eventType: r.eventType,
+              change: r.reviewerUid === null ? "removed" : r.previousReviewerUid === null ? "assigned" : r.previousReviewerUid === r.reviewerUid ? "updated" : "reassigned",
+              previousReviewer: toName(r.previousReviewerUid),
+              reviewer: toName(r.reviewerUid),
+            };
           case "workspace_report_review_decided":
             return { ...base, eventType: r.eventType, status: r.status, purpose: r.purposeCode };
         }

@@ -84,6 +84,8 @@ const submitted = (over: Record<string, unknown> = {}, viewer: Record<string, un
     { type: "report_review_submitted", at: "2026-11-02T11:00:00.000Z", actorDisplayName: "Mo", cycle: 2, purposeCode: "client_delivery" },
     { type: "report_review_decided", at: "2026-11-02T12:00:00.000Z", actorDisplayName: "Rae", cycle: 2, status: "approved_with_conditions" },
   ],
+  content: { absentNow: ["unifiedAnswer", "synthesis", "consensus"], addedSinceSubmission: [] as string[] },
+  historyIncomplete: false,
   disclaimer: REPORT_REVIEW_DISCLAIMER,
 });
 
@@ -161,6 +163,16 @@ describe("submitted", () => {
     expect(byTestId(r, "report-review-history")).toHaveLength(1);
     expect(r.root.findAll((n) => n.props["data-testid"] === "report-review-decision-form")).toEqual([]);
     expect(cardProps).toEqual([]); // a decided cycle's assignment is not managed here
+    expect(byTestId(r, "report-review-content-added")).toEqual([]);
+    expect(byTestId(r, "report-review-history-incomplete")).toEqual([]);
+  });
+
+  it("review M-2 / n-1: content added after submission and an incomplete history are stated", async () => {
+    mockedAuthedFetch.mockResolvedValueOnce(response(200, { ...submitted(), content: { absentNow: ["consensus"], addedSinceSubmission: ["unifiedAnswer", "synthesis"] }, historyIncomplete: true }));
+    const r = await mount();
+    expect(byTestId(r, "report-review-scope-absent")[0].children.join("")).toBe("This report does not contain a consensus summary. Approval does not add or verify them.");
+    expect(byTestId(r, "report-review-content-added")[0].children.join("")).toBe("Added after this report was submitted for review, and not covered by its decision: a Unified Answer, a synthesis.");
+    expect(byTestId(r, "report-review-history-incomplete")).toHaveLength(1);
   });
 
   it("assigned reviewer: the decision form (with the disclaimer) posts the cycle and updatedAt it was shown", async () => {
@@ -211,8 +223,20 @@ describe("Audit Log row and queue row", () => {
     expect(text(decided)).toContain("Untitled research");
     expect(text(decided)).toContain("Review cycle 1 is closed.");
     expect(decided.root.findAll((n) => n.props["data-testid"] === "report-review-disclaimer" && typeof n.type === "string")[0].children.join("")).toBe(REPORT_REVIEW_DISCLAIMER);
-    const removed = mountEl(createElement(ReportReviewAuditEntry, { event: { eventType: "workspace_report_review_reviewer_changed", occurredAt: "2026-11-02T12:00:00.000Z", actor: { displayName: "Ada" }, research: { question: "Q" }, cycle: 1, previousReviewer: { displayName: "Rae" }, reviewer: null } }));
+    const removed = mountEl(createElement(ReportReviewAuditEntry, { event: { eventType: "workspace_report_review_reviewer_changed", occurredAt: "2026-11-02T12:00:00.000Z", actor: { displayName: "Ada" }, research: { question: "Q" }, cycle: 1, change: "removed", previousReviewer: { displayName: "Rae" }, reviewer: null } }));
     expect(text(removed)).toContain("Report reviewer removed");
+    expect(removed.root.findAll((n) => n.props["data-testid"] === "report-review-disclaimer")).toEqual([]);
+    const updated = mountEl(createElement(ReportReviewAuditEntry, { event: { eventType: "workspace_report_review_reviewer_changed", occurredAt: "2026-11-02T12:00:00.000Z", actor: { displayName: "Ada" }, research: { question: "Q" }, cycle: 1, change: "updated", previousReviewer: { displayName: "Rae" }, reviewer: { displayName: "Rae" } } }));
+    expect(text(updated)).toContain("Report review assignment updated");
+    expect(text(updated)).toContain("the reviewer is unchanged");
+    // Review m-2: the disclaimer also appears where approval is REQUESTED (submission and resubmission rows).
+    for (const ev of [
+      { eventType: "workspace_report_review_submitted", occurredAt: "2026-11-02T12:00:00.000Z", actor: { displayName: "Mo" }, research: { question: "Q" }, cycle: 1, purpose: "other" },
+      { eventType: "workspace_report_review_resubmitted", occurredAt: "2026-11-02T12:00:00.000Z", actor: { displayName: "Mo" }, research: { question: "Q" }, cycle: 2, fromCycle: 1, purpose: "other", clearedReviewer: null },
+    ] as const) {
+      const r = mountEl(createElement(ReportReviewAuditEntry, { event: ev }));
+      expect(r.root.findAll((n) => n.props["data-testid"] === "report-review-disclaimer" && typeof n.type === "string")[0].children.join("")).toBe(REPORT_REVIEW_DISCLAIMER);
+    }
   });
 
   const row = (recordKind?: "report_review") => ({
@@ -247,6 +271,8 @@ describe("strict client parser", () => {
     ["bad assignment state", { ...submitted(), assignment: { revision: 1, info: { ...submitted().assignment.info, state: "maybe" } } }],
     ["history item without actor", { ...submitted(), history: [{ type: "report_review_submitted", at: "x", cycle: 1 }] }],
     ["non-string name", { ...submitted(), names: { a: 1 } }],
+    ["content missing", { ...submitted(), content: undefined }],
+    ["historyIncomplete missing", { ...submitted(), historyIncomplete: undefined }],
     ["not_submitted without reason", { ok: true, state: "not_submitted", eligibility: { eligible: false }, viewer: { canSubmit: false }, disclaimer: "D" }],
   ])("rejects %s", (_l, json) => {
     expect(parseReportReviewContextResponse(json)).toBeNull();
@@ -261,7 +287,7 @@ describe("Audit Log client accepts report-review rows (one unrecognised row woul
   const rows = [
     { eventType: "workspace_report_review_submitted", occurredAt: "2026-11-02T11:00:00.000Z", actor: { displayName: "Mo" }, research: { question: "Q" }, cycle: 1, purpose: "other" },
     { eventType: "workspace_report_review_resubmitted", occurredAt: "2026-11-02T11:00:00.000Z", actor: { displayName: "Mo" }, research: { question: null }, cycle: 2, fromCycle: 1, purpose: "other", clearedReviewer: null },
-    { eventType: "workspace_report_review_reviewer_changed", occurredAt: "2026-11-02T11:00:00.000Z", actor: { displayName: "Ada" }, research: { question: "Q" }, cycle: 1, previousReviewer: null, reviewer: { displayName: "Rae" } },
+    { eventType: "workspace_report_review_reviewer_changed", occurredAt: "2026-11-02T11:00:00.000Z", actor: { displayName: "Ada" }, research: { question: "Q" }, cycle: 1, change: "assigned", previousReviewer: null, reviewer: { displayName: "Rae" } },
     { eventType: "workspace_report_review_decided", occurredAt: "2026-11-02T11:00:00.000Z", actor: { displayName: "Rae" }, research: { question: "Q" }, cycle: 1, status: "approved", purpose: "other" },
     { eventType: "workspace_member_removed", occurredAt: "2026-11-02T11:00:00.000Z", actor: { displayName: "Ada" }, target: { displayName: "Bo" }, previousRole: "member" },
   ];

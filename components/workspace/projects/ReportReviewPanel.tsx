@@ -30,6 +30,7 @@ import {
   MAX_DECISION_COMMENT_CHARS,
   MAX_DECISION_CONDITION_CHARS,
   MAX_DECISION_CONDITIONS,
+  REPORT_REVIEW_ANALYSIS_LABELS,
   REPORT_REVIEW_DECISION_STATUSES,
   REPORT_REVIEW_DISCLAIMER,
   REPORT_REVIEW_INELIGIBLE_EXPLANATIONS,
@@ -327,7 +328,11 @@ export default function ReportReviewPanel({ workspaceId, runId, canCreateExport 
   const { record, viewer, names } = ctx;
   const hr = record.humanReview;
   const decided = !(hr.status === "unreviewed" || hr.status === "pending");
-  const absent = [record.scope.unifiedAnswer === "absent" ? "a Unified Answer" : null, record.scope.consensus === "absent" ? "a consensus summary" : null, record.scope.synthesis === "absent" ? "a synthesis" : null].filter(Boolean) as string[];
+  // Review M-2: what the run lacks NOW (never the frozen submission scope alone), and what was added after submission.
+  const labelOf = (a: string) => (REPORT_REVIEW_ANALYSIS_LABELS as Record<string, string>)[a] ?? a;
+  const order = ["unifiedAnswer", "consensus", "synthesis"];
+  const absent = order.filter((a) => ctx.content.absentNow.includes(a)).map(labelOf);
+  const added = order.filter((a) => ctx.content.addedSinceSubmission.includes(a)).map(labelOf);
   const decisionDenial = !viewer.canDecide && viewer.denial ? (DECISION_DENIAL_TEXT[viewer.denial] ?? PANEL_DENIAL_TEXT[viewer.denial] ?? "") : "";
 
   return (
@@ -358,6 +363,11 @@ export default function ReportReviewPanel({ workspaceId, runId, canCreateExport 
       {absent.length > 0 && (
         <p data-testid="report-review-scope-absent" className="mt-2 text-xs text-cp-muted">
           This report does not contain {absent.join(", ")}. Approval does not add or verify them.
+        </p>
+      )}
+      {added.length > 0 && (
+        <p data-testid="report-review-content-added" role="note" className="mt-2 rounded-lg border border-cp-orange bg-cp-orange-soft px-3 py-2 text-xs text-cp-text">
+          Added after this report was submitted for review, and not covered by its decision: {added.join(", ")}.
         </p>
       )}
 
@@ -412,6 +422,12 @@ export default function ReportReviewPanel({ workspaceId, runId, canCreateExport 
       )}
 
       {feedback}
+
+      {ctx.historyIncomplete && (
+        <p data-testid="report-review-history-incomplete" className="mt-4 text-xs text-cp-orange">
+          Some earlier review cycles could not be read, so the cycle history below is incomplete.
+        </p>
+      )}
 
       {ctx.previousCycles.length > 0 && (
         <div className="mt-4">

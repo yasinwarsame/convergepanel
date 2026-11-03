@@ -49,6 +49,7 @@ const VIEWER = "uid-viewer";
 const CREATOR = "uid-creator";
 const NOW = Timestamp.fromDate(new Date("2026-11-02T10:00:00Z"));
 const RUN = "runB3e";
+const LEGACY = { version: 1, schemaId: "generic", classification: { queryType: "generic" }, generatedAt: "2026-11-02T09:59:00.000Z", results: [], alignedClaims: [] };
 const XSS = `<script>alert("x")</script>&'`;
 const RESPONSE_TEXT = `Line one\n<img src=x onerror=alert(1)> & "quoted"`;
 
@@ -79,7 +80,7 @@ beforeEach(() => {
     status: "complete",
     createdAt: NOW,
     runDocument: { perModel: [{ modelId: "chatgpt", status: "ok", rawTextTruncated: RESPONSE_TEXT, wasTruncated: false }, { modelId: "claude", status: "error", rawTextTruncated: "", wasTruncated: false }] },
-    legacyAdaptiveOutput: { version: 1, schemaId: "generic", classification: {}, generatedAt: "x", results: [], alignedClaims: [] },
+    legacyAdaptiveOutput: LEGACY,
   });
 });
 
@@ -109,7 +110,9 @@ describe("export content", () => {
       ["claude", ""],
     ]);
     expect(doc.research.synthesis).toBeNull(); // none saved → none exported, never generated
-    expect(doc.analysisPresence).toEqual({ unifiedAnswer: "absent", synthesis: "absent", consensus: "absent", respondedModels: 1, requestedModels: 2 });
+    expect(doc.analysisPresence).toMatchObject({ unifiedAnswer: "absent", synthesis: "absent", consensus: "absent", respondedModels: 1, requestedModels: 2, addedSinceSubmission: [] });
+    expect(doc.decisionHistory.every((c) => c.scopeAtSubmission.synthesis === "absent")).toBe(true);
+    expect(doc.research.structuredResult).toMatchObject({ schemaId: "generic" });
     expect(doc.review).toEqual({
       kind: "report_review",
       currentCycle: 2,
@@ -141,13 +144,31 @@ describe("export content", () => {
     expect(html).not.toMatch(/<[a-z][^>]*\s(src|href|on[a-z]+)=/i); // no real tag loads or runs anything
     expect(html).toContain(escapeHtml(XSS));
     expect(html).toContain(escapeHtml(RESPONSE_TEXT));
-    expect(html).toContain("This report does not contain a Unified Answer, consensus summary, synthesis; none was generated or verified.");
+    expect(html).toContain("This report does not contain a Unified Answer, a consensus summary, a synthesis; none was generated or verified.");
+    expect(html).toContain("<h2>Saved structured result</h2>"); // review M-1: the saved structured report is in the printable record
+    expect(html).toContain(escapeHtml(JSON.stringify(LEGACY, null, 2)));
+    expect(html).not.toContain("not covered by the decision");
     expect(html).toContain("Withheld from exports");
     for (const secret of [REVIEWER, "PRIVATE-REVIEWER-COMMENT"]) expect(html).not.toContain(secret);
   });
 
   it("escapeHtml escapes all five significant characters", () => {
     expect(escapeHtml(`<a href="x">'&'</a>`)).toBe("&lt;a href=&quot;x&quot;&gt;&#39;&amp;&#39;&lt;/a&gt;");
+  });
+});
+
+describe("review M-2: content saved after submission is disclosed, never presented as reviewed", () => {
+  it("a synthesis added after approval is flagged in JSON and HTML, and no longer described as absent", async () => {
+    await lifecycle();
+    db.seed(`runs/${RUN}`, { ...db.read(`runs/${RUN}`)!, synthesizedStructuredReport: { summary: "Generated later" }, schemaVersion: 1, synthesizedBy: "chatgpt" });
+    const doc = (await (await get("json")).json()) as ReportReviewExportV1;
+    expect(doc.analysisPresence).toMatchObject({ unifiedAnswer: "present", synthesis: "present", consensus: "absent", addedSinceSubmission: ["unifiedAnswer", "synthesis"] });
+    expect(doc.analysisPresence.atSubmission).toMatchObject({ unifiedAnswer: "absent", synthesis: "absent" });
+    const html = await (await get("html")).text();
+    expect(html).toContain("Added after this report was submitted for review, and not covered by the decision: a Unified Answer, a synthesis.");
+    expect(html).toContain("This report does not contain a consensus summary; none was generated or verified.");
+    expect(html).toContain(escapeHtml(JSON.stringify({ summary: "Generated later" }, null, 2)));
+    expect(html).toContain("Saved synthesis <strong>(added after this report was submitted for review — not covered by the decision)</strong>");
   });
 });
 
@@ -227,7 +248,7 @@ describe("builder is pure and never fabricates analysis", () => {
   it("present synthesis is carried verbatim; absent stays null", () => {
     const record = { version: 1, kind: "report_review", cycle: 1, scope: { schemaId: "generic", unifiedAnswer: "present", synthesis: "present", consensus: "absent", respondedModels: 2, requestedModels: 2 }, purpose: { code: "other", note: null }, humanReview: { status: "unreviewed" }, submittedAt: "t", submittedByUserId: "u", createdAt: "t", updatedAt: "t" } as ReportReviewRecordV1;
     const payload = { question: "Q", selectedModels: [], results: [], synthesisCache: { report: { summary: "S" }, schemaVersion: 1, synthesizedBy: "m", consensusSummary: null }, legacyAdaptive: { status: "absent", output: null } } as never;
-    const doc = buildReportReviewExport({ generatedAt: "g", runId: "r", payload, record, archivedCycles: [] });
+    const doc = buildReportReviewExport({ generatedAt: "g", runId: "r", payload, record, archivedCycles: [], drift: { current: record.scope, addedSinceSubmission: [] } });
     expect(doc.research.synthesis).toEqual({ summary: "S" });
     expect(doc.research.structuredResult).toBeNull();
     expect(renderReportReviewExportHtml(doc)).toContain("This report does not contain a consensus summary; none was generated or verified.");

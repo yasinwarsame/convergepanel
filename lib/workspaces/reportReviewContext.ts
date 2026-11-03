@@ -28,6 +28,8 @@ import { isValidAssignmentTarget, type WorkspaceReviewCandidate } from "./worksp
 import { resolveWorkspaceReviewerDisplayNames } from "./workspaceReviewerIdentity";
 import { REVIEWER_UNAVAILABLE_LABEL } from "@/lib/governance/reviewerIdentity";
 import {
+  compareReportReviewScope,
+  type ReportReviewAnalysis,
   evaluateReportReviewEligibility,
   isReportReviewDecided,
   parseReportReviewRecord,
@@ -82,6 +84,10 @@ export type ReportReviewContextResult =
       viewer: { canDecide: boolean; denial: ReportReviewDecisionDenial | PanelDenial | null; canResubmit: boolean; canManageAssignment: boolean };
       names: Record<string, string>;
       history: ReportReviewHistoryItem[];
+      /** Review M-2: analyses absent from the run now, and analyses saved after this cycle was submitted (not reviewed). */
+      content: { absentNow: ReportReviewAnalysis[]; addedSinceSubmission: ReportReviewAnalysis[] };
+      /** Review n-1: an archived cycle could not be read, so the cycle history shown is incomplete (never silently). */
+      historyIncomplete: boolean;
       disclaimer: string;
     }
   | {
@@ -146,9 +152,10 @@ export async function getReportReviewContext(args: { uid: string; workspaceId: s
     const reviewer: WorkspaceReviewCandidate = { uid: args.uid, workspaceId: access.membership.workspaceId, role, status: access.membership.status };
     const authority = evaluateReportReviewDecisionAuthority({ reviewer, workspaceId: args.workspaceId, creatorUid: target.creatorUid, record, assignment });
 
-    const previousCycles: ReportReviewCycleSummary[] = cyclesSnap.docs
-      .map((d) => d.data() as { cycle?: unknown; record?: Record<string, unknown>; assignment?: Record<string, unknown> | null })
-      .filter((a) => typeof a.cycle === "number" && a.record)
+    const archives = cyclesSnap.docs.map((d) => d.data() as { cycle?: unknown; record?: Record<string, unknown>; assignment?: Record<string, unknown> | null });
+    const readable = archives.filter((a) => typeof a.cycle === "number" && a.record);
+    const historyIncomplete = readable.length !== archives.length || archives.length !== record.cycle - 1;
+    const previousCycles: ReportReviewCycleSummary[] = readable
       .map((a) => {
         const hr = (a.record!.humanReview ?? {}) as Record<string, unknown>;
         const purpose = (a.record!.purpose ?? {}) as Record<string, unknown>;
@@ -235,6 +242,8 @@ export async function getReportReviewContext(args: { uid: string; workspaceId: s
       },
       names,
       history,
+      content: (({ absentNow, addedSinceSubmission }) => ({ absentNow, addedSinceSubmission }))(compareReportReviewScope(record.scope, run)),
+      historyIncomplete,
       disclaimer: REPORT_REVIEW_DISCLAIMER,
     };
   } catch (err) {
