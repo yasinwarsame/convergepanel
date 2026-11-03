@@ -33,7 +33,7 @@ import { submitReportReview, resubmitReportReview } from "@/lib/workspaces/repor
 import { decideReportReview } from "@/lib/workspaces/reportReviewDecisionMutation";
 import { putWorkspaceReviewAssignment } from "@/lib/workspaces/workspaceReviewMutations";
 import { getReviewerCandidates } from "@/lib/workspaces/reviewerCandidates";
-import { isMissingIndexError } from "@/lib/workspaces/reviewQueue";
+import { getReviewQueue, isMissingIndexError } from "@/lib/workspaces/reviewQueue";
 import { computeMembershipId } from "@/lib/workspaces/membershipId";
 import { REPORT_REVIEW_DISCLAIMER } from "@/lib/governance/reportReviewCopy";
 import type { ReportReviewRecordV1 } from "@/lib/governance/reportReview";
@@ -218,5 +218,35 @@ describe("missing composite index is recognised", () => {
     [null, false],
   ])("%j → %s", (err, expected) => {
     expect(isMissingIndexError(err)).toBe(expected);
+  });
+});
+
+describe("queue scan: a missing index in the MERGED scan is index_unavailable; the governed scan is unchanged", () => {
+  const indexError = Object.assign(new Error("9 FAILED_PRECONDITION: The query requires an index. You can create it here: https://console.firebase.google.com/x"), { code: 9 });
+  const args = { view: "needs_review" as const, workspaceId: W, uid: OWNER, callerCandidate: { uid: OWNER, workspaceId: W, role: "owner" as const, status: "active" as const }, projectFilter: undefined, limit: 5, cursor: null };
+  let original: typeof db.collection;
+  beforeEach(() => {
+    original = db.collection.bind(db);
+    // Every query on `runs` fails the way Firestore fails a query whose composite index is missing.
+    (db as unknown as { collection: (n: string) => unknown }).collection = (name: string) => {
+      const real = original(name) as unknown as Record<string, unknown>;
+      if (name !== "runs") return real;
+      const failing: Record<string, unknown> = {};
+      for (const m of ["where", "orderBy", "startAfter", "limit"]) failing[m] = () => failing;
+      failing.get = async () => {
+        throw indexError;
+      };
+      return failing;
+    };
+  });
+  afterEach(() => {
+    (db as unknown as { collection: unknown }).collection = original;
+  });
+  it("ON (merged): index_unavailable", async () => {
+    expect(await getReviewQueue(args)).toEqual({ status: "index_unavailable" });
+  });
+  it("OFF (governed only): query_failed, exactly as before B3", async () => {
+    flags.REPORT_REVIEW_ENABLED = false;
+    expect(await getReviewQueue(args)).toEqual({ status: "query_failed" });
   });
 });
