@@ -69,6 +69,12 @@ export interface ReportReviewExportV1 {
     changedSinceSubmission: ReportReviewAnalysis[];
   };
   contentNote: string;
+  /**
+   * S1: the EXACT content this cycle was submitted with, from its write-once snapshot, re-verified against the cycle's
+   * fingerprint before export. `null` only for a cycle recorded before snapshots existed (then `contentIntegrity` is
+   * "unverifiable"). This — not `research` — is what the cycle's decision was about.
+   */
+  reviewedContent: { cycle: number; fingerprint: ReportReviewContentFingerprint; content: Record<string, unknown> } | null;
   review: {
     kind: "report_review";
     currentCycle: number;
@@ -134,6 +140,10 @@ export function buildReportReviewExport(args: {
   payload: RunReadPayload;
   record: ReportReviewRecordV1;
   archivedCycles: ReportReviewRecordV1[];
+  /** S1: the verified snapshot of `record`'s cycle (null only when that cycle predates snapshots). */
+  reviewed: { content: Record<string, unknown> } | null;
+  /** The current cycle, when `record` is an archived cycle selected with ?cycle=n (defaults to `record`). */
+  currentRecord?: ReportReviewRecordV1;
   /** compareReportReviewScope(record.scope, run): the run's analyses now, and those added since submission. */
   drift: { current: ReportReviewScope; changedSinceSubmission: ReportReviewAnalysis[] };
   /** Order A: the route's comparison of the run's current fingerprint with the cycle's (server-computed). */
@@ -177,7 +187,8 @@ export function buildReportReviewExport(args: {
       contentFingerprint: record.contentFingerprint ? { ...record.contentFingerprint } : null,
       contentIntegrity: args.contentIntegrity,
     },
-    decisionHistory: [...args.archivedCycles.map((c) => cycleEntry(c, false)), cycleEntry(record, true)],
+    decisionHistory: [...args.archivedCycles.map((c) => cycleEntry(c, false)), cycleEntry(args.currentRecord ?? record, true)],
+    reviewedContent: args.reviewed && record.contentFingerprint ? { cycle: record.cycle, fingerprint: { ...record.contentFingerprint }, content: args.reviewed.content } : null,
   };
 }
 
@@ -210,6 +221,15 @@ export function renderReportReviewExportHtml(doc: ReportReviewExportV1): string 
     .map((r) => `<section class="resp"><h3>${e(r.model)} <span class="muted">(${e(r.status)})</span></h3><pre>${e(r.text)}</pre></section>`)
     .join("");
   const synthesis = doc.research.synthesis !== null ? `<h2>Saved synthesis${p.changedSinceSubmission.includes("synthesis") ? notReviewed : ""}</h2><pre>${e(JSON.stringify(doc.research.synthesis, null, 2))}</pre>` : "";
+  // S1: the reviewed version, from the verified snapshot (what the decision was about).
+  const rc = doc.reviewedContent;
+  const rcResponses = (() => {
+    const pm = (rc?.content.runDocument as { perModel?: unknown } | undefined)?.perModel;
+    return Array.isArray(pm) ? pm.map((m) => { const o = (m ?? {}) as Record<string, unknown>; return { model: typeof o.modelId === "string" ? o.modelId : "unknown model", status: typeof o.status === "string" ? o.status : "unknown", text: typeof o.rawTextTruncated === "string" ? o.rawTextTruncated : "" }; }) : [];
+  })();
+  const reviewedSection = rc
+    ? `<h2>Reviewed version (exactly what review cycle ${rc.cycle} was submitted with)</h2><p class="muted">Fingerprint ${e(rc.fingerprint.algorithm)}:${e(rc.fingerprint.digest)}, verified.</p><p><strong>${e(typeof rc.content.question === "string" ? rc.content.question : "Untitled research")}</strong></p>${rcResponses.map((r) => `<section class="resp"><h3>${e(r.model)} <span class="muted">(${e(r.status)})</span></h3><pre>${e(r.text)}</pre></section>`).join("")}<p class="muted">The complete reviewed content (including any structured result and synthesis) is in the JSON export.</p>`
+    : `<p class="muted">This review cycle was recorded before reviewed-content snapshots existed, so its exact reviewed version is not available.</p>`;
   // Review M-1: the saved structured result (the legacy Adaptive Schema report the reviewer read) is part of the record.
   const structured = doc.research.structuredResult !== null ? `<h2>Saved structured result</h2><pre>${e(JSON.stringify(doc.research.structuredResult, null, 2))}</pre>` : "";
   return `<!doctype html>
@@ -244,6 +264,7 @@ ${
 <p class="muted">${p.respondedModels} of ${p.requestedModels} models responded.${absent.length ? ` This report does not contain ${e(absent.join(", "))}; none was generated or verified.` : ""}</p>
 ${added.length ? `<p class="disclaimer">Added or regenerated after this report was submitted for review, and not covered by the decision: ${e(added.join(", "))}.</p>` : ""}
 <p class="muted">${e(doc.contentNote)}</p>
+${reviewedSection}
 ${structured}
 ${synthesis}
 <h2>Saved model responses</h2>

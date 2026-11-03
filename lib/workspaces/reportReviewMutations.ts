@@ -43,9 +43,9 @@ import {
   type ReportReviewRecordV1,
 } from "@/lib/governance/reportReview";
 
-import { REPORT_REVIEW_CYCLES_COLLECTION, REPORT_REVIEW_EVENTS_COLLECTION } from "./reportReviewCollections";
+import { REPORT_REVIEW_CYCLES_COLLECTION, REPORT_REVIEW_EVENTS_COLLECTION, REPORT_REVIEW_SNAPSHOTS_COLLECTION } from "./reportReviewCollections";
 import { runQuestionSnapshot, writeReportReviewWorkspaceAuditEvent } from "./reportReviewWorkspaceAudit";
-import { computeReportReviewContentFingerprint, sameReportReviewContent } from "@/lib/governance/reportReviewContent";
+import { buildReportReviewContentSnapshot, computeReportReviewContentFingerprint, sameReportReviewContent } from "@/lib/governance/reportReviewContent";
 export { REPORT_REVIEW_CYCLES_COLLECTION, REPORT_REVIEW_EVENTS_COLLECTION };
 
 export type ReportReviewMutationFailure =
@@ -102,6 +102,8 @@ async function authorizeAndReadRun(tx: FirebaseFirestore.Transaction, args: { ui
   if (panelGate === "open") return { ok: false as const, reason: "active_panel" as const };
   if (panelGate === "invalid") return { ok: false as const, reason: "panel_unreadable" as const };
 
+  // S1: research being deleted accepts no new report-review operation (the deletion workflow then removes everything).
+  if (run.deletion !== undefined && run.deletion !== null) return { ok: false as const, reason: "run_not_found" as const };
   return { ok: true as const, runRef, run, workspaceId: target.workspaceId, projectId: target.projectId };
 }
 
@@ -140,6 +142,8 @@ export async function submitReportReview(args: { uid: string; workspaceId: strin
       if (!fp.ok) return { ok: false, reason: "content_unfingerprintable" };
       const record = buildReportReviewRecord({ cycle: 1, scope: eligibility.scope, purpose: purpose.purpose, actorUid: args.uid, now, contentFingerprint: fp.fingerprint });
       tx.update(pre.runRef, { reportReview: record });
+      // S1: the exact reviewed content, write-once, in the same commit as the fingerprint that names it.
+      tx.create(pre.runRef.collection(REPORT_REVIEW_SNAPSHOTS_COLLECTION).doc("1"), buildReportReviewContentSnapshot({ runId: args.runId, workspaceId: pre.workspaceId, cycle: 1, fingerprint: fp.fingerprint, canonical: fp.canonical, now, actorUid: args.uid }));
       tx.create(
         pre.runRef.collection(REPORT_REVIEW_EVENTS_COLLECTION).doc(),
         eventDoc({ type: "report_review_submitted", runId: args.runId, workspaceId: pre.workspaceId, projectId: pre.projectId, actorUid: args.uid, fromCycle: null, toCycle: 1, purposeCode: record.purpose.code, at: now })
@@ -217,6 +221,7 @@ export async function resubmitReportReview(args: { uid: string; workspaceId: str
       );
       const next = buildReportReviewRecord({ cycle: current.record.cycle + 1, scope: eligibility.scope, purpose: purpose.purpose, actorUid: args.uid, now, contentFingerprint: fp.fingerprint });
       tx.update(pre.runRef, { reportReview: next });
+      tx.create(pre.runRef.collection(REPORT_REVIEW_SNAPSHOTS_COLLECTION).doc(String(next.cycle)), buildReportReviewContentSnapshot({ runId: args.runId, workspaceId: pre.workspaceId, cycle: next.cycle, fingerprint: fp.fingerprint, canonical: fp.canonical, now, actorUid: args.uid }));
       tx.set(assignmentRef, {
         schemaVersion: 1,
         teamId: null,

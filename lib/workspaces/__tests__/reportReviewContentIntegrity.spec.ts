@@ -112,7 +112,7 @@ describe("rrc-v1 canonical form and fingerprint (pure)", () => {
       [
         "userId", "workspaceId", "projectId", "assigneeUid", "assigneeUids", "origin", "createdAt", "completedAt", "synthesizedAt", "synthesisInputHash", "synthesisMetadata",
         "tokenUsage", "totalTokens", "tokensByModel", "tokensByProvider", "promptTokensByProvider", "completionTokensByProvider", "geminiHasUsageMetadata", "documentSizeChars",
-        "adaptiveExportCounter", "reportReview", "governanceRecord", "teamGovernance", "errorMessage", "governanceStatus", "governanceReasons", "governanceMeta", "adaptiveRetryUsage",
+        "adaptiveExportCounter", "reportReview", "governanceRecord", "teamGovernance", "errorMessage", "deletion", "governanceStatus", "governanceReasons", "governanceMeta", "adaptiveRetryUsage",
       ].sort()
     );
     expect(digest(storedRun({ synthesizedAt: Timestamp.now() }))).toBe(GOLDEN_DIGEST);

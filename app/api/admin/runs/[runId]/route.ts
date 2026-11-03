@@ -48,6 +48,7 @@ import { writeAuditEvent } from "@/lib/governance/auditLog";
 import { sanitizeForFirestore } from "@/lib/firestore/sanitizeForFirestore";
 import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
 import { logger } from "@/lib/logger";
+import { deleteResearchRun } from "@/lib/firestore/researchDeletion";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -254,6 +255,17 @@ export async function DELETE(
     question,
     prevStatus: typeof prev.governanceStatus === "string" ? prev.governanceStatus : undefined,
   });
+
+  // Order A / S1: research ("runs") is deleted by the durable workflow — the whole run subtree (incl. report-review
+  // snapshots, cycles and events, and export records) plus research text copied into audit/projection records — and is
+  // reported as deleted ONLY after verification. An incomplete deletion is a 500 and can be retried safely.
+  if (collection === "runs") {
+    const result = await deleteResearchRun({ runId, actorUid: auth.uid, reason: "admin_delete" });
+    if (result.status !== "deleted") {
+      return NextResponse.json({ ok: false, error: "deletion_incomplete", message: "The research was not fully deleted. Nothing is reported as deleted; retry the deletion.", runId }, { status: 500 });
+    }
+    return NextResponse.json({ ok: true, deleted: runId });
+  }
 
   await ref.delete();
 

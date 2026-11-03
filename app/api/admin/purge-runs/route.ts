@@ -17,6 +17,7 @@ import { requireSystemAdminAccess } from "@/lib/firebase/auth-helpers";
 import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
 import { Timestamp } from "firebase-admin/firestore";
+import { deleteResearchRun } from "@/lib/firestore/researchDeletion";
 
 // Ensure Node.js runtime (Firebase Admin requires Node.js, not Edge)
 export const runtime = "nodejs";
@@ -45,6 +46,8 @@ interface PurgeRunsResponse {
   sampleIds: string[];
   collectionsTouched: string[];
   capped?: boolean; // true if hit maxToDelete limit
+  /** Order A / S1: runs whose durable deletion did not complete (counted in errorsCount, never in deletedCount). */
+  incompleteRunIds?: string[];
 }
 
 /**
@@ -144,6 +147,20 @@ function getStatusFilter(status: "any" | "success" | "failed"): string | null {
     return "error";
   }
   return null;
+}
+
+/** Durable per-run deletion with bounded concurrency (10 at a time). */
+async function deleteRunsDurably(refs: FirebaseFirestore.DocumentReference[], actorUid: string): Promise<{ deletedCount: number; errorsCount: number; incompleteRunIds: string[] }> {
+  let deletedCount = 0;
+  const incompleteRunIds: string[] = [];
+  for (let i = 0; i < refs.length; i += 10) {
+    const results = await Promise.all(refs.slice(i, i + 10).map((r) => deleteResearchRun({ runId: r.id, actorUid, reason: "admin_purge" })));
+    for (const r of results) {
+      if (r.status === "deleted") deletedCount++;
+      else incompleteRunIds.push(r.runId);
+    }
+  }
+  return { deletedCount, errorsCount: incompleteRunIds.length, incompleteRunIds };
 }
 
 /**
@@ -306,8 +323,10 @@ export async function POST(req: NextRequest) {
 
     const matchedCount = allDocRefs.length;
 
-    // Delete documents (or simulate if dry run)
-    const { deletedCount, errorsCount } = await deleteDocuments(allDocRefs, dryRun);
+    // Delete (or simulate). Order A / S1: each run goes through the durable research-deletion workflow (whole subtree +
+    // redaction of research text copied elsewhere, verified); a run whose deletion is incomplete is counted as an error,
+    // never as deleted, and can be retried safely by purging again.
+    const { deletedCount, errorsCount, incompleteRunIds } = dryRun ? { ...(await deleteDocuments(allDocRefs, true)), incompleteRunIds: [] as string[] } : await deleteRunsDurably(allDocRefs, auth.uid);
 
     logger.info("[admin/purge-runs] Purge completed", {
       dryRun,
@@ -327,6 +346,7 @@ export async function POST(req: NextRequest) {
       deletedCount,
       errorsCount,
       sampleIds,
+      ...(incompleteRunIds.length > 0 ? { incompleteRunIds: incompleteRunIds.slice(0, 50) } : {}),
       collectionsTouched: ["runs"],
       ...(capped && { capped: true }),
     };

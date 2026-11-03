@@ -92,6 +92,8 @@ export async function decideReportReview(args: {
         projectIdValue: run.projectId,
       });
       if (target.kind !== "valid_workspace_review_target") return { ok: false, reason: "run_not_found" };
+      // S1: research being deleted accepts no decision.
+      if (run.deletion !== undefined && run.deletion !== null) return { ok: false, reason: "run_not_found" };
 
       const panelGate = await readPanelGate(tx, runRef, args.runId);
       if (panelGate === "open") return { ok: false, reason: "active_panel" };

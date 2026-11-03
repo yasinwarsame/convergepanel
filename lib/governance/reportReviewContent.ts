@@ -36,8 +36,12 @@ import { createHash } from "crypto";
 
 export const REPORT_REVIEW_CONTENT_VERSION = "rrc-v1" as const;
 export const REPORT_REVIEW_CONTENT_ALGORITHM = "sha256" as const;
-/** A Firestore document is at most 1 MiB; its canonical JSON can be somewhat larger. 4 MiB leaves ample headroom. */
-export const REPORT_REVIEW_CONTENT_MAX_BYTES = 4 * 1024 * 1024;
+/**
+ * S1: the canonical content is stored, write-once, as ONE snapshot document (runs/{R}/reportReviewSnapshots/{cycle}), and a
+ * Firestore document is at most 1 MiB. 900,000 bytes leaves room for the snapshot's other fields. Larger content fails
+ * closed (`too_large`): it is never fingerprinted without being preserved. Runs are already truncated to fit Firestore.
+ */
+export const REPORT_REVIEW_CONTENT_MAX_BYTES = 900_000;
 
 /** Top-level run fields that are NOT report content, with the reason each is unrelated to report meaning. */
 export const REPORT_REVIEW_CONTENT_EXCLUDED_FIELDS: Readonly<Record<string, string>> = Object.freeze({
@@ -65,6 +69,7 @@ export const REPORT_REVIEW_CONTENT_EXCLUDED_FIELDS: Readonly<Record<string, stri
   governanceRecord: "governed-review record (a report-review run never has one; B1 invariant)",
   teamGovernance: "Team policy evaluation snapshot (governance state, not report content)",
   errorMessage: "failure text of a run that did not complete (such runs are not eligible)",
+  deletion: "research-deletion workflow marker (lib/firestore/researchDeletion.ts), not content",
   governanceStatus: "organization policy evaluation result (governance state, like teamGovernance), written after synthesis",
   governanceReasons: "organization policy evaluation reasons (governance state), written after synthesis",
   governanceMeta: "organization policy evaluation metadata (incl. evaluatedAt), written after synthesis",
@@ -177,4 +182,50 @@ export function isReportReviewContentFingerprint(v: unknown): v is ReportReviewC
 
 export function sameReportReviewContent(a: ReportReviewContentFingerprint, b: ReportReviewContentFingerprint): boolean {
   return a.version === b.version && a.algorithm === b.algorithm && a.digest === b.digest && a.canonicalBytes === b.canonicalBytes;
+}
+
+/**
+ * S1 — the reviewed-content snapshot: the exact canonical content a cycle was submitted with, stored write-once
+ * (`tx.create`) in the SAME transaction that records the cycle's fingerprint, at runs/{R}/reportReviewSnapshots/{cycle}.
+ * It is readable only through server routes that have already authorized the caller for THIS run's Workspace, and every
+ * read re-verifies it (verifyReportReviewContentSnapshot). It is deleted only by the research-deletion workflow
+ * (lib/firestore/researchDeletion.ts), together with the run.
+ */
+export interface ReportReviewContentSnapshotV1 {
+  version: 1;
+  runId: string;
+  workspaceId: string;
+  cycle: number;
+  fingerprint: ReportReviewContentFingerprint;
+  canonical: string;
+  createdAt: string;
+  createdByUserId: string;
+}
+
+export function buildReportReviewContentSnapshot(args: { runId: string; workspaceId: string; cycle: number; fingerprint: ReportReviewContentFingerprint; canonical: string; now: string; actorUid: string }): ReportReviewContentSnapshotV1 {
+  return { version: 1, runId: args.runId, workspaceId: args.workspaceId, cycle: args.cycle, fingerprint: { ...args.fingerprint }, canonical: args.canonical, createdAt: args.now, createdByUserId: args.actorUid };
+}
+
+/**
+ * Re-verifies a stored snapshot against the cycle's own fingerprint and binding. Anything else is "invalid" (never
+ * presented): wrong run/Workspace/cycle, a fingerprint that differs from the record's, or content whose digest no longer
+ * matches. Returns the parsed reviewed content on success.
+ */
+export function verifyReportReviewContentSnapshot(
+  raw: unknown,
+  expected: { runId: string; workspaceId: string; cycle: number; fingerprint: ReportReviewContentFingerprint }
+): { ok: true; content: Record<string, unknown> } | { ok: false } {
+  if (typeof raw !== "object" || raw === null) return { ok: false };
+  const s = raw as Record<string, unknown>;
+  if (s.version !== 1 || s.runId !== expected.runId || s.workspaceId !== expected.workspaceId || s.cycle !== expected.cycle) return { ok: false };
+  if (!isReportReviewContentFingerprint(s.fingerprint) || !sameReportReviewContent(s.fingerprint, expected.fingerprint)) return { ok: false };
+  if (typeof s.canonical !== "string") return { ok: false };
+  const digest = createHash("sha256").update(`${REPORT_REVIEW_CONTENT_VERSION}\n${s.canonical}`, "utf8").digest("hex");
+  if (digest !== expected.fingerprint.digest || Buffer.byteLength(s.canonical, "utf8") !== expected.fingerprint.canonicalBytes) return { ok: false };
+  try {
+    const content = JSON.parse(s.canonical);
+    return typeof content === "object" && content !== null && !Array.isArray(content) ? { ok: true, content } : { ok: false };
+  } catch {
+    return { ok: false };
+  }
 }

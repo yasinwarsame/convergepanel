@@ -103,6 +103,10 @@ jest.mock("@/lib/firebase/admin", () => ({
   firebaseAdmin: { firestore: { Timestamp: { now: () => "TS", fromDate: () => "TS" }, FieldValue: { serverTimestamp: () => "TS", delete: () => "DEL" } } },
 }));
 jest.mock("@/lib/governance/auditLog", () => ({ writeAuditEvent: (...a: unknown[]) => writeAuditEvent(...(a as [])) }));
+// Order A / S1: research deletion (single DELETE of collection=runs, and purge) now goes through the durable workflow —
+// THAT is the guarded destructive effect for these two routes.
+const deleteResearchRun = jest.fn(async (a: { runId: string }) => ({ status: "deleted", runId: a.runId, attempts: 1 }));
+jest.mock("@/lib/firestore/researchDeletion", () => ({ deleteResearchRun: (...a: unknown[]) => deleteResearchRun(...(a as [never])) }));
 jest.mock("@/lib/stripe/client", () => ({ stripe: { subscriptions: { retrieve: (...a: unknown[]) => stripeRetrieve(...(a as [])), list: async () => ({ data: [] }) } } }));
 jest.mock("@/app/api/stripe/webhook/route", () => ({ handleSubscriptionChange: (...a: unknown[]) => handleSubscriptionChange(...(a as [])) }));
 jest.mock("@/lib/stripe/usage", () => ({ resetUsageForNewPlan: (...a: unknown[]) => resetUsageForNewPlan(...(a as [])) }));
@@ -139,7 +143,7 @@ const ROUTES = [
     // 400 before reaching the guard's protected work, which left every
     // side-effect assertion here unfalsifiable.
     call: () => RUNS_DELETE(bearer("http://localhost/api/admin/runs/run-1?collection=runs", { confirm: true }, "DELETE"), ctx),
-    effects: () => [docDelete, writeAuditEvent],
+    effects: () => [deleteResearchRun, writeAuditEvent],
   },
   {
     name: "PATCH /api/admin/runs/[runId]",
@@ -161,7 +165,7 @@ const ROUTES = [
   {
     name: "POST /api/admin/purge-runs",
     call: () => PURGE_POST(bearer("http://localhost/api/admin/purge-runs", { mode: "olderThan", days: 30, dryRun: false, confirmation: "DELETE" })),
-    effects: () => [batchDelete, batchCommit],
+    effects: () => [deleteResearchRun],
   },
 ];
 
@@ -170,7 +174,7 @@ beforeEach(() => {
   process.env.GOVERNANCE_ADMIN_EMAILS = GOV_ONLY;
   purgePagesServed = 0;
   authRecordThrows = false;
-  for (const f of [docDelete, docUpdate, docSet, batchDelete, batchCommit, writeAuditEvent, handleSubscriptionChange, stripeRetrieve, resetUsageForNewPlan]) f.mockClear();
+  for (const f of [docDelete, docUpdate, docSet, batchDelete, batchCommit, writeAuditEvent, handleSubscriptionChange, stripeRetrieve, resetUsageForNewPlan, deleteResearchRun]) f.mockClear();
   decoded = {};
   authRecord = {};
 });

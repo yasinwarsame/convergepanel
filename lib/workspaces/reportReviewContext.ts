@@ -134,6 +134,7 @@ export async function getReportReviewContext(args: { uid: string; workspaceId: s
       projectIdValue: run.projectId,
     });
     if (target.kind !== "valid_workspace_review_target") return { status: "not_found" };
+    if (run.deletion !== undefined && run.deletion !== null) return { status: "not_found" }; // S1: being deleted
     // B1 invariant: a run never holds both records. Fail closed rather than present either.
     if (run.governanceRecord !== undefined && run.governanceRecord !== null && run.reportReview !== undefined && run.reportReview !== null) return { status: "integrity_violation" };
 

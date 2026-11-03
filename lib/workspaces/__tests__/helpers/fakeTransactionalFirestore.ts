@@ -68,7 +68,7 @@ let autoId = 0;
 // ---------------------------------------------------------------------------------------------------------------------
 const DOC_ID = "__name__";
 type Source = { kind: "collection"; path: string } | { kind: "group"; id: string };
-type Where = { field: string; op: "==" | "in" | "<"; value: unknown };
+type Where = { field: string; op: "==" | "in" | "<" | "<=" | ">="; value: unknown };
 type Order = { field: string; dir: "asc" | "desc" };
 
 function nested(data: Data, path: string): unknown {
@@ -106,7 +106,7 @@ export class FakeQueryBase {
   protected next(p: Partial<{ wheres: Where[]; orders: Order[]; after: unknown[] | null; max: number }>): FakeQueryBase {
     return new FakeQueryBase(this.db, this.source, p.wheres ?? this.wheres, p.orders ?? this.orders, p.after !== undefined ? p.after : this.after, p.max ?? this.max);
   }
-  where(field: unknown, op: "==" | "in" | "<", value: unknown) {
+  where(field: unknown, op: "==" | "in" | "<" | "<=" | ">=", value: unknown) {
     return this.next({ wheres: [...this.wheres, { field: fieldName(field), op, value }] });
   }
   orderBy(field: unknown, dir: "asc" | "desc" = "asc") {
@@ -143,7 +143,9 @@ export class FakeQueryBase {
           const v = val(path, data, w.field);
           if (w.op === "==") return v === w.value || (isTimestampLike(v) && isTimestampLike(w.value) && cmpValue(v, w.value) === 0);
           if (w.op === "in") return Array.isArray(w.value) && w.value.includes(v);
-          return v !== undefined && cmpValue(v, w.value) < 0 && typeof v === typeof w.value;
+          if (v === undefined || typeof v !== typeof w.value) return false;
+          const c = cmpValue(v, w.value);
+          return w.op === "<" ? c < 0 : w.op === "<=" ? c <= 0 : c >= 0;
         })
       );
     // Firestore only returns documents that HAVE every orderBy field.
@@ -186,6 +188,13 @@ export class FakeDocRef {
     const parts = this.path.split("/");
     return new FakeCollectionRef(this.db, parts.slice(0, -1).join("/"));
   }
+  /** Subcollections that contain at least one document at any depth (as Firestore's listCollections reports them). */
+  async listCollections() {
+    const prefix = `${this.path}/`;
+    const names = new Set<string>();
+    for (const p of this.db.docs.keys()) if (p.startsWith(prefix)) names.add(p.slice(prefix.length).split("/")[0]);
+    return Array.from(names).sort().map((n) => new FakeCollectionRef(this.db, `${this.path}/${n}`));
+  }
   async get() {
     return this.db.snapshot(this.path);
   }
@@ -212,6 +221,16 @@ export class FakeCollectionRef extends FakeQueryBase {
   }
   doc(id?: string) {
     return new FakeDocRef(this.db, `${this.path}/${id ?? `auto${++autoId}`}`);
+  }
+  /** Every document id under this collection, INCLUDING "missing" ancestors that only have subcollections (Firestore semantics). */
+  async listDocuments() {
+    const prefix = `${this.path}/`;
+    const ids = new Set<string>();
+    for (const p of this.db.docs.keys()) if (p.startsWith(prefix)) ids.add(p.slice(prefix.length).split("/")[0]);
+    return Array.from(ids).sort().map((id) => new FakeDocRef(this.db, `${this.path}/${id}`));
+  }
+  get id() {
+    return this.path.split("/").pop()!;
   }
   /** The document this collection belongs to (null for a root collection). */
   get parent(): FakeDocRef | null {
@@ -254,7 +273,7 @@ export class FakeTransactionalFirestore {
   docs = new Map<string, Stored>();
   private clock = 0;
   stats = { commits: 0, retries: 0, aborted: 0 };
-  hooks: { afterTxReads?: (attempt: number) => Promise<void> | void; failCommit?: (attempt: number) => void } = {};
+  hooks: { afterTxReads?: (attempt: number) => Promise<void> | void; failCommit?: (attempt: number) => void; failWrite?: (w: { kind: string; path: string }) => void } = {};
 
   collection(name: string) {
     return new FakeCollectionRef(this, name);
@@ -292,6 +311,7 @@ export class FakeTransactionalFirestore {
     const staged = new Map<string, Stored | undefined>();
     const current = (p: string) => (staged.has(p) ? staged.get(p) : this.docs.get(p));
     for (const w of writes) {
+      this.hooks.failWrite?.({ kind: w.kind, path: w.path }); // partial-storage-failure injection (S1 deletion tests)
       const cur = current(w.path);
       if (w.kind === "create" && cur) throw new FirestoreError("ALREADY_EXISTS", w.path);
       if (w.kind === "update" && !cur) throw new FirestoreError("NOT_FOUND", w.path);

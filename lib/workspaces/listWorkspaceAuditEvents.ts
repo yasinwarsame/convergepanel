@@ -309,8 +309,16 @@ function isNonEmptyStringArray(v: unknown): v is string[] {
  * Any failure returns `null` — the row is skipped, never repaired or
  * rendered with a manufactured value.
  */
-function validateRow(id: string, raw: Record<string, unknown> | undefined, workspaceId: string): ValidatedRow | null {
-  if (!raw) return null;
+/**
+ * Order A / S1 — after the research a row refers to is deleted, the row is KEPT (audit metadata) and its research text is
+ * redacted by the deletion workflow (runQuestion: null, contentRedacted: true). It is shown with this fixed label, never
+ * dropped and never with the deleted text.
+ */
+export const DELETED_RESEARCH_LABEL = "[deleted research]";
+
+function validateRow(id: string, rawIn: Record<string, unknown> | undefined, workspaceId: string): ValidatedRow | null {
+  if (!rawIn) return null;
+  const raw = rawIn.contentRedacted === true && rawIn.runQuestion === null ? { ...rawIn, runQuestion: DELETED_RESEARCH_LABEL } : rawIn;
   const eventType = raw.eventType;
   if (typeof eventType !== "string" || !VALID_EVENT_TYPES.has(eventType)) return null;
   if (raw.workspaceId !== workspaceId) return null;

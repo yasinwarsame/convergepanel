@@ -28,10 +28,10 @@ import { buildRunReadPayload } from "@/lib/runs/runReadPayload";
 import { resolveRunReviewRouting } from "@/lib/runs/resolveRunReviewRouting";
 import { compareReportReviewScope, parseReportReviewRecord, type ReportReviewRecordV1 } from "@/lib/governance/reportReview";
 import { reportReviewCaller, reportReviewErrorBody } from "@/lib/workspaces/reportReviewRouteSupport";
-import { REPORT_REVIEW_CYCLES_COLLECTION } from "@/lib/workspaces/reportReviewCollections";
+import { REPORT_REVIEW_CYCLES_COLLECTION, REPORT_REVIEW_SNAPSHOTS_COLLECTION } from "@/lib/workspaces/reportReviewCollections";
 import { internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
 import { buildReportReviewExport, checkArchivedCycles, renderReportReviewExportHtml } from "@/lib/workspaces/reportReviewExport";
-import { computeReportReviewContentFingerprint, sameReportReviewContent } from "@/lib/governance/reportReviewContent";
+import { computeReportReviewContentFingerprint, sameReportReviewContent, verifyReportReviewContentSnapshot } from "@/lib/governance/reportReviewContent";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -65,6 +65,10 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
 
   const format = req.nextUrl.searchParams.get("format");
   if (format !== "json" && format !== "html") return reportReviewErrorBody(400, "unsupported_format", 'Only format "json" or "html" is supported.');
+  // S1: ?cycle=n exports that (archived) cycle's decision with ITS reviewed version; default is the current cycle.
+  const cycleParam = req.nextUrl.searchParams.get("cycle");
+  const requestedCycle = cycleParam === null ? null : /^[1-9][0-9]{0,5}$/.test(cycleParam) ? Number(cycleParam) : NaN;
+  if (Number.isNaN(requestedCycle)) return reportReviewErrorBody(400, "invalid_cycle", "cycle must be a positive whole number.");
 
   let data: Record<string, unknown>;
   try {
@@ -86,6 +90,7 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
     }
   }
 
+  if (data.deletion !== undefined && data.deletion !== null) return shared(runNotFoundConcealedResponse()); // S1: being deleted
   const parsed = parseReportReviewRecord(data.reportReview);
   if (!parsed.ok) {
     if (parsed.reason === "absent") return shared(runNotFoundConcealedResponse()); // nothing to export: concealed like any absent resource
@@ -120,12 +125,35 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
   const viewerRole = deriveTeamRunViewerRole({ uid, capabilities: caps, assignmentResult, governanceRecord: data.governanceRecord });
   const payload = await buildRunReadPayload({ runId, data, viewerRole, mayReadDecisionContent: true, resolveReviewRouting: resolveRunReviewRouting });
 
-  const drift = compareReportReviewScope(record.scope, data, record.submittedAt);
-  // Order A: is the content below exactly what this cycle was submitted with? (server-computed, rrc-v1)
+  // The cycle being exported: the current one, or an archived one (?cycle=n).
+  const target: ReportReviewRecordV1 | undefined = requestedCycle === null || requestedCycle === record.cycle ? record : history.cycles.find((c) => c.cycle === requestedCycle);
+  if (!target) return shared(runNotFoundConcealedResponse());
+
+  // S1: the exact reviewed content, from the write-once snapshot, re-verified (binding + digest) before it is exported.
+  let reviewed: { content: Record<string, unknown> } | null = null;
+  if (target.contentFingerprint) {
+    let snapRaw: unknown;
+    try {
+      const snap = await adminDb.collection("runs").doc(runId).collection(REPORT_REVIEW_SNAPSHOTS_COLLECTION).doc(String(target.cycle)).get();
+      snapRaw = snap.exists ? snap.data() : undefined;
+    } catch (err) {
+      logger.warn(`${LOG} snapshot read failed`, { workspaceId, runId, error: err instanceof Error ? err.message : String(err) });
+      return shared(teamRunLookupUnavailableResponse());
+    }
+    const verified = verifyReportReviewContentSnapshot(snapRaw, { runId, workspaceId, cycle: target.cycle, fingerprint: target.contentFingerprint });
+    if (!verified.ok) {
+      logger.error(`${LOG} reviewed-content snapshot missing or does not verify; export refused`, { workspaceId, runId, cycle: target.cycle });
+      return internal();
+    }
+    reviewed = { content: verified.content };
+  }
+
+  const drift = compareReportReviewScope(target.scope, data, target.submittedAt);
+  // Order A: is the current research exactly what this cycle was submitted with? (server-computed, rrc-v1)
   const currentFp = computeReportReviewContentFingerprint(data);
-  const contentIntegrity = !record.contentFingerprint || !currentFp.ok ? "unverifiable" : sameReportReviewContent(record.contentFingerprint, currentFp.fingerprint) ? "matches" : "changed";
-  const doc = buildReportReviewExport({ generatedAt: new Date().toISOString(), runId, payload, record, archivedCycles: history.cycles, drift, contentIntegrity });
-  const filename = `report-review-${runId}-cycle-${record.cycle}.${format}`;
+  const contentIntegrity = !target.contentFingerprint || !currentFp.ok ? "unverifiable" : sameReportReviewContent(target.contentFingerprint, currentFp.fingerprint) ? "matches" : "changed";
+  const doc = buildReportReviewExport({ generatedAt: new Date().toISOString(), runId, payload, record: target, currentRecord: record, archivedCycles: history.cycles, drift, contentIntegrity, reviewed });
+  const filename = `report-review-${runId}-cycle-${target.cycle}.${format}`;
   const headers = { "Content-Disposition": `attachment; filename="${filename}"`, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
   if (format === "json") return new NextResponse(JSON.stringify(doc, null, 2), { status: 200, headers: { ...headers, "Content-Type": "application/json; charset=utf-8" } });
   return new NextResponse(renderReportReviewExportHtml(doc), { status: 200, headers: { ...headers, "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'" } });

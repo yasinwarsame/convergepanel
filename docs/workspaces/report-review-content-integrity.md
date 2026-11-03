@@ -43,7 +43,7 @@ Tests check every listed exclusion, plus a non-content change made in normal use
 - **Numbers:** must be finite, serialized per ECMAScript. `-0` becomes `0`; `1` and `1.0` are the same value, as in Firestore.
 - **Timestamps and Dates:** become `{"$timestamp":"<seconds>.<9-digit ns>"}`, so one instant is always the same text.
 - **Anything else fails closed** as `unsupported_value`: GeoPoint, DocumentReference, bytes, NaN, Infinity, bigint, functions, and any stored map with a `$timestamp` key (so the encoding is unambiguous). Submission is refused with `content_unfingerprintable` rather than recording a fingerprint that does not cover the content.
-- **Bound:** canonical content over 4 MiB fails closed (`too_large`). A Firestore document is at most 1 MiB, so real runs are well inside this.
+- **Bound:** canonical content over 900,000 bytes fails closed (`too_large`), so the reviewed-content snapshot always fits in one Firestore document (§4).
 - **Fingerprint:** `{ version: "rrc-v1", algorithm: "sha256", digest: hex(SHA-256("rrc-v1\n" + canonical)), canonicalBytes }`.
 - **Golden test:** a fixed fixture's digest is pinned. It was computed by an **independent** implementation (Python `json.dumps(sort_keys=True, separators=(",",":"), ensure_ascii=False)`), not by the code under test.
 
@@ -70,21 +70,80 @@ Tests check every listed exclusion, plus a non-content change made in normal use
   - the export states plainly that the content shown is the **current** research, **not** the reviewed version.
 - **Governed review:** unchanged. No governed decision, assignment or panel module references the fingerprint (pinned statically).
 
-## 4. STOP: preserving the reviewed content itself (owner decision required)
+## 4. Reviewed-content snapshot (S1, owner-approved 2026-11-03)
 
-A hash proves *whether* the content is the reviewed version. On its own it cannot reproduce the reviewed version after the research changes. That needs a stored copy: an immutable snapshot of the canonical content, written with `tx.create` in the submission transaction, for example at `runs/{R}/reportReviewSnapshots/{cycle}`, verified against the record's fingerprint on every read and export.
+**What is stored.**
+- Each cycle stores the exact canonical content it was submitted with, at `runs/{R}/reportReviewSnapshots/{cycle}`.
+- The snapshot contains `version`, `runId`, `workspaceId`, `cycle`, `fingerprint`, `canonical`, `createdAt` and `createdByUserId`.
+- It is written with `tx.create` in the **same transaction** as the cycle's fingerprint, so a cycle never exists without its snapshot.
 
-**Why this was not built.** Run deletion today (`DELETE /api/admin/runs/{id}` and `POST /api/admin/purge-runs`) deletes only the run document, never its subcollections. A snapshot is a full copy of the research content. It would therefore **survive an administrator deleting the research**, which would be a new privacy gap: deleted research would persist as a review snapshot. The order says to stop and propose alternatives when privacy boundaries prevent a safe implementation.
+**Immutability.**
+- An existing snapshot is never overwritten: a colliding create fails the whole submission.
+- No code path updates a snapshot. Only the research-deletion workflow removes it (§5).
 
-| Option | What it takes | Assessment |
-|---|---|---|
-| **S1 (recommended)** | Snapshot subcollection as above, **plus** the two admin deletion paths also delete that run's `reportReviewSnapshots` (and ideally all its review subcollections), with tests. | Complete, auditable history, and deletion stays complete. It touches two system-admin destructive routes, so it needs your explicit authorization. |
-| S2 | Snapshot stored inside the run document, keyed by fingerprint so identical content is stored once. | Deleted together with the run. But it roughly doubles document size: submission must refuse runs near 1 MiB, and every read of the run gets heavier. Not recommended. |
-| S3 | No snapshot: fingerprint only (this PR). | Integrity is guaranteed (nothing can be approved unless it is exactly the submitted content). A historical decision whose content later changed is provably *not* the current content, but cannot be reproduced. That does not meet "independently auditable". |
+**Size.** Canonical content is bounded at 900,000 bytes, so the snapshot fits in one Firestore document. Larger content fails closed: such research can't be submitted, and it is never fingerprinted without being preserved.
 
-Until a snapshot option is authorized and built, activation should treat S3's limit as known.
+**Access.**
+- Clients have no access (rules catch-all).
+- The server reads snapshots only in the record export, after Workspace, capability and containment checks.
+- Every read is **re-verified**: the binding (run, Workspace, cycle) and the fingerprint must equal the cycle's, and the SHA-256 of the stored canonical text must equal the digest.
+- A snapshot that doesn't verify is never exported (500).
 
-## 5. Not changed
+**Export.**
+- `reviewedContent` (JSON) and a "Reviewed version" section (HTML) show exactly what the cycle was submitted with, even after the research changes.
+- `?cycle=n` exports an archived cycle's decision together with *its* reviewed version.
+- The live research is shown separately, with the integrity status.
+
+**Privacy.** The snapshot is a second copy of research that already lives in the same access-controlled run subtree. It is deleted with the run (§5), so it never outlives the research.
+
+## 5. Research deletion contract (S1)
+
+**Deletion paths.** All supported deletion paths use one durable, idempotent workflow (`lib/firestore/researchDeletion.ts`):
+- `DELETE /api/admin/runs/{id}?collection=runs`;
+- `POST /api/admin/purge-runs`.
+
+Admin user deletion removes the account but has never deleted research. That is unchanged and listed as an open decision below.
+
+**Workflow.**
+1. **Job record.** `runDeletionJobs/{runId}` is written first. It holds no research content: state, step, attempts, actor, timestamps and the last error.
+2. **Mark.** The run is marked deletion-pending in a transaction. From then on every report-review mutation and read refuses the run.
+3. **Subtree.** The run's entire subtree is deleted recursively. It is discovered with `listCollections()` and `listDocuments()`, which also reach "missing" ancestor documents.
+4. **Out-of-tree copies.** Research text copied outside the run is redacted or deleted (table below).
+5. **Run document.** The run document is deleted, then the subtree is swept again.
+6. **Verify.** Success is reported only when the run document is gone, the subtree is empty, and nothing else still carries research text.
+   - Otherwise the job is marked `failed` with the step.
+   - The single DELETE route answers **500 `deletion_incomplete`**.
+   - Purge counts the run under `errorsCount` / `incompleteRunIds`, never under `deletedCount`.
+   - Re-running is always safe.
+
+**Orphan detection.** `findResearchDeletionOrphans()` lists report-review or export documents whose run is gone, plus unfinished jobs.
+
+| Data | On authorized deletion |
+|---|---|
+| `runs/{R}` | Deleted |
+| Report-review snapshots, cycle archives, events | Deleted (with the run subtree) |
+| Export records (`runs/{R}/exports`, holding frozen report snapshots) | Deleted. Rendered bytes are never stored. |
+| Review assignment, history, panels, governance events, any other subcollection | Deleted |
+| Workspace Audit Log rows (`workspaceMembershipEvents`) for the run | **Kept** as audit metadata (who, what, when, cycle, status). `runQuestion` is redacted to null with `contentRedacted: true`, and the row displays as "[deleted research]" (rows are never dropped). |
+| Admin audit log rows (`admin_audit_logs`) for the run | **Kept**. `question` is redacted with `contentRedacted: true`. |
+| Legacy Team projections (`teamRuns`; they carry the receipt conclusion) | Deleted (a derived index) |
+| `runDeletionJobs/{runId}` | Kept (deletion evidence, no content) |
+| Firestore managed backups / point-in-time recovery | **Not reachable by the application.** They expire under the project's backup retention. Owner and legal decision below. |
+| Logs (Vercel, Sentry) | Contain no research text, by policy (`logger` metadata only) |
+
+**Normal operation stays immutable.** Archives, events and snapshots are append-only (tests pin that only the deletion workflow removes them). Authorized deletion is the single exception.
+
+**Workspace isolation.** Snapshots live inside the run subtree, carry their Workspace binding, are verified against it on every read, and are reachable only through the run's own Workspace export.
+
+**Governed review.** Governed runs are deleted through the same workflow, and the report-review steps are no-ops for them. As a deliberate improvement, their subcollections and projections are no longer orphaned.
+
+**Open owner and legal decisions (not built, not assumed):**
+- **Legal hold.** No legal-hold mechanism exists; an authorized deletion proceeds unconditionally. If records must sometimes be retained, a hold flag that blocks the workflow is a separate design.
+- **Backups and PITR.** Deleted research persists in managed backups until they expire. The retention period and customer disclosure are owner and legal decisions.
+- **User account deletion.** It leaves the user's research in place, as before S1. Whether account deletion should also delete research is a separate product and privacy decision.
+- **Audit metadata retention.** Redacted audit rows are kept indefinitely, as today. A time-based retention policy for audit metadata is an owner decision.
+
+## 6. Not changed
 
 - `REPORT_REVIEW_ENABLED`, `lib/env.ts`, `firestore.rules`, indexes, Production settings and Order 6 files are unchanged.
 - No migration or backfill: Production has no report-review records, because the feature has never been enabled.
