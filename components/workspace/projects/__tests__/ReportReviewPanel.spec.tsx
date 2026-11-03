@@ -300,6 +300,7 @@ describe("Audit Log client accepts report-review rows (one unrecognised row woul
     ["cycle missing", { ...rows[0], cycle: undefined }],
     ["empty question", { ...rows[0], research: { question: "" } }],
     ["reviewer not a name ref", { ...rows[2], reviewer: "Rae" }],
+    ["unknown change kind", { ...rows[2], change: "moved" }],
     ["decided without status", { ...rows[3], status: undefined }],
   ])("a malformed report-review row is rejected (%s)", async (_l, row) => {
     mockedAuthedFetch.mockResolvedValueOnce(response(200, { ok: true, events: [row], hasMore: false }));
