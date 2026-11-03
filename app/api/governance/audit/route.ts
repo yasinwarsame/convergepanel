@@ -409,8 +409,9 @@ const AUDIT_PARENT_CLASSIFY_CHUNK = 100;
  * `policy_updated` events have no parent and are always kept.
  *
  * Reads are batched `getAll()` calls over distinct parents, chunked at
- * AUDIT_PARENT_CLASSIFY_CHUNK, field-masked to what the rule needs
- * (`workspaceId` for Claims/Videos; `userId` + `workspaceId` for runs), and
+ * AUDIT_PARENT_CLASSIFY_CHUNK, field-masked to `userId` + `workspaceId` for both
+ * kinds (`workspaceId` decides containment; `userId` is the owner each kept
+ * row's `trailAvailable` is decided from, see markTrailAvailability), and
  * bounded by the events already in hand — never N+1, no writes.
  */
 type AuditParentKind = "verification" | "run";

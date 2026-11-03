@@ -214,6 +214,9 @@ describe("T6 — workspace isolation is unchanged for the owner", () => {
 describe("T7 — the list marks trail availability by the same rule", () => {
   beforeEach(() => {
     parents.set("verifications/own-claim", { userId: ME });
+    parents.set("verifications/assigned-claim", { userId: ASSIGNER });
+    parents.set("verifications/former-claim", { userId: FORMER });
+    parents.set("videoVerifications/own-video", { userId: ME });
     parents.set("runs/own-team-run", { userId: ME, workspaceId: "team-ws" });
     auditRows = [
       row("e11", "own-run"),
@@ -222,22 +225,48 @@ describe("T7 — the list marks trail availability by the same rule", () => {
       row("e14", "own-claim", { collection: "verifications" }),
       row("e15", "own-team-run"),
       { id: "e16", data: { action: "policy_updated", byUid: ME, at: "2026-11-03T21:00:16.000Z", runId: "policy" } },
+      // A legacy row that RECORDS the viewer as owner of someone else's run: availability must come from the parent.
+      row("e17", "former-run", { action: "changes_requested", runOwnerUid: ME }),
+      row("e18", "assigned-claim", { collection: "verifications" }),
+      row("e19", "former-claim", { collection: "verifications" }),
+      row("e20", "own-video", { collection: "videoVerifications" }),
     ];
   });
 
-  it("own and current-assigner rows are openable; the former reviewer's row is listed but not openable", async () => {
+  const LISTED = ["e11", "e12", "e13", "e14", "e16", "e17", "e18", "e19", "e20"];
+
+  it("own and current-assigner rows are openable; former-reviewer rows are listed but not openable", async () => {
     asViewer(ME, MY_SCOPE);
     const r = await get("");
     expect(r.status).toBe(200);
     const byId = Object.fromEntries(r.body.events.map((e: any) => [e.id, e.trailAvailable]));
-    expect(byId).toEqual({ e11: true, e12: true, e13: false, e14: true, e16: undefined });
+    expect(byId).toEqual({
+      e11: true, e12: true, e13: false, e14: true, e16: undefined,
+      e17: false, e18: true, e19: false, e20: true,
+    });
   });
 
-  it("every listed row agrees with what its drilldown actually answers", async () => {
-    asViewer(ME, MY_SCOPE);
+  it("a support admin (global scope): every listed parent-backed row is openable", async () => {
+    asViewer(ME, null);
+    const r = await get("");
+    const byId = Object.fromEntries(r.body.events.map((e: any) => [e.id, e.trailAvailable]));
+    expect(byId).toEqual({
+      e11: true, e12: true, e13: true, e14: true, e16: undefined,
+      e17: true, e18: true, e19: true, e20: true,
+    });
+  });
+
+  it.each([
+    ["a full-plan reviewer", MY_SCOPE],
+    ["a support admin", null],
+  ] as Array<[string, string[] | null]>)("%s: every listed row agrees with what its drilldown actually answers", async (_l, scope) => {
+    asViewer(ME, scope);
     const list = await get("");
-    for (const ev of list.body.events.filter((e: any) => e.runId !== "policy")) {
-      asViewer(ME, MY_SCOPE);
+    expect(list.body.events.map((e: any) => e.id).sort()).toEqual([...LISTED].sort());
+    const parentBacked = list.body.events.filter((e: any) => e.runId !== "policy");
+    expect(parentBacked).toHaveLength(LISTED.length - 1);
+    for (const ev of parentBacked) {
+      asViewer(ME, scope);
       const d = await trail(ev.runId, ev.collection ?? "runs");
       expect(`${ev.id}:${d.status === 200}`).toBe(`${ev.id}:${ev.trailAvailable}`);
     }

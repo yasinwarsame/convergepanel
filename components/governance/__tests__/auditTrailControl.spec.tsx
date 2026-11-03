@@ -11,7 +11,7 @@ jest.mock("@/hooks/useUserPlan", () => ({ useUserPlan: () => ({}) }));
 
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { AUDIT_TRAIL_UNAVAILABLE_COPY, AuditLogEventCard } from "@/components/governance/GovernanceDashboard";
+import { AUDIT_TRAIL_UNAVAILABLE_COPY, AuditLogEventCard, auditTrailTarget } from "@/components/governance/GovernanceDashboard";
 
 const VIEWER = { uid: "uid-viewer", email: "viewer@example.com" };
 
@@ -51,5 +51,29 @@ describe("trail control", () => {
 
   it("the explanation is fixed copy: it names no owner, reviewer or assignment", () => {
     expect(AUDIT_TRAIL_UNAVAILABLE_COPY).not.toMatch(/@|owner|assign|revok|former/i);
+  });
+});
+
+describe("auditTrailTarget — the drilldown reads the parent the list classified (server auditParentOf rules)", () => {
+  it("trims runId and collection, as the server's classification does", () => {
+    expect(auditTrailTarget({ runId: " run-1 ", collection: " verifications " })).toEqual({ runId: "run-1", collection: "verifications" });
+  });
+  it("an absent or blank collection drills into runs", () => {
+    expect(auditTrailTarget({ runId: "run-1" })).toEqual({ runId: "run-1", collection: "runs" });
+    expect(auditTrailTarget({ runId: "run-1", collection: "  " })).toEqual({ runId: "run-1", collection: "runs" });
+  });
+  it("videoVerifications is kept", () => {
+    expect(auditTrailTarget({ runId: "v-1", collection: "videoVerifications" })).toEqual({ runId: "v-1", collection: "videoVerifications" });
+  });
+  it("no trail for a missing or blank run id, a policy row, or an unknown collection", () => {
+    expect(auditTrailTarget({})).toBeNull();
+    expect(auditTrailTarget({ runId: "   " })).toBeNull();
+    expect(auditTrailTarget({ runId: " policy " })).toBeNull();
+    expect(auditTrailTarget({ runId: "run-1", collection: "teamRuns" })).toBeNull();
+  });
+  it("a card whose runId is blank after trimming offers neither control nor explanation", () => {
+    const html = card({ ...base, runId: "   ", trailAvailable: true });
+    expect(hasButton(html)).toBe(false);
+    expect(html).not.toContain(AUDIT_TRAIL_UNAVAILABLE_COPY);
   });
 });
