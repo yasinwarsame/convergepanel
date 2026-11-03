@@ -6,6 +6,9 @@
  */
 
 const stores: Record<string, Map<string, Record<string, unknown>>> = {
+  // Research deletion integrity (2026-11-03): the deletion tombstone collection, read inside every review/assignment
+  // transaction. Empty unless a test seeds it, as in Firestore.
+  runDeletionJobs: new Map(),
   runs: new Map(),
   workspaces: new Map(),
   projects: new Map(),

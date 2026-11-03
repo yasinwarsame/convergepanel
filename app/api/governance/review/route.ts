@@ -14,7 +14,7 @@ import {
 } from "@/lib/governance/governanceVisibleUserIds";
 import { writeAuditEvent } from "@/lib/governance/auditLog";
 import { writeGuardedGovernanceAuditRow } from "@/lib/governance/governanceAuditRow";
-import { isResearchWriteRefusedError, runResearchWrite } from "@/lib/firestore/researchDeletionBarrier";
+import { isResearchDeletedInTx, isResearchWriteRefusedError, runResearchWrite } from "@/lib/firestore/researchDeletionBarrier";
 import { resolveGovernanceRequestUser } from "@/lib/governance/authCheck";
 import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
 import { logger } from "@/lib/logger";
@@ -272,6 +272,9 @@ export async function POST(request: NextRequest) {
       if (assigned !== resolved.uid) return "revoked" as const;
     }
     if (!current.exists) return "conflict" as const;
+    // Research deletion integrity: a research run that is deleted or being deleted takes no decision (checked in this
+    // transaction, before the write).
+    if (collection === "runs" && (await isResearchDeletedInTx(txn, adminDb!, docId, current))) return "gone" as const;
     const currentData = current.data() as Record<string, unknown>;
     const currentStatus =
       typeof currentData.governanceStatus === "string" && currentData.governanceStatus
@@ -281,6 +284,12 @@ export async function POST(request: NextRequest) {
     txn.set(ref, patch, { merge: true });
     return "committed" as const;
   });
+  if (outcome === "gone") {
+    return NextResponse.json(
+      { ok: false, error: { code: "not_found", message: "Run not found" } },
+      { status: 404 }
+    );
+  }
   if (outcome === "revoked") {
     return NextResponse.json(
       {

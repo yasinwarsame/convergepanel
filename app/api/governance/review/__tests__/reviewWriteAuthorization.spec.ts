@@ -393,10 +393,11 @@ describe.each(COLLECTIONS)("HOSTILE REQUEST BODY — collection=%s", (collection
 });
 
 describe("research deletion integrity — governance review of a research run", () => {
-  it("a run deleted after the decision committed gets no audit row and no governance event (they carry the question and comment)", async () => {
+  it("a run whose deletion has started (tombstone) takes no decision: 404, and no status, audit row or event is written (review M-1)", async () => {
     existingDocs["runDeletionJobs/run-a"] = { userId: "n/a" }; // the deletion has started (tombstone written)
     const res = await post("runs", "run-a");
-    expect(res.status).toBe(200); // the decision committed before the deletion swept the run
+    expect(res.status).toBe(404);
+    expect(primaryWrites("runs", "run-a")).toEqual([]);
     expect(auditWrites).toEqual([]);
     expect(eventWrites()).toEqual([]);
   });

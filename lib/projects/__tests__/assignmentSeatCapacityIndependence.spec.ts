@@ -13,7 +13,7 @@ import { Timestamp } from "firebase-admin/firestore";
 
 type StoredDoc = { data: Record<string, unknown>; updateTime: Timestamp };
 // Deliberately NO `teamWorkspaceSeatAdmission` entry.
-const stores: Record<string, Map<string, StoredDoc>> = { workspaces: new Map(), workspaceMemberships: new Map(), projects: new Map(), runs: new Map(), workspaceMembershipEvents: new Map() };
+const stores: Record<string, Map<string, StoredDoc>> = { workspaces: new Map(), workspaceMemberships: new Map(), projects: new Map(), runs: new Map(), workspaceMembershipEvents: new Map(), runDeletionJobs: new Map() /* research deletion integrity: the tombstone collection, empty unless seeded */ };
 let counter = 0;
 const nextUpdateTime = () => new Timestamp(1_700_000_000 + ++counter, 0);
 function makeDocRef(collectionName: string, docId: string) {

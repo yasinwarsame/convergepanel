@@ -21,7 +21,7 @@
 import { persistableQuestionContext } from "@/lib/questionContext";
 import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
-import { guardedResearchAdd, guardedResearchCreate, guardedResearchSetMerge } from "@/lib/firestore/researchDeletionBarrier";
+import { guardedResearchAdd, guardedResearchCreate, guardedResearchSetMerge, isResearchDeletedInTx } from "@/lib/firestore/researchDeletionBarrier";
 import { ModelResult } from "@/lib/types";
 import { modelIdToProviderKey, safeNum } from "@/lib/tokenExtraction";
 import { Timestamp } from "firebase-admin/firestore";
@@ -871,7 +871,8 @@ export async function submitAdaptiveHumanReview(args: {
       // can be closed.
       const panelRef = ref.collection("humanReviewPanel").doc("current");
       const [snap, panelSnap] = await Promise.all([txn.get(ref), txn.get(panelRef)]);
-      if (!snap.exists) {
+      // Research deletion integrity: a run that is deleted or being deleted is treated as missing (same result).
+      if (!snap.exists || (await isResearchDeletedInTx(txn, adminDb!, ref.id, snap))) {
         return { ok: false, reason: "run_missing" };
       }
 
@@ -1139,7 +1140,8 @@ export async function submitAdaptiveHumanReviewAssignment(args: {
 
       const [runSnap, assignmentSnap] = await Promise.all([txn.get(runRef), txn.get(assignmentRef)]);
 
-      if (!runSnap.exists) {
+      // Research deletion integrity: a run that is deleted or being deleted is treated as missing (same result).
+      if (!runSnap.exists || (await isResearchDeletedInTx(txn, adminDb!, runRef.id, runSnap))) {
         return { ok: false, reason: "run_missing" };
       }
       // Phase 1 Cross-Authority Guard — applies to LEGACY TEAM authority only.
@@ -1337,7 +1339,8 @@ export async function submitAdaptiveHumanReviewPanel(args: {
 
       const [runSnap, panelSnap] = await Promise.all([txn.get(runRef), txn.get(panelRef)]);
 
-      if (!runSnap.exists) {
+      // Research deletion integrity: a run that is deleted or being deleted is treated as missing (same result).
+      if (!runSnap.exists || (await isResearchDeletedInTx(txn, adminDb!, runRef.id, runSnap))) {
         return { ok: false, reason: "run_missing" };
       }
       // Phase 1 Cross-Authority Guard — a Workspace-bound run belongs to
@@ -1461,7 +1464,8 @@ export async function cancelAdaptiveHumanReviewPanel(args: {
 
       const [runSnap, panelSnap] = await Promise.all([txn.get(runRef), txn.get(panelRef)]);
 
-      if (!runSnap.exists) {
+      // Research deletion integrity: a run that is deleted or being deleted is treated as missing (same result).
+      if (!runSnap.exists || (await isResearchDeletedInTx(txn, adminDb!, runRef.id, runSnap))) {
         return { ok: false, reason: "run_missing" };
       }
       // Phase 1 Cross-Authority Guard — a Workspace-bound run belongs to
@@ -1657,7 +1661,8 @@ export async function submitAdaptiveHumanReviewVote(args: {
         txn.get(voteRef),
       ]);
 
-      if (!runSnap.exists) {
+      // Research deletion integrity: a run that is deleted or being deleted is treated as missing (same result).
+      if (!runSnap.exists || (await isResearchDeletedInTx(txn, adminDb!, runRef.id, runSnap))) {
         return { ok: false, reason: "run_missing" };
       }
       // Phase 1 Cross-Authority Guard — a Workspace-bound run belongs to
@@ -1869,7 +1874,8 @@ export async function finalizeAdaptiveHumanReviewPanel(args: {
 
       const [runSnap, panelSnap] = await Promise.all([txn.get(runRef), txn.get(panelRef)]);
 
-      if (!runSnap.exists) {
+      // Research deletion integrity: a run that is deleted or being deleted is treated as missing (same result).
+      if (!runSnap.exists || (await isResearchDeletedInTx(txn, adminDb!, runRef.id, runSnap))) {
         return { ok: false, reason: "run_missing" };
       }
       // Phase 1 Cross-Authority Guard — a Workspace-bound run belongs to
@@ -2241,7 +2247,8 @@ export async function overrideAdaptiveHumanReviewPanel(args: {
 
       const [runSnap, panelSnap] = await Promise.all([txn.get(runRef), txn.get(panelRef)]);
 
-      if (!runSnap.exists) {
+      // Research deletion integrity: a run that is deleted or being deleted is treated as missing (same result).
+      if (!runSnap.exists || (await isResearchDeletedInTx(txn, adminDb!, runRef.id, runSnap))) {
         return { ok: false, reason: "run_missing" };
       }
       // Phase 1 Cross-Authority Guard — a Workspace-bound run belongs to

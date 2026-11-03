@@ -50,7 +50,7 @@ import { isResearchWriteRefusedError, runResearchWrite } from "@/lib/firestore/r
 import { sanitizeForFirestore } from "@/lib/firestore/sanitizeForFirestore";
 import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
 import { logger } from "@/lib/logger";
-import { deleteResearchRun, getUnfinishedResearchDeletion } from "@/lib/firestore/researchDeletion";
+import { deleteResearchRun, getUnfinishedResearchDeletion, REDACTED_ADMIN_AUDIT_QUESTION } from "@/lib/firestore/researchDeletion";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -272,7 +272,9 @@ export async function DELETE(
     return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
   }
   const prev = snap.data() as Record<string, unknown>;
-  const question = auditQuestionFromDoc(collection, prev);
+  // Research deletion integrity (review m-1): the deletion evidence row for a research run carries no research text. It
+  // is written already redacted, so a duplicate request racing a completed deletion cannot leave the question behind.
+  const question = collection === "runs" ? REDACTED_ADMIN_AUDIT_QUESTION : auditQuestionFromDoc(collection, prev);
 
   await writeAuditEvent({
     action: "admin_deleted",
@@ -285,6 +287,7 @@ export async function DELETE(
     runOwnerEmail: typeof prev.userEmail === "string" ? prev.userEmail : "",
     question,
     prevStatus: typeof prev.governanceStatus === "string" ? prev.governanceStatus : undefined,
+    ...(collection === "runs" ? { contentRedacted: true } : {}),
   });
 
   // Order A / S1: research ("runs") is deleted by the durable workflow — the whole run subtree (incl. report-review

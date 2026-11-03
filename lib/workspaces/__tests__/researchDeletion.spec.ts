@@ -461,3 +461,22 @@ describe("resume is research-only", () => {
     expect(db.read(`runDeletionJobs/${RUN}`)).toMatchObject({ state: "failed" }); // untouched: not resumed through another collection
   });
 });
+
+describe("review M-1: Workspace review writers refuse a run whose deletion has started (tombstone), in their own transaction", () => {
+  it("assignment: run_not_found and nothing written with a tombstone; control: the same call succeeds without it", async () => {
+    db.seed(`runDeletionJobs/${RUN}`, { runId: RUN, state: "in_progress" });
+    const before = under(`runs/${RUN}/`).length;
+    const r = await putWorkspaceReviewAssignment({ uid: ADMIN, workspaceId: W, runId: RUN, assignedReviewerUserId: REVIEWER, expectedRevision: 0, dueAt: null });
+    expect(r).toEqual(expect.objectContaining({ ok: false, reason: "run_not_found" }));
+    expect(under(`runs/${RUN}/`).length).toBe(before);
+    db.docs.delete(`runDeletionJobs/${RUN}`);
+    expect((await putWorkspaceReviewAssignment({ uid: ADMIN, workspaceId: W, runId: RUN, assignedReviewerUserId: REVIEWER, expectedRevision: 0, dueAt: null })).ok).toBe(true);
+  });
+
+  it("a non-member is still refused on membership first (concealment order unchanged) even when the run has a tombstone", async () => {
+    db.seed(`runDeletionJobs/${RUN}`, { runId: RUN, state: "in_progress" });
+    const r = await putWorkspaceReviewAssignment({ uid: "uid-stranger", workspaceId: W, runId: RUN, assignedReviewerUserId: REVIEWER, expectedRevision: 0, dueAt: null });
+    expect(r.ok).toBe(false);
+    expect((r as { reason: string }).reason).not.toBe("run_not_found");
+  });
+});

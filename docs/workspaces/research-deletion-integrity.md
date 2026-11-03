@@ -84,11 +84,18 @@ The only difference is the barrier.
 
 An update landing while deletion is in progress modifies a document that the deletion then removes. After the run document is gone, these updates fail.
 
-**C. Transactional writers that read `runs/{R}` and require it to exist.** These are review, panel, vote, assignment, decision, resubmission, project association, assignee, retry accounting and report review. They cannot recreate a deleted run.
-- One that commits before the mark is case 1 in §2.
-- One that commits during the deletion window is caught by the pre-verify or the post-delete re-sweep. At worst the deletion reports **incomplete** and is retried. It is never reported as done.
+**C. Transactional writers that read `runs/{R}` themselves: now guarded (independent review M-1).** Requiring the run to exist was not enough. Between the tombstone and the run's deletion, a review, vote (with its comment), assignment or assignee write could still commit. It created research-derived records after deletion had started, and an ordinary reviewer could keep the deletion reporting `incomplete`. Each of these transactions now calls `isResearchDeletedInTx(tx, db, runId, runSnap)` where it reads the run, after its own authorization checks, so concealment order is unchanged. The check reads the tombstone and the mark, and maps a deleted or deleting run to the transaction's existing missing-run result (`run_missing`, `run_not_found`, or 404 in the governance review route):
+- `runs.ts`: decision, assignment, panel create, panel cancel, vote, finalize, override;
+- `workspaceReviewMutations.ts`: 3 transactions;
+- `workspaceReviewPanelMutations.ts`: 5 transactions;
+- `resubmitWorkspaceReview.ts`;
+- `setTeamRunAssignee.ts`;
+- `associateRunWithProject.ts`, `associateTeamRunWithProject.ts`;
+- the decision transaction in `app/api/governance/review`.
 
-Report-review writers additionally refuse the mark.
+Report-review writers already refused the mark, and they also refuse a missing run. Not guarded: `adaptiveRetryAccounting.ts`. It updates usage metadata only (no research text) on the run document itself, which the deletion removes, and it requires the run to exist.
+
+**The admin DELETE evidence row (review m-1).** For a research run, the `admin_deleted` row is written already redacted (`question: "[deleted research]"`, `contentRedacted: true`). A duplicate DELETE racing a completed deletion therefore cannot leave the question behind.
 
 **Not run-scoped, or operator-only.** These were reviewed and need no barrier:
 - `projectEvents` rows (metadata only);
@@ -148,7 +155,7 @@ Every result type, field, value, version assignment and failure code is unchange
 
 ## 7. Tests
 
-- **`researchDeletionBarrier.spec.ts` (fake transactional Firestore, 92 tests).**
+- **`researchDeletionBarrier.spec.ts` (fake transactional Firestore, 101 tests).**
   - Every guarded writer is tested under tombstone, mark and missing (it refuses and writes nothing), and normal (it writes exactly as before).
   - The interleaving test, run per writer: the deletion runs to completion after the writer's reads and before its commit. The writer is refused on retry, nothing is resurrected, the deletion verifies and there are no orphans.
   - Post-deletion retries.
@@ -158,6 +165,7 @@ Every result type, field, value, version assignment and failure code is unchange
   - Malformed ids.
   - Export lifecycle.
   - Verification and non-run paths are unchanged.
+  - Category C (review M-1): every `runs.ts` review, panel, vote and assignment transaction refuses a tombstone or mark, with a control. The reviewer's scenario (a writer committing between the sweep and the pre-verify) is refused, and the deletion completes as `deleted`.
 - **`researchDeletionBarrier.emulator.spec.ts` (real Firestore emulator, 13 tests).**
   - Seven writers racing a deletion, 8 rounds each, including a stale assignment-history writer.
   - A delayed writer holding its transaction open across the deletion.

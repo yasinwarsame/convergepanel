@@ -2,6 +2,7 @@
  * Immutable Multi-Reviewer Vote Contract and Submission, Part C —
  * getAdaptiveHumanReviewVote() / submitAdaptiveHumanReviewVote() tests.
  */
+import { installDeletionTombstoneCollection } from "@/lib/workspaces/__tests__/helpers/deletionTombstoneCollection";
 
 const runDocs = new Map<string, Record<string, any>>();
 const panelDocs = new Map<string, Record<string, any>>();
@@ -103,6 +104,8 @@ mockAdminDb.collection = (name: string) => {
     },
   };
 };
+// Research deletion integrity (2026-11-03, review M-1): the deletion-tombstone collection every review transaction reads.
+const deletionTombstones = installDeletionTombstoneCollection(mockAdminDb);
 
 import { getAdaptiveHumanReviewVote, submitAdaptiveHumanReviewVote } from "@/lib/firestore/runs";
 import { buildAdaptiveHumanReviewVoteId } from "@/lib/governance/adaptiveHumanReviewVote";
@@ -191,7 +194,24 @@ beforeEach(() => {
   panelDocs.clear();
   teamDocs.clear();
   voteDocs.clear();
+  deletionTombstones.clear();
   firestoreUnavailableFlag.value = false;
+});
+
+describe("submitAdaptiveHumanReviewVote — research deletion integrity (review M-1)", () => {
+  it("a vote (which carries the reviewer's comment) on a run whose deletion has started is refused as run_missing; no vote is written", async () => {
+    seedHappyPath();
+    deletionTombstones.set(RUN_ID, { state: "in_progress" });
+    const result = await submitAdaptiveHumanReviewVote(baseArgs());
+    expect(result).toEqual(expect.objectContaining({ ok: false, reason: "run_missing" }));
+    expect(voteDocs.size).toBe(0);
+  });
+  it("a vote on a run marked for deletion is refused the same way", async () => {
+    seedHappyPath();
+    runDocs.set(RUN_ID, { ...runDocs.get(RUN_ID), deletion: { state: "pending" } });
+    expect(await submitAdaptiveHumanReviewVote(baseArgs())).toEqual(expect.objectContaining({ ok: false, reason: "run_missing" }));
+    expect(voteDocs.size).toBe(0);
+  });
 });
 
 describe("getAdaptiveHumanReviewVote", () => {

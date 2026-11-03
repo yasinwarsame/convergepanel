@@ -13,6 +13,9 @@ import { Timestamp } from "firebase-admin/firestore";
 
 type StoredDoc = Record<string, unknown>;
 const stores: Record<string, Map<string, StoredDoc>> = {
+  // Research deletion integrity (2026-11-03): the deletion tombstone collection, read inside every review/assignment
+  // transaction. Empty unless a test seeds it, as in Firestore.
+  runDeletionJobs: new Map(),
   workspaces: new Map(),
   workspaceMemberships: new Map(),
   runs: new Map(),

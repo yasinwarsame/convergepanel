@@ -85,6 +85,7 @@
 
 import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
+import { isResearchDeletedInTx } from "@/lib/firestore/researchDeletionBarrier";
 import { logger } from "@/lib/logger";
 import { WORKSPACES_ENABLED } from "@/lib/env";
 import { getPersonalWorkspaceId } from "@/lib/workspaces/personalWorkspaceId";
@@ -149,7 +150,8 @@ export async function associateRunWithProject(args: {
 
       // Step 3 — run existence/ownership/binding. Every failure path
       // collapses to the same concealed outcome.
-      if (!runSnap.exists) {
+      if (!runSnap.exists || (await isResearchDeletedInTx(txn, adminDb!, runRef.id, runSnap))) {
+        // Research deletion integrity: a deleted or deleting run is treated as missing (same concealed result).
         return { status: "run_not_found" };
       }
       const runData = runSnap.data() as Record<string, unknown>;

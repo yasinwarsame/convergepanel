@@ -72,10 +72,11 @@ const runDoc = {
   data: () => ({ userId: "victim-uid", userEmail: "victim@test-invented.example", question: "q", governanceStatus: "approved" }),
 };
 /**
- * Research deletion integrity (2026-11-03): PATCH on a research run writes the override and its admin_audit_logs row in
- * ONE transaction guarded by the deletion barrier. The barrier reads `runDeletionJobs/{runId}` (the tombstone) and the
- * run. So the double routes by collection (tombstone / audit row / run) and runs the callback as a transaction that
- * applies its buffered writes only when the callback succeeds. `auditRowCreate` is the guarded audit-row write that
+ * Research deletion integrity (2026-11-03): PATCH on a research run writes the override in a transaction guarded by the
+ * deletion barrier, then the admin_audit_logs row in its own guarded transaction (best-effort, like writeAuditEvent). The
+ * barrier reads `runDeletionJobs/{runId}` (the tombstone) and the run. So the double routes by collection (tombstone /
+ * audit row / run) and runs each callback as a transaction that applies its buffered writes only when the callback
+ * succeeds. `auditRowCreate` is the guarded audit-row write that
  * replaces `writeAuditEvent` for research runs.
  */
 const auditRowCreate = jest.fn(async () => undefined);
@@ -133,6 +134,7 @@ jest.mock("@/lib/firestore/researchDeletion", () => ({
   deleteResearchRun: (...a: unknown[]) => deleteResearchRun(...(a as [never])),
   listUnfinishedResearchDeletions: async () => [],
   getUnfinishedResearchDeletion: async () => false,
+  REDACTED_ADMIN_AUDIT_QUESTION: jest.requireActual("@/lib/firestore/researchDeletion").REDACTED_ADMIN_AUDIT_QUESTION,
 }));
 jest.mock("@/lib/stripe/client", () => ({ stripe: { subscriptions: { retrieve: (...a: unknown[]) => stripeRetrieve(...(a as [])), list: async () => ({ data: [] }) } } }));
 jest.mock("@/app/api/stripe/webhook/route", () => ({ handleSubscriptionChange: (...a: unknown[]) => handleSubscriptionChange(...(a as [])) }));
@@ -392,5 +394,15 @@ describe("research deletion integrity — PATCH on a research run", () => {
     expect(docSet).toHaveBeenCalledTimes(1);
     expect(auditRowCreate).toHaveBeenCalledTimes(1);
     expect(writeAuditEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe("research deletion integrity — the admin DELETE evidence row (review m-1)", () => {
+  it("for a research run it carries no research text: question redacted at source, contentRedacted:true", async () => {
+    AS.system();
+    const res = await RUNS_DELETE(bearer("http://localhost/api/admin/runs/run-1?collection=runs", { confirm: true }, "DELETE"), ctx);
+    expect(res.status).toBe(200);
+    expect(writeAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "admin_deleted", runId: "run-1", question: "[deleted research]", contentRedacted: true }));
+    expect(JSON.stringify((writeAuditEvent as jest.Mock).mock.calls)).not.toContain('"question":"q"'); // the run's question
   });
 });

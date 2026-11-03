@@ -38,6 +38,7 @@
 import "server-only";
 import { Timestamp } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase/admin";
+import { isResearchDeletedInTx } from "@/lib/firestore/researchDeletionBarrier";
 import { logger } from "@/lib/logger";
 import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS, PROJECT_ASSIGNMENT_ENABLED, PROJECT_ASSIGNMENT_CANARY_UIDS } from "@/lib/env";
 import { resolveTeamWorkspaceTargetAdmission } from "@/lib/workspaces/teamWorkspaceTargetAdmission";
@@ -118,7 +119,8 @@ export async function setTeamRunAssignee(args: {
       // 2. The run, read fresh through this transaction, bound to this Workspace.
       const runRef = adminDb!.collection("runs").doc(args.runId);
       const runSnap = await tx.get(runRef);
-      if (!runSnap.exists) {
+      if (!runSnap.exists || (await isResearchDeletedInTx(tx, adminDb!, runRef.id, runSnap))) {
+        // Research deletion integrity: a deleted or deleting run is treated as missing (same concealed result).
         return { status: "run_not_found" };
       }
       const runData = runSnap.data() as Record<string, unknown>;

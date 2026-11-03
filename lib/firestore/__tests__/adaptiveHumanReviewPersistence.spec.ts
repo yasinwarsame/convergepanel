@@ -11,6 +11,7 @@
  * and "sibling fields untouched" assertions below a genuine proof rather
  * than an assumption.
  */
+import { installDeletionTombstoneCollection } from "@/lib/workspaces/__tests__/helpers/deletionTombstoneCollection";
 
 const runDocs = new Map<string, Record<string, any>>();
 const teamRunDocs = new Map<string, Record<string, any>>();
@@ -113,6 +114,8 @@ jest.mock("@/lib/firebase/admin", () => ({
     return firestoreUnavailableFlag.value ? null : mockAdminDb;
   },
 }));
+// Research deletion integrity (2026-11-03, review M-1): the deletion-tombstone collection every review transaction reads.
+const deletionTombstones = installDeletionTombstoneCollection(mockAdminDb);
 
 const mockLoggerWarn = jest.fn();
 jest.mock("@/lib/logger", () => ({
@@ -167,6 +170,18 @@ beforeEach(() => {
   mockLoggerWarn.mockClear();
   panelDocs.clear();
   mockAdminDb.runTransaction.mockClear();
+});
+
+describe("submitAdaptiveHumanReview — research deletion integrity (review M-1)", () => {
+  it("a decision on a run whose deletion has started is refused as run_missing, and the governance record is unchanged", async () => {
+    seedRun("run-1", governanceRecord({ humanReview: { status: "unreviewed" } }));
+    deletionTombstones.set("run-1", { state: "in_progress" });
+    const before = JSON.stringify(runDocs.get("run-1"));
+    const result = await submitAdaptiveHumanReview({ runId: "run-1", update: { status: "approved" }, reviewerId: "reviewer-uid", reviewerName: "Reviewer Name", expectedUpdatedAt: EXPECTED_UPDATED_AT, now: "2026-07-30T00:00:00.000Z" });
+    expect(result).toEqual(expect.objectContaining({ ok: false, reason: "run_missing" }));
+    expect(JSON.stringify(runDocs.get("run-1"))).toBe(before);
+    deletionTombstones.clear();
+  });
 });
 
 describe("submitAdaptiveHumanReview", () => {

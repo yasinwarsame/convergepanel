@@ -36,6 +36,9 @@ type StoredDoc = Record<string, unknown>;
  * return, so a prototype-named collection is an ordinary lazily-created store the diff can see.
  */
 const stores: Record<string, Map<string, StoredDoc>> = Object.assign(Object.create(null) as Record<string, Map<string, StoredDoc>>, {
+  // Research deletion integrity (2026-11-03): the deletion tombstone collection, read inside every review/panel
+  // transaction. Empty unless a test seeds it, as in Firestore.
+  runDeletionJobs: new Map(),
   workspaces: new Map(),
   workspaceMemberships: new Map(),
   runs: new Map(),
@@ -3526,7 +3529,7 @@ function countGovernanceEventAddSites(): string[] {
  * return sites, [[count:declaredWitnesses=15]] guard witnesses reading [[count:guardOperandReaders=8]]
  * registry operands, [[count:atomicityCases=8]] atomicity directions, [[count:provenanceSubjects=4]]
  * provenance subjects with [[count:equivalenceEntries=30]] declared equivalences,
- * [[count:pinnedImports=24]] pinned imports and [[count:mechanismIds=6]] citable harness mechanisms.
+ * [[count:pinnedImports=25]] pinned imports and [[count:mechanismIds=6]] citable harness mechanisms.
  */
 describe("PR claim re-derivation — every measured count is computed from source (§61)", () => {
   const surface = () => deriveProductionWriteSurface(PANEL_MUTATIONS_SOURCE, Object.keys(PANEL_OPERATION_FUNCTIONS));
@@ -3543,7 +3546,7 @@ describe("PR claim re-derivation — every measured count is computed from sourc
     expect(`auditedOperations:${Object.keys(PANEL_OPERATION_FUNCTIONS).length}`).toBe("auditedOperations:3");
     expect(`auditedActions:${PANEL_MUTATION_ACTIONS.length}`).toBe("auditedActions:4");
     expect(`appendHelperCallSites:${[...PANEL_MUTATIONS_SOURCE.matchAll(/appendPanelGovernanceEvent\(tx,/g)].length}`).toBe("appendHelperCallSites:3");
-    expect(`pinnedImports:${surface().allImports.length}`).toBe("pinnedImports:24");
+    expect(`pinnedImports:${surface().allImports.length}`).toBe("pinnedImports:25");
     expect(`transactionWriteSites:${surface().transactionWriteSites.length}`).toBe("transactionWriteSites:4");
     expect(`reachableLocalFunctions:${surface().reachableLocalFunctions.join(",")}`).toBe("reachableLocalFunctions:appendPanelGovernanceEvent,deleteWorkspaceReviewPanel,isAssignmentActive,putWorkspaceReviewPanel,readAndParsePanel,readVotesForRevision,submitWorkspaceReviewPanelVote,toWorkspacePanelDto");
     expect(`directWriteCalls:${surface().directWriteCalls.length}`).toBe("directWriteCalls:0");
@@ -3915,7 +3918,7 @@ describe("governance-event `.add()` write sites — derived from the repository 
     // the governance review route now create the event in a transaction guarded by the deletion barrier.
     const sites = countGovernanceEventAddSites();
     expect(sites).toEqual([
-      "app/api/governance/review/route.ts:402",
+      "app/api/governance/review/route.ts:411",
       "lib/governance/evaluateAndStore.ts:128",
       "lib/governance/governanceBackfill.ts:63",
     ].sort());
@@ -3925,7 +3928,7 @@ describe("governance-event `.add()` write sites — derived from the repository 
   it("the walker searches `app/` as well as `lib/` (the R8 count missed the app route)", () => {
     const sites = countGovernanceEventAddSites();
     expect(sites.filter((s) => s.startsWith("lib/")).length).toBe(2);
-    expect(sites.filter((s) => s.startsWith("app/"))).toEqual(["app/api/governance/review/route.ts:402"]);
+    expect(sites.filter((s) => s.startsWith("app/"))).toEqual(["app/api/governance/review/route.ts:411"]);
   });
 
   it("the detector is not vacuously blind: it finds nothing in a tree with no such call, and finds one when there is one", () => {
@@ -4234,7 +4237,7 @@ describe("whole-event-store oracle — channel inventory fails closed (§9)", ()
    */
   it("the production module's COMPLETE import list is pinned — any new dependency fails until classified", () => {
     const imports = surface().allImports;
-    expect(imports.length).toBe(24);
+    expect(imports.length).toBe(25);
     expect(imports).toEqual([
       "./authorizeTeamWorkspaceMutationInTransaction :: TeamMutationAuthorizationDenialReason, authorizeTeamWorkspaceMutationInTransaction",
       "./capabilities :: roleHasCapability",
@@ -4249,6 +4252,10 @@ describe("whole-event-store oracle — channel inventory fails closed (§9)", ()
       "@/lib/adaptiveSchema/persistedOutput :: PersistedAdaptiveSchemaId",
       "@/lib/env :: TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS, TEAM_WORKSPACES_ENABLED",
       "@/lib/firebase/admin :: adminDb",
+      // Research deletion integrity (2026-11-03, review M-1), classified READ-ONLY: `isResearchDeletedInTx` reads the
+      // deletion tombstone through the CALLER'S transaction (`tx.get`) and inspects the run snapshot the caller already
+      // read. It has no write capability and opens no transaction of its own.
+      "@/lib/firestore/researchDeletionBarrier :: isResearchDeletedInTx",
       "@/lib/firestore/runs :: createAdaptiveHumanReviewHistory, createAdaptivePanelFinalizationHistory, createAdaptivePanelOverrideHistory, writeAdaptivePanelFinalizationGovernanceEvent, writeAdaptivePanelOverrideGovernanceEvent",
       "@/lib/governance/adaptiveHumanReviewHistory :: buildAdaptiveHumanReviewHistoryEntry, isAdaptiveReviewNonTerminalStatus",
       "@/lib/governance/adaptiveHumanReviewPanel :: AdaptiveHumanReviewPanelV1, AdaptiveReviewFinalStatus, MAX_ADAPTIVE_PANEL_REVIEWERS, MIN_ADAPTIVE_PANEL_REVIEWERS, buildCancelledAdaptiveHumanReviewPanel, buildFinalizedAdaptiveHumanReviewPanel, buildNextAdaptiveHumanReviewPanel, buildOwnerOverriddenAdaptiveHumanReviewPanel, normalizeAdaptivePanelReviewerUserIds, parseAdaptiveHumanReviewPanel",
@@ -6079,7 +6086,8 @@ type GuardOperandKey = keyof typeof GUARD_OPERAND_READERS;
 const G = Object.freeze({
   authDenied: "!auth.ok",
   researchRead: '!roleHasCapability(auth.membership.role, "research.read")',
-  runAbsent: "!runSnap.exists",
+  // Research deletion integrity (review M-1): a deleted or deleting run is the same "absent" decision.
+  runAbsent: "!runSnap.exists || (await isResearchDeletedInTx(tx, adminDb!, runRef.id, runSnap))",
   targetInvalid: 'target.kind !== "valid_workspace_review_target"',
   panelFinalized: 'current.status === "finalized"',
   panelNotOpen: 'current.status !== "open"',
@@ -6234,13 +6242,13 @@ describe("AST rejection-site inventory — the production module's real decision
     ]);
     // The guards are what make them genuinely different decisions rather than a stylistic repeat.
     const guardOf = (siteId: string) => DISCOVERED_REJECTION_SITES.find((s) => s.siteId === siteId)?.guardExpr;
-    expect(guardOf("create#reject-05")).toBe("!runSnap.exists");
+    expect(guardOf("create#reject-05")).toBe(G.runAbsent);
     expect(guardOf("create#reject-06")).toBe('target.kind !== "valid_workspace_review_target"');
     expect(guardOf("create#reject-10")).toBe('current.status === "finalized"');
     expect(guardOf("create#reject-11")).toBe('current.status !== "open"');
-    expect(guardOf("cancel#reject-05")).toBe("!runSnap.exists");
+    expect(guardOf("cancel#reject-05")).toBe(G.runAbsent);
     expect(guardOf("cancel#reject-06")).toBe('target.kind !== "valid_workspace_review_target"');
-    expect(guardOf("vote#reject-04")).toBe("!runSnap.exists");
+    expect(guardOf("vote#reject-04")).toBe(G.runAbsent);
     expect(guardOf("vote#reject-05")).toBe('target.kind !== "valid_workspace_review_target"');
     expect(guardOf("vote#reject-12")).toBe("!panel.reviewerUserIds.includes(args.uid)");
     expect(guardOf("vote#reject-13")).toBe("!eligibility.eligible");

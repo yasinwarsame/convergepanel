@@ -77,6 +77,21 @@ export async function assertResearchWritable(tx: Tx, db: Db, runId: string): Pro
  * non-transactional write: the write moves into `body` unchanged (`tx.set` / `tx.update` / `tx.create` in place of
  * `ref.set` / `ref.update` / `col.add`).
  */
+/**
+ * For a transaction that ALREADY reads `runs/{runId}` itself and handles a missing run with its own result (the
+ * review, panel, vote, assignment, decision, resubmission, assignee and project-association writers). It reads the
+ * tombstone in `tx` and checks the run snapshot the caller read for the deletion mark. It returns true when the run must
+ * be treated as gone, so the caller returns its existing not-found result, after its own authorization checks, with
+ * concealment order unchanged. Call it in the transaction's read phase, before any write.
+ */
+export async function isResearchDeletedInTx(tx: Tx, db: Db, runId: string, runSnap: { exists: boolean; data(): unknown }): Promise<boolean> {
+  if (runSnap.exists) {
+    const deletion = (runSnap.data() as Record<string, unknown> | undefined)?.deletion;
+    if (deletion !== undefined && deletion !== null) return true;
+  }
+  return (await tx.get(researchDeletionTombstoneRef(db, runId))).exists;
+}
+
 /** Guarded `ref.set(data, { merge: true })`. */
 export async function guardedResearchSetMerge(db: Db, runId: string, ref: FirebaseFirestore.DocumentReference, data: FirebaseFirestore.DocumentData): Promise<void> {
   await runResearchWrite(db, runId, (tx) => {

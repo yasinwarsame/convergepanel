@@ -271,3 +271,76 @@ describe("the barrier itself", () => {
     expect(derived()).toEqual([]);
   });
 });
+
+// ── Review M-1: the transactional review / panel / vote / assignment writers ("Category C") ───────────────────────
+import {
+  submitAdaptiveHumanReview,
+  submitAdaptiveHumanReviewAssignment,
+  submitAdaptiveHumanReviewPanel,
+  cancelAdaptiveHumanReviewPanel,
+  submitAdaptiveHumanReviewVote,
+  finalizeAdaptiveHumanReviewPanel,
+  overrideAdaptiveHumanReviewPanel,
+} from "@/lib/firestore/runs";
+
+describe("review M-1: every transactional review writer refuses a deleted or deleting run, in its own transaction", () => {
+  const C_WRITERS: Array<[string, () => Promise<any>]> = [
+    ["submitAdaptiveHumanReview (decision)", () => submitAdaptiveHumanReview({ runId: R, update: { status: "approved", comment: SECRET } as never, reviewerId: "u2", reviewerName: "R", teamId: null } as never)],
+    ["submitAdaptiveHumanReviewAssignment", () => submitAdaptiveHumanReviewAssignment({ runId: R, teamId: null, newReviewerUserId: "u2", actorUserId: "u1", expectedRevision: 0 } as never)],
+    ["submitAdaptiveHumanReviewPanel", () => submitAdaptiveHumanReviewPanel({ runId: R, teamId: "team1", reviewerUserIds: ["u2", "u3"], actorUserId: "u1" } as never)],
+    ["cancelAdaptiveHumanReviewPanel", () => cancelAdaptiveHumanReviewPanel({ runId: R, teamId: "team1", actorUserId: "u1" } as never)],
+    ["submitAdaptiveHumanReviewVote (carries the comment)", () => submitAdaptiveHumanReviewVote({ runId: R, teamId: "team1", reviewerUserId: "u2", vote: { status: "approved", comment: SECRET } } as never)],
+    ["finalizeAdaptiveHumanReviewPanel", () => finalizeAdaptiveHumanReviewPanel({ runId: R, teamId: "team1", actorUserId: "u1" } as never)],
+    ["overrideAdaptiveHumanReviewPanel", () => overrideAdaptiveHumanReviewPanel({ runId: R, teamId: "team1", actorUserId: "u1", justification: SECRET } as never)],
+  ];
+  for (const [name, call] of C_WRITERS) {
+    it(`${name}: tombstone or mark → run_missing, nothing written; control: without them the barrier does not refuse`, async () => {
+      for (const state of ["tombstone-with-run", "mark"] as const) {
+        seedState("normal");
+        if (state === "mark") db.seed(`runs/${R}`, { userId: "u1", question: SECRET, deletion: { state: "pending" } });
+        else db.seed(`${RESEARCH_DELETION_TOMBSTONE_COLLECTION}/${R}`, { state: "in_progress" });
+        db.writeLog = [];
+        expect(await call()).toEqual(expect.objectContaining({ ok: false, reason: "run_missing" }));
+        expect(db.writeLog).toEqual([]);
+      }
+      seedState("normal");
+      const control = await call();
+      expect(control?.reason).not.toBe("run_missing"); // the refusal above came from the barrier, not from the fixture
+    });
+  }
+
+  it("the reviewer's scenario: a writer that commits between the deletion's sweep and its pre-verify is refused, and the deletion completes", async () => {
+    seedState("normal");
+    db.seed(`runs/${R}/exports/e1`, { body: SECRET }); // something for the sweep to delete
+    // The deletion's first step after the subtree sweep is the Workspace-audit redaction query. The writer is injected
+    // there, once: after the tombstone, mark and sweep, and before the pre-verify.
+    const realCollection = db.collection.bind(db);
+    let injected: any = null;
+    (db as any).collection = (name: string) => {
+      const col = realCollection(name);
+      if (name !== "workspaceMembershipEvents" || injected !== null) return col;
+      return {
+        where: (...w: unknown[]) => {
+          const q = (col.where as any)(...w);
+          return {
+            get: async () => {
+              if (injected === null) {
+                expect(db.paths(`runs/${R}/`)).toEqual([]); // the sweep has run
+                injected = await submitAdaptiveHumanReviewAssignment({ runId: R, teamId: null, newReviewerUserId: "u2", actorUserId: "u1", expectedRevision: 0 } as never);
+              }
+              return q.get();
+            },
+          };
+        },
+      };
+    };
+    try {
+      const res = await deleteResearchRun({ runId: R, actorUid: "sys", reason: "admin_delete" });
+      expect(injected).toEqual(expect.objectContaining({ ok: false, reason: "run_missing" }));
+      expect(res).toMatchObject({ status: "deleted" }); // not "incomplete": the writer could not stall it
+      expect(derived()).toEqual([]);
+    } finally {
+      (db as any).collection = realCollection;
+    }
+  });
+});

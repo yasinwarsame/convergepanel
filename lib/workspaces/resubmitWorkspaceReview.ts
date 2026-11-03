@@ -66,6 +66,7 @@
 
 import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
+import { isResearchDeletedInTx } from "@/lib/firestore/researchDeletionBarrier";
 import { logger } from "@/lib/logger";
 import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS } from "@/lib/env";
 import { resolveTeamWorkspaceTargetAdmission } from "./teamWorkspaceTargetAdmission";
@@ -157,7 +158,8 @@ export async function resubmitWorkspaceReview(args: {
       // transaction — never a route-level snapshot. ----
       const runRef = adminDb!.collection("runs").doc(args.runId);
       const runSnap = await tx.get(runRef);
-      if (!runSnap.exists) {
+      if (!runSnap.exists || (await isResearchDeletedInTx(tx, adminDb!, runRef.id, runSnap))) {
+        // Research deletion integrity: a deleted or deleting run is treated as missing (same result).
         return { ok: false, reason: "run_not_found" };
       }
       const runData = runSnap.data() as Record<string, unknown>;
