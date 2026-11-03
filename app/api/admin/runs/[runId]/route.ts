@@ -45,9 +45,12 @@ async function auditActorEmail(uid: string): Promise<string> {
 }
 import { adminDb } from "@/lib/firebase/admin";
 import { writeAuditEvent } from "@/lib/governance/auditLog";
+import { writeGuardedGovernanceAuditRow } from "@/lib/governance/governanceAuditRow";
+import { isResearchWriteRefusedError, runResearchWrite } from "@/lib/firestore/researchDeletionBarrier";
 import { sanitizeForFirestore } from "@/lib/firestore/sanitizeForFirestore";
 import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
 import { logger } from "@/lib/logger";
+import { deleteResearchRun, getUnfinishedResearchDeletion, REDACTED_ADMIN_AUDIT_QUESTION } from "@/lib/firestore/researchDeletion";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -166,39 +169,60 @@ export async function PATCH(
       : "Admin governance override";
 
   const ref = adminDb.collection(collection).doc(runId);
-  const snap = await ref.get();
-  if (!snap.exists) {
-    return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
-  }
-  const prev = snap.data() as Record<string, unknown>;
-  const prevStatus = typeof prev.governanceStatus === "string" ? prev.governanceStatus : null;
-
-  await ref.set(
+  const statusPatch = (): DocumentData =>
     sanitizeForFirestore({
       governanceStatus: status,
       governanceReviewedBy: auth.uid,
       governanceReviewedAt: new Date().toISOString(),
       governanceReviewComment: comment,
-    }) as DocumentData,
-    { merge: true }
-  );
+    }) as DocumentData;
+  const overrideAudit = (prev: Record<string, unknown>, byEmail: unknown) => {
+    const prevStatus = typeof prev.governanceStatus === "string" ? prev.governanceStatus : null;
+    return {
+      action: "admin_override",
+      runId,
+      collection,
+      runType: auditRunType(collection),
+      byUid: auth.uid,
+      byEmail,
+      comment,
+      prevStatus: prevStatus ?? undefined,
+      nextStatus: status,
+      runOwnerUid: String(prev.userId ?? prev.uid ?? ""),
+      runOwnerEmail: typeof prev.userEmail === "string" ? prev.userEmail : "",
+      question: auditQuestionFromDoc(collection, prev),
+      consensusScore: typeof prev.consensusScore === "number" ? prev.consensusScore : null,
+    };
+  };
 
-  const question = auditQuestionFromDoc(collection, prev);
-  await writeAuditEvent({
-    action: "admin_override",
-    runId,
-    collection,
-    runType: auditRunType(collection),
-    byUid: auth.uid,
-    byEmail: await auditActorEmail(auth.uid),
-    comment,
-    prevStatus: prevStatus ?? undefined,
-    nextStatus: status,
-    runOwnerUid: String(prev.userId ?? prev.uid ?? ""),
-    runOwnerEmail: typeof prev.userEmail === "string" ? prev.userEmail : "",
-    question,
-    consensusScore: typeof prev.consensusScore === "number" ? prev.consensusScore : null,
-  });
+  if (collection === "runs") {
+    // Research deletion integrity: the override is written in a transaction guarded by the deletion barrier, from the run
+    // as read inside it. A deleted or deleting run is Not found. The audit row (question, comment) is then written in its
+    // own guarded transaction, best-effort exactly like writeAuditEvent.
+    const db = adminDb;
+    let prev: Record<string, unknown>;
+    try {
+      prev = await runResearchWrite(db, runId, (tx, run) => {
+        tx.set(ref, statusPatch(), { merge: true });
+        return run.data() as Record<string, unknown>;
+      });
+    } catch (err) {
+      if (isResearchWriteRefusedError(err)) return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
+      throw err;
+    }
+    await writeGuardedGovernanceAuditRow(db, runId, overrideAudit(prev, await auditActorEmail(auth.uid)));
+    return NextResponse.json({ ok: true, runId, collection, governanceStatus: status });
+  }
+
+  const snap = await ref.get();
+  if (!snap.exists) {
+    return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
+  }
+  const prev = snap.data() as Record<string, unknown>;
+
+  await ref.set(statusPatch(), { merge: true });
+
+  await writeAuditEvent(overrideAudit(prev, await auditActorEmail(auth.uid)));
 
   return NextResponse.json({ ok: true, runId, collection, governanceStatus: status });
 }
@@ -237,10 +261,20 @@ export async function DELETE(
   const ref = adminDb.collection(collection).doc(runId);
   const snap = await ref.get();
   if (!snap.exists) {
+    // Order A / S1 (review M-1): a research deletion that failed after the run document was removed is RESUMED by runId.
+    if (collection === "runs" && (await getUnfinishedResearchDeletion(runId))) {
+      const resumed = await deleteResearchRun({ runId, actorUid: auth.uid, reason: "admin_delete" });
+      if (resumed.status !== "deleted") {
+        return NextResponse.json({ ok: false, error: "deletion_incomplete", message: "The research was not fully deleted. Nothing is reported as deleted; retry the deletion.", runId }, { status: 500 });
+      }
+      return NextResponse.json({ ok: true, deleted: runId, resumed: true });
+    }
     return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
   }
   const prev = snap.data() as Record<string, unknown>;
-  const question = auditQuestionFromDoc(collection, prev);
+  // Research deletion integrity (review m-1): the deletion evidence row for a research run carries no research text. It
+  // is written already redacted, so a duplicate request racing a completed deletion cannot leave the question behind.
+  const question = collection === "runs" ? REDACTED_ADMIN_AUDIT_QUESTION : auditQuestionFromDoc(collection, prev);
 
   await writeAuditEvent({
     action: "admin_deleted",
@@ -253,7 +287,19 @@ export async function DELETE(
     runOwnerEmail: typeof prev.userEmail === "string" ? prev.userEmail : "",
     question,
     prevStatus: typeof prev.governanceStatus === "string" ? prev.governanceStatus : undefined,
+    ...(collection === "runs" ? { contentRedacted: true } : {}),
   });
+
+  // Order A / S1: research ("runs") is deleted by the durable workflow — the whole run subtree (incl. report-review
+  // snapshots, cycles and events, and export records) plus research text copied into audit/projection records — and is
+  // reported as deleted ONLY after verification. An incomplete deletion is a 500 and can be retried safely.
+  if (collection === "runs") {
+    const result = await deleteResearchRun({ runId, actorUid: auth.uid, reason: "admin_delete" });
+    if (result.status !== "deleted") {
+      return NextResponse.json({ ok: false, error: "deletion_incomplete", message: "The research was not fully deleted. Nothing is reported as deleted; retry the deletion.", runId }, { status: 500 });
+    }
+    return NextResponse.json({ ok: true, deleted: runId });
+  }
 
   await ref.delete();
 

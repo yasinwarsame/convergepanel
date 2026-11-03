@@ -94,7 +94,7 @@ function docRef(path: string): any {
 function collRef(path: string): any {
   const filters: Array<{ f: string; v: unknown }> = [];
   const q: any = {
-    doc: (id: string) => docRef(`${path}/${id}`),
+    doc: (id?: string) => docRef(`${path}/${id ?? `auto-${++autoId}`}`),
     add: async (fields: Record<string, unknown>) => {
       const ref = docRef(`${path}/auto-${++autoId}`);
       await ref.set(fields);
@@ -118,7 +118,7 @@ function collRef(path: string): any {
 async function runTransaction<T>(fn: (txn: unknown) => Promise<T>): Promise<T> {
   for (let attempt = 0; attempt < 5; attempt++) {
     const reads = new Map<string, number>();
-    const writes: Array<{ path: string; fields: Record<string, unknown>; merge: boolean }> = [];
+    const writes: Array<{ path: string; fields: Record<string, unknown>; merge: boolean; create?: boolean }> = [];
     const txn = {
       get: async (ref: { __path: string }) => {
         reads.set(ref.__path, store.get(ref.__path)?.version ?? 0);
@@ -126,6 +126,11 @@ async function runTransaction<T>(fn: (txn: unknown) => Promise<T>): Promise<T> {
       },
       set: (ref: { __path: string }, fields: Record<string, unknown>, opts?: { merge?: boolean }) => {
         writes.push({ path: ref.__path, fields, merge: opts?.merge === true });
+      },
+      // Research deletion integrity (2026-11-03): the review route now creates the audit row and the governance event in
+      // a guarded transaction. `create` fails ALREADY_EXISTS at commit if the document exists, as in Firestore.
+      create: (ref: { __path: string }, fields: Record<string, unknown>) => {
+        writes.push({ path: ref.__path, fields, merge: false, create: true });
       },
     };
     const result = await fn(txn);
@@ -145,6 +150,7 @@ async function runTransaction<T>(fn: (txn: unknown) => Promise<T>): Promise<T> {
     if (failCommitWritingPath && writes.some((w) => w.path === failCommitWritingPath)) {
       throw new Error("DEADLINE_EXCEEDED: commit failed");
     }
+    if (writes.some((w) => w.create && store.has(w.path))) throw new Error("ALREADY_EXISTS");
     for (const w of writes) applyWrite(w.path, w.fields, w.merge);
     return result;
   }

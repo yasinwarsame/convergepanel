@@ -12,6 +12,9 @@ import { Timestamp } from "firebase-admin/firestore";
 
 type StoredDoc = Record<string, unknown>;
 const stores: Record<string, Map<string, StoredDoc>> = {
+  // Research deletion integrity (2026-11-03): the deletion tombstone collection, read inside every review/assignment
+  // transaction. Empty unless a test seeds it, as in Firestore.
+  runDeletionJobs: new Map(),
   workspaces: new Map(),
   workspaceMemberships: new Map(),
   runs: new Map(),
@@ -411,5 +414,25 @@ describe("audit event (D5) — schema, nullability, Project snapshot, atomicity"
     expect(await call({ assigneeUid: MEMBER })).toEqual({ status: "transaction_failed" });
     expect(stores.runs.get(RUN_ID)!.assigneeUid).toBeUndefined();
     expect(events()).toHaveLength(0);
+  });
+});
+
+
+describe("research deletion integrity (review M-1)", () => {
+  it("a run whose deletion has started (tombstone) is run_not_found and nothing is written; control: assigned without it", async () => {
+    fullTeam();
+    seedRun();
+    stores.runDeletionJobs.set(RUN_ID, asPersisted({ state: "in_progress" }));
+    const before = JSON.stringify(stores.runs.get(RUN_ID));
+    expect(await call()).toEqual(expect.objectContaining({ status: "run_not_found" }));
+    expect(JSON.stringify(stores.runs.get(RUN_ID))).toBe(before);
+    expect(stores.workspaceMembershipEvents?.size ?? 0).toBe(0);
+    stores.runDeletionJobs.delete(RUN_ID);
+    expect((await call()).status).toBe("assigned");
+  });
+  it("a run marked for deletion is run_not_found", async () => {
+    fullTeam();
+    seedRun({ deletion: { state: "pending" } });
+    expect(await call()).toEqual(expect.objectContaining({ status: "run_not_found" }));
   });
 });

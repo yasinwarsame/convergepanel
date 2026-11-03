@@ -27,7 +27,12 @@ const UNCHANGED: [string, string][] = [
   ["lib/adaptiveSchema/jsonExportSchema.ts", "e50f144b619e0c81faf78bbc61adc71ac27ab944795649cb9fdbc864bb6aeacb"],
   ["lib/pdf/renderAdaptiveResearchPdf.ts", "efc6da0857c4a3734cf0eb97f5387d1eadd6319330e4b61202d5c3ca46f266fd"],
   ["lib/docx/renderAdaptiveResearchDocx.ts", "80fb811d7df16b2c303f1583b748f68d98e0b283c300d128a9ffd87ce575fec1"],
-  ["lib/firestore/adaptiveExports.ts", "4385a42a3d447ccd846fa1b2e08a5816c8120e3be66e99e9191ab8a0d661bf1f"],
+  // OWNER EXACT-FILE EXCEPTION (2026-11-03, research deletion integrity). This file was byte-identical to 0249a4e5,
+  // sha256 4385a42a3d447ccd846fa1b2e08a5816c8120e3be66e99e9191ab8a0d661bf1f, git blob d081edb861da7b89c260a3847b54706c37db0235.
+  // The only change is the deletion barrier in its four writers; see
+  // docs/workspaces/research-deletion-integrity.md §4. It is re-pinned to the exact new content (git blob 2c75ea17).
+  // No other frozen file changes.
+  ["lib/firestore/adaptiveExports.ts", "8e3a4199885f339d308abeb9555858a92681b59ef2ce7ce8b400c0160325aecf"],
   ["lib/firestore/sanitizeForFirestore.ts", "323a430eab2314603ca4c878df5b29f1bc310f9f86c92dee96cb847bb17ba28a"],
   ["lib/adaptiveSchema/decisionReceiptBuilder.ts", "6a5f8c1e2830611dfa59b24152a3ddbf2da1b915a2c14c199c01753f0a3402d7"],
   ["lib/adaptiveSchema/decisionSupportAlignment.ts", "792f32ebd5fbe43881a34466e8dc8cae1c083caee6af19f712c70bbe43bd9462"],

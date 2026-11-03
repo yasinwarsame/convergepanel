@@ -22,6 +22,8 @@ type Data = Record<string, unknown>;
 type Stored = { data: Data; version: number };
 
 const MAX_ATTEMPTS = 5;
+/** Set while an `afterTxReads` hook body runs; see `runTransaction`. */
+const insideAfterTxReadsHook = new (require("async_hooks") as typeof import("async_hooks")).AsyncLocalStorage<true>();
 
 function isPlainObject(v: unknown): v is Data {
   return typeof v === "object" && v !== null && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype;
@@ -68,7 +70,7 @@ let autoId = 0;
 // ---------------------------------------------------------------------------------------------------------------------
 const DOC_ID = "__name__";
 type Source = { kind: "collection"; path: string } | { kind: "group"; id: string };
-type Where = { field: string; op: "==" | "in" | "<"; value: unknown };
+type Where = { field: string; op: "==" | "in" | "<" | "<=" | ">="; value: unknown };
 type Order = { field: string; dir: "asc" | "desc" };
 
 function nested(data: Data, path: string): unknown {
@@ -106,7 +108,7 @@ export class FakeQueryBase {
   protected next(p: Partial<{ wheres: Where[]; orders: Order[]; after: unknown[] | null; max: number }>): FakeQueryBase {
     return new FakeQueryBase(this.db, this.source, p.wheres ?? this.wheres, p.orders ?? this.orders, p.after !== undefined ? p.after : this.after, p.max ?? this.max);
   }
-  where(field: unknown, op: "==" | "in" | "<", value: unknown) {
+  where(field: unknown, op: "==" | "in" | "<" | "<=" | ">=", value: unknown) {
     return this.next({ wheres: [...this.wheres, { field: fieldName(field), op, value }] });
   }
   orderBy(field: unknown, dir: "asc" | "desc" = "asc") {
@@ -143,7 +145,9 @@ export class FakeQueryBase {
           const v = val(path, data, w.field);
           if (w.op === "==") return v === w.value || (isTimestampLike(v) && isTimestampLike(w.value) && cmpValue(v, w.value) === 0);
           if (w.op === "in") return Array.isArray(w.value) && w.value.includes(v);
-          return v !== undefined && cmpValue(v, w.value) < 0 && typeof v === typeof w.value;
+          if (v === undefined || typeof v !== typeof w.value) return false;
+          const c = cmpValue(v, w.value);
+          return w.op === "<" ? c < 0 : w.op === "<=" ? c <= 0 : c >= 0;
         })
       );
     // Firestore only returns documents that HAVE every orderBy field.
@@ -186,6 +190,13 @@ export class FakeDocRef {
     const parts = this.path.split("/");
     return new FakeCollectionRef(this.db, parts.slice(0, -1).join("/"));
   }
+  /** Subcollections that contain at least one document at any depth (as Firestore's listCollections reports them). */
+  async listCollections() {
+    const prefix = `${this.path}/`;
+    const names = new Set<string>();
+    for (const p of this.db.docs.keys()) if (p.startsWith(prefix)) names.add(p.slice(prefix.length).split("/")[0]);
+    return Array.from(names).sort().map((n) => new FakeCollectionRef(this.db, `${this.path}/${n}`));
+  }
   async get() {
     return this.db.snapshot(this.path);
   }
@@ -213,6 +224,21 @@ export class FakeCollectionRef extends FakeQueryBase {
   doc(id?: string) {
     return new FakeDocRef(this.db, `${this.path}/${id ?? `auto${++autoId}`}`);
   }
+  async add(data: Data) {
+    const ref = this.doc();
+    await ref.create(data);
+    return ref;
+  }
+  /** Every document id under this collection, INCLUDING "missing" ancestors that only have subcollections (Firestore semantics). */
+  async listDocuments() {
+    const prefix = `${this.path}/`;
+    const ids = new Set<string>();
+    for (const p of this.db.docs.keys()) if (p.startsWith(prefix)) ids.add(p.slice(prefix.length).split("/")[0]);
+    return Array.from(ids).sort().map((id) => new FakeDocRef(this.db, `${this.path}/${id}`));
+  }
+  get id() {
+    return this.path.split("/").pop()!;
+  }
   /** The document this collection belongs to (null for a root collection). */
   get parent(): FakeDocRef | null {
     const parts = this.path.split("/");
@@ -226,10 +252,19 @@ export class FakeTransaction {
   reads = new Map<string, number>(); // path -> version read (-1 = missing)
   writes: Write[] = [];
   constructor(private db: FakeTransactionalFirestore) {}
-  async get(ref: FakeDocRef) {
+  async get(ref: FakeDocRef): Promise<ReturnType<FakeTransactionalFirestore["snapshot"]>>;
+  async get(ref: FakeQueryBase): Promise<Awaited<ReturnType<FakeQueryBase["get"]>>>;
+  async get(ref: FakeDocRef | FakeQueryBase): Promise<unknown> {
     if (this.writes.length > 0) throw new FirestoreError("INVALID_ARGUMENT", "Firestore transactions require all reads to be executed before all writes.");
+    if (ref instanceof FakeQueryBase) {
+      // A query read in a transaction: every returned document joins the read set (phantoms are not tracked).
+      const snap = await ref.get();
+      for (const d of snap.docs) this.reads.set(d.ref.path, this.db.docs.get(d.ref.path)?.version ?? -1);
+      return snap;
+    }
     const s = this.db.docs.get(ref.path);
     this.reads.set(ref.path, s ? s.version : -1);
+    this.db.txReadLog.push(ref.path);
     return this.db.snapshot(ref.path);
   }
   set(ref: FakeDocRef, data: Data, opts?: { merge?: boolean }) {
@@ -254,7 +289,7 @@ export class FakeTransactionalFirestore {
   docs = new Map<string, Stored>();
   private clock = 0;
   stats = { commits: 0, retries: 0, aborted: 0 };
-  hooks: { afterTxReads?: (attempt: number) => Promise<void> | void; failCommit?: (attempt: number) => void } = {};
+  hooks: { afterTxReads?: (attempt: number) => Promise<void> | void; failCommit?: (attempt: number) => void; failWrite?: (w: { kind: string; path: string }) => void } = {};
 
   collection(name: string) {
     return new FakeCollectionRef(this, name);
@@ -288,10 +323,19 @@ export class FakeTransactionalFirestore {
     };
   }
   /** Applies a batch atomically: validates every write first, then applies all. */
-  applyWrites(writes: Write[]) {
+  /**
+   * Every write that was APPLIED (committed), in order: its kind, path, data, and whether it came from a transaction
+   * commit (`via: "tx"`) or a direct document call (`via: "direct"`). Lets specs assert the exact write shape a
+   * production writer issues, the way method spies did, against a store that models transactions.
+   */
+  /** Every document path read inside a transaction, in order (lets a spec assert which documents a transaction read). */
+  txReadLog: string[] = [];
+  writeLog: { kind: Write["kind"]; path: string; data: Data; via: "tx" | "direct" }[] = [];
+  applyWrites(writes: Write[], via: "tx" | "direct" = "direct") {
     const staged = new Map<string, Stored | undefined>();
     const current = (p: string) => (staged.has(p) ? staged.get(p) : this.docs.get(p));
     for (const w of writes) {
+      this.hooks.failWrite?.({ kind: w.kind, path: w.path }); // partial-storage-failure injection (S1 deletion tests)
       const cur = current(w.path);
       if (w.kind === "create" && cur) throw new FirestoreError("ALREADY_EXISTS", w.path);
       if (w.kind === "update" && !cur) throw new FirestoreError("NOT_FOUND", w.path);
@@ -309,12 +353,21 @@ export class FakeTransactionalFirestore {
       if (s === undefined) this.docs.delete(p);
       else this.docs.set(p, { data: s.data, version: ++this.clock });
     }
+    for (const w of writes) this.writeLog.push({ kind: w.kind, path: w.path, data: clone(w.data), via });
   }
   async runTransaction<T>(fn: (tx: FakeTransaction) => Promise<T>): Promise<T> {
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       const tx = new FakeTransaction(this);
       const result = await fn(tx);
-      await this.hooks.afterTxReads?.(attempt);
+      // The hook stands for OTHER writers acting between this transaction's reads and its commit. Writes the hook makes
+      // are those other writers' own operations. When they run transactions of their own (for example, every
+      // deletion-barrier-guarded writer), they are not intercepted again, which would make the hook re-enter itself
+      // without bound. The guard is scoped to the hook's own async context (AsyncLocalStorage): a transaction running
+      // concurrently from elsewhere is still intercepted.
+      if (this.hooks.afterTxReads && !insideAfterTxReadsHook.getStore()) {
+        const hook = this.hooks.afterTxReads;
+        await insideAfterTxReadsHook.run(true, () => hook(attempt));
+      }
       // A transaction that wrote nothing commits as-is (production: a read-only transaction has nothing to conflict on,
       // and its result reflects the state it read). Only attempts with writes are validated and retried.
       const conflict = tx.writes.length > 0 && Array.from(tx.reads.entries()).some(([p, v]) => (this.docs.get(p)?.version ?? -1) !== v);
@@ -323,7 +376,7 @@ export class FakeTransactionalFirestore {
         continue;
       }
       this.hooks.failCommit?.(attempt);
-      this.applyWrites(tx.writes);
+      this.applyWrites(tx.writes, "tx");
       this.stats.commits++;
       return result;
     }

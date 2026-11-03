@@ -46,10 +46,15 @@ export default function ReportReviewAuditEntry({ event }: { event: WorkspaceAudi
       details.push(<span key="p">Purpose: <span className="font-medium text-cp-muted">{reportReviewPurposeLabel(event.purpose)}</span></span>);
       break;
     case "workspace_report_review_resubmitted":
-      title = "Report resubmitted for approval";
+      title = event.closedReason === "content_changed" ? "Report resubmitted after its content changed" : event.closedReason === "content_unverifiable" ? "Report resubmitted (previous cycle could not be verified)" : "Report resubmitted for approval";
       body = (
         <>
-          <span className="font-medium text-cp-text">{question}</span>: review cycle {event.fromCycle} was archived and cycle {event.cycle} started.
+          <span className="font-medium text-cp-text">{question}</span>:{" "}
+          {event.closedReason === "content_changed"
+            ? `the research changed after review cycle ${event.fromCycle} was submitted, so that cycle was closed without a decision and cycle ${event.cycle} started.`
+            : event.closedReason === "content_unverifiable"
+              ? `review cycle ${event.fromCycle} could not be tied to verifiable content, so it was closed without a decision and cycle ${event.cycle} started.`
+              : `review cycle ${event.fromCycle} was archived and cycle ${event.cycle} started.`}
         </>
       );
       details.push(<span key="p">Purpose: <span className="font-medium text-cp-muted">{reportReviewPurposeLabel(event.purpose)}</span></span>);

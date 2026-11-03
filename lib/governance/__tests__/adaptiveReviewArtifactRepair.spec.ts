@@ -3,60 +3,29 @@
  * repairAdaptiveReviewArtifacts() tests.
  */
 
-const runDocs = new Map<string, Record<string, any>>();
-const historyDocs = new Map<string, Record<string, any>>();
-const auditDocs = new Map<string, Record<string, any>>();
-const firestoreUnavailableFlag = { value: false };
-
-function alreadyExistsError() {
-  const err: any = new Error("6 ALREADY_EXISTS");
-  err.code = 6;
-  return err;
-}
-
-const mockAdminDb: any = {
-  collection: (name: string) => ({
-    doc: (id: string) => ({
-      get: jest.fn().mockImplementation(async () => {
-        if (name === "runs") return { exists: runDocs.has(id), data: () => runDocs.get(id) };
-        throw new Error("unexpected get");
-      }),
-      collection: (subName: string) => ({
-        doc: (docId: string) => ({
-          create: jest.fn().mockImplementation(async (value: Record<string, unknown>) => {
-            const store = subName === "humanReviewHistory" ? historyDocs : auditDocs;
-            const key = `${id}/${subName}/${docId}`;
-            if (store.has(key)) throw alreadyExistsError();
-            store.set(key, value);
-          }),
-        }),
-      }),
-      create: jest.fn(),
-    }),
-  }),
-};
-
-// admin_audit_logs writes go through `.collection("admin_audit_logs").doc(id).create()`
-// directly (top-level), not a subcollection of runs — patch that path distinctly.
-const originalCollectionFn = mockAdminDb.collection;
-mockAdminDb.collection = (name: string) => {
-  if (name === "admin_audit_logs") {
-    return {
-      doc: (docId: string) => ({
-        create: jest.fn().mockImplementation(async (value: Record<string, unknown>) => {
-          const key = `admin_audit_logs/${docId}`;
-          if (auditDocs.has(key)) throw alreadyExistsError();
-          auditDocs.set(key, value);
-        }),
-      }),
-    };
+// Research deletion integrity (2026-11-03): the history writer now creates its entry in a transaction guarded by the
+// deletion barrier, so the hand-written create() stubs are replaced by the shared transactional fake. The three stores
+// keep their original keys as views over it (helpers/fakeStoreViews.ts).
+import { FakeTransactionalFirestore } from "@/lib/workspaces/__tests__/helpers/fakeTransactionalFirestore";
+import { runDocView, runSubView, storeView } from "@/lib/workspaces/__tests__/helpers/fakeStoreViews";
+const db = new FakeTransactionalFirestore();
+const runDocs = runDocView(db);
+const historyDocs = runSubView(db, { include: ["humanReviewHistory"] });
+// The old stub put admin_audit_logs rows AND every other run subcollection into this one store.
+const auditDocs = storeView(
+  db,
+  (k) => (k.startsWith("admin_audit_logs/") ? k : `runs/${k}`),
+  (p) => {
+    if (/^admin_audit_logs\/[^/]+$/.test(p)) return p;
+    const m = /^runs\/([^/]+)\/([^/]+)\/([^/]+)$/.exec(p);
+    return m && m[2] !== "humanReviewHistory" ? p.slice("runs/".length) : null;
   }
-  return originalCollectionFn(name);
-};
+);
+const firestoreUnavailableFlag = { value: false };
 
 jest.mock("@/lib/firebase/admin", () => ({
   get adminDb() {
-    return firestoreUnavailableFlag.value ? null : mockAdminDb;
+    return firestoreUnavailableFlag.value ? null : db;
   },
 }));
 

@@ -52,6 +52,7 @@ import "server-only";
 import { randomUUID } from "crypto";
 import { Timestamp } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase/admin";
+import { assertResearchWritable } from "@/lib/firestore/researchDeletionBarrier";
 import { logger } from "@/lib/logger";
 import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS } from "@/lib/env";
 import { resolveTeamWorkspaceTargetAdmission } from "@/lib/workspaces/teamWorkspaceTargetAdmission";
@@ -219,8 +220,9 @@ export async function saveTeamClaimVerification(args: {
   /**
    * Phase 11A.3 — server-derived from `resolveClaimVerificationOrigin()`
    * BEFORE this function is ever called (the resolver performs its own
-   * Firestore read and must not run inside this transaction). `undefined`
-   * for an ordinary Team verification — never set by this function on its
+   * Firestore read and must not run inside this transaction). `null`
+   * for an ordinary Team verification (the deletion-barrier check below relies on
+   * `!== null`) — never set by this function on its
    * own, never accepted as a pass-through of caller-supplied request data.
    */
   originSnapshot: TeamOriginSnapshot;
@@ -282,6 +284,10 @@ export async function saveTeamClaimVerification(args: {
           return { kind: "project_archived" };
         }
       }
+
+      // Research deletion integrity: an origin-linked artifact copies the source run's evidence sources, so it is created
+      // only while that run is writable (checked in this transaction). A refusal fails the transaction: nothing commits.
+      if (args.originSnapshot !== null) await assertResearchWritable(tx, adminDb!, args.originSnapshot.origin.runId);
 
       // Phase 11A.3 — `origin` (when the caller supplied one, already
       // resolved before this transaction opened) is spread in explicitly,

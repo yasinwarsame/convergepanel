@@ -25,6 +25,8 @@ export function reportReviewAssignmentContext(runData: Record<string, unknown>):
   // behaviour is exactly as before B2, whatever the run carries. Callers have already verified the run's Workspace.
   if (!isReportReviewEnabledForWorkspace(runData.workspaceId)) return { kind: "not_report_review" };
   if (runData.reportReview === undefined || runData.reportReview === null) return { kind: "not_report_review" };
+  // S1: a report-review run being deleted accepts no assignment change (fails closed like an unreadable record).
+  if (runData.deletion !== undefined && runData.deletion !== null) return { kind: "malformed" };
   // A run carrying BOTH records violates the B1 invariant: fail closed, as the decision path and the queue do.
   if (runData.governanceRecord !== undefined && runData.governanceRecord !== null) return { kind: "malformed" };
   const parsed = parseReportReviewRecord(runData.reportReview);

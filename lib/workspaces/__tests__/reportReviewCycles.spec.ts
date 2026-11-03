@@ -106,6 +106,8 @@ describe("first submission", () => {
       submittedByUserId: MEMBER,
       createdAt: "2026-11-02T11:00:00.000Z",
       updatedAt: "2026-11-02T11:00:00.000Z",
+      // Order A: the server-computed fingerprint of the content as read in the submission transaction.
+      contentFingerprint: { version: "rrc-v1", algorithm: "sha256", digest: expect.stringMatching(/^[0-9a-f]{64}$/), canonicalBytes: expect.any(Number) },
     });
     const events = db.paths(`runs/${RUN}/reportReviewEvents/`).map((p) => db.read(p));
     expect(events).toEqual([
@@ -246,6 +248,7 @@ describe("D-B6: resubmission is a new cycle; history is preserved and write-once
       assignment: prior.assignment,
       archivedAt: "2026-11-02T12:00:00.000Z",
       archivedByUserId: MEMBER,
+      closedReason: "decided",
     });
     expect((db.read(`runs/${RUN}/reportReviewCycles/1`)!.record as ReportReviewRecordV1).humanReview.status).toBe(status);
 

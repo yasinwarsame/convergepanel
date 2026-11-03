@@ -45,6 +45,7 @@
 import "server-only";
 import { Timestamp } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase/admin";
+import { isResearchDeletedInTx } from "@/lib/firestore/researchDeletionBarrier";
 import { logger } from "@/lib/logger";
 import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS } from "@/lib/env";
 import { resolveTeamWorkspaceTargetAdmission } from "./teamWorkspaceTargetAdmission";
@@ -226,7 +227,7 @@ export async function putWorkspaceReviewAssignment(args: {
 
       const runRef = adminDb!.collection("runs").doc(args.runId);
       const runSnap = await tx.get(runRef);
-      if (!runSnap.exists) return { ok: false, reason: "run_not_found" as const };
+      if (!runSnap.exists || (await isResearchDeletedInTx(tx, adminDb!, runRef.id, runSnap))) return { ok: false, reason: "run_not_found" as const }; // deletion barrier
       const runData = runSnap.data() as Record<string, unknown>;
       const target = resolveWorkspaceReviewTarget({
         requestedWorkspaceId: args.workspaceId,
@@ -409,7 +410,7 @@ export async function deleteWorkspaceReviewAssignment(args: { uid: string; works
 
       const runRef = adminDb!.collection("runs").doc(args.runId);
       const runSnap = await tx.get(runRef);
-      if (!runSnap.exists) return { ok: false, reason: "run_not_found" as const };
+      if (!runSnap.exists || (await isResearchDeletedInTx(tx, adminDb!, runRef.id, runSnap))) return { ok: false, reason: "run_not_found" as const }; // deletion barrier
       const runData = runSnap.data() as Record<string, unknown>;
       const target = resolveWorkspaceReviewTarget({
         requestedWorkspaceId: args.workspaceId,
@@ -533,7 +534,7 @@ export async function submitWorkspaceReviewDecision(args: {
 
       const runRef = adminDb!.collection("runs").doc(args.runId);
       const runSnap = await tx.get(runRef);
-      if (!runSnap.exists) return { ok: false, reason: "run_not_found" as const };
+      if (!runSnap.exists || (await isResearchDeletedInTx(tx, adminDb!, runRef.id, runSnap))) return { ok: false, reason: "run_not_found" as const }; // deletion barrier
       const runData = runSnap.data() as Record<string, unknown>;
       const target = resolveWorkspaceReviewTarget({
         requestedWorkspaceId: args.workspaceId,

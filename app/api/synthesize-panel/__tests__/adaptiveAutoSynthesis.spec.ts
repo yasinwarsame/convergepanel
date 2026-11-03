@@ -22,6 +22,7 @@
  * runs for real — this is exactly the condition being enforced, so it is
  * never mocked away.
  */
+import { installDeletionTombstoneCollection } from "@/lib/workspaces/__tests__/helpers/deletionTombstoneCollection";
 
 jest.mock("@/lib/env", () => ({
   OPENAI_API_KEY: "test-key",
@@ -54,6 +55,19 @@ const runsGetCallCounts = new Map<string, number>();
 // rides on an EXISTING write rather than a new one.
 const runUpdates: Array<{ id: string; fields: Record<string, unknown> }> = [];
 const mockAdminDb = {
+  // Research deletion integrity (2026-11-03, review round 2 M-2): the synthesis write is now a guarded transactional
+  // update. Buffered like a real transaction: the writes apply only when the callback completes.
+  runTransaction: async (fn: (tx: any) => Promise<unknown>) => {
+    const buffered: Array<() => Promise<unknown>> = [];
+    const result = await fn({
+      get: (ref: any) => ref.get(),
+      update: (ref: any, f: unknown) => void buffered.push(() => ref.update(f)),
+      set: (ref: any, f: unknown, o?: unknown) => void buffered.push(() => ref.set(f, o)),
+      create: (ref: any, f: unknown) => void buffered.push(() => (ref.create ? ref.create(f) : ref.set(f))),
+    });
+    for (const w of buffered) await w();
+    return result;
+  },
   collection: (name: string) => ({
     doc: (id: string) => ({
       get: jest.fn().mockImplementation(async () => {
@@ -85,7 +99,8 @@ const mockAdminDb = {
 };
 jest.mock("@/lib/firebase/admin", () => ({
   adminDb: mockAdminDb,
-}));
+}));const deletionTombstones = installDeletionTombstoneCollection(mockAdminDb);
+
 
 const mockedEvaluateAndStoreGovernance = jest.fn().mockResolvedValue({ governanceStatus: "approved" });
 jest.mock("@/lib/governance/evaluateAndStore", () => ({
@@ -361,6 +376,20 @@ describe("POST /api/synthesize-panel — adaptive run rejection (Step 6 fix)", (
       expect(stored?.synthesizedStructuredReport).toBeDefined();
       expect(stored?.schemaVersion).toBe(1);
       expect(stored).toHaveProperty("synthesisConsensusSummary");
+    });
+
+    it("deletion barrier (review round 2, M-2): a synthesis that finishes after the run's deletion started writes nothing to the run", async () => {
+      const runId = "run-legacy-deleting";
+      persistLegacyRun(runId);
+      const before = JSON.stringify(runDocs.get(runId));
+      deletionTombstones.set(runId, { state: "in_progress" }); // the deletion starts while the synthesis model call runs
+      try {
+        await POST(buildSynthesizeRequest(runId, LEGACY_PROSE_TEXT));
+      } finally {
+        deletionTombstones.delete(runId);
+      }
+      expect(JSON.stringify(runDocs.get(runId))).toBe(before);
+      expect(runDocs.get(runId)?.synthesizedStructuredReport).toBeUndefined();
     });
   });
 

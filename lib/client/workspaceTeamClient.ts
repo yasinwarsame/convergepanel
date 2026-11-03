@@ -511,7 +511,7 @@ export type WorkspaceAuditEventItem =
 /** Order B, Stage B3 — Report Review audit rows: question snapshot (nullable, never invented), cycle, display names only. */
 export type WorkspaceAuditReportReviewEventItem =
   | { eventType: "workspace_report_review_submitted"; occurredAt: string; actor: { displayName: string }; research: { question: string | null }; cycle: number; purpose: string }
-  | { eventType: "workspace_report_review_resubmitted"; occurredAt: string; actor: { displayName: string }; research: { question: string | null }; cycle: number; fromCycle: number; purpose: string; clearedReviewer: { displayName: string } | null }
+  | { eventType: "workspace_report_review_resubmitted"; occurredAt: string; actor: { displayName: string }; research: { question: string | null }; cycle: number; fromCycle: number; purpose: string; clearedReviewer: { displayName: string } | null; closedReason: "decided" | "content_changed" | "content_unverifiable" }
   | { eventType: "workspace_report_review_reviewer_changed"; occurredAt: string; actor: { displayName: string }; research: { question: string | null }; cycle: number; change: "assigned" | "reassigned" | "removed" | "updated"; previousReviewer: { displayName: string } | null; reviewer: { displayName: string } | null }
   | { eventType: "workspace_report_review_decided"; occurredAt: string; actor: { displayName: string }; research: { question: string | null }; cycle: number; status: string; purpose: string };
 
@@ -539,7 +539,7 @@ function isValidReportReviewAuditEvent(v: Record<string, unknown>): boolean {
     case "workspace_report_review_submitted":
       return typeof v.purpose === "string";
     case "workspace_report_review_resubmitted":
-      return typeof v.purpose === "string" && typeof v.fromCycle === "number" && nameOrNull(v.clearedReviewer);
+      return typeof v.purpose === "string" && typeof v.fromCycle === "number" && nameOrNull(v.clearedReviewer) && (v.closedReason === "decided" || v.closedReason === "content_changed" || v.closedReason === "content_unverifiable");
     case "workspace_report_review_reviewer_changed":
       return (v.change === "assigned" || v.change === "reassigned" || v.change === "removed" || v.change === "updated") && nameOrNull(v.previousReviewer) && nameOrNull(v.reviewer);
     case "workspace_report_review_decided":

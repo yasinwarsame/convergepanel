@@ -13,6 +13,9 @@ import { Timestamp } from "firebase-admin/firestore";
 
 type StoredDoc = Record<string, unknown>;
 const stores: Record<string, Map<string, StoredDoc>> = {
+  // Research deletion integrity (2026-11-03): the deletion tombstone collection, read inside every review/assignment
+  // transaction. Empty unless a test seeds it, as in Firestore.
+  runDeletionJobs: new Map(),
   workspaces: new Map(),
   workspaceMemberships: new Map(),
   runs: new Map(),
@@ -69,6 +72,8 @@ function makeDocRef(collectionName: string, docId: string) {
   return {
     __collection: collectionName,
     __id: docId,
+    // A real DocumentReference exposes its `id`. The deletion barrier (review M-1) identifies the run by it.
+    id: docId,
     collection: (subCollectionName: string) => ({
       doc: (subDocId?: string) => {
         if (subCollectionName === "humanReviewAssignment") {
@@ -728,5 +733,17 @@ describe("Workspace-canary target admission (Phase 10B.3.2B.1)", () => {
     teamWorkspacesCanaryWorkspaceIds = WS_ID;
     const result = await call({ uid: CREATOR_UID, workspaceId: OTHER_WS_ID });
     expect(result).toEqual({ ok: false, reason: "team_workspaces_disabled" });
+  });
+});
+
+
+describe("research deletion integrity (review M-1)", () => {
+  it("a run whose deletion has started (tombstone) is run_not_found and unchanged; control: resubmits without it", async () => {
+    stores.runDeletionJobs.set(RUN_ID, asPersisted({ state: "in_progress" }));
+    const before = JSON.stringify(stores.runs.get(RUN_ID));
+    expect(await call()).toEqual(expect.objectContaining({ ok: false, reason: "run_not_found" }));
+    expect(JSON.stringify(stores.runs.get(RUN_ID))).toBe(before);
+    stores.runDeletionJobs.delete(RUN_ID);
+    expect((await call()).ok).toBe(true);
   });
 });

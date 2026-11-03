@@ -17,6 +17,7 @@ import { requireSystemAdminAccess } from "@/lib/firebase/auth-helpers";
 import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
 import { Timestamp } from "firebase-admin/firestore";
+import { deleteResearchRun, listUnfinishedResearchDeletions } from "@/lib/firestore/researchDeletion";
 
 // Ensure Node.js runtime (Firebase Admin requires Node.js, not Edge)
 export const runtime = "nodejs";
@@ -45,6 +46,14 @@ interface PurgeRunsResponse {
   sampleIds: string[];
   collectionsTouched: string[];
   capped?: boolean; // true if hit maxToDelete limit
+  /** Order A / S1: runs whose durable deletion did not complete (counted in errorsCount, never in deletedCount). */
+  incompleteRunIds?: string[];
+  /** Not started within the time budget; purge again to continue (counted in errorsCount). */
+  notStartedRunIds?: string[];
+  notStartedCount?: number;
+  /** Earlier unfinished deletions resumed after this purge's own runs (reported separately, never in deletedCount). */
+  resumedDeletedCount?: number;
+  resumedIncompleteRunIds?: string[];
 }
 
 /**
@@ -147,6 +156,46 @@ function getStatusFilter(status: "any" | "success" | "failed"): string | null {
 }
 
 /**
+ * Durable per-run deletion with bounded concurrency (10 at a time). Order A / S1 review fixes:
+ *   - the runs matched by THIS purge's filters are processed first and are the only ones counted in deletedCount;
+ *   - then, within the remaining budget, unfinished earlier deletions are resumed and reported SEPARATELY
+ *     (resumedDeletedCount / resumedIncompleteRunIds) — never mixed into this purge's counts;
+ *   - a time budget stops STARTING new deletions well before the function limit; matched runs not started are reported
+ *     in `notStartedRunIds` (counted in errorsCount; purge again to continue) — never silently skipped, never "deleted".
+ */
+const PURGE_TIME_BUDGET_MS = 240_000;
+async function deleteRunsDurably(
+  refs: FirebaseFirestore.DocumentReference[],
+  actorUid: string,
+  startedAt = Date.now()
+): Promise<{ deletedCount: number; errorsCount: number; incompleteRunIds: string[]; notStartedRunIds: string[]; resumedDeletedCount: number; resumedIncompleteRunIds: string[] }> {
+  const overBudget = () => Date.now() - startedAt > PURGE_TIME_BUDGET_MS;
+  async function process(ids: string[]) {
+    const deleted: string[] = [];
+    const incomplete: string[] = [];
+    let i = 0;
+    for (; i < ids.length; i += 10) {
+      if (overBudget()) break;
+      const results = await Promise.all(ids.slice(i, i + 10).map((runId) => deleteResearchRun({ runId, actorUid, reason: "admin_purge" })));
+      for (const r of results) (r.status === "deleted" ? deleted : incomplete).push(r.runId);
+    }
+    return { deleted, incomplete, notStarted: ids.slice(i) };
+  }
+  const matched = await process(refs.map((r) => r.id));
+  const matchedIds = new Set(refs.map((r) => r.id));
+  const resumable = overBudget() ? [] : (await listUnfinishedResearchDeletions()).filter((id) => !matchedIds.has(id));
+  const resumed = await process(resumable);
+  return {
+    deletedCount: matched.deleted.length,
+    errorsCount: matched.incomplete.length + matched.notStarted.length,
+    incompleteRunIds: matched.incomplete,
+    notStartedRunIds: matched.notStarted,
+    resumedDeletedCount: resumed.deleted.length,
+    resumedIncompleteRunIds: [...resumed.incomplete, ...resumed.notStarted],
+  };
+}
+
+/**
  * Delete documents in batches
  */
 async function deleteDocuments(
@@ -184,6 +233,9 @@ async function deleteDocuments(
 
   return { deletedCount, errorsCount };
 }
+
+// Order A / S1 review m-1: durable deletion is slower than a batch delete; allow the full function duration.
+export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   try {
@@ -306,8 +358,12 @@ export async function POST(req: NextRequest) {
 
     const matchedCount = allDocRefs.length;
 
-    // Delete documents (or simulate if dry run)
-    const { deletedCount, errorsCount } = await deleteDocuments(allDocRefs, dryRun);
+    // Delete (or simulate). Order A / S1: each run goes through the durable research-deletion workflow (whole subtree +
+    // redaction of research text copied elsewhere, verified); a run whose deletion is incomplete is counted as an error,
+    // never as deleted, and can be retried safely by purging again.
+    const { deletedCount, errorsCount, incompleteRunIds, notStartedRunIds, resumedDeletedCount, resumedIncompleteRunIds } = dryRun
+      ? { ...(await deleteDocuments(allDocRefs, true)), incompleteRunIds: [] as string[], notStartedRunIds: [] as string[], resumedDeletedCount: 0, resumedIncompleteRunIds: [] as string[] }
+      : await deleteRunsDurably(allDocRefs, auth.uid);
 
     logger.info("[admin/purge-runs] Purge completed", {
       dryRun,
@@ -327,6 +383,9 @@ export async function POST(req: NextRequest) {
       deletedCount,
       errorsCount,
       sampleIds,
+      ...(incompleteRunIds.length > 0 ? { incompleteRunIds: incompleteRunIds.slice(0, 50) } : {}),
+      ...(notStartedRunIds.length > 0 ? { notStartedRunIds: notStartedRunIds.slice(0, 50), notStartedCount: notStartedRunIds.length } : {}),
+      ...(resumedDeletedCount > 0 || resumedIncompleteRunIds.length > 0 ? { resumedDeletedCount, resumedIncompleteRunIds: resumedIncompleteRunIds.slice(0, 50) } : {}),
       collectionsTouched: ["runs"],
       ...(capped && { capped: true }),
     };

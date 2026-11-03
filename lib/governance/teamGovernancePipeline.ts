@@ -5,6 +5,7 @@
 import "server-only";
 
 import { adminDb } from "@/lib/firebase/admin";
+import { guardedResearchSetMerge, runResearchWrite } from "@/lib/firestore/researchDeletionBarrier";
 import { Timestamp, type DocumentData } from "firebase-admin/firestore";
 import type { UserProfile } from "@/lib/types";
 import type { ConsensusSummary } from "@/lib/verification/consensusScoring";
@@ -96,10 +97,8 @@ export async function applyTeamGovernancePipeline(input: {
   const teamRunId = `${teamId}-${input.uid}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
   try {
-    await adminDb
-      .collection("teamRuns")
-      .doc(teamRunId)
-      .set({
+    const teamRunRef = adminDb.collection("teamRuns").doc(teamRunId);
+    const teamRunDoc = {
         id: teamRunId,
         teamId,
         userId: input.uid,
@@ -114,7 +113,11 @@ export async function applyTeamGovernancePipeline(input: {
         timestamp: Timestamp.now(),
         runId: input.runId ?? null,
         verificationId: input.verificationId ?? null,
-      });
+      };
+    // Deletion barrier: a projection of a research run (it copies the question and claims) is written only while that
+    // run is writable. Verification-only projections (no runId) are unchanged.
+    if (input.runId) await runResearchWrite(adminDb, input.runId, (tx) => void tx.set(teamRunRef, teamRunDoc));
+    else await teamRunRef.set(teamRunDoc);
   } catch (e) {
     console.error("[teamGovernancePipeline] teamRuns write failed", e);
     return {
@@ -135,7 +138,7 @@ export async function applyTeamGovernancePipeline(input: {
 
   if (input.runId) {
     try {
-      await adminDb.collection("runs").doc(input.runId).set({ teamGovernance: snapshot }, { merge: true });
+      await guardedResearchSetMerge(adminDb, input.runId, adminDb.collection("runs").doc(input.runId), { teamGovernance: snapshot }); // deletion barrier
     } catch (e) {
       console.error("[teamGovernancePipeline] runs teamGovernance merge failed", e);
     }

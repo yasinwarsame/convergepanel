@@ -58,6 +58,7 @@ import { OPENAI_API_KEY, ANTHROPIC_API_KEY } from "@/lib/env";
 import { StructuredSynthesisSchema, StructuredSynthesis } from "@/lib/synthesis/structuredSchema";
 import { buildSynthesisInput } from "@/lib/synthesis/buildSynthesisInput";
 import { adminDb } from "@/lib/firebase/admin";
+import { guardedResearchUpdate } from "@/lib/firestore/researchDeletionBarrier";
 import { Timestamp } from "firebase-admin/firestore";
 import { generateRequestId, getRequestId } from "@/lib/utils/requestId";
 import { createErrorResponse, ERROR_CODES } from "@/lib/api/errorResponse";
@@ -2078,7 +2079,9 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
       try {
         const totalElapsed = Date.now() - timing.requestStart;
         
-        await adminDb.collection("runs").doc(runId).update({
+        // Research deletion integrity (review round 2, M-2): the synthesis (written after the model call) lands only on a run
+        // whose deletion has not started. A refusal is handled like any other failed store below.
+        await guardedResearchUpdate(adminDb, runId, adminDb.collection("runs").doc(runId), {
           synthesizedStructuredReport: enrichedSynthesis,
           schemaVersion: 1,
           synthesizedAt: Timestamp.now(),

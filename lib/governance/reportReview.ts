@@ -13,6 +13,7 @@
 
 import { Timestamp } from "firebase-admin/firestore";
 import { SCHEMA_ANSWER_SHAPE, isPersistedLegacyAdaptiveSchemaId } from "@/lib/adaptiveSchema/persistedOutput";
+import { isReportReviewContentFingerprint, type ReportReviewContentFingerprint } from "./reportReviewContent";
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Fixed copy and limits
@@ -72,6 +73,13 @@ export interface ReportReviewRecordV1 {
   submittedByUserId: string;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Order A (reviewed-content integrity): the server-computed fingerprint of the exact content this cycle was submitted
+   * with (lib/governance/reportReviewContent.ts, rrc-v1). Written once with the cycle and never replaced; a decision is
+   * refused when the run's current content no longer matches it. Optional only for records written before Order A
+   * (none exist in Production: report review has never been enabled); a decision on such a record fails closed.
+   */
+  contentFingerprint?: ReportReviewContentFingerprint;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -213,6 +221,7 @@ export function parseReportReviewRecord(raw: unknown): ReportReviewParse {
   if (decided && (typeof hr.reviewerId !== "string" || hr.reviewerId.length === 0 || !isIso(hr.reviewedAt))) return { ok: false, reason: "malformed" };
   if (hr.comment !== undefined && typeof hr.comment !== "string") return { ok: false, reason: "malformed" };
   if (hr.conditions !== undefined && !(Array.isArray(hr.conditions) && hr.conditions.every((c) => typeof c === "string"))) return { ok: false, reason: "malformed" };
+  if (r.contentFingerprint !== undefined && !isReportReviewContentFingerprint(r.contentFingerprint)) return { ok: false, reason: "malformed" };
 
   // Rebuilt from validated fields only: unknown keys are never carried into responses or archives.
   const humanReview: ReportReviewHumanReview = { status: hr.status as ReportReviewStatus };
@@ -240,6 +249,7 @@ export function parseReportReviewRecord(raw: unknown): ReportReviewParse {
       submittedByUserId: r.submittedByUserId as string,
       createdAt: r.createdAt as string,
       updatedAt: r.updatedAt as string,
+      ...(r.contentFingerprint !== undefined ? { contentFingerprint: { ...(r.contentFingerprint as ReportReviewContentFingerprint) } } : {}),
     },
   };
 }
@@ -252,7 +262,7 @@ export function isReportReviewDecided(record: ReportReviewRecordV1): boolean {
 // Builders
 // ---------------------------------------------------------------------------------------------------------------------
 
-export function buildReportReviewRecord(args: { cycle: number; scope: ReportReviewScope; purpose: ReportReviewPurpose; actorUid: string; now: string }): ReportReviewRecordV1 {
+export function buildReportReviewRecord(args: { cycle: number; scope: ReportReviewScope; purpose: ReportReviewPurpose; actorUid: string; now: string; contentFingerprint: ReportReviewContentFingerprint }): ReportReviewRecordV1 {
   return {
     version: 1,
     kind: "report_review",
@@ -264,6 +274,7 @@ export function buildReportReviewRecord(args: { cycle: number; scope: ReportRevi
     submittedByUserId: args.actorUid,
     createdAt: args.now,
     updatedAt: args.now,
+    contentFingerprint: { ...args.contentFingerprint },
   };
 }
 
@@ -276,10 +287,16 @@ export interface ReportReviewCycleArchiveV1 {
   assignment: Record<string, unknown> | null;
   archivedAt: string;
   archivedByUserId: string;
+  /**
+   * Order A: why the cycle closed. "decided" — a reviewer recorded a decision on exactly the fingerprinted content;
+   * "content_changed" — the research changed while the cycle was open, so it was superseded UNDECIDED (its record keeps
+   * the original fingerprint; nothing about the new content is attributed to it). Absent on archives written before Order A.
+   */
+  closedReason?: "decided" | "content_changed" | "content_unverifiable";
 }
 
-export function buildReportReviewCycleArchive(args: { runId: string; record: ReportReviewRecordV1; assignment: Record<string, unknown> | null; actorUid: string; now: string }): ReportReviewCycleArchiveV1 {
-  return { version: 1, runId: args.runId, cycle: args.record.cycle, record: args.record, assignment: args.assignment, archivedAt: args.now, archivedByUserId: args.actorUid };
+export function buildReportReviewCycleArchive(args: { runId: string; record: ReportReviewRecordV1; assignment: Record<string, unknown> | null; actorUid: string; now: string; closedReason: "decided" | "content_changed" | "content_unverifiable" }): ReportReviewCycleArchiveV1 {
+  return { version: 1, runId: args.runId, cycle: args.record.cycle, record: args.record, assignment: args.assignment, archivedAt: args.now, archivedByUserId: args.actorUid, closedReason: args.closedReason };
 }
 
 export type ReportReviewEventType = "report_review_submitted" | "report_review_resubmitted";

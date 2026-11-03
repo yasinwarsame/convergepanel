@@ -9,6 +9,8 @@ import { adminDb } from "@/lib/firebase/admin";
 import { sanitizeForFirestore } from "@/lib/firestore/sanitizeForFirestore";
 import { loadGovernancePolicy } from "@/lib/governance/governancePolicyStore";
 import { writeAuditEvent } from "@/lib/governance/auditLog";
+import { writeGuardedGovernanceAuditRow } from "@/lib/governance/governanceAuditRow";
+import { runResearchWrite } from "@/lib/firestore/researchDeletionBarrier";
 import { evaluateGovernance } from "./evaluateGovernance";
 import type { GovernanceInput, GovernancePolicy } from "./evaluateGovernance";
 
@@ -70,24 +72,12 @@ export async function evaluateAndStoreGovernance(params: {
     );
     const result = evaluateGovernance(params.input, policy);
 
-    await adminDb
-      .collection(params.collection)
-      .doc(params.runId)
-      .set(
-        sanitizeForFirestore({
+    const statusDoc = sanitizeForFirestore({
           governanceStatus: result.status,
           governanceReasons: result.reasons,
           governanceMeta: result.meta,
-        }) as DocumentData,
-        { merge: true }
-      );
-
-    await adminDb
-      .collection(params.collection)
-      .doc(params.runId)
-      .collection("governanceEvents")
-      .add(
-        sanitizeForFirestore({
+        }) as DocumentData;
+    const eventDoc = sanitizeForFirestore({
           action: "evaluated",
           byUid: "system",
           byEmail: "system",
@@ -100,14 +90,8 @@ export async function evaluateAndStoreGovernance(params: {
           // keeps the score semantics that governed THIS evaluation.
           scoreFamily: result.meta.scoreFamily,
           scoreThresholdsInEffect: result.meta.scoreThresholdsInEffect,
-        }) as DocumentData
-      );
-
-    const parentSnap = await adminDb.collection(params.collection).doc(params.runId).get();
-    const parentData = (parentSnap.data() ?? {}) as Record<string, unknown>;
-    const runOwnerEmail = typeof parentData.userEmail === "string" ? parentData.userEmail : "";
-
-    await writeAuditEvent({
+        }) as DocumentData;
+    const auditEvent = (runOwnerEmail: string) => ({
       runId: params.runId,
       collection: params.collection,
       runType: params.input.runType === "verification" ? "claim" : "research",
@@ -124,6 +108,31 @@ export async function evaluateAndStoreGovernance(params: {
       question: (params.input.question || "").substring(0, 200),
       consensusScore: params.input.consensusScore,
     });
+
+    if (params.collection === "runs") {
+      // Research deletion integrity: for a research run, the status and the governance event are written in one
+      // transaction guarded by the deletion barrier. The audit row (which carries the question) is written in its own
+      // guarded transaction, best-effort exactly like writeAuditEvent. A deleted or deleting run gets none of them, even if
+      // this evaluation started before the deletion.
+      const db = adminDb;
+      const parentData = await runResearchWrite(db, params.runId, (tx, run) => {
+        tx.set(run.ref, statusDoc, { merge: true });
+        tx.create(run.ref.collection("governanceEvents").doc(), eventDoc);
+        return (run.data() ?? {}) as Record<string, unknown>;
+      });
+      const runOwnerEmail = typeof parentData.userEmail === "string" ? parentData.userEmail : "";
+      await writeGuardedGovernanceAuditRow(db, params.runId, auditEvent(runOwnerEmail));
+    } else {
+      await adminDb.collection(params.collection).doc(params.runId).set(statusDoc, { merge: true });
+
+      await adminDb.collection(params.collection).doc(params.runId).collection("governanceEvents").add(eventDoc);
+
+      const parentSnap = await adminDb.collection(params.collection).doc(params.runId).get();
+      const parentData = (parentSnap.data() ?? {}) as Record<string, unknown>;
+      const runOwnerEmail = typeof parentData.userEmail === "string" ? parentData.userEmail : "";
+
+      await writeAuditEvent(auditEvent(runOwnerEmail));
+    }
 
     console.log(
       `[governance] Evaluated run ${params.runId} → ${result.status} (${result.reasons.length} reasons, policy v${policy.policyVersion})`

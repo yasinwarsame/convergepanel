@@ -5,6 +5,7 @@
  * content into its audit event / response and previously had no Layer-A
  * gate for the `runs` collection case.
  */
+import { installDeletionTombstoneCollection } from "@/lib/workspaces/__tests__/helpers/deletionTombstoneCollection";
 
 const mockedResolveGovernanceRequestUser = jest.fn();
 jest.mock("@/lib/governance/authCheck", () => ({
@@ -21,9 +22,12 @@ jest.mock("@/lib/governance/auditLog", () => ({ writeAuditEvent: jest.fn().mockR
 jest.mock("@/lib/firestore/sanitizeForFirestore", () => ({ sanitizeForFirestore: (v: unknown) => v }));
 
 const runDocs = new Map<string, Record<string, unknown>>();
+/** Research deletion integrity (2026-11-03): research-run audit rows and events are now created in guarded transactions. */
+const createdDocs: Array<{ collection: string; data: unknown }> = [];
 const mockAdminDb: any = {
   collection: (name: string) => ({
     doc: (id: string) => ({
+      create: jest.fn().mockImplementation(async (data: unknown) => void createdDocs.push({ collection: name, data })),
       get: async () => {
         const data = runDocs.get(id);
         return { exists: !!data, data: () => data };
@@ -35,13 +39,27 @@ const mockAdminDb: any = {
         const existing = opts?.merge ? runDocs.get(id) || {} : {};
         runDocs.set(id, { ...existing, ...fields });
       }),
-      collection: () => ({ add: jest.fn().mockResolvedValue({ id: "event-id" }) }),
+      collection: (sub: string) => ({
+        add: jest.fn().mockResolvedValue({ id: "event-id" }),
+        doc: () => ({ create: async (data: unknown) => void createdDocs.push({ collection: `${name}/${id}/${sub}`, data }) }),
+      }),
     }),
   }),
-  runTransaction: async (fn: (txn: unknown) => Promise<unknown>) =>
-    fn({ get: (ref: any) => ref.get(), set: (ref: any, data: unknown, opts?: unknown) => ref.set(data, opts) }),
+  // Buffered: writes apply only when the callback completes, as a committed transaction would.
+  runTransaction: async (fn: (txn: unknown) => Promise<unknown>) => {
+    const buffered: Array<() => Promise<unknown>> = [];
+    const result = await fn({
+      get: (ref: any) => ref.get(),
+      set: (ref: any, data: unknown, opts?: unknown) => void buffered.push(() => ref.set(data, opts)),
+      create: (ref: any, data: unknown) => void buffered.push(() => ref.create(data)),
+    });
+    for (const w of buffered) await w();
+    return result;
+  },
 };
 jest.mock("@/lib/firebase/admin", () => ({ adminDb: mockAdminDb }));
+// Research deletion integrity (2026-11-03, review M-1): the deletion-tombstone collection every review transaction reads.
+installDeletionTombstoneCollection(mockAdminDb);
 
 const mockedGetWorkspace = jest.fn();
 jest.mock("@/lib/firestore/workspaces", () => ({ getWorkspace: (...args: any[]) => mockedGetWorkspace(...args) }));

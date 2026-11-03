@@ -56,6 +56,8 @@ let existingDocs: Record<string, { userId: string }> = {};
 /** Every write the handler performed, with full collection+id identity. */
 type Write = { kind: "set" | "update" | "add"; collection: string; id: string; patch?: Record<string, unknown> };
 let writes: Write[] = [];
+/** Runs once, right after the next committed transaction (research deletion integrity tests). */
+const afterNextCommit: { fn: (() => void) | null } = { fn: null };
 const auditWrites: Array<Record<string, unknown>> = [];
 jest.mock("@/lib/governance/auditLog", () => ({
   writeAuditEvent: async (e: Record<string, unknown>) => { auditWrites.push(e); },
@@ -87,8 +89,17 @@ function docHandle(collection: string, id: string) {
     },
     set: async (patch: Record<string, unknown>) => { writes.push({ kind: "set", collection, id, patch }); },
     update: async (patch: Record<string, unknown>) => { writes.push({ kind: "update", collection, id, patch }); },
+    // Research deletion integrity (2026-11-03): for a research run the audit row is created inside the guarded
+    // transaction rather than through writeAuditEvent. It is recorded in the same `auditWrites` list, as the row the
+    // route wrote.
+    create: async (row: Record<string, unknown>) => {
+      if (collection === "admin_audit_logs") auditWrites.push(row);
+      else writes.push({ kind: "set", collection, id, patch: row });
+    },
     collection: (sub: string) => ({
       add: async (patch: Record<string, unknown>) => { writes.push({ kind: "add", collection: `${collection}/${id}/${sub}`, id: "auto", patch }); },
+      // A transactional auto-id event create (`tx.create(col.doc(), …)`) is the same document creation `add` made.
+      doc: () => ({ create: async (patch: Record<string, unknown>) => { writes.push({ kind: "add", collection: `${collection}/${id}/${sub}`, id: "auto", patch }); } }),
       orderBy: () => ({ limit: () => ({ get: async () => ({ docs: [] }) }) }),
       get: async () => ({ docs: [] }),
     }),
@@ -116,8 +127,24 @@ jest.mock("@/lib/firebase/admin", () => ({
     collection: (n: string) => collectionHandle(n),
     // Transactions delegate to the same recorded doc handles, so every write the
     // route commits inside one is still captured in `writes`.
-    runTransaction: async (fn: (txn: unknown) => Promise<unknown>) =>
-      fn({ get: (ref: { get: () => Promise<unknown> }) => ref.get(), set: (ref: { set: (p: unknown) => Promise<unknown> }, p: unknown) => ref.set(p) }),
+    // Writes are buffered and applied only when the callback completes, as a committed transaction would; the deletion
+    // barrier's tombstone read (`runDeletionJobs/{id}`) resolves to "absent" like any unseeded document.
+    runTransaction: async (fn: (txn: unknown) => Promise<unknown>) => {
+      const after = afterNextCommit.fn;
+      const buffered: Array<() => Promise<unknown>> = [];
+      const result = await fn({
+        get: (ref: { get: () => Promise<unknown> }) => ref.get(),
+        set: (ref: { set: (p: unknown) => Promise<unknown> }, p: unknown) => void buffered.push(() => ref.set(p)),
+        create: (ref: { create: (p: unknown) => Promise<unknown> }, p: unknown) => void buffered.push(() => ref.create(p)),
+      });
+      for (const w of buffered) await w();
+      // Test hook: something (e.g. a deletion starting) that happens right AFTER this transaction committed.
+      if (after) {
+        afterNextCommit.fn = null;
+        after();
+      }
+      return result;
+    },
   },
   firebaseAdmin: { firestore: { Timestamp: { now: () => "TS", fromDate: () => "TS" }, FieldValue: { serverTimestamp: () => "TS" } } },
 }));
@@ -185,6 +212,7 @@ beforeEach(() => {
   liveRecord = { email: "reviewer@test-invented.example", emailVerified: true, disabled: false };
   writes = [];
   auditWrites.length = 0;
+  afterNextCommit.fn = null;
   existingDocs = {};
   for (const c of COLLECTIONS) {
     existingDocs[`${c}/run-a`] = { userId: OWNER_A };
@@ -370,5 +398,48 @@ describe.each(COLLECTIONS)("HOSTILE REQUEST BODY — collection=%s", (collection
     expect(auditWrites[0]).toMatchObject({ byUid: REVIEWER, runOwnerUid: OWNER_A });
     expect(auditWrites[0].runOwnerUid).not.toBe(OWNER_B);
     expect(auditWrites[0].byUid).not.toBe("attacker-uid");
+  });
+});
+
+describe("research deletion integrity — governance review of a research run", () => {
+  it("a run whose deletion has started (tombstone) takes no decision: 404, and no status, audit row or event is written (review M-1)", async () => {
+    existingDocs["runDeletionJobs/run-a"] = { userId: "n/a" }; // the deletion has started (tombstone written)
+    const res = await post("runs", "run-a");
+    expect(res.status).toBe(404);
+    expect(primaryWrites("runs", "run-a")).toEqual([]);
+    expect(auditWrites).toEqual([]);
+    expect(eventWrites()).toEqual([]);
+  });
+
+  it("verifications and video documents are not research runs: their audit and event writes are unchanged", async () => {
+    existingDocs["runDeletionJobs/run-a"] = { userId: "n/a" };
+    for (const c of COLLECTIONS.filter((x) => x !== "runs")) {
+      writes = [];
+      auditWrites.length = 0;
+      const res = await post(c, "run-a");
+      expect(res.status).toBe(200);
+      expect(auditWrites).toHaveLength(1);
+      expect(eventWrites()).toHaveLength(1);
+    }
+  });
+
+  it("a deletion that starts AFTER the decision committed (tombstone lands between the decision and its post-commit writes) gets no audit row and no event", async () => {
+    afterNextCommit.fn = () => {
+      existingDocs["runDeletionJobs/run-a"] = { userId: "n/a" };
+    };
+    const res = await post("runs", "run-a");
+    expect(res.status).toBe(200); // the decision itself committed before the deletion started
+    expect(afterNextCommit.fn).toBeNull(); // the hook ran
+    expect(primaryWrites("runs", "run-a")).toHaveLength(1);
+    expect(auditWrites).toEqual([]); // the guarded audit row was refused
+    expect(eventWrites()).toEqual([]); // the guarded event was refused
+  });
+
+  it("a path-like runId (addressing a nested document) is rejected 400 before any read or write (review round 2 m-2)", async () => {
+    existingDocs["runs/run-a/exports/e1"] = { userId: OWNER_A };
+    const res = await post("runs", "run-a/exports/e1");
+    expect(res.status).toBe(400);
+    expect(writes).toEqual([]);
+    expect(auditWrites).toEqual([]);
   });
 });

@@ -617,8 +617,13 @@ function docHandle(collection: string, id: string) {
     }),
     set: async (patch: Record<string, unknown>) => { writes.push({ kind: "set", collection, id, patch }); },
     update: async (patch: Record<string, unknown>) => { writes.push({ kind: "update", collection, id, patch }); },
+    create: async (patch: Record<string, unknown>) => {
+      if (collection === "admin_audit_logs") return auditRowWrite(patch);
+      writes.push({ kind: "set", collection, id, patch });
+    },
     collection: (sub: string) => ({
       add: async (patch: Record<string, unknown>) => { writes.push({ kind: "add", collection: `${collection}/${id}/${sub}`, id: "auto", patch }); },
+      doc: () => ({ create: async (patch: Record<string, unknown>) => { writes.push({ kind: "add", collection: `${collection}/${id}/${sub}`, id: "auto", patch }); } }),
       orderBy: () => ({ limit: () => ({ get: async () => ({ docs: [] }) }) }),
       get: async () => ({ docs: [] }),
     }),
@@ -635,14 +640,23 @@ function collectionHandle(name: string) {
     return { docs: assignerUids.map((id) => ({ id, data: () => ({}) })), empty: assignerUids.length === 0, size: assignerUids.length };
   };
   return Object.assign(q, {
-    doc: (id: string) => docHandle(name, id),
+    doc: (id?: string) => docHandle(name, id ?? "auto-id"),
     /**
      * Phase FIRST-ADMIN-C8. `writeAuditEvent` is NO LONGER MOCKED, so the real
      * writer runs against this double and its own logging is captured. The C7
      * suite stubbed `@/lib/governance/auditLog` — the module holding the actual
      * leak — so the proof examined everything except the thing that leaked.
      */
-    add: async (patch: Record<string, unknown>) => {
+    add: async (patch: Record<string, unknown>) => auditRowWrite(patch),
+  });
+}
+/**
+ * The audit-row write, used by both `.add()` (writeAuditEvent) and the guarded transactional create a research-run review
+ * now uses (research deletion integrity, 2026-11-03). `auditWriteFails` injects the same path-carrying storage failure
+ * into either one.
+ */
+async function auditRowWrite(patch: Record<string, unknown>) {
+  {
       if (auditWriteFails) {
         // Firestore errors carry the document path they failed on, which is how
         // a cross-tenant identifier reaches the log by a route no grep for
@@ -666,8 +680,7 @@ function collectionHandle(name: string) {
       }
       auditRows.push(patch);
       return { id: "audit-row-id" };
-    },
-  });
+  }
 }
 
 jest.mock("@/lib/firebase/admin", () => ({
@@ -678,8 +691,18 @@ jest.mock("@/lib/firebase/admin", () => ({
   },
   adminDb: {
     collection: (n: string) => collectionHandle(n),
-    runTransaction: async (fn: (txn: unknown) => Promise<unknown>) =>
-      fn({ get: (ref: { get: () => Promise<unknown> }) => ref.get(), set: (ref: { set: (p: unknown) => Promise<unknown> }, p: unknown) => ref.set(p) }),
+    // Writes are buffered and applied when the callback completes, as a committed transaction would. A failing write
+    // fails the commit. The deletion barrier's tombstone read resolves to "absent" like any unseeded document.
+    runTransaction: async (fn: (txn: unknown) => Promise<unknown>) => {
+      const buffered: Array<() => Promise<unknown>> = [];
+      const result = await fn({
+        get: (ref: { get: () => Promise<unknown> }) => ref.get(),
+        set: (ref: { set: (p: unknown) => Promise<unknown> }, p: unknown) => void buffered.push(() => ref.set(p)),
+        create: (ref: { create: (p: unknown) => Promise<unknown> }, p: unknown) => void buffered.push(() => ref.create(p)),
+      });
+      for (const w of buffered) await w();
+      return result;
+    },
   },
   firebaseAdmin: { firestore: { Timestamp: { now: () => "TS", fromDate: () => "TS" }, FieldValue: { serverTimestamp: () => "TS" } } },
 }));
@@ -827,10 +850,18 @@ describe.each(COLLECTIONS)("GOVERNANCE HOT PATH — collection=%s", (collection)
     // And the visibility resolver's line ran too, with its counts.
     expect(logs).toContain("[governance/queue] User:");
     expect(logs).toContain("plan: full");
-    // THE REAL AUDIT WRITER EXECUTED on this request — not a stub. Both its
-    // log lines are present, and it persisted exactly one identified row.
-    expect(logs).toContain("[governance/audit] Writing audit event:");
-    expect(logs).toContain("[governance/audit] Event written to admin_audit_logs:");
+    // THE REAL AUDIT WRITER EXECUTED on this request — not a stub — and it
+    // persisted exactly one identified row. For verification and video
+    // documents that writer is writeAuditEvent, and both its log lines are
+    // present. For a research run (research deletion integrity, 2026-11-03) it is
+    // the deletion-barrier-guarded writer, which creates the same row inside a
+    // transaction and logs nothing on success. Neither writer is stubbed here.
+    if (collection === "runs") {
+      expect(logs).not.toContain("[governance/audit] Writing audit event:");
+    } else {
+      expect(logs).toContain("[governance/audit] Writing audit event:");
+      expect(logs).toContain("[governance/audit] Event written to admin_audit_logs:");
+    }
     expect(auditRows).toHaveLength(1);
     // The identified data lives in the ROW, which is the whole argument for
     // keeping it out of the log. If this stopped being true, redacting the log

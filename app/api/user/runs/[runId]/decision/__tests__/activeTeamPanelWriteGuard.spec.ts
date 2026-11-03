@@ -33,6 +33,7 @@
  * Step 2 is what this file pins. Steps 3–5 are properties of Firestore, cited
  * in the PR evidence, and are not claimed to be reproduced by this harness.
  */
+import { installDeletionTombstoneCollection } from "@/lib/workspaces/__tests__/helpers/deletionTombstoneCollection";
 
 const mockedResolveRequestIdentity = jest.fn();
 jest.mock("@/lib/auth/resolveRequestIdentity", () => ({ resolveRequestIdentity: (...a: any[]) => mockedResolveRequestIdentity(...a) }));
@@ -142,6 +143,8 @@ const mockAdminDb: any = {
   },
 };
 jest.mock("@/lib/firebase/admin", () => ({ get adminDb() { return mockAdminDb; } }));
+// Research deletion integrity (2026-11-03, review M-1): the deletion-tombstone collection every review transaction reads.
+installDeletionTombstoneCollection(mockAdminDb);
 
 import { POST } from "@/app/api/user/runs/[runId]/decision/route";
 import { NextRequest } from "next/server";

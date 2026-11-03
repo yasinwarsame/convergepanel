@@ -2,6 +2,7 @@
  * Transactional Multi-Reviewer Finalization, Part E —
  * finalizeAdaptiveHumanReviewPanel() tests.
  */
+import { installDeletionTombstoneCollection } from "@/lib/workspaces/__tests__/helpers/deletionTombstoneCollection";
 
 const runDocs = new Map<string, Record<string, any>>();
 const panelDocs = new Map<string, Record<string, any>>();
@@ -103,6 +104,8 @@ mockAdminDb.collection = (name: string) => {
     },
   };
 };
+// Research deletion integrity (2026-11-03, review M-1): the deletion-tombstone collection every review transaction reads.
+installDeletionTombstoneCollection(mockAdminDb);
 
 import { finalizeAdaptiveHumanReviewPanel, submitAdaptiveHumanReviewVote, submitAdaptiveHumanReviewPanel } from "@/lib/firestore/runs";
 import { buildAdaptiveHumanReviewVoteId } from "@/lib/governance/adaptiveHumanReviewVote";

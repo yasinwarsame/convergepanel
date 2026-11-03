@@ -47,11 +47,14 @@ describe("1. archive and event history is write-once in every write path", () =>
     writers: ["lib/workspaces/reportReviewAssignmentAudit.ts", "lib/workspaces/reportReviewDecisionMutation.ts", WRITER],
     // B3 adds the record export (read-only: it reads the cycle archives to build the decision history).
     readers: ["lib/workspaces/reportReviewContext.ts", "app/api/workspaces/[workspaceId]/runs/[runId]/report-review/export/route.ts"],
+    // S1: the research-deletion workflow is the ONLY code that removes these documents (with the whole run, on an
+    // authorized deletion); it lists them for orphan detection. Pinned so no other path can delete review history.
+    deleters: ["lib/firestore/researchDeletion.ts"],
   };
 
   it("only the pinned modules reference the archive and event collections", () => {
     const users = FILES.filter((f) => /reportReviewCycles|reportReviewEvents|REPORT_REVIEW_CYCLES_COLLECTION|REPORT_REVIEW_EVENTS_COLLECTION/.test(stripComments(readFileSync(f, "utf8")))).map(rel).sort();
-    expect(users).toEqual([...COLLECTION_USERS.constants, ...COLLECTION_USERS.readers, ...COLLECTION_USERS.writers].sort());
+    expect(users).toEqual([...COLLECTION_USERS.constants, ...COLLECTION_USERS.readers, ...COLLECTION_USERS.writers, ...COLLECTION_USERS.deleters].sort());
   });
 
   it.each(["lib/workspaces/reportReviewAssignmentAudit.ts", "lib/workspaces/reportReviewDecisionMutation.ts", WRITER])("%s writes archives/events only with tx.create (never set/update/delete)", (file) => {
@@ -195,6 +198,8 @@ describe("2. the dual-record invariant's assumptions are pinned", () => {
       "lib/governance/evaluateAdaptiveGovernance.ts": 7,
       "lib/governance/personalReviewInbox.ts": 3,
       "lib/governance/reportReview.ts": 3,
+      // Order A: names governanceRecord once, in the content boundary's EXCLUSION list (never read or written).
+      "lib/governance/reportReviewContent.ts": 1,
       "lib/governance/reviewIntegrityMetrics.ts": 2,
       "lib/governance/teamReviewLabels.ts": 1,
       "lib/governance/teamReviewQueueEnrichment.ts": 6,

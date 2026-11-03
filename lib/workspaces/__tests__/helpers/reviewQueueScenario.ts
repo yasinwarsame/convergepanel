@@ -13,6 +13,9 @@ import { Timestamp } from "firebase-admin/firestore";
 import { computeMembershipId } from "@/lib/workspaces/membershipId";
 import { buildReportReviewRecord } from "@/lib/governance/reportReview";
 
+/** A well-formed rrc-v1 fingerprint for queue fixtures (queue reads never re-verify content; decisions do). */
+export const TEST_CONTENT_FINGERPRINT = { version: "rrc-v1" as const, algorithm: "sha256" as const, digest: "0".repeat(64), canonicalBytes: 2 };
+
 export const W = "wsQueue";
 export const W2 = "wsQueueOther";
 export const OWNER = "q-owner";
@@ -58,6 +61,7 @@ function rrRecord(status: string, reviewedAt: string | null) {
     purpose: { code: "internal_review", note: null },
     actorUid: SUBMITTER,
     now: "2026-11-02T09:00:00.000Z",
+    contentFingerprint: TEST_CONTENT_FINGERPRINT,
   });
   return { ...base, humanReview: { status, ...(reviewedAt ? { reviewedAt, reviewerId: REVIEWER } : {}), ...(status === "approved_with_conditions" ? { conditions: ["c"] } : {}) } };
 }

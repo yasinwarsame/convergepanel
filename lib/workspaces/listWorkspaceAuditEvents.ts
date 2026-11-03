@@ -200,7 +200,14 @@ interface WorkspaceAuditReportReviewDtoBase extends WorkspaceAuditEventDtoBase {
 }
 export type WorkspaceAuditReportReviewEventDto =
   | (WorkspaceAuditReportReviewDtoBase & { eventType: "workspace_report_review_submitted"; purpose: string })
-  | (WorkspaceAuditReportReviewDtoBase & { eventType: "workspace_report_review_resubmitted"; fromCycle: number; purpose: string; clearedReviewer: { displayName: string } | null })
+  | (WorkspaceAuditReportReviewDtoBase & {
+      eventType: "workspace_report_review_resubmitted";
+      fromCycle: number;
+      purpose: string;
+      clearedReviewer: { displayName: string } | null;
+      /** Order A: "decided" — the previous cycle closed with a decision; "content_changed" — it was superseded undecided because the research changed. */
+      closedReason: "decided" | "content_changed" | "content_unverifiable";
+    })
   | (WorkspaceAuditReportReviewDtoBase & {
       eventType: "workspace_report_review_reviewer_changed";
       /** Decided from uids on the server (never from display names): a same-reviewer write is an assignment update (e.g. due date). */
@@ -240,7 +247,7 @@ type ValidatedRow =
 type ReportReviewRowBase = { occurredAtIso: string; actorUid: string; runQuestion: string | null; cycle: number };
 type ReportReviewValidatedRow =
   | (ReportReviewRowBase & { eventType: "workspace_report_review_submitted"; purposeCode: string })
-  | (ReportReviewRowBase & { eventType: "workspace_report_review_resubmitted"; fromCycle: number; purposeCode: string; clearedReviewerUid: string | null })
+  | (ReportReviewRowBase & { eventType: "workspace_report_review_resubmitted"; fromCycle: number; purposeCode: string; clearedReviewerUid: string | null; closedReason: "decided" | "content_changed" | "content_unverifiable" })
   | (ReportReviewRowBase & { eventType: "workspace_report_review_reviewer_changed"; previousReviewerUid: string | null; reviewerUid: string | null })
   | (ReportReviewRowBase & { eventType: "workspace_report_review_decided"; status: string; purposeCode: string });
 
@@ -268,7 +275,8 @@ function validateReportReviewRow(eventType: string, raw: Record<string, unknown>
       if (typeof raw.purposeCode !== "string" || !VALID_RR_PURPOSES.has(raw.purposeCode)) return null;
       if (!isCycle(raw.fromCycle) || raw.cycle !== raw.fromCycle + 1) return null;
       if (!isUidOrNull(raw.clearedReviewerUid)) return null;
-      return { ...base, eventType, fromCycle: raw.fromCycle, purposeCode: raw.purposeCode, clearedReviewerUid: raw.clearedReviewerUid };
+      if (raw.closedReason !== "decided" && raw.closedReason !== "content_changed" && raw.closedReason !== "content_unverifiable") return null;
+      return { ...base, eventType, fromCycle: raw.fromCycle, purposeCode: raw.purposeCode, clearedReviewerUid: raw.clearedReviewerUid, closedReason: raw.closedReason };
     case "workspace_report_review_reviewer_changed":
       if (!isUidOrNull(raw.previousReviewerUid) || !isUidOrNull(raw.reviewerUid)) return null;
       return { ...base, eventType, previousReviewerUid: raw.previousReviewerUid, reviewerUid: raw.reviewerUid };
@@ -301,8 +309,16 @@ function isNonEmptyStringArray(v: unknown): v is string[] {
  * Any failure returns `null` — the row is skipped, never repaired or
  * rendered with a manufactured value.
  */
-function validateRow(id: string, raw: Record<string, unknown> | undefined, workspaceId: string): ValidatedRow | null {
-  if (!raw) return null;
+/**
+ * Order A / S1 — after the research a row refers to is deleted, the row is KEPT (audit metadata) and its research text is
+ * redacted by the deletion workflow (runQuestion: null, contentRedacted: true). It is shown with this fixed label, never
+ * dropped and never with the deleted text.
+ */
+export const DELETED_RESEARCH_LABEL = "[deleted research]";
+
+function validateRow(id: string, rawIn: Record<string, unknown> | undefined, workspaceId: string): ValidatedRow | null {
+  if (!rawIn) return null;
+  const raw = rawIn.contentRedacted === true && rawIn.runQuestion === null ? { ...rawIn, runQuestion: DELETED_RESEARCH_LABEL } : rawIn;
   const eventType = raw.eventType;
   if (typeof eventType !== "string" || !VALID_EVENT_TYPES.has(eventType)) return null;
   if (raw.workspaceId !== workspaceId) return null;
@@ -484,7 +500,7 @@ export async function listWorkspaceAuditEvents(args: { workspaceId: string; limi
           case "workspace_report_review_submitted":
             return { ...base, eventType: r.eventType, purpose: r.purposeCode };
           case "workspace_report_review_resubmitted":
-            return { ...base, eventType: r.eventType, fromCycle: r.fromCycle, purpose: r.purposeCode, clearedReviewer: toName(r.clearedReviewerUid) };
+            return { ...base, eventType: r.eventType, fromCycle: r.fromCycle, purpose: r.purposeCode, clearedReviewer: toName(r.clearedReviewerUid), closedReason: r.closedReason };
           case "workspace_report_review_reviewer_changed":
             return {
               ...base,

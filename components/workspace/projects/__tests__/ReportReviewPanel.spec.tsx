@@ -86,6 +86,7 @@ const submitted = (over: Record<string, unknown> = {}, viewer: Record<string, un
   ],
   content: { absentNow: ["unifiedAnswer", "synthesis", "consensus"], changedSinceSubmission: [] as string[] },
   historyIncomplete: false,
+  contentIntegrity: { status: "matches" },
   disclaimer: REPORT_REVIEW_DISCLAIMER,
 });
 
@@ -232,7 +233,7 @@ describe("Audit Log row and queue row", () => {
     // Review m-2: the disclaimer also appears where approval is REQUESTED (submission and resubmission rows).
     for (const ev of [
       { eventType: "workspace_report_review_submitted", occurredAt: "2026-11-02T12:00:00.000Z", actor: { displayName: "Mo" }, research: { question: "Q" }, cycle: 1, purpose: "other" },
-      { eventType: "workspace_report_review_resubmitted", occurredAt: "2026-11-02T12:00:00.000Z", actor: { displayName: "Mo" }, research: { question: "Q" }, cycle: 2, fromCycle: 1, purpose: "other", clearedReviewer: null },
+      { eventType: "workspace_report_review_resubmitted", occurredAt: "2026-11-02T12:00:00.000Z", actor: { displayName: "Mo" }, research: { question: "Q" }, cycle: 2, fromCycle: 1, purpose: "other", clearedReviewer: null, closedReason: "decided" },
     ] as const) {
       const r = mountEl(createElement(ReportReviewAuditEntry, { event: ev }));
       expect(r.root.findAll((n) => n.props["data-testid"] === "report-review-disclaimer" && typeof n.type === "string")[0].children.join("")).toBe(REPORT_REVIEW_DISCLAIMER);
@@ -286,11 +287,19 @@ describe("Audit Log client accepts report-review rows (one unrecognised row woul
   const { fetchWorkspaceAuditEvents } = jest.requireActual("@/lib/client/workspaceTeamClient") as typeof import("@/lib/client/workspaceTeamClient");
   const rows = [
     { eventType: "workspace_report_review_submitted", occurredAt: "2026-11-02T11:00:00.000Z", actor: { displayName: "Mo" }, research: { question: "Q" }, cycle: 1, purpose: "other" },
-    { eventType: "workspace_report_review_resubmitted", occurredAt: "2026-11-02T11:00:00.000Z", actor: { displayName: "Mo" }, research: { question: null }, cycle: 2, fromCycle: 1, purpose: "other", clearedReviewer: null },
+    { eventType: "workspace_report_review_resubmitted", occurredAt: "2026-11-02T11:00:00.000Z", actor: { displayName: "Mo" }, research: { question: null }, cycle: 2, fromCycle: 1, purpose: "other", clearedReviewer: null, closedReason: "decided" },
     { eventType: "workspace_report_review_reviewer_changed", occurredAt: "2026-11-02T11:00:00.000Z", actor: { displayName: "Ada" }, research: { question: "Q" }, cycle: 1, change: "assigned", previousReviewer: null, reviewer: { displayName: "Rae" } },
     { eventType: "workspace_report_review_decided", occurredAt: "2026-11-02T11:00:00.000Z", actor: { displayName: "Rae" }, research: { question: "Q" }, cycle: 1, status: "approved", purpose: "other" },
     { eventType: "workspace_member_removed", occurredAt: "2026-11-02T11:00:00.000Z", actor: { displayName: "Ada" }, target: { displayName: "Bo" }, previousRole: "member" },
   ];
+  it.each(["decided", "content_changed", "content_unverifiable"])("the client accepts a resubmission row closed as %s, and the row explains it", async (closedReason) => {
+    const row = { ...rows[1], closedReason };
+    mockedAuthedFetch.mockResolvedValueOnce(response(200, { ok: true, events: [row], hasMore: false }));
+    expect((await fetchWorkspaceAuditEvents({ user: null, authReady: true, workspaceId: WS })).status).toBe("ok");
+    const r = TestRenderer.create(createElement(ReportReviewAuditEntry, { event: row as never }));
+    expect(text(r)).toContain(closedReason === "decided" ? "was archived and cycle 2 started" : "closed without a decision");
+  });
+
   it("a mixed page parses", async () => {
     mockedAuthedFetch.mockResolvedValueOnce(response(200, { ok: true, events: rows, hasMore: false }));
     const res = await fetchWorkspaceAuditEvents({ user: null, authReady: true, workspaceId: WS });

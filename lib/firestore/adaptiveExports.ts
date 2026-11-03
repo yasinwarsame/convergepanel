@@ -21,6 +21,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { AdaptiveResearchExportV1 } from "@/lib/adaptiveSchema/researchExport";
 import { sanitizeForFirestore } from "@/lib/firestore/sanitizeForFirestore";
+import { assertResearchWritable, guardedResearchSetMerge, runResearchWrite } from "@/lib/firestore/researchDeletionBarrier";
 
 function exportsCollection(runId: string) {
   return adminDb!.collection("runs").doc(runId).collection("exports");
@@ -105,7 +106,8 @@ export async function createAdaptiveExportRecord(input: CreateAdaptiveExportInpu
     const exportRef = exportsCollection(input.runId).doc(input.exportId);
 
     const reportVersion = await adminDb.runTransaction(async (txn) => {
-      const runSnap = await txn.get(runRef);
+      // Research deletion integrity: refuses (write_failed) a deleted, deleting or missing run, in this transaction.
+      const runSnap = await assertResearchWritable(txn, adminDb!, input.runId);
       const currentCounter = (runSnap.data()?.adaptiveExportCounter as number | undefined) ?? 0;
       const nextVersion = currentCounter + 1;
 
@@ -180,10 +182,8 @@ export async function markAdaptiveExportReady(
 ): Promise<UpdateAdaptiveExportResult> {
   if (!adminDb) return { ok: false, reason: "firestore_unavailable" };
   try {
-    await exportsCollection(runId).doc(exportId).set(
-      { artifactStatus: "ready", exportMetadata: { fileHash } },
-      { merge: true }
-    );
+    // Research deletion integrity: guarded, so a render that finishes after the run was deleted writes nothing.
+    await guardedResearchSetMerge(adminDb, runId, exportsCollection(runId).doc(exportId), { artifactStatus: "ready", exportMetadata: { fileHash } });
     return { ok: true };
   } catch {
     return { ok: false, reason: "write_failed" };
@@ -198,7 +198,7 @@ export async function markAdaptiveExportFailed(
 ): Promise<UpdateAdaptiveExportResult> {
   if (!adminDb) return { ok: false, reason: "firestore_unavailable" };
   try {
-    await exportsCollection(runId).doc(exportId).set({ artifactStatus: "failed", failureReason }, { merge: true });
+    await guardedResearchSetMerge(adminDb, runId, exportsCollection(runId).doc(exportId), { artifactStatus: "failed", failureReason }); // deletion barrier
     return { ok: true };
   } catch {
     return { ok: false, reason: "write_failed" };
@@ -220,15 +220,14 @@ export async function markAdaptiveExportFailed(
 export async function supersedeOlderAdaptiveExports(runId: string, currentExportId: string): Promise<UpdateAdaptiveExportResult> {
   if (!adminDb) return { ok: false, reason: "firestore_unavailable" };
   try {
-    const snap = await exportsCollection(runId).where("artifactStatus", "==", "ready").get();
-    const batch = adminDb.batch();
-    let mutated = false;
-    for (const doc of snap.docs) {
-      if (doc.id === currentExportId) continue;
-      batch.set(doc.ref, { artifactStatus: "superseded" }, { merge: true });
-      mutated = true;
-    }
-    if (mutated) await batch.commit();
+    // Research deletion integrity: the query and the writes are one transaction guarded by the deletion barrier.
+    await runResearchWrite(adminDb, runId, async (txn) => {
+      const snap = await txn.get(exportsCollection(runId).where("artifactStatus", "==", "ready"));
+      for (const doc of snap.docs) {
+        if (doc.id === currentExportId) continue;
+        txn.set(doc.ref, { artifactStatus: "superseded" }, { merge: true });
+      }
+    });
     return { ok: true };
   } catch {
     return { ok: false, reason: "write_failed" };

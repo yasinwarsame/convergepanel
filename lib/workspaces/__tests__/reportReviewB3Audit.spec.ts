@@ -119,7 +119,7 @@ describe("one durable audit row per committed mutation", () => {
       { ...common, eventType: "workspace_report_review_reviewer_changed", actorUid: ADMIN, cycle: 1, previousReviewerUid: REVIEWER2, reviewerUid: null, revision: 3, at: "2026-11-02T11:03:00.000Z" },
       { ...common, eventType: "workspace_report_review_reviewer_changed", actorUid: ADMIN, cycle: 1, previousReviewerUid: null, reviewerUid: REVIEWER, revision: 4, at: "2026-11-02T11:04:00.000Z" },
       { ...common, eventType: "workspace_report_review_decided", actorUid: REVIEWER, cycle: 1, priorStatus: "unreviewed", status: "changes_requested", purposeCode: "client_delivery", at: "2026-11-02T12:00:00.000Z" },
-      { ...common, eventType: "workspace_report_review_resubmitted", actorUid: MEMBER, cycle: 2, fromCycle: 1, purposeCode: "internal_review", clearedReviewerUid: REVIEWER, at: "2026-11-02T13:00:00.000Z" },
+      { ...common, eventType: "workspace_report_review_resubmitted", actorUid: MEMBER, cycle: 2, fromCycle: 1, purposeCode: "internal_review", clearedReviewerUid: REVIEWER, closedReason: "decided", at: "2026-11-02T13:00:00.000Z" },
     ]);
     // The audit row's instant IS the record's own timestamp (one clock read per mutation).
     expect(rr().submittedAt).toBe("2026-11-02T13:00:00.000Z");
@@ -207,7 +207,7 @@ describe("Audit Log reader", () => {
     const res = await listWorkspaceAuditEvents({ workspaceId: W, limit: 20 });
     if (res.status !== "ok") throw new Error(res.status);
     expect(res.items).toEqual([
-      { eventType: "workspace_report_review_resubmitted", occurredAt: "2026-11-02T13:00:00.000Z", actor: { displayName: `Name(${MEMBER})` }, research: { question: "Is the <b>supply</b> plan sound?" }, cycle: 2, fromCycle: 1, purpose: "publication_review", clearedReviewer: { displayName: `Name(${REVIEWER})` } },
+      { eventType: "workspace_report_review_resubmitted", occurredAt: "2026-11-02T13:00:00.000Z", actor: { displayName: `Name(${MEMBER})` }, research: { question: "Is the <b>supply</b> plan sound?" }, cycle: 2, fromCycle: 1, purpose: "publication_review", clearedReviewer: { displayName: `Name(${REVIEWER})` }, closedReason: "decided" },
       { eventType: "workspace_report_review_decided", occurredAt: "2026-11-02T12:00:00.000Z", actor: { displayName: `Name(${REVIEWER})` }, research: { question: "Is the <b>supply</b> plan sound?" }, cycle: 1, status: "approved", purpose: "client_delivery" },
       { eventType: "workspace_report_review_reviewer_changed", occurredAt: "2026-11-02T11:01:00.000Z", actor: { displayName: `Name(${ADMIN})` }, research: { question: "Is the <b>supply</b> plan sound?" }, cycle: 1, change: "assigned", previousReviewer: null, reviewer: { displayName: `Name(${REVIEWER})` } },
       { eventType: "workspace_report_review_submitted", occurredAt: "2026-11-02T11:00:00.000Z", actor: { displayName: `Name(${MEMBER})` }, research: { question: "Is the <b>supply</b> plan sound?" }, cycle: 1, purpose: "client_delivery" },
@@ -234,6 +234,12 @@ describe("Audit Log reader", () => {
     expect(res.status === "ok" && res.items[0]).toMatchObject({ change: "reassigned", previousReviewer: { displayName: "Sam" }, reviewer: { displayName: "Sam" } });
   });
 
+  it.each(["decided", "content_changed", "content_unverifiable"])("a resubmission row closed as %s is projected (never silently dropped)", async (closedReason) => {
+    db.seed("workspaceMembershipEvents/rs", { workspaceId: W, actorUid: MEMBER, runId: RUN, projectId: null, runQuestion: "Q", eventType: "workspace_report_review_resubmitted", cycle: 2, fromCycle: 1, purposeCode: "other", clearedReviewerUid: null, closedReason, at: Timestamp.fromDate(new Date("2026-11-02T11:00:00Z")) });
+    const res = await listWorkspaceAuditEvents({ workspaceId: W, limit: 20 });
+    expect(res.status === "ok" && res.items.map((i) => (i as { closedReason?: string }).closedReason)).toEqual([closedReason]);
+  });
+
   it("another Workspace's rows are never returned (query scope + row check)", async () => {
     await submit();
     const res = await listWorkspaceAuditEvents({ workspaceId: W2, limit: 20 });
@@ -246,7 +252,9 @@ describe("Audit Log reader", () => {
     ["unknown purpose", { ...base, eventType: "workspace_report_review_submitted", cycle: 1, purposeCode: "certified" }],
     ["decided with unknown status", { ...base, eventType: "workspace_report_review_decided", cycle: 1, priorStatus: "unreviewed", status: "verified", purposeCode: "other" }],
     ["decided from a decided status", { ...base, eventType: "workspace_report_review_decided", cycle: 1, priorStatus: "approved", status: "rejected", purposeCode: "other" }],
-    ["resubmitted with a cycle gap", { ...base, eventType: "workspace_report_review_resubmitted", cycle: 3, fromCycle: 1, purposeCode: "other", clearedReviewerUid: null }],
+    ["resubmitted with a cycle gap", { ...base, eventType: "workspace_report_review_resubmitted", cycle: 3, fromCycle: 1, purposeCode: "other", clearedReviewerUid: null, closedReason: "decided" }],
+    ["resubmitted without a closed reason", { ...base, eventType: "workspace_report_review_resubmitted", cycle: 2, fromCycle: 1, purposeCode: "other", clearedReviewerUid: null }],
+    ["resubmitted with an unknown closed reason", { ...base, eventType: "workspace_report_review_resubmitted", cycle: 2, fromCycle: 1, purposeCode: "other", clearedReviewerUid: null, closedReason: "expired" }],
     ["reviewer change with empty uid", { ...base, eventType: "workspace_report_review_reviewer_changed", cycle: 1, previousReviewerUid: "", reviewerUid: null }],
     ["missing runId", { ...base, runId: undefined, eventType: "workspace_report_review_submitted", cycle: 1, purposeCode: "other" }],
     ["empty question", { ...base, runQuestion: "", eventType: "workspace_report_review_submitted", cycle: 1, purposeCode: "other" }],

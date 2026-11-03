@@ -5,39 +5,24 @@
  * used, and that an existing projection is never overwritten on retry.
  */
 
-const docsById = new Map<string, Record<string, unknown>>();
+// Research deletion integrity (2026-11-03): the projection is now created in a transaction guarded by the deletion
+// barrier (it carries the receipt conclusion). The spec uses the shared transactional fake, which models create()
+// exclusivity (ALREADY_EXISTS) and transaction attempts. `docsById` reads teamRuns documents by id;
+// `createCalls()` lists applied creates as the old spy's [collection, id, data].
+import { FakeTransactionalFirestore } from "@/lib/workspaces/__tests__/helpers/fakeTransactionalFirestore";
+const db = new FakeTransactionalFirestore();
 const firestoreUnavailableFlag = { value: false };
-const createMock = jest.fn();
-const docMock = jest.fn();
-
-function makeCreateImpl() {
-  return async (id: string, projection: Record<string, unknown>) => {
-    if (docsById.has(id)) {
-      const err: any = new Error("6 ALREADY_EXISTS: Document already exists: " + id);
-      err.code = 6;
-      throw err;
-    }
-    docsById.set(id, projection);
-  };
-}
-
-const mockAdminDb = {
-  collection: (name: string) => ({
-    doc: (id: string) => {
-      docMock(name, id);
-      return {
-        create: jest.fn().mockImplementation(async (projection: Record<string, unknown>) => {
-          createMock(name, id, projection);
-          return makeCreateImpl()(id, projection);
-        }),
-      };
-    },
-  }),
-};
+const docsById = { get: (id: string) => db.read(`teamRuns/${id}`) as Record<string, unknown> | undefined };
+const createCalls = () =>
+  db.writeLog.filter((w) => w.kind === "create").map((w) => {
+    const [collectionName, id] = w.path.split("/");
+    return [collectionName, id, w.data] as [string, string, Record<string, unknown>];
+  });
+const RUN = "run-11111111-1111-1111-1111-111111111111";
 
 jest.mock("@/lib/firebase/admin", () => ({
   get adminDb() {
-    return firestoreUnavailableFlag.value ? null : mockAdminDb;
+    return firestoreUnavailableFlag.value ? null : db;
   },
 }));
 
@@ -50,10 +35,12 @@ import { createAdaptiveTeamRunProjection } from "@/lib/firestore/teamRuns";
 import { buildAdaptiveTeamRunProjectionId, AdaptiveTeamRunProjection } from "@/lib/governance/adaptiveTeamReview";
 
 beforeEach(() => {
-  docsById.clear();
+  db.docs.clear();
+  db.hooks = {};
+  db.writeLog = [];
+  db.stats = { commits: 0, retries: 0, aborted: 0 };
+  db.seed(`runs/${RUN}`, { userId: "uid-123" }); // the projected run exists and is writable
   firestoreUnavailableFlag.value = false;
-  createMock.mockClear();
-  docMock.mockClear();
   mockLoggerWarn.mockClear();
 });
 
@@ -113,8 +100,9 @@ describe("createAdaptiveTeamRunProjection", () => {
   it("uses .create(), not .set(), to write the projection", async () => {
     const p = projection();
     await createAdaptiveTeamRunProjection(p);
-    expect(createMock).toHaveBeenCalledTimes(1);
-    const [collectionName, id, writtenProjection] = createMock.mock.calls[0];
+    expect(createCalls()).toHaveLength(1);
+    expect(db.writeLog.map((w) => w.kind)).toEqual(["create"]); // never a set
+    const [collectionName, id, writtenProjection] = createCalls()[0];
     expect(collectionName).toBe("teamRuns");
     expect(id).toBe(buildAdaptiveTeamRunProjectionId(p.teamId, p.runId));
     expect(writtenProjection).toEqual(p);
@@ -146,51 +134,44 @@ describe("createAdaptiveTeamRunProjection", () => {
   it("makes exactly one write attempt — no retry loop on ALREADY_EXISTS or on failure", async () => {
     const p = projection();
     await createAdaptiveTeamRunProjection(p);
-    createMock.mockClear();
-    await createAdaptiveTeamRunProjection(p);
-    expect(createMock).toHaveBeenCalledTimes(1);
+    db.writeLog = [];
+    db.stats = { commits: 0, retries: 0, aborted: 0 };
+    expect(await createAdaptiveTeamRunProjection(p)).toEqual(expect.objectContaining({ status: "already_exists" }));
+    // One transaction attempt, which finds the projection and writes nothing; no retry loop.
+    expect(db.stats).toEqual({ commits: 1, retries: 0, aborted: 0 });
+    expect(db.writeLog).toEqual([]);
   });
 
   it("returns 'firestore_unavailable' when adminDb is null, without throwing", async () => {
     firestoreUnavailableFlag.value = true;
     const result = await createAdaptiveTeamRunProjection(projection());
     expect(result).toEqual({ status: "firestore_unavailable" });
-    expect(createMock).not.toHaveBeenCalled();
+    expect(createCalls()).toHaveLength(0);
   });
 
   it("returns 'write_failed' on an unexpected Firestore error, without throwing", async () => {
     const p = projection();
     const id = buildAdaptiveTeamRunProjectionId(p.teamId, p.runId);
-    // Pre-seed a doc-create override by mocking a permission error instead of ALREADY_EXISTS.
-    const originalCollection = mockAdminDb.collection;
-    (mockAdminDb as any).collection = (name: string) => ({
-      doc: (docId: string) => ({
-        create: jest.fn().mockImplementation(async () => {
-          const err: any = new Error("7 PERMISSION_DENIED: Missing or insufficient permissions");
-          err.code = 7;
-          throw err;
-        }),
-      }),
-    });
+    // A permission error at commit instead of ALREADY_EXISTS.
+    db.hooks.failCommit = () => {
+      const err: any = new Error("7 PERMISSION_DENIED: Missing or insufficient permissions");
+      err.code = 7;
+      throw err;
+    };
 
     const result = await createAdaptiveTeamRunProjection(p);
     expect(result).toEqual({ status: "write_failed" });
     expect(mockLoggerWarn).toHaveBeenCalled();
 
-    (mockAdminDb as any).collection = originalCollection;
-    void id;
+    expect(docsById.get(id)).toBeUndefined();
   });
 
   it("logs only metadata (runId/teamId) on failure — never the receipt conclusion or review data", async () => {
-    (mockAdminDb as any).collection = (name: string) => ({
-      doc: () => ({
-        create: jest.fn().mockImplementation(async () => {
-          const err: any = new Error("13 INTERNAL");
-          err.code = 13;
-          throw err;
-        }),
-      }),
-    });
+    db.hooks.failCommit = () => {
+      const err: any = new Error("13 INTERNAL");
+      err.code = 13;
+      throw err;
+    };
 
     const p = projection({ receiptConclusion: "SENSITIVE CONTENT SHOULD NOT BE LOGGED" });
     await createAdaptiveTeamRunProjection(p);
@@ -200,5 +181,16 @@ describe("createAdaptiveTeamRunProjection", () => {
     expect(loggedArgs).not.toContain("SENSITIVE CONTENT SHOULD NOT BE LOGGED");
     expect(loggedArgs).toContain(p.runId);
     expect(loggedArgs).toContain(p.teamId);
+  });
+
+  it("deletion barrier: a run that is deleted, being deleted or missing gets no projection", async () => {
+    for (const setup of [() => db.seed(`runDeletionJobs/${RUN}`, { state: "complete" }), () => db.seed(`runs/${RUN}`, { deletion: { state: "pending" } }), () => db.docs.delete(`runs/${RUN}`)]) {
+      db.docs.clear();
+      db.writeLog = [];
+      db.seed(`runs/${RUN}`, { userId: "uid-123" });
+      setup();
+      expect(await createAdaptiveTeamRunProjection(projection())).toEqual({ status: "write_failed" });
+      expect(createCalls()).toHaveLength(0);
+    }
   });
 });

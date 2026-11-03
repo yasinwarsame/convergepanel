@@ -38,6 +38,10 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
       return reportReviewErrorBody(409, r.reason, "This review changed since you last viewed it. Refresh and try again.");
     case "active_panel":
       return reportReviewErrorBody(409, "active_panel", "This research has an open review panel.");
+    case "content_changed":
+      return reportReviewErrorBody(409, "content_changed", "This research changed after it was submitted, so this decision was not recorded. It must be resubmitted for a new review.");
+    case "content_unverifiable":
+      return reportReviewErrorBody(409, "content_unverifiable", "This review can't be decided because the content it was submitted with can't be verified.");
     case "not_authorized":
     case "insufficient_capability": {
       const { status, body: b } = teamRunInsufficientCapabilityResponse();

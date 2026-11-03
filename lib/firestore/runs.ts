@@ -21,6 +21,7 @@
 import { persistableQuestionContext } from "@/lib/questionContext";
 import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
+import { guardedResearchAdd, guardedResearchCreate, guardedResearchSetMerge, guardedResearchUpdate, isResearchDeletedInTx, isResearchWriteRefusedError } from "@/lib/firestore/researchDeletionBarrier";
 import { ModelResult } from "@/lib/types";
 import { modelIdToProviderKey, safeNum } from "@/lib/tokenExtraction";
 import { Timestamp } from "firebase-admin/firestore";
@@ -438,7 +439,8 @@ export async function completeRun(
     tokensByProvider: Object.keys(tokensByProvider).length > 0 ? tokensByProvider : undefined,
   };
 
-  await adminDb.collection("runs").doc(runId).update(updateData);
+  // Research deletion integrity (review round 2, M-2): the model output lands only on a run whose deletion has not started.
+  await guardedResearchUpdate(adminDb, runId, adminDb.collection("runs").doc(runId), updateData as FirebaseFirestore.UpdateData<FirebaseFirestore.DocumentData>);
 
   console.log(`[firestore/runs] ✅ Completed run ${runId} with ${tokenTotals.totalTokens} total tokens from ${Object.keys(tokensByProvider).length} provider(s)`);
 
@@ -490,7 +492,7 @@ export async function persistAdaptiveOutput(
   }
 
   try {
-    await adminDb.collection("runs").doc(runId).set({ adaptiveOutput: output }, { merge: true });
+    await guardedResearchSetMerge(adminDb, runId, adminDb.collection("runs").doc(runId), { adaptiveOutput: output }); // deletion barrier
     return { saved: true };
   } catch (err: unknown) {
     console.warn(`[firestore/runs] Failed to persist adaptiveOutput for run ${runId}:`, (err as Error)?.message);
@@ -524,7 +526,7 @@ export async function persistLegacyAdaptiveOutput(
   }
 
   try {
-    await adminDb.collection("runs").doc(runId).set({ legacyAdaptiveOutput: output }, { merge: true });
+    await guardedResearchSetMerge(adminDb, runId, adminDb.collection("runs").doc(runId), { legacyAdaptiveOutput: output }); // deletion barrier
     return { saved: true };
   } catch (err: unknown) {
     console.warn(`[firestore/runs] Failed to persist legacyAdaptiveOutput for run ${runId}:`, (err as Error)?.message);
@@ -581,7 +583,7 @@ export async function persistGovernanceRecord(
   }
 
   try {
-    await adminDb.collection("runs").doc(runId).set({ governanceRecord }, { merge: true });
+    await guardedResearchSetMerge(adminDb, runId, adminDb.collection("runs").doc(runId), { governanceRecord }); // deletion barrier
     return { saved: true };
   } catch (err: unknown) {
     logger.warn("[firestore/runs] Failed to persist governanceRecord", {
@@ -702,15 +704,17 @@ export async function persistAutomatedGovernanceUpdate(
   }
 
   try {
-    await adminDb
-      .collection("runs")
-      .doc(runId)
-      .update({
-        "governanceRecord.automatedGovernance": automatedGovernance,
-        "governanceRecord.updatedAt": updatedAt,
-      });
+    // Research deletion integrity (review round 2, M-2): guarded; a deleted, deleting or missing run is run_missing.
+    await guardedResearchUpdate(adminDb, runId, adminDb.collection("runs").doc(runId), {
+      "governanceRecord.automatedGovernance": automatedGovernance,
+      "governanceRecord.updatedAt": updatedAt,
+    });
     return { saved: true };
   } catch (err: unknown) {
+    if (isResearchWriteRefusedError(err)) {
+      logger.warn("[firestore/runs] persistAutomatedGovernanceUpdate: run document missing", { runId });
+      return { saved: false, reason: "run_missing" };
+    }
     // Best-effort classification of a "document doesn't exist" failure —
     // Firestore's Admin SDK surfaces this as a NOT_FOUND-coded error on
     // .update(). Not verified against a live emulator in this step; falls
@@ -754,11 +758,7 @@ export async function writeAdaptiveGovernanceEvent(
   }
 
   try {
-    await adminDb
-      .collection("runs")
-      .doc(runId)
-      .collection("governanceEvents")
-      .add({
+    await guardedResearchAdd(adminDb, runId, adminDb.collection("runs").doc(runId).collection("governanceEvents"), {
         action: "evaluated",
         byUid: "system",
         byEmail: "system",
@@ -874,7 +874,8 @@ export async function submitAdaptiveHumanReview(args: {
       // can be closed.
       const panelRef = ref.collection("humanReviewPanel").doc("current");
       const [snap, panelSnap] = await Promise.all([txn.get(ref), txn.get(panelRef)]);
-      if (!snap.exists) {
+      // Research deletion integrity: a run that is deleted or being deleted is treated as missing (same result).
+      if (!snap.exists || (await isResearchDeletedInTx(txn, adminDb!, ref.id, snap))) {
         return { ok: false, reason: "run_missing" };
       }
 
@@ -996,11 +997,7 @@ export async function writeAdaptiveHumanReviewEvent(args: {
   }
 
   try {
-    await adminDb
-      .collection("runs")
-      .doc(args.runId)
-      .collection("governanceEvents")
-      .add({
+    await guardedResearchAdd(adminDb, args.runId, adminDb.collection("runs").doc(args.runId).collection("governanceEvents"), {
         action: "human_review_decided",
         byUid: args.reviewerId,
         at: args.at,
@@ -1045,7 +1042,8 @@ export async function createAdaptiveHumanReviewHistory(runId: string, entry: Ada
   }
 
   try {
-    await adminDb.collection("runs").doc(runId).collection("humanReviewHistory").doc(entry.decisionId).create(entry);
+    const created = await guardedResearchCreate(adminDb, runId, adminDb.collection("runs").doc(runId).collection("humanReviewHistory").doc(entry.decisionId), entry); // deletion barrier
+    if (created === "already_exists") return { status: "already_exists" };
     return { status: "recorded" };
   } catch (err: unknown) {
     const code = (err as { code?: number | string })?.code;
@@ -1145,7 +1143,8 @@ export async function submitAdaptiveHumanReviewAssignment(args: {
 
       const [runSnap, assignmentSnap] = await Promise.all([txn.get(runRef), txn.get(assignmentRef)]);
 
-      if (!runSnap.exists) {
+      // Research deletion integrity: a run that is deleted or being deleted is treated as missing (same result).
+      if (!runSnap.exists || (await isResearchDeletedInTx(txn, adminDb!, runRef.id, runSnap))) {
         return { ok: false, reason: "run_missing" };
       }
       // Phase 1 Cross-Authority Guard — applies to LEGACY TEAM authority only.
@@ -1215,7 +1214,8 @@ export async function createAdaptiveHumanReviewAssignmentHistory(
     return { status: "failed" };
   }
   try {
-    await adminDb.collection("runs").doc(runId).collection("humanReviewAssignmentHistory").doc(entry.eventId).create(entry);
+    const created = await guardedResearchCreate(adminDb, runId, adminDb.collection("runs").doc(runId).collection("humanReviewAssignmentHistory").doc(entry.eventId), entry); // deletion barrier
+    if (created === "already_exists") return { status: "already_exists" };
     return { status: "recorded" };
   } catch (err: unknown) {
     const code = (err as { code?: number | string })?.code;
@@ -1342,7 +1342,8 @@ export async function submitAdaptiveHumanReviewPanel(args: {
 
       const [runSnap, panelSnap] = await Promise.all([txn.get(runRef), txn.get(panelRef)]);
 
-      if (!runSnap.exists) {
+      // Research deletion integrity: a run that is deleted or being deleted is treated as missing (same result).
+      if (!runSnap.exists || (await isResearchDeletedInTx(txn, adminDb!, runRef.id, runSnap))) {
         return { ok: false, reason: "run_missing" };
       }
       // Phase 1 Cross-Authority Guard — a Workspace-bound run belongs to
@@ -1466,7 +1467,8 @@ export async function cancelAdaptiveHumanReviewPanel(args: {
 
       const [runSnap, panelSnap] = await Promise.all([txn.get(runRef), txn.get(panelRef)]);
 
-      if (!runSnap.exists) {
+      // Research deletion integrity: a run that is deleted or being deleted is treated as missing (same result).
+      if (!runSnap.exists || (await isResearchDeletedInTx(txn, adminDb!, runRef.id, runSnap))) {
         return { ok: false, reason: "run_missing" };
       }
       // Phase 1 Cross-Authority Guard — a Workspace-bound run belongs to
@@ -1662,7 +1664,8 @@ export async function submitAdaptiveHumanReviewVote(args: {
         txn.get(voteRef),
       ]);
 
-      if (!runSnap.exists) {
+      // Research deletion integrity: a run that is deleted or being deleted is treated as missing (same result).
+      if (!runSnap.exists || (await isResearchDeletedInTx(txn, adminDb!, runRef.id, runSnap))) {
         return { ok: false, reason: "run_missing" };
       }
       // Phase 1 Cross-Authority Guard — a Workspace-bound run belongs to
@@ -1874,7 +1877,8 @@ export async function finalizeAdaptiveHumanReviewPanel(args: {
 
       const [runSnap, panelSnap] = await Promise.all([txn.get(runRef), txn.get(panelRef)]);
 
-      if (!runSnap.exists) {
+      // Research deletion integrity: a run that is deleted or being deleted is treated as missing (same result).
+      if (!runSnap.exists || (await isResearchDeletedInTx(txn, adminDb!, runRef.id, runSnap))) {
         return { ok: false, reason: "run_missing" };
       }
       // Phase 1 Cross-Authority Guard — a Workspace-bound run belongs to
@@ -2104,7 +2108,7 @@ export async function createAdaptivePanelFinalizationHistory(
     return { status: "failed" };
   }
   try {
-    await adminDb.collection("runs").doc(runId).collection("humanReviewPanelHistory").doc(entry.eventId).create(entry);
+    if ((await guardedResearchCreate(adminDb, runId, adminDb.collection("runs").doc(runId).collection("humanReviewPanelHistory").doc(entry.eventId), entry)) === "already_exists") return { status: "already_exists" }; // deletion barrier
     return { status: "recorded" };
   } catch (err: unknown) {
     const code = (err as { code?: number | string })?.code;
@@ -2147,12 +2151,7 @@ export async function writeAdaptivePanelFinalizationGovernanceEvent(args: {
   }
   const eventId = `panel-finalized:${args.finalDecisionId}`;
   try {
-    await adminDb
-      .collection("runs")
-      .doc(args.runId)
-      .collection("governanceEvents")
-      .doc(eventId)
-      .create({
+    const created = await guardedResearchCreate(adminDb, args.runId, adminDb.collection("runs").doc(args.runId).collection("governanceEvents").doc(eventId), {
         action: "multi_reviewer_panel_finalized",
         byUid: args.actorUserId,
         at: args.finalizedAt,
@@ -2164,6 +2163,7 @@ export async function writeAdaptivePanelFinalizationGovernanceEvent(args: {
         aggregationPolicyVersion: args.aggregationPolicyVersion,
         supportingReviewerCount: args.supportingReviewerCount,
       });
+    if (created === "already_exists") return { status: "already_exists" }; // deletion barrier
     return { status: "recorded" };
   } catch (err: unknown) {
     const code = (err as { code?: number | string })?.code;
@@ -2250,7 +2250,8 @@ export async function overrideAdaptiveHumanReviewPanel(args: {
 
       const [runSnap, panelSnap] = await Promise.all([txn.get(runRef), txn.get(panelRef)]);
 
-      if (!runSnap.exists) {
+      // Research deletion integrity: a run that is deleted or being deleted is treated as missing (same result).
+      if (!runSnap.exists || (await isResearchDeletedInTx(txn, adminDb!, runRef.id, runSnap))) {
         return { ok: false, reason: "run_missing" };
       }
       // Phase 1 Cross-Authority Guard — a Workspace-bound run belongs to
@@ -2424,7 +2425,7 @@ export async function createAdaptivePanelOverrideHistory(
     return { status: "failed" };
   }
   try {
-    await adminDb.collection("runs").doc(runId).collection("humanReviewPanelHistory").doc(entry.eventId).create(entry);
+    if ((await guardedResearchCreate(adminDb, runId, adminDb.collection("runs").doc(runId).collection("humanReviewPanelHistory").doc(entry.eventId), entry)) === "already_exists") return { status: "already_exists" }; // deletion barrier
     return { status: "recorded" };
   } catch (err: unknown) {
     const code = (err as { code?: number | string })?.code;
@@ -2465,12 +2466,7 @@ export async function writeAdaptivePanelOverrideGovernanceEvent(args: {
   }
   const eventId = `panel-owner-overridden:${args.finalDecisionId}`;
   try {
-    await adminDb
-      .collection("runs")
-      .doc(args.runId)
-      .collection("governanceEvents")
-      .doc(eventId)
-      .create({
+    const created = await guardedResearchCreate(adminDb, args.runId, adminDb.collection("runs").doc(args.runId).collection("governanceEvents").doc(eventId), {
         action: "multi_reviewer_panel_owner_overridden",
         byUid: args.overrideByUserId,
         at: args.finalizedAt,
@@ -2480,6 +2476,7 @@ export async function writeAdaptivePanelOverrideGovernanceEvent(args: {
         finalStatus: args.finalStatus,
         decisionId: args.finalDecisionId,
       });
+    if (created === "already_exists") return { status: "already_exists" }; // deletion barrier
     return { status: "recorded" };
   } catch (err: unknown) {
     const code = (err as { code?: number | string })?.code;
@@ -2504,7 +2501,8 @@ export async function markRunError(runId: string, errorMessage: string): Promise
     throw new Error("Firestore is not available");
   }
 
-  await adminDb.collection("runs").doc(runId).update({
+  // Research deletion integrity (review round 2, M-2): guarded like every other research write.
+  await guardedResearchUpdate(adminDb, runId, adminDb.collection("runs").doc(runId), {
     status: "error",
     completedAt: Timestamp.now(),
     errorMessage,

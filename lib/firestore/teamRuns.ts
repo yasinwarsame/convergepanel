@@ -23,6 +23,7 @@
 import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
+import { guardedResearchCreate, guardedResearchUpdate, isResearchWriteRefusedError } from "@/lib/firestore/researchDeletionBarrier";
 import { AdaptiveTeamRunProjection, buildAdaptiveTeamRunProjectionId } from "@/lib/governance/adaptiveTeamReview";
 
 export type CreateAdaptiveTeamRunProjectionResult =
@@ -41,7 +42,9 @@ export async function createAdaptiveTeamRunProjection(
   const projectionId = buildAdaptiveTeamRunProjectionId(projection.teamId, projection.runId);
 
   try {
-    await adminDb.collection("teamRuns").doc(projectionId).create(projection);
+    // Deletion barrier: the projection carries the receipt conclusion, so it is created only while the run is writable.
+    const created = await guardedResearchCreate(adminDb, projection.runId, adminDb.collection("teamRuns").doc(projectionId), projection as unknown as FirebaseFirestore.DocumentData);
+    if (created === "already_exists") return { status: "already_exists", projectionId };
     return { status: "created", projectionId };
   } catch (err: unknown) {
     // Firestore's Admin SDK surfaces "document already exists" as an
@@ -147,13 +150,18 @@ export async function syncAdaptiveTeamRunProjectionAfterReview(args: {
   const projectionId = buildAdaptiveTeamRunProjectionId(args.teamId, args.runId);
 
   try {
-    await adminDb.collection("teamRuns").doc(projectionId).update({
+    // Research deletion integrity (review round 2, M-2): the projection of a run whose deletion has started is not updated.
+    await guardedResearchUpdate(adminDb, args.runId, adminDb.collection("teamRuns").doc(projectionId), {
       humanReviewStatus: args.humanReviewStatus,
       reviewedAt: args.reviewedAt,
       updatedAt: args.updatedAt,
     });
     return { status: "synced" };
   } catch (err: unknown) {
+    if (isResearchWriteRefusedError(err)) {
+      logger.warn("[firestore/teamRuns] Adaptive projection not synced: research deleted, being deleted or missing", { runId: args.runId, teamId: args.teamId });
+      return { status: "not_found" };
+    }
     const code = (err as { code?: number | string })?.code;
     const message = (err as Error)?.message ?? "";
     const notFound = code === 5 || code === "NOT_FOUND" || message.includes("NOT_FOUND") || message.includes("No document to update");

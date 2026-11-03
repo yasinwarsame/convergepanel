@@ -20,6 +20,7 @@
 
 import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
+import { isResearchDeletedInTx } from "@/lib/firestore/researchDeletionBarrier";
 import { logger } from "@/lib/logger";
 import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS } from "@/lib/env";
 import { isReportReviewEnabledForWorkspace } from "./reportReviewActivation";
@@ -33,13 +34,20 @@ import { runQuestionSnapshot, writeReportReviewWorkspaceAuditEvent } from "./rep
 import type { WorkspaceReviewCandidate } from "./workspaceReviewEligibility";
 import { isReportReviewDecided, parseReportReviewRecord, type ReportReviewHumanReview, type ReportReviewRecordV1 } from "@/lib/governance/reportReview";
 import { evaluateReportReviewDecisionAuthority, validateDecisionUpdate, type ReportReviewDecisionDenial } from "@/lib/governance/reportReviewDecision";
+import { computeReportReviewContentFingerprint, sameReportReviewContent } from "@/lib/governance/reportReviewContent";
 
 export type DecideReportReviewFailure =
   | { ok: false; reason: "disabled" | "team_workspaces_disabled" | "firestore_unavailable" | "write_failed" }
   | { ok: false; reason: TeamMutationAuthorizationDenialReason | "insufficient_capability" }
   | { ok: false; reason: "run_not_found" | "active_panel" | "panel_unreadable" | "record_malformed" | "integrity_violation" }
   | { ok: false; reason: "invalid_decision" | "conditions_required" | "cycle_conflict" | "stale_expected_updated_at" | "decision_conflict" }
-  | { ok: false; reason: "not_authorized"; denial: ReportReviewDecisionDenial };
+  | { ok: false; reason: "not_authorized"; denial: ReportReviewDecisionDenial }
+  /**
+   * Order A: the research as read in this transaction is not the content this cycle was submitted with
+   * (`content_changed`), or the cycle has no usable fingerprint (`content_unverifiable`). Nothing is written: the
+   * assignment, the record and its history are untouched, and the cycle must be resubmitted for renewed review.
+   */
+  | { ok: false; reason: "content_changed" | "content_unverifiable" };
 
 export type DecideReportReviewResult = { ok: true; replayed: boolean; record: ReportReviewRecordV1 } | DecideReportReviewFailure;
 
@@ -85,6 +93,9 @@ export async function decideReportReview(args: {
         projectIdValue: run.projectId,
       });
       if (target.kind !== "valid_workspace_review_target") return { ok: false, reason: "run_not_found" };
+      // S1 + research deletion integrity (review round 2, M-1): research whose deletion has started (tombstone, or the
+      // mark) accepts no decision.
+      if (await isResearchDeletedInTx(tx, adminDb!, args.runId, { exists: true, data: () => run })) return { ok: false, reason: "run_not_found" };
 
       const panelGate = await readPanelGate(tx, runRef, args.runId);
       if (panelGate === "open") return { ok: false, reason: "active_panel" };
@@ -116,6 +127,13 @@ export async function decideReportReview(args: {
       const reviewer: WorkspaceReviewCandidate = { uid: args.uid, workspaceId: auth.membership.workspaceId, role: auth.membership.role, status: auth.membership.status };
       const authority = evaluateReportReviewDecisionAuthority({ reviewer, workspaceId: args.workspaceId, creatorUid: target.creatorUid, record, assignment });
       if (!authority.authorized) return { ok: false, reason: "not_authorized", denial: authority.reason };
+
+      // Order A: a decision can only ever apply to exactly the content that was submitted. The run was read in THIS
+      // transaction, so a concurrent content write either commits first (and is seen here) or forces a retry.
+      if (!record.contentFingerprint) return { ok: false, reason: "content_unverifiable" };
+      const currentFp = computeReportReviewContentFingerprint(run);
+      if (!currentFp.ok) return { ok: false, reason: "content_unverifiable" };
+      if (!sameReportReviewContent(record.contentFingerprint, currentFp.fingerprint)) return { ok: false, reason: "content_changed" };
 
       // ---- writes ----
       const humanReview: ReportReviewHumanReview = { status: decision.update.status, reviewerId: args.uid, reviewedAt: now };

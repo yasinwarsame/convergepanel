@@ -2,6 +2,7 @@
  * Saved-run provenance honesty (S1) — synthesis route. Harness (mocks + fake
  * Firestore) reused from adaptiveAutoSynthesis.spec.ts.
  */
+import { installDeletionTombstoneCollection } from "@/lib/workspaces/__tests__/helpers/deletionTombstoneCollection";
 jest.mock("@/lib/env", () => ({
   OPENAI_API_KEY: "test-key",
   ANTHROPIC_API_KEY: "test-key",
@@ -30,6 +31,19 @@ const readFailureRunIds = new Set<string>();
 // (no internal retry loop) rather than inferring it indirectly.
 const runsGetCallCounts = new Map<string, number>();
 const mockAdminDb = {
+  // Research deletion integrity (2026-11-03, review round 2 M-2): the synthesis write is now a guarded transactional
+  // update. Buffered like a real transaction: the writes apply only when the callback completes.
+  runTransaction: async (fn: (tx: any) => Promise<unknown>) => {
+    const buffered: Array<() => Promise<unknown>> = [];
+    const result = await fn({
+      get: (ref: any) => ref.get(),
+      update: (ref: any, f: unknown) => void buffered.push(() => ref.update(f)),
+      set: (ref: any, f: unknown, o?: unknown) => void buffered.push(() => ref.set(f, o)),
+      create: (ref: any, f: unknown) => void buffered.push(() => (ref.create ? ref.create(f) : ref.set(f))),
+    });
+    for (const w of buffered) await w();
+    return result;
+  },
   collection: (name: string) => ({
     doc: (id: string) => ({
       get: jest.fn().mockImplementation(async () => {
@@ -60,7 +74,8 @@ const mockAdminDb = {
 };
 jest.mock("@/lib/firebase/admin", () => ({
   adminDb: mockAdminDb,
-}));
+}));installDeletionTombstoneCollection(mockAdminDb);
+
 
 const mockedEvaluateAndStoreGovernance = jest.fn().mockResolvedValue({ governanceStatus: "approved" });
 jest.mock("@/lib/governance/evaluateAndStore", () => ({

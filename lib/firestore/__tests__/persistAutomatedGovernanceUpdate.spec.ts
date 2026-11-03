@@ -13,57 +13,31 @@
  * assumption.
  */
 
-const runDocs = new Map<string, Record<string, any>>();
-const missingRunIds = new Set<string>();
+// Research deletion integrity (2026-11-03): writeAdaptiveGovernanceEvent now creates the event in a transaction guarded
+// by the deletion barrier, so this spec runs on the shared transactional fake instead of an update()/add() stub. The fake
+// models `.update()` at the FIELD-PATH level, exactly like the real Admin SDK: a dotted key updates one nested leaf.
+// That keeps the §18.9 concurrency regression a real proof. Unlike the old stub, `.update()` on a missing document
+// fails NOT_FOUND, as in production, instead of creating it. `missingRunIds.add(id)` therefore just means "not seeded".
+import { FakeTransactionalFirestore } from "@/lib/workspaces/__tests__/helpers/fakeTransactionalFirestore";
+import { runDocView } from "@/lib/workspaces/__tests__/helpers/fakeStoreViews";
+const db = new FakeTransactionalFirestore();
+const runDocs = runDocView(db);
+const missingRunIds = { add: (id: string) => void db.docs.delete(`runs/${id}`), clear: () => undefined };
 const firestoreUnavailableFlag = { value: false };
-
-function applyDotPathUpdate(target: Record<string, any>, fields: Record<string, unknown>): void {
-  for (const [path, value] of Object.entries(fields)) {
-    const segments = path.split(".");
-    let cursor = target;
-    for (let i = 0; i < segments.length - 1; i++) {
-      const segment = segments[i];
-      if (typeof cursor[segment] !== "object" || cursor[segment] === null) {
-        cursor[segment] = {};
-      }
-      cursor = cursor[segment];
-    }
-    cursor[segments[segments.length - 1]] = value;
-  }
-}
-
-const eventsByRunId = new Map<string, Record<string, unknown>[]>();
-
-const mockAdminDb = {
-  collection: (name: string) => ({
-    doc: (id: string) => ({
-      update: jest.fn().mockImplementation(async (fields: Record<string, unknown>) => {
-        if (name === "runs" && missingRunIds.has(id)) {
-          const err: any = new Error("5 NOT_FOUND: No document to update: runs/" + id);
-          err.code = 5;
-          throw err;
-        }
-        if (!runDocs.has(id)) {
-          runDocs.set(id, {});
-        }
-        applyDotPathUpdate(runDocs.get(id)!, fields);
-      }),
-      collection: (subName: string) => ({
-        add: jest.fn().mockImplementation(async (event: Record<string, unknown>) => {
-          const key = `${id}/${subName}`;
-          const existing = eventsByRunId.get(key) || [];
-          existing.push(event);
-          eventsByRunId.set(key, existing);
-          return { id: `event-${existing.length}` };
-        }),
-      }),
-    }),
-  }),
+const mockAdminDb = db;
+/** `${runId}/${subcollection}` → the documents in it, in commit order. */
+const eventsByRunId = {
+  get: (key: string) => {
+    const docs = db.writeLog.filter((w) => w.kind === "create" && w.path.startsWith(`runs/${key}/`)).map((w) => w.data);
+    return docs.length ? docs : undefined;
+  },
+  keys: () => Array.from(new Set(db.paths("runs/").filter((p) => p.split("/").length === 4).map((p) => p.split("/").slice(1, 3).join("/"))))[Symbol.iterator](),
+  clear: () => undefined,
 };
 
 jest.mock("@/lib/firebase/admin", () => ({
   get adminDb() {
-    return firestoreUnavailableFlag.value ? null : mockAdminDb;
+    return firestoreUnavailableFlag.value ? null : db;
   },
 }));
 
@@ -86,7 +60,9 @@ function automatedGovernance(overrides: Partial<NonNullable<GovernanceRecordV1["
 }
 
 beforeEach(() => {
-  runDocs.clear();
+  db.docs.clear();
+  db.hooks = {};
+  db.writeLog = [];
   missingRunIds.clear();
   eventsByRunId.clear();
   firestoreUnavailableFlag.value = false;
@@ -180,17 +156,20 @@ describe("persistAutomatedGovernanceUpdate", () => {
   });
 
   it("does not retry after a write failure", async () => {
+    // Research deletion integrity (2026-11-03): the update now commits through a guarded transaction, so the failure is
+    // injected at commit on the shared transactional fake. Same assertion: exactly one write attempt, no retry.
     const runId = "run-no-retry";
-    const updateMock = jest.fn().mockRejectedValueOnce(new Error("boom"));
-    const brokenAdminDb = { collection: () => ({ doc: () => ({ update: updateMock }) }) };
-    jest.resetModules();
-    jest.doMock("@/lib/firebase/admin", () => ({ adminDb: brokenAdminDb }));
-    jest.doMock("@/lib/logger", () => ({ logger: { warn: jest.fn(), error: jest.fn(), info: jest.fn(), debug: jest.fn() } }));
-    const { persistAutomatedGovernanceUpdate: persistWithBrokenDb } = await import("@/lib/firestore/runs");
-
-    await persistWithBrokenDb(runId, automatedGovernance(), "2026-07-29T13:00:00.000Z");
-    expect(updateMock).toHaveBeenCalledTimes(1);
-    jest.resetModules();
+    runDocs.set(runId, { governanceRecord: { schemaId: "decision_support" } });
+    let commitAttempts = 0;
+    db.hooks.failCommit = () => {
+      commitAttempts++;
+      throw new Error("boom");
+    };
+    const outcome = await persistAutomatedGovernanceUpdate(runId, automatedGovernance(), "2026-07-29T13:00:00.000Z");
+    db.hooks = {};
+    expect(outcome).toEqual({ saved: false, reason: "write_failed" });
+    expect(commitAttempts).toBe(1);
+    expect(db.writeLog).toEqual([]);
   });
 
   it("logs only metadata (runId) on failure — never receipt content, reasons, or reviewer identity", async () => {
@@ -207,6 +186,11 @@ describe("persistAutomatedGovernanceUpdate", () => {
 });
 
 describe("writeAdaptiveGovernanceEvent", () => {
+  // Events are written only for an existing, writable run (deletion barrier).
+  beforeEach(() => {
+    for (const id of ["run-events-1", "run-events-2", "run-x", "run-events-shared-timestamp"]) runDocs.set(id, { governanceRecord: { schemaId: "decision_support" } });
+  });
+
   it("writes the generic governanceEvents shape, using the real (schema-agnostic) contract", async () => {
     const runId = "run-events-1";
     const outcome = await writeAdaptiveGovernanceEvent(runId, automatedGovernance(), "2026-07-29T12:00:00.000Z");
@@ -315,5 +299,17 @@ describe("Concurrency regression — MANDATORY (§18.9)", () => {
     expect(finalRecord.automatedGovernance).toEqual(automatedGovernance());
     expect(finalRecord.humanReview).toEqual({ status: "rejected", reviewerId: "u2" });
     expect(finalRecord.decisionReceipt).toEqual({ conclusion: "original conclusion" });
+  });
+});
+
+describe("writeAdaptiveGovernanceEvent — deletion barrier", () => {
+  it("a run that is deleted, being deleted or missing gets no event", async () => {
+    runDocs.set("run-tomb", { governanceRecord: {} });
+    db.seed("runDeletionJobs/run-tomb", { state: "complete" });
+    runDocs.set("run-mark", { governanceRecord: {}, deletion: { state: "pending" } });
+    for (const id of ["run-tomb", "run-mark", "run-none"]) {
+      expect(await writeAdaptiveGovernanceEvent(id, automatedGovernance(), "2026-07-29T12:00:00.000Z")).toEqual({ written: false, reason: "write_failed" });
+    }
+    expect(db.writeLog).toEqual([]);
   });
 });

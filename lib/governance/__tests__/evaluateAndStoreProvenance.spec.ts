@@ -13,32 +13,28 @@
  */
 import type { GovernanceInput, GovernancePolicy } from "@/lib/governance/evaluateGovernance";
 
+// Research deletion integrity (2026-11-03): for a research run (`runs`), the status, the governance event and the audit
+// row are now written in ONE transaction guarded by the deletion barrier, so this spec uses the shared transactional fake.
+// `writes.sets` / `writes.adds` are views over its applied-write log with the same shape the old fake recorded:
+// sets carry `merge`, adds carry the collection path.
+import { FakeTransactionalFirestore } from "@/lib/workspaces/__tests__/helpers/fakeTransactionalFirestore";
 type Write = { path: string; data: Record<string, unknown>; merge?: boolean };
+const db = new FakeTransactionalFirestore();
+const writes = {
+  get sets(): Write[] {
+    return db.writeLog.filter((w) => w.kind === "set" || w.kind === "merge").map((w) => ({ path: w.path, data: w.data, merge: w.kind === "merge" ? true : undefined }));
+  },
+  get adds(): Write[] {
+    return db.writeLog.filter((w) => w.kind === "create").map((w) => ({ path: w.path.split("/").slice(0, -1).join("/"), data: w.data }));
+  },
+};
+const docs = { get: (path: string) => db.read(path), set: (path: string, data: Record<string, unknown>) => db.seed(path, data) };
 
-const writes: { sets: Write[]; adds: Write[] } = { sets: [], adds: [] };
-const docs = new Map<string, Record<string, unknown>>();
-
-function fakeDoc(path: string): any {
-  return {
-    set: async (data: Record<string, unknown>, opts?: { merge?: boolean }) => {
-      writes.sets.push({ path, data, merge: opts?.merge });
-      docs.set(path, { ...(opts?.merge ? docs.get(path) ?? {} : {}), ...data });
-    },
-    get: async () => ({ exists: docs.has(path), data: () => docs.get(path) }),
-    collection: (name: string) => fakeCollection(`${path}/${name}`),
-  };
-}
-function fakeCollection(path: string): any {
-  return {
-    doc: (id: string) => fakeDoc(`${path}/${id}`),
-    add: async (data: Record<string, unknown>) => {
-      writes.adds.push({ path, data });
-      return { id: `auto-${writes.adds.length}` };
-    },
-  };
-}
-
-jest.mock("@/lib/firebase/admin", () => ({ adminDb: { collection: (name: string) => fakeCollection(name) } }));
+jest.mock("@/lib/firebase/admin", () => ({
+  get adminDb() {
+    return db;
+  },
+}));
 jest.mock("@/lib/admin/entitlements", () => ({ getEffectiveEntitlements: jest.fn(async () => ({ planId: "full" })) }));
 let mockPolicy: GovernancePolicy;
 jest.mock("@/lib/governance/governancePolicyStore", () => ({ loadGovernancePolicy: jest.fn(async () => mockPolicy) }));
@@ -67,9 +63,9 @@ const INPUT: GovernanceInput = {
 };
 
 beforeEach(() => {
-  writes.sets = [];
-  writes.adds = [];
-  docs.clear();
+  db.docs.clear();
+  db.hooks = {};
+  db.writeLog = [];
   mockPolicy = getDefaultGovernancePolicy();
   jest.spyOn(console, "log").mockImplementation(() => undefined);
   jest.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -77,12 +73,12 @@ beforeEach(() => {
 afterEach(() => jest.restoreAllMocks());
 
 async function run(input: GovernanceInput, runId = "vid-1", collection: "runs" | "verifications" | "videoVerifications" = "videoVerifications") {
-  docs.set(`${collection}/${runId}`, { userEmail: "owner@example.test" });
+  if (!docs.get(`${collection}/${runId}`)) docs.set(`${collection}/${runId}`, { userEmail: "owner@example.test" });
   const { evaluateAndStoreGovernance } = loadEvaluateAndStore();
   const res = await evaluateAndStoreGovernance({ runId, collection, input, ownerUid: "uid-1" });
-  const parent = writes.sets.find((w) => w.path === `${collection}/${runId}`)!;
-  const event = writes.adds.find((w) => w.path === `${collection}/${runId}/governanceEvents`)!;
-  const audit = writes.adds.find((w) => w.path === "admin_audit_logs")!;
+  const parent = writes.sets.filter((w) => w.path === `${collection}/${runId}`).pop()!;
+  const event = writes.adds.filter((w) => w.path === `${collection}/${runId}/governanceEvents`).pop()!;
+  const audit = writes.adds.filter((w) => w.path === "admin_audit_logs").pop()!;
   return { res, parent, event, audit };
 }
 
@@ -225,5 +221,42 @@ describe("legacy shapes without D5.1 provenance remain readable", () => {
     expect(ev.data).toEqual(
       expect.objectContaining({ action: "evaluated", nextStatus: "approved", scoreFamily: "claim_verification_v1", scoreThresholdsInEffect: { minConsensusToAvoidReview: 70, minConsensusToAvoidReviewSource: "shared" } })
     );
+  });
+});
+
+describe("research runs: guarded transactions, same documents (research deletion integrity)", () => {
+  it("the parent status and the event commit together in one guarded transaction; the audit row commits in its own (best-effort, like writeAuditEvent)", async () => {
+    db.stats = { commits: 0, retries: 0, aborted: 0 };
+    await run({ ...INPUT, scoreFamily: "research_synthesis_v1", runType: "research" }, "run-t", "runs");
+    expect(db.stats.commits).toBe(2);
+    expect(db.writeLog.map((w) => [w.kind, w.path.split("/").slice(0, -1).join("/") || w.path, w.via])).toEqual([
+      ["merge", "runs", "tx"],
+      ["create", "runs/run-t/governanceEvents", "tx"],
+      ["create", "admin_audit_logs", "tx"],
+    ]);
+  });
+
+  it("the research-run audit row is field-for-field what writeAuditEvent writes for the same evaluation", async () => {
+    const research = { ...INPUT, scoreFamily: "research_synthesis_v1" as const, runType: "research" as const, question: `  ${"Q".repeat(260)}  ` };
+    const viaGuarded = (await run(research, "r-1", "runs")).audit.data;
+    const viaWriteAuditEvent = (await run(research, "r-1", "verifications")).audit.data;
+    const strip = (d: Record<string, unknown>) => {
+      const { collection: _c, at: _a, ...rest } = d;
+      return rest;
+    };
+    expect(strip(viaGuarded)).toEqual(strip(viaWriteAuditEvent));
+    expect(viaGuarded.question).toBe("Q".repeat(198)); // cut to 200 by the caller, then trimmed, exactly as before
+    expect(viaGuarded.collection).toBe("runs");
+  });
+
+  it("deletion barrier: a deleted, deleting or missing research run gets no status, event or audit row", async () => {
+    db.seed("runDeletionJobs/run-d", { state: "complete" });
+    db.seed("runs/run-d", { userEmail: "owner@example.test" });
+    db.seed("runs/run-m", { userEmail: "owner@example.test", deletion: { state: "pending" } });
+    const { evaluateAndStoreGovernance } = loadEvaluateAndStore();
+    for (const runId of ["run-d", "run-m", "run-none"]) {
+      expect(await evaluateAndStoreGovernance({ runId, collection: "runs", input: { ...INPUT, runType: "research" }, ownerUid: "uid-1" })).toBeNull();
+    }
+    expect(db.writeLog).toEqual([]);
   });
 });

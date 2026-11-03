@@ -13,6 +13,8 @@ import {
   runOwnerVisibleInGovernance,
 } from "@/lib/governance/governanceVisibleUserIds";
 import { writeAuditEvent } from "@/lib/governance/auditLog";
+import { writeGuardedGovernanceAuditRow } from "@/lib/governance/governanceAuditRow";
+import { isResearchDeletedInTx, isResearchWriteRefusedError, runResearchWrite } from "@/lib/firestore/researchDeletionBarrier";
 import { resolveGovernanceRequestUser } from "@/lib/governance/authCheck";
 import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
 import { logger } from "@/lib/logger";
@@ -72,6 +74,9 @@ export async function POST(request: NextRequest) {
 
   if (!runId || typeof runId !== "string" || !runId.trim()) {
     fields.runId = "Required non-empty string";
+  } else if (runId.includes("/")) {
+    // A document id is one path segment. A "/" would address a nested document (review round 2, m-2).
+    fields.runId = "Must be a single document id";
   }
   if (coll !== "runs" && coll !== "verifications" && coll !== "videoVerifications") {
     fields.collection = 'Must be "runs", "verifications", or "videoVerifications"';
@@ -270,6 +275,9 @@ export async function POST(request: NextRequest) {
       if (assigned !== resolved.uid) return "revoked" as const;
     }
     if (!current.exists) return "conflict" as const;
+    // Research deletion integrity: a research run that is deleted or being deleted takes no decision (checked in this
+    // transaction, before the write).
+    if (collection === "runs" && (await isResearchDeletedInTx(txn, adminDb!, docId, current))) return "gone" as const;
     const currentData = current.data() as Record<string, unknown>;
     const currentStatus =
       typeof currentData.governanceStatus === "string" && currentData.governanceStatus
@@ -279,6 +287,12 @@ export async function POST(request: NextRequest) {
     txn.set(ref, patch, { merge: true });
     return "committed" as const;
   });
+  if (outcome === "gone") {
+    return NextResponse.json(
+      { ok: false, error: { code: "not_found", message: "Run not found" } },
+      { status: 404 }
+    );
+  }
   if (outcome === "revoked") {
     return NextResponse.json(
       {
@@ -353,7 +367,7 @@ export async function POST(request: NextRequest) {
         })()
       : String(runData.question ?? runData.claim ?? runData.query ?? "").substring(0, 200);
 
-  await writeAuditEvent({
+  const auditEvent = {
     runId: docId,
     collection,
     runType:
@@ -368,10 +382,8 @@ export async function POST(request: NextRequest) {
     runOwnerEmail,
     question: auditQuestion,
     consensusScore: consensusScore ?? null,
-  });
-
-  await ref.collection("governanceEvents").add(
-    sanitizeForFirestore({
+  };
+  const governanceEventDoc = sanitizeForFirestore({
       action: reviewAction,
       byUid: resolved.uid,
       byEmail: resolved.email,
@@ -379,8 +391,28 @@ export async function POST(request: NextRequest) {
       comment: finalComment,
       prevStatus,
       nextStatus: nextGovernanceStatus,
-    }) as DocumentData
-  );
+    }) as DocumentData;
+
+  if (collection === "runs") {
+    // Research deletion integrity: the audit row (question, comment) and the governance event (comment) are each written
+    // in a transaction guarded by the deletion barrier. If the run was deleted after the decision committed, neither is
+    // written. The decision itself committed before the deletion and is removed by it. The audit row stays best-effort,
+    // exactly like writeAuditEvent. The event keeps its own failure behavior: an error still propagates.
+    const db = adminDb;
+    await writeGuardedGovernanceAuditRow(db, docId, auditEvent);
+    try {
+      await runResearchWrite(db, docId, (tx) => {
+        tx.create(ref.collection("governanceEvents").doc(), governanceEventDoc);
+      });
+    } catch (err) {
+      if (!isResearchWriteRefusedError(err)) throw err;
+      logger.warn("[governance/review] run deleted after the decision; governance event not written", { refusal: err.refusal });
+    }
+  } else {
+    await writeAuditEvent(auditEvent);
+
+    await ref.collection("governanceEvents").add(governanceEventDoc);
+  }
 
   return NextResponse.json({
     ok: true,

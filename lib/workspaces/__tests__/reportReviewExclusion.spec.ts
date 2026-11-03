@@ -247,10 +247,15 @@ describe("E: retries after partial failure", () => {
     await create.run(runId);
     await complete.run(runId);
     await persistGoverned.run(runId);
+    const intercepted: number[] = [];
     db.hooks.afterTxReads = async (attempt) => {
+      intercepted.push(attempt);
       if (attempt === 0) await initGovernance.run(runId);
     };
     const res = await submit(runId);
+    // Exactly the submission's transaction was intercepted, once. The injected initialization's own guarded transaction
+    // is not re-intercepted, which was the recursive-hook defect (fakeTransactionalFirestoreHooks.spec.ts).
+    expect(intercepted).toEqual([0]);
     db.hooks = {};
     await initGovernance.run(runId); // a second (retry) initialization
     expect(res.ok).toBe(false);

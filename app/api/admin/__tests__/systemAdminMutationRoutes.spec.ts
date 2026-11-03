@@ -71,8 +71,21 @@ const runDoc = {
   id: "run-1",
   data: () => ({ userId: "victim-uid", userEmail: "victim@test-invented.example", question: "q", governanceStatus: "approved" }),
 };
+/**
+ * Research deletion integrity (2026-11-03): PATCH on a research run writes the override in a transaction guarded by the
+ * deletion barrier, then the admin_audit_logs row in its own guarded transaction (best-effort, like writeAuditEvent). The
+ * barrier reads `runDeletionJobs/{runId}` (the tombstone) and the run. So the double routes by collection (tombstone /
+ * audit row / run) and runs each callback as a transaction that applies its buffered writes only when the callback
+ * succeeds. `auditRowCreate` is the guarded audit-row write that
+ * replaces `writeAuditEvent` for research runs.
+ */
+const auditRowCreate = jest.fn(async () => undefined);
+let tombstoneExists = false;
+const tombstoneHandle = { get: async () => ({ exists: tombstoneExists, data: () => (tombstoneExists ? { state: "complete" } : undefined) }) };
+const auditRowHandle = { create: (...a: unknown[]) => auditRowCreate(...(a as [])) };
 const docHandle = {
-  get: async () => runDoc,
+  ref: undefined as unknown,
+  get: async () => ({ ...runDoc, ref: docHandle }),
   delete: (...a: unknown[]) => docDelete(...(a as [])),
   update: (...a: unknown[]) => docUpdate(...(a as [])),
   set: (...a: unknown[]) => docSet(...(a as [])),
@@ -88,8 +101,8 @@ jest.mock("@/lib/firebase/admin", () => ({
     },
   },
   adminDb: {
-    collection: () => ({
-      doc: () => docHandle,
+    collection: (name: string) => ({
+      doc: () => (name === "runDeletionJobs" ? tombstoneHandle : name === "admin_audit_logs" ? auditRowHandle : docHandle),
       // A non-empty page, so the purge path actually reaches its batch delete.
       // With an empty page `batchDelete`/`batchCommit` never fired for ANY
       // tier, which made the denial assertions unfalsifiable.
@@ -99,10 +112,30 @@ jest.mock("@/lib/firebase/admin", () => ({
       get: async () => ({ empty: false, docs: purgeDocs(), size: purgeDocs().length }),
     }),
     batch: () => ({ delete: (...a: unknown[]) => batchDelete(...(a as [])), commit: () => batchCommit() }),
+    runTransaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+      const buffered: Array<() => unknown> = [];
+      const tx = {
+        get: (ref: { get: () => Promise<unknown> }) => ref.get(),
+        set: (ref: { set: (...a: unknown[]) => unknown }, ...a: unknown[]) => void buffered.push(() => ref.set(...a)),
+        create: (ref: { create: (...a: unknown[]) => unknown }, ...a: unknown[]) => void buffered.push(() => ref.create(...a)),
+      };
+      const result = await fn(tx);
+      for (const w of buffered) await w();
+      return result;
+    },
   },
   firebaseAdmin: { firestore: { Timestamp: { now: () => "TS", fromDate: () => "TS" }, FieldValue: { serverTimestamp: () => "TS", delete: () => "DEL" } } },
 }));
 jest.mock("@/lib/governance/auditLog", () => ({ writeAuditEvent: (...a: unknown[]) => writeAuditEvent(...(a as [])) }));
+// Order A / S1: research deletion (single DELETE of collection=runs, and purge) now goes through the durable workflow —
+// THAT is the guarded destructive effect for these two routes.
+const deleteResearchRun = jest.fn(async (a: { runId: string }) => ({ status: "deleted", runId: a.runId, attempts: 1 }));
+jest.mock("@/lib/firestore/researchDeletion", () => ({
+  deleteResearchRun: (...a: unknown[]) => deleteResearchRun(...(a as [never])),
+  listUnfinishedResearchDeletions: async () => [],
+  getUnfinishedResearchDeletion: async () => false,
+  REDACTED_ADMIN_AUDIT_QUESTION: jest.requireActual("@/lib/firestore/researchDeletion").REDACTED_ADMIN_AUDIT_QUESTION,
+}));
 jest.mock("@/lib/stripe/client", () => ({ stripe: { subscriptions: { retrieve: (...a: unknown[]) => stripeRetrieve(...(a as [])), list: async () => ({ data: [] }) } } }));
 jest.mock("@/app/api/stripe/webhook/route", () => ({ handleSubscriptionChange: (...a: unknown[]) => handleSubscriptionChange(...(a as [])) }));
 jest.mock("@/lib/stripe/usage", () => ({ resetUsageForNewPlan: (...a: unknown[]) => resetUsageForNewPlan(...(a as [])) }));
@@ -128,7 +161,10 @@ const bearer = (url: string, body?: unknown, method = "POST") =>
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 
-const ctx = { params: Promise.resolve({ runId: "run-1" }) } as never;
+// Next 14 passes route params as a plain object, and these handlers destructure `params` directly. A Promise here left
+// `runId` undefined in every handler call. The old Firestore double ignored document ids, which masked that. The
+// deletion barrier refuses an undefined run id, which exposed it.
+const ctx = { params: { runId: "run-1" } } as never;
 
 /** Each case: the call, and every side effect that must not fire. */
 const ROUTES = [
@@ -139,14 +175,16 @@ const ROUTES = [
     // 400 before reaching the guard's protected work, which left every
     // side-effect assertion here unfalsifiable.
     call: () => RUNS_DELETE(bearer("http://localhost/api/admin/runs/run-1?collection=runs", { confirm: true }, "DELETE"), ctx),
-    effects: () => [docDelete, writeAuditEvent],
+    effects: () => [deleteResearchRun, writeAuditEvent],
   },
   {
     name: "PATCH /api/admin/runs/[runId]",
     call: () => RUNS_PATCH(bearer("http://localhost/api/admin/runs/run-1", { collection: "runs", action: "set_governance_status", status: "blocked" }, "PATCH"), ctx),
     // `docUpdate` was a decoy — this handler writes with `.set()`, never
     // `.update()` — so asserting its absence proved nothing.
-    effects: () => [docSet, writeAuditEvent],
+    // Research deletion integrity: for a research run the audit row is created in the guarded transaction
+    // (`auditRowCreate`), not through `writeAuditEvent`.
+    effects: () => [docSet, auditRowCreate],
   },
   {
     name: "POST /api/admin/sync-subscription",
@@ -161,7 +199,7 @@ const ROUTES = [
   {
     name: "POST /api/admin/purge-runs",
     call: () => PURGE_POST(bearer("http://localhost/api/admin/purge-runs", { mode: "olderThan", days: 30, dryRun: false, confirmation: "DELETE" })),
-    effects: () => [batchDelete, batchCommit],
+    effects: () => [deleteResearchRun],
   },
 ];
 
@@ -170,7 +208,8 @@ beforeEach(() => {
   process.env.GOVERNANCE_ADMIN_EMAILS = GOV_ONLY;
   purgePagesServed = 0;
   authRecordThrows = false;
-  for (const f of [docDelete, docUpdate, docSet, batchDelete, batchCommit, writeAuditEvent, handleSubscriptionChange, stripeRetrieve, resetUsageForNewPlan]) f.mockClear();
+  for (const f of [docDelete, docUpdate, docSet, batchDelete, batchCommit, writeAuditEvent, handleSubscriptionChange, stripeRetrieve, resetUsageForNewPlan, deleteResearchRun, auditRowCreate]) f.mockClear();
+  tombstoneExists = false;
   decoded = {};
   authRecord = {};
 });
@@ -247,8 +286,9 @@ describe("audit attribution on the SYSTEM_ADMIN run handlers", () => {
   it("records BOTH the acting uid and the actor address from the live record", async () => {
     AS.system();
     await patch();
-    expect(writeAuditEvent).toHaveBeenCalledWith(
-      expect.objectContaining({ byUid: "s", byEmail: OUTSIDER })
+    // Research run: the audit row is created in the guarded transaction (auditRowCreate), with the same attribution.
+    expect(auditRowCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ byUid: "s", byEmail: OUTSIDER, runId: "run-1", action: "admin_override" })
     );
   });
 
@@ -256,8 +296,8 @@ describe("audit attribution on the SYSTEM_ADMIN run handlers", () => {
     AS.system();
     authRecordThrows = true;
     await patch();
-    expect(writeAuditEvent).toHaveBeenCalledWith(
-      expect.objectContaining({ byUid: "s", byEmail: "" })
+    expect(auditRowCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ byUid: "s", byEmail: "", runId: "run-1" })
     );
   });
 });
@@ -306,5 +346,63 @@ describe("GET /api/admin/runs/[runId] deliberately REMAINS ADMIN_PORTAL", () => 
     decoded = { uid: "p", email: PORTAL_ONLY };
     authRecord = { email: PORTAL_ONLY, emailVerified: true, disabled: true };
     expect((await get()).status).toBe(401);
+  });
+});
+
+describe("Order A / S1: an incomplete research deletion is never reported as deleted", () => {
+  const asSystem = () => {
+    decoded = { uid: "s", email: OUTSIDER, admin: true };
+    authRecord = { email: OUTSIDER, emailVerified: true, disabled: false };
+  };
+  it("DELETE: workflow incomplete → 500 deletion_incomplete (retryable), never ok", async () => {
+    asSystem();
+    deleteResearchRun.mockResolvedValueOnce({ status: "incomplete", runId: "run-1", step: "subtree", error: "x" } as never);
+    const res = await RUNS_DELETE(bearer("http://localhost/api/admin/runs/run-1?collection=runs", { confirm: true }, "DELETE"), ctx);
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ ok: false, error: "deletion_incomplete" });
+  });
+  it("purge: an incomplete run is counted as an error and listed, never in deletedCount", async () => {
+    asSystem();
+    deleteResearchRun.mockImplementation(async (a: { runId: string }) => ({ status: "incomplete", runId: a.runId, step: "verify", error: "x" }) as never);
+    const res = await PURGE_POST(bearer("http://localhost/api/admin/purge-runs", { mode: "olderThan", days: 30, dryRun: false, confirmation: "DELETE" }));
+    const body = await res.json();
+    expect(body.deletedCount).toBe(0);
+    expect(body.errorsCount).toBeGreaterThan(0);
+    expect(body.incompleteRunIds.length).toBe(body.errorsCount);
+    deleteResearchRun.mockImplementation(async (a: { runId: string }) => ({ status: "deleted", runId: a.runId, attempts: 1 }) as never);
+  });
+});
+
+describe("research deletion integrity — PATCH on a research run", () => {
+  const patch = () =>
+    RUNS_PATCH(bearer("http://localhost/api/admin/runs/run-1", { collection: "runs", action: "set_governance_status", status: "blocked" }, "PATCH"), ctx);
+
+  it("a run with a deletion tombstone is Not found: no override, no audit row", async () => {
+    AS.system();
+    tombstoneExists = true;
+    const res = await patch();
+    expect(res.status).toBe(404);
+    expect(docSet).not.toHaveBeenCalled();
+    expect(auditRowCreate).not.toHaveBeenCalled();
+    expect(writeAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("an ordinary run: the override and its audit row are written together, and writeAuditEvent is not used for runs", async () => {
+    AS.system();
+    const res = await patch();
+    expect(res.status).toBe(200);
+    expect(docSet).toHaveBeenCalledTimes(1);
+    expect(auditRowCreate).toHaveBeenCalledTimes(1);
+    expect(writeAuditEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe("research deletion integrity — the admin DELETE evidence row (review m-1)", () => {
+  it("for a research run it carries no research text: question redacted at source, contentRedacted:true", async () => {
+    AS.system();
+    const res = await RUNS_DELETE(bearer("http://localhost/api/admin/runs/run-1?collection=runs", { confirm: true }, "DELETE"), ctx);
+    expect(res.status).toBe(200);
+    expect(writeAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "admin_deleted", runId: "run-1", question: "[deleted research]", contentRedacted: true }));
+    expect(JSON.stringify((writeAuditEvent as jest.Mock).mock.calls)).not.toContain('"question":"q"'); // the run's question
   });
 });

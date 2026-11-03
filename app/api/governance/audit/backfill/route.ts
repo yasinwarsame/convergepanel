@@ -7,6 +7,7 @@ import type { DocumentData } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase/admin";
 import type { GovernanceAuditLogAction } from "@/lib/governance/auditLog";
 import { sanitizeForFirestore } from "@/lib/firestore/sanitizeForFirestore";
+import { isResearchWriteRefusedError, runResearchWrite } from "@/lib/firestore/researchDeletionBarrier";
 import { checkAdminOnly, resolveGovernanceRequestUser } from "@/lib/governance/authCheck";
 
 export const runtime = "nodejs";
@@ -80,7 +81,20 @@ async function backfillCollection(collection: "runs" | "verifications"): Promise
         backfilled: true,
       }) as DocumentData;
 
-      await adminDb.collection("admin_audit_logs").doc(docId).set(payload, { merge: true });
+      const auditRef = adminDb.collection("admin_audit_logs").doc(docId);
+      if (collection === "runs") {
+        // Research deletion integrity: the payload (question, comment) comes from a read made before this write, so it is
+        // written only in a transaction guarded by the deletion barrier. Without it, a run deleted meanwhile could have
+        // its redacted audit row overwritten with the deleted text.
+        try {
+          await runResearchWrite(adminDb, runId, (tx) => void tx.set(auditRef, payload, { merge: true }));
+        } catch (err) {
+          if (isResearchWriteRefusedError(err)) continue;
+          throw err;
+        }
+      } else {
+        await auditRef.set(payload, { merge: true });
+      }
       written += 1;
     }
   }

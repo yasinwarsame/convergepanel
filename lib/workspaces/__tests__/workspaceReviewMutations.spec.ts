@@ -15,6 +15,9 @@ import { Timestamp } from "firebase-admin/firestore";
 
 type StoredDoc = Record<string, unknown>;
 const stores: Record<string, Map<string, StoredDoc>> = {
+  // Research deletion integrity (2026-11-03): the deletion tombstone collection, read inside every review/assignment
+  // transaction. Empty unless a test seeds it, as in Firestore.
+  runDeletionJobs: new Map(),
   workspaces: new Map(),
   workspaceMemberships: new Map(),
   runs: new Map(),
@@ -66,6 +69,8 @@ function makeDocRef(collectionName: string, docId: string) {
   return {
     __collection: collectionName,
     __id: docId,
+    // A real DocumentReference exposes its `id`. The deletion barrier (review M-1) identifies the run by it.
+    id: docId,
     collection: (subCollectionName: string) => ({
       doc: (_subDocId: string) => makeSubDocRef(subCollectionName, docId),
     }),
@@ -392,6 +397,17 @@ describe("putWorkspaceReviewAssignment — infra/rollout", () => {
   });
 });
 
+describe("putWorkspaceReviewAssignment — research deletion integrity (review M-1)", () => {
+  it("a run whose deletion has started (tombstone) is run_not_found and nothing is written; control: allowed without it", async () => {
+    stores.runDeletionJobs.set(RUN_ID, asPersisted({ state: "in_progress" }));
+    const before = JSON.stringify(Object.fromEntries(Object.entries(stores).map(([k, m]) => [k, [...m.entries()]])));
+    expect(await putCall()).toEqual(expect.objectContaining({ ok: false, reason: "run_not_found" }));
+    expect(JSON.stringify(Object.fromEntries(Object.entries(stores).map(([k, m]) => [k, [...m.entries()]])))).toBe(before);
+    stores.runDeletionJobs.delete(RUN_ID);
+    expect((await putCall()).ok).toBe(true);
+  });
+});
+
 describe("putWorkspaceReviewAssignment — authorization", () => {
   it("Owner (reviews.manage): allowed to create an assignment for a Member", async () => {
     const result = await putCall({ uid: OWNER_UID, assignedReviewerUserId: MEMBER_UID, dueAt: null });
@@ -636,6 +652,16 @@ function deleteCall(overrides: Partial<Parameters<typeof deleteWorkspaceReviewAs
 }
 
 describe("deleteWorkspaceReviewAssignment", () => {
+  it("research deletion integrity (review round 2 m-1): a run whose deletion has started is run_not_found and the assignment is unchanged; control: PASS without it", async () => {
+    seedAssignment();
+    stores.runDeletionJobs.set(RUN_ID, asPersisted({ state: "in_progress" }));
+    const before = JSON.stringify(stores.humanReviewAssignment.get(RUN_ID));
+    expect(await deleteCall()).toEqual(expect.objectContaining({ ok: false, reason: "run_not_found" }));
+    expect(JSON.stringify(stores.humanReviewAssignment.get(RUN_ID))).toBe(before);
+    stores.runDeletionJobs.delete(RUN_ID);
+    expect(await deleteCall()).toEqual({ ok: true });
+  });
+
   it("valid manager + correct revision: PASS", async () => {
     seedAssignment();
     const result = await deleteCall();
@@ -782,6 +808,16 @@ function decisionCall(overrides: Partial<Parameters<typeof submitWorkspaceReview
 }
 
 describe("submitWorkspaceReviewDecision — authorization", () => {
+  it("research deletion integrity (review round 2 m-1): a decision on a run whose deletion has started is run_not_found and the record is unchanged; control: ALLOW without it", async () => {
+    seedAssignment({ assignedReviewerUserId: REVIEWER_UID });
+    stores.runDeletionJobs.set(RUN_ID, asPersisted({ state: "in_progress" }));
+    const before = JSON.stringify(stores.runs.get(RUN_ID));
+    expect(await decisionCall()).toEqual(expect.objectContaining({ ok: false, reason: "run_not_found" }));
+    expect(JSON.stringify(stores.runs.get(RUN_ID))).toBe(before);
+    stores.runDeletionJobs.delete(RUN_ID);
+    expect((await decisionCall()).ok).toBe(true);
+  });
+
   it("assigned current Reviewer: ALLOW", async () => {
     seedAssignment({ assignedReviewerUserId: REVIEWER_UID });
     const result = await decisionCall();

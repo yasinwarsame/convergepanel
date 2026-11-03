@@ -6,6 +6,7 @@
  * ignored. Harness (fake Firestore, captured prompts) follows
  * savedRunProvenanceSynthesis.spec.ts.
  */
+import { installDeletionTombstoneCollection } from "@/lib/workspaces/__tests__/helpers/deletionTombstoneCollection";
 jest.mock("@/lib/env", () => ({ OPENAI_API_KEY: "test-key", ANTHROPIC_API_KEY: "test-key" }));
 jest.mock("@/lib/firebase/auth-helpers", () => ({ verifySessionCookie: jest.fn().mockResolvedValue({ uid: "test-uid" }) }));
 jest.mock("@/lib/firebase/auth", () => ({ verifyIdToken: jest.fn() }));
@@ -16,6 +17,19 @@ jest.mock("@/lib/security/rateLimit", () => ({
 const runDocs = new Map<string, Record<string, unknown>>();
 const runWrites: Array<{ id: string; fields: Record<string, unknown> }> = [];
 const mockAdminDb = {
+  // Research deletion integrity (2026-11-03, review round 2 M-2): the synthesis write is now a guarded transactional
+  // update. Buffered like a real transaction: the writes apply only when the callback completes.
+  runTransaction: async (fn: (tx: any) => Promise<unknown>) => {
+    const buffered: Array<() => Promise<unknown>> = [];
+    const result = await fn({
+      get: (ref: any) => ref.get(),
+      update: (ref: any, f: unknown) => void buffered.push(() => ref.update(f)),
+      set: (ref: any, f: unknown, o?: unknown) => void buffered.push(() => ref.set(f, o)),
+      create: (ref: any, f: unknown) => void buffered.push(() => (ref.create ? ref.create(f) : ref.set(f))),
+    });
+    for (const w of buffered) await w();
+    return result;
+  },
   collection: (name: string) => ({
     doc: (id: string) => ({
       get: jest.fn().mockImplementation(async () => {
@@ -36,6 +50,7 @@ const mockAdminDb = {
   }),
 };
 jest.mock("@/lib/firebase/admin", () => ({ adminDb: mockAdminDb }));
+installDeletionTombstoneCollection(mockAdminDb);
 
 // Workspace integrity is exercised for real elsewhere; here a Workspace-bound run is simply "valid".
 jest.mock("@/lib/workspaces/runWorkspaceIntegrity", () => ({
