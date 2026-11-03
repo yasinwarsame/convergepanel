@@ -24,6 +24,7 @@
  */
 import { REPORT_REVIEW_ANALYSIS_LABELS, REPORT_REVIEW_DISCLAIMER, reportReviewPurposeLabel, reportReviewStatusLabel } from "@/lib/governance/reportReviewCopy";
 import type { ReportReviewAnalysis, ReportReviewRecordV1, ReportReviewScope } from "@/lib/governance/reportReview";
+import type { ReportReviewContentFingerprint } from "@/lib/governance/reportReviewContent";
 import type { RunReadPayload } from "@/lib/runs/runReadPayload";
 
 export const REPORT_REVIEW_EXPORT_FORMAT = "convergepanel.report-review-record";
@@ -40,6 +41,8 @@ export interface ReportReviewExportCycle {
   conditions: string[];
   current: boolean;
   scopeAtSubmission: ReportReviewScope;
+  /** Order A: the fingerprint of the exact content this cycle was submitted (and, if decided, decided) on. */
+  contentFingerprint: ReportReviewContentFingerprint | null;
 }
 
 export interface ReportReviewExportV1 {
@@ -76,6 +79,13 @@ export interface ReportReviewExportV1 {
     decidedAt: string | null;
     conditions: string[];
     reviewer: "withheld";
+    contentFingerprint: ReportReviewContentFingerprint | null;
+    /**
+     * Order A: "matches" — the research content below IS the content this cycle was submitted with; "changed" — it is
+     * NOT (the content below is the current research, and this cycle's status does not apply to it); "unverifiable" —
+     * the cycle has no usable fingerprint.
+     */
+    contentIntegrity: "matches" | "changed" | "unverifiable";
   };
   decisionHistory: ReportReviewExportCycle[];
 }
@@ -111,6 +121,7 @@ function cycleEntry(r: ReportReviewRecordV1, current: boolean): ReportReviewExpo
     conditions: r.humanReview.conditions ? [...r.humanReview.conditions] : [],
     current,
     scopeAtSubmission: { ...r.scope },
+    contentFingerprint: r.contentFingerprint ? { ...r.contentFingerprint } : null,
   };
 }
 
@@ -125,6 +136,8 @@ export function buildReportReviewExport(args: {
   archivedCycles: ReportReviewRecordV1[];
   /** compareReportReviewScope(record.scope, run): the run's analyses now, and those added since submission. */
   drift: { current: ReportReviewScope; changedSinceSubmission: ReportReviewAnalysis[] };
+  /** Order A: the route's comparison of the run's current fingerprint with the cycle's (server-computed). */
+  contentIntegrity: "matches" | "changed" | "unverifiable";
 }): ReportReviewExportV1 {
   const { payload, record, drift } = args;
   const hr = record.humanReview;
@@ -161,6 +174,8 @@ export function buildReportReviewExport(args: {
       decidedAt: hr.reviewedAt ?? null,
       conditions: hr.conditions ? [...hr.conditions] : [],
       reviewer: "withheld",
+      contentFingerprint: record.contentFingerprint ? { ...record.contentFingerprint } : null,
+      contentIntegrity: args.contentIntegrity,
     },
     decisionHistory: [...args.archivedCycles.map((c) => cycleEntry(c, false)), cycleEntry(record, true)],
   };
@@ -204,6 +219,15 @@ export function renderReportReviewExportHtml(doc: ReportReviewExportV1): string 
 </head><body>
 <h1>Report review record</h1>
 <p class="disclaimer">${e(doc.disclaimer)}</p>
+${
+  doc.review.contentIntegrity === "matches"
+    ? `<p class="muted">The research below is exactly the content review cycle ${doc.review.currentCycle} was submitted with (fingerprint ${e(doc.review.contentFingerprint!.algorithm)}:${e(doc.review.contentFingerprint!.digest)}).</p>`
+    : `<p class="disclaimer"><strong>${
+        doc.review.contentIntegrity === "changed"
+          ? `The research has changed since review cycle ${doc.review.currentCycle} was submitted. The content below is the CURRENT research, NOT the version that was reviewed, and this cycle's status does not apply to it.`
+          : `The content submitted for review cycle ${doc.review.currentCycle} cannot be verified. The content below is the current research and this cycle's status does not apply to it.`
+      }</strong></p>`
+}
 <h2>Review</h2>
 <table><tbody>
 <tr><th>Status</th><td>${e(doc.review.statusLabel)}</td></tr>

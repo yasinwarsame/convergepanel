@@ -31,6 +31,7 @@ import { reportReviewCaller, reportReviewErrorBody } from "@/lib/workspaces/repo
 import { REPORT_REVIEW_CYCLES_COLLECTION } from "@/lib/workspaces/reportReviewCollections";
 import { internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
 import { buildReportReviewExport, checkArchivedCycles, renderReportReviewExportHtml } from "@/lib/workspaces/reportReviewExport";
+import { computeReportReviewContentFingerprint, sameReportReviewContent } from "@/lib/governance/reportReviewContent";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -120,7 +121,10 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
   const payload = await buildRunReadPayload({ runId, data, viewerRole, mayReadDecisionContent: true, resolveReviewRouting: resolveRunReviewRouting });
 
   const drift = compareReportReviewScope(record.scope, data, record.submittedAt);
-  const doc = buildReportReviewExport({ generatedAt: new Date().toISOString(), runId, payload, record, archivedCycles: history.cycles, drift });
+  // Order A: is the content below exactly what this cycle was submitted with? (server-computed, rrc-v1)
+  const currentFp = computeReportReviewContentFingerprint(data);
+  const contentIntegrity = !record.contentFingerprint || !currentFp.ok ? "unverifiable" : sameReportReviewContent(record.contentFingerprint, currentFp.fingerprint) ? "matches" : "changed";
+  const doc = buildReportReviewExport({ generatedAt: new Date().toISOString(), runId, payload, record, archivedCycles: history.cycles, drift, contentIntegrity });
   const filename = `report-review-${runId}-cycle-${record.cycle}.${format}`;
   const headers = { "Content-Disposition": `attachment; filename="${filename}"`, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
   if (format === "json") return new NextResponse(JSON.stringify(doc, null, 2), { status: 200, headers: { ...headers, "Content-Type": "application/json; charset=utf-8" } });

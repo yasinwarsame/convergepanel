@@ -39,6 +39,7 @@ import {
 } from "@/lib/governance/reportReview";
 import { evaluateReportReviewDecisionAuthority, type ReportReviewDecisionDenial } from "@/lib/governance/reportReviewDecision";
 import { parseAdaptiveHumanReviewPanel } from "@/lib/governance/adaptiveHumanReviewPanel";
+import { computeReportReviewContentFingerprint, sameReportReviewContent, type ReportReviewContentFingerprint } from "@/lib/governance/reportReviewContent";
 
 /** Bounded: a run's history is a handful of events per cycle; the newest 200 are returned. */
 export const REPORT_REVIEW_HISTORY_LIMIT = 200;
@@ -61,6 +62,7 @@ export interface ReportReviewHistoryItem {
   purposeCode?: string;
   previousReviewerDisplayName?: string | null;
   reviewerDisplayName?: string | null;
+  closedReason?: "decided" | "content_changed";
 }
 
 export interface ReportReviewAssignmentInfo {
@@ -74,6 +76,7 @@ export interface ReportReviewAssignmentInfo {
 }
 
 type PanelDenial = "active_panel" | "panel_unreadable";
+type ContentDenial = "content_changed" | "content_unverifiable";
 
 export type ReportReviewContextResult =
   | {
@@ -81,7 +84,13 @@ export type ReportReviewContextResult =
       record: ReportReviewRecordV1;
       previousCycles: ReportReviewCycleSummary[];
       assignment: { assignedReviewerUserId: string | null; revision: number; info: ReportReviewAssignmentInfo | null };
-      viewer: { canDecide: boolean; denial: ReportReviewDecisionDenial | PanelDenial | null; canResubmit: boolean; canManageAssignment: boolean };
+      viewer: { canDecide: boolean; denial: ReportReviewDecisionDenial | PanelDenial | ContentDenial | null; canResubmit: boolean; canManageAssignment: boolean };
+      /**
+       * Order A: whether the research now is EXACTLY the content this cycle was submitted with (server-computed
+       * fingerprint, rrc-v1). "changed": no decision can be recorded; the cycle must be resubmitted. "unverifiable":
+       * the cycle has no usable fingerprint (fails closed exactly like the decision transaction).
+       */
+      contentIntegrity: { status: "matches" | "changed" | "unverifiable"; fingerprint: ReportReviewContentFingerprint | null };
       names: Record<string, string>;
       history: ReportReviewHistoryItem[];
       /** Review M-2: analyses absent from the run now, and analyses saved after this cycle was submitted (not reviewed). */
@@ -204,6 +213,7 @@ export async function getReportReviewContext(args: { uid: string; workspaceId: s
           cycle: typeof e.cycle === "number" ? e.cycle : typeof e.toCycle === "number" ? e.toCycle : record.cycle,
         };
         if (e.type === "report_review_decided" && typeof e.status === "string") item.status = e.status;
+        if (e.type === "report_review_resubmitted" && (e.closedReason === "decided" || e.closedReason === "content_changed")) item.closedReason = e.closedReason;
         if (typeof e.purposeCode === "string") item.purposeCode = e.purposeCode;
         if (e.type === "report_review_assignment_changed") {
           item.previousReviewerDisplayName = nameOf(str(e.previousReviewerUserId));
@@ -235,7 +245,12 @@ export async function getReportReviewContext(args: { uid: string; workspaceId: s
     const decided = isReportReviewDecided(record);
     const { reportReview: _omit, ...withoutRecord } = run;
     void _omit;
-    const canResubmit = decided && mayOrganize && panelDenial === null && evaluateReportReviewEligibility(withoutRecord).eligible;
+    // Order A: the same content check the decision transaction applies.
+    const currentFp = computeReportReviewContentFingerprint(run);
+    const integrity: "matches" | "changed" | "unverifiable" = !record.contentFingerprint || !currentFp.ok ? "unverifiable" : sameReportReviewContent(record.contentFingerprint, currentFp.fingerprint) ? "matches" : "changed";
+    const contentDenial: ContentDenial | null = decided ? null : integrity === "changed" ? "content_changed" : integrity === "unverifiable" ? "content_unverifiable" : null;
+    // A new cycle may start after a decision, or (the resubmit transaction's own rule) when an open cycle's content changed.
+    const canResubmit = (decided || integrity === "changed") && mayOrganize && panelDenial === null && currentFp.ok && evaluateReportReviewEligibility(withoutRecord).eligible;
     const canManageAssignment = !decided && roleHasCapability(role, "reviews.manage") && roleHasCapability(role, "research.read") && panelDenial === null;
 
     return {
@@ -244,7 +259,13 @@ export async function getReportReviewContext(args: { uid: string; workspaceId: s
       previousCycles,
       assignment: { assignedReviewerUserId: assignedUid, revision: typeof assignment?.revision === "number" ? assignment.revision : 0, info },
       viewer: {
-        ...(panelDenial ? { canDecide: false, denial: panelDenial } : authority.authorized ? { canDecide: true, denial: null } : { canDecide: false, denial: authority.reason }),
+        ...(panelDenial
+          ? { canDecide: false, denial: panelDenial }
+          : !authority.authorized
+            ? { canDecide: false, denial: authority.reason }
+            : contentDenial
+              ? { canDecide: false, denial: contentDenial }
+              : { canDecide: true, denial: null }),
         canResubmit,
         canManageAssignment,
       },
@@ -252,6 +273,7 @@ export async function getReportReviewContext(args: { uid: string; workspaceId: s
       history,
       content: (({ absentNow, changedSinceSubmission }) => ({ absentNow, changedSinceSubmission }))(compareReportReviewScope(record.scope, run, record.submittedAt)),
       historyIncomplete,
+      contentIntegrity: { status: integrity, fingerprint: record.contentFingerprint ?? null },
       disclaimer: REPORT_REVIEW_DISCLAIMER,
     };
   } catch (err) {

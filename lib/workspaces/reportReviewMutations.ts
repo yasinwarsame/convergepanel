@@ -45,6 +45,7 @@ import {
 
 import { REPORT_REVIEW_CYCLES_COLLECTION, REPORT_REVIEW_EVENTS_COLLECTION } from "./reportReviewCollections";
 import { runQuestionSnapshot, writeReportReviewWorkspaceAuditEvent } from "./reportReviewWorkspaceAudit";
+import { computeReportReviewContentFingerprint, sameReportReviewContent } from "@/lib/governance/reportReviewContent";
 export { REPORT_REVIEW_CYCLES_COLLECTION, REPORT_REVIEW_EVENTS_COLLECTION };
 
 export type ReportReviewMutationFailure =
@@ -52,7 +53,9 @@ export type ReportReviewMutationFailure =
   | { ok: false; reason: TeamMutationAuthorizationDenialReason | "insufficient_capability" }
   | { ok: false; reason: "run_not_found" | "active_panel" | "panel_unreadable" | "invalid_purpose" }
   | { ok: false; reason: "ineligible"; ineligible: ReportReviewIneligibleReason }
-  | { ok: false; reason: "not_decided" | "cycle_conflict" | "record_malformed" };
+  | { ok: false; reason: "not_decided" | "cycle_conflict" | "record_malformed" }
+  /** Order A: the saved content could not be canonically fingerprinted (unsupported value or over the size bound). */
+  | { ok: false; reason: "content_unfingerprintable" };
 
 export type SubmitReportReviewResult = { ok: true; created: boolean; record: ReportReviewRecordV1 } | ReportReviewMutationFailure;
 export type ResubmitReportReviewResult = { ok: true; record: ReportReviewRecordV1; archivedCycle: number } | ReportReviewMutationFailure;
@@ -132,7 +135,10 @@ export async function submitReportReview(args: { uid: string; workspaceId: strin
         return { ok: false, reason: "ineligible", ineligible: eligibility.reason };
       }
 
-      const record = buildReportReviewRecord({ cycle: 1, scope: eligibility.scope, purpose: purpose.purpose, actorUid: args.uid, now });
+      // Order A: bind the cycle to the exact content as read in THIS transaction (server-computed, never client-supplied).
+      const fp = computeReportReviewContentFingerprint(pre.run);
+      if (!fp.ok) return { ok: false, reason: "content_unfingerprintable" };
+      const record = buildReportReviewRecord({ cycle: 1, scope: eligibility.scope, purpose: purpose.purpose, actorUid: args.uid, now, contentFingerprint: fp.fingerprint });
       tx.update(pre.runRef, { reportReview: record });
       tx.create(
         pre.runRef.collection(REPORT_REVIEW_EVENTS_COLLECTION).doc(),
@@ -181,7 +187,15 @@ export async function resubmitReportReview(args: { uid: string; workspaceId: str
       const current = parseReportReviewRecord(pre.run.reportReview);
       if (!current.ok) return current.reason === "absent" ? { ok: false, reason: "ineligible", ineligible: "no_review_information" } : { ok: false, reason: "record_malformed" };
       if (current.record.cycle !== expectedCycle) return { ok: false, reason: "cycle_conflict" };
-      if (!isReportReviewDecided(current.record)) return { ok: false, reason: "not_decided" };
+      // Order A: the content as read in THIS transaction becomes the new cycle's fingerprint.
+      const fp = computeReportReviewContentFingerprint(pre.run);
+      if (!fp.ok) return { ok: false, reason: "content_unfingerprintable" };
+      // A new cycle starts after a decision, or when the research changed while the cycle was open (the open cycle is
+      // then superseded undecided; it can never be decided on content it was not submitted with).
+      const decided = isReportReviewDecided(current.record);
+      const contentChanged = current.record.contentFingerprint !== undefined && !sameReportReviewContent(current.record.contentFingerprint, fp.fingerprint);
+      if (!decided && !contentChanged) return { ok: false, reason: "not_decided" };
+      const closedReason = decided ? ("decided" as const) : ("content_changed" as const);
 
       // The exclusion rule must still hold (evaluated as if no report review existed yet).
       const { reportReview: _ignored, ...withoutReportReview } = pre.run;
@@ -197,9 +211,9 @@ export async function resubmitReportReview(args: { uid: string; workspaceId: str
       // ---- writes (all reads done) ----
       tx.create(
         pre.runRef.collection(REPORT_REVIEW_CYCLES_COLLECTION).doc(String(current.record.cycle)),
-        buildReportReviewCycleArchive({ runId: args.runId, record: current.record, assignment, actorUid: args.uid, now })
+        buildReportReviewCycleArchive({ runId: args.runId, record: current.record, assignment, actorUid: args.uid, now, closedReason })
       );
-      const next = buildReportReviewRecord({ cycle: current.record.cycle + 1, scope: eligibility.scope, purpose: purpose.purpose, actorUid: args.uid, now });
+      const next = buildReportReviewRecord({ cycle: current.record.cycle + 1, scope: eligibility.scope, purpose: purpose.purpose, actorUid: args.uid, now, contentFingerprint: fp.fingerprint });
       tx.update(pre.runRef, { reportReview: next });
       tx.set(assignmentRef, {
         schemaVersion: 1,
@@ -219,7 +233,7 @@ export async function resubmitReportReview(args: { uid: string; workspaceId: str
       });
       tx.create(
         pre.runRef.collection(REPORT_REVIEW_EVENTS_COLLECTION).doc(),
-        eventDoc({ type: "report_review_resubmitted", runId: args.runId, workspaceId: pre.workspaceId, projectId: pre.projectId, actorUid: args.uid, fromCycle: current.record.cycle, toCycle: next.cycle, purposeCode: next.purpose.code, at: now })
+        { ...eventDoc({ type: "report_review_resubmitted", runId: args.runId, workspaceId: pre.workspaceId, projectId: pre.projectId, actorUid: args.uid, fromCycle: current.record.cycle, toCycle: next.cycle, purposeCode: next.purpose.code, at: now }), closedReason }
       );
       const previousReviewerUserId = typeof assignment?.assignedReviewerUserId === "string" ? assignment.assignedReviewerUserId : null;
       // B3: one Workspace Audit row records the archive of the decided cycle, the new cycle, and the reviewer reset.
@@ -236,6 +250,7 @@ export async function resubmitReportReview(args: { uid: string; workspaceId: str
           fromCycle: current.record.cycle,
           purposeCode: next.purpose.code,
           clearedReviewerUid: previousReviewerUserId,
+          closedReason,
         },
         now
       );

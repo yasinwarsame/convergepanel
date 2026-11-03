@@ -149,7 +149,7 @@ interface WorkspaceReportReviewEventIdentity {
 
 export type ReportReviewWorkspaceAuditArgs =
   | (WorkspaceReportReviewEventIdentity & { eventType: "workspace_report_review_submitted"; purposeCode: string })
-  | (WorkspaceReportReviewEventIdentity & { eventType: "workspace_report_review_resubmitted"; fromCycle: number; purposeCode: string; clearedReviewerUid: string | null })
+  | (WorkspaceReportReviewEventIdentity & { eventType: "workspace_report_review_resubmitted"; fromCycle: number; purposeCode: string; clearedReviewerUid: string | null; closedReason: "decided" | "content_changed" })
   | (WorkspaceReportReviewEventIdentity & { eventType: "workspace_report_review_reviewer_changed"; previousReviewerUid: string | null; reviewerUid: string | null; revision: number })
   | (WorkspaceReportReviewEventIdentity & { eventType: "workspace_report_review_decided"; priorStatus: string; status: string; purposeCode: string });
 

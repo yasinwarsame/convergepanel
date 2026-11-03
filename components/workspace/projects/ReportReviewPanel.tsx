@@ -58,6 +58,8 @@ const DECISION_DENIAL_TEXT: Record<string, string> = {
   not_assigned: "Only the assigned reviewer can record a decision.",
   stale_assignment: "The reviewer assignment belongs to an earlier cycle. A manager must assign a reviewer for this cycle.",
   not_open: "",
+  content_changed: "",
+  content_unverifiable: "",
 };
 
 function formatWhen(iso: string | null | undefined): string {
@@ -391,6 +393,17 @@ export default function ReportReviewPanel({ workspaceId, runId, canCreateExport 
 
       <ReportReviewDisclaimer />
 
+      {/* Order A: a decision only ever applies to the exact content submitted; changed content needs a new cycle. */}
+      {ctx.contentIntegrity.status !== "matches" && (
+        <p data-testid="report-review-content-integrity" role="alert" className="mt-3 rounded-lg border border-cp-orange bg-cp-orange-soft px-3 py-2 text-sm text-cp-text">
+          {ctx.contentIntegrity.status === "changed"
+            ? decided
+              ? `This research has changed since review cycle ${record.cycle} was submitted. The decision above applies only to the version that was submitted, not to the current research.`
+              : "This research has changed since it was submitted, so no decision can be recorded for this cycle. It must be submitted again for a new review."
+            : "The submitted content of this cycle can't be verified, so no decision can be recorded. It must be submitted again for a new review."}
+        </p>
+      )}
+
       {!decided && (
         <ReviewAssignmentCard
           workspaceId={workspaceId}
@@ -416,7 +429,10 @@ export default function ReportReviewPanel({ workspaceId, runId, canCreateExport 
 
       {viewer.canResubmit && (
         <div className="mt-4 border-t border-cp-border-soft pt-3">
-          <p className="text-sm text-cp-text">Submit again to start review cycle {record.cycle + 1}. This cycle&apos;s decision stays in the history unchanged.</p>
+          <p className="text-sm text-cp-text">
+            Submit again to start review cycle {record.cycle + 1} with the research as it is now.{" "}
+            {decided ? "This cycle's decision stays in the history unchanged, tied to the version it reviewed." : "This cycle closes without a decision and stays in the history."}
+          </p>
           <PurposeForm submitLabel="Submit again" pending={pending} onSubmit={(purpose) => run(() => resubmitReportReviewRequest({ workspaceId, runId, user, authReady, purpose, expectedCycle: record.cycle }))} />
         </div>
       )}
@@ -454,7 +470,9 @@ export default function ReportReviewPanel({ workspaceId, runId, canCreateExport 
                 {h.type === "report_review_submitted"
                   ? `submitted by ${h.actorDisplayName}`
                   : h.type === "report_review_resubmitted"
-                    ? `resubmitted by ${h.actorDisplayName}`
+                    ? h.closedReason === "content_changed"
+                      ? `resubmitted by ${h.actorDisplayName} after the research changed (the previous cycle closed without a decision)`
+                      : `resubmitted by ${h.actorDisplayName}`
                     : h.type === "report_review_decided"
                       ? `${reportReviewStatusLabel(h.status ?? "")} by ${h.actorDisplayName}`
                       : h.reviewerDisplayName

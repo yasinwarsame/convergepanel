@@ -123,6 +123,8 @@ describe("export content", () => {
       decidedAt: "2026-11-02T14:00:00.000Z",
       conditions: [`Cite ${XSS}`],
       reviewer: "withheld",
+      contentFingerprint: { version: "rrc-v1", algorithm: "sha256", digest: expect.stringMatching(/^[0-9a-f]{64}$/), canonicalBytes: expect.any(Number) },
+      contentIntegrity: "matches",
     });
     expect(doc.decisionHistory.map((c) => [c.cycle, c.status, c.purposeCode, c.decidedAt, c.current])).toEqual([
       [1, "changes_requested", "client_delivery", "2026-11-02T12:00:00.000Z", false],
@@ -263,7 +265,7 @@ describe("builder is pure and never fabricates analysis", () => {
   it("present synthesis is carried verbatim; absent stays null", () => {
     const record = { version: 1, kind: "report_review", cycle: 1, scope: { schemaId: "generic", unifiedAnswer: "present", synthesis: "present", consensus: "absent", respondedModels: 2, requestedModels: 2 }, purpose: { code: "other", note: null }, humanReview: { status: "unreviewed" }, submittedAt: "t", submittedByUserId: "u", createdAt: "t", updatedAt: "t" } as ReportReviewRecordV1;
     const payload = { question: "Q", selectedModels: [], results: [], synthesisCache: { report: { summary: "S" }, schemaVersion: 1, synthesizedBy: "m", consensusSummary: null }, legacyAdaptive: { status: "absent", output: null } } as never;
-    const doc = buildReportReviewExport({ generatedAt: "g", runId: "r", payload, record, archivedCycles: [], drift: { current: record.scope, changedSinceSubmission: [] } });
+    const doc = buildReportReviewExport({ generatedAt: "g", runId: "r", payload, record, archivedCycles: [], drift: { current: record.scope, changedSinceSubmission: [] }, contentIntegrity: "unverifiable" });
     expect(doc.research.synthesis).toEqual({ summary: "S" });
     expect(doc.research.structuredResult).toBeNull();
     expect(renderReportReviewExportHtml(doc)).toContain("This report does not contain a consensus summary; none was generated or verified.");

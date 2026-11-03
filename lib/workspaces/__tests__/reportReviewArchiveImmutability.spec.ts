@@ -195,6 +195,8 @@ describe("2. the dual-record invariant's assumptions are pinned", () => {
       "lib/governance/evaluateAdaptiveGovernance.ts": 7,
       "lib/governance/personalReviewInbox.ts": 3,
       "lib/governance/reportReview.ts": 3,
+      // Order A: names governanceRecord once, in the content boundary's EXCLUSION list (never read or written).
+      "lib/governance/reportReviewContent.ts": 1,
       "lib/governance/reviewIntegrityMetrics.ts": 2,
       "lib/governance/teamReviewLabels.ts": 1,
       "lib/governance/teamReviewQueueEnrichment.ts": 6,

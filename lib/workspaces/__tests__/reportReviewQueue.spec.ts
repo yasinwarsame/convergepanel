@@ -27,7 +27,7 @@ jest.mock("@/lib/workspaces/approvalWorkflowRollout", () => ({ resolveApprovalWo
 import { NextRequest } from "next/server";
 import { Timestamp } from "firebase-admin/firestore";
 import { GET } from "@/app/api/workspaces/[workspaceId]/review-queue/route";
-import { buildSeed, seedDb, seedDroppedBlock, pageAllWithProgress, expectedStatusView, expectedAssignedToMe, pageAll, type QueueFn, type SeedRun, W, W2, OWNER, REVIEWER, SUBMITTER, CREATOR } from "./helpers/reviewQueueScenario";
+import { buildSeed, seedDb, seedDroppedBlock, pageAllWithProgress, expectedStatusView, expectedAssignedToMe, pageAll, type QueueFn, type SeedRun, W, W2, OWNER, REVIEWER, SUBMITTER, CREATOR, TEST_CONTENT_FINGERPRINT } from "./helpers/reviewQueueScenario";
 import { buildReportReviewRecord } from "@/lib/governance/reportReview";
 
 async function call(view: string, uid: string, limit: number, cursor: string | null, workspaceId = W) {
@@ -129,7 +129,7 @@ describe("concurrent changes between pages", () => {
     const between = async (page: number) => {
       if (page === 1) {
         // (a) a submission OLDER than everything (lands after the cursor: must appear)
-        const old = buildReportReviewRecord({ cycle: 1, scope: { schemaId: "generic", unifiedAnswer: "absent", synthesis: "absent", consensus: "absent", respondedModels: 1, requestedModels: 1 }, purpose: { code: "other", note: null }, actorUid: SUBMITTER, now: "2026-11-02T09:00:00.000Z" });
+        const old = buildReportReviewRecord({ cycle: 1, scope: { schemaId: "generic", unifiedAnswer: "absent", synthesis: "absent", consensus: "absent", respondedModels: 1, requestedModels: 1 }, purpose: { code: "other", note: null }, actorUid: SUBMITTER, now: "2026-11-02T09:00:00.000Z", contentFingerprint: TEST_CONTENT_FINGERPRINT });
         await db.collection("runs").doc("rr-late-old").set({ userId: CREATOR, workspaceId: W, projectId: null, question: "late", status: "complete", createdAt: Timestamp.fromMillis(Date.UTC(2020, 0, 1)), reportReview: old });
         inserted.push("rr-late-old");
         // (b) a submission NEWER than everything (lands before the cursor: correctly not on later pages)

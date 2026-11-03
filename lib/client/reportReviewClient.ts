@@ -38,6 +38,7 @@ export interface ReportReviewClientHistoryItem {
   purposeCode?: string;
   previousReviewerDisplayName?: string | null;
   reviewerDisplayName?: string | null;
+  closedReason?: "decided" | "content_changed";
 }
 
 export interface ReportReviewClientCycle {
@@ -60,6 +61,7 @@ export type ReportReviewContext =
       history: ReportReviewClientHistoryItem[];
       content: { absentNow: string[]; changedSinceSubmission: string[] };
       historyIncomplete: boolean;
+      contentIntegrity: { status: "matches" | "changed" | "unverifiable" };
       disclaimer: string;
     }
   | { state: "not_submitted"; eligibility: { eligible: true } | { eligible: false; reason: string }; viewer: { canSubmit: boolean }; disclaimer: string };
@@ -95,6 +97,8 @@ export function parseReportReviewContextResponse(json: unknown): ReportReviewCon
   const content = json.content;
   const strArr = (v: unknown): v is string[] => Array.isArray(v) && v.every(isStr);
   if (!isObj(content) || !strArr(content.absentNow) || !strArr(content.changedSinceSubmission) || typeof json.historyIncomplete !== "boolean") return null;
+  const integrity = json.contentIntegrity;
+  if (!isObj(integrity) || !(integrity.status === "matches" || integrity.status === "changed" || integrity.status === "unverifiable")) return null;
   return {
     state: "submitted",
     record: r as unknown as ReportReviewClientRecord,
@@ -105,6 +109,7 @@ export function parseReportReviewContextResponse(json: unknown): ReportReviewCon
     history: json.history as ReportReviewClientHistoryItem[],
     content: { absentNow: content.absentNow as string[], changedSinceSubmission: content.changedSinceSubmission as string[] },
     historyIncomplete: json.historyIncomplete,
+    contentIntegrity: { status: integrity.status },
     disclaimer: json.disclaimer,
   };
 }

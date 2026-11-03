@@ -70,6 +70,8 @@ export function reportReviewFailureResponse(failure: ReportReviewMutationFailure
       return reportReviewErrorBody(409, "not_decided", "The current review cycle has no decision yet, so it can't be resubmitted.");
     case "cycle_conflict":
       return reportReviewErrorBody(409, "cycle_conflict", "This review changed since you last viewed it. Refresh and try again.");
+    case "content_unfingerprintable":
+      return reportReviewErrorBody(409, "content_unfingerprintable", "This research can't be submitted for approval: its saved content could not be recorded exactly for review.");
     case "panel_unreadable":
     case "record_malformed":
     case "firestore_unavailable":
