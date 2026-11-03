@@ -312,3 +312,27 @@ describe("GET /api/admin/runs/[runId] deliberately REMAINS ADMIN_PORTAL", () => 
     expect((await get()).status).toBe(401);
   });
 });
+
+describe("Order A / S1: an incomplete research deletion is never reported as deleted", () => {
+  const asSystem = () => {
+    decoded = { uid: "s", email: OUTSIDER, admin: true };
+    authRecord = { email: OUTSIDER, emailVerified: true, disabled: false };
+  };
+  it("DELETE: workflow incomplete → 500 deletion_incomplete (retryable), never ok", async () => {
+    asSystem();
+    deleteResearchRun.mockResolvedValueOnce({ status: "incomplete", runId: "run-1", step: "subtree", error: "x" } as never);
+    const res = await RUNS_DELETE(bearer("http://localhost/api/admin/runs/run-1?collection=runs", { confirm: true }, "DELETE"), ctx);
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ ok: false, error: "deletion_incomplete" });
+  });
+  it("purge: an incomplete run is counted as an error and listed, never in deletedCount", async () => {
+    asSystem();
+    deleteResearchRun.mockImplementation(async (a: { runId: string }) => ({ status: "incomplete", runId: a.runId, step: "verify", error: "x" }) as never);
+    const res = await PURGE_POST(bearer("http://localhost/api/admin/purge-runs", { mode: "olderThan", days: 30, dryRun: false, confirmation: "DELETE" }));
+    const body = await res.json();
+    expect(body.deletedCount).toBe(0);
+    expect(body.errorsCount).toBeGreaterThan(0);
+    expect(body.incompleteRunIds.length).toBe(body.errorsCount);
+    deleteResearchRun.mockImplementation(async (a: { runId: string }) => ({ status: "deleted", runId: a.runId, attempts: 1 }) as never);
+  });
+});
