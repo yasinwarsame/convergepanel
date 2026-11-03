@@ -107,6 +107,17 @@ describe("rrc-v1 canonical form and fingerprint (pure)", () => {
     return r.fingerprint.digest;
   };
 
+  it("the exclusion list is exactly the documented one (a removal or addition must be a reviewed boundary change)", () => {
+    expect(Object.keys(REPORT_REVIEW_CONTENT_EXCLUDED_FIELDS).sort()).toEqual(
+      [
+        "userId", "workspaceId", "projectId", "assigneeUid", "assigneeUids", "origin", "createdAt", "completedAt", "synthesizedAt", "synthesisInputHash", "synthesisMetadata",
+        "tokenUsage", "totalTokens", "tokensByModel", "tokensByProvider", "promptTokensByProvider", "completionTokensByProvider", "geminiHasUsageMetadata", "documentSizeChars",
+        "adaptiveExportCounter", "reportReview", "governanceRecord", "teamGovernance", "errorMessage", "governanceStatus", "governanceReasons", "governanceMeta", "adaptiveRetryUsage",
+      ].sort()
+    );
+    expect(digest(storedRun({ synthesizedAt: Timestamp.now() }))).toBe(GOLDEN_DIGEST);
+  });
+
   it.each(Object.keys(REPORT_REVIEW_CONTENT_EXCLUDED_FIELDS))("excluded field %s never changes the fingerprint", (field) => {
     expect(digest(storedRun({ [field]: { changed: Math.random() } }))).toBe(GOLDEN_DIGEST);
   });
@@ -140,6 +151,9 @@ describe("rrc-v1 canonical form and fingerprint (pure)", () => {
     expect(digest(storedRun({ note: { at: new Timestamp(t.seconds, t.nanoseconds + 1) } }))).not.toBe(digest(storedRun({ note: { at: t } })));
     const c = canonicalReportReviewContent(storedRun({ note: { at: new Date(-1500) } }));
     expect(c.ok && c.canonical).toContain('{"$timestamp":"-2.500000000"}');
+    // The documented form: seconds, a dot, and exactly nine nanosecond digits.
+    const n = canonicalReportReviewContent(storedRun({ note: { at: new Timestamp(1762077600, 5) } }));
+    expect(n.ok && n.canonical).toContain('{"$timestamp":"1762077600.000000005"}');
   });
 
   it.each([
@@ -248,6 +262,15 @@ describe("submission and decision bind to the exact submitted content", () => {
     expect(await decide()).toEqual({ ok: false, reason: "content_unverifiable" });
     const ctx = await getReportReviewContext({ uid: MEMBER, workspaceId: W, runId: RUN });
     expect(ctx.status === "ok" && [ctx.contentIntegrity.status, ctx.viewer.canResubmit]).toEqual(["unverifiable", false]);
+    expect(await resubmitReportReview({ uid: MEMBER, workspaceId: W, runId: RUN, purpose: { code: "other" }, expectedCycle: 1 })).toEqual({ ok: false, reason: "content_unfingerprintable" });
+  });
+
+  it("a DECIDED cycle whose current content can no longer be fingerprinted: resubmission is not offered (the transaction would refuse it)", async () => {
+    await submitted();
+    expect((await decide()).ok).toBe(true);
+    setRun({ score: NaN });
+    const ctx = await getReportReviewContext({ uid: MEMBER, workspaceId: W, runId: RUN });
+    expect(ctx.status === "ok" && ctx.viewer.canResubmit).toBe(false);
     expect(await resubmitReportReview({ uid: MEMBER, workspaceId: W, runId: RUN, purpose: { code: "other" }, expectedCycle: 1 })).toEqual({ ok: false, reason: "content_unfingerprintable" });
   });
 

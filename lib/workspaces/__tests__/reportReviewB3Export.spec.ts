@@ -189,6 +189,20 @@ describe("confirmation MINOR: a synthesis REGENERATED after submission is also n
   });
 });
 
+describe("Order A: the export states whether the content shown is exactly the reviewed version", () => {
+  it("content changed after the decision: contentIntegrity 'changed' and an explicit NOT-the-reviewed-version statement", async () => {
+    await lifecycle();
+    let doc = (await (await get("json")).json()) as ReportReviewExportV1;
+    expect(doc.review.contentIntegrity).toBe("matches");
+    db.seed(`runs/${RUN}`, { ...db.read(`runs/${RUN}`)!, synthesizedStructuredReport: { summary: "changed" }, schemaVersion: 1 });
+    doc = (await (await get("json")).json()) as ReportReviewExportV1;
+    expect(doc.review.contentIntegrity).toBe("changed");
+    const html = await (await get("html")).text();
+    expect(html).toContain("The content below is the CURRENT research, NOT the version that was reviewed");
+    expect(html).not.toContain("is exactly the content review cycle");
+  });
+});
+
 describe("historical-cycle integrity", () => {
   const rec = (cycle: number) => ({ cycle, humanReview: { status: "rejected" } }) as unknown as ReportReviewRecordV1;
   it.each([
