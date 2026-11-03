@@ -145,7 +145,7 @@ describe("submitted: abilities, names, history", () => {
     expect(c.viewer).toMatchObject({ canResubmit: false, canManageAssignment: true });
     expect(c.names[MEMBER]).toBe(`Name(${MEMBER})`);
     expect(c.history).toEqual([{ type: "report_review_submitted", at: "2026-11-02T11:00:00.000Z", actorDisplayName: `Name(${MEMBER})`, cycle: 1, purposeCode: "internal_review" }]);
-    expect([c.content, c.historyIncomplete]).toEqual([{ absentNow: ["unifiedAnswer", "synthesis", "consensus"], addedSinceSubmission: [] }, false]);
+    expect([c.content, c.historyIncomplete]).toEqual([{ absentNow: ["unifiedAnswer", "synthesis", "consensus"], changedSinceSubmission: [] }, false]);
     const m = await ctx(MEMBER);
     expect(m.status === "ok" && m.viewer.canManageAssignment).toBe(false); // Member lacks reviews.manage
   });
@@ -192,7 +192,7 @@ describe("review M-2 / n-1: content drift and incomplete history are stated, nev
     await submit();
     db.seed(`runs/${RUN}`, { ...db.read(`runs/${RUN}`)!, synthesizedStructuredReport: { summary: "later" } });
     const c = await ctx(OWNER);
-    expect(c.status === "ok" && c.content).toEqual({ absentNow: ["consensus"], addedSinceSubmission: ["unifiedAnswer", "synthesis"] });
+    expect(c.status === "ok" && c.content).toEqual({ absentNow: ["consensus"], changedSinceSubmission: ["unifiedAnswer", "synthesis"] });
   });
   it("an unreadable or missing archived cycle sets historyIncomplete", async () => {
     await submit();
@@ -205,6 +205,17 @@ describe("review M-2 / n-1: content drift and incomplete history are stated, nev
     c = await ctx(OWNER);
     expect(c.status === "ok" && c.historyIncomplete).toBe(true);
     db.docs.delete(`runs/${RUN}/reportReviewCycles/1`);
+    c = await ctx(OWNER);
+    expect(c.status === "ok" && c.historyIncomplete).toBe(true);
+    // Confirmation NIT: an archive filed under the wrong cycle number, or with a malformed record object, is incomplete.
+    const good = { cycle: 1, record: { ...rr(), cycle: 1, humanReview: { status: "rejected", reviewerId: REVIEWER, reviewedAt: "2026-11-02T12:00:00.000Z" } } };
+    db.seed(`runs/${RUN}/reportReviewCycles/1`, good);
+    c = await ctx(OWNER);
+    expect(c.status === "ok" && c.historyIncomplete).toBe(false);
+    db.seed(`runs/${RUN}/reportReviewCycles/1`, { ...good, cycle: 3, record: { ...good.record, cycle: 3 } });
+    c = await ctx(OWNER);
+    expect(c.status === "ok" && c.historyIncomplete).toBe(true);
+    db.seed(`runs/${RUN}/reportReviewCycles/1`, { ...good, record: { broken: true } });
     c = await ctx(OWNER);
     expect(c.status === "ok" && c.historyIncomplete).toBe(true);
   });

@@ -110,7 +110,7 @@ describe("export content", () => {
       ["claude", ""],
     ]);
     expect(doc.research.synthesis).toBeNull(); // none saved → none exported, never generated
-    expect(doc.analysisPresence).toMatchObject({ unifiedAnswer: "absent", synthesis: "absent", consensus: "absent", respondedModels: 1, requestedModels: 2, addedSinceSubmission: [] });
+    expect(doc.analysisPresence).toMatchObject({ unifiedAnswer: "absent", synthesis: "absent", consensus: "absent", respondedModels: 1, requestedModels: 2, changedSinceSubmission: [] });
     expect(doc.decisionHistory.every((c) => c.scopeAtSubmission.synthesis === "absent")).toBe(true);
     expect(doc.research.structuredResult).toMatchObject({ schemaId: "generic" });
     expect(doc.review).toEqual({
@@ -162,13 +162,28 @@ describe("review M-2: content saved after submission is disclosed, never present
     await lifecycle();
     db.seed(`runs/${RUN}`, { ...db.read(`runs/${RUN}`)!, synthesizedStructuredReport: { summary: "Generated later" }, schemaVersion: 1, synthesizedBy: "chatgpt" });
     const doc = (await (await get("json")).json()) as ReportReviewExportV1;
-    expect(doc.analysisPresence).toMatchObject({ unifiedAnswer: "present", synthesis: "present", consensus: "absent", addedSinceSubmission: ["unifiedAnswer", "synthesis"] });
+    expect(doc.analysisPresence).toMatchObject({ unifiedAnswer: "present", synthesis: "present", consensus: "absent", changedSinceSubmission: ["unifiedAnswer", "synthesis"] });
     expect(doc.analysisPresence.atSubmission).toMatchObject({ unifiedAnswer: "absent", synthesis: "absent" });
     const html = await (await get("html")).text();
-    expect(html).toContain("Added after this report was submitted for review, and not covered by the decision: a Unified Answer, a synthesis.");
+    expect(html).toContain("Added or regenerated after this report was submitted for review, and not covered by the decision: a Unified Answer, a synthesis.");
     expect(html).toContain("This report does not contain a consensus summary; none was generated or verified.");
     expect(html).toContain(escapeHtml(JSON.stringify({ summary: "Generated later" }, null, 2)));
-    expect(html).toContain("Saved synthesis <strong>(added after this report was submitted for review — not covered by the decision)</strong>");
+    expect(html).toContain("Saved synthesis <strong>(added or regenerated after this report was submitted for review — not covered by the decision)</strong>");
+  });
+});
+
+describe("confirmation MINOR: a synthesis REGENERATED after submission is also not covered by the decision", () => {
+  const withSynthesis = (synthesizedAtIso: string) => ({ ...db.read(`runs/${RUN}`)!, synthesizedStructuredReport: { summary: "v" }, synthesisConsensusSummary: { agreement: "x" }, schemaVersion: 1, synthesizedAt: Timestamp.fromDate(new Date(synthesizedAtIso)) });
+  it("present at submission, regenerated afterwards (synthesizedAt later): flagged", async () => {
+    db.seed(`runs/${RUN}`, withSynthesis("2026-11-02T10:30:00.000Z"));
+    await lifecycle(); // current cycle submitted 13:00
+    let doc = (await (await get("json")).json()) as ReportReviewExportV1;
+    expect(doc.analysisPresence.atSubmission).toMatchObject({ unifiedAnswer: "present", synthesis: "present", consensus: "present" });
+    expect(doc.analysisPresence.changedSinceSubmission).toEqual([]); // generated BEFORE submission: covered
+    db.seed(`runs/${RUN}`, withSynthesis("2026-11-02T15:00:00.000Z"));
+    doc = (await (await get("json")).json()) as ReportReviewExportV1;
+    expect(doc.analysisPresence.changedSinceSubmission).toEqual(["unifiedAnswer", "synthesis", "consensus"]);
+    expect(await (await get("html")).text()).toContain("Added or regenerated after this report was submitted for review, and not covered by the decision: a Unified Answer, a consensus summary, a synthesis.");
   });
 });
 
@@ -248,7 +263,7 @@ describe("builder is pure and never fabricates analysis", () => {
   it("present synthesis is carried verbatim; absent stays null", () => {
     const record = { version: 1, kind: "report_review", cycle: 1, scope: { schemaId: "generic", unifiedAnswer: "present", synthesis: "present", consensus: "absent", respondedModels: 2, requestedModels: 2 }, purpose: { code: "other", note: null }, humanReview: { status: "unreviewed" }, submittedAt: "t", submittedByUserId: "u", createdAt: "t", updatedAt: "t" } as ReportReviewRecordV1;
     const payload = { question: "Q", selectedModels: [], results: [], synthesisCache: { report: { summary: "S" }, schemaVersion: 1, synthesizedBy: "m", consensusSummary: null }, legacyAdaptive: { status: "absent", output: null } } as never;
-    const doc = buildReportReviewExport({ generatedAt: "g", runId: "r", payload, record, archivedCycles: [], drift: { current: record.scope, addedSinceSubmission: [] } });
+    const doc = buildReportReviewExport({ generatedAt: "g", runId: "r", payload, record, archivedCycles: [], drift: { current: record.scope, changedSinceSubmission: [] } });
     expect(doc.research.synthesis).toEqual({ summary: "S" });
     expect(doc.research.structuredResult).toBeNull();
     expect(renderReportReviewExportHtml(doc)).toContain("This report does not contain a consensus summary; none was generated or verified.");

@@ -84,7 +84,7 @@ const submitted = (over: Record<string, unknown> = {}, viewer: Record<string, un
     { type: "report_review_submitted", at: "2026-11-02T11:00:00.000Z", actorDisplayName: "Mo", cycle: 2, purposeCode: "client_delivery" },
     { type: "report_review_decided", at: "2026-11-02T12:00:00.000Z", actorDisplayName: "Rae", cycle: 2, status: "approved_with_conditions" },
   ],
-  content: { absentNow: ["unifiedAnswer", "synthesis", "consensus"], addedSinceSubmission: [] as string[] },
+  content: { absentNow: ["unifiedAnswer", "synthesis", "consensus"], changedSinceSubmission: [] as string[] },
   historyIncomplete: false,
   disclaimer: REPORT_REVIEW_DISCLAIMER,
 });
@@ -168,10 +168,10 @@ describe("submitted", () => {
   });
 
   it("review M-2 / n-1: content added after submission and an incomplete history are stated", async () => {
-    mockedAuthedFetch.mockResolvedValueOnce(response(200, { ...submitted(), content: { absentNow: ["consensus"], addedSinceSubmission: ["unifiedAnswer", "synthesis"] }, historyIncomplete: true }));
+    mockedAuthedFetch.mockResolvedValueOnce(response(200, { ...submitted(), content: { absentNow: ["consensus"], changedSinceSubmission: ["unifiedAnswer", "synthesis"] }, historyIncomplete: true }));
     const r = await mount();
     expect(byTestId(r, "report-review-scope-absent")[0].children.join("")).toBe("This report does not contain a consensus summary. Approval does not add or verify them.");
-    expect(byTestId(r, "report-review-content-added")[0].children.join("")).toBe("Added after this report was submitted for review, and not covered by its decision: a Unified Answer, a synthesis.");
+    expect(byTestId(r, "report-review-content-added")[0].children.join("")).toBe("Added or regenerated after this report was submitted for review, and not covered by its decision: a Unified Answer, a synthesis.");
     expect(byTestId(r, "report-review-history-incomplete")).toHaveLength(1);
   });
 

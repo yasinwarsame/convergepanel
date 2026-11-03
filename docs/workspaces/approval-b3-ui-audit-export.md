@@ -111,7 +111,7 @@ No governed export file changed; the Order 6 suites pass unmodified.
 - The research content is the run **as saved now**, while each cycle's scope is frozen when that cycle is submitted.
 - Some analyses can still be saved later; for example, the run owner can generate a synthesis.
 - The export therefore states analysis presence from the run as it is now.
-- `addedSinceSubmission` lists anything saved after the current cycle was submitted. The HTML document marks it as **not covered by the decision**.
+- `changedSinceSubmission` lists anything saved after the current cycle was submitted. The HTML document marks it as **not covered by the decision**.
 - Each history entry carries its own `scopeAtSubmission`.
 - The page panel shows the same disclosure.
 - The saved structured (legacy Adaptive Schema) result is rendered in the HTML document as well as in the JSON (M-1).

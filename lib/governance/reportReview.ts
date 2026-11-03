@@ -305,15 +305,29 @@ export type ReportReviewAnalysis = "unifiedAnswer" | "synthesis" | "consensus";
 const ANALYSES: readonly ReportReviewAnalysis[] = ["unifiedAnswer", "synthesis", "consensus"];
 
 /**
- * A cycle's `scope` is frozen at submission, but some analyses can still be saved on the run afterwards (for example the
- * run owner generating a synthesis). Compares the run as it is NOW with what was submitted, so every surface can say
- * truthfully what is absent, and flag anything added after submission as NOT covered by the review decision.
+ * A cycle's `scope` is frozen at submission, but analyses can still be saved on the run afterwards: the run owner can
+ * generate a synthesis (with its consensus summary) where none existed, or regenerate one that did
+ * (app/api/synthesize-panel writes `synthesizedStructuredReport`, `synthesisConsensusSummary` and `synthesizedAt`).
+ * Compares the run as it is NOW with what was submitted, so every surface can say truthfully what is absent, and flag
+ * anything ADDED or REGENERATED after submission (`synthesizedAt` later than `submittedAt`) as NOT covered by the review
+ * decision. The legacy envelope's own synthesis is written once at execution and never changes afterwards.
  */
-export function compareReportReviewScope(submitted: ReportReviewScope, run: Record<string, unknown>): { current: ReportReviewScope; addedSinceSubmission: ReportReviewAnalysis[]; absentNow: ReportReviewAnalysis[] } {
+export function compareReportReviewScope(
+  submitted: ReportReviewScope,
+  run: Record<string, unknown>,
+  submittedAt: string
+): { current: ReportReviewScope; changedSinceSubmission: ReportReviewAnalysis[]; absentNow: ReportReviewAnalysis[] } {
   const current = deriveScope(run, submitted.schemaId);
+  const at = run.synthesizedAt;
+  const regenerated = at instanceof Timestamp && at.toMillis() > Date.parse(submittedAt);
+  const fromSavedSynthesis: Record<ReportReviewAnalysis, boolean> = {
+    unifiedAnswer: run.synthesizedStructuredReport !== undefined && run.synthesizedStructuredReport !== null,
+    synthesis: run.synthesizedStructuredReport !== undefined && run.synthesizedStructuredReport !== null,
+    consensus: run.synthesisConsensusSummary !== undefined && run.synthesisConsensusSummary !== null,
+  };
   return {
     current,
-    addedSinceSubmission: ANALYSES.filter((a) => submitted[a] === "absent" && current[a] === "present"),
+    changedSinceSubmission: ANALYSES.filter((a) => current[a] === "present" && (submitted[a] === "absent" || (regenerated && fromSavedSynthesis[a]))),
     absentNow: ANALYSES.filter((a) => current[a] === "absent"),
   };
 }

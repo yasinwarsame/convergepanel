@@ -332,7 +332,7 @@ export default function ReportReviewPanel({ workspaceId, runId, canCreateExport 
   const labelOf = (a: string) => (REPORT_REVIEW_ANALYSIS_LABELS as Record<string, string>)[a] ?? a;
   const order = ["unifiedAnswer", "consensus", "synthesis"];
   const absent = order.filter((a) => ctx.content.absentNow.includes(a)).map(labelOf);
-  const added = order.filter((a) => ctx.content.addedSinceSubmission.includes(a)).map(labelOf);
+  const added = order.filter((a) => ctx.content.changedSinceSubmission.includes(a)).map(labelOf);
   const decisionDenial = !viewer.canDecide && viewer.denial ? (DECISION_DENIAL_TEXT[viewer.denial] ?? PANEL_DENIAL_TEXT[viewer.denial] ?? "") : "";
 
   return (
@@ -367,7 +367,7 @@ export default function ReportReviewPanel({ workspaceId, runId, canCreateExport 
       )}
       {added.length > 0 && (
         <p data-testid="report-review-content-added" role="note" className="mt-2 rounded-lg border border-cp-orange bg-cp-orange-soft px-3 py-2 text-xs text-cp-text">
-          Added after this report was submitted for review, and not covered by its decision: {added.join(", ")}.
+          Added or regenerated after this report was submitted for review, and not covered by its decision: {added.join(", ")}.
         </p>
       )}
 

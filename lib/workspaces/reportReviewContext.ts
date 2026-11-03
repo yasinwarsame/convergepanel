@@ -85,7 +85,7 @@ export type ReportReviewContextResult =
       names: Record<string, string>;
       history: ReportReviewHistoryItem[];
       /** Review M-2: analyses absent from the run now, and analyses saved after this cycle was submitted (not reviewed). */
-      content: { absentNow: ReportReviewAnalysis[]; addedSinceSubmission: ReportReviewAnalysis[] };
+      content: { absentNow: ReportReviewAnalysis[]; changedSinceSubmission: ReportReviewAnalysis[] };
       /** Review n-1: an archived cycle could not be read, so the cycle history shown is incomplete (never silently). */
       historyIncomplete: boolean;
       disclaimer: string;
@@ -154,7 +154,15 @@ export async function getReportReviewContext(args: { uid: string; workspaceId: s
 
     const archives = cyclesSnap.docs.map((d) => d.data() as { cycle?: unknown; record?: Record<string, unknown>; assignment?: Record<string, unknown> | null });
     const readable = archives.filter((a) => typeof a.cycle === "number" && a.record);
-    const historyIncomplete = readable.length !== archives.length || archives.length !== record.cycle - 1;
+    // Complete only when every archive is a valid record and the cycles are exactly 1..n-1 (the export's own rule).
+    const validCycles = archives
+      .filter((a) => typeof a.cycle === "number" && (() => {
+        const r = parseReportReviewRecord(a.record);
+        return r.ok && r.record.cycle === a.cycle;
+      })())
+      .map((a) => a.cycle as number)
+      .sort((x, y) => x - y);
+    const historyIncomplete = archives.length !== record.cycle - 1 || validCycles.length !== archives.length || validCycles.some((c, i) => c !== i + 1);
     const previousCycles: ReportReviewCycleSummary[] = readable
       .map((a) => {
         const hr = (a.record!.humanReview ?? {}) as Record<string, unknown>;
@@ -242,7 +250,7 @@ export async function getReportReviewContext(args: { uid: string; workspaceId: s
       },
       names,
       history,
-      content: (({ absentNow, addedSinceSubmission }) => ({ absentNow, addedSinceSubmission }))(compareReportReviewScope(record.scope, run)),
+      content: (({ absentNow, changedSinceSubmission }) => ({ absentNow, changedSinceSubmission }))(compareReportReviewScope(record.scope, run, record.submittedAt)),
       historyIncomplete,
       disclaimer: REPORT_REVIEW_DISCLAIMER,
     };

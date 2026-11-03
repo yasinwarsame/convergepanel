@@ -15,7 +15,7 @@
  *   - The decision history: every archived cycle (write-once, validated contiguous 1..n-1) and the current one.
  *   - The fixed disclaimer.
  *   - Content drift (review M-2): research content is the run AS SAVED NOW, while each cycle's scope was frozen at its
- *     submission. Any analysis saved after the current cycle was submitted is listed in `addedSinceSubmission` and marked
+ *     submission. Any analysis saved after the current cycle was submitted is listed in `changedSinceSubmission` and marked
  *     in the document as NOT covered by the review decision; each history entry carries its own `scopeAtSubmission`.
  *   - Reviewer identity and the reviewer's private comment are WITHHELD, the same boundary as the governed Team export
  *     (E1-S6b: an export never carries reviewer identity or private reviewer text the canonical research read does not).
@@ -63,7 +63,7 @@ export interface ReportReviewExportV1 {
     respondedModels: number;
     requestedModels: number;
     atSubmission: ReportReviewScope;
-    addedSinceSubmission: ReportReviewAnalysis[];
+    changedSinceSubmission: ReportReviewAnalysis[];
   };
   contentNote: string;
   review: {
@@ -124,7 +124,7 @@ export function buildReportReviewExport(args: {
   record: ReportReviewRecordV1;
   archivedCycles: ReportReviewRecordV1[];
   /** compareReportReviewScope(record.scope, run): the run's analyses now, and those added since submission. */
-  drift: { current: ReportReviewScope; addedSinceSubmission: ReportReviewAnalysis[] };
+  drift: { current: ReportReviewScope; changedSinceSubmission: ReportReviewAnalysis[] };
 }): ReportReviewExportV1 {
   const { payload, record, drift } = args;
   const hr = record.humanReview;
@@ -148,7 +148,7 @@ export function buildReportReviewExport(args: {
       respondedModels: drift.current.respondedModels,
       requestedModels: drift.current.requestedModels,
       atSubmission: { ...record.scope },
-      addedSinceSubmission: [...drift.addedSinceSubmission],
+      changedSinceSubmission: [...drift.changedSinceSubmission],
     },
     contentNote: REPORT_REVIEW_CONTENT_NOTE,
     review: {
@@ -182,8 +182,8 @@ export function renderReportReviewExportHtml(doc: ReportReviewExportV1): string 
   const p = doc.analysisPresence;
   const order: ReportReviewAnalysis[] = ["unifiedAnswer", "consensus", "synthesis"];
   const absent = order.filter((a) => p[a] === "absent").map((a) => REPORT_REVIEW_ANALYSIS_LABELS[a]);
-  const added = order.filter((a) => p.addedSinceSubmission.includes(a)).map((a) => REPORT_REVIEW_ANALYSIS_LABELS[a]);
-  const notReviewed = " <strong>(added after this report was submitted for review — not covered by the decision)</strong>";
+  const added = order.filter((a) => p.changedSinceSubmission.includes(a)).map((a) => REPORT_REVIEW_ANALYSIS_LABELS[a]);
+  const notReviewed = " <strong>(added or regenerated after this report was submitted for review — not covered by the decision)</strong>";
   const rows = doc.decisionHistory
     .map(
       (c) =>
@@ -194,7 +194,7 @@ export function renderReportReviewExportHtml(doc: ReportReviewExportV1): string 
     .map(responseText)
     .map((r) => `<section class="resp"><h3>${e(r.model)} <span class="muted">(${e(r.status)})</span></h3><pre>${e(r.text)}</pre></section>`)
     .join("");
-  const synthesis = doc.research.synthesis !== null ? `<h2>Saved synthesis${p.addedSinceSubmission.includes("synthesis") ? notReviewed : ""}</h2><pre>${e(JSON.stringify(doc.research.synthesis, null, 2))}</pre>` : "";
+  const synthesis = doc.research.synthesis !== null ? `<h2>Saved synthesis${p.changedSinceSubmission.includes("synthesis") ? notReviewed : ""}</h2><pre>${e(JSON.stringify(doc.research.synthesis, null, 2))}</pre>` : "";
   // Review M-1: the saved structured result (the legacy Adaptive Schema report the reviewer read) is part of the record.
   const structured = doc.research.structuredResult !== null ? `<h2>Saved structured result</h2><pre>${e(JSON.stringify(doc.research.structuredResult, null, 2))}</pre>` : "";
   return `<!doctype html>
@@ -218,7 +218,7 @@ export function renderReportReviewExportHtml(doc: ReportReviewExportV1): string 
 <h2>Research</h2>
 <p><strong>${e(doc.research.question || "Untitled research")}</strong></p>
 <p class="muted">${p.respondedModels} of ${p.requestedModels} models responded.${absent.length ? ` This report does not contain ${e(absent.join(", "))}; none was generated or verified.` : ""}</p>
-${added.length ? `<p class="disclaimer">Added after this report was submitted for review, and not covered by the decision: ${e(added.join(", "))}.</p>` : ""}
+${added.length ? `<p class="disclaimer">Added or regenerated after this report was submitted for review, and not covered by the decision: ${e(added.join(", "))}.</p>` : ""}
 <p class="muted">${e(doc.contentNote)}</p>
 ${structured}
 ${synthesis}
