@@ -38,12 +38,17 @@ const PAGE = 300;
 
 export type ResearchDeletionStep = "job" | "mark" | "subtree" | "workspace_audit" | "admin_audit" | "team_projection" | "run" | "verify";
 
-/** A deletion job that has not completed (resumable by runId even if the run document is already gone). */
+/**
+ * A deletion that needs (re-)running by runId even though the run document is already gone: an unfinished job, OR a
+ * completed job whose verification no longer holds (content recreated afterwards by a writer outside report review).
+ */
 export async function getUnfinishedResearchDeletion(runId: string): Promise<boolean> {
   const db = adminDb;
   if (!db) return false;
   const job = await db.collection(RUN_DELETION_JOBS_COLLECTION).doc(runId).get();
-  return job.exists && (job.data() as Record<string, unknown>).state !== "complete";
+  if (!job.exists) return false;
+  if ((job.data() as Record<string, unknown>).state !== "complete") return true;
+  return (await verifyDeleted(db, db.collection("runs").doc(runId), runId)) !== null;
 }
 
 /** Unfinished deletion jobs (bounded), for purge to resume. */
@@ -224,12 +229,13 @@ export async function findResearchDeletionOrphans(limitPerSource = 200): Promise
     }
   }
   const jobs = await db.collection(RUN_DELETION_JOBS_COLLECTION).where("state", "in", ["in_progress", "failed"]).limit(limitPerSource).get();
-  // Review S1-B-1 (detection): a run recreated AFTER a completed deletion (by a writer outside report review that does not
-  // check the deletion mark) shows up as a completed job whose run document or subtree exists again.
-  const done = await db.collection(RUN_DELETION_JOBS_COLLECTION).where("state", "==", "complete").limit(limitPerSource).get();
+  // Review S1-B-1 (detection): content recreated AFTER a completed deletion by a writer outside report review — the run
+  // document, its subtree, OR research text in an audit row / projection / lock — fails the same full verification the
+  // deletion used. Newest completed jobs first (single-field order; no composite index), bounded.
+  const done = await db.collection(RUN_DELETION_JOBS_COLLECTION).orderBy("completedAt", "desc").limit(limitPerSource).get();
   for (const j of done.docs) {
-    const runRef = db.collection("runs").doc(j.id);
-    if ((await runRef.get()).exists || !(await subtreeIsEmpty(runRef))) orphan.add(j.id);
+    if ((j.data() as Record<string, unknown>).state !== "complete") continue;
+    if ((await verifyDeleted(db, db.collection("runs").doc(j.id), j.id)) !== null) orphan.add(j.id);
   }
   return { orphanRunIds: Array.from(orphan).sort(), unfinishedJobs: jobs.docs.map((d) => d.id).sort() };
 }

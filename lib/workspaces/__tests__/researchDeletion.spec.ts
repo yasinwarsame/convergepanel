@@ -281,9 +281,10 @@ describe("S1 deletion: every supported path removes the research and every deriv
 
   it("admin audit free text (question, comment, reasons, justification) is redacted; metadata is kept (review S1-M-2)", async () => {
     await reviewedRun();
-    db.seed("admin_audit_logs/rev", { action: "approved", runId: RUN, question: SECRET_Q, comment: "SECRET-COMMENT", reasons: ["SECRET-REASON"], justification: "SECRET-JUST", byUid: REVIEWER, at: "t" });
+    const R = REDACTED_ADMIN_AUDIT_QUESTION;
+    db.seed("admin_audit_logs/rev", { action: "approved", runId: RUN, question: SECRET_Q, comment: "SECRET-COMMENT", reasons: ["SECRET-REASON"], justification: "SECRET-JUST", overrideJustification: "SECRET-OJ", note: "SECRET-N", notes: ["SECRET-NS"], byUid: REVIEWER, at: "t" });
     expect((await deleteResearchRun({ runId: RUN, actorUid: "uid-sysadmin", reason: "admin_delete" })).status).toBe("deleted");
-    expect(db.read("admin_audit_logs/rev")).toEqual({ action: "approved", runId: RUN, question: REDACTED_ADMIN_AUDIT_QUESTION, comment: REDACTED_ADMIN_AUDIT_QUESTION, reasons: REDACTED_ADMIN_AUDIT_QUESTION, justification: REDACTED_ADMIN_AUDIT_QUESTION, byUid: REVIEWER, at: "t", contentRedacted: true });
+    expect(db.read("admin_audit_logs/rev")).toEqual({ action: "approved", runId: RUN, question: R, comment: R, reasons: R, justification: R, overrideJustification: R, note: R, notes: R, byUid: REVIEWER, at: "t", contentRedacted: true });
   });
 
   it("snapshot locks naming the deleted run are removed (re-adding the source research is not blocked) (review S1-m-2)", async () => {
@@ -293,12 +294,25 @@ describe("S1 deletion: every supported path removes the research and every deriv
     expect([db.read("runSnapshotLocks/l1"), db.read("runSnapshotLocks/l2")]).toEqual([undefined, { snapshotRunId: "other", sourceRunId: "personal-2" }]);
   });
 
-  it("a run recreated after a completed deletion (writer outside report review) is detected as an orphan (review S1-B-1 detection)", async () => {
+  it.each([
+    ["the run document alone", () => db.seed(`runs/${RUN}`, { adaptiveExportCounter: 1 })],
+    ["a subtree document alone (run document absent)", () => db.seed(`runs/${RUN}/exports/late`, { reportSnapshot: { question: SECRET_Q } })],
+    ["a Workspace Audit row with research text", () => db.seed("workspaceMembershipEvents/lateRa", { eventType: "workspace_research_assignee_changed", workspaceId: W, runId: RUN, runQuestion: SECRET_Q, at: Timestamp.now() })],
+    ["an admin audit row with a reviewer comment", () => db.seed("admin_audit_logs/lateGov", { action: "approved", runId: RUN, comment: "SECRET-COMMENT" })],
+  ])("content recreated after a completed deletion (%s) is detected, and the admin DELETE re-runs the deletion", async (_l, recreate) => {
     await reviewedRun();
     expect((await deleteResearchRun({ runId: RUN, actorUid: "uid-sysadmin", reason: "admin_delete" })).status).toBe("deleted");
-    db.seed(`runs/${RUN}`, { adaptiveExportCounter: 1 });
-    db.seed(`runs/${RUN}/exports/late`, { reportSnapshot: { question: SECRET_Q } });
+    expect((await findResearchDeletionOrphans()).orphanRunIds).toEqual([]);
+    recreate();
     expect((await findResearchDeletionOrphans()).orphanRunIds).toEqual([RUN]);
+    if (!db.read(`runs/${RUN}`)) {
+      const res = await adminDelete(new NextRequest(`http://localhost/api/admin/runs/${RUN}?collection=runs`, { method: "DELETE", body: JSON.stringify({ confirm: true }), headers: { "content-type": "application/json" } }), { params: { runId: RUN } } as never);
+      expect(res.status).toBe(200);
+    } else {
+      expect((await deleteResearchRun({ runId: RUN, actorUid: "uid-sysadmin", reason: "admin_delete" })).status).toBe("deleted");
+    }
+    expect((await findResearchDeletionOrphans()).orphanRunIds).toEqual([]);
+    assertNothingLeft(RUN);
   });
 
   it("purge resumes unfinished deletion jobs (including runs whose document is already gone)", async () => {
@@ -409,5 +423,40 @@ describe("verification ordering (review S1-M-1 mutation gaps)", () => {
     db.hooks = {};
     expect((await deleteResearchRun({ runId: RUN, actorUid: "uid-sysadmin", reason: "admin_delete" })).status).toBe("deleted");
     expect(db.read("runSnapshotLocks/lateLock")).toBeUndefined();
+  });
+});
+
+describe("purge scope, budget and resume reporting (review S1 confirmation MINOR-3)", () => {
+  const purge = () => purgePost(new NextRequest("http://localhost/api/admin/purge-runs", { method: "POST", body: JSON.stringify({ mode: "olderThan", days: 30, dryRun: false, confirmation: "DELETE" }), headers: { "content-type": "application/json" } }));
+  it("resumed earlier deletions are reported separately and never counted in this purge's deletedCount", async () => {
+    db.seed("runDeletionJobs/earlier", { runId: "earlier", state: "failed", step: "verify" });
+    db.seed("runs/earlier/exports/x", { snapshot: SECRET_Q });
+    const body = await (await purge()).json();
+    expect([body.deletedCount, body.errorsCount, body.resumedDeletedCount]).toEqual([1, 0, 1]);
+    expect(under("runs/earlier")).toEqual([]);
+  });
+  it("time budget: once exceeded, no new deletion starts; the rest is reported as notStarted (counted as errors), never as deleted", async () => {
+    for (const id of ["b1", "b2", "b3"]) seedRun(id);
+    // Every clock read is 5 minutes later than the last, so the budget is already exceeded at the first check.
+    let t = Date.now();
+    const spy = jest.spyOn(Date, "now").mockImplementation(() => (t += 5 * 60_000));
+    try {
+      const body = await (await purge()).json();
+      expect(body.deletedCount).toBe(0);
+      expect(body.notStartedCount).toBe(4);
+      expect(body.errorsCount).toBe(4);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(db.read(`runs/${RUN}`)).toBeDefined();
+  });
+});
+
+describe("resume is research-only", () => {
+  it("a missing document in another collection never triggers the research-deletion resume", async () => {
+    db.seed(`runDeletionJobs/${RUN}`, { runId: RUN, state: "failed" });
+    const res = await adminDelete(new NextRequest(`http://localhost/api/admin/runs/${RUN}-x?collection=verifications`, { method: "DELETE", body: JSON.stringify({ confirm: true }), headers: { "content-type": "application/json" } }), { params: { runId: `${RUN}-x` } } as never);
+    expect(res.status).toBe(404);
+    expect(db.read(`runDeletionJobs/${RUN}`)).toMatchObject({ state: "failed" });
   });
 });

@@ -115,7 +115,8 @@ Admin user deletion removes the account but has never deleted research. That is 
    - The single DELETE route answers **500 `deletion_incomplete`**.
    - Purge counts the run under `errorsCount` / `incompleteRunIds`, never under `deletedCount`.
    - Re-running is always safe.
-   - A deletion whose final step failed after the run document was removed is **resumed by runId**: `DELETE /api/admin/runs/{id}` resumes an unfinished job, and purge resumes unfinished jobs first.
+   - A deletion whose final step failed after the run document was removed is **resumed by runId**. `DELETE /api/admin/runs/{id}` resumes an unfinished job, or a completed one whose verification no longer holds.
+   - Purge processes its own filtered runs first. Within the remaining budget it then resumes unfinished earlier deletions, and reports them **separately** (`resumedDeletedCount`, `resumedIncompleteRunIds`), never in `deletedCount`.
    - Purge has a time budget (`maxDuration` 300 s). It stops *starting* new deletions at 240 s and reports the rest as `notStartedRunIds` (counted in `errorsCount`). Purge again to continue.
 
 **Orphan detection.** `findResearchDeletionOrphans()` lists report-review or export documents whose run is gone, plus unfinished jobs.
@@ -152,8 +153,9 @@ If one of them commits **after** a deletion has completed, it can recreate a run
 - the governed-run writer, which needs separate authorization.
 
 So it is **not built**. Until it is:
-- `findResearchDeletionOrphans()` detects it: a completed job whose run document or subtree exists again;
-- re-running the deletion removes it.
+- **Detection.** `findResearchDeletionOrphans()` re-runs the **full** deletion verification for the most recent completed jobs (newest first, bounded). It flags a recreated run document, a recreated subtree, a Workspace Audit row carrying research text, an unredacted admin audit row (for example a late governance review comment), a projection, or a lock.
+- **Remedy.** `DELETE /api/admin/runs/{id}?collection=runs` re-runs the deletion for a flagged run even when the run document is absent.
+- **Residual risk.** Detection is not scheduled, because no job runner is authorized. It must be run on demand until the writers are fixed.
 
 Owner options are in the PR record.
 
