@@ -7,3 +7,11 @@
  * decision — it cannot happen through configuration alone. Tests override this module with jest.mock.
  */
 export const REPORT_REVIEW_ENABLED = false as boolean;
+
+/**
+ * Owner Order B (2026-11-03) — single-workspace activation allow-list. Report review operates ONLY for a Workspace listed
+ * here, AND only while REPORT_REVIEW_ENABLED is true. Default deny: empty. The trial Workspace id is named by the owner in
+ * a separate activation decision and added by a reviewed PR; it is never hard-coded speculatively. Validated by
+ * lib/workspaces/reportReviewActivation.ts, which fails closed on any malformed configuration (see there).
+ */
+export const REPORT_REVIEW_WORKSPACE_ALLOWLIST: readonly string[] = [];

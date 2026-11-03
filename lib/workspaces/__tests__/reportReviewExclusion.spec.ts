@@ -30,7 +30,7 @@ jest.mock("@/lib/firebase/admin", () => ({
     return db;
   },
 }));
-jest.mock("@/lib/workspaces/reportReviewRollout", () => ({ REPORT_REVIEW_ENABLED: true }));
+jest.mock("@/lib/workspaces/reportReviewRollout", () => ({ REPORT_REVIEW_ENABLED: true, REPORT_REVIEW_WORKSPACE_ALLOWLIST: ["wsTeamB1"] }));
 jest.mock("@/lib/env", () => ({
   ...jest.requireActual("@/lib/env"),
   TEAM_WORKSPACES_ENABLED: true,

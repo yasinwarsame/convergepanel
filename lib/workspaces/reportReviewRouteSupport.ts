@@ -1,5 +1,5 @@
 /**
- * Order B, Stage B1 — shared HTTP mapping for the two Report Review routes. Concealment policy matches the existing
+ * Order B — shared HTTP gate and mapping for the Report Review routes (submit, context, resubmit, decision, export). Concealment policy matches the existing
  * review routes: every reason that would reveal whether a run exists, belongs to another Workspace, or whether the
  * feature is admitted collapses to the same concealed 404. A member lacking capability gets 403 (the Workspace is
  * already visible to them; nothing about the run is revealed). Eligibility, conflicts and gates are 409 with an exact
@@ -12,14 +12,21 @@ import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
 import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { APPROVAL_WORKFLOW_ENABLED, APPROVAL_WORKFLOW_CANARY_UIDS } from "@/lib/env";
 import { resolveApprovalWorkflowAdmission } from "./approvalWorkflowRollout";
-import { teamRunWorkspaceNotFoundConcealedResponse } from "./teamRunAccessResponse";
+import { teamRunLookupUnavailableResponse, teamRunWorkspaceNotFoundConcealedResponse } from "./teamRunAccessResponse";
+import { logger } from "@/lib/logger";
 import { internalErrorResponse } from "./teamWorkspaceErrorResponse";
 import type { ReportReviewMutationFailure } from "./reportReviewMutations";
-import { REPORT_REVIEW_ENABLED } from "./reportReviewRollout";
+import { isReportReviewEnabledForWorkspace } from "./reportReviewActivation";
+import { resolveWorkspaceAccess } from "./resolveWorkspaceAccess";
 import { REPORT_REVIEW_INELIGIBLE_EXPLANATIONS } from "@/lib/governance/reportReviewCopy";
 
 export function reportReviewErrorBody(status: number, code: string, message: string) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
+}
+
+function lookupUnavailable(): NextResponse {
+  const { status, body } = teamRunLookupUnavailableResponse();
+  return NextResponse.json(body, { status });
 }
 
 export function concealed(): NextResponse {
@@ -27,7 +34,11 @@ export function concealed(): NextResponse {
   return NextResponse.json(body, { status });
 }
 
-export async function reportReviewCaller(req: NextRequest, route: string, method: "GET" | "POST" = "POST"): Promise<string | NextResponse> {
+/**
+ * `workspaceId` is the route's Workspace: report review must be activated for exactly that Workspace (Order B allow-list),
+ * checked before anything else about the request is evaluated. Normal authorization then still applies in full.
+ */
+export async function reportReviewCaller(req: NextRequest, route: string, workspaceId: string, method: "GET" | "POST" = "POST"): Promise<string | NextResponse> {
   const identity = await resolveRequestIdentity(req);
   if (identity.status !== "authenticated") {
     logIdentityResolutionFailure({ route, method, failureCategory: identity.reason });
@@ -36,9 +47,27 @@ export async function reportReviewCaller(req: NextRequest, route: string, method
   }
   // Report review is review machinery: it also requires Approval Workflow admission (concealed when not admitted).
   // Dark: concealed before anything else about the request (body shape included) is evaluated.
-  if (!REPORT_REVIEW_ENABLED) return concealed();
+  if (!isReportReviewEnabledForWorkspace(workspaceId)) return concealed();
   const admission = resolveApprovalWorkflowAdmission({ uid: identity.uid, globalEnabled: APPROVAL_WORKFLOW_ENABLED, canaryUidsRaw: APPROVAL_WORKFLOW_CANARY_UIDS });
   if (!admission.admitted) return concealed();
+  // Order B review MINOR-1: an active member of THIS Team Workspace only, before the body is read. Otherwise a non-member
+  // could tell the activated Workspace apart (malformed body → 400 there, concealed 404 everywhere else). Every
+  // operation still re-authorizes its exact capability inside its own transaction; this check only conceals.
+  // Infrastructure failure is NEVER collapsed into "not found" (teamRunAccessResponse.ts policy): it is a logged,
+  // retryable 503. Accepted trade-off: only during a Firestore outage, the activated Workspace answers 503 where an
+  // unlisted one answers 404 (the allow-list is checked without I/O) — far weaker than the steady-state oracle closed above.
+  let access: Awaited<ReturnType<typeof resolveWorkspaceAccess>>;
+  try {
+    access = await resolveWorkspaceAccess({ uid: identity.uid, workspaceId });
+  } catch (err) {
+    logger.warn("[workspaces/reportReviewRouteSupport] workspace access lookup threw", { route, workspaceId, error: err instanceof Error ? err.message : String(err) });
+    return lookupUnavailable();
+  }
+  if (!access.granted && access.reason === "lookup_failed") {
+    logger.warn("[workspaces/reportReviewRouteSupport] workspace access lookup failed", { route, workspaceId });
+    return lookupUnavailable();
+  }
+  if (!access.granted || access.workspaceType !== "team") return concealed();
   return identity.uid;
 }
 

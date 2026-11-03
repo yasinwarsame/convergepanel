@@ -2,7 +2,7 @@
 
 /**
  * Order B, Stage B3 — the Report Review panel on the Team research page, for research WITHOUT a governed review record
- * (Generic and the other non-Milestone-2 result types). Rendered only when the server-derived `REPORT_REVIEW_ENABLED`
+ * (Generic and the other non-Milestone-2 result types). Rendered only when the server-derived isReportReviewEnabledForWorkspace(this Workspace)
  * is on; while it is off the page keeps the Order A "Approval review" notice exactly as before.
  *
  * Everything shown comes from `GET …/report-review`, whose verdicts (can submit / decide / resubmit / manage assignment)

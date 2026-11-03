@@ -101,7 +101,7 @@ describe("TeamUnfiledResearchDetailPage — renders the shell in Unfiled mode", 
       r = TestRenderer.create(element as never);
     });
     expect(r.root.findAllByProps({ "data-testid": "team-research-detail-shell" })).toHaveLength(1);
-    expect(shellProps[0]).toEqual({ workspaceId: WS_ID, workspaceName: "Acme Team", runId: RUN_ID, project: null, showMembers: false, showAudit: true, canVerifyClaim: false, canCreateExport: false, reportReviewEnabled: false }); // B3: Report Review is OFF (compile-time switch)
+    expect(shellProps[0]).toEqual({ workspaceId: WS_ID, workspaceName: "Acme Team", runId: RUN_ID, project: null, showMembers: false, showAudit: true, canVerifyClaim: false, canCreateExport: false, reportReviewEnabled: false }); // Report Review is not activated for this Workspace (switch off, empty allow-list)
   });
 
   it("performs no Project lookup and no direct run read, and names no Personal endpoint or address", async () => {

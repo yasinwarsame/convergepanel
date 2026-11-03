@@ -5,7 +5,7 @@
  * research exports, and what it contains). Streamed in one response; nothing is stored.
  *
  * Authorization, in order (each denial is the Team run family's existing response):
- *   identity → REPORT_REVIEW_ENABLED + Approval Workflow admission (reportReviewCaller: concealed 404 while dark)
+ *   identity → activation for THIS Workspace (switch + allow-list) + Approval Workflow admission + Workspace membership (reportReviewCaller: concealed 404 otherwise)
  *   → run-id syntax → Workspace access (resolveTeamRunWorkspaceAccess) → exports.create AND research.read AND
  *   reviews.read → format → run read → Workspace containment (validateTeamRunRowShape) → Project containment
  *   (a Project of another Workspace is concealed, as in the canonical read and the governed export, E1-S7)
@@ -47,7 +47,7 @@ function internal() {
 }
 
 export async function GET(req: NextRequest, { params }: { params: { workspaceId: string; runId: string } }) {
-  const uidOrRes = await reportReviewCaller(req, ROUTE, "GET");
+  const uidOrRes = await reportReviewCaller(req, ROUTE, params.workspaceId, "GET");
   if (uidOrRes instanceof NextResponse) return uidOrRes;
   const uid = uidOrRes;
   const { workspaceId } = params;

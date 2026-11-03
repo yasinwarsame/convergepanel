@@ -1,7 +1,7 @@
 /**
  * Order B, Stage B2 — POST /api/workspaces/{W}/runs/{R}/report-review/decision
  * Body exactly `{ decision: { status, comment?, conditions? }, expectedCycle, expectedUpdatedAt }`.
- * Dark (compile-time REPORT_REVIEW_ENABLED) and Approval Workflow admission; otherwise the concealed 404.
+ * Dark unless report review is activated for this Workspace (isReportReviewEnabledForWorkspace: switch + single-workspace allow-list), plus Approval Workflow admission and Workspace membership; otherwise the concealed 404.
  * Every "not authorized" sub-reason collapses to the same external 403 as the governed decision route.
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -15,7 +15,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest, { params }: { params: { workspaceId: string; runId: string } }) {
-  const uidOrRes = await reportReviewCaller(req, "/api/workspaces/[workspaceId]/runs/[runId]/report-review/decision");
+  const uidOrRes = await reportReviewCaller(req, "/api/workspaces/[workspaceId]/runs/[runId]/report-review/decision", params.workspaceId);
   if (uidOrRes instanceof NextResponse) return uidOrRes;
   const body = await readJsonObject(req);
   if (!body || !Object.keys(body).every((k) => k === "decision" || k === "expectedCycle" || k === "expectedUpdatedAt")) {
