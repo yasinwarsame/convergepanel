@@ -156,17 +156,20 @@ describe("persistAutomatedGovernanceUpdate", () => {
   });
 
   it("does not retry after a write failure", async () => {
+    // Research deletion integrity (2026-11-03): the update now commits through a guarded transaction, so the failure is
+    // injected at commit on the shared transactional fake. Same assertion: exactly one write attempt, no retry.
     const runId = "run-no-retry";
-    const updateMock = jest.fn().mockRejectedValueOnce(new Error("boom"));
-    const brokenAdminDb = { collection: () => ({ doc: () => ({ update: updateMock }) }) };
-    jest.resetModules();
-    jest.doMock("@/lib/firebase/admin", () => ({ adminDb: brokenAdminDb }));
-    jest.doMock("@/lib/logger", () => ({ logger: { warn: jest.fn(), error: jest.fn(), info: jest.fn(), debug: jest.fn() } }));
-    const { persistAutomatedGovernanceUpdate: persistWithBrokenDb } = await import("@/lib/firestore/runs");
-
-    await persistWithBrokenDb(runId, automatedGovernance(), "2026-07-29T13:00:00.000Z");
-    expect(updateMock).toHaveBeenCalledTimes(1);
-    jest.resetModules();
+    runDocs.set(runId, { governanceRecord: { schemaId: "decision_support" } });
+    let commitAttempts = 0;
+    db.hooks.failCommit = () => {
+      commitAttempts++;
+      throw new Error("boom");
+    };
+    const outcome = await persistAutomatedGovernanceUpdate(runId, automatedGovernance(), "2026-07-29T13:00:00.000Z");
+    db.hooks = {};
+    expect(outcome).toEqual({ saved: false, reason: "write_failed" });
+    expect(commitAttempts).toBe(1);
+    expect(db.writeLog).toEqual([]);
   });
 
   it("logs only metadata (runId) on failure — never receipt content, reasons, or reviewer identity", async () => {

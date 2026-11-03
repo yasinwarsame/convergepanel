@@ -20,6 +20,7 @@
 
 import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
+import { isResearchDeletedInTx } from "@/lib/firestore/researchDeletionBarrier";
 import { logger } from "@/lib/logger";
 import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS } from "@/lib/env";
 import { isReportReviewEnabledForWorkspace } from "./reportReviewActivation";
@@ -92,8 +93,9 @@ export async function decideReportReview(args: {
         projectIdValue: run.projectId,
       });
       if (target.kind !== "valid_workspace_review_target") return { ok: false, reason: "run_not_found" };
-      // S1: research being deleted accepts no decision.
-      if (run.deletion !== undefined && run.deletion !== null) return { ok: false, reason: "run_not_found" };
+      // S1 + research deletion integrity (review round 2, M-1): research whose deletion has started (tombstone, or the
+      // mark) accepts no decision.
+      if (await isResearchDeletedInTx(tx, adminDb!, args.runId, { exists: true, data: () => run })) return { ok: false, reason: "run_not_found" };
 
       const panelGate = await readPanelGate(tx, runRef, args.runId);
       if (panelGate === "open") return { ok: false, reason: "active_panel" };

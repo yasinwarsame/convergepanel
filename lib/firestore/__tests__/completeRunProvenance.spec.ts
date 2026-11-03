@@ -17,12 +17,17 @@ jest.mock("@/lib/panelModels", () => {
   return { ...actual, getPanelModelConfig: (id: string) => ({ ...actual.getPanelModelConfig(id), provider: configProvider }) };
 });
 
-const update = jest.fn(async (_data: Record<string, unknown>) => undefined);
-const set = jest.fn(async () => undefined);
-const get = jest.fn(async () => ({ exists: false, data: () => undefined }));
+// Research deletion integrity (2026-11-03, review round 2 M-2): the completion write is now a guarded transactional
+// update, so the spec uses the shared transactional fake. `updates()` and the full write log replace the update/set spies.
+// The assertions are the same: exactly ONE completion write, it is an `update`, and nothing else is written.
+import { FakeTransactionalFirestore } from "@/lib/workspaces/__tests__/helpers/fakeTransactionalFirestore";
+const db = new FakeTransactionalFirestore();
 jest.mock("@/lib/firebase/admin", () => ({
-  adminDb: { collection: () => ({ doc: () => ({ get, update, set }) }) },
+  get adminDb() {
+    return db;
+  },
 }));
+const updates = () => db.writeLog.filter((w) => w.kind === "update");
 
 import { completeRun } from "@/lib/firestore/runs";
 import type { ModelResult } from "@/lib/types";
@@ -60,7 +65,7 @@ function substitutedRow(over: Partial<ModelResult> = {}): ModelResult {
 }
 
 async function complete(results: ModelResult[]) {
-  update.mockClear();
+  db.writeLog = [];
   await completeRun({
     runId: "run-1",
     userId: "uid-1",
@@ -70,16 +75,17 @@ async function complete(results: ModelResult[]) {
     tokenUsageByModel: results.map((r) => ({ modelId: r.modelId, tokenUsage: { totalTokens: 3, promptTokens: 1, completionTokens: 2 } })) as never,
     tokenTotals: { totalTokens: 3 * results.length, promptTokens: results.length, completionTokens: 2 * results.length } as never,
   });
-  expect(update).toHaveBeenCalledTimes(1);
-  const written = update.mock.calls[0][0] as { runDocument: { perModel: Array<Record<string, unknown>> } };
+  expect(updates()).toHaveLength(1);
+  const written = updates()[0].data as unknown as { runDocument: { perModel: Array<Record<string, unknown>> } };
   return written.runDocument.perModel;
 }
 
 beforeEach(() => {
   configProvider = "CONFIG-PROVIDER-A";
-  update.mockClear();
-  set.mockClear();
-  get.mockClear();
+  db.docs.clear();
+  db.hooks = {};
+  db.writeLog = [];
+  db.seed("runs/run-1", { userId: "uid-1", question: "Q?", status: "running" }); // completeRun updates an existing run
 });
 
 it("freezes the runtime provider and requested model onto the existing perModel row", async () => {
@@ -131,8 +137,17 @@ it("never persists actualModel or substitutionReason", async () => {
 
 it("adds fields to the ONE existing completion write — no other write operation", async () => {
   await complete([okRow(), substitutedRow()]);
-  expect(update).toHaveBeenCalledTimes(1);
-  expect(set).not.toHaveBeenCalled();
-  const [row] = (update.mock.calls[0][0] as { runDocument: { perModel: Array<Record<string, unknown>> } }).runDocument.perModel;
+  expect(db.writeLog.map((w) => [w.kind, w.path])).toEqual([["update", "runs/run-1"]]); // one write, an update, nothing else
+  const [row] = (updates()[0].data as unknown as { runDocument: { perModel: Array<Record<string, unknown>> } }).runDocument.perModel;
   expect(Object.keys(row).sort()).toEqual(["latencyMs", "modelId", "provider", "rawTextTruncated", "requestedModel", "status", "tokenUsage", "wasTruncated"]);
+});
+
+it("deletion barrier (review round 2, M-2): model output is not written to a run whose deletion has started", async () => {
+  db.seed("runDeletionJobs/run-1", { state: "in_progress" });
+  db.writeLog = [];
+  await expect(
+    completeRun({ runId: "run-1", userId: "uid-1", results: [okRow()], question: "Q?", selectedModels: ["chatgpt"], tokenUsageByModel: [{ modelId: "chatgpt", tokenUsage }] as never, tokenTotals: { totalTokens: 3, promptTokens: 1, completionTokens: 2 } as never })
+  ).rejects.toMatchObject({ code: "research_write_refused" });
+  expect(db.writeLog).toEqual([]);
+  expect(db.read("runs/run-1")).toEqual({ userId: "uid-1", question: "Q?", status: "running" });
 });

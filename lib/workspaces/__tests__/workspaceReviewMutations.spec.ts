@@ -652,6 +652,16 @@ function deleteCall(overrides: Partial<Parameters<typeof deleteWorkspaceReviewAs
 }
 
 describe("deleteWorkspaceReviewAssignment", () => {
+  it("research deletion integrity (review round 2 m-1): a run whose deletion has started is run_not_found and the assignment is unchanged; control: PASS without it", async () => {
+    seedAssignment();
+    stores.runDeletionJobs.set(RUN_ID, asPersisted({ state: "in_progress" }));
+    const before = JSON.stringify(stores.humanReviewAssignment.get(RUN_ID));
+    expect(await deleteCall()).toEqual(expect.objectContaining({ ok: false, reason: "run_not_found" }));
+    expect(JSON.stringify(stores.humanReviewAssignment.get(RUN_ID))).toBe(before);
+    stores.runDeletionJobs.delete(RUN_ID);
+    expect(await deleteCall()).toEqual({ ok: true });
+  });
+
   it("valid manager + correct revision: PASS", async () => {
     seedAssignment();
     const result = await deleteCall();
@@ -798,6 +808,16 @@ function decisionCall(overrides: Partial<Parameters<typeof submitWorkspaceReview
 }
 
 describe("submitWorkspaceReviewDecision — authorization", () => {
+  it("research deletion integrity (review round 2 m-1): a decision on a run whose deletion has started is run_not_found and the record is unchanged; control: ALLOW without it", async () => {
+    seedAssignment({ assignedReviewerUserId: REVIEWER_UID });
+    stores.runDeletionJobs.set(RUN_ID, asPersisted({ state: "in_progress" }));
+    const before = JSON.stringify(stores.runs.get(RUN_ID));
+    expect(await decisionCall()).toEqual(expect.objectContaining({ ok: false, reason: "run_not_found" }));
+    expect(JSON.stringify(stores.runs.get(RUN_ID))).toBe(before);
+    stores.runDeletionJobs.delete(RUN_ID);
+    expect((await decisionCall()).ok).toBe(true);
+  });
+
   it("assigned current Reviewer: ALLOW", async () => {
     seedAssignment({ assignedReviewerUserId: REVIEWER_UID });
     const result = await decisionCall();

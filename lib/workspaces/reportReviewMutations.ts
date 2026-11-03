@@ -21,6 +21,7 @@
 
 import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
+import { isResearchDeletedInTx } from "@/lib/firestore/researchDeletionBarrier";
 import { logger } from "@/lib/logger";
 import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS } from "@/lib/env";
 import { isReportReviewEnabledForWorkspace } from "./reportReviewActivation";
@@ -102,8 +103,9 @@ async function authorizeAndReadRun(tx: FirebaseFirestore.Transaction, args: { ui
   if (panelGate === "open") return { ok: false as const, reason: "active_panel" as const };
   if (panelGate === "invalid") return { ok: false as const, reason: "panel_unreadable" as const };
 
-  // S1: research being deleted accepts no new report-review operation (the deletion workflow then removes everything).
-  if (run.deletion !== undefined && run.deletion !== null) return { ok: false as const, reason: "run_not_found" as const };
+  // S1 + research deletion integrity (review round 2, M-1): research whose deletion has started (tombstone, or the mark)
+  // accepts no new report-review operation. A deletion that crashed after its tombstone and before its mark still blocks.
+  if (await isResearchDeletedInTx(tx, adminDb!, args.runId, { exists: true, data: () => run })) return { ok: false as const, reason: "run_not_found" as const };
   return { ok: true as const, runRef, run, workspaceId: target.workspaceId, projectId: target.projectId };
 }
 

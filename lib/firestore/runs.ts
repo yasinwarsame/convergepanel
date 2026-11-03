@@ -21,7 +21,7 @@
 import { persistableQuestionContext } from "@/lib/questionContext";
 import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
-import { guardedResearchAdd, guardedResearchCreate, guardedResearchSetMerge, isResearchDeletedInTx } from "@/lib/firestore/researchDeletionBarrier";
+import { guardedResearchAdd, guardedResearchCreate, guardedResearchSetMerge, guardedResearchUpdate, isResearchDeletedInTx, isResearchWriteRefusedError } from "@/lib/firestore/researchDeletionBarrier";
 import { ModelResult } from "@/lib/types";
 import { modelIdToProviderKey, safeNum } from "@/lib/tokenExtraction";
 import { Timestamp } from "firebase-admin/firestore";
@@ -439,7 +439,8 @@ export async function completeRun(
     tokensByProvider: Object.keys(tokensByProvider).length > 0 ? tokensByProvider : undefined,
   };
 
-  await adminDb.collection("runs").doc(runId).update(updateData);
+  // Research deletion integrity (review round 2, M-2): the model output lands only on a run whose deletion has not started.
+  await guardedResearchUpdate(adminDb, runId, adminDb.collection("runs").doc(runId), updateData as FirebaseFirestore.UpdateData<FirebaseFirestore.DocumentData>);
 
   console.log(`[firestore/runs] ✅ Completed run ${runId} with ${tokenTotals.totalTokens} total tokens from ${Object.keys(tokensByProvider).length} provider(s)`);
 
@@ -703,15 +704,17 @@ export async function persistAutomatedGovernanceUpdate(
   }
 
   try {
-    await adminDb
-      .collection("runs")
-      .doc(runId)
-      .update({
-        "governanceRecord.automatedGovernance": automatedGovernance,
-        "governanceRecord.updatedAt": updatedAt,
-      });
+    // Research deletion integrity (review round 2, M-2): guarded; a deleted, deleting or missing run is run_missing.
+    await guardedResearchUpdate(adminDb, runId, adminDb.collection("runs").doc(runId), {
+      "governanceRecord.automatedGovernance": automatedGovernance,
+      "governanceRecord.updatedAt": updatedAt,
+    });
     return { saved: true };
   } catch (err: unknown) {
+    if (isResearchWriteRefusedError(err)) {
+      logger.warn("[firestore/runs] persistAutomatedGovernanceUpdate: run document missing", { runId });
+      return { saved: false, reason: "run_missing" };
+    }
     // Best-effort classification of a "document doesn't exist" failure —
     // Firestore's Admin SDK surfaces this as a NOT_FOUND-coded error on
     // .update(). Not verified against a live emulator in this step; falls
@@ -2498,7 +2501,8 @@ export async function markRunError(runId: string, errorMessage: string): Promise
     throw new Error("Firestore is not available");
   }
 
-  await adminDb.collection("runs").doc(runId).update({
+  // Research deletion integrity (review round 2, M-2): guarded like every other research write.
+  await guardedResearchUpdate(adminDb, runId, adminDb.collection("runs").doc(runId), {
     status: "error",
     completedAt: Timestamp.now(),
     errorMessage,

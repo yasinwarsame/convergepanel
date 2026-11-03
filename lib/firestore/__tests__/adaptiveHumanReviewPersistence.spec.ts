@@ -100,9 +100,12 @@ const mockAdminDb: any = {
         }
         return { exists: runDocs.has(ref.id), data: () => runDocs.get(ref.id) };
       },
-      update: (ref: { id: string }, fields: Record<string, unknown>) => {
-        if (!runDocs.has(ref.id)) throw notFoundError(ref.id);
-        applyDotPathUpdate(runDocs.get(ref.id)!, fields);
+      // Routed by the reference's collection, as Firestore does. The projection sync (now a guarded transaction, research
+      // deletion integrity) updates `teamRuns/{projectionId}`, not the run.
+      update: (ref: { id: string; __path?: string }, fields: Record<string, unknown>) => {
+        const store = (ref.__path ?? `runs/${ref.id}`).startsWith("teamRuns/") ? teamRunDocs : runDocs;
+        if (!store.has(ref.id)) throw notFoundError(ref.id);
+        applyDotPathUpdate(store.get(ref.id)!, fields);
       },
     };
     return fn(txn);
@@ -466,6 +469,21 @@ describe("getAdaptiveTeamRunProjection", () => {
 });
 
 describe("syncAdaptiveTeamRunProjectionAfterReview", () => {
+  // The sync runs only after the canonical write to an existing run; it is guarded by the deletion barrier.
+  beforeEach(() => {
+    runDocs.set("run-1", { governanceRecord: governanceRecord() });
+  });
+
+  it("deletion barrier: a run whose deletion has started gets no projection update (not_found), and the projection is unchanged", async () => {
+    const id = buildAdaptiveTeamRunProjectionId("team-1", "run-1");
+    teamRunDocs.set(id, { adaptive: true, teamId: "team-1", runId: "run-1", humanReviewStatus: "unreviewed" });
+    deletionTombstones.set("run-1", { state: "in_progress" });
+    const result = await syncAdaptiveTeamRunProjectionAfterReview({ teamId: "team-1", runId: "run-1", humanReviewStatus: "approved", updatedAt: "2026-07-30T00:00:00.000Z" });
+    deletionTombstones.clear();
+    expect(result).toEqual({ status: "not_found" });
+    expect(teamRunDocs.get(id)!.humanReviewStatus).toBe("unreviewed");
+  });
+
   it("syncs humanReviewStatus/reviewedAt/updatedAt only, after the canonical write", async () => {
     const id = buildAdaptiveTeamRunProjectionId("team-1", "run-1");
     teamRunDocs.set(id, {

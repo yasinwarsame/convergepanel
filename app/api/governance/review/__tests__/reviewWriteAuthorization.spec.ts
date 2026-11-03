@@ -434,4 +434,12 @@ describe("research deletion integrity — governance review of a research run", 
     expect(auditWrites).toEqual([]); // the guarded audit row was refused
     expect(eventWrites()).toEqual([]); // the guarded event was refused
   });
+
+  it("a path-like runId (addressing a nested document) is rejected 400 before any read or write (review round 2 m-2)", async () => {
+    existingDocs["runs/run-a/exports/e1"] = { userId: OWNER_A };
+    const res = await post("runs", "run-a/exports/e1");
+    expect(res.status).toBe(400);
+    expect(writes).toEqual([]);
+    expect(auditWrites).toEqual([]);
+  });
 });

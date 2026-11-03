@@ -5,15 +5,18 @@
  *
  * `writeAuditEvent` writes outside any transaction, and its rows carry research text (the question, reviewer comments).
  * A row written after a completed deletion would re-expose deleted text. `auditLog.ts` is frozen by the Order 6 boundary
- * suites, so research-run callers use `writeGuardedGovernanceAuditRow` instead. It keeps `writeAuditEvent`'s contract
- * exactly:
+ * suites, so research-run callers use `writeGuardedGovernanceAuditRow` instead. It keeps `writeAuditEvent`'s row and
+ * failure contract:
  *   - the same row, field for field: `question`, when a string, is trimmed and cut to 200 characters; `at` is stamped
  *     with the current ISO time; the row passes through `sanitizeForFirestore`;
  *   - BEST-EFFORT. It never throws. A storage failure is logged with only the action, error name and error code, never
  *     the raw error, whose message and details repeat the document path (Phase FIRST-ADMIN-C8/C10). The caller's own
  *     writes are never rolled back or blocked by an audit failure.
  *
- * The only difference is the barrier. A run that is deleted, being deleted or missing gets no row (`"refused"`).
+ * Two differences:
+ *   - The barrier: a run that is deleted, being deleted or missing gets no row (`"refused"`).
+ *   - On success it does not emit `writeAuditEvent`'s two operational `[governance/audit]` log lines (an observability
+ *     difference only; reviewLogRedaction.spec.ts pins it).
  * Verification and video documents still use `writeAuditEvent` unchanged.
  */
 import "server-only";

@@ -35,7 +35,7 @@ import { persistAdaptiveOutput, writeAdaptiveGovernanceEvent, createAdaptiveHuma
 import { createAdaptiveExportRecord, markAdaptiveExportReady } from "@/lib/firestore/adaptiveExports";
 import { evaluateAndStoreGovernance } from "@/lib/governance/evaluateAndStore";
 import { createAdaptiveTeamRunProjection } from "@/lib/firestore/teamRuns";
-import { deleteResearchRun, findResearchDeletionOrphans } from "@/lib/firestore/researchDeletion";
+import { ADMIN_AUDIT_FREE_TEXT_FIELDS, REDACTED_ADMIN_AUDIT_QUESTION, deleteResearchRun, findResearchDeletionOrphans } from "@/lib/firestore/researchDeletion";
 import { RESEARCH_DELETION_TOMBSTONE_COLLECTION, runResearchWrite, isResearchWriteRefusedError } from "@/lib/firestore/researchDeletionBarrier";
 
 const maybe = EMULATOR ? describe : describe.skip;
@@ -55,8 +55,9 @@ async function leftovers(id: string): Promise<string[]> {
   if ((await run.get()).exists) out.push("run");
   for (const c of await run.listCollections()) out.push(`sub:${c.id}`);
   for (const col of ["teamRuns", "workspaceMembershipEvents"]) if (!(await db.collection(col).where("runId", "==", id).get()).empty) out.push(col);
+  // Research text left in a kept audit row: any free-text field that is not the redaction placeholder.
   const aal = await db.collection("admin_audit_logs").where("runId", "==", id).get();
-  if (aal.docs.some((d) => d.data().contentRedacted !== true)) out.push("admin_audit_logs(unredacted)");
+  if (aal.docs.some((d) => ADMIN_AUDIT_FREE_TEXT_FIELDS.some((f) => d.data()[f] !== undefined && d.data()[f] !== REDACTED_ADMIN_AUDIT_QUESTION))) out.push("admin_audit_logs(research text)");
   return out;
 }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

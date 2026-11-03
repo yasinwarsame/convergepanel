@@ -111,7 +111,14 @@ async function redactWorkspaceAudit(db: Db, runId: string): Promise<number> {
  * actor, time, statuses, counts) is kept as evidence.
  */
 export const ADMIN_AUDIT_FREE_TEXT_FIELDS = ["question", "comment", "reasons", "justification", "overrideJustification", "note", "notes"] as const;
-const isRedacted = (row: Record<string, unknown>) => row.contentRedacted === true && ADMIN_AUDIT_FREE_TEXT_FIELDS.every((f) => row[f] === undefined || row[f] === REDACTED_ADMIN_AUDIT_QUESTION);
+/**
+ * A row carries no research text when every free-text field is absent or already redacted. That is what deletion must
+ * guarantee. `contentRedacted: true` is stamped on every row the redaction step rewrites, but it is not required of a
+ * metadata-only row that never held research text. Example: the adaptive review/assignment/panel/export audit rows
+ * written post-commit by the frozen auditLog.ts. Requiring it made such a row landing mid-deletion fail verification and
+ * report the deletion incomplete (review round 2, m-3), although it held nothing to delete.
+ */
+const isRedacted = (row: Record<string, unknown>) => ADMIN_AUDIT_FREE_TEXT_FIELDS.every((f) => row[f] === undefined || row[f] === REDACTED_ADMIN_AUDIT_QUESTION);
 
 async function redactAdminAudit(db: Db, runId: string): Promise<number> {
   const snap = await db.collection("admin_audit_logs").where("runId", "==", runId).get();

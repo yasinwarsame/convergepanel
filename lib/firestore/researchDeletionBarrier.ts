@@ -85,11 +85,25 @@ export async function assertResearchWritable(tx: Tx, db: Db, runId: string): Pro
  * concealment order unchanged. Call it in the transaction's read phase, before any write.
  */
 export async function isResearchDeletedInTx(tx: Tx, db: Db, runId: string, runSnap: { exists: boolean; data(): unknown }): Promise<boolean> {
+  // A malformed or path-like id (review round 2, m-2) would point the tombstone read at a nested path that never exists.
+  // Fail closed: treat it as deleted.
+  if (typeof runId !== "string" || runId.length === 0 || runId.includes("/")) return true;
   if (runSnap.exists) {
     const deletion = (runSnap.data() as Record<string, unknown> | undefined)?.deletion;
     if (deletion !== undefined && deletion !== null) return true;
   }
   return (await tx.get(researchDeletionTombstoneRef(db, runId))).exists;
+}
+
+/**
+ * Guarded `ref.update(data)` (review round 2, M-2). It keeps `update()`'s semantics: dotted field paths, and it never
+ * creates a document. It also refuses a run whose deletion has started. A missing run is refused as "missing" instead of
+ * failing NOT_FOUND.
+ */
+export async function guardedResearchUpdate(db: Db, runId: string, ref: FirebaseFirestore.DocumentReference, data: FirebaseFirestore.UpdateData<FirebaseFirestore.DocumentData>): Promise<void> {
+  await runResearchWrite(db, runId, (tx) => {
+    tx.update(ref, data);
+  });
 }
 
 /** Guarded `ref.set(data, { merge: true })`. */

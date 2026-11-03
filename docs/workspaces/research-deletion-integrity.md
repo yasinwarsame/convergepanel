@@ -69,22 +69,27 @@ The audit covered every server write in `lib/` and `app/`. The repository has no
 
 The adaptive audit writers in the frozen `auditLog.ts` (`writeAdaptiveAdminAuditEvent` and its assignment, panel-finalization, panel-override and export variants) write the `admin_audit_logs` rows for adaptive review, assignment, panel and export actions. They are metadata only, with no question or comment. They are left unchanged because `auditLog.ts` is frozen and the barrier does not need it: the action that triggers them is guarded. A rare post-commit metadata row landing after a completed deletion carries no research text. Detection flags it (it lacks `contentRedacted`) and a re-run marks it.
 
-**Audit rows stay best-effort.** `writeGuardedGovernanceAuditRow` (`lib/governance/governanceAuditRow.ts`) writes the same row as the frozen `writeAuditEvent`, field for field (question cut to 200 then trimmed, `at`, sanitized), and keeps its contract:
+**Audit rows stay best-effort.** `writeGuardedGovernanceAuditRow` (`lib/governance/governanceAuditRow.ts`) writes the same row as the frozen `writeAuditEvent`, field for field (question trimmed, then cut to 200 characters; `at`; sanitized), and keeps its failure contract:
 - it never throws, and never blocks or rolls back the caller's own write;
 - a storage failure is logged with only the action, error name and error code (Phase FIRST-ADMIN-C8/C10). The injected path-carrying failure in `reviewLogRedaction.spec.ts` covers this path for research runs.
 
 The only difference is the barrier.
 
-**B. Update-only writers.** These cannot create a document: `update()` fails `NOT_FOUND` on a missing document.
-- `completeRun`, `markRunError`, `persistAutomatedGovernanceUpdate`;
-- the synthesis `runs` update;
-- `normalizeRunProjectId`;
-- `syncAdaptiveTeamRunProjectionAfterReview`;
-- the legacy Team decision route.
+**B. Update-only writers: now guarded (independent review round 2, M-2).** `update()` cannot create a document, so these could never resurrect a deleted run. But they could still *modify* research content after deletion started: for example, model output from `completeRun`, or a synthesis written after its model call. If that deletion then failed partway, the content stayed until a retry. Each now updates through `guardedResearchUpdate`, which keeps `update()`'s semantics (dotted paths; never creates a document) and adds the barrier check in the same transaction:
+- `completeRun`, `markRunError`, `persistAutomatedGovernanceUpdate` (a refusal maps to `run_missing`);
+- the synthesis `runs` update in `synthesize-panel` (a refusal is handled like any other failed store);
+- `syncAdaptiveTeamRunProjectionAfterReview` (a refusal maps to `not_found`);
+- the legacy Team decision route, for research rows (a refusal returns 404; verification rows are unchanged).
 
-An update landing while deletion is in progress modifies a document that the deletion then removes. After the run document is gone, these updates fail.
+Not guarded: `normalizeRunProjectId`, an operator script that updates `projectId` only, with a `lastUpdateTime` precondition. It carries no research text.
 
-**C. Transactional writers that read `runs/{R}` themselves: now guarded (independent review M-1).** Requiring the run to exist was not enough. Between the tombstone and the run's deletion, a review, vote (with its comment), assignment or assignee write could still commit. It created research-derived records after deletion had started, and an ordinary reviewer could keep the deletion reporting `incomplete`. Each of these transactions now calls `isResearchDeletedInTx(tx, db, runId, runSnap)` where it reads the run, after its own authorization checks, so concealment order is unchanged. The check reads the tombstone and the mark, and maps a deleted or deleting run to the transaction's existing missing-run result (`run_missing`, `run_not_found`, or 404 in the governance review route):
+**Report review (review round 2, M-1).** Submission, resubmission and the decision now check the tombstone as well as the mark, so a deletion that crashed after its tombstone and before its mark still blocks them.
+
+**Path-like ids (review round 2, m-2).** `isResearchDeletedInTx`, like `assertResearchWritable`, treats an empty id or one containing `/` as deleted. The governance review route also rejects a `/` id with a 400 before any read.
+
+**Verification of kept audit rows (review round 2, m-3).** Deletion verification now requires that no kept audit row carries research text: every free-text field is absent or redacted. A metadata-only row that never held text, landing after the redaction step, no longer holds a deletion at `incomplete`. Rows that do carry text are still redacted and verified.
+
+**C. Transactional writers that read `runs/{R}` themselves: now guarded (independent review M-1).** Requiring the run to exist was not enough. Between the tombstone and the run's deletion, a review, vote (with its comment), assignment or assignee write could still commit. It created research-derived records after deletion had started, and an ordinary reviewer could keep the deletion reporting `incomplete`. Each of these transactions now calls `isResearchDeletedInTx(tx, db, runId, runSnap)` at the point where it already handles a missing run. In the Workspace and project writers that point comes after the membership checks, so concealment order is unchanged. In the `runs.ts` writers it is the existence check itself, before the in-transaction cross-authority guard. A caller there sees `run_missing`, which is exactly what it would see once the deletion completes, so it learns nothing new. The check reads the tombstone and the mark, and maps a deleted or deleting run to the transaction's existing missing-run result (`run_missing`, `run_not_found`, or 404 in the governance review route):
 - `runs.ts`: decision, assignment, panel create, panel cancel, vote, finalize, override;
 - `workspaceReviewMutations.ts`: 3 transactions;
 - `workspaceReviewPanelMutations.ts`: 5 transactions;

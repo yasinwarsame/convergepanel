@@ -4,6 +4,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase/admin";
+import { isResearchWriteRefusedError, runResearchWrite } from "@/lib/firestore/researchDeletionBarrier";
 import {
   getRequestUid,
   loadUserAndTeam,
@@ -95,7 +96,20 @@ export async function POST(
     notes: typeof body.notes === "string" ? body.notes.slice(0, 4000) : "",
   };
 
-  await ref.update({ humanDecision });
+  // Research deletion integrity (review round 2, M-2): a projection of a research run (`runId` set) is updated only while
+  // that run's deletion has not started, checked in the same transaction. Verification projections (no runId) are unchanged.
+  const projectedRunId = typeof data.runId === "string" && data.runId ? data.runId : null;
+  if (projectedRunId) {
+    const db = adminDb;
+    try {
+      await runResearchWrite(db, projectedRunId, (tx) => void tx.update(ref, { humanDecision }));
+    } catch (err) {
+      if (!isResearchWriteRefusedError(err)) throw err;
+      return NextResponse.json({ ok: false, error: { code: "not_found", message: "Run not found." } }, { status: 404 });
+    }
+  } else {
+    await ref.update({ humanDecision });
+  }
 
   return NextResponse.json({ ok: true, humanDecision });
 }

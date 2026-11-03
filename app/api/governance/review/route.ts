@@ -74,6 +74,9 @@ export async function POST(request: NextRequest) {
 
   if (!runId || typeof runId !== "string" || !runId.trim()) {
     fields.runId = "Required non-empty string";
+  } else if (runId.includes("/")) {
+    // A document id is one path segment. A "/" would address a nested document (review round 2, m-2).
+    fields.runId = "Must be a single document id";
   }
   if (coll !== "runs" && coll !== "verifications" && coll !== "videoVerifications") {
     fields.collection = 'Must be "runs", "verifications", or "videoVerifications"';

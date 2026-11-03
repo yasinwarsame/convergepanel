@@ -1631,6 +1631,19 @@ function finalizeCall(overrides: Partial<Parameters<typeof finalizeWorkspaceRevi
 }
 
 describe("finalizeWorkspaceReviewPanel", () => {
+  it("research deletion integrity (review round 2 m-1): a run whose deletion has started is run_not_found, nothing is finalized; control: PASS without it", async () => {
+    seedPanel({ revision: 1 });
+    seedVote(OWNER_UID, 1, { status: "approved" });
+    seedVote(ADMIN_UID, 1, { status: "approved" });
+    stores.runDeletionJobs.set(RUN_ID, asPersisted({ state: "in_progress" }));
+    const before = JSON.stringify(stores.runs.get(RUN_ID));
+    expect(await finalizeCall()).toEqual({ ok: false, reason: "run_not_found" });
+    expect(JSON.stringify(stores.runs.get(RUN_ID))).toBe(before);
+    expect(mockedCreateAdaptivePanelFinalizationHistory).not.toHaveBeenCalled();
+    stores.runDeletionJobs.delete(RUN_ID);
+    expect(await finalizeCall()).toEqual(expect.objectContaining({ ok: true }));
+  });
+
   it("quorum met, strict majority: PASS, writes history/event/audit", async () => {
     seedPanel({ revision: 1 });
     seedVote(OWNER_UID, 1, { status: "approved" });
@@ -1769,6 +1782,17 @@ function overrideCall(overrides: Partial<Parameters<typeof overrideWorkspaceRevi
 }
 
 describe("overrideWorkspaceReviewPanel", () => {
+  it("research deletion integrity (review round 2 m-1): a run whose deletion has started is run_not_found, no override; control: PASS without it", async () => {
+    seedPanel({ revision: 1 });
+    stores.runDeletionJobs.set(RUN_ID, asPersisted({ state: "in_progress" }));
+    const before = JSON.stringify(stores.runs.get(RUN_ID));
+    expect(await overrideCall()).toEqual({ ok: false, reason: "run_not_found" });
+    expect(JSON.stringify(stores.runs.get(RUN_ID))).toBe(before);
+    expect(mockedCreateAdaptivePanelOverrideHistory).not.toHaveBeenCalled();
+    stores.runDeletionJobs.delete(RUN_ID);
+    expect(await overrideCall()).toEqual(expect.objectContaining({ ok: true }));
+  });
+
   it("Owner with reviews.override + research.read: PASS", async () => {
     seedPanel({ revision: 1 });
     const result = await overrideCall();
@@ -3934,7 +3958,7 @@ describe("governance-event `.add()` write sites — derived from the repository 
     // the governance review route now create the event in a transaction guarded by the deletion barrier.
     const sites = countGovernanceEventAddSites();
     expect(sites).toEqual([
-      "app/api/governance/review/route.ts:411",
+      "app/api/governance/review/route.ts:414",
       "lib/governance/evaluateAndStore.ts:128",
       "lib/governance/governanceBackfill.ts:63",
     ].sort());
@@ -3944,7 +3968,7 @@ describe("governance-event `.add()` write sites — derived from the repository 
   it("the walker searches `app/` as well as `lib/` (the R8 count missed the app route)", () => {
     const sites = countGovernanceEventAddSites();
     expect(sites.filter((s) => s.startsWith("lib/")).length).toBe(2);
-    expect(sites.filter((s) => s.startsWith("app/"))).toEqual(["app/api/governance/review/route.ts:411"]);
+    expect(sites.filter((s) => s.startsWith("app/"))).toEqual(["app/api/governance/review/route.ts:414"]);
   });
 
   it("the detector is not vacuously blind: it finds nothing in a tree with no such call, and finds one when there is one", () => {

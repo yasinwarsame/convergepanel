@@ -480,3 +480,62 @@ describe("review M-1: Workspace review writers refuse a run whose deletion has s
     expect((r as { reason: string }).reason).not.toBe("run_not_found");
   });
 });
+
+describe("review round 2 M-1: report review refuses a run with a tombstone even when the deletion crashed before marking it", () => {
+  it("submit: run_not_found, and no snapshot, cycle or Workspace audit row (with the question) is written", async () => {
+    db.seed(`runDeletionJobs/${RUN}`, { runId: RUN, state: "failed", step: "mark" }); // tombstone, no mark
+    const r = await submitReportReview({ uid: MEMBER, workspaceId: W, runId: RUN, purpose: { code: "client_delivery", note: "note" } });
+    expect(r).toEqual(expect.objectContaining({ ok: false, reason: "run_not_found" }));
+    expect(under(`runs/${RUN}/`)).toEqual([]);
+    expect(under("workspaceMembershipEvents/")).toEqual([]);
+    expect(db.read(`runs/${RUN}`)!.reportReview).toBeUndefined();
+  });
+
+  it("decision: run_not_found when the tombstone appears after submission (no mark); control: the same decision succeeds without it", async () => {
+    const s = await submitReportReview({ uid: MEMBER, workspaceId: W, runId: RUN, purpose: { code: "client_delivery", note: "note" } });
+    if (!s.ok) throw new Error(s.reason);
+    await putWorkspaceReviewAssignment({ uid: ADMIN, workspaceId: W, runId: RUN, assignedReviewerUserId: REVIEWER, expectedRevision: 0, dueAt: null });
+    db.seed(`runDeletionJobs/${RUN}`, { runId: RUN, state: "in_progress", step: "job" });
+    const decide = () => decideReportReview({ uid: REVIEWER, workspaceId: W, runId: RUN, decision: { status: "approved" }, expectedCycle: 1, expectedUpdatedAt: rr().updatedAt });
+    expect(await decide()).toEqual({ ok: false, reason: "run_not_found" });
+    expect(rr().status).not.toBe("approved");
+    db.docs.delete(`runDeletionJobs/${RUN}`);
+    expect((await decide()).ok).toBe(true);
+  });
+
+  it("resubmission is refused the same way", async () => {
+    await reviewedRun(); // cycle 1 decided changes_requested
+    db.seed(`runDeletionJobs/${RUN}`, { runId: RUN, state: "in_progress" });
+    const r = await resubmitReportReview({ uid: MEMBER, workspaceId: W, runId: RUN, purpose: { code: "client_delivery", note: "n" }, expectedCycle: 1 });
+    expect(r).toEqual(expect.objectContaining({ ok: false, reason: "run_not_found" }));
+    expect(rr().cycle).toBe(1);
+  });
+});
+
+describe("review round 2 m-3: a metadata-only audit row landing mid-deletion does not hold the deletion at incomplete", () => {
+  it("an adaptive review audit row with no free text (written post-commit, frozen auditLog.ts) after the redaction step: the deletion still completes", async () => {
+    let injected = false;
+    db.hooks.failWrite = (w) => {
+      // The Team-projection deletion runs AFTER the admin-audit redaction step and BEFORE verification. A late post-commit
+      // audit row lands exactly there, so the redaction step never saw it.
+      if (!injected && w.kind === "delete" && w.path.startsWith("teamRuns/")) {
+        injected = true;
+        db.seed("admin_audit_logs/adaptive-review:late", { action: "adaptive_human_review_decided", runId: RUN, byUid: REVIEWER, at: "t" });
+      }
+    };
+    db.seed("teamRuns/t1", { runId: RUN, teamId: "team1" });
+    const res = await deleteResearchRun({ runId: RUN, actorUid: "sys", reason: "admin_delete" });
+    db.hooks = {};
+    expect(injected).toBe(true);
+    expect(res).toMatchObject({ status: "deleted" });
+    // Kept as evidence, never stamped (the redaction step had already run): under the old rule it failed verification.
+    expect(db.read("admin_audit_logs/adaptive-review:late")).toEqual({ action: "adaptive_human_review_decided", runId: RUN, byUid: REVIEWER, at: "t" });
+  });
+
+  it("a row that DOES carry research text still fails verification until it is redacted (the rule is about text, not the flag)", async () => {
+    db.seed("admin_audit_logs/late-text", { action: "evaluated", runId: RUN, question: "SECRET" });
+    const res = await deleteResearchRun({ runId: RUN, actorUid: "sys", reason: "admin_delete" });
+    expect(res).toMatchObject({ status: "deleted" });
+    expect(db.read("admin_audit_logs/late-text")).toEqual(expect.objectContaining({ question: REDACTED_ADMIN_AUDIT_QUESTION, contentRedacted: true }));
+  });
+});

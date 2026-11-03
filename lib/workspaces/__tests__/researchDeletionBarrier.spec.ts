@@ -344,3 +344,42 @@ describe("review M-1: every transactional review writer refuses a deleted or del
     }
   });
 });
+
+// ── Review round 2: update-only writers (M-2) and path-like ids (m-2) ─────────────────────────────────────────────
+import { markRunError } from "@/lib/firestore/runs";
+import { guardedResearchUpdate, isResearchDeletedInTx } from "@/lib/firestore/researchDeletionBarrier";
+
+describe("review round 2 M-2: update-only writers are guarded and still never create a document", () => {
+  it("markRunError: refused for a deleted, deleting or missing run; nothing written", async () => {
+    for (const state of ["tombstone", "mark", "missing"] as const) {
+      seedState(state);
+      const before = derived();
+      await expect(markRunError(R, "boom")).rejects.toMatchObject({ code: "research_write_refused" });
+      expect(derived()).toEqual(before);
+    }
+    seedState("normal");
+    await markRunError(R, "boom");
+    expect(db.read(`runs/${R}`)).toEqual(expect.objectContaining({ status: "error", errorMessage: "boom" }));
+  });
+
+  it("guardedResearchUpdate keeps update() semantics: dotted paths update one leaf, and a missing target document is NOT created", async () => {
+    seedState("normal");
+    db.seed(`runs/${R}`, { userId: "u1", governanceRecord: { a: 1, b: 2 } });
+    await guardedResearchUpdate(db as never, R, db.doc(`runs/${R}`) as never, { "governanceRecord.b": 3 });
+    expect(db.read(`runs/${R}`)!.governanceRecord).toEqual({ a: 1, b: 3 });
+    await expect(guardedResearchUpdate(db as never, R, db.doc(`teamRuns/absent`) as never, { x: 1 })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(db.read("teamRuns/absent")).toBeUndefined();
+  });
+});
+
+describe("review round 2 m-2: a path-like run id never passes the in-transaction check", () => {
+  it("isResearchDeletedInTx treats an id containing '/' (or empty) as deleted, even when it names an existing, unmarked subtree document", async () => {
+    seedState("normal");
+    db.seed(`runs/${R}/exports/e1`, { body: SECRET });
+    for (const id of [`${R}/exports/e1`, "", "a/b"]) {
+      const deleted = await db.runTransaction(async (tx) => isResearchDeletedInTx(tx as never, db as never, id, { exists: true, data: () => ({}) }));
+      expect(deleted).toBe(true);
+    }
+    expect(await db.runTransaction(async (tx) => isResearchDeletedInTx(tx as never, db as never, R, { exists: true, data: () => ({}) }))).toBe(false); // control
+  });
+});
