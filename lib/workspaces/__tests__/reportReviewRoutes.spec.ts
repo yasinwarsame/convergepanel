@@ -7,9 +7,12 @@ jest.mock("@/lib/auth/resolveRequestIdentity", () => ({ resolveRequestIdentity: 
 jest.mock("@/lib/auth/identityResolutionTelemetry", () => ({ logIdentityResolutionFailure: jest.fn() }));
 const admission = { admitted: true };
 // Order B review MINOR-1: the route gate also requires active Team Workspace membership before reading the body.
-const memberOf = { granted: true };
+const memberOf: { granted: boolean; type: string; reason: string; throws: boolean } = { granted: true, type: "team", reason: "membership_not_found", throws: false };
 jest.mock("@/lib/workspaces/resolveWorkspaceAccess", () => ({
-  resolveWorkspaceAccess: async () => (memberOf.granted ? { granted: true, workspaceType: "team" } : { granted: false, reason: "membership_not_found" }),
+  resolveWorkspaceAccess: async () => {
+    if (memberOf.throws) throw new Error("firestore down");
+    return memberOf.granted ? { granted: true, workspaceType: memberOf.type } : { granted: false, reason: memberOf.reason };
+  },
 }));
 jest.mock("@/lib/workspaces/approvalWorkflowRollout", () => ({ resolveApprovalWorkflowAdmission: () => admission }));
 const rollout = { REPORT_REVIEW_ENABLED: true };
@@ -39,6 +42,9 @@ beforeEach(() => {
   jest.clearAllMocks();
   admission.admitted = true;
   memberOf.granted = true;
+  memberOf.type = "team";
+  memberOf.reason = "membership_not_found";
+  memberOf.throws = false;
   rollout.REPORT_REVIEW_ENABLED = true;
   mockedIdentity.mockResolvedValue({ status: "authenticated", uid: "u1", source: "session_cookie" });
   mockedSubmit.mockResolvedValue({ ok: true, created: true, record: RECORD });
@@ -180,5 +186,26 @@ describe("Order B review MINOR-1: a non-member cannot tell the activated Workspa
   });
   it("member of the activated Workspace: a malformed body is a 400 (they already know their own Workspace)", async () => {
     expect((await submitPost(req({ extra: 1 }), params)).status).toBe(400);
+  });
+});
+
+describe("Order B confirmation: gate edge cases", () => {
+  it("a Personal workspace (not Team) is concealed like a non-member", async () => {
+    memberOf.type = "personal";
+    expect((await submitPost(req({ extra: 1 }), params)).status).toBe(404);
+  });
+  it.each([
+    ["lookup_failed", () => ((memberOf.granted = false), (memberOf.reason = "lookup_failed"))],
+    ["a thrown lookup", () => (memberOf.throws = true)],
+  ])("infrastructure failure (%s) is a retryable 503, never 'not found'", async (_l, setup) => {
+    setup();
+    const res = await submitPost(req({ extra: 1 }), params);
+    expect(res.status).toBe(503);
+    expect(mockedSubmit).not.toHaveBeenCalled();
+  });
+  it("non-member: resubmit is concealed too (one shared gate, before the body is read)", async () => {
+    memberOf.granted = false;
+    expect((await resubmitPost(req({ extra: 1 }, "report-review/resubmit"), params)).status).toBe(404);
+    expect(mockedResubmit).not.toHaveBeenCalled();
   });
 });
