@@ -1,7 +1,7 @@
 /**
  * Order B, Stage B1 — POST /api/workspaces/{W}/runs/{R}/report-review/resubmit
  * D-B6: after a decided cycle, archive it write-once and start a new cycle. Body exactly `{ purpose, expectedCycle }`.
- * Dark: REPORT_REVIEW_ENABLED (compile-time false, lib/workspaces/reportReviewRollout.ts) and Approval Workflow admission; otherwise the concealed 404.
+ * Dark unless activated for this Workspace (lib/workspaces/reportReviewActivation.ts: switch + single-workspace allow-list), plus Approval Workflow admission and Workspace membership; otherwise the concealed 404.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { resubmitReportReview } from "@/lib/workspaces/reportReviewMutations";
@@ -12,7 +12,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest, { params }: { params: { workspaceId: string; runId: string } }) {
-  const uidOrRes = await reportReviewCaller(req, "/api/workspaces/[workspaceId]/runs/[runId]/report-review/resubmit");
+  const uidOrRes = await reportReviewCaller(req, "/api/workspaces/[workspaceId]/runs/[runId]/report-review/resubmit", params.workspaceId);
   if (uidOrRes instanceof NextResponse) return uidOrRes;
   const body = await readJsonObject(req);
   if (!body || !Object.keys(body).every((k) => k === "purpose" || k === "expectedCycle")) return reportReviewErrorBody(400, "bad_request", "Body must be exactly { purpose, expectedCycle }.");

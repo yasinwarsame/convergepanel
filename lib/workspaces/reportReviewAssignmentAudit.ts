@@ -15,14 +15,15 @@
  */
 import { parseReportReviewRecord } from "@/lib/governance/reportReview";
 import { REPORT_REVIEW_EVENTS_COLLECTION } from "./reportReviewCollections";
-import { REPORT_REVIEW_ENABLED } from "./reportReviewRollout";
+import { isReportReviewEnabledForWorkspace } from "./reportReviewActivation";
 import { runQuestionSnapshot, writeReportReviewWorkspaceAuditEvent } from "./reportReviewWorkspaceAudit";
 
 export type ReportReviewAssignmentContext = { kind: "not_report_review" } | { kind: "report_review"; cycle: number; submitterUid: string; runQuestion: string | null } | { kind: "malformed" };
 
 export function reportReviewAssignmentContext(runData: Record<string, unknown>): ReportReviewAssignmentContext {
-  // Dormant while Report Review is OFF: assignment behaviour is then exactly as before B2, whatever the run carries.
-  if (!REPORT_REVIEW_ENABLED) return { kind: "not_report_review" };
+  // Dormant unless Report Review is active for THIS run's own Workspace (Order B allow-list): elsewhere assignment
+  // behaviour is exactly as before B2, whatever the run carries. Callers have already verified the run's Workspace.
+  if (!isReportReviewEnabledForWorkspace(runData.workspaceId)) return { kind: "not_report_review" };
   if (runData.reportReview === undefined || runData.reportReview === null) return { kind: "not_report_review" };
   // A run carrying BOTH records violates the B1 invariant: fail closed, as the decision path and the queue do.
   if (runData.governanceRecord !== undefined && runData.governanceRecord !== null) return { kind: "malformed" };

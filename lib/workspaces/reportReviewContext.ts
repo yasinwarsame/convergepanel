@@ -17,7 +17,7 @@
 import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
-import { REPORT_REVIEW_ENABLED } from "./reportReviewRollout";
+import { isReportReviewEnabledForWorkspace } from "./reportReviewActivation";
 import { resolveWorkspaceAccess } from "./resolveWorkspaceAccess";
 import { resolveWorkspaceReviewTarget } from "./resolveWorkspaceReviewTarget";
 import { REPORT_REVIEW_CYCLES_COLLECTION, REPORT_REVIEW_EVENTS_COLLECTION } from "./reportReviewCollections";
@@ -104,7 +104,7 @@ const HISTORY_TYPES: ReadonlySet<string> = new Set(["report_review_submitted", "
 const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
 
 export async function getReportReviewContext(args: { uid: string; workspaceId: string; runId: string }): Promise<ReportReviewContextResult> {
-  if (!REPORT_REVIEW_ENABLED || !adminDb) return { status: "not_found" };
+  if (!isReportReviewEnabledForWorkspace(args.workspaceId) || !adminDb) return { status: "not_found" };
   const access = await resolveWorkspaceAccess({ uid: args.uid, workspaceId: args.workspaceId });
   if (!access.granted || access.workspaceType !== "team") return { status: "not_found" };
   if (!access.capabilities.includes("research.read") || !access.capabilities.includes("reviews.read")) return { status: "not_found" };

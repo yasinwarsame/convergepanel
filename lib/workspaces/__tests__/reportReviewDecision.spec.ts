@@ -16,6 +16,7 @@ jest.mock("@/lib/workspaces/reportReviewRollout", () => ({
   get REPORT_REVIEW_ENABLED() {
     return flags.REPORT_REVIEW_ENABLED;
   },
+  REPORT_REVIEW_WORKSPACE_ALLOWLIST: ["wsB2"],
 }));
 jest.mock("@/lib/env", () => ({ ...jest.requireActual("@/lib/env"), TEAM_WORKSPACES_ENABLED: true, TEAM_WORKSPACES_CANARY_UIDS: undefined, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS: undefined }));
 jest.mock("@/lib/logger", () => ({ logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
@@ -157,7 +158,8 @@ describe("authorization: the shared contract (server-authoritative)", () => {
     membership(W, REVIEWER, "reviewer", "removed");
     expect((await decide(REVIEWER)).ok).toBe(false);
     membership(W, REVIEWER, "reviewer");
-    expect(await decide(REVIEWER, undefined, { workspaceId: W2 })).toEqual({ ok: false, reason: "run_not_found" });
+    // Order B: W2 is not the activated Workspace, so report review is refused there before anything else (the run binding check would refuse it too).
+    expect(await decide(REVIEWER, undefined, { workspaceId: W2 })).toEqual({ ok: false, reason: "disabled" });
     expect(rr().humanReview.status).toBe("unreviewed");
   });
 
