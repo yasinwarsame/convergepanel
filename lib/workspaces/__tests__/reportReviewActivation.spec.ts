@@ -305,10 +305,11 @@ describe("owner ruling (Order B): rollback stops NEW report-review operations bu
     return { status: res.status, body: res.status === 200 ? await res.json() : null };
   };
   async function reviewedInTrial() {
-    const sub = await submitReportReview({ uid: MEMBER, workspaceId: T, runId: "rT", purpose: { code: "client_delivery", note: "PURPOSE-NOTE" } });
+    // Explicit, distinct timestamps: the Audit Log orders by time, so same-millisecond writes would order by doc id.
+    const sub = await submitReportReview({ uid: MEMBER, workspaceId: T, runId: "rT", purpose: { code: "client_delivery", note: "PURPOSE-NOTE" }, now: "2026-11-02T11:00:00.000Z" });
     if (!sub.ok) throw new Error("submit");
-    await putWorkspaceReviewAssignment({ uid: OWNER, workspaceId: T, runId: "rT", assignedReviewerUserId: REVIEWER, expectedRevision: 0, dueAt: null });
-    await decideReportReview({ uid: REVIEWER, workspaceId: T, runId: "rT", decision: { status: "approved_with_conditions", conditions: ["CONDITION-TEXT"], comment: "PRIVATE-COMMENT" }, expectedCycle: 1, expectedUpdatedAt: sub.record.updatedAt });
+    await putWorkspaceReviewAssignment({ uid: OWNER, workspaceId: T, runId: "rT", assignedReviewerUserId: REVIEWER, expectedRevision: 0, dueAt: null, now: "2026-11-02T11:01:00.000Z" });
+    await decideReportReview({ uid: REVIEWER, workspaceId: T, runId: "rT", decision: { status: "approved_with_conditions", conditions: ["CONDITION-TEXT"], comment: "PRIVATE-COMMENT" }, expectedCycle: 1, expectedUpdatedAt: sub.record.updatedAt, now: "2026-11-02T12:00:00.000Z" });
   }
   const rrTypes = (body: { events: { eventType: string }[] }) => body.events.map((e) => e.eventType).filter((t) => t.startsWith("workspace_report_review_"));
 
