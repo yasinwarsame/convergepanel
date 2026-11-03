@@ -212,16 +212,20 @@ export default function ReportReviewPanel({ workspaceId, runId, canCreateExport 
     };
   }, []);
 
+  // Keyed on the signed-in uid (not the user object's identity), so a re-render can never re-trigger the read.
+  const uid = user?.uid ?? null;
+  const userRef = useRef(user);
+  userRef.current = user;
   useEffect(() => {
-    if (!authReady || !user) return;
+    if (!authReady || !uid) return;
     const controller = new AbortController();
     void (async () => {
-      const r = await fetchReportReviewContext({ workspaceId, runId, user, authReady, signal: controller.signal });
+      const r = await fetchReportReviewContext({ workspaceId, runId, user: userRef.current, authReady, signal: controller.signal });
       if (controller.signal.aborted || !mounted.current) return;
       setState(r.status === "ok" ? { kind: "ready", context: r.context } : r.status === "not_found" ? { kind: "unavailable" } : { kind: "error" });
     })();
     return () => controller.abort();
-  }, [workspaceId, runId, user, authReady, tick]);
+  }, [workspaceId, runId, uid, authReady, tick]);
 
   const reload = useCallback(() => setTick((n) => n + 1), []);
 

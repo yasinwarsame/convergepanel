@@ -743,3 +743,34 @@ describe("R4-I4 Verify this claim handoff", () => {
     expect(ancillary.exportSurface.type.name).toBe("TeamResearchExportButton");
   });
 });
+
+describe("Order B, Stage B3 — Report Review panel placement (switch-gated)", () => {
+  const kindsOf = (r: TestRenderer.ReactTestRenderer) =>
+    ((r.toJSON() as TestRenderer.ReactTestRendererJSON).children as TestRenderer.ReactTestRendererJSON[]).map((c) => (c.props["aria-label"] ? `${c.type}:${c.props["aria-label"]}` : c.props["data-testid"] ? c.props["data-testid"] : c.type));
+  const reportReviewCalls = () => mockedAuthedFetch.mock.calls.filter((c) => String(c[0]).includes("/report-review"));
+
+  beforeEach(() => mockedAuthedFetch.mockReset());
+
+  it("OFF (Production): the Order A notice, and the report-review API is never called", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(200, body()));
+    const r = await mount({ ...PROJECT_PROPS, reportReviewEnabled: false });
+    expect(kindsOf(r)).toEqual(["nav:Breadcrumb", "div", "nav:Workspace", "persisted-result-view", "approval-not-available-notice"]);
+    expect(reportReviewCalls()).toEqual([]);
+  });
+
+  it("ON, no governed review: the Report Review panel replaces the notice and reads its own context", async () => {
+    mockedAuthedFetch.mockImplementation(async (url: string) =>
+      String(url).includes("/report-review") ? response(200, { ok: true, state: "not_submitted", eligibility: { eligible: false, reason: "not_complete" }, viewer: { canSubmit: false }, disclaimer: "D" }) : response(200, body())
+    );
+    const r = await mount({ ...PROJECT_PROPS, reportReviewEnabled: true });
+    expect(kindsOf(r)).toEqual(["nav:Breadcrumb", "div", "nav:Workspace", "persisted-result-view", "report-review-panel"]);
+    expect(reportReviewCalls().map((c) => c[0])).toEqual([`/api/workspaces/${WS}/runs/${RUN}/report-review`]);
+  });
+
+  it("ON, governed review present: no report-review panel and no report-review call", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(200, body({}, { review: { humanReviewStatus: "approved", conditions: null, decidedVia: null, decisionReceipt: null } })));
+    const r = await mount({ ...PROJECT_PROPS, reportReviewEnabled: true });
+    expect(kindsOf(r)).not.toContain("report-review-panel");
+    expect(reportReviewCalls()).toEqual([]);
+  });
+});

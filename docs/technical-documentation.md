@@ -1239,6 +1239,26 @@ A **separate, newer** governance system layered on the same `governanceRecord.hu
 
 Full operational detail, the executed canary closeout (tested source SHA, final governance matrix, rollback procedure, technical debt register, recanary policy): **[`docs/operations/workspace-governance-canary-runbook.md`](./operations/workspace-governance-canary-runbook.md)**.
 
+#### Report review for non-governed research (Order B, B1–B3) — dark
+
+Research without a `governanceRecord` (Generic and the other non-Milestone-2 types) can be explicitly submitted for human approval. The record lives at `runs/{R}.reportReview`, and a run never holds both records (B1 invariant).
+
+| Stage | Adds | Code |
+|---|---|---|
+| B1 | Submission and resubmission | `lib/workspaces/reportReviewMutations.ts` |
+| B2 | Decision, assignment audit, merged Approval Queue | `reportReviewDecisionMutation.ts`, `reviewQueue.ts` |
+| B3 | Team research page panel; Workspace Audit Log rows; record export | `ReportReviewPanel.tsx`; `workspace_report_review_*` rows in `workspaceMembershipEvents`, written in the mutation's own transaction; `GET …/report-review/export?format=json\|html` |
+
+The B3 export is separate from the Order 6-frozen research exports.
+
+**Gating.** Everything is gated by the compile-time `REPORT_REVIEW_ENABLED` (`lib/workspaces/reportReviewRollout.ts`, currently `false`) and by Approval Workflow admission.
+
+**Copy.** The fixed disclaimer lives in `lib/governance/reportReviewCopy.ts`.
+
+**Indexes.** The four `reportReview.*` composite indexes are declared in `firestore.indexes.json` but **not deployed**. A missing index makes the merged queue answer 503 `review_queue_index_unavailable`.
+
+**Details.** Contracts, the index manifest and the activation checklist: [`docs/workspaces/approval-b3-ui-audit-export.md`](./workspaces/approval-b3-ui-audit-export.md).
+
 ---
 
 ## Adaptive Research Export
