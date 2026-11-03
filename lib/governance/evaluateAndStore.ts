@@ -9,7 +9,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import { sanitizeForFirestore } from "@/lib/firestore/sanitizeForFirestore";
 import { loadGovernancePolicy } from "@/lib/governance/governancePolicyStore";
 import { writeAuditEvent } from "@/lib/governance/auditLog";
-import { createGovernanceAuditRowInTx } from "@/lib/governance/governanceAuditRow";
+import { writeGuardedGovernanceAuditRow } from "@/lib/governance/governanceAuditRow";
 import { runResearchWrite } from "@/lib/firestore/researchDeletionBarrier";
 import { evaluateGovernance } from "./evaluateGovernance";
 import type { GovernanceInput, GovernancePolicy } from "./evaluateGovernance";
@@ -110,17 +110,18 @@ export async function evaluateAndStoreGovernance(params: {
     });
 
     if (params.collection === "runs") {
-      // Research deletion integrity: for a research run, the status, the governance event and the audit row (which carries
-      // the question) are written in ONE transaction guarded by the deletion barrier. A deleted or deleting run gets none
-      // of them, even if this evaluation started before the deletion. Same documents as before, now atomic.
+      // Research deletion integrity: for a research run, the status and the governance event are written in one
+      // transaction guarded by the deletion barrier. The audit row (which carries the question) is written in its own
+      // guarded transaction, best-effort exactly like writeAuditEvent. A deleted or deleting run gets none of them, even if
+      // this evaluation started before the deletion.
       const db = adminDb;
-      await runResearchWrite(db, params.runId, (tx, run) => {
-        const parentData = (run.data() ?? {}) as Record<string, unknown>;
-        const runOwnerEmail = typeof parentData.userEmail === "string" ? parentData.userEmail : "";
+      const parentData = await runResearchWrite(db, params.runId, (tx, run) => {
         tx.set(run.ref, statusDoc, { merge: true });
         tx.create(run.ref.collection("governanceEvents").doc(), eventDoc);
-        createGovernanceAuditRowInTx(tx, db, auditEvent(runOwnerEmail));
+        return (run.data() ?? {}) as Record<string, unknown>;
       });
+      const runOwnerEmail = typeof parentData.userEmail === "string" ? parentData.userEmail : "";
+      await writeGuardedGovernanceAuditRow(db, params.runId, auditEvent(runOwnerEmail));
     } else {
       await adminDb.collection(params.collection).doc(params.runId).set(statusDoc, { merge: true });
 

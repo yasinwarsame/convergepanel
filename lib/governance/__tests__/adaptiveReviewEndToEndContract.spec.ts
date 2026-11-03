@@ -11,142 +11,44 @@
  * REAL.
  */
 
-const runDocs = new Map<string, Record<string, any>>();
-const teamRunDocs = new Map<string, Record<string, any>>();
-const auditDocs = new Map<string, Record<string, any>>();
-const eventsByRunId = new Map<string, Record<string, unknown>[]>();
-const historyDocs = new Map<string, Record<string, any>>();
-
-function applyDotPathUpdate(target: Record<string, any>, fields: Record<string, unknown>): void {
-  for (const [path, value] of Object.entries(fields)) {
-    const segments = path.split(".");
-    let cursor = target;
-    for (let i = 0; i < segments.length - 1; i++) {
-      const segment = segments[i];
-      if (typeof cursor[segment] !== "object" || cursor[segment] === null) cursor[segment] = {};
-      cursor = cursor[segment];
-    }
-    cursor[segments[segments.length - 1]] = value;
-  }
-}
-
-function notFoundError(id: string) {
-  const err: any = new Error("5 NOT_FOUND: No document to update: " + id);
-  err.code = 5;
-  return err;
-}
-
-function alreadyExistsError() {
-  const err: any = new Error("6 ALREADY_EXISTS");
-  err.code = 6;
-  return err;
-}
-
-function topLevelStoreFor(name: string): Map<string, Record<string, any>> | null {
-  if (name === "runs") return runDocs;
-  if (name === "teamRuns") return teamRunDocs;
-  if (name === "admin_audit_logs") return auditDocs;
-  return null;
-}
-
+// Research deletion integrity (2026-11-03): the decision route's post-commit history, audit and event writers now run
+// in transactions guarded by the deletion barrier. The hand-written double (single-attempt transaction, refs routed by
+// id) is replaced by the shared transactional fake. Each store keeps its original keys as a view over it:
+//   - runDocs, teamRunDocs and auditDocs: by document id;
+//   - historyDocs: `${runId}/${sub}/${docId}`, every run subcollection except governanceEvents and humanReviewPanel;
+//   - eventsByRunId: `${runId}/governanceEvents`, giving the event list;
+//   - panelDocsByPath: by full path.
+// `panelReadPaths` lists the panel paths read inside transactions, from the fake's transaction read log.
+import { FakeTransactionalFirestore } from "@/lib/workspaces/__tests__/helpers/fakeTransactionalFirestore";
+import { runDocView, runSubView, storeView, topLevelView } from "@/lib/workspaces/__tests__/helpers/fakeStoreViews";
+const db = new FakeTransactionalFirestore();
+const mockAdminDb = db;
+const runDocs = runDocView(db);
+const teamRunDocs = topLevelView(db, "teamRuns", false);
+const auditDocs = topLevelView(db, "admin_audit_logs", false);
+const historyDocs = runSubView(db, { exclude: ["governanceEvents", "humanReviewPanel"] });
+const eventsByRunId = {
+  get: (key: string) => {
+    const docs = db.paths(`runs/${key}/`).map((p) => db.read(p)!);
+    return docs.length ? docs : undefined;
+  },
+  clear: () => undefined,
+};
 /** R2 P3 — explicit panel store so "absent" is configured, never accidental. */
-const panelDocsByPath = new Map<string, Record<string, unknown>>();
-const panelReadPaths: string[] = [];
-
-const mockAdminDb: any = {
-  collection: (name: string) => ({
-    doc: (id: string) => ({
-      id,
-      get: jest.fn().mockImplementation(async () => {
-        const store = topLevelStoreFor(name);
-        if (!store) throw new Error(`unexpected top-level get on ${name}`);
-        return { exists: store.has(id), data: () => store.get(id) };
-      }),
-      update: jest.fn().mockImplementation(async (fields: Record<string, unknown>) => {
-        const store = topLevelStoreFor(name);
-        if (!store || !store.has(id)) throw notFoundError(id);
-        applyDotPathUpdate(store.get(id)!, fields);
-      }),
-      create: jest.fn().mockImplementation(async (value: Record<string, unknown>) => {
-        const store = topLevelStoreFor(name);
-        if (!store) throw new Error(`unexpected top-level create on ${name}`);
-        if (store.has(id)) throw alreadyExistsError();
-        store.set(id, value);
-      }),
-      collection: (subName: string) => ({
-        add: jest.fn().mockImplementation(async (event: Record<string, unknown>) => {
-          const key = `${id}/${subName}`;
-          const existing = eventsByRunId.get(key) || [];
-          existing.push(event);
-          eventsByRunId.set(key, existing);
-          return { id: `event-${existing.length}` };
-        }),
-        doc: (docId: string) => ({
-          id: docId,
-          __path: `runs/${id}/${subName}/${docId}`,
-          create: jest.fn().mockImplementation(async (value: Record<string, unknown>) => {
-            const key = `${id}/${subName}/${docId}`;
-            if (historyDocs.has(key)) throw alreadyExistsError();
-            historyDocs.set(key, value);
-          }),
-          // Multi-Reviewer Panel Foundation, Part B — the decision route's
-          // panel-presence gate now reads `humanReviewPanel/current` on
-          // every POST. No test in this file ever creates a panel, so this
-          // always correctly reports "not found" (absent), never
-          // "read_failed" — the fake must support the read at all so the
-          // panel gate doesn't fail CLOSED (503) by mistake for every
-          // single test in this file, per its own deliberate fail-closed design.
-          get: jest.fn().mockImplementation(async () => {
-            const key = `${id}/${subName}/${docId}`;
-            return { exists: historyDocs.has(key), data: () => historyDocs.get(key) };
-          }),
-        }),
-        get: jest.fn().mockImplementation(async () => {
-          const prefix = `${id}/${subName}/`;
-          const docs = [...historyDocs.entries()]
-            .filter(([key]) => key.startsWith(prefix))
-            .map(([key, value]) => ({ id: key.slice(prefix.length), data: () => value }));
-          return { docs };
-        }),
-      }),
-    }),
-  }),
-  runTransaction: jest.fn().mockImplementation(async (fn: (txn: any) => Promise<any>) => {
-    const txn = {
-      // R2 P3 — PR #189 added an in-transaction read of
-      // `runs/{runId}/humanReviewPanel/current`. This fake used to key
-      // `txn.get` on `ref.id` alone, and the subcollection ref carried no
-      // `id`, so that production read silently resolved to `runDocs.get(
-      // undefined)` -> "absent". It was answering the panel question by
-      // accident. Subcollection reads are now dispatched by PATH and served
-      // from an explicit store, so "no panel" is a configured fact and the
-      // request is recorded for assertion.
-      get: async (ref: { id: string; __path?: string }) => {
-        const path = ref.__path;
-        if (path && path.includes("/humanReviewPanel/")) {
-          panelReadPaths.push(path);
-          return { exists: panelDocsByPath.has(path), data: () => panelDocsByPath.get(path) };
-        }
-        if (path && !path.startsWith(`runs/${ref.id}`)) {
-          const key = path.split("/").slice(1).join("/");
-          return { exists: historyDocs.has(key), data: () => historyDocs.get(key) };
-        }
-        return { exists: runDocs.has(ref.id), data: () => runDocs.get(ref.id) };
-      },
-      update: (ref: { id: string }, fields: Record<string, unknown>) => {
-        if (!runDocs.has(ref.id)) throw notFoundError(ref.id);
-        applyDotPathUpdate(runDocs.get(ref.id)!, fields);
-      },
-    };
-    return fn(txn);
-  }),
+const panelDocsByPath = storeView(db, (k) => k, (p) => (/^runs\/[^/]+\/humanReviewPanel\/[^/]+$/.test(p) ? p : null));
+const panelReadPaths = {
+  some: (pred: (p: string) => boolean) => db.txReadLog.filter((p) => p.includes("/humanReviewPanel/")).some(pred),
+  set length(_n: number) {
+    db.txReadLog = [];
+  },
 };
 
 jest.mock("@/lib/firebase/admin", () => ({
   get adminDb() {
-    return mockAdminDb;
+    return db;
   },
 }));
+
 
 jest.mock("@/lib/logger", () => ({
   logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() },
@@ -240,6 +142,10 @@ async function fetchHistory() {
 beforeEach(() => {
   panelDocsByPath.clear();
   panelReadPaths.length = 0;
+  db.docs.clear();
+  db.hooks = {};
+  db.writeLog = [];
+  db.txReadLog = [];
   runDocs.clear();
   teamRunDocs.clear();
   auditDocs.clear();

@@ -264,6 +264,7 @@ export class FakeTransaction {
     }
     const s = this.db.docs.get(ref.path);
     this.reads.set(ref.path, s ? s.version : -1);
+    this.db.txReadLog.push(ref.path);
     return this.db.snapshot(ref.path);
   }
   set(ref: FakeDocRef, data: Data, opts?: { merge?: boolean }) {
@@ -327,6 +328,8 @@ export class FakeTransactionalFirestore {
    * commit (`via: "tx"`) or a direct document call (`via: "direct"`). Lets specs assert the exact write shape a
    * production writer issues, the way method spies did, against a store that models transactions.
    */
+  /** Every document path read inside a transaction, in order (lets a spec assert which documents a transaction read). */
+  txReadLog: string[] = [];
   writeLog: { kind: Write["kind"]; path: string; data: Data; via: "tx" | "direct" }[] = [];
   applyWrites(writes: Write[], via: "tx" | "direct" = "direct") {
     const staged = new Map<string, Stored | undefined>();

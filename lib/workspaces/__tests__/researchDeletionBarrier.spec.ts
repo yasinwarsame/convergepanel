@@ -139,7 +139,7 @@ describe("normal-run documents are the same documents the writers wrote before",
     expect(await createAdaptiveHumanReviewHistory(R, { decisionId: "d1", n: 2 } as never)).toEqual({ status: "already_exists" });
     expect(db.read(`runs/${R}/humanReviewHistory/d1`)).toEqual({ decisionId: "d1", n: 1 });
   });
-  it("evaluateAndStoreGovernance writes status, one event and one audit row atomically (question cut to 200, then trimmed, as writeAuditEvent did)", async () => {
+  it("evaluateAndStoreGovernance writes status + one event (one guarded transaction) and one audit row (its own guarded transaction); question cut to 200, then trimmed, as writeAuditEvent did", async () => {
     seedState("normal");
     await evaluateAndStoreGovernance({ runId: R, collection: "runs", input: { question: `  ${"q".repeat(300)}  `, consensusScore: 40, runType: "research" } as never, ownerUid: "u1" });
     expect(db.read(`runs/${R}`)).toEqual(expect.objectContaining({ governanceStatus: "needs_review", governanceReasons: ["low consensus"] }));

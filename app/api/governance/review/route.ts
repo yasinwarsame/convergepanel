@@ -13,7 +13,7 @@ import {
   runOwnerVisibleInGovernance,
 } from "@/lib/governance/governanceVisibleUserIds";
 import { writeAuditEvent } from "@/lib/governance/auditLog";
-import { createGovernanceAuditRowInTx } from "@/lib/governance/governanceAuditRow";
+import { writeGuardedGovernanceAuditRow } from "@/lib/governance/governanceAuditRow";
 import { isResearchWriteRefusedError, runResearchWrite } from "@/lib/firestore/researchDeletionBarrier";
 import { resolveGovernanceRequestUser } from "@/lib/governance/authCheck";
 import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
@@ -382,18 +382,19 @@ export async function POST(request: NextRequest) {
     }) as DocumentData;
 
   if (collection === "runs") {
-    // Research deletion integrity: the audit row (question, comment) and the governance event (comment) are written in
-    // one transaction guarded by the deletion barrier. If the run was deleted after the decision committed, they are not
-    // written; the decision itself committed before the deletion and is removed by it.
+    // Research deletion integrity: the audit row (question, comment) and the governance event (comment) are each written
+    // in a transaction guarded by the deletion barrier. If the run was deleted after the decision committed, neither is
+    // written. The decision itself committed before the deletion and is removed by it. The audit row stays best-effort,
+    // exactly like writeAuditEvent. The event keeps its own failure behavior: an error still propagates.
     const db = adminDb;
+    await writeGuardedGovernanceAuditRow(db, docId, auditEvent);
     try {
       await runResearchWrite(db, docId, (tx) => {
-        createGovernanceAuditRowInTx(tx, db, auditEvent);
         tx.create(ref.collection("governanceEvents").doc(), governanceEventDoc);
       });
     } catch (err) {
       if (!isResearchWriteRefusedError(err)) throw err;
-      logger.warn("[governance/review] run deleted after the decision; audit row and event not written", { refusal: err.refusal });
+      logger.warn("[governance/review] run deleted after the decision; governance event not written", { refusal: err.refusal });
     }
   } else {
     await writeAuditEvent(auditEvent);

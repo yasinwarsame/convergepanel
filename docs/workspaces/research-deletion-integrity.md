@@ -59,15 +59,21 @@ The audit covered every server write in `lib/` and `app/`. The repository has no
 | `runs.ts` `createAdaptiveHumanReviewHistory`, `…AssignmentHistory`, `…PanelFinalizationHistory`, `…PanelOverrideHistory`, `writeAdaptivePanelFinalizationGovernanceEvent`, `writeAdaptivePanelOverrideGovernanceEvent` | post-commit history and event creates (including the call after the report-review submit transaction) | guarded create |
 | `teamRuns.ts` `createAdaptiveTeamRunProjection` | Team projection with the receipt conclusion | guarded create |
 | `teamGovernancePipeline.ts` `applyTeamGovernancePipeline` | `teamRuns` row with question and claims; `runs.teamGovernance` set-merge | guarded, when a `runId` is given. Verification-only rows are unchanged |
-| `evaluateAndStore.ts` `evaluateAndStoreGovernance` (fire-and-forget after synthesis) | `runs` status set-merge, `governanceEvents` add, `admin_audit_logs` row with the question | for `runs`: all three in **one** guarded transaction. Other collections unchanged |
-| `app/api/governance/review` | post-commit audit row (question, comment) and `governanceEvents` (comment) | for `runs`: one guarded transaction after the decision commits. If refused, the decision had committed before the deletion and is removed by it |
-| `app/api/admin/runs/[runId]` PATCH | `governanceReviewComment` set-merge and audit row (question) | for `runs`: one guarded transaction, from the run read inside it. Refused runs get 404 |
+| `evaluateAndStore.ts` `evaluateAndStoreGovernance` (fire-and-forget after synthesis) | `runs` status set-merge, `governanceEvents` add, `admin_audit_logs` row with the question | for `runs`: status and event in one guarded transaction, then the audit row in its own guarded transaction (best-effort, see below). Other collections unchanged |
+| `app/api/governance/review` | post-commit audit row (question, comment) and `governanceEvents` (comment) | for `runs`: each in its own guarded transaction after the decision commits. If refused, the decision had committed before the deletion and is removed by it. Event errors still propagate as before |
+| `app/api/admin/runs/[runId]` PATCH | `governanceReviewComment` set-merge and audit row (question) | for `runs`: the override in a guarded transaction, from the run read inside it, then the audit row in its own guarded transaction. Refused runs get 404 |
 | `app/api/governance/audit/backfill` | `admin_audit_logs` set-merge (question, comment) from a stale read; could **un-redact** a row | for `runs`: guarded set-merge. Refused runs are skipped |
 | `adaptiveExports.ts` `createAdaptiveExportRecord`, `markAdaptiveExportReady`, `markAdaptiveExportFailed`, `supersedeOlderAdaptiveExports` | export record holding the full `reportSnapshot`, counter, lifecycle stubs | guarded (Order 6 exact-file exception, §4) |
 | `verifications.ts` `saveClaimVerification`, `teamClaimVerifications.ts` `saveTeamClaimVerification` (origin-linked only) | new verification copying the source run's evidence sources | the source run is checked in the save transaction. A deleted source refuses the save |
 | `teamRunSnapshots.ts` `createTeamRunSnapshotFromPersonal` | a new Team run copied from a personal source | a source that is deleted or being deleted is `source_not_found` (concealed, as for a missing source) |
 
 The adaptive audit writers in the frozen `auditLog.ts` (`writeAdaptiveAdminAuditEvent` and its assignment, panel-finalization, panel-override and export variants) write the `admin_audit_logs` rows for adaptive review, assignment, panel and export actions. They are metadata only, with no question or comment. They are left unchanged because `auditLog.ts` is frozen and the barrier does not need it: the action that triggers them is guarded. A rare post-commit metadata row landing after a completed deletion carries no research text. Detection flags it (it lacks `contentRedacted`) and a re-run marks it.
+
+**Audit rows stay best-effort.** `writeGuardedGovernanceAuditRow` (`lib/governance/governanceAuditRow.ts`) writes the same row as the frozen `writeAuditEvent`, field for field (question cut to 200 then trimmed, `at`, sanitized), and keeps its contract:
+- it never throws, and never blocks or rolls back the caller's own write;
+- a storage failure is logged with only the action, error name and error code (Phase FIRST-ADMIN-C8/C10). The injected path-carrying failure in `reviewLogRedaction.spec.ts` covers this path for research runs.
+
+The only difference is the barrier.
 
 **B. Update-only writers.** These cannot create a document: `update()` fails `NOT_FOUND` on a missing document.
 - `completeRun`, `markRunError`, `persistAutomatedGovernanceUpdate`;

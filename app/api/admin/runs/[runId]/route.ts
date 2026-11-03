@@ -45,7 +45,7 @@ async function auditActorEmail(uid: string): Promise<string> {
 }
 import { adminDb } from "@/lib/firebase/admin";
 import { writeAuditEvent } from "@/lib/governance/auditLog";
-import { createGovernanceAuditRowInTx } from "@/lib/governance/governanceAuditRow";
+import { writeGuardedGovernanceAuditRow } from "@/lib/governance/governanceAuditRow";
 import { isResearchWriteRefusedError, runResearchWrite } from "@/lib/firestore/researchDeletionBarrier";
 import { sanitizeForFirestore } from "@/lib/firestore/sanitizeForFirestore";
 import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
@@ -196,19 +196,21 @@ export async function PATCH(
   };
 
   if (collection === "runs") {
-    // Research deletion integrity: the override and its audit row (question, comment) are written in one transaction
-    // guarded by the deletion barrier, from the run as read inside it. A deleted or deleting run is Not found.
+    // Research deletion integrity: the override is written in a transaction guarded by the deletion barrier, from the run
+    // as read inside it. A deleted or deleting run is Not found. The audit row (question, comment) is then written in its
+    // own guarded transaction, best-effort exactly like writeAuditEvent.
     const db = adminDb;
-    const byEmail = await auditActorEmail(auth.uid);
+    let prev: Record<string, unknown>;
     try {
-      await runResearchWrite(db, runId, (tx, run) => {
+      prev = await runResearchWrite(db, runId, (tx, run) => {
         tx.set(ref, statusPatch(), { merge: true });
-        createGovernanceAuditRowInTx(tx, db, overrideAudit(run.data() as Record<string, unknown>, byEmail));
+        return run.data() as Record<string, unknown>;
       });
     } catch (err) {
       if (isResearchWriteRefusedError(err)) return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
       throw err;
     }
+    await writeGuardedGovernanceAuditRow(db, runId, overrideAudit(prev, await auditActorEmail(auth.uid)));
     return NextResponse.json({ ok: true, runId, collection, governanceStatus: status });
   }
 

@@ -31,7 +31,7 @@ jest.mock("@/lib/governance/evaluateGovernance", () => ({
 }));
 
 import { adminDb } from "@/lib/firebase/admin";
-import { persistAdaptiveOutput, writeAdaptiveGovernanceEvent, createAdaptiveHumanReviewHistory } from "@/lib/firestore/runs";
+import { persistAdaptiveOutput, writeAdaptiveGovernanceEvent, createAdaptiveHumanReviewHistory, createAdaptiveHumanReviewAssignmentHistory } from "@/lib/firestore/runs";
 import { createAdaptiveExportRecord, markAdaptiveExportReady } from "@/lib/firestore/adaptiveExports";
 import { evaluateAndStoreGovernance } from "@/lib/governance/evaluateAndStore";
 import { createAdaptiveTeamRunProjection } from "@/lib/firestore/teamRuns";
@@ -73,6 +73,8 @@ const RACERS: Racer[] = [
   { name: "persistAdaptiveOutput", run: (id) => persistAdaptiveOutput(id, { version: 1, results: [SECRET] } as never) },
   { name: "writeAdaptiveGovernanceEvent", run: (id) => writeAdaptiveGovernanceEvent(id, { status: "needs_review", reasons: [SECRET], policyVersion: 1 } as never, "t") },
   { name: "createAdaptiveHumanReviewHistory", run: (id) => createAdaptiveHumanReviewHistory(id, { decisionId: "d1", comment: SECRET } as never) },
+  // A stale reviewer-assignment operation: its post-commit history write lands while (or after) the run is deleted.
+  { name: "createAdaptiveHumanReviewAssignmentHistory (stale assignment)", run: (id) => createAdaptiveHumanReviewAssignmentHistory(id, { eventId: "a1", newReviewerUserId: "u2" } as never) },
   { name: "createAdaptiveExportRecord (Order 6 exception)", run: (id) => createAdaptiveExportRecord({ runId: id, exportId: "exp-1", record: { exportMetadata: { exportId: "exp-1" }, artifactStatus: "generating", reportSnapshot: { body: SECRET } } as never }) },
   { name: "evaluateAndStoreGovernance", run: (id) => evaluateAndStoreGovernance({ runId: id, collection: "runs", input: { question: SECRET, consensusScore: 40, runType: "research" } as never, ownerUid: "u1" }) },
   { name: "createAdaptiveTeamRunProjection", run: (id) => createAdaptiveTeamRunProjection({ teamId: "team1", runId: id, conclusion: SECRET } as never) },
@@ -140,6 +142,18 @@ maybe("REAL Firestore: research deletion barrier", () => {
     await seedRun("tomb"); // something recreates a run under the deleted id
     expect(await persistAdaptiveOutput("tomb", { version: 1 } as never)).toEqual({ saved: false, reason: "write_failed" });
     expect((await db.collection("runs").doc("tomb").get()).data()!.adaptiveOutput).toBeUndefined();
+  }, 60_000);
+
+  it("interrupted deletion (crash right after the tombstone) already blocks every writer; recovery completes the deletion", async () => {
+    await seedRun("crash");
+    // What a deletion that died after its first step leaves behind: the tombstone (job in_progress), no mark yet.
+    await db.collection(RESEARCH_DELETION_TOMBSTONE_COLLECTION).doc("crash").set({ runId: "crash", state: "in_progress", step: "job" });
+    for (const r of RACERS) await r.run("crash");
+    const run = (await db.collection("runs").doc("crash").get()).data()!;
+    expect(Object.keys(run).sort()).toEqual(["question", "status", "userEmail", "userId", "workspaceId"]); // nothing added
+    expect((await db.collection("runs").doc("crash").listCollections()).map((c) => c.id)).toEqual([]);
+    expect(await deleteResearchRun({ runId: "crash", actorUid: "sys", reason: "admin_delete" })).toMatchObject({ status: "deleted" }); // recovery
+    expect(await leftovers("crash")).toEqual([]);
   }, 60_000);
 
   it("missing run document (no tombstone, e.g. deleted before tombstones existed): writers create nothing", async () => {

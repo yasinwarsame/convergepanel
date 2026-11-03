@@ -26,6 +26,10 @@ const stores: Record<string, Map<string, StoredDoc>> = {
   workspaceMemberships: new Map(),
   projects: new Map(),
   verifications: new Map(),
+  // Research deletion integrity (2026-11-03): an origin-linked save reads its source run and the run's deletion
+  // tombstone inside the Gate 2 transaction (deletion barrier).
+  runs: new Map(),
+  runDeletionJobs: new Map(),
 };
 
 function resetStores() {
@@ -33,6 +37,10 @@ function resetStores() {
   stores.workspaceMemberships.clear();
   stores.projects.clear();
   stores.verifications.clear();
+  stores.runs.clear();
+  stores.runDeletionJobs.clear();
+  // The source research runs the origin-linked tests reference exist and are writable.
+  for (const id of ["run-1", "run-2", "run-3"]) stores.runs.set(id, { data: { userId: OWNER_UID }, updateTime: nextUpdateTime() });
 }
 
 class FirestoreError extends Error {
@@ -639,5 +647,23 @@ describe("saveTeamClaimVerification — Workspace-canary target admission (Phase
     const result = await saveTeamClaimVerification(claimArgs() as any);
     expect(result).toEqual({ status: "team_workspaces_disabled" });
     expect(writeAttempts).toEqual([]);
+  });
+});
+
+describe("research deletion integrity — origin-linked Team claim verification", () => {
+  it("a source run that is deleted, being deleted or missing refuses the save inside Gate 2: nothing is created", async () => {
+    stores.runDeletionJobs.set("run-1", { data: { state: "complete" }, updateTime: nextUpdateTime() });
+    stores.runs.set("run-2", { data: { userId: OWNER_UID, deletion: { state: "pending" } }, updateTime: nextUpdateTime() });
+    for (const runId of ["run-1", "run-2", "run-never"]) {
+      const origin = { type: "deep_research_claim" as const, runId, claimId: "v1:findings:0:" + "a".repeat(43) };
+      const result = await saveTeamClaimVerification(originArgs({ origin, evidenceSources: [] }));
+      expect(result.status).toBe("transaction_failed");
+    }
+    expect(stores.verifications.size).toBe(0);
+  });
+  it("an ordinary (non-origin) Team verification never consults any run", async () => {
+    stores.runDeletionJobs.set("run-1", { data: { state: "complete" }, updateTime: nextUpdateTime() });
+    const result = await saveTeamClaimVerification(claimArgs() as any);
+    expect(result.status).toBe("created");
   });
 });

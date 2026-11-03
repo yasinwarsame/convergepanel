@@ -224,9 +224,11 @@ describe("legacy shapes without D5.1 provenance remain readable", () => {
   });
 });
 
-describe("research runs: one guarded transaction, same documents (research deletion integrity)", () => {
-  it("the parent status, the event and the audit row are committed together, in one transaction", async () => {
+describe("research runs: guarded transactions, same documents (research deletion integrity)", () => {
+  it("the parent status and the event commit together in one guarded transaction; the audit row commits in its own (best-effort, like writeAuditEvent)", async () => {
+    db.stats = { commits: 0, retries: 0, aborted: 0 };
     await run({ ...INPUT, scoreFamily: "research_synthesis_v1", runType: "research" }, "run-t", "runs");
+    expect(db.stats.commits).toBe(2);
     expect(db.writeLog.map((w) => [w.kind, w.path.split("/").slice(0, -1).join("/") || w.path, w.via])).toEqual([
       ["merge", "runs", "tx"],
       ["create", "runs/run-t/governanceEvents", "tx"],

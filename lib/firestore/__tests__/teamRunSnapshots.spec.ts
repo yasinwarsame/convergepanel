@@ -34,6 +34,8 @@ const stores: Record<string, Map<string, StoredDoc>> = {
   runs: new Map(),
   runSnapshotLocks: new Map(),
   workspaceMembershipEvents: new Map(),
+  // Research deletion integrity (2026-11-03): the source run's deletion tombstone, read inside the snapshot transaction.
+  runDeletionJobs: new Map(),
 };
 
 function resetStores() {
@@ -629,6 +631,20 @@ describe("Z3–Z7 — source authorization (every failure is the SAME concealed 
     expect(stores.runSnapshotLocks.size).toBe(0);
     expect(stores.workspaceMembershipEvents.size).toBe(0);
   };
+
+  it("research deletion integrity — a source with a deletion tombstone is concealed, nothing written", async () => {
+    stores.runDeletionJobs.set(SRC, { data: { state: "in_progress" }, updateTime: nextUpdateTime() });
+    await expectConcealedAndClean();
+  });
+
+  it("research deletion integrity — a source marked for deletion is concealed, nothing written", async () => {
+    stores.runs.get(SRC)!.data.deletion = { state: "pending" };
+    await expectConcealedAndClean();
+  });
+
+  it("research deletion integrity — positive control: the same source without tombstone or mark is copied", async () => {
+    expect(await createTeamRunSnapshotFromPersonal(args())).toEqual(expect.objectContaining({ status: "created" }));
+  });
 
   it("Z3 — a Personal reviewer of the source (Team member, but NOT the source owner) is refused on ownership", async () => {
     seedMembership(OTHER_UID, "member");

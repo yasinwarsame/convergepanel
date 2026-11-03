@@ -3618,7 +3618,7 @@ describe("PR claim re-derivation — every measured count is computed from sourc
         "harnessMechanismIds:6",
         "twinDirectedChecks:14",
         "twinUnorderedPairs:7",
-        "governanceEventAddSites:5",
+        "governanceEventAddSites:3", // research deletion integrity (2026-11-03): see the §60 add-site test
       ].join(" ")
     );
   });
@@ -3915,8 +3915,8 @@ describe("governance-event `.add()` write sites — derived from the repository 
     // the governance review route now create the event in a transaction guarded by the deletion barrier.
     const sites = countGovernanceEventAddSites();
     expect(sites).toEqual([
-      "app/api/governance/review/route.ts:401",
-      "lib/governance/evaluateAndStore.ts:127",
+      "app/api/governance/review/route.ts:402",
+      "lib/governance/evaluateAndStore.ts:128",
       "lib/governance/governanceBackfill.ts:63",
     ].sort());
     expect(`addSiteCount:${sites.length}`).toBe("addSiteCount:3");
@@ -3925,7 +3925,7 @@ describe("governance-event `.add()` write sites — derived from the repository 
   it("the walker searches `app/` as well as `lib/` (the R8 count missed the app route)", () => {
     const sites = countGovernanceEventAddSites();
     expect(sites.filter((s) => s.startsWith("lib/")).length).toBe(2);
-    expect(sites.filter((s) => s.startsWith("app/"))).toEqual(["app/api/governance/review/route.ts:401"]);
+    expect(sites.filter((s) => s.startsWith("app/"))).toEqual(["app/api/governance/review/route.ts:402"]);
   });
 
   it("the detector is not vacuously blind: it finds nothing in a tree with no such call, and finds one when there is one", () => {
