@@ -56,6 +56,8 @@ let existingDocs: Record<string, { userId: string }> = {};
 /** Every write the handler performed, with full collection+id identity. */
 type Write = { kind: "set" | "update" | "add"; collection: string; id: string; patch?: Record<string, unknown> };
 let writes: Write[] = [];
+/** Runs once, right after the next committed transaction (research deletion integrity tests). */
+const afterNextCommit: { fn: (() => void) | null } = { fn: null };
 const auditWrites: Array<Record<string, unknown>> = [];
 jest.mock("@/lib/governance/auditLog", () => ({
   writeAuditEvent: async (e: Record<string, unknown>) => { auditWrites.push(e); },
@@ -128,6 +130,7 @@ jest.mock("@/lib/firebase/admin", () => ({
     // Writes are buffered and applied only when the callback completes, as a committed transaction would; the deletion
     // barrier's tombstone read (`runDeletionJobs/{id}`) resolves to "absent" like any unseeded document.
     runTransaction: async (fn: (txn: unknown) => Promise<unknown>) => {
+      const after = afterNextCommit.fn;
       const buffered: Array<() => Promise<unknown>> = [];
       const result = await fn({
         get: (ref: { get: () => Promise<unknown> }) => ref.get(),
@@ -135,6 +138,11 @@ jest.mock("@/lib/firebase/admin", () => ({
         create: (ref: { create: (p: unknown) => Promise<unknown> }, p: unknown) => void buffered.push(() => ref.create(p)),
       });
       for (const w of buffered) await w();
+      // Test hook: something (e.g. a deletion starting) that happens right AFTER this transaction committed.
+      if (after) {
+        afterNextCommit.fn = null;
+        after();
+      }
       return result;
     },
   },
@@ -204,6 +212,7 @@ beforeEach(() => {
   liveRecord = { email: "reviewer@test-invented.example", emailVerified: true, disabled: false };
   writes = [];
   auditWrites.length = 0;
+  afterNextCommit.fn = null;
   existingDocs = {};
   for (const c of COLLECTIONS) {
     existingDocs[`${c}/run-a`] = { userId: OWNER_A };
@@ -412,5 +421,17 @@ describe("research deletion integrity — governance review of a research run", 
       expect(auditWrites).toHaveLength(1);
       expect(eventWrites()).toHaveLength(1);
     }
+  });
+
+  it("a deletion that starts AFTER the decision committed (tombstone lands between the decision and its post-commit writes) gets no audit row and no event", async () => {
+    afterNextCommit.fn = () => {
+      existingDocs["runDeletionJobs/run-a"] = { userId: "n/a" };
+    };
+    const res = await post("runs", "run-a");
+    expect(res.status).toBe(200); // the decision itself committed before the deletion started
+    expect(afterNextCommit.fn).toBeNull(); // the hook ran
+    expect(primaryWrites("runs", "run-a")).toHaveLength(1);
+    expect(auditWrites).toEqual([]); // the guarded audit row was refused
+    expect(eventWrites()).toEqual([]); // the guarded event was refused
   });
 });
