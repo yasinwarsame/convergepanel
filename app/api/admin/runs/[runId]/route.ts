@@ -48,7 +48,7 @@ import { writeAuditEvent } from "@/lib/governance/auditLog";
 import { sanitizeForFirestore } from "@/lib/firestore/sanitizeForFirestore";
 import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
 import { logger } from "@/lib/logger";
-import { deleteResearchRun } from "@/lib/firestore/researchDeletion";
+import { deleteResearchRun, getUnfinishedResearchDeletion } from "@/lib/firestore/researchDeletion";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -238,6 +238,14 @@ export async function DELETE(
   const ref = adminDb.collection(collection).doc(runId);
   const snap = await ref.get();
   if (!snap.exists) {
+    // Order A / S1 (review M-1): a research deletion that failed after the run document was removed is RESUMED by runId.
+    if (collection === "runs" && (await getUnfinishedResearchDeletion(runId))) {
+      const resumed = await deleteResearchRun({ runId, actorUid: auth.uid, reason: "admin_delete" });
+      if (resumed.status !== "deleted") {
+        return NextResponse.json({ ok: false, error: "deletion_incomplete", message: "The research was not fully deleted. Nothing is reported as deleted; retry the deletion.", runId }, { status: 500 });
+      }
+      return NextResponse.json({ ok: true, deleted: runId, resumed: true });
+    }
     return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
   }
   const prev = snap.data() as Record<string, unknown>;

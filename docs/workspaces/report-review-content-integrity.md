@@ -109,12 +109,14 @@ Admin user deletion removes the account but has never deleted research. That is 
 2. **Mark.** The run is marked deletion-pending in a transaction. From then on every report-review mutation and read refuses the run.
 3. **Subtree.** The run's entire subtree is deleted recursively. It is discovered with `listCollections()` and `listDocuments()`, which also reach "missing" ancestor documents.
 4. **Out-of-tree copies.** Research text copied outside the run is redacted or deleted (table below).
-5. **Run document.** The run document is deleted, then the subtree is swept again.
+5. **Pre-check, then the run document.** Everything except the run document is verified first. Only then is the run document deleted; the subtree is swept again and the audit rows re-redacted, which also catches a row written during deletion.
 6. **Verify.** Success is reported only when the run document is gone, the subtree is empty, and nothing else still carries research text.
    - Otherwise the job is marked `failed` with the step.
    - The single DELETE route answers **500 `deletion_incomplete`**.
    - Purge counts the run under `errorsCount` / `incompleteRunIds`, never under `deletedCount`.
    - Re-running is always safe.
+   - A deletion whose final step failed after the run document was removed is **resumed by runId**: `DELETE /api/admin/runs/{id}` resumes an unfinished job, and purge resumes unfinished jobs first.
+   - Purge has a time budget (`maxDuration` 300 s). It stops *starting* new deletions at 240 s and reports the rest as `notStartedRunIds` (counted in `errorsCount`). Purge again to continue.
 
 **Orphan detection.** `findResearchDeletionOrphans()` lists report-review or export documents whose run is gone, plus unfinished jobs.
 
@@ -125,7 +127,8 @@ Admin user deletion removes the account but has never deleted research. That is 
 | Export records (`runs/{R}/exports`, holding frozen report snapshots) | Deleted. Rendered bytes are never stored. |
 | Review assignment, history, panels, governance events, any other subcollection | Deleted |
 | Workspace Audit Log rows (`workspaceMembershipEvents`) for the run | **Kept** as audit metadata (who, what, when, cycle, status). `runQuestion` is redacted to null with `contentRedacted: true`, and the row displays as "[deleted research]" (rows are never dropped). |
-| Admin audit log rows (`admin_audit_logs`) for the run | **Kept**. `question` is redacted with `contentRedacted: true`. |
+| Admin audit log rows (`admin_audit_logs`) for the run | **Kept** as metadata. All free text is redacted: `question`, `comment`, `reasons`, `justification`, `overrideJustification`, `note`, `notes`, with `contentRedacted: true`. |
+| Team snapshot locks (`runSnapshotLocks`) naming the run | Deleted (metadata only, but a stale lock would block re-adding the source research) |
 | Legacy Team projections (`teamRuns`; they carry the receipt conclusion) | Deleted (a derived index) |
 | `runDeletionJobs/{runId}` | Kept (deletion evidence, no content) |
 | Firestore managed backups / point-in-time recovery | **Not reachable by the application.** They expire under the project's backup retention. Owner and legal decision below. |
@@ -136,6 +139,23 @@ Admin user deletion removes the account but has never deleted research. That is 
 **Workspace isolation.** Snapshots live inside the run subtree, carry their Workspace binding, are verified against it on every read, and are reachable only through the run's own Workspace export.
 
 **Governed review.** Governed runs are deleted through the same workflow, and the report-review steps are no-ops for them. As a deliberate improvement, their subcollections and projections are no longer orphaned.
+
+**STOP: concurrent writers outside report review (owner authorization required).** Report-review writers check the deletion mark inside their transactions. A few **existing** writers that are not part of report review do not:
+- the export record writer `lib/firestore/adaptiveExports.ts` (`createAdaptiveExportRecord`, `markAdaptiveExportReady`/`Failed`, which use set-merge);
+- the governed-run writers in `lib/firestore/runs.ts` (`adaptiveOutput`, `legacyAdaptiveOutput`, `governanceRecord`, set-merge);
+- `lib/governance/teamGovernancePipeline.ts`;
+- `/api/governance/review` (its audit row and `governanceEvents`);
+- `setTeamRunAssignee`.
+
+If one of them commits **after** a deletion has completed, it can recreate a run document or subtree, for example an export record holding a frozen report snapshot. Closing that completely means making each of them require `exists && !deletion` inside its transaction (and using `update`, not set-merge). That touches:
+- an Order 6 byte-pinned file (`adaptiveExports.ts`);
+- the governed-run writer, which needs separate authorization.
+
+So it is **not built**. Until it is:
+- `findResearchDeletionOrphans()` detects it: a completed job whose run document or subtree exists again;
+- re-running the deletion removes it.
+
+Owner options are in the PR record.
 
 **Open owner and legal decisions (not built, not assumed):**
 - **Legal hold.** No legal-hold mechanism exists; an authorized deletion proceeds unconditionally. If records must sometimes be retained, a hold flag that blocks the workflow is a separate design.

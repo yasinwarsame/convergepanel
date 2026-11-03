@@ -37,6 +37,22 @@ export const REDACTED_ADMIN_AUDIT_QUESTION = "[deleted research]";
 const PAGE = 300;
 
 export type ResearchDeletionStep = "job" | "mark" | "subtree" | "workspace_audit" | "admin_audit" | "team_projection" | "run" | "verify";
+
+/** A deletion job that has not completed (resumable by runId even if the run document is already gone). */
+export async function getUnfinishedResearchDeletion(runId: string): Promise<boolean> {
+  const db = adminDb;
+  if (!db) return false;
+  const job = await db.collection(RUN_DELETION_JOBS_COLLECTION).doc(runId).get();
+  return job.exists && (job.data() as Record<string, unknown>).state !== "complete";
+}
+
+/** Unfinished deletion jobs (bounded), for purge to resume. */
+export async function listUnfinishedResearchDeletions(limit = 100): Promise<string[]> {
+  const db = adminDb;
+  if (!db) return [];
+  const snap = await db.collection(RUN_DELETION_JOBS_COLLECTION).where("state", "in", ["in_progress", "failed"]).limit(limit).get();
+  return snap.docs.map((d) => d.id).sort();
+}
 export type ResearchDeletionResult =
   | { status: "deleted"; runId: string; attempts: number }
   | { status: "incomplete"; runId: string; step: ResearchDeletionStep; error: string }
@@ -78,16 +94,33 @@ async function redactWorkspaceAudit(db: Db, runId: string): Promise<number> {
   return n;
 }
 
+/**
+ * Free-text fields an admin audit row may carry about the research (review S1-M-2): the question, a reviewer's or an
+ * administrator's comment, governance reasons, justification text and notes. All are redacted; the row's metadata (action,
+ * actor, time, statuses, counts) is kept as evidence.
+ */
+export const ADMIN_AUDIT_FREE_TEXT_FIELDS = ["question", "comment", "reasons", "justification", "overrideJustification", "note", "notes"] as const;
+const isRedacted = (row: Record<string, unknown>) => row.contentRedacted === true && ADMIN_AUDIT_FREE_TEXT_FIELDS.every((f) => row[f] === undefined || row[f] === REDACTED_ADMIN_AUDIT_QUESTION);
+
 async function redactAdminAudit(db: Db, runId: string): Promise<number> {
   const snap = await db.collection("admin_audit_logs").where("runId", "==", runId).get();
   let n = 0;
   for (const d of snap.docs) {
     const row = d.data() as Record<string, unknown>;
-    if (row.contentRedacted === true && (row.question === undefined || row.question === REDACTED_ADMIN_AUDIT_QUESTION)) continue;
-    await d.ref.update({ ...(row.question !== undefined ? { question: REDACTED_ADMIN_AUDIT_QUESTION } : {}), contentRedacted: true });
+    if (isRedacted(row)) continue;
+    const patch: Record<string, unknown> = { contentRedacted: true };
+    for (const f of ADMIN_AUDIT_FREE_TEXT_FIELDS) if (row[f] !== undefined) patch[f] = REDACTED_ADMIN_AUDIT_QUESTION;
+    await d.ref.update(patch);
     n++;
   }
   return n;
+}
+
+/** Team snapshot locks naming this run (review S1-m-2): metadata only, but a stale lock blocks re-adding the source. */
+async function deleteSnapshotLocks(db: Db, runId: string): Promise<number> {
+  const snap = await db.collection("runSnapshotLocks").where("snapshotRunId", "==", runId).get();
+  for (const d of snap.docs) await d.ref.delete();
+  return snap.size;
 }
 
 async function deleteTeamProjections(db: Db, runId: string): Promise<number> {
@@ -96,15 +129,16 @@ async function deleteTeamProjections(db: Db, runId: string): Promise<number> {
   return snap.size;
 }
 
-/** Nothing derived from the run still carries research text. */
-async function verifyDeleted(db: Db, runRef: DocRef, runId: string): Promise<string | null> {
-  if ((await runRef.get()).exists) return "run document still exists";
+/** Nothing derived from the run still carries research text. `runDocMayExist` for the pre-check before the run is deleted. */
+async function verifyDeleted(db: Db, runRef: DocRef, runId: string, runDocMayExist = false): Promise<string | null> {
+  if (!runDocMayExist && (await runRef.get()).exists) return "run document still exists";
   if (!(await subtreeIsEmpty(runRef))) return "run subtree not empty";
   const wme = await db.collection("workspaceMembershipEvents").where("runId", "==", runId).get();
   if (wme.docs.some((d) => (d.data() as Record<string, unknown>).runQuestion != null)) return "workspace audit row still carries research text";
   const aal = await db.collection("admin_audit_logs").where("runId", "==", runId).get();
-  if (aal.docs.some((d) => (d.data() as Record<string, unknown>).contentRedacted !== true)) return "admin audit row not redacted";
+  if (aal.docs.some((d) => !isRedacted(d.data() as Record<string, unknown>))) return "admin audit row not redacted";
   if (!(await db.collection("teamRuns").where("runId", "==", runId).get()).empty) return "team projection still exists";
+  if (!(await db.collection("runSnapshotLocks").where("snapshotRunId", "==", runId).get()).empty) return "snapshot lock still exists";
   return null;
 }
 
@@ -138,12 +172,21 @@ export async function deleteResearchRun(args: { runId: string; actorUid: string;
     await redactAdminAudit(db, args.runId);
     step = "team_projection";
     await deleteTeamProjections(db, args.runId);
+    await deleteSnapshotLocks(db, args.runId);
+
+    // Review S1-M-1: everything except the run document is verified BEFORE the run document goes, so a failure here
+    // leaves the run (still marked) for an ordinary retry through any deletion path.
+    step = "verify";
+    const pre = await verifyDeleted(db, runRef, args.runId, true);
+    if (pre) throw new Error(pre);
 
     step = "run";
     await runRef.delete();
-    // A write that committed before the mark but after the subtree pass cannot exist (the mark serialises them), but the
-    // subtree is swept once more after the run document is gone, so the verification below is about the final state.
+    // Sweep again after the run document is gone, then verify the final state. If this last check fails the job stays
+    // `failed` and the run can be resumed by runId (DELETE /api/admin/runs/{id} and purge both resume unfinished jobs).
     await deleteSubtree(runRef);
+    await redactWorkspaceAudit(db, args.runId);
+    await redactAdminAudit(db, args.runId);
 
     step = "verify";
     const problem = await verifyDeleted(db, runRef, args.runId);
@@ -181,5 +224,12 @@ export async function findResearchDeletionOrphans(limitPerSource = 200): Promise
     }
   }
   const jobs = await db.collection(RUN_DELETION_JOBS_COLLECTION).where("state", "in", ["in_progress", "failed"]).limit(limitPerSource).get();
+  // Review S1-B-1 (detection): a run recreated AFTER a completed deletion (by a writer outside report review that does not
+  // check the deletion mark) shows up as a completed job whose run document or subtree exists again.
+  const done = await db.collection(RUN_DELETION_JOBS_COLLECTION).where("state", "==", "complete").limit(limitPerSource).get();
+  for (const j of done.docs) {
+    const runRef = db.collection("runs").doc(j.id);
+    if ((await runRef.get()).exists || !(await subtreeIsEmpty(runRef))) orphan.add(j.id);
+  }
   return { orphanRunIds: Array.from(orphan).sort(), unfinishedJobs: jobs.docs.map((d) => d.id).sort() };
 }

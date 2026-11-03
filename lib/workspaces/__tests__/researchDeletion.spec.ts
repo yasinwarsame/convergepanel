@@ -40,6 +40,7 @@ import { verifyReportReviewContentSnapshot, computeReportReviewContentFingerprin
 import { computeMembershipId } from "@/lib/workspaces/membershipId";
 import { GET as exportGet } from "@/app/api/workspaces/[workspaceId]/runs/[runId]/report-review/export/route";
 import { POST as purgePost } from "@/app/api/admin/purge-runs/route";
+import { DELETE as adminDelete } from "@/app/api/admin/runs/[runId]/route";
 import type { ReportReviewRecordV1 } from "@/lib/governance/reportReview";
 
 const W = "wsDel";
@@ -255,13 +256,61 @@ describe("S1 deletion: every supported path removes the research and every deriv
     await reviewedRun();
     db.hooks = {
       failWrite: (w) => {
-        if (w.kind === "delete" && w.path === `runs/${RUN}`) db.seed("workspaceMembershipEvents/late", { eventType: "workspace_report_review_decided", workspaceId: W, runId: RUN, runQuestion: SECRET_Q, cycle: 1, at: Timestamp.now() });
+        // A derived copy appearing between the pre-check and the end (projections are not re-swept after the run is gone).
+        if (w.kind === "delete" && w.path === `runs/${RUN}`) db.seed(`teamRuns/late_${RUN}`, { runId: RUN, receiptConclusion: SECRET_A });
       },
     };
     expect(await deleteResearchRun({ runId: RUN, actorUid: "uid-sysadmin", reason: "admin_delete" })).toMatchObject({ status: "incomplete", step: "verify" });
     db.hooks = {};
+    // The run document is already gone: the deletion is still resumable by runId (review S1-M-1).
+    expect(db.read(`runs/${RUN}`)).toBeUndefined();
     expect((await deleteResearchRun({ runId: RUN, actorUid: "uid-sysadmin", reason: "admin_delete" })).status).toBe("deleted");
     assertNothingLeft(RUN);
+  });
+
+  it("a late audit row written while the run was being deleted is still redacted (post-deletion sweep)", async () => {
+    await reviewedRun();
+    db.hooks = {
+      failWrite: (w) => {
+        if (w.kind === "delete" && w.path === `runs/${RUN}`) db.seed("workspaceMembershipEvents/late", { eventType: "workspace_research_assignee_changed", workspaceId: W, runId: RUN, runQuestion: SECRET_Q, at: Timestamp.now() });
+      },
+    };
+    expect((await deleteResearchRun({ runId: RUN, actorUid: "uid-sysadmin", reason: "admin_delete" })).status).toBe("deleted");
+    expect(db.read("workspaceMembershipEvents/late")).toMatchObject({ runQuestion: null, contentRedacted: true });
+  });
+
+  it("admin audit free text (question, comment, reasons, justification) is redacted; metadata is kept (review S1-M-2)", async () => {
+    await reviewedRun();
+    db.seed("admin_audit_logs/rev", { action: "approved", runId: RUN, question: SECRET_Q, comment: "SECRET-COMMENT", reasons: ["SECRET-REASON"], justification: "SECRET-JUST", byUid: REVIEWER, at: "t" });
+    expect((await deleteResearchRun({ runId: RUN, actorUid: "uid-sysadmin", reason: "admin_delete" })).status).toBe("deleted");
+    expect(db.read("admin_audit_logs/rev")).toEqual({ action: "approved", runId: RUN, question: REDACTED_ADMIN_AUDIT_QUESTION, comment: REDACTED_ADMIN_AUDIT_QUESTION, reasons: REDACTED_ADMIN_AUDIT_QUESTION, justification: REDACTED_ADMIN_AUDIT_QUESTION, byUid: REVIEWER, at: "t", contentRedacted: true });
+  });
+
+  it("snapshot locks naming the deleted run are removed (re-adding the source research is not blocked) (review S1-m-2)", async () => {
+    db.seed("runSnapshotLocks/l1", { snapshotRunId: RUN, sourceRunId: "personal-1" });
+    db.seed("runSnapshotLocks/l2", { snapshotRunId: "other", sourceRunId: "personal-2" });
+    expect((await deleteResearchRun({ runId: RUN, actorUid: "uid-sysadmin", reason: "admin_delete" })).status).toBe("deleted");
+    expect([db.read("runSnapshotLocks/l1"), db.read("runSnapshotLocks/l2")]).toEqual([undefined, { snapshotRunId: "other", sourceRunId: "personal-2" }]);
+  });
+
+  it("a run recreated after a completed deletion (writer outside report review) is detected as an orphan (review S1-B-1 detection)", async () => {
+    await reviewedRun();
+    expect((await deleteResearchRun({ runId: RUN, actorUid: "uid-sysadmin", reason: "admin_delete" })).status).toBe("deleted");
+    db.seed(`runs/${RUN}`, { adaptiveExportCounter: 1 });
+    db.seed(`runs/${RUN}/exports/late`, { reportSnapshot: { question: SECRET_Q } });
+    expect((await findResearchDeletionOrphans()).orphanRunIds).toEqual([RUN]);
+  });
+
+  it("purge resumes unfinished deletion jobs (including runs whose document is already gone)", async () => {
+    await reviewedRun();
+    db.hooks = { failWrite: (w) => { if (w.kind === "delete" && w.path === `runs/${RUN}`) db.seed(`teamRuns/late_${RUN}`, { runId: RUN }); } };
+    expect((await deleteResearchRun({ runId: RUN, actorUid: "uid-sysadmin", reason: "admin_delete" })).status).toBe("incomplete");
+    db.hooks = {};
+    const res = await purgePost(new NextRequest("http://localhost/api/admin/purge-runs", { method: "POST", body: JSON.stringify({ mode: "olderThan", days: 30, dryRun: false, confirmation: "DELETE" }), headers: { "content-type": "application/json" } }));
+    const body = await res.json();
+    expect(body.errorsCount).toBe(0);
+    expect(db.read(`runDeletionJobs/${RUN}`)).toMatchObject({ state: "complete" });
+    expect(db.read(`teamRuns/late_${RUN}`)).toBeUndefined();
   });
 
   it("concurrent review and deletion: once deletion has started, submit, decide, assign, context and export all refuse; a decision racing the mark retries and refuses", async () => {
@@ -320,5 +369,19 @@ describe("S1 deletion: every supported path removes the research and every deriv
     await putWorkspaceReviewAssignment({ uid: ADMIN, workspaceId: W, runId: RUN, assignedReviewerUserId: REVIEWER, expectedRevision: 2, dueAt: null });
     expect([db.read(`runs/${RUN}/reportReviewCycles/1`), db.read(`runs/${RUN}/reportReviewSnapshots/1`)]).toEqual([archive, snap]);
     expect(computeReportReviewContentFingerprint({ x: 1 }).ok).toBe(true);
+  });
+});
+
+describe("admin DELETE route resumes an unfinished deletion by runId (review S1-M-1)", () => {
+  const del = (runId: string) => adminDelete(new NextRequest(`http://localhost/api/admin/runs/${runId}?collection=runs`, { method: "DELETE", body: JSON.stringify({ confirm: true }), headers: { "content-type": "application/json" } }), { params: { runId } } as never);
+  it("run document already gone + unfinished job → resumed and verified; no job → 404 as before", async () => {
+    await reviewedRun();
+    db.hooks = { failWrite: (w) => { if (w.kind === "delete" && w.path === `runs/${RUN}`) db.seed(`teamRuns/late_${RUN}`, { runId: RUN }); } };
+    expect((await deleteResearchRun({ runId: RUN, actorUid: "uid-sysadmin", reason: "admin_delete" })).status).toBe("incomplete");
+    db.hooks = {};
+    const res = await del(RUN);
+    expect([res.status, await res.json()]).toEqual([200, { ok: true, deleted: RUN, resumed: true }]);
+    expect(db.read(`runDeletionJobs/${RUN}`)).toMatchObject({ state: "complete" });
+    expect((await del("never-existed")).status).toBe(404);
   });
 });

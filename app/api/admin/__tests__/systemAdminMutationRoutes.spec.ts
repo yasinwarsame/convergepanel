@@ -106,7 +106,11 @@ jest.mock("@/lib/governance/auditLog", () => ({ writeAuditEvent: (...a: unknown[
 // Order A / S1: research deletion (single DELETE of collection=runs, and purge) now goes through the durable workflow —
 // THAT is the guarded destructive effect for these two routes.
 const deleteResearchRun = jest.fn(async (a: { runId: string }) => ({ status: "deleted", runId: a.runId, attempts: 1 }));
-jest.mock("@/lib/firestore/researchDeletion", () => ({ deleteResearchRun: (...a: unknown[]) => deleteResearchRun(...(a as [never])) }));
+jest.mock("@/lib/firestore/researchDeletion", () => ({
+  deleteResearchRun: (...a: unknown[]) => deleteResearchRun(...(a as [never])),
+  listUnfinishedResearchDeletions: async () => [],
+  getUnfinishedResearchDeletion: async () => false,
+}));
 jest.mock("@/lib/stripe/client", () => ({ stripe: { subscriptions: { retrieve: (...a: unknown[]) => stripeRetrieve(...(a as [])), list: async () => ({ data: [] }) } } }));
 jest.mock("@/app/api/stripe/webhook/route", () => ({ handleSubscriptionChange: (...a: unknown[]) => handleSubscriptionChange(...(a as [])) }));
 jest.mock("@/lib/stripe/usage", () => ({ resetUsageForNewPlan: (...a: unknown[]) => resetUsageForNewPlan(...(a as [])) }));
