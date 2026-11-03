@@ -20,6 +20,7 @@
  */
 
 import Link from "next/link";
+import { teamResearchDetailHref } from "@/lib/workspaces/teamResearchDetailHref";
 import type { WorkspaceReviewQueueRow } from "@/lib/client/workspaceReviewQueueClient";
 import { getReviewStatusLabel, getReviewStatusBadgeClass, isApprovedWithConditions, getAssignmentPresentation, getProjectLabel, formatDueDate, formatAbsoluteDate } from "@/lib/workspaces/reviewQueuePresentation";
 
@@ -37,7 +38,16 @@ export default function ReviewQueueRow({ row, projectNameById, canManageReviews 
   // new, permanent, Workspace-native canonical detail route — it sources
   // its own Workspace authority from `runs/{runId}.workspaceId`, so no
   // `?workspace=` param is needed here even for a multi-Workspace uid.
-  const detailHref = `/workspace/reviews/${encodeURIComponent(row.runId)}`;
+  //
+  // Order B, Stage B3 — a report-review row has no governed review page (it would be not-found there): it opens the
+  // Team research page, where its report review is shown, decided and audited.
+  const isReportReview = row.recordKind === "report_review";
+  const detailHref = isReportReview ? teamResearchDetailHref({ workspaceId: row.workspaceId, projectId: row.projectId, runId: row.runId }) : `/workspace/reviews/${encodeURIComponent(row.runId)}`;
+  const reportReviewTag = isReportReview ? (
+    <span data-testid="queue-report-review-tag" className="ml-2 rounded-full border border-cp-border bg-cp-raised px-2 py-0.5 text-xs font-normal text-cp-muted">
+      Report review
+    </span>
+  ) : null;
 
   const assignmentToneClass = assignmentPresentation.tone === "warning" ? "text-cp-orange" : assignmentPresentation.tone === "positive" ? "text-cp-text" : "text-cp-muted";
 
@@ -47,6 +57,7 @@ export default function ReviewQueueRow({ row, projectNameById, canManageReviews 
       <div className="hidden items-center gap-4 px-4 py-3 md:grid md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_auto_minmax(0,1fr)_auto_auto_auto]">
         <span className="truncate text-sm font-medium text-cp-text" title={row.runLabel}>
           {row.runLabel || "Untitled research"}
+          {reportReviewTag}
         </span>
         <span className="truncate text-sm text-cp-muted">{projectLabel}</span>
         <span className={`inline-flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${statusClass}`}>
@@ -72,6 +83,7 @@ export default function ReviewQueueRow({ row, projectNameById, canManageReviews 
       <div className="flex flex-col gap-2 px-4 py-3 md:hidden">
         <p className="text-sm font-medium text-cp-text" title={row.runLabel}>
           {row.runLabel || "Untitled research"}
+          {reportReviewTag}
         </p>
         <span className={`inline-flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${statusClass}`}>
           {statusLabel}

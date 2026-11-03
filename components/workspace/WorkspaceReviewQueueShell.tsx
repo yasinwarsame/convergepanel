@@ -35,6 +35,7 @@ import {
 } from "@/lib/client/workspaceReviewQueueClient";
 import { REVIEW_QUEUE_VIEWS, getReviewQueueViewLabel, normalizeReviewQueueView, getReviewQueueEmptyStateCopy, type ReviewQueueView } from "@/lib/workspaces/reviewQueuePresentation";
 import ReviewQueueRow from "./ReviewQueueRow";
+import { REPORT_REVIEW_DISCLAIMER } from "@/lib/governance/reportReviewCopy";
 import ReviewEmptyState from "@/components/teamGovernance/ReviewEmptyState";
 import ReviewErrorState from "@/components/teamGovernance/ReviewErrorState";
 
@@ -242,6 +243,13 @@ export default function WorkspaceReviewQueueShell({ workspaceId, workspaceName, 
             ))}
           </ul>
         </div>
+      )}
+
+      {/* Order B, Stage B3 — wherever a report-review approval is shown, so is the fixed disclaimer. */}
+      {listStatus === "ready" && items.some((row) => row.recordKind === "report_review") && (
+        <p data-testid="queue-report-review-disclaimer" className="mt-3 text-xs text-cp-muted">
+          Report reviews: {REPORT_REVIEW_DISCLAIMER}
+        </p>
       )}
 
       {listStatus === "ready" && hasMore && (

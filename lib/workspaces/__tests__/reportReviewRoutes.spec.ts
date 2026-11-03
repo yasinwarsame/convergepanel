@@ -108,9 +108,8 @@ describe("success responses carry the record and the fixed disclaimer", () => {
   });
 
   it("the disclaimer states approval is not factual verification", () => {
-    expect(REPORT_REVIEW_DISCLAIMER).toBe(
-      "Approval means a reviewer read this report and found it acceptable for its stated purpose. It does not mean its factual claims, sources or model confidence were verified, or that analysis missing from the report exists."
-    );
+    // B3: the owner's exact text (B3 authorization, 2026-11-03), one consistent disclaimer everywhere.
+    expect(REPORT_REVIEW_DISCLAIMER).toBe("Approval means this report was reviewed and considered acceptable for its stated purpose. It does not verify the factual accuracy of its claims.");
   });
 });
 

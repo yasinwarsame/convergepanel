@@ -338,7 +338,7 @@ export async function putWorkspaceReviewAssignment(args: {
 
       tx.set(assignmentRef, nextAssignment);
       if (reportReviewContext.kind === "report_review") {
-        writeReportReviewAssignmentEvent(tx, runRef, { runId: args.runId, workspaceId: target.workspaceId, projectId: target.projectId, actorUid: args.uid, cycle: reportReviewContext.cycle, previousReviewerUserId: current?.assignedReviewerUserId ?? null, newReviewerUserId: args.assignedReviewerUserId, revision: nextAssignment.revision, at: now });
+        writeReportReviewAssignmentEvent(tx, runRef, { runId: args.runId, workspaceId: target.workspaceId, projectId: target.projectId, actorUid: args.uid, cycle: reportReviewContext.cycle, previousReviewerUserId: current?.assignedReviewerUserId ?? null, newReviewerUserId: args.assignedReviewerUserId, revision: nextAssignment.revision, at: now }, reportReviewContext.runQuestion);
       }
 
       const dto = toDto(nextAssignment);
@@ -457,7 +457,7 @@ export async function deleteWorkspaceReviewAssignment(args: { uid: string; works
 
       tx.set(assignmentRef, nextAssignment);
       if (reportReviewContext.kind === "report_review") {
-        writeReportReviewAssignmentEvent(tx, runRef, { runId: args.runId, workspaceId: target.workspaceId, projectId: target.projectId, actorUid: args.uid, cycle: reportReviewContext.cycle, previousReviewerUserId: current?.assignedReviewerUserId ?? null, newReviewerUserId: null, revision: nextAssignment.revision, at: now });
+        writeReportReviewAssignmentEvent(tx, runRef, { runId: args.runId, workspaceId: target.workspaceId, projectId: target.projectId, actorUid: args.uid, cycle: reportReviewContext.cycle, previousReviewerUserId: current?.assignedReviewerUserId ?? null, newReviewerUserId: null, revision: nextAssignment.revision, at: now }, reportReviewContext.runQuestion);
       }
       return { ok: true, historyEntry };
     });

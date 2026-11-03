@@ -167,5 +167,11 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
       const { status, body } = internalErrorResponse();
       return NextResponse.json(body, { status });
     }
+    case "index_unavailable":
+      // Order B, Stage B3 — identifiable and controlled: never a partial page that looks complete.
+      return NextResponse.json(
+        { ok: false, errorCode: "review_queue_index_unavailable", message: "The approval queue is temporarily unavailable while its database index is prepared. Try again later." },
+        { status: 503 }
+      );
   }
 }

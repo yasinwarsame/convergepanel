@@ -21,6 +21,7 @@ import { notFound } from "next/navigation";
 import { resolveServerComponentIdentity } from "@/lib/auth/resolveServerComponentIdentity";
 import { resolveWorkspaceAccess } from "@/lib/workspaces/resolveWorkspaceAccess";
 import TeamResearchDetailShell from "@/components/workspace/projects/TeamResearchDetailShell";
+import { REPORT_REVIEW_ENABLED } from "@/lib/workspaces/reportReviewRollout";
 
 export const dynamic = "force-dynamic";
 
@@ -55,6 +56,7 @@ export default async function TeamUnfiledResearchDetailPage({ params }: { params
       // source run's own Project before executing anything.
       canVerifyClaim={access.capabilities.includes("research.create")}
       canCreateExport={access.capabilities.includes("exports.create")}
+      reportReviewEnabled={REPORT_REVIEW_ENABLED}
     />
   );
 }

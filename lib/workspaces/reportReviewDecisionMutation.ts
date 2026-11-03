@@ -29,6 +29,7 @@ import { resolveWorkspaceReviewTarget } from "./resolveWorkspaceReviewTarget";
 import { roleHasCapability } from "./capabilities";
 import { readPanelGate } from "./workspaceReviewMutations";
 import { REPORT_REVIEW_EVENTS_COLLECTION } from "./reportReviewCollections";
+import { runQuestionSnapshot, writeReportReviewWorkspaceAuditEvent } from "./reportReviewWorkspaceAudit";
 import type { WorkspaceReviewCandidate } from "./workspaceReviewEligibility";
 import { isReportReviewDecided, parseReportReviewRecord, type ReportReviewHumanReview, type ReportReviewRecordV1 } from "@/lib/governance/reportReview";
 import { evaluateReportReviewDecisionAuthority, validateDecisionUpdate, type ReportReviewDecisionDenial } from "@/lib/governance/reportReviewDecision";
@@ -136,6 +137,12 @@ export async function decideReportReview(args: {
         conditionsCount: decision.update.conditions?.length ?? 0,
         at: now,
       });
+      // B3: the Workspace Audit row for the decision, which also closes the cycle (decision committed iff row committed).
+      writeReportReviewWorkspaceAuditEvent(
+        tx,
+        { eventType: "workspace_report_review_decided", actorUid: args.uid, workspaceId: target.workspaceId, projectId: target.projectId, runId: args.runId, runQuestion: runQuestionSnapshot(run), cycle: record.cycle, priorStatus: hr.status, status: decision.update.status, purposeCode: record.purpose.code },
+        now
+      );
       return { ok: true, replayed: false, record: { ...record, humanReview, updatedAt: now } };
     });
   } catch (err) {

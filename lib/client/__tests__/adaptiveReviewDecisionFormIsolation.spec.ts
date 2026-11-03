@@ -40,6 +40,11 @@ function filesReferencingDecisionRoute(): string[] {
   return candidates.filter((f) => {
     if (f.endsWith(join("adaptive-runs", "[runId]", "decision", "route.ts"))) return false; // the server route itself
     const contents = readFileSync(f, "utf8");
+    // Order B, Stage B3: the Report Review client calls a DIFFERENT route (…/report-review/decision), never the adaptive one.
+    if (f.endsWith(join("lib", "client", "reportReviewClient.ts"))) {
+      if (contents.includes("adaptive-runs")) throw new Error("reportReviewClient.ts must never reference the adaptive decision route");
+      return false;
+    }
     return callSitePattern.test(contents);
   });
 }

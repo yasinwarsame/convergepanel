@@ -73,6 +73,7 @@ import { decodeWorkspaceAuditEventsCursor, encodeWorkspaceAuditEventsCursor } fr
 import { firestoreSecondsNanos } from "@/lib/runs/runSummary";
 import { resolveWorkspaceReviewerDisplayNames } from "./workspaceReviewerIdentity";
 import type { WorkspaceMembershipRole } from "./membershipTypes";
+import { REPORT_REVIEW_PURPOSES, REPORT_REVIEW_DECISION_STATUSES } from "@/lib/governance/reportReviewCopy";
 
 export const AUDIT_LOG_DEFAULT_LIMIT = 20;
 export const AUDIT_LOG_MAX_LIMIT = 50;
@@ -104,13 +105,32 @@ export type WorkspaceAuditResearchEventType = "workspace_research_snapshot_creat
  * new assignee as nullable display names. No ids of any kind are surfaced.
  */
 export type WorkspaceAuditAssignmentEventType = "workspace_project_assignees_changed" | "workspace_research_assignee_changed";
-export type WorkspaceAuditEventType = WorkspaceAuditMemberEventType | WorkspaceAuditProjectEventType | WorkspaceAuditResearchEventType | WorkspaceAuditAssignmentEventType;
+/**
+ * Order B, Stage B3 — Report Review events (written in the mutation's own transaction by
+ * lib/workspaces/reportReviewWorkspaceAudit.ts). The DTO exposes the run question snapshot, the cycle, the purpose code,
+ * statuses and display names only — never `runId`, `projectId` or a uid.
+ */
+export type WorkspaceAuditReportReviewEventType =
+  | "workspace_report_review_submitted"
+  | "workspace_report_review_resubmitted"
+  | "workspace_report_review_reviewer_changed"
+  | "workspace_report_review_decided";
+export type WorkspaceAuditEventType = WorkspaceAuditMemberEventType | WorkspaceAuditProjectEventType | WorkspaceAuditResearchEventType | WorkspaceAuditAssignmentEventType | WorkspaceAuditReportReviewEventType;
 
 const VALID_MEMBER_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_member_removed", "workspace_ownership_transferred", "workspace_member_role_changed"]);
 const VALID_PROJECT_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_project_archived", "workspace_project_restored"]);
 const VALID_RESEARCH_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_research_snapshot_created"]);
 const VALID_ASSIGNMENT_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_project_assignees_changed", "workspace_research_assignee_changed"]);
-const VALID_EVENT_TYPES: ReadonlySet<string> = new Set([...VALID_MEMBER_EVENT_TYPES, ...VALID_PROJECT_EVENT_TYPES, ...VALID_RESEARCH_EVENT_TYPES, ...VALID_ASSIGNMENT_EVENT_TYPES]);
+const VALID_REPORT_REVIEW_EVENT_TYPES: ReadonlySet<string> = new Set([
+  "workspace_report_review_submitted",
+  "workspace_report_review_resubmitted",
+  "workspace_report_review_reviewer_changed",
+  "workspace_report_review_decided",
+]);
+const VALID_EVENT_TYPES: ReadonlySet<string> = new Set([...VALID_MEMBER_EVENT_TYPES, ...VALID_PROJECT_EVENT_TYPES, ...VALID_RESEARCH_EVENT_TYPES, ...VALID_ASSIGNMENT_EVENT_TYPES, ...VALID_REPORT_REVIEW_EVENT_TYPES]);
+const VALID_RR_PURPOSES: ReadonlySet<string> = new Set(REPORT_REVIEW_PURPOSES);
+const VALID_RR_DECISIONS: ReadonlySet<string> = new Set(REPORT_REVIEW_DECISION_STATUSES);
+const VALID_RR_PRIOR_STATUSES: ReadonlySet<string> = new Set(["unreviewed", "pending"]);
 /**
  * Order 4 Slice 2a — RECOGNISED but not surfaced: Source Standing audit rows
  * are written by the (dark) Source Standing writer and will be presented by a
@@ -173,7 +193,19 @@ interface WorkspaceAuditResearchAssignmentEventDto extends WorkspaceAuditEventDt
   repair: boolean;
 }
 
+/** Report Review rows: the run question snapshot (null when the run had none — never invented), cycle, display names only. */
+interface WorkspaceAuditReportReviewDtoBase extends WorkspaceAuditEventDtoBase {
+  research: { question: string | null };
+  cycle: number;
+}
+export type WorkspaceAuditReportReviewEventDto =
+  | (WorkspaceAuditReportReviewDtoBase & { eventType: "workspace_report_review_submitted"; purpose: string })
+  | (WorkspaceAuditReportReviewDtoBase & { eventType: "workspace_report_review_resubmitted"; fromCycle: number; purpose: string; clearedReviewer: { displayName: string } | null })
+  | (WorkspaceAuditReportReviewDtoBase & { eventType: "workspace_report_review_reviewer_changed"; previousReviewer: { displayName: string } | null; reviewer: { displayName: string } | null })
+  | (WorkspaceAuditReportReviewDtoBase & { eventType: "workspace_report_review_decided"; status: string; purpose: string });
+
 export type WorkspaceAuditEventDto =
+  | WorkspaceAuditReportReviewEventDto
   | WorkspaceAuditProjectAssignmentEventDto
   | WorkspaceAuditResearchAssignmentEventDto
   | (WorkspaceAuditMemberEventDtoBase & { eventType: "workspace_member_removed"; previousRole: WorkspaceAuditPreviousRole })
@@ -196,7 +228,53 @@ type ValidatedRow =
   | { eventType: "workspace_project_restored"; occurredAtIso: string; actorUid: string; projectId: string; projectName: string }
   | { eventType: "workspace_research_snapshot_created"; occurredAtIso: string; actorUid: string; projectId: string; projectName: string; runId: string; runQuestion: string }
   | { eventType: "workspace_project_assignees_changed"; occurredAtIso: string; actorUid: string; projectId: string; projectName: string; addedUids: string[]; removedUids: string[] }
-  | { eventType: "workspace_research_assignee_changed"; occurredAtIso: string; actorUid: string; projectId: string | null; projectName: string | null; runId: string; runQuestion: string; previousAssigneeUid: string | null; assigneeUid: string | null };
+  | { eventType: "workspace_research_assignee_changed"; occurredAtIso: string; actorUid: string; projectId: string | null; projectName: string | null; runId: string; runQuestion: string; previousAssigneeUid: string | null; assigneeUid: string | null }
+  | ReportReviewValidatedRow;
+
+type ReportReviewRowBase = { occurredAtIso: string; actorUid: string; runQuestion: string | null; cycle: number };
+type ReportReviewValidatedRow =
+  | (ReportReviewRowBase & { eventType: "workspace_report_review_submitted"; purposeCode: string })
+  | (ReportReviewRowBase & { eventType: "workspace_report_review_resubmitted"; fromCycle: number; purposeCode: string; clearedReviewerUid: string | null })
+  | (ReportReviewRowBase & { eventType: "workspace_report_review_reviewer_changed"; previousReviewerUid: string | null; reviewerUid: string | null })
+  | (ReportReviewRowBase & { eventType: "workspace_report_review_decided"; status: string; purposeCode: string });
+
+function isReportReviewRow(row: ValidatedRow): row is ReportReviewValidatedRow {
+  return VALID_REPORT_REVIEW_EVENT_TYPES.has(row.eventType);
+}
+
+const isCycle = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 1;
+const isUidOrNull = (v: unknown): v is string | null => v === null || (typeof v === "string" && v.length > 0);
+
+/** Report Review rows: every field the writer always sets must be present and well-formed, or the row is skipped. */
+function validateReportReviewRow(eventType: string, raw: Record<string, unknown>, occurredAtIso: string, actorUid: string): ReportReviewValidatedRow | null {
+  if (typeof raw.runId !== "string" || raw.runId.length === 0) return null;
+  if (!(raw.projectId === null || (typeof raw.projectId === "string" && raw.projectId.length > 0))) return null;
+  const runQuestion = raw.runQuestion;
+  if (!(runQuestion === null || (typeof runQuestion === "string" && runQuestion.length > 0))) return null;
+  if (!isCycle(raw.cycle)) return null;
+  const base: ReportReviewRowBase = { occurredAtIso, actorUid, runQuestion: runQuestion as string | null, cycle: raw.cycle };
+  switch (eventType) {
+    case "workspace_report_review_submitted":
+      if (typeof raw.purposeCode !== "string" || !VALID_RR_PURPOSES.has(raw.purposeCode)) return null;
+      if (raw.cycle !== 1) return null;
+      return { ...base, eventType, purposeCode: raw.purposeCode };
+    case "workspace_report_review_resubmitted":
+      if (typeof raw.purposeCode !== "string" || !VALID_RR_PURPOSES.has(raw.purposeCode)) return null;
+      if (!isCycle(raw.fromCycle) || raw.cycle !== raw.fromCycle + 1) return null;
+      if (!isUidOrNull(raw.clearedReviewerUid)) return null;
+      return { ...base, eventType, fromCycle: raw.fromCycle, purposeCode: raw.purposeCode, clearedReviewerUid: raw.clearedReviewerUid };
+    case "workspace_report_review_reviewer_changed":
+      if (!isUidOrNull(raw.previousReviewerUid) || !isUidOrNull(raw.reviewerUid)) return null;
+      return { ...base, eventType, previousReviewerUid: raw.previousReviewerUid, reviewerUid: raw.reviewerUid };
+    case "workspace_report_review_decided":
+      if (typeof raw.purposeCode !== "string" || !VALID_RR_PURPOSES.has(raw.purposeCode)) return null;
+      if (typeof raw.status !== "string" || !VALID_RR_DECISIONS.has(raw.status)) return null;
+      if (typeof raw.priorStatus !== "string" || !VALID_RR_PRIOR_STATUSES.has(raw.priorStatus)) return null;
+      return { ...base, eventType, status: raw.status, purposeCode: raw.purposeCode };
+    default:
+      return null;
+  }
+}
 
 function isNonEmptyStringArray(v: unknown): v is string[] {
   return Array.isArray(v) && v.every((x) => typeof x === "string" && x.length > 0);
@@ -233,6 +311,8 @@ function validateRow(id: string, raw: Record<string, unknown> | undefined, works
   } catch {
     return null;
   }
+
+  if (VALID_REPORT_REVIEW_EVENT_TYPES.has(eventType)) return validateReportReviewRow(eventType, raw, occurredAtIso, actorUid);
 
   if (VALID_PROJECT_EVENT_TYPES.has(eventType)) {
     const projectId = raw.projectId;
@@ -369,6 +449,11 @@ export async function listWorkspaceAuditEvents(args: { workspaceId: string; limi
         if (row.previousAssigneeUid !== null) uids.add(row.previousAssigneeUid);
         if (row.assigneeUid !== null) uids.add(row.assigneeUid);
       }
+      if (row.eventType === "workspace_report_review_reviewer_changed") {
+        if (row.previousReviewerUid !== null) uids.add(row.previousReviewerUid);
+        if (row.reviewerUid !== null) uids.add(row.reviewerUid);
+      }
+      if (row.eventType === "workspace_report_review_resubmitted" && row.clearedReviewerUid !== null) uids.add(row.clearedReviewerUid);
     }
     // Two bounded batch calls (never per-event) — a uid appearing as both
     // an actor (in one event) and a target (in another) is fetched at
@@ -384,6 +469,22 @@ export async function listWorkspaceAuditEvents(args: { workspaceId: string; limi
 
     const items: WorkspaceAuditEventDto[] = validated.map((row) => {
       const actor = { displayName: actorNames.get(row.actorUid) ?? UNKNOWN_AUDIT_ACTOR_LABEL };
+      if (isReportReviewRow(row)) {
+        // Allow-list projection: question snapshot, cycle, purpose code, statuses and display names — no runId, projectId or uid.
+        const r = row;
+        const toName = (u: string | null) => (u === null ? null : { displayName: targetNames.get(u) ?? UNKNOWN_AUDIT_TARGET_LABEL });
+        const base = { occurredAt: r.occurredAtIso, actor, research: { question: r.runQuestion }, cycle: r.cycle };
+        switch (r.eventType) {
+          case "workspace_report_review_submitted":
+            return { ...base, eventType: r.eventType, purpose: r.purposeCode };
+          case "workspace_report_review_resubmitted":
+            return { ...base, eventType: r.eventType, fromCycle: r.fromCycle, purpose: r.purposeCode, clearedReviewer: toName(r.clearedReviewerUid) };
+          case "workspace_report_review_reviewer_changed":
+            return { ...base, eventType: r.eventType, previousReviewer: toName(r.previousReviewerUid), reviewer: toName(r.reviewerUid) };
+          case "workspace_report_review_decided":
+            return { ...base, eventType: r.eventType, status: r.status, purpose: r.purposeCode };
+        }
+      }
       if (row.eventType === "workspace_project_archived" || row.eventType === "workspace_project_restored") {
         // Allow-list projection: name snapshot only — `projectId` is never surfaced.
         return { eventType: row.eventType, occurredAt: row.occurredAtIso, actor, project: { name: row.projectName } };

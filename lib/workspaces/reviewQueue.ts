@@ -78,7 +78,21 @@ export interface ReviewQueueRow {
 
 export type ReviewQueueResult =
   | { status: "ok"; items: ReviewQueueRow[]; hasMore: boolean; nextCursor?: string }
-  | { status: "query_failed" };
+  | { status: "query_failed" }
+  /** Order B, Stage B3 — only from the merged (Report Review ON) scan: a required composite index is missing or still building. */
+  | { status: "index_unavailable" };
+
+/**
+ * Order B, Stage B3 — a Firestore query refused for a missing (or still-building) composite index fails with
+ * FAILED_PRECONDITION (gRPC code 9) and a message naming the index. Recognised so the merged queue fails with an
+ * identifiable, controlled error rather than a generic one — never a silently incomplete page.
+ */
+export function isMissingIndexError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as { code?: unknown; message?: unknown };
+  const failedPrecondition = e.code === 9 || e.code === "failed-precondition" || e.code === "FAILED_PRECONDITION";
+  return failedPrecondition && typeof e.message === "string" && /index/i.test(e.message);
+}
 
 interface RunRevalidation {
   runId: string;
@@ -713,6 +727,10 @@ async function scanStatusViewMerged(args: {
     if (hasMore && !nextCursor) return { status: "query_failed" }; // explicit error, never a silently truncated page
     return { status: "ok", items: validRows, hasMore, ...(nextCursor ? { nextCursor } : {}) };
   } catch (err) {
+    if (isMissingIndexError(err)) {
+      logger.error("[workspaces/reviewQueue] REPORT_REVIEW_INDEX_UNAVAILABLE: merged status-view query needs a composite index that is missing or still building", { view: args.view, workspaceId: args.workspaceId, error: err instanceof Error ? err.message : String(err) });
+      return { status: "index_unavailable" };
+    }
     logger.warn("[workspaces/reviewQueue] merged status-view query failed", { view: args.view, workspaceId: args.workspaceId, error: err instanceof Error ? err.message : String(err) });
     return { status: "query_failed" };
   }

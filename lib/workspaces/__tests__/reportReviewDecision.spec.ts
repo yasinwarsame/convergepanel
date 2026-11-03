@@ -182,11 +182,11 @@ describe("authorization: the shared contract (server-authoritative)", () => {
       [CREATOR, false, "self_review"],
     ] as const) {
       const ctx = await getReportReviewContext({ uid, workspaceId: W, runId: RUN });
-      expect(ctx.status === "ok" && ctx.viewer).toEqual({ canDecide, denial });
+      expect(ctx.status === "ok" && ctx.viewer).toMatchObject({ canDecide, denial }); // B3 adds canResubmit/canManageAssignment (tested in reportReviewB3.spec.ts)
     }
     // VIEWER lacks reviews.submit: context is readable (reviews.read) but deciding is not allowed.
     const v = await getReportReviewContext({ uid: VIEWER, workspaceId: W, runId: RUN });
-    expect(v.status === "ok" && v.viewer).toEqual({ canDecide: false, denial: "insufficient_capability" });
+    expect(v.status === "ok" && v.viewer).toMatchObject({ canDecide: false, denial: "insufficient_capability" });
     expect(await getReportReviewContext({ uid: "uid-stranger", workspaceId: W, runId: RUN })).toEqual({ status: "not_found" });
   });
 });
@@ -323,7 +323,7 @@ describe("B2 review fixes", () => {
     const { buildNextAdaptiveHumanReviewPanel } = jest.requireActual("@/lib/governance/adaptiveHumanReviewPanel");
     db.seed(`runs/${RUN}/humanReviewPanel/current`, buildNextAdaptiveHumanReviewPanel({ teamId: null, runId: RUN, reviewerUserIds: [REVIEWER, REVIEWER2], actorUserId: OWNER, now: "2026-11-02T11:30:00.000Z", current: null, workspaceMetadata: { workspaceId: W, projectId: null } }));
     const ctx = await getReportReviewContext({ uid: REVIEWER, workspaceId: W, runId: RUN });
-    expect(ctx.status === "ok" && ctx.viewer).toEqual({ canDecide: false, denial: "active_panel" });
+    expect(ctx.status === "ok" && ctx.viewer).toMatchObject({ canDecide: false, denial: "active_panel" });
     expect(await decide(REVIEWER)).toEqual({ ok: false, reason: "active_panel" });
   });
 

@@ -45,7 +45,8 @@ describe("1. archive and event history is write-once in every write path", () =>
   const COLLECTION_USERS = {
     constants: ["lib/workspaces/reportReviewCollections.ts"],
     writers: ["lib/workspaces/reportReviewAssignmentAudit.ts", "lib/workspaces/reportReviewDecisionMutation.ts", WRITER],
-    readers: ["lib/workspaces/reportReviewContext.ts"],
+    // B3 adds the record export (read-only: it reads the cycle archives to build the decision history).
+    readers: ["lib/workspaces/reportReviewContext.ts", "app/api/workspaces/[workspaceId]/runs/[runId]/report-review/export/route.ts"],
   };
 
   it("only the pinned modules reference the archive and event collections", () => {
@@ -161,6 +162,8 @@ describe("2. the dual-record invariant's assumptions are pinned", () => {
       "app/api/user/runs/[runId]/review-history/route.ts": 2,
       "app/api/user/runs/[runId]/route.ts": 7,
       "app/api/workspaces/[workspaceId]/runs/[runId]/export/route.ts": 3,
+      // B3: the report-review record export READS governanceRecord only to refuse a run holding both records (fail closed).
+      "app/api/workspaces/[workspaceId]/runs/[runId]/report-review/export/route.ts": 4,
       "app/api/workspaces/[workspaceId]/runs/[runId]/review-panel/finalize/route.ts": 1,
       "app/api/workspaces/[workspaceId]/runs/[runId]/route.ts": 8,
       "lib/adaptiveSchema/decisionReceiptBuilder.ts": 1,
