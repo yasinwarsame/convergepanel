@@ -37,6 +37,8 @@ export interface WorkspaceReviewQueueRow {
   };
   isAssignedToMe: boolean;
   isOverdue: boolean;
+  /** Order B, Stage B3 — present only on report-review rows (the server sends it only while Report Review is ON). */
+  recordKind?: "report_review";
 }
 
 export interface WorkspaceReviewQueuePage {

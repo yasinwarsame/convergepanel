@@ -120,7 +120,38 @@ export type WorkspaceMembershipEventType =
   | "workspace_research_snapshot_created"
   | "workspace_project_assignees_changed"
   | "workspace_research_assignee_changed"
-  | "workspace_source_standing_changed";
+  | "workspace_source_standing_changed"
+  | ReportReviewWorkspaceAuditEventType;
+
+/**
+ * Order B, Stage B3 — Report Review events in the Workspace Audit Log. Written ONLY by
+ * `writeReportReviewWorkspaceAuditEvent()` (lib/workspaces/reportReviewWorkspaceAudit.ts) with `tx.create()`, INSIDE the
+ * report-review mutation's own transaction: MUTATION COMMITTED IFF AUDIT EVENT COMMITTED. A decision closes its cycle,
+ * so `workspace_report_review_decided` is also the cycle-completion record; `workspace_report_review_resubmitted` records
+ * the archive of `fromCycle` and the creation of `cycle`. Identities are uids only (display names resolve at read time);
+ * `runQuestion` is a transaction-read snapshot (null when the run has no usable question).
+ */
+export type ReportReviewWorkspaceAuditEventType =
+  | "workspace_report_review_submitted"
+  | "workspace_report_review_resubmitted"
+  | "workspace_report_review_reviewer_changed"
+  | "workspace_report_review_decided";
+
+interface WorkspaceReportReviewEventIdentity {
+  actorUid: string;
+  workspaceId: string;
+  projectId: string | null;
+  runId: string;
+  runQuestion: string | null;
+  /** The cycle this event belongs to (for a resubmission: the NEW cycle). */
+  cycle: number;
+}
+
+export type ReportReviewWorkspaceAuditArgs =
+  | (WorkspaceReportReviewEventIdentity & { eventType: "workspace_report_review_submitted"; purposeCode: string })
+  | (WorkspaceReportReviewEventIdentity & { eventType: "workspace_report_review_resubmitted"; fromCycle: number; purposeCode: string; clearedReviewerUid: string | null })
+  | (WorkspaceReportReviewEventIdentity & { eventType: "workspace_report_review_reviewer_changed"; previousReviewerUid: string | null; reviewerUid: string | null; revision: number })
+  | (WorkspaceReportReviewEventIdentity & { eventType: "workspace_report_review_decided"; priorStatus: string; status: string; purposeCode: string });
 
 interface WorkspaceMembershipEventIdentity {
   actorUid: string;
@@ -199,7 +230,8 @@ export type WorkspaceMembershipEventArgs =
   | (WorkspaceResearchSnapshotEventIdentity & { eventType: "workspace_research_snapshot_created" })
   | (WorkspaceProjectAssignmentEventIdentity & { eventType: "workspace_project_assignees_changed" })
   | (WorkspaceResearchAssignmentEventIdentity & { eventType: "workspace_research_assignee_changed" })
-  | (WorkspaceSourceStandingEventIdentity & { eventType: "workspace_source_standing_changed" });
+  | (WorkspaceSourceStandingEventIdentity & { eventType: "workspace_source_standing_changed" })
+  | ReportReviewWorkspaceAuditArgs;
 
 export type WorkspaceMembershipEventDocData =
   | (WorkspaceMembershipEventIdentity & { eventType: "workspace_member_removed"; previousRole: WorkspaceMembershipRole; at: Timestamp })
@@ -210,7 +242,8 @@ export type WorkspaceMembershipEventDocData =
   | (WorkspaceResearchSnapshotEventIdentity & { eventType: "workspace_research_snapshot_created"; at: Timestamp })
   | (WorkspaceProjectAssignmentEventIdentity & { eventType: "workspace_project_assignees_changed"; at: Timestamp })
   | (WorkspaceResearchAssignmentEventIdentity & { eventType: "workspace_research_assignee_changed"; at: Timestamp })
-  | (WorkspaceSourceStandingEventIdentity & { eventType: "workspace_source_standing_changed"; at: Timestamp });
+  | (WorkspaceSourceStandingEventIdentity & { eventType: "workspace_source_standing_changed"; at: Timestamp })
+  | (ReportReviewWorkspaceAuditArgs & { at: Timestamp });
 
 /**
  * Pure — no I/O, never throws. `at` is caller-supplied (never generated

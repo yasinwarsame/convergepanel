@@ -77,6 +77,7 @@ import {
 } from "@/lib/research/teamRunDetailPresentation";
 import { teamRunDetailApiUrl } from "@/lib/workspaces/teamResearchDetailHref";
 import { teamClaimOriginHandoffHref } from "@/lib/workspaces/teamClaimOriginHandoff";
+import ReportReviewPanel from "@/components/workspace/projects/ReportReviewPanel";
 
 export type TeamResearchDetailShellProps = {
   workspaceId: string;
@@ -101,6 +102,12 @@ export type TeamResearchDetailShellProps = {
    * Workspace. Presentation only: the export POST re-authorizes everything.
    */
   canCreateExport?: boolean;
+  /**
+   * Order B, Stage B3 — the server's compile-time `REPORT_REVIEW_ENABLED`. When false (Production today) the page keeps
+   * the Order A "Approval review" notice exactly as before; when true, research without a governed review record shows
+   * the Report Review panel instead. Presentation only: every report-review route is itself dark while the switch is off.
+   */
+  reportReviewEnabled?: boolean;
 };
 
 type DetailState =
@@ -140,7 +147,7 @@ export function teamResearchAncillaryPresentation(
   };
 }
 
-export default function TeamResearchDetailShell({ workspaceId, workspaceName, runId, project, showMembers, showAudit, canVerifyClaim = false, canCreateExport = false }: TeamResearchDetailShellProps) {
+export default function TeamResearchDetailShell({ workspaceId, workspaceName, runId, project, showMembers, showAudit, canVerifyClaim = false, canCreateExport = false, reportReviewEnabled = false }: TeamResearchDetailShellProps) {
   const { user, authReady } = useAuth();
   const router = useRouter();
   const [state, setState] = useState<DetailState>({ kind: "loading" });
@@ -390,7 +397,8 @@ export default function TeamResearchDetailShell({ workspaceId, workspaceName, ru
           />
           {/* Owner Order A (2026-11-02): the reader is already authorized here, and `review` is null exactly when the run
               has no usable review record, so stating why approval is unavailable reveals nothing new. */}
-          {state.meta.review === null && (
+          {state.meta.review === null && reportReviewEnabled && <ReportReviewPanel workspaceId={workspaceId} runId={runId} canCreateExport={canCreateExport} />}
+          {state.meta.review === null && !reportReviewEnabled && (
             <section data-testid="approval-not-available-notice" aria-labelledby="approval-not-available-heading" className="mt-6 rounded-xl border border-cp-border bg-cp-raised p-5 text-sm">
               <h2 id="approval-not-available-heading" className="text-sm font-semibold text-cp-text">
                 {APPROVAL_NOT_AVAILABLE_HEADING}

@@ -505,14 +505,49 @@ export type WorkspaceAuditEventItem =
       assignee: { displayName: string } | null;
       /** An integrity-repair write (equal before/after) — a real committed write, not a no-op. */
       repair: boolean;
-    };
+    }
+  | WorkspaceAuditReportReviewEventItem;
+
+/** Order B, Stage B3 — Report Review audit rows: question snapshot (nullable, never invented), cycle, display names only. */
+export type WorkspaceAuditReportReviewEventItem =
+  | { eventType: "workspace_report_review_submitted"; occurredAt: string; actor: { displayName: string }; research: { question: string | null }; cycle: number; purpose: string }
+  | { eventType: "workspace_report_review_resubmitted"; occurredAt: string; actor: { displayName: string }; research: { question: string | null }; cycle: number; fromCycle: number; purpose: string; clearedReviewer: { displayName: string } | null }
+  | { eventType: "workspace_report_review_reviewer_changed"; occurredAt: string; actor: { displayName: string }; research: { question: string | null }; cycle: number; change: "assigned" | "reassigned" | "removed" | "updated"; previousReviewer: { displayName: string } | null; reviewer: { displayName: string } | null }
+  | { eventType: "workspace_report_review_decided"; occurredAt: string; actor: { displayName: string }; research: { question: string | null }; cycle: number; status: string; purpose: string };
 
 const VALID_AUDIT_PREVIOUS_ROLES: ReadonlySet<string> = new Set(["admin", "member", "reviewer", "viewer"]);
 const VALID_AUDIT_MEMBER_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_member_removed", "workspace_ownership_transferred", "workspace_member_role_changed"]);
 const VALID_AUDIT_PROJECT_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_project_archived", "workspace_project_restored"]);
 const VALID_AUDIT_RESEARCH_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_research_snapshot_created"]);
 const VALID_AUDIT_ASSIGNMENT_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_project_assignees_changed", "workspace_research_assignee_changed"]);
-const VALID_AUDIT_EVENT_TYPES: ReadonlySet<string> = new Set([...VALID_AUDIT_MEMBER_EVENT_TYPES, ...VALID_AUDIT_PROJECT_EVENT_TYPES, ...VALID_AUDIT_RESEARCH_EVENT_TYPES, ...VALID_AUDIT_ASSIGNMENT_EVENT_TYPES]);
+const VALID_AUDIT_REPORT_REVIEW_EVENT_TYPES: ReadonlySet<string> = new Set([
+  "workspace_report_review_submitted",
+  "workspace_report_review_resubmitted",
+  "workspace_report_review_reviewer_changed",
+  "workspace_report_review_decided",
+]);
+const VALID_AUDIT_EVENT_TYPES: ReadonlySet<string> = new Set([...VALID_AUDIT_MEMBER_EVENT_TYPES, ...VALID_AUDIT_PROJECT_EVENT_TYPES, ...VALID_AUDIT_RESEARCH_EVENT_TYPES, ...VALID_AUDIT_ASSIGNMENT_EVENT_TYPES, ...VALID_AUDIT_REPORT_REVIEW_EVENT_TYPES]);
+
+function isValidReportReviewAuditEvent(v: Record<string, unknown>): boolean {
+  const research = v.research;
+  if (typeof research !== "object" || research === null) return false;
+  const question = (research as Record<string, unknown>).question;
+  if (!(question === null || (typeof question === "string" && question.length > 0))) return false;
+  if (typeof v.cycle !== "number" || !Number.isInteger(v.cycle) || v.cycle < 1) return false;
+  const nameOrNull = (x: unknown) => x === null || isDisplayNameRef(x);
+  switch (v.eventType) {
+    case "workspace_report_review_submitted":
+      return typeof v.purpose === "string";
+    case "workspace_report_review_resubmitted":
+      return typeof v.purpose === "string" && typeof v.fromCycle === "number" && nameOrNull(v.clearedReviewer);
+    case "workspace_report_review_reviewer_changed":
+      return (v.change === "assigned" || v.change === "reassigned" || v.change === "removed" || v.change === "updated") && nameOrNull(v.previousReviewer) && nameOrNull(v.reviewer);
+    case "workspace_report_review_decided":
+      return typeof v.purpose === "string" && typeof v.status === "string";
+    default:
+      return false;
+  }
+}
 
 function isDisplayNameRef(value: unknown): value is { displayName: string } {
   return typeof value === "object" && value !== null && typeof (value as Record<string, unknown>).displayName === "string";
@@ -533,6 +568,7 @@ function isValidAuditEvent(value: unknown): value is WorkspaceAuditEventItem {
   if (typeof v.occurredAt !== "string" || Number.isNaN(Date.parse(v.occurredAt))) return false;
   const actor = v.actor;
   if (typeof actor !== "object" || actor === null || typeof (actor as Record<string, unknown>).displayName !== "string") return false;
+  if (VALID_AUDIT_REPORT_REVIEW_EVENT_TYPES.has(v.eventType)) return isValidReportReviewAuditEvent(v);
   if (v.eventType === "workspace_project_assignees_changed") {
     return isProjectNameRef(v.project) && Array.isArray(v.added) && v.added.every(isDisplayNameRef) && Array.isArray(v.removed) && v.removed.every(isDisplayNameRef) && typeof v.repair === "boolean";
   }

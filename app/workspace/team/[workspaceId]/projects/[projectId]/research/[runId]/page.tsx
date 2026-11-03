@@ -28,6 +28,7 @@ import { resolveServerComponentIdentity } from "@/lib/auth/resolveServerComponen
 import { resolveWorkspaceAccess } from "@/lib/workspaces/resolveWorkspaceAccess";
 import { getProject } from "@/lib/firestore/projects";
 import TeamResearchDetailShell from "@/components/workspace/projects/TeamResearchDetailShell";
+import { REPORT_REVIEW_ENABLED } from "@/lib/workspaces/reportReviewRollout";
 
 export const dynamic = "force-dynamic";
 
@@ -83,6 +84,7 @@ export default async function TeamResearchDetailPage({
       // for. Presentation only; viewing still needs just `research.read`.
       canVerifyClaim={access.capabilities.includes("research.create") && access.capabilities.includes("research.organize")}
       canCreateExport={access.capabilities.includes("exports.create")}
+      reportReviewEnabled={REPORT_REVIEW_ENABLED}
     />
   );
 }

@@ -15,12 +15,11 @@
 import { isOrdinaryReviewerAuthorized, type WorkspaceReviewCandidate } from "@/lib/workspaces/workspaceReviewEligibility";
 import type { ReportReviewRecordV1, ReportReviewStatus } from "./reportReview";
 
-export const REPORT_REVIEW_DECISION_STATUSES = Object.freeze(["approved", "approved_with_conditions", "changes_requested", "rejected"] as const);
-export type ReportReviewDecisionStatus = (typeof REPORT_REVIEW_DECISION_STATUSES)[number];
-
-export const MAX_DECISION_COMMENT_CHARS = 2000;
-export const MAX_DECISION_CONDITIONS = 10;
-export const MAX_DECISION_CONDITION_CHARS = 500;
+// B3: the decision vocabulary and limits live in the import-free ./reportReviewCopy so the browser form enforces the very
+// same limits; re-exported here unchanged.
+import { REPORT_REVIEW_DECISION_STATUSES, MAX_DECISION_COMMENT_CHARS, MAX_DECISION_CONDITIONS, MAX_DECISION_CONDITION_CHARS, type ReportReviewDecisionStatus } from "./reportReviewCopy";
+export { REPORT_REVIEW_DECISION_STATUSES, MAX_DECISION_COMMENT_CHARS, MAX_DECISION_CONDITIONS, MAX_DECISION_CONDITION_CHARS };
+export type { ReportReviewDecisionStatus };
 
 export type DecisionUpdate = { status: ReportReviewDecisionStatus; comment: string | null; conditions: string[] | null };
 export type DecisionUpdateValidation = { ok: true; update: DecisionUpdate } | { ok: false; reason: "invalid_decision" | "conditions_required" };

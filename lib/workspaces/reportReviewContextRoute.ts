@@ -12,7 +12,13 @@ export async function handleReportReviewContextGet(req: NextRequest, params: { w
   if (r.status === "ok") {
     const { status: _s, ...rest } = r;
     void _s;
-    return NextResponse.json({ ok: true, ...rest });
+    return NextResponse.json({ ok: true, state: "submitted", ...rest });
+  }
+  // B3: not yet submitted — whether it can be, and why not (the reader is already authorized to read this run).
+  if (r.status === "not_submitted") {
+    const { status: _s, ...rest } = r;
+    void _s;
+    return NextResponse.json({ ok: true, state: "not_submitted", ...rest });
   }
   if (r.status === "not_found") return concealed();
   const { status, body } = internalErrorResponse();

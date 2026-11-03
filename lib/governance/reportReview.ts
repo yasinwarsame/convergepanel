@@ -18,23 +18,11 @@ import { SCHEMA_ANSWER_SHAPE, isPersistedLegacyAdaptiveSchemaId } from "@/lib/ad
 // Fixed copy and limits
 // ---------------------------------------------------------------------------------------------------------------------
 
-/** Fixed text shown with every report-review approval (D-B1). Never configurable, never replaced by the purpose note. */
-export const REPORT_REVIEW_DISCLAIMER =
-  "Approval means a reviewer read this report and found it acceptable for its stated purpose. It does not mean its factual claims, sources or model confidence were verified, or that analysis missing from the report exists.";
-
-/** D-B1a: the fixed purpose categories. Workflow labels only; never certifications. */
-export const REPORT_REVIEW_PURPOSES = Object.freeze(["internal_review", "client_delivery", "publication_review", "other"] as const);
-export type ReportReviewPurposeCode = (typeof REPORT_REVIEW_PURPOSES)[number];
-
-export const REPORT_REVIEW_PURPOSE_LABELS: Readonly<Record<ReportReviewPurposeCode, string>> = Object.freeze({
-  internal_review: "Internal review",
-  client_delivery: "Client delivery",
-  publication_review: "Publication review",
-  other: "Other",
-});
-
-/** D-B1a: optional note, at most 280 characters (counted as Unicode code points). */
-export const REPORT_REVIEW_NOTE_MAX_CHARS = 280;
+// B3: the disclaimer (the owner's exact text), purposes, labels and the note limit live in the import-free
+// ./reportReviewCopy module so client components read the very same values. Re-exported here unchanged.
+import { REPORT_REVIEW_DISCLAIMER, REPORT_REVIEW_NOTE_MAX_CHARS, REPORT_REVIEW_PURPOSES, REPORT_REVIEW_PURPOSE_LABELS, type ReportReviewPurposeCode, type ReportReviewStatus, type ReportReviewIneligibleReason } from "./reportReviewCopy";
+export { REPORT_REVIEW_DISCLAIMER, REPORT_REVIEW_NOTE_MAX_CHARS, REPORT_REVIEW_PURPOSES, REPORT_REVIEW_PURPOSE_LABELS };
+export type { ReportReviewPurposeCode, ReportReviewStatus, ReportReviewIneligibleReason };
 
 /**
  * #274 (5165761c) merged 2026-11-01T21:00:29Z; before it, a Generic run could never carry a legacy envelope. Runs
@@ -47,7 +35,6 @@ export const REPORT_REVIEW_ENVELOPE_CUTOFF = Timestamp.fromDate(new Date("2026-1
 // Types
 // ---------------------------------------------------------------------------------------------------------------------
 
-export type ReportReviewStatus = "unreviewed" | "pending" | "approved" | "approved_with_conditions" | "changes_requested" | "rejected";
 const STATUSES: ReadonlySet<string> = new Set<ReportReviewStatus>(["unreviewed", "pending", "approved", "approved_with_conditions", "changes_requested", "rejected"]);
 const OPEN_STATUSES: ReadonlySet<string> = new Set<ReportReviewStatus>(["unreviewed", "pending"]);
 
@@ -113,12 +100,12 @@ export function validateReportReviewPurpose(raw: unknown): PurposeValidation {
 // Eligibility (D-B7 option (a): positive evidence that the run can never hold a governance record)
 // ---------------------------------------------------------------------------------------------------------------------
 
-export type ReportReviewIneligibleReason =
-  | "governed_run" // has, or will have, a governance record: uses the standard approval workflow
-  | "already_submitted" // reportReview exists and is open
-  | "already_decided" // reportReview exists and is decided: use resubmission (a new cycle)
-  | "not_complete"
-  | "no_review_information"; // D-B8: saved without the information approval review needs
+// ReportReviewIneligibleReason (from ./reportReviewCopy):
+//   governed_run          has, or will have, a governance record: uses the standard approval workflow
+//   already_submitted     reportReview exists and is open
+//   already_decided       reportReview exists and is decided: use resubmission (a new cycle)
+//   not_complete
+//   no_review_information D-B8: saved without the information approval review needs
 
 export type ReportReviewEligibility = { eligible: true; scope: ReportReviewScope } | { eligible: false; reason: ReportReviewIneligibleReason };
 
@@ -163,7 +150,7 @@ export function evaluateReportReviewEligibility(run: Record<string, unknown>): R
 }
 
 /** Copies what the saved run has. Never synthesizes, never upgrades. */
-function deriveScope(run: Record<string, unknown>, schemaId: string | null): ReportReviewScope {
+export function deriveScope(run: Record<string, unknown>, schemaId: string | null): ReportReviewScope {
   const present = (v: unknown) => (v !== undefined && v !== null ? "present" : "absent") as "present" | "absent";
   const perModel = (run.runDocument as { perModel?: unknown } | undefined)?.perModel;
   const rows = Array.isArray(perModel) ? perModel : [];
@@ -308,4 +295,39 @@ export interface ReportReviewEventV1 {
   toCycle: number;
   purposeCode: ReportReviewPurposeCode;
   at: string;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// B3 (review M-2): content drift since submission
+// ---------------------------------------------------------------------------------------------------------------------
+
+export type ReportReviewAnalysis = "unifiedAnswer" | "synthesis" | "consensus";
+const ANALYSES: readonly ReportReviewAnalysis[] = ["unifiedAnswer", "synthesis", "consensus"];
+
+/**
+ * A cycle's `scope` is frozen at submission, but analyses can still be saved on the run afterwards: the run owner can
+ * generate a synthesis (with its consensus summary) where none existed, or regenerate one that did
+ * (app/api/synthesize-panel writes `synthesizedStructuredReport`, `synthesisConsensusSummary` and `synthesizedAt`).
+ * Compares the run as it is NOW with what was submitted, so every surface can say truthfully what is absent, and flag
+ * anything ADDED or REGENERATED after submission (`synthesizedAt` later than `submittedAt`) as NOT covered by the review
+ * decision. The legacy envelope's own synthesis is written once at execution and never changes afterwards.
+ */
+export function compareReportReviewScope(
+  submitted: ReportReviewScope,
+  run: Record<string, unknown>,
+  submittedAt: string
+): { current: ReportReviewScope; changedSinceSubmission: ReportReviewAnalysis[]; absentNow: ReportReviewAnalysis[] } {
+  const current = deriveScope(run, submitted.schemaId);
+  const at = run.synthesizedAt;
+  const regenerated = at instanceof Timestamp && at.toMillis() > Date.parse(submittedAt);
+  const fromSavedSynthesis: Record<ReportReviewAnalysis, boolean> = {
+    unifiedAnswer: run.synthesizedStructuredReport !== undefined && run.synthesizedStructuredReport !== null,
+    synthesis: run.synthesizedStructuredReport !== undefined && run.synthesizedStructuredReport !== null,
+    consensus: run.synthesisConsensusSummary !== undefined && run.synthesisConsensusSummary !== null,
+  };
+  return {
+    current,
+    changedSinceSubmission: ANALYSES.filter((a) => current[a] === "present" && (submitted[a] === "absent" || (regenerated && fromSavedSynthesis[a]))),
+    absentNow: ANALYSES.filter((a) => current[a] === "absent"),
+  };
 }

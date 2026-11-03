@@ -29,6 +29,7 @@ import { resolveWorkspaceReviewTarget } from "./resolveWorkspaceReviewTarget";
 import { isValidAssignmentTarget, type WorkspaceReviewCandidate } from "./workspaceReviewEligibility";
 import { validateMembershipBinding } from "./membershipBinding";
 import { resolveReviewerDisplayNames, REVIEWER_UNAVAILABLE_LABEL } from "@/lib/governance/reviewerIdentity";
+import { reportReviewAssignmentContext } from "./reportReviewAssignmentAudit";
 
 const MAX_CANDIDATES_SCANNED = 200;
 
@@ -55,6 +56,11 @@ export async function getReviewerCandidates(args: { workspaceId: string; runId: 
       projectIdValue: runData.projectId,
     });
     if (target.kind !== "valid_workspace_review_target") return { status: "run_not_found" };
+    // Order B, Stage B3 — for a report-review run (dormant while Report Review is OFF, and never for a governed run),
+    // the submitter is excluded, exactly as the assignment transaction refuses them (B2 submitter guard).
+    const reportReview = reportReviewAssignmentContext(runData);
+    if (reportReview.kind === "malformed") return { status: "run_not_found" };
+    const submitterUid = reportReview.kind === "report_review" ? reportReview.submitterUid : null;
 
     const snap = await db.collection("workspaceMemberships").where("workspaceId", "==", args.workspaceId).where("status", "==", "active").limit(MAX_CANDIDATES_SCANNED).get();
 
@@ -71,7 +77,7 @@ export async function getReviewerCandidates(args: { workspaceId: string; runId: 
       if (!membership) continue;
       const candidate: WorkspaceReviewCandidate = { uid: membership.uid, workspaceId: membership.workspaceId, role: membership.role, status: membership.status };
       const eligibility = isValidAssignmentTarget({ candidate, runWorkspaceId: args.workspaceId, creatorUid: target.creatorUid });
-      if (eligibility.eligible) eligibleUids.push(membership.uid);
+      if (eligibility.eligible && membership.uid !== submitterUid) eligibleUids.push(membership.uid);
     }
 
     const nameByUid = eligibleUids.length > 0 ? await resolveReviewerDisplayNames(eligibleUids, new Map(), undefined, REVIEWER_UNAVAILABLE_LABEL) : new Map<string, string>();

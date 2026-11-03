@@ -16,6 +16,7 @@ import { teamRunWorkspaceNotFoundConcealedResponse } from "./teamRunAccessRespon
 import { internalErrorResponse } from "./teamWorkspaceErrorResponse";
 import type { ReportReviewMutationFailure } from "./reportReviewMutations";
 import { REPORT_REVIEW_ENABLED } from "./reportReviewRollout";
+import { REPORT_REVIEW_INELIGIBLE_EXPLANATIONS } from "@/lib/governance/reportReviewCopy";
 
 export function reportReviewErrorBody(status: number, code: string, message: string) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
@@ -42,13 +43,8 @@ export async function reportReviewCaller(req: NextRequest, route: string, method
 }
 
 /** Fixed reason sentences (design §6, D-B8) for an authorized caller whose run cannot be submitted. */
-export const REPORT_REVIEW_INELIGIBLE_MESSAGES = Object.freeze({
-  governed_run: "This research already has a review record and uses the standard approval workflow.",
-  already_submitted: "This research is already submitted for approval.",
-  already_decided: "This research has a completed review. Resubmit it to start a new review cycle.",
-  not_complete: "This research isn't finished yet.",
-  no_review_information: "This research can't be submitted: it was saved without the information approval review needs.",
-} as const);
+// B3: single source shared with the page (lib/governance/reportReviewCopy.ts); the sentences are unchanged.
+export const REPORT_REVIEW_INELIGIBLE_MESSAGES = REPORT_REVIEW_INELIGIBLE_EXPLANATIONS;
 
 export function reportReviewFailureResponse(failure: ReportReviewMutationFailure): NextResponse {
   switch (failure.reason) {

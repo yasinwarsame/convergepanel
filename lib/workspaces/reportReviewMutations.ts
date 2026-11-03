@@ -44,6 +44,7 @@ import {
 } from "@/lib/governance/reportReview";
 
 import { REPORT_REVIEW_CYCLES_COLLECTION, REPORT_REVIEW_EVENTS_COLLECTION } from "./reportReviewCollections";
+import { runQuestionSnapshot, writeReportReviewWorkspaceAuditEvent } from "./reportReviewWorkspaceAudit";
 export { REPORT_REVIEW_CYCLES_COLLECTION, REPORT_REVIEW_EVENTS_COLLECTION };
 
 export type ReportReviewMutationFailure =
@@ -137,6 +138,12 @@ export async function submitReportReview(args: { uid: string; workspaceId: strin
         pre.runRef.collection(REPORT_REVIEW_EVENTS_COLLECTION).doc(),
         eventDoc({ type: "report_review_submitted", runId: args.runId, workspaceId: pre.workspaceId, projectId: pre.projectId, actorUid: args.uid, fromCycle: null, toCycle: 1, purposeCode: record.purpose.code, at: now })
       );
+      // B3: the Workspace Audit Log row, in this same transaction (submission committed iff audit row committed).
+      writeReportReviewWorkspaceAuditEvent(
+        tx,
+        { eventType: "workspace_report_review_submitted", actorUid: args.uid, workspaceId: pre.workspaceId, projectId: pre.projectId, runId: args.runId, runQuestion: runQuestionSnapshot(pre.run), cycle: 1, purposeCode: record.purpose.code },
+        now
+      );
       return { ok: true, created: true, record };
     });
   } catch (err) {
@@ -215,6 +222,23 @@ export async function resubmitReportReview(args: { uid: string; workspaceId: str
         eventDoc({ type: "report_review_resubmitted", runId: args.runId, workspaceId: pre.workspaceId, projectId: pre.projectId, actorUid: args.uid, fromCycle: current.record.cycle, toCycle: next.cycle, purposeCode: next.purpose.code, at: now })
       );
       const previousReviewerUserId = typeof assignment?.assignedReviewerUserId === "string" ? assignment.assignedReviewerUserId : null;
+      // B3: one Workspace Audit row records the archive of the decided cycle, the new cycle, and the reviewer reset.
+      writeReportReviewWorkspaceAuditEvent(
+        tx,
+        {
+          eventType: "workspace_report_review_resubmitted",
+          actorUid: args.uid,
+          workspaceId: pre.workspaceId,
+          projectId: pre.projectId,
+          runId: args.runId,
+          runQuestion: runQuestionSnapshot(pre.run),
+          cycle: next.cycle,
+          fromCycle: current.record.cycle,
+          purposeCode: next.purpose.code,
+          clearedReviewerUid: previousReviewerUserId,
+        },
+        now
+      );
       // History only when a reviewer is actually removed (no no-op "unassigned" entries).
       const historyEntry =
         assignment === null || previousReviewerUserId === null

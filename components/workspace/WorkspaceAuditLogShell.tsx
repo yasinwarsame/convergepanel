@@ -22,6 +22,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { fetchWorkspaceAuditEvents, type WorkspaceAuditEventItem, type WorkspaceAuditPreviousRole } from "@/lib/client/workspaceTeamClient";
+import ReportReviewAuditEntry, { isReportReviewAuditEvent } from "@/components/workspace/ReportReviewAuditEntry";
 import ReviewErrorState from "@/components/teamGovernance/ReviewErrorState";
 import WorkspaceNav from "@/components/workspace/WorkspaceNav";
 import WorkspaceGovernanceSummary from "@/components/workspace/WorkspaceGovernanceSummary";
@@ -148,7 +149,9 @@ export default function WorkspaceAuditLogShell({
         <ul className="space-y-3">
           {events.map((event, i) => (
             <li key={i} className="rounded-xl border border-cp-border bg-cp-surface px-5 py-4 shadow-sm">
-              {event.eventType === "workspace_member_removed" ? (
+              {isReportReviewAuditEvent(event) ? (
+                <ReportReviewAuditEntry event={event} />
+              ) : event.eventType === "workspace_member_removed" ? (
                 <>
                   <p className="text-sm font-medium text-cp-text">Member removed</p>
                   <p className="mt-1 text-sm text-cp-muted">
