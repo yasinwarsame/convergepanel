@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { submitReportReview } from "@/lib/workspaces/reportReviewMutations";
 import { REPORT_REVIEW_DISCLAIMER } from "@/lib/governance/reportReview";
 import { readJsonObject, reportReviewCaller, reportReviewErrorBody, reportReviewFailureResponse } from "@/lib/workspaces/reportReviewRouteSupport";
+import { handleReportReviewContextGet } from "@/lib/workspaces/reportReviewContextRoute";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,4 +22,9 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
   const result = await submitReportReview({ uid: uidOrRes, workspaceId: params.workspaceId, runId: params.runId, purpose: body.purpose });
   if (!result.ok) return reportReviewFailureResponse(result);
   return NextResponse.json({ ok: true, created: result.created, reportReview: result.record, disclaimer: REPORT_REVIEW_DISCLAIMER }, { status: result.created ? 201 : 200 });
+}
+
+/** Order B, Stage B2 — read-only report-review context (record, previous cycles, assignment, viewer decision ability). */
+export async function GET(req: NextRequest, { params }: { params: { workspaceId: string; runId: string } }) {
+  return handleReportReviewContextGet(req, params);
 }

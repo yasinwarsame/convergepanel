@@ -39,6 +39,8 @@ import { isCanonicalDueAt, type AdaptiveHumanReviewAssignmentV1 } from "@/lib/go
 import { resolveWorkspaceReviewerDisplayNames, REVIEWER_UNAVAILABLE_LABEL } from "./workspaceReviewerIdentity";
 import type { GovernanceRecordV1 } from "@/lib/adaptiveSchema/governanceRecord";
 import { encodeReviewQueueCursor, type ReviewQueueView, type ReviewQueueCursor } from "./reviewQueueCursor";
+import { REPORT_REVIEW_ENABLED } from "./reportReviewRollout";
+import { parseReportReviewRecord } from "@/lib/governance/reportReview";
 
 const MAX_SCAN_ROUNDS = 3;
 
@@ -70,6 +72,8 @@ export interface ReviewQueueRow {
   };
   isAssignedToMe: boolean;
   isOverdue: boolean;
+  /** Order B, Stage B2 — present ONLY on report-review rows (governed rows are byte-identical to before). */
+  recordKind?: "report_review";
 }
 
 export type ReviewQueueResult =
@@ -84,6 +88,8 @@ interface RunRevalidation {
   humanReview: GovernanceRecordV1["humanReview"];
   createdAt: string;
   runLabel: string;
+  /** Order B, Stage B2 — set only for a report-review run; its submitter can never be an actionable reviewer. */
+  reportReview?: { submitterUid: string; cycle: number };
 }
 
 // ============================================
@@ -115,7 +121,26 @@ function revalidateRun(runId: string, workspaceId: string, runData: Record<strin
   if (target.kind !== "valid_workspace_review_target") return null;
 
   const parsed = parseGovernanceRecord(runData.governanceRecord);
-  if (!parsed.ok) return null;
+  if (!parsed.ok) {
+    // Order B, Stage B2 — only while Report Review is enabled: a run without a governance record may be a
+    // report-review run. When disabled, this branch is never reached and behaviour is unchanged.
+    if (!REPORT_REVIEW_ENABLED) return null;
+    if (runData.governanceRecord !== undefined && runData.governanceRecord !== null) return null; // malformed governed record: unchanged (excluded)
+    const rr = parseReportReviewRecord(runData.reportReview);
+    if (!rr.ok) return null;
+    return {
+      runId,
+      workspaceId: target.workspaceId,
+      projectId: target.projectId,
+      creatorUid: target.creatorUid,
+      humanReview: rr.record.humanReview as GovernanceRecordV1["humanReview"],
+      createdAt: createdAtToIso(runData.createdAt),
+      runLabel: truncateRunLabel(typeof runData.question === "string" ? runData.question : ""),
+      reportReview: { submitterUid: rr.record.submittedByUserId, cycle: rr.record.cycle },
+    };
+  }
+  // A run carrying BOTH records violates the B1 invariant: fail closed (never listed) while Report Review is enabled.
+  if (REPORT_REVIEW_ENABLED && runData.reportReview !== undefined && runData.reportReview !== null) return null;
 
   return {
     runId,
@@ -126,6 +151,11 @@ function revalidateRun(runId: string, workspaceId: string, runData: Record<strin
     createdAt: createdAtToIso(runData.createdAt),
     runLabel: truncateRunLabel(typeof runData.question === "string" ? runData.question : ""),
   };
+}
+
+/** Order B, Stage B2 — the report-review submitter is never an actionable reviewer of that report. */
+function isReportReviewSubmitter(revalidated: RunRevalidation, uid: string | null | undefined): boolean {
+  return revalidated.reportReview !== undefined && typeof uid === "string" && uid === revalidated.reportReview.submitterUid;
 }
 
 // ============================================
@@ -139,6 +169,8 @@ interface AssignmentSummaryInput {
   assignment: (AdaptiveHumanReviewAssignmentV1 & { assignedReviewerUserId: string }) | null;
   /** Already-resolved CURRENT membership of the assignee, or `null` if none/removed/malformed. Callers batch this — this function never reads Firestore itself. */
   assigneeCandidate: WorkspaceReviewCandidate | null;
+  /** Order B, Stage B2 — the report-review submitter, if this is a report-review run. */
+  submitterUid?: string | null;
 }
 
 function deriveAssignmentSummary(input: AssignmentSummaryInput): { assignedReviewerUserId: string | null; dueAt: string | null; state: ReviewQueueAssignmentState } {
@@ -150,7 +182,7 @@ function deriveAssignmentSummary(input: AssignmentSummaryInput): { assignedRevie
   return {
     assignedReviewerUserId: input.assignment.assignedReviewerUserId,
     dueAt,
-    state: eligibility.eligible ? "actionable" : "stale",
+    state: eligibility.eligible && !(input.submitterUid && input.assignment.assignedReviewerUserId === input.submitterUid) ? "actionable" : "stale",
   };
 }
 
@@ -275,7 +307,7 @@ async function scanStatusView(args: {
               ? (rawAssignment as AdaptiveHumanReviewAssignmentV1 & { assignedReviewerUserId: string })
               : null;
           const assigneeCandidate = assignment ? (membershipByUid.get(assignment.assignedReviewerUserId) ?? null) : null;
-          const assignmentSummary = deriveAssignmentSummary({ runId: doc.id, workspaceId: args.workspaceId, creatorUid: revalidated.creatorUid, assignment, assigneeCandidate });
+          const assignmentSummary = deriveAssignmentSummary({ runId: doc.id, workspaceId: args.workspaceId, creatorUid: revalidated.creatorUid, assignment, assigneeCandidate, submitterUid: revalidated.reportReview?.submitterUid ?? null });
           // Reflects real overdue state on EVERY view's row (a single
           // stable DTO shape, §31) — not only the dedicated `overdue`
           // view, which additionally uses this as its own inclusion
@@ -295,6 +327,7 @@ async function scanStatusView(args: {
               assignment: { ...assignmentSummary, assignedReviewerDisplayName: null },
               isAssignedToMe: assignmentSummary.assignedReviewerUserId === args.uid && assignmentSummary.state === "actionable",
               isOverdue,
+              ...(revalidated.reportReview ? { recordKind: "report_review" as const } : {}),
             });
           }
         }
@@ -378,6 +411,7 @@ async function scanAssignedToMe(args: {
 
         const eligibility = isValidAssignmentTarget({ candidate: args.callerCandidate, runWorkspaceId: args.workspaceId, creatorUid: revalidated.creatorUid });
         if (!eligibility.eligible) continue; // stale/self-review — never shown as actionable "assigned to me"
+        if (isReportReviewSubmitter(revalidated, args.uid)) continue; // Order B, Stage B2 — submitter never reviews
 
         const dueAt = typeof assignment.dueAt === "string" && isCanonicalDueAt(assignment.dueAt) ? assignment.dueAt : null;
         if (validRows.length < args.limit) {
@@ -392,6 +426,7 @@ async function scanAssignedToMe(args: {
             assignment: { assignedReviewerUserId: args.uid, assignedReviewerDisplayName: null, dueAt, state: "actionable" },
             isAssignedToMe: true,
             isOverdue: dueAt !== null && Date.parse(dueAt) < Date.now(),
+            ...(revalidated.reportReview ? { recordKind: "report_review" as const } : {}),
           });
         }
         if (validRows.length >= args.limit) break;
@@ -469,6 +504,7 @@ async function scanOverdue(args: {
         const candidate = membershipByUid.get(assignment.assignedReviewerUserId) ?? null;
         const eligibility = isValidAssignmentTarget({ candidate, runWorkspaceId: args.workspaceId, creatorUid: revalidated.creatorUid });
         if (!eligibility.eligible) continue;
+        if (isReportReviewSubmitter(revalidated, assignment.assignedReviewerUserId)) continue; // Order B, Stage B2
 
         if (validRows.length < args.limit) {
           validRows.push({
@@ -482,6 +518,7 @@ async function scanOverdue(args: {
             assignment: { assignedReviewerUserId: assignment.assignedReviewerUserId, assignedReviewerDisplayName: null, dueAt: assignment.dueAt, state: "actionable" },
             isAssignedToMe: assignment.assignedReviewerUserId === args.uid,
             isOverdue: true,
+            ...(revalidated.reportReview ? { recordKind: "report_review" as const } : {}),
           });
         }
         if (validRows.length >= args.limit) break;
@@ -501,8 +538,184 @@ function cursorIso(sort: ReviewQueueCursor["sort"]): string {
   return sort.kind === "iso" ? sort.value : new Date(0).toISOString();
 }
 
-function encodeCursorFor(workspaceId: string, view: ReviewQueueView, projectFilter: string | null | undefined, sort: ReviewQueueCursor["sort"], docPath: string): string {
-  return encodeReviewQueueCursor({ workspaceId, view, projectFilter, sort, docPath });
+function encodeCursorFor(workspaceId: string, view: ReviewQueueView, projectFilter: string | null | undefined, sort: ReviewQueueCursor["sort"], docPath: string, merged = false): string {
+  return encodeReviewQueueCursor({ workspaceId, view, projectFilter, sort, docPath, ...(merged ? { merged: true } : {}) });
+}
+
+// ============================================
+// Order B, Stage B2 — MERGED status views (governed + report-review streams)
+//
+// Two queries over the same `runs` collection with mutually exclusive predicates (a run never holds both records —
+// the B1 invariant; a run that somehow does is dropped by revalidateRun) and ONE total order: the view's sort value
+// (createdAt, or the stream's own humanReview.reviewedAt ISO string) descending, then document id descending.
+//
+// Frontier rule (design rev 5 §5, verified): a buffered row may be CONSUMED only if every stream that is not exhausted
+// has already fetched at or past it in queue order. The cursor is the last CONSUMED position (never "last emitted"),
+// so rows dropped by revalidation still advance it. A stream is refetched only when its buffer is empty, from the
+// cursor. Hence: no row is skipped, none is emitted twice, and the pager always advances.
+// ============================================
+
+type MergedSort = { kind: "timestamp"; seconds: number; nanoseconds: number } | { kind: "iso"; value: string };
+interface MergedPos {
+  sort: MergedSort;
+  docId: string;
+}
+interface StreamState {
+  name: "governance" | "report_review";
+  statusField: string;
+  orderField: string;
+  buffer: { doc: FirebaseFirestore.QueryDocumentSnapshot; pos: MergedPos }[];
+  lastFetched: MergedPos | null;
+  exhausted: boolean;
+}
+
+function byteCompare(a: string, b: string): number {
+  return Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
+}
+
+/** Negative when `a` comes BEFORE `b` in queue order (sort value desc, then document id desc). */
+export function compareMergedQueueOrder(a: MergedPos, b: MergedPos): number {
+  let c = 0;
+  if (a.sort.kind === "timestamp" && b.sort.kind === "timestamp") c = a.sort.seconds - b.sort.seconds || a.sort.nanoseconds - b.sort.nanoseconds;
+  else if (a.sort.kind === "iso" && b.sort.kind === "iso") c = byteCompare(a.sort.value, b.sort.value);
+  if (c !== 0) return -c; // descending
+  return -byteCompare(a.docId, b.docId);
+}
+
+/**
+ * The row's sort value. Firestore orders mixed value TYPES by type, which this comparator does not model, so a sort
+ * value of an unexpected type fails the page explicitly (500) instead of being mis-ordered. Production writes
+ * createdAt as a Timestamp and reviewedAt as an ISO string.
+ */
+function mergedSortOf(kind: "timestamp" | "iso", data: Record<string, unknown>, orderField: string): MergedSort {
+  if (kind === "timestamp") {
+    const v = data.createdAt;
+    if (!(v instanceof Timestamp)) throw new Error("merged queue: non-Timestamp createdAt");
+    return { kind: "timestamp", seconds: v.seconds, nanoseconds: v.nanoseconds };
+  }
+  const [root] = orderField.split(".");
+  const hr = (data[root] as Record<string, unknown> | undefined)?.humanReview as Record<string, unknown> | undefined;
+  if (typeof hr?.reviewedAt !== "string") throw new Error("merged queue: non-string reviewedAt");
+  return { kind: "iso", value: hr.reviewedAt };
+}
+
+const MERGED_ORDER_FIELDS: Record<"needs_review" | "changes_requested" | "recently_approved", { governance: string; report_review: string }> = {
+  needs_review: { governance: "createdAt", report_review: "createdAt" },
+  changes_requested: { governance: "governanceRecord.humanReview.reviewedAt", report_review: "reportReview.humanReview.reviewedAt" },
+  recently_approved: { governance: "governanceRecord.humanReview.reviewedAt", report_review: "reportReview.humanReview.reviewedAt" },
+};
+
+
+async function scanStatusViewMerged(args: {
+  view: "needs_review" | "changes_requested" | "recently_approved";
+  workspaceId: string;
+  uid: string;
+  projectFilter: string | null | undefined;
+  limit: number;
+  cursor: ReviewQueueCursor | null;
+}): Promise<ReviewQueueResult> {
+  if (!adminDb) return { status: "query_failed" };
+  const spec = STATUS_VIEW_SPECS[args.view];
+  const fields = MERGED_ORDER_FIELDS[args.view];
+  const streams: StreamState[] = [
+    { name: "governance", statusField: "governanceRecord.humanReview.status", orderField: fields.governance, buffer: [], lastFetched: null, exhausted: false },
+    { name: "report_review", statusField: "reportReview.humanReview.status", orderField: fields.report_review, buffer: [], lastFetched: null, exhausted: false },
+  ];
+  let pos: MergedPos | null = args.cursor ? { sort: args.cursor.sort, docId: args.cursor.docPath } : null;
+  const batchSize = args.limit + 1;
+  const validRows: ReviewQueueRow[] = [];
+  const assignmentsByRunId = new Map<string, AdaptiveHumanReviewAssignmentV1 | undefined>();
+  const membershipByUid = new Map<string, WorkspaceReviewCandidate>();
+
+  async function fetchStream(st: StreamState): Promise<void> {
+    let query: FirebaseFirestore.Query = adminDb!.collection("runs").where("workspaceId", "==", args.workspaceId);
+    query = spec.statuses.length === 1 ? query.where(st.statusField, "==", spec.statuses[0]) : query.where(st.statusField, "in", spec.statuses);
+    if (args.projectFilter !== undefined) query = query.where("projectId", "==", args.projectFilter);
+    query = query.orderBy(st.orderField, "desc").orderBy(FieldPath.documentId(), "desc");
+    if (pos) query = query.startAfter(pos.sort.kind === "timestamp" ? new Timestamp(pos.sort.seconds, pos.sort.nanoseconds) : pos.sort.value, pos.docId);
+    const snap = await query.limit(batchSize).get();
+    if (snap.docs.length < batchSize) st.exhausted = true;
+    for (const d of snap.docs) st.buffer.push({ doc: d, pos: { sort: mergedSortOf(spec.sortKind, d.data(), st.orderField), docId: d.id } });
+    if (snap.docs.length > 0) st.lastFetched = st.buffer[st.buffer.length - 1].pos;
+    // Batched lookups for this fetch (one getAll each), as in the single-stream scan.
+    const ids = snap.docs.map((d) => d.id).filter((id) => !assignmentsByRunId.has(id));
+    const loaded = await batchLoadAssignments(ids);
+    for (const id of ids) assignmentsByRunId.set(id, loaded.get(id));
+    const uids = ids.map((id) => assignmentsByRunId.get(id)?.assignedReviewerUserId).filter((u): u is string => typeof u === "string" && u.length > 0 && !membershipByUid.has(u));
+    const members = await batchLoadMembershipCandidates(args.workspaceId, uids);
+    for (const [u, m] of members) membershipByUid.set(u, m);
+  }
+
+  try {
+    const MAX_FETCHES = MAX_SCAN_ROUNDS * 2;
+    let fetches = 0;
+    for (;;) {
+      if (validRows.length >= args.limit) break;
+      // Refill: only a stream whose buffer is empty, and not exhausted, is fetched (from the consumed position).
+      const needing = streams.filter((st) => st.buffer.length === 0 && !st.exhausted);
+      if (needing.length > 0) {
+        if (fetches + needing.length > MAX_FETCHES) break;
+        for (const st of needing) await fetchStream(st);
+        fetches += needing.length;
+      }
+      // Frontier: the earliest (in queue order) last-fetched position among non-exhausted streams.
+      const open = streams.filter((st) => !st.exhausted);
+      const frontier = open.length === 0 ? null : open.map((st) => st.lastFetched).reduce<MergedPos | null>((m, p) => (p === null ? m : m === null || compareMergedQueueOrder(p, m) < 0 ? p : m), null);
+      // Next candidate in merged order.
+      const heads = streams.filter((st) => st.buffer.length > 0);
+      if (heads.length === 0) {
+        if (streams.every((st) => st.exhausted)) break;
+        continue; // a non-exhausted stream with an empty buffer is refilled at the top of the loop
+      }
+      const head = heads.reduce((a, b) => (compareMergedQueueOrder(a.buffer[0].pos, b.buffer[0].pos) <= 0 ? a : b));
+      const next = head.buffer[0];
+      // Defensive (mutation-tested as equivalent): every non-exhausted stream was refilled above, so its buffer is
+      // non-empty and `next` (the minimum head) is never past the frontier. Kept so a future loop change fails safe.
+      if (frontier !== null && compareMergedQueueOrder(next.pos, frontier) > 0) {
+        // Cannot consume past a stream that has not fetched this far: refill that stream (its buffer must be empty).
+        if (streams.some((st) => !st.exhausted && st.buffer.length === 0)) continue;
+        break; // defensive: unreachable by construction
+      }
+      head.buffer.shift();
+      pos = next.pos; // consumed
+      const data = next.doc.data();
+      const revalidated = revalidateRun(next.doc.id, args.workspaceId, data);
+      // Defensive (mutation-tested as equivalent): revalidateRun already drops any run whose records disagree with the
+      // stream that fetched it (both records, or a malformed governed record beside a report review).
+      const kindMatches = revalidated && ((head.name === "report_review") === (revalidated.reportReview !== undefined));
+      if (revalidated && kindMatches && spec.statuses.includes(revalidated.humanReview.status)) {
+        const rawAssignment = assignmentsByRunId.get(next.doc.id);
+        const assignment =
+          rawAssignment && typeof rawAssignment.assignedReviewerUserId === "string" && rawAssignment.assignedReviewerUserId.length > 0
+            ? (rawAssignment as AdaptiveHumanReviewAssignmentV1 & { assignedReviewerUserId: string })
+            : null;
+        const assigneeCandidate = assignment ? (membershipByUid.get(assignment.assignedReviewerUserId) ?? null) : null;
+        const summary = deriveAssignmentSummary({ runId: next.doc.id, workspaceId: args.workspaceId, creatorUid: revalidated.creatorUid, assignment, assigneeCandidate, submitterUid: revalidated.reportReview?.submitterUid ?? null });
+        const isOverdue = summary.state === "actionable" && summary.dueAt !== null && Date.parse(summary.dueAt) < Date.now();
+        validRows.push({
+          runId: revalidated.runId,
+          workspaceId: revalidated.workspaceId,
+          projectId: revalidated.projectId,
+          runLabel: revalidated.runLabel,
+          reviewStatus: revalidated.humanReview.status,
+          createdAt: revalidated.createdAt,
+          reviewedAt: revalidated.humanReview.reviewedAt ?? null,
+          assignment: { ...summary, assignedReviewerDisplayName: null },
+          isAssignedToMe: summary.assignedReviewerUserId === args.uid && summary.state === "actionable",
+          isOverdue,
+          ...(revalidated.reportReview ? { recordKind: "report_review" as const } : {}),
+        });
+      }
+    }
+
+    const hasMore = streams.some((st) => !st.exhausted || st.buffer.length > 0);
+    const nextCursor = hasMore && pos ? encodeCursorFor(args.workspaceId, args.view, args.projectFilter, pos.sort, pos.docId, true) : undefined;
+    if (hasMore && !nextCursor) return { status: "query_failed" }; // explicit error, never a silently truncated page
+    return { status: "ok", items: validRows, hasMore, ...(nextCursor ? { nextCursor } : {}) };
+  } catch (err) {
+    logger.warn("[workspaces/reviewQueue] merged status-view query failed", { view: args.view, workspaceId: args.workspaceId, error: err instanceof Error ? err.message : String(err) });
+    return { status: "query_failed" };
+  }
 }
 
 // ============================================
@@ -555,7 +768,9 @@ export async function getReviewQueue(args: {
     case "needs_review":
     case "changes_requested":
     case "recently_approved":
-      result = await scanStatusView({ view: args.view, workspaceId: args.workspaceId, uid: args.uid, projectFilter: args.projectFilter, limit: args.limit, cursor: args.cursor });
+      result = REPORT_REVIEW_ENABLED
+        ? await scanStatusViewMerged({ view: args.view, workspaceId: args.workspaceId, uid: args.uid, projectFilter: args.projectFilter, limit: args.limit, cursor: args.cursor })
+        : await scanStatusView({ view: args.view, workspaceId: args.workspaceId, uid: args.uid, projectFilter: args.projectFilter, limit: args.limit, cursor: args.cursor });
       break;
     case "assigned_to_me":
       result = await scanAssignedToMe({ workspaceId: args.workspaceId, uid: args.uid, callerCandidate: args.callerCandidate, projectFilter: args.projectFilter, limit: args.limit, cursor: args.cursor });

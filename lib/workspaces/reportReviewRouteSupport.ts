@@ -26,10 +26,10 @@ export function concealed(): NextResponse {
   return NextResponse.json(body, { status });
 }
 
-export async function reportReviewCaller(req: NextRequest, route: string): Promise<string | NextResponse> {
+export async function reportReviewCaller(req: NextRequest, route: string, method: "GET" | "POST" = "POST"): Promise<string | NextResponse> {
   const identity = await resolveRequestIdentity(req);
   if (identity.status !== "authenticated") {
-    logIdentityResolutionFailure({ route, method: "POST", failureCategory: identity.reason });
+    logIdentityResolutionFailure({ route, method, failureCategory: identity.reason });
     if (identity.reason === "missing_credentials") return reportReviewErrorBody(401, "unauthorized", "Please sign in.");
     return reportReviewErrorBody(401, "auth_error", "Authentication failed.");
   }

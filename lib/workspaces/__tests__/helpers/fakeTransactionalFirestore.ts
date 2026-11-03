@@ -61,6 +61,116 @@ export class FirestoreError extends Error {
 
 let autoId = 0;
 
+// ---------------------------------------------------------------------------------------------------------------------
+// Queries (B2): where (==, in, <) on dotted paths, orderBy (incl. documentId), startAfter(values), limit, collectionGroup.
+// Ordering matches Firestore for the value kinds used here: Timestamp by (seconds, nanos); strings and document keys by
+// UTF-8 bytes; documentId on a collection query = the bare id, on a collection-group query = the full path.
+// ---------------------------------------------------------------------------------------------------------------------
+const DOC_ID = "__name__";
+type Source = { kind: "collection"; path: string } | { kind: "group"; id: string };
+type Where = { field: string; op: "==" | "in" | "<"; value: unknown };
+type Order = { field: string; dir: "asc" | "desc" };
+
+function nested(data: Data, path: string): unknown {
+  let cur: unknown = data;
+  for (const seg of path.split(".")) {
+    if (cur === null || typeof cur !== "object") return undefined;
+    cur = (cur as Data)[seg];
+  }
+  return cur;
+}
+function isTimestampLike(v: unknown): v is { seconds: number; nanoseconds: number } {
+  return typeof v === "object" && v !== null && typeof (v as { seconds?: unknown }).seconds === "number" && typeof (v as { nanoseconds?: unknown }).nanoseconds === "number";
+}
+function cmpValue(a: unknown, b: unknown): number {
+  if (isTimestampLike(a) && isTimestampLike(b)) return a.seconds - b.seconds || a.nanoseconds - b.nanoseconds;
+  if (typeof a === "string" && typeof b === "string") return Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  return 0;
+}
+function fieldName(f: unknown): string {
+  if (typeof f === "string") return f;
+  const str = String(f);
+  return str === "__name__" || str.includes("__name__") ? DOC_ID : str;
+}
+
+export class FakeQueryBase {
+  constructor(
+    protected db: FakeTransactionalFirestore,
+    protected source: Source,
+    protected wheres: Where[],
+    protected orders: Order[],
+    protected after: unknown[] | null,
+    protected max: number
+  ) {}
+  protected next(p: Partial<{ wheres: Where[]; orders: Order[]; after: unknown[] | null; max: number }>): FakeQueryBase {
+    return new FakeQueryBase(this.db, this.source, p.wheres ?? this.wheres, p.orders ?? this.orders, p.after !== undefined ? p.after : this.after, p.max ?? this.max);
+  }
+  where(field: unknown, op: "==" | "in" | "<", value: unknown) {
+    return this.next({ wheres: [...this.wheres, { field: fieldName(field), op, value }] });
+  }
+  orderBy(field: unknown, dir: "asc" | "desc" = "asc") {
+    return this.next({ orders: [...this.orders, { field: fieldName(field), dir }] });
+  }
+  startAfter(...values: unknown[]) {
+    return this.next({ after: values });
+  }
+  limit(n: number) {
+    return this.next({ max: n });
+  }
+  select() {
+    return this;
+  }
+  private members(): string[] {
+    const all = Array.from(this.db.docs.keys());
+    if (this.source.kind === "collection") {
+      const prefix = `${this.source.path}/`;
+      return all.filter((p) => p.startsWith(prefix) && !p.slice(prefix.length).includes("/"));
+    }
+    const id = this.source.id;
+    return all.filter((p) => {
+      const parts = p.split("/");
+      return parts.length >= 2 && parts[parts.length - 2] === id;
+    });
+  }
+  async get() {
+    const keyOf = (path: string) => (this.source.kind === "group" ? path : path.split("/").pop()!);
+    const val = (path: string, data: Data, field: string) => (field === DOC_ID ? keyOf(path) : nested(data, field));
+    let rows = this.members()
+      .map((path) => ({ path, data: this.db.docs.get(path)!.data }))
+      .filter(({ path, data }) =>
+        this.wheres.every((w) => {
+          const v = val(path, data, w.field);
+          if (w.op === "==") return v === w.value || (isTimestampLike(v) && isTimestampLike(w.value) && cmpValue(v, w.value) === 0);
+          if (w.op === "in") return Array.isArray(w.value) && w.value.includes(v);
+          return v !== undefined && cmpValue(v, w.value) < 0 && typeof v === typeof w.value;
+        })
+      );
+    // Firestore only returns documents that HAVE every orderBy field.
+    rows = rows.filter(({ path, data }) => this.orders.every((o) => val(path, data, o.field) !== undefined));
+    const cmpRow = (a: { path: string; data: Data }, b: { path: string; data: Data }) => {
+      for (const o of this.orders) {
+        const c = cmpValue(val(a.path, a.data, o.field), val(b.path, b.data, o.field)) * (o.dir === "desc" ? -1 : 1);
+        if (c !== 0) return c;
+      }
+      return 0;
+    };
+    rows.sort(cmpRow);
+    if (this.after) {
+      const after = this.after;
+      rows = rows.filter((r) => {
+        for (let i = 0; i < this.orders.length; i++) {
+          const c = cmpValue(val(r.path, r.data, this.orders[i].field), after[i]) * (this.orders[i].dir === "desc" ? -1 : 1);
+          if (c !== 0) return c > 0;
+        }
+        return false;
+      });
+    }
+    rows = rows.slice(0, this.max);
+    return { docs: rows.map((r) => this.db.snapshot(r.path)), empty: rows.length === 0, size: rows.length };
+  }
+}
+
 export class FakeDocRef {
   constructor(
     private db: FakeTransactionalFirestore,
@@ -93,13 +203,20 @@ export class FakeDocRef {
   }
 }
 
-export class FakeCollectionRef {
+export class FakeCollectionRef extends FakeQueryBase {
   constructor(
-    private db: FakeTransactionalFirestore,
+    db: FakeTransactionalFirestore,
     public path: string
-  ) {}
+  ) {
+    super(db, { kind: "collection", path }, [], [], null, Infinity);
+  }
   doc(id?: string) {
     return new FakeDocRef(this.db, `${this.path}/${id ?? `auto${++autoId}`}`);
+  }
+  /** The document this collection belongs to (null for a root collection). */
+  get parent(): FakeDocRef | null {
+    const parts = this.path.split("/");
+    return parts.length < 2 ? null : new FakeDocRef(this.db, parts.slice(0, -1).join("/"));
   }
 }
 
@@ -141,6 +258,9 @@ export class FakeTransactionalFirestore {
 
   collection(name: string) {
     return new FakeCollectionRef(this, name);
+  }
+  collectionGroup(id: string) {
+    return new FakeQueryBase(this, { kind: "group", id }, [], [], null, Infinity);
   }
   doc(path: string) {
     return new FakeDocRef(this, path);

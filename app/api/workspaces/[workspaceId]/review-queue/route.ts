@@ -35,6 +35,7 @@ import { teamRunAccessDeniedResponse, teamRunWorkspaceNotFoundConcealedResponse,
 import { internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
 import { decodeReviewQueueCursor, type ReviewQueueView } from "@/lib/workspaces/reviewQueueCursor";
 import { getReviewQueue } from "@/lib/workspaces/reviewQueue";
+import { isMergedReviewQueueView } from "@/lib/workspaces/reviewQueueMode";
 import type { WorkspaceReviewCandidate } from "@/lib/workspaces/workspaceReviewEligibility";
 
 export const runtime = "nodejs";
@@ -139,7 +140,7 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
     // unvalidated cross-context `startAfter()` position is still the
     // wrong contract: it could silently skip a prefix of, or falsely
     // exhaust, the requesting Workspace's own correctly-scoped results).
-    if (decoded.cursor.workspaceId !== workspaceId || decoded.cursor.view !== view || decoded.cursor.projectFilter !== projectFilter) {
+    if (decoded.cursor.workspaceId !== workspaceId || decoded.cursor.view !== view || decoded.cursor.projectFilter !== projectFilter || (decoded.cursor.merged === true) !== isMergedReviewQueueView(view)) {
       return NextResponse.json({ ok: false, errorCode: "invalid_cursor", message: "This page link is no longer valid." }, { status: 400 });
     }
     cursor = decoded.cursor;
