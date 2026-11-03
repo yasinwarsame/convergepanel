@@ -47,8 +47,19 @@ A member of the trial Workspace gets nothing in another Workspace: the route, mu
 
 Governed review never consults the rule.
 
-## Audit Log projection: owner decision OD-B-1
+## Audit Log after rollback (owner ruling, 2026-11-03)
 
-Report-review rows are written only while the target Workspace is listed, so an unlisted Workspace can hold report-review Audit Log rows only from an earlier, since-rolled-back trial. This PR **keeps those rows visible** in the Workspace Audit Log. Hiding audit history when a feature is switched off would defeat the purpose of an audit trail. Tests check that unlisted Workspaces never receive new rows.
+A rollback (switch off, or the trial Workspace removed from the allow-list) stops **new** report-review operations:
+- submission, decisions and resubmission are refused;
+- a reviewer assignment becomes an ordinary assignment and writes no report-review audit row.
 
-If the owner prefers the Audit Log projection to follow the allow-list too, that is a one-line reader change. It is listed as an owner decision rather than built, because it would hide existing audit records.
+It does **not** erase evidence. Existing report-review Audit Log rows stay visible, byte-identical, to users authorized to read that Workspace's Audit Log (`audit.read`).
+
+Privacy and authorization boundaries are unchanged:
+- A removed member loses Audit Log and report-review access.
+- Another Workspace never sees the rows.
+- Rows carry only the question snapshot, statuses, cycle and display names. They never include the purpose note, conditions or reviewer comments.
+
+When research is deleted, the deletion workflow in #287 (S1) redacts the question snapshot in these rows. They then show as "[deleted research]" and are kept, never dropped.
+
+Tested in `reportReviewActivation.spec.ts`. The existing code already satisfied the ruling, so no implementation change was needed.

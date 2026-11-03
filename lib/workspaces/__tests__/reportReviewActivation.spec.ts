@@ -52,6 +52,7 @@ import { POST as submitPost, GET as contextGet } from "@/app/api/workspaces/[wor
 import { POST as decisionPost } from "@/app/api/workspaces/[workspaceId]/runs/[runId]/report-review/decision/route";
 import { POST as resubmitPost } from "@/app/api/workspaces/[workspaceId]/runs/[runId]/report-review/resubmit/route";
 import { GET as exportGet } from "@/app/api/workspaces/[workspaceId]/runs/[runId]/report-review/export/route";
+import { GET as auditGet } from "@/app/api/workspaces/[workspaceId]/audit-events/route";
 
 const T = "wsTrial";
 const O = "wsOther";
@@ -294,5 +295,64 @@ describe("UI and API agree", () => {
       .map((f) => path.relative(root, f))
       .sort();
     expect(readers).toEqual(["lib/workspaces/reportReviewActivation.ts", "lib/workspaces/reportReviewRollout.ts"]);
+  });
+});
+
+describe("owner ruling (Order B): rollback stops NEW report-review operations but never erases audit evidence", () => {
+  const auditAs = async (uid: string, ws: string) => {
+    identity.uid = uid;
+    const res = await auditGet(new NextRequest(`http://localhost/api/workspaces/${ws}/audit-events`), { params: { workspaceId: ws } });
+    return { status: res.status, body: res.status === 200 ? await res.json() : null };
+  };
+  async function reviewedInTrial() {
+    const sub = await submitReportReview({ uid: MEMBER, workspaceId: T, runId: "rT", purpose: { code: "client_delivery", note: "PURPOSE-NOTE" } });
+    if (!sub.ok) throw new Error("submit");
+    await putWorkspaceReviewAssignment({ uid: OWNER, workspaceId: T, runId: "rT", assignedReviewerUserId: REVIEWER, expectedRevision: 0, dueAt: null });
+    await decideReportReview({ uid: REVIEWER, workspaceId: T, runId: "rT", decision: { status: "approved_with_conditions", conditions: ["CONDITION-TEXT"], comment: "PRIVATE-COMMENT" }, expectedCycle: 1, expectedUpdatedAt: sub.record.updatedAt });
+  }
+  const rrTypes = (body: { events: { eventType: string }[] }) => body.events.map((e) => e.eventType).filter((t) => t.startsWith("workspace_report_review_"));
+
+  it.each([
+    ["switch turned off", () => (cfg.enabled = false)],
+    ["trial Workspace removed from the allow-list", () => (cfg.list = [])],
+  ])("%s: the same report-review rows stay visible to authorized auditors; new operations are refused", async (_l, rollback) => {
+    await reviewedInTrial();
+    const before = await auditAs(OWNER, T);
+    expect(before.status).toBe(200);
+    const kinds = rrTypes(before.body);
+    expect(kinds).toEqual(["workspace_report_review_decided", "workspace_report_review_reviewer_changed", "workspace_report_review_submitted"]);
+    rollback();
+    const after = await auditAs(OWNER, T);
+    expect(after.status).toBe(200);
+    expect(JSON.stringify(after.body.events)).toBe(JSON.stringify(before.body.events)); // identical evidence after rollback
+    expect(await submitReportReview({ uid: MEMBER, workspaceId: T, runId: "rT", purpose: { code: "other" } })).toEqual({ ok: false, reason: "disabled" });
+    expect(await decideReportReview({ uid: REVIEWER, workspaceId: T, runId: "rT", decision: { status: "approved" }, expectedCycle: 1, expectedUpdatedAt: "x" })).toEqual({ ok: false, reason: "disabled" });
+    expect(await resubmitReportReview({ uid: MEMBER, workspaceId: T, runId: "rT", purpose: { code: "other" }, expectedCycle: 1 })).toEqual({ ok: false, reason: "disabled" });
+    // A reviewer assignment after rollback is an ordinary governed-style assignment: no report-review audit row.
+    const n = auditRows(T).length;
+    await putWorkspaceReviewAssignment({ uid: OWNER, workspaceId: T, runId: "rT", assignedReviewerUserId: MEMBER, expectedRevision: 1, dueAt: null });
+    expect(auditRows(T).length).toBe(n);
+  });
+
+  it("audit rows never expose review content: no purpose note, conditions or reviewer comment — only the question snapshot, statuses and names", async () => {
+    await reviewedInTrial();
+    const { body } = await auditAs(OWNER, T);
+    const text = JSON.stringify(body.events);
+    for (const secret of ["PURPOSE-NOTE", "CONDITION-TEXT", "PRIVATE-COMMENT", "answer"]) expect(text).not.toContain(secret);
+    // Deleted research: the research-deletion workflow (PR #287, S1) redacts the question snapshot in these rows
+    // (runQuestion → null, shown as "[deleted research]"); that behaviour and its tests live in #287.
+  });
+
+  it("removed membership: a removed member can no longer read the Audit Log or use report review; other Workspaces never see the rows", async () => {
+    await reviewedInTrial();
+    const id = computeMembershipId(T, OWNER);
+    db.seed(`workspaceMemberships/${id}`, { ...db.read(`workspaceMemberships/${id}`)!, status: "removed", removedAt: NOW, removedByUserId: "uid-x" });
+    expect((await auditAs(OWNER, T)).status).not.toBe(200);
+    identity.uid = OWNER;
+    expect((await contextGet(new NextRequest(base(T, "rT")), params(T, "rT"))).status).toBe(404);
+    // The same caller, in the OTHER Workspace where they are still an owner: none of the trial Workspace's rows appear.
+    const other = await auditAs(OWNER, O);
+    expect(other.status).toBe(200);
+    expect(rrTypes(other.body)).toEqual([]);
   });
 });
