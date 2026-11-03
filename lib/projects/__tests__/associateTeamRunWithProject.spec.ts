@@ -67,6 +67,8 @@ function makeDocRef(collectionName: string, docId: string) {
   return {
     __collection: collectionName,
     __id: docId,
+    // A real DocumentReference exposes its `id`. The deletion barrier (review M-1) identifies the run by it.
+    id: docId,
     // Phase 9B.2 — subcollection chaining, needed only for
     // `runs/{runId}/humanReviewAssignment|humanReviewPanel/current`. Both
     // are single-fixed-ID ("current") subcollections, so the sub-doc ref is
@@ -1055,5 +1057,24 @@ describe("Phase 9B.2 — active Workspace-review projection sync (Step 9)", () =
     await call({ targetProjectId: PROJECT_ID_2, expectedProjectId: PROJECT_ID });
 
     expect(stores.humanReviewAssignment.get(RUN_ID)?.projectId).toBe(PROJECT_ID); // untouched
+  });
+});
+
+
+describe("research deletion integrity (review M-1)", () => {
+  it("a run whose deletion has started (tombstone) is run_not_found and unchanged; control: associated without it", async () => {
+    seedRun({ projectId: null });
+    seedProject(PROJECT_ID);
+    stores.runDeletionJobs.set(RUN_ID, asPersisted({ state: "in_progress" }));
+    const before = JSON.stringify(stores.runs.get(RUN_ID));
+    expect((await call({ targetProjectId: PROJECT_ID })).status).toBe("run_not_found");
+    expect(JSON.stringify(stores.runs.get(RUN_ID))).toBe(before);
+    stores.runDeletionJobs.delete(RUN_ID);
+    expect((await call({ targetProjectId: PROJECT_ID })).status).toBe("associated");
+  });
+  it("a run marked for deletion is run_not_found", async () => {
+    seedRun({ projectId: null, deletion: { state: "pending" } });
+    seedProject(PROJECT_ID);
+    expect((await call({ targetProjectId: PROJECT_ID })).status).toBe("run_not_found");
   });
 });

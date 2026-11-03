@@ -69,6 +69,8 @@ function makeDocRef(collectionName: string, docId: string) {
   return {
     __collection: collectionName,
     __id: docId,
+    // A real DocumentReference exposes its `id`. The deletion barrier (review M-1) identifies the run by it.
+    id: docId,
     collection: (subCollectionName: string) => ({
       doc: (_subDocId: string) => makeSubDocRef(subCollectionName, docId),
     }),
@@ -392,6 +394,17 @@ describe("putWorkspaceReviewAssignment — infra/rollout", () => {
   it("Firestore unavailable -> denied", async () => {
     firestoreUnavailableFlag.value = true;
     expect(await putCall()).toEqual({ ok: false, reason: "firestore_unavailable" });
+  });
+});
+
+describe("putWorkspaceReviewAssignment — research deletion integrity (review M-1)", () => {
+  it("a run whose deletion has started (tombstone) is run_not_found and nothing is written; control: allowed without it", async () => {
+    stores.runDeletionJobs.set(RUN_ID, asPersisted({ state: "in_progress" }));
+    const before = JSON.stringify(Object.fromEntries(Object.entries(stores).map(([k, m]) => [k, [...m.entries()]])));
+    expect(await putCall()).toEqual(expect.objectContaining({ ok: false, reason: "run_not_found" }));
+    expect(JSON.stringify(Object.fromEntries(Object.entries(stores).map(([k, m]) => [k, [...m.entries()]])))).toBe(before);
+    stores.runDeletionJobs.delete(RUN_ID);
+    expect((await putCall()).ok).toBe(true);
   });
 });
 

@@ -673,6 +673,8 @@ function makeDocRef(collectionName: string, docId: string) {
   const ref = {
     __collection: collectionName,
     __id: docId,
+    // A real DocumentReference exposes its `id`. The deletion barrier (review M-1) identifies the run by it.
+    id: docId,
     __path: `${collectionName}/${docId}`,
     collection: (subCollectionName: string) => failClosedSurface({
       // Phase 9C.5 — `.doc()` with no argument mirrors real Firestore's
@@ -1307,6 +1309,20 @@ describe("putWorkspaceReviewPanel — infra/rollout", () => {
     const result = await putCall();
     expect(result).toEqual({ ok: false, reason: "team_workspaces_disabled" });
     expect(mockAdminDb.runTransaction).not.toHaveBeenCalled();
+  });
+});
+
+describe("putWorkspaceReviewPanel — research deletion integrity (review M-1)", () => {
+  it("a run whose deletion has started (tombstone) is run_not_found and no panel is written; control: allowed without it", async () => {
+    stores.runDeletionJobs.set(RUN_ID, asPersisted({ state: "in_progress" }));
+    expect(await putCall()).toEqual({ ok: false, reason: "run_not_found" });
+    expect(stores.humanReviewPanel?.size ?? 0).toBe(0);
+    stores.runDeletionJobs.delete(RUN_ID);
+    expect((await putCall()).ok).toBe(true);
+  });
+  it("a run marked for deletion is run_not_found", async () => {
+    seedRun({ deletion: { state: "pending" } });
+    expect(await putCall()).toEqual({ ok: false, reason: "run_not_found" });
   });
 });
 
