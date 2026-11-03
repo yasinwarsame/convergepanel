@@ -199,7 +199,9 @@ describe("global audit list", () => {
     const refs = parentCalls[0].filter((a: any) => a && a.__path);
     expect(refs).toHaveLength(30);
     expect(refs.every((ref: any) => ref.__path.startsWith("verifications/"))).toBe(true);
-    expect(parentCalls[0][parentCalls[0].length - 1]).toEqual({ fieldMask: ["workspaceId"] });
+    // Governance audit trail fix (2026-11-04): `userId` joins the mask, in the SAME single batched call, so each kept
+    // row's trail availability comes from the parent's authoritative owner. Still one call, still 30 refs.
+    expect(parentCalls[0][parentCalls[0].length - 1]).toEqual({ fieldMask: ["userId", "workspaceId"] });
     const runCalls = runParentCalls();
     expect(runCalls).toHaveLength(1);
     expect(runCalls[0].filter((a: any) => a && a.__path)).toHaveLength(30);

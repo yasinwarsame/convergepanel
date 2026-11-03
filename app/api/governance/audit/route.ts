@@ -11,6 +11,7 @@ import {
   runOwnerVisibleInGovernance,
 } from "@/lib/governance/governanceVisibleUserIds";
 import { resolveGovernanceRequestUser } from "@/lib/governance/authCheck";
+import { governanceTrailAccessible } from "@/lib/governance/governanceTrailAccess";
 import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
 import { createRunWorkspaceIntegrityBatch } from "@/lib/workspaces/runWorkspaceIntegrityBatch";
 import { logger } from "@/lib/logger";
@@ -245,6 +246,12 @@ type AuditResponseEvent = Omit<AuditEvent, "byEmail" | "runOwnerUid" | "runOwner
   byEmail?: string;
   runOwnerEmail?: string;
   runOwnerIsViewer?: true;
+  /**
+   * Global list only: whether this row's trail can be opened by this viewer, decided by the SAME rule the drilldown
+   * enforces (`governanceTrailAccessible`, on the parent read by containment). Present on every parent-backed row;
+   * absent on policy rows, which have no trail.
+   */
+  trailAvailable?: boolean;
 };
 
 /**
@@ -420,7 +427,12 @@ function auditParentOf(e: AuditEvent): { kind: AuditParentKind; collection: stri
 
 async function excludeOutOfDomainAuditEvents(
   events: AuditEvent[]
-): Promise<{ events: AuditEvent[]; runParents: Map<string, Record<string, unknown> | null> }> {
+): Promise<{
+  events: AuditEvent[];
+  runParents: Map<string, Record<string, unknown> | null>;
+  /** Kept parents' authoritative owner, `String(userId ?? "")` exactly as the drilldown derives it; keyed `collection/runId`. */
+  parentOwners: Map<string, string>;
+}> {
   const db = adminDb;
   if (!db) throw new Error("no db");
   const parents = new Map<string, { kind: AuditParentKind; collection: string; runId: string }>();
@@ -431,10 +443,13 @@ async function excludeOutOfDomainAuditEvents(
 
   const allowedParents = new Set<string>();
   const runParents = new Map<string, Record<string, unknown> | null>();
+  const parentOwners = new Map<string, string>();
   const validateRun = createRunWorkspaceIntegrityBatch();
   for (const kind of ["verification", "run"] as const) {
     const entries = [...parents.entries()].filter(([, p]) => p.kind === kind);
-    const fieldMask = kind === "run" ? ["userId", "workspaceId"] : ["workspaceId"];
+    // `userId` is read for Claims/Videos too, in the SAME batched call, so each kept row's trail availability is decided
+    // from the parent's authoritative owner without a second read.
+    const fieldMask = ["userId", "workspaceId"];
     for (let i = 0; i < entries.length; i += AUDIT_PARENT_CLASSIFY_CHUNK) {
       const chunk = entries.slice(i, i + AUDIT_PARENT_CLASSIFY_CHUNK);
       const refs = chunk.map(([, p]) => db.collection(p.collection).doc(p.runId));
@@ -449,13 +464,20 @@ async function excludeOutOfDomainAuditEvents(
           if (!snap || snap.exists !== true) return;
           const data = snap.data();
           if (typeof data !== "object" || data === null) return;
+          const ownerUid = String((data as Record<string, unknown>).userId ?? "");
           if (kind === "verification") {
-            if (isPersonalVerificationArtifact(data)) allowedParents.add(key);
+            if (isPersonalVerificationArtifact(data)) {
+              allowedParents.add(key);
+              parentOwners.set(key, ownerUid);
+            }
             return;
           }
           runParents.set(p.runId, data as Record<string, unknown>);
           const integrity = await validateRun(data as Record<string, unknown>);
-          if (integrity.classification !== "invalid") allowedParents.add(key);
+          if (integrity.classification !== "invalid") {
+            allowedParents.add(key);
+            parentOwners.set(key, ownerUid);
+          }
         })
       );
     }
@@ -467,7 +489,27 @@ async function excludeOutOfDomainAuditEvents(
     if (parent === null) return false;
     return allowedParents.has(`${parent.collection}/${parent.runId}`);
   });
-  return { events: kept, runParents };
+  return { events: kept, runParents, parentOwners };
+}
+
+/**
+ * Marks each parent-backed row of the global list with `trailAvailable`, from the owner containment already read.
+ * No reads. A row whose parent owner is unknown here gets `false` (fail closed: the control is not offered).
+ */
+function markTrailAvailability(
+  presented: AuditResponseEvent[],
+  source: AuditEvent[],
+  parentOwners: ReadonlyMap<string, string>,
+  viewerUid: string,
+  visibleUserIds: string[] | null
+): AuditResponseEvent[] {
+  return presented.map((row, i) => {
+    const parent = auditParentOf(source[i]);
+    if (parent === "policy" || parent === null) return row;
+    const ownerUid = parentOwners.get(`${parent.collection}/${parent.runId}`);
+    const trailAvailable = ownerUid !== undefined && governanceTrailAccessible({ viewerUid, visibleUserIds, ownerUid });
+    return { ...row, trailAvailable };
+  });
 }
 
 /** Fetch recent docs; prefer orderBy("at"), fall back to plain limit if index/field issues. */
@@ -570,8 +612,10 @@ export async function GET(request: NextRequest) {
         );
       }
 
+      // The run's OWNER may open its trail (which shows only the viewer's own actions), as may a reviewer the owner
+      // currently assigns. The viewer is NOT added to their reviewer scope (see governanceTrailAccess.ts).
       const ownerUid = String(parentData.userId ?? "");
-      if (!runOwnerVisibleInGovernance(vis.visibleUserIds, ownerUid)) {
+      if (!governanceTrailAccessible({ viewerUid: resolved.uid, visibleUserIds: vis.visibleUserIds, ownerUid })) {
         return NextResponse.json(
           {
             ok: false,
@@ -745,7 +789,13 @@ export async function GET(request: NextRequest) {
     );
 
     const tEm3 = Date.now();
-    const presented3 = await presentAuditEventsForViewer(events, resolved.uid, vis.visibleUserIds, contained.runParents);
+    const presented3 = markTrailAvailability(
+      await presentAuditEventsForViewer(events, resolved.uid, vis.visibleUserIds, contained.runParents),
+      events,
+      contained.parentOwners,
+      resolved.uid,
+      vis.visibleUserIds
+    );
     console.log(`[governance/audit] Email lookups: ${Date.now() - tEm3}ms`);
     console.log(`[governance/audit] Total: ${Date.now() - t0}ms`);
     return NextResponse.json({ ok: true, events: presented3 });

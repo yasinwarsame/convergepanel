@@ -245,9 +245,14 @@ type AuditEvent = {
   runType?: string;
   runOwnerEmail?: string;
   runOwnerIsViewer?: boolean;
+  /** Server-decided: this viewer may open the row's trail. Only `true` offers the control (fail closed). */
+  trailAvailable?: boolean;
   question?: string;
   consensusScore?: number | null;
 };
+
+/** Shown instead of the trail control when the trail can't be opened. Names no owner and no reason beyond scope. */
+export const AUDIT_TRAIL_UNAVAILABLE_COPY = "Trail unavailable: this run is outside your current review access.";
 
 type AuditInlineTrailState = {
   eventId: string;
@@ -428,7 +433,8 @@ export function AuditLogEventCard(props: {
     typeof ev.consensusScore === "number" && Number.isFinite(ev.consensusScore)
       ? Math.round(ev.consensusScore)
       : null;
-  const showTrailBtn = Boolean(ev.runId && ev.runId !== "policy");
+  const hasTrail = Boolean(ev.runId && ev.runId !== "policy");
+  const showTrailBtn = hasTrail && ev.trailAvailable === true;
   const actionLabel = (governanceAuditActionDisplayLabel(ev.action) ?? ev.action.replace(/_/g, " ")).toUpperCase();
 
   return (
@@ -518,6 +524,8 @@ export function AuditLogEventCard(props: {
               >
                 {expanded ? "Hide trail" : "Open trail →"}
               </button>
+            ) : hasTrail ? (
+              <span className="text-xs text-cp-muted">{AUDIT_TRAIL_UNAVAILABLE_COPY}</span>
             ) : (
               <span />
             )}
