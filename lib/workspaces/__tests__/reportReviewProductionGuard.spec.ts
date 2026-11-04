@@ -46,12 +46,13 @@ import { isReportReviewEnabledForWorkspace, reportReviewActivationConfig } from 
 import { submitReportReview } from "@/lib/workspaces/reportReviewMutations";
 import { decideReportReview } from "@/lib/workspaces/reportReviewDecisionMutation";
 import { getReportReviewContext } from "@/lib/workspaces/reportReviewContext";
-import { putWorkspaceReviewAssignment } from "@/lib/workspaces/workspaceReviewMutations";
+import { putWorkspaceReviewAssignment, deleteWorkspaceReviewAssignment } from "@/lib/workspaces/workspaceReviewMutations";
 import { getReviewerCandidates } from "@/lib/workspaces/reviewerCandidates";
 import { isMergedReviewQueueView } from "@/lib/workspaces/reviewQueueMode";
 import { computeMembershipId } from "@/lib/workspaces/membershipId";
 import type { ReportReviewRecordV1 } from "@/lib/governance/reportReview";
 import { POST as submitPost, GET as contextGet } from "@/app/api/workspaces/[workspaceId]/runs/[runId]/report-review/route";
+import { POST as resubmitPost } from "@/app/api/workspaces/[workspaceId]/runs/[runId]/report-review/resubmit/route";
 import { POST as decisionPost } from "@/app/api/workspaces/[workspaceId]/runs/[runId]/report-review/decision/route";
 import { GET as exportGet } from "@/app/api/workspaces/[workspaceId]/runs/[runId]/report-review/export/route";
 
@@ -160,32 +161,59 @@ describe("deployment environment: exact Production only, everything else fails c
 });
 
 describe("Preview + switch ON + allow-listed Workspace: every server-side surface refuses", () => {
-  it("routes, mutations, context, queue and assignment hooks behave as if the feature were off — with a Production positive control", async () => {
-    // Create a real report review in Production first, so every refusal below can only come from the gate.
+  it("every surface refuses in Preview, and the identical call is admitted in Production (positive control per surface)", async () => {
+    // A real report review created in Production first, so every Preview refusal can only come from the guard.
     setEnv("production");
     expect((await submit(MEMBER)).ok).toBe(true);
+    const rec = rr()!;
+    const calls = {
+      submitHttp: async () => { identity.uid = ADMIN; return (await submitPost(post(base(W, RUN), { purpose: { code: "internal_review" } }), params(W, RUN))).status; },
+      contextHttp: async () => { identity.uid = OWNER; return (await contextGet(new NextRequest(base(W, RUN)), params(W, RUN))).status; },
+      exportHttp: async () => { identity.uid = OWNER; return (await exportGet(new NextRequest(`${base(W, RUN)}/export?format=json`), params(W, RUN))).status; },
+      decisionHttp: async () => { identity.uid = REVIEWER; return (await decisionPost(post(`${base(W, RUN)}/decision`, { decision: { status: "approved", comment: "ok" }, expectedCycle: rec.cycle, expectedUpdatedAt: rec.updatedAt }), params(W, RUN))).status; },
+      resubmitHttp: async () => { identity.uid = MEMBER; return (await resubmitPost(post(`${base(W, RUN)}/resubmit`, { purpose: { code: "internal_review" }, expectedCycle: rec.cycle }), params(W, RUN))).status; },
+    };
+    // Preview: concealed 404 on every route; mutations disabled; queue governed-only; assignment changes refused.
     setEnv("preview");
-    identity.uid = MEMBER;
-    expect((await submitPost(post(base(W, RUN), { purpose: { code: "internal_review" } }), params(W, RUN))).status).toBe(404);
-    expect(await submit(MEMBER, W, RUN)).toEqual({ ok: false, reason: "disabled" });
+    for (const [name, call] of Object.entries(calls)) expect([name, await call()]).toEqual([name, 404]);
+    expect(await submit(ADMIN)).toEqual({ ok: false, reason: "disabled" });
     expect(await decide(REVIEWER)).toEqual({ ok: false, reason: "disabled" });
-    identity.uid = OWNER;
-    expect((await contextGet(new NextRequest(base(W, RUN)), params(W, RUN))).status).toBe(404);
     expect(await getReportReviewContext({ uid: OWNER, workspaceId: W, runId: RUN })).toEqual({ status: "not_found" });
-    expect((await exportGet(new NextRequest(`${base(W, RUN)}/export?format=json`), params(W, RUN))).status).toBe(404);
-    expect((await decisionPost(post(`${base(W, RUN)}/decision`, { decision: { status: "approved" }, expectedCycle: 1, expectedUpdatedAt: "x" }), params(W, RUN))).status).toBe(404);
     expect(isMergedReviewQueueView("needs_review", W)).toBe(false);
-    // Dormant assignment hooks: the submitter (MEMBER) stays a candidate and is assignable, as when the feature is off.
-    const cands = await getReviewerCandidates({ workspaceId: W, runId: RUN });
-    expect(cands.status === "ok" && cands.reviewers.map((r) => r.uid)).toContain(MEMBER);
+    // Review M-1: a run carrying a report review accepts NO assignment change outside Production (Preview shares
+    // Production's Firestore) — not even an "ordinary" one that would make the submitter assignable or skip the audit.
+    expect(await assign(ADMIN, MEMBER)).toEqual({ ok: false, reason: "run_not_found" });
+    expect(await assign(ADMIN, REVIEWER)).toEqual({ ok: false, reason: "run_not_found" });
+    expect(await getReviewerCandidates({ workspaceId: W, runId: RUN })).toEqual({ status: "run_not_found" });
+    expect(db.read(`runs/${RUN}/humanReviewAssignment/current`)).toBeUndefined();
+    const auditBefore = db.paths("workspaceMembershipEvents/").length;
 
-    // Positive control: the same request in Production is admitted.
+    // Production: the same calls are admitted (status is whatever the operation itself answers — never the 404 gate).
     setEnv("production");
-    expect((await contextGet(new NextRequest(base(W, RUN)), params(W, RUN))).status).toBe(200);
+    expect(await calls.contextHttp()).toBe(200);
+    expect(await calls.exportHttp()).toBe(200);
+    expect(await calls.submitHttp()).toBe(200); // already open: idempotent, created=false — the gate admitted it
+    expect(await calls.resubmitHttp()).toBe(409); // open cycle: not_decided
+    expect(await calls.decisionHttp()).toBe(403); // unassigned reviewer: not_authorized
     expect(isMergedReviewQueueView("needs_review", W)).toBe(true);
     const candsProd = await getReviewerCandidates({ workspaceId: W, runId: RUN });
     expect(candsProd.status === "ok" && candsProd.reviewers.map((r) => r.uid)).not.toContain(MEMBER);
     expect(candsProd.status === "ok" && candsProd.reviewers.map((r) => r.uid)).toContain(REVIEWER);
+    expect(await assign(ADMIN, MEMBER)).toEqual({ ok: false, reason: { kind: "target_not_eligible", reason: "self_review" } });
+    expect((await assign(ADMIN, REVIEWER)).ok).toBe(true);
+    expect(db.paths("workspaceMembershipEvents/").length).toBe(auditBefore + 1); // reviewer_changed audit row
+    // A Preview DELETE of that Production assignment is refused too.
+    setEnv("preview");
+    const revision = (db.read(`runs/${RUN}/humanReviewAssignment/current`) as { revision: number }).revision;
+    expect(await deleteWorkspaceReviewAssignment({ uid: ADMIN, workspaceId: W, runId: RUN, expectedRevision: revision })).toEqual({ ok: false, reason: "run_not_found" });
+    expect(db.read(`runs/${RUN}/humanReviewAssignment/current`)).toBeDefined();
+    setEnv("production");
+    expect((await calls.decisionHttp())).toBe(200); // now assigned: decides in Production
+  });
+
+  it("governed (non-report-review) runs keep their ordinary assignment behaviour in Preview", async () => {
+    setEnv("preview");
+    expect((await assign(ADMIN, REVIEWER)).ok).toBe(true);
   });
 
   it("client-supplied environment hints are ignored (headers, query string)", async () => {
@@ -233,17 +261,34 @@ describe("Production + switch ON + allow-listed Workspace: review invariants unc
 });
 
 describe("static: the guard is the single reader of the deployment signal", () => {
-  it("among report-review modules only reportReviewDeploymentEnvironment.ts reads VERCEL_ENV, and activation imports it", () => {
-    const dir = join(__dirname, "..");
-    const files = readdirSync(dir).filter((f) => /^(reportReview|reviewQueue).*\.ts$/.test(f));
-    const readers = files.filter((f) => /VERCEL_ENV/.test(readFileSync(join(dir, f), "utf8").replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "")));
-    expect(readers).toEqual(["reportReviewDeploymentEnvironment.ts"]);
+  const strip = (src: string) => src.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+  function walk(dir: string, out: string[] = []): string[] {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (e.name === "node_modules" || e.name === "__tests__" || e.name.startsWith(".")) continue;
+      const p = join(dir, e.name);
+      if (e.isDirectory()) walk(p, out);
+      else if (/\.(ts|tsx)$/.test(e.name)) out.push(p);
+    }
+    return out;
+  }
+  it("no report-review code reads VERCEL_ENV except reportReviewDeploymentEnvironment.ts, and activation + assignment use the guard", () => {
+    const root = join(__dirname, "..", "..", "..");
+    const files = ["lib", "app", "components"].flatMap((d) => walk(join(root, d)));
+    const reportReviewFiles = files.filter((f) => /reportReview|report-review|reviewQueue|reviewerCandidates|workspaceReviewMutations/.test(f));
+    expect(reportReviewFiles.length).toBeGreaterThan(10);
+    const readers = reportReviewFiles.filter((f) => /VERCEL_ENV/.test(strip(readFileSync(f, "utf8")))).map((f) => f.slice(root.length + 1));
+    expect(readers).toEqual(["lib/workspaces/reportReviewDeploymentEnvironment.ts"]);
+    const dir = join(root, "lib", "workspaces");
     const activation = readFileSync(join(dir, "reportReviewActivation.ts"), "utf8");
-    expect(activation).toMatch(/import \{ isProductionDeployment \} from "\.\/reportReviewDeploymentEnvironment";/);
     expect(activation).toMatch(/if \(!isProductionDeployment\(\)\) return \{ status: "disabled" \};\s*return evaluateReportReviewActivation\(/);
-    // No NEXT_PUBLIC_ variant of the signal exists anywhere in the guard.
-    const guardCode = readFileSync(join(dir, "reportReviewDeploymentEnvironment.ts"), "utf8").replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+    expect(readFileSync(join(dir, "reportReviewAssignmentAudit.ts"), "utf8")).toMatch(/!isProductionDeployment\(\)\) return \{ kind: "malformed" \};/);
+    const guardCode = strip(readFileSync(join(dir, "reportReviewDeploymentEnvironment.ts"), "utf8"));
     expect(guardCode).toMatch(/process\.env\.VERCEL_ENV === "production"/);
     expect(guardCode).not.toMatch(/NEXT_PUBLIC_/);
+  });
+  it("shipped configuration on this branch is dark: switch false, allow-list empty", () => {
+    const actual = jest.requireActual("@/lib/workspaces/reportReviewRollout") as { REPORT_REVIEW_ENABLED: unknown; REPORT_REVIEW_WORKSPACE_ALLOWLIST: unknown };
+    expect(actual.REPORT_REVIEW_ENABLED).toBe(false);
+    expect(actual.REPORT_REVIEW_WORKSPACE_ALLOWLIST).toEqual([]);
   });
 });

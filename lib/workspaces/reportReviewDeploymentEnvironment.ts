@@ -11,8 +11,11 @@
  * header, query parameter, cookie or browser configuration, and it has no NEXT_PUBLIC_ variant.
  *
  * Fail closed: anything other than the exact string "production" — unset, empty, "preview", "development", a different
- * case, surrounding whitespace — is NOT Production. Local `next dev`, Jest and CI therefore never activate report review
- * unless a test explicitly declares the Production environment.
+ * case, surrounding whitespace — is NOT Production. Local `next dev`, Jest and CI therefore do not activate report review
+ * UNLESS `VERCEL_ENV=production` is supplied explicitly — a test declaring it, or a local `.env.local` written by
+ * `vercel env pull --environment=production` (which sets it). Operators must not run a local server with pulled
+ * Production environment. In Production the value depends on Vercel's "Automatically expose System Environment
+ * Variables" setting (currently on); verify the runtime value before relying on the guard for an activation.
  *
  * Read directly from process.env (not lib/env.ts) because lib/env.ts is frozen by the Order 6 boundary suites. Precedent:
  * lib/email/workspaceInvitations.ts reads `process.env.VERCEL_ENV` for the same Preview-safety purpose. A static test

@@ -16,11 +16,17 @@
 import { parseReportReviewRecord } from "@/lib/governance/reportReview";
 import { REPORT_REVIEW_EVENTS_COLLECTION } from "./reportReviewCollections";
 import { isReportReviewEnabledForWorkspace } from "./reportReviewActivation";
+import { isProductionDeployment } from "./reportReviewDeploymentEnvironment";
 import { runQuestionSnapshot, writeReportReviewWorkspaceAuditEvent } from "./reportReviewWorkspaceAudit";
 
 export type ReportReviewAssignmentContext = { kind: "not_report_review" } | { kind: "report_review"; cycle: number; submitterUid: string; runQuestion: string | null } | { kind: "malformed" };
 
 export function reportReviewAssignmentContext(runData: Record<string, unknown>): ReportReviewAssignmentContext {
+  // Production-only guard (Option C, review M-1): outside the Vercel Production deployment, a run that CARRIES a report
+  // review accepts no assignment change at all. Preview shares Production's Firestore, so treating such a run as an
+  // ordinary run there would make the submitter assignable and skip the report-review audit — on Production data.
+  // Fails closed as "malformed" → run_not_found (assignment PUT/DELETE and reviewer candidates alike).
+  if (runData.reportReview !== undefined && runData.reportReview !== null && !isProductionDeployment()) return { kind: "malformed" };
   // Dormant unless Report Review is active for THIS run's own Workspace (Order B allow-list): elsewhere assignment
   // behaviour is exactly as before B2, whatever the run carries. Callers have already verified the run's Workspace.
   if (!isReportReviewEnabledForWorkspace(runData.workspaceId)) return { kind: "not_report_review" };
