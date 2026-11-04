@@ -2,7 +2,7 @@
 
 Status: implementation for owner review (2026-11-03). **Report review stays OFF.**
 
-- `REPORT_REVIEW_ENABLED = false` is unchanged.
+- `REPORT_REVIEW_ENABLED = false` is unchanged. (Superseded 2026-11-04: the TeamCP pilot proposes the switch on for one Workspace; see `report-review-activation-allowlist.md`.)
 - `lib/env.ts`, Production settings and Firestore indexes are untouched, and nothing is deployed.
 
 Design reference: PR #282 (`approval-b-report-review-design.md` rev 5, `approval-implementation-sequence.md`). B1 is #284 and B2 is #285, both live and dark. C1–C3 are not included.
@@ -174,7 +174,7 @@ Nothing else B3 adds needs a composite index:
 ## 5. Feature OFF verification
 
 - `REPORT_REVIEW_ENABLED = false as boolean` is unchanged (`lib/workspaces/reportReviewRollout.ts`).
-- Both research pages pass `reportReviewEnabled={REPORT_REVIEW_ENABLED}`. The page specs pin that value as `false` and the notice as unchanged.
+- Both research pages pass `reportReviewEnabled={REPORT_REVIEW_ENABLED}`. The page specs pin that value as `false` and the notice as unchanged. (Superseded: Order B changed this to `isReportReviewEnabledForWorkspace(access.workspace.id)`; see `report-review-activation-allowlist.md`.)
 - Every report-review route conceals with 404 before reading the body while off. That includes the new export.
 - The assignment audit hook and candidate exclusion are dormant while off.
 - `lib/env.ts`, `firestore.rules` and the Order 6 pinned files are unchanged; their hash suites pass.

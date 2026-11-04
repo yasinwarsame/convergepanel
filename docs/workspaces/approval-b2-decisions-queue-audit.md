@@ -31,7 +31,7 @@ A decision requires **all** of the following:
 
 ## 2. Combined Approval Queue
 
-| View | Report Review OFF (Production today) | Report Review ON |
+| View | Report Review OFF (Production at B2; every Workspace not on the allow-list) | Report Review ON (allow-listed Workspace only) |
 |---|---|---|
 | Needs review, Changes requested, Recently approved | Unchanged single governed scan; version-1 cursors | Merged scan over two `runs` streams (governed + report review). One total order: sort value desc, then document id desc. Frontier rule; cursor = last **consumed** position; version-2 cursors |
 | Assigned to me, Overdue | Unchanged | The same assignment-driven scans. Revalidation accepts report reviews; the submitter is excluded |

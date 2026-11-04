@@ -1,8 +1,18 @@
 # Report review: single-workspace activation allow-list (Order B)
 
-Status: development only (owner authorization 2026-11-03). Production is **not activated** until a pilot activation PR is merged and deployed.
+Status: allow-list mechanism added 2026-11-03 (owner authorization). Pilot configuration proposed 2026-11-04.
 
-**Pilot activation PR (prepared 2026-11-04, draft, NOT merged).** It sets `REPORT_REVIEW_ENABLED = true` and `REPORT_REVIEW_WORKSPACE_ALLOWLIST = ["Aw6kbjROOaOIhCXUiKlq"]` (Team Workspace "TeamCP"). Merging that PR **is** the activation action: once deployed, report review runs in TeamCP and nowhere else. It needs separate owner authorization. Rollback is a revert of that change (switch `false`, list `[]`), then a redeploy; the "Audit Log after rollback" section below applies. The shipped configuration is pinned by `lib/workspaces/__tests__/reportReviewTeamcpPilot.spec.ts`.
+**TeamCP pilot configuration.** The pilot PR sets `REPORT_REVIEW_ENABLED = true` and `REPORT_REVIEW_WORKSPACE_ALLOWLIST = ["Aw6kbjROOaOIhCXUiKlq"]` (Team Workspace "TeamCP"). Merging and deploying that change **is** the activation action and needs separate owner authorization. Before it is deployed, Production runs with the switch `false` and the list `[]`.
+
+Once deployed, report review is available only in TeamCP, and only to TeamCP members who also pass the existing admission gates:
+- Team Workspaces admission (`TEAM_WORKSPACES_*`);
+- Approval Workflow admission (`APPROVAL_WORKFLOW_ENABLED` / `APPROVAL_WORKFLOW_CANARY_UIDS`, `lib/workspaces/reportReviewRouteSupport.ts`).
+
+These gates are per user and environment-driven, not per Workspace. A TeamCP member who fails them sees the research page's report-review panel, but its requests are concealed (404) and the panel shows "unavailable". Confirm both gates for the pilot accounts before activation.
+
+**Rollback.** Revert that change (switch `false`, list `[]`) and redeploy. The "Audit Log after rollback" section below applies.
+
+The shipped configuration is pinned, against the real module, by `lib/workspaces/__tests__/reportReviewTeamcpPilot.spec.ts`.
 
 ## Rule
 
@@ -17,7 +27,7 @@ Status: development only (owner authorization 2026-11-03). Production is **not a
 
 **Defaults and failure.** An empty list, or the switch off, means disabled. Any malformed configuration (more than one id, a duplicate, an empty or path-like id, a non-array) disables report review **in every Workspace**. It never falls back to "allow all".
 
-**Where the list lives.** The allow-list is a compile-time constant, not an environment variable. `lib/env.ts` is frozen by the Order 6 boundary suites, and a reviewed code change is the intended control for activation. Activating the trial will be a separate, owner-authorized PR that flips the switch and names exactly the owner's trial Workspace id. No Workspace id is hard-coded in advance.
+**Where the list lives.** The allow-list is a compile-time constant, not an environment variable. `lib/env.ts` is frozen by the Order 6 boundary suites, and a reviewed code change is the intended control for activation. Activating the trial is a separate, owner-authorized PR that flips the switch and names exactly the owner's trial Workspace id (the TeamCP pilot above). No Workspace id is added without such a decision.
 
 ## Surfaces (each checks the Workspace it targets)
 

@@ -39,14 +39,17 @@ jest.mock("@/lib/workspaces/approvalWorkflowRollout", () => ({ resolveApprovalWo
 import { NextRequest } from "next/server";
 import * as rollout from "@/lib/workspaces/reportReviewRollout";
 import { evaluateReportReviewActivation, isReportReviewEnabledForWorkspace, reportReviewActivationConfig } from "@/lib/workspaces/reportReviewActivation";
-import { submitReportReview } from "@/lib/workspaces/reportReviewMutations";
+import { submitReportReview, resubmitReportReview } from "@/lib/workspaces/reportReviewMutations";
 import { decideReportReview } from "@/lib/workspaces/reportReviewDecisionMutation";
 import { getReportReviewContext } from "@/lib/workspaces/reportReviewContext";
 import { putWorkspaceReviewAssignment } from "@/lib/workspaces/workspaceReviewMutations";
 import { isMergedReviewQueueView } from "@/lib/workspaces/reviewQueueMode";
+import { getReviewQueue } from "@/lib/workspaces/reviewQueue";
+import { getReviewerCandidates } from "@/lib/workspaces/reviewerCandidates";
 import { computeMembershipId } from "@/lib/workspaces/membershipId";
-import type { ReportReviewRecordV1 } from "@/lib/governance/reportReview";
+import { buildReportReviewRecord, type ReportReviewRecordV1 } from "@/lib/governance/reportReview";
 import { POST as submitPost, GET as contextGet } from "@/app/api/workspaces/[workspaceId]/runs/[runId]/report-review/route";
+import { POST as resubmitPost } from "@/app/api/workspaces/[workspaceId]/runs/[runId]/report-review/resubmit/route";
 import { POST as decisionPost } from "@/app/api/workspaces/[workspaceId]/runs/[runId]/report-review/decision/route";
 import { GET as exportGet } from "@/app/api/workspaces/[workspaceId]/runs/[runId]/report-review/export/route";
 
@@ -88,6 +91,14 @@ const submit = (uid: string, ws = TEAMCP, runId = RUN) => submitReportReview({ u
 const assign = (actor: string, reviewer: string, expectedRevision = 0) => putWorkspaceReviewAssignment({ uid: actor, workspaceId: TEAMCP, runId: RUN, assignedReviewerUserId: reviewer, expectedRevision, dueAt: null, now: "2026-11-04T11:05:00.000Z" });
 const decide = (uid: string, ws = TEAMCP, runId = RUN) =>
   decideReportReview({ uid, workspaceId: ws, runId, decision: { status: "approved", comment: "ok" }, expectedCycle: rr(runId)?.cycle ?? 1, expectedUpdatedAt: rr(runId)?.updatedAt ?? "x", now: "2026-11-04T12:00:00.000Z" });
+/** A report review left in a Workspace that is not allow-listed (e.g. after a rollback). */
+const leftoverRecord = () =>
+  buildReportReviewRecord({ cycle: 1, scope: { schemaId: "generic", unifiedAnswer: "absent", synthesis: "absent", consensus: "absent", respondedModels: 1, requestedModels: 1 }, purpose: { code: "internal_review", note: null }, actorUid: MEMBER, now: "2026-11-04T09:00:00.000Z" });
+const reportReviewAuditRows = () =>
+  db
+    .paths("workspaceMembershipEvents/")
+    .map((p) => db.read(p)!)
+    .filter((r) => typeof r.eventType === "string" && (r.eventType as string).startsWith("workspace_report_review_"));
 /** Bypasses the assignment guard, to prove the DECISION path itself refuses. */
 const seedAssignment = (uid: string) =>
   db.seed(`runs/${RUN}/humanReviewAssignment/current`, { schemaVersion: 1, teamId: null, runId: RUN, assignedReviewerUserId: uid, assignedAt: "x", assignedByUserId: ADMIN, updatedAt: "x", updatedByUserId: ADMIN, revision: 1, workspaceId: TEAMCP, projectId: null, dueAt: null, cycle: 1 });
@@ -114,8 +125,8 @@ describe("shipped configuration (real module)", () => {
     expect(rollout.REPORT_REVIEW_ENABLED).toBe(true);
     expect(rollout.REPORT_REVIEW_WORKSPACE_ALLOWLIST).toEqual([TEAMCP]);
     const cfg = reportReviewActivationConfig();
-    expect(cfg.status).toBe("active");
-    expect(cfg.status === "active" && [...cfg.workspaceIds]).toEqual([TEAMCP]);
+    if (cfg.status !== "active") throw new Error(`expected active, got ${cfg.status}`);
+    expect([...cfg.workspaceIds]).toEqual([TEAMCP]);
   });
 
   it("admits TeamCP and nothing else", () => {
@@ -137,57 +148,80 @@ describe("shipped configuration (real module)", () => {
 });
 
 describe("with the shipped configuration: TeamCP only, server-side contract unchanged", () => {
-  it("another Workspace is refused on every surface; TeamCP works", async () => {
+  it("another Workspace holding a report review is refused on each gated surface (the record exists, so only the gate can refuse); TeamCP works", async () => {
+    // Seed a report review on the other Workspace's run, so a 404 / "disabled" there cannot come from "no record".
+    db.seed(`runs/${RUN_OTHER}`, { ...db.read(`runs/${RUN_OTHER}`)!, reportReview: leftoverRecord() });
     identity.uid = MEMBER;
     expect((await submitPost(post(base(OTHER, RUN_OTHER), { purpose: { code: "internal_review" } }), params(OTHER, RUN_OTHER))).status).toBe(404);
+    expect((await resubmitPost(post(`${base(OTHER, RUN_OTHER)}/resubmit`, { purpose: { code: "internal_review" }, expectedCycle: 1 }), params(OTHER, RUN_OTHER))).status).toBe(404);
     expect(await submit(MEMBER, OTHER, RUN_OTHER)).toEqual({ ok: false, reason: "disabled" });
+    expect(await resubmitReportReview({ uid: MEMBER, workspaceId: OTHER, runId: RUN_OTHER, purpose: { code: "internal_review" }, expectedCycle: 1 })).toEqual({ ok: false, reason: "disabled" });
     expect(await decide(REVIEWER, OTHER, RUN_OTHER)).toEqual({ ok: false, reason: "disabled" });
     identity.uid = OWNER;
     expect((await contextGet(new NextRequest(base(OTHER, RUN_OTHER)), params(OTHER, RUN_OTHER))).status).toBe(404);
+    expect(await getReportReviewContext({ uid: OWNER, workspaceId: OTHER, runId: RUN_OTHER })).toEqual({ status: "not_found" });
     expect((await exportGet(new NextRequest(`${base(OTHER, RUN_OTHER)}/export?format=json`), params(OTHER, RUN_OTHER))).status).toBe(404);
     expect((await decisionPost(post(`${base(OTHER, RUN_OTHER)}/decision`, { decision: { status: "approved" }, expectedCycle: 1, expectedUpdatedAt: "x" }), params(OTHER, RUN_OTHER))).status).toBe(404);
+    // Dormant run-level hooks in the other Workspace: the submitter stays an eligible candidate and is assignable
+    // (the report-review submitter guard is off there), and no report-review audit row is written.
+    const cands = await getReviewerCandidates({ workspaceId: OTHER, runId: RUN_OTHER });
+    expect(cands.status === "ok" && cands.reviewers.map((r) => r.uid)).toContain(MEMBER);
+    expect((await putWorkspaceReviewAssignment({ uid: ADMIN, workspaceId: OTHER, runId: RUN_OTHER, assignedReviewerUserId: MEMBER, expectedRevision: 0, dueAt: null })).ok).toBe(true);
+    expect(reportReviewAuditRows()).toEqual([]);
+    // Queue: the other Workspace uses the governed-only scan, so its report review is not listed.
     expect(isMergedReviewQueueView("needs_review", OTHER)).toBe(false);
-    expect(rr(RUN_OTHER)).toBeUndefined();
+    const qOther = await getReviewQueue({ view: "needs_review", workspaceId: OTHER, uid: OWNER, callerCandidate: { uid: OWNER, workspaceId: OTHER, role: "owner", status: "active" }, projectFilter: undefined, limit: 10, cursor: null });
+    expect(qOther.status === "ok" && qOther.items.map((i) => i.runId)).toEqual([]);
     // Containment: TeamCP's route with the other Workspace's run is refused.
     expect(await submit(MEMBER, TEAMCP, RUN_OTHER)).toEqual({ ok: false, reason: "run_not_found" });
 
+    // Positive controls in TeamCP: the same surfaces work.
     identity.uid = MEMBER;
     expect((await submitPost(post(base(TEAMCP, RUN), { purpose: { code: "internal_review" } }), params(TEAMCP, RUN))).status).toBe(201);
+    identity.uid = OWNER;
+    expect((await contextGet(new NextRequest(base(TEAMCP, RUN)), params(TEAMCP, RUN))).status).toBe(200);
     expect(isMergedReviewQueueView("needs_review", TEAMCP)).toBe(true);
-    expect(rr(RUN_OTHER)).toBeUndefined();
+    const qTeamcp = await getReviewQueue({ view: "needs_review", workspaceId: TEAMCP, uid: OWNER, callerCandidate: { uid: OWNER, workspaceId: TEAMCP, role: "owner", status: "active" }, projectFilter: undefined, limit: 10, cursor: null });
+    expect(qTeamcp.status === "ok" && qTeamcp.items.map((i) => i.runId)).toEqual([RUN]);
+    expect(reportReviewAuditRows().every((r) => r.workspaceId === TEAMCP)).toBe(true);
   });
 
-  it("capabilities are enforced server-side: reviewers and removed members cannot submit; a member cannot assign", async () => {
+  it("capabilities and membership are enforced server-side, with exact reasons", async () => {
     for (const uid of [REVIEWER, REVIEWER2]) expect(await submit(uid)).toEqual({ ok: false, reason: "insufficient_capability" });
-    expect((await submit(REMOVED)).ok).toBe(false);
-    expect((await submit("uid-stranger")).ok).toBe(false);
+    expect(await submit(REMOVED)).toEqual({ ok: false, reason: "membership_removed" });
+    expect(await submit("uid-stranger")).toEqual({ ok: false, reason: "membership_not_found" });
     expect(rr()).toBeUndefined();
     expect((await submit(MEMBER)).ok).toBe(true);
-    expect((await assign(MEMBER, REVIEWER)).ok).toBe(false); // member lacks reviews.manage
-    expect((await assign(REMOVED, REVIEWER)).ok).toBe(false);
-    expect((await assign(ADMIN, REMOVED)).ok).toBe(false); // a removed member is not an eligible target
+    expect(await assign(MEMBER, REVIEWER)).toEqual({ ok: false, reason: "insufficient_capability" }); // member lacks reviews.manage
+    expect(await assign(REMOVED, REVIEWER)).toEqual({ ok: false, reason: "membership_removed" });
+    expect(await assign(ADMIN, REMOVED)).toEqual({ ok: false, reason: { kind: "target_not_eligible", reason: "removed" } });
+    expect(await assign(ADMIN, "uid-stranger")).toEqual({ ok: false, reason: { kind: "target_not_eligible", reason: "not_found" } });
   });
 
-  it("the reviewer must be assigned: unassigned reviewers, the owner and the admin cannot decide", async () => {
-    expect((await submit(ADMIN)).ok).toBe(true);
-    for (const uid of [REVIEWER, REVIEWER2, OWNER, MEMBER]) expect((await decide(uid)).ok).toBe(false);
+  it("the reviewer must be assigned: nobody decides an unassigned review, and only the current assignee decides once assigned", async () => {
+    expect((await submit(MEMBER)).ok).toBe(true); // MEMBER submits; OWNER is the creator
+    for (const uid of [REVIEWER, REVIEWER2, ADMIN]) expect(await decide(uid)).toEqual({ ok: false, reason: "not_authorized", denial: "not_assigned" });
+    expect(await decide(OWNER)).toEqual({ ok: false, reason: "not_authorized", denial: "self_review" }); // creator
+    // The unassigned submitter is refused by the assignment check first; the "submitter" denial itself is pinned below
+    // with a directly seeded assignment.
+    expect(await decide(MEMBER)).toEqual({ ok: false, reason: "not_authorized", denial: "not_assigned" });
     expect(rr()!.humanReview.status).toBe("unreviewed");
     expect((await assign(ADMIN, REVIEWER)).ok).toBe(true);
-    expect(await decide(REVIEWER2)).toEqual({ ok: false, reason: "not_authorized", denial: "not_assigned" });
+    for (const uid of [REVIEWER2, ADMIN]) expect(await decide(uid)).toEqual({ ok: false, reason: "not_authorized", denial: "not_assigned" });
     const ok = await decide(REVIEWER);
     expect(ok.ok).toBe(true);
     expect(rr()!.humanReview.status).toBe("approved");
   });
 
-  it("the run creator (TeamCP's owner) cannot decide, even through a directly seeded assignment, and cannot be assigned", async () => {
+  it("the run creator (TeamCP's owner) cannot be assigned, and cannot decide even through a directly seeded assignment", async () => {
     expect((await submit(MEMBER)).ok).toBe(true);
-    expect((await assign(ADMIN, OWNER)).ok).toBe(false);
+    expect(await assign(ADMIN, OWNER)).toEqual({ ok: false, reason: { kind: "target_not_eligible", reason: "self_review" } });
     seedAssignment(OWNER);
     expect(await decide(OWNER)).toEqual({ ok: false, reason: "not_authorized", denial: "self_review" });
     expect(rr()!.humanReview.status).toBe("unreviewed");
   });
 
-  it("the submitter cannot decide their own submission, and cannot be assigned to it", async () => {
+  it("the submitter cannot be assigned to their own submission, and cannot decide it even through a directly seeded assignment", async () => {
     expect((await submit(ADMIN)).ok).toBe(true);
     expect(await assign(OWNER, ADMIN)).toEqual({ ok: false, reason: { kind: "target_not_eligible", reason: "self_review" } });
     seedAssignment(ADMIN);
@@ -195,12 +229,15 @@ describe("with the shipped configuration: TeamCP only, server-side contract unch
     expect(rr()!.humanReview.status).toBe("unreviewed");
   });
 
-  it("a removed member cannot participate: an assignee removed after assignment loses the decision and the context", async () => {
+  it("a removed member cannot participate: an assignee removed after assignment loses the context and the decision", async () => {
     expect((await submit(MEMBER)).ok).toBe(true);
     expect((await assign(ADMIN, REVIEWER)).ok).toBe(true);
+    // Positive control: while active, the assignee can read the context and is allowed to decide.
+    const before = await getReportReviewContext({ uid: REVIEWER, workspaceId: TEAMCP, runId: RUN });
+    expect(before.status === "ok" && before.viewer).toMatchObject({ canDecide: true, denial: null });
     membership(TEAMCP, REVIEWER, "reviewer", "removed");
-    expect((await decide(REVIEWER)).ok).toBe(false);
     expect(await getReportReviewContext({ uid: REVIEWER, workspaceId: TEAMCP, runId: RUN })).toEqual({ status: "not_found" });
+    expect(await decide(REVIEWER)).toEqual({ ok: false, reason: "membership_removed" });
     expect(await getReportReviewContext({ uid: REMOVED, workspaceId: TEAMCP, runId: RUN })).toEqual({ status: "not_found" });
     expect(rr()!.humanReview.status).toBe("unreviewed");
   });
