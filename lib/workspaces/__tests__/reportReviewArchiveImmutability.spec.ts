@@ -248,8 +248,9 @@ describe("3. gated by construction", () => {
   // compile-time boolean constant, never read from the environment, so changing it needs a reviewed code change.
   it("the shipped switch is a compile-time boolean constant (changing it needs a reviewed code change)", async () => {
     const actual = jest.requireActual("@/lib/workspaces/reportReviewRollout") as { REPORT_REVIEW_ENABLED: unknown; REPORT_REVIEW_WORKSPACE_ALLOWLIST: unknown };
-    expect(actual.REPORT_REVIEW_ENABLED).toBe(true);
-    expect(actual.REPORT_REVIEW_WORKSPACE_ALLOWLIST).toEqual(["Aw6kbjROOaOIhCXUiKlq"]);
+    // The exact shipped values are pinned once, in reportReviewTeamcpPilot.spec.ts; here only the shape is checked.
+    expect(typeof actual.REPORT_REVIEW_ENABLED).toBe("boolean");
+    expect(Array.isArray(actual.REPORT_REVIEW_WORKSPACE_ALLOWLIST)).toBe(true);
     const src = stripComments(readFileSync(join(ROOT, "lib/workspaces/reportReviewRollout.ts"), "utf8"));
     expect(src).not.toMatch(/process\.env/);
   });

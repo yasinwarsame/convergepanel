@@ -5,6 +5,7 @@
  * `lib/env.ts` is frozen by the Order 6 boundary suites (dsExportBoundaries / dsProvenanceUiBoundaries pin it
  * byte-for-byte). Turning Report Review on therefore requires a separate, reviewed change and an owner enablement
  * decision — it cannot happen through configuration alone. Tests override this module with jest.mock.
+ * (Stage history: B1–B3 shipped dark. The TeamCP pilot change, owner decision 2026-11-04, turns it on for one Workspace.)
  */
 export const REPORT_REVIEW_ENABLED = true as boolean;
 

@@ -2,7 +2,7 @@
 
 **Scope.** Owner-authorized Stage B2 (2026-11-03), stacked on B1 (#284).
 
-**Status.** Report Review stays OFF. The switch is the compile-time `false` in `lib/workspaces/reportReviewRollout.ts`.
+**Status.** Report Review stays OFF. The switch is the compile-time `false` in `lib/workspaces/reportReviewRollout.ts`. (Stage status at B2. Superseded 2026-11-04 by the TeamCP pilot: see `report-review-activation-allowlist.md`.)
 
 ## 1. Decision contract (server-authoritative, shared with the UI)
 
@@ -44,7 +44,7 @@ A decision requires **all** of the following:
 - A failed query returns an explicit 500, never a silently truncated page. A sort value of an unexpected type (a non-Timestamp `createdAt`, or a non-string `reviewedAt`) also fails explicitly.
 - **Known scope:** `rejected` items, governed or report review, appear in no Approval Queue view, exactly as governed rejections do today.
 
-**Indexes.** Four composite indexes are declared in `firestore.indexes.json`: (`workspaceId`[, `projectId`], `reportReview.humanReview.status`, `createdAt` | `reportReview.humanReview.reviewedAt` desc). They are **not deployed**; deploying them is a precondition for enablement.
+**Indexes.** Four composite indexes are declared in `firestore.indexes.json`: (`workspaceId`[, `projectId`], `reportReview.humanReview.status`, `createdAt` | `reportReview.humanReview.reviewedAt` desc). They are **not deployed**; deploying them is a precondition for enablement. (Superseded 2026-11-04: deployed and READY in Production.)
 
 ### Evidence
 

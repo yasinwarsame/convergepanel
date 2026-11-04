@@ -183,7 +183,24 @@ describe("with the shipped configuration: TeamCP only, server-side contract unch
     expect(isMergedReviewQueueView("needs_review", TEAMCP)).toBe(true);
     const qTeamcp = await getReviewQueue({ view: "needs_review", workspaceId: TEAMCP, uid: OWNER, callerCandidate: { uid: OWNER, workspaceId: TEAMCP, role: "owner", status: "active" }, projectFilter: undefined, limit: 10, cursor: null });
     expect(qTeamcp.status === "ok" && qTeamcp.items.map((i) => i.runId)).toEqual([RUN]);
-    expect(reportReviewAuditRows().every((r) => r.workspaceId === TEAMCP)).toBe(true);
+    // The other Workspace's dormant hooks above are contrasted with the live ones here.
+    const candsT = await getReviewerCandidates({ workspaceId: TEAMCP, runId: RUN });
+    expect(candsT.status === "ok" && candsT.reviewers.map((r) => r.uid)).not.toContain(MEMBER); // submitter excluded
+    expect(candsT.status === "ok" && candsT.reviewers.map((r) => r.uid)).toContain(REVIEWER);
+    expect((await putWorkspaceReviewAssignment({ uid: ADMIN, workspaceId: TEAMCP, runId: RUN, assignedReviewerUserId: REVIEWER, expectedRevision: 0, dueAt: null })).ok).toBe(true);
+    const rows = reportReviewAuditRows();
+    expect(rows.map((r) => [r.eventType, r.workspaceId])).toEqual(expect.arrayContaining([["workspace_report_review_submitted", TEAMCP], ["workspace_report_review_reviewer_changed", TEAMCP]]));
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((r) => r.workspaceId === TEAMCP)).toBe(true);
+    // HTTP positive controls for the routes checked as 404 on the other Workspace: none of them answers 404 in TeamCP.
+    identity.uid = OWNER;
+    expect((await exportGet(new NextRequest(`${base(TEAMCP, RUN)}/export?format=json`), params(TEAMCP, RUN))).status).toBe(200);
+    identity.uid = MEMBER;
+    expect((await resubmitPost(post(`${base(TEAMCP, RUN)}/resubmit`, { purpose: { code: "internal_review" }, expectedCycle: 1 }), params(TEAMCP, RUN))).status).not.toBe(404);
+    identity.uid = REVIEWER;
+    const rec = rr()!;
+    expect((await decisionPost(post(`${base(TEAMCP, RUN)}/decision`, { decision: { status: "approved", comment: "ok" }, expectedCycle: rec.cycle, expectedUpdatedAt: rec.updatedAt }), params(TEAMCP, RUN))).status).toBe(200);
+    expect(rr()!.humanReview.status).toBe("approved");
   });
 
   it("capabilities and membership are enforced server-side, with exact reasons", async () => {
@@ -239,6 +256,15 @@ describe("with the shipped configuration: TeamCP only, server-side contract unch
     expect(await getReportReviewContext({ uid: REVIEWER, workspaceId: TEAMCP, runId: RUN })).toEqual({ status: "not_found" });
     expect(await decide(REVIEWER)).toEqual({ ok: false, reason: "membership_removed" });
     expect(await getReportReviewContext({ uid: REMOVED, workspaceId: TEAMCP, runId: RUN })).toEqual({ status: "not_found" });
+    // HTTP, removed caller: concealed on every route.
+    identity.uid = REVIEWER;
+    expect((await contextGet(new NextRequest(base(TEAMCP, RUN)), params(TEAMCP, RUN))).status).toBe(404);
+    expect((await exportGet(new NextRequest(`${base(TEAMCP, RUN)}/export?format=json`), params(TEAMCP, RUN))).status).toBe(404);
+    const rec = rr()!;
+    expect((await decisionPost(post(`${base(TEAMCP, RUN)}/decision`, { decision: { status: "approved" }, expectedCycle: rec.cycle, expectedUpdatedAt: rec.updatedAt }), params(TEAMCP, RUN))).status).toBe(404);
+    identity.uid = REMOVED;
+    expect((await submitPost(post(base(TEAMCP, RUN), { purpose: { code: "internal_review" } }), params(TEAMCP, RUN))).status).toBe(404);
+    expect((await resubmitPost(post(`${base(TEAMCP, RUN)}/resubmit`, { purpose: { code: "internal_review" }, expectedCycle: 1 }), params(TEAMCP, RUN))).status).toBe(404);
     expect(rr()!.humanReview.status).toBe("unreviewed");
   });
 });

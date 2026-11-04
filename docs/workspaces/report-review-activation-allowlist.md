@@ -4,11 +4,13 @@ Status: allow-list mechanism added 2026-11-03 (owner authorization). Pilot confi
 
 **TeamCP pilot configuration.** The pilot PR sets `REPORT_REVIEW_ENABLED = true` and `REPORT_REVIEW_WORKSPACE_ALLOWLIST = ["Aw6kbjROOaOIhCXUiKlq"]` (Team Workspace "TeamCP"). Merging and deploying that change **is** the activation action and needs separate owner authorization. Before it is deployed, Production runs with the switch `false` and the list `[]`.
 
-Once deployed, report review is available only in TeamCP, and only to TeamCP members who also pass the existing admission gates:
-- Team Workspaces admission (`TEAM_WORKSPACES_*`);
-- Approval Workflow admission (`APPROVAL_WORKFLOW_ENABLED` / `APPROVAL_WORKFLOW_CANARY_UIDS`, `lib/workspaces/reportReviewRouteSupport.ts`).
+Once deployed, report review is available only in TeamCP, and only to TeamCP members who also pass two existing, environment-driven admission gates:
+- **Team Workspaces admission** (`TEAM_WORKSPACES_ENABLED`, or the canary lists `TEAM_WORKSPACES_CANARY_UIDS` (per user) / `TEAM_WORKSPACES_CANARY_WORKSPACE_IDS` (per Workspace); `lib/workspaces/teamWorkspaceTargetAdmission.ts`). A member who fails it cannot open the Team research page at all (404).
+- **Approval Workflow admission** (`APPROVAL_WORKFLOW_ENABLED`, or the per-user canary `APPROVAL_WORKFLOW_CANARY_UIDS`; `lib/workspaces/reportReviewRouteSupport.ts`). A member who fails it sees the research page and its report-review panel, but the panel's requests are concealed (404) and it shows "unavailable".
 
-These gates are per user and environment-driven, not per Workspace. A TeamCP member who fails them sees the research page's report-review panel, but its requests are concealed (404) and the panel shows "unavailable". Confirm both gates for the pilot accounts before activation.
+Confirm both gates for the pilot accounts before activation.
+
+**Index precondition.** Once enabled, TeamCP's Approval Queue status views use the merged scan, which needs the four `reportReview.*` composite indexes on `runs`. Without them those views answer 503 `review_queue_index_unavailable`, governed items included. The indexes were deployed to `convergepanel` on 2026-11-04 and verified READY (ids `CICAgPigl4sK`, `CICAgNjr6JwK`, `CICAgITszIAK`, `CICAgJjFqZMK`; live set equal to `firestore.indexes.json`). Re-verify they are READY immediately before merging.
 
 **Rollback.** Revert that change (switch `false`, list `[]`) and redeploy. The "Audit Log after rollback" section below applies.
 
