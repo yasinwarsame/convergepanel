@@ -6,11 +6,11 @@ Status: allow-list mechanism added 2026-11-03 (owner authorization). Pilot confi
 
 Once deployed, report review is available only in TeamCP, and only to TeamCP members who also pass two existing, environment-driven admission gates:
 - **Team Workspaces admission** (`TEAM_WORKSPACES_ENABLED`, or the canary lists `TEAM_WORKSPACES_CANARY_UIDS` (per user) / `TEAM_WORKSPACES_CANARY_WORKSPACE_IDS` (per Workspace); `lib/workspaces/teamWorkspaceTargetAdmission.ts`). A member who fails it cannot open the Team research page at all (404).
-- **Approval Workflow admission** (`APPROVAL_WORKFLOW_ENABLED`, or the per-user canary `APPROVAL_WORKFLOW_CANARY_UIDS`; `lib/workspaces/reportReviewRouteSupport.ts`). A member who fails it sees the research page and its report-review panel, but the panel's requests are concealed (404) and it shows "unavailable".
+- **Approval Workflow admission** (`APPROVAL_WORKFLOW_ENABLED`, or the per-user canary `APPROVAL_WORKFLOW_CANARY_UIDS`; `lib/workspaces/reportReviewRouteSupport.ts`). A member who fails it still sees the research page. On a run without a governed review, the report-review panel's requests are concealed (404), and the panel falls back to the unchanged Order A "Approval review" notice ("This research result can't be submitted for approval…"). That reads like an ineligible run, not a failed gate.
 
 Confirm both gates for the pilot accounts before activation.
 
-**Index precondition.** Once enabled, TeamCP's Approval Queue status views use the merged scan, which needs the four `reportReview.*` composite indexes on `runs`. Without them those views answer 503 `review_queue_index_unavailable`, governed items included. The indexes were deployed to `convergepanel` on 2026-11-04 and verified READY (ids `CICAgPigl4sK`, `CICAgNjr6JwK`, `CICAgITszIAK`, `CICAgJjFqZMK`; live set equal to `firestore.indexes.json`). Re-verify they are READY immediately before merging.
+**Index precondition.** Once enabled, TeamCP's Approval Queue status views use the merged scan, which needs the four `reportReview.*` composite indexes on `runs`. Without them those views answer 503 `review_queue_index_unavailable`, governed items included. The indexes were deployed to `convergepanel` on 2026-11-04 and verified READY (ids `CICAgPigl4sK`, `CICAgNjr6JwK`, `CICAgITszIAK`, `CICAgJjFqZMK`). A full comparison the same day found the live composite-index set (54, all READY) equal to `firestore.indexes.json`, with nothing missing or extra. Re-verify they are READY immediately before merging.
 
 **Rollback.** Revert that change (switch `false`, list `[]`) and redeploy. The "Audit Log after rollback" section below applies.
 

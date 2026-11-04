@@ -196,7 +196,9 @@ describe("with the shipped configuration: TeamCP only, server-side contract unch
     identity.uid = OWNER;
     expect((await exportGet(new NextRequest(`${base(TEAMCP, RUN)}/export?format=json`), params(TEAMCP, RUN))).status).toBe(200);
     identity.uid = MEMBER;
-    expect((await resubmitPost(post(`${base(TEAMCP, RUN)}/resubmit`, { purpose: { code: "internal_review" }, expectedCycle: 1 }), params(TEAMCP, RUN))).status).not.toBe(404);
+    const resub = await resubmitPost(post(`${base(TEAMCP, RUN)}/resubmit`, { purpose: { code: "internal_review" }, expectedCycle: 1 }), params(TEAMCP, RUN));
+    expect(resub.status).toBe(409); // the gate admits it; the open (undecided) cycle refuses resubmission
+    expect(((await resub.json()) as { error?: { code?: string } }).error?.code).toBe("not_decided");
     identity.uid = REVIEWER;
     const rec = rr()!;
     expect((await decisionPost(post(`${base(TEAMCP, RUN)}/decision`, { decision: { status: "approved", comment: "ok" }, expectedCycle: rec.cycle, expectedUpdatedAt: rec.updatedAt }), params(TEAMCP, RUN))).status).toBe(200);
