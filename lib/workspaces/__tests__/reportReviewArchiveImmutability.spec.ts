@@ -242,10 +242,15 @@ describe("2. the dual-record invariant's assumptions are pinned", () => {
   });
 });
 
-describe("3. dark by construction", () => {
-  it("the shipped switch is the compile-time constant false (enabling needs a reviewed code change)", async () => {
-    const actual = jest.requireActual("@/lib/workspaces/reportReviewRollout") as { REPORT_REVIEW_ENABLED: boolean };
-    expect(actual.REPORT_REVIEW_ENABLED).toBe(false);
+describe("3. gated by construction", () => {
+  // Was "dark by construction" (pinned `false`). The TeamCP pilot PR (owner decision 2026-11-04) flips the switch; the
+  // exact shipped value + allow-list is pinned in reportReviewTeamcpPilot.spec.ts. What stays true here: the switch is a
+  // compile-time boolean constant, never read from the environment, so changing it needs a reviewed code change.
+  it("the shipped switch is a compile-time boolean constant (changing it needs a reviewed code change)", async () => {
+    const actual = jest.requireActual("@/lib/workspaces/reportReviewRollout") as { REPORT_REVIEW_ENABLED: unknown; REPORT_REVIEW_WORKSPACE_ALLOWLIST: unknown };
+    // The exact shipped values are pinned once, in reportReviewTeamcpPilot.spec.ts; here only the shape is checked.
+    expect(typeof actual.REPORT_REVIEW_ENABLED).toBe("boolean");
+    expect(Array.isArray(actual.REPORT_REVIEW_WORKSPACE_ALLOWLIST)).toBe(true);
     const src = stripComments(readFileSync(join(ROOT, "lib/workspaces/reportReviewRollout.ts"), "utf8"));
     expect(src).not.toMatch(/process\.env/);
   });

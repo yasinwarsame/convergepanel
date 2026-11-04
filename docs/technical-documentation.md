@@ -1251,11 +1251,11 @@ Research without a `governanceRecord` (Generic and the other non-Milestone-2 typ
 
 The B3 export is separate from the Order 6-frozen research exports.
 
-**Gating.** Everything is gated by the compile-time `REPORT_REVIEW_ENABLED` (`lib/workspaces/reportReviewRollout.ts`, currently `false`) and by Approval Workflow admission.
+**Gating.** Everything is gated by the compile-time `REPORT_REVIEW_ENABLED` (`lib/workspaces/reportReviewRollout.ts`) plus the single-workspace allow-list (`REPORT_REVIEW_WORKSPACE_ALLOWLIST` in the same file, evaluated by `lib/workspaces/reportReviewActivation.ts`; see `docs/workspaces/report-review-activation-allowlist.md` for the current value and the TeamCP pilot) and by Approval Workflow admission.
 
 **Copy.** The fixed disclaimer lives in `lib/governance/reportReviewCopy.ts`.
 
-**Indexes.** The four `reportReview.*` composite indexes are declared in `firestore.indexes.json` but **not deployed**. A missing index makes the merged queue answer 503 `review_queue_index_unavailable`.
+**Indexes.** The four `reportReview.*` composite indexes are declared in `firestore.indexes.json` and were deployed to Production on 2026-11-04 (all READY). A missing index makes the merged queue answer 503 `review_queue_index_unavailable`.
 
 **Details.** Contracts, the index manifest and the activation checklist: [`docs/workspaces/approval-b3-ui-audit-export.md`](./workspaces/approval-b3-ui-audit-export.md).
 

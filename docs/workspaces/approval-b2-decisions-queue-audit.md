@@ -2,7 +2,7 @@
 
 **Scope.** Owner-authorized Stage B2 (2026-11-03), stacked on B1 (#284).
 
-**Status.** Report Review stays OFF. The switch is the compile-time `false` in `lib/workspaces/reportReviewRollout.ts`.
+**Status.** Report Review stays OFF. The switch is the compile-time `false` in `lib/workspaces/reportReviewRollout.ts`. (Stage status at B2. Superseded 2026-11-04 by the TeamCP pilot: see `report-review-activation-allowlist.md`.)
 
 ## 1. Decision contract (server-authoritative, shared with the UI)
 
@@ -31,7 +31,7 @@ A decision requires **all** of the following:
 
 ## 2. Combined Approval Queue
 
-| View | Report Review OFF (Production today) | Report Review ON |
+| View | Report Review OFF (Production at B2; every Workspace not on the allow-list) | Report Review ON (allow-listed Workspace only) |
 |---|---|---|
 | Needs review, Changes requested, Recently approved | Unchanged single governed scan; version-1 cursors | Merged scan over two `runs` streams (governed + report review). One total order: sort value desc, then document id desc. Frontier rule; cursor = last **consumed** position; version-2 cursors |
 | Assigned to me, Overdue | Unchanged | The same assignment-driven scans. Revalidation accepts report reviews; the submitter is excluded |
@@ -44,7 +44,7 @@ A decision requires **all** of the following:
 - A failed query returns an explicit 500, never a silently truncated page. A sort value of an unexpected type (a non-Timestamp `createdAt`, or a non-string `reviewedAt`) also fails explicitly.
 - **Known scope:** `rejected` items, governed or report review, appear in no Approval Queue view, exactly as governed rejections do today.
 
-**Indexes.** Four composite indexes are declared in `firestore.indexes.json`: (`workspaceId`[, `projectId`], `reportReview.humanReview.status`, `createdAt` | `reportReview.humanReview.reviewedAt` desc). They are **not deployed**; deploying them is a precondition for enablement.
+**Indexes.** Four composite indexes are declared in `firestore.indexes.json`: (`workspaceId`[, `projectId`], `reportReview.humanReview.status`, `createdAt` | `reportReview.humanReview.reviewedAt` desc). They are **not deployed**; deploying them is a precondition for enablement. (Superseded 2026-11-04: deployed and READY in Production.)
 
 ### Evidence
 
