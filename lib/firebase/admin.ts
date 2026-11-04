@@ -8,7 +8,7 @@ import admin from "firebase-admin";
 import { App, cert, getApps, initializeApp } from "firebase-admin/app";
 import { Auth, getAuth } from "firebase-admin/auth";
 import { Firestore, getFirestore } from "firebase-admin/firestore";
-import { evaluateServerFirebaseIsolation, serviceAccountProject, PRODUCTION_FIREBASE_PROJECT_NUMBER, type FirebaseIsolationVerdict } from "./projectIsolation";
+import { evaluateServerFirebaseIsolation, serviceAccountProject, PRODUCTION_FIREBASE_PROJECT_ID, PRODUCTION_FIREBASE_PROJECT_NUMBER, type FirebaseIsolationVerdict } from "./projectIsolation";
 import { readOperatorGrant } from "./operatorGrant";
 
 /**
@@ -22,8 +22,9 @@ function enforceFirebaseIsolation(verdict: FirebaseIsolationVerdict, projectId: 
     const grant = readOperatorGrant();
     const pid = typeof projectId === "string" ? projectId.trim().toLowerCase() : "";
     const saProject = serviceAccountProject(clientEmail);
-    const credentialMatches = saProject === null || saProject === pid || saProject === PRODUCTION_FIREBASE_PROJECT_NUMBER;
-    if (grant && pid.length > 0 && grant.projectId === pid && credentialMatches) {
+    // Review m-1: lifted ONLY for exactly the Production project, with a credential that is a Production service account.
+    const credentialIsProduction = saProject === PRODUCTION_FIREBASE_PROJECT_ID || saProject === PRODUCTION_FIREBASE_PROJECT_NUMBER;
+    if (grant && pid === PRODUCTION_FIREBASE_PROJECT_ID && grant.projectId === pid && credentialIsProduction) {
       console.error(`[firebase-admin] OPERATOR access to Production project "${pid}" (operation=${grant.operation}, mode=${grant.mode}, granted ${grant.grantedAt})`);
       return;
     }

@@ -18,7 +18,7 @@
  * wiring the real `adminDb` binding, running the report, and printing it.
  *
  * Usage:
- *   npm run projects:dry-run-normalization
+ *   npm run projects:dry-run-normalization -- --confirm-project=<firebase-project-id>   (required for Production access)
  */
 
 const dotenv = require("dotenv");

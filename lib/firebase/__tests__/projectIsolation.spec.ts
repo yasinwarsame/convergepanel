@@ -108,9 +108,12 @@ function loadAdmin(env: Partial<Record<(typeof ENV_KEYS)[number], string>>, exis
     jest.doMock("firebase-admin/firestore", () => ({ getFirestore: () => ({ kind: "db", settings: () => undefined }) }));
     const log = jest.spyOn(console, "log").mockImplementation(() => undefined);
     const err = jest.spyOn(console, "error").mockImplementation(() => undefined);
-    mod = require("../admin");
-    log.mockRestore();
-    err.mockRestore();
+    try {
+      mod = require("../admin");
+    } finally {
+      log.mockRestore();
+      err.mockRestore();
+    }
   });
   return { initializeApp, mod: mod! };
 }

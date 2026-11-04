@@ -8,15 +8,26 @@
  *   - lib/firebase/admin.ts has not been loaded yet, and no grant exists yet.
  * Without `--confirm-project`, nothing is granted and Production stays refused (the script's own checks then report it).
  *
- * Mode: "write" only when `--execute` is on the command line, otherwise "read-only". The grant never weakens a script's
- * own safeguards (exact project confirmation, --execute, candidate count + fingerprint, ALLOW_* acknowledgements); it
- * only lets lib/firebase/admin.ts initialize against the project the operator named. Read-only scripts stay structurally
- * write-free.
+ * Mode is bound to the operation (OPERATOR_OPERATIONS): the read-only scripts refuse `--execute`; the write-capable
+ * ones are "write" only with `--execute`. The mode is recorded and logged; WRITES themselves stay controlled by each
+ * script's own existing gates (exact project confirmation, --execute, candidate count + fingerprint, ALLOW_*
+ * acknowledgements) — the grant never weakens them, it only lets lib/firebase/admin.ts initialize against Production.
  *
  * Only the four reviewed scripts may import this module (pinned by lib/firebase/__tests__/operatorAccess.spec.ts).
  */
 import * as path from "path";
 import { OPERATOR_GRANT_KEY, operatorShellRefusal, type OperatorProductionGrant } from "../../lib/firebase/operatorGrant";
+
+/**
+ * The ONLY operations that may obtain a grant, and the mode each may have (review m-2: mode is bound to the operation,
+ * not merely recorded). Read-only operations refuse `--execute` outright; write-capable ones are "write" only with it.
+ */
+export const OPERATOR_OPERATIONS: Readonly<Record<string, "read-only" | "write-with-execute">> = Object.freeze({
+  "check-project-run-invariant.ts": "read-only",
+  "dry-run-project-normalization.ts": "read-only",
+  "execute-project-normalization.ts": "write-with-execute",
+  "provision-existing-personal-workspaces.ts": "write-with-execute",
+});
 
 export function grantOperatorProductionAccessFromArgv(argv: readonly string[], loadedModules: readonly string[] = Object.keys(require.cache ?? {})): OperatorProductionGrant | null {
   const confirmArgs = argv.filter((a) => a.startsWith("--confirm-project="));
@@ -33,11 +44,16 @@ export function grantOperatorProductionAccessFromArgv(argv: readonly string[], l
   if (loadedModules.some((m) => /[\\/]lib[\\/]firebase[\\/]admin\.(ts|js)$/.test(m))) {
     throw new Error("[operator] Refusing: lib/firebase/admin was loaded before the operator grant. Import scripts/lib/operatorProductionAccess first.");
   }
+  const operation = path.basename(argv[1] ?? "");
+  const policy = Object.prototype.hasOwnProperty.call(OPERATOR_OPERATIONS, operation) ? OPERATOR_OPERATIONS[operation] : undefined;
+  if (policy === undefined) throw new Error(`[operator] Refusing: "${operation}" is not a reviewed operator operation.`);
+  const execute = argv.includes("--execute");
+  if (policy === "read-only" && execute) throw new Error(`[operator] Refusing: ${operation} is read-only and does not accept --execute.`);
   const grant: OperatorProductionGrant = Object.freeze({
     version: 1,
     projectId,
-    operation: path.basename(argv[1] ?? "unknown-operation"),
-    mode: argv.includes("--execute") ? "write" : "read-only",
+    operation,
+    mode: policy === "write-with-execute" && execute ? "write" : "read-only",
     grantedAt: new Date().toISOString(),
   });
   Object.defineProperty(globalThis, OPERATOR_GRANT_KEY, { value: grant, writable: false, configurable: false, enumerable: false });

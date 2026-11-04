@@ -1,6 +1,22 @@
 # Firebase environment isolation (I-1/I-2)
 
-Owner decisions: 2026-11-04. Production Firebase (`convergepanel`) is reachable only from the Vercel Production deployment and from explicitly granted operator scripts. Everything else fails closed.
+Owner decisions: 2026-11-04. Through the application's Firebase modules (`lib/firebase/admin.ts`, `lib/firebase/client.ts`), Production Firebase (`convergepanel`) is reachable only from:
+- the Vercel Production deployment;
+- the four explicitly granted operator scripts below.
+
+Everything else that uses those modules fails closed.
+
+**Known residual: legacy scripts.** Several older scripts call `initializeApp` themselves and do **not** go through this rule:
+- `scripts/setAdmin.ts`
+- `scripts/seed-adaptive-multi-reviewer-e2e.ts`
+- `scripts/cleanup-adaptive-multi-reviewer-e2e.ts`
+- `scripts/set-admin-claim.js`
+- `scripts/set-admin-simple.js`
+- `scripts/set-admin-by-uid.js`
+- `scripts/check-admin-claims.js`
+- `scripts/verify-admin-claims.js`
+
+They are manual operator tools with their own credentials. Some default to `convergepanel`, and some carry their own safety guards. Bringing them under this rule, or retiring them, is a tracked follow-up.
 
 ## The rule
 
@@ -69,13 +85,25 @@ The approach is **dedicated, explicitly granted access, with no environment swit
    - the operator names the target with `--confirm-project=<id>`;
    - it runs in a local operator shell, so `VERCEL`, `VERCEL_ENV` and `NEXT_RUNTIME` are unset and `NODE_ENV` is not `production`;
    - `lib/firebase/admin` has not loaded yet, and no grant exists yet.
-3. The mode is `write` only with `--execute`; otherwise it is `read-only`.
+3. **The mode is bound to the operation.**
+   - The read-only scripts (`check-project-run-invariant.ts`, `dry-run-project-normalization.ts`) refuse `--execute`.
+   - The write-capable scripts are `write` only with `--execute`.
+   - Any other operation gets no grant.
+   - The mode is recorded and logged. Writes themselves remain controlled by each script's own existing gates.
 4. It prints an audit line: project, operation, mode and time.
-5. `lib/firebase/admin.ts` lifts a Production refusal **only** for a valid grant that names exactly the resolved project, with a credential that belongs to it. It logs `OPERATOR access to Production project …`.
+5. `lib/firebase/admin.ts` lifts a Production refusal **only** when all of these hold:
+   - the grant is valid;
+   - the resolved project is exactly `convergepanel` and the grant names it;
+   - the credential is a Production service account (by IAM domain or project number).
+
+   It then logs `OPERATOR access to Production project …`.
 
 **What does not change:**
 - No variable can turn operator access on.
 - Web request handlers and Preview cannot use it: the reader refuses inside Vercel and inside Next.js.
 - Static tests pin that only these four scripts import the writer and only `admin.ts` reads the grant.
-- **Credentials:** the operator's existing service-account credential, supplied to the shell the same way as today. This adds no new authentication path.
+- **Credentials:** the operator's existing Production service-account credential. This adds no new authentication path.
+  - Each script loads `.env.local` with dotenv before the grant. A `.env.local` written by `vercel env pull` contains `VERCEL`/`VERCEL_ENV`, so the grant refuses it, by design.
+  - Run operator commands from a **separate operator checkout** whose `.env.local` contains only the Production Admin credential and `FIREBASE_PROJECT_ID`, with no `VERCEL*` lines and no `NEXT_PUBLIC_*` values.
+  - Never put that credential in a development checkout.
 - Running any write-capable command still needs its own separate approval.

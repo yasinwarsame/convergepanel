@@ -1439,7 +1439,9 @@ All exported from `lib/env.ts`.
 - **Identity checked.** Server: the projectId or the service-account email's project. Browser: the API key, projectId, authDomain, storageBucket, project number or appId.
 - **Environment signal.** Server: `VERCEL_ENV`, read at runtime. Browser: `NEXT_PUBLIC_VERCEL_ENV`, inlined at build. Both depend on Vercel's "Automatically expose System Environment Variables" setting.
 - **No hard-coded fallbacks.** A missing or refused browser config initializes an unroutable placeholder project. A refused Admin init leaves `adminDb`/`adminAuth` undefined, which routes treat as "Firestore unavailable".
-- **Local dev, Jest and CI** therefore cannot reach the Production project. This also applies to the operator scripts that import `lib/firebase/admin`.
+- **Local dev, Jest and CI** therefore cannot reach the Production project.
+- **Exception:** four reviewed operator scripts may reach Production through an explicit, in-process operator grant. It requires `--confirm-project`, a local operator shell, and a mode bound to the operation.
+- Details, and the remaining legacy scripts that do not yet use the rule, are in [`docs/operations/firebase-environment-isolation.md`](./operations/firebase-environment-isolation.md).
 
 
 **AI providers:**

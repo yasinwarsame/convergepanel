@@ -46,15 +46,18 @@ function runCase(opts: { env: Record<string, string | undefined>; argv: string[]
       jest.doMock("firebase-admin/auth", () => ({ getAuth: () => ({}) }));
       jest.doMock("firebase-admin/firestore", () => ({ getFirestore: () => ({ settings: () => undefined }) }));
       const quiet = [jest.spyOn(console, "log").mockImplementation(() => undefined), jest.spyOn(console, "error").mockImplementation(() => undefined)];
-      const writer = require("../../../scripts/lib/operatorProductionAccess");
       try {
-        grantResult = writer.grantOperatorProductionAccessFromArgv(opts.argv, opts.loadAdminFirst ? ["/x/lib/firebase/admin.ts"] : []);
-      } catch (e) {
-        grantError = e;
+        const writer = require("../../../scripts/lib/operatorProductionAccess");
+        try {
+          grantResult = writer.grantOperatorProductionAccessFromArgv(opts.argv, opts.loadAdminFirst ? ["/x/lib/firebase/admin.ts"] : []);
+        } catch (e) {
+          grantError = e;
+        }
+        if (opts.tamper && slotHolder[OPERATOR_GRANT_KEY]) opts.tamper(slotHolder);
+        admin = require("../admin");
+      } finally {
+        quiet.forEach((q) => q.mockRestore());
       }
-      if (opts.tamper && slotHolder[OPERATOR_GRANT_KEY]) opts.tamper(slotHolder);
-      admin = require("../admin");
-      quiet.forEach((q) => q.mockRestore());
     });
   } finally {
     defineSpy.mockRestore();
@@ -64,6 +67,7 @@ function runCase(opts: { env: Record<string, string | undefined>; argv: string[]
   return { initializeApp, grantResult, grantError, adminDb: admin!.adminDb };
 }
 const ARGV = (...a: string[]) => ["node", "/repo/scripts/projects/check-project-run-invariant.ts", ...a];
+const ARGV_FOR = (script: string, ...a: string[]) => ["node", `/repo/scripts/x/${script}`, ...a];
 
 describe("operator grant → Admin init", () => {
   it("explicit --confirm-project in a local operator shell grants read-only access to exactly that project", () => {
@@ -74,9 +78,30 @@ describe("operator grant → Admin init", () => {
     expect(r.initializeApp).toHaveBeenCalledTimes(1);
     expect(r.adminDb).toBeDefined();
   });
-  it("--execute marks the grant write-capable (the script's own write safeguards still apply)", () => {
-    const r = runCase({ env: { FIREBASE_SERVICE_ACCOUNT_JSON: PROD_SA }, argv: ARGV("--execute", "--confirm-project=convergepanel") });
-    expect(r.grantResult).toMatchObject({ mode: "write" });
+  it.each(["execute-project-normalization.ts", "provision-existing-personal-workspaces.ts"])("write-capable %s: write only with --execute, read-only without", (script) => {
+    expect(runCase({ env: { FIREBASE_SERVICE_ACCOUNT_JSON: PROD_SA }, argv: ARGV_FOR(script, "--execute", "--confirm-project=convergepanel") }).grantResult).toMatchObject({ mode: "write", operation: script });
+    expect(runCase({ env: { FIREBASE_SERVICE_ACCOUNT_JSON: PROD_SA }, argv: ARGV_FOR(script, "--confirm-project=convergepanel") }).grantResult).toMatchObject({ mode: "read-only", operation: script });
+  });
+  it.each(["check-project-run-invariant.ts", "dry-run-project-normalization.ts"])("read-only %s refuses --execute (mode bound to the operation)", (script) => {
+    const r = runCase({ env: { FIREBASE_SERVICE_ACCOUNT_JSON: PROD_SA }, argv: ARGV_FOR(script, "--execute", "--confirm-project=convergepanel") });
+    expect(String(r.grantError)).toMatch(/is read-only and does not accept --execute/);
+    expect(r.initializeApp).not.toHaveBeenCalled();
+  });
+  it("an operation that is not one of the four reviewed scripts gets no grant", () => {
+    const r = runCase({ env: { FIREBASE_SERVICE_ACCOUNT_JSON: PROD_SA }, argv: ARGV_FOR("setAdmin.ts", "--confirm-project=convergepanel") });
+    expect(String(r.grantError)).toMatch(/not a reviewed operator operation/);
+    expect(r.initializeApp).not.toHaveBeenCalled();
+  });
+  it("the grant never lifts a refusal for a non-Production project (review m-1: numeric Production SA + other project id)", () => {
+    const odd = JSON.stringify({ project_id: "foo-project", client_email: "907484474744-compute@developer.gserviceaccount.com", private_key: "k" });
+    const r = runCase({ env: { FIREBASE_SERVICE_ACCOUNT_JSON: odd }, argv: ARGV("--confirm-project=foo-project") });
+    expect(r.grantResult).toMatchObject({ projectId: "foo-project" });
+    expect(r.initializeApp).not.toHaveBeenCalled();
+  });
+  it("a Production project id with an unrecognised (non-Production) credential email is not lifted", () => {
+    const unknownEmail = JSON.stringify({ project_id: "convergepanel", client_email: "someone@example.com", private_key: "k" });
+    const r = runCase({ env: { FIREBASE_SERVICE_ACCOUNT_JSON: unknownEmail }, argv: ARGV("--confirm-project=convergepanel") });
+    expect(r.initializeApp).not.toHaveBeenCalled();
   });
   it("no --confirm-project → no grant → Production refused (no fallback)", () => {
     const r = runCase({ env: { FIREBASE_SERVICE_ACCOUNT_JSON: PROD_SA }, argv: ARGV() });
