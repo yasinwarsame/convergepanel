@@ -56,7 +56,8 @@ export async function getReviewerCandidates(args: { workspaceId: string; runId: 
       projectIdValue: runData.projectId,
     });
     if (target.kind !== "valid_workspace_review_target") return { status: "run_not_found" };
-    // Order B, Stage B3 — for a report-review run (dormant while Report Review is OFF, and never for a governed run),
+    // Order B, Stage B3 — for a report-review run (dormant in Production while Report Review is OFF; outside Production
+    // such a run answers run_not_found; never for a governed run),
     // the submitter is excluded, exactly as the assignment transaction refuses them (B2 submitter guard).
     const reportReview = reportReviewAssignmentContext(runData);
     if (reportReview.kind === "malformed") return { status: "run_not_found" };

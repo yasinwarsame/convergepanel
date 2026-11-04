@@ -1,7 +1,8 @@
 /**
  * Owner Order B (2026-11-03) — the ONE activation rule for every report-review read and write surface.
  *
- *   isReportReviewEnabledForWorkspace(workspaceId) ⇔ REPORT_REVIEW_ENABLED
+ *   isReportReviewEnabledForWorkspace(workspaceId) ⇔ the server runs in the Vercel Production deployment
+ *                                                  ∧ REPORT_REVIEW_ENABLED
  *                                                  ∧ the allow-list configuration is valid
  *                                                  ∧ workspaceId is a string listed in it
  *
@@ -17,6 +18,7 @@
  * Governed review never consults this rule.
  */
 import { REPORT_REVIEW_ENABLED, REPORT_REVIEW_WORKSPACE_ALLOWLIST } from "./reportReviewRollout";
+import { isProductionDeployment } from "./reportReviewDeploymentEnvironment";
 
 export const REPORT_REVIEW_MAX_ACTIVE_WORKSPACES = 1;
 const WORKSPACE_ID = /^[A-Za-z0-9_-]{1,128}$/;
@@ -36,6 +38,9 @@ export function evaluateReportReviewActivation(enabled: unknown, allowlist: unkn
 }
 
 export function reportReviewActivationConfig(): ReportReviewActivationConfig {
+  // Production-only guard (Option C): outside the Vercel Production deployment report review is disabled everywhere,
+  // whatever the switch and allow-list say. Checked first, so no other configuration is consulted there.
+  if (!isProductionDeployment()) return { status: "disabled" };
   return evaluateReportReviewActivation(REPORT_REVIEW_ENABLED, REPORT_REVIEW_WORKSPACE_ALLOWLIST);
 }
 

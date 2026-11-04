@@ -6,6 +6,7 @@ Status: development only (owner authorization 2026-11-03). **Nothing is activate
 
 `isReportReviewEnabledForWorkspace(workspaceId)` (in `lib/workspaces/reportReviewActivation.ts`) is true only when **all** of these hold:
 
+0. the server runs in the Vercel **Production** deployment: `process.env.VERCEL_ENV === "production"` exactly (`lib/workspaces/reportReviewDeploymentEnvironment.ts`). This is checked first, and anything else (Preview, development, unset, a different case or spacing) disables report review in every Workspace. It is a server-side platform signal; request headers, query strings and browser configuration are never consulted. Local `next dev`, Jest and CI are not Production unless `VERCEL_ENV=production` is supplied explicitly: by a test, or by a local `.env.local` from `vercel env pull --environment=production`, which must not be used to run a local server. Outside Production, a run that already carries a report review also accepts **no reviewer-assignment change** (put, delete or candidate listing answer `run_not_found`), because Preview shares Production's Firestore. Before an activation, confirm the runtime value in Production; it relies on Vercel's "Automatically expose System Environment Variables" setting;
 1. the compile-time switch is exactly `true`;
 2. the allow-list is valid:
    - an array of 1 to `REPORT_REVIEW_MAX_ACTIVE_WORKSPACES` (= 1) ids;
@@ -38,12 +39,14 @@ The allow-list **adds** a restriction and grants nothing. These checks all still
 
 A member of the trial Workspace gets nothing in another Workspace: the route, mutation, context, export and queue all refuse there. Addressing the trial Workspace with another Workspace's run is refused by containment.
 
-**Unlisted Workspaces** behave exactly as before B2. Even a leftover report review there, for example after a rollback, stays dormant:
+**Unlisted Workspaces** (in the Production deployment) behave exactly as before B2. Even a leftover report review there, for example after a rollback, stays dormant:
 - the submitter is assignable;
 - no report-review audit row is written;
 - the candidate list is unchanged;
 - decisions are refused;
 - the queue is the governed-only scan. It is byte-identical whether the feature is on (for another Workspace) or fully off.
+
+Outside the Production deployment (Preview, development), a run that carries a report review accepts no reviewer-assignment change at all, whatever the switch and allow-list say: put, delete and candidate listing answer `run_not_found`. This also applies to leftover report reviews after a rollback.
 
 Governed review never consults the rule.
 
@@ -51,7 +54,7 @@ Governed review never consults the rule.
 
 A rollback (switch off, or the trial Workspace removed from the allow-list) stops **new** report-review operations:
 - submission, decisions and resubmission are refused;
-- a reviewer assignment becomes an ordinary assignment and writes no report-review audit row.
+- in the Production deployment, a reviewer assignment becomes an ordinary assignment and writes no report-review audit row. Outside Production, assignment of a run carrying a report review stays frozen (`run_not_found`).
 
 It does **not** erase evidence. Existing report-review Audit Log rows stay visible, byte-identical, to users authorized to read that Workspace's Audit Log (`audit.read`).
 

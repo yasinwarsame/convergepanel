@@ -13,6 +13,7 @@ jest.mock("@/lib/firebase/admin", () => ({
   },
 }));
 const cfg: { enabled: unknown; list: unknown } = { enabled: true, list: ["wsTrial"] };
+jest.mock("@/lib/workspaces/reportReviewDeploymentEnvironment", () => ({ isProductionDeployment: () => true })); // Production-only guard: these specs exercise report review as deployed in Production
 jest.mock("@/lib/workspaces/reportReviewRollout", () => ({
   get REPORT_REVIEW_ENABLED() {
     return cfg.enabled;
