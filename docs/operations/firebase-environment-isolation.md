@@ -26,6 +26,14 @@ They are manual operator tools with their own credentials. Some default to `conv
 - Server: the projectId, or the service-account email's project. Every email form counts: IAM, App Engine default, Compute default, Google-managed.
 - Browser: any of the web API key (Firebase Auth resolves the project from it), projectId, authDomain, storageBucket, project number (messagingSenderId) or appId.
 
+**Build-time guard (M-2).** `next.config.js` calls `lib/firebase/productionBuildConfigGuard.js` before anything is built. It fails the build in two cases:
+- A Vercel build has no `VERCEL_ENV`.
+- A Production build (`VERCEL_ENV`/`NEXT_PUBLIC_VERCEL_ENV` = `production`) does not have all of these:
+  - `NEXT_PUBLIC_VERCEL_ENV=production`;
+  - all six `NEXT_PUBLIC_FIREBASE_*` values, present and trimmed, identifying the Production project and never the placeholder.
+
+So a broken Production release cannot be created: Vercel keeps serving the previous deployment. Preview, development, local and CI builds are not checked. `NEXT_PUBLIC_VERCEL_ENV` is a Vercel framework system variable, not a project variable. It is available at build and runtime while "Automatically expose System Environment Variables" is on, but it is missing in `vercel --prebuilt` deployments, which the guard would then refuse.
+
 **When it is allowed.** Only when the deployment environment is exactly `production`:
 - Server: `VERCEL_ENV`, read at runtime.
 - Browser: `NEXT_PUBLIC_VERCEL_ENV`, inlined at build.
@@ -102,8 +110,13 @@ The approach is **dedicated, explicitly granted access, with no environment swit
 - No variable can turn operator access on.
 - Web request handlers and Preview cannot use it: the reader refuses inside Vercel and inside Next.js.
 - Static tests pin that only these four scripts import the writer and only `admin.ts` reads the grant.
-- **Credentials:** the operator's existing Production service-account credential. This adds no new authentication path.
-  - Each script loads `.env.local` with dotenv before the grant. A `.env.local` written by `vercel env pull` contains `VERCEL`/`VERCEL_ENV`, so the grant refuses it, by design.
-  - Run operator commands from a **separate operator checkout** whose `.env.local` contains only the Production Admin credential and `FIREBASE_PROJECT_ID`, with no `VERCEL*` lines and no `NEXT_PUBLIC_*` values.
-  - Never put that credential in a development checkout.
+- **Credentials:** the operator's existing, approved Production service-account key file. This adds no new authentication path, but it must be selected **explicitly**: `--operator-credentials=<path to the JSON key>`.
+  - The writer validates the file: `project_id` is `convergepanel`, `client_email` is a Production service account, and a private key is present.
+  - It removes every other Firebase credential variable from the process. This matters because the base64 form would otherwise win.
+  - It then installs only that file. Credentials from `.env.local` or the environment are **never** used for Production.
+- **Where to run.** Each script loads `.env.local` with dotenv first.
+  - A `.env.local` from `vercel env pull` sets `VERCEL`/`VERCEL_ENV`. Production operator access then refuses with a specific message that names `vercel env pull`.
+  - Run Production operator commands from a **separate operator checkout** with no pulled Vercel variables, and keep the key file outside any repository.
+  - A **non-Production** target (`--confirm-project=<isolated-project>`) needs no grant. It works from an ordinary development checkout with the isolated credentials.
+- **Preflight.** `--operator-preflight` runs every check (target, shell, credential file, operation and mode, load order), prints the result, and exits **without** granting or touching Firebase. Example: `npm run verify:project-run-invariant -- --confirm-project=convergepanel --operator-credentials=/secure/convergepanel-operator.json --operator-preflight`.
 - Running any write-capable command still needs its own separate approval.
