@@ -1251,7 +1251,7 @@ Research without a `governanceRecord` (Generic and the other non-Milestone-2 typ
 
 The B3 export is separate from the Order 6-frozen research exports.
 
-**Gating.** Everything is gated by the compile-time `REPORT_REVIEW_ENABLED` (`lib/workspaces/reportReviewRollout.ts`, currently `false`) and by Approval Workflow admission.
+**Gating.** Everything is gated by a Production-only deployment guard (`VERCEL_ENV === "production"` exactly, checked first; `lib/workspaces/reportReviewDeploymentEnvironment.ts`), by the compile-time `REPORT_REVIEW_ENABLED` (`lib/workspaces/reportReviewRollout.ts`, currently `false`), by the single-workspace allow-list in the same file (evaluated by `lib/workspaces/reportReviewActivation.ts`), and by Approval Workflow admission.
 
 **Copy.** The fixed disclaimer lives in `lib/governance/reportReviewCopy.ts`.
 

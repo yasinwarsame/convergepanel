@@ -6,6 +6,7 @@ Status: development only (owner authorization 2026-11-03). **Nothing is activate
 
 `isReportReviewEnabledForWorkspace(workspaceId)` (in `lib/workspaces/reportReviewActivation.ts`) is true only when **all** of these hold:
 
+0. the server runs in the Vercel **Production** deployment: `process.env.VERCEL_ENV === "production"` exactly (`lib/workspaces/reportReviewDeploymentEnvironment.ts`). This is checked first, and anything else (Preview, development, unset, a different case or spacing) disables report review in every Workspace. It is a server-side platform signal; request headers, query strings and browser configuration are never consulted. Local `next dev`, Jest and CI are therefore never Production unless a test declares it;
 1. the compile-time switch is exactly `true`;
 2. the allow-list is valid:
    - an array of 1 to `REPORT_REVIEW_MAX_ACTIVE_WORKSPACES` (= 1) ids;

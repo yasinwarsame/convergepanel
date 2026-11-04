@@ -12,6 +12,7 @@ jest.mock("@/lib/firebase/admin", () => ({
   },
 }));
 const flags = { REPORT_REVIEW_ENABLED: true };
+jest.mock("@/lib/workspaces/reportReviewDeploymentEnvironment", () => ({ isProductionDeployment: () => true })); // Production-only guard: these specs exercise report review as deployed in Production
 jest.mock("@/lib/workspaces/reportReviewRollout", () => ({
   get REPORT_REVIEW_ENABLED() {
     return flags.REPORT_REVIEW_ENABLED;
