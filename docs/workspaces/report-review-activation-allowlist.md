@@ -1,6 +1,8 @@
 # Report review: single-workspace activation allow-list (Order B)
 
-Status: development only (owner authorization 2026-11-03). **Nothing is activated.** `REPORT_REVIEW_ENABLED = false` and `REPORT_REVIEW_WORKSPACE_ALLOWLIST = []`.
+Status: development only (owner authorization 2026-11-03). Production is **not activated** until a pilot activation PR is merged and deployed.
+
+**Pilot activation PR (prepared 2026-11-04, draft, NOT merged).** It sets `REPORT_REVIEW_ENABLED = true` and `REPORT_REVIEW_WORKSPACE_ALLOWLIST = ["Aw6kbjROOaOIhCXUiKlq"]` (Team Workspace "TeamCP"). Merging that PR **is** the activation action: once deployed, report review runs in TeamCP and nowhere else. It needs separate owner authorization. Rollback is a revert of that change (switch `false`, list `[]`), then a redeploy; the "Audit Log after rollback" section below applies. The shipped configuration is pinned by `lib/workspaces/__tests__/reportReviewTeamcpPilot.spec.ts`.
 
 ## Rule
 

@@ -6,7 +6,7 @@
  * byte-for-byte). Turning Report Review on therefore requires a separate, reviewed change and an owner enablement
  * decision — it cannot happen through configuration alone. Tests override this module with jest.mock.
  */
-export const REPORT_REVIEW_ENABLED = false as boolean;
+export const REPORT_REVIEW_ENABLED = true as boolean;
 
 /**
  * Owner Order B (2026-11-03) — single-workspace activation allow-list. Report review operates ONLY for a Workspace listed
@@ -14,4 +14,7 @@ export const REPORT_REVIEW_ENABLED = false as boolean;
  * a separate activation decision and added by a reviewed PR; it is never hard-coded speculatively. Validated by
  * lib/workspaces/reportReviewActivation.ts, which fails closed on any malformed configuration (see there).
  */
-export const REPORT_REVIEW_WORKSPACE_ALLOWLIST: readonly string[] = [];
+export const REPORT_REVIEW_WORKSPACE_ALLOWLIST: readonly string[] = [
+  // Owner pilot decision (2026-11-04): Team Workspace "TeamCP" only. Rollback = revert this change (switch false, list []).
+  "Aw6kbjROOaOIhCXUiKlq",
+];
