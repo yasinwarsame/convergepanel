@@ -174,6 +174,7 @@ describe("Preview + switch ON + allow-listed Workspace: every server-side surfac
       resubmitHttp: async () => { identity.uid = MEMBER; return (await resubmitPost(post(`${base(W, RUN)}/resubmit`, { purpose: { code: "internal_review" }, expectedCycle: rec.cycle }), params(W, RUN))).status; },
     };
     // Preview: concealed 404 on every route; mutations disabled; queue governed-only; assignment changes refused.
+    const storeBeforePreview = JSON.stringify([...db.docs.entries()].sort());
     setEnv("preview");
     for (const [name, call] of Object.entries(calls)) expect([name, await call()]).toEqual([name, 404]);
     expect(await submit(ADMIN)).toEqual({ ok: false, reason: "disabled" });
@@ -186,6 +187,7 @@ describe("Preview + switch ON + allow-listed Workspace: every server-side surfac
     expect(await assign(ADMIN, REVIEWER)).toEqual({ ok: false, reason: "run_not_found" });
     expect(await getReviewerCandidates({ workspaceId: W, runId: RUN })).toEqual({ status: "run_not_found" });
     expect(db.read(`runs/${RUN}/humanReviewAssignment/current`)).toBeUndefined();
+    expect(JSON.stringify([...db.docs.entries()].sort())).toBe(storeBeforePreview); // Preview wrote nothing at all
     const auditBefore = db.paths("workspaceMembershipEvents/").length;
 
     // Production: the same calls are admitted (status is whatever the operation itself answers — never the 404 gate).
@@ -211,9 +213,30 @@ describe("Preview + switch ON + allow-listed Workspace: every server-side surfac
     expect((await calls.decisionHttp())).toBe(200); // now assigned: decides in Production
   });
 
-  it("governed (non-report-review) runs keep their ordinary assignment behaviour in Preview", async () => {
+  it("plain runs (no report review) keep their ordinary assignment behaviour in Preview", async () => {
     setEnv("preview");
     expect((await assign(ADMIN, REVIEWER)).ok).toBe(true);
+  });
+
+  it.each([
+    ["shipped/dark: switch off, empty list", false, [] as string[]],
+    ["rollback: switch on, the run's Workspace delisted", true, ["wsOther"]],
+    ["rollback: switch off, Workspace still listed", false, ["wsPilot"]],
+  ])("Preview freezes assignment of a run carrying a report review under %s; Production keeps ordinary assignment", async (_l, enabled, list) => {
+    // Leftover report review (created while active in Production), then the configuration changes.
+    setEnv("production");
+    expect((await submit(MEMBER)).ok).toBe(true);
+    cfg.enabled = enabled;
+    cfg.list = list;
+    const before = JSON.stringify([...db.docs.entries()].sort());
+    setEnv("preview");
+    expect(await assign(ADMIN, REVIEWER)).toEqual({ ok: false, reason: "run_not_found" });
+    expect(await assign(ADMIN, MEMBER)).toEqual({ ok: false, reason: "run_not_found" });
+    expect(await getReviewerCandidates({ workspaceId: W, runId: RUN })).toEqual({ status: "run_not_found" });
+    expect(JSON.stringify([...db.docs.entries()].sort())).toBe(before); // nothing written in Preview
+    // Production control: ordinary (dormant) assignment, exactly as the rollback ruling says.
+    setEnv("production");
+    expect((await assign(ADMIN, MEMBER)).ok).toBe(true); // submitter assignable when dormant
   });
 
   it("client-supplied environment hints are ignored (headers, query string)", async () => {
@@ -260,7 +283,7 @@ describe("Production + switch ON + allow-listed Workspace: review invariants unc
   });
 });
 
-describe("static: the guard is the single reader of the deployment signal", () => {
+describe("static: the guard is the single reader of the deployment signal (a name-based pin over lib/app/components; not a proof — middleware.ts and scripts/ are not scanned)", () => {
   const strip = (src: string) => src.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
   function walk(dir: string, out: string[] = []): string[] {
     for (const e of readdirSync(dir, { withFileTypes: true })) {
