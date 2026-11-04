@@ -15,10 +15,25 @@ const PROD_SA_EMAIL = "firebase-adminsdk-x@convergepanel.iam.gserviceaccount.com
 const PREVIEW_SA_EMAIL = "firebase-adminsdk-x@convergepanel-preview.iam.gserviceaccount.com";
 const NON_PROD_ENVS: unknown[] = ["preview", "development", undefined, "", "Production", " production", "production ", "prod", null, 1];
 
-const PROD_WEB = { apiKey: "AIzaProd", authDomain: "convergepanel.firebaseapp.com", projectId: "convergepanel", storageBucket: "convergepanel.firebasestorage.app", messagingSenderId: "907484474744", appId: "1:907484474744:web:abc" };
+const PROD_WEB = { apiKey: "AIzaSyCUr6oygS_YWxpdXa2pXVryebPzSnOUxdo", authDomain: "convergepanel.firebaseapp.com", projectId: "convergepanel", storageBucket: "convergepanel.firebasestorage.app", messagingSenderId: "907484474744", appId: "1:907484474744:web:abc" };
 const PREVIEW_WEB = { apiKey: "AIzaPrev", authDomain: "convergepanel-preview.firebaseapp.com", projectId: "convergepanel-preview", storageBucket: "convergepanel-preview.firebasestorage.app", messagingSenderId: "111111111111", appId: "1:111111111111:web:def" };
 
 describe("server rule (I-2)", () => {
+  it.each([
+    ["App Engine default", "convergepanel@appspot.gserviceaccount.com"],
+    ["Compute default", "907484474744-compute@developer.gserviceaccount.com"],
+    ["Google-managed", "service-907484474744@gcp-sa-firestore.iam.gserviceaccount.com"],
+    ["IAM (mixed case)", "Firebase-AdminSDK-x@ConvergePanel.iam.gserviceaccount.com"],
+  ])("every Production service-account form is Production identity: %s", (_l, email) => {
+    expect(evaluateServerFirebaseIsolation({ projectId: "convergepanel-preview", clientEmail: email, deploymentEnv: "preview" })).toEqual({ ok: false, reason: "production_project_outside_production" });
+    expect(evaluateServerFirebaseIsolation({ projectId: "convergepanel", clientEmail: email, deploymentEnv: "production" })).toEqual({ ok: true });
+  });
+  it("outside Production a credential must belong to the project it is used for; Production is never refused for a mismatch", () => {
+    expect(evaluateServerFirebaseIsolation({ projectId: "convergepanel-preview", clientEmail: "x@other-project.iam.gserviceaccount.com", deploymentEnv: "preview" })).toEqual({ ok: false, reason: "credential_project_mismatch" });
+    expect(evaluateServerFirebaseIsolation({ projectId: "convergepanel-preview", clientEmail: "x@other-project.iam.gserviceaccount.com", deploymentEnv: "production" })).toEqual({ ok: true });
+    expect(evaluateServerFirebaseIsolation({ projectId: "convergepanel-preview", clientEmail: "someone@example.com", deploymentEnv: "preview" })).toEqual({ ok: true }); // unrecognised form: no project to compare
+  });
+
   it("Production deployment may use the Production project", () => {
     expect(evaluateServerFirebaseIsolation({ projectId: "convergepanel", clientEmail: PROD_SA_EMAIL, deploymentEnv: "production" })).toEqual({ ok: true });
   });
@@ -48,7 +63,7 @@ describe("browser rule (I-1)", () => {
   });
   it("any single Production identity field is enough to refuse outside Production", () => {
     for (const [k, v] of Object.entries(PROD_WEB)) {
-      if (k === "apiKey") continue; // the API key is not a project identifier
+      // apiKey included: Firebase Auth resolves the project FROM the API key (review MAJOR-1).
       const mixed = { ...PREVIEW_WEB, [k]: v };
       expect(resolveBrowserFirebaseConfig(mixed, "preview")).toMatchObject({ status: "unavailable", reason: "production_project_outside_production" });
     }
@@ -143,10 +158,24 @@ describe("REAL Admin init (I-2): every credential path", () => {
     expect(initializeApp).not.toHaveBeenCalled();
   });
   it("an app already in the SDK registry that points at convergepanel is refused outside Production", () => {
-    const { initializeApp, mod } = loadAdmin({ FIREBASE_SERVICE_ACCOUNT_JSON: sa("convergepanel-preview", PREVIEW_SA_EMAIL), VERCEL_ENV: "preview" }, [{ options: { projectId: "convergepanel" } }]);
+    const { initializeApp, mod } = loadAdmin({ FIREBASE_SERVICE_ACCOUNT_JSON: sa("convergepanel-preview", PREVIEW_SA_EMAIL), VERCEL_ENV: "preview" }, [{ name: "[DEFAULT]", options: { projectId: "convergepanel" } }]);
     expect(initializeApp).not.toHaveBeenCalled();
     expect(mod.adminDb).toBeUndefined();
     expect(mod.getInitializedFirebaseProjectId()).toBeUndefined();
+  });
+});
+
+describe("REAL Admin init: app reuse", () => {
+  it("a DEFAULT app already registered for the Preview project is reused in Preview (positive control)", () => {
+    const { initializeApp, mod } = loadAdmin({ FIREBASE_SERVICE_ACCOUNT_JSON: sa("convergepanel-preview", PREVIEW_SA_EMAIL), VERCEL_ENV: "preview" }, [{ name: "[DEFAULT]", options: { projectId: "convergepanel-preview" } }]);
+    expect(initializeApp).not.toHaveBeenCalled();
+    expect(mod.adminDb).toBeDefined();
+    expect(mod.getInitializedFirebaseProjectId()).toBe("convergepanel-preview");
+  });
+  it("a non-DEFAULT app in the registry is never reused (the DEFAULT app is created and checked)", () => {
+    const { initializeApp, mod } = loadAdmin({ FIREBASE_SERVICE_ACCOUNT_JSON: sa("convergepanel-preview", PREVIEW_SA_EMAIL), VERCEL_ENV: "preview" }, [{ name: "other", options: { projectId: "convergepanel" } }]);
+    expect(initializeApp).toHaveBeenCalledTimes(1);
+    expect(mod.getInitializedFirebaseProjectId()).toBe("convergepanel-preview");
   });
 });
 
@@ -200,6 +229,9 @@ describe("REAL client init (I-1)", () => {
   });
   it("Preview build with complete Preview config initializes Preview", () => {
     expect(loadClient(PREVIEW_WEB, "preview")).toEqual(PREVIEW_WEB);
+  });
+  it("Preview config that still carries the Production API key never initializes (Auth resolves the project from the key)", () => {
+    expect(loadClient({ ...PREVIEW_WEB, apiKey: PROD_WEB.apiKey }, "preview")).toEqual(UNAVAILABLE_BROWSER_FIREBASE_CONFIG);
   });
   it("no hard-coded Production values remain in client.ts", () => {
     const src = require("fs").readFileSync(require("path").join(__dirname, "..", "client.ts"), "utf8");

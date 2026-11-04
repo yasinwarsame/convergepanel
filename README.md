@@ -459,6 +459,8 @@ service cloud.firestore {
 
 ### Firebase Client (Required)
 
+There are no built-in defaults: every `NEXT_PUBLIC_FIREBASE_*` value must be set. The Production Firebase project is refused outside the Vercel Production deployment, in the browser and on the server (`lib/firebase/projectIsolation.ts`). Local development must use a non-Production Firebase project.
+
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `NEXT_PUBLIC_FIREBASE_API_KEY` | Firebase API key | **Yes** |

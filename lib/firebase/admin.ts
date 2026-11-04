@@ -87,9 +87,10 @@ function initFirebaseAdmin() {
   console.log("[firebase-admin] clientEmail:", sa.clientEmail?.substring(0, 20) + "...");
   console.log("[firebase-admin] privateKey length:", sa.privateKey?.length);
 
-  const existingApps = getApps();
-  app = existingApps.length > 0
-    ? existingApps[0]
+  // Reuse only the DEFAULT app (the one this module creates); any other registered app is ignored.
+  const existingDefault = getApps().find((a) => a.name === "[DEFAULT]");
+  app = existingDefault
+    ? existingDefault
     : initializeApp({
         credential: cert({
           projectId: sa.projectId,

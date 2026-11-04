@@ -20,6 +20,12 @@ export const PRODUCTION_FIREBASE_PROJECT_ID = "convergepanel";
 /** Production project NUMBER (appears as messagingSenderId and inside appId). */
 export const PRODUCTION_FIREBASE_PROJECT_NUMBER = "907484474744";
 /**
+ * Production web API key. Firebase Auth (Identity Toolkit) resolves the project FROM THE API KEY, not from projectId, so a
+ * Preview config carrying this key would sign users in against Production Auth. Public by design (shipped in every
+ * Production bundle); listed here only so it is recognised as Production identity.
+ */
+export const PRODUCTION_FIREBASE_WEB_API_KEY = "AIzaSyCUr6oygS_YWxpdXa2pXVryebPzSnOUxdo";
+/**
  * Used when the browser configuration is missing, malformed or refused. Uppercase and underscores make it impossible as
  * a real Firebase project id, so every request made with it fails; it is never the Production project.
  */
@@ -31,17 +37,45 @@ export function isProductionDeploymentEnv(deploymentEnv: unknown): boolean {
   return deploymentEnv === "production";
 }
 
-export function serverIdentityTargetsProduction(args: { projectId: unknown; clientEmail?: unknown }): boolean {
-  if (norm(args.projectId) === PRODUCTION_FIREBASE_PROJECT_ID) return true;
-  return norm(args.clientEmail).endsWith(`@${PRODUCTION_FIREBASE_PROJECT_ID}.iam.gserviceaccount.com`);
+/**
+ * The project a service-account email belongs to, when its form names one:
+ *   <name>@<project>.iam.gserviceaccount.com, <project>@appspot.gserviceaccount.com (App Engine default),
+ *   <number>-compute@developer.gserviceaccount.com (Compute default), service-<number>@<…>.iam.gserviceaccount.com
+ *   (Google-managed). Returns the project id or number, or null when the form is not recognised.
+ */
+export function serviceAccountProject(clientEmail: unknown): string | null {
+  const e = norm(clientEmail);
+  let m = /^service-(\d+)@[a-z0-9.-]+\.iam\.gserviceaccount\.com$/.exec(e);
+  if (m) return m[1];
+  m = /^[^@]+@([a-z0-9-]+)\.iam\.gserviceaccount\.com$/.exec(e);
+  if (m) return m[1];
+  m = /^([a-z0-9-]+)@appspot\.gserviceaccount\.com$/.exec(e);
+  if (m) return m[1];
+  m = /^(\d+)-compute@developer\.gserviceaccount\.com$/.exec(e);
+  if (m) return m[1];
+  return null;
 }
 
-export type FirebaseIsolationVerdict = { ok: true } | { ok: false; reason: "missing_project_id" | "production_project_outside_production" };
+export function serverIdentityTargetsProduction(args: { projectId: unknown; clientEmail?: unknown }): boolean {
+  if (norm(args.projectId) === PRODUCTION_FIREBASE_PROJECT_ID) return true;
+  const saProject = serviceAccountProject(args.clientEmail);
+  return saProject === PRODUCTION_FIREBASE_PROJECT_ID || saProject === PRODUCTION_FIREBASE_PROJECT_NUMBER;
+}
+
+export type FirebaseIsolationVerdict = { ok: true } | { ok: false; reason: "missing_project_id" | "production_project_outside_production" | "credential_project_mismatch" };
 
 /** Server (Admin SDK) rule. */
 export function evaluateServerFirebaseIsolation(args: { projectId: unknown; clientEmail?: unknown; deploymentEnv: unknown }): FirebaseIsolationVerdict {
   if (typeof args.projectId !== "string" || args.projectId.trim().length === 0) return { ok: false, reason: "missing_project_id" };
-  if (serverIdentityTargetsProduction(args) && !isProductionDeploymentEnv(args.deploymentEnv)) return { ok: false, reason: "production_project_outside_production" };
+  const production = isProductionDeploymentEnv(args.deploymentEnv);
+  if (serverIdentityTargetsProduction(args) && !production) return { ok: false, reason: "production_project_outside_production" };
+  // Outside Production, a credential that names a project by id must belong to the project it is used for (a relabelled
+  // key is refused even when neither side is recognisably Production). Not enforced in Production, so an unusual but
+  // working Production credential can never cause an outage here.
+  if (!production) {
+    const saProject = serviceAccountProject(args.clientEmail);
+    if (saProject !== null && !/^\d+$/.test(saProject) && saProject !== norm(args.projectId)) return { ok: false, reason: "credential_project_mismatch" };
+  }
   return { ok: true };
 }
 
@@ -67,6 +101,7 @@ export const UNAVAILABLE_BROWSER_FIREBASE_CONFIG: Readonly<BrowserFirebaseConfig
 export function browserConfigTargetsProduction(c: Partial<Record<(typeof BROWSER_KEYS)[number], unknown>>): boolean {
   const p = PRODUCTION_FIREBASE_PROJECT_ID;
   return (
+    (typeof c.apiKey === "string" && c.apiKey.trim() === PRODUCTION_FIREBASE_WEB_API_KEY) ||
     norm(c.projectId) === p ||
     norm(c.authDomain).startsWith(`${p}.`) ||
     norm(c.storageBucket).startsWith(`${p}.`) ||
