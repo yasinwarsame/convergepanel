@@ -14,41 +14,33 @@
 import { initializeApp, getApps, FirebaseApp } from "firebase/app";
 import { getAuth, Auth } from "firebase/auth";
 import { getFirestore, Firestore } from "firebase/firestore";
+import { resolveBrowserFirebaseConfig } from "./projectIsolation";
 
 /**
- * Firebase configuration object
- * 
- * Reads configuration from environment variables (NEXT_PUBLIC_* prefix makes them
- * available to the browser). Falls back to default values for some fields if not set.
- * 
- * These values come from Firebase Console > Project Settings > Your apps > Web app
+ * Firebase configuration (I-1, Preview isolation — owner decision 2026-11-04)
+ *
+ * There are NO hard-coded fallbacks. Every value must come from its NEXT_PUBLIC_FIREBASE_* variable (inlined at build).
+ * If any is missing or malformed — or the values identify the PRODUCTION project while the build is not the Vercel
+ * Production deployment (`NEXT_PUBLIC_VERCEL_ENV !== "production"`) — the SDK is initialized with an unroutable
+ * placeholder project instead, so every auth/Firestore request fails rather than reaching Production. The module still
+ * imports cleanly, so server rendering and CI builds (which have no Firebase variables) keep working.
+ * Rule and identity checks: lib/firebase/projectIsolation.ts.
  */
-const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "AIzaSyCUr6oygS_YWxpdXa2pXVryebPzSnOUxdo",
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "convergepanel.firebaseapp.com",
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "convergepanel",
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "convergepanel.firebasestorage.app",
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "907484474744",
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || "1:907484474744:web:19a931809616da203f6c8d",
-};
-
-/**
- * Validate required configuration before initialization
- * 
- * apiKey and appId are required for Firebase to work. If missing, throw an error
- * immediately to prevent runtime issues.
- */
-if (!firebaseConfig.apiKey) {
-  throw new Error(
-    "Firebase API key is missing. Please set NEXT_PUBLIC_FIREBASE_API_KEY in .env.local"
-  );
+const resolvedFirebaseConfig = resolveBrowserFirebaseConfig(
+  {
+    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+  },
+  process.env.NEXT_PUBLIC_VERCEL_ENV,
+);
+if (resolvedFirebaseConfig.status !== "ok" && typeof window !== "undefined") {
+  console.error(`[firebase-client] Firebase is unavailable in this deployment (${resolvedFirebaseConfig.reason}). Sign-in and data access are disabled.`);
 }
-
-if (!firebaseConfig.appId) {
-  throw new Error(
-    "Firebase App ID is missing. Please set NEXT_PUBLIC_FIREBASE_APP_ID in .env.local"
-  );
-}
+const firebaseConfig = resolvedFirebaseConfig.config;
 
 /**
  * Initialize Firebase App

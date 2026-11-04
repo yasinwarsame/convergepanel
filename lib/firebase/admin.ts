@@ -8,6 +8,7 @@ import admin from "firebase-admin";
 import { App, cert, getApps, initializeApp } from "firebase-admin/app";
 import { Auth, getAuth } from "firebase-admin/auth";
 import { Firestore, getFirestore } from "firebase-admin/firestore";
+import { evaluateServerFirebaseIsolation } from "./projectIsolation";
 
 export const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || "convergepanel";
 
@@ -73,6 +74,14 @@ function initFirebaseAdmin() {
   console.log("[firebase-admin] Starting initialization...");
 
   const sa = loadServiceAccount();
+
+  // I-2 (Preview isolation): refuse to connect to the PRODUCTION Firebase project outside the Vercel Production
+  // deployment, whatever credential format supplied it. Checked on the RESOLVED identity (projectId and the service
+  // account's IAM domain), before any app is created. `VERCEL_ENV` is the Vercel system variable read at runtime; unset
+  // (local dev, Jest, CI) is not Production. Throwing here lands in the outer catch below: Admin stays uninitialized
+  // (adminDb/adminAuth undefined), which every route already treats as "Firestore unavailable" — fail closed.
+  const isolation = evaluateServerFirebaseIsolation({ projectId: sa.projectId, clientEmail: sa.clientEmail, deploymentEnv: process.env.VERCEL_ENV });
+  if (!isolation.ok) throw new Error(`Firebase Admin initialization refused: ${isolation.reason}`);
   
   console.log("[firebase-admin] projectId:", sa.projectId);
   console.log("[firebase-admin] clientEmail:", sa.clientEmail?.substring(0, 20) + "...");
@@ -89,6 +98,13 @@ function initFirebaseAdmin() {
         }),
         projectId: sa.projectId,
       });
+
+  // An app that already exists in the SDK registry (e.g. after a dev-mode reload) must satisfy the same rule.
+  const existing = evaluateServerFirebaseIsolation({ projectId: app.options.projectId, clientEmail: sa.clientEmail, deploymentEnv: process.env.VERCEL_ENV });
+  if (!existing.ok) {
+    app = undefined;
+    throw new Error(`Firebase Admin initialization refused: ${existing.reason}`);
+  }
 
   adminAuth = getAuth(app);
   adminDb = getFirestore(app);
