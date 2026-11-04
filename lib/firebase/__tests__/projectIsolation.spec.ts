@@ -233,6 +233,19 @@ describe("REAL client init (I-1)", () => {
   it("Preview config that still carries the Production API key never initializes (Auth resolves the project from the key)", () => {
     expect(loadClient({ ...PREVIEW_WEB, apiKey: PROD_WEB.apiKey }, "preview")).toEqual(UNAVAILABLE_BROWSER_FIREBASE_CONFIG);
   });
+  it("in a browser, a Production build with missing config fails LOUDLY (never masked); a Preview build degrades to the placeholder", () => {
+    const g = globalThis as { window?: unknown };
+    g.window = {};
+    const err = jest.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      expect(() => loadClient(null, "production")).toThrow(/Firebase is unavailable in this deployment \(missing_or_malformed\)/);
+      expect(loadClient(null, "preview")).toEqual(UNAVAILABLE_BROWSER_FIREBASE_CONFIG);
+      expect(err).toHaveBeenCalledWith(expect.stringMatching(/Firebase is unavailable/));
+    } finally {
+      delete g.window;
+      err.mockRestore();
+    }
+  });
   it("no hard-coded Production values remain in client.ts", () => {
     const src = require("fs").readFileSync(require("path").join(__dirname, "..", "client.ts"), "utf8");
     expect(src).not.toMatch(/AIzaSy|907484474744|convergepanel\.firebaseapp\.com|"convergepanel"/);

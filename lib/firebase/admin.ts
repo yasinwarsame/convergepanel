@@ -8,7 +8,28 @@ import admin from "firebase-admin";
 import { App, cert, getApps, initializeApp } from "firebase-admin/app";
 import { Auth, getAuth } from "firebase-admin/auth";
 import { Firestore, getFirestore } from "firebase-admin/firestore";
-import { evaluateServerFirebaseIsolation } from "./projectIsolation";
+import { evaluateServerFirebaseIsolation, serviceAccountProject, PRODUCTION_FIREBASE_PROJECT_NUMBER, type FirebaseIsolationVerdict } from "./projectIsolation";
+import { readOperatorGrant } from "./operatorGrant";
+
+/**
+ * Applies the isolation verdict. The ONLY exception: a Production refusal outside Production is lifted by a valid
+ * operator grant (lib/firebase/operatorGrant.ts) that names exactly this project, created in this process by an operator
+ * script from explicit argv. Every other refusal stands.
+ */
+function enforceFirebaseIsolation(verdict: FirebaseIsolationVerdict, projectId: unknown, clientEmail: unknown): void {
+  if (verdict.ok) return;
+  if (verdict.reason === "production_project_outside_production") {
+    const grant = readOperatorGrant();
+    const pid = typeof projectId === "string" ? projectId.trim().toLowerCase() : "";
+    const saProject = serviceAccountProject(clientEmail);
+    const credentialMatches = saProject === null || saProject === pid || saProject === PRODUCTION_FIREBASE_PROJECT_NUMBER;
+    if (grant && pid.length > 0 && grant.projectId === pid && credentialMatches) {
+      console.error(`[firebase-admin] OPERATOR access to Production project "${pid}" (operation=${grant.operation}, mode=${grant.mode}, granted ${grant.grantedAt})`);
+      return;
+    }
+  }
+  throw new Error(`Firebase Admin initialization refused: ${verdict.reason}`);
+}
 
 export const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || "convergepanel";
 
@@ -80,8 +101,7 @@ function initFirebaseAdmin() {
   // account's IAM domain), before any app is created. `VERCEL_ENV` is the Vercel system variable read at runtime; unset
   // (local dev, Jest, CI) is not Production. Throwing here lands in the outer catch below: Admin stays uninitialized
   // (adminDb/adminAuth undefined), which every route already treats as "Firestore unavailable" — fail closed.
-  const isolation = evaluateServerFirebaseIsolation({ projectId: sa.projectId, clientEmail: sa.clientEmail, deploymentEnv: process.env.VERCEL_ENV });
-  if (!isolation.ok) throw new Error(`Firebase Admin initialization refused: ${isolation.reason}`);
+  enforceFirebaseIsolation(evaluateServerFirebaseIsolation({ projectId: sa.projectId, clientEmail: sa.clientEmail, deploymentEnv: process.env.VERCEL_ENV }), sa.projectId, sa.clientEmail);
   
   console.log("[firebase-admin] projectId:", sa.projectId);
   console.log("[firebase-admin] clientEmail:", sa.clientEmail?.substring(0, 20) + "...");
@@ -101,10 +121,11 @@ function initFirebaseAdmin() {
       });
 
   // An app that already exists in the SDK registry (e.g. after a dev-mode reload) must satisfy the same rule.
-  const existing = evaluateServerFirebaseIsolation({ projectId: app.options.projectId, clientEmail: sa.clientEmail, deploymentEnv: process.env.VERCEL_ENV });
-  if (!existing.ok) {
+  try {
+    enforceFirebaseIsolation(evaluateServerFirebaseIsolation({ projectId: app.options.projectId, clientEmail: sa.clientEmail, deploymentEnv: process.env.VERCEL_ENV }), app.options.projectId, sa.clientEmail);
+  } catch (refused) {
     app = undefined;
-    throw new Error(`Firebase Admin initialization refused: ${existing.reason}`);
+    throw refused;
   }
 
   adminAuth = getAuth(app);

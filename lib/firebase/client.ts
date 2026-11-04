@@ -38,7 +38,11 @@ const resolvedFirebaseConfig = resolveBrowserFirebaseConfig(
   process.env.NEXT_PUBLIC_VERCEL_ENV,
 );
 if (resolvedFirebaseConfig.status !== "ok" && typeof window !== "undefined") {
-  console.error(`[firebase-client] Firebase is unavailable in this deployment (${resolvedFirebaseConfig.reason}). Sign-in and data access are disabled.`);
+  const message = `[firebase-client] Firebase is unavailable in this deployment (${resolvedFirebaseConfig.reason}). Sign-in and data access are disabled.`;
+  // A Production build must never mask a misconfiguration behind the placeholder: fail loudly in the browser (error
+  // boundary + error reporting). Server rendering and builds are unaffected (no window), so pages still prerender.
+  if (process.env.NEXT_PUBLIC_VERCEL_ENV === "production") throw new Error(message);
+  console.error(message);
 }
 const firebaseConfig = resolvedFirebaseConfig.config;
 

@@ -29,6 +29,8 @@ const dotenv = require("dotenv");
 const nodePath = require("path");
 dotenv.config({ path: nodePath.resolve(__dirname, "../../.env.local") });
 
+// MUST be the first import: grants Production Firebase access for this process only from explicit --confirm-project.
+import "../lib/operatorProductionAccess";
 import "server-only";
 import { adminDb, FIREBASE_PROJECT_ID, getInitializedFirebaseProjectId } from "@/lib/firebase/admin";
 import { runProjectNormalizationExecution } from "@/lib/projects/runProjectNormalizationExecutor";
