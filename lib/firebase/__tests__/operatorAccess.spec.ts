@@ -173,6 +173,21 @@ describe("operator grant → Admin init", () => {
     expect(r.grantResult).toBeNull();
     expect(r.initializeApp).not.toHaveBeenCalled();
   });
+  it("--operator-preflight without --confirm-project exits 1 and grants nothing", () => {
+    const r = runCase({ env: {}, argv: ARGV("--operator-preflight") });
+    expect(r.exitCode).toBe(1);
+    expect(r.grantResult).toBeNull();
+  });
+  it("--operator-preflight for a NON-Production target exits 0 without a grant", () => {
+    const r = runCase({ env: {}, argv: ARGV("--confirm-project=convergepanel-preview", "--operator-preflight") });
+    expect(r.exitCode).toBe(0);
+    expect(r.grantResult).toBeNull();
+  });
+  it("--operator-credentials on a NON-Production target is refused, never silently ignored", () => {
+    const r = runCase({ env: {}, argv: ARGV("--confirm-project=convergepanel-preview", CRED) });
+    expect(String(r.grantError)).toMatch(/--operator-credentials is only for the Production project/);
+    expect(r.initializeApp).not.toHaveBeenCalled();
+  });
   it("--operator-preflight with a failing check refuses (no exit 0)", () => {
     const r = runCase({ env: { FIREBASE_SERVICE_ACCOUNT_JSON: PROD_SA }, argv: ARGV("--confirm-project=convergepanel", "--operator-preflight") });
     expect(String(r.grantError)).toMatch(/requires --operator-credentials/);

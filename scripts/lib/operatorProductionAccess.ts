@@ -97,8 +97,15 @@ export function grantOperatorProductionAccessFromArgv(argv: readonly string[], o
   }
   if (!/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(projectId)) throw new Error(`[operator] Refusing: "${projectId}" is not a valid Firebase project id.`);
   if (projectId !== PRODUCTION_FIREBASE_PROJECT_ID) {
-    console.error(`[operator] Target "${projectId}" is not the Production project: no operator grant is needed or created.`);
-    if (preflight) exit(0);
+    // Review n-1: never silently ignore an operator-selected credential — it exists only for Production.
+    if (argv.some((a) => a.startsWith("--operator-credentials="))) {
+      throw new Error(`[operator] Refusing: --operator-credentials is only for the Production project; target "${projectId}" uses this checkout's isolated-project credentials.`);
+    }
+    console.error(`[operator] Target "${projectId}" is not the Production project: no operator grant is needed or created; this checkout's own (isolated-project) credentials are used, and Firebase isolation still refuses any Production credential.`);
+    if (preflight) {
+      console.error("[operator] PREFLIGHT (non-Production target): nothing granted, Firebase not touched. The script's own --confirm-project identity check (where it has one) runs after initialization.");
+      exit(0);
+    }
     return null;
   }
 

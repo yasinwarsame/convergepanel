@@ -4,10 +4,11 @@
  */
 import { readFileSync } from "fs";
 import { join } from "path";
-import { resolveBrowserFirebaseConfig, UNAVAILABLE_FIREBASE_PROJECT_ID } from "../projectIsolation";
+import { resolveBrowserFirebaseConfig, UNAVAILABLE_FIREBASE_PROJECT_ID, PRODUCTION_FIREBASE_WEB_API_KEY, PRODUCTION_FIREBASE_PROJECT_ID, PRODUCTION_FIREBASE_PROJECT_NUMBER } from "../projectIsolation";
 const guard = require("../productionBuildConfigGuard") as {
   productionBuildConfigProblems: (env: Record<string, string | undefined>) => string[];
   assertProductionBuildConfig: (env: Record<string, string | undefined>) => void;
+  APPROVED_PRODUCTION_WEB_CONFIG: Record<string, string>;
 };
 
 const PROD = {
@@ -16,7 +17,7 @@ const PROD = {
   NEXT_PUBLIC_FIREBASE_PROJECT_ID: "convergepanel",
   NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: "convergepanel.firebasestorage.app",
   NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "907484474744",
-  NEXT_PUBLIC_FIREBASE_APP_ID: "1:907484474744:web:abc",
+  NEXT_PUBLIC_FIREBASE_APP_ID: "1:907484474744:web:19a931809616da203f6c8d",
 };
 const PREVIEW = {
   NEXT_PUBLIC_FIREBASE_API_KEY: "AIzaPreview",
@@ -39,13 +40,31 @@ describe("Production build guard (M-2)", () => {
       expect(() => guard.assertProductionBuildConfig(env)).toThrow(new RegExp(`Refusing to build: .*${k}`));
     }
   });
+  it("the pinned approved configuration is the fixture, and the runtime rule pins the same Production identity", () => {
+    expect(guard.APPROVED_PRODUCTION_WEB_CONFIG).toEqual(PROD);
+    expect(Object.isFrozen(guard.APPROVED_PRODUCTION_WEB_CONFIG)).toBe(true);
+    expect(guard.APPROVED_PRODUCTION_WEB_CONFIG.NEXT_PUBLIC_FIREBASE_API_KEY).toBe(PRODUCTION_FIREBASE_WEB_API_KEY);
+    expect(guard.APPROVED_PRODUCTION_WEB_CONFIG.NEXT_PUBLIC_FIREBASE_PROJECT_ID).toBe(PRODUCTION_FIREBASE_PROJECT_ID);
+    expect(guard.APPROVED_PRODUCTION_WEB_CONFIG.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID).toBe(PRODUCTION_FIREBASE_PROJECT_NUMBER);
+  });
+  it.each([
+    ["another project's valid-looking API key", "NEXT_PUBLIC_FIREBASE_API_KEY", "AIzaSyD" + "x".repeat(32)],
+    ["the placeholder API key", "NEXT_PUBLIC_FIREBASE_API_KEY", "firebase-config-unavailable"],
+    ["a quoted API key", "NEXT_PUBLIC_FIREBASE_API_KEY", `"${PRODUCTION_FIREBASE_WEB_API_KEY}"`],
+    ["a truncated API key", "NEXT_PUBLIC_FIREBASE_API_KEY", PRODUCTION_FIREBASE_WEB_API_KEY.slice(0, -1)],
+    ["another web app of the Production project", "NEXT_PUBLIC_FIREBASE_APP_ID", "1:907484474744:web:0000000000000000000000"],
+    ["the legacy appspot bucket (not the approved one)", "NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET", "convergepanel.appspot.com"],
+    ["a custom auth domain (needs a reviewed pin change)", "NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN", "auth.convergepanel.com"],
+  ])("a Production build is refused for %s", (_l, k, v) => {
+    expect(() => guard.assertProductionBuildConfig({ ...PROD_BUILD, ...PROD, [k]: v })).toThrow(new RegExp(`${k} does not match the approved Production web-app configuration`));
+  });
   it("the placeholder identity is never accepted as Production configuration", () => {
     expect(() => guard.assertProductionBuildConfig({ ...PROD_BUILD, ...PROD, NEXT_PUBLIC_FIREBASE_PROJECT_ID: UNAVAILABLE_FIREBASE_PROJECT_ID })).toThrow(/placeholder/);
   });
   it("a Production build carrying non-Production (Preview) config fails (it would break Production sign-in)", () => {
     const problems = guard.productionBuildConfigProblems({ ...PROD_BUILD, ...PREVIEW });
-    expect(problems.length).toBeGreaterThanOrEqual(5);
-    expect(() => guard.assertProductionBuildConfig({ ...PROD_BUILD, ...PREVIEW })).toThrow(/does not identify the Production project/);
+    expect(problems.length).toBe(6);
+    expect(() => guard.assertProductionBuildConfig({ ...PROD_BUILD, ...PREVIEW })).toThrow(/NEXT_PUBLIC_FIREBASE_PROJECT_ID does not match the approved Production web-app configuration/);
   });
   it("a Production build without NEXT_PUBLIC_VERCEL_ENV fails (the browser would silently refuse Production)", () => {
     expect(() => guard.assertProductionBuildConfig({ VERCEL: "1", VERCEL_ENV: "production", ...PROD })).toThrow(/NEXT_PUBLIC_VERCEL_ENV must be exactly "production"/);
@@ -73,7 +92,8 @@ describe("Production build guard (M-2)", () => {
     }
   });
   it("parity with the runtime browser rule: whatever the guard accepts, the browser accepts as Production", () => {
-    const cases = [PROD, { ...PROD, NEXT_PUBLIC_FIREBASE_APP_ID: "" }, PREVIEW, { ...PROD, NEXT_PUBLIC_FIREBASE_PROJECT_ID: UNAVAILABLE_FIREBASE_PROJECT_ID }];
+    const cases = [PROD, { ...PROD, NEXT_PUBLIC_FIREBASE_APP_ID: "" }, PREVIEW, { ...PROD, NEXT_PUBLIC_FIREBASE_PROJECT_ID: UNAVAILABLE_FIREBASE_PROJECT_ID }, { ...PROD, NEXT_PUBLIC_FIREBASE_API_KEY: "AIzaSyD" + "x".repeat(32) }];
+    expect(guard.productionBuildConfigProblems({ ...PROD_BUILD, ...PROD })).toEqual([]); // positive control
     for (const c of cases) {
       const guardOk = guard.productionBuildConfigProblems({ ...PROD_BUILD, ...c }).length === 0;
       const runtime = resolveBrowserFirebaseConfig(
@@ -81,7 +101,8 @@ describe("Production build guard (M-2)", () => {
         "production",
       );
       const runtimeProdOk = runtime.status === "ok" && runtime.config.projectId === "convergepanel";
-      expect([c.NEXT_PUBLIC_FIREBASE_PROJECT_ID, guardOk]).toEqual([c.NEXT_PUBLIC_FIREBASE_PROJECT_ID, runtimeProdOk]);
+      // The build guard is STRICTER than the runtime rule (it pins the exact approved config), never looser.
+      if (guardOk) expect(runtimeProdOk).toBe(true);
     }
   });
   it("next.config.js runs the guard before building", () => {

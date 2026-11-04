@@ -32,7 +32,20 @@ They are manual operator tools with their own credentials. Some default to `conv
   - `NEXT_PUBLIC_VERCEL_ENV=production`;
   - all six `NEXT_PUBLIC_FIREBASE_*` values, present and trimmed, identifying the Production project and never the placeholder.
 
-So a broken Production release cannot be created: Vercel keeps serving the previous deployment. Preview, development, local and CI builds are not checked. `NEXT_PUBLIC_VERCEL_ENV` is a Vercel framework system variable, not a project variable. It is available at build and runtime while "Automatically expose System Environment Variables" is on, but it is missing in `vercel --prebuilt` deployments, which the guard would then refuse.
+A Production build is also refused unless all six values **exactly equal the approved Production web-app configuration** pinned in the guard:
+- The pinned values were read on 2026-11-05 from the Firebase Management API: `projects/convergepanel/webApps` has exactly one ACTIVE app, and the pin is its `/config`, which matches the live bundle.
+- They are public identifiers, not credentials.
+- Rotating the web API key, re-creating the web app, or moving to a custom auth domain needs a reviewed change to `APPROVED_PRODUCTION_WEB_CONFIG`.
+
+So a Production build with missing, placeholder or mismatched browser configuration cannot be created through `next build`: Vercel keeps serving the previous deployment. Preview, development, local and CI builds are not checked. `NEXT_PUBLIC_VERCEL_ENV` is a Vercel framework system variable, not a project variable. It is available at build and runtime while "Automatically expose System Environment Variables" is on.
+
+**Supported Production release path: Vercel Git integration only (merge to `main`).** The build guard runs inside `next build`, so it only protects builds that happen there.
+
+Prebuilt deployments (`vercel build` then `vercel deploy --prebuilt --prod`) build on the operator's machine. Vercel documents that system environment variables are missing at build time with `--prebuilt`, so the guard does not see a Vercel Production build and does not check that artifact. Such an artifact would carry no `NEXT_PUBLIC_VERCEL_ENV=production`, so:
+- in the browser, it fails closed: Production config is refused and sign-in stops working (an outage, not data exposure);
+- on the server, `VERCEL_ENV=production` at runtime still applies the same isolation rule.
+
+**Do not deploy Production with `--prebuilt`.** Any exception needs owner approval and a Production sign-in check right after the deploy.
 
 **When it is allowed.** Only when the deployment environment is exactly `production`:
 - Server: `VERCEL_ENV`, read at runtime.
@@ -90,7 +103,8 @@ The approach is **dedicated, explicitly granted access, with no environment swit
 **How access works:**
 1. Each script's **first** import is `scripts/lib/operatorProductionAccess.ts`.
 2. That module creates a frozen, immutable grant **in this process only**, and only when all of these hold:
-   - the operator names the target with `--confirm-project=<id>`;
+   - the operator names the target with `--confirm-project=convergepanel`;
+   - the operator selects the approved Production key file with `--operator-credentials=<file>`, which is validated and installed as the only credential (details below);
    - it runs in a local operator shell, so `VERCEL`, `VERCEL_ENV` and `NEXT_RUNTIME` are unset and `NODE_ENV` is not `production`;
    - `lib/firebase/admin` has not loaded yet, and no grant exists yet.
 3. **The mode is bound to the operation.**

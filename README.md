@@ -49,12 +49,12 @@ pnpm install
 
 3. Create a `.env.local` file in the root directory:
 ```bash
-cp .env.example .env.local
+cp .env.local.example .env.local
 ```
 
-4. Set up Firebase:
-   - Create a Firebase project at https://console.firebase.google.com
-   - Project ID: `convergepanel` (or update env vars)
+4. Set up Firebase for **local development**:
+   - Use an **isolated, non-Production** Firebase project (`<isolated-project-id>`). Create one at https://console.firebase.google.com, or use the shared isolated project once it exists.
+   - **Never** use the Production project (`convergepanel`) for development: it is refused outside the Vercel Production deployment. Production maintenance follows `docs/operations/firebase-environment-isolation.md`.
    - Enable Authentication (Email/Password)
    - Enable Firestore Database
    - Get your Firebase config from Project Settings
