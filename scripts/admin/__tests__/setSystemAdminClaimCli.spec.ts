@@ -660,6 +660,23 @@ describe("M-2: result-file location is filesystem-grounded (real temp dirs; neve
     expect(realIo(repo).caseInsensitivePaths(repo)).toBe(true);
   });
 
+  it("realIo.caseInsensitivePaths off darwin/win32: a filesystem probe (same inode under swapped case) decides", () => {
+    const realPlatform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { value: "linux" });
+    try {
+      const same = { ...rawFs, statSync: (() => ({ dev: 1, ino: 7 })) as unknown as FsLayer["statSync"] } as FsLayer;
+      let n = 0;
+      const different = { ...rawFs, statSync: (() => ({ dev: 1, ino: ++n })) as unknown as FsLayer["statSync"] } as FsLayer;
+      const missing = { ...rawFs, statSync: (() => { throw Object.assign(new Error("x"), { code: "ENOENT" }); }) as unknown as FsLayer["statSync"] } as FsLayer;
+      expect(realIo(repo, same).caseInsensitivePaths("/Some/Dir")).toBe(true);
+      expect(realIo(repo, different).caseInsensitivePaths("/Some/Dir")).toBe(false);
+      expect(realIo(repo, missing).caseInsensitivePaths("/Some/Dir")).toBe(false);
+      expect(realIo(repo, same).caseInsensitivePaths("/1/2")).toBe(false); // no letters: nothing to fold
+    } finally {
+      Object.defineProperty(process, "platform", realPlatform);
+    }
+  });
+
   it("checkResultLocation folds case when the volume is case-insensitive even if canonicalisation kept the input case", () => {
     const io = {
       realpathDir: (p: string) => p, // a canonicaliser that does NOT restore case
