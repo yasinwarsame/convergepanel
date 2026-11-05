@@ -73,6 +73,7 @@ import { sanitizeModelText, truncateForSynthesis, MAX_CHARS_SYNTHESIS_PER_MODEL 
 import { compressModelResponse, compressClusters, computeInputHash } from "@/lib/synthesis/compressInput";
 import { buildEvidencePack } from "@/lib/synthesis/buildEvidencePack";
 import { authoritativeSynthesisInputs } from "@/lib/synthesis/authoritativeRunInputs";
+import { independentVoices } from "@/lib/panel/independentVoices";
 import { isPathSafeRunId, resolveSynthesisRunAccess, SYNTHESIS_RUN_FORBIDDEN, SYNTHESIS_RUN_UNAVAILABLE } from "@/lib/synthesis/synthesisRunAccess";
 import { synthesizeReport } from "@/lib/consensus";
 import type { ModelResult } from "@/lib/types";
@@ -901,6 +902,34 @@ export async function POST(req: NextRequest) {
         ),
           { status: 400 }
         );
+    }
+
+    // Independent executing models, not answered slots: several slots answered
+    // by one substitute model are ONE model (lib/panel/independentVoices.ts).
+    // authoritativeSynthesisInputs already refuses such a run; this re-checks
+    // the rows that actually entered the prompt (a row whose text sanitizes to
+    // empty is skipped above) and gives the same truthful refusal.
+    const promptVoices = independentVoices(
+      authoritative.value.rows
+        .filter((row) => seenModelIds.has(row.modelId))
+        .map((row) => ({ modelId: row.modelId, status: row.status, provider: row.provenance.provider }))
+    );
+    if (promptVoices.length < 2) {
+      logger.warn(`[${requestId}] [synthesize-panel] Rejected: fewer than 2 independent executing models`, {
+        requestId,
+        runId,
+        independentModels: promptVoices.length,
+        answeredSlots: seenModelIds.size,
+      });
+      return NextResponse.json(
+        createErrorResponse(
+          ERROR_CODES.SYNTHESIS_SOURCE_UNAVAILABLE,
+          "This run does not have enough saved model responses to synthesize.",
+          requestId,
+          { reason: "insufficient_results" }
+        ),
+        { status: 409 }
+      );
     }
 
     // Extract model IDs and prepare for cluster-based input (if clusters provided)

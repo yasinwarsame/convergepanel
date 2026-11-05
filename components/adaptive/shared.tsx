@@ -14,6 +14,8 @@ import { runModelFamilyName } from "@/lib/panel/runModelIdentity";
 import ModelChip from "@/components/ModelChip";
 import { substitutedSlotLabel } from "@/lib/adaptiveSchema/positionPresentation";
 import { usePositionPresentation } from "./PositionPresentationContext";
+import { useRunModelProvenance } from "./RunModelProvenanceContext";
+import { executingVoiceName } from "@/lib/panel/executingVoiceLabel";
 import { didNotRespondText, slotDidNotRespond, useRunSlotStatus } from "@/components/adaptive/RunSlotStatusContext";
 import { SAVED_COPY_NOTICES } from "@/lib/adaptiveSchema/savedCopyNotice";
 
@@ -28,21 +30,40 @@ export function getModelLabel(modelId: ModelId | string): string {
 }
 
 /**
- * Order 5 Contract P (H-2): a slot's name where a surface shows that slot's recorded output. On a marked report whose
- * recorded provenance says the slot was substituted, the full slot label — "Claude slot (substituted; answered by
- * DeepSeek)" — so the requested model is never named as the author of the substitute's response. Otherwise (and on
- * every unmarked report) exactly `getModelLabel`. Nothing is inferred: without recorded provenance the slot keeps its
- * family name.
+ * The name of the model that wrote a slot's recorded output, for a surface stating who agreed, supported or disputed.
+ *  - Marked report (Order 5 Contract P, H-2): a substituted slot is "Claude slot (substituted; answered by DeepSeek)".
+ *  - Unmarked report: a slot the run's rows (RunModelProvenanceContext) record as substituted is named by its executing
+ *    model, "DeepSeek (substituting Claude)" (lib/panel/executingVoiceLabel.ts) — never as the requested model.
+ *  - Otherwise `getModelLabel`. Nothing is inferred: without recorded provenance the slot keeps its family name.
  */
-export function SlotName({ modelId }: { modelId: ModelId | string }) {
+export function useSlotVoiceName(): (modelId: ModelId | string) => string {
   const position = usePositionPresentation();
-  return <>{(position && substitutedSlotLabel(String(modelId), position.provenance)) || getModelLabel(modelId)}</>;
+  const runProvenance = useRunModelProvenance();
+  return (modelId) => {
+    if (position) return substitutedSlotLabel(String(modelId), position.provenance) || getModelLabel(modelId);
+    return executingVoiceName(String(modelId), runProvenance);
+  };
 }
 
-/** `ModelChip`, followed on a marked report by the recorded substitution of a substituted slot (H-2); otherwise exactly `ModelChip`. */
+/** A slot's name where a surface shows that slot's recorded output — see `useSlotVoiceName`. */
+export function SlotName({ modelId }: { modelId: ModelId | string }) {
+  const name = useSlotVoiceName();
+  return <>{name(modelId)}</>;
+}
+
+/**
+ * `ModelChip`, followed on a marked report by the recorded substitution of a substituted slot (H-2). On an unmarked
+ * report a slot the run records as substituted is a chip naming its executing model ("DeepSeek (substituting
+ * ChatGPT)"); otherwise exactly `ModelChip`.
+ */
 export function SlotChip(props: React.ComponentProps<typeof ModelChip>) {
   const position = usePositionPresentation();
+  const runProvenance = useRunModelProvenance();
   const substituted = position ? substitutedSlotLabel(String(props.modelId), position.provenance) : null;
+  if (!position) {
+    const facts = runProvenance?.find((f) => f && f.modelId === String(props.modelId));
+    return facts?.substituted === true ? <ModelChip {...props} label={executingVoiceName(String(props.modelId), runProvenance)} /> : <ModelChip {...props} />;
+  }
   if (!substituted) return <ModelChip {...props} />;
   return (
     <>

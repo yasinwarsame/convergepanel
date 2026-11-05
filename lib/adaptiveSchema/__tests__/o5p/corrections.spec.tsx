@@ -503,8 +503,12 @@ describe("NITs addressed in this round", () => {
     const { out } = await outputs("generic-substituted-and-failed");
     // Standalone panel evidence (its own boundary) and the full page both name the column by its recorded slot.
     for (const k of ["ui.panelEvidence", "ui.panelResponse"]) expect([k, /<th[^>]*>Claude slot \(substituted; answered by DeepSeek\)<\/th>/.test(out[k]!)]).toEqual([k, true]);
-    // Negative control: the matrix rendered outside any marked boundary is the historical one, named by family.
-    expect(out["ui.claimMatrix"]).toMatch(/<th[^>]*>Claude<\/th>/);
+    // Negative control: the matrix rendered outside any marked boundary does not use the marked slot wording. Since the
+    // executing-model attribution rule (2026-11-05) it names the recorded substitute by the model that answered,
+    // "DeepSeek (substituting Claude)" — never by the requested model's family alone.
+    expect(out["ui.claimMatrix"]).toMatch(/<th[^>]*>DeepSeek \(substituting Claude\)<\/th>/);
+    expect(out["ui.claimMatrix"]).not.toMatch(/<th[^>]*>Claude<\/th>/);
+    expect(out["ui.claimMatrix"]).not.toContain("Claude slot (substituted");
   });
 });
 

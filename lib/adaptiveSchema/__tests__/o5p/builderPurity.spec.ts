@@ -38,6 +38,7 @@ import { isPersistedLegacyAdaptiveSchemaId } from "@/lib/adaptiveSchema/persiste
 import { AdaptiveRetryUsageSink } from "@/lib/adaptiveSchema/retryCorrection";
 import { CLASSIFICATION_BASE, DEFAULT_MODE, MockMode, SCENARIOS, SEEDED_SCHEMAS, SEEDS, geminiMockImpl, seededResults } from "./o5pScenarios";
 import { GROUNDING_RANK, claimTieReference, groundingTier, legacyTrust, oracleIsEligibleClaimTie } from "../o5c/claimTieOracle";
+import { recordedSubstitutions, undoExecutingAttributionValue } from "@/components/adaptive/__tests__/executingAttributionStrip";
 
 const gem = callGemini as unknown as jest.Mock;
 const baseline: Record<string, { schemaId: string; result: string; geminiCalls: string; connectorCalls: string; geminiCallCount: number; inputMutated: boolean }> = JSON.parse(
@@ -124,7 +125,15 @@ describe("Contract P builder purity vs the 2c17feee pipeline", () => {
     const c = CASES.find((x) => x.name === name)!;
     const b = baseline[name];
     const out = await run(c.schemaId, c.input(), c.mode, c.retry);
-    const { value, markers } = comparable(out.res, c.schemaId);
+    const comparableOut = comparable(out.res, c.schemaId);
+    const markers = comparableOut.markers;
+    // Executing-model attribution (owner rule, 2026-11-05): generated supporter / disputer names of a slot the run
+    // records as substituted read "DeepSeek (substituting Claude)". The 2c17feee baseline predates the rule, so that
+    // attribution (and only it) is reversed before hashing; it must occur exactly where the input records a substitution.
+    const subs = recordedSubstitutions(c.input() as any[]);
+    const reverted = undoExecutingAttributionValue(comparableOut.value, subs);
+    const value = reverted.value;
+    expect([name, reverted.count > 0]).toEqual([name, subs.length > 0 && (out.res.alignedClaims?.length ?? 0) > 0]);
     if (c.schemaId === "generic") expectGenericEnvelopeIsACopy(out.res, { ...CLASSIFICATION_BASE, queryType: "generic", answerShape: getResultSchema("generic" as any).renderHint });
     else expect(!!out.res.persistedLegacyOutput).toBe(isPersistedLegacyAdaptiveSchemaId(c.schemaId));
     const rows = out.res.alignedClaims ?? [];

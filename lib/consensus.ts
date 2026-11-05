@@ -45,10 +45,9 @@ import {
   ModelId,
 } from "@/lib/types";
 import { buildAgreementMap, ClaimCluster as AgreementClaimCluster } from "@/lib/agreementMap";
-import { providerDisplayName, runModelFamilyName } from "@/lib/panel/runModelIdentity";
 import { isUsableResult } from "@/lib/panel/publicize";
-import { coerceStatus } from "@/lib/panel/normalize";
 import { independentVoices } from "@/lib/panel/independentVoices";
+import { executingVoiceName } from "@/lib/panel/executingVoiceLabel";
 import { escapeHtml } from "@/lib/security/escapeHtml";
 
 const SYSTEM_WRAPPER =
@@ -520,17 +519,10 @@ export function synthesizeReport(
   }
 
   // Attribution: a substituted slot's text was written by the substitute
-  // provider, so it is never named as the slot's own model in agreement text.
-  const substitutedSlots = new Map<string, unknown>(
-    successfulResults
-      .filter((r) => coerceStatus(String(r.status)) === "substituted")
-      .map((r) => [String(r.modelId), (r as { provider?: unknown }).provider])
-  );
-  const voiceName = (id: ModelId | string): string => {
-    if (!substitutedSlots.has(String(id))) return runModelFamilyName(id);
-    const substitute = providerDisplayName(substitutedSlots.get(String(id))) ?? "Substitute model";
-    return `${substitute} (substituting ${runModelFamilyName(id)})`;
-  };
+  // provider, so it is never named as the slot's own model in agreement text
+  // ("DeepSeek (substituting ChatGPT)" — lib/panel/executingVoiceLabel.ts, the
+  // one naming rule every agreement surface uses).
+  const voiceName = (id: ModelId | string): string => executingVoiceName(String(id), successfulResults);
 
   // Build agreement map using claim extraction + similarity clustering
   // Wrap in try-catch to prevent crashes if buildAgreementMap fails

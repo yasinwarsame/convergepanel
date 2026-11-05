@@ -20,7 +20,7 @@
 
 import "server-only";
 import { ModelId, ModelResult } from "@/lib/types";
-import { independentVoices } from "@/lib/panel/independentVoices";
+import { independentVoices, REPEATED_SUBSTITUTE_EXCLUDED } from "@/lib/panel/independentVoices";
 import { ADAPTIVE_VERIFICATION_ENABLED } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { CONNECTOR_MAP } from "@/lib/connectors";
@@ -527,9 +527,8 @@ function buildNonClaimRows(schema: ResultSchema, adaptiveResults: AdaptiveModelR
   return rows;
 }
 
-/** parseError for a slot excluded from agreement by the independent-voice rule. */
-export const REPEATED_SUBSTITUTE_EXCLUDED =
-  "Not counted as an independent model: answered by the same substitute model as another panel slot.";
+/** parseError for a slot excluded from agreement by the independent-voice rule (defined client-safe in independentVoices.ts). */
+export { REPEATED_SUBSTITUTE_EXCLUDED };
 
 /**
  * Agreement inputs under the independent-voice rule: among slots with usable

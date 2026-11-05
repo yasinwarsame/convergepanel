@@ -8,6 +8,7 @@
 import { StructuredSynthesis } from "@/lib/synthesis/structuredSchema";
 import { VerificationGateResult } from "@/lib/verificationGate/verificationGate";
 import { classifyGrounding, GroundingResult } from "./sourceGrounding";
+import { independentVoiceCount, type ExecutingIdentityRow } from "@/lib/panel/executingVoiceLabel";
 
 export interface PanelVerdict {
   question: string;
@@ -30,11 +31,18 @@ export interface PanelVerdict {
 export function buildPanelVerdict(
   question: string,
   report: StructuredSynthesis,
-  gate: VerificationGateResult
+  gate: VerificationGateResult,
+  /**
+   * The run's result rows, when the caller holds them. "Agreed by N models"
+   * counts INDEPENDENT executing models (lib/panel/executingVoiceLabel.ts):
+   * slots answered by one substitute model are one model. Without rows each
+   * distinct slot counts once (nothing is inferred).
+   */
+  rows?: readonly ExecutingIdentityRow[] | null
 ): PanelVerdict {
   const topFinding = report.keyFindings?.[0];
   const topConsensus = topFinding?.claim ?? report.executiveSummary?.slice(0, 200) ?? "No consensus identified.";
-  const consensusModelCount = topFinding?.modelsSupporting?.length ?? 0;
+  const consensusModelCount = independentVoiceCount(topFinding?.modelsSupporting ?? [], rows);
 
   const topDisagreementItem = report.disagreements?.[0];
   const topDisagreement = topDisagreementItem?.topic ?? null;

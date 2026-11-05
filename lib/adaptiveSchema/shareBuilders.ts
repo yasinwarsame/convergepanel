@@ -9,7 +9,8 @@
  */
 
 import { ModelId } from "@/lib/types";
-import { RunModelProvenanceFacts, runModelFamilyName, runModelLabels } from "@/lib/panel/runModelIdentity";
+import { RunModelProvenanceFacts, runModelLabels } from "@/lib/panel/runModelIdentity";
+import { executingVoiceName } from "@/lib/panel/executingVoiceLabel";
 import { MemoInput } from "@/lib/verification/generateMemo";
 import { AdaptiveSynthesisReport } from "./types";
 import { dedupeTextList } from "./textSimilarity";
@@ -153,9 +154,20 @@ function truncate(text: string, max: number): string {
   return trimmed.length <= max ? trimmed : `${trimmed.slice(0, max - 1).trimEnd()}…`;
 }
 
-export function buildAdaptiveSynthesisMarkdown(question: string, storedReport: AdaptiveSynthesisReport, positionInput?: PositionSafeInput): string {
+export function buildAdaptiveSynthesisMarkdown(
+  question: string,
+  storedReport: AdaptiveSynthesisReport,
+  positionInput?: PositionSafeInput,
+  /**
+   * The run's per-slot provenance, when the caller holds it: a disagreement position from a slot the run records as
+   * substituted is attributed to its executing model ("DeepSeek (substituting ChatGPT)"), never to the requested model.
+   * Absent → family names, exactly as before.
+   */
+  slotProvenance?: readonly RunModelProvenanceFacts[] | null
+): string {
   const report = shown(storedReport, positionInput);
-  if (report.presentation) return buildPresentedMarkdown(question, report);
+  const slotName = (modelId: string) => executingVoiceName(modelId, slotProvenance ?? positionInput?.provenance ?? null);
+  if (report.presentation) return buildPresentedMarkdown(question, report, slotName);
   const lines: string[] = [];
   lines.push("# Synthesis Report");
   lines.push("");
@@ -183,7 +195,7 @@ export function buildAdaptiveSynthesisMarkdown(question: string, storedReport: A
     lines.push("## Where models disagree");
     report.disagreements.forEach((d) => {
       lines.push(`- **${d.topic}** — ${d.whyTheyDiffer}`);
-      d.positions.forEach((p) => lines.push(`  - ${runModelFamilyName(p.modelId)}: ${p.position}`));
+      d.positions.forEach((p) => lines.push(`  - ${slotName(p.modelId)}: ${p.position}`));
     });
     lines.push("");
   }
@@ -204,7 +216,7 @@ export function buildAdaptiveSynthesisMarkdown(question: string, storedReport: A
   return lines.join("\n");
 }
 
-function buildPresentedMarkdown(question: string, report: AdaptiveSynthesisReport): string {
+function buildPresentedMarkdown(question: string, report: AdaptiveSynthesisReport, slotName: (modelId: string) => string): string {
   const lines: string[] = [];
   lines.push("# Synthesis Report");
   lines.push("");
@@ -266,7 +278,7 @@ function buildPresentedMarkdown(question: string, report: AdaptiveSynthesisRepor
       } else {
         lines.push(`  - ${d.why.text}`);
       }
-      report.disagreements[i].positions.forEach((p) => lines.push(`  - ${runModelFamilyName(p.modelId)}: ${escapeMarkdownInline(p.position)}`));
+      report.disagreements[i].positions.forEach((p) => lines.push(`  - ${slotName(p.modelId)}: ${escapeMarkdownInline(p.position)}`));
     });
     lines.push("");
   }

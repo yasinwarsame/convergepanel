@@ -27,7 +27,7 @@ import {
   ModelId,
 } from "@/lib/types";
 import { getPanelModelConfig, PanelModelId } from "@/lib/panelModels";
-import { runModelFamilyName, runModelIdentityDetail, runModelIdentityLabel, runModelProvenanceFromResultRow } from "@/lib/panel/runModelIdentity";
+import { runModelIdentityDetail, runModelIdentityLabel, runModelProvenanceFromResultRow } from "@/lib/panel/runModelIdentity";
 import { RunModelProvenanceContext } from "@/components/adaptive/RunModelProvenanceContext";
 import { RunSlotStatusContext } from "@/components/adaptive/RunSlotStatusContext";
 import { normalizeBullets } from "@/lib/normalizeBullets";
@@ -44,6 +44,8 @@ import type { SynthesisConsensusSummaryDetail } from "@/lib/verification/consens
 import ModelChip from "@/components/ModelChip";
 import { sanitizeModelText, truncateForSynthesis, MAX_CHARS_SYNTHESIS_PER_MODEL } from "@/lib/panel/sanitizeText";
 import { classifyClusterType, isAnalysisReady } from "@/lib/synthesis/trustSummary";
+import { independentVoices } from "@/lib/panel/independentVoices";
+import { executingVoiceName, groupSlotsByExecutingVoice, independentModelCountText, type ExecutingVoiceGroup } from "@/lib/panel/executingVoiceLabel";
 import { shouldAutoTriggerSynthesis } from "@/lib/synthesis/autoSynthesisTrigger";
 import type { AdaptiveAncillaryPresentation } from "@/components/adaptive/adaptiveAncillaryPresentation";
 import type { DsProvenanceDisplay } from "@/lib/research/dsProvenanceClientView";
@@ -786,7 +788,8 @@ export default function ResultsDisplay({
   dsProvenance,
 }: ResultsDisplayProps) {
   const { user, authReady } = useAuth();
-  const results = Array.isArray(resultsProp) ? resultsProp : [];
+  // Memoised so the hooks that read it (attribution of agreement clusters among them) see a stable value.
+  const results = useMemo(() => (Array.isArray(resultsProp) ? resultsProp : []), [resultsProp]);
 
   const showGovBanner =
     teamGovernance &&
@@ -865,15 +868,29 @@ export default function ResultsDisplay({
         cluster.id || `${representativeText}|${[...modelIds].sort().join(",")}`;
       if (seen.has(key)) continue;
       seen.add(key);
+      // Executing-model attribution (lib/panel/executingVoiceLabel.ts): the
+      // cluster's slots grouped by the model that actually wrote them. A
+      // DeepSeek-substituted slot is named "DeepSeek (substituting ChatGPT)",
+      // and slots answered by one substitute are ONE voice. `voiceModelIds`
+      // (one slot per voice) is what classification counts, so a cluster
+      // whose slots collapse to one executing model — e.g. an analysis saved
+      // before the independent-voice rule — is never presented as consensus.
+      // `modelIds` (every slot, as stored) is left untouched.
+      const voices: ExecutingVoiceGroup[] = groupSlotsByExecutingVoice(modelIds as string[], results);
       deduped.push({
         ...cluster,
         modelIds,
+        voices,
+        voiceModelIds: voices.map((v) => v.slotIds[0]),
         representativeText,
       });
     }
 
     return deduped;
-  }, [synthesizedReport]);
+  }, [synthesizedReport, results]);
+
+  /** Classification by independent executing models (see `voices` above), shared by counts and cards. */
+  const classifyByVoices = (cluster: any) => classifyClusterType({ ...cluster, modelIds: cluster.voiceModelIds ?? cluster.modelIds });
 
   // CANONICAL COUNTS: Group clusters by type using the same classification logic as rendering
   // These arrays are the EXACT arrays used for rendering cards in Agreement Map
@@ -883,7 +900,7 @@ export default function ResultsDisplay({
     const single: any[] = [];
 
     for (const cluster of canonicalClusters) {
-      const clusterType = classifyClusterType(cluster);
+      const clusterType = classifyByVoices(cluster);
       if (clusterType === "consensus") {
         consensus.push(cluster);
       } else if (clusterType === "contested") {
@@ -927,13 +944,13 @@ export default function ResultsDisplay({
         id: cluster.id || `consensus-${idx}`,
         text: cluster.representativeText || cluster.claims?.[0]?.text || "",
         confidence: cluster.confidence,
-        models: cluster.modelIds || [],
+        voices: (cluster.voices || []) as ExecutingVoiceGroup[],
         refs: cluster.refs,
       })),
       contestedItems: contestedClusters.map((cluster: any, idx: number) => ({
         id: cluster.id || `contested-${idx}`,
         text: cluster.representativeText || cluster.claims?.[0]?.text || "",
-        models: cluster.modelIds || [],
+        voices: (cluster.voices || []) as ExecutingVoiceGroup[],
         refs: cluster.refs,
       })),
       uncertainCount: singleModelClusters.length,
@@ -1030,6 +1047,10 @@ export default function ResultsDisplay({
     // policy, decided by the one pure helper so a read surface can prove the
     // effect is inert without mounting this renderer.
     if (
+      // Independent executing models, not answered slots: two slots answered by
+      // the same substitute model are one model (lib/panel/independentVoices.ts),
+      // and the server refuses to synthesize fewer than two.
+      independentVoices(okResults).length >= 2 &&
       runId &&
       shouldAutoTriggerSynthesis({
         okResultCount: okResults.length,
@@ -1549,15 +1570,15 @@ export default function ResultsDisplay({
                               )}
                               <div className="flex items-center gap-2 mt-2 flex-wrap">
                                 <span className="text-xs font-medium text-green-700">
-                                  Agreed by {item.models.length} model{item.models.length !== 1 ? "s" : ""}:{" "}
+                                  Agreed by {independentModelCountText(item.voices.length)}:{" "}
                                 </span>
                                 <div className="flex flex-wrap gap-1.5">
-                                  {item.models.map((modelId: string) => (
+                                  {item.voices.map((voice) => (
                                     <span
-                                      key={modelId}
+                                      key={voice.key}
                                       className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-200"
                                     >
-                                      {runModelFamilyName(modelId)}
+                                      {voice.label}
                                     </span>
                                   ))}
                                 </div>
@@ -1615,12 +1636,12 @@ export default function ResultsDisplay({
                                   Different perspectives from:{" "}
                                 </span>
                                 <div className="flex flex-wrap gap-1.5">
-                                  {item.models.map((modelId: string) => (
+                                  {item.voices.map((voice) => (
                                     <span
-                                      key={modelId}
+                                      key={voice.key}
                                       className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800 border border-orange-200"
                                     >
-                                      {runModelFamilyName(modelId)}
+                                      {voice.label}
                                     </span>
                                   ))}
                                 </div>
@@ -1817,7 +1838,7 @@ export default function ResultsDisplay({
 
               // Use canonical classification helper to determine cluster type
               // This ensures the rendering matches the Trust Summary counting logic
-              const clusterType = classifyClusterType(cluster);
+              const clusterType = classifyByVoices(cluster);
               const effectiveLabel = clusterType === "contested" ? "disagreement" : 
                                     clusterType === "single" ? "single" : 
                                     clusterType === "consensus" ? "consensus" :
@@ -1872,19 +1893,18 @@ export default function ResultsDisplay({
                         <div className="flex flex-wrap gap-2">
                           {/* Use the same PanelModelConfig as the Run Panel buttons so colors and labels always match.
                               Always attach the canonical PanelModelId so the frontend can color and label consistently. */}
-                          {cluster.modelIds.map((id: string) => {
-                            // Ensure we have a valid PanelModelId
-                            const modelId = id as PanelModelId;
-                            return (
-                              <ModelChip
-                                key={`${cluster.id}-${id}`}
-                                modelId={modelId}
-                                variant="outline"
-                                size="xs"
-                                uppercase={false}
-                              />
-                            );
-                          })}
+                          {/* One chip per EXECUTING model: a substituted slot reads
+                              "DeepSeek (substituting ChatGPT)", never as the slot's model. */}
+                          {(cluster.voices as ExecutingVoiceGroup[]).map((voice) => (
+                            <ModelChip
+                              key={`${cluster.id}-${voice.key}`}
+                              modelId={voice.slotIds[0] as PanelModelId}
+                              variant="outline"
+                              size="xs"
+                              uppercase={false}
+                              label={voice.substituted ? voice.label : undefined}
+                            />
+                          ))}
                         </div>
                         <svg
                           className={`h-4 w-4 text-slate-500 transition-transform ${isExpanded ? "rotate-180" : ""}`}
@@ -1936,8 +1956,8 @@ export default function ResultsDisplay({
                                     }`}
                                   >
                                     <span className="font-semibold text-gray-700">
-                                      {/* Slot reference: family name only, never a version. */}
-                                      {runModelFamilyName(claim.modelId)}:
+                                      {/* Executing model: family name for the slot's own model, "DeepSeek (substituting ChatGPT)" for a substitute. */}
+                                      {executingVoiceName(claim.modelId, results)}:
                                     </span>{" "}
                                     {claim.text}
                                   </div>
@@ -1976,19 +1996,18 @@ export default function ResultsDisplay({
                           This ensures Grok (and any future models) appear when they participate in a cluster */}
                       {/* Use the same PanelModelConfig as the Run Panel buttons so colors and labels always match.
                           Always attach the canonical PanelModelId so the frontend can color and label consistently. */}
-                      {cluster.modelIds.map((id: string) => {
-                        // Ensure we have a valid PanelModelId
-                        const modelId = id as PanelModelId;
-                        return (
-                          <ModelChip
-                            key={`${cluster.id}-${id}`}
-                            modelId={modelId}
-                            variant="outline"
-                            size="xs"
-                            uppercase={false}
-                          />
-                        );
-                      })}
+                      {/* One chip per EXECUTING model: a substituted slot reads
+                          "DeepSeek (substituting ChatGPT)", never as the slot's model. */}
+                      {(cluster.voices as ExecutingVoiceGroup[]).map((voice) => (
+                        <ModelChip
+                          key={`${cluster.id}-${voice.key}`}
+                          modelId={voice.slotIds[0] as PanelModelId}
+                          variant="outline"
+                          size="xs"
+                          uppercase={false}
+                          label={voice.substituted ? voice.label : undefined}
+                        />
+                      ))}
                     </div>
                   </div>
                   <div className={`px-4 py-3 ${
@@ -2024,8 +2043,8 @@ export default function ResultsDisplay({
                                 }`}
                               >
                                 <span className="font-semibold text-gray-700">
-                                  {/* Slot reference: family name only, never a version. */}
-                                  {runModelFamilyName(claim.modelId)}:
+                                  {/* Executing model: family name for the slot's own model, "DeepSeek (substituting ChatGPT)" for a substitute. */}
+                                  {executingVoiceName(claim.modelId, results)}:
                                 </span>{" "}
                                 {claim.text}
                               </div>

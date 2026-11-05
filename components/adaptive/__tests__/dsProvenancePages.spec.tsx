@@ -94,6 +94,7 @@ const mockAuthedFetch = jest.fn();
 jest.mock("@/lib/client/authedFetch", () => ({ authedFetch: (...a: unknown[]) => mockAuthedFetch(...a) }));
 
 import { undoCriticalContrastClasses } from "./criticalContrastSlice";
+import { recordedSubstitutions, undoExecutingAttributionHtml } from "./executingAttributionStrip";
 import { createHash } from "crypto";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
@@ -326,6 +327,7 @@ if (CAPTURE) {
     writeFileSync(CAPTURE, JSON.stringify({ baseCommit: "9eca1e3420b526973b6ff872c6e04e1a390eea46", tz: process.env.TZ, now: FIXED_NOW.toISOString(), caseCount: CASES.length, cases }, null, 1) + "\n");
   }, 600_000);
 } else {
+  const SUBSTITUTIONS = recordedSubstitutions(PER_MODEL_ROWS);
   const BASELINE: { baseCommit: string; cases: Record<string, BaselineCase> } = existsSync(BASELINE_PATH) ? JSON.parse(readFileSync(BASELINE_PATH, "utf8")) : { baseCommit: "", cases: {} };
 
   describe("page parity with the unmodified 9eca1e3 pages (real routes, real pages)", () => {
@@ -338,11 +340,14 @@ if (CAPTURE) {
       const base = BASELINE.cases[c.id];
       const off = await renderPage(c, false);
       // Order 6 critical-contrast slice: the baseline predates it; compare with its class changes reversed.
-      expect({ sha: sha(undoCriticalContrastClasses(off.dom).markup), d9: off.d9, requests: off.requests }).toEqual({ sha: base.domSha256, d9: base.d9, requests: base.requests });
+      // Executing-model attribution (owner rule, 2026-11-05): the substituted claude row (PER_MODEL_ROWS) is named
+      // "DeepSeek (substituting Claude)"; the baseline predates it, so that attribution (and only it) is reversed too.
+      const undo = (dom: string) => undoExecutingAttributionHtml(undoCriticalContrastClasses(dom).markup, SUBSTITUTIONS).markup;
+      expect({ sha: sha(undo(off.dom)), d9: off.d9, requests: off.requests }).toEqual({ sha: base.domSha256, d9: base.d9, requests: base.requests });
       // Flag OFF: no section anywhere.
       expect(off.dom).toBe(off.baselineDom);
       const on = await renderPage(c, true);
-      expect({ sha: sha(undoCriticalContrastClasses(on.baselineDom).markup), d9: on.d9, requests: on.requests }).toEqual({ sha: base.domSha256, d9: base.d9, requests: base.requests });
+      expect({ sha: sha(undo(on.baselineDom)), d9: on.d9, requests: on.requests }).toEqual({ sha: base.domSha256, d9: base.d9, requests: base.requests });
     });
 
     it.each(CASES.map((c) => [c.id, c] as const))("Ruling B: %s — with modelResults served, the page differs ONLY inside the Model Responses section", async (_id, c) => {

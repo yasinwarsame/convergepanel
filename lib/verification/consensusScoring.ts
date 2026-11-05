@@ -144,7 +144,15 @@ export type KeyFindingSupportBlock = {
 };
 
 export type SynthesisConsensusSummaryDetail = {
+  /**
+   * Distinct INDEPENDENT executing models among the usable rows (independentVoices): slots answered by one substitute
+   * model count once. Before the independent-voice rule it counted every usable slot.
+   */
   modelsHealthy: number;
+  /**
+   * The number of rows scored — on /api/synthesize-panel, the run's successful (usable) responses, one per answered
+   * slot (substitutes included). NOT the dispatched panel size: failed slots never reach the scorer.
+   */
   modelCount: number;
   highConfidenceClaims: number;
   contestedClaims: number;
@@ -223,7 +231,9 @@ export function classifyModelStanceForClaim(text: string, anchors: string[]): "s
 /**
  * Usable rows reduced to independent voices (lib/panel/independentVoices.ts):
  * several slots answered by one substitute model support or dissent once.
- * `modelCount` stays the dispatched panel size.
+ * `modelCount` is `results.length` — the rows the caller passed. The synthesis
+ * route passes only the run's successful responses (authoritativeRunInputs),
+ * so it is the successful-response count, not the dispatched panel size.
  */
 function usableSynthesisRows(results: SynthesisConsensusResultRow[]) {
   return independentVoices(results.filter((r) => {

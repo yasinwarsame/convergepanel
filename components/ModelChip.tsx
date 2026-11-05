@@ -30,6 +30,13 @@ interface ModelChipProps {
   uppercase?: boolean;
   /** "family" (default): slot family name. "product": the product-selection label from lib/panelModels.ts. */
   labelKind?: "family" | "product";
+  /**
+   * The executing model's name when it is not the slot's own model — e.g.
+   * "DeepSeek (substituting ChatGPT)" for a DeepSeek-substituted slot
+   * (lib/panel/executingVoiceLabel.ts). Replaces the slot name and the slot's
+   * identity dot, which would otherwise attribute the text to the slot's model.
+   */
+  label?: string;
 }
 
 // Small 2px identity dot per model — the only place model color shows up.
@@ -49,9 +56,10 @@ export default function ModelChip({
   className = "",
   uppercase = true,
   labelKind = "family",
+  label,
 }: ModelChipProps) {
-  const displayName = labelKind === "product" ? getPanelModelConfig(modelId).label : runModelFamilyName(modelId);
-  const dotColor = MODEL_DOT_COLORS[modelId] ?? "bg-cp-faint";
+  const displayName = label ?? (labelKind === "product" ? getPanelModelConfig(modelId).label : runModelFamilyName(modelId));
+  const dotColor = label !== undefined ? "bg-cp-faint" : (MODEL_DOT_COLORS[modelId] ?? "bg-cp-faint");
 
   // Size classes
   const sizeClasses = {

@@ -24,6 +24,7 @@ import { generateVerificationMemo } from "@/lib/verification/generateMemo";
 import { SCENARIOS } from "./o5pScenarios";
 import { SHARED_MEMO_INPUTS, normalizeMemo, renderRecord } from "./o5pRender";
 import { stripAnalysisNoticeHtml } from "@/components/adaptive/__tests__/analysisNoticeStrip";
+import { recordedSubstitutions, undoExecutingAttributionHtml } from "@/components/adaptive/__tests__/executingAttributionStrip";
 
 const FIXTURES = join(__dirname, "__fixtures__", "baseline-2c17fee");
 const records: Record<string, any> = JSON.parse(readFileSync(join(FIXTURES, "records.json"), "utf8"));
@@ -67,6 +68,11 @@ describe("Contract P historical parity (2c17feee oracles)", () => {
     // D-3 (2026-11-02): the owner-approved analysis-availability notice is removed before hashing against the 2c17feee
     // oracle, and required exactly where the record's synthesis is degraded (the narrative-failure scenario) and nowhere else.
     let notices = 0;
+    // Executing-model attribution (owner rule, 2026-11-05): a slot the run records as substituted is named
+    // "DeepSeek (substituting Claude)" — the baseline predates the rule, so that attribution (and only it) is reversed
+    // before hashing, and it must appear exactly where the run records a substitution.
+    const subs = recordedSubstitutions(scenario.results() as any[]);
+    let attributions = 0;
     const actual = Object.fromEntries(
       Object.entries(outputs).map(([k, v]) => {
         if (v === null) return [k, null];
@@ -74,10 +80,13 @@ describe("Contract P historical parity (2c17feee oracles)", () => {
         // Review MINOR-5: never more than one notice in one rendered output.
         expect([name, k, stripped.count <= 1]).toEqual([name, k, true]);
         notices += stripped.count;
-        return [k, sha(stripped.markup)];
+        const reverted = undoExecutingAttributionHtml(stripped.markup, subs);
+        attributions += reverted.count;
+        return [k, sha(reverted.markup)];
       })
     );
     expect([name, notices > 0]).toEqual([name, records[name]?.synthesisReport?.degraded === true]);
+    expect([name, attributions > 0]).toEqual([name, subs.length > 0]);
     expect(renderHashes).toBeDefined();
     expect(actual).toEqual(renderHashes![name]);
   });

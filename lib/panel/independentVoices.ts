@@ -10,7 +10,8 @@
  *
  * Rule: every aggregator that counts agreeing/supporting models first reduces
  * its usable rows to independent voices — one per executing model:
- *  - a non-substituted row is its own voice, keyed by its slot (`modelId`);
+ *  - a non-substituted row is its own voice, keyed by its slot (`modelId`,
+ *    trimmed and lower-cased like the provider key);
  *  - a substituted row is keyed by the provider that actually executed it
  *    (`provider`, e.g. "deepseek"). The first such row in panel order is kept;
  *    later rows with the same executor are dropped from agreement counting.
@@ -27,6 +28,10 @@
  */
 
 import { coerceStatus } from "./normalize";
+
+/** Why a later slot answered by an already-counted substitute model is not an agreement input (adaptive runs). */
+export const REPEATED_SUBSTITUTE_EXCLUDED =
+  "Not counted as an independent model: answered by the same substitute model as another panel slot.";
 
 export type VoiceRow = {
   modelId: string;
@@ -45,7 +50,9 @@ export function executingModelKey(row: VoiceRow): string {
   if (coerceStatus(row.status) === "substituted") {
     return `substitute:${recordedProvider(row.provider) ?? "unknown"}`;
   }
-  return `slot:${String(row.modelId).trim()}`;
+  // Slot ids are lower-case everywhere; normalising here as the provider key
+  // is normalised means a case variant can only merge (fewer voices), never split.
+  return `slot:${String(row.modelId).trim().toLowerCase()}`;
 }
 
 /**

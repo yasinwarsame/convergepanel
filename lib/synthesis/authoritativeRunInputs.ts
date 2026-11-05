@@ -27,6 +27,7 @@
  * Pure: no I/O. Never reads anything the caller supplied.
  */
 import { isUsableResult } from "@/lib/panel/publicize";
+import { independentVoices } from "@/lib/panel/independentVoices";
 import { composeSynthesisQuestion, readPersistedQuestionContext } from "@/lib/questionContext";
 
 export type AuthoritativeModelRow = {
@@ -48,7 +49,7 @@ export type AuthoritativeSynthesisInputsResult =
   | { ok: true; value: AuthoritativeSynthesisInputs }
   | { ok: false; reason: "question_unavailable" | "results_unavailable" | "insufficient_results" };
 
-/** Minimum distinct usable model rows for a synthesis — the panel's own minimum. */
+/** Minimum distinct INDEPENDENT executing models among the usable rows for a synthesis — the panel's own minimum. */
 export const MIN_AUTHORITATIVE_SYNTHESIS_ROWS = 2;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -92,6 +93,12 @@ export function authoritativeSynthesisInputs(run: Record<string, unknown>): Auth
       },
     });
   }
-  if (rows.length < MIN_AUTHORITATIVE_SYNTHESIS_ROWS) return { ok: false, reason: "insufficient_results" };
+  // The minimum is of INDEPENDENT executing models, not answered slots
+  // (lib/panel/independentVoices.ts): two slots both answered by the DeepSeek
+  // fallback are one model, and a synthesis built from them would present one
+  // model's text as cross-model consensus (overallConsensusScore, "strong"
+  // evidence). Such a run gets the same truthful refusal as one answered slot.
+  const voices = independentVoices(rows.map((row) => ({ modelId: row.modelId, status: row.status, provider: row.provenance.provider })));
+  if (voices.length < MIN_AUTHORITATIVE_SYNTHESIS_ROWS) return { ok: false, reason: "insufficient_results" };
   return { ok: true, value: { question: composeSynthesisQuestion(question, questionContext), rows } };
 }

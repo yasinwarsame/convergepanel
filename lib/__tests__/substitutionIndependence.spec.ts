@@ -329,7 +329,7 @@ describe("synthesis consensus scoring (computeSynthesisConsensusScoring — rese
     biasAndBlindSpots: [],
   } as unknown as StructuredSynthesis;
 
-  it("two DeepSeek-substituted rows support once; modelCount stays the dispatched total", () => {
+  it("two DeepSeek-substituted rows support once; modelCount is the successful responses passed in (3), modelsHealthy the independent models (2)", () => {
     const out = computeSynthesisConsensusScoring({
       synthesis,
       results: [

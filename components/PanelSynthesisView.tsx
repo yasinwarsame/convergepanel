@@ -38,8 +38,10 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ModelResult, SynthesizedReport } from "@/lib/types";
 import { StructuredSynthesis } from "@/lib/synthesis/structuredSchema";
-import { runModelFamilyName, runModelIdentityLabel, runModelProvenanceFromResultRow } from "@/lib/panel/runModelIdentity";
+import { runModelIdentityLabel, runModelProvenanceFromResultRow } from "@/lib/panel/runModelIdentity";
 import { isUsableResult } from "@/lib/panel/publicize";
+import { independentVoices } from "@/lib/panel/independentVoices";
+import { executingVoiceName, groupSlotsByExecutingVoice, independentModelCountText } from "@/lib/panel/executingVoiceLabel";
 import { coerceStatus } from "@/lib/panel/normalize";
 import { modelHealthSubstitution, substitutedProviderNames } from "@/lib/panel/substitutionDisplay";
 import {
@@ -733,6 +735,14 @@ export default function PanelSynthesisView({
   const getModelText = (r: any): string => 
     (r as any).rawTextFull ?? (r as any).rawText ?? (r as any).text ?? "";
 
+  // Independent executing models among the usable responses
+  // (lib/panel/independentVoices.ts): two slots answered by the DeepSeek
+  // fallback are ONE model. Synthesis, the consensus score and cross-model
+  // support are only offered / presented with at least two.
+  const independentResponderCount = independentVoices(
+    results.filter((r) => isUsableResult(r) && getModelText(r).trim().length > 0)
+  ).length;
+
   // Cleanup: abort ongoing request on component unmount
   useEffect(() => {
     return () => {
@@ -890,8 +900,8 @@ export default function PanelSynthesisView({
         (r) => isUsableResult(r) && getModelText(r).trim().length > 0
       );
 
-      if (okResults.length < 2) {
-        throw new Error("Synthesis requires at least 2 successful model responses.");
+      if (independentVoices(okResults).length < 2) {
+        throw new Error("Synthesis requires responses from at least 2 independent models.");
       }
 
       // Update progress
@@ -1298,7 +1308,7 @@ export default function PanelSynthesisView({
         ...prev,
         status: "loading",
       }));
-    } else if (preGeneratedStatus === "idle" && runId && results.length >= 2) {
+    } else if (preGeneratedStatus === "idle" && runId && results.length >= 2 && independentResponderCount >= 2) {
       // AUTO-START: If synthesis is idle but we have results and runId, auto-start generation
       // This handles cases where auto-generation hasn't completed yet or was missed
       // Only trigger once per runId (guarded by triggeredRunIdsRef)
@@ -1321,6 +1331,7 @@ export default function PanelSynthesisView({
     preGeneratedStatus,
     runId,
     results.length,
+    independentResponderCount,
     generateSynthesis,
   ]);
 
@@ -1462,11 +1473,15 @@ export default function PanelSynthesisView({
     const sourceBacked = (synthesizedReport?.consensusAnalysis?.agreementClusters?.length ?? 0) > 0;
 
     const consensusMeta = synthesisState.consensusSummary;
-    const modelsHealthyResolved =
-      consensusMeta?.modelsHealthy ??
-      results.filter((r) => isUsableResult(r) && getModelText(r).trim().length > 0).length;
+    const modelsHealthyResolved = consensusMeta?.modelsHealthy ?? independentResponderCount;
+    // Fewer than two independent executing models (e.g. two slots both
+    // answered by DeepSeek): nothing here is cross-model, so no consensus
+    // score and no per-finding cross-model support is presented — including a
+    // summary persisted before the independent-voice rule existed (shown as
+    // stored data is never rewritten; it is just not presented as consensus).
+    const crossModel = independentResponderCount >= 2;
     const modelTotalResolved = consensusMeta?.modelCount ?? Math.max(1, results.length);
-    const panelVerdict = buildPanelVerdict(question, report, gate);
+    const panelVerdict = buildPanelVerdict(question, report, gate, results);
     const policyRollup =
       consensusMeta != null
         ? rollupPolicyConsensusSummary(consensusMeta, report.keyFindings?.length ?? 0)
@@ -1571,8 +1586,14 @@ export default function PanelSynthesisView({
             </div>
           )}
 
-          {consensusMeta && (
+          {consensusMeta && crossModel && (
             <SynthesisConsensusSummaryBox summary={consensusMeta} modelTotal={modelTotalResolved} />
+          )}
+          {consensusMeta && !crossModel && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900" data-testid="consensus-insufficient-independent-models">
+              No consensus score: fewer than two independent models responded. Slots answered by the same substitute
+              model count as one model, so there is no cross-model agreement to measure.
+            </div>
           )}
 
           {/* Key Findings (green cards) */}
@@ -1608,18 +1629,25 @@ export default function PanelSynthesisView({
                         )}
                         <div className="flex items-center gap-2 mt-2">
                           <span className="text-xs font-medium text-green-700">
-                            {finding.modelsSupporting.length} model{finding.modelsSupporting.length !== 1 ? "s" : ""}: {finding.modelsSupporting.map(runModelFamilyName).join(", ")}
+                            {(() => {
+                              // Named and counted by EXECUTING model: a substitute is
+                              // "DeepSeek (substituting ChatGPT)", and slots answered by
+                              // one substitute are one model.
+                              const voices = groupSlotsByExecutingVoice(finding.modelsSupporting, results);
+                              return `${independentModelCountText(voices.length)}: ${voices.map((v) => v.label).join(", ")}`;
+                            })()}
                           </span>
                           <span className="text-xs text-green-600">•</span>
                           <span className="text-xs text-green-600">{finding.confidence} confidence</span>
                         </div>
-                        {finding.support &&
+                        {crossModel &&
+                          finding.support &&
                           (finding.evidenceQuality === "strong" ||
                             finding.evidenceQuality === "mixed" ||
                             finding.evidenceQuality === "weak") && (
                             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-green-800/90">
                               <span>
-                                Supported by {finding.support.supportingModels.length}/
+                                Supported by {groupSlotsByExecutingVoice(finding.support.supportingModels, results).length}/
                                 {Math.max(1, modelsHealthyResolved)} models
                               </span>
                               <span
@@ -1678,7 +1706,7 @@ export default function PanelSynthesisView({
                           {Object.entries(disagreement.positionsByModel).map(([modelId, position], posIdx) => (
                             <div key={posIdx} className="pl-3 border-l-2 border-orange-300">
                               <div className="flex items-center gap-2 mb-1">
-                                <span className="text-sm font-medium text-orange-900">{runModelFamilyName(modelId)}:</span>
+                                <span className="text-sm font-medium text-orange-900">{executingVoiceName(modelId, results)}:</span>
                               </div>
                               <p className="text-sm text-orange-800">{position}</p>
                             </div>
@@ -1740,7 +1768,7 @@ export default function PanelSynthesisView({
                                   key={modelId}
                                   className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200"
                                 >
-                                  {runModelFamilyName(modelId)}
+                                  {executingVoiceName(modelId, results)}
                                 </span>
                               ))}
                             </div>
@@ -1755,7 +1783,7 @@ export default function PanelSynthesisView({
                               {biasItem.evidence.map((ev, evIdx) => (
                                 <div key={evIdx} className="bg-white rounded border border-slate-200 p-3">
                                   <div className="flex items-start gap-2 mb-1">
-                                    <span className="text-sm font-medium text-slate-700">{runModelFamilyName(ev.modelId)}:</span>
+                                    <span className="text-sm font-medium text-slate-700">{executingVoiceName(ev.modelId, results)}:</span>
                                     <span className="text-sm text-slate-600 italic flex-1">&quot;{ev.excerpt}&quot;</span>
                                   </div>
                                   <p className="text-sm text-slate-600 ml-0 mt-1">{ev.rationale}</p>
@@ -1941,11 +1969,11 @@ export default function PanelSynthesisView({
           No Synthesis Available Yet
         </h3>
         <p className="text-sm text-slate-600 mb-4">
-          {results.filter(r => isUsableResult(r)).length >= 2
+          {independentResponderCount >= 2
             ? "Click the button below to generate a synthesis report."
-            : "At least 2 successful model responses are required for synthesis."}
+            : "Responses from at least 2 independent models are required for synthesis. Slots answered by the same substitute model count as one model."}
         </p>
-        {results.filter(r => isUsableResult(r)).length >= 2 && runId && (
+        {independentResponderCount >= 2 && runId && (
           <button
             onClick={() => {
               setSynthesisState(prev => ({ ...prev, status: "loading", error: null }));

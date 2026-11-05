@@ -87,12 +87,13 @@ export const ADAPTIVE_SYNTHESIS_SECTION_IDS = [
   "disclaimer",
   "export-actions",
 ] as const;
-import { Card, SectionLabel, ProbabilityBar, StakesBadge, TintBadge, getModelLabel, SlotName, SlotChip } from "./shared";
+import { Card, SectionLabel, ProbabilityBar, StakesBadge, TintBadge, SlotName, SlotChip, useSlotVoiceName } from "./shared";
 import { classifyClaimSeverity } from "@/lib/verificationGate/claimSeverity";
 import { VerificationActions } from "@/components/VerificationActions";
 import { generateVerificationMemo, downloadTextFile } from "@/lib/verification/generateMemo";
 import { copyToClipboardWithFallback } from "@/lib/ui/copyFormats";
 import { useRunModelProvenance } from "./RunModelProvenanceContext";
+import { executingModelKey, REPEATED_SUBSTITUTE_EXCLUDED } from "@/lib/panel/independentVoices";
 import {
   buildAdaptiveSynthesisMarkdown,
   buildAdaptiveMemoInput,
@@ -314,7 +315,20 @@ export function TrustSummaryTable({ trustSummary }: { trustSummary: AdaptiveTrus
   // Order 5 (Contract P, F-2): on a marked report the computed trust inputs are labelled for what they count — every
   // scored row, value comparisons included — never as claim positions. The values are the stored ones, unchanged.
   const marked = !!usePositionPresentation();
+  const runProvenance = useRunModelProvenance();
   if (trustSummary.perModel.length === 0) return null;
+  // A slot answered by a substitute model that an earlier slot already counted is excluded from agreement by the
+  // independent-voice rule (orchestrate.ts), which stores it as parse health "failed". Its health cell says so instead
+  // of reading as a parse failure. Read from the run's own rows; the stored values are unchanged.
+  const notCounted = new Set<string>();
+  const countedSubstitutes = new Set<string>();
+  for (const m of trustSummary.perModel) {
+    const facts = runProvenance?.find((f) => f && f.modelId === m.modelId);
+    if (facts?.substituted !== true) continue;
+    const key = executingModelKey({ modelId: m.modelId, status: "substituted", provider: facts.provider });
+    if (m.parseHealth !== "failed") countedSubstitutes.add(key);
+    else if (countedSubstitutes.has(key)) notCounted.add(m.modelId);
+  }
   return (
     <Card>
       <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
@@ -360,11 +374,20 @@ export function TrustSummaryTable({ trustSummary }: { trustSummary: AdaptiveTrus
                 <td className="py-2 pr-4 text-slate-700">{Math.round(m.citationScore * 100)}%</td>
                 <td className="py-2 pr-4 text-slate-700">{m.contradictionCount}</td>
                 <td className="py-2 pr-4">
+                  {notCounted.has(m.modelId) ? (
+                    <span
+                      className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium bg-slate-50 text-slate-600 border-slate-200"
+                      title={REPEATED_SUBSTITUTE_EXCLUDED}
+                    >
+                      not counted
+                    </span>
+                  ) : (
                   <span
                     className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${PARSE_HEALTH_STYLES[m.parseHealth]}`}
                   >
                     {m.parseHealth}
                   </span>
+                  )}
                 </td>
               </tr>
             ))}
@@ -1079,6 +1102,8 @@ export function PanelVerdictCard({ report, gate }: { report: AdaptiveSynthesisRe
  */
 function LoadBearingClaim({ claim }: { claim: AlignedClaim }) {
   const position = usePositionPresentation();
+  // Executing-model names: a substituted slot is never named as its requested model.
+  const voiceName = useSlotVoiceName();
   if (position) {
     // Order 5 (Contract P): the row's own computed statement; supporting / disputing slots for a claim row only.
     const view = rowView(claim, position.roster, position.provenance);
@@ -1096,7 +1121,7 @@ function LoadBearingClaim({ claim }: { claim: AlignedClaim }) {
     );
   }
   const named = (stances: string[]) =>
-    claim.cells.filter((c): c is AlignedClaimCell => !!c && stances.includes(c.stance)).map((c) => getModelLabel(c.modelId));
+    claim.cells.filter((c): c is AlignedClaimCell => !!c && stances.includes(c.stance)).map((c) => voiceName(c.modelId));
   const supports = named(["agrees", "partial"]);
   const disputes = named(["disputes"]);
   const who = [supports.length > 0 ? `supported by ${supports.join(", ")}` : "", disputes.length > 0 ? `disputed by ${disputes.join(", ")}` : ""].filter(Boolean);
@@ -1144,6 +1169,7 @@ export default function AdaptiveSynthesisReportView({
   const rows = alignedClaims || [];
   const modelProvenance = useRunModelProvenance();
   const position = usePositionPresentation();
+  const voiceName = useSlotVoiceName();
   // Order 5 (Contract P): normally already the position-safe view (AdaptivePanelResponse); a marked stored report
   // reaching this view directly is presented the same way. Unmarked reports are unchanged.
   const report = useMemo(
@@ -1156,10 +1182,10 @@ export default function AdaptiveSynthesisReportView({
   const agreeGroups = presentAgreeGroups(report);
 
   const handleCopy = useCallback(async () => {
-    const markdown = buildAdaptiveSynthesisMarkdown(question, report);
+    const markdown = buildAdaptiveSynthesisMarkdown(question, report, undefined, modelProvenance);
     const ok = await copyToClipboardWithFallback(markdown);
     if (!ok) throw new Error("copy failed");
-  }, [question, report]);
+  }, [question, report, modelProvenance]);
 
   const handleExportMemo = useCallback(() => {
     const memoInput = buildAdaptiveMemoInput(question, report, modelsUsed, runId || "", modelProvenance);
@@ -1326,7 +1352,7 @@ export default function AdaptiveSynthesisReportView({
                   {claim.cells.some(Boolean) && (
                     <span className="text-slate-500">
                       {" "}
-                      ({claim.cells.filter(Boolean).map((c) => getModelLabel(c!.modelId)).join(", ")})
+                      ({claim.cells.filter(Boolean).map((c) => voiceName(c!.modelId)).join(", ")})
                     </span>
                   )}
                 </li>
