@@ -1,6 +1,10 @@
 /** @type {import('next').NextConfig} */
 const { withSentryConfig } = require("@sentry/nextjs");
 
+// I-1 M-2: a Production build with missing/invalid browser Firebase configuration or deployment identity fails HERE,
+// before any page is built (no-op for Preview, development, local and CI builds).
+require("./lib/firebase/productionBuildConfigGuard").assertProductionBuildConfig(process.env);
+
 const nextConfig = {
   reactStrictMode: true,
   skipTrailingSlashRedirect: true,
