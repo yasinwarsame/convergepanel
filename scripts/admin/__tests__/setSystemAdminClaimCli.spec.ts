@@ -1396,6 +1396,17 @@ describe("read-only claim scripts", () => {
       "auth.getUser(", "auth.listUsers(", "auth.revokeRefreshTokens(", "auth.setCustomUserClaims(", "auth.verifyIdToken(", "auth.writeCustomClaims(",
     ]);
   });
+  it("the real role write (the revocation anchor) always changes the document and returns the SERVER writeTime", () => {
+    // Firestore reports a write that does not change the document with its PREVIOUS update time;
+    // a server-timestamp field guarantees every anchor write is a change (runbook: "How revocation is verified").
+    const code = stripComments(read("scripts/admin/set-system-admin-claim.ts"));
+    const roleWrite = code.slice(code.indexOf("writeUsersDocRole: async"), code.indexOf("createAuditRow: async"));
+    expect(roleWrite).toMatch(/\.set\(\{ role, updatedAt: FieldValue\.serverTimestamp\(\) \}, \{ merge: true \}\)/);
+    expect(roleWrite).toMatch(/return \{ seconds: r\.writeTime\.seconds, nanoseconds: r\.writeTime\.nanoseconds \}/);
+    const auditWrite = code.slice(code.indexOf("createAuditRow: async"), code.indexOf("timestampNow: () => Timestamp.now()"));
+    expect(auditWrite).toMatch(/\.create\(record\)/);
+    expect(auditWrite).toMatch(/return \{ seconds: r\.writeTime\.seconds, nanoseconds: r\.writeTime\.nanoseconds \}/);
+  });
   it("verify-admin-claims.js delegates to the same implementation", () => {
     expect(read("scripts/verify-admin-claims.js")).toContain('require("./check-admin-claims.js")');
   });
