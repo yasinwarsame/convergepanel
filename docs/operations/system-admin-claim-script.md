@@ -126,12 +126,24 @@ lexically: its parent directory and the repository root are canonicalised with
 refused (`result_path_inside_repo`) if it lies inside the current worktree or
 ANY git worktree of this repository (`git worktree list`) — compared
 case-folded on macOS/Windows and on any volume detected as case-insensitive, so
-`/users/.../convergepanel/out.json` cannot slip past. A parent directory or
-repository root that cannot be canonicalised, or ANY existing entry at the
-target path (file, directory or symlink, live or dangling), is refused
-(`result_path_invalid`); the file is then created with
-`O_CREAT|O_EXCL|O_NOFOLLOW` and its directory re-canonicalised after the
-create, so a symlink or directory swap after the check is refused too. It contains
+`/users/.../convergepanel/out.json` cannot slip past. A second, independent
+layer compares filesystem identity: the parent directory and EVERY ancestor up
+to `/` are `stat`ed and refused (`result_path_inside_repo`) if any has the
+`dev:ino` of the repository root or of any worktree root — so an alternate
+spelling the canonicaliser leaves alone (the macOS firmlink
+`/System/Volumes/Data/Users/...`, a bind mount) is still recognised as inside.
+A parent directory or repository root that cannot be canonicalised, an ancestor
+or protected root whose identity cannot be established, a `git worktree list`
+that fails or returns nothing (never treated as "no worktrees"), or ANY existing
+entry at the target path (file, directory or symlink, live or dangling), is
+refused (`result_path_invalid`). A listed worktree whose directory no longer
+exists (git reports it prunable) contains nothing and is skipped. The file is
+then created with `O_CREAT|O_EXCL|O_NOFOLLOW` and re-verified AFTER the create:
+the entry at the path must be the inode the descriptor created, the parent
+directory must still have the checked `dev:ino` and canonical path, and no
+ancestor of it may now be a protected root — so a symlink or directory swap
+after the check is refused too. On that refusal the tool unlinks the file only
+if the entry at the path is, at that moment, its own inode. It contains
 UIDs, claims, the masked credential email and the request id, never key
 material or tokens. Do not commit it.
 
@@ -276,6 +288,16 @@ ordinary (non-admin) use.
   write; two operators revoking two different admins at the same moment could
   each see the other as the remaining admin. One operator at a time; confirm
   the remaining admins afterwards with the read-only check script.
+
+- **Result-file location residuals.** (a) Only this repository and its
+  `git worktree list` worktrees are protected; a SEPARATE clone of the
+  repository elsewhere on disk is not recognised — do not point
+  `--result-file` into any checkout. (b) Node has no `openat`/`unlinkat`, so
+  the post-create re-check runs by path: an adversary with write access to the
+  result directory's ancestors who moves the directory away after the create
+  can leave an empty 0600 file behind in the moved directory (it is never
+  written; the run is refused before any credential is read). Use the default
+  result directory (owned by you, mode 0700) to avoid both.
 
 ## Defects fixed (from the retired scripts)
 

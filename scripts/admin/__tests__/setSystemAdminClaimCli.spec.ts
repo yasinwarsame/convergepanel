@@ -17,6 +17,8 @@ import {
   type FirebaseFactory,
   type FirebaseHandle,
   type FsLayer,
+  type IdentityResult,
+  type ResultLocation,
 } from "../set-system-admin-claim";
 import { REFUSAL_CODES, checkResultDirStat, expectedConfirmation, parseSetSystemAdminClaimArgs } from "../../../lib/admin/systemAdminClaimSafety";
 import type { UserRecordLike } from "../../../lib/admin/systemAdminClaimSafety";
@@ -29,6 +31,21 @@ const readOnly = require("../../check-admin-claims.js");
 const rawFs: typeof fs = jest.requireActual("node:fs");
 
 const REPO = path.resolve(__dirname, "..", "..", "..");
+
+/** A string-keyed fake identity: every distinct path string is its own directory. */
+const stringIdentity = (p: string): IdentityResult => (p.startsWith("/nonexistent") ? "absent" : { id: `1:${p}` });
+
+/** Real dev:ino of an existing path (the oracle; independent of the code under test). */
+const realId = (p: string) => {
+  const st = fs.statSync(p, { bigint: true });
+  return `${st.dev}:${st.ino}`;
+};
+
+/** A ResultLocation for realIo.createResultFile built from the real filesystem; `dirOverride` replaces only the canonical string. */
+const realLoc = (file: string, repoRoot: string, dirOverride?: string): ResultLocation => {
+  const real = fs.realpathSync.native(path.dirname(file));
+  return { file, dir: dirOverride ?? real, dirId: realId(real), protectedIds: new Set([realId(repoRoot)]) };
+};
 const PROJECT = "cp-rehearsal-1";
 const TARGET = "TargetUid0000000000000000001";
 const OPERATOR = "OperatorUid00000000000000001";
@@ -80,9 +97,10 @@ function fakeIo(e: Env, over: Partial<CliIo> = {}): CliIo {
     },
     realpathDir: (p) => (p.startsWith("/nonexistent") ? null : p),
     gitWorktreeRoots: () => [REPO],
+    statIdentity: stringIdentity,
     caseInsensitivePaths: () => false,
     lstatKind: (p) => (e.results.has(p) ? "file" : "absent"),
-    createResultFile: (p) => {
+    createResultFile: ({ file: p }) => {
       if (e.results.has(p)) throw new Error("EEXIST");
       e.created.push(p);
       e.results.set(p, "");
@@ -404,9 +422,9 @@ describe("realIo — files on disk (temp dirs only)", () => {
   it("result file: exclusive 0600 create, written through the kept fd (a path swap after create is not followed)", () => {
     const io = realIo(REPO);
     const p = path.join(dir, "r.json");
-    const h = io.createResultFile(p, fs.realpathSync.native(dir));
+    const h = io.createResultFile(realLoc(p, REPO));
     expect(fs.statSync(p).mode & 0o777).toBe(0o600);
-    expect(() => io.createResultFile(p, fs.realpathSync.native(dir))).toThrow();
+    expect(() => io.createResultFile(realLoc(p, REPO))).toThrow();
     // Swap the path for a decoy after the create; the fd still points at the original inode.
     const moved = path.join(dir, "moved.json");
     fs.renameSync(p, moved);
@@ -422,7 +440,7 @@ describe("realIo — files on disk (temp dirs only)", () => {
     fs.writeFileSync(target, "ORIGINAL");
     const link = path.join(dir, "link.json");
     fs.symlinkSync(target, link);
-    expect(() => realIo(REPO).createResultFile(link, fs.realpathSync.native(dir))).toThrow();
+    expect(() => realIo(REPO).createResultFile(realLoc(link, REPO))).toThrow();
     expect(fs.readFileSync(target, "utf8")).toBe("ORIGINAL");
   });
 
@@ -585,7 +603,7 @@ describe("M-2: result-file location is filesystem-grounded (real temp dirs; neve
     fs.symlinkSync(repo, repoLink);
     const out: string[] = [];
     const err: string[] = [];
-    const io = { ...realIo(repoLink), stdout: (l: string) => out.push(l), stderr: (l: string) => err.push(l), gitWorktreeRoots: () => null };
+    const io = { ...realIo(repoLink), stdout: (l: string) => out.push(l), stderr: (l: string) => err.push(l), gitWorktreeRoots: () => [repoLink] };
     const code = await runCli({ argv: [...BASE, `--result-file=${path.join(repo, "out.json")}`], env: { NODE_ENV: "development" }, repoRoot: repoLink, io, firebase: () => { throw new Error("x"); } });
     expect(code).toBe(2);
     expect(err.join()).toContain("[result_path_inside_repo]");
@@ -596,7 +614,7 @@ describe("M-2: result-file location is filesystem-grounded (real temp dirs; neve
     const out: string[] = [];
     const err: string[] = [];
     const missing = path.join(base, "no-such-repo");
-    const io = { ...realIo(missing), stdout: (l: string) => out.push(l), stderr: (l: string) => err.push(l), gitWorktreeRoots: () => null };
+    const io = { ...realIo(missing), stdout: (l: string) => out.push(l), stderr: (l: string) => err.push(l), gitWorktreeRoots: () => [missing] };
     const code = await runCli({ argv: [...BASE, `--result-file=${path.join(outside, "x.json")}`], env: { NODE_ENV: "development" }, repoRoot: missing, io, firebase: () => { throw new Error("x"); } });
     expect(code).toBe(2);
     expect(err.join()).toContain("[result_path_invalid]");
@@ -694,7 +712,8 @@ describe("M-2: result-file location is filesystem-grounded (real temp dirs; neve
   it("checkResultLocation folds case when the volume is case-insensitive even if canonicalisation kept the input case", () => {
     const io = {
       realpathDir: (p: string) => p, // a canonicaliser that does NOT restore case
-      gitWorktreeRoots: () => [],
+      gitWorktreeRoots: () => ["/Users/op/Apps/CP"],
+      statIdentity: stringIdentity,
       caseInsensitivePaths: () => true,
       lstatKind: () => "absent" as const,
     };
@@ -715,7 +734,7 @@ describe("M-2: result-file location is filesystem-grounded (real temp dirs; neve
     const p = path.join(outside, "flags.json");
     const openSpy = jest.spyOn(rawFs, "openSync");
     try {
-      realIo(repo).createResultFile(p, outside).close();
+      realIo(repo).createResultFile(realLoc(p, repo)).close();
       const calls = openSpy.mock.calls.filter(([q]) => q === p);
       expect(calls).toHaveLength(1);
       const [, flags, mode] = calls[0] as [string, number, number];
@@ -732,14 +751,317 @@ describe("M-2: result-file location is filesystem-grounded (real temp dirs; neve
     const referent = path.join(repo, "via-link.json");
     const link = path.join(outside, "dl.json");
     fs.symlinkSync(referent, link);
-    expect(() => realIo(repo).createResultFile(link, outside)).toThrow();
+    expect(() => realIo(repo).createResultFile(realLoc(link, repo))).toThrow();
     expect(fs.existsSync(referent)).toBe(false);
   });
 
   it("createResultFile: a parent directory that no longer canonicalises to the checked one => throws and removes its own empty file", () => {
     const p = path.join(outside, "moved.json");
-    expect(() => realIo(repo).createResultFile(p, path.join(base, "SomewhereElse"))).toThrow();
+    expect(() => realIo(repo).createResultFile(realLoc(p, repo, path.join(base, "SomewhereElse")))).toThrow();
     expect(fs.existsSync(p)).toBe(false);
+  });
+});
+
+describe("B1–B3: containment by filesystem identity, worktree enumeration, post-create re-check", () => {
+  // ---- checkResultLocation with an injected identity (the firmlink shape) ----
+  // realpath.native returns a firmlink spelling unchanged, so the string layer
+  // sees two different paths for one directory; only dev:ino can tell.
+  const CP = "/Users/op/Apps/CP";
+  const WT = "/Users/op/Apps/CP-wt";
+  const FIRM = "/System/Volumes/Data";
+  /** Identity that treats `${FIRM}/X` and `/X` as the same directory (as the kernel does). */
+  const firmIdentity = (p: string): IdentityResult => ({ id: `16777223:${p.startsWith(`${FIRM}/`) ? p.slice(FIRM.length) : p}` });
+  const idIo = (over: Partial<Pick<CliIo, "realpathDir" | "gitWorktreeRoots" | "caseInsensitivePaths" | "lstatKind" | "statIdentity">> = {}) => ({
+    realpathDir: (p: string) => p,
+    gitWorktreeRoots: () => [CP, WT],
+    caseInsensitivePaths: () => false,
+    lstatKind: () => "absent" as const,
+    statIdentity: firmIdentity,
+    ...over,
+  });
+
+  it("B1: a firmlink spelling of the repo (/System/Volumes/Data/Users/...) is refused by identity", () => {
+    expect(checkResultLocation(`${FIRM}${CP}/out.json`, CP, idIo())).toMatchObject({ ok: false, code: "result_path_inside_repo" });
+  });
+  it("B1: a firmlink spelling of a DEEP subdirectory of the repo is refused (every ancestor is compared, not only the parent)", () => {
+    expect(checkResultLocation(`${FIRM}${CP}/a/b/c/out.json`, CP, idIo())).toMatchObject({ ok: false, code: "result_path_inside_repo" });
+  });
+  it("B1: a firmlink spelling of a LINKED worktree is refused (every worktree root's identity is protected)", () => {
+    expect(checkResultLocation(`${FIRM}${WT}/sub/out.json`, CP, idIo())).toMatchObject({ ok: false, code: "result_path_inside_repo" });
+  });
+  it("B1 CONTROL: a firmlink spelling of a sibling OUTSIDE the repo is accepted and carries the identities the create re-checks", () => {
+    const r = checkResultLocation(`${FIRM}/Users/op/Apps/CP-other/out.json`, CP, idIo());
+    expect(r).toMatchObject({ ok: true, file: `${FIRM}/Users/op/Apps/CP-other/out.json`, dir: `${FIRM}/Users/op/Apps/CP-other`, dirId: "16777223:/Users/op/Apps/CP-other" });
+    if (!r.ok) throw new Error("fixture");
+    expect([...r.protectedIds].sort()).toEqual([`16777223:${CP}`, `16777223:${WT}`]);
+  });
+  it("B1: identities compare dev AND ino — same ino on another device is a different directory (CONTROL), same dev:ino is the repo", () => {
+    const io = idIo({ statIdentity: (p) => ({ id: p === "/Volumes/Other/x" ? `2:${CP}` : `1:${p}` }) });
+    expect(checkResultLocation("/Volumes/Other/x/out.json", CP, io)).toMatchObject({ ok: true });
+    const same = idIo({ statIdentity: (p) => ({ id: p === "/Volumes/Other/x" ? `1:${CP}` : `1:${p}` }) });
+    expect(checkResultLocation("/Volumes/Other/x/out.json", CP, same)).toMatchObject({ ok: false, code: "result_path_inside_repo" });
+  });
+  it.each<[string, IdentityResult]>([["absent", "absent"], ["error", "error"]])(
+    "B1 fail closed: an ANCESTOR whose identity is %s => result_path_invalid (never treated as outside)",
+    (_l, failure) => {
+      const io = idIo({ statIdentity: (p) => (p === "/Users/op" ? failure : firmIdentity(p)) });
+      expect(checkResultLocation("/Users/op/elsewhere/out.json", CP, io)).toMatchObject({ ok: false, code: "result_path_invalid" });
+    },
+  );
+  it.each<[string, IdentityResult]>([["absent", "absent"], ["error", "error"]])(
+    "B1 fail closed: the result DIRECTORY's identity %s => result_path_invalid",
+    (_l, failure) => {
+      const io = idIo({ statIdentity: (p) => (p === "/Users/op/elsewhere" ? failure : firmIdentity(p)) });
+      expect(checkResultLocation("/Users/op/elsewhere/out.json", CP, io)).toMatchObject({ ok: false, code: "result_path_invalid" });
+    },
+  );
+  it.each<[string, IdentityResult]>([["absent", "absent"], ["error", "error"]])(
+    "B1 fail closed: the REPOSITORY ROOT's identity %s => result_path_invalid",
+    (_l, failure) => {
+      const io = idIo({ statIdentity: (p) => (p === CP ? failure : firmIdentity(p)) });
+      expect(checkResultLocation("/Users/op/elsewhere/out.json", CP, io)).toMatchObject({ ok: false, code: "result_path_invalid" });
+    },
+  );
+  it("B1 fail closed: a worktree whose identity errors => result_path_invalid; a worktree that is GONE (prunable) contains nothing (CONTROL)", () => {
+    const erroring = idIo({ statIdentity: (p) => (p === WT ? "error" : firmIdentity(p)) });
+    expect(checkResultLocation("/Users/op/elsewhere/out.json", CP, erroring)).toMatchObject({ ok: false, code: "result_path_invalid" });
+    const gone = idIo({ statIdentity: (p) => (p === WT ? "absent" : firmIdentity(p)) });
+    expect(checkResultLocation("/Users/op/elsewhere/out.json", CP, gone)).toMatchObject({ ok: true });
+  });
+
+  it.each<[string, string[] | null]>([["null (git failed)", null], ["empty", []]])(
+    "B2: a worktree enumeration that is %s is refused, never treated as zero worktrees",
+    (_l, list) => {
+      expect(checkResultLocation("/Users/op/elsewhere/out.json", CP, idIo({ gitWorktreeRoots: () => list }))).toMatchObject({
+        ok: false,
+        code: "result_path_invalid",
+      });
+    },
+  );
+  it("B2 CONTROL: the same path with a listed worktree is accepted", () => {
+    expect(checkResultLocation("/Users/op/elsewhere/out.json", CP, idIo())).toMatchObject({ ok: true });
+  });
+
+  // ---- realIo.statIdentity ----
+  it("realIo.statIdentity: dev AND ino form the identity (fake stat)", () => {
+    const table: Record<string, { dev: bigint; ino: bigint }> = { "/a": { dev: 1n, ino: 5n }, "/b": { dev: 2n, ino: 5n }, "/c": { dev: 1n, ino: 6n }, "/d": { dev: 1n, ino: 5n } };
+    const layer = { ...rawFs, statSync: ((p: string) => table[p]) as unknown as FsLayer["statSync"] } as FsLayer;
+    const io = realIo(REPO, layer);
+    const [a, b, c, d] = ["/a", "/b", "/c", "/d"].map((p) => io.statIdentity(p));
+    expect(a).toEqual(d);
+    expect(a).not.toEqual(b); // same ino, different device
+    expect(a).not.toEqual(c); // same device, different ino
+  });
+  it("realIo.statIdentity: ENOENT/ENOTDIR => absent; any other error => error", () => {
+    const thrower = (code: string) => ({ ...rawFs, statSync: (() => { throw Object.assign(new Error(code), { code }); }) as unknown as FsLayer["statSync"] }) as FsLayer;
+    expect(realIo(REPO, thrower("ENOENT")).statIdentity("/x")).toBe("absent");
+    expect(realIo(REPO, thrower("ENOTDIR")).statIdentity("/x")).toBe("absent");
+    expect(realIo(REPO, thrower("EACCES")).statIdentity("/x")).toBe("error");
+    expect(realIo(REPO, thrower("EIO")).statIdentity("/x")).toBe("error");
+  });
+
+  // ---- real filesystem ----
+  let base: string;
+  let repo: string;
+  let outside: string;
+  let otherWt: string;
+  beforeEach(() => {
+    base = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "sac-b-")));
+    repo = path.join(base, "RepoRoot");
+    outside = path.join(base, "Outside");
+    otherWt = path.join(base, "OtherWorktree");
+    for (const d of [repo, outside, otherWt]) fs.mkdirSync(d);
+  });
+  afterEach(() => {
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+  /** Every file below `d`, recursively (directories excluded). */
+  const filesUnder = (d: string): string[] =>
+    fs.readdirSync(d, { withFileTypes: true }).flatMap((ent) => {
+      const full = path.join(d, ent.name);
+      return ent.isDirectory() ? filesUnder(full) : [full];
+    });
+
+  async function runReal(resultFile: string, over: Partial<CliIo> = {}, fsx: FsLayer = fs) {
+    const out: string[] = [];
+    const err: string[] = [];
+    let factoryCalls = 0;
+    const io: CliIo = {
+      ...realIo(repo, fsx),
+      stdout: (l) => out.push(l),
+      stderr: (l) => err.push(l),
+      gitWorktreeRoots: () => [repo, otherWt],
+      git: () => ({ sha: null, dirty: null }),
+      nowMs: () => Date.parse("2026-11-05T10:00:00Z"),
+      randomPart: () => "b",
+      ...over,
+    };
+    const code = await runCli({
+      argv: [...BASE, `--result-file=${resultFile}`],
+      env: { NODE_ENV: "development" },
+      repoRoot: repo,
+      io,
+      firebase: () => {
+        factoryCalls++;
+        throw new Error("never reached: /keys/sa.json does not exist on disk");
+      },
+    });
+    return { code, out, err: err.join("\n"), factoryCalls };
+  }
+
+  it("realIo.statIdentity on disk: a symlink and (on darwin/win32) a case variant share the directory's identity; siblings differ", () => {
+    const io = realIo(repo);
+    const link = path.join(outside, "alias");
+    fs.symlinkSync(repo, link);
+    expect(io.statIdentity(link)).toEqual({ id: realId(repo) });
+    if (process.platform === "darwin" || process.platform === "win32") expect(io.statIdentity(repo.toLowerCase())).toEqual({ id: realId(repo) });
+    expect(io.statIdentity(outside)).not.toEqual(io.statIdentity(repo));
+    expect(io.statIdentity(path.join(base, "none"))).toBe("absent");
+  });
+
+  const DARWIN_FIRMLINK = process.platform === "darwin" && fs.existsSync("/System/Volumes/Data");
+  it("B1 (darwin, real firmlink): /System/Volumes/Data + the repo path is refused; repo, subdirectory and worktree stay empty", async () => {
+    if (!DARWIN_FIRMLINK) return;
+    const firmRepo = `/System/Volumes/Data${repo}`;
+    // Preconditions that make this test meaningful: the kernel sees ONE
+    // directory, and realpath.native does NOT rewrite the firmlink spelling.
+    expect(realId(firmRepo)).toBe(realId(repo));
+    expect(fs.realpathSync.native(firmRepo)).toBe(firmRepo);
+    fs.mkdirSync(path.join(repo, "sub"));
+    for (const target of [`${firmRepo}/out.json`, `${firmRepo}/sub/out.json`, `/System/Volumes/Data${otherWt}/out.json`]) {
+      const r = await runReal(target);
+      expect({ target, code: r.code, inside: r.err.includes("[result_path_inside_repo]"), factory: r.factoryCalls }).toEqual({ target, code: 2, inside: true, factory: 0 });
+    }
+    expect(filesUnder(repo)).toEqual([]);
+    expect(filesUnder(otherWt)).toEqual([]);
+  });
+  it("B1 CONTROL (darwin, real firmlink): /System/Volumes/Data + an OUTSIDE path is accepted and written", async () => {
+    if (!DARWIN_FIRMLINK) return;
+    const target = `/System/Volumes/Data${outside}/ok.json`;
+    const r = await runReal(target);
+    expect(r.code).toBe(2);
+    expect(r.err).toContain("[credentials_file_unreadable]");
+    expect(JSON.parse(fs.readFileSync(path.join(outside, "ok.json"), "utf8"))).toMatchObject({ status: "refused" });
+  });
+
+  it("B2 end to end: git worktree enumeration failing => exit 2 result_path_invalid, nothing created", async () => {
+    const target = path.join(outside, "b2.json");
+    const r = await runReal(target, { gitWorktreeRoots: () => null });
+    expect(r.code).toBe(2);
+    expect(r.err).toContain("[result_path_invalid]");
+    expect(fs.existsSync(target)).toBe(false);
+    expect(r.factoryCalls).toBe(0);
+  });
+
+  // The location check's LAST io call is lstatKind(file): a hook there runs
+  // strictly between validation and the exclusive create.
+  const afterValidation = (target: string, act: () => void): Partial<CliIo> => ({
+    lstatKind: (p) => {
+      const k = realIo(repo).lstatKind(p);
+      if (p === target) act();
+      return k;
+    },
+  });
+
+  it("B3: parent directory swapped for a symlink INTO the repo between validation and create => refused, the file it created in the repo is removed", async () => {
+    const sub = path.join(outside, "sub");
+    fs.mkdirSync(sub);
+    const target = path.join(sub, "r.json");
+    const r = await runReal(target, afterValidation(target, () => {
+      fs.renameSync(sub, path.join(outside, "sub-old"));
+      fs.symlinkSync(repo, sub);
+    }));
+    expect(r.code).toBe(2);
+    expect(r.err).toContain("[result_path_invalid]");
+    expect(filesUnder(repo)).toEqual([]);
+    expect(r.factoryCalls).toBe(0);
+  });
+
+  it("B3: the same swap is refused by IDENTITY even when the canonicaliser is fooled (realpath reports the checked string)", async () => {
+    const sub = path.join(outside, "sub");
+    fs.mkdirSync(sub);
+    const target = path.join(sub, "r.json");
+    // A realpath.native that always echoes the checked spelling for `sub` (as
+    // it does for a firmlink): only the post-create dev:ino checks remain.
+    const native = (p: string) => (p === sub ? sub : rawFs.realpathSync.native(p));
+    const lying = { ...rawFs, realpathSync: Object.assign((p: fs.PathLike) => rawFs.realpathSync(p), { native }) } as unknown as FsLayer;
+    const r = await runReal(target, afterValidation(target, () => {
+      fs.renameSync(sub, path.join(outside, "sub-old"));
+      fs.symlinkSync(repo, sub);
+    }), lying);
+    expect(r.code).toBe(2);
+    expect(r.err).toContain("[result_path_invalid]");
+    expect(filesUnder(repo)).toEqual([]);
+  });
+
+  it("B3: the checked directory itself MOVED INTO the repo between validation and create (same inode, same canonical string) => refused by the post-create ancestor walk", async () => {
+    const sub = path.join(outside, "sub");
+    fs.mkdirSync(sub);
+    const target = path.join(sub, "r.json");
+    const parked = path.join(base, "parked");
+    // After the swap `<base>/Outside` IS the repository and `sub` (same inode) sits inside it.
+    const r = await runReal(target, afterValidation(target, () => {
+      fs.renameSync(outside, parked);
+      fs.renameSync(repo, outside);
+      fs.renameSync(path.join(parked, "sub"), sub);
+    }));
+    expect(r.code).toBe(2);
+    expect(r.err).toContain("[result_path_invalid]");
+    // `outside` now holds the repository: it must contain no file at all.
+    expect(filesUnder(outside)).toEqual([]);
+  });
+
+  it("B3: the created file REPLACED at the path right after the create => refused, and the replacement is NOT unlinked (not ours)", async () => {
+    const target = path.join(outside, "rep.json");
+    const moved = path.join(outside, "ours-moved.json");
+    const swapping = {
+      ...rawFs,
+      openSync: ((p: fs.PathLike, flags: number, mode?: number) => {
+        const fd = rawFs.openSync(p, flags, mode);
+        if (p === target) {
+          rawFs.renameSync(target, moved);
+          rawFs.writeFileSync(target, "DECOY");
+        }
+        return fd;
+      }) as unknown as FsLayer["openSync"],
+    } as FsLayer;
+    const r = await runReal(target, {}, swapping);
+    expect(r.code).toBe(2);
+    expect(r.err).toContain("[result_path_invalid]");
+    expect(fs.readFileSync(target, "utf8")).toBe("DECOY");
+    expect(fs.readFileSync(moved, "utf8")).toBe(""); // never written: the run stopped before any credential read
+  });
+
+  it("NIT: cleanup re-verifies ownership at unlink time — a file swapped in AFTER the identity check but before cleanup is NOT unlinked", async () => {
+    const target = path.join(outside, "late.json");
+    let armed = true;
+    // The post-create realpath call happens after the "file at path is ours"
+    // check; swap the file there and make the canonical check fail.
+    const native = (p: string) => {
+      if (armed && p === outside && fs.existsSync(target) && fs.readFileSync(target, "utf8") === "") {
+        armed = false;
+        rawFs.unlinkSync(target);
+        rawFs.writeFileSync(target, "SOMEONE-ELSE");
+        return path.join(base, "Elsewhere");
+      }
+      return rawFs.realpathSync.native(p);
+    };
+    const layer = { ...rawFs, realpathSync: Object.assign((p: fs.PathLike) => rawFs.realpathSync(p), { native }) } as unknown as FsLayer;
+    const r = await runReal(target, {}, layer);
+    expect(armed).toBe(false);
+    expect(r.code).toBe(2);
+    expect(r.err).toContain("[result_path_invalid]");
+    expect(fs.readFileSync(target, "utf8")).toBe("SOMEONE-ELSE");
+  });
+
+  it("CONTROL: with no interference the same real-filesystem run creates and writes the result file", async () => {
+    const sub = path.join(outside, "sub");
+    fs.mkdirSync(sub);
+    const target = path.join(sub, "r.json");
+    const r = await runReal(target, afterValidation(target, () => undefined));
+    expect(r.code).toBe(2);
+    expect(r.err).toContain("[credentials_file_unreadable]");
+    expect(JSON.parse(fs.readFileSync(target, "utf8"))).toMatchObject({ status: "refused" });
   });
 });
 

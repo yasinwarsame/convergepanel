@@ -87,6 +87,27 @@ export type SecretFileRead = { isSymlink: boolean; isFile: boolean; mode: number
 /** The exclusively-created result file, written through the descriptor kept from the create (never reopened by path). */
 export type ResultFileHandle = { write: (contents: string) => void; close: () => void };
 
+/**
+ * Filesystem identity of an existing path (stat, symlinks FOLLOWED):
+ * `{ id: "<dev>:<ino>" }`. "absent" for ENOENT/ENOTDIR; "error" for anything
+ * else. Two spellings of one directory (case variants, symlinks, macOS
+ * firmlinks such as /System/Volumes/Data/Users vs /Users, bind mounts) share
+ * one identity even when no string canonicaliser agrees.
+ */
+export type IdentityResult = { id: string } | "absent" | "error";
+
+/** A validated result-file location: what the post-create re-check compares against. */
+export type ResultLocation = {
+  /** The file path to create: the canonical directory + the requested basename. */
+  file: string;
+  /** realpath.native of the parent directory at validation time. */
+  dir: string;
+  /** Filesystem identity of that directory at validation time. */
+  dirId: string;
+  /** Filesystem identities of the repository root and every git worktree root. */
+  protectedIds: ReadonlySet<string>;
+};
+
 export type CliIo = {
   stdout: (line: string) => void;
   stderr: (line: string) => void;
@@ -94,18 +115,23 @@ export type CliIo = {
   readSecretFile: (p: string) => SecretFileRead | null;
   /** Filesystem-canonical path (realpath.native: symlinks resolved, on-disk case) of an EXISTING path; null otherwise. */
   realpathDir: (p: string) => string | null;
-  /** Roots of every git worktree of the repository at repoRoot; null when git cannot list them. */
+  /** Roots of every git worktree of the repository at repoRoot; null when git cannot list them (refused, never treated as "none"). */
   gitWorktreeRoots: () => string[] | null;
+  /** Filesystem identity (dev:ino, symlinks followed) of `p`. */
+  statIdentity: (p: string) => IdentityResult;
   /** True when paths under `canonicalDir` compare case-insensitively (always true on darwin/win32). */
   caseInsensitivePaths: (canonicalDir: string) => boolean;
   /** What is at `p` WITHOUT following a final symlink. */
   lstatKind: (p: string) => "absent" | "symlink" | "file" | "other" | "error";
   /**
    * Create the result file exclusively (O_CREAT|O_EXCL|O_NOFOLLOW, mode 0600)
-   * before any Firebase call and keep the fd. Throws if the file did not land
-   * at `p` inside `canonicalDir` (a directory swapped after the check).
+   * before any Firebase call and keep the fd. Throws (removing the file only
+   * when it is provably its own) unless, AFTER the create, the fd's file is
+   * the entry at `loc.file`, the parent directory still has identity
+   * `loc.dirId` and canonicalises to `loc.dir`, and no ancestor of the
+   * re-canonicalised directory has a protected identity.
    */
-  createResultFile: (p: string, canonicalDir: string) => ResultFileHandle;
+  createResultFile: (loc: ResultLocation) => ResultFileHandle;
   /** Create (0700) or lstat the default result directory; returns its lstat for checkResultDirStat. */
   prepareDefaultResultDir: () => { dir: string; stat: DirStat | null };
   currentUid: () => number | null;
@@ -184,18 +210,56 @@ function makeOperatorTokenReader(io: CliIo) {
 // ---------------------------------------------------------------------------
 // Result-file location (filesystem-grounded, fail closed)
 
+const INSIDE_REPO_MESSAGE = "Refusing: the result file must be outside every git worktree of this repository (it contains UIDs).";
+
 /**
- * Canonicalises the result file's parent directory and every protected root
- * through the filesystem (realpath.native), never lexically, and refuses a
- * file inside ANY git worktree of this repository — compared case-folded on a
- * case-insensitive volume. The target must not exist yet (no file, no
- * symlink); the exclusive O_NOFOLLOW create then closes the remaining race.
+ * Identity layer of the location check: walks `canonicalDir` and EVERY
+ * ancestor up to the filesystem root and refuses if any of them has the
+ * filesystem identity (dev:ino) of a protected root. Containment is decided by
+ * the filesystem, not by spelling, so an alternate path to the same directory
+ * (macOS firmlink /System/Volumes/Data/..., a bind mount, a case variant the
+ * canonicaliser left alone) is still recognised as inside. Fails closed: an
+ * ancestor whose identity cannot be established is a refusal.
+ */
+export function checkAncestorIdentities(
+  canonicalDir: string,
+  protectedIds: ReadonlySet<string>,
+  statIdentity: (p: string) => IdentityResult,
+): { ok: true; dirId: string } | Refusal {
+  if (!path.isAbsolute(canonicalDir)) {
+    return refuse("result_path_invalid", "Refusing: the result file's directory could not be canonicalised.");
+  }
+  let dirId: string | null = null;
+  let cur = canonicalDir;
+  for (;;) {
+    const s = statIdentity(cur);
+    if (s === "absent" || s === "error") {
+      return refuse("result_path_invalid", "Refusing: the filesystem identity of the result file's directory or one of its ancestors could not be established.");
+    }
+    if (protectedIds.has(s.id)) return refuse("result_path_inside_repo", INSIDE_REPO_MESSAGE);
+    if (dirId === null) dirId = s.id;
+    const parent = path.dirname(cur);
+    if (parent === cur) return { ok: true, dirId };
+    cur = parent;
+  }
+}
+
+/**
+ * Two layers, both must pass. (1) Strings: the parent directory and every
+ * protected root are canonicalised through the filesystem (realpath.native,
+ * never lexically) and compared case-folded on a case-insensitive volume.
+ * (2) Identity: no ancestor-or-self of the canonical directory may have the
+ * dev:ino of the repository root or of ANY git worktree root
+ * (checkAncestorIdentities). A worktree list that cannot be obtained, or is
+ * empty (git always lists the main worktree), is a refusal. The target must not
+ * exist yet (no file, no symlink); the exclusive O_NOFOLLOW create and its
+ * post-create re-check then close the remaining race.
  */
 export function checkResultLocation(
   resultFile: string,
   repoRoot: string,
-  io: Pick<CliIo, "realpathDir" | "gitWorktreeRoots" | "caseInsensitivePaths" | "lstatKind">,
-): { ok: true; file: string; dir: string } | Refusal {
+  io: Pick<CliIo, "realpathDir" | "gitWorktreeRoots" | "caseInsensitivePaths" | "lstatKind" | "statIdentity">,
+): ({ ok: true } & ResultLocation) | Refusal {
   const dir = io.realpathDir(path.dirname(resultFile));
   if (dir === null) {
     return refuse("result_path_invalid", "Refusing: the result file's directory does not exist or could not be canonicalised.");
@@ -204,16 +268,36 @@ export function checkResultLocation(
   if (repoCanonical === null) {
     return refuse("result_path_invalid", "Refusing: the repository root could not be canonicalised.");
   }
+  const worktrees = io.gitWorktreeRoots();
+  if (worktrees === null || worktrees.length === 0) {
+    // Never "zero worktrees": an enumeration failure would silently drop every linked worktree from the protected set.
+    return refuse("result_path_invalid", "Refusing: the git worktrees of this repository could not be listed, so the result file cannot be proven to lie outside them.");
+  }
   const roots = new Set<string>([repoCanonical, path.resolve(repoRoot)]);
-  for (const w of io.gitWorktreeRoots() ?? []) {
+  const protectedIds = new Set<string>();
+  const repoId = io.statIdentity(repoCanonical);
+  if (repoId === "absent" || repoId === "error") {
+    return refuse("result_path_invalid", "Refusing: the filesystem identity of the repository root could not be established.");
+  }
+  protectedIds.add(repoId.id);
+  for (const w of worktrees) {
     roots.add(path.resolve(w));
     const c = io.realpathDir(w);
     if (c !== null) roots.add(c);
+    const id = io.statIdentity(w);
+    // A listed worktree whose directory is gone (git reports it "prunable")
+    // contains nothing; any other failure to identify it fails closed.
+    if (id === "error") {
+      return refuse("result_path_invalid", "Refusing: the filesystem identity of a git worktree of this repository could not be established.");
+    }
+    if (id !== "absent") protectedIds.add(id.id);
   }
   const file = path.join(dir, path.basename(resultFile));
   const caseInsensitive = io.caseInsensitivePaths(dir) || io.caseInsensitivePaths(repoCanonical);
   const r = checkResultPath({ resolvedFile: file, resolvedDir: dir, protectedRoots: [...roots], caseInsensitive });
   if (r) return r;
+  const byIdentity = checkAncestorIdentities(dir, protectedIds, io.statIdentity);
+  if (!byIdentity.ok) return byIdentity;
   const kind = io.lstatKind(file);
   if (kind !== "absent") {
     return refuse(
@@ -225,7 +309,7 @@ export function checkResultLocation(
           : "Refusing: something already exists at the result file path; the result file is never overwritten.",
     );
   }
-  return { ok: true, file, dir };
+  return { ok: true, file, dir, dirId: byIdentity.dirId, protectedIds };
 }
 
 // ---------------------------------------------------------------------------
@@ -271,7 +355,7 @@ export async function runCli(opts: CliOptions): Promise<number> {
   resultFile = pathCheck.file;
   let resultHandle: ResultFileHandle;
   try {
-    resultHandle = io.createResultFile(pathCheck.file, pathCheck.dir);
+    resultHandle = io.createResultFile(pathCheck);
   } catch {
     io.stderr("[result_path_invalid] Refusing: could not create the result file exclusively (it may already exist, or its directory changed).");
     return 2;
@@ -457,6 +541,25 @@ export function realIo(repoRoot: string, fsx: FsLayer = fs): CliIo {
       return null;
     }
   };
+  const identityOf = (st: { dev: bigint; ino: bigint }) => `${st.dev}:${st.ino}`;
+  const classify = (e: unknown): "absent" | "error" => {
+    const code = (e as { code?: unknown })?.code;
+    return code === "ENOENT" || code === "ENOTDIR" ? "absent" : "error";
+  };
+  const statIdentity = (p: string): IdentityResult => {
+    try {
+      return { id: identityOf(fsx.statSync(p, { bigint: true })) };
+    } catch (e) {
+      return classify(e);
+    }
+  };
+  const statIdentityNoFollow = (p: string): IdentityResult => {
+    try {
+      return { id: identityOf(fsx.lstatSync(p, { bigint: true })) };
+    } catch (e) {
+      return classify(e);
+    }
+  };
   return {
     stdout: (line) => process.stdout.write(`${line}\n`),
     stderr: (line) => process.stderr.write(`${line}\n`),
@@ -519,21 +622,36 @@ export function realIo(repoRoot: string, fsx: FsLayer = fs): CliIo {
         return (e as { code?: unknown })?.code === "ENOENT" ? "absent" : "error";
       }
     },
-    createResultFile: (p, canonicalDir) => {
+    statIdentity: (p) => statIdentity(p),
+    createResultFile: (loc) => {
       // O_CREAT|O_EXCL refuses an existing file or symlink; O_NOFOLLOW also
       // refuses a final-component symlink planted after the location check.
       // The fd is kept so the final write cannot be redirected by a path swap.
       const c = fsx.constants;
+      const p = loc.file;
       const fd = fsx.openSync(p, c.O_WRONLY | c.O_CREAT | c.O_EXCL | c.O_NOFOLLOW, 0o600);
-      let landed = false;
+      let ownId: string | null = null;
       try {
-        const st = fsx.fstatSync(fd);
-        const l = fsx.lstatSync(p);
-        landed = l.dev === st.dev && l.ino === st.ino;
-        // A parent directory swapped for a symlink between the check and the
-        // create would put the file elsewhere: re-canonicalise and compare.
-        if (!st.isFile() || !landed || realpathNative(path.dirname(p)) !== canonicalDir) {
-          throw new Error("result file did not land in the checked directory");
+        const st = fsx.fstatSync(fd, { bigint: true });
+        if (!st.isFile()) throw new Error("result file is not a regular file");
+        ownId = identityOf(st);
+        // Re-verify AFTER the create, by identity: a parent directory swapped
+        // (for a symlink, or for another directory) between the check and the
+        // create would have put the file somewhere else.
+        const atPath = statIdentityNoFollow(p);
+        if (atPath === "absent" || atPath === "error" || atPath.id !== ownId) {
+          throw new Error("the created file is not the entry at the result path");
+        }
+        const parent = statIdentity(path.dirname(p));
+        if (parent === "absent" || parent === "error" || parent.id !== loc.dirId) {
+          throw new Error("the result file's directory is not the checked directory");
+        }
+        const canonical = realpathNative(path.dirname(p));
+        if (canonical === null || canonical !== loc.dir) {
+          throw new Error("the result file's directory no longer canonicalises to the checked one");
+        }
+        if (!checkAncestorIdentities(canonical, loc.protectedIds, statIdentity).ok) {
+          throw new Error("the result file's directory now lies inside a protected root");
         }
       } catch (e) {
         try {
@@ -541,11 +659,18 @@ export function realIo(repoRoot: string, fsx: FsLayer = fs): CliIo {
         } catch {
           // ignore
         }
-        if (landed) {
-          try {
-            fsx.unlinkSync(p); // our own empty file, never anyone else's (same inode)
-          } catch {
-            // ignore
+        // Remove the file only when the entry at the path is, right now, the
+        // very inode this fd created — never anyone else's file. A file whose
+        // directory was moved away cannot be reached by path and is left
+        // (empty, 0600) where it is.
+        if (ownId !== null) {
+          const now = statIdentityNoFollow(p);
+          if (now !== "absent" && now !== "error" && now.id === ownId) {
+            try {
+              fsx.unlinkSync(p);
+            } catch {
+              // ignore
+            }
           }
         }
         throw e;
