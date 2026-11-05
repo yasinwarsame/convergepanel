@@ -12,8 +12,8 @@
  * It never writes anything.
  */
 
-const { main } = require("./check-admin-claims.js");
+const { runAsCli } = require("./check-admin-claims.js");
 
 if (require.main === module) {
-  main(process.argv.slice(2), process.env).then((code) => process.exit(code));
+  runAsCli(process.argv.slice(2), process.env);
 }

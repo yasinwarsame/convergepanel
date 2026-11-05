@@ -82,8 +82,10 @@ export type RefusalCode =
   // local files
   | "result_path_invalid"
   | "result_path_inside_repo"
+  | "result_dir_unsafe"
   | "credentials_file_unreadable"
   | "credentials_file_unsafe"
+  | "credentials_file_symlink"
   | "credentials_invalid"
   | "project_confirmation_mismatch"
   | "operator_token_file_unsafe"
@@ -97,6 +99,7 @@ export type RefusalCode =
   | "users_doc_read_failed"
   // plan
   | "claims_invalid"
+  | "claims_prototype_key"
   | "unrelated_claims_changed"
   | "reserved_claim"
   | "claims_too_large"
@@ -120,11 +123,12 @@ export const REFUSAL_CODES: readonly RefusalCode[] = [
   "flag_conflict", "project_confirmation_missing", "project_id_invalid", "credentials_missing",
   "operation_missing", "operation_invalid", "target_missing_arg", "target_uid_invalid",
   "revoke_sessions_missing", "revoke_sessions_invalid", "reduction_flag_missing", "confirmation_missing",
-  "result_path_invalid", "result_path_inside_repo", "credentials_file_unreadable", "credentials_file_unsafe",
+  "result_path_invalid", "result_path_inside_repo", "result_dir_unsafe", "credentials_file_unreadable", "credentials_file_unsafe",
+  "credentials_file_symlink",
   "credentials_invalid", "project_confirmation_mismatch", "operator_token_file_unsafe",
   "dirty_tree",
   "target_missing", "target_lookup_failed", "target_mismatch", "target_disabled", "users_doc_read_failed",
-  "claims_invalid", "unrelated_claims_changed", "reserved_claim", "claims_too_large",
+  "claims_invalid", "claims_prototype_key", "unrelated_claims_changed", "reserved_claim", "claims_too_large",
   "operator_token_missing", "operator_token_invalid", "operator_token_revoked", "operator_not_system_admin",
   "admin_enumeration_failed", "bootstrap_not_first", "self_revoke", "last_admin",
   "confirmation_mismatch", "audit_unavailable",
@@ -329,10 +333,15 @@ export function parseSetSystemAdminClaimArgs(argv: readonly string[]): { ok: tru
 
 /** A secret-bearing file must be a regular file with no group or other permission bits (0600 or stricter). */
 export function checkSecretFileMode(
-  stat: { isFile: boolean; mode: number },
+  stat: { isFile: boolean; mode: number; isSymlink?: boolean },
   code: "credentials_file_unsafe" | "operator_token_file_unsafe",
   label: string,
 ): Refusal | null {
+  // lstat result: a symlink is refused outright (the key file named on the
+  // command line must be the file read, not whatever the link points at now).
+  if (stat.isSymlink === true) {
+    return refuse(code === "credentials_file_unsafe" ? "credentials_file_symlink" : code, `Refusing: ${label} is a symbolic link. Name the real file.`);
+  }
   if (!stat.isFile) return refuse(code, `Refusing: ${label} is not a regular file.`);
   if ((stat.mode & 0o077) !== 0) {
     return refuse(code, `Refusing: ${label} is readable or writable by group/other (mode ${(stat.mode & 0o777).toString(8)}). chmod 600 it.`);
@@ -410,6 +419,27 @@ export function checkResultPath(args: { resolvedFile: string; resolvedDir: strin
   return null;
 }
 
+export type DirStat = { isSymlink: boolean; isDirectory: boolean; uid: number; mode: number };
+
+/**
+ * The DEFAULT result directory lives in a shared temp location. On a
+ * multi-user host another account could pre-create it (or a symlink in its
+ * place) and race the result file. Require: not a symlink, a directory, owned
+ * by the current uid, mode exactly 0700.
+ */
+export function checkResultDirStat(stat: DirStat | null, currentUid: number | null): Refusal | null {
+  if (stat === null) return refuse("result_dir_unsafe", "Refusing: the default result directory could not be created or inspected.");
+  if (stat.isSymlink) return refuse("result_dir_unsafe", "Refusing: the default result directory is a symbolic link.");
+  if (!stat.isDirectory) return refuse("result_dir_unsafe", "Refusing: the default result directory path is not a directory.");
+  if (currentUid === null || stat.uid !== currentUid) {
+    return refuse("result_dir_unsafe", "Refusing: the default result directory is not owned by the current user.");
+  }
+  if ((stat.mode & 0o777) !== 0o700) {
+    return refuse("result_dir_unsafe", `Refusing: the default result directory has mode ${(stat.mode & 0o777).toString(8)}; it must be 700.`);
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Target
 
@@ -466,9 +496,7 @@ export function canonicalJson(v: unknown): string {
 
 /** Every claim except `admin`, canonicalised. */
 export function unrelatedClaimsFingerprint(claims: Claims): string {
-  const rest: Claims = {};
-  for (const k of Object.keys(claims)) if (k !== "admin") rest[k] = claims[k];
-  return canonicalJson(rest);
+  return canonicalJson(Object.fromEntries(Object.entries(claims).filter(([k]) => k !== "admin")));
 }
 
 export function claimsByteLength(claims: Claims): number {
@@ -486,13 +514,17 @@ export function planClaimChange(current: unknown, operation: ClaimOperation): { 
   if (current !== undefined && current !== null && !isPlainObject(current)) {
     return refuse("claims_invalid", "Refusing: the target's current custom claims are not a plain object.");
   }
-  const before: Claims = current ? { ...current } : {};
+  if (current && Object.prototype.hasOwnProperty.call(current, "__proto__")) {
+    // An own "__proto__" key would be silently dropped (or turned into a
+    // prototype) by ordinary property assignment while copying claims.
+    return refuse("claims_prototype_key", 'Refusing: the target\'s current claims carry an own "__proto__" key.');
+  }
+  const before: Claims = current ? Object.fromEntries(Object.entries(current)) : {};
   let after: Claims;
   if (operation === "grant") {
     after = { ...before, admin: true };
   } else {
-    after = {};
-    for (const k of Object.keys(before)) if (k !== "admin") after[k] = before[k];
+    after = Object.fromEntries(Object.entries(before).filter(([k]) => k !== "admin"));
   }
 
   const diff: DiffLine[] = [];
@@ -677,13 +709,20 @@ export function verifyReadBack(plan: ClaimPlan, readBackClaims: unknown): { ok: 
 }
 
 /**
- * `tokensValidAfterTime` has one-second resolution; the revocation must be at
- * or after the second in which the run started.
+ * Session revocation is proven from SERVER timestamps only: the read-back
+ * `tokensValidAfterTime` must be strictly later than the value read from the
+ * same Auth record before the write. The local clock is never consulted, so
+ * operator clock skew in either direction cannot fake or mask the result.
+ * (One-second resolution: a revocation in the same second as a previous one
+ * reads as "did not advance" and fails closed.)
  */
-export function verifySessionsRevoked(tokensValidAfterTime: string | undefined, startedAtMs: number): boolean {
-  if (typeof tokensValidAfterTime !== "string") return false;
-  const t = Date.parse(tokensValidAfterTime);
-  return Number.isFinite(t) && t >= Math.floor(startedAtMs / 1000) * 1000;
+export function verifySessionsRevoked(afterTokensValidAfterTime: string | undefined, beforeTokensValidAfterTime: string | undefined): boolean {
+  if (typeof afterTokensValidAfterTime !== "string") return false;
+  const after = Date.parse(afterTokensValidAfterTime);
+  if (!Number.isFinite(after)) return false;
+  if (beforeTokensValidAfterTime === undefined) return true;
+  const before = Date.parse(beforeTokensValidAfterTime);
+  return Number.isFinite(before) && after > before;
 }
 
 // ---------------------------------------------------------------------------

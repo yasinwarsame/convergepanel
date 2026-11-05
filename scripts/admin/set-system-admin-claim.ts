@@ -60,7 +60,9 @@ import {
   type ParsedClaimArgs,
   type Refusal,
   type ServiceAccountEvidence,
+  type DirStat,
   checkIdTokenShape,
+  checkResultDirStat,
   checkResultPath,
   checkRuntimeEnvironment,
   checkSecretFileMode,
@@ -73,19 +75,23 @@ import {
 // ---------------------------------------------------------------------------
 // Injectable boundaries (real implementations at the bottom of the file)
 
-export type FileStat = { isFile: boolean; mode: number };
+/** One open of a secret file: lstat for symlinks, then open(O_NOFOLLOW) + fstat + read through that descriptor. */
+export type SecretFileRead = { isSymlink: boolean; isFile: boolean; mode: number; body: string | null };
+
+/** The exclusively-created result file, written through the descriptor kept from the create (never reopened by path). */
+export type ResultFileHandle = { write: (contents: string) => void; close: () => void };
 
 export type CliIo = {
   stdout: (line: string) => void;
   stderr: (line: string) => void;
-  statFile: (p: string) => FileStat | null;
-  readFile: (p: string) => string;
+  /** null when the path does not exist or cannot be opened. */
+  readSecretFile: (p: string) => SecretFileRead | null;
   realpathDir: (p: string) => string | null;
-  /** Create the result file exclusively (flag wx, mode 0600) before any Firebase call. */
-  createResultFile: (p: string) => void;
-  /** Overwrite the already-created result file with the final JSON. */
-  finalizeResultFile: (p: string, contents: string) => void;
-  defaultResultDir: () => string;
+  /** Create the result file exclusively (O_CREAT|O_EXCL, mode 0600) before any Firebase call; keep the fd. */
+  createResultFile: (p: string) => ResultFileHandle;
+  /** Create (0700) or lstat the default result directory; returns its lstat for checkResultDirStat. */
+  prepareDefaultResultDir: () => { dir: string; stat: DirStat | null };
+  currentUid: () => number | null;
   git: () => { sha: string | null; dirty: boolean | null };
   nowMs: () => number;
   randomPart: () => string;
@@ -127,13 +133,14 @@ type LoadedCredential = { evidence: ServiceAccountEvidence; privateKey: string }
  */
 export function loadOperatorCredential(args: ParsedClaimArgs, io: CliIo): { ok: true; credential: LoadedCredential } | Refusal {
   const file = path.resolve(args.credentialsPath);
-  const stat = io.statFile(file);
-  if (!stat) return refuse("credentials_file_unreadable", "Refusing: the --credentials file does not exist or cannot be read.");
-  const unsafe = checkSecretFileMode(stat, "credentials_file_unsafe", "the --credentials file");
+  const read = io.readSecretFile(file);
+  if (!read) return refuse("credentials_file_unreadable", "Refusing: the --credentials file does not exist or cannot be read.");
+  const unsafe = checkSecretFileMode(read, "credentials_file_unsafe", "the --credentials file");
   if (unsafe) return unsafe;
+  if (read.body === null) return refuse("credentials_file_unreadable", "Refusing: the --credentials file could not be read.");
   let parsed: unknown;
   try {
-    parsed = JSON.parse(io.readFile(file));
+    parsed = JSON.parse(read.body);
   } catch {
     return refuse("credentials_invalid", "Refusing: the --credentials file is not valid JSON.");
   }
@@ -145,16 +152,12 @@ export function loadOperatorCredential(args: ParsedClaimArgs, io: CliIo): { ok: 
 function makeOperatorTokenReader(io: CliIo) {
   return async (p: string): Promise<{ ok: true; token: string } | Refusal> => {
     const file = path.resolve(p);
-    const stat = io.statFile(file);
-    if (!stat) return refuse("operator_token_invalid", "Refusing: the operator token file does not exist or cannot be read.");
-    const unsafe = checkSecretFileMode(stat, "operator_token_file_unsafe", "the operator token file");
+    const read = io.readSecretFile(file);
+    if (!read) return refuse("operator_token_invalid", "Refusing: the operator token file does not exist or cannot be read.");
+    const unsafe = checkSecretFileMode(read, "operator_token_file_unsafe", "the operator token file");
     if (unsafe) return unsafe;
-    let token: string;
-    try {
-      token = io.readFile(file).trim();
-    } catch {
-      return refuse("operator_token_invalid", "Refusing: the operator token file could not be read.");
-    }
+    if (read.body === null) return refuse("operator_token_invalid", "Refusing: the operator token file could not be read.");
+    const token = read.body.trim();
     const shape = checkIdTokenShape(token);
     if (shape) return shape;
     return { ok: true, token };
@@ -184,7 +187,18 @@ export async function runCli(opts: CliOptions): Promise<number> {
 
   // 3. Result file: validated and created before any credential is read.
   const requestId = generateRequestId(io.nowMs(), io.randomPart());
-  const resultFile = path.resolve(args.resultFile ?? path.join(io.defaultResultDir(), `system-admin-claim-${requestId}.json`));
+  let resultFile: string;
+  if (args.resultFile !== null) {
+    resultFile = path.resolve(args.resultFile);
+  } else {
+    const prepared = io.prepareDefaultResultDir();
+    const dirRefusal = checkResultDirStat(prepared.stat, io.currentUid());
+    if (dirRefusal) {
+      io.stderr(`[${dirRefusal.code}] ${dirRefusal.message}`);
+      return 2;
+    }
+    resultFile = path.join(prepared.dir, `system-admin-claim-${requestId}.json`);
+  }
   const resultDir = io.realpathDir(path.dirname(resultFile));
   const repoRoot = io.realpathDir(opts.repoRoot) ?? opts.repoRoot;
   const pathRefusal = resultDir === null
@@ -194,8 +208,9 @@ export async function runCli(opts: CliOptions): Promise<number> {
     io.stderr(`[${pathRefusal.code}] ${pathRefusal.message}`);
     return 2;
   }
+  let resultHandle: ResultFileHandle;
   try {
-    io.createResultFile(resultFile);
+    resultHandle = io.createResultFile(resultFile);
   } catch {
     io.stderr("[result_path_invalid] Refusing: could not create the result file exclusively (it may already exist).");
     return 2;
@@ -208,6 +223,12 @@ export async function runCli(opts: CliOptions): Promise<number> {
   let early: Refusal | null = null;
   let firebase: FirebaseHandle | null = null;
   let unexpected: string | null = null;
+  // Set BEFORE any Firebase write call is issued, so an unexpected throw can
+  // be classified honestly: no write attempted => exit 2, otherwise exit 3.
+  let writeAttempted = false;
+  const markWrite = () => {
+    writeAttempted = true;
+  };
 
   try {
     // 4. Credential.
@@ -232,10 +253,9 @@ export async function runCli(opts: CliOptions): Promise<number> {
         run = await runSystemAdminClaim(
           { args, projectId: firebase.projectId, requestId, credential: evidence },
           {
-            auth: firebase.auth,
-            store: firebase.store,
+            auth: trackAuthWrites(firebase.auth, markWrite),
+            store: trackStoreWrites(firebase.store, markWrite),
             timestampNow: firebase.timestampNow,
-            nowMs: io.nowMs,
             readOperatorToken: makeOperatorTokenReader(io),
             git,
             log: io.stdout,
@@ -251,16 +271,19 @@ export async function runCli(opts: CliOptions): Promise<number> {
     if (firebase) await firebase.dispose().catch(() => undefined);
   }
 
-  // An unexpected throw may have happened after a write: exit 3, never 0.
-  const exitCode = unexpected !== null ? 3 : run ? run.exitCode : 2;
+  // An unexpected throw after a write attempt is exit 3 (never 0); before any write it is a plain refusal (2).
+  const exitCode = unexpected !== null ? (writeAttempted ? 3 : 2) : run ? run.exitCode : 2;
   const report = {
     schema: "convergepanel.system-admin-claim-result/v1",
     phase: run?.status === "applied" || run?.status === "failed_after_write" ? "executed" : run?.status === "dry_run" ? "dry-run" : "not-executed",
     status: unexpected !== null ? "unexpected_error" : run ? run.status : "refused",
     code: unexpected !== null ? `unexpected_error:${unexpected}` : run ? run.code : early?.code ?? null,
     message: unexpected !== null
-      ? "Unexpected error. A Firebase write may or may not have happened; read the target's claims before retrying."
+      ? writeAttempted
+        ? "Unexpected error after a Firebase write was attempted. The write may or may not have happened; read the target's claims before retrying."
+        : "Unexpected error before any Firebase write. Nothing was written."
       : run ? run.message : early?.message ?? null,
+    writeAttempted,
     exitCode,
     requestId,
     startedAt,
@@ -275,13 +298,49 @@ export async function runCli(opts: CliOptions): Promise<number> {
   else if (run && run.exitCode !== 0) io.stderr(`[${run.code}] ${run.message}`);
 
   try {
-    io.finalizeResultFile(resultFile, `${JSON.stringify(report, null, 2)}\n`);
+    resultHandle.write(`${JSON.stringify(report, null, 2)}\n`);
+    resultHandle.close();
     io.stdout(`Result file: ${resultFile}`);
   } catch {
+    try {
+      resultHandle.close();
+    } catch {
+      // already closed or unusable
+    }
     io.stderr(`RESULT FILE NOT WRITTEN (${resultFile}). Request ${requestId}.`);
     return exitCode === 0 ? 1 : exitCode;
   }
   return exitCode;
+}
+
+function trackAuthWrites(auth: ClaimAuthPort, mark: () => void): ClaimAuthPort {
+  return {
+    getUser: (uid) => auth.getUser(uid),
+    verifyIdToken: (token, checkRevoked) => auth.verifyIdToken(token, checkRevoked),
+    listUsers: (max, pageToken) => auth.listUsers(max, pageToken),
+    writeCustomClaims: (uid, claims) => {
+      mark();
+      return auth.writeCustomClaims(uid, claims);
+    },
+    revokeRefreshTokens: (uid) => {
+      mark();
+      return auth.revokeRefreshTokens(uid);
+    },
+  };
+}
+
+function trackStoreWrites(store: ClaimStorePort, mark: () => void): ClaimStorePort {
+  return {
+    readUsersDocRole: (uid) => store.readUsersDocRole(uid),
+    writeUsersDocRole: (uid, role) => {
+      mark();
+      return store.writeUsersDocRole(uid, role);
+    },
+    createAuditRow: (id, record) => {
+      mark();
+      return store.createAuditRow(id, record);
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -322,15 +381,30 @@ export function realIo(repoRoot: string): CliIo {
   return {
     stdout: (line) => process.stdout.write(`${line}\n`),
     stderr: (line) => process.stderr.write(`${line}\n`),
-    statFile: (p) => {
+    readSecretFile: (p) => {
+      let l: fs.Stats;
       try {
-        const s = fs.statSync(p);
-        return { isFile: s.isFile(), mode: s.mode };
+        l = fs.lstatSync(p);
       } catch {
         return null;
       }
+      if (l.isSymbolicLink()) return { isSymlink: true, isFile: false, mode: l.mode, body: null };
+      let fd: number;
+      try {
+        // O_NOFOLLOW: a symlink swapped in after the lstat still fails here.
+        fd = fs.openSync(p, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+      } catch {
+        return null;
+      }
+      try {
+        const st = fs.fstatSync(fd);
+        // Only a regular file is read (a FIFO/device could block or be unbounded).
+        const body = st.isFile() ? fs.readFileSync(fd, "utf8") : null;
+        return { isSymlink: false, isFile: st.isFile(), mode: st.mode, body };
+      } finally {
+        fs.closeSync(fd);
+      }
     },
-    readFile: (p) => fs.readFileSync(p, "utf8"),
     realpathDir: (p) => {
       try {
         return fs.realpathSync(p);
@@ -338,13 +412,34 @@ export function realIo(repoRoot: string): CliIo {
         return null;
       }
     },
-    createResultFile: (p) => fs.writeFileSync(p, "", { flag: "wx", mode: 0o600 }),
-    finalizeResultFile: (p, contents) => fs.writeFileSync(p, contents, { flag: "r+", mode: 0o600 }),
-    defaultResultDir: () => {
-      const dir = path.join(os.tmpdir(), "convergepanel-operator");
-      fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-      return dir;
+    createResultFile: (p) => {
+      // O_CREAT|O_EXCL ("wx") refuses an existing file or symlink; the fd is
+      // kept so the final write cannot be redirected by a path swap.
+      const fd = fs.openSync(p, "wx", 0o600);
+      return {
+        write: (contents) => {
+          fs.ftruncateSync(fd, 0);
+          fs.writeSync(fd, contents, 0, "utf8");
+          fs.fsyncSync(fd);
+        },
+        close: () => fs.closeSync(fd),
+      };
     },
+    prepareDefaultResultDir: () => {
+      const dir = path.join(os.tmpdir(), "convergepanel-operator");
+      try {
+        fs.mkdirSync(dir, { mode: 0o700 });
+      } catch {
+        // already exists (or cannot be created) — inspected below either way
+      }
+      try {
+        const l = fs.lstatSync(dir);
+        return { dir, stat: { isSymlink: l.isSymbolicLink(), isDirectory: l.isDirectory(), uid: l.uid, mode: l.mode } };
+      } catch {
+        return { dir, stat: null };
+      }
+    },
+    currentUid: () => (typeof process.getuid === "function" ? process.getuid() : null),
     git: () => {
       try {
         const sha = execFileSync("git", ["-C", repoRoot, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();

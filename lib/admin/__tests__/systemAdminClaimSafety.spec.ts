@@ -14,6 +14,7 @@ import {
   checkIdTokenShape,
   checkOperatorAuthorization,
   checkPlanInvariants,
+  checkResultDirStat,
   checkResultPath,
   checkRevokeSafety,
   checkRuntimeEnvironment,
@@ -26,6 +27,7 @@ import {
   maskEmail,
   parseSetSystemAdminClaimArgs,
   planClaimChange,
+  unrelatedClaimsFingerprint,
   validateServiceAccountKey,
   verifyReadBack,
   verifySessionsRevoked,
@@ -400,11 +402,16 @@ describe("read-back verification", () => {
   it("canonicalJson is key-order independent", () => {
     expect(canonicalJson({ b: 1, a: { d: 2, c: [3] } })).toBe(canonicalJson({ a: { c: [3], d: 2 }, b: 1 }));
   });
-  it("sessions-revoked check: same second passes, earlier fails, missing fails", () => {
-    const started = Date.parse("2026-11-05T10:00:00.700Z");
-    expect(verifySessionsRevoked("Thu, 05 Nov 2026 10:00:00 GMT", started)).toBe(true);
-    expect(verifySessionsRevoked("Thu, 05 Nov 2026 09:59:59 GMT", started)).toBe(false);
-    expect(verifySessionsRevoked(undefined, started)).toBe(false);
+  it("sessions-revoked: server read-back must be STRICTLY later than the server pre-write value", () => {
+    const before = "Thu, 05 Nov 2026 09:00:00 GMT";
+    expect(verifySessionsRevoked("Thu, 05 Nov 2026 10:00:00 GMT", before)).toBe(true);
+    expect(verifySessionsRevoked(before, before)).toBe(false); // did not advance
+    expect(verifySessionsRevoked("Thu, 05 Nov 2026 08:00:00 GMT", before)).toBe(false);
+    expect(verifySessionsRevoked(undefined, before)).toBe(false);
+    expect(verifySessionsRevoked("garbage", before)).toBe(false);
+    expect(verifySessionsRevoked("Thu, 05 Nov 2026 10:00:00 GMT", "garbage")).toBe(false);
+    // no pre-write value: a present read-back value is new server state
+    expect(verifySessionsRevoked("Thu, 05 Nov 2026 10:00:00 GMT", undefined)).toBe(true);
   });
 });
 
@@ -464,6 +471,53 @@ describe("audit record — matches lib/admin/auditLog.ts#AuditLogEntry", () => {
   });
   it("masks email", () => {
     expect(maskEmail("firebase-adminsdk@x.iam.gserviceaccount.com")).toBe("fire…@…");
+  });
+});
+
+describe("NIT-1 — own __proto__ claim key", () => {
+  it("is refused with claims_prototype_key (it would otherwise be silently dropped on copy)", () => {
+    const claims = JSON.parse('{"__proto__":{"x":1},"plan":"pro"}');
+    expect(Object.prototype.hasOwnProperty.call(claims, "__proto__")).toBe(true);
+    const r = planClaimChange(claims, "grant");
+    expect(r.ok ? "ok" : r.code).toBe("claims_prototype_key");
+    expect(planClaimChange(claims, "revoke").ok).toBe(false);
+  });
+  it("CONTROL: an ordinary key named constructor is preserved byte-equal through grant and revoke", () => {
+    const g = planClaimChange({ constructor: "c", plan: "pro" }, "grant");
+    expect(g.ok && g.plan.after).toEqual({ constructor: "c", plan: "pro", admin: true });
+    const v = planClaimChange({ constructor: "c", admin: true }, "revoke");
+    expect(v.ok && v.plan.after).toEqual({ constructor: "c" });
+  });
+  it("the unrelated-claims fingerprint keeps an own __proto__ key (copy is define-based, not assignment)", () => {
+    const a = JSON.parse('{"__proto__":{"x":1}}');
+    expect(unrelatedClaimsFingerprint(a)).not.toBe(unrelatedClaimsFingerprint({}));
+  });
+});
+
+describe("MINOR-4 — checkResultDirStat", () => {
+  const ok = { isSymlink: false, isDirectory: true, uid: 501, mode: 0o40700 };
+  it("CONTROL: own, real directory, mode 0700 passes", () => {
+    expect(checkResultDirStat(ok, 501)).toBeNull();
+  });
+  it.each<[string, Parameters<typeof checkResultDirStat>[0], number | null]>([
+    ["symlink", { ...ok, isSymlink: true }, 501],
+    ["file", { ...ok, isDirectory: false }, 501],
+    ["other owner", { ...ok, uid: 0 }, 501],
+    ["group-readable", { ...ok, mode: 0o40750 }, 501],
+    ["world-writable", { ...ok, mode: 0o40777 }, 501],
+    ["too strict is still not 0700", { ...ok, mode: 0o40500 }, 501],
+    ["missing", null, 501],
+    ["unknown uid", ok, null],
+  ])("refuses result_dir_unsafe: %s", (_l, stat, uid) => {
+    expect(checkResultDirStat(stat, uid)?.code).toBe("result_dir_unsafe");
+  });
+});
+
+describe("NIT-2 — symlinked secret files", () => {
+  it("a symlinked credentials file refuses credentials_file_symlink; a symlinked token refuses operator_token_file_unsafe", () => {
+    expect(checkSecretFileMode({ isSymlink: true, isFile: false, mode: 0o120777 }, "credentials_file_unsafe", "f")?.code).toBe("credentials_file_symlink");
+    expect(checkSecretFileMode({ isSymlink: true, isFile: false, mode: 0o120777 }, "operator_token_file_unsafe", "f")?.code).toBe("operator_token_file_unsafe");
+    expect(checkSecretFileMode({ isSymlink: false, isFile: true, mode: 0o100600 }, "credentials_file_unsafe", "f")).toBeNull();
   });
 });
 

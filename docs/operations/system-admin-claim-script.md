@@ -42,7 +42,9 @@ npm run admin:set-system-admin-claim -- \
 - **No defaults.** No default project, no default user, no default operation.
 - **Credentials:** only the `--credentials` key file. The tool never loads
   `.env.local` and never reads credential environment variables. The file must
-  be a regular file with mode 0600, `type` must be `service_account`,
+  not be a symbolic link (`credentials_file_symlink`), and it is opened once
+  (`O_NOFOLLOW`) and checked with `fstat` on that same descriptor, so the file
+  checked is the file read. It must be a regular file with mode 0600, `type` must be `service_account`,
   `client_email` and `private_key` must be present, and `project_id` must equal
   `--confirm-project`. The tool initialises its own named Firebase app from it
   and checks that app's project id again.
@@ -62,7 +64,8 @@ npm run admin:set-system-admin-claim -- \
 - **Claims:** grant writes `{ ...existing, admin: true }` with `admin` last;
   revoke removes only the `admin` key. Every other claim must be byte-equal
   (canonical JSON) before and after, the payload must be at most 1000 bytes,
-  and reserved claim names are refused. If nothing would change, the tool exits
+  and reserved claim names are refused. Claims carrying an own `__proto__` key
+  are refused (`claims_prototype_key`), because copying would drop it. If nothing would change, the tool exits
   0 and writes nothing, even with `--execute`.
 - **Commit state:** `--execute` refuses when `scripts/admin` or `lib/admin` has
   uncommitted changes, or the commit cannot be determined. The commit SHA is
@@ -92,9 +95,13 @@ visible, not impossible).
 ## Evidence
 
 **Local result file.** Written for every run that gets past argument parsing:
-created exclusively (`wx`, mode 0600) before any Firebase call, then filled
-with the final result. Default directory: `<os.tmpdir()>/convergepanel-operator/`
-(mode 0700). A `--result-file` inside the git worktree is refused. It contains
+created exclusively (`O_CREAT|O_EXCL`, mode 0600) before any Firebase call, then
+filled through the SAME file descriptor (never reopened by path, so a later
+path swap cannot redirect it). Default directory:
+`<os.tmpdir()>/convergepanel-operator/`; it must be a real directory (not a
+symlink), owned by the current user, mode exactly 0700, or the run is refused
+(`result_dir_unsafe`) — on a shared host another account could otherwise
+pre-create it. A `--result-file` inside the git worktree is refused. It contains
 UIDs, claims, the masked credential email and the request id, never key
 material or tokens. Do not commit it.
 
@@ -118,10 +125,12 @@ Firestore rules deny all client access to this collection, but the Admin SDK
 bypasses rules: "immutable" here means create-only by convention plus key
 custody, not something the rules enforce.
 
-Exit codes: `0` dry run, no change, or applied and verified; `2` refused before
-any Firebase write; `3` a write was attempted and not fully verified, or an
-unexpected error occurred (inspect the read-back; do not assume either state);
-`1` the result file could not be written after a clean run.
+Exit codes: `0` dry run, no change, or applied and verified; `2` refused, or an
+unexpected error before any Firebase write was issued (the result file records
+`writeAttempted: false`); `3` a write was attempted and not fully verified, or
+an unexpected error after a write was attempted (inspect the read-back; do not
+assume either state); `1` the result file could not be written after a clean
+run.
 
 ## Revocation and sessions: OPEN OWNER DECISION
 
@@ -140,7 +149,11 @@ So `no` leaves up to 5 days of ADMIN_PORTAL access on an existing cookie, and
 up-to-1-hour SYSTEM_ADMIN bearer window; only adding `checkRevoked` to the
 SYSTEM_ADMIN verification path would (see admin-authority-tiers.md, "What this
 procedure does NOT give you"). With `yes`, the tool verifies that the Auth
-record's `tokensValidAfterTime` advanced.
+record's `tokensValidAfterTime` read back after the write is strictly later than
+the value read from the same record before the write. Only server timestamps
+are compared; the operator's local clock is never used. (One-second
+resolution: a second revocation within the same second fails closed as
+`verification_failed`.)
 
 ## Defects fixed (from the retired scripts)
 
@@ -155,7 +168,9 @@ record's `tokensValidAfterTime` advanced.
   are not carried forward.
 - `scripts/check-admin-claims.js` and `scripts/verify-admin-claims.js` are still
   read-only but now require `--confirm-project`, `--credentials` and `--uid`
-  (no hard-coded UID, no `.env.local`).
+  (no hard-coded UID, no `.env.local`). They use the same single-open,
+  no-symlink key-file read, and an unexpected failure prints a generic line
+  (no message or stack) and exits 1.
 
 ## Later: adopting the PR #294 operator grant
 

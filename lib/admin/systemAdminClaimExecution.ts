@@ -75,7 +75,6 @@ export type ExecutionDeps<TS> = {
   auth: ClaimAuthPort;
   store: ClaimStorePort;
   timestampNow: () => TS;
-  nowMs: () => number;
   /** Resolves the operator token file to a token, or refuses (mode/shape). */
   readOperatorToken: (path: string) => Promise<{ ok: true; token: string } | Refusal>;
   git: { sha: string | null; dirty: boolean | null };
@@ -179,6 +178,8 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
   const targetRefusal = checkTargetRecord(target, args.targetUid);
   if (targetRefusal) return refused(targetRefusal);
   result.targetEmail = typeof target.email === "string" ? target.email : null;
+  // Server-side revocation baseline, captured before any write (see verifySessionsRevoked).
+  const preWriteTokensValidAfterTime = typeof target.tokensValidAfterTime === "string" ? target.tokensValidAfterTime : undefined;
 
   try {
     result.usersDocRole.before = await deps.store.readUsersDocRole(args.targetUid);
@@ -337,7 +338,6 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
   }
   result.auditRowIds.push(attemptId);
 
-  const startedAtMs = deps.nowMs();
   let failure: PostWriteFailure | null = null;
   let failureDetail: string | undefined;
 
@@ -391,7 +391,7 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
     if (!v.ok) {
       failure = "verification_failed";
       failureDetail = v.detail;
-    } else if (args.operation === "revoke" && args.revokeSessions === "yes" && !verifySessionsRevoked(readBack.tokensValidAfterTime, startedAtMs)) {
+    } else if (args.operation === "revoke" && args.revokeSessions === "yes" && !verifySessionsRevoked(readBack.tokensValidAfterTime, preWriteTokensValidAfterTime)) {
       failure = "verification_failed";
       failureDetail = "tokensValidAfterTime did not advance";
     } else if (result.usersDocRole.after !== intendedRole) {

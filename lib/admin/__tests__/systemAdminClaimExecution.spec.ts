@@ -108,7 +108,6 @@ function deps(w: World, overrides: Partial<ExecutionDeps<string>> = {}): Executi
     auth,
     store,
     timestampNow: () => "TS",
-    nowMs: () => Date.parse("2026-11-05T10:00:01Z"),
     readOperatorToken: async () => ({ ok: true, token: TOKEN }),
     git: { sha: "abc123", dirty: false },
     log: (line) => w.calls.push(`log:${line}`),
@@ -419,6 +418,84 @@ describe("execute — failures after the write are exit 3 and recorded", () => {
     w.fail.getUserAfterWrite = true;
     const r = await runSystemAdminClaim(ctx(args(exec)), deps(w));
     expect([r.exitCode, r.code]).toEqual([3, "verification_failed"]);
+  });
+});
+
+describe("review round 1 — gaps", () => {
+  const exec = ["--operator-id-token-file=/t", "--execute", `--confirm-claim=${GRANT_CONFIRM}`];
+
+  it("MINOR-1: bootstrap counts DISABLED admin holders too (a disabled admin:true account => bootstrap_not_first)", async () => {
+    const w = world();
+    w.users.get(OPERATOR)!.customClaims = {};
+    w.users.set(OTHER_ADMIN, { uid: OTHER_ADMIN, disabled: true, customClaims: { admin: true } });
+    const r = await runSystemAdminClaim(ctx(args(["--bootstrap-first-admin", "--execute", `--confirm-claim=${GRANT_CONFIRM}`])), deps(w));
+    expect(r.code).toBe("bootstrap_not_first");
+    expect(w.writes).toBe(0);
+  });
+
+  it("MINOR-2: a users/{uid}.role write that silently does nothing => verification_failed, exit 3", async () => {
+    const w = world();
+    const d = deps(w);
+    d.store.writeUsersDocRole = async (uid, role) => {
+      w.calls.push(`writeRole:${uid}:${role}`);
+      w.writes++;
+    };
+    const r = await runSystemAdminClaim(ctx(args(exec)), d);
+    expect([r.status, r.exitCode, r.code]).toEqual(["failed_after_write", 3, "verification_failed"]);
+    expect(w.audit.get("system-admin-claim:req_1_abc:outcome")!.metadata).toMatchObject({
+      outcome: "verification_failed",
+      outcomeDetail: "users/{uid}.role read-back mismatch",
+    });
+  });
+
+  describe("MINOR-3: session revocation is judged on server timestamps only", () => {
+    const confirm = expectedConfirmation({ operation: "revoke", projectId: PROJECT, targetUid: TARGET, revokeSessions: "yes" });
+    const revokeExec = ["--revoke-sessions=yes", "--operator-id-token-file=/t", "--execute", `--confirm-claim=${confirm}`];
+    const setup = (serverAfter: string | null) => {
+      const w = world();
+      const target = w.users.get(TARGET)!;
+      target.customClaims = { admin: true };
+      target.tokensValidAfterTime = "Thu, 05 Nov 2026 09:00:00 GMT"; // server value before the write
+      w.users.set(OTHER_ADMIN, { uid: OTHER_ADMIN, disabled: false, customClaims: { admin: true } });
+      const d = deps(w);
+      d.auth.revokeRefreshTokens = async (uid) => {
+        w.calls.push(`revokeRefreshTokens:${uid}`);
+        w.writes++;
+        if (serverAfter !== null) w.users.get(uid)!.tokensValidAfterTime = serverAfter;
+      };
+      return { w, d };
+    };
+    it("local clock far BEHIND the server: a real revocation still verifies", async () => {
+      const { d } = setup("Thu, 05 Nov 2026 10:00:00 GMT");
+      const realNow = Date.now;
+      Date.now = () => Date.parse("2001-01-01T00:00:00Z");
+      try {
+        expect((await runSystemAdminClaim(ctx(args(revokeExec, "revoke")), d)).status).toBe("applied");
+      } finally {
+        Date.now = realNow;
+      }
+    });
+    it("local clock far AHEAD of the server: a real revocation still verifies", async () => {
+      const { d } = setup("Thu, 05 Nov 2026 10:00:00 GMT");
+      const realNow = Date.now;
+      Date.now = () => Date.parse("2099-01-01T00:00:00Z");
+      try {
+        expect((await runSystemAdminClaim(ctx(args(revokeExec, "revoke")), d)).status).toBe("applied");
+      } finally {
+        Date.now = realNow;
+      }
+    });
+    it("a revocation that did not advance the server value fails verification (whatever the local clock says)", async () => {
+      const { d } = setup(null);
+      const realNow = Date.now;
+      Date.now = () => Date.parse("2001-01-01T00:00:00Z");
+      try {
+        const r = await runSystemAdminClaim(ctx(args(revokeExec, "revoke")), d);
+        expect([r.exitCode, r.code]).toEqual([3, "verification_failed"]);
+      } finally {
+        Date.now = realNow;
+      }
+    });
   });
 });
 

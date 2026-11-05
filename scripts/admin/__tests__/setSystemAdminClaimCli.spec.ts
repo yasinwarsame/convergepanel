@@ -9,7 +9,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { runCli, realIo, type CliIo, type FirebaseFactory, type FirebaseHandle } from "../set-system-admin-claim";
-import { REFUSAL_CODES, expectedConfirmation } from "../../../lib/admin/systemAdminClaimSafety";
+import { REFUSAL_CODES, checkResultDirStat, expectedConfirmation } from "../../../lib/admin/systemAdminClaimSafety";
 import type { UserRecordLike } from "../../../lib/admin/systemAdminClaimSafety";
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -24,7 +24,7 @@ const TOKEN = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJvcCJ9.SIGNATURE-MUST-NEVER-APPEAR
 const KEY = { type: "service_account", project_id: PROJECT, client_email: "firebase-adminsdk-x@cp-rehearsal-1.iam.gserviceaccount.com", private_key: FAKE_PRIVATE_KEY };
 
 type Env = {
-  files: Map<string, { mode: number; body: string }>;
+  files: Map<string, { mode: number; body: string; symlink?: boolean }>;
   out: string[];
   err: string[];
   results: Map<string, string>;
@@ -57,25 +57,21 @@ function fakeIo(e: Env, over: Partial<CliIo> = {}): CliIo {
   return {
     stdout: (l) => e.out.push(l),
     stderr: (l) => e.err.push(l),
-    statFile: (p) => {
+    readSecretFile: (p) => {
       const f = e.files.get(p);
-      return f ? { isFile: true, mode: f.mode } : null;
-    },
-    readFile: (p) => {
-      const f = e.files.get(p);
-      if (!f) throw new Error("ENOENT");
-      return f.body;
+      if (!f) return null;
+      if (f.symlink) return { isSymlink: true, isFile: false, mode: 0o120777, body: null };
+      return { isSymlink: false, isFile: true, mode: f.mode, body: f.body };
     },
     realpathDir: (p) => (p.startsWith("/nonexistent") ? null : p),
     createResultFile: (p) => {
       if (e.results.has(p)) throw new Error("EEXIST");
       e.created.push(p);
       e.results.set(p, "");
+      return { write: (c) => { e.results.set(p, c); }, close: () => undefined };
     },
-    finalizeResultFile: (p, c) => {
-      e.results.set(p, c);
-    },
-    defaultResultDir: () => "/tmp/convergepanel-operator",
+    prepareDefaultResultDir: () => ({ dir: "/tmp/convergepanel-operator", stat: { isSymlink: false, isDirectory: true, uid: 501, mode: 0o40700 } }),
+    currentUid: () => 501,
     git: () => ({ sha: "deadbeef", dirty: false }),
     nowMs: () => Date.parse("2026-11-05T10:00:00Z"),
     randomPart: () => "abc123",
@@ -232,6 +228,39 @@ describe("runCli — refusals before any credential or Firebase use", () => {
   });
 });
 
+describe("runCli — symlinked secrets and the default result directory", () => {
+  it("a symlinked --credentials file is refused with credentials_file_symlink", async () => {
+    const e = makeEnv();
+    e.files.get("/keys/sa.json")!.symlink = true;
+    const r = await run(BASE, e);
+    expect(r.code).toBe(2);
+    expect(r.result).toMatchObject({ code: "credentials_file_symlink" });
+    expect(e.factoryCalls).toBe(0);
+  });
+  it("a symlinked operator token file is refused", async () => {
+    const e = makeEnv();
+    e.files.get("/keys/token")!.symlink = true;
+    const r = await run([...BASE, "--operator-id-token-file=/keys/token", "--execute", `--confirm-claim=${CONFIRM}`], e);
+    expect(r.result.run).toMatchObject({ code: "operator_token_file_unsafe" });
+    expect(e.writes).toEqual([]);
+  });
+  it.each<[string, { isSymlink: boolean; isDirectory: boolean; uid: number; mode: number } | null, number | null]>([
+    ["symlink", { isSymlink: true, isDirectory: false, uid: 501, mode: 0o120777 }, 501],
+    ["not a directory", { isSymlink: false, isDirectory: false, uid: 501, mode: 0o100700 }, 501],
+    ["owned by another uid", { isSymlink: false, isDirectory: true, uid: 0, mode: 0o40700 }, 501],
+    ["mode 0755", { isSymlink: false, isDirectory: true, uid: 501, mode: 0o40755 }, 501],
+    ["mode 0711", { isSymlink: false, isDirectory: true, uid: 501, mode: 0o40711 }, 501],
+    ["uninspectable", null, 501],
+    ["no current uid", { isSymlink: false, isDirectory: true, uid: 501, mode: 0o40700 }, null],
+  ])("default result dir %s => result_dir_unsafe, nothing created, factory never called", async (_l, stat, uid) => {
+    const e = makeEnv();
+    const r = await run(BASE, e, { io: { prepareDefaultResultDir: () => ({ dir: "/tmp/convergepanel-operator", stat }), currentUid: () => uid } });
+    expect(r.code).toBe(2);
+    expect(e.err.join()).toContain("[result_dir_unsafe]");
+    expect([e.created.length, e.factoryCalls]).toEqual([0, 0]);
+  });
+});
+
 describe("runCli — dry run and execute end to end (fake Firebase)", () => {
   it("dry run: exit 0, ZERO Firebase writes, result file phase dry-run with the confirmation string", async () => {
     const r = await run([...BASE, "--operator-id-token-file=/keys/token"]);
@@ -258,36 +287,113 @@ describe("runCli — dry run and execute end to end (fake Firebase)", () => {
     expect(r.all).not.toContain("private_key");
   });
 
-  it("an unexpected throw after starting is exit 3 (never 0) and records only the error name", async () => {
+  it("an unexpected throw BEFORE any Firebase write is exit 2 and says nothing was written", async () => {
     const e = makeEnv();
     const r = await run([...BASE, "--operator-id-token-file=/keys/token", "--execute", `--confirm-claim=${CONFIRM}`], e, {
       io: { stdout: (l) => { if (l.startsWith("Authorization")) throw new RangeError("secret-ish message"); e.out.push(l); } },
     });
-    expect(r.code).toBe(3);
-    expect(r.result).toMatchObject({ status: "unexpected_error", code: "unexpected_error:RangeError" });
+    expect(r.code).toBe(2);
+    expect(e.writes).toEqual([]);
+    expect(r.result).toMatchObject({ status: "unexpected_error", code: "unexpected_error:RangeError", writeAttempted: false });
+    expect(r.result.message).toMatch(/before any Firebase write/);
     expect(r.all).not.toContain("secret-ish message");
+  });
+
+  it("an unexpected throw AFTER a write was attempted is exit 3 (never 0 or 2)", async () => {
+    const e = makeEnv();
+    const r = await run([...BASE, "--operator-id-token-file=/keys/token", "--execute", `--confirm-claim=${CONFIRM}`], e, {
+      io: { stdout: (l) => { if (l.startsWith("Applied")) throw new RangeError("late"); e.out.push(l); } },
+    });
+    expect(e.writes.some((w) => w.startsWith("claims:"))).toBe(true);
+    expect(r.code).toBe(3);
+    expect(r.result).toMatchObject({ status: "unexpected_error", writeAttempted: true });
   });
 });
 
-describe("realIo — local result file is exclusive and 0600", () => {
-  it("creates with wx/0600 and refuses to recreate", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sac-test-"));
-    try {
-      const io = realIo(REPO);
-      const p = path.join(dir, "r.json");
-      io.createResultFile(p);
-      expect(fs.statSync(p).mode & 0o777).toBe(0o600);
-      expect(() => io.createResultFile(p)).toThrow();
-      io.finalizeResultFile(p, "{\"a\":1}\n");
-      expect(fs.readFileSync(p, "utf8")).toBe("{\"a\":1}\n");
-      expect(fs.statSync(p).mode & 0o777).toBe(0o600);
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
+describe("realIo — files on disk (temp dirs only)", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "sac-test-"));
   });
-  it("the default result directory is outside the repo", () => {
-    const dir = realIo(REPO).defaultResultDir();
-    expect(path.relative(REPO, dir).startsWith("..")).toBe(true);
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("result file: exclusive 0600 create, written through the kept fd (a path swap after create is not followed)", () => {
+    const io = realIo(REPO);
+    const p = path.join(dir, "r.json");
+    const h = io.createResultFile(p);
+    expect(fs.statSync(p).mode & 0o777).toBe(0o600);
+    expect(() => io.createResultFile(p)).toThrow();
+    // Swap the path for a decoy after the create; the fd still points at the original inode.
+    const moved = path.join(dir, "moved.json");
+    fs.renameSync(p, moved);
+    fs.writeFileSync(p, "DECOY");
+    h.write("{\"a\":1}\n");
+    h.close();
+    expect(fs.readFileSync(moved, "utf8")).toBe("{\"a\":1}\n");
+    expect(fs.readFileSync(p, "utf8")).toBe("DECOY");
+  });
+
+  it("result file: an existing symlink at the path is refused by the exclusive create", () => {
+    const target = path.join(dir, "target.json");
+    fs.writeFileSync(target, "ORIGINAL");
+    const link = path.join(dir, "link.json");
+    fs.symlinkSync(target, link);
+    expect(() => realIo(REPO).createResultFile(link)).toThrow();
+    expect(fs.readFileSync(target, "utf8")).toBe("ORIGINAL");
+  });
+
+  it("secret reads: regular file is read through one fd; a symlink is reported, not followed", () => {
+    const io = realIo(REPO);
+    const real = path.join(dir, "k.json");
+    fs.writeFileSync(real, "BODY", { mode: 0o600 });
+    expect(io.readSecretFile(real)).toEqual({ isSymlink: false, isFile: true, mode: fs.statSync(real).mode, body: "BODY" });
+    const link = path.join(dir, "link");
+    fs.symlinkSync(real, link);
+    expect(io.readSecretFile(link)).toMatchObject({ isSymlink: true, body: null });
+    expect(io.readSecretFile(path.join(dir, "missing"))).toBeNull();
+    expect(io.readSecretFile(dir)).toMatchObject({ isSymlink: false, isFile: false, body: null });
+  });
+
+  it("the default result directory is outside the repo, owned by us, mode 0700, and passes checkResultDirStat", () => {
+    const io = realIo(REPO);
+    const { dir: d, stat } = io.prepareDefaultResultDir();
+    expect(path.relative(REPO, d).startsWith("..")).toBe(true);
+    expect(checkResultDirStat(stat, io.currentUid())).toBeNull();
+  });
+});
+
+describe("read-only loadKey (real temp files)", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "sac-ro-"));
+  });
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  it("CONTROL: a 0600 regular key file loads", () => {
+    const k = path.join(dir, "k.json");
+    fs.writeFileSync(k, JSON.stringify(KEY), { mode: 0o600 });
+    expect(readOnly.loadKey(k, PROJECT)).toMatchObject({ ok: true });
+  });
+  it("refuses a symlinked key file with credentials_file_symlink, and a 0644 file with credentials_file_unsafe", () => {
+    const k = path.join(dir, "k.json");
+    fs.writeFileSync(k, JSON.stringify(KEY), { mode: 0o600 });
+    const link = path.join(dir, "link.json");
+    fs.symlinkSync(k, link);
+    expect(readOnly.loadKey(link, PROJECT)).toMatchObject({ ok: false, code: "credentials_file_symlink" });
+    fs.chmodSync(k, 0o644);
+    expect(readOnly.loadKey(k, PROJECT)).toMatchObject({ ok: false, code: "credentials_file_unsafe" });
+  });
+  it("runAsCli: an unexpected rejection prints a generic line and exits 1 (no message, no stack)", async () => {
+    const lines: string[] = [];
+    let exitCode: number | undefined;
+    // NODE_ENV is fine; force main() to throw by passing an argv whose iteration throws.
+    const hostile = { [Symbol.iterator]: () => { throw new Error("RAW-INTERNAL-MESSAGE"); } };
+    await readOnly.runAsCli(hostile, {}, (c: number) => { exitCode = c; }, (l: string) => lines.push(l));
+    expect(exitCode).toBe(1);
+    expect(lines).toEqual(["Unexpected failure. Nothing was written (this tool is read-only)."]);
   });
 });
 

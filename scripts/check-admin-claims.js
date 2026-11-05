@@ -50,27 +50,50 @@ function runtimeRefusal(env) {
   return null;
 }
 
-/** Reads and validates the key file. Never echoes any key field other than project_id. */
+/**
+ * Reads and validates the key file. Never echoes any key field other than
+ * project_id. The file is opened ONCE (lstat refuses a symlink, then
+ * open(O_NOFOLLOW) + fstat + read through that descriptor), so the checked
+ * file is the file read.
+ */
 function loadKey(credentialsPath, confirmProject) {
   const file = path.resolve(credentialsPath);
-  let stat;
+  let lst;
   try {
-    stat = fs.statSync(file);
+    lst = fs.lstatSync(file);
   } catch {
-    return { ok: false, message: "Refusing: the --credentials file does not exist or cannot be read." };
+    return { ok: false, code: "credentials_file_unreadable", message: "Refusing: the --credentials file does not exist or cannot be read." };
   }
-  if (!stat.isFile() || (stat.mode & 0o077) !== 0) return { ok: false, message: "Refusing: the --credentials file must be a regular file with mode 0600." };
+  if (lst.isSymbolicLink()) {
+    return { ok: false, code: "credentials_file_symlink", message: "Refusing: the --credentials file is a symbolic link. Name the real file." };
+  }
+  let fd;
+  try {
+    fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  } catch {
+    return { ok: false, code: "credentials_file_unreadable", message: "Refusing: the --credentials file could not be opened." };
+  }
+  let body;
+  try {
+    const st = fs.fstatSync(fd);
+    if (!st.isFile() || (st.mode & 0o077) !== 0) {
+      return { ok: false, code: "credentials_file_unsafe", message: "Refusing: the --credentials file must be a regular file with mode 0600." };
+    }
+    body = fs.readFileSync(fd, "utf8");
+  } finally {
+    fs.closeSync(fd);
+  }
   let key;
   try {
-    key = JSON.parse(fs.readFileSync(file, "utf8"));
+    key = JSON.parse(body);
   } catch {
-    return { ok: false, message: "Refusing: the --credentials file is not valid JSON." };
+    return { ok: false, code: "credentials_invalid", message: "Refusing: the --credentials file is not valid JSON." };
   }
   if (!key || key.type !== "service_account" || typeof key.client_email !== "string" || typeof key.private_key !== "string") {
-    return { ok: false, message: "Refusing: the --credentials file is not a service-account key." };
+    return { ok: false, code: "credentials_invalid", message: "Refusing: the --credentials file is not a service-account key." };
   }
   if (key.project_id !== confirmProject) {
-    return { ok: false, message: `Refusing: --confirm-project does not match the credential's project_id (${String(key.project_id)}).` };
+    return { ok: false, code: "project_confirmation_mismatch", message: `Refusing: --confirm-project does not match the credential's project_id (${String(key.project_id)}).` };
   }
   return { ok: true, key };
 }
@@ -119,8 +142,19 @@ async function main(argv, env) {
   }
 }
 
-module.exports = { parseReadOnlyArgs, runtimeRefusal, main };
+module.exports = { parseReadOnlyArgs, runtimeRefusal, loadKey, main, runAsCli };
+
+/** CLI entry shared with verify-admin-claims.js. Any unexpected failure prints a generic line (no message, no stack) and exits 1. */
+function runAsCli(argv, env, exit = process.exit, writeErr = (l) => process.stderr.write(`${l}\n`)) {
+  return main(argv, env).then(
+    (code) => exit(code),
+    () => {
+      writeErr("Unexpected failure. Nothing was written (this tool is read-only).");
+      exit(1);
+    }
+  );
+}
 
 if (require.main === module) {
-  main(process.argv.slice(2), process.env).then((code) => process.exit(code));
+  runAsCli(process.argv.slice(2), process.env);
 }
