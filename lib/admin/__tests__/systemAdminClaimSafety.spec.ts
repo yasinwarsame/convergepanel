@@ -3,6 +3,9 @@
  * CONTROL (a valid input that passes, so the refusal assertion is not
  * vacuous) and a NEGATIVE case that must produce the named refusal code.
  */
+import * as fs from "node:fs";
+import * as path from "node:path";
+
 import {
   CLAIMS_MAX_BYTES,
   REFUSAL_CODES,
@@ -48,7 +51,6 @@ const REVOKE = [
   "--credentials=/keys/sa.json",
   `--target-uid=${UID}`,
   "--operation=revoke",
-  "--revoke-sessions=no",
   "--allow-claim-reduction",
 ];
 
@@ -83,12 +85,13 @@ describe("parseSetSystemAdminClaimArgs", () => {
     const r = parseSetSystemAdminClaimArgs(GRANT);
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.args).toMatchObject({ operation: "grant", targetUid: UID, confirmProject: PROJECT, execute: false, revokeSessions: null });
+      expect(r.args).toMatchObject({ operation: "grant", targetUid: UID, confirmProject: PROJECT, execute: false });
+      expect(r.args).not.toHaveProperty("revokeSessions");
     }
   });
   it("CONTROL: a revoke with every required flag parses", () => {
     const r = parseSetSystemAdminClaimArgs(REVOKE);
-    expect(r.ok && r.args.revokeSessions).toBe("no");
+    expect(r.ok && r.args.operation).toBe("revoke");
   });
   it("CONTROL: execute with a confirmation parses", () => {
     expect(parseCode([...GRANT, "--execute", "--confirm-claim=x"])).toBe("ok");
@@ -117,10 +120,12 @@ describe("parseSetSystemAdminClaimArgs", () => {
     ["target_missing_arg", without(GRANT, "--target-uid")],
     ["target_uid_invalid", [...without(GRANT, "--target-uid"), "--target-uid=a@b.com"]],
     ["target_uid_invalid", [...without(GRANT, "--target-uid"), `--target-uid=${"a".repeat(129)}`]],
-    ["revoke_sessions_missing", without(REVOKE, "--revoke-sessions")],
-    ["revoke_sessions_invalid", [...without(REVOKE, "--revoke-sessions"), "--revoke-sessions=true"]],
+    // Owner policy: revoke ALWAYS revokes sessions; the opt-out flag is gone in every form.
+    ["unknown_flag", [...REVOKE, "--revoke-sessions=no"]],
+    ["unknown_flag", [...REVOKE, "--revoke-sessions=yes"]],
+    ["unknown_flag", [...REVOKE, "--revoke-sessions"]],
+    ["unknown_flag", [...GRANT, "--revoke-sessions=yes"]],
     ["reduction_flag_missing", without(REVOKE, "--allow-claim-reduction")],
-    ["flag_conflict", [...GRANT, "--revoke-sessions=yes"]],
     ["flag_conflict", [...GRANT, "--allow-claim-reduction"]],
     ["flag_conflict", [...REVOKE, "--bootstrap-first-admin"]],
     ["flag_conflict", [...GRANT, "--bootstrap-first-admin", "--operator-id-token-file=/t"]],
@@ -128,6 +133,11 @@ describe("parseSetSystemAdminClaimArgs", () => {
     ["confirmation_missing", [...GRANT, "--execute"]],
   ])("refuses %s", (code, argv) => {
     expect(parseCode(argv)).toBe(code);
+  });
+  it("--revoke-sessions is refused with a message that says revoke always revokes sessions", () => {
+    const r = parseSetSystemAdminClaimArgs([...REVOKE, "--revoke-sessions=no"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.message).toMatch(/ALWAYS revokes the target's refresh tokens/);
   });
 
   it("there is no default project and no default target (an empty argv refuses)", () => {
@@ -301,11 +311,11 @@ describe("checkPlanInvariants", () => {
 });
 
 describe("confirmation", () => {
-  const g = expectedConfirmation({ operation: "grant", projectId: PROJECT, targetUid: UID, revokeSessions: null });
-  const rv = expectedConfirmation({ operation: "revoke", projectId: PROJECT, targetUid: UID, revokeSessions: "yes" });
-  it("binds operation, project and uid (and the session decision on revoke)", () => {
+  const g = expectedConfirmation({ operation: "grant", projectId: PROJECT, targetUid: UID });
+  const rv = expectedConfirmation({ operation: "revoke", projectId: PROJECT, targetUid: UID });
+  it("binds operation, project and uid (and the mandatory session revocation on revoke)", () => {
     expect(g).toBe(`grant:admin:true:${PROJECT}:${UID}`);
-    expect(rv).toBe(`revoke:admin:removed:sessions-yes:${PROJECT}:${UID}`);
+    expect(rv).toBe(`revoke:admin:removed:sessions-revoked:${PROJECT}:${UID}`);
   });
   it("CONTROL: the exact string passes", () => {
     expect(checkConfirmation(g, g)).toBeNull();
@@ -317,9 +327,10 @@ describe("confirmation", () => {
     ["other project", `grant:admin:true:convergepanel:${UID}`],
     ["other uid", `grant:admin:true:${PROJECT}:someoneElse`],
     ["revoke string for a grant", rv],
-    ["revoke with the other session decision", expectedConfirmation({ operation: "revoke", projectId: PROJECT, targetUid: UID, revokeSessions: "no" })],
+    ["revoke: retired sessions-no string", `revoke:admin:removed:sessions-no:${PROJECT}:${UID}`],
+    ["revoke: retired sessions-yes string", `revoke:admin:removed:sessions-yes:${PROJECT}:${UID}`],
   ])("refuses confirmation_mismatch: %s", (_l, provided) => {
-    const expected = _l === "revoke with the other session decision" ? rv : g;
+    const expected = _l.startsWith("revoke:") ? rv : g;
     expect(checkConfirmation(provided, expected)?.code).toBe("confirmation_mismatch");
   });
   it("refuses confirmation_missing", () => {
@@ -432,7 +443,7 @@ describe("audit record — matches lib/admin/auditLog.ts#AuditLogEntry", () => {
     afterClaims: { admin: true },
     usersDocRoleBefore: null,
     usersDocRoleAfter: "admin",
-    revokeSessions: null,
+    claimWrite: "write",
     credentialSource: "explicit-key-file",
     credentialClientEmailMasked: "fire…@…",
     gitSha: "abc123",
@@ -445,24 +456,62 @@ describe("audit record — matches lib/admin/auditLog.ts#AuditLogEntry", () => {
     expect(rec).not.toHaveProperty("action");
     expect(rec).not.toHaveProperty("at");
     expect(rec.createdAt).toBe(TS);
-    expect(rec.actionType).toBe("GRANT_SYSTEM_ADMIN_CLAIM");
-    expect(rec.metadata).toMatchObject({ source: "operator-script", phase: "attempt", script: "scripts/admin/set-system-admin-claim.ts" });
+    // An attempt row is NEVER labelled as a grant/revoke: it is not a completed change.
+    expect(rec.actionType).toBe("SYSTEM_ADMIN_CLAIM_ATTEMPT");
+    expect(rec.metadata).toMatchObject({
+      source: "operator-script",
+      phase: "attempt",
+      script: "scripts/admin/set-system-admin-claim.ts",
+      requestedOperation: "grant",
+      completed: false,
+      afterSemantics: "intended-not-applied",
+      claimWrite: "write",
+      sessionRevocation: "not_applicable",
+    });
     expect(rec.metadata).not.toHaveProperty("outcome");
+    expect(rec.metadata).not.toHaveProperty("revokeSessions");
   });
   it("outcome rows carry metadata.outcome; optional emails are omitted, never undefined", () => {
     const out = buildClaimAuditRecord({
       ...{
         requestId: "r", createdAt: TS, projectId: PROJECT, operation: "revoke" as const, authorization: "first-admin-bootstrap" as const,
         adminUid: "operator-bootstrap", targetUid: UID, beforeClaims: {}, afterClaims: {}, usersDocRoleBefore: null, usersDocRoleAfter: null,
-        revokeSessions: "yes" as const, credentialSource: "explicit-key-file" as const, credentialClientEmailMasked: "x…@…", gitSha: "s", confirmClaim: "c",
+        claimWrite: "write" as const, credentialSource: "explicit-key-file" as const, credentialClientEmailMasked: "x…@…", gitSha: "s", confirmClaim: "c",
       },
       phase: "outcome",
       outcome: "applied",
     });
     expect(out.metadata.outcome).toBe("applied");
+    expect(out.metadata).toMatchObject({ completed: true, afterSemantics: "read-back", sessionRevocation: "required" });
     expect(out.actionType).toBe("REVOKE_SYSTEM_ADMIN_CLAIM");
     expect("adminEmail" in out).toBe(false);
     expect("targetEmail" in out).toBe(false);
+  });
+  it.each<[string, "grant" | "revoke", "attempt" | "outcome", string | undefined, string, boolean]>([
+    ["attempt grant", "grant", "attempt", undefined, "SYSTEM_ADMIN_CLAIM_ATTEMPT", false],
+    ["attempt revoke", "revoke", "attempt", undefined, "SYSTEM_ADMIN_CLAIM_ATTEMPT", false],
+    ["grant applied", "grant", "outcome", "applied", "GRANT_SYSTEM_ADMIN_CLAIM", true],
+    ["revoke applied", "revoke", "outcome", "applied", "REVOKE_SYSTEM_ADMIN_CLAIM", true],
+    ["revoke sessions-only", "revoke", "outcome", "claim_already_absent_sessions_revoked", "REVOKE_SYSTEM_ADMIN_SESSIONS", true],
+    ["revoke sessions failed", "revoke", "outcome", "sessions_revoke_failed", "SYSTEM_ADMIN_CLAIM_INCOMPLETE", false],
+    ["grant mint failed", "grant", "outcome", "mint_failed", "SYSTEM_ADMIN_CLAIM_INCOMPLETE", false],
+    ["outcome row missing", "grant", "outcome", "audit_outcome_missing", "SYSTEM_ADMIN_CLAIM_INCOMPLETE", false],
+    ["verification failed", "revoke", "outcome", "verification_failed", "SYSTEM_ADMIN_CLAIM_INCOMPLETE", false],
+  ])("actionType/completed: %s", (_l, operation, phase, outcome, actionType, completed) => {
+    const r = buildClaimAuditRecord({
+      requestId: "r", createdAt: TS, projectId: PROJECT, operation, authorization: "operator-id-token",
+      adminUid: "op", targetUid: UID, beforeClaims: {}, afterClaims: {}, usersDocRoleBefore: null, usersDocRoleAfter: null,
+      claimWrite: "write", credentialSource: "explicit-key-file", credentialClientEmailMasked: "x…@…", gitSha: "s", confirmClaim: "c",
+      phase,
+      outcome: outcome as never,
+    });
+    expect([r.actionType, r.metadata.completed]).toEqual([actionType, completed]);
+  });
+  it("every claim action type is declared in lib/admin/auditLog.ts#AdminActionType", () => {
+    const src = fs.readFileSync(path.join(__dirname, "..", "auditLog.ts"), "utf8");
+    for (const t of ["SYSTEM_ADMIN_CLAIM_ATTEMPT", "GRANT_SYSTEM_ADMIN_CLAIM", "REVOKE_SYSTEM_ADMIN_CLAIM", "REVOKE_SYSTEM_ADMIN_SESSIONS", "SYSTEM_ADMIN_CLAIM_INCOMPLETE"]) {
+      expect({ t, declared: src.includes(`"${t}"`) }).toEqual({ t, declared: true });
+    }
   });
   it("doc ids are deterministic per request and phase", () => {
     expect(auditDocId("req_1_a", "attempt")).toBe("system-admin-claim:req_1_a:attempt");

@@ -67,9 +67,14 @@ function loadKey(credentialsPath, confirmProject) {
   if (lst.isSymbolicLink()) {
     return { ok: false, code: "credentials_file_symlink", message: "Refusing: the --credentials file is a symbolic link. Name the real file." };
   }
+  // A FIFO/socket/device is refused without opening it (open() on a FIFO blocks).
+  if (!lst.isFile()) {
+    return { ok: false, code: "credentials_file_unsafe", message: "Refusing: the --credentials file must be a regular file with mode 0600." };
+  }
   let fd;
   try {
-    fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    // O_NONBLOCK: a FIFO swapped in after the lstat cannot block; fstat below refuses it.
+    fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
   } catch {
     return { ok: false, code: "credentials_file_unreadable", message: "Refusing: the --credentials file could not be opened." };
   }

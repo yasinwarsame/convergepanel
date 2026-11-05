@@ -20,8 +20,14 @@ export type AdminActionType =
   | "UPDATE_ENTITLEMENTS"
   // Written only by scripts/admin/set-system-admin-claim.ts (create-only rows
   // built by lib/admin/systemAdminClaimSafety.ts#buildClaimAuditRecord).
+  // ATTEMPT and INCOMPLETE rows are NOT a completed privilege change; only
+  // GRANT_/REVOKE_SYSTEM_ADMIN_CLAIM (and, for a revoke re-run whose claim was
+  // already absent, REVOKE_SYSTEM_ADMIN_SESSIONS) record a verified result.
+  | "SYSTEM_ADMIN_CLAIM_ATTEMPT"
   | "GRANT_SYSTEM_ADMIN_CLAIM"
   | "REVOKE_SYSTEM_ADMIN_CLAIM"
+  | "REVOKE_SYSTEM_ADMIN_SESSIONS"
+  | "SYSTEM_ADMIN_CLAIM_INCOMPLETE"
   | "OTHER";
 
 /**

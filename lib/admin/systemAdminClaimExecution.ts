@@ -7,15 +7,19 @@
  * proven by tests rather than asserted in prose.
  *
  * Write ordering on --execute (fail closed):
- *   1. create the `attempt` audit row (create-only). Failure => refuse, NO write.
- *   2. write the custom claims.
- *   3. revoke refresh tokens (revoke with --revoke-sessions=yes only).
- *   4. mirror `users/{uid}.role` (display-only field used by the admin UI).
- *   5. read back and verify.
+ *   1. create the `attempt` audit row (create-only). If that call fails the
+ *      row's existence is UNKNOWN: no further write is issued and the run is
+ *      INCOMPLETE (exit 3, `audit_attempt_failed`), never "nothing written".
+ *   2. write the custom claims — skipped on a revoke whose `admin` claim is
+ *      already absent (a re-run): claims are never rewritten then.
+ *   3. revoke refresh tokens (EVERY revoke; owner policy, no opt-out).
+ *   4. mirror `users/{uid}.role` (display-only field used by the admin UI);
+ *      on a sessions-only re-run only if it is still outstanding.
+ *   5. read back and verify (claims; for revoke, tokensValidAfterTime advanced).
  *   6. create the `outcome` audit row (create-only).
  * After any failure in 2–4 the remaining mutations are skipped, but read-back
  * and the outcome row still run so the evidence records what actually happened.
- * Nothing is rolled back automatically.
+ * Nothing is rolled back automatically; re-running the same command is safe.
  *
  * The operator ID token is read through a port, passed to `verifyIdToken`, and
  * dropped. It is never logged, returned, or written to any record.
@@ -25,6 +29,7 @@ import {
   type AuditOutcome,
   type AuthorizationMode,
   type ClaimPlan,
+  type ClaimWritePlan,
   type Claims,
   type DecodedTokenLike,
   type ParsedClaimArgs,
@@ -88,25 +93,43 @@ export type ExecutionContext = {
   credential: Pick<ServiceAccountEvidence, "source" | "clientEmailMasked">;
 };
 
-export type RunStatus = "dry_run" | "no_change" | "applied" | "refused" | "failed_after_write";
+export type RunStatus =
+  | "dry_run"
+  | "no_change"
+  | "applied"
+  | "claim_already_absent_sessions_revoked"
+  | "refused"
+  | "incomplete";
 
 export type RunResult = {
   status: RunStatus;
+  /**
+   * 0 completed and verified (or grant already in place: no_change);
+   * 2 refused or dry run: NO write call was issued (guaranteed);
+   * 3 a write call was issued (possibly only the attempt audit row, outcome
+   *   unknown) and the operation is incomplete or unverified. Re-run is safe.
+   */
   exitCode: 0 | 2 | 3;
   code: RefusalCode | PostWriteFailure | null;
+  outcome: AuditOutcome | null;
   message: string | null;
   requestId: string;
   projectId: string;
   operation: ParsedClaimArgs["operation"];
   targetUid: string;
   targetEmail: string | null;
-  revokeSessions: ParsedClaimArgs["revokeSessions"];
+  /** Revoke always revokes refresh tokens; grant never does. */
+  sessionRevocation: "required" | "not_applicable";
+  claimWrite: ClaimWritePlan | null;
   plan: { before: Claims; after: Claims; diff: string[] } | null;
   readBackClaims: Claims | null;
   usersDocRole: { before: string | null; after: string | null };
   authorization: { mode: AuthorizationMode | "not_evaluated"; operatorUid: string | null; operatorEmailMasked: string | null };
   expectedConfirmation: string | null;
+  /** Rows created and confirmed. */
   auditRowIds: string[];
+  /** Rows whose create call failed: they may or may not exist. */
+  auditRowIdsUnconfirmed: string[];
   writesAttempted: string[];
   git: { sha: string | null; dirty: boolean | null };
 };
@@ -134,19 +157,22 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
     status: "refused",
     exitCode: 2,
     code: null,
+    outcome: null,
     message: null,
     requestId: ctx.requestId,
     projectId: ctx.projectId,
     operation: args.operation,
     targetUid: args.targetUid,
     targetEmail: null,
-    revokeSessions: args.revokeSessions,
+    sessionRevocation: args.operation === "revoke" ? "required" : "not_applicable",
+    claimWrite: null,
     plan: null,
     readBackClaims: null,
     usersDocRole: { before: null, after: null },
     authorization: { mode: "not_evaluated", operatorUid: null, operatorEmailMasked: null },
     expectedConfirmation: null,
     auditRowIds: [],
+    auditRowIdsUnconfirmed: [],
     writesAttempted: [],
     git: deps.git,
   };
@@ -270,27 +296,39 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
     if (r) return refused(r);
   }
 
-  // --- no change -------------------------------------------------------------
-  if (!plan.changed) {
+  // --- no change (grant only) -------------------------------------------------
+  // A revoke whose claim is already absent is NOT "no change": the session
+  // revocation may be outstanding (e.g. a previous run ended with
+  // sessions_revoke_failed), so it continues below as a sessions-only run.
+  const sessionsOnly = args.operation === "revoke" && !plan.changed;
+  if (!plan.changed && !sessionsOnly) {
     result.status = "no_change";
     result.exitCode = 0;
     result.code = null;
     result.message = "No change: the claims already match the intended state. Nothing was written.";
+    if (result.usersDocRole.before !== intendedRole) {
+      result.message += ` Note: users/{uid}.role is ${JSON.stringify(result.usersDocRole.before)} (display-only mirror; this tool does not repair it on a no-change run).`;
+    }
     deps.log(result.message);
     return result;
   }
+  const claimWrite: ClaimWritePlan = sessionsOnly ? "skip_already_absent" : "write";
+  // On a sessions-only re-run the role mirror is written only if it is still outstanding.
+  const writeRole = !sessionsOnly || result.usersDocRole.before !== intendedRole;
+  result.claimWrite = claimWrite;
+  if (sessionsOnly) {
+    deps.log("Claim write:    SKIPPED - the admin claim is already absent; claims will NOT be rewritten.");
+  }
+  if (args.operation === "revoke") {
+    deps.log("Sessions:       the target's refresh tokens WILL be revoked (mandatory on revoke; signs the user out everywhere).");
+  }
 
-  const expected = expectedConfirmation({
-    operation: args.operation,
-    projectId: ctx.projectId,
-    targetUid: args.targetUid,
-    revokeSessions: args.revokeSessions,
-  });
+  const expected = expectedConfirmation({ operation: args.operation, projectId: ctx.projectId, targetUid: args.targetUid });
 
   // --- dry run (default) -----------------------------------------------------
   if (!args.execute) {
     result.status = "dry_run";
-    result.exitCode = 0;
+    result.exitCode = 2;
     result.expectedConfirmation = expected;
     result.message = "Dry run: nothing was written to Firebase.";
     deps.log(result.message);
@@ -306,6 +344,8 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
   }
 
   // --- execute ---------------------------------------------------------------
+  // From here on every exit is 0 (completed and verified) or 3 (a write call
+  // was issued and the operation is not verified complete). Never 2.
   const auditBase = {
     requestId: ctx.requestId,
     projectId: ctx.projectId,
@@ -317,14 +357,18 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
     targetEmail: result.targetEmail ?? undefined,
     beforeClaims: plan.before,
     usersDocRoleBefore: result.usersDocRole.before,
-    revokeSessions: args.revokeSessions,
+    claimWrite,
     credentialSource: ctx.credential.source,
     credentialClientEmailMasked: ctx.credential.clientEmailMasked,
     gitSha: deps.git.sha as string,
     confirmClaim: expected,
   };
 
+  let failure: PostWriteFailure | null = null;
+  let failureDetail: string | undefined;
+
   const attemptId = auditDocId(ctx.requestId, "attempt");
+  result.writesAttempted.push("audit_attempt_row");
   try {
     await deps.store.createAuditRow(attemptId, buildClaimAuditRecord({
       ...auditBase,
@@ -334,23 +378,31 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
       usersDocRoleAfter: intendedRole,
     }));
   } catch {
-    return refused(refuse("audit_unavailable", "Refusing: the attempt audit row could not be created. No claim was written."));
+    // The create call was issued; whether the row exists is unknown. This is
+    // an incomplete WRITE outcome (exit 3), not a refusal: nothing guarantees
+    // that zero database writes happened.
+    result.auditRowIdsUnconfirmed.push(attemptId);
+    return incomplete(
+      result,
+      "audit_attempt_failed",
+      "attempt audit row creation failed; the row may or may not exist. No claim, session or role write was issued",
+      deps,
+    );
   }
   result.auditRowIds.push(attemptId);
 
-  let failure: PostWriteFailure | null = null;
-  let failureDetail: string | undefined;
-
-  result.writesAttempted.push("custom_claims");
-  try {
-    await deps.auth.writeCustomClaims(args.targetUid, plan.after);
-  } catch (e) {
-    failure = "mint_failed";
-    const code = errorCode(e);
-    failureDetail = typeof code === "string" ? code : "unknown error";
+  if (claimWrite === "write") {
+    result.writesAttempted.push("custom_claims");
+    try {
+      await deps.auth.writeCustomClaims(args.targetUid, plan.after);
+    } catch (e) {
+      failure = "mint_failed";
+      const code = errorCode(e);
+      failureDetail = typeof code === "string" ? code : "unknown error";
+    }
   }
 
-  if (!failure && args.operation === "revoke" && args.revokeSessions === "yes") {
+  if (!failure && args.operation === "revoke") {
     result.writesAttempted.push("revoke_refresh_tokens");
     try {
       await deps.auth.revokeRefreshTokens(args.targetUid);
@@ -359,7 +411,7 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
     }
   }
 
-  if (!failure) {
+  if (!failure && writeRole) {
     result.writesAttempted.push("users_doc_role");
     try {
       await deps.store.writeUsersDocRole(args.targetUid, intendedRole);
@@ -391,7 +443,7 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
     if (!v.ok) {
       failure = "verification_failed";
       failureDetail = v.detail;
-    } else if (args.operation === "revoke" && args.revokeSessions === "yes" && !verifySessionsRevoked(readBack.tokensValidAfterTime, preWriteTokensValidAfterTime)) {
+    } else if (args.operation === "revoke" && !verifySessionsRevoked(readBack.tokensValidAfterTime, preWriteTokensValidAfterTime)) {
       failure = "verification_failed";
       failureDetail = "tokensValidAfterTime did not advance";
     } else if (result.usersDocRole.after !== intendedRole) {
@@ -400,8 +452,9 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
     }
   }
 
-  const outcome: AuditOutcome = failure ?? "applied";
+  const outcome: AuditOutcome = failure ?? (sessionsOnly ? "claim_already_absent_sessions_revoked" : "applied");
   const outcomeId = auditDocId(ctx.requestId, "outcome");
+  result.writesAttempted.push("audit_outcome_row");
   try {
     await deps.store.createAuditRow(outcomeId, buildClaimAuditRecord({
       ...auditBase,
@@ -414,23 +467,39 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
     }));
     result.auditRowIds.push(outcomeId);
   } catch {
+    result.auditRowIdsUnconfirmed.push(outcomeId);
     if (!failure) failure = "audit_outcome_missing";
     deps.log(`AUDIT OUTCOME MISSING for ${ctx.requestId}: reconcile from the local result file and the attempt row.`);
   }
 
-  if (failure) {
-    result.status = "failed_after_write";
-    result.exitCode = 3;
-    result.code = failure;
-    result.message = `Write attempted but not verified (${failure}${failureDetail ? `: ${failureDetail}` : ""}). Do not assume either state; inspect the read-back.`;
+  if (failure) return incomplete(result, failure, failureDetail, deps);
+
+  result.outcome = outcome;
+  result.exitCode = 0;
+  result.code = null;
+  if (outcome === "claim_already_absent_sessions_revoked") {
+    result.status = "claim_already_absent_sessions_revoked";
+    result.message = "Completed: the admin claim was already absent, so no claim was written. The outstanding session revocation was performed and verified (refresh tokens revoked; tokensValidAfterTime advanced). Already-issued ID tokens stay valid until they expire (up to 1 hour).";
   } else {
     result.status = "applied";
-    result.exitCode = 0;
-    result.code = null;
     result.message = args.operation === "grant"
       ? "Applied and verified. The user must obtain a fresh ID token (sign out and in) before the claim is visible."
-      : `Applied and verified. Sessions revoked: ${args.revokeSessions}.`;
+      : "Applied and verified: admin removed and refresh tokens revoked (tokensValidAfterTime advanced). Already-issued ID tokens stay valid until they expire (up to 1 hour).";
   }
+  deps.log(result.message);
+  return result;
+}
+
+/** Re-run guidance printed on every exit-3 outcome. */
+export const RERUN_IS_SAFE =
+  "Re-running the same command is safe: it never re-applies a claim already in place, never changes any other claim, and a revoke re-run whose claim is already absent only completes the outstanding session revocation (no claim write).";
+
+function incomplete<TS>(result: RunResult, code: PostWriteFailure, detail: string | undefined, deps: ExecutionDeps<TS>): RunResult {
+  result.status = "incomplete";
+  result.exitCode = 3;
+  result.code = code;
+  result.outcome = code;
+  result.message = `INCOMPLETE (${code}${detail ? `: ${detail}` : ""}). A write was attempted and the operation is not verified complete; inspect the read-back before assuming either state. ${RERUN_IS_SAFE}`;
   deps.log(result.message);
   return result;
 }

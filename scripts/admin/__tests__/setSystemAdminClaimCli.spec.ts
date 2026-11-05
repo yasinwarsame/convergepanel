@@ -3,7 +3,7 @@
  * with an in-memory filesystem and a fake Firebase factory (no network, no
  * real project), plus static checks over the tracked scripts.
  */
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -12,8 +12,12 @@ import { runCli, realIo, type CliIo, type FirebaseFactory, type FirebaseHandle }
 import { REFUSAL_CODES, checkResultDirStat, expectedConfirmation } from "../../../lib/admin/systemAdminClaimSafety";
 import type { UserRecordLike } from "../../../lib/admin/systemAdminClaimSafety";
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const readOnly = require("../../check-admin-claims.js");
+
+// The underlying CommonJS fs object (the `import * as fs` binding is a getter
+// wrapper that cannot be spied on); both the script and check-admin-claims.js
+// resolve openSync through it at call time.
+const rawFs: typeof fs = jest.requireActual("node:fs");
 
 const REPO = path.resolve(__dirname, "..", "..", "..");
 const PROJECT = "cp-rehearsal-1";
@@ -32,6 +36,7 @@ type Env = {
   factoryCalls: number;
   writes: string[];
   users: Map<string, UserRecordLike>;
+  role: string | null;
 };
 
 function makeEnv(): Env {
@@ -50,6 +55,7 @@ function makeEnv(): Env {
       [TARGET, { uid: TARGET, email: "t@example.com", disabled: false, customClaims: { admin: false, keep: 1 } }],
       [OPERATOR, { uid: OPERATOR, email: "op@example.com", disabled: false, customClaims: { admin: true } }],
     ]),
+    role: "user",
   };
 }
 
@@ -80,6 +86,7 @@ function fakeIo(e: Env, over: Partial<CliIo> = {}): CliIo {
 }
 
 function fakeFactory(e: Env, projectOverride?: string, throwOn?: string): FirebaseFactory {
+  let tva = 0;
   return (input) => {
     e.factoryCalls++;
     expect(input.privateKey).toBe(FAKE_PRIVATE_KEY);
@@ -102,15 +109,19 @@ function fakeFactory(e: Env, projectOverride?: string, throwOn?: string): Fireba
           e.users.get(uid)!.customClaims = claims;
         },
         revokeRefreshTokens: async (uid) => {
+          if (throwOn === "revoke") throw new Error("revoke down");
           e.writes.push(`revoke:${uid}`);
+          e.users.get(uid)!.tokensValidAfterTime = new Date(Date.parse("2026-11-05T10:00:00Z") + ++tva * 1000).toUTCString();
         },
       },
       store: {
-        readUsersDocRole: async () => (e.writes.includes(`role:${TARGET}`) ? "admin" : "user"),
-        writeUsersDocRole: async (uid) => {
+        readUsersDocRole: async () => e.role,
+        writeUsersDocRole: async (uid, role) => {
           e.writes.push(`role:${uid}`);
+          e.role = role;
         },
         createAuditRow: async (id, rec) => {
+          if (throwOn === "attempt" && id.endsWith(":attempt")) throw new Error("audit down");
           e.writes.push(`audit:${id}:${JSON.stringify(rec)}`);
         },
       },
@@ -122,7 +133,7 @@ function fakeFactory(e: Env, projectOverride?: string, throwOn?: string): Fireba
 }
 
 const BASE = [`--confirm-project=${PROJECT}`, "--credentials=/keys/sa.json", `--target-uid=${TARGET}`, "--operation=grant"];
-const CONFIRM = expectedConfirmation({ operation: "grant", projectId: PROJECT, targetUid: TARGET, revokeSessions: null });
+const CONFIRM = expectedConfirmation({ operation: "grant", projectId: PROJECT, targetUid: TARGET });
 const RESULT = "/tmp/convergepanel-operator/system-admin-claim-req_1793872800000_abc123.json";
 
 const safeParse = (t: string) => {
@@ -205,9 +216,10 @@ describe("runCli — refusals before any credential or Firebase use", () => {
     expect(r.all).not.toContain("FAKEKEYMAT");
   });
 
-  it("CONTROL: the unmutated environment reaches Firebase", async () => {
+  it("CONTROL: the unmutated environment reaches Firebase (dry run => exit 2)", async () => {
     const r = await run(BASE);
-    expect(r.code).toBe(0);
+    expect(r.code).toBe(2);
+    expect(r.result).toMatchObject({ status: "dry_run", writeAttempted: false });
     expect(r.e.factoryCalls).toBe(1);
   });
 
@@ -262,11 +274,11 @@ describe("runCli — symlinked secrets and the default result directory", () => 
 });
 
 describe("runCli — dry run and execute end to end (fake Firebase)", () => {
-  it("dry run: exit 0, ZERO Firebase writes, result file phase dry-run with the confirmation string", async () => {
+  it("dry run: exit 2, ZERO Firebase writes, result file phase dry-run with the confirmation string", async () => {
     const r = await run([...BASE, "--operator-id-token-file=/keys/token"]);
-    expect(r.code).toBe(0);
+    expect(r.code).toBe(2);
     expect(r.e.writes).toEqual([]);
-    expect(r.result).toMatchObject({ phase: "dry-run", status: "dry_run", exitCode: 0, confirmProject: PROJECT });
+    expect(r.result).toMatchObject({ phase: "dry-run", status: "dry_run", exitCode: 2, writeAttempted: false, confirmProject: PROJECT });
     expect(r.result.run.expectedConfirmation).toBe(CONFIRM);
     expect(r.result.credential).toEqual({ source: "explicit-key-file", projectId: PROJECT, clientEmailMasked: "fire…@…" });
     expect(r.e.out).toContain(`Result file: ${RESULT}`);
@@ -307,6 +319,64 @@ describe("runCli — dry run and execute end to end (fake Firebase)", () => {
     expect(e.writes.some((w) => w.startsWith("claims:"))).toBe(true);
     expect(r.code).toBe(3);
     expect(r.result).toMatchObject({ status: "unexpected_error", writeAttempted: true });
+    expect(r.result.message).toMatch(/Re-running the same command is safe/);
+  });
+
+  it("attempt audit row create throwing => exit 3 (outcome unknown), writeAttempted true, never 2", async () => {
+    const r = await run([...BASE, "--operator-id-token-file=/keys/token", "--execute", `--confirm-claim=${CONFIRM}`], makeEnv(), { throwOn: "attempt" });
+    expect(r.code).toBe(3);
+    expect(r.result).toMatchObject({ phase: "executed", status: "incomplete", code: "audit_attempt_failed", exitCode: 3, writeAttempted: true });
+    expect(r.e.writes).toEqual([]);
+    expect(r.e.err.join("\n")).toMatch(/Re-running the same command is safe/);
+  });
+
+  describe("revoke (sessions always revoked)", () => {
+    const REVOKE_CONFIRM = expectedConfirmation({ operation: "revoke", projectId: PROJECT, targetUid: TARGET });
+    const REVOKE = [
+      `--confirm-project=${PROJECT}`, "--credentials=/keys/sa.json", `--target-uid=${TARGET}`, "--operation=revoke", "--allow-claim-reduction",
+      "--operator-id-token-file=/keys/token",
+    ];
+    const adminTarget = () => {
+      const e = makeEnv();
+      e.users.get(TARGET)!.customClaims = { admin: true, keep: 1 };
+      e.users.get(TARGET)!.tokensValidAfterTime = "Thu, 05 Nov 2026 09:00:00 GMT";
+      e.users.set("OtherAdmin", { uid: "OtherAdmin", disabled: false, customClaims: { admin: true } });
+      e.role = "admin";
+      return e;
+    };
+    it("the retired --revoke-sessions flag is refused before any file or Firebase use", async () => {
+      const e = adminTarget();
+      const r = await run([...REVOKE, "--revoke-sessions=no"], e);
+      expect(r.code).toBe(2);
+      expect(e.err.join()).toContain("[unknown_flag]");
+      expect([e.factoryCalls, e.created.length]).toEqual([0, 0]);
+    });
+    it("execute: claim removed, others kept, refresh tokens revoked, exit 0", async () => {
+      const e = adminTarget();
+      const r = await run([...REVOKE, "--execute", `--confirm-claim=${REVOKE_CONFIRM}`], e);
+      expect(r.code).toBe(0);
+      expect(r.result).toMatchObject({ status: "applied", exitCode: 0, run: { sessionRevocation: "required", outcome: "applied" } });
+      expect(e.users.get(TARGET)!.customClaims).toEqual({ keep: 1 });
+      expect(e.writes).toContain(`revoke:${TARGET}`);
+    });
+    it("sessions failure => exit 3 INCOMPLETE; the SAME command re-run completes sessions without a claim write, exit 0", async () => {
+      const e = adminTarget();
+      const argv = [...REVOKE, "--execute", `--confirm-claim=${REVOKE_CONFIRM}`];
+      const r1 = await runCli({ argv, env: { NODE_ENV: "development" }, repoRoot: REPO, io: fakeIo(e), firebase: fakeFactory(e, undefined, "revoke") });
+      expect(r1).toBe(3);
+      expect(JSON.parse(e.results.get(RESULT)!)).toMatchObject({ status: "incomplete", code: "sessions_revoke_failed", writeAttempted: true });
+      const claimWritesBefore = e.writes.filter((w) => w.startsWith("claims:")).length;
+      const r2 = await runCli({
+        argv, env: { NODE_ENV: "development" }, repoRoot: REPO,
+        io: fakeIo(e, { randomPart: () => "retry1" }), firebase: fakeFactory(e),
+      });
+      expect(r2).toBe(0);
+      const res2 = JSON.parse(e.results.get(RESULT.replace("abc123", "retry1"))!);
+      expect(res2).toMatchObject({ phase: "executed", status: "claim_already_absent_sessions_revoked", exitCode: 0, run: { claimWrite: "skip_already_absent" } });
+      expect(e.writes.filter((w) => w.startsWith("claims:")).length).toBe(claimWritesBefore);
+      expect(e.writes).toContain(`revoke:${TARGET}`);
+      expect(e.users.get(TARGET)!.customClaims).toEqual({ keep: 1 });
+    });
   });
 });
 
@@ -356,6 +426,33 @@ describe("realIo — files on disk (temp dirs only)", () => {
     expect(io.readSecretFile(dir)).toMatchObject({ isSymlink: false, isFile: false, body: null });
   });
 
+  it("secret reads: a FIFO is refused WITHOUT being opened (open() on a FIFO would block)", () => {
+    const fifo = path.join(dir, "fifo");
+    execFileSync("mkfifo", [fifo]);
+    const openSpy = jest.spyOn(rawFs, "openSync");
+    try {
+      expect(realIo(REPO).readSecretFile(fifo)).toMatchObject({ isSymlink: false, isFile: false, body: null });
+      expect(openSpy.mock.calls.filter(([p]) => p === fifo)).toEqual([]);
+    } finally {
+      openSpy.mockRestore();
+    }
+  });
+
+  it("secret reads: the single open uses O_NOFOLLOW | O_NONBLOCK (a FIFO swapped in after lstat cannot block)", () => {
+    const real = path.join(dir, "k.json");
+    fs.writeFileSync(real, "BODY", { mode: 0o600 });
+    const openSpy = jest.spyOn(rawFs, "openSync");
+    try {
+      realIo(REPO).readSecretFile(real);
+      const flags = openSpy.mock.calls.filter(([p]) => p === real).map(([, f]) => f as number);
+      expect(flags).toHaveLength(1);
+      expect(flags[0] & fs.constants.O_NONBLOCK).toBe(fs.constants.O_NONBLOCK);
+      expect(flags[0] & fs.constants.O_NOFOLLOW).toBe(fs.constants.O_NOFOLLOW);
+    } finally {
+      openSpy.mockRestore();
+    }
+  });
+
   it("the default result directory is outside the repo, owned by us, mode 0700, and passes checkResultDirStat", () => {
     const io = realIo(REPO);
     const { dir: d, stat } = io.prepareDefaultResultDir();
@@ -385,6 +482,17 @@ describe("read-only loadKey (real temp files)", () => {
     expect(readOnly.loadKey(link, PROJECT)).toMatchObject({ ok: false, code: "credentials_file_symlink" });
     fs.chmodSync(k, 0o644);
     expect(readOnly.loadKey(k, PROJECT)).toMatchObject({ ok: false, code: "credentials_file_unsafe" });
+  });
+  it("refuses a FIFO key path with credentials_file_unsafe without opening it", () => {
+    const fifo = path.join(dir, "fifo");
+    execFileSync("mkfifo", [fifo]);
+    const openSpy = jest.spyOn(rawFs, "openSync");
+    try {
+      expect(readOnly.loadKey(fifo, PROJECT)).toMatchObject({ ok: false, code: "credentials_file_unsafe" });
+      expect(openSpy.mock.calls.filter(([p]) => p === fifo)).toEqual([]);
+    } finally {
+      openSpy.mockRestore();
+    }
   });
   it("runAsCli: an unexpected rejection prints a generic line and exits 1 (no message, no stack)", async () => {
     const lines: string[] = [];

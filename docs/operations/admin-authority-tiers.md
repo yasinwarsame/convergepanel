@@ -166,7 +166,9 @@ Two ways to enroll a SYSTEM_ADMIN. Choose ONE deliberately:
 with an explicitly named service-account key file. It is a dry run unless given
 `--execute` plus an exact typed confirmation, preserves every other custom
 claim, refuses disabled targets, and writes create-only `admin_audit_logs`
-attempt/outcome rows. Runbook, CLI and the open revocation-session decision:
+attempt/outcome rows. A revoke always revokes the target's refresh tokens
+(owner policy); already-issued ID tokens remain valid up to about an hour on
+routes that do not check revocation. Runbook, CLI, exit codes and retry:
 `docs/operations/system-admin-claim-script.md`. The four older minting scripts
 were retired. `ADMIN_SECRET` never needs to hold a live value
 for enrollment, so the bootstrap route is not part of the enrollment story at

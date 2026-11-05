@@ -33,6 +33,8 @@
 
 import * as nodePath from "node:path";
 
+import type { AdminActionType } from "./auditLog";
+
 // ---------------------------------------------------------------------------
 // Constants
 
@@ -75,8 +77,6 @@ export type RefusalCode =
   | "operation_invalid"
   | "target_missing_arg"
   | "target_uid_invalid"
-  | "revoke_sessions_missing"
-  | "revoke_sessions_invalid"
   | "reduction_flag_missing"
   | "confirmation_missing"
   // local files
@@ -112,9 +112,8 @@ export type RefusalCode =
   | "bootstrap_not_first"
   | "self_revoke"
   | "last_admin"
-  // confirmation and audit
-  | "confirmation_mismatch"
-  | "audit_unavailable";
+  // confirmation
+  | "confirmation_mismatch";
 
 /** Every refusal code, for exhaustive test coverage. */
 export const REFUSAL_CODES: readonly RefusalCode[] = [
@@ -122,7 +121,7 @@ export const REFUSAL_CODES: readonly RefusalCode[] = [
   "unknown_flag", "duplicate_flag", "positional_arg", "flag_value_missing", "flag_value_unexpected",
   "flag_conflict", "project_confirmation_missing", "project_id_invalid", "credentials_missing",
   "operation_missing", "operation_invalid", "target_missing_arg", "target_uid_invalid",
-  "revoke_sessions_missing", "revoke_sessions_invalid", "reduction_flag_missing", "confirmation_missing",
+  "reduction_flag_missing", "confirmation_missing",
   "result_path_invalid", "result_path_inside_repo", "result_dir_unsafe", "credentials_file_unreadable", "credentials_file_unsafe",
   "credentials_file_symlink",
   "credentials_invalid", "project_confirmation_mismatch", "operator_token_file_unsafe",
@@ -131,11 +130,17 @@ export const REFUSAL_CODES: readonly RefusalCode[] = [
   "claims_invalid", "claims_prototype_key", "unrelated_claims_changed", "reserved_claim", "claims_too_large",
   "operator_token_missing", "operator_token_invalid", "operator_token_revoked", "operator_not_system_admin",
   "admin_enumeration_failed", "bootstrap_not_first", "self_revoke", "last_admin",
-  "confirmation_mismatch", "audit_unavailable",
+  "confirmation_mismatch",
 ];
 
-/** Outcomes that can only happen AFTER a Firebase write was attempted. */
+/**
+ * Outcomes that can only happen AFTER a Firebase write call was issued
+ * (exit 3). `audit_attempt_failed` is the first write call itself failing: its
+ * outcome is unknown (the create may have landed before the error), so it is
+ * never reported as "nothing written".
+ */
 export type PostWriteFailure =
+  | "audit_attempt_failed"
   | "mint_failed"
   | "sessions_revoke_failed"
   | "users_doc_failed"
@@ -180,15 +185,12 @@ export function checkRuntimeEnvironment(env: Readonly<Record<string, string | un
 // Argv
 
 export type ClaimOperation = "grant" | "revoke";
-export type RevokeSessions = "yes" | "no";
 
 export type ParsedClaimArgs = {
   confirmProject: string;
   credentialsPath: string;
   targetUid: string;
   operation: ClaimOperation;
-  /** Required on revoke, refused on grant. Owner policy is UNRESOLVED, so there is no default. */
-  revokeSessions: RevokeSessions | null;
   operatorIdTokenFile: string | null;
   bootstrapFirstAdmin: boolean;
   allowClaimReduction: boolean;
@@ -202,7 +204,6 @@ const VALUE_FLAGS = [
   "--credentials",
   "--target-uid",
   "--operation",
-  "--revoke-sessions",
   "--operator-id-token-file",
   "--confirm-claim",
   "--result-file",
@@ -230,6 +231,12 @@ export function parseSetSystemAdminClaimArgs(argv: readonly string[]): { ok: tru
     const name = eq === -1 ? token : token.slice(0, eq);
     const isValueFlag = (VALUE_FLAGS as readonly string[]).includes(name);
     const isBooleanFlag = (BOOLEAN_FLAGS as readonly string[]).includes(name);
+    if (name === "--revoke-sessions") {
+      return refuse(
+        "unknown_flag",
+        "Refusing --revoke-sessions: the flag was removed. Revoking admin ALWAYS revokes the target's refresh tokens (owner policy); there is no opt-out.",
+      );
+    }
     if (!isValueFlag && !isBooleanFlag) {
       return refuse("unknown_flag", `Refusing unknown flag ${name}. Allowed: ${ALLOWED_FLAGS.join(", ")}.`);
     }
@@ -269,24 +276,11 @@ export function parseSetSystemAdminClaimArgs(argv: readonly string[]): { ok: tru
     return refuse("target_uid_invalid", "Refusing: --target-uid must be 1-128 characters of [A-Za-z0-9_-].");
   }
 
-  const revokeRaw = values.get("--revoke-sessions");
-  let revokeSessions: RevokeSessions | null = null;
   if (operation === "revoke") {
-    if (revokeRaw === undefined) {
-      return refuse(
-        "revoke_sessions_missing",
-        "Refusing: --operation=revoke requires an explicit --revoke-sessions=yes|no. There is no default (owner policy decision; see docs/operations/system-admin-claim-script.md).",
-      );
-    }
-    if (revokeRaw !== "yes" && revokeRaw !== "no") {
-      return refuse("revoke_sessions_invalid", "Refusing: --revoke-sessions must be exactly yes or no.");
-    }
-    revokeSessions = revokeRaw;
     if (!booleans.has("--allow-claim-reduction")) {
       return refuse("reduction_flag_missing", "Refusing: removing the admin claim requires --allow-claim-reduction.");
     }
   } else {
-    if (revokeRaw !== undefined) return refuse("flag_conflict", "Refusing: --revoke-sessions applies only to --operation=revoke.");
     if (booleans.has("--allow-claim-reduction")) {
       return refuse("flag_conflict", "Refusing: --allow-claim-reduction applies only to --operation=revoke.");
     }
@@ -317,7 +311,6 @@ export function parseSetSystemAdminClaimArgs(argv: readonly string[]): { ok: tru
       credentialsPath,
       targetUid,
       operation,
-      revokeSessions,
       operatorIdTokenFile,
       bootstrapFirstAdmin,
       allowClaimReduction: booleans.has("--allow-claim-reduction"),
@@ -587,18 +580,19 @@ export function formatDiff(plan: ClaimPlan): string[] {
 
 /**
  * The exact typed confirmation. It binds the operation, the claim result, the
- * project and the UID (and, for revoke, the session decision), so a string
- * copied from a rehearsal on another project or another user cannot authorise
- * this write.
+ * project and the UID (and, for revoke, the mandatory session revocation), so
+ * a string copied from a rehearsal on another project or another user cannot
+ * authorise this write. A revoke re-run whose claim is already absent (it only
+ * completes the outstanding session revocation) uses the SAME string, so a
+ * re-run of the exact same command is always accepted.
  */
 export function expectedConfirmation(args: {
   operation: ClaimOperation;
   projectId: string;
   targetUid: string;
-  revokeSessions: RevokeSessions | null;
 }): string {
   if (args.operation === "grant") return `grant:admin:true:${args.projectId}:${args.targetUid}`;
-  return `revoke:admin:removed:sessions-${args.revokeSessions ?? "unset"}:${args.projectId}:${args.targetUid}`;
+  return `revoke:admin:removed:sessions-revoked:${args.projectId}:${args.targetUid}`;
 }
 
 export function checkConfirmation(provided: string | null, expected: string): Refusal | null {
@@ -728,10 +722,45 @@ export function verifySessionsRevoked(afterTokensValidAfterTime: string | undefi
 // ---------------------------------------------------------------------------
 // Audit record (matches lib/admin/auditLog.ts#AuditLogEntry)
 
-export type ClaimAuditActionType = "GRANT_SYSTEM_ADMIN_CLAIM" | "REVOKE_SYSTEM_ADMIN_CLAIM";
+/**
+ * actionType separates an ATTEMPT from a COMPLETED privilege change, so a row
+ * listed on its own (the admin user-details page shows actionType) can never
+ * be read as "admin was granted/revoked" unless that was verified:
+ *   - SYSTEM_ADMIN_CLAIM_ATTEMPT   every attempt row (written BEFORE any change)
+ *   - GRANT_/REVOKE_SYSTEM_ADMIN_CLAIM   outcome row, change applied AND verified
+ *   - REVOKE_SYSTEM_ADMIN_SESSIONS outcome row, claim was already absent; this
+ *                                  run only revoked (and verified) sessions
+ *   - SYSTEM_ADMIN_CLAIM_INCOMPLETE outcome row, anything not verified
+ */
+export type ClaimAuditActionType =
+  | "SYSTEM_ADMIN_CLAIM_ATTEMPT"
+  | "GRANT_SYSTEM_ADMIN_CLAIM"
+  | "REVOKE_SYSTEM_ADMIN_CLAIM"
+  | "REVOKE_SYSTEM_ADMIN_SESSIONS"
+  | "SYSTEM_ADMIN_CLAIM_INCOMPLETE";
 export type AuthorizationMode = "operator-id-token" | "first-admin-bootstrap";
 export type AuditPhase = "attempt" | "outcome";
-export type AuditOutcome = "applied" | PostWriteFailure;
+/** Completed outcomes (exit 0) and incomplete ones (exit 3). */
+export type CompletedOutcome = "applied" | "claim_already_absent_sessions_revoked";
+export type AuditOutcome = CompletedOutcome | PostWriteFailure;
+/** How the claim is handled by this run: written, or (revoke re-run) already absent and NOT rewritten. */
+export type ClaimWritePlan = "write" | "skip_already_absent";
+
+// Compile-time: every claim action type is a declared AdminActionType.
+type ClaimActionTypesAreAdminActionTypes = ClaimAuditActionType extends AdminActionType ? true : never;
+const claimActionTypesAreAdminActionTypes: ClaimActionTypesAreAdminActionTypes = true;
+void claimActionTypesAreAdminActionTypes;
+
+export function isCompletedOutcome(o: AuditOutcome): o is CompletedOutcome {
+  return o === "applied" || o === "claim_already_absent_sessions_revoked";
+}
+
+export function claimAuditActionType(phase: AuditPhase, operation: ClaimOperation, outcome?: AuditOutcome): ClaimAuditActionType {
+  if (phase === "attempt") return "SYSTEM_ADMIN_CLAIM_ATTEMPT";
+  if (outcome === "applied") return operation === "grant" ? "GRANT_SYSTEM_ADMIN_CLAIM" : "REVOKE_SYSTEM_ADMIN_CLAIM";
+  if (outcome === "claim_already_absent_sessions_revoked" && operation === "revoke") return "REVOKE_SYSTEM_ADMIN_SESSIONS";
+  return "SYSTEM_ADMIN_CLAIM_INCOMPLETE";
+}
 
 export function generateRequestId(nowMs: number, randomPart: string): string {
   return `req_${nowMs}_${randomPart}`;
@@ -765,7 +794,7 @@ export function buildClaimAuditRecord<TS>(input: {
   afterClaims: Claims;
   usersDocRoleBefore: string | null;
   usersDocRoleAfter: string | null;
-  revokeSessions: RevokeSessions | null;
+  claimWrite: ClaimWritePlan;
   credentialSource: ServiceAccountEvidence["source"];
   credentialClientEmailMasked: string;
   gitSha: string;
@@ -779,12 +808,20 @@ export function buildClaimAuditRecord<TS>(input: {
     authorization: input.authorization,
     credentialSource: input.credentialSource,
     credentialClientEmailMasked: input.credentialClientEmailMasked,
-    revokeSessions: input.revokeSessions,
+    requestedOperation: input.operation,
+    claimWrite: input.claimWrite,
+    // Revoke ALWAYS revokes refresh tokens (owner policy); grant never does.
+    sessionRevocation: input.operation === "revoke" ? "required" : "not_applicable",
     gitSha: input.gitSha,
     confirmClaim: input.confirmClaim,
   };
-  if (input.phase === "outcome") {
-    metadata.outcome = input.outcome ?? "verification_failed";
+  // The attempt row's `after` is the INTENDED state, never evidence that it
+  // was reached; only an outcome row with completed === true is.
+  const outcome: AuditOutcome | undefined = input.phase === "outcome" ? (input.outcome ?? "verification_failed") : undefined;
+  metadata.completed = outcome !== undefined && isCompletedOutcome(outcome);
+  metadata.afterSemantics = input.phase === "attempt" ? "intended-not-applied" : "read-back";
+  if (outcome !== undefined) {
+    metadata.outcome = outcome;
     if (input.outcomeDetail) metadata.outcomeDetail = input.outcomeDetail;
   }
   const record: {
@@ -801,7 +838,7 @@ export function buildClaimAuditRecord<TS>(input: {
   } = {
     adminUid: input.adminUid,
     targetUid: input.targetUid,
-    actionType: input.operation === "grant" ? "GRANT_SYSTEM_ADMIN_CLAIM" : "REVOKE_SYSTEM_ADMIN_CLAIM",
+    actionType: claimAuditActionType(input.phase, input.operation, outcome),
     before: { customClaims: input.beforeClaims, usersDocRole: input.usersDocRoleBefore },
     after: { customClaims: input.afterClaims, usersDocRole: input.usersDocRoleAfter },
     createdAt: input.createdAt,

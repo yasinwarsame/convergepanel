@@ -1,8 +1,11 @@
 /**
  * Orchestration tests over call-counting fakes. No Firebase, no network.
- * Proves: dry run performs zero writes; the attempt audit row precedes the
- * claim write and its failure prevents the write; read-back and the outcome
- * row follow; refusals happen before any write.
+ * Proves: dry run performs zero writes (exit 2); the attempt audit row
+ * precedes the claim write and its failure prevents the write but is exit 3
+ * (outcome unknown), never 2; read-back and the outcome row follow; refusals
+ * happen before any write; every revoke revokes sessions; a revoke re-run whose
+ * claim is already absent completes the session revocation without rewriting
+ * claims.
  */
 import {
   runSystemAdminClaim,
@@ -122,21 +125,24 @@ function args(extra: string[], op: "grant" | "revoke" = "grant"): ParsedClaimArg
   if (!r.ok) throw new Error(`fixture argv refused: ${r.code}`);
   return r.args;
 }
-const ctx = (a: ParsedClaimArgs) => ({
+const ctx = (a: ParsedClaimArgs, requestId = "req_1_abc") => ({
   args: a,
   projectId: PROJECT,
-  requestId: "req_1_abc",
+  requestId,
   credential: { source: "explicit-key-file" as const, clientEmailMasked: "fire…@…" },
 });
-const GRANT_CONFIRM = expectedConfirmation({ operation: "grant", projectId: PROJECT, targetUid: TARGET, revokeSessions: null });
+const GRANT_CONFIRM = expectedConfirmation({ operation: "grant", projectId: PROJECT, targetUid: TARGET });
+const REVOKE_CONFIRM = expectedConfirmation({ operation: "revoke", projectId: PROJECT, targetUid: TARGET });
+const REVOKE_EXEC = ["--operator-id-token-file=/t", "--execute", `--confirm-claim=${REVOKE_CONFIRM}`];
 const writeCalls = (w: World) => w.calls.filter((c) => /^(writeCustomClaims|revokeRefreshTokens|writeRole|createAuditRow)/.test(c));
 
 describe("dry run (default)", () => {
-  it("performs ZERO writes and prints the exact confirmation", async () => {
+  it("performs ZERO writes, exits 2 (not completed), and prints the exact confirmation", async () => {
     const w = world();
     const r = await runSystemAdminClaim(ctx(args(["--operator-id-token-file=/t"])), deps(w));
     expect(r.status).toBe("dry_run");
-    expect(r.exitCode).toBe(0);
+    expect(r.exitCode).toBe(2);
+    expect(r.writesAttempted).toEqual([]);
     expect(w.writes).toBe(0);
     expect(writeCalls(w)).toEqual([]);
     expect(r.expectedConfirmation).toBe(GRANT_CONFIRM);
@@ -155,8 +161,11 @@ describe("dry run (default)", () => {
     const w = world();
     w.users.get(TARGET)!.customClaims = { admin: true, plan: "pro" };
     w.users.set(OTHER_ADMIN, { uid: OTHER_ADMIN, disabled: false, customClaims: { admin: true } });
-    const r = await runSystemAdminClaim(ctx(args(["--revoke-sessions=yes"], "revoke")), deps(w));
+    const r = await runSystemAdminClaim(ctx(args([], "revoke")), deps(w));
     expect(r.status).toBe("dry_run");
+    expect(r.exitCode).toBe(2);
+    expect(r.expectedConfirmation).toBe(`revoke:admin:removed:sessions-revoked:${PROJECT}:${TARGET}`);
+    expect(w.calls).toContain("log:Sessions:       the target's refresh tokens WILL be revoked (mandatory on revoke; signs the user out everywhere).");
     expect(w.writes).toBe(0);
   });
 });
@@ -199,16 +208,13 @@ describe("execute — happy paths", () => {
     expect(attempt.after).toEqual({ customClaims: { admin: true, plan: "pro" }, usersDocRole: "admin" });
   });
 
-  it("revoke with --revoke-sessions=yes removes only admin, revokes tokens, verifies tokensValidAfterTime", async () => {
+  it("revoke removes only admin, ALWAYS revokes tokens, verifies tokensValidAfterTime", async () => {
     const w = world();
     w.users.get(TARGET)!.customClaims = { admin: true, plan: "pro" };
     w.users.set(OTHER_ADMIN, { uid: OTHER_ADMIN, disabled: false, customClaims: { admin: true } });
-    const confirm = expectedConfirmation({ operation: "revoke", projectId: PROJECT, targetUid: TARGET, revokeSessions: "yes" });
-    const r = await runSystemAdminClaim(
-      ctx(args(["--revoke-sessions=yes", "--operator-id-token-file=/t", "--execute", `--confirm-claim=${confirm}`], "revoke")),
-      deps(w),
-    );
-    expect(r.status).toBe("applied");
+    const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), deps(w));
+    expect([r.status, r.exitCode, r.outcome]).toEqual(["applied", 0, "applied"]);
+    expect(r.sessionRevocation).toBe("required");
     expect(w.users.get(TARGET)!.customClaims).toEqual({ plan: "pro" });
     expect(writeCalls(w)).toEqual([
       "createAuditRow:attempt",
@@ -217,19 +223,20 @@ describe("execute — happy paths", () => {
       `writeRole:${TARGET}:user`,
       "createAuditRow:outcome",
     ]);
-    expect(w.audit.get("system-admin-claim:req_1_abc:outcome")!.metadata).toMatchObject({ revokeSessions: "yes", outcome: "applied" });
+    const outcomeRow = w.audit.get("system-admin-claim:req_1_abc:outcome")!;
+    expect(outcomeRow.actionType).toBe("REVOKE_SYSTEM_ADMIN_CLAIM");
+    expect(outcomeRow.metadata).toMatchObject({ sessionRevocation: "required", claimWrite: "write", outcome: "applied", completed: true });
+    expect(w.audit.get("system-admin-claim:req_1_abc:attempt")!).toMatchObject({
+      actionType: "SYSTEM_ADMIN_CLAIM_ATTEMPT",
+      metadata: { completed: false, afterSemantics: "intended-not-applied" },
+    });
   });
 
-  it("revoke with --revoke-sessions=no never calls revokeRefreshTokens", async () => {
+  it("a grant never revokes sessions", async () => {
     const w = world();
-    w.users.get(TARGET)!.customClaims = { admin: true };
-    w.users.set(OTHER_ADMIN, { uid: OTHER_ADMIN, disabled: false, customClaims: { admin: true } });
-    const confirm = expectedConfirmation({ operation: "revoke", projectId: PROJECT, targetUid: TARGET, revokeSessions: "no" });
-    const r = await runSystemAdminClaim(
-      ctx(args(["--revoke-sessions=no", "--operator-id-token-file=/t", "--execute", `--confirm-claim=${confirm}`], "revoke")),
-      deps(w),
-    );
+    const r = await runSystemAdminClaim(ctx(args(["--operator-id-token-file=/t", "--execute", `--confirm-claim=${GRANT_CONFIRM}`])), deps(w));
     expect(r.status).toBe("applied");
+    expect(r.sessionRevocation).toBe("not_applicable");
     expect(w.calls.some((c) => c.startsWith("revokeRefreshTokens"))).toBe(false);
   });
 
@@ -273,7 +280,6 @@ describe("execute — refusals happen before ANY write", () => {
     ["bootstrap_not_first", () => undefined, ["--bootstrap-first-admin", "--execute", `--confirm-claim=${GRANT_CONFIRM}`], {}],
     ["admin_enumeration_failed", (w) => { w.fail.list = true; }, ["--bootstrap-first-admin", "--execute", `--confirm-claim=${GRANT_CONFIRM}`], {}],
     ["confirmation_mismatch", () => undefined, ["--operator-id-token-file=/t", "--execute", `--confirm-claim=grant:admin:true:convergepanel:${TARGET}`], {}],
-    ["audit_unavailable", (w) => { w.fail.attempt = true; }, null, {}],
   ];
   it.each(cases)("%s", async (code, mutate, argv, over) => {
     const w = world();
@@ -282,9 +288,9 @@ describe("execute — refusals happen before ANY write", () => {
     expect(r.status).toBe("refused");
     expect(r.exitCode).toBe(2);
     expect(r.code).toBe(code);
-    // No claim write, no role write, no token revocation — ever.
-    expect(w.calls.filter((c) => /^(writeCustomClaims|revokeRefreshTokens|writeRole)/.test(c))).toEqual([]);
-    // The only permitted write on a refusal is the attempt row whose failure caused it.
+    // Exit 2 guarantees NO write call of any kind, the attempt audit row included.
+    expect(writeCalls(w)).toEqual([]);
+    expect(r.writesAttempted).toEqual([]);
     expect(w.audit.size).toBe(0);
   });
 
@@ -317,8 +323,7 @@ describe("execute — refusals happen before ANY write", () => {
   });
 
   it("revoke refuses self_revoke and last_admin before any write", async () => {
-    const confirmNo = expectedConfirmation({ operation: "revoke", projectId: PROJECT, targetUid: TARGET, revokeSessions: "no" });
-    const revokeExec = ["--revoke-sessions=no", "--operator-id-token-file=/t", "--execute", `--confirm-claim=${confirmNo}`];
+    const revokeExec = REVOKE_EXEC;
 
     const w1 = world();
     w1.users.get(TARGET)!.customClaims = { admin: true };
@@ -333,30 +338,59 @@ describe("execute — refusals happen before ANY write", () => {
     w2.users.get(TARGET)!.customClaims = { admin: true };
     w2.users.get(OPERATOR)!.customClaims = {};
     w2.users.set(OTHER_ADMIN, { uid: OTHER_ADMIN, disabled: true, customClaims: { admin: true } });
-    expect((await runSystemAdminClaim(ctx(args(["--revoke-sessions=no"], "revoke")), deps(w2))).code).toBe("last_admin");
+    expect((await runSystemAdminClaim(ctx(args([], "revoke")), deps(w2))).code).toBe("last_admin");
 
     // CONTROL: with one more ENABLED holder the same revoke dry run passes.
     const w3 = world();
     w3.users.get(TARGET)!.customClaims = { admin: true };
     w3.users.get(OPERATOR)!.customClaims = {};
     w3.users.set(OTHER_ADMIN, { uid: OTHER_ADMIN, disabled: false, customClaims: { admin: true } });
-    expect((await runSystemAdminClaim(ctx(args(["--revoke-sessions=no"], "revoke")), deps(w3))).status).toBe("dry_run");
+    expect((await runSystemAdminClaim(ctx(args([], "revoke")), deps(w3))).status).toBe("dry_run");
     expect(w1.writes + w2.writes + w3.writes).toBe(0);
   });
 });
 
-describe("audit ordering — attempt failure means no mint", () => {
-  it("attempt create() failing => writeCustomClaims is NEVER called", async () => {
+describe("audit ordering — attempt failure means no mint, and is exit 3 (outcome unknown), never 2", () => {
+  const expectAttemptFailed = (r: Awaited<ReturnType<typeof runSystemAdminClaim>>, w: World) => {
+    expect([r.status, r.exitCode, r.code, r.outcome]).toEqual(["incomplete", 3, "audit_attempt_failed", "audit_attempt_failed"]);
+    expect(r.writesAttempted).toEqual(["audit_attempt_row"]);
+    expect(r.auditRowIds).toEqual([]);
+    expect(r.auditRowIdsUnconfirmed).toEqual(["system-admin-claim:req_1_abc:attempt"]);
+    expect(r.message).toMatch(/may or may not exist/);
+    expect(r.message).toMatch(/Re-running the same command is safe/);
+    expect(r.message).not.toMatch(/nothing (was )?written/i);
+    expect(writeCalls(w)).toEqual(["createAuditRow:attempt"]);
+  };
+  it("attempt create() throwing => no claim/session/role write, exit 3 audit_attempt_failed", async () => {
     const w = world();
     w.fail.attempt = true;
     const r = await runSystemAdminClaim(
       ctx(args(["--operator-id-token-file=/t", "--execute", `--confirm-claim=${GRANT_CONFIRM}`])),
       deps(w),
     );
-    expect(r.code).toBe("audit_unavailable");
-    expect(w.calls).toContain("createAuditRow:attempt");
-    expect(w.calls.some((c) => c.startsWith("writeCustomClaims"))).toBe(false);
+    expectAttemptFailed(r, w);
     expect(w.users.get(TARGET)!.customClaims).toEqual({ admin: false, plan: "pro" });
+  });
+  it("the create landed but the call threw (orphan row) => still exit 3, never 2", async () => {
+    const w = world();
+    const d = deps(w);
+    d.store.createAuditRow = async (id, record) => {
+      w.calls.push("createAuditRow:attempt");
+      w.writes++;
+      w.audit.set(id, record);
+      throw new Error("DEADLINE_EXCEEDED");
+    };
+    const r = await runSystemAdminClaim(ctx(args(["--operator-id-token-file=/t", "--execute", `--confirm-claim=${GRANT_CONFIRM}`])), d);
+    expectAttemptFailed(r, w);
+    expect(w.audit.size).toBe(1);
+  });
+  it("on a revoke: attempt failure revokes nothing either", async () => {
+    const w = world();
+    w.users.get(TARGET)!.customClaims = { admin: true };
+    w.users.set(OTHER_ADMIN, { uid: OTHER_ADMIN, disabled: false, customClaims: { admin: true } });
+    w.fail.attempt = true;
+    const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), deps(w));
+    expectAttemptFailed(r, w);
   });
   it("a pre-existing attempt row (create-only collision) also prevents the mint", async () => {
     const w = world();
@@ -365,7 +399,7 @@ describe("audit ordering — attempt failure means no mint", () => {
       ctx(args(["--operator-id-token-file=/t", "--execute", `--confirm-claim=${GRANT_CONFIRM}`])),
       deps(w),
     );
-    expect(r.code).toBe("audit_unavailable");
+    expect([r.exitCode, r.code]).toEqual([3, "audit_attempt_failed"]);
     expect(w.calls.some((c) => c.startsWith("writeCustomClaims"))).toBe(false);
   });
 });
@@ -394,17 +428,19 @@ describe("execute — failures after the write are exit 3 and recorded", () => {
     const r = await runSystemAdminClaim(ctx(args(exec)), deps(w));
     expect([r.exitCode, r.code]).toEqual([3, "users_doc_failed"]);
   });
-  it("sessions_revoke_failed", async () => {
+  it("sessions_revoke_failed is INCOMPLETE (exit 3), says re-run is safe, and is recorded as incomplete", async () => {
     const w = world();
     w.users.get(TARGET)!.customClaims = { admin: true };
     w.users.set(OTHER_ADMIN, { uid: OTHER_ADMIN, disabled: false, customClaims: { admin: true } });
     w.fail.revoke = true;
-    const confirm = expectedConfirmation({ operation: "revoke", projectId: PROJECT, targetUid: TARGET, revokeSessions: "yes" });
-    const r = await runSystemAdminClaim(
-      ctx(args(["--revoke-sessions=yes", "--operator-id-token-file=/t", "--execute", `--confirm-claim=${confirm}`], "revoke")),
-      deps(w),
-    );
-    expect([r.exitCode, r.code]).toEqual([3, "sessions_revoke_failed"]);
+    const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), deps(w));
+    expect([r.status, r.exitCode, r.code]).toEqual(["incomplete", 3, "sessions_revoke_failed"]);
+    expect(r.message).toMatch(/^INCOMPLETE/);
+    expect(r.message).toMatch(/Re-running the same command is safe/);
+    expect(w.audit.get("system-admin-claim:req_1_abc:outcome")).toMatchObject({
+      actionType: "SYSTEM_ADMIN_CLAIM_INCOMPLETE",
+      metadata: { outcome: "sessions_revoke_failed", completed: false },
+    });
   });
   it("audit_outcome_missing when the outcome row cannot be created", async () => {
     const w = world();
@@ -441,7 +477,7 @@ describe("review round 1 — gaps", () => {
       w.writes++;
     };
     const r = await runSystemAdminClaim(ctx(args(exec)), d);
-    expect([r.status, r.exitCode, r.code]).toEqual(["failed_after_write", 3, "verification_failed"]);
+    expect([r.status, r.exitCode, r.code]).toEqual(["incomplete", 3, "verification_failed"]);
     expect(w.audit.get("system-admin-claim:req_1_abc:outcome")!.metadata).toMatchObject({
       outcome: "verification_failed",
       outcomeDetail: "users/{uid}.role read-back mismatch",
@@ -449,8 +485,7 @@ describe("review round 1 — gaps", () => {
   });
 
   describe("MINOR-3: session revocation is judged on server timestamps only", () => {
-    const confirm = expectedConfirmation({ operation: "revoke", projectId: PROJECT, targetUid: TARGET, revokeSessions: "yes" });
-    const revokeExec = ["--revoke-sessions=yes", "--operator-id-token-file=/t", "--execute", `--confirm-claim=${confirm}`];
+    const revokeExec = REVOKE_EXEC;
     const setup = (serverAfter: string | null) => {
       const w = world();
       const target = w.users.get(TARGET)!;
@@ -496,6 +531,112 @@ describe("review round 1 — gaps", () => {
         Date.now = realNow;
       }
     });
+  });
+});
+
+describe("safe retry — revoke whose admin claim is already absent (R2 MINOR-1)", () => {
+  const BEFORE_TVA = "Thu, 05 Nov 2026 09:00:00 GMT";
+  const revokeWorld = () => {
+    const w = world();
+    const t = w.users.get(TARGET)!;
+    t.customClaims = { admin: true, plan: "pro", team: { id: "t1" } };
+    t.tokensValidAfterTime = BEFORE_TVA;
+    w.roles.set(TARGET, "admin");
+    w.users.set(OTHER_ADMIN, { uid: OTHER_ADMIN, disabled: false, customClaims: { admin: true } });
+    return w;
+  };
+
+  it("run 1 sessions_revoke_failed (exit 3) -> run 2, same command: completes sessions, no claim write, exit 0", async () => {
+    const w = revokeWorld();
+    w.fail.revoke = true;
+    const r1 = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke"), "req_1_first"), deps(w));
+    expect([r1.exitCode, r1.code]).toEqual([3, "sessions_revoke_failed"]);
+    expect(w.users.get(TARGET)!.customClaims).toEqual({ plan: "pro", team: { id: "t1" } });
+    expect(w.users.get(TARGET)!.tokensValidAfterTime).toBe(BEFORE_TVA);
+
+    w.fail.revoke = false;
+    w.calls.length = 0;
+    const claimsObject = w.users.get(TARGET)!.customClaims;
+    const r2 = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke"), "req_2_retry"), deps(w));
+    expect([r2.status, r2.exitCode, r2.code, r2.outcome]).toEqual([
+      "claim_already_absent_sessions_revoked", 0, null, "claim_already_absent_sessions_revoked",
+    ]);
+    expect(r2.claimWrite).toBe("skip_already_absent");
+    expect(r2.message).not.toMatch(/no change/i);
+    // Claims are NOT rewritten (same object, never passed to writeCustomClaims); unrelated claims intact.
+    expect(writeCalls(w)).toEqual([
+      "createAuditRow:attempt",
+      `revokeRefreshTokens:${TARGET}`,
+      `writeRole:${TARGET}:user`, // still outstanding from run 1
+      "createAuditRow:outcome",
+    ]);
+    expect(w.users.get(TARGET)!.customClaims).toBe(claimsObject);
+    expect(w.users.get(TARGET)!.customClaims).toEqual({ plan: "pro", team: { id: "t1" } });
+    expect(w.users.get(TARGET)!.tokensValidAfterTime).not.toBe(BEFORE_TVA);
+    expect(w.audit.get("system-admin-claim:req_2_retry:attempt")).toMatchObject({
+      actionType: "SYSTEM_ADMIN_CLAIM_ATTEMPT",
+      metadata: { claimWrite: "skip_already_absent", sessionRevocation: "required", completed: false },
+    });
+    expect(w.audit.get("system-admin-claim:req_2_retry:outcome")).toMatchObject({
+      actionType: "REVOKE_SYSTEM_ADMIN_SESSIONS",
+      metadata: { outcome: "claim_already_absent_sessions_revoked", completed: true, claimWrite: "skip_already_absent" },
+      after: { customClaims: { plan: "pro", team: { id: "t1" } }, usersDocRole: "user" },
+    });
+  });
+
+  it("the retry uses the SAME typed confirmation as the original revoke", async () => {
+    const w = revokeWorld();
+    w.users.get(TARGET)!.customClaims = { plan: "pro" };
+    const dry = await runSystemAdminClaim(ctx(args([], "revoke")), deps(w));
+    expect([dry.status, dry.exitCode]).toEqual(["dry_run", 2]);
+    expect(dry.expectedConfirmation).toBe(REVOKE_CONFIRM);
+    expect(w.calls).toContain("log:Claim write:    SKIPPED - the admin claim is already absent; claims will NOT be rewritten.");
+    expect(w.writes).toBe(0);
+  });
+
+  it("role already 'user' => the retry writes NOTHING but the attempt row, the session revocation and the outcome row", async () => {
+    const w = revokeWorld();
+    w.users.get(TARGET)!.customClaims = { plan: "pro" };
+    w.roles.set(TARGET, "user");
+    const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), deps(w));
+    expect([r.status, r.exitCode]).toEqual(["claim_already_absent_sessions_revoked", 0]);
+    expect(writeCalls(w)).toEqual(["createAuditRow:attempt", `revokeRefreshTokens:${TARGET}`, "createAuditRow:outcome"]);
+  });
+
+  it("session revocation failing AGAIN on the retry => INCOMPLETE exit 3, never no_change/0", async () => {
+    const w = revokeWorld();
+    w.users.get(TARGET)!.customClaims = { plan: "pro" };
+    w.fail.revoke = true;
+    const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), deps(w));
+    expect([r.status, r.exitCode, r.code]).toEqual(["incomplete", 3, "sessions_revoke_failed"]);
+    expect(r.message).toMatch(/Re-running the same command is safe/);
+    expect(w.calls.some((c) => c.startsWith("writeCustomClaims"))).toBe(false);
+    expect(w.audit.get("system-admin-claim:req_1_abc:outcome")).toMatchObject({
+      actionType: "SYSTEM_ADMIN_CLAIM_INCOMPLETE",
+      metadata: { outcome: "sessions_revoke_failed", completed: false },
+    });
+  });
+
+  it("a retry whose revocation does not advance tokensValidAfterTime => verification_failed, exit 3", async () => {
+    const w = revokeWorld();
+    w.users.get(TARGET)!.customClaims = { plan: "pro" };
+    const d = deps(w);
+    d.auth.revokeRefreshTokens = async (uid) => {
+      w.calls.push(`revokeRefreshTokens:${uid}`);
+      w.writes++;
+    };
+    const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), d);
+    expect([r.exitCode, r.code]).toEqual([3, "verification_failed"]);
+  });
+
+  it("a retry requires the typed confirmation (wrong string => refused, zero writes)", async () => {
+    const w = revokeWorld();
+    w.users.get(TARGET)!.customClaims = { plan: "pro" };
+    const r = await runSystemAdminClaim(
+      ctx(args(["--operator-id-token-file=/t", "--execute", `--confirm-claim=revoke:admin:removed:sessions-no:${PROJECT}:${TARGET}`], "revoke")),
+      deps(w),
+    );
+    expect([r.status, r.exitCode, r.code, w.writes]).toEqual(["refused", 2, "confirmation_mismatch", 0]);
   });
 });
 

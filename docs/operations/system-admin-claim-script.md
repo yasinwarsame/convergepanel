@@ -31,7 +31,6 @@ npm run admin:set-system-admin-claim -- \
   --credentials=<service-account key file, mode 0600> \
   --target-uid=<uid> \
   --operation=grant|revoke \
-  [--revoke-sessions=yes|no]          # REQUIRED with revoke; refused with grant
   [--allow-claim-reduction]           # REQUIRED with revoke; refused with grant
   [--operator-id-token-file=<file>]   # mode 0600; required for --execute (unless bootstrap)
   [--bootstrap-first-admin]           # grant only; only while zero accounts hold admin === true
@@ -40,11 +39,18 @@ npm run admin:set-system-admin-claim -- \
 ```
 
 - **No defaults.** No default project, no default user, no default operation.
+- **Revoke always revokes sessions.** Owner policy: removing `admin` ALWAYS
+  calls `revokeRefreshTokens` for the target, with no opt-out. The former
+  `--revoke-sessions=yes|no` flag was removed and is refused (`unknown_flag`)
+  with a message saying so.
 - **Credentials:** only the `--credentials` key file. The tool never loads
   `.env.local` and never reads credential environment variables. The file must
   not be a symbolic link (`credentials_file_symlink`), and it is opened once
   (`O_NOFOLLOW`) and checked with `fstat` on that same descriptor, so the file
-  checked is the file read. It must be a regular file with mode 0600, `type` must be `service_account`,
+  checked is the file read. A FIFO, socket or device path is refused from the
+  `lstat` WITHOUT being opened (opening a FIFO blocks), and the single open also
+  carries `O_NONBLOCK` so a FIFO swapped in after the `lstat` cannot block
+  either; the `fstat` then refuses it. It must be a regular file with mode 0600, `type` must be `service_account`,
   `client_email` and `private_key` must be present, and `project_id` must equal
   `--confirm-project`. The tool initialises its own named Firebase app from it
   and checks that app's project id again.
@@ -56,17 +62,23 @@ npm run admin:set-system-admin-claim -- \
   prints the current claims, the intended claims, the per-key diff and the exact
   confirmation string, and writes nothing to Firebase.
 - **Typed confirmation** binds operation, project and UID (and, for revoke, the
-  session decision):
+  mandatory session revocation):
   - grant: `grant:admin:true:<project>:<uid>`
-  - revoke: `revoke:admin:removed:sessions-<yes|no>:<project>:<uid>`
+  - revoke: `revoke:admin:removed:sessions-revoked:<project>:<uid>`
+  The revoke string is the same for a re-run whose claim is already absent
+  (see "Retry"), so re-running the exact same command is always accepted. The
+  retired `sessions-yes` / `sessions-no` strings are refused
+  (`confirmation_mismatch`).
 - **Target:** UID only (`[A-Za-z0-9_-]{1,128}`). Refused if missing, if the
   returned record has a different UID, or if `disabled !== false`.
 - **Claims:** grant writes `{ ...existing, admin: true }` with `admin` last;
   revoke removes only the `admin` key. Every other claim must be byte-equal
   (canonical JSON) before and after, the payload must be at most 1000 bytes,
   and reserved claim names are refused. Claims carrying an own `__proto__` key
-  are refused (`claims_prototype_key`), because copying would drop it. If nothing would change, the tool exits
-  0 and writes nothing, even with `--execute`.
+  are refused (`claims_prototype_key`), because copying would drop it. A
+  GRANT that would change nothing exits 0 (`no_change`) and writes nothing,
+  even with `--execute`. A REVOKE whose claim is already absent is NOT "no
+  change": see "Retry".
 - **Commit state:** `--execute` refuses when `scripts/admin` or `lib/admin` has
   uncommitted changes, or the commit cannot be determined. The commit SHA is
   recorded in the audit rows.
@@ -84,6 +96,13 @@ npm run admin:set-system-admin-claim -- \
 - `--bootstrap-first-admin`: for a project with no SYSTEM_ADMIN. Refused unless
   zero accounts (enabled or disabled) hold `admin === true`. Authenticates no
   human; the audit row records `adminUid: "operator-bootstrap"`.
+  **Single run, single operator.** The zero-holder count and the claim write
+  are separate calls with no lock between them (check-then-act, TOCTOU). Two
+  bootstrap runs started at the same time — two operators, or two terminals —
+  can both see zero holders and both grant. Exactly one person runs bootstrap,
+  once, and confirms the result (the outcome row, then a dry run that shows
+  `admin: true`) before anyone runs it again. If two first admins were created,
+  revoke the unintended one with the normal operator-token path.
 - Revoke also refuses self-revoke (operator UID equals target) and a revoke that
   would leave zero enabled admin holders.
 
@@ -112,48 +131,110 @@ appear on the admin user-details page (query `targetUid` + `createdAt desc`) and
 carry no `action` or `at` field, so the governance audit reader ignores them.
 Both are created with `.doc(id).create()` (create-only):
 
-1. `system-admin-claim:<requestId>:attempt` — written BEFORE the claim. If it
-   cannot be created, the tool refuses (`audit_unavailable`) and writes nothing.
-2. Claim write, then (revoke with `--revoke-sessions=yes`) `revokeRefreshTokens`,
-   then the `users/{uid}.role` mirror (`admin` / `user`; display only).
-3. Read-back of the Auth record and `users/{uid}.role`.
+1. `system-admin-claim:<requestId>:attempt` — written BEFORE any change. If the
+   create call fails, nothing further is issued and the run is INCOMPLETE
+   (`audit_attempt_failed`, exit 3): the create may have landed before the
+   error, so the row may or may not exist. It is never reported as "nothing
+   written".
+2. Claim write (skipped on a revoke whose claim is already absent), then — on
+   EVERY revoke — `revokeRefreshTokens`, then the `users/{uid}.role` mirror
+   (`admin` / `user`; display only; on a sessions-only re-run only if it is
+   still outstanding).
+3. Read-back of the Auth record and `users/{uid}.role`; for revoke, the
+   server's `tokensValidAfterTime` must have advanced.
 4. `system-admin-claim:<requestId>:outcome` with the read-back state and
-   `metadata.outcome` (`applied`, `mint_failed`, `sessions_revoke_failed`,
-   `users_doc_failed`, `verification_failed`).
+   `metadata.outcome`.
+
+**Attempted vs completed.** An attempt row is never a completed privilege
+change, and the row type says so, so a row seen on its own (the admin
+user-details page lists `actionType`) cannot be misread:
+
+| Row | `actionType` | `metadata.completed` | `after` means |
+|---|---|---|---|
+| attempt (every run) | `SYSTEM_ADMIN_CLAIM_ATTEMPT` | `false` | the INTENDED state (`afterSemantics: "intended-not-applied"`) |
+| outcome `applied` (grant) | `GRANT_SYSTEM_ADMIN_CLAIM` | `true` | read-back |
+| outcome `applied` (revoke) | `REVOKE_SYSTEM_ADMIN_CLAIM` | `true` | read-back |
+| outcome `claim_already_absent_sessions_revoked` | `REVOKE_SYSTEM_ADMIN_SESSIONS` | `true` | read-back (no claim was written by this run) |
+| outcome `mint_failed`, `sessions_revoke_failed`, `users_doc_failed`, `verification_failed` | `SYSTEM_ADMIN_CLAIM_INCOMPLETE` | `false` | read-back |
+
+Every row also carries `metadata.requestedOperation` (`grant`/`revoke`),
+`metadata.claimWrite` (`write` / `skip_already_absent`) and
+`metadata.sessionRevocation` (`required` on revoke, `not_applicable` on grant).
+An attempt row with no outcome row for the same `requestId` means the run
+ended incomplete (or the outcome row itself failed: `audit_outcome_missing`,
+which the local result file records); reconcile from the result file.
 
 Firestore rules deny all client access to this collection, but the Admin SDK
 bypasses rules: "immutable" here means create-only by convention plus key
 custody, not something the rules enforce.
 
-Exit codes: `0` dry run, no change, or applied and verified; `2` refused, or an
-unexpected error before any Firebase write was issued (the result file records
-`writeAttempted: false`); `3` a write was attempted and not fully verified, or
-an unexpected error after a write was attempted (inspect the read-back; do not
-assume either state); `1` the result file could not be written after a clean
-run.
+### Exit codes
 
-## Revocation and sessions: OPEN OWNER DECISION
-
-`--operation=revoke` requires `--revoke-sessions=yes|no` with no default,
-because the session policy has not been decided. What each choice does in this
-codebase today:
-
-| | `--revoke-sessions=no` | `--revoke-sessions=yes` |
+| Exit | Meaning | Database writes |
 |---|---|---|
-| SYSTEM_ADMIN routes (bearer ID token, `verifyIdToken` WITHOUT `checkRevoked`) | Already-issued ID tokens keep `admin: true` until they expire (up to about 1 hour). The next token refresh drops the claim. | Same up-to-1-hour window for already-issued ID tokens (no revocation check on this path). Refresh then fails, so the user is signed out. |
-| ADMIN_PORTAL routes that accept the `__session` cookie (`verifySessionCookie(cookie, true)`) | A session cookie minted while the user was admin carries `admin: true` for its whole life (5 days, `app/api/auth/session/route.ts`) and keeps ADMIN_PORTAL access. | Cookies issued before the revocation fail the revocation check immediately. |
-| Side effects | None beyond the claim. | Signs the user out on every device, including ordinary (non-admin) use. |
+| `0` | Completed and verified: `applied`, `claim_already_absent_sessions_revoked`, or a grant already in place (`no_change`). | As required by the operation (none for `no_change`). |
+| `2` | Refused, or dry run (the default). Also an unexpected error raised before any write call. | **None.** Guaranteed: exit 2 is only returned before the first write call (the attempt audit row included) is issued; the result file records `writeAttempted: false`. |
+| `3` | A write call was issued and the operation is INCOMPLETE or unverified: `audit_attempt_failed` (attempt row outcome unknown), `mint_failed`, `sessions_revoke_failed`, `users_doc_failed`, `verification_failed`, `audit_outcome_missing`, or an unexpected error after a write call. | Unknown / partial. Inspect the read-back in the result file. **Re-running the same command is safe.** |
+| `1` | The result file could not be written after an otherwise exit-0 run. | As for exit 0. |
 
-So `no` leaves up to 5 days of ADMIN_PORTAL access on an existing cookie, and
-`yes` closes that but forces a full sign-out. Neither choice shortens the
-up-to-1-hour SYSTEM_ADMIN bearer window; only adding `checkRevoked` to the
-SYSTEM_ADMIN verification path would (see admin-authority-tiers.md, "What this
-procedure does NOT give you"). With `yes`, the tool verifies that the Auth
-record's `tokensValidAfterTime` read back after the write is strictly later than
-the value read from the same record before the write. Only server timestamps
-are compared; the operator's local clock is never used. (One-second
-resolution: a second revocation within the same second fails closed as
-`verification_failed`.)
+A dry run exits 2, not 0: it completed nothing. Scripts that wrap the tool
+must treat only `0` as "done".
+
+### Retry
+
+Re-running the exact same command (same flags, same `--confirm-claim`) after
+any exit 3 is safe:
+
+- It never re-applies a claim already in place and never changes any other
+  claim (grant re-run => `no_change`; a grant whose `users/{uid}.role` mirror
+  failed is reported in the `no_change` message and is not repaired).
+- A revoke whose `admin` claim is already absent — e.g. the previous run ended
+  `sessions_revoke_failed` — does NOT report "no change". Under the same typed
+  confirmation it writes the attempt row, does NOT call the claim write,
+  performs the outstanding (idempotent) `revokeRefreshTokens`, writes the
+  `users/{uid}.role` mirror only if it is still not `user`, verifies that
+  `tokensValidAfterTime` advanced, and writes an outcome row
+  `claim_already_absent_sessions_revoked` (`REVOKE_SYSTEM_ADMIN_SESSIONS`),
+  exit 0. If the revocation fails again it is `sessions_revoke_failed`, exit 3,
+  and the instruction is the same: re-run.
+- Note: this also means a revoke aimed at a user who never had `admin` signs
+  that user out everywhere. The dry run prints `Claim write: SKIPPED` and the
+  sessions line, so read it before executing.
+
+## Revocation and sessions (owner policy: always revoke)
+
+Every revoke calls `revokeRefreshTokens(targetUid)` and verifies, from server
+timestamps only, that the Auth record's `tokensValidAfterTime` read back after
+the write is strictly later than the value read before it (the operator's
+local clock is never used; one-second resolution, so a second revocation
+within the same second fails closed as `verification_failed`).
+
+What that does and does not invalidate in this codebase (code at the time of
+writing; this tool does not change any route):
+
+| Credential | Verified by | Effect of the revoke |
+|---|---|---|
+| Firebase refresh tokens | Firebase Auth | Revoked. The client cannot mint new ID tokens; it is signed out on its next refresh. |
+| `__session` cookie (5-day Firebase session cookie, `app/api/auth/session/route.ts:37`, `:76`) | `verifySessionCookie(cookie, true)` — revocation CHECKED — at `lib/firebase/auth-helpers.ts:127` (`verifySessionCookieValue`, used by `resolveRequestIdentity` / `resolveServerComponentIdentity` / `/api/auth/session`), `lib/firebase/auth-helpers.ts:277` (`requireAdminPortalAccess` cookie fallback) and `app/api/admin/access/route.ts:41` | Rejected immediately: a cookie minted before the revocation fails the revocation check. There is no `verifySessionCookie(..., false)` call in `lib/` or `app/`. |
+| App-side session store | — | None exists: no `sessions` / `admin_sessions` collection grants access (searched `lib/`, `app/`, `middleware.ts`). `middleware.ts:26` only checks that a `__session` cookie is present for `/admin/*` routing; it grants no API access. Nothing else to invalidate. |
+| Already-issued ID tokens (bearer, up to about 1 hour) | `verifyIdToken(token)` WITHOUT `checkRevoked` at `lib/firebase/auth-helpers.ts:56` (`verifyAdminToken` -> `requireSystemAdminAccess`), `lib/firebase/auth-helpers.ts:273` (`requireAdminPortalAccess`), `lib/firebase/adminAuth.ts:43` (`getRequestUser` -> `requireSystemAdminBearer`), `app/api/admin/access/route.ts:37`, `lib/firebase/auth.ts:30` (`checkRevoked: false`) | **NOT invalidated.** An ID token minted while the user held `admin: true` keeps `admin: true` until it expires, and these paths do not check revocation. |
+
+**The remaining risk is already-issued ID tokens.** Global sign-out
+(`revokeRefreshTokens`) alone is NOT sufficient to cut SYSTEM_ADMIN access off
+immediately. Until it expires (up to about an hour), a revoked admin's
+existing ID token still passes every bearer path listed above. Closing that
+window is a route change, outside this tool: privileged endpoints must enforce
+current state on each request — `verifyIdToken(token, true)` (revocation
+checked) and/or a live `getUser(uid)` read of `customClaims.admin` — rather
+than trusting the claim inside a token. (These route gaps are tracked
+separately; see admin-authority-tiers.md, "What this procedure does NOT give
+you".) If immediate cut-off matters, also disable the account
+(`disabled: true`) out of band: Firebase rejects ID tokens of a disabled user
+only when revocation is checked, so even that does not close the
+no-`checkRevoked` paths — treat the up-to-1-hour window as real.
+
+Side effect of the policy: the target is signed out everywhere, including
+ordinary (non-admin) use.
 
 ## Defects fixed (from the retired scripts)
 

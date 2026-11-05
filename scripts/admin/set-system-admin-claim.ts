@@ -19,12 +19,17 @@
  *     --credentials=<service-account key file, mode 0600> \
  *     --target-uid=<uid> \
  *     --operation=grant|revoke \
- *     [--revoke-sessions=yes|no]            # REQUIRED with revoke, refused with grant
- *     [--allow-claim-reduction]             # REQUIRED with revoke
+ *     [--allow-claim-reduction]             # REQUIRED with revoke (revoke ALWAYS revokes refresh tokens)
  *     [--operator-id-token-file=<file>]     # SYSTEM_ADMIN ID token, mode 0600; required for --execute
  *     [--bootstrap-first-admin]             # instead of a token, only while zero admins exist
  *     [--execute --confirm-claim=<exact string printed by the dry run>]
  *     [--result-file=<absolute path outside the repo, *.json>]
+ *
+ * EXIT CODES: 0 completed and verified (or a grant already in place);
+ * 2 refused or dry run — no Firebase write call was issued;
+ * 3 a write call was issued (possibly only the attempt audit row) and the
+ *   operation is incomplete or unverified — re-running the same command is safe;
+ * 1 the result file could not be written after an otherwise-successful run.
  *
  * CREDENTIALS. Only the key file named by --credentials is used. This tool
  * never loads .env.local and never reads FIREBASE_* / GOOGLE_* credential
@@ -53,6 +58,7 @@ import {
   type ClaimAuthPort,
   type ClaimStorePort,
   type RunResult,
+  RERUN_IS_SAFE,
   runSystemAdminClaim,
 } from "../../lib/admin/systemAdminClaimExecution";
 import {
@@ -275,12 +281,14 @@ export async function runCli(opts: CliOptions): Promise<number> {
   const exitCode = unexpected !== null ? (writeAttempted ? 3 : 2) : run ? run.exitCode : 2;
   const report = {
     schema: "convergepanel.system-admin-claim-result/v1",
-    phase: run?.status === "applied" || run?.status === "failed_after_write" ? "executed" : run?.status === "dry_run" ? "dry-run" : "not-executed",
+    phase: run && (run.status === "applied" || run.status === "claim_already_absent_sessions_revoked" || run.status === "incomplete")
+      ? "executed"
+      : run?.status === "dry_run" ? "dry-run" : "not-executed",
     status: unexpected !== null ? "unexpected_error" : run ? run.status : "refused",
     code: unexpected !== null ? `unexpected_error:${unexpected}` : run ? run.code : early?.code ?? null,
     message: unexpected !== null
       ? writeAttempted
-        ? "Unexpected error after a Firebase write was attempted. The write may or may not have happened; read the target's claims before retrying."
+        ? `INCOMPLETE: unexpected error after a Firebase write call was issued. The write may or may not have happened; read the target's claims. ${RERUN_IS_SAFE}`
         : "Unexpected error before any Firebase write. Nothing was written."
       : run ? run.message : early?.message ?? null,
     writeAttempted,
@@ -389,10 +397,15 @@ export function realIo(repoRoot: string): CliIo {
         return null;
       }
       if (l.isSymbolicLink()) return { isSymlink: true, isFile: false, mode: l.mode, body: null };
+      // A FIFO, socket or device is refused WITHOUT opening it: open() on a
+      // FIFO blocks until a writer appears, and a device can be unbounded.
+      if (!l.isFile()) return { isSymlink: false, isFile: false, mode: l.mode, body: null };
       let fd: number;
       try {
         // O_NOFOLLOW: a symlink swapped in after the lstat still fails here.
-        fd = fs.openSync(p, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+        // O_NONBLOCK: a FIFO swapped in after the lstat cannot block the open;
+        // the fstat below then refuses it. No effect on a regular file.
+        fd = fs.openSync(p, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
       } catch {
         return null;
       }
