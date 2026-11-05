@@ -165,9 +165,12 @@ Two ways to enroll a SYSTEM_ADMIN. Choose ONE deliberately:
 `scripts/admin/set-system-admin-claim.ts` (`npm run admin:set-system-admin-claim`)
 with an explicitly named service-account key file. It is a dry run unless given
 `--execute` plus an exact typed confirmation, preserves every other custom
-claim, refuses disabled targets, and writes create-only `admin_audit_logs`
+claim, refuses to GRANT to a disabled account (a revoke is allowed on one and
+never re-enables it), and writes create-only `admin_audit_logs`
 attempt/outcome rows. A revoke always revokes the target's refresh tokens
-(owner policy); already-issued ID tokens remain valid up to about an hour on
+(owner policy) and reports success only when the stored
+`tokensValidAfterTime` is proven, against a server commit time, to cover the
+claim removal; already-issued ID tokens remain valid up to about an hour on
 routes that do not check revocation. Runbook, CLI, exit codes and retry:
 `docs/operations/system-admin-claim-script.md`. The four older minting scripts
 were retired. `ADMIN_SECRET` never needs to hold a live value

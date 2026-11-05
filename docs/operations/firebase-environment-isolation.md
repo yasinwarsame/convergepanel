@@ -7,7 +7,7 @@ Owner decisions: 2026-11-04. Through the application's Firebase modules (`lib/fi
 Everything else that uses those modules fails closed.
 
 **Known residual: legacy scripts.** Several older scripts call `initializeApp` themselves and do **not** go through this rule:
-- `scripts/admin/set-system-admin-claim.ts` (the single SYSTEM_ADMIN grant/revoke tool; it refuses Vercel/production runtimes and emulator variables, requires `--confirm-project` to equal the key's `project_id`, and re-checks the connected project — see `docs/operations/system-admin-claim-script.md`)
+- `scripts/admin/set-system-admin-claim.ts` (the single SYSTEM_ADMIN grant/revoke tool; it refuses Vercel/production runtimes and emulator variables, requires `--confirm-project` to equal the key's `project_id`, and initialises its own app with that explicit `projectId` — the project binding is by construction from the key, not a network check of the connected project; it has not yet adopted the operator grant below (pending follow-up) — see `docs/operations/system-admin-claim-script.md`)
 - `scripts/seed-adaptive-multi-reviewer-e2e.ts`
 - `scripts/cleanup-adaptive-multi-reviewer-e2e.ts`
 - `scripts/check-admin-claims.js` (read-only, explicit `--uid`)
