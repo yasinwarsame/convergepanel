@@ -2184,6 +2184,13 @@
   "rule": "research memo original path, legacy panel only, when MemoInput.independentModelCount < 2 (fewer than two independent executing models): states that there is NO consensus score / cross-model agreement (connector fail-closed correction pass, 2026-11-05)"
  },
  {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"This question was sent to a panel of large language models via ConvergePanel with identical instructions, but fewer than two independent models responded (slots answered by the same substitute model count as one). No cross-model comparison was possible: no consensus score is reported and nothing in this memo reflects agreement or convergence between models.\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "research memo original path, legacy panel only, METHODOLOGY when MemoInput.independentModelCount < 2 (fewer than two independent executing models): states that NO cross-model comparison, consensus or convergence exists (connector fail-closed correction round 2, 2026-11-06)"
+ },
+ {
   "file": "lib/adaptiveSchema/dsProvenanceViewMin.ts",
   "literal": "\"Options were grouped by text similarity. Different options with similar wording (for example 3.5% vs 35%, or Approve vs Disapprove) can be merged; agreement on an option is not established.\"",
   "count": 1,
