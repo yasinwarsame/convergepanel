@@ -786,6 +786,9 @@ describe("B1–B3: containment by filesystem identity, worktree enumeration, pos
   it("B1: a firmlink spelling of a DEEP subdirectory of the repo is refused (every ancestor is compared, not only the parent)", () => {
     expect(checkResultLocation(`${FIRM}${CP}/a/b/c/out.json`, CP, idIo())).toMatchObject({ ok: false, code: "result_path_inside_repo" });
   });
+  it("B1: the repository root's OWN identity is protected even when the worktree list does not spell it", () => {
+    expect(checkResultLocation(`${FIRM}${CP}/out.json`, CP, idIo({ gitWorktreeRoots: () => [WT] }))).toMatchObject({ ok: false, code: "result_path_inside_repo" });
+  });
   it("B1: a firmlink spelling of a LINKED worktree is refused (every worktree root's identity is protected)", () => {
     expect(checkResultLocation(`${FIRM}${WT}/sub/out.json`, CP, idIo())).toMatchObject({ ok: false, code: "result_path_inside_repo" });
   });
