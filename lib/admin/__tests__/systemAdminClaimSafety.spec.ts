@@ -202,19 +202,40 @@ describe("validateServiceAccountKey", () => {
 
 describe("checkResultPath", () => {
   const repo = "/Users/op/Apps/CP";
+  const chk = (resolvedFile: string, protectedRoots: string[] = [repo], caseInsensitive = false) =>
+    checkResultPath({ resolvedFile, resolvedDir: path.dirname(resolvedFile), protectedRoots, caseInsensitive });
   it("CONTROL: a tmp path outside the repo passes", () => {
-    expect(checkResultPath({ resolvedFile: "/tmp/x/r.json", resolvedDir: "/tmp/x", repoRoot: repo })).toBeNull();
+    expect(chk("/tmp/x/r.json")).toBeNull();
   });
-  it("CONTROL: a sibling directory with a shared prefix is not 'inside'", () => {
-    expect(checkResultPath({ resolvedFile: "/Users/op/Apps/CP-other/r.json", resolvedDir: "/Users/op/Apps/CP-other", repoRoot: repo })).toBeNull();
+  it("CONTROL: a sibling directory with a shared prefix is not 'inside' (no lexical prefix test)", () => {
+    expect(chk("/Users/op/Apps/CP-other/r.json")).toBeNull();
+    expect(chk("/Users/op/Apps/CPx/r.json", [repo], true)).toBeNull();
+  });
+  it("CONTROL: a directory literally named '..something' inside a non-protected dir is not confused with '..'", () => {
+    expect(chk("/tmp/..cache/r.json", ["/tmp/x"])).toBeNull();
   });
   it("refuses result_path_inside_repo", () => {
-    expect(checkResultPath({ resolvedFile: `${repo}/out/r.json`, resolvedDir: `${repo}/out`, repoRoot: repo })?.code).toBe("result_path_inside_repo");
-    expect(checkResultPath({ resolvedFile: `${repo}/r.json`, resolvedDir: repo, repoRoot: repo })?.code).toBe("result_path_inside_repo");
+    expect(chk(`${repo}/out/r.json`)?.code).toBe("result_path_inside_repo");
+    expect(chk(`${repo}/r.json`)?.code).toBe("result_path_inside_repo");
+    expect(chk(`${repo}/..cache/r.json`)?.code).toBe("result_path_inside_repo");
+  });
+  it("refuses a path inside ANY protected root (every git worktree of the repo), not only the first", () => {
+    expect(chk("/Users/op/Apps/CP-WT2/sub/r.json", [repo, "/Users/op/Apps/CP-WT2"])?.code).toBe("result_path_inside_repo");
+  });
+  it("case-insensitive volume: a case variant of the repo path is inside (folded comparison)", () => {
+    expect(chk("/users/op/apps/cp/out.json", [repo], true)?.code).toBe("result_path_inside_repo");
+    expect(chk("/USERS/OP/APPS/CP/out.json", [repo], true)?.code).toBe("result_path_inside_repo");
+    // On a case-SENSITIVE volume a case variant is a different directory.
+    expect(chk("/users/op/apps/cp/out.json", [repo], false)).toBeNull();
   });
   it("refuses result_path_invalid (not .json / relative)", () => {
-    expect(checkResultPath({ resolvedFile: "/tmp/r.txt", resolvedDir: "/tmp", repoRoot: repo })?.code).toBe("result_path_invalid");
-    expect(checkResultPath({ resolvedFile: "r.json", resolvedDir: "/tmp", repoRoot: repo })?.code).toBe("result_path_invalid");
+    expect(chk("/tmp/r.txt")?.code).toBe("result_path_invalid");
+    expect(checkResultPath({ resolvedFile: "r.json", resolvedDir: "/tmp", protectedRoots: [repo], caseInsensitive: false })?.code).toBe("result_path_invalid");
+  });
+  it("fails closed: no protected root, a relative root, or a dir that is not the file's parent => result_path_invalid", () => {
+    expect(chk("/tmp/x/r.json", [])?.code).toBe("result_path_invalid");
+    expect(chk("/tmp/x/r.json", ["rel/root"])?.code).toBe("result_path_invalid");
+    expect(checkResultPath({ resolvedFile: "/tmp/x/r.json", resolvedDir: "/tmp/y", protectedRoots: [repo], caseInsensitive: false })?.code).toBe("result_path_invalid");
   });
 });
 
@@ -480,6 +501,7 @@ describe("audit record — matches lib/admin/auditLog.ts#AuditLogEntry", () => {
       },
       phase: "outcome",
       outcome: "applied",
+      readBack: { customClaims: "read", usersDocRole: "read" },
     });
     expect(out.metadata.outcome).toBe("applied");
     expect(out.metadata).toMatchObject({ completed: true, afterSemantics: "read-back", sessionRevocation: "required" });
@@ -504,8 +526,68 @@ describe("audit record — matches lib/admin/auditLog.ts#AuditLogEntry", () => {
       claimWrite: "write", credentialSource: "explicit-key-file", credentialClientEmailMasked: "x…@…", gitSha: "s", confirmClaim: "c",
       phase,
       outcome: outcome as never,
+      readBack: { customClaims: "read", usersDocRole: "read" },
     });
     expect([r.actionType, r.metadata.completed]).toEqual([actionType, completed]);
+  });
+
+  describe("M-1: an outcome row never presents unread state as read", () => {
+    const base = {
+      requestId: "r", createdAt: TS, projectId: PROJECT, operation: "revoke" as const, authorization: "operator-id-token" as const,
+      adminUid: "op", targetUid: UID, beforeClaims: { admin: true, plan: "pro" }, usersDocRoleBefore: "admin",
+      claimWrite: "write" as const, credentialSource: "explicit-key-file" as const, credentialClientEmailMasked: "x…@…", gitSha: "s", confirmClaim: "c",
+      phase: "outcome" as const,
+    };
+    it("claims read-back failed: after.customClaims is null (never {}), afterSemantics unknown, marker recorded", () => {
+      const r = buildClaimAuditRecord({
+        ...base, outcome: "sessions_revoke_failed", afterClaims: null, usersDocRoleAfter: "user",
+        readBack: { customClaims: "failed", usersDocRole: "read" },
+        outcomeDetails: ["sessions_revoke_failed: x", "verification_failed: read-back failed"],
+      });
+      expect(r.after).toEqual({ customClaims: null, usersDocRole: "user" });
+      expect(r.metadata).toMatchObject({
+        completed: false,
+        afterSemantics: "unknown",
+        readBack: { customClaims: "failed", usersDocRole: "read" },
+        outcome: "sessions_revoke_failed",
+        outcomeDetail: "sessions_revoke_failed: x; verification_failed: read-back failed",
+        outcomeDetails: ["sessions_revoke_failed: x", "verification_failed: read-back failed"],
+      });
+      expect(r.actionType).toBe("SYSTEM_ADMIN_CLAIM_INCOMPLETE");
+    });
+    it("a stale/fabricated afterClaims passed with a failed read is DROPPED to null", () => {
+      const r = buildClaimAuditRecord({
+        ...base, outcome: "verification_failed", afterClaims: {}, usersDocRoleAfter: null,
+        readBack: { customClaims: "failed", usersDocRole: "read" },
+      });
+      expect(r.after.customClaims).toBeNull();
+      expect(r.metadata.afterSemantics).toBe("unknown");
+    });
+    it("role read-back failed: after.usersDocRole null and afterSemantics unknown", () => {
+      const r = buildClaimAuditRecord({
+        ...base, outcome: "verification_failed", afterClaims: { plan: "pro" }, usersDocRoleAfter: "user",
+        readBack: { customClaims: "read", usersDocRole: "failed" },
+      });
+      expect(r.after).toEqual({ customClaims: { plan: "pro" }, usersDocRole: null });
+      expect(r.metadata).toMatchObject({ afterSemantics: "unknown", readBack: { customClaims: "read", usersDocRole: "failed" } });
+    });
+    it("fail closed: a COMPLETED outcome with a failed or missing read-back is downgraded to verification_failed (never completed)", () => {
+      for (const readBack of [undefined, { customClaims: "failed" as const, usersDocRole: "read" as const }, { customClaims: "read" as const, usersDocRole: "failed" as const }]) {
+        const r = buildClaimAuditRecord({ ...base, outcome: "applied", afterClaims: { plan: "pro" }, usersDocRoleAfter: "user", readBack });
+        expect([r.actionType, r.metadata.completed, r.metadata.outcome, r.metadata.afterSemantics]).toEqual([
+          "SYSTEM_ADMIN_CLAIM_INCOMPLETE", false, "verification_failed", "unknown",
+        ]);
+      }
+    });
+    it("CONTROL: full read-back => read-back semantics and the read snapshot", () => {
+      const r = buildClaimAuditRecord({
+        ...base, outcome: "applied", afterClaims: { plan: "pro" }, usersDocRoleAfter: "user",
+        readBack: { customClaims: "read", usersDocRole: "read" },
+      });
+      expect(r.after).toEqual({ customClaims: { plan: "pro" }, usersDocRole: "user" });
+      expect(r.metadata).toMatchObject({ afterSemantics: "read-back", completed: true });
+      expect(r.metadata).not.toHaveProperty("outcomeDetail");
+    });
   });
   it("every claim action type is declared in lib/admin/auditLog.ts#AdminActionType", () => {
     const src = fs.readFileSync(path.join(__dirname, "..", "auditLog.ts"), "utf8");

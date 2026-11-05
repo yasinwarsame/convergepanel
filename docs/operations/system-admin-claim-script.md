@@ -35,7 +35,7 @@ npm run admin:set-system-admin-claim -- \
   [--operator-id-token-file=<file>]   # mode 0600; required for --execute (unless bootstrap)
   [--bootstrap-first-admin]           # grant only; only while zero accounts hold admin === true
   [--execute --confirm-claim=<exact string printed by the dry run>]
-  [--result-file=<absolute *.json path outside the repo>]
+  [--result-file=<NEW *.json path outside every git worktree of this repo>]
 ```
 
 - **No defaults.** No default project, no default user, no default operation.
@@ -120,7 +120,18 @@ path swap cannot redirect it). Default directory:
 `<os.tmpdir()>/convergepanel-operator/`; it must be a real directory (not a
 symlink), owned by the current user, mode exactly 0700, or the run is refused
 (`result_dir_unsafe`) — on a shared host another account could otherwise
-pre-create it. A `--result-file` inside the git worktree is refused. It contains
+pre-create it. A `--result-file` is checked against the filesystem, never
+lexically: its parent directory and the repository root are canonicalised with
+`realpath.native` (symlinks resolved, on-disk case restored), and the file is
+refused (`result_path_inside_repo`) if it lies inside the current worktree or
+ANY git worktree of this repository (`git worktree list`) — compared
+case-folded on macOS/Windows and on any volume detected as case-insensitive, so
+`/users/.../convergepanel/out.json` cannot slip past. A parent directory or
+repository root that cannot be canonicalised, or ANY existing entry at the
+target path (file, directory or symlink, live or dangling), is refused
+(`result_path_invalid`); the file is then created with
+`O_CREAT|O_EXCL|O_NOFOLLOW` and its directory re-canonicalised after the
+create, so a symlink or directory swap after the check is refused too. It contains
 UIDs, claims, the masked credential email and the request id, never key
 material or tokens. Do not commit it.
 
@@ -143,7 +154,13 @@ Both are created with `.doc(id).create()` (create-only):
 3. Read-back of the Auth record and `users/{uid}.role`; for revoke, the
    server's `tokensValidAfterTime` must have advanced.
 4. `system-admin-claim:<requestId>:outcome` with the read-back state and
-   `metadata.outcome`.
+   `metadata.outcome`. A read that fails is never replaced by a snapshot: the
+   unread field is `null` (`after.customClaims: null` / `after.usersDocRole:
+   null`), `metadata.afterSemantics` is `"unknown"`, `metadata.readBack` says
+   which read failed, and the run is INCOMPLETE (exit 3). EVERY failure is
+   kept, in order, in `metadata.outcomeDetails` (joined in `outcomeDetail`);
+   `metadata.outcome` is the first. The result file carries the same
+   (`run.readBack`, `run.failureDetails`, `run.readBackClaims: null`).
 
 **Attempted vs completed.** An attempt row is never a completed privilege
 change, and the row type says so, so a row seen on its own (the admin
@@ -155,7 +172,10 @@ user-details page lists `actionType`) cannot be misread:
 | outcome `applied` (grant) | `GRANT_SYSTEM_ADMIN_CLAIM` | `true` | read-back |
 | outcome `applied` (revoke) | `REVOKE_SYSTEM_ADMIN_CLAIM` | `true` | read-back |
 | outcome `claim_already_absent_sessions_revoked` | `REVOKE_SYSTEM_ADMIN_SESSIONS` | `true` | read-back (no claim was written by this run) |
-| outcome `mint_failed`, `sessions_revoke_failed`, `users_doc_failed`, `verification_failed` | `SYSTEM_ADMIN_CLAIM_INCOMPLETE` | `false` | read-back |
+| outcome `mint_failed`, `sessions_revoke_failed`, `users_doc_failed`, `verification_failed` | `SYSTEM_ADMIN_CLAIM_INCOMPLETE` | `false` | read-back (`afterSemantics: "read-back"`) — or, when a read-back failed, `null` for the unread field with `afterSemantics: "unknown"`: the state is UNKNOWN, not empty |
+
+A completed outcome is only ever written with a full read-back; the record
+builder downgrades a "completed" outcome without one to `verification_failed`.
 
 Every row also carries `metadata.requestedOperation` (`grant`/`revoke`),
 `metadata.claimWrite` (`write` / `skip_already_absent`) and
@@ -197,6 +217,9 @@ any exit 3 is safe:
   `claim_already_absent_sessions_revoked` (`REVOKE_SYSTEM_ADMIN_SESSIONS`),
   exit 0. If the revocation fails again it is `sessions_revoke_failed`, exit 3,
   and the instruction is the same: re-run.
+- An exit 3 whose read-back failed (`afterSemantics: "unknown"`) says nothing
+  about the target's claims: read them (`scripts/check-admin-claims.js`) or
+  re-run, never assume they were wiped or kept.
 - Note: this also means a revoke aimed at a user who never had `admin` signs
   that user out everywhere. The dry run prints `Claim write: SKIPPED` and the
   sessions line, so read it before executing.
@@ -228,13 +251,31 @@ current state on each request — `verifyIdToken(token, true)` (revocation
 checked) and/or a live `getUser(uid)` read of `customClaims.admin` — rather
 than trusting the claim inside a token. (These route gaps are tracked
 separately; see admin-authority-tiers.md, "What this procedure does NOT give
-you".) If immediate cut-off matters, also disable the account
+you".) If immediate cut-off matters, FIRST finish the revoke with this tool (exit 0 —
+it refuses a target whose `disabled !== false`, so disabling first would block
+the revoke and leave the claim in place), THEN disable the account
 (`disabled: true`) out of band: Firebase rejects ID tokens of a disabled user
 only when revocation is checked, so even that does not close the
 no-`checkRevoked` paths — treat the up-to-1-hour window as real.
 
 Side effect of the policy: the target is signed out everywhere, including
 ordinary (non-admin) use.
+
+## Known limits (not compare-and-set)
+
+- **No compare-and-set on claims.** Firebase Auth has no conditional
+  `setCustomUserClaims`. The tool reads the claims, computes the new object
+  (only `admin` changes) and writes the whole object; a concurrent writer of
+  ANOTHER claim between that read and the write is overwritten. The read-back
+  detects a difference from the planned state (`verification_failed`, exit 3)
+  but cannot prevent it. Do not run this tool while anything else (Stripe
+  webhooks writing `plan`, another operator) may be writing the same user's
+  claims.
+- **Last-admin check is check-then-act.** The "would leave zero enabled
+  admins" and bootstrap "zero admins exist" checks enumerate users and then
+  write; two operators revoking two different admins at the same moment could
+  each see the other as the remaining admin. One operator at a time; confirm
+  the remaining admins afterwards with the read-only check script.
 
 ## Defects fixed (from the retired scripts)
 

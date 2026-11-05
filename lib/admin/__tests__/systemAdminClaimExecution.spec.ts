@@ -27,7 +27,7 @@ type World = {
   audit: Map<string, Record<string, unknown>>;
   calls: string[];
   writes: number;
-  fail: Partial<Record<"attempt" | "outcome" | "claims" | "revoke" | "role" | "getUserAfterWrite" | "list", boolean>>;
+  fail: Partial<Record<"attempt" | "outcome" | "claims" | "revoke" | "role" | "getUserAfterWrite" | "readRoleAfterWrite" | "list", boolean>>;
   tokenDecoded: { uid: string; admin?: unknown } | { error: string };
   /** A broken backend that silently ignores the claim write. */
   dropClaimWrite?: boolean;
@@ -53,7 +53,7 @@ function deps(w: World, overrides: Partial<ExecutionDeps<string>> = {}): Executi
   const auth: ClaimAuthPort = {
     getUser: async (uid) => {
       w.calls.push(`getUser:${uid}`);
-      if (wroteClaims && w.fail.getUserAfterWrite) throw Object.assign(new Error("x"), { code: "auth/internal-error" });
+      if ((wroteClaims || w.writes > 0) && w.fail.getUserAfterWrite) throw Object.assign(new Error("x"), { code: "auth/internal-error" });
       const u = w.users.get(uid);
       if (!u) throw Object.assign(new Error("not found"), { code: "auth/user-not-found" });
       return JSON.parse(JSON.stringify(u));
@@ -90,6 +90,7 @@ function deps(w: World, overrides: Partial<ExecutionDeps<string>> = {}): Executi
   const store: ClaimStorePort = {
     readUsersDocRole: async (uid) => {
       w.calls.push(`readRole:${uid}`);
+      if (w.fail.readRoleAfterWrite && w.writes > 0) throw Object.assign(new Error("x"), { code: "unavailable" });
       return w.roles.get(uid) ?? null;
     },
     writeUsersDocRole: async (uid, role) => {
@@ -480,7 +481,7 @@ describe("review round 1 — gaps", () => {
     expect([r.status, r.exitCode, r.code]).toEqual(["incomplete", 3, "verification_failed"]);
     expect(w.audit.get("system-admin-claim:req_1_abc:outcome")!.metadata).toMatchObject({
       outcome: "verification_failed",
-      outcomeDetail: "users/{uid}.role read-back mismatch",
+      outcomeDetail: "verification_failed: users/{uid}.role read-back mismatch",
     });
   });
 
@@ -662,5 +663,132 @@ describe("no secret in any output", () => {
     const everything = JSON.stringify({ r, calls: w.calls.filter((c) => c.startsWith("log:")), audit: [...w.audit.values()] });
     expect(everything).not.toContain("SECRET-TOKEN-VALUE");
     expect(everything).not.toContain(TOKEN);
+  });
+});
+
+describe("M-1: read-back failure is never presented as a read snapshot", () => {
+  const OUTCOME = "system-admin-claim:req_1_abc:outcome";
+  const adminTargetWorld = () => {
+    const w = world();
+    const t = w.users.get(TARGET)!;
+    t.customClaims = { admin: true, plan: "pro" };
+    t.tokensValidAfterTime = "Thu, 05 Nov 2026 09:00:00 GMT";
+    w.roles.set(TARGET, "admin");
+    w.users.set(OTHER_ADMIN, { uid: OTHER_ADMIN, disabled: false, customClaims: { admin: true } });
+    return w;
+  };
+
+  it("reviewer repro: revoke on {admin:true, plan:'pro'}, revokeRefreshTokens throws, read-back getUser throws", async () => {
+    const w = adminTargetWorld();
+    w.fail.revoke = true;
+    w.fail.getUserAfterWrite = true;
+    const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), deps(w));
+    // Explicitly incomplete, first failure is the code.
+    expect([r.status, r.exitCode, r.code, r.outcome]).toEqual(["incomplete", 3, "sessions_revoke_failed", "sessions_revoke_failed"]);
+    // The result never fabricates a snapshot.
+    expect(r.readBackClaims).toBeNull();
+    expect(r.readBack).toEqual({ customClaims: "failed", usersDocRole: "read" });
+    // BOTH failures are kept, in order.
+    expect(r.failureDetails).toHaveLength(2);
+    expect(r.failureDetails[0]).toMatch(/^sessions_revoke_failed: /);
+    expect(r.failureDetails[1]).toMatch(/^verification_failed: read-back failed: target Auth record could not be read/);
+    expect(r.message).toMatch(/read-back FAILED: the resulting state is UNKNOWN, not empty/);
+    const row = w.audit.get(OUTCOME)!;
+    expect(row).toMatchObject({
+      actionType: "SYSTEM_ADMIN_CLAIM_INCOMPLETE",
+      before: { customClaims: { admin: true, plan: "pro" } },
+      after: { customClaims: null },
+      metadata: {
+        completed: false,
+        afterSemantics: "unknown",
+        readBack: { customClaims: "failed", usersDocRole: "read" },
+        outcome: "sessions_revoke_failed",
+      },
+    });
+    const md = row.metadata as { outcomeDetails: string[]; outcomeDetail: string };
+    expect(md.outcomeDetails).toEqual(r.failureDetails);
+    expect(md.outcomeDetail).toContain("sessions_revoke_failed");
+    expect(md.outcomeDetail).toContain("read-back failed");
+    // The real state: unrelated claims are intact (the row did not claim otherwise).
+    expect(w.users.get(TARGET)!.customClaims).toEqual({ plan: "pro" });
+  });
+
+  it("grant path: read-back getUser throws after a successful write => verification_failed, after.customClaims null, unknown", async () => {
+    const w = world();
+    w.fail.getUserAfterWrite = true;
+    const r = await runSystemAdminClaim(ctx(args(["--operator-id-token-file=/t", "--execute", `--confirm-claim=${GRANT_CONFIRM}`])), deps(w));
+    expect([r.status, r.exitCode, r.code]).toEqual(["incomplete", 3, "verification_failed"]);
+    expect(r.readBackClaims).toBeNull();
+    expect(w.audit.get(OUTCOME)).toMatchObject({
+      actionType: "SYSTEM_ADMIN_CLAIM_INCOMPLETE",
+      after: { customClaims: null },
+      metadata: { completed: false, afterSemantics: "unknown", readBack: { customClaims: "failed", usersDocRole: "read" } },
+    });
+  });
+
+  it("grant path: users/{uid}.role read-back throws => role UNKNOWN (null + failed marker), never a mismatch claim", async () => {
+    const w = world();
+    w.fail.readRoleAfterWrite = true;
+    const r = await runSystemAdminClaim(ctx(args(["--operator-id-token-file=/t", "--execute", `--confirm-claim=${GRANT_CONFIRM}`])), deps(w));
+    expect([r.status, r.exitCode, r.code]).toEqual(["incomplete", 3, "verification_failed"]);
+    expect(r.readBack).toEqual({ customClaims: "read", usersDocRole: "failed" });
+    expect(r.failureDetails).toEqual([expect.stringMatching(/^verification_failed: read-back failed: users\/\{uid\}\.role could not be read/)]);
+    expect(w.audit.get(OUTCOME)).toMatchObject({
+      after: { customClaims: { admin: true, plan: "pro" }, usersDocRole: null },
+      metadata: { completed: false, afterSemantics: "unknown", readBack: { customClaims: "read", usersDocRole: "failed" } },
+    });
+  });
+
+  it("mint failure followed by a read-back failure keeps BOTH details (not only the first)", async () => {
+    const w = world();
+    w.fail.claims = true;
+    w.fail.getUserAfterWrite = true;
+    const r = await runSystemAdminClaim(ctx(args(["--operator-id-token-file=/t", "--execute", `--confirm-claim=${GRANT_CONFIRM}`])), deps(w));
+    expect(r.code).toBe("mint_failed");
+    expect(r.failureDetails.map((d) => d.split(":")[0])).toEqual(["mint_failed", "verification_failed"]);
+    expect((w.audit.get(OUTCOME)!.metadata as { outcomeDetails: string[] }).outcomeDetails).toEqual(r.failureDetails);
+  });
+
+  it("an outcome-row failure is added to the details after the earlier ones", async () => {
+    const w = world();
+    w.fail.getUserAfterWrite = true;
+    w.fail.outcome = true;
+    const r = await runSystemAdminClaim(ctx(args(["--operator-id-token-file=/t", "--execute", `--confirm-claim=${GRANT_CONFIRM}`])), deps(w));
+    expect(r.code).toBe("verification_failed");
+    expect(r.failureDetails.map((d) => d.split(":")[0])).toEqual(["verification_failed", "audit_outcome_missing"]);
+  });
+
+  it("sessions-only retry whose read-back fails: still no claim write, incomplete exit 3, claims UNKNOWN", async () => {
+    const w = adminTargetWorld();
+    w.users.get(TARGET)!.customClaims = { plan: "pro" };
+    w.fail.getUserAfterWrite = true;
+    const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), deps(w));
+    expect([r.status, r.exitCode, r.code, r.claimWrite]).toEqual(["incomplete", 3, "verification_failed", "skip_already_absent"]);
+    expect(w.calls.some((c) => c.startsWith("writeCustomClaims"))).toBe(false);
+    expect(w.audit.get(OUTCOME)).toMatchObject({
+      actionType: "SYSTEM_ADMIN_CLAIM_INCOMPLETE",
+      after: { customClaims: null },
+      metadata: { afterSemantics: "unknown", completed: false, claimWrite: "skip_already_absent" },
+    });
+  });
+
+  it("CONTROL: a fully verified run records read-back semantics, a real snapshot, and no failure details", async () => {
+    const w = adminTargetWorld();
+    const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), deps(w));
+    expect([r.status, r.exitCode]).toEqual(["applied", 0]);
+    expect(r.readBack).toEqual({ customClaims: "read", usersDocRole: "read" });
+    expect(r.failureDetails).toEqual([]);
+    expect(w.audit.get(OUTCOME)).toMatchObject({
+      after: { customClaims: { plan: "pro" }, usersDocRole: "user" },
+      metadata: { afterSemantics: "read-back", completed: true, readBack: { customClaims: "read", usersDocRole: "read" } },
+    });
+    expect(w.audit.get(OUTCOME)!.metadata).not.toHaveProperty("outcomeDetail");
+  });
+
+  it("dry run / refusal: read-back is not_attempted and no snapshot is reported", async () => {
+    const w = world();
+    const r = await runSystemAdminClaim(ctx(args([])), deps(w));
+    expect(r.readBack).toEqual({ customClaims: "not_attempted", usersDocRole: "not_attempted" });
+    expect(r.readBackClaims).toBeNull();
   });
 });

@@ -392,22 +392,46 @@ export function validateServiceAccountKey(
   };
 }
 
-/** True when `child` is `parent` or lies beneath it (both already absolute and resolved). */
-export function isPathInside(child: string, parent: string): boolean {
-  const rel = nodePath.relative(parent, child);
-  return rel === "" || (!rel.startsWith("..") && !nodePath.isAbsolute(rel));
+/**
+ * True when `child` is `parent` or lies beneath it. Both MUST already be
+ * filesystem-canonical (realpath.native of an existing directory); this is a
+ * `path.relative` comparison, never a lexical prefix test. With
+ * `caseInsensitive` both are case-folded first, so `/users/op/apps/cp` is
+ * inside `/Users/op/Apps/CP` on a case-insensitive volume (macOS/Windows default).
+ */
+export function isPathInside(child: string, parent: string, caseInsensitive = false): boolean {
+  const c = caseInsensitive ? child.toLowerCase() : child;
+  const p = caseInsensitive ? parent.toLowerCase() : parent;
+  const rel = nodePath.relative(p, c);
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${nodePath.sep}`) && !nodePath.isAbsolute(rel));
 }
 
 /**
- * The local result file holds UIDs and must never be committed. Its directory
- * (after symlink resolution, done by the caller) must be outside the repo.
+ * The local result file holds UIDs and must never be committed. The caller
+ * passes the filesystem-canonical parent directory (realpath.native — symlinks
+ * resolved and on-disk case restored) and the canonical root of EVERY git
+ * worktree of this repository; the file must lie inside none of them. Fails
+ * closed: no protected root at all is a refusal.
  */
-export function checkResultPath(args: { resolvedFile: string; resolvedDir: string; repoRoot: string }): Refusal | null {
+export function checkResultPath(args: {
+  resolvedFile: string;
+  resolvedDir: string;
+  protectedRoots: readonly string[];
+  caseInsensitive: boolean;
+}): Refusal | null {
   if (!nodePath.isAbsolute(args.resolvedFile) || !args.resolvedFile.endsWith(".json")) {
     return refuse("result_path_invalid", "Refusing: --result-file must resolve to an absolute path ending in .json.");
   }
-  if (isPathInside(args.resolvedDir, args.repoRoot) || isPathInside(args.resolvedFile, args.repoRoot)) {
-    return refuse("result_path_inside_repo", "Refusing: the result file must be outside the git worktree (it contains UIDs).");
+  if (!nodePath.isAbsolute(args.resolvedDir) || nodePath.dirname(args.resolvedFile) !== args.resolvedDir) {
+    return refuse("result_path_invalid", "Refusing: the result file's directory could not be canonicalised.");
+  }
+  if (args.protectedRoots.length === 0 || args.protectedRoots.some((r) => !nodePath.isAbsolute(r))) {
+    return refuse("result_path_invalid", "Refusing: the repository root could not be canonicalised.");
+  }
+  for (const root of args.protectedRoots) {
+    if (isPathInside(args.resolvedDir, root, args.caseInsensitive) || isPathInside(args.resolvedFile, root, args.caseInsensitive)) {
+      return refuse("result_path_inside_repo", "Refusing: the result file must be outside every git worktree of this repository (it contains UIDs).");
+    }
   }
   return null;
 }
@@ -743,6 +767,9 @@ export type AuditPhase = "attempt" | "outcome";
 /** Completed outcomes (exit 0) and incomplete ones (exit 3). */
 export type CompletedOutcome = "applied" | "claim_already_absent_sessions_revoked";
 export type AuditOutcome = CompletedOutcome | PostWriteFailure;
+/** Whether a post-write read actually returned data ("failed" = threw; nothing is known). */
+export type ReadOutcome = "read" | "failed";
+export type ReadBackStatus = { customClaims: ReadOutcome; usersDocRole: ReadOutcome };
 /** How the claim is handled by this run: written, or (revoke re-run) already absent and NOT rewritten. */
 export type ClaimWritePlan = "write" | "skip_already_absent";
 
@@ -780,7 +807,13 @@ export function auditDocId(requestId: string, phase: AuditPhase): string {
 export function buildClaimAuditRecord<TS>(input: {
   phase: AuditPhase;
   outcome?: AuditOutcome;
-  outcomeDetail?: string;
+  /** Every failure recorded by the run, in order (not only the first). */
+  outcomeDetails?: readonly string[];
+  /**
+   * Outcome rows only: whether each `after` field was actually read back.
+   * Missing (or any "failed") => `afterSemantics: "unknown"`; fail closed.
+   */
+  readBack?: ReadBackStatus;
   requestId: string;
   createdAt: TS;
   projectId: string;
@@ -791,7 +824,8 @@ export function buildClaimAuditRecord<TS>(input: {
   targetUid: string;
   targetEmail?: string;
   beforeClaims: Claims;
-  afterClaims: Claims;
+  /** Attempt: the intended claims. Outcome: the read-back claims, or null when they could not be read. */
+  afterClaims: Claims | null;
   usersDocRoleBefore: string | null;
   usersDocRoleAfter: string | null;
   claimWrite: ClaimWritePlan;
@@ -816,14 +850,32 @@ export function buildClaimAuditRecord<TS>(input: {
     confirmClaim: input.confirmClaim,
   };
   // The attempt row's `after` is the INTENDED state, never evidence that it
-  // was reached; only an outcome row with completed === true is.
-  const outcome: AuditOutcome | undefined = input.phase === "outcome" ? (input.outcome ?? "verification_failed") : undefined;
+  // was reached; only an outcome row with completed === true is. An outcome
+  // row whose read-back did not fully succeed NEVER presents a snapshot: the
+  // unread fields are null, afterSemantics is "unknown", and it can never be
+  // a completed outcome.
+  const readBack: ReadBackStatus | undefined = input.phase === "outcome"
+    ? {
+      customClaims: input.readBack?.customClaims === "read" && input.afterClaims !== null ? "read" : "failed",
+      usersDocRole: input.readBack?.usersDocRole === "read" ? "read" : "failed",
+    }
+    : undefined;
+  const fullyRead = readBack !== undefined && readBack.customClaims === "read" && readBack.usersDocRole === "read";
+  let outcome: AuditOutcome | undefined = input.phase === "outcome" ? (input.outcome ?? "verification_failed") : undefined;
+  if (outcome !== undefined && !fullyRead && isCompletedOutcome(outcome)) outcome = "verification_failed";
   metadata.completed = outcome !== undefined && isCompletedOutcome(outcome);
-  metadata.afterSemantics = input.phase === "attempt" ? "intended-not-applied" : "read-back";
+  metadata.afterSemantics = input.phase === "attempt" ? "intended-not-applied" : fullyRead ? "read-back" : "unknown";
+  if (readBack !== undefined) metadata.readBack = readBack;
   if (outcome !== undefined) {
     metadata.outcome = outcome;
-    if (input.outcomeDetail) metadata.outcomeDetail = input.outcomeDetail;
+    const details = (input.outcomeDetails ?? []).filter((d) => typeof d === "string" && d !== "");
+    if (details.length > 0) {
+      metadata.outcomeDetail = details.join("; ");
+      metadata.outcomeDetails = [...details];
+    }
   }
+  const afterClaims: Claims | null = readBack !== undefined && readBack.customClaims !== "read" ? null : input.afterClaims;
+  const afterRole: string | null = readBack !== undefined && readBack.usersDocRole !== "read" ? null : input.usersDocRoleAfter;
   const record: {
     adminUid: string;
     adminEmail?: string;
@@ -831,7 +883,7 @@ export function buildClaimAuditRecord<TS>(input: {
     targetEmail?: string;
     actionType: ClaimAuditActionType;
     before: { customClaims: Claims; usersDocRole: string | null };
-    after: { customClaims: Claims; usersDocRole: string | null };
+    after: { customClaims: Claims | null; usersDocRole: string | null };
     createdAt: TS;
     requestId: string;
     metadata: Record<string, unknown>;
@@ -840,7 +892,7 @@ export function buildClaimAuditRecord<TS>(input: {
     targetUid: input.targetUid,
     actionType: claimAuditActionType(input.phase, input.operation, outcome),
     before: { customClaims: input.beforeClaims, usersDocRole: input.usersDocRoleBefore },
-    after: { customClaims: input.afterClaims, usersDocRole: input.usersDocRoleAfter },
+    after: { customClaims: afterClaims, usersDocRole: afterRole },
     createdAt: input.createdAt,
     requestId: input.requestId,
     metadata,

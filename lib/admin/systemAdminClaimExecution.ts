@@ -35,6 +35,7 @@ import {
   type ParsedClaimArgs,
   type PostWriteFailure,
   type Refusal,
+  type ReadOutcome,
   type RefusalCode,
   type ServiceAccountEvidence,
   type UserRecordLike,
@@ -122,8 +123,14 @@ export type RunResult = {
   sessionRevocation: "required" | "not_applicable";
   claimWrite: ClaimWritePlan | null;
   plan: { before: Claims; after: Claims; diff: string[] } | null;
+  /** null whenever the post-write read-back did not succeed (never a fabricated `{}`). */
   readBackClaims: Claims | null;
+  /** `after` is null both for "no role" and "could not read": `readBack.usersDocRole` disambiguates. */
   usersDocRole: { before: string | null; after: string | null };
+  /** Whether each post-write read actually returned data; "not_attempted" when no write ran. */
+  readBack: { customClaims: ReadOutcome | "not_attempted"; usersDocRole: ReadOutcome | "not_attempted" };
+  /** Every failure recorded on an incomplete run, in order (the `code` is the first). */
+  failureDetails: string[];
   authorization: { mode: AuthorizationMode | "not_evaluated"; operatorUid: string | null; operatorEmailMasked: string | null };
   expectedConfirmation: string | null;
   /** Rows created and confirmed. */
@@ -169,6 +176,8 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
     plan: null,
     readBackClaims: null,
     usersDocRole: { before: null, after: null },
+    readBack: { customClaims: "not_attempted", usersDocRole: "not_attempted" },
+    failureDetails: [],
     authorization: { mode: "not_evaluated", operatorUid: null, operatorEmailMasked: null },
     expectedConfirmation: null,
     auditRowIds: [],
@@ -364,8 +373,19 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
     confirmClaim: expected,
   };
 
-  let failure: PostWriteFailure | null = null;
-  let failureDetail: string | undefined;
+  // The FIRST failure is the run's code; EVERY failure is kept as a detail so a
+  // later failure (e.g. the read-back) is never hidden behind an earlier one.
+  // (`as` keeps TypeScript from narrowing to null: it is assigned in a closure.)
+  let failure = null as PostWriteFailure | null;
+  const details = result.failureDetails;
+  const recordFailure = (code: PostWriteFailure, detail: string): void => {
+    if (!failure) failure = code;
+    details.push(`${code}: ${detail}`);
+  };
+  const codeOf = (e: unknown): string => {
+    const code = errorCode(e);
+    return typeof code === "string" ? code : "unknown error";
+  };
 
   const attemptId = auditDocId(ctx.requestId, "attempt");
   result.writesAttempted.push("audit_attempt_row");
@@ -382,12 +402,8 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
     // an incomplete WRITE outcome (exit 3), not a refusal: nothing guarantees
     // that zero database writes happened.
     result.auditRowIdsUnconfirmed.push(attemptId);
-    return incomplete(
-      result,
-      "audit_attempt_failed",
-      "attempt audit row creation failed; the row may or may not exist. No claim, session or role write was issued",
-      deps,
-    );
+    details.push("audit_attempt_failed: attempt audit row creation failed; the row may or may not exist. No claim, session or role write was issued");
+    return incomplete(result, "audit_attempt_failed", deps);
   }
   result.auditRowIds.push(attemptId);
 
@@ -396,9 +412,7 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
     try {
       await deps.auth.writeCustomClaims(args.targetUid, plan.after);
     } catch (e) {
-      failure = "mint_failed";
-      const code = errorCode(e);
-      failureDetail = typeof code === "string" ? code : "unknown error";
+      recordFailure("mint_failed", `custom claim write failed (${codeOf(e)})`);
     }
   }
 
@@ -406,8 +420,8 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
     result.writesAttempted.push("revoke_refresh_tokens");
     try {
       await deps.auth.revokeRefreshTokens(args.targetUid);
-    } catch {
-      failure = "sessions_revoke_failed";
+    } catch (e) {
+      recordFailure("sessions_revoke_failed", `refresh-token revocation failed (${codeOf(e)})`);
     }
   }
 
@@ -415,40 +429,44 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
     result.writesAttempted.push("users_doc_role");
     try {
       await deps.store.writeUsersDocRole(args.targetUid, intendedRole);
-    } catch {
-      failure = "users_doc_failed";
+    } catch (e) {
+      recordFailure("users_doc_failed", `users/{uid}.role write failed (${codeOf(e)})`);
     }
   }
 
   // --- read back (always, after any write attempt) ---------------------------
+  // A read that throws leaves its field UNKNOWN (null + "failed"); it is never
+  // replaced by an empty snapshot, and it is always recorded as a failure
+  // detail even when an earlier step already failed.
   let readBack: UserRecordLike | null = null;
   try {
     readBack = await deps.auth.getUser(args.targetUid);
     result.readBackClaims = readBack.customClaims && typeof readBack.customClaims === "object"
       ? { ...(readBack.customClaims as Claims) }
       : {};
-  } catch {
-    if (!failure) {
-      failure = "verification_failed";
-      failureDetail = "read-back lookup failed";
-    }
+    result.readBack.customClaims = "read";
+  } catch (e) {
+    readBack = null;
+    result.readBackClaims = null;
+    result.readBack.customClaims = "failed";
+    recordFailure("verification_failed", `read-back failed: target Auth record could not be read (${codeOf(e)}); claims after this run are UNKNOWN`);
   }
   try {
     result.usersDocRole.after = await deps.store.readUsersDocRole(args.targetUid);
-  } catch {
+    result.readBack.usersDocRole = "read";
+  } catch (e) {
     result.usersDocRole.after = null;
+    result.readBack.usersDocRole = "failed";
+    recordFailure("verification_failed", `read-back failed: users/{uid}.role could not be read (${codeOf(e)}); role after this run is UNKNOWN`);
   }
   if (!failure && readBack) {
     const v = verifyReadBack(plan, readBack.customClaims);
     if (!v.ok) {
-      failure = "verification_failed";
-      failureDetail = v.detail;
+      recordFailure("verification_failed", v.detail);
     } else if (args.operation === "revoke" && !verifySessionsRevoked(readBack.tokensValidAfterTime, preWriteTokensValidAfterTime)) {
-      failure = "verification_failed";
-      failureDetail = "tokensValidAfterTime did not advance";
+      recordFailure("verification_failed", "tokensValidAfterTime did not advance");
     } else if (result.usersDocRole.after !== intendedRole) {
-      failure = "verification_failed";
-      failureDetail = "users/{uid}.role read-back mismatch";
+      recordFailure("verification_failed", "users/{uid}.role read-back mismatch");
     }
   }
 
@@ -460,19 +478,23 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
       ...auditBase,
       phase: "outcome",
       outcome,
-      outcomeDetail: failureDetail,
+      outcomeDetails: [...details],
       createdAt: deps.timestampNow(),
-      afterClaims: result.readBackClaims ?? {},
+      afterClaims: result.readBack.customClaims === "read" ? result.readBackClaims : null,
       usersDocRoleAfter: result.usersDocRole.after,
+      readBack: {
+        customClaims: result.readBack.customClaims === "read" ? "read" : "failed",
+        usersDocRole: result.readBack.usersDocRole === "read" ? "read" : "failed",
+      },
     }));
     result.auditRowIds.push(outcomeId);
   } catch {
     result.auditRowIdsUnconfirmed.push(outcomeId);
-    if (!failure) failure = "audit_outcome_missing";
+    recordFailure("audit_outcome_missing", "outcome audit row creation failed; the row may or may not exist");
     deps.log(`AUDIT OUTCOME MISSING for ${ctx.requestId}: reconcile from the local result file and the attempt row.`);
   }
 
-  if (failure) return incomplete(result, failure, failureDetail, deps);
+  if (failure) return incomplete(result, failure, deps);
 
   result.outcome = outcome;
   result.exitCode = 0;
@@ -494,12 +516,15 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
 export const RERUN_IS_SAFE =
   "Re-running the same command is safe: it never re-applies a claim already in place, never changes any other claim, and a revoke re-run whose claim is already absent only completes the outstanding session revocation (no claim write).";
 
-function incomplete<TS>(result: RunResult, code: PostWriteFailure, detail: string | undefined, deps: ExecutionDeps<TS>): RunResult {
+function incomplete<TS>(result: RunResult, code: PostWriteFailure, deps: ExecutionDeps<TS>): RunResult {
   result.status = "incomplete";
   result.exitCode = 3;
   result.code = code;
   result.outcome = code;
-  result.message = `INCOMPLETE (${code}${detail ? `: ${detail}` : ""}). A write was attempted and the operation is not verified complete; inspect the read-back before assuming either state. ${RERUN_IS_SAFE}`;
+  const unknown = result.readBack.customClaims === "failed" || result.readBack.usersDocRole === "failed"
+    ? " The post-write read-back FAILED: the resulting state is UNKNOWN, not empty."
+    : "";
+  result.message = `INCOMPLETE (${code}). Failures: ${result.failureDetails.join("; ") || code}.${unknown} A write was attempted and the operation is not verified complete; inspect the read-back before assuming either state. ${RERUN_IS_SAFE}`;
   deps.log(result.message);
   return result;
 }

@@ -23,7 +23,7 @@
  *     [--operator-id-token-file=<file>]     # SYSTEM_ADMIN ID token, mode 0600; required for --execute
  *     [--bootstrap-first-admin]             # instead of a token, only while zero admins exist
  *     [--execute --confirm-claim=<exact string printed by the dry run>]
- *     [--result-file=<absolute path outside the repo, *.json>]
+ *     [--result-file=<path to a NEW *.json file outside every git worktree of this repo>]
  *
  * EXIT CODES: 0 completed and verified (or a grant already in place);
  * 2 refused or dry run — no Firebase write call was issued;
@@ -92,9 +92,20 @@ export type CliIo = {
   stderr: (line: string) => void;
   /** null when the path does not exist or cannot be opened. */
   readSecretFile: (p: string) => SecretFileRead | null;
+  /** Filesystem-canonical path (realpath.native: symlinks resolved, on-disk case) of an EXISTING path; null otherwise. */
   realpathDir: (p: string) => string | null;
-  /** Create the result file exclusively (O_CREAT|O_EXCL, mode 0600) before any Firebase call; keep the fd. */
-  createResultFile: (p: string) => ResultFileHandle;
+  /** Roots of every git worktree of the repository at repoRoot; null when git cannot list them. */
+  gitWorktreeRoots: () => string[] | null;
+  /** True when paths under `canonicalDir` compare case-insensitively (always true on darwin/win32). */
+  caseInsensitivePaths: (canonicalDir: string) => boolean;
+  /** What is at `p` WITHOUT following a final symlink. */
+  lstatKind: (p: string) => "absent" | "symlink" | "file" | "other" | "error";
+  /**
+   * Create the result file exclusively (O_CREAT|O_EXCL|O_NOFOLLOW, mode 0600)
+   * before any Firebase call and keep the fd. Throws if the file did not land
+   * at `p` inside `canonicalDir` (a directory swapped after the check).
+   */
+  createResultFile: (p: string, canonicalDir: string) => ResultFileHandle;
   /** Create (0700) or lstat the default result directory; returns its lstat for checkResultDirStat. */
   prepareDefaultResultDir: () => { dir: string; stat: DirStat | null };
   currentUid: () => number | null;
@@ -171,6 +182,53 @@ function makeOperatorTokenReader(io: CliIo) {
 }
 
 // ---------------------------------------------------------------------------
+// Result-file location (filesystem-grounded, fail closed)
+
+/**
+ * Canonicalises the result file's parent directory and every protected root
+ * through the filesystem (realpath.native), never lexically, and refuses a
+ * file inside ANY git worktree of this repository — compared case-folded on a
+ * case-insensitive volume. The target must not exist yet (no file, no
+ * symlink); the exclusive O_NOFOLLOW create then closes the remaining race.
+ */
+export function checkResultLocation(
+  resultFile: string,
+  repoRoot: string,
+  io: Pick<CliIo, "realpathDir" | "gitWorktreeRoots" | "caseInsensitivePaths" | "lstatKind">,
+): { ok: true; file: string; dir: string } | Refusal {
+  const dir = io.realpathDir(path.dirname(resultFile));
+  if (dir === null) {
+    return refuse("result_path_invalid", "Refusing: the result file's directory does not exist or could not be canonicalised.");
+  }
+  const repoCanonical = io.realpathDir(repoRoot);
+  if (repoCanonical === null) {
+    return refuse("result_path_invalid", "Refusing: the repository root could not be canonicalised.");
+  }
+  const roots = new Set<string>([repoCanonical, path.resolve(repoRoot)]);
+  for (const w of io.gitWorktreeRoots() ?? []) {
+    roots.add(path.resolve(w));
+    const c = io.realpathDir(w);
+    if (c !== null) roots.add(c);
+  }
+  const file = path.join(dir, path.basename(resultFile));
+  const caseInsensitive = io.caseInsensitivePaths(dir) || io.caseInsensitivePaths(repoCanonical);
+  const r = checkResultPath({ resolvedFile: file, resolvedDir: dir, protectedRoots: [...roots], caseInsensitive });
+  if (r) return r;
+  const kind = io.lstatKind(file);
+  if (kind !== "absent") {
+    return refuse(
+      "result_path_invalid",
+      kind === "symlink"
+        ? "Refusing: a symbolic link already exists at the result file path."
+        : kind === "error"
+          ? "Refusing: the result file path could not be inspected."
+          : "Refusing: something already exists at the result file path; the result file is never overwritten.",
+    );
+  }
+  return { ok: true, file, dir };
+}
+
+// ---------------------------------------------------------------------------
 // CLI
 
 export async function runCli(opts: CliOptions): Promise<number> {
@@ -205,20 +263,17 @@ export async function runCli(opts: CliOptions): Promise<number> {
     }
     resultFile = path.join(prepared.dir, `system-admin-claim-${requestId}.json`);
   }
-  const resultDir = io.realpathDir(path.dirname(resultFile));
-  const repoRoot = io.realpathDir(opts.repoRoot) ?? opts.repoRoot;
-  const pathRefusal = resultDir === null
-    ? refuse("result_path_invalid", "Refusing: the result file's directory does not exist.")
-    : checkResultPath({ resolvedFile: path.join(resultDir, path.basename(resultFile)), resolvedDir: resultDir, repoRoot });
-  if (pathRefusal) {
-    io.stderr(`[${pathRefusal.code}] ${pathRefusal.message}`);
+  const pathCheck = checkResultLocation(resultFile, opts.repoRoot, io);
+  if (!pathCheck.ok) {
+    io.stderr(`[${pathCheck.code}] ${pathCheck.message}`);
     return 2;
   }
+  resultFile = pathCheck.file;
   let resultHandle: ResultFileHandle;
   try {
-    resultHandle = io.createResultFile(resultFile);
+    resultHandle = io.createResultFile(pathCheck.file, pathCheck.dir);
   } catch {
-    io.stderr("[result_path_invalid] Refusing: could not create the result file exclusively (it may already exist).");
+    io.stderr("[result_path_invalid] Refusing: could not create the result file exclusively (it may already exist, or its directory changed).");
     return 2;
   }
 
@@ -385,14 +440,30 @@ export const realFirebaseFactory: FirebaseFactory = ({ projectId, clientEmail, p
   };
 };
 
-export function realIo(repoRoot: string): CliIo {
+/** The fs surface realIo uses; injectable so tests can simulate races (e.g. lstat vs fstat disagreeing). */
+export type FsLayer = Pick<
+  typeof fs,
+  | "lstatSync" | "statSync" | "openSync" | "fstatSync" | "readFileSync" | "closeSync" | "realpathSync"
+  | "ftruncateSync" | "writeSync" | "fsyncSync" | "mkdirSync" | "unlinkSync" | "constants"
+>;
+
+export function realIo(repoRoot: string, fsx: FsLayer = fs): CliIo {
+  const realpathNative = (p: string): string | null => {
+    try {
+      // .native: the OS realpath(3) — resolves symlinks AND restores on-disk
+      // case on case-insensitive volumes; the JS realpathSync keeps input case.
+      return fsx.realpathSync.native(p);
+    } catch {
+      return null;
+    }
+  };
   return {
     stdout: (line) => process.stdout.write(`${line}\n`),
     stderr: (line) => process.stderr.write(`${line}\n`),
     readSecretFile: (p) => {
       let l: fs.Stats;
       try {
-        l = fs.lstatSync(p);
+        l = fsx.lstatSync(p);
       } catch {
         return null;
       }
@@ -405,48 +476,98 @@ export function realIo(repoRoot: string): CliIo {
         // O_NOFOLLOW: a symlink swapped in after the lstat still fails here.
         // O_NONBLOCK: a FIFO swapped in after the lstat cannot block the open;
         // the fstat below then refuses it. No effect on a regular file.
-        fd = fs.openSync(p, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+        fd = fsx.openSync(p, fsx.constants.O_RDONLY | fsx.constants.O_NOFOLLOW | fsx.constants.O_NONBLOCK);
       } catch {
         return null;
       }
       try {
-        const st = fs.fstatSync(fd);
+        const st = fsx.fstatSync(fd);
         // Only a regular file is read (a FIFO/device could block or be unbounded).
-        const body = st.isFile() ? fs.readFileSync(fd, "utf8") : null;
+        const body = st.isFile() ? fsx.readFileSync(fd, "utf8") : null;
         return { isSymlink: false, isFile: st.isFile(), mode: st.mode, body };
       } finally {
-        fs.closeSync(fd);
+        fsx.closeSync(fd);
       }
     },
-    realpathDir: (p) => {
+    realpathDir: (p) => realpathNative(p),
+    gitWorktreeRoots: () => {
       try {
-        return fs.realpathSync(p);
+        const out = execFileSync("git", ["-C", repoRoot, "worktree", "list", "--porcelain"], { encoding: "utf8" });
+        return out.split("\n").filter((l) => l.startsWith("worktree ")).map((l) => l.slice("worktree ".length));
       } catch {
         return null;
       }
     },
-    createResultFile: (p) => {
-      // O_CREAT|O_EXCL ("wx") refuses an existing file or symlink; the fd is
-      // kept so the final write cannot be redirected by a path swap.
-      const fd = fs.openSync(p, "wx", 0o600);
+    caseInsensitivePaths: (canonicalDir) => {
+      // APFS/HFS+ and NTFS default to case-insensitive: fold unconditionally there.
+      if (process.platform === "darwin" || process.platform === "win32") return true;
+      const swapped = canonicalDir.replace(/[a-zA-Z]/g, (ch) => (ch === ch.toLowerCase() ? ch.toUpperCase() : ch.toLowerCase()));
+      if (swapped === canonicalDir) return false;
+      try {
+        const a = fsx.statSync(canonicalDir);
+        const b = fsx.statSync(swapped);
+        return a.dev === b.dev && a.ino === b.ino;
+      } catch {
+        return false;
+      }
+    },
+    lstatKind: (p) => {
+      try {
+        const l = fsx.lstatSync(p);
+        return l.isSymbolicLink() ? "symlink" : l.isFile() ? "file" : "other";
+      } catch (e) {
+        return (e as { code?: unknown })?.code === "ENOENT" ? "absent" : "error";
+      }
+    },
+    createResultFile: (p, canonicalDir) => {
+      // O_CREAT|O_EXCL refuses an existing file or symlink; O_NOFOLLOW also
+      // refuses a final-component symlink planted after the location check.
+      // The fd is kept so the final write cannot be redirected by a path swap.
+      const c = fsx.constants;
+      const fd = fsx.openSync(p, c.O_WRONLY | c.O_CREAT | c.O_EXCL | c.O_NOFOLLOW, 0o600);
+      let landed = false;
+      try {
+        const st = fsx.fstatSync(fd);
+        const l = fsx.lstatSync(p);
+        landed = l.dev === st.dev && l.ino === st.ino;
+        // A parent directory swapped for a symlink between the check and the
+        // create would put the file elsewhere: re-canonicalise and compare.
+        if (!st.isFile() || !landed || realpathNative(path.dirname(p)) !== canonicalDir) {
+          throw new Error("result file did not land in the checked directory");
+        }
+      } catch (e) {
+        try {
+          fsx.closeSync(fd);
+        } catch {
+          // ignore
+        }
+        if (landed) {
+          try {
+            fsx.unlinkSync(p); // our own empty file, never anyone else's (same inode)
+          } catch {
+            // ignore
+          }
+        }
+        throw e;
+      }
       return {
         write: (contents) => {
-          fs.ftruncateSync(fd, 0);
-          fs.writeSync(fd, contents, 0, "utf8");
-          fs.fsyncSync(fd);
+          fsx.ftruncateSync(fd, 0);
+          fsx.writeSync(fd, contents, 0, "utf8");
+          fsx.fsyncSync(fd);
         },
-        close: () => fs.closeSync(fd),
+        close: () => fsx.closeSync(fd),
       };
     },
     prepareDefaultResultDir: () => {
       const dir = path.join(os.tmpdir(), "convergepanel-operator");
       try {
-        fs.mkdirSync(dir, { mode: 0o700 });
+        fsx.mkdirSync(dir, { mode: 0o700 });
       } catch {
         // already exists (or cannot be created) — inspected below either way
       }
       try {
-        const l = fs.lstatSync(dir);
+        const l = fsx.lstatSync(dir);
         return { dir, stat: { isSymlink: l.isSymbolicLink(), isDirectory: l.isDirectory(), uid: l.uid, mode: l.mode } };
       } catch {
         return { dir, stat: null };

@@ -8,8 +8,17 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { runCli, realIo, type CliIo, type FirebaseFactory, type FirebaseHandle } from "../set-system-admin-claim";
-import { REFUSAL_CODES, checkResultDirStat, expectedConfirmation } from "../../../lib/admin/systemAdminClaimSafety";
+import {
+  checkResultLocation,
+  loadOperatorCredential,
+  realIo,
+  runCli,
+  type CliIo,
+  type FirebaseFactory,
+  type FirebaseHandle,
+  type FsLayer,
+} from "../set-system-admin-claim";
+import { REFUSAL_CODES, checkResultDirStat, expectedConfirmation, parseSetSystemAdminClaimArgs } from "../../../lib/admin/systemAdminClaimSafety";
 import type { UserRecordLike } from "../../../lib/admin/systemAdminClaimSafety";
 
 const readOnly = require("../../check-admin-claims.js");
@@ -70,6 +79,9 @@ function fakeIo(e: Env, over: Partial<CliIo> = {}): CliIo {
       return { isSymlink: false, isFile: true, mode: f.mode, body: f.body };
     },
     realpathDir: (p) => (p.startsWith("/nonexistent") ? null : p),
+    gitWorktreeRoots: () => [REPO],
+    caseInsensitivePaths: () => false,
+    lstatKind: (p) => (e.results.has(p) ? "file" : "absent"),
     createResultFile: (p) => {
       if (e.results.has(p)) throw new Error("EEXIST");
       e.created.push(p);
@@ -392,9 +404,9 @@ describe("realIo — files on disk (temp dirs only)", () => {
   it("result file: exclusive 0600 create, written through the kept fd (a path swap after create is not followed)", () => {
     const io = realIo(REPO);
     const p = path.join(dir, "r.json");
-    const h = io.createResultFile(p);
+    const h = io.createResultFile(p, fs.realpathSync.native(dir));
     expect(fs.statSync(p).mode & 0o777).toBe(0o600);
-    expect(() => io.createResultFile(p)).toThrow();
+    expect(() => io.createResultFile(p, fs.realpathSync.native(dir))).toThrow();
     // Swap the path for a decoy after the create; the fd still points at the original inode.
     const moved = path.join(dir, "moved.json");
     fs.renameSync(p, moved);
@@ -410,7 +422,7 @@ describe("realIo — files on disk (temp dirs only)", () => {
     fs.writeFileSync(target, "ORIGINAL");
     const link = path.join(dir, "link.json");
     fs.symlinkSync(target, link);
-    expect(() => realIo(REPO).createResultFile(link)).toThrow();
+    expect(() => realIo(REPO).createResultFile(link, fs.realpathSync.native(dir))).toThrow();
     expect(fs.readFileSync(target, "utf8")).toBe("ORIGINAL");
   });
 
@@ -458,6 +470,301 @@ describe("realIo — files on disk (temp dirs only)", () => {
     const { dir: d, stat } = io.prepareDefaultResultDir();
     expect(path.relative(REPO, d).startsWith("..")).toBe(true);
     expect(checkResultDirStat(stat, io.currentUid())).toBeNull();
+  });
+});
+
+describe("M-2: result-file location is filesystem-grounded (real temp dirs; never the real repo)", () => {
+  // A stand-in "repository" with mixed case under os.tmpdir(): nothing here
+  // can ever create a file inside the real worktree, even under a mutant.
+  let base: string;
+  let repo: string;
+  let outside: string;
+  let otherWt: string;
+  beforeEach(() => {
+    base = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "sac-m2-")));
+    repo = path.join(base, "RepoRoot");
+    outside = path.join(base, "Outside");
+    otherWt = path.join(base, "OtherWorktree");
+    for (const d of [repo, outside, otherWt]) fs.mkdirSync(d);
+  });
+  afterEach(() => {
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+  const IS_CI_VOLUME = process.platform === "darwin" || process.platform === "win32";
+  const swapCase = (p: string) => p.replace(/[a-zA-Z]/g, (c) => (c === c.toLowerCase() ? c.toUpperCase() : c.toLowerCase()));
+
+  async function runReal(resultFile: string, over: Partial<CliIo> = {}) {
+    const out: string[] = [];
+    const err: string[] = [];
+    let factoryCalls = 0;
+    const io: CliIo = {
+      ...realIo(repo),
+      stdout: (l) => out.push(l),
+      stderr: (l) => err.push(l),
+      gitWorktreeRoots: () => [repo, otherWt],
+      git: () => ({ sha: null, dirty: null }),
+      nowMs: () => Date.parse("2026-11-05T10:00:00Z"),
+      randomPart: () => "m2",
+      ...over,
+    };
+    const code = await runCli({
+      argv: [...BASE, `--result-file=${resultFile}`],
+      env: { NODE_ENV: "development" },
+      repoRoot: repo,
+      io,
+      firebase: () => {
+        factoryCalls++;
+        throw new Error("never reached: /keys/sa.json does not exist on disk");
+      },
+    });
+    return { code, out, err: err.join("\n"), factoryCalls };
+  }
+  const repoIsEmpty = () => expect(fs.readdirSync(repo)).toEqual([]);
+
+  it("CONTROL: a legitimate path outside the repo is accepted: created 0600 and written (the run then refuses the missing key)", async () => {
+    const target = path.join(outside, "ok.json");
+    const r = await runReal(target);
+    expect(r.code).toBe(2);
+    expect(r.err).toContain("[credentials_file_unreadable]");
+    expect(fs.statSync(target).mode & 0o777).toBe(0o600);
+    expect(JSON.parse(fs.readFileSync(target, "utf8"))).toMatchObject({ status: "refused", code: "credentials_file_unreadable" });
+    expect(r.out).toContain(`Result file: ${target}`);
+    repoIsEmpty();
+  });
+
+  it("CONTROL: on a case-insensitive volume a case variant of an OUTSIDE path is accepted and reported in on-disk case", async () => {
+    if (!IS_CI_VOLUME) return;
+    const r = await runReal(path.join(swapCase(outside), "ok2.json"));
+    expect(r.code).toBe(2);
+    expect(fs.existsSync(path.join(outside, "ok2.json"))).toBe(true);
+    expect(r.out).toContain(`Result file: ${path.join(outside, "ok2.json")}`);
+  });
+
+  it.each<[string, (b: { repo: string; outside: string; base: string }) => string]>([
+    ["lowercase variant", ({ repo: rp }) => path.join(rp.toLowerCase(), "out.json")],
+    ["uppercase variant", ({ repo: rp }) => path.join(rp.toUpperCase(), "out.json")],
+    ["swapped-case variant", ({ repo: rp }) => path.join(swapCase(rp), "out.json")],
+  ])("%s of the repo path is refused (never written inside the repo)", async (_l, make) => {
+    const r = await runReal(make({ repo, outside, base }));
+    expect(r.code).toBe(2);
+    // On a case-sensitive volume the variant directory does not exist at all.
+    expect(r.err).toContain(IS_CI_VOLUME ? "[result_path_inside_repo]" : "[result_path_invalid]");
+    expect(r.factoryCalls).toBe(0);
+    repoIsEmpty();
+  });
+
+  it.each<[string, (b: { repo: string; outside: string; base: string }) => string]>([
+    ["plain path inside", ({ repo: rp }) => path.join(rp, "out.json")],
+    [".. traversal from outside", ({ outside: o }) => `${o}/../RepoRoot/out.json`],
+    ["duplicate separators", ({ repo: rp }) => `${rp}//sub/..//out.json`],
+    ["trailing slash", ({ repo: rp }) => `${rp}/out.json/`],
+    ["dot segments", ({ repo: rp }) => `${rp}/./out.json`],
+  ])("%s => result_path_inside_repo", async (_l, make) => {
+    const r = await runReal(make({ repo, outside, base }));
+    expect(r.code).toBe(2);
+    expect(r.err).toContain("[result_path_inside_repo]");
+    repoIsEmpty();
+  });
+
+  it("a symlinked directory OUTSIDE that points INTO the repo is refused (canonical, not lexical)", async () => {
+    const link = path.join(outside, "link-to-repo");
+    fs.symlinkSync(repo, link);
+    const r = await runReal(path.join(link, "out.json"));
+    expect(r.err).toContain("[result_path_inside_repo]");
+    repoIsEmpty();
+  });
+
+  it("a path inside ANOTHER git worktree of the repo is refused", async () => {
+    const r = await runReal(path.join(otherWt, "out.json"));
+    expect(r.err).toContain("[result_path_inside_repo]");
+    expect(fs.readdirSync(otherWt)).toEqual([]);
+  });
+
+  it("the repo reached through a symlinked parent: protected roots are canonicalised too", async () => {
+    const repoLink = path.join(outside, "repo-alias");
+    fs.symlinkSync(repo, repoLink);
+    const out: string[] = [];
+    const err: string[] = [];
+    const io = { ...realIo(repoLink), stdout: (l: string) => out.push(l), stderr: (l: string) => err.push(l), gitWorktreeRoots: () => null };
+    const code = await runCli({ argv: [...BASE, `--result-file=${path.join(repo, "out.json")}`], env: { NODE_ENV: "development" }, repoRoot: repoLink, io, firebase: () => { throw new Error("x"); } });
+    expect(code).toBe(2);
+    expect(err.join()).toContain("[result_path_inside_repo]");
+    repoIsEmpty();
+  });
+
+  it("a repo root that cannot be canonicalised fails closed", async () => {
+    const out: string[] = [];
+    const err: string[] = [];
+    const missing = path.join(base, "no-such-repo");
+    const io = { ...realIo(missing), stdout: (l: string) => out.push(l), stderr: (l: string) => err.push(l), gitWorktreeRoots: () => null };
+    const code = await runCli({ argv: [...BASE, `--result-file=${path.join(outside, "x.json")}`], env: { NODE_ENV: "development" }, repoRoot: missing, io, firebase: () => { throw new Error("x"); } });
+    expect(code).toBe(2);
+    expect(err.join()).toContain("[result_path_invalid]");
+    expect(fs.existsSync(path.join(outside, "x.json"))).toBe(false);
+  });
+
+  it("a nonexistent parent directory is refused (nothing created)", async () => {
+    const r = await runReal(path.join(outside, "missing", "out.json"));
+    expect(r.err).toContain("[result_path_invalid]");
+    expect(fs.existsSync(path.join(outside, "missing"))).toBe(false);
+  });
+
+  it("an existing regular file at the target is refused and left untouched", async () => {
+    const target = path.join(outside, "exists.json");
+    fs.writeFileSync(target, "PREVIOUS");
+    const r = await runReal(target);
+    expect(r.err).toContain("[result_path_invalid]");
+    expect(r.err).toMatch(/already exists/);
+    expect(fs.readFileSync(target, "utf8")).toBe("PREVIOUS");
+  });
+
+  it("a symlink at the target (live or dangling) is refused; its referent is untouched / never created", async () => {
+    const real = path.join(outside, "real.json");
+    fs.writeFileSync(real, "ORIGINAL");
+    fs.symlinkSync(real, path.join(outside, "live.json"));
+    const intoRepo = path.join(repo, "planted.json");
+    fs.symlinkSync(intoRepo, path.join(outside, "dangling.json"));
+    for (const name of ["live.json", "dangling.json"]) {
+      const r = await runReal(path.join(outside, name));
+      expect(r.err).toContain("[result_path_invalid]");
+      expect(r.err).toMatch(/symbolic link/);
+    }
+    expect(fs.readFileSync(real, "utf8")).toBe("ORIGINAL");
+    repoIsEmpty();
+  });
+
+  it("a symlink planted AFTER the location check is not followed by the create (O_NOFOLLOW|O_EXCL)", async () => {
+    const intoRepo = path.join(repo, "planted.json");
+    const target = path.join(outside, "race.json");
+    const r = await runReal(target, {
+      lstatKind: (p) => {
+        const k = realIo(repo).lstatKind(p);
+        if (p === target) fs.symlinkSync(intoRepo, target); // race: plant right after the check
+        return k;
+      },
+    });
+    expect(r.code).toBe(2);
+    expect(r.err).toContain("[result_path_invalid]");
+    expect(fs.existsSync(intoRepo)).toBe(false);
+    repoIsEmpty();
+  });
+
+  it("realIo.realpathDir is realpath.NATIVE: a case variant comes back in on-disk case", () => {
+    if (!IS_CI_VOLUME) return;
+    expect(realIo(repo).realpathDir(repo.toLowerCase())).toBe(repo);
+    expect(realIo(repo).realpathDir(repo.toUpperCase())).toBe(repo);
+  });
+
+  it("realIo.caseInsensitivePaths folds on darwin/win32", () => {
+    if (!IS_CI_VOLUME) return;
+    expect(realIo(repo).caseInsensitivePaths(repo)).toBe(true);
+  });
+
+  it("checkResultLocation folds case when the volume is case-insensitive even if canonicalisation kept the input case", () => {
+    const io = {
+      realpathDir: (p: string) => p, // a canonicaliser that does NOT restore case
+      gitWorktreeRoots: () => [],
+      caseInsensitivePaths: () => true,
+      lstatKind: () => "absent" as const,
+    };
+    expect(checkResultLocation("/users/op/apps/cp/out.json", "/Users/op/Apps/CP", io)).toMatchObject({ ok: false, code: "result_path_inside_repo" });
+    expect(checkResultLocation("/Users/op/Apps/CP-other/out.json", "/Users/op/Apps/CP", io)).toMatchObject({ ok: true });
+  });
+
+  it("realIo.lstatKind: absent / file / symlink / other", () => {
+    const io = realIo(repo);
+    const f = path.join(outside, "f.json");
+    fs.writeFileSync(f, "x");
+    fs.symlinkSync(f, path.join(outside, "l.json"));
+    expect([io.lstatKind(path.join(outside, "none.json")), io.lstatKind(f), io.lstatKind(path.join(outside, "l.json")), io.lstatKind(outside)])
+      .toEqual(["absent", "file", "symlink", "other"]);
+  });
+
+  it("createResultFile opens with O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW, mode 0600", () => {
+    const p = path.join(outside, "flags.json");
+    const openSpy = jest.spyOn(rawFs, "openSync");
+    try {
+      realIo(repo).createResultFile(p, outside).close();
+      const calls = openSpy.mock.calls.filter(([q]) => q === p);
+      expect(calls).toHaveLength(1);
+      const [, flags, mode] = calls[0] as [string, number, number];
+      const c = fs.constants;
+      expect(typeof flags).toBe("number");
+      expect(flags & (c.O_WRONLY | c.O_CREAT | c.O_EXCL | c.O_NOFOLLOW)).toBe(c.O_WRONLY | c.O_CREAT | c.O_EXCL | c.O_NOFOLLOW);
+      expect(mode).toBe(0o600);
+    } finally {
+      openSpy.mockRestore();
+    }
+  });
+
+  it("createResultFile refuses a dangling symlink at the path (never creates its referent)", () => {
+    const referent = path.join(repo, "via-link.json");
+    const link = path.join(outside, "dl.json");
+    fs.symlinkSync(referent, link);
+    expect(() => realIo(repo).createResultFile(link, outside)).toThrow();
+    expect(fs.existsSync(referent)).toBe(false);
+  });
+
+  it("createResultFile: a parent directory that no longer canonicalises to the checked one => throws and removes its own empty file", () => {
+    const p = path.join(outside, "moved.json");
+    expect(() => realIo(repo).createResultFile(p, path.join(base, "SomewhereElse"))).toThrow();
+    expect(fs.existsSync(p)).toBe(false);
+  });
+});
+
+describe("M-3: exit code 1 and the post-open fstat gate", () => {
+  it("result-file write failure after an otherwise exit-0 run => exit 1 (never 0)", async () => {
+    const e = makeEnv();
+    const r = await run([...BASE, "--operator-id-token-file=/keys/token", "--execute", `--confirm-claim=${CONFIRM}`], e, {
+      io: { createResultFile: () => ({ write: () => { throw new Error("ENOSPC"); }, close: () => undefined }) },
+    });
+    expect(e.users.get(TARGET)!.customClaims).toEqual({ admin: true, keep: 1 }); // the run itself completed
+    expect(r.code).toBe(1);
+    expect(e.err.join("\n")).toContain("RESULT FILE NOT WRITTEN");
+  });
+  it("result-file write failure keeps a non-zero run's own code (3 stays 3, 2 stays 2)", async () => {
+    const failing = { createResultFile: () => ({ write: () => { throw new Error("EIO"); }, close: () => undefined }) };
+    const r3 = await run([...BASE, "--operator-id-token-file=/keys/token", "--execute", `--confirm-claim=${CONFIRM}`], makeEnv(), { io: failing, throwOn: "attempt" });
+    expect(r3.code).toBe(3);
+    const r2 = await run(BASE, makeEnv(), { io: failing });
+    expect(r2.code).toBe(2);
+  });
+  it("CONTROL: the same run with a working result file exits 0", async () => {
+    const r = await run([...BASE, "--operator-id-token-file=/keys/token", "--execute", `--confirm-claim=${CONFIRM}`]);
+    expect(r.code).toBe(0);
+  });
+
+  // lstat says "regular file", but by the time it is opened the path is a FIFO/device (a swap).
+  const swappedFs = (fstatIsFile: boolean) => {
+    const readFileSync = jest.fn(() => JSON.stringify(KEY));
+    const closeSync = jest.fn();
+    const layer = {
+      ...rawFs,
+      constants: rawFs.constants,
+      lstatSync: (() => ({ isSymbolicLink: () => false, isFile: () => true, mode: 0o100600 })) as unknown as FsLayer["lstatSync"],
+      openSync: (() => 4242) as unknown as FsLayer["openSync"],
+      fstatSync: (() => ({ isFile: () => fstatIsFile, mode: fstatIsFile ? 0o100600 : 0o010600 })) as unknown as FsLayer["fstatSync"],
+      readFileSync: readFileSync as unknown as FsLayer["readFileSync"],
+      closeSync: closeSync as unknown as FsLayer["closeSync"],
+    } as FsLayer;
+    return { layer, readFileSync, closeSync };
+  };
+  it("secret read: lstat=regular but fstat=FIFO => NOT read, isFile false, fd closed", () => {
+    const { layer, readFileSync, closeSync } = swappedFs(false);
+    expect(realIo(REPO, layer).readSecretFile("/keys/sa.json")).toEqual({ isSymlink: false, isFile: false, mode: 0o010600, body: null });
+    expect(readFileSync).not.toHaveBeenCalled();
+    expect(closeSync).toHaveBeenCalledWith(4242);
+  });
+  it("loadOperatorCredential over that swapped file refuses credentials_file_unsafe", () => {
+    const { layer } = swappedFs(false);
+    const parsed = parseSetSystemAdminClaimArgs(BASE);
+    if (!parsed.ok) throw new Error("fixture");
+    expect(loadOperatorCredential(parsed.args, realIo(REPO, layer))).toMatchObject({ ok: false, code: "credentials_file_unsafe" });
+  });
+  it("CONTROL: lstat=regular and fstat=regular => read through the fd", () => {
+    const { layer, readFileSync } = swappedFs(true);
+    expect(realIo(REPO, layer).readSecretFile("/keys/sa.json")).toMatchObject({ isFile: true, body: JSON.stringify(KEY) });
+    expect(readFileSync).toHaveBeenCalledWith(4242, "utf8");
   });
 });
 
