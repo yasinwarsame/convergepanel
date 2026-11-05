@@ -18,13 +18,15 @@
  * wiring the real `adminDb` binding, running the report, and printing it.
  *
  * Usage:
- *   npm run projects:dry-run-normalization
+ *   npm run projects:dry-run-normalization -- --confirm-project=<firebase-project-id>   (required for Production access)
  */
 
 const dotenv = require("dotenv");
 const nodePath = require("path");
 dotenv.config({ path: nodePath.resolve(__dirname, "../../.env.local") });
 
+// MUST be the first import: grants Production Firebase access for this process only from explicit --confirm-project.
+import "../lib/operatorProductionAccess";
 import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
 import { runProjectNormalizationDryRun, type RawRunRecordForNormalization } from "@/lib/projects/runProjectNormalizationDryRun";

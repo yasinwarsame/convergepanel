@@ -1435,6 +1435,15 @@ At runtime, `lib/env.ts` is the single source of truth for all server-side envir
 
 All exported from `lib/env.ts`.
 
+**Firebase project isolation (I-1/I-2, 2026-11-04).** `lib/firebase/projectIsolation.ts` is the single rule for the server and the browser: a connection whose resolved identity is the Production project (`convergepanel`) is allowed only when the deployment environment is exactly `production`.
+- **Identity checked.** Server: the projectId or the service-account email's project. Browser: the API key, projectId, authDomain, storageBucket, project number or appId.
+- **Environment signal.** Server: `VERCEL_ENV`, read at runtime. Browser: `NEXT_PUBLIC_VERCEL_ENV`, inlined at build. Both depend on Vercel's "Automatically expose System Environment Variables" setting.
+- **No hard-coded fallbacks.** A missing or refused browser config initializes an unroutable placeholder project. A refused Admin init leaves `adminDb`/`adminAuth` undefined, which routes treat as "Firestore unavailable".
+- **Local dev, Jest and CI** therefore cannot reach the Production project through the app's Firebase modules. Legacy scripts that start Firebase themselves are listed in the isolation doc.
+- **Exception:** four reviewed operator scripts may reach Production through an explicit, in-process operator grant. It requires `--confirm-project=convergepanel`, an explicitly selected and validated Production key (`--operator-credentials=<file>`), a local operator shell, and a mode bound to the operation.
+- Details, and the remaining legacy scripts that do not yet use the rule, are in [`docs/operations/firebase-environment-isolation.md`](./operations/firebase-environment-isolation.md).
+
+
 **AI providers:**
 
 | Variable | Used for |
