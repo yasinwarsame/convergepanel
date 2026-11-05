@@ -57,7 +57,8 @@ describe("readable layout import boundary", () => {
     "lib/research/readableReport/layoutRollout.ts": [],
     "lib/research/readableReport/copy.ts": [],
     "lib/research/readableReport/answerStatus.ts": ["@/lib/adaptiveSchema/types", "./copy"],
-    "lib/research/readableReport/trustSignals.ts": ["@/lib/adaptiveSchema/types", "@/lib/adaptiveSchema/gatePresentation", "./copy"],
+    // Review of cb2febb (MINOR): + config, for GATE_THRESHOLDS (storedGateConsistency reads the thresholds, never a copy).
+    "lib/research/readableReport/trustSignals.ts": ["@/lib/adaptiveSchema/types", "@/lib/adaptiveSchema/config", "@/lib/adaptiveSchema/gatePresentation", "./copy"],
   };
 
   it("every readableReport module is listed, and imports exactly its allow-list (pure presentation)", () => {

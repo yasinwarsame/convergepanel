@@ -2402,23 +2402,44 @@
  },
  {
   "file": "lib/research/readableReport/copy.ts",
-  "literal": "\"Verification gate: Pass — the certainty score met the pass threshold and none of the most-raised claims had a split position; the evidence was not independently checked\"",
+  "literal": "\"Verification gate: Pass. This is a rule-based check of the panel's certainty score and split positions; it is not an independent verification of the evidence.\"",
   "count": 1,
   "category": "computed-status",
-  "rule": "#290 readable legacy gate banner (readable layout, pre-Order-4 reports only): the stored gate status and gate.ts computeAdaptiveGate's pass rule — certainty >= GATE_THRESHOLDS.passMin and no split among the loadBearingTopN most-raised claims; no claim that positions matched; evidence not checked"
+  "rule": "#290 readable legacy gate banner (readable layout, pre-Order-4 reports only; review of cb2febb): the stored gate status word (Pass) and the kind of check the gate (gate.ts) is — rule-based, on certainty and split positions, not an independent verification of the evidence; 'split' names what the rule looks at, not which claims split; states no condition about the most-raised claims"
  },
  {
   "file": "lib/research/readableReport/copy.ts",
-  "literal": "\"Verification gate: Caution — the certainty score was below the pass threshold or a claim had a split position, and no more than one of the most-raised claims had a split position; the evidence was not independently checked\"",
+  "literal": "\"Verification gate: Caution. This is a rule-based check of the panel's certainty score and split positions; it is not an independent verification of the evidence.\"",
   "count": 1,
   "category": "computed-status",
-  "rule": "#290 readable legacy gate banner (readable layout, pre-Order-4 reports only): gate.ts's caution rule as a disjunction (certainty below passMin, one load-bearing split, or a factual_lookup split) with at most one load-bearing split; names no cause; evidence not checked"
+  "rule": "#290 readable legacy gate banner (readable layout, pre-Order-4 reports only; review of cb2febb): the stored gate status word (Caution) and the kind of check the gate (gate.ts) is — rule-based, on certainty and split positions, not an independent verification of the evidence; 'split' names what the rule looks at, not which claims split; states no condition about the most-raised claims"
  },
  {
   "file": "lib/research/readableReport/copy.ts",
-  "literal": "\"Verification gate: Fail — the certainty score was below the caution threshold or two or more of the most-raised claims had a split position; the evidence was not independently checked\"",
+  "literal": "\"Verification gate: Fail. This is a rule-based check of the panel's certainty score and split positions; it is not an independent verification of the evidence.\"",
   "count": 1,
   "category": "computed-status",
-  "rule": "#290 readable legacy gate banner (readable layout, pre-Order-4 reports only): gate.ts's fail rule as a disjunction (certainty below cautionMin, or two or more load-bearing splits); names no cause; evidence not checked"
+  "rule": "#290 readable legacy gate banner (readable layout, pre-Order-4 reports only; review of cb2febb): the stored gate status word (Fail) and the kind of check the gate (gate.ts) is — rule-based, on certainty and split positions, not an independent verification of the evidence; 'split' names what the rule looks at, not which claims split; states no condition about the most-raised claims"
+ },
+ {
+  "file": "lib/research/readableReport/copy.ts",
+  "literal": "\"Verification gate: Unavailable — the stored result is inconsistent with its recorded inputs. The gate is a rule-based check of the panel's certainty score and split positions; it is not an independent verification of the evidence.\"",
+  "count": 1,
+  "category": "computed-status",
+  "rule": "#290 readable legacy gate banner (readable layout, pre-Order-4 reports only; review of cb2febb MINOR): a stored gate that contradicts its recorded inputs (trustSignals.storedGateConsistency) shows no gate result — neither the stored one nor a recomputed one; gate.ts check kind, evidence not verified"
+ },
+ {
+  "file": "lib/adaptiveSchema/schemaRegistry.ts",
+  "literal": "\"Every (subject, attribute) comparison point you can responsibly assess. Reuse the exact same subject name across all its cells, and the exact same attribute name across all its cells, so your response stays internally consistent.\"",
+  "count": 1,
+  "category": "prompt",
+  "rule": "model prompt / schema field description (unchanged); newly seen by the cb2febb-review 'consistent' stem — internal naming consistency of one response, not agreement between models"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"Multiple models noted patterns or artifacts consistent with deceptive manipulation.\"",
+  "count": 1,
+  "category": "shared-claim-video",
+  "rule": "video memo verdict sentence (unchanged); newly seen by the cb2febb-review 'consistent' stem — artifacts consistent with manipulation, not agreement between models"
  }
 ]

@@ -1,18 +1,23 @@
 /**
- * #290 Increment 1 — review of 28f770c NOT CLEAN (MAJOR): the readable legacy Pass banner said "the models' positions
- * on the most-raised claims matched". lib/adaptiveSchema/gate.ts does not mean that: pass is certainty >= passMin AND no
- * split among the loadBearingTopN most-raised claims, so a pass can rest on majority claims with partial positions
- * (forecast) or a single-source claim (procedural).
+ * #290 Increment 1 — the readable legacy gate banner states only what holds.
  *
- * Each case renders the COMPLETE readable report through the real AdaptivePanelResponse (reportLayout "readable") for
- * a report persisted before the Order 4 gate presentation (presentation removed), and checks:
- *   - both gate banners carry READABLE_GATE_COPY.legacyBanner for the stored status, clause for clause;
- *   - every clause the banner states holds on the stored gate inputs (the oracle is gate.ts's rule, recomputed by the
- *     real computeAdaptiveGate from the stored rows, which must reproduce the stored status);
- *   - no banner says the positions matched / agreed / were identical, or that anything was verified or confirmed;
- *   - the page carries no unqualified "verified".
- * Classic byte parity for the same fixtures is asserted in readableLegacyGateBanner.spec.tsx, historicalParity and
- * nonDsWordingParity.
+ * Review of cb2febb NOT CLEAN:
+ *   MAJOR — the banner described gate.ts's condition on "the most-raised claims" unqualified, but gate.ts looks only at
+ *     the top GATE_THRESHOLDS.loadBearingTopN claims after a salience sort that cuts ties in stored order: a fourth,
+ *     equally-raised split claim made "none of the most-raised claims had a split position" false (and generic-splits
+ *     stores caution with TWO top-salience splits). The old oracle read rec.gate.loadBearingClaims — the gate's own
+ *     cut — so it could not see this (circular).
+ *   MINOR — on a malformed legacy record whose stored gate contradicts its stored inputs, a condition-stating banner
+ *     contradicted the inputs shown on the same page.
+ *
+ * Owner order: the banner is "Verification gate: <Pass|Caution|Fail>." plus the kind of check the gate is (rule-based,
+ * not an independent verification of the evidence) — no statement about which claims agreed, matched or split. A legacy
+ * record whose stored gate contradicts its recorded inputs shows "Verification gate: Unavailable — …" (no gate result:
+ * not the stored one, not a recomputed one). Missing inputs are not "inconsistent".
+ *
+ * Every case renders the COMPLETE readable report through the real AdaptivePanelResponse. The oracles are computed
+ * from the stored ROWS independently (claimSalience over every claim, ties included) or from the real gate.ts — never
+ * from the gate's stored loadBearingClaims. Expected wording is written out literally here, not read from copy.ts.
  */
 jest.mock("@/components/AuthProvider", () => ({ useAuth: () => ({ user: { uid: "u-290" }, authReady: true }) }));
 jest.mock("@/hooks/useUserPlan", () => ({ useUserPlan: () => ({ plan: "full", loading: false }) }));
@@ -26,23 +31,35 @@ import TestRenderer, { act, type ReactTestInstance } from "react-test-renderer";
 import { GateBanner } from "@/components/adaptive/AdaptiveSynthesisReportView";
 import { GATE_THRESHOLDS } from "@/lib/adaptiveSchema/config";
 import { computeAdaptiveGate } from "@/lib/adaptiveSchema/gate";
-import { LEGACY_GATE_BANNER_LABEL, hasGatePresentation, pageGateValue, readGateStatus } from "@/lib/adaptiveSchema/gatePresentation";
-import { READABLE_GATE_COPY } from "@/lib/research/readableReport/copy";
+import { LEGACY_GATE_BANNER_LABEL, gateLabel, hasGatePresentation, pageGateValue, readGateStatus } from "@/lib/adaptiveSchema/gatePresentation";
+import { claimSalience } from "@/lib/adaptiveSchema/scoring";
 import { VOCAB, scanVocabulary } from "@/lib/adaptiveSchema/__tests__/o5p/vocabularyScanner";
-import { htmlText, panelElement, record, remoteWorkFixture, renderPanel, slotRows } from "./readableFixtures";
+import { htmlText, panelElement, record, remoteWorkFixture, renderPanel, slotRows, tierHtml } from "./readableFixtures";
 
 const READABLE = { reportLayout: "readable" };
 type Known = "pass" | "caution" | "fail";
 
-/** The 28f770c wording the review found untrue. */
-const OLD_28F770C = {
-  pass: "Verification gate: Pass — the models' positions on the most-raised claims matched; the evidence was not independently checked",
-  caution: "Verification gate: Caution — the panel did not meet the conditions for a clean pass; the evidence was not independently checked",
-  fail: "Verification gate: Fail — the panel did not meet the gate's conditions; the evidence was not independently checked",
+/** The owner-ordered wording, written out (not imported) so the spec checks the words themselves. */
+const KIND = "This is a rule-based check of the panel's certainty score and split positions; it is not an independent verification of the evidence.";
+const PLAIN: Record<Known, string> = {
+  pass: `Verification gate: Pass. ${KIND}`,
+  caution: `Verification gate: Caution. ${KIND}`,
+  fail: `Verification gate: Fail. ${KIND}`,
 };
+const UNAVAILABLE =
+  "Verification gate: Unavailable — the stored result is inconsistent with its recorded inputs. The gate is a rule-based check of the panel's certainty score and split positions; it is not an independent verification of the evidence.";
 
-/** Overclaims a gate banner must never make: positions matched / agreed, or the evidence verified / confirmed. */
-const BANNER_OVERCLAIM = /\b(match\w*|agree\w*|identical|same positions?|uniform\w*|unanim\w*|consensus|converg\w*|confirm\w*|verified|verify)\b/i;
+/** The cb2febb wording the review found untrue (and the 28f770c wording before it). */
+const OLD_WORDING = [
+  "Verification gate: Pass — the certainty score met the pass threshold and none of the most-raised claims had a split position; the evidence was not independently checked",
+  "Verification gate: Caution — the certainty score was below the pass threshold or a claim had a split position, and no more than one of the most-raised claims had a split position; the evidence was not independently checked",
+  "Verification gate: Fail — the certainty score was below the caution threshold or two or more of the most-raised claims had a split position; the evidence was not independently checked",
+  "Verification gate: Pass — the models' positions on the most-raised claims matched; the evidence was not independently checked",
+];
+
+/** Any claim a gate banner must never make: about which claims agreed / matched / split, or that evidence was verified. */
+const BANNER_OVERCLAIM =
+  /\b(match\w*|agree\w*|identical\w*|same (positions?|stances?)|uniform\w*|unanim\w*|consensus|converg\w*|confirm\w*|verified|verify|most-raised|none of|no more than|two or more|all (of )?the|had no split|threshold)\b/i;
 const unqualifiedVerified = (text: string) => /\bverified\b/i.test(text.split("not a verified finding").join(""));
 
 beforeEach(() => {
@@ -56,34 +73,54 @@ function textOf(node: ReactTestInstance | string): string {
   return node.children.map((c) => textOf(c as any)).join("");
 }
 
-async function banners(rec: any, rows: any): Promise<string[]> {
+async function banners(rec: any, rows: any, extra: Record<string, unknown> = READABLE): Promise<{ text: string[]; props: any[] }> {
   let r!: TestRenderer.ReactTestRenderer;
   await act(async () => {
-    r = TestRenderer.create(panelElement(rec, rows, READABLE));
+    r = TestRenderer.create(panelElement(rec, rows, extra));
   });
-  return r.root.findAllByType(GateBanner).map((b) => textOf(b));
+  const found = r.root.findAllByType(GateBanner);
+  return { text: found.map((b) => textOf(b)), props: found.map((b) => b.props) };
 }
 
-/**
- * Every clause of the banner for a status, each with the predicate it asserts over the stored gate inputs. The clauses
- * are the banner's own words; the predicates are gate.ts's rule for that status.
- */
-interface Inputs {
-  certainty: number;
-  topSplits: number;
-  anySplit: boolean;
+function gateSignalOf(html: string): { value: string; state: string; text: string } {
+  const trust = tierHtml(html, "trust")!;
+  const at = trust.indexOf('data-trust-signal="gate"');
+  const el = trust.slice(trust.lastIndexOf("<", at));
+  const state = /data-state="([^"]*)"/.exec(el)![1];
+  const value = /data-trust-signal-value=""[^>]*>([^<]*)</.exec(el)![1];
+  const end = el.indexOf('data-trust-signal="coverage"');
+  return { value, state, text: htmlText(end > 0 ? el.slice(0, end) : el) };
 }
-const CLAUSES: Record<Known, Array<[string, (i: Inputs) => boolean]>> = {
-  pass: [
-    ["the certainty score met the pass threshold", (i) => i.certainty >= GATE_THRESHOLDS.passMin],
-    ["none of the most-raised claims had a split position", (i) => i.topSplits === 0],
-  ],
-  caution: [
-    ["the certainty score was below the pass threshold or a claim had a split position", (i) => i.certainty < GATE_THRESHOLDS.passMin || i.anySplit],
-    ["no more than one of the most-raised claims had a split position", (i) => i.topSplits <= 1],
-  ],
-  fail: [["the certainty score was below the caution threshold or two or more of the most-raised claims had a split position", (i) => i.certainty < GATE_THRESHOLDS.cautionMin || i.topSplits >= 2]],
+
+/** Independent of the gate's stored cut: every claim sharing the highest salience in the stored rows (ties included). */
+function topSalienceTie(rows: any[]): any[] {
+  const max = Math.max(...rows.map((r) => claimSalience(r)));
+  return rows.filter((r) => claimSalience(r) === max);
+}
+
+const legacy = (rec: any) => {
+  expect(hasGatePresentation(rec.synthesisReport)).toBe(true);
+  delete rec.synthesisReport.presentation;
+  expect(hasGatePresentation(rec.synthesisReport)).toBe(false);
+  return rec;
 };
+
+/**
+ * The reviewer's repro: generic-consensus with two more consensus claims and one split claim, all raised by every model
+ * (salience 5). gate.ts keeps the first three in stored order (all consensus) → pass, while a split claim is exactly as
+ * raised as they are. The stored gate is what the real gate.ts gives for the stored rows and certainty.
+ */
+function tieBeyondTopN() {
+  const rec = record("generic-consensus");
+  const base = rec.alignedClaims;
+  const split = record("generic-splits").alignedClaims.find((c: any) => c.status === "split");
+  const clone = (c: any, id: string) => ({ ...JSON.parse(JSON.stringify(c)), id, claimText: `${c.claimText} (${id})` });
+  rec.alignedClaims = [...base, clone(base[0], "extra-consensus-a"), clone(base[1], "extra-consensus-b"), JSON.parse(JSON.stringify(split))];
+  const g = computeAdaptiveGate(rec.alignedClaims, rec.gate.runCertainty, rec.schemaId);
+  rec.gate = { ...rec.gate, ...JSON.parse(JSON.stringify(g)) };
+  rec.synthesisReport.gate = g.status;
+  return rec;
+}
 
 interface Case {
   label: string;
@@ -91,64 +128,58 @@ interface Case {
   expect: Known;
   make?: () => any;
   edit?: (rec: any) => void;
-  /** What the fixture must exercise (so a case cannot silently stop testing what it is named for). */
+  /** What the fixture must exercise, checked on the ROWS (so a case cannot silently stop testing what it is named for). */
   shape?: (rec: any) => void;
-  inputsRecorded?: boolean;
-  /** The stored gate value was edited without its inputs (remote-work shape): only the banner wording is checked. */
-  storedValueOnly?: boolean;
 }
 
-const statuses = (rec: any) => rec.gate.loadBearingClaims.map((c: any) => c.status);
+const statusesOf = (rows: any[]) => rows.map((c) => c.status);
 
-const CASES: Case[] = [
+const PLAIN_CASES: Case[] = [
   {
     label: "legacy pass — forecast: majority claims with partial positions, none split",
     base: "forecast",
     expect: "pass",
     shape: (rec) => {
-      expect(statuses(rec)).toEqual(["majority", "majority"]);
-      // Partial / non-supporting positions exist on the load-bearing claims: they did not "match".
-      for (const c of rec.gate.loadBearingClaims) expect(c.cells.map((x: any) => x.stance)).toContain("partial");
+      const top = topSalienceTie(rec.alignedClaims);
+      expect(statusesOf(top).every((s) => s === "majority")).toBe(true);
+      for (const c of top) expect(c.cells.map((x: any) => x.stance)).toContain("partial");
+    },
+  },
+  { label: "legacy pass — procedural: a single-source claim among the stored claims", base: "procedural", expect: "pass", shape: (rec) => expect(statusesOf(rec.alignedClaims)).toContain("single_source") },
+  { label: "legacy pass — all claims consensus", base: "generic-consensus", expect: "pass", shape: (rec) => expect(new Set(statusesOf(rec.alignedClaims))).toEqual(new Set(["consensus"])) },
+  {
+    label: "legacy pass — a FOURTH equally-raised claim is split (tie beyond the top three)",
+    base: "generic-consensus",
+    expect: "pass",
+    make: tieBeyondTopN,
+    shape: (rec) => {
+      const top = topSalienceTie(rec.alignedClaims);
+      expect(top.length).toBeGreaterThan(GATE_THRESHOLDS.loadBearingTopN);
+      // A split claim is among the most-raised — "none of the most-raised claims had a split position" would be false.
+      expect(top.filter((c) => c.status === "split")).toHaveLength(1);
     },
   },
   {
-    label: "legacy pass — procedural: a single-source claim among the most-raised",
-    base: "procedural",
-    expect: "pass",
-    shape: (rec) => expect(statuses(rec)).toContain("single_source"),
+    label: "legacy caution — generic-splits: TWO top-salience claims split, stored caution",
+    base: "generic-splits",
+    expect: "caution",
+    shape: (rec) => {
+      const top = topSalienceTie(rec.alignedClaims);
+      // "no more than one of the most-raised claims had a split position" would be false.
+      expect(top.filter((c) => c.status === "split").length).toBeGreaterThanOrEqual(2);
+    },
   },
-  { label: "legacy pass — all most-raised claims consensus", base: "generic-consensus", expect: "pass", shape: (rec) => expect(new Set(statuses(rec))).toEqual(new Set(["consensus"])) },
   {
     label: "legacy caution — certainty below the pass threshold, no split (limited coverage)",
     base: "generic-malformed",
     expect: "caution",
-    shape: (rec) => {
-      expect(rec.gate.runCertainty).toBeLessThan(GATE_THRESHOLDS.passMin);
-      expect(rec.gate.loadBearingSplitCount).toBe(0);
-    },
+    shape: (rec) => expect(rec.gate.runCertainty).toBeLessThan(GATE_THRESHOLDS.passMin),
   },
+  { label: "legacy caution — one claim split at a certainty above the pass threshold", base: "contested-empirical", expect: "caution" },
+  { label: "legacy caution — degraded coverage (one failed, one substituted)", base: "generic-substituted-and-failed", expect: "caution" },
+  { label: "legacy fail — two claims split at a certainty above the pass threshold", base: "legal-regulatory", expect: "fail" },
   {
-    label: "legacy caution — one most-raised claim split at a certainty above the pass threshold",
-    base: "contested-empirical",
-    expect: "caution",
-    shape: (rec) => {
-      expect(rec.gate.runCertainty).toBeGreaterThanOrEqual(GATE_THRESHOLDS.passMin);
-      expect(rec.gate.loadBearingSplitCount).toBe(1);
-    },
-  },
-  {
-    label: "legacy fail — two most-raised claims split at a certainty above the pass threshold",
-    base: "legal-regulatory",
-    expect: "fail",
-    shape: (rec) => {
-      expect(rec.gate.runCertainty).toBeGreaterThanOrEqual(GATE_THRESHOLDS.passMin);
-      expect(rec.gate.loadBearingSplitCount).toBe(2);
-    },
-  },
-  {
-    // No rendering fixture fails on certainty alone, so generic-malformed's stored certainty is lowered below the
-    // caution floor and its stored gate set to what gate.ts then computes (checked in build()).
-    label: "legacy fail — certainty below the caution threshold, no split",
+    label: "legacy fail — certainty below the caution threshold, no split (stored gate set to gate.ts's result)",
     base: "generic-malformed",
     expect: "fail",
     edit: (rec) => {
@@ -156,108 +187,204 @@ const CASES: Case[] = [
       rec.gate.status = "fail";
       rec.synthesisReport.gate = "fail";
     },
-    shape: (rec) => {
-      expect(rec.gate.runCertainty).toBeLessThan(GATE_THRESHOLDS.cautionMin);
-      expect(rec.gate.loadBearingSplitCount).toBe(0);
-    },
-  },
-  { label: "legacy caution — degraded coverage (one failed, one substituted)", base: "generic-substituted-and-failed", expect: "caution" },
-  {
-    label: "legacy fail — degraded synthesis (remote-work shape; stored gate edited to fail)",
-    base: "generic-substituted-and-failed",
-    expect: "fail",
-    make: () => remoteWorkFixture().rec,
-    storedValueOnly: true,
-    shape: (rec) => expect(rec.synthesisReport.degraded).toBe(true),
-  },
-  {
-    label: "legacy pass — missing verification evidence (gate inputs not recorded)",
-    base: "generic-consensus",
-    expect: "pass",
-    inputsRecorded: false,
-    edit: (rec) => {
-      delete rec.gate.runCertainty;
-      delete rec.gate.loadBearingSplitCount;
-      delete rec.gate.loadBearingClaims;
-    },
   },
 ];
 
-function build(c: Case) {
-  const rec = c.make ? c.make() : record(c.base);
-  if (c.inputsRecorded === false) {
-    c.edit?.(rec);
-  } else {
+describe("readable legacy gate banner: the stored word and the kind of check — no claim about which claims split", () => {
+  it.each(PLAIN_CASES.map((c) => [c.label, c] as const))("%s", async (_label, c) => {
+    const rec = c.make ? c.make() : record(c.base);
     c.edit?.(rec);
     c.shape?.(rec);
-    // The stored status is what the real gate.ts gives for the stored rows and certainty (remote-work: an edited value).
-    if (!c.storedValueOnly) expect(computeAdaptiveGate(rec.alignedClaims, rec.gate.runCertainty, rec.schemaId).status).toBe(rec.gate.status);
-  }
-  expect(hasGatePresentation(rec.synthesisReport)).toBe(true);
-  delete rec.synthesisReport.presentation;
-  expect(hasGatePresentation(rec.synthesisReport)).toBe(false);
-  return { rec, rows: slotRows(c.base) };
-}
+    // Non-circular oracle: the real gate.ts, from the stored ROWS and certainty, gives the stored status.
+    expect(computeAdaptiveGate(rec.alignedClaims, rec.gate.runCertainty, rec.schemaId).status).toBe(c.expect);
+    expect(readGateStatus(pageGateValue(rec.synthesisReport, rec.gate.status))).toBe(c.expect);
+    legacy(rec);
+    const rows = slotRows(c.base);
 
-describe("readable legacy gate banner states gate.ts's rule for the stored status — and only what holds", () => {
-  it.each(CASES.map((c) => [c.label, c] as const))("%s", async (_label, c) => {
-    const { rec, rows } = build(c);
-    const stored = readGateStatus(pageGateValue(rec.synthesisReport, rec.gate.status));
-    expect(stored).toBe(c.expect);
-
-    const expected = READABLE_GATE_COPY.legacyBanner[c.expect];
     const html = renderPanel(rec, rows, READABLE);
     const text = htmlText(html);
-    const shown = await banners(rec, rows);
-    expect(shown).toEqual([expected, expected]);
-    expect(text.split(expected)).toHaveLength(3);
+    const shown = (await banners(rec, rows)).text;
+    expect(shown).toEqual([PLAIN[c.expect], PLAIN[c.expect]]);
+    expect(text.split(PLAIN[c.expect])).toHaveLength(3);
+    for (const b of shown) expect(b.replace(KIND, "")).not.toMatch(BANNER_OVERCLAIM);
+    for (const b of shown) expect(b).not.toContain("Unavailable");
 
-    for (const b of shown) {
-      expect(b.startsWith(`Verification gate: ${{ pass: "Pass", caution: "Caution", fail: "Fail" }[c.expect]} — `)).toBe(true);
-      expect(b.endsWith("; the evidence was not independently checked")).toBe(true);
-      for (const [clause] of CLAUSES[c.expect]) expect(b).toContain(clause);
-      expect(b).not.toMatch(BANNER_OVERCLAIM);
-    }
+    // The trust signal shows the stored word (the record is consistent).
+    expect(gateSignalOf(html).value).toBe({ pass: "Pass", caution: "Caution", fail: "Fail" }[c.expect]);
 
-    // Each clause holds on the stored inputs (when the page has them).
-    if (c.inputsRecorded !== false && !c.storedValueOnly) {
-      const top = rec.gate.loadBearingClaims;
-      expect(top.length).toBeLessThanOrEqual(GATE_THRESHOLDS.loadBearingTopN);
-      const inputs: Inputs = {
-        certainty: rec.gate.runCertainty,
-        topSplits: top.filter((x: any) => x.status === "split").length,
-        anySplit: rec.alignedClaims.some((x: any) => x.status === "split"),
-      };
-      expect(inputs.topSplits).toBe(rec.gate.loadBearingSplitCount);
-      for (const [clause, holds] of CLAUSES[c.expect]) expect([clause, holds(inputs)]).toEqual([clause, true]);
-    }
-
-    // Nowhere on the readable page: any 28f770c / historical banner wording, or an unqualified "verified".
-    for (const w of [...Object.values(OLD_28F770C), ...Object.values(LEGACY_GATE_BANNER_LABEL)]) expect(text).not.toContain(w);
-    expect(text).not.toMatch(/positions on the most-raised claims matched/);
+    for (const w of [...OLD_WORDING, ...Object.values(LEGACY_GATE_BANNER_LABEL), UNAVAILABLE]) expect(text).not.toContain(w);
+    expect(text).not.toMatch(/most-raised claims (matched|had)/);
     expect(unqualifiedVerified(text)).toBe(false);
   });
 
-  it("factual lookup (gate.ts caps an otherwise-passing gate at caution on any split): the caution clauses hold; the page shows no gate banner", async () => {
-    for (const base of ["factual-tie", "factual-normalizer"]) {
-      const rec = record(base);
-      expect(computeAdaptiveGate(rec.alignedClaims, rec.gate.runCertainty, rec.schemaId).status).toBe("caution");
-      const inputs: Inputs = {
-        certainty: rec.gate.runCertainty,
-        topSplits: rec.gate.loadBearingClaims.filter((x: any) => x.status === "split").length,
-        anySplit: rec.alignedClaims.some((x: any) => x.status === "split"),
-      };
-      for (const [clause, holds] of CLAUSES.caution) expect([clause, holds(inputs)]).toEqual([clause, true]);
-      delete rec.synthesisReport.presentation;
-      expect(await banners(rec, slotRows(base))).toEqual([]);
-    }
+  it("missing gate inputs: the plain label and explanation — never 'inconsistent'", async () => {
+    const rec = legacy(record("generic-consensus"));
+    delete rec.gate.runCertainty;
+    delete rec.gate.loadBearingSplitCount;
+    delete rec.gate.loadBearingClaims;
+    const rows = slotRows("generic-consensus");
+    const html = renderPanel(rec, rows, READABLE);
+    expect((await banners(rec, rows)).text).toEqual([PLAIN.pass, PLAIN.pass]);
+    const sig = gateSignalOf(html);
+    expect(sig.value).toBe("Pass");
+    expect(sig.text).toContain("The gate's stored inputs are not available on this page.");
+    expect(htmlText(html)).not.toMatch(/inconsistent|Unavailable/);
   });
 
-  it("the pass clauses are false for the old 'matched' reading: a pass fixture's most-raised claims are not all consensus", () => {
-    for (const base of ["forecast", "procedural"]) {
-      const rec = record(base);
-      expect(rec.gate.status).toBe("pass");
-      expect(statuses(rec).every((s: string) => s === "consensus")).toBe(false);
+  it("factual lookup (gate.ts caps a passing gate at caution on any split) is not called inconsistent; the page shows no banner", async () => {
+    const { storedGateConsistency } = require("@/lib/research/readableReport/trustSignals");
+    for (const base of ["factual-tie", "factual-normalizer"]) {
+      const rec = legacy(record(base));
+      expect(computeAdaptiveGate(rec.alignedClaims, rec.gate.runCertainty, rec.schemaId).status).toBe("caution");
+      expect(storedGateConsistency({ gate: rec.gate, synthesisReport: rec.synthesisReport, schemaId: rec.schemaId })).toBe("consistent");
+      expect((await banners(rec, slotRows(base))).text).toEqual([]);
+    }
+  });
+});
+
+/**
+ * Malformed legacy records: the stored gate contradicts what the record itself stores. Each conflict is stated from the
+ * stored data directly (not from the code under test).
+ */
+interface Conflict {
+  label: string;
+  base: string;
+  make?: () => any;
+  edit?: (rec: any) => void;
+  /** The independent statement of the conflict, on the stored fields. */
+  conflict: (rec: any) => void;
+}
+
+const CONFLICTS: Conflict[] = [
+  {
+    label: "remote-work shape: stored fail over inputs that give caution (69%, one of three split)",
+    base: "generic-substituted-and-failed",
+    make: () => remoteWorkFixture().rec,
+    conflict: (rec) => {
+      expect(rec.synthesisReport.gate).toBe("fail");
+      expect(rec.gate.runCertainty).toBeGreaterThanOrEqual(GATE_THRESHOLDS.cautionMin);
+      expect(rec.gate.loadBearingSplitCount).toBeLessThan(2);
+      expect(computeAdaptiveGate(rec.alignedClaims, rec.gate.runCertainty, rec.schemaId).status).not.toBe("fail");
+    },
+  },
+  {
+    label: "report says fail, gate object says pass (two stored results)",
+    base: "generic-consensus",
+    edit: (rec) => {
+      rec.gate.status = "pass";
+      rec.synthesisReport.gate = "fail";
+    },
+    conflict: (rec) => expect(rec.gate.status).not.toBe(rec.synthesisReport.gate),
+  },
+  {
+    label: "report says pass, gate object says fail, inputs give pass (the page's stored value would be the stronger one)",
+    base: "generic-consensus",
+    edit: (rec) => {
+      rec.gate.status = "fail";
+      rec.synthesisReport.gate = "pass";
+    },
+    conflict: (rec) => expect(rec.gate.status).not.toBe(rec.synthesisReport.gate),
+  },
+  {
+    label: "stored pass with certainty below the pass threshold",
+    base: "generic-malformed",
+    edit: (rec) => {
+      rec.gate.status = "pass";
+      rec.synthesisReport.gate = "pass";
+    },
+    conflict: (rec) => expect(rec.gate.runCertainty).toBeLessThan(GATE_THRESHOLDS.passMin),
+  },
+  {
+    label: "stored pass with two load-bearing splits recorded",
+    base: "legal-regulatory",
+    edit: (rec) => {
+      rec.gate.status = "pass";
+      rec.synthesisReport.gate = "pass";
+    },
+    conflict: (rec) => expect(rec.gate.loadBearingSplitCount).toBeGreaterThanOrEqual(2),
+  },
+  {
+    label: "recorded split count disagrees with the recorded load-bearing claims",
+    base: "contested-empirical",
+    edit: (rec) => {
+      rec.gate.loadBearingSplitCount = 0;
+      rec.gate.status = "pass";
+      rec.synthesisReport.gate = "pass";
+    },
+    conflict: (rec) => expect(rec.gate.loadBearingClaims.filter((c: any) => c.status === "split").length).not.toBe(rec.gate.loadBearingSplitCount),
+  },
+];
+
+describe("conflicting legacy metadata: readable shows the gate as unavailable, never a corrected or stronger result", () => {
+  it.each(CONFLICTS.map((c) => [c.label, c] as const))("%s", async (_label, c) => {
+    const rec = c.make ? c.make() : record(c.base);
+    c.edit?.(rec);
+    c.conflict(rec);
+    legacy(rec);
+    const rows = slotRows(c.base);
+    const stored = readGateStatus(pageGateValue(rec.synthesisReport, rec.gate.status)) as Known;
+
+    const html = renderPanel(rec, rows, READABLE);
+    const text = htmlText(html);
+    expect((await banners(rec, rows)).text).toEqual([UNAVAILABLE, UNAVAILABLE]);
+    for (const w of [...Object.values(PLAIN), ...OLD_WORDING, ...Object.values(LEGACY_GATE_BANNER_LABEL)]) expect(text).not.toContain(w);
+    // Outside the stored answer text (shown verbatim wherever the page shows it — an answer composed after Order 4 may
+    // open with its own gate sentence, which is stored data, not a statement the readable layout adds), no gate result
+    // is stated.
+    const storedAnswer = String(rec.synthesisReport.unifiedAnswer).replace(/\s+/g, " ").trim();
+    expect(text).toContain(storedAnswer);
+    expect(text.split(storedAnswer).join(" ")).not.toMatch(/Verification gate: (Pass|Caution|Fail)\b/);
+
+    const sig = gateSignalOf(html);
+    expect(sig.value).toBe("Unavailable");
+    expect(sig.state).toBe("inconsistent");
+    expect(sig.text).toContain("The stored result is inconsistent with its recorded inputs, so no gate result is shown.");
+    // The recorded inputs are still shown as stored.
+    expect(sig.text).toContain(`Certainty score: ${Math.round(rec.gate.runCertainty * 100)}%`);
+    expect(sig.text).toContain(`Most-raised claims with a split position: ${rec.gate.loadBearingSplitCount} of ${rec.gate.loadBearingClaims.length}`);
+    // No caution notice is offered as though the stored caution were the result.
+    expect(sig.text).not.toMatch(/did not meet the conditions/);
+    expect(unqualifiedVerified(text)).toBe(false);
+    expect(stored).not.toBe("unrecognized");
+  });
+
+  it.each(CONFLICTS.map((c) => [c.label, c] as const))("Order 4 report (presentation kept), same conflict — unchanged: %s", async (_label, c) => {
+    const rec = c.make ? c.make() : record(c.base);
+    c.edit?.(rec);
+    expect(hasGatePresentation(rec.synthesisReport)).toBe(true);
+    const rows = slotRows(c.base);
+    const stored = readGateStatus(pageGateValue(rec.synthesisReport, rec.gate.status));
+    const html = renderPanel(rec, rows, READABLE);
+    expect((await banners(rec, rows)).text).toEqual([gateLabel(stored), gateLabel(stored)]);
+    expect(htmlText(html)).not.toContain(UNAVAILABLE);
+    const sig = gateSignalOf(html);
+    expect(sig.value).toBe({ pass: "Pass", caution: "Caution", fail: "Fail", unrecognized: "Unrecognized" }[stored]);
+    expect(sig.state).toBe(stored);
+  });
+
+  it.each(CONFLICTS.map((c) => [c.label, c] as const))("classic keeps the stored historical label byte for byte: %s", async (_label, c) => {
+    const rec = c.make ? c.make() : record(c.base);
+    c.edit?.(rec);
+    legacy(rec);
+    const rows = slotRows(c.base);
+    const stored = readGateStatus(pageGateValue(rec.synthesisReport, rec.gate.status)) as Known;
+    const html = renderPanel(rec, rows);
+    const b = await banners(rec, rows, {});
+    expect(b.text.length).toBeGreaterThan(0);
+    for (const t of b.text) expect(t).toBe(LEGACY_GATE_BANNER_LABEL[stored]);
+    for (const p of b.props) expect(p.legacyLabels).toBeUndefined();
+    expect(html).not.toContain("Unavailable");
+    expect(html).not.toContain("rule-based check");
+  });
+
+  it("stored data is read, never written: the record is byte-identical after a readable render", () => {
+    for (const c of CONFLICTS) {
+      const rec = c.make ? c.make() : record(c.base);
+      c.edit?.(rec);
+      legacy(rec);
+      const before = JSON.stringify(rec);
+      renderPanel(rec, slotRows(c.base), READABLE);
+      expect(JSON.stringify(rec)).toBe(before);
     }
   });
 });
@@ -267,37 +394,38 @@ describe("the vocabulary gate sees the gate banner wording (non-vacuous)", () =>
     readFileSync(join(process.cwd(), "lib/adaptiveSchema/__tests__/o5p/__fixtures__/vocabularyManifest.json"), "utf8")
   );
 
-  it("the 28f770c 'matched' Pass copy, and the equivalent overclaims, are caught by the scanner's vocabulary", () => {
-    expect(VOCAB.test(OLD_28F770C.pass)).toBe(true);
+  it("the overclaims are caught by the scanner's vocabulary, with the cb2febb-review stems", () => {
     for (const phrase of [
       "positions matched",
-      "matching positions",
-      "the models' answers match",
       "identical positions",
+      "identically positioned",
       "the same position",
-      "the same positions",
-      "uniform positions",
-      "harmonized positions",
-      "positions coincided",
+      "the same stance",
+      "the same stances",
+      "consistent answers",
+      "equivalent positions",
+      "concordant positions",
+      "concordance",
       "confirmed by the panel",
       "in line with each other",
-      "in accord",
     ])
       expect([phrase, VOCAB.test(phrase)]).toEqual([phrase, true]);
+    // "inconsistent" is not agreement vocabulary: the unavailable banner is seen for its "split", not for it.
+    expect(VOCAB.test("inconsistent with its recorded inputs")).toBe(false);
   });
 
-  it("every readable legacy banner literal is scanned and classified as computed status in the manifest", () => {
+  it("every readable gate banner literal is scanned and classified as computed status in the manifest", () => {
     const hits = scanVocabulary(process.cwd(), ["lib/research/readableReport/copy.ts"]).map((l) => l.literal);
-    for (const w of Object.values(READABLE_GATE_COPY.legacyBanner)) {
+    for (const w of [...Object.values(PLAIN), UNAVAILABLE]) {
       const literal = JSON.stringify(w);
       expect(hits).toContain(literal);
       const entry = manifest.find((e) => e.file === "lib/research/readableReport/copy.ts" && e.literal === literal);
       expect(entry?.category).toBe("computed-status");
-      expect(entry?.rule).toMatch(/gate\.ts/);
+      expect(entry?.rule).toMatch(/gate\.ts|storedGateConsistency/);
     }
   });
 
-  it("no manifest entry classifies the 28f770c wording (it is gone from the source)", () => {
-    for (const w of Object.values(OLD_28F770C)) expect(manifest.some((e) => e.literal.includes(w))).toBe(false);
+  it("no manifest entry classifies the cb2febb or 28f770c wording (it is gone from the source)", () => {
+    for (const w of OLD_WORDING) expect(manifest.some((e) => e.literal.includes(w))).toBe(false);
   });
 });

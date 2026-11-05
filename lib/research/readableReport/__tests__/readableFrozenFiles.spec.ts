@@ -57,10 +57,19 @@ const UNCHANGED_AT_35933C8: Record<string, string> = {
  * existing entry changed; the 28f770c banner literals had no entry). Scanner a8f3ecf08d12b20fa58cb622b6d03a62a0d1c7ef →
  * cf275d0fb2a80bf99b5f0f707a508103b40054bc; manifest c16cc1f5e78d781b9f71fefe8b5493416dc940a0 →
  * 84d1674780ec5b99c8a38edd91e8c1c34cbd4c6d (328 → 346 entries). Same two files pinned; pinned to the exact new content.
+ *
+ * Re-pinned again (owner-authorized, review of cb2febb): MAJOR — the readable legacy gate banner no longer restates
+ * gate.ts's rule (its three literals replaced by "Verification gate: <word>. This is a rule-based check …" plus the
+ * Unavailable banner for a stored gate that contradicts its recorded inputs: 3 entries removed, 4 appended); NIT — VOCAB
+ * stems widened (identical\w*, "same stance(s)", consistent, equivalen\w*, concordan\w*), 2 newly seen literals
+ * classified (schemaRegistry prompt; generateMemo video verdict — neither is agreement between models). Scanner
+ * cf275d0fb2a80bf99b5f0f707a508103b40054bc → 37e23190b3585eaa57fa0ddad29c5b6d01d2f76f; manifest
+ * 84d1674780ec5b99c8a38edd91e8c1c34cbd4c6d → 7573b80eb23f9a492076da23a295a1619ed5109c (346 → 349 entries). Same two
+ * files pinned (set size unchanged).
  */
 const WIDENED_BY_INC1: Record<string, string> = {
-  "lib/adaptiveSchema/__tests__/o5p/vocabularyScanner.ts": "cf275d0fb2a80bf99b5f0f707a508103b40054bc",
-  "lib/adaptiveSchema/__tests__/o5p/__fixtures__/vocabularyManifest.json": "84d1674780ec5b99c8a38edd91e8c1c34cbd4c6d",
+  "lib/adaptiveSchema/__tests__/o5p/vocabularyScanner.ts": "37e23190b3585eaa57fa0ddad29c5b6d01d2f76f",
+  "lib/adaptiveSchema/__tests__/o5p/__fixtures__/vocabularyManifest.json": "7573b80eb23f9a492076da23a295a1619ed5109c",
 };
 
 /**

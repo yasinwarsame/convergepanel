@@ -61,7 +61,8 @@ import { resolveReportLayout, type ReportLayout } from "@/lib/research/readableR
 import ReadableSummaryBar from "@/components/research/readable/ReadableSummaryBar";
 import ReadableReportHeader from "@/components/research/readable/ReadableReportHeader";
 import { READABLE_MODEL_RESPONSES_ANCHOR } from "@/components/research/readable/ExecutiveAnswer";
-import { READABLE_GATE_COPY, READABLE_TRUST_COPY } from "@/lib/research/readableReport/copy";
+import { READABLE_TRUST_COPY } from "@/lib/research/readableReport/copy";
+import { readableLegacyGateBannerLabels } from "@/lib/research/readableReport/trustSignals";
 import type { ListScoreNames } from "./ListView";
 
 /** #290 Inc 1, readable mode only: the Model Responses list names the per-model stored score as the trust signals do. */
@@ -630,9 +631,10 @@ function AdaptivePanelResponseBody(props: AdaptivePanelResponseProps) {
       modelsUsed: modelIds,
       question,
       onRunFollowUp,
-      // A report without the Order 4 gate presentation: the gate banner states the stored gate word and that the models'
-      // positions are not checked evidence, instead of the historical "Verified — panel converges" (classic keeps it).
-      legacyGateBannerLabels: READABLE_GATE_COPY.legacyBanner,
+      // A report without the Order 4 gate presentation: the gate banner states the stored gate word and that the gate is
+      // a rule-based check, not an independent verification of the evidence, instead of the historical "Verified — panel
+      // converges" (classic keeps it). A stored gate that contradicts its recorded inputs shows as unavailable.
+      legacyGateBannerLabels: readableLegacyGateBannerLabels({ gate, synthesisReport, schemaId: schema.id }),
     };
     return (
       <div className="space-y-4" data-report-layout="readable">

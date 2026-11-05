@@ -104,27 +104,28 @@ export const READABLE_TRUST_COPY = {
 /**
  * The verification gate banner (governance section and full synthesis report) on a report persisted before the Order 4
  * gate presentation. Classic keeps the historical wording (LEGACY_GATE_BANNER_LABEL: "Verified — panel converges",
- * "Caution — partial convergence", "Could not verify — panel split"); readable states the stored gate with the same D6
- * word the trust signal shows, the rule lib/adaptiveSchema/gate.ts (computeAdaptiveGate, unchanged since it was
- * introduced) applies for that status, and that the evidence was not checked against anything. Reports that carry the
- * Order 4 presentation, and unrecognized stored values, keep gatePresentation's neutral wording unchanged.
+ * "Caution — partial convergence", "Could not verify — panel split"); readable states the stored gate word (the same D6
+ * word the trust signal shows) and what kind of check the gate is. Reports that carry the Order 4 presentation, and
+ * unrecognized stored values, keep gatePresentation's neutral wording unchanged.
  *
- * Each sentence is the gate's own rule for the stored status, never a cause the page cannot know (the cause is not
- * stored — Order 4 D1). "Most-raised claims" are the GATE_THRESHOLDS.loadBearingTopN claims by salience, as the trust
- * signal's "Most-raised claims with a split position" names them; "split" is the stored claim status.
- *   - pass:    certainty >= passMin AND no load-bearing split. Both always hold; the claims may still be majority,
- *              single-source or limited-coverage, so nothing says the models' positions matched.
- *   - caution: certainty in [cautionMin, passMin) with at most one load-bearing split, OR exactly one load-bearing split,
- *              OR (factual_lookup) a split on any claim at an otherwise passing gate. So: certainty below the pass
- *              threshold or some claim split, and never more than one of the most-raised claims split.
- *   - fail:    two or more load-bearing splits OR certainty < cautionMin — either may be the one that applied.
- * No thresholds are written as numbers: the words follow GATE_THRESHOLDS rather than restating it.
+ * Review of cb2febb (MAJOR): the banner no longer restates the gate's rule. gate.ts looks only at the
+ * GATE_THRESHOLDS.loadBearingTopN claims after a salience sort that cuts ties in stored order, so any sentence about
+ * "the most-raised claims" (none split, at most one split, …) can be false for a claim tied just past the cut. The
+ * banner says only the stored word and that it is a rule-based check, not an independent verification of the evidence —
+ * nothing about which claims agreed, matched or split.
+ *
+ * `inconsistent`: a malformed legacy record whose stored gate contradicts its own recorded inputs
+ * (trustSignals.storedGateConsistency). No gate result is shown — neither the stored one nor a recomputed one.
  */
 export const READABLE_GATE_COPY = {
   legacyBanner: {
-    pass: "Verification gate: Pass — the certainty score met the pass threshold and none of the most-raised claims had a split position; the evidence was not independently checked",
-    caution:
-      "Verification gate: Caution — the certainty score was below the pass threshold or a claim had a split position, and no more than one of the most-raised claims had a split position; the evidence was not independently checked",
-    fail: "Verification gate: Fail — the certainty score was below the caution threshold or two or more of the most-raised claims had a split position; the evidence was not independently checked",
+    pass: "Verification gate: Pass. This is a rule-based check of the panel's certainty score and split positions; it is not an independent verification of the evidence.",
+    caution: "Verification gate: Caution. This is a rule-based check of the panel's certainty score and split positions; it is not an independent verification of the evidence.",
+    fail: "Verification gate: Fail. This is a rule-based check of the panel's certainty score and split positions; it is not an independent verification of the evidence.",
   },
+  inconsistentBanner:
+    "Verification gate: Unavailable — the stored result is inconsistent with its recorded inputs. The gate is a rule-based check of the panel's certainty score and split positions; it is not an independent verification of the evidence.",
+  /** The trust signal's value and detail for the same malformed record. */
+  inconsistentValue: "Unavailable",
+  inconsistentDetail: "The stored result is inconsistent with its recorded inputs, so no gate result is shown.",
 } as const;

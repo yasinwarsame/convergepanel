@@ -33,11 +33,11 @@ import { RunModelProvenanceContext } from "@/components/adaptive/RunModelProvena
 import { RunSlotStatusContext } from "@/components/adaptive/RunSlotStatusContext";
 import PersistedResearchResultView from "@/components/research/PersistedResearchResultView";
 import { runModelProvenanceFromResultRow } from "@/lib/panel/runModelIdentity";
-import { READABLE_ANSWER_COPY, READABLE_TRUST_COPY } from "@/lib/research/readableReport/copy";
+import { READABLE_ANSWER_COPY, READABLE_GATE_COPY, READABLE_TRUST_COPY } from "@/lib/research/readableReport/copy";
 import { ALL_SCENARIOS, PILOT_SCENARIOS, QUESTION, htmlText, panelElement, record, remoteWorkFixture, renderPanel, slotRows, tierHtml } from "./readableFixtures";
 
 const READABLE = { reportLayout: "readable" };
-const STRENGTH: Record<string, number> = { pass: 3, caution: 2, fail: 1, unrecognized: 0 };
+const STRENGTH: Record<string, number> = { pass: 3, caution: 2, fail: 1, unrecognized: 0, unavailable: 0 };
 
 beforeEach(() => {
   jest.spyOn(console, "error").mockImplementation(() => {});
@@ -200,10 +200,14 @@ describe("D. readable wording is never stronger than the stored data", () => {
     const trust = tierHtml(html, "trust")!;
     const stored = readGateStatus(gate);
 
-    // Gate: the stored status word, exactly — so its strength equals the stored status, never more.
+    // Gate: the stored status word, exactly — so its strength equals the stored status, never more. Review of cb2febb
+    // (MINOR): with no synthesis report there is no Order 4 presentation, and generic-mixed's recorded inputs give
+    // caution — so a stored pass or fail contradicts them, and the signal shows no result ("Unavailable", weakest).
     const shown = signalValue(trust, "gate");
-    expect(shown).toBe(GATE_STATUS_WORD[stored]);
-    const shownKey = (Object.keys(GATE_STATUS_WORD) as (keyof typeof GATE_STATUS_WORD)[]).find((k) => GATE_STATUS_WORD[k] === shown)!;
+    const contradictsInputs = synth === "missing" && (gate === "pass" || gate === "fail");
+    expect(record("generic-mixed").gate.status).toBe("caution");
+    expect(shown).toBe(contradictsInputs ? READABLE_GATE_COPY.inconsistentValue : GATE_STATUS_WORD[stored]);
+    const shownKey = contradictsInputs ? "unavailable" : (Object.keys(GATE_STATUS_WORD) as (keyof typeof GATE_STATUS_WORD)[]).find((k) => GATE_STATUS_WORD[k] === shown)!;
     expect(STRENGTH[shownKey]).toBeLessThanOrEqual(STRENGTH[stored]);
     const trustText = htmlText(trust);
     expect(trustText).not.toMatch(/consensus|verified|models agree|panel agrees/i);

@@ -17,6 +17,7 @@
  */
 import type {
   AdaptiveGateResult,
+  AdaptiveGateStatus,
   AdaptiveModelResult,
   AdaptiveSynthesisReport,
   AdaptiveTrustSummary,
@@ -24,8 +25,9 @@ import type {
   Metric,
   ResultSchema,
 } from "@/lib/adaptiveSchema/types";
-import { GATE_STATUS_WORD, gateNotice, pageGateValue, readGateStatus, type GateDisplayStatus } from "@/lib/adaptiveSchema/gatePresentation";
-import { READABLE_TRUST_COPY as C } from "./copy";
+import { GATE_THRESHOLDS } from "@/lib/adaptiveSchema/config";
+import { GATE_STATUS_WORD, gateNotice, hasGatePresentation, pageGateValue, readGateStatus, type GateDisplayStatus } from "@/lib/adaptiveSchema/gatePresentation";
+import { READABLE_GATE_COPY as G, READABLE_TRUST_COPY as C } from "./copy";
 
 export type TrustSignalId = "gate" | "coverage" | "sources" | "behaviour";
 
@@ -46,7 +48,7 @@ export interface TrustSignalsInput {
   results: AdaptiveModelResult[];
   alignedClaims?: AlignedClaim[] | null;
   gate?: AdaptiveGateResult | null;
-  synthesisReport?: Pick<AdaptiveSynthesisReport, "gate"> | null;
+  synthesisReport?: Pick<AdaptiveSynthesisReport, "gate" | "presentation"> | null;
   trustSummary?: AdaptiveTrustSummary | null;
   /** The run's recorded per-slot call status (RunSlotStatusContext); null when the page was not handed it. */
   slotStatuses: ReadonlyMap<string, string> | null;
@@ -57,15 +59,79 @@ const isFiniteNumber = (x: unknown): x is number => typeof x === "number" && Num
 
 // ── 1. Verification gate ────────────────────────────────────────────────────
 
-export function gateSignal(input: Pick<TrustSignalsInput, "gate" | "synthesisReport">): TrustSignal {
+export interface StoredGateInput {
+  gate?: AdaptiveGateResult | null;
+  synthesisReport?: Pick<AdaptiveSynthesisReport, "gate" | "presentation"> | null;
+  /** The report type; only factual_lookup changes the rule (gate.ts caps its otherwise-passing gate at caution). */
+  schemaId?: string;
+}
+
+/**
+ * Whether a LEGACY report's stored gate agrees with the gate's own stored inputs. Read-only: nothing is written,
+ * nothing corrected, and no gate is ever shown in place of the stored one.
+ *
+ *   - "not_applicable": the report carries the Order 4 presentation (its wording is unchanged), or the page's stored
+ *     gate value (pageGateValue) is not a known status (D8 "Unrecognized" already shows no result).
+ *   - "inconsistent", either:
+ *       (a) the report's stored gate and the gate object's stored status are both strings and differ (two stored
+ *           results for one run); or
+ *       (b) the gate's recorded loadBearingClaims list (when stored) does not hold loadBearingSplitCount claims with
+ *           status "split"; or
+ *       (c) gate.ts's decision for the recorded inputs (runCertainty, loadBearingSplitCount; GATE_THRESHOLDS) is not
+ *           the stored status — fail when splits >= 2 or certainty < cautionMin; else pass when certainty >= passMin
+ *           and splits === 0; else caution. factual_lookup alone may store caution where that decision is pass (gate.ts
+ *           caps it on a split anywhere in the rows).
+ *   - "inputs_not_recorded": no (a), and runCertainty or loadBearingSplitCount is not stored as a finite number (a
+ *     non-negative integer count): nothing to check the stored status against. Missing is not inconsistent.
+ *   - "consistent": otherwise.
+ * The rows are not re-scored: the check reads the inputs the gate recorded (and the trust signal shows), not a fresh
+ * salience sort of the claims.
+ */
+export type StoredGateConsistency = "not_applicable" | "inconsistent" | "inputs_not_recorded" | "consistent";
+
+/** gate.ts's decision on its two recorded inputs (computeAdaptiveGate without the factual_lookup row cap). */
+function ruleStatus(certainty: number, loadBearingSplits: number): AdaptiveGateStatus {
+  if (loadBearingSplits >= 2 || certainty < GATE_THRESHOLDS.cautionMin) return "fail";
+  if (certainty >= GATE_THRESHOLDS.passMin && loadBearingSplits === 0) return "pass";
+  return "caution";
+}
+
+export function storedGateConsistency({ gate, synthesisReport, schemaId }: StoredGateInput): StoredGateConsistency {
+  if (!gate && !synthesisReport) return "not_applicable";
+  if (hasGatePresentation(synthesisReport)) return "not_applicable";
+  const shown = readGateStatus(pageGateValue(synthesisReport ?? null, gate?.status));
+  if (shown === "unrecognized") return "not_applicable";
+  if (synthesisReport && gate && typeof gate.status === "string" && typeof synthesisReport.gate === "string" && gate.status !== synthesisReport.gate) return "inconsistent";
+  const certainty = gate?.runCertainty;
+  const splits = gate?.loadBearingSplitCount;
+  if (!isFiniteNumber(certainty) || !isFiniteNumber(splits) || !Number.isInteger(splits) || splits < 0) return "inputs_not_recorded";
+  if (Array.isArray(gate!.loadBearingClaims) && gate!.loadBearingClaims.filter((c) => c?.status === "split").length !== splits) return "inconsistent";
+  const expected = ruleStatus(certainty, splits);
+  if (expected === shown) return "consistent";
+  if (schemaId === "factual_lookup" && expected === "pass" && shown === "caution") return "consistent";
+  return "inconsistent";
+}
+
+/**
+ * The readable gate banner's words for a legacy report (AdaptiveSynthesisReportView's LegacyGateBannerLabels): the
+ * stored word with what kind of check the gate is, or — on an inconsistent record — the unavailable statement for every
+ * status, so no gate result is shown.
+ */
+export function readableLegacyGateBannerLabels(input: StoredGateInput): Readonly<Record<AdaptiveGateStatus, string>> {
+  if (storedGateConsistency(input) !== "inconsistent") return G.legacyBanner;
+  return { pass: G.inconsistentBanner, caution: G.inconsistentBanner, fail: G.inconsistentBanner };
+}
+
+export function gateSignal(input: Pick<TrustSignalsInput, "gate" | "synthesisReport"> & { schemaId?: string }): TrustSignal {
   const base = { id: "gate" as const, name: C.gateName, definition: C.gateDefinition };
   const { gate, synthesisReport } = input;
   if (!gate && !synthesisReport) return { ...base, value: C.gateNotRecorded, details: [C.gateNotRecordedDetail], state: "not_recorded" };
 
   // The stored value the rest of the page shows (F4): the report's copy when a report exists.
   const status: GateDisplayStatus = readGateStatus(pageGateValue(synthesisReport ?? null, gate?.status));
+  const inconsistent = storedGateConsistency(input) === "inconsistent";
   const details: string[] = [];
-  const notice = gateNotice(status);
+  const notice = inconsistent ? null : gateNotice(status);
   // D8: an unrecognized stored value supports no verification result, so its stored inputs are not presented beside it.
   if (status !== "unrecognized") {
     if (gate && isFiniteNumber(gate.runCertainty) && isFiniteNumber(gate.loadBearingSplitCount) && Array.isArray(gate.loadBearingClaims)) {
@@ -74,6 +140,7 @@ export function gateSignal(input: Pick<TrustSignalsInput, "gate" | "synthesisRep
       details.push(C.gateInputsNotRecorded);
     }
   }
+  if (inconsistent) return { ...base, value: G.inconsistentValue, details: [...details, G.inconsistentDetail], state: "inconsistent" };
   if (notice) details.push(notice);
   return { ...base, value: GATE_STATUS_WORD[status], details, state: status };
 }
@@ -220,5 +287,5 @@ export function vacuousCitationCounts(schema: Pick<ResultSchema, "id" | "fields"
 
 /** The four signals, in their fixed display order. */
 export function buildTrustSignals(input: TrustSignalsInput): TrustSignal[] {
-  return [gateSignal(input), coverageSignal(input), sourcesSignal(input), behaviourSignal(input)];
+  return [gateSignal({ ...input, schemaId: input.schema.id }), coverageSignal(input), sourcesSignal(input), behaviourSignal(input)];
 }

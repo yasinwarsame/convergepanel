@@ -31,6 +31,8 @@ import { htmlText, panelElement, record, remoteWorkFixture, renderPanel, slotRow
 
 const READABLE = { reportLayout: "readable" };
 const NEW_WORDING = Object.values(READABLE_GATE_COPY.legacyBanner);
+/** Every readable-only gate banner text, the unavailable one included (classic must carry none). */
+const ALL_READABLE_BANNERS = [...NEW_WORDING, READABLE_GATE_COPY.inconsistentBanner];
 const LEGACY_WORDING = Object.values(LEGACY_GATE_BANNER_LABEL);
 /** As react-dom/server escapes text. */
 const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/'/g, "&#x27;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -59,6 +61,11 @@ interface Case {
   base: string;
   make?: () => any;
   edit?: (rec: any) => void;
+  /**
+   * Review of cb2febb (MINOR): the stored gate contradicts the record's own stored data (stated here from the fixture,
+   * not from the code under test), so a legacy readable page shows the gate as unavailable.
+   */
+  storedConflict?: true;
 }
 
 const CASES: Case[] = [
@@ -79,7 +86,8 @@ const CASES: Case[] = [
   { label: "disagreement (many splits)", base: "generic-splits" },
   { label: "degraded coverage (one failed, one substituted)", base: "generic-substituted-and-failed" },
   { label: "degraded coverage (assembled summary)", base: "generic-mixed-narrative-fail" },
-  { label: "degraded coverage + fail (remote-work shape)", base: "generic-substituted-and-failed", make: () => remoteWorkFixture().rec },
+  // remoteWorkFixture edits the stored gate to fail; its recorded inputs (69%, one of three split) give caution.
+  { label: "degraded coverage + fail (remote-work shape)", base: "generic-substituted-and-failed", make: () => remoteWorkFixture().rec, storedConflict: true },
   {
     // F4: the banner shows the report's stored gate, not the gate object's copy.
     label: "page gate value: gate object says pass, the report says fail",
@@ -88,6 +96,7 @@ const CASES: Case[] = [
       rec.gate.status = "pass";
       rec.synthesisReport.gate = "fail";
     },
+    storedConflict: true,
   },
 ];
 
@@ -123,7 +132,8 @@ describe("readable: no legacy \"Verified\" banner; the stored gate is stated, ag
     // The four trust signals are intact, and the gate signal states the stored gate word.
     const trust = tierHtml(html, "trust")!;
     for (const id of ["gate", "coverage", "sources", "behaviour"]) expect(trust).toContain(`data-trust-signal="${id}"`);
-    expect(/data-trust-signal="gate"[\s\S]*?data-trust-signal-value=""[^>]*>([^<]*)</.exec(trust)![1]).toBe(GATE_STATUS_WORD[stored]);
+    const conflict = variant === "legacy" && c.storedConflict === true;
+    expect(/data-trust-signal="gate"[\s\S]*?data-trust-signal-value=""[^>]*>([^<]*)</.exec(trust)![1]).toBe(conflict ? READABLE_GATE_COPY.inconsistentValue : GATE_STATUS_WORD[stored]);
     if (c.label.startsWith("missing")) expect(htmlText(trust)).toContain(READABLE_TRUST_COPY.gateInputsNotRecorded);
 
     // Nowhere on the readable page: the historical banner wording, or an unqualified "verified".
@@ -137,9 +147,9 @@ describe("readable: no legacy \"Verified\" banner; the stored gate is stated, ag
     const root = (await mount(rec, rows, READABLE)).root;
     const banners = root.findAllByType(GateBanner).map((b) => textOf(b));
     expect(banners).toHaveLength(2);
-    const expected = variant === "legacy" ? READABLE_GATE_COPY.legacyBanner[stored as "pass" | "caution" | "fail"] : gateLabel(stored);
+    const expected = conflict ? READABLE_GATE_COPY.inconsistentBanner : variant === "legacy" ? READABLE_GATE_COPY.legacyBanner[stored as "pass" | "caution" | "fail"] : gateLabel(stored);
     expect(banners).toEqual([expected, expected]);
-    if (variant === "order4") for (const w of NEW_WORDING) expect(text).not.toContain(w);
+    if (variant === "order4") for (const w of [...NEW_WORDING, READABLE_GATE_COPY.inconsistentBanner]) expect(text).not.toContain(w);
     else expect(text.split(expected)).toHaveLength(3);
     // The banner follows the answer: the reader meets the answer before any gate banner.
     expect(html.indexOf(esc(expected))).toBeGreaterThan(order[1]);
@@ -149,7 +159,7 @@ describe("readable: no legacy \"Verified\" banner; the stored gate is stated, ag
     const rec = record("generic-all-failed");
     const rows = slotRows("generic-all-failed");
     const text = htmlText(renderPanel(rec, rows, READABLE));
-    for (const w of [...LEGACY_WORDING, ...NEW_WORDING]) expect(text).not.toContain(w);
+    for (const w of [...LEGACY_WORDING, ...ALL_READABLE_BANNERS]) expect(text).not.toContain(w);
     expect(unqualifiedVerified(text)).toBe(false);
     expect((await mount(rec, rows, READABLE)).root.findAllByType(GateBanner)).toHaveLength(0);
   });
@@ -167,7 +177,7 @@ describe("classic parity: the same fixtures keep the historical banner wording b
     const { rec, rows } = build(c, variant);
     const html = renderPanel(rec, rows);
     const stored = readGateStatus(pageGateValue(rec.synthesisReport, rec.gate.status));
-    for (const w of NEW_WORDING) expect(html).not.toContain(w);
+    for (const w of ALL_READABLE_BANNERS) expect(htmlText(html)).not.toContain(w);
     const root = (await mount(rec, rows)).root;
     const banners = root.findAllByType(GateBanner);
     expect(banners.length).toBeGreaterThan(0);
@@ -208,13 +218,17 @@ describe("GateBanner's readable option changes only the words, and only on the l
 });
 
 describe("the readable gate wording", () => {
-  it("states the stored gate word, separates the models' positions from evidence checking, and never says verified", () => {
+  // Review of cb2febb (MAJOR): the banner states the stored word and the kind of check — never a condition on which
+  // claims split, agreed or matched (gate.ts's top-N cut with stored-order ties makes any such sentence unsafe).
+  it("states the stored gate word and the kind of check, separates it from evidence verification, and claims nothing about the claims", () => {
+    const kind = "This is a rule-based check of the panel's certainty score and split positions; it is not an independent verification of the evidence.";
     for (const [status, words] of Object.entries(READABLE_GATE_COPY.legacyBanner)) {
-      expect(words.startsWith(gateLabel(status as "pass"))).toBe(true);
-      expect(words).toContain("the evidence was not independently checked");
+      expect(words).toBe(`${gateLabel(status as "pass")}. ${kind}`);
       expect(words).not.toMatch(/verif(ied|y)\b/i);
-      expect(words).not.toMatch(/converg|consensus/i);
+      expect(words).not.toMatch(/converg|consensus|most-raised|none of|no more than|two or more|match|agree|threshold/i);
     }
+    expect(READABLE_GATE_COPY.inconsistentBanner.startsWith("Verification gate: Unavailable — the stored result is inconsistent with its recorded inputs.")).toBe(true);
+    expect(READABLE_GATE_COPY.inconsistentBanner).not.toMatch(/\b(Pass|Caution|Fail)\b|verif(ied|y)\b|most-raised|match|agree/i);
   });
 
   // Review of 28f770c (MINOR): this used to assert the banner had NO scanner hit — vacuous, because the scanner did not
@@ -222,7 +236,7 @@ describe("the readable gate wording", () => {
   // (and is classified in the manifest: readableLegacyGateTruth.spec.tsx); the capped tooltip still carries none.
   it("every banner literal is seen by the vocabulary scanner; the capped tooltip carries no vocabulary", () => {
     const hits = scanVocabulary(process.cwd(), ["lib/research/readableReport/copy.ts"]).map((l) => l.literal);
-    for (const w of NEW_WORDING) expect(hits).toContain(JSON.stringify(w));
+    for (const w of [...NEW_WORDING, READABLE_GATE_COPY.inconsistentBanner]) expect(hits).toContain(JSON.stringify(w));
     expect(hits.some((h) => /behaviour score is capped/.test(h))).toBe(false);
   });
 });

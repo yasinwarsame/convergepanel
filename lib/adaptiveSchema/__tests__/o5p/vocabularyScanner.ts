@@ -22,8 +22,10 @@ export const SCANNED_ROOTS = ["components/adaptive", "lib/adaptiveSchema", "lib/
 // "in accord…". "verif\w*" is deliberately not added: it is evidence-checking vocabulary, not agreement vocabulary, and
 // would list every "Verification gate" label and every "not independently verified" qualifier (39 more literals);
 // unqualified "verified" claims are asserted on the rendered pages instead (readableLegacyGateBanner / readableLegacyGateTruth specs).
+// Review of cb2febb (NIT): stems widened — identical\w*, "same stance(s)", consistent (whole word: "inconsistent" is not
+// agreement vocabulary and is not matched), equivalen\w*, concordan\w*.
 export const VOCAB =
-  /\b(agree\w*|consensus|majority|diverg\w*|contested|camps?|split|disagree\w*|disput\w*|different positions|converg\w*|oppos\w*|supported by|disputed by|supporters?|disputers?|unresolved|vote\w*|align\w*|contradict\w*|unanim\w*|concur\w*|dissent\w*|corroborat\w*|endorse\w*|unique claims?|same answers?|match\w*|identical|uniform\w*|harmon\w*|coincid\w*|confirm\w*|same positions?|in line with|in accord\w*)\b/i;
+  /\b(agree\w*|consensus|majority|diverg\w*|contested|camps?|split|disagree\w*|disput\w*|different positions|converg\w*|oppos\w*|supported by|disputed by|supporters?|disputers?|unresolved|vote\w*|align\w*|contradict\w*|unanim\w*|concur\w*|dissent\w*|corroborat\w*|endorse\w*|unique claims?|same answers?|match\w*|identical\w*|uniform\w*|harmon\w*|coincid\w*|confirm\w*|same positions?|in line with|in accord\w*|same stances?|consistent|equivalen\w*|concordan\w*)\b/i;
 const BARE_ENUM = /^["'`][a-z_]+["'`]$/;
 
 export interface Literal {

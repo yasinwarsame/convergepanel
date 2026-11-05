@@ -5,8 +5,22 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { getResultSchema } from "@/lib/adaptiveSchema/schemaRegistry";
 import { CAUTION_NOTICE, GATE_STATUS_WORD, UNRECOGNIZED_GATE_NOTICE } from "@/lib/adaptiveSchema/gatePresentation";
-import { behaviourSignal, buildTrustSignals, vacuousCitationCounts, claimsWithMultipleModels, coverageCounts, coverageSignal, gateSignal, namesASource, sourcesSignal } from "../trustSignals";
-import { READABLE_TRUST_COPY as C } from "../copy";
+import { GATE_THRESHOLDS } from "@/lib/adaptiveSchema/config";
+import { computeAdaptiveGate } from "@/lib/adaptiveSchema/gate";
+import {
+  behaviourSignal,
+  buildTrustSignals,
+  vacuousCitationCounts,
+  claimsWithMultipleModels,
+  coverageCounts,
+  coverageSignal,
+  gateSignal,
+  namesASource,
+  readableLegacyGateBannerLabels,
+  sourcesSignal,
+  storedGateConsistency,
+} from "../trustSignals";
+import { READABLE_GATE_COPY as G, READABLE_TRUST_COPY as C } from "../copy";
 
 const RECORDS: Record<string, any> = JSON.parse(readFileSync(join(process.cwd(), "lib/adaptiveSchema/__tests__/o5p/__fixtures__/baseline-2c17fee/records.json"), "utf8"));
 const rec = (name: string) => JSON.parse(JSON.stringify(RECORDS[name]));
@@ -235,5 +249,93 @@ describe("buildTrustSignals", () => {
     expect(all).not.toMatch(/consensus|verified|majority/i);
     expect(C.sourcesDefinition).toMatch(/not checked/);
     expect(C.behaviourDefinition).toMatch(/not whether the answer is correct/);
+  });
+});
+
+/**
+ * Review of cb2febb (MINOR): a legacy record whose stored gate contradicts its recorded inputs. storedGateConsistency
+ * re-states gate.ts's decision on the two recorded inputs; the differential below holds it to the REAL computeAdaptiveGate
+ * (rows built so the real gate sees exactly the given certainty and load-bearing split count), so a drift in either
+ * fails here.
+ */
+describe("storedGateConsistency (legacy records only; read-only)", () => {
+  const cell = (m: string) => ({ modelId: m, stance: "agrees" });
+  /** n claims raised by 3 models, the first `splits` of them split (all equally raised, so the real gate keeps stored order). */
+  const rows = (n: number, splits: number) =>
+    Array.from({ length: n }, (_, i) => ({ id: `c${i}`, claimText: `c${i}`, status: i < splits ? "split" : "consensus", cells: ["a", "b", "c"].map(cell) }));
+  const legacyOf = (gate: any, reportGate: unknown = gate.status) => ({ gate, synthesisReport: { gate: reportGate }, schemaId: "generic" });
+
+  const CERTAINTIES = [0, GATE_THRESHOLDS.cautionMin - 0.01, GATE_THRESHOLDS.cautionMin, 0.6, GATE_THRESHOLDS.passMin - 0.001, GATE_THRESHOLDS.passMin, 0.9, 1];
+  const GRID = CERTAINTIES.flatMap((c) => [0, 1, 2, 3].map((s) => [c, s] as const));
+
+  it.each(GRID)("certainty %p, %p load-bearing splits: the real gate's status is consistent; every other stored status is inconsistent", (certainty, splits) => {
+    const real = JSON.parse(JSON.stringify(computeAdaptiveGate(rows(4, splits), certainty, "generic")));
+    expect(real.loadBearingSplitCount).toBe(Math.min(splits, GATE_THRESHOLDS.loadBearingTopN));
+    expect(storedGateConsistency(legacyOf(real))).toBe("consistent");
+    expect(readableLegacyGateBannerLabels(legacyOf(real))).toBe(G.legacyBanner);
+    for (const other of ["pass", "caution", "fail"].filter((s) => s !== real.status)) {
+      const g = { ...real, status: other };
+      expect([other, storedGateConsistency(legacyOf(g))]).toEqual([other, "inconsistent"]);
+      expect(readableLegacyGateBannerLabels(legacyOf(g))).toEqual({ pass: G.inconsistentBanner, caution: G.inconsistentBanner, fail: G.inconsistentBanner });
+    }
+  });
+
+  it("factual_lookup: a stored caution where the inputs alone give pass is consistent (gate.ts's row cap); the reverse is not", () => {
+    const g = { status: "caution", runCertainty: 0.95, loadBearingSplitCount: 0, loadBearingClaims: [] };
+    expect(storedGateConsistency({ gate: g, synthesisReport: { gate: "caution" }, schemaId: "factual_lookup" })).toBe("consistent");
+    expect(storedGateConsistency({ gate: g, synthesisReport: { gate: "caution" }, schemaId: "generic" })).toBe("inconsistent");
+    const f = { status: "pass", runCertainty: 0.6, loadBearingSplitCount: 0, loadBearingClaims: [] };
+    expect(storedGateConsistency({ gate: f, synthesisReport: { gate: "pass" }, schemaId: "factual_lookup" })).toBe("inconsistent");
+  });
+
+  it("two stored results that differ are inconsistent, even without inputs", () => {
+    expect(storedGateConsistency({ gate: { status: "pass" } as any, synthesisReport: { gate: "fail" } })).toBe("inconsistent");
+    expect(storedGateConsistency({ gate: { status: "fail" } as any, synthesisReport: { gate: "pass" } })).toBe("inconsistent");
+    expect(storedGateConsistency({ gate: { status: "pass" } as any, synthesisReport: { gate: "pass" } })).toBe("inputs_not_recorded");
+  });
+
+  it("a recorded split count that disagrees with the recorded load-bearing claims is inconsistent", () => {
+    const real = JSON.parse(JSON.stringify(computeAdaptiveGate(rows(3, 1), 0.9, "generic")));
+    expect(storedGateConsistency(legacyOf(real))).toBe("consistent");
+    expect(storedGateConsistency(legacyOf({ ...real, loadBearingSplitCount: 0, status: "pass" }))).toBe("inconsistent");
+    // Without the claims list, the count alone is checked against the status.
+    const { loadBearingClaims: _drop, ...noList } = real;
+    expect(storedGateConsistency(legacyOf(noList))).toBe("consistent");
+  });
+
+  it.each([
+    ["certainty missing", { runCertainty: undefined }],
+    ["certainty not a number", { runCertainty: "0.9" }],
+    ["certainty NaN", { runCertainty: NaN }],
+    ["split count missing", { loadBearingSplitCount: undefined }],
+    ["split count fractional", { loadBearingSplitCount: 0.5 }],
+    ["split count negative", { loadBearingSplitCount: -1 }],
+  ])("missing or malformed inputs (%s) are not inconsistent — nothing to check against", (_n, patch) => {
+    const g = { status: "fail", runCertainty: 0.99, loadBearingSplitCount: 0, loadBearingClaims: [], ...patch };
+    expect(storedGateConsistency(legacyOf(g))).toBe("inputs_not_recorded");
+    expect(readableLegacyGateBannerLabels(legacyOf(g))).toBe(G.legacyBanner);
+  });
+
+  it("not applicable: an Order 4 report (its wording is unchanged), an unrecognized stored value, no gate at all", () => {
+    const wrong = { status: "pass", runCertainty: 0.1, loadBearingSplitCount: 3, loadBearingClaims: [] };
+    expect(storedGateConsistency({ gate: wrong, synthesisReport: { gate: "pass", presentation: { verificationGate: { status: "pass" } } as any } })).toBe("not_applicable");
+    expect(storedGateConsistency({ gate: { ...wrong, status: "verified-ish" }, synthesisReport: { gate: "verified-ish" } })).toBe("not_applicable");
+    expect(storedGateConsistency({})).toBe("not_applicable");
+  });
+
+  it("gateSignal on an inconsistent legacy record: Unavailable, inputs still shown, no notice; Order 4 copy unchanged", () => {
+    const r = rec("generic-mixed");
+    expect(r.gate.status).toBe("caution");
+    r.gate.status = "pass";
+    r.synthesisReport.gate = "pass";
+    const order4 = gateSignal({ gate: r.gate, synthesisReport: r.synthesisReport });
+    expect([order4.value, order4.state]).toEqual(["Pass", "pass"]);
+    delete r.synthesisReport.presentation;
+    const s = gateSignal({ gate: r.gate, synthesisReport: r.synthesisReport, schemaId: r.schemaId });
+    expect([s.value, s.state]).toEqual(["Unavailable", "inconsistent"]);
+    expect(s.details[0]).toContain(C.gateInputsHeading);
+    expect(s.details).toContain("The stored result is inconsistent with its recorded inputs, so no gate result is shown.");
+    expect(s.details.join(" ")).not.toContain(CAUTION_NOTICE);
+    expect(JSON.stringify(r.gate.status)).toBe('"pass"'); // stored data untouched
   });
 });

@@ -26,7 +26,7 @@ import PanelEvidenceSection from "@/components/adaptive/PanelEvidenceSection";
 import ReviewGovernanceSection from "@/components/adaptive/ReviewGovernanceSection";
 import { ANALYSIS_NOTICE_LINES } from "@/components/adaptive/AnalysisAvailabilityNotice";
 import { GATE_LABEL, GATE_STATUS_WORD, LEGACY_GATE_BANNER_LABEL, UNRECOGNIZED_GATE_NOTICE, readGateStatus } from "@/lib/adaptiveSchema/gatePresentation";
-import { READABLE_ANSWER_COPY, READABLE_TRUST_COPY } from "@/lib/research/readableReport/copy";
+import { READABLE_ANSWER_COPY, READABLE_GATE_COPY, READABLE_TRUST_COPY } from "@/lib/research/readableReport/copy";
 import { READABLE_MODEL_RESPONSES_ANCHOR } from "@/components/research/readable/ExecutiveAnswer";
 import { PILOT_SCENARIOS, htmlText, panelElement, record, remoteWorkFixture, renderPanel, slotRows, tierHtml } from "./readableFixtures";
 
@@ -279,8 +279,11 @@ describe("M-2. legacy answer path (no stored presentation.answer): answer first,
 
     // Never stronger than stored: the trust panel shows the stored gate word; nothing in the lead reads Pass / verified
     // unless the stored gate is a recognized pass; the frozen legacy banner wording is not used.
+    // Review of cb2febb (MINOR): the remote-work shape stores fail over inputs that give caution (certainty above the
+    // caution floor, one load-bearing split); without the Order 4 presentation that contradiction shows no result.
     const trustValue = /data-trust-signal="gate"[\s\S]*?data-trust-signal-value=""[^>]*>([^<]*)</.exec(trust)![1];
-    expect(trustValue).toBe(GATE_STATUS_WORD[stored]);
+    const contradictsInputs = c.label.includes("remote-work") && variant === "presentation-removed";
+    expect(trustValue).toBe(contradictsInputs ? READABLE_GATE_COPY.inconsistentValue : GATE_STATUS_WORD[stored]);
     const lead2 = htmlText(answer + trust);
     if (stored !== "pass") expect(lead2).not.toMatch(/\bPass\b/);
     for (const banner of Object.values(LEGACY_GATE_BANNER_LABEL)) expect(lead2).not.toContain(banner);
