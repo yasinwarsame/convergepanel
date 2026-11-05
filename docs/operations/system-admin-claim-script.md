@@ -35,7 +35,7 @@ npm run admin:set-system-admin-claim -- \
   [--operator-id-token-file=<file>]   # mode 0600; required for --execute (unless bootstrap)
   [--bootstrap-first-admin]           # grant only; only while zero accounts hold admin === true
   [--execute --confirm-claim=<exact string printed by the dry run>]
-  [--result-file=<NEW *.json path outside every git worktree of this repo>]
+  [--result-file=<NEW *.json path outside every git checkout>]
 ```
 
 - **No defaults.** No default project, no default user, no default operation.
@@ -124,28 +124,57 @@ pre-create it. A `--result-file` is checked against the filesystem, never
 lexically: its parent directory and the repository root are canonicalised with
 `realpath.native` (symlinks resolved, on-disk case restored), and the file is
 refused (`result_path_inside_repo`) if it lies inside the current worktree or
-ANY git worktree of this repository (`git worktree list`) — compared
-case-folded on macOS/Windows and on any volume detected as case-insensitive, so
-`/users/.../convergepanel/out.json` cannot slip past. A second, independent
-layer compares filesystem identity: the parent directory and EVERY ancestor up
-to `/` are `stat`ed and refused (`result_path_inside_repo`) if any has the
-`dev:ino` of the repository root or of any worktree root — so an alternate
-spelling the canonicaliser leaves alone (the macOS firmlink
-`/System/Volumes/Data/Users/...`, a bind mount) is still recognised as inside.
-A parent directory or repository root that cannot be canonicalised, an ancestor
-or protected root whose identity cannot be established, a `git worktree list`
-that fails or returns nothing (never treated as "no worktrees"), or ANY existing
-entry at the target path (file, directory or symlink, live or dangling), is
-refused (`result_path_invalid`). A listed worktree whose directory no longer
-exists (git reports it prunable) contains nothing and is skipped. The file is
-then created with `O_CREAT|O_EXCL|O_NOFOLLOW` and re-verified AFTER the create:
-the entry at the path must be the inode the descriptor created, the parent
-directory must still have the checked `dev:ino` and canonical path, and no
-ancestor of it may now be a protected root — so a symlink or directory swap
-after the check is refused too. On that refusal the tool unlinks the file only
-if the entry at the path is, at that moment, its own inode. It contains
-UIDs, claims, the masked credential email and the request id, never key
-material or tokens. Do not commit it.
+ANY git worktree of this repository (`git worktree list --porcelain -z`) —
+compared case-folded on macOS/Windows and on any volume detected as
+case-insensitive, so `/users/.../convergepanel/out.json` cannot slip past. A
+second, independent layer compares filesystem identity: the parent directory
+and EVERY ancestor up to `/` are `stat`ed and refused
+(`result_path_inside_repo`) if any has the `dev:ino` of the repository root or
+of any worktree root — so an alternate spelling of a ROOT (or of a path through
+a root) that the canonicaliser leaves alone, such as the macOS firmlink
+`/System/Volumes/Data/Users/...`, is still recognised as inside. A third layer
+needs no enumeration: the parent directory and every ancestor are refused
+(`result_path_inside_repo`) if they contain a `.git` entry of any kind
+(directory, gitfile, symlink) — this covers a linked worktree moved with `mv`
+(git still lists it at its old path), a separate clone, and any other checkout.
+A `.git` entry that cannot be inspected is refused (`result_path_invalid`).
+
+Every git command the tool runs (`worktree list`, `rev-parse`, `status`) runs
+with ALL inherited `GIT_*` variables removed (so `GIT_DIR`, `GIT_COMMON_DIR`,
+`GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_CEILING_DIRECTORIES`,
+`GIT_CONFIG_COUNT`/`KEY_n`/`VALUE_n`, `GIT_CONFIG_PARAMETERS` cannot point it at
+another repository or index), with system and global git config disabled
+(`GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=<null device>`) and
+`GIT_OPTIONAL_LOCKS=0`. The worktree list is parsed strictly from the
+NUL-delimited format, so a worktree path containing a newline is read exactly.
+
+**Ambiguous repository state is a refusal** (`result_path_invalid`, exit 2,
+nothing written anywhere): `git worktree list` failing, output not in exactly
+the documented record format (unknown or repeated attribute, a record not
+starting with one absolute `worktree` path, missing terminators), an empty
+list, ANY worktree reported `prunable`, a listed worktree whose directory does
+not exist or cannot be identified, or a list that does not contain the
+repository root itself (git described some other repository). The message
+tells the operator to run `git worktree list` and fix the state with
+`git worktree repair <new path>` (moved) or `git worktree prune` (deleted). A
+locked worktree on unmounted storage is also refused until it is reachable or
+removed. A parent directory or repository root that cannot be canonicalised, an
+ancestor or protected root whose identity cannot be established, or ANY
+existing entry at the target path (file, directory or symlink, live or
+dangling), is refused (`result_path_invalid`) as well.
+
+The file is then created with `O_CREAT|O_EXCL|O_NOFOLLOW` and re-verified AFTER
+the create: the entry at the path must be the inode the descriptor created, the
+parent directory must still have the checked `dev:ino` and canonical path, and
+no ancestor of it may now be a protected root or contain a `.git` entry — so a
+symlink or directory swap after the check is refused too. On that refusal the
+tool unlinks the file only if the entry at the path is, at that moment, its own
+inode. The SAME checks run again immediately before the report is written
+through the kept descriptor: if the directory was moved in the meantime (for
+example into a checkout), nothing is written (`RESULT FILE NOT WRITTEN`, the
+run's own exit code is kept; 0 becomes 1) and the empty 0600 file is left
+where it now is. The file contains UIDs, claims, the masked credential email
+and the request id, never key material or tokens. Do not commit it.
 
 **Audit rows** (`--execute` only), in `admin_audit_logs`, using the existing
 admin/billing schema (`adminUid, adminEmail?, targetUid, targetEmail?,
@@ -289,15 +318,23 @@ ordinary (non-admin) use.
   each see the other as the remaining admin. One operator at a time; confirm
   the remaining admins afterwards with the read-only check script.
 
-- **Result-file location residuals.** (a) Only this repository and its
-  `git worktree list` worktrees are protected; a SEPARATE clone of the
-  repository elsewhere on disk is not recognised — do not point
-  `--result-file` into any checkout. (b) Node has no `openat`/`unlinkat`, so
-  the post-create re-check runs by path: an adversary with write access to the
-  result directory's ancestors who moves the directory away after the create
-  can leave an empty 0600 file behind in the moved directory (it is never
-  written; the run is refused before any credential is read). Use the default
-  result directory (owned by you, mode 0700) to avoid both.
+- **Result-file location residuals.** (a) A checkout with NO `.git` entry
+  anywhere above it (a work tree driven by an external `GIT_DIR` /
+  `core.worktree`) and not listed by `git worktree list` is not recognised.
+  (b) Identity comparison protects the worktree ROOTS: an alias of a
+  SUBDIRECTORY of a worktree (a Linux bind mount or macOS nullfs mount of
+  `<repo>/scripts` placed elsewhere, or a hard-linked directory on HFS+) walks
+  up through the alias's own parents, never meets a root or a `.git`, and is
+  accepted. (c) Node has no `openat`/`unlinkat`/`F_GETPATH`, so every re-check
+  runs by path: an adversary with write access to the result directory's
+  ancestors who moves the directory after the create can leave an empty 0600
+  file behind in the moved directory; and a move landing in the window between
+  the pre-write re-check and the `write` call itself puts the report there. (d)
+  A `.git` entry in an unrelated ancestor (e.g. a dotfiles repository at
+  `$HOME/.git`) makes every path under it refused — use a directory outside it.
+  Do not point `--result-file` into any checkout; use the default result
+  directory (owned by you, mode 0700, under the OS temp directory) to avoid all
+  of these.
 
 ## Defects fixed (from the retired scripts)
 

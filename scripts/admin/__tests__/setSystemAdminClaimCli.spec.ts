@@ -419,20 +419,27 @@ describe("realIo — files on disk (temp dirs only)", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it("result file: exclusive 0600 create, written through the kept fd (a path swap after create is not followed)", () => {
+  it("result file: exclusive 0600 create; a path swap after create is not followed AND the pre-write re-check writes nothing anywhere", () => {
     const io = realIo(REPO);
     const p = path.join(dir, "r.json");
     const h = io.createResultFile(realLoc(p, REPO));
     expect(fs.statSync(p).mode & 0o777).toBe(0o600);
     expect(() => io.createResultFile(realLoc(p, REPO))).toThrow();
-    // Swap the path for a decoy after the create; the fd still points at the original inode.
+    // Swap the path for a decoy after the create.
     const moved = path.join(dir, "moved.json");
     fs.renameSync(p, moved);
     fs.writeFileSync(p, "DECOY");
+    expect(() => h.write("{\"a\":1}\n")).toThrow();
+    h.close();
+    expect(fs.readFileSync(moved, "utf8")).toBe("");
+    expect(fs.readFileSync(p, "utf8")).toBe("DECOY");
+  });
+  it("CONTROL: result file written through the kept fd when nothing moved", () => {
+    const p = path.join(dir, "ok.json");
+    const h = realIo(REPO).createResultFile(realLoc(p, REPO));
     h.write("{\"a\":1}\n");
     h.close();
-    expect(fs.readFileSync(moved, "utf8")).toBe("{\"a\":1}\n");
-    expect(fs.readFileSync(p, "utf8")).toBe("DECOY");
+    expect(fs.readFileSync(p, "utf8")).toBe("{\"a\":1}\n");
   });
 
   it("result file: an existing symlink at the path is refused by the exclusive create", () => {
@@ -786,8 +793,10 @@ describe("B1–B3: containment by filesystem identity, worktree enumeration, pos
   it("B1: a firmlink spelling of a DEEP subdirectory of the repo is refused (every ancestor is compared, not only the parent)", () => {
     expect(checkResultLocation(`${FIRM}${CP}/a/b/c/out.json`, CP, idIo())).toMatchObject({ ok: false, code: "result_path_inside_repo" });
   });
-  it("B1: the repository root's OWN identity is protected even when the worktree list does not spell it", () => {
-    expect(checkResultLocation(`${FIRM}${CP}/out.json`, CP, idIo({ gitWorktreeRoots: () => [WT] }))).toMatchObject({ ok: false, code: "result_path_inside_repo" });
+  it("B1: the repository root's OWN identity is protected even when the worktree list spells it differently", () => {
+    // `/alias/CP` is the repo by identity only (so the list passes the "repo is listed" check), never by string.
+    const io = idIo({ gitWorktreeRoots: () => ["/alias/CP", WT], statIdentity: (p) => (p === "/alias/CP" ? firmIdentity(CP) : firmIdentity(p)) });
+    expect(checkResultLocation(`${FIRM}${CP}/out.json`, CP, io)).toMatchObject({ ok: false, code: "result_path_inside_repo" });
   });
   it("B1: a firmlink spelling of a LINKED worktree is refused (every worktree root's identity is protected)", () => {
     expect(checkResultLocation(`${FIRM}${WT}/sub/out.json`, CP, idIo())).toMatchObject({ ok: false, code: "result_path_inside_repo" });
@@ -825,11 +834,36 @@ describe("B1–B3: containment by filesystem identity, worktree enumeration, pos
       expect(checkResultLocation("/Users/op/elsewhere/out.json", CP, io)).toMatchObject({ ok: false, code: "result_path_invalid" });
     },
   );
-  it("B1 fail closed: a worktree whose identity errors => result_path_invalid; a worktree that is GONE (prunable) contains nothing (CONTROL)", () => {
+  it("B1 fail closed: a worktree whose identity errors => result_path_invalid", () => {
     const erroring = idIo({ statIdentity: (p) => (p === WT ? "error" : firmIdentity(p)) });
     expect(checkResultLocation("/Users/op/elsewhere/out.json", CP, erroring)).toMatchObject({ ok: false, code: "result_path_invalid" });
+  });
+  it("D: a listed worktree whose directory is GONE (moved/deleted, prunable) => result_path_invalid with the repair/prune hint (never 'nothing to protect')", () => {
     const gone = idIo({ statIdentity: (p) => (p === WT ? "absent" : firmIdentity(p)) });
-    expect(checkResultLocation("/Users/op/elsewhere/out.json", CP, gone)).toMatchObject({ ok: true });
+    const r = checkResultLocation("/Users/op/elsewhere/out.json", CP, gone);
+    expect(r).toMatchObject({ ok: false, code: "result_path_invalid" });
+    if (r.ok) throw new Error("fixture");
+    expect(r.message).toMatch(/git worktree repair/);
+    expect(r.message).toMatch(/git worktree prune/);
+  });
+  it("D: a worktree list that does not include the repository root (git pointed at another repository) => result_path_invalid", () => {
+    const foreign = idIo({ gitWorktreeRoots: () => ["/Users/op/Apps/Foreign", "/Users/op/Apps/Foreign-wt"] });
+    expect(checkResultLocation("/Users/op/elsewhere/out.json", CP, foreign)).toMatchObject({ ok: false, code: "result_path_invalid" });
+  });
+  it("D CONTROL: the same list plus the repository root is accepted", () => {
+    const withRepo = idIo({ gitWorktreeRoots: () => ["/Users/op/Apps/Foreign", CP] });
+    expect(checkResultLocation("/Users/op/elsewhere/out.json", CP, withRepo)).toMatchObject({ ok: true });
+  });
+  it("checkout layer: a `.git` entry (any kind) in the result directory or ANY ancestor => result_path_inside_repo; an uninspectable one => result_path_invalid", () => {
+    for (const [gitAt, kind, code] of [
+      ["/Users/op/elsewhere/.git", "other", "result_path_inside_repo"],
+      ["/Users/op/.git", "file", "result_path_inside_repo"],
+      ["/.git", "symlink", "result_path_inside_repo"],
+      ["/Users/.git", "error", "result_path_invalid"],
+    ] as const) {
+      const io = idIo({ lstatKind: (p) => (p === gitAt ? kind : "absent") });
+      expect({ gitAt, r: checkResultLocation("/Users/op/elsewhere/out.json", CP, io) }).toMatchObject({ gitAt, r: { ok: false, code } });
+    }
   });
 
   it.each<[string, string[] | null]>([["null (git failed)", null], ["empty", []]])(

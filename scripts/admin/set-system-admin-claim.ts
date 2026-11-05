@@ -23,7 +23,7 @@
  *     [--operator-id-token-file=<file>]     # SYSTEM_ADMIN ID token, mode 0600; required for --execute
  *     [--bootstrap-first-admin]             # instead of a token, only while zero admins exist
  *     [--execute --confirm-claim=<exact string printed by the dry run>]
- *     [--result-file=<path to a NEW *.json file outside every git worktree of this repo>]
+ *     [--result-file=<path to a NEW *.json file outside every git checkout>]
  *
  * EXIT CODES: 0 completed and verified (or a grant already in place);
  * 2 refused or dry run — no Firebase write call was issued;
@@ -91,8 +91,10 @@ export type ResultFileHandle = { write: (contents: string) => void; close: () =>
  * Filesystem identity of an existing path (stat, symlinks FOLLOWED):
  * `{ id: "<dev>:<ino>" }`. "absent" for ENOENT/ENOTDIR; "error" for anything
  * else. Two spellings of one directory (case variants, symlinks, macOS
- * firmlinks such as /System/Volumes/Data/Users vs /Users, bind mounts) share
- * one identity even when no string canonicaliser agrees.
+ * firmlinks such as /System/Volumes/Data/Users vs /Users) share one identity
+ * even when no string canonicaliser agrees. Only directories that ARE a
+ * protected root are compared: an alias (bind mount, nullfs) of a
+ * SUBDIRECTORY of a worktree is not recognised (documented residual).
  */
 export type IdentityResult = { id: string } | "absent" | "error";
 
@@ -115,7 +117,13 @@ export type CliIo = {
   readSecretFile: (p: string) => SecretFileRead | null;
   /** Filesystem-canonical path (realpath.native: symlinks resolved, on-disk case) of an EXISTING path; null otherwise. */
   realpathDir: (p: string) => string | null;
-  /** Roots of every git worktree of the repository at repoRoot; null when git cannot list them (refused, never treated as "none"). */
+  /**
+   * Roots of every git worktree of the repository at repoRoot, from
+   * `git worktree list --porcelain -z` run with a sanitized environment
+   * (gitEnv). null — refused, never treated as "none" — when git fails, the
+   * output is not exactly the documented record format, or ANY worktree is
+   * reported prunable (moved or deleted: the list no longer says where it is).
+   */
   gitWorktreeRoots: () => string[] | null;
   /** Filesystem identity (dev:ino, symlinks followed) of `p`. */
   statIdentity: (p: string) => IdentityResult;
@@ -128,8 +136,10 @@ export type CliIo = {
    * before any Firebase call and keep the fd. Throws (removing the file only
    * when it is provably its own) unless, AFTER the create, the fd's file is
    * the entry at `loc.file`, the parent directory still has identity
-   * `loc.dirId` and canonicalises to `loc.dir`, and no ancestor of the
-   * re-canonicalised directory has a protected identity.
+   * `loc.dirId` and canonicalises to `loc.dir`, no ancestor of the
+   * re-canonicalised directory has a protected identity, and no ancestor
+   * contains a `.git` entry. The returned `write` repeats those checks
+   * immediately before writing and throws (writing nothing) if they fail.
    */
   createResultFile: (loc: ResultLocation) => ResultFileHandle;
   /** Create (0700) or lstat the default result directory; returns its lstat for checkResultDirStat. */
@@ -211,15 +221,112 @@ function makeOperatorTokenReader(io: CliIo) {
 // Result-file location (filesystem-grounded, fail closed)
 
 const INSIDE_REPO_MESSAGE = "Refusing: the result file must be outside every git worktree of this repository (it contains UIDs).";
+const INSIDE_CHECKOUT_MESSAGE =
+  "Refusing: the result file's directory or one of its ancestors contains a `.git` entry, i.e. it lies inside a git checkout (of this or any repository). The result file contains UIDs; put it outside every checkout.";
+const WORKTREE_STATE_HINT =
+  "Run `git worktree list` in the repository: a worktree that was moved must be re-registered (`git worktree repair <new path>`), one that was deleted must be removed (`git worktree prune`). Then re-run.";
+
+/**
+ * Environment for every git child process. ALL inherited `GIT_*` variables
+ * are dropped (GIT_DIR, GIT_COMMON_DIR, GIT_WORK_TREE, GIT_INDEX_FILE,
+ * GIT_CEILING_DIRECTORIES, GIT_CONFIG_COUNT/KEY_n/VALUE_n,
+ * GIT_CONFIG_PARAMETERS, ...): any of them can make `git -C <repoRoot>`
+ * describe a different repository or a different index, and the worktree
+ * enumeration would then protect the wrong directories. System and global
+ * config are not read (only the repository's own config); optional locks are
+ * off so `git status` never rewrites the index.
+ */
+export function gitEnv(hostEnv: Readonly<Record<string, string | undefined>>): NodeJS.ProcessEnv {
+  const out = {} as NodeJS.ProcessEnv;
+  for (const [k, v] of Object.entries(hostEnv)) {
+    if (v === undefined || /^GIT_/i.test(k)) continue;
+    out[k] = v;
+  }
+  out.GIT_CONFIG_NOSYSTEM = "1";
+  out.GIT_CONFIG_GLOBAL = os.devNull;
+  out.GIT_OPTIONAL_LOCKS = "0";
+  return out;
+}
+
+const WORKTREE_ATTRS: Record<string, "value" | "none" | "optional"> = {
+  HEAD: "value",
+  branch: "value",
+  detached: "none",
+  bare: "none",
+  locked: "optional",
+};
+
+/**
+ * Strict parser for `git worktree list --porcelain -z`: attributes are
+ * NUL-terminated and every record ends with an extra NUL, so a worktree path
+ * may contain a newline. Returns null — never a partial list — on anything
+ * but exactly that format: empty output, a missing terminator, a record not
+ * starting with one absolute `worktree <path>`, an unknown or repeated
+ * attribute, or a `prunable` attribute (a moved or deleted worktree: git no
+ * longer knows where it is, so the protected set would be incomplete).
+ */
+export function parseWorktreeListPorcelainZ(out: string): string[] | null {
+  if (!out.endsWith("\0\0")) return null;
+  const tokens = out.split("\0");
+  tokens.pop(); // the empty string after the output's final NUL; the "" before it closes the last record
+  const roots: string[] = [];
+  let seen: Set<string> | null = null;
+  for (const t of tokens) {
+    if (t === "") {
+      if (seen === null) return null; // empty record
+      seen = null;
+      continue;
+    }
+    if (seen === null) {
+      if (!t.startsWith("worktree ")) return null;
+      const p = t.slice("worktree ".length);
+      if (p === "" || !path.isAbsolute(p)) return null;
+      roots.push(p);
+      seen = new Set(["worktree"]);
+      continue;
+    }
+    const sp = t.indexOf(" ");
+    const key = sp === -1 ? t : t.slice(0, sp);
+    const shape = Object.prototype.hasOwnProperty.call(WORKTREE_ATTRS, key) ? WORKTREE_ATTRS[key] : undefined;
+    if (shape === undefined || seen.has(key)) return null; // includes "prunable" and a second "worktree"
+    if (shape === "value" && (sp === -1 || sp === t.length - 1)) return null;
+    if (shape === "none" && sp !== -1) return null;
+    seen.add(key);
+  }
+  if (seen !== null) return null; // last record not terminated
+  return roots.length > 0 ? roots : null;
+}
+
+/**
+ * Checkout layer: refuses when `canonicalDir` or ANY ancestor contains a
+ * `.git` entry (directory, gitfile, symlink — anything). This needs no
+ * enumeration at all, so it also covers a linked worktree git has lost track
+ * of (moved with `mv`) and a separate clone of the repository. Fails closed:
+ * a `.git` path that cannot be inspected is a refusal.
+ */
+export function checkNoGitAncestor(canonicalDir: string, lstatKind: CliIo["lstatKind"]): Refusal | null {
+  let cur = canonicalDir;
+  for (;;) {
+    const k = lstatKind(path.join(cur, ".git"));
+    if (k === "error") {
+      return refuse("result_path_invalid", "Refusing: whether the result file's directory lies inside a git checkout could not be established.");
+    }
+    if (k !== "absent") return refuse("result_path_inside_repo", INSIDE_CHECKOUT_MESSAGE);
+    const parent = path.dirname(cur);
+    if (parent === cur) return null;
+    cur = parent;
+  }
+}
 
 /**
  * Identity layer of the location check: walks `canonicalDir` and EVERY
  * ancestor up to the filesystem root and refuses if any of them has the
  * filesystem identity (dev:ino) of a protected root. Containment is decided by
- * the filesystem, not by spelling, so an alternate path to the same directory
- * (macOS firmlink /System/Volumes/Data/..., a bind mount, a case variant the
- * canonicaliser left alone) is still recognised as inside. Fails closed: an
- * ancestor whose identity cannot be established is a refusal.
+ * the filesystem, not by spelling, so an alternate path to a protected ROOT
+ * (macOS firmlink /System/Volumes/Data/..., a bind mount of the root itself, a
+ * case variant the canonicaliser left alone) is still recognised as inside. An
+ * alias of a SUBDIRECTORY of a root is not (documented residual). Fails
+ * closed: an ancestor whose identity cannot be established is a refusal.
  */
 export function checkAncestorIdentities(
   canonicalDir: string,
@@ -245,15 +352,21 @@ export function checkAncestorIdentities(
 }
 
 /**
- * Two layers, both must pass. (1) Strings: the parent directory and every
+ * Three layers, all must pass. (1) Strings: the parent directory and every
  * protected root are canonicalised through the filesystem (realpath.native,
  * never lexically) and compared case-folded on a case-insensitive volume.
  * (2) Identity: no ancestor-or-self of the canonical directory may have the
  * dev:ino of the repository root or of ANY git worktree root
- * (checkAncestorIdentities). A worktree list that cannot be obtained, or is
- * empty (git always lists the main worktree), is a refusal. The target must not
- * exist yet (no file, no symlink); the exclusive O_NOFOLLOW create and its
- * post-create re-check then close the remaining race.
+ * (checkAncestorIdentities). (3) Checkout: no ancestor-or-self may contain a
+ * `.git` entry (checkNoGitAncestor).
+ *
+ * Ambiguous repository state is a refusal, never "fewer protected roots": a
+ * worktree list that cannot be obtained or parsed, is empty, reports a
+ * prunable worktree, does not include the repository root itself (git was
+ * pointed at another repository), or names a worktree whose directory is
+ * absent or cannot be identified. The target must not exist yet (no file, no
+ * symlink); the exclusive O_NOFOLLOW create and its post-create re-check then
+ * close the remaining race.
  */
 export function checkResultLocation(
   resultFile: string,
@@ -271,7 +384,10 @@ export function checkResultLocation(
   const worktrees = io.gitWorktreeRoots();
   if (worktrees === null || worktrees.length === 0) {
     // Never "zero worktrees": an enumeration failure would silently drop every linked worktree from the protected set.
-    return refuse("result_path_invalid", "Refusing: the git worktrees of this repository could not be listed, so the result file cannot be proven to lie outside them.");
+    return refuse(
+      "result_path_invalid",
+      `Refusing: the git worktrees of this repository could not be listed unambiguously (git failed, its output was not in the expected format, or a worktree is prunable), so the result file cannot be proven to lie outside them. ${WORKTREE_STATE_HINT}`,
+    );
   }
   const roots = new Set<string>([repoCanonical, path.resolve(repoRoot)]);
   const protectedIds = new Set<string>();
@@ -280,17 +396,27 @@ export function checkResultLocation(
     return refuse("result_path_invalid", "Refusing: the filesystem identity of the repository root could not be established.");
   }
   protectedIds.add(repoId.id);
+  let repoListed = false;
   for (const w of worktrees) {
     roots.add(path.resolve(w));
     const c = io.realpathDir(w);
     if (c !== null) roots.add(c);
     const id = io.statIdentity(w);
-    // A listed worktree whose directory is gone (git reports it "prunable")
-    // contains nothing; any other failure to identify it fails closed.
+    // A listed worktree whose directory is gone is NOT "nothing to protect":
+    // a worktree moved with `mv` is still listed at its old path, and its
+    // checkout now lives somewhere the list does not say. Fail closed.
+    if (id === "absent") {
+      return refuse("result_path_invalid", `Refusing: a git worktree of this repository is listed at a path that no longer exists (moved or deleted). ${WORKTREE_STATE_HINT}`);
+    }
     if (id === "error") {
       return refuse("result_path_invalid", "Refusing: the filesystem identity of a git worktree of this repository could not be established.");
     }
-    if (id !== "absent") protectedIds.add(id.id);
+    if (id.id === repoId.id) repoListed = true;
+    protectedIds.add(id.id);
+  }
+  if (!repoListed) {
+    // git always lists the worktree it was asked about: a list without it describes another repository.
+    return refuse("result_path_invalid", "Refusing: the git worktree list does not include this repository's own root, so it describes some other repository.");
   }
   const file = path.join(dir, path.basename(resultFile));
   const caseInsensitive = io.caseInsensitivePaths(dir) || io.caseInsensitivePaths(repoCanonical);
@@ -298,6 +424,8 @@ export function checkResultLocation(
   if (r) return r;
   const byIdentity = checkAncestorIdentities(dir, protectedIds, io.statIdentity);
   if (!byIdentity.ok) return byIdentity;
+  const inCheckout = checkNoGitAncestor(dir, io.lstatKind);
+  if (inCheckout) return inCheckout;
   const kind = io.lstatKind(file);
   if (kind !== "absent") {
     return refuse(
@@ -560,6 +688,40 @@ export function realIo(repoRoot: string, fsx: FsLayer = fs): CliIo {
       return classify(e);
     }
   };
+  const lstatKind: CliIo["lstatKind"] = (p) => {
+    try {
+      const l = fsx.lstatSync(p);
+      return l.isSymbolicLink() ? "symlink" : l.isFile() ? "file" : "other";
+    } catch (e) {
+      return (e as { code?: unknown })?.code === "ENOENT" ? "absent" : "error";
+    }
+  };
+  /**
+   * Throws unless the entry at `loc.file` is (by lstat, not followed) the
+   * inode `ownId`, its parent still has the checked identity and canonical
+   * path, and no ancestor of that directory is a protected root or contains
+   * a `.git` entry. Run after the create AND again right before the write.
+   */
+  const verifyLanded = (loc: ResultLocation, ownId: string) => {
+    const atPath = statIdentityNoFollow(loc.file);
+    if (atPath === "absent" || atPath === "error" || atPath.id !== ownId) {
+      throw new Error("the created file is not the entry at the result path");
+    }
+    const parent = statIdentity(path.dirname(loc.file));
+    if (parent === "absent" || parent === "error" || parent.id !== loc.dirId) {
+      throw new Error("the result file's directory is not the checked directory");
+    }
+    const canonical = realpathNative(path.dirname(loc.file));
+    if (canonical === null || canonical !== loc.dir) {
+      throw new Error("the result file's directory no longer canonicalises to the checked one");
+    }
+    if (!checkAncestorIdentities(canonical, loc.protectedIds, statIdentity).ok) {
+      throw new Error("the result file's directory now lies inside a protected root");
+    }
+    if (checkNoGitAncestor(canonical, lstatKind) !== null) {
+      throw new Error("the result file's directory now lies inside a git checkout");
+    }
+  };
   return {
     stdout: (line) => process.stdout.write(`${line}\n`),
     stderr: (line) => process.stderr.write(`${line}\n`),
@@ -595,8 +757,8 @@ export function realIo(repoRoot: string, fsx: FsLayer = fs): CliIo {
     realpathDir: (p) => realpathNative(p),
     gitWorktreeRoots: () => {
       try {
-        const out = execFileSync("git", ["-C", repoRoot, "worktree", "list", "--porcelain"], { encoding: "utf8" });
-        return out.split("\n").filter((l) => l.startsWith("worktree ")).map((l) => l.slice("worktree ".length));
+        const out = execFileSync("git", ["-C", repoRoot, "worktree", "list", "--porcelain", "-z"], { encoding: "utf8", env: gitEnv(process.env) });
+        return parseWorktreeListPorcelainZ(out);
       } catch {
         return null;
       }
@@ -614,14 +776,7 @@ export function realIo(repoRoot: string, fsx: FsLayer = fs): CliIo {
         return false;
       }
     },
-    lstatKind: (p) => {
-      try {
-        const l = fsx.lstatSync(p);
-        return l.isSymbolicLink() ? "symlink" : l.isFile() ? "file" : "other";
-      } catch (e) {
-        return (e as { code?: unknown })?.code === "ENOENT" ? "absent" : "error";
-      }
-    },
+    lstatKind,
     statIdentity: (p) => statIdentity(p),
     createResultFile: (loc) => {
       // O_CREAT|O_EXCL refuses an existing file or symlink; O_NOFOLLOW also
@@ -638,21 +793,7 @@ export function realIo(repoRoot: string, fsx: FsLayer = fs): CliIo {
         // Re-verify AFTER the create, by identity: a parent directory swapped
         // (for a symlink, or for another directory) between the check and the
         // create would have put the file somewhere else.
-        const atPath = statIdentityNoFollow(p);
-        if (atPath === "absent" || atPath === "error" || atPath.id !== ownId) {
-          throw new Error("the created file is not the entry at the result path");
-        }
-        const parent = statIdentity(path.dirname(p));
-        if (parent === "absent" || parent === "error" || parent.id !== loc.dirId) {
-          throw new Error("the result file's directory is not the checked directory");
-        }
-        const canonical = realpathNative(path.dirname(p));
-        if (canonical === null || canonical !== loc.dir) {
-          throw new Error("the result file's directory no longer canonicalises to the checked one");
-        }
-        if (!checkAncestorIdentities(canonical, loc.protectedIds, statIdentity).ok) {
-          throw new Error("the result file's directory now lies inside a protected root");
-        }
+        verifyLanded(loc, ownId);
       } catch (e) {
         try {
           fsx.closeSync(fd);
@@ -675,8 +816,14 @@ export function realIo(repoRoot: string, fsx: FsLayer = fs): CliIo {
         }
         throw e;
       }
+      const landedId = ownId;
       return {
         write: (contents) => {
+          // The directory may have been moved (e.g. INTO a checkout) while the
+          // run was in progress: re-check where the file is now and write
+          // nothing if it is no longer where it was validated. The remaining
+          // window is this check -> the writeSync below (documented residual).
+          verifyLanded(loc, landedId);
           fsx.ftruncateSync(fd, 0);
           fsx.writeSync(fd, contents, 0, "utf8");
           fsx.fsyncSync(fd);
@@ -701,8 +848,9 @@ export function realIo(repoRoot: string, fsx: FsLayer = fs): CliIo {
     currentUid: () => (typeof process.getuid === "function" ? process.getuid() : null),
     git: () => {
       try {
-        const sha = execFileSync("git", ["-C", repoRoot, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-        const status = execFileSync("git", ["-C", repoRoot, "status", "--porcelain", "--", "scripts/admin", "lib/admin"], { encoding: "utf8" });
+        const env = gitEnv(process.env);
+        const sha = execFileSync("git", ["-C", repoRoot, "rev-parse", "HEAD"], { encoding: "utf8", env }).trim();
+        const status = execFileSync("git", ["-C", repoRoot, "status", "--porcelain", "--", "scripts/admin", "lib/admin"], { encoding: "utf8", env });
         return { sha, dirty: status.trim() !== "" };
       } catch {
         return { sha: null, dirty: null };
