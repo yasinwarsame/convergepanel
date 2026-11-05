@@ -61,6 +61,15 @@ import { resolveReportLayout, type ReportLayout } from "@/lib/research/readableR
 import ReadableSummaryBar from "@/components/research/readable/ReadableSummaryBar";
 import ReadableReportHeader from "@/components/research/readable/ReadableReportHeader";
 import { READABLE_MODEL_RESPONSES_ANCHOR } from "@/components/research/readable/ExecutiveAnswer";
+import { READABLE_TRUST_COPY } from "@/lib/research/readableReport/copy";
+import type { ListScoreNames } from "./ListView";
+
+/** #290 Inc 1, readable mode only: the Model Responses list names the per-model stored score as the trust signals do. */
+const READABLE_LIST_SCORE_NAMES: ListScoreNames = {
+  row: READABLE_TRUST_COPY.listScoreRow,
+  sort: READABLE_TRUST_COPY.listScoreSort,
+  capped: READABLE_TRUST_COPY.listScoreCapped,
+};
 
 const RENDER_HINTS_WITHOUT_MATRIX = new Set<AnswerShape>(["metrics_grid", "verdict_card", "step_diff", "scenario_tree"]);
 
@@ -600,9 +609,15 @@ function AdaptivePanelResponseBody(props: AdaptivePanelResponseProps) {
   // needed there.
   // #290 Increment 1 — readable layout (opt-in; classic below is untouched). The header bar keeps report type, status,
   // models, generated and the export surfaces; the answer section leads, then the four trust signals; then every
-  // classic section with the same props as the classic branch, so nothing is hidden.
+  // classic section with the same props as the classic branch, so nothing is hidden — except the trust summary table
+  // (review M-1 on 6bcc234): its "Panel reliability" score and per-model citation percentages contradict the four
+  // signals, so readable passes no trustSummary to Panel Evidence or to the governance section's full synthesis report
+  // (both render the table only when one is passed; PanelEvidenceSection itself is pinned by dsProvenanceUiBoundaries
+  // and is not edited), and the Model Responses list names the per-model stored score as the signals do (behaviour
+  // score). The panel score is still on the page, in the signals; the per-model scores, in the list.
   if (PHASE2_PILOT_SCHEMAS.has(schema.id) && resolveReportLayout(props.reportLayout) === "readable") {
-    // The same props the classic pilot branch hands the one review & governance helper below.
+    // The props the classic pilot branch hands the one review & governance helper below, without trustSummary: the full
+    // synthesis report inside it renders the trust summary table only when one is passed (see the comment above).
     const readableGovernanceProps: ReviewGovernanceSectionProps = {
       humanReview: props.humanReview,
       reviewRouting: props.reviewRouting,
@@ -610,7 +625,6 @@ function AdaptivePanelResponseBody(props: AdaptivePanelResponseProps) {
       runId,
       gate,
       synthesisReport,
-      trustSummary,
       alignedClaims,
       modelsUsed: modelIds,
       question,
@@ -636,14 +650,13 @@ function AdaptivePanelResponseBody(props: AdaptivePanelResponseProps) {
             <ModelResponsesSection
               schema={schema}
               results={results}
-              listView={gate && synthesisReport ? { alignedClaims, gate, synthesisReport, trustSummary } : undefined}
+              listView={gate && synthesisReport ? { alignedClaims, gate, synthesisReport, trustSummary, scoreNames: READABLE_LIST_SCORE_NAMES } : undefined}
             />
           </div>
           <PanelEvidenceSection
             schemaId={schema.id}
             gate={gate}
             synthesisReport={synthesisReport}
-            trustSummary={trustSummary}
             alignedClaims={alignedClaims}
             modelsUsed={modelIds}
             showClaimMatrix={schema.renderHint === "step_diff"}

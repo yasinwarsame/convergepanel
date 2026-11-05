@@ -28,6 +28,7 @@ import { presentVerdictCaveat } from "@/lib/adaptiveSchema/agreementNarrative";
 import { ANALYSIS_NOTICE_LINES } from "@/components/adaptive/AnalysisAvailabilityNotice";
 import ModelResponsesSection from "@/components/adaptive/ModelResponsesSection";
 import PanelEvidenceSection from "@/components/adaptive/PanelEvidenceSection";
+import { TrustSummaryTable } from "@/components/adaptive/AdaptiveSynthesisReportView";
 import { RunModelProvenanceContext } from "@/components/adaptive/RunModelProvenanceContext";
 import { RunSlotStatusContext } from "@/components/adaptive/RunSlotStatusContext";
 import PersistedResearchResultView from "@/components/research/PersistedResearchResultView";
@@ -84,7 +85,7 @@ describe("B. readable structure", () => {
     expect(html.indexOf(tierHtml(html, "trust")!) + tierHtml(html, "trust")!.length).toBeLessThan(order[3]);
   });
 
-  it.each(PILOT_SCENARIOS)("%s: the details tier carries the classic Model Responses and Panel Evidence markup, byte for byte", (name) => {
+  it.each(PILOT_SCENARIOS)("%s: the details tier carries the classic Model Responses and Panel Evidence markup, except the trust summary table and the per-model score's name", (name) => {
     const rec = record(name);
     const rows = slotRows(name);
     const wrap = (el: any) =>
@@ -93,13 +94,33 @@ describe("B. readable structure", () => {
       );
     const schema = getResultSchema(rec.schemaId);
     const { alignedClaims, gate, synthesisReport, trustSummary } = rec;
-    const modelResponses = wrap(createElement(ModelResponsesSection as any, { schema, results: rec.results, listView: gate && synthesisReport ? { alignedClaims, gate, synthesisReport, trustSummary } : undefined }));
-    const evidence = wrap(createElement(PanelEvidenceSection as any, { schemaId: rec.schemaId, gate, synthesisReport, trustSummary, alignedClaims, modelsUsed: rec.results.map((r: any) => r.modelId), showClaimMatrix: schema.renderHint === "step_diff" }));
+    const modelsUsed = rec.results.map((r: any) => r.modelId);
+    const listView = gate && synthesisReport ? { alignedClaims, gate, synthesisReport, trustSummary } : undefined;
+    const evidenceProps = { schemaId: rec.schemaId, gate, synthesisReport, alignedClaims, modelsUsed, showClaimMatrix: schema.renderHint === "step_diff" };
+    // Classic: exactly the classic sections (parity).
+    const classicModelResponses = wrap(createElement(ModelResponsesSection as any, { schema, results: rec.results, listView }));
+    const classicEvidence = wrap(createElement(PanelEvidenceSection as any, { ...evidenceProps, trustSummary }));
     const classic = renderPanel(rec, rows);
+    expect(classic).toContain(classicModelResponses);
+    expect(classic).toContain(classicEvidence);
+    // Readable: the same sections, with the readable score names and without the trust summary table.
+    const readableModelResponses = wrap(
+      createElement(ModelResponsesSection as any, { schema, results: rec.results, listView: listView && { ...listView, scoreNames: { row: READABLE_TRUST_COPY.listScoreRow, sort: READABLE_TRUST_COPY.listScoreSort, capped: READABLE_TRUST_COPY.listScoreCapped } } })
+    );
+    const readableEvidence = wrap(createElement(PanelEvidenceSection as any, evidenceProps));
     const details = tierHtml(renderPanel(rec, rows, READABLE), "details")!;
-    for (const part of [modelResponses, evidence]) {
-      expect(classic).toContain(part);
-      expect(details).toContain(part);
+    expect(details).toContain(readableModelResponses);
+    expect(details).toContain(readableEvidence);
+    // Panel Evidence differs from classic by exactly the trust summary table, nothing else.
+    const noTable = readableEvidence;
+    const table = trustSummary ? wrap(createElement(TrustSummaryTable as any, { trustSummary })) : "";
+    if (gate && synthesisReport) {
+      // Not vacuous: where a trust summary has rows, classic Panel Evidence really holds the table.
+      if (trustSummary?.perModel?.length) expect(table).toContain("Panel reliability");
+      expect(classicEvidence).toContain(table);
+      expect(classicEvidence.replace(table, "")).toBe(noTable);
+    } else {
+      expect(readableEvidence).toBe(classicEvidence);
     }
     // The classic uncertainty / follow-up sections stay in readable mode.
     for (const label of [">Uncertainties<", ">Suggested follow-ups<"]) if (classic.includes(label)) expect(details).toContain(label);

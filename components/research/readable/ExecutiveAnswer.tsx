@@ -63,10 +63,16 @@ function AnswerBody({ stored }: { stored: AdaptiveSynthesisReport }) {
       {synthesisReport.presentation?.answer ? (
         <UnifiedAnswerClaims report={synthesisReport} />
       ) : (
-        <>
+        // A report persisted before presentation.answer (review M-2 on 6bcc234): its stored answer text comes first,
+        // then the stored gate lead AnswerLead renders for it (the gate word and its notice, e.g. an unrecognized gate's
+        // "no verification result is shown"), unchanged — so the reader meets the answer first and the gate statement
+        // directly after it, never in place of it. The heading above already says whether the text was written.
+        <div data-answer-part="legacy-answer" className="space-y-2">
+          <p data-answer-part="legacy-answer-text" className="text-sm leading-relaxed text-cp-text whitespace-pre-line">
+            {unifiedAnswer}
+          </p>
           <AnswerLead report={synthesisReport} />
-          <p className="text-sm leading-relaxed text-cp-text whitespace-pre-line">{unifiedAnswer}</p>
-        </>
+        </div>
       )}
 
       <div className="mt-3 grid grid-cols-1 gap-3 border-t border-cp-border-soft pt-3 sm:grid-cols-2">

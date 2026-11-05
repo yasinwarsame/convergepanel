@@ -257,6 +257,17 @@ function buildRowVM(
 
 export type SortMode = "trust" | "outliers" | "response_time";
 
+/**
+ * #290 Increment 1 — the readable layout's names for the per-model stored score (readable mode only). The readable
+ * trust panel calls that stored score the "model behaviour score"; a readable page passes these so the rows use the same
+ * name. Absent (every classic call site): the classic "trust" wording, unchanged.
+ */
+export interface ListScoreNames {
+  row: (percent: number) => string;
+  sort: string;
+  capped: string;
+}
+
 const SORT_OPTIONS: { mode: SortMode; label: string }[] = [
   { mode: "trust", label: "trust" },
   { mode: "outliers", label: "outliers first" },
@@ -379,7 +390,7 @@ function PulseCard({
   );
 }
 
-function SortControl({ sortMode, onChange }: { sortMode: SortMode; onChange: (mode: SortMode) => void }) {
+function SortControl({ sortMode, onChange, scoreNames }: { sortMode: SortMode; onChange: (mode: SortMode) => void; scoreNames?: ListScoreNames }) {
   return (
     <div className="flex items-center gap-1 text-xs text-slate-500">
       <span>Sort:</span>
@@ -391,7 +402,7 @@ function SortControl({ sortMode, onChange }: { sortMode: SortMode; onChange: (mo
             onClick={() => onChange(mode)}
             className={`px-1.5 py-0.5 rounded ${sortMode === mode ? "font-semibold text-slate-900 bg-slate-100" : "hover:text-slate-700"}`}
           >
-            {label}
+            {scoreNames && mode === "trust" ? scoreNames.sort : label}
           </button>
         </span>
       ))}
@@ -524,11 +535,13 @@ function ModelRow({
   vm,
   expanded,
   onToggle,
+  scoreNames,
 }: {
   schema: ResultSchema;
   vm: RowVM;
   expanded: boolean;
   onToggle: () => void;
+  scoreNames?: ListScoreNames;
 }) {
   const { result } = vm;
   // D-4: a recorded provider failure is never described as a parse/format failure.
@@ -568,7 +581,7 @@ function ModelRow({
           <span className={`h-2 w-2 rounded-full shrink-0 ${HEALTH_DOT_COLORS[vm.parseHealth]}`} title={`Parse health: ${vm.parseHealth}`} />
           {vm.trustScore !== null && (
             <span className="text-xs text-slate-600 whitespace-nowrap">
-              trust {Math.round(vm.trustScore * 100)}%
+              {scoreNames ? scoreNames.row(Math.round(vm.trustScore * 100)) : <>trust {Math.round(vm.trustScore * 100)}%</>}
               {vm.capped && TRUST_SCORE_CAP_REASON[vm.parseHealth] && (
                 <span
                   className="ml-1 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-amber-100 text-[9px] font-bold text-amber-700 cursor-help align-text-top"
@@ -613,7 +626,7 @@ function ModelRow({
                 {vm.citations} citation{vm.citations === 1 ? "" : "s"}
               </TintBadge>
             ))}
-          {vm.capped && <TintBadge tone="warning">degraded · trust capped</TintBadge>}
+          {vm.capped && <TintBadge tone="warning">{scoreNames ? scoreNames.capped : "degraded · trust capped"}</TintBadge>}
           <span className="ml-auto flex items-center gap-2 shrink-0">
             <span className="text-xs text-slate-400">{formatLatency(result.latencyMs)}</span>
             <Chevron expanded={expanded} />
@@ -639,6 +652,8 @@ export interface ListViewProps {
   gate: AdaptiveGateResult;
   synthesisReport: AdaptiveSynthesisReport;
   trustSummary?: AdaptiveTrustSummary;
+  /** #290 Inc 1: readable mode only — see ListScoreNames. */
+  scoreNames?: ListScoreNames;
   /** Switches the parent tab shell to Synthesis Report and scrolls to the given `data-section` anchor. */
   onNavigateToSynthesis?: (sectionId: string) => void;
 }
@@ -659,6 +674,7 @@ function ListViewBody({
   gate,
   synthesisReport,
   trustSummary,
+  scoreNames,
   onNavigateToSynthesis,
 }: ListViewProps) {
   const rows = useMemo(() => alignedClaims || [], [alignedClaims]);
@@ -721,7 +737,7 @@ function ListViewBody({
           <span className="text-xs text-slate-500">
             {results.length} model{results.length === 1 ? "" : "s"}
           </span>
-          <SortControl sortMode={sortMode} onChange={setSortMode} />
+          <SortControl sortMode={sortMode} onChange={setSortMode} scoreNames={scoreNames} />
         </div>
         <div className="rounded-xl border border-slate-200 bg-white overflow-hidden divide-y divide-slate-100">
           {sortedVMs.map((vm) => (
@@ -731,6 +747,7 @@ function ListViewBody({
               vm={vm}
               expanded={expandedModels.has(vm.result.modelId)}
               onToggle={() => toggle(vm.result.modelId)}
+              scoreNames={scoreNames}
             />
           ))}
         </div>

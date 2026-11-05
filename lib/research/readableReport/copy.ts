@@ -84,6 +84,14 @@ export const READABLE_TRUST_COPY = {
     "Citations: N/A for this report type. The stored score counts that part as full marks because no values are scored for sources, which raises it.",
   behaviourCitationNoValues:
     "Citations: no response gave a value to source. The stored score counts that part as full marks, which raises it.",
+  /**
+   * The per-model stored score in the Model Responses list, named as the panel names it (ListView's ListScoreNames;
+   * review M-1 on 6bcc234 — the readable page states no "Panel reliability" and no per-model citation percentages).
+   */
+  listScoreRow: (percent: number) => `behaviour score ${percent}%`,
+  listScoreSort: "behaviour score",
+  listScoreCapped: "degraded · score capped",
+
   behaviourCitationPartial: (vacuous: number, parsed: number) =>
     `Citations: ${vacuous} of ${parsed} parsed responses gave no value to source. The stored score counts that part as full marks for ${vacuous === 1 ? "that response" : "those responses"}, which raises it.`,
 } as const;
