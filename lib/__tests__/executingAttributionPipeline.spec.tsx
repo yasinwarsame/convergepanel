@@ -18,6 +18,11 @@ jest.mock("remark-gfm", () => ({ __esModule: true, default: () => null }));
 jest.mock("@/components/AuthProvider", () => ({ useAuth: () => ({ user: { uid: "uid-1" }, authReady: true }) }));
 const mockedAuthedFetch = jest.fn();
 jest.mock("@/lib/client/authedFetch", () => ({ authedFetch: (...a: unknown[]) => mockedAuthedFetch(...a) }));
+const mockFetchWithTimeout = jest.fn();
+jest.mock("@/lib/client/fetchWithTimeout", () => ({
+  fetchWithTimeout: (...a: unknown[]) => mockFetchWithTimeout(...a),
+  FetchError: class FetchError extends Error {},
+}));
 jest.mock("next/link", () => ({ __esModule: true, default: ({ href, children }: { href: string; children?: unknown }) => require("react").createElement("a", { href }, children as never) }));
 
 const mockOpenAICreate = jest.fn();
@@ -263,6 +268,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockDeepSeekKey = undefined;
   mockedAuthedFetch.mockResolvedValue({ ok: false, status: 404, json: async () => ({}) });
+  mockFetchWithTimeout.mockResolvedValue({ ok: false, status: 404, json: async () => ({}), text: async () => "" });
   mockCallGrok.mockResolvedValue(ok("grok"));
   mockCallGemini.mockResolvedValue(ok("gemini"));
   mockCallDeepSeek.mockResolvedValue({ ok: true, text: PANEL_TEXT, latencyMs: 3, actualModel: "deepseek-chat" });
@@ -398,6 +404,30 @@ describe("ResultsDisplay attribution (rendered)", () => {
     expect(textOf(r)).toMatch(/Agreed by 2 models:/);
   });
 
+  it("claim wordings are attributed to the executing model", async () => {
+    const results = await run("twoSubstitutionsPlusGrok");
+    const r = await mountResults(results, synthesizeReport(results)!);
+    const text = textOf(r);
+    expect(text).toContain("DeepSeek (substituting ChatGPT):");
+    expect(text).not.toMatch(/(^|[^g(] ?)ChatGPT:/);
+  });
+
+  it("auto-synthesis is not started for two answered slots from one independent model; control: two real models start it", async () => {
+    const posts = () => mockedAuthedFetch.mock.calls.filter((c) => String(c[0]).includes("/api/synthesize-panel")).length;
+    const subs = await run("twoSubstitutions");
+    await mount(createElement(ResultsDisplay as never, { results: subs, synthesizedReport: null, onRerun: () => {}, onAddModel: () => {}, question: "q", runId: "run-sub", synthesisStatus: "idle", synthesisReport: null, adaptive: null } as never));
+    await act(async () => {
+      await new Promise((res) => setTimeout(res, 0));
+    });
+    expect(posts()).toBe(0);
+    const real = await run("distinctReal");
+    await mount(createElement(ResultsDisplay as never, { results: real, synthesizedReport: null, onRerun: () => {}, onAddModel: () => {}, question: "q", runId: "run-real", synthesisStatus: "idle", synthesisReport: null, adaptive: null } as never));
+    await act(async () => {
+      await new Promise((res) => setTimeout(res, 0));
+    });
+    expect(posts()).toBeGreaterThan(0);
+  });
+
   it("control: distinct real providers keep their family-name chips", async () => {
     const results = await run("distinctReal");
     const r = await mountResults(results, synthesizeReport(results)!);
@@ -485,6 +515,19 @@ describe("PanelSynthesisView (rendered)", () => {
     const text = textOf(r);
     expect(text).toContain("3 models: ChatGPT, Claude, Grok");
     expect(text).toContain("90/100");
+  });
+
+  it("Retry on an errored synthesis never POSTs for one independent model (pre-flight refuses)", async () => {
+    const results = await run("twoSubstitutions");
+    const r = await mount(createElement(PanelSynthesisView as never, { results, question: "q", runId: "run-1", preGeneratedStatus: "error", preGeneratedError: "Previous failure" } as never));
+    const retry = r.root.findAll((n) => n.type === "button" && nodeText(n).includes("Retry"))[0];
+    await act(async () => {
+      retry.props.onClick();
+      for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    });
+    const posts = mockFetchWithTimeout.mock.calls.filter((c) => (c[1] as { method?: string } | undefined)?.method === "POST");
+    expect(posts).toHaveLength(0);
+    expect(textOf(r)).toContain("Synthesis requires responses from at least 2 independent models.");
   });
 
   it("empty state: two substituted slots are not offered synthesis", async () => {

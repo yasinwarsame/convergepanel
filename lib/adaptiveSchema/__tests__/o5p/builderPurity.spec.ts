@@ -134,6 +134,11 @@ describe("Contract P builder purity vs the 2c17feee pipeline", () => {
     const reverted = undoExecutingAttributionValue(comparableOut.value, subs);
     const value = reverted.value;
     expect([name, reverted.count > 0]).toEqual([name, subs.length > 0 && (out.res.alignedClaims?.length ?? 0) > 0]);
+    // The generated Unified Answer text itself names the substitute by its executing model (not only the presented claims).
+    if (name === "generic-substituted-and-failed") {
+      expect(out.res.synthesisReport.unifiedAnswer).toContain("(ChatGPT, DeepSeek (substituting Claude), Perplexity, Gemini)");
+      expect(out.res.synthesisReport.unifiedAnswer).not.toContain("(ChatGPT, Claude,");
+    }
     if (c.schemaId === "generic") expectGenericEnvelopeIsACopy(out.res, { ...CLASSIFICATION_BASE, queryType: "generic", answerShape: getResultSchema("generic" as any).renderHint });
     else expect(!!out.res.persistedLegacyOutput).toBe(isPersistedLegacyAdaptiveSchemaId(c.schemaId));
     const rows = out.res.alignedClaims ?? [];
