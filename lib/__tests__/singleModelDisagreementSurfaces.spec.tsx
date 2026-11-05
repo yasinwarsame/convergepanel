@@ -245,6 +245,9 @@ describe("stored-disagreement classifier (lib/panel/storedDisagreementIndependen
     expect(classify(rows, { topic: "t", models: ["DeepSeek (substituting ChatGPT)", "Grok"] })).toBe("cross_model");
     expect(classify(rows, "Founding date: ChatGPT says 1789, Claude says 1792")).toBe("independence_unverified");
     expect(classify(rows, item(["chatgpt", "mystery-model"]))).toBe("independence_unverified");
+    // A name that maps to no persisted row makes the whole item unattributable — it is never dropped so the remaining
+    // (independent) slots could vouch for a cross-model split.
+    expect(classify(rows, item(["chatgpt", "grok", "mystery-model"]))).toBe("independence_unverified");
   });
   it("missing provenance → independence_unverified (no rows, or rows without a status)", () => {
     expect(classify(undefined, item(["chatgpt", "claude"]))).toBe("independence_unverified");
