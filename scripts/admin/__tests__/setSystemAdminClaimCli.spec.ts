@@ -997,6 +997,44 @@ describe("B1–B3: containment by filesystem identity, worktree enumeration, pos
     expect(filesUnder(repo)).toEqual([]);
   });
 
+  it("B3: parent swapped for a symlink into a repo SUBDIRECTORY with a fooled canonicaliser => refused by the parent dev:ino check (the string walk sees no protected ancestor)", async () => {
+    const sub = path.join(outside, "sub");
+    fs.mkdirSync(sub);
+    const inner = path.join(repo, "inner");
+    fs.mkdirSync(inner);
+    const target = path.join(sub, "r.json");
+    const native = (p: string) => (p === sub ? sub : rawFs.realpathSync.native(p));
+    const lying = { ...rawFs, realpathSync: Object.assign((p: fs.PathLike) => rawFs.realpathSync(p), { native }) } as unknown as FsLayer;
+    const r = await runReal(target, afterValidation(target, () => {
+      fs.renameSync(sub, path.join(outside, "sub-old"));
+      fs.symlinkSync(inner, sub);
+    }), lying);
+    expect(r.code).toBe(2);
+    expect(r.err).toContain("[result_path_invalid]");
+    expect(filesUnder(repo)).toEqual([]);
+  });
+
+  it("B3: the created file MOVED INTO the repo and a symlink to it left at the path => refused (the entry at the path is compared with lstat, not followed); the moved file is never written", async () => {
+    const target = path.join(outside, "sym.json");
+    const stolen = path.join(repo, "stolen.json");
+    const swapping = {
+      ...rawFs,
+      openSync: ((p: fs.PathLike, flags: number, mode?: number) => {
+        const fd = rawFs.openSync(p, flags, mode);
+        if (p === target) {
+          rawFs.renameSync(target, stolen);
+          rawFs.symlinkSync(stolen, target);
+        }
+        return fd;
+      }) as unknown as FsLayer["openSync"],
+    } as FsLayer;
+    const r = await runReal(target, {}, swapping);
+    expect(r.code).toBe(2);
+    expect(r.err).toContain("[result_path_invalid]");
+    expect(fs.readFileSync(stolen, "utf8")).toBe("");
+    expect(fs.lstatSync(target).isSymbolicLink()).toBe(true); // not ours: left in place
+  });
+
   it("B3: the checked directory itself MOVED INTO the repo between validation and create (same inode, same canonical string) => refused by the post-create ancestor walk", async () => {
     const sub = path.join(outside, "sub");
     fs.mkdirSync(sub);
