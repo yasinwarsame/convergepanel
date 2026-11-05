@@ -42,7 +42,7 @@ import { join } from "path";
 import TestRenderer, { act } from "react-test-renderer";
 import PanelSynthesisView from "@/components/PanelSynthesisView";
 import { VerificationActions } from "@/components/VerificationActions";
-import { buildPanelVerdict, formatVerdictText, buildCopyForXShort, NO_CONSENSUS_SCORE_SHARE_LINE, PANEL_VERDICT_SINGLE_MODEL_HEADING } from "@/lib/verificationGate/panelVerdict";
+import { buildPanelVerdict, formatVerdictText, buildCopyForXShort, NO_CONSENSUS_SCORE_SHARE_LINE, PANEL_VERDICT_SINGLE_MODEL_HEADING, SINGLE_MODEL_SHARE_TAGLINE } from "@/lib/verificationGate/panelVerdict";
 import { computeVerificationGate } from "@/lib/verificationGate/verificationGate";
 import { buildLinkedInPost } from "@/lib/ui/socialCopy";
 import { authoritativeSynthesisInputs } from "@/lib/synthesis/authoritativeRunInputs";
@@ -132,8 +132,11 @@ describe("A. two slots answered by DeepSeek (one independent model), stored cons
     expect(post).not.toMatch(/Consensus score/);
     expect(post).not.toContain("Where models agree");
     expect(post).toContain(NO_CONSENSUS_SCORE_SHARE_LINE);
-    expect(post).toContain("across 1 model simultaneously");
+    expect(post).toContain("only 1 model responded independently");
+    expect(post).not.toContain("simultaneously");
     expect(post).not.toContain("5 AI models");
+    expect(post).not.toContain("The disagreements tell you more");
+    expect(post).toContain(SINGLE_MODEL_SHARE_TAGLINE);
   });
 
   it("X post: no consensus score, model count is 1", async () => {
@@ -142,7 +145,9 @@ describe("A. two slots answered by DeepSeek (one independent model), stored cons
     expect(post).not.toContain("90/100");
     expect(post).not.toMatch(/^Consensus:/m);
     expect(post).toContain(NO_CONSENSUS_SCORE_SHARE_LINE);
-    expect(post).toMatch(/^Asked 1 model: /);
+    expect(post).toMatch(/^Asked a model panel \(1 model responded independently\): /);
+    expect(post).not.toContain("Five give you the shape");
+    expect(post).toContain(SINGLE_MODEL_SHARE_TAGLINE);
   });
 
   it("memo: no consensus score, no 'WHERE MODELS AGREE', not '2 AI models researched'", async () => {

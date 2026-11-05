@@ -20,6 +20,13 @@ export const PANEL_VERDICT_SINGLE_MODEL_HEADING = "Top finding (one independent 
 export const NO_CONSENSUS_SCORE_SHARE_LINE =
   "No consensus score: fewer than two independent models responded (slots answered by the same substitute model count as one).";
 
+/**
+ * Share-post closing line in place of a multi-model tagline ("The disagreements tell you more…", "Five give you the shape
+ * of the problem.", "…highlights consensus, disagreements…") when fewer than two independent models responded.
+ */
+export const SINGLE_MODEL_SHARE_TAGLINE =
+  "Only one independent model responded, so this is one model's answer, not a cross-model comparison.";
+
 /** Verdict card text in place of "No major disagreements detected." when fewer than two independent models responded. */
 export const NO_CROSS_MODEL_COMPARISON_TEXT = "No cross-model comparison: fewer than two independent models responded.";
 

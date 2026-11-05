@@ -4,7 +4,7 @@
  */
 
 import type { VerificationGateResult } from "@/lib/verificationGate/verificationGate";
-import type { PanelVerdict } from "@/lib/verificationGate/panelVerdict";
+import { SINGLE_MODEL_SHARE_TAGLINE, type PanelVerdict } from "@/lib/verificationGate/panelVerdict";
 
 export interface LinkedInModelHealth {
   total: number;
@@ -135,7 +135,9 @@ export function buildLinkedInPost(params: LinkedInParams): string {
 
   // H) ConvergePanel mention
   lines.push(
-    "Built with ConvergePanel — a multi-model panel that highlights consensus, disagreements, and blind spots."
+    crossModel
+      ? "Built with ConvergePanel — a multi-model panel that highlights consensus, disagreements, and blind spots."
+      : `Built with ConvergePanel. ${SINGLE_MODEL_SHARE_TAGLINE}`
   );
 
   // Optional hashtags (max 4)

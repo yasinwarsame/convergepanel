@@ -466,6 +466,10 @@ function generateVideoMemo(input: MemoInput): string {
 /** Research memo evidence-quality line when fewer than two independent models responded. */
 export const RESEARCH_MEMO_NO_CROSS_MODEL_EVIDENCE = "not assessed (fewer than two independent models responded)";
 
+/** Research memo METHODOLOGY when fewer than two independent models responded: no consensus or convergence is claimed. */
+export const RESEARCH_MEMO_SINGLE_MODEL_METHODOLOGY =
+  "This question was sent to a panel of large language models via ConvergePanel with identical instructions, but fewer than two independent models responded (slots answered by the same substitute model count as one). No cross-model comparison was possible: no consensus score is reported and nothing in this memo reflects agreement or convergence between models.";
+
 function generateResearchMemo(input: MemoInput): string {
   const lines: string[] = [];
   const q = (input.question ?? "").trim() || "—";
@@ -535,7 +539,9 @@ function generateResearchMemo(input: MemoInput): string {
 
   lines.push("METHODOLOGY");
   lines.push(
-    `This question was independently researched by ${n} large language model${n === 1 ? "" : "s"} via ConvergePanel. Each model received identical instructions. Models were not shown each other's responses. Results were synthesized to identify areas of agreement and disagreement. The consensus score reflects the degree of convergence across models weighted by evidence quality and source backing.`
+    noConsensus
+      ? RESEARCH_MEMO_SINGLE_MODEL_METHODOLOGY
+      : `This question was independently researched by ${n} large language model${n === 1 ? "" : "s"} via ConvergePanel. Each model received identical instructions. Models were not shown each other's responses. Results were synthesized to identify areas of agreement and disagreement. The consensus score reflects the degree of convergence across models weighted by evidence quality and source backing.`
   );
   lines.push("");
   lines.push("DISCLAIMER");

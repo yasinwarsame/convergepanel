@@ -65,6 +65,7 @@ import {
   PanelVerdict,
   PANEL_VERDICT_SINGLE_MODEL_HEADING,
   NO_CONSENSUS_SCORE_SHARE_LINE,
+  SINGLE_MODEL_SHARE_TAGLINE,
   NO_CROSS_MODEL_COMPARISON_TEXT,
 } from "@/lib/verificationGate/panelVerdict";
 import {
@@ -1525,7 +1526,10 @@ export default function PanelSynthesisView({
       const agreements = crossModel ? extractResearchAgreements(panelVerdict) : [];
       const disagreements = extractResearchDisagreements(independentDisagreements);
 
-      const head = `I researched "${q.length > 120 ? `${q.slice(0, 117)}...` : q}" across ${sharedModelCount} simultaneously using ConvergePanel.`;
+      const qShort = q.length > 120 ? `${q.slice(0, 117)}...` : q;
+      const head = crossModel
+        ? `I researched "${qShort}" across ${sharedModelCount} simultaneously using ConvergePanel.`
+        : `I researched "${qShort}" using ConvergePanel; only ${sharedModelCount} responded independently.`;
       const parts: string[] = [head, "", crossModel ? `Consensus score: ${score}/100 (${confidence})` : NO_CONSENSUS_SCORE_SHARE_LINE, ""];
       if (findings.length > 0) {
         parts.push("Key findings:");
@@ -1542,7 +1546,7 @@ export default function PanelSynthesisView({
         disagreements.slice(0, 2).forEach((d) => parts.push(`→ ${d}`));
         parts.push("");
       }
-      parts.push("The disagreements tell you more than any single answer.", "", "→ convergepanel.com");
+      parts.push(crossModel ? "The disagreements tell you more than any single answer." : SINGLE_MODEL_SHARE_TAGLINE, "", "→ convergepanel.com");
       setGeneratedPost(parts.join("\n"));
       setGeneratedPostType("linkedin");
       setCopiedPost(false);
@@ -1556,7 +1560,7 @@ export default function PanelSynthesisView({
       const line = (f: string, max: number) => (f.length > max ? `${f.slice(0, max - 3)}...` : f);
 
       const parts: string[] = [
-        `Asked ${sharedModelCount}: "${q.length > 80 ? `${q.slice(0, 77)}...` : q}"`,
+        `${crossModel ? `Asked ${sharedModelCount}` : `Asked a model panel (${sharedModelCount} responded independently)`}: "${q.length > 80 ? `${q.slice(0, 77)}...` : q}"`,
         "",
         crossModel ? `Consensus: ${score}/100` : NO_CONSENSUS_SCORE_SHARE_LINE,
         "",
@@ -1574,7 +1578,7 @@ export default function PanelSynthesisView({
         parts.push(`Models disagreed on: ${line(disagreements[0] ?? "", 100)}`, "");
       }
       parts.push(
-        "One model gives you a confident answer. Five give you the shape of the problem.",
+        crossModel ? "One model gives you a confident answer. Five give you the shape of the problem." : SINGLE_MODEL_SHARE_TAGLINE,
         "",
         "convergepanel.com"
       );
