@@ -20,9 +20,14 @@ jest.mock("@/lib/client/fetchWithTimeout", () => ({
 }));
 jest.mock("next/link", () => ({ __esModule: true, default: ({ href, children }: { href: string; children?: unknown }) => require("react").createElement("a", { href }, children as never) }));
 const mockDownloads: Array<[string, string]> = [];
+const mockMemoInputs: any[] = [];
 jest.mock("@/lib/verification/generateMemo", () => {
   const actual = jest.requireActual("@/lib/verification/generateMemo");
-  return { ...actual, downloadTextFile: (content: string, name: string) => mockDownloads.push([content, name]) };
+  return {
+    ...actual,
+    downloadTextFile: (content: string, name: string) => mockDownloads.push([content, name]),
+    generateVerificationMemo: (input: any) => (mockMemoInputs.push(input), actual.generateVerificationMemo(input)),
+  };
 });
 const mockCopied: string[] = [];
 jest.mock("@/lib/ui/copyFormats", () => {
@@ -87,6 +92,7 @@ async function generatedPost(r: TestRenderer.ReactTestRenderer, which: "onGenera
 }
 async function memo(r: TestRenderer.ReactTestRenderer): Promise<string> {
   mockDownloads.length = 0;
+  mockMemoInputs.length = 0;
   await act(async () => {
     actions(r).onExportMemo();
   });
@@ -146,6 +152,23 @@ describe("A. two slots answered by DeepSeek (one independent model), stored cons
     expect(text).toContain("CONSENSUS SCORE: none (fewer than two independent models responded");
     expect(text).not.toContain("WHERE MODELS AGREE");
     expect(text).not.toMatch(/\d+ AI models researched this question independently/);
+    // Each layer holds on its own: the view passes no agreements and the independent count…
+    expect(mockMemoInputs).toHaveLength(1);
+    expect([mockMemoInputs[0].synthesisAgreements, mockMemoInputs[0].independentModelCount]).toEqual([[], 1]);
+  });
+
+  it("memo generator alone: independentModelCount < 2 suppresses the score and 'WHERE MODELS AGREE' even when agreements are supplied", () => {
+    const { generateVerificationMemo } = jest.requireActual("@/lib/verification/generateMemo");
+    const base = { type: "research", question: "q", consensusScore: 90, confidenceLabel: "High", evidenceQuality: "strong", verificationId: "r", keyFindings: ["F"], synthesisAgreements: ["A"], modelsUsed: ["x", "y"] };
+    const one = generateVerificationMemo({ ...base, independentModelCount: 1 });
+    expect(one).not.toContain("WHERE MODELS AGREE");
+    expect(one).not.toContain("90/100");
+    const two = generateVerificationMemo({ ...base, independentModelCount: 2 });
+    expect(two).toContain("WHERE MODELS AGREE");
+    expect(two).toContain("CONSENSUS SCORE: 90/100");
+    // Absent → the memo exactly as before this field existed.
+    expect(generateVerificationMemo(base)).toBe(generateVerificationMemo({ ...base, independentModelCount: undefined }));
+    expect(generateVerificationMemo(base)).toContain("2 AI models researched this question independently.");
   });
 
   it("copied synthesis markdown: no 'Top consensus'", async () => {
