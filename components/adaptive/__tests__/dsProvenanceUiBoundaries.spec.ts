@@ -48,10 +48,6 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   "components/adaptive/DecisionSupportView.tsx": "e3beb32c1161f42d84222b1633a6bd8b1bb98939",
   "components/adaptive/DsReceiptWording.tsx": "71b1542ecc11532f26f0bf8a758fffe311775ac6",
   "components/adaptive/PanelEvidenceSection.tsx": "01fa50175cc4a014ad17d2abad806b8eec999170",
-  // #290 Inc 1 readable legacy gate banner (owner-authorized Option A, 2026-11-05): an optional, readable-only
-  // `legacyGateBannerLabels` prop threaded to the gate banner and the full synthesis report; classic callers never pass it
-  // and render byte-identically; no provenance code. Was c5298d27bb4e52562fc9865b17875ee87fc04d5c (unchanged since 9eca1e3).
-  "components/adaptive/ReviewGovernanceSection.tsx": "5cc7f903a5a66f0ab7101d2a58b2616d569191e0",
   "components/adaptive/TopSummaryBar.tsx": "ea8b059bbafe1589fe79f1a3824c298d5a68926b",
   // Order 6 critical-contrast slice (class-only; see criticalContrastSlice.ts): was 52464f6b4c8d3d330ac1764ff711297e2c31ecbe at 9eca1e3.
   "components/workspace/projects/TeamResearchReviewSummary.tsx": "16a12b9d0f15c5297a8745958126cdd6ea50d263",
@@ -59,9 +55,31 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   "firestore.rules": "2fb80a11bfa6c55fe94e0438a980a3b0794aeafd",
 };
 
+/**
+ * Changed since 9eca1e3 by #290 Inc 1 and re-pinned to the exact new content (owner-authorized Option A, 2026-11-05) —
+ * kept apart from UNCHANGED_AT_9ECA1E3 so that map's name stays true for this file:
+ *   - ReviewGovernanceSection.tsx: an optional, readable-only `legacyGateBannerLabels` prop threaded to the gate banner
+ *     and the full synthesis report; classic callers never pass it and render byte-identically; no provenance code.
+ *     Was c5298d27bb4e52562fc9865b17875ee87fc04d5c (unchanged since 9eca1e3).
+ */
+const CHANGED_BY_290_INC1_READABLE_GATE_OPTION: Record<string, string> = {
+  "components/adaptive/ReviewGovernanceSection.tsx": "5cc7f903a5a66f0ab7101d2a58b2616d569191e0",
+};
+
 describe("forbidden layers are unchanged from main 9eca1e3", () => {
   it.each(Object.entries(UNCHANGED_AT_9ECA1E3))("%s", (path, blob) => {
     expect(gitBlob(readFileSync(join(ROOT, path)))).toBe(blob);
+  });
+
+  it.each(Object.entries(CHANGED_BY_290_INC1_READABLE_GATE_OPTION))("%s (changed by #290 Inc 1, pinned to its new content)", (path, blob) => {
+    expect(gitBlob(readFileSync(join(ROOT, path)))).toBe(blob);
+  });
+
+  it("the #290 Inc 1 re-pin is outside the unchanged map, and the pinned set is the same 28 files", () => {
+    const all = [...Object.keys(UNCHANGED_AT_9ECA1E3), ...Object.keys(CHANGED_BY_290_INC1_READABLE_GATE_OPTION)];
+    expect(Object.keys(UNCHANGED_AT_9ECA1E3)).not.toContain("components/adaptive/ReviewGovernanceSection.tsx");
+    expect(new Set(all).size).toBe(all.length);
+    expect(all).toHaveLength(28);
   });
 });
 

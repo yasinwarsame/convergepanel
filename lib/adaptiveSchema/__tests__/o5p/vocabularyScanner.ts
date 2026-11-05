@@ -17,8 +17,13 @@ import * as ts from "typescript";
 // #290 Increment 1: the readable report layout's UI-only copy and components are presentation consumers too.
 export const SCANNED_ROOTS = ["components/adaptive", "lib/adaptiveSchema", "lib/pdf", "lib/docx", "lib/verification/generateMemo.ts", "lib/panel/runModelIdentity.ts", "lib/research/readableReport", "components/research/readable"];
 
+// #290 Inc 1 (review of 28f770c, MINOR): "matched" slipped past the gate, so the equivalent-agreement words are scanned
+// too — match\w*, identical, uniform\w*, harmon\w*, coincid\w*, confirm\w*, "same position(s)", "in line with",
+// "in accord…". "verif\w*" is deliberately not added: it is evidence-checking vocabulary, not agreement vocabulary, and
+// would list every "Verification gate" label and every "not independently verified" qualifier (39 more literals);
+// unqualified "verified" claims are asserted on the rendered pages instead (readableLegacyGateBanner / readableLegacyGateTruth specs).
 export const VOCAB =
-  /\b(agree\w*|consensus|majority|diverg\w*|contested|camps?|split|disagree\w*|disput\w*|different positions|converg\w*|oppos\w*|supported by|disputed by|supporters?|disputers?|unresolved|vote\w*|align\w*|contradict\w*|unanim\w*|concur\w*|dissent\w*|corroborat\w*|endorse\w*|unique claims?|same answers?)\b/i;
+  /\b(agree\w*|consensus|majority|diverg\w*|contested|camps?|split|disagree\w*|disput\w*|different positions|converg\w*|oppos\w*|supported by|disputed by|supporters?|disputers?|unresolved|vote\w*|align\w*|contradict\w*|unanim\w*|concur\w*|dissent\w*|corroborat\w*|endorse\w*|unique claims?|same answers?|match\w*|identical|uniform\w*|harmon\w*|coincid\w*|confirm\w*|same positions?|in line with|in accord\w*)\b/i;
 const BARE_ENUM = /^["'`][a-z_]+["'`]$/;
 
 export interface Literal {

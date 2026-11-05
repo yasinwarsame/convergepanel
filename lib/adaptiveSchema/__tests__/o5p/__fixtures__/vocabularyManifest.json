@@ -2294,5 +2294,131 @@
   "count": 1,
   "category": "non-user",
   "rule": "type key (Pick<TrustSignalsInput, …>)"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": "\"Stance match\"",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "marked trust column label (unmarked: 'Majority align'); the stance-match input is defined exactly in TRUST_INPUTS_NOTE; newly listed by the #290 Inc 1 scanner widening (match/identical/confirm variants); unchanged literal"
+ },
+ {
+  "file": "components/adaptive/ComparisonMatrixView.tsx",
+  "literal": "\"These comparisons reflect the panel models' own knowledge, not live verified pricing, specs, or data. For decisions that matter, confirm critical details against a current source.\"",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 comparison matrix disclaimer: 'confirm' asks the reader to check a current source; no agreement claim; newly listed by the #290 Inc 1 scanner widening (match/identical/confirm variants); unchanged literal"
+ },
+ {
+  "file": "components/adaptive/PanelEvidenceSection.tsx",
+  "literal": ">The three lists below are Tier 3 — deterministic, pattern-based concerns computed directly from the panel&apos;s own responses. They are not confirmed bias (that is Tier 1, shown in the primary report) and not the panel&apos;s own self-reported gaps (Tier 2, also in the primary report) — treat them as speculative signals worth a second look, never as established findings.<",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 evidence tallies Tier 3 note: 'not confirmed' qualifies pattern-based concerns; no agreement claim; newly listed by the #290 Inc 1 scanner widening (match/identical/confirm variants); unchanged literal"
+ },
+ {
+  "file": "components/adaptive/RankedListView.tsx",
+  "literal": ">The top two items had closely matched model coverage — treat &ldquo;<",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 ranked list: 'closely matched' describes model coverage counts of the top two items, not positions; newly listed by the #290 Inc 1 scanner widening (match/identical/confirm variants); unchanged literal"
+ },
+ {
+  "file": "lib/adaptiveSchema/alignment.ts",
+  "literal": "\"[adaptiveSchema] claimOrigins length does not match claims, treating field origin as unknown\"",
+  "count": 1,
+  "category": "non-user",
+  "rule": "logger message (field-origin length check), never rendered; newly listed by the #290 Inc 1 scanner widening (match/identical/confirm variants); unchanged literal"
+ },
+ {
+  "file": "lib/adaptiveSchema/jsonExport.ts",
+  "literal": "`AdaptiveResearchExportV1 record has schemaFamily \"${record.schemaFamily}\" but no matching reportSnapshot branch`",
+  "count": 1,
+  "category": "non-user",
+  "rule": "thrown error message (export branch selection), never rendered; newly listed by the #290 Inc 1 scanner widening (match/identical/confirm variants); unchanged literal"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "\"Values match\"",
+  "count": 4,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; value-comparison heading computed from the stored normalized values (values, not claim positions); newly listed by the #290 Inc 1 scanner widening (match/identical/confirm variants); unchanged literal"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "`All ${numeric.length} numeric values are identical${notStated(missing)}.`",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; numeric value comparison computed from the stored values, not claim positions; newly listed by the #290 Inc 1 scanner widening (match/identical/confirm variants); unchanged literal"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "`${all} answers match (${ignoring})${notStated(missing)}.`",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; normalized answer comparison computed from the stored values, not claim positions; newly listed by the #290 Inc 1 scanner widening (match/identical/confirm variants); unchanged literal"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "\"Position details unavailable: the stored claim could not be matched to a unique recorded row.\"",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): POSITION_DETAILS_UNAVAILABLE — a stored claim/row join failure; 'matched' is the record join, not agreement; newly listed by the #290 Inc 1 scanner widening (match/identical/confirm variants); unchanged literal"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "`${plural(c.valuesMatch, \"value comparison\")} with matching values`",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; count of value comparisons whose stored values are equal; newly listed by the #290 Inc 1 scanner widening (match/identical/confirm variants); unchanged literal"
+ },
+ {
+  "file": "lib/adaptiveSchema/promptBuilder.ts",
+  "literal": "`interface DecisionRisk { id: string; // short kebab-case slug label: string; // the risk itself, one sentence likelihood?: \"low\" | \"medium\" | \"high\" | \"unknown\"; impact?: \"low\" | \"medium\" | \"high\" | \"unknown\"; mitigation?: string; optionLabel?: string; // set ONLY if specific to one option (must match an \"options\" entry) — omit if it applies broadly }`",
+  "count": 1,
+  "category": "prompt",
+  "rule": "model prompt / schema field description (unchanged); 'matching' refers to option labels; newly listed by the #290 Inc 1 scanner widening (match/identical/confirm variants); unchanged literal"
+ },
+ {
+  "file": "lib/adaptiveSchema/routeClassifiedQuery.ts",
+  "literal": "\"Something about this query didn't match any known request type.\"",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "routing fallback explanation: 'match' is query-type classification, not agreement; newly listed by the #290 Inc 1 scanner widening (match/identical/confirm variants); unchanged literal"
+ },
+ {
+  "file": "lib/adaptiveSchema/schemaRegistry.ts",
+  "literal": "\"Assumptions your recommendation depends on that the user has not confirmed. Empty array if you made none.\"",
+  "count": 1,
+  "category": "prompt",
+  "rule": "model prompt / schema field description (unchanged); 'confirmed' refers to the user, not the panel; newly listed by the #290 Inc 1 scanner widening (match/identical/confirm variants); unchanged literal"
+ },
+ {
+  "file": "lib/adaptiveSchema/schemaRegistry.ts",
+  "literal": "\"Concrete risks and tradeoffs relevant to this decision, whether tied to one specific option (set optionLabel, matching an `options` entry) or broad across all options (omit optionLabel).\"",
+  "count": 1,
+  "category": "prompt",
+  "rule": "model prompt / schema field description (unchanged); 'matching' refers to option labels; newly listed by the #290 Inc 1 scanner widening (match/identical/confirm variants); unchanged literal"
+ },
+ {
+  "file": "lib/research/readableReport/copy.ts",
+  "literal": "\"Verification gate: Pass — the certainty score met the pass threshold and none of the most-raised claims had a split position; the evidence was not independently checked\"",
+  "count": 1,
+  "category": "computed-status",
+  "rule": "#290 readable legacy gate banner (readable layout, pre-Order-4 reports only): the stored gate status and gate.ts computeAdaptiveGate's pass rule — certainty >= GATE_THRESHOLDS.passMin and no split among the loadBearingTopN most-raised claims; no claim that positions matched; evidence not checked"
+ },
+ {
+  "file": "lib/research/readableReport/copy.ts",
+  "literal": "\"Verification gate: Caution — the certainty score was below the pass threshold or a claim had a split position, and no more than one of the most-raised claims had a split position; the evidence was not independently checked\"",
+  "count": 1,
+  "category": "computed-status",
+  "rule": "#290 readable legacy gate banner (readable layout, pre-Order-4 reports only): gate.ts's caution rule as a disjunction (certainty below passMin, one load-bearing split, or a factual_lookup split) with at most one load-bearing split; names no cause; evidence not checked"
+ },
+ {
+  "file": "lib/research/readableReport/copy.ts",
+  "literal": "\"Verification gate: Fail — the certainty score was below the caution threshold or two or more of the most-raised claims had a split position; the evidence was not independently checked\"",
+  "count": 1,
+  "category": "computed-status",
+  "rule": "#290 readable legacy gate banner (readable layout, pre-Order-4 reports only): gate.ts's fail rule as a disjunction (certainty below cautionMin, or two or more load-bearing splits); names no cause; evidence not checked"
  }
 ]

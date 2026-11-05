@@ -62,7 +62,7 @@ interface Case {
 }
 
 const CASES: Case[] = [
-  { label: "pre-Order-4 pass (models' positions matched)", base: "generic-consensus" },
+  { label: "pre-Order-4 pass (all most-raised claims consensus)", base: "generic-consensus" },
   { label: "failed verification gate", base: "legal-regulatory" },
   {
     label: "missing verification evidence (gate inputs not recorded)",
@@ -217,9 +217,12 @@ describe("the readable gate wording", () => {
     }
   });
 
-  it("introduces no agreement / disagreement vocabulary the scanner would have to classify", () => {
+  // Review of 28f770c (MINOR): this used to assert the banner had NO scanner hit — vacuous, because the scanner did not
+  // know "matched". The banner now names the stored "split" status, so every banner literal must be SEEN by the scanner
+  // (and is classified in the manifest: readableLegacyGateTruth.spec.tsx); the capped tooltip still carries none.
+  it("every banner literal is seen by the vocabulary scanner; the capped tooltip carries no vocabulary", () => {
     const hits = scanVocabulary(process.cwd(), ["lib/research/readableReport/copy.ts"]).map((l) => l.literal);
-    for (const w of NEW_WORDING) expect(hits.some((h) => h.includes(w.slice(0, 40)))).toBe(false);
+    for (const w of NEW_WORDING) expect(hits).toContain(JSON.stringify(w));
     expect(hits.some((h) => /behaviour score is capped/.test(h))).toBe(false);
   });
 });

@@ -105,13 +105,26 @@ export const READABLE_TRUST_COPY = {
  * The verification gate banner (governance section and full synthesis report) on a report persisted before the Order 4
  * gate presentation. Classic keeps the historical wording (LEGACY_GATE_BANNER_LABEL: "Verified — panel converges",
  * "Caution — partial convergence", "Could not verify — panel split"); readable states the stored gate with the same D6
- * word the trust signal shows, and that the models' positions are not evidence checked against anything. Reports that
- * carry the Order 4 presentation, and unrecognized stored values, keep gatePresentation's neutral wording unchanged.
+ * word the trust signal shows, the rule lib/adaptiveSchema/gate.ts (computeAdaptiveGate, unchanged since it was
+ * introduced) applies for that status, and that the evidence was not checked against anything. Reports that carry the
+ * Order 4 presentation, and unrecognized stored values, keep gatePresentation's neutral wording unchanged.
+ *
+ * Each sentence is the gate's own rule for the stored status, never a cause the page cannot know (the cause is not
+ * stored — Order 4 D1). "Most-raised claims" are the GATE_THRESHOLDS.loadBearingTopN claims by salience, as the trust
+ * signal's "Most-raised claims with a split position" names them; "split" is the stored claim status.
+ *   - pass:    certainty >= passMin AND no load-bearing split. Both always hold; the claims may still be majority,
+ *              single-source or limited-coverage, so nothing says the models' positions matched.
+ *   - caution: certainty in [cautionMin, passMin) with at most one load-bearing split, OR exactly one load-bearing split,
+ *              OR (factual_lookup) a split on any claim at an otherwise passing gate. So: certainty below the pass
+ *              threshold or some claim split, and never more than one of the most-raised claims split.
+ *   - fail:    two or more load-bearing splits OR certainty < cautionMin — either may be the one that applied.
+ * No thresholds are written as numbers: the words follow GATE_THRESHOLDS rather than restating it.
  */
 export const READABLE_GATE_COPY = {
   legacyBanner: {
-    pass: "Verification gate: Pass — the models' positions on the most-raised claims matched; the evidence was not independently checked",
-    caution: "Verification gate: Caution — the panel did not meet the conditions for a clean pass; the evidence was not independently checked",
-    fail: "Verification gate: Fail — the panel did not meet the gate's conditions; the evidence was not independently checked",
+    pass: "Verification gate: Pass — the certainty score met the pass threshold and none of the most-raised claims had a split position; the evidence was not independently checked",
+    caution:
+      "Verification gate: Caution — the certainty score was below the pass threshold or a claim had a split position, and no more than one of the most-raised claims had a split position; the evidence was not independently checked",
+    fail: "Verification gate: Fail — the certainty score was below the caution threshold or two or more of the most-raised claims had a split position; the evidence was not independently checked",
   },
 } as const;

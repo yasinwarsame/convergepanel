@@ -49,11 +49,18 @@ const UNCHANGED_AT_35933C8: Record<string, string> = {
  * The vocabulary gate, widened by #290 Inc 1 (review MAJOR-2) to scan the readable modules: SCANNED_ROOTS gains
  * lib/research/readableReport and components/research/readable, and the manifest gains one classified entry per new
  * readable literal (appended; no existing entry changed). Was vocabularyScanner 1be4e9a4, manifest 3c2add10 at 35933c8.
- * Pinned to the exact new content.
+ *
+ * Widened again (owner-authorized, review of 28f770c MINOR — the readable Pass banner's "matched" passed the gate
+ * unseen): VOCAB gains match\w*, identical, uniform\w*, harmon\w*, coincid\w*, confirm\w*, "same position(s)",
+ * "in line with" and "in accord…" ("verif\w*" deliberately not: see the scanner's comment), and the manifest gains one
+ * classified entry per newly seen literal, plus the three rewritten readable legacy gate banner literals (appended; no
+ * existing entry changed; the 28f770c banner literals had no entry). Scanner a8f3ecf08d12b20fa58cb622b6d03a62a0d1c7ef →
+ * cf275d0fb2a80bf99b5f0f707a508103b40054bc; manifest c16cc1f5e78d781b9f71fefe8b5493416dc940a0 →
+ * 84d1674780ec5b99c8a38edd91e8c1c34cbd4c6d (328 → 346 entries). Same two files pinned; pinned to the exact new content.
  */
 const WIDENED_BY_INC1: Record<string, string> = {
-  "lib/adaptiveSchema/__tests__/o5p/vocabularyScanner.ts": "a8f3ecf08d12b20fa58cb622b6d03a62a0d1c7ef",
-  "lib/adaptiveSchema/__tests__/o5p/__fixtures__/vocabularyManifest.json": "c16cc1f5e78d781b9f71fefe8b5493416dc940a0",
+  "lib/adaptiveSchema/__tests__/o5p/vocabularyScanner.ts": "cf275d0fb2a80bf99b5f0f707a508103b40054bc",
+  "lib/adaptiveSchema/__tests__/o5p/__fixtures__/vocabularyManifest.json": "84d1674780ec5b99c8a38edd91e8c1c34cbd4c6d",
 };
 
 /**
@@ -65,12 +72,14 @@ const WIDENED_BY_INC1: Record<string, string> = {
  *     gateBannerText's, byte for byte — historicalParity / nonDsWordingParity and their fixtures above are unchanged.
  *     Was 7f31cd2839a32b78053a273a5faebc7165ef6433 at 35933c8.
  *   - dsProvenanceUiBoundaries.spec.ts: its own ReviewGovernanceSection.tsx pin re-pinned (same prop threading), with
- *     the reason recorded beside it. Was dd7e6f6083724c775debfd7551ccbcacbb9ea647 at 35933c8.
+ *     the reason recorded beside it. Was dd7e6f6083724c775debfd7551ccbcacbb9ea647 at 35933c8. Review of 28f770c (NIT):
+ *     that re-pin moved out of UNCHANGED_AT_9ECA1E3 into its own CHANGED_BY_290_INC1_READABLE_GATE_OPTION map (same
+ *     file, same blob, same 28-file pin set): d6368241dcf506a06f78a7d4590c506acda52341 → cb61bde9f1efff29e0f908cbb6810620d39afa47.
  * gatePresentation.ts (LEGACY_GATE_BANNER_LABEL) stays pinned unchanged above.
  */
 const READABLE_GATE_OPTION_BY_INC1: Record<string, string> = {
   "components/adaptive/AdaptiveSynthesisReportView.tsx": "78bc669a7da2f59c078bd7841be28bf76bf5e696",
-  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "d6368241dcf506a06f78a7d4590c506acda52341",
+  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "cb61bde9f1efff29e0f908cbb6810620d39afa47",
 };
 
 describe("#290 Increment 1 leaves the sealed and frozen files byte-identical to 35933c8", () => {
