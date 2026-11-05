@@ -45,8 +45,10 @@ import {
   ModelId,
 } from "@/lib/types";
 import { buildAgreementMap, ClaimCluster as AgreementClaimCluster } from "@/lib/agreementMap";
-import { runModelFamilyName } from "@/lib/panel/runModelIdentity";
+import { providerDisplayName, runModelFamilyName } from "@/lib/panel/runModelIdentity";
 import { isUsableResult } from "@/lib/panel/publicize";
+import { coerceStatus } from "@/lib/panel/normalize";
+import { independentVoices } from "@/lib/panel/independentVoices";
 import { escapeHtml } from "@/lib/security/escapeHtml";
 
 const SYSTEM_WRAPPER =
@@ -500,7 +502,12 @@ export function synthesizeReport(
   // Use safe text getter to handle both rawTextFull and rawText fields
   const getModelText = (r: ModelResult | any): string => 
     (r as any).rawTextFull ?? (r as any).rawText ?? (r as any).text ?? "";
-  const successfulResults = results.filter((r) => isUsableResult(r) && getModelText(r).trim().length > 0);
+  // Independent voices only (lib/panel/independentVoices.ts): several slots
+  // answered by the same substitute model count once toward the ≥2 rule and
+  // toward agreement — buildAgreementMap applies the same reduction.
+  const successfulResults = independentVoices(
+    results.filter((r) => isUsableResult(r) && getModelText(r).trim().length > 0)
+  );
 
   /**
    * Core Rule: Cannot synthesize with <2 responses
@@ -511,6 +518,19 @@ export function synthesizeReport(
   if (successfulResults.length < 2) {
     return null; // Cannot synthesize with <2 responses
   }
+
+  // Attribution: a substituted slot's text was written by the substitute
+  // provider, so it is never named as the slot's own model in agreement text.
+  const substitutedSlots = new Map<string, unknown>(
+    successfulResults
+      .filter((r) => coerceStatus(String(r.status)) === "substituted")
+      .map((r) => [String(r.modelId), (r as { provider?: unknown }).provider])
+  );
+  const voiceName = (id: ModelId | string): string => {
+    if (!substitutedSlots.has(String(id))) return runModelFamilyName(id);
+    const substitute = providerDisplayName(substitutedSlots.get(String(id))) ?? "Substitute model";
+    return `${substitute} (substituting ${runModelFamilyName(id)})`;
+  };
 
   // Build agreement map using claim extraction + similarity clustering
   // Wrap in try-catch to prevent crashes if buildAgreementMap fails
@@ -625,7 +645,7 @@ export function synthesizeReport(
     consensusClusters.slice(0, 7).forEach((cluster) => {
       const modelCount = new Set(cluster.claims.map((c) => c.modelId)).size;
       const modelNames = Array.from(new Set(cluster.claims.map((c) => c.modelId)))
-        .map((id) => runModelFamilyName(id))
+        .map((id) => voiceName(id))
         .join(", ");
       unifiedAnswer += `<li><strong>${escapeHtml(cluster.representativeText)}</strong> — <em>Agreed by ${modelCount} models (${escapeHtml(modelNames)})</em></li>\n`;
     });
@@ -640,7 +660,7 @@ export function synthesizeReport(
     unifiedAnswer += "<ul>\n";
     disagreementClusters.slice(0, 7).forEach((cluster) => {
       const modelNames = cluster.modelIds
-        .map((id) => runModelFamilyName(id))
+        .map((id) => voiceName(id))
         .join(", ");
       unifiedAnswer += `<li class="bg-orange-50 border-l-4 border-orange-400 pl-4 py-2 rounded-r-md my-2"><strong>${escapeHtml(cluster.representativeText)}</strong> — <em>Different perspectives from: ${escapeHtml(modelNames)}</em></li>\n`;
     });
@@ -669,7 +689,7 @@ export function synthesizeReport(
       const representativeClaim = cluster.claims[0];
       const modelCount = new Set(cluster.claims.map((c) => c.modelId)).size;
       const modelNames = Array.from(new Set(cluster.claims.map((c) => c.modelId)))
-        .map((id) => runModelFamilyName(id))
+        .map((id) => voiceName(id))
         .join(", ");
       unifiedAnswer += `<p class="bg-green-50 border-l-4 border-green-400 pl-4 py-2 rounded-r-md my-2"><strong>• ${escapeHtml(representativeClaim.text)}</strong> <em>(Consensus: ${modelCount} models agree — ${escapeHtml(modelNames)})</em></p>\n`;
     });
@@ -683,7 +703,7 @@ export function synthesizeReport(
     unifiedAnswer += "<p>The following points represent <strong>contested claims</strong> where models provide conflicting or incompatible perspectives:</p>\n\n";
     disagreementClusters.slice(0, 8).forEach((cluster) => {
       const models = cluster.modelIds;
-      const modelNames = models.map((id) => runModelFamilyName(id)).join(", ");
+      const modelNames = models.map((id) => voiceName(id)).join(", ");
       // Wrap entire disagreement cluster in light orange container
       unifiedAnswer += `<div class="bg-orange-50 border-l-4 border-orange-400 pl-4 py-3 rounded-r-md my-2">\n`;
       unifiedAnswer += `<p class="mb-2"><strong>Different perspectives on:</strong> ${escapeHtml(cluster.representativeText)}</p>\n`;
@@ -699,7 +719,7 @@ export function synthesizeReport(
       if (uniqueModelClaims.size > 1) {
         unifiedAnswer += "<ul class=\"ml-4 mt-2 space-y-1\">\n";
         uniqueModelClaims.forEach((text, modelId) => {
-          const modelName = runModelFamilyName(modelId);
+          const modelName = voiceName(modelId);
           unifiedAnswer += `<li class="mb-1"><strong>${escapeHtml(modelName)}:</strong> ${escapeHtml(text)}</li>\n`;
         });
         unifiedAnswer += "</ul>\n";

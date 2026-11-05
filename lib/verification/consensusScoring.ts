@@ -6,6 +6,7 @@ import type { ClaimVerdict } from "./claimVerdict";
 import type { ModelConfidence, ModelVerdict } from "./parseVerificationJson";
 import type { StructuredSynthesis } from "@/lib/synthesis/structuredSchema";
 import { coerceStatus } from "@/lib/panel/normalize";
+import { independentVoices } from "@/lib/panel/independentVoices";
 
 export type ConsensusSummary = {
   overallConsensusScore: number;
@@ -130,6 +131,8 @@ export type SynthesisConsensusResultRow = {
   modelId: string;
   status: string;
   rawText?: string | null;
+  /** Executing provider as persisted (a substituted row: the substitute). Keys independent voices. */
+  provider?: string;
 };
 
 export type KeyFindingSupportBlock = {
@@ -217,13 +220,18 @@ export function classifyModelStanceForClaim(text: string, anchors: string[]): "s
   return "support";
 }
 
+/**
+ * Usable rows reduced to independent voices (lib/panel/independentVoices.ts):
+ * several slots answered by one substitute model support or dissent once.
+ * `modelCount` stays the dispatched panel size.
+ */
 function usableSynthesisRows(results: SynthesisConsensusResultRow[]) {
-  return results.filter((r) => {
+  return independentVoices(results.filter((r) => {
     const st = coerceStatus(r.status);
     if (st !== "ok" && st !== "substituted") return false;
     const t = (r.rawText ?? "").trim();
     return t.length >= MIN_RAW_TEXT_LEN;
-  });
+  }));
 }
 
 function perClaimEvidenceQuality(

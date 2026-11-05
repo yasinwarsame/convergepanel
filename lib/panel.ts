@@ -62,6 +62,7 @@ function isRetryableResult(result: ModelResult): boolean {
 }
 
 function isNonRetryable(result: ModelResult): boolean {
+  if (result.errorCode === "provider_not_configured") return true;
   const msg = (result.errorMessage ?? "").toLowerCase();
   return (
     msg.includes("401") ||
@@ -108,6 +109,11 @@ const NON_TRANSIENT_QUOTA_PHRASES = [
 ];
 
 function shouldAttemptDeepSeek(primaryCode: string, primaryResult: ModelResult): boolean {
+  // A missing/empty provider key is a configuration failure, not a provider
+  // outage: the slot fails closed and is never answered by a substitute.
+  if (primaryResult.errorCode === "provider_not_configured" || primaryCode.endsWith("_not_configured")) {
+    return false;
+  }
   if (primaryCode.includes("_auth") || primaryCode.includes("_forbidden")) {
     return false;
   }
@@ -127,7 +133,10 @@ function shouldAttemptDeepSeek(primaryCode: string, primaryResult: ModelResult):
  *
  * CRITICAL GUARANTEE: Always returns exactly one result per selected model.
  * - Primary succeeds → status: "ok"
- * - Primary fails, DeepSeek succeeds → status: "substituted"
+ * - Primary fails transiently, DeepSeek succeeds → status: "substituted"
+ *   (provider: "deepseek", actualModel: the DeepSeek model, substitutedFrom,
+ *   substitutionReason). Never for a missing key (`*_not_configured`), an
+ *   auth/forbidden failure, or a non-transient quota failure.
  * - Both fail or fallback not allowed → status: "failed"
  */
 export async function runPanel(

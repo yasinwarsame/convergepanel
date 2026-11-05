@@ -175,6 +175,10 @@ export async function callChatGPT(
         modelId: "chatgpt",
         status: "error",
         rawText: "ChatGPT authentication error. Check your API key.",
+        // Fixed text (never the SDK message, which can echo part of the key).
+        // "401" classifies this as `<provider>_auth` in runPanel: a rejected
+        // credential is never retried and never DeepSeek-substituted.
+        errorMessage: "401 authentication error: OpenAI rejected the configured API key.",
         latencyMs,
         tokenUsage: zeroTokenUsage, // CRITICAL: Always include tokenUsage
       };

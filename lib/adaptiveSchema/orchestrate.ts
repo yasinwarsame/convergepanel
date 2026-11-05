@@ -20,6 +20,7 @@
 
 import "server-only";
 import { ModelId, ModelResult } from "@/lib/types";
+import { independentVoices } from "@/lib/panel/independentVoices";
 import { ADAPTIVE_VERIFICATION_ENABLED } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { CONNECTOR_MAP } from "@/lib/connectors";
@@ -526,6 +527,25 @@ function buildNonClaimRows(schema: ResultSchema, adaptiveResults: AdaptiveModelR
   return rows;
 }
 
+/** parseError for a slot excluded from agreement by the independent-voice rule. */
+export const REPEATED_SUBSTITUTE_EXCLUDED =
+  "Not counted as an independent model: answered by the same substitute model as another panel slot.";
+
+/**
+ * Agreement inputs under the independent-voice rule: among slots with usable
+ * structured output, a later slot answered by an already-counted substitute
+ * model becomes a non-contributing row. Index-aligned with `adaptiveResults`.
+ */
+function excludeRepeatedSubstitutes(results: ModelResult[], adaptiveResults: AdaptiveModelResult[]): AdaptiveModelResult[] {
+  const usable = adaptiveResults
+    .map((r, idx) => ({ modelId: String(r.modelId), status: String(results[idx]?.status ?? ""), provider: results[idx]?.provider, idx }))
+    .filter((v) => adaptiveResults[v.idx].ok && adaptiveResults[v.idx].data);
+  const kept = new Set(independentVoices(usable).map((v) => v.idx));
+  return adaptiveResults.map((r, idx) =>
+    !r.ok || !r.data || kept.has(idx) ? r : { ...r, ok: false, data: null, parseError: REPEATED_SUBSTITUTE_EXCLUDED }
+  );
+}
+
 /**
  * Post-fan-out step: validate every model's raw text against the schema,
  * align every comparable field type into one AlignedClaim[] matrix, and
@@ -561,13 +581,22 @@ export async function finalizeAdaptiveRun(
     );
   }
 
+  // Independent voices (lib/panel/independentVoices.ts): several slots
+  // answered by the same substitute model are ONE model. Every agreement /
+  // coverage / alignment builder below reads `agreementInputs`, where a
+  // later slot from an already-counted substitute is excluded (ok: false,
+  // explained in parseError). `adaptiveResults` itself — the per-slot
+  // display + persistence rows and the totalModels denominators — is
+  // unchanged, so the slot is still shown as a labelled substitute.
+  const agreementInputs = excludeRepeatedSubstitutes(results, adaptiveResults);
+
   // ranked_enumeration (Milestone 2): a parallel path, not funneled through
   // AlignedClaim at all — see enumAlignment.ts's header comment. Returns
   // early, before any claim[]/metric[]/etc alignment or the gate/
   // synthesisReport/trustSummary pipeline, none of which apply here.
   if (schema.id === "ranked_enumeration") {
     const enumFieldKeys = schema.fields.filter((f) => f.type === "enumItem[]").map((f) => f.key);
-    const perModelItems = adaptiveResults.map((r) => ({
+    const perModelItems = agreementInputs.map((r) => ({
       modelId: r.modelId,
       items: r.ok && r.data ? enumFieldKeys.flatMap((key) => (r.data![key] as EnumItem[] | undefined) || []) : [],
     }));
@@ -582,7 +611,7 @@ export async function finalizeAdaptiveRun(
   // trustSummary entirely too.
   if (schema.id === "comparison_matrix") {
     const cellFieldKeys = schema.fields.filter((f) => f.type === "comparisonCell[]").map((f) => f.key);
-    const perModelCells = adaptiveResults.map((r) => ({
+    const perModelCells = agreementInputs.map((r) => ({
       modelId: r.modelId,
       cells: r.ok && r.data ? cellFieldKeys.flatMap((key) => (r.data![key] as ComparisonCell[] | undefined) || []) : [],
       directConclusion: r.ok && r.data && typeof r.data.directConclusion === "string" ? r.data.directConclusion : undefined,
@@ -602,7 +631,7 @@ export async function finalizeAdaptiveRun(
   // empty-array placeholder), so totalModels is passed explicitly rather
   // than derived from the filtered list.
   if (schema.id === "definition_explanation") {
-    const perModelFields = adaptiveResults
+    const perModelFields = agreementInputs
       .filter((r) => r.ok && r.data)
       .map((r) => ({ modelId: r.modelId, fields: extractDefinitionFields(r.data!) }));
     const definitionExplanation = buildDefinitionExplanationResult(perModelFields, adaptiveResults.length);
@@ -615,7 +644,7 @@ export async function finalizeAdaptiveRun(
   // definition_explanation above, for the same reason (no natural "empty"
   // placeholder for a whole missing per-model response).
   if (schema.id === "causal_explanation") {
-    const perModelFields = adaptiveResults
+    const perModelFields = agreementInputs
       .filter((r) => r.ok && r.data)
       .map((r) => ({ modelId: r.modelId, fields: extractCausalFields(r.data!) }));
     const causalExplanation = buildCausalExplanationResult(perModelFields, adaptiveResults.length);
@@ -630,7 +659,7 @@ export async function finalizeAdaptiveRun(
   // placeholder for failures" convention as ranked_enumeration/
   // comparison_matrix, since the core content here is an array field.
   if (schema.id === "checklist_taxonomy") {
-    const perModelFields = adaptiveResults.map((r) => ({
+    const perModelFields = agreementInputs.map((r) => ({
       modelId: r.modelId,
       fields: r.ok && r.data ? extractChecklistFields(r.data) : { summary: "", items: [], notes: [] },
     }));
@@ -648,7 +677,7 @@ export async function finalizeAdaptiveRun(
   // definition_explanation/causal_explanation's "successful models only"
   // one, since the core content here is array fields too.
   if (schema.id === "deep_research") {
-    const perModelFields = adaptiveResults.map((r) => ({
+    const perModelFields = agreementInputs.map((r) => ({
       modelId: r.modelId,
       fields:
         r.ok && r.data
@@ -667,7 +696,7 @@ export async function finalizeAdaptiveRun(
   // constructing here; matches definition_explanation/causal_explanation's
   // convention instead).
   if (schema.id === "evidence_review") {
-    const perModelFields = adaptiveResults
+    const perModelFields = agreementInputs
       .filter((r) => r.ok && r.data)
       .map((r) => ({ modelId: r.modelId, fields: extractEvidenceReviewFields(r.data!) }));
     const evidenceReview = buildEvidenceReviewResult(perModelFields, adaptiveResults.length);
@@ -682,7 +711,7 @@ export async function finalizeAdaptiveRun(
   // only branch that also needs the RAW `results: ModelResult[]` (not just
   // validated adaptiveResults) — Tier 1 reads full raw response text.
   if (schema.id === "bias_blindspot_audit") {
-    const perModelFields = adaptiveResults
+    const perModelFields = agreementInputs
       .filter((r) => r.ok && r.data)
       .map((r) => ({ modelId: r.modelId, fields: extractBiasBlindspotFields(r.data!) }));
     const biasBlindspotAudit = await buildBiasBlindspotAuditResult(
@@ -703,7 +732,7 @@ export async function finalizeAdaptiveRun(
   // humanReviewNeeded can be computed honestly (never left to the renderer
   // alone) — see decisionSupportAlignment.ts's header comment.
   if (schema.id === "decision_support") {
-    const perModelFields = adaptiveResults
+    const perModelFields = agreementInputs
       .filter((r) => r.ok && r.data)
       .map((r) => ({ modelId: r.modelId, fields: extractDecisionSupportFields(r.data!) }));
     const decisionSupport = buildDecisionSupportResult(perModelFields, adaptiveResults.length, classification?.riskLevel);
@@ -716,7 +745,7 @@ export async function finalizeAdaptiveRun(
   let alignedClaims: AlignedClaim[] = [];
 
   if (claimFieldKeys.length > 0) {
-    const perModelClaims: ModelClaims[] = adaptiveResults.map((r) => {
+    const perModelClaims: ModelClaims[] = agreementInputs.map((r) => {
       const claims: Claim[] = [];
       // claimOrigins[i] records which field claims[i] came from (settled vs
       // disputed, see claimFieldClass) — built in the same loop so the two
@@ -739,7 +768,7 @@ export async function finalizeAdaptiveRun(
     alignedClaims.push(...(await alignClaims(perModelClaims)));
   }
 
-  alignedClaims.push(...buildNonClaimRows(schema, adaptiveResults));
+  alignedClaims.push(...buildNonClaimRows(schema, agreementInputs));
 
   if (alignedClaims.length === 0) {
     // Batch 3 persistence foundation (2C-1) — a schema with no
@@ -768,7 +797,7 @@ export async function finalizeAdaptiveRun(
   const runCertainty = computeRunCertainty(scored, schema.id);
   const gate = computeAdaptiveGate(scored, runCertainty, schema.id);
   const synthesisReport = await buildAdaptiveSynthesisReport(question || "", schema.id, scored, results);
-  const trustSummary = buildAdaptiveTrustSummary(schema, adaptiveResults, scored);
+  const trustSummary = buildAdaptiveTrustSummary(schema, agreementInputs, scored);
 
   // Batch 3 persistence foundation (2C-1) — originally narrowly scoped to
   // schema.id === "procedural" only (Phase 2 pilot); now covers the full

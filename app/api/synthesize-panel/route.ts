@@ -915,7 +915,11 @@ export async function POST(req: NextRequest) {
     let clusters: any[] = [];
     try {
       const serverConsensus = synthesizeReport(
-        authoritative.value.rows.map((row) => ({ modelId: row.modelId, status: row.status, rawText: row.text }) as unknown as ModelResult)
+        // The persisted executing provider travels with each row so several
+        // slots answered by one substitute count as one voice (independentVoices).
+        authoritative.value.rows.map(
+          (row) => ({ modelId: row.modelId, status: row.status, rawText: row.text, provider: row.provenance.provider }) as unknown as ModelResult
+        )
       );
       agreementClusters = serverConsensus?.consensusAnalysis?.agreementClusters ?? [];
       clusters = serverConsensus?.consensusAnalysis?.clusters ?? [];
@@ -2045,6 +2049,7 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
       modelId: row.modelId,
       status: row.status,
       rawText: row.text,
+      provider: row.provenance.provider,
     }));
 
     const sourceBacked =

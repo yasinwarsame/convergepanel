@@ -112,20 +112,22 @@ describe("runPanel — an unconfigured model is a typed failure, not a response"
     expect(notConfiguredWarns).toHaveLength(1);
   });
 
-  it("with DeepSeek configured, the slot is HONESTLY substituted (labelled, reason anthropic_not_configured) — never a claude 'ok'", async () => {
+  it("with DeepSeek configured, a missing key is still NOT substituted: failed slot, DeepSeek never called", async () => {
     mockDeepSeekKey = "ds-FAKE";
     mockCallDeepSeek.mockResolvedValue({ ok: true, text: PANEL_TEXT, latencyMs: 3, actualModel: "deepseek-chat" });
     openAIText(PANEL_TEXT);
     const results = await runPanel("q", ["chatgpt", "claude"], { chatgpt: FAKE_KEY, claude: undefined });
     const claude = results.find((r) => r.modelId === "claude")!;
-    expect(claude.status).toBe("substituted");
-    expect(claude.provider).toBe("deepseek");
-    expect(claude.substitutedFrom).toBe("anthropic:claude-haiku-4-5-20251001");
+    expect(claude.status).toBe("failed");
+    expect(claude.provider).toBe("anthropic");
+    expect(claude.substitutedFrom).toBeUndefined();
+    expect(claude.errorCode).toBe("provider_not_configured");
     expect(claude.substitutionReason).toBe("anthropic_not_configured");
     expect(mockAnthropicCtor).not.toHaveBeenCalled();
+    expect(mockCallDeepSeek).not.toHaveBeenCalled();
   });
 
-  it("DeepSeek fallback also failing → failed slot keeps the typed errorCode", async () => {
+  it("an empty-string key with DeepSeek configured (even one that would fail) → reason is the config gap alone, no DeepSeek attempt", async () => {
     mockDeepSeekKey = "ds-FAKE";
     mockCallDeepSeek.mockResolvedValue({ ok: false, code: "deepseek_5xx", retryable: false, message: "x", latencyMs: 1 });
     openAIText(PANEL_TEXT);
@@ -133,7 +135,8 @@ describe("runPanel — an unconfigured model is a typed failure, not a response"
     const claude = results.find((r) => r.modelId === "claude")!;
     expect(claude.status).toBe("failed");
     expect(claude.errorCode).toBe("provider_not_configured");
-    expect(claude.substitutionReason).toBe("anthropic_not_configured|deepseek_5xx");
+    expect(claude.substitutionReason).toBe("anthropic_not_configured");
+    expect(mockCallDeepSeek).not.toHaveBeenCalled();
   });
 });
 
