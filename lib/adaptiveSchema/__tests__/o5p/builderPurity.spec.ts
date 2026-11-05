@@ -38,7 +38,6 @@ import { isPersistedLegacyAdaptiveSchemaId } from "@/lib/adaptiveSchema/persiste
 import { AdaptiveRetryUsageSink } from "@/lib/adaptiveSchema/retryCorrection";
 import { CLASSIFICATION_BASE, DEFAULT_MODE, MockMode, SCENARIOS, SEEDED_SCHEMAS, SEEDS, geminiMockImpl, seededResults } from "./o5pScenarios";
 import { GROUNDING_RANK, claimTieReference, groundingTier, legacyTrust, oracleIsEligibleClaimTie } from "../o5c/claimTieOracle";
-import { recordedSubstitutions, undoExecutingAttributionValue } from "@/components/adaptive/__tests__/executingAttributionStrip";
 
 const gem = callGemini as unknown as jest.Mock;
 const baseline: Record<string, { schemaId: string; result: string; geminiCalls: string; connectorCalls: string; geminiCallCount: number; inputMutated: boolean }> = JSON.parse(
@@ -53,6 +52,33 @@ const canon = (x: any): string =>
       ? `{${Object.keys(x).sort().filter((k) => x[k] !== undefined).map((k) => `${JSON.stringify(k)}:${canon(x[k])}`).join(",")}}`
       : JSON.stringify(x);
 const MARKER = "disagreementPositionVersion";
+
+/**
+ * Executing-model attribution (owner rule, connector fail-closed pass, 2026-11-05): the builder names a slot the run
+ * records as substituted by the model that wrote it — "DeepSeek (substituting Claude)" — in the generated Unified
+ * Answer, the answer claims' supporters and the load-bearing supporters / disputers. The 2c17feee baseline predates the
+ * rule, so for a case whose input records a substitution the result is pinned EXACTLY here instead: the sha-256 of the
+ * same canonical comparable value, plus the exact count of the executing label in it and in each generated field —
+ * captured on this branch (see `capturedAt`). Every case with no recorded substitution is still held to the untouched
+ * 2c17feee hash. Nothing is transformed before hashing.
+ */
+const ATTRIBUTION: {
+  capturedAt: string;
+  label: string;
+  cases: Record<string, { result: string; labelCount: number; fieldCounts: Record<string, number> }>;
+} = JSON.parse(readFileSync(join(__dirname, "__fixtures__", "executing-attribution", "builderHashes.json"), "utf8"));
+const occurrences = (text: string, needle: string) => text.split(needle).length - 1;
+/** Where the builder writes slot names into generated text, counted per field. */
+function attributionFieldCounts(res: any, label: string): Record<string, number> {
+  const p = res?.synthesisReport?.presentation;
+  const count = (v: unknown) => occurrences(typeof v === "string" ? v : JSON.stringify(v ?? null), label);
+  return {
+    unifiedAnswer: count(res?.synthesisReport?.unifiedAnswer),
+    "presentation.answer.claims[].supporters": count((p?.answer?.claims ?? []).map((c: any) => c.supporters ?? null)),
+    "presentation.verificationGate.unresolvedLoadBearing[].supporters": count((p?.verificationGate?.unresolvedLoadBearing ?? []).map((c: any) => c.supporters ?? null)),
+    "presentation.verificationGate.unresolvedLoadBearing[].disputers": count((p?.verificationGate?.unresolvedLoadBearing ?? []).map((c: any) => c.disputers ?? null)),
+  };
+}
 
 async function run(schemaId: string, input: any[], mode: MockMode, retry?: { modelId: string; data: unknown }[]) {
   gem.mockReset();
@@ -125,19 +151,22 @@ describe("Contract P builder purity vs the 2c17feee pipeline", () => {
     const c = CASES.find((x) => x.name === name)!;
     const b = baseline[name];
     const out = await run(c.schemaId, c.input(), c.mode, c.retry);
-    const comparableOut = comparable(out.res, c.schemaId);
-    const markers = comparableOut.markers;
-    // Executing-model attribution (owner rule, 2026-11-05): generated supporter / disputer names of a slot the run
-    // records as substituted read "DeepSeek (substituting Claude)". The 2c17feee baseline predates the rule, so that
-    // attribution (and only it) is reversed before hashing; it must occur exactly where the input records a substitution.
-    const subs = recordedSubstitutions(c.input() as any[]);
-    const reverted = undoExecutingAttributionValue(comparableOut.value, subs);
-    const value = reverted.value;
-    expect([name, reverted.count > 0]).toEqual([name, subs.length > 0 && (out.res.alignedClaims?.length ?? 0) > 0]);
-    // The generated Unified Answer text itself names the substitute by its executing model (not only the presented claims).
-    if (name === "generic-substituted-and-failed") {
-      expect(out.res.synthesisReport.unifiedAnswer).toContain("(ChatGPT, DeepSeek (substituting Claude), Perplexity, Gemini)");
-      expect(out.res.synthesisReport.unifiedAnswer).not.toContain("(ChatGPT, Claude,");
+    const { value, markers } = comparable(out.res, c.schemaId);
+    // Pinned exactly where (and only where) the input records a substitution.
+    const pin = ATTRIBUTION.cases[name];
+    expect([name, pin !== undefined]).toEqual([name, (c.input() as any[]).some((r) => r && r.status === "substituted")]);
+    const expectedResult = pin ? pin.result : b.result;
+    if (pin) {
+      expect([name, pin.result !== b.result]).toEqual([name, true]);
+      expect([name, occurrences(canon(value), ATTRIBUTION.label)]).toEqual([name, pin.labelCount]);
+      expect([name, attributionFieldCounts(out.res, ATTRIBUTION.label)]).toEqual([name, pin.fieldCounts]);
+      // The generated Unified Answer text names the substitute by its executing model.
+      if (name === "generic-substituted-and-failed") {
+        expect(out.res.synthesisReport.unifiedAnswer).toContain("(ChatGPT, DeepSeek (substituting Claude), Perplexity, Gemini)");
+        expect(out.res.synthesisReport.unifiedAnswer).not.toContain("(ChatGPT, Claude,");
+      }
+    } else {
+      expect([name, occurrences(JSON.stringify(out.res), ATTRIBUTION.label)]).toEqual([name, 0]);
     }
     if (c.schemaId === "generic") expectGenericEnvelopeIsACopy(out.res, { ...CLASSIFICATION_BASE, queryType: "generic", answerShape: getResultSchema("generic" as any).renderHint });
     else expect(!!out.res.persistedLegacyOutput).toBe(isPersistedLegacyAdaptiveSchemaId(c.schemaId));
@@ -145,7 +174,7 @@ describe("Contract P builder purity vs the 2c17feee pipeline", () => {
     const results = out.res.adaptiveResults ?? [];
     const claimTie = rows.some((r: any) => oracleIsEligibleClaimTie(r, results));
     if (!claimTie) {
-      expect(sha(canon(value))).toBe(b.result);
+      expect(sha(canon(value))).toBe(expectedResult);
       expect(JSON.stringify(value)).not.toContain("attributionRule");
     } else {
       const schema = getResultSchema(c.schemaId as any) as any;
@@ -168,7 +197,7 @@ describe("Contract P builder purity vs the 2c17feee pipeline", () => {
         expect(GROUNDING_RANK[groundingTier(candidate.overallTrust)]).toBeLessThanOrEqual(GROUNDING_RANK[groundingTier(oracle.overallTrust)]);
         holder.trustSummary = oracle;
       }
-      expect(sha(canon(value))).toBe(b.result);
+      expect(sha(canon(value))).toBe(expectedResult);
     }
     // The marker is the number 1, on the live report and its persisted copy, exactly when the builder produced a
     // presentation over at least one row; nowhere else.

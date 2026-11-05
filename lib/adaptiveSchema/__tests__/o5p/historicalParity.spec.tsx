@@ -24,7 +24,6 @@ import { generateVerificationMemo } from "@/lib/verification/generateMemo";
 import { SCENARIOS } from "./o5pScenarios";
 import { SHARED_MEMO_INPUTS, normalizeMemo, renderRecord } from "./o5pRender";
 import { stripAnalysisNoticeHtml } from "@/components/adaptive/__tests__/analysisNoticeStrip";
-import { recordedSubstitutions, undoExecutingAttributionHtml } from "@/components/adaptive/__tests__/executingAttributionStrip";
 
 const FIXTURES = join(__dirname, "__fixtures__", "baseline-2c17fee");
 const records: Record<string, any> = JSON.parse(readFileSync(join(FIXTURES, "records.json"), "utf8"));
@@ -38,6 +37,27 @@ const renderHashes: Hashes | undefined = ORACLE_BY_TIMEZONE[ORACLE_TIMEZONE];
 const TIMEZONE_KEYS = ["export.docxXml", "export.pdfTree"];
 const sharedMemos: Record<string, string> = JSON.parse(readFileSync(join(FIXTURES, "sharedMemos.json"), "utf8"));
 const sha = (s: string) => createHash("sha256").update(s, "utf8").digest("hex");
+
+/**
+ * Executing-model attribution (owner rule, connector fail-closed pass, 2026-11-05): a slot the run records as
+ * substituted is named by the model that wrote it, "DeepSeek (substituting Claude)", never as the requested model. The
+ * 2c17feee oracle predates that rule, so for a scenario whose rows record a substitution the outputs that name that
+ * slot are pinned EXACTLY here instead — full sha-256 of the rendered output (any dropped, duplicated or reverted label
+ * changes it) plus, per output key, the exact count of the executing label and of executing-model chips (neutral dot +
+ * label) — captured on this branch at the commit that
+ * introduced the file (see its `capturedAt`). Every other output of that scenario, and every output of every scenario
+ * with no recorded substitution, is still held to the untouched 2c17feee oracle. No output is transformed before hashing.
+ */
+type AttributionPins = {
+  capturedAt: string;
+  label: string;
+  /** A chip naming the executing model: the neutral dot (never the requested model's identity colour), then the label. */
+  chipMarkup: string;
+  scenarios: Record<string, { hashes: Record<string, Record<string, string>>; labelCounts: Record<string, number>; executingChipCounts: Record<string, number> }>;
+};
+const ATTRIBUTION: AttributionPins = JSON.parse(readFileSync(join(__dirname, "__fixtures__", "executing-attribution", "renderHashes.json"), "utf8"));
+const hasRecordedSubstitution = (rows: any[]) => rows.some((r) => r && r.status === "substituted");
+const occurrences = (text: string, needle: string) => text.split(needle).length - 1;
 
 describe("Contract P historical parity (2c17feee oracles)", () => {
   it("runs in a timezone a 2c17feee oracle was captured in (run with TZ=UTC)", () => {
@@ -68,11 +88,8 @@ describe("Contract P historical parity (2c17feee oracles)", () => {
     // D-3 (2026-11-02): the owner-approved analysis-availability notice is removed before hashing against the 2c17feee
     // oracle, and required exactly where the record's synthesis is degraded (the narrative-failure scenario) and nowhere else.
     let notices = 0;
-    // Executing-model attribution (owner rule, 2026-11-05): a slot the run records as substituted is named
-    // "DeepSeek (substituting Claude)" — the baseline predates the rule, so that attribution (and only it) is reversed
-    // before hashing, and it must appear exactly where the run records a substitution.
-    const subs = recordedSubstitutions(scenario.results() as any[]);
-    let attributions = 0;
+    const labelCounts: Record<string, number> = {};
+    const chipCounts: Record<string, number> = {};
     const actual = Object.fromEntries(
       Object.entries(outputs).map(([k, v]) => {
         if (v === null) return [k, null];
@@ -80,15 +97,31 @@ describe("Contract P historical parity (2c17feee oracles)", () => {
         // Review MINOR-5: never more than one notice in one rendered output.
         expect([name, k, stripped.count <= 1]).toEqual([name, k, true]);
         notices += stripped.count;
-        const reverted = undoExecutingAttributionHtml(stripped.markup, subs);
-        attributions += reverted.count;
-        return [k, sha(reverted.markup)];
+        labelCounts[k] = occurrences(stripped.markup, ATTRIBUTION.label);
+        chipCounts[k] = occurrences(stripped.markup, ATTRIBUTION.chipMarkup + ATTRIBUTION.label);
+        return [k, sha(stripped.markup)];
       })
     );
     expect([name, notices > 0]).toEqual([name, records[name]?.synthesisReport?.degraded === true]);
-    expect([name, attributions > 0]).toEqual([name, subs.length > 0]);
     expect(renderHashes).toBeDefined();
-    expect(actual).toEqual(renderHashes![name]);
+    const pins = ATTRIBUTION.scenarios[name];
+    // Pinned exactly where (and only where) the run records a substitution.
+    expect([name, pins !== undefined]).toEqual([name, hasRecordedSubstitution(scenario.results() as any[])]);
+    if (!pins) {
+      // No recorded substitution: the untouched 2c17feee oracle, every output, and the executing label nowhere.
+      expect(actual).toEqual(renderHashes![name]);
+      expect(Object.values(labelCounts).every((n) => n === 0)).toBe(true);
+      return;
+    }
+    // Exact executing-label and executing-chip counts per output key (every key, zeros included).
+    expect(labelCounts).toEqual(pins.labelCounts);
+    expect(chipCounts).toEqual(pins.executingChipCounts);
+    const pinnedForTimezone = pins.hashes[ORACLE_TIMEZONE];
+    expect(pinnedForTimezone).toBeDefined();
+    // Outputs that name the substituted slot: the exact pinned rendering. Every other output: the 2c17feee oracle.
+    expect(Object.keys(pinnedForTimezone).sort()).toEqual(Object.keys(labelCounts).filter((k) => labelCounts[k] > 0).sort());
+    for (const k of Object.keys(pinnedForTimezone)) expect([k, pinnedForTimezone[k] !== renderHashes![name][k]]).toEqual([k, true]);
+    expect(actual).toEqual({ ...renderHashes![name], ...pinnedForTimezone });
   });
 
   it.each(Object.keys(SHARED_MEMO_INPUTS))("shared memo generator: %s is byte-identical", (key) => {

@@ -1,0 +1,63 @@
+{
+ "capturedAt": "fix/connector-missing-key-fail-closed, working tree on f2493e0 (connector fail-closed correction pass, 2026-11-05); at capture each pinned output differed from the 2c17feee oracle ONLY by the executing-model attribution of the recorded substituted claude slot",
+ "label": "DeepSeek (substituting Claude)",
+ "scenarios": {
+  "generic-substituted-and-failed": {
+   "hashes": {
+    "UTC": {
+     "ui.panelResponse": "4d75da0d999c1363d710710d75b44fa3758d98e3957fa9c265a05e7d726e8853",
+     "ui.synthesisView": "8e73da197816ab324ed26c301c9d5ff1586888691fb6983f53ac6e2c0a2dcbcf",
+     "ui.panelEvidence": "8147ee101d89a9acfbaf3e25e0abea05340405b367bb0fd76ef6d060b2df2765",
+     "ui.claimMatrix": "3b92ada62b04bcb8a8551b63a8df3b995d79f91b76ebc45d2d33b3ae42d1041e",
+     "ui.governance": "ca39559e774a3ea4b9f63fbcf5262fa89d7a539c544a46bf267af5f12f2b9cbf",
+     "text.markdown": "a31ad946d5961605701348191358cb7b7f51792b3c37b0a38c15f0239d28a94a"
+    },
+    "Africa/Nairobi": {
+     "ui.panelResponse": "4d75da0d999c1363d710710d75b44fa3758d98e3957fa9c265a05e7d726e8853",
+     "ui.synthesisView": "8e73da197816ab324ed26c301c9d5ff1586888691fb6983f53ac6e2c0a2dcbcf",
+     "ui.panelEvidence": "8147ee101d89a9acfbaf3e25e0abea05340405b367bb0fd76ef6d060b2df2765",
+     "ui.claimMatrix": "3b92ada62b04bcb8a8551b63a8df3b995d79f91b76ebc45d2d33b3ae42d1041e",
+     "ui.governance": "ca39559e774a3ea4b9f63fbcf5262fa89d7a539c544a46bf267af5f12f2b9cbf",
+     "text.markdown": "a31ad946d5961605701348191358cb7b7f51792b3c37b0a38c15f0239d28a94a"
+    }
+   },
+   "labelCounts": {
+    "ui.panelResponse": 23,
+    "ui.panelResponse.noProvenance": 0,
+    "ui.synthesisView": 12,
+    "ui.listView": 0,
+    "ui.primaryStrip": 0,
+    "ui.panelEvidence": 10,
+    "ui.claimMatrix": 1,
+    "ui.governance": 12,
+    "text.markdown": 3,
+    "text.linkedin": 0,
+    "text.x": 0,
+    "text.memoInput": 0,
+    "text.memo": 0,
+    "export.json": 0,
+    "export.pdfTree": 0,
+    "export.docxXml": 0
+   },
+   "executingChipCounts": {
+    "ui.panelResponse": 12,
+    "ui.panelResponse.noProvenance": 0,
+    "ui.synthesisView": 6,
+    "ui.listView": 0,
+    "ui.primaryStrip": 0,
+    "ui.panelEvidence": 6,
+    "ui.claimMatrix": 0,
+    "ui.governance": 6,
+    "text.markdown": 0,
+    "text.linkedin": 0,
+    "text.x": 0,
+    "text.memoInput": 0,
+    "text.memo": 0,
+    "export.json": 0,
+    "export.pdfTree": 0,
+    "export.docxXml": 0
+   }
+  }
+ },
+ "chipMarkup": "\"h-2 w-2 shrink-0 rounded-full bg-cp-faint\" aria-hidden=\"true\"></span>"
+}
