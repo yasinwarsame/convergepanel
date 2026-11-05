@@ -36,21 +36,6 @@ const g = (cwd: string, ...args: string[]) =>
     { cwd, encoding: "utf8", env: { ...hostEnvNoGit(), GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: os.devNull } },
   );
 
-/** Runs `fn` with extra process.env entries, restoring the exact previous values afterwards. */
-function withEnv<T>(extra: Record<string, string>, fn: () => T): T {
-  const saved = new Map<string, string | undefined>();
-  for (const k of Object.keys(extra)) saved.set(k, process.env[k]);
-  Object.assign(process.env, extra);
-  try {
-    return fn();
-  } finally {
-    for (const [k, v] of saved) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-  }
-}
-
 let base: string;
 let repo: string;
 let play: string;
@@ -303,38 +288,40 @@ describe("C: every git invocation runs with a sanitized environment", () => {
   });
   const repoSha = () => g(repo, "rev-parse", "HEAD").trim();
 
+  // child_process inherits the REAL process environment, which jest's sandboxed
+  // `process.env` is not: the inherited-variable cases therefore run the real
+  // module in a real child process with the variable set in ITS environment.
+  const TOOL = path.resolve(__dirname, "..", "set-system-admin-claim.ts");
+  const TS_NODE = path.resolve(__dirname, "..", "..", "..", "node_modules", ".bin", "ts-node");
+  const probeInChild = (extra: Record<string, string>) => {
+    const code = `const m = require(${JSON.stringify(TOOL)}); const io = m.realIo(${JSON.stringify(repo)}); process.stdout.write(JSON.stringify({ roots: io.gitWorktreeRoots(), git: io.git() }));`;
+    const out = execFileSync(process.execPath, [TS_NODE, "--transpile-only", "--compiler-options", JSON.stringify({ module: "CommonJS", moduleResolution: "node" }), "-e", code], {
+      cwd: path.resolve(__dirname, "..", "..", ".."),
+      encoding: "utf8",
+      env: { ...hostEnvNoGit(), ...extra },
+      timeout: 60_000,
+    });
+    return JSON.parse(out) as { roots: string[] | null; git: { sha: string | null; dirty: boolean | null } };
+  };
+
+  it("CONTROL (child process, no GIT_* set): the repository's own worktree list and commit", () => {
+    expect(probeInChild({})).toEqual({ roots: [repo], git: { sha: repoSha(), dirty: false } });
+  }, 60_000);
+
   it.each<[string, () => Record<string, string>]>([
     ["GIT_DIR", () => ({ GIT_DIR: path.join(foreign, ".git") })],
     ["GIT_DIR + GIT_WORK_TREE", () => ({ GIT_DIR: path.join(foreign, ".git"), GIT_WORK_TREE: foreign })],
     ["GIT_COMMON_DIR", () => ({ GIT_COMMON_DIR: path.join(foreign, ".git") })],
-  ])("%s pointing at another repository does not redirect worktree enumeration or the recorded commit", (_l, extra) => {
-    const clean = cli.realIo(repo).gitWorktreeRoots();
-    expect(clean).toEqual([repo]);
-    const redirected = withEnv(extra(), () => ({ roots: cli.realIo(repo).gitWorktreeRoots(), git: cli.realIo(repo).git() }));
-    expect(redirected).toEqual({ roots: [repo], git: { sha: repoSha(), dirty: false } });
-  });
+    ["GIT_INDEX_FILE (an empty index)", () => ({ GIT_INDEX_FILE: path.join(base, "empty-index") })],
+  ])("%s inherited by the process does not redirect worktree enumeration or the recorded commit/dirty state", (_l, extra) => {
+    expect(probeInChild(extra())).toEqual({ roots: [repo], git: { sha: repoSha(), dirty: false } });
+  }, 60_000);
 
-  it("GIT_INDEX_FILE pointing at an empty index does not make a clean tree 'dirty'", () => {
-    const empty = path.join(base, "empty-index");
-    const io = withEnv({ GIT_INDEX_FILE: empty }, () => cli.realIo(repo).git());
-    expect(io).toEqual({ sha: repoSha(), dirty: false });
-  });
-
-  it("GIT_CONFIG_COUNT/KEY/VALUE cannot hide an untracked file in scripts/admin from the dirty flag", () => {
+  it("GIT_CONFIG_COUNT/KEY/VALUE inherited by the process cannot hide an untracked file in scripts/admin from the dirty flag", () => {
     fs.writeFileSync(path.join(repo, "scripts", "admin", "planted.ts"), "export {};\n");
-    const io = withEnv({ GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "status.showUntrackedFiles", GIT_CONFIG_VALUE_0: "no" }, () => cli.realIo(repo).git());
-    expect(io).toEqual({ sha: repoSha(), dirty: true });
-  });
-
-  it("end to end under GIT_DIR redirection: a result file inside this repo's linked worktree is still refused", async () => {
-    const wt = path.join(play, "wt");
-    g(repo, "worktree", "add", "-q", "--detach", wt, "HEAD");
-    const target = path.join(wt, "x.json");
-    const r = await withEnv({ GIT_DIR: path.join(foreign, ".git") }, () => runReal(target));
-    expect(r.code).toBe(2);
-    expect(r.err).toContain("[result_path_inside_repo]");
-    expect(fs.existsSync(target)).toBe(false);
-  });
+    const r = probeInChild({ GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "status.showUntrackedFiles", GIT_CONFIG_VALUE_0: "no" });
+    expect(r).toEqual({ roots: [repo], git: { sha: repoSha(), dirty: true } });
+  }, 60_000);
 
   it("gitEnv: drops EVERY GIT_* variable (any case), keeps the rest, disables system/global config and optional locks, never mutates its input", () => {
     const host = {
