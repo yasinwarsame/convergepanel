@@ -102,7 +102,7 @@ PERPLEXITY_API_KEY=your_perplexity_api_key_here
    - Publish the rules
 
 **Note**: 
-- You don't need all API keys. Models without keys will return mock responses.
+- You don't need all API keys. A model without a key returns an explicit `provider_not_configured` error result (never a mock or fabricated response) and is excluded from consensus and response counts.
 - API keys can be managed via the Admin UI (Firestore) or via environment variables.
 - Firestore-stored keys take precedence over environment variables.
 

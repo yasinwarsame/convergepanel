@@ -186,6 +186,10 @@ The panel queries all selected models concurrently using `Promise.allSettled`. E
 4. If fallback also fails, the slot becomes a failed placeholder
 5. Public status is normalized to `"ok" | "substituted" | "failed"` — callers never see internal retry states
 
+### Missing provider key (fail closed)
+
+A connector whose API key is missing, empty or whitespace-only makes **no provider call and fabricates no text**. ChatGPT and Claude (`lib/connectors/providerNotConfigured.ts`) return `status: "error"`, `rawText: null`, `errorCode: "provider_not_configured"` (optional typed field on `ModelResult`) and a non-secret `errorMessage` naming the env var, identically in every environment. The dev-only `FORCE_*_FAIL` switches are checked first and are unchanged. In `runPanel` the code is not retried, is recorded as `substitutionReason: "<provider>_not_configured"`, and is still eligible for the labelled DeepSeek substitution (same as before for Gemini's missing key); a failed placeholder keeps `errorCode`. An unconfigured model is therefore never counted as a responding model, in agreement/consensus, in `successfulModels`, or toward the ≥2-response synthesis rule. (Until this change ChatGPT/Claude returned a fake `status: "ok"` "Mock response from … (no API key configured)"; runs saved while a key was missing may still contain that text.)
+
 ### Models
 
 Registered in `CONNECTOR_MAP` (`lib/connectors/index.ts`):

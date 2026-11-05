@@ -5,6 +5,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { ModelResult } from "@/lib/types";
 import type { ConnectorCallOptions } from "./types";
+import { isApiKeyConfigured, providerNotConfiguredResult } from "./providerNotConfigured";
 import { buildPanelPrompt } from "@/lib/panelPrompt";
 import { MODEL_LIMITS, getModelTimeout } from "@/lib/modelConfig";
 import { getTotalTokensFromProviderResponse, modelIdToProviderKey, safeNum } from "@/lib/tokenExtraction";
@@ -24,15 +25,6 @@ function createTimeout(timeoutMs: number) {
   );
 }
 
-function mockResult(): ModelResult {
-  return {
-    modelId: "claude",
-    status: "ok",
-    rawText: "Mock response from claude (no API key configured)",
-    latencyMs: 0,
-  };
-}
-
 export async function callClaude(
   question: string,
   context?: string | null,
@@ -47,8 +39,10 @@ export async function callClaude(
     return { modelId: "claude", status: "error", rawText: null, errorMessage: "Forced failure (dev)", latencyMs: 0 };
   }
 
-  if (!apiKey) {
-    return mockResult();
+  // Fail closed: a missing/empty/whitespace-only key is a provider-configuration
+  // failure, never a model response (see ./providerNotConfigured.ts).
+  if (!isApiKeyConfigured(apiKey)) {
+    return providerNotConfiguredResult("claude", "Claude (Anthropic)", "ANTHROPIC_API_KEY");
   }
 
   try {
