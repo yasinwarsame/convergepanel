@@ -193,6 +193,9 @@ describe("runCli — refusals before any credential or Firebase use", () => {
     ["credentials_file_unreadable", (e) => e.files.delete("/keys/sa.json")],
     ["credentials_file_unsafe", (e) => { e.files.get("/keys/sa.json")!.mode = 0o100644; }],
     ["credentials_invalid", (e) => { e.files.get("/keys/sa.json")!.body = `{"private_key": "${FAKE_PRIVATE_KEY.replace(/\n/g, "\\n")}", oops`; }],
+    // A parser error message quotes the first bytes of the input; a key file
+    // that is not JSON must not have its contents echoed through that message.
+    ["credentials_invalid", (e) => { e.files.get("/keys/sa.json")!.body = "FAKEKEYMATERIAL-MUST-NEVER-APPEAR not json"; }],
     ["credentials_invalid", (e) => { e.files.get("/keys/sa.json")!.body = JSON.stringify({ ...KEY, type: "authorized_user" }); }],
     ["project_confirmation_mismatch", (e) => { e.files.get("/keys/sa.json")!.body = JSON.stringify({ ...KEY, project_id: "convergepanel" }); }],
   ])("%s: refused, factory never called, result file records the code, no key material anywhere", async (code, mutate) => {
@@ -202,7 +205,8 @@ describe("runCli — refusals before any credential or Firebase use", () => {
     expect(r.code).toBe(2);
     expect(e.factoryCalls).toBe(0);
     expect(r.result).toMatchObject({ status: "refused", code, exitCode: 2 });
-    expect(r.all).not.toContain("FAKEKEYMATERIAL");
+    // "FAKEKEYMAT" is the 10-character prefix a JSON.parse message would quote.
+    expect(r.all).not.toContain("FAKEKEYMAT");
   });
 
   it("CONTROL: the unmutated environment reaches Firebase", async () => {
