@@ -12,7 +12,8 @@ import { readdirSync, readFileSync, statSync } from "fs";
 import { join, relative } from "path";
 
 const ROOT = process.cwd();
-const importsOf = (src: string) => [...src.matchAll(/(?:from\s+|require\(\s*|import\(\s*)["']([^"']+)["']/g)].map((m) => m[1]);
+// Static, side-effect (`import "x"`), dynamic and require forms.
+const importsOf = (src: string) => [...src.matchAll(/(?:from\s+|\bimport\s+|require\(\s*|import\(\s*)["']([^"']+)["']/g)].map((m) => m[1]);
 
 function walk(rel: string): string[] {
   const p = join(ROOT, rel);
