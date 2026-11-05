@@ -642,6 +642,16 @@ function statusChipClasses(status: string): { wrap: string; label: string } {
   };
 }
 
+/**
+ * The queue's consensus text for a row: a research row whose stored score is withheld (fewer than two independent
+ * executing models, or independence not recorded — see `consensusWithheld`) shows the reason, never a number.
+ */
+export function queueConsensusText(row: Pick<QueueRow, "consensusScore" | "consensusWithheld">, withDenominator: boolean): string {
+  if (row.consensusWithheld) return CONSENSUS_WITHHELD_TEXT[row.consensusWithheld];
+  if (row.consensusScore == null) return "—";
+  return withDenominator ? `${Math.round(row.consensusScore)}/100` : String(Math.round(row.consensusScore));
+}
+
 function consensusColor(score: number | null): string {
   if (score == null) return "text-cp-faint";
   if (score > 75) return "text-emerald-400";
@@ -690,11 +700,7 @@ function ReviewModal(props: {
 
   const isBlock = mode === "blocked";
   const title = isBlock ? "Block this run" : "Request changes on this run";
-  const consensus = row.consensusWithheld
-    ? CONSENSUS_WITHHELD_TEXT[row.consensusWithheld]
-    : row.consensusScore == null
-      ? "—"
-      : `${Math.round(row.consensusScore)}/100`;
+  const consensus = queueConsensusText(row, true);
   const statusLabel =
     row.governanceStatus === "needs_review"
       ? "Needs Review"
@@ -2011,13 +2017,9 @@ function FragmentRow(props: {
         </td>
         <td className={`px-3 py-2 font-semibold ${consensusColor(row.consensusScore)}`}>
           {row.consensusWithheld ? (
-            <span title={CONSENSUS_WITHHELD_TEXT[row.consensusWithheld]} className="text-xs font-normal text-cp-muted">
-              {CONSENSUS_WITHHELD_TEXT[row.consensusWithheld]}
-            </span>
-          ) : row.consensusScore == null ? (
-            "—"
+            <span className="text-xs font-normal text-cp-muted">{queueConsensusText(row, false)}</span>
           ) : (
-            Math.round(row.consensusScore)
+            queueConsensusText(row, false)
           )}
         </td>
         <td className="hidden px-3 py-2 md:table-cell">
