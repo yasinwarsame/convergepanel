@@ -78,7 +78,11 @@ export const MIN_INDEPENDENT_SYNTHESIS_MODELS = 2;
 /** A client-held result row: live `ModelResult` or a reloaded run's public row. */
 export type ClientSynthesisRow = VoiceRow & { rawTextFull?: unknown; rawText?: unknown; text?: unknown };
 
-function clientRowText(row: ClientSynthesisRow): string {
+/**
+ * The text a client row carries: the first NON-EMPTY of `rawTextFull`, `rawText`, `text`. The one text getter for the
+ * client synthesis gate and the synthesis payload (`PanelSynthesisView`), so a row the gate counts is never sent empty.
+ */
+export function clientRowText(row: ClientSynthesisRow): string {
   for (const v of [row.rawTextFull, row.rawText, row.text]) {
     if (typeof v === "string" && v.length > 0) return v;
   }
@@ -103,3 +107,44 @@ export function independentSynthesisResponders<T extends ClientSynthesisRow>(row
 export function meetsIndependentSynthesisMinimum(rows: readonly ClientSynthesisRow[]): boolean {
   return independentSynthesisResponders(rows).length >= MIN_INDEPENDENT_SYNTHESIS_MODELS;
 }
+
+/**
+ * Whether a STORED research run's consensus score may be presented as multi-model agreement, judged only from what the
+ * run document persisted (`runDocument.perModel`, else `resultsCompact.perModel`; each row `{ modelId, status,
+ * rawTextTruncated, provider? }`):
+ *  - "independent": the persisted rows meet `meetsIndependentSynthesisMinimum` (≥ 2 independent executing models);
+ *  - "insufficient": the rows carry execution identity (a string `status` on every row) and reduce to fewer than two;
+ *  - "unverified": no persisted rows, or rows without a recorded status — execution identity cannot be established, so
+ *    nothing is inferred from response slots (fail closed: never presented as agreement).
+ * Pure; reads nothing else, never mutates the document.
+ */
+export type StoredConsensusIndependence = "independent" | "insufficient" | "unverified";
+
+export function storedRunConsensusIndependence(data: Record<string, unknown> | null | undefined): StoredConsensusIndependence {
+  if (!data || typeof data !== "object") return "unverified";
+  const fromRunDocument = (data.runDocument as { perModel?: unknown } | undefined)?.perModel;
+  const perModel = Array.isArray(fromRunDocument) ? fromRunDocument : (data.resultsCompact as { perModel?: unknown } | undefined)?.perModel;
+  if (!Array.isArray(perModel) || perModel.length === 0) return "unverified";
+  const rows: ClientSynthesisRow[] = [];
+  for (const raw of perModel) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return "unverified";
+    const r = raw as Record<string, unknown>;
+    if (typeof r.modelId !== "string" || r.modelId.trim().length === 0 || typeof r.status !== "string") return "unverified";
+    rows.push({ modelId: r.modelId, status: r.status, provider: r.provider, rawTextFull: r.rawTextTruncated, rawText: r.rawText, text: r.text });
+  }
+  return meetsIndependentSynthesisMinimum(rows) ? "independent" : "insufficient";
+}
+
+/** Why a stored consensus score is withheld from a list surface (absent when the score is shown). */
+export type ConsensusScoreWithheldReason = "insufficient_independent_models" | "independence_unverified";
+
+export function consensusScoreWithheldReason(independence: StoredConsensusIndependence): ConsensusScoreWithheldReason | undefined {
+  if (independence === "independent") return undefined;
+  return independence === "insufficient" ? "insufficient_independent_models" : "independence_unverified";
+}
+
+/** Short display text for a withheld stored consensus score. */
+export const CONSENSUS_WITHHELD_TEXT: Readonly<Record<ConsensusScoreWithheldReason, string>> = Object.freeze({
+  insufficient_independent_models: "No consensus score (fewer than two independent models)",
+  independence_unverified: "Consensus score withheld (model independence not recorded)",
+});

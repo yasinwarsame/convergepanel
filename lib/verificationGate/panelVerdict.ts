@@ -20,6 +20,28 @@ export const PANEL_VERDICT_SINGLE_MODEL_HEADING = "Top finding (one independent 
 export const NO_CONSENSUS_SCORE_SHARE_LINE =
   "No consensus score: fewer than two independent models responded (slots answered by the same substitute model count as one).";
 
+/** Verdict card text in place of "No major disagreements detected." when fewer than two independent models responded. */
+export const NO_CROSS_MODEL_COMPARISON_TEXT = "No cross-model comparison: fewer than two independent models responded.";
+
+/**
+ * The disagreements that are REAL cross-model disagreements: with fewer than two independent executing models in the run
+ * (`crossModel === false`) there are none; otherwise an item whose positions come from two or more slots that collapse
+ * to fewer than two independent executing models (e.g. ChatGPT and Claude both answered by DeepSeek) is one model's
+ * positions, not a disagreement between models, and is dropped. Items naming fewer than two slots are kept as stored.
+ * Order preserved; never mutates its input.
+ */
+export function crossModelDisagreements<T extends { positionsByModel?: Record<string, string> | null }>(
+  items: readonly T[] | null | undefined,
+  rows: readonly ExecutingIdentityRow[] | null | undefined,
+  crossModel: boolean
+): T[] {
+  if (!crossModel || !items) return [];
+  return items.filter((d) => {
+    const slots = Array.from(new Set(Object.keys(d?.positionsByModel ?? {}).map((k) => k.trim()).filter((k) => k.length > 0)));
+    return slots.length < 2 || independentVoiceCount(slots, rows) >= 2;
+  });
+}
+
 export interface PanelVerdict {
   question: string;
   /**
@@ -66,7 +88,8 @@ export function buildPanelVerdict(
   const topConsensus = topFinding?.claim ?? report.executiveSummary?.slice(0, 200) ?? "No consensus identified.";
   const consensusModelCount = independentVoiceCount(topFinding?.modelsSupporting ?? [], rows);
 
-  const topDisagreementItem = report.disagreements?.[0];
+  // Only real cross-model disagreements (crossModelDisagreements): never one model's positions presented as a split.
+  const topDisagreementItem = crossModelDisagreements(report.disagreements, rows, crossModel)[0];
   const topDisagreement = topDisagreementItem?.topic ?? null;
   const disagreementDetail = topDisagreementItem?.whyTheyDiffer ?? null;
   // Independent executing models, like consensusModelCount: positions from two slots answered by one substitute

@@ -463,6 +463,9 @@ function generateVideoMemo(input: MemoInput): string {
   return lines.join("\n").trimEnd() + "\n";
 }
 
+/** Research memo evidence-quality line when fewer than two independent models responded. */
+export const RESEARCH_MEMO_NO_CROSS_MODEL_EVIDENCE = "not assessed (fewer than two independent models responded)";
+
 function generateResearchMemo(input: MemoInput): string {
   const lines: string[] = [];
   const q = (input.question ?? "").trim() || "—";
@@ -489,7 +492,8 @@ function generateResearchMemo(input: MemoInput): string {
   } else {
     lines.push(`CONSENSUS SCORE: ${input.consensusScore}/100 (${input.confidenceLabel} confidence)`);
   }
-  lines.push(`EVIDENCE QUALITY: ${input.evidenceQuality}`);
+  // The stored evidence quality is a cross-model support rollup: with one independent model it measures nothing.
+  lines.push(noConsensus ? `EVIDENCE QUALITY: ${RESEARCH_MEMO_NO_CROSS_MODEL_EVIDENCE}` : `EVIDENCE QUALITY: ${input.evidenceQuality}`);
   lines.push("");
   lines.push("SUMMARY");
   lines.push(
@@ -511,7 +515,8 @@ function generateResearchMemo(input: MemoInput): string {
     lines.push("");
   }
 
-  if (disagree.length) {
+  // Below two independent models no disagreement between models exists to report.
+  if (disagree.length && !noConsensus) {
     lines.push("WHERE MODELS DISAGREE");
     disagree.forEach((p) => lines.push(`- ${p}`));
     lines.push("");

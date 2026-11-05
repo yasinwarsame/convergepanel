@@ -6,6 +6,8 @@
  * No new model calls are made.
  */
 
+import { MIN_INDEPENDENT_SYNTHESIS_MODELS } from "@/lib/panel/independentVoices";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -77,11 +79,33 @@ export interface VerificationGateInput {
 
   /** Approximate question length for factoid heuristic (optional) */
   questionLength?: number;
+
+  /**
+   * Independent executing models among the run's usable responses (`independentSynthesisResponders`; slots answered by
+   * one substitute model are one model). When supplied and below `MIN_INDEPENDENT_SYNTHESIS_MODELS` (or not a finite
+   * number), the gate never reads as cross-model agreement: label `INSUFFICIENT_INDEPENDENT_MODELS_GATE_LABEL`, status at
+   * least NEEDS_HUMAN_REVIEW, and no "broad agreement" step. Absent → exactly the gate as before (callers without rows).
+   */
+  independentModelCount?: number;
 }
 
 // ---------------------------------------------------------------------------
 // Labels
 // ---------------------------------------------------------------------------
+
+/** Gate label when fewer than two independent executing models responded — no cross-model check was possible. */
+export const INSUFFICIENT_INDEPENDENT_MODELS_GATE_LABEL = "Insufficient independent models";
+export const INSUFFICIENT_INDEPENDENT_MODELS_GATE_REASON =
+  "Fewer than two independent models responded — no cross-model comparison was possible (slots answered by the same substitute model count as one)";
+export const INSUFFICIENT_INDEPENDENT_MODELS_GATE_STEP =
+  "Treat this as a single model's answer: rerun when at least two independent models are available, and verify key claims against primary sources before acting on them.";
+
+/** True when the caller supplied an independent-model count that does not meet the panel minimum (fail closed on NaN). */
+function hasInsufficientIndependentModels(input: VerificationGateInput): boolean {
+  if (input.independentModelCount === undefined) return false;
+  const n = input.independentModelCount;
+  return !(typeof n === "number" && Number.isFinite(n) && n >= MIN_INDEPENDENT_SYNTHESIS_MODELS);
+}
 
 const STATUS_LABELS: Record<VerificationGateStatus, string> = {
   SAFE_TO_EXPLORE: "Broadly consistent",
@@ -223,9 +247,12 @@ export function computeVerificationGate(
   input: VerificationGateInput
 ): VerificationGateResult {
   const metrics = extractMetrics(input);
-  const status = determineStatus(metrics);
-  const reasons = buildReasons(metrics);
-  const recommendedNextSteps = buildNextSteps(metrics, status);
+  const insufficient = hasInsufficientIndependentModels(input);
+  const computed = determineStatus(metrics);
+  // One independent model is never "broadly consistent": nothing was compared.
+  const status: VerificationGateStatus = insufficient && computed === "SAFE_TO_EXPLORE" ? "NEEDS_HUMAN_REVIEW" : computed;
+  const reasons = insufficient ? [INSUFFICIENT_INDEPENDENT_MODELS_GATE_REASON, ...buildReasons(metrics)] : buildReasons(metrics);
+  const recommendedNextSteps = buildNextSteps(metrics, status, insufficient);
 
   if (process.env.NODE_ENV !== "production") {
     console.log("[VerificationGate]", { status, metrics });
@@ -233,7 +260,7 @@ export function computeVerificationGate(
 
   return {
     status,
-    label: STATUS_LABELS[status],
+    label: insufficient ? INSUFFICIENT_INDEPENDENT_MODELS_GATE_LABEL : STATUS_LABELS[status],
     reasons,
     recommendedNextSteps,
     metrics,
@@ -385,9 +412,14 @@ function buildReasons(m: VerificationGateMetrics): string[] {
 
 function buildNextSteps(
   m: VerificationGateMetrics,
-  status: VerificationGateStatus
+  status: VerificationGateStatus,
+  insufficientIndependentModels = false
 ): string[] {
   const steps: string[] = [];
+
+  if (insufficientIndependentModels) {
+    steps.push(INSUFFICIENT_INDEPENDENT_MODELS_GATE_STEP);
+  }
 
   if (m.sourceBacked && m.missingSourcesCount >= 1) {
     steps.push(

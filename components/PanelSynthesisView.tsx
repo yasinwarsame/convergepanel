@@ -40,7 +40,7 @@ import { ModelResult, SynthesizedReport } from "@/lib/types";
 import { StructuredSynthesis } from "@/lib/synthesis/structuredSchema";
 import { runModelIdentityLabel, runModelProvenanceFromResultRow } from "@/lib/panel/runModelIdentity";
 import { isUsableResult } from "@/lib/panel/publicize";
-import { independentSynthesisResponders, meetsIndependentSynthesisMinimum } from "@/lib/panel/independentVoices";
+import { clientRowText, independentSynthesisResponders, meetsIndependentSynthesisMinimum } from "@/lib/panel/independentVoices";
 import { executingVoiceName, groupSlotsByExecutingVoice, independentModelCountText } from "@/lib/panel/executingVoiceLabel";
 import { coerceStatus } from "@/lib/panel/normalize";
 import { modelHealthSubstitution, substitutedProviderNames } from "@/lib/panel/substitutionDisplay";
@@ -59,7 +59,14 @@ import {
 } from "@/lib/verificationGate/verificationGate";
 import { classifyClaimSeverity, ClaimSeverityResult } from "@/lib/verificationGate/claimSeverity";
 import { classifyGrounding, GroundingResult } from "@/lib/verificationGate/sourceGrounding";
-import { buildPanelVerdict, PanelVerdict, PANEL_VERDICT_SINGLE_MODEL_HEADING, NO_CONSENSUS_SCORE_SHARE_LINE } from "@/lib/verificationGate/panelVerdict";
+import {
+  buildPanelVerdict,
+  crossModelDisagreements,
+  PanelVerdict,
+  PANEL_VERDICT_SINGLE_MODEL_HEADING,
+  NO_CONSENSUS_SCORE_SHARE_LINE,
+  NO_CROSS_MODEL_COMPARISON_TEXT,
+} from "@/lib/verificationGate/panelVerdict";
 import {
   rollupPolicyConsensusSummary,
   type SynthesisConsensusSummaryDetail,
@@ -77,8 +84,9 @@ function extractResearchAgreements(panelVerdict: PanelVerdict): string[] {
   return t ? [t] : [];
 }
 
-function extractResearchDisagreements(report: StructuredSynthesis): string[] {
-  return (report.disagreements ?? []).map((d) => `${d.topic}: ${d.whyTheyDiffer}`.trim());
+/** Share lines of the disagreements the caller passes — only real cross-model ones (`crossModelDisagreements`). */
+function extractResearchDisagreements(disagreements: StructuredSynthesis["disagreements"]): string[] {
+  return (disagreements ?? []).map((d) => `${d.topic}: ${d.whyTheyDiffer}`.trim());
 }
 
 interface PanelSynthesisViewProps {
@@ -610,7 +618,9 @@ function PanelVerdictCard({
                 )}
               </>
             ) : (
-              <p className="mt-2 text-sm text-slate-400 italic">No major disagreements detected.</p>
+              <p className="mt-2 text-sm text-slate-400 italic">
+                {verdict.crossModel === false ? NO_CROSS_MODEL_COMPARISON_TEXT : "No major disagreements detected."}
+              </p>
             )}
           </div>
         </div>
@@ -743,8 +753,9 @@ export default function PanelSynthesisView({
   };
 
   // Safe text getter
-  const getModelText = (r: any): string => 
-    (r as any).rawTextFull ?? (r as any).rawText ?? (r as any).text ?? "";
+  // The same getter as the client synthesis gate (first non-empty of rawTextFull / rawText / text), so a row the gate
+  // counts is never sent with empty text.
+  const getModelText = (r: any): string => clientRowText(r);
 
   // Independent executing models among the usable responses
   // (lib/panel/independentVoices.ts): two slots answered by the DeepSeek
@@ -1467,15 +1478,27 @@ export default function PanelSynthesisView({
       // Show non-blocking notice if we're also pre-generating a new version in the background
       const showLoadingNotice = isPreGenerating;
 
+      // Fewer than two independent executing models (e.g. two slots both
+      // answered by DeepSeek): nothing here is cross-model, so no consensus
+      // score, no per-finding cross-model support and no "broadly consistent"
+      // gate is presented — including a summary persisted before the
+      // independent-voice rule existed (shown as stored data is never
+      // rewritten; it is just not presented as consensus).
+      const crossModel = independentResponderCount >= 2;
+      // Only real disagreements between independent executing models; positions from slots answered by one model are
+      // not a disagreement (and below two independent models there is none).
+      const independentDisagreements = crossModelDisagreements(report.disagreements, results, crossModel);
+
       // Compute Verification Gate from existing synthesis signals
       const gateInput: VerificationGateInput = {
         keyFindings: report.keyFindings,
-        disagreements: report.disagreements,
+        disagreements: independentDisagreements,
         biasAndBlindSpots: report.biasAndBlindSpots,
         openQuestions: report.openQuestions,
         trustSummary: synthesizedReport?.consensusAnalysis?.trustSummary,
         sourceBacked: (synthesizedReport?.consensusAnalysis?.agreementClusters?.length ?? 0) > 0,
         questionLength: question?.trim().length ?? 0,
+        independentModelCount: independentResponderCount,
       };
       const gate = computeVerificationGate(gateInput);
 
@@ -1483,12 +1506,6 @@ export default function PanelSynthesisView({
 
     const consensusMeta = synthesisState.consensusSummary;
     const modelsHealthyResolved = consensusMeta?.modelsHealthy ?? independentResponderCount;
-    // Fewer than two independent executing models (e.g. two slots both
-    // answered by DeepSeek): nothing here is cross-model, so no consensus
-    // score and no per-finding cross-model support is presented — including a
-    // summary persisted before the independent-voice rule existed (shown as
-    // stored data is never rewritten; it is just not presented as consensus).
-    const crossModel = independentResponderCount >= 2;
     const modelTotalResolved = consensusMeta?.modelCount ?? Math.max(1, results.length);
     const panelVerdict = buildPanelVerdict(question, report, gate, results, { crossModel });
     const policyRollup =
@@ -1506,7 +1523,7 @@ export default function PanelSynthesisView({
       const confidence = policyRollup?.confidenceLabel ?? "Medium";
       const findings = extractResearchKeyFindings(report);
       const agreements = crossModel ? extractResearchAgreements(panelVerdict) : [];
-      const disagreements = extractResearchDisagreements(report);
+      const disagreements = extractResearchDisagreements(independentDisagreements);
 
       const head = `I researched "${q.length > 120 ? `${q.slice(0, 117)}...` : q}" across ${sharedModelCount} simultaneously using ConvergePanel.`;
       const parts: string[] = [head, "", crossModel ? `Consensus score: ${score}/100 (${confidence})` : NO_CONSENSUS_SCORE_SHARE_LINE, ""];
@@ -1535,7 +1552,7 @@ export default function PanelSynthesisView({
       const q = (question ?? "").trim();
       const score = consensusMeta?.overallConsensusScore ?? 0;
       const findings = extractResearchKeyFindings(report);
-      const disagreements = extractResearchDisagreements(report);
+      const disagreements = extractResearchDisagreements(independentDisagreements);
       const line = (f: string, max: number) => (f.length > max ? `${f.slice(0, max - 3)}...` : f);
 
       const parts: string[] = [
@@ -1686,11 +1703,11 @@ export default function PanelSynthesisView({
           )}
 
           {/* Disagreements (orange cards) */}
-          {report.disagreements && report.disagreements.length > 0 && (
+          {independentDisagreements.length > 0 && (
             <div>
               <h2 className="text-lg font-semibold text-slate-900 mb-4">Disagreements</h2>
               <div className="space-y-3">
-                {report.disagreements.map((disagreement, idx) => {
+                {independentDisagreements.map((disagreement, idx) => {
                   const severity = classifyClaimSeverity(
                     disagreement.topic + " " + disagreement.whyTheyDiffer,
                     undefined,
@@ -1897,7 +1914,7 @@ export default function PanelSynthesisView({
               })
             }
             onExportMemo={() => {
-              const disagreeLines = (report.disagreements ?? []).map((d) =>
+              const disagreeLines = independentDisagreements.map((d) =>
                 `${d.topic}: ${d.whyTheyDiffer}`.trim()
               );
               const memo = generateVerificationMemo({

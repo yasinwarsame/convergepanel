@@ -191,9 +191,9 @@ describe("A. two slots answered by DeepSeek (one independent model), stored cons
 
 describe("A (controls): at least two independent executing models keep the consensus text", () => {
   it.each([
-    ["two substitutions + Grok", TWO_SUBS_PLUS_GROK, 2],
-    ["distinct real providers", DISTINCT_REAL, 3],
-  ] as const)("%s: score, 'Where models agree', 'Top consensus', model count %i", async (_n, rows, n) => {
+    ["two substitutions + Grok", 2, TWO_SUBS_PLUS_GROK],
+    ["distinct real providers", 3, DISTINCT_REAL],
+  ] as const)("%s: score, 'Where models agree', 'Top consensus', model count %i", async (_n, n, rows) => {
     const r = await mountSynthesis([...rows], report(rows.map((x) => x.modelId)), { ...SUMMARY, modelsHealthy: n, modelCount: rows.length });
     const li = await generatedPost(r, "onGenerateLinkedIn");
     expect(li).toContain("Consensus score: 90/100");
