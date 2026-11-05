@@ -105,7 +105,7 @@ describe("B. readable structure", () => {
     expect(classic).toContain(classicEvidence);
     // Readable: the same sections, with the readable score names and without the trust summary table.
     const readableModelResponses = wrap(
-      createElement(ModelResponsesSection as any, { schema, results: rec.results, listView: listView && { ...listView, scoreNames: { row: READABLE_TRUST_COPY.listScoreRow, sort: READABLE_TRUST_COPY.listScoreSort, capped: READABLE_TRUST_COPY.listScoreCapped } } })
+      createElement(ModelResponsesSection as any, { schema, results: rec.results, listView: listView && { ...listView, scoreNames: { row: READABLE_TRUST_COPY.listScoreRow, sort: READABLE_TRUST_COPY.listScoreSort, capped: READABLE_TRUST_COPY.listScoreCapped, cappedReason: READABLE_TRUST_COPY.listScoreCappedReason } } })
     );
     const readableEvidence = wrap(createElement(PanelEvidenceSection as any, evidenceProps));
     const details = tierHtml(renderPanel(rec, rows, READABLE), "details")!;

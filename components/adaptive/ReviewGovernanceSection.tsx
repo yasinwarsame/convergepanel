@@ -52,7 +52,7 @@ import { deriveReportStatus, REPORT_STATUS_LABELS, ReportStatusInput } from "@/l
 import { decidedViaLabel, ReviewGovernanceReviewerView, ReviewGovernanceViewModel } from "@/lib/adaptiveSchema/reviewGovernanceViewModel";
 import { AdaptiveGateResult, AdaptiveSynthesisReport } from "@/lib/adaptiveSchema/types";
 import { Card, SectionLabel } from "./shared";
-import AdaptiveSynthesisReportView, { GateBanner, PanelVerdictCard } from "./AdaptiveSynthesisReportView";
+import AdaptiveSynthesisReportView, { GateBanner, PanelVerdictCard, type LegacyGateBannerLabels } from "./AdaptiveSynthesisReportView";
 import { presentPositionSafeReport } from "@/lib/adaptiveSchema/positionPresentation";
 import { PositionPresentationBoundary, usePositionPresentation } from "./PositionPresentationContext";
 import { useRunModelProvenance } from "./RunModelProvenanceContext";
@@ -438,6 +438,8 @@ export interface ReviewGovernanceSectionProps extends ReportStatusInput {
   modelsUsed?: ModelId[];
   question?: string;
   onRunFollowUp?: (question: string) => void;
+  /** #290 Inc 1: readable layout only — the gate banner's words for a report without the Order 4 presentation (see LegacyGateBannerLabels). Absent (every classic caller): unchanged. */
+  legacyGateBannerLabels?: LegacyGateBannerLabels;
 }
 
 interface ReviewGovernanceBodyProps extends ReviewGovernanceSectionProps {
@@ -461,6 +463,7 @@ export function ReviewGovernanceBody({
   modelsUsed,
   question,
   onRunFollowUp,
+  legacyGateBannerLabels,
   loading,
   unavailable,
   detail,
@@ -513,7 +516,7 @@ export function ReviewGovernanceBody({
           </>
         )}
 
-        {gate && <VerificationGate report={synthesisReport} gate={gate.status} />}
+        {gate && <VerificationGate report={synthesisReport} gate={gate.status} legacyLabels={legacyGateBannerLabels} />}
         {gate && synthesisReport && <PanelVerdictCard report={synthesisReport} gate={gate} />}
 
         {/* GovernanceRecordV1 only exists for Milestone-2 schemas — skip the
@@ -536,6 +539,7 @@ export function ReviewGovernanceBody({
                 modelsUsed={modelsUsed}
                 runId={runId}
                 onRunFollowUp={onRunFollowUp}
+                legacyGateBannerLabels={legacyGateBannerLabels}
               />
             </div>
           </details>
@@ -547,11 +551,11 @@ export function ReviewGovernanceBody({
 }
 
 /** The governance section's gate: the report view's banner — one wording source (gatePresentation.ts, D6). */
-function VerificationGate({ report, gate }: { report: AdaptiveSynthesisReport | undefined; gate: unknown }) {
+function VerificationGate({ report, gate, legacyLabels }: { report: AdaptiveSynthesisReport | undefined; gate: unknown; legacyLabels?: LegacyGateBannerLabels }) {
   return (
     <div>
       <SectionLabel>Verification gate</SectionLabel>
-      <GateBanner report={report ?? null} gate={gate} />
+      <GateBanner report={report ?? null} gate={gate} legacyLabels={legacyLabels} />
     </div>
   );
 }

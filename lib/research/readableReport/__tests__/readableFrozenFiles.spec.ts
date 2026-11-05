@@ -26,12 +26,10 @@ const UNCHANGED_AT_35933C8: Record<string, string> = {
   "lib/adaptiveSchema/__tests__/o5p/o5pScenarios.ts": "d3e0ec5beb38d7eec80f76f2caf91bf275f65b85",
   "lib/adaptiveSchema/__tests__/o5p/vocabularyInventory.spec.ts": "d2bc041abf55fa88066faf9a2cda5b774f1d3b14",
   "components/adaptive/__tests__/nonDsWordingParity.spec.tsx": "5ff413cb8365ba413c600a043895ba55fc0d9014",
-  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "dd7e6f6083724c775debfd7551ccbcacbb9ea647",
   "components/adaptive/__tests__/adaptiveAncillaryStructure.spec.ts": "cfab55ca124c4f918149df06901285390134745b",
   "lib/env.ts": "2b81ae7239ea4fd655b8320d5bf726c778149a20",
   "components/adaptive/TopSummaryBar.tsx": "ea8b059bbafe1589fe79f1a3824c298d5a68926b",
   "components/adaptive/PrimarySynthesisStrip.tsx": "61d4e96c83ef380a164cf9ac4ce69ed187ade8b0",
-  "components/adaptive/AdaptiveSynthesisReportView.tsx": "7f31cd2839a32b78053a273a5faebc7165ef6433",
   "components/adaptive/AnalysisAvailabilityNotice.tsx": "0886deb1b4828f5ea0d1995fe8efc4eaec2a5892",
   "lib/adaptiveSchema/reportSummary.ts": "3ba976c88335c289f335d94776061d765d5a9361",
   "lib/adaptiveSchema/reportStatus.ts": "52f0de27b3a7a790854b27c50e948e39dc73dde7",
@@ -58,6 +56,23 @@ const WIDENED_BY_INC1: Record<string, string> = {
   "lib/adaptiveSchema/__tests__/o5p/__fixtures__/vocabularyManifest.json": "c16cc1f5e78d781b9f71fefe8b5493416dc940a0",
 };
 
+/**
+ * Owner-authorized narrow exception (Option A, 2026-11-05; review R4 NOT CLEAN on 2335b42 — legacy "Verified — panel
+ * converges" banner on the readable page). Moved here from UNCHANGED_AT_35933C8 (the pinned set is the same files), pinned
+ * to the exact new content:
+ *   - AdaptiveSynthesisReportView.tsx: GateBanner takes an optional readable-only `legacyLabels`, and the report view an
+ *     optional `legacyGateBannerLabels` it hands to its banner. Absent (every classic caller), the banner is
+ *     gateBannerText's, byte for byte — historicalParity / nonDsWordingParity and their fixtures above are unchanged.
+ *     Was 7f31cd2839a32b78053a273a5faebc7165ef6433 at 35933c8.
+ *   - dsProvenanceUiBoundaries.spec.ts: its own ReviewGovernanceSection.tsx pin re-pinned (same prop threading), with
+ *     the reason recorded beside it. Was dd7e6f6083724c775debfd7551ccbcacbb9ea647 at 35933c8.
+ * gatePresentation.ts (LEGACY_GATE_BANNER_LABEL) stays pinned unchanged above.
+ */
+const READABLE_GATE_OPTION_BY_INC1: Record<string, string> = {
+  "components/adaptive/AdaptiveSynthesisReportView.tsx": "78bc669a7da2f59c078bd7841be28bf76bf5e696",
+  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "d6368241dcf506a06f78a7d4590c506acda52341",
+};
+
 describe("#290 Increment 1 leaves the sealed and frozen files byte-identical to 35933c8", () => {
   it.each(Object.entries(UNCHANGED_AT_35933C8))("%s", (path, blob) => {
     expect(gitBlob(readFileSync(join(process.cwd(), path)))).toBe(blob);
@@ -65,5 +80,15 @@ describe("#290 Increment 1 leaves the sealed and frozen files byte-identical to 
 
   it.each(Object.entries(WIDENED_BY_INC1))("%s (widened by Inc 1, pinned to its new content)", (path, blob) => {
     expect(gitBlob(readFileSync(join(process.cwd(), path)))).toBe(blob);
+  });
+
+  it.each(Object.entries(READABLE_GATE_OPTION_BY_INC1))("%s (readable legacy gate option, pinned to its new content)", (path, blob) => {
+    expect(gitBlob(readFileSync(join(process.cwd(), path)))).toBe(blob);
+  });
+
+  it("the pinned set is unchanged by the Option A exception: 32 files, no file in two lists", () => {
+    const all = [...Object.keys(UNCHANGED_AT_35933C8), ...Object.keys(WIDENED_BY_INC1), ...Object.keys(READABLE_GATE_OPTION_BY_INC1)];
+    expect(new Set(all).size).toBe(all.length);
+    expect(all).toHaveLength(32);
   });
 });

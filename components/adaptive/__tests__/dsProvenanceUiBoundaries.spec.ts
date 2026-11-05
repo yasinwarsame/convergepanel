@@ -48,7 +48,10 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   "components/adaptive/DecisionSupportView.tsx": "e3beb32c1161f42d84222b1633a6bd8b1bb98939",
   "components/adaptive/DsReceiptWording.tsx": "71b1542ecc11532f26f0bf8a758fffe311775ac6",
   "components/adaptive/PanelEvidenceSection.tsx": "01fa50175cc4a014ad17d2abad806b8eec999170",
-  "components/adaptive/ReviewGovernanceSection.tsx": "c5298d27bb4e52562fc9865b17875ee87fc04d5c",
+  // #290 Inc 1 readable legacy gate banner (owner-authorized Option A, 2026-11-05): an optional, readable-only
+  // `legacyGateBannerLabels` prop threaded to the gate banner and the full synthesis report; classic callers never pass it
+  // and render byte-identically; no provenance code. Was c5298d27bb4e52562fc9865b17875ee87fc04d5c (unchanged since 9eca1e3).
+  "components/adaptive/ReviewGovernanceSection.tsx": "5cc7f903a5a66f0ab7101d2a58b2616d569191e0",
   "components/adaptive/TopSummaryBar.tsx": "ea8b059bbafe1589fe79f1a3824c298d5a68926b",
   // Order 6 critical-contrast slice (class-only; see criticalContrastSlice.ts): was 52464f6b4c8d3d330ac1764ff711297e2c31ecbe at 9eca1e3.
   "components/workspace/projects/TeamResearchReviewSummary.tsx": "16a12b9d0f15c5297a8745958126cdd6ea50d263",

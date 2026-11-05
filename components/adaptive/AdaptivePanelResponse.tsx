@@ -61,7 +61,7 @@ import { resolveReportLayout, type ReportLayout } from "@/lib/research/readableR
 import ReadableSummaryBar from "@/components/research/readable/ReadableSummaryBar";
 import ReadableReportHeader from "@/components/research/readable/ReadableReportHeader";
 import { READABLE_MODEL_RESPONSES_ANCHOR } from "@/components/research/readable/ExecutiveAnswer";
-import { READABLE_TRUST_COPY } from "@/lib/research/readableReport/copy";
+import { READABLE_GATE_COPY, READABLE_TRUST_COPY } from "@/lib/research/readableReport/copy";
 import type { ListScoreNames } from "./ListView";
 
 /** #290 Inc 1, readable mode only: the Model Responses list names the per-model stored score as the trust signals do. */
@@ -69,6 +69,7 @@ const READABLE_LIST_SCORE_NAMES: ListScoreNames = {
   row: READABLE_TRUST_COPY.listScoreRow,
   sort: READABLE_TRUST_COPY.listScoreSort,
   capped: READABLE_TRUST_COPY.listScoreCapped,
+  cappedReason: READABLE_TRUST_COPY.listScoreCappedReason,
 };
 
 const RENDER_HINTS_WITHOUT_MATRIX = new Set<AnswerShape>(["metrics_grid", "verdict_card", "step_diff", "scenario_tree"]);
@@ -629,6 +630,9 @@ function AdaptivePanelResponseBody(props: AdaptivePanelResponseProps) {
       modelsUsed: modelIds,
       question,
       onRunFollowUp,
+      // A report without the Order 4 gate presentation: the gate banner states the stored gate word and that the models'
+      // positions are not checked evidence, instead of the historical "Verified — panel converges" (classic keeps it).
+      legacyGateBannerLabels: READABLE_GATE_COPY.legacyBanner,
     };
     return (
       <div className="space-y-4" data-report-layout="readable">

@@ -91,7 +91,27 @@ export const READABLE_TRUST_COPY = {
   listScoreRow: (percent: number) => `behaviour score ${percent}%`,
   listScoreSort: "behaviour score",
   listScoreCapped: "degraded · score capped",
+  /** The capped-score hint's tooltip, naming the score as the list row does (classic says "trust score is capped"). */
+  listScoreCappedReason: (parseHealth: "ok" | "degraded" | "failed", capPercent: number | null) =>
+    parseHealth === "failed"
+      ? "Response failed to parse or validate — behaviour score is 0."
+      : `Response was degraded (one or more fields were soft-truncated) — behaviour score is capped${capPercent === null ? "" : ` at ${capPercent}%`} regardless of citation/consistency scoring.`,
 
   behaviourCitationPartial: (vacuous: number, parsed: number) =>
     `Citations: ${vacuous} of ${parsed} parsed responses gave no value to source. The stored score counts that part as full marks for ${vacuous === 1 ? "that response" : "those responses"}, which raises it.`,
+} as const;
+
+/**
+ * The verification gate banner (governance section and full synthesis report) on a report persisted before the Order 4
+ * gate presentation. Classic keeps the historical wording (LEGACY_GATE_BANNER_LABEL: "Verified — panel converges",
+ * "Caution — partial convergence", "Could not verify — panel split"); readable states the stored gate with the same D6
+ * word the trust signal shows, and that the models' positions are not evidence checked against anything. Reports that
+ * carry the Order 4 presentation, and unrecognized stored values, keep gatePresentation's neutral wording unchanged.
+ */
+export const READABLE_GATE_COPY = {
+  legacyBanner: {
+    pass: "Verification gate: Pass — the models' positions on the most-raised claims matched; the evidence was not independently checked",
+    caution: "Verification gate: Caution — the panel did not meet the conditions for a clean pass; the evidence was not independently checked",
+    fail: "Verification gate: Fail — the panel did not meet the gate's conditions; the evidence was not independently checked",
+  },
 } as const;

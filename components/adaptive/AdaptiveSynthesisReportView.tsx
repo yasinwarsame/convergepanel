@@ -25,6 +25,7 @@ import {
   AlignedClaim,
   AlignedClaimCell,
   AdaptiveGateResult,
+  AdaptiveGateStatus,
   AdaptiveSynthesisReport,
   AdaptiveTrustSummary,
   CLAIM_TIE_ATTRIBUTION_RULE,
@@ -50,7 +51,7 @@ import {
   presentNarrativeSections,
   presentUnifiedAnswer,
 } from "@/lib/adaptiveSchema/reportPresentation";
-import { GATE_LABEL, GateTone, gateBadgeText, gateBannerText, gateTone, pageGateValue } from "@/lib/adaptiveSchema/gatePresentation";
+import { GATE_LABEL, GateTone, gateBadgeText, gateBannerText, gateTone, hasGatePresentation, pageGateValue, readGateStatus } from "@/lib/adaptiveSchema/gatePresentation";
 import {
   POSITIONS_BY_SLOT_HEADING,
   PresentedSlotPosition,
@@ -123,12 +124,35 @@ const GATE_ACCENT: Record<GateTone, string> = {
 };
 
 /**
- * The gate banner: worded by gatePresentation.gateBannerText (historical reports keep their wording, D7). With a report
- * it shows the report's stored gate — the one the Unified Answer and exports show (F4, pageGateValue).
+ * #290 Increment 1 — readable layout only: the words a readable page shows in place of LEGACY_GATE_BANNER_LABEL ("Verified
+ * — panel converges" and its caution / fail siblings) on a report without the Order 4 presentation. Classic call sites
+ * never pass it, so their banner is gateBannerText's, byte for byte.
  */
-export function GateBanner({ report, gate }: { report: AdaptiveSynthesisReport | null; gate: unknown }) {
+export type LegacyGateBannerLabels = Readonly<Record<AdaptiveGateStatus, string>>;
+
+/**
+ * The readable replacement for the legacy banner wording, or null when gateBannerText's words stand: no labels passed
+ * (classic), a report carrying the Order 4 presentation (already neutral, D6), or a stored value that is not a known
+ * status (D8 "Unrecognized"). Only the words change — the stored gate and report are read, never written.
+ */
+function legacyGateBannerOverride(report: AdaptiveSynthesisReport | null, shown: unknown, labels: LegacyGateBannerLabels | undefined): string | null {
+  if (!labels || hasGatePresentation(report)) return null;
+  const status = readGateStatus(shown);
+  return status === "unrecognized" ? null : labels[status];
+}
+
+/**
+ * The gate banner: worded by gatePresentation.gateBannerText (historical reports keep their wording, D7). With a report
+ * it shows the report's stored gate — the one the Unified Answer and exports show (F4, pageGateValue). legacyLabels:
+ * readable layout only (see LegacyGateBannerLabels).
+ */
+export function GateBanner({ report, gate, legacyLabels }: { report: AdaptiveSynthesisReport | null; gate: unknown; legacyLabels?: LegacyGateBannerLabels }) {
   const shown = pageGateValue(report, gate);
-  return <div className={`rounded-xl border px-4 py-3 text-sm font-medium ${GATE_BANNER_STYLES[gateTone(shown)]}`}>{gateBannerText(report, shown)}</div>;
+  return (
+    <div className={`rounded-xl border px-4 py-3 text-sm font-medium ${GATE_BANNER_STYLES[gateTone(shown)]}`}>
+      {legacyGateBannerOverride(report, shown, legacyLabels) ?? gateBannerText(report, shown)}
+    </div>
+  );
 }
 
 function agreementColorClass(score: number): string {
@@ -1130,6 +1154,7 @@ export default function AdaptiveSynthesisReportView({
   modelsUsed,
   runId,
   onRunFollowUp,
+  legacyGateBannerLabels,
 }: {
   report: AdaptiveSynthesisReport;
   gate: AdaptiveGateResult;
@@ -1140,6 +1165,8 @@ export default function AdaptiveSynthesisReportView({
   runId?: string | null;
   /** Bias & Blind Spots Tier 2 cards' "Run follow-up" action — pre-fills the question box, never auto-runs. */
   onRunFollowUp?: (question: string) => void;
+  /** #290 Inc 1: readable layout only — see LegacyGateBannerLabels. Absent (every classic caller): unchanged. */
+  legacyGateBannerLabels?: LegacyGateBannerLabels;
 }) {
   const rows = alignedClaims || [];
   const modelProvenance = useRunModelProvenance();
@@ -1179,7 +1206,7 @@ export default function AdaptiveSynthesisReportView({
     <PositionPresentationBoundary report={report} roster={position?.roster ?? modelsUsed} provenance={position?.provenance ?? modelProvenance}>
     <div className="space-y-4">
       <div data-section="gate-banner">
-        <GateBanner report={report} gate={gate.status} />
+        <GateBanner report={report} gate={gate.status} legacyLabels={legacyGateBannerLabels} />
       </div>
 
       <div data-section="unified-answer">

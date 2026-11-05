@@ -31,7 +31,7 @@ import {
   ModelTrustSummary,
   ResultSchema,
 } from "@/lib/adaptiveSchema/types";
-import { TRUST_SCORE_CAP_REASON } from "@/lib/adaptiveSchema/config";
+import { TRUST_SCORE_CAP_BY_HEALTH, TRUST_SCORE_CAP_REASON } from "@/lib/adaptiveSchema/config";
 import { Card, SectionLabel, BulletList, ConfidencePill, ProbabilityBar, TintBadge, SlotName } from "./shared";
 import ModelChip from "@/components/ModelChip";
 import { GateTone, gateChipText, gateTone, pageGateValue } from "@/lib/adaptiveSchema/gatePresentation";
@@ -266,6 +266,17 @@ export interface ListScoreNames {
   row: (percent: number) => string;
   sort: string;
   capped: string;
+  /**
+   * The capped-score hint's tooltip (classic: TRUST_SCORE_CAP_REASON, "trust score is capped"), given the row's parse
+   * health and its stored cap as a whole percent (null when none is configured). Shown only where classic shows its hint.
+   */
+  cappedReason: (parseHealth: ModelTrustSummary["parseHealth"], capPercent: number | null) => string;
+}
+
+/** #290 Inc 1 (readable only): the configured score cap for a parse health, as a whole percent; null when none. */
+function capPercent(parseHealth: ModelTrustSummary["parseHealth"]): number | null {
+  const cap = TRUST_SCORE_CAP_BY_HEALTH[parseHealth];
+  return cap === null || cap === undefined ? null : Math.round(cap * 100);
 }
 
 const SORT_OPTIONS: { mode: SortMode; label: string }[] = [
@@ -585,7 +596,7 @@ function ModelRow({
               {vm.capped && TRUST_SCORE_CAP_REASON[vm.parseHealth] && (
                 <span
                   className="ml-1 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-amber-100 text-[9px] font-bold text-amber-700 cursor-help align-text-top"
-                  title={TRUST_SCORE_CAP_REASON[vm.parseHealth]!}
+                  title={scoreNames ? scoreNames.cappedReason(vm.parseHealth, capPercent(vm.parseHealth)) : TRUST_SCORE_CAP_REASON[vm.parseHealth]!}
                 >
                   !
                 </span>
