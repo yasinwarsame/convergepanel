@@ -389,3 +389,31 @@ describe("classic, same fixtures: no readable gate presentation reaches it; the 
     for (const a of accents) expect(a.cls).toContain(ACCENT[stored]);
   });
 });
+
+// ── One presentation object, computed once ─────────────────────────────────
+
+describe("the readable page computes the gate presentation ONCE and hands the same object to every gate display", () => {
+  it.each(["legacy inconsistent", "legacy consistent", "order4"] as const)("%s", async (kind) => {
+    const TestRenderer = require("react-test-renderer");
+    const { act } = TestRenderer;
+    const { panelElement } = require("./readableFixtures");
+    const { GateBanner, PanelVerdictCard } = require("@/components/adaptive/AdaptiveSynthesisReportView");
+    const ListView = require("@/components/adaptive/ListView").default;
+    const TrustSignalsPanel = require("@/components/research/readable/TrustSignalsPanel").default;
+    const rec = record("generic-consensus");
+    if (kind !== "order4") legacy(rec);
+    if (kind === "legacy inconsistent") (rec.gate.status = "fail"), (rec.synthesisReport.gate = "fail");
+    let r: any;
+    await act(async () => {
+      r = TestRenderer.create(panelElement(rec, slotRows("generic-consensus"), READABLE));
+    });
+    const shared = r.root.findByType(TrustSignalsPanel).props.gatePresentation;
+    expect(shared).toBeDefined();
+    const banners = r.root.findAllByType(GateBanner).map((n: any) => n.props.readable);
+    const cards = r.root.findAllByType(PanelVerdictCard).map((n: any) => n.props.readable);
+    const lists = r.root.findAllByType(ListView).map((n: any) => n.props.readableGate);
+    expect([banners.length, cards.length, lists.length]).toEqual([2, 2, 1]);
+    for (const p of [...banners, ...cards, ...lists]) expect(p).toBe(shared);
+    expect(shared.status).toBe({ "legacy inconsistent": "unavailable", "legacy consistent": "pass", order4: "pass" }[kind]);
+  });
+});
