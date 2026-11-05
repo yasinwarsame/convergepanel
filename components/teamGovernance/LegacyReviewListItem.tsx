@@ -8,17 +8,19 @@
  */
 
 import type { EnrichedLegacyTeamRunListItemV1 } from "@/lib/governance/teamReviewQueueEnrichment";
+import { CONSENSUS_WITHHELD_TEXT } from "@/lib/panel/independentVoices";
 
 /**
- * A legacy team-queue row (`teamRuns`) stores a consensus score but no per-model execution identity, so it cannot be
- * established that at least two independent models contributed (lib/panel/independentVoices.ts). The stored score is
- * shown only with that qualification — never as unqualified multi-model agreement.
+ * The consensus text of a legacy team-queue row. The route (`app/api/teams/runs/route.ts`,
+ * `applyLegacyConsensusIndependence`) decides from the linked run's persisted per-model rows whether the stored score
+ * may be shown: a withheld score arrives as `consensusScore: null` + `consensusWithheld` and is shown as its reason,
+ * never as a number; a shown score (≥ 2 independent executing models, or a claim-verification row) is shown plainly.
  */
-export const LEGACY_CONSENSUS_INDEPENDENCE_QUALIFIER = "model independence not recorded";
-
-export function legacyConsensusText(score: number | null | undefined): string {
+export function legacyConsensusText(item: Pick<EnrichedLegacyTeamRunListItemV1, "consensusScore" | "consensusWithheld">): string {
+  if (item.consensusWithheld) return CONSENSUS_WITHHELD_TEXT[item.consensusWithheld];
+  const score = item.consensusScore;
   if (score == null || !Number.isFinite(score)) return "No consensus score";
-  return `Consensus ${Math.round(score)}/100 (${LEGACY_CONSENSUS_INDEPENDENCE_QUALIFIER})`;
+  return `Consensus ${Math.round(score)}/100`;
 }
 
 function formatCreatedAt(iso: string): string {
@@ -49,7 +51,7 @@ export default function LegacyReviewListItem({ item }: { item: EnrichedLegacyTea
           {item.policyFlags.length} policy flag{item.policyFlags.length === 1 ? "" : "s"}
         </span>
         <span aria-hidden>&middot;</span>
-        <span>{legacyConsensusText(item.consensusScore)}</span>
+        <span>{legacyConsensusText(item)}</span>
         <span aria-hidden>&middot;</span>
         <span>{decisionLabel}</span>
       </div>

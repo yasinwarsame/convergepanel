@@ -42,6 +42,11 @@ import type { GovernanceRecordV1 } from "../adaptiveSchema/governanceRecord";
 import type { AdaptiveHumanReviewAssignmentV1 } from "./adaptiveHumanReviewAssignment";
 import type { AdaptiveHumanReviewPanelV1 } from "./adaptiveHumanReviewPanel";
 import type { AdaptiveHumanReviewVoteV1 } from "./adaptiveHumanReviewVote";
+import {
+  consensusScoreWithheldReason,
+  type ConsensusScoreWithheldReason,
+  type StoredConsensusIndependence,
+} from "../panel/independentVoices";
 
 export interface EnrichedLegacyTeamRunListItemV1 extends Omit<LegacyTeamRunListItemV1, "humanDecision"> {
   humanDecision?: {
@@ -50,6 +55,33 @@ export interface EnrichedLegacyTeamRunListItemV1 extends Omit<LegacyTeamRunListI
     /** Resolved display identity of the decider — `null` only when `decidedBy` is absent (decision predates identity capture, extremely unlikely but handled). Never a raw uid. */
     reviewer: { displayName: string } | null;
   };
+  /**
+   * Present when the stored consensus score is withheld (`consensusScore` is then null): a research row whose linked
+   * `runs/{runId}` rows reduce to fewer than two independent executing models ("insufficient_independent_models"), or
+   * whose execution identity cannot be established — run unreadable, no persisted rows, or no run linkage at all
+   * ("independence_unverified"). See `applyLegacyConsensusIndependence`.
+   */
+  consensusWithheld?: ConsensusScoreWithheldReason;
+}
+
+/**
+ * Pure. Withholds a legacy row's stored consensus score unless independence is proven:
+ *  - research row (`runId`): `independence` is `storedRunConsensusIndependence` of the linked run document, or null when
+ *    the run could not be read — shown only when "independent";
+ *  - claim-verification row (`verificationId`, no `runId`): unchanged — claim verification calls each connector
+ *    directly (no substitution), so no research independence rule applies;
+ *  - a row naming neither: independence cannot be established → withheld as unverified.
+ * A row without a stored score is unchanged. Never mutates its input.
+ */
+export function applyLegacyConsensusIndependence(
+  item: EnrichedLegacyTeamRunListItemV1,
+  independence: StoredConsensusIndependence | null
+): EnrichedLegacyTeamRunListItemV1 {
+  if (item.consensusScore == null) return item;
+  if (!item.runId && item.verificationId) return item;
+  const reason = item.runId ? consensusScoreWithheldReason(independence ?? "unverified") : "independence_unverified";
+  if (!reason) return item;
+  return { ...item, consensusScore: null, consensusWithheld: reason };
 }
 
 export interface EnrichedAdaptiveTeamRunListItemV1 extends AdaptiveTeamRunListItemV1 {

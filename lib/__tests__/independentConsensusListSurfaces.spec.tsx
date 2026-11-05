@@ -19,7 +19,7 @@ import { toRunSummaryBase } from "@/lib/runs/runSummary";
 import { toProjectRunSummary } from "@/lib/projects/projectRunSummary";
 import { toTeamRunSummary } from "@/lib/workspaces/teamRunSummary";
 import { workspaceRunStatusLine } from "@/components/workspace/WorkspaceRunCard";
-import LegacyReviewListItem, { LEGACY_CONSENSUS_INDEPENDENCE_QUALIFIER, legacyConsensusText } from "@/components/teamGovernance/LegacyReviewListItem";
+import LegacyReviewListItem, { legacyConsensusText } from "@/components/teamGovernance/LegacyReviewListItem";
 
 const row = (modelId: string, status: string, extra: Record<string, unknown> = {}) => ({ modelId, status, rawTextTruncated: `${modelId} text`, ...extra });
 
@@ -121,17 +121,24 @@ describe("Workspace / project / Team run summaries and the status line", () => {
   });
 });
 
-describe("legacy Team review row (teamRuns: no per-model execution identity)", () => {
-  const item = (consensusScore: number | null) =>
-    ({ kind: "legacy", teamRunId: "t1", createdAt: "2026-07-28T00:00:00.000Z", querySummary: "q", policyFlags: [], blockedByPolicy: false, governanceReviewRequired: false, consensusScore }) as never;
-  it("a stored score is shown only qualified as independence-not-recorded", () => {
-    const html = renderToStaticMarkup(createElement(LegacyReviewListItem, { item: item(72.4) }));
-    expect(html).toContain(`Consensus 72/100 (${LEGACY_CONSENSUS_INDEPENDENCE_QUALIFIER})`);
-    expect(html).not.toMatch(/Consensus 72\/100<\/span>/);
+describe("legacy Team review row: the route decides independence; the item shows the score or the reason", () => {
+  const item = (extra: Record<string, unknown>) =>
+    ({ kind: "legacy", teamRunId: "t1", createdAt: "2026-07-28T00:00:00.000Z", querySummary: "q", policyFlags: [], blockedByPolicy: false, governanceReviewRequired: false, ...extra }) as never;
+  it("a shown score (independence proven by the route) is plain — no blanket qualifier", () => {
+    const html = renderToStaticMarkup(createElement(LegacyReviewListItem, { item: item({ runId: "r1", consensusScore: 72.4 }) }));
+    expect(html).toContain("<span>Consensus 72/100</span>");
+    expect(html).not.toContain("independence");
+  });
+  it("a withheld score shows its reason and no number", () => {
+    for (const reason of ["insufficient_independent_models", "independence_unverified"] as const) {
+      const html = renderToStaticMarkup(createElement(LegacyReviewListItem, { item: item({ runId: "r1", consensusScore: null, consensusWithheld: reason }) }));
+      expect(html).toContain(CONSENSUS_WITHHELD_TEXT[reason]);
+      expect(html).not.toMatch(/Consensus \d+\/100/);
+    }
   });
   it("no score → 'No consensus score'", () => {
-    expect(legacyConsensusText(null)).toBe("No consensus score");
-    expect(legacyConsensusText(Number.NaN)).toBe("No consensus score");
+    expect(legacyConsensusText({ consensusScore: null })).toBe("No consensus score");
+    expect(legacyConsensusText({ consensusScore: Number.NaN })).toBe("No consensus score");
   });
 });
 

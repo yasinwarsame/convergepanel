@@ -12,6 +12,7 @@ import {
   isTeamAdmin,
 } from "@/lib/teams/teamApiAuth";
 import { logger } from "@/lib/logger";
+import { storedRunConsensusIndependence, type StoredConsensusIndependence } from "@/lib/panel/independentVoices";
 import {
   classifyTeamRunRow,
   parseTeamRunListFilters,
@@ -20,9 +21,11 @@ import {
   paginateTeamRunListItems,
   TeamRunListItemV1,
   AdaptiveTeamRunListItemV1,
+  LegacyTeamRunListItemV1,
 } from "@/lib/governance/teamRunListContract";
 import {
   enrichLegacyTeamRunListItem,
+  applyLegacyConsensusIndependence,
   enrichAdaptiveTeamRunListItem,
   EnrichedTeamRunListItemV1,
   EnrichedTeamRunListResponseV1,
@@ -120,11 +123,25 @@ async function enrichPageItems(
   const assignmentRefs = adaptiveItems.map((i) => db.collection("runs").doc(i.runId).collection("humanReviewAssignment").doc("current"));
   const panelRefs = adaptiveItems.map((i) => db.collection("runs").doc(i.runId).collection("humanReviewPanel").doc("current"));
 
-  const [runSnaps, assignmentSnaps, panelSnaps] = await Promise.all([
+  // Legacy research rows: the linked run's persisted per-model rows decide whether the row's stored consensus score may
+  // be shown (≥ 2 independent executing models). A failed or missing read proves nothing → withheld as unverified.
+  const legacyResearchRunIds = Array.from(
+    new Set(pageItems.filter((i): i is LegacyTeamRunListItemV1 => i.kind === "legacy" && !!i.runId && i.consensusScore != null).map((i) => i.runId as string))
+  );
+  const legacyRunRefs = legacyResearchRunIds.map((runId) => db.collection("runs").doc(runId));
+
+  const [runSnaps, assignmentSnaps, panelSnaps, legacyRunSnaps] = await Promise.all([
     batchGetAll(db, runRefs),
     batchGetAll(db, assignmentRefs),
     batchGetAll(db, panelRefs),
+    batchGetAll(db, legacyRunRefs),
   ]);
+  const legacyIndependenceByRunId = new Map<string, StoredConsensusIndependence>();
+  legacyResearchRunIds.forEach((runId, idx) => {
+    const result = legacyRunSnaps[idx];
+    if (result.failed || !result.snap?.exists) return;
+    legacyIndependenceByRunId.set(runId, storedRunConsensusIndependence(result.snap.data() as Record<string, unknown> | undefined));
+  });
 
   const governanceByRunId = new Map<string, GovernanceRecordV1 | null>();
   const assignmentByRunId = new Map<string, AdaptiveHumanReviewAssignmentV1 | null>();
@@ -203,7 +220,10 @@ async function enrichPageItems(
   const enriched: EnrichedTeamRunListItemV1[] = [];
   for (const item of pageItems) {
     if (item.kind === "legacy") {
-      enriched.push(await enrichLegacyTeamRunListItem(item, item.humanDecision?.decidedBy, resolveDisplayName));
+      const enrichedLegacy = await enrichLegacyTeamRunListItem(item, item.humanDecision?.decidedBy, resolveDisplayName);
+      enriched.push(
+        applyLegacyConsensusIndependence(enrichedLegacy, item.runId ? legacyIndependenceByRunId.get(item.runId) ?? null : null)
+      );
     } else {
       const enrichedItem = await enrichAdaptiveTeamRunListItem(
         item,
