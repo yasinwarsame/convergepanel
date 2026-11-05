@@ -82,7 +82,10 @@ export function gateSignal(input: Pick<TrustSignalsInput, "gate" | "synthesisRep
 
 export interface CoverageCounts {
   dispatched: number;
+  /** ok + substituted: a slot that produced a response, from its own model or a substitute. */
   responded: number;
+  /** The part of `responded` answered by a substitute model, never by the model that was asked. */
+  substituted: number;
   notResponded: number;
   unknown: number;
 }
@@ -91,14 +94,19 @@ export interface CoverageCounts {
 export function coverageCounts(slotStatuses: ReadonlyMap<string, string> | null): CoverageCounts | null {
   if (!slotStatuses || slotStatuses.size === 0) return null;
   let responded = 0;
+  let substituted = 0;
   let notResponded = 0;
   let unknown = 0;
   for (const status of slotStatuses.values()) {
     if (typeof status !== "string" || status.length === 0) unknown += 1;
-    else if (status === "ok" || status === "substituted") responded += 1;
+    else if (status === "ok") responded += 1;
+    else if (status === "substituted") {
+      responded += 1;
+      substituted += 1;
+    }
     else notResponded += 1;
   }
-  return { dispatched: slotStatuses.size, responded, notResponded, unknown };
+  return { dispatched: slotStatuses.size, responded, substituted, notResponded, unknown };
 }
 
 /** Claims whose non-empty cells come from at least two distinct models, out of all claims. */
@@ -120,8 +128,9 @@ export function coverageSignal(input: Pick<TrustSignalsInput, "results" | "align
   let value: string;
   let state: string;
   if (counts) {
-    value = C.coverageResponded(counts.responded, counts.dispatched);
+    value = C.coverageResponded(counts.responded, counts.dispatched, counts.substituted);
     state = counts.unknown > 0 ? "partial_status" : "recorded";
+    if (counts.substituted > 0) details.push(C.coverageSubstitutedDetail(counts.substituted));
     if (counts.unknown > 0) details.push(C.coverageUnknownStatus(counts.unknown, counts.dispatched));
   } else {
     value = C.coverageNoStatus;
@@ -189,10 +198,24 @@ export function behaviourSignal(input: Pick<TrustSignalsInput, "schema" | "resul
   if (!isFiniteNumber(overall)) return { ...base, value: C.behaviourNotScored, details: [C.behaviourNotScoredDetail], state: "not_scored" };
   const details: string[] = [];
   // The stored citation part is a vacuous full mark whenever no sourceable value existed (computeCitationScore → 1).
-  if (sourceableValueCounts(input.schema, input.results).total === 0) {
-    details.push(schemaRequestsSources(input.schema) ? C.behaviourCitationNoValues : C.behaviourCitationNotApplicable);
-  }
+  // computeCitationScore gives a parsed response with no sourceable value a full citation mark — per response. Say so
+  // whenever any parsed response got that mark, not only when all did.
+  const { parsed, vacuous } = vacuousCitationCounts(input.schema, input.results);
+  if (parsed > 0 && vacuous === parsed) details.push(schemaRequestsSources(input.schema) ? C.behaviourCitationNoValues : C.behaviourCitationNotApplicable);
+  else if (vacuous > 0) details.push(C.behaviourCitationPartial(vacuous, parsed));
   return { ...base, value: C.behaviourValue(pct(overall)), details, state: "scored" };
+}
+
+/** Parsed responses (ok with data), and how many of them had no sourceable value (a vacuous full citation mark). */
+export function vacuousCitationCounts(schema: Pick<ResultSchema, "id" | "fields">, results: AdaptiveModelResult[]): { parsed: number; vacuous: number } {
+  let parsed = 0;
+  let vacuous = 0;
+  for (const result of results) {
+    if (!result.ok || !result.data) continue;
+    parsed += 1;
+    if (sourceableValueCounts(schema, [result]).total === 0) vacuous += 1;
+  }
+  return { parsed, vacuous };
 }
 
 /** The four signals, in their fixed display order. */

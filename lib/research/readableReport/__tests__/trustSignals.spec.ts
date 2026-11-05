@@ -5,7 +5,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { getResultSchema } from "@/lib/adaptiveSchema/schemaRegistry";
 import { CAUTION_NOTICE, GATE_STATUS_WORD, UNRECOGNIZED_GATE_NOTICE } from "@/lib/adaptiveSchema/gatePresentation";
-import { behaviourSignal, buildTrustSignals, claimsWithMultipleModels, coverageCounts, coverageSignal, gateSignal, namesASource, sourcesSignal } from "../trustSignals";
+import { behaviourSignal, buildTrustSignals, vacuousCitationCounts, claimsWithMultipleModels, coverageCounts, coverageSignal, gateSignal, namesASource, sourcesSignal } from "../trustSignals";
 import { READABLE_TRUST_COPY as C } from "../copy";
 
 const RECORDS: Record<string, any> = JSON.parse(readFileSync(join(process.cwd(), "lib/adaptiveSchema/__tests__/o5p/__fixtures__/baseline-2c17fee/records.json"), "utf8"));
@@ -85,8 +85,25 @@ describe("panel coverage signal", () => {
       ["perplexity", "ok"],
       ["gemini", "timeout"],
     ]);
-    expect(coverageCounts(m)).toEqual({ dispatched: 5, responded: 3, notResponded: 2, unknown: 0 });
-    expect(coverageSignal({ results: [], alignedClaims: [], slotStatuses: m }).value).toBe("Responded: 3 of 5 dispatched");
+    expect(coverageCounts(m)).toEqual({ dispatched: 5, responded: 3, substituted: 1, notResponded: 2, unknown: 0 });
+    expect(coverageSignal({ results: [], alignedClaims: [], slotStatuses: m }).value).toBe("Responded: 3 of 5 dispatched, including 1 answered by a substitute model");
+  });
+
+  it("review MINOR-2: substituted slots are never shown as the asked model responding (5 dispatched, 3 substituted)", () => {
+    const m = new Map([
+      ["chatgpt", "ok"],
+      ["claude", "substituted"],
+      ["grok", "substituted"],
+      ["perplexity", "ok"],
+      ["gemini", "substituted"],
+    ]);
+    const s = coverageSignal({ results: [], alignedClaims: [], slotStatuses: m });
+    expect(s.value).toBe("Responded: 5 of 5 dispatched, including 3 answered by a substitute model");
+    expect(s.value).not.toBe("Responded: 5 of 5 dispatched");
+    expect(s.details).toContain(C.coverageSubstitutedDetail(3));
+    const plain = coverageSignal({ results: [], alignedClaims: [], slotStatuses: new Map([["chatgpt", "ok"]]) });
+    expect(plain.value).toBe("Responded: 1 of 1 dispatched");
+    expect(plain.details.join(" ")).not.toMatch(/substitute/);
   });
 
   it("a blank status is unknown, never counted as a response", () => {
@@ -120,6 +137,16 @@ describe("panel coverage signal", () => {
 });
 
 describe("sources signal", () => {
+  it("review MINOR-4: legal_regulatory (which asks for keyAuthority) is never told it asks for no sources", () => {
+    const schema = getResultSchema("legal_regulatory");
+    expect(schema.fields.some((f) => f.key === "keyAuthority")).toBe(true);
+    const s = sourcesSignal({ schema, results: [{ modelId: "chatgpt", ok: true, data: {} }] as any });
+    const text = [s.value, ...s.details].join(" ");
+    expect(text).not.toMatch(/does not ask models for sources|not requested/i);
+    expect(text).toMatch(/no values that are scored for a named source/);
+    expect(text).toMatch(/authorities or sources a model mentions in its text are not counted/);
+  });
+
   it.each(["generic", "procedural", "forecast_speculative", "legal_regulatory", "creative_generative"])('%s schema → sources "N/A" and never "100%"', (schemaId) => {
     const schema = getResultSchema(schemaId as any);
     const results = [{ modelId: "chatgpt", schemaId, ok: true, data: {} }] as any;
@@ -169,6 +196,22 @@ describe("model behaviour score signal", () => {
   it.each([undefined, null, { perModel: [] }, { overallTrust: NaN }, { overallTrust: "0.9" }])("unscored stays unscored: %p", (ts) => {
     const s = behaviourSignal({ schema: getResultSchema("generic"), results: [], trustSummary: ts as any });
     expect([s.state, s.value]).toEqual(["not_scored", C.behaviourNotScored]);
+  });
+
+  it("review MINOR-3: a partial vacuous citation mark is disclosed (some parsed responses had no value to source)", () => {
+    const schema = getResultSchema("financial_valuation");
+    const key = schema.fields.find((f) => f.type === "metric[]")!.key;
+    const results: any[] = [
+      { modelId: "chatgpt", ok: true, data: { [key]: [{ label: "x", value: 1, unit: "u", asOf: "unknown", source: "SEC" }] } },
+      { modelId: "claude", ok: true, data: {} },
+      { modelId: "grok", ok: true, data: { [key]: [] } },
+      { modelId: "gemini", ok: false, data: null },
+    ];
+    const s = behaviourSignal({ schema, results, trustSummary: { perModel: [], overallTrust: 0.8 } });
+    expect(s.details).toEqual([C.behaviourCitationPartial(2, 3)]);
+    expect(vacuousCitationCounts(schema, results)).toEqual({ parsed: 3, vacuous: 2 });
+    // Every parsed response sourced something → no note.
+    expect(behaviourSignal({ schema, results: [results[0]], trustSummary: { perModel: [], overallTrust: 0.8 } }).details).toEqual([]);
   });
 
   it("a source-requesting schema with no values gives a different, still honest note", () => {

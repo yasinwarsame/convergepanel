@@ -6,7 +6,8 @@
  * wording already says what is needed (gatePresentation's gate words and notices, the analysis-availability lines), the
  * readable layout reads that wording instead of restating it.
  *
- * Rules the wording follows (readableSemantics.spec.ts asserts them):
+ * Rules the wording follows (trustSignals.spec.ts and components/research/readable/__tests__/readableReport.spec.tsx assert
+ * them):
  *   - the verification gate is never called consensus or agreement, and Pass is never called "verified";
  *   - counts are stated with both numbers; a value with no denominator is "N/A" / "Not recorded", never a percentage;
  *   - nothing here checks sources or answer accuracy, and the copy never says it does.
@@ -50,7 +51,12 @@ export const READABLE_TRUST_COPY = {
   coverageName: "Panel coverage",
   coverageDefinition:
     "How many of the models asked actually responded, and how many claims have positions from at least two models. It counts responses; it does not measure agreement.",
-  coverageResponded: (responded: number, dispatched: number) => `Responded: ${responded} of ${dispatched} dispatched`,
+  coverageResponded: (responded: number, dispatched: number, substituted = 0) =>
+    substituted > 0
+      ? `Responded: ${responded} of ${dispatched} dispatched, including ${substituted} answered by a substitute model`
+      : `Responded: ${responded} of ${dispatched} dispatched`,
+  coverageSubstitutedDetail: (substituted: number) =>
+    `${substituted} of the dispatched models did not answer themselves; a different model answered in ${substituted === 1 ? "its" : "their"} place.`,
   coverageUnknownStatus: (unknown: number, dispatched: number) => `Response status not recorded for ${unknown} of ${dispatched}`,
   coverageNoStatus: "Response status not recorded",
   coverageModelsInReport: (n: number) => `Models in this report: ${n}`,
@@ -60,8 +66,9 @@ export const READABLE_TRUST_COPY = {
   sourcesName: "Sources",
   sourcesDefinition:
     "Whether models named a source for the values this report type asks them to source. Sources are named by the models and are not checked.",
-  sourcesNotRequested: "N/A (not requested)",
-  sourcesNotRequestedDetail: "This report type does not ask models for sources.",
+  sourcesNotRequested: "N/A (no source-scored values)",
+  sourcesNotRequestedDetail:
+    "This report type asks for no values that are scored for a named source. Any authorities or sources a model mentions in its text are not counted here.",
   sourcesNamed: (named: number, total: number) => `Named: ${named} of ${total} values`,
   sourcesNamedDetail: "Named by models, not checked.",
   sourcesNone: (total: number) => `None recorded (0 of ${total} values)`,
@@ -74,7 +81,9 @@ export const READABLE_TRUST_COPY = {
   behaviourNotScoredDetail: "No model behaviour score was recorded for this run.",
   behaviourValue: (percent: number) => `${percent}% (stored score)`,
   behaviourCitationNotApplicable:
-    "Citations: N/A for this report type. The stored score counts that part as full marks because no sources were requested, which raises it.",
+    "Citations: N/A for this report type. The stored score counts that part as full marks because no values are scored for sources, which raises it.",
   behaviourCitationNoValues:
     "Citations: no response gave a value to source. The stored score counts that part as full marks, which raises it.",
+  behaviourCitationPartial: (vacuous: number, parsed: number) =>
+    `Citations: ${vacuous} of ${parsed} parsed responses gave no value to source. The stored score counts that part as full marks for ${vacuous === 1 ? "that response" : "those responses"}, which raises it.`,
 } as const;

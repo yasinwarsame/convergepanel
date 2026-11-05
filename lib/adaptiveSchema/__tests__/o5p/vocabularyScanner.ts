@@ -14,7 +14,8 @@ import { readdirSync, readFileSync, statSync } from "fs";
 import { join, relative } from "path";
 import * as ts from "typescript";
 
-export const SCANNED_ROOTS = ["components/adaptive", "lib/adaptiveSchema", "lib/pdf", "lib/docx", "lib/verification/generateMemo.ts", "lib/panel/runModelIdentity.ts"];
+// #290 Increment 1: the readable report layout's UI-only copy and components are presentation consumers too.
+export const SCANNED_ROOTS = ["components/adaptive", "lib/adaptiveSchema", "lib/pdf", "lib/docx", "lib/verification/generateMemo.ts", "lib/panel/runModelIdentity.ts", "lib/research/readableReport", "components/research/readable"];
 
 export const VOCAB =
   /\b(agree\w*|consensus|majority|diverg\w*|contested|camps?|split|disagree\w*|disput\w*|different positions|converg\w*|oppos\w*|supported by|disputed by|supporters?|disputers?|unresolved|vote\w*|align\w*|contradict\w*|unanim\w*|concur\w*|dissent\w*|corroborat\w*|endorse\w*|unique claims?|same answers?)\b/i;

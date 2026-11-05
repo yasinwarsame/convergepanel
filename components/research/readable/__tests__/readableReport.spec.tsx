@@ -131,7 +131,7 @@ describe("C. #290 remote-work fixture", () => {
     const html = renderPanel(rec, rows, READABLE);
     const answer = tierHtml(html, "answer")!;
     const trust = tierHtml(html, "trust")!;
-    expect(signalValue(trust, "coverage")).toBe("Responded: 4 of 5 dispatched");
+    expect(signalValue(trust, "coverage")).toBe("Responded: 4 of 5 dispatched, including 1 answered by a substitute model");
     expect(signalValue(trust, "gate")).toBe("Fail");
     expect(signalValue(trust, "sources")).toBe(READABLE_TRUST_COPY.sourcesNotRequested);
     expect(htmlText(answer)).toContain(READABLE_ANSWER_COPY.assembledHeading);
@@ -316,5 +316,70 @@ describe("F. Personal and Team share the renderer", () => {
     // Classic through the same view stays classic when no layout is passed.
     const classic = renderToStaticMarkup(createElement(PersistedResearchResultView, { presentation: presentation(rec, rows) }));
     expect(classic).not.toContain("data-readable-tier");
+  });
+});
+
+// ── G. export and governance ownership in readable mode (review MAJOR-1, MINOR-1) ──
+
+import AdaptiveExportButton from "@/components/adaptive/AdaptiveExportButton";
+import AdaptiveExportHistorySection from "@/components/adaptive/AdaptiveExportHistorySection";
+import ReviewGovernanceSection from "@/components/adaptive/ReviewGovernanceSection";
+import { readFileSync } from "fs";
+import { join } from "path";
+import { SCANNED_ROOTS } from "@/lib/adaptiveSchema/__tests__/o5p/vocabularyScanner";
+
+async function mountWith(rec: any, rows: any, extra: Record<string, unknown>) {
+  let r!: TestRenderer.ReactTestRenderer;
+  await act(async () => {
+    r = TestRenderer.create(panelElement(rec, rows, extra));
+  });
+  return r;
+}
+const byTestId = (r: TestRenderer.ReactTestRenderer, id: string) => r.root.findAll((n) => typeof n.type === "string" && n.props["data-testid"] === id);
+const DELEGATED = {
+  kind: "delegated_read_only",
+  exportSurface: createElement("div", { "data-testid": "team-export-surface" }),
+  exportHistorySurface: createElement("div", { "data-testid": "team-export-history-surface" }),
+  reviewGovernanceSurface: createElement("div", { "data-testid": "team-review-governance-surface" }),
+};
+
+describe("G. readable mode keeps the export and governance ownership decisions", () => {
+  it.each(PILOT_SCENARIOS)("%s: Team delegated_read_only mounts no Personal export component and renders the Team surfaces", async (name) => {
+    const r = await mountWith(record(name), slotRows(name), { ...READABLE, ancillaryPresentation: DELEGATED });
+    expect(r.root.findAllByType(AdaptiveExportButton)).toHaveLength(0);
+    expect(r.root.findAllByType(AdaptiveExportHistorySection)).toHaveLength(0);
+    expect(r.root.findAllByType(ReviewGovernanceSection)).toHaveLength(0);
+    expect(byTestId(r, "team-export-surface")).toHaveLength(1);
+    expect(byTestId(r, "team-export-history-surface")).toHaveLength(1);
+    expect(byTestId(r, "team-review-governance-surface")).toHaveLength(1);
+  });
+
+  it.each(PILOT_SCENARIOS)("%s: Personal default mounts the Personal export button, history and review & governance section exactly once (control)", async (name) => {
+    const r = await mountWith(record(name), slotRows(name), READABLE);
+    expect(r.root.findAllByType(AdaptiveExportButton)).toHaveLength(1);
+    expect(r.root.findAllByType(AdaptiveExportHistorySection)).toHaveLength(1);
+    expect(r.root.findAllByType(ReviewGovernanceSection)).toHaveLength(1);
+    // The governance section sits in the details tier, after the trust signals.
+    const details = r.root.find((n) => n.props["data-readable-tier"] === "details");
+    expect(details.findAllByType(ReviewGovernanceSection)).toHaveLength(1);
+  });
+
+  it("ReadableSummaryBar: one export decision, the same source shape as TopSummaryBar's pinned one", () => {
+    const bar = readFileSync(join(process.cwd(), "components/research/readable/ReadableSummaryBar.tsx"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+    expect(bar.match(/<AdaptiveExportButton\b/g) ?? []).toHaveLength(1);
+    expect(bar.match(/<AdaptiveExportHistorySection\b/g) ?? []).toHaveLength(1);
+    expect(bar).toMatch(/const exportControl = ancillary\.kind === "delegated_read_only" \? \(ancillary\.exportSurface \?\? null\) : <AdaptiveExportButton runId=\{runId\} \/>;/);
+    expect(bar).toMatch(/const exportHistory = ancillary\.kind === "delegated_read_only" \? \(ancillary\.exportHistorySurface \?\? null\) : <AdaptiveExportHistorySection runId=\{runId\} \/>;/);
+  });
+
+  it("the readable branch passes the same resolved policy object to ReadableSummaryBar", () => {
+    const panel = readFileSync(join(process.cwd(), "components/adaptive/AdaptivePanelResponse.tsx"), "utf8");
+    expect(panel).toMatch(/<ReadableSummaryBar[\s\S]*?ancillaryPresentation=\{ancillary\}/);
+  });
+});
+
+describe("H. the readable copy is inside the vocabulary gate (review MAJOR-2)", () => {
+  it("SCANNED_ROOTS includes both readable roots", () => {
+    expect(SCANNED_ROOTS).toEqual(expect.arrayContaining(["lib/research/readableReport", "components/research/readable"]));
   });
 });

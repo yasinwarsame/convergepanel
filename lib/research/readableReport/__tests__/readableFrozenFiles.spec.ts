@@ -20,13 +20,11 @@ const UNCHANGED_AT_35933C8: Record<string, string> = {
   "lib/adaptiveSchema/__tests__/o5p/__fixtures__/baseline-2c17fee/renderHashes.UTC.json": "d5f5560efb995baab83bdc0d4577b9588f6b4090",
   "lib/adaptiveSchema/__tests__/o5p/__fixtures__/baseline-2c17fee/builderHashes.json": "060ab7e2d9cc3bc3ad7e2288766347315262ea3a",
   "lib/adaptiveSchema/__tests__/o5p/__fixtures__/baseline-2c17fee/sharedMemos.json": "8ac7d5882ea2b67d0169677337c242e98d5f052c",
-  "lib/adaptiveSchema/__tests__/o5p/__fixtures__/vocabularyManifest.json": "3c2add10d4f1c7543de0eda08d92482b9b2fd902",
   "components/adaptive/__tests__/seSurfaces/__fixtures__/nonDsBaseline.json": "0d51dfacc64e8450de5ee8828b20cb9e4ffcea1f",
   "lib/adaptiveSchema/__tests__/o5p/historicalParity.spec.tsx": "c699f3686c36a2cd576d3d7bcef66fa570788f9f",
   "lib/adaptiveSchema/__tests__/o5p/o5pRender.ts": "453cffb18b9cfd9c66f8766b27d3e74e4e8cfe68",
   "lib/adaptiveSchema/__tests__/o5p/o5pScenarios.ts": "d3e0ec5beb38d7eec80f76f2caf91bf275f65b85",
   "lib/adaptiveSchema/__tests__/o5p/vocabularyInventory.spec.ts": "d2bc041abf55fa88066faf9a2cda5b774f1d3b14",
-  "lib/adaptiveSchema/__tests__/o5p/vocabularyScanner.ts": "1be4e9a4eae79bc88f766ae054fd26871ab992f7",
   "components/adaptive/__tests__/nonDsWordingParity.spec.tsx": "5ff413cb8365ba413c600a043895ba55fc0d9014",
   "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "dd7e6f6083724c775debfd7551ccbcacbb9ea647",
   "components/adaptive/__tests__/adaptiveAncillaryStructure.spec.ts": "cfab55ca124c4f918149df06901285390134745b",
@@ -49,8 +47,23 @@ const UNCHANGED_AT_35933C8: Record<string, string> = {
   "app/page.tsx": "6dbe9b1f924731e1417655a68f41cd232f7cd16a",
 };
 
+/**
+ * The vocabulary gate, widened by #290 Inc 1 (review MAJOR-2) to scan the readable modules: SCANNED_ROOTS gains
+ * lib/research/readableReport and components/research/readable, and the manifest gains one classified entry per new
+ * readable literal (appended; no existing entry changed). Was vocabularyScanner 1be4e9a4, manifest 3c2add10 at 35933c8.
+ * Pinned to the exact new content.
+ */
+const WIDENED_BY_INC1: Record<string, string> = {
+  "lib/adaptiveSchema/__tests__/o5p/vocabularyScanner.ts": "a8f3ecf08d12b20fa58cb622b6d03a62a0d1c7ef",
+  "lib/adaptiveSchema/__tests__/o5p/__fixtures__/vocabularyManifest.json": "c16cc1f5e78d781b9f71fefe8b5493416dc940a0",
+};
+
 describe("#290 Increment 1 leaves the sealed and frozen files byte-identical to 35933c8", () => {
   it.each(Object.entries(UNCHANGED_AT_35933C8))("%s", (path, blob) => {
+    expect(gitBlob(readFileSync(join(process.cwd(), path)))).toBe(blob);
+  });
+
+  it.each(Object.entries(WIDENED_BY_INC1))("%s (widened by Inc 1, pinned to its new content)", (path, blob) => {
     expect(gitBlob(readFileSync(join(process.cwd(), path)))).toBe(blob);
   });
 });
