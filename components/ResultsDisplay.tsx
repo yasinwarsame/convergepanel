@@ -46,6 +46,7 @@ import { sanitizeModelText, truncateForSynthesis, MAX_CHARS_SYNTHESIS_PER_MODEL 
 import { classifyClusterType, isAnalysisReady } from "@/lib/synthesis/trustSummary";
 import { shouldAutoTriggerSynthesis } from "@/lib/synthesis/autoSynthesisTrigger";
 import type { AdaptiveAncillaryPresentation } from "@/components/adaptive/adaptiveAncillaryPresentation";
+import type { ReportLayout } from "@/lib/research/readableReport/layoutMode";
 import type { DsProvenanceDisplay } from "@/lib/research/dsProvenanceClientView";
 import { useAuth } from "@/components/AuthProvider";
 import type {
@@ -744,6 +745,8 @@ interface ResultsDisplayProps {
   adaptiveAncillaryPresentation?: AdaptiveAncillaryPresentation;
   /** Order 6 / S-2a — the persisted page's provenance display model (P1/W1 only); absent everywhere else. */
   dsProvenance?: DsProvenanceDisplay;
+  /** #290 Increment 1 — forwarded unchanged to AdaptivePanelResponse. Absent → classic (the live composer passes nothing). */
+  reportLayout?: ReportLayout;
 }
 
 /**
@@ -784,6 +787,7 @@ export default function ResultsDisplay({
   allowSynthesisGeneration = true,
   adaptiveAncillaryPresentation,
   dsProvenance,
+  reportLayout,
 }: ResultsDisplayProps) {
   const { user, authReady } = useAuth();
   const results = Array.isArray(resultsProp) ? resultsProp : [];
@@ -1141,6 +1145,7 @@ export default function ResultsDisplay({
           onVerifyClaim={onVerifyClaim}
           ancillaryPresentation={adaptiveAncillaryPresentation}
           dsProvenance={dsProvenance}
+          reportLayout={reportLayout}
         />
         </RunSlotStatusContext.Provider>
         </RunModelProvenanceContext.Provider>

@@ -65,6 +65,7 @@ import { createGenerationGuard } from "@/lib/client/authGeneration";
 import { Breadcrumb } from "@/components/shared/Breadcrumb";
 import WorkspaceNav from "@/components/workspace/WorkspaceNav";
 import PersistedResearchResultView from "@/components/research/PersistedResearchResultView";
+import { resolveShellReportLayout, type ReportLayout } from "@/lib/research/readableReport/layoutMode";
 import { displayResearchQuestion } from "@/lib/research/savedResponseDisplay";
 import TeamResearchReviewSummary from "@/components/workspace/projects/TeamResearchReviewSummary";
 import { APPROVAL_NOT_AVAILABLE_HEADING, APPROVAL_NOT_AVAILABLE_MESSAGE } from "@/lib/workspaces/approvalAssignmentCopy";
@@ -108,6 +109,8 @@ export type TeamResearchDetailShellProps = {
    * the Report Review panel instead. Presentation only: every report-review route is itself dark while the switch is off.
    */
   reportReviewEnabled?: boolean;
+  /** #290 Increment 1 — absent → the rollout switch (off → classic); resolved exactly as the Personal shell does. */
+  reportLayout?: ReportLayout;
 };
 
 type DetailState =
@@ -147,7 +150,8 @@ export function teamResearchAncillaryPresentation(
   };
 }
 
-export default function TeamResearchDetailShell({ workspaceId, workspaceName, runId, project, showMembers, showAudit, canVerifyClaim = false, canCreateExport = false, reportReviewEnabled = false }: TeamResearchDetailShellProps) {
+export default function TeamResearchDetailShell({ workspaceId, workspaceName, runId, project, showMembers, showAudit, canVerifyClaim = false, canCreateExport = false, reportReviewEnabled = false, reportLayout }: TeamResearchDetailShellProps) {
+  const layout = resolveShellReportLayout(reportLayout);
   const { user, authReady } = useAuth();
   const router = useRouter();
   const [state, setState] = useState<DetailState>({ kind: "loading" });
@@ -394,6 +398,7 @@ export default function TeamResearchDetailShell({ workspaceId, workspaceName, ru
             // Absent handler => DeepResearchView renders no action at all, which
             // is exactly what Reviewers and Viewers must see.
             onVerifyClaim={canVerifyClaim ? handleVerifyClaim : undefined}
+            {...(layout === "readable" ? { reportLayout: layout } : {})}
           />
           {/* Owner Order A (2026-11-02): the reader is already authorized here, and `review` is null exactly when the run
               has no usable review record, so stating why approval is unavailable reveals nothing new. */}

@@ -57,6 +57,10 @@ import { useRunModelProvenance } from "./RunModelProvenanceContext";
 import { PositionPresentationContext, PositionPresentationState } from "./PositionPresentationContext";
 import { useEffect, useMemo, useState } from "react";
 import AnalysisAvailabilityNotice from "@/components/adaptive/AnalysisAvailabilityNotice";
+import { resolveReportLayout, type ReportLayout } from "@/lib/research/readableReport/layoutMode";
+import ReadableSummaryBar from "@/components/research/readable/ReadableSummaryBar";
+import ReadableReportHeader from "@/components/research/readable/ReadableReportHeader";
+import { READABLE_MODEL_RESPONSES_ANCHOR } from "@/components/research/readable/ExecutiveAnswer";
 
 const RENDER_HINTS_WITHOUT_MATRIX = new Set<AnswerShape>(["metrics_grid", "verdict_card", "step_diff", "scenario_tree"]);
 
@@ -141,6 +145,12 @@ export interface AdaptivePanelResponseProps extends AdaptiveRendererProps {
    * Rendered only in the Decision Support branch, after Panel Evidence. Absent → nothing (every other caller).
    */
   dsProvenance?: DsProvenanceDisplay;
+  /**
+   * #290 Increment 1 — the report layout. Absent, or anything but exactly "readable" → classic, byte for byte today's
+   * markup. "readable" changes only the Phase 2 pilot branch below (answer first, then four trust signals, then the
+   * unchanged classic sections). Resolved by the Personal / Team report shells from a default-off rollout switch.
+   */
+  reportLayout?: ReportLayout;
 }
 
 /**
@@ -588,6 +598,62 @@ function AdaptivePanelResponseBody(props: AdaptivePanelResponseProps) {
   // already degrade gracefully on their own when gate/synthesisReport are
   // undefined (both accept them as optional props), so no changes were
   // needed there.
+  // #290 Increment 1 — readable layout (opt-in; classic below is untouched). The header bar keeps report type, status,
+  // models, generated and the export surfaces; the answer section leads, then the four trust signals; then every
+  // classic section with the same props as the classic branch, so nothing is hidden.
+  if (PHASE2_PILOT_SCHEMAS.has(schema.id) && resolveReportLayout(props.reportLayout) === "readable") {
+    // The same props the classic pilot branch hands the one review & governance helper below.
+    const readableGovernanceProps: ReviewGovernanceSectionProps = {
+      humanReview: props.humanReview,
+      reviewRouting: props.reviewRouting,
+      persistenceStatus: props.persistenceStatus,
+      runId,
+      gate,
+      synthesisReport,
+      trustSummary,
+      alignedClaims,
+      modelsUsed: modelIds,
+      question,
+      onRunFollowUp,
+    };
+    return (
+      <div className="space-y-4" data-report-layout="readable">
+        <ReadableSummaryBar
+          schemaId={schema.id}
+          results={results}
+          runId={runId}
+          generatedAt={props.generatedAt}
+          persistenceStatus={props.persistenceStatus}
+          humanReview={props.humanReview}
+          reviewRouting={props.reviewRouting}
+          ancillaryPresentation={ancillary}
+        />
+        <ReadableReportHeader schema={schema} results={results} alignedClaims={alignedClaims} gate={gate} synthesisReport={synthesisReport} trustSummary={trustSummary} />
+        <div className="space-y-4" data-readable-tier="details">
+          <SchemaKeyFactsStrip schemaId={schema.id} results={results} alignedClaims={alignedClaims} />
+          <AdaptiveResultsView {...props} />
+          <div id={READABLE_MODEL_RESPONSES_ANCHOR}>
+            <ModelResponsesSection
+              schema={schema}
+              results={results}
+              listView={gate && synthesisReport ? { alignedClaims, gate, synthesisReport, trustSummary } : undefined}
+            />
+          </div>
+          <PanelEvidenceSection
+            schemaId={schema.id}
+            gate={gate}
+            synthesisReport={synthesisReport}
+            trustSummary={trustSummary}
+            alignedClaims={alignedClaims}
+            modelsUsed={modelIds}
+            showClaimMatrix={schema.renderHint === "step_diff"}
+          />
+          {renderReviewGovernance(readableGovernanceProps)}
+        </div>
+      </div>
+    );
+  }
+
   if (PHASE2_PILOT_SCHEMAS.has(schema.id)) {
     return withBar(
       <div className="space-y-4">

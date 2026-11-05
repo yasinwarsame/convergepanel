@@ -1,0 +1,56 @@
+/**
+ * #290 Increment 1 — the files this increment must not change, pinned to their git blob ids at origin/main 35933c8.
+ *
+ * The sealed parity oracles and their fixtures (historicalParity, nonDsWordingParity, vocabularyInventory), the frozen
+ * wording modules shared with exports and persisted report text (reportSummary, agreementNarrative, reportPresentation,
+ * positionPresentation, gatePresentation, trustSummary, shareBuilders, exportSnapshot), the PDF / DOCX composers, the
+ * classic strip and summary bar, lib/env.ts and the live composer. A readable-layout change that touched any of them
+ * would fail here before review. Readable additions live in new files only.
+ */
+import { createHash } from "crypto";
+import { readFileSync } from "fs";
+import { join } from "path";
+
+const gitBlob = (data: Buffer) => createHash("sha1").update(Buffer.concat([Buffer.from(`blob ${data.length}\0`), data])).digest("hex");
+
+/** `git rev-parse 35933c8:<path>`. */
+const UNCHANGED_AT_35933C8: Record<string, string> = {
+  "lib/adaptiveSchema/__tests__/o5p/__fixtures__/baseline-2c17fee/records.json": "322a80a944f4549e49bf45a803f4c623f074ca0e",
+  "lib/adaptiveSchema/__tests__/o5p/__fixtures__/baseline-2c17fee/renderHashes.json": "861bec939276e2a9cdc5420c206484fe689d808c",
+  "lib/adaptiveSchema/__tests__/o5p/__fixtures__/baseline-2c17fee/renderHashes.UTC.json": "d5f5560efb995baab83bdc0d4577b9588f6b4090",
+  "lib/adaptiveSchema/__tests__/o5p/__fixtures__/baseline-2c17fee/builderHashes.json": "060ab7e2d9cc3bc3ad7e2288766347315262ea3a",
+  "lib/adaptiveSchema/__tests__/o5p/__fixtures__/baseline-2c17fee/sharedMemos.json": "8ac7d5882ea2b67d0169677337c242e98d5f052c",
+  "lib/adaptiveSchema/__tests__/o5p/__fixtures__/vocabularyManifest.json": "3c2add10d4f1c7543de0eda08d92482b9b2fd902",
+  "components/adaptive/__tests__/seSurfaces/__fixtures__/nonDsBaseline.json": "0d51dfacc64e8450de5ee8828b20cb9e4ffcea1f",
+  "lib/adaptiveSchema/__tests__/o5p/historicalParity.spec.tsx": "c699f3686c36a2cd576d3d7bcef66fa570788f9f",
+  "lib/adaptiveSchema/__tests__/o5p/o5pRender.ts": "453cffb18b9cfd9c66f8766b27d3e74e4e8cfe68",
+  "lib/adaptiveSchema/__tests__/o5p/o5pScenarios.ts": "d3e0ec5beb38d7eec80f76f2caf91bf275f65b85",
+  "lib/adaptiveSchema/__tests__/o5p/vocabularyInventory.spec.ts": "d2bc041abf55fa88066faf9a2cda5b774f1d3b14",
+  "lib/adaptiveSchema/__tests__/o5p/vocabularyScanner.ts": "1be4e9a4eae79bc88f766ae054fd26871ab992f7",
+  "components/adaptive/__tests__/nonDsWordingParity.spec.tsx": "5ff413cb8365ba413c600a043895ba55fc0d9014",
+  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "dd7e6f6083724c775debfd7551ccbcacbb9ea647",
+  "components/adaptive/__tests__/adaptiveAncillaryStructure.spec.ts": "cfab55ca124c4f918149df06901285390134745b",
+  "lib/env.ts": "2b81ae7239ea4fd655b8320d5bf726c778149a20",
+  "components/adaptive/TopSummaryBar.tsx": "ea8b059bbafe1589fe79f1a3824c298d5a68926b",
+  "components/adaptive/PrimarySynthesisStrip.tsx": "61d4e96c83ef380a164cf9ac4ce69ed187ade8b0",
+  "components/adaptive/AdaptiveSynthesisReportView.tsx": "7f31cd2839a32b78053a273a5faebc7165ef6433",
+  "components/adaptive/AnalysisAvailabilityNotice.tsx": "0886deb1b4828f5ea0d1995fe8efc4eaec2a5892",
+  "lib/adaptiveSchema/reportSummary.ts": "3ba976c88335c289f335d94776061d765d5a9361",
+  "lib/adaptiveSchema/reportStatus.ts": "52f0de27b3a7a790854b27c50e948e39dc73dde7",
+  "lib/adaptiveSchema/agreementNarrative.ts": "98e8ecf75fc1e147e3a40f7e134fb63caa64f83a",
+  "lib/adaptiveSchema/reportPresentation.ts": "842f4d04595914652e5aaf6cd0c4bc1e5b509edd",
+  "lib/adaptiveSchema/positionPresentation.ts": "b8d05a23b3d19b260e3fc617db7ebe0ee87e7d69",
+  "lib/adaptiveSchema/gatePresentation.ts": "001454f32aae050f8e42ff269ba8873dba1a3ee6",
+  "lib/adaptiveSchema/trustSummary.ts": "dc6ea9e337a8ae9851559f6d035fc7664422526e",
+  "lib/adaptiveSchema/shareBuilders.ts": "4cbba2539d4ee865b2102a2bd9e096344468525e",
+  "lib/adaptiveSchema/exportSnapshot.ts": "5af930878120bbda7ba49ec40045502416859d19",
+  "lib/pdf/AdaptiveResearchDocument.tsx": "10ba10b9d413214b7e4e00c422f9b15ab640d26a",
+  "lib/docx/AdaptiveResearchDocxDocument.ts": "4e8ba97ea8d0ad4bc9e13d2a598121da2ff657b0",
+  "app/page.tsx": "6dbe9b1f924731e1417655a68f41cd232f7cd16a",
+};
+
+describe("#290 Increment 1 leaves the sealed and frozen files byte-identical to 35933c8", () => {
+  it.each(Object.entries(UNCHANGED_AT_35933C8))("%s", (path, blob) => {
+    expect(gitBlob(readFileSync(join(process.cwd(), path)))).toBe(blob);
+  });
+});

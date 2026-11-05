@@ -754,6 +754,19 @@ This slice closes the remaining gaps without a new taxonomy, provider or schema 
   - The frozen-baseline strip matches the exact notice only, with exactly one notice per affected output.
   - `dsProvenancePages.spec.tsx` compares the frozen 9eca1e3 pages with `modelResults` removed, and proves the field changes nothing outside the Model Responses section (and the dev-only debug panel).
 
+### Readable report layout — #290 Increment 1 (dark: switch OFF, classic everywhere)
+
+- **Seam:** `reportLayout: "classic" | "readable"` (`lib/research/readableReport/layoutMode.ts`), threaded Personal / Team shell → `PersistedResearchResultView` → `ResultsDisplay` → `AdaptivePanelResponse`. Anything but exactly `"readable"` is classic. The live composer passes nothing.
+- **Enablement:** the compile-time switch `REPORT_READABLE_LAYOUT_ENABLED = false` in `lib/research/readableReport/layoutRollout.ts` (not an env var: `lib/env.ts` is pinned by the Order 6 boundary suites, same precedent as `reportReviewRollout.ts`). Both shells resolve it with `resolveShellReportLayout()` and forward `reportLayout` only when readable, so classic props are unchanged. Turning it on is a reviewed code change plus an owner decision.
+- **Readable (Phase 2 pilot schemas only):** `ReadableSummaryBar` (TopSummaryBar without Consensus / Source grounding) → `ExecutiveAnswer` ("Answer" only when `degraded === false`; degraded → "Panel summary (assembled from scored claims; …)"; no report → no answer text) → `TrustSignalsPanel` (Verification gate, Panel coverage, Sources, Model behaviour score) → the classic sections, unchanged. Non-pilot schemas ignore the layout.
+- **Trust signal definitions** (`lib/research/readableReport/copy.ts`, `trustSignals.ts`; the human-readable counterpart for a future API-1):
+  - Verification gate: the stored status word (D6) plus the stored inputs (certainty, split count among the load-bearing claims); no cause is written; unrecognized → the D8 notice, no inputs.
+  - Panel coverage: responded (ok / substituted) of dispatched slots from `RunSlotStatusContext`; a failed slot is never a response; claims with positions from 2+ models.
+  - Sources: named / total over the values the schema asks models to source; "N/A (not requested)" or "None recorded", never a percentage.
+  - Model behaviour score: the stored `overallTrust`, with a note when its citation part is a vacuous full mark.
+- **Accepted divergence:** exports, copy / memo / share text and persisted report text are unchanged, so PDF/DOCX still say "Consensus" / "Source grounding" where the readable UI says "Verification gate" / "Model behaviour score".
+- **Guards:** `readableImportBoundary.spec.ts` (no export / engine / persistence code imports the module), `readableFrozenFiles.spec.ts` (sealed oracles, frozen wording modules, `lib/env.ts`, TopSummaryBar pinned to 35933c8), `components/research/readable/__tests__/readableReport.spec.tsx` (classic bytes, order, semantics, accessibility, Personal = Team).
+
 ---
 
 ## Synthesis
