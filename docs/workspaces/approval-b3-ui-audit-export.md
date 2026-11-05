@@ -176,7 +176,7 @@ Nothing else B3 adds needs a composite index:
 - `REPORT_REVIEW_ENABLED = false as boolean` is unchanged (`lib/workspaces/reportReviewRollout.ts`).
 - Both research pages pass `reportReviewEnabled={REPORT_REVIEW_ENABLED}`. The page specs pin that value as `false` and the notice as unchanged.
 - Every report-review route conceals with 404 before reading the body while off. That includes the new export.
-- The assignment audit hook and candidate exclusion are dormant while off.
+- The assignment audit hook and candidate exclusion are dormant while off. (Superseded for non-Production deployments by the Production-only guard: there, assignment of a run carrying a report review is refused.)
 - `lib/env.ts`, `firestore.rules` and the Order 6 pinned files are unchanged; their hash suites pass.
 
 ## 6. Activation checklist for a single authorized workspace (needs a separate owner GO)

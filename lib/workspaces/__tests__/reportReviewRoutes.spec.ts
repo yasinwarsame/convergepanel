@@ -16,6 +16,7 @@ jest.mock("@/lib/workspaces/resolveWorkspaceAccess", () => ({
 }));
 jest.mock("@/lib/workspaces/approvalWorkflowRollout", () => ({ resolveApprovalWorkflowAdmission: () => admission }));
 const rollout = { REPORT_REVIEW_ENABLED: true };
+jest.mock("@/lib/workspaces/reportReviewDeploymentEnvironment", () => ({ isProductionDeployment: () => true })); // Production-only guard: these specs exercise report review as deployed in Production
 jest.mock("@/lib/workspaces/reportReviewRollout", () => ({
   get REPORT_REVIEW_ENABLED() {
     return rollout.REPORT_REVIEW_ENABLED;
