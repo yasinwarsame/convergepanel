@@ -128,6 +128,23 @@ describe("M-1. the readable report states no panel reliability score and no per-
     }
   });
 
+  it("a parsed model whose stored score is capped: readable names it as the signals do, classic keeps its wording", async () => {
+    // generic-mixed with its first parsed slot's stored entry marked degraded + capped (stored values, not recomputed).
+    const rec = record("generic-mixed");
+    const entry = rec.trustSummary.perModel[0];
+    expect(rec.results.find((x: any) => x.modelId === entry.modelId).ok).toBe(true);
+    entry.capped = true;
+    entry.parseHealth = "degraded";
+    const rows = slotRows("generic-mixed");
+    const readable = textOf((await mount(rec, rows, READABLE)).root);
+    expect(readable).toContain(READABLE_TRUST_COPY.listScoreCapped);
+    expect(readable).not.toContain("trust capped");
+    expect(readable).toContain(READABLE_TRUST_COPY.listScoreRow(Math.round(entry.trustScore * 100)));
+    const classic = textOf((await mount(rec, rows)).root);
+    expect(classic).toContain("degraded · trust capped");
+    expect(classic).not.toContain(READABLE_TRUST_COPY.listScoreCapped);
+  });
+
   it.each(M1_FIXTURES)("%s: classic still renders the trust summary table and the classic score names (parity)", async (_name, make) => {
     const { rec, rows } = make();
     const r = await mount(rec, rows);
