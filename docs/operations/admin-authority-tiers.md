@@ -161,9 +161,14 @@ system to anyone who obtains it.
 
 Two ways to enroll a SYSTEM_ADMIN. Choose ONE deliberately:
 
-**Option 1 — out-of-band service-account script (preferred).** Call
-`setCustomUserClaims(uid, { admin: true })` directly from a script authenticated
-by the Firebase service account. `ADMIN_SECRET` never needs to hold a live value
+**Option 1 — out-of-band service-account script (preferred).** Run
+`scripts/admin/set-system-admin-claim.ts` (`npm run admin:set-system-admin-claim`)
+with an explicitly named service-account key file. It is a dry run unless given
+`--execute` plus an exact typed confirmation, preserves every other custom
+claim, refuses disabled targets, and writes create-only `admin_audit_logs`
+attempt/outcome rows. Runbook, CLI and the open revocation-session decision:
+`docs/operations/system-admin-claim-script.md`. The four older minting scripts
+were retired. `ADMIN_SECRET` never needs to hold a live value
 for enrollment, so the bootstrap route is not part of the enrollment story at
 all, and there is no post-enrollment rotation to remember.
 

@@ -18,6 +18,10 @@ export type AdminActionType =
   | "REACTIVATE_SUB"
   | "SYNC_STRIPE"
   | "UPDATE_ENTITLEMENTS"
+  // Written only by scripts/admin/set-system-admin-claim.ts (create-only rows
+  // built by lib/admin/systemAdminClaimSafety.ts#buildClaimAuditRecord).
+  | "GRANT_SYSTEM_ADMIN_CLAIM"
+  | "REVOKE_SYSTEM_ADMIN_CLAIM"
   | "OTHER";
 
 /**

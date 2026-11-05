@@ -63,6 +63,8 @@ Two credential paths are accepted by every API route:
 
 A **disabled** Firebase Auth account obtains no email-derived privilege in any tier.
 
+**Operator claim tool:** the `admin` claim is changed out of band only through `scripts/admin/set-system-admin-claim.ts` (`npm run admin:set-system-admin-claim`; logic in `lib/admin/systemAdminClaimSafety.ts` and `lib/admin/systemAdminClaimExecution.ts`). Explicit key file and `--confirm-project`, dry run by default, typed confirmation, other claims preserved, create-only `admin_audit_logs` attempt/outcome rows (`GRANT_SYSTEM_ADMIN_CLAIM` / `REVOKE_SYSTEM_ADMIN_CLAIM`). The older minting scripts were retired. Runbook: `docs/operations/system-admin-claim-script.md`.
+
 **Admin routes** (`app/api/admin/*`) must use a scope-explicit guard from `lib/firebase/auth-helpers.ts`: `requireAdminPortalAccess()` for the ADMIN_PORTAL read/monitoring tier, or `requireSystemAdminAccess()` / `requireSystemAdminBearer()` for SYSTEM_ADMIN. `requireAdminApiAccess()` and `requireAdmin()` are **deprecated aliases** kept only for compatibility — do not use them in new code, and note that `requireAdminApiAccess` is the PORTAL guard, which a verified, enabled `ADMIN_EMAILS` member satisfies **with no custom claim at all**. Using `verifySessionCookie()` alone on an admin route is a privilege-escalation vulnerability — it only confirms a valid session, not any administrator tier.
 
 ### Auth Lifecycle Hardening (Step 6) — client/server session synchronization, now LIVE
