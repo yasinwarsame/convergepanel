@@ -10,8 +10,24 @@ import { VerificationGateResult } from "@/lib/verificationGate/verificationGate"
 import { classifyGrounding, GroundingResult } from "./sourceGrounding";
 import { independentVoiceCount, type ExecutingIdentityRow } from "@/lib/panel/executingVoiceLabel";
 
+/**
+ * Heading of the verdict's top item when fewer than two independent executing models responded: one model's finding is
+ * not a consensus (two slots answered by the same substitute model are one model).
+ */
+export const PANEL_VERDICT_SINGLE_MODEL_HEADING = "Top finding (one independent model; not a consensus)";
+
+/** Share / memo line in place of a consensus score when fewer than two independent executing models responded. */
+export const NO_CONSENSUS_SCORE_SHARE_LINE =
+  "No consensus score: fewer than two independent models responded (slots answered by the same substitute model count as one).";
+
 export interface PanelVerdict {
   question: string;
+  /**
+   * At least two independent executing models responded, so the top item may be presented as a cross-model consensus
+   * and its model counts as agreement / split. False → no consensus, no "agreed by" / "split" counts on any surface.
+   * Absent (a verdict built elsewhere, e.g. a fixture) → treated as true, the behaviour before this field existed.
+   */
+  crossModel?: boolean;
   topConsensus: string;
   consensusModelCount: number;
   topDisagreement: string | null;
@@ -38,8 +54,14 @@ export function buildPanelVerdict(
    * slots answered by one substitute model are one model. Without rows each
    * distinct slot counts once (nothing is inferred).
    */
-  rows?: readonly ExecutingIdentityRow[] | null
+  rows?: readonly ExecutingIdentityRow[] | null,
+  /**
+   * `crossModel`: whether the run has at least two independent executing models among its usable responses (the
+   * caller's `independentSynthesisResponders` count). Omitted → true (callers without rows; nothing is inferred).
+   */
+  opts?: { crossModel?: boolean }
 ): PanelVerdict {
+  const crossModel = opts?.crossModel !== false;
   const topFinding = report.keyFindings?.[0];
   const topConsensus = topFinding?.claim ?? report.executiveSummary?.slice(0, 200) ?? "No consensus identified.";
   const consensusModelCount = independentVoiceCount(topFinding?.modelsSupporting ?? [], rows);
@@ -47,8 +69,10 @@ export function buildPanelVerdict(
   const topDisagreementItem = report.disagreements?.[0];
   const topDisagreement = topDisagreementItem?.topic ?? null;
   const disagreementDetail = topDisagreementItem?.whyTheyDiffer ?? null;
+  // Independent executing models, like consensusModelCount: positions from two slots answered by one substitute
+  // model are one model's position, not a two-model split.
   const disagreementModelCount = topDisagreementItem
-    ? Object.keys(topDisagreementItem.positionsByModel ?? {}).length
+    ? independentVoiceCount(Object.keys(topDisagreementItem.positionsByModel ?? {}), rows)
     : 0;
 
   const biasItem = report.biasAndBlindSpots?.[0];
@@ -65,6 +89,7 @@ export function buildPanelVerdict(
 
   return {
     question,
+    crossModel,
     topConsensus,
     consensusModelCount,
     topDisagreement,
@@ -76,6 +101,11 @@ export function buildPanelVerdict(
     grounding,
     recommendedNextSteps: gate.recommendedNextSteps,
   };
+}
+
+/** "Consensus", or — with fewer than two independent executing models — a label that claims no consensus. */
+function topItemPrefix(v: PanelVerdict): string {
+  return v.crossModel === false ? "Finding (one independent model; not a consensus)" : "Consensus";
 }
 
 /**
@@ -91,7 +121,7 @@ export function formatVerdictText(v: PanelVerdict, platform: "linkedin" | "x"): 
   const parts: string[] = [];
   parts.push(v.question);
   parts.push("");
-  parts.push(`Consensus: ${v.topConsensus}`);
+  parts.push(`${topItemPrefix(v)}: ${v.topConsensus}`);
 
   if (v.topDisagreement) {
     parts.push(`Key disagreement: ${v.topDisagreement}`);
@@ -150,7 +180,7 @@ export function buildCopyForXShort(v: PanelVerdict): string {
   const parts: string[] = [];
   parts.push(trimToSentence(v.question, 120));
   parts.push("");
-  parts.push(`Consensus: ${firstSentence(v.topConsensus)}`);
+  parts.push(`${topItemPrefix(v)}: ${firstSentence(v.topConsensus)}`);
 
   if (v.topDisagreement) {
     parts.push(`Disagreement: ${firstSentence(v.topDisagreement)}`);
@@ -235,7 +265,7 @@ export function buildCopyForXThread(v: PanelVerdict): string[] {
   const parts: string[] = [];
   parts.push(v.question);
   parts.push("");
-  parts.push(`Consensus: ${v.topConsensus}`);
+  parts.push(`${topItemPrefix(v)}: ${v.topConsensus}`);
 
   if (v.topDisagreement) {
     parts.push(`Key disagreement: ${v.topDisagreement}`);

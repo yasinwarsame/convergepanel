@@ -52,7 +52,11 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   "components/adaptive/TopSummaryBar.tsx": "ea8b059bbafe1589fe79f1a3824c298d5a68926b",
   // Order 6 critical-contrast slice (class-only; see criticalContrastSlice.ts): was 52464f6b4c8d3d330ac1764ff711297e2c31ecbe at 9eca1e3.
   "components/workspace/projects/TeamResearchReviewSummary.tsx": "16a12b9d0f15c5297a8745958126cdd6ea50d263",
-  "app/page.tsx": "6dbe9b1f924731e1417655a68f41cd232f7cd16a",
+  // Connector fail-closed correction pass (owner-authorized 2026-11-05, finding C): ONLY the legacy-panel synthesis
+  // eligibility — the generateSynthesisAutomatically pre-flight and the history auto-synthesis condition now require
+  // two INDEPENDENT executing models (meetsIndependentSynthesisMinimum, the server gate's rule); no provenance code.
+  // Was 6dbe9b1f924731e1417655a68f41cd232f7cd16a at 9eca1e3.
+  "app/page.tsx": "3826603986f4b86b7425a8055aecc3354ab2bc24",
   "firestore.rules": "2fb80a11bfa6c55fe94e0438a980a3b0794aeafd",
 };
 

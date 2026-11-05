@@ -40,7 +40,7 @@ import { ModelResult, SynthesizedReport } from "@/lib/types";
 import { StructuredSynthesis } from "@/lib/synthesis/structuredSchema";
 import { runModelIdentityLabel, runModelProvenanceFromResultRow } from "@/lib/panel/runModelIdentity";
 import { isUsableResult } from "@/lib/panel/publicize";
-import { independentVoices } from "@/lib/panel/independentVoices";
+import { independentSynthesisResponders, meetsIndependentSynthesisMinimum } from "@/lib/panel/independentVoices";
 import { executingVoiceName, groupSlotsByExecutingVoice, independentModelCountText } from "@/lib/panel/executingVoiceLabel";
 import { coerceStatus } from "@/lib/panel/normalize";
 import { modelHealthSubstitution, substitutedProviderNames } from "@/lib/panel/substitutionDisplay";
@@ -59,7 +59,7 @@ import {
 } from "@/lib/verificationGate/verificationGate";
 import { classifyClaimSeverity, ClaimSeverityResult } from "@/lib/verificationGate/claimSeverity";
 import { classifyGrounding, GroundingResult } from "@/lib/verificationGate/sourceGrounding";
-import { buildPanelVerdict, PanelVerdict } from "@/lib/verificationGate/panelVerdict";
+import { buildPanelVerdict, PanelVerdict, PANEL_VERDICT_SINGLE_MODEL_HEADING, NO_CONSENSUS_SCORE_SHARE_LINE } from "@/lib/verificationGate/panelVerdict";
 import {
   rollupPolicyConsensusSummary,
   type SynthesisConsensusSummaryDetail,
@@ -164,11 +164,17 @@ const SYNTHESIS_METRIC_CARD_CLASS =
 function SynthesisConsensusSummaryBox({
   summary,
   modelTotal,
+  independentModels,
 }: {
   summary: SynthesisConsensusSummaryDetail;
   modelTotal: number;
+  /** Independent executing models among the run's usable responses (independentSynthesisResponders). */
+  independentModels: number;
 }) {
   const denom = Math.max(1, modelTotal);
+  // "Model health" is independent executing models over scored responses. A summary stored before the
+  // independent-voice rule counted every answered slot; the shown numerator never exceeds what the run's rows prove.
+  const healthy = Math.min(summary.modelsHealthy, independentModels);
   const { label, tier } = synthesisConsensusPresentation(summary.overallConsensusScore);
   const st = SYNTHESIS_CONSENSUS_TIER_STYLES[tier];
 
@@ -202,11 +208,16 @@ function SynthesisConsensusSummaryBox({
         </div>
         <div className={SYNTHESIS_METRIC_CARD_CLASS}>
           <p
-            className={`text-lg font-bold tabular-nums ${synthesisModelHealthNumberClass(summary.modelsHealthy, denom)}`}
+            className={`text-lg font-bold tabular-nums ${synthesisModelHealthNumberClass(healthy, denom)}`}
           >
-            {summary.modelsHealthy}/{denom}
+            {healthy}/{denom}
           </p>
-          <p className="mt-1 text-sm leading-snug text-gray-500">Model health</p>
+          <p
+            className="mt-1 text-sm leading-snug text-gray-500"
+            title="Independent models out of the responses scored. Slots answered by the same substitute model count as one model."
+          >
+            Model health (independent models / responses)
+          </p>
         </div>
       </div>
     </div>
@@ -555,10 +566,10 @@ function PanelVerdictCard({
 
         {/* ── B) Two-column grid: Consensus + Disagreement ── */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Left: Top consensus */}
+          {/* Left: Top consensus — only with at least two independent executing models */}
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
             <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">
-              Top consensus
+              {verdict.crossModel ? "Top consensus" : PANEL_VERDICT_SINGLE_MODEL_HEADING}
             </span>
             <ul className="mt-2 space-y-1.5">
               <li className="flex items-start gap-2 text-sm text-slate-800 leading-relaxed">
@@ -566,7 +577,7 @@ function PanelVerdictCard({
                 <span className="whitespace-normal break-words">{verdict.topConsensus}</span>
               </li>
             </ul>
-            {verdict.consensusModelCount > 0 && (
+            {verdict.crossModel && verdict.consensusModelCount > 0 && (
               <p className="mt-2 text-[11px] text-slate-400">
                 Agreed by {verdict.consensusModelCount} model{verdict.consensusModelCount !== 1 ? "s" : ""}
               </p>
@@ -592,7 +603,7 @@ function PanelVerdictCard({
                     </li>
                   )}
                 </ul>
-                {verdict.disagreementModelCount > 0 && (
+                {verdict.crossModel && verdict.disagreementModelCount > 0 && (
                   <p className="mt-2 text-[11px] text-slate-400">
                     {verdict.disagreementModelCount} model{verdict.disagreementModelCount !== 1 ? "s" : ""} split
                   </p>
@@ -739,9 +750,7 @@ export default function PanelSynthesisView({
   // (lib/panel/independentVoices.ts): two slots answered by the DeepSeek
   // fallback are ONE model. Synthesis, the consensus score and cross-model
   // support are only offered / presented with at least two.
-  const independentResponderCount = independentVoices(
-    results.filter((r) => isUsableResult(r) && getModelText(r).trim().length > 0)
-  ).length;
+  const independentResponderCount = independentSynthesisResponders(results).length;
 
   // Cleanup: abort ongoing request on component unmount
   useEffect(() => {
@@ -900,7 +909,7 @@ export default function PanelSynthesisView({
         (r) => isUsableResult(r) && getModelText(r).trim().length > 0
       );
 
-      if (independentVoices(okResults).length < 2) {
+      if (!meetsIndependentSynthesisMinimum(okResults)) {
         throw new Error("Synthesis requires responses from at least 2 independent models.");
       }
 
@@ -1481,22 +1490,26 @@ export default function PanelSynthesisView({
     // stored data is never rewritten; it is just not presented as consensus).
     const crossModel = independentResponderCount >= 2;
     const modelTotalResolved = consensusMeta?.modelCount ?? Math.max(1, results.length);
-    const panelVerdict = buildPanelVerdict(question, report, gate, results);
+    const panelVerdict = buildPanelVerdict(question, report, gate, results, { crossModel });
     const policyRollup =
       consensusMeta != null
         ? rollupPolicyConsensusSummary(consensusMeta, report.keyFindings?.length ?? 0)
         : null;
 
+    // Share / memo text states what the screen states: the model count is of independent executing models, and with
+    // fewer than two there is no consensus score and no "where models agree" (the on-screen
+    // consensus-insufficient-independent-models treatment), whatever summary was stored.
+    const sharedModelCount = independentModelCountText(independentResponderCount);
     const handleGenerateLinkedIn = () => {
       const q = (question ?? "").trim();
       const score = consensusMeta?.overallConsensusScore ?? 0;
       const confidence = policyRollup?.confidenceLabel ?? "Medium";
       const findings = extractResearchKeyFindings(report);
-      const agreements = extractResearchAgreements(panelVerdict);
+      const agreements = crossModel ? extractResearchAgreements(panelVerdict) : [];
       const disagreements = extractResearchDisagreements(report);
 
-      const head = `I researched "${q.length > 120 ? `${q.slice(0, 117)}...` : q}" across 5 AI models simultaneously using ConvergePanel.`;
-      const parts: string[] = [head, "", `Consensus score: ${score}/100 (${confidence})`, ""];
+      const head = `I researched "${q.length > 120 ? `${q.slice(0, 117)}...` : q}" across ${sharedModelCount} simultaneously using ConvergePanel.`;
+      const parts: string[] = [head, "", crossModel ? `Consensus score: ${score}/100 (${confidence})` : NO_CONSENSUS_SCORE_SHARE_LINE, ""];
       if (findings.length > 0) {
         parts.push("Key findings:");
         findings.slice(0, 3).forEach((f) => parts.push(`→ ${f}`));
@@ -1526,9 +1539,9 @@ export default function PanelSynthesisView({
       const line = (f: string, max: number) => (f.length > max ? `${f.slice(0, max - 3)}...` : f);
 
       const parts: string[] = [
-        `Asked 5 AI models: "${q.length > 80 ? `${q.slice(0, 77)}...` : q}"`,
+        `Asked ${sharedModelCount}: "${q.length > 80 ? `${q.slice(0, 77)}...` : q}"`,
         "",
-        `Consensus: ${score}/100`,
+        crossModel ? `Consensus: ${score}/100` : NO_CONSENSUS_SCORE_SHARE_LINE,
         "",
       ];
       if (findings.length > 0) {
@@ -1587,7 +1600,7 @@ export default function PanelSynthesisView({
           )}
 
           {consensusMeta && crossModel && (
-            <SynthesisConsensusSummaryBox summary={consensusMeta} modelTotal={modelTotalResolved} />
+            <SynthesisConsensusSummaryBox summary={consensusMeta} modelTotal={modelTotalResolved} independentModels={independentResponderCount} />
           )}
           {consensusMeta && !crossModel && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900" data-testid="consensus-insufficient-independent-models">
@@ -1605,7 +1618,8 @@ export default function PanelSynthesisView({
                   const severity = classifyClaimSeverity(
                     finding.claim,
                     finding.confidence,
-                    finding.modelsSupporting?.length
+                    // Independent executing models, not slots (two DeepSeek-substituted slots are one model).
+                    finding.modelsSupporting ? groupSlotsByExecutingVoice(finding.modelsSupporting, results).length : undefined
                   );
                   const grounding = classifyGrounding(finding.claim, finding.evidenceRefs);
                   return (
@@ -1892,8 +1906,10 @@ export default function PanelSynthesisView({
                 consensusScore: consensusMeta?.overallConsensusScore ?? 0,
                 confidenceLabel: policyRollup?.confidenceLabel ?? "Medium",
                 evidenceQuality: policyRollup?.evidenceQuality ?? "mixed",
+                // Independent executing models: below two the memo states no consensus score and no agreement.
+                independentModelCount: independentResponderCount,
                 keyFindings: (report.keyFindings ?? []).map((k) => k.claim),
-                synthesisAgreements: panelVerdict.topConsensus ? [panelVerdict.topConsensus] : [],
+                synthesisAgreements: crossModel && panelVerdict.topConsensus ? [panelVerdict.topConsensus] : [],
                 synthesisDisagreements: disagreeLines,
                 confidenceAssessment:
                   report.executiveSummary?.trim() || panelVerdict.keyBlindSpot || "",

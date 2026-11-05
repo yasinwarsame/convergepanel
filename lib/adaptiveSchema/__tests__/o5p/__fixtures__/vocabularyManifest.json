@@ -2170,6 +2170,20 @@
   "rule": "research memo original methodology"
  },
  {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"CONSENSUS SCORE: none (fewer than two independent models responded; slots answered by the same substitute model count as one)\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "research memo original path, legacy panel only, when MemoInput.independentModelCount < 2 (fewer than two independent executing models): states that there is NO consensus score / cross-model agreement (connector fail-closed correction pass, 2026-11-05)"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"Fewer than two independent AI models responded to this question, so there is no cross-model agreement to report. Treat the findings as a single model's output.\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "research memo original path, legacy panel only, when MemoInput.independentModelCount < 2 (fewer than two independent executing models): states that there is NO consensus score / cross-model agreement (connector fail-closed correction pass, 2026-11-05)"
+ },
+ {
   "file": "lib/adaptiveSchema/dsProvenanceViewMin.ts",
   "literal": "\"Options were grouped by text similarity. Different options with similar wording (for example 3.5% vs 35%, or Approve vs Disapprove) can be merged; agreement on an option is not established.\"",
   "count": 1,

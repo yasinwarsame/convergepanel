@@ -92,11 +92,13 @@ export function buildLinkedInPost(params: LinkedInParams): string {
 
   // E) Consensus + agreed count
   const consensus = clamp(verdict.topConsensus, 200);
+  // Fewer than two independent executing models (verdict.crossModel === false): no consensus is claimed.
+  const crossModel = verdict.crossModel !== false;
   const agreedBy =
-    verdict.consensusModelCount > 0
+    crossModel && verdict.consensusModelCount > 0
       ? ` Agreed by ${verdict.consensusModelCount} model${verdict.consensusModelCount !== 1 ? "s" : ""}.`
       : "";
-  lines.push(`Consensus: ${consensus}${agreedBy}`);
+  lines.push(`${crossModel ? "Consensus" : "Finding (one independent model; not a consensus)"}: ${consensus}${agreedBy}`);
   lines.push("");
 
   // F) Disagreement (topic + short why, ~180 chars)

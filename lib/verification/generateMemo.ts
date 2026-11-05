@@ -64,6 +64,12 @@ export interface MemoInput {
   synthesisDisagreements?: string[];
   confidenceAssessment?: string;
   modelsUsed?: string[];
+  /**
+   * Research (legacy panel) memo only: the number of INDEPENDENT executing models among the usable responses (slots
+   * answered by one substitute model are one model). When supplied it is the model count the memo states, and below two
+   * the memo states no consensus score and no "where models agree" section. Absent → exactly the memo as before.
+   */
+  independentModelCount?: number;
 
   /**
    * Order 5 (Contract P): set ONLY by shareBuilders.buildAdaptiveMemoInput for an adaptive research report marked
@@ -463,7 +469,13 @@ function generateResearchMemo(input: MemoInput): string {
   const findings = dedupeCap(input.keyFindings ?? []);
   const agree = dedupeCap(input.synthesisAgreements ?? []);
   const disagree = dedupeCap(input.synthesisDisagreements ?? []);
-  const n = Math.max(1, input.modelsUsed?.length ?? 0);
+  const independent =
+    typeof input.independentModelCount === "number" && Number.isFinite(input.independentModelCount)
+      ? Math.max(0, Math.floor(input.independentModelCount))
+      : null;
+  const n = independent !== null ? Math.max(1, independent) : Math.max(1, input.modelsUsed?.length ?? 0);
+  // Fewer than two independent executing models: one model's output is not a consensus.
+  const noConsensus = independent !== null && independent < 2;
 
   lines.push("VERIFICATION MEMO");
   lines.push("ConvergePanel Multi-Model Research Report");
@@ -472,12 +484,18 @@ function generateResearchMemo(input: MemoInput): string {
   lines.push("RESEARCH QUERY");
   lines.push(`"${q}"`);
   lines.push("");
-  lines.push(`CONSENSUS SCORE: ${input.consensusScore}/100 (${input.confidenceLabel} confidence)`);
+  if (noConsensus) {
+    lines.push("CONSENSUS SCORE: none (fewer than two independent models responded; slots answered by the same substitute model count as one)");
+  } else {
+    lines.push(`CONSENSUS SCORE: ${input.consensusScore}/100 (${input.confidenceLabel} confidence)`);
+  }
   lines.push(`EVIDENCE QUALITY: ${input.evidenceQuality}`);
   lines.push("");
   lines.push("SUMMARY");
   lines.push(
-    `${n} AI models researched this question independently. ${researchSummarySentence(input.consensusScore, input.evidenceQuality)}`
+    noConsensus
+      ? "Fewer than two independent AI models responded to this question, so there is no cross-model agreement to report. Treat the findings as a single model's output."
+      : `${n} AI models researched this question independently. ${researchSummarySentence(input.consensusScore, input.evidenceQuality)}`
   );
   lines.push("");
 
@@ -487,7 +505,7 @@ function generateResearchMemo(input: MemoInput): string {
     lines.push("");
   }
 
-  if (agree.length) {
+  if (agree.length && !noConsensus) {
     lines.push("WHERE MODELS AGREE");
     agree.forEach((p) => lines.push(`- ${p}`));
     lines.push("");

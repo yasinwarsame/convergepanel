@@ -27,7 +27,7 @@
  * Pure: no I/O. Never reads anything the caller supplied.
  */
 import { isUsableResult } from "@/lib/panel/publicize";
-import { independentVoices } from "@/lib/panel/independentVoices";
+import { independentVoices, MIN_INDEPENDENT_SYNTHESIS_MODELS } from "@/lib/panel/independentVoices";
 import { composeSynthesisQuestion, readPersistedQuestionContext } from "@/lib/questionContext";
 
 export type AuthoritativeModelRow = {
@@ -50,7 +50,7 @@ export type AuthoritativeSynthesisInputsResult =
   | { ok: false; reason: "question_unavailable" | "results_unavailable" | "insufficient_results" };
 
 /** Minimum distinct INDEPENDENT executing models among the usable rows for a synthesis — the panel's own minimum. */
-export const MIN_AUTHORITATIVE_SYNTHESIS_ROWS = 2;
+export const MIN_AUTHORITATIVE_SYNTHESIS_ROWS = MIN_INDEPENDENT_SYNTHESIS_MODELS;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

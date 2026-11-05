@@ -587,6 +587,7 @@ function MarkedPositionMap({ claims, roster, provenance }: { claims: AlignedClai
 /** Exported — see UnifiedAnswerCard's export doc above. */
 export function AgreementDisagreementMap({ claims, modelsUsed }: { claims: AlignedClaim[]; modelsUsed: ModelId[] }) {
   const position = usePositionPresentation();
+  const runProvenance = useRunModelProvenance();
   if (position) return <MarkedPositionMap claims={claims} roster={position.roster} provenance={position.provenance} />;
   // Coverage-1 claims (a single model's own claim, never corroborated or
   // disputed by anyone else) aren't agreement data — they're rendered
@@ -606,6 +607,14 @@ export function AgreementDisagreementMap({ claims, modelsUsed }: { claims: Align
       <div className="space-y-3">
         {sorted.map((claim) => {
           const { agreeModels, disputeModels, silentModels } = bucketModelsByStance(claim, modelsUsed);
+          // A slot answered by the same substitute model as a slot already shown agreeing / disputing is that model
+          // again, not a silent second model: its "Silent" chip is not shown (counts are unchanged).
+          const executingKey = (m: string) => {
+            const facts = runProvenance?.find((f) => f && f.modelId === m);
+            return executingModelKey({ modelId: m, status: facts?.substituted === true ? "substituted" : "ok", provider: facts?.provider });
+          };
+          const voiced = new Set([...agreeModels, ...disputeModels].map(executingKey));
+          const silentChips = silentModels.filter((m) => !voiced.has(executingKey(m)));
           const isSplit = claim.status === "split";
           const isLimitedCoverage = claim.status === "limited_coverage";
           const contestedNote = describeContested(claim);
@@ -656,10 +665,10 @@ export function AgreementDisagreementMap({ claims, modelsUsed }: { claims: Align
                     ))}
                   </div>
                 )}
-                {silentModels.length > 0 && (
+                {silentChips.length > 0 && (
                   <div className="flex items-center gap-1 flex-wrap">
                     <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400">Silent</span>
-                    {silentModels.map((m) => (
+                    {silentChips.map((m) => (
                       <SlotChip key={`silent-${m}`} modelId={m} size="xs" className="opacity-50" />
                     ))}
                   </div>

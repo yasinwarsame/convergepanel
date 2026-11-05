@@ -71,3 +71,35 @@ export function independentVoices<T extends VoiceRow>(rows: readonly T[]): T[] {
   }
   return out;
 }
+
+/** The panel's synthesis minimum: at least this many INDEPENDENT executing models among the usable responses. */
+export const MIN_INDEPENDENT_SYNTHESIS_MODELS = 2;
+
+/** A client-held result row: live `ModelResult` or a reloaded run's public row. */
+export type ClientSynthesisRow = VoiceRow & { rawTextFull?: unknown; rawText?: unknown; text?: unknown };
+
+function clientRowText(row: ClientSynthesisRow): string {
+  for (const v of [row.rawTextFull, row.rawText, row.text]) {
+    if (typeof v === "string" && v.length > 0) return v;
+  }
+  return "";
+}
+
+/**
+ * The independent executing models a client holds usable responses from: rows that answered (ok / substituted) with
+ * non-empty text, reduced to one per executing model. The client mirror of the server synthesis gate
+ * (`authoritativeSynthesisInputs`, which applies the same reduction to the persisted rows).
+ */
+export function independentSynthesisResponders<T extends ClientSynthesisRow>(rows: readonly T[]): T[] {
+  const usable = rows.filter((r) => {
+    if (!r) return false;
+    const s = coerceStatus(r.status);
+    return (s === "ok" || s === "substituted") && clientRowText(r).trim().length > 0;
+  });
+  return independentVoices(usable);
+}
+
+/** True when the rows meet the synthesis minimum of independent executing models (client pre-flight / auto-trigger). */
+export function meetsIndependentSynthesisMinimum(rows: readonly ClientSynthesisRow[]): boolean {
+  return independentSynthesisResponders(rows).length >= MIN_INDEPENDENT_SYNTHESIS_MODELS;
+}

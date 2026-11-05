@@ -32,6 +32,7 @@ import EmailVerificationNotice from "@/components/EmailVerificationNotice";
 import { ModelId, ModelResult, ModelStatus, SynthesizedReport, RunPanelApiResponse, ConnectorStatus } from "@/lib/types";
 import { coerceStatus } from "@/lib/panel/normalize";
 import { isUsableResult } from "@/lib/panel/publicize";
+import { meetsIndependentSynthesisMinimum } from "@/lib/panel/independentVoices";
 import { synthesizeReport } from "@/lib/consensus";
 import { getModelDisplayNameSafe } from "@/lib/panelModels";
 import ModelPicker from "@/components/ModelPicker";
@@ -1409,8 +1410,10 @@ export default function Home() {
         (r) => isUsableResult(r) && ((r as any).rawTextFull?.trim()?.length > 0 || (r as any).rawText?.trim()?.length > 0 || (r as any).text?.trim()?.length > 0)
       );
 
-      if (okResults.length < 2) {
-        throw new Error("Synthesis requires at least 2 successful model responses.");
+      // At least 2 INDEPENDENT executing models, as the server gate requires
+      // (authoritativeSynthesisInputs): slots answered by one substitute model are one model.
+      if (!meetsIndependentSynthesisMinimum(okResults)) {
+        throw new Error("Synthesis requires responses from at least 2 independent models.");
       }
 
       // Build payload
@@ -2073,7 +2076,7 @@ export default function Home() {
           // adaptiveOutput marker triggers legacy auto-synthesis here.
           if (
             data.runId &&
-            (data.results as ModelResult[]).filter((r) => isUsableResult(r)).length >= 2 &&
+            meetsIndependentSynthesisMinimum(data.results as ModelResult[]) &&
             (data.adaptive?.status === "absent" || !data.adaptive)
           ) {
             void generateSynthesisAutomatically(
