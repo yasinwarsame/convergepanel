@@ -24,9 +24,16 @@ import {
 import { runModelFamilyName } from "@/lib/panel/runModelIdentity";
 import {
   consensusScoreWithheldReason,
-  storedRunConsensusIndependence,
   type ConsensusScoreWithheldReason,
+  type StoredConsensusIndependence,
 } from "@/lib/panel/independentVoices";
+import {
+  classifyStoredDisagreement,
+  storedRunIndependenceContext,
+  type QualifiedDisagreementBasis,
+  type StoredRunIndependenceContext,
+} from "@/lib/panel/storedDisagreementIndependence";
+
 import { buildAgreementDisagreementDigest } from "@/lib/verification/agreementDigest";
 import { governanceAdminListShapeForLog } from "@/lib/admin/config";
 import {
@@ -149,6 +156,8 @@ type QueueModelVerdictRow = {
   summary?: string;
 };
 
+type QueueQualifiedDisagreement = { text: string; basis: QualifiedDisagreementBasis };
+
 type RunSummary = {
   runId: string;
   collection: "runs" | "verifications" | "videoVerifications";
@@ -182,6 +191,13 @@ type RunSummary = {
   incorrectParts?: string[];
   /** Research: short key finding lines from stored synthesis when available. */
   keyFindings?: string[];
+  /**
+   * Research: stored disagreement lines that are NOT disagreements between independent executing models, each with the
+   * reason (lib/panel/storedDisagreementIndependence.ts). `disagreements` / `disagreementPoints` hold only genuine ones.
+   */
+  qualifiedDisagreements?: QueueQualifiedDisagreement[];
+  /** Research: present when the run's persisted rows do not prove ≥ 2 independent executing models. */
+  modelIndependence?: Exclude<StoredConsensusIndependence, "independent">;
   /** Short rationale line for claim verdict (first model summary). */
   claimVerdictSummary?: string;
   createdAt: string;
@@ -492,13 +508,20 @@ function buildVerificationQueueReviewExtras(data: Record<string, unknown>): {
   };
 }
 
-function pushDisagreementLine(out: string[], line: string) {
+/** One stored research disagreement: its display line and the raw stored item (kept for model attribution). */
+type StoredDisagreementLine = { text: string; item: unknown };
+
+/** How many lines of each research list the queue returns. */
+const RESEARCH_LIST_CAP = 3;
+
+function pushDisagreementLine(out: StoredDisagreementLine[], line: string, item: unknown) {
   const t = line.trim();
-  if (t && !out.includes(t)) out.push(t);
+  if (t && !out.some((o) => o.text === t)) out.push({ text: t, item });
 }
 
-function extractResearchDisagreementBullets(data: Record<string, unknown>): string[] {
-  const out: string[] = [];
+/** Every stored research disagreement line (uncapped; capped per display class after classification). */
+function extractResearchDisagreementBullets(data: Record<string, unknown>): StoredDisagreementLine[] {
+  const out: StoredDisagreementLine[] = [];
   const candidates = [
     data.synthesizedStructuredReport,
     data.synthesizedReportV2,
@@ -511,55 +534,52 @@ function extractResearchDisagreementBullets(data: Record<string, unknown>): stri
     const d1 = r.disagreements;
     if (Array.isArray(d1)) {
       for (const item of d1) {
-        if (typeof item === "string") pushDisagreementLine(out, item);
+        if (typeof item === "string") pushDisagreementLine(out, item, item);
         else if (item && typeof item === "object") {
           const o = item as Record<string, unknown>;
           const topic = String(o.topic ?? "");
           const why = String(o.whyTheyDiffer ?? o.description ?? o.summary ?? "");
           const point = topic && why ? `${topic}: ${why}` : topic || why;
-          pushDisagreementLine(out, truncate(point, 280));
+          pushDisagreementLine(out, truncate(point, 280), item);
         }
-        if (out.length >= 3) return out.slice(0, 3);
       }
     }
     const kd = r.keyDisagreements;
     if (Array.isArray(kd)) {
       for (const item of kd) {
-        if (typeof item === "string") pushDisagreementLine(out, item);
+        if (typeof item === "string") pushDisagreementLine(out, item, item);
         else if (item && typeof item === "object") {
           const o = item as Record<string, unknown>;
           const topic = String(o.topic ?? "");
           const summary = String(o.summary ?? "");
           const point = topic && summary ? `${topic}: ${summary}` : topic || summary;
-          pushDisagreementLine(out, truncate(point, 280));
+          pushDisagreementLine(out, truncate(point, 280), item);
         }
-        if (out.length >= 3) return out.slice(0, 3);
       }
     }
-    if (out.length >= 3) break;
   }
-  return out.slice(0, 3);
+  return out;
 }
 
 function extractResearchSynthesisQueueExtras(data: Record<string, unknown>): {
   keyFindings: string[];
-  disagreementPoints: string[];
+  disagreementPoints: StoredDisagreementLine[];
 } {
   const keyFindings: string[] = [];
-  const disagreementPoints: string[] = [];
+  const disagreementPoints: StoredDisagreementLine[] = [];
   const seenK = new Set<string>();
   const seenD = new Set<string>();
   const pushFinding = (raw: string) => {
     const t = raw.trim();
-    if (!t || seenK.has(t) || keyFindings.length >= 3) return;
+    if (!t || seenK.has(t) || keyFindings.length >= RESEARCH_LIST_CAP) return;
     seenK.add(t);
     keyFindings.push(truncate(t, 280));
   };
-  const pushDisagreementPoint = (raw: string) => {
+  const pushDisagreementPoint = (raw: string, item: unknown) => {
     const t = raw.trim();
-    if (!t || seenD.has(t) || disagreementPoints.length >= 3) return;
+    if (!t || seenD.has(t)) return;
     seenD.add(t);
-    disagreementPoints.push(truncate(t, 280));
+    disagreementPoints.push({ text: truncate(t, 280), item });
   };
 
   const synthRoot = data.structuredSynthesis ?? data.synthesis;
@@ -576,7 +596,7 @@ function extractResearchSynthesisQueueExtras(data: Record<string, unknown>): {
     const kf = r.keyFindings;
     if (Array.isArray(kf)) {
       for (const f of kf) {
-        if (keyFindings.length >= 3) break;
+        if (keyFindings.length >= RESEARCH_LIST_CAP) break;
         if (typeof f === "string") pushFinding(f);
         else if (f && typeof f === "object") {
           const o = f as Record<string, unknown>;
@@ -587,18 +607,39 @@ function extractResearchSynthesisQueueExtras(data: Record<string, unknown>): {
     const dg = r.disagreements;
     if (Array.isArray(dg)) {
       for (const d of dg) {
-        if (disagreementPoints.length >= 3) break;
-        if (typeof d === "string") pushDisagreementPoint(d);
+        if (typeof d === "string") pushDisagreementPoint(d, d);
         else if (d && typeof d === "object") {
           const o = d as Record<string, unknown>;
-          pushDisagreementPoint(String(o.point ?? o.description ?? o.topic ?? o.whyTheyDiffer ?? ""));
+          pushDisagreementPoint(String(o.point ?? o.description ?? o.topic ?? o.whyTheyDiffer ?? ""), d);
         }
       }
     }
-    if (keyFindings.length >= 3 && disagreementPoints.length >= 3) break;
   }
 
   return { keyFindings, disagreementPoints };
+}
+
+/**
+ * Split stored research disagreement lines by executing-model independence (lib/panel/storedDisagreementIndependence.ts):
+ * genuine cross-model disagreements stay disagreements; every other line is returned with the reason it is not one
+ * (same executing model, one independent model, independence unverified). Stored text is unchanged; each list is
+ * capped independently, so a qualified line never displaces a genuine one.
+ */
+function partitionResearchDisagreements(
+  lines: readonly StoredDisagreementLine[],
+  ctx: StoredRunIndependenceContext
+): { genuine: string[]; qualified: QueueQualifiedDisagreement[] } {
+  const genuine: string[] = [];
+  const qualified: QueueQualifiedDisagreement[] = [];
+  for (const line of lines) {
+    const basis = classifyStoredDisagreement(line.item, ctx);
+    if (basis === "cross_model") {
+      if (genuine.length < RESEARCH_LIST_CAP) genuine.push(line.text);
+    } else if (qualified.length < RESEARCH_LIST_CAP) {
+      qualified.push({ text: line.text, basis });
+    }
+  }
+  return { genuine, qualified };
 }
 
 function summarizeResearch(id: string, data: Record<string, unknown>, email: string): RunSummary {
@@ -613,14 +654,26 @@ function summarizeResearch(id: string, data: Record<string, unknown>, email: str
   }
 
   const gi = governanceInputFromResearchRun(data);
-  const disagreements = extractResearchDisagreementBullets(data);
-  const { keyFindings, disagreementPoints } = extractResearchSynthesisQueueExtras(data);
+  // Stored disagreements are presented as disagreements between models only when independent executing models wrote
+  // them; the rest are returned qualified (never erased, never as a cross-model split).
+  const independenceCtx = storedRunIndependenceContext(data);
+  const { genuine: disagreements, qualified: qualifiedFromBullets } = partitionResearchDisagreements(
+    extractResearchDisagreementBullets(data),
+    independenceCtx
+  );
+  const { keyFindings, disagreementPoints: storedPoints } = extractResearchSynthesisQueueExtras(data);
+  const { genuine: disagreementPoints, qualified: qualifiedFromPoints } = partitionResearchDisagreements(storedPoints, independenceCtx);
+  const qualifiedDisagreements: QueueQualifiedDisagreement[] = [];
+  for (const q of [...qualifiedFromBullets, ...qualifiedFromPoints]) {
+    if (qualifiedDisagreements.length >= RESEARCH_LIST_CAP) break;
+    if (!qualifiedDisagreements.some((x) => x.text === q.text)) qualifiedDisagreements.push(q);
+  }
   // A stored research score (and the cross-model evidence quality derived with it) is listed only when the persisted
   // rows prove ≥ 2 independent executing models (lib/panel/independentVoices.ts).
   const consensusWithheld =
     gi.consensusScore == null && gi.evidenceQuality == null
       ? undefined
-      : consensusScoreWithheldReason(storedRunConsensusIndependence(data));
+      : consensusScoreWithheldReason(independenceCtx.independence);
   return {
     runId: id,
     collection: "runs",
@@ -635,6 +688,8 @@ function summarizeResearch(id: string, data: Record<string, unknown>, email: str
     ...(disagreements.length > 0 ? { disagreements } : {}),
     ...(keyFindings.length > 0 ? { keyFindings } : {}),
     ...(disagreementPoints.length > 0 ? { disagreementPoints } : {}),
+    ...(qualifiedDisagreements.length > 0 ? { qualifiedDisagreements } : {}),
+    ...(independenceCtx.independence !== "independent" ? { modelIndependence: independenceCtx.independence } : {}),
     createdAt: new Date(firestoreMillis(data.createdAt) || Date.now()).toISOString(),
     userId: String(data.userId ?? ""),
     userEmail: email,

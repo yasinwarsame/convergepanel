@@ -23,7 +23,8 @@ import { isValidReviewThresholdValue } from "@/lib/governance/familyReviewThresh
 import ScoreTypeThresholdsSection from "@/components/governance/ScoreTypeThresholdsSection";
 import { buildPolicyPatch } from "@/components/governance/policyPatch";
 import { runModelFamilyName } from "@/lib/panel/runModelIdentity";
-import { CONSENSUS_WITHHELD_TEXT, type ConsensusScoreWithheldReason } from "@/lib/panel/independentVoices";
+import { CONSENSUS_WITHHELD_TEXT, type ConsensusScoreWithheldReason, type StoredConsensusIndependence } from "@/lib/panel/independentVoices";
+import { QUALIFIED_DISAGREEMENT_TEXT, type QualifiedDisagreementBasis } from "@/lib/panel/storedDisagreementIndependence";
 import {
   formatFullDatetime,
   formatRelativeTime,
@@ -66,6 +67,10 @@ type QueueRow = {
   correctParts?: string[];
   incorrectParts?: string[];
   keyFindings?: string[];
+  /** Research: stored disagreement lines that are not disagreements between independent models, with the reason. */
+  qualifiedDisagreements?: { text: string; basis: QualifiedDisagreementBasis }[];
+  /** Research: the run's persisted rows do not prove ≥ 2 independent executing models. */
+  modelIndependence?: Exclude<StoredConsensusIndependence, "independent">;
   claimVerdictSummary?: string;
   createdAt: string;
   userId: string;
@@ -651,6 +656,19 @@ export function queueConsensusText(row: Pick<QueueRow, "consensusScore" | "conse
   if (row.consensusScore == null) return "—";
   return withDenominator ? `${Math.round(row.consensusScore)}/100` : String(Math.round(row.consensusScore));
 }
+
+/**
+ * Heading of a research row's stored key findings: below two independent executing models (or with independence not
+ * recorded) they are one model's findings, never presented as the panel's.
+ */
+export function queueKeyFindingsHeading(row: Pick<QueueRow, "modelIndependence">): string {
+  if (row.modelIndependence === "insufficient") return "Key findings (synthesis — one independent model; not a consensus)";
+  if (row.modelIndependence === "unverified") return "Key findings (synthesis — model independence unverified)";
+  return "Key findings (synthesis)";
+}
+
+/** Heading of the stored disagreement lines that are not disagreements between independent models. */
+export const QUALIFIED_DISAGREEMENTS_HEADING = "Recorded differences not counted as model disagreements";
 
 function consensusColor(score: number | null): string {
   if (score == null) return "text-cp-faint";
@@ -1903,7 +1921,7 @@ export default function GovernanceDashboard() {
   );
 }
 
-function FragmentRow(props: {
+export function FragmentRow(props: {
   row: QueueRow;
   currentUserUid?: string;
   currentUserEmail?: string | null;
@@ -2122,7 +2140,7 @@ function FragmentRow(props: {
 
             {row.runType === "research" && row.keyFindings && row.keyFindings.length > 0 ? (
               <div className="mt-4 rounded-r-lg border-l-4 border-emerald-500 bg-emerald-50/80 pl-3 pr-3 py-3">
-                <p className="text-sm font-semibold text-emerald-900">Key findings (synthesis)</p>
+                <p className="text-sm font-semibold text-emerald-900">{queueKeyFindingsHeading(row)}</p>
                 <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-emerald-950/90">
                   {row.keyFindings.map((f, i) => (
                     <li key={i}>{f}</li>
@@ -2295,6 +2313,19 @@ function FragmentRow(props: {
                 <ul className="mt-1.5 list-disc space-y-1 pl-5 text-sm text-slate-700">
                   {row.disagreements.map((d, i) => (
                     <li key={i}>{d}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {row.runType === "research" && row.qualifiedDisagreements && row.qualifiedDisagreements.length > 0 ? (
+              <div className="mt-4" data-testid="queue-qualified-disagreements">
+                <p className="text-sm font-semibold text-cp-text">{QUALIFIED_DISAGREEMENTS_HEADING}</p>
+                <ul className="mt-1.5 list-disc space-y-1 pl-5 text-sm text-cp-muted">
+                  {row.qualifiedDisagreements.map((d, i) => (
+                    <li key={i}>
+                      {d.text} <span className="text-xs text-cp-faint">({QUALIFIED_DISAGREEMENT_TEXT[d.basis]})</span>
+                    </li>
                   ))}
                 </ul>
               </div>

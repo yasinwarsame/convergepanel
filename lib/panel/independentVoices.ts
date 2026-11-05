@@ -17,7 +17,10 @@
  *    later rows with the same executor are dropped from agreement counting.
  *    A substituted row that recorded no provider (older saved runs) is keyed
  *    "unknown" — all unrecorded substitutes together count as at most one
- *    voice (fail closed: never more independence than can be proven).
+ *    voice, and when the same set also holds a substitute with a recorded
+ *    provider the unrecorded ones merge into it (`resolveExecutingModelKeys`):
+ *    an unrecorded substitute may have been that same model, so it never adds
+ *    a voice (fail closed: never more independence than can be proven).
  *
  * The provider, not `actualModel`, is the key because `actualModel` is not
  * persisted on saved runs (runtimeModelProvenance, S2) and the DeepSeek
@@ -48,11 +51,26 @@ function recordedProvider(provider: unknown): string | null {
 /** The identity of the model that actually wrote this row's text. */
 export function executingModelKey(row: VoiceRow): string {
   if (coerceStatus(row.status) === "substituted") {
-    return `substitute:${recordedProvider(row.provider) ?? "unknown"}`;
+    const p = recordedProvider(row.provider);
+    return p ? `substitute:${p}` : UNRECORDED_SUBSTITUTE_KEY;
   }
   // Slot ids are lower-case everywhere; normalising here as the provider key
   // is normalised means a case variant can only merge (fewer voices), never split.
   return `slot:${String(row.modelId).trim().toLowerCase()}`;
+}
+
+/** `executingModelKey` of a substituted row whose provider was not recorded. */
+export const UNRECORDED_SUBSTITUTE_KEY = "substitute:unknown";
+
+/**
+ * Resolve the executing-model keys of ONE set of rows (same order, same length): an unrecorded substitute
+ * (`UNRECORDED_SUBSTITUTE_KEY`) is merged into the first recorded substitute key of the set, because the unrecorded row
+ * may have been answered by that same substitute model. With no recorded substitute in the set the keys are unchanged
+ * (all unrecorded substitutes already share one key). Can only merge, never split.
+ */
+export function resolveExecutingModelKeys(keys: readonly string[]): string[] {
+  const firstRecorded = keys.find((k) => k.startsWith("substitute:") && k !== UNRECORDED_SUBSTITUTE_KEY);
+  return firstRecorded ? keys.map((k) => (k === UNRECORDED_SUBSTITUTE_KEY ? firstRecorded : k)) : [...keys];
 }
 
 /**
@@ -61,14 +79,15 @@ export function executingModelKey(row: VoiceRow): string {
  * already filtered to usable (ok / substituted with text).
  */
 export function independentVoices<T extends VoiceRow>(rows: readonly T[]): T[] {
+  const keys = resolveExecutingModelKeys(rows.map((row) => executingModelKey(row)));
   const seen = new Set<string>();
   const out: T[] = [];
-  for (const row of rows) {
-    const key = executingModelKey(row);
-    if (seen.has(key)) continue;
+  rows.forEach((row, i) => {
+    const key = keys[i];
+    if (seen.has(key)) return;
     seen.add(key);
     out.push(row);
-  }
+  });
   return out;
 }
 
@@ -120,18 +139,29 @@ export function meetsIndependentSynthesisMinimum(rows: readonly ClientSynthesisR
  */
 export type StoredConsensusIndependence = "independent" | "insufficient" | "unverified";
 
-export function storedRunConsensusIndependence(data: Record<string, unknown> | null | undefined): StoredConsensusIndependence {
-  if (!data || typeof data !== "object") return "unverified";
+/**
+ * The persisted execution-identity rows of a STORED research run (`runDocument.perModel`, else `resultsCompact.perModel`),
+ * or null when execution identity cannot be established: no rows, or any row without a non-empty string `modelId` and a
+ * string `status`. Each row keeps its recorded `provider` and its stored text. Pure; never mutates the document.
+ */
+export function storedRunPerModelRows(data: Record<string, unknown> | null | undefined): ClientSynthesisRow[] | null {
+  if (!data || typeof data !== "object") return null;
   const fromRunDocument = (data.runDocument as { perModel?: unknown } | undefined)?.perModel;
   const perModel = Array.isArray(fromRunDocument) ? fromRunDocument : (data.resultsCompact as { perModel?: unknown } | undefined)?.perModel;
-  if (!Array.isArray(perModel) || perModel.length === 0) return "unverified";
+  if (!Array.isArray(perModel) || perModel.length === 0) return null;
   const rows: ClientSynthesisRow[] = [];
   for (const raw of perModel) {
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return "unverified";
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
     const r = raw as Record<string, unknown>;
-    if (typeof r.modelId !== "string" || r.modelId.trim().length === 0 || typeof r.status !== "string") return "unverified";
+    if (typeof r.modelId !== "string" || r.modelId.trim().length === 0 || typeof r.status !== "string") return null;
     rows.push({ modelId: r.modelId, status: r.status, provider: r.provider, rawTextFull: r.rawTextTruncated, rawText: r.rawText, text: r.text });
   }
+  return rows;
+}
+
+export function storedRunConsensusIndependence(data: Record<string, unknown> | null | undefined): StoredConsensusIndependence {
+  const rows = storedRunPerModelRows(data);
+  if (!rows) return "unverified";
   return meetsIndependentSynthesisMinimum(rows) ? "independent" : "insufficient";
 }
 

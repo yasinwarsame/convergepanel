@@ -21,7 +21,7 @@
  */
 
 import { coerceStatus } from "./normalize";
-import { executingModelKey } from "./independentVoices";
+import { executingModelKey, resolveExecutingModelKeys } from "./independentVoices";
 import { providerDisplayName, runModelFamilyName } from "./runModelIdentity";
 
 /** A row as any surface holds it: a result row (`status`) or provenance facts (`substituted`). */
@@ -84,12 +84,19 @@ export function groupSlotsByExecutingVoice(
 ): ExecutingVoiceGroup[] {
   const groups: ExecutingVoiceGroup[] = [];
   const byKey = new Map<string, ExecutingVoiceGroup>();
-  for (const raw of slotIds) {
-    const slotId = String(raw).trim();
-    if (slotId.length === 0) continue;
-    const row = rowFor(slotId, rows);
-    const substituted = isSubstitutedRow(row);
-    const key = executingModelKey({ modelId: slotId, status: substituted ? "substituted" : "ok", provider: row?.provider });
+  const entries = slotIds
+    .map((raw) => String(raw).trim())
+    .filter((slotId) => slotId.length > 0)
+    .map((slotId) => {
+      const row = rowFor(slotId, rows);
+      const substituted = isSubstitutedRow(row);
+      return { slotId, substituted, key: executingModelKey({ modelId: slotId, status: substituted ? "substituted" : "ok", provider: row?.provider }) };
+    });
+  // An unrecorded substitute merges into a recorded substitute of the same list (it may have been that model).
+  const keys = resolveExecutingModelKeys(entries.map((e) => e.key));
+  for (let i = 0; i < entries.length; i++) {
+    const { slotId, substituted } = entries[i];
+    const key = keys[i];
     const existing = byKey.get(key);
     if (existing) {
       if (!existing.slotIds.includes(slotId)) existing.slotIds.push(slotId);
@@ -101,7 +108,9 @@ export function groupSlotsByExecutingVoice(
   }
   for (const g of groups) {
     const families = g.slotIds.map((id) => runModelFamilyName(id)).join(", ");
-    g.label = g.substituted ? `${substituteName(rowFor(g.slotIds[0], rows)?.provider)} (substituting ${families})` : families;
+    // Name the substitute by a recorded provider when any slot of the group recorded one.
+    const recorded = g.slotIds.map((id) => rowFor(id, rows)?.provider).find((p) => providerDisplayName(p) !== null);
+    g.label = g.substituted ? `${substituteName(recorded ?? rowFor(g.slotIds[0], rows)?.provider)} (substituting ${families})` : families;
   }
   return groups;
 }
