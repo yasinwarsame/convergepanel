@@ -22,6 +22,11 @@ import {
   researchConsensusScoreFromRunDoc,
 } from "@/lib/governance/governanceInputFromDocs";
 import { runModelFamilyName } from "@/lib/panel/runModelIdentity";
+import {
+  consensusScoreWithheldReason,
+  storedRunConsensusIndependence,
+  type ConsensusScoreWithheldReason,
+} from "@/lib/panel/independentVoices";
 import { buildAgreementDisagreementDigest } from "@/lib/verification/agreementDigest";
 import { governanceAdminListShapeForLog } from "@/lib/admin/config";
 import {
@@ -151,6 +156,12 @@ type RunSummary = {
   question: string;
   consensusScore: number | null;
   evidenceQuality: string | null;
+  /**
+   * Research rows only: the stored consensus score / evidence quality are withheld from this list (both null) because
+   * the run's persisted rows reduce to fewer than two independent executing models, or record no execution identity.
+   * Display only — the governance evaluation input and the stored run are unchanged.
+   */
+  consensusWithheld?: ConsensusScoreWithheldReason;
   governanceStatus: GovernanceStatus;
   governanceReasons: string[];
   modelHealth: { ok: number; substituted: number; failed: number };
@@ -604,13 +615,20 @@ function summarizeResearch(id: string, data: Record<string, unknown>, email: str
   const gi = governanceInputFromResearchRun(data);
   const disagreements = extractResearchDisagreementBullets(data);
   const { keyFindings, disagreementPoints } = extractResearchSynthesisQueueExtras(data);
+  // A stored research score (and the cross-model evidence quality derived with it) is listed only when the persisted
+  // rows prove ≥ 2 independent executing models (lib/panel/independentVoices.ts).
+  const consensusWithheld =
+    gi.consensusScore == null && gi.evidenceQuality == null
+      ? undefined
+      : consensusScoreWithheldReason(storedRunConsensusIndependence(data));
   return {
     runId: id,
     collection: "runs",
     runType: "research",
     question: truncate(String(data.question ?? data.query ?? ""), 200),
-    consensusScore: gi.consensusScore,
-    evidenceQuality: gi.evidenceQuality,
+    consensusScore: consensusWithheld ? null : gi.consensusScore,
+    evidenceQuality: consensusWithheld ? null : gi.evidenceQuality,
+    ...(consensusWithheld ? { consensusWithheld } : {}),
     governanceStatus: normalizeGovernanceStatus(String(data.governanceStatus ?? "needs_review")),
     governanceReasons: Array.isArray(data.governanceReasons) ? (data.governanceReasons as string[]) : [],
     modelHealth: gi.modelHealth,

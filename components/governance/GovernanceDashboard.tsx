@@ -23,6 +23,7 @@ import { isValidReviewThresholdValue } from "@/lib/governance/familyReviewThresh
 import ScoreTypeThresholdsSection from "@/components/governance/ScoreTypeThresholdsSection";
 import { buildPolicyPatch } from "@/components/governance/policyPatch";
 import { runModelFamilyName } from "@/lib/panel/runModelIdentity";
+import { CONSENSUS_WITHHELD_TEXT, type ConsensusScoreWithheldReason } from "@/lib/panel/independentVoices";
 import {
   formatFullDatetime,
   formatRelativeTime,
@@ -50,6 +51,8 @@ type QueueRow = {
   question: string;
   consensusScore: number | null;
   evidenceQuality: string | null;
+  /** Research: stored score withheld — fewer than two independent executing models, or independence not recorded. */
+  consensusWithheld?: ConsensusScoreWithheldReason;
   governanceStatus: "approved" | "needs_review" | "blocked";
   governanceReasons: string[];
   modelHealth: { ok: number; substituted: number; failed: number };
@@ -687,8 +690,11 @@ function ReviewModal(props: {
 
   const isBlock = mode === "blocked";
   const title = isBlock ? "Block this run" : "Request changes on this run";
-  const consensus =
-    row.consensusScore == null ? "—" : `${Math.round(row.consensusScore)}/100`;
+  const consensus = row.consensusWithheld
+    ? CONSENSUS_WITHHELD_TEXT[row.consensusWithheld]
+    : row.consensusScore == null
+      ? "—"
+      : `${Math.round(row.consensusScore)}/100`;
   const statusLabel =
     row.governanceStatus === "needs_review"
       ? "Needs Review"
@@ -2004,7 +2010,15 @@ function FragmentRow(props: {
           )}
         </td>
         <td className={`px-3 py-2 font-semibold ${consensusColor(row.consensusScore)}`}>
-          {row.consensusScore == null ? "—" : Math.round(row.consensusScore)}
+          {row.consensusWithheld ? (
+            <span title={CONSENSUS_WITHHELD_TEXT[row.consensusWithheld]} className="text-xs font-normal text-cp-muted">
+              {CONSENSUS_WITHHELD_TEXT[row.consensusWithheld]}
+            </span>
+          ) : row.consensusScore == null ? (
+            "—"
+          ) : (
+            Math.round(row.consensusScore)
+          )}
         </td>
         <td className="hidden px-3 py-2 md:table-cell">
           <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${ev.cls}`}>

@@ -12,6 +12,7 @@ import type { ClaimVerificationFirestoreDoc } from "@/lib/firestore/verification
 import type { PanelHistoryItem, PanelHistoryResearchItem } from "@/lib/user/panelHistory";
 import type { ModelId } from "@/lib/types";
 import { createRunWorkspaceIntegrityBatch } from "@/lib/workspaces/runWorkspaceIntegrityBatch";
+import { consensusScoreWithheldReason, storedRunConsensusIndependence } from "@/lib/panel/independentVoices";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -132,8 +133,12 @@ export async function GET(req: NextRequest) {
         : undefined;
 
       const synSum = data.synthesisConsensusSummary as { overallConsensusScore?: number } | undefined;
-      const synthesisConsensusScore =
-        typeof synSum?.overallConsensusScore === "number" ? synSum.overallConsensusScore : undefined;
+      const storedScore = typeof synSum?.overallConsensusScore === "number" ? synSum.overallConsensusScore : undefined;
+      // A stored score is shown only when the persisted rows prove ≥ 2 independent executing models
+      // (lib/panel/independentVoices.ts); otherwise it is withheld with the reason. Stored data is unchanged.
+      const synthesisConsensusWithheld =
+        storedScore === undefined ? undefined : consensusScoreWithheldReason(storedRunConsensusIndependence(data));
+      const synthesisConsensusScore = synthesisConsensusWithheld ? undefined : storedScore;
 
       // Query-Routing Redesign, Phase 1 — summary-only: read just the
       // discriminator field off the persisted envelope, never the full
@@ -154,6 +159,7 @@ export async function GET(req: NextRequest) {
           modelsOk,
           modelsTotal: modelsTotal || undefined,
           synthesisConsensusScore,
+          ...(synthesisConsensusWithheld ? { synthesisConsensusWithheld } : {}),
           governanceStatus: normalizeGovernanceStatus(data.governanceStatus),
           ...(hasAdaptiveOutput ? { hasAdaptiveOutput, adaptiveSchemaId } : {}),
         },

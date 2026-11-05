@@ -9,6 +9,18 @@
 
 import type { EnrichedLegacyTeamRunListItemV1 } from "@/lib/governance/teamReviewQueueEnrichment";
 
+/**
+ * A legacy team-queue row (`teamRuns`) stores a consensus score but no per-model execution identity, so it cannot be
+ * established that at least two independent models contributed (lib/panel/independentVoices.ts). The stored score is
+ * shown only with that qualification — never as unqualified multi-model agreement.
+ */
+export const LEGACY_CONSENSUS_INDEPENDENCE_QUALIFIER = "model independence not recorded";
+
+export function legacyConsensusText(score: number | null | undefined): string {
+  if (score == null || !Number.isFinite(score)) return "No consensus score";
+  return `Consensus ${Math.round(score)}/100 (${LEGACY_CONSENSUS_INDEPENDENCE_QUALIFIER})`;
+}
+
 function formatCreatedAt(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
@@ -37,7 +49,7 @@ export default function LegacyReviewListItem({ item }: { item: EnrichedLegacyTea
           {item.policyFlags.length} policy flag{item.policyFlags.length === 1 ? "" : "s"}
         </span>
         <span aria-hidden>&middot;</span>
-        <span>{item.consensusScore != null ? `Consensus ${Math.round(item.consensusScore)}/100` : "No consensus score"}</span>
+        <span>{legacyConsensusText(item.consensusScore)}</span>
         <span aria-hidden>&middot;</span>
         <span>{decisionLabel}</span>
       </div>

@@ -3,6 +3,7 @@
  */
 
 import type { ModelId } from "@/lib/types";
+import type { ConsensusScoreWithheldReason } from "@/lib/panel/independentVoices";
 import type { QueryType } from "@/lib/adaptiveSchema/types";
 
 /** Stored on run / verification docs when org governance evaluation ran. */
@@ -17,8 +18,12 @@ export type PanelHistoryResearchItem = {
   status?: string;
   modelsOk?: number;
   modelsTotal?: number;
-  /** From stored synthesis consensus summary when available (0–100). */
+  /**
+   * From stored synthesis consensus summary when available (0–100) AND the run's persisted rows prove at least two
+   * independent executing models; otherwise absent and `synthesisConsensusWithheld` says why.
+   */
   synthesisConsensusScore?: number;
+  synthesisConsensusWithheld?: ConsensusScoreWithheldReason;
   governanceStatus?: PanelHistoryGovernanceStatus;
   /**
    * Query-Routing Redesign, Phase 1 — summary-only signal that a versioned
