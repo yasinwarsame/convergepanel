@@ -199,6 +199,10 @@ describe("M1. fewer than two independent executing models: no agreement / eviden
     expect(s.card).not.toContain("Founding date");
     expect(s.card).toContain(NO_CROSS_MODEL_COMPARISON_TEXT);
     expect(hasDisagreementsSection(r)).toBe(false);
+    // The gate's disagreement reasons / steps are not fed by one model's positions either.
+    for (const t of [s.gate, s.markdown]) {
+      expect(t).not.toMatch(/Model disagreement on a core conclusion|Minor nuance differences|Isolate the disputed premise/);
+    }
     expect(mockMemoInputs.length === 0 || mockMemoInputs[0].synthesisDisagreements.length === 0).toBe(true);
   });
 });
@@ -229,6 +233,8 @@ describe("M1 controls: two genuinely independent models keep agreement, evidence
     expect(s.card).toContain("2 models split");
     expect(s.card).not.toContain(NO_CROSS_MODEL_COMPARISON_TEXT);
     expect(hasDisagreementsSection(r)).toBe(true);
+    // Control: a real disagreement still drives the gate's disagreement reason.
+    expect(s.gate).toMatch(/Model disagreement on a core conclusion \(1\)|Minor nuance differences noted \(1\)/);
   });
 
   it("two DeepSeek slots + Grok: the DeepSeek-vs-DeepSeek 'disagreement' is dropped, the DeepSeek-vs-Grok one is kept", async () => {
