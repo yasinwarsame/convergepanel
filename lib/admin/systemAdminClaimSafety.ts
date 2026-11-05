@@ -23,12 +23,15 @@
  * user, claim wipe, accidental write) and make every honest write attributable
  * in `admin_audit_logs` and in a local result file.
  *
- * SEAM FOR PR #294 (operator production grant). Credential evidence carries a
- * `source` discriminant. Today the only source is `"explicit-key-file"`
- * (validated here by `validateServiceAccountKey`). When the operator grant
- * from PR #294 lands, the script adds a second source (`"operator-grant"`) and
- * replaces its credential loader; nothing in this module's planning, argv,
- * confirmation or audit logic depends on how the credential was obtained.
+ * CREDENTIAL SOURCE SEAM. Credential evidence carries a `source`
+ * discriminant. Today the only source is `"explicit-key-file"` (validated here
+ * by `validateServiceAccountKey`). PR #294 (Firebase environment isolation,
+ * merged as 8a6ea65) added the operator production grant
+ * (`scripts/lib/operatorProductionAccess.ts`); THIS tool has not adopted it
+ * yet — that is a pending follow-up. Adopting it adds a second source
+ * (`"operator-grant"`) and replaces the script's credential loader; nothing in
+ * this module's planning, argv, confirmation or audit logic depends on how the
+ * credential was obtained.
  */
 
 import * as nodePath from "node:path";
@@ -143,6 +146,12 @@ export type PostWriteFailure =
   | "audit_attempt_failed"
   | "mint_failed"
   | "sessions_revoke_failed"
+  /**
+   * The revocation call returned, but the read-back `tokensValidAfterTime`
+   * could not be shown to cover the claim-removal time from a server clock
+   * (no server-time anchor, no read-back value, or a value below the cutoff).
+   */
+  | "sessions_revoke_unverified"
   | "users_doc_failed"
   | "verification_failed"
   | "audit_outcome_missing";
@@ -468,13 +477,27 @@ export type UserRecordLike = {
   tokensValidAfterTime?: string;
 };
 
-/** `disabled === false` strictly: a missing or non-boolean value refuses (admin-authority-tiers.md). */
-export function checkTargetRecord(record: UserRecordLike, targetUid: string): Refusal | null {
+/**
+ * GRANT requires `disabled === false` strictly: a disabled account, or one
+ * whose disabled state is missing / not a boolean, never receives SYSTEM_ADMIN
+ * (admin-authority-tiers.md).
+ *
+ * REVOKE is privilege REMOVAL and is allowed on a disabled account (owner
+ * decision 2026-11-06): an operator who disabled a compromised admin must
+ * still be able to strip the claim and revoke its sessions. The tool never
+ * changes the `disabled` flag in either direction — it has no port that can.
+ * A revoke still refuses a record whose disabled state is not a boolean
+ * (malformed record; fail closed).
+ */
+export function checkTargetRecord(record: UserRecordLike, targetUid: string, operation: ClaimOperation): Refusal | null {
   if (record.uid !== targetUid) {
     return refuse("target_mismatch", "Refusing: the Auth record returned does not have the requested UID.");
   }
-  if (record.disabled !== false) {
-    return refuse("target_disabled", "Refusing: the target account is disabled (or its disabled state is unknown).");
+  if (operation === "grant" && record.disabled !== false) {
+    return refuse("target_disabled", "Refusing: the target account is disabled (or its disabled state is unknown). A disabled account is never granted admin.");
+  }
+  if (operation === "revoke" && typeof record.disabled !== "boolean") {
+    return refuse("target_disabled", "Refusing: the target account's disabled state is unknown (not a boolean).");
   }
   return null;
 }
@@ -727,21 +750,119 @@ export function verifyReadBack(plan: ClaimPlan, readBackClaims: unknown): { ok: 
 }
 
 /**
- * Session revocation is proven from SERVER timestamps only: the read-back
- * `tokensValidAfterTime` must be strictly later than the value read from the
- * same Auth record before the write. The local clock is never consulted, so
- * operator clock skew in either direction cannot fake or mask the result.
- * (One-second resolution: a revocation in the same second as a previous one
- * reads as "did not advance" and fails closed.)
+ * SESSION REVOCATION EVIDENCE (see the runbook, "How revocation is verified").
+ *
+ * firebase-admin's `revokeRefreshTokens(uid)` sends
+ * `validSince: Math.floor(new Date().getTime() / 1000)` — the OPERATOR'S LOCAL
+ * clock (firebase-admin 12.7.0, lib/auth/auth-api-request.js:1261). Auth
+ * stores that value as `tokensValidAfterTime`; a session is revoked when its
+ * `auth_time` (whole seconds) is strictly earlier
+ * (lib/auth/base-auth.js:968-972). A slow operator clock therefore leaves
+ * sessions signed in during the lag valid, and "the value advanced" proves
+ * nothing about coverage.
+ *
+ * What must hold: every session that could have seen `admin: true` started
+ * before the claim removal took effect, so `tokensValidAfterTime` must be
+ * later than the SERVER time at which the removal took effect. The tool
+ * proves that against a server clock:
+ *   anchor  = the Firestore commit time of a write issued only AFTER the claim
+ *             write returned (the users/{uid}.role mirror), checked to be later
+ *             than the attempt row's commit time (same clock), so a stale
+ *             "previous update time" can never pass as the anchor;
+ *   cutoff  = anchor whole seconds + 1 + REVOCATION_SKEW_MARGIN_SECONDS;
+ *   verified iff the read-back tokensValidAfterTime (whole seconds) >= cutoff.
+ * The +1 covers the second containing the anchor (auth_time is truncated to
+ * seconds and the comparison is strict). The margin absorbs clock skew between
+ * Firestore and Firebase Auth servers, for which Google publishes no bound
+ * (residual risk, documented). The local clock is never used as evidence.
  */
-export function verifySessionsRevoked(afterTokensValidAfterTime: string | undefined, beforeTokensValidAfterTime: string | undefined): boolean {
-  if (typeof afterTokensValidAfterTime !== "string") return false;
-  const after = Date.parse(afterTokensValidAfterTime);
-  if (!Number.isFinite(after)) return false;
-  if (beforeTokensValidAfterTime === undefined) return true;
-  const before = Date.parse(beforeTokensValidAfterTime);
-  return Number.isFinite(before) && after > before;
+export const REVOCATION_SKEW_MARGIN_SECONDS = 2;
+
+/** A server timestamp (Firestore `Timestamp` shape: whole seconds + nanoseconds). */
+export type ServerTime = { seconds: number; nanoseconds: number };
+
+function isServerTime(t: unknown): t is ServerTime {
+  if (t === null || typeof t !== "object") return false;
+  const o = t as Record<string, unknown>;
+  return Number.isSafeInteger(o.seconds) && (o.seconds as number) > 0
+    && Number.isInteger(o.nanoseconds) && (o.nanoseconds as number) >= 0 && (o.nanoseconds as number) < 1e9;
 }
+
+function serverTimeAfter(a: ServerTime, b: ServerTime): boolean {
+  return a.seconds > b.seconds || (a.seconds === b.seconds && a.nanoseconds > b.nanoseconds);
+}
+
+export function serverTimeIso(t: ServerTime): string {
+  return new Date(t.seconds * 1000 + Math.floor(t.nanoseconds / 1e6)).toISOString();
+}
+
+/**
+ * Accepts the anchor only when it is a well-formed server time strictly later
+ * than the attempt row's commit time (both Firestore commit times, so the
+ * comparison is on one clock). Firestore reports a write that did not change
+ * the document with the document's PREVIOUS update time; the role write always
+ * changes the document (`updatedAt: serverTimestamp()`), and this check fails
+ * closed if that ever stops being true.
+ */
+export function checkRevocationAnchor(
+  anchor: unknown,
+  attemptCommitTime: unknown,
+): { ok: true; anchor: ServerTime } | { ok: false; detail: string } {
+  if (!isServerTime(anchor)) return { ok: false, detail: "the role write returned no usable server commit time" };
+  if (!isServerTime(attemptCommitTime)) return { ok: false, detail: "the attempt row returned no usable server commit time to check the anchor against" };
+  if (!serverTimeAfter(anchor, attemptCommitTime)) {
+    return { ok: false, detail: "the role write's commit time is not later than the attempt row's (stale or no-op write time)" };
+  }
+  return { ok: true, anchor };
+}
+
+/** Whole-second cutoff (Unix seconds) that `tokensValidAfterTime` must reach. */
+export function revocationCutoffSeconds(anchor: ServerTime): number {
+  return anchor.seconds + 1 + REVOCATION_SKEW_MARGIN_SECONDS;
+}
+
+/**
+ * Compares the server's read-back `tokensValidAfterTime` with the
+ * server-derived cutoff. Never consults the local clock.
+ */
+export function verifySessionsRevoked(
+  afterTokensValidAfterTime: unknown,
+  cutoffSeconds: number,
+): { ok: true; validSinceSeconds: number } | { ok: false; detail: string; validSinceSeconds: number | null } {
+  if (typeof afterTokensValidAfterTime !== "string") {
+    return { ok: false, detail: "the read-back Auth record has no tokensValidAfterTime", validSinceSeconds: null };
+  }
+  const ms = Date.parse(afterTokensValidAfterTime);
+  if (!Number.isFinite(ms)) {
+    return { ok: false, detail: "the read-back tokensValidAfterTime is not a date", validSinceSeconds: null };
+  }
+  const validSinceSeconds = Math.floor(ms / 1000);
+  if (!Number.isSafeInteger(cutoffSeconds) || cutoffSeconds <= 0) {
+    return { ok: false, detail: "no valid server-derived cutoff", validSinceSeconds };
+  }
+  if (validSinceSeconds < cutoffSeconds) {
+    return {
+      ok: false,
+      validSinceSeconds,
+      detail: `tokensValidAfterTime ${new Date(validSinceSeconds * 1000).toISOString()} is earlier than the server-derived cutoff ${new Date(cutoffSeconds * 1000).toISOString()}: sessions started while the admin claim was present may still be valid. revokeRefreshTokens uses the operator's local clock; it is probably behind server time — sync it (NTP) and re-run`,
+    };
+  }
+  return { ok: true, validSinceSeconds };
+}
+
+/** Recorded in the result file and the outcome audit row of every revoke. */
+export type SessionRevocationEvidence = {
+  anchorSource: "firestore-commit-time:users/{uid}.role";
+  anchorServerTime: string | null;
+  marginSeconds: number;
+  cutoff: string | null;
+  tokensValidAfterTimeBefore: string | null;
+  tokensValidAfterTimeAfter: string | null;
+  /** Read-back validSince minus the anchor, in seconds (positive = ahead of server time). */
+  validSinceMinusAnchorSeconds: number | null;
+  verified: boolean;
+  detail: string | null;
+};
 
 // ---------------------------------------------------------------------------
 // Audit record (matches lib/admin/auditLog.ts#AuditLogEntry)
@@ -809,6 +930,8 @@ export function buildClaimAuditRecord<TS>(input: {
   outcome?: AuditOutcome;
   /** Every failure recorded by the run, in order (not only the first). */
   outcomeDetails?: readonly string[];
+  /** Revoke outcome rows: the session-revocation evidence. */
+  sessionRevocationEvidence?: SessionRevocationEvidence | null;
   /**
    * Outcome rows only: whether each `after` field was actually read back.
    * Missing (or any "failed") => `afterSemantics: "unknown"`; fail closed.
@@ -863,6 +986,13 @@ export function buildClaimAuditRecord<TS>(input: {
   const fullyRead = readBack !== undefined && readBack.customClaims === "read" && readBack.usersDocRole === "read";
   let outcome: AuditOutcome | undefined = input.phase === "outcome" ? (input.outcome ?? "verification_failed") : undefined;
   if (outcome !== undefined && !fullyRead && isCompletedOutcome(outcome)) outcome = "verification_failed";
+  // A revoke is only ever recorded as completed with VERIFIED session-revocation evidence.
+  if (outcome !== undefined && input.operation === "revoke" && isCompletedOutcome(outcome) && input.sessionRevocationEvidence?.verified !== true) {
+    outcome = "sessions_revoke_unverified";
+  }
+  if (input.phase === "outcome" && input.operation === "revoke") {
+    metadata.sessionRevocationEvidence = input.sessionRevocationEvidence ?? null;
+  }
   metadata.completed = outcome !== undefined && isCompletedOutcome(outcome);
   metadata.afterSemantics = input.phase === "attempt" ? "intended-not-applied" : fullyRead ? "read-back" : "unknown";
   if (readBack !== undefined) metadata.readBack = readBack;

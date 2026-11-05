@@ -37,11 +37,19 @@
  * Custody of that key file is the real security boundary — anyone holding it
  * can bypass every check in this file (see lib/admin/systemAdminClaimSafety.ts).
  *
- * SEAM FOR PR #294. `loadOperatorCredential` below is the single place that
- * turns operator input into a credential. When the operator production grant
- * (scripts/lib/operatorProductionAccess.ts) merges, it replaces this function
- * (and becomes this file's first import); the executor, the audit schema and
- * the confirmation format are unchanged by that swap.
+ * PROJECT BINDING is by construction, not by a network check: the key's
+ * project_id must equal --confirm-project, and the app is initialised with
+ * that explicit projectId (no ambient project discovery). runCli's comparison
+ * of the factory's projectId with --confirm-project is a local consistency
+ * assertion over the factory; it makes no call to Google and cannot detect
+ * anything the key's project_id did not already determine.
+ *
+ * CREDENTIAL SEAM. `loadOperatorCredential` below is the single place that
+ * turns operator input into a credential. PR #294 (merged, 8a6ea65) added the
+ * operator production grant (scripts/lib/operatorProductionAccess.ts); this
+ * tool has NOT adopted it yet — a pending follow-up. Adopting it replaces this
+ * function (and makes the grant this file's first import); the executor, the
+ * audit schema and the confirmation format are unchanged by that swap.
  */
 
 import { execFileSync } from "node:child_process";
@@ -148,6 +156,8 @@ export type CliIo = {
   git: () => { sha: string | null; dirty: boolean | null };
   nowMs: () => number;
   randomPart: () => string;
+  /** A timer wait (see ExecutionDeps.sleepMs). */
+  sleepMs: (ms: number) => Promise<void>;
 };
 
 export type FirebaseHandle = {
@@ -174,7 +184,7 @@ export type CliOptions = {
 };
 
 // ---------------------------------------------------------------------------
-// Credential loading — the PR #294 seam
+// Credential loading — the credential seam (PR #294 grant adoption is a pending follow-up)
 
 type LoadedCredential = { evidence: ServiceAccountEvidence; privateKey: string };
 
@@ -519,6 +529,7 @@ export async function runCli(opts: CliOptions): Promise<number> {
         privateKey: loaded.credential.privateKey,
         appName: `system-admin-claim-${requestId}`,
       });
+      // Local consistency assertion (see "PROJECT BINDING" above): not a network check.
       if (firebase.projectId !== args.confirmProject) {
         early = refuse("project_confirmation_mismatch", "Refusing: the initialised Firebase app's project does not equal --confirm-project.");
       } else {
@@ -529,6 +540,7 @@ export async function runCli(opts: CliOptions): Promise<number> {
             auth: trackAuthWrites(firebase.auth, markWrite),
             store: trackStoreWrites(firebase.store, markWrite),
             timestampNow: firebase.timestampNow,
+            sleepMs: io.sleepMs,
             readOperatorToken: makeOperatorTokenReader(io),
             git,
             log: io.stdout,
@@ -640,11 +652,17 @@ export const realFirebaseFactory: FirebaseFactory = ({ projectId, clientEmail, p
         const role = snap.exists ? snap.get("role") : null;
         return typeof role === "string" ? role : null;
       },
+      // Both resolve with the SERVER commit time (WriteResult.writeTime). The
+      // role write always changes the document (updatedAt is a server
+      // timestamp), so its writeTime is this commit's time, never the
+      // document's previous update time (which Firestore reports for a no-op).
       writeUsersDocRole: async (uid, role) => {
-        await db.collection("users").doc(uid).set({ role, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+        const r = await db.collection("users").doc(uid).set({ role, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+        return { seconds: r.writeTime.seconds, nanoseconds: r.writeTime.nanoseconds };
       },
       createAuditRow: async (auditRowId, record) => {
-        await db.collection(AUDIT_COLLECTION).doc(auditRowId).create(record);
+        const r = await db.collection(AUDIT_COLLECTION).doc(auditRowId).create(record);
+        return { seconds: r.writeTime.seconds, nanoseconds: r.writeTime.nanoseconds };
       },
     },
     timestampNow: () => Timestamp.now(),
@@ -858,6 +876,7 @@ export function realIo(repoRoot: string, fsx: FsLayer = fs): CliIo {
     },
     nowMs: () => Date.now(),
     randomPart: () => randomBytes(6).toString("hex"),
+    sleepMs: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   };
 }
 

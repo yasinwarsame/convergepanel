@@ -63,6 +63,9 @@ type Env = {
   writes: string[];
   users: Map<string, UserRecordLike>;
   role: string | null;
+  /** Server clock (ms). The operator clock is serverMs + skewMs; revokeRefreshTokens stamps from the operator clock (as the SDK does). */
+  serverMs: number;
+  skewMs: number;
 };
 
 function makeEnv(): Env {
@@ -82,8 +85,14 @@ function makeEnv(): Env {
       [OPERATOR, { uid: OPERATOR, email: "op@example.com", disabled: false, customClaims: { admin: true } }],
     ]),
     role: "user",
+    serverMs: Date.parse("2026-11-05T10:00:00.250Z"),
+    skewMs: 0,
   };
 }
+const serverTime = (e: Env) => {
+  e.serverMs += 30;
+  return { seconds: Math.floor(e.serverMs / 1000), nanoseconds: (e.serverMs % 1000) * 1e6 };
+};
 
 function fakeIo(e: Env, over: Partial<CliIo> = {}): CliIo {
   return {
@@ -111,12 +120,14 @@ function fakeIo(e: Env, over: Partial<CliIo> = {}): CliIo {
     git: () => ({ sha: "deadbeef", dirty: false }),
     nowMs: () => Date.parse("2026-11-05T10:00:00Z"),
     randomPart: () => "abc123",
+    sleepMs: async (ms) => {
+      e.serverMs += ms;
+    },
     ...over,
   };
 }
 
 function fakeFactory(e: Env, projectOverride?: string, throwOn?: string): FirebaseFactory {
-  let tva = 0;
   return (input) => {
     e.factoryCalls++;
     expect(input.privateKey).toBe(FAKE_PRIVATE_KEY);
@@ -141,7 +152,8 @@ function fakeFactory(e: Env, projectOverride?: string, throwOn?: string): Fireba
         revokeRefreshTokens: async (uid) => {
           if (throwOn === "revoke") throw new Error("revoke down");
           e.writes.push(`revoke:${uid}`);
-          e.users.get(uid)!.tokensValidAfterTime = new Date(Date.parse("2026-11-05T10:00:00Z") + ++tva * 1000).toUTCString();
+          // firebase-admin: validSince = Math.floor(new Date().getTime() / 1000) — the OPERATOR clock.
+          e.users.get(uid)!.tokensValidAfterTime = new Date(Math.floor((e.serverMs + e.skewMs) / 1000) * 1000).toUTCString();
         },
       },
       store: {
@@ -149,10 +161,12 @@ function fakeFactory(e: Env, projectOverride?: string, throwOn?: string): Fireba
         writeUsersDocRole: async (uid, role) => {
           e.writes.push(`role:${uid}`);
           e.role = role;
+          return serverTime(e);
         },
         createAuditRow: async (id, rec) => {
           if (throwOn === "attempt" && id.endsWith(":attempt")) throw new Error("audit down");
           e.writes.push(`audit:${id}:${JSON.stringify(rec)}`);
+          return serverTime(e);
         },
       },
       timestampNow: () => "TS",
@@ -406,6 +420,32 @@ describe("runCli — dry run and execute end to end (fake Firebase)", () => {
       expect(e.writes.filter((w) => w.startsWith("claims:")).length).toBe(claimWritesBefore);
       expect(e.writes).toContain(`revoke:${TARGET}`);
       expect(e.users.get(TARGET)!.customClaims).toEqual({ keep: 1 });
+    });
+    it("SLOW operator clock: the revocation is not reported done — exit 3 sessions_revoke_unverified, evidence in the result file", async () => {
+      const e = adminTarget();
+      e.skewMs = -20_000;
+      const r = await run([...REVOKE, "--execute", `--confirm-claim=${REVOKE_CONFIRM}`], e);
+      expect(r.code).toBe(3);
+      expect(r.result).toMatchObject({
+        phase: "executed", status: "incomplete", code: "sessions_revoke_unverified", exitCode: 3, writeAttempted: true,
+        run: { sessionRevocationEvidence: { verified: false, anchorSource: "firestore-commit-time:users/{uid}.role", marginSeconds: 2 } },
+      });
+      expect(e.err.join("\n")).toMatch(/earlier than the server-derived cutoff/);
+    });
+    it("revoke on a DISABLED target completes (exit 0) and the account stays disabled", async () => {
+      const e = adminTarget();
+      e.users.get(TARGET)!.disabled = true;
+      const r = await run([...REVOKE, "--execute", `--confirm-claim=${REVOKE_CONFIRM}`], e);
+      expect(r.code).toBe(0);
+      expect(e.users.get(TARGET)!.disabled).toBe(true);
+      expect(e.users.get(TARGET)!.customClaims).toEqual({ keep: 1 });
+    });
+    it("the result file carries only the MASKED target email", async () => {
+      const e = adminTarget();
+      const r = await run([...REVOKE, "--execute", `--confirm-claim=${REVOKE_CONFIRM}`], e);
+      expect(r.code).toBe(0);
+      expect(r.result.run.targetEmailMasked).toBe("t…@…");
+      expect(e.results.get(RESULT)).not.toContain("t@example.com");
     });
   });
 });
@@ -1332,6 +1372,9 @@ describe("read-only claim scripts", () => {
     expect(readOnly.parseReadOnlyArgs(argv)).toMatchObject({ ok: false, code });
   });
   it("refuses Vercel / production runtimes", () => {
+    expect(readOnly.runtimeRefusal({ VERCEL: "1" })).toMatch(/Refusing: VERCEL is set/);
+    expect(readOnly.runtimeRefusal({ NEXT_RUNTIME: "nodejs" })).toMatch(/Refusing: NEXT_RUNTIME is set/);
+    expect(readOnly.runtimeRefusal({ FIREBASE_AUTH_EMULATOR_HOST: "localhost:9099" })).toMatch(/Refusing/);
     expect(readOnly.runtimeRefusal({ VERCEL_ENV: "preview" })).toMatch(/Refusing/);
     expect(readOnly.runtimeRefusal({ NODE_ENV: "production" })).toMatch(/Refusing/);
     expect(readOnly.runtimeRefusal({ NODE_ENV: "development" })).toBeNull();
@@ -1341,6 +1384,17 @@ describe("read-only claim scripts", () => {
       const code = stripComments(read(f));
       expect(code).not.toMatch(/setCustomUserClaims|revokeRefreshTokens|\.set\(|\.update\(|\.create\(|\.add\(|\.delete\(/);
     }
+  });
+  it("the claim tool never changes `disabled` and never sets validSince itself (no updateUser, no enable path)", () => {
+    for (const f of ["scripts/admin/set-system-admin-claim.ts", "lib/admin/systemAdminClaimExecution.ts"]) {
+      const code = stripComments(read(f));
+      expect({ f, hit: code.match(/updateUser\s*\(|disabled\s*:|disableUser|validSince\s*:/g) }).toEqual({ f, hit: null });
+    }
+    // The real factory's Auth port exposes exactly these calls.
+    const factory = stripComments(read("scripts/admin/set-system-admin-claim.ts"));
+    expect([...new Set(factory.match(/auth\.(\w+)\(/g))].sort()).toEqual([
+      "auth.getUser(", "auth.listUsers(", "auth.revokeRefreshTokens(", "auth.setCustomUserClaims(", "auth.verifyIdToken(", "auth.writeCustomClaims(",
+    ]);
   });
   it("verify-admin-claims.js delegates to the same implementation", () => {
     expect(read("scripts/verify-admin-claims.js")).toContain('require("./check-admin-claims.js")');

@@ -12,14 +12,21 @@
  *      INCOMPLETE (exit 3, `audit_attempt_failed`), never "nothing written".
  *   2. write the custom claims — skipped on a revoke whose `admin` claim is
  *      already absent (a re-run): claims are never rewritten then.
- *   3. revoke refresh tokens (EVERY revoke; owner policy, no opt-out).
- *   4. mirror `users/{uid}.role` (display-only field used by the admin UI);
- *      on a sessions-only re-run only if it is still outstanding.
- *   5. read back and verify (claims; for revoke, tokensValidAfterTime advanced).
+ *   3. mirror `users/{uid}.role` (display-only field used by the admin UI).
+ *      On revoke this write is ALSO the server-time anchor: its Firestore
+ *      commit time is a server timestamp taken after the claim write returned
+ *      (see verifySessionsRevoked in systemAdminClaimSafety.ts), so it is
+ *      written on EVERY revoke, re-runs included.
+ *   4. revoke: wait until the operator's clock should have passed the cutoff
+ *      (anchor + 1 s + margin), then revoke refresh tokens (EVERY revoke;
+ *      owner policy, no opt-out). Attempted even when step 3 failed: it only
+ *      removes access — but the run is then unverifiable and INCOMPLETE.
+ *   5. read back and verify (claims; role; for revoke, the server's
+ *      tokensValidAfterTime >= the server-derived cutoff).
  *   6. create the `outcome` audit row (create-only).
- * After any failure in 2–4 the remaining mutations are skipped, but read-back
- * and the outcome row still run so the evidence records what actually happened.
- * Nothing is rolled back automatically; re-running the same command is safe.
+ * A claim-write failure skips steps 3–4; read-back and the outcome row still
+ * run so the evidence records what actually happened. Nothing is rolled back
+ * automatically; re-running the same command is safe.
  *
  * The operator ID token is read through a port, passed to `verifyIdToken`, and
  * dropped. It is never logged, returned, or written to any record.
@@ -37,14 +44,18 @@ import {
   type Refusal,
   type ReadOutcome,
   type RefusalCode,
+  type ServerTime,
   type ServiceAccountEvidence,
+  type SessionRevocationEvidence,
   type UserRecordLike,
+  REVOCATION_SKEW_MARGIN_SECONDS,
   auditDocId,
   buildClaimAuditRecord,
   checkBootstrapFirstAdmin,
   checkConfirmation,
   checkOperatorAuthorization,
   checkPlanInvariants,
+  checkRevocationAnchor,
   checkRevokeSafety,
   checkTargetRecord,
   classifyOperatorTokenError,
@@ -54,6 +65,8 @@ import {
   maskEmail,
   planClaimChange,
   refuse,
+  revocationCutoffSeconds,
+  serverTimeIso,
   verifyReadBack,
   verifySessionsRevoked,
 } from "./systemAdminClaimSafety";
@@ -72,15 +85,27 @@ export interface ClaimAuthPort {
 
 export interface ClaimStorePort {
   readUsersDocRole(uid: string): Promise<string | null>;
-  writeUsersDocRole(uid: string, role: "admin" | "user"): Promise<void>;
-  /** MUST be create-only (`.doc(id).create()`); an existing id must fail. */
-  createAuditRow(docId: string, record: Record<string, unknown>): Promise<void>;
+  /**
+   * Resolves with the write's SERVER commit time (Firestore
+   * `WriteResult.writeTime`). The write MUST change the document every time
+   * (it sets `updatedAt: serverTimestamp()`), because Firestore reports a
+   * no-op write with the document's previous update time.
+   */
+  writeUsersDocRole(uid: string, role: "admin" | "user"): Promise<ServerTime>;
+  /** MUST be create-only (`.doc(id).create()`); an existing id must fail. Resolves with the server commit time. */
+  createAuditRow(docId: string, record: Record<string, unknown>): Promise<ServerTime>;
 }
 
 export type ExecutionDeps<TS> = {
   auth: ClaimAuthPort;
   store: ClaimStorePort;
   timestampNow: () => TS;
+  /**
+   * Waits `ms` milliseconds (a timer, not a clock reading). Used only to let
+   * the operator's clock — which revokeRefreshTokens stamps — pass the
+   * server-derived cutoff before the revocation call. Never evidence.
+   */
+  sleepMs: (ms: number) => Promise<void>;
   /** Resolves the operator token file to a token, or refuses (mode/shape). */
   readOperatorToken: (path: string) => Promise<{ ok: true; token: string } | Refusal>;
   git: { sha: string | null; dirty: boolean | null };
@@ -118,9 +143,12 @@ export type RunResult = {
   projectId: string;
   operation: ParsedClaimArgs["operation"];
   targetUid: string;
-  targetEmail: string | null;
+  /** Masked (the local result file never holds the full target email; the audit row does). */
+  targetEmailMasked: string | null;
   /** Revoke always revokes refresh tokens; grant never does. */
   sessionRevocation: "required" | "not_applicable";
+  /** Revoke --execute only: how (and whether) the revocation was proven against a server clock. */
+  sessionRevocationEvidence: SessionRevocationEvidence | null;
   claimWrite: ClaimWritePlan | null;
   plan: { before: Claims; after: Claims; diff: string[] } | null;
   /** null whenever the post-write read-back did not succeed (never a fabricated `{}`). */
@@ -170,8 +198,9 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
     projectId: ctx.projectId,
     operation: args.operation,
     targetUid: args.targetUid,
-    targetEmail: null,
+    targetEmailMasked: null,
     sessionRevocation: args.operation === "revoke" ? "required" : "not_applicable",
+    sessionRevocationEvidence: null,
     claimWrite: null,
     plan: null,
     readBackClaims: null,
@@ -210,11 +239,15 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
     if (code === "auth/user-not-found") return refused(refuse("target_missing", "Refusing: no Auth user has that UID in this project."));
     return refused(refuse("target_lookup_failed", `Refusing: target lookup failed (${typeof code === "string" ? code : "unknown error"}).`));
   }
-  const targetRefusal = checkTargetRecord(target, args.targetUid);
+  // Grant refuses a disabled target; revoke (privilege removal) allows one. Nothing here ever changes `disabled`.
+  const targetRefusal = checkTargetRecord(target, args.targetUid, args.operation);
   if (targetRefusal) return refused(targetRefusal);
-  result.targetEmail = typeof target.email === "string" ? target.email : null;
-  // Server-side revocation baseline, captured before any write (see verifySessionsRevoked).
-  const preWriteTokensValidAfterTime = typeof target.tokensValidAfterTime === "string" ? target.tokensValidAfterTime : undefined;
+  const targetEmail = typeof target.email === "string" ? target.email : null;
+  result.targetEmailMasked = targetEmail ? maskEmail(targetEmail) : null;
+  const preWriteTokensValidAfterTime = typeof target.tokensValidAfterTime === "string" ? target.tokensValidAfterTime : null;
+  if (args.operation === "revoke" && target.disabled === true) {
+    deps.log("Target state:   DISABLED - the admin claim is still removed and sessions revoked; the account stays disabled.");
+  }
 
   try {
     result.usersDocRole.before = await deps.store.readUsersDocRole(args.targetUid);
@@ -322,8 +355,6 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
     return result;
   }
   const claimWrite: ClaimWritePlan = sessionsOnly ? "skip_already_absent" : "write";
-  // On a sessions-only re-run the role mirror is written only if it is still outstanding.
-  const writeRole = !sessionsOnly || result.usersDocRole.before !== intendedRole;
   result.claimWrite = claimWrite;
   if (sessionsOnly) {
     deps.log("Claim write:    SKIPPED - the admin claim is already absent; claims will NOT be rewritten.");
@@ -363,7 +394,7 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
     adminUid: operatorUid ?? "operator-bootstrap",
     adminEmail: operatorEmail,
     targetUid: args.targetUid,
-    targetEmail: result.targetEmail ?? undefined,
+    targetEmail: targetEmail ?? undefined,
     beforeClaims: plan.before,
     usersDocRoleBefore: result.usersDocRole.before,
     claimWrite,
@@ -389,8 +420,9 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
 
   const attemptId = auditDocId(ctx.requestId, "attempt");
   result.writesAttempted.push("audit_attempt_row");
+  let attemptCommitTime: unknown = null;
   try {
-    await deps.store.createAuditRow(attemptId, buildClaimAuditRecord({
+    attemptCommitTime = await deps.store.createAuditRow(attemptId, buildClaimAuditRecord({
       ...auditBase,
       phase: "attempt",
       createdAt: deps.timestampNow(),
@@ -407,30 +439,50 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
   }
   result.auditRowIds.push(attemptId);
 
+  let claimWriteOk = true;
   if (claimWrite === "write") {
     result.writesAttempted.push("custom_claims");
     try {
       await deps.auth.writeCustomClaims(args.targetUid, plan.after);
     } catch (e) {
+      claimWriteOk = false;
       recordFailure("mint_failed", `custom claim write failed (${codeOf(e)})`);
     }
   }
 
-  if (!failure && args.operation === "revoke") {
-    result.writesAttempted.push("revoke_refresh_tokens");
+  // Role mirror. On revoke its commit time is the server-time anchor, so it is
+  // issued only AFTER the claim write returned.
+  let anchor: ServerTime | null = null;
+  let anchorProblem: string | null = null;
+  if (claimWriteOk) {
+    result.writesAttempted.push("users_doc_role");
     try {
-      await deps.auth.revokeRefreshTokens(args.targetUid);
+      const commit = await deps.store.writeUsersDocRole(args.targetUid, intendedRole);
+      const a = checkRevocationAnchor(commit, attemptCommitTime);
+      if (a.ok) anchor = a.anchor;
+      else anchorProblem = a.detail;
     } catch (e) {
-      recordFailure("sessions_revoke_failed", `refresh-token revocation failed (${codeOf(e)})`);
+      anchorProblem = "the role write (the server-time anchor) failed";
+      recordFailure("users_doc_failed", `users/{uid}.role write failed (${codeOf(e)})`);
     }
   }
 
-  if (!failure && writeRole) {
-    result.writesAttempted.push("users_doc_role");
+  let revokeOk = false;
+  const cutoff = anchor ? revocationCutoffSeconds(anchor) : null;
+  if (claimWriteOk && args.operation === "revoke") {
+    if (anchor && cutoff !== null) {
+      // revokeRefreshTokens stamps validSince with the LOCAL clock; give an
+      // accurate clock time to pass the cutoff. Waiting proves nothing — the
+      // read-back below is the evidence.
+      const anchorMs = anchor.seconds * 1000 + Math.floor(anchor.nanoseconds / 1e6);
+      await deps.sleepMs(Math.max(0, cutoff * 1000 - anchorMs + REVOCATION_SLEEP_SLACK_MS));
+    }
+    result.writesAttempted.push("revoke_refresh_tokens");
     try {
-      await deps.store.writeUsersDocRole(args.targetUid, intendedRole);
+      await deps.auth.revokeRefreshTokens(args.targetUid);
+      revokeOk = true;
     } catch (e) {
-      recordFailure("users_doc_failed", `users/{uid}.role write failed (${codeOf(e)})`);
+      recordFailure("sessions_revoke_failed", `refresh-token revocation failed (${codeOf(e)})`);
     }
   }
 
@@ -463,11 +515,50 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
     const v = verifyReadBack(plan, readBack.customClaims);
     if (!v.ok) {
       recordFailure("verification_failed", v.detail);
-    } else if (args.operation === "revoke" && !verifySessionsRevoked(readBack.tokensValidAfterTime, preWriteTokensValidAfterTime)) {
-      recordFailure("verification_failed", "tokensValidAfterTime did not advance");
     } else if (result.usersDocRole.after !== intendedRole) {
       recordFailure("verification_failed", "users/{uid}.role read-back mismatch");
     }
+  }
+
+  // --- session revocation evidence (revoke) ----------------------------------
+  // Success requires: the revocation call returned, a server-time anchor, and a
+  // read-back tokensValidAfterTime at or after the server-derived cutoff.
+  if (args.operation === "revoke") {
+    const after = readBack && typeof readBack.tokensValidAfterTime === "string" ? readBack.tokensValidAfterTime : null;
+    const evidence: SessionRevocationEvidence = {
+      anchorSource: "firestore-commit-time:users/{uid}.role",
+      anchorServerTime: anchor ? serverTimeIso(anchor) : null,
+      marginSeconds: REVOCATION_SKEW_MARGIN_SECONDS,
+      cutoff: cutoff !== null ? new Date(cutoff * 1000).toISOString() : null,
+      tokensValidAfterTimeBefore: preWriteTokensValidAfterTime,
+      tokensValidAfterTimeAfter: after,
+      validSinceMinusAnchorSeconds: null,
+      verified: false,
+      detail: null,
+    };
+    let unverified: string | null = null;
+    if (!claimWriteOk) {
+      unverified = "not attempted: the claim write failed";
+    } else if (!revokeOk) {
+      unverified = "the revocation call failed";
+    } else if (!anchor || cutoff === null) {
+      unverified = `no server-time anchor (${anchorProblem ?? "unknown"}): refresh tokens were revoked with the operator's local clock as validSince, and coverage of the claim-removal time cannot be proven`;
+      recordFailure("sessions_revoke_unverified", unverified);
+    } else if (!readBack) {
+      unverified = "the Auth record could not be read back";
+      recordFailure("sessions_revoke_unverified", "tokensValidAfterTime could not be read back");
+    } else {
+      const sv = verifySessionsRevoked(after, cutoff);
+      if (sv.validSinceSeconds !== null) evidence.validSinceMinusAnchorSeconds = sv.validSinceSeconds - anchor.seconds;
+      if (sv.ok) {
+        evidence.verified = true;
+      } else {
+        unverified = sv.detail;
+        recordFailure("sessions_revoke_unverified", sv.detail);
+      }
+    }
+    evidence.detail = unverified;
+    result.sessionRevocationEvidence = evidence;
   }
 
   const outcome: AuditOutcome = failure ?? (sessionsOnly ? "claim_already_absent_sessions_revoked" : "applied");
@@ -479,6 +570,7 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
       phase: "outcome",
       outcome,
       outcomeDetails: [...details],
+      sessionRevocationEvidence: result.sessionRevocationEvidence,
       createdAt: deps.timestampNow(),
       afterClaims: result.readBack.customClaims === "read" ? result.readBackClaims : null,
       usersDocRoleAfter: result.usersDocRole.after,
@@ -499,18 +591,32 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
   result.outcome = outcome;
   result.exitCode = 0;
   result.code = null;
+  const revokedProof = "refresh tokens revoked; tokensValidAfterTime read back at or after the cutoff derived from a server commit time taken after the claim removal";
   if (outcome === "claim_already_absent_sessions_revoked") {
     result.status = "claim_already_absent_sessions_revoked";
-    result.message = "Completed: the admin claim was already absent, so no claim was written. The outstanding session revocation was performed and verified (refresh tokens revoked; tokensValidAfterTime advanced). Already-issued ID tokens stay valid until they expire (up to 1 hour).";
+    result.message = `Completed: the admin claim was already absent, so no claim was written. The outstanding session revocation was performed and verified (${revokedProof}). Already-issued ID tokens stay valid until they expire (up to 1 hour) on routes that do not check revocation.`;
   } else {
     result.status = "applied";
     result.message = args.operation === "grant"
       ? "Applied and verified. The user must obtain a fresh ID token (sign out and in) before the claim is visible."
-      : "Applied and verified: admin removed and refresh tokens revoked (tokensValidAfterTime advanced). Already-issued ID tokens stay valid until they expire (up to 1 hour).";
+      : `Applied and verified: admin removed and ${revokedProof}. Already-issued ID tokens stay valid until they expire (up to 1 hour) on routes that do not check revocation.`;
+  }
+  const ahead = result.sessionRevocationEvidence?.validSinceMinusAnchorSeconds;
+  if (typeof ahead === "number" && ahead > FAR_AHEAD_WARNING_SECONDS) {
+    result.message += ` Note: tokensValidAfterTime is ${ahead}s after server time (the operator clock is ahead): the target cannot keep any session that starts before ${result.sessionRevocationEvidence?.tokensValidAfterTimeAfter}.`;
   }
   deps.log(result.message);
   return result;
 }
+
+/**
+ * Added to the wait before revoking, so an operator clock up to about this far
+ * BEHIND server time still stamps validSince at or after the cutoff. It only
+ * sets tolerance; it is never evidence (the read-back is).
+ */
+export const REVOCATION_SLEEP_SLACK_MS = 1500;
+/** Above this, a verified revocation's validSince is reported as far ahead of server time. */
+export const FAR_AHEAD_WARNING_SECONDS = 300;
 
 /** Re-run guidance printed on every exit-3 outcome. */
 export const RERUN_IS_SAFE =
