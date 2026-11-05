@@ -131,7 +131,7 @@ export function gateSignal(input: Pick<TrustSignalsInput, "gate" | "synthesisRep
   const status: GateDisplayStatus = readGateStatus(pageGateValue(synthesisReport ?? null, gate?.status));
   const inconsistent = storedGateConsistency(input) === "inconsistent";
   const details: string[] = [];
-  const notice = inconsistent ? null : gateNotice(status);
+  const notice = gateNotice(status);
   // D8: an unrecognized stored value supports no verification result, so its stored inputs are not presented beside it.
   if (status !== "unrecognized") {
     if (gate && isFiniteNumber(gate.runCertainty) && isFiniteNumber(gate.loadBearingSplitCount) && Array.isArray(gate.loadBearingClaims)) {
@@ -140,6 +140,7 @@ export function gateSignal(input: Pick<TrustSignalsInput, "gate" | "synthesisRep
       details.push(C.gateInputsNotRecorded);
     }
   }
+  // Inconsistent: no gate result, so no notice for the stored status either.
   if (inconsistent) return { ...base, value: G.inconsistentValue, details: [...details, G.inconsistentDetail], state: "inconsistent" };
   if (notice) details.push(notice);
   return { ...base, value: GATE_STATUS_WORD[status], details, state: status };
