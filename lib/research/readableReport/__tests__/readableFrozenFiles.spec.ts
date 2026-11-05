@@ -85,10 +85,22 @@ const WIDENED_BY_INC1: Record<string, string> = {
  *     that re-pin moved out of UNCHANGED_AT_9ECA1E3 into its own CHANGED_BY_290_INC1_READABLE_GATE_OPTION map (same
  *     file, same blob, same 28-file pin set): d6368241dcf506a06f78a7d4590c506acda52341 → cb61bde9f1efff29e0f908cbb6810620d39afa47.
  * gatePresentation.ts (LEGACY_GATE_BANNER_LABEL) stays pinned unchanged above.
+ *
+ * Re-pinned again (owner ruling on review of 082a2a7 NOT CLEAN, MINOR-1/MINOR-2 — narrow readable-only exception for the
+ * verification banner, the Panel Verdict display and the Model Responses gate badge): every readable gate display now
+ * reads ONE presentation (trustSignals.readableGatePresentation, computed once per page), so an inconsistent legacy record
+ * is neutral and "Unavailable" on the banner (words and tone), both Panel Verdict badges and accents and the list badge.
+ *   - AdaptiveSynthesisReportView.tsx: LegacyGateBannerLabels / legacyGateBannerOverride replaced by the optional
+ *     readable-only `ReadableGateDisplay` (GateBanner `readable`, PanelVerdictCard `readable`, report view
+ *     `readableGate`). Absent (every classic caller), the banner, badge and accent are gatePresentation's, byte for byte.
+ *     78bc669a7da2f59c078bd7841be28bf76bf5e696 → 486dbcd342baddd5eb285e5ec6acef6ddd1841fa.
+ *   - dsProvenanceUiBoundaries.spec.ts: its ReviewGovernanceSection.tsx pin re-pinned for the same prop threading (reason
+ *     recorded beside it). cb61bde9f1efff29e0f908cbb6810620d39afa47 → 7ee80b6b52b8c71af0c72e95b52b45e0080058c0.
+ * Same two files, same 32-file pinned set; gatePresentation.ts, gate.ts and the parity oracles stay pinned unchanged.
  */
 const READABLE_GATE_OPTION_BY_INC1: Record<string, string> = {
-  "components/adaptive/AdaptiveSynthesisReportView.tsx": "78bc669a7da2f59c078bd7841be28bf76bf5e696",
-  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "cb61bde9f1efff29e0f908cbb6810620d39afa47",
+  "components/adaptive/AdaptiveSynthesisReportView.tsx": "486dbcd342baddd5eb285e5ec6acef6ddd1841fa",
+  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "7ee80b6b52b8c71af0c72e95b52b45e0080058c0",
 };
 
 describe("#290 Increment 1 leaves the sealed and frozen files byte-identical to 35933c8", () => {

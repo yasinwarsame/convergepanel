@@ -16,7 +16,7 @@ import {
   coverageSignal,
   gateSignal,
   namesASource,
-  readableLegacyGateBannerLabels,
+  readableGatePresentation,
   sourcesSignal,
   storedGateConsistency,
 } from "../trustSignals";
@@ -272,11 +272,11 @@ describe("storedGateConsistency (legacy records only; read-only)", () => {
     const real = JSON.parse(JSON.stringify(computeAdaptiveGate(rows(4, splits), certainty, "generic")));
     expect(real.loadBearingSplitCount).toBe(Math.min(splits, GATE_THRESHOLDS.loadBearingTopN));
     expect(storedGateConsistency(legacyOf(real))).toBe("consistent");
-    expect(readableLegacyGateBannerLabels(legacyOf(real))).toBe(G.legacyBanner);
+    expect(readableGatePresentation(legacyOf(real))).toMatchObject({ status: real.status, tone: real.status, banner: G.legacyBanner[real.status as "pass"] });
     for (const other of ["pass", "caution", "fail"].filter((s) => s !== real.status)) {
       const g = { ...real, status: other };
       expect([other, storedGateConsistency(legacyOf(g))]).toEqual([other, "inconsistent"]);
-      expect(readableLegacyGateBannerLabels(legacyOf(g))).toEqual({ pass: G.inconsistentBanner, caution: G.inconsistentBanner, fail: G.inconsistentBanner });
+      expect(readableGatePresentation(legacyOf(g))).toEqual({ status: "unavailable", word: "Unavailable", tone: "neutral", banner: G.inconsistentBanner, bannerNote: G.storedTextNote, badge: "Verification gate: Unavailable", chip: "Verification gate: Unavailable" });
     }
   });
 
@@ -313,7 +313,7 @@ describe("storedGateConsistency (legacy records only; read-only)", () => {
   ])("missing or malformed inputs (%s) are not inconsistent — nothing to check against", (_n, patch) => {
     const g = { status: "fail", runCertainty: 0.99, loadBearingSplitCount: 0, loadBearingClaims: [], ...patch };
     expect(storedGateConsistency(legacyOf(g))).toBe("inputs_not_recorded");
-    expect(readableLegacyGateBannerLabels(legacyOf(g))).toBe(G.legacyBanner);
+    expect(readableGatePresentation(legacyOf(g))).toEqual({ status: "fail", word: "Fail", tone: "fail", banner: G.legacyBanner.fail, bannerNote: null, badge: "Verification gate: Fail", chip: "Verification gate: Fail" });
   });
 
   it("not applicable: an Order 4 report (its wording is unchanged), an unrecognized stored value, no gate at all", () => {
@@ -348,5 +348,56 @@ describe("storedGateConsistency (legacy records only; read-only)", () => {
     const s = gateSignal({ gate: r.gate, synthesisReport: r.synthesisReport, schemaId: r.schemaId });
     expect([s.value, s.state]).toEqual(["Unavailable", "inconsistent"]);
     expect(s.details).not.toContain(CAUTION_NOTICE);
+  });
+});
+
+/**
+ * Review of 082a2a7 (owner ruling): every readable gate display reads ONE presentation. These pin its four branches
+ * with literal expected values (not read from the code under test), including mutant M18's untested branch: the
+ * report's stored gate unrecognized while the gate object's status is a known word.
+ */
+describe("readableGatePresentation: one status, label and tone for every readable gate display", () => {
+  const legacy = (gate: any, reportGate: unknown) => ({ gate, synthesisReport: { gate: reportGate }, schemaId: "generic" });
+  const KNOWN = { runCertainty: 1, loadBearingSplitCount: 0, loadBearingClaims: [] };
+
+  it("M18: report.gate unrecognized, gate.status recognized → unrecognized (D8), neutral, never unavailable, never the gate object's word", () => {
+    for (const reportGate of ["verified-ish", 7, null, undefined, "PASS"]) {
+      const input = legacy({ status: "pass", ...KNOWN }, reportGate);
+      expect(storedGateConsistency(input)).toBe("not_applicable");
+      expect(readableGatePresentation(input)).toEqual({
+        status: "unrecognized",
+        word: "Unrecognized",
+        tone: "neutral",
+        banner: "Verification gate: Unrecognized",
+        bannerNote: null,
+        badge: "Verification gate: Unrecognized",
+        chip: "Verification gate: Unrecognized",
+      });
+      const sig = gateSignal(input);
+      expect([sig.value, sig.state]).toEqual(["Unrecognized", "unrecognized"]);
+      expect(sig.details).toEqual([UNRECOGNIZED_GATE_NOTICE]);
+    }
+  });
+
+  it("the reverse (report.gate known, gate.status unrecognized) is two stored results only when both are strings", () => {
+    expect(readableGatePresentation(legacy({ status: "verified-ish", ...KNOWN }, "pass")).status).toBe("unavailable");
+    expect(readableGatePresentation(legacy({ status: 7, ...KNOWN }, "pass")).status).toBe("pass");
+  });
+
+  it("no report: the gate object's status is the page's value", () => {
+    expect(readableGatePresentation({ gate: { status: "caution", runCertainty: 0.6, loadBearingSplitCount: 0, loadBearingClaims: [] } as any })).toMatchObject({ status: "caution", tone: "caution", badge: "Verification gate: Caution" });
+    expect(readableGatePresentation({ gate: { status: "pass", runCertainty: 0.1, loadBearingSplitCount: 0, loadBearingClaims: [] } as any })).toMatchObject({ status: "unavailable", tone: "neutral" });
+  });
+
+  it("Order 4 report: gatePresentation's own words and tone, even when its stored gate contradicts its inputs", () => {
+    const p = readableGatePresentation({ gate: { status: "pass", runCertainty: 0.1, loadBearingSplitCount: 3, loadBearingClaims: [] } as any, synthesisReport: { gate: "pass", presentation: { verificationGate: { status: "pass" } } as any } });
+    expect(p).toEqual({ status: "pass", word: "Pass", tone: "pass", banner: "Verification gate: Pass", bannerNote: null, badge: "Verification gate: Pass", chip: "Verification gate: Pass" });
+  });
+
+  it("gateSignal reads a passed presentation (computed once by the page) rather than recomputing", () => {
+    const input = legacy({ status: "pass", ...KNOWN }, "pass");
+    const forced = { ...readableGatePresentation(input), status: "unavailable" as const, word: "Unavailable" };
+    expect(gateSignal({ ...input, gatePresentation: forced }).state).toBe("inconsistent");
+    expect(gateSignal(input).state).toBe("pass");
   });
 });

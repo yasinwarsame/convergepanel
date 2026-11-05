@@ -128,4 +128,15 @@ export const READABLE_GATE_COPY = {
   /** The trust signal's value and detail for the same malformed record. */
   inconsistentValue: "Unavailable",
   inconsistentDetail: "The stored result is inconsistent with its recorded inputs, so no gate result is shown.",
+  /**
+   * Review of 082a2a7 (owner ruling): the readable page's one short gate label for the Panel Verdict badge and the Model
+   * Responses header badge on that record — the same unavailable state the banner and the trust signal show.
+   */
+  unavailableLabel: "Verification gate: Unavailable",
+  /**
+   * On that record, text stored with the report (the answer, the certainty line) may still name the stored gate, e.g.
+   * "(gate: pass)". Stored text is shown as written — never edited — so the readable page says, beside the unavailable
+   * state, that such words are part of the stored text and are not the gate result.
+   */
+  storedTextNote: "Text stored with this report (such as the answer or the certainty line) may name a gate result. That text is shown as written; it is not the gate result.",
 } as const;

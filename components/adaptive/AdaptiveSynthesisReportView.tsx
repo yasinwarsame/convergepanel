@@ -25,7 +25,6 @@ import {
   AlignedClaim,
   AlignedClaimCell,
   AdaptiveGateResult,
-  AdaptiveGateStatus,
   AdaptiveSynthesisReport,
   AdaptiveTrustSummary,
   CLAIM_TIE_ATTRIBUTION_RULE,
@@ -51,7 +50,7 @@ import {
   presentNarrativeSections,
   presentUnifiedAnswer,
 } from "@/lib/adaptiveSchema/reportPresentation";
-import { GATE_LABEL, GateTone, gateBadgeText, gateBannerText, gateTone, hasGatePresentation, pageGateValue, readGateStatus } from "@/lib/adaptiveSchema/gatePresentation";
+import { GATE_LABEL, GateTone, gateBadgeText, gateBannerText, gateTone, pageGateValue } from "@/lib/adaptiveSchema/gatePresentation";
 import {
   POSITIONS_BY_SLOT_HEADING,
   PresentedSlotPosition,
@@ -124,35 +123,38 @@ const GATE_ACCENT: Record<GateTone, string> = {
 };
 
 /**
- * #290 Increment 1 — readable layout only: the words a readable page shows in place of LEGACY_GATE_BANNER_LABEL ("Verified
- * — panel converges" and its caution / fail siblings) on a report without the Order 4 presentation. Classic call sites
- * never pass it, so their banner is gateBannerText's, byte for byte.
+ * #290 Increment 1 — readable layout only: the page's one gate presentation (lib/research/readableReport/trustSignals
+ * readableGatePresentation, computed once per page by AdaptivePanelResponse's readable branch). Every readable gate
+ * display — this banner (words and tone), the Panel Verdict badge and accent, the Model Responses header badge — reads
+ * it, so one page never shows "Unavailable" beside a raw "pass" or a pass / fail colour. Classic call sites never pass
+ * it: their banner, badge and accent are gatePresentation's, byte for byte.
  */
-export type LegacyGateBannerLabels = Readonly<Record<AdaptiveGateStatus, string>>;
-
-/**
- * The readable replacement for the legacy banner wording, or null when gateBannerText's words stand: no labels passed
- * (classic), a report carrying the Order 4 presentation (already neutral, D6), or a stored value that is not a known
- * status (D8 "Unrecognized"). Only the words change — the stored gate and report are read, never written.
- */
-function legacyGateBannerOverride(report: AdaptiveSynthesisReport | null, shown: unknown, labels: LegacyGateBannerLabels | undefined): string | null {
-  if (!labels || hasGatePresentation(report)) return null;
-  const status = readGateStatus(shown);
-  return status === "unrecognized" ? null : labels[status];
+export interface ReadableGateDisplay {
+  /** For tests and styling hooks only (data-readable-gate); never shown on its own. */
+  readonly status: string;
+  readonly tone: GateTone;
+  readonly banner: string;
+  readonly bannerNote: string | null;
+  readonly badge: string;
+  readonly chip: string;
 }
 
 /**
  * The gate banner: worded by gatePresentation.gateBannerText (historical reports keep their wording, D7). With a report
- * it shows the report's stored gate — the one the Unified Answer and exports show (F4, pageGateValue). legacyLabels:
- * readable layout only (see LegacyGateBannerLabels).
+ * it shows the report's stored gate — the one the Unified Answer and exports show (F4, pageGateValue). readable: readable
+ * layout only (see ReadableGateDisplay).
  */
-export function GateBanner({ report, gate, legacyLabels }: { report: AdaptiveSynthesisReport | null; gate: unknown; legacyLabels?: LegacyGateBannerLabels }) {
+export function GateBanner({ report, gate, readable }: { report: AdaptiveSynthesisReport | null; gate: unknown; readable?: ReadableGateDisplay }) {
+  if (readable) {
+    return (
+      <div data-readable-gate={readable.status} className={`rounded-xl border px-4 py-3 text-sm font-medium ${GATE_BANNER_STYLES[readable.tone]}`}>
+        {readable.banner}
+        {readable.bannerNote && <span className="mt-1 block font-normal">{readable.bannerNote}</span>}
+      </div>
+    );
+  }
   const shown = pageGateValue(report, gate);
-  return (
-    <div className={`rounded-xl border px-4 py-3 text-sm font-medium ${GATE_BANNER_STYLES[gateTone(shown)]}`}>
-      {legacyGateBannerOverride(report, shown, legacyLabels) ?? gateBannerText(report, shown)}
-    </div>
-  );
+  return <div className={`rounded-xl border px-4 py-3 text-sm font-medium ${GATE_BANNER_STYLES[gateTone(shown)]}`}>{gateBannerText(report, shown)}</div>;
 }
 
 function agreementColorClass(score: number): string {
@@ -1005,7 +1007,7 @@ export function BiasBlindSpotsSection({
 }
 
 /** Exported — see UnifiedAnswerCard's export doc above. */
-export function PanelVerdictCard({ report, gate }: { report: AdaptiveSynthesisReport; gate: AdaptiveGateResult }) {
+export function PanelVerdictCard({ report, gate, readable }: { report: AdaptiveSynthesisReport; gate: AdaptiveGateResult; readable?: ReadableGateDisplay }) {
   const v = report.verdictCard;
   // Order 5 (Contract P): a marked report's headings come from its rows (a value comparison is never "top consensus").
   const positions = positionView(report)?.verdict ?? null;
@@ -1015,9 +1017,11 @@ export function PanelVerdictCard({ report, gate }: { report: AdaptiveSynthesisRe
   const caveat = presentVerdictCaveat(v);
   // F4: the card shows the report's stored gate, as the Unified Answer does.
   const shownGate = pageGateValue(report, gate.status);
+  // #290 Inc 1: readable layout only — the page's one gate presentation (ReadableGateDisplay); classic: unchanged.
+  const tone = readable ? readable.tone : gateTone(shownGate);
   return (
     <div className="relative rounded-xl border border-slate-200 bg-white p-6 overflow-hidden">
-      <div className={`absolute left-0 top-0 h-1.5 w-full ${GATE_ACCENT[gateTone(shownGate)]}`} />
+      <div className={`absolute left-0 top-0 h-1.5 w-full ${GATE_ACCENT[tone]}`} />
 
       <div className="rounded-lg bg-sky-50 border border-sky-200 px-4 py-3 text-xs text-sky-800 mb-4">
         ConvergePanel is an AI-assisted research tool, not a forensic or fact-checking authority. Synthesis informs
@@ -1026,8 +1030,8 @@ export function PanelVerdictCard({ report, gate }: { report: AdaptiveSynthesisRe
 
       <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
         <h3 className="text-lg font-semibold text-slate-900">Panel Verdict</h3>
-        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${GATE_BADGE_STYLES[gateTone(shownGate)]}`}>
-          {gateBadgeText(report, shownGate)}
+        <span {...(readable ? { "data-readable-gate": readable.status } : {})} className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${GATE_BADGE_STYLES[tone]}`}>
+          {readable ? readable.badge : gateBadgeText(report, shownGate)}
         </span>
       </div>
 
@@ -1154,7 +1158,7 @@ export default function AdaptiveSynthesisReportView({
   modelsUsed,
   runId,
   onRunFollowUp,
-  legacyGateBannerLabels,
+  readableGate,
 }: {
   report: AdaptiveSynthesisReport;
   gate: AdaptiveGateResult;
@@ -1165,8 +1169,8 @@ export default function AdaptiveSynthesisReportView({
   runId?: string | null;
   /** Bias & Blind Spots Tier 2 cards' "Run follow-up" action — pre-fills the question box, never auto-runs. */
   onRunFollowUp?: (question: string) => void;
-  /** #290 Inc 1: readable layout only — see LegacyGateBannerLabels. Absent (every classic caller): unchanged. */
-  legacyGateBannerLabels?: LegacyGateBannerLabels;
+  /** #290 Inc 1: readable layout only — see ReadableGateDisplay. Absent (every classic caller): unchanged. */
+  readableGate?: ReadableGateDisplay;
 }) {
   const rows = alignedClaims || [];
   const modelProvenance = useRunModelProvenance();
@@ -1206,7 +1210,7 @@ export default function AdaptiveSynthesisReportView({
     <PositionPresentationBoundary report={report} roster={position?.roster ?? modelsUsed} provenance={position?.provenance ?? modelProvenance}>
     <div className="space-y-4">
       <div data-section="gate-banner">
-        <GateBanner report={report} gate={gate.status} legacyLabels={legacyGateBannerLabels} />
+        <GateBanner report={report} gate={gate.status} readable={readableGate} />
       </div>
 
       <div data-section="unified-answer">
@@ -1365,7 +1369,7 @@ export default function AdaptiveSynthesisReportView({
       )}
 
       <div data-section="panel-verdict">
-        <PanelVerdictCard report={report} gate={gate} />
+        <PanelVerdictCard report={report} gate={gate} readable={readableGate} />
       </div>
 
       <div data-section="export-actions">

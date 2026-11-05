@@ -5,8 +5,8 @@
  * gate banner with the frozen historical wording LEGACY_GATE_BANNER_LABEL ("Verified — panel converges", "Caution —
  * partial convergence", "Could not verify — panel split"). On the readable page that banner appears twice (the
  * governance section's Verification gate, and the full synthesis report inside it) and reads as an evidence
- * verification claim. Readable passes READABLE_GATE_COPY.legacyBanner through the optional `legacyLabels` /
- * `legacyGateBannerLabels` props; classic passes nothing and keeps the historical wording byte for byte.
+ * verification claim. Readable passes the page's one gate presentation (trustSignals.readableGatePresentation) through
+ * the optional `readable` / `readableGate` props; classic passes nothing and keeps the historical wording byte for byte.
  *
  * Every case renders the COMPLETE readable report through the real AdaptivePanelResponse (reportLayout "readable"), in
  * two variants: as stored (Order 4 presentation present) and legacy (presentation removed — exactly what a pre-Order-4
@@ -26,6 +26,7 @@ import ListView from "@/components/adaptive/ListView";
 import { TRUST_SCORE_CAP_BY_HEALTH, TRUST_SCORE_CAP_REASON } from "@/lib/adaptiveSchema/config";
 import { GATE_STATUS_WORD, LEGACY_GATE_BANNER_LABEL, gateBannerText, gateLabel, hasGatePresentation, pageGateValue, readGateStatus } from "@/lib/adaptiveSchema/gatePresentation";
 import { READABLE_GATE_COPY, READABLE_TRUST_COPY } from "@/lib/research/readableReport/copy";
+import { readableGatePresentation } from "@/lib/research/readableReport/trustSignals";
 import { scanVocabulary } from "@/lib/adaptiveSchema/__tests__/o5p/vocabularyScanner";
 import { htmlText, panelElement, record, remoteWorkFixture, renderPanel, slotRows, tierHtml } from "./readableFixtures";
 
@@ -148,7 +149,9 @@ describe("readable: no legacy \"Verified\" banner; the stored gate is stated, ag
     const banners = root.findAllByType(GateBanner).map((b) => textOf(b));
     expect(banners).toHaveLength(2);
     const expected = conflict ? READABLE_GATE_COPY.inconsistentBanner : variant === "legacy" ? READABLE_GATE_COPY.legacyBanner[stored as "pass" | "caution" | "fail"] : gateLabel(stored);
-    expect(banners).toEqual([expected, expected]);
+    // The unavailable banner carries the stored-text note as its second line (review of 082a2a7, owner ruling).
+    const shownBanner = conflict ? `${expected}${READABLE_GATE_COPY.storedTextNote}` : expected;
+    expect(banners).toEqual([shownBanner, shownBanner]);
     if (variant === "order4") for (const w of [...NEW_WORDING, READABLE_GATE_COPY.inconsistentBanner]) expect(text).not.toContain(w);
     else expect(text.split(expected)).toHaveLength(3);
     // The banner follows the answer: the reader meets the answer before any gate banner.
@@ -182,7 +185,7 @@ describe("classic parity: the same fixtures keep the historical banner wording b
     const banners = root.findAllByType(GateBanner);
     expect(banners.length).toBeGreaterThan(0);
     for (const b of banners) {
-      expect(b.props.legacyLabels).toBeUndefined();
+      expect(b.props.readable).toBeUndefined();
       // The exact markup gateBannerText gives this stored report (frozen gatePresentation wording).
       const markup = renderToStaticMarkup(createElement(GateBanner, { report: b.props.report, gate: b.props.gate }));
       expect(markup).toContain(`>${esc(gateBannerText(b.props.report, pageGateValue(b.props.report, b.props.gate)))}<`);
@@ -192,7 +195,7 @@ describe("classic parity: the same fixtures keep the historical banner wording b
   });
 });
 
-describe("GateBanner's readable option changes only the words, and only on the legacy path", () => {
+describe("GateBanner's readable option: Order 4 / unrecognized words unchanged; legacy words replaced; same tone when consistent", () => {
   const STATUSES: unknown[] = ["pass", "caution", "fail", "verified-ish", 7, undefined];
   const reportOf = (gate: unknown, order4: boolean) => {
     const rec = record("generic-mixed");
@@ -202,17 +205,20 @@ describe("GateBanner's readable option changes only the words, and only on the l
   };
   it.each(STATUSES.flatMap((s) => [true, false].map((o) => [String(s), o, s] as const)))("stored %s, Order 4 presentation %s", (_n, order4, s) => {
     const report = reportOf(s, order4);
+    // No recorded inputs on the gate object: never "inconsistent" (missing is not inconsistent).
+    const presentation = readableGatePresentation({ gate: { status: s } as any, synthesisReport: report });
     const classic = renderToStaticMarkup(createElement(GateBanner, { report, gate: s }));
-    const readable = renderToStaticMarkup(createElement(GateBanner, { report, gate: s, legacyLabels: READABLE_GATE_COPY.legacyBanner }));
+    const readable = renderToStaticMarkup(createElement(GateBanner, { report, gate: s, readable: presentation }));
     const status = readGateStatus(s);
     expect(classic).toContain(`>${esc(gateBannerText(report, s))}<`);
+    const withAttr = (html: string) => html.replace("<div ", `<div data-readable-gate="${presentation.status}" `);
     if (order4 || status === "unrecognized") {
-      expect(readable).toBe(classic);
+      expect(readable).toBe(withAttr(classic));
     } else {
       const legacy = LEGACY_GATE_BANNER_LABEL[status];
       const replacement = READABLE_GATE_COPY.legacyBanner[status];
       expect(classic).toContain(`>${legacy}<`);
-      expect(readable).toBe(classic.replace(`>${legacy}<`, `>${esc(replacement)}<`)); // same element, same tone classes
+      expect(readable).toBe(withAttr(classic.replace(`>${legacy}<`, `>${esc(replacement)}<`))); // same element, same tone classes
     }
   });
 });

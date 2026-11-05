@@ -7,6 +7,7 @@
  * the classic content, unchanged and still fully present.
  */
 
+import type { ReadableGatePresentation } from "@/lib/research/readableReport/trustSignals";
 import type { AdaptiveGateResult, AdaptiveModelResult, AdaptiveSynthesisReport, AdaptiveTrustSummary, AlignedClaim, ResultSchema } from "@/lib/adaptiveSchema/types";
 import ExecutiveAnswer from "./ExecutiveAnswer";
 import TrustSignalsPanel from "./TrustSignalsPanel";
@@ -18,6 +19,8 @@ export interface ReadableReportHeaderProps {
   gate?: AdaptiveGateResult;
   synthesisReport?: AdaptiveSynthesisReport;
   trustSummary?: AdaptiveTrustSummary;
+  /** The page's one gate presentation (AdaptivePanelResponse's readable branch); the gate signal reads it. */
+  gatePresentation?: ReadableGatePresentation;
 }
 
 export default function ReadableReportHeader(props: ReadableReportHeaderProps) {

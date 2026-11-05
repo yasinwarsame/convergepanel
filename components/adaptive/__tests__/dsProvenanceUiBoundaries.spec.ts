@@ -61,9 +61,13 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
  *   - ReviewGovernanceSection.tsx: an optional, readable-only `legacyGateBannerLabels` prop threaded to the gate banner
  *     and the full synthesis report; classic callers never pass it and render byte-identically; no provenance code.
  *     Was c5298d27bb4e52562fc9865b17875ee87fc04d5c (unchanged since 9eca1e3).
+ *     Re-pinned again (owner ruling on review of 082a2a7, MINOR-1/MINOR-2 — one readable gate presentation): the
+ *     readable-only prop is now `readableGate` (the page's one gate presentation), handed to the gate banner, the Panel
+ *     Verdict card and the full synthesis report; classic callers still pass nothing and render byte-identically; no
+ *     provenance code. 5cc7f903a5a66f0ab7101d2a58b2616d569191e0 → 7eaba3c9d076525f9182610a590bfcb9466a1157.
  */
 const CHANGED_BY_290_INC1_READABLE_GATE_OPTION: Record<string, string> = {
-  "components/adaptive/ReviewGovernanceSection.tsx": "5cc7f903a5a66f0ab7101d2a58b2616d569191e0",
+  "components/adaptive/ReviewGovernanceSection.tsx": "7eaba3c9d076525f9182610a590bfcb9466a1157",
 };
 
 describe("forbidden layers are unchanged from main 9eca1e3", () => {

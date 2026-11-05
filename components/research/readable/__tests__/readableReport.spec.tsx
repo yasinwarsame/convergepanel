@@ -34,6 +34,7 @@ import { RunSlotStatusContext } from "@/components/adaptive/RunSlotStatusContext
 import PersistedResearchResultView from "@/components/research/PersistedResearchResultView";
 import { runModelProvenanceFromResultRow } from "@/lib/panel/runModelIdentity";
 import { READABLE_ANSWER_COPY, READABLE_GATE_COPY, READABLE_TRUST_COPY } from "@/lib/research/readableReport/copy";
+import { readableGatePresentation } from "@/lib/research/readableReport/trustSignals";
 import { ALL_SCENARIOS, PILOT_SCENARIOS, QUESTION, htmlText, panelElement, record, remoteWorkFixture, renderPanel, slotRows, tierHtml } from "./readableFixtures";
 
 const READABLE = { reportLayout: "readable" };
@@ -105,7 +106,7 @@ describe("B. readable structure", () => {
     expect(classic).toContain(classicEvidence);
     // Readable: the same sections, with the readable score names and without the trust summary table.
     const readableModelResponses = wrap(
-      createElement(ModelResponsesSection as any, { schema, results: rec.results, listView: listView && { ...listView, scoreNames: { row: READABLE_TRUST_COPY.listScoreRow, sort: READABLE_TRUST_COPY.listScoreSort, capped: READABLE_TRUST_COPY.listScoreCapped, cappedReason: READABLE_TRUST_COPY.listScoreCappedReason } } })
+      createElement(ModelResponsesSection as any, { schema, results: rec.results, listView: listView && { ...listView, scoreNames: { row: READABLE_TRUST_COPY.listScoreRow, sort: READABLE_TRUST_COPY.listScoreSort, capped: READABLE_TRUST_COPY.listScoreCapped, cappedReason: READABLE_TRUST_COPY.listScoreCappedReason }, readableGate: readableGatePresentation({ gate, synthesisReport, schemaId: rec.schemaId }) } })
     );
     const readableEvidence = wrap(createElement(PanelEvidenceSection as any, evidenceProps));
     const details = tierHtml(renderPanel(rec, rows, READABLE), "details")!;

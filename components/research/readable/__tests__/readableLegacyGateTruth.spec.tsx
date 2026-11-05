@@ -48,6 +48,16 @@ const PLAIN: Record<Known, string> = {
 };
 const UNAVAILABLE =
   "Verification gate: Unavailable — the stored result is inconsistent with its recorded inputs. The gate is a rule-based check of the panel's certainty score and split positions; it is not an independent verification of the evidence.";
+/** Review of 082a2a7 (owner ruling): the unavailable banner's second line — stored text is shown as written. */
+const STORED_TEXT_NOTE = "Text stored with this report (such as the answer or the certainty line) may name a gate result. That text is shown as written; it is not the gate result.";
+/**
+ * Review of 082a2a7 (MINOR-2): the old check matched only "Verification gate: Pass|Caution|Fail" and so could not see the
+ * raw forms the page actually showed — the Model Responses badge "gate: pass" and the Panel Verdict badge "pass". This
+ * matches the D6 label, the legacy chip form, and (on its own line, see RAW_PILL) the bare badge.
+ */
+const GATE_RESULT_TEXT = /Verification gate: (Pass|Caution|Fail)\b|\bgate: (pass|caution|fail)\b/;
+/** A pill (rounded-full badge) whose whole text is a raw stored gate: "pass", "gate: fail", … */
+const RAW_PILL = /<span[^>]*class="[^"]*rounded-full[^"]*"[^>]*>(gate: )?(pass|caution|fail)<\/span>/;
 
 /** The cb2febb wording the review found untrue (and the 28f770c wording before it). */
 const OLD_WORDING = [
@@ -341,14 +351,24 @@ describe("conflicting legacy metadata: readable shows the gate as unavailable, n
 
     const html = renderPanel(rec, rows, READABLE);
     const text = htmlText(html);
-    expect((await banners(rec, rows)).text).toEqual([UNAVAILABLE, UNAVAILABLE]);
+    expect((await banners(rec, rows)).text).toEqual([`${UNAVAILABLE}${STORED_TEXT_NOTE}`, `${UNAVAILABLE}${STORED_TEXT_NOTE}`]);
     for (const w of [...Object.values(PLAIN), ...OLD_WORDING, ...Object.values(LEGACY_GATE_BANNER_LABEL)]) expect(text).not.toContain(w);
     // Outside the stored answer text (shown verbatim wherever the page shows it — an answer composed after Order 4 may
     // open with its own gate sentence, which is stored data, not a statement the readable layout adds), no gate result
     // is stated.
     const storedAnswer = String(rec.synthesisReport.unifiedAnswer).replace(/\s+/g, " ").trim();
+    // The stored certainty line ("Run certainty 69% (gate: caution). …") is stored text too, shown as written.
+    const storedCertainty = String(rec.synthesisReport.certaintyAssessment).replace(/\s+/g, " ").trim();
     expect(text).toContain(storedAnswer);
-    expect(text.split(storedAnswer).join(" ")).not.toMatch(/Verification gate: (Pass|Caution|Fail)\b/);
+    expect(text).toContain(storedCertainty);
+    const outside = text.split(storedAnswer).join(" ").split(storedCertainty).join(" ");
+    expect(outside).not.toMatch(GATE_RESULT_TEXT);
+    expect(html).not.toMatch(RAW_PILL);
+    expect(text).toContain(STORED_TEXT_NOTE);
+    // Non-vacuous: on the classic page of the same record both detectors fire (raw "gate: …" chip and bare badge).
+    const classic = renderPanel(rec, rows);
+    expect(htmlText(classic).split(storedAnswer).join(" ").split(storedCertainty).join(" ")).toMatch(GATE_RESULT_TEXT);
+    expect(classic).toMatch(RAW_PILL);
 
     const sig = gateSignalOf(html);
     expect(sig.value).toBe("Unavailable");
@@ -387,7 +407,7 @@ describe("conflicting legacy metadata: readable shows the gate as unavailable, n
     const b = await banners(rec, rows, {});
     expect(b.text.length).toBeGreaterThan(0);
     for (const t of b.text) expect(t).toBe(LEGACY_GATE_BANNER_LABEL[stored]);
-    for (const p of b.props) expect(p.legacyLabels).toBeUndefined();
+    for (const p of b.props) expect(p.readable).toBeUndefined();
     expect(html).not.toContain("Unavailable");
     expect(html).not.toContain("rule-based check");
   });

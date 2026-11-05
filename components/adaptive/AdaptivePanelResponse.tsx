@@ -62,7 +62,7 @@ import ReadableSummaryBar from "@/components/research/readable/ReadableSummaryBa
 import ReadableReportHeader from "@/components/research/readable/ReadableReportHeader";
 import { READABLE_MODEL_RESPONSES_ANCHOR } from "@/components/research/readable/ExecutiveAnswer";
 import { READABLE_TRUST_COPY } from "@/lib/research/readableReport/copy";
-import { readableLegacyGateBannerLabels } from "@/lib/research/readableReport/trustSignals";
+import { readableGatePresentation } from "@/lib/research/readableReport/trustSignals";
 import type { ListScoreNames } from "./ListView";
 
 /** #290 Inc 1, readable mode only: the Model Responses list names the per-model stored score as the trust signals do. */
@@ -620,6 +620,11 @@ function AdaptivePanelResponseBody(props: AdaptivePanelResponseProps) {
   if (PHASE2_PILOT_SCHEMAS.has(schema.id) && resolveReportLayout(props.reportLayout) === "readable") {
     // The props the classic pilot branch hands the one review & governance helper below, without trustSummary: the full
     // synthesis report inside it renders the trust summary table only when one is passed (see the comment above).
+    // Review of 082a2a7 (owner ruling): the page's ONE gate presentation, computed once here. The trust signal, both
+    // banners (words and tone), both Panel Verdict badges and the Model Responses header badge all show it, so a stored
+    // gate that contradicts its recorded inputs is "Unavailable" everywhere — never beside a raw "pass" or a pass / fail
+    // colour. Order 4 reports and unrecognized values keep gatePresentation's words. Nothing stored is changed.
+    const readableGate = readableGatePresentation({ gate, synthesisReport, schemaId: schema.id });
     const readableGovernanceProps: ReviewGovernanceSectionProps = {
       humanReview: props.humanReview,
       reviewRouting: props.reviewRouting,
@@ -634,7 +639,7 @@ function AdaptivePanelResponseBody(props: AdaptivePanelResponseProps) {
       // A report without the Order 4 gate presentation: the gate banner states the stored gate word and that the gate is
       // a rule-based check, not an independent verification of the evidence, instead of the historical "Verified — panel
       // converges" (classic keeps it). A stored gate that contradicts its recorded inputs shows as unavailable.
-      legacyGateBannerLabels: readableLegacyGateBannerLabels({ gate, synthesisReport, schemaId: schema.id }),
+      readableGate,
     };
     return (
       <div className="space-y-4" data-report-layout="readable">
@@ -648,7 +653,7 @@ function AdaptivePanelResponseBody(props: AdaptivePanelResponseProps) {
           reviewRouting={props.reviewRouting}
           ancillaryPresentation={ancillary}
         />
-        <ReadableReportHeader schema={schema} results={results} alignedClaims={alignedClaims} gate={gate} synthesisReport={synthesisReport} trustSummary={trustSummary} />
+        <ReadableReportHeader schema={schema} results={results} alignedClaims={alignedClaims} gate={gate} synthesisReport={synthesisReport} trustSummary={trustSummary} gatePresentation={readableGate} />
         <div className="space-y-4" data-readable-tier="details">
           <SchemaKeyFactsStrip schemaId={schema.id} results={results} alignedClaims={alignedClaims} />
           <AdaptiveResultsView {...props} />
@@ -656,7 +661,7 @@ function AdaptivePanelResponseBody(props: AdaptivePanelResponseProps) {
             <ModelResponsesSection
               schema={schema}
               results={results}
-              listView={gate && synthesisReport ? { alignedClaims, gate, synthesisReport, trustSummary, scoreNames: READABLE_LIST_SCORE_NAMES } : undefined}
+              listView={gate && synthesisReport ? { alignedClaims, gate, synthesisReport, trustSummary, scoreNames: READABLE_LIST_SCORE_NAMES, readableGate } : undefined}
             />
           </div>
           <PanelEvidenceSection

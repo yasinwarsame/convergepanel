@@ -35,6 +35,7 @@ import { TRUST_SCORE_CAP_BY_HEALTH, TRUST_SCORE_CAP_REASON } from "@/lib/adaptiv
 import { Card, SectionLabel, BulletList, ConfidencePill, ProbabilityBar, TintBadge, SlotName } from "./shared";
 import ModelChip from "@/components/ModelChip";
 import { GateTone, gateChipText, gateTone, pageGateValue } from "@/lib/adaptiveSchema/gatePresentation";
+import type { ReadableGateDisplay } from "./AdaptiveSynthesisReportView";
 import { PanelCounts, ROW_COUNTS_UNAVAILABLE, SlotRowCounts, hasReadableRowBreakdown, panelCounts, readSlots, rowTypeOf, slotLabel, slotRowCounts } from "@/lib/adaptiveSchema/positionPresentation";
 import { PositionPresentationBoundary, PositionPresentationState, usePositionPresentation } from "./PositionPresentationContext";
 import { didNotRespondText, slotDidNotRespond, useRunSlotStatus } from "@/components/adaptive/RunSlotStatusContext";
@@ -334,10 +335,13 @@ function RunHeaderStrip({
   splitCount,
   limitedCoverageCount,
   counts,
+  readableGate,
 }: {
   schema: ResultSchema;
   gate: AdaptiveGateResult;
   synthesisReport: AdaptiveSynthesisReport;
+  /** #290 Inc 1: readable layout only — the page's one gate presentation (ReadableGateDisplay); absent (classic): unchanged. */
+  readableGate?: ReadableGateDisplay;
   alignedClaimsCount: number;
   splitCount: number;
   limitedCoverageCount: number;
@@ -350,8 +354,11 @@ function RunHeaderStrip({
         <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600">
           {schema.id.replace(/_/g, " ")}
         </span>
-        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${GATE_CHIP_STYLES[gateTone(pageGateValue(synthesisReport, gate.status))]}`}>
-          {gateChipText(synthesisReport, pageGateValue(synthesisReport, gate.status))}
+        <span
+          {...(readableGate ? { "data-readable-gate": readableGate.status } : {})}
+          className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${GATE_CHIP_STYLES[readableGate ? readableGate.tone : gateTone(pageGateValue(synthesisReport, gate.status))]}`}
+        >
+          {readableGate ? readableGate.chip : gateChipText(synthesisReport, pageGateValue(synthesisReport, gate.status))}
         </span>
       </div>
       {counts ? (
@@ -665,6 +672,8 @@ export interface ListViewProps {
   trustSummary?: AdaptiveTrustSummary;
   /** #290 Inc 1: readable mode only — see ListScoreNames. */
   scoreNames?: ListScoreNames;
+  /** #290 Inc 1: readable mode only — the run-header gate badge from the page's one gate presentation (ReadableGateDisplay). */
+  readableGate?: ReadableGateDisplay;
   /** Switches the parent tab shell to Synthesis Report and scrolls to the given `data-section` anchor. */
   onNavigateToSynthesis?: (sectionId: string) => void;
 }
@@ -686,6 +695,7 @@ function ListViewBody({
   synthesisReport,
   trustSummary,
   scoreNames,
+  readableGate,
   onNavigateToSynthesis,
 }: ListViewProps) {
   const rows = useMemo(() => alignedClaims || [], [alignedClaims]);
@@ -722,6 +732,7 @@ function ListViewBody({
         splitCount={splitCount}
         limitedCoverageCount={limitedCoverageCount}
         counts={counts}
+        readableGate={readableGate}
       />
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

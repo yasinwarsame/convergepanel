@@ -10,6 +10,7 @@
  */
 
 import { useId } from "react";
+import type { ReadableGatePresentation } from "@/lib/research/readableReport/trustSignals";
 import type { AdaptiveGateResult, AdaptiveModelResult, AdaptiveSynthesisReport, AdaptiveTrustSummary, AlignedClaim, ResultSchema } from "@/lib/adaptiveSchema/types";
 import { useRunSlotStatus } from "@/components/adaptive/RunSlotStatusContext";
 import { buildTrustSignals, type TrustSignal } from "@/lib/research/readableReport/trustSignals";
@@ -22,6 +23,8 @@ export interface TrustSignalsPanelProps {
   gate?: AdaptiveGateResult;
   synthesisReport?: AdaptiveSynthesisReport;
   trustSummary?: AdaptiveTrustSummary;
+  /** The page's one gate presentation (AdaptivePanelResponse's readable branch); the gate signal reads it. */
+  gatePresentation?: ReadableGatePresentation;
 }
 
 export default function TrustSignalsPanel(props: TrustSignalsPanelProps) {

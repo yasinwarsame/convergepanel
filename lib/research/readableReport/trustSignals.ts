@@ -26,7 +26,20 @@ import type {
   ResultSchema,
 } from "@/lib/adaptiveSchema/types";
 import { GATE_THRESHOLDS } from "@/lib/adaptiveSchema/config";
-import { GATE_STATUS_WORD, gateNotice, hasGatePresentation, pageGateValue, readGateStatus, type GateDisplayStatus } from "@/lib/adaptiveSchema/gatePresentation";
+import {
+  GATE_STATUS_WORD,
+  gateBadgeText,
+  gateBannerText,
+  gateChipText,
+  gateLabel,
+  gateNotice,
+  gateTone,
+  hasGatePresentation,
+  pageGateValue,
+  readGateStatus,
+  type GateDisplayStatus,
+  type GateTone,
+} from "@/lib/adaptiveSchema/gatePresentation";
 import { READABLE_GATE_COPY as G, READABLE_TRUST_COPY as C } from "./copy";
 
 export type TrustSignalId = "gate" | "coverage" | "sources" | "behaviour";
@@ -52,6 +65,8 @@ export interface TrustSignalsInput {
   trustSummary?: AdaptiveTrustSummary | null;
   /** The run's recorded per-slot call status (RunSlotStatusContext); null when the page was not handed it. */
   slotStatuses: ReadonlyMap<string, string> | null;
+  /** The page's one readable gate presentation (computed once by the readable branch); computed here when absent. */
+  gatePresentation?: ReadableGatePresentation;
 }
 
 const pct = (x: number) => Math.round(x * 100);
@@ -108,42 +123,77 @@ export function storedGateConsistency({ gate, synthesisReport, schemaId }: Store
   if (Array.isArray(gate!.loadBearingClaims) && gate!.loadBearingClaims.filter((c) => c?.status === "split").length !== splits) return "inconsistent";
   const expected = ruleStatus(certainty, splits);
   if (expected === shown) return "consistent";
+  // Not reachable from a readable page today — factual_lookup is not a Phase 2 pilot schema, so the readable branch never
+  // renders it — but kept so this pure check states gate.ts's rule for every schema (trustSignals.spec covers it).
   if (schemaId === "factual_lookup" && expected === "pass" && shown === "caution") return "consistent";
   return "inconsistent";
 }
 
 /**
- * The readable gate banner's words for a legacy report (AdaptiveSynthesisReportView's LegacyGateBannerLabels): the
- * stored word with what kind of check the gate is, or — on an inconsistent record — the unavailable statement for every
- * status, so no gate result is shown.
+ * Review of 082a2a7 (owner ruling): every readable-mode gate display — the governance and full-report banners (text and
+ * tone), both Panel Verdict badges and accent bars, the Model Responses header badge, and the trust signal — is drawn
+ * from this ONE presentation, computed once per page by AdaptivePanelResponse's readable branch, so one page never shows
+ * "Unavailable" beside a raw "gate: pass" or a pass / fail colour. Presentation only: the stored gate and report are read,
+ * never written, and no gate is recomputed or shown in place of the stored one.
+ *
+ *   - Order 4 report (presentation.verificationGate) or an unrecognized stored value (D8): gatePresentation's own words
+ *     and tone, exactly as before ("Verification gate: Pass" …; neutral for unrecognized).
+ *   - Legacy, inconsistent (storedGateConsistency): "unavailable" — neutral tone, the unavailable banner with the
+ *     stored-text note, "Verification gate: Unavailable" on both badges. No pass / caution / fail word or colour.
+ *   - Legacy otherwise (consistent, or inputs not recorded): the stored status — its tone, the readable legacy banner,
+ *     and the D6 label ("Verification gate: Pass") on both badges in place of the historical raw "pass" / "gate: pass".
  */
-export function readableLegacyGateBannerLabels(input: StoredGateInput): Readonly<Record<AdaptiveGateStatus, string>> {
-  if (storedGateConsistency(input) !== "inconsistent") return G.legacyBanner;
-  return { pass: G.inconsistentBanner, caution: G.inconsistentBanner, fail: G.inconsistentBanner };
+export type ReadableGateStatus = GateDisplayStatus | "unavailable";
+
+export interface ReadableGatePresentation {
+  status: ReadableGateStatus;
+  /** The one-word value the trust signal shows ("Pass" … "Unrecognized", "Unavailable"). */
+  word: string;
+  /** The styling tone every readable gate display uses; "neutral" for unrecognized and unavailable. */
+  tone: GateTone;
+  /** The banner text (governance section and full synthesis report). */
+  banner: string;
+  /** A further banner line; only the unavailable state has one (READABLE_GATE_COPY.storedTextNote). */
+  bannerNote: string | null;
+  /** The Panel Verdict card's badge. */
+  badge: string;
+  /** The Model Responses list's run-header badge. */
+  chip: string;
 }
 
-export function gateSignal(input: Pick<TrustSignalsInput, "gate" | "synthesisReport"> & { schemaId?: string }): TrustSignal {
+export function readableGatePresentation(input: StoredGateInput): ReadableGatePresentation {
+  const report = input.synthesisReport ?? null;
+  const shown = readGateStatus(pageGateValue(report, input.gate?.status));
+  if (storedGateConsistency(input) === "inconsistent") {
+    return { status: "unavailable", word: G.inconsistentValue, tone: "neutral", banner: G.inconsistentBanner, bannerNote: G.storedTextNote, badge: G.unavailableLabel, chip: G.unavailableLabel };
+  }
+  if (shown === "unrecognized" || hasGatePresentation(report)) {
+    return { status: shown, word: GATE_STATUS_WORD[shown], tone: gateTone(shown), banner: gateBannerText(report, shown), bannerNote: null, badge: gateBadgeText(report, shown), chip: gateChipText(report, shown) };
+  }
+  return { status: shown, word: GATE_STATUS_WORD[shown], tone: shown, banner: G.legacyBanner[shown], bannerNote: null, badge: gateLabel(shown), chip: gateLabel(shown) };
+}
+
+export function gateSignal(input: Pick<TrustSignalsInput, "gate" | "synthesisReport" | "gatePresentation"> & { schemaId?: string }): TrustSignal {
   const base = { id: "gate" as const, name: C.gateName, definition: C.gateDefinition };
   const { gate, synthesisReport } = input;
   if (!gate && !synthesisReport) return { ...base, value: C.gateNotRecorded, details: [C.gateNotRecordedDetail], state: "not_recorded" };
 
-  // The stored value the rest of the page shows (F4): the report's copy when a report exists.
-  const status: GateDisplayStatus = readGateStatus(pageGateValue(synthesisReport ?? null, gate?.status));
-  const inconsistent = storedGateConsistency(input) === "inconsistent";
+  // The page's one gate presentation: the stored value the rest of the page shows (F4), or unavailable.
+  const presentation = input.gatePresentation ?? readableGatePresentation(input);
   const details: string[] = [];
-  const notice = gateNotice(status);
   // D8: an unrecognized stored value supports no verification result, so its stored inputs are not presented beside it.
-  if (status !== "unrecognized") {
+  if (presentation.status !== "unrecognized") {
     if (gate && isFiniteNumber(gate.runCertainty) && isFiniteNumber(gate.loadBearingSplitCount) && Array.isArray(gate.loadBearingClaims)) {
       details.push(`${C.gateInputsHeading}: ${C.gateCertainty(pct(gate.runCertainty))}; ${C.gateSplitTop(gate.loadBearingSplitCount, gate.loadBearingClaims.length)}`);
     } else {
       details.push(C.gateInputsNotRecorded);
     }
   }
-  // Inconsistent: no gate result, so no notice for the stored status either.
-  if (inconsistent) return { ...base, value: G.inconsistentValue, details: [...details, G.inconsistentDetail], state: "inconsistent" };
+  // Unavailable: no gate result, so no notice for the stored status either; the stored-text note instead.
+  if (presentation.status === "unavailable") return { ...base, value: presentation.word, details: [...details, G.inconsistentDetail, G.storedTextNote], state: "inconsistent" };
+  const notice = gateNotice(presentation.status);
   if (notice) details.push(notice);
-  return { ...base, value: GATE_STATUS_WORD[status], details, state: status };
+  return { ...base, value: presentation.word, details, state: presentation.status };
 }
 
 // ── 2. Panel coverage ───────────────────────────────────────────────────────
