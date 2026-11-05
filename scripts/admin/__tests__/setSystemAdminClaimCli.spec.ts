@@ -660,6 +660,20 @@ describe("M-2: result-file location is filesystem-grounded (real temp dirs; neve
     expect(realIo(repo).caseInsensitivePaths(repo)).toBe(true);
   });
 
+  it("realIo.caseInsensitivePaths folds on darwin/win32 even when the probe says case-sensitive (fail toward refusing)", () => {
+    const realPlatform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    let n = 0;
+    const different = { ...rawFs, statSync: (() => ({ dev: 1, ino: ++n })) as unknown as FsLayer["statSync"] } as FsLayer;
+    try {
+      for (const platform of ["darwin", "win32"]) {
+        Object.defineProperty(process, "platform", { value: platform });
+        expect({ platform, folded: realIo(repo, different).caseInsensitivePaths("/Some/Dir") }).toEqual({ platform, folded: true });
+      }
+    } finally {
+      Object.defineProperty(process, "platform", realPlatform);
+    }
+  });
+
   it("realIo.caseInsensitivePaths off darwin/win32: a filesystem probe (same inode under swapped case) decides", () => {
     const realPlatform = Object.getOwnPropertyDescriptor(process, "platform")!;
     Object.defineProperty(process, "platform", { value: "linux" });
