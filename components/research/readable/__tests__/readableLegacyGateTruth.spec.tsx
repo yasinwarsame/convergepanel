@@ -286,6 +286,21 @@ const CONFLICTS: Conflict[] = [
     conflict: (rec) => expect(rec.gate.status).not.toBe(rec.synthesisReport.gate),
   },
   {
+    // Mutation M14b (caution notice leaking into the Unavailable signal) needs a stored caution: every other conflict stores
+    // pass or fail, which carry no notice.
+    label: "stored caution over inputs that give pass (full certainty, no split)",
+    base: "generic-consensus",
+    edit: (rec) => {
+      rec.gate.status = "caution";
+      rec.synthesisReport.gate = "caution";
+    },
+    conflict: (rec) => {
+      expect(rec.gate.runCertainty).toBeGreaterThanOrEqual(GATE_THRESHOLDS.passMin);
+      expect(rec.gate.loadBearingSplitCount).toBe(0);
+      expect(rec.schemaId).not.toBe("factual_lookup");
+    },
+  },
+  {
     label: "stored pass with certainty below the pass threshold",
     base: "generic-malformed",
     edit: (rec) => {

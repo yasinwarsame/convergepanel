@@ -338,4 +338,15 @@ describe("storedGateConsistency (legacy records only; read-only)", () => {
     expect(s.details.join(" ")).not.toContain(CAUTION_NOTICE);
     expect(JSON.stringify(r.gate.status)).toBe('"pass"'); // stored data untouched
   });
+
+  it("gateSignal on an inconsistent stored caution: no caution notice beside Unavailable", () => {
+    const r = rec("generic-consensus");
+    expect(r.gate.status).toBe("pass");
+    r.gate.status = "caution";
+    r.synthesisReport.gate = "caution";
+    delete r.synthesisReport.presentation;
+    const s = gateSignal({ gate: r.gate, synthesisReport: r.synthesisReport, schemaId: r.schemaId });
+    expect([s.value, s.state]).toEqual(["Unavailable", "inconsistent"]);
+    expect(s.details).not.toContain(CAUTION_NOTICE);
+  });
 });
