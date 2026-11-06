@@ -79,6 +79,18 @@ export interface MemoInput {
   researchIndependenceUnverified?: boolean;
 
   /**
+   * Research (legacy panel) memo only: the stored differences that are NOT disagreements between independent executing
+   * models (`PanelVerdict.recordedDifferences`), stated in their own section with topic, reason and each position named
+   * by its executing model — never under "where models disagree". Absent / empty → exactly the memo as before.
+   */
+  researchRecordedDifferences?: ReadonlyArray<{
+    topic: string;
+    whyTheyDiffer: string | null;
+    basisText: string;
+    positions: ReadonlyArray<{ voice: string; position: string }>;
+  }>;
+
+  /**
    * Claim memo only: whether the verification's stored rows prove >= 2 independent executing models with a usable answer
    * (`ClaimVerificationClientPayload.modelIndependence`). "insufficient" / "unverified" → no consensus score, no
    * cross-model evidence quality, the verdict stated as one model's assessment (or with unverified coverage), and no
@@ -519,6 +531,11 @@ export const RESEARCH_MEMO_NO_CROSS_MODEL_EVIDENCE = "not assessed (fewer than t
 export const RESEARCH_MEMO_SINGLE_MODEL_METHODOLOGY =
   "This question was sent to a panel of large language models via ConvergePanel with identical instructions, but fewer than two independent models responded (slots answered by the same substitute model count as one). No cross-model comparison was possible: no consensus score is reported and nothing in this memo reflects agreement or convergence between models.";
 
+/** Research memo section of stored differences that are not disagreements between independent models. */
+export const RESEARCH_MEMO_RECORDED_DIFFERENCES_HEADING = "RECORDED DIFFERENCES NOT COUNTED AS MODEL DISAGREEMENTS";
+export const RESEARCH_MEMO_RECORDED_DIFFERENCES_NOTE =
+  "The synthesis recorded these differing positions, but they are not counted as disagreements between independent models. Each position is named by the model that actually answered.";
+
 /** Research memo lines when two or more slots answered but which models executed is not recorded. */
 export const RESEARCH_MEMO_UNVERIFIED_SUMMARY =
   "Which models actually answered this question could not be established, so nothing in this memo is presented as agreement or disagreement between models.";
@@ -591,6 +608,18 @@ function generateResearchMemo(input: MemoInput): string {
   if (disagree.length && !noConsensus) {
     lines.push("WHERE MODELS DISAGREE");
     disagree.forEach((p) => lines.push(`- ${p}`));
+    lines.push("");
+  }
+
+  const recorded = input.researchRecordedDifferences ?? [];
+  if (recorded.length) {
+    lines.push(RESEARCH_MEMO_RECORDED_DIFFERENCES_HEADING);
+    lines.push(RESEARCH_MEMO_RECORDED_DIFFERENCES_NOTE);
+    for (const d of recorded) {
+      lines.push(`- ${d.topic} — ${d.basisText}`);
+      if (d.whyTheyDiffer) lines.push(`  ${d.whyTheyDiffer}`);
+      d.positions.forEach((p) => lines.push(`  ${p.voice}: ${p.position}`));
+    }
     lines.push("");
   }
 

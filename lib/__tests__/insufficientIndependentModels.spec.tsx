@@ -55,6 +55,9 @@ import {
   INSUFFICIENT_INDEPENDENT_MODELS_GATE_STEP,
 } from "@/lib/verificationGate/verificationGate";
 import { buildLinkedInPost } from "@/lib/ui/socialCopy";
+import { RECORDED_DIFFERENCES_HEADING } from "@/lib/verificationGate/panelVerdict";
+import { QUALIFIED_DISAGREEMENT_TEXT } from "@/lib/panel/storedDisagreementIndependence";
+import { outsideRecordedDifferences, recordedDifferenceSections } from "./recordedDifferencesText";
 import { buildSynthesisMarkdown } from "@/lib/ui/copyFormats";
 import { RESEARCH_MEMO_NO_CROSS_MODEL_EVIDENCE } from "@/lib/verification/generateMemo";
 import { clientRowText, meetsIndependentSynthesisMinimum } from "@/lib/panel/independentVoices";
@@ -135,6 +138,15 @@ async function copied(r: TestRenderer.ReactTestRenderer): Promise<string> {
 }
 const verdictCard = (r: TestRenderer.ReactTestRenderer) => nodeText(r.root.findAll((n) => n.type === "h3" && nodeText(n) === "Panel Verdict")[0].parent!.parent!.parent!);
 const gateCard = (r: TestRenderer.ReactTestRenderer) => nodeText(r.root.findAll((n) => n.type === "span" && nodeText(n) === "Verification Gate")[0].parent!.parent!.parent!);
+const byTestIdText = (r: TestRenderer.ReactTestRenderer, id: string) =>
+  r.root.findAll((n) => n.props?.["data-testid"] === id && typeof n.type === "string").map(nodeText).join("\n");
+/** The verdict card's recorded-differences lists (and their heading) vs the rest of the card. */
+const recordedInCard = (r: TestRenderer.ReactTestRenderer) => byTestIdText(r, "verdict-recorded-differences");
+const cardOutsideRecorded = (r: TestRenderer.ReactTestRenderer) => {
+  let t = verdictCard(r);
+  for (const el of r.root.findAll((n) => n.props?.["data-testid"] === "verdict-recorded-differences" && typeof n.type === "string")) t = t.split(nodeText(el)).join("");
+  return t.split(RECORDED_DIFFERENCES_HEADING).join("");
+};
 const hasDisagreementsSection = (r: TestRenderer.ReactTestRenderer) => r.root.findAll((n) => n.type === "h2" && nodeText(n) === "Disagreements").length > 0;
 
 /** Every text a viewer can see or share for one mounted run. */
@@ -192,13 +204,23 @@ describe("M1. fewer than two independent executing models: no agreement / eviden
     const r = await mount([...rows], disputedReport(supporting, ["chatgpt", "claude"]));
     const s = await everySurface(r);
     expect(s.linkedIn).not.toContain("Where models disagree");
-    expect(s.linkedIn).not.toContain("Founding date");
     expect(s.x).not.toContain("Models disagreed on");
     expect(s.memo).not.toContain("WHERE MODELS DISAGREE");
     expect(s.markdown).not.toContain("Key disagreement");
-    expect(s.card).not.toContain("Founding date");
+    // Review of 1ee4982, MINOR-B: the stored difference is RETAINED — only inside its own "Recorded differences not
+    // counted as model disagreements" section (one independent model), never anywhere else on any surface.
+    for (const where of ["linkedIn", "x", "memo", "markdown"] as const) {
+      expect([where, recordedDifferenceSections(s[where]).includes("Founding date")]).toEqual([where, true]);
+      expect([where, outsideRecordedDifferences(s[where]).includes("Founding date")]).toEqual([where, false]);
+      expect([where, recordedDifferenceSections(s[where]).includes(QUALIFIED_DISAGREEMENT_TEXT.single_independent_model)]).toEqual([where, true]);
+    }
+    const cardRecorded = recordedInCard(r);
+    expect(cardRecorded).toContain("Founding date");
+    expect(cardOutsideRecorded(r)).not.toContain("Founding date");
+    expect(s.card).not.toContain("Key disagreement");
     expect(s.card).toContain(NO_CROSS_MODEL_COMPARISON_TEXT);
     expect(hasDisagreementsSection(r)).toBe(false);
+    expect(byTestIdText(r, "recorded-differences")).toContain("Founding date");
     // The gate's disagreement reasons / steps are not fed by one model's positions either.
     for (const t of [s.gate, s.markdown]) {
       expect(t).not.toMatch(/Model disagreement on a core conclusion|Minor nuance differences|Isolate the disputed premise/);
@@ -242,14 +264,25 @@ describe("M1 controls: two genuinely independent models keep agreement, evidence
     (rep.disagreements as any[]).push({ topic: "Real split", positionsByModel: { chatgpt: "1789", grok: "1792" }, whyTheyDiffer: "Different sources." });
     const r = await mount([...SUBS_PLUS_GROK], rep, { ...STRONG_SUMMARY, modelCount: 3 });
     const s = await everySurface(r);
-    for (const text of [s.linkedIn, s.x, s.memo, s.markdown, s.card]) expect(text).not.toContain("Fabricated split");
+    // MINOR-B: the DeepSeek-vs-DeepSeek item is retained only in its own section, named by executing model.
+    for (const text of [s.linkedIn, s.memo, s.markdown]) {
+      expect(outsideRecordedDifferences(text)).not.toContain("Fabricated split");
+      expect(recordedDifferenceSections(text)).toContain("Fabricated split");
+      expect(recordedDifferenceSections(text)).toContain(QUALIFIED_DISAGREEMENT_TEXT.same_executing_model);
+    }
+    // X carries a recorded difference only when no genuine disagreement exists (here one does).
+    expect(s.x).not.toContain("Fabricated split");
+    expect(cardOutsideRecorded(r)).not.toContain("Fabricated split");
+    expect(recordedInCard(r)).toContain("Fabricated split");
+    expect(byTestIdText(r, "recorded-differences")).toContain("DeepSeek (substituting ChatGPT):");
     expect(s.linkedIn).toContain("Real split: Different sources.");
     expect(s.x).toContain("Models disagreed on: Real split");
     expect(s.memo).toContain("- Real split: Different sources.");
     expect(s.markdown).toContain("- Topic: Real split");
     expect(s.card).toContain("Real split");
     // On-screen Disagreements section: only the real one.
-    const h3s = r.root.findAll((n) => n.type === "h3").map(nodeText);
+    const section = r.root.findAll((n) => n.type === "h2" && nodeText(n) === "Disagreements")[0].parent!;
+    const h3s = section.findAll((n) => n.type === "h3").map(nodeText);
     expect(h3s).toContain("Real split");
     expect(h3s).not.toContain("Fabricated split");
   });
@@ -304,7 +337,9 @@ describe("M1 builders on their own", () => {
     expect(below.topDisagreement).toBeNull();
     for (const t of [formatVerdictText(below, "linkedin"), buildCopyForXShort(below), buildLinkedInPost({ question: "q", gate, verdict: below, modelHealth: { total: 2, responded: 2, substituted: 2, failed: 0 } } as never)]) {
       expect(t).not.toMatch(/Key disagreement|Disagreement:/);
-      expect(t).not.toContain("Founding date");
+      // MINOR-B: retained only in the recorded-differences section.
+      expect(outsideRecordedDifferences(t)).not.toContain("Founding date");
+      expect(recordedDifferenceSections(t)).toContain("Founding date");
       expect(t).not.toContain("Broadly consistent");
       expect(t).toContain(INSUFFICIENT_INDEPENDENT_MODELS_GATE_LABEL);
     }

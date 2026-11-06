@@ -46,7 +46,8 @@ import {
   UNVERIFIED_INDEPENDENT_COVERAGE_GATE_LABEL,
   type VerificationGateInput,
 } from "@/lib/verificationGate/verificationGate";
-import { classifyStoredDisagreement, storedRunIndependenceContext } from "@/lib/panel/storedDisagreementIndependence";
+import { classifyStoredDisagreement, QUALIFIED_DISAGREEMENT_TEXT, storedRunIndependenceContext } from "@/lib/panel/storedDisagreementIndependence";
+import { outsideRecordedDifferences, recordedDifferenceSections } from "./recordedDifferencesText";
 import type { ModelResult } from "@/lib/types";
 import type { StructuredSynthesis } from "@/lib/synthesis/structuredSchema";
 
@@ -230,10 +231,18 @@ describe("PSV end to end: gate card, verdict and copied synthesis (share text)",
     // The verdict / share present only the genuine item as a disagreement between models.
     const verdict = buildPanelVerdict("q", report([SAME, UNKNOWN, GENUINE]), computeVerificationGate({ keyFindings: [] }), COLLAPSED, { crossModel: true });
     expect(verdict.topDisagreement).toBe(GENUINE.topic);
-    expect(formatVerdictText(verdict, "linkedin")).not.toContain(UNKNOWN.topic);
+    // Review of 1ee4982, MINOR-B: the two non-genuine items are RETAINED with their own reason, only inside the
+    // "Recorded differences not counted as model disagreements" section of each text — never outside it.
     const post = await linkedIn(r);
-    expect(post).not.toContain(UNKNOWN.topic);
-    expect(post).not.toContain(SAME.topic);
+    for (const text of [formatVerdictText(verdict, "linkedin"), post, md]) {
+      for (const item of [UNKNOWN, SAME]) {
+        expect(outsideRecordedDifferences(text)).not.toContain(item.topic);
+        expect(recordedDifferenceSections(text)).toContain(item.topic);
+      }
+      expect(recordedDifferenceSections(text)).toContain(`${UNKNOWN.topic} — ${QUALIFIED_DISAGREEMENT_TEXT.independence_unverified}`);
+      expect(recordedDifferenceSections(text)).toContain(`${SAME.topic} — ${QUALIFIED_DISAGREEMENT_TEXT.same_executing_model}`);
+      expect(recordedDifferenceSections(text)).not.toContain(GENUINE.topic);
+    }
     expect(md).not.toContain(UNKNOWN.topic + ":");
   });
 

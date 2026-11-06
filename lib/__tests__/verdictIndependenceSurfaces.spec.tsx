@@ -54,6 +54,9 @@ import {
   UNVERIFIED_INDEPENDENT_COVERAGE_GATE_STEP,
 } from "@/lib/verificationGate/verificationGate";
 import type { ModelResult } from "@/lib/types";
+import { RECORDED_DIFFERENCES_HEADING } from "@/lib/verificationGate/panelVerdict";
+import { QUALIFIED_DISAGREEMENT_TEXT } from "@/lib/panel/storedDisagreementIndependence";
+import { outsideRecordedDifferences } from "./recordedDifferencesText";
 import type { StructuredSynthesis } from "@/lib/synthesis/structuredSchema";
 
 const TEXT = "Paris is the capital of France. The city has been the seat of the French government for centuries.";
@@ -160,7 +163,10 @@ describe("MINOR-1: unknown execution provenance (3 answering slots + a row with 
     expect(card).not.toContain("Top consensus");
     expect(card).not.toMatch(/Agreed by \d+ model/);
     expect(card).not.toContain("No major disagreements detected.");
-    expect(card).toContain(`${INDEPENDENCE_UNVERIFIED_DISAGREEMENTS_REASON} (1)`);
+    // MINOR-B (review of 1ee4982): the stored item is kept as evidence under its own heading, not as a key disagreement.
+    expect(card).toContain(RECORDED_DIFFERENCES_HEADING);
+    expect(card).not.toContain("Key disagreement");
+    expect(nodeText(byTestId(r, "verdict-recorded-differences")[0])).toContain(`${CROSS3.topic}${QUALIFIED_DISAGREEMENT_TEXT.independence_unverified}`);
     expect(card).not.toMatch(/\d+ models? split/);
   });
 
@@ -189,8 +195,8 @@ describe("MINOR-1: unknown execution provenance (3 answering slots + a row with 
     expect(text).not.toContain("Top consensus:");
     expect(text).toContain("Top finding (model independence unverified; not confirmed as a consensus):");
     expect(text).not.toContain("No major disagreements detected.");
-    expect(text).toContain("Differing positions (not confirmed as a disagreement between models):");
-    expect(text).toContain(`- ${INDEPENDENCE_UNVERIFIED_DISAGREEMENTS_REASON} (1)`);
+    expect(text).not.toContain("Key disagreement:");
+    expect(text).toContain(`${RECORDED_DIFFERENCES_HEADING}:\n- ${CROSS3.topic} — ${QUALIFIED_DISAGREEMENT_TEXT.independence_unverified}`);
   });
 
   it("LinkedIn post: no consensus score, no 'Where models agree', no model-count claim", async () => {
@@ -202,7 +208,8 @@ describe("MINOR-1: unknown execution provenance (3 answering slots + a row with 
     expect(text).not.toMatch(/across \d+ models/);
     expect(text).not.toContain("The disagreements tell you more than any single answer.");
     expect(text).toContain("Consensus score withheld: which models actually answered could not be established (model independence unverified).");
-    expect(text).toContain(`→ ${INDEPENDENCE_UNVERIFIED_DISAGREEMENTS_REASON} (1)`);
+    expect(text).toContain(`${RECORDED_DIFFERENCES_HEADING}:\n→ ${CROSS3.topic} — ${QUALIFIED_DISAGREEMENT_TEXT.independence_unverified}`);
+    expect(text).not.toContain("Where models disagree");
   });
 
   it("X post: no consensus score, no 'Asked N models'", async () => {
@@ -229,16 +236,14 @@ describe("MINOR-1: unknown execution provenance (3 answering slots + a row with 
     const v = buildPanelVerdict("Q?", rep, gate, UNKNOWN_PROVENANCE, { crossModel: true });
     expect(v.independenceUnverified).toBe(true);
     expect(v.topDisagreement).toBeNull();
-    expect(v.disagreementNotes).toEqual([`${INDEPENDENCE_UNVERIFIED_DISAGREEMENTS_REASON} (1)`]);
+    expect(v.recordedDifferences?.map((d) => [d.topic, d.basis])).toEqual([[CROSS3.topic, "independence_unverified"]]);
     for (const text of [formatVerdictText(v, "linkedin"), buildCopyForXShort(v), buildCopyForXThread(v).join("\n")]) {
       expect(text).not.toMatch(/(^|\n)(\d+\/\d+ )?Consensus:/);
       expect(text).toContain("Finding (model independence unverified; not confirmed as a consensus):");
     }
-    // The single tweet drops the category line first when over 280 characters; the long forms keep it.
-    expect(formatVerdictText(v, "linkedin")).toContain(`- ${INDEPENDENCE_UNVERIFIED_DISAGREEMENTS_REASON} (1)`);
-    expect(buildCopyForXThread(v).join(" ")).toContain(INDEPENDENCE_UNVERIFIED_DISAGREEMENTS_REASON);
-    const short = buildCopyForXShort({ ...v, question: "Q?", topConsensus: "Yes.", keyBlindSpot: null });
-    expect(short).toContain(`Differing positions: ${INDEPENDENCE_UNVERIFIED_DISAGREEMENTS_REASON} (1)`);
+    // The long forms keep the item in full; the single tweet keeps it while it fits (see the MINOR-B X block).
+    expect(formatVerdictText(v, "linkedin")).toContain(`- ${CROSS3.topic} — ${QUALIFIED_DISAGREEMENT_TEXT.independence_unverified}`);
+    expect(buildCopyForXThread(v).join(" ")).toContain(QUALIFIED_DISAGREEMENT_TEXT.independence_unverified);
   });
 });
 
@@ -247,40 +252,50 @@ describe("MINOR-2: collapsed run (DeepSeek serves ChatGPT and Claude, plus Grok)
     const r = await mount(COLLAPSED, report([SAME]));
     const card = verdictCardText(r);
     expect(card).not.toContain("No major disagreements detected.");
-    expect(nodeText(byTestId(r, "verdict-non-genuine-disagreements")[0])).toBe(`${NON_INDEPENDENT_DISAGREEMENTS_REASON} (1)`);
+    expect(nodeText(byTestId(r, "verdict-recorded-differences")[0])).toContain(`${SAME.topic}${QUALIFIED_DISAGREEMENT_TEXT.same_executing_model}`);
     // ≥ 2 independent models with recorded identity: the consensus presentation itself is unchanged.
     expect(card).toContain("Top consensus");
     const text = await copied(r);
     expect(text).toContain("Top consensus:");
-    expect(text).toContain(`Differing positions (not confirmed as a disagreement between models):\n- ${NON_INDEPENDENT_DISAGREEMENTS_REASON} (1)`);
+    expect(text).toContain(`${RECORDED_DIFFERENCES_HEADING}:\n- ${SAME.topic} — ${QUALIFIED_DISAGREEMENT_TEXT.same_executing_model}`);
   });
 
   it("only an unattributable (unknown-independence) difference: stated as such", async () => {
     const r = await mount(COLLAPSED, report([UNKNOWN]));
     const card = verdictCardText(r);
     expect(card).not.toContain("No major disagreements detected.");
-    expect(nodeText(byTestId(r, "verdict-non-genuine-disagreements")[0])).toBe(`${INDEPENDENCE_UNVERIFIED_DISAGREEMENTS_REASON} (1)`);
-    expect(await copied(r)).toContain(`- ${INDEPENDENCE_UNVERIFIED_DISAGREEMENTS_REASON} (1)`);
+    expect(nodeText(byTestId(r, "verdict-recorded-differences")[0])).toContain(`${UNKNOWN.topic}${QUALIFIED_DISAGREEMENT_TEXT.independence_unverified}`);
+    expect(await copied(r)).toContain(`- ${UNKNOWN.topic} — ${QUALIFIED_DISAGREEMENT_TEXT.independence_unverified}`);
   });
 
-  it("both categories: each with its own count", async () => {
+  it("both categories: every item kept, each with its own reason, in stored order", async () => {
     const r = await mount(COLLAPSED, report([SAME, UNKNOWN, SAME]));
-    expect(byTestId(r, "verdict-non-genuine-disagreements")[0].findAll((n) => n.type === "li").map(nodeText)).toEqual([
-      `${NON_INDEPENDENT_DISAGREEMENTS_REASON} (2)`,
-      `${INDEPENDENCE_UNVERIFIED_DISAGREEMENTS_REASON} (1)`,
+    const list = byTestId(r, "verdict-recorded-differences")[0];
+    expect(list.children.filter((c) => typeof c !== "string" && c.type === "li").map((li) => nodeText(li as never).split(":")[0])).toEqual([
+      `${SAME.topic}${QUALIFIED_DISAGREEMENT_TEXT.same_executing_model}${SAME.whyTheyDiffer}DeepSeek (substituting ChatGPT)`,
+      `${UNKNOWN.topic}${QUALIFIED_DISAGREEMENT_TEXT.independence_unverified}${UNKNOWN.whyTheyDiffer}DeepSeek (substituting ChatGPT)`,
+      `${SAME.topic}${QUALIFIED_DISAGREEMENT_TEXT.same_executing_model}${SAME.whyTheyDiffer}DeepSeek (substituting ChatGPT)`,
     ]);
   });
 
-  it("a genuine cross-model item: it is the key disagreement, with no category notes (as before)", async () => {
+  it("a genuine cross-model item: it is the key disagreement (as before); the others are kept in their own block", async () => {
     const r = await mount(COLLAPSED, report([SAME, GENUINE, UNKNOWN]));
     const card = verdictCardText(r);
+    expect(card).toContain("Key disagreement");
     expect(card).toContain("First location");
     expect(card).toContain("2 models split");
-    expect(byTestId(r, "verdict-non-genuine-disagreements")).toHaveLength(0);
+    const block = byTestId(r, "verdict-recorded-differences");
+    expect(block).toHaveLength(1);
+    expect(nodeText(block[0])).toContain(SAME.topic);
+    expect(nodeText(block[0])).toContain(UNKNOWN.topic);
+    expect(nodeText(block[0])).not.toContain(GENUINE.topic);
     const v = buildPanelVerdict("Q?", report([SAME, GENUINE, UNKNOWN]), computeVerificationGate({}), COLLAPSED, { crossModel: true });
-    expect(Object.keys(v)).not.toContain("disagreementNotes");
+    expect(v.topDisagreement).toBe(GENUINE.topic);
+    expect(v.recordedDifferences?.map((d) => d.topic)).toEqual([SAME.topic, UNKNOWN.topic]);
     expect(Object.keys(v)).not.toContain("independenceUnverified");
-    expect(await copied(r)).not.toContain("Differing positions (not confirmed as a disagreement between models):");
+    const md = await copied(r);
+    expect(md).toContain(`Key disagreement:\n- Topic: ${GENUINE.topic}`);
+    expect(outsideRecordedDifferences(md)).not.toContain(SAME.topic);
   });
 });
 
@@ -299,13 +314,15 @@ describe("unaffected rows keep their presentation", () => {
     );
   });
 
-  it("single independent model (two DeepSeek-served slots): the single-model wording, unchanged", async () => {
+  it("single independent model (two DeepSeek-served slots): the single-model wording, unchanged; stored item kept as evidence", async () => {
     const r = await mount(TWO_SUBS, report([SAME]));
     const card = verdictCardText(r);
     expect(card).toContain("Top finding (one independent model; not a consensus)");
     expect(card).toContain("No cross-model comparison: fewer than two independent models responded.");
     expect(card).not.toContain("model independence unverified");
-    expect(byTestId(r, "verdict-non-genuine-disagreements")).toHaveLength(0);
+    // MINOR-B: the one model's stored differing positions are kept as evidence, labelled as one independent model.
+    expect(nodeText(byTestId(r, "verdict-recorded-differences")[0])).toContain(`${SAME.topic}${QUALIFIED_DISAGREEMENT_TEXT.single_independent_model}`);
+    expect(card).not.toContain("Key disagreement");
     expect(byTestId(r, "consensus-insufficient-independent-models")).toHaveLength(1);
     expect(byTestId(r, "consensus-independence-unverified")).toHaveLength(0);
   });

@@ -2322,5 +2322,19 @@
   "count": 1,
   "category": "historical-path",
   "rule": "research memo original path, legacy panel only, when MemoInput.researchIndependenceUnverified is true (two or more slots answered but the rows do not record which models executed): states that NO consensus score, agreement or convergence between models is presented (review of 71b03e3, MINOR-1, 2026-11-06)"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"RECORDED DIFFERENCES NOT COUNTED AS MODEL DISAGREEMENTS\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "research memo original path, legacy panel only, when MemoInput.researchRecordedDifferences is non-empty (stored differences that are NOT disagreements between independent executing models): states them in their own section, never under WHERE MODELS DISAGREE (review of 1ee4982, MINOR-B, 2026-11-06); absent → the memo as before"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"The synthesis recorded these differing positions, but they are not counted as disagreements between independent models. Each position is named by the model that actually answered.\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "research memo original path, legacy panel only, when MemoInput.researchRecordedDifferences is non-empty (stored differences that are NOT disagreements between independent executing models): states them in their own section, never under WHERE MODELS DISAGREE (review of 1ee4982, MINOR-B, 2026-11-06); absent → the memo as before"
  }
 ]

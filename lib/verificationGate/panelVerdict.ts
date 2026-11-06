@@ -6,15 +6,16 @@
  */
 
 import { StructuredSynthesis } from "@/lib/synthesis/structuredSchema";
-import {
-  VerificationGateResult,
-  INDEPENDENCE_UNVERIFIED_DISAGREEMENTS_REASON,
-  NON_INDEPENDENT_DISAGREEMENTS_REASON,
-} from "@/lib/verificationGate/verificationGate";
+import { VerificationGateResult } from "@/lib/verificationGate/verificationGate";
 import { classifyGrounding, GroundingResult } from "./sourceGrounding";
-import { independentVoiceCount, type ExecutingIdentityRow } from "@/lib/panel/executingVoiceLabel";
+import { executingVoiceName, independentVoiceCount, type ExecutingIdentityRow } from "@/lib/panel/executingVoiceLabel";
 import { rowsRecordExecutionIdentity, type ClientSynthesisRow } from "@/lib/panel/independentVoices";
-import { classifyDisagreementAgainstRows, rowsCollapsed } from "@/lib/panel/storedDisagreementIndependence";
+import {
+  classifyDisagreementAgainstRows,
+  QUALIFIED_DISAGREEMENT_TEXT,
+  rowsCollapsed,
+  type QualifiedDisagreementBasis,
+} from "@/lib/panel/storedDisagreementIndependence";
 
 /**
  * Heading of the verdict's top item when fewer than two independent executing models responded: one model's finding is
@@ -59,8 +60,71 @@ export const INDEPENDENCE_UNVERIFIED_SCORE_SHARE_LINE =
 export const INDEPENDENCE_UNVERIFIED_SHARE_TAGLINE =
   "Model independence is unverified, so this is not presented as a cross-model comparison.";
 
-/** Heading over `PanelVerdict.disagreementNotes` in copied / shared text. */
-export const DIFFERING_POSITIONS_HEADING = "Differing positions (not confirmed as a disagreement between models):";
+/**
+ * Heading of the separate evidence section that keeps every stored difference which is NOT a disagreement between
+ * independent executing models (repeated output from one executing model, one independent model, or unknown model
+ * independence) — the governance queue's wording (components/governance/GovernanceDashboard.tsx
+ * QUALIFIED_DISAGREEMENTS_HEADING). Never shown under "Disagreements" / "Key disagreement".
+ */
+export const RECORDED_DIFFERENCES_HEADING = "Recorded differences not counted as model disagreements";
+
+/** One line explaining the section, on the view and in long-form text. */
+export const RECORDED_DIFFERENCES_NOTE =
+  "The synthesis recorded these differing positions, but they are not counted as disagreements between independent models. Each position is named by the model that actually answered.";
+
+/**
+ * A stored disagreement item that is NOT a disagreement between independent executing models, kept as evidence: its
+ * topic, why the positions differ, the reason it is not counted (`QUALIFIED_DISAGREEMENT_TEXT`, the queue's wording) and
+ * every recorded position named by the EXECUTING model of its slot (`executingVoiceName`: "DeepSeek (substituting
+ * ChatGPT)"). Stored text is never rewritten.
+ */
+export type RecordedDifference = {
+  topic: string;
+  whyTheyDiffer: string | null;
+  basis: QualifiedDisagreementBasis;
+  basisText: string;
+  positions: { voice: string; position: string }[];
+};
+
+type DisagreementLike = { topic?: unknown; whyTheyDiffer?: unknown; positionsByModel?: Record<string, string> | null };
+
+/**
+ * Every stored item that `crossModelDisagreements` does NOT keep, with the reason (the complement, item for item, in
+ * order): below two independent executing models every item is one model's ("single_independent_model"); rows that do
+ * not record execution identity make every item "independence_unverified"; otherwise the queue's rule
+ * (`classifyDisagreementAgainstRows`). Empty for a run whose items are all genuine — so unaffected runs carry nothing.
+ */
+export function recordedDifferences<T extends DisagreementLike>(
+  items: readonly T[] | null | undefined,
+  rows: readonly ExecutingIdentityRow[] | null | undefined,
+  crossModel: boolean
+): RecordedDifference[] {
+  if (!Array.isArray(items) || items.length === 0) return [];
+  const genuine = new Set<T>(crossModelDisagreements(items, rows, crossModel));
+  const identityRecorded = !!rows && rowsRecordExecutionIdentity(rows);
+  const ctx = rows && identityRecorded && crossModel ? liveRunContext(rows) : null;
+  const out: RecordedDifference[] = [];
+  for (const item of items) {
+    if (!item || genuine.has(item)) continue;
+    const basis: QualifiedDisagreementBasis = !crossModel
+      ? "single_independent_model"
+      : !rows || !identityRecorded
+        ? "independence_unverified"
+        : (classifyDisagreementAgainstRows(item, ctx!) as QualifiedDisagreementBasis);
+    const pbm = item.positionsByModel && typeof item.positionsByModel === "object" ? item.positionsByModel : {};
+    out.push({
+      topic: typeof item.topic === "string" ? item.topic : "",
+      whyTheyDiffer: typeof item.whyTheyDiffer === "string" && item.whyTheyDiffer.trim() ? item.whyTheyDiffer : null,
+      basis,
+      basisText: QUALIFIED_DISAGREEMENT_TEXT[basis],
+      positions: Object.entries(pbm as Record<string, unknown>)
+        .filter((e): e is [string, string] => typeof e[1] === "string")
+        .map(([slot, position]) => ({ voice: executingVoiceName(slot, rows), position })),
+    });
+  }
+  return out;
+}
+
 
 /**
  * The disagreements that are REAL cross-model disagreements: with fewer than two independent executing models in the run
@@ -134,13 +198,12 @@ export interface PanelVerdict {
    */
   independenceUnverified?: true;
   /**
-   * Present only when the run has stored disagreement items but none is a genuine disagreement between independent
-   * executing models (with at least two answering slots): one line per category, with its count, in the gate's own
-   * wording — repeated output from one executing model (`NON_INDEPENDENT_DISAGREEMENTS_REASON`) and unknown model
-   * independence (`INDEPENDENCE_UNVERIFIED_DISAGREEMENTS_REASON`). Surfaces state these instead of "No major
-   * disagreements detected." Absent whenever a genuine item exists (it is then the top disagreement, as before).
+   * Present only when the run has stored disagreement items that are NOT genuine disagreements between independent
+   * executing models (`recordedDifferences`): each kept with its topic, reason and positions named by executing model,
+   * presented in its own "Recorded differences not counted as model disagreements" section on every surface — never as
+   * a disagreement, never reduced to a count. Absent when every stored item is genuine (unaffected runs).
    */
-  disagreementNotes?: string[];
+  recordedDifferences?: RecordedDifference[];
   topConsensus: string;
   consensusModelCount: number;
   topDisagreement: string | null;
@@ -204,24 +267,15 @@ export function buildPanelVerdict(
     topDisagreement ?? undefined
   );
 
-  // No genuine item but stored items exist: state each non-genuine category (the gate's classification and counts), never
-  // an absence of disagreement. Below two answering models the existing "no cross-model comparison" text stands.
-  const storedCount = Array.isArray(report.disagreements) ? report.disagreements.length : 0;
-  let disagreementNotes: string[] | null = null;
-  if (crossModel && !topDisagreementItem && storedCount > 0) {
-    const unknownCount = independenceUnverifiedDisagreements(report.disagreements, rows, crossModel).length;
-    const repeatedCount = Math.max(0, storedCount - genuineDisagreements.length - unknownCount);
-    disagreementNotes = [
-      ...(repeatedCount > 0 ? [`${NON_INDEPENDENT_DISAGREEMENTS_REASON} (${repeatedCount})`] : []),
-      ...(unknownCount > 0 ? [`${INDEPENDENCE_UNVERIFIED_DISAGREEMENTS_REASON} (${unknownCount})`] : []),
-    ];
-  }
+  // Every stored item that is not a genuine disagreement between independent models, kept as evidence (never erased,
+  // never presented as a disagreement, never reduced to a count).
+  const recorded = recordedDifferences(report.disagreements, rows, crossModel);
 
   return {
     question,
     crossModel,
     ...(independenceUnverified ? { independenceUnverified: true as const } : {}),
-    ...(disagreementNotes && disagreementNotes.length > 0 ? { disagreementNotes } : {}),
+    ...(recorded.length > 0 ? { recordedDifferences: recorded } : {}),
     topConsensus,
     consensusModelCount,
     topDisagreement,
@@ -241,10 +295,20 @@ function topItemPrefix(v: PanelVerdict): string {
   return v.independenceUnverified ? INDEPENDENCE_UNVERIFIED_FINDING_PREFIX : "Consensus";
 }
 
-/** The verdict's non-genuine disagreement lines (`disagreementNotes`) under their heading; empty when none. */
-function disagreementNoteLines(v: PanelVerdict): string[] {
-  const notes = v.disagreementNotes ?? [];
-  return notes.length > 0 ? [DIFFERING_POSITIONS_HEADING, ...notes.map((n) => `- ${n}`)] : [];
+/**
+ * The verdict's recorded differences (`recordedDifferences`) under their own heading, in full: topic and reason, why the
+ * positions differ, and each position named by its executing model. Empty when none.
+ */
+export function recordedDifferenceLines(v: Pick<PanelVerdict, "recordedDifferences">, bullet = "-"): string[] {
+  const items = v.recordedDifferences ?? [];
+  if (items.length === 0) return [];
+  const lines = [`${RECORDED_DIFFERENCES_HEADING}:`];
+  for (const d of items) {
+    lines.push(`${bullet} ${d.topic} — ${d.basisText}`);
+    if (d.whyTheyDiffer) lines.push(`  ${d.whyTheyDiffer}`);
+    for (const p of d.positions) lines.push(`  ${p.voice}: ${p.position}`);
+  }
+  return lines;
 }
 
 /**
@@ -268,7 +332,7 @@ export function formatVerdictText(v: PanelVerdict, platform: "linkedin" | "x"): 
       parts.push(v.disagreementDetail);
     }
   }
-  parts.push(...disagreementNoteLines(v));
+  parts.push(...recordedDifferenceLines(v));
 
   parts.push(`Verification Gate: ${v.gateLabel}`);
   parts.push(`Grounding: ${v.grounding.label}`);
@@ -325,9 +389,14 @@ export function buildCopyForXShort(v: PanelVerdict): string {
   if (v.topDisagreement) {
     parts.push(`Disagreement: ${firstSentence(v.topDisagreement)}`);
   }
-  // One line per non-genuine category (never an absence claim); dropped first when over the limit.
-  const noteLines = (v.disagreementNotes ?? []).map((n) => `Differing positions: ${n}`);
-  parts.push(...noteLines);
+  // The first recorded difference (never an absence claim, never under "Disagreement:"): with its positions by executing
+  // model, else without them, else dropped — the first optional line to go when over the limit.
+  const recorded = v.recordedDifferences?.[0];
+  const recordedHead = recorded ? `Recorded difference (${recorded.basisText}): ${firstSentence(recorded.topic)}` : null;
+  const recordedPositions = recorded?.positions.map((p) => `${p.voice}: ${firstSentence(p.position)}`).join("; ") ?? "";
+  const recordedCandidates = recordedHead ? [...(recordedPositions ? [`${recordedHead} — ${recordedPositions}`] : []), recordedHead] : [];
+  let recordedLine: string | null = recordedCandidates[0] ?? null;
+  if (recordedLine) parts.push(recordedLine);
 
   parts.push(`Gate: ${v.gateLabel}`);
 
@@ -341,10 +410,12 @@ export function buildCopyForXShort(v: PanelVerdict): string {
   let text = parts.join("\n");
 
   // If still over 280, drop optional sections one at a time
-  for (const note of noteLines) {
-    if (text.length <= 280) break;
-    const idx = parts.indexOf(note);
-    if (idx !== -1) { parts.splice(idx, 1); text = parts.join("\n"); }
+  for (let i = 1; text.length > 280 && recordedLine !== null; i++) {
+    const idx = parts.indexOf(recordedLine);
+    recordedLine = recordedCandidates[i] ?? null;
+    if (recordedLine !== null) parts[idx] = recordedLine;
+    else parts.splice(idx, 1);
+    text = parts.join("\n");
   }
   if (text.length > 280 && v.keyBlindSpot) {
     const idx = parts.findIndex((p) => p.startsWith("Caveat:"));
@@ -421,7 +492,7 @@ export function buildCopyForXThread(v: PanelVerdict): string[] {
       parts.push(v.disagreementDetail);
     }
   }
-  parts.push(...disagreementNoteLines(v));
+  parts.push(...recordedDifferenceLines(v));
 
   parts.push(`Verification Gate: ${v.gateLabel}`);
 

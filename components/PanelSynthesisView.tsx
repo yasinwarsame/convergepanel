@@ -72,7 +72,10 @@ import {
   INDEPENDENCE_UNVERIFIED_NO_DISAGREEMENT_TEXT,
   INDEPENDENCE_UNVERIFIED_SCORE_SHARE_LINE,
   INDEPENDENCE_UNVERIFIED_SHARE_TAGLINE,
-  DIFFERING_POSITIONS_HEADING,
+  RECORDED_DIFFERENCES_HEADING,
+  RECORDED_DIFFERENCES_NOTE,
+  recordedDifferenceLines,
+  type RecordedDifference,
 } from "@/lib/verificationGate/panelVerdict";
 import {
   rollupPolicyConsensusSummary,
@@ -524,6 +527,32 @@ async function copyStructuredSynthesisMarkdown(
   return copyToClipboardWithFallback(markdown);
 }
 
+/* ─── Recorded differences (not counted as model disagreements) ─── */
+
+/** Each stored difference that is not a disagreement between independent models: topic, reason, positions by executing model. */
+function RecordedDifferencesList({ items, testId }: { items: RecordedDifference[]; testId: string }) {
+  return (
+    <ul className="mt-2 space-y-3" data-testid={testId}>
+      {items.map((d, i) => (
+        <li key={i} className="text-sm text-slate-700 leading-relaxed">
+          <p className="font-medium text-slate-800 whitespace-normal break-words">{d.topic}</p>
+          <p className="text-[11px] text-slate-500">{d.basisText}</p>
+          {d.whyTheyDiffer && <p className="mt-1 text-slate-600 whitespace-normal break-words">{d.whyTheyDiffer}</p>}
+          {d.positions.length > 0 && (
+            <ul className="mt-1 space-y-1">
+              {d.positions.map((p, j) => (
+                <li key={j} className="pl-3 border-l-2 border-slate-300 whitespace-normal break-words">
+                  <span className="font-medium text-slate-800">{p.voice}:</span> {p.position}
+                </li>
+              ))}
+            </ul>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /* ─── Panel Verdict Summary Card ─── */
 
 function PanelVerdictCard({
@@ -534,6 +563,7 @@ function PanelVerdictCard({
   gate: VerificationGateResult;
 }) {
   const gateStyle = GATE_STYLES[gate.status] ?? GATE_STYLES.NEEDS_HUMAN_REVIEW;
+  const recorded = verdict.recordedDifferences ?? [];
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -603,10 +633,10 @@ function PanelVerdictCard({
             )}
           </div>
 
-          {/* Right: Key disagreement */}
+          {/* Right: Key disagreement — or, with no genuine one, the recorded differences not counted as model disagreements */}
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
             <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">
-              Key disagreement
+              {!verdict.topDisagreement && recorded.length > 0 ? RECORDED_DIFFERENCES_HEADING : "Key disagreement"}
             </span>
             {verdict.topDisagreement ? (
               <>
@@ -628,17 +658,15 @@ function PanelVerdictCard({
                   </p>
                 )}
               </>
-            ) : verdict.crossModel !== false && verdict.disagreementNotes && verdict.disagreementNotes.length > 0 ? (
-              // Stored items exist but none is a genuine disagreement between independent models: each category with its
-              // count (the gate's wording), never an absence of disagreement.
-              <ul className="mt-2 space-y-1.5" data-testid="verdict-non-genuine-disagreements">
-                {verdict.disagreementNotes.map((note, i) => (
-                  <li key={i} className="flex items-start gap-2 text-sm text-slate-600 leading-relaxed">
-                    <span className="mt-1.5 block h-1.5 w-1.5 flex-shrink-0 rounded-full bg-slate-300" />
-                    <span className="whitespace-normal break-words">{note}</span>
-                  </li>
-                ))}
-              </ul>
+            ) : recorded.length > 0 ? (
+              // Stored items exist but none is a genuine disagreement between independent models: each kept as evidence
+              // (topic, reason, positions by executing model) under its own heading — never an absence of disagreement.
+              <>
+                {verdict.crossModel === false && (
+                  <p className="mt-2 text-sm text-slate-400 italic">{NO_CROSS_MODEL_COMPARISON_TEXT}</p>
+                )}
+                <RecordedDifferencesList items={recorded} testId="verdict-recorded-differences" />
+              </>
             ) : (
               <p className="mt-2 text-sm text-slate-400 italic">
                 {verdict.crossModel === false
@@ -650,6 +678,14 @@ function PanelVerdictCard({
             )}
           </div>
         </div>
+
+        {/* A genuine key disagreement AND recorded differences: the differences in their own block, never under it */}
+        {verdict.topDisagreement && recorded.length > 0 && (
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+            <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">{RECORDED_DIFFERENCES_HEADING}</span>
+            <RecordedDifferencesList items={recorded} testId="verdict-recorded-differences" />
+          </div>
+        )}
 
         {/* ── C) Caveat / blind spot (full text, no truncation) ── */}
         {verdict.keyBlindSpot && (
@@ -1556,6 +1592,7 @@ export default function PanelSynthesisView({
     // fewer than two there is no consensus score and no "where models agree" (the on-screen
     // consensus-insufficient-independent-models treatment), whatever summary was stored.
     const sharedModelCount = independentModelCountText(independentResponderCount);
+    const recordedDiffs = panelVerdict.recordedDifferences ?? [];
     const handleGenerateLinkedIn = () => {
       const q = (question ?? "").trim();
       const score = consensusMeta?.overallConsensusScore ?? 0;
@@ -1591,10 +1628,11 @@ export default function PanelSynthesisView({
         disagreements.slice(0, 2).forEach((d) => parts.push(`→ ${d}`));
         parts.push("");
       }
-      // Stored differing positions that are not a genuine disagreement between models: stated by category, not dropped.
-      if (panelVerdict.disagreementNotes && panelVerdict.disagreementNotes.length > 0) {
-        parts.push(DIFFERING_POSITIONS_HEADING);
-        panelVerdict.disagreementNotes.forEach((n) => parts.push(`→ ${n}`));
+      // Stored differences that are not genuine disagreements between models: their own section, with topic and
+      // positions by executing model (never under "Where models disagree", never reduced to a count).
+      if (recordedDiffs.length > 0) {
+        parts.push(...recordedDifferenceLines({ recordedDifferences: recordedDiffs.slice(0, 2) }, "→"));
+        if (recordedDiffs.length > 2) parts.push(`→ …and ${recordedDiffs.length - 2} more in the report`);
         parts.push("");
       }
       parts.push(
@@ -1641,6 +1679,11 @@ export default function PanelSynthesisView({
       }
       if (disagreements.length > 0) {
         parts.push(`Models disagreed on: ${line(disagreements[0] ?? "", 100)}`, "");
+      } else if (recordedDiffs.length > 0) {
+        // No genuine disagreement: the first recorded difference, labelled as not a model disagreement.
+        const d = recordedDiffs[0];
+        const positions = d.positions.map((p) => `${p.voice}: ${p.position}`).join("; ");
+        parts.push(`Recorded difference (${d.basisText}): ${line(positions ? `${d.topic} (${positions})` : d.topic, 100)}`, "");
       }
       parts.push(
         independenceUnverified
@@ -1833,6 +1876,31 @@ export default function PanelSynthesisView({
             </div>
           )}
 
+          {/* Recorded differences not counted as model disagreements — separate from "Disagreements", never merged into it */}
+          {recordedDiffs.length > 0 && (
+            <div data-testid="recorded-differences">
+              <h2 className="text-lg font-semibold text-slate-900 mb-1">{RECORDED_DIFFERENCES_HEADING}</h2>
+              <p className="text-sm text-slate-500 mb-4">{RECORDED_DIFFERENCES_NOTE}</p>
+              <div className="space-y-3">
+                {recordedDiffs.map((d, idx) => (
+                  <div key={idx} className="rounded-lg bg-slate-50 border border-slate-200 p-4">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500 mb-1">{d.basisText}</p>
+                    <h3 className="text-slate-900 font-semibold mb-2">{d.topic}</h3>
+                    {d.whyTheyDiffer && <p className="text-slate-700 mb-3">{d.whyTheyDiffer}</p>}
+                    <div className="space-y-2 mt-3">
+                      {d.positions.map((p, posIdx) => (
+                        <div key={posIdx} className="pl-3 border-l-2 border-slate-300">
+                          <span className="text-sm font-medium text-slate-900">{p.voice}:</span>
+                          <p className="text-sm text-slate-700">{p.position}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Bias & Blind Spots */}
           {report.biasAndBlindSpots && report.biasAndBlindSpots.length > 0 ? (
             <div>
@@ -2011,6 +2079,7 @@ export default function PanelSynthesisView({
                 synthesisAgreements: presentsConsensus && panelVerdict.topConsensus ? [panelVerdict.topConsensus] : [],
                 ...(independenceUnverified ? { researchIndependenceUnverified: true } : {}),
                 synthesisDisagreements: disagreeLines,
+                ...(recordedDiffs.length > 0 ? { researchRecordedDifferences: recordedDiffs } : {}),
                 confidenceAssessment:
                   report.executiveSummary?.trim() || panelVerdict.keyBlindSpot || "",
                 modelsUsed: results.filter(isUsableResult).map((r) => runModelIdentityLabel(runModelProvenanceFromResultRow(r))),

@@ -5,8 +5,8 @@
 
 import type { VerificationGateResult } from "@/lib/verificationGate/verificationGate";
 import {
-  DIFFERING_POSITIONS_HEADING,
   PANEL_VERDICT_INDEPENDENCE_UNVERIFIED_HEADING,
+  recordedDifferenceLines,
   PANEL_VERDICT_SINGLE_MODEL_HEADING,
   type PanelVerdict,
 } from "@/lib/verificationGate/panelVerdict";
@@ -105,11 +105,12 @@ export function buildSynthesisMarkdown(
       parts.push(`- Detail: ${verdict.disagreementDetail}`);
     }
   }
-  // No genuine disagreement but stored items exist: each category with its count, never an absence of disagreement.
-  if (verdict.disagreementNotes && verdict.disagreementNotes.length > 0) {
+  // Stored differences that are not disagreements between independent models: their own section (topic, reason and
+  // each position named by its executing model), never under "Key disagreement", never reduced to a count.
+  const recorded = recordedDifferenceLines(verdict);
+  if (recorded.length > 0) {
     parts.push("");
-    parts.push(DIFFERING_POSITIONS_HEADING);
-    verdict.disagreementNotes.forEach((n) => parts.push(`- ${n}`));
+    parts.push(...recorded);
   }
 
   if (verdict.keyBlindSpot) {
