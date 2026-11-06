@@ -31,6 +31,7 @@ import { normalizeForComparison } from "./comparisonNormalization";
 import { CAUTION_NEXT_STEP_WITHOUT_DISAGREEMENT, VERDICT_NEXT_STEPS } from "./config";
 import { singleLineText } from "./textSerialization";
 import { providerDisplayName, runModelFamilyName, type RunModelProvenanceFacts } from "@/lib/panel/runModelIdentity";
+import { adaptiveTopHeading, adaptiveTopIndependence, supportingSlotsOfRow, type AdaptiveTopIndependence } from "./verdictIndependence";
 
 // ─── Marker ─────────────────────────────────────────────────────────────────
 
@@ -735,7 +736,21 @@ export interface PositionView {
   biasFindingsWithheld: number;
   coverageGapsWithheld: number;
   /** topLabel / keyLabel: the label of the card's top / key row text — "Claim" only for a claim row (m-6). */
-  verdict: { topHeading: string; keyHeading: string; noKeyText: string; topIsClaim: boolean; topLabel: string; keyLabel: string; sectionHeading: string };
+  verdict: {
+    topHeading: string;
+    keyHeading: string;
+    noKeyText: string;
+    topIsClaim: boolean;
+    topLabel: string;
+    keyLabel: string;
+    sectionHeading: string;
+    /**
+     * Present only when the top CLAIM's supporting slots are not independent executing models (a repeated substitute
+     * model) or their execution identity is not recorded (verdictIndependence.ts) — `topHeading` is then the qualified
+     * heading. Absent for every report whose supporters are independent models (rendered exactly as before).
+     */
+    topIndependence?: Exclude<AdaptiveTopIndependence, { kind: "independent" }>;
+  };
 }
 
 const POSITION_VIEW = Symbol.for("convergepanel.positionView");
@@ -899,6 +914,7 @@ function presentVerdict(src: AdaptiveSynthesisReport, rows: readonly unknown[] |
   let topHeading = noClaimRows ? UNJOINED_TOP_HEADING : "Top consensus";
   let topIsClaim = false;
   let topKind: PresentedRowKind = "other";
+  let topIndependence: PositionView["verdict"]["topIndependence"];
   let panelVerdict = src.panelVerdict;
   let top: Partial<AdaptiveVerdictCard> = {};
   if (card.topConsensus !== NO_CONSENSUS_IDENTIFIED) {
@@ -908,6 +924,13 @@ function presentVerdict(src: AdaptiveSynthesisReport, rows: readonly unknown[] |
     if (view && view.rowType === "claim") {
       topIsClaim = true;
       if (view.claimStatus !== "consensus") topHeading = TOP_MAJORITY_HEADING;
+      // Historical reports counted every slot a substitute model answered: the top claim is headed by what its
+      // supporting slots' recorded execution proves (verdictIndependence.ts). Stored values are unchanged.
+      const independence = adaptiveTopIndependence(supportingSlotsOfRow(join.row), input.provenance);
+      if (independence.kind !== "independent") {
+        topHeading = adaptiveTopHeading(independence)!;
+        topIndependence = independence;
+      }
       top = { topConsensusAgreement: view.text, consensusModelCount: view.supporters.length, ...(view.contested ? { topConsensusContested: view.contested } : {}) };
     } else if (view) {
       topHeading = "Top value comparison";
@@ -951,7 +974,20 @@ function presentVerdict(src: AdaptiveSynthesisReport, rows: readonly unknown[] |
   delete verdictCard.caveatSource;
   const shownKinds = [...(card.topConsensus !== NO_CONSENSUS_IDENTIFIED ? [topKind] : []), ...(card.keyDisagreement ? [keyKind] : [])];
   const sectionHeading = shownKinds.length > 0 ? rowKindsHeading(shownKinds, VERDICT_SECTION_HEADINGS) : noClaimRows ? VERDICT_SECTION_HEADINGS.other : VERDICT_SECTION_HEADINGS.claim;
-  return { verdictCard, panelVerdict, verdict: { topHeading, keyHeading, noKeyText: noClaimRows ? NO_UNRESOLVED_ROW : NO_RECORDED_OPPOSING_POSITIONS, topIsClaim, topLabel: rowKindLabel(topKind, CLAIM_LABEL), keyLabel: rowKindLabel(keyKind, CLAIM_LABEL), sectionHeading } };
+  return {
+    verdictCard,
+    panelVerdict,
+    verdict: {
+      topHeading,
+      keyHeading,
+      noKeyText: noClaimRows ? NO_UNRESOLVED_ROW : NO_RECORDED_OPPOSING_POSITIONS,
+      topIsClaim,
+      topLabel: rowKindLabel(topKind, CLAIM_LABEL),
+      keyLabel: rowKindLabel(keyKind, CLAIM_LABEL),
+      sectionHeading,
+      ...(topIndependence ? { topIndependence } : {}),
+    },
+  };
 }
 
 export const TOP_MAJORITY_HEADING = "Top majority-supported claim";

@@ -39,6 +39,7 @@ import { escapeMarkdownInline, markdownQuote, plainTextQuote, singleLineText } f
 import { X_MAX_WEIGHTED_LENGTH, XUrlSpan, parseXText, xPostableText, xUrlSpans } from "./xWeightedText";
 import { EMOJI } from "./xTextRules.generated";
 import { ADAPTIVE_RESEARCH_REPORT_KIND } from "@/lib/verification/generateMemo";
+import { adaptiveTopIndependence, adaptiveTopIndependenceStatement, unmarkedTopIndependence, type AdaptiveTopIndependence } from "./verdictIndependence";
 import { POSITIONS_BY_SLOT_HEADING, PositionSafeInput, PresentedSlotPosition, biasWithheldNotice, coverageWithheldNotice, isPositionMarked, positionView, presentPositionSafeReport } from "./positionPresentation";
 
 /**
@@ -92,10 +93,19 @@ function plainTextBlock(block: TextBlock, indent = ""): string {
   return [`${indent}${block.label}:`, ...plainTextQuote(block.text, indent)].join("\n");
 }
 
+/** The label of the line stating the top claim's model independence (only when it is not independent). */
+export const MODEL_INDEPENDENCE_LABEL = "Model independence";
+
+/** "**Model independence:** …" when the top claim's supporting slots are not independent executing models; else nothing. */
+function markdownTopIndependence(t: AdaptiveTopIndependence | null, report: AdaptiveSynthesisReport): string[] {
+  const text = t ? adaptiveTopIndependenceStatement(t, report.verdictCard?.consensusModelCount) : null;
+  return text ? [`**${MODEL_INDEPENDENCE_LABEL}:** ${text}`] : [];
+}
+
 /** The panel verdict for Markdown: the computed figures, and the top claim with its own result (R6-1, R6-3). */
-function markdownPanelVerdict(report: AdaptiveSynthesisReport): string[] {
+function markdownPanelVerdict(report: AdaptiveSynthesisReport, topIndependence: AdaptiveTopIndependence | null): string[] {
   const card = report.verdictCard;
-  if (!card.topConsensusAgreement) return [`**Panel verdict:** ${escapeMarkdownInline(report.panelVerdict)}`];
+  if (!card.topConsensusAgreement) return [`**Panel verdict:** ${escapeMarkdownInline(report.panelVerdict)}`, ...markdownTopIndependence(topIndependence, report)];
   // Order 5 (Contract P, m-6): on a marked report the top row is labelled and headed by what it is.
   const verdict = positionView(report)?.verdict;
   const parts = [
@@ -103,7 +113,7 @@ function markdownPanelVerdict(report: AdaptiveSynthesisReport): string[] {
     `**${PANEL_RESULT_LABEL}:** ${card.topConsensusAgreement}`,
     ...(card.topConsensusContested ? [`**Contested:** ${card.topConsensusContested}`] : []),
   ];
-  return [`**Panel verdict:** certainty ${Math.round(report.runCertainty * 100)}%; ${markdownGate(report)}. ${verdict ? verdict.topHeading : "Top claim"}:`, parts.join(" — ")];
+  return [`**Panel verdict:** certainty ${Math.round(report.runCertainty * 100)}%; ${markdownGate(report)}. ${verdict ? verdict.topHeading : "Top claim"}:`, parts.join(" — "), ...markdownTopIndependence(topIndependence, report)];
 }
 
 /** The gate inside a Markdown line: "Verification gate: Caution" on reports with the Order 4 presentation, else "gate: caution" as before. */
@@ -167,13 +177,18 @@ export function buildAdaptiveSynthesisMarkdown(
 ): string {
   const report = shown(storedReport, positionInput);
   const slotName = (modelId: string) => executingVoiceName(modelId, slotProvenance ?? positionInput?.provenance ?? null);
-  if (report.presentation) return buildPresentedMarkdown(question, report, slotName);
+  // The top claim's model independence (verdictIndependence.ts): a marked report carries it; an unmarked one is judged
+  // from the rows and per-slot provenance the caller holds. Null — exactly as before — for independent supporters.
+  const view = positionView(report);
+  const topIndependence = view ? view.verdict.topIndependence ?? null : unmarkedTopIndependence(report.verdictCard, positionInput?.rows ?? null, slotProvenance ?? positionInput?.provenance ?? null);
+  if (report.presentation) return buildPresentedMarkdown(question, report, slotName, topIndependence);
   const lines: string[] = [];
   lines.push("# Synthesis Report");
   lines.push("");
   lines.push(`**Question:** ${question}`);
   lines.push("");
   lines.push(`**Panel verdict:** ${report.panelVerdict}`);
+  lines.push(...markdownTopIndependence(topIndependence, report));
   lines.push("");
   lines.push("## Unified Answer");
   // D8: an unrecognized stored gate is stated before the stored answer; a known gate exports exactly as before.
@@ -216,13 +231,13 @@ export function buildAdaptiveSynthesisMarkdown(
   return lines.join("\n");
 }
 
-function buildPresentedMarkdown(question: string, report: AdaptiveSynthesisReport, slotName: (modelId: string) => string): string {
+function buildPresentedMarkdown(question: string, report: AdaptiveSynthesisReport, slotName: (modelId: string) => string, topIndependence: AdaptiveTopIndependence | null): string {
   const lines: string[] = [];
   lines.push("# Synthesis Report");
   lines.push("");
   lines.push(`**Question:** ${question}`);
   lines.push("");
-  lines.push(...markdownPanelVerdict(report));
+  lines.push(...markdownPanelVerdict(report, topIndependence));
   lines.push("");
   lines.push("## Unified Answer");
   lines.push(...markdownUnifiedAnswer(report));
@@ -356,6 +371,17 @@ export function buildAdaptiveMemoInput(
       verificationId,
     };
   }
+  // Unmarked memos state "N AI models researched this question independently", a consensus score and "where models
+  // agree" (the shared research memo): with a repeated substitute model in the run's rows the memo is told how many
+  // independent executing models the run had, and without recorded execution identity that independence is
+  // unverified (verdictIndependence.ts). Independent runs: nothing is added — the memo as before.
+  const runIndependence = adaptiveTopIndependence(null, modelProvenance);
+  const independenceInput =
+    runIndependence.kind === "repeated_substitute"
+      ? { independentModelCount: runIndependence.voices.length }
+      : runIndependence.kind === "unverified"
+        ? { researchIndependenceUnverified: true }
+        : {};
   if (report.presentation) {
     const agree = presentAgreeItems(report).map(claimLine);
     const summary = presentExecutiveSummary(report).map((b) => plainTextBlock(b)).join("\n\n");
@@ -381,6 +407,7 @@ export function buildAdaptiveMemoInput(
       confidenceAssessment: summary || presentCertainty(report).map((b) => plainTextBlock(b)).join("\n\n"),
       modelsUsed: runModelLabels(modelsUsed, modelProvenance),
       verificationId,
+      ...independenceInput,
     };
   }
   return {
@@ -399,6 +426,7 @@ export function buildAdaptiveMemoInput(
     confidenceAssessment: report.executiveSummary || report.certaintyAssessment,
     modelsUsed: runModelLabels(modelsUsed, modelProvenance),
     verificationId,
+    ...independenceInput,
   };
 }
 

@@ -93,6 +93,7 @@ import { VerificationActions } from "@/components/VerificationActions";
 import { generateVerificationMemo, downloadTextFile } from "@/lib/verification/generateMemo";
 import { copyToClipboardWithFallback } from "@/lib/ui/copyFormats";
 import { useRunModelProvenance } from "./RunModelProvenanceContext";
+import { adaptiveTopHeading, adaptiveTopIndependenceStatement, unmarkedTopIndependence } from "@/lib/adaptiveSchema/verdictIndependence";
 import { executingModelKey, REPEATED_SUBSTITUTE_EXCLUDED } from "@/lib/panel/independentVoices";
 import {
   buildAdaptiveSynthesisMarkdown,
@@ -1013,10 +1014,15 @@ export function BiasBlindSpotsSection({
 }
 
 /** Exported — see UnifiedAnswerCard's export doc above. */
-export function PanelVerdictCard({ report, gate }: { report: AdaptiveSynthesisReport; gate: AdaptiveGateResult }) {
+export function PanelVerdictCard({ report, gate, alignedClaims }: { report: AdaptiveSynthesisReport; gate: AdaptiveGateResult; alignedClaims?: AlignedClaim[] }) {
   const v = report.verdictCard;
   // Order 5 (Contract P): a marked report's headings come from its rows (a value comparison is never "top consensus").
   const positions = positionView(report)?.verdict ?? null;
+  // Historical reports counted each slot a substitute model answered as its own supporter: a top claim whose supporting
+  // slots were answered by one substitute model, or whose execution is not recorded, is never an unqualified "Top
+  // consensus — agreed by N" (verdictIndependence.ts; stored values unchanged). Independent supporters: as before.
+  const runProvenance = useRunModelProvenance();
+  const topIndependence = positions ? positions.topIndependence ?? null : unmarkedTopIndependence(v, alignedClaims ?? null, runProvenance);
   // R4-1: claim text is model-written; cards that carry the computed status show it beside the quoted claim.
   const top = presentVerdictClaim(v.topConsensus, v.topConsensusAgreement, positions?.topLabel);
   const split = v.keyDisagreement ? presentVerdictClaim(v.keyDisagreement, v.keyDisagreementAgreement, positions?.keyLabel) : null;
@@ -1043,11 +1049,15 @@ export function PanelVerdictCard({ report, gate }: { report: AdaptiveSynthesisRe
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
         <div className="rounded-lg bg-slate-50 border border-slate-200 p-3">
-          <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">{positions ? positions.topHeading : "Top consensus"}</span>
+          <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">{positions ? positions.topHeading : topIndependence ? adaptiveTopHeading(topIndependence) : "Top consensus"}</span>
           <p className="text-sm text-slate-800 mt-1">
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 mr-1.5" />
             {top.result ? <span data-source="model_claim">{top.claim}</span> : top.claim}
-            {v.consensusModelCount > 0 &&
+            {topIndependence ? (
+              <span data-source="computed" data-testid="verdict-top-independence" className="block text-xs text-slate-600 mt-0.5">
+                {adaptiveTopIndependenceStatement(topIndependence, v.consensusModelCount)}
+              </span>
+            ) : v.consensusModelCount > 0 &&
               (positions ? (
                 <span className="text-slate-500"> — supported or partially supported by {v.consensusModelCount} panel slot{v.consensusModelCount === 1 ? "" : "s"}</span>
               ) : (
@@ -1373,7 +1383,7 @@ export default function AdaptiveSynthesisReportView({
       )}
 
       <div data-section="panel-verdict">
-        <PanelVerdictCard report={report} gate={gate} />
+        <PanelVerdictCard report={report} gate={gate} alignedClaims={alignedClaims} />
       </div>
 
       <div data-section="export-actions">

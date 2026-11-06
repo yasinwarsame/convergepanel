@@ -29,6 +29,8 @@ import { presentVerdictCaveat, presentVerdictClaim } from "@/lib/adaptiveSchema/
 import { Card, SectionLabel } from "./shared";
 import { AnswerLead, UnifiedAnswerClaims } from "./AdaptiveSynthesisReportView";
 import { isPositionMarked, positionView, presentPositionSafeReport } from "@/lib/adaptiveSchema/positionPresentation";
+import { adaptiveTopHeading, adaptiveTopIndependenceStatement, unmarkedTopIndependence } from "@/lib/adaptiveSchema/verdictIndependence";
+import { useRunModelProvenance } from "./RunModelProvenanceContext";
 
 export default function PrimarySynthesisStrip({ synthesisReport: stored }: { synthesisReport: AdaptiveSynthesisReport }) {
   // Order 5 (Contract P): AdaptivePanelResponse passes the position-safe view; a marked stored report without its rows
@@ -40,6 +42,11 @@ export default function PrimarySynthesisStrip({ synthesisReport: stored }: { syn
   const top = presentVerdictClaim(verdictCard.topConsensus, verdictCard.topConsensusAgreement, positions?.topLabel);
   const split = verdictCard.keyDisagreement ? presentVerdictClaim(verdictCard.keyDisagreement, verdictCard.keyDisagreementAgreement, positions?.keyLabel) : null;
   const caveat = presentVerdictCaveat(verdictCard);
+  // A top claim whose supporting slots were answered by one substitute model, or whose execution is not recorded, is
+  // never "Models agree — N models" (verdictIndependence.ts; stored values unchanged). The strip holds no rows, so an
+  // unmarked report is judged by every slot the run records.
+  const runProvenance = useRunModelProvenance();
+  const topIndependence = positions ? positions.topIndependence ?? null : unmarkedTopIndependence(verdictCard, null, runProvenance);
 
   return (
     <Card className="bg-sky-50/60 border-sky-200">
@@ -57,10 +64,14 @@ export default function PrimarySynthesisStrip({ synthesisReport: stored }: { syn
 
       <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-sky-200 pt-3">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{positions ? positions.topHeading : "Models agree"}</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{positions ? positions.topHeading : topIndependence ? adaptiveTopHeading(topIndependence) : "Models agree"}</p>
           <p className="mt-0.5 text-sm text-slate-800">
             {top.result ? <span data-source="model_claim">{top.claim}</span> : top.claim}
-            {verdictCard.consensusModelCount > 0 &&
+            {topIndependence ? (
+              <span data-source="computed" data-testid="strip-top-independence" className="block text-xs text-slate-600 mt-0.5">
+                {adaptiveTopIndependenceStatement(topIndependence, verdictCard.consensusModelCount)}
+              </span>
+            ) : verdictCard.consensusModelCount > 0 &&
               (positions ? (
                 <span className="text-slate-500"> — {verdictCard.consensusModelCount} panel slot{verdictCard.consensusModelCount === 1 ? "" : "s"}</span>
               ) : (

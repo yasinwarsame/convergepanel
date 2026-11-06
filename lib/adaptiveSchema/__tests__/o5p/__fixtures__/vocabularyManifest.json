@@ -2336,5 +2336,40 @@
   "count": 1,
   "category": "historical-path",
   "rule": "research memo original path, legacy panel only, when MemoInput.researchRecordedDifferences is non-empty (stored differences that are NOT disagreements between independent executing models): states them in their own section, never under WHERE MODELS DISAGREE (review of 1ee4982, MINOR-B, 2026-11-06); absent → the memo as before"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictIndependence.ts",
+  "literal": "\"Top finding (repeated substitute model; not an independent consensus)\"",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "historical adaptive top-claim independence (owner ruling, review of 1ee4982, 2026-11-06): shown ONLY when the top claim's supporting slots (or, unjoined, the run's slots) are recorded as answered by one repeated substitute model or carry no recorded execution identity (verdictIndependence.ts); qualifies / replaces 'Top consensus' / 'agreed by N'; stored values unchanged; independent supporters render byte-identically (historicalParity.spec.tsx)"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictIndependence.ts",
+  "literal": "\"Top finding (model independence unverified; not confirmed as a consensus)\"",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "historical adaptive top-claim independence (owner ruling, review of 1ee4982, 2026-11-06): shown ONLY when the top claim's supporting slots (or, unjoined, the run's slots) are recorded as answered by one repeated substitute model or carry no recorded execution identity (verdictIndependence.ts); qualifies / replaces 'Top consensus' / 'agreed by N'; stored values unchanged; independent supporters render byte-identically (historicalParity.spec.tsx)"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictIndependence.ts",
+  "literal": "`Recorded as supported by ${slotsText(storedCount)}`",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "historical adaptive top-claim independence (owner ruling, review of 1ee4982, 2026-11-06): shown ONLY when the top claim's supporting slots (or, unjoined, the run's slots) are recorded as answered by one repeated substitute model or carry no recorded execution identity (verdictIndependence.ts); qualifies / replaces 'Top consensus' / 'agreed by N'; stored values unchanged; independent supporters render byte-identically (historicalParity.spec.tsx)"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictIndependence.ts",
+  "literal": "`${recorded ? `${recorded}. ` : \"\"}In this run ${t.repeated.join(\"; \")} answered several slots, so this is not presented as an independent consensus.`",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "historical adaptive top-claim independence (owner ruling, review of 1ee4982, 2026-11-06): shown ONLY when the top claim's supporting slots (or, unjoined, the run's slots) are recorded as answered by one repeated substitute model or carry no recorded execution identity (verdictIndependence.ts); qualifies / replaces 'Top consensus' / 'agreed by N'; stored values unchanged; independent supporters render byte-identically (historicalParity.spec.tsx)"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictIndependence.ts",
+  "literal": "`Model independence unverified: ${recorded ? `${recorded.charAt(0).toLowerCase()}${recorded.slice(1)}, but which` : \"which\"} models answered ${t.scope === \"supporters\" ? \"the supporting slots\" : \"this run's slots\"} is not recorded.`",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "historical adaptive top-claim independence (owner ruling, review of 1ee4982, 2026-11-06): shown ONLY when the top claim's supporting slots (or, unjoined, the run's slots) are recorded as answered by one repeated substitute model or carry no recorded execution identity (verdictIndependence.ts); qualifies / replaces 'Top consensus' / 'agreed by N'; stored values unchanged; independent supporters render byte-identically (historicalParity.spec.tsx)"
  }
 ]
