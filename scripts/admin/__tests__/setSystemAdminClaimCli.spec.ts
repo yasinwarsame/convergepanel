@@ -428,9 +428,9 @@ describe("runCli — dry run and execute end to end (fake Firebase)", () => {
       expect(r.code).toBe(3);
       expect(r.result).toMatchObject({
         phase: "executed", status: "incomplete", code: "sessions_revoke_unverified", exitCode: 3, writeAttempted: true,
-        run: { sessionRevocationEvidence: { verified: false, anchorSource: "firestore-commit-time:users/{uid}.role", marginSeconds: 2 } },
+        run: { sessionRevocationEvidence: { cutoffObserved: false, anchorSource: "firestore-commit-time:users/{uid}.role", marginSeconds: 2 } },
       });
-      expect(e.err.join("\n")).toMatch(/earlier than the server-derived cutoff/);
+      expect(e.err.join("\n")).toMatch(/earlier than the server-anchored cutoff/);
     });
     it("revoke on a DISABLED target completes (exit 0) and the account stays disabled", async () => {
       const e = adminTarget();
@@ -1355,6 +1355,28 @@ describe("static wiring", () => {
   });
 });
 
+describe("realIo().sleepMs is a real timer wait (the pre-revocation wait)", () => {
+  it("does not resolve before the requested time and resolves once it has elapsed (fake timers)", async () => {
+    jest.useFakeTimers();
+    try {
+      let done = false;
+      const p = realIo(REPO).sleepMs(3_500).then(() => { done = true; });
+      await jest.advanceTimersByTimeAsync(3_499);
+      expect(done).toBe(false);
+      await jest.advanceTimersByTimeAsync(1);
+      expect(done).toBe(true);
+      await p;
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+  it("waits on the real clock for at least the requested time (short real wait)", async () => {
+    const t0 = process.hrtime.bigint();
+    await realIo(REPO).sleepMs(80);
+    expect(Number(process.hrtime.bigint() - t0) / 1e6).toBeGreaterThanOrEqual(75);
+  });
+});
+
 describe("read-only claim scripts", () => {
   const ok = [`--confirm-project=${PROJECT}`, "--credentials=/k.json", `--uid=${TARGET}`];
   it("CONTROL: all three flags parse", () => {
@@ -1396,9 +1418,12 @@ describe("read-only claim scripts", () => {
       "auth.getUser(", "auth.listUsers(", "auth.revokeRefreshTokens(", "auth.setCustomUserClaims(", "auth.verifyIdToken(", "auth.writeCustomClaims(",
     ]);
   });
+  it("the regex pin above is backed by a behavioural test that a rewording cannot evade (setSystemAdminClaimRealPorts.spec.ts)", () => {
+    expect(fs.existsSync(path.join(REPO, "scripts/admin/__tests__/setSystemAdminClaimRealPorts.spec.ts"))).toBe(true);
+  });
   it("the real role write (the revocation anchor) always changes the document and returns the SERVER writeTime", () => {
     // Firestore reports a write that does not change the document with its PREVIOUS update time;
-    // a server-timestamp field guarantees every anchor write is a change (runbook: "How revocation is verified").
+    // a server-timestamp field makes every anchor write a change (runbook: "The server-time anchor").
     const code = stripComments(read("scripts/admin/set-system-admin-claim.ts"));
     const roleWrite = code.slice(code.indexOf("writeUsersDocRole: async"), code.indexOf("createAuditRow: async"));
     expect(roleWrite).toMatch(/\.set\(\{ role, updatedAt: FieldValue\.serverTimestamp\(\) \}, \{ merge: true \}\)/);

@@ -22,7 +22,9 @@ export type AdminActionType =
   // built by lib/admin/systemAdminClaimSafety.ts#buildClaimAuditRecord).
   // ATTEMPT and INCOMPLETE rows are NOT a completed privilege change; only
   // GRANT_/REVOKE_SYSTEM_ADMIN_CLAIM (and, for a revoke re-run whose claim was
-  // already absent, REVOKE_SYSTEM_ADMIN_SESSIONS) record a verified result.
+  // already absent, REVOKE_SYSTEM_ADMIN_SESSIONS) record a completed result
+  // (claims read back as planned; for a revoke, revocation acknowledged and the
+  // cutoff observed under an unbounded clock assumption — not proof).
   | "SYSTEM_ADMIN_CLAIM_ATTEMPT"
   | "GRANT_SYSTEM_ADMIN_CLAIM"
   | "REVOKE_SYSTEM_ADMIN_CLAIM"

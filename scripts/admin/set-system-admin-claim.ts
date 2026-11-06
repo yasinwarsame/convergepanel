@@ -25,10 +25,14 @@
  *     [--execute --confirm-claim=<exact string printed by the dry run>]
  *     [--result-file=<path to a NEW *.json file outside every git checkout>]
  *
- * EXIT CODES: 0 completed and verified (or a grant already in place);
+ * EXIT CODES: 0 completed — claims read back as planned and, on revoke, the
+ *   revocation acknowledged with the cutoff observed (an observation under an
+ *   unbounded clock-alignment assumption, NOT proof of revocation; already-issued
+ *   ID tokens keep admin: true on SYSTEM_ADMIN bearer routes until they expire)
+ *   — or a grant already in place;
  * 2 refused or dry run — no Firebase write call was issued;
  * 3 a write call was issued (possibly only the attempt audit row) and the
- *   operation is incomplete or unverified — re-running the same command is safe;
+ *   operation is incomplete — re-running the same command is safe;
  * 1 the result file could not be written after an otherwise-successful run.
  *
  * CREDENTIALS. Only the key file named by --credentials is used. This tool

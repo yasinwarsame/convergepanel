@@ -34,7 +34,9 @@ import {
   unrelatedClaimsFingerprint,
   validateServiceAccountKey,
   verifyReadBack,
-  verifySessionsRevoked,
+  observeRevocationCutoff,
+  CURRENT_PRIVILEGE_ENFORCEMENT_NOTE,
+  REVOCATION_CLOCK_ASSUMPTION,
   revocationCutoffSeconds,
   REVOCATION_SKEW_MARGIN_SECONDS,
   type SessionRevocationEvidence,
@@ -456,16 +458,16 @@ describe("session revocation evidence — server clock only", () => {
     expect(revocationCutoffSeconds({ seconds: T0, nanoseconds: 0 })).toBe(T0 + 3);
     expect(revocationCutoffSeconds({ seconds: T0, nanoseconds: 999_999_999 })).toBe(T0 + 3);
   });
-  it("verified iff the read-back validSince (whole seconds) is AT or AFTER the cutoff", () => {
+  it("cutoff observed iff the read-back validSince (whole seconds) is AT or AFTER the cutoff", () => {
     const cutoff = T0 + 3;
-    expect(verifySessionsRevoked(utc(cutoff), cutoff)).toEqual({ ok: true, validSinceSeconds: cutoff });
-    expect(verifySessionsRevoked(utc(cutoff + 3600), cutoff).ok).toBe(true);
-    const below = verifySessionsRevoked(utc(cutoff - 1), cutoff);
+    expect(observeRevocationCutoff(utc(cutoff), cutoff)).toEqual({ ok: true, validSinceSeconds: cutoff });
+    expect(observeRevocationCutoff(utc(cutoff + 3600), cutoff).ok).toBe(true);
+    const below = observeRevocationCutoff(utc(cutoff - 1), cutoff);
     expect(below).toMatchObject({ ok: false, validSinceSeconds: cutoff - 1 });
-    expect(!below.ok && below.detail).toMatch(/earlier than the server-derived cutoff/);
-    expect(verifySessionsRevoked(undefined, cutoff)).toMatchObject({ ok: false, validSinceSeconds: null });
-    expect(verifySessionsRevoked("garbage", cutoff).ok).toBe(false);
-    expect(verifySessionsRevoked(utc(cutoff), Number.NaN).ok).toBe(false);
+    expect(!below.ok && below.detail).toMatch(/earlier than the server-anchored cutoff/);
+    expect(observeRevocationCutoff(undefined, cutoff)).toMatchObject({ ok: false, validSinceSeconds: null });
+    expect(observeRevocationCutoff("garbage", cutoff).ok).toBe(false);
+    expect(observeRevocationCutoff(utc(cutoff), Number.NaN).ok).toBe(false);
   });
   it("the anchor must be a well-formed server time STRICTLY later than the attempt row's commit time", () => {
     const attempt = { seconds: T0, nanoseconds: 500 };
@@ -482,6 +484,8 @@ describe("session revocation evidence — server clock only", () => {
 });
 
 const VERIFIED_EVIDENCE: SessionRevocationEvidence = {
+  claimWrite: "confirmed",
+  revocationApiAcknowledged: true,
   anchorSource: "firestore-commit-time:users/{uid}.role",
   anchorServerTime: "2026-11-05T10:00:00.000Z",
   marginSeconds: 2,
@@ -489,7 +493,9 @@ const VERIFIED_EVIDENCE: SessionRevocationEvidence = {
   tokensValidAfterTimeBefore: null,
   tokensValidAfterTimeAfter: "Thu, 05 Nov 2026 10:00:03 GMT",
   validSinceMinusAnchorSeconds: 3,
-  verified: true,
+  cutoffObserved: true,
+  clockAlignmentAssumption: REVOCATION_CLOCK_ASSUMPTION,
+  currentPrivilegeEnforcement: CURRENT_PRIVILEGE_ENFORCEMENT_NOTE,
   detail: null,
 };
 
@@ -580,8 +586,9 @@ describe("audit record — matches lib/admin/auditLog.ts#AuditLogEntry", () => {
     expect([r.actionType, r.metadata.completed]).toEqual([actionType, completed]);
   });
 
-  it("fail closed: a COMPLETED revoke outcome without VERIFIED session evidence is downgraded to sessions_revoke_unverified", () => {
-    for (const ev of [undefined, null, { ...VERIFIED_EVIDENCE, verified: false }]) {
+  it("fail closed: a COMPLETED revoke outcome without an acknowledged revocation AND an observed cutoff is downgraded to sessions_revoke_unverified", () => {
+    // Stricter than a1c2159: an observed cutoff WITHOUT an acknowledged revocation call is not completed either.
+    for (const ev of [undefined, null, { ...VERIFIED_EVIDENCE, cutoffObserved: false }, { ...VERIFIED_EVIDENCE, revocationApiAcknowledged: false }]) {
       for (const outcome of ["applied", "claim_already_absent_sessions_revoked"] as const) {
         const r = buildClaimAuditRecord({
           requestId: "r", createdAt: TS, projectId: PROJECT, operation: "revoke", authorization: "operator-id-token",

@@ -147,9 +147,11 @@ export type PostWriteFailure =
   | "mint_failed"
   | "sessions_revoke_failed"
   /**
-   * The revocation call returned, but the read-back `tokensValidAfterTime`
-   * could not be shown to cover the claim-removal time from a server clock
-   * (no server-time anchor, no read-back value, or a value below the cutoff).
+   * The revocation cutoff was NOT observed: no server-time anchor, no
+   * read-back `tokensValidAfterTime`, a value below the server-anchored
+   * cutoff, or (revoke) a claim write that threw and is unconfirmed. Even the
+   * opposite case — cutoff observed — is an observation under an unbounded
+   * clock-alignment assumption, not proof of revocation.
    */
   | "sessions_revoke_unverified"
   | "users_doc_failed"
@@ -750,7 +752,7 @@ export function verifyReadBack(plan: ClaimPlan, readBackClaims: unknown): { ok: 
 }
 
 /**
- * SESSION REVOCATION EVIDENCE (see the runbook, "How revocation is verified").
+ * SESSION REVOCATION EVIDENCE (see the runbook, "What a revoke reports").
  *
  * firebase-admin's `revokeRefreshTokens(uid)` sends
  * `validSince: Math.floor(new Date().getTime() / 1000)` — the OPERATOR'S LOCAL
@@ -758,25 +760,47 @@ export function verifyReadBack(plan: ClaimPlan, readBackClaims: unknown): { ok: 
  * stores that value as `tokensValidAfterTime`; a session is revoked when its
  * `auth_time` (whole seconds) is strictly earlier
  * (lib/auth/base-auth.js:968-972). A slow operator clock therefore leaves
- * sessions signed in during the lag valid, and "the value advanced" proves
+ * sessions signed in during the lag valid, and "the value advanced" says
  * nothing about coverage.
  *
- * What must hold: every session that could have seen `admin: true` started
- * before the claim removal took effect, so `tokensValidAfterTime` must be
- * later than the SERVER time at which the removal took effect. The tool
- * proves that against a server clock:
- *   anchor  = the Firestore commit time of a write issued only AFTER the claim
- *             write returned (the users/{uid}.role mirror), checked to be later
- *             than the attempt row's commit time (same clock), so a stale
- *             "previous update time" can never pass as the anchor;
- *   cutoff  = anchor whole seconds + 1 + REVOCATION_SKEW_MARGIN_SECONDS;
- *   verified iff the read-back tokensValidAfterTime (whole seconds) >= cutoff.
- * The +1 covers the second containing the anchor (auth_time is truncated to
- * seconds and the comparison is strict). The margin absorbs clock skew between
- * Firestore and Firebase Auth servers, for which Google publishes no bound
- * (residual risk, documented). The local clock is never used as evidence.
+ * What the tool records, kept apart on purpose:
+ *   (a) API acknowledgment: `revokeRefreshTokens` returned without error.
+ *   (b) Observed cutoff: the read-back `tokensValidAfterTime` compared with a
+ *       server-anchored cutoff:
+ *         anchor = the Firestore commit time of a write issued only AFTER the
+ *                  claim write returned (the users/{uid}.role mirror);
+ *         cutoff = anchor whole seconds + 1 + REVOCATION_SKEW_MARGIN_SECONDS;
+ *         observed iff read-back tokensValidAfterTime (whole seconds) >= cutoff.
+ *       The +1 covers the second containing the anchor (auth_time is truncated
+ *       to seconds and the comparison is strict).
+ *   (c) ASSUMPTION, not a guarantee: the anchor comes from Firestore and
+ *       `tokensValidAfterTime` is judged by Firebase Auth. Google publishes no
+ *       bound on the clock skew between them; the 2 s margin ASSUMES it is
+ *       smaller. The comparison is therefore not proof of session revocation.
+ *   (d) Enforcement of current admin privileges is NOT provided by any of
+ *       this: SYSTEM_ADMIN bearer guards call verifyIdToken without
+ *       checkRevoked (lib/firebase/auth-helpers.ts verifyAdminToken,
+ *       lib/firebase/adminAuth.ts getRequestUser), so an already-issued ID
+ *       token keeps admin: true until it expires (up to ~1 h). Session-cookie
+ *       paths (verifySessionCookie(cookie, true)) do check revocation. Live
+ *       enforcement is the separate S2 change.
+ *   (e) Anything else (no anchor, no read-back, below cutoff, revocation call
+ *       failed, claim write unconfirmed) is INCOMPLETE (exit 3).
+ * The local clock is never compared with anything.
  */
 export const REVOCATION_SKEW_MARGIN_SECONDS = 2;
+
+/** (c) The cross-service clock assumption every observed cutoff depends on. Printed and recorded verbatim. */
+export const REVOCATION_CLOCK_ASSUMPTION =
+  `ASSUMPTION (unchecked by this tool): the Firestore and Firebase Auth server clocks differ by less than the ${REVOCATION_SKEW_MARGIN_SECONDS} s margin. Google publishes no bound on that skew (unbounded), so an observed cutoff is an observation under this assumption, not proof that sessions were revoked.`;
+
+/** (d) What the revocation does NOT do for current admin privileges. Printed and recorded verbatim. */
+export const CURRENT_PRIVILEGE_ENFORCEMENT_NOTE =
+  "Current admin privileges are NOT cut off by this: SYSTEM_ADMIN bearer guards verify ID tokens without checkRevoked, so an already-issued ID token keeps admin: true until it expires (up to about 1 hour) regardless of revocation. Session-cookie paths (verifySessionCookie with revocation checking) do reject sessions started before tokensValidAfterTime. Enforcement against current privileges awaits S2 (live admin authorization in route guards).";
+
+/** (a)+(b)+(c) in one line: the success summary for a revoke. */
+export const REVOCATION_OBSERVED_SUMMARY =
+  `revocation acknowledged; cutoff observed at/after server-anchored cutoff (assumes Firestore/Auth clock skew < ${REVOCATION_SKEW_MARGIN_SECONDS} s, unbounded)`;
 
 /** A server timestamp (Firestore `Timestamp` shape: whole seconds + nanoseconds). */
 export type ServerTime = { seconds: number; nanoseconds: number };
@@ -798,11 +822,16 @@ export function serverTimeIso(t: ServerTime): string {
 
 /**
  * Accepts the anchor only when it is a well-formed server time strictly later
- * than the attempt row's commit time (both Firestore commit times, so the
- * comparison is on one clock). Firestore reports a write that did not change
- * the document with the document's PREVIOUS update time; the role write always
- * changes the document (`updatedAt: serverTimestamp()`), and this check fails
- * closed if that ever stops being true.
+ * than the attempt row's commit time (both Firestore commit times, one clock).
+ *
+ * Precise property: this rejects any returned time at or before the attempt
+ * row's commit. It does NOT detect a stale time later than that — e.g. the
+ * previous update time of a users/{uid} write by someone else that landed
+ * after the attempt row (Firestore reports a no-op write with the document's
+ * PREVIOUS update time). The real protection against a stale anchor is the
+ * role write itself: it always sets `updatedAt: serverTimestamp()`, so it
+ * always changes the document and its writeTime is its own commit time
+ * (pinned by the CLI spec). This check is a backstop for the narrower case.
  */
 export function checkRevocationAnchor(
   anchor: unknown,
@@ -823,9 +852,11 @@ export function revocationCutoffSeconds(anchor: ServerTime): number {
 
 /**
  * Compares the server's read-back `tokensValidAfterTime` with the
- * server-derived cutoff. Never consults the local clock.
+ * server-anchored cutoff. Never consults the local clock. `ok` means the
+ * cutoff was OBSERVED — not that revocation is proven (see
+ * REVOCATION_CLOCK_ASSUMPTION).
  */
-export function verifySessionsRevoked(
+export function observeRevocationCutoff(
   afterTokensValidAfterTime: unknown,
   cutoffSeconds: number,
 ): { ok: true; validSinceSeconds: number } | { ok: false; detail: string; validSinceSeconds: number | null } {
@@ -838,20 +869,30 @@ export function verifySessionsRevoked(
   }
   const validSinceSeconds = Math.floor(ms / 1000);
   if (!Number.isSafeInteger(cutoffSeconds) || cutoffSeconds <= 0) {
-    return { ok: false, detail: "no valid server-derived cutoff", validSinceSeconds };
+    return { ok: false, detail: "no valid server-anchored cutoff", validSinceSeconds };
   }
   if (validSinceSeconds < cutoffSeconds) {
     return {
       ok: false,
       validSinceSeconds,
-      detail: `tokensValidAfterTime ${new Date(validSinceSeconds * 1000).toISOString()} is earlier than the server-derived cutoff ${new Date(cutoffSeconds * 1000).toISOString()}: sessions started while the admin claim was present may still be valid. revokeRefreshTokens uses the operator's local clock; it is probably behind server time — sync it (NTP) and re-run`,
+      detail: `tokensValidAfterTime ${new Date(validSinceSeconds * 1000).toISOString()} is earlier than the server-anchored cutoff ${new Date(cutoffSeconds * 1000).toISOString()}: sessions started while the admin claim was present may still be valid. revokeRefreshTokens uses the operator's local clock; it is probably behind server time — sync it (NTP) and re-run`,
     };
   }
   return { ok: true, validSinceSeconds };
 }
 
-/** Recorded in the result file and the outcome audit row of every revoke. */
+/**
+ * Recorded in the result file and the outcome audit row of every revoke.
+ * The five things a reader must keep apart are separate fields:
+ * (a) revocationApiAcknowledged, (b) cutoffObserved (+ the times),
+ * (c) clockAlignmentAssumption, (d) currentPrivilegeEnforcement,
+ * (e) detail (why the run is incomplete, when it is).
+ */
 export type SessionRevocationEvidence = {
+  /** How this run handled the claim: confirmed write, write that threw (unconfirmed), or skipped (already absent). */
+  claimWrite: "confirmed" | "unconfirmed" | "skipped_already_absent";
+  /** (a) revokeRefreshTokens returned without error. An acknowledgment, nothing more. */
+  revocationApiAcknowledged: boolean;
   anchorSource: "firestore-commit-time:users/{uid}.role";
   anchorServerTime: string | null;
   marginSeconds: number;
@@ -860,7 +901,13 @@ export type SessionRevocationEvidence = {
   tokensValidAfterTimeAfter: string | null;
   /** Read-back validSince minus the anchor, in seconds (positive = ahead of server time). */
   validSinceMinusAnchorSeconds: number | null;
-  verified: boolean;
+  /** (b) read-back tokensValidAfterTime >= the server-anchored cutoff. An observation, not proof. */
+  cutoffObserved: boolean;
+  /** (c) always REVOCATION_CLOCK_ASSUMPTION. */
+  clockAlignmentAssumption: string;
+  /** (d) always CURRENT_PRIVILEGE_ENFORCEMENT_NOTE. */
+  currentPrivilegeEnforcement: string;
+  /** (e) why the cutoff was not observed / the run is incomplete; null when observed. */
   detail: string | null;
 };
 
@@ -870,12 +917,15 @@ export type SessionRevocationEvidence = {
 /**
  * actionType separates an ATTEMPT from a COMPLETED privilege change, so a row
  * listed on its own (the admin user-details page shows actionType) can never
- * be read as "admin was granted/revoked" unless that was verified:
+ * be read as "admin was granted/revoked" unless the claim read-back matched:
  *   - SYSTEM_ADMIN_CLAIM_ATTEMPT   every attempt row (written BEFORE any change)
- *   - GRANT_/REVOKE_SYSTEM_ADMIN_CLAIM   outcome row, change applied AND verified
+ *   - GRANT_/REVOKE_SYSTEM_ADMIN_CLAIM   outcome row, claim change read back as
+ *                                  planned (revoke: also revocation acknowledged
+ *                                  and cutoff observed, under the clock assumption)
  *   - REVOKE_SYSTEM_ADMIN_SESSIONS outcome row, claim was already absent; this
- *                                  run only revoked (and verified) sessions
- *   - SYSTEM_ADMIN_CLAIM_INCOMPLETE outcome row, anything not verified
+ *                                  run only revoked sessions (acknowledged,
+ *                                  cutoff observed, under the clock assumption)
+ *   - SYSTEM_ADMIN_CLAIM_INCOMPLETE outcome row, anything else
  */
 export type ClaimAuditActionType =
   | "SYSTEM_ADMIN_CLAIM_ATTEMPT"
@@ -986,8 +1036,13 @@ export function buildClaimAuditRecord<TS>(input: {
   const fullyRead = readBack !== undefined && readBack.customClaims === "read" && readBack.usersDocRole === "read";
   let outcome: AuditOutcome | undefined = input.phase === "outcome" ? (input.outcome ?? "verification_failed") : undefined;
   if (outcome !== undefined && !fullyRead && isCompletedOutcome(outcome)) outcome = "verification_failed";
-  // A revoke is only ever recorded as completed with VERIFIED session-revocation evidence.
-  if (outcome !== undefined && input.operation === "revoke" && isCompletedOutcome(outcome) && input.sessionRevocationEvidence?.verified !== true) {
+  // A revoke is only ever recorded as completed when the revocation call was
+  // acknowledged AND the cutoff was observed (an observation under the clock
+  // assumption — never described as proof).
+  if (
+    outcome !== undefined && input.operation === "revoke" && isCompletedOutcome(outcome)
+    && (input.sessionRevocationEvidence?.cutoffObserved !== true || input.sessionRevocationEvidence?.revocationApiAcknowledged !== true)
+  ) {
     outcome = "sessions_revoke_unverified";
   }
   if (input.phase === "outcome" && input.operation === "revoke") {

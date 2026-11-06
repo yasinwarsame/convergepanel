@@ -274,7 +274,7 @@ describe("execute — happy paths", () => {
       `revokeRefreshTokens:${TARGET}`,
       "createAuditRow:outcome",
     ]);
-    expect(r.sessionRevocationEvidence).toMatchObject({ verified: true, marginSeconds: 2, detail: null });
+    expect(r.sessionRevocationEvidence).toMatchObject({ cutoffObserved: true, marginSeconds: 2, detail: null });
     const outcomeRow = w.audit.get("system-admin-claim:req_1_abc:outcome")!;
     expect(outcomeRow.actionType).toBe("REVOKE_SYSTEM_ADMIN_CLAIM");
     expect(outcomeRow.metadata).toMatchObject({ sessionRevocation: "required", claimWrite: "write", outcome: "applied", completed: true });
@@ -577,7 +577,7 @@ describe("safe retry — revoke whose admin claim is already absent (R2 MINOR-1)
     expect(w.users.get(TARGET)!.customClaims).toBe(claimsObject);
     expect(w.users.get(TARGET)!.customClaims).toEqual({ plan: "pro", team: { id: "t1" } });
     expect(w.users.get(TARGET)!.tokensValidAfterTime).not.toBe(BEFORE_TVA);
-    expect(r2.sessionRevocationEvidence).toMatchObject({ verified: true, tokensValidAfterTimeBefore: BEFORE_TVA });
+    expect(r2.sessionRevocationEvidence).toMatchObject({ cutoffObserved: true, tokensValidAfterTimeBefore: BEFORE_TVA });
     expect(w.audit.get("system-admin-claim:req_2_retry:attempt")).toMatchObject({
       actionType: "SYSTEM_ADMIN_CLAIM_ATTEMPT",
       metadata: { claimWrite: "skip_already_absent", sessionRevocation: "required", completed: false },
@@ -797,7 +797,7 @@ describe("M-1: read-back failure is never presented as a read snapshot", () => {
   });
 });
 
-describe("R3 MAJOR: session revocation is proven against a SERVER clock, never the operator clock", () => {
+describe("R3 MAJOR: the revocation cutoff is observed against a SERVER-anchored cutoff, never the operator clock", () => {
   const OUTCOME = "system-admin-claim:req_1_abc:outcome";
   const BEFORE_TVA = "Thu, 05 Nov 2026 09:00:00 GMT";
   const adminWorld = (skewMs = 0) => {
@@ -813,12 +813,12 @@ describe("R3 MAJOR: session revocation is proven against a SERVER clock, never t
   const evidenceOf = (r: Awaited<ReturnType<typeof runSystemAdminClaim>>) => r.sessionRevocationEvidence!;
   const secs = (iso: string | null) => Math.floor(Date.parse(iso as string) / 1000);
 
-  it("CONTROL accurate operator clock: verified; validSince >= cutoff = anchor second + 1 + 2 s margin", async () => {
+  it("CONTROL accurate operator clock: cutoff observed; validSince >= cutoff = anchor second + 1 + 2 s margin", async () => {
     const w = adminWorld(0);
     const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), deps(w));
     expect([r.status, r.exitCode, r.code]).toEqual(["applied", 0, null]);
     const ev = evidenceOf(r);
-    expect(ev.verified).toBe(true);
+    expect(ev.cutoffObserved).toBe(true);
     expect(secs(ev.cutoff)).toBe(secs(ev.anchorServerTime) + 3);
     expect(secs(ev.tokensValidAfterTimeAfter)).toBeGreaterThanOrEqual(secs(ev.cutoff));
     // The anchor is the role write's commit time, taken after the claim write returned.
@@ -827,7 +827,36 @@ describe("R3 MAJOR: session revocation is proven against a SERVER clock, never t
     const sleepIdx = w.calls.findIndex((c) => c.startsWith("sleep:"));
     expect(sleepIdx).toBeGreaterThan(w.calls.indexOf(`writeRole:${TARGET}:user`));
     expect(sleepIdx).toBeLessThan(w.calls.indexOf(`revokeRefreshTokens:${TARGET}`));
-    expect(w.audit.get(OUTCOME)!.metadata).toMatchObject({ outcome: "applied", completed: true, sessionRevocationEvidence: { verified: true } });
+    expect(w.audit.get(OUTCOME)!.metadata).toMatchObject({ outcome: "applied", completed: true, sessionRevocationEvidence: { cutoffObserved: true } });
+  });
+
+  it("success output and evidence keep the five things apart: acknowledgment, observed cutoff, clock ASSUMPTION, enforcement caveat, and no proof claim", async () => {
+    const w = adminWorld(0);
+    const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), deps(w));
+    expect([r.status, r.exitCode]).toEqual(["applied", 0]);
+    const m = r.message!;
+    expect(m).toContain("revocation acknowledged; cutoff observed at/after server-anchored cutoff (assumes Firestore/Auth clock skew < 2 s, unbounded)");
+    expect(m).toContain("ASSUMPTION (unchecked by this tool)");
+    expect(m).toMatch(/not proof that sessions were revoked/);
+    expect(m).toMatch(/verify ID tokens without checkRevoked/);
+    expect(m).toMatch(/up to about 1 hour/);
+    expect(m).toMatch(/awaits S2/);
+    // Only negated forms ("not proof") may appear; no affirmative proof wording.
+    expect(m.replace(/\b(not|never|no)\s+(a\s+)?(proof|proven|guarantee|verified)\b/gi, "")).not.toMatch(/\b(proof|prove[sdn]?|proving|guarantee[sd]?|verified|verifies)\b/i);
+    expect(w.calls).toContain(`log:${m}`);
+    const ev = evidenceOf(r);
+    expect(ev).toMatchObject({ claimWrite: "confirmed", revocationApiAcknowledged: true, cutoffObserved: true });
+    expect(ev.clockAlignmentAssumption).toMatch(/unbounded/);
+    expect(ev.currentPrivilegeEnforcement).toMatch(/S2/);
+    expect(w.audit.get(OUTCOME)!.metadata).toMatchObject({
+      sessionRevocationEvidence: { clockAlignmentAssumption: ev.clockAlignmentAssumption, currentPrivilegeEnforcement: ev.currentPrivilegeEnforcement },
+    });
+    // Sessions-only re-run states the same.
+    const r2 = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke"), "req_2_again"), deps(w));
+    expect(r2.status).toBe("claim_already_absent_sessions_revoked");
+    expect(r2.message).toContain("assumes Firestore/Auth clock skew < 2 s, unbounded");
+    expect(r2.message).toMatch(/awaits S2/);
+    expect(r2.sessionRevocationEvidence).toMatchObject({ claimWrite: "skipped_already_absent" });
   });
 
   it("SLOW operator clock (10 s behind): the SDK stamps validSince in the past => INCOMPLETE sessions_revoke_unverified, exit 3 (fdd4da7 reported applied/0)", async () => {
@@ -840,13 +869,13 @@ describe("R3 MAJOR: session revocation is proven against a SERVER clock, never t
     // ...but it does not cover the claim-removal time on the server clock.
     expect(w.validSinceSent[0]).toBeLessThan(secs(evidenceOf(r).anchorServerTime));
     expect([r.status, r.exitCode, r.code, r.outcome]).toEqual(["incomplete", 3, "sessions_revoke_unverified", "sessions_revoke_unverified"]);
-    expect(r.message).toMatch(/earlier than the server-derived cutoff/);
+    expect(r.message).toMatch(/earlier than the server-anchored cutoff/);
     expect(r.message).toMatch(/local clock/);
     expect(r.message).toMatch(/Re-running the same command is safe/);
-    expect(evidenceOf(r)).toMatchObject({ verified: false, tokensValidAfterTimeBefore: BEFORE_TVA });
+    expect(evidenceOf(r)).toMatchObject({ cutoffObserved: false, tokensValidAfterTimeBefore: BEFORE_TVA });
     expect(w.audit.get(OUTCOME)).toMatchObject({
       actionType: "SYSTEM_ADMIN_CLAIM_INCOMPLETE",
-      metadata: { outcome: "sessions_revoke_unverified", completed: false, sessionRevocationEvidence: { verified: false } },
+      metadata: { outcome: "sessions_revoke_unverified", completed: false, sessionRevocationEvidence: { cutoffObserved: false } },
     });
   });
 
@@ -886,6 +915,26 @@ describe("R3 MAJOR: session revocation is proven against a SERVER clock, never t
     expect([r.status, r.exitCode]).toEqual(["applied", 0]);
     expect(evidenceOf(r).validSinceMinusAnchorSeconds).toBeGreaterThan(3600);
     expect(r.message).toMatch(/operator clock is ahead/);
+    expect(r.message).toMatch(/over-revocation/);
+    expect(r.message).toMatch(/sync this machine's clock \(NTP\) and re-run the same revoke command/);
+  });
+
+  it("FAST-clock lock-out recovery: a re-run of the same revoke from a synced clock is a sessions-only run that re-stamps validSince near server time (Auth assumed to store the value as sent)", async () => {
+    const w = adminWorld(3_600_000);
+    const r1 = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke"), "req_1_fast"), deps(w));
+    expect([r1.status, r1.exitCode]).toEqual(["applied", 0]);
+    const locked = Date.parse(w.users.get(TARGET)!.tokensValidAfterTime!);
+    expect(locked - w.serverMs).toBeGreaterThan(3_500_000);
+    w.skewMs = 0;
+    w.calls.length = 0;
+    const r2 = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke"), "req_2_synced"), deps(w));
+    expect([r2.status, r2.exitCode]).toEqual(["claim_already_absent_sessions_revoked", 0]);
+    // No claim write; attempt row, role (anchor), revoke, outcome row.
+    expect(writeCalls(w)).toEqual(["createAuditRow:attempt", `writeRole:${TARGET}:user`, `revokeRefreshTokens:${TARGET}`, "createAuditRow:outcome"]);
+    const after = Date.parse(w.users.get(TARGET)!.tokensValidAfterTime!);
+    expect(after).toBeLessThan(locked);
+    expect(Math.abs(after - w.serverMs)).toBeLessThan(10_000);
+    expect(r2.message).not.toMatch(/operator clock is ahead/);
   });
 
   it("revocation call succeeds but the read-back record has NO tokensValidAfterTime => sessions_revoke_unverified", async () => {
@@ -907,17 +956,53 @@ describe("R3 MAJOR: session revocation is proven against a SERVER clock, never t
     const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), deps(w));
     expect([r.exitCode, r.code]).toEqual([3, "verification_failed"]);
     expect(r.failureDetails.map((x) => x.split(":")[0])).toEqual(["verification_failed", "sessions_revoke_unverified"]);
-    expect(evidenceOf(r)).toMatchObject({ verified: false, tokensValidAfterTimeAfter: null });
+    expect(evidenceOf(r)).toMatchObject({ cutoffObserved: false, tokensValidAfterTimeAfter: null });
   });
 
   describe("network failure at each step", () => {
-    it("claim write fails => no anchor write, NO revocation, mint_failed exit 3", async () => {
+    it("REVOKE claim write throws => no anchor write, revocation STILL called (privilege removal), INCOMPLETE mint_failed exit 3, recorded in result + audit", async () => {
       const w = adminWorld(0);
       w.fail.claims = true;
       const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), deps(w));
+      expect([r.status, r.exitCode, r.code, r.outcome]).toEqual(["incomplete", 3, "mint_failed", "mint_failed"]);
+      expect(writeCalls(w)).toEqual([
+        "createAuditRow:attempt", `writeCustomClaims:${TARGET}`, `revokeRefreshTokens:${TARGET}`, "createAuditRow:outcome",
+      ]);
+      expect(r.writesAttempted).toEqual(["audit_attempt_row", "custom_claims", "revoke_refresh_tokens", "audit_outcome_row"]);
+      // No anchor => no wait, no cutoff, never "observed".
+      expect(w.calls.some((c) => c.startsWith("sleep:"))).toBe(false);
+      expect(evidenceOf(r)).toMatchObject({
+        claimWrite: "unconfirmed", revocationApiAcknowledged: true, cutoffObserved: false, anchorServerTime: null, cutoff: null,
+      });
+      expect(evidenceOf(r).detail).toMatch(/claim write threw and is UNCONFIRMED.*revokeRefreshTokens was still called and acknowledged/);
+      expect(r.failureDetails.map((x) => x.split(":")[0])).toEqual(["mint_failed", "sessions_revoke_unverified"]);
+      expect(w.audit.get(OUTCOME)).toMatchObject({
+        actionType: "SYSTEM_ADMIN_CLAIM_INCOMPLETE",
+        metadata: {
+          outcome: "mint_failed", completed: false,
+          sessionRevocationEvidence: { claimWrite: "unconfirmed", revocationApiAcknowledged: true, cutoffObserved: false },
+        },
+      });
+      expect((w.audit.get(OUTCOME)!.metadata as { outcomeDetails: string[] }).outcomeDetails.join()).toMatch(/UNCONFIRMED/);
+    });
+
+    it("REVOKE claim write throws AND the revocation call fails => mint_failed + sessions_revoke_failed, exit 3", async () => {
+      const w = adminWorld(0);
+      w.fail.claims = true;
+      w.fail.revoke = true;
+      const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), deps(w));
+      expect([r.exitCode, r.code]).toEqual([3, "mint_failed"]);
+      expect(r.failureDetails.map((x) => x.split(":")[0])).toEqual(["mint_failed", "sessions_revoke_failed"]);
+      expect(evidenceOf(r)).toMatchObject({ claimWrite: "unconfirmed", revocationApiAcknowledged: false, cutoffObserved: false });
+    });
+
+    it("GRANT claim write throws => no role write, no revocation (grant never revokes), mint_failed exit 3", async () => {
+      const w = world();
+      w.fail.claims = true;
+      const r = await runSystemAdminClaim(ctx(args(["--operator-id-token-file=/t", "--execute", `--confirm-claim=${GRANT_CONFIRM}`])), deps(w));
       expect([r.exitCode, r.code]).toEqual([3, "mint_failed"]);
       expect(writeCalls(w)).toEqual(["createAuditRow:attempt", `writeCustomClaims:${TARGET}`, "createAuditRow:outcome"]);
-      expect(evidenceOf(r)).toMatchObject({ verified: false, detail: "not attempted: the claim write failed" });
+      expect(r.sessionRevocationEvidence).toBeNull();
     });
 
     it("server-time capture (role write) fails => revocation is STILL attempted (it only removes access), but the run is INCOMPLETE", async () => {
@@ -932,7 +1017,7 @@ describe("R3 MAJOR: session revocation is proven against a SERVER clock, never t
       expect(r.failureDetails[1]).toMatch(/no server-time anchor/);
       // No anchor => no sleep: the tool never pretends a local wait is evidence.
       expect(w.calls.some((c) => c.startsWith("sleep:"))).toBe(false);
-      expect(evidenceOf(r)).toMatchObject({ verified: false, anchorServerTime: null, cutoff: null });
+      expect(evidenceOf(r)).toMatchObject({ cutoffObserved: false, anchorServerTime: null, cutoff: null });
     });
 
     it("anchor that is NOT later than the attempt row's commit time (stale / no-op write time) => sessions_revoke_unverified", async () => {
@@ -965,7 +1050,7 @@ describe("R3 MAJOR: session revocation is proven against a SERVER clock, never t
       w.fail.revoke = true;
       const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), deps(w));
       expect([r.exitCode, r.code]).toEqual([3, "sessions_revoke_failed"]);
-      expect(evidenceOf(r)).toMatchObject({ verified: false, detail: "the revocation call failed" });
+      expect(evidenceOf(r)).toMatchObject({ cutoffObserved: false, detail: "the revocation call failed" });
     });
 
     it("attempt audit row fails => nothing else is written, no revocation", async () => {
@@ -993,12 +1078,12 @@ describe("R3 MAJOR: session revocation is proven against a SERVER clock, never t
       w.fail.outcome = true;
       const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), deps(w));
       expect([r.exitCode, r.code]).toEqual([3, "audit_outcome_missing"]);
-      expect(evidenceOf(r).verified).toBe(true);
+      expect(evidenceOf(r).cutoffObserved).toBe(true);
     });
   });
 
   describe("retry after partial claim removal", () => {
-    it("claim write landed but the call threw => run 1 mint_failed (no revocation); run 2 (same command) verifies sessions, exit 0", async () => {
+    it("claim write landed but the call threw => run 1 mint_failed, revocation still called; run 2 (same command) observes the cutoff, exit 0", async () => {
       const w = adminWorld(0);
       const d1 = deps(w);
       const orig = d1.auth.writeCustomClaims;
@@ -1009,12 +1094,14 @@ describe("R3 MAJOR: session revocation is proven against a SERVER clock, never t
       const r1 = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke"), "req_1_first"), d1);
       expect([r1.exitCode, r1.code]).toEqual([3, "mint_failed"]);
       expect(w.users.get(TARGET)!.customClaims).toEqual({ plan: "pro" });
-      expect(w.calls.some((c) => c.startsWith("revokeRefreshTokens"))).toBe(false);
+      // The claim removal may have applied server-side: the revocation is called anyway (privilege removal).
+      expect(w.calls.filter((c) => c.startsWith("revokeRefreshTokens"))).toEqual([`revokeRefreshTokens:${TARGET}`]);
+      expect(r1.sessionRevocationEvidence).toMatchObject({ claimWrite: "unconfirmed", revocationApiAcknowledged: true, cutoffObserved: false });
       w.calls.length = 0;
       const r2 = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke"), "req_2_retry"), deps(w));
       expect([r2.status, r2.exitCode]).toEqual(["claim_already_absent_sessions_revoked", 0]);
       expect(w.calls.some((c) => c.startsWith("writeCustomClaims"))).toBe(false);
-      expect(r2.sessionRevocationEvidence!.verified).toBe(true);
+      expect(r2.sessionRevocationEvidence!.cutoffObserved).toBe(true);
     });
 
     it("run 1 with a SLOW clock ends unverified; re-running with the same slow clock stays INCOMPLETE; after the clock is synced the re-run verifies", async () => {
@@ -1047,10 +1134,11 @@ describe("R3 MINOR-1: disabled targets — revoke allowed, grant refused, never 
     expect(w.calls).toContain("log:Target state:   DISABLED - the admin claim is still removed and sessions revoked; the account stays disabled.");
   });
 
-  it("the auth port has NO method that can change `disabled` (no updateUser / enable path exists)", () => {
-    const w = world();
-    expect(Object.keys(deps(w).auth).sort()).toEqual(["getUser", "listUsers", "revokeRefreshTokens", "verifyIdToken", "writeCustomClaims"]);
-  });
+  // The former "auth port has NO method that can change `disabled`" test here
+  // enumerated the keys of THIS file's fake port, so it could never fail on a
+  // change to the real wiring. It is replaced by behavioural tests against
+  // the real port (realFirebaseFactory over a recording SDK Proxy) in
+  // scripts/admin/__tests__/setSystemAdminClaimRealPorts.spec.ts.
 
   it("grant on a DISABLED target is refused with zero writes", async () => {
     const w = world();

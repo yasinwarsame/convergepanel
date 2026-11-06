@@ -4,7 +4,7 @@
  * `scripts/admin/set-system-admin-claim.ts` wires real Firebase Admin objects
  * into these ports; the tests wire call-counting fakes. This module imports no
  * Firebase code and reads no environment, so the write ordering below is
- * proven by tests rather than asserted in prose.
+ * pinned by tests rather than asserted in prose.
  *
  * Write ordering on --execute (fail closed):
  *   1. create the `attempt` audit row (create-only). If that call fails the
@@ -15,18 +15,21 @@
  *   3. mirror `users/{uid}.role` (display-only field used by the admin UI).
  *      On revoke this write is ALSO the server-time anchor: its Firestore
  *      commit time is a server timestamp taken after the claim write returned
- *      (see verifySessionsRevoked in systemAdminClaimSafety.ts), so it is
+ *      (see observeRevocationCutoff in systemAdminClaimSafety.ts), so it is
  *      written on EVERY revoke, re-runs included.
  *   4. revoke: wait until the operator's clock should have passed the cutoff
  *      (anchor + 1 s + margin), then revoke refresh tokens (EVERY revoke;
- *      owner policy, no opt-out). Attempted even when step 3 failed: it only
- *      removes access — but the run is then unverifiable and INCOMPLETE.
- *   5. read back and verify (claims; role; for revoke, the server's
- *      tokensValidAfterTime >= the server-derived cutoff).
+ *      owner policy, no opt-out). Attempted even when step 3 failed, and even
+ *      when the claim write in step 2 threw (it may have applied server-side):
+ *      revoking only removes access — but such a run is INCOMPLETE (exit 3).
+ *   5. read back (claims; role; for revoke, compare the server's
+ *      tokensValidAfterTime with the server-anchored cutoff — an observation
+ *      under REVOCATION_CLOCK_ASSUMPTION, not proof of revocation).
  *   6. create the `outcome` audit row (create-only).
- * A claim-write failure skips steps 3–4; read-back and the outcome row still
- * run so the evidence records what actually happened. Nothing is rolled back
- * automatically; re-running the same command is safe.
+ * A claim-write failure skips step 3 (and, on a grant, step 4 does not apply);
+ * read-back and the outcome row still run so the evidence records what
+ * actually happened. Nothing is rolled back automatically; re-running the same
+ * command is safe.
  *
  * The operator ID token is read through a port, passed to `verifyIdToken`, and
  * dropped. It is never logged, returned, or written to any record.
@@ -48,6 +51,9 @@ import {
   type ServiceAccountEvidence,
   type SessionRevocationEvidence,
   type UserRecordLike,
+  CURRENT_PRIVILEGE_ENFORCEMENT_NOTE,
+  REVOCATION_CLOCK_ASSUMPTION,
+  REVOCATION_OBSERVED_SUMMARY,
   REVOCATION_SKEW_MARGIN_SECONDS,
   auditDocId,
   buildClaimAuditRecord,
@@ -67,8 +73,8 @@ import {
   refuse,
   revocationCutoffSeconds,
   serverTimeIso,
+  observeRevocationCutoff,
   verifyReadBack,
-  verifySessionsRevoked,
 } from "./systemAdminClaimSafety";
 
 // ---------------------------------------------------------------------------
@@ -103,7 +109,7 @@ export type ExecutionDeps<TS> = {
   /**
    * Waits `ms` milliseconds (a timer, not a clock reading). Used only to let
    * the operator's clock — which revokeRefreshTokens stamps — pass the
-   * server-derived cutoff before the revocation call. Never evidence.
+   * server-anchored cutoff before the revocation call. Never evidence.
    */
   sleepMs: (ms: number) => Promise<void>;
   /** Resolves the operator token file to a token, or refuses (mode/shape). */
@@ -130,7 +136,9 @@ export type RunStatus =
 export type RunResult = {
   status: RunStatus;
   /**
-   * 0 completed and verified (or grant already in place: no_change);
+   * 0 completed: claims read back as planned; on revoke, revocation
+   *   acknowledged and cutoff observed (under the clock assumption, not proof);
+   *   or a grant already in place (no_change);
    * 2 refused or dry run: NO write call was issued (guaranteed);
    * 3 a write call was issued (possibly only the attempt audit row, outcome
    *   unknown) and the operation is incomplete or unverified. Re-run is safe.
@@ -147,7 +155,10 @@ export type RunResult = {
   targetEmailMasked: string | null;
   /** Revoke always revokes refresh tokens; grant never does. */
   sessionRevocation: "required" | "not_applicable";
-  /** Revoke --execute only: how (and whether) the revocation was proven against a server clock. */
+  /**
+   * Revoke --execute only: the revocation API acknowledgment, the observed
+   * cutoff, the clock assumption it rests on, and the enforcement caveat.
+   */
   sessionRevocationEvidence: SessionRevocationEvidence | null;
   claimWrite: ClaimWritePlan | null;
   plan: { before: Claims; after: Claims; diff: string[] } | null;
@@ -384,8 +395,9 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
   }
 
   // --- execute ---------------------------------------------------------------
-  // From here on every exit is 0 (completed and verified) or 3 (a write call
-  // was issued and the operation is not verified complete). Never 2.
+  // From here on every exit is 0 (completed: read-back matched; revoke also
+  // acknowledged with the cutoff observed) or 3 (a write call was issued and
+  // the operation is incomplete). Never 2.
   const auditBase = {
     requestId: ctx.requestId,
     projectId: ctx.projectId,
@@ -469,11 +481,15 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
 
   let revokeOk = false;
   const cutoff = anchor ? revocationCutoffSeconds(anchor) : null;
-  if (claimWriteOk && args.operation === "revoke") {
+  // EVERY revoke calls revokeRefreshTokens — including one whose claim write
+  // threw: the write may have applied server-side, and revoking only removes
+  // access. That run stays INCOMPLETE (mint_failed first) because the claim
+  // write is unconfirmed and no anchor was taken.
+  if (args.operation === "revoke") {
     if (anchor && cutoff !== null) {
       // revokeRefreshTokens stamps validSince with the LOCAL clock; give an
-      // accurate clock time to pass the cutoff. Waiting proves nothing — the
-      // read-back below is the evidence.
+      // accurate clock time to pass the cutoff. Waiting is not evidence — the
+      // read-back below is the observation.
       const anchorMs = anchor.seconds * 1000 + Math.floor(anchor.nanoseconds / 1e6);
       await deps.sleepMs(Math.max(0, cutoff * 1000 - anchorMs + REVOCATION_SLEEP_SLACK_MS));
     }
@@ -522,10 +538,13 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
 
   // --- session revocation evidence (revoke) ----------------------------------
   // Success requires: the revocation call returned, a server-time anchor, and a
-  // read-back tokensValidAfterTime at or after the server-derived cutoff.
+  // read-back tokensValidAfterTime at or after the server-anchored cutoff
+  // (cutoff observed — under REVOCATION_CLOCK_ASSUMPTION, never proof).
   if (args.operation === "revoke") {
     const after = readBack && typeof readBack.tokensValidAfterTime === "string" ? readBack.tokensValidAfterTime : null;
     const evidence: SessionRevocationEvidence = {
+      claimWrite: claimWrite === "skip_already_absent" ? "skipped_already_absent" : claimWriteOk ? "confirmed" : "unconfirmed",
+      revocationApiAcknowledged: revokeOk,
       anchorSource: "firestore-commit-time:users/{uid}.role",
       anchorServerTime: anchor ? serverTimeIso(anchor) : null,
       marginSeconds: REVOCATION_SKEW_MARGIN_SECONDS,
@@ -533,25 +552,30 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
       tokensValidAfterTimeBefore: preWriteTokensValidAfterTime,
       tokensValidAfterTimeAfter: after,
       validSinceMinusAnchorSeconds: null,
-      verified: false,
+      cutoffObserved: false,
+      clockAlignmentAssumption: REVOCATION_CLOCK_ASSUMPTION,
+      currentPrivilegeEnforcement: CURRENT_PRIVILEGE_ENFORCEMENT_NOTE,
       detail: null,
     };
     let unverified: string | null = null;
     if (!claimWriteOk) {
-      unverified = "not attempted: the claim write failed";
+      unverified = revokeOk
+        ? "the claim write threw and is UNCONFIRMED (it may have applied server-side); revokeRefreshTokens was still called and acknowledged as a privilege-removal measure, but no server-time anchor was taken, so no cutoff was observed"
+        : "the claim write threw and is UNCONFIRMED (it may have applied server-side); revokeRefreshTokens was still called and failed";
+      if (revokeOk) recordFailure("sessions_revoke_unverified", unverified);
     } else if (!revokeOk) {
       unverified = "the revocation call failed";
     } else if (!anchor || cutoff === null) {
-      unverified = `no server-time anchor (${anchorProblem ?? "unknown"}): refresh tokens were revoked with the operator's local clock as validSince, and coverage of the claim-removal time cannot be proven`;
+      unverified = `no server-time anchor (${anchorProblem ?? "unknown"}): revokeRefreshTokens was acknowledged with the operator's local clock as validSince, and no cutoff could be observed`;
       recordFailure("sessions_revoke_unverified", unverified);
     } else if (!readBack) {
       unverified = "the Auth record could not be read back";
       recordFailure("sessions_revoke_unverified", "tokensValidAfterTime could not be read back");
     } else {
-      const sv = verifySessionsRevoked(after, cutoff);
+      const sv = observeRevocationCutoff(after, cutoff);
       if (sv.validSinceSeconds !== null) evidence.validSinceMinusAnchorSeconds = sv.validSinceSeconds - anchor.seconds;
       if (sv.ok) {
-        evidence.verified = true;
+        evidence.cutoffObserved = true;
       } else {
         unverified = sv.detail;
         recordFailure("sessions_revoke_unverified", sv.detail);
@@ -591,22 +615,30 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
   result.outcome = outcome;
   result.exitCode = 0;
   result.code = null;
-  const revokedProof = "refresh tokens revoked; tokensValidAfterTime read back at or after the cutoff derived from a server commit time taken after the claim removal";
   if (outcome === "claim_already_absent_sessions_revoked") {
     result.status = "claim_already_absent_sessions_revoked";
-    result.message = `Completed: the admin claim was already absent, so no claim was written. The outstanding session revocation was performed and verified (${revokedProof}). Already-issued ID tokens stay valid until they expire (up to 1 hour) on routes that do not check revocation.`;
+    result.message = `Completed: the admin claim was already absent, so no claim was written. ${revocationSummary(result.sessionRevocationEvidence)}`;
   } else {
     result.status = "applied";
     result.message = args.operation === "grant"
-      ? "Applied and verified. The user must obtain a fresh ID token (sign out and in) before the claim is visible."
-      : `Applied and verified: admin removed and ${revokedProof}. Already-issued ID tokens stay valid until they expire (up to 1 hour) on routes that do not check revocation.`;
+      ? "Applied: the claims read back as planned. The user must obtain a fresh ID token (sign out and in) before the claim is visible."
+      : `Applied: the admin claim was removed (read back as planned). ${revocationSummary(result.sessionRevocationEvidence)}`;
   }
   const ahead = result.sessionRevocationEvidence?.validSinceMinusAnchorSeconds;
   if (typeof ahead === "number" && ahead > FAR_AHEAD_WARNING_SECONDS) {
-    result.message += ` Note: tokensValidAfterTime is ${ahead}s after server time (the operator clock is ahead): the target cannot keep any session that starts before ${result.sessionRevocationEvidence?.tokensValidAfterTimeAfter}.`;
+    result.message += ` Note: tokensValidAfterTime is ${ahead}s after server time (the operator clock is ahead): wherever revocation is checked, any session the target starts before ${result.sessionRevocationEvidence?.tokensValidAfterTimeAfter} is rejected (over-revocation; the target may be unable to stay signed in until then). Recovery: sync this machine's clock (NTP) and re-run the same revoke command (runbook, "Fast operator clock").`;
   }
   deps.log(result.message);
   return result;
+}
+
+/**
+ * The revoke success text: (a) acknowledgment, (b) observed cutoff, (c) the
+ * clock assumption, (d) the enforcement caveat. Never phrased as proof.
+ */
+export function revocationSummary(ev: SessionRevocationEvidence | null): string {
+  const observed = ev ? ` (read-back tokensValidAfterTime ${ev.tokensValidAfterTimeAfter}; server-anchored cutoff ${ev.cutoff})` : "";
+  return `Sessions: ${REVOCATION_OBSERVED_SUMMARY}${observed}. ${REVOCATION_CLOCK_ASSUMPTION} ${CURRENT_PRIVILEGE_ENFORCEMENT_NOTE}`;
 }
 
 /**
@@ -615,7 +647,7 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
  * sets tolerance; it is never evidence (the read-back is).
  */
 export const REVOCATION_SLEEP_SLACK_MS = 1500;
-/** Above this, a verified revocation's validSince is reported as far ahead of server time. */
+/** Above this, an observed cutoff's validSince is reported as far ahead of server time. */
 export const FAR_AHEAD_WARNING_SECONDS = 300;
 
 /** Re-run guidance printed on every exit-3 outcome. */
@@ -630,7 +662,7 @@ function incomplete<TS>(result: RunResult, code: PostWriteFailure, deps: Executi
   const unknown = result.readBack.customClaims === "failed" || result.readBack.usersDocRole === "failed"
     ? " The post-write read-back FAILED: the resulting state is UNKNOWN, not empty."
     : "";
-  result.message = `INCOMPLETE (${code}). Failures: ${result.failureDetails.join("; ") || code}.${unknown} A write was attempted and the operation is not verified complete; inspect the read-back before assuming either state. ${RERUN_IS_SAFE}`;
+  result.message = `INCOMPLETE (${code}). Failures: ${result.failureDetails.join("; ") || code}.${unknown} A write was attempted and the operation is not complete; inspect the read-back before assuming either state. ${RERUN_IS_SAFE}`;
   deps.log(result.message);
   return result;
 }
