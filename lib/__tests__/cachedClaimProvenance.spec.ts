@@ -185,11 +185,15 @@ describe("B1 wiring (app/page.tsx)", () => {
   });
 
   it("openHistoryItem uses a cached payload directly only when it records independence; otherwise reads the record", () => {
-    expect(open).toContain("if (item.payload && claimPayloadRecordsIndependence(item.payload)) {");
-    expect(open).not.toMatch(/if \(item\.payload\) \{/);
-    expect(open).toContain("resolveClaimHistoryPayload(item.id, cachedPayload, lookup)");
+    // The branch moved into lib/client/historyDetailOpen.ts (MINOR-A of the 1ee4982 review); behaviour is tested in
+    // lib/__tests__/historyDetailOpen.spec.ts. The same rules are pinned on the module and on the page wiring.
+    const mod = readFileSync(join(__dirname, "..", "client", "historyDetailOpen.ts"), "utf8");
+    expect(mod).toContain("if (item.payload && claimPayloadRecordsIndependence(item.payload)) {");
+    expect(mod).not.toMatch(/if \(item\.payload\) \{/);
+    expect(mod).toContain("resolveClaimHistoryPayload(item.id, cachedPayload, lookup)");
+    expect(mod).toContain("sink.setPayload(resolved.payload);");
+    expect(open).toContain("await openSavedClaimVerification(opens, item, lookup, {");
     expect(open).toContain("`/api/user/verifications/${encodeURIComponent(item.id)}`");
-    expect(open).toContain("setVerificationPayload(resolved.payload);");
     // The refreshed history row carries the record's independence, so the line and the detail agree.
     expect(open).toContain("modelIndependence: claimModelIndependence(record.modelIndependence),");
   });

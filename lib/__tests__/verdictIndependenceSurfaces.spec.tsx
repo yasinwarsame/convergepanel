@@ -330,19 +330,14 @@ describe("NIT-1: under unknown provenance the coverage step stands alone (no dup
 });
 
 describe("NIT-2: openHistoryItem commits only the latest selection (app/page.tsx wiring)", () => {
+  // Superseded by MINOR-A of the 1ee4982 review: the sequence guard and the loading indicator now live in
+  // lib/client/historyDetailOpen.ts, tested behaviourally (quick switch, slow/cached/rejected reads, stale completions)
+  // in lib/__tests__/historyDetailOpen.spec.ts, which also pins this page wiring.
   const src = readFileSync(join(__dirname, "..", "..", "app", "page.tsx"), "utf8");
   const open = src.slice(src.indexOf("const openHistoryItem = async"), src.indexOf("openHistoryItemRef.current = openHistoryItem;"));
-  it("every open takes a new sequence number before any branch", () => {
-    expect(src).toContain("const historyOpenSeq = useRef(0);");
-    expect(open.indexOf("const openSeq = ++historyOpenSeq.current;")).toBeGreaterThan(-1);
-    expect(open.indexOf("const openSeq = ++historyOpenSeq.current;")).toBeLessThan(open.indexOf('if (item.type === "research")'));
-  });
-  it("the claim and video reads check it after their await and before committing", () => {
-    const claimAwait = open.indexOf("await resolveClaimHistoryPayload(");
-    expect(open.slice(claimAwait, open.indexOf("setVerificationPayload(resolved.payload);"))).toContain("if (!isLatestOpen()) return;");
-    const videoAwait = open.indexOf("(await res.json()) as { ok?: boolean; payload?: VideoVerificationClientPayload }");
-    expect(open.slice(videoAwait, open.indexOf("setVideoVerificationPayload(data.payload);"))).toContain("if (!isLatestOpen()) return;");
-    expect(open).toContain("if (isLatestOpen()) setHistoryDetailLoadingId(null);");
-    expect(open).toContain("if (lookup && isLatestOpen()) setHistoryDetailLoadingId(null);");
+  it("both reads go through the coordinator; no ad-hoc sequence remains", () => {
+    expect(open).toContain("await openSavedClaimVerification(opens, item, lookup, {");
+    expect(open).toContain("await openSavedVideoVerification(opens, item.id, read, {");
+    expect(src).not.toContain("historyOpenSeq");
   });
 });

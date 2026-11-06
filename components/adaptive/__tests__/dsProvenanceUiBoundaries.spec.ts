@@ -63,7 +63,10 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   // none (lib/verification/cachedClaimProvenance.ts); no provenance code. Was 5bca766b6b3e3d04c9bba07aa2881e4005a14a70.
   // Review of 71b03e3, NIT-2: ONLY a sequence guard in openHistoryItem (historyOpenSeq) so a slow read for an earlier
   // history selection never commits over a later one; no provenance code. Was 736663e85981f6da7e6a46a55554ea9ad0cc1a20.
-  "app/page.tsx": "8e20322c531f0d4e9df9e954d38c4a029af03460",
+  // Review of 1ee4982, MINOR-A: ONLY the History open loading indicator — openHistoryItem's claim/video reads moved
+  // into lib/client/historyDetailOpen.ts (each open replaces the indicator; cached/navigating opens clear it; tab
+  // changes and supersedeRunningResearch end pending opens); no provenance code. Was 8e20322c531f0d4e9df9e954d38c4a029af03460.
+  "app/page.tsx": "70023e0b7a51822698b062dc8c0120bf8bf9aa81",
   "firestore.rules": "2fb80a11bfa6c55fe94e0438a980a3b0794aeafd",
 };
 

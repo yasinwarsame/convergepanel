@@ -56,7 +56,13 @@ import VideoVerificationResult from "@/components/VideoVerificationResult";
 import FileAttachButton from "@/components/FileAttachButton";
 import type { ClaimVerificationClientPayload } from "@/lib/verification/claimVerificationClientPayload";
 import { claimHistoryConsensusSuffix, claimModelIndependence } from "@/lib/verification/claimConsensusPresentation";
-import { claimPayloadRecordsIndependence, reconcileCachedClaimPayload, resolveClaimHistoryPayload } from "@/lib/verification/cachedClaimProvenance";
+import { reconcileCachedClaimPayload } from "@/lib/verification/cachedClaimProvenance";
+import {
+  createHistoryDetailOpenCoordinator,
+  openSavedClaimVerification,
+  openSavedVideoVerification,
+  type HistoryDetailOpenCoordinator,
+} from "@/lib/client/historyDetailOpen";
 import type { StoredConsensusIndependence } from "@/lib/panel/independentVoices";
 import { buildOriginLinkedVerifyClaimRequestBody } from "@/lib/verification/originLinkedVerifyClaimRequest";
 import type { VideoVerificationClientPayload } from "@/lib/verification/videoVerificationClientPayload";
@@ -461,8 +467,10 @@ export default function Home() {
   /** When set, Research tab shows saved run results instead of the composer (loaded from Firestore). */
   const [viewingHistoryRunId, setViewingHistoryRunId] = useState<string | null>(null);
   const historyLoadSeq = useRef(0);
-  /** Sequence of history-item opens: a slow read for an earlier selection never overwrites a later one. */
-  const historyOpenSeq = useRef(0);
+  /** History-item opens (lib/client/historyDetailOpen.ts): only the latest selection commits; each owns the loading indicator. */
+  const historyDetailOpensRef = useRef<HistoryDetailOpenCoordinator>(
+    createHistoryDetailOpenCoordinator(setHistoryDetailLoadingId)
+  );
 
   // Models selected for this panel run
   // Start with empty selection - users will choose their models
@@ -534,6 +542,8 @@ export default function Home() {
    */
   const supersedeRunningResearch = useCallback(() => {
     invalidateResearchIntent();
+    // Newer intent also ends any pending History open, so its late read cannot commit over the new surface.
+    historyDetailOpensRef.current.supersede();
     if (runStatusRef.current !== "running") return;
     setRunStatus("idle");
     setModelStatuses({} as Record<ModelId, "queued" | "thinking" | ModelStatus>);
@@ -549,6 +559,8 @@ export default function Home() {
    */
   const selectPanelTab = useCallback(
     (nextTab: "research" | "verify" | "video" | "history") => {
+      // A tab change is a new selection: a pending History open must not keep its indicator on (or commit into) it.
+      historyDetailOpensRef.current.supersede();
       if (nextTab !== "research") supersedeRunningResearch();
       setPanelTab(nextTab);
     },
@@ -2134,9 +2146,11 @@ export default function Home() {
   };
 
   const openHistoryItem = async (item: HistoryItem) => {
-    // Every selection supersedes the previous one: only the latest open may commit state after an await.
-    const openSeq = ++historyOpenSeq.current;
-    const isLatestOpen = () => openSeq === historyOpenSeq.current;
+    // Every selection supersedes the previous one and replaces the history loading indicator with its own
+    // (lib/client/historyDetailOpen.ts): only the latest open may commit state after an await, and an open that commits
+    // synchronously (cached claim, research navigation, signed-out video) still clears an earlier open's indicator.
+    // supersedeRunningResearch() ends every pending open first (newer intent); each branch then begins its own.
+    const opens = historyDetailOpensRef.current;
     if (item.type === "research") {
       /**
        * PERSONAL-RESEARCH-URL-1 §AD/§AE — a saved research run now has a durable
@@ -2154,6 +2168,7 @@ export default function Home() {
       // C1 §E — and the abandoned run is RELEASED as well as invalidated, under
       // the one rule every newer-intent path now follows.
       supersedeRunningResearch();
+      opens.begin(null); // navigates: nothing to load here, so no indicator
       router.push(personalResearchHref(item.id));
       return;
     }
@@ -2169,37 +2184,27 @@ export default function Home() {
       setVideoVerificationPayload(null);
       setError(null);
       setErrorCode(null);
-      if (!user || !authReady) {
-        setHistoryDetailLoadingId(null);
-        return;
-      }
-      setHistoryDetailLoadingId(item.id);
-      try {
-        const { authedFetch } = await import("@/lib/client/authedFetch");
-        const url = `/api/user/verifications/${encodeURIComponent(item.id)}?collection=videoVerifications`;
-        const res = await authedFetch(url, { user, authReady, method: "GET" });
-        const data = (await res.json()) as { ok?: boolean; payload?: VideoVerificationClientPayload };
-        if (!isLatestOpen()) return;
-        if (data.ok && data.payload) {
-          setVideoVerificationPayload(data.payload);
+      const read =
+        user && authReady
+          ? async () => {
+              const { authedFetch } = await import("@/lib/client/authedFetch");
+              const url = `/api/user/verifications/${encodeURIComponent(item.id)}?collection=videoVerifications`;
+              const res = await authedFetch(url, { user, authReady, method: "GET" });
+              return (await res.json()) as { ok?: boolean; payload?: VideoVerificationClientPayload };
+            }
+          : null;
+      await openSavedVideoVerification(opens, item.id, read, {
+        setPayload: setVideoVerificationPayload,
+        setError,
+        onRecordRead: (payload) =>
           setHistoryItems((prev) =>
             prev.map((h) =>
               h.id === item.id && h.type === "video_verification"
-                ? { ...h, governanceStatus: data.payload!.governanceStatus ?? h.governanceStatus }
+                ? { ...h, governanceStatus: payload.governanceStatus ?? h.governanceStatus }
                 : h
             )
-          );
-        } else {
-          setVideoVerificationPayload(null);
-          setError("Could not load this video verification.");
-        }
-      } catch {
-        if (!isLatestOpen()) return;
-        setVideoVerificationPayload(null);
-        setError("Could not load this video verification.");
-      } finally {
-        if (isLatestOpen()) setHistoryDetailLoadingId(null);
-      }
+          ),
+      });
       return;
     }
     // C1 §G/§H — same for a saved claim verification.
@@ -2207,19 +2212,10 @@ export default function Home() {
     setPanelTab("verify");
     setVideoVerificationPayload(null);
     setViewingHistoryRunId(null);
-    if (item.payload && claimPayloadRecordsIndependence(item.payload)) {
-      setVerificationPayload({
-        ...item.payload,
-        verificationId: item.payload.verificationId ?? item.id,
-      });
-      setClaimInput(item.payload.claim);
-      return;
-    }
-    // No cached payload, or one cached before it recorded model independence: the user's own persisted record (the
-    // authenticated, owner-scoped detail API) is the authority. If it cannot be read, a cached payload is presented as
-    // cached — independence unrecorded, i.e. "unverified" (cachedClaimProvenance.ts).
-    const cachedPayload = item.payload ?? null;
-    setClaimInput(cachedPayload?.claim ?? item.claim ?? item.title);
+    // A cached payload that records independence is presented as is; otherwise (no cached payload, or one cached
+    // before it recorded model independence) the user's own persisted record (the authenticated, owner-scoped detail
+    // API) is the authority. If it cannot be read, a cached payload is presented as cached — independence unrecorded,
+    // i.e. "unverified" (cachedClaimProvenance.ts).
     const lookup =
       user && authReady
         ? async (): Promise<ClaimVerificationClientPayload | null> => {
@@ -2233,14 +2229,10 @@ export default function Home() {
             return data.ok && data.payload ? data.payload : null;
           }
         : null;
-    if (lookup) setHistoryDetailLoadingId(item.id);
-    try {
-      const resolved = await resolveClaimHistoryPayload(item.id, cachedPayload, lookup);
-      if (!isLatestOpen()) return;
-      setVerificationPayload(resolved.payload);
-      const record = resolved.fromRecord ? resolved.payload : null;
-      if (record) {
-        setClaimInput(record.claim);
+    await openSavedClaimVerification(opens, item, lookup, {
+      setPayload: setVerificationPayload,
+      setClaimInput,
+      onRecordRead: (record) =>
         setHistoryItems((prev) =>
           prev.map((h) =>
             h.id === item.id && h.type === "verification"
@@ -2253,11 +2245,8 @@ export default function Home() {
                 }
               : h
           )
-        );
-      }
-    } finally {
-      if (lookup && isLatestOpen()) setHistoryDetailLoadingId(null);
-    }
+        ),
+    });
   };
 
   openHistoryItemRef.current = openHistoryItem;
