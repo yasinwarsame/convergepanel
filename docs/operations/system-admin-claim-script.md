@@ -78,7 +78,8 @@ npm run admin:set-system-admin-claim -- \
   returned record has a different UID. **Grant** is refused when
   `disabled !== false` (a disabled account is never granted admin). **Revoke**
   is privilege removal and is ALLOWED on a disabled account (owner decision
-  2026-11-06): the claim is removed and the sessions revoked, and the account
+  2026-11-06): the tool removes the claim and calls `revokeRefreshTokens`
+  (with the outcomes and limits described under "Revocation and sessions"), and the account
   stays disabled — the tool has no call that can change `disabled` in either
   direction. A revoke still refuses a record whose `disabled` is not a boolean
   (malformed; `target_disabled`).
@@ -216,9 +217,10 @@ Both are created with `.doc(id).create()` (create-only):
    server-side before it threw, and revoking only removes access. The run
    stays INCOMPLETE (`mint_failed`, exit 3) because the claim write is
    unconfirmed and no anchor was taken; the result and the outcome row record
-   `sessionRevocationEvidence.claimWrite: "unconfirmed"`, whether the
-   revocation call was acknowledged, and a `sessions_revoke_unverified`
-   detail. A failed role write does NOT skip the revocation either, and that
+   `sessionRevocationEvidence.claimWrite: "unconfirmed"` and whether the
+   revocation call was acknowledged, plus a `sessions_revoke_unverified`
+   detail when it was acknowledged or a `sessions_revoke_failed` detail when
+   it failed. A failed role write does NOT skip the revocation either, and that
    run is INCOMPLETE too.
 3. Read-back of the Auth record and `users/{uid}.role`; for revoke, the
    server's `tokensValidAfterTime` is compared with the server-anchored
@@ -457,8 +459,8 @@ returned, the claim removal is in effect for token minting. A NEW sign-in that
 starts after the cutoff while a stale replica still served `admin: true` is
 not covered by any revocation. Whether a session that started BEFORE the
 removal is rejected is also not established by the tool: Firebase rejects it
-only where revocation is checked (session cookies — not the bearer ID-token
-paths in the table below) and only if its `auth_time` is earlier than the
+only where revocation is checked (session cookies, and the refresh-token
+exchange — not the bearer ID-token paths in the table below) and only if its `auth_time` is earlier than the
 stored `validSince`, which the revoke call stamps from the operator's local
 clock. The tool compares `validSince` with a Firestore-anchored cutoff, never
 with Firebase Auth's own `auth_time` clock, so this coverage holds only under
@@ -469,10 +471,24 @@ window below is unchanged by any of this (fact (d) above; S2).
 What that does and does not invalidate in this codebase (code at the time of
 writing; this tool does not change any route):
 
+Read every row below as conditional. A revoke run moves through separate
+states, and only the first three are things the tool records:
+(1) revocation ATTEMPTED — `revokeRefreshTokens` was called;
+(2) Firebase ACKNOWLEDGED the call — `revocationApiAcknowledged: true`;
+(3) cutoff OBSERVED — `cutoffObserved: true`, i.e. the read-back
+`tokensValidAfterTime` is at or after the Firestore-anchored cutoff;
+(4) access EFFECTIVELY revoked for a given session — never observed by the
+tool. (4) additionally needs that session's `auth_time` to be earlier than
+the stored `validSince` (stamped from the operator's local clock), which for
+sessions that started before the claim removal rests on the unproven
+cross-service clock assumption in "Residual risk" above. If the revoke call
+failed (`sessions_revoke_failed`, `revocationApiAcknowledged: false`),
+NOTHING in this table changed for any credential.
+
 | Credential | Checked by | Effect of the revoke |
 |---|---|---|
-| Firebase refresh tokens | Firebase Auth | Revoked. The client cannot mint new ID tokens; it is signed out on its next refresh. |
-| `__session` cookie (5-day Firebase session cookie, `app/api/auth/session/route.ts:37`, `:76`) | `verifySessionCookie(cookie, true)` — revocation CHECKED — at `lib/firebase/auth-helpers.ts:127` (`verifySessionCookieValue`, used by `resolveRequestIdentity` / `resolveServerComponentIdentity` / `/api/auth/session`), `lib/firebase/auth-helpers.ts:277` (`requireAdminPortalAccess` cookie fallback) and `app/api/admin/access/route.ts:41` | Rejected immediately: a cookie minted before the revocation fails the revocation check. There is no `verifySessionCookie(..., false)` call in `lib/` or `app/`. |
+| Firebase refresh tokens | Firebase Auth (on the token exchange) | Only if the call was acknowledged: Firebase then refuses to mint new ID tokens from a refresh token whose session `auth_time` is earlier than the stored `validSince`, and the client is signed out on its next refresh. A session whose `auth_time` is at or after `validSince` (operator clock behind, or cross-service skew) keeps refreshing. The tool does not observe which sessions are affected. |
+| `__session` cookie (5-day Firebase session cookie, `app/api/auth/session/route.ts:37`, `:76`) | `verifySessionCookie(cookie, true)` — revocation CHECKED — at `lib/firebase/auth-helpers.ts:127` (`verifySessionCookieValue`, used by `resolveRequestIdentity` / `resolveServerComponentIdentity` / `/api/auth/session`), `lib/firebase/auth-helpers.ts:277` (`requireAdminPortalAccess` cookie fallback) and `app/api/admin/access/route.ts:41` | Only if the call was acknowledged: on its next request, a cookie whose session `auth_time` is earlier than the stored `validSince` fails the revocation check and is rejected. This is judged on `auth_time`, not on when the cookie was minted, so a cookie for a session whose `auth_time` is at or after `validSince` still passes; whether every pre-removal cookie is covered is NOT established by the tool. There is no `verifySessionCookie(..., false)` call in `lib/` or `app/`. |
 | App-side session store | — | None exists: no `sessions` / `admin_sessions` collection grants access (searched `lib/`, `app/`, `middleware.ts`). `middleware.ts:26` only checks that a `__session` cookie is present for `/admin/*` routing; it grants no API access. Nothing else to invalidate. |
 | Already-issued ID tokens (bearer, up to about 1 hour) | `verifyIdToken(token)` WITHOUT `checkRevoked` at `lib/firebase/auth-helpers.ts:56` (`verifyAdminToken` -> `requireSystemAdminAccess`), `lib/firebase/auth-helpers.ts:273` (`requireAdminPortalAccess`), `lib/firebase/adminAuth.ts:43` (`getRequestUser` -> `requireSystemAdminBearer`), `app/api/admin/access/route.ts:37`, `lib/firebase/auth.ts:30` (`checkRevoked: false`) | **NOT invalidated.** An ID token minted while the user held `admin: true` keeps `admin: true` until it expires, and these paths do not check revocation. |
 
@@ -486,8 +502,8 @@ checked) and/or a live `getUser(uid)` read of `customClaims.admin` — rather
 than trusting the claim inside a token. (These route gaps are tracked
 separately; see admin-authority-tiers.md, "What this procedure does NOT give
 you".) If immediate cut-off matters, disable the account (`disabled: true`)
-out of band — before or after the revoke; the tool revokes a disabled
-account's claim and sessions and never re-enables it. Firebase rejects ID
+out of band — before or after the revoke; on a disabled account the tool
+still removes the claim and calls `revokeRefreshTokens`, and never re-enables it. Firebase rejects ID
 tokens of a disabled user only when revocation is checked, so even that does
 not close the no-`checkRevoked` paths — treat the up-to-1-hour window as
 real.
