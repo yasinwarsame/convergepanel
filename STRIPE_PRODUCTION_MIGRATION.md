@@ -1,5 +1,35 @@
 # Stripe Production Migration Summary
 
+> **STALE — read the incident notice first.** This document records the
+> **pre-incident** Stripe configuration (its Price IDs were correct only until
+> September 2026). Do not copy any Price ID out of it.
+>
+> **September 2026 Full Annual billing incident.** The Price this document
+> lists for `STRIPE_5_MODELS_ANNUAL` was sold as "$1,631.90 / year" but its
+> Stripe `recurring.interval` was **month**, so annual subscribers were billed
+> monthly. What is true now:
+>
+> - Production `STRIPE_5_MODELS_ANNUAL` points at a **corrected yearly Price**
+>   ($1,631.90, `interval: year`, `interval_count: 1`). Verify with
+>   `npm run billing:verify-prices` against a fresh Production env pull; never
+>   trust a Price ID copied from this file.
+> - **The retired monthly-cadence Price must never be used for new checkout.**
+>   It is deliberately absent from the checkout price map and must stay absent.
+>   One historical subscription still references it; that customer's repair is
+>   a separate, individually approved operation.
+> - Checkout verifies a Price's **real** cadence against the interval the
+>   customer selected before any Stripe write, and refuses the sale on a
+>   mismatch. Configuration alone is no longer trusted.
+> - Plan resolution tolerates a **retired** Price via a validated,
+>   server-written plan marker, and `trialing` carries full paid entitlement
+>   alongside `active`.
+> - **Local development must never combine live Stripe secrets with live Price
+>   mappings.** Use Stripe **test** credentials and test Price IDs locally, or
+>   leave local billing unconfigured so it fails closed. A local checkout run
+>   against live credentials creates a real customer subscription.
+>
+> Everything below is retained for historical context only.
+
 ## Overview
 Migrated from test mode fallbacks to production-only Stripe Price IDs. Removed all test mode code paths and updated environment variable names to match production configuration.
 
@@ -26,10 +56,10 @@ The code supports both `STRIPE_5_MODELS_ANNUAL` (preferred) and `Stripe_5_Models
 
 | Plan | Billing Interval | Env Var | Price ID |
 |------|-----------------|---------|----------|
-| 3-Model Plan (lite) | Monthly | `STRIPE_PRICE_3_MODELS` | `price_1Slk76IhqLHjOc83zM9hyIOG` |
-| 3-Model Plan (lite) | Annual | `STRIPE_3_MODELS_ANNUAL` | `price_1SlkmlIhqLHjOc835h9X8HRv` |
-| Full Plan (full) | Monthly | `STRIPE_PRICE_5_MODELS` | `price_1Slk8jIhqLHjOc83Un4e3t6L` |
-| Full Plan (full) | Annual | `STRIPE_5_MODELS_ANNUAL` | `price_1SlkZmIhqLHjOc83eBuiJqyi` |
+| 3-Model Plan (lite) | Monthly | `STRIPE_PRICE_3_MODELS` | `price_… (redacted — read from Vercel env, not from this file)` |
+| 3-Model Plan (lite) | Annual | `STRIPE_3_MODELS_ANNUAL` | `price_… (redacted — read from Vercel env, not from this file)` |
+| Full Plan (full) | Monthly | `STRIPE_PRICE_5_MODELS` | `price_… (redacted — read from Vercel env, not from this file)` |
+| Full Plan (full) | Annual | `STRIPE_5_MODELS_ANNUAL` | `price_… (redacted — read from Vercel env, not from this file)` |
 
 ## Files Changed
 
@@ -117,10 +147,10 @@ The code supports both `STRIPE_5_MODELS_ANNUAL` (preferred) and `Stripe_5_Models
 
 1. **Update .env.local** (if not already done):
    ```bash
-   STRIPE_PRICE_3_MODELS=price_1Slk76IhqLHjOc83zM9hyIOG
-   STRIPE_PRICE_5_MODELS=price_1Slk8jIhqLHjOc83Un4e3t6L
-   STRIPE_3_MODELS_ANNUAL=price_1SlkmlIhqLHjOc835h9X8HRv
-   STRIPE_5_MODELS_ANNUAL=price_1SlkZmIhqLHjOc83eBuiJqyi  # Recommended: use uppercase
+   STRIPE_PRICE_3_MODELS=price_… (redacted — read from Vercel env, not from this file)
+   STRIPE_PRICE_5_MODELS=price_… (redacted — read from Vercel env, not from this file)
+   STRIPE_3_MODELS_ANNUAL=price_… (redacted — read from Vercel env, not from this file)
+   STRIPE_5_MODELS_ANNUAL=price_… (redacted — read from Vercel env, not from this file)  # Recommended: use uppercase
    ```
 
 2. **Optional: Standardize casing** in .env.local:
