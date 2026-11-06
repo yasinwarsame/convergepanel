@@ -49,12 +49,12 @@ pnpm install
 
 3. Create a `.env.local` file in the root directory:
 ```bash
-cp .env.example .env.local
+cp .env.local.example .env.local
 ```
 
-4. Set up Firebase:
-   - Create a Firebase project at https://console.firebase.google.com
-   - Project ID: `convergepanel` (or update env vars)
+4. Set up Firebase for **local development**:
+   - Use an **isolated, non-Production** Firebase project (`<isolated-project-id>`). Create one at https://console.firebase.google.com, or use the shared isolated project once it exists.
+   - **Never** use the Production project (`convergepanel`) for development: it is refused outside the Vercel Production deployment. Production maintenance follows `docs/operations/firebase-environment-isolation.md`.
    - Enable Authentication (Email/Password)
    - Enable Firestore Database
    - Get your Firebase config from Project Settings
@@ -68,20 +68,22 @@ cp .env.example .env.local
      - `private_key` → `FIREBASE_PRIVATE_KEY` (keep the quotes and `\n` characters)
    - **Important**: The private key must be in quotes and newlines must be escaped as `\n`
 
-6. Add environment variables to `.env.local`:
+6. Add environment variables to `.env.local`. **Local development uses the isolated, non-Production Firebase project.** The Production project (`convergepanel`) is refused outside the Vercel Production deployment, so never use Production values or a Production key here.
+   - Preferred: once the isolated project exists, run `vercel env pull --environment=development`.
+   - Production maintenance uses a separate operator workflow; see `docs/operations/firebase-environment-isolation.md`.
 ```env
-# Firebase Client Config (from Firebase Console)
-NEXT_PUBLIC_FIREBASE_API_KEY=your_api_key
-NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=convergepanel.firebaseapp.com
-NEXT_PUBLIC_FIREBASE_PROJECT_ID=convergepanel
-NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=convergepanel.appspot.com
-NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=907484474744
-NEXT_PUBLIC_FIREBASE_APP_ID=your_app_id
+# Firebase Client Config (isolated project, from Firebase Console)
+NEXT_PUBLIC_FIREBASE_API_KEY=<isolated-project-web-api-key>
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=<isolated-project-id>.firebaseapp.com
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=<isolated-project-id>
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=<isolated-project-id>.firebasestorage.app
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=<isolated-project-number>
+NEXT_PUBLIC_FIREBASE_APP_ID=<isolated-project-web-app-id>
 
-# Firebase Admin SDK (Service Account) - REQUIRED
+# Firebase Admin SDK (Service Account of the ISOLATED project) - REQUIRED
 # Get these from Firebase Console > Project Settings > Service Accounts > Generate new private key
-FIREBASE_PROJECT_ID=convergepanel
-FIREBASE_CLIENT_EMAIL=firebase-adminsdk-xxxxx@convergepanel.iam.gserviceaccount.com
+FIREBASE_PROJECT_ID=<isolated-project-id>
+FIREBASE_CLIENT_EMAIL=<service-account>@<isolated-project-id>.iam.gserviceaccount.com
 # IMPORTANT: Keep the quotes and \n characters exactly as they appear in the JSON file
 FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC...\n-----END PRIVATE KEY-----\n"
 
@@ -458,6 +460,8 @@ service cloud.firestore {
 ## Environment Variables
 
 ### Firebase Client (Required)
+
+There are no built-in defaults: every `NEXT_PUBLIC_FIREBASE_*` value must be set. The Production Firebase project is refused outside the Vercel Production deployment, in the browser and on the server (`lib/firebase/projectIsolation.ts`). Local development must use a non-Production Firebase project.
 
 | Variable | Description | Required |
 |----------|-------------|----------|
