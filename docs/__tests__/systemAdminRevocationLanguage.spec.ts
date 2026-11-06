@@ -392,6 +392,8 @@ const CITED_B7C23DE = [
   ["R6-repeat-is-harmless", "A repeated revocation is monotonic: validSince never moves backward."],
   ["R6-rerun-is-safe", "Retrying the revoke is always safe."],
   ["R6-only-reduces-access", "A re-run cannot lower the cutoff."],
+  // Needs the code span KEPT: stripped, this sentence has no revocation term left.
+  ["R6-repeat-is-harmless", "`validSince` is monotonic."],
 ] as const;
 
 /** Accurate, conditional or negated explanations: every rule must pass these. */
@@ -489,6 +491,11 @@ describe("no unconditional revoke-effect claims (PR #295 sweep, owner order B)",
   it.each(REVOKE_DOC_SCOPES)("%s", (label, pick) => {
     const file = label.split(" ")[0];
     expect({ file, offending: claimOffending(pick(read(file))) }).toEqual({ file, offending: [] });
+  });
+
+  it("CONTROL: the claim scan keeps code spans (stripping them would hide `validSince` is monotonic.)", () => {
+    expect(docSentencesKeepCode("`validSince` is monotonic.")).toEqual(["validSince is monotonic."]);
+    expect(claimViolations(docSentences("`validSince` is monotonic.").join(" "))).toEqual([]);
   });
 
   it("the tiers 'does NOT give you' scope is the real body (not just the heading)", () => {
