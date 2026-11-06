@@ -27,7 +27,26 @@ export interface VerificationGateMetrics {
   lowConfidenceCount: number;
   /** Whether the run was source-backed (affects missing-sources strictness) */
   sourceBacked?: boolean;
+  /**
+   * Present only when independent-model coverage is reduced (see `VerificationGateResult.independentCoverage`):
+   * contested / uncertain ("Mixed" findings, `trustSummary.contestedAreas`) signals that come from ONE independent
+   * model. Relabelled, never erased; `contestedCount` then holds only contests BETWEEN independent models (0).
+   */
+  singleModelContestedCount?: number;
+  /**
+   * Present only when some passed `disagreements` are not between independent executing models (below two independent
+   * models: all of them; otherwise those outside `independentDisagreements`). `disagreementsCount` /
+   * `materialDisagreementsCount` count only genuine cross-model disagreements.
+   */
+  nonIndependentDisagreementsCount?: number;
 }
+
+/**
+ * Independent-model coverage of the run the gate judged, when reduced:
+ *  - "insufficient": fewer than two independent executing models responded;
+ *  - "unverified": which models actually executed could not be established.
+ */
+export type ReducedIndependentCoverage = "insufficient" | "unverified";
 
 export interface VerificationGateResult {
   status: VerificationGateStatus;
@@ -35,6 +54,8 @@ export interface VerificationGateResult {
   reasons: string[];
   recommendedNextSteps: string[];
   metrics: VerificationGateMetrics;
+  /** Present only when independent-model coverage is reduced (absent: ≥ 2 independent models, or not supplied). */
+  independentCoverage?: ReducedIndependentCoverage;
 }
 
 /**
@@ -87,6 +108,24 @@ export interface VerificationGateInput {
    * least NEEDS_HUMAN_REVIEW, and no "broad agreement" step. Absent → exactly the gate as before (callers without rows).
    */
   independentModelCount?: number;
+
+  /**
+   * The subset of `disagreements` that are genuine disagreements between independent executing models (the caller's
+   * `crossModelDisagreements`). `disagreements` itself stays the full stored list: the status is never more permissive
+   * than the gate over the full list, while only this subset is presented as model disagreement. Absent → every passed
+   * disagreement is genuine (when coverage is sufficient).
+   */
+  independentDisagreements?: Array<{
+    topic: string;
+    positionsByModel: Record<string, string>;
+    whyTheyDiffer: string;
+  }>;
+
+  /**
+   * True when the caller cannot establish which models actually executed (e.g. rows without recorded execution
+   * identity): coverage "unverified" — never presumed independent. Takes precedence over `independentModelCount`.
+   */
+  executionProvenanceUnverified?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -108,11 +147,37 @@ export const SINGLE_MODEL_UNCERTAIN_CLAIMS_REASON = "Claims marked uncertain or 
 export const SINGLE_MODEL_UNCERTAIN_CLAIMS_STEP =
   "Verify the claims marked uncertain or mixed against primary sources before using them in a memo.";
 
-/** True when the caller supplied an independent-model count that does not meet the panel minimum (fail closed on NaN). */
-function hasInsufficientIndependentModels(input: VerificationGateInput): boolean {
-  if (input.independentModelCount === undefined) return false;
+/** Gate label / reason / step when the executing models could not be established (unknown execution provenance). */
+export const UNVERIFIED_INDEPENDENT_COVERAGE_GATE_LABEL = "Independent-model coverage unverified";
+export const UNVERIFIED_INDEPENDENT_COVERAGE_GATE_REASON =
+  "Which models actually executed could not be established — independent-model coverage unverified, so nothing here is presented as agreement or disagreement between models";
+export const UNVERIFIED_INDEPENDENT_COVERAGE_GATE_STEP =
+  "Treat this as unverified: rerun, or confirm which models answered, before relying on any cross-model signal; verify key claims against primary sources.";
+
+/**
+ * Stored disagreement items whose positions are NOT from two or more independent executing models (one model in
+ * several slots, or any item below two independent models): one model's differing / contested assertions.
+ */
+export const NON_INDEPENDENT_DISAGREEMENTS_REASON =
+  "Differing positions from one independent model — not a disagreement between models";
+
+/** The coverage the caller supplied, or null when sufficient / not supplied (fail closed on a non-finite count). */
+function reducedIndependentCoverage(input: VerificationGateInput): ReducedIndependentCoverage | null {
+  if (input.executionProvenanceUnverified === true) return "unverified";
+  if (input.independentModelCount === undefined) return null;
   const n = input.independentModelCount;
-  return !(typeof n === "number" && Number.isFinite(n) && n >= MIN_INDEPENDENT_SYNTHESIS_MODELS);
+  return typeof n === "number" && Number.isFinite(n) && n >= MIN_INDEPENDENT_SYNTHESIS_MODELS ? null : "insufficient";
+}
+
+const STATUS_SEVERITY: Record<VerificationGateStatus, number> = {
+  SAFE_TO_EXPLORE: 0,
+  NEEDS_HUMAN_REVIEW: 1,
+  DO_NOT_RELY_YET: 2,
+};
+
+/** The stricter of two statuses. */
+function stricterStatus(a: VerificationGateStatus, b: VerificationGateStatus): VerificationGateStatus {
+  return STATUS_SEVERITY[a] >= STATUS_SEVERITY[b] ? a : b;
 }
 
 const STATUS_LABELS: Record<VerificationGateStatus, string> = {
@@ -254,13 +319,52 @@ function isMaterialDisagreement(
 export function computeVerificationGate(
   input: VerificationGateInput
 ): VerificationGateResult {
-  const insufficient = hasInsufficientIndependentModels(input);
-  const metrics = extractMetrics(input, insufficient);
-  const computed = determineStatus(metrics);
-  // One independent model is never "broadly consistent": nothing was compared.
-  const status: VerificationGateStatus = insufficient && computed === "SAFE_TO_EXPLORE" ? "NEEDS_HUMAN_REVIEW" : computed;
-  const reasons = insufficient ? [INSUFFICIENT_INDEPENDENT_MODELS_GATE_REASON, ...buildReasons(metrics, true)] : buildReasons(metrics);
-  const recommendedNextSteps = buildNextSteps(metrics, status, insufficient);
+  const coverage = reducedIndependentCoverage(input);
+  const all = input.disagreements ?? [];
+  // Genuine disagreements between independent executing models: none below two independent models.
+  const genuine = coverage ? [] : input.independentDisagreements ?? all;
+  const nonIndependentDisagreementsCount = Math.max(0, all.length - genuine.length);
+
+  if (!coverage && nonIndependentDisagreementsCount === 0) {
+    // Coverage sufficient (or not supplied) and every disagreement genuine: exactly the gate as before.
+    const metrics = extractMetrics({ ...input, disagreements: genuine });
+    const status = determineStatus(metrics);
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[VerificationGate]", { status, metrics });
+    }
+    return {
+      status,
+      label: STATUS_LABELS[status],
+      reasons: buildReasons(metrics),
+      recommendedNextSteps: buildNextSteps(metrics, status, null),
+      metrics,
+    };
+  }
+
+  // Stricter-only: the status over the FULL stored signals (every disagreement, contested hint unchanged) is the floor —
+  // reduced independent coverage relabels signals, it never makes the verdict more permissive.
+  const baseline = extractMetrics({ ...input, disagreements: all });
+  const presented = extractMetrics({ ...input, disagreements: genuine });
+  const metrics: VerificationGateMetrics = coverage
+    ? {
+        ...presented,
+        // Nothing is contested BETWEEN models below two independent models; the same signals are kept, relabelled.
+        contestedCount: 0,
+        singleModelContestedCount: baseline.contestedCount,
+        nonIndependentDisagreementsCount,
+      }
+    : { ...presented, nonIndependentDisagreementsCount };
+  let status = stricterStatus(determineStatus(baseline), determineStatus(metrics));
+  // One independent model (or unknown execution) is never "broadly consistent": nothing was compared.
+  if (coverage) status = stricterStatus(status, "NEEDS_HUMAN_REVIEW");
+  const coverageReason =
+    coverage === "insufficient"
+      ? [INSUFFICIENT_INDEPENDENT_MODELS_GATE_REASON]
+      : coverage === "unverified"
+        ? [UNVERIFIED_INDEPENDENT_COVERAGE_GATE_REASON]
+        : [];
+  const reasons = [...coverageReason, ...buildReasons(metrics)];
+  const recommendedNextSteps = buildNextSteps(metrics, status, coverage);
 
   if (process.env.NODE_ENV !== "production") {
     console.log("[VerificationGate]", { status, metrics });
@@ -268,10 +372,16 @@ export function computeVerificationGate(
 
   return {
     status,
-    label: insufficient ? INSUFFICIENT_INDEPENDENT_MODELS_GATE_LABEL : STATUS_LABELS[status],
+    label:
+      coverage === "insufficient"
+        ? INSUFFICIENT_INDEPENDENT_MODELS_GATE_LABEL
+        : coverage === "unverified"
+          ? UNVERIFIED_INDEPENDENT_COVERAGE_GATE_LABEL
+          : STATUS_LABELS[status],
     reasons,
     recommendedNextSteps,
     metrics,
+    ...(coverage ? { independentCoverage: coverage } : {}),
   };
 }
 
@@ -279,11 +389,8 @@ export function computeVerificationGate(
 // Metrics extraction
 // ---------------------------------------------------------------------------
 
-function extractMetrics(input: VerificationGateInput, insufficientIndependentModels = false): VerificationGateMetrics {
-  const { keyFindings = [], biasAndBlindSpots = [], openQuestions = [], trustSummary, sourceBacked = false, questionLength } = input;
-  // Below two independent models there is no disagreement between models, whatever the caller passed (a stored report
-  // can still carry positions written by one model in two slots).
-  const disagreements = insufficientIndependentModels ? [] : input.disagreements ?? [];
+function extractMetrics(input: VerificationGateInput): VerificationGateMetrics {
+  const { keyFindings = [], disagreements = [], biasAndBlindSpots = [], openQuestions = [], trustSummary, sourceBacked = false, questionLength } = input;
 
   const canonicalTokens = keyFindings.length > 0
     ? extractCanonicalTokens(keyFindings[0].claim)
@@ -315,8 +422,7 @@ function extractMetrics(input: VerificationGateInput, insufficientIndependentMod
 
   const openQuestionsCount = isLikelyFactoid ? 0 : openQuestions.length;
 
-  // `trustSummary.contestedAreas` counts areas contested BETWEEN models: with one independent model it measures nothing.
-  const contestedHint = insufficientIndependentModels ? 0 : trustSummary?.contestedAreas ?? 0;
+  const contestedHint = trustSummary?.contestedAreas ?? 0;
   const uncertainHint = trustSummary?.uncertainPoints ?? 0;
 
   const contestedCount = Math.max(
@@ -385,7 +491,7 @@ function determineStatus(m: VerificationGateMetrics): VerificationGateStatus {
 // Reason bullets (only include triggered signals)
 // ---------------------------------------------------------------------------
 
-function buildReasons(m: VerificationGateMetrics, insufficientIndependentModels = false): string[] {
+function buildReasons(m: VerificationGateMetrics): string[] {
   const reasons: string[] = [];
   const nuanceCount = m.disagreementsCount - m.materialDisagreementsCount;
 
@@ -398,12 +504,15 @@ function buildReasons(m: VerificationGateMetrics, insufficientIndependentModels 
       `Minor nuance differences noted (${nuanceCount})`
     );
   }
+  // Only contests between independent models are "Contested claims detected"; one model's are stated as such.
   if (m.contestedCount >= 1) {
-    reasons.push(
-      insufficientIndependentModels
-        ? `${SINGLE_MODEL_UNCERTAIN_CLAIMS_REASON} (${m.contestedCount})`
-        : `Contested claims detected (${m.contestedCount})`
-    );
+    reasons.push(`Contested claims detected (${m.contestedCount})`);
+  }
+  if ((m.singleModelContestedCount ?? 0) >= 1) {
+    reasons.push(`${SINGLE_MODEL_UNCERTAIN_CLAIMS_REASON} (${m.singleModelContestedCount})`);
+  }
+  if ((m.nonIndependentDisagreementsCount ?? 0) >= 1) {
+    reasons.push(`${NON_INDEPENDENT_DISAGREEMENTS_REASON} (${m.nonIndependentDisagreementsCount})`);
   }
   if (m.sourceBacked && m.missingSourcesCount >= 1) {
     reasons.push(
@@ -429,12 +538,14 @@ function buildReasons(m: VerificationGateMetrics, insufficientIndependentModels 
 function buildNextSteps(
   m: VerificationGateMetrics,
   status: VerificationGateStatus,
-  insufficientIndependentModels = false
+  coverage: ReducedIndependentCoverage | null
 ): string[] {
   const steps: string[] = [];
 
-  if (insufficientIndependentModels) {
+  if (coverage === "insufficient") {
     steps.push(INSUFFICIENT_INDEPENDENT_MODELS_GATE_STEP);
+  } else if (coverage === "unverified") {
+    steps.push(UNVERIFIED_INDEPENDENT_COVERAGE_GATE_STEP);
   }
 
   if (m.sourceBacked && m.missingSourcesCount >= 1) {
@@ -449,10 +560,11 @@ function buildNextSteps(
   }
   if (m.contestedCount >= 1) {
     steps.push(
-      insufficientIndependentModels
-        ? SINGLE_MODEL_UNCERTAIN_CLAIMS_STEP
-        : "Extract the top contested claims and verify them independently before using in a memo."
+      "Extract the top contested claims and verify them independently before using in a memo."
     );
+  }
+  if ((m.singleModelContestedCount ?? 0) >= 1 || (m.nonIndependentDisagreementsCount ?? 0) >= 1) {
+    steps.push(SINGLE_MODEL_UNCERTAIN_CLAIMS_STEP);
   }
   if (m.biasFlagsCount >= 1) {
     steps.push(

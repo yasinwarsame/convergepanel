@@ -21,6 +21,13 @@ export type StoredVerificationModelSummary = {
   correctParts: string[];
   incorrectParts: string[];
   unverifiableParts: string[];
+  /**
+   * Present only when the connector reported a substitute answered this slot (`status: "substituted"`); `provider` is
+   * the executing provider when recorded. Absent: the slot's own provider answered. Read by
+   * lib/panel/storedVerificationIndependence.ts.
+   */
+  substituted?: true;
+  provider?: string;
 };
 
 export type ClaimVerificationFirestoreDoc = {

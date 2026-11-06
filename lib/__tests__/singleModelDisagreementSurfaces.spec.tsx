@@ -40,6 +40,7 @@ import { VerificationActions } from "@/components/VerificationActions";
 import { buildPanelVerdict, SINGLE_MODEL_SHARE_TAGLINE } from "@/lib/verificationGate/panelVerdict";
 import {
   computeVerificationGate,
+  NON_INDEPENDENT_DISAGREEMENTS_REASON,
   SINGLE_MODEL_UNCERTAIN_CLAIMS_REASON,
   SINGLE_MODEL_UNCERTAIN_CLAIMS_STEP,
 } from "@/lib/verificationGate/verificationGate";
@@ -154,6 +155,32 @@ describe("MINOR-2: gate below two independent models (reloaded legacy run, DeepS
     expect(two.metrics.disagreementsCount).toBe(1);
     expect(two.metrics.contestedCount).toBe(2);
     expect(two.reasons.join("\n")).toContain("Contested claims detected (2)");
+  });
+});
+
+describe("Review of 8584211, MINOR-2 wiring: PSV hands the gate every stored disagreement, relabelled — never erased", () => {
+  it("DeepSeek×2 (one independent model): the stored disagreement is stated as one model's differing positions", async () => {
+    const r = await mountSynthesis(TWO_SUBS, mixedReport(["chatgpt", "claude"]));
+    const screen = nodeText(r.root);
+    const md = await copied(r);
+    for (const text of [screen, md]) {
+      expect(text).toContain(`${NON_INDEPENDENT_DISAGREEMENTS_REASON} (1)`);
+      expect(text).not.toMatch(/Model disagreement on a core conclusion|Minor nuance differences|Contested claims detected/);
+    }
+  });
+
+  it("DeepSeek×2 + Grok (two independent models): the DeepSeek-vs-DeepSeek item is relabelled, not a model disagreement", async () => {
+    const r = await mountSynthesis([sub("chatgpt"), sub("claude"), ok("grok")], mixedReport(["chatgpt", "claude"]));
+    const md = await copied(r);
+    expect(md).toContain(`${NON_INDEPENDENT_DISAGREEMENTS_REASON} (1)`);
+    expect(md).not.toMatch(/Model disagreement on a core conclusion|Minor nuance differences/);
+  });
+
+  it("control: two genuinely independent models — the disagreement is a model disagreement, nothing relabelled", async () => {
+    const r = await mountSynthesis(DISTINCT_REAL, mixedReport(["chatgpt", "claude"]));
+    const md = await copied(r);
+    expect(md).toContain("Minor nuance differences noted (1)");
+    expect(md).not.toContain(NON_INDEPENDENT_DISAGREEMENTS_REASON);
   });
 });
 

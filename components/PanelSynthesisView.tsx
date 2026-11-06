@@ -1490,10 +1490,13 @@ export default function PanelSynthesisView({
       // not a disagreement (and below two independent models there is none).
       const independentDisagreements = crossModelDisagreements(report.disagreements, results, crossModel);
 
-      // Compute Verification Gate from existing synthesis signals
+      // Compute Verification Gate from existing synthesis signals. The gate receives every stored disagreement (its
+      // status is never more permissive than over the full list) and the genuine cross-model subset (the only ones it
+      // presents as model disagreement; the rest are stated as one model's differing positions).
       const gateInput: VerificationGateInput = {
         keyFindings: report.keyFindings,
-        disagreements: independentDisagreements,
+        disagreements: report.disagreements,
+        independentDisagreements,
         biasAndBlindSpots: report.biasAndBlindSpots,
         openQuestions: report.openQuestions,
         trustSummary: synthesizedReport?.consensusAnalysis?.trustSummary,

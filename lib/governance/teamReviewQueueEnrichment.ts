@@ -56,30 +56,32 @@ export interface EnrichedLegacyTeamRunListItemV1 extends Omit<LegacyTeamRunListI
     reviewer: { displayName: string } | null;
   };
   /**
-   * Present when the stored consensus score is withheld (`consensusScore` is then null): a research row whose linked
-   * `runs/{runId}` rows reduce to fewer than two independent executing models ("insufficient_independent_models"), or
-   * whose execution identity cannot be established — run unreadable, no persisted rows, or no run linkage at all
+   * Present when the stored consensus score is withheld (`consensusScore` is then null): the row's canonical artifact —
+   * the linked `runs/{runId}` (research) or `verifications/{verificationId}` (claim verification) — reduces to fewer
+   * than two independent executing models with a usable answer ("insufficient_independent_models"), or its execution
+   * identity cannot be established — artifact unreadable, no / incomplete per-model rows, or no linkage at all
    * ("independence_unverified"). See `applyLegacyConsensusIndependence`.
    */
   consensusWithheld?: ConsensusScoreWithheldReason;
 }
 
 /**
- * Pure. Withholds a legacy row's stored consensus score unless independence is proven:
- *  - research row (`runId`): `independence` is `storedRunConsensusIndependence` of the linked run document, or null when
- *    the run could not be read — shown only when "independent";
- *  - claim-verification row (`verificationId`, no `runId`): unchanged — claim verification calls each connector
- *    directly (no substitution), so no research independence rule applies;
+ * Pure. Withholds a legacy row's stored consensus score unless independence is proven. `independence` is computed by
+ * the caller from the row's canonical artifact, or null when that artifact could not be read:
+ *  - research row (`runId`): `storedRunConsensusIndependence` of `runs/{runId}`;
+ *  - claim-verification row (`verificationId`, no `runId`): `storedVerificationConsensusIndependence` of
+ *    `verifications/{verificationId}` — a claim score is a cross-model figure too, so one answering model (or several
+ *    slots served by one executing provider) is not consensus;
  *  - a row naming neither: independence cannot be established → withheld as unverified.
- * A row without a stored score is unchanged. Never mutates its input.
+ * Shown only when "independent". A row without a stored score is unchanged. Never mutates its input.
  */
 export function applyLegacyConsensusIndependence(
   item: EnrichedLegacyTeamRunListItemV1,
   independence: StoredConsensusIndependence | null
 ): EnrichedLegacyTeamRunListItemV1 {
   if (item.consensusScore == null) return item;
-  if (!item.runId && item.verificationId) return item;
-  const reason = item.runId ? consensusScoreWithheldReason(independence ?? "unverified") : "independence_unverified";
+  const linked = !!item.runId || !!item.verificationId;
+  const reason = linked ? consensusScoreWithheldReason(independence ?? "unverified") : "independence_unverified";
   if (!reason) return item;
   return { ...item, consensusScore: null, consensusWithheld: reason };
 }

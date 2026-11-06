@@ -25,6 +25,13 @@ function isConnectorSuccess(r: ModelResult): boolean {
   return r.status === "ok" || r.status === "substituted";
 }
 
+/** `{ substituted: true, provider? }` for a substituted result (provider only when recorded); `{}` otherwise. */
+function substitutionAttribution(r: ModelResult): { substituted?: true; provider?: string } {
+  if (r.status !== "substituted") return {};
+  const provider = typeof r.provider === "string" && r.provider.trim().length > 0 ? r.provider.trim() : undefined;
+  return provider ? { substituted: true, provider } : { substituted: true };
+}
+
 export function buildClaimModelEvidence(modelResults: ModelResult[]): StoredVerificationModelSummary[] {
   return modelResults.map((r) => {
     if (!isConnectorSuccess(r)) {
@@ -87,6 +94,9 @@ export function buildClaimModelEvidence(modelResults: ModelResult[]): StoredVeri
       correctParts: d.correctParts,
       incorrectParts: d.incorrectParts,
       unverifiableParts: d.unverifiableParts,
+      // Execution attribution: a connector-reported substitute is recorded, never stored as the slot's own answer
+      // (lib/panel/storedVerificationIndependence.ts). Absent for a slot answered by its own provider.
+      ...substitutionAttribution(r),
     };
   });
 }

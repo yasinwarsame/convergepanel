@@ -16,9 +16,11 @@
  * Attribution: an item names slots through `positionsByModel` keys (StructuredSynthesis), `positions[].model` (V2
  * report) or `models` (legacy `keyDisagreements`). A name maps to a persisted row by slot id, by family name
  * ("ChatGPT"), or by the executing-model label `synthesizeReport` writes ("DeepSeek (substituting ChatGPT, Claude)").
- * Any name that maps to no row makes the item unattributable; nothing is inferred from slots. An attributed item is
- * judged by `crossModelDisagreements` (the synthesis path's own rule). An unattributable item falls back to the run:
- * genuine only when every usable slot is its own independent model.
+ * Any name that maps to no row makes the item unattributable; nothing is inferred from slots. An item attributed to a
+ * slot that did not answer (failed / error / no text) is "independence_unverified"; an item attributed to ONE slot is
+ * that model's own differing positions ("same_executing_model"); an item attributed to ≥ 2 slots is judged by
+ * `crossModelDisagreements` (the synthesis path's own rule). An unattributable item falls back to the run: genuine only
+ * when every usable slot is its own independent model.
  *
  * Pure, server- and client-safe; never mutates its input.
  */
@@ -55,14 +57,17 @@ export type StoredRunIndependenceContext = {
   collapsed: boolean;
 };
 
+/** A row that answered (ok / substituted) with stored text — the rows independence is judged from. */
+function isUsableRow(r: ClientSynthesisRow): boolean {
+  const s = coerceStatus(r.status);
+  return (s === "ok" || s === "substituted") && clientRowText(r).trim().length > 0;
+}
+
 export function storedRunIndependenceContext(data: Record<string, unknown> | null | undefined): StoredRunIndependenceContext {
   const rows = storedRunPerModelRows(data);
   const independence = storedRunConsensusIndependence(data);
   if (!rows) return { independence, rows: null, collapsed: false };
-  const usable = rows.filter((r) => {
-    const s = coerceStatus(r.status);
-    return (s === "ok" || s === "substituted") && clientRowText(r).trim().length > 0;
-  });
+  const usable = rows.filter(isUsableRow);
   return { independence, rows, collapsed: usable.length > independentSynthesisResponders(rows).length };
 }
 
@@ -126,8 +131,20 @@ export function classifyStoredDisagreement(item: unknown, ctx: StoredRunIndepend
     }
   }
   const distinct = slots ? Array.from(new Set(slots)) : [];
+  if (distinct.length > 0) {
+    const rows = ctx.rows;
+    // A position attributed to a slot that did not answer (failed / error / empty) was not written by that slot's
+    // model: the item's attribution is not trustworthy, so it is never presented as a cross-model disagreement.
+    const unanswered = distinct.some((id) => {
+      const row = rows.find((r) => r.modelId.trim() === id);
+      return !row || !isUsableRow(row);
+    });
+    if (unanswered) return "independence_unverified";
+    // Positions attributed to ONE slot are one model's differing positions, not a disagreement between models.
+    if (distinct.length === 1) return "same_executing_model";
+  }
   if (distinct.length < 2) {
-    // Unattributable (or one slot named): judged by the run — genuine only when no slots collapsed onto one model.
+    // Unattributable (no model names): judged by the run — genuine only when no slots collapsed onto one model.
     return ctx.collapsed ? "independence_unverified" : "cross_model";
   }
   const positionsByModel = Object.fromEntries(distinct.map((id) => [id, ""]));

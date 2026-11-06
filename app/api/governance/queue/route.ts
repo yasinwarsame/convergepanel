@@ -27,6 +27,7 @@ import {
   type ConsensusScoreWithheldReason,
   type StoredConsensusIndependence,
 } from "@/lib/panel/independentVoices";
+import { storedVerificationConsensusIndependence } from "@/lib/panel/storedVerificationIndependence";
 import {
   classifyStoredDisagreement,
   storedRunIndependenceContext,
@@ -102,6 +103,9 @@ const VER_QUEUE_FIELDS = [
   "missingSourcesCount",
   "governanceMeta",
   "modelResults",
+  // Requested models: a requested model with no stored row makes independent-model coverage unverified
+  // (lib/panel/storedVerificationIndependence.ts).
+  "selectedModels",
   // TEAM-VERIFICATION-PARITY-R1 — projected so the structural scope rule can
   // see a Workspace-bound row at all; without it every row looks Personal.
   "workspaceId",
@@ -166,8 +170,9 @@ type RunSummary = {
   consensusScore: number | null;
   evidenceQuality: string | null;
   /**
-   * Research rows only: the stored consensus score / evidence quality are withheld from this list (both null) because
-   * the run's persisted rows reduce to fewer than two independent executing models, or record no execution identity.
+   * Research and claim-verification rows: the stored consensus score / evidence quality are withheld from this list (both
+   * null) because the stored per-model rows reduce to fewer than two independent executing models, or record no
+   * (or incomplete) execution identity.
    * Display only — the governance evaluation input and the stored run are unchanged.
    */
   consensusWithheld?: ConsensusScoreWithheldReason;
@@ -196,7 +201,7 @@ type RunSummary = {
    * reason (lib/panel/storedDisagreementIndependence.ts). `disagreements` / `disagreementPoints` hold only genuine ones.
    */
   qualifiedDisagreements?: QueueQualifiedDisagreement[];
-  /** Research: present when the run's persisted rows do not prove ≥ 2 independent executing models. */
+  /** Research / claim verification: present when the stored per-model rows do not prove ≥ 2 independent executing models. */
   modelIndependence?: Exclude<StoredConsensusIndependence, "independent">;
   /** Short rationale line for claim verdict (first model summary). */
   claimVerdictSummary?: string;
@@ -712,13 +717,20 @@ function summarizeVerification(id: string, data: Record<string, unknown>, email:
   const { agreementSummary, dissentSummary } = buildAgreementDissentFromVerification(data);
   const digestDisagreements = verificationDisagreementBullets(data);
   const claimVerdictSummary = firstVerificationModelSummary(data);
+  // A stored claim score (and the cross-model evidence quality stored with it) is listed only when the stored per-model
+  // rows prove ≥ 2 independent executing models with a usable answer (lib/panel/storedVerificationIndependence.ts).
+  const independence = storedVerificationConsensusIndependence(data);
+  const consensusWithheld =
+    gi.consensusScore == null && gi.evidenceQuality == null ? undefined : consensusScoreWithheldReason(independence);
   return {
     runId: id,
     collection: "verifications",
     runType: "verification",
     question: truncate(String(data.claim ?? data.question ?? ""), 200),
-    consensusScore: gi.consensusScore,
-    evidenceQuality: gi.evidenceQuality,
+    consensusScore: consensusWithheld ? null : gi.consensusScore,
+    evidenceQuality: consensusWithheld ? null : gi.evidenceQuality,
+    ...(consensusWithheld ? { consensusWithheld } : {}),
+    ...(independence !== "independent" ? { modelIndependence: independence } : {}),
     governanceStatus: normalizeGovernanceStatus(String(data.governanceStatus ?? "needs_review")),
     governanceReasons: Array.isArray(data.governanceReasons) ? (data.governanceReasons as string[]) : [],
     modelHealth: gi.modelHealth,

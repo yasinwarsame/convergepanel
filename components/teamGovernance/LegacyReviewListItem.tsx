@@ -12,9 +12,10 @@ import { CONSENSUS_WITHHELD_TEXT } from "@/lib/panel/independentVoices";
 
 /**
  * The consensus text of a legacy team-queue row. The route (`app/api/teams/runs/route.ts`,
- * `applyLegacyConsensusIndependence`) decides from the linked run's persisted per-model rows whether the stored score
- * may be shown: a withheld score arrives as `consensusScore: null` + `consensusWithheld` and is shown as its reason,
- * never as a number; a shown score (≥ 2 independent executing models, or a claim-verification row) is shown plainly.
+ * `applyLegacyConsensusIndependence`) decides from the canonical artifact's persisted per-model rows — `runs/{runId}`
+ * for research, `verifications/{verificationId}` for claim verification — whether the stored score may be shown: a
+ * withheld score arrives as `consensusScore: null` + `consensusWithheld` and is shown as its reason, never as a number;
+ * only a score backed by ≥ 2 independent executing models is shown plainly.
  */
 export function legacyConsensusText(item: Pick<EnrichedLegacyTeamRunListItemV1, "consensusScore" | "consensusWithheld">): string {
   if (item.consensusWithheld) return CONSENSUS_WITHHELD_TEXT[item.consensusWithheld];

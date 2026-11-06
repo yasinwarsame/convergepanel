@@ -2,7 +2,8 @@
  * Fresh review of 0d4f6c9, MINOR-1 — legacy Team review rows (`teamRuns`, GET /api/teams/runs?version=1 →
  * LegacyReviewListItem). A research row stores `runId`; the route reads the linked `runs/{runId}` and shows the stored
  * consensus score only when its persisted per-model rows prove ≥ 2 independent executing models. Otherwise the score is
- * withheld with its reason. Claim-verification rows keep their score with no research-independence wording.
+ * withheld with its reason. Claim-verification rows (`verificationId`, no `runId`) get the same rule from the linked
+ * `verifications/{verificationId}` per-model rows (review of 8584211, MAJOR): never exempt.
  */
 const teamRunDocs = new Map<string, Record<string, any>>();
 // Path-keyed store for the enrichment reads this route now performs:
@@ -232,13 +233,97 @@ describe("GET /api/teams/runs?version=1 — legacy consensus score vs the linked
     expect([by.two.consensusScore, by.two.consensusWithheld]).toEqual([null, "independence_unverified"]);
   });
 
-  it("claim-verification row keeps its score with no research-independence wording", async () => {
-    pathStore.set("verifications/ver-1", { claimText: "c" });
-    teamRunDocs.set("claim", legacyDoc({ type: "verification", runId: null, verificationId: "ver-1", consensusScore: 81 }));
+  // Review of 8584211, MAJOR — claim-verification rows are judged from `verifications/{verificationId}`.
+  const vrow = (modelId: string, status: "ok" | "parse_error" | "failed", extra: Record<string, unknown> = {}) => ({
+    modelId,
+    status,
+    verdict: status === "ok" ? "accurate" : status,
+    confidence: "high",
+    summary: `${modelId} summary`,
+    correctParts: [],
+    incorrectParts: [],
+    unverifiableParts: [],
+    ...extra,
+  });
+  function seedVerification(id: string, modelResults: unknown[] | undefined, selectedModels?: string[]) {
+    pathStore.set(`verifications/${id}`, {
+      userId: "owner-uid",
+      claim: "c",
+      consensusScore: 92,
+      ...(modelResults ? { modelResults } : {}),
+      ...(selectedModels ? { selectedModels } : {}),
+    });
+  }
+  const claimDoc = (verificationId: string) => legacyDoc({ type: "verification", runId: null, verificationId, consensusScore: 92 });
+
+  it("claim row: three requested models, one answered → no consensus score (insufficient), never 'Consensus 92/100'", async () => {
+    seedVerification("v-one", [vrow("chatgpt", "ok"), vrow("claude", "failed"), vrow("grok", "parse_error")], ["chatgpt", "claude", "grok"]);
+    teamRunDocs.set("claim-one", claimDoc("v-one"));
     const by = await legacyItems();
-    expect([by.claim.consensusScore, "consensusWithheld" in by.claim]).toEqual([81, false]);
-    expect(html(by.claim)).toContain("<span>Consensus 81/100</span>");
-    expect(html(by.claim)).not.toContain("independen");
+    expect([by["claim-one"].consensusScore, by["claim-one"].consensusWithheld]).toEqual([null, "insufficient_independent_models"]);
+    expect(html(by["claim-one"])).toContain(CONSENSUS_WITHHELD_TEXT.insufficient_independent_models);
+    expect(html(by["claim-one"])).not.toMatch(/Consensus \d+\/100/);
+  });
+
+  it("claim row: slots answered by one substitute provider (DeepSeek) are one model → insufficient", async () => {
+    seedVerification(
+      "v-ds",
+      [vrow("chatgpt", "ok", { substituted: true, provider: "deepseek" }), vrow("claude", "ok", { substituted: true, provider: "deepseek" }), vrow("grok", "failed")],
+      ["chatgpt", "claude", "grok"]
+    );
+    teamRunDocs.set("claim-ds", claimDoc("v-ds"));
+    const by = await legacyItems();
+    expect([by["claim-ds"].consensusScore, by["claim-ds"].consensusWithheld]).toEqual([null, "insufficient_independent_models"]);
+  });
+
+  it("claim row: two independent executing models answered → score shown plainly", async () => {
+    seedVerification("v-two", [vrow("chatgpt", "ok"), vrow("claude", "ok"), vrow("grok", "failed")], ["chatgpt", "claude", "grok"]);
+    teamRunDocs.set("claim-two", claimDoc("v-two"));
+    const by = await legacyItems();
+    expect([by["claim-two"].consensusScore, "consensusWithheld" in by["claim-two"]]).toEqual([92, false]);
+    expect(html(by["claim-two"])).toContain("<span>Consensus 92/100</span>");
+  });
+
+  it("claim row: missing / incomplete executing attribution → unverified (never presumed independent)", async () => {
+    seedVerification("v-none", undefined);
+    seedVerification("v-partial", [vrow("chatgpt", "ok"), vrow("claude", "ok")], ["chatgpt", "claude", "grok"]);
+    seedVerification("v-unknown", [vrow("chatgpt", "ok"), vrow("mystery-model", "ok")]);
+    seedVerification("v-nostatus", [vrow("chatgpt", "ok"), { ...vrow("claude", "ok"), status: undefined }]);
+    for (const id of ["v-none", "v-partial", "v-unknown", "v-nostatus"]) teamRunDocs.set(id, claimDoc(id));
+    const by = await legacyItems();
+    for (const id of ["v-none", "v-partial", "v-unknown", "v-nostatus"]) {
+      expect([id, by[id].consensusScore, by[id].consensusWithheld]).toEqual([id, null, "independence_unverified"]);
+      expect(html(by[id])).toContain(CONSENSUS_WITHHELD_TEXT.independence_unverified);
+    }
+  });
+
+  it("claim row: verification document absent, or its read fails → unverified", async () => {
+    teamRunDocs.set("claim-missing", claimDoc("v-missing"));
+    let by = await legacyItems();
+    // The read-domain guard hides a row whose canonical verification is absent (never listed, so never scored).
+    expect(by["claim-missing"]).toBeUndefined();
+    seedVerification("v-two", [vrow("chatgpt", "ok"), vrow("claude", "ok")], ["chatgpt", "claude"]);
+    teamRunDocs.clear();
+    teamRunDocs.set("claim-two", claimDoc("v-two"));
+    getAllShouldThrow = true;
+    getAllSucceedForFirstCalls = 1; // the read-domain guard succeeds; enrichment reads fail
+    getAllCallCount = 0;
+    by = await legacyItems();
+    expect([by["claim-two"].consensusScore, by["claim-two"].consensusWithheld]).toEqual([null, "independence_unverified"]);
+  });
+
+  it("claim rows are read in one batched verifications read (no per-row reads)", async () => {
+    for (const n of [1, 2, 3]) {
+      seedVerification(`v-b${n}`, [vrow("chatgpt", "ok"), vrow("claude", "ok")], ["chatgpt", "claude"]);
+      teamRunDocs.set(`b${n}`, claimDoc(`v-b${n}`));
+    }
+    const spy = jest.spyOn(mockAdminDb, "getAll");
+    await legacyItems();
+    const verificationCalls = spy.mock.calls.filter((args: any[]) => args.some((r: any) => String(r.__path).startsWith("verifications/") ));
+    // One read-domain call (guard) + one enrichment call — each carrying all three refs.
+    for (const call of verificationCalls) expect(call.filter((r: any) => String(r.__path).startsWith("verifications/"))).toHaveLength(3);
+    expect(verificationCalls.length).toBeGreaterThanOrEqual(2);
+    spy.mockRestore();
   });
 
   it("no stored score: nothing withheld, no run read needed", async () => {
@@ -258,8 +343,10 @@ describe("applyLegacyConsensusIndependence (pure)", () => {
     expect(applyLegacyConsensusIndependence({ ...base, runId: "r" }, "insufficient")).toEqual({ ...base, runId: "r", consensusScore: null, consensusWithheld: "insufficient_independent_models" });
     expect(applyLegacyConsensusIndependence({ ...base, runId: "r" }, null)).toEqual({ ...base, runId: "r", consensusScore: null, consensusWithheld: "independence_unverified" });
   });
-  it("a row naming neither a run nor a verification → unverified; a claim row → unchanged", () => {
+  it("a row naming neither a run nor a verification → unverified; a claim row is judged like a research row", () => {
     expect(applyLegacyConsensusIndependence({ ...base }, "independent")).toEqual({ ...base, consensusScore: null, consensusWithheld: "independence_unverified" });
-    expect(applyLegacyConsensusIndependence({ ...base, verificationId: "v" }, null)).toEqual({ ...base, verificationId: "v" });
+    expect(applyLegacyConsensusIndependence({ ...base, verificationId: "v" }, null)).toEqual({ ...base, verificationId: "v", consensusScore: null, consensusWithheld: "independence_unverified" });
+    expect(applyLegacyConsensusIndependence({ ...base, verificationId: "v" }, "insufficient")).toEqual({ ...base, verificationId: "v", consensusScore: null, consensusWithheld: "insufficient_independent_models" });
+    expect(applyLegacyConsensusIndependence({ ...base, verificationId: "v" }, "independent")).toEqual({ ...base, verificationId: "v" });
   });
 });

@@ -13,6 +13,7 @@ import {
 } from "@/lib/teams/teamApiAuth";
 import { logger } from "@/lib/logger";
 import { storedRunConsensusIndependence, type StoredConsensusIndependence } from "@/lib/panel/independentVoices";
+import { storedVerificationConsensusIndependence } from "@/lib/panel/storedVerificationIndependence";
 import {
   classifyTeamRunRow,
   parseTeamRunListFilters,
@@ -129,18 +130,38 @@ async function enrichPageItems(
     new Set(pageItems.filter((i): i is LegacyTeamRunListItemV1 => i.kind === "legacy" && !!i.runId && i.consensusScore != null).map((i) => i.runId as string))
   );
   const legacyRunRefs = legacyResearchRunIds.map((runId) => db.collection("runs").doc(runId));
+  // Legacy claim-verification rows (`verificationId`, no `runId`): the same rule from `verifications/{verificationId}`'s
+  // persisted per-model rows (lib/panel/storedVerificationIndependence.ts) — never exempt. Same fail-closed handling.
+  const legacyVerificationIds = Array.from(
+    new Set(
+      pageItems
+        .filter((i): i is LegacyTeamRunListItemV1 => i.kind === "legacy" && !i.runId && !!i.verificationId && i.consensusScore != null)
+        .map((i) => i.verificationId as string)
+    )
+  );
+  const legacyVerificationRefs = legacyVerificationIds.map((id) => db.collection("verifications").doc(id));
 
-  const [runSnaps, assignmentSnaps, panelSnaps, legacyRunSnaps] = await Promise.all([
+  const [runSnaps, assignmentSnaps, panelSnaps, legacyRunSnaps, legacyVerificationSnaps] = await Promise.all([
     batchGetAll(db, runRefs),
     batchGetAll(db, assignmentRefs),
     batchGetAll(db, panelRefs),
     batchGetAll(db, legacyRunRefs),
+    batchGetAll(db, legacyVerificationRefs),
   ]);
   const legacyIndependenceByRunId = new Map<string, StoredConsensusIndependence>();
   legacyResearchRunIds.forEach((runId, idx) => {
     const result = legacyRunSnaps[idx];
     if (result.failed || !result.snap?.exists) return;
     legacyIndependenceByRunId.set(runId, storedRunConsensusIndependence(result.snap.data() as Record<string, unknown> | undefined));
+  });
+  const legacyIndependenceByVerificationId = new Map<string, StoredConsensusIndependence>();
+  legacyVerificationIds.forEach((verificationId, idx) => {
+    const result = legacyVerificationSnaps[idx];
+    if (result.failed || !result.snap?.exists) return;
+    legacyIndependenceByVerificationId.set(
+      verificationId,
+      storedVerificationConsensusIndependence(result.snap.data() as Record<string, unknown> | undefined)
+    );
   });
 
   const governanceByRunId = new Map<string, GovernanceRecordV1 | null>();
@@ -222,7 +243,14 @@ async function enrichPageItems(
     if (item.kind === "legacy") {
       const enrichedLegacy = await enrichLegacyTeamRunListItem(item, item.humanDecision?.decidedBy, resolveDisplayName);
       enriched.push(
-        applyLegacyConsensusIndependence(enrichedLegacy, item.runId ? legacyIndependenceByRunId.get(item.runId) ?? null : null)
+        applyLegacyConsensusIndependence(
+          enrichedLegacy,
+          item.runId
+            ? legacyIndependenceByRunId.get(item.runId) ?? null
+            : item.verificationId
+              ? legacyIndependenceByVerificationId.get(item.verificationId) ?? null
+              : null
+        )
       );
     } else {
       const enrichedItem = await enrichAdaptiveTeamRunListItem(
