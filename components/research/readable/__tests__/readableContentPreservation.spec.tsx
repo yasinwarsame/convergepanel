@@ -25,7 +25,7 @@ import SchemaKeyFactsStrip from "@/components/adaptive/SchemaKeyFactsStrip";
 import { getResultSchema } from "@/lib/adaptiveSchema/schemaRegistry";
 import { READABLE_ANSWER_COPY, READABLE_TRUST_COPY } from "@/lib/research/readableReport/copy";
 import { buildTrustSignals, sourcesSignal } from "@/lib/research/readableReport/trustSignals";
-import { PILOT_SCENARIOS, htmlText, record, renderPanel, slotRows, tierHtml } from "./readableFixtures";
+import { PILOT_SCENARIOS, htmlEscape, htmlText, htmlUnescape, record, renderPanel, slotRows, tierHtml } from "./readableFixtures";
 
 const READABLE = { reportLayout: "readable" };
 
@@ -80,7 +80,22 @@ const withoutFrozenNegation = (text: string) => text.split("not a verified findi
 const CONTESTED = "Grok disputes this using the 2024 Seattle panel data (sentinel-contested-7Q)";
 const DETAIL = "ChatGPT and Claude read the tariff evidence in opposite directions (sentinel-detail-4K)";
 const CAVEAT = "Claude's estimate rests on a single 2019 survey (sentinel-caveat-9P)";
+/** Every escaped character, more than once: a first-occurrence-only escape of the stored text would not match the markup. */
+const CAVEAT_MULTI = `Claude's and Grok's estimates rest on "one" 2019 & 2020 survey <n=40> & "a" poll (sentinel-caveat-3W)`;
 const UNCERTAINTY = "Long-run effects beyond five years are not measured (sentinel-uncertainty-2M)";
+
+describe("test helpers: entity decoding and escaping are exact", () => {
+  it("htmlUnescape decodes each React entity once, so an escaped entity stays literal text", () => {
+    expect(htmlUnescape("&amp; &lt; &gt; &quot; &#x27;")).toBe(`& < > " '`);
+    expect(htmlUnescape("&amp;lt;b&amp;gt; &amp;amp; &amp;quot; &amp;#x27;")).toBe("&lt;b&gt; &amp; &quot; &#x27;");
+    expect(htmlText("<p>&amp;lt;script&amp;gt;</p>")).toBe("&lt;script&gt;");
+  });
+  it("htmlEscape escapes every occurrence of each character and round-trips through htmlUnescape", () => {
+    expect(htmlEscape(`a'b'c "d" & e & <f> <g>`)).toBe("a&#x27;b&#x27;c &quot;d&quot; &amp; e &amp; &lt;f&gt; &lt;g&gt;");
+    for (const t of [CAVEAT, CAVEAT_MULTI, "&lt;b&gt;", "a &amp; b"]) expect(htmlUnescape(htmlEscape(t))).toBe(t);
+    expect(htmlEscape(CAVEAT_MULTI)).toBe(renderToStaticMarkup(createElement("p", null, CAVEAT_MULTI)).slice(3, -4));
+  });
+});
 
 describe("M1a. the contested note on the top point", () => {
   function contestedHtml() {
@@ -172,13 +187,13 @@ describe("M1c. the schema key-facts block", () => {
 });
 
 describe("M1d. caveats and uncertainty", () => {
-  it("a model-bias caveat is shown in the readable answer, labelled and attributed to the model, with the stored text", () => {
+  it.each([CAVEAT, CAVEAT_MULTI])("a model-bias caveat is shown in the readable answer, labelled and attributed to the model, with the stored text: %s", (caveat) => {
     const rec = record("generic-mixed");
-    rec.synthesisReport.verdictCard.caveat = CAVEAT;
+    rec.synthesisReport.verdictCard.caveat = caveat;
     rec.synthesisReport.verdictCard.caveatSource = "model_bias_check";
     const answerHtml = tierHtml(renderPanel(rec, slotRows("generic-mixed"), READABLE), "answer")!;
-    expect(htmlText(answerHtml)).toContain(CAVEAT);
-    const at = answerHtml.indexOf(CAVEAT.replace("'", "&#x27;"));
+    expect(htmlText(answerHtml)).toContain(caveat);
+    const at = answerHtml.indexOf(htmlEscape(caveat));
     expect(at).toBeGreaterThan(-1);
     const openTag = answerHtml.slice(answerHtml.lastIndexOf("<p", at), at);
     expect(openTag).toContain('data-source="model_bias"');

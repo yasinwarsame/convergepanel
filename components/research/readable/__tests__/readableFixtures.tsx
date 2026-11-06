@@ -78,15 +78,20 @@ export function renderPanel(rec: any, rows: ModelResult[] | null, extra: Record<
   return renderToStaticMarkup(panelElement(rec, rows, extra));
 }
 
-/** Visible text of an HTML string (tags removed, entities for quotes/ampersands decoded, whitespace collapsed). */
+/**
+ * The five entities React's server renderer emits for text and attribute values. Each is decoded exactly once, in a
+ * single pass (one regex, one lookup), so markup "&amp;lt;" reads as the literal text "&lt;", never "<" — chained
+ * replaces that decode "&amp;" before "&lt;" would decode its result a second time (CodeQL js/double-escaping).
+ */
+const HTML_ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', "#x27": "'" };
+export const htmlUnescape = (s: string): string => s.replace(/&(amp|lt|gt|quot|#x27);/g, (_m, e: string) => HTML_ENTITIES[e]);
+/** The inverse of htmlUnescape: text as React escapes it in markup (every occurrence of each character). */
+const HTML_ESCAPES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#x27;" };
+export const htmlEscape = (s: string): string => s.replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
+
+/** Visible text of an HTML string (tags removed, entities decoded once, whitespace collapsed). */
 export function htmlText(html: string): string {
-  return html
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&quot;/g, '"')
-    .replace(/&#x27;/g, "'")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
+  return htmlUnescape(html.replace(/<[^>]+>/g, " "))
     .replace(/\s+/g, " ")
     .trim();
 }
