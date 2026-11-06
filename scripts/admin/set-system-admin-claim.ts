@@ -19,7 +19,7 @@
  *     --credentials=<service-account key file, mode 0600> \
  *     --target-uid=<uid> \
  *     --operation=grant|revoke \
- *     [--allow-claim-reduction]             # REQUIRED with revoke (revoke ALWAYS revokes refresh tokens)
+ *     [--allow-claim-reduction]             # REQUIRED with revoke (every revoke REQUESTS refresh-token revocation)
  *     [--operator-id-token-file=<file>]     # SYSTEM_ADMIN ID token, mode 0600; required for --execute
  *     [--bootstrap-first-admin]             # instead of a token, only while zero admins exist
  *     [--execute --confirm-claim=<exact string printed by the dry run>]
@@ -32,7 +32,9 @@
  *   — or a grant already in place;
  * 2 refused or dry run — no Firebase write call was issued;
  * 3 a write call was issued (possibly only the attempt audit row) and the
- *   operation is incomplete — re-running the same command is safe;
+ *   operation is incomplete — re-run the same command from a synced clock
+ *   (a revoke re-run calls revokeRefreshTokens again, which overwrites
+ *   validSince and can move the cutoff backward from a slow clock);
  * 1 the result file could not be written after an otherwise-successful run.
  *
  * CREDENTIALS. Only the key file named by --credentials is used. This tool
@@ -70,7 +72,7 @@ import {
   type ClaimAuthPort,
   type ClaimStorePort,
   type RunResult,
-  RERUN_IS_SAFE,
+  RERUN_GUIDANCE,
   runSystemAdminClaim,
 } from "../../lib/admin/systemAdminClaimExecution";
 import {
@@ -571,7 +573,7 @@ export async function runCli(opts: CliOptions): Promise<number> {
     code: unexpected !== null ? `unexpected_error:${unexpected}` : run ? run.code : early?.code ?? null,
     message: unexpected !== null
       ? writeAttempted
-        ? `INCOMPLETE: unexpected error after a Firebase write call was issued. The write may or may not have happened; read the target's claims. ${RERUN_IS_SAFE}`
+        ? `INCOMPLETE: unexpected error after a Firebase write call was issued. The write may or may not have happened; read the target's claims. ${RERUN_GUIDANCE}`
         : "Unexpected error before any Firebase write. Nothing was written."
       : run ? run.message : early?.message ?? null,
     writeAttempted,

@@ -86,8 +86,12 @@ the live record. It does **not** immediately revoke CLAIM-derived authority:
 SYSTEM_ADMIN keeps SYSTEM_ADMIN — including run deletion, governance-status
 override and both billing-mutation routes — until their ID token expires
 (≤1 hour). **For a SYSTEM_ADMIN the lever is claim revocation plus
-`revokeRefreshTokens(uid)`, not disablement alone.** Put both in the incident
-runbook.
+`revokeRefreshTokens(uid)`, not disablement alone.** Neither of them shortens
+that ≤1 hour window for an already-issued ID token on the bearer paths (no
+`checkRevoked`); closing it is S2. `revokeRefreshTokens` affects only
+revocation-checked paths, only for sessions whose `auth_time` is earlier than
+the stamped `validSince`, and a later call from a slower clock can lower that
+value again. Put all of this in the incident runbook.
 
 ### BOOTSTRAP_SECRET — not a human role
 `ADMIN_SECRET` gates `/api/admin/set-admin`, which mints the first `admin: true`
@@ -179,7 +183,12 @@ bound Google does not publish. It also does not enforce current privileges:
 the SYSTEM_ADMIN bearer guards verify ID tokens without `checkRevoked`, so an
 already-issued ID token keeps `admin: true` for up to about an hour regardless
 of the revocation (session-cookie paths do check revocation); live enforcement
-is the separate S2 change. Runbook, CLI, exit codes and retry:
+is the separate S2 change. A repeated revocation request is not monotonic:
+`revokeRefreshTokens` overwrites `validSince` with the operator's clock, so a
+re-run from a slow clock can move the cutoff backward and stop the revocation
+check from rejecting sessions an earlier revoke had excluded; the tool records
+that (`tokensValidAfterTimeMovedBackward`) and never reports it as a clean
+success, but does not prevent it. Runbook, CLI, exit codes and retry:
 `docs/operations/system-admin-claim-script.md`. The four older minting scripts
 were retired. `ADMIN_SECRET` never needs to hold a live value
 for enrollment, so the bootstrap route is not part of the enrollment story at
@@ -509,7 +518,10 @@ table is the contract.
    applied the request — revocation-checked session cookies (and, assumed, the
    refresh-token exchange) reject sessions whose `auth_time` is earlier than
    the `validSince` it stamps from the operator's clock. It does NOT invalidate
-   an already-issued ID token on the bearer path (step 3).
+   an already-issued ID token on the bearer path (step 3). It overwrites the
+   stored `validSince` rather than keeping the later value, so a repeated call
+   from a slower clock can LOWER it again: sync the operator clock (NTP) before
+   every call.
 3. **Understand the residual window.** Every SYSTEM_ADMIN guard verifies with
    `verifyIdToken`, which does not consult revocation. Until the outstanding ID
    token expires (Firebase default one hour), a de-claimed or disabled
@@ -719,7 +731,14 @@ re-create the claim you just removed.**
 
 ### What this procedure does NOT give you
 
-Immediate, guaranteed cutoff for a claim-derived SYSTEM_ADMIN. If that matters
-for a given incident, the options are to wait out the token lifetime, or to add
-`checkRevoked` to the SYSTEM_ADMIN verification path — a deliberate change with
-a latency and quota cost, not made here.
+No immediate cutoff for a claim-derived SYSTEM_ADMIN, and no assurance of one.
+Removing the claim and requesting `revokeRefreshTokens` do not end an
+already-issued ID token on the bearer paths (no `checkRevoked`; up to about an
+hour). Even on revocation-checked paths the request covers only sessions whose
+`auth_time` is earlier than the stamped `validSince`, under an unproven
+Firestore/Auth clock assumption, and a later request from a slower clock can
+lower that value and stop the check from rejecting sessions an earlier revoke
+had excluded. If immediate cutoff matters for a given incident, the options are
+to wait out the token lifetime, or to add `checkRevoked` (or a live claim read)
+to the SYSTEM_ADMIN verification path — S2, a deliberate change with a latency
+and quota cost, not made here.

@@ -245,7 +245,7 @@ export function parseSetSystemAdminClaimArgs(argv: readonly string[]): { ok: tru
     if (name === "--revoke-sessions") {
       return refuse(
         "unknown_flag",
-        "Refusing --revoke-sessions: the flag was removed. Revoking admin ALWAYS revokes the target's refresh tokens (owner policy); there is no opt-out.",
+        "Refusing --revoke-sessions: the flag was removed. Every executed revoke REQUESTS revocation of the target's refresh tokens (owner policy); there is no opt-out. The request can fail, and even an acknowledged one does not end already-issued ID tokens (runbook, \"Revocation and sessions\").",
       );
     }
     if (!isValueFlag && !isBooleanFlag) {
@@ -631,9 +631,9 @@ export function formatDiff(plan: ClaimPlan): string[] {
  * The exact typed confirmation. It binds the operation, the claim result, the
  * project and the UID (and, for revoke, the mandatory session revocation), so
  * a string copied from a rehearsal on another project or another user cannot
- * authorise this write. A revoke re-run whose claim is already absent (it only
- * completes the outstanding session revocation) uses the SAME string, so a
- * re-run of the exact same command is always accepted.
+ * authorise this write. A revoke re-run whose claim is already absent (no
+ * claim write; it requests refresh-token revocation again) uses the SAME
+ * string, so a re-run of the exact same command is always accepted.
  */
 export function expectedConfirmation(args: {
   operation: ClaimOperation;
@@ -786,6 +786,15 @@ export function verifyReadBack(plan: ClaimPlan, readBackClaims: unknown): { ok: 
  *       enforcement is the separate S2 change.
  *   (e) Anything else (no anchor, no read-back, below cutoff, revocation call
  *       failed, claim write unconfirmed) is INCOMPLETE (exit 3).
+ *   (f) NOT MONOTONIC (unresolved risk, recorded, not prevented):
+ *       revokeRefreshTokens OVERWRITES validSince with the caller's clock; it
+ *       does not keep the later of the stored and the new value. A later call
+ *       from a slower clock (a re-run, a sessions-only run, another operator,
+ *       any Admin SDK caller) can therefore LOWER tokensValidAfterTime and
+ *       re-admit, wherever revocation is checked, sessions whose auth_time lies
+ *       between the new and the old value — sessions an earlier revoke had
+ *       excluded. The tool records the move (tokensValidAfterTimeMovedBackward)
+ *       and never reports it as a clean success, but does not prevent it.
  * The local clock is never compared with anything.
  */
 export const REVOCATION_SKEW_MARGIN_SECONDS = 2;
@@ -882,6 +891,26 @@ export function observeRevocationCutoff(
 }
 
 /**
+ * (f) Whether the stored validSince moved BACKWARD across this run: read-back
+ * `tokensValidAfterTime` (whole seconds) strictly earlier than the value read
+ * before the run. null when either value is absent or not a date — the
+ * direction is then unknown, never assumed forward. Reporting only: the tool
+ * does not prevent a backward move (revokeRefreshTokens overwrites validSince).
+ */
+export function validSinceMovedBackward(before: unknown, after: unknown): boolean | null {
+  if (typeof before !== "string" || typeof after !== "string") return null;
+  const b = Date.parse(before);
+  const a = Date.parse(after);
+  if (!Number.isFinite(b) || !Number.isFinite(a)) return null;
+  return Math.floor(a / 1000) < Math.floor(b / 1000);
+}
+
+/** (f) The detail recorded and printed whenever a backward move is observed. */
+export function validSinceMovedBackwardDetail(before: string, after: string): string {
+  return `tokensValidAfterTime moved BACKWARD during this run, from ${before} to ${after}: revokeRefreshTokens overwrites validSince with the operator's local clock and does not keep the later value. Wherever revocation is checked, the check no longer rejects a session whose auth_time lies at or after ${after} and before ${before}, including one an earlier revoke had excluded. This tool does not prevent that (unresolved risk; runbook, "Backward cutoff moves")`;
+}
+
+/**
  * Recorded in the result file and the outcome audit row of every revoke.
  * The five things a reader must keep apart are separate fields:
  * (a) revocationApiAcknowledged, (b) cutoffObserved (+ the times),
@@ -899,6 +928,13 @@ export type SessionRevocationEvidence = {
   cutoff: string | null;
   tokensValidAfterTimeBefore: string | null;
   tokensValidAfterTimeAfter: string | null;
+  /**
+   * (f) Read-back tokensValidAfterTime (whole seconds) is EARLIER than the
+   * value read before the run: this run's revokeRefreshTokens call lowered the
+   * stored validSince (it overwrites; it does not take a max). null when
+   * either value is missing or unparseable (the move is then UNKNOWN).
+   */
+  tokensValidAfterTimeMovedBackward: boolean | null;
   /** Read-back validSince minus the anchor, in seconds (positive = ahead of server time). */
   validSinceMinusAnchorSeconds: number | null;
   /** (b) read-back tokensValidAfterTime >= the server-anchored cutoff. An observation, not proof. */
@@ -1017,7 +1053,7 @@ export function buildClaimAuditRecord<TS>(input: {
     credentialClientEmailMasked: input.credentialClientEmailMasked,
     requestedOperation: input.operation,
     claimWrite: input.claimWrite,
-    // Revoke ALWAYS revokes refresh tokens (owner policy); grant never does.
+    // Every executed revoke REQUESTS refresh-token revocation (owner policy); grant never does.
     sessionRevocation: input.operation === "revoke" ? "required" : "not_applicable",
     gitSha: input.gitSha,
     confirmClaim: input.confirmClaim,

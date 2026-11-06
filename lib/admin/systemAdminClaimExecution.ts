@@ -18,18 +18,22 @@
  *      (see observeRevocationCutoff in systemAdminClaimSafety.ts), so it is
  *      written on EVERY revoke, re-runs included.
  *   4. revoke: wait until the operator's clock should have passed the cutoff
- *      (anchor + 1 s + margin), then revoke refresh tokens (EVERY revoke;
- *      owner policy, no opt-out). Attempted even when step 3 failed, and even
- *      when the claim write in step 2 threw (it may have applied server-side):
- *      revoking only removes access — but such a run is INCOMPLETE (exit 3).
+ *      (anchor + 1 s + margin), then call revokeRefreshTokens ONCE (EVERY
+ *      revoke; owner policy, no opt-out). Attempted even when step 3 failed,
+ *      and even when the claim write in step 2 threw (it may have applied
+ *      server-side) — such a run is INCOMPLETE (exit 3). The call OVERWRITES
+ *      validSince with the operator's clock: it is not monotonic, and from a
+ *      slow clock it can LOWER a value an earlier run stored (see (f) in
+ *      systemAdminClaimSafety.ts; recorded, not prevented).
  *   5. read back (claims; role; for revoke, compare the server's
  *      tokensValidAfterTime with the server-anchored cutoff — an observation
  *      under REVOCATION_CLOCK_ASSUMPTION, not proof of revocation).
  *   6. create the `outcome` audit row (create-only).
  * A claim-write failure skips step 3 (and, on a grant, step 4 does not apply);
  * read-back and the outcome row still run so the evidence records what
- * actually happened. Nothing is rolled back automatically; re-running the same
- * command is safe.
+ * actually happened. Nothing is rolled back automatically; a re-run never
+ * re-applies a claim already in place or changes another claim, but a revoke
+ * re-run calls revokeRefreshTokens again (RERUN_GUIDANCE).
  *
  * The operator ID token is read through a port, passed to `verifyIdToken`, and
  * dropped. It is never logged, returned, or written to any record.
@@ -56,6 +60,8 @@ import {
   REVOCATION_OBSERVED_SUMMARY,
   REVOCATION_SKEW_MARGIN_SECONDS,
   auditDocId,
+  validSinceMovedBackward,
+  validSinceMovedBackwardDetail,
   buildClaimAuditRecord,
   checkBootstrapFirstAdmin,
   checkConfirmation,
@@ -141,7 +147,7 @@ export type RunResult = {
    *   or a grant already in place (no_change);
    * 2 refused or dry run: NO write call was issued (guaranteed);
    * 3 a write call was issued (possibly only the attempt audit row, outcome
-   *   unknown) and the operation is incomplete or unverified. Re-run is safe.
+   *   unknown) and the operation is incomplete or unverified (see RERUN_GUIDANCE).
    */
   exitCode: 0 | 2 | 3;
   code: RefusalCode | PostWriteFailure | null;
@@ -153,7 +159,7 @@ export type RunResult = {
   targetUid: string;
   /** Masked (the local result file never holds the full target email; the audit row does). */
   targetEmailMasked: string | null;
-  /** Revoke always revokes refresh tokens; grant never does. */
+  /** Every executed revoke REQUESTS refresh-token revocation; grant never does. */
   sessionRevocation: "required" | "not_applicable";
   /**
    * Revoke --execute only: the revocation API acknowledgment, the observed
@@ -257,7 +263,7 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
   result.targetEmailMasked = targetEmail ? maskEmail(targetEmail) : null;
   const preWriteTokensValidAfterTime = typeof target.tokensValidAfterTime === "string" ? target.tokensValidAfterTime : null;
   if (args.operation === "revoke" && target.disabled === true) {
-    deps.log("Target state:   DISABLED - the admin claim is still removed and sessions revoked; the account stays disabled.");
+    deps.log("Target state:   DISABLED - the admin claim is still removed and refresh-token revocation is still requested; the account stays disabled.");
   }
 
   try {
@@ -371,7 +377,7 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
     deps.log("Claim write:    SKIPPED - the admin claim is already absent; claims will NOT be rewritten.");
   }
   if (args.operation === "revoke") {
-    deps.log("Sessions:       the target's refresh tokens WILL be revoked (mandatory on revoke; signs the user out everywhere).");
+    deps.log(REVOKE_SESSIONS_PLAN_LINE);
   }
 
   const expected = expectedConfirmation({ operation: args.operation, projectId: ctx.projectId, targetUid: args.targetUid });
@@ -481,10 +487,12 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
 
   let revokeOk = false;
   const cutoff = anchor ? revocationCutoffSeconds(anchor) : null;
-  // EVERY revoke calls revokeRefreshTokens — including one whose claim write
-  // threw: the write may have applied server-side, and revoking only removes
-  // access. That run stays INCOMPLETE (mint_failed first) because the claim
-  // write is unconfirmed and no anchor was taken.
+  // EVERY revoke calls revokeRefreshTokens exactly once — including one whose
+  // claim write threw (the write may have applied server-side). That run stays
+  // INCOMPLETE (mint_failed first) because the claim write is unconfirmed and
+  // no anchor was taken. The call is not access-reducing by construction: it
+  // overwrites validSince, so from a slow clock it can lower an earlier value
+  // (recorded below as tokensValidAfterTimeMovedBackward; not prevented).
   if (args.operation === "revoke") {
     if (anchor && cutoff !== null) {
       // revokeRefreshTokens stamps validSince with the LOCAL clock; give an
@@ -551,6 +559,7 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
       cutoff: cutoff !== null ? new Date(cutoff * 1000).toISOString() : null,
       tokensValidAfterTimeBefore: preWriteTokensValidAfterTime,
       tokensValidAfterTimeAfter: after,
+      tokensValidAfterTimeMovedBackward: validSinceMovedBackward(preWriteTokensValidAfterTime, after),
       validSinceMinusAnchorSeconds: null,
       cutoffObserved: false,
       clockAlignmentAssumption: REVOCATION_CLOCK_ASSUMPTION,
@@ -581,7 +590,18 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
         recordFailure("sessions_revoke_unverified", sv.detail);
       }
     }
-    evidence.detail = unverified;
+    // (f) A backward move is never a clean success. On a run that is already
+    // incomplete it is added as a failure detail; on a run whose cutoff was
+    // observed (possible only when the stored value was AHEAD of this run's
+    // cutoff, e.g. after a fast-clock run) it is printed as a WARNING below and
+    // recorded in the evidence. Reporting only: nothing here changes a call.
+    if (evidence.tokensValidAfterTimeMovedBackward === true) {
+      const moved = validSinceMovedBackwardDetail(preWriteTokensValidAfterTime as string, after as string);
+      if (failure) recordFailure("sessions_revoke_unverified", moved);
+      evidence.detail = unverified ? `${unverified}; ${moved}` : moved;
+    } else {
+      evidence.detail = unverified;
+    }
     result.sessionRevocationEvidence = evidence;
   }
 
@@ -624,6 +644,9 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
       ? "Applied: the claims read back as planned. The user must obtain a fresh ID token (sign out and in) before the claim is visible."
       : `Applied: the admin claim was removed (read back as planned). ${revocationSummary(result.sessionRevocationEvidence)}`;
   }
+  if (result.sessionRevocationEvidence?.tokensValidAfterTimeMovedBackward === true) {
+    result.message += ` WARNING (not a clean success): ${result.sessionRevocationEvidence.detail}. The read-back is still at or after this run's server-anchored cutoff, so that interval starts after the cutoff (under the same clock assumption); if this was not the intended fast-clock recovery, find out what stamped the earlier value.`;
+  }
   const ahead = result.sessionRevocationEvidence?.validSinceMinusAnchorSeconds;
   if (typeof ahead === "number" && ahead > FAR_AHEAD_WARNING_SECONDS) {
     result.message += ` Note: tokensValidAfterTime is ${ahead}s after server time (the operator clock is ahead): wherever revocation is checked, any session the target starts before ${result.sessionRevocationEvidence?.tokensValidAfterTimeAfter} is rejected (over-revocation; the target may be unable to stay signed in until then). Recovery: sync this machine's clock (NTP) and re-run the same revoke command (runbook, "Fast operator clock").`;
@@ -650,9 +673,17 @@ export const REVOCATION_SLEEP_SLACK_MS = 1500;
 /** Above this, an observed cutoff's validSince is reported as far ahead of server time. */
 export const FAR_AHEAD_WARNING_SECONDS = 300;
 
-/** Re-run guidance printed on every exit-3 outcome. */
-export const RERUN_IS_SAFE =
-  "Re-running the same command is safe: it never re-applies a claim already in place, never changes any other claim, and a revoke re-run whose claim is already absent only completes the outstanding session revocation (no claim write).";
+/**
+ * Re-run guidance printed on every exit-3 outcome. It does not present a re-run
+ * as free of risk: a revoke re-run calls revokeRefreshTokens again, which
+ * overwrites validSince and can move the cutoff backward from a slow clock.
+ */
+export const RERUN_GUIDANCE =
+  "Re-running the same command never re-applies a claim already in place and never changes any other claim. A revoke re-run calls revokeRefreshTokens again (with no claim write when the admin claim is already absent), which OVERWRITES validSince with this machine's clock and does not keep the later value: from a clock that is behind, a re-run can move the cutoff BACKWARD and stop the revocation check from rejecting sessions an earlier run had excluded. Sync this machine's clock (NTP) before re-running, and read sessionRevocationEvidence afterwards.";
+
+/** The dry-run / pre-execute sessions line for every revoke: the request and its limits, never an effect. */
+export const REVOKE_SESSIONS_PLAN_LINE =
+  "Sessions:       revokeRefreshTokens WILL be requested for the target (mandatory on revoke). The request can fail; it overwrites validSince with this machine's clock (sync it first: NTP); it does not end already-issued ID tokens (up to about 1 hour) and is not a sign-out from every device.";
 
 function incomplete<TS>(result: RunResult, code: PostWriteFailure, deps: ExecutionDeps<TS>): RunResult {
   result.status = "incomplete";
@@ -662,7 +693,11 @@ function incomplete<TS>(result: RunResult, code: PostWriteFailure, deps: Executi
   const unknown = result.readBack.customClaims === "failed" || result.readBack.usersDocRole === "failed"
     ? " The post-write read-back FAILED: the resulting state is UNKNOWN, not empty."
     : "";
-  result.message = `INCOMPLETE (${code}). Failures: ${result.failureDetails.join("; ") || code}.${unknown} A write was attempted and the operation is not complete; inspect the read-back before assuming either state. ${RERUN_IS_SAFE}`;
+  const ev = result.sessionRevocationEvidence;
+  const backward = ev?.tokensValidAfterTimeMovedBackward === true && ev.detail && !result.failureDetails.some((d) => d.includes("moved BACKWARD"))
+    ? ` WARNING: ${ev.detail}.`
+    : "";
+  result.message = `INCOMPLETE (${code}). Failures: ${result.failureDetails.join("; ") || code}.${unknown}${backward} A write was attempted and the operation is not complete; inspect the read-back before assuming either state. ${RERUN_GUIDANCE}`;
   deps.log(result.message);
   return result;
 }

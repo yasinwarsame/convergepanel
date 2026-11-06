@@ -3,9 +3,9 @@
  * Proves: dry run performs zero writes (exit 2); the attempt audit row
  * precedes the claim write and its failure prevents the write but is exit 3
  * (outcome unknown), never 2; read-back and the outcome row follow; refusals
- * happen before any write; every revoke revokes sessions; a revoke re-run whose
- * claim is already absent completes the session revocation without rewriting
- * claims.
+ * happen before any write; every revoke calls revokeRefreshTokens exactly once;
+ * a revoke re-run whose claim is already absent requests revocation again
+ * without rewriting claims; a backward validSince move is never a clean success.
  *
  * CLOCK MODEL (faithful to firebase-admin 12.7.0): the fake keeps a SERVER
  * clock (`w.serverMs`, advanced by every RPC's latency and by sleepMs) and an
@@ -15,6 +15,8 @@
  * Firestore writes return SERVER commit times.
  */
 import {
+  RERUN_GUIDANCE,
+  REVOKE_SESSIONS_PLAN_LINE,
   runSystemAdminClaim,
   type ClaimAuthPort,
   type ClaimStorePort,
@@ -215,7 +217,11 @@ describe("dry run (default)", () => {
     expect(r.status).toBe("dry_run");
     expect(r.exitCode).toBe(2);
     expect(r.expectedConfirmation).toBe(`revoke:admin:removed:sessions-revoked:${PROJECT}:${TARGET}`);
-    expect(w.calls).toContain("log:Sessions:       the target's refresh tokens WILL be revoked (mandatory on revoke; signs the user out everywhere).");
+    const PLAN_LINE = "Sessions:       revokeRefreshTokens WILL be requested for the target (mandatory on revoke). The request can fail; it overwrites validSince with this machine's clock (sync it first: NTP); it does not end already-issued ID tokens (up to about 1 hour) and is not a sign-out from every device.";
+    expect(REVOKE_SESSIONS_PLAN_LINE).toBe(PLAN_LINE);
+    expect(w.calls).toContain(`log:${PLAN_LINE}`);
+    expect(w.calls.filter((c) => c.startsWith("log:Sessions:"))).toEqual([`log:${PLAN_LINE}`]);
+    expect(w.calls.join("\n")).not.toMatch(/signs the user out everywhere|refresh tokens WILL be revoked/);
     expect(w.writes).toBe(0);
   });
 });
@@ -258,7 +264,7 @@ describe("execute — happy paths", () => {
     expect(attempt.after).toEqual({ customClaims: { admin: true, plan: "pro" }, usersDocRole: "admin" });
   });
 
-  it("revoke removes only admin, writes the role anchor, ALWAYS revokes tokens, verifies against the server cutoff", async () => {
+  it("revoke removes only admin, writes the role anchor, calls revokeRefreshTokens once, observes the server cutoff", async () => {
     const w = world();
     w.users.get(TARGET)!.customClaims = { admin: true, plan: "pro" };
     w.users.set(OTHER_ADMIN, { uid: OTHER_ADMIN, disabled: false, customClaims: { admin: true } });
@@ -409,7 +415,8 @@ describe("audit ordering — attempt failure means no mint, and is exit 3 (outco
     expect(r.auditRowIds).toEqual([]);
     expect(r.auditRowIdsUnconfirmed).toEqual(["system-admin-claim:req_1_abc:attempt"]);
     expect(r.message).toMatch(/may or may not exist/);
-    expect(r.message).toMatch(/Re-running the same command is safe/);
+    expect(r.message).toContain(RERUN_GUIDANCE);
+    expect(r.message).not.toMatch(/command is safe|harmless|idempotent/i);
     expect(r.message).not.toMatch(/nothing (was )?written/i);
     expect(writeCalls(w)).toEqual(["createAuditRow:attempt"]);
   };
@@ -480,7 +487,7 @@ describe("execute — failures after the write are exit 3 and recorded", () => {
     const r = await runSystemAdminClaim(ctx(args(exec)), deps(w));
     expect([r.exitCode, r.code]).toEqual([3, "users_doc_failed"]);
   });
-  it("sessions_revoke_failed is INCOMPLETE (exit 3), says re-run is safe, and is recorded as incomplete", async () => {
+  it("sessions_revoke_failed is INCOMPLETE (exit 3), prints the re-run guidance (clock sync; overwrite risk), and is recorded as incomplete", async () => {
     const w = world();
     w.users.get(TARGET)!.customClaims = { admin: true };
     w.users.set(OTHER_ADMIN, { uid: OTHER_ADMIN, disabled: false, customClaims: { admin: true } });
@@ -488,7 +495,8 @@ describe("execute — failures after the write are exit 3 and recorded", () => {
     const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), deps(w));
     expect([r.status, r.exitCode, r.code]).toEqual(["incomplete", 3, "sessions_revoke_failed"]);
     expect(r.message).toMatch(/^INCOMPLETE/);
-    expect(r.message).toMatch(/Re-running the same command is safe/);
+    expect(r.message).toContain(RERUN_GUIDANCE);
+    expect(r.message).not.toMatch(/command is safe|harmless|idempotent/i);
     expect(w.audit.get("system-admin-claim:req_1_abc:outcome")).toMatchObject({
       actionType: "SYSTEM_ADMIN_CLAIM_INCOMPLETE",
       metadata: { outcome: "sessions_revoke_failed", completed: false },
@@ -550,7 +558,7 @@ describe("safe retry — revoke whose admin claim is already absent (R2 MINOR-1)
     return w;
   };
 
-  it("run 1 sessions_revoke_failed (exit 3) -> run 2, same command: completes sessions, no claim write, exit 0", async () => {
+  it("run 1 sessions_revoke_failed (exit 3) -> run 2, same command: requests revocation again, cutoff observed, no claim write, exit 0", async () => {
     const w = revokeWorld();
     w.fail.revoke = true;
     const r1 = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke"), "req_1_first"), deps(w));
@@ -614,7 +622,8 @@ describe("safe retry — revoke whose admin claim is already absent (R2 MINOR-1)
     w.fail.revoke = true;
     const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), deps(w));
     expect([r.status, r.exitCode, r.code]).toEqual(["incomplete", 3, "sessions_revoke_failed"]);
-    expect(r.message).toMatch(/Re-running the same command is safe/);
+    expect(r.message).toContain(RERUN_GUIDANCE);
+    expect(r.message).not.toMatch(/command is safe|harmless|idempotent/i);
     expect(w.calls.some((c) => c.startsWith("writeCustomClaims"))).toBe(false);
     expect(w.audit.get("system-admin-claim:req_1_abc:outcome")).toMatchObject({
       actionType: "SYSTEM_ADMIN_CLAIM_INCOMPLETE",
@@ -871,7 +880,8 @@ describe("R3 MAJOR: the revocation cutoff is observed against a SERVER-anchored 
     expect([r.status, r.exitCode, r.code, r.outcome]).toEqual(["incomplete", 3, "sessions_revoke_unverified", "sessions_revoke_unverified"]);
     expect(r.message).toMatch(/earlier than the server-anchored cutoff/);
     expect(r.message).toMatch(/local clock/);
-    expect(r.message).toMatch(/Re-running the same command is safe/);
+    expect(r.message).toContain(RERUN_GUIDANCE);
+    expect(r.message).not.toMatch(/command is safe|harmless|idempotent/i);
     expect(evidenceOf(r)).toMatchObject({ cutoffObserved: false, tokensValidAfterTimeBefore: BEFORE_TVA });
     expect(w.audit.get(OUTCOME)).toMatchObject({
       actionType: "SYSTEM_ADMIN_CLAIM_INCOMPLETE",
@@ -935,6 +945,18 @@ describe("R3 MAJOR: the revocation cutoff is observed against a SERVER-anchored 
     expect(after).toBeLessThan(locked);
     expect(Math.abs(after - w.serverMs)).toBeLessThan(10_000);
     expect(r2.message).not.toMatch(/operator clock is ahead/);
+    // The recovery IS a backward move (revokeRefreshTokens overwrites validSince): it is recorded and
+    // printed as a WARNING, never as a clean success, even though the cutoff was observed.
+    expect(r2.sessionRevocationEvidence).toMatchObject({ cutoffObserved: true, tokensValidAfterTimeMovedBackward: true });
+    expect(r2.sessionRevocationEvidence!.detail).toMatch(/moved BACKWARD during this run/);
+    expect(r2.message).toMatch(/^Completed: /);
+    expect(r2.message).toContain("WARNING (not a clean success): tokensValidAfterTime moved BACKWARD during this run");
+    expect(w.audit.get("system-admin-claim:req_2_synced:outcome")!.metadata).toMatchObject({
+      sessionRevocationEvidence: { tokensValidAfterTimeMovedBackward: true },
+    });
+    // r1 (forward from the 09:00 value) is a clean success: no warning.
+    expect(r1.sessionRevocationEvidence!.tokensValidAfterTimeMovedBackward).toBe(false);
+    expect(r1.message).not.toMatch(/WARNING|BACKWARD/);
   });
 
   it("revocation call succeeds but the read-back record has NO tokensValidAfterTime => sessions_revoke_unverified", async () => {
@@ -1005,7 +1027,7 @@ describe("R3 MAJOR: the revocation cutoff is observed against a SERVER-anchored 
       expect(r.sessionRevocationEvidence).toBeNull();
     });
 
-    it("server-time capture (role write) fails => revocation is STILL attempted (it only removes access), but the run is INCOMPLETE", async () => {
+    it("server-time capture (role write) fails => revocation is STILL requested (no wait, local-clock validSince), but the run is INCOMPLETE", async () => {
       const w = adminWorld(0);
       w.fail.role = true;
       const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), deps(w));
@@ -1082,6 +1104,133 @@ describe("R3 MAJOR: the revocation cutoff is observed against a SERVER-anchored 
     });
   });
 
+  /**
+   * BACKWARD CUTOFF MOVES (owner order B). revokeRefreshTokens OVERWRITES
+   * validSince with the operator clock (firebase-admin auth-api-request.js
+   * ~1253-1263); it does not take a max. The fake models exactly that
+   * (sdkRevoke assigns, never compares). The tool does NOT prevent a backward
+   * move; these tests pin what it REPORTS.
+   */
+  describe("backward cutoff move: recorded, never a clean success (not prevented)", () => {
+    const syncedRun = async (w: World, id: string) => runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke"), id), deps(w));
+
+    it("RISK REPRODUCED: an accurate revoke, then a sessions-only re-run from a SLOW clock LOWERS validSince below the first run's value => INCOMPLETE exit 3 with a backward detail", async () => {
+      const w = adminWorld(0);
+      const r1 = await syncedRun(w, "req_1_ok");
+      expect([r1.status, r1.exitCode]).toEqual(["applied", 0]);
+      const v1 = Date.parse(w.users.get(TARGET)!.tokensValidAfterTime!);
+      w.skewMs = -60_000;
+      const r2 = await syncedRun(w, "req_2_slow");
+      // The store really moved backward: the tool does not prevent it.
+      expect(w.validSinceSent).toHaveLength(2);
+      expect(w.validSinceSent[1]).toBeLessThan(w.validSinceSent[0]);
+      expect(Date.parse(w.users.get(TARGET)!.tokensValidAfterTime!)).toBeLessThan(v1);
+      // ...and it is reported as incomplete, with the move named.
+      expect([r2.status, r2.exitCode, r2.code, r2.outcome]).toEqual(["incomplete", 3, "sessions_revoke_unverified", "sessions_revoke_unverified"]);
+      expect(r2.sessionRevocationEvidence).toMatchObject({ cutoffObserved: false, tokensValidAfterTimeMovedBackward: true });
+      expect(r2.failureDetails.map((d) => d.split(":")[0])).toEqual(["sessions_revoke_unverified", "sessions_revoke_unverified"]);
+      expect(r2.failureDetails[1]).toMatch(/moved BACKWARD during this run/);
+      expect(r2.message).toMatch(/moved BACKWARD during this run/);
+      expect(w.audit.get("system-admin-claim:req_2_slow:outcome")).toMatchObject({
+        actionType: "SYSTEM_ADMIN_CLAIM_INCOMPLETE",
+        metadata: { completed: false, outcome: "sessions_revoke_unverified", sessionRevocationEvidence: { tokensValidAfterTimeMovedBackward: true } },
+      });
+      expect((w.audit.get("system-admin-claim:req_2_slow:outcome")!.metadata as { outcomeDetails: string[] }).outcomeDetails.join()).toMatch(/moved BACKWARD/);
+    });
+
+    it("EXHAUSTIVE: whenever the stored value was NOT ahead of this run's cutoff, every backward move is exit 3 (it is necessarily below the cutoff)", async () => {
+      let backwardSeen = 0;
+      for (const beforeOffsetS of [-3600, -60, -5, 0, 1, 2]) {
+        for (const skewS of [-3600, -120, -61, -30, -5, -2, -1, 0, 1, 30]) {
+          const w = adminWorld(skewS * 1000);
+          w.users.get(TARGET)!.tokensValidAfterTime = new Date((Math.floor(SERVER_START_MS / 1000) + beforeOffsetS) * 1000).toUTCString();
+          const r = await syncedRun(w, `req_${beforeOffsetS}_${skewS}`);
+          const ev = r.sessionRevocationEvidence!;
+          if (ev.tokensValidAfterTimeMovedBackward === true) {
+            backwardSeen++;
+            expect({ beforeOffsetS, skewS, exit: r.exitCode, observed: ev.cutoffObserved }).toEqual({ beforeOffsetS, skewS, exit: 3, observed: false });
+          }
+          if (r.exitCode === 0) expect(ev.tokensValidAfterTimeMovedBackward).toBe(false);
+        }
+      }
+      expect(backwardSeen).toBeGreaterThan(5); // the grid really exercises the backward case
+    });
+
+    it("the only exit-0 backward move is from a value AHEAD of this run's cutoff (fast-clock stamp); it carries the WARNING and the evidence flag", async () => {
+      const w = adminWorld(0);
+      const ahead = new Date((Math.floor(SERVER_START_MS / 1000) + 7200) * 1000).toUTCString();
+      w.users.get(TARGET)!.tokensValidAfterTime = ahead;
+      const r = await syncedRun(w, "req_ahead");
+      expect([r.status, r.exitCode]).toEqual(["applied", 0]);
+      const ev = r.sessionRevocationEvidence!;
+      expect(ev).toMatchObject({ cutoffObserved: true, tokensValidAfterTimeMovedBackward: true, tokensValidAfterTimeBefore: ahead });
+      expect(secs(ev.tokensValidAfterTimeAfter)).toBeGreaterThanOrEqual(secs(ev.cutoff));
+      expect(r.message).toContain(`WARNING (not a clean success): tokensValidAfterTime moved BACKWARD during this run, from ${ahead} to ${ev.tokensValidAfterTimeAfter}`);
+      expect(r.failureDetails).toEqual([]);
+    });
+
+    it("no anchor (role write fails) from a slow clock: the backward move is appended to the failure details", async () => {
+      const w = adminWorld(0);
+      await syncedRun(w, "req_1_ok");
+      w.skewMs = -60_000;
+      w.fail.role = true;
+      const r = await syncedRun(w, "req_2_noanchor");
+      expect([r.exitCode, r.code]).toEqual([3, "users_doc_failed"]);
+      expect(r.failureDetails.map((d) => d.split(":")[0])).toEqual(["users_doc_failed", "sessions_revoke_unverified", "sessions_revoke_unverified"]);
+      expect(r.failureDetails[2]).toMatch(/moved BACKWARD/);
+      expect(r.sessionRevocationEvidence!.detail).toMatch(/no server-time anchor.*; tokensValidAfterTime moved BACKWARD/);
+    });
+
+    it("claim write threw (no anchor) from a slow clock: backward move recorded alongside mint_failed", async () => {
+      const w = adminWorld(-120_000);
+      w.users.get(TARGET)!.tokensValidAfterTime = new Date(SERVER_START_MS).toUTCString();
+      w.fail.claims = true;
+      const r = await syncedRun(w, "req_mint");
+      expect([r.exitCode, r.code]).toEqual([3, "mint_failed"]);
+      expect(r.sessionRevocationEvidence).toMatchObject({ claimWrite: "unconfirmed", tokensValidAfterTimeMovedBackward: true });
+      expect(r.failureDetails.some((d) => /moved BACKWARD/.test(d))).toBe(true);
+    });
+
+    it("a backward move on a run that then fails only at the outcome row is still printed (incomplete message WARNING)", async () => {
+      const w = adminWorld(0);
+      w.users.get(TARGET)!.tokensValidAfterTime = new Date((Math.floor(SERVER_START_MS / 1000) + 7200) * 1000).toUTCString();
+      w.fail.outcome = true;
+      const r = await syncedRun(w, "req_outcome");
+      expect([r.exitCode, r.code]).toEqual([3, "audit_outcome_missing"]);
+      expect(r.sessionRevocationEvidence!.tokensValidAfterTimeMovedBackward).toBe(true);
+      expect(r.message).toMatch(/WARNING: tokensValidAfterTime moved BACKWARD/);
+    });
+
+    it("UNKNOWN direction is never reported as forward: no prior value => null; read-back failed => null", async () => {
+      const w = adminWorld(0);
+      delete w.users.get(TARGET)!.tokensValidAfterTime;
+      const r = await syncedRun(w, "req_noprior");
+      expect([r.exitCode, r.sessionRevocationEvidence!.tokensValidAfterTimeMovedBackward]).toEqual([0, null]);
+      const w2 = adminWorld(0);
+      w2.fail.getUserAfterWrite = true;
+      const r2 = await syncedRun(w2, "req_norb");
+      expect([r2.exitCode, r2.sessionRevocationEvidence!.tokensValidAfterTimeMovedBackward]).toEqual([3, null]);
+    });
+
+    it("CONTROL: two accurate runs in sequence move validSince forward: flag false, no WARNING, exit 0", async () => {
+      const w = adminWorld(0);
+      await syncedRun(w, "req_1_ok");
+      const r2 = await syncedRun(w, "req_2_ok");
+      expect([r2.status, r2.exitCode]).toEqual(["claim_already_absent_sessions_revoked", 0]);
+      expect(r2.sessionRevocationEvidence!.tokensValidAfterTimeMovedBackward).toBe(false);
+      expect(r2.message).not.toMatch(/WARNING|BACKWARD/);
+    });
+
+    it("every executed revoke calls revokeRefreshTokens EXACTLY once per run (no in-run retry)", async () => {
+      for (const fail of [{}, { revoke: true }, { role: true }, { claims: true }, { getUserAfterWrite: true }, { outcome: true }] as World["fail"][]) {
+        const w = adminWorld(0);
+        w.fail = fail;
+        await syncedRun(w, "req_once");
+        expect({ fail, n: w.calls.filter((c) => c.startsWith("revokeRefreshTokens")).length }).toEqual({ fail, n: 1 });
+      }
+    });
+  });
+
   describe("retry after partial claim removal", () => {
     it("claim write landed but the call threw => run 1 mint_failed, revocation still called; run 2 (same command) observes the cutoff, exit 0", async () => {
       const w = adminWorld(0);
@@ -1119,7 +1268,7 @@ describe("R3 MAJOR: the revocation cutoff is observed against a SERVER-anchored 
 });
 
 describe("R3 MINOR-1: disabled targets — revoke allowed, grant refused, never enabled", () => {
-  it("revoke on a DISABLED admin target: claim removed, sessions revoked and verified, account stays disabled", async () => {
+  it("revoke on a DISABLED admin target: claim removed, revocation requested with the cutoff observed, account stays disabled", async () => {
     const w = world();
     const t = w.users.get(TARGET)!;
     t.customClaims = { admin: true, plan: "pro" };
@@ -1131,7 +1280,8 @@ describe("R3 MINOR-1: disabled targets — revoke allowed, grant refused, never 
     expect(w.users.get(TARGET)!.disabled).toBe(true);
     expect(w.disabledWrites).toEqual([]);
     expect(w.calls).toContain(`revokeRefreshTokens:${TARGET}`);
-    expect(w.calls).toContain("log:Target state:   DISABLED - the admin claim is still removed and sessions revoked; the account stays disabled.");
+    expect(w.calls).toContain("log:Target state:   DISABLED - the admin claim is still removed and refresh-token revocation is still requested; the account stays disabled.");
+    expect(w.calls.join("\n")).not.toMatch(/sessions revoked/);
   });
 
   // The former "auth port has NO method that can change `disabled`" test here

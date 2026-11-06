@@ -22,6 +22,7 @@ import {
 } from "../set-system-admin-claim";
 import { REFUSAL_CODES, checkResultDirStat, expectedConfirmation, parseSetSystemAdminClaimArgs } from "../../../lib/admin/systemAdminClaimSafety";
 import type { UserRecordLike } from "../../../lib/admin/systemAdminClaimSafety";
+import { RERUN_GUIDANCE } from "../../../lib/admin/systemAdminClaimExecution";
 
 const readOnly = require("../../check-admin-claims.js");
 
@@ -363,7 +364,8 @@ describe("runCli — dry run and execute end to end (fake Firebase)", () => {
     expect(e.writes.some((w) => w.startsWith("claims:"))).toBe(true);
     expect(r.code).toBe(3);
     expect(r.result).toMatchObject({ status: "unexpected_error", writeAttempted: true });
-    expect(r.result.message).toMatch(/Re-running the same command is safe/);
+    expect(r.result.message).toContain(RERUN_GUIDANCE);
+    expect(r.result.message).not.toMatch(/command is safe|harmless|idempotent/i);
   });
 
   it("attempt audit row create throwing => exit 3 (outcome unknown), writeAttempted true, never 2", async () => {
@@ -371,7 +373,8 @@ describe("runCli — dry run and execute end to end (fake Firebase)", () => {
     expect(r.code).toBe(3);
     expect(r.result).toMatchObject({ phase: "executed", status: "incomplete", code: "audit_attempt_failed", exitCode: 3, writeAttempted: true });
     expect(r.e.writes).toEqual([]);
-    expect(r.e.err.join("\n")).toMatch(/Re-running the same command is safe/);
+    expect(r.e.err.join("\n")).toContain(RERUN_GUIDANCE);
+    expect(r.e.err.join("\n")).not.toMatch(/command is safe|harmless|idempotent/i);
   });
 
   describe("revoke (sessions always revoked)", () => {

@@ -35,6 +35,8 @@ import {
   validateServiceAccountKey,
   verifyReadBack,
   observeRevocationCutoff,
+  validSinceMovedBackward,
+  validSinceMovedBackwardDetail,
   CURRENT_PRIVILEGE_ENFORCEMENT_NOTE,
   REVOCATION_CLOCK_ASSUMPTION,
   revocationCutoffSeconds,
@@ -126,7 +128,7 @@ describe("parseSetSystemAdminClaimArgs", () => {
     ["target_missing_arg", without(GRANT, "--target-uid")],
     ["target_uid_invalid", [...without(GRANT, "--target-uid"), "--target-uid=a@b.com"]],
     ["target_uid_invalid", [...without(GRANT, "--target-uid"), `--target-uid=${"a".repeat(129)}`]],
-    // Owner policy: revoke ALWAYS revokes sessions; the opt-out flag is gone in every form.
+    // Owner policy: every executed revoke REQUESTS refresh-token revocation; the opt-out flag is gone in every form.
     ["unknown_flag", [...REVOKE, "--revoke-sessions=no"]],
     ["unknown_flag", [...REVOKE, "--revoke-sessions=yes"]],
     ["unknown_flag", [...REVOKE, "--revoke-sessions"]],
@@ -140,10 +142,12 @@ describe("parseSetSystemAdminClaimArgs", () => {
   ])("refuses %s", (code, argv) => {
     expect(parseCode(argv)).toBe(code);
   });
-  it("--revoke-sessions is refused with a message that says revoke always revokes sessions", () => {
+  it("--revoke-sessions is refused with a message that says every revoke REQUESTS revocation (no opt-out) and states its limits", () => {
     const r = parseSetSystemAdminClaimArgs([...REVOKE, "--revoke-sessions=no"]);
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.message).toMatch(/ALWAYS revokes the target's refresh tokens/);
+    if (r.ok) return;
+    expect(r.message).toBe("Refusing --revoke-sessions: the flag was removed. Every executed revoke REQUESTS revocation of the target's refresh tokens (owner policy); there is no opt-out. The request can fail, and even an acknowledged one does not end already-issued ID tokens (runbook, \"Revocation and sessions\").");
+    expect(r.message).not.toMatch(/ALWAYS revokes/);
   });
 
   it("there is no default project and no default target (an empty argv refuses)", () => {
@@ -469,6 +473,24 @@ describe("session revocation evidence — server clock only", () => {
     expect(observeRevocationCutoff("garbage", cutoff).ok).toBe(false);
     expect(observeRevocationCutoff(utc(cutoff), Number.NaN).ok).toBe(false);
   });
+  it("(f) backward move: strictly earlier whole second is true; equal/later is false; missing or unparseable is UNKNOWN (null), never forward", () => {
+    expect(validSinceMovedBackward(utc(T0), utc(T0 - 1))).toBe(true);
+    expect(validSinceMovedBackward(utc(T0 + 3600), utc(T0))).toBe(true);
+    expect(validSinceMovedBackward(utc(T0), utc(T0))).toBe(false);
+    expect(validSinceMovedBackward(utc(T0), utc(T0 + 1))).toBe(false);
+    // Sub-second differences inside one whole second are not a move (Auth stores whole seconds).
+    expect(validSinceMovedBackward(new Date(T0 * 1000 + 900).toISOString(), new Date(T0 * 1000 + 100).toISOString())).toBe(false);
+    expect(validSinceMovedBackward(null, utc(T0))).toBeNull();
+    expect(validSinceMovedBackward(utc(T0), null)).toBeNull();
+    expect(validSinceMovedBackward(undefined, undefined)).toBeNull();
+    expect(validSinceMovedBackward("garbage", utc(T0))).toBeNull();
+    expect(validSinceMovedBackward(utc(T0), "garbage")).toBeNull();
+    const d = validSinceMovedBackwardDetail(utc(T0), utc(T0 - 60));
+    expect(d).toContain(`from ${utc(T0)} to ${utc(T0 - 60)}`);
+    expect(d).toMatch(/overwrites validSince/);
+    expect(d).toMatch(/does not keep the later value/);
+    expect(d).toMatch(/This tool does not prevent that \(unresolved risk/);
+  });
   it("the anchor must be a well-formed server time STRICTLY later than the attempt row's commit time", () => {
     const attempt = { seconds: T0, nanoseconds: 500 };
     expect(checkRevocationAnchor({ seconds: T0, nanoseconds: 501 }, attempt)).toEqual({ ok: true, anchor: { seconds: T0, nanoseconds: 501 } });
@@ -492,6 +514,7 @@ const VERIFIED_EVIDENCE: SessionRevocationEvidence = {
   cutoff: "2026-11-05T10:00:03.000Z",
   tokensValidAfterTimeBefore: null,
   tokensValidAfterTimeAfter: "Thu, 05 Nov 2026 10:00:03 GMT",
+  tokensValidAfterTimeMovedBackward: null,
   validSinceMinusAnchorSeconds: 3,
   cutoffObserved: true,
   clockAlignmentAssumption: REVOCATION_CLOCK_ASSUMPTION,
