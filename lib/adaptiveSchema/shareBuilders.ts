@@ -39,7 +39,15 @@ import { escapeMarkdownInline, markdownQuote, plainTextQuote, singleLineText } f
 import { X_MAX_WEIGHTED_LENGTH, XUrlSpan, parseXText, xPostableText, xUrlSpans } from "./xWeightedText";
 import { EMOJI } from "./xTextRules.generated";
 import { ADAPTIVE_RESEARCH_REPORT_KIND } from "@/lib/verification/generateMemo";
-import { adaptiveTopIndependence, adaptiveTopIndependenceStatement, unmarkedTopIndependence, type AdaptiveTopIndependence } from "./verdictIndependence";
+import {
+  adaptiveTopIndependence,
+  adaptiveTopIndependenceStatement,
+  independenceQualification,
+  presentIndependenceQualifiedReport,
+  sharePanelPhrase,
+  shortSharePanelPhrase,
+  type AdaptiveTopIndependence,
+} from "./verdictIndependence";
 import { POSITIONS_BY_SLOT_HEADING, PositionSafeInput, PresentedSlotPosition, biasWithheldNotice, coverageWithheldNotice, isPositionMarked, positionView, presentPositionSafeReport } from "./positionPresentation";
 
 /**
@@ -47,8 +55,16 @@ import { POSITIONS_BY_SLOT_HEADING, PositionSafeInput, PresentedSlotPosition, bi
  * already presented (positionPresentation.presentPositionSafeReport) is used as is; a marked stored report reaching a
  * builder directly is presented here, from the rows and roster the caller holds — without them no position is derived.
  */
-function shown(report: AdaptiveSynthesisReport, input?: PositionSafeInput): AdaptiveSynthesisReport {
-  return isPositionMarked(report) ? presentPositionSafeReport(report, input ?? { rows: null, roster: [] }) : report;
+function shown(report: AdaptiveSynthesisReport, input?: PositionSafeInput, slotProvenance?: readonly RunModelProvenanceFacts[] | null): AdaptiveSynthesisReport {
+  if (isPositionMarked(report)) return presentPositionSafeReport(report, input ?? { rows: null, roster: [] });
+  // An unmarked report: its agreement statements whose supporting slots are not independent executing models are
+  // stated by their executing models (verdictIndependence.ts) — the same object, as before, for every other report.
+  return presentIndependenceQualifiedReport(report, { rows: input?.rows ?? null, provenance: input?.provenance ?? slotProvenance ?? null });
+}
+
+/** "Where models agree", or its qualified heading when an entry under it is not agreement between independent models. */
+function agreeHeading(report: AdaptiveSynthesisReport): string {
+  return independenceQualification(report)?.agreeHeading ?? "Where models agree";
 }
 
 /** A row's positions by slot as plain lines (never quoted as verbatim model text). */
@@ -159,6 +175,17 @@ function dedupedAgreementItems(report: AdaptiveSynthesisReport): string[] {
   return dedupeTextList(report.whereModelsAgree, { ...TEXT_DEDUP_THRESHOLDS, cap: WHERE_MODELS_AGREE_MAX_ITEMS });
 }
 
+/** The merged legacy lines, each followed by its independence statement when it has one (after the merge, never before it). */
+function qualifiedAgreementLines(report: AdaptiveSynthesisReport, format: (line: string, qualifier: string) => string): string[] {
+  const qualifiers = independenceQualification(report)?.legacyAgree;
+  return dedupedAgreementItems(report).map((line) => {
+    const q = qualifiers?.get(line);
+    return q ? format(line, q) : line;
+  });
+}
+
+const plainQualified = (line: string, q: string) => `${line} — ${PANEL_RESULT_LABEL}: ${q}`;
+
 function truncate(text: string, max: number): string {
   const trimmed = text.trim();
   return trimmed.length <= max ? trimmed : `${trimmed.slice(0, max - 1).trimEnd()}…`;
@@ -175,12 +202,12 @@ export function buildAdaptiveSynthesisMarkdown(
    */
   slotProvenance?: readonly RunModelProvenanceFacts[] | null
 ): string {
-  const report = shown(storedReport, positionInput);
+  const report = shown(storedReport, positionInput, slotProvenance);
   const slotName = (modelId: string) => executingVoiceName(modelId, slotProvenance ?? positionInput?.provenance ?? null);
-  // The top claim's model independence (verdictIndependence.ts): a marked report carries it; an unmarked one is judged
-  // from the rows and per-slot provenance the caller holds. Null — exactly as before — for independent supporters.
+  // The top claim's model independence (verdictIndependence.ts): a marked report carries it in its position view; an
+  // unmarked one in its independence-qualified view. Null — exactly as before — for independent supporters.
   const view = positionView(report);
-  const topIndependence = view ? view.verdict.topIndependence ?? null : unmarkedTopIndependence(report.verdictCard, positionInput?.rows ?? null, slotProvenance ?? positionInput?.provenance ?? null);
+  const topIndependence = view ? view.verdict.topIndependence ?? null : independenceQualification(report)?.top ?? null;
   if (report.presentation) return buildPresentedMarkdown(question, report, slotName, topIndependence);
   const lines: string[] = [];
   lines.push("# Synthesis Report");
@@ -199,9 +226,9 @@ export function buildAdaptiveSynthesisMarkdown(
   lines.push(report.executiveSummary);
   lines.push("");
 
-  const agreementItems = dedupedAgreementItems(report);
+  const agreementItems = qualifiedAgreementLines(report, (line, q) => `${line} — **${PANEL_RESULT_LABEL}:** ${q}`);
   if (agreementItems.length > 0) {
-    lines.push("## Where models agree");
+    lines.push(`## ${agreeHeading(report)}`);
     agreementItems.forEach((a) => lines.push(`- ${a}`));
     lines.push("");
   }
@@ -260,7 +287,7 @@ function buildPresentedMarkdown(question: string, report: AdaptiveSynthesisRepor
   } else {
     const agreeItems = presentAgreeItems(report);
     if (agreeItems.length > 0) {
-      lines.push("## Where models agree");
+      lines.push(`## ${agreeHeading(report)}`);
       agreeItems.forEach((a) => lines.push(`- ${markdownClaim(a)}`));
       lines.push("");
     }
@@ -419,9 +446,9 @@ export function buildAdaptiveMemoInput(
     keyFindings: [
       // D8: an unrecognized stored gate leads the findings; a known gate exports exactly as before.
       ...(readGateStatus(report.gate) === "unrecognized" ? [leadText(answerLeadBlocks(presentUnifiedAnswer(report)))] : []),
-      ...dedupedAgreementItems(report).slice(0, 8),
+      ...qualifiedAgreementLines(report, plainQualified).slice(0, 8),
     ],
-    synthesisAgreements: dedupedAgreementItems(report),
+    synthesisAgreements: qualifiedAgreementLines(report, plainQualified),
     synthesisDisagreements: report.disagreements.map((d) => `${d.topic}: ${d.whyTheyDiffer}`),
     confidenceAssessment: report.executiveSummary || report.certaintyAssessment,
     modelsUsed: runModelLabels(modelsUsed, modelProvenance),
@@ -435,7 +462,9 @@ export function buildAdaptiveLinkedInPost(question: string, storedReport: Adapti
   // Order 5 (Contract P): a compact format — no per-slot positions, no model names; rows are stated by their own result.
   const marked = !!positionView(report);
   const lines: string[] = [];
-  lines.push(`I researched "${truncate(question, 120)}" across a multi-model AI panel using ConvergePanel.`);
+  // A run whose slots are not all independent executing models is not introduced as an unqualified multi-model panel.
+  const panelPhrase = sharePanelPhrase(independenceQualification(report)?.run ?? null);
+  lines.push(panelPhrase ? `I researched "${truncate(question, 120)}" using ConvergePanel, across ${panelPhrase}.` : `I researched "${truncate(question, 120)}" across a multi-model AI panel using ConvergePanel.`);
   lines.push("");
   if (hasGatePresentation(report)) {
     // Order 4 (D5/D6): the gate in its neutral wording, the certainty as its own figure, and on caution the notice.
@@ -448,7 +477,8 @@ export function buildAdaptiveLinkedInPost(question: string, storedReport: Adapti
   lines.push("");
 
   const presented = report.presentation;
-  const agreementItems = presented ? [] : dedupedAgreementItems(report);
+  // A legacy line is shortened; its independence statement (computed) never is.
+  const agreementItems = presented ? [] : qualifiedAgreementLines(report, (line, q) => plainQualified(truncate(line, 140), q));
   const view = positionView(report);
   if (view && presented) {
     // Order 5 (Contract P, F-1): claims and value comparisons under their own headings, up to two of each.
@@ -460,9 +490,9 @@ export function buildAdaptiveLinkedInPost(question: string, storedReport: Adapti
       lines.push("");
     });
   } else if (presented ? presented.agree.length > 0 : agreementItems.length > 0) {
-    lines.push("Where models agree:");
+    lines.push(`${agreeHeading(report)}:`);
     if (presented) presented.agree.slice(0, 2).forEach((a) => lines.push(`→ ${shortClaimWithResult(a, 100)}`));
-    else agreementItems.slice(0, 2).forEach((a) => lines.push(`→ ${truncate(a, 140)}`));
+    else agreementItems.slice(0, 2).forEach((a, i) => lines.push(`→ ${independenceQualification(report)?.legacyAgree.has(dedupedAgreementItems(report)[i]) ? a : truncate(a, 140)}`));
     lines.push("");
   }
 
@@ -487,7 +517,7 @@ export function buildAdaptiveXPost(question: string, storedReport: AdaptiveSynth
   if (positionView(report)) return buildMarkedXPost(question, report);
   const splitLabel = "Models split on: ";
   const parts: string[] = [];
-  parts.push(`Asked a multi-model AI panel: "${truncate(question, 80)}"`);
+  parts.push(`Asked ${shortSharePanelPhrase(independenceQualification(report)?.run ?? null) ?? "a multi-model AI panel"}: "${truncate(question, 80)}"`);
   if (hasGatePresentation(report)) {
     const status = readGateStatus(report.gate);
     parts.push(`${gateLabel(status)}${status === "caution" ? ` (${CAUTION_NOTICE_SHORT})` : ""} · Certainty: ${Math.round(report.runCertainty * 100)}%`);
@@ -672,7 +702,10 @@ function buildMarkedXPost(question: string, report: AdaptiveSynthesisReport): st
   const fitQuestion = xFitter(questionText.text, questionText.truncated);
   const fitClaim = xFitter(claimText.text, claimText.truncated);
   const allowed = new Set([...fitQuestion.urls, ...fitClaim.urls, ...xUrlSpans((split?.result ?? "").normalize("NFC"))].map((u) => u.url));
-  const asked = (q: string) => (q ? `${X_ASKED}: "${q}"` : X_ASKED);
+  // A run with fewer than two independent executing models (or unrecorded execution) is not "a multi-model AI panel".
+  const panel = shortSharePanelPhrase(independenceQualification(report)?.run ?? null);
+  const askedLine = panel ? `Asked ${panel}` : X_ASKED;
+  const asked = (q: string) => (q ? `${askedLine}: "${q}"` : askedLine);
   const post = (q: string, row: string | null) => [asked(q), gateLine, ...(row ? [row] : []), X_BRAND].join("\n\n");
   const rowLine = (claimBudget: number) => {
     if (!split) return null;
@@ -700,10 +733,10 @@ function buildMarkedXPost(question: string, report: AdaptiveSynthesisReport): st
     const candidate = post(qBudget ? fitQuestion(qBudget) : "", pointer);
     if (fits(candidate)) return candidate;
   }
-  return markedXFallback(gateLine);
+  return markedXFallback(gateLine, askedLine);
 }
 
 /** The defined safe fallback: no question, no row — only computed and fixed text, always a valid post. */
-export function markedXFallback(gateLine: string): string {
-  return [X_ASKED, gateLine, X_BRAND].join("\n\n");
+export function markedXFallback(gateLine: string, askedLine: string = X_ASKED): string {
+  return [askedLine, gateLine, X_BRAND].join("\n\n");
 }

@@ -93,7 +93,13 @@ import { VerificationActions } from "@/components/VerificationActions";
 import { generateVerificationMemo, downloadTextFile } from "@/lib/verification/generateMemo";
 import { copyToClipboardWithFallback } from "@/lib/ui/copyFormats";
 import { useRunModelProvenance } from "./RunModelProvenanceContext";
-import { adaptiveTopHeading, adaptiveTopIndependenceStatement, unmarkedTopIndependence } from "@/lib/adaptiveSchema/verdictIndependence";
+import {
+  groupedSupportingVoices,
+  independenceQualification,
+  qualifiedStatusHeading,
+  rowSupportIndependence,
+  topIndependencePresentation,
+} from "@/lib/adaptiveSchema/verdictIndependence";
 import { executingModelKey, REPEATED_SUBSTITUTE_EXCLUDED } from "@/lib/panel/independentVoices";
 import {
   buildAdaptiveSynthesisMarkdown,
@@ -1021,8 +1027,9 @@ export function PanelVerdictCard({ report, gate, alignedClaims }: { report: Adap
   // Historical reports counted each slot a substitute model answered as its own supporter: a top claim whose supporting
   // slots were answered by one substitute model, or whose execution is not recorded, is never an unqualified "Top
   // consensus — agreed by N" (verdictIndependence.ts; stored values unchanged). Independent supporters: as before.
+  // The card's result line then states the executing models itself (verdictIndependence.ts, the report's qualified view).
   const runProvenance = useRunModelProvenance();
-  const topIndependence = positions ? positions.topIndependence ?? null : unmarkedTopIndependence(v, alignedClaims ?? null, runProvenance);
+  const topIndependence = topIndependencePresentation(report, positions, alignedClaims ?? null, runProvenance);
   // R4-1: claim text is model-written; cards that carry the computed status show it beside the quoted claim.
   const top = presentVerdictClaim(v.topConsensus, v.topConsensusAgreement, positions?.topLabel);
   const split = v.keyDisagreement ? presentVerdictClaim(v.keyDisagreement, v.keyDisagreementAgreement, positions?.keyLabel) : null;
@@ -1049,14 +1056,16 @@ export function PanelVerdictCard({ report, gate, alignedClaims }: { report: Adap
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
         <div className="rounded-lg bg-slate-50 border border-slate-200 p-3">
-          <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">{positions ? positions.topHeading : topIndependence ? adaptiveTopHeading(topIndependence) : "Top consensus"}</span>
+          <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">{topIndependence ? topIndependence.heading : positions ? positions.topHeading : "Top consensus"}</span>
           <p className="text-sm text-slate-800 mt-1">
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 mr-1.5" />
             {top.result ? <span data-source="model_claim">{top.claim}</span> : top.claim}
             {topIndependence ? (
-              <span data-source="computed" data-testid="verdict-top-independence" className="block text-xs text-slate-600 mt-0.5">
-                {adaptiveTopIndependenceStatement(topIndependence, v.consensusModelCount)}
-              </span>
+              topIndependence.statement && (
+                <span data-source="computed" data-testid="verdict-top-independence" className="block text-xs text-slate-600 mt-0.5">
+                  {topIndependence.statement}
+                </span>
+              )
             ) : v.consensusModelCount > 0 &&
               (positions ? (
                 <span className="text-slate-500"> — supported or partially supported by {v.consensusModelCount} panel slot{v.consensusModelCount === 1 ? "" : "s"}</span>
@@ -1123,6 +1132,7 @@ function LoadBearingClaim({ claim }: { claim: AlignedClaim }) {
   const position = usePositionPresentation();
   // Executing-model names: a substituted slot is never named as its requested model.
   const voiceName = useSlotVoiceName();
+  const runProvenance = useRunModelProvenance();
   if (position) {
     // Order 5 (Contract P): the row's own computed statement; supporting / disputing slots for a claim row only.
     const view = rowView(claim, position.roster, position.provenance);
@@ -1141,7 +1151,10 @@ function LoadBearingClaim({ claim }: { claim: AlignedClaim }) {
   }
   const named = (stances: string[]) =>
     claim.cells.filter((c): c is AlignedClaimCell => !!c && stances.includes(c.stance)).map((c) => voiceName(c.modelId));
-  const supports = named(["agrees", "partial"]);
+  // A consensus / majority row whose supporting slots are not independent executing models: its qualified status and
+  // each executing model once (verdictIndependence.ts). Every other row: as before.
+  const independence = rowSupportIndependence(claim, runProvenance);
+  const supports = independence ? groupedSupportingVoices(claim, runProvenance) : named(["agrees", "partial"]);
   const disputes = named(["disputes"]);
   const who = [supports.length > 0 ? `supported by ${supports.join(", ")}` : "", disputes.length > 0 ? `disputed by ${disputes.join(", ")}` : ""].filter(Boolean);
   return (
@@ -1150,7 +1163,7 @@ function LoadBearingClaim({ claim }: { claim: AlignedClaim }) {
         {CLAIM_LABEL}: {quoteClaim(claim.claimText)}
       </span>
       <span data-source="computed" className="block text-xs text-slate-500 mt-0.5">
-        {PANEL_RESULT_LABEL}: <span className="font-medium">{consensusStatusLabel(claim.status)}</span>
+        {PANEL_RESULT_LABEL}: <span className="font-medium">{(independence && qualifiedStatusHeading(claim.status, independence)) || consensusStatusLabel(claim.status)}</span>
         {who.length > 0 ? ` (${who.join("; ")})` : ""}
       </span>
     </>
@@ -1299,7 +1312,7 @@ export default function AdaptiveSynthesisReportView({
       {!agreeGroups && agreeItems.length > 0 && (
         <div data-section="where-models-agree">
           <Card>
-            <SectionLabel>Where models agree</SectionLabel>
+            <SectionLabel>{independenceQualification(report)?.agreeHeading ?? "Where models agree"}</SectionLabel>
             <ul className="list-disc list-outside pl-5 space-y-1 text-sm leading-relaxed text-slate-800">
               {agreeItems.map((item, idx) =>
                 report.presentation ? (
@@ -1307,7 +1320,15 @@ export default function AdaptiveSynthesisReportView({
                     <ClaimWithResult item={item} />
                   </li>
                 ) : (
-                  <li key={idx}>{item.claim.text}</li>
+                  <li key={idx}>
+                    {item.claim.text}
+                    {/* A legacy line whose supporting slots are not independent executing models: its statement (computed). */}
+                    {item.result && (
+                      <span data-source="computed" data-testid="agree-independence" className="block text-xs text-slate-600 mt-0.5">
+                        {item.result.label}: {item.result.text}
+                      </span>
+                    )}
+                  </li>
                 )
               )}
             </ul>

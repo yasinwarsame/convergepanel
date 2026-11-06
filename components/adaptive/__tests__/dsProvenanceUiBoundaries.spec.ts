@@ -31,8 +31,15 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   "lib/adaptiveSchema/dsProvenanceRouteAdapter.ts": "ac1f027bb128534c75c1270351e03e294b83240f",
   "lib/env.ts": "2b81ae7239ea4fd655b8320d5bf726c778149a20",
   "lib/adaptiveSchema/exportSnapshot.ts": "5af930878120bbda7ba49ec40045502416859d19",
-  "lib/pdf/AdaptiveResearchDocument.tsx": "10ba10b9d413214b7e4e00c422f9b15ab640d26a",
-  "lib/docx/AdaptiveResearchDocxDocument.ts": "4e8ba97ea8d0ad4bc9e13d2a598121da2ff657b0",
+  // Owner order C3 (review of cf74a52, controlled exception): ONLY the unmarked verdict section's headings — when
+  // exportPositionSafeReport reports the top claim's supporting slots as not independent executing models
+  // (`independence`), the section label is "Where models agree / disagree (counted by executing model)" / "(model
+  // independence unverified)" and the top sub-label is the qualified top heading; otherwise the same literals and the
+  // same element tree / paragraphs as before. No provenance code, no import change; the qualified answer / card text
+  // comes from exportPositionView.ts. Pinned by DS_FROZEN_EXPORT_DIFF below and by historicalAgreementIndependence.spec.tsx.
+  // Was 10ba10b9d413214b7e4e00c422f9b15ab640d26a (PDF) and 4e8ba97ea8d0ad4bc9e13d2a598121da2ff657b0 (DOCX) at 9eca1e3.
+  "lib/pdf/AdaptiveResearchDocument.tsx": "6bd87796ec04f361792a5afe6ccbf8cc21155591",
+  "lib/docx/AdaptiveResearchDocxDocument.ts": "c7c4d4ab97121e5a335ad5b7acd7aa934b138dca",
   "lib/adaptiveSchema/dsLabelWording.ts": "db50c0e7b9cec1ad8416a566b2d08c4ed16fefa1",
   "lib/adaptiveSchema/decisionSupportAlignment.ts": "b19e49caacc05c52c17a4676a7321dca654d132c",
   "lib/adaptiveSchema/decisionReceiptBuilder.ts": "e32c42b64d7d1d05f41dee95c548dacc76668640",
@@ -73,6 +80,55 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
 describe("forbidden layers are unchanged from main 9eca1e3", () => {
   it.each(Object.entries(UNCHANGED_AT_9ECA1E3))("%s", (path, blob) => {
     expect(gitBlob(readFileSync(join(ROOT, path)))).toBe(blob);
+  });
+});
+
+/**
+ * Owner order C3 (review of cf74a52): the PDF / DOCX composers changed ONLY by the listed edits. Reverting exactly these
+ * edits in the current source must reproduce the 9eca1e3 blob byte for byte — so any other change to a frozen export
+ * composer (a provenance read, an import, a recomputation, a reworded literal) fails here even though the pin above was
+ * re-recorded.
+ */
+const C3_COMMENT_PDF =
+  "  // An unmarked report whose top claim's supporting slots are not independent executing models: the verdict section is\n  // headed by what it counts (exportPositionView.ts); every other unmarked report composes exactly as before.\n";
+const C3_COMMENT_DOCX =
+  "  // An unmarked report whose top claim's supporting slots are not independent executing models: the verdict section is\n  // headed by what it counts (exportPositionView.ts); every other unmarked report exports exactly as before.\n";
+const DS_FROZEN_EXPORT_DIFF: Record<string, { was: string; edits: [current: string, at9eca1e3: string][] }> = {
+  "lib/pdf/AdaptiveResearchDocument.tsx": {
+    was: "10ba10b9d413214b7e4e00c422f9b15ab640d26a",
+    edits: [
+      [`${C3_COMMENT_PDF}  const { report: synthesis, view: positions, independence } = exportPositionSafeReport(record);`, "  const { report: synthesis, view: positions } = exportPositionSafeReport(record);"],
+      ['<SectionCard label={independence ? independence.sectionHeading : "Where models agree / disagree"}>', '<SectionCard label="Where models agree / disagree">'],
+      [
+        '<VerdictCardBody verdictCard={synthesis.verdictCard} {...(independence ? { headings: { top: independence.topHeading, key: "Disagreement" } } : {})} />',
+        "<VerdictCardBody verdictCard={synthesis.verdictCard} />",
+      ],
+    ],
+  },
+  "lib/docx/AdaptiveResearchDocxDocument.ts": {
+    was: "4e8ba97ea8d0ad4bc9e13d2a598121da2ff657b0",
+    edits: [
+      [`${C3_COMMENT_DOCX}  const { report: synthesis, view: positions, independence } = exportPositionSafeReport(record);`, "  const { report: synthesis, view: positions } = exportPositionSafeReport(record);"],
+      [
+        'out.push(heading(positions ? positions.verdict.sectionHeading : independence ? independence.sectionHeading : "Where models agree / disagree"));',
+        'out.push(heading(positions ? positions.verdict.sectionHeading : "Where models agree / disagree"));',
+      ],
+      [
+        'out.push(muted(positions ? positions.verdict.topHeading : independence ? independence.topHeading : "Agreement"), body(top.claim));',
+        'out.push(muted(positions ? positions.verdict.topHeading : "Agreement"), body(top.claim));',
+      ],
+    ],
+  },
+};
+
+describe("owner order C3: the frozen export composers differ from 9eca1e3 only by the independence headings", () => {
+  it.each(Object.entries(DS_FROZEN_EXPORT_DIFF))("%s", (path, { was, edits }) => {
+    let src = read(path);
+    for (const [current, before] of edits) {
+      expect([path, src.split(current).length - 1]).toEqual([path, 1]);
+      src = src.replace(current, before);
+    }
+    expect(gitBlob(Buffer.from(src, "utf8"))).toBe(was);
   });
 });
 

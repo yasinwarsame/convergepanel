@@ -334,7 +334,9 @@ function legacySection(record: AdaptiveResearchExportV1): (Paragraph | Table)[] 
   const legacy = record.reportSnapshot.legacy!;
   const schema = SCHEMA_REGISTRY[legacy.schemaId];
   // Order 5 (Contract P): a marked report is composed from its position-safe view; unmarked reports are unchanged.
-  const { report: synthesis, view: positions } = exportPositionSafeReport(record);
+  // An unmarked report whose top claim's supporting slots are not independent executing models: the verdict section is
+  // headed by what it counts (exportPositionView.ts); every other unmarked report exports exactly as before.
+  const { report: synthesis, view: positions, independence } = exportPositionSafeReport(record);
 
   const out: (Paragraph | Table)[] = [];
 
@@ -365,12 +367,12 @@ function legacySection(record: AdaptiveResearchExportV1): (Paragraph | Table)[] 
       for (const block of answerLeadBlocks(presentUnifiedAnswer(synthesis))) out.push(body(blockText(block)));
       out.push(body(synthesis.unifiedAnswer));
     }
-    out.push(heading(positions ? positions.verdict.sectionHeading : "Where models agree / disagree"));
+    out.push(heading(positions ? positions.verdict.sectionHeading : independence ? independence.sectionHeading : "Where models agree / disagree"));
     // Consensus Integrity: the quoted claim with its computed status (R4-1), and the canonical contested note
     // (verdictCard.ts). Each is absent on reports persisted before it existed, which export exactly as before.
     const card = synthesis.verdictCard;
     const top = presentVerdictClaim(card.topConsensus, card.topConsensusAgreement, positions?.verdict.topLabel);
-    out.push(muted(positions ? positions.verdict.topHeading : "Agreement"), body(top.claim));
+    out.push(muted(positions ? positions.verdict.topHeading : independence ? independence.topHeading : "Agreement"), body(top.claim));
     if (top.result) out.push(muted(top.result));
     if (card.topConsensusContested) out.push(muted(`Contested: ${card.topConsensusContested}`));
     if (card.keyDisagreement) {

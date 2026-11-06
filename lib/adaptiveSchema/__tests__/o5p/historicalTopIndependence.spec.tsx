@@ -54,8 +54,11 @@ describe("historical adaptive report, collapsed DeepSeek slots (generic-consensu
       expect([k, html.includes(">Top consensus<")]).toEqual([k, false]);
       expect([k, /agreed by \d+ model/.test(html)]).toEqual([k, false]);
       expect([k, /supported or partially supported by \d+ panel slot/.test(html)]).toEqual([k, false]);
-      expect([k, html.includes(ADAPTIVE_REPEATED_SUBSTITUTE_TOP_HEADING)]).toEqual([k, true]);
-      expect([k, html.includes(`Recorded as supported by 5 panel slots, answered by 4 independent models: ${DEEPSEEK}; Grok; Perplexity; Gemini.`)]).toEqual([k, true]);
+      // Review of cf74a52 (N1): four independent executing models keep a qualified consensus heading; the card's result
+      // line states the executing models itself (MAJOR-1), so no separate statement repeats it.
+      expect([k, html.includes("Top consensus (4 independent models; a substitute model that answered several slots counted once)")]).toEqual([k, true]);
+      expect([k, html.includes(`recorded as consensus of 5 panel slots; those slots were answered by 4 independent models (${DEEPSEEK}; Grok; Perplexity; Gemini)`)]).toEqual([k, true]);
+      expect([k, html.includes("Recorded as supported by 5 panel slots")]).toEqual([k, false]);
     }
     const md = out["text.markdown"]!;
     expect(md).toContain(`**Model independence:** Recorded as supported by 5 panel slots`);
@@ -73,15 +76,16 @@ describe("historical adaptive report, collapsed DeepSeek slots (generic-consensu
     const strip = out["ui.primaryStrip"]!;
     expect(strip).not.toContain(">Models agree<");
     expect(strip).not.toMatch(/— 5 models/);
+    // Rendered here without the stored rows: the run's slots decide, and the stored result says what it counts.
     expect(strip).toContain(ADAPTIVE_REPEATED_SUBSTITUTE_TOP_HEADING);
-    expect(strip).toContain("In this run DeepSeek (substituting ChatGPT, Claude) answered several slots");
+    expect(strip).toContain("counted by panel slot; in this run DeepSeek (substituting ChatGPT, Claude) answered several slots");
   });
 
   it("marked shape: the exports (PDF / DOCX) head the top claim with the qualified heading", async () => {
     const out = await renderRecord(shaped("generic-consensus", "marked"), collapse(scenarioRows("generic-consensus")));
     for (const k of ["export.pdfTree", "export.docxXml"]) {
-      expect([k, out[k]!.includes(ADAPTIVE_REPEATED_SUBSTITUTE_TOP_HEADING)]).toEqual([k, true]);
-      expect([k, out[k]!.includes("Top consensus")]).toEqual([k, false]);
+      expect([k, out[k]!.includes("Top consensus (4 independent models; a substitute model that answered several slots counted once)")]).toEqual([k, true]);
+      expect([k, /Top consensus(?! \(4 independent)/.test(out[k]!)]).toEqual([k, false]);
     }
   });
 
@@ -102,7 +106,7 @@ describe("historical adaptive report, insufficient provenance (a row without a r
       expect([k, html.includes(">Top consensus<")]).toEqual([k, false]);
       expect([k, /agreed by \d+ model/.test(html)]).toEqual([k, false]);
       expect([k, html.includes(ADAPTIVE_INDEPENDENCE_UNVERIFIED_TOP_HEADING)]).toEqual([k, true]);
-      expect([k, html.includes("Model independence unverified: recorded as supported by 5 panel slots, but which models answered the supporting slots is not recorded.")]).toEqual([k, true]);
+      expect([k, html.includes("recorded as consensus of 5 panel slots; model independence unverified — which models answered the supporting slots is not recorded")]).toEqual([k, true]);
       expect([k, html.includes("substituting")]).toEqual([k, false]);
     }
     expect(out["text.markdown"]).toContain("**Model independence:** Model independence unverified:");

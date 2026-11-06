@@ -31,7 +31,18 @@ import { normalizeForComparison } from "./comparisonNormalization";
 import { CAUTION_NEXT_STEP_WITHOUT_DISAGREEMENT, VERDICT_NEXT_STEPS } from "./config";
 import { singleLineText } from "./textSerialization";
 import { providerDisplayName, runModelFamilyName, type RunModelProvenanceFacts } from "@/lib/panel/runModelIdentity";
-import { adaptiveTopHeading, adaptiveTopIndependence, supportingSlotsOfRow, type AdaptiveTopIndependence } from "./verdictIndependence";
+import {
+  adaptiveTopIndependence,
+  attachRunIndependence,
+  presentIndependenceQualifiedReport,
+  qualifiedRowResult,
+  qualifiedStatusHeading,
+  qualifiedTopHeading,
+  rowSupportIndependence,
+  supportingSlotsOfRow,
+  type AdaptiveTopIndependence,
+  type QualifiedStatusHeading,
+} from "./verdictIndependence";
 
 // ─── Marker ─────────────────────────────────────────────────────────────────
 
@@ -409,7 +420,8 @@ export type RowHeading =
   | "Values differ"
   | "Comparison"
   | "No recorded positions"
-  | "Position details unavailable";
+  | "Position details unavailable"
+  | QualifiedStatusHeading;
 
 export interface PresentedSlotPosition {
   slot: string;
@@ -503,6 +515,14 @@ export function rowView(row: unknown, roster: readonly string[], provenance?: re
       return { ...common, claimStatus: "split", heading: kind === "opposing_positions" ? "Recorded opposing positions" : kind === "no_positions" ? "No recorded positions" : "Unresolved claim", text: claimKindText(kind, reading), isOpposition: kind === "opposing_positions" };
     }
     if (!isKnownStatus(status)) return { ...common, heading: "Unrecognised status", text: `unrecognised status — not presented as agreement${readingTail(reading).length ? `; ${readingTail(reading).join("; ")}` : ""}` };
+    // Historical reports counted every slot a substitute model answered as its own supporter: a consensus / majority
+    // row whose supporting slots are not independent executing models is stated by its executing models
+    // (verdictIndependence.ts) — the stored status as recorded, never recomputed. Independent supporters: as before.
+    const independence = rowSupportIndependence(r, provenance);
+    if (independence) {
+      const tail = readingTail(reading);
+      return { ...common, claimStatus: status, heading: qualifiedStatusHeading(status, independence) ?? STATUS_HEADING[status], text: `${qualifiedRowResult(r, independence)}${tail.length ? `; ${tail.join("; ")}` : ""}` };
+    }
     return { ...common, claimStatus: status, heading: STATUS_HEADING[status], text: claimStatusText(status, reading, claimText, roster.length) };
   }
 
@@ -797,7 +817,10 @@ function presentedClaim(c: PresentedClaim, join: RowJoin, input: PositionSafeInp
  * PositionView attached. Idempotent: a report this function returned is returned as is.
  */
 export function presentPositionSafeReport<R extends AdaptiveSynthesisReport | null | undefined>(report: R, input: PositionSafeInput): R {
-  if (!report || !isPositionMarked(report) || positionView(report)) return report;
+  if (!report || positionView(report)) return report;
+  // An unmarked report renders as before, except that an agreement statement whose supporting slots are not independent
+  // executing models is stated by its executing models (verdictIndependence.ts; the same object when nothing needs it).
+  if (!isPositionMarked(report)) return presentIndependenceQualifiedReport(report, input);
   const rows = Array.isArray(input.rows) ? input.rows : null;
   const roster = [...input.roster];
   const src = report as AdaptiveSynthesisReport;
@@ -895,6 +918,9 @@ export function presentPositionSafeReport<R extends AdaptiveSynthesisReport | nu
     verdictCard,
   };
   Object.defineProperty(out, POSITION_VIEW, { value: view, enumerable: false });
+  // The run as a whole (verdictIndependence.ts): a run with fewer than two independent executing models is never
+  // introduced as a multi-model panel (LinkedIn / X). Rows are qualified by rowView; nothing else reads this here.
+  attachRunIndependence(out, input.provenance);
   return out as R;
 }
 
@@ -928,7 +954,7 @@ function presentVerdict(src: AdaptiveSynthesisReport, rows: readonly unknown[] |
       // supporting slots' recorded execution proves (verdictIndependence.ts). Stored values are unchanged.
       const independence = adaptiveTopIndependence(supportingSlotsOfRow(join.row), input.provenance);
       if (independence.kind !== "independent") {
-        topHeading = adaptiveTopHeading(independence)!;
+        topHeading = qualifiedTopHeading(independence, view.claimStatus);
         topIndependence = independence;
       }
       top = { topConsensusAgreement: view.text, consensusModelCount: view.supporters.length, ...(view.contested ? { topConsensusContested: view.contested } : {}) };
