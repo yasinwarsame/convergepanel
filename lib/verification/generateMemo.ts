@@ -72,6 +72,13 @@ export interface MemoInput {
   independentModelCount?: number;
 
   /**
+   * Research (legacy panel) memo only: true when two or more slots answered but the run's rows do not record which
+   * models executed (the gate's coverage "unverified"): the memo then withholds the consensus score and the cross-model
+   * evidence quality and states no "where models agree / disagree" sections. Absent / false → exactly the memo as before.
+   */
+  researchIndependenceUnverified?: boolean;
+
+  /**
    * Claim memo only: whether the verification's stored rows prove >= 2 independent executing models with a usable answer
    * (`ClaimVerificationClientPayload.modelIndependence`). "insufficient" / "unverified" → no consensus score, no
    * cross-model evidence quality, the verdict stated as one model's assessment (or with unverified coverage), and no
@@ -512,6 +519,12 @@ export const RESEARCH_MEMO_NO_CROSS_MODEL_EVIDENCE = "not assessed (fewer than t
 export const RESEARCH_MEMO_SINGLE_MODEL_METHODOLOGY =
   "This question was sent to a panel of large language models via ConvergePanel with identical instructions, but fewer than two independent models responded (slots answered by the same substitute model count as one). No cross-model comparison was possible: no consensus score is reported and nothing in this memo reflects agreement or convergence between models.";
 
+/** Research memo lines when two or more slots answered but which models executed is not recorded. */
+export const RESEARCH_MEMO_UNVERIFIED_SUMMARY =
+  "Which models actually answered this question could not be established, so nothing in this memo is presented as agreement or disagreement between models.";
+export const RESEARCH_MEMO_UNVERIFIED_METHODOLOGY =
+  "This question was sent to a panel of large language models via ConvergePanel with identical instructions, but which models actually executed could not be established (model independence unverified). No consensus score is reported and nothing in this memo reflects agreement or convergence between models.";
+
 function generateResearchMemo(input: MemoInput): string {
   const lines: string[] = [];
   const q = (input.question ?? "").trim() || "—";
@@ -524,7 +537,10 @@ function generateResearchMemo(input: MemoInput): string {
       : null;
   const n = independent !== null ? Math.max(1, independent) : Math.max(1, input.modelsUsed?.length ?? 0);
   // Fewer than two independent executing models: one model's output is not a consensus.
-  const noConsensus = independent !== null && independent < 2;
+  const singleModel = independent !== null && independent < 2;
+  // Unknown execution identity: no consensus either, stated as unverified (never as one model's output).
+  const unverified = !singleModel && input.researchIndependenceUnverified === true;
+  const noConsensus = singleModel || unverified;
 
   lines.push("VERIFICATION MEMO");
   lines.push("ConvergePanel Multi-Model Research Report");
@@ -533,17 +549,27 @@ function generateResearchMemo(input: MemoInput): string {
   lines.push("RESEARCH QUERY");
   lines.push(`"${q}"`);
   lines.push("");
-  if (noConsensus) {
+  if (unverified) {
+    lines.push(CLAIM_MEMO_WITHHELD_CONSENSUS_LINE);
+  } else if (noConsensus) {
     lines.push("CONSENSUS SCORE: none (fewer than two independent models responded; slots answered by the same substitute model count as one)");
   } else {
     lines.push(`CONSENSUS SCORE: ${input.consensusScore}/100 (${input.confidenceLabel} confidence)`);
   }
   // The stored evidence quality is a cross-model support rollup: with one independent model it measures nothing.
-  lines.push(noConsensus ? `EVIDENCE QUALITY: ${RESEARCH_MEMO_NO_CROSS_MODEL_EVIDENCE}` : `EVIDENCE QUALITY: ${input.evidenceQuality}`);
+  lines.push(
+    unverified
+      ? `EVIDENCE QUALITY: ${CLAIM_MEMO_UNVERIFIED_EVIDENCE}`
+      : noConsensus
+        ? `EVIDENCE QUALITY: ${RESEARCH_MEMO_NO_CROSS_MODEL_EVIDENCE}`
+        : `EVIDENCE QUALITY: ${input.evidenceQuality}`
+  );
   lines.push("");
   lines.push("SUMMARY");
   lines.push(
-    noConsensus
+    unverified
+      ? RESEARCH_MEMO_UNVERIFIED_SUMMARY
+      : noConsensus
       ? "Fewer than two independent AI models responded to this question, so there is no cross-model agreement to report. Treat the findings as a single model's output."
       : `${n} AI models researched this question independently. ${researchSummarySentence(input.consensusScore, input.evidenceQuality)}`
   );
@@ -581,7 +607,9 @@ function generateResearchMemo(input: MemoInput): string {
 
   lines.push("METHODOLOGY");
   lines.push(
-    noConsensus
+    unverified
+      ? RESEARCH_MEMO_UNVERIFIED_METHODOLOGY
+      : noConsensus
       ? RESEARCH_MEMO_SINGLE_MODEL_METHODOLOGY
       : `This question was independently researched by ${n} large language model${n === 1 ? "" : "s"} via ConvergePanel. Each model received identical instructions. Models were not shown each other's responses. Results were synthesized to identify areas of agreement and disagreement. The consensus score reflects the degree of convergence across models weighted by evidence quality and source backing.`
   );

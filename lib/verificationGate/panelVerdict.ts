@@ -6,7 +6,11 @@
  */
 
 import { StructuredSynthesis } from "@/lib/synthesis/structuredSchema";
-import { VerificationGateResult } from "@/lib/verificationGate/verificationGate";
+import {
+  VerificationGateResult,
+  INDEPENDENCE_UNVERIFIED_DISAGREEMENTS_REASON,
+  NON_INDEPENDENT_DISAGREEMENTS_REASON,
+} from "@/lib/verificationGate/verificationGate";
 import { classifyGrounding, GroundingResult } from "./sourceGrounding";
 import { independentVoiceCount, type ExecutingIdentityRow } from "@/lib/panel/executingVoiceLabel";
 import { rowsRecordExecutionIdentity, type ClientSynthesisRow } from "@/lib/panel/independentVoices";
@@ -31,6 +35,32 @@ export const SINGLE_MODEL_SHARE_TAGLINE =
 
 /** Verdict card text in place of "No major disagreements detected." when fewer than two independent models responded. */
 export const NO_CROSS_MODEL_COMPARISON_TEXT = "No cross-model comparison: fewer than two independent models responded.";
+
+/**
+ * Verdict heading of the top item when the run's rows do not record which models executed
+ * (`rowsRecordExecutionIdentity` false) although two or more slots answered: the item may be one model's output repeated,
+ * so it is never presented as a consensus.
+ */
+export const PANEL_VERDICT_INDEPENDENCE_UNVERIFIED_HEADING =
+  "Top finding (model independence unverified; not confirmed as a consensus)";
+
+/** Share / copy prefix of the top item under unknown model independence. */
+export const INDEPENDENCE_UNVERIFIED_FINDING_PREFIX = "Finding (model independence unverified; not confirmed as a consensus)";
+
+/** Verdict card text in place of "No major disagreements detected." under unknown model independence with no stored item. */
+export const INDEPENDENCE_UNVERIFIED_NO_DISAGREEMENT_TEXT =
+  "No disagreements recorded, but model independence is unverified: this is not evidence of agreement between models.";
+
+/** Share / memo line in place of a consensus score under unknown model independence. */
+export const INDEPENDENCE_UNVERIFIED_SCORE_SHARE_LINE =
+  "Consensus score withheld: which models actually answered could not be established (model independence unverified).";
+
+/** Share-post closing line in place of a multi-model tagline under unknown model independence. */
+export const INDEPENDENCE_UNVERIFIED_SHARE_TAGLINE =
+  "Model independence is unverified, so this is not presented as a cross-model comparison.";
+
+/** Heading over `PanelVerdict.disagreementNotes` in copied / shared text. */
+export const DIFFERING_POSITIONS_HEADING = "Differing positions (not confirmed as a disagreement between models):";
 
 /**
  * The disagreements that are REAL cross-model disagreements: with fewer than two independent executing models in the run
@@ -97,6 +127,20 @@ export interface PanelVerdict {
    * Absent (a verdict built elsewhere, e.g. a fixture) → treated as true, the behaviour before this field existed.
    */
   crossModel?: boolean;
+  /**
+   * Present (true) only when at least two slots answered but the rows do not record which models executed
+   * (`rowsRecordExecutionIdentity` false — the gate's coverage "unverified"): no consensus, no "agreed by" / "split"
+   * counts, and no absence-of-disagreement claim on any surface.
+   */
+  independenceUnverified?: true;
+  /**
+   * Present only when the run has stored disagreement items but none is a genuine disagreement between independent
+   * executing models (with at least two answering slots): one line per category, with its count, in the gate's own
+   * wording — repeated output from one executing model (`NON_INDEPENDENT_DISAGREEMENTS_REASON`) and unknown model
+   * independence (`INDEPENDENCE_UNVERIFIED_DISAGREEMENTS_REASON`). Surfaces state these instead of "No major
+   * disagreements detected." Absent whenever a genuine item exists (it is then the top disagreement, as before).
+   */
+  disagreementNotes?: string[];
   topConsensus: string;
   consensusModelCount: number;
   topDisagreement: string | null;
@@ -131,12 +175,15 @@ export function buildPanelVerdict(
   opts?: { crossModel?: boolean }
 ): PanelVerdict {
   const crossModel = opts?.crossModel !== false;
+  // At least two slots answered but which models executed is not recorded: nothing may be presented as cross-model.
+  const independenceUnverified = crossModel && !!rows && !rowsRecordExecutionIdentity(rows);
   const topFinding = report.keyFindings?.[0];
   const topConsensus = topFinding?.claim ?? report.executiveSummary?.slice(0, 200) ?? "No consensus identified.";
   const consensusModelCount = independentVoiceCount(topFinding?.modelsSupporting ?? [], rows);
 
   // Only real cross-model disagreements (crossModelDisagreements): never one model's positions presented as a split.
-  const topDisagreementItem = crossModelDisagreements(report.disagreements, rows, crossModel)[0];
+  const genuineDisagreements = crossModelDisagreements(report.disagreements, rows, crossModel);
+  const topDisagreementItem = genuineDisagreements[0];
   const topDisagreement = topDisagreementItem?.topic ?? null;
   const disagreementDetail = topDisagreementItem?.whyTheyDiffer ?? null;
   // Independent executing models, like consensusModelCount: positions from two slots answered by one substitute
@@ -157,9 +204,24 @@ export function buildPanelVerdict(
     topDisagreement ?? undefined
   );
 
+  // No genuine item but stored items exist: state each non-genuine category (the gate's classification and counts), never
+  // an absence of disagreement. Below two answering models the existing "no cross-model comparison" text stands.
+  const storedCount = Array.isArray(report.disagreements) ? report.disagreements.length : 0;
+  let disagreementNotes: string[] | null = null;
+  if (crossModel && !topDisagreementItem && storedCount > 0) {
+    const unknownCount = independenceUnverifiedDisagreements(report.disagreements, rows, crossModel).length;
+    const repeatedCount = Math.max(0, storedCount - genuineDisagreements.length - unknownCount);
+    disagreementNotes = [
+      ...(repeatedCount > 0 ? [`${NON_INDEPENDENT_DISAGREEMENTS_REASON} (${repeatedCount})`] : []),
+      ...(unknownCount > 0 ? [`${INDEPENDENCE_UNVERIFIED_DISAGREEMENTS_REASON} (${unknownCount})`] : []),
+    ];
+  }
+
   return {
     question,
     crossModel,
+    ...(independenceUnverified ? { independenceUnverified: true as const } : {}),
+    ...(disagreementNotes && disagreementNotes.length > 0 ? { disagreementNotes } : {}),
     topConsensus,
     consensusModelCount,
     topDisagreement,
@@ -175,7 +237,14 @@ export function buildPanelVerdict(
 
 /** "Consensus", or — with fewer than two independent executing models — a label that claims no consensus. */
 function topItemPrefix(v: PanelVerdict): string {
-  return v.crossModel === false ? "Finding (one independent model; not a consensus)" : "Consensus";
+  if (v.crossModel === false) return "Finding (one independent model; not a consensus)";
+  return v.independenceUnverified ? INDEPENDENCE_UNVERIFIED_FINDING_PREFIX : "Consensus";
+}
+
+/** The verdict's non-genuine disagreement lines (`disagreementNotes`) under their heading; empty when none. */
+function disagreementNoteLines(v: PanelVerdict): string[] {
+  const notes = v.disagreementNotes ?? [];
+  return notes.length > 0 ? [DIFFERING_POSITIONS_HEADING, ...notes.map((n) => `- ${n}`)] : [];
 }
 
 /**
@@ -199,6 +268,7 @@ export function formatVerdictText(v: PanelVerdict, platform: "linkedin" | "x"): 
       parts.push(v.disagreementDetail);
     }
   }
+  parts.push(...disagreementNoteLines(v));
 
   parts.push(`Verification Gate: ${v.gateLabel}`);
   parts.push(`Grounding: ${v.grounding.label}`);
@@ -255,6 +325,9 @@ export function buildCopyForXShort(v: PanelVerdict): string {
   if (v.topDisagreement) {
     parts.push(`Disagreement: ${firstSentence(v.topDisagreement)}`);
   }
+  // One line per non-genuine category (never an absence claim); dropped first when over the limit.
+  const noteLines = (v.disagreementNotes ?? []).map((n) => `Differing positions: ${n}`);
+  parts.push(...noteLines);
 
   parts.push(`Gate: ${v.gateLabel}`);
 
@@ -268,6 +341,11 @@ export function buildCopyForXShort(v: PanelVerdict): string {
   let text = parts.join("\n");
 
   // If still over 280, drop optional sections one at a time
+  for (const note of noteLines) {
+    if (text.length <= 280) break;
+    const idx = parts.indexOf(note);
+    if (idx !== -1) { parts.splice(idx, 1); text = parts.join("\n"); }
+  }
   if (text.length > 280 && v.keyBlindSpot) {
     const idx = parts.findIndex((p) => p.startsWith("Caveat:"));
     if (idx !== -1) { parts.splice(idx, 1); text = parts.join("\n"); }
@@ -343,6 +421,7 @@ export function buildCopyForXThread(v: PanelVerdict): string[] {
       parts.push(v.disagreementDetail);
     }
   }
+  parts.push(...disagreementNoteLines(v));
 
   parts.push(`Verification Gate: ${v.gateLabel}`);
 

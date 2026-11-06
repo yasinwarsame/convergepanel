@@ -68,6 +68,11 @@ import {
   NO_CONSENSUS_SCORE_SHARE_LINE,
   SINGLE_MODEL_SHARE_TAGLINE,
   NO_CROSS_MODEL_COMPARISON_TEXT,
+  PANEL_VERDICT_INDEPENDENCE_UNVERIFIED_HEADING,
+  INDEPENDENCE_UNVERIFIED_NO_DISAGREEMENT_TEXT,
+  INDEPENDENCE_UNVERIFIED_SCORE_SHARE_LINE,
+  INDEPENDENCE_UNVERIFIED_SHARE_TAGLINE,
+  DIFFERING_POSITIONS_HEADING,
 } from "@/lib/verificationGate/panelVerdict";
 import {
   rollupPolicyConsensusSummary,
@@ -579,7 +584,11 @@ function PanelVerdictCard({
           {/* Left: Top consensus — only with at least two independent executing models */}
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
             <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">
-              {verdict.crossModel ? "Top consensus" : PANEL_VERDICT_SINGLE_MODEL_HEADING}
+              {!verdict.crossModel
+                ? PANEL_VERDICT_SINGLE_MODEL_HEADING
+                : verdict.independenceUnverified
+                  ? PANEL_VERDICT_INDEPENDENCE_UNVERIFIED_HEADING
+                  : "Top consensus"}
             </span>
             <ul className="mt-2 space-y-1.5">
               <li className="flex items-start gap-2 text-sm text-slate-800 leading-relaxed">
@@ -587,7 +596,7 @@ function PanelVerdictCard({
                 <span className="whitespace-normal break-words">{verdict.topConsensus}</span>
               </li>
             </ul>
-            {verdict.crossModel && verdict.consensusModelCount > 0 && (
+            {verdict.crossModel && !verdict.independenceUnverified && verdict.consensusModelCount > 0 && (
               <p className="mt-2 text-[11px] text-slate-400">
                 Agreed by {verdict.consensusModelCount} model{verdict.consensusModelCount !== 1 ? "s" : ""}
               </p>
@@ -613,15 +622,30 @@ function PanelVerdictCard({
                     </li>
                   )}
                 </ul>
-                {verdict.crossModel && verdict.disagreementModelCount > 0 && (
+                {verdict.crossModel && !verdict.independenceUnverified && verdict.disagreementModelCount > 0 && (
                   <p className="mt-2 text-[11px] text-slate-400">
                     {verdict.disagreementModelCount} model{verdict.disagreementModelCount !== 1 ? "s" : ""} split
                   </p>
                 )}
               </>
+            ) : verdict.crossModel !== false && verdict.disagreementNotes && verdict.disagreementNotes.length > 0 ? (
+              // Stored items exist but none is a genuine disagreement between independent models: each category with its
+              // count (the gate's wording), never an absence of disagreement.
+              <ul className="mt-2 space-y-1.5" data-testid="verdict-non-genuine-disagreements">
+                {verdict.disagreementNotes.map((note, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-slate-600 leading-relaxed">
+                    <span className="mt-1.5 block h-1.5 w-1.5 flex-shrink-0 rounded-full bg-slate-300" />
+                    <span className="whitespace-normal break-words">{note}</span>
+                  </li>
+                ))}
+              </ul>
             ) : (
               <p className="mt-2 text-sm text-slate-400 italic">
-                {verdict.crossModel === false ? NO_CROSS_MODEL_COMPARISON_TEXT : "No major disagreements detected."}
+                {verdict.crossModel === false
+                  ? NO_CROSS_MODEL_COMPARISON_TEXT
+                  : verdict.independenceUnverified
+                    ? INDEPENDENCE_UNVERIFIED_NO_DISAGREEMENT_TEXT
+                    : "No major disagreements detected."}
               </p>
             )}
           </div>
@@ -1487,6 +1511,10 @@ export default function PanelSynthesisView({
       // independent-voice rule existed (shown as stored data is never
       // rewritten; it is just not presented as consensus).
       const crossModel = independentResponderCount >= 2;
+      // At least two slots answered but the rows do not record which models executed (the gate's coverage
+      // "unverified"): no consensus score, no cross-model support counts and no "where models agree" on any surface.
+      const independenceUnverified = crossModel && !rowsRecordExecutionIdentity(results);
+      const presentsConsensus = crossModel && !independenceUnverified;
       // Only real disagreements between independent executing models; positions from slots answered by one model are
       // not a disagreement (and below two independent models there is none).
       const independentDisagreements = crossModelDisagreements(report.disagreements, results, crossModel);
@@ -1533,14 +1561,21 @@ export default function PanelSynthesisView({
       const score = consensusMeta?.overallConsensusScore ?? 0;
       const confidence = policyRollup?.confidenceLabel ?? "Medium";
       const findings = extractResearchKeyFindings(report);
-      const agreements = crossModel ? extractResearchAgreements(panelVerdict) : [];
+      const agreements = presentsConsensus ? extractResearchAgreements(panelVerdict) : [];
       const disagreements = extractResearchDisagreements(independentDisagreements);
 
       const qShort = q.length > 120 ? `${q.slice(0, 117)}...` : q;
-      const head = crossModel
+      const head = independenceUnverified
+        ? `I researched "${qShort}" with a ConvergePanel model panel (model independence unverified).`
+        : crossModel
         ? `I researched "${qShort}" across ${sharedModelCount} simultaneously using ConvergePanel.`
         : `I researched "${qShort}" using ConvergePanel; only ${sharedModelCount} responded independently.`;
-      const parts: string[] = [head, "", crossModel ? `Consensus score: ${score}/100 (${confidence})` : NO_CONSENSUS_SCORE_SHARE_LINE, ""];
+      const scoreLine = independenceUnverified
+        ? INDEPENDENCE_UNVERIFIED_SCORE_SHARE_LINE
+        : crossModel
+          ? `Consensus score: ${score}/100 (${confidence})`
+          : NO_CONSENSUS_SCORE_SHARE_LINE;
+      const parts: string[] = [head, "", scoreLine, ""];
       if (findings.length > 0) {
         parts.push("Key findings:");
         findings.slice(0, 3).forEach((f) => parts.push(`→ ${f}`));
@@ -1556,7 +1591,21 @@ export default function PanelSynthesisView({
         disagreements.slice(0, 2).forEach((d) => parts.push(`→ ${d}`));
         parts.push("");
       }
-      parts.push(crossModel ? "The disagreements tell you more than any single answer." : SINGLE_MODEL_SHARE_TAGLINE, "", "→ convergepanel.com");
+      // Stored differing positions that are not a genuine disagreement between models: stated by category, not dropped.
+      if (panelVerdict.disagreementNotes && panelVerdict.disagreementNotes.length > 0) {
+        parts.push(DIFFERING_POSITIONS_HEADING);
+        panelVerdict.disagreementNotes.forEach((n) => parts.push(`→ ${n}`));
+        parts.push("");
+      }
+      parts.push(
+        independenceUnverified
+          ? INDEPENDENCE_UNVERIFIED_SHARE_TAGLINE
+          : crossModel
+            ? "The disagreements tell you more than any single answer."
+            : SINGLE_MODEL_SHARE_TAGLINE,
+        "",
+        "→ convergepanel.com"
+      );
       setGeneratedPost(parts.join("\n"));
       setGeneratedPostType("linkedin");
       setCopiedPost(false);
@@ -1570,9 +1619,15 @@ export default function PanelSynthesisView({
       const line = (f: string, max: number) => (f.length > max ? `${f.slice(0, max - 3)}...` : f);
 
       const parts: string[] = [
-        `${crossModel ? `Asked ${sharedModelCount}` : `Asked a model panel (${sharedModelCount} responded independently)`}: "${q.length > 80 ? `${q.slice(0, 77)}...` : q}"`,
+        `${
+          independenceUnverified
+            ? "Asked a model panel (model independence unverified)"
+            : crossModel
+              ? `Asked ${sharedModelCount}`
+              : `Asked a model panel (${sharedModelCount} responded independently)`
+        }: "${q.length > 80 ? `${q.slice(0, 77)}...` : q}"`,
         "",
-        crossModel ? `Consensus: ${score}/100` : NO_CONSENSUS_SCORE_SHARE_LINE,
+        independenceUnverified ? INDEPENDENCE_UNVERIFIED_SCORE_SHARE_LINE : crossModel ? `Consensus: ${score}/100` : NO_CONSENSUS_SCORE_SHARE_LINE,
         "",
       ];
       if (findings.length > 0) {
@@ -1588,7 +1643,11 @@ export default function PanelSynthesisView({
         parts.push(`Models disagreed on: ${line(disagreements[0] ?? "", 100)}`, "");
       }
       parts.push(
-        crossModel ? "One model gives you a confident answer. Five give you the shape of the problem." : SINGLE_MODEL_SHARE_TAGLINE,
+        independenceUnverified
+          ? INDEPENDENCE_UNVERIFIED_SHARE_TAGLINE
+          : crossModel
+            ? "One model gives you a confident answer. Five give you the shape of the problem."
+            : SINGLE_MODEL_SHARE_TAGLINE,
         "",
         "convergepanel.com"
       );
@@ -1630,8 +1689,14 @@ export default function PanelSynthesisView({
             </div>
           )}
 
-          {consensusMeta && crossModel && (
+          {consensusMeta && presentsConsensus && (
             <SynthesisConsensusSummaryBox summary={consensusMeta} modelTotal={modelTotalResolved} independentModels={independentResponderCount} />
+          )}
+          {consensusMeta && independenceUnverified && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900" data-testid="consensus-independence-unverified">
+              Consensus score withheld: which models actually answered could not be established, so there is no verified
+              cross-model agreement to measure.
+            </div>
           )}
           {consensusMeta && !crossModel && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900" data-testid="consensus-insufficient-independent-models">
@@ -1679,13 +1744,16 @@ export default function PanelSynthesisView({
                               // "DeepSeek (substituting ChatGPT)", and slots answered by
                               // one substitute are one model.
                               const voices = groupSlotsByExecutingVoice(finding.modelsSupporting, results);
-                              return `${independentModelCountText(voices.length)}: ${voices.map((v) => v.label).join(", ")}`;
+                              // Unknown execution identity: the slots are listed, never counted as independent models.
+                              return independenceUnverified
+                                ? `Supporting slots (model independence unverified): ${voices.map((v) => v.label).join(", ")}`
+                                : `${independentModelCountText(voices.length)}: ${voices.map((v) => v.label).join(", ")}`;
                             })()}
                           </span>
                           <span className="text-xs text-green-600">•</span>
                           <span className="text-xs text-green-600">{finding.confidence} confidence</span>
                         </div>
-                        {crossModel &&
+                        {presentsConsensus &&
                           finding.support &&
                           (finding.evidenceQuality === "strong" ||
                             finding.evidenceQuality === "mixed" ||
@@ -1940,7 +2008,8 @@ export default function PanelSynthesisView({
                 // Independent executing models: below two the memo states no consensus score and no agreement.
                 independentModelCount: independentResponderCount,
                 keyFindings: (report.keyFindings ?? []).map((k) => k.claim),
-                synthesisAgreements: crossModel && panelVerdict.topConsensus ? [panelVerdict.topConsensus] : [],
+                synthesisAgreements: presentsConsensus && panelVerdict.topConsensus ? [panelVerdict.topConsensus] : [],
+                ...(independenceUnverified ? { researchIndependenceUnverified: true } : {}),
                 synthesisDisagreements: disagreeLines,
                 confidenceAssessment:
                   report.executiveSummary?.trim() || panelVerdict.keyBlindSpot || "",

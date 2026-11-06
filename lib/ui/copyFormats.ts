@@ -4,7 +4,12 @@
  */
 
 import type { VerificationGateResult } from "@/lib/verificationGate/verificationGate";
-import { PANEL_VERDICT_SINGLE_MODEL_HEADING, type PanelVerdict } from "@/lib/verificationGate/panelVerdict";
+import {
+  DIFFERING_POSITIONS_HEADING,
+  PANEL_VERDICT_INDEPENDENCE_UNVERIFIED_HEADING,
+  PANEL_VERDICT_SINGLE_MODEL_HEADING,
+  type PanelVerdict,
+} from "@/lib/verificationGate/panelVerdict";
 
 export interface ModelHealthForCopy {
   total: number;
@@ -82,7 +87,14 @@ export function buildSynthesisMarkdown(
 
   parts.push("## Panel Verdict");
   // Fewer than two independent executing models (verdict.crossModel === false): the top item is one model's finding.
-  parts.push(verdict.crossModel === false ? `${PANEL_VERDICT_SINGLE_MODEL_HEADING}:` : "Top consensus:");
+  // Unknown execution identity (verdict.independenceUnverified): never presented as a consensus.
+  parts.push(
+    verdict.crossModel === false
+      ? `${PANEL_VERDICT_SINGLE_MODEL_HEADING}:`
+      : verdict.independenceUnverified
+        ? `${PANEL_VERDICT_INDEPENDENCE_UNVERIFIED_HEADING}:`
+        : "Top consensus:"
+  );
   parts.push(`- ${verdict.topConsensus}`);
 
   if (verdict.topDisagreement) {
@@ -92,6 +104,12 @@ export function buildSynthesisMarkdown(
     if (verdict.disagreementDetail) {
       parts.push(`- Detail: ${verdict.disagreementDetail}`);
     }
+  }
+  // No genuine disagreement but stored items exist: each category with its count, never an absence of disagreement.
+  if (verdict.disagreementNotes && verdict.disagreementNotes.length > 0) {
+    parts.push("");
+    parts.push(DIFFERING_POSITIONS_HEADING);
+    verdict.disagreementNotes.forEach((n) => parts.push(`- ${n}`));
   }
 
   if (verdict.keyBlindSpot) {
