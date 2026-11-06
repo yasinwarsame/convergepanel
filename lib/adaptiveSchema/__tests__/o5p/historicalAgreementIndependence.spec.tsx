@@ -125,14 +125,17 @@ describe("every slot answered by DeepSeek (generic-consensus, stored 'consensus:
     expect(view).toContain(AGREE_HEADING_ONE_EXECUTING_MODEL);
     expect(view).toContain(ADAPTIVE_REPEATED_SUBSTITUTE_TOP_HEADING);
     // The panel count says what it counts; the load-bearing list names the executing model once, with its status.
-    expect(view).toContain(`Of 2 scored claims across 5 dispatched models: consensus on 2. These counts are of panel slots: in this run ${ALL_DEEPSEEK} answered several slots, so they are not counts of independent models.`);
+    const countNote = `Of 2 scored claims across 5 dispatched models: consensus on 2. These counts are of panel slots: in this run ${ALL_DEEPSEEK} answered several slots, so they are not counts of independent models.`;
+    // r5: the executive summary's panel count and the certainty line; legacy: the stored certainty line only.
+    expect(view.split(countNote).length - 1).toBe(shape === "r5" ? 2 : 1);
     if (shape === "r5") {
       expect(view).toContain(`Panel result: Not an independent consensus (supported by ${ALL_DEEPSEEK})`);
       expect(view).not.toContain("DeepSeek (substituting ChatGPT), DeepSeek (substituting Claude)");
     }
     if (shape === "legacy") {
       // Each stored "Where models agree" line is followed by its computed result.
-      expect(view).toContain(`“Raising the minimum wage reduces employment” Panel result: not an independent consensus: the 5 panel slots supporting it were all answered by one model, ${ALL_DEEPSEEK}`);
+      const agreeSection = view.slice(view.indexOf(AGREE_HEADING_ONE_EXECUTING_MODEL), view.indexOf("Bias & blind spots"));
+      expect(agreeSection).toContain(`“Raising the minimum wage reduces employment” Panel result: not an independent consensus: the 5 panel slots supporting it were all answered by one model, ${ALL_DEEPSEEK}`);
     }
     // The qualified card states independence once, in its result line (MAJOR-1: no consensus line under the qualifier).
     expect(view).not.toContain("Recorded as supported by 5 panel slots");
