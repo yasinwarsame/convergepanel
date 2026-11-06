@@ -313,6 +313,19 @@ describe("review of 8def047 repro: the complete readable copied Markdown, openin
     expect(lines.filter((l) => l === FAIL_TEMPLATE)).toHaveLength(2);
   });
 
+  it("an empty stored summary gets no label: nothing stored is reproduced there", () => {
+    const rec = record("generic-mixed-narrative-fail");
+    rec.gate.status = "pass";
+    delete rec.synthesisReport.presentation;
+    rec.synthesisReport.executiveSummary = "";
+    const p = presentationOf(rec);
+    expect(p.status).toBe("unavailable");
+    const lines = buildAdaptiveSynthesisMarkdown(QUESTION, rec.synthesisReport, undefined, p).split("\n");
+    const es = lines.indexOf("## Executive Summary");
+    expect(lines.slice(es, es + 4)).toEqual(["## Executive Summary", "", "", "## Where models agree"]);
+    expect(lines).not.toContain("**Stored executive summary (historical; inconsistent with recorded inputs):**");
+  });
+
   it("R5-era presented path (legal-regulatory, stored PASS): the stored answer note in the summary is labelled", () => {
     const rec = record("legal-regulatory");
     rec.gate.status = "pass";
