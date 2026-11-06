@@ -2259,5 +2259,54 @@
   "count": 1,
   "category": "other-schema",
   "rule": "Order 6 S-E.1 R2-m1 (owner ruling 2026-10-28): identity of the producer's stored :488 rationale, used only to recognise and replace it on screen; never rendered (asserted by the S-E.1 whole-surface scanner)"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"one independent model's assessment; not agreement between models\"",
+  "count": 1,
+  "category": "shared-claim-video",
+  "rule": "claim memo, only when MemoInput.claimModelIndependence is \"insufficient\" / \"unverified\" (fewer than two independent executing models answered, or independence not recorded): states that there is NO consensus score / agreement between models (review of 262ef64, B1, 2026-11-06); the independent path is byte-pinned (independentRecordsParity.spec.tsx)"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"CONSENSUS SCORE: none (fewer than two independent models answered; slots answered by the same substitute model count as one)\"",
+  "count": 1,
+  "category": "shared-claim-video",
+  "rule": "claim memo, only when MemoInput.claimModelIndependence is \"insufficient\" / \"unverified\" (fewer than two independent executing models answered, or independence not recorded): states that there is NO consensus score / agreement between models (review of 262ef64, B1, 2026-11-06); the independent path is byte-pinned (independentRecordsParity.spec.tsx)"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"CONSENSUS SCORE: withheld (model independence not recorded)\"",
+  "count": 1,
+  "category": "shared-claim-video",
+  "rule": "claim memo, only when MemoInput.claimModelIndependence is \"insufficient\" / \"unverified\" (fewer than two independent executing models answered, or independence not recorded): states that there is NO consensus score / agreement between models (review of 262ef64, B1, 2026-11-06); the independent path is byte-pinned (independentRecordsParity.spec.tsx)"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"Fewer than two independent AI models answered this claim, so there is no cross-model agreement to report. Treat the verdict as a single model's assessment.\"",
+  "count": 1,
+  "category": "shared-claim-video",
+  "rule": "claim memo, only when MemoInput.claimModelIndependence is \"insufficient\" / \"unverified\" (fewer than two independent executing models answered, or independence not recorded): states that there is NO consensus score / agreement between models (review of 262ef64, B1, 2026-11-06); the independent path is byte-pinned (independentRecordsParity.spec.tsx)"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"Which models executed this verification could not be established, so the verdict is not presented as agreement between models.\"",
+  "count": 1,
+  "category": "shared-claim-video",
+  "rule": "claim memo, only when MemoInput.claimModelIndependence is \"insufficient\" / \"unverified\" (fewer than two independent executing models answered, or independence not recorded): states that there is NO consensus score / agreement between models (review of 262ef64, B1, 2026-11-06); the independent path is byte-pinned (independentRecordsParity.spec.tsx)"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"This claim was sent to a panel of large language models via ConvergePanel with identical instructions, but fewer than two independent models answered (slots answered by the same substitute model count as one). No cross-model comparison was possible: no consensus score is reported and nothing in this memo reflects agreement between models.\"",
+  "count": 1,
+  "category": "shared-claim-video",
+  "rule": "claim memo, only when MemoInput.claimModelIndependence is \"insufficient\" / \"unverified\" (fewer than two independent executing models answered, or independence not recorded): states that there is NO consensus score / agreement between models (review of 262ef64, B1, 2026-11-06); the independent path is byte-pinned (independentRecordsParity.spec.tsx)"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"This claim was sent to a panel of large language models via ConvergePanel with identical instructions. Which models actually executed could not be established from the stored record, so no consensus score is reported and nothing in this memo is presented as agreement between independent models.\"",
+  "count": 1,
+  "category": "shared-claim-video",
+  "rule": "claim memo, only when MemoInput.claimModelIndependence is \"insufficient\" / \"unverified\" (fewer than two independent executing models answered, or independence not recorded): states that there is NO consensus score / agreement between models (review of 262ef64, B1, 2026-11-06); the independent path is byte-pinned (independentRecordsParity.spec.tsx)"
  }
 ]

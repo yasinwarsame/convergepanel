@@ -56,7 +56,9 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   // eligibility — the generateSynthesisAutomatically pre-flight and the history auto-synthesis condition now require
   // two INDEPENDENT executing models (meetsIndependentSynthesisMinimum, the server gate's rule); no provenance code.
   // Was 6dbe9b1f924731e1417655a68f41cd232f7cd16a at 9eca1e3.
-  "app/page.tsx": "3826603986f4b86b7425a8055aecc3354ab2bc24",
+  // Review of 262ef64, B1 (claim surfaces): ONLY the claim history line (claimHistoryConsensusSuffix) and the live claim
+  // payload / history item carrying modelIndependence; no provenance code. Was 3826603986f4b86b7425a8055aecc3354ab2bc24.
+  "app/page.tsx": "5bca766b6b3e3d04c9bba07aa2881e4005a14a70",
   "firestore.rules": "2fb80a11bfa6c55fe94e0438a980a3b0794aeafd",
 };
 
