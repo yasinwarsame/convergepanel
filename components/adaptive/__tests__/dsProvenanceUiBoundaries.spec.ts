@@ -61,7 +61,9 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   // Review of 0ca72b0, owner order B1 (cached claim payloads): ONLY mergeHistoryById reconciling a cached claim payload
   // with the server row's independence and openHistoryItem reading the user's own record when a cached payload records
   // none (lib/verification/cachedClaimProvenance.ts); no provenance code. Was 5bca766b6b3e3d04c9bba07aa2881e4005a14a70.
-  "app/page.tsx": "736663e85981f6da7e6a46a55554ea9ad0cc1a20",
+  // Review of 71b03e3, NIT-2: ONLY a sequence guard in openHistoryItem (historyOpenSeq) so a slow read for an earlier
+  // history selection never commits over a later one; no provenance code. Was 736663e85981f6da7e6a46a55554ea9ad0cc1a20.
+  "app/page.tsx": "8e20322c531f0d4e9df9e954d38c4a029af03460",
   "firestore.rules": "2fb80a11bfa6c55fe94e0438a980a3b0794aeafd",
 };
 

@@ -461,6 +461,8 @@ export default function Home() {
   /** When set, Research tab shows saved run results instead of the composer (loaded from Firestore). */
   const [viewingHistoryRunId, setViewingHistoryRunId] = useState<string | null>(null);
   const historyLoadSeq = useRef(0);
+  /** Sequence of history-item opens: a slow read for an earlier selection never overwrites a later one. */
+  const historyOpenSeq = useRef(0);
 
   // Models selected for this panel run
   // Start with empty selection - users will choose their models
@@ -2132,6 +2134,9 @@ export default function Home() {
   };
 
   const openHistoryItem = async (item: HistoryItem) => {
+    // Every selection supersedes the previous one: only the latest open may commit state after an await.
+    const openSeq = ++historyOpenSeq.current;
+    const isLatestOpen = () => openSeq === historyOpenSeq.current;
     if (item.type === "research") {
       /**
        * PERSONAL-RESEARCH-URL-1 §AD/§AE — a saved research run now has a durable
@@ -2174,6 +2179,7 @@ export default function Home() {
         const url = `/api/user/verifications/${encodeURIComponent(item.id)}?collection=videoVerifications`;
         const res = await authedFetch(url, { user, authReady, method: "GET" });
         const data = (await res.json()) as { ok?: boolean; payload?: VideoVerificationClientPayload };
+        if (!isLatestOpen()) return;
         if (data.ok && data.payload) {
           setVideoVerificationPayload(data.payload);
           setHistoryItems((prev) =>
@@ -2188,10 +2194,11 @@ export default function Home() {
           setError("Could not load this video verification.");
         }
       } catch {
+        if (!isLatestOpen()) return;
         setVideoVerificationPayload(null);
         setError("Could not load this video verification.");
       } finally {
-        setHistoryDetailLoadingId(null);
+        if (isLatestOpen()) setHistoryDetailLoadingId(null);
       }
       return;
     }
@@ -2229,6 +2236,7 @@ export default function Home() {
     if (lookup) setHistoryDetailLoadingId(item.id);
     try {
       const resolved = await resolveClaimHistoryPayload(item.id, cachedPayload, lookup);
+      if (!isLatestOpen()) return;
       setVerificationPayload(resolved.payload);
       const record = resolved.fromRecord ? resolved.payload : null;
       if (record) {
@@ -2248,7 +2256,7 @@ export default function Home() {
         );
       }
     } finally {
-      if (lookup) setHistoryDetailLoadingId(null);
+      if (lookup && isLatestOpen()) setHistoryDetailLoadingId(null);
     }
   };
 
