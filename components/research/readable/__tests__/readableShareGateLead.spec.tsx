@@ -162,6 +162,10 @@ describe("inconsistent legacy record (readable): the unavailable gate leads ever
       expect(verdictLines).toHaveLength(1);
       expect(lines.filter((l) => l.startsWith(`**${LABEL("panel verdict")}:** `))).toHaveLength(1);
     }
+    // The Unified Answer section reproduces stored text, so it opens with the stored-answer label (legacy and R5 paths).
+    const ans = lines.indexOf("## Unified Answer");
+    expect(lines[ans + 1]).toBe(`**${LABEL("answer")}:**`);
+    expect(lines[ans + 2].length).toBeGreaterThan(0);
     // The Certainty section: the readable gate alone, then the stored certainty text, labelled.
     const cert = lines.indexOf("## Certainty");
     expect(lines.slice(cert + 1, cert + 4)).toEqual([`${pct(rec)}% (${UNAVAILABLE})`, "", `**${LABEL("certainty text")}:** ${rec.synthesisReport.certaintyAssessment}`]);
