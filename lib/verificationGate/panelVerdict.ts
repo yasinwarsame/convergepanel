@@ -54,9 +54,33 @@ export function crossModelDisagreements<T extends { positionsByModel?: Record<st
       return slots.length < 2 || independentVoiceCount(slots, rows) >= 2;
     });
   }
-  const clientRows = rows.filter((r) => r && typeof r.modelId === "string") as unknown as ClientSynthesisRow[];
-  const ctx = { independence: "independent" as const, rows: clientRows, collapsed: rowsCollapsed(clientRows) };
+  const ctx = liveRunContext(rows);
   return items.filter((d) => classifyDisagreementAgainstRows(d, ctx) === "cross_model");
+}
+
+/** The live run's rows as a ≥ 2-independent-model context (callers pass it only when `crossModel` is true). */
+function liveRunContext(rows: readonly ExecutingIdentityRow[]) {
+  const clientRows = rows.filter((r) => r && typeof r.modelId === "string") as unknown as ClientSynthesisRow[];
+  return { independence: "independent" as const, rows: clientRows, collapsed: rowsCollapsed(clientRows) };
+}
+
+/**
+ * The disagreements whose model independence is UNKNOWN — classified "independence_unverified" by the same rule the
+ * governance queue applies (`classifyDisagreementAgainstRows`): in a run with ≥ 2 independent executing models where
+ * some slots collapsed onto one executing model, an item naming fewer than two attributable slots (or none). They are
+ * neither a disagreement between models nor repeated output from one model, and the gate states them under their own
+ * reason (`INDEPENDENCE_UNVERIFIED_DISAGREEMENTS_REASON`). Empty when `crossModel` is false (every item is then one
+ * model's — the run has fewer than two independent models) or without rows (nothing is inferred). Order preserved;
+ * never mutates its input.
+ */
+export function independenceUnverifiedDisagreements<T extends { positionsByModel?: Record<string, string> | null }>(
+  items: readonly T[] | null | undefined,
+  rows: readonly ExecutingIdentityRow[] | null | undefined,
+  crossModel: boolean
+): T[] {
+  if (!crossModel || !items || !rows) return [];
+  const ctx = liveRunContext(rows);
+  return items.filter((d) => classifyDisagreementAgainstRows(d, ctx) === "independence_unverified");
 }
 
 export interface PanelVerdict {

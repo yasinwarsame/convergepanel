@@ -62,6 +62,7 @@ import { classifyGrounding, GroundingResult } from "@/lib/verificationGate/sourc
 import {
   buildPanelVerdict,
   crossModelDisagreements,
+  independenceUnverifiedDisagreements,
   PanelVerdict,
   PANEL_VERDICT_SINGLE_MODEL_HEADING,
   NO_CONSENSUS_SCORE_SHARE_LINE,
@@ -1489,6 +1490,9 @@ export default function PanelSynthesisView({
       // Only real disagreements between independent executing models; positions from slots answered by one model are
       // not a disagreement (and below two independent models there is none).
       const independentDisagreements = crossModelDisagreements(report.disagreements, results, crossModel);
+      // Items whose model independence is unknown (unattributable in a run where some slots collapsed): stated as such
+      // by the gate — never as one model's positions, never as a model disagreement.
+      const unverifiedIndependenceDisagreements = independenceUnverifiedDisagreements(report.disagreements, results, crossModel);
 
       // Compute Verification Gate from existing synthesis signals. The gate receives every stored disagreement (its
       // status is never more permissive than over the full list) and the genuine cross-model subset (the only ones it
@@ -1497,6 +1501,7 @@ export default function PanelSynthesisView({
         keyFindings: report.keyFindings,
         disagreements: report.disagreements,
         independentDisagreements,
+        ...(unverifiedIndependenceDisagreements.length > 0 ? { independenceUnverifiedDisagreements: unverifiedIndependenceDisagreements } : {}),
         biasAndBlindSpots: report.biasAndBlindSpots,
         openQuestions: report.openQuestions,
         trustSummary: synthesizedReport?.consensusAnalysis?.trustSummary,
