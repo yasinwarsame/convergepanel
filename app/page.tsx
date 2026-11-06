@@ -56,6 +56,7 @@ import VideoVerificationResult from "@/components/VideoVerificationResult";
 import FileAttachButton from "@/components/FileAttachButton";
 import type { ClaimVerificationClientPayload } from "@/lib/verification/claimVerificationClientPayload";
 import { claimHistoryConsensusSuffix, claimModelIndependence } from "@/lib/verification/claimConsensusPresentation";
+import { claimPayloadRecordsIndependence, reconcileCachedClaimPayload, resolveClaimHistoryPayload } from "@/lib/verification/cachedClaimProvenance";
 import type { StoredConsensusIndependence } from "@/lib/panel/independentVoices";
 import { buildOriginLinkedVerifyClaimRequestBody } from "@/lib/verification/originLinkedVerifyClaimRequest";
 import type { VideoVerificationClientPayload } from "@/lib/verification/videoVerificationClientPayload";
@@ -203,11 +204,13 @@ function mergeHistoryById(existing: HistoryItem[], incoming: HistoryItem[]): His
       continue;
     }
     if (it.type === "verification" && prev.type === "verification") {
-      const payload = it.payload ?? prev.payload;
+      // A payload cached before it recorded model independence adopts the independence the server computed for this
+      // record from its persisted rows (`it` is a server history row); nothing is inferred (cachedClaimProvenance.ts).
+      const payload = reconcileCachedClaimPayload(it.payload ?? prev.payload, it.modelIndependence);
       map.set(it.id, {
         ...prev,
         ...it,
-        payload: payload ?? undefined,
+        payload,
         governanceStatus: it.governanceStatus ?? prev.governanceStatus,
       });
     } else if (it.type === "research" && prev.type === "research") {
@@ -2197,7 +2200,7 @@ export default function Home() {
     setPanelTab("verify");
     setVideoVerificationPayload(null);
     setViewingHistoryRunId(null);
-    if (item.payload) {
+    if (item.payload && claimPayloadRecordsIndependence(item.payload)) {
       setVerificationPayload({
         ...item.payload,
         verificationId: item.payload.verificationId ?? item.id,
@@ -2205,42 +2208,47 @@ export default function Home() {
       setClaimInput(item.payload.claim);
       return;
     }
-    const fallbackClaim = item.claim ?? item.title;
-    setClaimInput(fallbackClaim);
-    if (!user || !authReady) {
-      setVerificationPayload(null);
-      return;
-    }
-    setHistoryDetailLoadingId(item.id);
+    // No cached payload, or one cached before it recorded model independence: the user's own persisted record (the
+    // authenticated, owner-scoped detail API) is the authority. If it cannot be read, a cached payload is presented as
+    // cached — independence unrecorded, i.e. "unverified" (cachedClaimProvenance.ts).
+    const cachedPayload = item.payload ?? null;
+    setClaimInput(cachedPayload?.claim ?? item.claim ?? item.title);
+    const lookup =
+      user && authReady
+        ? async (): Promise<ClaimVerificationClientPayload | null> => {
+            const { authedFetch } = await import("@/lib/client/authedFetch");
+            const res = await authedFetch(`/api/user/verifications/${encodeURIComponent(item.id)}`, {
+              user,
+              authReady,
+              method: "GET",
+            });
+            const data = (await res.json()) as { ok?: boolean; payload?: ClaimVerificationClientPayload };
+            return data.ok && data.payload ? data.payload : null;
+          }
+        : null;
+    if (lookup) setHistoryDetailLoadingId(item.id);
     try {
-      const { authedFetch } = await import("@/lib/client/authedFetch");
-      const res = await authedFetch(`/api/user/verifications/${encodeURIComponent(item.id)}`, {
-        user,
-        authReady,
-        method: "GET",
-      });
-      const data = (await res.json()) as { ok?: boolean; payload?: ClaimVerificationClientPayload };
-      if (data.ok && data.payload) {
-        setVerificationPayload(data.payload);
-        setClaimInput(data.payload.claim);
+      const resolved = await resolveClaimHistoryPayload(item.id, cachedPayload, lookup);
+      setVerificationPayload(resolved.payload);
+      const record = resolved.fromRecord ? resolved.payload : null;
+      if (record) {
+        setClaimInput(record.claim);
         setHistoryItems((prev) =>
           prev.map((h) =>
             h.id === item.id && h.type === "verification"
               ? {
                   ...h,
-                  payload: data.payload!,
-                  governanceStatus: data.payload!.governanceStatus ?? h.governanceStatus,
+                  payload: record,
+                  consensusScore: record.consensusScore,
+                  modelIndependence: claimModelIndependence(record.modelIndependence),
+                  governanceStatus: record.governanceStatus ?? h.governanceStatus,
                 }
               : h
           )
         );
-      } else {
-        setVerificationPayload(null);
       }
-    } catch {
-      setVerificationPayload(null);
     } finally {
-      setHistoryDetailLoadingId(null);
+      if (lookup) setHistoryDetailLoadingId(null);
     }
   };
 
