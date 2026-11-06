@@ -123,11 +123,20 @@ const WIDENED_BY_INC1: Record<string, string> = {
  *     byte-identical: the 5,266-output digest at bb4aed5 and the 15,798-output classic digest captured at 7212c47
  *     (records × gate edits × stored / legacy / R5-era × short / long question, builders and classic page) unchanged.
  * AdaptiveSynthesisReportView.tsx stays 24f22d8c; same 32-file pinned set.
+ *
+ * Re-pinned again (review of 8def047, MINOR — on the readable unavailable gate the copied Markdown reproduced the stored
+ * executive summary unlabelled; on legacy records it is often the stored verdict, e.g. "Verification gate: Caution. …" or
+ * "Panel could not converge on a reliable answer."): both Markdown paths now label it "Stored executive summary
+ * (historical; inconsistent with recorded inputs)", as the answer is. Readable unavailable only.
+ *   - shareBuilders.ts: 6ecb19ee8e15e3d4a5cc7d08d7e2793872395ab9 → e4f5188b64d66cdd424ef24a3857e57905b1e9c1. Classic output
+ *     byte-identical: 137,760 classic outputs (records × 82 gate edits × 7 shapes × 3 questions × 4 builders) hash-equal
+ *     to 8def047, and the frozen classic digests above unchanged.
+ * AdaptiveSynthesisReportView.tsx stays 24f22d8c; same 32-file pinned set.
  */
 const READABLE_GATE_OPTION_BY_INC1: Record<string, string> = {
   "components/adaptive/AdaptiveSynthesisReportView.tsx": "24f22d8ccd4e97eb762edbbca182bceca3be5c92",
   "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "7ee80b6b52b8c71af0c72e95b52b45e0080058c0",
-  "lib/adaptiveSchema/shareBuilders.ts": "6ecb19ee8e15e3d4a5cc7d08d7e2793872395ab9",
+  "lib/adaptiveSchema/shareBuilders.ts": "e4f5188b64d66cdd424ef24a3857e57905b1e9c1",
 };
 
 describe("#290 Increment 1 leaves the sealed and frozen files byte-identical to 35933c8", () => {

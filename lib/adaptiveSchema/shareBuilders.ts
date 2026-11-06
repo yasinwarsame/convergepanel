@@ -82,8 +82,9 @@ const POSITIONS_UNAVAILABLE_IN_FORMAT = "Position details are unavailable in thi
  *
  * Review of 7212c47 (MINOR): on the unavailable state the copied Markdown and the memo LEAD with the banner and the
  * note — right after the question, as the screen does — before any text stored with the report, and every stored
- * verdict-bearing value they still reproduce (the panel verdict, the answer, the certainty text) is labelled
- * "Stored … (historical; inconsistent with recorded inputs)", never stated as the current conclusion. Every other
+ * verdict-bearing value they still reproduce (the panel verdict, the answer, the executive summary — review of
+ * 8def047 — and the certainty text) is labelled "Stored … (historical; inconsistent with recorded inputs)", never
+ * stated as the current conclusion. Every other
  * readable status (a consistent record, an Order 4 report) keeps the ordering it had.
  */
 export interface ReadableShareGate {
@@ -231,6 +232,10 @@ export function buildAdaptiveSynthesisMarkdown(question: string, storedReport: A
   lines.push(report.unifiedAnswer);
   lines.push("");
   lines.push("## Executive Summary");
+  // #290 Inc 1 (review of 8def047): on a legacy record the stored summary is often the stored verdict itself (the
+  // pre-R5 fail template, or the answer with its "Verification gate: Caution." lead), so beside the unavailable gate it
+  // is labelled as stored and historical, as the answer is.
+  if (unavailable && report.executiveSummary) lines.push(`**${storedHistoricalLabel("executive summary")}:**`);
   lines.push(report.executiveSummary);
   lines.push("");
 
@@ -284,7 +289,11 @@ function buildPresentedMarkdown(question: string, report: AdaptiveSynthesisRepor
   lines.push(...answerLines);
   lines.push("");
   lines.push("## Executive Summary");
-  for (const block of presentExecutiveSummary(report)) {
+  const summaryBlocks = presentExecutiveSummary(report);
+  // #290 Inc 1 (review of 8def047): the summary reproduces stored text (an R5 record's stored answer note — "Panel could
+  // not converge on a reliable answer." — or its model summary), so beside the unavailable gate it is labelled as stored.
+  if (unavailable && summaryBlocks.length > 0) lines.push(`**${storedHistoricalLabel("executive summary")}:**`);
+  for (const block of summaryBlocks) {
     lines.push(...markdownBlock(block));
     lines.push("");
   }

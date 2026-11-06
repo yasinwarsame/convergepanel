@@ -12,6 +12,14 @@
  * NIT 1: the readable X post must fit X's 280 characters as classic does, keep "via ConvergePanel", and never cut the
  * gate line or a row's computed result (the model-written claim / topic and then the question give way).
  *
+ * Review of 8def047 (MINOR): the stored executive summary was reproduced under "## Executive Summary" unlabelled. On a
+ * legacy record it is often the stored verdict itself (the answer with its "Verification gate: Caution." lead, or the
+ * pre-R5 fail template "Panel could not converge on a reliable answer."), and on an R5-era record it reproduces the
+ * stored answer note. It is now labelled "Stored executive summary (historical; …)" as the answer is. CONFLICTS gains
+ * a record whose summary carries a gate verdict and a pre-R5 fail-template summary; the complete copied Markdown of the
+ * review's repro is asserted line for line. NIT-2: the X give-way order (claim before question) is pinned; NIT-3: the
+ * defined X fallback is reached.
+ *
  * Expected words are written out literally here, not read from the code under test.
  */
 import { hasGatePresentation } from "@/lib/adaptiveSchema/gatePresentation";
@@ -29,6 +37,10 @@ const BANNER =
 const NOTE = "Text stored with this report (such as the answer or the certainty line) may name a gate result. That stored text is reproduced as written; it is not the gate result.";
 const LABEL = (what: string) => `Stored ${what} (historical; inconsistent with recorded inputs)`;
 const HISTORICAL = "(historical; inconsistent with recorded inputs)";
+/** The pre-R5 fail template: buildTemplateExecutiveSummary / the unified answer of a failed legacy run. */
+const FAIL_TEMPLATE = "Panel could not converge on a reliable answer.";
+/** A stored verdict without a gate word: the fail template. */
+const STORED_VERDICT_TEXT = /Panel could not converge on a reliable answer/;
 /** Any gate result statement: the D6 label, the historical "(gate: pass)" / X "(pass)" forms, a memo confidence level. */
 const GATE_RESULT_TEXT = /Verification gate: (Pass|Caution|Fail)\b|\bgate: (pass|caution|fail)\b|\((pass|caution|fail)\)|\b(High|Medium|Low) confidence\b/i;
 const LONG_QUESTION =
@@ -89,6 +101,14 @@ const CONFLICTS: Case[] = [
   { label: "stored FAIL over full certainty", base: "generic-consensus", edit: (r) => ((r.gate.status = "fail"), (r.synthesisReport.gate = "fail")) },
   { label: "report FAIL, gate object pass", base: "generic-consensus", edit: (r) => ((r.gate.status = "pass"), (r.synthesisReport.gate = "fail")) },
   { label: "report PASS, gate object fail (medical, no top claim)", base: "medical-health", edit: (r) => ((r.gate.status = "fail"), (r.synthesisReport.gate = "pass")) },
+  // Review of 8def047: the stored summary carries a gate verdict ("Verification gate: Caution. Caution: …").
+  { label: "gate object PASS, summary states the stored caution (generic-mixed-narrative-fail)", base: "generic-mixed-narrative-fail", edit: (r) => (r.gate.status = "pass") },
+  // Review of 8def047: a pre-R5 failed run — summary and answer are the fail template; stored PASS over two splits.
+  {
+    label: "stored PASS, pre-R5 fail-template summary (legal-regulatory)",
+    base: "legal-regulatory",
+    edit: (r) => ((r.gate.status = "pass"), (r.synthesisReport.gate = "pass"), (r.synthesisReport.executiveSummary = FAIL_TEMPLATE), (r.synthesisReport.unifiedAnswer = FAIL_TEMPLATE)),
+  },
 ];
 const CONSISTENT: Case[] = [
   { label: "valid PASS (generic-consensus)", base: "generic-consensus" },
@@ -140,18 +160,31 @@ describe("inconsistent legacy record (readable): the unavailable gate leads ever
     expect(firstGateWord(md)).toBeLessThan(Infinity); // the stored gate words are still reproduced (transparency) …
     // … but only under a historical label: each line naming a gate result is a labelled stored value, or follows the
     // labelled stored answer within the Unified Answer section.
+    // Review of 8def047: and every line of the Executive Summary section follows its stored-summary label; a stored
+    // verdict without a gate word (the fail template) is held to the same rule.
     let section = "";
     let underStoredAnswer = false;
+    let underStoredSummary = false;
     for (const line of lines) {
       if (line.startsWith("## ")) {
         section = line;
         underStoredAnswer = false;
+        underStoredSummary = false;
         continue;
       }
       if (line === `**${LABEL("answer")}:**`) underStoredAnswer = section === "## Unified Answer";
-      if (!GATE_RESULT_TEXT.test(line)) continue;
-      expect(line.startsWith("**Stored ") || underStoredAnswer).toBe(true);
+      if (line === `**${LABEL("executive summary")}:**`) underStoredSummary = section === "## Executive Summary";
+      if (section === "## Executive Summary" && line !== "" && line !== `**${LABEL("executive summary")}:**`) expect(underStoredSummary).toBe(true);
+      if (!GATE_RESULT_TEXT.test(line) && !STORED_VERDICT_TEXT.test(line)) continue;
+      expect(line.startsWith("**Stored ") || underStoredAnswer || underStoredSummary).toBe(true);
     }
+    // The Executive Summary section reproduces stored text, so it opens with the stored-summary label (both paths); on
+    // the legacy path the stored summary follows it verbatim.
+    const es = lines.indexOf("## Executive Summary");
+    expect(lines[es + 1]).toBe(`**${LABEL("executive summary")}:**`);
+    expect(lines[es + 2].length).toBeGreaterThan(0);
+    if (v === "legacy") expect(lines.slice(es + 2).join("\n").startsWith(`${rec.synthesisReport.executiveSummary}\n`)).toBe(true);
+    expect(lines.filter((l) => l === `**${LABEL("executive summary")}:**`)).toHaveLength(1);
     // The raw stored panel verdict appears only under its historical label; an unlabelled "Panel verdict" line is only
     // the computed one, which states Unavailable.
     const verdict = rec.synthesisReport.panelVerdict as string;
@@ -191,6 +224,109 @@ describe("inconsistent legacy record (readable): the unavailable gate leads ever
       expect(post.indexOf(UNAVAILABLE)).toBeLessThan(firstStored(post, rec).at);
       expect(post).not.toMatch(GATE_RESULT_TEXT);
     }
+  });
+});
+
+// ── Review of 8def047: the complete copied Markdown of the review's repro ──
+
+describe("review of 8def047 repro: the complete readable copied Markdown, opening lines first", () => {
+  it("generic-mixed-narrative-fail, gate object PASS, legacy shape: every line, the stored summary labelled", () => {
+    const rec = record("generic-mixed-narrative-fail");
+    rec.gate.status = "pass";
+    delete rec.synthesisReport.presentation;
+    const p = presentationOf(rec);
+    expect(p.status).toBe("unavailable");
+    const STORED_CAUTION =
+      "Verification gate: Caution. Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.";
+    const STORED_BODY = [
+      "",
+      "“Raising the minimum wage reduces employment” (ChatGPT, Claude, Grok, Perplexity, Gemini). “Inflation expectations remain anchored” (ChatGPT, Claude, Grok, Perplexity, Gemini).",
+      "",
+      "Unresolved load-bearing claim:",
+      "- “Tariffs protect domestic manufacturing jobs” (split: 1 of 5 dispatched models support it and 1 disputes it)",
+    ];
+    expect(buildAdaptiveSynthesisMarkdown(QUESTION, rec.synthesisReport, undefined, p).split("\n")).toEqual([
+      "# Synthesis Report",
+      "",
+      "**Question:** Does remote work change productivity?",
+      "",
+      BANNER,
+      "",
+      NOTE,
+      "",
+      "**Stored panel verdict (historical; inconsistent with recorded inputs):** 5/5 models converge on “Raising the minimum wage reduces employment”; certainty 71%; gate: caution.",
+      "",
+      "## Unified Answer",
+      "**Stored answer (historical; inconsistent with recorded inputs):**",
+      STORED_CAUTION,
+      ...STORED_BODY,
+      "",
+      "## Executive Summary",
+      "**Stored executive summary (historical; inconsistent with recorded inputs):**",
+      STORED_CAUTION,
+      ...STORED_BODY,
+      "",
+      "## Where models agree",
+      "- “Raising the minimum wage reduces employment”",
+      "- “Inflation expectations remain anchored”",
+      "",
+      "## Where models disagree",
+      "- **Tariffs protect domestic manufacturing jobs** — Models take different positions on this point — see each model's excerpt below.",
+      "  - ChatGPT: Tariffs protect jobs.",
+      "  - Claude: Tariffs do not protect jobs.",
+      "  - Grok: Tariff effects are unclear.",
+      "- **Housing prices will cool** — Models take different positions on this point — see each model's excerpt below.",
+      "  - ChatGPT: Housing will cool.",
+      "  - Claude: Housing will not cool.",
+      "  - Grok: No cooling expected.",
+      "- **Productivity growth will accelerate** — Models take different positions on this point — see each model's excerpt below.",
+      "  - ChatGPT: Productivity may rise somewhat.",
+      "  - Claude: Productivity may rise somewhat.",
+      "",
+      "## Bias & blind spots",
+      "- **recency bias** — ChatGPT and Grok take opposite positions on rates.",
+      "",
+      "## Certainty",
+      "71% (Verification gate: Unavailable)",
+      "",
+      "**Stored certainty text (historical; inconsistent with recorded inputs):** Run certainty 71% (gate: caution). Of 6 scored claims across 5 dispatched models: consensus on 2; a split on 3; a single source only on 1.",
+      "",
+      "Source: convergepanel.com",
+    ]);
+  });
+
+  it("pre-R5 fail template (legacy), stored PASS: the template stands only under the stored labels", () => {
+    const rec = record("legal-regulatory");
+    rec.gate.status = "pass";
+    rec.synthesisReport.gate = "pass";
+    rec.synthesisReport.executiveSummary = FAIL_TEMPLATE;
+    rec.synthesisReport.unifiedAnswer = FAIL_TEMPLATE;
+    delete rec.synthesisReport.presentation;
+    const p = presentationOf(rec);
+    expect(p.status).toBe("unavailable");
+    const lines = buildAdaptiveSynthesisMarkdown(QUESTION, rec.synthesisReport, undefined, p).split("\n");
+    expect(lines.slice(0, 8)).toEqual(["# Synthesis Report", "", "**Question:** Does remote work change productivity?", "", BANNER, "", NOTE, ""]);
+    const es = lines.indexOf("## Executive Summary");
+    expect(lines.slice(es, es + 4)).toEqual(["## Executive Summary", "**Stored executive summary (historical; inconsistent with recorded inputs):**", FAIL_TEMPLATE, ""]);
+    const ans = lines.indexOf("## Unified Answer");
+    expect(lines.slice(ans, ans + 3)).toEqual(["## Unified Answer", "**Stored answer (historical; inconsistent with recorded inputs):**", FAIL_TEMPLATE]);
+    expect(lines.filter((l) => l === FAIL_TEMPLATE)).toHaveLength(2);
+  });
+
+  it("R5-era presented path (legal-regulatory, stored PASS): the stored answer note in the summary is labelled", () => {
+    const rec = record("legal-regulatory");
+    rec.gate.status = "pass";
+    rec.synthesisReport.gate = "pass";
+    delete rec.synthesisReport.presentation.verificationGate;
+    delete rec.synthesisReport.presentation.disagreementPositionVersion;
+    const p = presentationOf(rec);
+    expect(p.status).toBe("unavailable");
+    const lines = buildAdaptiveSynthesisMarkdown(QUESTION, rec.synthesisReport, undefined, p).split("\n");
+    expect(lines.slice(0, 8)).toEqual(["# Synthesis Report", "", "**Question:** Does remote work change productivity?", "", BANNER, "", NOTE, ""]);
+    const es = lines.indexOf("## Executive Summary");
+    expect(lines[es + 1]).toBe("**Stored executive summary (historical; inconsistent with recorded inputs):**");
+    const summary = lines.slice(es + 2, lines.findIndex((l, i) => i > es && l.startsWith("## ")));
+    expect(summary).toContain(FAIL_TEMPLATE);
   });
 });
 
@@ -303,6 +439,35 @@ describe("readable X post: at most 280 characters, the brand kept, the gate line
     expect(x.length).toBeLessThanOrEqual(280);
     expect(x.endsWith("\n\nvia ConvergePanel")).toBe(true);
     expect(x).toContain(` — panel result: ${split.result}\n\nvia ConvergePanel`);
+  });
+
+  it("NIT-2 (review of 8def047): the claim gives way before the question — every claim length is tried at a question length first", () => {
+    // Unavailable gate, R5 row, long question: no claim fits beside the 80-character question, so the question takes 48
+    // and the claim the longest that then fits (24). Trying the question first (24, with the 60-character claim) is wrong.
+    const rec = record("generic-mixed");
+    rec.gate.status = "pass";
+    delete rec.synthesisReport.presentation.verificationGate;
+    delete rec.synthesisReport.presentation.disagreementPositionVersion;
+    const p = presentationOf(rec);
+    expect(p.status).toBe("unavailable");
+    expect(buildAdaptiveXPost(LONG_QUESTION, rec.synthesisReport, undefined, p)).toBe(
+      [
+        "Asked a multi-model AI panel: \"Across the last two decades of peer-reviewed la…\"",
+        "Verification gate: Unavailable · Certainty: 71%",
+        "Models split on: “Tariffs protect domesti…” — panel result: split: 1 of 5 dispatched models support it and 1 disputes it",
+        "via ConvergePanel",
+      ].join("\n\n")
+    );
+  });
+
+  it("NIT-3 (review of 8def047): a row whose computed result cannot fit beside any question gives the defined fallback", () => {
+    const rec = record("generic-mixed");
+    rec.gate.status = "pass";
+    delete rec.synthesisReport.presentation.verificationGate;
+    delete rec.synthesisReport.presentation.disagreementPositionVersion;
+    rec.synthesisReport.presentation.disagree[0].result = `split: ${"x".repeat(200)}`;
+    const p = presentationOf(rec);
+    expect(buildAdaptiveXPost(LONG_QUESTION, rec.synthesisReport, undefined, p)).toBe(["Asked a multi-model AI panel", "Verification gate: Unavailable · Certainty: 71%", "via ConvergePanel"].join("\n\n"));
   });
 
   it("a post that fits keeps the layout it had: the classic layout with the readable gate line", () => {
