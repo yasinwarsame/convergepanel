@@ -13,6 +13,9 @@
  *      classic page's actions produce exactly the classic output (no leak).
  *   3. Frozen classic parity: every classic output (builders with no option, classic page HTML and its four actions) over
  *      a broad fixture set hashes to the digest captured at bb4aed5 (5,266 outputs).
+ *   4. Review of 7212c47: the parity extended to stored / legacy / R5-era presentations × short / long questions (15,798
+ *      classic outputs) and to the readable outputs that fix must not change (3,840), both captured at 7212c47. The
+ *      unavailable lead and the historical labels are asserted in readableShareGateLead.spec.tsx.
  *
  * Expected words are written out literally here, not read from the code under test.
  */
@@ -72,6 +75,10 @@ const WORD: Record<Known, string> = { pass: "Pass", caution: "Caution", fail: "F
 const CONFIDENCE: Record<Known, string> = { pass: "High", caution: "Medium", fail: "Low" };
 const UNAVAILABLE = "Verification gate: Unavailable";
 const STORED_TEXT_NOTE = "Text stored with this report (such as the answer or the certainty line) may name a gate result. That stored text is reproduced as written; it is not the gate result.";
+const UNAVAILABLE_BANNER =
+  "Verification gate: Unavailable — the stored result is inconsistent with its recorded inputs. The gate is a rule-based check of the panel's certainty score and split positions; it is not an independent verification of the evidence.";
+/** Review of 7212c47: a stored verdict-bearing value reproduced beside the unavailable gate. */
+const HISTORICAL = (what: string) => `Stored ${what} (historical; inconsistent with recorded inputs)`;
 const CAUTION_NOTICE = "Caution: This result requires further review. The panel did not meet the conditions for a clean verification pass. Review the findings and limitations before relying on this answer.";
 /** Any gate result statement: the D6 label, the historical "(gate: pass)" / X "(pass)" forms, a memo confidence level. */
 const GATE_RESULT_TEXT = /Verification gate: (Pass|Caution|Fail)\b|\bgate: (pass|caution|fail)\b|\((pass|caution|fail)\)|\b(High|Medium|Low) confidence\b/i;
@@ -206,16 +213,17 @@ describe("inconsistent legacy record: every generated format states 'Verificatio
     // X: same, no "(pass)" / "(requires further review)".
     expect(out.x.split("\n\n")[1]).toBe(`${UNAVAILABLE} · Certainty: ${pct(rec)}%`);
     expect(out.x).not.toContain("requires further review");
-    // Markdown: the computed certainty line states Unavailable; the stored certainty text follows as written and the
-    // stored-text note right after it.
+    // Markdown (review of 7212c47): the computed certainty line states Unavailable on its own; the stored certainty text
+    // follows, labelled as stored and historical. The banner and the note lead the document (see "leads" below).
     const md = out.markdown.split("\n");
-    const at = md.indexOf(`${pct(rec)}% (${UNAVAILABLE}) — ${rec.synthesisReport.certaintyAssessment}`);
+    const at = md.indexOf(`${pct(rec)}% (${UNAVAILABLE})`);
     expect(at).toBeGreaterThan(0);
-    expect(md.slice(at + 1, at + 3)).toEqual(["", STORED_TEXT_NOTE]);
-    // Memo: no gate-based confidence level; the note follows the stored certainty text.
+    expect(md.slice(at + 1, at + 3)).toEqual(["", `**${HISTORICAL("certainty text")}:** ${rec.synthesisReport.certaintyAssessment}`]);
+    // Memo: no gate-based confidence level; the banner and the note lead the findings; the stored assessment is labelled.
     expect(out.memoInput.confidenceLabel).toBe("No gate-based");
     expect(out.memo).toContain("(No gate-based confidence)");
-    expect((out.memoInput.confidenceAssessment ?? "").endsWith(`\n\n${STORED_TEXT_NOTE}`)).toBe(true);
+    expect(out.memoInput.keyFindings?.[0]).toBe(`${UNAVAILABLE_BANNER} ${STORED_TEXT_NOTE}`);
+    expect((out.memoInput.confidenceAssessment ?? "").startsWith(`${HISTORICAL("assessment")}:\n`)).toBe(true);
 
     // Outside the stored text, no generated format states any gate result; the posts and Markdown state Unavailable.
     for (const text of [out.linkedin, out.x, out.markdown]) expect(text).toContain(UNAVAILABLE);
@@ -252,13 +260,16 @@ describe("R5-era legacy record (presentation without the Order 4 gate): the pres
     expect(p.status).toBe("unavailable");
     const out = generated(rec, p);
     const md = out.markdown.split("\n");
-    // The panel verdict line and the certainty line: both Unavailable; the note after the certainty block.
-    // (A verdict card without a top claim states the stored panel verdict text instead — stored text, as written.)
-    const verdictLine = md.find((l) => l.startsWith("**Panel verdict:**"))!;
-    if (rec.synthesisReport.verdictCard.topConsensusAgreement) expect(verdictLine).toContain(`certainty ${pct(rec)}%; ${UNAVAILABLE}.`);
-    else expect(verdictLine).not.toContain("certainty");
-    expect(md.some((l) => l.startsWith(`${pct(rec)}% (${UNAVAILABLE}) — `))).toBe(true);
-    expect(md[md.length - 3]).toBe(STORED_TEXT_NOTE);
+    // The panel verdict line and the certainty line: both Unavailable; the banner and the note lead (review of 7212c47).
+    // (A verdict card without a top claim reproduces the stored panel verdict text — labelled as stored and historical.)
+    if (rec.synthesisReport.verdictCard.topConsensusAgreement) expect(md.find((l) => l.startsWith("**Panel verdict:**"))).toContain(`certainty ${pct(rec)}%; ${UNAVAILABLE}.`);
+    else {
+      expect(md.some((l) => l.startsWith("**Panel verdict:**"))).toBe(false);
+      expect(md.some((l) => l.startsWith(`**${HISTORICAL("panel verdict")}:** `))).toBe(true);
+    }
+    expect(md).toContain(`${pct(rec)}% (${UNAVAILABLE})`);
+    expect(md.some((l) => l.startsWith(`**${HISTORICAL("certainty text")}:** `))).toBe(true);
+    expect(md.slice(4, 7)).toEqual([UNAVAILABLE_BANNER, "", STORED_TEXT_NOTE]);
     expect(out.linkedin.split("\n")[2]).toBe(`${UNAVAILABLE} · Certainty: ${pct(rec)}%`);
     for (const text of [out.linkedin, out.x, out.markdown, out.memo]) expect(withoutStored(text, rec)).not.toMatch(GATE_RESULT_TEXT);
     // Control: classic keeps the historical "gate: <stored>" in the computed lines.
@@ -326,7 +337,7 @@ describe("Order 4 reports: the readable option gives exactly the classic output 
     // The marked builder (its row or its pointer to the full report), never the historical "Models split on: ".
     expect(classic).toMatch(/Unresolved: |unresolved rows? — see the full report/);
     expect(classic).not.toContain("Models split on: ");
-    const x = buildAdaptiveXPost(QUESTION, rec.synthesisReport, pos, { status: "unavailable", badge: UNAVAILABLE, bannerNote: STORED_TEXT_NOTE });
+    const x = buildAdaptiveXPost(QUESTION, rec.synthesisReport, pos, { status: "unavailable", badge: UNAVAILABLE, banner: UNAVAILABLE_BANNER, bannerNote: STORED_TEXT_NOTE });
     expect(x).toContain(`${UNAVAILABLE} · Certainty: ${pct(rec)}%`);
     expect(x).not.toMatch(/Verification gate: Caution|requires further review/);
     expect(x).toMatch(/Unresolved: |unresolved rows? — see the full report/); // still the marked builder
@@ -450,4 +461,146 @@ describe("frozen classic parity: every classic output over the broad fixture set
     const digest = sha(keys.map((k) => `${k}=${out[k]}`).join("\n"));
     expect({ count: keys.length, sha256: digest }).toEqual(CLASSIC_DIGEST_AT_BB4AED5);
   }, 300000);
+});
+
+// ── 4. Frozen parity extended (review of 7212c47) ──────────────────────────
+
+/**
+ * Review of 7212c47 extends the frozen parity above (which stays as it is) to the cases the readable fix touches:
+ *   - classic: the 22 o5p records × the 10 gate edits × three presentation variants (as stored; legacy — no presentation;
+ *     R5-era — presentation without the Order 4 gate) × a short and a long question, plus the remote-work fixture: the
+ *     builders with no option (with and without position input; memo input and memo text) and the classic page with that
+ *     question (HTML, and its actions' Markdown, memo and posts). Captured at 7212c47 (before this fix).
+ *   - readable, what this fix must not change: over the same records with the short question, the readable option's
+ *     LinkedIn and X posts for every page presentation, and its Markdown and memo for every presentation but
+ *     "unavailable" (consistent legacy records, Order 4 reports, unrecognized). Captured at 7212c47.
+ */
+const LONG_QUESTION_290B =
+  "Across the last two decades of peer-reviewed labour-economics research, does a sustained shift to remote or hybrid work measurably change individual and team productivity, and how do sector, task type and measurement method change the answer?";
+const CLASSIC_DIGEST_AT_7212C47 = { count: 15798, sha256: "e7fa0463c219009056735ceaf7cff697f0b8e34935efec025ea233c63678dcab" };
+const READABLE_UNCHANGED_DIGEST_AT_7212C47 = { count: 3840, sha256: "5db7b09c022b33834c028c03845c4fbadad9032c84cb01383fa3508a2508a17f" };
+
+function extendedRecords(): Array<[string, () => any, string]> {
+  const names = Object.keys(JSON.parse(readFileSync(join(process.cwd(), "lib/adaptiveSchema/__tests__/o5p/__fixtures__/baseline-2c17fee/records.json"), "utf8")));
+  const edits: Array<[string, (r: any) => void]> = [
+    ["none", () => {}],
+    ["both-pass", (r) => r.gate && ((r.gate.status = "pass"), (r.synthesisReport.gate = "pass"))],
+    ["both-caution", (r) => r.gate && ((r.gate.status = "caution"), (r.synthesisReport.gate = "caution"))],
+    ["both-fail", (r) => r.gate && ((r.gate.status = "fail"), (r.synthesisReport.gate = "fail"))],
+    ["rep-fail-gate-pass", (r) => r.gate && ((r.gate.status = "pass"), (r.synthesisReport.gate = "fail"))],
+    ["rep-pass-gate-fail", (r) => r.gate && ((r.gate.status = "fail"), (r.synthesisReport.gate = "pass"))],
+    ["rep-weird", (r) => r.gate && (r.synthesisReport.gate = "verified-ish")],
+    ["rep-null", (r) => r.gate && (r.synthesisReport.gate = null)],
+    ["split0-pass", (r) => r.gate && ((r.gate.loadBearingSplitCount = 0), (r.gate.status = "pass"), (r.synthesisReport.gate = "pass"))],
+    ["inputs-missing", (r) => r.gate && (delete r.gate.runCertainty, delete r.gate.loadBearingSplitCount, delete r.gate.loadBearingClaims)],
+  ];
+  const variant = (r: any, v: string) => {
+    if (!r.synthesisReport?.presentation) return;
+    if (v === "legacy") delete r.synthesisReport.presentation;
+    if (v === "r5") {
+      delete r.synthesisReport.presentation.verificationGate;
+      delete r.synthesisReport.presentation.disagreementPositionVersion;
+    }
+  };
+  const recs: Array<[string, () => any, string]> = [];
+  for (const n of names)
+    for (const [e, f] of edits)
+      for (const v of ["stored", "legacy", "r5"])
+        recs.push([
+          `${n}|${e}|${v}`,
+          () => {
+            const r = record(n);
+            f(r);
+            variant(r, v);
+            return r;
+          },
+          n,
+        ]);
+  for (const v of ["stored", "legacy", "r5"])
+    recs.push([
+      `remote|${v}`,
+      () => {
+        const r = remoteWorkFixture().rec;
+        variant(r, v);
+        return r;
+      },
+      "generic-substituted-and-failed",
+    ]);
+  return recs;
+}
+
+const sha290b = (s: string) => createHash("sha256").update(s).digest("hex");
+function digestOf(out: Record<string, string>) {
+  const keys = Object.keys(out).sort();
+  if (process.env.R290B_DUMP) require("fs").writeFileSync(`${process.env.R290B_DUMP}.${keys.length}.json`, JSON.stringify(out, Object.keys(out).sort(), 1));
+  return { count: keys.length, sha256: sha290b(keys.map((k) => `${k}=${out[k]}`).join("\n")) };
+}
+
+describe("frozen parity extended (review of 7212c47)", () => {
+  it("classic: every classic output over records × gate edits × presentation variants × short / long question is byte-identical to 7212c47", () => {
+    const out: Record<string, string> = {};
+    for (const [key, make, base] of extendedRecords())
+      for (const [qk, q] of [["short", QUESTION], ["long", LONG_QUESTION_290B]] as const) {
+        const rec = make();
+        const rows = slotRows(base);
+        const k0 = `${key}|${qk}`;
+        if (rec.synthesisReport) {
+          const pos = { rows, roster: rows.map((x: any) => x.modelId) } as any;
+          for (const [pk, pi] of [["nopos", undefined], ["pos", pos]] as const) {
+            out[`${k0}|${pk}|md`] = sha290b(buildAdaptiveSynthesisMarkdown(q, rec.synthesisReport, pi as any));
+            out[`${k0}|${pk}|li`] = sha290b(buildAdaptiveLinkedInPost(q, rec.synthesisReport, pi as any));
+            out[`${k0}|${pk}|x`] = sha290b(buildAdaptiveXPost(q, rec.synthesisReport, pi as any));
+          }
+          const mi = buildAdaptiveMemoInput(q, rec.synthesisReport, rows.map((x: any) => x.modelId), "v1", null, rows);
+          out[`${k0}|memoinput`] = sha290b(JSON.stringify(mi));
+          out[`${k0}|memotext`] = sha290b(normMemo(generateVerificationMemo(mi)));
+        }
+        const k = `${k0}|classic`;
+        captured.length = 0;
+        clip.length = 0;
+        downloads.length = 0;
+        posts.length = 0;
+        out[`${k}|html`] = sha290b(renderPanel(rec, rows, { question: q }));
+        const sets = captured.filter((p) => p.onGenerateLinkedIn);
+        out[`${k}|viewcount`] = String(sets.length);
+        for (const p of sets)
+          for (const h of ["onCopy", "onExportMemo", "onGenerateLinkedIn", "onGenerateX"]) {
+            try {
+              const r = p[h]?.();
+              if (r && typeof r.catch === "function") r.catch(() => {});
+            } catch {
+              /* setState after a static render */
+            }
+          }
+        out[`${k}|clip`] = sha290b(JSON.stringify(clip));
+        out[`${k}|memo`] = sha290b(JSON.stringify(downloads.map(normMemo)));
+        out[`${k}|posts`] = sha290b(JSON.stringify(posts));
+      }
+    expect(digestOf(out)).toEqual(CLASSIC_DIGEST_AT_7212C47);
+  }, 600000);
+
+  it("readable: the outputs this fix must not change (posts for every presentation, Markdown / memo unless unavailable) equal 7212c47", () => {
+    const out: Record<string, string> = {};
+    const statuses = new Set<string>();
+    for (const [key, make, base] of extendedRecords()) {
+      const rec = make();
+      if (!rec.synthesisReport) continue;
+      const p = readableGatePresentation({ gate: rec.gate, synthesisReport: rec.synthesisReport, schemaId: rec.schemaId });
+      statuses.add(p.status);
+      const rows = slotRows(base);
+      const pos = { rows, roster: rows.map((x: any) => x.modelId) } as any;
+      for (const [pk, pi] of [["nopos", undefined], ["pos", pos]] as const) {
+        out[`${key}|${p.status}|${pk}|li`] = sha290b(buildAdaptiveLinkedInPost(QUESTION, rec.synthesisReport, pi as any, p));
+        out[`${key}|${p.status}|${pk}|x`] = sha290b(buildAdaptiveXPost(QUESTION, rec.synthesisReport, pi as any, p));
+        if (p.status !== "unavailable") out[`${key}|${p.status}|${pk}|md`] = sha290b(buildAdaptiveSynthesisMarkdown(QUESTION, rec.synthesisReport, pi as any, p));
+      }
+      if (p.status !== "unavailable") {
+        const mi = buildAdaptiveMemoInput(QUESTION, rec.synthesisReport, rows.map((x: any) => x.modelId), "v1", null, rows, p);
+        out[`${key}|${p.status}|memoinput`] = sha290b(JSON.stringify(mi));
+        out[`${key}|${p.status}|memotext`] = sha290b(normMemo(generateVerificationMemo(mi)));
+      }
+    }
+    expect([...statuses].sort()).toEqual(["caution", "fail", "pass", "unavailable", "unrecognized"]);
+    expect(digestOf(out)).toEqual(READABLE_UNCHANGED_DIGEST_AT_7212C47);
+  }, 600000);
 });

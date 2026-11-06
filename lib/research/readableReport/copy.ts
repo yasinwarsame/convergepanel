@@ -137,7 +137,8 @@ export const READABLE_GATE_COPY = {
    * On that record, text stored with the report (the answer, the certainty line) may still name the stored gate, e.g.
    * "(gate: pass)". Stored text is shown as written — never edited — so the readable page says, beside the unavailable
    * state, that such words are part of the stored text and are not the gate result. The readable Copy (Markdown) and
-   * Export memo actions append the same note after the stored text they reproduce; the lines they generate themselves,
+   * Export memo actions lead with the unavailable banner and this note, before any stored text (review of 7212c47), and
+   * label the stored verdict-bearing values they reproduce as stored and historical; the lines they generate themselves,
    * and the LinkedIn / X posts, state the readable gate ("Verification gate: Unavailable"), never the stored one.
    */
   storedTextNote: "Text stored with this report (such as the answer or the certainty line) may name a gate result. That stored text is reproduced as written; it is not the gate result.",

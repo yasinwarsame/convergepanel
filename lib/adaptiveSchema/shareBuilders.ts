@@ -75,14 +75,35 @@ const POSITIONS_UNAVAILABLE_IN_FORMAT = "Position details are unavailable in thi
  *
  *   status:     the presentation's status ("pass" | "caution" | "fail" | "unrecognized" | "unavailable").
  *   badge:      its one short label ("Verification gate: Unavailable"), used wherever a builder states the gate.
+ *   banner:     the page's banner ("Verification gate: Unavailable — the stored result is inconsistent with its recorded
+ *               inputs. …"); written only on the unavailable state (Markdown, memo), as the screen leads with it.
  *   bannerNote: on the unavailable state only, the note that stored text (the certainty line, the answer) may name a
- *               gate result and is not the gate result; written after the stored text it qualifies (Markdown, memo).
+ *               gate result and is not the gate result; written right after the banner.
+ *
+ * Review of 7212c47 (MINOR): on the unavailable state the copied Markdown and the memo LEAD with the banner and the
+ * note — right after the question, as the screen does — before any text stored with the report, and every stored
+ * verdict-bearing value they still reproduce (the panel verdict, the answer, the certainty text) is labelled
+ * "Stored … (historical; inconsistent with recorded inputs)", never stated as the current conclusion. Every other
+ * readable status (a consistent record, an Order 4 report) keeps the ordering it had.
  */
 export interface ReadableShareGate {
   readonly status: string;
   readonly badge: string;
+  readonly banner: string;
   readonly bannerNote: string | null;
 }
+
+/** The readable page shows no gate result: a legacy record whose stored gate contradicts its recorded inputs. */
+const isUnavailable = (readable?: ReadableShareGate): readable is ReadableShareGate => readable?.status === "unavailable";
+
+/** The label of a stored verdict-bearing value reproduced beside the unavailable gate: "Stored panel verdict (historical; …)". */
+const storedHistoricalLabel = (what: string) => `Stored ${what} (historical; inconsistent with recorded inputs)`;
+
+/** The unavailable gate's lead, as the screen's banner: the banner, then the stored-text note. */
+const unavailableLead = (readable: ReadableShareGate): string[] => [readable.banner, ...(readable.bannerNote ? [readable.bannerNote] : [])];
+
+/** The row label of the (unmarked) X post, classic and readable. */
+const X_ROW_LABEL = "Models split on: ";
 
 /** The certainty figure beside the readable gate label: "Verification gate: Unavailable · Certainty: 40%". */
 function readableGateLine(gate: ReadableShareGate, report: AdaptiveSynthesisReport, caution: string): string {
@@ -119,7 +140,10 @@ function plainTextBlock(block: TextBlock, indent = ""): string {
 /** The panel verdict for Markdown: the computed figures, and the top claim with its own result (R6-1, R6-3). */
 function markdownPanelVerdict(report: AdaptiveSynthesisReport, readable?: ReadableShareGate): string[] {
   const card = report.verdictCard;
-  if (!card.topConsensusAgreement) return [`**Panel verdict:** ${escapeMarkdownInline(report.panelVerdict)}`];
+  if (!card.topConsensusAgreement) {
+    // #290 Inc 1 (review of 7212c47): beside the unavailable gate the stored verdict is labelled as such, never stated as the conclusion.
+    return [`**${isUnavailable(readable) ? storedHistoricalLabel("panel verdict") : "Panel verdict"}:** ${escapeMarkdownInline(report.panelVerdict)}`];
+  }
   // Order 5 (Contract P, m-6): on a marked report the top row is labelled and headed by what it is.
   const verdict = positionView(report)?.verdict;
   const parts = [
@@ -190,11 +214,20 @@ export function buildAdaptiveSynthesisMarkdown(question: string, storedReport: A
   lines.push("");
   lines.push(`**Question:** ${question}`);
   lines.push("");
-  lines.push(`**Panel verdict:** ${report.panelVerdict}`);
+  const unavailable = isUnavailable(readable);
+  if (unavailable) {
+    // #290 Inc 1 (review of 7212c47): the readable page's unavailable gate leads, before any stored verdict or answer
+    // text; the stored panel verdict and answer follow, each labelled as stored and historical.
+    unavailableLead(readable).forEach((l) => lines.push(l, ""));
+    lines.push(`**${storedHistoricalLabel("panel verdict")}:** ${report.panelVerdict}`);
+  } else {
+    lines.push(`**Panel verdict:** ${report.panelVerdict}`);
+  }
   lines.push("");
   lines.push("## Unified Answer");
   // D8: an unrecognized stored gate is stated before the stored answer; a known gate exports exactly as before.
   answerLeadBlocks(presentUnifiedAnswer(report)).forEach((b) => lines.push(...markdownBlock(b)));
+  if (unavailable && report.unifiedAnswer) lines.push(`**${storedHistoricalLabel("answer")}:**`);
   lines.push(report.unifiedAnswer);
   lines.push("");
   lines.push("## Executive Summary");
@@ -226,8 +259,8 @@ export function buildAdaptiveSynthesisMarkdown(question: string, storedReport: A
   }
 
   lines.push("## Certainty");
-  lines.push(`${Math.round(report.runCertainty * 100)}% (${markdownGate(report, readable)}) — ${report.certaintyAssessment}`);
-  if (readable?.bannerNote) lines.push("", readable.bannerNote);
+  if (unavailable) lines.push(`${Math.round(report.runCertainty * 100)}% (${readable.badge})`, "", `**${storedHistoricalLabel("certainty text")}:** ${report.certaintyAssessment}`);
+  else lines.push(`${Math.round(report.runCertainty * 100)}% (${markdownGate(report, readable)}) — ${report.certaintyAssessment}`);
   lines.push("");
   lines.push("Source: convergepanel.com");
 
@@ -240,10 +273,15 @@ function buildPresentedMarkdown(question: string, report: AdaptiveSynthesisRepor
   lines.push("");
   lines.push(`**Question:** ${question}`);
   lines.push("");
+  const unavailable = isUnavailable(readable);
+  // #290 Inc 1 (review of 7212c47): the readable page's unavailable gate leads, before any stored text.
+  if (unavailable) unavailableLead(readable).forEach((l) => lines.push(l, ""));
   lines.push(...markdownPanelVerdict(report, readable));
   lines.push("");
   lines.push("## Unified Answer");
-  lines.push(...markdownUnifiedAnswer(report));
+  const answerLines = markdownUnifiedAnswer(report);
+  if (unavailable && answerLines.length > 0) lines.push(`**${storedHistoricalLabel("answer")}:**`);
+  lines.push(...answerLines);
   lines.push("");
   lines.push("## Executive Summary");
   for (const block of presentExecutiveSummary(report)) {
@@ -318,12 +356,12 @@ function buildPresentedMarkdown(question: string, report: AdaptiveSynthesisRepor
 
   lines.push("## Certainty");
   const [certaintyLine, ...certaintyRest] = presentCertainty(report);
-  lines.push(`${Math.round(report.runCertainty * 100)}% (${markdownGate(report, readable)}) — ${certaintyLine.text}`);
+  if (unavailable) lines.push(`${Math.round(report.runCertainty * 100)}% (${readable.badge})`, "", `**${storedHistoricalLabel("certainty text")}:** ${certaintyLine.text}`);
+  else lines.push(`${Math.round(report.runCertainty * 100)}% (${markdownGate(report, readable)}) — ${certaintyLine.text}`);
   for (const block of certaintyRest) {
     lines.push("");
     lines.push(...markdownBlock(block));
   }
-  if (readable?.bannerNote) lines.push("", readable.bannerNote);
   lines.push("");
   lines.push("Source: convergepanel.com");
 
@@ -347,12 +385,16 @@ export function buildAdaptiveMemoInput(
 ): MemoInput {
   const input = buildMemoInput(question, storedReport, modelsUsed, verificationId, modelProvenance, positionRows);
   if (!readable) return input;
-  // The readable page's gate: an unavailable gate supports no confidence level (as an unrecognized one does), and the
-  // stored-text note follows the stored certainty text it qualifies. Any other status is the stored one: unchanged.
+  // The readable page's gate. Any status but unavailable is the stored one: unchanged.
+  if (readable.status !== "unavailable") return { ...input, confidenceLabel: GATE_CONFIDENCE_LABEL[readGateStatus(readable.status)] };
+  // Unavailable (review of 7212c47): no gate-based confidence level (as for an unrecognized gate); the banner and the
+  // stored-text note lead the findings — the memo's first statement after its computed figures, before any stored text —
+  // and the stored assessment it reproduces is labelled as stored and historical.
   return {
     ...input,
     confidenceLabel: GATE_CONFIDENCE_LABEL[readGateStatus(readable.status)],
-    ...(readable.bannerNote ? { confidenceAssessment: [input.confidenceAssessment, readable.bannerNote].filter(Boolean).join("\n\n") } : {}),
+    keyFindings: [unavailableLead(readable).join(" "), ...(input.keyFindings ?? [])],
+    ...(input.confidenceAssessment ? { confidenceAssessment: `${storedHistoricalLabel("assessment")}:\n${input.confidenceAssessment}` } : {}),
   };
 }
 
@@ -501,13 +543,12 @@ export function buildAdaptiveLinkedInPost(question: string, storedReport: Adapti
 export function buildAdaptiveXPost(question: string, storedReport: AdaptiveSynthesisReport, positionInput?: PositionSafeInput, readable?: ReadableShareGate): string {
   const report = shown(storedReport, positionInput);
   if (positionView(report)) return buildMarkedXPost(question, report, readable);
-  const splitLabel = "Models split on: ";
+  // #290 Inc 1, readable only: the readable page's gate (ReadableShareGate), in a post that fits (review of 7212c47).
+  if (readable) return buildReadableXPost(question, report, readable);
+  const splitLabel = X_ROW_LABEL;
   const parts: string[] = [];
   parts.push(`Asked a multi-model AI panel: "${truncate(question, 80)}"`);
-  if (readable) {
-    // #290 Inc 1, readable only: the readable page's gate (ReadableShareGate).
-    parts.push(readableGateLine(readable, report, ` (${CAUTION_NOTICE_SHORT})`));
-  } else if (hasGatePresentation(report)) {
+  if (hasGatePresentation(report)) {
     const status = readGateStatus(report.gate);
     parts.push(`${gateLabel(status)}${status === "caution" ? ` (${CAUTION_NOTICE_SHORT})` : ""} · Certainty: ${Math.round(report.runCertainty * 100)}%`);
   } else {
@@ -524,6 +565,37 @@ export function buildAdaptiveXPost(question: string, storedReport: AdaptiveSynth
   }
   parts.push("via ConvergePanel");
   return truncate(parts.join("\n\n"), 280);
+}
+
+/**
+ * #290 Inc 1, readable only (review of 7212c47, NIT): the X post with the readable page's gate line. The readable label
+ * is longer than the historical "(pass)", so the classic layout (question to 80, claim to its room or topic to 80) could
+ * pass 280 characters and the final cut then dropped "via ConvergePanel" and cut into the computed result. Here the
+ * classic layout is kept whenever it fits (the same text the readable post had); otherwise the model-written claim or
+ * topic gives way first (60, 40, 24, 12), then the question (80, 48, 24). The gate line, the certainty, a row's computed
+ * result and the brand are never cut; if even the shortest form does not fit, the defined fallback — the panel line, the
+ * gate line and the brand — is used. Same limit as classic: 280 characters (`string.length`).
+ */
+function buildReadableXPost(question: string, report: AdaptiveSynthesisReport, readable: ReadableShareGate): string {
+  const gateLine = readableGateLine(readable, report, ` (${CAUTION_NOTICE_SHORT})`);
+  // The first presented row (claim and computed result), else a legacy report's first stored topic.
+  const firstRow = report.presentation?.disagree[0];
+  const topic = !firstRow && report.disagreements.length > 0 ? report.disagreements[0].topic : null;
+  const asked = (max: number) => `${X_ASKED}: "${truncate(question, max)}"`;
+  const row = (max: number) => (firstRow ? `${X_ROW_LABEL}${shortClaimWithResult(firstRow, max)}` : topic !== null ? `${X_ROW_LABEL}${truncate(topic, max)}` : null);
+  const post = (questionMax: number, rowLine: string | null) => [asked(questionMax), gateLine, ...(rowLine ? [rowLine] : []), X_BRAND].join("\n\n");
+  const fits = (text: string) => text.length <= 280;
+  // The classic layout: the claim takes the room left (12–60), a legacy topic up to 80.
+  const fixed = [asked(80), gateLine, X_BRAND].join("\n\n").length + 2;
+  const room = firstRow ? 280 - fixed - X_ROW_LABEL.length - shortClaimWithResult({ ...firstRow, claim: "" }, 0).length : 0;
+  const classicLayout = post(80, row(firstRow ? Math.max(12, Math.min(60, room)) : 80));
+  if (fits(classicLayout)) return classicLayout;
+  for (const questionMax of [80, 48, 24])
+    for (const rowMax of [60, 40, 24, 12]) {
+      const candidate = post(questionMax, row(rowMax));
+      if (fits(candidate)) return candidate;
+    }
+  return [X_ASKED, gateLine, X_BRAND].join("\n\n");
 }
 
 // ─── X (Order 5, Contract P, m-1 / H-1) ─────────────────────────────────────

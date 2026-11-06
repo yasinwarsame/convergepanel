@@ -1,11 +1,17 @@
 /**
- * #290 Increment 1 — the files this increment must not change, pinned to their git blob ids at origin/main 35933c8.
+ * #290 Increment 1 — the files this increment must not change, pinned to their git blob ids (32 files).
  *
- * The sealed parity oracles and their fixtures (historicalParity, nonDsWordingParity, vocabularyInventory), the frozen
- * wording modules shared with exports and persisted report text (reportSummary, agreementNarrative, reportPresentation,
- * positionPresentation, gatePresentation, trustSummary, shareBuilders, exportSnapshot), the PDF / DOCX composers, the
- * classic strip and summary bar, lib/env.ts and the live composer. A readable-layout change that touched any of them
- * would fail here before review. Readable additions live in new files only.
+ * UNCHANGED_AT_35933C8 (blob ids at origin/main 35933c8): the sealed parity oracles and their fixtures (historicalParity,
+ * nonDsWordingParity, vocabularyInventory), the frozen wording modules shared with exports and persisted report text
+ * (reportSummary, agreementNarrative, reportPresentation, positionPresentation, gatePresentation, trustSummary,
+ * exportSnapshot), the PDF / DOCX composers, the classic strip and summary bar, lib/env.ts and the live composer. A
+ * readable-layout change that touched any of them would fail here before review. Readable additions live in new files.
+ *
+ * The owner-authorized exceptions are pinned to their exact new content, each with its reason, in WIDENED_BY_INC1
+ * (vocabulary scanner and manifest) and READABLE_GATE_OPTION_BY_INC1 (AdaptiveSynthesisReportView.tsx,
+ * dsProvenanceUiBoundaries.spec.ts and — since 7212c47 — shareBuilders.ts, which is no longer pinned at 35933c8: it takes
+ * the optional readable-only ReadableShareGate; its classic output is held byte-identical by the frozen parity digests in
+ * components/research/readable/__tests__/readableShareGate.spec.tsx).
  */
 import { createHash } from "crypto";
 import { readFileSync } from "fs";
@@ -107,11 +113,21 @@ const WIDENED_BY_INC1: Record<string, string> = {
  *   - AdaptiveSynthesisReportView.tsx: its four export actions pass `readableGate` to the builders (classic: undefined).
  *     486dbcd342baddd5eb285e5ec6acef6ddd1841fa → 24f22d8ccd4e97eb762edbbca182bceca3be5c92.
  * Same 32-file pinned set (28 → 27 in UNCHANGED_AT_35933C8 is not a removal: shareBuilders.ts moved to this map).
+ *
+ * Re-pinned again (review of 7212c47, MINOR + NIT): on the readable unavailable gate the copied Markdown and the memo lead
+ * with the page's banner and stored-text note, before any stored text, and label the stored panel verdict, answer,
+ * certainty text and memo assessment "Stored … (historical; inconsistent with recorded inputs)"; ReadableShareGate gains
+ * `banner` (the report view already passes it — ReadableGateDisplay carries it — so the view is unchanged); the readable
+ * X post fits 280 characters with the brand and the computed result whole (buildReadableXPost).
+ *   - shareBuilders.ts: 389ea0cf6ffabbe390ba3fb438e2764c35344f17 → 6ecb19ee8e15e3d4a5cc7d08d7e2793872395ab9. Classic output
+ *     byte-identical: the 5,266-output digest at bb4aed5 and the 15,798-output classic digest captured at 7212c47
+ *     (records × gate edits × stored / legacy / R5-era × short / long question, builders and classic page) unchanged.
+ * AdaptiveSynthesisReportView.tsx stays 24f22d8c; same 32-file pinned set.
  */
 const READABLE_GATE_OPTION_BY_INC1: Record<string, string> = {
   "components/adaptive/AdaptiveSynthesisReportView.tsx": "24f22d8ccd4e97eb762edbbca182bceca3be5c92",
   "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "7ee80b6b52b8c71af0c72e95b52b45e0080058c0",
-  "lib/adaptiveSchema/shareBuilders.ts": "389ea0cf6ffabbe390ba3fb438e2764c35344f17",
+  "lib/adaptiveSchema/shareBuilders.ts": "6ecb19ee8e15e3d4a5cc7d08d7e2793872395ab9",
 };
 
 describe("#290 Increment 1 leaves the sealed and frozen files byte-identical to 35933c8", () => {
