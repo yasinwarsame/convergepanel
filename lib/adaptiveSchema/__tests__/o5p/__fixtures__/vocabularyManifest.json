@@ -2308,5 +2308,19 @@
   "count": 1,
   "category": "shared-claim-video",
   "rule": "claim memo, only when MemoInput.claimModelIndependence is \"insufficient\" / \"unverified\" (fewer than two independent executing models answered, or independence not recorded): states that there is NO consensus score / agreement between models (review of 262ef64, B1, 2026-11-06); the independent path is byte-pinned (independentRecordsParity.spec.tsx)"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"Which models actually answered this question could not be established, so nothing in this memo is presented as agreement or disagreement between models.\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "research memo original path, legacy panel only, when MemoInput.researchIndependenceUnverified is true (two or more slots answered but the rows do not record which models executed): states that NO consensus score, agreement or convergence between models is presented (review of 71b03e3, MINOR-1, 2026-11-06)"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"This question was sent to a panel of large language models via ConvergePanel with identical instructions, but which models actually executed could not be established (model independence unverified). No consensus score is reported and nothing in this memo reflects agreement or convergence between models.\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "research memo original path, legacy panel only, when MemoInput.researchIndependenceUnverified is true (two or more slots answered but the rows do not record which models executed): states that NO consensus score, agreement or convergence between models is presented (review of 71b03e3, MINOR-1, 2026-11-06)"
  }
 ]
