@@ -64,6 +64,31 @@ const POSITIONS_UNAVAILABLE_IN_FORMAT = "Position details are unavailable in thi
 // short model text escaped inline, model prose as an escaped blockquote under its label — so model text cannot
 // become a report heading, list, link or HTML. Headings and computed lines are written here.
 
+/**
+ * #290 Increment 1 — readable layout only. The readable page's ONE gate presentation (lib/research/readableReport/
+ * trustSignals readableGatePresentation, computed once per page; structurally the report view's ReadableGateDisplay),
+ * handed to the builders by the readable report view's Copy / Export memo / LinkedIn / X actions, so the generated text
+ * states the gate the page shows: on a legacy record whose stored gate contradicts its recorded inputs, "Verification
+ * gate: Unavailable" — never the stored "(gate: pass)" — and on every other record the page's own label ("Verification
+ * gate: Pass" …). Presentation only: the stored report is read, never written, and no gate is recomputed. Classic
+ * callers pass nothing: every builder's output is then byte-identical to before.
+ *
+ *   status:     the presentation's status ("pass" | "caution" | "fail" | "unrecognized" | "unavailable").
+ *   badge:      its one short label ("Verification gate: Unavailable"), used wherever a builder states the gate.
+ *   bannerNote: on the unavailable state only, the note that stored text (the certainty line, the answer) may name a
+ *               gate result and is not the gate result; written after the stored text it qualifies (Markdown, memo).
+ */
+export interface ReadableShareGate {
+  readonly status: string;
+  readonly badge: string;
+  readonly bannerNote: string | null;
+}
+
+/** The certainty figure beside the readable gate label: "Verification gate: Unavailable · Certainty: 40%". */
+function readableGateLine(gate: ReadableShareGate, report: AdaptiveSynthesisReport, caution: string): string {
+  return `${gate.badge}${gate.status === "caution" ? caution : ""} · Certainty: ${Math.round(report.runCertainty * 100)}%`;
+}
+
 /** The computed "Verification gate: …" block (reportPresentation): written as one line wherever it appears. */
 const isGateBlock = (b: TextBlock) => b.source === "computed" && b.label === GATE_LABEL;
 
@@ -92,7 +117,7 @@ function plainTextBlock(block: TextBlock, indent = ""): string {
 }
 
 /** The panel verdict for Markdown: the computed figures, and the top claim with its own result (R6-1, R6-3). */
-function markdownPanelVerdict(report: AdaptiveSynthesisReport): string[] {
+function markdownPanelVerdict(report: AdaptiveSynthesisReport, readable?: ReadableShareGate): string[] {
   const card = report.verdictCard;
   if (!card.topConsensusAgreement) return [`**Panel verdict:** ${escapeMarkdownInline(report.panelVerdict)}`];
   // Order 5 (Contract P, m-6): on a marked report the top row is labelled and headed by what it is.
@@ -102,11 +127,15 @@ function markdownPanelVerdict(report: AdaptiveSynthesisReport): string[] {
     `**${PANEL_RESULT_LABEL}:** ${card.topConsensusAgreement}`,
     ...(card.topConsensusContested ? [`**Contested:** ${card.topConsensusContested}`] : []),
   ];
-  return [`**Panel verdict:** certainty ${Math.round(report.runCertainty * 100)}%; ${markdownGate(report)}. ${verdict ? verdict.topHeading : "Top claim"}:`, parts.join(" — ")];
+  return [`**Panel verdict:** certainty ${Math.round(report.runCertainty * 100)}%; ${markdownGate(report, readable)}. ${verdict ? verdict.topHeading : "Top claim"}:`, parts.join(" — ")];
 }
 
-/** The gate inside a Markdown line: "Verification gate: Caution" on reports with the Order 4 presentation, else "gate: caution" as before. */
-function markdownGate(report: AdaptiveSynthesisReport): string {
+/**
+ * The gate inside a Markdown line: "Verification gate: Caution" on reports with the Order 4 presentation, else "gate: caution" as before.
+ * #290 Inc 1, readable only: the readable page's gate label.
+ */
+function markdownGate(report: AdaptiveSynthesisReport, readable?: ReadableShareGate): string {
+  if (readable) return readable.badge;
   return hasGatePresentation(report) ? gateLabel(readGateStatus(report.gate)) : `gate: ${legacyGateWord(report.gate)}`;
 }
 
@@ -153,9 +182,9 @@ function truncate(text: string, max: number): string {
   return trimmed.length <= max ? trimmed : `${trimmed.slice(0, max - 1).trimEnd()}…`;
 }
 
-export function buildAdaptiveSynthesisMarkdown(question: string, storedReport: AdaptiveSynthesisReport, positionInput?: PositionSafeInput): string {
+export function buildAdaptiveSynthesisMarkdown(question: string, storedReport: AdaptiveSynthesisReport, positionInput?: PositionSafeInput, readable?: ReadableShareGate): string {
   const report = shown(storedReport, positionInput);
-  if (report.presentation) return buildPresentedMarkdown(question, report);
+  if (report.presentation) return buildPresentedMarkdown(question, report, readable);
   const lines: string[] = [];
   lines.push("# Synthesis Report");
   lines.push("");
@@ -197,20 +226,21 @@ export function buildAdaptiveSynthesisMarkdown(question: string, storedReport: A
   }
 
   lines.push("## Certainty");
-  lines.push(`${Math.round(report.runCertainty * 100)}% (gate: ${legacyGateWord(report.gate)}) — ${report.certaintyAssessment}`);
+  lines.push(`${Math.round(report.runCertainty * 100)}% (${markdownGate(report, readable)}) — ${report.certaintyAssessment}`);
+  if (readable?.bannerNote) lines.push("", readable.bannerNote);
   lines.push("");
   lines.push("Source: convergepanel.com");
 
   return lines.join("\n");
 }
 
-function buildPresentedMarkdown(question: string, report: AdaptiveSynthesisReport): string {
+function buildPresentedMarkdown(question: string, report: AdaptiveSynthesisReport, readable?: ReadableShareGate): string {
   const lines: string[] = [];
   lines.push("# Synthesis Report");
   lines.push("");
   lines.push(`**Question:** ${question}`);
   lines.push("");
-  lines.push(...markdownPanelVerdict(report));
+  lines.push(...markdownPanelVerdict(report, readable));
   lines.push("");
   lines.push("## Unified Answer");
   lines.push(...markdownUnifiedAnswer(report));
@@ -288,11 +318,12 @@ function buildPresentedMarkdown(question: string, report: AdaptiveSynthesisRepor
 
   lines.push("## Certainty");
   const [certaintyLine, ...certaintyRest] = presentCertainty(report);
-  lines.push(`${Math.round(report.runCertainty * 100)}% (${markdownGate(report)}) — ${certaintyLine.text}`);
+  lines.push(`${Math.round(report.runCertainty * 100)}% (${markdownGate(report, readable)}) — ${certaintyLine.text}`);
   for (const block of certaintyRest) {
     lines.push("");
     lines.push(...markdownBlock(block));
   }
+  if (readable?.bannerNote) lines.push("", readable.bannerNote);
   lines.push("");
   lines.push("Source: convergepanel.com");
 
@@ -309,6 +340,27 @@ export function buildAdaptiveMemoInput(
    * holds it: each model is then named with its recorded requested model.
    * Without it, models are named by family only — never by a product label.
    */
+  modelProvenance?: readonly RunModelProvenanceFacts[] | null,
+  positionRows?: readonly unknown[] | null,
+  /** #290 Inc 1: readable layout only (see ReadableShareGate). Absent (every classic caller): unchanged. */
+  readable?: ReadableShareGate
+): MemoInput {
+  const input = buildMemoInput(question, storedReport, modelsUsed, verificationId, modelProvenance, positionRows);
+  if (!readable) return input;
+  // The readable page's gate: an unavailable gate supports no confidence level (as an unrecognized one does), and the
+  // stored-text note follows the stored certainty text it qualifies. Any other status is the stored one: unchanged.
+  return {
+    ...input,
+    confidenceLabel: GATE_CONFIDENCE_LABEL[readGateStatus(readable.status)],
+    ...(readable.bannerNote ? { confidenceAssessment: [input.confidenceAssessment, readable.bannerNote].filter(Boolean).join("\n\n") } : {}),
+  };
+}
+
+function buildMemoInput(
+  question: string,
+  storedReport: AdaptiveSynthesisReport,
+  modelsUsed: ModelId[],
+  verificationId: string,
   modelProvenance?: readonly RunModelProvenanceFacts[] | null,
   positionRows?: readonly unknown[] | null
 ): MemoInput {
@@ -390,14 +442,18 @@ export function buildAdaptiveMemoInput(
   };
 }
 
-export function buildAdaptiveLinkedInPost(question: string, storedReport: AdaptiveSynthesisReport, positionInput?: PositionSafeInput): string {
+export function buildAdaptiveLinkedInPost(question: string, storedReport: AdaptiveSynthesisReport, positionInput?: PositionSafeInput, readable?: ReadableShareGate): string {
   const report = shown(storedReport, positionInput);
   // Order 5 (Contract P): a compact format — no per-slot positions, no model names; rows are stated by their own result.
   const marked = !!positionView(report);
   const lines: string[] = [];
   lines.push(`I researched "${truncate(question, 120)}" across a multi-model AI panel using ConvergePanel.`);
   lines.push("");
-  if (hasGatePresentation(report)) {
+  if (readable) {
+    // #290 Inc 1, readable only: the readable page's gate (ReadableShareGate), and on caution the notice.
+    lines.push(readableGateLine(readable, report, ""));
+    if (readable.status === "caution") lines.push(CAUTION_NOTICE);
+  } else if (hasGatePresentation(report)) {
     // Order 4 (D5/D6): the gate in its neutral wording, the certainty as its own figure, and on caution the notice.
     const status = readGateStatus(report.gate);
     lines.push(`${gateLabel(status)} · Certainty: ${Math.round(report.runCertainty * 100)}%`);
@@ -442,13 +498,16 @@ export function buildAdaptiveLinkedInPost(question: string, storedReport: Adapti
   return lines.join("\n");
 }
 
-export function buildAdaptiveXPost(question: string, storedReport: AdaptiveSynthesisReport, positionInput?: PositionSafeInput): string {
+export function buildAdaptiveXPost(question: string, storedReport: AdaptiveSynthesisReport, positionInput?: PositionSafeInput, readable?: ReadableShareGate): string {
   const report = shown(storedReport, positionInput);
-  if (positionView(report)) return buildMarkedXPost(question, report);
+  if (positionView(report)) return buildMarkedXPost(question, report, readable);
   const splitLabel = "Models split on: ";
   const parts: string[] = [];
   parts.push(`Asked a multi-model AI panel: "${truncate(question, 80)}"`);
-  if (hasGatePresentation(report)) {
+  if (readable) {
+    // #290 Inc 1, readable only: the readable page's gate (ReadableShareGate).
+    parts.push(readableGateLine(readable, report, ` (${CAUTION_NOTICE_SHORT})`));
+  } else if (hasGatePresentation(report)) {
     const status = readGateStatus(report.gate);
     parts.push(`${gateLabel(status)}${status === "caution" ? ` (${CAUTION_NOTICE_SHORT})` : ""} · Certainty: ${Math.round(report.runCertainty * 100)}%`);
   } else {
@@ -619,8 +678,10 @@ const X_ASKED = "Asked a multi-model AI panel";
  * so no attribution can be wrong. Every URL in the post is one of the question's, the claim's or the computed result's, whole. If even the
  * shortest form is not a valid post, the defined fallback — the panel line, the gate line and the brand — is used.
  */
-function buildMarkedXPost(question: string, report: AdaptiveSynthesisReport): string {
-  const gateLine = hasGatePresentation(report)
+function buildMarkedXPost(question: string, report: AdaptiveSynthesisReport, readable?: ReadableShareGate): string {
+  const gateLine = readable
+    ? readableGateLine(readable, report, ` (${CAUTION_NOTICE_SHORT})`)
+    : hasGatePresentation(report)
     ? (() => {
         const status = readGateStatus(report.gate);
         return `${gateLabel(status)}${status === "caution" ? ` (${CAUTION_NOTICE_SHORT})` : ""} · Certainty: ${Math.round(report.runCertainty * 100)}%`;

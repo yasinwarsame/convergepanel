@@ -1186,25 +1186,28 @@ export default function AdaptiveSynthesisReportView({
   // Order 5 (Contract P, F-1): a marked report's entries in groups — claims, value comparisons, rows not joined.
   const agreeGroups = presentAgreeGroups(report);
 
+  // #290 Inc 1: readable layout only — the generated text states the page's one gate presentation (shareBuilders
+  // ReadableShareGate), so a report shown as "Unavailable" never yields "(gate: pass)". Classic (no readableGate): the
+  // builders receive nothing extra and their output is unchanged.
   const handleCopy = useCallback(async () => {
-    const markdown = buildAdaptiveSynthesisMarkdown(question, report);
+    const markdown = buildAdaptiveSynthesisMarkdown(question, report, undefined, readableGate);
     const ok = await copyToClipboardWithFallback(markdown);
     if (!ok) throw new Error("copy failed");
-  }, [question, report]);
+  }, [question, report, readableGate]);
 
   const handleExportMemo = useCallback(() => {
-    const memoInput = buildAdaptiveMemoInput(question, report, modelsUsed, runId || "", modelProvenance);
+    const memoInput = buildAdaptiveMemoInput(question, report, modelsUsed, runId || "", modelProvenance, undefined, readableGate);
     const memo = generateVerificationMemo(memoInput);
     downloadTextFile(memo, `research-memo-${runId || "adaptive"}.txt`);
-  }, [question, report, modelsUsed, runId, modelProvenance]);
+  }, [question, report, modelsUsed, runId, modelProvenance, readableGate]);
 
   const handleGenerateLinkedIn = useCallback(() => {
-    setGeneratedPost({ type: "linkedin", text: buildAdaptiveLinkedInPost(question, report) });
-  }, [question, report]);
+    setGeneratedPost({ type: "linkedin", text: buildAdaptiveLinkedInPost(question, report, undefined, readableGate) });
+  }, [question, report, readableGate]);
 
   const handleGenerateX = useCallback(() => {
-    setGeneratedPost({ type: "x", text: buildAdaptiveXPost(question, report) });
-  }, [question, report]);
+    setGeneratedPost({ type: "x", text: buildAdaptiveXPost(question, report, undefined, readableGate) });
+  }, [question, report, readableGate]);
 
   return (
     <PositionPresentationBoundary report={report} roster={position?.roster ?? modelsUsed} provenance={position?.provenance ?? modelProvenance}>

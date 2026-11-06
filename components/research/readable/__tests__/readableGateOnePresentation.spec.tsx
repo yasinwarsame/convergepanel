@@ -32,7 +32,7 @@ type Known = "pass" | "caution" | "fail";
 const KIND = "This is a rule-based check of the panel's certainty score and split positions; it is not an independent verification of the evidence.";
 const UNAVAILABLE_BANNER =
   "Verification gate: Unavailable — the stored result is inconsistent with its recorded inputs. The gate is a rule-based check of the panel's certainty score and split positions; it is not an independent verification of the evidence.";
-const STORED_TEXT_NOTE = "Text stored with this report (such as the answer or the certainty line) may name a gate result. That text is shown as written; it is not the gate result.";
+const STORED_TEXT_NOTE = "Text stored with this report (such as the answer or the certainty line) may name a gate result. That stored text is reproduced as written; it is not the gate result.";
 const UNAVAILABLE_LABEL = "Verification gate: Unavailable";
 const WORD: Record<Known, string> = { pass: "Pass", caution: "Caution", fail: "Fail" };
 

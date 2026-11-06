@@ -49,7 +49,7 @@ const PLAIN: Record<Known, string> = {
 const UNAVAILABLE =
   "Verification gate: Unavailable — the stored result is inconsistent with its recorded inputs. The gate is a rule-based check of the panel's certainty score and split positions; it is not an independent verification of the evidence.";
 /** Review of 082a2a7 (owner ruling): the unavailable banner's second line — stored text is shown as written. */
-const STORED_TEXT_NOTE = "Text stored with this report (such as the answer or the certainty line) may name a gate result. That text is shown as written; it is not the gate result.";
+const STORED_TEXT_NOTE = "Text stored with this report (such as the answer or the certainty line) may name a gate result. That stored text is reproduced as written; it is not the gate result.";
 /**
  * Review of 082a2a7 (MINOR-2): the old check matched only "Verification gate: Pass|Caution|Fail" and so could not see the
  * raw forms the page actually showed — the Model Responses badge "gate: pass" and the Panel Verdict badge "pass". This

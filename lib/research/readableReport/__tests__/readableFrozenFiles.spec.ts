@@ -38,7 +38,6 @@ const UNCHANGED_AT_35933C8: Record<string, string> = {
   "lib/adaptiveSchema/positionPresentation.ts": "b8d05a23b3d19b260e3fc617db7ebe0ee87e7d69",
   "lib/adaptiveSchema/gatePresentation.ts": "001454f32aae050f8e42ff269ba8873dba1a3ee6",
   "lib/adaptiveSchema/trustSummary.ts": "dc6ea9e337a8ae9851559f6d035fc7664422526e",
-  "lib/adaptiveSchema/shareBuilders.ts": "4cbba2539d4ee865b2102a2bd9e096344468525e",
   "lib/adaptiveSchema/exportSnapshot.ts": "5af930878120bbda7ba49ec40045502416859d19",
   "lib/pdf/AdaptiveResearchDocument.tsx": "10ba10b9d413214b7e4e00c422f9b15ab640d26a",
   "lib/docx/AdaptiveResearchDocxDocument.ts": "4e8ba97ea8d0ad4bc9e13d2a598121da2ff657b0",
@@ -97,10 +96,22 @@ const WIDENED_BY_INC1: Record<string, string> = {
  *   - dsProvenanceUiBoundaries.spec.ts: its ReviewGovernanceSection.tsx pin re-pinned for the same prop threading (reason
  *     recorded beside it). cb61bde9f1efff29e0f908cbb6810620d39afa47 → 7ee80b6b52b8c71af0c72e95b52b45e0080058c0.
  * Same two files, same 32-file pinned set; gatePresentation.ts, gate.ts and the parity oracles stay pinned unchanged.
+ *
+ * Re-pinned again (review of bb4aed5, MINOR — the readable page showed "Unavailable" while its Generate LinkedIn / X
+ * post, Copy synthesis and Export memo stated the stored gate, e.g. "(gate: pass)"): the readable report view hands the
+ * page's one presentation to the share builders as an explicit optional argument.
+ *   - shareBuilders.ts: moved here from UNCHANGED_AT_35933C8 (the pinned set is the same files). Every builder takes an
+ *     optional readable-only `ReadableShareGate`; absent (every classic caller), the output is byte-identical — the
+ *     builderHashes / sharedMemos oracles above are unchanged, and readableShareGate.spec.tsx's frozen parity digest over
+ *     5,266 classic outputs equals the one captured at bb4aed5. Was 4cbba2539d4ee865b2102a2bd9e096344468525e (= 35933c8).
+ *   - AdaptiveSynthesisReportView.tsx: its four export actions pass `readableGate` to the builders (classic: undefined).
+ *     486dbcd342baddd5eb285e5ec6acef6ddd1841fa → 24f22d8ccd4e97eb762edbbca182bceca3be5c92.
+ * Same 32-file pinned set (28 → 27 in UNCHANGED_AT_35933C8 is not a removal: shareBuilders.ts moved to this map).
  */
 const READABLE_GATE_OPTION_BY_INC1: Record<string, string> = {
-  "components/adaptive/AdaptiveSynthesisReportView.tsx": "486dbcd342baddd5eb285e5ec6acef6ddd1841fa",
+  "components/adaptive/AdaptiveSynthesisReportView.tsx": "24f22d8ccd4e97eb762edbbca182bceca3be5c92",
   "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "7ee80b6b52b8c71af0c72e95b52b45e0080058c0",
+  "lib/adaptiveSchema/shareBuilders.ts": "389ea0cf6ffabbe390ba3fb438e2764c35344f17",
 };
 
 describe("#290 Increment 1 leaves the sealed and frozen files byte-identical to 35933c8", () => {
