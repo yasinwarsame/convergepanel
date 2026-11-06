@@ -124,6 +124,16 @@ describe("every slot answered by DeepSeek (generic-consensus, stored 'consensus:
     }
     expect(view).toContain(AGREE_HEADING_ONE_EXECUTING_MODEL);
     expect(view).toContain(ADAPTIVE_REPEATED_SUBSTITUTE_TOP_HEADING);
+    // The panel count says what it counts; the load-bearing list names the executing model once, with its status.
+    expect(view).toContain(`Of 2 scored claims across 5 dispatched models: consensus on 2. These counts are of panel slots: in this run ${ALL_DEEPSEEK} answered several slots, so they are not counts of independent models.`);
+    if (shape === "r5") {
+      expect(view).toContain(`Panel result: Not an independent consensus (supported by ${ALL_DEEPSEEK})`);
+      expect(view).not.toContain("DeepSeek (substituting ChatGPT), DeepSeek (substituting Claude)");
+    }
+    if (shape === "legacy") {
+      // Each stored "Where models agree" line is followed by its computed result.
+      expect(view).toContain(`“Raising the minimum wage reduces employment” Panel result: not an independent consensus: the 5 panel slots supporting it were all answered by one model, ${ALL_DEEPSEEK}`);
+    }
     // The qualified card states independence once, in its result line (MAJOR-1: no consensus line under the qualifier).
     expect(view).not.toContain("Recorded as supported by 5 panel slots");
     expect(out["text.linkedin"]).toContain(`across an AI panel whose responding slots were all answered by one model, ${ALL_DEEPSEEK}.`);
@@ -263,5 +273,11 @@ describe("the view itself", () => {
     const prov = provenanceOf(VARIANTS.partial(scenarioRows("generic-consensus")));
     expect(unmarkedTopIndependence(rec.synthesisReport.verdictCard, [dup, ...rows], prov)).toMatchObject({ kind: "repeated_substitute", scope: "run" });
     expect(unmarkedTopIndependence(rec.synthesisReport.verdictCard, [dup], prov)).toBeNull();
+    // The view joins the same way: a duplicated text is stated by the run (counted by panel slot), never by the first row.
+    const view: any = presentIndependenceQualifiedReport(rec.synthesisReport, { rows: [dup, ...rows], provenance: prov });
+    const topClaim = view.presentation.answer.claims.find((c: any) => c.claim === top.claimText);
+    expect(topClaim.result).toBe("consensus: all 5 dispatched models support it (counted by panel slot; in this run DeepSeek (substituting ChatGPT, Claude) answered several slots, so this is not a count of independent models)");
+    expect(topClaim.supporters).toBe("ChatGPT, Claude, Grok, Perplexity, Gemini (panel slots)");
+    expect(independenceQualification(view)).toMatchObject({ top: { kind: "repeated_substitute", scope: "run" } });
   });
 });
