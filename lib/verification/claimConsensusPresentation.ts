@@ -67,12 +67,6 @@ export function claimVerdictQualifier(independence: unknown): string | null {
   return i === "insufficient" ? CLAIM_SINGLE_MODEL_ASSESSMENT_TEXT : CLAIM_COVERAGE_UNVERIFIED_TEXT;
 }
 
-/** History / list line fragment: "92 consensus", or the withheld text. */
-export function claimListConsensusText(score: unknown, independence: unknown, suffix: string): string {
-  const d = claimConsensusDisplay(score, independence);
-  return d.kind === "score" ? `${d.score}${suffix}` : d.text;
-}
-
 /**
  * The Personal history row suffix for a claim: " · 92 consensus" only for an "independent" record (the server sends the
  * independence with every history row; a live result carries it from the verify response); otherwise
