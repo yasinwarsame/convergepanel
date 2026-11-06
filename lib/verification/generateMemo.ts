@@ -72,6 +72,15 @@ export interface MemoInput {
   independentModelCount?: number;
 
   /**
+   * Claim memo only: whether the verification's stored rows prove >= 2 independent executing models with a usable answer
+   * (`ClaimVerificationClientPayload.modelIndependence`). "insufficient" / "unverified" → no consensus score, no
+   * cross-model evidence quality, the verdict stated as one model's assessment (or with unverified coverage), and no
+   * "where models agree / disagree" sections. Absent → exactly the memo as before (callers that hold a payload always
+   * pass it; lib/verification/claimConsensusPresentation.ts fails a missing value closed to "unverified").
+   */
+  claimModelIndependence?: "independent" | "insufficient" | "unverified";
+
+  /**
    * Order 5 (Contract P): set ONLY by shareBuilders.buildAdaptiveMemoInput for an adaptive research report marked
    * presentation.disagreementPositionVersion === 1. Its findings, agreements and disagreements are then already stated
    * from the report's rows; the memo takes the adaptive-only path (isMarkedAdaptiveResearchMemo). Claim, video and
@@ -238,6 +247,22 @@ function formatModelsConsultedGrid(names: string[]): string {
   return lines.join("\n");
 }
 
+/** Claim memo lines when fewer than two independent models answered, or model independence is not recorded. */
+export const CLAIM_MEMO_SINGLE_MODEL_VERDICT_NOTE = "one independent model's assessment; not agreement between models";
+export const CLAIM_MEMO_UNVERIFIED_VERDICT_NOTE = "independent-model coverage unverified";
+export const CLAIM_MEMO_NO_CONSENSUS_LINE =
+  "CONSENSUS SCORE: none (fewer than two independent models answered; slots answered by the same substitute model count as one)";
+export const CLAIM_MEMO_WITHHELD_CONSENSUS_LINE = "CONSENSUS SCORE: withheld (model independence not recorded)";
+export const CLAIM_MEMO_UNVERIFIED_EVIDENCE = "not assessed (model independence not recorded)";
+export const CLAIM_MEMO_SINGLE_MODEL_SUMMARY =
+  "Fewer than two independent AI models answered this claim, so there is no cross-model agreement to report. Treat the verdict as a single model's assessment.";
+export const CLAIM_MEMO_UNVERIFIED_SUMMARY =
+  "Which models executed this verification could not be established, so the verdict is not presented as agreement between models.";
+export const CLAIM_MEMO_SINGLE_MODEL_METHODOLOGY =
+  "This claim was sent to a panel of large language models via ConvergePanel with identical instructions, but fewer than two independent models answered (slots answered by the same substitute model count as one). No cross-model comparison was possible: no consensus score is reported and nothing in this memo reflects agreement between models.";
+export const CLAIM_MEMO_UNVERIFIED_METHODOLOGY =
+  "This claim was sent to a panel of large language models via ConvergePanel with identical instructions. Which models actually executed could not be established from the stored record, so no consensus score is reported and nothing in this memo is presented as agreement between independent models.";
+
 function generateClaimMemo(input: MemoInput): string {
   const lines: string[] = [];
   const claim = (input.claim ?? "").trim() || "—";
@@ -255,13 +280,25 @@ function generateClaimMemo(input: MemoInput): string {
   lines.push("CLAIM VERIFIED");
   lines.push(`"${claim}"`);
   lines.push("");
-  lines.push(`VERDICT: ${verdictHuman}`);
-  lines.push(`CONSENSUS SCORE: ${input.consensusScore}/100 (${input.confidenceLabel} confidence)`);
-  lines.push(`EVIDENCE QUALITY: ${input.evidenceQuality}`);
+  const coverage = input.claimModelIndependence;
+  const noConsensus = coverage === "insufficient" || coverage === "unverified";
+  if (noConsensus) {
+    lines.push(`VERDICT: ${verdictHuman} (${coverage === "insufficient" ? CLAIM_MEMO_SINGLE_MODEL_VERDICT_NOTE : CLAIM_MEMO_UNVERIFIED_VERDICT_NOTE})`);
+    lines.push(coverage === "insufficient" ? CLAIM_MEMO_NO_CONSENSUS_LINE : CLAIM_MEMO_WITHHELD_CONSENSUS_LINE);
+    lines.push(`EVIDENCE QUALITY: ${coverage === "insufficient" ? RESEARCH_MEMO_NO_CROSS_MODEL_EVIDENCE : CLAIM_MEMO_UNVERIFIED_EVIDENCE}`);
+  } else {
+    lines.push(`VERDICT: ${verdictHuman}`);
+    lines.push(`CONSENSUS SCORE: ${input.consensusScore}/100 (${input.confidenceLabel} confidence)`);
+    lines.push(`EVIDENCE QUALITY: ${input.evidenceQuality}`);
+  }
   lines.push("");
   lines.push("SUMMARY");
   lines.push(
-    `${Math.max(1, n)} AI models evaluated this claim independently. ${claimSummarySentence(input.verdict)}`
+    coverage === "insufficient"
+      ? CLAIM_MEMO_SINGLE_MODEL_SUMMARY
+      : coverage === "unverified"
+        ? CLAIM_MEMO_UNVERIFIED_SUMMARY
+        : `${Math.max(1, n)} AI models evaluated this claim independently. ${claimSummarySentence(input.verdict)}`
   );
   lines.push("");
 
@@ -279,14 +316,15 @@ function generateClaimMemo(input: MemoInput): string {
     lines.push("");
   }
 
-  const agree = dedupeCap(input.agreementPoints ?? []);
+  // Below two independent models (or with unverified coverage) nothing is agreement or disagreement between models.
+  const agree = noConsensus ? [] : dedupeCap(input.agreementPoints ?? []);
   if (agree.length) {
     lines.push("WHERE MODELS AGREE");
     agree.forEach((p) => lines.push(`- ${p}`));
     lines.push("");
   }
 
-  const disagree = dedupeCap(input.disagreementPoints ?? []);
+  const disagree = noConsensus ? [] : dedupeCap(input.disagreementPoints ?? []);
   if (disagree.length) {
     lines.push("WHERE MODELS DISAGREE");
     disagree.forEach((p) => lines.push(`- ${p}`));
@@ -326,7 +364,11 @@ function generateClaimMemo(input: MemoInput): string {
 
   lines.push("METHODOLOGY");
   lines.push(
-    `This claim was independently evaluated by ${nn} large language model${nn === 1 ? "" : "s"}${namesPhrase} via ConvergePanel. Each model received the claim with identical instructions to evaluate accuracy, identify correct and incorrect parts, and provide evidence. Models were not shown each other's responses. The consensus score reflects the degree of agreement across models weighted by evidence quality.`
+    noConsensus
+      ? coverage === "insufficient"
+        ? CLAIM_MEMO_SINGLE_MODEL_METHODOLOGY
+        : CLAIM_MEMO_UNVERIFIED_METHODOLOGY
+      : `This claim was independently evaluated by ${nn} large language model${nn === 1 ? "" : "s"}${namesPhrase} via ConvergePanel. Each model received the claim with identical instructions to evaluate accuracy, identify correct and incorrect parts, and provide evidence. Models were not shown each other's responses. The consensus score reflects the degree of agreement across models weighted by evidence quality.`
   );
   lines.push("");
   lines.push("DISCLAIMER");

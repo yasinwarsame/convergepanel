@@ -273,22 +273,39 @@ describe("gate: four distinct categories", () => {
 // NITs — stored disagreement classification
 // ---------------------------------------------------------------------------------------------------------------------
 
-describe("classifyStoredDisagreement NITs", () => {
+describe("classifyStoredDisagreement — established classification with >= 2 independent executing models (review of 262ef64, B3)", () => {
+  // A run whose usable slots are all independent models (grok failed): the classification is the one established before
+  // executing-model attribution (every item genuine), identical to the live panel's crossModelDisagreements.
   const row = (modelId: string, status: string, text = `${modelId} text`) => ({ modelId, status, rawTextTruncated: text });
   const ctx = storedRunIndependenceContext({ runDocument: { perModel: [row("chatgpt", "ok"), row("claude", "ok"), row("grok", "failed", "")] } });
 
-  it("an item naming ONE slot is that model's own positions, not a cross-model disagreement", () => {
-    expect(classifyStoredDisagreement({ topic: "t", positionsByModel: { chatgpt: "a" } }, ctx)).toBe("same_executing_model");
-    expect(classifyStoredDisagreement({ topic: "t", models: ["ChatGPT", "chatgpt"] }, ctx)).toBe("same_executing_model");
+  it("an item naming ONE slot in a non-collapsed run stays cross_model (no 'same executing model' without a collapse)", () => {
+    expect(classifyStoredDisagreement({ topic: "t", positionsByModel: { chatgpt: "a" } }, ctx)).toBe("cross_model");
+    expect(classifyStoredDisagreement({ topic: "t", models: ["ChatGPT", "chatgpt"] }, ctx)).toBe("cross_model");
   });
 
-  it("an item naming a slot that did not answer is unverified, never cross-model", () => {
-    expect(classifyStoredDisagreement({ topic: "t", positionsByModel: { chatgpt: "a", grok: "b" } }, ctx)).toBe("independence_unverified");
-    expect(classifyStoredDisagreement({ topic: "t", positionsByModel: { chatgpt: "a", claude: "b", grok: "c" } }, ctx)).toBe("independence_unverified");
+  it("an item also naming a slot that did not answer stays cross_model in a non-collapsed run (established behaviour)", () => {
+    expect(classifyStoredDisagreement({ topic: "t", positionsByModel: { chatgpt: "a", grok: "b" } }, ctx)).toBe("cross_model");
+    expect(classifyStoredDisagreement({ topic: "t", positionsByModel: { chatgpt: "a", claude: "b", grok: "c" } }, ctx)).toBe("cross_model");
   });
 
   it("controls: two answering independent slots stay cross_model; an unattributed line in a non-collapsed run stays cross_model", () => {
     expect(classifyStoredDisagreement({ topic: "t", positionsByModel: { chatgpt: "a", claude: "b" } }, ctx)).toBe("cross_model");
     expect(classifyStoredDisagreement("plain stored line", ctx)).toBe("cross_model");
+  });
+
+  it("same_executing_model only when the named slots actually collapsed onto one executing model", () => {
+    const collapsed = storedRunIndependenceContext({
+      runDocument: {
+        perModel: [
+          { modelId: "chatgpt", status: "substituted", provider: "deepseek", rawTextTruncated: "x" },
+          { modelId: "claude", status: "substituted", provider: "deepseek", rawTextTruncated: "y" },
+          row("grok", "ok"),
+        ],
+      },
+    });
+    expect(classifyStoredDisagreement({ topic: "t", positionsByModel: { chatgpt: "a", claude: "b" } }, collapsed)).toBe("same_executing_model");
+    expect(classifyStoredDisagreement({ topic: "t", positionsByModel: { chatgpt: "a" } }, collapsed)).toBe("independence_unverified");
+    expect(classifyStoredDisagreement({ topic: "t", positionsByModel: { chatgpt: "a", grok: "b" } }, collapsed)).toBe("cross_model");
   });
 });

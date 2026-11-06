@@ -49,7 +49,8 @@ const ts = (offsetMinutes: number) => Timestamp.fromMillis(T0 + offsetMinutes * 
 function claim(id: string, minute: number, extra: Record<string, unknown> = {}): Row {
   return {
     id,
-    data: { userId: UID, type: "claim_verification", claim: `Claim ${id}`, verdict: "accurate", consensusScore: 80, governanceStatus: "approved", timestamp: ts(minute), ...extra },
+    // Two independent executing models answered, so the stored score is listed (claim independence rule).
+    data: { userId: UID, type: "claim_verification", claim: `Claim ${id}`, verdict: "accurate", consensusScore: 80, governanceStatus: "approved", timestamp: ts(minute), modelResults: [{ modelId: "chatgpt", status: "ok" }, { modelId: "claude", status: "ok" }], selectedModels: ["chatgpt", "claude"], ...extra },
   };
 }
 function video(id: string, minute: number, extra: Record<string, unknown> = {}): Row {
@@ -79,7 +80,7 @@ describe("Claim history containment", () => {
     const { status, body } = await history();
     expect(status).toBe(200);
     expect(body.items).toEqual([
-      { type: "verification", id: "vcl-personal", at: new Date(T0 + 60_000).toISOString(), claim: "Claim vcl-personal", verdict: "accurate", consensusScore: 80, governanceStatus: "approved" },
+      { type: "verification", id: "vcl-personal", at: new Date(T0 + 60_000).toISOString(), claim: "Claim vcl-personal", verdict: "accurate", consensusScore: 80, modelIndependence: "independent", governanceStatus: "approved" },
     ]);
   });
 

@@ -366,10 +366,6 @@ export function computeVerificationGate(
   const reasons = [...coverageReason, ...buildReasons(metrics)];
   const recommendedNextSteps = buildNextSteps(metrics, status, coverage);
 
-  if (process.env.NODE_ENV !== "production") {
-    console.log("[VerificationGate]", { status, metrics });
-  }
-
   return {
     status,
     label:

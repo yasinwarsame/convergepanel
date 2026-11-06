@@ -28,6 +28,7 @@ import {
   type StoredConsensusIndependence,
 } from "@/lib/panel/independentVoices";
 import { storedVerificationConsensusIndependence } from "@/lib/panel/storedVerificationIndependence";
+import { buildQueueVerificationAgreement } from "@/lib/governance/queueVerificationAgreement";
 import {
   classifyStoredDisagreement,
   storedRunIndependenceContext,
@@ -197,12 +198,17 @@ type RunSummary = {
   /** Research: short key finding lines from stored synthesis when available. */
   keyFindings?: string[];
   /**
-   * Research: stored disagreement lines that are NOT disagreements between independent executing models, each with the
+   * Research / claim / video: stored signals that are NOT agreement or disagreement between independent executing models, each with the
    * reason (lib/panel/storedDisagreementIndependence.ts). `disagreements` / `disagreementPoints` hold only genuine ones.
    */
   qualifiedDisagreements?: QueueQualifiedDisagreement[];
-  /** Research / claim verification: present when the stored per-model rows do not prove ≥ 2 independent executing models. */
+  /** Research / claim / video verification: present when the stored per-model rows do not prove ≥ 2 independent executing models. */
   modelIndependence?: Exclude<StoredConsensusIndependence, "independent">;
+  /**
+   * Claim / video verification: fewer than two independent executing models answered — the verdict as ONE model's
+   * assessment (never "1/1 models say …").
+   */
+  singleModelAssessment?: string;
   /** Short rationale line for claim verdict (first model summary). */
   claimVerdictSummary?: string;
   createdAt: string;
@@ -330,51 +336,8 @@ function humanizePerModelVerdict(v: string): string {
   return map[k] || v.replace(/_/g, " ");
 }
 
-function buildAgreementDissentFromVerification(data: Record<string, unknown>): {
-  agreementSummary?: string;
-  dissentSummary?: string;
-} {
-  const mr = data.modelResults;
-  if (!Array.isArray(mr)) return {};
-  type Row = { verdict: string };
-  const usable: Row[] = [];
-  for (const row of mr) {
-    if (!row || typeof row !== "object") continue;
-    const m = row as Record<string, unknown>;
-    if (String(m.status ?? "") !== "ok") continue;
-    usable.push({ verdict: String(m.verdict ?? "").toLowerCase().replace(/\s+/g, "_") });
-  }
-  if (usable.length === 0) return {};
-  const counts = new Map<string, number>();
-  for (const u of usable) {
-    counts.set(u.verdict, (counts.get(u.verdict) ?? 0) + 1);
-  }
-  let majority = "";
-  let max = 0;
-  for (const [v, c] of counts) {
-    if (c > max) {
-      max = c;
-      majority = v;
-    }
-  }
-  const n = usable.length;
-  const agreementSummary = `${max}/${n} models say ${humanizePerModelVerdict(majority).toLowerCase()}`;
-  const outliers = mr.filter((row) => {
-    if (!row || typeof row !== "object") return false;
-    const m = row as Record<string, unknown>;
-    if (String(m.status ?? "") !== "ok") return false;
-    return String(m.verdict ?? "").toLowerCase().replace(/\s+/g, "_") !== majority;
-  }) as Record<string, unknown>[];
-  if (outliers.length === 0) return { agreementSummary };
-  const parts = outliers.map((o) => {
-    const id = String(o.modelId ?? "");
-    const v = humanizePerModelVerdict(String(o.verdict ?? ""));
-    return `${runModelFamilyName(id)}: ${v}`;
-  });
-  return { agreementSummary, dissentSummary: `Dissent: ${parts.join("; ")}` };
-}
-
-function verificationDisagreementBullets(data: Record<string, unknown>): string[] {
+/** The claim digest's conflicting-assessment points, each with the two slots it names (classified by the caller). */
+function verificationDisagreementDigest(data: Record<string, unknown>): Array<{ point: string; models: string[] }> {
   const mr = data.modelResults;
   if (!Array.isArray(mr)) return [];
   const lines = mr
@@ -389,8 +352,7 @@ function verificationDisagreementBullets(data: Record<string, unknown>): string[
     })
     .filter((x) => x.modelId);
   if (lines.length === 0) return [];
-  const { whereModelsDisagree } = buildAgreementDisagreementDigest(lines);
-  return whereModelsDisagree.map((d) => d.point).slice(0, 3);
+  return buildAgreementDisagreementDigest(lines).whereModelsDisagree;
 }
 
 function firstVerificationModelSummary(data: Record<string, unknown>): string | undefined {
@@ -418,14 +380,12 @@ function queueNonOkModelStatusLabel(status: string): string {
 /** Rich claim-verification payload for the review queue expanded UI. */
 function buildVerificationQueueReviewExtras(data: Record<string, unknown>): {
   modelVerdicts: QueueModelVerdictRow[];
-  agreementPoints: string[];
-  disagreementPoints: string[];
   correctParts: string[];
   incorrectParts: string[];
 } {
   const mr = data.modelResults;
   if (!Array.isArray(mr)) {
-    return { modelVerdicts: [], agreementPoints: [], disagreementPoints: [], correctParts: [], incorrectParts: [] };
+    return { modelVerdicts: [], correctParts: [], incorrectParts: [] };
   }
 
   const modelVerdicts: QueueModelVerdictRow[] = [];
@@ -458,29 +418,6 @@ function buildVerificationQueueReviewExtras(data: Record<string, unknown>): {
     if (!row || typeof row !== "object") return false;
     return String((row as Record<string, unknown>).status ?? "") === "ok";
   }) as Record<string, unknown>[];
-  const total = Math.max(1, usable.length);
-
-  const verdictCounts: Record<string, string[]> = {};
-  for (const row of usable) {
-    const m = row as Record<string, unknown>;
-    const v = String(m.verdict ?? m.verdictLabel ?? "unknown").toLowerCase().replace(/\s+/g, "_");
-    const id = String(m.modelId ?? "");
-    if (!verdictCounts[v]) verdictCounts[v] = [];
-    verdictCounts[v].push(id);
-  }
-
-  const agreementPoints: string[] = [];
-  const disagreementPoints: string[] = [];
-  for (const [verdict, models] of Object.entries(verdictCounts)) {
-    const humanV = humanizePerModelVerdict(verdict);
-    if (models.length >= 3) {
-      agreementPoints.push(`${models.length}/${total} models rate this as ${humanV.toLowerCase()}`);
-    }
-    if (models.length === 1 || models.length === 2) {
-      const names = models.map((id) => runModelFamilyName(id)).join(", ");
-      disagreementPoints.push(`${names} rated as ${humanV.toLowerCase()} (others disagree)`);
-    }
-  }
 
   const correctParts: string[] = [];
   const incorrectParts: string[] = [];
@@ -506,8 +443,6 @@ function buildVerificationQueueReviewExtras(data: Record<string, unknown>): {
 
   return {
     modelVerdicts,
-    agreementPoints,
-    disagreementPoints,
     correctParts: correctParts.slice(0, 5),
     incorrectParts: incorrectParts.slice(0, 5),
   };
@@ -714,8 +649,12 @@ function summarizeVerification(id: string, data: Record<string, unknown>, email:
     Date.now();
   const ownerUid = ownerUidFromVerificationDoc(data);
   const reviewExtras = buildVerificationQueueReviewExtras(data);
-  const { agreementSummary, dissentSummary } = buildAgreementDissentFromVerification(data);
-  const digestDisagreements = verificationDisagreementBullets(data);
+  // Agreement / disagreement wording by executing-model independence (lib/governance/queueVerificationAgreement.ts).
+  const agreement = buildQueueVerificationAgreement(data, {
+    kind: "verification",
+    humanize: humanizePerModelVerdict,
+    digest: verificationDisagreementDigest(data),
+  });
   const claimVerdictSummary = firstVerificationModelSummary(data);
   // A stored claim score (and the cross-model evidence quality stored with it) is listed only when the stored per-model
   // rows prove ≥ 2 independent executing models with a usable answer (lib/panel/storedVerificationIndependence.ts).
@@ -736,13 +675,15 @@ function summarizeVerification(id: string, data: Record<string, unknown>, email:
     modelHealth: gi.modelHealth,
     verificationVerdict: data.verdict != null ? String(data.verdict) : undefined,
     ...(reviewExtras.modelVerdicts.length > 0 ? { modelVerdicts: reviewExtras.modelVerdicts } : {}),
-    ...(reviewExtras.agreementPoints.length > 0 ? { agreementPoints: reviewExtras.agreementPoints } : {}),
-    ...(reviewExtras.disagreementPoints.length > 0 ? { disagreementPoints: reviewExtras.disagreementPoints } : {}),
+    ...(agreement.agreementPoints.length > 0 ? { agreementPoints: agreement.agreementPoints } : {}),
+    ...(agreement.disagreementPoints.length > 0 ? { disagreementPoints: agreement.disagreementPoints } : {}),
     ...(reviewExtras.correctParts.length > 0 ? { correctParts: reviewExtras.correctParts } : {}),
     ...(reviewExtras.incorrectParts.length > 0 ? { incorrectParts: reviewExtras.incorrectParts } : {}),
-    ...(agreementSummary ? { agreementSummary } : {}),
-    ...(dissentSummary ? { dissentSummary } : {}),
-    ...(digestDisagreements.length > 0 ? { disagreements: digestDisagreements } : {}),
+    ...(agreement.agreementSummary ? { agreementSummary: agreement.agreementSummary } : {}),
+    ...(agreement.dissentSummary ? { dissentSummary: agreement.dissentSummary } : {}),
+    ...(agreement.disagreements.length > 0 ? { disagreements: agreement.disagreements } : {}),
+    ...(agreement.qualifiedDisagreements.length > 0 ? { qualifiedDisagreements: agreement.qualifiedDisagreements } : {}),
+    ...(agreement.singleModelAssessment ? { singleModelAssessment: agreement.singleModelAssessment } : {}),
     ...(claimVerdictSummary ? { claimVerdictSummary } : {}),
     createdAt: new Date(createdMs).toISOString(),
     userId: ownerUid || String(data.userId ?? ""),
@@ -793,59 +734,13 @@ function videoModelHealth(data: Record<string, unknown>): { ok: number; substitu
   return { ok, substituted: 0, failed };
 }
 
-function buildAgreementDissentFromVideo(data: Record<string, unknown>): {
-  agreementSummary?: string;
-  dissentSummary?: string;
-} {
-  const mr = data.modelResults;
-  if (!Array.isArray(mr)) return {};
-  type Row = { verdict: string };
-  const usable: Row[] = [];
-  for (const row of mr) {
-    if (!row || typeof row !== "object") continue;
-    const m = row as Record<string, unknown>;
-    if (String(m.status ?? "") !== "ok") continue;
-    usable.push({ verdict: String(m.verdict ?? "").toLowerCase().replace(/\s+/g, "_") });
-  }
-  if (usable.length === 0) return {};
-  const counts = new Map<string, number>();
-  for (const u of usable) {
-    counts.set(u.verdict, (counts.get(u.verdict) ?? 0) + 1);
-  }
-  let majority = "";
-  let max = 0;
-  for (const [v, c] of counts) {
-    if (c > max) {
-      max = c;
-      majority = v;
-    }
-  }
-  const n = usable.length;
-  const agreementSummary = `${max}/${n} models say ${humanizeVideoVerdict(majority).toLowerCase()}`;
-  const outliers = mr.filter((row) => {
-    if (!row || typeof row !== "object") return false;
-    const m = row as Record<string, unknown>;
-    if (String(m.status ?? "") !== "ok") return false;
-    return String(m.verdict ?? "").toLowerCase().replace(/\s+/g, "_") !== majority;
-  }) as Record<string, unknown>[];
-  if (outliers.length === 0) return { agreementSummary };
-  const parts = outliers.map((o) => {
-    const id = String(o.modelId ?? "");
-    const v = humanizeVideoVerdict(String(o.verdict ?? ""));
-    return `${runModelFamilyName(id)}: ${v}`;
-  });
-  return { agreementSummary, dissentSummary: `Dissent: ${parts.join("; ")}` };
-}
-
 /** Per-model video authenticity rows for the expanded queue UI. */
 function buildVideoQueueReviewExtras(data: Record<string, unknown>): {
   modelVerdicts: QueueModelVerdictRow[];
-  agreementPoints: string[];
-  disagreementPoints: string[];
 } {
   const mr = data.modelResults;
   if (!Array.isArray(mr)) {
-    return { modelVerdicts: [], agreementPoints: [], disagreementPoints: [] };
+    return { modelVerdicts: [] };
   }
 
   const modelVerdicts: QueueModelVerdictRow[] = [];
@@ -874,35 +769,7 @@ function buildVideoQueueReviewExtras(data: Record<string, unknown>): {
     });
   }
 
-  const usable = mr.filter((row) => {
-    if (!row || typeof row !== "object") return false;
-    return String((row as Record<string, unknown>).status ?? "") === "ok";
-  }) as Record<string, unknown>[];
-  const total = Math.max(1, usable.length);
-
-  const verdictCounts: Record<string, string[]> = {};
-  for (const row of usable) {
-    const m = row as Record<string, unknown>;
-    const v = String(m.verdict ?? "unknown").toLowerCase().replace(/\s+/g, "_");
-    const id = String(m.modelId ?? "");
-    if (!verdictCounts[v]) verdictCounts[v] = [];
-    verdictCounts[v].push(id);
-  }
-
-  const agreementPoints: string[] = [];
-  const disagreementPoints: string[] = [];
-  for (const [verdict, models] of Object.entries(verdictCounts)) {
-    const humanV = humanizeVideoVerdict(verdict);
-    if (models.length >= 2) {
-      agreementPoints.push(`${models.length}/${total} models rate as ${humanV.toLowerCase()}`);
-    }
-    if (models.length === 1 && total > 1) {
-      const names = models.map((id) => runModelFamilyName(id)).join(", ");
-      disagreementPoints.push(`${names} rated as ${humanV.toLowerCase()} (others disagree)`);
-    }
-  }
-
-  return { modelVerdicts, agreementPoints, disagreementPoints };
+  return { modelVerdicts };
 }
 
 function firstVideoModelSummary(data: Record<string, unknown>): string | undefined {
@@ -929,8 +796,12 @@ function summarizeVideo(id: string, data: Record<string, unknown>, email: string
   const question = truncate(`Video: ${fn} (${duration != null ? `${duration}s` : "unknown"}, ${w}x${h})`, 200);
   const createdMs = firestoreMillis(data.timestamp) || Date.now();
   const reviewExtras = buildVideoQueueReviewExtras(data);
-  const { agreementSummary, dissentSummary } = buildAgreementDissentFromVideo(data);
-  const digestDisagreements = verificationDisagreementBullets(data);
+  // Video slots are never substituted: each answering slot is its own executing model (queueVerificationAgreement.ts).
+  const agreement = buildQueueVerificationAgreement(data, {
+    kind: "video",
+    humanize: humanizeVideoVerdict,
+    digest: verificationDisagreementDigest(data),
+  });
   const videoSummary = firstVideoModelSummary(data);
 
   return {
@@ -945,11 +816,14 @@ function summarizeVideo(id: string, data: Record<string, unknown>, email: string
     modelHealth: videoModelHealth(data),
     verificationVerdict: data.verdict != null ? String(data.verdict) : undefined,
     ...(reviewExtras.modelVerdicts.length > 0 ? { modelVerdicts: reviewExtras.modelVerdicts } : {}),
-    ...(reviewExtras.agreementPoints.length > 0 ? { agreementPoints: reviewExtras.agreementPoints } : {}),
-    ...(reviewExtras.disagreementPoints.length > 0 ? { disagreementPoints: reviewExtras.disagreementPoints } : {}),
-    ...(agreementSummary ? { agreementSummary } : {}),
-    ...(dissentSummary ? { dissentSummary } : {}),
-    ...(digestDisagreements.length > 0 ? { disagreements: digestDisagreements } : {}),
+    ...(agreement.agreementPoints.length > 0 ? { agreementPoints: agreement.agreementPoints } : {}),
+    ...(agreement.disagreementPoints.length > 0 ? { disagreementPoints: agreement.disagreementPoints } : {}),
+    ...(agreement.agreementSummary ? { agreementSummary: agreement.agreementSummary } : {}),
+    ...(agreement.dissentSummary ? { dissentSummary: agreement.dissentSummary } : {}),
+    ...(agreement.disagreements.length > 0 ? { disagreements: agreement.disagreements } : {}),
+    ...(agreement.qualifiedDisagreements.length > 0 ? { qualifiedDisagreements: agreement.qualifiedDisagreements } : {}),
+    ...(agreement.singleModelAssessment ? { singleModelAssessment: agreement.singleModelAssessment } : {}),
+    ...(agreement.modelIndependence !== "independent" ? { modelIndependence: agreement.modelIndependence } : {}),
     ...(videoSummary ? { claimVerdictSummary: videoSummary } : {}),
     createdAt: new Date(createdMs).toISOString(),
     userId: String(data.userId ?? ""),

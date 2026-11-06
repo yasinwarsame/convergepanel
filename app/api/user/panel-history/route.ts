@@ -13,6 +13,7 @@ import type { PanelHistoryItem, PanelHistoryResearchItem } from "@/lib/user/pane
 import type { ModelId } from "@/lib/types";
 import { createRunWorkspaceIntegrityBatch } from "@/lib/workspaces/runWorkspaceIntegrityBatch";
 import { consensusScoreWithheldReason, storedRunConsensusIndependence } from "@/lib/panel/independentVoices";
+import { storedVerificationConsensusIndependence } from "@/lib/panel/storedVerificationIndependence";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -174,6 +175,11 @@ export async function GET(req: NextRequest) {
       if (String(data.userId ?? "") !== uid) continue;
       if (data.type != null && data.type !== "claim_verification") continue;
       const sortKey = firestoreMillis(data.timestamp);
+      // A claim's stored score is a cross-model figure: listed only when the stored rows prove >= 2 independent
+      // executing models with a usable answer (lib/panel/storedVerificationIndependence.ts); otherwise withheld with
+      // the reason. Stored data is unchanged.
+      const claimIndependence = storedVerificationConsensusIndependence(data as Record<string, unknown>);
+      const claimWithheld = consensusScoreWithheldReason(claimIndependence);
       merged.push({
         sortKey,
         item: {
@@ -182,7 +188,9 @@ export async function GET(req: NextRequest) {
           at: new Date(sortKey || Date.now()).toISOString(),
           claim: String(data.claim ?? ""),
           verdict: String(data.verdict ?? "unverifiable"),
-          consensusScore: typeof data.consensusScore === "number" ? data.consensusScore : 0,
+          consensusScore: claimWithheld ? null : typeof data.consensusScore === "number" ? data.consensusScore : 0,
+          ...(claimWithheld ? { consensusWithheld: claimWithheld } : {}),
+          modelIndependence: claimIndependence,
           governanceStatus: normalizeGovernanceStatus(data.governanceStatus),
         },
       });

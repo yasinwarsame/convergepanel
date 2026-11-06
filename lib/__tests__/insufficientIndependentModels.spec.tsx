@@ -283,7 +283,7 @@ describe("M1 builders on their own", () => {
     expect([g.status, g.label]).toEqual(["DO_NOT_RELY_YET", INSUFFICIENT_INDEPENDENT_MODELS_GATE_LABEL]);
   });
 
-  it("crossModelDisagreements: crossModel false → none; same-executor slots dropped; distinct kept; single-slot item kept", () => {
+  it("crossModelDisagreements: crossModel false → none; same-executor slots dropped; distinct kept; single-slot item kept only when no slots collapsed", () => {
     const items: Array<{ topic: string; positionsByModel: Record<string, string> }> = [
       { topic: "same", positionsByModel: { chatgpt: "a", claude: "b" } },
       { topic: "real", positionsByModel: { chatgpt: "a", grok: "b" } },
@@ -291,7 +291,9 @@ describe("M1 builders on their own", () => {
       { topic: "dup-key", positionsByModel: { chatgpt: "a", " chatgpt ": "b" } },
     ];
     expect(crossModelDisagreements(items, SUBS_PLUS_GROK, false)).toEqual([]);
-    expect(crossModelDisagreements(items, SUBS_PLUS_GROK, true).map((d) => d.topic)).toEqual(["real", "single", "dup-key"]);
+    // SUBS_PLUS_GROK collapsed (chatgpt + claude both DeepSeek): an item naming one slot cannot be attributed to
+    // independent models — the same classification the governance queue gives the stored record (review of 262ef64, B3).
+    expect(crossModelDisagreements(items, SUBS_PLUS_GROK, true).map((d) => d.topic)).toEqual(["real"]);
     expect(crossModelDisagreements(items, TWO_INDEPENDENT, true).map((d) => d.topic)).toEqual(["same", "real", "single", "dup-key"]);
     expect(crossModelDisagreements(null, TWO_INDEPENDENT, true)).toEqual([]);
   });

@@ -40,7 +40,7 @@ import { ModelResult, SynthesizedReport } from "@/lib/types";
 import { StructuredSynthesis } from "@/lib/synthesis/structuredSchema";
 import { runModelIdentityLabel, runModelProvenanceFromResultRow } from "@/lib/panel/runModelIdentity";
 import { isUsableResult } from "@/lib/panel/publicize";
-import { clientRowText, independentSynthesisResponders, meetsIndependentSynthesisMinimum } from "@/lib/panel/independentVoices";
+import { clientRowText, independentSynthesisResponders, meetsIndependentSynthesisMinimum, rowsRecordExecutionIdentity } from "@/lib/panel/independentVoices";
 import { executingVoiceName, groupSlotsByExecutingVoice, independentModelCountText } from "@/lib/panel/executingVoiceLabel";
 import { coerceStatus } from "@/lib/panel/normalize";
 import { modelHealthSubstitution, substitutedProviderNames } from "@/lib/panel/substitutionDisplay";
@@ -1503,6 +1503,8 @@ export default function PanelSynthesisView({
         sourceBacked: (synthesizedReport?.consensusAnalysis?.agreementClusters?.length ?? 0) > 0,
         questionLength: question?.trim().length ?? 0,
         independentModelCount: independentResponderCount,
+        // Rows that do not record which model executed (no slot id / status): coverage is "unverified", never presumed.
+        ...(rowsRecordExecutionIdentity(results) ? {} : { executionProvenanceUnverified: true }),
       };
       const gate = computeVerificationGate(gateInput);
 

@@ -16,11 +16,18 @@
  * Attribution: an item names slots through `positionsByModel` keys (StructuredSynthesis), `positions[].model` (V2
  * report) or `models` (legacy `keyDisagreements`). A name maps to a persisted row by slot id, by family name
  * ("ChatGPT"), or by the executing-model label `synthesizeReport` writes ("DeepSeek (substituting ChatGPT, Claude)").
- * Any name that maps to no row makes the item unattributable; nothing is inferred from slots. An item attributed to a
- * slot that did not answer (failed / error / no text) is "independence_unverified"; an item attributed to ONE slot is
- * that model's own differing positions ("same_executing_model"); an item attributed to ≥ 2 slots is judged by
- * `crossModelDisagreements` (the synthesis path's own rule). An unattributable item falls back to the run: genuine only
- * when every usable slot is its own independent model.
+ * Any name that maps to no row makes the item unattributable; nothing is inferred from slots. An item attributed to
+ * ≥ 2 slots is a disagreement between models only when those slots are ≥ 2 independent executing models
+ * (`independentVoiceCount`), else "same_executing_model" — the only path to that label, so it is used only when the
+ * named slots really collapsed onto one executing model. An item attributed to fewer than two slots (or
+ * unattributable) falls back to the run: genuine only when every usable slot is its own independent model. An item
+ * whose raw `positionsByModel` keys already reduce to one executing model (the synthesis path's original rule) is never
+ * genuine either.
+ *
+ * ONE rule for every surface: the governance queue (stored rows, `classifyStoredDisagreement`) and the live panel /
+ * gate / share / panel verdict (`crossModelDisagreements`, live rows) both call `classifyDisagreementAgainstRows`, so
+ * the same record is never a model disagreement on one surface and not on another. With ≥ 2 independent executing
+ * models and no collapsed slots every item is "cross_model" — exactly the behaviour before executing-model attribution.
  *
  * Pure, server- and client-safe; never mutates its input.
  */
@@ -35,7 +42,7 @@ import {
   type StoredConsensusIndependence,
 } from "./independentVoices";
 import { runModelFamilyName } from "./runModelIdentity";
-import { crossModelDisagreements } from "@/lib/verificationGate/panelVerdict";
+import { independentVoiceCount } from "./executingVoiceLabel";
 
 export type StoredDisagreementBasis = "cross_model" | "same_executing_model" | "single_independent_model" | "independence_unverified";
 
@@ -67,8 +74,7 @@ export function storedRunIndependenceContext(data: Record<string, unknown> | nul
   const rows = storedRunPerModelRows(data);
   const independence = storedRunConsensusIndependence(data);
   if (!rows) return { independence, rows: null, collapsed: false };
-  const usable = rows.filter(isUsableRow);
-  return { independence, rows, collapsed: usable.length > independentSynthesisResponders(rows).length };
+  return { independence, rows, collapsed: rowsCollapsed(rows) };
 }
 
 function norm(s: string): string {
@@ -113,16 +119,39 @@ export function storedDisagreementModelNames(item: unknown): string[] | null {
   return cleaned.length > 0 ? cleaned : null;
 }
 
-/** Classify one stored disagreement item (string or object) against its run. */
-export function classifyStoredDisagreement(item: unknown, ctx: StoredRunIndependenceContext): StoredDisagreementBasis {
+/** The trimmed, non-empty `positionsByModel` keys of an item (the synthesis path's raw attribution). */
+function rawPositionKeys(item: unknown): string[] {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+  const pbm = (item as Record<string, unknown>).positionsByModel;
+  if (!pbm || typeof pbm !== "object" || Array.isArray(pbm)) return [];
+  return Array.from(new Set(Object.keys(pbm as Record<string, unknown>).map((k) => k.trim()).filter((k) => k.length > 0)));
+}
+
+/**
+ * Whether the run's usable rows outnumber its independent executing models (some slots were answered by one model).
+ * Rows without stored text are not usable, so rows that carry no text never read as collapsed.
+ */
+export function rowsCollapsed(rows: readonly ClientSynthesisRow[]): boolean {
+  return rows.filter(isUsableRow).length > independentSynthesisResponders(rows).length;
+}
+
+/**
+ * Classify one disagreement item (string or object) against a run's rows — the one rule behind the queue
+ * (`classifyStoredDisagreement`) and the live panel / gate / share (`crossModelDisagreements`).
+ */
+export function classifyDisagreementAgainstRows(item: unknown, ctx: StoredRunIndependenceContext): StoredDisagreementBasis {
   if (ctx.independence === "unverified" || !ctx.rows) return "independence_unverified";
   if (ctx.independence === "insufficient") return "single_independent_model";
+  const rows = ctx.rows;
+  // The synthesis path's original rule: raw keys that reduce to one executing model are one model's positions.
+  const raw = rawPositionKeys(item);
+  if (raw.length >= 2 && independentVoiceCount(raw, rows) < 2) return "same_executing_model";
   const names = storedDisagreementModelNames(item);
   let slots: string[] | null = null;
   if (names) {
     slots = [];
     for (const name of names) {
-      const s = slotsForName(name, ctx.rows);
+      const s = slotsForName(name, rows);
       if (!s) {
         slots = null;
         break;
@@ -131,22 +160,14 @@ export function classifyStoredDisagreement(item: unknown, ctx: StoredRunIndepend
     }
   }
   const distinct = slots ? Array.from(new Set(slots)) : [];
-  if (distinct.length > 0) {
-    const rows = ctx.rows;
-    // A position attributed to a slot that did not answer (failed / error / empty) was not written by that slot's
-    // model: the item's attribution is not trustworthy, so it is never presented as a cross-model disagreement.
-    const unanswered = distinct.some((id) => {
-      const row = rows.find((r) => r.modelId.trim() === id);
-      return !row || !isUsableRow(row);
-    });
-    if (unanswered) return "independence_unverified";
-    // Positions attributed to ONE slot are one model's differing positions, not a disagreement between models.
-    if (distinct.length === 1) return "same_executing_model";
-  }
   if (distinct.length < 2) {
-    // Unattributable (no model names): judged by the run — genuine only when no slots collapsed onto one model.
+    // Unattributable (or one slot named): judged by the run — genuine only when no slots collapsed onto one model.
     return ctx.collapsed ? "independence_unverified" : "cross_model";
   }
-  const positionsByModel = Object.fromEntries(distinct.map((id) => [id, ""]));
-  return crossModelDisagreements([{ positionsByModel }], ctx.rows, true).length === 1 ? "cross_model" : "same_executing_model";
+  return independentVoiceCount(distinct, rows) >= 2 ? "cross_model" : "same_executing_model";
+}
+
+/** Classify one stored disagreement item (string or object) against its run. */
+export function classifyStoredDisagreement(item: unknown, ctx: StoredRunIndependenceContext): StoredDisagreementBasis {
+  return classifyDisagreementAgainstRows(item, ctx);
 }

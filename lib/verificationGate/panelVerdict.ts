@@ -9,6 +9,8 @@ import { StructuredSynthesis } from "@/lib/synthesis/structuredSchema";
 import { VerificationGateResult } from "@/lib/verificationGate/verificationGate";
 import { classifyGrounding, GroundingResult } from "./sourceGrounding";
 import { independentVoiceCount, type ExecutingIdentityRow } from "@/lib/panel/executingVoiceLabel";
+import type { ClientSynthesisRow } from "@/lib/panel/independentVoices";
+import { classifyDisagreementAgainstRows, rowsCollapsed } from "@/lib/panel/storedDisagreementIndependence";
 
 /**
  * Heading of the verdict's top item when fewer than two independent executing models responded: one model's finding is
@@ -32,9 +34,12 @@ export const NO_CROSS_MODEL_COMPARISON_TEXT = "No cross-model comparison: fewer 
 
 /**
  * The disagreements that are REAL cross-model disagreements: with fewer than two independent executing models in the run
- * (`crossModel === false`) there are none; otherwise an item whose positions come from two or more slots that collapse
- * to fewer than two independent executing models (e.g. ChatGPT and Claude both answered by DeepSeek) is one model's
- * positions, not a disagreement between models, and is dropped. Items naming fewer than two slots are kept as stored.
+ * (`crossModel === false`) there are none. Otherwise each item is judged by the SAME rule the governance queue applies
+ * to the stored record (`classifyDisagreementAgainstRows`, lib/panel/storedDisagreementIndependence.ts): an item whose
+ * positions come from two or more slots that collapse to fewer than two independent executing models (e.g. ChatGPT and
+ * Claude both answered by DeepSeek) is one model's positions, and an item naming fewer than two slots (or none) in a run
+ * where some slots collapsed cannot be attributed to independent models — neither is kept. In a run whose usable slots
+ * are all independent models every item is kept, as before. Without rows nothing is inferred (only the raw-key rule).
  * Order preserved; never mutates its input.
  */
 export function crossModelDisagreements<T extends { positionsByModel?: Record<string, string> | null }>(
@@ -43,10 +48,15 @@ export function crossModelDisagreements<T extends { positionsByModel?: Record<st
   crossModel: boolean
 ): T[] {
   if (!crossModel || !items) return [];
-  return items.filter((d) => {
-    const slots = Array.from(new Set(Object.keys(d?.positionsByModel ?? {}).map((k) => k.trim()).filter((k) => k.length > 0)));
-    return slots.length < 2 || independentVoiceCount(slots, rows) >= 2;
-  });
+  if (!rows) {
+    return items.filter((d) => {
+      const slots = Array.from(new Set(Object.keys(d?.positionsByModel ?? {}).map((k) => k.trim()).filter((k) => k.length > 0)));
+      return slots.length < 2 || independentVoiceCount(slots, rows) >= 2;
+    });
+  }
+  const clientRows = rows.filter((r) => r && typeof r.modelId === "string") as unknown as ClientSynthesisRow[];
+  const ctx = { independence: "independent" as const, rows: clientRows, collapsed: rowsCollapsed(clientRows) };
+  return items.filter((d) => classifyDisagreementAgainstRows(d, ctx) === "cross_model");
 }
 
 export interface PanelVerdict {

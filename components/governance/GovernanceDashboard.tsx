@@ -67,10 +67,12 @@ type QueueRow = {
   correctParts?: string[];
   incorrectParts?: string[];
   keyFindings?: string[];
-  /** Research: stored disagreement lines that are not disagreements between independent models, with the reason. */
+  /** Research / claim / video: stored signals that are not agreement or disagreement between independent models, with the reason. */
   qualifiedDisagreements?: { text: string; basis: QualifiedDisagreementBasis }[];
-  /** Research: the run's persisted rows do not prove ≥ 2 independent executing models. */
+  /** Research / claim / video: the stored rows do not prove ≥ 2 independent executing models. */
   modelIndependence?: Exclude<StoredConsensusIndependence, "independent">;
+  /** Claim / video: fewer than two independent models answered — the verdict as one model's assessment. */
+  singleModelAssessment?: string;
   claimVerdictSummary?: string;
   createdAt: string;
   userId: string;
@@ -669,6 +671,50 @@ export function queueKeyFindingsHeading(row: Pick<QueueRow, "modelIndependence">
 
 /** Heading of the stored disagreement lines that are not disagreements between independent models. */
 export const QUALIFIED_DISAGREEMENTS_HEADING = "Recorded differences not counted as model disagreements";
+
+/** Claim / video row note when the stored rows do not prove >= 2 independent executing models. */
+export const QUEUE_VERIFICATION_INDEPENDENCE_NOTE: Readonly<Record<"insufficient" | "unverified", string>> = Object.freeze({
+  insufficient:
+    "Fewer than two independent models answered (slots answered by the same substitute model count as one) — no agreement or disagreement between models.",
+  unverified: "Independent-model coverage unverified — nothing here is presented as agreement or disagreement between models.",
+});
+
+/**
+ * What a claim / video row's expanded view presents as agreement and disagreement between models. A row the route marks
+ * with `modelIndependence` (fewer than two independent executing models, or independence not recorded) presents NONE
+ * — whatever lines it carries — and shows the note, the single-model assessment and the qualified signals instead.
+ */
+export function queueVerificationAgreementView(
+  row: Pick<
+    QueueRow,
+    "agreementPoints" | "agreementSummary" | "disagreementPoints" | "dissentSummary" | "disagreements" | "modelIndependence" | "qualifiedDisagreements" | "singleModelAssessment"
+  >
+): {
+  agreeLines: string[];
+  disagreeLines: string[];
+  note: string | null;
+  singleModelAssessment: string | null;
+  qualified: { text: string; basis: QualifiedDisagreementBasis }[];
+} {
+  const qualified = row.qualifiedDisagreements ?? [];
+  if (row.modelIndependence === "insufficient" || row.modelIndependence === "unverified") {
+    return {
+      agreeLines: [],
+      disagreeLines: [],
+      note: QUEUE_VERIFICATION_INDEPENDENCE_NOTE[row.modelIndependence],
+      singleModelAssessment: row.singleModelAssessment ?? null,
+      qualified,
+    };
+  }
+  const agreeLines =
+    row.agreementPoints && row.agreementPoints.length > 0 ? row.agreementPoints : row.agreementSummary ? [row.agreementSummary] : [];
+  const disagreeLines = [
+    ...(row.disagreementPoints ?? []),
+    ...(row.disagreementPoints?.length ? [] : row.dissentSummary ? [row.dissentSummary] : []),
+    ...(row.disagreements ?? []),
+  ];
+  return { agreeLines, disagreeLines, note: null, singleModelAssessment: null, qualified };
+}
 
 function consensusColor(score: number | null): string {
   if (score == null) return "text-cp-faint";
@@ -2247,40 +2293,54 @@ export function FragmentRow(props: {
               </div>
             ) : null}
 
-            {(row.runType === "verification" || row.runType === "video") &&
-            ((row.agreementPoints && row.agreementPoints.length > 0) || row.agreementSummary) ? (
-              <div className="mt-4 rounded-r-lg border-l-4 border-emerald-500 bg-emerald-50/70 pl-3 pr-3 py-3">
-                <p className="text-sm font-semibold text-emerald-900">Where models agree</p>
-                <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-emerald-950/90">
-                  {(row.agreementPoints && row.agreementPoints.length > 0
-                    ? row.agreementPoints
-                    : row.agreementSummary
-                      ? [row.agreementSummary]
-                      : []
-                  ).map((line, i) => (
-                    <li key={i}>{line}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-
             {row.runType === "verification" || row.runType === "video"
               ? (() => {
-                  const disagreeLines: string[] = [
-                    ...(row.disagreementPoints ?? []),
-                    ...(row.disagreementPoints?.length ? [] : row.dissentSummary ? [row.dissentSummary] : []),
-                    ...(row.disagreements ?? []),
-                  ];
-                  if (disagreeLines.length === 0) return null;
+                  const view = queueVerificationAgreementView(row);
                   return (
-                    <div className="mt-4 rounded-r-lg border-l-4 border-red-500 bg-red-50/60 pl-3 pr-3 py-3">
-                      <p className="text-sm font-semibold text-red-900">Where models disagree</p>
-                      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-red-950/90">
-                        {disagreeLines.map((line, i) => (
-                          <li key={i}>{line}</li>
-                        ))}
-                      </ul>
-                    </div>
+                    <>
+                      {view.note ? (
+                        <p className="mt-4 rounded-lg border border-cp-border bg-cp-raised px-3 py-2 text-sm text-cp-muted" data-testid="queue-verification-independence-note">
+                          {view.note}
+                        </p>
+                      ) : null}
+                      {view.singleModelAssessment ? (
+                        <p className="mt-2 text-sm text-cp-text" data-testid="queue-single-model-assessment">
+                          {view.singleModelAssessment}
+                        </p>
+                      ) : null}
+                      {view.agreeLines.length > 0 ? (
+                        <div className="mt-4 rounded-r-lg border-l-4 border-emerald-500 bg-emerald-50/70 pl-3 pr-3 py-3">
+                          <p className="text-sm font-semibold text-emerald-900">Where models agree</p>
+                          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-emerald-950/90">
+                            {view.agreeLines.map((line, i) => (
+                              <li key={i}>{line}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                      {view.disagreeLines.length > 0 ? (
+                        <div className="mt-4 rounded-r-lg border-l-4 border-red-500 bg-red-50/60 pl-3 pr-3 py-3">
+                          <p className="text-sm font-semibold text-red-900">Where models disagree</p>
+                          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-red-950/90">
+                            {view.disagreeLines.map((line, i) => (
+                              <li key={i}>{line}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                      {view.qualified.length > 0 ? (
+                        <div className="mt-4" data-testid="queue-verification-qualified-signals">
+                          <p className="text-sm font-semibold text-cp-text">{QUALIFIED_DISAGREEMENTS_HEADING}</p>
+                          <ul className="mt-1.5 list-disc space-y-1 pl-5 text-sm text-cp-muted">
+                            {view.qualified.map((d, i) => (
+                              <li key={i}>
+                                {d.text} <span className="text-xs text-cp-faint">({QUALIFIED_DISAGREEMENT_TEXT[d.basis]})</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                    </>
                   );
                 })()
               : null}

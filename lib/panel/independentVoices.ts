@@ -159,6 +159,20 @@ export function storedRunPerModelRows(data: Record<string, unknown> | null | und
   return rows;
 }
 
+/**
+ * Whether client-held rows record execution identity: every row is an object with a non-empty string `modelId` and a
+ * string `status` (the same requirement `storedRunPerModelRows` applies to persisted rows). False → which models
+ * executed cannot be established (the gate's `executionProvenanceUnverified`). No rows → false.
+ */
+export function rowsRecordExecutionIdentity(rows: readonly unknown[] | null | undefined): boolean {
+  if (!Array.isArray(rows) || rows.length === 0) return false;
+  return rows.every((raw) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+    const r = raw as Record<string, unknown>;
+    return typeof r.modelId === "string" && r.modelId.trim().length > 0 && typeof r.status === "string";
+  });
+}
+
 export function storedRunConsensusIndependence(data: Record<string, unknown> | null | undefined): StoredConsensusIndependence {
   const rows = storedRunPerModelRows(data);
   if (!rows) return "unverified";

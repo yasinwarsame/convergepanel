@@ -40,6 +40,8 @@ export function claimFixture(over: Partial<ClaimVerificationClientPayload> = {})
     accurateAmongUsable: 1,
     usableModelCount: 2,
     governanceStatus: "needs_review",
+    // Two independent executing models answered (chatgpt, claude): what the server now sends with this record.
+    modelIndependence: "independent",
     ...over,
   };
 }

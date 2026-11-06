@@ -3,6 +3,7 @@
  */
 
 import type { AuditBundle } from "@/lib/verification/auditBundle";
+import type { StoredConsensusIndependence } from "@/lib/panel/independentVoices";
 
 export type ClaimVerdictUi = "confirmed" | "disputed" | "partially_true" | "unverifiable";
 
@@ -63,6 +64,13 @@ export type ClaimVerificationClientPayload = {
   policyFlags?: string[];
   /** Org governance evaluation (paid plans). */
   governanceStatus?: "approved" | "needs_review" | "blocked";
+  /**
+   * Whether the stored rows prove >= 2 independent executing models with a usable answer
+   * (`storedVerificationConsensusIndependence`, computed server-side from the persisted record). Only "independent"
+   * presents `consensusScore` as a multi-model consensus (lib/verification/claimConsensusPresentation.ts); absent is
+   * treated as "unverified" (fail closed). `consensusScore` itself stays the stored value.
+   */
+  modelIndependence?: StoredConsensusIndependence;
   /**
    * Phase 11A.5B — present (as an object or explicit `null`) on a
    * PERSONAL verification DETAIL read only; absent on every other

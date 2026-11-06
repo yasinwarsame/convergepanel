@@ -3,7 +3,7 @@
  */
 
 import type { ModelId } from "@/lib/types";
-import type { ConsensusScoreWithheldReason } from "@/lib/panel/independentVoices";
+import type { ConsensusScoreWithheldReason, StoredConsensusIndependence } from "@/lib/panel/independentVoices";
 import type { QueryType } from "@/lib/adaptiveSchema/types";
 
 /** Stored on run / verification docs when org governance evaluation ran. */
@@ -42,7 +42,12 @@ export type PanelHistoryVerificationItem = {
   at: string;
   claim: string;
   verdict: string;
-  consensusScore: number;
+  /** The stored score, or null when it is withheld (`consensusWithheld`): not a multi-model consensus. */
+  consensusScore: number | null;
+  /** Present when the stored rows do not prove >= 2 independent executing models (lib/panel/storedVerificationIndependence.ts). */
+  consensusWithheld?: ConsensusScoreWithheldReason;
+  /** Whether the stored rows prove >= 2 independent executing models with a usable answer. */
+  modelIndependence: StoredConsensusIndependence;
   governanceStatus?: PanelHistoryGovernanceStatus;
 };
 

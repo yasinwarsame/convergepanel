@@ -55,6 +55,8 @@ import VideoUploader from "@/components/VideoUploader";
 import VideoVerificationResult from "@/components/VideoVerificationResult";
 import FileAttachButton from "@/components/FileAttachButton";
 import type { ClaimVerificationClientPayload } from "@/lib/verification/claimVerificationClientPayload";
+import { claimHistoryConsensusSuffix, claimModelIndependence } from "@/lib/verification/claimConsensusPresentation";
+import type { StoredConsensusIndependence } from "@/lib/panel/independentVoices";
 import { buildOriginLinkedVerifyClaimRequestBody } from "@/lib/verification/originLinkedVerifyClaimRequest";
 import type { VideoVerificationClientPayload } from "@/lib/verification/videoVerificationClientPayload";
 import type { PanelHistoryGovernanceStatus, PanelHistoryItem } from "@/lib/user/panelHistory";
@@ -180,6 +182,7 @@ function panelApiItemToHistoryItem(row: PanelHistoryItem): HistoryItem {
     claim: c,
     verdict: row.verdict,
     consensusScore: row.consensusScore,
+    modelIndependence: claimModelIndependence(row.modelIndependence),
     governanceStatus: row.governanceStatus,
   };
 }
@@ -249,7 +252,9 @@ type HistoryItem =
       at: string;
       claim?: string;
       verdict?: string;
-      consensusScore?: number;
+      consensusScore?: number | null;
+      /** Presented as "N consensus" only when "independent"; absent → unverified (claimConsensusPresentation). */
+      modelIndependence?: StoredConsensusIndependence;
       payload?: ClaimVerificationClientPayload | null;
       governanceStatus?: PanelHistoryGovernanceStatus;
     }
@@ -1611,6 +1616,7 @@ export default function Home() {
         auditBundle: data.auditBundle,
         accurateAmongUsable: data.accurateAmongUsable,
         usableModelCount: data.usableModelCount,
+        modelIndependence: claimModelIndependence(data.modelIndependence),
         governanceReviewRequired: data.governanceReviewRequired,
         blockedByPolicy: data.blockedByPolicy,
         policyBlockMessage: data.policyBlockMessage,
@@ -1635,6 +1641,7 @@ export default function Home() {
           claim: claim.trim(),
           verdict: data.verdict,
           consensusScore: data.consensusScore,
+          modelIndependence: payload.modelIndependence,
           payload,
           governanceStatus: payload.governanceStatus,
         };
@@ -1796,6 +1803,7 @@ export default function Home() {
         auditBundle: data.auditBundle,
         accurateAmongUsable: data.accurateAmongUsable,
         usableModelCount: data.usableModelCount,
+        modelIndependence: claimModelIndependence(data.modelIndependence),
         governanceReviewRequired: data.governanceReviewRequired,
         blockedByPolicy: data.blockedByPolicy,
         policyBlockMessage: data.policyBlockMessage,
@@ -1820,6 +1828,7 @@ export default function Home() {
           claim: claimText,
           verdict: data.verdict,
           consensusScore: data.consensusScore,
+          modelIndependence: payload.modelIndependence,
           payload,
           governanceStatus: payload.governanceStatus,
         };
@@ -2886,9 +2895,7 @@ export default function Home() {
                                 {item.verdict != null && item.verdict !== ""
                                   ? `${formatHistoryVerdictLabel(item.verdict)}`
                                   : "Claim"}
-                                {item.consensusScore != null && item.consensusScore !== undefined
-                                  ? ` · ${item.consensusScore} consensus`
-                                  : ""}
+                                {claimHistoryConsensusSuffix(item)}
                               </span>
                             )}
                           </span>

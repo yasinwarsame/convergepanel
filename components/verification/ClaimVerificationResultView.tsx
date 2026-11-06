@@ -32,6 +32,15 @@ import type {
   ClaimVerdictUi,
 } from "@/lib/verification/claimVerificationClientPayload";
 import { CLAIM_VERDICT_CLIPBOARD_DISCLAIMER } from "@/lib/legal/clipboardDisclaimers";
+import {
+  claimConsensusDisplay,
+  claimModelIndependence,
+  claimVerdictQualifier,
+  CLAIM_NOT_INDEPENDENT_AGREE_HEADING,
+  CLAIM_NOT_INDEPENDENT_DISAGREE_HEADING,
+  CLAIM_SINGLE_MODEL_BANNER_SUBTITLE,
+  CLAIM_UNVERIFIED_BANNER_SUBTITLE,
+} from "@/lib/verification/claimConsensusPresentation";
 
 function verdictBadgeClass(verdict: string): string {
   const v = verdict.toLowerCase();
@@ -198,7 +207,15 @@ export function buildClaimVerdictClipboardText(data: ClaimVerificationClientPayl
   lines.push(`ConvergePanel — Claim result`);
   lines.push(`Claim: ${data.claim}`);
   lines.push(`Aggregate verdict: ${data.verdict}`);
-  lines.push(`Consensus score: ${data.consensusScore} (${data.confidenceLabel} confidence)`);
+  // A multi-model consensus score only with >= 2 independent executing models (claimConsensusPresentation).
+  const consensus = claimConsensusDisplay(data.consensusScore, data.modelIndependence);
+  const qualifier = claimVerdictQualifier(data.modelIndependence);
+  if (consensus.kind === "score") {
+    lines.push(`Consensus score: ${consensus.score} (${data.confidenceLabel} confidence)`);
+  } else {
+    lines.push(`Verdict basis: ${qualifier}`);
+    lines.push(`Consensus score: ${consensus.text}`);
+  }
   lines.push("");
   lines.push("Per model:");
   for (const m of data.modelEvidence) {
@@ -206,12 +223,12 @@ export function buildClaimVerdictClipboardText(data: ClaimVerificationClientPayl
   }
   if (data.whereModelsAgree.length) {
     lines.push("");
-    lines.push("Where models agree:");
+    lines.push(consensus.kind === "score" ? "Where models agree:" : `${CLAIM_NOT_INDEPENDENT_AGREE_HEADING}:`);
     data.whereModelsAgree.forEach((x) => lines.push(`• ${x}`));
   }
   if (data.whereModelsDisagree.length) {
     lines.push("");
-    lines.push("Where models disagree:");
+    lines.push(consensus.kind === "score" ? "Where models disagree:" : `${CLAIM_NOT_INDEPENDENT_DISAGREE_HEADING}:`);
     data.whereModelsDisagree.forEach((x) => lines.push(`• ${x.point} [${x.models.join(", ")}]`));
   }
   lines.push(CLAIM_VERDICT_CLIPBOARD_DISCLAIMER.trimEnd());
@@ -227,6 +244,9 @@ export function buildClaimVerdictClipboardText(data: ClaimVerificationClientPayl
 export function ClaimVerificationAuditTrailDetails({ data }: { data: ClaimVerificationClientPayload }) {
   const bundle = data.auditBundle;
   const evidenceQ = data.evidenceQuality ?? bundle.evidenceQuality;
+  // The stored bundle is shown as recorded, except that its cross-model figures (consensus, and the confidence and
+  // evidence quality derived with it) are not presented as a consensus below two independent models.
+  const consensus = claimConsensusDisplay(bundle.consensusScore, data.modelIndependence);
   return (
     <>
       <h3 className="text-sm font-semibold text-cp-text tracking-tight">Audit trail</h3>
@@ -247,11 +267,19 @@ export function ClaimVerificationAuditTrailDetails({ data }: { data: ClaimVerifi
             </span>
           </dd>
           <dt className="text-cp-faint shrink-0">Consensus</dt>
-          <dd className="text-cp-text font-semibold tabular-nums">{bundle.consensusScore}/100</dd>
-          <dt className="text-cp-faint shrink-0">Confidence</dt>
-          <dd className={confidenceLabelTextClass(bundle.confidenceLabel)}>{bundle.confidenceLabel}</dd>
-          <dt className="text-cp-faint shrink-0">Evidence</dt>
-          <dd className={evidenceQualityTextClass(evidenceQ)}>{evidenceQ}</dd>
+          {consensus.kind === "score" ? (
+            <dd className="text-cp-text font-semibold tabular-nums">{consensus.score}/100</dd>
+          ) : (
+            <dd className="text-cp-muted" data-testid="claim-audit-consensus-withheld">{consensus.text}</dd>
+          )}
+          {consensus.kind === "score" ? (
+            <>
+              <dt className="text-cp-faint shrink-0">Confidence</dt>
+              <dd className={confidenceLabelTextClass(bundle.confidenceLabel)}>{bundle.confidenceLabel}</dd>
+              <dt className="text-cp-faint shrink-0">Evidence</dt>
+              <dd className={evidenceQualityTextClass(evidenceQ)}>{evidenceQ}</dd>
+            </>
+          ) : null}
         </div>
       </dl>
 
@@ -309,6 +337,9 @@ export default function ClaimVerificationResultView({
 }: ClaimVerificationResultViewProps) {
   const [openModels, setOpenModels] = useState<Record<string, boolean>>({});
 
+  const independence = claimModelIndependence(data.modelIndependence);
+  const consensus = claimConsensusDisplay(data.consensusScore, data.modelIndependence);
+
   const banner = useMemo((): {
     className: string;
     icon: ReactNode;
@@ -325,6 +356,21 @@ export default function ClaimVerificationResultView({
       data.verdict === "unverifiable"
         ? data.verdict
         : "unverifiable";
+    if (independence !== "independent") {
+      // Fewer than two independent executing models (or unknown execution): the verdict is not agreement between models.
+      const tone = {
+        confirmed: "bg-emerald-50 border-emerald-200 text-emerald-900",
+        disputed: "bg-rose-50 border-rose-200 text-rose-900",
+        partially_true: "bg-amber-50 border-amber-200 text-amber-900",
+        unverifiable: "bg-cp-raised border-cp-border text-cp-text",
+      }[v];
+      return {
+        className: tone,
+        icon: AGGREGATE_VERDICT_ICONS[v],
+        title: `${aggregateVerdictLabel(v)} — ${claimVerdictQualifier(independence)}`,
+        subtitle: independence === "insufficient" ? CLAIM_SINGLE_MODEL_BANNER_SUBTITLE : CLAIM_UNVERIFIED_BANNER_SUBTITLE,
+      };
+    }
     switch (v) {
       case "confirmed":
         return {
@@ -356,7 +402,7 @@ export default function ClaimVerificationResultView({
           subtitle: "Insufficient agreement or too many unknowns",
         };
     }
-  }, [data]);
+  }, [data, independence]);
 
   return (
     <div className="rounded-2xl border border-cp-border bg-cp-surface text-cp-text shadow-sm overflow-hidden">
@@ -386,9 +432,15 @@ export default function ClaimVerificationResultView({
       <div className="px-5 py-5 md:px-8 space-y-6 border-b border-cp-border-soft">
         <div className="rounded-xl border border-cp-border bg-cp-raised p-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-cp-faint">Consensus</p>
+          {consensus.kind === "withheld" ? (
+            <div className="mt-2" data-testid="claim-consensus-withheld">
+              <p className="text-base font-semibold text-cp-text">{consensus.text}</p>
+              <p className="mt-1 text-xs text-cp-faint">{claimVerdictQualifier(independence)}</p>
+            </div>
+          ) : (
           <div className="mt-2 flex flex-wrap items-end gap-4">
             <div>
-              <p className="text-3xl font-bold text-cp-text">{data.consensusScore}</p>
+              <p className="text-3xl font-bold text-cp-text">{consensus.score}</p>
               <p className="text-xs text-cp-faint">Consensus score</p>
             </div>
             <div>
@@ -408,6 +460,7 @@ export default function ClaimVerificationResultView({
               </div>
             )}
           </div>
+          )}
           {governanceSurface}
         </div>
 
@@ -423,7 +476,9 @@ export default function ClaimVerificationResultView({
         <h3 className="text-sm font-semibold text-cp-text">Agreement &amp; disagreement</h3>
         {data.whereModelsAgree.length > 0 ? (
           <div>
-            <p className="text-xs font-medium text-emerald-700 mb-2">Where models agree</p>
+            <p className="text-xs font-medium text-emerald-700 mb-2">
+              {consensus.kind === "score" ? "Where models agree" : CLAIM_NOT_INDEPENDENT_AGREE_HEADING}
+            </p>
             <ul className="list-disc pl-5 text-sm text-cp-text space-y-1">
               {data.whereModelsAgree.map((x, i) => (
                 <li key={i}>{x}</li>
@@ -435,7 +490,9 @@ export default function ClaimVerificationResultView({
         )}
         {data.whereModelsDisagree.length > 0 && (
           <div>
-            <p className="text-xs font-medium text-rose-700 mb-2">Where models disagree</p>
+            <p className="text-xs font-medium text-rose-700 mb-2">
+              {consensus.kind === "score" ? "Where models disagree" : CLAIM_NOT_INDEPENDENT_DISAGREE_HEADING}
+            </p>
             <ul className="list-disc pl-5 text-sm text-cp-text space-y-1">
               {data.whereModelsDisagree.map((x, i) => (
                 <li key={i}>

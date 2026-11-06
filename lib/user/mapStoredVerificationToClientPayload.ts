@@ -5,6 +5,7 @@
 import type { ClaimVerificationClientPayload, ClaimVerificationSourceResearch } from "@/lib/verification/claimVerificationClientPayload";
 import type { ClaimVerificationFirestoreDoc } from "@/lib/firestore/verifications";
 import { buildAgreementDisagreementDigest } from "@/lib/verification/agreementDigest";
+import { storedVerificationConsensusIndependence } from "@/lib/panel/storedVerificationIndependence";
 
 /**
  * Rebuilds the client verification payload from a Firestore `verifications` document.
@@ -77,6 +78,8 @@ export function mapStoredVerificationToClientPayload(
     data.governanceStatus === "blocked"
       ? { governanceStatus: data.governanceStatus }
       : {}),
+    // Presentation only: whether the stored score may be shown as a multi-model consensus (stored data unchanged).
+    modelIndependence: storedVerificationConsensusIndependence(data as unknown as Record<string, unknown>),
     ...(options ? { sourceResearch: options.sourceResearch } : {}),
   };
 }

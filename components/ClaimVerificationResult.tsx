@@ -23,6 +23,7 @@ import { useAuth } from "@/components/AuthProvider";
 import { GovernanceBadge } from "@/components/GovernanceBadge";
 import { VerificationActions } from "@/components/VerificationActions";
 import { downloadTextFile, generateVerificationMemo } from "@/lib/verification/generateMemo";
+import { claimModelIndependence } from "@/lib/verification/claimConsensusPresentation";
 import ClaimVerificationResultView, {
   buildClaimVerdictClipboardText,
   ClaimVerificationAuditTrailDetails,
@@ -135,6 +136,8 @@ export default function ClaimVerificationResult({
       agreementPoints: data.whereModelsAgree,
       disagreementPoints: data.whereModelsDisagree.map((d) => d.point),
       verificationId: data.verificationId ?? "",
+      // Fail closed: a payload without recorded independence is "unverified" (no consensus score in the memo).
+      claimModelIndependence: claimModelIndependence(data.modelIndependence),
     });
     const base = data.verificationId?.replace(/[^a-zA-Z0-9-_]+/g, "-").slice(0, 48) || String(Date.now());
     downloadTextFile(memo, `claim-memo-${base}.txt`);
