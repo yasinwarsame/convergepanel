@@ -167,17 +167,19 @@ with an explicitly named service-account key file. It is a dry run unless given
 `--execute` plus an exact typed confirmation, preserves every other custom
 claim, refuses to GRANT to a disabled account (a revoke is allowed on one and
 never re-enables it), and writes create-only `admin_audit_logs`
-attempt/outcome rows. A revoke always revokes the target's refresh tokens
-(owner policy) and reports success only when Firebase acknowledged the
-revocation call AND the read-back `tokensValidAfterTime` is at or after a
-cutoff anchored on a Firestore server commit time taken after the claim
-removal. That is an observation, not proof of revocation: it ASSUMES the
-Firestore and Firebase Auth clocks differ by less than a 2 s margin, a bound
-Google does not publish. It also does not enforce current privileges: the
-SYSTEM_ADMIN bearer guards verify ID tokens without `checkRevoked`, so an
+attempt/outcome rows. Every executed revoke requests revocation of the
+target's refresh tokens (owner policy). That request can fail or throw
+(`sessions_revoke_failed`, exit 3; a thrown call is an unknown outcome —
+re-run the same command). The tool reports success only when Firebase
+acknowledged the revocation call AND the read-back `tokensValidAfterTime` is
+at or after a cutoff anchored on a Firestore server commit time taken after
+the claim removal. That is an observation, not proof of revocation: it ASSUMES
+the Firestore and Firebase Auth clocks differ by less than a 2 s margin, a
+bound Google does not publish. It also does not enforce current privileges:
+the SYSTEM_ADMIN bearer guards verify ID tokens without `checkRevoked`, so an
 already-issued ID token keeps `admin: true` for up to about an hour regardless
-of the revocation (session-cookie paths do check revocation); live
-enforcement is the separate S2 change. Runbook, CLI, exit codes and retry:
+of the revocation (session-cookie paths do check revocation); live enforcement
+is the separate S2 change. Runbook, CLI, exit codes and retry:
 `docs/operations/system-admin-claim-script.md`. The four older minting scripts
 were retired. `ADMIN_SECRET` never needs to hold a live value
 for enrollment, so the bootstrap route is not part of the enrollment story at
@@ -503,7 +505,11 @@ table is the contract.
    key). `/api/admin/set-role` does this, but it itself requires SYSTEM_ADMIN, so
    during an incident use a service-account script rather than the route.
 2. `[CONTAINMENT_REVOKE_REFRESH][REQUIRED]` **Revoke refresh tokens** — `adminAuth.revokeRefreshTokens(uid)`. Without this
-   the already-issued ID token keeps working.
+   the account's sessions can keep refreshing. With it — and only if Firebase
+   applied the request — revocation-checked session cookies (and, assumed, the
+   refresh-token exchange) reject sessions whose `auth_time` is earlier than
+   the `validSince` it stamps from the operator's clock. It does NOT invalidate
+   an already-issued ID token on the bearer path (step 3).
 3. **Understand the residual window.** Every SYSTEM_ADMIN guard verifies with
    `verifyIdToken`, which does not consult revocation. Until the outstanding ID
    token expires (Firebase default one hour), a de-claimed or disabled
@@ -511,9 +517,11 @@ table is the contract.
    override and both billing-mutation routes. Disabling the account does **not**
    shorten this window on the bearer path.
 4. Session cookies are a separate artifact and are verified with
-   `verifySessionCookie(cookie, true)`, so revocation and disablement DO take
-   effect there immediately. But no SYSTEM_ADMIN route accepts a cookie, so this
-   helps only the ADMIN_PORTAL surface.
+   `verifySessionCookie(cookie, true)`, so disablement takes effect there on
+   the next request, and so does an applied revocation — but only for a cookie
+   whose session `auth_time` is earlier than the stored `validSince`. But no
+   SYSTEM_ADMIN route accepts a cookie, so this helps only the ADMIN_PORTAL
+   surface.
 5. **A revoked-but-unexpired ID token can still be exchanged for a fresh session
    cookie.** `POST /api/auth/session` mints with `verifyIdToken` and no
    revocation check, so the cookie's own five-day life can begin AFTER the
@@ -672,9 +680,10 @@ table is the contract.
    compromised (as opposed to a credential leak on an otherwise trusted
    account). Be precise about what this buys, per §B.3-B.5:
 
-   - **Existing session cookies stop working immediately.** Routes accepting a
-     cookie call `verifySessionCookie(cookie, true)`, and that second argument
-     performs the revocation/disabled check. That is the whole of what
+   - **Existing session cookies of the disabled account stop working on their
+     next request.** Routes accepting a cookie call
+     `verifySessionCookie(cookie, true)`, and that second argument performs the
+     disabled check (as well as the revocation check). That is the whole of what
      "invalidate the session" means here — there is no separate
      session-invalidation endpoint.
    - **Minting a NEW cookie is not blocked by this application.**
