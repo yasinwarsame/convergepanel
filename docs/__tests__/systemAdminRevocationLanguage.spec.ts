@@ -203,7 +203,7 @@ const CLAIM_RULES: ClaimRule[] = [
   {
     id: "R2-always-revokes",
     re: new RegExp(
-      String.raw`\b(?:always|every\s+(?:executed\s+)?revoke)\s+(?:revokes?|invalidates?|kills?|ends?(?!\s+(?:with|by|in|up|at)\b))\b[^.;]{0,40}?\b(?:refresh[- ]tokens?|sessions?)\b` +
+      String.raw`\b(?:always|every\s+(?:executed\s+)?revoke)\s+(?:revokes?|invalidates?|kills?|ends?(?!\s+(?:with|by|in|up|at)\b))\b[^.;]{0,40}?\b(?:refresh[- ]tokens?|tokens?|sessions?)\b` +
       String.raw`|\b(?:refresh[- ]tokens?|sessions?)\s+(?:are|is|were|get)\s+always\s+(?:revoked|invalidated)\b` +
       String.raw`|\bnever\s+fails?\s+to\s+(?:revoke|invalidate|sign|log|end|kill)\b`,
       "gi",
@@ -392,6 +392,8 @@ const CITED_B7C23DE = [
   ["R6-repeat-is-harmless", "A repeated revocation is monotonic: validSince never moves backward."],
   ["R6-rerun-is-safe", "Retrying the revoke is always safe."],
   ["R6-only-reduces-access", "A re-run cannot lower the cutoff."],
+  // b7c23de test title (spec :261), not caught by the "refresh tokens" form.
+  ["R2-always-revokes", "revoke removes only admin, writes the role anchor, ALWAYS revokes tokens, verifies against the server cutoff"],
   // Needs the code span KEPT: stripped, this sentence has no revocation term left.
   ["R6-repeat-is-harmless", "`validSince` is monotonic."],
 ] as const;
@@ -499,7 +501,9 @@ describe("no unconditional revoke-effect claims (PR #295 sweep, owner order B)",
   });
 
   it("the tiers 'does NOT give you' scope is the real body (not just the heading)", () => {
-    const body = tiersAfter("### What this procedure does NOT give you")(read("docs/operations/admin-authority-tiers.md"));
+    // Read through the SAME picker the scope test uses, so an emptied scope fails here.
+    const pick = REVOKE_DOC_SCOPES.find(([label]) => label.endsWith("(does NOT give you)"))![1];
+    const body = pick(read("docs/operations/admin-authority-tiers.md"));
     expect(body.length).toBeGreaterThan(300);
     expect(body).toMatch(/S2/);
     expect(body).toMatch(/lower that value/);
