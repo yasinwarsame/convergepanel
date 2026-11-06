@@ -171,7 +171,7 @@ type RunSummary = {
   consensusScore: number | null;
   evidenceQuality: string | null;
   /**
-   * Research and claim-verification rows: the stored consensus score / evidence quality are withheld from this list (both
+   * Research, claim-verification and video rows: the stored consensus score / evidence quality are withheld from this list (both
    * null) because the stored per-model rows reduce to fewer than two independent executing models, or record no
    * (or incomplete) execution identity.
    * Display only — the governance evaluation input and the stored run are unchanged.
@@ -803,14 +803,22 @@ function summarizeVideo(id: string, data: Record<string, unknown>, email: string
     digest: verificationDisagreementDigest(data),
   });
   const videoSummary = firstVideoModelSummary(data);
+  // A stored video score (and the cross-model evidence quality stored with it) is listed only when the stored per-model
+  // rows prove ≥ 2 independent executing models that answered (`agreement.modelIndependence`); otherwise withheld with
+  // the reason, exactly as claim and research rows. Display only — the stored record is unchanged.
+  const storedScore = typeof data.consensusScore === "number" ? data.consensusScore : null;
+  const storedEvidence = typeof data.evidenceQuality === "string" ? data.evidenceQuality : null;
+  const consensusWithheld =
+    storedScore == null && storedEvidence == null ? undefined : consensusScoreWithheldReason(agreement.modelIndependence);
 
   return {
     runId: id,
     collection: "videoVerifications",
     runType: "video",
     question,
-    consensusScore: typeof data.consensusScore === "number" ? data.consensusScore : null,
-    evidenceQuality: typeof data.evidenceQuality === "string" ? data.evidenceQuality : null,
+    consensusScore: consensusWithheld ? null : storedScore,
+    evidenceQuality: consensusWithheld ? null : storedEvidence,
+    ...(consensusWithheld ? { consensusWithheld } : {}),
     governanceStatus: normalizeGovernanceStatus(String(data.governanceStatus ?? "needs_review")),
     governanceReasons: Array.isArray(data.governanceReasons) ? (data.governanceReasons as string[]) : [],
     modelHealth: videoModelHealth(data),

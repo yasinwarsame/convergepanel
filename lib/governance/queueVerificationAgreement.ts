@@ -205,7 +205,8 @@ export function buildQueueVerificationAgreement(data: Record<string, unknown>, o
         majority = v;
       }
     }
-    if (consistent.length > 0) {
+    // "k/n models say …" needs at least two independent models with one consistent verdict each (never "1/1").
+    if (consistent.length >= 2) {
       out.agreementSummary = `${max}/${consistent.length} models say ${opts.humanize(majority).toLowerCase()}`;
       const outliers = consistent.filter((voice) => voice.summaryVerdicts[0] !== majority);
       if (outliers.length > 0) {
