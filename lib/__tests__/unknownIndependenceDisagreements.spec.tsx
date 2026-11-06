@@ -156,6 +156,20 @@ describe("live gate: unknown independence vs repeated execution (≥ 2 independe
     expect(g.reasons.join("\n")).not.toContain(NON_INDEPENDENT_DISAGREEMENTS_REASON);
   });
 
+  it("an inconsistent caller (unknown subset overlapping the genuine one) never yields a negative or inflated count", () => {
+    const g = computeVerificationGate({
+      keyFindings: report([]).keyFindings,
+      disagreements: [SAME, GENUINE],
+      independentDisagreements: [GENUINE],
+      independenceUnverifiedDisagreements: [SAME, GENUINE],
+      independentModelCount: 2,
+      questionLength: 200,
+    });
+    expect([g.metrics.nonIndependentDisagreementsCount, g.metrics.independenceUnverifiedDisagreementsCount]).toEqual([0, 1]);
+    expect(g.reasons).toContain(`${INDEPENDENCE_UNVERIFIED_DISAGREEMENTS_REASON} (1)`);
+    expect(g.reasons.join("\n")).not.toContain(NON_INDEPENDENT_DISAGREEMENTS_REASON);
+  });
+
   it("gate status and label are unchanged by the split (stricter-only floor untouched)", () => {
     for (const d of [[SAME, UNKNOWN], [UNKNOWN], [SAME, UNKNOWN, GENUINE], [UNKNOWN, UNKNOWN, UNKNOWN]]) {
       const split = computeVerificationGate(input(d, true));
