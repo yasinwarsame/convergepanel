@@ -313,8 +313,14 @@ any exit 3 is safe:
   clock fails the same way (it never reports success); sync the clock (NTP)
   and re-run.
 - `mint_failed` on a revoke: the claim write threw, so whether `admin` was
-  removed is unknown, but the refresh tokens were still revoked (see
-  `sessionRevocationEvidence`). Re-run the same command: if the removal had
+  removed is unknown. The tool still ATTEMPTED `revokeRefreshTokens`; that
+  call can itself fail. Read `sessionRevocationEvidence`:
+  `revocationApiAcknowledged: true` means only that Firebase acknowledged the
+  call; `false` means it failed too (also recorded as a
+  `sessions_revoke_failed` detail). In both cases no server-time anchor was
+  taken, so no cutoff was observed (`cutoffObserved: false`), and the run is
+  INCOMPLETE (exit 3) — an acknowledgment is not evidence that any earlier
+  session is invalid. Re-run the same command: if the removal had
   landed, the re-run is a sessions-only run (no claim write); if not, it
   writes the claim again.
 - A fast operator clock — see "Fast operator clock: recovery" below.
@@ -449,8 +455,14 @@ not a contract and not a measured bound, so a completed revoke is never
 evidence that revocation covered the claim removal. (2) It is assumed that once `setCustomUserClaims` has
 returned, the claim removal is in effect for token minting. A NEW sign-in that
 starts after the cutoff while a stale replica still served `admin: true` is
-not covered by any revocation; sessions that started before the cutoff are
-covered regardless, because revocation is judged on `auth_time`. (3) A fast
+not covered by any revocation. Whether a session that started BEFORE the
+removal is rejected is also not established by the tool: Firebase rejects it
+only where revocation is checked (session cookies — not the bearer ID-token
+paths in the table below) and only if its `auth_time` is earlier than the
+stored `validSince`, which the revoke call stamps from the operator's local
+clock. The tool compares `validSince` with a Firestore-anchored cutoff, never
+with Firebase Auth's own `auth_time` clock, so this coverage holds only under
+the unproven cross-service clock assumption in (1). (3) A fast
 operator clock over-revokes as described. (4) The already-issued-ID-token
 window below is unchanged by any of this (fact (d) above; S2).
 
