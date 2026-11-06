@@ -122,3 +122,15 @@ describe("missing provenance", () => {
     expect(src).toContain("...(rowsRecordExecutionIdentity(results) ? {} : { executionProvenanceUnverified: true }),");
   });
 });
+
+describe("one slot named twice (slot id + family name) is that slot's own positions on every surface", () => {
+  it("queue and live both refuse it as a cross-model disagreement (the live panel's established raw-key rule)", () => {
+    const perModel = [ok("chatgpt"), ok("claude"), failed("grok")];
+    const item = { topic: "alias", positionsByModel: { chatgpt: "1789", ChatGPT: "1792" }, whyTheyDiffer: "same slot twice" };
+    const ctx = storedRunIndependenceContext({ runDocument: { perModel } });
+    expect([ctx.independence, ctx.collapsed]).toEqual(["independent", false]);
+    expect(classifyStoredDisagreement(item, ctx)).toBe("same_executing_model");
+    const rows = perModel.map((p) => ({ modelId: p.modelId, status: p.status, rawText: p.rawTextTruncated }));
+    expect(crossModelDisagreements([item], rows, true)).toEqual([]);
+  });
+});
