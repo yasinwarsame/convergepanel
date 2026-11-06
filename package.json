@@ -75,7 +75,7 @@
     "esbuild": "^0.27.4",
     "eslint": "^8.57.0",
     "eslint-config-next": "^14.2.35",
-    "firebase-tools": "^13.35.1",
+    "firebase-tools": "^15.34.0",
     "jest": "^30.4.2",
     "jszip": "3.10.1",
     "playwright": "^1.60.0",
