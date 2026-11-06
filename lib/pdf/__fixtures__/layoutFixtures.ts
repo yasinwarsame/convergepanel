@@ -1114,3 +1114,15 @@ export function pdfLayoutFixtures(): PdfLayoutFixture[] {
     bareClosingLabel(),
   ];
 }
+
+/**
+ * c16: the layout fixtures carry no frozen run provenance — by data they are pre-6.2b exports, whose model independence
+ * is stated as unverified (owner ruling, exportPositionView.exportSlotProvenance). A spec whose subject is layout or
+ * claim formatting on a current export (every slot its own recorded executing model) freezes this record's provenance:
+ * each dispatched slot recorded as NOT substituted, and nothing else (no provider or model is invented, so every slot
+ * label is unchanged). Returns the same (mutated) record.
+ */
+export function withIndependentFrozenProvenance<T extends { reportSnapshot: any }>(record: T): T {
+  record.reportSnapshot.runProvenance = { models: (record.reportSnapshot.models ?? []).map((m: { modelId: string }) => ({ modelId: m.modelId, substituted: false })) };
+  return record;
+}

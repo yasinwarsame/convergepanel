@@ -51,7 +51,7 @@ import {
   governanceStatusDisplay,
 } from "@/lib/adaptiveSchema/exportContentDerivation";
 import { COLORS, badgeStyle, pdfStyles } from "./theme";
-import { exportPositionSafeReport } from "@/lib/adaptiveSchema/exportPositionView";
+import { exportPositionSafeReport, exportRunIndependence } from "@/lib/adaptiveSchema/exportPositionView";
 import { MARKED_GATE_LEVEL_FIELD, MARKED_GATE_LEVEL_NOTE, MARKED_GATE_LEVEL_WORD, isPositionMarked } from "@/lib/adaptiveSchema/positionPresentation";
 
 /**
@@ -397,7 +397,9 @@ function StatusSummary({ record }: { record: AdaptiveResearchExportV1 }) {
   if (isDsLabelWordingMarked(record)) return <DsStatusSummaryV1 record={record} />;
   const snapshot = record.reportSnapshot;
   // Order 5 (Contract P, m-5): a legacy-family (gate-scored) marked report's level is its gate, labelled so.
-  const gateLevel = isPositionMarked(snapshot.legacy?.synthesisReport);
+  // c16 (MAJOR-2): so is the level of a report whose run's slots are not independent executing models, or whose
+  // execution is not recorded (a pre-6.2b export) — never a "Strong consensus" tier.
+  const gateLevel = isPositionMarked(snapshot.legacy?.synthesisReport) || !!exportRunIndependence(record);
   return (
     <SectionCard label="Report status summary" bounded>
       <View style={pdfStyles.fieldGrid}>

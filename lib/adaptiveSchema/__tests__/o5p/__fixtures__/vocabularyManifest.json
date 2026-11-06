@@ -436,7 +436,7 @@
  {
   "file": "components/adaptive/ListView.tsx",
   "literal": "\"Consensus claims\"",
-  "count": 1,
+  "count": 2,
   "category": "contract-p-applied",
   "rule": "Pulse card; marked: consensus CLAIM rows only (field rows excluded)"
  },
@@ -1017,7 +1017,7 @@
  {
   "file": "lib/adaptiveSchema/positionPresentation.ts",
   "literal": "\"Consensus\"",
-  "count": 2,
+  "count": 4,
   "category": "contract-p",
   "rule": "Contract P wording (positionPresentation.ts): marked records only; claim kinds for split claim rows, statuses for other claim rows"
  },
@@ -1045,7 +1045,7 @@
  {
   "file": "lib/adaptiveSchema/positionPresentation.ts",
   "literal": "\"Majority support\"",
-  "count": 2,
+  "count": 4,
   "category": "contract-p",
   "rule": "Contract P wording (positionPresentation.ts): marked records only; claim kinds for split claim rows, statuses for other claim rows"
  },
@@ -2410,7 +2410,7 @@
  {
   "file": "lib/adaptiveSchema/verdictIndependence.ts",
   "literal": "\"majority support\"",
-  "count": 1,
+  "count": 2,
   "category": "contract-p-applied",
   "rule": "stored status words as recorded, used only inside the independence-qualified headings / results of verdictIndependence.ts: historical adaptive agreement independence (owner order C, review of cf74a52, 2026-11-06): shown ONLY when a stored consensus / majority statement's supporting slots (joined from the stored rows; unjoined, the run's slots) are recorded as answered by a repeated substitute model or carry no recorded execution identity (verdictIndependence.ts presentIndependenceQualifiedReport / rowView); states the executing models and independent-model counts; stored values unchanged; independent runs render byte-identically (historicalParity.spec.tsx, historicalAgreementIndependence.spec.tsx)"
  },
@@ -2520,10 +2520,101 @@
   "rule": "test id / symbol key, never rendered"
  },
  {
-  "file": "lib/adaptiveSchema/verdictIndependence.ts",
-  "literal": "`${c.supporters} (panel slots)`",
+  "file": "lib/adaptiveSchema/exportPositionView.ts",
+  "literal": "\"Agreement\"",
   "count": 1,
   "category": "contract-p-applied",
-  "rule": "historical adaptive agreement independence (owner order C, review of cf74a52, 2026-11-06): shown ONLY when a stored consensus / majority statement's supporting slots (joined from the stored rows; unjoined, the run's slots) are recorded as answered by a repeated substitute model or carry no recorded execution identity (verdictIndependence.ts presentIndependenceQualifiedReport / rowView); states the executing models and independent-model counts; stored values unchanged; independent runs render byte-identically (historicalParity.spec.tsx, historicalAgreementIndependence.spec.tsx)"
+  "rule": "the composers' existing top sub-label, kept when the top claim's own supporters are independent executing models (c16: the section heading states the run)"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "`${ri.bothSides.join(\"; \")} answered slots on both sides, so this is not a disagreement between independent models.`",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "c16 (review of 48f3739): shown ONLY when the run's slots (or the row's positioned slots) are not independent recorded executing models, or their execution is not recorded (verdictIndependence.ts); states slot counts as panel slots and names executing models; independent runs render as before"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "`${contested} ${COUNTED_BY_PANEL_SLOT}`",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "c16 (review of 48f3739): shown ONLY when the run's slots (or the row's positioned slots) are not independent recorded executing models, or their execution is not recorded (verdictIndependence.ts); states slot counts as panel slots and names executing models; independent runs render as before"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictIndependence.ts",
+  "literal": "`${ri.bothSides.join(\"; \")} answered slots on both sides, so this is not a disagreement between independent models`",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "c16 (review of 48f3739): shown ONLY when the run's slots (or the row's positioned slots) are not independent recorded executing models, or their execution is not recorded (verdictIndependence.ts); states slot counts as panel slots and names executing models; independent runs render as before"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictIndependence.ts",
+  "literal": "\"Agreement by panel slot\"",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "c16 (review of 48f3739): shown ONLY when the run's slots (or the row's positioned slots) are not independent recorded executing models, or their execution is not recorded (verdictIndependence.ts); states slot counts as panel slots and names executing models; independent runs render as before (summary bar, schema-derived level)"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictIndependence.ts",
+  "literal": "\"Split (panel slots)\"",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "c16 (review of 48f3739): shown ONLY when the run's slots (or the row's positioned slots) are not independent recorded executing models, or their execution is not recorded (verdictIndependence.ts); states slot counts as panel slots and names executing models; independent runs render as before (summary bar, schema-derived level)"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictIndependence.ts",
+  "literal": "\"Which models answered this run's slots is not recorded, so uniform responses are not shown as agreement between independent models.\"",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "c16 (review of 48f3739): shown ONLY when the run's slots (or the row's positioned slots) are not independent recorded executing models, or their execution is not recorded (verdictIndependence.ts); states slot counts as panel slots and names executing models; independent runs render as before (homogeneity badge, N2)"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictIndependence.ts",
+  "literal": "\"Unusually uniform responses across panel slots (not independent agreement)\"",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "c16 (review of 48f3739): shown ONLY when the run's slots (or the row's positioned slots) are not independent recorded executing models, or their execution is not recorded (verdictIndependence.ts); states slot counts as panel slots and names executing models; independent runs render as before (homogeneity badge, N2)"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictIndependence.ts",
+  "literal": "`In this run ${run.repeated.join(\"; \")} answered several slots, so uniform responses across them are not agreement between independent models.`",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "c16 (review of 48f3739): shown ONLY when the run's slots (or the row's positioned slots) are not independent recorded executing models, or their execution is not recorded (verdictIndependence.ts); states slot counts as panel slots and names executing models; independent runs render as before (homogeneity badge, N2)"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictIndependence.ts",
+  "literal": "`${agree} of ${slotsText(total)} agree`",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "c16 (review of 48f3739): shown ONLY when the run's slots (or the row's positioned slots) are not independent recorded executing models, or their execution is not recorded (verdictIndependence.ts); states slot counts as panel slots and names executing models; independent runs render as before (agreement map count line)"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictIndependence.ts",
+  "literal": "`${dispute} dispute${dispute === 1 ? \"s\" : \"\"}`",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "c16 (review of 48f3739): shown ONLY when the run's slots (or the row's positioned slots) are not independent recorded executing models, or their execution is not recorded (verdictIndependence.ts); states slot counts as panel slots and names executing models; independent runs render as before (agreement map count line)"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictIndependence.ts",
+  "literal": "`${m} independent model${m === 1 ? \"\" : \"s\"}${ri.bothSides.length && agree > 0 && dispute > 0 ? ` (${ri.bothSides.join(\"; \")} on both sides)` : \"\"}`",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "c16 (review of 48f3739): shown ONLY when the run's slots (or the row's positioned slots) are not independent recorded executing models, or their execution is not recorded (verdictIndependence.ts); states slot counts as panel slots and names executing models; independent runs render as before (agreement map count line)"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictIndependence.ts",
+  "literal": "`${m[1]}/${m[2]} panel slots converge on ${m[3]} (${result}); ${m[4]}`",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "c16 (review of 48f3739): shown ONLY when the run's slots (or the row's positioned slots) are not independent recorded executing models, or their execution is not recorded (verdictIndependence.ts); states slot counts as panel slots and names executing models; independent runs render as before (stored panel verdict, MAJOR-1)"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictIndependence.ts",
+  "literal": "`${c.contested} ${COUNTED_BY_PANEL_SLOT}`",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "c16 (review of 48f3739): shown ONLY when the run's slots (or the row's positioned slots) are not independent recorded executing models, or their execution is not recorded (verdictIndependence.ts); states slot counts as panel slots and names executing models; independent runs render as before (stored contested note)"
  }
 ]

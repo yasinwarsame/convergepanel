@@ -45,6 +45,7 @@ import {
   independenceQualification,
   presentIndependenceQualifiedReport,
   sharePanelPhrase,
+  shortRunCountedResult,
   shortSharePanelPhrase,
   type AdaptiveTopIndependence,
 } from "./verdictIndependence";
@@ -524,7 +525,11 @@ export function buildAdaptiveXPost(question: string, storedReport: AdaptiveSynth
   } else {
     parts.push(`Certainty: ${Math.round(report.runCertainty * 100)}% (${legacyGateWord(report.gate)})`);
   }
-  const split = report.presentation?.disagree[0];
+  // c16: in a run whose slots are not independent executing models the split's slot count is stated in X's budget as
+  // what it is (the full qualified statement would not fit and would be cut mid-sentence).
+  const run = independenceQualification(report)?.run ?? null;
+  const storedSplit = report.presentation?.disagree[0];
+  const split = storedSplit && run && typeof storedSplit.result === "string" ? { ...storedSplit, result: shortRunCountedResult(storedSplit.result, run) } : storedSplit;
   if (split) {
     // The post is capped at 280 characters: the claim gives way, the computed result never does.
     const fixed = [...parts, "via ConvergePanel"].join("\n\n").length + 2;
@@ -678,7 +683,7 @@ function xFitter(text: string, truncated = false): ((budget: number) => string) 
 
 const X_BRAND = "via ConvergePanel";
 const X_UNRESOLVED_LABEL = "Unresolved: ";
-const X_ASKED = "Asked a multi-model AI panel";
+export const X_ASKED = "Asked a multi-model AI panel";
 
 /**
  * A marked report's X post, valid on X by weighted length (twitter-text v3 rules, checked on the finished post). The
@@ -737,6 +742,7 @@ function buildMarkedXPost(question: string, report: AdaptiveSynthesisReport): st
 }
 
 /** The defined safe fallback: no question, no row — only computed and fixed text, always a valid post. */
-export function markedXFallback(gateLine: string, askedLine: string = X_ASKED): string {
+/** `askedLine` is required (R12): the caller's qualified "Asked an AI panel (…)" line is never silently replaced by X_ASKED. */
+export function markedXFallback(gateLine: string, askedLine: string): string {
   return [askedLine, gateLine, X_BRAND].join("\n\n");
 }

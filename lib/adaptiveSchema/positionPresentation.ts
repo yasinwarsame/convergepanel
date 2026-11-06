@@ -35,11 +35,14 @@ import {
   adaptiveTopIndependence,
   attachRunIndependence,
   presentIndependenceQualifiedReport,
-  qualifiedRowResult,
-  qualifiedStatusHeading,
+  COUNTED_BY_PANEL_SLOT,
+  QUALIFIED_TOP_NEXT_STEP,
+  qualifiedRowHeading,
+  qualifiedRowText,
   qualifiedTopHeading,
-  rowSupportIndependence,
+  rowIndependence,
   supportingSlotsOfRow,
+  type RowIndependence,
   type AdaptiveTopIndependence,
   type QualifiedStatusHeading,
 } from "./verdictIndependence";
@@ -421,7 +424,8 @@ export type RowHeading =
   | "Comparison"
   | "No recorded positions"
   | "Position details unavailable"
-  | QualifiedStatusHeading;
+  | QualifiedStatusHeading
+  | `${"Consensus" | "Majority support" | "Limited coverage" | "Single source"} (counted by panel slot)`;
 
 export interface PresentedSlotPosition {
   slot: string;
@@ -482,6 +486,14 @@ function validContested(row: Record<string, unknown>): string | null {
   return `${m} of ${l} model${l === 1 ? "" : "s"} that listed this claim ${m === 1 ? "marks" : "mark"} it contested`;
 }
 
+/** A marked split row's slots, stated by executing model (its text already counts panel slots). */
+function splitIndependenceSentence(ri: RowIndependence): string {
+  if (ri.t.kind === "unverified") return "Model independence unverified: which models answered these panel slots is not recorded.";
+  if (ri.bothSides.length && ri.supportSlots.length && ri.disputeSlots.length) return `${ri.bothSides.join("; ")} answered slots on both sides, so this is not a disagreement between independent models.`;
+  const m = ri.t.voices.length;
+  return m === 1 ? `These panel slots were all answered by one model, ${ri.t.voices[0]}.` : `These panel slots were answered by ${m} independent models (${ri.t.voices.join("; ")}).`;
+}
+
 /** The single entry point every consumer uses for one stored row. */
 export function rowView(row: unknown, roster: readonly string[], provenance?: readonly RunModelProvenanceFacts[] | null): RowView {
   const r = isPlainObject(row) ? row : {};
@@ -507,21 +519,29 @@ export function rowView(row: unknown, roster: readonly string[], provenance?: re
   if (type === "claim") {
     const status = r.status;
     const claimText = typeof r.claimText === "string" ? r.claimText : "";
-    const supporters = reading.slots.filter((s) => s.kind === "position" && (s.stance === "agrees" || s.stance === "partial")).map((s) => label(s.slot));
-    const disputers = reading.slots.filter((s) => s.kind === "position" && s.stance === "disputes").map((s) => label(s.slot));
-    const common = { ...base, slots: slotPositions(claimPosition), supporters, disputers, contested: validContested(r) };
+    // Historical reports counted every slot a substitute model answered as its own model: a claim row whose positioned
+    // slots (supporting and disputing) are not independent executing models is stated by its executing models
+    // (verdictIndependence.ts) — the stored status as recorded, never recomputed. Independent slots: as before.
+    const ri = isKnownStatus(status) || status === "split" ? rowIndependence(r, provenance) : null;
+    const sideLabels = (side: "support" | "dispute", perSlot: string[]) => {
+      const t = side === "support" ? ri?.support : ri?.dispute;
+      // Several slots one substitute model answered are that model once; otherwise each slot's own label (which already
+      // names a substitute's executing model).
+      return ri && t && t.kind === "repeated_substitute" ? (side === "support" ? ri.supportVoices : ri.disputeVoices) : perSlot;
+    };
+    const supporters = sideLabels("support", reading.slots.filter((s) => s.kind === "position" && (s.stance === "agrees" || s.stance === "partial")).map((s) => label(s.slot)));
+    const disputers = sideLabels("dispute", reading.slots.filter((s) => s.kind === "position" && s.stance === "disputes").map((s) => label(s.slot)));
+    const contested = validContested(r);
+    const common = { ...base, slots: slotPositions(claimPosition), supporters, disputers, contested: contested && ri ? `${contested} ${COUNTED_BY_PANEL_SLOT}` : contested };
     if (status === "split") {
       const kind = claimKind(reading);
-      return { ...common, claimStatus: "split", heading: kind === "opposing_positions" ? "Recorded opposing positions" : kind === "no_positions" ? "No recorded positions" : "Unresolved claim", text: claimKindText(kind, reading), isOpposition: kind === "opposing_positions" };
+      const text = claimKindText(kind, reading);
+      return { ...common, claimStatus: "split", heading: kind === "opposing_positions" ? "Recorded opposing positions" : kind === "no_positions" ? "No recorded positions" : "Unresolved claim", text: ri ? `${text} ${splitIndependenceSentence(ri)}` : text, isOpposition: kind === "opposing_positions" };
     }
     if (!isKnownStatus(status)) return { ...common, heading: "Unrecognised status", text: `unrecognised status — not presented as agreement${readingTail(reading).length ? `; ${readingTail(reading).join("; ")}` : ""}` };
-    // Historical reports counted every slot a substitute model answered as its own supporter: a consensus / majority
-    // row whose supporting slots are not independent executing models is stated by its executing models
-    // (verdictIndependence.ts) — the stored status as recorded, never recomputed. Independent supporters: as before.
-    const independence = rowSupportIndependence(r, provenance);
-    if (independence) {
+    if (ri) {
       const tail = readingTail(reading);
-      return { ...common, claimStatus: status, heading: qualifiedStatusHeading(status, independence) ?? STATUS_HEADING[status], text: `${qualifiedRowResult(r, independence)}${tail.length ? `; ${tail.join("; ")}` : ""}` };
+      return { ...common, claimStatus: status, heading: qualifiedRowHeading(status, ri, STATUS_HEADING[status] as "Consensus" | "Majority support" | "Limited coverage" | "Single source"), text: `${qualifiedRowText(r, ri)}${tail.length ? `; ${tail.join("; ")}` : ""}` };
     }
     return { ...common, claimStatus: status, heading: STATUS_HEADING[status], text: claimStatusText(status, reading, claimText, roster.length) };
   }
@@ -957,7 +977,8 @@ function presentVerdict(src: AdaptiveSynthesisReport, rows: readonly unknown[] |
         topHeading = qualifiedTopHeading(independence, view.claimStatus);
         topIndependence = independence;
       }
-      top = { topConsensusAgreement: view.text, consensusModelCount: view.supporters.length, ...(view.contested ? { topConsensusContested: view.contested } : {}) };
+      // The recorded count is of supporting panel slots (as stored), never of the grouped executing models.
+      top = { topConsensusAgreement: view.text, consensusModelCount: rowView(join.row, input.roster).supporters.length, ...(view.contested ? { topConsensusContested: view.contested } : {}) };
     } else if (view) {
       topHeading = "Top value comparison";
       top = { topConsensusAgreement: view.text, consensusModelCount: 0 };
@@ -993,7 +1014,9 @@ function presentVerdict(src: AdaptiveSynthesisReport, rows: readonly unknown[] |
     .filter((s) => s !== VERDICT_NEXT_STEPS.caution[2])
     .map((s) => (s === VERDICT_NEXT_STEPS.caution[0] && !keyIsOpposition ? (card.keyDisagreement ? (keyIsField ? NEUTRAL_KEY_VALUES_STEP : NEUTRAL_KEY_CLAIM_STEP) : CAUTION_NEXT_STEP_WITHOUT_DISAGREEMENT) : s))
     // The pass step names "the top consensus claim": only a consensus or majority CLAIM row is one.
-    .map((s) => (s === VERDICT_NEXT_STEPS.pass[0] && !topIsClaim ? NEUTRAL_TOP_RESULT_STEP : s));
+    .map((s) => (s === VERDICT_NEXT_STEPS.pass[0] && !topIsClaim ? NEUTRAL_TOP_RESULT_STEP : s))
+    // N1: a top claim whose support is not independent executing models is not "the top consensus claim".
+    .map((s) => (s === VERDICT_NEXT_STEPS.pass[0] && topIndependence ? QUALIFIED_TOP_NEXT_STEP : s));
   const verdictCard: AdaptiveVerdictCard = { ...card, ...top, ...key, caveat: null, recommendedNextSteps: steps };
   // The contested note is restated from the joined row only; the caveat is model-written and withheld.
   if (card.topConsensus !== NO_CONSENSUS_IDENTIFIED && !top.topConsensusContested) delete verdictCard.topConsensusContested;

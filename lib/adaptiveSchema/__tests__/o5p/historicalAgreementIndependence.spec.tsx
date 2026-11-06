@@ -120,7 +120,7 @@ describe("every slot answered by DeepSeek (generic-consensus, stored 'consensus:
       expect(view).toContain(`Supported by: ${ALL_DEEPSEEK}`);
     } else {
       // The legacy answer string names slots: it is followed by what they are.
-      expect(view).toContain(`Model independence: The models named here are panel slots: in this run ${ALL_DEEPSEEK} answered several slots, so they are not all independent models.`);
+      expect(view).toContain(`Model independence: The models named and counted here are panel slots: in this run ${ALL_DEEPSEEK} answered several slots, so they are not all independent models.`);
     }
     expect(view).toContain(AGREE_HEADING_ONE_EXECUTING_MODEL);
     expect(view).toContain(ADAPTIVE_REPEATED_SUBSTITUTE_TOP_HEADING);

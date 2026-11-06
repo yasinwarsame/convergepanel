@@ -22,6 +22,7 @@
 import { groupSlotsByExecutingVoice } from "@/lib/panel/executingVoiceLabel";
 import type { RunModelProvenanceFacts } from "@/lib/panel/runModelIdentity";
 import { NO_CONSENSUS_IDENTIFIED, quoteClaim } from "./agreementNarrative";
+import { VERDICT_NEXT_STEPS } from "./config";
 
 export type AdaptiveTopIndependence =
   | { kind: "independent" }
@@ -183,6 +184,194 @@ export function qualifiedRowResult(row: unknown, t: QualifiedIndependence): stri
 
 const SUBSTITUTE_MODEL_FALLBACK = "a substitute model";
 
+// ─── Every claim row, every side (c16: review of 48f3739, MINOR-2 / R13) ─────────────────────────────────────────────
+//
+// A row's slot counts are model counts only when every slot that took a position on it (supporting AND disputing) is
+// its own recorded executing model. rowSupportIndependence judges the supporting side of a consensus / majority row;
+// rowIndependence judges any claim row (split, limited coverage and single-source rows too) over both sides, and says
+// when one executing model answered slots on both sides (a "disagreement" of one model with itself).
+
+/** Every stored claim status a row statement may carry, as recorded. */
+const ANY_STATUS_WORD: Readonly<Record<string, string>> = { consensus: "consensus", majority: "majority support", split: "split", limited_coverage: "limited coverage", single_source: "single source" };
+
+/** The disputing slot ids of a stored aligned row (unique). */
+export function disputingSlotsOfRow(row: unknown): string[] {
+  const cells = row && typeof row === "object" ? (row as { cells?: unknown }).cells : null;
+  if (!Array.isArray(cells)) return [];
+  return unique(cells.filter((c) => !!c && typeof c === "object" && (c as { stance?: unknown }).stance === "disputes").map((c) => String((c as { modelId?: unknown }).modelId ?? "")));
+}
+
+/** One claim row's model independence, judged over every slot that took a position on it. */
+export interface RowIndependence {
+  /** Supporting and disputing slots together. */
+  t: QualifiedIndependence;
+  /** The supporting side alone (consensus / majority headings read this). */
+  support: AdaptiveTopIndependence;
+  dispute: AdaptiveTopIndependence;
+  supportSlots: string[];
+  disputeSlots: string[];
+  /** The executing models of each side, each once. */
+  supportVoices: string[];
+  disputeVoices: string[];
+  /** Executing models that answered slots on both sides (labelled over both sides' slots). */
+  bothSides: string[];
+}
+
+/**
+ * Null when every slot that took a position on the row is its own recorded executing model, when the row is not a
+ * claim row with a recorded status, or without the run's rows (nothing inferred).
+ */
+export function rowIndependence(row: unknown, provenance: readonly RunModelProvenanceFacts[] | null | undefined): RowIndependence | null {
+  if (!Array.isArray(provenance) || !row || typeof row !== "object" || Array.isArray(row)) return null;
+  const status = (row as { status?: unknown }).status;
+  if (typeof status !== "string" || !Object.prototype.hasOwnProperty.call(ANY_STATUS_WORD, status)) return null;
+  const supportSlots = unique(supportingSlotsOfRow(row) ?? []);
+  const disputeSlots = disputingSlotsOfRow(row);
+  const participants = unique([...supportSlots, ...disputeSlots]);
+  if (participants.length === 0) return null;
+  const t = adaptiveTopIndependence(participants, provenance);
+  if (t.kind === "independent") return null;
+  const groups = groupSlotsByExecutingVoice(participants, provenance);
+  const bothSides = groups.filter((g) => g.slotIds.some((s) => supportSlots.includes(s)) && g.slotIds.some((s) => disputeSlots.includes(s))).map((g) => g.label);
+  return {
+    t,
+    support: supportSlots.length ? adaptiveTopIndependence(supportSlots, provenance) : INDEPENDENT,
+    dispute: disputeSlots.length ? adaptiveTopIndependence(disputeSlots, provenance) : INDEPENDENT,
+    supportSlots,
+    disputeSlots,
+    supportVoices: groupSlotsByExecutingVoice(supportSlots, provenance).map((g) => g.label),
+    disputeVoices: groupSlotsByExecutingVoice(disputeSlots, provenance).map((g) => g.label),
+    bothSides: t.kind === "unverified" ? [] : bothSides,
+  };
+}
+
+/** One side of a row ("3 panel slots support it, answered by 2 independent models (…)"). */
+function sideClause(n: number, verb: "support" | "dispute", side: AdaptiveTopIndependence, voices: readonly string[]): string {
+  const counted = `${slotsText(n)} ${n === 1 ? `${verb}s` : verb} it`;
+  if (side.kind === "unverified") return `${counted} (model independence unverified — which models answered ${n === 1 ? "it" : "them"} is not recorded)`;
+  if (voices.length === 1) return n === 1 ? `${counted} (${voices[0]})` : `${counted}, all answered by one model, ${voices[0]}`;
+  if (voices.length < n) return `${counted}, answered by ${voices.length} independent models (${voices.join("; ")})`;
+  return `${counted}, each answered by its own model (${voices.join("; ")})`;
+}
+
+/**
+ * The computed result of ANY claim row whose positioned slots are not all independent executing models: the stored
+ * status as recorded, each side's slot count and its executing models, and the executing models that answered slots on
+ * both sides. A consensus / majority row whose disputing side needs nothing stated keeps qualifiedRowResult's wording.
+ */
+export function qualifiedRowText(row: unknown, ri: RowIndependence): string {
+  const status = String((row as { status?: unknown }).status);
+  const disputeSideClean = ri.disputeSlots.length === 0 || (ri.dispute.kind === "independent" && ri.bothSides.length === 0);
+  if (isAgreementStatus(status) && ri.support.kind !== "independent" && disputeSideClean) return qualifiedRowResult(row, ri.support);
+  const parts = [
+    ri.supportSlots.length ? sideClause(ri.supportSlots.length, "support", ri.support, ri.supportVoices) : "no panel slot supports it",
+    ...(ri.disputeSlots.length ? [sideClause(ri.disputeSlots.length, "dispute", ri.dispute, ri.disputeVoices)] : []),
+    ...(ri.bothSides.length && ri.supportSlots.length && ri.disputeSlots.length ? [`${ri.bothSides.join("; ")} answered slots on both sides, so this is not a disagreement between independent models`] : []),
+  ];
+  return `recorded as ${ANY_STATUS_WORD[status]}: ${parts.join("; ")}`;
+}
+
+/** The heading of such a row: a qualified consensus / majority heading, else the status label counted by panel slot. */
+export function qualifiedRowHeading<B extends string>(status: unknown, ri: RowIndependence, baseLabel: B): QualifiedStatusHeading | `${B} (counted by panel slot)` {
+  if (ri.support.kind !== "independent") {
+    const h = qualifiedStatusHeading(status, ri.support);
+    if (h) return h;
+  }
+  return `${baseLabel} (counted by panel slot)` as `${B} (counted by panel slot)`;
+}
+
+/** Who supports / disputes such a row, each executing model once; null for a side whose execution is not recorded. */
+export function qualifiedSideVoices(ri: RowIndependence, side: "support" | "dispute"): string[] | null {
+  const t = side === "support" ? ri.support : ri.dispute;
+  const voices = side === "support" ? ri.supportVoices : ri.disputeVoices;
+  return t.kind === "unverified" || voices.length === 0 ? null : voices;
+}
+
+/** A stored count note ("all 4 models that listed this claim mark it contested") in a run whose slots are not independent. */
+export const COUNTED_BY_PANEL_SLOT = "(counted by panel slot)";
+
+/** The run's slots as a whole: null when every slot is its own recorded executing model, or without the run's rows. */
+export function runIndependence(provenance: readonly RunModelProvenanceFacts[] | null | undefined): QualifiedIndependence | null {
+  if (!Array.isArray(provenance)) return null;
+  const t = adaptiveTopIndependence(null, provenance);
+  return t.kind === "independent" ? null : t;
+}
+
+/**
+ * The run's independence as a surface shows it: the qualified view's verdict when the surface holds that view (never
+ * re-judged), else the run's own rows. Null — the surface renders as before — for an independent run or without rows.
+ */
+export function shownRunIndependence(report: unknown, provenance: readonly RunModelProvenanceFacts[] | null | undefined): QualifiedIndependence | null {
+  const q = independenceQualification(report);
+  return q ? q.run : runIndependence(provenance);
+}
+
+// ─── Run-level wording shared by the summary bar, banner, lists, map and exports (c16) ───────────────────────────────
+
+/** A slot-counted list figure in a run whose slots are not independent ("Consensus claims (counted by panel slot)"). */
+export function slotCountedLabel(label: string): string {
+  return `${label} ${COUNTED_BY_PANEL_SLOT}`;
+}
+
+/** The summary-bar field of a schema-derived level in a run whose slots are not independent (never "Strong consensus"). */
+export const SLOT_AGREEMENT_FIELD = "Agreement by panel slot";
+export const SLOT_AGREEMENT_WORD: Readonly<Record<"strong" | "moderate" | "weak" | "split" | "unscored", string>> = {
+  strong: "High (panel slots, not independent models)",
+  moderate: "Moderate (panel slots, not independent models)",
+  weak: "Low (panel slots, not independent models)",
+  split: "Split (panel slots)",
+  unscored: "Not scored",
+};
+
+/** The diagnostics' homogeneity badge, in place of "Unusually uniform agreement", for a run whose slots are not independent. */
+export function uniformityBadge(run: QualifiedIndependence): { label: string; title: string } {
+  return run.kind === "unverified"
+    ? { label: "Unusually uniform responses (model independence unverified)", title: "Which models answered this run's slots is not recorded, so uniform responses are not shown as agreement between independent models." }
+    : { label: "Unusually uniform responses across panel slots (not independent agreement)", title: `In this run ${run.repeated.join("; ")} answered several slots, so uniform responses across them are not agreement between independent models.` };
+}
+
+/** "(raised by 3 models)" for an item whose raising slots are not independent executing models. */
+export function raisedByText(slots: readonly string[], provenance: readonly RunModelProvenanceFacts[] | null | undefined): string | null {
+  const t = adaptiveTopIndependence(unique(slots), provenance);
+  if (t.kind === "independent") return null;
+  const n = unique(slots).length;
+  if (t.kind === "unverified") return `(raised by ${slotsText(n)}; model independence unverified)`;
+  return `(raised by ${slotsText(n)}, answered by ${t.voices.length} independent model${t.voices.length === 1 ? "" : "s"}: ${t.voices.join("; ")})`;
+}
+
+/**
+ * An agreement-map row's count line ("2 of 5 agree · 1 dispute") in a run whose slots are not independent: counted as
+ * panel slots, and — when the row's own positioned slots are not independent (`ri`) — with their independent models.
+ */
+export function slotAgreementLabel(agree: number, dispute: number, silent: number, total: number, ri: RowIndependence | null): string {
+  const parts = [`${agree} of ${slotsText(total)} agree`];
+  if (dispute > 0) parts.push(`${dispute} dispute${dispute === 1 ? "s" : ""}`);
+  if (silent > 0) parts.push(`${silent} silent`);
+  if (!ri) return parts.join(" · ");
+  if (ri.t.kind === "unverified") parts.push("model independence unverified");
+  else {
+    const m = ri.t.voices.length;
+    parts.push(`${m} independent model${m === 1 ? "" : "s"}${ri.bothSides.length && agree > 0 && dispute > 0 ? ` (${ri.bothSides.join("; ")} on both sides)` : ""}`);
+  }
+  return parts.join(" · ");
+}
+
+/**
+ * The stored panel verdict ("5/5 models converge on “…”; certainty 100%; gate: pass.") when its top claim is not
+ * supported by independent executing models: the claim with its computed result, then the stored certainty and gate.
+ * A verdict in any other format is followed by what it counts. Never recomputed.
+ */
+export function qualifiedPanelVerdict(stored: string, result: string, joined: boolean, run: QualifiedIndependence | null): string {
+  const m = /^(\d+)\/(\d+) models converge on ([\s\S]+?); (certainty [\s\S]*)$/.exec(stored);
+  if (m && joined) return `Top finding ${m[3]} — ${result}; ${m[4]}`;
+  if (m) return `${m[1]}/${m[2]} panel slots converge on ${m[3]} (${result}); ${m[4]}`;
+  return run ? `${stored} (${runScopeQualifier(run)})` : stored;
+}
+
+/** The stored pass next step names "the top consensus claim": a qualified top is not one. */
+export const QUALIFIED_TOP_NEXT_STEP = "Use this synthesis as a starting point — spot-check the top finding against one primary source before acting on it.";
+export const STORED_TOP_CONSENSUS_NEXT_STEP = VERDICT_NEXT_STEPS.pass[0];
+
 /** The heading of a consensus / majority row whose supporting slots are not independent executing models. */
 export type QualifiedStatusHeading =
   | `${"Consensus" | "Majority support"} (model independence unverified)`
@@ -228,8 +417,8 @@ export function runIndependenceNote(run: QualifiedIndependence): string {
 /** Follows a legacy report's stored answer string, which names the slots that support each claim. */
 export function answerIndependenceNote(run: QualifiedIndependence): string {
   return run.kind === "unverified"
-    ? "The models named here are panel slots: which models answered them is not recorded (model independence unverified)."
-    : `The models named here are panel slots: in this run ${run.repeated.join("; ")} answered several slots, so they are not all independent models.`;
+    ? "The models named and counted here are panel slots: which models answered them is not recorded (model independence unverified)."
+    : `The models named and counted here are panel slots: in this run ${run.repeated.join("; ")} answered several slots, so they are not all independent models.`;
 }
 
 /**
@@ -241,6 +430,16 @@ export function sharePanelPhrase(run: QualifiedIndependence | null): string | nu
   if (!run) return null;
   if (run.kind === "unverified") return "an AI panel (model independence unverified: which models answered is not recorded)";
   return run.voices.length < 2 ? `an AI panel whose responding slots were all answered by one model, ${run.voices[0] ?? SUBSTITUTE_MODEL_FALLBACK}` : null;
+}
+
+/**
+ * A row result in X's length budget, for a run whose slots are not independent executing models: the stored status
+ * word, then what the count is of — never a slot count presented as models, never cut mid-qualification.
+ */
+export function shortRunCountedResult(storedResult: string, run: QualifiedIndependence): string {
+  const status = /^([a-z][a-z ]*):/i.exec(storedResult)?.[1] ?? "recorded";
+  const what = run.kind === "unverified" ? "model independence unverified" : run.voices.length < 2 ? "one model answered every slot" : `${run.voices.length} independent models`;
+  return `${status} (counted by panel slot; ${what})`;
 }
 
 /** sharePanelPhrase in X's length budget. */
@@ -291,11 +490,11 @@ export function independenceQualification(report: unknown): IndependenceQualific
   return ((report as Record<symbol, unknown>)[QUALIFICATION] as IndependenceQualification | undefined) ?? null;
 }
 
-/** A stored row whose claimText equals `claim` exactly, when exactly one row has that text and it is consensus / majority. */
-function joinAgreementRow(rows: readonly unknown[] | null, claim: unknown): unknown | null {
+/** A stored row whose claimText equals `claim` exactly, when exactly one row has that text and its status is one of `statuses`. */
+function joinRow(rows: readonly unknown[] | null, claim: unknown, statuses: readonly string[]): unknown | null {
   if (!rows || typeof claim !== "string") return null;
   const same = rows.filter((r) => !!r && typeof r === "object" && (r as { claimText?: unknown }).claimText === claim);
-  return same.length === 1 && isAgreementStatus((same[0] as { status?: unknown }).status) ? same[0] : null;
+  return same.length === 1 && statuses.includes(String((same[0] as { status?: unknown }).status)) ? same[0] : null;
 }
 
 /** A legacy "Where models agree" line: the quoted claim (synthesisReport.ts), or its bare text. */
@@ -308,13 +507,21 @@ function joinLegacyAgreeLine(rows: readonly unknown[] | null, line: string): unk
   return matches.length === 1 && isAgreementStatus((matches[0] as { status?: unknown }).status) ? matches[0] : null;
 }
 
-type Statement = { row: unknown; t: QualifiedIndependence } | { row: null; t: QualifiedIndependence } | null;
+const AGREEMENT_STATUSES = ["consensus", "majority"] as const;
+const SPLIT_STATUSES = ["split"] as const;
+
+/** One stored statement: its joined row's independence, or (unjoined) the run's. */
+type Statement = { row: unknown; ri: RowIndependence; t: QualifiedIndependence } | { row: null; ri: null; t: QualifiedIndependence } | null;
 
 /**
  * The independence-qualified view of an UNMARKED adaptive report (a marked report is qualified inside its position view,
  * positionPresentation.rowView). Returns the stored report itself — the same object — when nothing it states needs
- * qualifying or when the run's per-slot rows are not held; otherwise a copy whose agreement statements are re-worded
- * (never the stored object; nothing is recomputed: statuses, counts and claim text are read as stored).
+ * qualifying or when the run's per-slot rows are not held; otherwise a copy whose statements are re-worded (never the
+ * stored object; nothing is recomputed: statuses, counts and claim text are read as stored).
+ *
+ * Every row statement is judged (c16): consensus / majority claims, the fail gate's split answers, the caution answer's
+ * load-bearing splits, "Where models disagree", the verdict card's top and key results and the stored panel verdict —
+ * a joined row by every slot that took a position on it, an unjoined statement by the run.
  */
 export function presentIndependenceQualifiedReport<R extends AdaptiveSynthesisReportLike | null | undefined>(
   report: R,
@@ -324,21 +531,26 @@ export function presentIndependenceQualifiedReport<R extends AdaptiveSynthesisRe
   const provenance = input.provenance;
   if (!Array.isArray(provenance)) return report;
   const rows = Array.isArray(input.rows) ? input.rows : null;
-  const runT = adaptiveTopIndependence(null, provenance);
-  const run = runT.kind === "independent" ? null : runT;
+  const run = runIndependence(provenance);
   const src = report as AdaptiveSynthesisReportLike;
 
-  // One stored agreement statement (a claim's text): its joined row's qualification, else — when the run itself is not
-  // independent — the run's (the row cannot prove its supporters independent). Null: shown as stored.
-  const statementFor = (claim: unknown): Statement => {
-    const row = joinAgreementRow(rows, claim);
+  // One stored statement (a claim's text): its joined row's qualification, else — when the run itself is not
+  // independent — the run's (the row cannot prove its slots independent). Null: shown as stored.
+  const statementFor = (claim: unknown, statuses: readonly string[]): Statement => {
+    const row = joinRow(rows, claim, statuses);
     if (row) {
-      const t = rowSupportIndependence(row, provenance);
-      return t ? { row, t } : null;
+      const ri = rowIndependence(row, provenance);
+      return ri ? { row, ri, t: ri.t } : null;
     }
-    return run ? { row: null, t: run } : null;
+    return run ? { row: null, ri: null, t: run } : null;
   };
-  const qualifiedText = (stored: string, st: NonNullable<Statement>) => (st.row ? qualifiedRowResult(st.row, st.t) : `${stored} (${runScopeQualifier(st.t)})`);
+  const qualifiedText = (stored: string, st: NonNullable<Statement>) => (st.row ? qualifiedRowText(st.row, st.ri!) : `${stored} (${runScopeQualifier(st.t)})`);
+  const qualifiedNames = (stored: unknown, st: NonNullable<Statement>, side: "support" | "dispute") => {
+    if (typeof stored !== "string") return {};
+    const named = st.row ? qualifiedSideVoices(st.ri!, side) : null;
+    return { [side === "support" ? "supporters" : "disputers"]: named ? named.join("; ") : `${stored} (panel slots)` };
+  };
+  const qualifiedContested = (c: any) => (typeof c?.contested === "string" && c.contested ? { contested: `${c.contested} ${COUNTED_BY_PANEL_SLOT}` } : {});
   let anyAgreeQualified = false;
   let anyQualified = false;
   const qualifiedKinds: QualifiedIndependence[] = [];
@@ -346,41 +558,34 @@ export function presentIndependenceQualifiedReport<R extends AdaptiveSynthesisRe
     anyQualified = true;
     qualifiedKinds.push(st.t);
   };
+  /** A stored { claim, result, contested?, supporters?, disputers? } entry, qualified when its statement needs it. */
+  const entry = (c: any, statuses: readonly string[], onQualified?: () => void) => {
+    if (!c || typeof c !== "object" || typeof c.result !== "string") return c;
+    const st = statementFor(c.claim, statuses);
+    if (!st) return c;
+    mark(st);
+    onQualified?.();
+    return { ...c, result: qualifiedText(c.result, st), ...qualifiedContested(c), ...qualifiedNames(c.supporters, st, "support"), ...qualifiedNames(c.disputers, st, "dispute") };
+  };
 
   const p = src.presentation && typeof src.presentation === "object" ? src.presentation : null;
   let presentation = p;
   if (p) {
     const answer = p.answer && typeof p.answer === "object" && Array.isArray(p.answer.claims) ? p.answer : null;
-    const isAgreementAnswer = src.gate !== "fail";
-    const answerClaims = answer
-      ? answer.claims.map((c: any) => {
-          if (!isAgreementAnswer || !c || typeof c !== "object" || typeof c.result !== "string") return c;
-          const st = statementFor(c.claim);
-          if (!st) return c;
-          mark(st);
-          const supporters = st.row ? qualifiedSupporters(st.t) : null;
-          return {
-            ...c,
-            result: qualifiedText(c.result, st),
-            ...(typeof c.supporters === "string" ? { supporters: supporters ?? `${c.supporters} (panel slots)` } : supporters ? { supporters } : {}),
-          };
-        })
-      : null;
-    const agree = Array.isArray(p.agree)
-      ? p.agree.map((c: any) => {
-          if (!c || typeof c !== "object" || typeof c.result !== "string") return c;
-          const st = statementFor(c.claim);
-          if (!st) return c;
-          mark(st);
-          anyAgreeQualified = true;
-          return { ...c, result: qualifiedText(c.result, st) };
-        })
-      : null;
+    // The fail gate's answer lists the split claims; every other gate's lists consensus / majority claims (R13).
+    const answerStatuses = src.gate === "fail" ? SPLIT_STATUSES : AGREEMENT_STATUSES;
+    const answerClaims = answer ? answer.claims.map((c: any) => entry(c, answerStatuses)) : null;
+    const agree = Array.isArray(p.agree) ? p.agree.map((c: any) => entry(c, AGREEMENT_STATUSES, () => (anyAgreeQualified = true))) : null;
+    const disagree = Array.isArray(p.disagree) ? p.disagree.map((c: any) => entry(c, SPLIT_STATUSES)) : null;
+    const gate = p.verificationGate && typeof p.verificationGate === "object" ? p.verificationGate : null;
+    const unresolved = gate && Array.isArray(gate.unresolvedLoadBearing) ? gate.unresolvedLoadBearing.map((c: any) => entry(c, SPLIT_STATUSES)) : null;
     if (anyQualified) {
       presentation = {
         ...p,
         ...(answer ? { answer: { ...answer, claims: answerClaims } } : {}),
         ...(agree ? { agree } : {}),
+        ...(disagree ? { disagree } : {}),
+        ...(unresolved ? { verificationGate: { ...gate, unresolvedLoadBearing: unresolved } } : {}),
       };
     }
   }
@@ -392,35 +597,56 @@ export function presentIndependenceQualifiedReport<R extends AdaptiveSynthesisRe
     for (const line of src.whereModelsAgree) {
       if (typeof line !== "string") continue;
       const row = joinLegacyAgreeLine(rows, line);
-      const t = row ? rowSupportIndependence(row, provenance) : rows ? null : run;
+      const ri = row ? rowIndependence(row, provenance) : null;
+      const t = ri ? ri.t : rows ? null : run;
       if (!t) continue;
-      legacyAgree.set(line, row ? qualifiedRowResult(row, t) : legacyRunScopeQualifier(t));
+      legacyAgree.set(line, ri ? qualifiedRowText(row, ri) : legacyRunScopeQualifier(t));
       qualifiedKinds.push(t);
       anyQualified = true;
       anyAgreeQualified = true;
     }
   }
 
-  // The verdict card's top claim.
+  // The verdict card's top claim and key disagreement, and the stored panel verdict that names the top claim.
   const card = src.verdictCard && typeof src.verdictCard === "object" ? src.verdictCard : null;
   let verdictCard = card;
+  let panelVerdict: unknown = src.panelVerdict;
   let top: QualifiedIndependence | null = null;
   let topStatus: string | null = null;
   let topResultQualified = false;
   if (card && typeof card.topConsensus === "string" && card.topConsensus !== NO_CONSENSUS_IDENTIFIED) {
-    const st = statementFor(card.topConsensus);
+    const st = statementFor(card.topConsensus, AGREEMENT_STATUSES);
     if (st) {
-      top = st.t;
+      // The heading reads the supporting side (a genuine independent majority keeps its heading).
+      top = st.row ? (st.ri!.support.kind === "independent" ? null : st.ri!.support) : st.t;
       topStatus = st.row ? String((st.row as { status?: unknown }).status) : null;
       mark(st);
+      const next: Record<string, unknown> = { ...qualifiedContested({ contested: card.topConsensusContested }) };
+      if (typeof next.contested === "string") {
+        next.topConsensusContested = next.contested;
+      }
+      delete next.contested;
       if (typeof card.topConsensusAgreement === "string" && card.topConsensusAgreement) {
-        verdictCard = { ...card, topConsensusAgreement: qualifiedText(card.topConsensusAgreement, st) };
+        next.topConsensusAgreement = qualifiedText(card.topConsensusAgreement, st);
         topResultQualified = true;
+      }
+      // N1: the stored pass step names "the top consensus claim"; a top whose support is not independent is not one.
+      if (top && Array.isArray(card.recommendedNextSteps)) next.recommendedNextSteps = card.recommendedNextSteps.map((s: unknown) => (s === STORED_TOP_CONSENSUS_NEXT_STEP ? QUALIFIED_TOP_NEXT_STEP : s));
+      verdictCard = { ...verdictCard, ...next };
+      if (typeof src.panelVerdict === "string") {
+        panelVerdict = qualifiedPanelVerdict(src.panelVerdict, st.row ? qualifiedRowText(st.row, st.ri!) : runScopeQualifier(st.t), !!st.row, st.t);
       }
     }
   }
+  if (card && typeof card.keyDisagreement === "string" && card.keyDisagreement && typeof card.keyDisagreementAgreement === "string" && card.keyDisagreementAgreement) {
+    const st = statementFor(card.keyDisagreement, SPLIT_STATUSES);
+    if (st) {
+      mark(st);
+      verdictCard = { ...verdictCard, keyDisagreementAgreement: qualifiedText(card.keyDisagreementAgreement, st) };
+    }
+  }
 
-  // Every statement stands (independent supporters) in a run that still holds a repeated substitute model or an
+  // Every statement stands (independent slots) in a run that still holds a repeated substitute model or an
   // unrecorded execution identity: the view is returned with that verdict attached, so a surface handed it without the
   // rows (the governance card) never re-judges the top claim by the run's slots. Its text is the stored text, except
   // that a run with fewer than two independent executing models (or unrecorded execution) is never introduced as a
@@ -444,8 +670,11 @@ export function presentIndependenceQualifiedReport<R extends AdaptiveSynthesisRe
     ...src,
     ...(presentation !== p ? { presentation } : {}),
     ...(verdictCard !== card ? { verdictCard } : {}),
+    ...(panelVerdict !== src.panelVerdict ? { panelVerdict } : {}),
     ...(counted(src.certaintyAssessment) ? { certaintyAssessment: `${src.certaintyAssessment} ${note}` } : {}),
     ...(!p && typeof src.unifiedAnswer === "string" && src.unifiedAnswer ? { unifiedAnswer: `${src.unifiedAnswer} ${MODEL_INDEPENDENCE_QUALIFIER_LABEL}: ${answerIndependenceNote(noteT)}` } : {}),
+    // A legacy report whose narrative fell back stores the same answer string as its executive summary.
+    ...(!p && typeof src.executiveSummary === "string" && src.executiveSummary && src.executiveSummary === src.unifiedAnswer ? { executiveSummary: `${src.executiveSummary} ${MODEL_INDEPENDENCE_QUALIFIER_LABEL}: ${answerIndependenceNote(noteT)}` } : {}),
   };
   const headingT = run ?? qualifiedKinds[0];
   const agreeHeading = !anyAgreeQualified
@@ -463,9 +692,11 @@ export function presentIndependenceQualifiedReport<R extends AdaptiveSynthesisRe
 /** The structural slice of a stored report this view reads (types.ts AdaptiveSynthesisReport; kept loose: data is untrusted). */
 type AdaptiveSynthesisReportLike = {
   presentation?: any;
+  panelVerdict?: unknown;
   verdictCard?: any;
   whereModelsAgree?: unknown;
   unifiedAnswer?: unknown;
+  executiveSummary?: unknown;
   certaintyAssessment?: unknown;
   gate?: unknown;
 };

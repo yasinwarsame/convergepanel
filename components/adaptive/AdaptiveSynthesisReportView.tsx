@@ -94,12 +94,17 @@ import { generateVerificationMemo, downloadTextFile } from "@/lib/verification/g
 import { copyToClipboardWithFallback } from "@/lib/ui/copyFormats";
 import { useRunModelProvenance } from "./RunModelProvenanceContext";
 import {
-  groupedSupportingVoices,
+  COUNTED_BY_PANEL_SLOT,
   independenceQualification,
-  qualifiedStatusHeading,
-  rowSupportIndependence,
+  qualifiedRowHeading,
+  runIndependence,
+  qualifiedSideVoices,
+  rowIndependence,
+  slotAgreementLabel,
   topIndependencePresentation,
+  uniformityBadge,
 } from "@/lib/adaptiveSchema/verdictIndependence";
+import { useRunIndependence } from "./useRunIndependence";
 import { executingModelKey, REPEATED_SUBSTITUTE_EXCLUDED } from "@/lib/panel/independentVoices";
 import {
   buildAdaptiveSynthesisMarkdown,
@@ -136,7 +141,10 @@ const GATE_ACCENT: Record<GateTone, string> = {
  */
 export function GateBanner({ report, gate }: { report: AdaptiveSynthesisReport | null; gate: unknown }) {
   const shown = pageGateValue(report, gate);
-  return <div className={`rounded-xl border px-4 py-3 text-sm font-medium ${GATE_BANNER_STYLES[gateTone(shown)]}`}>{gateBannerText(report, shown)}</div>;
+  // A historical banner ("Verified — panel converges") asserts panel agreement: in a run whose slots are not independent
+  // executing models (or whose execution is not recorded) the gate is stated as the gate it is.
+  const runQ = useRunIndependence(report);
+  return <div className={`rounded-xl border px-4 py-3 text-sm font-medium ${GATE_BANNER_STYLES[gateTone(shown)]}`}>{gateBannerText(report, shown, { slotsNotIndependent: !!runQ })}</div>;
 }
 
 function agreementColorClass(score: number): string {
@@ -596,6 +604,8 @@ export function AgreementDisagreementMap({ claims, modelsUsed }: { claims: Align
   const position = usePositionPresentation();
   const runProvenance = useRunModelProvenance();
   if (position) return <MarkedPositionMap claims={claims} roster={position.roster} provenance={position.provenance} />;
+  // c16 (MINOR-1): in a run whose slots are not independent executing models every count here is of panel slots.
+  const slotsNotIndependent = !!runIndependence(runProvenance);
   // Coverage-1 claims (a single model's own claim, never corroborated or
   // disputed by anyone else) aren't agreement data — they're rendered
   // separately by SingleModelInsightsList below this section.
@@ -626,6 +636,9 @@ export function AgreementDisagreementMap({ claims, modelsUsed }: { claims: Align
           const isLimitedCoverage = claim.status === "limited_coverage";
           const contestedNote = describeContested(claim);
           const severity = classifyClaimSeverity(claim.claimText, undefined, agreeModels.length + disputeModels.length, isSplit);
+          // A row whose positioned slots are not independent executing models: counted as panel slots, with its
+          // independent executing models (verdictIndependence.ts). Every other row: as before.
+          const ri = rowIndependence(claim, runProvenance);
           return (
             <div
               key={claim.id}
@@ -645,14 +658,14 @@ export function AgreementDisagreementMap({ claims, modelsUsed }: { claims: Align
                   />
                 </div>
                 <span className="shrink-0 text-xs text-slate-500 whitespace-nowrap">
-                  {agreementLabel(agreeModels.length, disputeModels.length, silentModels.length, modelsUsed.length)}
+                  {ri || slotsNotIndependent ? slotAgreementLabel(agreeModels.length, disputeModels.length, silentModels.length, modelsUsed.length, ri) : agreementLabel(agreeModels.length, disputeModels.length, silentModels.length, modelsUsed.length)}
                   {claim.disagreementType ? ` · ${claim.disagreementType.replace(/_/g, " ")}` : ""}
                   {isLimitedCoverage ? " · limited coverage" : ""}
                 </span>
               </div>
               {contestedNote && (
                 <p className="text-xs text-amber-700" data-testid="contested-note">
-                  Contested: {contestedNote}
+                  Contested: {contestedNote}{ri || slotsNotIndependent ? ` ${COUNTED_BY_PANEL_SLOT}` : ""}
                 </p>
               )}
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
@@ -914,6 +927,9 @@ function CoverageGapCard({
 /** T3: a single compact strip of inline stats — never cards, per spec. */
 function DiagnosticsStrip({ diagnostics }: { diagnostics: AdaptiveSynthesisReport["diagnostics"] }) {
   const marked = !!usePositionPresentation();
+  // N2: uniform responses across slots one model answered are not agreement between independent models.
+  const runQ = useRunIndependence();
+  const uniformity = runQ ? uniformityBadge(runQ) : null;
   const citationPct = diagnostics.totalClaimCount > 0 ? diagnostics.citedClaimCount / diagnostics.totalClaimCount : null;
   const citationDanger = citationPct !== null && citationPct < CITATION_COVERAGE_DANGER_THRESHOLD;
 
@@ -936,14 +952,18 @@ function DiagnosticsStrip({ diagnostics }: { diagnostics: AdaptiveSynthesisRepor
         </TintBadge>
       )}
       {evidenceParts.length > 0 && <TintBadge tone="accent">Evidence mix: {evidenceParts.join(", ")}</TintBadge>}
-      {diagnostics.homogeneityFlag && (
+      {diagnostics.homogeneityFlag && (uniformity ? (
+        <TintBadge tone="accent" title={uniformity.title}>
+          {uniformity.label}
+        </TintBadge>
+      ) : (
         <TintBadge
           tone="accent"
           title="Models share training data — strong consensus is not independent verification."
         >
           Unusually uniform agreement
         </TintBadge>
-      )}
+      ))}
     </div>
   );
 }
@@ -1153,9 +1173,9 @@ function LoadBearingClaim({ claim }: { claim: AlignedClaim }) {
     claim.cells.filter((c): c is AlignedClaimCell => !!c && stances.includes(c.stance)).map((c) => voiceName(c.modelId));
   // A consensus / majority row whose supporting slots are not independent executing models: its qualified status and
   // each executing model once (verdictIndependence.ts). Every other row: as before.
-  const independence = rowSupportIndependence(claim, runProvenance);
-  const supports = independence ? groupedSupportingVoices(claim, runProvenance) : named(["agrees", "partial"]);
-  const disputes = named(["disputes"]);
+  const ri = rowIndependence(claim, runProvenance);
+  const supports = (ri && qualifiedSideVoices(ri, "support")) || named(["agrees", "partial"]);
+  const disputes = (ri && qualifiedSideVoices(ri, "dispute")) || named(["disputes"]);
   const who = [supports.length > 0 ? `supported by ${supports.join(", ")}` : "", disputes.length > 0 ? `disputed by ${disputes.join(", ")}` : ""].filter(Boolean);
   return (
     <>
@@ -1163,7 +1183,7 @@ function LoadBearingClaim({ claim }: { claim: AlignedClaim }) {
         {CLAIM_LABEL}: {quoteClaim(claim.claimText)}
       </span>
       <span data-source="computed" className="block text-xs text-slate-500 mt-0.5">
-        {PANEL_RESULT_LABEL}: <span className="font-medium">{(independence && qualifiedStatusHeading(claim.status, independence)) || consensusStatusLabel(claim.status)}</span>
+        {PANEL_RESULT_LABEL}: <span className="font-medium">{ri ? qualifiedRowHeading(claim.status, ri, consensusStatusLabel(claim.status)) : consensusStatusLabel(claim.status)}</span>
         {who.length > 0 ? ` (${who.join("; ")})` : ""}
       </span>
     </>

@@ -37,6 +37,8 @@ import ModelChip from "@/components/ModelChip";
 import { GateTone, gateChipText, gateTone, pageGateValue } from "@/lib/adaptiveSchema/gatePresentation";
 import { PanelCounts, ROW_COUNTS_UNAVAILABLE, SlotRowCounts, hasReadableRowBreakdown, panelCounts, readSlots, rowTypeOf, slotLabel, slotRowCounts } from "@/lib/adaptiveSchema/positionPresentation";
 import { PositionPresentationBoundary, PositionPresentationState, usePositionPresentation } from "./PositionPresentationContext";
+import { slotCountedLabel } from "@/lib/adaptiveSchema/verdictIndependence";
+import { useRunIndependence } from "./useRunIndependence";
 import { didNotRespondText, slotDidNotRespond, useRunSlotStatus } from "@/components/adaptive/RunSlotStatusContext";
 
 // Wording: gatePresentation.gateChipText (D6/D7); "neutral": an unrecognized stored gate (D8).
@@ -664,6 +666,7 @@ function ListViewBody({
   const rows = useMemo(() => alignedClaims || [], [alignedClaims]);
   const position = usePositionPresentation();
   const counts = useMemo(() => (position ? panelCounts(rows, position.roster) : null), [position, rows]);
+  const slotsNotIndependent = !!useRunIndependence(synthesisReport);
   const [sortMode, setSortMode] = useState<SortMode>("trust");
   const [expandedModels, setExpandedModels] = useState<Set<ModelId>>(new Set());
 
@@ -699,7 +702,9 @@ function ListViewBody({
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <PulseCard
-          label="Consensus claims"
+          // c16 (MINOR-1): consensus rows are counted by panel slot; in a run whose slots are not independent executing
+          // models that count is not one of independent-model consensus.
+          label={slotsNotIndependent ? slotCountedLabel("Consensus claims") : "Consensus claims"}
           value={counts ? counts.claimByStatus.consensus : consensusCount}
           onClick={() => onNavigateToSynthesis?.("agreement-disagreement-map")}
         />

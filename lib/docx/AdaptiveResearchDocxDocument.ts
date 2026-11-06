@@ -39,7 +39,7 @@ import {
   WidthType,
 } from "docx";
 import { AdaptiveResearchExportV1 } from "@/lib/adaptiveSchema/researchExport";
-import { exportPositionSafeReport } from "@/lib/adaptiveSchema/exportPositionView";
+import { exportPositionSafeReport, exportRunIndependence } from "@/lib/adaptiveSchema/exportPositionView";
 import { MARKED_GATE_LEVEL_FIELD, MARKED_GATE_LEVEL_NOTE, MARKED_GATE_LEVEL_WORD, isPositionMarked } from "@/lib/adaptiveSchema/positionPresentation";
 import { exportModelIdentityLabel, exportRunProvenanceLines, readFrozenRunProvenance } from "@/lib/adaptiveSchema/exportRunProvenance";
 import { CONSENSUS_LABELS, SOURCE_GROUNDING_LABELS } from "@/lib/adaptiveSchema/reportSummary";
@@ -201,7 +201,9 @@ function statusSummarySection(record: AdaptiveResearchExportV1): (Paragraph | Ta
   const snapshot = record.reportSnapshot;
   const modelsText = snapshot.models.map((m) => `${exportModelIdentityLabel(snapshot.runProvenance, m.modelId)}${m.ok === false ? " (failed)" : ""}`).join(", ");
   // Order 5 (Contract P, m-5): a legacy-family (gate-scored) marked report's level is its gate, labelled so.
-  if (isPositionMarked(snapshot.legacy?.synthesisReport)) {
+  // c16 (MAJOR-2): so is the level of a report whose run's slots are not independent executing models, or whose
+  // execution is not recorded (a pre-6.2b export) — never a "Strong consensus" tier.
+  if (isPositionMarked(snapshot.legacy?.synthesisReport) || exportRunIndependence(record)) {
     return [
       heading("Report status summary"),
       ...fieldGrid([
