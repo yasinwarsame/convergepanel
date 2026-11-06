@@ -31,6 +31,7 @@ import TopSummaryBar from "@/components/adaptive/TopSummaryBar";
 import { RunModelProvenanceContext } from "@/components/adaptive/RunModelProvenanceContext";
 import { buildAdaptiveSynthesisMarkdown } from "@/lib/adaptiveSchema/shareBuilders";
 import { gateBannerText } from "@/lib/adaptiveSchema/gatePresentation";
+import { rowView } from "@/lib/adaptiveSchema/positionPresentation";
 import {
   QUALIFIED_TOP_NEXT_STEP,
   STORED_TOP_CONSENSUS_NEXT_STEP,
@@ -331,6 +332,18 @@ describe("MINOR-2: non-consensus rows are stated by executing model on both side
     // The independent majority's heading and count stand.
     expect(out["ui.synthesisView"]).toContain("agreed by 3 models");
     expect(out["ui.synthesisView"]).not.toContain("Top finding (repeated substitute model");
+  });
+
+  it("marked rowView: a split row's panel-slot text is followed by its executing models (all one / partial / unverified)", () => {
+    const rec = records["generic-splits"];
+    const row = rec.alignedClaims.find((r: any) => r.claimText === "Interest rates will fall next year");
+    const roster = rec.results.map((r: any) => r.modelId);
+    const textFor = (variant: Variant) => rowView(row, roster, provenanceOf(VARIANTS[variant](scenarioRows("generic-splits")))).text;
+    const independent = textFor("independent");
+    expect(textFor("allDeepSeek")).toBe(`${independent} DeepSeek (substituting Claude, Perplexity, ChatGPT, Grok, Gemini) answered slots on both sides, so this is not a disagreement between independent models.`);
+    expect(textFor("splitNonSupp")).toBe(`${independent} These panel slots were answered by 4 independent models (DeepSeek (substituting Claude, Perplexity); ChatGPT; Grok; Gemini).`);
+    expect(textFor("unverified")).toBe(`${independent} Model independence unverified: which models answered these panel slots is not recorded.`);
+    expect(independent).not.toMatch(/independent models|unverified/);
   });
 
   it("rowIndependence judges both sides; the disputer clause is load-bearing (mutant: disputers dropped)", () => {
