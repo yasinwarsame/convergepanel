@@ -168,10 +168,16 @@ with an explicitly named service-account key file. It is a dry run unless given
 claim, refuses to GRANT to a disabled account (a revoke is allowed on one and
 never re-enables it), and writes create-only `admin_audit_logs`
 attempt/outcome rows. A revoke always revokes the target's refresh tokens
-(owner policy) and reports success only when the stored
-`tokensValidAfterTime` is proven, against a server commit time, to cover the
-claim removal; already-issued ID tokens remain valid up to about an hour on
-routes that do not check revocation. Runbook, CLI, exit codes and retry:
+(owner policy) and reports success only when Firebase acknowledged the
+revocation call AND the read-back `tokensValidAfterTime` is at or after a
+cutoff anchored on a Firestore server commit time taken after the claim
+removal. That is an observation, not proof of revocation: it ASSUMES the
+Firestore and Firebase Auth clocks differ by less than a 2 s margin, a bound
+Google does not publish. It also does not enforce current privileges: the
+SYSTEM_ADMIN bearer guards verify ID tokens without `checkRevoked`, so an
+already-issued ID token keeps `admin: true` for up to about an hour regardless
+of the revocation (session-cookie paths do check revocation); live
+enforcement is the separate S2 change. Runbook, CLI, exit codes and retry:
 `docs/operations/system-admin-claim-script.md`. The four older minting scripts
 were retired. `ADMIN_SECRET` never needs to hold a live value
 for enrollment, so the bootstrap route is not part of the enrollment story at
