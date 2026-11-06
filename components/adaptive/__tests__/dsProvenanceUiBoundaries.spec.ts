@@ -58,7 +58,10 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   // Was 6dbe9b1f924731e1417655a68f41cd232f7cd16a at 9eca1e3.
   // Review of 262ef64, B1 (claim surfaces): ONLY the claim history line (claimHistoryConsensusSuffix) and the live claim
   // payload / history item carrying modelIndependence; no provenance code. Was 3826603986f4b86b7425a8055aecc3354ab2bc24.
-  "app/page.tsx": "5bca766b6b3e3d04c9bba07aa2881e4005a14a70",
+  // Review of 0ca72b0, owner order B1 (cached claim payloads): ONLY mergeHistoryById reconciling a cached claim payload
+  // with the server row's independence and openHistoryItem reading the user's own record when a cached payload records
+  // none (lib/verification/cachedClaimProvenance.ts); no provenance code. Was 5bca766b6b3e3d04c9bba07aa2881e4005a14a70.
+  "app/page.tsx": "736663e85981f6da7e6a46a55554ea9ad0cc1a20",
   "firestore.rules": "2fb80a11bfa6c55fe94e0438a980a3b0794aeafd",
 };
 

@@ -9,7 +9,7 @@ import { StructuredSynthesis } from "@/lib/synthesis/structuredSchema";
 import { VerificationGateResult } from "@/lib/verificationGate/verificationGate";
 import { classifyGrounding, GroundingResult } from "./sourceGrounding";
 import { independentVoiceCount, type ExecutingIdentityRow } from "@/lib/panel/executingVoiceLabel";
-import type { ClientSynthesisRow } from "@/lib/panel/independentVoices";
+import { rowsRecordExecutionIdentity, type ClientSynthesisRow } from "@/lib/panel/independentVoices";
 import { classifyDisagreementAgainstRows, rowsCollapsed } from "@/lib/panel/storedDisagreementIndependence";
 
 /**
@@ -39,7 +39,8 @@ export const NO_CROSS_MODEL_COMPARISON_TEXT = "No cross-model comparison: fewer 
  * positions come from two or more slots that collapse to fewer than two independent executing models (e.g. ChatGPT and
  * Claude both answered by DeepSeek) is one model's positions, and an item naming fewer than two slots (or none) in a run
  * where some slots collapsed cannot be attributed to independent models — neither is kept. In a run whose usable slots
- * are all independent models every item is kept, as before. Without rows nothing is inferred (only the raw-key rule).
+ * are all independent models every item is kept, as before. Without rows nothing is inferred (only the raw-key rule);
+ * rows that do not record execution identity (`rowsRecordExecutionIdentity`) prove no item cross-model (none kept).
  * Order preserved; never mutates its input.
  */
 export function crossModelDisagreements<T extends { positionsByModel?: Record<string, string> | null }>(
@@ -54,6 +55,9 @@ export function crossModelDisagreements<T extends { positionsByModel?: Record<st
       return slots.length < 2 || independentVoiceCount(slots, rows) >= 2;
     });
   }
+  // Rows that do not record which model executed (the gate's `executionProvenanceUnverified`): no item can be shown to
+  // be between independent models — the queue's "independence_unverified" for a run without persisted identity.
+  if (!rowsRecordExecutionIdentity(rows)) return [];
   const ctx = liveRunContext(rows);
   return items.filter((d) => classifyDisagreementAgainstRows(d, ctx) === "cross_model");
 }
@@ -69,7 +73,8 @@ function liveRunContext(rows: readonly ExecutingIdentityRow[]) {
  * governance queue applies (`classifyDisagreementAgainstRows`): in a run with ≥ 2 independent executing models where
  * some slots collapsed onto one executing model, an item naming fewer than two attributable slots (or none). They are
  * neither a disagreement between models nor repeated output from one model, and the gate states them under their own
- * reason (`INDEPENDENCE_UNVERIFIED_DISAGREEMENTS_REASON`). Empty when `crossModel` is false (every item is then one
+ * reason (`INDEPENDENCE_UNVERIFIED_DISAGREEMENTS_REASON`). Rows that do not record execution identity
+ * (`rowsRecordExecutionIdentity`) make every item one of unknown independence. Empty when `crossModel` is false (every item is then one
  * model's — the run has fewer than two independent models) or without rows (nothing is inferred). Order preserved;
  * never mutates its input.
  */
@@ -79,6 +84,7 @@ export function independenceUnverifiedDisagreements<T extends { positionsByModel
   crossModel: boolean
 ): T[] {
   if (!crossModel || !items || !rows) return [];
+  if (!rowsRecordExecutionIdentity(rows)) return [...items];
   const ctx = liveRunContext(rows);
   return items.filter((d) => classifyDisagreementAgainstRows(d, ctx) === "independence_unverified");
 }

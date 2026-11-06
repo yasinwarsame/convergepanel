@@ -254,6 +254,12 @@ describe("NIT n4: unknown execution provenance through PanelSynthesisView (behav
       expect(text).not.toContain(NON_INDEPENDENT_DISAGREEMENTS_REASON);
       expect(text).not.toContain(SINGLE_MODEL_UNCERTAIN_CLAIMS_REASON);
     }
+    // No item is presented as a disagreement between models (the queue's rule for a run without persisted identity).
+    expect(crossModelDisagreements([SAME, GENUINE], rows, true)).toEqual([]);
+    expect(independenceUnverifiedDisagreements([SAME, GENUINE], rows, true)).toEqual([SAME, GENUINE]);
+    const verdictSection = md.slice(md.indexOf("## Panel Verdict"));
+    expect(verdictSection).not.toContain("Key disagreement");
+    expect(nodeText(r.root)).not.toMatch(/models split/);
   });
 
   it("rowsRecordExecutionIdentity: empty / missing rows record nothing", () => {
