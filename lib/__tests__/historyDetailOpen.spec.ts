@@ -272,10 +272,18 @@ describe("rejected and failed reads", () => {
     expect(p.st).toMatchObject({ loadingId: null, claim: { verificationId: "B" }, claimInput: "claim B" });
   });
 
-  it("signed out, no cached claim: nothing to read, no indicator, nothing presented", async () => {
+  it("signed out, no cached claim: nothing to read, no indicator (not even while it resolves), nothing presented", async () => {
     const p = page();
-    await p.openClaim("A", undefined, null);
-    expect(p.st).toMatchObject({ loadingId: null, claim: null, claimInput: "title A" });
+    const a = deferred<{ ok?: boolean; payload?: VideoVerificationClientPayload }>();
+    const doneA = p.openVideo("A", () => a.promise);
+    const doneB = p.openClaim("B", undefined, null);
+    // Synchronously: B replaced A's indicator with its own — none, as B reads nothing.
+    expect(p.st.loadingId).toBeNull();
+    await doneB;
+    expect(p.st).toMatchObject({ loadingId: null, claim: null, claimInput: "title B" });
+    a.resolve({ ok: true, payload: video("A") });
+    await doneA;
+    expect(p.st).toMatchObject({ loadingId: null, video: null });
   });
 });
 
