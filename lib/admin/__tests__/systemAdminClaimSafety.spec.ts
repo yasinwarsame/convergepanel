@@ -591,6 +591,15 @@ describe("session revocation evidence — server clock only", () => {
     ] as const)("fails closed (no call): %s", (_l, r0, uid, now) => {
       expect(checkPreCallCutoff(r0 as never, uid, now).decision).toBe("refuse_unusable");
     });
+    it("a non-object never passes as a record, even when a prototype carries the target uid", () => {
+      const protos = [String.prototype, Number.prototype, Boolean.prototype] as unknown as Record<string, unknown>[];
+      for (const p of protos) p.uid = UID;
+      try {
+        for (const v of [UID, 0, 1, true]) expect(checkPreCallCutoff(v as never, UID, at(T0)).decision).toBe("refuse_unusable");
+      } finally {
+        for (const p of protos) delete p.uid;
+      }
+    });
   });
   it("the anchor must be a well-formed server time STRICTLY later than the attempt row's commit time", () => {
     const attempt = { seconds: T0, nanoseconds: 500 };
