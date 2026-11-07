@@ -1323,6 +1323,27 @@ describe("R3 MAJOR: the revocation cutoff is observed against a SERVER-anchored 
       expect(evidenceOf(r).preCallCheck.decision).toBe("refuse_unusable");
     });
 
+    it("a lowering visible ONLY against the fresh pre-call value is still detected (stored ahead, then lowered before the read-back, still above the pre-run value)", async () => {
+      const w = adminWorld(0);
+      const d = storedDuringWait(w, deps(w), 3600);
+      const orig = d.auth.getUser;
+      let n = 0;
+      d.auth.getUser = async (uid) => {
+        // 1 pre-run, 2 operator, 3 fresh pre-call, 4 read-back: lower by 10 s just before the read-back.
+        if (++n === 4) {
+          const s0 = secs(w.users.get(TARGET)!.tokensValidAfterTime!);
+          w.users.get(TARGET)!.tokensValidAfterTime = new Date((s0 - 10) * 1000).toUTCString();
+        }
+        return orig(uid);
+      };
+      const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), d);
+      const ev = evidenceOf(r);
+      expect(secs(ev.tokensValidAfterTimeAfter)).toBeGreaterThan(secs(BEFORE_TVA));
+      expect(ev.tokensValidAfterTimeLowerThanBefore).toBe(true);
+      expect([r.exitCode, r.code]).toEqual([4, "stored_cutoff_ahead"]);
+      expect(r.failureDetails.map((x) => x.split(":")[0])).toEqual(["stored_cutoff_ahead", "revocation_cutoff_lowered"]);
+    });
+
     it("stored-ahead on a run that also fails at the outcome row => exit 3 (3 > 4), with the review fact kept", async () => {
       const w = adminWorld(0);
       w.fail.outcome = true;
