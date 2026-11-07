@@ -783,3 +783,58 @@ describe("G4: identifier scan (no confirmation, outcome, status or actionType id
     expect(page).toContain("{auditActionTypeLabel(log.actionType)}");
   });
 });
+
+/**
+ * PR #295 residuals (2a48a5d register N1–N4): the runbook states what the code
+ * does on a re-run whose claim was already absent, the read-back identity
+ * check, the absent-after-present refusal, and the carried label limitation
+ * (exit 3 or 4, never 0).
+ */
+describe("PR #295 residuals: runbook statements match the code", () => {
+  const RUNBOOK = "docs/operations/system-admin-claim-script.md";
+  const exitRow = (n: string) => {
+    const row = read(RUNBOOK).split("\n").find((l) => l.startsWith(`| \`${n}\` |`));
+    if (!row) throw new Error(`exit row ${n} not found`);
+    return row;
+  };
+
+  it("N4: the exit-4 row no longer says the claim write was always made; it names the skipped_already_absent case", () => {
+    const row4 = exitRow("4");
+    expect(row4).not.toContain("The claim and role writes of the run were made");
+    expect(row4).toContain('`claimWrite: "skipped_already_absent"`: no claim write was made');
+  });
+
+  it("N4: no doc says the claim and role writes of the run 'stand' or 'were made' without the already-absent qualifier", () => {
+    for (const f of [RUNBOOK, "docs/technical-documentation.md"]) {
+      const t = read(f).replace(/\s+/g, " ");
+      expect({ f, hit: /the claim and role writes (of the run )?(were made|stand|already made)/i.test(t) }).toEqual({ f, hit: false });
+    }
+  });
+
+  it("nit 7: every 're-applies a claim' statement carries 'already in place'", () => {
+    for (const f of [RUNBOOK, "docs/technical-documentation.md"]) {
+      const t = read(f).replace(/\s+/g, " ");
+      const bare = t.match(/re-applies a claim(?! already in place)/g) ?? [];
+      expect({ f, bare }).toEqual({ f, bare: [] });
+    }
+    expect(RERUN_GUIDANCE).toContain("never re-applies a claim already in place");
+  });
+
+  it("N1/N2: the runbook documents the absent-after-present refusal and the read-back identity check", () => {
+    const t = read(RUNBOOK).replace(/\s+/g, " ");
+    expect(t).toContain("NO `tokensValidAfterTime` when the pre-run read of the same run had a value");
+    expect(t).toContain("(When both reads have no value, the call proceeds.)");
+    expect(t).toContain('a record for a different account, one without a `uid`, or no record is `verification_failed`');
+    expect(t).toContain("never `applied`, never `CUTOFF_OBSERVED`");
+  });
+
+  it("N3 (carried): the label limitation is documented with exit 3 or exit 4, never 0", () => {
+    const t = read(RUNBOOK).replace(/\s+/g, " ");
+    const a = t.indexOf("**Known limitation (label only).**");
+    expect(a).toBeGreaterThan(0);
+    const para = t.slice(a, t.indexOf("**Concurrency, other callers and residuals**", a));
+    expect(para).toContain("The exit is never 0");
+    expect(para).toContain("exit 3 `sessions_revoke_unverified` when S is below the server-anchored cutoff");
+    expect(para).toContain("exit 4 `revocation_cutoff_lowered` when S is at or after the cutoff but below V");
+  });
+});
