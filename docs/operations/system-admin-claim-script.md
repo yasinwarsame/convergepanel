@@ -39,16 +39,20 @@ npm run admin:set-system-admin-claim -- \
 ```
 
 - **No defaults.** No default project, no default user, no default operation.
-- **Every revoke requests session revocation.** Owner policy: an executed
-  revoke that gets past the attempt audit row calls `revokeRefreshTokens` for
-  the target, with no opt-out. That call is a REQUEST: it can fail or throw
+- **Every revoke requests session revocation (owner policy, amended).** An
+  executed revoke that gets past the attempt audit row and the operator clock
+  check calls `revokeRefreshTokens` for the target, with no opt-out, **unless
+  a fresh read immediately before the call shows the stored
+  `tokensValidAfterTime` is later than the value the call would write** (see
+  "Lowered cutoffs"). That call is a REQUEST: it can fail or throw
   (`sessions_revoke_failed`, exit 3; a thrown call is an unknown outcome, not
   a confirmed no-op), and even an acknowledged call has the limited effect
   described under "Revocation and sessions". The call OVERWRITES the stored
-  `validSince` with the operator's clock, so it is not monotonic: see
-  "Backward cutoff moves". The former
-  `--revoke-sessions=yes|no` flag was removed and is refused (`unknown_flag`)
-  with a message saying that every executed revoke requests revocation.
+  `validSince` with the operator's clock (overwrite-only; no compare-and-set
+  exists): see "Lowered cutoffs". There is no flag that overrides the
+  fresh-read check. The former `--revoke-sessions=yes|no` flag was removed and
+  is refused (`unknown_flag`) with a message saying that every executed revoke
+  requests revocation.
 - **Credentials:** only the `--credentials` key file. The tool never loads
   `.env.local` and never reads credential environment variables. The file must
   not be a symbolic link (`credentials_file_symlink`), and it is opened once
@@ -73,19 +77,22 @@ npm run admin:set-system-admin-claim -- \
   prints the current claims, the intended claims, the per-key diff and the exact
   confirmation string, and writes nothing to Firebase. On a revoke it also
   prints the `Sessions:` line, which describes the REQUEST and its limits, not
-  an effect: `revokeRefreshTokens` will be requested, the request can fail, it
-  overwrites `validSince` with this machine's clock (sync it first), and it
-  does not end already-issued ID tokens and is not a sign-out from every
-  device.
+  an effect: `revokeRefreshTokens` will be requested (unless the fresh
+  pre-call read shows a stored cutoff later than this machine's clock), the
+  request can fail, it overwrites `validSince` with this machine's clock (sync
+  it first; the run stops before any claim write if this clock is more than
+  2 s off Firestore server time), and it does not end already-issued ID tokens
+  and is not a sign-out from every device.
 - **Typed confirmation** binds operation, project and UID (and, for revoke, the
-  mandatory session-revocation request):
+  mandatory revocation request):
   - grant: `grant:admin:true:<project>:<uid>`
-  - revoke: `revoke:admin:removed:sessions-revoked:<project>:<uid>`
-  The `sessions-revoked` part names the mandatory request; it does not assert
-  any effect on sessions. The revoke string is the same for a re-run whose
-  claim is already absent (see "Retry"), so re-running the exact same command
-  is always accepted. The retired `sessions-yes` / `sessions-no` strings are
-  refused (`confirmation_mismatch`).
+  - revoke: `revoke:admin:removed:revocation-requested:<project>:<uid>`
+  The `revocation-requested` part names the mandatory request; it asserts no
+  effect on sessions. The revoke string is the same for a re-run whose claim
+  is already absent (see "Retry"), so re-running the exact same command is
+  always accepted. The retired forms `revoke:admin:removed:sessions-revoked:…`,
+  `…:sessions-yes:…` and `…:sessions-no:…` are refused
+  (`confirmation_mismatch`, with a note that the form is retired).
 - **Target:** UID only (`[A-Za-z0-9_-]{1,128}`). Refused if missing or if the
   returned record has a different UID. **Grant** is refused when
   `disabled !== false` (a disabled account is never granted admin). **Revoke**
@@ -203,7 +210,7 @@ example into a checkout), nothing is written (`RESULT FILE NOT WRITTEN`, the
 run's own exit code is kept; 0 becomes 1) and the empty 0600 file is left
 where it now is. The file contains UIDs, claims, the MASKED target, operator
 and credential emails (`run.targetEmailMasked`, never the full target email),
-the session-revocation evidence and the request id, never key material or
+the session-revocation observations and the request id, never key material or
 tokens. Do not commit it. (The audit rows in Firestore carry the full operator
 and target emails, as the existing admin audit rows do.)
 
@@ -219,31 +226,50 @@ Both are created with `.doc(id).create()` (create-only):
    (`audit_attempt_failed`, exit 3): the create may have landed before the
    error, so the row may or may not exist. It is never reported as "nothing
    written".
+   **Operator clock check (G3).** The tool reads this machine's clock just
+   before the create call and just after it returns. The attempt row's
+   Firestore commit time must satisfy
+   `local before − 2 s ≤ commit ≤ local after + 2 s` (request latency widens
+   the window; it is measured, not assumed). Otherwise — or when the commit
+   time is unusable, or the clock stepped backward across the call — the run
+   stops with exit 3 `operator_clock_out_of_tolerance`: NO claim, role or
+   revocation call is made, only the outcome row is written, and the claim is
+   untouched. Sync the clock (NTP) and re-run. This compares the operator
+   clock with Firestore's, so it rests on the same cross-service assumption as
+   (c) below; it never measures Firebase Auth's clock. It applies to grant and
+   revoke alike.
 2. Claim write (skipped on a revoke whose claim is already absent), then the
    `users/{uid}.role` mirror (`admin` / `user`; display only). On revoke the
    role write is ALSO the server-time anchor (see "What a revoke reports"),
    so it is written on every revoke, re-runs included. Then — on EVERY
-   revoke — a short wait (only when an anchor was taken; about 3.5–4.5 s)
-   and the `revokeRefreshTokens` request.
+   revoke — a short wait (only when an anchor was taken; about 3.5–4.5 s),
+   a FRESH read of the target's Auth record (G2, immediately before the
+   call), and the `revokeRefreshTokens` request unless that read shows a
+   stored `tokensValidAfterTime` later than the value the call would write
+   (exit 4 `stored_cutoff_ahead`, no call) or the read fails (exit 3
+   `pre_call_read_failed`, no call — never a fallback to the earlier read or
+   an assumed value). The claim and role writes already made are kept and
+   reported: they reduce privilege.
    A failed claim write skips the role write. On a GRANT it also means no
    revocation (a grant never revokes). On a REVOKE the revocation is STILL
-   requested, without the wait: `setCustomUserClaims` may have applied
-   server-side before it threw. That request is not guaranteed to narrow
-   access: without the wait it stamps `validSince` from the operator's
-   clock immediately, and from a slow clock it can LOWER a value an earlier
-   revoke stored, so that the revocation check stops rejecting sessions the
-   earlier revoke had excluded (see "Backward cutoff moves"; recorded, not
-   prevented). The run
+   requested (after the fresh pre-call read), without the wait:
+   `setCustomUserClaims` may have applied server-side before it threw. That
+   request is not guaranteed to narrow access: without the wait it stamps
+   `validSince` from the operator's clock immediately; the fresh read refuses
+   a value lower than the stored one, but another writer inside the run
+   window can still lower it (see "Lowered cutoffs"). The run
    stays INCOMPLETE (`mint_failed`, exit 3) because the claim write is
    unconfirmed and no anchor was taken; the result and the outcome row record
-   `sessionRevocationEvidence.claimWrite: "unconfirmed"` and whether the
+   `sessionRevocationObservations.claimWrite: "unconfirmed"` and whether the
    revocation call was acknowledged, plus a `sessions_revoke_unverified`
    detail when it was acknowledged or a `sessions_revoke_failed` detail when
    it failed. A failed role write does NOT skip the revocation either, and that
    run is INCOMPLETE too.
 3. Read-back of the Auth record and `users/{uid}.role`; for revoke, the
    server's `tokensValidAfterTime` is compared with the server-anchored
-   cutoff (an observation under a clock assumption, not proof — see below).
+   cutoff (an observation under a clock assumption, not proof — see below)
+   and with every value known earlier in the run (a lower read-back is
+   `revocation_cutoff_lowered`).
 4. `system-admin-claim:<requestId>:outcome` with the read-back state and
    `metadata.outcome`. A read that fails is never replaced by a snapshot: the
    unread field is `null` (`after.customClaims: null` / `after.usersDocRole:
@@ -261,37 +287,53 @@ user-details page lists `actionType`) cannot be misread:
 |---|---|---|---|
 | attempt (every run) | `SYSTEM_ADMIN_CLAIM_ATTEMPT` | `false` | the INTENDED state (`afterSemantics: "intended-not-applied"`) |
 | outcome `applied` (grant) | `GRANT_SYSTEM_ADMIN_CLAIM` | `true` | read-back |
-| outcome `applied` (revoke) | `REVOKE_SYSTEM_ADMIN_CLAIM` | `true` | read-back |
-| outcome `claim_already_absent_sessions_revoked` | `REVOKE_SYSTEM_ADMIN_SESSIONS` | `true` | read-back (no claim was written by this run) |
-| outcome `mint_failed`, `sessions_revoke_failed`, `sessions_revoke_unverified`, `users_doc_failed`, `verification_failed` | `SYSTEM_ADMIN_CLAIM_INCOMPLETE` | `false` | read-back (`afterSemantics: "read-back"`) — or, when a read-back failed, `null` for the unread field with `afterSemantics: "unknown"`: the state is UNKNOWN, not empty |
+| outcome `applied` (revoke) | `REVOKE_SYSTEM_ADMIN_CLAIM` | `true` | read-back. The name covers the claim removal read back as planned; for the session side read `metadata.sessionRevocationState` (exit 0 requires `CUTOFF_OBSERVED`) |
+| outcome `claim_already_absent_revocation_cutoff_observed` | `SYSTEM_ADMIN_REVOCATION_CUTOFF_OBSERVED` | `true` | read-back (no claim was written by this run) |
+| outcome `mint_failed`, `sessions_revoke_failed`, `sessions_revoke_unverified`, `users_doc_failed`, `verification_failed`, `operator_clock_out_of_tolerance`, `pre_call_read_failed`, `audit_outcome_missing` (exit 3) | `SYSTEM_ADMIN_CLAIM_INCOMPLETE` | `false` | read-back (`afterSemantics: "read-back"`) — or, when a read-back failed, `null` for the unread field with `afterSemantics: "unknown"`: the state is UNKNOWN, not empty |
+| outcome `revocation_cutoff_lowered`, `stored_cutoff_ahead` (exit 4, review required) | `SYSTEM_ADMIN_CLAIM_INCOMPLETE` | `false` | read-back; the claim removal may be complete — read `metadata.outcome` and the observations |
 
-The names `claim_already_absent_sessions_revoked` and
-`REVOKE_SYSTEM_ADMIN_SESSIONS` are fixed identifiers. On a completed run they
-mean (a) and (b) below: the revocation request was acknowledged and the cutoff
-was observed. They do not mean that every session of the target is invalid.
+The admin user-details page shows each of these action types with a readable
+label (the raw name is kept as the hover title). On a completed run,
+`claim_already_absent_revocation_cutoff_observed` and
+`SYSTEM_ADMIN_REVOCATION_CUTOFF_OBSERVED` mean (a) and (b) below: the
+revocation request was acknowledged and the cutoff was observed. They do not
+mean that any session of the target is invalid; effective revocation is not
+observable (`effectiveRevocation: "not_observable"` on every revoke row).
 
 A completed outcome is only ever written with a full read-back; the record
-builder downgrades a "completed" outcome without one to `verification_failed`,
-and a "completed" REVOKE outcome whose revocation call was not acknowledged or
-whose cutoff was not observed to `sessions_revoke_unverified`. Every revoke
-outcome row carries `metadata.sessionRevocationEvidence`; the result file
-carries the same as `run.sessionRevocationEvidence`. Its fields keep five
-things apart:
+builder downgrades a "completed" outcome without one to `verification_failed`
+(also an exit-4 outcome without one), a "completed" REVOKE outcome whose
+revocation call was not acknowledged or whose cutoff was not observed to
+`sessions_revoke_unverified`, then one whose read-back is lower than an
+earlier value to `revocation_cutoff_lowered`, and finally any "completed"
+REVOKE outcome whose state is not `CUTOFF_OBSERVED` to
+`sessions_revoke_unverified` (precedence 3 > 4 > 0). Every revoke outcome row
+carries `metadata.sessionRevocationObservations`,
+`metadata.sessionRevocationState` and `metadata.effectiveRevocation`; every
+revoke attempt row carries `metadata.effectiveRevocation`. The result file
+carries the same as `run.sessionRevocationObservations`,
+`run.sessionRevocationState` and `run.effectiveRevocation`. The fields keep
+these things apart:
 
 | Field | Meaning |
 |---|---|
-| `claimWrite` | `confirmed`, `unconfirmed` (the claim write threw; it may have applied), or `skipped_already_absent` |
+| `sessionRevocationState` | One of `NOT_REQUESTED` (no call: clock check, attempt-row failure, pre-call read failure, stored value ahead), `REQUESTED_UNACKNOWLEDGED` (the call threw; effect UNKNOWN), `ACKNOWLEDGED_UNOBSERVED` (acknowledged; no anchor, no read-back, or an unconfirmed claim write), `CUTOFF_NOT_REACHED` (read-back earlier than the cutoff), `CUTOFF_ANOMALY` (read-back absent or unparseable, or more than 300 s after the anchor), `CUTOFF_LOWERED` (read-back earlier than a value known earlier in the run; cause not attributable), `CUTOFF_OBSERVED`. None of them means a session was rejected. |
+| `effectiveRevocation` | Always `"not_observable"`. |
+| `claimWrite` | `confirmed`, `unconfirmed` (the claim write threw; it may have applied), `skipped_already_absent`, or `not_attempted` (stopped by the clock check) |
+| `revocationRequested` | Whether `revokeRefreshTokens` was called in this run. |
 | `revocationApiAcknowledged` | (a) `revokeRefreshTokens` returned without error. An acknowledgment from the API, nothing more. |
-| `anchorServerTime`, `marginSeconds`, `cutoff`, `tokensValidAfterTimeBefore` / `After`, `validSinceMinusAnchorSeconds`, `cutoffObserved` | (b) the observed cutoff: whether the read-back `tokensValidAfterTime` is at or after the server-anchored cutoff |
-| `tokensValidAfterTimeMovedBackward` | (f) `true` when the read-back value is earlier (whole seconds) than the value read before the run — this run's call LOWERED the stored `validSince`; `false` when it did not; `null` when either value was missing or unparseable (direction UNKNOWN, never assumed forward). See "Backward cutoff moves". |
+| `anchorServerTime`, `marginSeconds`, `cutoff`, `tokensValidAfterTimeBefore` / `After`, `validSinceMinusAnchorSeconds`, `cutoffObserved` | (b) the observed cutoff: whether the read-back `tokensValidAfterTime` is at or after the server-anchored cutoff, after an acknowledged call |
+| `preCallCheck` | G2: `read` (`read` / `failed` / `not_attempted`), the fresh `tokensValidAfterTime`, `storedSeconds` (S), `localSeconds` (V), and `decision` (`call`, `skip_stored_ahead`, `refuse_unusable`, `refuse_read_failed`, `not_reached`) |
+| `tokensValidAfterTimeLowerThanBefore` | (f) `true` when the read-back value is earlier (whole seconds) than a value known earlier in this run — the pre-run read, the fresh pre-call read, or (after an acknowledged call) the V the call was cleared to write. The cause is not attributable: this run's call, a clock step, or another writer inside the run window. `false` when not; `null` when the read-back or every earlier value was missing or unparseable (direction UNKNOWN, never assumed forward). See "Lowered cutoffs". |
 | `clockAlignmentAssumption` | (c) the cross-service clock ASSUMPTION the comparison rests on (fixed text) |
-| `currentPrivilegeEnforcement` | (d) what the revocation does NOT do for current admin privileges (fixed text) |
-| `detail` | (e) why the cutoff was not observed / the run is incomplete; `null` when observed |
+| `currentPrivilegeEnforcement` | (d) what the revocation does NOT do for current admin privileges until S2 (fixed text) |
+| `detail` | (e) every reason the run is not a clean exit 0, joined: why no call was made, why the cutoff was not observed, and any lowering text. `null` only on a clean `CUTOFF_OBSERVED`. A `CUTOFF_LOWERED` run whose cutoff WAS observed still carries the lowering text here. |
 
-(This field was named `verified` before this change; it was renamed
-`cutoffObserved` because it records an observation, not a verification of
-revocation. No outcome code or exit code changed. `tokensValidAfterTimeMovedBackward`
-was added later; it is reporting only and changes no call the tool makes.)
+(Before this change these fields were named `sessionRevocationEvidence`,
+`tokensValidAfterTimeMovedBackward`, and the completed outcomes
+`claim_already_absent_…`/`REVOKE_SYSTEM_ADMIN_…` used names that read as an
+effect on sessions. They were renamed before merge; nothing on `main` read
+the old names.)
 
 Every row also carries `metadata.requestedOperation` (`grant`/`revoke`),
 `metadata.claimWrite` (`write` / `skip_already_absent`) and
@@ -308,21 +350,29 @@ custody, not something the rules enforce.
 
 | Exit | Meaning | Database writes |
 |---|---|---|
-| `0` | Completed: `applied`, `claim_already_absent_sessions_revoked`, or a grant already in place (`no_change`). The claims read back as planned; on revoke, the revocation call was acknowledged and the cutoff was observed — under the clock assumption below, not proof of revocation, and without cutting off already-issued ID tokens. | As required by the operation (none for `no_change`). |
+| `0` | Completed: `applied`, `claim_already_absent_revocation_cutoff_observed`, or a grant already in place (`no_change`). Every observable step succeeded: the claims read back as planned; on revoke, revocation was requested and acknowledged, there is a server-time anchor, the read-back `tokensValidAfterTime` is at or after the server-anchored cutoff, and it is not lower than any value read earlier in the run (`CUTOFF_OBSERVED`). The message reads "revocation requested and acknowledged; cutoff observed … under the Firestore≈Auth clock assumption …; effective revocation not observable" — not proof of revocation, and (until S2) without cutting off already-issued ID tokens. | As required by the operation (none for `no_change`). |
 | `2` | Refused, or dry run (the default). Also an unexpected error raised before any write call. | **None.** Guaranteed: exit 2 is only returned before the first write call (the attempt audit row included) is issued; the result file records `writeAttempted: false`. |
-| `3` | A write call was issued and the operation is INCOMPLETE: `audit_attempt_failed` (attempt row outcome unknown), `mint_failed`, `sessions_revoke_failed`, `sessions_revoke_unverified`, `users_doc_failed`, `verification_failed`, `audit_outcome_missing`, or an unexpected error after a write call. | Unknown / partial. Inspect the read-back in the result file. On a revoke, a failed or thrown revocation call is an UNKNOWN outcome, not a confirmed no-op. Re-running the same command is how an incomplete run is finished; it never re-applies a claim or changes another claim, but a revoke re-run calls `revokeRefreshTokens` again — sync the clock first (see "Retry" and "Backward cutoff moves"). |
+| `3` | A write call was issued and the operation is INCOMPLETE: `audit_attempt_failed` (attempt row outcome unknown), `operator_clock_out_of_tolerance` (no claim, role or revocation call), `mint_failed`, `pre_call_read_failed` (no revocation call), `sessions_revoke_failed`, `sessions_revoke_unverified`, `users_doc_failed`, `verification_failed`, `audit_outcome_missing`, or an unexpected error after a write call. | Unknown / partial. Inspect the read-back in the result file. On a revoke, a failed or thrown revocation call is an UNKNOWN outcome, not a confirmed no-op. Re-running the same command is how an incomplete run is finished; it never re-applies a claim or changes another claim, but a revoke re-run calls `revokeRefreshTokens` again (unless the fresh pre-call read shows a stored value ahead) — sync the clock first (see "Retry" and "Lowered cutoffs"). |
+| `4` | REVIEW REQUIRED — do not re-run blindly, do not treat as done: `revocation_cutoff_lowered` (the read-back is lower than a value known earlier in the run, any cause) or `stored_cutoff_ahead` (the fresh pre-call read showed a stored value later than the value the call would write, so the call was NOT made). The row records `completed: false`; the message carries the review guidance, not the re-run guidance. | The claim and role writes of the run were made and read back (claim removal may be complete). On `stored_cutoff_ahead` no revocation call was made. |
 | `1` | The result file could not be written after an otherwise exit-0 run. | As for exit 0. |
+
+**Precedence 3 > 4 > 0.** A run that is incomplete for an exit-3 reason stays
+exit 3 even when it also observed a lowering or a stored value ahead; the
+review fact is still recorded (failure details, `sessionRevocationState:
+"CUTOFF_LOWERED"`, and the message names it). Exit 4 is never mapped to 0 or
+3, and a result-file failure turns only exit 0 into 1 (exit 4 stays 4).
 
 A dry run exits 2, not 0: it completed nothing. The one exit-0 run without
 `--execute` is a GRANT whose claim is already in place (`no_change`): there
 is nothing to do, so it reports done with or without `--execute` and writes
-nothing. Scripts that wrap the tool must treat only `0` as "done".
+nothing. Scripts that wrap the tool must treat only `0` as "done", and must
+never retry automatically on `4`.
 
 ### Retry
 
 Re-running the exact same command (same flags, same `--confirm-claim`) after
-any exit 3 is how an incomplete run is finished. What a re-run does and does
-not do:
+any exit 3 is how an incomplete run is finished. After exit 4, do NOT re-run
+first: review (see "Lowered cutoffs"). What a re-run does and does not do:
 
 - It never re-applies a claim already in place and never changes any other
   claim (grant re-run => `no_change`; a grant whose `users/{uid}.role` mirror
@@ -331,27 +381,35 @@ not do:
   `sessions_revoke_failed` — does NOT report "no change". Under the same typed
   confirmation it writes the attempt row, does NOT call the claim write,
   writes the `users/{uid}.role` mirror (the server-time anchor; the same value
-  `user` again), calls `revokeRefreshTokens` again — which OVERWRITES
-  `validSince` with the operator's clock, so from a slow clock it can move the
-  cutoff BACKWARD (see "Backward cutoff moves"; sync the clock before every
-  re-run) — compares
-  `tokensValidAfterTime` with a fresh server-anchored cutoff, and — only when
-  the call was acknowledged and the cutoff observed — writes an outcome row
-  `claim_already_absent_sessions_revoked` (`REVOKE_SYSTEM_ADMIN_SESSIONS`),
-  exit 0. If the revocation call fails or throws again it is
-  `sessions_revoke_failed`, exit 3 (outcome unknown), and the instruction is
-  the same: re-run.
+  `user` again), takes a fresh read, calls `revokeRefreshTokens` again unless
+  that read shows a stored value later than this machine's clock (exit 4
+  `stored_cutoff_ahead`) — the call OVERWRITES `validSince` with the
+  operator's clock (see "Lowered cutoffs"; sync the clock before every
+  re-run) — compares `tokensValidAfterTime` with a fresh server-anchored
+  cutoff, and — only when the call was acknowledged, the cutoff observed and
+  nothing lower than an earlier value was read back — writes an outcome row
+  `claim_already_absent_revocation_cutoff_observed`
+  (`SYSTEM_ADMIN_REVOCATION_CUTOFF_OBSERVED`), exit 0. If the revocation call
+  fails or throws again it is `sessions_revoke_failed`, exit 3 (outcome
+  unknown), and the instruction is the same: re-run.
+- `operator_clock_out_of_tolerance` means this machine's clock is more than
+  2 s (plus the measured request latency) off Firestore server time. Nothing
+  but the attempt and outcome rows was written. Sync the clock (NTP), then
+  re-run; with the same clock the re-run is refused the same way.
 - `sessions_revoke_unverified` with "earlier than the server-anchored cutoff"
-  means the operator's clock is behind server time. Re-running with the same
-  clock fails the same way (it never reports success) — and each such re-run
-  re-stamps `validSince` from that slow clock, which can LOWER the value an
-  earlier run stored. Sync the clock (NTP) first, then re-run.
-- A failure detail or WARNING "tokensValidAfterTime moved BACKWARD during this
-  run" means this run's call lowered the stored value: see "Backward cutoff
-  moves" for what that re-admits and what to do.
+  means the operator's clock is behind server time by more than the wait
+  slack (about 1.5 s) while still inside the 2 s clock check. Sync the clock
+  (NTP) first, then re-run.
+- `pre_call_read_failed`: the fresh read immediately before
+  `revokeRefreshTokens` failed (or returned an unusable record), so the call
+  was NOT made; the claim and role writes of the run stand. Re-run the same
+  command; it reads again.
+- `revocation_cutoff_lowered` or `stored_cutoff_ahead` (exit 4, or a review
+  fact inside an exit 3): see "Lowered cutoffs" for what it means and what to
+  do. Do not re-run blindly.
 - `mint_failed` on a revoke: the claim write threw, so whether `admin` was
   removed is unknown. The tool still ATTEMPTED `revokeRefreshTokens`; that
-  call can itself fail. Read `sessionRevocationEvidence`:
+  call can itself fail. Read `sessionRevocationObservations`:
   `revocationApiAcknowledged: true` means only that Firebase acknowledged the
   call; `false` means it failed too (also recorded as a
   `sessions_revoke_failed` detail). In both cases no server-time anchor was
@@ -360,7 +418,9 @@ not do:
   session is invalid. Re-run the same command: if the removal had
   landed, the re-run is a sessions-only run (no claim write); if not, it
   writes the claim again.
-- A fast operator clock — see "Fast operator clock: recovery" below.
+- A fast operator clock — refused by the clock check before any claim write;
+  for a stored value left ahead by an earlier fast clock, see "Fast operator
+  clock: recovery" below.
 - An exit 3 whose read-back failed (`afterSemantics: "unknown"`) says nothing
   about the target's claims: read them (`scripts/check-admin-claims.js`) or
   re-run, never assume they were wiped or kept.
@@ -374,30 +434,38 @@ not do:
 
 ## Revocation and sessions (owner policy: every revoke requests revocation)
 
-Every executed revoke that gets past the attempt audit row calls
-`revokeRefreshTokens(targetUid)`: revocation is REQUESTED. The call can fail
-or throw (`sessions_revoke_failed`, exit 3); a thrown call is an UNKNOWN
+Every executed revoke that gets past the attempt audit row and the operator
+clock check calls `revokeRefreshTokens(targetUid)` — unless a fresh read
+immediately before the call shows the stored `tokensValidAfterTime` is later
+than the value the call would write — so revocation is REQUESTED. The call can
+fail or throw (`sessions_revoke_failed`, exit 3); a thrown call is an UNKNOWN
 outcome — Firebase may or may not have updated `validSince` — not a confirmed
-no-op. What the tool can say afterwards is limited, and it says it in five
-separate parts — in the success message, the result file and the outcome
-audit row:
+no-op. API acknowledgment, the observed cutoff and effective authorization are
+separate things; only the first two are observable. What the tool can say
+afterwards is limited, and it says it in separate parts — in the exit-0
+message, the result file and the outcome audit row:
 
 - **(a) API acknowledgment.** `revokeRefreshTokens` returned without error.
   That is all it means.
 - **(b) Observed cutoff.** The read-back `tokensValidAfterTime` is at or after
   a cutoff anchored on a Firestore server commit time taken after the claim
-  write returned. Below the cutoff, or no anchor, or no read-back: INCOMPLETE
-  (`sessions_revoke_unverified`, exit 3) — never success.
+  write returned, and is not lower than any value known earlier in the run.
+  Below the cutoff, or no anchor, or no read-back: INCOMPLETE
+  (`sessions_revoke_unverified`, exit 3) — never success. Lower than an
+  earlier value: `revocation_cutoff_lowered`, exit 4 — never success.
 - **(c) Clock-alignment ASSUMPTION.** The anchor is Firestore's clock;
   `tokensValidAfterTime` is judged by Firebase Auth. Google publishes no bound
   on the skew between those services. The 2 s margin is an assumption, not a
   measured or documented bound, and the skew is unbounded as far as this tool
   can know. So (b) is an observation under an assumption. **It is not proof
-  that sessions were revoked**, and the tool never reports it as such. The
-  success message reads: "revocation acknowledged; cutoff observed at/after
-  server-anchored cutoff (assumes Firestore/Auth clock skew < 2 s, unbounded)".
-- **(d) Enforcement of current admin privileges: not provided.** Today the
-  SYSTEM_ADMIN bearer guards call `verifyIdToken` WITHOUT `checkRevoked`
+  that sessions were revoked**, and the tool never reports it as such:
+  effective revocation is not observable (`effectiveRevocation:
+  "not_observable"` on every revoke row). The exit-0 message reads:
+  "revocation requested and acknowledged; cutoff observed at or after the
+  server-anchored cutoff under the Firestore≈Auth clock assumption (skew < 2 s
+  assumed, unbounded); effective revocation not observable".
+- **(d) Enforcement of current admin privileges: not provided (until S2).**
+  Today the SYSTEM_ADMIN bearer guards call `verifyIdToken` WITHOUT `checkRevoked`
   (`lib/firebase/auth-helpers.ts:56` `verifyAdminToken`, `:321`
   `checkIsAdminFromToken`, `lib/firebase/adminAuth.ts:43` `getRequestUser`,
   `app/api/admin/access/route.ts:37`). An already-issued ID token therefore
@@ -408,8 +476,9 @@ audit row:
   privileges on each request is S2 (live admin authorization in route
   guards), a separate future change; this tool does not do it.
 - **(e) Incomplete outcomes.** Anything short of (a)+(b) is exit 3 with the
-  reason in `sessionRevocationEvidence.detail` and `failureDetails`. Re-run
-  the same command (see "Retry").
+  reason in `sessionRevocationObservations.detail` and `failureDetails`. Re-run
+  the same command (see "Retry"). An observed lowering or a stored value ahead
+  is exit 4 (review required; see "Lowered cutoffs").
 
 ### What a revoke reports (and why not "the value advanced")
 
@@ -417,8 +486,9 @@ audit row:
 firebase-admin 12.7.0 `revokeRefreshTokens` sends
 `validSince: Math.floor(new Date().getTime() / 1000)`
 (`node_modules/firebase-admin/lib/auth/auth-api-request.js:1253-1263`) to
-`accounts:update`; Auth stores it as `tokensValidAfterTime`
-(`lib/auth/user-record.js:367-371`, whole seconds). The Admin SDK rejects a
+`accounts:update`, which has no precondition and no compare-and-set; Auth
+stores it and the SDK reports it as `tokensValidAfterTime`, a UTC string with
+whole-second resolution (`lib/auth/user-record.js:35-46`, `:366-371`). The Admin SDK rejects a
 session cookie, or an ID token checked with `checkRevoked`, when its
 `auth_time` (whole seconds) is strictly earlier than that value
 (`lib/auth/base-auth.js:966-972`); the refresh-token exchange runs in Google's
@@ -443,7 +513,7 @@ claim write returned. Sources considered:
 | HTTP `Date` header of the Identity Toolkit response | Rejected. Whole seconds only, and the SDK's public API does not expose response headers (`invokeRequestHandler` returns the body); reading it needs internal APIs. |
 | Auth `metadata.lastRefreshTime` / `lastSignInTime` | Rejected. They describe the user's own activity, not "now"; they need not move during the run. |
 | `DocumentSnapshot.readTime` of a read | Not used. Server-assigned, but its relation to request arrival is less clearly specified than a commit timestamp. |
-| Setting `validSince` explicitly | Not used. `auth.updateUser(uid, { validSince })` reaches the same `accounts:update` RPC (`validSince` is whitelisted at `auth-api-request.js:314`) but is NOT part of the typed public `UpdateRequest`, and a future SDK could drop the key silently (`validateCreateEditRequest` deletes unknown keys). It could also LOWER an existing value — as `revokeRefreshTokens` itself can (see "Backward cutoff moves"). The public, documented `revokeRefreshTokens` is used and its result is read back instead. |
+| Setting `validSince` explicitly | Not used. `auth.updateUser(uid, { validSince })` reaches the same `accounts:update` RPC (`validSince` is whitelisted at `auth-api-request.js:314`) but is NOT part of the typed public `UpdateRequest`, and a future SDK could drop the key silently (`validateCreateEditRequest` deletes unknown keys). It could also LOWER an existing value — as `revokeRefreshTokens` itself can (see "Lowered cutoffs"). The public, documented `revokeRefreshTokens` is used and its result is read back instead. |
 
 **The check.**
 `cutoff = anchor whole seconds + 1 + 2` (Unix seconds). The `+1` covers the
@@ -453,24 +523,27 @@ Firestore and Firebase Auth servers (assumption (c): no published bound).
 Before calling `revokeRefreshTokens` the tool waits
 until an accurate operator clock would be about 1.5 s past the cutoff (a
 timer, not a clock reading: it only sets how far behind an operator clock may
-be and still pass; it is never evidence). It then reads the Auth record back
-and reports the cutoff observed only when `tokensValidAfterTime >= cutoff`.
-The local clock is never compared with anything.
+be and still pass; it is never evidence). It then takes the fresh pre-call
+read (G2), calls, reads the Auth record back and reports the cutoff observed
+only when `tokensValidAfterTime >= cutoff`. The local clock IS compared with
+Firestore's in two places, both under assumption (c): the clock check around
+the attempt row (G3), and V in the pre-call check (G2). It is never compared
+with Firebase Auth's own clock, which is not observable.
 
-- **Slow operator clock** (more than about 1.5 s behind): `validSince` lands
-  below the cutoff, the run is `sessions_revoke_unverified` (exit 3) with a
-  message naming the likely cause. Sync the clock and re-run; a re-run with
-  the same clock fails the same way.
-- **Fast operator clock:** `validSince` lands in the future relative to the
-  server. It is still at or after the cutoff, so the cutoff is observed and
-  the run completes. Assumed (not documented by Google, not verifiable
-  offline) that Auth stores the value as sent; the effect is
-  over-revocation: wherever revocation is checked, any session the target
-  starts before that instant is rejected too (for the refresh-token exchange,
-  under the assumed same rule), so the target may have to sign
-  in again repeatedly, or be unable to stay signed in, until then. When it is
-  more than 300 s ahead the success message says so and points at the
-  recovery below.
+- **Operator clock more than 2 s off** (plus the measured request latency),
+  either direction: refused by the clock check before any claim write
+  (`operator_clock_out_of_tolerance`, exit 3; no claim, role or revocation
+  call). Sync the clock (NTP) and re-run.
+- **Slow operator clock inside the check** (about 1.5–2 s behind):
+  `validSince` can land below the cutoff, the run is
+  `sessions_revoke_unverified` (exit 3) with a message naming the likely
+  cause. Sync the clock and re-run.
+- **Fast operator clock inside the check** (up to about 2 s ahead):
+  `validSince` lands up to about 2 s in the future relative to the server;
+  the cutoff is observed. A read-back more than 300 s after the anchor cannot
+  come from a clock that passed the check: it is `CUTOFF_ANOMALY`,
+  `sessions_revoke_unverified`, exit 3 (another writer or a clock step is the
+  likely source).
 - **No anchor** (role write failed, returned no time, or a time not later
   than the attempt row's): the revocation is still attempted, then reported
   `sessions_revoke_unverified` — validSince came from the local clock and no
@@ -481,91 +554,115 @@ The local clock is never compared with anything.
 - **Read-back missing or failed:** `sessions_revoke_unverified` (plus
   `verification_failed` when the Auth read itself failed).
 
-**Fast operator clock: recovery.** Sync this machine's clock (NTP) and re-run
-the SAME revoke command. Checked against the code: because the `admin` claim
-is already absent, the re-run is a sessions-only run — it writes a new attempt
-row, does NOT write claims, writes the `users/{uid}.role` mirror (a fresh
-anchor), waits, calls `revokeRefreshTokens` (which stamps `validSince` from the
-now-synced clock) and reads back. If Auth stores the value as sent — the same
-assumption as above; `accounts:update` accepts a lower `validSince`, see the
-`updateUser` row in the table above — `tokensValidAfterTime` moves back to
-about the current time, ending the lock-out, and the run completes as
-`claim_already_absent_sessions_revoked` without the "operator clock is ahead"
-note. If the note is still printed, Auth did not lower the value: the
-lock-out lasts until that time passes. The re-run also requests revocation
-again, as every revoke does: if the call is acknowledged, a session the target
-did manage to start is rejected wherever revocation is checked only when its
-`auth_time` is earlier than the new `validSince`. Because the recovery LOWERS
-the stored value, it is a backward cutoff move: the run still completes
-(exit 0, cutoff observed) but records
-`tokensValidAfterTimeMovedBackward: true` and prints
-"WARNING (not a clean success): tokensValidAfterTime moved BACKWARD during
-this run ..." — expected for this recovery, and the reason the next section
-exists.
-(`lib/admin/__tests__/systemAdminClaimExecution.spec.ts`, "FAST-clock lock-out
-recovery", models this under the stored-as-sent assumption.)
+**Fast operator clock: recovery.** The clock check now refuses a fast
+operator clock before any claim write, so this tool no longer stamps a far
+future `validSince`. A stored value that is already far ahead (stamped by an
+earlier version of this tool, by another writer, or by a clock step) locks
+the target out wherever revocation is checked until that time passes. A
+re-run of the same revoke from a synced clock does NOT lower it: the fresh
+pre-call read shows the stored value later than the value the call would
+write, so `revokeRefreshTokens` is NOT called and the run ends exit 4
+`stored_cutoff_ahead` (the claim and role writes of the run stand). Lowering
+a stored cutoff on purpose is not something this tool does: there is no mode
+or flag for it. It needs an owner-approved recovery policy with its own
+authorization record and audit design (deferred). Until then, treat the
+lock-out as lasting until the stored time passes, and escalate to the owner.
+(`lib/admin/__tests__/systemAdminClaimExecution.spec.ts`, "G2: fresh pre-call
+read", pins that a stored value ahead is never overwritten by this tool.)
 
-### Backward cutoff moves (unresolved risk, recorded, not prevented)
+### Lowered cutoffs (unresolved risk; narrowed for this tool only)
 
 **The fact.** `revokeRefreshTokens` sends `validSince` = the caller's local
 clock (`auth-api-request.js:1253-1263`) and Auth stores it. It OVERWRITES the
-stored value; it does not keep the later of the two. A revocation request is
-therefore not monotonic: a later call from a slower clock LOWERS
-`tokensValidAfterTime`, and wherever revocation is checked (session cookies;
-the refresh-token exchange, assumed) the check stops rejecting any session
-whose `auth_time` lies between the new and the old value — including sessions
-an earlier revoke had excluded. A session cookie minted while the target still
-held `admin: true` carries that claim; if its `auth_time` falls in that
-interval it passes `verifySessionCookie(cookie, true)` again. This tool does
-not prevent this, and no algorithm change was made to prevent it (there is no
-"never lower" guard).
+stored value; it does not keep the later of the two. The Auth API is
+overwrite-only (`accounts:update`, no precondition, no compare-and-set), so
+no caller's write is conditioned on the stored value. A later call from a
+slower clock LOWERS `tokensValidAfterTime`, and wherever revocation is checked
+(session cookies; the refresh-token exchange, assumed) the check stops
+rejecting any session whose `auth_time` lies between the new and the old value
+— including sessions an earlier revoke had excluded. A session cookie minted
+while the target still held `admin: true` carries that claim; if its
+`auth_time` falls in that interval it passes `verifySessionCookie(cookie,
+true)` again.
+
+**Owner policy (amended, D-2a).** "Every revoke calls `revokeRefreshTokens`"
+now reads: every revoke calls `revokeRefreshTokens` unless a fresh read
+immediately before the call shows the stored `tokensValidAfterTime` is later
+than the value the call would write. In whole seconds: `S` = the stored value
+floored to seconds, `V = floor(Date.now() / 1000)` read just before the call;
+if `V < S` the call is **not made** (exit 4 `stored_cutoff_ahead`). `V == S`
+calls (it rewrites the same value). There is no override flag. A skipped call
+loses no coverage — every session with `auth_time < S` is already rejected
+wherever revocation is checked, a superset of `< V` — but a stored value ahead
+of a clock-checked local time is an anomaly someone must review, hence exit 4.
+If the fresh read fails, the call is not made either (exit 3
+`pre_call_read_failed`; never a fallback to the earlier read or an assumed
+value).
+
+**What this tool does.** This tool refuses to write a value lower than the
+one it reads immediately before the call, and reports any lowering it
+observes within its own run. Nothing more is claimed: the cutoff stays
+overwrite-only for every other caller.
+
+**What the tool reports** (`sessionRevocationObservations` in the result file
+and the outcome row; tests in
+`lib/admin/__tests__/systemAdminClaimExecution.spec.ts`, "G1 grid", "G2",
+"G3", "concurrency"):
+
+- `tokensValidAfterTimeLowerThanBefore` compares the read-back value with every
+  value known earlier in the run: `tokensValidAfterTimeBefore` (pre-run),
+  `preCallCheck.tokensValidAfterTime` (fresh pre-call read) and, after an
+  acknowledged call, `preCallCheck.localSeconds` (V; the SDK stamps V or later
+  on a clock that does not step backward).
+- Lower read-back on an otherwise complete run: exit 4
+  `revocation_cutoff_lowered`, `sessionRevocationState: "CUTOFF_LOWERED"`,
+  `completed: false`. Cause not attributable (this run's call, a clock step,
+  or another writer inside the run window).
+- Lower read-back on a run that is already incomplete (below the cutoff, no
+  anchor, claim write threw, outcome row missing): exit 3 with the exit-3
+  code; the `revocation_cutoff_lowered` detail and the `CUTOFF_LOWERED` state
+  are recorded as well.
+- A run whose read-back failed, or with no usable earlier value, records
+  `null`: the direction is UNKNOWN.
+
+**Concurrency, other callers and residuals** (no global property is claimed;
+each mechanism narrows only this tool's own contribution):
+
+| Writer / interleaving | Effect | Residual (documented, not closed) |
+|---|---|---|
+| This tool, slow operator clock | The clock check stops the run before the claim write when the attempt row's commit time is outside `[local before − 2 s, local after + 2 s]`; the pre-call check refuses `V < S`. | The Firestore≈Auth clock assumption (no documented bound). |
+| This tool, fast operator clock | The clock check stops the run before the claim write. | Same assumption. |
+| Two operators of this tool on the same target, interleaved | Each run's fresh read sees the other's committed stamp, so a lower stamp is refused. Between one run's fresh read and its call the other run may write (a window of milliseconds); a run whose read-back comes after the other's lower write reports `CUTOFF_LOWERED`, exit 4. The run whose own call did the overwriting cannot see it. | Detection only for the overlap. Rule: one operator at a time per target (no lock exists). |
+| Firebase console, another Admin SDK caller, a future server-side revoke, a password change (Firebase documents that these revoke refresh tokens; whether that rewrites `validSince`, and from which clock, is UNKNOWN) | Inside the run window: detected by the read-back as `CUTOFF_LOWERED` (cause not attributable). Outside the window: invisible to the tool. | A later lowering by anyone is not detected; no monitor exists. |
+| SDK clock read after V | The SDK reads the clock milliseconds after V, so it writes V or V+1 on a clock that does not step. | A backward clock step between the check and the call is caught by the read-back (`CUTOFF_LOWERED`). |
+| Thrown `revokeRefreshTokens` (it may have applied) | `REQUESTED_UNACKNOWLEDGED`, exit 3. A re-run's fresh read compares against whatever is stored. | Unchanged. |
 
 **Which tool paths call `revokeRefreshTokens` more than once for a target.**
-Within one run: none — every executed revoke calls it exactly once (pinned:
-"every executed revoke calls revokeRefreshTokens EXACTLY once per run"). Across
-runs, every run is a new call that overwrites: a normal revoke; a sessions-only
-re-run (claim already absent) after `sessions_revoke_failed`,
-`sessions_revoke_unverified`, `mint_failed` or `users_doc_failed`; the
-fast-clock recovery; a second operator running the same revoke; and any other
+Within one run: none — every revoke that reaches the call calls it exactly
+once (pinned: "EXACTLY once per run"). Across runs, every run is a new call
+that overwrites (unless the fresh read refuses it): a normal revoke; a
+sessions-only re-run (claim already absent) after `sessions_revoke_failed`,
+`sessions_revoke_unverified`, `pre_call_read_failed`, `mint_failed` or
+`users_doc_failed`; a second operator running the same revoke; and any other
 Admin SDK caller (another script, the console) outside this tool.
 
-**What the tool reports today** (`sessionRevocationEvidence` in the result
-file and the outcome row; tests in
-`lib/admin/__tests__/systemAdminClaimExecution.spec.ts`, "backward cutoff
-move"):
-
-- `tokensValidAfterTimeMovedBackward` compares the read-back value with the
-  value read before the run (`tokensValidAfterTimeBefore`).
-- If the stored value was NOT ahead of this run's server-anchored cutoff (the
-  normal case: it was stamped by an earlier run or by Firebase in the past),
-  any backward move puts the new value below that cutoff, so the run is
-  ALREADY `sessions_revoke_unverified`, exit 3; the tool adds a failure detail
-  "tokensValidAfterTime moved BACKWARD during this run, from X to Y". Pinned by
-  an exhaustive grid of prior values and operator-clock offsets.
-- Runs with no anchor (role write failed, claim write threw) are exit 3
-  anyway; the backward detail is appended when the move is observed.
-- A run whose read-back failed, or whose prior value was missing, records
-  `null`: the direction is UNKNOWN.
-- The only exit-0 backward move is from a stored value AHEAD of this run's
-  cutoff (a fast-clock stamp; typically the fast-clock recovery). The new
-  value is still at or after this run's cutoff, so the interval it re-admits
-  starts after that cutoff (under the clock assumption). The run completes but
-  prints "WARNING (not a clean success)" and records the flag.
-
-**What is NOT covered.** (1) The tool sees only its own before/after pair. A
-later call — another operator, a re-run from a slow clock, any Admin SDK
-caller — can lower the value after a run reported success; that earlier
-success then describes a state that no longer holds, and nothing in the tool
-detects it. (2) A thrown `revokeRefreshTokens` call may have overwritten the
-value anyway (unknown outcome). (3) The move is judged against the
-Firestore-anchored cutoff, so the clock assumption below applies.
+**What is NOT covered.** (1) The tool sees only its own run window. A later
+call — another operator, any Admin SDK caller, the console — can lower the
+value after a run reported exit 0; that earlier exit 0 then describes a state
+that no longer holds, and nothing in the tool detects it. (2) A writer between
+this run's fresh read and its call is overwritten by this run's call and is
+not visible to this run. (3) A thrown `revokeRefreshTokens` call may have
+overwritten the value anyway (unknown outcome). (4) Every comparison with the
+Firestore-anchored cutoff rests on the clock assumption above.
 
 **What to do.** Sync the operator clock (NTP) before every revoke and every
-re-run. After any run reporting a backward move outside the intended
-fast-clock recovery, re-run the same command from a synced clock (with an accurate
-clock its new `validSince` lands a few seconds after its own, later, server
-anchor, so later than any value an accurate earlier run stored) and confirm `tokensValidAfterTimeMovedBackward:
-false` and exit 0. One operator at a time per target.
+re-run. On exit 4 (or an exit 3 carrying a `revocation_cutoff_lowered` /
+`stored_cutoff_ahead` detail): do not re-run blindly. Compare
+`tokensValidAfterTimeBefore`, `preCallCheck` and `tokensValidAfterTimeAfter`,
+find out what wrote the stored value (another operator, the console, another
+Admin SDK caller, a fast clock), and decide with the owner. A re-run from a
+synced clock does not restore a higher value that was lost. One operator at a
+time per target.
 
 **Residual risk (stated, not solved).** (1) The anchor and `validSince` come
 from two different Google services. Google publishes no cross-service clock
@@ -583,11 +680,13 @@ exchange; not the bearer ID-token paths in the table below) and only if its
 stamps from the operator's local clock. The tool compares `validSince` with a
 Firestore-anchored cutoff, never with Firebase Auth's own `auth_time` clock,
 so this coverage holds only under the unproven cross-service clock assumption
-in (1). (3) A fast operator clock over-revokes as described. (4) The
-already-issued-ID-token window below is unchanged by any of this (fact (d)
-above; S2). (5) Backward cutoff moves: any later `revokeRefreshTokens` call
-from a slower clock lowers the stored value (section above); recorded per run,
-not prevented.
+in (1). (3) A stored value ahead (an earlier fast clock or another writer)
+over-revokes until it passes; this tool does not lower it. (4) The
+already-issued-ID-token window below is unchanged by any of this until S2
+(fact (d) above). (5) Lowered cutoffs: any later `revokeRefreshTokens` call from a slower
+clock, by any caller, lowers the stored value ("Lowered cutoffs"); this tool
+refuses to write a value lower than the one it reads immediately before the
+call and reports a lowering it observes within its own run, nothing more.
 
 What that does and does not invalidate in this codebase (code at the time of
 writing; this tool does not change any route):
@@ -606,7 +705,7 @@ cross-service clock assumption in "Residual risk" above. If the revoke call
 failed or threw (`sessions_revoke_failed`, `revocationApiAcknowledged:
 false`), the outcome is UNKNOWN, not a confirmed no-op: whether Firebase
 updated `validSince` is not known. Treat every credential in this table as
-still valid; compare `sessionRevocationEvidence.tokensValidAfterTimeBefore`
+still valid; compare `sessionRevocationObservations.tokensValidAfterTimeBefore`
 with `tokensValidAfterTimeAfter` in the result file (a read-back taken after
 the call) to see whether the stored value moved; and re-run the same
 command.
@@ -616,9 +715,9 @@ command.
 | Firebase refresh tokens | Firebase Auth (on the token exchange, in Google's backend) | Only if Firebase applied the request (an acknowledged call; a thrown call's effect is unknown). ASSUMED, not observable from the Admin SDK or this tool: Firebase then refuses to mint new ID tokens from a refresh token whose session `auth_time` is earlier than the stored `validSince`, so the client loses that session on its next refresh. A session whose `auth_time` is at or after `validSince` (operator clock behind, or cross-service skew) keeps refreshing. The tool does not observe which sessions are affected. |
 | `__session` cookie (5-day Firebase session cookie, `app/api/auth/session/route.ts:37`, `:76`) | `verifySessionCookie(cookie, true)` — revocation CHECKED — at `lib/firebase/auth-helpers.ts:127` (`verifySessionCookieValue`, used by `resolveRequestIdentity` / `resolveServerComponentIdentity` / `/api/auth/session`), `lib/firebase/auth-helpers.ts:277` (`requireAdminPortalAccess` cookie fallback) and `app/api/admin/access/route.ts:41` | Only if Firebase applied the request (an acknowledged call; a thrown call's effect is unknown): on its next request, a cookie whose session `auth_time` is earlier than the stored `validSince` fails the revocation check and is rejected. This is judged on `auth_time`, not on when the cookie was minted, so a cookie for a session whose `auth_time` is at or after `validSince` still passes; whether every pre-removal cookie is covered is NOT established by the tool. There is no `verifySessionCookie(..., false)` call in `lib/` or `app/`. |
 | App-side session store | — | None exists: no `sessions` / `admin_sessions` collection grants access (searched `lib/`, `app/`, `middleware.ts`). `middleware.ts:26` only checks that a `__session` cookie is present for `/admin/*` routing; it grants no API access. Nothing else to invalidate. |
-| Already-issued ID tokens (bearer, up to about 1 hour) | `verifyIdToken(token)` WITHOUT `checkRevoked` at `lib/firebase/auth-helpers.ts:56` (`verifyAdminToken` -> `requireSystemAdminAccess`), `lib/firebase/auth-helpers.ts:273` (`requireAdminPortalAccess`), `lib/firebase/adminAuth.ts:43` (`getRequestUser` -> `requireSystemAdminBearer`), `app/api/admin/access/route.ts:37`, `lib/firebase/auth.ts:30` (`checkRevoked: false`) | **NOT invalidated.** An ID token minted while the user held `admin: true` keeps `admin: true` until it expires, and these paths do not check revocation. |
+| Already-issued ID tokens (bearer, up to about 1 hour) | `verifyIdToken(token)` WITHOUT `checkRevoked` at `lib/firebase/auth-helpers.ts:56` (`verifyAdminToken` -> `requireSystemAdminAccess`), `lib/firebase/auth-helpers.ts:273` (`requireAdminPortalAccess`), `lib/firebase/adminAuth.ts:43` (`getRequestUser` -> `requireSystemAdminBearer`), `app/api/admin/access/route.ts:37`, `lib/firebase/auth.ts:30` (`checkRevoked: false`) | **NOT invalidated (until S2).** An ID token minted while the user held `admin: true` keeps `admin: true` until it expires, and these paths do not check revocation. |
 
-**The remaining risk is already-issued ID tokens.** A refresh-token revocation
+**The remaining risk (until S2) is already-issued ID tokens.** A refresh-token revocation
 request (`revokeRefreshTokens`), even an acknowledged one, is NOT sufficient
 to cut SYSTEM_ADMIN access off immediately. Until it expires (up to about an
 hour), a revoked admin's existing ID token still passes every bearer path

@@ -86,7 +86,8 @@ function makeEnv(): Env {
       [OPERATOR, { uid: OPERATOR, email: "op@example.com", disabled: false, customClaims: { admin: true } }],
     ]),
     role: "user",
-    serverMs: Date.parse("2026-11-05T10:00:00.250Z"),
+    // Starts on a whole second so the first request id (taken from the operator clock) is stable.
+    serverMs: Date.parse("2026-11-05T10:00:00.000Z"),
     skewMs: 0,
   };
 }
@@ -119,7 +120,8 @@ function fakeIo(e: Env, over: Partial<CliIo> = {}): CliIo {
     prepareDefaultResultDir: () => ({ dir: "/tmp/convergepanel-operator", stat: { isSymlink: false, isDirectory: true, uid: 501, mode: 0o40700 } }),
     currentUid: () => 501,
     git: () => ({ sha: "deadbeef", dirty: false }),
-    nowMs: () => Date.parse("2026-11-05T10:00:00Z"),
+    // The OPERATOR clock: the clock revokeRefreshTokens stamps from (below) and the G2/G3 checks read.
+    nowMs: () => e.serverMs + e.skewMs,
     randomPart: () => "abc123",
     sleepMs: async (ms) => {
       e.serverMs += ms;
@@ -197,7 +199,8 @@ async function run(argv: string[], e = makeEnv(), opts: { env?: Record<string, s
     io: fakeIo(e, opts.io),
     firebase: fakeFactory(e, opts.project, opts.throwOn),
   });
-  const result = e.results.get(RESULT);
+  // The newest result file (its name carries the request id, taken from the operator clock).
+  const result = e.results.get(e.created[e.created.length - 1] ?? RESULT);
   return { code, e, result: result ? safeParse(result) : null, all: JSON.stringify({ out: e.out, err: e.err, results: [...e.results.values()], writes: e.writes }) };
 }
 
@@ -377,7 +380,7 @@ describe("runCli — dry run and execute end to end (fake Firebase)", () => {
     expect(r.e.err.join("\n")).not.toMatch(/command is safe|harmless|idempotent/i);
   });
 
-  describe("revoke (sessions always revoked)", () => {
+  describe("revoke (revocation always requested)", () => {
     const REVOKE_CONFIRM = expectedConfirmation({ operation: "revoke", projectId: PROJECT, targetUid: TARGET });
     const REVOKE = [
       `--confirm-project=${PROJECT}`, "--credentials=/keys/sa.json", `--target-uid=${TARGET}`, "--operation=revoke", "--allow-claim-reduction",
@@ -398,7 +401,7 @@ describe("runCli — dry run and execute end to end (fake Firebase)", () => {
       expect(e.err.join()).toContain("[unknown_flag]");
       expect([e.factoryCalls, e.created.length]).toEqual([0, 0]);
     });
-    it("execute: claim removed, others kept, refresh tokens revoked, exit 0", async () => {
+    it("execute: claim removed, others kept, refresh-token revocation requested and acknowledged, exit 0", async () => {
       const e = adminTarget();
       const r = await run([...REVOKE, "--execute", `--confirm-claim=${REVOKE_CONFIRM}`], e);
       expect(r.code).toBe(0);
@@ -418,22 +421,54 @@ describe("runCli — dry run and execute end to end (fake Firebase)", () => {
         io: fakeIo(e, { randomPart: () => "retry1" }), firebase: fakeFactory(e),
       });
       expect(r2).toBe(0);
-      const res2 = JSON.parse(e.results.get(RESULT.replace("abc123", "retry1"))!);
-      expect(res2).toMatchObject({ phase: "executed", status: "claim_already_absent_sessions_revoked", exitCode: 0, run: { claimWrite: "skip_already_absent" } });
+      expect(e.created[1]).toMatch(/_retry1\.json$/);
+      const res2 = JSON.parse(e.results.get(e.created[1])!);
+      expect(res2).toMatchObject({ phase: "executed", status: "claim_already_absent_revocation_cutoff_observed", exitCode: 0, run: { claimWrite: "skip_already_absent" } });
       expect(e.writes.filter((w) => w.startsWith("claims:")).length).toBe(claimWritesBefore);
       expect(e.writes).toContain(`revoke:${TARGET}`);
       expect(e.users.get(TARGET)!.customClaims).toEqual({ keep: 1 });
     });
-    it("SLOW operator clock: the revocation is not reported done — exit 3 sessions_revoke_unverified, evidence in the result file", async () => {
+    it("operator clock 20 s behind: refused by the G3 gate BEFORE the claim write — exit 3 operator_clock_out_of_tolerance, no claim/role/revoke call", async () => {
       const e = adminTarget();
       e.skewMs = -20_000;
       const r = await run([...REVOKE, "--execute", `--confirm-claim=${REVOKE_CONFIRM}`], e);
       expect(r.code).toBe(3);
       expect(r.result).toMatchObject({
-        phase: "executed", status: "incomplete", code: "sessions_revoke_unverified", exitCode: 3, writeAttempted: true,
-        run: { sessionRevocationEvidence: { cutoffObserved: false, anchorSource: "firestore-commit-time:users/{uid}.role", marginSeconds: 2 } },
+        phase: "executed", status: "incomplete", code: "operator_clock_out_of_tolerance", exitCode: 3, writeAttempted: true,
+        run: { sessionRevocationState: "NOT_REQUESTED", effectiveRevocation: "not_observable", sessionRevocationObservations: { claimWrite: "not_attempted", revocationRequested: false } },
       });
-      expect(e.err.join("\n")).toMatch(/earlier than the server-anchored cutoff/);
+      expect(e.writes.filter((w) => /^(claims|role|revoke):/.test(w))).toEqual([]);
+      expect(e.users.get(TARGET)!.customClaims).toEqual({ admin: true, keep: 1 });
+      expect(e.err.join("\n")).toMatch(/operator clock is outside the 2 s tolerance/);
+    });
+    it("stored cutoff ahead of the operator clock: exit 4 review_required propagates through runCli; no revocation call; result file phase executed", async () => {
+      const e = adminTarget();
+      e.users.get(TARGET)!.tokensValidAfterTime = "Thu, 05 Nov 2026 12:00:00 GMT";
+      const r = await run([...REVOKE, "--execute", `--confirm-claim=${REVOKE_CONFIRM}`], e);
+      expect(r.code).toBe(4);
+      expect(r.result).toMatchObject({
+        phase: "executed", status: "review_required", code: "stored_cutoff_ahead", exitCode: 4,
+        run: { sessionRevocationState: "NOT_REQUESTED", sessionRevocationObservations: { preCallCheck: { decision: "skip_stored_ahead" } } },
+      });
+      expect(e.writes).not.toContain(`revoke:${TARGET}`);
+      expect(e.users.get(TARGET)!.customClaims).toEqual({ keep: 1 });
+      expect(e.err.join("\n")).toContain("[stored_cutoff_ahead] REVIEW REQUIRED");
+    });
+    it("an exit-4 run whose result file cannot be written stays exit 4 (only 0 becomes 1)", async () => {
+      const e = adminTarget();
+      e.users.get(TARGET)!.tokensValidAfterTime = "Thu, 05 Nov 2026 12:00:00 GMT";
+      const r = await run([...REVOKE, "--execute", `--confirm-claim=${REVOKE_CONFIRM}`], e, {
+        io: { createResultFile: () => ({ write: () => { throw new Error("ENOSPC"); }, close: () => undefined }) },
+      });
+      expect(r.code).toBe(4);
+      expect(e.err.join("\n")).toContain("RESULT FILE NOT WRITTEN");
+    });
+    it("the retired sessions-revoked confirmation is refused before any write (exit 2)", async () => {
+      const e = adminTarget();
+      const r = await run([...REVOKE, "--execute", `--confirm-claim=revoke:admin:removed:sessions-revoked:${PROJECT}:${TARGET}`], e);
+      expect(r.code).toBe(2);
+      expect(r.result).toMatchObject({ code: "confirmation_mismatch", writeAttempted: false });
+      expect(e.writes).toEqual([]);
     });
     it("revoke on a DISABLED target completes (exit 0) and the account stays disabled", async () => {
       const e = adminTarget();

@@ -156,7 +156,40 @@ export type PostWriteFailure =
   | "sessions_revoke_unverified"
   | "users_doc_failed"
   | "verification_failed"
-  | "audit_outcome_missing";
+  | "audit_outcome_missing"
+  /**
+   * G3: the attempt row's Firestore commit time lies outside
+   * [local clock before the create − margin, local clock after it + margin].
+   * The run stops before the claim write: no claim, role or revocation call is
+   * issued; only the attempt and outcome rows are written.
+   */
+  | "operator_clock_out_of_tolerance"
+  /**
+   * G2: the fresh Auth read required immediately before revokeRefreshTokens
+   * failed, or returned no usable record or tokensValidAfterTime. The call is
+   * NOT made (no fallback to an earlier read or an assumed value).
+   */
+  | "pre_call_read_failed";
+
+/** Every exit-3 code, for exhaustive tests and the identifier scan. */
+export const POST_WRITE_FAILURES: readonly PostWriteFailure[] = [
+  "audit_attempt_failed", "mint_failed", "sessions_revoke_failed", "sessions_revoke_unverified",
+  "users_doc_failed", "verification_failed", "audit_outcome_missing",
+  "operator_clock_out_of_tolerance", "pre_call_read_failed",
+];
+
+/**
+ * Exit 4: "review required; do not re-run blindly". Never mapped to 0 or 3.
+ * A run that is ALSO incomplete for an exit-3 reason stays exit 3 (precedence
+ * 3 > 4 > 0) and keeps the review fact in its failure details and state.
+ */
+export type ReviewRequiredOutcome =
+  /** The read-back tokensValidAfterTime is earlier than a value read earlier in this run (any cause). */
+  | "revocation_cutoff_lowered"
+  /** G2: the fresh pre-call read shows a stored value later than the one the call would write; the call was not made. */
+  | "stored_cutoff_ahead";
+
+export const REVIEW_REQUIRED_OUTCOMES: readonly ReviewRequiredOutcome[] = ["revocation_cutoff_lowered", "stored_cutoff_ahead"];
 
 export type Refusal = { ok: false; code: RefusalCode; message: string };
 
@@ -629,7 +662,7 @@ export function formatDiff(plan: ClaimPlan): string[] {
 
 /**
  * The exact typed confirmation. It binds the operation, the claim result, the
- * project and the UID (and, for revoke, the mandatory session revocation), so
+ * project and the UID (and, for revoke, the mandatory revocation REQUEST), so
  * a string copied from a rehearsal on another project or another user cannot
  * authorise this write. A revoke re-run whose claim is already absent (no
  * claim write; it requests refresh-token revocation again) uses the SAME
@@ -641,15 +674,31 @@ export function expectedConfirmation(args: {
   targetUid: string;
 }): string {
   if (args.operation === "grant") return `grant:admin:true:${args.projectId}:${args.targetUid}`;
-  return `revoke:admin:removed:sessions-revoked:${args.projectId}:${args.targetUid}`;
+  return `revoke:admin:removed:revocation-requested:${args.projectId}:${args.targetUid}`;
 }
+
+/**
+ * Retired revoke confirmation forms (prefixes before `<project>:<uid>`). They
+ * are refused with `confirmation_mismatch`; the message names the retirement.
+ * Listed here only so the refusal can say so and the identifier scan can
+ * allow-list them.
+ */
+export const RETIRED_REVOKE_CONFIRMATION_PREFIXES: readonly string[] = [
+  "revoke:admin:removed:sessions-revoked:",
+  "revoke:admin:removed:sessions-yes:",
+  "revoke:admin:removed:sessions-no:",
+];
 
 export function checkConfirmation(provided: string | null, expected: string): Refusal | null {
   if (provided === null) {
     return refuse("confirmation_missing", "Refusing: --execute requires --confirm-claim.");
   }
   if (provided !== expected) {
-    return refuse("confirmation_mismatch", `Refusing: --confirm-claim does not match. Expected exactly: ${expected}`);
+    const retired = RETIRED_REVOKE_CONFIRMATION_PREFIXES.some((p) => provided.startsWith(p));
+    return refuse(
+      "confirmation_mismatch",
+      `Refusing: --confirm-claim does not match.${retired ? " That confirmation form is retired." : ""} Expected exactly: ${expected}`,
+    );
   }
   return null;
 }
@@ -693,7 +742,7 @@ export function checkIdTokenShape(token: string): Refusal | null {
 /** Maps a verifyIdToken error to a refusal using only its code. The raw message is never used. */
 export function classifyOperatorTokenError(code: unknown): Refusal {
   if (code === "auth/id-token-revoked") {
-    return refuse("operator_token_revoked", "Refusing: the operator's sessions have been revoked. Sign in again and export a fresh token.");
+    return refuse("operator_token_revoked", "Refusing: Firebase reports the operator's ID token as revoked (auth/id-token-revoked). Sign in again and export a fresh token.");
   }
   if (code === "auth/user-disabled") {
     return refuse("operator_not_system_admin", "Refusing: the operator account is disabled.");
@@ -752,14 +801,17 @@ export function verifyReadBack(plan: ClaimPlan, readBackClaims: unknown): { ok: 
 }
 
 /**
- * SESSION REVOCATION EVIDENCE (see the runbook, "What a revoke reports").
+ * SESSION REVOCATION OBSERVATIONS (see the runbook, "What a revoke reports").
  *
  * firebase-admin's `revokeRefreshTokens(uid)` sends
  * `validSince: Math.floor(new Date().getTime() / 1000)` — the OPERATOR'S LOCAL
- * clock (firebase-admin 12.7.0, lib/auth/auth-api-request.js:1261). Auth
- * stores that value as `tokensValidAfterTime`; a session is revoked when its
- * `auth_time` (whole seconds) is strictly earlier
- * (lib/auth/base-auth.js:968-972). A slow operator clock therefore leaves
+ * clock, floored to whole seconds (firebase-admin 12.7.0,
+ * lib/auth/auth-api-request.js:1261) — to `accounts:update`, which has no
+ * precondition and no compare-and-set. Auth stores that value and reports it
+ * as `tokensValidAfterTime` (a UTC string, whole seconds;
+ * lib/auth/user-record.js:366-371). The revocation check rejects a session
+ * whose `auth_time` (whole seconds) is strictly earlier
+ * (lib/auth/base-auth.js:966-972). A slow operator clock therefore leaves
  * sessions signed in during the lag valid, and "the value advanced" says
  * nothing about coverage.
  *
@@ -776,26 +828,42 @@ export function verifyReadBack(plan: ClaimPlan, readBackClaims: unknown): { ok: 
  *   (c) ASSUMPTION, not a guarantee: the anchor comes from Firestore and
  *       `tokensValidAfterTime` is judged by Firebase Auth. Google publishes no
  *       bound on the clock skew between them; the 2 s margin ASSUMES it is
- *       smaller. The comparison is therefore not proof of session revocation.
+ *       smaller. The comparison is therefore not proof of session revocation,
+ *       and effective revocation is never observable by this tool
+ *       (`effectiveRevocation: "not_observable"` on every revoke row).
  *   (d) Enforcement of current admin privileges is NOT provided by any of
- *       this: SYSTEM_ADMIN bearer guards call verifyIdToken without
+ *       this (until S2): SYSTEM_ADMIN bearer guards call verifyIdToken without
  *       checkRevoked (lib/firebase/auth-helpers.ts verifyAdminToken,
  *       lib/firebase/adminAuth.ts getRequestUser), so an already-issued ID
  *       token keeps admin: true until it expires (up to ~1 h). Session-cookie
  *       paths (verifySessionCookie(cookie, true)) do check revocation. Live
  *       enforcement is the separate S2 change.
  *   (e) Anything else (no anchor, no read-back, below cutoff, revocation call
- *       failed, claim write unconfirmed) is INCOMPLETE (exit 3).
- *   (f) NOT MONOTONIC (unresolved risk, recorded, not prevented):
+ *       failed, claim write unconfirmed, operator clock out of tolerance,
+ *       pre-call read failed) is INCOMPLETE (exit 3).
+ *   (f) OVERWRITE-ONLY CUTOFF (unresolved risk, narrowed for this tool only):
  *       revokeRefreshTokens OVERWRITES validSince with the caller's clock; it
- *       does not keep the later of the stored and the new value. A later call
- *       from a slower clock (a re-run, a sessions-only run, another operator,
- *       any Admin SDK caller) can therefore LOWER tokensValidAfterTime and
- *       re-admit, wherever revocation is checked, sessions whose auth_time lies
- *       between the new and the old value — sessions an earlier revoke had
- *       excluded. The tool records the move (tokensValidAfterTimeMovedBackward)
- *       and never reports it as a clean success, but does not prevent it.
- * The local clock is never compared with anything.
+ *       does not keep the later of the stored and the new value, and nothing
+ *       in Firebase Auth offers a conditional write. Two things narrow THIS
+ *       tool's own contribution, and nothing else:
+ *         - G3 (checkOperatorClock): before the claim write, the attempt row's
+ *           Firestore commit time must lie within
+ *           [local before − margin, local after + margin]; otherwise the run
+ *           stops (exit 3, operator_clock_out_of_tolerance) with no claim,
+ *           role or revocation call. The local clock IS compared here, with
+ *           Firestore's, under the same cross-service assumption as (c).
+ *         - G2 (checkPreCallCutoff): immediately before the call, a fresh Auth
+ *           read gives the stored value S (whole seconds) and the local clock
+ *           gives V = floor(now / 1000). If V < S the call is not made (exit 4,
+ *           stored_cutoff_ahead). If that read fails, the call is not made
+ *           either (exit 3, pre_call_read_failed).
+ *       This tool refuses to write a value lower than the one it reads
+ *       immediately before the call, and reports any lowering it observes
+ *       within its own run (exit 4, revocation_cutoff_lowered; cause not
+ *       attributable). Another writer (another operator between the fresh
+ *       read and the call, the Firebase console, any Admin SDK caller, a later
+ *       call after the run) can still lower the stored value; outside the run
+ *       window that is invisible to the tool.
  */
 export const REVOCATION_SKEW_MARGIN_SECONDS = 2;
 
@@ -803,13 +871,42 @@ export const REVOCATION_SKEW_MARGIN_SECONDS = 2;
 export const REVOCATION_CLOCK_ASSUMPTION =
   `ASSUMPTION (unchecked by this tool): the Firestore and Firebase Auth server clocks differ by less than the ${REVOCATION_SKEW_MARGIN_SECONDS} s margin. Google publishes no bound on that skew (unbounded), so an observed cutoff is an observation under this assumption, not proof that sessions were revoked.`;
 
-/** (d) What the revocation does NOT do for current admin privileges. Printed and recorded verbatim. */
+/** (d) What the revocation does NOT do for current admin privileges (until S2). Printed and recorded verbatim. */
 export const CURRENT_PRIVILEGE_ENFORCEMENT_NOTE =
-  "Current admin privileges are NOT cut off by this: SYSTEM_ADMIN bearer guards verify ID tokens without checkRevoked, so an already-issued ID token keeps admin: true until it expires (up to about 1 hour) regardless of revocation. Session-cookie paths (verifySessionCookie with revocation checking) do reject sessions started before tokensValidAfterTime. Enforcement against current privileges awaits S2 (live admin authorization in route guards).";
+  "Current admin privileges are NOT cut off by this (until S2): SYSTEM_ADMIN bearer guards verify ID tokens without checkRevoked, so an already-issued ID token keeps admin: true until it expires (up to about 1 hour) regardless of revocation. Session-cookie paths (verifySessionCookie with revocation checking) do reject sessions started before tokensValidAfterTime. Enforcement against current privileges awaits S2 (live admin authorization in route guards).";
 
-/** (a)+(b)+(c) in one line: the success summary for a revoke. */
+/** (a)+(b)+(c) in one line: the exit-0 summary for a revoke. */
 export const REVOCATION_OBSERVED_SUMMARY =
-  `revocation acknowledged; cutoff observed at/after server-anchored cutoff (assumes Firestore/Auth clock skew < ${REVOCATION_SKEW_MARGIN_SECONDS} s, unbounded)`;
+  `revocation requested and acknowledged; cutoff observed at or after the server-anchored cutoff under the Firestore≈Auth clock assumption (skew < ${REVOCATION_SKEW_MARGIN_SECONDS} s assumed, unbounded); effective revocation not observable`;
+
+/** Every revoke row carries this fixed value: whether any session is actually rejected is never observed by the tool. */
+export const EFFECTIVE_REVOCATION = "not_observable" as const;
+
+/**
+ * The revoke's session-revocation state. API acknowledgment, the observed
+ * cutoff and effective authorization are separate facts; none of these
+ * states means a session was rejected.
+ */
+export type SessionRevocationState =
+  /** revokeRefreshTokens was not called (clock gate, attempt-row failure, pre-call read failure, stored value ahead). */
+  | "NOT_REQUESTED"
+  /** The call threw: its effect is UNKNOWN (it may have applied). */
+  | "REQUESTED_UNACKNOWLEDGED"
+  /** Acknowledged, but no anchor, no read-back, or an unconfirmed claim write: no cutoff observation. */
+  | "ACKNOWLEDGED_UNOBSERVED"
+  /** Acknowledged; read-back earlier than the server-anchored cutoff. */
+  | "CUTOFF_NOT_REACHED"
+  /** Acknowledged; read-back absent or unparseable, or implausibly far ahead of the anchor. */
+  | "CUTOFF_ANOMALY"
+  /** The read-back is earlier than a value read earlier in this run (cause not attributable). */
+  | "CUTOFF_LOWERED"
+  /** Acknowledged; anchor; read-back at or after the cutoff; not lower than the values read earlier in the run. */
+  | "CUTOFF_OBSERVED";
+
+export const SESSION_REVOCATION_STATES: readonly SessionRevocationState[] = [
+  "NOT_REQUESTED", "REQUESTED_UNACKNOWLEDGED", "ACKNOWLEDGED_UNOBSERVED", "CUTOFF_NOT_REACHED",
+  "CUTOFF_ANOMALY", "CUTOFF_LOWERED", "CUTOFF_OBSERVED",
+];
 
 /** A server timestamp (Firestore `Timestamp` shape: whole seconds + nanoseconds). */
 export type ServerTime = { seconds: number; nanoseconds: number };
@@ -825,8 +922,96 @@ function serverTimeAfter(a: ServerTime, b: ServerTime): boolean {
   return a.seconds > b.seconds || (a.seconds === b.seconds && a.nanoseconds > b.nanoseconds);
 }
 
+function serverTimeMs(t: ServerTime): number {
+  return t.seconds * 1000 + Math.floor(t.nanoseconds / 1e6);
+}
+
 export function serverTimeIso(t: ServerTime): string {
-  return new Date(t.seconds * 1000 + Math.floor(t.nanoseconds / 1e6)).toISOString();
+  return new Date(serverTimeMs(t)).toISOString();
+}
+
+/**
+ * G3 pre-write clock gate. `commit` is the attempt row's Firestore commit time;
+ * `localBeforeMs` / `localAfterMs` are this machine's clock read immediately
+ * before the create call was issued and immediately after it returned. The
+ * operator clock is accepted only when
+ *   localBeforeMs − margin ≤ commit ≤ localAfterMs + margin   (milliseconds).
+ * Request latency widens the window (it is measured, not assumed). The
+ * comparison is with Firestore's clock, so it rests on the same cross-service
+ * assumption as REVOCATION_CLOCK_ASSUMPTION; it is a tolerance check, not a
+ * measurement of Firebase Auth's clock. A commit time that is not a usable
+ * server time fails closed.
+ */
+export function checkOperatorClock(input: {
+  localBeforeMs: number;
+  localAfterMs: number;
+  commit: unknown;
+  marginSeconds: number;
+}): { ok: true } | { ok: false; detail: string } {
+  const { localBeforeMs, localAfterMs, commit, marginSeconds } = input;
+  if (!Number.isFinite(localBeforeMs) || !Number.isFinite(localAfterMs) || localAfterMs < localBeforeMs) {
+    return { ok: false, detail: "the local clock readings around the attempt row are not usable (missing, or the clock stepped backward during the call)" };
+  }
+  if (!isServerTime(commit)) {
+    return { ok: false, detail: "the attempt row returned no usable server commit time, so the operator clock could not be checked" };
+  }
+  const c = serverTimeMs(commit);
+  const m = marginSeconds * 1000;
+  if (c < localBeforeMs - m || c > localAfterMs + m) {
+    const offsetMs = c < localBeforeMs ? localBeforeMs - c : -(c - localAfterMs);
+    return {
+      ok: false,
+      detail: `the operator clock is outside the ${marginSeconds} s tolerance of Firestore server time (attempt row committed at ${serverTimeIso(commit)}; local clock ${new Date(localBeforeMs).toISOString()} before the call and ${new Date(localAfterMs).toISOString()} after it; operator clock ${offsetMs > 0 ? "ahead" : "behind"} by about ${Math.round(Math.abs(offsetMs) / 1000)} s). No claim, role or revocation call was made. Sync this machine's clock (NTP) and re-run`,
+    };
+  }
+  return { ok: true };
+}
+
+/** Whole seconds of a `tokensValidAfterTime` string, or null when absent / not a date. */
+export function tokensValidAfterSeconds(v: unknown): number | null {
+  if (typeof v !== "string") return null;
+  const ms = Date.parse(v);
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+}
+
+export type PreCallDecision =
+  | { decision: "call"; storedSeconds: number | null; localSeconds: number }
+  | { decision: "skip_stored_ahead"; storedSeconds: number; localSeconds: number; detail: string }
+  | { decision: "refuse_unusable"; storedSeconds: null; localSeconds: number | null; detail: string };
+
+/**
+ * G2 refuse-if-ahead, from a FRESH Auth read taken immediately before the
+ * call (never an earlier read, never an assumed value).
+ *   S = stored tokensValidAfterTime, whole seconds (absent = never set);
+ *   V = floor(localNowMs / 1000) — what revokeRefreshTokens would write.
+ * V < S  => skip the call (it would lower the stored value);
+ * V >= S => call (V == S rewrites the same value).
+ * A record for another uid, a non-string non-absent value, or an unparseable
+ * value cannot be compared and fails closed (no call).
+ */
+export function checkPreCallCutoff(fresh: UserRecordLike, targetUid: string, localNowMs: number): PreCallDecision {
+  if (!Number.isFinite(localNowMs)) {
+    return { decision: "refuse_unusable", storedSeconds: null, localSeconds: null, detail: "the local clock reading before the call is not usable" };
+  }
+  const localSeconds = Math.floor(localNowMs / 1000);
+  if (!fresh || fresh.uid !== targetUid) {
+    return { decision: "refuse_unusable", storedSeconds: null, localSeconds, detail: "the fresh Auth read before the call did not return the target's record" };
+  }
+  const raw: unknown = fresh.tokensValidAfterTime;
+  if (raw === undefined || raw === null) return { decision: "call", storedSeconds: null, localSeconds };
+  const storedSeconds = tokensValidAfterSeconds(raw);
+  if (storedSeconds === null) {
+    return { decision: "refuse_unusable", storedSeconds: null, localSeconds, detail: "the fresh Auth read before the call returned a tokensValidAfterTime that is not a date" };
+  }
+  if (localSeconds < storedSeconds) {
+    return {
+      decision: "skip_stored_ahead",
+      storedSeconds,
+      localSeconds,
+      detail: `the stored tokensValidAfterTime ${new Date(storedSeconds * 1000).toISOString()} (fresh read immediately before the call) is later than the value the call would write (${new Date(localSeconds * 1000).toISOString()}, this machine's clock), so revokeRefreshTokens was NOT called: it overwrites and would have lowered the stored value. A stored value ahead of a clock-checked local time is an anomaly: find out what stamped it before doing anything else`,
+    };
+  }
+  return { decision: "call", storedSeconds, localSeconds };
 }
 
 /**
@@ -861,9 +1046,9 @@ export function revocationCutoffSeconds(anchor: ServerTime): number {
 
 /**
  * Compares the server's read-back `tokensValidAfterTime` with the
- * server-anchored cutoff. Never consults the local clock. `ok` means the
- * cutoff was OBSERVED — not that revocation is proven (see
- * REVOCATION_CLOCK_ASSUMPTION).
+ * server-anchored cutoff. Never consults the local clock. `ok` means only
+ * that the cutoff was OBSERVED, under REVOCATION_CLOCK_ASSUMPTION; no session
+ * rejection is ever observed.
  */
 export function observeRevocationCutoff(
   afterTokensValidAfterTime: unknown,
@@ -890,60 +1075,104 @@ export function observeRevocationCutoff(
   return { ok: true, validSinceSeconds };
 }
 
-/**
- * (f) Whether the stored validSince moved BACKWARD across this run: read-back
- * `tokensValidAfterTime` (whole seconds) strictly earlier than the value read
- * before the run. null when either value is absent or not a date — the
- * direction is then unknown, never assumed forward. Reporting only: the tool
- * does not prevent a backward move (revokeRefreshTokens overwrites validSince).
- */
-export function validSinceMovedBackward(before: unknown, after: unknown): boolean | null {
-  if (typeof before !== "string" || typeof after !== "string") return null;
-  const b = Date.parse(before);
-  const a = Date.parse(after);
-  if (!Number.isFinite(b) || !Number.isFinite(a)) return null;
-  return Math.floor(a / 1000) < Math.floor(b / 1000);
+/** Whole seconds of an earlier value: a tokensValidAfterTime string, or already whole seconds (a safe integer). */
+function priorSeconds(v: unknown): number | null {
+  if (typeof v === "number") return Number.isSafeInteger(v) ? v : null;
+  return tokensValidAfterSeconds(v);
 }
 
-/** (f) The detail recorded and printed whenever a backward move is observed. */
-export function validSinceMovedBackwardDetail(before: string, after: string): string {
-  return `tokensValidAfterTime moved BACKWARD during this run, from ${before} to ${after}: revokeRefreshTokens overwrites validSince with the operator's local clock and does not keep the later value. Wherever revocation is checked, the check no longer rejects a session whose auth_time lies at or after ${after} and before ${before}, including one an earlier revoke had excluded. This tool does not prevent that (unresolved risk; runbook, "Backward cutoff moves")`;
+/**
+ * (f) Whether the read-back `tokensValidAfterTime` (whole seconds) is strictly
+ * earlier than ANY value known earlier in this run: the pre-run read, the
+ * fresh pre-call read, and — after an acknowledged call — the value V the call
+ * was cleared to write (the SDK stamps V or later on a clock that does not
+ * step backward). Strings are tokensValidAfterTime values; numbers are whole
+ * seconds. null when the read-back is absent or not a date, or no earlier
+ * value is usable — the direction is then UNKNOWN, never assumed forward. The
+ * cause is not attributable: this run's call, a clock step, or another writer
+ * inside the run window.
+ */
+export function validSinceLowerThanBefore(earlier: readonly unknown[], after: unknown): boolean | null {
+  const a = tokensValidAfterSeconds(after);
+  if (a === null) return null;
+  const priors = earlier.map(priorSeconds).filter((s): s is number => s !== null);
+  if (priors.length === 0) return null;
+  return a < Math.max(...priors);
 }
+
+/** The highest earlier value as a readable string (for the lowered detail), or null when none is usable. */
+export function highestEarlierValue(earlier: readonly unknown[]): string | null {
+  let best: { s: number; text: string } | null = null;
+  for (const v of earlier) {
+    const s = priorSeconds(v);
+    if (s === null) continue;
+    const text = typeof v === "string" ? v : `${new Date(s * 1000).toUTCString()} (the value this run's call was cleared to write)`;
+    if (best === null || s > best.s) best = { s, text };
+  }
+  return best ? best.text : null;
+}
+
+/** (f) The detail recorded and printed whenever a lowering is observed. Causation-neutral. */
+export function validSinceLowerThanBeforeDetail(before: string, after: string): string {
+  return `the read-back tokensValidAfterTime ${after} is earlier than ${before}, a value read earlier in this run (cause not attributable: this run's revokeRefreshTokens call, which overwrites validSince with the caller's clock, or another writer inside the run window). Wherever revocation is checked, the check no longer rejects a session whose auth_time lies at or after ${after} and before ${before}, including one an earlier revoke had excluded. Review before doing anything else (runbook, "Lowered cutoffs")`;
+}
+
+/** G2 pre-call check, as recorded. */
+export type PreCallCheck = {
+  /** "not_attempted": the run never reached the call (or the operation is not a revoke). */
+  read: "read" | "failed" | "not_attempted";
+  /** The fresh tokensValidAfterTime exactly as read (null when absent or not read). */
+  tokensValidAfterTime: string | null;
+  storedSeconds: number | null;
+  localSeconds: number | null;
+  decision: "call" | "skip_stored_ahead" | "refuse_unusable" | "refuse_read_failed" | "not_reached";
+};
 
 /**
  * Recorded in the result file and the outcome audit row of every revoke.
- * The five things a reader must keep apart are separate fields:
+ * The things a reader must keep apart are separate fields:
  * (a) revocationApiAcknowledged, (b) cutoffObserved (+ the times),
  * (c) clockAlignmentAssumption, (d) currentPrivilegeEnforcement,
- * (e) detail (why the run is incomplete, when it is).
+ * (e) detail (why the run is not exit 0, when it is not), plus the state
+ * and the fixed effectiveRevocation.
  */
-export type SessionRevocationEvidence = {
-  /** How this run handled the claim: confirmed write, write that threw (unconfirmed), or skipped (already absent). */
-  claimWrite: "confirmed" | "unconfirmed" | "skipped_already_absent";
+export type SessionRevocationObservations = {
+  /** One of SESSION_REVOCATION_STATES. Never means a session was rejected. */
+  sessionRevocationState: SessionRevocationState;
+  /** Always "not_observable": no session rejection is ever observed by the tool. */
+  effectiveRevocation: typeof EFFECTIVE_REVOCATION;
+  /** How this run handled the claim: confirmed write, write that threw (unconfirmed), skipped (already absent), or not attempted (stopped earlier). */
+  claimWrite: "confirmed" | "unconfirmed" | "skipped_already_absent" | "not_attempted";
+  /** Whether revokeRefreshTokens was called in this run. */
+  revocationRequested: boolean;
   /** (a) revokeRefreshTokens returned without error. An acknowledgment, nothing more. */
   revocationApiAcknowledged: boolean;
   anchorSource: "firestore-commit-time:users/{uid}.role";
   anchorServerTime: string | null;
   marginSeconds: number;
   cutoff: string | null;
+  /** Pre-run read (before any write). */
   tokensValidAfterTimeBefore: string | null;
+  /** G2: the fresh read immediately before the call. */
+  preCallCheck: PreCallCheck;
   tokensValidAfterTimeAfter: string | null;
   /**
-   * (f) Read-back tokensValidAfterTime (whole seconds) is EARLIER than the
-   * value read before the run: this run's revokeRefreshTokens call lowered the
-   * stored validSince (it overwrites; it does not take a max). null when
-   * either value is missing or unparseable (the move is then UNKNOWN).
+   * (f) The read-back tokensValidAfterTime (whole seconds) is EARLIER than a
+   * value read earlier in this run (pre-run or fresh pre-call). Cause not
+   * attributable: this run's call or another writer in the run window. null
+   * when the read-back or every earlier value is missing or unparseable (the
+   * direction is then UNKNOWN).
    */
-  tokensValidAfterTimeMovedBackward: boolean | null;
+  tokensValidAfterTimeLowerThanBefore: boolean | null;
   /** Read-back validSince minus the anchor, in seconds (positive = ahead of server time). */
   validSinceMinusAnchorSeconds: number | null;
-  /** (b) read-back tokensValidAfterTime >= the server-anchored cutoff. An observation, not proof. */
+  /** (b) read-back tokensValidAfterTime >= the server-anchored cutoff after an acknowledged call. An observation, not proof. */
   cutoffObserved: boolean;
   /** (c) always REVOCATION_CLOCK_ASSUMPTION. */
   clockAlignmentAssumption: string;
   /** (d) always CURRENT_PRIVILEGE_ENFORCEMENT_NOTE. */
   currentPrivilegeEnforcement: string;
-  /** (e) why the cutoff was not observed / the run is incomplete; null when observed. */
+  /** (e) why the run is not exit 0, or the observation that needs review; null on a clean CUTOFF_OBSERVED. */
   detail: string | null;
 };
 
@@ -951,29 +1180,38 @@ export type SessionRevocationEvidence = {
 // Audit record (matches lib/admin/auditLog.ts#AuditLogEntry)
 
 /**
- * actionType separates an ATTEMPT from a COMPLETED privilege change, so a row
- * listed on its own (the admin user-details page shows actionType) can never
- * be read as "admin was granted/revoked" unless the claim read-back matched:
+ * actionType separates an ATTEMPT from a COMPLETED change, so a row listed on
+ * its own (the admin user-details page shows actionType) can never be read as
+ * "admin was granted/removed" unless the claim read-back matched:
  *   - SYSTEM_ADMIN_CLAIM_ATTEMPT   every attempt row (written BEFORE any change)
- *   - GRANT_/REVOKE_SYSTEM_ADMIN_CLAIM   outcome row, claim change read back as
- *                                  planned (revoke: also revocation acknowledged
- *                                  and cutoff observed, under the clock assumption)
- *   - REVOKE_SYSTEM_ADMIN_SESSIONS outcome row, claim was already absent; this
- *                                  run only revoked sessions (acknowledged,
- *                                  cutoff observed, under the clock assumption)
- *   - SYSTEM_ADMIN_CLAIM_INCOMPLETE outcome row, anything else
+ *   - GRANT_SYSTEM_ADMIN_CLAIM     outcome row, grant read back as planned
+ *   - REVOKE_SYSTEM_ADMIN_CLAIM    outcome row, claim removal read back as
+ *                                  planned; for the session side see
+ *                                  metadata.sessionRevocationState (exit 0
+ *                                  requires CUTOFF_OBSERVED)
+ *   - SYSTEM_ADMIN_REVOCATION_CUTOFF_OBSERVED  outcome row, claim was already
+ *                                  absent; this run requested revocation, it
+ *                                  was acknowledged and the cutoff observed
+ *                                  (under the clock assumption)
+ *   - SYSTEM_ADMIN_CLAIM_INCOMPLETE outcome row, anything else (exit 3, or
+ *                                  exit 4 review required: see metadata.outcome)
  */
 export type ClaimAuditActionType =
   | "SYSTEM_ADMIN_CLAIM_ATTEMPT"
   | "GRANT_SYSTEM_ADMIN_CLAIM"
   | "REVOKE_SYSTEM_ADMIN_CLAIM"
-  | "REVOKE_SYSTEM_ADMIN_SESSIONS"
+  | "SYSTEM_ADMIN_REVOCATION_CUTOFF_OBSERVED"
   | "SYSTEM_ADMIN_CLAIM_INCOMPLETE";
+export const CLAIM_AUDIT_ACTION_TYPES: readonly ClaimAuditActionType[] = [
+  "SYSTEM_ADMIN_CLAIM_ATTEMPT", "GRANT_SYSTEM_ADMIN_CLAIM", "REVOKE_SYSTEM_ADMIN_CLAIM",
+  "SYSTEM_ADMIN_REVOCATION_CUTOFF_OBSERVED", "SYSTEM_ADMIN_CLAIM_INCOMPLETE",
+];
 export type AuthorizationMode = "operator-id-token" | "first-admin-bootstrap";
 export type AuditPhase = "attempt" | "outcome";
-/** Completed outcomes (exit 0) and incomplete ones (exit 3). */
-export type CompletedOutcome = "applied" | "claim_already_absent_sessions_revoked";
-export type AuditOutcome = CompletedOutcome | PostWriteFailure;
+/** Completed outcomes (exit 0); review-required (exit 4); incomplete (exit 3). */
+export type CompletedOutcome = "applied" | "claim_already_absent_revocation_cutoff_observed";
+export const COMPLETED_OUTCOMES: readonly CompletedOutcome[] = ["applied", "claim_already_absent_revocation_cutoff_observed"];
+export type AuditOutcome = CompletedOutcome | ReviewRequiredOutcome | PostWriteFailure;
 /** Whether a post-write read actually returned data ("failed" = threw; nothing is known). */
 export type ReadOutcome = "read" | "failed";
 export type ReadBackStatus = { customClaims: ReadOutcome; usersDocRole: ReadOutcome };
@@ -986,13 +1224,17 @@ const claimActionTypesAreAdminActionTypes: ClaimActionTypesAreAdminActionTypes =
 void claimActionTypesAreAdminActionTypes;
 
 export function isCompletedOutcome(o: AuditOutcome): o is CompletedOutcome {
-  return o === "applied" || o === "claim_already_absent_sessions_revoked";
+  return o === "applied" || o === "claim_already_absent_revocation_cutoff_observed";
+}
+
+export function isReviewRequiredOutcome(o: AuditOutcome): o is ReviewRequiredOutcome {
+  return o === "revocation_cutoff_lowered" || o === "stored_cutoff_ahead";
 }
 
 export function claimAuditActionType(phase: AuditPhase, operation: ClaimOperation, outcome?: AuditOutcome): ClaimAuditActionType {
   if (phase === "attempt") return "SYSTEM_ADMIN_CLAIM_ATTEMPT";
   if (outcome === "applied") return operation === "grant" ? "GRANT_SYSTEM_ADMIN_CLAIM" : "REVOKE_SYSTEM_ADMIN_CLAIM";
-  if (outcome === "claim_already_absent_sessions_revoked" && operation === "revoke") return "REVOKE_SYSTEM_ADMIN_SESSIONS";
+  if (outcome === "claim_already_absent_revocation_cutoff_observed" && operation === "revoke") return "SYSTEM_ADMIN_REVOCATION_CUTOFF_OBSERVED";
   return "SYSTEM_ADMIN_CLAIM_INCOMPLETE";
 }
 
@@ -1016,8 +1258,8 @@ export function buildClaimAuditRecord<TS>(input: {
   outcome?: AuditOutcome;
   /** Every failure recorded by the run, in order (not only the first). */
   outcomeDetails?: readonly string[];
-  /** Revoke outcome rows: the session-revocation evidence. */
-  sessionRevocationEvidence?: SessionRevocationEvidence | null;
+  /** Revoke outcome rows: the session-revocation observations. */
+  sessionRevocationObservations?: SessionRevocationObservations | null;
   /**
    * Outcome rows only: whether each `after` field was actually read back.
    * Missing (or any "failed") => `afterSemantics: "unknown"`; fail closed.
@@ -1058,11 +1300,13 @@ export function buildClaimAuditRecord<TS>(input: {
     gitSha: input.gitSha,
     confirmClaim: input.confirmClaim,
   };
+  // Every revoke row (attempt and outcome): effective revocation is never observed.
+  if (input.operation === "revoke") metadata.effectiveRevocation = EFFECTIVE_REVOCATION;
   // The attempt row's `after` is the INTENDED state, never evidence that it
   // was reached; only an outcome row with completed === true is. An outcome
   // row whose read-back did not fully succeed NEVER presents a snapshot: the
   // unread fields are null, afterSemantics is "unknown", and it can never be
-  // a completed outcome.
+  // a completed (or review-required) outcome.
   const readBack: ReadBackStatus | undefined = input.phase === "outcome"
     ? {
       customClaims: input.readBack?.customClaims === "read" && input.afterClaims !== null ? "read" : "failed",
@@ -1071,18 +1315,32 @@ export function buildClaimAuditRecord<TS>(input: {
     : undefined;
   const fullyRead = readBack !== undefined && readBack.customClaims === "read" && readBack.usersDocRole === "read";
   let outcome: AuditOutcome | undefined = input.phase === "outcome" ? (input.outcome ?? "verification_failed") : undefined;
-  if (outcome !== undefined && !fullyRead && isCompletedOutcome(outcome)) outcome = "verification_failed";
-  // A revoke is only ever recorded as completed when the revocation call was
-  // acknowledged AND the cutoff was observed (an observation under the clock
-  // assumption — never described as proof).
+  if (outcome !== undefined && !fullyRead && (isCompletedOutcome(outcome) || isReviewRequiredOutcome(outcome))) outcome = "verification_failed";
+  const obs = input.sessionRevocationObservations ?? null;
+  // Precedence 3 > 4 > 0. A revoke is only ever recorded as completed when the
+  // revocation call was acknowledged AND the cutoff was observed (an
+  // observation under the clock assumption — never described as proof); a
+  // missing acknowledgment / observation is exit-3 class and wins.
   if (
     outcome !== undefined && input.operation === "revoke" && isCompletedOutcome(outcome)
-    && (input.sessionRevocationEvidence?.cutoffObserved !== true || input.sessionRevocationEvidence?.revocationApiAcknowledged !== true)
+    && (obs?.cutoffObserved !== true || obs?.revocationApiAcknowledged !== true)
   ) {
     outcome = "sessions_revoke_unverified";
   }
+  // Then a lowered cutoff (exit-4 class): never a completed revoke.
+  if (
+    outcome !== undefined && input.operation === "revoke" && isCompletedOutcome(outcome)
+    && (obs?.tokensValidAfterTimeLowerThanBefore === true || obs?.sessionRevocationState === "CUTOFF_LOWERED")
+  ) {
+    outcome = "revocation_cutoff_lowered";
+  }
+  // Backstop: a completed revoke row must carry the CUTOFF_OBSERVED state.
+  if (outcome !== undefined && input.operation === "revoke" && isCompletedOutcome(outcome) && obs?.sessionRevocationState !== "CUTOFF_OBSERVED") {
+    outcome = "sessions_revoke_unverified";
+  }
   if (input.phase === "outcome" && input.operation === "revoke") {
-    metadata.sessionRevocationEvidence = input.sessionRevocationEvidence ?? null;
+    metadata.sessionRevocationObservations = obs;
+    metadata.sessionRevocationState = obs ? obs.sessionRevocationState : "NOT_REQUESTED";
   }
   metadata.completed = outcome !== undefined && isCompletedOutcome(outcome);
   metadata.afterSemantics = input.phase === "attempt" ? "intended-not-applied" : fullyRead ? "read-back" : "unknown";

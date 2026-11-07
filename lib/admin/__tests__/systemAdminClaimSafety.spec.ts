@@ -35,13 +35,21 @@ import {
   validateServiceAccountKey,
   verifyReadBack,
   observeRevocationCutoff,
-  validSinceMovedBackward,
-  validSinceMovedBackwardDetail,
+  validSinceLowerThanBefore,
+  validSinceLowerThanBeforeDetail,
+  highestEarlierValue,
+  checkOperatorClock,
+  checkPreCallCutoff,
+  isReviewRequiredOutcome,
+  COMPLETED_OUTCOMES,
+  POST_WRITE_FAILURES,
+  REVIEW_REQUIRED_OUTCOMES,
+  RETIRED_REVOKE_CONFIRMATION_PREFIXES,
   CURRENT_PRIVILEGE_ENFORCEMENT_NOTE,
   REVOCATION_CLOCK_ASSUMPTION,
   revocationCutoffSeconds,
   REVOCATION_SKEW_MARGIN_SECONDS,
-  type SessionRevocationEvidence,
+  type SessionRevocationObservations,
   type ClaimPlan,
 } from "../systemAdminClaimSafety";
 
@@ -352,9 +360,21 @@ describe("checkPlanInvariants", () => {
 describe("confirmation", () => {
   const g = expectedConfirmation({ operation: "grant", projectId: PROJECT, targetUid: UID });
   const rv = expectedConfirmation({ operation: "revoke", projectId: PROJECT, targetUid: UID });
-  it("binds operation, project and uid (and the mandatory session revocation on revoke)", () => {
+  it("binds operation, project and uid (and the mandatory revocation REQUEST on revoke; no effect is named)", () => {
     expect(g).toBe(`grant:admin:true:${PROJECT}:${UID}`);
-    expect(rv).toBe(`revoke:admin:removed:sessions-revoked:${PROJECT}:${UID}`);
+    expect(rv).toBe(`revoke:admin:removed:revocation-requested:${PROJECT}:${UID}`);
+  });
+  it.each(RETIRED_REVOKE_CONFIRMATION_PREFIXES.map((p) => [p]))("the retired form %s is refused (confirmation_mismatch) and named as retired", (prefix) => {
+    const r = checkConfirmation(`${prefix}${PROJECT}:${UID}`, rv);
+    expect(r?.code).toBe("confirmation_mismatch");
+    expect(r?.message).toContain("That confirmation form is retired.");
+    // CONTROL: an ordinary wrong string is refused without the retirement note.
+    expect(checkConfirmation(`${rv}x`, rv)?.message).not.toContain("retired");
+  });
+  it("the retired list covers sessions-revoked, sessions-yes and sessions-no", () => {
+    expect([...RETIRED_REVOKE_CONFIRMATION_PREFIXES].sort()).toEqual([
+      "revoke:admin:removed:sessions-no:", "revoke:admin:removed:sessions-revoked:", "revoke:admin:removed:sessions-yes:",
+    ]);
   });
   it("CONTROL: the exact string passes", () => {
     expect(checkConfirmation(g, g)).toBeNull();
@@ -368,6 +388,7 @@ describe("confirmation", () => {
     ["revoke string for a grant", rv],
     ["revoke: retired sessions-no string", `revoke:admin:removed:sessions-no:${PROJECT}:${UID}`],
     ["revoke: retired sessions-yes string", `revoke:admin:removed:sessions-yes:${PROJECT}:${UID}`],
+    ["revoke: retired sessions-revoked string", `revoke:admin:removed:sessions-revoked:${PROJECT}:${UID}`],
   ])("refuses confirmation_mismatch: %s", (_l, provided) => {
     const expected = _l.startsWith("revoke:") ? rv : g;
     expect(checkConfirmation(provided, expected)?.code).toBe("confirmation_mismatch");
@@ -473,23 +494,96 @@ describe("session revocation evidence — server clock only", () => {
     expect(observeRevocationCutoff("garbage", cutoff).ok).toBe(false);
     expect(observeRevocationCutoff(utc(cutoff), Number.NaN).ok).toBe(false);
   });
-  it("(f) backward move: strictly earlier whole second is true; equal/later is false; missing or unparseable is UNKNOWN (null), never forward", () => {
-    expect(validSinceMovedBackward(utc(T0), utc(T0 - 1))).toBe(true);
-    expect(validSinceMovedBackward(utc(T0 + 3600), utc(T0))).toBe(true);
-    expect(validSinceMovedBackward(utc(T0), utc(T0))).toBe(false);
-    expect(validSinceMovedBackward(utc(T0), utc(T0 + 1))).toBe(false);
-    // Sub-second differences inside one whole second are not a move (Auth stores whole seconds).
-    expect(validSinceMovedBackward(new Date(T0 * 1000 + 900).toISOString(), new Date(T0 * 1000 + 100).toISOString())).toBe(false);
-    expect(validSinceMovedBackward(null, utc(T0))).toBeNull();
-    expect(validSinceMovedBackward(utc(T0), null)).toBeNull();
-    expect(validSinceMovedBackward(undefined, undefined)).toBeNull();
-    expect(validSinceMovedBackward("garbage", utc(T0))).toBeNull();
-    expect(validSinceMovedBackward(utc(T0), "garbage")).toBeNull();
-    const d = validSinceMovedBackwardDetail(utc(T0), utc(T0 - 60));
-    expect(d).toContain(`from ${utc(T0)} to ${utc(T0 - 60)}`);
-    expect(d).toMatch(/overwrites validSince/);
-    expect(d).toMatch(/does not keep the later value/);
-    expect(d).toMatch(/This tool does not prevent that \(unresolved risk/);
+  it("(f) lowered: strictly earlier whole second than ANY earlier value is true; equal/later is false; missing or unparseable is UNKNOWN (null), never forward", () => {
+    expect(validSinceLowerThanBefore([utc(T0)], utc(T0 - 1))).toBe(true);
+    expect(validSinceLowerThanBefore([utc(T0 + 3600)], utc(T0))).toBe(true);
+    expect(validSinceLowerThanBefore([utc(T0)], utc(T0))).toBe(false);
+    expect(validSinceLowerThanBefore([utc(T0)], utc(T0 + 1))).toBe(false);
+    // Against the HIGHEST earlier value: pre-run behind, fresh pre-call ahead.
+    expect(validSinceLowerThanBefore([utc(T0 - 60), utc(T0 + 5)], utc(T0))).toBe(true);
+    expect(validSinceLowerThanBefore([utc(T0 + 5), utc(T0 - 60)], utc(T0))).toBe(true);
+    // Numbers are whole seconds (the V an acknowledged call was cleared to write).
+    expect(validSinceLowerThanBefore([utc(T0 - 60), T0], utc(T0 - 1))).toBe(true);
+    expect(validSinceLowerThanBefore([utc(T0 - 60), T0], utc(T0))).toBe(false);
+    expect(validSinceLowerThanBefore([1.5], utc(T0))).toBeNull();
+    // Sub-second differences inside one whole second are not a lowering (Auth stores whole seconds).
+    expect(validSinceLowerThanBefore([new Date(T0 * 1000 + 900).toISOString()], new Date(T0 * 1000 + 100).toISOString())).toBe(false);
+    expect(validSinceLowerThanBefore([null], utc(T0))).toBeNull();
+    expect(validSinceLowerThanBefore([], utc(T0))).toBeNull();
+    expect(validSinceLowerThanBefore([utc(T0)], null)).toBeNull();
+    expect(validSinceLowerThanBefore([undefined], undefined)).toBeNull();
+    expect(validSinceLowerThanBefore(["garbage"], utc(T0))).toBeNull();
+    expect(validSinceLowerThanBefore([utc(T0)], "garbage")).toBeNull();
+    // An unusable earlier value is ignored, not treated as zero.
+    expect(validSinceLowerThanBefore(["garbage", utc(T0)], utc(T0 - 1))).toBe(true);
+    expect(highestEarlierValue([utc(T0 - 60), utc(T0 + 5), null])).toBe(utc(T0 + 5));
+    expect(highestEarlierValue([utc(T0 - 60), T0 + 9])).toMatch(/the value this run's call was cleared to write/);
+    expect(highestEarlierValue([null, "garbage"])).toBeNull();
+    const d = validSinceLowerThanBeforeDetail(utc(T0), utc(T0 - 60));
+    expect(d).toContain(`the read-back tokensValidAfterTime ${utc(T0 - 60)} is earlier than ${utc(T0)}, a value read earlier in this run`);
+    expect(d).toMatch(/cause not attributable: this run's revokeRefreshTokens call, which overwrites validSince with the caller's clock, or another writer inside the run window/);
+    expect(d).toMatch(/Review before doing anything else/);
+    // Causation-neutral: never "this run's call lowered" / "moved BACKWARD during this run".
+    expect(d).not.toMatch(/moved BACKWARD|call lowered|LOWERED the stored/);
+  });
+  describe("G3 checkOperatorClock: commit within [before - m, after + m] (ms), fail closed", () => {
+    const st = (ms: number) => ({ seconds: Math.floor(ms / 1000), nanoseconds: (ms % 1000) * 1e6 });
+    const B = T0 * 1000 + 250;
+    it.each([
+      ["commit exactly before - m", B, B + 100, B - 2000, true],
+      ["commit 1 ms earlier than before - m", B, B + 100, B - 2001, false],
+      ["commit exactly after + m", B, B + 100, B + 2100, true],
+      ["commit 1 ms later than after + m", B, B + 100, B + 2101, false],
+      ["commit inside the call", B, B + 100, B + 50, true],
+      ["latency widens: a 3 s call admits commit at after + m", B, B + 3000, B + 5000, true],
+      ["clock far ahead (commit 1 h before)", B, B + 100, B - 3_600_000, false],
+      ["clock far behind (commit 1 h after)", B, B + 100, B + 3_600_000, false],
+    ] as const)("%s => ok %s", (_l, before, after, commitMs, ok) => {
+      const r = checkOperatorClock({ localBeforeMs: before, localAfterMs: after, commit: st(commitMs), marginSeconds: 2 });
+      expect(r.ok).toBe(ok);
+      if (!r.ok) expect(r.detail).toMatch(/No claim, role or revocation call was made/);
+    });
+    it("names the direction: local ahead of the commit is 'ahead', behind is 'behind'", () => {
+      const ahead = checkOperatorClock({ localBeforeMs: B + 10_000, localAfterMs: B + 10_100, commit: st(B), marginSeconds: 2 });
+      const behind = checkOperatorClock({ localBeforeMs: B - 10_000, localAfterMs: B - 9_900, commit: st(B), marginSeconds: 2 });
+      expect(!ahead.ok && ahead.detail).toMatch(/operator clock ahead by about 10 s/);
+      expect(!behind.ok && behind.detail).toMatch(/operator clock behind by about 10 s/);
+    });
+    it.each([
+      ["no commit time", B, B + 100, undefined],
+      ["malformed commit time", B, B + 100, { seconds: "1", nanoseconds: 0 }],
+      ["NaN clock", Number.NaN, B, st(B)],
+      ["clock stepped backward across the call", B + 100, B, st(B + 50)],
+    ] as const)("fails closed: %s", (_l, before, after, commit) => {
+      expect(checkOperatorClock({ localBeforeMs: before, localAfterMs: after, commit, marginSeconds: 2 }).ok).toBe(false);
+    });
+  });
+  describe("G2 checkPreCallCutoff: V = floor(now/1000), S = stored whole seconds; V < S skips", () => {
+    const rec = (tva?: unknown) => ({ uid: UID, disabled: false, ...(tva === undefined ? {} : { tokensValidAfterTime: tva as string }) });
+    const at = (sec: number, ms = 0) => sec * 1000 + ms;
+    it.each([
+      ["V = S - 1 (999 ms into the second still floors to V)", T0 + 10, at(T0 + 9, 999), "skip_stored_ahead"],
+      ["V = S", T0 + 10, at(T0 + 10), "call"],
+      ["V = S (late in the second)", T0 + 10, at(T0 + 10, 999), "call"],
+      ["V = S + 1", T0 + 10, at(T0 + 11), "call"],
+      ["V far below S", T0 + 7200, at(T0), "skip_stored_ahead"],
+    ] as const)("%s => %s", (_l, sSec, nowMs, decision) => {
+      const r = checkPreCallCutoff(rec(utc(sSec)), UID, nowMs);
+      expect(r.decision).toBe(decision);
+      expect([r.storedSeconds, r.localSeconds]).toEqual([sSec, Math.floor(nowMs / 1000)]);
+      if (r.decision === "skip_stored_ahead") expect(r.detail).toMatch(/revokeRefreshTokens was NOT called: it overwrites and would have lowered the stored value/);
+    });
+    it("absent stored value (never set) => call", () => {
+      expect(checkPreCallCutoff(rec(undefined), UID, at(T0))).toEqual({ decision: "call", storedSeconds: null, localSeconds: T0 });
+    });
+    it.each([
+      ["unparseable stored value", rec("garbage"), UID, at(T0)],
+      ["non-string stored value", rec(12345), UID, at(T0)],
+      ["record for another uid", { ...rec(utc(T0)), uid: "other" }, UID, at(T0)],
+      ["NaN local clock", rec(utc(T0)), UID, Number.NaN],
+    ] as const)("fails closed (no call): %s", (_l, r0, uid, now) => {
+      expect(checkPreCallCutoff(r0 as never, uid, now).decision).toBe("refuse_unusable");
+    });
   });
   it("the anchor must be a well-formed server time STRICTLY later than the attempt row's commit time", () => {
     const attempt = { seconds: T0, nanoseconds: 500 };
@@ -505,16 +599,20 @@ describe("session revocation evidence — server clock only", () => {
   });
 });
 
-const VERIFIED_EVIDENCE: SessionRevocationEvidence = {
+const VERIFIED_EVIDENCE: SessionRevocationObservations = {
+  sessionRevocationState: "CUTOFF_OBSERVED",
+  effectiveRevocation: "not_observable",
   claimWrite: "confirmed",
+  revocationRequested: true,
   revocationApiAcknowledged: true,
   anchorSource: "firestore-commit-time:users/{uid}.role",
   anchorServerTime: "2026-11-05T10:00:00.000Z",
   marginSeconds: 2,
   cutoff: "2026-11-05T10:00:03.000Z",
   tokensValidAfterTimeBefore: null,
+  preCallCheck: { read: "read", tokensValidAfterTime: null, storedSeconds: null, localSeconds: 1793872803, decision: "call" },
   tokensValidAfterTimeAfter: "Thu, 05 Nov 2026 10:00:03 GMT",
-  tokensValidAfterTimeMovedBackward: null,
+  tokensValidAfterTimeLowerThanBefore: false,
   validSinceMinusAnchorSeconds: 3,
   cutoffObserved: true,
   clockAlignmentAssumption: REVOCATION_CLOCK_ASSUMPTION,
@@ -577,11 +675,14 @@ describe("audit record — matches lib/admin/auditLog.ts#AuditLogEntry", () => {
       phase: "outcome",
       outcome: "applied",
       readBack: { customClaims: "read", usersDocRole: "read" },
-      sessionRevocationEvidence: VERIFIED_EVIDENCE,
+      sessionRevocationObservations: VERIFIED_EVIDENCE,
     });
     expect(out.metadata.outcome).toBe("applied");
-    expect(out.metadata.sessionRevocationEvidence).toEqual(VERIFIED_EVIDENCE);
-    expect(out.metadata).toMatchObject({ completed: true, afterSemantics: "read-back", sessionRevocation: "required" });
+    expect(out.metadata.sessionRevocationObservations).toEqual(VERIFIED_EVIDENCE);
+    expect(out.metadata).toMatchObject({
+      completed: true, afterSemantics: "read-back", sessionRevocation: "required",
+      sessionRevocationState: "CUTOFF_OBSERVED", effectiveRevocation: "not_observable",
+    });
     expect(out.actionType).toBe("REVOKE_SYSTEM_ADMIN_CLAIM");
     expect("adminEmail" in out).toBe(false);
     expect("targetEmail" in out).toBe(false);
@@ -591,7 +692,7 @@ describe("audit record — matches lib/admin/auditLog.ts#AuditLogEntry", () => {
     ["attempt revoke", "revoke", "attempt", undefined, "SYSTEM_ADMIN_CLAIM_ATTEMPT", false],
     ["grant applied", "grant", "outcome", "applied", "GRANT_SYSTEM_ADMIN_CLAIM", true],
     ["revoke applied", "revoke", "outcome", "applied", "REVOKE_SYSTEM_ADMIN_CLAIM", true],
-    ["revoke sessions-only", "revoke", "outcome", "claim_already_absent_sessions_revoked", "REVOKE_SYSTEM_ADMIN_SESSIONS", true],
+    ["revoke sessions-only", "revoke", "outcome", "claim_already_absent_revocation_cutoff_observed", "SYSTEM_ADMIN_REVOCATION_CUTOFF_OBSERVED", true],
     ["revoke sessions failed", "revoke", "outcome", "sessions_revoke_failed", "SYSTEM_ADMIN_CLAIM_INCOMPLETE", false],
     ["grant mint failed", "grant", "outcome", "mint_failed", "SYSTEM_ADMIN_CLAIM_INCOMPLETE", false],
     ["outcome row missing", "grant", "outcome", "audit_outcome_missing", "SYSTEM_ADMIN_CLAIM_INCOMPLETE", false],
@@ -604,7 +705,7 @@ describe("audit record — matches lib/admin/auditLog.ts#AuditLogEntry", () => {
       phase,
       outcome: outcome as never,
       readBack: { customClaims: "read", usersDocRole: "read" },
-      sessionRevocationEvidence: VERIFIED_EVIDENCE,
+      sessionRevocationObservations: VERIFIED_EVIDENCE,
     });
     expect([r.actionType, r.metadata.completed]).toEqual([actionType, completed]);
   });
@@ -612,17 +713,98 @@ describe("audit record — matches lib/admin/auditLog.ts#AuditLogEntry", () => {
   it("fail closed: a COMPLETED revoke outcome without an acknowledged revocation AND an observed cutoff is downgraded to sessions_revoke_unverified", () => {
     // Stricter than a1c2159: an observed cutoff WITHOUT an acknowledged revocation call is not completed either.
     for (const ev of [undefined, null, { ...VERIFIED_EVIDENCE, cutoffObserved: false }, { ...VERIFIED_EVIDENCE, revocationApiAcknowledged: false }]) {
-      for (const outcome of ["applied", "claim_already_absent_sessions_revoked"] as const) {
+      for (const outcome of ["applied", "claim_already_absent_revocation_cutoff_observed"] as const) {
         const r = buildClaimAuditRecord({
           requestId: "r", createdAt: TS, projectId: PROJECT, operation: "revoke", authorization: "operator-id-token",
           adminUid: "op", targetUid: UID, beforeClaims: {}, afterClaims: {}, usersDocRoleBefore: null, usersDocRoleAfter: "user",
           claimWrite: "write", credentialSource: "explicit-key-file", credentialClientEmailMasked: "x…@…", gitSha: "s", confirmClaim: "c",
-          phase: "outcome", outcome, readBack: { customClaims: "read", usersDocRole: "read" }, sessionRevocationEvidence: ev,
+          phase: "outcome", outcome, readBack: { customClaims: "read", usersDocRole: "read" }, sessionRevocationObservations: ev,
         });
         expect([r.actionType, r.metadata.completed, r.metadata.outcome]).toEqual(["SYSTEM_ADMIN_CLAIM_INCOMPLETE", false, "sessions_revoke_unverified"]);
       }
     }
   });
+  const revokeOutcome = (outcome: string, ev: SessionRevocationObservations | null | undefined, readBack: { customClaims: "read" | "failed"; usersDocRole: "read" | "failed" } = { customClaims: "read", usersDocRole: "read" }) =>
+    buildClaimAuditRecord({
+      requestId: "r", createdAt: TS, projectId: PROJECT, operation: "revoke", authorization: "operator-id-token",
+      adminUid: "op", targetUid: UID, beforeClaims: {}, afterClaims: {}, usersDocRoleBefore: null, usersDocRoleAfter: "user",
+      claimWrite: "write", credentialSource: "explicit-key-file", credentialClientEmailMasked: "x…@…", gitSha: "s", confirmClaim: "c",
+      phase: "outcome", outcome: outcome as never, readBack, sessionRevocationObservations: ev,
+    });
+
+  it("G1: a COMPLETED revoke whose read-back is lower than an earlier value is downgraded to revocation_cutoff_lowered (never completed)", () => {
+    for (const ev of [
+      { ...VERIFIED_EVIDENCE, tokensValidAfterTimeLowerThanBefore: true },
+      { ...VERIFIED_EVIDENCE, sessionRevocationState: "CUTOFF_LOWERED" as const },
+    ]) {
+      for (const outcome of ["applied", "claim_already_absent_revocation_cutoff_observed"]) {
+        const r = revokeOutcome(outcome, ev);
+        expect([r.actionType, r.metadata.completed, r.metadata.outcome]).toEqual(["SYSTEM_ADMIN_CLAIM_INCOMPLETE", false, "revocation_cutoff_lowered"]);
+      }
+    }
+  });
+
+  it("G1 precedence 3 > 4: lowered AND not acknowledged/observed => sessions_revoke_unverified (exit-3 class), not revocation_cutoff_lowered", () => {
+    for (const ev of [
+      { ...VERIFIED_EVIDENCE, tokensValidAfterTimeLowerThanBefore: true, cutoffObserved: false },
+      { ...VERIFIED_EVIDENCE, tokensValidAfterTimeLowerThanBefore: true, revocationApiAcknowledged: false },
+    ]) {
+      expect(revokeOutcome("applied", ev).metadata.outcome).toBe("sessions_revoke_unverified");
+    }
+  });
+
+  it("backstop: a COMPLETED revoke row must carry CUTOFF_OBSERVED", () => {
+    for (const state of ["NOT_REQUESTED", "REQUESTED_UNACKNOWLEDGED", "ACKNOWLEDGED_UNOBSERVED", "CUTOFF_NOT_REACHED", "CUTOFF_ANOMALY"] as const) {
+      const r = revokeOutcome("applied", { ...VERIFIED_EVIDENCE, sessionRevocationState: state });
+      expect({ state, outcome: r.metadata.outcome, completed: r.metadata.completed }).toEqual({ state, outcome: "sessions_revoke_unverified", completed: false });
+    }
+    expect(revokeOutcome("applied", VERIFIED_EVIDENCE).metadata.completed).toBe(true); // CONTROL
+  });
+
+  it("exit-4 outcomes are recorded as given, never completed; with a failed read-back they become verification_failed (3 > 4)", () => {
+    for (const o of REVIEW_REQUIRED_OUTCOMES) {
+      const r = revokeOutcome(o, VERIFIED_EVIDENCE);
+      expect([r.actionType, r.metadata.completed, r.metadata.outcome]).toEqual(["SYSTEM_ADMIN_CLAIM_INCOMPLETE", false, o]);
+      expect(revokeOutcome(o, VERIFIED_EVIDENCE, { customClaims: "failed", usersDocRole: "read" }).metadata.outcome).toBe("verification_failed");
+    }
+  });
+
+  it("every revoke row (attempt and outcome) carries effectiveRevocation: not_observable; a missing observation records NOT_REQUESTED", () => {
+    const attempt = buildClaimAuditRecord({
+      requestId: "r", createdAt: TS, projectId: PROJECT, operation: "revoke", authorization: "operator-id-token",
+      adminUid: "op", targetUid: UID, beforeClaims: { admin: true }, afterClaims: {}, usersDocRoleBefore: "admin", usersDocRoleAfter: "user",
+      claimWrite: "write", credentialSource: "explicit-key-file", credentialClientEmailMasked: "x…@…", gitSha: "s", confirmClaim: "c", phase: "attempt",
+    });
+    expect(attempt.metadata).toMatchObject({ effectiveRevocation: "not_observable" });
+    expect(attempt.metadata).not.toHaveProperty("sessionRevocationState");
+    const none = revokeOutcome("audit_attempt_failed", null);
+    expect(none.metadata).toMatchObject({ effectiveRevocation: "not_observable", sessionRevocationState: "NOT_REQUESTED", sessionRevocationObservations: null });
+  });
+
+  it("row shape (revoke outcome): the metadata key set and the observation key set are pinned", () => {
+    const r = revokeOutcome("applied", VERIFIED_EVIDENCE);
+    expect(Object.keys(r.metadata).sort()).toEqual([
+      "afterSemantics", "authorization", "claimWrite", "completed", "confirmClaim", "credentialClientEmailMasked", "credentialSource",
+      "effectiveRevocation", "gitSha", "outcome", "phase", "projectId", "readBack", "requestedOperation", "script",
+      "sessionRevocation", "sessionRevocationObservations", "sessionRevocationState", "source",
+    ]);
+    expect(Object.keys(r.metadata.sessionRevocationObservations as object).sort()).toEqual([
+      "anchorServerTime", "anchorSource", "claimWrite", "clockAlignmentAssumption", "currentPrivilegeEnforcement", "cutoff", "cutoffObserved",
+      "detail", "effectiveRevocation", "marginSeconds", "preCallCheck", "revocationApiAcknowledged", "revocationRequested",
+      "sessionRevocationState", "tokensValidAfterTimeAfter", "tokensValidAfterTimeBefore", "tokensValidAfterTimeLowerThanBefore",
+      "validSinceMinusAnchorSeconds",
+    ]);
+    expect(Object.keys(r.metadata.sessionRevocationObservations as object)).not.toContain("tokensValidAfterTimeMovedBackward");
+    expect(Object.keys(r.metadata)).not.toContain("sessionRevocationEvidence");
+  });
+
+  it("outcome inventories are disjoint and classify correctly", () => {
+    const all = [...COMPLETED_OUTCOMES, ...REVIEW_REQUIRED_OUTCOMES, ...POST_WRITE_FAILURES];
+    expect(new Set(all).size).toBe(all.length);
+    for (const o of REVIEW_REQUIRED_OUTCOMES) expect(isReviewRequiredOutcome(o)).toBe(true);
+    for (const o of [...COMPLETED_OUTCOMES, ...POST_WRITE_FAILURES]) expect(isReviewRequiredOutcome(o)).toBe(false);
+  });
+
   it("grant outcome rows carry no session evidence field", () => {
     const r = buildClaimAuditRecord({
       requestId: "r", createdAt: TS, projectId: PROJECT, operation: "grant", authorization: "operator-id-token",
@@ -630,7 +812,7 @@ describe("audit record — matches lib/admin/auditLog.ts#AuditLogEntry", () => {
       claimWrite: "write", credentialSource: "explicit-key-file", credentialClientEmailMasked: "x…@…", gitSha: "s", confirmClaim: "c",
       phase: "outcome", outcome: "applied", readBack: { customClaims: "read", usersDocRole: "read" },
     });
-    expect([r.metadata.completed, "sessionRevocationEvidence" in r.metadata]).toEqual([true, false]);
+    expect([r.metadata.completed, "sessionRevocationObservations" in r.metadata]).toEqual([true, false]);
   });
 
   describe("M-1: an outcome row never presents unread state as read", () => {
@@ -685,7 +867,7 @@ describe("audit record — matches lib/admin/auditLog.ts#AuditLogEntry", () => {
       const r = buildClaimAuditRecord({
         ...base, outcome: "applied", afterClaims: { plan: "pro" }, usersDocRoleAfter: "user",
         readBack: { customClaims: "read", usersDocRole: "read" },
-        sessionRevocationEvidence: VERIFIED_EVIDENCE,
+        sessionRevocationObservations: VERIFIED_EVIDENCE,
       });
       expect(r.after).toEqual({ customClaims: { plan: "pro" }, usersDocRole: "user" });
       expect(r.metadata).toMatchObject({ afterSemantics: "read-back", completed: true });
@@ -694,7 +876,7 @@ describe("audit record — matches lib/admin/auditLog.ts#AuditLogEntry", () => {
   });
   it("every claim action type is declared in lib/admin/auditLog.ts#AdminActionType", () => {
     const src = fs.readFileSync(path.join(__dirname, "..", "auditLog.ts"), "utf8");
-    for (const t of ["SYSTEM_ADMIN_CLAIM_ATTEMPT", "GRANT_SYSTEM_ADMIN_CLAIM", "REVOKE_SYSTEM_ADMIN_CLAIM", "REVOKE_SYSTEM_ADMIN_SESSIONS", "SYSTEM_ADMIN_CLAIM_INCOMPLETE"]) {
+    for (const t of ["SYSTEM_ADMIN_CLAIM_ATTEMPT", "GRANT_SYSTEM_ADMIN_CLAIM", "REVOKE_SYSTEM_ADMIN_CLAIM", "SYSTEM_ADMIN_REVOCATION_CUTOFF_OBSERVED", "SYSTEM_ADMIN_CLAIM_INCOMPLETE"]) {
       expect({ t, declared: src.includes(`"${t}"`) }).toEqual({ t, declared: true });
     }
   });

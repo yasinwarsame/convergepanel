@@ -15,13 +15,21 @@ import * as path from "node:path";
 import * as ts from "typescript";
 
 import {
+  CLAIM_AUDIT_ACTION_TYPES,
+  COMPLETED_OUTCOMES,
   CURRENT_PRIVILEGE_ENFORCEMENT_NOTE,
+  POST_WRITE_FAILURES,
+  RETIRED_REVOKE_CONFIRMATION_PREFIXES,
+  REVIEW_REQUIRED_OUTCOMES,
   REVOCATION_CLOCK_ASSUMPTION,
   REVOCATION_OBSERVED_SUMMARY,
-  type SessionRevocationEvidence,
-  validSinceMovedBackwardDetail,
+  type SessionRevocationObservations,
+  checkOperatorClock,
+  checkPreCallCutoff,
+  expectedConfirmation,
+  validSinceLowerThanBeforeDetail,
 } from "../../lib/admin/systemAdminClaimSafety";
-import { RERUN_GUIDANCE, REVOKE_SESSIONS_PLAN_LINE, revocationSummary } from "../../lib/admin/systemAdminClaimExecution";
+import { RERUN_GUIDANCE, REVIEW_GUIDANCE, REVOKE_SESSIONS_PLAN_LINE, revocationSummary } from "../../lib/admin/systemAdminClaimExecution";
 
 const REPO = path.resolve(__dirname, "..", "..");
 const read = (f: string) => fs.readFileSync(path.join(REPO, f), "utf8");
@@ -57,22 +65,39 @@ function section(text: string, from: string, to: string): string {
   return text.slice(a, b);
 }
 
-const SAMPLE_EVIDENCE: SessionRevocationEvidence = {
+const SAMPLE_EVIDENCE: SessionRevocationObservations = {
+  sessionRevocationState: "CUTOFF_OBSERVED",
+  effectiveRevocation: "not_observable",
   claimWrite: "confirmed",
+  revocationRequested: true,
   revocationApiAcknowledged: true,
   anchorSource: "firestore-commit-time:users/{uid}.role",
   anchorServerTime: "2026-11-05T10:00:00.000Z",
   marginSeconds: 2,
   cutoff: "2026-11-05T10:00:03.000Z",
   tokensValidAfterTimeBefore: null,
+  preCallCheck: { read: "read", tokensValidAfterTime: null, storedSeconds: null, localSeconds: 1793872804, decision: "call" },
   tokensValidAfterTimeAfter: "Thu, 05 Nov 2026 10:00:04 GMT",
-  tokensValidAfterTimeMovedBackward: false,
+  tokensValidAfterTimeLowerThanBefore: false,
   validSinceMinusAnchorSeconds: 4,
   cutoffObserved: true,
   clockAlignmentAssumption: REVOCATION_CLOCK_ASSUMPTION,
   currentPrivilegeEnforcement: CURRENT_PRIVILEGE_ENFORCEMENT_NOTE,
   detail: null,
 };
+
+/** Every operator-facing string the tool renders from constants and builders (rendered, not source). */
+function renderedOperatorStrings(): string[] {
+  const gate = checkOperatorClock({ localBeforeMs: 0 + 1_793_872_800_000, localAfterMs: 1_793_872_800_100, commit: { seconds: 1_793_872_900, nanoseconds: 0 }, marginSeconds: 2 });
+  const ahead = checkPreCallCutoff({ uid: "u", tokensValidAfterTime: "Thu, 05 Nov 2026 12:00:00 GMT" }, "u", 1_793_872_804_000);
+  return [
+    REVOCATION_CLOCK_ASSUMPTION, CURRENT_PRIVILEGE_ENFORCEMENT_NOTE, REVOCATION_OBSERVED_SUMMARY, RERUN_GUIDANCE, REVIEW_GUIDANCE, REVOKE_SESSIONS_PLAN_LINE,
+    revocationSummary(SAMPLE_EVIDENCE), revocationSummary(null),
+    validSinceLowerThanBeforeDetail("Thu, 05 Nov 2026 10:00:04 GMT", "Thu, 05 Nov 2026 09:59:00 GMT"),
+    gate.ok ? "" : gate.detail,
+    ahead.decision === "skip_stored_ahead" ? ahead.detail : "",
+  ].filter(Boolean);
+}
 
 describe("no proof language about revocation (owner ruling: unbounded Firestore/Auth clock skew)", () => {
   it("CONTROL: the scanner flags affirmative proof wording and passes negated wording", () => {
@@ -105,7 +130,7 @@ describe("no proof language about revocation (owner ruling: unbounded Firestore/
   });
 
   it("exported message constants and the rendered revoke summary", () => {
-    const strings = [REVOCATION_CLOCK_ASSUMPTION, CURRENT_PRIVILEGE_ENFORCEMENT_NOTE, REVOCATION_OBSERVED_SUMMARY, RERUN_GUIDANCE, REVOKE_SESSIONS_PLAN_LINE, revocationSummary(SAMPLE_EVIDENCE), revocationSummary(null)];
+    const strings = renderedOperatorStrings();
     expect(strings.flatMap((s) => offending(docSentences(s)))).toEqual([]);
   });
 });
@@ -113,7 +138,7 @@ describe("no proof language about revocation (owner ruling: unbounded Firestore/
 describe("the assumption and the enforcement caveat are stated", () => {
   it("the success summary names acknowledgment, the observed cutoff, the unbounded 2 s assumption and S2", () => {
     const m = revocationSummary(SAMPLE_EVIDENCE);
-    expect(m).toContain("revocation acknowledged; cutoff observed at/after server-anchored cutoff (assumes Firestore/Auth clock skew < 2 s, unbounded)");
+    expect(m).toContain("revocation requested and acknowledged; cutoff observed at or after the server-anchored cutoff under the Firestore≈Auth clock assumption (skew < 2 s assumed, unbounded); effective revocation not observable");
     expect(m).toContain(REVOCATION_CLOCK_ASSUMPTION);
     expect(m).toContain(CURRENT_PRIVILEGE_ENFORCEMENT_NOTE);
     expect(REVOCATION_CLOCK_ASSUMPTION).toMatch(/ASSUMPTION/);
@@ -129,7 +154,7 @@ describe("the assumption and the enforcement caveat are stated", () => {
       "**(a) API acknowledgment.**",
       "**(b) Observed cutoff.**",
       "**(c) Clock-alignment ASSUMPTION.**",
-      "**(d) Enforcement of current admin privileges: not provided.**",
+      "**(d) Enforcement of current admin privileges: not provided (until S2).**",
       "**(e) Incomplete outcomes.**",
       "It is not proof\n  that sessions were revoked",
       "S2 (live admin authorization in route\n  guards)",
@@ -531,16 +556,12 @@ describe("no unconditional revoke-effect claims (PR #295 sweep, owner order B)",
   });
 
   it("exported operator strings (rendered) pass the claim rules", () => {
-    const strings = [
-      REVOCATION_CLOCK_ASSUMPTION, CURRENT_PRIVILEGE_ENFORCEMENT_NOTE, REVOCATION_OBSERVED_SUMMARY, RERUN_GUIDANCE, REVOKE_SESSIONS_PLAN_LINE,
-      revocationSummary(SAMPLE_EVIDENCE), revocationSummary(null),
-      validSinceMovedBackwardDetail("Thu, 05 Nov 2026 10:00:04 GMT", "Thu, 05 Nov 2026 09:59:00 GMT"),
-    ];
+    const strings = renderedOperatorStrings();
     expect(strings.flatMap((s) => claimOffending(s))).toEqual([]);
     expect(strings.flatMap((s) => offending(docSentences(s)))).toEqual([]);
   });
 
-  it("the sweep keeps the distinctions: requested, acknowledged, cutoff observed, assumption, S2, incomplete/retry, backward moves", () => {
+  it("the sweep keeps the distinctions: requested, acknowledged, cutoff observed, assumption, S2, incomplete/retry, lowered cutoffs, exit 4", () => {
     const flat = (s: string) => s.replace(/\s+/g, " ");
     const runbook = flat(read("docs/operations/system-admin-claim-script.md"));
     for (const needle of [
@@ -553,31 +574,212 @@ describe("no unconditional revoke-effect claims (PR #295 sweep, owner order B)",
       "S2 (live admin authorization in route guards)",
       "Treat every credential in this table as still valid",
       "and re-run the same command",
-      "### Backward cutoff moves (unresolved risk, recorded, not prevented)",
+      "### Lowered cutoffs (unresolved risk; narrowed for this tool only)",
       "It OVERWRITES the stored value; it does not keep the later of the two.",
-      "This tool does not prevent this",
-      "`tokensValidAfterTimeMovedBackward`",
-      "WARNING (not a clean success)",
+      "Nothing more is claimed: the cutoff stays overwrite-only for every other caller.",
+      "**Owner policy (amended, D-2a).**",
+      "if `V < S` the call is **not made** (exit 4 `stored_cutoff_ahead`)",
+      "**Precedence 3 > 4 > 0.**",
+      "`tokensValidAfterTimeLowerThanBefore`",
+      "exit 4 `revocation_cutoff_lowered`",
+      "`operator_clock_out_of_tolerance`",
+      "`pre_call_read_failed`",
+      "`effectiveRevocation: \"not_observable\"`",
       "What is NOT covered.",
       "Sync the operator clock (NTP) before every revoke and every re-run.",
     ]) {
       expect({ needle, present: runbook.includes(needle) }).toEqual({ needle, present: true });
     }
     // The retracted statements are gone everywhere in the runbook.
-    for (const gone of ["can only reduce access", "repeating the request is harmless", "any exit 3 is safe", "**Re-running the same command is safe**", "The printed sessions line overstates"]) {
+    for (const gone of [
+      "can only reduce access", "repeating the request is harmless", "any exit 3 is safe", "**Re-running the same command is safe**", "The printed sessions line overstates",
+      "WARNING (not a clean success)", "moved BACKWARD", "The local clock is never compared with anything", "this run's call LOWERED",
+    ]) {
       expect({ gone, present: runbook.includes(gone) }).toEqual({ gone, present: false });
     }
     const opt1 = flat(section(read("docs/operations/admin-authority-tiers.md"), "**Option 1", "**Option 2"));
     expect(opt1).toMatch(/requests revocation of the target's refresh tokens/);
     expect(opt1).toMatch(/unknown outcome/);
-    expect(opt1).toMatch(/not monotonic/);
+    expect(opt1).toMatch(/overwrite-only/);
     const c5 = flat(section(read("docs/operations/admin-authority-tiers.md"), "**Consequence to know before enrolling anyone", "### BOOTSTRAP_SECRET"));
     expect(c5).toMatch(/Neither of them shortens that ≤1 hour window for an already-issued ID token/);
     expect(c5).toMatch(/S2/);
     const tech = flat(section(read("docs/technical-documentation.md"), "**Operator claim tool:**", "\n\n"));
     expect(tech).toMatch(/requests refresh-token revocation/);
     expect(tech).toMatch(/unknown outcome, not a confirmed no-op/);
-    expect(tech).toMatch(/not monotonic/);
+    expect(tech).toMatch(/overwrite-only/);
     expect(tech).not.toMatch(/re-run is safe/);
+  });
+});
+
+/**
+ * PR #295 G5 (owner Order 18): no text may claim global monotonicity. Because
+ * the Auth API is overwrite-only (no compare-and-set), the words below are
+ * forbidden outright in every shipped doc scope, source string/comment and
+ * rendered operator string — negated or not. The allowed statement is: "this
+ * tool refuses to write a value lower than the one it reads immediately before
+ * the call, and reports any lowering it observes within its own run".
+ *
+ * R7: no effect-implying "revoked" (sessions/tokens/cookies/access "were
+ * revoked", "sessions-revoked"), unless the same clause negates or
+ * conditions it ("not proof that sessions were revoked", "whether ...").
+ */
+const FORBIDDEN_MONOTONIC = /\bmonotonic(?:ally|ity)?\b|\bcannot\s+be\s+lowered\b|\bprevents?\s+(?:any\s+)?lowering\b/gi;
+const R7_EFFECT_REVOKED = new RegExp(
+  String.raw`\b(?:sessions?|refresh[- ]tokens?|tokens?|cookies?|access|privileges?)\b[^.;:]{0,40}?\b(?:is|are|was|were|been|be|gets?|got)\s+(?:now\s+|all\s+|fully\s+|successfully\s+)?revoked\b` +
+  String.raw`|sessions?[_ -]revoked\b|\brevoked\s+(?:the\s+(?:target'?s?\s+)?)?(?:sessions?|refresh[- ]tokens?)\b|\b(?:successfully|fully)\s+revoked\b`,
+  "gi",
+);
+const R7_EXCUSE = /\b(?:not|never|no|nor|without|cannot|isn't|doesn't|whether|if|unless|only\s+when|retired|refused|formerly)\b[^.;]*$/i;
+
+function forbiddenMonotonic(units: string[]): string[] {
+  return units.filter((u) => new RegExp(FORBIDDEN_MONOTONIC.source, "gi").test(u));
+}
+function effectRevoked(units: string[]): string[] {
+  return units.filter((u) => [...u.matchAll(new RegExp(R7_EFFECT_REVOKED.source, "gi"))].some((m) => !R7_EXCUSE.test(u.slice(Math.max(0, (m.index ?? 0) - 100), m.index))));
+}
+
+describe("G5: no monotonicity claims and no effect-implying 'revoked' (PR #295 Order 18)", () => {
+  it("CONTROL: the forbidden-phrase scan flags every form, negated or not, and passes the allowed statement", () => {
+    for (const bad of [
+      "validSince is monotonic.", "The cutoff is not monotonic.", "A revocation is monotonically increasing.",
+      "The cutoff cannot be lowered by this tool.", "G2 prevents lowering.", "The check prevents any lowering of the cutoff.",
+    ]) {
+      expect({ bad, hits: forbiddenMonotonic(docSentencesKeepCode(bad)).length }).toEqual({ bad, hits: 1 });
+    }
+    expect(forbiddenMonotonic(docSentencesKeepCode("This tool refuses to write a value lower than the one it reads immediately before the call, and reports any lowering it observes within its own run."))).toEqual([]);
+  });
+
+  it("CONTROL: the effect-revoked scan flags effect claims and identifiers, and passes negated/conditional/retired uses", () => {
+    for (const bad of [
+      "The target's sessions were revoked.", "Refresh tokens are revoked by the run.", "Sessions revoked; exit 0.",
+      "outcome claim_already_absent_sessions_revoked", "confirmation revoke:admin:removed:sessions-revoked:p:u", "The run revoked the target's sessions.",
+      "Access was successfully revoked.",
+    ]) {
+      expect({ bad, hits: effectRevoked(docSentencesKeepCode(bad)).length }).toEqual({ bad, hits: 1 });
+    }
+    for (const ok of [
+      "It is not proof that sessions were revoked.",
+      "Whether any session was revoked is not observable.",
+      "The retired `revoke:admin:removed:sessions-revoked:<project>:<uid>` string is refused.",
+      "Refusing: Firebase reports the operator's ID token as revoked (auth/id-token-revoked).",
+      "operator_token_revoked",
+    ]) {
+      expect({ ok, hits: effectRevoked(docSentencesKeepCode(ok)) }).toEqual({ ok, hits: [] });
+    }
+  });
+
+  it.each(REVOKE_DOC_SCOPES)("doc scope %s", (label, pick) => {
+    const file = label.split(" ")[0];
+    const units = docSentencesKeepCode(pick(read(file)));
+    expect({ file, monotonic: forbiddenMonotonic(units), revoked: effectRevoked(units) }).toEqual({ file, monotonic: [], revoked: [] });
+  });
+
+  it.each([...SOURCE_FILES, "lib/admin/auditLog.ts", "app/admin/users/[uid]/page.tsx"])("source strings and comments: %s", (file) => {
+    // The retired-confirmation list is the one allow-listed place for an old form.
+    const units = sourceTexts(file).filter((t) => !RETIRED_REVOKE_CONFIRMATION_PREFIXES.includes(t)).flatMap((t) => docSentencesKeepCode(t));
+    expect({ file, monotonic: forbiddenMonotonic(units), revoked: effectRevoked(units) }).toEqual({ file, monotonic: [], revoked: [] });
+  });
+
+  it.each(SPEC_FILES)("test titles: %s", (file) => {
+    const units = sourceTexts(file, { testTitlesOnly: true });
+    expect({ file, monotonic: forbiddenMonotonic(units), revoked: effectRevoked(units) }).toEqual({ file, monotonic: [], revoked: [] });
+  });
+
+  it("rendered operator strings", () => {
+    const units = renderedOperatorStrings().flatMap((t) => docSentencesKeepCode(t));
+    expect({ monotonic: forbiddenMonotonic(units), revoked: effectRevoked(units) }).toEqual({ monotonic: [], revoked: [] });
+  });
+
+  it("the allowed statement is present in the runbook, the tiers doc and the technical documentation", () => {
+    const allowed = "this tool refuses to write a value lower than the one it reads immediately before the call, and reports any lowering it observes within its own run";
+    for (const [file, pick] of [
+      ["docs/operations/system-admin-claim-script.md", (t: string) => t],
+      ["docs/operations/admin-authority-tiers.md", (t: string) => section(t, "**Option 1", "**Option 2")],
+      ["docs/technical-documentation.md", (t: string) => section(t, "**Operator claim tool:**", "\n\n")],
+    ] as const) {
+      expect({ file, present: pick(read(file)).replace(/\s+/g, " ").toLowerCase().includes(allowed) }).toEqual({ file, present: true });
+    }
+  });
+});
+
+/**
+ * PR #295 G4 identifier scan. No confirmation, outcome, run status or
+ * actionType identifier may contain "revoked" or "_SESSIONS" (they would read
+ * as an effect on sessions). The union members are read from the real AST, so
+ * a new member cannot dodge the scan; the exported inventories must equal them.
+ * The retired confirmation forms are allow-listed only in
+ * RETIRED_REVOKE_CONFIRMATION_PREFIXES (and in refusal tests).
+ */
+function unionMembers(file: string, typeName: string): string[] {
+  const sf = ts.createSourceFile(file, read(file), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const out: string[] = [];
+  const visit = (n: ts.Node): void => {
+    if (ts.isTypeAliasDeclaration(n) && n.name.text === typeName) {
+      const walk = (t: ts.Node): void => {
+        if (ts.isLiteralTypeNode(t) && ts.isStringLiteral(t.literal)) out.push(t.literal.text);
+        ts.forEachChild(t, walk);
+      };
+      walk(n.type);
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  if (out.length === 0) throw new Error(`no string members found for ${typeName} in ${file}`);
+  return out;
+}
+
+const BAD_IDENTIFIER = /revoked|_SESSIONS/i;
+const RETIRED_IDENTIFIERS = [
+  "claim_already_absent_sessions_revoked", "REVOKE_SYSTEM_ADMIN_SESSIONS", "tokensValidAfterTimeMovedBackward",
+  "sessionRevocationEvidence", "SessionRevocationEvidence", "validSinceMovedBackward", "sessions-revoked",
+];
+
+describe("G4: identifier scan (no confirmation, outcome, status or actionType identifier implies an effect)", () => {
+  const SAFETY = "lib/admin/systemAdminClaimSafety.ts";
+  const EXEC = "lib/admin/systemAdminClaimExecution.ts";
+  const unions: [string, string][] = [
+    [SAFETY, "CompletedOutcome"], [SAFETY, "ReviewRequiredOutcome"], [SAFETY, "PostWriteFailure"], [SAFETY, "ClaimAuditActionType"],
+    [SAFETY, "SessionRevocationState"], [EXEC, "RunStatus"], ["lib/admin/auditLog.ts", "AdminActionType"],
+  ];
+
+  it("CONTROL: the scan pattern flags the retired identifiers", () => {
+    for (const id of ["claim_already_absent_sessions_revoked", "REVOKE_SYSTEM_ADMIN_SESSIONS", "revoke:admin:removed:sessions-revoked:p:u"]) {
+      expect({ id, bad: BAD_IDENTIFIER.test(id) }).toEqual({ id, bad: true });
+    }
+  });
+
+  it.each(unions)("%s %s members", (file, name) => {
+    const members = unionMembers(file, name);
+    expect({ name, bad: members.filter((m) => BAD_IDENTIFIER.test(m)) }).toEqual({ name, bad: [] });
+  });
+
+  it("the exported inventories equal the type unions (a new member cannot dodge the scan)", () => {
+    expect([...COMPLETED_OUTCOMES].sort()).toEqual(unionMembers(SAFETY, "CompletedOutcome").sort());
+    expect([...REVIEW_REQUIRED_OUTCOMES].sort()).toEqual(unionMembers(SAFETY, "ReviewRequiredOutcome").sort());
+    expect([...POST_WRITE_FAILURES].sort()).toEqual(unionMembers(SAFETY, "PostWriteFailure").sort());
+    expect([...CLAIM_AUDIT_ACTION_TYPES].sort()).toEqual(unionMembers(SAFETY, "ClaimAuditActionType").sort());
+  });
+
+  it("the typed confirmations carry no effect identifier; only the retired list names the old forms", () => {
+    for (const operation of ["grant", "revoke"] as const) {
+      const c = expectedConfirmation({ operation, projectId: "cp-rehearsal-1", targetUid: "u" });
+      expect({ c, bad: BAD_IDENTIFIER.test(c) }).toEqual({ c, bad: false });
+    }
+    expect(RETIRED_REVOKE_CONFIRMATION_PREFIXES).toContain("revoke:admin:removed:sessions-revoked:");
+  });
+
+  it.each([
+    "lib/admin/systemAdminClaimSafety.ts", "lib/admin/systemAdminClaimExecution.ts", "scripts/admin/set-system-admin-claim.ts",
+    "lib/admin/auditLog.ts", "app/admin/users/[uid]/page.tsx",
+  ])("no retired identifier remains in %s (except the retired-confirmation list)", (file) => {
+    const text = read(file).replace('"revoke:admin:removed:sessions-revoked:",', "");
+    expect({ file, found: RETIRED_IDENTIFIERS.filter((id) => text.includes(id)) }).toEqual({ file, found: [] });
+  });
+
+  it("the admin UI labels every claim action type (the new one included) instead of showing it raw", () => {
+    const page = read("app/admin/users/[uid]/page.tsx");
+    for (const t of CLAIM_AUDIT_ACTION_TYPES) expect({ t, labelled: new RegExp(`\\b${t}:\\s*"`).test(page) }).toEqual({ t, labelled: true });
+    expect(page).toContain("{auditActionTypeLabel(log.actionType)}");
   });
 });

@@ -172,23 +172,32 @@ with an explicitly named service-account key file. It is a dry run unless given
 claim, refuses to GRANT to a disabled account (a revoke is allowed on one and
 never re-enables it), and writes create-only `admin_audit_logs`
 attempt/outcome rows. Every executed revoke requests revocation of the
-target's refresh tokens (owner policy). That request can fail or throw
-(`sessions_revoke_failed`, exit 3; a thrown call is an unknown outcome —
-re-run the same command). The tool reports success only when Firebase
-acknowledged the revocation call AND the read-back `tokensValidAfterTime` is
-at or after a cutoff anchored on a Firestore server commit time taken after
-the claim removal. That is an observation, not proof of revocation: it ASSUMES
-the Firestore and Firebase Auth clocks differ by less than a 2 s margin, a
-bound Google does not publish. It also does not enforce current privileges:
-the SYSTEM_ADMIN bearer guards verify ID tokens without `checkRevoked`, so an
-already-issued ID token keeps `admin: true` for up to about an hour regardless
-of the revocation (session-cookie paths do check revocation); live enforcement
-is the separate S2 change. A repeated revocation request is not monotonic:
-`revokeRefreshTokens` overwrites `validSince` with the operator's clock, so a
-re-run from a slow clock can move the cutoff backward and stop the revocation
-check from rejecting sessions an earlier revoke had excluded; the tool records
-that (`tokensValidAfterTimeMovedBackward`) and never reports it as a clean
-success, but does not prevent it. Runbook, CLI, exit codes and retry:
+target's refresh tokens (owner policy), unless a fresh read immediately before
+the call shows the stored `tokensValidAfterTime` is later than the value the
+call would write (then no call, exit 4 `stored_cutoff_ahead`, review
+required). That request can fail or throw (`sessions_revoke_failed`, exit 3;
+a thrown call is an unknown outcome — re-run the same command). Before any
+claim write the tool also checks the operator clock against Firestore's
+commit time of the attempt row (2 s margin; otherwise exit 3
+`operator_clock_out_of_tolerance`, nothing changed). The tool reports exit 0
+only when Firebase acknowledged the revocation call AND the read-back
+`tokensValidAfterTime` is at or after a cutoff anchored on a Firestore server
+commit time taken after the claim removal AND is not lower than the values
+read earlier in the run. That is an observation, not proof of revocation: it
+ASSUMES the Firestore and Firebase Auth clocks differ by less than a 2 s
+margin, a bound Google does not publish, and effective revocation is never
+observable by the tool (`effectiveRevocation: "not_observable"`). It also does
+not enforce current privileges (until S2): the SYSTEM_ADMIN bearer guards
+verify ID tokens without `checkRevoked`, so an already-issued ID token keeps
+`admin: true` for up to about an hour regardless of the revocation
+(session-cookie paths do check revocation); live enforcement is the separate
+S2 change. The cutoff is overwrite-only: `revokeRefreshTokens` overwrites
+`validSince` with the operator's clock and Firebase Auth offers no
+compare-and-set, so any caller can lower it. This tool refuses to write a
+value lower than the one it reads immediately before the call, and reports any
+lowering it observes within its own run (`tokensValidAfterTimeLowerThanBefore`,
+exit 4 `revocation_cutoff_lowered`, never a clean success); a lowering by
+another writer outside the run is not detected. Runbook, CLI, exit codes and retry:
 `docs/operations/system-admin-claim-script.md`. The four older minting scripts
 were retired. `ADMIN_SECRET` never needs to hold a live value
 for enrollment, so the bootstrap route is not part of the enrollment story at

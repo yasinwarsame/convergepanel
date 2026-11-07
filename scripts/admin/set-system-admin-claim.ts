@@ -26,16 +26,22 @@
  *     [--result-file=<path to a NEW *.json file outside every git checkout>]
  *
  * EXIT CODES: 0 completed — claims read back as planned and, on revoke, the
- *   revocation acknowledged with the cutoff observed (an observation under an
- *   unbounded clock-alignment assumption, NOT proof of revocation; already-issued
- *   ID tokens keep admin: true on SYSTEM_ADMIN bearer routes until they expire)
- *   — or a grant already in place;
+ *   revocation requested and acknowledged with the cutoff observed and not
+ *   lower than the values read earlier in the run (an observation under an
+ *   unbounded clock-alignment assumption, NOT proof of revocation; effective
+ *   revocation is not observable; until S2, already-issued ID tokens keep
+ *   admin: true on SYSTEM_ADMIN bearer routes until they expire) — or a grant
+ *   already in place;
  * 2 refused or dry run — no Firebase write call was issued;
  * 3 a write call was issued (possibly only the attempt audit row) and the
  *   operation is incomplete — re-run the same command from a synced clock
  *   (a revoke re-run calls revokeRefreshTokens again, which overwrites
- *   validSince and can move the cutoff backward from a slow clock);
- * 1 the result file could not be written after an otherwise-successful run.
+ *   validSince); includes operator_clock_out_of_tolerance (no claim, role or
+ *   revocation call) and pre_call_read_failed (no revocation call);
+ * 4 review required — the cutoff was lowered within the run, or the call was
+ *   skipped because the stored value is ahead of this machine's clock: do NOT
+ *   re-run blindly (REVIEW_GUIDANCE). Precedence 3 > 4 > 0;
+ * 1 the result file could not be written after an otherwise exit-0 run.
  *
  * CREDENTIALS. Only the key file named by --credentials is used. This tool
  * never loads .env.local and never reads FIREBASE_* / GOOGLE_* credential
@@ -160,6 +166,7 @@ export type CliIo = {
   prepareDefaultResultDir: () => { dir: string; stat: DirStat | null };
   currentUid: () => number | null;
   git: () => { sha: string | null; dirty: boolean | null };
+  /** This machine's clock (ms): request id, timestamps, and the G2/G3 clock reads (the clock revokeRefreshTokens stamps from). */
   nowMs: () => number;
   randomPart: () => string;
   /** A timer wait (see ExecutionDeps.sleepMs). */
@@ -546,6 +553,7 @@ export async function runCli(opts: CliOptions): Promise<number> {
             auth: trackAuthWrites(firebase.auth, markWrite),
             store: trackStoreWrites(firebase.store, markWrite),
             timestampNow: firebase.timestampNow,
+            nowMs: io.nowMs,
             sleepMs: io.sleepMs,
             readOperatorToken: makeOperatorTokenReader(io),
             git,
@@ -566,7 +574,7 @@ export async function runCli(opts: CliOptions): Promise<number> {
   const exitCode = unexpected !== null ? (writeAttempted ? 3 : 2) : run ? run.exitCode : 2;
   const report = {
     schema: "convergepanel.system-admin-claim-result/v1",
-    phase: run && (run.status === "applied" || run.status === "claim_already_absent_sessions_revoked" || run.status === "incomplete")
+    phase: run && (run.status === "applied" || run.status === "claim_already_absent_revocation_cutoff_observed" || run.status === "review_required" || run.status === "incomplete")
       ? "executed"
       : run?.status === "dry_run" ? "dry-run" : "not-executed",
     status: unexpected !== null ? "unexpected_error" : run ? run.status : "refused",

@@ -160,6 +160,8 @@ function runReal(b: Backend, op: "grant" | "revoke", requestId: string) {
     auth: h.auth,
     store: h.store,
     timestampNow: h.timestampNow,
+    // Local == server clock in this double (the clock the SDK double stamps validSince from).
+    nowMs: () => b.serverMs,
     sleepMs: async (ms) => { b.serverMs += ms; },
     readOperatorToken: async () => ({ ok: true, token: TOKEN }),
     git: { sha: "abc", dirty: false },
@@ -216,7 +218,7 @@ describe("real port wiring (realFirebaseFactory) over a recording SDK double", (
     const r = await runReal(b, "revoke", "req_1_ok");
     expect([r.status, r.exitCode]).toEqual(["applied", 0]);
     expect(b.users.get(TARGET)!.customClaims).toEqual({ plan: "pro" });
-    expect(r.sessionRevocationEvidence).toMatchObject({ claimWrite: "confirmed", revocationApiAcknowledged: true, cutoffObserved: true });
+    expect(r.sessionRevocationObservations).toMatchObject({ claimWrite: "confirmed", revocationApiAcknowledged: true, cutoffObserved: true });
     const roleWrite = b.docWrites.find((w) => w.path === `users/${TARGET}`)!;
     expect(roleWrite.data).toEqual({ data: { role: "user", updatedAt: { __serverTimestamp: true } }, opts: { merge: true } });
   });
@@ -228,7 +230,7 @@ describe("real port wiring (realFirebaseFactory) over a recording SDK double", (
     expect([r.status, r.exitCode, r.code]).toEqual(["incomplete", 3, "mint_failed"]);
     expect(b.touched).toContain("revokeRefreshTokens");
     expect(b.users.get(TARGET)!.tokensValidAfterTime).toBeDefined();
-    expect(r.sessionRevocationEvidence).toMatchObject({ claimWrite: "unconfirmed", revocationApiAcknowledged: true, cutoffObserved: false });
+    expect(r.sessionRevocationObservations).toMatchObject({ claimWrite: "unconfirmed", revocationApiAcknowledged: true, cutoffObserved: false });
   });
 
   it("CONTROL: the recorder does catch a computed-name call to a forbidden member", async () => {
