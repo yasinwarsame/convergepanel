@@ -36,7 +36,8 @@ import { Card, SectionLabel, BulletList, FailedResultsNote, splitResults, getMod
 import ModelChip from "@/components/ModelChip";
 import { runModelIdentityDetail } from "@/lib/panel/runModelIdentity";
 import { useRunModelProvenance } from "./RunModelProvenanceContext";
-import ListView from "./ListView";
+import ListView, { type ListScoreNames } from "./ListView";
+import type { ReadableGateDisplay } from "./AdaptiveSynthesisReportView";
 
 function ComparisonCellList({ cells }: { cells: ComparisonCell[] }) {
   if (!cells || cells.length === 0) return null;
@@ -157,6 +158,10 @@ export interface ModelResponsesSectionProps {
     gate: AdaptiveGateResult;
     synthesisReport: AdaptiveSynthesisReport;
     trustSummary?: AdaptiveTrustSummary;
+    /** #290 Inc 1: readable mode only (ListScoreNames); absent on every classic call site. */
+    scoreNames?: ListScoreNames;
+    /** #290 Inc 1: readable mode only — the page's one gate presentation for the run-header badge; absent on every classic call site. */
+    readableGate?: ReadableGateDisplay;
   };
 }
 
@@ -173,6 +178,8 @@ export default function ModelResponsesSection({ schema, results, listView }: Mod
             gate={listView.gate}
             synthesisReport={listView.synthesisReport}
             trustSummary={listView.trustSummary}
+            scoreNames={listView.scoreNames}
+            readableGate={listView.readableGate}
             onNavigateToSynthesis={() => {}}
           />
         )}

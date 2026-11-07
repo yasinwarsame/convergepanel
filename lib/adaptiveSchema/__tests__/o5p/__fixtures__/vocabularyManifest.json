@@ -2238,5 +2238,208 @@
   "count": 1,
   "category": "other-schema",
   "rule": "Order 6 S-E.1 R2-m1 (owner ruling 2026-10-28): identity of the producer's stored :488 rationale, used only to recognise and replace it on screen; never rendered (asserted by the S-E.1 whole-surface scanner)"
+ },
+ {
+  "file": "lib/research/readableReport/copy.ts",
+  "literal": "\"Models agree\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "#290 readable ExecutiveAnswer (readable layout only): the same top-point label PrimarySynthesisStrip shows on an unmarked report; marked: positionView topHeading, as in the strip"
+ },
+ {
+  "file": "lib/research/readableReport/copy.ts",
+  "literal": "\"Models disagree\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "#290 readable ExecutiveAnswer (readable layout only): the same key-point label PrimarySynthesisStrip shows on an unmarked report; marked: positionView keyHeading, as in the strip"
+ },
+ {
+  "file": "lib/research/readableReport/copy.ts",
+  "literal": "\"No major disagreements detected.\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "#290 readable ExecutiveAnswer (readable layout only): the same empty key-point text as PrimarySynthesisStrip on an unmarked report; marked: positionView noKeyText"
+ },
+ {
+  "file": "lib/research/readableReport/copy.ts",
+  "literal": "`Most-raised claims with a split position: ${split} of ${top}`",
+  "count": 1,
+  "category": "computed-status",
+  "rule": "#290 readable trust panel: the stored gate inputs, shown as stored — gate.loadBearingSplitCount over gate.loadBearingClaims.length; 'split' is the stored claim status; no cause is stated"
+ },
+ {
+  "file": "lib/research/readableReport/copy.ts",
+  "literal": "\"How many of the models asked actually responded, and how many claims have positions from at least two models. It counts responses; it does not measure agreement.\"",
+  "count": 1,
+  "category": "historical-or-shared",
+  "rule": "#290 readable trust panel: Panel coverage definition — counts responses and positions, and says it is not an agreement measure"
+ },
+ {
+  "file": "lib/research/readableReport/copy.ts",
+  "literal": "\"A stored score that combines citation presence, how often each model's position matched the most common one, and contradictions. It describes how the models behaved, not whether the answer is correct.\"",
+  "count": 1,
+  "category": "historical-or-shared",
+  "rule": "#290 readable trust panel: Model behaviour score definition — the stored overallTrust inputs (citations, majority alignment, contradictions), as the trust table description; not answer accuracy"
+ },
+ {
+  "file": "components/research/readable/ExecutiveAnswer.tsx",
+  "literal": ">Contested:<",
+  "count": 1,
+  "category": "claim-contested-note",
+  "rule": "#290 readable ExecutiveAnswer: contested note label, as in PrimarySynthesisStrip"
+ },
+ {
+  "file": "lib/research/readableReport/trustSignals.ts",
+  "literal": "\"alignedClaims\"",
+  "count": 1,
+  "category": "non-user",
+  "rule": "type key (Pick<TrustSignalsInput, …>)"
+ },
+ {
+  "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
+  "literal": "\"Stance match\"",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "marked trust column label (unmarked: 'Majority align'); the stance-match input is defined exactly in TRUST_INPUTS_NOTE; newly listed by the #290 Inc 1 scanner widening (match/identical/confirm variants); unchanged literal"
+ },
+ {
+  "file": "components/adaptive/ComparisonMatrixView.tsx",
+  "literal": "\"These comparisons reflect the panel models' own knowledge, not live verified pricing, specs, or data. For decisions that matter, confirm critical details against a current source.\"",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 comparison matrix disclaimer: 'confirm' asks the reader to check a current source; no agreement claim; newly listed by the #290 Inc 1 scanner widening (match/identical/confirm variants); unchanged literal"
+ },
+ {
+  "file": "components/adaptive/PanelEvidenceSection.tsx",
+  "literal": ">The three lists below are Tier 3 — deterministic, pattern-based concerns computed directly from the panel&apos;s own responses. They are not confirmed bias (that is Tier 1, shown in the primary report) and not the panel&apos;s own self-reported gaps (Tier 2, also in the primary report) — treat them as speculative signals worth a second look, never as established findings.<",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 evidence tallies Tier 3 note: 'not confirmed' qualifies pattern-based concerns; no agreement claim; newly listed by the #290 Inc 1 scanner widening (match/identical/confirm variants); unchanged literal"
+ },
+ {
+  "file": "components/adaptive/RankedListView.tsx",
+  "literal": ">The top two items had closely matched model coverage — treat &ldquo;<",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "Milestone-2 ranked list: 'closely matched' describes model coverage counts of the top two items, not positions; newly listed by the #290 Inc 1 scanner widening (match/identical/confirm variants); unchanged literal"
+ },
+ {
+  "file": "lib/adaptiveSchema/alignment.ts",
+  "literal": "\"[adaptiveSchema] claimOrigins length does not match claims, treating field origin as unknown\"",
+  "count": 1,
+  "category": "non-user",
+  "rule": "logger message (field-origin length check), never rendered; newly listed by the #290 Inc 1 scanner widening (match/identical/confirm variants); unchanged literal"
+ },
+ {
+  "file": "lib/adaptiveSchema/jsonExport.ts",
+  "literal": "`AdaptiveResearchExportV1 record has schemaFamily \"${record.schemaFamily}\" but no matching reportSnapshot branch`",
+  "count": 1,
+  "category": "non-user",
+  "rule": "thrown error message (export branch selection), never rendered; newly listed by the #290 Inc 1 scanner widening (match/identical/confirm variants); unchanged literal"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "\"Values match\"",
+  "count": 4,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; value-comparison heading computed from the stored normalized values (values, not claim positions); newly listed by the #290 Inc 1 scanner widening (match/identical/confirm variants); unchanged literal"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "`All ${numeric.length} numeric values are identical${notStated(missing)}.`",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; numeric value comparison computed from the stored values, not claim positions; newly listed by the #290 Inc 1 scanner widening (match/identical/confirm variants); unchanged literal"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "`${all} answers match (${ignoring})${notStated(missing)}.`",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; normalized answer comparison computed from the stored values, not claim positions; newly listed by the #290 Inc 1 scanner widening (match/identical/confirm variants); unchanged literal"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "\"Position details unavailable: the stored claim could not be matched to a unique recorded row.\"",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): POSITION_DETAILS_UNAVAILABLE — a stored claim/row join failure; 'matched' is the record join, not agreement; newly listed by the #290 Inc 1 scanner widening (match/identical/confirm variants); unchanged literal"
+ },
+ {
+  "file": "lib/adaptiveSchema/positionPresentation.ts",
+  "literal": "`${plural(c.valuesMatch, \"value comparison\")} with matching values`",
+  "count": 1,
+  "category": "contract-p",
+  "rule": "Contract P wording (positionPresentation.ts): marked records only; count of value comparisons whose stored values are equal; newly listed by the #290 Inc 1 scanner widening (match/identical/confirm variants); unchanged literal"
+ },
+ {
+  "file": "lib/adaptiveSchema/promptBuilder.ts",
+  "literal": "`interface DecisionRisk { id: string; // short kebab-case slug label: string; // the risk itself, one sentence likelihood?: \"low\" | \"medium\" | \"high\" | \"unknown\"; impact?: \"low\" | \"medium\" | \"high\" | \"unknown\"; mitigation?: string; optionLabel?: string; // set ONLY if specific to one option (must match an \"options\" entry) — omit if it applies broadly }`",
+  "count": 1,
+  "category": "prompt",
+  "rule": "model prompt / schema field description (unchanged); 'matching' refers to option labels; newly listed by the #290 Inc 1 scanner widening (match/identical/confirm variants); unchanged literal"
+ },
+ {
+  "file": "lib/adaptiveSchema/routeClassifiedQuery.ts",
+  "literal": "\"Something about this query didn't match any known request type.\"",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "routing fallback explanation: 'match' is query-type classification, not agreement; newly listed by the #290 Inc 1 scanner widening (match/identical/confirm variants); unchanged literal"
+ },
+ {
+  "file": "lib/adaptiveSchema/schemaRegistry.ts",
+  "literal": "\"Assumptions your recommendation depends on that the user has not confirmed. Empty array if you made none.\"",
+  "count": 1,
+  "category": "prompt",
+  "rule": "model prompt / schema field description (unchanged); 'confirmed' refers to the user, not the panel; newly listed by the #290 Inc 1 scanner widening (match/identical/confirm variants); unchanged literal"
+ },
+ {
+  "file": "lib/adaptiveSchema/schemaRegistry.ts",
+  "literal": "\"Concrete risks and tradeoffs relevant to this decision, whether tied to one specific option (set optionLabel, matching an `options` entry) or broad across all options (omit optionLabel).\"",
+  "count": 1,
+  "category": "prompt",
+  "rule": "model prompt / schema field description (unchanged); 'matching' refers to option labels; newly listed by the #290 Inc 1 scanner widening (match/identical/confirm variants); unchanged literal"
+ },
+ {
+  "file": "lib/research/readableReport/copy.ts",
+  "literal": "\"Verification gate: Pass. This is a rule-based check of the panel's certainty score and split positions; it is not an independent verification of the evidence.\"",
+  "count": 1,
+  "category": "computed-status",
+  "rule": "#290 readable legacy gate banner (readable layout, pre-Order-4 reports only; review of cb2febb): the stored gate status word (Pass) and the kind of check the gate (gate.ts) is — rule-based, on certainty and split positions, not an independent verification of the evidence; 'split' names what the rule looks at, not which claims split; states no condition about the most-raised claims"
+ },
+ {
+  "file": "lib/research/readableReport/copy.ts",
+  "literal": "\"Verification gate: Caution. This is a rule-based check of the panel's certainty score and split positions; it is not an independent verification of the evidence.\"",
+  "count": 1,
+  "category": "computed-status",
+  "rule": "#290 readable legacy gate banner (readable layout, pre-Order-4 reports only; review of cb2febb): the stored gate status word (Caution) and the kind of check the gate (gate.ts) is — rule-based, on certainty and split positions, not an independent verification of the evidence; 'split' names what the rule looks at, not which claims split; states no condition about the most-raised claims"
+ },
+ {
+  "file": "lib/research/readableReport/copy.ts",
+  "literal": "\"Verification gate: Fail. This is a rule-based check of the panel's certainty score and split positions; it is not an independent verification of the evidence.\"",
+  "count": 1,
+  "category": "computed-status",
+  "rule": "#290 readable legacy gate banner (readable layout, pre-Order-4 reports only; review of cb2febb): the stored gate status word (Fail) and the kind of check the gate (gate.ts) is — rule-based, on certainty and split positions, not an independent verification of the evidence; 'split' names what the rule looks at, not which claims split; states no condition about the most-raised claims"
+ },
+ {
+  "file": "lib/research/readableReport/copy.ts",
+  "literal": "\"Verification gate: Unavailable — the stored result is inconsistent with its recorded inputs. The gate is a rule-based check of the panel's certainty score and split positions; it is not an independent verification of the evidence.\"",
+  "count": 1,
+  "category": "computed-status",
+  "rule": "#290 readable legacy gate banner (readable layout, pre-Order-4 reports only; review of cb2febb MINOR): a stored gate that contradicts its recorded inputs (trustSignals.storedGateConsistency) shows no gate result — neither the stored one nor a recomputed one; gate.ts check kind, evidence not verified"
+ },
+ {
+  "file": "lib/adaptiveSchema/schemaRegistry.ts",
+  "literal": "\"Every (subject, attribute) comparison point you can responsibly assess. Reuse the exact same subject name across all its cells, and the exact same attribute name across all its cells, so your response stays internally consistent.\"",
+  "count": 1,
+  "category": "prompt",
+  "rule": "model prompt / schema field description (unchanged); newly seen by the cb2febb-review 'consistent' stem — internal naming consistency of one response, not agreement between models"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"Multiple models noted patterns or artifacts consistent with deceptive manipulation.\"",
+  "count": 1,
+  "category": "shared-claim-video",
+  "rule": "video memo verdict sentence (unchanged); newly seen by the cb2febb-review 'consistent' stem — artifacts consistent with manipulation, not agreement between models"
  }
 ]

@@ -31,10 +31,11 @@ import {
   ModelTrustSummary,
   ResultSchema,
 } from "@/lib/adaptiveSchema/types";
-import { TRUST_SCORE_CAP_REASON } from "@/lib/adaptiveSchema/config";
+import { TRUST_SCORE_CAP_BY_HEALTH, TRUST_SCORE_CAP_REASON } from "@/lib/adaptiveSchema/config";
 import { Card, SectionLabel, BulletList, ConfidencePill, ProbabilityBar, TintBadge, SlotName } from "./shared";
 import ModelChip from "@/components/ModelChip";
 import { GateTone, gateChipText, gateTone, pageGateValue } from "@/lib/adaptiveSchema/gatePresentation";
+import type { ReadableGateDisplay } from "./AdaptiveSynthesisReportView";
 import { PanelCounts, ROW_COUNTS_UNAVAILABLE, SlotRowCounts, hasReadableRowBreakdown, panelCounts, readSlots, rowTypeOf, slotLabel, slotRowCounts } from "@/lib/adaptiveSchema/positionPresentation";
 import { PositionPresentationBoundary, PositionPresentationState, usePositionPresentation } from "./PositionPresentationContext";
 import { didNotRespondText, slotDidNotRespond, useRunSlotStatus } from "@/components/adaptive/RunSlotStatusContext";
@@ -257,6 +258,28 @@ function buildRowVM(
 
 export type SortMode = "trust" | "outliers" | "response_time";
 
+/**
+ * #290 Increment 1 — the readable layout's names for the per-model stored score (readable mode only). The readable
+ * trust panel calls that stored score the "model behaviour score"; a readable page passes these so the rows use the same
+ * name. Absent (every classic call site): the classic "trust" wording, unchanged.
+ */
+export interface ListScoreNames {
+  row: (percent: number) => string;
+  sort: string;
+  capped: string;
+  /**
+   * The capped-score hint's tooltip (classic: TRUST_SCORE_CAP_REASON, "trust score is capped"), given the row's parse
+   * health and its stored cap as a whole percent (null when none is configured). Shown only where classic shows its hint.
+   */
+  cappedReason: (parseHealth: ModelTrustSummary["parseHealth"], capPercent: number | null) => string;
+}
+
+/** #290 Inc 1 (readable only): the configured score cap for a parse health, as a whole percent; null when none. */
+function capPercent(parseHealth: ModelTrustSummary["parseHealth"]): number | null {
+  const cap = TRUST_SCORE_CAP_BY_HEALTH[parseHealth];
+  return cap === null || cap === undefined ? null : Math.round(cap * 100);
+}
+
 const SORT_OPTIONS: { mode: SortMode; label: string }[] = [
   { mode: "trust", label: "trust" },
   { mode: "outliers", label: "outliers first" },
@@ -312,10 +335,13 @@ function RunHeaderStrip({
   splitCount,
   limitedCoverageCount,
   counts,
+  readableGate,
 }: {
   schema: ResultSchema;
   gate: AdaptiveGateResult;
   synthesisReport: AdaptiveSynthesisReport;
+  /** #290 Inc 1: readable layout only — the page's one gate presentation (ReadableGateDisplay); absent (classic): unchanged. */
+  readableGate?: ReadableGateDisplay;
   alignedClaimsCount: number;
   splitCount: number;
   limitedCoverageCount: number;
@@ -328,8 +354,11 @@ function RunHeaderStrip({
         <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600">
           {schema.id.replace(/_/g, " ")}
         </span>
-        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${GATE_CHIP_STYLES[gateTone(pageGateValue(synthesisReport, gate.status))]}`}>
-          {gateChipText(synthesisReport, pageGateValue(synthesisReport, gate.status))}
+        <span
+          {...(readableGate ? { "data-readable-gate": readableGate.status } : {})}
+          className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${GATE_CHIP_STYLES[readableGate ? readableGate.tone : gateTone(pageGateValue(synthesisReport, gate.status))]}`}
+        >
+          {readableGate ? readableGate.chip : gateChipText(synthesisReport, pageGateValue(synthesisReport, gate.status))}
         </span>
       </div>
       {counts ? (
@@ -379,7 +408,7 @@ function PulseCard({
   );
 }
 
-function SortControl({ sortMode, onChange }: { sortMode: SortMode; onChange: (mode: SortMode) => void }) {
+function SortControl({ sortMode, onChange, scoreNames }: { sortMode: SortMode; onChange: (mode: SortMode) => void; scoreNames?: ListScoreNames }) {
   return (
     <div className="flex items-center gap-1 text-xs text-slate-500">
       <span>Sort:</span>
@@ -391,7 +420,7 @@ function SortControl({ sortMode, onChange }: { sortMode: SortMode; onChange: (mo
             onClick={() => onChange(mode)}
             className={`px-1.5 py-0.5 rounded ${sortMode === mode ? "font-semibold text-slate-900 bg-slate-100" : "hover:text-slate-700"}`}
           >
-            {label}
+            {scoreNames && mode === "trust" ? scoreNames.sort : label}
           </button>
         </span>
       ))}
@@ -524,11 +553,13 @@ function ModelRow({
   vm,
   expanded,
   onToggle,
+  scoreNames,
 }: {
   schema: ResultSchema;
   vm: RowVM;
   expanded: boolean;
   onToggle: () => void;
+  scoreNames?: ListScoreNames;
 }) {
   const { result } = vm;
   // D-4: a recorded provider failure is never described as a parse/format failure.
@@ -568,11 +599,11 @@ function ModelRow({
           <span className={`h-2 w-2 rounded-full shrink-0 ${HEALTH_DOT_COLORS[vm.parseHealth]}`} title={`Parse health: ${vm.parseHealth}`} />
           {vm.trustScore !== null && (
             <span className="text-xs text-slate-600 whitespace-nowrap">
-              trust {Math.round(vm.trustScore * 100)}%
+              {scoreNames ? scoreNames.row(Math.round(vm.trustScore * 100)) : <>trust {Math.round(vm.trustScore * 100)}%</>}
               {vm.capped && TRUST_SCORE_CAP_REASON[vm.parseHealth] && (
                 <span
                   className="ml-1 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-amber-100 text-[9px] font-bold text-amber-700 cursor-help align-text-top"
-                  title={TRUST_SCORE_CAP_REASON[vm.parseHealth]!}
+                  title={scoreNames ? scoreNames.cappedReason(vm.parseHealth, capPercent(vm.parseHealth)) : TRUST_SCORE_CAP_REASON[vm.parseHealth]!}
                 >
                   !
                 </span>
@@ -613,7 +644,7 @@ function ModelRow({
                 {vm.citations} citation{vm.citations === 1 ? "" : "s"}
               </TintBadge>
             ))}
-          {vm.capped && <TintBadge tone="warning">degraded · trust capped</TintBadge>}
+          {vm.capped && <TintBadge tone="warning">{scoreNames ? scoreNames.capped : "degraded · trust capped"}</TintBadge>}
           <span className="ml-auto flex items-center gap-2 shrink-0">
             <span className="text-xs text-slate-400">{formatLatency(result.latencyMs)}</span>
             <Chevron expanded={expanded} />
@@ -639,6 +670,10 @@ export interface ListViewProps {
   gate: AdaptiveGateResult;
   synthesisReport: AdaptiveSynthesisReport;
   trustSummary?: AdaptiveTrustSummary;
+  /** #290 Inc 1: readable mode only — see ListScoreNames. */
+  scoreNames?: ListScoreNames;
+  /** #290 Inc 1: readable mode only — the run-header gate badge from the page's one gate presentation (ReadableGateDisplay). */
+  readableGate?: ReadableGateDisplay;
   /** Switches the parent tab shell to Synthesis Report and scrolls to the given `data-section` anchor. */
   onNavigateToSynthesis?: (sectionId: string) => void;
 }
@@ -659,6 +694,8 @@ function ListViewBody({
   gate,
   synthesisReport,
   trustSummary,
+  scoreNames,
+  readableGate,
   onNavigateToSynthesis,
 }: ListViewProps) {
   const rows = useMemo(() => alignedClaims || [], [alignedClaims]);
@@ -695,6 +732,7 @@ function ListViewBody({
         splitCount={splitCount}
         limitedCoverageCount={limitedCoverageCount}
         counts={counts}
+        readableGate={readableGate}
       />
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -721,7 +759,7 @@ function ListViewBody({
           <span className="text-xs text-slate-500">
             {results.length} model{results.length === 1 ? "" : "s"}
           </span>
-          <SortControl sortMode={sortMode} onChange={setSortMode} />
+          <SortControl sortMode={sortMode} onChange={setSortMode} scoreNames={scoreNames} />
         </div>
         <div className="rounded-xl border border-slate-200 bg-white overflow-hidden divide-y divide-slate-100">
           {sortedVMs.map((vm) => (
@@ -731,6 +769,7 @@ function ListViewBody({
               vm={vm}
               expanded={expandedModels.has(vm.result.modelId)}
               onToggle={() => toggle(vm.result.modelId)}
+              scoreNames={scoreNames}
             />
           ))}
         </div>
