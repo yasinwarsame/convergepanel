@@ -986,15 +986,17 @@ export type PreCallDecision =
  *   V = floor(localNowMs / 1000) — what revokeRefreshTokens would write.
  * V < S  => skip the call (it would lower the stored value);
  * V >= S => call (V == S rewrites the same value).
- * A record for another uid, a non-string non-absent value, or an unparseable
- * value cannot be compared and fails closed (no call).
+ * Takes WHATEVER the fresh read resolved to: no record (undefined, null, a
+ * non-object), a record for another uid or without one, a non-string
+ * non-absent value, or an unparseable value cannot be compared and fails
+ * closed (no call).
  */
-export function checkPreCallCutoff(fresh: UserRecordLike, targetUid: string, localNowMs: number): PreCallDecision {
+export function checkPreCallCutoff(fresh: UserRecordLike | null | undefined, targetUid: string, localNowMs: number): PreCallDecision {
   if (!Number.isFinite(localNowMs)) {
     return { decision: "refuse_unusable", storedSeconds: null, localSeconds: null, detail: "the local clock reading before the call is not usable" };
   }
   const localSeconds = Math.floor(localNowMs / 1000);
-  if (!fresh || fresh.uid !== targetUid) {
+  if (!fresh || typeof fresh !== "object" || fresh.uid !== targetUid) {
     return { decision: "refuse_unusable", storedSeconds: null, localSeconds, detail: "the fresh Auth read before the call did not return the target's record" };
   }
   const raw: unknown = fresh.tokensValidAfterTime;

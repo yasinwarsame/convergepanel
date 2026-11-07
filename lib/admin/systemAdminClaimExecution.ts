@@ -564,9 +564,14 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
     }
     // G2: a FRESH read, immediately before the call. The pre-run read is too
     // early, and nothing is assumed when this read fails: no call then.
-    let fresh: UserRecordLike | null = null;
+    // Whatever a read that did not throw resolved to — including undefined,
+    // null or a malformed record — goes through checkPreCallCutoff, which
+    // fails closed on anything it cannot compare (m-1: no bypass branch).
+    let fresh: UserRecordLike | null | undefined = null;
+    let freshResolved = false;
     try {
       fresh = await deps.auth.getUser(args.targetUid);
+      freshResolved = true;
       preCall.read = "read";
     } catch (e) {
       preCall.read = "failed";
@@ -574,8 +579,8 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
       notCalledReason = `the fresh Auth read immediately before revokeRefreshTokens failed (${codeOf(e)}); the call was NOT made (no earlier or assumed value is used)`;
       recordFailure("pre_call_read_failed", notCalledReason);
     }
-    if (fresh) {
-      preCall.tokensValidAfterTime = typeof fresh.tokensValidAfterTime === "string" ? fresh.tokensValidAfterTime : null;
+    if (freshResolved) {
+      preCall.tokensValidAfterTime = fresh && typeof fresh === "object" && typeof fresh.tokensValidAfterTime === "string" ? fresh.tokensValidAfterTime : null;
       const pc = checkPreCallCutoff(fresh, args.targetUid, deps.nowMs());
       preCall.storedSeconds = pc.storedSeconds;
       preCall.localSeconds = pc.localSeconds;
@@ -719,6 +724,15 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
     result.sessionRevocationState = state;
   }
 
+  // Executor backstop (mirrors the audit-row builder's): a revoke that would
+  // otherwise exit 0 must show a revokeRefreshTokens call that was made and
+  // returned, and state CUTOFF_OBSERVED. Anything else is exit 3, recorded
+  // BEFORE the outcome row so the exit code, message and row agree.
+  if (isRevoke && !failure && !review) {
+    const blocker = revokeExitZeroBlocker({ revokeCalled, revokeOk, observations: result.sessionRevocationObservations });
+    if (blocker !== null) recordFailure("sessions_revoke_unverified", blocker);
+  }
+
   const outcome: AuditOutcome = failure ?? review ?? (sessionsOnly ? "claim_already_absent_revocation_cutoff_observed" : "applied");
   const outcomeId = auditDocId(ctx.requestId, "outcome");
   result.writesAttempted.push("audit_outcome_row");
@@ -766,6 +780,31 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
 }
 
 /**
+ * The executor's exit-0 invariant for a revoke. Returns why the run may NOT
+ * exit 0, or null when it may: revokeRefreshTokens was called, the call
+ * returned, the observations record both, and the state is CUTOFF_OBSERVED
+ * with the cutoff observed. Never consulted for a grant.
+ */
+export function revokeExitZeroBlocker(input: {
+  revokeCalled: boolean;
+  revokeOk: boolean;
+  observations: SessionRevocationObservations | null;
+}): string | null {
+  const obs = input.observations;
+  const facts = `call made: ${input.revokeCalled}; call returned: ${input.revokeOk}; state: ${obs ? obs.sessionRevocationState : "none recorded"}`;
+  const ok = input.revokeCalled === true
+    && input.revokeOk === true
+    && obs !== null
+    && obs.revocationRequested === true
+    && obs.revocationApiAcknowledged === true
+    && obs.cutoffObserved === true
+    && obs.sessionRevocationState === "CUTOFF_OBSERVED";
+  return ok
+    ? null
+    : `a revoke completes only when revokeRefreshTokens was called and returned and the cutoff was observed (state CUTOFF_OBSERVED); this run does not show that (${facts}), so it is NOT complete`;
+}
+
+/**
  * The exit-0 revoke text: (a) request and acknowledgment, (b) observed cutoff,
  * (c) the clock assumption, effective revocation not observable, (d) the
  * enforcement caveat. Never phrased as proof or as an effect.
@@ -802,7 +841,7 @@ export const REVIEW_GUIDANCE =
 
 /** The dry-run / pre-execute sessions line for every revoke: the request and its limits, never an effect. */
 export const REVOKE_SESSIONS_PLAN_LINE =
-  `Sessions:       revokeRefreshTokens WILL be requested for the target (mandatory on revoke) unless a fresh read just before the call shows a stored cutoff later than this machine's clock. The request can fail; it overwrites validSince with this machine's clock (sync it first: NTP; the run stops before any claim write if this clock is more than ${REVOCATION_SKEW_MARGIN_SECONDS} s off Firestore server time); it does not end already-issued ID tokens (up to about 1 hour) and is not a sign-out from every device.`;
+  `Sessions:       revokeRefreshTokens WILL be requested for the target (mandatory on revoke) unless a fresh read just before the call shows a stored cutoff later than this machine's clock. The request can fail; it overwrites validSince with this machine's clock (sync it first: NTP; the run stops before any claim write if this clock is more than about ${REVOCATION_SKEW_MARGIN_SECONDS} s (plus the measured request latency) off Firestore server time); it does not end already-issued ID tokens (up to about 1 hour) and is not a sign-out from every device.`;
 
 function incomplete<TS>(result: RunResult, code: PostWriteFailure, review: ReviewRequiredOutcome | null, deps: ExecutionDeps<TS>): RunResult {
   result.status = "incomplete";

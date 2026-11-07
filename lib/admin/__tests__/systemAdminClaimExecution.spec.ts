@@ -21,12 +21,14 @@ import {
   RERUN_GUIDANCE,
   REVIEW_GUIDANCE,
   REVOKE_SESSIONS_PLAN_LINE,
+  revokeExitZeroBlocker,
   runSystemAdminClaim,
   type ClaimAuthPort,
   type ClaimStorePort,
   type ExecutionDeps,
 } from "../systemAdminClaimExecution";
 import { expectedConfirmation, parseSetSystemAdminClaimArgs, type ParsedClaimArgs, type UserRecordLike } from "../systemAdminClaimSafety";
+import * as safety from "../systemAdminClaimSafety";
 
 const PROJECT = "cp-rehearsal-1";
 const TARGET = "TargetUid0000000000000000001";
@@ -231,7 +233,7 @@ describe("dry run (default)", () => {
     expect(r.status).toBe("dry_run");
     expect(r.exitCode).toBe(2);
     expect(r.expectedConfirmation).toBe(`revoke:admin:removed:revocation-requested:${PROJECT}:${TARGET}`);
-    const PLAN_LINE = "Sessions:       revokeRefreshTokens WILL be requested for the target (mandatory on revoke) unless a fresh read just before the call shows a stored cutoff later than this machine's clock. The request can fail; it overwrites validSince with this machine's clock (sync it first: NTP; the run stops before any claim write if this clock is more than 2 s off Firestore server time); it does not end already-issued ID tokens (up to about 1 hour) and is not a sign-out from every device.";
+    const PLAN_LINE = "Sessions:       revokeRefreshTokens WILL be requested for the target (mandatory on revoke) unless a fresh read just before the call shows a stored cutoff later than this machine's clock. The request can fail; it overwrites validSince with this machine's clock (sync it first: NTP; the run stops before any claim write if this clock is more than about 2 s (plus the measured request latency) off Firestore server time); it does not end already-issued ID tokens (up to about 1 hour) and is not a sign-out from every device.";
     expect(REVOKE_SESSIONS_PLAN_LINE).toBe(PLAN_LINE);
     expect(w.calls).toContain(`log:${PLAN_LINE}`);
     expect(w.calls.filter((c) => c.startsWith("log:Sessions:"))).toEqual([`log:${PLAN_LINE}`]);
@@ -1351,6 +1353,172 @@ describe("R3 MAJOR: the revocation cutoff is observed against a SERVER-anchored 
       expect([r.exitCode, r.code]).toEqual([3, "audit_outcome_missing"]);
       expect(r.failureDetails.map((d) => d.split(":")[0])).toEqual(["stored_cutoff_ahead", "audit_outcome_missing"]);
       expect(r.message).toContain("A review fact was ALSO recorded (stored_cutoff_ahead)");
+    });
+  });
+
+  /**
+   * m-1 (review of 9a7d5ba): EVERY value a fresh pre-call read resolves to
+   * goes through checkPreCallCutoff. A read that resolves with no usable
+   * record, or that throws (the real firebase-admin 12.7.0 getUser throws
+   * auth/user-not-found rather than resolving empty), is exit 3
+   * pre_call_read_failed with NO revokeRefreshTokens call — never exit 0.
+   */
+  describe("m-1: an unusable fresh pre-call read is exit 3 with no call, never exit 0", () => {
+    /** getUser order on a revoke: 1 pre-run target, 2 operator live read, 3 FRESH pre-call, 4 read-back. */
+    const freshReadIs = (d: ExecutionDeps<string>, fresh: (u: UserRecordLike) => unknown) => {
+      const orig = d.auth.getUser;
+      let n = 0;
+      d.auth.getUser = async (uid) => {
+        const u = await orig(uid);
+        return (++n === 3 ? fresh(u) : u) as UserRecordLike;
+      };
+      return d;
+    };
+    const throwsOnFresh = (d: ExecutionDeps<string>, err: () => Error) => {
+      const orig = d.auth.getUser;
+      let n = 0;
+      d.auth.getUser = async (uid) => {
+        if (++n === 3) throw err();
+        return orig(uid);
+      };
+      return d;
+    };
+    const withoutUid = (u: UserRecordLike) => {
+      const { uid: _drop, ...rest } = u;
+      return rest;
+    };
+
+    it.each([
+      ["undefined", (d: ExecutionDeps<string>) => freshReadIs(d, () => undefined), "refuse_unusable", "read"],
+      ["null", (d: ExecutionDeps<string>) => freshReadIs(d, () => null), "refuse_unusable", "read"],
+      ["an empty object {}", (d: ExecutionDeps<string>) => freshReadIs(d, () => ({})), "refuse_unusable", "read"],
+      ["the target's record without a uid", (d: ExecutionDeps<string>) => freshReadIs(d, withoutUid), "refuse_unusable", "read"],
+      ["a record for another uid", (d: ExecutionDeps<string>) => freshReadIs(d, (u) => ({ ...u, uid: "SomeoneElse" })), "refuse_unusable", "read"],
+      ["an unparseable tokensValidAfterTime", (d: ExecutionDeps<string>) => freshReadIs(d, (u) => ({ ...u, tokensValidAfterTime: "not a date" })), "refuse_unusable", "read"],
+      ["a non-string tokensValidAfterTime", (d: ExecutionDeps<string>) => freshReadIs(d, (u) => ({ ...u, tokensValidAfterTime: 1793872800 })), "refuse_unusable", "read"],
+      ["a non-object (a string)", (d: ExecutionDeps<string>) => freshReadIs(d, () => TARGET), "refuse_unusable", "read"],
+      ["a non-object (a number)", (d: ExecutionDeps<string>) => freshReadIs(d, () => 0), "refuse_unusable", "read"],
+      ["a thrown generic error", (d: ExecutionDeps<string>) => throwsOnFresh(d, () => new Error("socket hang up")), "refuse_read_failed", "failed"],
+      // What the real SDK does when the record is missing: auth-api-request.js:550-552.
+      ["a thrown auth/user-not-found (real SDK behaviour)", (d: ExecutionDeps<string>) => throwsOnFresh(d, () => Object.assign(new Error("There is no user record corresponding to the provided identifier."), { code: "auth/user-not-found" })), "refuse_read_failed", "failed"],
+    ] as const)("the fresh read resolves/throws %s => exit 3 pre_call_read_failed, zero revoke calls", async (_label, rig, decision, read) => {
+      const w = adminWorld(0);
+      const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), rig(deps(w)));
+      expect(w.calls.filter((c) => c.startsWith("revokeRefreshTokens")).length).toBe(0);
+      expect(w.validSinceSent).toEqual([]);
+      expect(w.users.get(TARGET)!.tokensValidAfterTime).toBe(BEFORE_TVA);
+      expect([r.status, r.exitCode, r.code, r.outcome]).toEqual(["incomplete", 3, "pre_call_read_failed", "pre_call_read_failed"]);
+      expect(r.sessionRevocationState).toBe("NOT_REQUESTED");
+      // Exactly one failure: the refusal itself (the backstop is never what catches it).
+      expect(r.failureDetails.map((x) => x.split(":")[0])).toEqual(["pre_call_read_failed"]);
+      expect(r.writesAttempted).toEqual(["audit_attempt_row", "custom_claims", "users_doc_role", "audit_outcome_row"]);
+      expect(evidenceOf(r)).toMatchObject({
+        sessionRevocationState: "NOT_REQUESTED",
+        revocationRequested: false,
+        revocationApiAcknowledged: false,
+        cutoffObserved: false,
+        preCallCheck: { read, decision, storedSeconds: null },
+      });
+      expect(r.message).toMatch(/^INCOMPLETE \(pre_call_read_failed\)\. /);
+      expect(r.message).toMatch(/the call was NOT made/);
+      expect(r.message).not.toMatch(/\bapplied\b/i);
+      expect(r.message).not.toMatch(/acknowledged/i);
+      expect(r.message).toContain(RERUN_GUIDANCE);
+      expect(w.audit.get(OUTCOME)).toMatchObject({
+        actionType: "SYSTEM_ADMIN_CLAIM_INCOMPLETE",
+        metadata: { outcome: "pre_call_read_failed", completed: false, sessionRevocationState: "NOT_REQUESTED", effectiveRevocation: "not_observable" },
+      });
+    });
+
+    it("CONTROL: the same rig passing the record through unchanged => exit 0 with one call", async () => {
+      const w = adminWorld(0);
+      const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), freshReadIs(deps(w), (u) => u));
+      expect([r.exitCode, r.sessionRevocationState, w.calls.filter((c) => c.startsWith("revokeRefreshTokens")).length]).toEqual([0, "CUTOFF_OBSERVED", 1]);
+    });
+
+    it("the fresh read resolving undefined on a claim-already-absent re-run is exit 3 too (not 'Completed')", async () => {
+      const w = adminWorld(0);
+      w.users.get(TARGET)!.customClaims = { plan: "pro" };
+      w.roles.set(TARGET, "user");
+      const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), freshReadIs(deps(w), () => undefined));
+      expect([r.exitCode, r.code, w.calls.filter((c) => c.startsWith("revokeRefreshTokens")).length]).toEqual([3, "pre_call_read_failed", 0]);
+      expect(r.message).not.toMatch(/^Completed/);
+      expect(w.audit.get(OUTCOME)).toMatchObject({ metadata: { outcome: "pre_call_read_failed", completed: false } });
+    });
+  });
+
+  /**
+   * The executor's own exit-0 invariant for a revoke (mirrors the audit-row
+   * builder's backstop): exit 0 requires a revokeRefreshTokens call that was
+   * made and returned, and state CUTOFF_OBSERVED. No ordinary path reaches the
+   * backstop — every non-call path records its own failure or review — so the
+   * wiring test injects an internally inconsistent clock-gate result.
+   */
+  describe("executor backstop: a revoke exits 0 only with a call made, returned, and CUTOFF_OBSERVED", () => {
+    const goodObs = async () => {
+      const w = adminWorld(0);
+      const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), deps(w));
+      expect([r.exitCode, r.sessionRevocationState]).toEqual([0, "CUTOFF_OBSERVED"]);
+      return r.sessionRevocationObservations!;
+    };
+
+    it("CONTROL: a real exit-0 run's observations pass", async () => {
+      expect(revokeExitZeroBlocker({ revokeCalled: true, revokeOk: true, observations: await goodObs() })).toBeNull();
+    });
+
+    it.each([
+      ["the call was not made", { revokeCalled: false }, {}],
+      ["the call did not return", { revokeOk: false }, {}],
+      ["no observations", {}, null],
+      ["observations do not record a request", {}, { revocationRequested: false }],
+      ["observations do not record an acknowledgment", {}, { revocationApiAcknowledged: false }],
+      ["the cutoff was not observed", {}, { cutoffObserved: false }],
+      ...(["NOT_REQUESTED", "REQUESTED_UNACKNOWLEDGED", "ACKNOWLEDGED_UNOBSERVED", "CUTOFF_NOT_REACHED", "CUTOFF_ANOMALY", "CUTOFF_LOWERED"] as const)
+        .map((s) => [`state ${s}`, {}, { sessionRevocationState: s }] as const),
+    ] as const)("blocks exit 0 when %s", async (_label, flags, obsPatch) => {
+      const obs = obsPatch === null ? null : { ...(await goodObs()), ...obsPatch };
+      const blocker = revokeExitZeroBlocker({ revokeCalled: true, revokeOk: true, ...flags, observations: obs });
+      expect(blocker).toMatch(/^a revoke completes only when revokeRefreshTokens was called and returned and the cutoff was observed \(state CUTOFF_OBSERVED\)/);
+      // Never claims an acknowledgment (state identifiers aside).
+      expect(blocker!.replace(/\b[A-Z_]{6,}\b/g, "")).not.toMatch(/acknowledged/i);
+    });
+
+    it("WIRING: an inconsistent internal state (clock gate reads false, then true: no call, no failure recorded) is caught => exit 3, never 'Completed'", async () => {
+      const sessionsOnlyWorld = () => {
+        const w = adminWorld(0);
+        w.users.get(TARGET)!.customClaims = { plan: "pro" };
+        w.roles.set(TARGET, "user");
+        return w;
+      };
+      // Control: the same world, no injection => exit 0 with one call.
+      const c = sessionsOnlyWorld();
+      const rc = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), deps(c));
+      expect([rc.exitCode, rc.status, c.calls.filter((x) => x.startsWith("revokeRefreshTokens")).length]).toEqual([0, "claim_already_absent_revocation_cutoff_observed", 1]);
+
+      let reads = 0;
+      const spy = jest.spyOn(safety, "checkOperatorClock").mockImplementation(() => ({
+        get ok() { return reads++ > 0; },
+        detail: "injected",
+      }) as never);
+      try {
+        const w = sessionsOnlyWorld();
+        const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), deps(w));
+        expect(spy).toHaveBeenCalledTimes(1);
+        expect(w.calls.filter((x) => x.startsWith("revokeRefreshTokens")).length).toBe(0);
+        expect([r.status, r.exitCode, r.code, r.outcome]).toEqual(["incomplete", 3, "sessions_revoke_unverified", "sessions_revoke_unverified"]);
+        expect(r.sessionRevocationState).toBe("NOT_REQUESTED");
+        expect(r.failureDetails).toEqual([
+          "sessions_revoke_unverified: a revoke completes only when revokeRefreshTokens was called and returned and the cutoff was observed (state CUTOFF_OBSERVED); this run does not show that (call made: false; call returned: false; state: NOT_REQUESTED), so it is NOT complete",
+        ]);
+        expect(r.message).toMatch(/^INCOMPLETE \(sessions_revoke_unverified\)\. /);
+        expect(r.message).not.toMatch(/^(Completed|Applied)/);
+        expect(w.audit.get(OUTCOME)).toMatchObject({
+          actionType: "SYSTEM_ADMIN_CLAIM_INCOMPLETE",
+          metadata: { outcome: "sessions_revoke_unverified", completed: false, sessionRevocationState: "NOT_REQUESTED" },
+        });
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 

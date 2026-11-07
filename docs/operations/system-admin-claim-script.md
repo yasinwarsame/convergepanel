@@ -81,8 +81,9 @@ npm run admin:set-system-admin-claim -- \
   pre-call read shows a stored cutoff later than this machine's clock), the
   request can fail, it overwrites `validSince` with this machine's clock (sync
   it first; the run stops before any claim write if this clock is more than
-  2 s off Firestore server time), and it does not end already-issued ID tokens
-  and is not a sign-out from every device.
+  about 2 s (plus the measured request latency) off Firestore server time),
+  and it does not end already-issued ID tokens and is not a sign-out from
+  every device.
 - **Typed confirmation** binds operation, project and UID (and, for revoke, the
   mandatory revocation request):
   - grant: `grant:admin:true:<project>:<uid>`

@@ -581,6 +581,13 @@ describe("session revocation evidence — server clock only", () => {
       ["non-string stored value", rec(12345), UID, at(T0)],
       ["record for another uid", { ...rec(utc(T0)), uid: "other" }, UID, at(T0)],
       ["NaN local clock", rec(utc(T0)), UID, Number.NaN],
+      // m-1: whatever a fresh read that did not throw resolved to.
+      ["undefined (no record)", undefined, UID, at(T0)],
+      ["null (no record)", null, UID, at(T0)],
+      ["an empty object", {}, UID, at(T0)],
+      ["a record without a uid", { tokensValidAfterTime: utc(T0) }, UID, at(T0)],
+      ["a string, not a record", UID, UID, at(T0)],
+      ["a number, not a record", 0, UID, at(T0)],
     ] as const)("fails closed (no call): %s", (_l, r0, uid, now) => {
       expect(checkPreCallCutoff(r0 as never, uid, now).decision).toBe("refuse_unusable");
     });
