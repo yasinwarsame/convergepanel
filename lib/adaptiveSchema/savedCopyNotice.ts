@@ -11,5 +11,17 @@ export const SAVED_COPY_SHORTENED = "The saved copy of this response was shorten
  */
 export const SAVED_COPY_UNSTRUCTURED = "The saved copy of this response can't be shown in this format. Its contribution, if any, is reflected in the report above.";
 
+/**
+ * Owner-authorized (2026-11-07): the text that follows the slot's display name when the run's persisted record
+ * ESTABLISHES that this slot's corrective retry succeeded and was included in the report, while its saved copy (the
+ * first answer) cannot be shown. Rendered as `<SlotName/>` + this suffix, e.g. "Gemini's response was successfully
+ * retried…". Only `retriedIncludedSlotsFromRecord` (savedCopyRetryEvidence.ts) can select it.
+ */
+export const SAVED_COPY_RETRIED_AFTER_NAME =
+  "'s response was successfully retried and included in this report. The corrected response was not preserved as a separately viewable saved copy.";
+
+/** The parseError carried by such a row: the same sentence with a fixed subject, so any surface printing it raw stays accurate. */
+export const SAVED_COPY_RETRIED_INCLUDED = `This model${SAVED_COPY_RETRIED_AFTER_NAME}`;
+
 /** Messages that describe the saved copy, not the model's live outcome. Rendered as-is, never as "incompatible format". */
-export const SAVED_COPY_NOTICES: ReadonlySet<string> = new Set([SAVED_COPY_SHORTENED, SAVED_COPY_UNSTRUCTURED]);
+export const SAVED_COPY_NOTICES: ReadonlySet<string> = new Set([SAVED_COPY_SHORTENED, SAVED_COPY_UNSTRUCTURED, SAVED_COPY_RETRIED_INCLUDED]);

@@ -13,6 +13,7 @@ import {
 import { parseGovernanceRecord } from "@/lib/adaptiveSchema/governanceRecordParser";
 import { attachDeepResearchClaimIds } from "@/lib/verification/attachDeepResearchClaimIds";
 import { reconstructModelResults } from "@/lib/adaptiveSchema/reconstructModelResults";
+import { retriedIncludedSlotsFromRecord } from "@/lib/adaptiveSchema/savedCopyRetryEvidence";
 import type { AdaptiveModelResult } from "@/lib/adaptiveSchema/types";
 
 /**
@@ -228,7 +229,10 @@ export async function buildRunReadPayload(args: {
         humanReview,
         reviewRouting,
         automatedGovernance,
-        modelResults: reconstructModelResults(parsedAdaptive.output.schemaId, results),
+        // Only the notice wording depends on the retry record; the record itself is never returned.
+        modelResults: reconstructModelResults(parsedAdaptive.output.schemaId, results, {
+          retriedIncludedSlots: retriedIncludedSlotsFromRecord(data.adaptiveRetryUsage, parsedAdaptive.output),
+        }),
       }
     : { status: parsedAdaptive.reason, output: null, humanReview: null, reviewRouting: "unknown" as const, automatedGovernance: null };
 
