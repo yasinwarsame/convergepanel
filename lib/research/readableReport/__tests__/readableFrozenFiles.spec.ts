@@ -132,10 +132,16 @@ const WIDENED_BY_INC1: Record<string, string> = {
  *     byte-identical: 137,760 classic outputs (records × 82 gate edits × 7 shapes × 3 questions × 4 builders) hash-equal
  *     to 8def047, and the frozen classic digests above unchanged.
  * AdaptiveSynthesisReportView.tsx stays 24f22d8c; same 32-file pinned set.
+ *
+ * Re-pinned (owner-authorized 2026-11-07, Order 18-A — saved-copy retry notice): dsProvenanceUiBoundaries.spec.ts changed
+ * only its own lib/runs/runReadPayload.ts pin (2d897bf → ca6e332, notice wording only; no provenance code). The spec's
+ * other pins and assertions are unchanged.
+ *   - dsProvenanceUiBoundaries.spec.ts: 7ee80b6b52b8c71af0c72e95b52b45e0080058c0 → 4f2991601910578b95cd268cf466beb4e1d3a182.
+ * Same 32-file pinned set.
  */
 const READABLE_GATE_OPTION_BY_INC1: Record<string, string> = {
   "components/adaptive/AdaptiveSynthesisReportView.tsx": "24f22d8ccd4e97eb762edbbca182bceca3be5c92",
-  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "7ee80b6b52b8c71af0c72e95b52b45e0080058c0",
+  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "4f2991601910578b95cd268cf466beb4e1d3a182",
   "lib/adaptiveSchema/shareBuilders.ts": "e4f5188b64d66cdd424ef24a3857e57905b1e9c1",
 };
 
