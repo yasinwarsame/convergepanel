@@ -1839,6 +1839,264 @@ describe("R3 MAJOR: the revocation cutoff is observed against a SERVER-anchored 
       expect(r2.sessionRevocationObservations!.cutoffObserved).toBe(true);
     });
   });
+
+  /**
+   * PR #295 residuals N1 and N2 (register of 2a48a5d).
+   * getUser order: revoke 1 pre-run, 2 operator live, 3 FRESH pre-call, 4 read-back;
+   * grant 1 pre-run, 2 operator live, 3 read-back.
+   */
+  describe("N1/N2 residuals: absent-after-present fresh cutoff; read-back identity", () => {
+    const nthGetUser = (d: ExecutionDeps<string>, n0: number, f: (u: UserRecordLike) => unknown) => {
+      const orig = d.auth.getUser;
+      let n = 0;
+      d.auth.getUser = async (uid) => {
+        const u = await orig(uid);
+        return (++n === n0 ? f(u) : u) as UserRecordLike;
+      };
+      return d;
+    };
+    const dropTva = (u: UserRecordLike) => {
+      const { tokensValidAfterTime: _drop, ...rest } = u;
+      return rest;
+    };
+    const revokeCalls = (w: World) => w.calls.filter((c) => c.startsWith("revokeRefreshTokens")).length;
+    const GRANT_EXEC = ["--operator-id-token-file=/t", "--execute", `--confirm-claim=${GRANT_CONFIRM}`];
+
+    it("CONTROL (normal success): pre-run and fresh both carry a value => one call, exit 0, CUTOFF_OBSERVED, applied", async () => {
+      const w = adminWorld(0);
+      const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), deps(w));
+      expect([r.status, r.exitCode, r.outcome, r.sessionRevocationState, revokeCalls(w)]).toEqual(["applied", 0, "applied", "CUTOFF_OBSERVED", 1]);
+      expect(w.audit.get(OUTCOME)).toMatchObject({ metadata: { outcome: "applied", completed: true } });
+    });
+
+    it.each([
+      ["the key missing", dropTva],
+      ["undefined", (u: UserRecordLike) => ({ ...u, tokensValidAfterTime: undefined })],
+      ["null", (u: UserRecordLike) => ({ ...u, tokensValidAfterTime: null })],
+      ["a malformed value", (u: UserRecordLike) => ({ ...u, tokensValidAfterTime: "not a date" })],
+      ["an empty string", (u: UserRecordLike) => ({ ...u, tokensValidAfterTime: "" })],
+    ] as const)("N1: the pre-run read had a cutoff, the fresh read has %s => no call, exit 3 pre_call_read_failed", async (_l, f) => {
+      const w = adminWorld(0);
+      const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), nthGetUser(deps(w), 3, f));
+      expect(revokeCalls(w)).toBe(0);
+      expect(w.validSinceSent).toEqual([]);
+      expect(w.users.get(TARGET)!.tokensValidAfterTime).toBe(BEFORE_TVA);
+      expect([r.status, r.exitCode, r.code, r.outcome]).toEqual(["incomplete", 3, "pre_call_read_failed", "pre_call_read_failed"]);
+      expect(r.failureDetails.map((x) => x.split(":")[0])).toEqual(["pre_call_read_failed"]);
+      expect(evidenceOf(r)).toMatchObject({
+        sessionRevocationState: "NOT_REQUESTED", revocationRequested: false, cutoffObserved: false,
+        tokensValidAfterTimeBefore: BEFORE_TVA,
+        preCallCheck: { read: "read", decision: "refuse_unusable", storedSeconds: null },
+      });
+      expect(r.message).toMatch(/the call was NOT made/);
+      expect(r.message).not.toMatch(/^Applied|^Completed/);
+      expect(w.audit.get(OUTCOME)).toMatchObject({
+        actionType: "SYSTEM_ADMIN_CLAIM_INCOMPLETE",
+        metadata: { outcome: "pre_call_read_failed", completed: false, sessionRevocationState: "NOT_REQUESTED", effectiveRevocation: "not_observable" },
+      });
+    });
+
+    it("N1: the absent-after-present refusal names its reason (not 'never set')", async () => {
+      const w = adminWorld(0);
+      const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), nthGetUser(deps(w), 3, dropTva));
+      expect(r.failureDetails[0]).toMatch(/^pre_call_read_failed: the fresh Auth read before the call returned no tokensValidAfterTime, although the earlier read in this run had one .*; the call was NOT made$/);
+    });
+
+    it.each([
+      ["an unparseable string", "not a date"],
+      ["a non-string (number)", 1793872800],
+      ["a non-string (object)", { seconds: 1 }],
+    ] as const)("N1: a malformed PRE-RUN value (%s) still counts as 'had one' when the fresh read has none", async (_l, pre) => {
+      const w = adminWorld(0);
+      (w.users.get(TARGET)! as Record<string, unknown>).tokensValidAfterTime = pre;
+      const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), nthGetUser(deps(w), 3, dropTva));
+      expect([r.exitCode, r.code, revokeCalls(w)]).toEqual([3, "pre_call_read_failed", 0]);
+      expect(evidenceOf(r).preCallCheck.decision).toBe("refuse_unusable");
+    });
+
+    it.each([
+      ["missing on both reads", (_u: UserRecordLike) => undefined],
+      ["null on the fresh read, missing on the pre-run read", (_u: UserRecordLike) => null],
+    ] as const)("N1 CONTROL: %s => the call proceeds as before (never set), exit 0", async (_l, freshTva) => {
+      const w = adminWorld(0);
+      delete w.users.get(TARGET)!.tokensValidAfterTime;
+      const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), nthGetUser(deps(w), 3, (u) => {
+        const v = freshTva(u);
+        return v === undefined ? dropTva(u) : { ...u, tokensValidAfterTime: v };
+      }));
+      expect([r.exitCode, r.sessionRevocationState, revokeCalls(w)]).toEqual([0, "CUTOFF_OBSERVED", 1]);
+      expect(evidenceOf(r)).toMatchObject({ tokensValidAfterTimeBefore: null, preCallCheck: { decision: "call", storedSeconds: null } });
+    });
+
+    it("N1 concurrency: the stored value disappears between the pre-run and the fresh read (abnormal adapter) => no call, exit 3", async () => {
+      const w = adminWorld(0);
+      const d = deps(w);
+      const origSleep = d.sleepMs;
+      d.sleepMs = async (ms) => {
+        await origSleep(ms);
+        delete w.users.get(TARGET)!.tokensValidAfterTime;
+      };
+      const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), d);
+      expect([r.exitCode, r.code, revokeCalls(w)]).toEqual([3, "pre_call_read_failed", 0]);
+    });
+
+    it("concurrency: another writer LOWERS the stored value between the pre-run and the fresh read (still present) => the fresh value is compared; the call writes V above both, exit 0", async () => {
+      const w = adminWorld(0);
+      const d = deps(w);
+      const origSleep = d.sleepMs;
+      d.sleepMs = async (ms) => {
+        await origSleep(ms);
+        w.users.get(TARGET)!.tokensValidAfterTime = new Date((secs(BEFORE_TVA) - 600) * 1000).toUTCString();
+      };
+      const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), d);
+      const ev = evidenceOf(r);
+      expect(ev.preCallCheck.storedSeconds).toBe(secs(BEFORE_TVA) - 600);
+      expect(secs(ev.tokensValidAfterTimeAfter)).toBeGreaterThan(secs(BEFORE_TVA));
+      expect([r.exitCode, ev.sessionRevocationState, ev.tokensValidAfterTimeLowerThanBefore, revokeCalls(w)]).toEqual([0, "CUTOFF_OBSERVED", false, 1]);
+    });
+
+    it("concurrency: another writer RAISES the stored value above V between the reads => exit 4 stored_cutoff_ahead, no call, completed false", async () => {
+      const w = adminWorld(0);
+      const d = deps(w);
+      const origSleep = d.sleepMs;
+      d.sleepMs = async (ms) => {
+        await origSleep(ms);
+        w.users.get(TARGET)!.tokensValidAfterTime = new Date((Math.floor(w.serverMs / 1000) + 600) * 1000).toUTCString();
+      };
+      const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), d);
+      expect([r.exitCode, r.code, revokeCalls(w)]).toEqual([4, "stored_cutoff_ahead", 0]);
+      expect(w.audit.get(OUTCOME)).toMatchObject({ metadata: { outcome: "stored_cutoff_ahead", completed: false } });
+    });
+
+    it("concurrency: a writer lowers the value below the cutoff after the call => exit 3 (3 > 4) with the lowering recorded as a review fact", async () => {
+      const w = adminWorld(0);
+      const d = deps(w);
+      const orig = d.auth.revokeRefreshTokens;
+      d.auth.revokeRefreshTokens = async (uid) => {
+        await orig(uid);
+        w.users.get(TARGET)!.tokensValidAfterTime = BEFORE_TVA;
+      };
+      const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), d);
+      expect([r.exitCode, r.code, r.sessionRevocationState]).toEqual([3, "sessions_revoke_unverified", "CUTOFF_LOWERED"]);
+      expect(r.failureDetails.map((x) => x.split(":")[0])).toEqual(["sessions_revoke_unverified", "revocation_cutoff_lowered"]);
+    });
+
+    const badReadBacks = [
+      ["a record for a different account", (u: UserRecordLike) => ({ ...u, uid: "SomeoneElse" }), /^verification_failed: read-back returned a different account/],
+      ["a record whose uid is missing", (u: UserRecordLike) => { const { uid: _d, ...rest } = u; return rest; }, /^verification_failed: read-back identity unknown/],
+      ["a record whose uid is undefined", (u: UserRecordLike) => ({ ...u, uid: undefined }), /^verification_failed: read-back identity unknown/],
+      ["a record whose uid is a number", (u: UserRecordLike) => ({ ...u, uid: 42 }), /^verification_failed: read-back identity unknown/],
+      ["a record whose uid is empty", (u: UserRecordLike) => ({ ...u, uid: "" }), /^verification_failed: read-back returned a different account/],
+      ["null", () => null, /^verification_failed: read-back identity unknown/],
+      ["undefined", () => undefined, /^verification_failed: read-back identity unknown/],
+      ["a string, not a record", () => TARGET, /^verification_failed: read-back identity unknown/],
+    ] as const;
+
+    it.each(badReadBacks)("N2 revoke: the read-back returns %s => exit 3 verification_failed, never CUTOFF_OBSERVED or applied", async (_l, f, detail) => {
+      const w = adminWorld(0);
+      const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), nthGetUser(deps(w), 4, f));
+      expect(revokeCalls(w)).toBe(1);
+      expect([r.status, r.exitCode, r.code, r.outcome]).toEqual(["incomplete", 3, "verification_failed", "verification_failed"]);
+      expect(r.failureDetails[0]).toMatch(detail);
+      expect(r.readBackClaims).toBeNull();
+      expect(r.readBack.customClaims).toBe("failed");
+      const ev = evidenceOf(r);
+      expect(ev.sessionRevocationState).toBe("ACKNOWLEDGED_UNOBSERVED");
+      expect(ev).toMatchObject({ cutoffObserved: false, tokensValidAfterTimeAfter: null });
+      expect(r.message).not.toMatch(/^Applied|^Completed/);
+      expect(w.audit.get(OUTCOME)).toMatchObject({
+        actionType: "SYSTEM_ADMIN_CLAIM_INCOMPLETE",
+        after: { customClaims: null },
+        metadata: { outcome: "verification_failed", completed: false, afterSemantics: "unknown", sessionRevocationState: "ACKNOWLEDGED_UNOBSERVED" },
+      });
+    });
+
+    it.each(badReadBacks)("N2 grant: the read-back returns %s => exit 3 verification_failed, never applied", async (_l, f, detail) => {
+      const w = world();
+      const r = await runSystemAdminClaim(ctx(args(GRANT_EXEC)), nthGetUser(deps(w), 3, f));
+      expect([r.status, r.exitCode, r.code, r.outcome]).toEqual(["incomplete", 3, "verification_failed", "verification_failed"]);
+      expect(r.failureDetails[0]).toMatch(detail);
+      expect(r.readBackClaims).toBeNull();
+      expect(r.message).not.toMatch(/^Applied/);
+      expect(w.audit.get(OUTCOME)).toMatchObject({
+        actionType: "SYSTEM_ADMIN_CLAIM_INCOMPLETE",
+        after: { customClaims: null },
+        metadata: { outcome: "verification_failed", completed: false, afterSemantics: "unknown" },
+      });
+    });
+
+    it("N2 CONTROL: the same rig passing the read-back through unchanged => grant exit 0 applied; revoke exit 0 CUTOFF_OBSERVED", async () => {
+      const wg = world();
+      const rg = await runSystemAdminClaim(ctx(args(GRANT_EXEC)), nthGetUser(deps(wg), 3, (u) => u));
+      expect([rg.status, rg.exitCode]).toEqual(["applied", 0]);
+      const wr = adminWorld(0);
+      const rr = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), nthGetUser(deps(wr), 4, (u) => u));
+      expect([rr.status, rr.exitCode, rr.sessionRevocationState]).toEqual(["applied", 0, "CUTOFF_OBSERVED"]);
+    });
+
+    it("N2: a different-account read-back whose cutoff WOULD pass is still not an observation (it is another account's state)", async () => {
+      const w = adminWorld(0);
+      const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), nthGetUser(deps(w), 4, (u) => ({ ...u, uid: OTHER_ADMIN })));
+      expect(evidenceOf(r)).toMatchObject({ cutoffObserved: false, tokensValidAfterTimeAfter: null, validSinceMinusAnchorSeconds: null });
+      expect(r.exitCode).toBe(3);
+    });
+
+    it.each([
+      ["null", () => null], ["undefined", () => undefined], ["a record without a uid", (u: UserRecordLike) => { const { uid: _d, ...rest } = u; return rest; }],
+    ] as const)("N2 pre-run read: %s => refused target_mismatch, exit 2, zero writes (never a rejection)", async (_l, f) => {
+      for (const op of ["grant", "revoke"] as const) {
+        const w = op === "grant" ? world() : adminWorld(0);
+        const r = await runSystemAdminClaim(ctx(args(op === "grant" ? GRANT_EXEC : REVOKE_EXEC, op)), nthGetUser(deps(w), 1, f));
+        expect([op, r.status, r.exitCode, r.code]).toEqual([op, "refused", 2, "target_mismatch"]);
+        expect(w.writes).toBe(0);
+      }
+    });
+
+    it.each([
+      ["null", () => null], ["a record without a uid", (u: UserRecordLike) => { const { uid: _d, ...rest } = u; return rest; }],
+    ] as const)("N2 operator live read: %s => refused operator_not_system_admin, exit 2, zero writes", async (_l, f) => {
+      const w = world();
+      const r = await runSystemAdminClaim(ctx(args(GRANT_EXEC)), nthGetUser(deps(w), 2, f));
+      expect([r.status, r.exitCode, r.code]).toEqual(["refused", 2, "operator_not_system_admin"]);
+      expect(w.writes).toBe(0);
+    });
+
+    it("retry after mint_failed: run 2's fresh read loses the cutoff => exit 3 with no call and no claim write; run 3 (same command) completes, exit 0", async () => {
+      const w = adminWorld(0);
+      const d1 = deps(w);
+      const origW = d1.auth.writeCustomClaims;
+      d1.auth.writeCustomClaims = async (uid, claims) => {
+        await origW(uid, claims);
+        throw Object.assign(new Error("DEADLINE_EXCEEDED"), { code: "auth/internal-error" });
+      };
+      const r1 = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke"), "req_1_first"), d1);
+      expect([r1.exitCode, r1.code]).toEqual([3, "mint_failed"]);
+      expect(typeof w.users.get(TARGET)!.tokensValidAfterTime).toBe("string");
+      w.calls.length = 0;
+      const r2 = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke"), "req_2_retry"), nthGetUser(deps(w), 3, dropTva));
+      expect([r2.exitCode, r2.code, revokeCalls(w)]).toEqual([3, "pre_call_read_failed", 0]);
+      expect(w.calls.some((c) => c.startsWith("writeCustomClaims"))).toBe(false);
+      expect(r2.sessionRevocationObservations!.claimWrite).toBe("skipped_already_absent");
+      w.calls.length = 0;
+      const r3 = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke"), "req_3_retry"), deps(w));
+      expect([r3.status, r3.exitCode, revokeCalls(w)]).toEqual(["claim_already_absent_revocation_cutoff_observed", 0, 1]);
+    });
+
+    it("retry after claim written but revoke incomplete: run 2's read-back names another account => exit 3 verification_failed (not 'Completed'); run 3 completes, exit 0", async () => {
+      const w = adminWorld(0);
+      w.fail.revoke = true;
+      const r1 = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke"), "req_1_first"), deps(w));
+      expect([r1.exitCode, r1.code]).toEqual([3, "sessions_revoke_failed"]);
+      expect(w.users.get(TARGET)!.customClaims).toEqual({ plan: "pro" });
+      w.fail.revoke = false;
+      const r2 = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke"), "req_2_retry"), nthGetUser(deps(w), 4, (u) => ({ ...u, uid: "SomeoneElse" })));
+      expect([r2.status, r2.exitCode, r2.code]).toEqual(["incomplete", 3, "verification_failed"]);
+      expect(r2.message).not.toMatch(/^Completed/);
+      expect(w.audit.get("system-admin-claim:req_2_retry:outcome")).toMatchObject({ metadata: { outcome: "verification_failed", completed: false } });
+      const r3 = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke"), "req_3_retry"), deps(w));
+      expect([r3.status, r3.exitCode]).toEqual(["claim_already_absent_revocation_cutoff_observed", 0]);
+    });
+  });
 });
 
 describe("R3 MINOR-1: disabled targets — revoke allowed, grant refused, never enabled", () => {

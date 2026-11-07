@@ -525,7 +525,8 @@ export type UserRecordLike = {
  * (malformed record; fail closed).
  */
 export function checkTargetRecord(record: UserRecordLike, targetUid: string, operation: ClaimOperation): Refusal | null {
-  if (record.uid !== targetUid) {
+  // N2: a missing or malformed record, or one without a string uid, is not the target's record.
+  if (!record || typeof record !== "object" || typeof record.uid !== "string" || record.uid !== targetUid) {
     return refuse("target_mismatch", "Refusing: the Auth record returned does not have the requested UID.");
   }
   if (operation === "grant" && record.disabled !== false) {
@@ -715,7 +716,8 @@ export type DecodedTokenLike = { uid: string; admin?: unknown; email?: unknown }
  * and both to name the same uid.
  */
 export function checkOperatorAuthorization(decoded: DecodedTokenLike, live: UserRecordLike): Refusal | null {
-  if (decoded.uid !== live.uid) {
+  // N2: the live record must be a record whose string uid equals the token's.
+  if (!live || typeof live !== "object" || typeof live.uid !== "string" || live.uid === "" || decoded.uid !== live.uid) {
     return refuse("operator_not_system_admin", "Refusing: the operator token and live record disagree on uid.");
   }
   if (decoded.admin !== true) {
@@ -990,8 +992,19 @@ export type PreCallDecision =
  * non-object), a record for another uid or without one, a non-string
  * non-absent value, or an unparseable value cannot be compared and fails
  * closed (no call).
+ *
+ * N1: an absent fresh value means "never set" ONLY when the earlier read of
+ * this run (`earlierTokensValidAfterTime`, the pre-run target read) had no
+ * value either. When the earlier read had any value, an absent fresh value
+ * is not "never set" (the Admin API cannot clear validSince): it cannot be
+ * compared, and fails closed (no call).
  */
-export function checkPreCallCutoff(fresh: UserRecordLike | null | undefined, targetUid: string, localNowMs: number): PreCallDecision {
+export function checkPreCallCutoff(
+  fresh: UserRecordLike | null | undefined,
+  targetUid: string,
+  localNowMs: number,
+  earlierTokensValidAfterTime?: unknown,
+): PreCallDecision {
   if (!Number.isFinite(localNowMs)) {
     return { decision: "refuse_unusable", storedSeconds: null, localSeconds: null, detail: "the local clock reading before the call is not usable" };
   }
@@ -1000,7 +1013,17 @@ export function checkPreCallCutoff(fresh: UserRecordLike | null | undefined, tar
     return { decision: "refuse_unusable", storedSeconds: null, localSeconds, detail: "the fresh Auth read before the call did not return the target's record" };
   }
   const raw: unknown = fresh.tokensValidAfterTime;
-  if (raw === undefined || raw === null) return { decision: "call", storedSeconds: null, localSeconds };
+  if (raw === undefined || raw === null) {
+    if (earlierTokensValidAfterTime !== undefined && earlierTokensValidAfterTime !== null) {
+      return {
+        decision: "refuse_unusable",
+        storedSeconds: null,
+        localSeconds,
+        detail: "the fresh Auth read before the call returned no tokensValidAfterTime, although the earlier read in this run had one (the Admin API cannot clear it), so the stored value is unknown, not \"never set\"",
+      };
+    }
+    return { decision: "call", storedSeconds: null, localSeconds };
+  }
   const storedSeconds = tokensValidAfterSeconds(raw);
   if (storedSeconds === null) {
     return { decision: "refuse_unusable", storedSeconds: null, localSeconds, detail: "the fresh Auth read before the call returned a tokensValidAfterTime that is not a date" };

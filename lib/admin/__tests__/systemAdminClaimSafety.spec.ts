@@ -275,6 +275,13 @@ describe("checkTargetRecord", () => {
     expect(checkTargetRecord({ uid: "other", disabled: false }, UID, "grant")?.code).toBe("target_mismatch");
     expect(checkTargetRecord({ uid: "other", disabled: true }, UID, "revoke")?.code).toBe("target_mismatch");
   });
+  it.each([
+    ["undefined", undefined], ["null", null], ["a string", UID], ["an empty object", {}],
+    ["a record without a uid", { disabled: false }], ["a numeric uid", { uid: 1, disabled: false }],
+    ["an empty uid", { uid: "", disabled: false }],
+  ] as const)("N2: a pre-run read of %s is target_mismatch (never a TypeError, never accepted)", (_l, rec) => {
+    for (const op of ["grant", "revoke"] as const) expect(checkTargetRecord(rec as never, UID, op)?.code).toBe("target_mismatch");
+  });
 });
 
 describe("planClaimChange — merge order and claim preservation", () => {
@@ -412,6 +419,15 @@ describe("operator authorization", () => {
     ["uid disagreement", { uid: "op2", admin: true }, live],
   ])("refuses operator_not_system_admin: %s", (_l, decoded, rec) => {
     expect(checkOperatorAuthorization(decoded, rec as never)?.code).toBe("operator_not_system_admin");
+  });
+  it.each([
+    ["undefined", { uid: "op1", admin: true }, undefined],
+    ["null", { uid: "op1", admin: true }, null],
+    ["a live record without a uid, token uid missing too", { admin: true }, { disabled: false, customClaims: { admin: true } }],
+    ["an empty uid on both", { uid: "", admin: true }, { uid: "", disabled: false, customClaims: { admin: true } }],
+    ["a numeric uid on both", { uid: 7, admin: true }, { uid: 7, disabled: false, customClaims: { admin: true } }],
+  ])("N2: the operator's live read of %s is refused (never a TypeError, never accepted)", (_l, decoded, rec) => {
+    expect(checkOperatorAuthorization(decoded as never, rec as never)?.code).toBe("operator_not_system_admin");
   });
   it("token shape: CONTROL passes; garbage refuses operator_token_invalid", () => {
     expect(checkIdTokenShape("aaa.bbb.ccc")).toBeNull();
@@ -599,6 +615,46 @@ describe("session revocation evidence — server clock only", () => {
       } finally {
         for (const p of protos) delete p.uid;
       }
+    });
+  });
+  describe("N1: an absent fresh value is 'never set' only when the earlier read had none either", () => {
+    const rec = (tva?: unknown) => ({ uid: UID, disabled: false, ...(tva === undefined ? {} : { tokensValidAfterTime: tva as string }) });
+    const at = (sec: number) => sec * 1000;
+    const EARLIER = utc(T0 - 3600);
+    it.each([
+      ["missing key", rec(undefined)],
+      ["undefined value", { uid: UID, disabled: false, tokensValidAfterTime: undefined }],
+      ["null value", rec(null)],
+    ] as const)("earlier read had a value, fresh read has %s => refuse_unusable (no call)", (_l, fresh) => {
+      const r = checkPreCallCutoff(fresh as never, UID, at(T0), EARLIER);
+      expect(r.decision).toBe("refuse_unusable");
+      expect(r).toMatchObject({ storedSeconds: null, localSeconds: T0 });
+      if (r.decision === "refuse_unusable") expect(r.detail).toMatch(/returned no tokensValidAfterTime, although the earlier read in this run had one/);
+    });
+    it.each([
+      ["a malformed earlier value", "not a date"],
+      ["a non-string earlier value", 12345],
+      ["an empty-string earlier value", ""],
+    ] as const)("%s still counts as 'had a value' => refuse_unusable", (_l, earlier) => {
+      expect(checkPreCallCutoff(rec(undefined), UID, at(T0), earlier).decision).toBe("refuse_unusable");
+    });
+    it.each([
+      ["malformed", "not a date"],
+      ["empty string", ""],
+      ["non-string", 12345],
+    ] as const)("earlier read had a value, fresh value %s => refuse_unusable (never treated as absent)", (_l, tva) => {
+      expect(checkPreCallCutoff(rec(tva), UID, at(T0), EARLIER).decision).toBe("refuse_unusable");
+    });
+    it("an empty-string fresh value with NO earlier value is still refused, never 'never set' (review mutant M26)", () => {
+      expect(checkPreCallCutoff(rec(""), UID, at(T0), undefined).decision).toBe("refuse_unusable");
+      expect(checkPreCallCutoff(rec(""), UID, at(T0), null).decision).toBe("refuse_unusable");
+    });
+    it.each([[undefined], [null]] as const)("CONTROL: both reads absent (earlier %s) => call", (earlier) => {
+      expect(checkPreCallCutoff(rec(undefined), UID, at(T0), earlier)).toEqual({ decision: "call", storedSeconds: null, localSeconds: T0 });
+      expect(checkPreCallCutoff(rec(null), UID, at(T0), earlier)).toEqual({ decision: "call", storedSeconds: null, localSeconds: T0 });
+    });
+    it("CONTROL: earlier and fresh both present => the normal comparison", () => {
+      expect(checkPreCallCutoff(rec(utc(T0 - 10)), UID, at(T0), EARLIER)).toEqual({ decision: "call", storedSeconds: T0 - 10, localSeconds: T0 });
     });
   });
   it("the anchor must be a well-formed server time STRICTLY later than the attempt row's commit time", () => {

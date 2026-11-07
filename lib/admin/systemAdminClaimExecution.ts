@@ -300,6 +300,9 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
   const targetEmail = typeof target.email === "string" ? target.email : null;
   result.targetEmailMasked = targetEmail ? maskEmail(targetEmail) : null;
   const preWriteTokensValidAfterTime = typeof target.tokensValidAfterTime === "string" ? target.tokensValidAfterTime : null;
+  // N1: the pre-run value as read (any type). When it is present, an absent
+  // fresh pre-call value is not "never set" and the call is refused.
+  const preWriteTokensValidAfterTimeRaw: unknown = target.tokensValidAfterTime;
   if (args.operation === "revoke" && target.disabled === true) {
     deps.log("Target state:   DISABLED - the admin claim is still removed and refresh-token revocation is still requested; the account stays disabled.");
   }
@@ -581,7 +584,7 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
     }
     if (freshResolved) {
       preCall.tokensValidAfterTime = fresh && typeof fresh === "object" && typeof fresh.tokensValidAfterTime === "string" ? fresh.tokensValidAfterTime : null;
-      const pc = checkPreCallCutoff(fresh, args.targetUid, deps.nowMs());
+      const pc = checkPreCallCutoff(fresh, args.targetUid, deps.nowMs(), preWriteTokensValidAfterTimeRaw);
       preCall.storedSeconds = pc.storedSeconds;
       preCall.localSeconds = pc.localSeconds;
       preCall.decision = pc.decision;
@@ -608,13 +611,27 @@ export async function runSystemAdminClaim<TS>(ctx: ExecutionContext, deps: Execu
   // A read that throws leaves its field UNKNOWN (null + "failed"); it is never
   // replaced by an empty snapshot, and it is always recorded as a failure
   // detail even when an earlier step already failed.
+  // N2: a read-back is evidence only when it is the TARGET's record (string
+  // uid === targetUid). Anything else is UNKNOWN (readBack = null), recorded
+  // as verification_failed: never an observation, never "applied".
   let readBack: UserRecordLike | null = null;
   try {
-    readBack = await deps.auth.getUser(args.targetUid);
-    result.readBackClaims = readBack.customClaims && typeof readBack.customClaims === "object"
-      ? { ...(readBack.customClaims as Claims) }
-      : {};
-    result.readBack.customClaims = "read";
+    const rb: unknown = await deps.auth.getUser(args.targetUid);
+    const rbUid: unknown = rb && typeof rb === "object" ? (rb as { uid?: unknown }).uid : undefined;
+    if (typeof rbUid === "string" && rbUid === args.targetUid) {
+      readBack = rb as UserRecordLike;
+      result.readBackClaims = readBack.customClaims && typeof readBack.customClaims === "object"
+        ? { ...(readBack.customClaims as Claims) }
+        : {};
+      result.readBack.customClaims = "read";
+    } else {
+      readBack = null;
+      result.readBackClaims = null;
+      result.readBack.customClaims = "failed";
+      recordFailure("verification_failed", typeof rbUid === "string"
+        ? "read-back returned a different account (its uid is not the target's); claims and tokensValidAfterTime after this run are UNKNOWN"
+        : "read-back identity unknown (no record, or a record without a string uid); claims and tokensValidAfterTime after this run are UNKNOWN");
+    }
   } catch (e) {
     readBack = null;
     result.readBackClaims = null;
