@@ -11,7 +11,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { FailedResultsNote } from "@/components/adaptive/shared";
 import { RunSlotStatusContext, didNotRespondText, slotDidNotRespond } from "@/components/adaptive/RunSlotStatusContext";
 import AnalysisAvailabilityNotice, { ANALYSIS_NOTICE_LINES, analysisAvailabilityLines } from "@/components/adaptive/AnalysisAvailabilityNotice";
-import { SAVED_COPY_SHORTENED, SAVED_COPY_UNSTRUCTURED } from "@/lib/adaptiveSchema/savedCopyNotice";
+import { SAVED_COPY_RETRIED_INCLUDED, SAVED_COPY_SHORTENED, SAVED_COPY_UNSTRUCTURED } from "@/lib/adaptiveSchema/savedCopyNotice";
 
 const failedRow = (modelId: string, parseError = "Empty response") => ({ modelId, schemaId: "generic", ok: false, data: null, parseError }) as never;
 const html = (el: ReturnType<typeof createElement>, statuses?: Map<string, string>) =>
@@ -55,6 +55,28 @@ describe("D-4 failure labels", () => {
     // Review R3 MINOR-1: the heading does not call a saved-copy row uncompared.
     expect(out).toContain("1 saved response can&#x27;t be shown here");
     expect(out).not.toContain("couldn&#x27;t be compared");
+  });
+
+  it("owner-authorized retried notice: rendered verbatim with the display name, counted as a saved copy, never 'couldn't be compared', no format details", () => {
+    const out = html(createElement(FailedResultsNote, { failed: [failedRow("gemini", SAVED_COPY_RETRIED_INCLUDED)] }), new Map([["gemini", "ok"]]));
+    expect(out).toContain(
+      "Gemini&#x27;s response was successfully retried and included in this report. The corrected response was not preserved as a separately viewable saved copy."
+    );
+    expect(out).toContain(`<p class="font-semibold mb-1">1 saved response can&#x27;t be shown here</p>`);
+    expect(out).not.toContain("couldn&#x27;t be compared");
+    expect(out).not.toContain("incompatible format");
+    expect(out).not.toContain("excluded");
+    expect(out).not.toContain("Details");
+    expect(out).not.toContain("This model"); // the sentinel's placeholder subject is never shown
+    expect(out).not.toContain("Gemini: "); // not the generic "<name>: <notice>" form
+  });
+
+  it("retried notice beside a genuine failure and a neutral saved copy: each counted in its own group", () => {
+    const out = html(
+      createElement(FailedResultsNote, { failed: [failedRow("grok"), failedRow("gemini", SAVED_COPY_RETRIED_INCLUDED), failedRow("claude", SAVED_COPY_UNSTRUCTURED)] }),
+      new Map([["grok", "failed"], ["gemini", "ok"], ["claude", "ok"]])
+    );
+    expect(out).toContain(`<p class="font-semibold mb-1">1 model couldn&#x27;t be compared · 2 saved responses can&#x27;t be shown here</p>`);
   });
 
   it("verification MINOR-3: a recovered model (saved-copy row) is never counted as failed; each group has its own exact count", () => {

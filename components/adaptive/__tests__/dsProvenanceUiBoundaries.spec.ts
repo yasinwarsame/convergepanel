@@ -42,7 +42,10 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   "lib/adaptiveSchema/persistedOutput.ts": "f570388ba819d8fa49096b1bf2405a2525ad6494",
   // Shared Adaptive Schema Ruling B (owner-approved 2026-11-02): additive response-time `adaptive.modelResults` (per-model
   // results rebuilt from the saved responses); no provenance code. Was 3b4868c206dfb252f9931c075953b3c0e139b371 at 9eca1e3.
-  "lib/runs/runReadPayload.ts": "2d897bfb98ee985786a7fee696d2be7bb7534933",
+  // Re-pinned (owner-authorized saved-copy retry notice, 2026-11-07): passes the slots the persisted retry record
+  // establishes as retried+included to reconstructModelResults (notice wording only); no provenance code.
+  // 2d897bfb98ee985786a7fee696d2be7bb7534933 → ca6e3327bd8e3f2a651194aee1c2b459523b12bb.
+  "lib/runs/runReadPayload.ts": "ca6e3327bd8e3f2a651194aee1c2b459523b12bb",
   "lib/user/runDocumentToPublicResults.ts": "d1ed5a2d6d9caafa3d7e63d18307919ca7cb4cf1",
   // Order 6 critical-contrast slice (class-only; see criticalContrastSlice.ts): was 49c7924bbb7bf9466ab7cc8b7cd23a0f2294db85 at 9eca1e3.
   "components/adaptive/DecisionSupportView.tsx": "e3beb32c1161f42d84222b1633a6bd8b1bb98939",

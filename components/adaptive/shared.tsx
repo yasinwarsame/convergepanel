@@ -15,7 +15,7 @@ import ModelChip from "@/components/ModelChip";
 import { substitutedSlotLabel } from "@/lib/adaptiveSchema/positionPresentation";
 import { usePositionPresentation } from "./PositionPresentationContext";
 import { didNotRespondText, slotDidNotRespond, useRunSlotStatus } from "@/components/adaptive/RunSlotStatusContext";
-import { SAVED_COPY_NOTICES } from "@/lib/adaptiveSchema/savedCopyNotice";
+import { SAVED_COPY_NOTICES, SAVED_COPY_RETRIED_AFTER_NAME, SAVED_COPY_RETRIED_INCLUDED } from "@/lib/adaptiveSchema/savedCopyNotice";
 
 /**
  * A completed run's slot, named by product family only ("ChatGPT") — never a
@@ -110,6 +110,9 @@ export function FailedResultsNote({ failed }: { failed: AdaptiveModelResult[] })
             <div className="text-red-700">
               {slotDidNotRespond(slotStatuses, r.modelId) ? (
                 <p><SlotName modelId={r.modelId} /> {didNotRespondText(slotDidNotRespond(slotStatuses, r.modelId)!)}</p>
+              ) : r.parseError === SAVED_COPY_RETRIED_INCLUDED ? (
+                // Owner-authorized: the persisted record establishes this slot's retry succeeded and was included.
+                <p><SlotName modelId={r.modelId} />{SAVED_COPY_RETRIED_AFTER_NAME}</p>
               ) : r.parseError && SAVED_COPY_NOTICES.has(r.parseError) ? (
                 // Ruling B: a statement about the stored copy (shortened, or unstructured first answer), never a format verdict.
                 <p><SlotName modelId={r.modelId} />: {r.parseError}</p>
