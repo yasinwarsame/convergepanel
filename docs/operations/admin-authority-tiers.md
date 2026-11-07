@@ -86,8 +86,12 @@ the live record. It does **not** immediately revoke CLAIM-derived authority:
 SYSTEM_ADMIN keeps SYSTEM_ADMIN — including run deletion, governance-status
 override and both billing-mutation routes — until their ID token expires
 (≤1 hour). **For a SYSTEM_ADMIN the lever is claim revocation plus
-`revokeRefreshTokens(uid)`, not disablement alone.** Put both in the incident
-runbook.
+`revokeRefreshTokens(uid)`, not disablement alone.** Neither of them shortens
+that ≤1 hour window for an already-issued ID token on the bearer paths (no
+`checkRevoked`); closing it is S2. `revokeRefreshTokens` affects only
+revocation-checked paths, only for sessions whose `auth_time` is earlier than
+the stamped `validSince`, and a later call from a slower clock can lower that
+value again. Put all of this in the incident runbook.
 
 ### BOOTSTRAP_SECRET — not a human role
 `ADMIN_SECRET` gates `/api/admin/set-admin`, which mints the first `admin: true`
@@ -161,9 +165,41 @@ system to anyone who obtains it.
 
 Two ways to enroll a SYSTEM_ADMIN. Choose ONE deliberately:
 
-**Option 1 — out-of-band service-account script (preferred).** Call
-`setCustomUserClaims(uid, { admin: true })` directly from a script authenticated
-by the Firebase service account. `ADMIN_SECRET` never needs to hold a live value
+**Option 1 — out-of-band service-account script (preferred).** Run
+`scripts/admin/set-system-admin-claim.ts` (`npm run admin:set-system-admin-claim`)
+with an explicitly named service-account key file. It is a dry run unless given
+`--execute` plus an exact typed confirmation, preserves every other custom
+claim, refuses to GRANT to a disabled account (a revoke is allowed on one and
+never re-enables it), and writes create-only `admin_audit_logs`
+attempt/outcome rows. Every executed revoke requests revocation of the
+target's refresh tokens (owner policy), unless a fresh read immediately before
+the call shows the stored `tokensValidAfterTime` is later than the value the
+call would write (then no call, exit 4 `stored_cutoff_ahead`, review
+required). That request can fail or throw (`sessions_revoke_failed`, exit 3;
+a thrown call is an unknown outcome — re-run the same command). Before any
+claim write the tool also checks the operator clock against Firestore's
+commit time of the attempt row (2 s margin; otherwise exit 3
+`operator_clock_out_of_tolerance`, nothing changed). The tool reports exit 0
+only when Firebase acknowledged the revocation call AND the read-back
+`tokensValidAfterTime` is at or after a cutoff anchored on a Firestore server
+commit time taken after the claim removal AND is not lower than the values
+read earlier in the run. That is an observation, not proof of revocation: it
+ASSUMES the Firestore and Firebase Auth clocks differ by less than a 2 s
+margin, a bound Google does not publish, and effective revocation is never
+observable by the tool (`effectiveRevocation: "not_observable"`). It also does
+not enforce current privileges (until S2): the SYSTEM_ADMIN bearer guards
+verify ID tokens without `checkRevoked`, so an already-issued ID token keeps
+`admin: true` for up to about an hour regardless of the revocation
+(session-cookie paths do check revocation); live enforcement is the separate
+S2 change. The cutoff is overwrite-only: `revokeRefreshTokens` overwrites
+`validSince` with the operator's clock and Firebase Auth offers no
+compare-and-set, so any caller can lower it. This tool refuses to write a
+value lower than the one it reads immediately before the call, and reports any
+lowering it observes within its own run (`tokensValidAfterTimeLowerThanBefore`,
+exit 4 `revocation_cutoff_lowered`, never a clean success); a lowering by
+another writer outside the run is not detected. Runbook, CLI, exit codes and retry:
+`docs/operations/system-admin-claim-script.md`. The four older minting scripts
+were retired. `ADMIN_SECRET` never needs to hold a live value
 for enrollment, so the bootstrap route is not part of the enrollment story at
 all, and there is no post-enrollment rotation to remember.
 
@@ -487,7 +523,14 @@ table is the contract.
    key). `/api/admin/set-role` does this, but it itself requires SYSTEM_ADMIN, so
    during an incident use a service-account script rather than the route.
 2. `[CONTAINMENT_REVOKE_REFRESH][REQUIRED]` **Revoke refresh tokens** — `adminAuth.revokeRefreshTokens(uid)`. Without this
-   the already-issued ID token keeps working.
+   the account's sessions can keep refreshing. With it — and only if Firebase
+   applied the request — revocation-checked session cookies (and, assumed, the
+   refresh-token exchange) reject sessions whose `auth_time` is earlier than
+   the `validSince` it stamps from the operator's clock. It does NOT invalidate
+   an already-issued ID token on the bearer path (step 3). It overwrites the
+   stored `validSince` rather than keeping the later value, so a repeated call
+   from a slower clock can LOWER it again: sync the operator clock (NTP) before
+   every call.
 3. **Understand the residual window.** Every SYSTEM_ADMIN guard verifies with
    `verifyIdToken`, which does not consult revocation. Until the outstanding ID
    token expires (Firebase default one hour), a de-claimed or disabled
@@ -495,9 +538,11 @@ table is the contract.
    override and both billing-mutation routes. Disabling the account does **not**
    shorten this window on the bearer path.
 4. Session cookies are a separate artifact and are verified with
-   `verifySessionCookie(cookie, true)`, so revocation and disablement DO take
-   effect there immediately. But no SYSTEM_ADMIN route accepts a cookie, so this
-   helps only the ADMIN_PORTAL surface.
+   `verifySessionCookie(cookie, true)`, so disablement takes effect there on
+   the next request, and so does an applied revocation — but only for a cookie
+   whose session `auth_time` is earlier than the stored `validSince`. But no
+   SYSTEM_ADMIN route accepts a cookie, so this helps only the ADMIN_PORTAL
+   surface.
 5. **A revoked-but-unexpired ID token can still be exchanged for a fresh session
    cookie.** `POST /api/auth/session` mints with `verifyIdToken` and no
    revocation check, so the cookie's own five-day life can begin AFTER the
@@ -656,9 +701,10 @@ table is the contract.
    compromised (as opposed to a credential leak on an otherwise trusted
    account). Be precise about what this buys, per §B.3-B.5:
 
-   - **Existing session cookies stop working immediately.** Routes accepting a
-     cookie call `verifySessionCookie(cookie, true)`, and that second argument
-     performs the revocation/disabled check. That is the whole of what
+   - **Existing session cookies of the disabled account stop working on their
+     next request.** Routes accepting a cookie call
+     `verifySessionCookie(cookie, true)`, and that second argument performs the
+     disabled check (as well as the revocation check). That is the whole of what
      "invalidate the session" means here — there is no separate
      session-invalidation endpoint.
    - **Minting a NEW cookie is not blocked by this application.**
@@ -694,7 +740,14 @@ re-create the claim you just removed.**
 
 ### What this procedure does NOT give you
 
-Immediate, guaranteed cutoff for a claim-derived SYSTEM_ADMIN. If that matters
-for a given incident, the options are to wait out the token lifetime, or to add
-`checkRevoked` to the SYSTEM_ADMIN verification path — a deliberate change with
-a latency and quota cost, not made here.
+No immediate cutoff for a claim-derived SYSTEM_ADMIN, and no assurance of one.
+Removing the claim and requesting `revokeRefreshTokens` do not end an
+already-issued ID token on the bearer paths (no `checkRevoked`; up to about an
+hour). Even on revocation-checked paths the request covers only sessions whose
+`auth_time` is earlier than the stamped `validSince`, under an unproven
+Firestore/Auth clock assumption, and a later request from a slower clock can
+lower that value and stop the check from rejecting sessions an earlier revoke
+had excluded. If immediate cutoff matters for a given incident, the options are
+to wait out the token lifetime, or to add `checkRevoked` (or a live claim read)
+to the SYSTEM_ADMIN verification path — S2, a deliberate change with a latency
+and quota cost, not made here.

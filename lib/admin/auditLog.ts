@@ -18,6 +18,23 @@ export type AdminActionType =
   | "REACTIVATE_SUB"
   | "SYNC_STRIPE"
   | "UPDATE_ENTITLEMENTS"
+  // Written only by scripts/admin/set-system-admin-claim.ts (create-only rows
+  // built by lib/admin/systemAdminClaimSafety.ts#buildClaimAuditRecord).
+  // ATTEMPT and INCOMPLETE rows are NOT a completed privilege change (an
+  // INCOMPLETE row is exit 3, or exit 4 "review required": see
+  // metadata.outcome). Only GRANT_/REVOKE_SYSTEM_ADMIN_CLAIM (and, for a revoke
+  // re-run whose claim was already absent, SYSTEM_ADMIN_REVOCATION_CUTOFF_OBSERVED)
+  // record a completed result: claims read back as planned; for a revoke,
+  // revocation requested and acknowledged and the cutoff observed under an
+  // unbounded clock assumption (not proof). REVOKE_SYSTEM_ADMIN_CLAIM names the
+  // claim removal read back; for the session side read
+  // metadata.sessionRevocationState. Every revoke row carries
+  // metadata.effectiveRevocation: "not_observable".
+  | "SYSTEM_ADMIN_CLAIM_ATTEMPT"
+  | "GRANT_SYSTEM_ADMIN_CLAIM"
+  | "REVOKE_SYSTEM_ADMIN_CLAIM"
+  | "SYSTEM_ADMIN_REVOCATION_CUTOFF_OBSERVED"
+  | "SYSTEM_ADMIN_CLAIM_INCOMPLETE"
   | "OTHER";
 
 /**

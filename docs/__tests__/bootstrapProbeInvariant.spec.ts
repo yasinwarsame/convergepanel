@@ -328,10 +328,14 @@ describe("admin-minting operator scripts are classified — BY CONTENT, not by n
      * it is not preceded by `:`.
      */
     const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
-    // `{ admin: true }`, `{ "admin": true }`, and property shorthand `{ admin }`.
-    const setsClaim =
-      /setCustomUserClaims\s*\(/.test(code) &&
-      (/["']?admin["']?\s*:\s*true/.test(code) || /\{[^}]*\badmin\b[^}:]*\}/.test(code));
+    // Phase ADMIN-SCRIPT-HARDENING. Any `setCustomUserClaims(` call in an
+    // operator script is classified, whatever its claim argument. The earlier
+    // predicate also required an `admin: true` / `{ admin }` LITERAL, which a
+    // tool whose claim object is computed elsewhere (the hardened
+    // scripts/admin/set-system-admin-claim.ts writes `plan.after` built in
+    // lib/admin) would evade. Every literal form the old predicate caught is
+    // still caught, because each of them also contains the call.
+    const setsClaim = /setCustomUserClaims\s*\(/.test(code);
     // Any uid reference alongside the bootstrap route — shorthand `{ uid, secret }`
     // carries no colon, so matching `uid:` alone missed the obvious form. The
     // canonical probe contains no `uid` identifier at all, so it stays clear.
@@ -344,13 +348,23 @@ describe("admin-minting operator scripts are classified — BY CONTENT, not by n
 
   it("ANCHOR: the content scan reads real scripts and finds the known minting tools", () => {
     expect(SCRIPT_FILES.length).toBeGreaterThan(5);
-    expect(MINTING).toEqual(expect.arrayContaining([
+    // Phase ADMIN-SCRIPT-HARDENING retired the four legacy minting scripts
+    // (setAdmin.ts, set-admin-claim.js, set-admin-simple.js, set-admin-by-uid.js)
+    // in favour of ONE hardened tool. The anchor is now exact, not
+    // arrayContaining: a second minting script appearing anywhere under
+    // scripts/ must be a deliberate, reviewed change to this list.
+    expect(MINTING).toEqual(["scripts/admin/set-system-admin-claim.ts"]);
+  });
+
+  it("ANCHOR: the retired minting scripts are gone, not merely unclassified", () => {
+    for (const f of [
       "scripts/set-admin-by-uid.js",
       "scripts/set-admin-claim.js",
       "scripts/set-admin-simple.js",
-      // The camelCase file the filename glob could not see.
       "scripts/setAdmin.ts",
-    ]));
+    ]) {
+      expect({ f, tracked: SCRIPT_FILES.includes(f) }).toEqual({ f, tracked: false });
+    }
   });
 
   it("ANCHOR: the predicate is discriminating, not universal", () => {
@@ -388,6 +402,8 @@ describe("admin-minting operator scripts are classified — BY CONTENT, not by n
     // C13: property shorthand and a quoted key both count as minting.
     expect(mintsAuthority(`const admin = true; await setCustomUserClaims(uid, { admin });`)).toBe(true);
     expect(mintsAuthority(`await setCustomUserClaims(uid, { "admin": true });`)).toBe(true);
+    // A computed claim object (the hardened tool's form) is still minting.
+    expect(mintsAuthority(`await auth.setCustomUserClaims(uid, plan.after);`)).toBe(true);
     // ...nor on prose about minting.
     expect(mintsAuthority(`// this script does not call setCustomUserClaims with admin: true`)).toBe(false);
   });
@@ -531,10 +547,7 @@ describe("REPOSITORY-WIDE OPERATOR CONTRACT — discovered, classified, contract
     "lib/security/rateLimit.ts": "IMPLEMENTATION",
     "scripts/lib/probe-admin-secret.mjs": "IMPLEMENTATION_WITH_OPERATOR_GUIDANCE",
     "scripts/probe-admin-secret.mjs": "OPERATOR_INSTRUCTION",
-    "scripts/set-admin-by-uid.js": "MINTING_EXAMPLE",
-    "scripts/set-admin-claim.js": "MINTING_EXAMPLE",
-    "scripts/set-admin-simple.js": "MINTING_EXAMPLE",
-    "scripts/setAdmin.ts": "MINTING_EXAMPLE",
+    "scripts/admin/set-system-admin-claim.ts": "MINTING_EXAMPLE",
   };
 
   /** Both kinds are subject to the canonical operator contract. */
@@ -562,10 +575,7 @@ describe("REPOSITORY-WIDE OPERATOR CONTRACT — discovered, classified, contract
     "app/api/user/usage/route.ts": "IMPLEMENTATION",
     "lib/security/adminSecretProbeAttestation.ts": "IMPLEMENTATION",
     "lib/security/rateLimit.ts": "IMPLEMENTATION",
-    "scripts/set-admin-by-uid.js": "MINTING_EXAMPLE",
-    "scripts/set-admin-claim.js": "MINTING_EXAMPLE",
-    "scripts/set-admin-simple.js": "MINTING_EXAMPLE",
-    "scripts/setAdmin.ts": "MINTING_EXAMPLE",
+    "scripts/admin/set-system-admin-claim.ts": "MINTING_EXAMPLE",
     ".env.local.example": "CONFIG_EXAMPLE",
   };
 
