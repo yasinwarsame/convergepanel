@@ -674,12 +674,39 @@ export function queuePresentedEvidenceQuality(row: Pick<QueueRow, "evidenceQuali
 }
 
 /**
- * A research row's stored disagreement lines presented as disagreements: every stored line except those the route lists
- * in `qualifiedDisagreements` (not a disagreement between independent executing models; shown under their own heading).
+ * The route's cap on `qualifiedDisagreements` (app/api/governance/queue/route.ts RESEARCH_LIST_CAP, pinned by
+ * phase0QueueRenderGuard.spec.tsx through the real GET). Once the list holds this many entries it may be incomplete.
  */
-export function queueResearchDisagreementLines(lines: readonly string[] | undefined, row: Pick<QueueRow, "qualifiedDisagreements">): string[] {
-  const qualified = new Set((row.qualifiedDisagreements ?? []).map((d) => d.text));
-  return (lines ?? []).filter((line) => !qualified.has(line));
+export const QUEUE_QUALIFIED_DISAGREEMENTS_CAP = 3;
+
+/** The topic part of a stored research line: the bullet form is "topic: why", the point form is the topic alone. */
+function researchLineTopic(line: string): string {
+  const i = line.indexOf(": ");
+  return (i >= 0 ? line.slice(0, i) : line).trim();
+}
+
+/**
+ * A research row's stored disagreement lines presented as disagreements between independent executing models. Fails
+ * closed — a line is shown only when the DTO positively establishes it as genuine:
+ *  - the row's execution is verified independent (no `modelIndependence`: the persisted rows prove >= 2 independent
+ *    executing models). Below that ("insufficient" / "unverified") NO stored line is a disagreement between models;
+ *  - the route's qualified list is complete (fewer than QUEUE_QUALIFIED_DISAGREEMENTS_CAP entries). A saturated list may
+ *    omit qualified lines, so no line can be established as genuine from it and none is shown — genuineness is never
+ *    inferred from a line's absence from a capped list;
+ *  - the line matches no qualified entry, by exact text or by topic (bullet "topic: why" and point "topic" forms of one
+ *    stored item are the same item).
+ * Qualified lines stay under their own heading. Presentation only: the DTO and every decision are unchanged.
+ */
+export function queueResearchDisagreementLines(
+  lines: readonly string[] | undefined,
+  row: Pick<QueueRow, "qualifiedDisagreements" | "modelIndependence">
+): string[] {
+  if (row.modelIndependence === "insufficient" || row.modelIndependence === "unverified") return [];
+  const listed = row.qualifiedDisagreements ?? [];
+  if (listed.length >= QUEUE_QUALIFIED_DISAGREEMENTS_CAP) return [];
+  const qualified = new Set(listed.map((d) => d.text));
+  const qualifiedTopics = new Set(listed.map((d) => researchLineTopic(d.text)));
+  return (lines ?? []).filter((line) => !qualified.has(line) && !qualifiedTopics.has(researchLineTopic(line)));
 }
 
 /**
