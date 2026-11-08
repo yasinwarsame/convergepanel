@@ -1,0 +1,6242 @@
+{
+ "_source": "generated 2026-11-08 by phase0QueueDtoBaseline.spec.ts with PHASE0_GOLDEN_OUT in git-archive exports: base = 35933c8, presentation = b894828",
+ "base": {
+  "runs:G-R0": {
+   "runId": "G-R0",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R0",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 0,
+    "substituted": 1,
+    "failed": 1
+   },
+   "disagreements": [
+    "Topic 0.0: w",
+    "Topic 0.1: w",
+    "Legacy 0.2: s"
+   ],
+   "createdAt": "2026-11-01T11:59:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C1": {
+   "runId": "G-C1",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C1",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 1
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Failed",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Inaccurate",
+     "confidence": "high confidence",
+     "summary": "claude says inaccurate"
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says accurate"
+    },
+    {
+     "modelId": "grok",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "grok says accurate"
+    }
+   ],
+   "disagreementPoints": [
+    "Claude rated as inaccurate (others disagree)",
+    "Gemini, Grok rated as accurate (others disagree)"
+   ],
+   "agreementSummary": "2/3 models say accurate",
+   "dissentSummary": "Dissent: Claude: Inaccurate",
+   "claimVerdictSummary": "claude says inaccurate",
+   "createdAt": "2026-11-01T11:58:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V2": {
+   "runId": "G-V2",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V2 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "Likely manipulated",
+     "confidence": ""
+    }
+   ],
+   "agreementSummary": "1/1 models say likely manipulated",
+   "createdAt": "2026-11-01T11:57:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R3": {
+   "runId": "G-R3",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R3",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 1,
+    "failed": 0
+   },
+   "disagreements": [
+    "KD 3: kd"
+   ],
+   "createdAt": "2026-11-01T11:56:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C4": {
+   "runId": "G-C4",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C4",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 0,
+    "substituted": 0,
+    "failed": 2
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Parse error",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Failed",
+     "confidence": ""
+    }
+   ],
+   "createdAt": "2026-11-01T11:55:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V5": {
+   "runId": "G-V5",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V5 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "Authentic",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "Likely manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "manipulated",
+     "confidence": ""
+    }
+   ],
+   "disagreementPoints": [
+    "Gemini rated as authentic (others disagree)",
+    "gpt4o rated as likely manipulated (others disagree)",
+    "Claude rated as manipulated (others disagree)"
+   ],
+   "agreementSummary": "1/3 models say authentic",
+   "dissentSummary": "Dissent: gpt4o: Likely manipulated; Claude: manipulated",
+   "createdAt": "2026-11-01T11:54:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R6": {
+   "runId": "G-R6",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R6",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 1,
+    "failed": 0
+   },
+   "disagreements": [
+    "Point 6.0: models differ",
+    "Point 6.1: models differ",
+    "Legacy 6.2: s"
+   ],
+   "keyFindings": [
+    "Finding 6"
+   ],
+   "disagreementPoints": [
+    "Point 6.0: models differ",
+    "Point 6.1: models differ",
+    "Legacy 6.2"
+   ],
+   "createdAt": "2026-11-01T11:53:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C7": {
+   "runId": "G-C7",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C7",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 0,
+    "failed": 1
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Failed",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "claude says accurate"
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Partially accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says partially_accurate"
+    }
+   ],
+   "disagreementPoints": [
+    "Claude rated as accurate (others disagree)",
+    "Gemini rated as partially accurate (others disagree)"
+   ],
+   "correctParts": [
+    "Part 7 is right"
+   ],
+   "incorrectParts": [
+    "The claim overstates figure 7 by a wide and documented margin across sources."
+   ],
+   "agreementSummary": "1/2 models say accurate",
+   "dissentSummary": "Dissent: Gemini: Partially accurate",
+   "claimVerdictSummary": "claude says accurate",
+   "createdAt": "2026-11-01T11:52:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V8": {
+   "runId": "G-V8",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V8 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "Authentic",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Authentic",
+     "confidence": ""
+    }
+   ],
+   "agreementPoints": [
+    "2/3 models rate as authentic"
+   ],
+   "disagreementPoints": [
+    "gpt4o rated as manipulated (others disagree)"
+   ],
+   "agreementSummary": "2/3 models say authentic",
+   "dissentSummary": "Dissent: gpt4o: manipulated",
+   "createdAt": "2026-11-01T11:51:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R9": {
+   "runId": "G-R9",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R9",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 1,
+    "failed": 0
+   },
+   "disagreements": [
+    "Legacy 9.0: s",
+    "Point 9.1: models differ",
+    "Legacy 9.2: s"
+   ],
+   "createdAt": "2026-11-01T11:50:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C10": {
+   "runId": "G-C10",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C10",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Inaccurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says inaccurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "claude says accurate"
+    }
+   ],
+   "disagreementPoints": [
+    "ChatGPT rated as inaccurate (others disagree)",
+    "Claude rated as accurate (others disagree)"
+   ],
+   "agreementSummary": "1/2 models say inaccurate",
+   "dissentSummary": "Dissent: Claude: Accurate",
+   "claimVerdictSummary": "chatgpt says inaccurate",
+   "createdAt": "2026-11-01T11:49:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V11": {
+   "runId": "G-V11",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V11 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "Authentic",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Authentic",
+     "confidence": ""
+    }
+   ],
+   "agreementPoints": [
+    "2/3 models rate as authentic"
+   ],
+   "disagreementPoints": [
+    "Gemini rated as manipulated (others disagree)"
+   ],
+   "agreementSummary": "2/3 models say authentic",
+   "dissentSummary": "Dissent: Gemini: manipulated",
+   "createdAt": "2026-11-01T11:48:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R12": {
+   "runId": "G-R12",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R12",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 1,
+    "failed": 1
+   },
+   "disagreements": [
+    "Point 12.0: models differ",
+    "Topic 12.1: w",
+    "Topic 12.2: w"
+   ],
+   "keyFindings": [
+    "Finding 12"
+   ],
+   "disagreementPoints": [
+    "Point 12.0: models differ",
+    "Topic 12.1",
+    "Topic 12.2"
+   ],
+   "createdAt": "2026-11-01T11:47:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C13": {
+   "runId": "G-C13",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C13",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 2
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Inaccurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says inaccurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Inaccurate",
+     "confidence": "high confidence",
+     "summary": "claude says inaccurate"
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Parse error",
+     "confidence": ""
+    },
+    {
+     "modelId": "grok",
+     "verdict": "Partially accurate",
+     "confidence": "high confidence",
+     "summary": "grok says partially_accurate"
+    },
+    {
+     "modelId": "perplexity",
+     "verdict": "Parse error",
+     "confidence": ""
+    }
+   ],
+   "disagreementPoints": [
+    "ChatGPT, Claude rated as inaccurate (others disagree)",
+    "Grok rated as partially accurate (others disagree)"
+   ],
+   "correctParts": [
+    "Part 13 is right"
+   ],
+   "agreementSummary": "2/3 models say inaccurate",
+   "dissentSummary": "Dissent: Grok: Partially accurate",
+   "claimVerdictSummary": "chatgpt says inaccurate",
+   "createdAt": "2026-11-01T11:46:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V14": {
+   "runId": "G-V14",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V14 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "Authentic",
+     "confidence": ""
+    }
+   ],
+   "agreementSummary": "1/1 models say authentic",
+   "createdAt": "2026-11-01T11:45:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R15": {
+   "runId": "G-R15",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R15",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 2,
+    "failed": 2
+   },
+   "disagreements": [
+    "Topic 15.0: w",
+    "Topic 15.1: w",
+    "Legacy 15.2: s"
+   ],
+   "createdAt": "2026-11-01T11:44:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C16": {
+   "runId": "G-C16",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C16",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 5,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Inaccurate",
+     "confidence": "high confidence",
+     "summary": "claude says inaccurate"
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says accurate"
+    },
+    {
+     "modelId": "grok",
+     "verdict": "Partially accurate",
+     "confidence": "high confidence",
+     "summary": "grok says partially_accurate"
+    },
+    {
+     "modelId": "perplexity",
+     "verdict": "Inaccurate",
+     "confidence": "high confidence",
+     "summary": "perplexity says inaccurate"
+    }
+   ],
+   "disagreementPoints": [
+    "ChatGPT, Gemini rated as accurate (others disagree)",
+    "Claude, Perplexity rated as inaccurate (others disagree)",
+    "Grok rated as partially accurate (others disagree)"
+   ],
+   "correctParts": [
+    "Part 16 is right"
+   ],
+   "incorrectParts": [
+    "The claim overstates figure 16 by a wide and documented margin across sources."
+   ],
+   "agreementSummary": "2/5 models say accurate",
+   "dissentSummary": "Dissent: Claude: Inaccurate; Grok: Partially accurate; Perplexity: Inaccurate",
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T11:43:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V17": {
+   "runId": "G-V17",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V17 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "Authentic",
+     "confidence": ""
+    }
+   ],
+   "disagreementPoints": [
+    "Gemini rated as manipulated (others disagree)",
+    "gpt4o rated as authentic (others disagree)"
+   ],
+   "agreementSummary": "1/2 models say manipulated",
+   "dissentSummary": "Dissent: gpt4o: Authentic",
+   "createdAt": "2026-11-01T11:42:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R18": {
+   "runId": "G-R18",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R18",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 0,
+    "substituted": 1,
+    "failed": 1
+   },
+   "disagreements": [
+    "Legacy 18.0: s"
+   ],
+   "createdAt": "2026-11-01T11:41:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C19": {
+   "runId": "G-C19",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C19",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 0,
+    "failed": 2
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Parse error",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Inaccurate",
+     "confidence": "high confidence",
+     "summary": "claude says inaccurate"
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Failed",
+     "confidence": ""
+    }
+   ],
+   "disagreementPoints": [
+    "Claude rated as inaccurate (others disagree)"
+   ],
+   "incorrectParts": [
+    "The claim overstates figure 19 by a wide and documented margin across sources."
+   ],
+   "agreementSummary": "1/1 models say inaccurate",
+   "claimVerdictSummary": "claude says inaccurate",
+   "createdAt": "2026-11-01T11:40:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V20": {
+   "runId": "G-V20",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V20 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "Authentic",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Authentic",
+     "confidence": ""
+    }
+   ],
+   "agreementPoints": [
+    "2/3 models rate as authentic"
+   ],
+   "disagreementPoints": [
+    "Gemini rated as manipulated (others disagree)"
+   ],
+   "agreementSummary": "2/3 models say authentic",
+   "dissentSummary": "Dissent: Gemini: manipulated",
+   "createdAt": "2026-11-01T11:39:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R21": {
+   "runId": "G-R21",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R21",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 0,
+    "substituted": 0,
+    "failed": 0
+   },
+   "disagreements": [
+    "Topic 21.0: w"
+   ],
+   "keyFindings": [
+    "Finding 21"
+   ],
+   "disagreementPoints": [
+    "Topic 21.0"
+   ],
+   "createdAt": "2026-11-01T11:38:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C22": {
+   "runId": "G-C22",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C22",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 1
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Inaccurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says inaccurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Partially accurate",
+     "confidence": "high confidence",
+     "summary": "claude says partially_accurate"
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says accurate"
+    },
+    {
+     "modelId": "grok",
+     "verdict": "Parse error",
+     "confidence": ""
+    }
+   ],
+   "disagreementPoints": [
+    "ChatGPT rated as inaccurate (others disagree)",
+    "Claude rated as partially accurate (others disagree)",
+    "Gemini rated as accurate (others disagree)"
+   ],
+   "correctParts": [
+    "Part 22 is right"
+   ],
+   "incorrectParts": [
+    "The claim overstates figure 22 by a wide and documented margin across sources."
+   ],
+   "agreementSummary": "1/3 models say inaccurate",
+   "dissentSummary": "Dissent: Claude: Partially accurate; Gemini: Accurate",
+   "claimVerdictSummary": "chatgpt says inaccurate",
+   "createdAt": "2026-11-01T11:37:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V23": {
+   "runId": "G-V23",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V23 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 0,
+    "failed": 1
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "Likely manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "Failed",
+     "confidence": ""
+    }
+   ],
+   "agreementSummary": "1/1 models say likely manipulated",
+   "createdAt": "2026-11-01T11:36:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R24": {
+   "runId": "G-R24",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R24",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 2,
+    "failed": 1
+   },
+   "disagreements": [
+    "Topic 24.0: w",
+    "Topic 24.1: w",
+    "Topic 24.2: w"
+   ],
+   "keyFindings": [
+    "Finding 24"
+   ],
+   "disagreementPoints": [
+    "Topic 24.0",
+    "Topic 24.1",
+    "Topic 24.2"
+   ],
+   "createdAt": "2026-11-01T11:35:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C25": {
+   "runId": "G-C25",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C25",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 0,
+    "substituted": 0,
+    "failed": 2
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Failed",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Parse error",
+     "confidence": ""
+    }
+   ],
+   "createdAt": "2026-11-01T11:34:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V26": {
+   "runId": "G-V26",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V26 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "Authentic",
+     "confidence": ""
+    }
+   ],
+   "disagreementPoints": [
+    "Gemini rated as manipulated (others disagree)",
+    "gpt4o rated as authentic (others disagree)"
+   ],
+   "agreementSummary": "1/2 models say manipulated",
+   "dissentSummary": "Dissent: gpt4o: Authentic",
+   "createdAt": "2026-11-01T11:33:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R27": {
+   "runId": "G-R27",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R27",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 1,
+    "failed": 0
+   },
+   "disagreements": [
+    "Legacy 27.0: s",
+    "Legacy 27.1: s",
+    "Topic 27.2: w"
+   ],
+   "keyFindings": [
+    "Finding 27"
+   ],
+   "disagreementPoints": [
+    "Legacy 27.0",
+    "Legacy 27.1",
+    "Topic 27.2"
+   ],
+   "createdAt": "2026-11-01T11:32:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C28": {
+   "runId": "G-C28",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C28",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Partially accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says partially_accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Inaccurate",
+     "confidence": "high confidence",
+     "summary": "claude says inaccurate"
+    }
+   ],
+   "disagreementPoints": [
+    "ChatGPT rated as partially accurate (others disagree)",
+    "Claude rated as inaccurate (others disagree)"
+   ],
+   "correctParts": [
+    "Part 28 is right"
+   ],
+   "agreementSummary": "1/2 models say partially accurate",
+   "dissentSummary": "Dissent: Claude: Inaccurate",
+   "claimVerdictSummary": "chatgpt says partially_accurate",
+   "createdAt": "2026-11-01T11:31:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V29": {
+   "runId": "G-V29",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V29 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 0,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "createdAt": "2026-11-01T11:30:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R30": {
+   "runId": "G-R30",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R30",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 1,
+    "failed": 0
+   },
+   "disagreements": [
+    "Topic 30.0: w",
+    "Legacy 30.1: s",
+    "Legacy 30.2: s"
+   ],
+   "createdAt": "2026-11-01T11:29:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C31": {
+   "runId": "G-C31",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C31",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 1
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Partially accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says partially_accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Parse error",
+     "confidence": ""
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says accurate"
+    },
+    {
+     "modelId": "grok",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "grok says accurate"
+    }
+   ],
+   "disagreementPoints": [
+    "ChatGPT rated as partially accurate (others disagree)",
+    "Gemini, Grok rated as accurate (others disagree)"
+   ],
+   "correctParts": [
+    "Part 31 is right"
+   ],
+   "incorrectParts": [
+    "The claim overstates figure 31 by a wide and documented margin across sources."
+   ],
+   "agreementSummary": "2/3 models say accurate",
+   "dissentSummary": "Dissent: ChatGPT: Partially accurate",
+   "claimVerdictSummary": "chatgpt says partially_accurate",
+   "createdAt": "2026-11-01T11:28:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V32": {
+   "runId": "G-V32",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V32 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 0,
+    "failed": 1
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "Failed",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "Likely manipulated",
+     "confidence": ""
+    }
+   ],
+   "agreementSummary": "1/1 models say likely manipulated",
+   "createdAt": "2026-11-01T11:27:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R33": {
+   "runId": "G-R33",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R33",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 0,
+    "substituted": 2,
+    "failed": 0
+   },
+   "disagreements": [
+    "Topic 33.0: w",
+    "Legacy 33.1: s",
+    "Topic 33.2: w"
+   ],
+   "createdAt": "2026-11-01T11:26:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C34": {
+   "runId": "G-C34",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C34",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 1
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Failed",
+     "confidence": ""
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says accurate"
+    },
+    {
+     "modelId": "grok",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "grok says accurate"
+    }
+   ],
+   "agreementPoints": [
+    "3/3 models rate this as accurate"
+   ],
+   "correctParts": [
+    "Part 34 is right"
+   ],
+   "incorrectParts": [
+    "The claim overstates figure 34 by a wide and documented margin across sources."
+   ],
+   "agreementSummary": "3/3 models say accurate",
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T11:25:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V35": {
+   "runId": "G-V35",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V35 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "Likely manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "Authentic",
+     "confidence": ""
+    }
+   ],
+   "disagreementPoints": [
+    "Gemini rated as likely manipulated (others disagree)",
+    "gpt4o rated as authentic (others disagree)"
+   ],
+   "agreementSummary": "1/2 models say likely manipulated",
+   "dissentSummary": "Dissent: gpt4o: Authentic",
+   "createdAt": "2026-11-01T11:24:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R36": {
+   "runId": "G-R36",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R36",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 1,
+    "failed": 0
+   },
+   "disagreements": [
+    "Topic 36.0: w",
+    "Topic 36.1: w",
+    "Topic 36.2: w"
+   ],
+   "keyFindings": [
+    "Finding 36"
+   ],
+   "disagreementPoints": [
+    "Topic 36.0",
+    "Topic 36.1",
+    "Topic 36.2"
+   ],
+   "createdAt": "2026-11-01T11:23:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C37": {
+   "runId": "G-C37",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C37",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 0,
+    "failed": 2
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Parse error",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "claude says accurate"
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Failed",
+     "confidence": ""
+    }
+   ],
+   "disagreementPoints": [
+    "Claude rated as accurate (others disagree)"
+   ],
+   "correctParts": [
+    "Part 37 is right"
+   ],
+   "incorrectParts": [
+    "The claim overstates figure 37 by a wide and documented margin across sources."
+   ],
+   "agreementSummary": "1/1 models say accurate",
+   "claimVerdictSummary": "claude says accurate",
+   "createdAt": "2026-11-01T11:22:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V38": {
+   "runId": "G-V38",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V38 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "Authentic",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "manipulated",
+     "confidence": ""
+    }
+   ],
+   "agreementPoints": [
+    "2/3 models rate as manipulated"
+   ],
+   "disagreementPoints": [
+    "gpt4o rated as authentic (others disagree)"
+   ],
+   "agreementSummary": "2/3 models say manipulated",
+   "dissentSummary": "Dissent: gpt4o: Authentic",
+   "createdAt": "2026-11-01T11:21:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R39": {
+   "runId": "G-R39",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R39",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 4,
+    "substituted": 0,
+    "failed": 0
+   },
+   "disagreements": [
+    "KD 39: kd"
+   ],
+   "keyFindings": [
+    "Finding 39"
+   ],
+   "createdAt": "2026-11-01T11:20:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C40": {
+   "runId": "G-C40",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C40",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 4,
+    "substituted": 0,
+    "failed": 1
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "claude says accurate"
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says accurate"
+    },
+    {
+     "modelId": "grok",
+     "verdict": "Inaccurate",
+     "confidence": "high confidence",
+     "summary": "grok says inaccurate"
+    },
+    {
+     "modelId": "perplexity",
+     "verdict": "Failed",
+     "confidence": ""
+    }
+   ],
+   "agreementPoints": [
+    "3/4 models rate this as accurate"
+   ],
+   "disagreementPoints": [
+    "Grok rated as inaccurate (others disagree)"
+   ],
+   "correctParts": [
+    "Part 40 is right"
+   ],
+   "incorrectParts": [
+    "The claim overstates figure 40 by a wide and documented margin across sources."
+   ],
+   "agreementSummary": "3/4 models say accurate",
+   "dissentSummary": "Dissent: Grok: Inaccurate",
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T11:19:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V41": {
+   "runId": "G-V41",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V41 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "manipulated",
+     "confidence": ""
+    }
+   ],
+   "agreementSummary": "1/1 models say manipulated",
+   "createdAt": "2026-11-01T11:18:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R42": {
+   "runId": "G-R42",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R42",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 0,
+    "failed": 0
+   },
+   "disagreements": [
+    "Point 42.0: models differ",
+    "Topic 42.1: w",
+    "Topic 42.2: w"
+   ],
+   "createdAt": "2026-11-01T11:17:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C43": {
+   "runId": "G-C43",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C43",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 0,
+    "failed": 1
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Parse error",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Inaccurate",
+     "confidence": "high confidence",
+     "summary": "claude says inaccurate"
+    }
+   ],
+   "disagreementPoints": [
+    "Claude rated as inaccurate (others disagree)"
+   ],
+   "incorrectParts": [
+    "The claim overstates figure 43 by a wide and documented margin across sources."
+   ],
+   "agreementSummary": "1/1 models say inaccurate",
+   "claimVerdictSummary": "claude says inaccurate",
+   "createdAt": "2026-11-01T11:16:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V44": {
+   "runId": "G-V44",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V44 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "Likely manipulated",
+     "confidence": ""
+    }
+   ],
+   "agreementSummary": "1/1 models say likely manipulated",
+   "createdAt": "2026-11-01T11:15:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R45": {
+   "runId": "G-R45",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R45",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 2,
+    "failed": 2
+   },
+   "disagreements": [
+    "Topic 45.0: w",
+    "Topic 45.1: w",
+    "Topic 45.2: w"
+   ],
+   "createdAt": "2026-11-01T11:14:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C46": {
+   "runId": "G-C46",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C46",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 0,
+    "failed": 1
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Parse error",
+     "confidence": ""
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says accurate"
+    }
+   ],
+   "disagreementPoints": [
+    "ChatGPT, Gemini rated as accurate (others disagree)"
+   ],
+   "agreementSummary": "2/2 models say accurate",
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T11:13:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V47": {
+   "runId": "G-V47",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V47 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 0,
+    "failed": 1
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "Likely manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "Likely manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Failed",
+     "confidence": ""
+    }
+   ],
+   "agreementPoints": [
+    "2/2 models rate as likely manipulated"
+   ],
+   "agreementSummary": "2/2 models say likely manipulated",
+   "createdAt": "2026-11-01T11:12:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R48": {
+   "runId": "G-R48",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R48",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 0,
+    "failed": 1
+   },
+   "disagreements": [
+    "Topic 48.0: w"
+   ],
+   "createdAt": "2026-11-01T11:11:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C49": {
+   "runId": "G-C49",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C49",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 1
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Parse error",
+     "confidence": ""
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says accurate"
+    },
+    {
+     "modelId": "grok",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "grok says accurate"
+    }
+   ],
+   "agreementPoints": [
+    "3/3 models rate this as accurate"
+   ],
+   "correctParts": [
+    "Part 49 is right"
+   ],
+   "incorrectParts": [
+    "The claim overstates figure 49 by a wide and documented margin across sources."
+   ],
+   "agreementSummary": "3/3 models say accurate",
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T11:10:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V50": {
+   "runId": "G-V50",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V50 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "Likely manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "manipulated",
+     "confidence": ""
+    }
+   ],
+   "agreementPoints": [
+    "2/3 models rate as manipulated"
+   ],
+   "disagreementPoints": [
+    "gpt4o rated as likely manipulated (others disagree)"
+   ],
+   "agreementSummary": "2/3 models say manipulated",
+   "dissentSummary": "Dissent: gpt4o: Likely manipulated",
+   "createdAt": "2026-11-01T11:09:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R51": {
+   "runId": "G-R51",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R51",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 1,
+    "failed": 1
+   },
+   "disagreements": [
+    "Topic 51.0: w",
+    "Topic 51.1: w",
+    "KD 51: kd"
+   ],
+   "keyFindings": [
+    "Finding 51"
+   ],
+   "disagreementPoints": [
+    "Topic 51.0",
+    "Topic 51.1"
+   ],
+   "createdAt": "2026-11-01T11:08:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C52": {
+   "runId": "G-C52",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C52",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 0,
+    "failed": 3
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Inaccurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says inaccurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Parse error",
+     "confidence": ""
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says accurate"
+    },
+    {
+     "modelId": "grok",
+     "verdict": "Failed",
+     "confidence": ""
+    },
+    {
+     "modelId": "perplexity",
+     "verdict": "Failed",
+     "confidence": ""
+    }
+   ],
+   "disagreementPoints": [
+    "ChatGPT rated as inaccurate (others disagree)",
+    "Gemini rated as accurate (others disagree)"
+   ],
+   "agreementSummary": "1/2 models say inaccurate",
+   "dissentSummary": "Dissent: Gemini: Accurate",
+   "claimVerdictSummary": "chatgpt says inaccurate",
+   "createdAt": "2026-11-01T11:07:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V53": {
+   "runId": "G-V53",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V53 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "Authentic",
+     "confidence": ""
+    }
+   ],
+   "agreementSummary": "1/1 models say authentic",
+   "createdAt": "2026-11-01T11:06:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R54": {
+   "runId": "G-R54",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R54",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 0,
+    "substituted": 2,
+    "failed": 0
+   },
+   "disagreements": [
+    "Point 54.0: models differ",
+    "Legacy 54.1: s"
+   ],
+   "createdAt": "2026-11-01T11:05:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C55": {
+   "runId": "G-C55",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C55",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 0,
+    "failed": 1
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Parse error",
+     "confidence": ""
+    }
+   ],
+   "disagreementPoints": [
+    "ChatGPT rated as accurate (others disagree)"
+   ],
+   "agreementSummary": "1/1 models say accurate",
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T11:04:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V56": {
+   "runId": "G-V56",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V56 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "Likely manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "manipulated",
+     "confidence": ""
+    }
+   ],
+   "agreementPoints": [
+    "2/3 models rate as manipulated"
+   ],
+   "disagreementPoints": [
+    "gpt4o rated as likely manipulated (others disagree)"
+   ],
+   "agreementSummary": "2/3 models say manipulated",
+   "dissentSummary": "Dissent: gpt4o: Likely manipulated",
+   "createdAt": "2026-11-01T11:03:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R57": {
+   "runId": "G-R57",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R57",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 0,
+    "substituted": 1,
+    "failed": 2
+   },
+   "disagreements": [
+    "Legacy 57.0: s",
+    "Point 57.1: models differ"
+   ],
+   "createdAt": "2026-11-01T11:02:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C58": {
+   "runId": "G-C58",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C58",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 5,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "claude says accurate"
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Partially accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says partially_accurate"
+    },
+    {
+     "modelId": "grok",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "grok says accurate"
+    },
+    {
+     "modelId": "perplexity",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "perplexity says accurate"
+    }
+   ],
+   "agreementPoints": [
+    "4/5 models rate this as accurate"
+   ],
+   "disagreementPoints": [
+    "Gemini rated as partially accurate (others disagree)"
+   ],
+   "correctParts": [
+    "Part 58 is right"
+   ],
+   "incorrectParts": [
+    "The claim overstates figure 58 by a wide and documented margin across sources."
+   ],
+   "agreementSummary": "4/5 models say accurate",
+   "dissentSummary": "Dissent: Gemini: Partially accurate",
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T11:01:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V59": {
+   "runId": "G-V59",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V59 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "Authentic",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Authentic",
+     "confidence": ""
+    }
+   ],
+   "agreementPoints": [
+    "2/3 models rate as authentic"
+   ],
+   "disagreementPoints": [
+    "gpt4o rated as manipulated (others disagree)"
+   ],
+   "agreementSummary": "2/3 models say authentic",
+   "dissentSummary": "Dissent: gpt4o: manipulated",
+   "createdAt": "2026-11-01T11:00:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R60": {
+   "runId": "G-R60",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R60",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 2,
+    "failed": 0
+   },
+   "disagreements": [
+    "Topic 60.0: w",
+    "KD 60: kd"
+   ],
+   "createdAt": "2026-11-01T10:59:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:R-IND": {
+   "runId": "R-IND",
+   "collection": "runs",
+   "runType": "research",
+   "question": "R-IND",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 5,
+    "substituted": 0,
+    "failed": 0
+   },
+   "disagreements": [
+    "Topic A: w"
+   ],
+   "createdAt": "2026-11-01T10:58:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:R-FC": {
+   "runId": "R-FC",
+   "collection": "runs",
+   "runType": "research",
+   "question": "R-FC",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 0,
+    "substituted": 3,
+    "failed": 0
+   },
+   "disagreements": [
+    "Topic A: w"
+   ],
+   "createdAt": "2026-11-01T10:57:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:R-PC": {
+   "runId": "R-PC",
+   "collection": "runs",
+   "runType": "research",
+   "question": "R-PC",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 2,
+    "failed": 0
+   },
+   "disagreements": [
+    "Topic same-exec: w",
+    "Topic genuine: w"
+   ],
+   "createdAt": "2026-11-01T10:56:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:R-UV": {
+   "runId": "R-UV",
+   "collection": "runs",
+   "runType": "research",
+   "question": "R-UV",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 1,
+    "failed": 0
+   },
+   "disagreements": [
+    "Topic A: w"
+   ],
+   "createdAt": "2026-11-01T10:55:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:R-NOROWS": {
+   "runId": "R-NOROWS",
+   "collection": "runs",
+   "runType": "research",
+   "question": "R-NOROWS",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 0,
+    "substituted": 0,
+    "failed": 0
+   },
+   "disagreements": [
+    "Topic A: w"
+   ],
+   "createdAt": "2026-11-01T10:54:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:R-B-IND": {
+   "runId": "R-B-IND",
+   "collection": "runs",
+   "runType": "research",
+   "question": "R-B-IND",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 5,
+    "substituted": 0,
+    "failed": 0
+   },
+   "disagreements": [
+    "Topic B: w"
+   ],
+   "createdAt": "2026-11-01T10:52:00.000Z",
+   "userId": "owner-b",
+   "userEmail": "owner-b"
+  },
+  "runs:R-CAP": {
+   "runId": "R-CAP",
+   "collection": "runs",
+   "runType": "research",
+   "question": "R-CAP",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 2,
+    "failed": 0
+   },
+   "disagreements": [
+    "Same 1: w",
+    "Same 2: w",
+    "Same 3: w"
+   ],
+   "createdAt": "2026-11-01T10:51:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:C-IND-agree2": {
+   "runId": "C-IND-agree2",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "C-IND-agree2",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "claude says accurate"
+    }
+   ],
+   "disagreementPoints": [
+    "ChatGPT, Claude rated as accurate (others disagree)"
+   ],
+   "agreementSummary": "2/2 models say accurate",
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T10:50:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:C-IND-split": {
+   "runId": "C-IND-split",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "C-IND-split",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 4,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "claude says accurate"
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says accurate"
+    },
+    {
+     "modelId": "grok",
+     "verdict": "Inaccurate",
+     "confidence": "high confidence",
+     "summary": "grok says inaccurate"
+    }
+   ],
+   "agreementPoints": [
+    "3/4 models rate this as accurate"
+   ],
+   "disagreementPoints": [
+    "Grok rated as inaccurate (others disagree)"
+   ],
+   "agreementSummary": "3/4 models say accurate",
+   "dissentSummary": "Dissent: Grok: Inaccurate",
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T10:49:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:C-ONE": {
+   "runId": "C-ONE",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "C-ONE",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 0,
+    "failed": 1
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Failed",
+     "confidence": ""
+    }
+   ],
+   "disagreementPoints": [
+    "ChatGPT rated as accurate (others disagree)"
+   ],
+   "agreementSummary": "1/1 models say accurate",
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T10:48:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:C-REAL3": {
+   "runId": "C-REAL3",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "C-REAL3",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "claude says accurate"
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says accurate"
+    }
+   ],
+   "agreementPoints": [
+    "3/3 models rate this as accurate"
+   ],
+   "agreementSummary": "3/3 models say accurate",
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T10:47:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:C-SUBNONE": {
+   "runId": "C-SUBNONE",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "C-SUBNONE",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "claude says accurate"
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says accurate"
+    }
+   ],
+   "agreementPoints": [
+    "3/3 models rate this as accurate"
+   ],
+   "agreementSummary": "3/3 models say accurate",
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T10:46:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:C-SUBMIX": {
+   "runId": "C-SUBMIX",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "C-SUBMIX",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "claude says accurate"
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says accurate"
+    }
+   ],
+   "agreementPoints": [
+    "3/3 models rate this as accurate"
+   ],
+   "agreementSummary": "3/3 models say accurate",
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T10:45:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:C-SUBUNK": {
+   "runId": "C-SUBUNK",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "C-SUBUNK",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "claude says accurate"
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says accurate"
+    }
+   ],
+   "agreementPoints": [
+    "3/3 models rate this as accurate"
+   ],
+   "agreementSummary": "3/3 models say accurate",
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T10:44:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:C-B-IND": {
+   "runId": "C-B-IND",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "C-B-IND",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "claude says accurate"
+    }
+   ],
+   "disagreementPoints": [
+    "ChatGPT, Claude rated as accurate (others disagree)"
+   ],
+   "agreementSummary": "2/2 models say accurate",
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T10:43:00.000Z",
+   "userId": "owner-b",
+   "userEmail": "owner-b"
+  },
+  "verifications:C-SUBREC": {
+   "runId": "C-SUBREC",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "C-SUBREC",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "claude says accurate"
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says accurate"
+    }
+   ],
+   "agreementPoints": [
+    "3/3 models rate this as accurate"
+   ],
+   "agreementSummary": "3/3 models say accurate",
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T10:42:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:V-IND": {
+   "runId": "V-IND",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: V-IND (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "Authentic",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "Authentic",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "manipulated",
+     "confidence": ""
+    }
+   ],
+   "agreementPoints": [
+    "2/3 models rate as authentic"
+   ],
+   "disagreementPoints": [
+    "Claude rated as manipulated (others disagree)"
+   ],
+   "agreementSummary": "2/3 models say authentic",
+   "dissentSummary": "Dissent: Claude: manipulated",
+   "createdAt": "2026-11-01T10:41:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:V-ONE": {
+   "runId": "V-ONE",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: V-ONE (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 0,
+    "failed": 2
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "Authentic",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "Failed",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Failed",
+     "confidence": ""
+    }
+   ],
+   "agreementSummary": "1/1 models say authentic",
+   "createdAt": "2026-11-01T10:40:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:V-SUB": {
+   "runId": "V-SUB",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: V-SUB (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 0,
+    "failed": 1
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "Authentic",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "Authentic",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Parse error",
+     "confidence": ""
+    }
+   ],
+   "agreementPoints": [
+    "2/2 models rate as authentic"
+   ],
+   "agreementSummary": "2/2 models say authentic",
+   "createdAt": "2026-11-01T10:39:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  }
+ },
+ "presentation": {
+  "runs:G-R0": {
+   "runId": "G-R0",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R0",
+   "consensusScore": null,
+   "evidenceQuality": null,
+   "consensusWithheld": "insufficient_independent_models",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 0,
+    "substituted": 1,
+    "failed": 1
+   },
+   "qualifiedDisagreements": [
+    {
+     "text": "Topic 0.0: w",
+     "basis": "single_independent_model"
+    },
+    {
+     "text": "Topic 0.1: w",
+     "basis": "single_independent_model"
+    },
+    {
+     "text": "Legacy 0.2: s",
+     "basis": "single_independent_model"
+    }
+   ],
+   "modelIndependence": "insufficient",
+   "createdAt": "2026-11-01T11:59:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C1": {
+   "runId": "G-C1",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C1",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 1
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Failed",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Inaccurate",
+     "confidence": "high confidence",
+     "summary": "claude says inaccurate"
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says accurate"
+    },
+    {
+     "modelId": "grok",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "grok says accurate"
+    }
+   ],
+   "disagreementPoints": [
+    "Claude rated as inaccurate (others disagree)",
+    "Gemini, Grok rated as accurate (others disagree)"
+   ],
+   "agreementSummary": "2/3 models say accurate",
+   "dissentSummary": "Dissent: Claude: Inaccurate",
+   "claimVerdictSummary": "claude says inaccurate",
+   "createdAt": "2026-11-01T11:58:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V2": {
+   "runId": "G-V2",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V2 (unknown, ?x?)",
+   "consensusScore": null,
+   "evidenceQuality": null,
+   "consensusWithheld": "insufficient_independent_models",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "Likely manipulated",
+     "confidence": ""
+    }
+   ],
+   "singleModelAssessment": "One independent model's assessment (Gemini): likely manipulated — not agreement between models",
+   "modelIndependence": "insufficient",
+   "createdAt": "2026-11-01T11:57:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R3": {
+   "runId": "G-R3",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R3",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 1,
+    "failed": 0
+   },
+   "disagreements": [
+    "KD 3: kd"
+   ],
+   "createdAt": "2026-11-01T11:56:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C4": {
+   "runId": "G-C4",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C4",
+   "consensusScore": null,
+   "evidenceQuality": null,
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 0,
+    "substituted": 0,
+    "failed": 2
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Parse error",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Failed",
+     "confidence": ""
+    }
+   ],
+   "createdAt": "2026-11-01T11:55:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V5": {
+   "runId": "G-V5",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V5 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "Authentic",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "Likely manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "manipulated",
+     "confidence": ""
+    }
+   ],
+   "disagreementPoints": [
+    "Gemini rated as authentic (others disagree)",
+    "gpt4o rated as likely manipulated (others disagree)",
+    "Claude rated as manipulated (others disagree)"
+   ],
+   "agreementSummary": "1/3 models say authentic",
+   "dissentSummary": "Dissent: gpt4o: Likely manipulated; Claude: manipulated",
+   "createdAt": "2026-11-01T11:54:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R6": {
+   "runId": "G-R6",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R6",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 1,
+    "failed": 0
+   },
+   "disagreements": [
+    "Point 6.0: models differ",
+    "Point 6.1: models differ",
+    "Legacy 6.2: s"
+   ],
+   "keyFindings": [
+    "Finding 6"
+   ],
+   "disagreementPoints": [
+    "Point 6.0: models differ",
+    "Point 6.1: models differ",
+    "Legacy 6.2"
+   ],
+   "createdAt": "2026-11-01T11:53:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C7": {
+   "runId": "G-C7",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C7",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 0,
+    "failed": 1
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Failed",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "claude says accurate"
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Partially accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says partially_accurate"
+    }
+   ],
+   "disagreementPoints": [
+    "Claude rated as accurate (others disagree)",
+    "Gemini rated as partially accurate (others disagree)"
+   ],
+   "correctParts": [
+    "Part 7 is right"
+   ],
+   "incorrectParts": [
+    "The claim overstates figure 7 by a wide and documented margin across sources."
+   ],
+   "agreementSummary": "1/2 models say accurate",
+   "dissentSummary": "Dissent: Gemini: Partially accurate",
+   "claimVerdictSummary": "claude says accurate",
+   "createdAt": "2026-11-01T11:52:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V8": {
+   "runId": "G-V8",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V8 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "Authentic",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Authentic",
+     "confidence": ""
+    }
+   ],
+   "disagreementPoints": [
+    "Gemini rated as authentic (others disagree)",
+    "gpt4o rated as manipulated (others disagree)"
+   ],
+   "agreementSummary": "1/2 models say authentic",
+   "dissentSummary": "Dissent: gpt4o: manipulated",
+   "createdAt": "2026-11-01T11:51:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R9": {
+   "runId": "G-R9",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R9",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 1,
+    "failed": 0
+   },
+   "disagreements": [
+    "Legacy 9.0: s",
+    "Point 9.1: models differ",
+    "Legacy 9.2: s"
+   ],
+   "createdAt": "2026-11-01T11:50:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C10": {
+   "runId": "G-C10",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C10",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Inaccurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says inaccurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "claude says accurate"
+    }
+   ],
+   "disagreementPoints": [
+    "ChatGPT rated as inaccurate (others disagree)",
+    "Claude rated as accurate (others disagree)"
+   ],
+   "agreementSummary": "1/2 models say inaccurate",
+   "dissentSummary": "Dissent: Claude: Accurate",
+   "claimVerdictSummary": "chatgpt says inaccurate",
+   "createdAt": "2026-11-01T11:49:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V11": {
+   "runId": "G-V11",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V11 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "Authentic",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Authentic",
+     "confidence": ""
+    }
+   ],
+   "agreementPoints": [
+    "2/3 models rate as authentic"
+   ],
+   "disagreementPoints": [
+    "Gemini rated as manipulated (others disagree)"
+   ],
+   "agreementSummary": "2/3 models say authentic",
+   "dissentSummary": "Dissent: Gemini: manipulated",
+   "createdAt": "2026-11-01T11:48:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R12": {
+   "runId": "G-R12",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R12",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 1,
+    "failed": 1
+   },
+   "disagreements": [
+    "Point 12.0: models differ",
+    "Topic 12.1: w",
+    "Topic 12.2: w"
+   ],
+   "keyFindings": [
+    "Finding 12"
+   ],
+   "disagreementPoints": [
+    "Point 12.0: models differ",
+    "Topic 12.1",
+    "Topic 12.2"
+   ],
+   "createdAt": "2026-11-01T11:47:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C13": {
+   "runId": "G-C13",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C13",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 2
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Inaccurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says inaccurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Inaccurate",
+     "confidence": "high confidence",
+     "summary": "claude says inaccurate"
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Parse error",
+     "confidence": ""
+    },
+    {
+     "modelId": "grok",
+     "verdict": "Partially accurate",
+     "confidence": "high confidence",
+     "summary": "grok says partially_accurate"
+    },
+    {
+     "modelId": "perplexity",
+     "verdict": "Parse error",
+     "confidence": ""
+    }
+   ],
+   "disagreementPoints": [
+    "ChatGPT, Claude rated as inaccurate (others disagree)",
+    "Grok rated as partially accurate (others disagree)"
+   ],
+   "correctParts": [
+    "Part 13 is right"
+   ],
+   "agreementSummary": "2/3 models say inaccurate",
+   "dissentSummary": "Dissent: Grok: Partially accurate",
+   "claimVerdictSummary": "chatgpt says inaccurate",
+   "createdAt": "2026-11-01T11:46:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V14": {
+   "runId": "G-V14",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V14 (unknown, ?x?)",
+   "consensusScore": null,
+   "evidenceQuality": null,
+   "consensusWithheld": "insufficient_independent_models",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "Authentic",
+     "confidence": ""
+    }
+   ],
+   "singleModelAssessment": "One independent model's assessment (Gemini): authentic — not agreement between models",
+   "modelIndependence": "insufficient",
+   "createdAt": "2026-11-01T11:45:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R15": {
+   "runId": "G-R15",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R15",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 2,
+    "failed": 2
+   },
+   "disagreements": [
+    "Topic 15.0: w",
+    "Topic 15.1: w",
+    "Legacy 15.2: s"
+   ],
+   "qualifiedDisagreements": [
+    {
+     "text": "KD 15: kd",
+     "basis": "independence_unverified"
+    }
+   ],
+   "createdAt": "2026-11-01T11:44:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C16": {
+   "runId": "G-C16",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C16",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 5,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Inaccurate",
+     "confidence": "high confidence",
+     "summary": "claude says inaccurate"
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says accurate"
+    },
+    {
+     "modelId": "grok",
+     "verdict": "Partially accurate",
+     "confidence": "high confidence",
+     "summary": "grok says partially_accurate"
+    },
+    {
+     "modelId": "perplexity",
+     "verdict": "Inaccurate",
+     "confidence": "high confidence",
+     "summary": "perplexity says inaccurate"
+    }
+   ],
+   "disagreementPoints": [
+    "Claude rated as inaccurate (others disagree)",
+    "Gemini rated as accurate (others disagree)",
+    "Grok rated as partially accurate (others disagree)"
+   ],
+   "correctParts": [
+    "Part 16 is right"
+   ],
+   "incorrectParts": [
+    "The claim overstates figure 16 by a wide and documented margin across sources."
+   ],
+   "agreementSummary": "1/3 models say inaccurate",
+   "dissentSummary": "Dissent: Gemini: Accurate; Grok: Partially accurate",
+   "qualifiedDisagreements": [
+    {
+     "text": "DeepSeek (substituting ChatGPT, Perplexity) rated as accurate; inaccurate — repeated outputs from one executing model",
+     "basis": "same_executing_model"
+    }
+   ],
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T11:43:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V17": {
+   "runId": "G-V17",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V17 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "Authentic",
+     "confidence": ""
+    }
+   ],
+   "disagreementPoints": [
+    "Gemini rated as manipulated (others disagree)",
+    "gpt4o rated as authentic (others disagree)"
+   ],
+   "agreementSummary": "1/2 models say manipulated",
+   "dissentSummary": "Dissent: gpt4o: Authentic",
+   "createdAt": "2026-11-01T11:42:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R18": {
+   "runId": "G-R18",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R18",
+   "consensusScore": null,
+   "evidenceQuality": null,
+   "consensusWithheld": "insufficient_independent_models",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 0,
+    "substituted": 1,
+    "failed": 1
+   },
+   "qualifiedDisagreements": [
+    {
+     "text": "Legacy 18.0: s",
+     "basis": "single_independent_model"
+    }
+   ],
+   "modelIndependence": "insufficient",
+   "createdAt": "2026-11-01T11:41:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C19": {
+   "runId": "G-C19",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C19",
+   "consensusScore": null,
+   "evidenceQuality": null,
+   "consensusWithheld": "insufficient_independent_models",
+   "modelIndependence": "insufficient",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 0,
+    "failed": 2
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Parse error",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Inaccurate",
+     "confidence": "high confidence",
+     "summary": "claude says inaccurate"
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Failed",
+     "confidence": ""
+    }
+   ],
+   "incorrectParts": [
+    "The claim overstates figure 19 by a wide and documented margin across sources."
+   ],
+   "singleModelAssessment": "One independent model's assessment (Claude): inaccurate — not agreement between models",
+   "claimVerdictSummary": "claude says inaccurate",
+   "createdAt": "2026-11-01T11:40:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V20": {
+   "runId": "G-V20",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V20 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "Authentic",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Authentic",
+     "confidence": ""
+    }
+   ],
+   "agreementPoints": [
+    "2/3 models rate as authentic"
+   ],
+   "disagreementPoints": [
+    "Gemini rated as manipulated (others disagree)"
+   ],
+   "agreementSummary": "2/3 models say authentic",
+   "dissentSummary": "Dissent: Gemini: manipulated",
+   "createdAt": "2026-11-01T11:39:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R21": {
+   "runId": "G-R21",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R21",
+   "consensusScore": null,
+   "evidenceQuality": null,
+   "consensusWithheld": "independence_unverified",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 0,
+    "substituted": 0,
+    "failed": 0
+   },
+   "keyFindings": [
+    "Finding 21"
+   ],
+   "qualifiedDisagreements": [
+    {
+     "text": "Topic 21.0: w",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic 21.0",
+     "basis": "independence_unverified"
+    }
+   ],
+   "modelIndependence": "unverified",
+   "createdAt": "2026-11-01T11:38:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C22": {
+   "runId": "G-C22",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C22",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 1
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Inaccurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says inaccurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Partially accurate",
+     "confidence": "high confidence",
+     "summary": "claude says partially_accurate"
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says accurate"
+    },
+    {
+     "modelId": "grok",
+     "verdict": "Parse error",
+     "confidence": ""
+    }
+   ],
+   "disagreementPoints": [
+    "ChatGPT rated as inaccurate (others disagree)",
+    "Claude rated as partially accurate (others disagree)",
+    "Gemini rated as accurate (others disagree)"
+   ],
+   "correctParts": [
+    "Part 22 is right"
+   ],
+   "incorrectParts": [
+    "The claim overstates figure 22 by a wide and documented margin across sources."
+   ],
+   "agreementSummary": "1/3 models say inaccurate",
+   "dissentSummary": "Dissent: Claude: Partially accurate; Gemini: Accurate",
+   "claimVerdictSummary": "chatgpt says inaccurate",
+   "createdAt": "2026-11-01T11:37:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V23": {
+   "runId": "G-V23",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V23 (unknown, ?x?)",
+   "consensusScore": null,
+   "evidenceQuality": null,
+   "consensusWithheld": "insufficient_independent_models",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 0,
+    "failed": 1
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "Likely manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "Failed",
+     "confidence": ""
+    }
+   ],
+   "singleModelAssessment": "One independent model's assessment (Gemini): likely manipulated — not agreement between models",
+   "modelIndependence": "insufficient",
+   "createdAt": "2026-11-01T11:36:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R24": {
+   "runId": "G-R24",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R24",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 2,
+    "failed": 1
+   },
+   "disagreements": [
+    "Topic 24.0: w",
+    "Topic 24.1: w",
+    "Topic 24.2: w"
+   ],
+   "keyFindings": [
+    "Finding 24"
+   ],
+   "disagreementPoints": [
+    "Topic 24.0",
+    "Topic 24.1",
+    "Topic 24.2"
+   ],
+   "createdAt": "2026-11-01T11:35:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C25": {
+   "runId": "G-C25",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C25",
+   "consensusScore": null,
+   "evidenceQuality": null,
+   "consensusWithheld": "insufficient_independent_models",
+   "modelIndependence": "insufficient",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 0,
+    "substituted": 0,
+    "failed": 2
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Failed",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Parse error",
+     "confidence": ""
+    }
+   ],
+   "createdAt": "2026-11-01T11:34:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V26": {
+   "runId": "G-V26",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V26 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "Authentic",
+     "confidence": ""
+    }
+   ],
+   "disagreementPoints": [
+    "Gemini rated as manipulated (others disagree)",
+    "gpt4o rated as authentic (others disagree)"
+   ],
+   "agreementSummary": "1/2 models say manipulated",
+   "dissentSummary": "Dissent: gpt4o: Authentic",
+   "createdAt": "2026-11-01T11:33:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R27": {
+   "runId": "G-R27",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R27",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 1,
+    "failed": 0
+   },
+   "disagreements": [
+    "Legacy 27.0: s",
+    "Legacy 27.1: s",
+    "Topic 27.2: w"
+   ],
+   "keyFindings": [
+    "Finding 27"
+   ],
+   "disagreementPoints": [
+    "Legacy 27.0",
+    "Legacy 27.1",
+    "Topic 27.2"
+   ],
+   "createdAt": "2026-11-01T11:32:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C28": {
+   "runId": "G-C28",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C28",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Partially accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says partially_accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Inaccurate",
+     "confidence": "high confidence",
+     "summary": "claude says inaccurate"
+    }
+   ],
+   "disagreementPoints": [
+    "ChatGPT rated as partially accurate (others disagree)",
+    "Claude rated as inaccurate (others disagree)"
+   ],
+   "correctParts": [
+    "Part 28 is right"
+   ],
+   "agreementSummary": "1/2 models say partially accurate",
+   "dissentSummary": "Dissent: Claude: Inaccurate",
+   "claimVerdictSummary": "chatgpt says partially_accurate",
+   "createdAt": "2026-11-01T11:31:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V29": {
+   "runId": "G-V29",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V29 (unknown, ?x?)",
+   "consensusScore": null,
+   "evidenceQuality": null,
+   "consensusWithheld": "independence_unverified",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 0,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelIndependence": "unverified",
+   "createdAt": "2026-11-01T11:30:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R30": {
+   "runId": "G-R30",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R30",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 1,
+    "failed": 0
+   },
+   "disagreements": [
+    "Topic 30.0: w",
+    "Legacy 30.1: s",
+    "Legacy 30.2: s"
+   ],
+   "createdAt": "2026-11-01T11:29:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C31": {
+   "runId": "G-C31",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C31",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 1
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Partially accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says partially_accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Parse error",
+     "confidence": ""
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says accurate"
+    },
+    {
+     "modelId": "grok",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "grok says accurate"
+    }
+   ],
+   "disagreementPoints": [
+    "ChatGPT rated as partially accurate (others disagree)",
+    "Gemini, Grok rated as accurate (others disagree)"
+   ],
+   "correctParts": [
+    "Part 31 is right"
+   ],
+   "incorrectParts": [
+    "The claim overstates figure 31 by a wide and documented margin across sources."
+   ],
+   "agreementSummary": "2/3 models say accurate",
+   "dissentSummary": "Dissent: ChatGPT: Partially accurate",
+   "claimVerdictSummary": "chatgpt says partially_accurate",
+   "createdAt": "2026-11-01T11:28:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V32": {
+   "runId": "G-V32",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V32 (unknown, ?x?)",
+   "consensusScore": null,
+   "evidenceQuality": null,
+   "consensusWithheld": "insufficient_independent_models",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 0,
+    "failed": 1
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "Failed",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "Likely manipulated",
+     "confidence": ""
+    }
+   ],
+   "singleModelAssessment": "One independent model's assessment (gpt4o): likely manipulated — not agreement between models",
+   "modelIndependence": "insufficient",
+   "createdAt": "2026-11-01T11:27:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R33": {
+   "runId": "G-R33",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R33",
+   "consensusScore": null,
+   "evidenceQuality": null,
+   "consensusWithheld": "insufficient_independent_models",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 0,
+    "substituted": 2,
+    "failed": 0
+   },
+   "qualifiedDisagreements": [
+    {
+     "text": "Topic 33.0: w",
+     "basis": "single_independent_model"
+    },
+    {
+     "text": "Legacy 33.1: s",
+     "basis": "single_independent_model"
+    },
+    {
+     "text": "Topic 33.2: w",
+     "basis": "single_independent_model"
+    }
+   ],
+   "modelIndependence": "insufficient",
+   "createdAt": "2026-11-01T11:26:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C34": {
+   "runId": "G-C34",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C34",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 1
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Failed",
+     "confidence": ""
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says accurate"
+    },
+    {
+     "modelId": "grok",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "grok says accurate"
+    }
+   ],
+   "agreementPoints": [
+    "3/3 models rate this as accurate"
+   ],
+   "correctParts": [
+    "Part 34 is right"
+   ],
+   "incorrectParts": [
+    "The claim overstates figure 34 by a wide and documented margin across sources."
+   ],
+   "agreementSummary": "3/3 models say accurate",
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T11:25:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V35": {
+   "runId": "G-V35",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V35 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "Likely manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "Authentic",
+     "confidence": ""
+    }
+   ],
+   "disagreementPoints": [
+    "Gemini rated as likely manipulated (others disagree)",
+    "gpt4o rated as authentic (others disagree)"
+   ],
+   "agreementSummary": "1/2 models say likely manipulated",
+   "dissentSummary": "Dissent: gpt4o: Authentic",
+   "createdAt": "2026-11-01T11:24:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R36": {
+   "runId": "G-R36",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R36",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 1,
+    "failed": 0
+   },
+   "disagreements": [
+    "Topic 36.0: w",
+    "Topic 36.1: w",
+    "Topic 36.2: w"
+   ],
+   "keyFindings": [
+    "Finding 36"
+   ],
+   "disagreementPoints": [
+    "Topic 36.0",
+    "Topic 36.1",
+    "Topic 36.2"
+   ],
+   "createdAt": "2026-11-01T11:23:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C37": {
+   "runId": "G-C37",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C37",
+   "consensusScore": null,
+   "evidenceQuality": null,
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 0,
+    "failed": 2
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Parse error",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "claude says accurate"
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Failed",
+     "confidence": ""
+    }
+   ],
+   "correctParts": [
+    "Part 37 is right"
+   ],
+   "incorrectParts": [
+    "The claim overstates figure 37 by a wide and documented margin across sources."
+   ],
+   "qualifiedDisagreements": [
+    {
+     "text": "1/1 responses say accurate — model independence unverified, not confirmed as agreement between models",
+     "basis": "independence_unverified"
+    }
+   ],
+   "claimVerdictSummary": "claude says accurate",
+   "createdAt": "2026-11-01T11:22:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V38": {
+   "runId": "G-V38",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V38 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "Authentic",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "manipulated",
+     "confidence": ""
+    }
+   ],
+   "agreementPoints": [
+    "2/3 models rate as manipulated"
+   ],
+   "disagreementPoints": [
+    "gpt4o rated as authentic (others disagree)"
+   ],
+   "agreementSummary": "2/3 models say manipulated",
+   "dissentSummary": "Dissent: gpt4o: Authentic",
+   "createdAt": "2026-11-01T11:21:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R39": {
+   "runId": "G-R39",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R39",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 4,
+    "substituted": 0,
+    "failed": 0
+   },
+   "disagreements": [
+    "KD 39: kd"
+   ],
+   "keyFindings": [
+    "Finding 39"
+   ],
+   "createdAt": "2026-11-01T11:20:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C40": {
+   "runId": "G-C40",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C40",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 4,
+    "substituted": 0,
+    "failed": 1
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "claude says accurate"
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says accurate"
+    },
+    {
+     "modelId": "grok",
+     "verdict": "Inaccurate",
+     "confidence": "high confidence",
+     "summary": "grok says inaccurate"
+    },
+    {
+     "modelId": "perplexity",
+     "verdict": "Failed",
+     "confidence": ""
+    }
+   ],
+   "agreementPoints": [
+    "3/4 models rate this as accurate"
+   ],
+   "disagreementPoints": [
+    "Grok rated as inaccurate (others disagree)"
+   ],
+   "correctParts": [
+    "Part 40 is right"
+   ],
+   "incorrectParts": [
+    "The claim overstates figure 40 by a wide and documented margin across sources."
+   ],
+   "agreementSummary": "3/4 models say accurate",
+   "dissentSummary": "Dissent: Grok: Inaccurate",
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T11:19:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V41": {
+   "runId": "G-V41",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V41 (unknown, ?x?)",
+   "consensusScore": null,
+   "evidenceQuality": null,
+   "consensusWithheld": "insufficient_independent_models",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "manipulated",
+     "confidence": ""
+    }
+   ],
+   "singleModelAssessment": "One independent model's assessment (Gemini): manipulated — not agreement between models",
+   "modelIndependence": "insufficient",
+   "createdAt": "2026-11-01T11:18:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R42": {
+   "runId": "G-R42",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R42",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 0,
+    "failed": 0
+   },
+   "disagreements": [
+    "Point 42.0: models differ",
+    "Topic 42.1: w",
+    "Topic 42.2: w"
+   ],
+   "createdAt": "2026-11-01T11:17:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C43": {
+   "runId": "G-C43",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C43",
+   "consensusScore": null,
+   "evidenceQuality": null,
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 0,
+    "failed": 1
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Parse error",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Inaccurate",
+     "confidence": "high confidence",
+     "summary": "claude says inaccurate"
+    }
+   ],
+   "incorrectParts": [
+    "The claim overstates figure 43 by a wide and documented margin across sources."
+   ],
+   "qualifiedDisagreements": [
+    {
+     "text": "1/1 responses say inaccurate — model independence unverified, not confirmed as agreement between models",
+     "basis": "independence_unverified"
+    }
+   ],
+   "claimVerdictSummary": "claude says inaccurate",
+   "createdAt": "2026-11-01T11:16:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V44": {
+   "runId": "G-V44",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V44 (unknown, ?x?)",
+   "consensusScore": null,
+   "evidenceQuality": null,
+   "consensusWithheld": "insufficient_independent_models",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "Likely manipulated",
+     "confidence": ""
+    }
+   ],
+   "singleModelAssessment": "One independent model's assessment (Gemini): likely manipulated — not agreement between models",
+   "modelIndependence": "insufficient",
+   "createdAt": "2026-11-01T11:15:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R45": {
+   "runId": "G-R45",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R45",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 2,
+    "failed": 2
+   },
+   "disagreements": [
+    "Topic 45.0: w",
+    "Topic 45.1: w"
+   ],
+   "qualifiedDisagreements": [
+    {
+     "text": "Topic 45.2: w",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "KD 45: kd",
+     "basis": "independence_unverified"
+    }
+   ],
+   "createdAt": "2026-11-01T11:14:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C46": {
+   "runId": "G-C46",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C46",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 0,
+    "failed": 1
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Parse error",
+     "confidence": ""
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says accurate"
+    }
+   ],
+   "agreementSummary": "2/2 models say accurate",
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T11:13:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V47": {
+   "runId": "G-V47",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V47 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 0,
+    "failed": 1
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "Likely manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "Likely manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Failed",
+     "confidence": ""
+    }
+   ],
+   "agreementPoints": [
+    "2/2 models rate as likely manipulated"
+   ],
+   "agreementSummary": "2/2 models say likely manipulated",
+   "createdAt": "2026-11-01T11:12:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R48": {
+   "runId": "G-R48",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R48",
+   "consensusScore": null,
+   "evidenceQuality": null,
+   "consensusWithheld": "insufficient_independent_models",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 0,
+    "failed": 1
+   },
+   "qualifiedDisagreements": [
+    {
+     "text": "Topic 48.0: w",
+     "basis": "single_independent_model"
+    }
+   ],
+   "modelIndependence": "insufficient",
+   "createdAt": "2026-11-01T11:11:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C49": {
+   "runId": "G-C49",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C49",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 1
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Parse error",
+     "confidence": ""
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says accurate"
+    },
+    {
+     "modelId": "grok",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "grok says accurate"
+    }
+   ],
+   "agreementPoints": [
+    "3/3 models rate this as accurate"
+   ],
+   "correctParts": [
+    "Part 49 is right"
+   ],
+   "incorrectParts": [
+    "The claim overstates figure 49 by a wide and documented margin across sources."
+   ],
+   "agreementSummary": "3/3 models say accurate",
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T11:10:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V50": {
+   "runId": "G-V50",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V50 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "Likely manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "manipulated",
+     "confidence": ""
+    }
+   ],
+   "agreementPoints": [
+    "2/3 models rate as manipulated"
+   ],
+   "disagreementPoints": [
+    "gpt4o rated as likely manipulated (others disagree)"
+   ],
+   "agreementSummary": "2/3 models say manipulated",
+   "dissentSummary": "Dissent: gpt4o: Likely manipulated",
+   "createdAt": "2026-11-01T11:09:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R51": {
+   "runId": "G-R51",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R51",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 1,
+    "failed": 1
+   },
+   "disagreements": [
+    "Topic 51.0: w",
+    "Topic 51.1: w",
+    "KD 51: kd"
+   ],
+   "keyFindings": [
+    "Finding 51"
+   ],
+   "disagreementPoints": [
+    "Topic 51.0",
+    "Topic 51.1"
+   ],
+   "createdAt": "2026-11-01T11:08:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C52": {
+   "runId": "G-C52",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C52",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 0,
+    "failed": 3
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Inaccurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says inaccurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Parse error",
+     "confidence": ""
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says accurate"
+    },
+    {
+     "modelId": "grok",
+     "verdict": "Failed",
+     "confidence": ""
+    },
+    {
+     "modelId": "perplexity",
+     "verdict": "Failed",
+     "confidence": ""
+    }
+   ],
+   "disagreementPoints": [
+    "ChatGPT rated as inaccurate (others disagree)",
+    "Gemini rated as accurate (others disagree)"
+   ],
+   "agreementSummary": "1/2 models say inaccurate",
+   "dissentSummary": "Dissent: Gemini: Accurate",
+   "claimVerdictSummary": "chatgpt says inaccurate",
+   "createdAt": "2026-11-01T11:07:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V53": {
+   "runId": "G-V53",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V53 (unknown, ?x?)",
+   "consensusScore": null,
+   "evidenceQuality": null,
+   "consensusWithheld": "insufficient_independent_models",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "Authentic",
+     "confidence": ""
+    }
+   ],
+   "singleModelAssessment": "One independent model's assessment (Gemini): authentic — not agreement between models",
+   "modelIndependence": "insufficient",
+   "createdAt": "2026-11-01T11:06:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R54": {
+   "runId": "G-R54",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R54",
+   "consensusScore": null,
+   "evidenceQuality": null,
+   "consensusWithheld": "insufficient_independent_models",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 0,
+    "substituted": 2,
+    "failed": 0
+   },
+   "qualifiedDisagreements": [
+    {
+     "text": "Point 54.0: models differ",
+     "basis": "single_independent_model"
+    },
+    {
+     "text": "Legacy 54.1: s",
+     "basis": "single_independent_model"
+    }
+   ],
+   "modelIndependence": "insufficient",
+   "createdAt": "2026-11-01T11:05:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C55": {
+   "runId": "G-C55",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C55",
+   "consensusScore": null,
+   "evidenceQuality": null,
+   "consensusWithheld": "insufficient_independent_models",
+   "modelIndependence": "insufficient",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 0,
+    "failed": 1
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Parse error",
+     "confidence": ""
+    }
+   ],
+   "singleModelAssessment": "One independent model's assessment (ChatGPT): accurate — not agreement between models",
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T11:04:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V56": {
+   "runId": "G-V56",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V56 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "Likely manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "manipulated",
+     "confidence": ""
+    }
+   ],
+   "disagreementPoints": [
+    "Gemini rated as manipulated (others disagree)",
+    "gpt4o rated as likely manipulated (others disagree)"
+   ],
+   "agreementSummary": "1/2 models say manipulated",
+   "dissentSummary": "Dissent: gpt4o: Likely manipulated",
+   "createdAt": "2026-11-01T11:03:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R57": {
+   "runId": "G-R57",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R57",
+   "consensusScore": null,
+   "evidenceQuality": null,
+   "consensusWithheld": "insufficient_independent_models",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 0,
+    "substituted": 1,
+    "failed": 2
+   },
+   "qualifiedDisagreements": [
+    {
+     "text": "Legacy 57.0: s",
+     "basis": "single_independent_model"
+    },
+    {
+     "text": "Point 57.1: models differ",
+     "basis": "single_independent_model"
+    }
+   ],
+   "modelIndependence": "insufficient",
+   "createdAt": "2026-11-01T11:02:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:G-C58": {
+   "runId": "G-C58",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "G-C58",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 5,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "claude says accurate"
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Partially accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says partially_accurate"
+    },
+    {
+     "modelId": "grok",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "grok says accurate"
+    },
+    {
+     "modelId": "perplexity",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "perplexity says accurate"
+    }
+   ],
+   "correctParts": [
+    "Part 58 is right"
+   ],
+   "incorrectParts": [
+    "The claim overstates figure 58 by a wide and documented margin across sources."
+   ],
+   "agreementSummary": "2/2 models say accurate",
+   "qualifiedDisagreements": [
+    {
+     "text": "DeepSeek (substituting Claude, Gemini, Grok) rated as accurate; partially accurate — repeated outputs from one executing model",
+     "basis": "same_executing_model"
+    }
+   ],
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T11:01:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:G-V59": {
+   "runId": "G-V59",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: G-V59 (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "Authentic",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "manipulated",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Authentic",
+     "confidence": ""
+    }
+   ],
+   "agreementPoints": [
+    "2/3 models rate as authentic"
+   ],
+   "disagreementPoints": [
+    "gpt4o rated as manipulated (others disagree)"
+   ],
+   "agreementSummary": "2/3 models say authentic",
+   "dissentSummary": "Dissent: gpt4o: manipulated",
+   "createdAt": "2026-11-01T11:00:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:G-R60": {
+   "runId": "G-R60",
+   "collection": "runs",
+   "runType": "research",
+   "question": "G-R60",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 2,
+    "failed": 0
+   },
+   "disagreements": [
+    "Topic 60.0: w"
+   ],
+   "qualifiedDisagreements": [
+    {
+     "text": "KD 60: kd",
+     "basis": "independence_unverified"
+    }
+   ],
+   "createdAt": "2026-11-01T10:59:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:R-IND": {
+   "runId": "R-IND",
+   "collection": "runs",
+   "runType": "research",
+   "question": "R-IND",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 5,
+    "substituted": 0,
+    "failed": 0
+   },
+   "disagreements": [
+    "Topic A: w"
+   ],
+   "createdAt": "2026-11-01T10:58:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:R-FC": {
+   "runId": "R-FC",
+   "collection": "runs",
+   "runType": "research",
+   "question": "R-FC",
+   "consensusScore": null,
+   "evidenceQuality": null,
+   "consensusWithheld": "insufficient_independent_models",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 0,
+    "substituted": 3,
+    "failed": 0
+   },
+   "qualifiedDisagreements": [
+    {
+     "text": "Topic A: w",
+     "basis": "single_independent_model"
+    }
+   ],
+   "modelIndependence": "insufficient",
+   "createdAt": "2026-11-01T10:57:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:R-PC": {
+   "runId": "R-PC",
+   "collection": "runs",
+   "runType": "research",
+   "question": "R-PC",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 2,
+    "failed": 0
+   },
+   "disagreements": [
+    "Topic genuine: w"
+   ],
+   "qualifiedDisagreements": [
+    {
+     "text": "Topic same-exec: w",
+     "basis": "same_executing_model"
+    }
+   ],
+   "createdAt": "2026-11-01T10:56:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:R-UV": {
+   "runId": "R-UV",
+   "collection": "runs",
+   "runType": "research",
+   "question": "R-UV",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 1,
+    "failed": 0
+   },
+   "disagreements": [
+    "Topic A: w"
+   ],
+   "createdAt": "2026-11-01T10:55:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:R-NOROWS": {
+   "runId": "R-NOROWS",
+   "collection": "runs",
+   "runType": "research",
+   "question": "R-NOROWS",
+   "consensusScore": null,
+   "evidenceQuality": null,
+   "consensusWithheld": "independence_unverified",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 0,
+    "substituted": 0,
+    "failed": 0
+   },
+   "qualifiedDisagreements": [
+    {
+     "text": "Topic A: w",
+     "basis": "independence_unverified"
+    }
+   ],
+   "modelIndependence": "unverified",
+   "createdAt": "2026-11-01T10:54:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "runs:R-B-IND": {
+   "runId": "R-B-IND",
+   "collection": "runs",
+   "runType": "research",
+   "question": "R-B-IND",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 5,
+    "substituted": 0,
+    "failed": 0
+   },
+   "disagreements": [
+    "Topic B: w"
+   ],
+   "createdAt": "2026-11-01T10:52:00.000Z",
+   "userId": "owner-b",
+   "userEmail": "owner-b"
+  },
+  "runs:R-CAP": {
+   "runId": "R-CAP",
+   "collection": "runs",
+   "runType": "research",
+   "question": "R-CAP",
+   "consensusScore": 90,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 2,
+    "failed": 0
+   },
+   "disagreements": [
+    "Genuine: w"
+   ],
+   "qualifiedDisagreements": [
+    {
+     "text": "Same 1: w",
+     "basis": "same_executing_model"
+    },
+    {
+     "text": "Same 2: w",
+     "basis": "same_executing_model"
+    },
+    {
+     "text": "Same 3: w",
+     "basis": "same_executing_model"
+    }
+   ],
+   "createdAt": "2026-11-01T10:51:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:C-IND-agree2": {
+   "runId": "C-IND-agree2",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "C-IND-agree2",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "claude says accurate"
+    }
+   ],
+   "agreementSummary": "2/2 models say accurate",
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T10:50:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:C-IND-split": {
+   "runId": "C-IND-split",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "C-IND-split",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 4,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "claude says accurate"
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says accurate"
+    },
+    {
+     "modelId": "grok",
+     "verdict": "Inaccurate",
+     "confidence": "high confidence",
+     "summary": "grok says inaccurate"
+    }
+   ],
+   "agreementPoints": [
+    "3/4 models rate this as accurate"
+   ],
+   "disagreementPoints": [
+    "Grok rated as inaccurate (others disagree)"
+   ],
+   "agreementSummary": "3/4 models say accurate",
+   "dissentSummary": "Dissent: Grok: Inaccurate",
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T10:49:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:C-ONE": {
+   "runId": "C-ONE",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "C-ONE",
+   "consensusScore": null,
+   "evidenceQuality": null,
+   "consensusWithheld": "insufficient_independent_models",
+   "modelIndependence": "insufficient",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 0,
+    "failed": 1
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Failed",
+     "confidence": ""
+    }
+   ],
+   "singleModelAssessment": "One independent model's assessment (ChatGPT): accurate — not agreement between models",
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T10:48:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:C-REAL3": {
+   "runId": "C-REAL3",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "C-REAL3",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "claude says accurate"
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says accurate"
+    }
+   ],
+   "agreementPoints": [
+    "3/3 models rate this as accurate"
+   ],
+   "agreementSummary": "3/3 models say accurate",
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T10:47:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:C-SUBNONE": {
+   "runId": "C-SUBNONE",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "C-SUBNONE",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "claude says accurate"
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says accurate"
+    }
+   ],
+   "agreementPoints": [
+    "3/3 models rate this as accurate"
+   ],
+   "agreementSummary": "3/3 models say accurate",
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T10:46:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:C-SUBMIX": {
+   "runId": "C-SUBMIX",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "C-SUBMIX",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "claude says accurate"
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says accurate"
+    }
+   ],
+   "agreementSummary": "2/2 models say accurate",
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T10:45:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:C-SUBUNK": {
+   "runId": "C-SUBUNK",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "C-SUBUNK",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "claude says accurate"
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says accurate"
+    }
+   ],
+   "agreementPoints": [
+    "3/3 models rate this as accurate"
+   ],
+   "agreementSummary": "3/3 models say accurate",
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T10:44:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "verifications:C-B-IND": {
+   "runId": "C-B-IND",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "C-B-IND",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "claude says accurate"
+    }
+   ],
+   "agreementSummary": "2/2 models say accurate",
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T10:43:00.000Z",
+   "userId": "owner-b",
+   "userEmail": "owner-b"
+  },
+  "verifications:C-SUBREC": {
+   "runId": "C-SUBREC",
+   "collection": "verifications",
+   "runType": "verification",
+   "question": "C-SUBREC",
+   "consensusScore": 80,
+   "evidenceQuality": null,
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "accurate",
+   "modelVerdicts": [
+    {
+     "modelId": "chatgpt",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "chatgpt says accurate"
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "claude says accurate"
+    },
+    {
+     "modelId": "gemini",
+     "verdict": "Accurate",
+     "confidence": "high confidence",
+     "summary": "gemini says accurate"
+    }
+   ],
+   "agreementPoints": [
+    "3/3 models rate this as accurate"
+   ],
+   "agreementSummary": "3/3 models say accurate",
+   "claimVerdictSummary": "chatgpt says accurate",
+   "createdAt": "2026-11-01T10:42:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:V-IND": {
+   "runId": "V-IND",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: V-IND (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 3,
+    "substituted": 0,
+    "failed": 0
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "Authentic",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "Authentic",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "manipulated",
+     "confidence": ""
+    }
+   ],
+   "agreementPoints": [
+    "2/3 models rate as authentic"
+   ],
+   "disagreementPoints": [
+    "Claude rated as manipulated (others disagree)"
+   ],
+   "agreementSummary": "2/3 models say authentic",
+   "dissentSummary": "Dissent: Claude: manipulated",
+   "createdAt": "2026-11-01T10:41:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:V-ONE": {
+   "runId": "V-ONE",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: V-ONE (unknown, ?x?)",
+   "consensusScore": null,
+   "evidenceQuality": null,
+   "consensusWithheld": "insufficient_independent_models",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 1,
+    "substituted": 0,
+    "failed": 2
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "Authentic",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "Failed",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Failed",
+     "confidence": ""
+    }
+   ],
+   "singleModelAssessment": "One independent model's assessment (Gemini): authentic — not agreement between models",
+   "modelIndependence": "insufficient",
+   "createdAt": "2026-11-01T10:40:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  },
+  "videoVerifications:V-SUB": {
+   "runId": "V-SUB",
+   "collection": "videoVerifications",
+   "runType": "video",
+   "question": "Video: V-SUB (unknown, ?x?)",
+   "consensusScore": 85,
+   "evidenceQuality": "strong",
+   "governanceStatus": "needs_review",
+   "governanceReasons": [
+    "r1"
+   ],
+   "modelHealth": {
+    "ok": 2,
+    "substituted": 0,
+    "failed": 1
+   },
+   "verificationVerdict": "authentic",
+   "modelVerdicts": [
+    {
+     "modelId": "gemini",
+     "verdict": "Authentic",
+     "confidence": ""
+    },
+    {
+     "modelId": "gpt4o",
+     "verdict": "Authentic",
+     "confidence": ""
+    },
+    {
+     "modelId": "claude",
+     "verdict": "Parse error",
+     "confidence": ""
+    }
+   ],
+   "agreementPoints": [
+    "2/2 models rate as authentic"
+   ],
+   "agreementSummary": "2/2 models say authentic",
+   "createdAt": "2026-11-01T10:39:00.000Z",
+   "userId": "owner-a",
+   "userEmail": "owner-a"
+  }
+ }
+}

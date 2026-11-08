@@ -1,0 +1,455 @@
+{
+ "_source": "generated 2026-11-08 by phase0TeamQueueBaseline.spec.ts with PHASE0_GOLDEN_OUT in git-archive exports: base = 35933c8, presentation = b894828",
+ "base": {
+  "main": {
+   "status": 200,
+   "items": {
+    "claim-v-none": {
+     "dto": {
+      "kind": "legacy",
+      "teamRunId": "claim-v-none",
+      "verificationId": "v-none",
+      "createdAt": "2026-07-24T00:00:00.000Z",
+      "querySummary": "q",
+      "policyFlags": [],
+      "blockedByPolicy": false,
+      "governanceReviewRequired": false,
+      "consensusScore": 92
+     },
+     "consensusText": "Consensus 92/100"
+    },
+    "claim-v-ds": {
+     "dto": {
+      "kind": "legacy",
+      "teamRunId": "claim-v-ds",
+      "verificationId": "v-ds",
+      "createdAt": "2026-07-23T00:00:00.000Z",
+      "querySummary": "q",
+      "policyFlags": [],
+      "blockedByPolicy": false,
+      "governanceReviewRequired": false,
+      "consensusScore": 92
+     },
+     "consensusText": "Consensus 92/100"
+    },
+    "claim-v-one": {
+     "dto": {
+      "kind": "legacy",
+      "teamRunId": "claim-v-one",
+      "verificationId": "v-one",
+      "createdAt": "2026-07-22T00:00:00.000Z",
+      "querySummary": "q",
+      "policyFlags": [],
+      "blockedByPolicy": false,
+      "governanceReviewRequired": false,
+      "consensusScore": 92
+     },
+     "consensusText": "Consensus 92/100"
+    },
+    "claim-v-ind": {
+     "dto": {
+      "kind": "legacy",
+      "teamRunId": "claim-v-ind",
+      "verificationId": "v-ind",
+      "createdAt": "2026-07-21T00:00:00.000Z",
+      "querySummary": "q",
+      "policyFlags": [],
+      "blockedByPolicy": false,
+      "governanceReviewRequired": false,
+      "consensusScore": 92
+     },
+     "consensusText": "Consensus 92/100"
+    },
+    "ownerb": {
+     "dto": {
+      "kind": "legacy",
+      "teamRunId": "ownerb",
+      "runId": "r-b-ind",
+      "createdAt": "2026-07-20T00:00:00.000Z",
+      "querySummary": "q",
+      "policyFlags": [],
+      "blockedByPolicy": false,
+      "governanceReviewRequired": false,
+      "consensusScore": 72
+     },
+     "consensusText": "Consensus 72/100"
+    },
+    "noscore": {
+     "dto": {
+      "kind": "legacy",
+      "teamRunId": "noscore",
+      "runId": "r-fc",
+      "createdAt": "2026-07-19T00:00:00.000Z",
+      "querySummary": "q",
+      "policyFlags": [],
+      "blockedByPolicy": false,
+      "governanceReviewRequired": false,
+      "consensusScore": null
+     },
+     "consensusText": "No consensus score"
+    },
+    "statusless": {
+     "dto": {
+      "kind": "legacy",
+      "teamRunId": "statusless",
+      "runId": "r-statusless",
+      "createdAt": "2026-07-18T00:00:00.000Z",
+      "querySummary": "q",
+      "policyFlags": [],
+      "blockedByPolicy": false,
+      "governanceReviewRequired": false,
+      "consensusScore": 72
+     },
+     "consensusText": "Consensus 72/100"
+    },
+    "norows": {
+     "dto": {
+      "kind": "legacy",
+      "teamRunId": "norows",
+      "runId": "r-norows",
+      "createdAt": "2026-07-17T00:00:00.000Z",
+      "querySummary": "q",
+      "policyFlags": [],
+      "blockedByPolicy": false,
+      "governanceReviewRequired": false,
+      "consensusScore": 72
+     },
+     "consensusText": "Consensus 72/100"
+    },
+    "s3mn": {
+     "dto": {
+      "kind": "legacy",
+      "teamRunId": "s3mn",
+      "runId": "r-s3mn",
+      "createdAt": "2026-07-16T00:00:00.000Z",
+      "querySummary": "q",
+      "policyFlags": [],
+      "blockedByPolicy": false,
+      "governanceReviewRequired": false,
+      "consensusScore": 72
+     },
+     "consensusText": "Consensus 72/100"
+    },
+    "pre62a": {
+     "dto": {
+      "kind": "legacy",
+      "teamRunId": "pre62a",
+      "runId": "r-pre62a",
+      "createdAt": "2026-07-15T00:00:00.000Z",
+      "querySummary": "q",
+      "policyFlags": [],
+      "blockedByPolicy": false,
+      "governanceReviewRequired": false,
+      "consensusScore": 72
+     },
+     "consensusText": "Consensus 72/100"
+    },
+    "one": {
+     "dto": {
+      "kind": "legacy",
+      "teamRunId": "one",
+      "runId": "r-one",
+      "createdAt": "2026-07-14T00:00:00.000Z",
+      "querySummary": "q",
+      "policyFlags": [],
+      "blockedByPolicy": false,
+      "governanceReviewRequired": false,
+      "consensusScore": 72
+     },
+     "consensusText": "Consensus 72/100"
+    },
+    "pc": {
+     "dto": {
+      "kind": "legacy",
+      "teamRunId": "pc",
+      "runId": "r-pc",
+      "createdAt": "2026-07-13T00:00:00.000Z",
+      "querySummary": "q",
+      "policyFlags": [],
+      "blockedByPolicy": false,
+      "governanceReviewRequired": false,
+      "consensusScore": 72
+     },
+     "consensusText": "Consensus 72/100"
+    },
+    "fc": {
+     "dto": {
+      "kind": "legacy",
+      "teamRunId": "fc",
+      "runId": "r-fc",
+      "createdAt": "2026-07-12T00:00:00.000Z",
+      "querySummary": "q",
+      "policyFlags": [],
+      "blockedByPolicy": false,
+      "governanceReviewRequired": false,
+      "consensusScore": 72
+     },
+     "consensusText": "Consensus 72/100"
+    },
+    "ind": {
+     "dto": {
+      "kind": "legacy",
+      "teamRunId": "ind",
+      "runId": "r-ind",
+      "createdAt": "2026-07-11T00:00:00.000Z",
+      "querySummary": "q",
+      "policyFlags": [],
+      "blockedByPolicy": false,
+      "governanceReviewRequired": false,
+      "consensusScore": 72
+     },
+     "consensusText": "Consensus 72/100"
+    }
+   }
+  },
+  "readFail": {
+   "status": 200,
+   "items": {
+    "readfail": {
+     "dto": {
+      "kind": "legacy",
+      "teamRunId": "readfail",
+      "runId": "r-ind",
+      "createdAt": "2026-07-25T00:00:00.000Z",
+      "querySummary": "q",
+      "policyFlags": [],
+      "blockedByPolicy": false,
+      "governanceReviewRequired": false,
+      "consensusScore": 72
+     },
+     "consensusText": "Consensus 72/100"
+    }
+   }
+  }
+ },
+ "presentation": {
+  "main": {
+   "status": 200,
+   "items": {
+    "claim-v-none": {
+     "dto": {
+      "kind": "legacy",
+      "teamRunId": "claim-v-none",
+      "verificationId": "v-none",
+      "createdAt": "2026-07-24T00:00:00.000Z",
+      "querySummary": "q",
+      "policyFlags": [],
+      "blockedByPolicy": false,
+      "governanceReviewRequired": false,
+      "consensusScore": null,
+      "consensusWithheld": "independence_unverified"
+     },
+     "consensusText": "Consensus score withheld (model independence not recorded)"
+    },
+    "claim-v-ds": {
+     "dto": {
+      "kind": "legacy",
+      "teamRunId": "claim-v-ds",
+      "verificationId": "v-ds",
+      "createdAt": "2026-07-23T00:00:00.000Z",
+      "querySummary": "q",
+      "policyFlags": [],
+      "blockedByPolicy": false,
+      "governanceReviewRequired": false,
+      "consensusScore": null,
+      "consensusWithheld": "insufficient_independent_models"
+     },
+     "consensusText": "No consensus score (fewer than two independent models)"
+    },
+    "claim-v-one": {
+     "dto": {
+      "kind": "legacy",
+      "teamRunId": "claim-v-one",
+      "verificationId": "v-one",
+      "createdAt": "2026-07-22T00:00:00.000Z",
+      "querySummary": "q",
+      "policyFlags": [],
+      "blockedByPolicy": false,
+      "governanceReviewRequired": false,
+      "consensusScore": null,
+      "consensusWithheld": "insufficient_independent_models"
+     },
+     "consensusText": "No consensus score (fewer than two independent models)"
+    },
+    "claim-v-ind": {
+     "dto": {
+      "kind": "legacy",
+      "teamRunId": "claim-v-ind",
+      "verificationId": "v-ind",
+      "createdAt": "2026-07-21T00:00:00.000Z",
+      "querySummary": "q",
+      "policyFlags": [],
+      "blockedByPolicy": false,
+      "governanceReviewRequired": false,
+      "consensusScore": 92
+     },
+     "consensusText": "Consensus 92/100"
+    },
+    "ownerb": {
+     "dto": {
+      "kind": "legacy",
+      "teamRunId": "ownerb",
+      "runId": "r-b-ind",
+      "createdAt": "2026-07-20T00:00:00.000Z",
+      "querySummary": "q",
+      "policyFlags": [],
+      "blockedByPolicy": false,
+      "governanceReviewRequired": false,
+      "consensusScore": 72
+     },
+     "consensusText": "Consensus 72/100"
+    },
+    "noscore": {
+     "dto": {
+      "kind": "legacy",
+      "teamRunId": "noscore",
+      "runId": "r-fc",
+      "createdAt": "2026-07-19T00:00:00.000Z",
+      "querySummary": "q",
+      "policyFlags": [],
+      "blockedByPolicy": false,
+      "governanceReviewRequired": false,
+      "consensusScore": null
+     },
+     "consensusText": "No consensus score"
+    },
+    "statusless": {
+     "dto": {
+      "kind": "legacy",
+      "teamRunId": "statusless",
+      "runId": "r-statusless",
+      "createdAt": "2026-07-18T00:00:00.000Z",
+      "querySummary": "q",
+      "policyFlags": [],
+      "blockedByPolicy": false,
+      "governanceReviewRequired": false,
+      "consensusScore": null,
+      "consensusWithheld": "independence_unverified"
+     },
+     "consensusText": "Consensus score withheld (model independence not recorded)"
+    },
+    "norows": {
+     "dto": {
+      "kind": "legacy",
+      "teamRunId": "norows",
+      "runId": "r-norows",
+      "createdAt": "2026-07-17T00:00:00.000Z",
+      "querySummary": "q",
+      "policyFlags": [],
+      "blockedByPolicy": false,
+      "governanceReviewRequired": false,
+      "consensusScore": null,
+      "consensusWithheld": "independence_unverified"
+     },
+     "consensusText": "Consensus score withheld (model independence not recorded)"
+    },
+    "s3mn": {
+     "dto": {
+      "kind": "legacy",
+      "teamRunId": "s3mn",
+      "runId": "r-s3mn",
+      "createdAt": "2026-07-16T00:00:00.000Z",
+      "querySummary": "q",
+      "policyFlags": [],
+      "blockedByPolicy": false,
+      "governanceReviewRequired": false,
+      "consensusScore": 72
+     },
+     "consensusText": "Consensus 72/100"
+    },
+    "pre62a": {
+     "dto": {
+      "kind": "legacy",
+      "teamRunId": "pre62a",
+      "runId": "r-pre62a",
+      "createdAt": "2026-07-15T00:00:00.000Z",
+      "querySummary": "q",
+      "policyFlags": [],
+      "blockedByPolicy": false,
+      "governanceReviewRequired": false,
+      "consensusScore": 72
+     },
+     "consensusText": "Consensus 72/100"
+    },
+    "one": {
+     "dto": {
+      "kind": "legacy",
+      "teamRunId": "one",
+      "runId": "r-one",
+      "createdAt": "2026-07-14T00:00:00.000Z",
+      "querySummary": "q",
+      "policyFlags": [],
+      "blockedByPolicy": false,
+      "governanceReviewRequired": false,
+      "consensusScore": null,
+      "consensusWithheld": "insufficient_independent_models"
+     },
+     "consensusText": "No consensus score (fewer than two independent models)"
+    },
+    "pc": {
+     "dto": {
+      "kind": "legacy",
+      "teamRunId": "pc",
+      "runId": "r-pc",
+      "createdAt": "2026-07-13T00:00:00.000Z",
+      "querySummary": "q",
+      "policyFlags": [],
+      "blockedByPolicy": false,
+      "governanceReviewRequired": false,
+      "consensusScore": 72
+     },
+     "consensusText": "Consensus 72/100"
+    },
+    "fc": {
+     "dto": {
+      "kind": "legacy",
+      "teamRunId": "fc",
+      "runId": "r-fc",
+      "createdAt": "2026-07-12T00:00:00.000Z",
+      "querySummary": "q",
+      "policyFlags": [],
+      "blockedByPolicy": false,
+      "governanceReviewRequired": false,
+      "consensusScore": null,
+      "consensusWithheld": "insufficient_independent_models"
+     },
+     "consensusText": "No consensus score (fewer than two independent models)"
+    },
+    "ind": {
+     "dto": {
+      "kind": "legacy",
+      "teamRunId": "ind",
+      "runId": "r-ind",
+      "createdAt": "2026-07-11T00:00:00.000Z",
+      "querySummary": "q",
+      "policyFlags": [],
+      "blockedByPolicy": false,
+      "governanceReviewRequired": false,
+      "consensusScore": 72
+     },
+     "consensusText": "Consensus 72/100"
+    }
+   }
+  },
+  "readFail": {
+   "status": 200,
+   "items": {
+    "readfail": {
+     "dto": {
+      "kind": "legacy",
+      "teamRunId": "readfail",
+      "runId": "r-ind",
+      "createdAt": "2026-07-25T00:00:00.000Z",
+      "querySummary": "q",
+      "policyFlags": [],
+      "blockedByPolicy": false,
+      "governanceReviewRequired": false,
+      "consensusScore": null,
+      "consensusWithheld": "independence_unverified"
+     },
+     "consensusText": "Consensus score withheld (model independence not recorded)"
+    }
+   }
+  }
+ }
+}
