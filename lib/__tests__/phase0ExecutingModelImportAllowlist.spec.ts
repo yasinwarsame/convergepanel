@@ -261,8 +261,9 @@ describe("H-14 behaviour: the executing provider never reaches a Phase 0 decisio
   it("panel verdict grounding reads the stored disagreement list whatever the rows (L13)", () => {
     const report = {
       executiveSummary: "s",
-      keyFindings: [{ claim: "Paris is the capital of France.", confidence: "High", evidenceRefs: [], modelsSupporting: ["chatgpt", "claude"] }],
-      disagreements: [{ topic: "Population figure", whyTheyDiffer: "w", positionsByModel: { chatgpt: "2m", claude: "2.1m" } }],
+      // The stored disagreement topic carries the only source language, so grounding depends on reading it (L13).
+      keyFindings: [{ claim: "Paris is the capital of France.", confidence: "High", evidenceRefs: ["r1"], modelsSupporting: ["chatgpt", "claude"] }],
+      disagreements: [{ topic: "According to the census report the population figure differs", whyTheyDiffer: "w", positionsByModel: { chatgpt: "2m", claude: "2.1m" } }],
       biasAndBlindSpots: [],
       openQuestions: [],
       methodology: "m",
@@ -270,6 +271,7 @@ describe("H-14 behaviour: the executing provider never reaches a Phase 0 decisio
     const gate = computeVerificationGate({ keyFindings: report.keyFindings as any, disagreements: report.disagreements as any, biasAndBlindSpots: [], openQuestions: [], sourceBacked: false, questionLength: 30 });
     const g = (r: ModelResult[] | undefined, crossModel?: boolean) => buildPanelVerdict("q", report, gate, r, crossModel === undefined ? undefined : { crossModel }).grounding;
     const base = g(undefined);
+    expect(base.level).toBe("source-backed");
     expect(g(rows(["sub", "sub"], "deepseek"), false)).toEqual(base);
     expect(g(rows(["sub", "sub"], "none"))).toEqual(base);
     expect(g(rows(["ok", "ok"], "distinct"))).toEqual(base);

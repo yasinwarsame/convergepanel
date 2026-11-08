@@ -551,6 +551,23 @@ describe("PanelSynthesisView (rendered)", () => {
     expect(textOf(r)).not.toContain("Synthesis requires");
   });
 
+  // Phase 0 (L03 site 6): the idle auto-start counts usable slots (35933c8), so two answered slots start a synthesis POST.
+  it("Phase 0 slot rule: idle auto-start POSTs for two answered slots (35933c8)", async () => {
+    const authed = jest.requireMock("@/lib/client/authedFetch") as Record<string, unknown>;
+    authed.prepareAuthedHeaders = jest.fn(async (_u: unknown, h: Record<string, string>) => h);
+    mockFetchWithTimeout.mockRejectedValue(new Error("network down (test)"));
+    const results = await run("twoSubstitutions");
+    await mount(createElement(PanelSynthesisView as never, { results, question: "q", runId: "run-auto", preGeneratedStatus: "idle", preGeneratedError: null } as never));
+    await act(async () => {
+      await new Promise((res) => setTimeout(res, 150));
+      for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    });
+    const posts = mockFetchWithTimeout.mock.calls.filter((c) => (c[1] as { method?: string } | undefined)?.method === "POST");
+    delete authed.prepareAuthedHeaders;
+    expect(posts).toHaveLength(1);
+    expect(String(posts[0][0])).toContain("/api/synthesize-panel");
+  });
+
   // Phase 0 (L03 sites 7–8): the empty state counts usable slots (35933c8), so two answered slots are offered synthesis.
   it("Phase 0 slot rule: empty state offers synthesis for two answered slots (35933c8)", async () => {
     const results = await run("twoSubstitutions");
