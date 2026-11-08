@@ -55,7 +55,10 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   // Order 6 critical-contrast slice (class-only; see criticalContrastSlice.ts): was 52464f6b4c8d3d330ac1764ff711297e2c31ecbe at 9eca1e3.
   "components/workspace/projects/TeamResearchReviewSummary.tsx": "16a12b9d0f15c5297a8745958126cdd6ea50d263",
   "app/page.tsx": "6dbe9b1f924731e1417655a68f41cd232f7cd16a",
-  "firestore.rules": "2fb80a11bfa6c55fe94e0438a980a3b0794aeafd",
+  // Re-pinned (owner-authorized SEC-2 / S4 provider-key boundary, 2026-11-09): `isAdminClaim()` and the
+  // `appConfig/modelKeys` admin-claim grant removed, replaced by a deny-only `match /appConfig/{doc=**}`; no other
+  // rule and no provenance code. 2fb80a11bfa6c55fe94e0438a980a3b0794aeafd → 747ccef5fc43f83bb08a986fadb49d5ca5d68e06.
+  "firestore.rules": "747ccef5fc43f83bb08a986fadb49d5ca5d68e06",
 };
 
 /**

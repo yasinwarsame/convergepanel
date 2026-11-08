@@ -39,7 +39,11 @@ const UNCHANGED: [string, string][] = [
   ["lib/adaptiveSchema/reportSummary.ts", "3acc265a3cc1ddf994d94bc09a48666b5a366980d7fe6e1f399778bbc12e948d"],
   ["lib/adaptiveSchema/exportContentDerivation.ts", "4f520bf8c61cba47e8508da6211f155dd281886d624037239f746bd215e4d298"],
   ["lib/adaptiveSchema/reportStatus.ts", "88dc403ded11dc7a52811d9a7102aa7f697abb69ccc5a19d52e639369ca5d957"],
-  ["firestore.rules", "7edff7ebf3a32fb3d646c53c5e9898718bc559aa94a969880af40e0bf2a594ed"],
+  // OWNER-AUTHORIZED EXCEPTION (2026-11-09, SEC-2 / S4 provider-key boundary). Was byte-identical to 0249a4e5, sha256
+  // 7edff7ebf3a32fb3d646c53c5e9898718bc559aa94a969880af40e0bf2a594ed. The only change: `isAdminClaim()` and the
+  // `appConfig/modelKeys` admin-claim grant removed, replaced by a deny-only `match /appConfig/{doc=**}`. Re-pinned to
+  // the exact new content (git blob 747ccef5). No other frozen file changes.
+  ["firestore.rules", "7cf97ec939cd9b88dc605fa950fd117a7ff815457cd930a87fa63a6cf8d58a1d"],
   ["lib/governance/auditLog.ts", "dc235b536961127e58af1c95c22e6ffd78b301a694b11f4668ec2973588d68db"],
   ["lib/env.ts", "8c824e1ef193bb13a128edecddfef1665564bb76a97a734d4bd913711386688a"],
   ["lib/adaptiveSchema/dsProvenanceRouteAdapter.ts", "0c8c4050a8ec1011471053d09a616326955e8ff4b6084474e32063091562f2c5"],
