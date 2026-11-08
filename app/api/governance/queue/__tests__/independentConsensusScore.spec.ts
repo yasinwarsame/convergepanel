@@ -77,7 +77,10 @@ async function rows(): Promise<Record<string, any>> {
 }
 
 describe("GET /api/governance/queue — research consensus score vs independent executing models", () => {
-  it("withholds score + evidence quality below two independent models and without execution identity", async () => {
+  // Phase 0 (L15, O14 = A; owner Option C): the queue DTO's consensusScore / evidenceQuality are the STORED values, as at
+  // 35933c8 (governance-queue metadata); `consensusWithheld` / `modelIndependence` are additive presentation keys that
+  // tell the dashboard to show the reason instead of the number (GovernanceDashboard queuePresentedScore).
+  it("keeps the stored score + evidence quality; marks them withheld below two independent models and without execution identity", async () => {
     const deepseek = { provider: "deepseek" };
     runRows = [
       run("two-deepseek", [row("chatgpt", "substituted", deepseek), row("claude", "substituted", deepseek)]),
@@ -88,11 +91,11 @@ describe("GET /api/governance/queue — research consensus score vs independent 
     ];
     const by = await rows();
     for (const k of ["two-deepseek", "one-independent", "missing-credentials"]) {
-      expect([k, by[k].consensusScore, by[k].evidenceQuality, by[k].consensusWithheld]).toEqual([k, null, null, "insufficient_independent_models"]);
+      expect([k, by[k].consensusScore, by[k].evidenceQuality, by[k].consensusWithheld]).toEqual([k, 90, "strong", "insufficient_independent_models"]);
     }
     expect([by["legacy-no-perModel"].consensusScore, by["legacy-no-perModel"].evidenceQuality, by["legacy-no-perModel"].consensusWithheld]).toEqual([
-      null,
-      null,
+      88,
+      "strong",
       "independence_unverified",
     ]);
     expect([by["two-independent"].consensusScore, by["two-independent"].evidenceQuality]).toEqual([90, "strong"]);

@@ -82,11 +82,14 @@ const VS_GROK = { topic: "Founder", positionsByModel: { chatgpt: "A merchant", g
 const report = (disagreements: unknown[]) => ({ synthesizedStructuredReport: { keyFindings: [{ claim: "Founded in the 1790s." }], disagreements }, structuredSynthesis: { keyFindings: ["Founded in the 1790s."], disagreements } });
 
 describe("GET /api/governance/queue — research disagreements vs executing-model independence", () => {
-  it("two DeepSeek substitutions: no 'Key disagreements'; the stored line is returned qualified as one independent model", async () => {
+  // Phase 0 (L15, O14 = A): `disagreements` / `disagreementPoints` are the 35933c8 DTO fields — every stored line,
+  // capped at 3, unpartitioned. `qualifiedDisagreements` / `modelIndependence` are additive: GovernanceDashboard lists the
+  // qualified lines under their own heading and drops them from "Key disagreements" (queueResearchDisagreementLines).
+  it("two DeepSeek substitutions: the stored line stays in the DTO (35933c8) and is also returned qualified as one independent model", async () => {
     runRows = [run("two-deepseek", [row("chatgpt", "substituted", deepseek), row("claude", "substituted", deepseek)], report([FOUNDING]))];
     const r = (await rows())["two-deepseek"];
-    expect(r.disagreements).toBeUndefined();
-    expect(r.disagreementPoints).toBeUndefined();
+    expect(r.disagreements).toEqual(["Founding date: ChatGPT says 1789, Claude says 1792"]);
+    expect(r.disagreementPoints).toEqual(["Founding date"]);
     expect(r.qualifiedDisagreements).toEqual([{ text: "Founding date: ChatGPT says 1789, Claude says 1792", basis: "single_independent_model" }, { text: "Founding date", basis: "single_independent_model" }]);
     expect(r.modelIndependence).toBe("insufficient");
   });
@@ -94,7 +97,7 @@ describe("GET /api/governance/queue — research disagreements vs executing-mode
   it("one independent model: the same", async () => {
     runRows = [run("one", [row("chatgpt", "ok"), row("claude", "failed", { rawTextTruncated: "" })], report(["Founding date: models differ"]))];
     const r = (await rows())["one"];
-    expect(r.disagreements).toBeUndefined();
+    expect(r.disagreements).toEqual(["Founding date: models differ"]);
     expect(r.qualifiedDisagreements).toEqual([{ text: "Founding date: models differ", basis: "single_independent_model" }]);
   });
 
@@ -107,11 +110,11 @@ describe("GET /api/governance/queue — research disagreements vs executing-mode
     expect("modelIndependence" in r).toBe(false);
   });
 
-  it("DeepSeek×2 + Grok: DeepSeek-vs-Grok kept, DeepSeek-vs-DeepSeek relabelled as the same executing model", async () => {
+  it("DeepSeek×2 + Grok: every stored line in the DTO (35933c8); DeepSeek-vs-DeepSeek additionally qualified as the same executing model", async () => {
     runRows = [run("mixed", [row("chatgpt", "substituted", deepseek), row("claude", "substituted", deepseek), row("grok", "ok")], report([FOUNDING, VS_GROK]))];
     const r = (await rows())["mixed"];
-    expect(r.disagreements).toEqual(["Founder: Different sources"]);
-    expect(r.disagreementPoints).toEqual(["Founder"]);
+    expect(r.disagreements).toEqual(["Founding date: ChatGPT says 1789, Claude says 1792", "Founder: Different sources"]);
+    expect(r.disagreementPoints).toEqual(["Founding date", "Founder"]);
     expect(r.qualifiedDisagreements).toEqual([
       { text: "Founding date: ChatGPT says 1789, Claude says 1792", basis: "same_executing_model" },
       { text: "Founding date", basis: "same_executing_model" },
@@ -119,20 +122,22 @@ describe("GET /api/governance/queue — research disagreements vs executing-mode
     expect("modelIndependence" in r).toBe(false);
   });
 
-  it("missing provenance (no persisted rows): qualified as independence unverified, never a disagreement", async () => {
+  it("missing provenance (no persisted rows): the stored line stays in the DTO (35933c8), additionally qualified as independence unverified", async () => {
     runRows = [run("legacy", undefined, { consensusScore: 88, ...report([FOUNDING]) })];
     const r = (await rows())["legacy"];
-    expect(r.disagreements).toBeUndefined();
-    expect(r.disagreementPoints).toBeUndefined();
+    expect(r.disagreements).toEqual(["Founding date: ChatGPT says 1789, Claude says 1792"]);
+    expect(r.disagreementPoints).toEqual(["Founding date"]);
     expect(r.qualifiedDisagreements?.map((q: any) => q.basis)).toEqual(["independence_unverified", "independence_unverified"]);
     expect(r.modelIndependence).toBe("unverified");
   });
 
-  it("a qualified line never displaces a genuine one (each list capped at 3 independently)", async () => {
+  // The 35933c8 DTO caps the stored lines at 3 before any classification, so the genuine fifth line is not in the DTO
+  // (exactly as at 35933c8); the qualified list is capped at 3 on its own.
+  it("the DTO keeps the 35933c8 cap of 3 stored lines; the qualified list is capped at 3 independently", async () => {
     const same = [1, 2, 3, 4].map((i) => ({ ...FOUNDING, topic: `Same ${i}` }));
     runRows = [run("cap", [row("chatgpt", "substituted", deepseek), row("claude", "substituted", deepseek), row("grok", "ok")], report([...same, VS_GROK]))];
     const r = (await rows())["cap"];
-    expect(r.disagreements).toEqual(["Founder: Different sources"]);
+    expect(r.disagreements).toEqual([1, 2, 3].map((i) => `Same ${i}: ChatGPT says 1789, Claude says 1792`));
     expect(r.qualifiedDisagreements).toHaveLength(3);
   });
 

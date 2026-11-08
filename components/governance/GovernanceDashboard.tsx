@@ -660,6 +660,29 @@ export function queueConsensusText(row: Pick<QueueRow, "consensusScore" | "conse
 }
 
 /**
+ * Render-time withholding (governance queue): the queue DTO carries the STORED consensus score and evidence quality
+ * (governance-queue metadata, unchanged) plus the additive `consensusWithheld` reason. When the reason is set, neither
+ * the number, its colour nor the evidence-quality chip is presented — the score cell shows the reason instead.
+ */
+export function queuePresentedScore(row: Pick<QueueRow, "consensusScore" | "consensusWithheld">): number | null {
+  return row.consensusWithheld ? null : row.consensusScore ?? null;
+}
+
+/** The evidence quality the queue presents for a row: none while its stored score is withheld (`consensusWithheld`). */
+export function queuePresentedEvidenceQuality(row: Pick<QueueRow, "evidenceQuality" | "consensusWithheld">): string | null {
+  return row.consensusWithheld ? null : row.evidenceQuality ?? null;
+}
+
+/**
+ * A research row's stored disagreement lines presented as disagreements: every stored line except those the route lists
+ * in `qualifiedDisagreements` (not a disagreement between independent executing models; shown under their own heading).
+ */
+export function queueResearchDisagreementLines(lines: readonly string[] | undefined, row: Pick<QueueRow, "qualifiedDisagreements">): string[] {
+  const qualified = new Set((row.qualifiedDisagreements ?? []).map((d) => d.text));
+  return (lines ?? []).filter((line) => !qualified.has(line));
+}
+
+/**
  * Heading of a research row's stored key findings: below two independent executing models (or with independence not
  * recorded) they are one model's findings, never presented as the panel's.
  */
@@ -1578,7 +1601,7 @@ export default function GovernanceDashboard() {
                   {displayedQueueRows.map((row) => {
                     const chip = statusChipClasses(row.governanceStatus);
                     const mh = modelHealthDisplay(row.modelHealth);
-                    const ev = evidenceChip(row.evidenceQuality);
+                    const ev = evidenceChip(queuePresentedEvidenceQuality(row));
                     const exp = expanded.has(`${row.collection}:${row.runId}`);
                     const reasons = row.governanceReasons ?? [];
                     const firstReason = reasons[0] ?? "—";
@@ -2079,7 +2102,7 @@ export function FragmentRow(props: {
             </span>
           )}
         </td>
-        <td className={`px-3 py-2 font-semibold ${consensusColor(row.consensusScore)}`}>
+        <td className={`px-3 py-2 font-semibold ${consensusColor(queuePresentedScore(row))}`}>
           {row.consensusWithheld ? (
             <span className="text-xs font-normal text-cp-muted">{queueConsensusText(row, false)}</span>
           ) : (
@@ -2195,11 +2218,11 @@ export function FragmentRow(props: {
               </div>
             ) : null}
 
-            {row.runType === "research" && row.disagreementPoints && row.disagreementPoints.length > 0 ? (
+            {row.runType === "research" && queueResearchDisagreementLines(row.disagreementPoints, row).length > 0 ? (
               <div className="mt-4 rounded-r-lg border-l-4 border-amber-600 bg-amber-50/90 pl-3 pr-3 py-3">
                 <p className="text-sm font-semibold text-amber-950">Where synthesis flags disagreements</p>
                 <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-amber-950/90">
-                  {row.disagreementPoints.map((d, i) => (
+                  {queueResearchDisagreementLines(row.disagreementPoints, row).map((d, i) => (
                     <li key={i}>{d}</li>
                   ))}
                 </ul>
@@ -2367,11 +2390,11 @@ export function FragmentRow(props: {
               </div>
             ) : null}
 
-            {row.disagreements && row.disagreements.length > 0 && row.runType === "research" ? (
+            {row.runType === "research" && queueResearchDisagreementLines(row.disagreements, row).length > 0 ? (
               <div className="mt-4">
                 <p className="text-sm font-semibold text-slate-900">Key disagreements</p>
                 <ul className="mt-1.5 list-disc space-y-1 pl-5 text-sm text-slate-700">
-                  {row.disagreements.map((d, i) => (
+                  {queueResearchDisagreementLines(row.disagreements, row).map((d, i) => (
                     <li key={i}>{d}</li>
                   ))}
                 </ul>

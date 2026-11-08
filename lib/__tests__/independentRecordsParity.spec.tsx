@@ -9,8 +9,10 @@
  * id / family name / one slot / a failed slot / no names, V2 `positions[]`, legacy `keyDisagreements`). This same file
  * was run in a scratch worktree at 8584211 (feature detection below selects each commit's own composition — the
  * PanelSynthesisView gate input and the history line formula of that commit) and its outputs hashed; the digest is
- * pinned here. The ONE deliberate wording change is normalised in the baseline before hashing: a claim whose answering
- * models are unanimous no longer gets "… rated as X (others disagree)" (no other model answered differently) — B2.
+ * pinned here. Phase 0 (owner Option C, O14 = A; inventory v3.4 H-8 (2)): the governance-queue DTO is the 35933c8 DTO
+ * again, including "… rated as X (others disagree)" on unanimous claim rows, so the former B2 normalisation of the
+ * baseline is removed and the digest is the RAW 8584211 output (reproduced 2026-11-08 by running this file in a
+ * git-archive export of 8584211; the same run with the B2 line reproduces the former pin 96651b5d…).
  * Memo "Generated:" lines are stripped (wall clock); audit timestamps are fixture-invalid ("—") to stay TZ-independent.
  */
 const mockedResolveGovernanceRequestUser = jest.fn();
@@ -59,8 +61,11 @@ import { toTeamClaimVerificationSummary } from "@/lib/workspaces/teamClaimVerifi
 import { TeamClaimListRow } from "@/components/workspace/claims/TeamClaimListRow";
 import { generateVerificationMemo } from "@/lib/verification/generateMemo";
 
-/** Pinned: sha256 of the 8584211 outputs for the generated set (computed in a scratch worktree at that commit). */
-const BASELINE_8584211_DIGEST = "96651b5d2288eb0fabcfb09cf1a582c1d99e93d34613fb78341c33a4bbf8ee02";
+/**
+ * Pinned: sha256 of the 8584211 outputs for the generated set (computed in a scratch export at that commit, without
+ * normalisation). Was 96651b5d2288eb0fabcfb09cf1a582c1d99e93d34613fb78341c33a4bbf8ee02 (B2-normalised baseline).
+ */
+const BASELINE_8584211_DIGEST = "ecda400490d0b6f10931dd72465941156b1ab332f752912e0e616a3232c5eb21";
 
 // Feature detection: the claim presentation module exists only after 8584211.
 let presentation: any = null;
@@ -260,7 +265,6 @@ async function outputs(): Promise<unknown> {
       ? ` · ${payload.consensusScore} consensus`
       : presentation.claimHistoryConsensusSuffix({ consensusScore: payload.consensusScore, modelIndependence: (payload as any).modelIndependence });
     const q = { ...byId[rec.id] };
-    if (IS_BASELINE && rec.unanimous) delete q.disagreementPoints; // B2: no "(others disagree)" when nobody answered differently
     return {
       id: rec.id,
       view: html(createElement(ClaimVerificationResultView, { data: payload })),

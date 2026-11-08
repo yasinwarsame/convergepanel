@@ -196,6 +196,9 @@ async function legacyItems(): Promise<Record<string, any>> {
 }
 const html = (item: unknown) => renderToStaticMarkup(createElement(LegacyReviewListItem, { item } as never)).replace(/<!-- -->/g, "");
 
+// Phase 0 (L16, O15 = yes; owner Option C): the Team review queue is governance-queue metadata, so the DTO keeps the
+// STORED consensusScore (35933c8); `consensusWithheld` is additive and LegacyReviewListItem presents the reason instead
+// of the number (legacyConsensusText). Every "withheld" case below asserts the stored score AND the additive reason.
 describe("GET /api/teams/runs?version=1 — legacy consensus score vs the linked run's independent executing models", () => {
   it("two DeepSeek substitutions / one independent model → withheld (insufficient); two independent → shown plainly", async () => {
     seedRun("r-ds2", [pm("chatgpt", "substituted", "deepseek"), pm("claude", "substituted", "deepseek")]);
@@ -205,7 +208,7 @@ describe("GET /api/teams/runs?version=1 — legacy consensus score vs the linked
     for (const [id, runId] of [["ds2", "r-ds2"], ["one", "r-one"], ["two", "r-two"], ["mixed", "r-mixed"]]) teamRunDocs.set(id, legacyDoc({ runId, consensusScore: 72 }));
     const by = await legacyItems();
     for (const id of ["ds2", "one"]) {
-      expect([id, by[id].consensusScore, by[id].consensusWithheld]).toEqual([id, null, "insufficient_independent_models"]);
+      expect([id, by[id].consensusScore, by[id].consensusWithheld]).toEqual([id, 72, "insufficient_independent_models"]);
       expect(html(by[id])).toContain(CONSENSUS_WITHHELD_TEXT.insufficient_independent_models);
       expect(html(by[id])).not.toMatch(/Consensus \d+\/100/);
     }
@@ -220,7 +223,7 @@ describe("GET /api/teams/runs?version=1 — legacy consensus score vs the linked
     seedRun("r-old", undefined);
     teamRunDocs.set("old", legacyDoc({ runId: "r-old", consensusScore: 64 }));
     const by = await legacyItems();
-    expect([by.old.consensusScore, by.old.consensusWithheld]).toEqual([null, "independence_unverified"]);
+    expect([by.old.consensusScore, by.old.consensusWithheld]).toEqual([64, "independence_unverified"]);
     expect(html(by.old)).toContain(CONSENSUS_WITHHELD_TEXT.independence_unverified);
   });
 
@@ -230,7 +233,7 @@ describe("GET /api/teams/runs?version=1 — legacy consensus score vs the linked
     getAllShouldThrow = true;
     getAllSucceedForFirstCalls = 1; // the read-domain guard succeeds; enrichment reads fail
     const by = await legacyItems();
-    expect([by.two.consensusScore, by.two.consensusWithheld]).toEqual([null, "independence_unverified"]);
+    expect([by.two.consensusScore, by.two.consensusWithheld]).toEqual([72, "independence_unverified"]);
   });
 
   // Review of 8584211, MAJOR — claim-verification rows are judged from `verifications/{verificationId}`.
@@ -260,7 +263,7 @@ describe("GET /api/teams/runs?version=1 — legacy consensus score vs the linked
     seedVerification("v-one", [vrow("chatgpt", "ok"), vrow("claude", "failed"), vrow("grok", "parse_error")], ["chatgpt", "claude", "grok"]);
     teamRunDocs.set("claim-one", claimDoc("v-one"));
     const by = await legacyItems();
-    expect([by["claim-one"].consensusScore, by["claim-one"].consensusWithheld]).toEqual([null, "insufficient_independent_models"]);
+    expect([by["claim-one"].consensusScore, by["claim-one"].consensusWithheld]).toEqual([92, "insufficient_independent_models"]);
     expect(html(by["claim-one"])).toContain(CONSENSUS_WITHHELD_TEXT.insufficient_independent_models);
     expect(html(by["claim-one"])).not.toMatch(/Consensus \d+\/100/);
   });
@@ -273,7 +276,7 @@ describe("GET /api/teams/runs?version=1 — legacy consensus score vs the linked
     );
     teamRunDocs.set("claim-ds", claimDoc("v-ds"));
     const by = await legacyItems();
-    expect([by["claim-ds"].consensusScore, by["claim-ds"].consensusWithheld]).toEqual([null, "insufficient_independent_models"]);
+    expect([by["claim-ds"].consensusScore, by["claim-ds"].consensusWithheld]).toEqual([92, "insufficient_independent_models"]);
   });
 
   it("claim row: two independent executing models answered → score shown plainly", async () => {
@@ -292,7 +295,7 @@ describe("GET /api/teams/runs?version=1 — legacy consensus score vs the linked
     for (const id of ["v-none", "v-partial", "v-unknown", "v-nostatus"]) teamRunDocs.set(id, claimDoc(id));
     const by = await legacyItems();
     for (const id of ["v-none", "v-partial", "v-unknown", "v-nostatus"]) {
-      expect([id, by[id].consensusScore, by[id].consensusWithheld]).toEqual([id, null, "independence_unverified"]);
+      expect([id, by[id].consensusScore, by[id].consensusWithheld]).toEqual([id, 92, "independence_unverified"]);
       expect(html(by[id])).toContain(CONSENSUS_WITHHELD_TEXT.independence_unverified);
     }
   });
@@ -309,7 +312,7 @@ describe("GET /api/teams/runs?version=1 — legacy consensus score vs the linked
     getAllSucceedForFirstCalls = 1; // the read-domain guard succeeds; enrichment reads fail
     getAllCallCount = 0;
     by = await legacyItems();
-    expect([by["claim-two"].consensusScore, by["claim-two"].consensusWithheld]).toEqual([null, "independence_unverified"]);
+    expect([by["claim-two"].consensusScore, by["claim-two"].consensusWithheld]).toEqual([92, "independence_unverified"]);
   });
 
   it("claim rows are read in one batched verifications read (no per-row reads)", async () => {
@@ -340,13 +343,13 @@ describe("applyLegacyConsensusIndependence (pure)", () => {
   const base = { kind: "legacy", teamRunId: "t", createdAt: "x", policyFlags: [], blockedByPolicy: false, governanceReviewRequired: false, consensusScore: 70 };
   it("research row: shown only when independent; null independence (unreadable run) → unverified", () => {
     expect(applyLegacyConsensusIndependence({ ...base, runId: "r" }, "independent")).toEqual({ ...base, runId: "r" });
-    expect(applyLegacyConsensusIndependence({ ...base, runId: "r" }, "insufficient")).toEqual({ ...base, runId: "r", consensusScore: null, consensusWithheld: "insufficient_independent_models" });
-    expect(applyLegacyConsensusIndependence({ ...base, runId: "r" }, null)).toEqual({ ...base, runId: "r", consensusScore: null, consensusWithheld: "independence_unverified" });
+    expect(applyLegacyConsensusIndependence({ ...base, runId: "r" }, "insufficient")).toEqual({ ...base, runId: "r", consensusWithheld: "insufficient_independent_models" });
+    expect(applyLegacyConsensusIndependence({ ...base, runId: "r" }, null)).toEqual({ ...base, runId: "r", consensusWithheld: "independence_unverified" });
   });
   it("a row naming neither a run nor a verification → unverified; a claim row is judged like a research row", () => {
-    expect(applyLegacyConsensusIndependence({ ...base }, "independent")).toEqual({ ...base, consensusScore: null, consensusWithheld: "independence_unverified" });
-    expect(applyLegacyConsensusIndependence({ ...base, verificationId: "v" }, null)).toEqual({ ...base, verificationId: "v", consensusScore: null, consensusWithheld: "independence_unverified" });
-    expect(applyLegacyConsensusIndependence({ ...base, verificationId: "v" }, "insufficient")).toEqual({ ...base, verificationId: "v", consensusScore: null, consensusWithheld: "insufficient_independent_models" });
+    expect(applyLegacyConsensusIndependence({ ...base }, "independent")).toEqual({ ...base, consensusWithheld: "independence_unverified" });
+    expect(applyLegacyConsensusIndependence({ ...base, verificationId: "v" }, null)).toEqual({ ...base, verificationId: "v", consensusWithheld: "independence_unverified" });
+    expect(applyLegacyConsensusIndependence({ ...base, verificationId: "v" }, "insufficient")).toEqual({ ...base, verificationId: "v", consensusWithheld: "insufficient_independent_models" });
     expect(applyLegacyConsensusIndependence({ ...base, verificationId: "v" }, "independent")).toEqual({ ...base, verificationId: "v" });
   });
 });

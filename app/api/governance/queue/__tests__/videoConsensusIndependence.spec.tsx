@@ -131,14 +131,16 @@ async function rows(): Promise<Record<string, any>> {
 }
 
 describe("B3: video queue rows — consensus score requires two independent executing models", () => {
-  it("one executing model (one answered, one failed): score and evidence quality withheld, reason shown", async () => {
+  // Phase 0 (L15, O14 = A): the DTO keeps the STORED score / evidence quality (35933c8); `consensusWithheld` is
+  // additive and the dashboard presents the reason, never the number (queueConsensusText / queuePresentedScore).
+  it("one executing model (one answered, one failed): stored score kept in the DTO, withheld at presentation, reason shown", async () => {
     const stored = vidWith("v-one", {}, [vrow("gemini", "ok", "authentic"), vrow("chatgpt", "failed", "")]);
     const before = JSON.stringify(stored.data);
     vidRows = [stored];
     const r = (await rows())["v-one"];
     expect([r.consensusScore, r.evidenceQuality, r.consensusWithheld, r.modelIndependence]).toEqual([
-      null,
-      null,
+      80,
+      "strong",
       "insufficient_independent_models",
       "insufficient",
     ]);
@@ -148,13 +150,13 @@ describe("B3: video queue rows — consensus score requires two independent exec
     expect(JSON.stringify(stored.data)).toBe(before);
   });
 
-  it("the same model id in two ok rows is one executing model: withheld", async () => {
+  it("the same model id in two ok rows is one executing model: withheld at presentation (stored score kept)", async () => {
     vidRows = [vidWith("v-dup", {}, [vrow("gemini", "ok", "authentic"), vrow("gemini", "ok", "authentic")])];
     const r = (await rows())["v-dup"];
-    expect([r.consensusScore, r.consensusWithheld]).toEqual([null, "insufficient_independent_models"]);
+    expect([r.consensusScore, r.consensusWithheld]).toEqual([80, "insufficient_independent_models"]);
   });
 
-  it("unknown provenance (no modelResults, or a row without model id / status): withheld as UNVERIFIED", async () => {
+  it("unknown provenance (no modelResults, or a row without model id / status): withheld at presentation as UNVERIFIED (stored score kept)", async () => {
     vidRows = [
       vidWith("v-none", {}, undefined),
       vidWith("v-bad", {}, [vrow("gemini", "ok", "authentic"), { status: "ok", verdict: "authentic" }]),
@@ -162,7 +164,7 @@ describe("B3: video queue rows — consensus score requires two independent exec
     const all = await rows();
     for (const id of ["v-none", "v-bad"]) {
       const r = all[id];
-      expect([r.consensusScore, r.evidenceQuality, r.consensusWithheld, r.modelIndependence]).toEqual([null, null, "independence_unverified", "unverified"]);
+      expect([r.consensusScore, r.evidenceQuality, r.consensusWithheld, r.modelIndependence]).toEqual([80, "strong", "independence_unverified", "unverified"]);
       expect(queueConsensusText(r, false)).toBe(CONSENSUS_WITHHELD_TEXT.independence_unverified);
     }
   });
@@ -198,7 +200,8 @@ describe("NIT n1: never '1/1 models say …'", () => {
     ];
     const r = (await rows())["n1"];
     expect(r.modelIndependence).toBeUndefined();
-    expect(r.agreementSummary).toBeUndefined();
+    // Phase 0 (L15, O14 = A): the 35933c8 slot tally (3 answered slots); never "1/1".
+    expect(r.agreementSummary).toBe("2/3 models say accurate");
     expect(JSON.stringify(r)).not.toMatch(/\b1\/1 models/);
   });
 
@@ -221,6 +224,7 @@ describe("NIT n2: same-executing-model digest pair in a run with ≥ 2 independe
     const r = (await rows())["n2"];
     expect(r.modelIndependence).toBeUndefined();
     expect(r.qualifiedDisagreements).toEqual([{ text: "Conflicting assessments: (chatgpt) vs (claude)", basis: "same_executing_model" }]);
-    expect(r.disagreements).toBeUndefined();
+    // Phase 0 (L15, O14 = A): the 35933c8 digest lines stay in the DTO; the qualification is additive.
+    expect(r.disagreements).toEqual(["Conflicting assessments: (chatgpt) vs (claude)"]);
   });
 });

@@ -85,23 +85,26 @@ async function rows(): Promise<Record<string, any>> {
 }
 
 describe("GET /api/governance/queue — claim verification consensus vs independent executing models", () => {
-  it("three requested, one answered → score + evidence quality withheld (insufficient)", async () => {
+  // Phase 0 (L15, O14 = A; owner Option C): the queue DTO's consensusScore / evidenceQuality are the STORED values, as at
+  // 35933c8 (governance-queue metadata); `consensusWithheld` / `modelIndependence` are additive presentation keys that
+  // tell the dashboard to show the reason instead of the number (GovernanceDashboard queuePresentedScore).
+  it("three requested, one answered → stored score + evidence quality kept; withheld reason additive (insufficient)", async () => {
     verRows = [ver("one", [vrow("chatgpt", "ok"), vrow("claude", "failed"), vrow("grok", "parse_error")], ["chatgpt", "claude", "grok"])];
     const r = (await rows())["one"];
     expect([r.consensusScore, r.evidenceQuality, r.consensusWithheld, r.modelIndependence]).toEqual([
-      null,
-      null,
+      92,
+      "strong",
       "insufficient_independent_models",
       "insufficient",
     ]);
   });
 
-  it("two slots answered by DeepSeek → one model → withheld", async () => {
+  it("two slots answered by DeepSeek → one model → stored score kept, withheld reason additive", async () => {
     verRows = [
       ver("ds", [vrow("chatgpt", "ok", { substituted: true, provider: "deepseek" }), vrow("claude", "ok", { substituted: true, provider: "deepseek" })], ["chatgpt", "claude"]),
     ];
     const r = (await rows())["ds"];
-    expect([r.consensusScore, r.consensusWithheld]).toEqual([null, "insufficient_independent_models"]);
+    expect([r.consensusScore, r.consensusWithheld]).toEqual([92, "insufficient_independent_models"]);
   });
 
   it("two independent models answered → score shown, no withheld reason", async () => {
@@ -110,14 +113,14 @@ describe("GET /api/governance/queue — claim verification consensus vs independ
     expect([r.consensusScore, r.evidenceQuality, "consensusWithheld" in r, "modelIndependence" in r]).toEqual([92, "strong", false, false]);
   });
 
-  it("missing / incomplete attribution → withheld as unverified", async () => {
+  it("missing / incomplete attribution → stored score kept, withheld reason additive (unverified)", async () => {
     verRows = [
       ver("none", undefined),
       ver("partial", [vrow("chatgpt", "ok"), vrow("claude", "ok")], ["chatgpt", "claude", "grok"]),
     ];
     const by = await rows();
     for (const id of ["none", "partial"]) {
-      expect([id, by[id].consensusScore, by[id].consensusWithheld, by[id].modelIndependence]).toEqual([id, null, "independence_unverified", "unverified"]);
+      expect([id, by[id].consensusScore, by[id].consensusWithheld, by[id].modelIndependence]).toEqual([id, 92, "independence_unverified", "unverified"]);
     }
   });
 

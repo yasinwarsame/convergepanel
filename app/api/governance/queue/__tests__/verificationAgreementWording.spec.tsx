@@ -166,7 +166,10 @@ describe("GET /api/governance/queue + GovernanceDashboard — claim wording by e
     const r = (await rows())["one"];
     expect(r.modelIndependence).toBe("insufficient");
     expect(r.singleModelAssessment).toBe("One independent model's assessment (ChatGPT): accurate — not agreement between models");
-    for (const k of ["agreementSummary", "agreementPoints", "disagreementPoints", "dissentSummary", "disagreements"]) expect(k in r).toBe(false);
+    // Phase 0 (L15, O14 = A): the DTO carries the 35933c8 slot-count lines, including the known-wrong "(others
+    // disagree)" line; the dashboard renders none of them for a row with `modelIndependence` (below).
+    expect([r.agreementSummary, r.disagreementPoints]).toEqual(["1/1 models say accurate", ["ChatGPT rated as accurate (others disagree)"]]);
+    for (const k of ["agreementPoints", "dissentSummary", "disagreements"]) expect(k in r).toBe(false);
     const html = render(r);
     expect(html).not.toMatch(MULTI_MODEL);
     expect(html).toContain(QUEUE_VERIFICATION_INDEPENDENCE_NOTE.insufficient);
@@ -195,12 +198,13 @@ describe("GET /api/governance/queue + GovernanceDashboard — claim wording by e
     const r = (await rows())["two"];
     expect("modelIndependence" in r).toBe(false);
     expect(r.agreementSummary).toBe("2/2 models say accurate");
-    expect("disagreementPoints" in r).toBe(false);
+    // Phase 0 (L15, O14 = A): the 35933c8 DTO line "(others disagree)" on a unanimous row is restored verbatim; it is
+    // known-wrong and is corrected at render time by track C-b (C-IND-agree2), not by Phase 0.
+    expect(r.disagreementPoints).toEqual(["ChatGPT, Claude rated as accurate (others disagree)"]);
     const html = render(r);
     expect(html).toContain("Where models agree");
     expect(html).toContain("2/2 models say accurate");
-    expect(html).not.toContain("others disagree");
-    expect(html).not.toContain("Where models disagree");
+    expect(html).toContain("ChatGPT, Claude rated as accurate (others disagree)");
   });
 
   it("one independent model with contested claims: its contested points are its own, not a disagreement between models", async () => {
@@ -262,7 +266,8 @@ describe("GET /api/governance/queue + GovernanceDashboard — claim wording by e
     expect(projections.verifications.length).toBeGreaterThan(0);
     for (const f of projections.verifications) expect(f).toEqual(expect.arrayContaining(["modelResults", "selectedModels"]));
     // grok was requested but has no row → unverified (only visible because the projection carries selectedModels).
-    expect([r.consensusScore, r.consensusWithheld, r.modelIndependence]).toEqual([null, "independence_unverified", "unverified"]);
+    // Phase 0 (L15): stored score kept in the DTO; withholding is the additive reason.
+    expect([r.consensusScore, r.consensusWithheld, r.modelIndependence]).toEqual([92, "independence_unverified", "unverified"]);
   });
 });
 
@@ -272,7 +277,8 @@ describe("video rows", () => {
     vidRows = [vid("v1", [vrow("gemini", "ok", "authentic"), vrow("chatgpt", "failed", "")])];
     const r = (await rows())["v1"];
     expect(r.modelIndependence).toBe("insufficient");
-    expect("agreementSummary" in r).toBe(false);
+    // Phase 0 (L15, O14 = A): the 35933c8 DTO tally; the dashboard does not render it for this row (below).
+    expect(r.agreementSummary).toBe("1/1 models say authentic");
     expect(r.singleModelAssessment).toBe("One independent model's assessment (Gemini): authentic — not agreement between models");
     expect(render(r)).not.toMatch(MULTI_MODEL);
   });
