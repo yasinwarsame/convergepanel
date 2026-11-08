@@ -22,7 +22,11 @@
  *         uid, or the request is 401. No slot falls back to the other; a
  *         present-but-empty or malformed `Authorization` header is a presented
  *         credential that failed, never "no bearer".
- *   SP-8  `ADMIN_SECRET` is never consulted. Nothing here reads a shared secret.
+ *   SP-8  The retired bootstrap shared secret is never consulted: nothing here
+ *         reads a secret or an environment variable. (The secret's name is kept
+ *         out of this file on purpose so the repository-wide operator-token
+ *         discovery in docs/__tests__/bootstrapProbeInvariant.spec.ts does not
+ *         classify this module as an operator site.)
  *
  * O-6 (step-up / MFA) is provisionally DECLINED for S2: no maximum `auth_time`
  * age is enforced. O-7 is provisionally logger-only: decisions emit structured

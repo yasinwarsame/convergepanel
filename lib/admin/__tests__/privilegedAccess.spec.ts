@@ -680,6 +680,9 @@ describe("static boundaries", () => {
     expect(SRC).toMatch(/^import "server-only";$/m);
     expect(code).not.toMatch(/process\.env/);
     expect(code).not.toMatch(/ADMIN_SECRET|BOOTSTRAP_SECRET/);
+    // Not even in a comment: the operator-token discovery in
+    // docs/__tests__/bootstrapProbeInvariant.spec.ts would classify the module.
+    expect(SRC).not.toMatch(/ADMIN_SECRET/);
   });
 
   it("the guard performs no Auth lookup of its own (the one read is readLiveAuthSnapshot)", () => {
