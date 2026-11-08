@@ -89,149 +89,64 @@ override and both billing-mutation routes — until their ID token expires
 `revokeRefreshTokens(uid)`, not disablement alone.** Put both in the incident
 runbook.
 
-### BOOTSTRAP_SECRET — not a human role
-`ADMIN_SECRET` gates `/api/admin/set-admin`, which mints the first `admin: true`
-claim. It authenticates **no identity at all** — possession of the secret is the
-entire check. It is an exceptional bootstrap mechanism, not an administrator
-tier. It fails closed when the variable is empty or unset: `adminSecret.length > 0`
-is the first conjunct of the comparison, evaluated before any `timingSafeEqual`.
+### Secret bootstrap route — RETIRED (S1)
 
-### BOOTSTRAP SECRET STATE MODEL — presence is not configuration
+The former bootstrap mechanism, `BOOTSTRAP_SECRET` (the `ADMIN_SECRET` variable on
+the `POST /api/admin/set-admin` route), is retired. It was never a human role:
+possession of the secret was the entire check, it authenticated no identity, and
+it left no audit record and no success log.
 
-Phase EXISTING_ADMIN_E2 (2026-09-09). An earlier pre-enrollment review recorded
-`ADMIN_SECRET` as "present and reusable" and scheduled a retirement, having tested
-only that the variable EXISTS. It exists and its value is EMPTY, so the bootstrap
-path was already fail-closed and the retirement was a no-op that could not have
-completed. Three states, and only the third means anything is live:
+- **The route is deleted.** `app/api/admin/set-admin/route.ts` no longer exists,
+  so a deployment built from this code answers `404` for that path. The tests in
+  `app/api/admin/__tests__/setAdminRouteRetired.spec.ts` keep it absent.
+- **No source reads the variable.** No non-test file reads `ADMIN_SECRET` or
+  `BOOTSTRAP_SECRET`, and `.env.local.example` no longer lists it. Setting the
+  variable has no effect on a current deployment.
+- **Its probe is deleted too.** The two-phase containment tool and its
+  rotation procedure existed only for that route, and are removed with it.
+- **Do not restore either.** Do not re-add `ADMIN_SECRET` to any environment and
+  do not restore the route. This is a settled owner decision (SP-8).
+- **Historical deployments are not covered by this.** A deployment built before
+  S1 still ships the retired route. Retiring those deployments, including the
+  stable alias that still points at one, is separate work (security step SEC-7).
+  Never send a uid or a secret to the retired route on any deployment. The only
+  post-deploy check is a signed-out `GET` of that path on current Production, by
+  the owner or under an authorized probe, which must return `404`.
 
-| State | Definition | Bootstrap path | Retirement action |
-|---|---|---|---|
-| `ABSENT` | variable does not exist | fail-closed | none |
-| `EMPTY` | variable exists, UTF-8 byte length **0** | fail-closed | **none required** |
-| `CONFIGURED` | variable exists, byte length **> 0** | potentially active | containment proof + remove/rotate |
+### Interim path for an `admin` claim change (until PR #295 merges)
 
-The runtime test is `Buffer.from(process.env.ADMIN_SECRET ?? "", "utf8").length > 0`,
-evaluated before any `timingSafeEqual`. `ABSENT` and `EMPTY` are indistinguishable
-to it — both can never authenticate any request.
+Until the hardened operator CLI (PR #295) merges, this is the only documented path
+for an emergency `admin` claim change. It is a written procedure; nothing in this
+document runs it.
 
-**Never infer activation from variable presence.** `vercel env ls` shows names and
-prints `Encrypted` for values, so it cannot separate `EMPTY` from `CONFIGURED`.
-Determine the effective state the way the runtime does — read the value through
-the approved secret-safe mechanism (`vercel env pull` to a temp file), measure only
-absent / empty / non-empty, delete the file, and never print the value or inline it
-on a command line. A control is worth running in the same pass: confirm an
-unrelated secret in the same pull has a plausible non-zero length, which
-distinguishes "genuinely empty" from "the tool redacted everything".
+1. **Who and where.** An emergency change to the `admin` custom claim (granting
+   it to a new SYSTEM_ADMIN, or removing it from a compromised one) is an
+   **owner action in the Firebase Console**. It is never an agent action.
+2. **Change only the `admin` key.** Leave every other custom claim on the account
+   as it was.
+3. **Verify read-only.** Confirm the result with
+   `scripts/check-admin-claims.js` or `scripts/verify-admin-claims.js`. Both call
+   `getUser` and print the claims; neither writes anything.
+4. **The account signs out and back in** before a new claim appears in its ID
+   token.
 
-**Containment precondition.** `probe-admin-secret.mjs --production-two-phase`
-requires `ADMIN_SECRET_STATE == CONFIGURED`. Its PRE half demands `400` +
-`credential-accepted`, which an empty secret can never produce. If the state is
-`ABSENT` or `EMPTY`, STOP before any Production request and report
-`BOOTSTRAP_SECRET_ALREADY_DISABLED` / `CONTAINMENT_NOT_APPLICABLE`. Do not spend a
-rate-limit slot discovering this.
-
-**Current observed Production state (2026-09-09):** the `ADMIN_SECRET` variable
-exists and its effective value is empty, so bootstrap-secret authentication is
-disabled and `/api/admin/set-admin` is fail-closed. **No secret retirement is
-outstanding.** Do not restate this as a completed retirement: the credential was
-never removed or rotated; it is disabled by an empty value. Removing the empty
-variable is optional hygiene with no runtime effect, and is deliberately NOT done,
-because it would require a Production configuration change and deployment for no
-security benefit.
-
-### Using BOOTSTRAP_SECRET to mint the first SYSTEM_ADMIN
-
-`ADMIN_SECRET` is a bootstrap mechanism, not a standing human credential. It
-authenticates no identity: possession alone mints `admin: true` on any uid, with
-no audit record and no success log. Treating it as a durable operator credential
-means holding, indefinitely, a value that silently grants the highest tier in the
-system to anyone who obtains it.
+**The legacy minting scripts are NOT part of this path. Do not use them:**
+`scripts/setAdmin.ts`, `scripts/set-admin-simple.js`, `scripts/set-admin-by-uid.js`
+and `scripts/set-admin-claim.js`. Each writes the account's whole custom-claim
+object without the CLI's safeguards: two of them drop every other claim, and two
+let an existing `admin` value silently override the grant. They are scheduled for
+deletion in security slice S5.
 
 > **CURRENT STATE (2026-09-09): no first-admin enrollment is pending.** Production
 > already has **two intended SYSTEM_ADMIN accounts**, both claim-derived
 > (`admin === true`) and both dispositioned INTENDED_KEEP by the operator. They do
 > not need `ADMIN_EMAILS`, because SYSTEM_ADMIN already implies ADMIN_PORTAL access.
 > `GOVERNANCE_ADMIN_EMAILS` remains absent unless governance authority is separately
-> requested. The procedure below is retained for a genuinely NEW administrator, and
-> its Option 2 applies only when `ADMIN_SECRET` is `CONFIGURED`.
+> requested.
 >
 > Earlier phases of this workstream described the state as "nobody enrolled". That
 > was true of the ALLOWLISTS and was never true of the claim; it was corrected when
 > Production custom claims were first enumerated.
-
-Two ways to enroll a SYSTEM_ADMIN. Choose ONE deliberately:
-
-**Option 1 — out-of-band service-account script (preferred).** Call
-`setCustomUserClaims(uid, { admin: true })` directly from a script authenticated
-by the Firebase service account. `ADMIN_SECRET` never needs to hold a live value
-for enrollment, so the bootstrap route is not part of the enrollment story at
-all, and there is no post-enrollment rotation to remember.
-
-**Option 2 — the bootstrap route.** If `/api/admin/set-admin` is used instead,
-run the steps in exactly this order. The numbering is the contract: the
-pre-check must be taken while the old secret is STILL LIVE, so it necessarily
-precedes the mint, the rotation and the rotation's deployment.
-
-<!-- BOOTSTRAP-SEQUENCE:CANONICAL — the only ordering. Order is tested by
-     docs/__tests__/bootstrapProbeInvariant.spec.ts. -->
-
-| ID | Requirement | Mode |
-|---|---|---|
-| `BOOTSTRAP_SET_SECRET` | Set `ADMIN_SECRET` to a freshly generated value and deploy it | MUST |
-| `BOOTSTRAP_PRECHECK` | Start the two-phase tool and confirm PRE accepts the exact old secret at canonical Production | MUST |
-| `BOOTSTRAP_MINT` | Mint the claim once, for the single intended uid, while the proof stays armed | MUST |
-| `BOOTSTRAP_VERIFY_MINT` | Verify the claim landed on that uid and on no other | MUST |
-| `BOOTSTRAP_ROTATE_SECRET` | Rotate or remove `ADMIN_SECRET` | MUST |
-| `BOOTSTRAP_DEPLOY_ROTATION` | Deploy that change deliberately | MUST |
-| `BOOTSTRAP_POSTCHECK` | Resume the SAME armed process and require POST rejected | MUST |
-| `BOOTSTRAP_POST_RATE_LIMITED` | On a post-check 429: stay in the same process, do not restart, wait for the window, retry the post-check | MUST_PRESERVE_PROCESS |
-| `BOOTSTRAP_REENUMERATE` | Re-enumerate privileged claims across all accounts | MUST |
-| `BOOTSTRAP_VERIFY_AUTHZ` | Verify positive and negative authorization controls | MUST |
-
-1. `[BOOTSTRAP_SET_SECRET][REQUIRED]` Set `ADMIN_SECRET` to a freshly generated
-   value and **deploy it**. An env edit alone does not reach running Production.
-2. `[BOOTSTRAP_PRECHECK][REQUIRED]` **Start the two-phase containment tool now,
-   before anything is minted or rotated**, and wait for `[PRE] OK`:
-
-       export OLD_ADMIN_SECRET        # already exported; never inline on the command line
-       node scripts/probe-admin-secret.mjs --production-two-phase
-
-   PRE must report the old secret **accepted** at the canonical Production
-   origin. This is the load-bearing half: it proves you reached an instance that
-   actually holds this secret, and that the exact bytes survived your shell.
-   **Leave this process running.** It holds the proof in memory; there is no
-   on-disk state and a restart cannot rebuild PRE once the rotation has shipped.
-3. `[BOOTSTRAP_MINT][REQUIRED]` With the proof armed and the old secret still
-   live, mint the claim **once**, for the single intended uid.
-4. `[BOOTSTRAP_VERIFY_MINT][REQUIRED]` Verify the claim landed on that uid and
-   on no other.
-5. `[BOOTSTRAP_ROTATE_SECRET][REQUIRED]` Rotate or remove `ADMIN_SECRET`. The
-   route fails closed on an empty or unset value, so removal is a valid state.
-6. `[BOOTSTRAP_DEPLOY_ROTATION][REQUIRED]` **Deploy that change deliberately.**
-   Until a deployment picks it up, the old value is still live.
-7. `[BOOTSTRAP_POSTCHECK][REQUIRED]` Return to the still-running process and let
-   it take POST. Only `PRODUCTION_CONTAINMENT_PROVEN` closes the bootstrap
-   window. A single-shot rejection is **not** enrollment evidence.
-
-   A post-check that does not prove containment does **not** end the run. A 429,
-   a 5xx, a transport failure, a refused redirect, an unattributed 401, or a
-   still-accepted response all leave the proof **armed** and retryable in that
-   same process — so a rate limit or a deployment that has not finished
-   propagating costs you a retry, not the proof.
-8. `[BOOTSTRAP_REENUMERATE][REQUIRED]` Re-enumerate privileged claims across all
-   accounts.
-9. `[BOOTSTRAP_VERIFY_AUTHZ][REQUIRED]` Verify both a positive and a negative
-   authorization control, and record the evidence.
-
-**Never send a uid to `/api/admin/set-admin` as a verification step.** The
-secret is validated BEFORE the uid, so with a uid a still-live old secret does
-not report a failure — it mints `admin: true` on that uid, with no audit record
-and no success log. The verification would be the breach. The two-phase tool
-sends `{"secret": "<OLD_SECRET>"}` and nothing else: `buildProbeBody()` takes one
-parameter and cannot carry a uid.
-
-Neither procedure is performed by any phase that documents it; enrollment is a
-separate, explicitly authorized action.
 
 ### Password admin session — REMOVED (R-25)
 The legacy `ADMIN_PASSWORD` flow (`/api/admin/login`, `/api/admin/logout`,
@@ -353,9 +268,9 @@ operator does; they are not automated.
 6. **Review the evidence — and know what does not exist.** Application audit
    coverage is partial. C7 corrected an earlier claim that `writeAuditEvent`
    covered the SYSTEM_ADMIN mutation handlers generally; the C7-R4 review then
-   found C7's own replacement table incomplete — it omitted
-   `/api/admin/set-admin`, the second claim-minting path, while carrying a
-   heading that asserted completeness. The table below is now enumerated from
+   found C7's own replacement table incomplete — it omitted the secret
+   bootstrap route (the second claim-minting path, since retired in S1), while
+   carrying a heading that asserted completeness. The table below is now enumerated from
    the filesystem and **held complete by a test**
    (`docs/__tests__/adminAuthorityEvidenceTable.spec.ts`). Stated precisely,
    because C8 claimed more than it enforced: the test walks
@@ -410,7 +325,6 @@ operator does; they are not automated.
    | `/api/governance/review` POST | GOVERNANCE_ADMIN / reviewer | ✅ `writeAuditEvent` | ✅ shape only | run's `governanceEvents` |
    | `/api/governance/policy` POST | GOVERNANCE_ADMIN | ✅ `writeAuditEvent` | ✅ | — |
    | `/api/governance/policy` GET | GOVERNANCE_ADMIN or current `full` plan (Step 6.0b) | ❌ | ✅ | — |
-   | **`/api/admin/set-admin` POST** | **BOOTSTRAP_SECRET only** | ❌ **NONE** | ❌ **NONE** | **none — see §B.6** |
    | **`/api/admin/set-role` POST** | SYSTEM_ADMIN | ❌ **NONE** | ✅ | — |
    | **`/api/admin/keys` GET, POST** | SYSTEM_ADMIN | ❌ **NONE** | ✅ | — |
    | **`/api/admin/purge-runs` POST** | SYSTEM_ADMIN | ❌ **NONE** | ✅ | — |
@@ -426,6 +340,11 @@ operator does; they are not automated.
    | `/api/governance/queue` GET | GOVERNANCE_ADMIN / reviewer | ❌ | ✅ shape only | — |
    | `/api/governance/reviewer` GET, POST | plan-gated self-service | ❌ | ❌ | — |
 
+   **The retired secret bootstrap route is not in this table** because it no
+   longer exists in current code (S1). On a historical deployment that still
+   ships it, it produced no audit record and no success log, so its use there
+   cannot be ruled out from application evidence.
+
    **`/api/governance/audit/backfill` deserves separate notice:** it is a
    privileged WRITE into `admin_audit_logs` itself (up to 400 documents), with
    no record of who ran it. When assessing whether the audit collection can be
@@ -433,7 +352,7 @@ operator does; they are not automated.
 
    **What an absent record does and does not mean.** For every ❌ Audit row
    there is no durable application record of who acted or what was touched. For
-   the rows that are ❌ in **both** columns — `set-admin`, `sync-subscription`,
+   the rows that are ❌ in **both** columns — `sync-subscription`,
    `users/[uid]` PATCH/DELETE (account disable and permanent deletion),
    `users/search`, `access`, `login`/`logout` — the application produces **no
    evidence of any kind on success**. An earlier version of this section told
@@ -476,16 +395,17 @@ table is the contract.
 |---|---|---|
 | `CONTAINMENT_REMOVE_CLAIM` | Remove `admin: true` from the affected account | MUST |
 | `CONTAINMENT_REVOKE_REFRESH` | Revoke refresh tokens | MUST |
-| `CONTAINMENT_ROTATE_BOOTSTRAP` | Rotate or remove `ADMIN_SECRET` where exposure is possible | MUST |
-| `CONTAINMENT_PROBE_OLD_SECRET` | Prove the rotation with the two-phase containment tool | MUST |
+| `CONTAINMENT_HISTORICAL_BOOTSTRAP` | Treat pre-S1 deployments that still ship the retired bootstrap route as in scope | MUST |
 | `CONTAINMENT_DISABLE_ACCOUNT` | Disable the affected Firebase Auth account when the identity is compromised | MUST |
 | `CONTAINMENT_REENUMERATE_CLAIMS` | Re-enumerate privileged claims across all accounts | MUST |
 | `CONTAINMENT_VERIFY_DENIAL` | Verify denial against Production | MUST |
 
 
-1. `[CONTAINMENT_REMOVE_CLAIM][REQUIRED]` **Remove the claim**: `setCustomUserClaims(uid, { admin: false })` (or drop the
-   key). `/api/admin/set-role` does this, but it itself requires SYSTEM_ADMIN, so
-   during an incident use a service-account script rather than the route.
+1. `[CONTAINMENT_REMOVE_CLAIM][REQUIRED]` **Remove the claim**: the effect is `setCustomUserClaims(uid, { admin: false })` (or
+   dropping the key, with every other claim left in place). `/api/admin/set-role`
+   does this, but it itself requires SYSTEM_ADMIN, so during an incident use the
+   interim path above (an owner action in the Firebase Console), not the route
+   and not a legacy minting script.
 2. `[CONTAINMENT_REVOKE_REFRESH][REQUIRED]` **Revoke refresh tokens** — `adminAuth.revokeRefreshTokens(uid)`. Without this
    the already-issued ID token keeps working.
 3. **Understand the residual window.** Every SYSTEM_ADMIN guard verifies with
@@ -503,155 +423,15 @@ table is the contract.
    revocation check, so the cookie's own five-day life can begin AFTER the
    revocation. Treat the effective ADMIN_PORTAL window as up to one hour plus the
    cookie lifetime unless you also invalidate the session.
-6. `[CONTAINMENT_ROTATE_BOOTSTRAP][REQUIRED]` **Contain the BOOTSTRAP path, or containment is not complete.** Steps 1-2
-   remove the claim from one account. They do nothing about `ADMIN_SECRET`,
-   which mints `admin: true` on **any uid** through `/api/admin/set-admin`
-   (§ "BOOTSTRAP_SECRET — not a human role"), authenticates no identity, and
-   leaves no audit record and no success log. Anyone still holding that value
-   re-creates the claim immediately and invisibly, including on a fresh account
-   you are not watching.
-
-   If there is ANY possibility the secret was exposed — a compromised admin
-   machine, a leaked deployment env, a shared password store, an unknown
-   exfiltration scope, or simply an inability to rule it out — then:
-
-   a. `[CONTAINMENT_PROBE_OLD_SECRET][REQUIRED]` **Start the two-phase
-      containment tool FIRST and wait for `[PRE] OK`.** The pre-check must be
-      taken while the exposed secret is still live — that is what binds the
-      later rejection to this credential at this origin. Starting after the
-      rotation makes the proof unobtainable, and re-enabling the old secret to
-      recreate a pre-check would re-open the hole you are closing.
-   b. Rotate `ADMIN_SECRET` to a new value, or remove it entirely if no
-      bootstrap is pending. The route fails closed on an empty or unset value,
-      so removal is a valid containment state.
-   c. **Deploy deliberately.** An environment variable change does not affect
-      running Production until a deployment picks it up. Until then the old
-      secret is still live.
-   d. **Return to the still-running process for POST.**
-
-      <!-- SAFE-PROBE:CANONICAL — one executable, two bound observations. -->
-
-      A single 401 is NOT proof. It establishes only that *the origin you
-      contacted rejected the string you supplied* — and both halves fail open
-      with nobody attacking you:
-
-      - **Wrong origin.** The route answers 401 + `credential-rejected` whenever
-        the secret does not match, INCLUDING when `ADMIN_SECRET` is unset. A
-        preview deployment, a staging project, a colleague's localhost, or a
-        mistyped host running this same code returns the *genuine* marker.
-      - **Wrong secret.** A high-entropy value containing `$`, a backtick, a
-        space, `!` or `*` is mangled by your shell before the tool sees it. The
-        LIVE route rejects the mangled string, and that reads as a successful
-        rotation.
-
-      Proof is a **state transition**, bound to one origin and one credential
-      inside one process:
-
-          export OLD_ADMIN_SECRET        # already exported; never inline on the command line
-          node scripts/probe-admin-secret.mjs --production-two-phase
-
-      1. **PRE** — before you rotate anything, the tool confirms the old
-         credential is **accepted** at `https://convergepanel.com`
-         (400 + `credential-accepted`). If it is not, the run **aborts**, and no
-         later rejection may be treated as proof. This is the load-bearing half:
-         a wrong host or a mangled secret cannot get past it.
-      2. You perform the authorized rotation/removal and **deploy it**.
-      3. **POST** — the same process reuses the same locked origin and the same
-         in-memory secret bytes, and requires 401 + `credential-rejected`.
-
-      Only `PRE accepted -> POST rejected` prints
-      `PRODUCTION_CONTAINMENT_PROVEN` and exits 0. Nothing is re-read between
-      phases, so changing the environment mid-run cannot retarget the second
-      observation.
-
-      **The origin is not an input.** `--production-two-phase` takes no origin
-      argument and reads no origin environment variable. It always contacts
-      `https://convergepanel.com/api/admin/set-admin`. An earlier build resolved
-      the origin from `PROBE_ORIGIN_OVERRIDE` and disabled the canonical check
-      whenever `PROBE_ALLOW_INSECURE_LOOPBACK=1` — so those two variables ran the
-      whole proof against a foreign host and printed the proof token while
-      transmitting the live old secret there. Both are gone; loopback testing now
-      happens inside the test suite, not through the shipped executable.
-
-      **A post-check that does not prove containment does not end the run.**
-      Only a rejection leaves the armed state:
-
-      | POST observation | Meaning | Armed after? |
-      |---|---|---|
-      | `401` + `credential-rejected` | **PROVEN** — containment established | no (terminal) |
-      | `400` + `credential-accepted` | `NOT_YET_CONTAINED` — old secret still live | **yes, retry** |
-      | `429` | `INCONCLUSIVE` — limiter answered before the secret was read | **yes, retry** |
-      | `5xx` | `INCONCLUSIVE` | **yes, retry** |
-      | transport failure / refused redirect | `INCONCLUSIVE` | **yes, retry** |
-      | `401` with no route marker | `INCONCLUSIVE` — not attributable | **yes, retry** |
-
-      This matters because the route allows only **3 requests per 300 s per IP**,
-      checked before the secret is examined, and the canonical sequence spends
-      exactly three: the pre-check, the mint, and the post-check. There is no
-      margin, so a 429 at the post-check is an ordinary event. The route sends
-      no `Retry-After` header, so there is no wait hint to read: allow the fixed
-      300-second window to clear, then retry the post-check in the SAME process —
-      the pre-check evidence is still held. Do not restart:
-      a fresh run's pre-check can no longer be accepted once the rotation has
-      shipped, and re-enabling the old secret to recreate one would re-open the
-      hole. Do not attempt to bypass the limiter.
-
-      **Exit codes.**
-
-      | Exit | Meaning |
-      |---|---|
-      | `0` | `PRODUCTION_CONTAINMENT_PROVEN`. The ONLY code that closes the window. |
-      | `2` | NOT CONTAINED — the last observation was a conclusive `credential-accepted`. |
-      | `3` | INCONCLUSIVE — no verdict was reached (refused target, missing secret, 429, 5xx, transport, unattributed response, or a non-interactive terminal). |
-
-      A `429` is never reported as exit 2: a rate limit says nothing about the
-      credential, and reading it as "containment failed" would start an incident
-      that does not exist.
-
-      **What the response header is.** `x-convergepanel-admin-secret-probe` is a
-      ROUTE MARKER: evidence that the expected route response contract was
-      observed at the contacted origin. It is **not** cryptographic attestation,
-      **not** proof of Production identity on its own, and **not** proof of
-      containment on its own — it is world-readable in a public repository. The
-      proof comes from the bound transition, not from the header.
-
-      A single-shot diagnostic exists (`--observe`, canonical by default;
-      `--observe --non-production-target <origin>` for anything else) and reports
-      `CREDENTIAL_ACCEPTED` / `CREDENTIAL_REJECTED` / `INCONCLUSIVE` only. It can
-      never print `PRODUCTION_CONTAINMENT_PROVEN`, because it observes no
-      transition. Do not use it as enrollment or containment evidence.
-
-      Behaviour pinned by `scripts/__tests__/probeAdminSecret.spec.ts`.
-
-      **On rate limiting.** The route applies a per-IP limit of **3 attempts
-      per 300 seconds (5 minutes)** before the secret is examined, so a 429
-      tells you nothing about the credential. It is an `INCONCLUSIVE`
-      observation, not a verdict, and it does **not** end the run: the proof
-      stays armed in this same process. `[BOOTSTRAP_POST_RATE_LIMITED]` Remain
-      in the same process, do not restart, wait for the window to clear, then
-      retry the post-check from that same armed proof. A fresh run's pre-check
-      can no longer be accepted once the rotation has shipped. Never try to
-      bypass the limiter. Those numbers are `RATE_LIMIT_MAX_REQUESTS` and
-      `RATE_LIMIT_WINDOW_SECONDS` in `app/api/admin/set-admin/route.ts`, and a
-      test fails if this paragraph and those constants disagree. Treat the limit
-      as **defence-in-depth only** — it is per-IP, so a distributed source
-      weakens it. The primary boundary is a high-entropy `ADMIN_SECRET`, used
-      only for a bootstrap window, then rotated or removed.
-
-      **What the per-IP limit depends on.** The key is derived from the
-      `x-forwarded-for` header (`app/api/admin/set-admin/route.ts`). The
-      application does **not** independently prevent header spoofing — the
-      control holds because Vercel overwrites that header at the edge and does
-      not forward client-supplied values, except where an Enterprise trusted
-      proxy is configured. That is an operational dependency on the hosting
-      layer, not a property of this code. If the deployment target changes, if a
-      trusted proxy is enabled, or if the app is ever run behind a proxy that
-      appends rather than replaces, the assumption must be re-validated and the
-      key moved to a platform-attested client IP.
-
-   d. (See step 8 — claim re-enumeration is unconditional, not part of this
-      branch.)
-
+6. `[CONTAINMENT_HISTORICAL_BOOTSTRAP][REQUIRED]` **Treat historical deployments as in scope.** Current code has no
+   secret bootstrap route (§ "Secret bootstrap route — RETIRED (S1)"), so on a
+   current deployment nothing re-creates the claim you removed in step 1 without
+   SYSTEM_ADMIN. A deployment built before S1 is different: it still ships the
+   retired route, which minted `admin: true` on any uid from possession of a
+   secret, with no audit record and no success log. Record in the incident which
+   historical deployments remain reachable and whether their retirement
+   (security step SEC-7) is complete. Do not re-add the secret, do not restore the
+   route, and never send a uid or a secret to it on any deployment.
 7. `[CONTAINMENT_DISABLE_ACCOUNT][REQUIRED]` **Disable the affected Firebase Auth account** when the identity itself is
    compromised (as opposed to a credential leak on an otherwise trusted
    account). Be precise about what this buys, per §B.3-B.5:
@@ -678,19 +458,17 @@ table is the contract.
 8. `[CONTAINMENT_REENUMERATE_CLAIMS][REQUIRED]` **Re-enumerate privileged claims across all accounts — unconditionally.**
    Not only when secret exposure is suspected: step 1 removed the claim from ONE
    account, and an attacker (or the compromised identity itself) may have minted
-   others before discovery, through `/api/admin/set-role` or the bootstrap
-   route. Neither leaves an audit record. List every account carrying
-   `admin: true` and confirm each is intended.
+   others before discovery, through `/api/admin/set-role` or, on a historical
+   deployment, the retired bootstrap route. Neither leaves an audit record. List
+   every account carrying `admin: true` and confirm each is intended, using the
+   read-only `scripts/check-admin-claims.js` / `scripts/verify-admin-claims.js`
+   per account.
 
 9. `[CONTAINMENT_VERIFY_DENIAL][REQUIRED]` **Verify denial against Production.** For the evidence review, consult the
    coverage table in §A.6 first — and note what it says about the operations a
    compromised SYSTEM_ADMIN is most likely to have used: claim minting via
-   `set-role` and `set-admin`, provider credential access, and bulk purge
-   produce no audit record, and `set-admin` produces no evidence at all.
-
-**If `ADMIN_SECRET` is `CONFIGURED` (non-empty), containment is not complete while
-that reusable bootstrap credential can
-re-create the claim you just removed.**
+   `set-role`, provider credential access, and bulk purge produce no audit
+   record, and the retired bootstrap route produced no evidence at all.
 
 ### What this procedure does NOT give you
 

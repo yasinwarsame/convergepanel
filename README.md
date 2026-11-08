@@ -87,9 +87,6 @@ FIREBASE_CLIENT_EMAIL=<service-account>@<isolated-project-id>.iam.gserviceaccoun
 # IMPORTANT: Keep the quotes and \n characters exactly as they appear in the JSON file
 FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC...\n-----END PRIVATE KEY-----\n"
 
-# Admin Secret (for setting first admin)
-ADMIN_SECRET=your-long-random-secret-string
-
 # Optional: API keys can be set here or via Admin UI
 # Firestore keys take precedence over environment variables
 OPENAI_API_KEY=your_openai_api_key_here
@@ -308,38 +305,22 @@ ConvergePanel uses Firebase Authentication with role-based access control.
 
 ### Setting Up the First Admin
 
-1. Sign up a user account through the app (`/signup`)
+The former secret bootstrap route (`/api/admin/set-admin`, gated by `ADMIN_SECRET`)
+was retired in security slice S1. The route is deleted and no source reads that
+variable, so do not set it.
 
-2. Get the user's UID from Firebase Console or from the user's profile page
+1. Sign up a user account through the app (`/signup`).
+2. Until the hardened operator CLI (PR #295) merges, granting the `admin` custom
+   claim is an **owner action in the Firebase Console**, never an agent action.
+   Change only the `admin` key and leave every other claim in place.
+3. Verify read-only with `node scripts/check-admin-claims.js <UID>` or
+   `scripts/verify-admin-claims.js`; neither writes anything.
+4. The user must sign out and sign back in for the claim to take effect.
 
-3. Call the admin setter endpoint. **MINTS-AUTHORITY** — this grants
-   SYSTEM_ADMIN to the named uid:
-```bash
-curl -X POST http://localhost:3000/api/admin/set-admin \
-  -H "Content-Type: application/json" \
-  -d '{"uid": "USER_UID_HERE", "secret": "YOUR_ADMIN_SECRET"}'
-```
-
-> <!-- SAFE-PROBE:PROHIBITION -->
-> **Never reuse this request to check whether an old secret still works.** The
-> secret is validated before the uid, so a still-live old secret does not report
-> a failure here — it mints the claim again, with no audit record and no log. To
-> verify a rotation or removal, use the uid-less probe in
-> `docs/operations/admin-authority-tiers.md` §B.6 — send `{"secret": "..."}`
-> with **no uid**.
->
-> **A standalone `401` is NOT Production containment proof.** On its own it says
-> only that the origin you contacted rejected the string you supplied, which is
-> also what a preview deploy with no secret set, or a shell-mangled secret,
-> returns. A single response is an OBSERVATION: `400` + the accepted marker =
-> credential accepted, `401` + the rejected marker = credential rejected,
-> anything else = inconclusive. Containment requires the two-phase proof at the
-> canonical Production origin — pre-check accepted, then rotate and deploy, then
-> the SAME process observing that credential rejected.
-
-4. The user must sign out and sign back in for the admin claim to take effect
-
-**Note**: This endpoint is not linked in the UI for security. It's a one-time setup endpoint.
+The legacy minting scripts (`scripts/setAdmin.ts`, `scripts/set-admin-simple.js`,
+`scripts/set-admin-by-uid.js`, `scripts/set-admin-claim.js`) are **not** part of
+this path. Do not use them: they overwrite or mishandle the account's other
+claims. The full procedure is in `docs/operations/admin-authority-tiers.md`.
 
 ## Admin Dashboard
 
@@ -479,7 +460,6 @@ There are no built-in defaults: every `NEXT_PUBLIC_FIREBASE_*` value must be set
 | `FIREBASE_PROJECT_ID` | Firebase project ID | **Yes** |
 | `FIREBASE_CLIENT_EMAIL` | Service account email | **Yes** |
 | `FIREBASE_PRIVATE_KEY` | Service account private key | **Yes** |
-| `ADMIN_SECRET` | Secret for setting first admin | **Yes** |
 
 ### API Keys (Optional)
 

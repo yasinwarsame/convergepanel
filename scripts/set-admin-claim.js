@@ -1,15 +1,18 @@
 /**
- * CLASSIFICATION: MINTS-AUTHORITY (service-account bootstrap tool).
+ * CLASSIFICATION: MINTS-AUTHORITY (legacy service-account tool).
  *
- * SAFE-PROBE:PROHIBITION — this script GRANTS SYSTEM_ADMIN. It is never a
- * secret-liveness probe and must not be used to check whether an old
- * ADMIN_SECRET still works: it does not use ADMIN_SECRET at all, and running it
- * mints the claim unconditionally. To verify a rotation use
- * `scripts/probe-admin-secret.mjs`, which cannot mint anything.
+ * DO NOT USE. This script is NOT part of the interim admin-claim path in
+ * docs/operations/admin-authority-tiers.md ("Interim path for an `admin` claim
+ * change"). It GRANTS SYSTEM_ADMIN. `setCustomUserClaims` writes the account's
+ * whole custom-claim object, and this script spreads the existing claims AFTER
+ * the keys it sets, so an existing `admin` value silently wins over the grant
+ * while the script reports success. It is not a liveness probe of any kind.
  *
- * This is the "Option 1" out-of-band path in
- * docs/operations/admin-authority-tiers.md — preferred over the bootstrap route
- * precisely because ADMIN_SECRET never needs a live value.
+ * Until the hardened operator CLI (PR #295) merges, an emergency `admin` claim
+ * change is an OWNER action in the Firebase Console, never an agent action, and
+ * is verified with the read-only `scripts/check-admin-claims.js` or
+ * `scripts/verify-admin-claims.js`. This file is retained only until its
+ * deletion in security slice S5.
  *
  * Quick script to set admin custom claims for a user by email or UID
  * 

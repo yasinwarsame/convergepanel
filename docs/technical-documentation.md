@@ -54,12 +54,12 @@ Two credential paths are accepted by every API route:
 
 **Middleware** (`middleware.ts`) only checks for cookie *presence* to gate `/admin/*` routes. Full token validation and custom claim checks happen inside each API route.
 
-**Administrator authority has three human tiers plus one bootstrap mechanism** — see `docs/operations/admin-authority-tiers.md` for the full contract.
+**Administrator authority has three human tiers; the former secret bootstrap mechanism is retired** — see `docs/operations/admin-authority-tiers.md` for the full contract.
 
 - **ADMIN_PORTAL** — a verified, enabled Firebase Auth email on `ADMIN_EMAILS`, **or** the `admin: true` custom claim. A broad READ/monitoring tier over customer runs and user records. `ADMIN_EMAILS` membership grants this **by itself**; it does not merely make an account eligible for the claim.
 - **SYSTEM_ADMIN** — the Firebase custom claim `admin === true` **only**, never email-derived. Gates provider credentials, admin-claim minting, bulk purge, destructive user/billing mutation, and (since Phase C4) run deletion, governance-status override, `sync-subscription` and `test-webhook`.
 - **GOVERNANCE_ADMIN** — a verified, enabled Firebase Auth email on `GOVERNANCE_ADMIN_EMAILS` **only**. Governance policy writes, audit backfill, and global run visibility. Neither `ADMIN_EMAILS` nor the `admin` claim confers it.
-- **BOOTSTRAP_SECRET** — `ADMIN_SECRET` on `/api/admin/set-admin`, an exceptional mechanism that authenticates no identity. Not a human role; fails closed when unset.
+- **BOOTSTRAP_SECRET (retired in S1)** — the former `ADMIN_SECRET` check on `/api/admin/set-admin` is gone: the route is deleted (a current deployment answers 404) and no source reads either variable. Do not re-add it. Until the hardened operator CLI (PR #295) merges, an emergency `admin` claim change is an owner action in the Firebase Console, never an agent action, verified with the read-only `scripts/check-admin-claims.js` / `scripts/verify-admin-claims.js`. The legacy minting scripts (`scripts/setAdmin.ts`, `scripts/set-admin-simple.js`, `scripts/set-admin-by-uid.js`, `scripts/set-admin-claim.js`) are not part of that path and must not be used. Deployments built before S1 still ship the route; their retirement is security step SEC-7.
 
 A **disabled** Firebase Auth account obtains no email-derived privilege in any tier.
 

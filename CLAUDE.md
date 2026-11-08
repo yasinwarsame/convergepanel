@@ -43,15 +43,19 @@ Two paths accepted in every API route:
 1. Session cookie `__session` → `verifySessionCookie()` from `lib/firebase/auth-helpers.ts`
 2. `Authorization: Bearer <token>` fallback → `verifyIdToken()` from `lib/firebase/auth.ts`
 
-Middleware (`middleware.ts`) only checks cookie *presence* to gate `/admin/*` — real auth (token validity + custom claims) happens inside each API route. Administrator authority has THREE human tiers plus ONE bootstrap mechanism — see
+Middleware (`middleware.ts`) only checks cookie *presence* to gate `/admin/*` — real auth (token validity + custom claims) happens inside each API route. Administrator authority has THREE human tiers; the former secret bootstrap mechanism is retired — see
 `docs/operations/admin-authority-tiers.md`. Human tiers: `ADMIN_PORTAL` (verified
 `ADMIN_EMAILS` member or the `admin` claim), `SYSTEM_ADMIN` (the `admin` custom claim
 ONLY — credentials, claim minting, purge, destructive user/billing mutation), and
 `GOVERNANCE_ADMIN` (verified `GOVERNANCE_ADMIN_EMAILS` member only). `ADMIN_EMAILS`
 does NOT grant SYSTEM_ADMIN or governance authority.
-Separately, `BOOTSTRAP_SECRET` (`ADMIN_SECRET` on `/api/admin/set-admin`) can mint the
-first `admin` claim. It authenticates no identity at all — it is a deployment-time
-bootstrap, not a role, and it fails closed when the variable is empty or unset.
+The former secret bootstrap (`BOOTSTRAP_SECRET`: `ADMIN_SECRET` on `/api/admin/set-admin`)
+was retired in S1: the route is deleted and no source reads either variable. Do not re-add it.
+Until the hardened operator CLI (PR #295) merges, an emergency `admin` claim change is an
+owner action in the Firebase Console, never an agent action, verified with the read-only
+`scripts/check-admin-claims.js` / `scripts/verify-admin-claims.js`. The legacy minting scripts
+(`scripts/setAdmin.ts`, `set-admin-simple.js`, `set-admin-by-uid.js`, `set-admin-claim.js`)
+are not part of that path and must not be used: they overwrite or mishandle other claims.
 A **disabled** Firebase Auth account obtains no email-derived privilege in any tier.
 ADMIN_PORTAL is a read/monitoring tier: run DELETE and PATCH, `/api/admin/sync-subscription`
 and `/api/admin/test-webhook` all require SYSTEM_ADMIN.
