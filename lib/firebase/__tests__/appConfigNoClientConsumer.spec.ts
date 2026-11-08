@@ -37,7 +37,24 @@ function walk(dir: string, out: string[] = []): string[] {
 }
 
 const UI_FILE = /^app\/(?!api\/)(?:.*\/)?(page|layout|template|loading|error|not-found|default|global-error)\.(tsx|ts|jsx|js)$/;
-const USE_CLIENT = /^(?:\s|\/\/[^\n]*\n|\/\*[\s\S]*?\*\/)*["']use client["']/;
+// Linear scan (no nested quantifier; CodeQL js/redos): skip leading whitespace and comments, then
+// require a "use client" / 'use client' directive.
+function hasUseClientDirective(src: string): boolean {
+  let i = 0;
+  for (;;) {
+    while (i < src.length && /\s/.test(src[i])) i++;
+    if (src.startsWith("//", i)) {
+      const nl = src.indexOf("\n", i);
+      if (nl === -1) return false;
+      i = nl + 1;
+    } else if (src.startsWith("/*", i)) {
+      const end = src.indexOf("*/", i + 2);
+      if (end === -1) return false;
+      i = end + 2;
+    } else break;
+  }
+  return src.startsWith('"use client"', i) || src.startsWith("'use client'", i);
+}
 const CLIENT_SDK = /from\s+["'](?:firebase\/[^"']+|@\/lib\/firebase\/client)["']/;
 
 function isClientModule(path: string, src: string): boolean {
@@ -45,7 +62,7 @@ function isClientModule(path: string, src: string): boolean {
     /^(components|hooks|lib\/client|extension)\//.test(path) ||
     UI_FILE.test(path) ||
     path === "instrumentation-client.ts" ||
-    USE_CLIENT.test(src) ||
+    hasUseClientDirective(src) ||
     CLIENT_SDK.test(src)
   );
 }
