@@ -860,23 +860,79 @@ describe("PR #295 residuals: runbook statements match the code", () => {
     expect(flat(RUNBOOK)).toContain("The Auth read-back counts only when it is the target's record (its `uid` is a string equal to `--target-uid`);");
   });
 
-  it("n-3: no doc sentence says the call proceeds when only the fresh read has no value (the both-absent sentence is the only one)", () => {
-    const BOTH_ABSENT = "(When both reads have no value, the call proceeds.)";
-    const PROCEEDS = /\b(proceeds?|goes ahead|is (still )?made|still calls)\b/i;
-    const ABSENCE = /\b(no value|has none|absent|missing|no tokensValidAfterTime|without a value)\b/i;
-    for (const f of [RUNBOOK, TECH]) {
-      const units = flat(f).replace(/`/g, "").split(/(?<=[.!?]\)?)\s+/);
-      const hits = units.filter((u) => PROCEEDS.test(u) && ABSENCE.test(u) && u !== BOTH_ABSENT);
-      expect({ f, hits }).toEqual({ f, hits: [] });
-    }
-    expect(flat(RUNBOOK)).toContain(BOTH_ABSENT);
+  /**
+   * n-C (local review of d017259): a meaning check, not a word list. A clause
+   * about the FRESH read having no value must not say the call happens,
+   * unless it also states the refusal ("no call", "NOT made",
+   * pre_call_read_failed) or it is the both-absent rule. Clauses are split at
+   * sentence ends, semicolons, colons and dashes so an inserted clause cannot
+   * hide behind a correct neighbour.
+   */
+  const FRESH = /\bfresh\b/i;
+  const ABSENT = /\b(no value|lacks?|lacking|missing|without (a|any) value|no tokensValidAfterTime|has none|is absent|never set|empty)\b/i;
+  const CALLS = /\b(calls?|called|calling|issued|issues|proceeds?|anyway|is (still )?made|goes ahead|never stops|still requested|is requested|will be requested)\b/i;
+  const REFUSES = /\b(no call|not made|not called|refused|refuses|pre_call_read_failed)\b|\bnot as "?never set/i;
+  const BOTH = /\bboth reads\b/i;
+  const clauses = (text: string) => text.replace(/`/g, "").replace(/\s+/g, " ").split(/(?<=[.!?]\)?)\s+|;\s*|:\s+| — /).map((c) => c.trim()).filter(Boolean);
+  const claimsCallOnAbsentFresh = (c: string) => FRESH.test(c) && ABSENT.test(c) && CALLS.test(c) && !REFUSES.test(c) && !BOTH.test(c);
+
+  it("n-C: the classifier flags each false sentence of the reviews and passes the correct ones (it is not vacuous)", () => {
+    const falseOnes = [
+      "If the fresh read lacks a tokensValidAfterTime, the tool calls revokeRefreshTokens anyway.",
+      "When the fresh read has no value, revokeRefreshTokens is called.",
+      "the request is made (exit 3, no call); a fresh read without a value never stops it, the request can fail",
+      "When the fresh read alone has no value, the call proceeds.",
+      "On a re-run whose fresh read has no value, the call proceeds.",
+      "When the fresh read is missing a value, the call is still made.",
+      "(exit 3 pre_call_read_failed, no call, no fallback to an earlier read; a fresh read with no value at all is treated as never set and the call is issued)",
+    ];
+    for (const t of falseOnes) expect({ t, flagged: clauses(t).some(claimsCallOnAbsentFresh) }).toEqual({ t, flagged: true });
+    const correct = [
+      "When the fresh read is missing its value after the pre-run read had one, no call is made.",
+      "(When both reads have no value, the call proceeds.)",
+      "the fresh read immediately before revokeRefreshTokens failed or returned an unusable record (including no tokensValidAfterTime when the pre-run read had one), so the call was NOT made",
+    ];
+    for (const t of correct) expect({ t, flagged: clauses(t).some(claimsCallOnAbsentFresh) }).toEqual({ t, flagged: false });
   });
 
-  it("n-1: every re-run / plan text names the unusable-fresh-read no-call case (exit 3), not only the stored-ahead one", () => {
-    expect(RERUN_GUIDANCE).toContain("or that fresh read is unusable: it fails, names another account, has a value that is not a date, or has no value although the earlier read in the run had one (then exit 3 pre_call_read_failed and no call)");
+  it("n-C: no clause in the runbook, the tech-doc or the printed texts says the call happens when the fresh read has no value (except the both-absent rule)", () => {
+    const corpus: [string, string][] = [
+      [RUNBOOK, read(RUNBOOK)], [TECH, read(TECH)],
+      ["RERUN_GUIDANCE", RERUN_GUIDANCE], ["REVOKE_SESSIONS_PLAN_LINE", REVOKE_SESSIONS_PLAN_LINE],
+    ];
+    let considered = 0;
+    for (const [f, text] of corpus) {
+      const cs = clauses(text);
+      considered += cs.filter((c) => FRESH.test(c) && ABSENT.test(c)).length;
+      expect({ f, hits: cs.filter(claimsCallOnAbsentFresh) }).toEqual({ f, hits: [] });
+    }
+    expect(considered).toBeGreaterThanOrEqual(8);
+    expect(flat(RUNBOOK)).toContain("(When both reads have no value, the call proceeds.)");
+  });
+
+  it("n-1 / n-A / n-B: every re-run, plan and policy text names the unusable-fresh-read no-call case, with the precedence caveat", () => {
+    const CAV = "no call; exit 3 with `pre_call_read_failed`, or with an earlier exit-3 code such as `mint_failed`";
+    expect(RERUN_GUIDANCE).toContain("or that fresh read is unusable, for example when it fails, returns no record or another account's record, has a value that is not a date, or has no value although the earlier read in the run had one (then no call, and exit 3: pre_call_read_failed, or an earlier exit-3 code such as mint_failed when one already occurred)");
     expect(REVOKE_SESSIONS_PLAN_LINE).toContain("or is unusable, including no value although the earlier read in the run had one (exit 3, no call)");
-    expect(flat(RUNBOOK)).toContain("calls `revokeRefreshTokens` again unless that read shows a stored value later than this machine's clock (exit 4 `stored_cutoff_ahead`, no call) or is unusable, including no value when the pre-run read had one (exit 3 `pre_call_read_failed`, no call)");
-    expect(exitRow("3")).toContain("or is unusable, including no value when the pre-run read had one (exit 3 `pre_call_read_failed`, no call)");
-    expect(flat(TECH)).toContain("but a revoke re-run calls `revokeRefreshTokens` again unless its fresh pre-call read shows a stored value ahead (exit 4, no call) or is unusable (exit 3 `pre_call_read_failed`, no call);");
+    const rb = flat(RUNBOOK);
+    // policy bullet (~:44)
+    expect(rb).toContain("unless a fresh read immediately before the call shows the stored `tokensValidAfterTime` is later than the value the call would write** (exit 4 `stored_cutoff_ahead`; see \"Lowered cutoffs\") **or that fresh read fails or is unusable**, including no value when the pre-run read had one (" + CAV + ").");
+    // Retry bullet
+    expect(rb).toContain("calls `revokeRefreshTokens` again unless that read shows a stored value later than this machine's clock (exit 4 `stored_cutoff_ahead`, no call) or is unusable, including no value when the pre-run read had one (" + CAV + ")");
+    // exit-3 row
+    expect(exitRow("3")).toContain("or is unusable, including no value when the pre-run read had one (" + CAV + ") — sync the clock first");
+    // Revocation and sessions (~:454)
+    expect(rb).toContain("calls `revokeRefreshTokens(targetUid)` — unless a fresh read immediately before the call shows the stored `tokensValidAfterTime` is later than the value the call would write (exit 4, no call), or that fresh read fails or is unusable, including no value when the pre-run read had one (" + CAV + ") — so revocation is REQUESTED.");
+    // D-2a owner policy (~:606)
+    expect(rb).toContain("Separately, the call is also not made when that fresh read fails or is unusable, including no value when the pre-run read had one (" + CAV + "; see \"Retry\").");
+    // tech-doc exit-3 sentence
+    expect(flat(TECH)).toContain("but a revoke re-run calls `revokeRefreshTokens` again unless its fresh pre-call read shows a stored value ahead (exit 4, no call) or is unusable (" + CAV + ");");
+  });
+
+  it("n-A: the runbook dry-run bullet states the same call condition as the printed Sessions: line (REVOKE_SESSIONS_PLAN_LINE)", () => {
+    const m = /unless (a fresh read just before the call .*?\(exit 3, no call\))\. The request can fail/.exec(REVOKE_SESSIONS_PLAN_LINE);
+    expect(m).not.toBeNull();
+    const condition = m![1];
+    expect(flat(RUNBOOK)).toContain("`revokeRefreshTokens` will be requested unless " + condition + "; the request can fail,");
   });
 });
