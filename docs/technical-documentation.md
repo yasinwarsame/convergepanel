@@ -192,6 +192,29 @@ A connector whose API key is missing, empty or whitespace-only makes **no provid
 
 ### Substituted slots are not independent voices
 
+> **Phase 0 compatibility restoration (owner Option C, 2026-11-08) — supersedes every DECISION statement in this
+> section.** Executing-model independence is now presentation only. Every decision-producing path is restored to the
+> 35933c8 slot rule: synthesis admission (`authoritativeSynthesisInputs`, `MIN_AUTHORITATIVE_SYNTHESIS_ROWS = 2` usable
+> slots; no route re-check), the client consensus engine and agreement map (`synthesizeReport`, `buildAgreementMap`:
+> usable slots), consensus scoring (`modelsHealthy` = usable slots; rows carry no `provider`), adaptive agreement inputs
+> (`finalizeAdaptiveRun` uses `adaptiveResults` directly; no `REPEATED_SUBSTITUTE_EXCLUDED` exclusion for new runs),
+> bias detection (usable slots), the verification-gate **status** (always `determineStatus` over the full stored signals;
+> `independentModelCount` / `executionProvenanceUnverified` / `independentDisagreements` change only the label, reasons
+> and steps), panel-verdict grounding (first stored disagreement), Key Findings severity (stored supporting slots), and
+> the client eligibility sites (PanelSynthesisView, ResultsDisplay auto-trigger, `app/page.tsx` pre-flight and history
+> auto-synthesis: usable slots). The governance queue (`/api/governance/queue`) and the Team review queue
+> (`/api/teams/runs?version=1`) return the 35933c8 DTO again (stored `consensusScore` / `evidenceQuality`; every stored
+> disagreement line; slot-count agreement / dissent lines, including "(others disagree)" on unanimous claim rows, O14);
+> `consensusWithheld`, `modelIndependence`, `qualifiedDisagreements` and `singleModelAssessment` are additive keys, and
+> the renderers withhold at presentation time (GovernanceDashboard `queuePresentedScore` /
+> `queuePresentedEvidenceQuality` / `queueResearchDisagreementLines`; LegacyReviewListItem `legacyConsensusText`).
+> ResultsDisplay presents the slot report's unified-answer HTML only with >= 2 independent executing models
+> (`UNIFIED_ANSWER_WITHHELD_TEXT` otherwise). Retained from the connector pass: missing-key fail-closed, 401
+> no-substitution, every attribution name and label, and the executing-model presentation on list / claim / queue
+> surfaces. Decision modules may import executing-model symbols only as allowlisted in
+> `lib/__tests__/phase0ExecutingModelImportAllowlist.spec.ts` (O16). The text below describes the connector pass as
+> designed; where it says a count, refusal, status or DTO field follows independent executing models, read "presented".
+
 A slot that *is* DeepSeek-substituted (transient primary failure: timeout, 5xx, transient 429, other error) records the executing model — `provider: "deepseek"`, `actualModel` (live only; not persisted), `substitutedFrom: "<provider>:<model>"`, `substitutionReason`. Three things are kept distinct:
 
 - **requested model** — the slot (`modelId`, e.g. `chatgpt`) and its `requestedModel`;
