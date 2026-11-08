@@ -261,10 +261,12 @@ export function buildPanelVerdict(
       ? biasItem
       : biasItem?.description ?? null;
 
+  // Evidence grounding reads the first STORED disagreement topic, as before the independent-voice rule: grounding is a
+  // decision label, so the cross-model reduction above changes only what is presented as a disagreement.
   const grounding = classifyGrounding(
     topConsensus,
     topFinding?.evidenceRefs,
-    topDisagreement ?? undefined
+    report.disagreements?.[0]?.topic ?? undefined
   );
 
   // Every stored item that is not a genuine disagreement between independent models, kept as evidence (never erased,

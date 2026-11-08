@@ -249,7 +249,9 @@ describe("B. disagreement count and severity count independent executing models"
     const v = buildPanelVerdict("q", report(["chatgpt", "claude", "grok"]), gate, DISTINCT_REAL);
     expect([v.consensusModelCount, v.disagreementModelCount]).toEqual([3, 3]);
   });
-  it("rendered: '2 models split' and a Mixed-confidence finding backed by 2 independent models is 'Important' (3 slots would be 'Low stakes')", async () => {
+  // Phase 0 (L14): Key Findings severity counts the stored supporting SLOTS (35933c8), so 3 slots are 'Low stakes'; the
+  // verdict card's "2 models split" is presentation and keeps counting executing models.
+  it("rendered: '2 models split'; a Mixed-confidence finding backed by 3 slots is 'Low stakes' (35933c8 severity)", async () => {
     const rep = report(["chatgpt", "claude", "grok"]);
     (rep.keyFindings[0] as any).confidence = "Mixed";
     const r = await mountSynthesis(TWO_SUBS_PLUS_GROK, rep, { ...SUMMARY, modelsHealthy: 2, modelCount: 3 });
@@ -257,7 +259,7 @@ describe("B. disagreement count and severity count independent executing models"
     expect(verdictCardText(r)).not.toContain("3 models split");
     // The Key Finding's severity badge (the first; the disagreement card's own badge follows).
     const findingBadge = (x: TestRenderer.ReactTestRenderer) => nodeText(x.root.findAll((n) => n.type === "span" && typeof n.props.title === "string" && /decisions|interpretation|low-impact/.test(n.props.title))[0]).trim();
-    expect(findingBadge(r)).toBe("Important");
+    expect(findingBadge(r)).toBe("Low stakes");
     // Control: three real models → 'Low stakes'.
     const r2 = await mountSynthesis(DISTINCT_REAL, rep, { ...SUMMARY, modelsHealthy: 3, modelCount: 3 });
     expect(findingBadge(r2)).toBe("Low stakes");
@@ -278,9 +280,12 @@ describe("C. client synthesis gate ≡ server synthesis gate on the same rows", 
     question: "q",
     runDocument: { question: "q", perModel: rows.map((r) => ({ modelId: r.modelId, status: r.status, rawTextTruncated: r.rawText ?? "", ...(r.provider ? { provider: r.provider } : {}) })) },
   });
+  // Phase 0 (L03; owner Option C): every synthesis gate — server and client — counts usable SLOTS (35933c8), so two
+  // answered slots are admitted whoever executed them. `meetsIndependentSynthesisMinimum` is now a presentation helper
+  // only (ResultsDisplay unified-answer guard), never a gate; its value is pinned separately below.
   const CASES: Array<[string, ModelResult[], boolean]> = [
-    ["two substitutes (same DeepSeek)", TWO_SUBS, false],
-    ["two substitutes, provider not recorded", [sub("chatgpt", undefined), sub("claude", undefined)], false],
+    ["two substitutes (same DeepSeek)", TWO_SUBS, true],
+    ["two substitutes, provider not recorded", [sub("chatgpt", undefined), sub("claude", undefined)], true],
     ["real + substitute", [ok("grok", "xai"), sub("chatgpt")], true],
     ["two real", [ok("chatgpt", "openai"), ok("grok", "xai")], true],
     ["one real", [ok("chatgpt", "openai")], false],
@@ -290,11 +295,21 @@ describe("C. client synthesis gate ≡ server synthesis gate on the same rows", 
   ];
   it.each(CASES)("%s → %s", (_n, rows, expected) => {
     const server = authoritativeSynthesisInputs(persisted(rows));
-    expect([server.ok, meetsIndependentSynthesisMinimum(rows)]).toEqual([expected, expected]);
+    expect(server.ok).toBe(expected);
+  });
+  it("the presentation helper still counts executing models (two substitutes → false; real + substitute → true)", () => {
+    expect(meetsIndependentSynthesisMinimum(TWO_SUBS)).toBe(false);
+    expect(meetsIndependentSynthesisMinimum([sub("chatgpt", undefined), sub("claude", undefined)])).toBe(false);
+    expect(meetsIndependentSynthesisMinimum([ok("grok", "xai"), sub("chatgpt")])).toBe(true);
   });
 
-  it("PanelSynthesisView offers synthesis exactly when the server gate would accept the rows", async () => {
-    for (const [name, rows, expected] of CASES) {
+  // Phase 0 (L03 sites 7–8): the empty state is the 35933c8 condition `results.filter(isUsableResult).length >= 2`,
+  // which does not read the row text — so "one real + one empty-text" is offered (the pre-flight then refuses it, as
+  // at 35933c8). Every other case matches the server gate.
+  const PSV_OFFER_35933C8: Record<string, boolean> = { "one real + one empty-text": true };
+  it("PanelSynthesisView offers synthesis when the server gate would accept the rows (35933c8 empty-state rule)", async () => {
+    for (const [name, rows, serverExpected] of CASES) {
+      const expected = PSV_OFFER_35933C8[name] ?? serverExpected;
       let r!: TestRenderer.ReactTestRenderer;
       await act(async () => {
         r = TestRenderer.create(createElement(PanelSynthesisView as never, { results: rows, question: "q", runId: "run-1", preGeneratedStatus: "error", preGeneratedError: null } as never));
@@ -305,18 +320,19 @@ describe("C. client synthesis gate ≡ server synthesis gate on the same rows", 
     }
   });
 
-  describe("app/page.tsx uses the same gate (owner-authorized change to the pinned page)", () => {
+  // Phase 0 (L03 sites 3–4): app/page.tsx is restored to the 35933c8 slot rule at both sites (re-pinned in
+  // dsProvenanceUiBoundaries.spec.ts). The behaviour is proven on the mounted page in phase0ClientGateCallers.spec.tsx.
+  describe("app/page.tsx uses the 35933c8 slot rule (Phase 0 restoration of the pinned page)", () => {
     const PAGE = readFileSync(join(process.cwd(), "app/page.tsx"), "utf8");
-    it("imports the shared predicate", () => {
-      expect(PAGE).toContain('import { meetsIndependentSynthesisMinimum } from "@/lib/panel/independentVoices";');
+    it("does not import the executing-model predicate", () => {
+      expect(PAGE).not.toContain("meetsIndependentSynthesisMinimum");
+      expect(PAGE).not.toMatch(/independentSynthesisResponders\(|independentVoices\(/);
     });
-    it("synthesis pre-flight refuses fewer than 2 independent models (no slot count)", () => {
-      expect(PAGE).toMatch(/if \(!meetsIndependentSynthesisMinimum\(okResults\)\) \{\s*throw new Error\("Synthesis requires responses from at least 2 independent models\."\);/);
-      expect(PAGE).not.toMatch(/okResults\.length < 2/);
+    it("synthesis pre-flight refuses fewer than 2 usable slots (35933c8)", () => {
+      expect(PAGE).toMatch(/if \(okResults\.length < 2\) \{\s*throw new Error\("Synthesis requires at least 2 successful model responses\."\);/);
     });
-    it("history auto-synthesis requires 2 independent models", () => {
-      expect(PAGE).toMatch(/data\.runId &&\s*meetsIndependentSynthesisMinimum\(data\.results as ModelResult\[\]\) &&\s*\(data\.adaptive\?\.status === "absent" \|\| !data\.adaptive\)/);
-      expect(PAGE).not.toMatch(/filter\(\(r\) => isUsableResult\(r\)\)\.length >= 2/);
+    it("history auto-synthesis requires 2 usable slots (35933c8)", () => {
+      expect(PAGE).toMatch(/data\.runId &&\s*\(data\.results as ModelResult\[\]\)\.filter\(\(r\) => isUsableResult\(r\)\)\.length >= 2 &&\s*\(data\.adaptive\?\.status === "absent" \|\| !data\.adaptive\)/);
     });
   });
 });

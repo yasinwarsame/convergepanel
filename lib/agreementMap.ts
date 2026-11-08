@@ -14,7 +14,6 @@
 
 import { ModelId, ModelResult } from "@/lib/types";
 import { isUsableResult } from "@/lib/panel/publicize";
-import { independentVoices } from "@/lib/panel/independentVoices";
 
 /**
  * Check if debug logging is enabled (dev-only or localhost)
@@ -659,10 +658,8 @@ export function buildAgreementMap(results: ModelResult[]): ClaimCluster[] {
   // Only use successful responses
   // This is fully dynamic - includes all models with status: "ok", including Gemini, Grok, Perplexity
   // No hard-coding of specific model IDs; any model that succeeds is included in the analysis
-  // Independent voices only: N slots answered by the same substitute model
-  // are one model, never N agreeing models (lib/panel/independentVoices.ts).
-  const successfulResults = independentVoices(
-    results.filter((r) => isUsableResult(r) && getModelText(r).trim().length > 0)
+  const successfulResults = results.filter(
+    (r) => isUsableResult(r) && getModelText(r).trim().length > 0
   );
 
   // Debug log: Verify input includes all OK models (including Gemini, Grok, Perplexity)

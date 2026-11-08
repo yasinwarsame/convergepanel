@@ -80,7 +80,11 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   // Review of 1ee4982, MINOR-A: ONLY the History open loading indicator — openHistoryItem's claim/video reads moved
   // into lib/client/historyDetailOpen.ts (each open replaces the indicator; cached/navigating opens clear it; tab
   // changes and supersedeRunningResearch end pending opens); no provenance code. Was 8e20322c531f0d4e9df9e954d38c4a029af03460.
-  "app/page.tsx": "70023e0b7a51822698b062dc8c0120bf8bf9aa81",
+  // Phase 0 compatibility restoration (owner Option C, 2026-11-08; inventory v3.4 A.7.1 row 6 / H-8 (1)): ONLY the two
+  // legacy-panel synthesis-eligibility sites (L03 sites 3–4) are restored to the 35933c8 slot rule
+  // (`okResults.length < 2` pre-flight; `filter(isUsableResult).length >= 2` history auto-synthesis) and the now-unused
+  // meetsIndependentSynthesisMinimum import is removed; no provenance code. Was 70023e0b7a51822698b062dc8c0120bf8bf9aa81.
+  "app/page.tsx": "8d97e6296c16b9b0a41c30a8311a88e61de9c9a5",
   "firestore.rules": "2fb80a11bfa6c55fe94e0438a980a3b0794aeafd",
 };
 

@@ -46,7 +46,6 @@ import {
 } from "@/lib/types";
 import { buildAgreementMap, ClaimCluster as AgreementClaimCluster } from "@/lib/agreementMap";
 import { isUsableResult } from "@/lib/panel/publicize";
-import { independentVoices } from "@/lib/panel/independentVoices";
 import { executingVoiceName } from "@/lib/panel/executingVoiceLabel";
 import { escapeHtml } from "@/lib/security/escapeHtml";
 
@@ -501,12 +500,7 @@ export function synthesizeReport(
   // Use safe text getter to handle both rawTextFull and rawText fields
   const getModelText = (r: ModelResult | any): string => 
     (r as any).rawTextFull ?? (r as any).rawText ?? (r as any).text ?? "";
-  // Independent voices only (lib/panel/independentVoices.ts): several slots
-  // answered by the same substitute model count once toward the ≥2 rule and
-  // toward agreement — buildAgreementMap applies the same reduction.
-  const successfulResults = independentVoices(
-    results.filter((r) => isUsableResult(r) && getModelText(r).trim().length > 0)
-  );
+  const successfulResults = results.filter((r) => isUsableResult(r) && getModelText(r).trim().length > 0);
 
   /**
    * Core Rule: Cannot synthesize with <2 responses

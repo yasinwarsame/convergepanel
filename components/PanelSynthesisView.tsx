@@ -40,7 +40,7 @@ import { ModelResult, SynthesizedReport } from "@/lib/types";
 import { StructuredSynthesis } from "@/lib/synthesis/structuredSchema";
 import { runModelIdentityLabel, runModelProvenanceFromResultRow } from "@/lib/panel/runModelIdentity";
 import { isUsableResult } from "@/lib/panel/publicize";
-import { clientRowText, independentSynthesisResponders, meetsIndependentSynthesisMinimum, rowsRecordExecutionIdentity } from "@/lib/panel/independentVoices";
+import { clientRowText, independentSynthesisResponders, rowsRecordExecutionIdentity } from "@/lib/panel/independentVoices";
 import { executingVoiceName, groupSlotsByExecutingVoice, independentModelCountText } from "@/lib/panel/executingVoiceLabel";
 import { coerceStatus } from "@/lib/panel/normalize";
 import { modelHealthSubstitution, substitutedProviderNames } from "@/lib/panel/substitutionDisplay";
@@ -982,8 +982,8 @@ export default function PanelSynthesisView({
         (r) => isUsableResult(r) && getModelText(r).trim().length > 0
       );
 
-      if (!meetsIndependentSynthesisMinimum(okResults)) {
-        throw new Error("Synthesis requires responses from at least 2 independent models.");
+      if (okResults.length < 2) {
+        throw new Error("Synthesis requires at least 2 successful model responses.");
       }
 
       // Update progress
@@ -1390,7 +1390,7 @@ export default function PanelSynthesisView({
         ...prev,
         status: "loading",
       }));
-    } else if (preGeneratedStatus === "idle" && runId && results.length >= 2 && independentResponderCount >= 2) {
+    } else if (preGeneratedStatus === "idle" && runId && results.length >= 2) {
       // AUTO-START: If synthesis is idle but we have results and runId, auto-start generation
       // This handles cases where auto-generation hasn't completed yet or was missed
       // Only trigger once per runId (guarded by triggeredRunIdsRef)
@@ -1757,8 +1757,7 @@ export default function PanelSynthesisView({
                   const severity = classifyClaimSeverity(
                     finding.claim,
                     finding.confidence,
-                    // Independent executing models, not slots (two DeepSeek-substituted slots are one model).
-                    finding.modelsSupporting ? groupSlotsByExecutingVoice(finding.modelsSupporting, results).length : undefined
+                    finding.modelsSupporting?.length
                   );
                   const grounding = classifyGrounding(finding.claim, finding.evidenceRefs);
                   return (
@@ -2154,11 +2153,11 @@ export default function PanelSynthesisView({
           No Synthesis Available Yet
         </h3>
         <p className="text-sm text-slate-600 mb-4">
-          {independentResponderCount >= 2
+          {results.filter(r => isUsableResult(r)).length >= 2
             ? "Click the button below to generate a synthesis report."
-            : "Responses from at least 2 independent models are required for synthesis. Slots answered by the same substitute model count as one model."}
+            : "At least 2 successful model responses are required for synthesis."}
         </p>
-        {independentResponderCount >= 2 && runId && (
+        {results.filter(r => isUsableResult(r)).length >= 2 && runId && (
           <button
             onClick={() => {
               setSynthesisState(prev => ({ ...prev, status: "loading", error: null }));

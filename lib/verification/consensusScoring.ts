@@ -6,7 +6,6 @@ import type { ClaimVerdict } from "./claimVerdict";
 import type { ModelConfidence, ModelVerdict } from "./parseVerificationJson";
 import type { StructuredSynthesis } from "@/lib/synthesis/structuredSchema";
 import { coerceStatus } from "@/lib/panel/normalize";
-import { independentVoices } from "@/lib/panel/independentVoices";
 
 export type ConsensusSummary = {
   overallConsensusScore: number;
@@ -131,8 +130,6 @@ export type SynthesisConsensusResultRow = {
   modelId: string;
   status: string;
   rawText?: string | null;
-  /** Executing provider as persisted (a substituted row: the substitute). Keys independent voices. */
-  provider?: string;
 };
 
 export type KeyFindingSupportBlock = {
@@ -144,15 +141,7 @@ export type KeyFindingSupportBlock = {
 };
 
 export type SynthesisConsensusSummaryDetail = {
-  /**
-   * Distinct INDEPENDENT executing models among the usable rows (independentVoices): slots answered by one substitute
-   * model count once. Before the independent-voice rule it counted every usable slot.
-   */
   modelsHealthy: number;
-  /**
-   * The number of rows scored — on /api/synthesize-panel, the run's successful (usable) responses, one per answered
-   * slot (substitutes included). NOT the dispatched panel size: failed slots never reach the scorer.
-   */
   modelCount: number;
   highConfidenceClaims: number;
   contestedClaims: number;
@@ -228,20 +217,13 @@ export function classifyModelStanceForClaim(text: string, anchors: string[]): "s
   return "support";
 }
 
-/**
- * Usable rows reduced to independent voices (lib/panel/independentVoices.ts):
- * several slots answered by one substitute model support or dissent once.
- * `modelCount` is `results.length` — the rows the caller passed. The synthesis
- * route passes only the run's successful responses (authoritativeRunInputs),
- * so it is the successful-response count, not the dispatched panel size.
- */
 function usableSynthesisRows(results: SynthesisConsensusResultRow[]) {
-  return independentVoices(results.filter((r) => {
+  return results.filter((r) => {
     const st = coerceStatus(r.status);
     if (st !== "ok" && st !== "substituted") return false;
     const t = (r.rawText ?? "").trim();
     return t.length >= MIN_RAW_TEXT_LEN;
-  }));
+  });
 }
 
 function perClaimEvidenceQuality(

@@ -290,11 +290,13 @@ describe("M1 controls: two genuinely independent models keep agreement, evidence
 
 describe("M1 builders on their own", () => {
   const rep = disputedReport(["chatgpt", "claude"], ["chatgpt", "claude"]);
-  it("computeVerificationGate: independentModelCount 0 / 1 / NaN / Infinity → insufficient; 2 / absent → unchanged", () => {
+  // Phase 0 (L07; owner Option C): coverage relabels only — the status is the 35933c8 status over the full signals.
+  it("computeVerificationGate: independentModelCount 0 / 1 / NaN / Infinity → insufficient label, 35933c8 status; 2 / absent → unchanged", () => {
     const base = { keyFindings: calmReport(["chatgpt", "grok"]).keyFindings as any, disagreements: [], biasAndBlindSpots: [], openQuestions: [], sourceBacked: false, questionLength: 30 };
     for (const n of [0, 1, Number.NaN, Number.POSITIVE_INFINITY]) {
       const g = computeVerificationGate({ ...base, independentModelCount: n });
-      expect([n, g.label, g.status]).toEqual([n, INSUFFICIENT_INDEPENDENT_MODELS_GATE_LABEL, "NEEDS_HUMAN_REVIEW"]);
+      expect([n, g.label, g.status]).toEqual([n, INSUFFICIENT_INDEPENDENT_MODELS_GATE_LABEL, computeVerificationGate(base).status]);
+      expect(g.status).toBe("SAFE_TO_EXPLORE");
       expect(g.reasons[0]).toBe(INSUFFICIENT_INDEPENDENT_MODELS_GATE_REASON);
       expect(g.recommendedNextSteps.join(" ")).not.toMatch(/broad agreement/);
       expect(g.recommendedNextSteps[0]).toBe(INSUFFICIENT_INDEPENDENT_MODELS_GATE_STEP);

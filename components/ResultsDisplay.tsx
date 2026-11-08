@@ -44,7 +44,7 @@ import type { SynthesisConsensusSummaryDetail } from "@/lib/verification/consens
 import ModelChip from "@/components/ModelChip";
 import { sanitizeModelText, truncateForSynthesis, MAX_CHARS_SYNTHESIS_PER_MODEL } from "@/lib/panel/sanitizeText";
 import { classifyClusterType, isAnalysisReady } from "@/lib/synthesis/trustSummary";
-import { independentVoices } from "@/lib/panel/independentVoices";
+import { meetsIndependentSynthesisMinimum } from "@/lib/panel/independentVoices";
 import { executingVoiceName, groupSlotsByExecutingVoice, independentModelCountText, type ExecutingVoiceGroup } from "@/lib/panel/executingVoiceLabel";
 import { shouldAutoTriggerSynthesis } from "@/lib/synthesis/autoSynthesisTrigger";
 import type { AdaptiveAncillaryPresentation } from "@/components/adaptive/adaptiveAncillaryPresentation";
@@ -144,6 +144,13 @@ function deduplicateClaims<T extends { modelId: string; text: string; id?: strin
   
   return Array.from(seen.values());
 }
+
+/**
+ * Shown in place of the unified-answer HTML when the usable responses come from fewer than two independent executing
+ * models (slots answered by one substitute model are one model): nothing is presented as agreement between models.
+ */
+export const UNIFIED_ANSWER_WITHHELD_TEXT =
+  "Fewer than two independent models responded, so no unified answer is presented as agreement between models.";
 
 /**
  * Centralized Trust Summary color system
@@ -1047,10 +1054,6 @@ export default function ResultsDisplay({
     // policy, decided by the one pure helper so a read surface can prove the
     // effect is inert without mounting this renderer.
     if (
-      // Independent executing models, not answered slots: two slots answered by
-      // the same substitute model are one model (lib/panel/independentVoices.ts),
-      // and the server refuses to synthesize fewer than two.
-      independentVoices(okResults).length >= 2 &&
       runId &&
       shouldAutoTriggerSynthesis({
         okResultCount: okResults.length,
@@ -1345,6 +1348,11 @@ export default function ResultsDisplay({
   // Check both synthesizedReport (from consensus engine) and preGeneratedSynthesisReport (from API)
   // The API-generated synthesis report should be used if synthesizedReport is not available
   const unifiedHtml = synthesizedReport?.unifiedAnswer || null;
+  // The client report counts answered slots (lib/consensus.ts), so its unified-answer HTML ("Agreed by N models") is
+  // presented only when the usable responses come from at least 2 INDEPENDENT executing models: slots answered by one
+  // substitute model are one model, and their text is never presented as agreement between models. Presentation
+  // only — which view renders, the report, the gate inputs and every decision are unchanged.
+  const unifiedAnswerPresentable = meetsIndependentSynthesisMinimum(results ?? []);
   const hasUnifiedAnswer = !!unifiedHtml && okResults.length > 0;
   const hasPreGeneratedReport = !!preGeneratedSynthesisReport && okResults.length > 0;
 
@@ -1687,8 +1695,13 @@ export default function ResultsDisplay({
             {/* Synthesis body content (with trust summary removed from HTML since we display it as visual pills above) */}
             {/* Heading hierarchy: H2 (Unified Answer) → H3 (Trust Summary) → H3 (Overall Synthesis) → H4s (Bias, Open Questions, Methodology, etc.) */}
             <div className="text-[15px] leading-relaxed text-slate-800">
+              {!unifiedAnswerPresentable && (
+                <p className="text-sm text-slate-600" data-testid="unified-answer-withheld">
+                  {UNIFIED_ANSWER_WITHHELD_TEXT}
+                </p>
+              )}
               <CollapsibleUnifiedAnswer 
-                html={synthesizedReport?.unifiedAnswer || ""
+                html={(unifiedAnswerPresentable ? synthesizedReport?.unifiedAnswer || "" : "")
                   // Remove duplicate "Trust Summary" sections - already shown above as cards
                   // Remove entire Trust Summary section including any "What is uncertain" subsections
                   .replace(/<h[23]>\s*Trust Summary\s*<\/h[23]>[\s\S]*?(?=<h[23]|$)/gi, '')

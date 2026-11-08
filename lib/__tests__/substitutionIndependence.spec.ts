@@ -275,25 +275,24 @@ describe("transient failures substituted by DeepSeek count as ONE voice, attribu
     }
   });
 
-  it("two DeepSeek substitutions + grok → every consensus cluster has exactly 2 voices, never both chatgpt and claude", async () => {
+  // Phase 0 (L04 / L11; owner Option C): the consensus engine and the agreement map count usable SLOTS, exactly as at
+  // 35933c8, so both substituted slots are in the clusters. Attribution is kept: every slot is named by the model that
+  // executed it, never as ChatGPT / Claude.
+  it("Phase 0 slot rule: two DeepSeek substitutions + grok → clusters keep every usable slot (35933c8); attribution names DeepSeek", async () => {
     const results = await twoSubstitutions(["chatgpt", "claude", "grok"]);
     const report = synthesizeReport(results)!;
     expect(report).not.toBeNull();
     const consensus = report.consensusAnalysis!.consensusFindings!;
     expect(consensus.length).toBeGreaterThan(0);
-    for (const f of consensus) {
-      expect(f.modelIds).toHaveLength(2);
-      expect(f.modelIds).toContain("grok");
-      expect(f.modelIds.includes("chatgpt") && f.modelIds.includes("claude")).toBe(false);
-    }
-    for (const ids of clusterIds(report)) expect(ids).not.toContain("claude"); // the repeated substitute is not a voice
-    // Attribution: the counted substitute is named as DeepSeek, never as ChatGPT/Claude.
+    for (const f of consensus) expect([...f.modelIds].sort()).toEqual(["chatgpt", "claude", "grok"]);
+    expect(clusterIds(report).some((ids) => ids.includes("claude"))).toBe(true);
+    // Attribution: each substituted slot is named as DeepSeek, never as ChatGPT/Claude.
     expect(report.unifiedAnswer).toContain("DeepSeek (substituting ChatGPT)");
-    expect(report.unifiedAnswer).toContain("Agreed by 2 models");
-    expect(report.unifiedAnswer).not.toMatch(/Agreed by 3 models/);
-    expect(report.unifiedAnswer).not.toContain("Claude");
+    expect(report.unifiedAnswer).toContain("DeepSeek (substituting Claude)");
+    expect(report.unifiedAnswer).toContain("Agreed by 3 models");
     const html = report.unifiedAnswer;
     expect(html.split("ChatGPT").length).toBe(html.split("(substituting ChatGPT)").length); // ChatGPT only ever as the substituted slot
+    expect(html.split("Claude").length).toBe(html.split("(substituting Claude)").length);
   });
 
   it("control: three REAL responders do produce 3-voice consensus (the reduction is what limits the substitutes)", async () => {
@@ -305,18 +304,22 @@ describe("transient failures substituted by DeepSeek count as ONE voice, attribu
     expect(report.consensusAnalysis!.consensusFindings!.some((f) => f.modelIds.length === 3)).toBe(true);
   });
 
-  it("two DeepSeek substitutions and nothing else → one voice → no synthesis", async () => {
+  it("Phase 0 slot rule: two DeepSeek substitutions and nothing else → two usable slots → a slot report (35933c8)", async () => {
     const results = await twoSubstitutions(["chatgpt", "claude"]);
     expect(results.every((r) => r.status === "substituted")).toBe(true);
-    expect(synthesizeReport(results)).toBeNull();
+    const report = synthesizeReport(results);
+    expect(report).not.toBeNull();
+    expect(report!.unifiedAnswer).toContain("DeepSeek (substituting ChatGPT)");
+    // The presentation helpers still see ONE executing model (they gate presentation only; see ResultsDisplay P0-H3).
+    expect(independentVoices(results)).toHaveLength(1);
   });
 
-  it("saved-run rows without a recorded provider (older runs) still collapse to one voice (fail closed)", () => {
+  it("Phase 0 slot rule: saved-run rows without a recorded provider (older runs) → a slot report (35933c8); the helpers still see one voice", () => {
     const rows = [
       { modelId: "chatgpt", status: "substituted", rawText: PANEL_TEXT },
       { modelId: "claude", status: "substituted", rawText: PANEL_TEXT },
     ] as unknown as ModelResult[];
-    expect(synthesizeReport(rows)).toBeNull();
+    expect(synthesizeReport(rows)).not.toBeNull();
     expect(executingModelKey(rows[0])).toBe(executingModelKey(rows[1]));
     expect(independentVoices(rows)).toHaveLength(1);
   });
@@ -329,7 +332,8 @@ describe("synthesis consensus scoring (computeSynthesisConsensusScoring — rese
     biasAndBlindSpots: [],
   } as unknown as StructuredSynthesis;
 
-  it("two DeepSeek-substituted rows support once; modelCount is the successful responses passed in (3), modelsHealthy the independent models (2)", () => {
+  // Phase 0 (L02): the scorer counts usable slots (35933c8); a `provider` on the row changes nothing.
+  it("Phase 0 slot rule: two DeepSeek-substituted rows support twice; modelCount and modelsHealthy are the usable slots (3, 35933c8)", () => {
     const out = computeSynthesisConsensusScoring({
       synthesis,
       results: [
@@ -341,8 +345,8 @@ describe("synthesis consensus scoring (computeSynthesisConsensusScoring — rese
       runId: "r",
     });
     const support = out.enrichedSynthesis.keyFindings[0].support!;
-    expect(support.supportingModels).toEqual(["chatgpt", "grok"]);
-    expect(out.consensusSummary.modelsHealthy).toBe(2);
+    expect(support.supportingModels).toEqual(["chatgpt", "claude", "grok"]);
+    expect(out.consensusSummary.modelsHealthy).toBe(3);
     expect(out.consensusSummary.modelCount).toBe(3);
     expect(support.supportRatio).toBe(1);
   });
@@ -388,7 +392,8 @@ describe("adaptive research: source coverage + accounting under two DeepSeek sub
     rationale: "test fixture",
   } as unknown as QueryClassification;
 
-  it("the repeated substitute contributes no coverage; responded accounting stays truthful", async () => {
+  // Phase 0 (L01): every usable slot is an agreement input (35933c8), so the repeated substitute contributes coverage.
+  it("Phase 0 slot rule: the repeated substitute contributes coverage (35933c8); responded accounting stays truthful", async () => {
     mockDeepSeekKey = DS_KEY;
     deepSeekText(DEEP_RESEARCH_JSON);
     grokText(DEEP_RESEARCH_JSON);
@@ -403,9 +408,9 @@ describe("adaptive research: source coverage + accounting under two DeepSeek sub
     const dr = output.deepResearch!;
     const findings = [...dr.findings, ...dr.lowConfidenceFindings];
     expect(findings).toHaveLength(1);
-    expect([...findings[0].contributingModels].sort()).toEqual(["chatgpt", "grok"]);
-    expect(findings[0].coverageCount).toBe(2);
-    expect(findings[0].coverageRatio).toBeCloseTo(2 / 3);
+    expect([...findings[0].contributingModels].sort()).toEqual(["chatgpt", "claude", "grok"]);
+    expect(findings[0].coverageCount).toBe(3);
+    expect(findings[0].coverageRatio).toBeCloseTo(3 / 3);
 
     // Per-slot display/accounting unchanged: every substituted slot still responded.
     const meta = output.commonResponseMeta!;
@@ -417,14 +422,15 @@ describe("adaptive research: source coverage + accounting under two DeepSeek sub
     expect(claude.parseError).toBeUndefined();
   });
 
-  it("bias detection sees one voice for two DeepSeek substitutions → insufficient_models, no audit call", async () => {
+  // Phase 0 (L06): bias detection counts usable slots (35933c8), so two substituted slots reach the audit call.
+  it("Phase 0 slot rule: bias detection sees two usable slots for two DeepSeek substitutions → the audit call is made (35933c8)", async () => {
     const rows = [
       { modelId: "chatgpt", status: "substituted", rawText: PANEL_TEXT, provider: "deepseek" },
       { modelId: "claude", status: "substituted", rawText: PANEL_TEXT, provider: "deepseek" },
     ] as unknown as ModelResult[];
     const out = await detectAdaptiveBiases("q", "deep_research", rows, ["chatgpt", "claude"]);
-    expect(out.emptyReason).toBe("insufficient_models");
-    expect(mockCallGemini).not.toHaveBeenCalled();
+    expect(out.emptyReason).not.toBe("insufficient_models");
+    expect(mockCallGemini).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -287,15 +287,26 @@ afterEach(async () => {
 // ─── A2: the synthesis gate counts independent executing models ─────────────
 
 describe("synthesis endpoint input gate (authoritativeSynthesisInputs)", () => {
-  it("NEGATIVE: two answered slots, one independent model (two DeepSeek substitutions) → insufficient_results", async () => {
+  // Phase 0 (L03 site 1, L04; owner Option C): synthesis admission counts usable SLOTS, exactly as at 35933c8. The
+  // executing model is still attributed (the substituted rows keep provider "deepseek"; see the attribution cases).
+  it("Phase 0 slot rule: two answered slots (two DeepSeek substitutions) are admitted, as at 35933c8", async () => {
     const results = await run("twoSubstitutions");
     expect(results.map((r) => [r.modelId, r.status, r.provider])).toEqual([
       ["chatgpt", "substituted", "deepseek"],
       ["claude", "substituted", "deepseek"],
     ]);
-    expect(authoritativeSynthesisInputs(persistedRun(results))).toEqual({ ok: false, reason: "insufficient_results" });
-    // No multi-model consensus either.
-    expect(synthesizeReport(results)).toBeNull();
+    const inputs = authoritativeSynthesisInputs(persistedRun(results));
+    expect(inputs.ok).toBe(true);
+    if (inputs.ok) expect(inputs.value.rows.map((r) => [r.modelId, r.status, r.provenance.provider])).toEqual([
+      ["chatgpt", "substituted", "deepseek"],
+      ["claude", "substituted", "deepseek"],
+    ]);
+    // The client report is the 35933c8 slot report (non-null) ...
+    const report = synthesizeReport(results);
+    expect(report).not.toBeNull();
+    // ... and its agreement text still names the executing model, never ChatGPT / Claude as agreeing.
+    expect(report!.unifiedAnswer).toContain("DeepSeek (substituting ChatGPT)");
+    expect(report!.unifiedAnswer).not.toMatch(/\(ChatGPT, Claude\)|ChatGPT, Claude\)/);
   });
 
   it.each([
@@ -325,19 +336,20 @@ describe("synthesis endpoint input gate (authoritativeSynthesisInputs)", () => {
 // ─── consensus scoring: modelsHealthy = independent models, modelCount = successful responses ────
 
 describe("synthesis consensus scoring counts", () => {
-  it("two substitutions + Grok: 2 independent models of 3 successful responses", async () => {
+  // Phase 0 (L02 + L05): scoring rows carry no provider and the scorer counts usable slots (35933c8).
+  it("Phase 0 slot rule: two substitutions + Grok score as 3 usable slots of 3 successful responses (35933c8)", async () => {
     const results = await run("twoSubstitutionsPlusGrok");
     const inputs = authoritativeSynthesisInputs(persistedRun(results));
     if (!inputs.ok) throw new Error("expected synthesizable");
     const out = computeSynthesisConsensusScoring({
       synthesis: synthesis(["chatgpt", "claude", "grok"]),
-      results: inputs.value.rows.map((r) => ({ modelId: r.modelId, status: r.status, rawText: r.text, provider: r.provenance.provider })),
+      results: inputs.value.rows.map((r) => ({ modelId: r.modelId, status: r.status, rawText: r.text })),
       sourceBacked: true,
       runId: "run-1",
     });
-    expect(out.consensusSummary.modelsHealthy).toBe(2);
+    expect(out.consensusSummary.modelsHealthy).toBe(3);
     expect(out.consensusSummary.modelCount).toBe(3);
-    expect(out.enrichedSynthesis.keyFindings[0].support!.supportingModels).toEqual(["chatgpt", "grok"]);
+    expect(out.enrichedSynthesis.keyFindings[0].support!.supportingModels).toEqual(["chatgpt", "claude", "grok"]);
   });
 
   it("missing keys: modelCount is the successful responses (2), not the dispatched panel (4)", async () => {
@@ -386,7 +398,9 @@ describe("ResultsDisplay attribution (rendered)", () => {
     const report = synthesizeReport(results)!;
     const r = await mountResults(results, report);
     const chips = chipTexts(r);
-    expect(chips).toContain("DeepSeek (substituting ChatGPT)");
+    // Phase 0 (L04 / L11): the clusters keep every usable slot (35933c8), so both DeepSeek slots sit in one cluster; the
+    // chips still group them under the executing model.
+    expect(chips).toContain("DeepSeek (substituting ChatGPT, Claude)");
     expect(chips).toContain("Grok");
     expect(chips).not.toContain("ChatGPT");
     expect(chips).not.toContain("Claude");
@@ -412,20 +426,21 @@ describe("ResultsDisplay attribution (rendered)", () => {
     expect(text).not.toMatch(/(^|[^g(] ?)ChatGPT:/);
   });
 
-  it("auto-synthesis is not started for two answered slots from one independent model; control: two real models start it", async () => {
+  // Phase 0 (L03 site 9): the auto-trigger counts usable slots (35933c8), so two answered slots start it.
+  it("Phase 0 slot rule: auto-synthesis starts for two answered slots (35933c8); control: two real models start it", async () => {
     const posts = () => mockedAuthedFetch.mock.calls.filter((c) => String(c[0]).includes("/api/synthesize-panel")).length;
     const subs = await run("twoSubstitutions");
     await mount(createElement(ResultsDisplay as never, { results: subs, synthesizedReport: null, onRerun: () => {}, onAddModel: () => {}, question: "q", runId: "run-sub", synthesisStatus: "idle", synthesisReport: null, adaptive: null } as never));
     await act(async () => {
       await new Promise((res) => setTimeout(res, 0));
     });
-    expect(posts()).toBe(0);
+    expect(posts()).toBe(1);
     const real = await run("distinctReal");
     await mount(createElement(ResultsDisplay as never, { results: real, synthesizedReport: null, onRerun: () => {}, onAddModel: () => {}, question: "q", runId: "run-real", synthesisStatus: "idle", synthesisReport: null, adaptive: null } as never));
     await act(async () => {
       await new Promise((res) => setTimeout(res, 0));
     });
-    expect(posts()).toBeGreaterThan(0);
+    expect(posts()).toBeGreaterThan(1);
   });
 
   it("control: distinct real providers keep their family-name chips", async () => {
@@ -517,7 +532,11 @@ describe("PanelSynthesisView (rendered)", () => {
     expect(text).toContain("90/100");
   });
 
-  it("Retry on an errored synthesis never POSTs for one independent model (pre-flight refuses)", async () => {
+  // Phase 0 (L03 site 5): the pre-flight counts usable slots (35933c8), so Retry proceeds to the synthesis POST.
+  it("Phase 0 slot rule: Retry on an errored synthesis POSTs for two answered slots (pre-flight admits, 35933c8)", async () => {
+    const authed = jest.requireMock("@/lib/client/authedFetch") as Record<string, unknown>;
+    authed.prepareAuthedHeaders = jest.fn(async (_u: unknown, h: Record<string, string>) => h);
+    mockFetchWithTimeout.mockRejectedValue(new Error("network down (test)"));
     const results = await run("twoSubstitutions");
     const r = await mount(createElement(PanelSynthesisView as never, { results, question: "q", runId: "run-1", preGeneratedStatus: "error", preGeneratedError: "Previous failure" } as never));
     const retry = r.root.findAll((n) => n.type === "button" && nodeText(n).includes("Retry"))[0];
@@ -526,15 +545,19 @@ describe("PanelSynthesisView (rendered)", () => {
       for (let i = 0; i < 10; i += 1) await Promise.resolve();
     });
     const posts = mockFetchWithTimeout.mock.calls.filter((c) => (c[1] as { method?: string } | undefined)?.method === "POST");
-    expect(posts).toHaveLength(0);
-    expect(textOf(r)).toContain("Synthesis requires responses from at least 2 independent models.");
+    delete authed.prepareAuthedHeaders;
+    expect(posts).toHaveLength(1);
+    expect(String(posts[0][0])).toContain("/api/synthesize-panel");
+    expect(textOf(r)).not.toContain("Synthesis requires");
   });
 
-  it("empty state: two substituted slots are not offered synthesis", async () => {
+  // Phase 0 (L03 sites 7–8): the empty state counts usable slots (35933c8), so two answered slots are offered synthesis.
+  it("Phase 0 slot rule: empty state offers synthesis for two answered slots (35933c8)", async () => {
     const results = await run("twoSubstitutions");
     const r = await mount(createElement(PanelSynthesisView as never, { results, question: "q", runId: "run-1", preGeneratedStatus: "error", preGeneratedError: null } as never));
     const text = textOf(r);
-    expect(text).toContain("Responses from at least 2 independent models are required for synthesis.");
-    expect(r.root.findAll((n) => n.type === "button" && nodeText(n).includes("Generate Synthesis"))).toHaveLength(0);
+    expect(text).toContain("Click the button below to generate a synthesis report.");
+    expect(text).not.toContain("At least 2 successful model responses are required for synthesis.");
+    expect(r.root.findAll((n) => n.type === "button" && nodeText(n).includes("Generate Synthesis"))).toHaveLength(1);
   });
 });

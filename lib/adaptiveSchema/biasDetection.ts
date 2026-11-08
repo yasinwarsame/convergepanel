@@ -28,7 +28,6 @@ import { callGemini } from "@/lib/connectors/gemini";
 import { GEMINI_API_KEY } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { stripJsonFences, withTimeout } from "./util";
-import { independentVoices } from "@/lib/panel/independentVoices";
 import { MAX_BIAS_FINDINGS, BIAS_EVIDENCE_EXCERPT_MAX_CHARS } from "./config";
 
 export const BIAS_CALL_TIMEOUT_MS = 12000;
@@ -73,9 +72,7 @@ export async function detectAdaptiveBiases(
   results: ModelResult[],
   modelRoster: ModelId[]
 ): Promise<AdaptiveBiasDetectionResult> {
-  // Independent voices only: several slots answered by one substitute model
-  // are one model, never a "shared" blind spot across models.
-  const usable = independentVoices(results.filter((r) => (r.status === "ok" || r.status === "substituted") && r.rawText));
+  const usable = results.filter((r) => (r.status === "ok" || r.status === "substituted") && r.rawText);
   if (usable.length < 2) return { findings: [], emptyReason: "insufficient_models" };
 
   const rosterList = modelRoster.join(", ");

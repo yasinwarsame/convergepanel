@@ -169,7 +169,9 @@ describe("gate: reduced independent coverage is stricter-only", () => {
   const rand = prng(20261106);
   const inputs = Array.from({ length: 1500 }, () => genInput(rand));
 
-  it("for every generated input and every reduced coverage, status is never more permissive than the full-signal gate", () => {
+  // Phase 0 (L07 + S-c22-1; owner Option C): reduced coverage relabels only — the status EQUALS the full-signal gate
+  // (35933c8), in both directions, for every generated input and every reduced coverage.
+  it("for every generated input and every reduced coverage, status equals the full-signal gate (35933c8)", () => {
     let sawDoNotRely = 0;
     for (const input of inputs) {
       const full = computeVerificationGate(input).status;
@@ -186,10 +188,8 @@ describe("gate: reduced independent coverage is stricter-only", () => {
       ];
       for (const r of reduced) {
         const g = computeVerificationGate(r);
-        expect(SEVERITY[g.status]).toBeGreaterThanOrEqual(SEVERITY[full]);
+        expect(SEVERITY[g.status]).toBe(SEVERITY[full]);
       }
-      // Below two independent models (or unknown provenance) it is never "broadly consistent".
-      for (const r of reduced.slice(0, 5)) expect(computeVerificationGate(r).status).not.toBe("SAFE_TO_EXPLORE");
     }
     // The property was exercised on the status that used to be weakened (DO_NOT_RELY_YET → NEEDS_HUMAN_REVIEW).
     expect(sawDoNotRely).toBeGreaterThan(20);
@@ -264,7 +264,9 @@ describe("gate: four distinct categories", () => {
     const unv = computeVerificationGate({ keyFindings: findings, executionProvenanceUnverified: true, independentModelCount: 4 });
     expect([ins.label, ins.reasons[0], ins.independentCoverage]).toEqual([INSUFFICIENT_INDEPENDENT_MODELS_GATE_LABEL, INSUFFICIENT_INDEPENDENT_MODELS_GATE_REASON, "insufficient"]);
     expect([unv.label, unv.reasons[0], unv.independentCoverage]).toEqual([UNVERIFIED_INDEPENDENT_COVERAGE_GATE_LABEL, UNVERIFIED_INDEPENDENT_COVERAGE_GATE_REASON, "unverified"]);
-    expect(unv.status).toBe("NEEDS_HUMAN_REVIEW");
+    // Phase 0 (L07): the status is the 35933c8 status over the full signals; only label / reasons / data differ.
+    const fullStatus = computeVerificationGate({ keyFindings: findings }).status;
+    expect([ins.status, unv.status]).toEqual([fullStatus, fullStatus]);
     expect(unv.recommendedNextSteps.join(" ")).not.toMatch(/broad agreement/);
   });
 });

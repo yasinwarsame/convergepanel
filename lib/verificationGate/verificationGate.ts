@@ -116,15 +116,16 @@ export interface VerificationGateInput {
   /**
    * Independent executing models among the run's usable responses (`independentSynthesisResponders`; slots answered by
    * one substitute model are one model). When supplied and below `MIN_INDEPENDENT_SYNTHESIS_MODELS` (or not a finite
-   * number), the gate never reads as cross-model agreement: label `INSUFFICIENT_INDEPENDENT_MODELS_GATE_LABEL`, status at
-   * least NEEDS_HUMAN_REVIEW, and no "broad agreement" step. Absent → exactly the gate as before (callers without rows).
+   * number), the gate never reads as cross-model agreement: label `INSUFFICIENT_INDEPENDENT_MODELS_GATE_LABEL` and no
+   * "broad agreement" step. Coverage only relabels: the status is unchanged (computed over the full stored signals).
+   * Absent → exactly the gate as before (callers without rows).
    */
   independentModelCount?: number;
 
   /**
    * The subset of `disagreements` that are genuine disagreements between independent executing models (the caller's
-   * `crossModelDisagreements`). `disagreements` itself stays the full stored list: the status is never more permissive
-   * than the gate over the full list, while only this subset is presented as model disagreement. Absent → every passed
+   * `crossModelDisagreements`). `disagreements` itself stays the full stored list: the status is always the gate over the
+   * full list, while only this subset is presented as model disagreement. Absent → every passed
    * disagreement is genuine (when coverage is sufficient).
    */
   independentDisagreements?: Array<{
@@ -205,17 +206,6 @@ function reducedIndependentCoverage(input: VerificationGateInput): ReducedIndepe
   if (input.independentModelCount === undefined) return null;
   const n = input.independentModelCount;
   return typeof n === "number" && Number.isFinite(n) && n >= MIN_INDEPENDENT_SYNTHESIS_MODELS ? null : "insufficient";
-}
-
-const STATUS_SEVERITY: Record<VerificationGateStatus, number> = {
-  SAFE_TO_EXPLORE: 0,
-  NEEDS_HUMAN_REVIEW: 1,
-  DO_NOT_RELY_YET: 2,
-};
-
-/** The stricter of two statuses. */
-function stricterStatus(a: VerificationGateStatus, b: VerificationGateStatus): VerificationGateStatus {
-  return STATUS_SEVERITY[a] >= STATUS_SEVERITY[b] ? a : b;
 }
 
 const STATUS_LABELS: Record<VerificationGateStatus, string> = {
@@ -373,9 +363,12 @@ export function computeVerificationGate(
   const nonIndependentDisagreementsCount = nonGenuineCount - independenceUnverifiedDisagreementsCount;
 
   if (!coverage && nonGenuineCount === 0) {
-    // Coverage sufficient (or not supplied) and every disagreement genuine: exactly the gate as before.
+    // Coverage sufficient (or not supplied) and every disagreement genuine.
     const metrics = extractMetrics({ ...input, disagreements: genuine });
-    const status = determineStatus(metrics);
+    // The status is always computed over the FULL stored signals, as before the independent-voice rule
+    // (35933c8: determineStatus(extractMetrics(input))), so it never depends on what the caller passes as
+    // `independentDisagreements`.
+    const status = determineStatus(extractMetrics({ ...input, disagreements: all }));
     if (process.env.NODE_ENV !== "production") {
       console.log("[VerificationGate]", { status, metrics });
     }
@@ -388,8 +381,9 @@ export function computeVerificationGate(
     };
   }
 
-  // Stricter-only: the status over the FULL stored signals (every disagreement, contested hint unchanged) is the floor —
-  // reduced independent coverage relabels signals, it never makes the verdict more permissive.
+  // The status is the computation over the FULL stored signals (every disagreement, contested hint unchanged), exactly
+  // as before the independent-voice rule: reduced independent coverage relabels the signals, the label, reasons and
+  // next steps; it never changes the status.
   const baseline = extractMetrics({ ...input, disagreements: all });
   const presented = extractMetrics({ ...input, disagreements: genuine });
   const unverifiedExtra = independenceUnverifiedDisagreementsCount > 0 ? { independenceUnverifiedDisagreementsCount } : {};
@@ -406,9 +400,7 @@ export function computeVerificationGate(
         ...unverifiedExtra,
       }
     : { ...presented, nonIndependentDisagreementsCount, ...unverifiedExtra };
-  let status = stricterStatus(determineStatus(baseline), determineStatus(metrics));
-  // One independent model (or unknown execution) is never "broadly consistent": nothing was compared.
-  if (coverage) status = stricterStatus(status, "NEEDS_HUMAN_REVIEW");
+  const status = determineStatus(baseline);
   const coverageReason =
     coverage === "insufficient"
       ? [INSUFFICIENT_INDEPENDENT_MODELS_GATE_REASON]

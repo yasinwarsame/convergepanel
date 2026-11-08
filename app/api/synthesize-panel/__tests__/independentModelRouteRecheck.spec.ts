@@ -1,8 +1,8 @@
 /**
- * Defence in depth for the independent-model synthesis gate (owner rule A2): /api/synthesize-panel re-checks the rows
- * that actually entered the prompt, independently of authoritativeSynthesisInputs. Here that first gate is replaced by
- * a double that (wrongly) admits two DeepSeek-substituted rows, so only the route's own re-check stands between them
- * and a one-model "consensus". Harness copied from serverAuthoritativeInputs.spec.ts.
+ * Phase 0 (L03 site 2; owner Option C): /api/synthesize-panel has NO executing-model re-check of the prompt rows, exactly
+ * as at 35933c8 — admission is decided once, by authoritativeSynthesisInputs (usable slots). Here that gate is replaced
+ * by a double that admits two DeepSeek-substituted rows, and the route synthesizes them like any two admitted rows.
+ * Harness copied from serverAuthoritativeInputs.spec.ts.
  */
 import { installDeletionTombstoneCollection } from "@/lib/workspaces/__tests__/helpers/deletionTombstoneCollection";
 jest.mock("@/lib/env", () => ({ OPENAI_API_KEY: "test-key", ANTHROPIC_API_KEY: "test-key" }));
@@ -109,16 +109,13 @@ beforeEach(() => {
   runDocs.set("run-x", { userId: "test-uid", question: "q", runDocument: { question: "q", perModel: [] } });
 });
 
-describe("route re-check: fewer than two independent executing models in the prompt rows", () => {
-  it("two DeepSeek-substituted rows admitted upstream → 409 insufficient_results, no LLM call, no write", async () => {
+describe("route: no executing-model re-check of the prompt rows (Phase 0 = 35933c8)", () => {
+  it("Phase 0 slot rule: two DeepSeek-substituted rows admitted upstream → synthesized (no re-check, 35933c8)", async () => {
     mockAuthoritative.mockReturnValue({ ok: true, value: { question: "q", rows: [row("chatgpt", "substituted", A, "deepseek"), row("claude", "substituted", B, "deepseek")] } });
     const res = await post("run-x");
-    expect(res.status).toBe(409);
-    const body = await res.json();
-    expect(body.errorCode).toBe("SYNTHESIS_SOURCE_UNAVAILABLE");
-    expect(JSON.stringify(body)).toContain("insufficient_results");
-    expect(mockCreate).not.toHaveBeenCalled();
-    expect(runWrites).toHaveLength(0);
+    expect(res.status).toBe(200);
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+    expect(runWrites.some((w) => "synthesizedStructuredReport" in w.fields)).toBe(true);
   });
 
   it("control: one real + one substitute admitted upstream → synthesized", async () => {
