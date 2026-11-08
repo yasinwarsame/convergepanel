@@ -71,11 +71,10 @@ describe("positive controls", () => {
   });
 
   it("BASELINE: under the pre-S4 rule an admin-claim client could read and overwrite the provider keys", async () => {
-    const pre = RULES.replace(
-      /match \/appConfig\/\{doc=\*\*\} \{\s*allow read, write: if false;\s*\}/,
-      "match /appConfig/modelKeys { allow read, write: if isSignedIn() && request.auth.token.admin == true; }",
-    );
-    expect(pre).not.toBe(RULES);
+    // Re-adds the pre-S4 grant next to the catch-all, so the baseline does not depend on the shape of the S4 block.
+    const CATCH_ALL = "    // Default deny all other documents\n";
+    expect(RULES.split(CATCH_ALL)).toHaveLength(2);
+    const pre = RULES.replace(CATCH_ALL, "    match /appConfig/modelKeys { allow read, write: if request.auth != null && request.auth.token.admin == true; }\n" + CATCH_ALL);
     const old = await initializeTestEnvironment({
       projectId: "demo-appconfig-boundary-baseline",
       firestore: { rules: pre, host: "127.0.0.1", port: Number(process.env.FIRESTORE_EMULATOR_PORT ?? 8080) },
