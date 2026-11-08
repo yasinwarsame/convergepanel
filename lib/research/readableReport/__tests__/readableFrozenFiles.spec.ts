@@ -138,10 +138,16 @@ const WIDENED_BY_INC1: Record<string, string> = {
  * other pins and assertions are unchanged.
  *   - dsProvenanceUiBoundaries.spec.ts: 7ee80b6b52b8c71af0c72e95b52b45e0080058c0 → 4f2991601910578b95cd268cf466beb4e1d3a182.
  * Same 32-file pinned set.
+ *
+ * Re-pinned (owner-authorized SEC-2 / S4 provider-key boundary, 2026-11-09): dsProvenanceUiBoundaries.spec.ts changed
+ * only its own firestore.rules pin (2fb80a1 → 747ccef: deny-only `appConfig/{doc=**}`; no provenance code). The spec's
+ * other pins and assertions are unchanged.
+ *   - dsProvenanceUiBoundaries.spec.ts: 4f2991601910578b95cd268cf466beb4e1d3a182 → abcee8eca3175d2c718b662a78c4f3796fcfd1f3.
+ * Same 32-file pinned set.
  */
 const READABLE_GATE_OPTION_BY_INC1: Record<string, string> = {
   "components/adaptive/AdaptiveSynthesisReportView.tsx": "24f22d8ccd4e97eb762edbbca182bceca3be5c92",
-  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "4f2991601910578b95cd268cf466beb4e1d3a182",
+  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "abcee8eca3175d2c718b662a78c4f3796fcfd1f3",
   "lib/adaptiveSchema/shareBuilders.ts": "e4f5188b64d66cdd424ef24a3857e57905b1e9c1",
 };
 
