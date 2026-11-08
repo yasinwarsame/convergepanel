@@ -246,6 +246,20 @@ describe("M-1: no same-model line is presented as a disagreement, whatever the n
     expect(r.disagreements).toHaveLength(Math.min(n, 3));
   });
 
+  it("fail closed on independence alone: a below-independence row shows no disagreement section even without a qualified list", async () => {
+    // The real DTO of a one-model run, with the additive qualified key absent (a row from a server that does not send it):
+    // the independence key by itself must keep every stored line out of the disagreement sections.
+    runRows = [run("fc-nokey", FC, [dis("Founding date", "chatgpt", "claude")])];
+    const r = { ...(await rows())["fc-nokey"] };
+    delete r.qualifiedDisagreements;
+    expect(r.modelIndependence).toBe("insufficient");
+    expect(queueResearchDisagreementLines(r.disagreements, r)).toEqual([]);
+    const { key, flags } = sections(render(r).html);
+    expect([key, flags]).toEqual([null, null]);
+    // Control: the same lines on a verified-independent row are shown.
+    expect(queueResearchDisagreementLines(r.disagreements, { qualifiedDisagreements: undefined })).toEqual(r.disagreements);
+  });
+
   it("the dashboard's cap constant equals the route's qualified-list cap (real GET)", async () => {
     runRows = [run("cap", FC, TOPICS.map((t) => dis(t, "chatgpt", "claude")))];
     expect((await rows())["cap"].qualifiedDisagreements).toHaveLength(QUEUE_QUALIFIED_DISAGREEMENTS_CAP);
