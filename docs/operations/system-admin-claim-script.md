@@ -364,7 +364,7 @@ custody, not something the rules enforce.
 |---|---|---|
 | `0` | Completed: `applied`, `claim_already_absent_revocation_cutoff_observed`, or a grant already in place (`no_change`). Every observable step succeeded: the claims read back as planned; on revoke, revocation was requested and acknowledged, there is a server-time anchor, the read-back `tokensValidAfterTime` is at or after the server-anchored cutoff, and it is not lower than any value read earlier in the run (`CUTOFF_OBSERVED`). The message reads "revocation requested and acknowledged; cutoff observed … under the Firestore≈Auth clock assumption …; effective revocation not observable" — not proof of revocation, and (until S2) without cutting off already-issued ID tokens. | As required by the operation (none for `no_change`). |
 | `2` | Refused, or dry run (the default). Also an unexpected error raised before any write call. | **None.** Guaranteed: exit 2 is only returned before the first write call (the attempt audit row included) is issued; the result file records `writeAttempted: false`. |
-| `3` | A write call was issued and the operation is INCOMPLETE: `audit_attempt_failed` (attempt row outcome unknown), `operator_clock_out_of_tolerance` (no claim, role or revocation call), `mint_failed`, `pre_call_read_failed` (no revocation call), `sessions_revoke_failed`, `sessions_revoke_unverified`, `users_doc_failed`, `verification_failed`, `audit_outcome_missing`, or an unexpected error after a write call. | Unknown / partial. Inspect the read-back in the result file. On a revoke, a failed or thrown revocation call is an UNKNOWN outcome, not a confirmed no-op. Re-running the same command is how an incomplete run is finished; it never re-applies a claim already in place or changes another claim, but a revoke re-run calls `revokeRefreshTokens` again (unless the fresh pre-call read shows a stored value ahead) — sync the clock first (see "Retry" and "Lowered cutoffs"). |
+| `3` | A write call was issued and the operation is INCOMPLETE: `audit_attempt_failed` (attempt row outcome unknown), `operator_clock_out_of_tolerance` (no claim, role or revocation call), `mint_failed`, `pre_call_read_failed` (no revocation call), `sessions_revoke_failed`, `sessions_revoke_unverified`, `users_doc_failed`, `verification_failed`, `audit_outcome_missing`, or an unexpected error after a write call. | Unknown / partial. Inspect the read-back in the result file. On a revoke, a failed or thrown revocation call is an UNKNOWN outcome, not a confirmed no-op. Re-running the same command is how an incomplete run is finished; it never re-applies a claim already in place or changes another claim, but a revoke re-run calls `revokeRefreshTokens` again unless the fresh pre-call read shows a stored value ahead (exit 4 `stored_cutoff_ahead`, no call) or is unusable, including no value when the pre-run read had one (exit 3 `pre_call_read_failed`, no call) — sync the clock first (see "Retry" and "Lowered cutoffs"). |
 | `4` | REVIEW REQUIRED — do not re-run blindly, do not treat as done: `revocation_cutoff_lowered` (the read-back is lower than a value known earlier in the run, any cause) or `stored_cutoff_ahead` (the fresh pre-call read showed a stored value later than the value the call would write, so the call was NOT made). The row records `completed: false`; the message carries the review guidance, not the re-run guidance. | The role write of the run was made, and so was the claim write, except on a re-run whose `admin` claim was already absent (`claimWrite: "skipped_already_absent"`: no claim write was made). The claims and the role were read back (claim removal may be complete). On `stored_cutoff_ahead` no revocation call was made. |
 | `1` | The result file could not be written after an otherwise exit-0 run. | As for exit 0. |
 
@@ -395,7 +395,9 @@ first: review (see "Lowered cutoffs"). What a re-run does and does not do:
   writes the `users/{uid}.role` mirror (the server-time anchor; the same value
   `user` again), takes a fresh read, calls `revokeRefreshTokens` again unless
   that read shows a stored value later than this machine's clock (exit 4
-  `stored_cutoff_ahead`) — the call OVERWRITES `validSince` with the
+  `stored_cutoff_ahead`, no call) or is unusable, including no value when the
+  pre-run read had one (exit 3 `pre_call_read_failed`, no call) — the call
+  OVERWRITES `validSince` with the
   operator's clock (see "Lowered cutoffs"; sync the clock before every
   re-run) — compares `tokensValidAfterTime` with a fresh server-anchored
   cutoff, and — only when the call was acknowledged, the cutoff observed and
@@ -646,8 +648,11 @@ and the outcome row; tests in
   review fact although the stored value never moved. The exit is never 0:
   it is exit 3 `sessions_revoke_unverified` when S is below the
   server-anchored cutoff, and exit 4 `revocation_cutoff_lowered` when S is at
-  or after the cutoff but below V. Only the state label and the review text
-  overstate what happened.
+  or after the cutoff but below V. When an earlier exit-3 failure precedes
+  the no-op (for example `mint_failed`, where no anchor is taken), the exit is
+  3 with that earlier code instead (precedence 3 > 4), and the label is still
+  `CUTOFF_LOWERED`. Only the state label and the review text overstate what
+  happened.
 
 **Concurrency, other callers and residuals** (no global property is claimed;
 each mechanism narrows only this tool's own contribution):

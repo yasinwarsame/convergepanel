@@ -850,7 +850,7 @@ export const FAR_AHEAD_ANOMALY_SECONDS = 300;
  * overwrites validSince.
  */
 export const RERUN_GUIDANCE =
-  "Re-running the same command never re-applies a claim already in place and never changes any other claim. A revoke re-run calls revokeRefreshTokens again (with no claim write when the admin claim is already absent) unless a fresh read immediately before the call shows a stored value later than this machine's clock (then exit 4 and no call). The call OVERWRITES validSince with this machine's clock and does not keep the later value: this tool refuses to write a value lower than the one it reads immediately before the call, but another writer between that read and the call, or after the run, can still lower it. Sync this machine's clock (NTP) before re-running, and read sessionRevocationObservations afterwards.";
+  "Re-running the same command never re-applies a claim already in place and never changes any other claim. A revoke re-run calls revokeRefreshTokens again (with no claim write when the admin claim is already absent) unless a fresh read immediately before the call shows a stored value later than this machine's clock (then exit 4 and no call) or that fresh read is unusable: it fails, names another account, has a value that is not a date, or has no value although the earlier read in the run had one (then exit 3 pre_call_read_failed and no call). The call OVERWRITES validSince with this machine's clock and does not keep the later value: this tool refuses to write a value lower than the one it reads immediately before the call, but another writer between that read and the call, or after the run, can still lower it. Sync this machine's clock (NTP) before re-running, and read sessionRevocationObservations afterwards.";
 
 /** Guidance printed on every exit-4 outcome: review, never a blind re-run. */
 export const REVIEW_GUIDANCE =
@@ -858,7 +858,7 @@ export const REVIEW_GUIDANCE =
 
 /** The dry-run / pre-execute sessions line for every revoke: the request and its limits, never an effect. */
 export const REVOKE_SESSIONS_PLAN_LINE =
-  `Sessions:       revokeRefreshTokens WILL be requested for the target (mandatory on revoke) unless a fresh read just before the call shows a stored cutoff later than this machine's clock. The request can fail; it overwrites validSince with this machine's clock (sync it first: NTP; the run stops before any claim write if this clock is more than about ${REVOCATION_SKEW_MARGIN_SECONDS} s (plus the measured request latency) off Firestore server time); it does not end already-issued ID tokens (up to about 1 hour) and is not a sign-out from every device.`;
+  `Sessions:       revokeRefreshTokens WILL be requested for the target (mandatory on revoke) unless a fresh read just before the call shows a stored cutoff later than this machine's clock (exit 4, no call) or is unusable, including no value although the earlier read in the run had one (exit 3, no call). The request can fail; it overwrites validSince with this machine's clock (sync it first: NTP; the run stops before any claim write if this clock is more than about ${REVOCATION_SKEW_MARGIN_SECONDS} s (plus the measured request latency) off Firestore server time); it does not end already-issued ID tokens (up to about 1 hour) and is not a sign-out from every device.`;
 
 function incomplete<TS>(result: RunResult, code: PostWriteFailure, review: ReviewRequiredOutcome | null, deps: ExecutionDeps<TS>): RunResult {
   result.status = "incomplete";

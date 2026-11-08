@@ -836,5 +836,47 @@ describe("PR #295 residuals: runbook statements match the code", () => {
     expect(para).toContain("The exit is never 0");
     expect(para).toContain("exit 3 `sessions_revoke_unverified` when S is below the server-anchored cutoff");
     expect(para).toContain("exit 4 `revocation_cutoff_lowered` when S is at or after the cutoff but below V");
+    // n-2 (remote review of b22fbfe): the third outcome — an earlier exit-3 failure keeps its own code.
+    expect(para).toContain("When an earlier exit-3 failure precedes the no-op (for example `mint_failed`, where no anchor is taken), the exit is 3 with that earlier code instead (precedence 3 > 4), and the label is still `CUTOFF_LOWERED`.");
+  });
+
+  /** n-3 (remote review of b22fbfe): exact clauses, not contains-only keywords. */
+  const TECH = "docs/technical-documentation.md";
+  const flat = (f: string) => read(f).replace(/\s+/g, " ");
+
+  it("n-3: the tech-doc N1 clause lists the absent-after-present case as unusable, exit 3, no call", () => {
+    expect(flat(TECH)).toContain(
+      "or that fresh read fails or is unusable — a different uid, an unparseable value, or no value when the pre-run read had one (exit 3 `pre_call_read_failed`, no call, no fallback to an earlier read)",
+    );
+  });
+
+  it("n-3: the tech-doc read-back clause is exit 3 with state unknown (never exit 4 / review)", () => {
+    const t = flat(TECH);
+    expect(t).toContain("an Auth read-back for a different account, or with no uid, is `verification_failed` (exit 3, state unknown)");
+    expect(t).not.toMatch(/`verification_failed` \(exit 4/);
+  });
+
+  it("n-3: runbook step 3 binds the read-back to `--target-uid` by a string uid (not by email or any other field)", () => {
+    expect(flat(RUNBOOK)).toContain("The Auth read-back counts only when it is the target's record (its `uid` is a string equal to `--target-uid`);");
+  });
+
+  it("n-3: no doc sentence says the call proceeds when only the fresh read has no value (the both-absent sentence is the only one)", () => {
+    const BOTH_ABSENT = "(When both reads have no value, the call proceeds.)";
+    const PROCEEDS = /\b(proceeds?|goes ahead|is (still )?made|still calls)\b/i;
+    const ABSENCE = /\b(no value|has none|absent|missing|no tokensValidAfterTime|without a value)\b/i;
+    for (const f of [RUNBOOK, TECH]) {
+      const units = flat(f).replace(/`/g, "").split(/(?<=[.!?]\)?)\s+/);
+      const hits = units.filter((u) => PROCEEDS.test(u) && ABSENCE.test(u) && u !== BOTH_ABSENT);
+      expect({ f, hits }).toEqual({ f, hits: [] });
+    }
+    expect(flat(RUNBOOK)).toContain(BOTH_ABSENT);
+  });
+
+  it("n-1: every re-run / plan text names the unusable-fresh-read no-call case (exit 3), not only the stored-ahead one", () => {
+    expect(RERUN_GUIDANCE).toContain("or that fresh read is unusable: it fails, names another account, has a value that is not a date, or has no value although the earlier read in the run had one (then exit 3 pre_call_read_failed and no call)");
+    expect(REVOKE_SESSIONS_PLAN_LINE).toContain("or is unusable, including no value although the earlier read in the run had one (exit 3, no call)");
+    expect(flat(RUNBOOK)).toContain("calls `revokeRefreshTokens` again unless that read shows a stored value later than this machine's clock (exit 4 `stored_cutoff_ahead`, no call) or is unusable, including no value when the pre-run read had one (exit 3 `pre_call_read_failed`, no call)");
+    expect(exitRow("3")).toContain("or is unusable, including no value when the pre-run read had one (exit 3 `pre_call_read_failed`, no call)");
+    expect(flat(TECH)).toContain("but a revoke re-run calls `revokeRefreshTokens` again unless its fresh pre-call read shows a stored value ahead (exit 4, no call) or is unusable (exit 3 `pre_call_read_failed`, no call);");
   });
 });
