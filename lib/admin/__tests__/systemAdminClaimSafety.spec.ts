@@ -616,6 +616,50 @@ describe("session revocation evidence — server clock only", () => {
         for (const p of protos) delete p.uid;
       }
     });
+    /**
+     * PR #295 local review of d017259, m-A: the fresh uid must EQUAL the target
+     * uid (Firebase UIDs are case-sensitive strings). No trimming, case
+     * folding, Unicode normalisation, whitespace removal or prefix matching.
+     */
+    const freshNearMisses = [
+      ["lower-cased", (u: string) => u.toLowerCase()],
+      ["upper-cased", (u: string) => u.toUpperCase()],
+      ["one letter's case flipped", (u: string) => u[0].toLowerCase() + u.slice(1)],
+      ["a leading space", (u: string) => ` ${u}`],
+      ["a trailing space", (u: string) => `${u} `],
+      ["an embedded space", (u: string) => `${u.slice(0, 5)} ${u.slice(5)}`],
+      ["a trailing newline", (u: string) => `${u}\n`],
+      ["a trailing tab", (u: string) => `${u}\t`],
+      ["a leading tab", (u: string) => `\t${u}`],
+      ["a non-breaking space appended", (u: string) => `${u}\u00a0`],
+      ["a zero-width space appended", (u: string) => `${u}\u200b`],
+      ["a zero-width joiner embedded", (u: string) => `${u.slice(0, 3)}\u200d${u.slice(3)}`],
+      ["a Cyrillic lookalike for its first letter", (u: string) => `\u0410${u.slice(1)}`],
+      ["fullwidth forms (NFKC-equal)", (u: string) => [...u].map((c) => String.fromCharCode(c.charCodeAt(0) + 0xfee0)).join("")],
+      ["a prefix of it (last character dropped)", (u: string) => u.slice(0, -1)],
+      ["it plus a suffix", (u: string) => `${u}2`],
+      ["another char appended in front", (u: string) => `x${u}`],
+    ] as const;
+    it.each(freshNearMisses)("m-A: a fresh record whose uid is the target's %s => refuse_unusable (no call)", (_l, alter) => {
+      const near = alter(UID);
+      expect(near).not.toBe(UID);
+      const r = checkPreCallCutoff({ ...rec(utc(T0)), uid: near }, UID, at(T0 + 5));
+      expect(r).toEqual({
+        decision: "refuse_unusable", storedSeconds: null, localSeconds: T0 + 5,
+        detail: "the fresh Auth read before the call did not return the target's record",
+      });
+    });
+    it("m-A CONTROL: the exact uid with the same record => call", () => {
+      expect(checkPreCallCutoff({ ...rec(utc(T0)), uid: UID }, UID, at(T0 + 5)).decision).toBe("call");
+    });
+    it.each([
+      ["the number form", 1234567890],
+      ["a String object", Object("1234567890")],
+      ["a one-element array", ["1234567890"]],
+    ] as const)("m-A: an all-digit target and a fresh uid that is %s => refuse_unusable", (_l, uid) => {
+      const r = checkPreCallCutoff({ ...rec(utc(T0)), uid } as never, "1234567890", at(T0 + 5));
+      expect(r.decision).toBe("refuse_unusable");
+    });
   });
   describe("N1: an absent fresh value is 'never set' only when the earlier read had none either", () => {
     const rec = (tva?: unknown) => ({ uid: UID, disabled: false, ...(tva === undefined ? {} : { tokensValidAfterTime: tva as string }) });

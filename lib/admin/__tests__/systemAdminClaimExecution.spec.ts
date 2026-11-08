@@ -2172,6 +2172,37 @@ describe("R3 MAJOR: the revocation cutoff is observed against a SERVER-anchored 
         expect(evidenceOf(r)).toMatchObject({ sessionRevocationState: "ACKNOWLEDGED_UNOBSERVED", cutoffObserved: false });
       });
 
+      const freshNearMisses = [
+        ...nearMisses,
+        ["has one letter's case flipped", (uid: string) => uid[0].toLowerCase() + uid.slice(1)],
+        ["has a leading space", (uid: string) => ` ${uid}`],
+        ["has an embedded space", (uid: string) => `${uid.slice(0, 6)} ${uid.slice(6)}`],
+        ["has a trailing tab", (uid: string) => `${uid}\t`],
+        ["has a zero-width space appended", (uid: string) => `${uid}\u200b`],
+        ["has a Cyrillic lookalike first letter", (uid: string) => `\u0422${uid.slice(1)}`],
+        ["is its fullwidth (NFKC-equal) form", (uid: string) => [...uid].map((c) => String.fromCharCode(c.charCodeAt(0) + 0xfee0)).join("")],
+        ["is a prefix of it", (uid: string) => uid.slice(0, -1)],
+        ["is it plus a suffix", (uid: string) => `${uid}2`],
+      ] as const;
+
+      it.each(freshNearMisses)("m-A (FRESH pre-call read, getUser #3): a fresh uid that %s => no call, exit 3 pre_call_read_failed, refuse_unusable", async (_l, alter) => {
+        expect(alter(TARGET)).not.toBe(TARGET);
+        const w = adminWorld(0);
+        const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), nthGetUser(deps(w), 3, (u) => ({ ...u, uid: alter(TARGET) })));
+        expect(revokeCalls(w)).toBe(0);
+        expect(w.validSinceSent).toEqual([]);
+        expect(w.users.get(TARGET)!.tokensValidAfterTime).toBe(BEFORE_TVA);
+        expect([r.status, r.exitCode, r.code]).toEqual(["incomplete", 3, "pre_call_read_failed"]);
+        expect(r.failureDetails[0]).toBe("pre_call_read_failed: the fresh Auth read before the call did not return the target's record; the call was NOT made");
+        expect(evidenceOf(r)).toMatchObject({ sessionRevocationState: "NOT_REQUESTED", revocationRequested: false, preCallCheck: { read: "read", decision: "refuse_unusable", storedSeconds: null } });
+      });
+
+      it("m-A CONTROL: the same rig with the fresh uid passed through unchanged => one call, exit 0", async () => {
+        const w = adminWorld(0);
+        const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), nthGetUser(deps(w), 3, (u) => ({ ...u, uid: TARGET })));
+        expect([r.exitCode, r.sessionRevocationState, revokeCalls(w)]).toEqual([0, "CUTOFF_OBSERVED", 1]);
+      });
+
       it.each(nearMisses)("N2 grant: a read-back uid that %s => exit 3 verification_failed, never applied", async (_l, alter) => {
         const w = world();
         const r = await runSystemAdminClaim(ctx(args(GRANT_EXEC)), nthGetUser(deps(w), 3, (u) => ({ ...u, uid: alter(TARGET) })));
@@ -2221,6 +2252,42 @@ describe("R3 MAJOR: the revocation cutoff is observed against a SERVER-anchored 
         });
         const od = (w.audit.get(OUTCOME) as { metadata: { outcomeDetails: string[] } }).metadata.outcomeDetails;
         expect(od.map((x) => x.split(":")[0])).toEqual(["pre_call_read_failed", "verification_failed"]);
+      });
+    });
+
+    describe("n-D: the FIRST exit-3 failure stays the run's code; a later pre_call_read_failed is a detail", () => {
+      it("mint_failed, then an unusable fresh read (no value after the pre-run read had one) => code mint_failed, no call", async () => {
+        const w = adminWorld(0);
+        const d = deps(w);
+        const origW = d.auth.writeCustomClaims;
+        d.auth.writeCustomClaims = async (uid, claims) => {
+          await origW(uid, claims);
+          throw Object.assign(new Error("DEADLINE_EXCEEDED"), { code: "auth/internal-error" });
+        };
+        const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), nthGetUser(d, 3, dropTva));
+        expect(revokeCalls(w)).toBe(0);
+        expect([r.status, r.exitCode, r.code, r.outcome]).toEqual(["incomplete", 3, "mint_failed", "mint_failed"]);
+        const codes = r.failureDetails.map((x) => x.split(":")[0]);
+        expect(codes.slice(0, 2)).toEqual(["mint_failed", "pre_call_read_failed"]);
+        expect(evidenceOf(r).preCallCheck.decision).toBe("refuse_unusable");
+        expect(w.audit.get(OUTCOME)).toMatchObject({ metadata: { outcome: "mint_failed", completed: false } });
+      });
+
+      it("users_doc_failed, then a fresh read of another account => code users_doc_failed, no call", async () => {
+        const w = adminWorld(0);
+        w.fail.role = true;
+        const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), nthGetUser(deps(w), 3, (u) => ({ ...u, uid: OTHER_ADMIN })));
+        expect(revokeCalls(w)).toBe(0);
+        expect([r.status, r.exitCode, r.code, r.outcome]).toEqual(["incomplete", 3, "users_doc_failed", "users_doc_failed"]);
+        const codes = r.failureDetails.map((x) => x.split(":")[0]);
+        expect(codes.slice(0, 2)).toEqual(["users_doc_failed", "pre_call_read_failed"]);
+        expect(w.audit.get(OUTCOME)).toMatchObject({ metadata: { outcome: "users_doc_failed", completed: false } });
+      });
+
+      it("CONTROL: the same unusable fresh read with no earlier failure => code pre_call_read_failed", async () => {
+        const w = adminWorld(0);
+        const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), nthGetUser(deps(w), 3, dropTva));
+        expect([r.exitCode, r.code]).toEqual([3, "pre_call_read_failed"]);
       });
     });
 
