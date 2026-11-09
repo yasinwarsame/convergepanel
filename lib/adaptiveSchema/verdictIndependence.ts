@@ -107,10 +107,17 @@ export function adaptiveTopIndependence(
   // F-2 (D-5): a stored placeholder slot is not a model response — never a considered slot, never an executing model.
   // A2: a slot recorded as failed is a known fact, shown as failed and never a voice.
   const { responding: slots, placeholders } = respondingSlots(considered, provenance);
-  if (slots.length === 0 && placeholders.length > 0) return { kind: "placeholder", scope, voices: [], placeholders };
+  if (slots.length === 0) {
+    if (placeholders.length > 0) return { kind: "placeholder", scope, voices: [], placeholders };
+    // Every considered slot is a recorded failure. A stored claim whose supporters all failed is never an independent
+    // consensus (unverified, the no-claim family). Run scope — every slot the run records, no stored claim joined — is
+    // a run with nothing to judge and no agreement to qualify: it renders exactly as before (owner decision, Order 29
+    // option (b): the 2c17feee oracle of the all-failed panel holds). The shared gate itself still fails for that run
+    // (runExecutionIdentity → UV), so no surface counts it as a verified independent run.
+    return scope === "supporters" ? { kind: "unverified", scope } : INDEPENDENT;
+  }
   // F-1: the shared corrected D-4 gate over the considered slots' rows (a slot with no row, no recorded status, or an
   // answered row without a recorded provider fails it — nothing is inferred, no provider history is reconstructed).
-  // Every considered slot recorded as failed → no rows → the gate fails (K = 0 is never an independent run).
   const rows = slots.map((s) => factsFor(provenance, s));
   if (rows.some((f) => !f) || !executionIdentityVerified(rows.map((f) => identityRowFromFacts(f)))) return { kind: "unverified", scope };
   const groups = groupSlotsByExecutingVoice(slots, provenance);

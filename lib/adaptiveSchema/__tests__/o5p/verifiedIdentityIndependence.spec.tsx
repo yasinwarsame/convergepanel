@@ -141,10 +141,15 @@ describe("F-1: the shared verified-identity rule on the verdict surfaces (the ru
     const collapsed = [f("chatgpt", true, "deepseek"), f("claude", true, "deepseek"), f("grok", false, "xai"), { modelId: "gemini", status: "timeout" } as RunModelProvenanceFacts];
     expect(adaptiveTopIndependence(null, collapsed)).toEqual({ kind: "repeated_substitute", scope: "run", voices: ["DeepSeek (substituting ChatGPT, Claude)", "Grok"], repeated: ["DeepSeek (substituting ChatGPT, Claude)"] });
     expect(raisedByText(["chatgpt", "claude", "grok", "gemini"], collapsed)).toBe("(raised by 4 panel slots, answered by 2 independent models: DeepSeek (substituting ChatGPT, Claude); Grok)");
-    // Finding K=0 → IND: every considered slot recorded as failed → nothing answered → unverified, never independent.
-    expect(adaptiveTopIndependence(null, [{ modelId: "chatgpt", status: "timeout" }, { modelId: "claude", status: "failed" }])).toEqual({ kind: "unverified", scope: "run" });
+    // Finding K=0 → IND: a stored claim whose supporters all recorded failures is never an independent consensus.
     expect(adaptiveTopIndependence(["chatgpt"], [{ modelId: "chatgpt", status: "timeout" }, ...VERIFIED])).toEqual({ kind: "unverified", scope: "supporters" });
-    expect(runIndependence([{ modelId: "chatgpt", status: "timeout" }, { modelId: "claude", status: "failed" }])).toEqual({ kind: "unverified", scope: "run" });
+    expect(adaptiveTopIndependence(["chatgpt", "claude"], [{ modelId: "chatgpt", status: "timeout" }, { modelId: "claude", status: "failed" }])).toEqual({ kind: "unverified", scope: "supporters" });
+    // Run scope with nothing answered and no stored claim joined renders as before (owner option (b): the all-failed
+    // panel's 2c17feee oracle holds); the shared gate still reads that run as unverified (K = 0 is never IND).
+    const allFailed = [{ modelId: "chatgpt", status: "timeout" }, { modelId: "claude", status: "failed" }];
+    expect(adaptiveTopIndependence(null, allFailed)).toEqual({ kind: "independent" });
+    expect(runIndependence(allFailed)).toBeNull();
+    expect(runExecutionIdentity(allFailed.map((f) => ({ ...f, rawText: null })))).toMatchObject({ kind: "UV", verified: false, independentModels: null, answeredSlots: 0 });
     // The same slot recorded as answered without a provider: unverified.
     expect(adaptiveTopIndependence(null, [...VERIFIED, { modelId: "gemini", status: "ok", substituted: false }])).toEqual({ kind: "unverified", scope: "run" });
   });

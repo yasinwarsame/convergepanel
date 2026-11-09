@@ -263,10 +263,13 @@ describe("Order 29 — exports judge model independence from the frozen per-slot
       expect([k, /Top consensus|agreed by|Models agree|\d+ independent model|consensus of \d+/i.test(text)]).toEqual([k, false]);
       expect([k, (text.match(/\(failed\)/g) ?? []).length]).toEqual([k, 5]);
     }
-    // (b) a stored report that claims a consensus over slots that are all recorded as failed: the claim is never rendered as an independent consensus.
+    // (b) a stored report that claims a consensus over slots that are all recorded as failed: the joined claim's supporters
+    // all failed → never rendered as an independent consensus (supporters scope). The run scope itself renders as before
+    // (owner option (b)); the gate still reads the run as unverified.
     const crafted = exportOf(CONS(), rows);
     expect(exportIdentity(crafted)).toMatchObject({ kind: "UV", verified: false, independentModels: null, answeredSlots: 0 });
-    expect(exportRunIndependence(crafted)).toEqual({ kind: "unverified", scope: "run" });
+    expect(exportRunIndependence(crafted)).toBeNull();
+    expect(exportPositionSafeReport(crafted).independence?.topHeading).toBe(ADAPTIVE_INDEPENDENCE_UNVERIFIED_TOP_HEADING);
     for (const [k, text] of await bothTexts(crafted)) {
       expect([k, text.includes(ADAPTIVE_INDEPENDENCE_UNVERIFIED_TOP_HEADING)]).toEqual([k, true]);
       expect([k, UNQUALIFIED_TOP.test(text)]).toEqual([k, false]);
