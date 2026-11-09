@@ -11,7 +11,7 @@
 
 import type { AdaptiveResearchExportV1 } from "./researchExport";
 import type { AdaptiveSynthesisReport } from "./types";
-import { readFrozenRunProvenance } from "./exportRunProvenance";
+import { readFrozenRunExecutionProvenance } from "./exportRunProvenance";
 import { runModelProvenanceFromExport, type RunModelProvenanceFacts } from "@/lib/panel/runModelIdentity";
 import { PositionView, VERDICT_SECTION_HEADINGS, positionView, presentPositionSafeReport } from "./positionPresentation";
 import { independenceQualification, qualifiedTopHeading, runIndependence, type QualifiedIndependence } from "./verdictIndependence";
@@ -52,11 +52,13 @@ function exportRoster(record: AdaptiveResearchExportV1): string[] {
  * The export's per-slot provenance for judging model independence. A pre-6.2b export carries no frozen provenance
  * (owner ruling, c16 MINOR-3): every slot is then a slot whose execution is NOT RECORDED — no `substituted` fact — so
  * every agreement statement is stated as "model independence unverified"; slot names stay the logical slot only (the
- * labels read `substituted === true` alone) and no execution data is manufactured.
+ * labels read `substituted === true` alone) and no execution data is manufactured. A version-2 snapshot's frozen
+ * per-slot outcome becomes each slot's recorded status (runModelProvenanceFromExport); a version-1 entry has none, so
+ * the shared gate reads the export as "model independence unverified" (Order 29 A1 / A2, owner-accepted).
  */
 function exportSlotProvenance(record: AdaptiveResearchExportV1): RunModelProvenanceFacts[] {
   const roster = exportRoster(record);
-  const frozen = readFrozenRunProvenance(record.reportSnapshot.runProvenance);
+  const frozen = readFrozenRunExecutionProvenance(record.reportSnapshot.runProvenance);
   return frozen ? roster.map((modelId) => runModelProvenanceFromExport(frozen, modelId)) : roster.map((modelId) => ({ modelId }));
 }
 

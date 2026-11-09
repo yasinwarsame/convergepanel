@@ -5,7 +5,7 @@
  * at creation time, (2) reads a frozen value back defensively for rendering,
  * and (3) produces the display lines every renderer (PDF, DOCX) shows — so the
  * formats cannot disagree about which facts an export carries. JSON emits the
- * same normalized object structurally.
+ * same normalized identity object structurally.
  *
  * INVARIANT: an export contains only provenance already persisted on the run
  * the authorized export operation read, freezes it at creation, and historical
@@ -22,12 +22,38 @@
  *     configuration, `modelId`, or anything else. A pre-6.2a run simply has no
  *     provider / requested model, and they stay absent.
  *   - `actualModel` is never carried: it is not provider-attested identity.
+ *
+ * Frozen provenance VERSION 2 (C-a closeout, Order 29 M-1 / m-1). Every entry
+ * also freezes the slot's call OUTCOME, derived ONLY from the explicitly
+ * recorded persisted `perModel.status` through the exact-match map
+ * `PERSISTED_STATUS_OUTCOMES` (the real ConnectorStatus values): ok / substituted
+ * → "answered"; failed / error → "failed"; timeout, refused, rate_limited → the
+ * same word. Anything else — a missing row, a missing or non-string status, a
+ * case or whitespace variant ("OK ", "Ok"), a word that is not a persisted status
+ * ("answered", "") — is `outcome: "unknown"`, `outcomeSource: "absent"`. The
+ * outcome is never inferred from the provider's presence or absence; a failed
+ * call recorded no provider and needs none. The entry also carries the D-5
+ * placeholder class of the persisted row's text (`invalidProviderOutput` /
+ * `validityUnknown`, the shared oracle in lib/panel/executionIdentity.ts), so
+ * the exports apply the same stored-placeholder rule as the UI (F-2). No stored
+ * run field changes and no historical run is rewritten: this is the export
+ * snapshot only. A version-1 snapshot (no outcomes) reads back as unknown — the
+ * owner accepted that older frozen exports read "model independence unverified"
+ * rather than reconstructing history.
+ *
+ * Two readers of one frozen value: `readFrozenRunProvenance` returns the
+ * identity facts (what the JSON export's `provenance.run` and the display lines
+ * consume — byte-stable across both versions), `readFrozenRunExecutionProvenance`
+ * the same facts with the execution read-back (what the independence judgement
+ * of the PDF / DOCX reads, exportPositionView.ts). Both preserve only literal
+ * valid values and treat anything else as unknown.
  */
 
 import type { GovernanceRecordV1 } from "./governanceRecord";
-import type { AdaptiveExportModelProvenance, AdaptiveExportRunProvenance } from "./researchExport";
+import type { AdaptiveExportModelProvenance, AdaptiveExportRunProvenance, AdaptiveExportSlotOutcome, AdaptiveExportSlotOutcomeSource } from "./researchExport";
 import type { ModelId } from "../types";
 import { runModelIdentityLabel, runModelProvenanceFromExport } from "../panel/runModelIdentity";
+import { placeholderClass } from "../panel/executionIdentity";
 
 const EVALUATED_AUTOMATED_STATUSES: readonly string[] = ["passed", "flagged", "blocked"];
 
@@ -43,6 +69,34 @@ function persistedSubstitutionState(status: unknown): boolean | undefined {
   if (status === "substituted") return true;
   if (typeof status === "string" && NON_SUBSTITUTED_PERSISTED_STATUSES.includes(status)) return false;
   return undefined;
+}
+
+/** The frozen provenance version written by `freezeExportRunProvenance`. */
+export const FROZEN_RUN_PROVENANCE_VERSION = 2 as const;
+
+/**
+ * Persisted `perModel.status` literal → frozen outcome. Exact match only (own property, the literal as persisted);
+ * every real ConnectorStatus value is listed and nothing else is.
+ */
+export const PERSISTED_STATUS_OUTCOMES: Readonly<Record<string, Exclude<AdaptiveExportSlotOutcome, "unknown">>> = Object.freeze({
+  ok: "answered",
+  substituted: "answered",
+  failed: "failed",
+  error: "failed",
+  timeout: "timeout",
+  refused: "refused",
+  rate_limited: "rate_limited",
+});
+
+const RECORDED_OUTCOMES: readonly AdaptiveExportSlotOutcome[] = ["answered", "failed", "timeout", "refused", "rate_limited"];
+
+type FrozenOutcome = { outcome: AdaptiveExportSlotOutcome; outcomeSource: AdaptiveExportSlotOutcomeSource };
+const UNKNOWN_OUTCOME: FrozenOutcome = Object.freeze({ outcome: "unknown", outcomeSource: "absent" });
+
+/** The outcome an explicitly recorded persisted status freezes; unknown / absent for anything else. */
+export function persistedStatusOutcome(status: unknown): FrozenOutcome {
+  if (typeof status !== "string" || !Object.prototype.hasOwnProperty.call(PERSISTED_STATUS_OUTCOMES, status)) return UNKNOWN_OUTCOME;
+  return { outcome: PERSISTED_STATUS_OUTCOMES[status], outcomeSource: "recorded" };
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -83,6 +137,10 @@ function frozenPolicyVersion(source: ExportRunProvenancePolicySource): number | 
 
 function frozenModel(modelId: ModelId, row: Record<string, unknown> | undefined): AdaptiveExportModelProvenance {
   const substituted = persistedSubstitutionState(row?.status);
+  // The slot's recorded outcome (exact persisted-status match) and the D-5 class of its persisted text (the shared
+  // oracle, read over the persisted row exactly as the UI reads a result row). Nothing is inferred from the provider.
+  const { outcome, outcomeSource } = persistedStatusOutcome(row?.status);
+  const cls = row ? placeholderClass({ ...row, modelId }) : null;
   // Built with conditional spreads only: no `undefined` value is ever written,
   // so a Firestore round-trip cannot turn an absent fact into a `null` one.
   return {
@@ -91,43 +149,91 @@ function frozenModel(modelId: ModelId, row: Record<string, unknown> | undefined)
     ...(row && nonEmptyString(row.requestedModel) ? { requestedModel: row.requestedModel } : {}),
     ...(substituted !== undefined ? { substituted } : {}),
     ...(substituted === true && row && nonEmptyString(row.substitutedFrom) ? { substitutedFrom: row.substitutedFrom } : {}),
+    outcome,
+    outcomeSource,
+    ...(cls === "INVALID_MOCK" ? { invalidProviderOutput: true as const } : {}),
+    ...(cls === "VALIDITY_UNKNOWN" ? { validityUnknown: true as const } : {}),
   };
 }
 
-/** Freezes the run's persisted provenance. Pure; never throws. */
+/** Freezes the run's persisted provenance (version 2). Pure; never throws. */
 export function freezeExportRunProvenance(input: FreezeExportRunProvenanceInput): AdaptiveExportRunProvenance {
   const perModel = isPlainObject(input.runDocument) && Array.isArray(input.runDocument.perModel) ? input.runDocument.perModel : [];
   const rows = perModel.filter(isPlainObject);
   const policyVersion = frozenPolicyVersion(input.policy);
   return {
     ...(policyVersion !== undefined ? { policyVersion } : {}),
+    provenanceVersion: FROZEN_RUN_PROVENANCE_VERSION,
     models: input.selectedModels.map((modelId) => frozenModel(modelId, rows.find((r) => r.modelId === modelId))),
   };
 }
 
-/**
- * Reads a FROZEN value back for rendering. `null` means "this export carries no
- * run provenance" (every pre-6.2b record): render nothing. Malformed fields are
- * treated as absent; nothing is filled in.
- */
-export function readFrozenRunProvenance(raw: unknown): AdaptiveExportRunProvenance | null {
+/** The frozen entry's identity facts (version 1 shape) and, separately, its execution read-back. */
+function readFrozenEntry(entry: Record<string, unknown>): { identity: AdaptiveExportModelProvenance; execution: Partial<AdaptiveExportModelProvenance> } {
+  // A literal boolean is preserved; anything else is an unknown state and omitted.
+  const substituted = typeof entry.substituted === "boolean" ? entry.substituted : undefined;
+  const identity: AdaptiveExportModelProvenance = {
+    modelId: entry.modelId as ModelId,
+    ...(nonEmptyString(entry.provider) ? { provider: entry.provider } : {}),
+    ...(nonEmptyString(entry.requestedModel) ? { requestedModel: entry.requestedModel } : {}),
+    ...(substituted !== undefined ? { substituted } : {}),
+    ...(substituted === true && nonEmptyString(entry.substitutedFrom) ? { substitutedFrom: entry.substitutedFrom } : {}),
+  };
+  // Only a literal recorded outcome with the literal source "recorded" is a recorded outcome; anything else — a
+  // version-1 entry, "unknown", a crafted or non-string value — is unknown / absent. Only the literal `true` is a D-5 fact.
+  const recorded = typeof entry.outcome === "string" && (RECORDED_OUTCOMES as readonly string[]).includes(entry.outcome) && entry.outcomeSource === "recorded";
+  const execution: Partial<AdaptiveExportModelProvenance> = {
+    ...(recorded ? { outcome: entry.outcome as AdaptiveExportSlotOutcome, outcomeSource: "recorded" as const } : UNKNOWN_OUTCOME),
+    ...(entry.invalidProviderOutput === true ? { invalidProviderOutput: true as const } : {}),
+    ...(entry.validityUnknown === true ? { validityUnknown: true as const } : {}),
+  };
+  return { identity, execution };
+}
+
+function readFrozenEntries(raw: unknown): { policyVersion?: number; provenanceVersion?: 2; entries: ReturnType<typeof readFrozenEntry>[] } | null {
   if (!isPlainObject(raw) || !Array.isArray(raw.models)) return null;
-  const models: AdaptiveExportModelProvenance[] = [];
+  const entries: ReturnType<typeof readFrozenEntry>[] = [];
   for (const entry of raw.models) {
     if (!isPlainObject(entry) || !nonEmptyString(entry.modelId)) continue;
-    // A literal boolean is preserved; anything else is an unknown state and omitted.
-    const substituted = typeof entry.substituted === "boolean" ? entry.substituted : undefined;
-    models.push({
-      modelId: entry.modelId as ModelId,
-      ...(nonEmptyString(entry.provider) ? { provider: entry.provider } : {}),
-      ...(nonEmptyString(entry.requestedModel) ? { requestedModel: entry.requestedModel } : {}),
-      ...(substituted !== undefined ? { substituted } : {}),
-      ...(substituted === true && nonEmptyString(entry.substitutedFrom) ? { substitutedFrom: entry.substitutedFrom } : {}),
-    });
+    entries.push(readFrozenEntry(entry));
   }
   return {
     ...(validPolicyVersion(raw.policyVersion) ? { policyVersion: raw.policyVersion } : {}),
-    models,
+    ...(raw.provenanceVersion === FROZEN_RUN_PROVENANCE_VERSION ? { provenanceVersion: FROZEN_RUN_PROVENANCE_VERSION } : {}),
+    entries,
+  };
+}
+
+/**
+ * Reads a FROZEN value back for rendering: the IDENTITY facts only (the JSON
+ * export's `provenance.run`, the display lines and the model labels), the same
+ * object for a version-1 and a version-2 snapshot of the same run. `null` means
+ * "this export carries no run provenance" (every pre-6.2b record): render
+ * nothing. Malformed fields are treated as absent; nothing is filled in.
+ */
+export function readFrozenRunProvenance(raw: unknown): AdaptiveExportRunProvenance | null {
+  const read = readFrozenEntries(raw);
+  if (!read) return null;
+  return {
+    ...(read.policyVersion !== undefined ? { policyVersion: read.policyVersion } : {}),
+    models: read.entries.map((e) => e.identity),
+  };
+}
+
+/**
+ * Reads a FROZEN value back with its execution facts (version 2): every entry
+ * carries `outcome` / `outcomeSource` — the literal recorded values, or
+ * unknown / absent for a version-1 entry or anything not literally valid —
+ * and the literal D-5 facts. This is what the exports' model-independence
+ * judgement reads (exportPositionView.ts → runModelProvenanceFromExport).
+ */
+export function readFrozenRunExecutionProvenance(raw: unknown): AdaptiveExportRunProvenance | null {
+  const read = readFrozenEntries(raw);
+  if (!read) return null;
+  return {
+    ...(read.policyVersion !== undefined ? { policyVersion: read.policyVersion } : {}),
+    ...(read.provenanceVersion !== undefined ? { provenanceVersion: read.provenanceVersion } : {}),
+    models: read.entries.map((e) => ({ ...e.identity, ...e.execution })),
   };
 }
 

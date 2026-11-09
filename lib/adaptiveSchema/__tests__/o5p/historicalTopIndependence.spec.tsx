@@ -136,7 +136,8 @@ describe("independent supporters are unaffected", () => {
 });
 
 describe("the rule on its own", () => {
-  const f = (modelId: string, substituted?: boolean, provider?: string) => ({ modelId, ...(substituted !== undefined ? { substituted } : {}), ...(provider ? { provider } : {}) });
+  // Facts as a result row or a version-2 export entry records them: the status and the substitution it implies (Order 29 A2: `substituted` alone is no status).
+  const f = (modelId: string, substituted?: boolean, provider?: string) => ({ modelId, ...(substituted !== undefined ? { status: substituted ? "substituted" : "ok", substituted } : {}), ...(provider ? { provider } : {}) });
   it("supporters collapse → repeated; a non-supporting collapsed pair does not qualify supporter scope", () => {
     const prov = [f("chatgpt", true, "deepseek"), f("claude", true, "deepseek"), f("grok", false, "xai")];
     expect(adaptiveTopIndependence(["chatgpt", "claude", "grok"], prov)).toEqual({ kind: "repeated_substitute", scope: "supporters", voices: [DEEPSEEK, "Grok"], repeated: [DEEPSEEK] });

@@ -29,7 +29,7 @@
  * imported from lib/panel/executionIdentity.ts (presentation only), never re-implemented here.
  */
 
-import { executionIdentityVerified, identityRowFromFacts, placeholderClass } from "@/lib/panel/executionIdentity";
+import { executionIdentityVerified, identityRowFromFacts, identityRowRecordedFailure, placeholderClass } from "@/lib/panel/executionIdentity";
 import { groupSlotsByExecutingVoice } from "@/lib/panel/executingVoiceLabel";
 import type { RunModelProvenanceFacts } from "@/lib/panel/runModelIdentity";
 import { NO_CONSENSUS_IDENTIFIED, quoteClaim } from "./agreementNarrative";
@@ -50,6 +50,8 @@ export const ADAPTIVE_REPEATED_SUBSTITUTE_TOP_HEADING = "Top finding (repeated s
 export const ADAPTIVE_INDEPENDENCE_UNVERIFIED_TOP_HEADING = "Top finding (model independence unverified; not confirmed as a consensus)";
 /** Heading in place of "Top consensus" / "Top majority-supported claim" / "Models agree" (a supporting slot held stored placeholder text). */
 export const ADAPTIVE_PLACEHOLDER_TOP_HEADING = "Top finding (stored placeholder text among the supporting slots; not an independent consensus)";
+/** The same heading when the judgement is run-scope (every slot the run records, no joined supporters — Order 29 m-2). */
+export const ADAPTIVE_PLACEHOLDER_RUN_TOP_HEADING = "Top finding (stored placeholder text among the slots of this run; not an independent consensus)";
 
 /** "1 panel slot held stored placeholder text (not a model response)" — the D-5 clause every placeholder statement carries. */
 export function placeholderSlotsClause(n: number): string {
@@ -77,10 +79,19 @@ function isPlaceholderSlot(provenance: readonly RunModelProvenanceFacts[], slot:
   return placeholderClass(identityRowFromFacts(factsFor(provenance, slot))) === "INVALID_MOCK";
 }
 
-/** The slots of a list that are model responses (stored placeholder slots removed), and the removed placeholder slots. */
+/** A slot whose facts record a failed call (failed / error / timeout / refused / rate_limited): a known fact, never a voice. */
+function isRecordedFailureSlot(provenance: readonly RunModelProvenanceFacts[], slot: string): boolean {
+  return identityRowRecordedFailure(identityRowFromFacts(factsFor(provenance, slot)));
+}
+
+/**
+ * The slots of a list that are model responses — stored placeholder slots and slots recorded as failed removed — and
+ * the removed placeholder slots. A recorded failure is excluded from the voices only (Order 29 A2); a slot with no
+ * recorded status stays in and fails the shared gate.
+ */
 function respondingSlots(slots: readonly string[], provenance: readonly RunModelProvenanceFacts[]): { responding: string[]; placeholders: string[] } {
   const placeholders = slots.filter((s) => isPlaceholderSlot(provenance, s));
-  return { responding: slots.filter((s) => !placeholders.includes(s)), placeholders };
+  return { responding: slots.filter((s) => !placeholders.includes(s) && !isRecordedFailureSlot(provenance, s)), placeholders };
 }
 
 export function adaptiveTopIndependence(
@@ -94,10 +105,12 @@ export function adaptiveTopIndependence(
   if (considered.length === 0) return scope === "run" && provenance.length > 0 ? { kind: "unverified", scope } : INDEPENDENT;
   if (scope === "run" && provenance.some((f) => !f || typeof f.modelId !== "string" || !f.modelId.trim())) return { kind: "unverified", scope };
   // F-2 (D-5): a stored placeholder slot is not a model response — never a considered slot, never an executing model.
+  // A2: a slot recorded as failed is a known fact, shown as failed and never a voice.
   const { responding: slots, placeholders } = respondingSlots(considered, provenance);
-  if (slots.length === 0) return placeholders.length > 0 ? { kind: "placeholder", scope, voices: [], placeholders } : INDEPENDENT;
+  if (slots.length === 0 && placeholders.length > 0) return { kind: "placeholder", scope, voices: [], placeholders };
   // F-1: the shared corrected D-4 gate over the considered slots' rows (a slot with no row, no recorded status, or an
   // answered row without a recorded provider fails it — nothing is inferred, no provider history is reconstructed).
+  // Every considered slot recorded as failed → no rows → the gate fails (K = 0 is never an independent run).
   const rows = slots.map((s) => factsFor(provenance, s));
   if (rows.some((f) => !f) || !executionIdentityVerified(rows.map((f) => identityRowFromFacts(f)))) return { kind: "unverified", scope };
   const groups = groupSlotsByExecutingVoice(slots, provenance);
@@ -108,7 +121,7 @@ export function adaptiveTopIndependence(
 export function adaptiveTopHeading(t: AdaptiveTopIndependence): string | null {
   if (t.kind === "repeated_substitute") return ADAPTIVE_REPEATED_SUBSTITUTE_TOP_HEADING;
   if (t.kind === "unverified") return ADAPTIVE_INDEPENDENCE_UNVERIFIED_TOP_HEADING;
-  if (t.kind === "placeholder") return ADAPTIVE_PLACEHOLDER_TOP_HEADING;
+  if (t.kind === "placeholder") return t.scope === "run" ? ADAPTIVE_PLACEHOLDER_RUN_TOP_HEADING : ADAPTIVE_PLACEHOLDER_TOP_HEADING;
   return null;
 }
 
@@ -133,7 +146,8 @@ export function adaptiveTopIndependenceStatement(t: AdaptiveTopIndependence, sto
   if (t.kind === "placeholder") {
     const m = t.voices.length;
     const p = t.placeholders.length;
-    return `${recorded ? `${recorded}, answered by` : "Supporting slots answered by"} ${m} independent model${m === 1 ? "" : "s"}${m > 0 ? `: ${t.voices.join("; ")}` : ""}. ${placeholderSlotsClause(p)} and ${p === 1 ? "is" : "are"} not counted.`;
+    const answeredBy = recorded ? `${recorded}, answered by` : t.scope === "run" ? "The slots of this run were answered by" : "Supporting slots answered by";
+    return `${answeredBy} ${m} independent model${m === 1 ? "" : "s"}${m > 0 ? `: ${t.voices.join("; ")}` : ""}. ${placeholderSlotsClause(p)} and ${p === 1 ? "is" : "are"} not counted.`;
   }
   return null;
 }

@@ -7,13 +7,18 @@
  * removal of any single provenance source fails a targeted test.
  */
 import {
+  FROZEN_RUN_PROVENANCE_VERSION,
   NON_SUBSTITUTED_PERSISTED_STATUSES,
+  PERSISTED_STATUS_OUTCOMES,
   PROVENANCE_NOT_RECORDED,
   exportRunProvenanceLines,
   freezeExportRunProvenance,
+  persistedStatusOutcome,
+  readFrozenRunExecutionProvenance,
   readFrozenRunProvenance,
   type ExportRunProvenancePolicySource,
 } from "@/lib/adaptiveSchema/exportRunProvenance";
+import { STORED_PLACEHOLDER_LITERALS } from "@/lib/panel/executionIdentity";
 import type { GovernanceRecordV1 } from "@/lib/adaptiveSchema/governanceRecord";
 
 const MODELS = ["chatgpt", "claude"] as never[];
@@ -33,6 +38,11 @@ function legacy(governanceStatus: "approved" | "needs_review" | "blocked" | null
 const freeze = (rows: unknown = { perModel: perModel() }, policy: ExportRunProvenancePolicySource = m2()) =>
   freezeExportRunProvenance({ selectedModels: MODELS, runDocument: rows, policy });
 
+/** Version 2 (Order 29): every frozen entry carries the slot's recorded outcome, or unknown / absent. */
+const A = { outcome: "answered", outcomeSource: "recorded" } as const;
+const U = { outcome: "unknown", outcomeSource: "absent" } as const;
+
+/** The identity facts (version-1 shape): what readFrozenRunProvenance, the JSON export and the display lines read. */
 const FULL = {
   policyVersion: 7,
   models: [
@@ -40,9 +50,19 @@ const FULL = {
     { modelId: "claude", provider: "deepseek", requestedModel: "claude-RUN-1", substituted: true, substitutedFrom: "anthropic:claude-RUN-1" },
   ],
 };
+/** The same run frozen at version 2: identity facts plus the recorded outcomes. */
+const FULL_V2 = {
+  policyVersion: 7,
+  provenanceVersion: 2,
+  models: [
+    { ...FULL.models[0], ...A },
+    { ...FULL.models[1], ...A },
+  ],
+};
 
-it("freezes the persisted policy version and every persisted per-model fact", () => {
-  expect(freeze()).toEqual(FULL);
+it("freezes the persisted policy version and every persisted per-model fact, with the version-2 marker and each slot's recorded outcome", () => {
+  expect(freeze()).toEqual(FULL_V2);
+  expect(FROZEN_RUN_PROVENANCE_VERSION).toBe(2);
 });
 
 it("never carries actualModel, and writes no undefined value anywhere (Firestore round-trip safe)", () => {
@@ -93,35 +113,35 @@ describe("per-model provenance — persisted perModel rows only", () => {
     return freeze({ perModel: rows }).models[i];
   };
   it("a row without provider (pre-6.2a) freezes no provider — never from config or modelId", () => {
-    expect(withRow(0, (r) => delete r.provider)).toEqual({ modelId: "chatgpt", requestedModel: "gpt-RUN-1", substituted: false });
+    expect(withRow(0, (r) => delete r.provider)).toEqual({ modelId: "chatgpt", requestedModel: "gpt-RUN-1", substituted: false, ...A });
   });
   it("a row without requestedModel freezes no requestedModel", () => {
-    expect(withRow(0, (r) => delete r.requestedModel)).toEqual({ modelId: "chatgpt", provider: "openai", substituted: false });
+    expect(withRow(0, (r) => delete r.requestedModel)).toEqual({ modelId: "chatgpt", provider: "openai", substituted: false, ...A });
   });
   it("a pre-6.2a substituted row keeps the substitution fact but no invented original", () => {
     expect(withRow(1, (r) => {
       delete r.substitutedFrom;
       delete r.provider;
       delete r.requestedModel;
-    })).toEqual({ modelId: "claude", substituted: true });
+    })).toEqual({ modelId: "claude", substituted: true, ...A });
   });
   it("substitution state comes from the persisted status: a stray substitutedFrom on a non-substituted row is not frozen", () => {
-    expect(withRow(0, (r) => (r.substitutedFrom = "openai:stray"))).toEqual({ modelId: "chatgpt", provider: "openai", requestedModel: "gpt-RUN-1", substituted: false });
+    expect(withRow(0, (r) => (r.substitutedFrom = "openai:stray"))).toEqual({ modelId: "chatgpt", provider: "openai", requestedModel: "gpt-RUN-1", substituted: false, ...A });
   });
   it("empty strings are not facts", () => {
     expect(withRow(0, (r) => {
       r.provider = "";
       r.requestedModel = "";
-    })).toEqual({ modelId: "chatgpt", substituted: false });
+    })).toEqual({ modelId: "chatgpt", substituted: false, ...A });
   });
   it("models follow selectedModels; a model with no persisted row gets only its id", () => {
     const frozen = freezeExportRunProvenance({ selectedModels: ["claude", "gemini"] as never[], runDocument: { perModel: perModel() }, policy: m2() });
     expect(frozen.models.map((m) => m.modelId)).toEqual(["claude", "gemini"]);
-    // No persisted row → no substitution claim either way, not `false`.
-    expect(frozen.models[1]).toEqual({ modelId: "gemini" });
+    // No persisted row → no substitution claim either way, not `false`; the outcome is unknown / absent.
+    expect(frozen.models[1]).toEqual({ modelId: "gemini", ...U });
   });
   it.each([undefined, null, "x", {}, { perModel: "x" }])("runDocument %p → ids only, nothing synthesized (no substitution claim)", (runDocument) => {
-    expect(freezeExportRunProvenance({ selectedModels: MODELS, runDocument, policy: m2() }).models).toEqual([{ modelId: "chatgpt" }, { modelId: "claude" }]);
+    expect(freezeExportRunProvenance({ selectedModels: MODELS, runDocument, policy: m2() }).models).toEqual([{ modelId: "chatgpt", ...U }, { modelId: "claude", ...U }]);
   });
   // Pinned literally — never iterated from the subject's own list, which would
   // silently drop a case if a status were removed from it.
@@ -143,10 +163,75 @@ describe("per-model provenance — persisted perModel rows only", () => {
       else r.status = status;
     });
     expect("substituted" in row).toBe(false);
-    expect(row).toEqual({ modelId: "chatgpt", provider: "openai", requestedModel: "gpt-RUN-1" });
+    expect(row).toEqual({ modelId: "chatgpt", provider: "openai", requestedModel: "gpt-RUN-1", ...U });
   });
   it("an unknown substitution state never carries a substitutedFrom", () => {
-    expect(withRow(1, (r) => delete r.status)).toEqual({ modelId: "claude", provider: "deepseek", requestedModel: "claude-RUN-1" });
+    expect(withRow(1, (r) => delete r.status)).toEqual({ modelId: "claude", provider: "deepseek", requestedModel: "claude-RUN-1", ...U });
+  });
+});
+
+describe("frozen outcome (version 2, Order 29 M-1) — the explicitly recorded persisted status only, through an exact-match map", () => {
+  const withRow = (i: number, edit: (row: Record<string, unknown>) => void) => {
+    const rows = perModel() as Array<Record<string, unknown>>;
+    edit(rows[i]);
+    return freeze({ perModel: rows }).models[i];
+  };
+  // Pinned literally, never iterated from the subject's own map.
+  const EXPECTED_OUTCOMES: Record<string, string> = { ok: "answered", substituted: "answered", failed: "failed", error: "failed", timeout: "timeout", refused: "refused", rate_limited: "rate_limited" };
+  it("the map is exactly the real ConnectorStatus values and nothing else", () => {
+    expect({ ...PERSISTED_STATUS_OUTCOMES }).toEqual(EXPECTED_OUTCOMES);
+    expect(Object.keys(PERSISTED_STATUS_OUTCOMES).sort()).toEqual([...NON_SUBSTITUTED_PERSISTED_STATUSES, "substituted"].sort());
+  });
+  it.each(Object.entries(EXPECTED_OUTCOMES))("persisted status %s → outcome %s, source recorded", (status, outcome) => {
+    expect(persistedStatusOutcome(status)).toEqual({ outcome, outcomeSource: "recorded" });
+    expect(withRow(0, (r) => (r.status = status))).toMatchObject({ outcome, outcomeSource: "recorded" });
+  });
+  it.each([
+    ["trailing space", "OK "],
+    ["capitalised", "Ok"],
+    ["the outcome word itself", "answered"],
+    ["empty", ""],
+    ["the fail-closed word", "unknown"],
+    ["upper-case", "TIMEOUT"],
+    ["number", 1],
+    ["null", null],
+    ["missing", undefined],
+    ["object", { status: "ok" }],
+  ])("a status that is %s (%p) → unknown / absent, never recorded", (_label, status) => {
+    expect(persistedStatusOutcome(status)).toEqual(U);
+    expect(withRow(0, (r) => {
+      if (status === undefined) delete r.status;
+      else r.status = status;
+    })).toMatchObject(U);
+  });
+  it("the outcome is never inferred from the provider: a failed call without a provider is a recorded failure, a statusless row with a provider is unknown", () => {
+    expect(withRow(0, (r) => {
+      r.status = "timeout";
+      delete r.provider;
+    })).toEqual({ modelId: "chatgpt", requestedModel: "gpt-RUN-1", substituted: false, outcome: "timeout", outcomeSource: "recorded" });
+    expect(withRow(0, (r) => {
+      r.status = "error";
+      r.provider = "unknown";
+    })).toEqual({ modelId: "chatgpt", provider: "unknown", requestedModel: "gpt-RUN-1", substituted: false, outcome: "failed", outcomeSource: "recorded" });
+    expect(withRow(0, (r) => delete r.status)).toEqual({ modelId: "chatgpt", provider: "openai", requestedModel: "gpt-RUN-1", ...U });
+  });
+  it("the D-5 class of the persisted row's text is frozen (the shared oracle): the exact listed literal, the loose marker, and nothing for ordinary text", () => {
+    expect(withRow(0, (r) => (r.rawTextTruncated = STORED_PLACEHOLDER_LITERALS.chatgpt))).toMatchObject({ ...A, invalidProviderOutput: true });
+    expect(withRow(0, (r) => (r.rawTextTruncated = `${STORED_PLACEHOLDER_LITERALS.chatgpt} (edited)`))).toMatchObject({ ...A, validityUnknown: true });
+    expect(withRow(0, (r) => (r.rawTextTruncated = "A mock response is not what this is."))).toMatchObject({ ...A, validityUnknown: true });
+    const plain = withRow(0, (r) => (r.rawTextTruncated = "Paris."));
+    expect("invalidProviderOutput" in plain || "validityUnknown" in plain).toBe(false);
+    // Only a slot whose own literal matches: Claude's literal in the ChatGPT slot is a near miss (validity unknown, not INVALID_MOCK).
+    expect(withRow(0, (r) => (r.rawTextTruncated = STORED_PLACEHOLDER_LITERALS.claude))).toMatchObject({ ...A, validityUnknown: true });
+  });
+  it("writes no undefined value for the version-2 fields either", () => {
+    const walk = (v: unknown): void => {
+      if (v && typeof v === "object") for (const x of Object.values(v)) {
+        expect(x).not.toBeUndefined();
+        walk(x);
+      }
+    };
+    walk(freeze({ perModel: [{ modelId: "chatgpt" }, { modelId: "claude", status: "refused" }] }));
   });
 });
 
@@ -154,8 +239,10 @@ describe("readFrozenRunProvenance — the record as frozen, defensively", () => 
   it.each([undefined, null, "x", {}, { models: "x" }])("%p (every pre-6.2b record) → null: render nothing", (raw) => {
     expect(readFrozenRunProvenance(raw)).toBeNull();
   });
-  it("round-trips a frozen value unchanged", () => {
+  it("round-trips a version-1 frozen value unchanged, and reads a version-2 value as the same identity facts (the JSON export and display lines never move)", () => {
     expect(readFrozenRunProvenance(JSON.parse(JSON.stringify(FULL)))).toEqual(FULL);
+    expect(readFrozenRunProvenance(JSON.parse(JSON.stringify(FULL_V2)))).toEqual(FULL);
+    expect(JSON.stringify(readFrozenRunProvenance(freeze()))).toBe(JSON.stringify(FULL));
   });
   it("Firestore-style nulls are absent facts, never rendered as values", () => {
     const raw = { policyVersion: null, models: [{ modelId: "chatgpt", provider: null, requestedModel: null, substituted: false, substitutedFrom: null }] };
@@ -186,6 +273,54 @@ describe("readFrozenRunProvenance — the record as frozen, defensively", () => 
     expect(readFrozenRunProvenance({ models: [null, { provider: "openai" }, { modelId: "", substituted: true }, { modelId: "grok", substituted: "yes" }] })).toEqual({
       models: [{ modelId: "grok" }],
     });
+  });
+});
+
+describe("readFrozenRunExecutionProvenance — the execution facts as frozen, literal values only", () => {
+  it.each([undefined, null, "x", {}, { models: "x" }])("%p (every pre-6.2b record) → null", (raw) => {
+    expect(readFrozenRunExecutionProvenance(raw)).toBeNull();
+  });
+  it("round-trips a version-2 frozen value unchanged", () => {
+    expect(readFrozenRunExecutionProvenance(JSON.parse(JSON.stringify(FULL_V2)))).toEqual(FULL_V2);
+    expect(readFrozenRunExecutionProvenance(freeze())).toEqual(FULL_V2);
+  });
+  it("a version-1 entry (no outcome) reads as unknown / absent and carries no version marker — nothing is reconstructed from substituted or the provider", () => {
+    expect(readFrozenRunExecutionProvenance(JSON.parse(JSON.stringify(FULL)))).toEqual({ policyVersion: 7, models: [{ ...FULL.models[0], ...U }, { ...FULL.models[1], ...U }] });
+  });
+  it.each([
+    ["answered", "answered"],
+    ["failed", "failed"],
+    ["timeout", "timeout"],
+    ["refused", "refused"],
+    ["rate_limited", "rate_limited"],
+  ])("a literal recorded outcome %s is preserved", (outcome) => {
+    expect(readFrozenRunExecutionProvenance({ models: [{ modelId: "a", outcome, outcomeSource: "recorded" }] })).toEqual({ models: [{ modelId: "a", outcome, outcomeSource: "recorded" }] });
+  });
+  it.each([
+    ["source absent", { outcome: "answered", outcomeSource: "absent" }],
+    ["source missing", { outcome: "answered" }],
+    ["source crafted", { outcome: "answered", outcomeSource: "Recorded" }],
+    ["the fail-closed word", { outcome: "unknown", outcomeSource: "recorded" }],
+    ["a persisted status word", { outcome: "ok", outcomeSource: "recorded" }],
+    ["capitalised", { outcome: "Answered", outcomeSource: "recorded" }],
+    ["trailing space", { outcome: "answered ", outcomeSource: "recorded" }],
+    ["empty", { outcome: "", outcomeSource: "recorded" }],
+    ["non-string", { outcome: 1, outcomeSource: "recorded" }],
+    ["null (Firestore)", { outcome: null, outcomeSource: null }],
+  ])("an outcome that is %s → unknown / absent", (_label, over) => {
+    expect(readFrozenRunExecutionProvenance({ models: [{ modelId: "a", ...over }] })).toEqual({ models: [{ modelId: "a", ...U }] });
+  });
+  it("the D-5 facts are read back only as the literal true; the version marker only as the literal 2", () => {
+    expect(readFrozenRunExecutionProvenance({ provenanceVersion: 2, models: [{ modelId: "a", ...A, invalidProviderOutput: true }, { modelId: "b", ...A, validityUnknown: true }] })).toEqual({
+      provenanceVersion: 2,
+      models: [{ modelId: "a", ...A, invalidProviderOutput: true }, { modelId: "b", ...A, validityUnknown: true }],
+    });
+    expect(readFrozenRunExecutionProvenance({ provenanceVersion: "2", models: [{ modelId: "a", ...A, invalidProviderOutput: "true", validityUnknown: 1 }] })).toEqual({ models: [{ modelId: "a", ...A }] });
+    expect(readFrozenRunExecutionProvenance({ provenanceVersion: 3, models: [] })).toEqual({ models: [] });
+  });
+  it("the identity reader of the same value is its version-1 projection (keys and order unchanged)", () => {
+    const raw = { provenanceVersion: 2, policyVersion: 7, models: [{ modelId: "a", provider: "openai", requestedModel: "m", substituted: false, outcome: "failed", outcomeSource: "recorded", invalidProviderOutput: true }] };
+    expect(JSON.stringify(readFrozenRunProvenance(raw))).toBe(JSON.stringify({ policyVersion: 7, models: [{ modelId: "a", provider: "openai", requestedModel: "m", substituted: false }] }));
   });
 });
 

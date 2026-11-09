@@ -12,6 +12,7 @@ import {
   STORED_PLACEHOLDER_LITERALS,
   modelWrittenBlockLabel,
   modelWrittenShortLabel,
+  rendersAsIndependent,
   runSlotStatement,
   withPlaceholderFact,
 } from "@/lib/panel/executionIdentity";
@@ -130,30 +131,70 @@ describe("C-a review F-1 / F-2: the facts adapter (identityRowFromFacts) reads t
     expect([name, viaFacts.kind, viaFacts.independentModels, viaFacts.placeholderSlots]).toEqual([name, viaRows.kind, viaRows.independentModels, viaRows.placeholderSlots]);
   });
 
-  it("maps `substituted` to the recorded status, passes provider and the D-5 facts through, and completes nothing", () => {
-    expect(identityRowFromFacts({ modelId: "chatgpt", substituted: false, provider: "openai" })).toEqual({ modelId: "chatgpt", status: "ok", provider: "openai" });
-    expect(identityRowFromFacts({ modelId: "claude", substituted: true, provider: "deepseek" })).toEqual({ modelId: "claude", status: "substituted", provider: "deepseek" });
+  it("reads only the recorded status, passes provider and the D-5 facts through, and completes nothing (Order 29 A2: `substituted` is never read as a status)", () => {
+    expect(identityRowFromFacts({ modelId: "chatgpt", status: "ok", substituted: false, provider: "openai" })).toEqual({ modelId: "chatgpt", status: "ok", provider: "openai" });
+    expect(identityRowFromFacts({ modelId: "claude", status: "substituted", substituted: true, provider: "deepseek" })).toEqual({ modelId: "claude", status: "substituted", provider: "deepseek" });
+    expect(identityRowFromFacts({ modelId: "gemini", status: "timeout", substituted: false })).toEqual({ modelId: "gemini", status: "timeout" });
     expect(identityRowFromFacts({ modelId: "grok" })).toEqual({ modelId: "grok" });
-    expect(identityRowFromFacts({ modelId: "chatgpt", substituted: false, provider: "openai", invalidProviderOutput: true })).toEqual({ modelId: "chatgpt", status: "ok", provider: "openai", invalidProviderOutput: true });
-    expect(identityRowFromFacts({ modelId: "chatgpt", substituted: false, provider: "openai", validityUnknown: true })).toEqual({ modelId: "chatgpt", status: "ok", provider: "openai", validityUnknown: true });
+    // A frozen version-1 export entry (substituted recorded, no outcome): no status — the gate then fails closed.
+    expect(identityRowFromFacts({ modelId: "chatgpt", substituted: false, provider: "openai" })).toEqual({ modelId: "chatgpt", provider: "openai" });
+    expect(identityRowFromFacts({ modelId: "claude", substituted: true, provider: "deepseek" })).toEqual({ modelId: "claude", provider: "deepseek" });
+    expect(identityRowFromFacts({ modelId: "chatgpt", status: "", substituted: false, provider: "openai" })).toEqual({ modelId: "chatgpt", provider: "openai" });
+    expect(identityRowFromFacts({ modelId: "chatgpt", status: "ok", substituted: false, provider: "openai", invalidProviderOutput: true })).toEqual({ modelId: "chatgpt", status: "ok", provider: "openai", invalidProviderOutput: true });
+    expect(identityRowFromFacts({ modelId: "chatgpt", status: "ok", substituted: false, provider: "openai", validityUnknown: true })).toEqual({ modelId: "chatgpt", status: "ok", provider: "openai", validityUnknown: true });
     expect(identityRowFromFacts(null)).toEqual({});
   });
 
   it("the D-5 facts are read back as the recorded class; a facts row without them has no class (it holds no text)", () => {
-    expect(placeholderClass(identityRowFromFacts(withPlaceholderFact({ modelId: "chatgpt", substituted: false }, mock("chatgpt") as any)))).toBe("INVALID_MOCK");
-    expect(placeholderClass(identityRowFromFacts(withPlaceholderFact({ modelId: "chatgpt", substituted: false }, { ...ok("chatgpt"), rawText: "a mock response in prose" } as any)))).toBe("VALIDITY_UNKNOWN");
-    expect(placeholderClass(identityRowFromFacts({ modelId: "chatgpt", substituted: false, provider: "openai" }))).toBeNull();
+    expect(placeholderClass(identityRowFromFacts(withPlaceholderFact({ modelId: "chatgpt", status: "ok", substituted: false }, mock("chatgpt") as any)))).toBe("INVALID_MOCK");
+    expect(placeholderClass(identityRowFromFacts(withPlaceholderFact({ modelId: "chatgpt", status: "ok", substituted: false }, { ...ok("chatgpt"), rawText: "a mock response in prose" } as any)))).toBe("VALIDITY_UNKNOWN");
+    expect(placeholderClass(identityRowFromFacts({ modelId: "chatgpt", status: "ok", substituted: false, provider: "openai" }))).toBeNull();
     // Only the literal `true` is a fact.
     expect(placeholderClass({ modelId: "chatgpt", status: "ok", invalidProviderOutput: "true" })).toBeNull();
     expect(placeholderClass({ modelId: "chatgpt", status: "ok", validityUnknown: 1 })).toBeNull();
   });
 
   it("a facts row with no recorded status, no provider, or provider 'unknown' fails the gate (nothing is inferred)", () => {
-    const verified = [{ modelId: "chatgpt", substituted: false, provider: "openai" }, { modelId: "claude", substituted: true, provider: "deepseek" }];
+    const verified = [{ modelId: "chatgpt", status: "ok", substituted: false, provider: "openai" }, { modelId: "claude", status: "substituted", substituted: true, provider: "deepseek" }];
     expect(executionIdentityVerified(verified.map(identityRowFromFacts))).toBe(true);
-    expect(executionIdentityVerified([{ modelId: "chatgpt", substituted: false }, verified[1]].map(identityRowFromFacts))).toBe(false);
+    expect(executionIdentityVerified([{ modelId: "chatgpt", status: "ok", substituted: false }, verified[1]].map(identityRowFromFacts))).toBe(false);
     expect(executionIdentityVerified([{ modelId: "chatgpt", provider: "openai" }, verified[1]].map(identityRowFromFacts))).toBe(false);
-    expect(executionIdentityVerified([verified[0], { modelId: "claude", substituted: true, provider: "unknown" }].map(identityRowFromFacts))).toBe(false);
-    expect(executionIdentityVerified([verified[0], { modelId: "claude", substituted: true }].map(identityRowFromFacts))).toBe(false);
+    expect(executionIdentityVerified([verified[0], { modelId: "claude", status: "substituted", substituted: true, provider: "unknown" }].map(identityRowFromFacts))).toBe(false);
+    expect(executionIdentityVerified([verified[0], { modelId: "claude", status: "substituted", substituted: true }].map(identityRowFromFacts))).toBe(false);
+    // Version-1 export facts (substituted, provider, no status): unverified — never upgraded by the provider's presence.
+    expect(executionIdentityVerified([{ modelId: "chatgpt", substituted: false, provider: "openai" }, { modelId: "claude", substituted: true, provider: "deepseek" }].map(identityRowFromFacts))).toBe(false);
+    // Mixed: one recorded row beside one version-1 row → unverified, never upgraded.
+    expect(executionIdentityVerified([verified[0], { modelId: "claude", substituted: true, provider: "deepseek" }].map(identityRowFromFacts))).toBe(false);
+    // A recorded failure needs no provider and does not make the run unverified; a recorded failure alone (K = 0) is not a verified run.
+    expect(executionIdentityVerified([...verified, { modelId: "gemini", status: "timeout" }].map(identityRowFromFacts))).toBe(true);
+    expect(runExecutionIdentity([...verified, { modelId: "gemini", status: "timeout" }].map(identityRowFromFacts))).toMatchObject({ kind: "IND", verified: true, independentModels: 2, answeredSlots: 2, panelSlots: 3 });
+    expect(executionIdentityVerified([{ modelId: "gemini", status: "timeout" }].map(identityRowFromFacts))).toBe(false);
+  });
+});
+
+describe("Order 29 finding K=0 → IND: a row set with no answered row is never a verified independent run", () => {
+  const failedRows = (statuses: string[]) => statuses.map((status, i) => ({ modelId: ["chatgpt", "claude", "grok", "perplexity", "gemini"][i], status, rawText: null, latencyMs: 1 }));
+  it.each([
+    ["every slot failed", ["failed", "failed", "failed"]],
+    ["every slot timed out / refused / rate-limited / errored", ["timeout", "refused", "rate_limited", "error"]],
+    ["one failed slot", ["failed"]],
+  ])("%s: the gate fails, kind UV, no K, qualified, not rendered as independent", (_label, statuses) => {
+    const rows = failedRows(statuses);
+    expect(rowsRecordExecutionIdentity(rows)).toBe(true);
+    expect(executionIdentityVerified(rows)).toBe(false);
+    const id = runExecutionIdentity(rows);
+    expect(id).toEqual({ kind: "UV", verified: false, independentModels: null, answeredSlots: 0, panelSlots: statuses.length, placeholderSlots: [], slotKeys: {}, qualified: true });
+    expect(rendersAsIndependent(id)).toBe(false);
+    for (const text of [runSlotStatement(id), modelWrittenBlockLabel(id), modelWrittenShortLabel(id)]) {
+      expect(text).toMatch(/model independence unverified/);
+      expect(text).not.toMatch(/\b0 independent/);
+    }
+  });
+  it("every answered row a stored placeholder (K = 0 once set aside): the gate fails too", () => {
+    expect(executionIdentityVerified([mock("chatgpt"), mock("claude")])).toBe(false);
+    expect(runExecutionIdentity([mock("chatgpt"), mock("claude"), { modelId: "grok", status: "failed", rawText: null }])).toMatchObject({ kind: "UV", verified: false, independentModels: null, answeredSlots: 0, placeholderSlots: ["chatgpt", "claude"] });
+  });
+  it("one answered row with a recorded provider is enough: K = 1 stays a verified (FC / IND) run", () => {
+    expect(runExecutionIdentity([ok("chatgpt"), ...failedRows(["failed", "timeout"]).map((r, i) => ({ ...r, modelId: ["claude", "grok"][i] }))])).toMatchObject({ kind: "IND", verified: true, independentModels: 1, answeredSlots: 1, panelSlots: 3 });
   });
 });

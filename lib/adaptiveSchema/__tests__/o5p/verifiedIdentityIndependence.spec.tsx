@@ -22,10 +22,12 @@ import { SCENARIOS } from "./o5pScenarios";
 import { exportRecord, renderRecord } from "./o5pRender";
 import {
   ADAPTIVE_INDEPENDENCE_UNVERIFIED_TOP_HEADING,
+  ADAPTIVE_PLACEHOLDER_RUN_TOP_HEADING,
   ADAPTIVE_PLACEHOLDER_TOP_HEADING,
   ADAPTIVE_REPEATED_SUBSTITUTE_TOP_HEADING,
   AGREE_HEADING_PLACEHOLDER,
   AGREE_HEADING_UNVERIFIED,
+  adaptiveTopHeading,
   adaptiveTopIndependence,
   adaptiveTopIndependenceStatement,
   independenceQualification,
@@ -68,12 +70,18 @@ const factsOf = (rows: readonly ModelResult[]): RunModelProvenanceFacts[] => row
 const mockRow = (modelId: "chatgpt" | "claude"): ModelResult =>
   ({ modelId, status: "ok", rawText: STORED_PLACEHOLDER_LITERALS[modelId], provider: modelId === "chatgpt" ? "openai" : "anthropic", latencyMs: 0 }) as unknown as ModelResult;
 
+/**
+ * Facts as every real source records them (a result row, or a version-2 export entry): the recorded status and the
+ * substitution it implies. `substituted` undefined → no status at all (a statusless row / a version-1 export entry).
+ */
 const f = (modelId: string, substituted?: boolean, provider?: string, extra: Partial<RunModelProvenanceFacts> = {}): RunModelProvenanceFacts => ({
   modelId,
-  ...(substituted !== undefined ? { substituted } : {}),
+  ...(substituted !== undefined ? { status: substituted ? "substituted" : "ok", substituted } : {}),
   ...(provider ? { provider } : {}),
   ...extra,
 });
+/** Version-1 export facts (Order 29 A2): `substituted` recorded, NO status — unknown to the gate, never upgraded. */
+const v1 = (modelId: string, substituted: boolean, provider?: string): RunModelProvenanceFacts => ({ modelId, substituted, ...(provider ? { provider } : {}) });
 
 const UI_KEYS = ["ui.synthesisView", "ui.panelResponse", "ui.primaryStrip"];
 const AGREED_BY_MODELS = /agreed by \d+ model|— \d+ models?</;
@@ -82,6 +90,17 @@ const AGREED_BY_MODELS = /agreed by \d+ model|— \d+ models?</;
 
 describe("F-1: the shared verified-identity rule on the verdict surfaces (the rule on its own)", () => {
   const VERIFIED = [f("chatgpt", false, "openai"), f("claude", false, "anthropic"), f("grok", false, "xai")];
+
+  it("version-1 export facts (substituted recorded, no outcome) are unknown: unverified in both scopes, with or without a provider (Order 29 A2)", () => {
+    const frozenV1 = [v1("chatgpt", false, "openai"), v1("claude", true, "deepseek"), v1("grok", false, "xai")];
+    expect(adaptiveTopIndependence(["chatgpt", "claude"], frozenV1)).toEqual({ kind: "unverified", scope: "supporters" });
+    expect(adaptiveTopIndependence(null, frozenV1)).toEqual({ kind: "unverified", scope: "run" });
+    // Mixed: one version-1 entry beside recorded ones → unverified, never upgraded.
+    expect(adaptiveTopIndependence(null, [VERIFIED[0], VERIFIED[1], v1("grok", false, "xai")])).toEqual({ kind: "unverified", scope: "run" });
+    expect(adaptiveTopIndependence(["chatgpt", "claude"], [VERIFIED[0], v1("claude", false, "anthropic")])).toEqual({ kind: "unverified", scope: "supporters" });
+    // Only the recorded status counts; nothing is read from `substituted`.
+    expect(adaptiveTopIndependence(null, [{ modelId: "chatgpt", status: "ok", provider: "openai" }, { modelId: "claude", status: "substituted", provider: "deepseek" }])).toEqual({ kind: "independent" });
+  });
 
   it("pre-6.2a facts (status recorded, no provider): unverified in both scopes; nothing reconstructs the provider", () => {
     const pre62a = [f("chatgpt", false), f("claude", false), f("grok", false)];
@@ -114,9 +133,18 @@ describe("F-1: the shared verified-identity rule on the verdict surfaces (the ru
     expect(adaptiveTopIndependence(["chatgpt", "claude"], [VERIFIED[0], f("claude", undefined, "anthropic")])).toEqual({ kind: "unverified", scope: "supporters" });
   });
 
-  it("a slot that did not answer needs no provider (as on the result rows): a failed slot with no provider leaves a verified run verified", () => {
+  it("a slot that did not answer needs no provider (as on the result rows): a failed slot with no provider leaves a verified run verified, and is never a voice", () => {
     const failed: RunModelProvenanceFacts = { modelId: "gemini", status: "failed", substituted: false };
     expect(adaptiveTopIndependence(null, [...VERIFIED, failed])).toEqual({ kind: "independent" });
+    for (const status of ["timeout", "error", "refused", "rate_limited"]) expect(adaptiveTopIndependence(null, [...VERIFIED, { modelId: "gemini", status, substituted: false }])).toEqual({ kind: "independent" });
+    // A2: a recorded failure is excluded from the voices — a repeated substitute beside a failed slot names only the answering models.
+    const collapsed = [f("chatgpt", true, "deepseek"), f("claude", true, "deepseek"), f("grok", false, "xai"), { modelId: "gemini", status: "timeout" } as RunModelProvenanceFacts];
+    expect(adaptiveTopIndependence(null, collapsed)).toEqual({ kind: "repeated_substitute", scope: "run", voices: ["DeepSeek (substituting ChatGPT, Claude)", "Grok"], repeated: ["DeepSeek (substituting ChatGPT, Claude)"] });
+    expect(raisedByText(["chatgpt", "claude", "grok", "gemini"], collapsed)).toBe("(raised by 4 panel slots, answered by 2 independent models: DeepSeek (substituting ChatGPT, Claude); Grok)");
+    // Finding K=0 → IND: every considered slot recorded as failed → nothing answered → unverified, never independent.
+    expect(adaptiveTopIndependence(null, [{ modelId: "chatgpt", status: "timeout" }, { modelId: "claude", status: "failed" }])).toEqual({ kind: "unverified", scope: "run" });
+    expect(adaptiveTopIndependence(["chatgpt"], [{ modelId: "chatgpt", status: "timeout" }, ...VERIFIED])).toEqual({ kind: "unverified", scope: "supporters" });
+    expect(runIndependence([{ modelId: "chatgpt", status: "timeout" }, { modelId: "claude", status: "failed" }])).toEqual({ kind: "unverified", scope: "run" });
     // The same slot recorded as answered without a provider: unverified.
     expect(adaptiveTopIndependence(null, [...VERIFIED, { modelId: "gemini", status: "ok", substituted: false }])).toEqual({ kind: "unverified", scope: "run" });
   });
@@ -196,8 +224,13 @@ describe("F-2: a stored placeholder slot is never an independent model on the to
     expect(adaptiveTopIndependence(null, [MOCK, CLAUDE, GROK])).toEqual({ kind: "placeholder", scope: "run", voices: ["Claude", "Grok"], placeholders: ["chatgpt"] });
     expect(runIndependence([MOCK, CLAUDE, GROK])).toEqual({ kind: "placeholder", scope: "run", voices: ["Claude", "Grok"], placeholders: ["chatgpt"] });
     expect(runIndependence([MOCK, f("claude", true, "deepseek"), f("grok", true, "deepseek")])).toEqual({ kind: "repeated_substitute", scope: "run", voices: ["DeepSeek (substituting Claude, Grok)"], repeated: ["DeepSeek (substituting Claude, Grok)"] });
-    // A run-scope judgement is never headed as a consensus.
-    expect(qualifiedTopHeading(runIndependence([MOCK, CLAUDE, GROK])!, "consensus")).toBe(ADAPTIVE_PLACEHOLDER_TOP_HEADING);
+    // A run-scope judgement is never headed as a consensus, and its heading says the run's slots, not "the supporting slots" (m-2).
+    expect(qualifiedTopHeading(runIndependence([MOCK, CLAUDE, GROK])!, "consensus")).toBe(ADAPTIVE_PLACEHOLDER_RUN_TOP_HEADING);
+    expect(adaptiveTopHeading(runIndependence([MOCK, CLAUDE, GROK])!)).toBe(ADAPTIVE_PLACEHOLDER_RUN_TOP_HEADING);
+    expect(adaptiveTopHeading(adaptiveTopIndependence(["chatgpt", "claude"], [MOCK, CLAUDE, GROK]))).toBe(ADAPTIVE_PLACEHOLDER_TOP_HEADING);
+    expect(ADAPTIVE_PLACEHOLDER_RUN_TOP_HEADING).not.toContain("supporting");
+    expect(adaptiveTopIndependenceStatement(runIndependence([MOCK, CLAUDE, GROK])!, null)).toBe("The slots of this run were answered by 2 independent models: Claude; Grok. 1 panel slot held stored placeholder text (not a model response) and is not counted.");
+    expect(adaptiveTopIndependenceStatement(adaptiveTopIndependence(["chatgpt", "claude", "grok"], [MOCK, CLAUDE, GROK]), null)).toBe("Supporting slots answered by 2 independent models: Claude; Grok. 1 panel slot held stored placeholder text (not a model response) and is not counted.");
   });
 
   it("the J02 fact is the only placeholder marker a facts row carries: the same slot without it is a genuine independent row", () => {
@@ -294,7 +327,7 @@ describe("F-1 on every surface: historical adaptive fixtures recorded without an
     const out = await renderRecord(shaped("generic-consensus", "r5"), rows);
     for (const [k, v] of Object.entries(out)) {
       if (!v) continue;
-      expect([k, v.includes(ADAPTIVE_INDEPENDENCE_UNVERIFIED_TOP_HEADING) || v.includes(ADAPTIVE_REPEATED_SUBSTITUTE_TOP_HEADING) || v.includes(ADAPTIVE_PLACEHOLDER_TOP_HEADING) || v.includes("Model independence")]).toEqual([k, false]);
+      expect([k, v.includes(ADAPTIVE_INDEPENDENCE_UNVERIFIED_TOP_HEADING) || v.includes(ADAPTIVE_REPEATED_SUBSTITUTE_TOP_HEADING) || v.includes(ADAPTIVE_PLACEHOLDER_TOP_HEADING) || v.includes(ADAPTIVE_PLACEHOLDER_RUN_TOP_HEADING) || v.includes("Model independence")]).toEqual([k, false]);
     }
     const report = shaped("generic-consensus", "r5").synthesisReport;
     expect(presentIndependenceQualifiedReport(report, { rows: records["generic-consensus"].alignedClaims, provenance: factsOf(rows) })).toBe(report);
@@ -323,13 +356,32 @@ describe("F-2 on the surfaces: a placeholder slot among the top claim's supporte
         // With the stored rows (report view, panel response) the top row's supporters are judged; the strip is rendered
         // without them and judges the run (an unmarked report) or derives no position (a marked one).
         if (k !== "ui.primaryStrip") expect([shape, k, html.includes("Top consensus (4 independent models; stored placeholder text set aside)")]).toEqual([shape, k, true]);
-        else if (shape !== "marked") expect([shape, k, html.includes(ADAPTIVE_PLACEHOLDER_TOP_HEADING)]).toEqual([shape, k, true]);
+        else if (shape !== "marked") {
+          // The strip judges the run (m-2): the run-scope heading, never the supporters wording.
+          expect([shape, k, html.includes(ADAPTIVE_PLACEHOLDER_RUN_TOP_HEADING)]).toEqual([shape, k, true]);
+          expect([shape, k, html.includes("among the supporting slots")]).toEqual([shape, k, false]);
+        }
       }
       expect([shape, out["ui.synthesisView"]!.includes(placeholderSlotsClause(1))]).toEqual([shape, true]);
       expect([shape, out["text.markdown"]!.includes(placeholderSlotsClause(1))]).toEqual([shape, true]);
       expect([shape, out["text.markdown"]!.includes("agreed by 5")]).toEqual([shape, false]);
+      if (shape !== "marked") {
+        // m-3: the unmarked memo is told the independent executing models once the placeholder slot is set aside (4, never the 5 dispatched slots).
+        expect([shape, JSON.parse(out["text.memoInput"]!).independentModelCount]).toEqual([shape, 4]);
+        expect([shape, out["text.memo"]!.includes("4 AI models researched this question independently.")]).toEqual([shape, true]);
+        expect([shape, out["text.memo"]!.includes("5 AI models researched")]).toEqual([shape, false]);
+      }
     }
   }, 120_000);
+
+  it("m-3: with one real model left beside the placeholder slots, the unmarked memo reports no consensus (count 1), never the dispatched-slot count", async () => {
+    const rows = scenarioRows("generic-consensus").map((r) => (r.modelId === "chatgpt" ? mockRow("chatgpt") : r.modelId === "claude" ? mockRow("claude") : r.modelId === "grok" ? ({ ...r, status: "failed", rawText: null } as ModelResult) : r.modelId === "perplexity" ? ({ ...r, status: "failed", rawText: null } as ModelResult) : r));
+    const provenance = factsOf(rows);
+    const out = await renderRecord(shaped("generic-consensus", "r5"), rows, { provenance });
+    expect(JSON.parse(out["text.memoInput"]!).independentModelCount).toBe(1);
+    expect(out["text.memo"]).toContain("CONSENSUS SCORE: none (fewer than two independent models responded");
+    expect(out["text.memo"]).not.toContain("5 AI models researched");
+  }, 60_000);
 
   it("the qualified view of the unmarked report heads 'Where models agree' for the placeholder case and keeps the stored object untouched", () => {
     const rec = shaped("generic-consensus", "r5");

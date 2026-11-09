@@ -8,7 +8,8 @@
  *  2. every usable row (status ok / substituted, non-empty text when the row carries text) records a provider: a
  *     non-empty string that is not "unknown". For an `ok` row that is the runtime provider Step 6.2a writes; for a
  *     substituted row it is the substitute's provider.
- *  3. no row holds text whose validity cannot be established (VALIDITY_UNKNOWN, D-5).
+ *  3. no row holds text whose validity cannot be established (VALIDITY_UNKNOWN, D-5);
+ *  4. at least one usable row exists (K = 0 is never presented as a verified independent run; Order 29).
  * When the gate holds, K is the number of distinct `executingModelKey`s over the usable rows. It never calls
  * `resolveExecutingModelKeys` (with the gate holding there is no unrecorded substitute to merge, so no inference path
  * exists), and it is never computed from requested slots, `selectedModels` or dispatched rows.
@@ -115,16 +116,17 @@ export function withPlaceholderFact(facts: RunModelProvenanceFacts, row: Identit
 }
 
 /**
- * A per-slot provenance-facts row (`RunModelProvenanceFacts`) as the gate reads it. The recorded `status` is read as
- * recorded (a failed / timed-out slot is not a usable row and needs no provider, exactly as on the result rows); a
- * facts row without it (a frozen export entry) is read from `substituted`, which was recorded from the row's status:
- * `true` → "substituted", `false` → an answered, non-substituted row ("ok"), absent → no recorded status (the gate then
- * fails). `provider` and the D-5 facts (`invalidProviderOutput`, `validityUnknown`) pass through; nothing is inferred
+ * A per-slot provenance-facts row (`RunModelProvenanceFacts`) as the gate reads it. Only the recorded `status` is
+ * read, as recorded (a failed / timed-out slot is not a usable row and needs no provider, exactly as on the result
+ * rows; an export entry's status is its RECORDED outcome, runModelProvenanceFromExport). A facts row without a status
+ * — a version-1 frozen export entry, a statusless row — has no recorded status and the gate fails: `substituted` is
+ * never read as a status (Order 29 A2 removed that inference — a frozen `substituted: false` also covered failed
+ * slots). `provider` and the D-5 facts (`invalidProviderOutput`, `validityUnknown`) pass through; nothing is inferred
  * or completed.
  */
 export function identityRowFromFacts(facts: RunModelProvenanceFacts | null | undefined): IdentityRow {
   if (!facts || typeof facts !== "object") return {};
-  const status = typeof facts.status === "string" && facts.status.length > 0 ? facts.status : facts.substituted === true ? "substituted" : facts.substituted === false ? "ok" : undefined;
+  const status = typeof facts.status === "string" && facts.status.length > 0 ? facts.status : undefined;
   return {
     modelId: facts.modelId,
     ...(status !== undefined ? { status } : {}),
@@ -150,20 +152,32 @@ function isUsable(row: IdentityRow): boolean {
   return carriesText(row) ? identityRowText(row).trim().length > 0 : true;
 }
 
+/** A row whose RECORDED status is a failure (failed / error / timeout / refused / rate_limited): a known fact, never a vote. */
+export function identityRowRecordedFailure(row: IdentityRow | null | undefined): boolean {
+  if (!row || typeof row !== "object" || typeof row.status !== "string") return false;
+  return coerceStatus(row.status) === "failed";
+}
+
 /**
  * The corrected D-4 gate (inventory v3.3 §0.1c, `executionIdentityVerified(rows)`): `rowsRecordExecutionIdentity` AND
- * every usable row records a provider AND no row is VALIDITY_UNKNOWN. INVALID_MOCK rows are not usable rows here (they
- * are not model responses), so they need no provider. No rows → false.
+ * every usable row records a provider AND no row is VALIDITY_UNKNOWN AND at least one row answered. INVALID_MOCK rows
+ * are not usable rows here (they are not model responses), so they need no provider and do not count as an answer.
+ * No rows → false. No answered row (every slot failed, or held only placeholder text) → false: with K = 0 there is no
+ * independent model to present, so nothing is ever rendered as a verified independent run (Order 29, finding
+ * "K=0 → IND").
  */
 export function executionIdentityVerified(rows: readonly unknown[] | null | undefined): boolean {
   if (!rowsRecordExecutionIdentity(rows)) return false;
+  let answered = 0;
   for (const raw of rows as readonly IdentityRow[]) {
     const cls = placeholderClass(raw);
     if (cls === "VALIDITY_UNKNOWN") return false;
     if (cls === "INVALID_MOCK") continue;
-    if (isUsable(raw) && !recordedProvider(raw.provider)) return false;
+    if (!isUsable(raw)) continue;
+    if (!recordedProvider(raw.provider)) return false;
+    answered += 1;
   }
-  return true;
+  return answered > 0;
 }
 
 /**
