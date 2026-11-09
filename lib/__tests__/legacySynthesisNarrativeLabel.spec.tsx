@@ -315,6 +315,13 @@ describe("R8 / decision non-regression: the corrected gate and the D-5 list neve
       expect(gateCard(await mountPsv([...rows]))).toBe(gateCard(await mountPsv(withProviders([...rows]))));
     }
   );
+  it("placeholders that leave one real model: the gate still counts them as the stored decision did (label unchanged)", async () => {
+    const rows = [mock("chatgpt"), mock("claude"), ok("grok")];
+    const asText = rows.map((x) => ({ ...x, rawText: "Paris is the capital of France. The city has been the seat of the French government for centuries." }) as ModelResult);
+    const g = gateCard(await mountPsv(rows, { ...SUMMARY, modelsHealthy: 3, modelCount: 3 }));
+    expect(g).toBe(gateCard(await mountPsv(asText, { ...SUMMARY, modelsHealthy: 3, modelCount: 3 })));
+    expect(g).not.toContain("Insufficient independent models");
+  });
   it("S9: stored placeholder rows still count as the stored decision counted them (gate identical to the same rows' text without the placeholder literal)", async () => {
     const asText = rowsOf("S9").map((x) => ({ ...x, rawText: "Paris is the capital of France. The city has been the seat of the French government for centuries." }) as ModelResult);
     expect(gateCard(await mountPsv(rowsOf("S9")))).toBe(gateCard(await mountPsv(asText)));

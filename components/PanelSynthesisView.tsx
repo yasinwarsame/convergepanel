@@ -585,8 +585,9 @@ function PanelVerdictCard({
   identity?: RunExecutionIdentity;
 }) {
   const gateStyle = GATE_STYLES[gate.status] ?? GATE_STYLES.NEEDS_HUMAN_REVIEW;
-  // E01 (C-a): counts only under the corrected D-4 gate; a PC run's counts are labelled as independent executing models.
-  const unverified = !!verdict.independenceUnverified || (verdict.crossModel !== false && !!identity && !identity.verified);
+  // E01 (C-a): the caller presents the verdict already under the corrected D-4 gate (`independenceUnverified` set for a
+  // run whose usable rows do not all record a provider); a PC run's counts are labelled as independent executing models.
+  const unverified = !!verdict.independenceUnverified;
   const unitLabelled = !!identity && identity.verified && identity.qualified;
   const recorded = verdict.recordedDifferences ?? [];
 
