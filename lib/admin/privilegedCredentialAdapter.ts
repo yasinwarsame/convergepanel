@@ -56,10 +56,13 @@
  *
  * (2) BOUNDED CLASSIFICATION after pre-validation. Once (1) has passed, the
  *     only `auth/argument-error` sources left in the SDK are: invalid
- *     signature, no matching `kid`, and the key-fetch failure. The first two
- *     are FIXED SDK strings with no caller content, and they are the only
- *     credential outcomes, so THEY are pinned (prefix-equal against the SDK's
- *     exact text). Everything else under `auth/argument-error` is, by
+ *     signature, no matching `kid`, the `safeDecode` decode failure (reached
+ *     only if the SDK's own JWT decoder disagrees with the pre-validation
+ *     decoder; pinned so a future SDK or decoder divergence can never turn a
+ *     credential defect into a 503), and the key-fetch failure. The first
+ *     three are FIXED SDK strings with no caller content, and they are the
+ *     only credential outcomes, so THEY are pinned (prefix-equal against the
+ *     SDK's exact text). Everything else under `auth/argument-error` is, by
  *     elimination, the key-fetch path — whose message is the transport
  *     error's text and therefore cannot be pinned — and is classified
  *     UNAVAILABLE (503), which is what design assumption A-2 prescribes for
@@ -117,6 +120,17 @@ export const SDK_CREDENTIAL_ARGUMENT_ERROR_SUFFIXES: readonly string[] = Object.
   " has invalid signature.",
   ' has "kid" claim which does not correspond to a known public key.',
 ]);
+
+/**
+ * token-verifier.js:171-173 (`safeDecode`) — the third FIXED-TEXT
+ * `argument-error`: "Decoding <jwtName> failed. Make sure you passed …". It is
+ * raised when the SDK's own `decodeJwt` rejects the string. Pre-validation
+ * decodes the same three segments first, so today this path is unreachable;
+ * it is pinned as a credential outcome so that a decoder divergence (SDK
+ * upgrade, Buffer encoding change) can never classify a bad credential as a
+ * verifier outage. The template wraps the jwtName; no caller value appears.
+ */
+export const SDK_CREDENTIAL_DECODE_FAILED = Object.freeze({ prefix: "Decoding ", suffix: " failed." });
 
 /**
  * Codes that are ALWAYS a credential outcome whatever the message. With
@@ -244,7 +258,12 @@ export function classifyVerificationFailure(proof: PrevalidatedCredential, err: 
   if (code === SDK_ARGUMENT_ERROR_CODE) {
     const message = errorMessageOf(err);
     const name = SDK_JWT_NAME[kind];
-    return SDK_CREDENTIAL_ARGUMENT_ERROR_SUFFIXES.some((suffix) => message.startsWith(name + suffix)) ? "credential" : "unavailable";
+    // The three pinned fixed texts, each as the full prefix the SDK emits for this credential kind.
+    const credentialPrefixes = [
+      SDK_CREDENTIAL_DECODE_FAILED.prefix + name + SDK_CREDENTIAL_DECODE_FAILED.suffix,
+      ...SDK_CREDENTIAL_ARGUMENT_ERROR_SUFFIXES.map((suffix) => name + suffix),
+    ];
+    return credentialPrefixes.some((prefix) => message.startsWith(prefix)) ? "credential" : "unavailable";
   }
   return "unavailable";
 }

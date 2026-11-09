@@ -32,6 +32,7 @@ import { AuthClientErrorCode, FirebaseAuthError } from "firebase-admin/auth";
 const SdkAuthError = FirebaseAuthError as unknown as new (info: { code: string; message: string }, message?: string) => FirebaseAuthError;
 import {
   EXPECTED_ISSUER_PREFIX,
+  SDK_CREDENTIAL_DECODE_FAILED,
   SDK_ALGORITHM,
   SDK_ARGUMENT_ERROR_CODE,
   SDK_CREDENTIAL_ARGUMENT_ERROR_SUFFIXES,
@@ -124,6 +125,11 @@ describe(`SDK drift pins (firebase-admin ${sdkVersion})`, () => {
     expect(tokenVerifierSrc).toContain("const errorMessage = `${this.tokenInfo.jwtName} has \"kid\" claim which does not ` +");
     expect(tokenVerifierSrc).toContain("`correspond to a known public key. Most likely the ${this.tokenInfo.shortName} ` +");
     expect(SDK_CREDENTIAL_ARGUMENT_ERROR_SUFFIXES).toEqual([" has invalid signature.", ' has "kid" claim which does not correspond to a known public key.']);
+  });
+  it("the third fixed credential message: safeDecode's decode failure (token-verifier.js:171-173)", () => {
+    expect(tokenVerifierSrc).toContain("const errorMessage = `Decoding ${this.tokenInfo.jwtName} failed. Make sure you passed ` +");
+    expect(tokenVerifierSrc).toContain("throw new error_1.FirebaseAuthError(error_1.AuthClientErrorCode.INVALID_ARGUMENT, errorMessage);");
+    expect(SDK_CREDENTIAL_DECODE_FAILED).toEqual({ prefix: "Decoding ", suffix: " failed." });
   });
   it("the default branch discards the JwtErrorCode and forwards the transport message under argument-error", () => {
     const fn = tokenVerifierSrc.slice(tokenVerifierSrc.indexOf("mapJwtErrorToAuthError(error) {"), tokenVerifierSrc.indexOf("exports.FirebaseTokenVerifier = FirebaseTokenVerifier;"));
@@ -299,6 +305,16 @@ describe("classifyVerificationFailure (pure)", () => {
         expect(classifyVerificationFailure(proof, argErr(`${SDK_JWT_NAME[other]}${suffix} See docs.`), kind)).toBe("unavailable");
         expect(classifyVerificationFailure(proof, argErr(`prefix ${SDK_JWT_NAME[kind]}${suffix}`), kind)).toBe("unavailable");
       }
+    }
+  });
+  it("argument-error: the safeDecode text is credential, per kind, by prefix", () => {
+    for (const kind of ["bearer", "cookie"] as CredentialKind[]) {
+      const other: CredentialKind = kind === "bearer" ? "cookie" : "bearer";
+      const text = (n: string) => `${SDK_CREDENTIAL_DECODE_FAILED.prefix}${n}${SDK_CREDENTIAL_DECODE_FAILED.suffix} Make sure you passed the entire string JWT. See docs.`;
+      expect(classifyVerificationFailure(proof, argErr(text(SDK_JWT_NAME[kind])), kind)).toBe("credential");
+      expect(classifyVerificationFailure(proof, argErr(text(SDK_JWT_NAME[other])), kind)).toBe("unavailable");
+      expect(classifyVerificationFailure(proof, argErr(`prefix ${text(SDK_JWT_NAME[kind])}`), kind)).toBe("unavailable");
+      expect(classifyVerificationFailure(proof, argErr(`Decoding ${SDK_JWT_NAME[kind]} succeeded.`), kind)).toBe("unavailable");
     }
   });
   it("argument-error with any other text is unavailable (the key-fetch class)", () => {
