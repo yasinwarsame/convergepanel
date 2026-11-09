@@ -145,14 +145,17 @@ document runs it.
    (`--allow-claim-reduction` is required with revoke). Nothing is defaulted.
 4. **Dry run first, then typed confirmation.** Without `--execute` the tool
    resolves the target, prints the current claims, the intended claims, the
-   per-key diff and the exact confirmation string, and writes nothing. Only then
+   per-key diff and the exact confirmation string, and writes nothing to Firebase. Only then
    run it again with `--execute --confirm-claim=<exact string printed by the dry
    run>` and `--operator-id-token-file=<file>` (mode 0600; the ID token of a
    SYSTEM_ADMIN's own session in the same project), or `--bootstrap-first-admin`
    only while zero accounts hold `admin === true`. Change only the `admin` key:
    grant writes `{ ...existing, admin: true }`, revoke removes only the `admin`
-   key, and the tool refuses a run that would alter any other claim. Every
-   executed revoke requests refresh-token revocation.
+   key, and the tool refuses a run that would alter any other claim. An
+   executed revoke requests refresh-token revocation unless the fresh read
+   immediately before the call shows a stored cutoff ahead of this clock (exit
+   4, no call) or that read fails or is unusable (exit 3, no call); the request
+   itself can fail, so confirm `revocationRequested` in the result file.
 5. **Keep the evidence.** The tool's audit rows plus
    `--result-file=<NEW *.json path outside every git checkout>`; keep that file
    outside the repository.
@@ -450,8 +453,10 @@ table is the contract.
    the route and not a legacy minting script.
 2. `[CONTAINMENT_REVOKE_REFRESH][REQUIRED]` **Revoke refresh tokens** — `adminAuth.revokeRefreshTokens(uid)`. Without this
    the already-issued ID token keeps working. An executed revoke through the
-   interim tool requests this itself (no opt-out); confirm it in the tool's
-   result file.
+   interim tool requests this itself (no opt-out flag) unless its pre-call
+   fresh read shows a stored cutoff ahead or is unusable (exit 4 or 3, no
+   call), and the request can fail; confirm `revocationRequested` in the
+   tool's result file before relying on it.
 3. **Understand the residual window.** Every SYSTEM_ADMIN guard verifies with
    `verifyIdToken`, which does not consult revocation. Until the outstanding ID
    token expires (Firebase default one hour), a de-claimed or disabled

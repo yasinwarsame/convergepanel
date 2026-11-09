@@ -101,7 +101,7 @@ const INTERIM_PATH_PINS: readonly RegExp[] = [
   /PR #295/,
   /\bf6039ea\b/, //                                   the exact reviewed commit, short form
   /f6039eaecb659159f52019b7f4cff4cce6a4ed89/, //      and the full SHA `rev-parse HEAD` must print
-  /\blocal(?:ly)?\b/i, //                           local execution
+  /locally\**,? from a checkout|run locally with the reviewed|local checkout/i, // local execution, as a phrase (the bare word "local" also matches unrelated text)
   /never from Vercel or any deployment/,
   /\bno defaults\b|Nothing is defaulted/i, //       explicit project and UID
   /--confirm-project/,

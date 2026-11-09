@@ -151,7 +151,11 @@ describe("the SYSTEM_ADMIN containment procedure closes the bootstrap path", () 
       /use the interim path above \(the reviewed SYSTEM_ADMIN claim operator tool from PR #295 at commit `f6039ea`, run locally by the owner as a dry run and then a typed confirmation; a Production revoke needs its own separate authorization\), not the route and not a legacy minting script/
     );
     expect(flat).not.toMatch(/owner action in the Firebase Console/i);
-    expect(flat).toMatch(/An executed revoke through the interim tool requests this itself \(no opt-out\)/);
+    expect(flat).toMatch(
+      /An executed revoke through the interim tool requests this itself \(no opt-out flag\) unless its pre-call fresh read shows a stored cutoff ahead or is unusable \(exit 4 or 3, no call\), and the request can fail; confirm `revocationRequested` in the tool's result file/
+    );
+    // The no-call case must stay stated: an unqualified "every revoke requests revocation" is the F1 over-statement.
+    expect(flat).not.toMatch(/Every executed revoke requests refresh-token revocation\./);
   });
 
   it("S1: historical deployments that still ship the retired route are in scope", () => {
