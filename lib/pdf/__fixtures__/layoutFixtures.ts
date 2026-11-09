@@ -1127,8 +1127,11 @@ const SLOT_RUNTIME_PROVIDER: Readonly<Record<string, string>> = { chatgpt: "open
  * requested model is invented, so every slot label is unchanged). Returns the same (mutated) record.
  */
 export function withIndependentFrozenProvenance<T extends { reportSnapshot: any }>(record: T): T {
+  // Version 2 (Order 29): a current export also freezes each slot's recorded outcome; a recorded "answered" is what the
+  // shared gate reads as the slot's status (a version-1 entry without it reads as unverified, by owner ruling).
   record.reportSnapshot.runProvenance = {
-    models: (record.reportSnapshot.models ?? []).map((m: { modelId: string }) => ({ modelId: m.modelId, substituted: false, provider: SLOT_RUNTIME_PROVIDER[m.modelId] ?? "openai" })),
+    provenanceVersion: 2,
+    models: (record.reportSnapshot.models ?? []).map((m: { modelId: string }) => ({ modelId: m.modelId, substituted: false, provider: SLOT_RUNTIME_PROVIDER[m.modelId] ?? "openai", outcome: "answered", outcomeSource: "recorded" })),
   };
   return record;
 }

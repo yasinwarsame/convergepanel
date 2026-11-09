@@ -2696,6 +2696,13 @@
  },
  {
   "file": "lib/adaptiveSchema/verdictIndependence.ts",
+  "literal": "\"Top finding (stored placeholder text among the slots of this run; not an independent consensus)\"",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "Order 29 m-2 (C-a closeout, 2026-11-09): the run-scope form of the F-2 placeholder heading — shown ONLY when the judgement is over every slot the run records (no joined supporters) and one of them holds a listed D-5 placeholder (INVALID_MOCK, the J02 fact); the supporting-slot heading keeps the supporters scope; stored values unchanged; runs without a placeholder slot render as before"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictIndependence.ts",
   "literal": "`not an independent ${NOT_INDEPENDENT_WORD[status]}: ${held} — no model response supports it${disputes}`",
   "count": 1,
   "category": "contract-p-applied",
