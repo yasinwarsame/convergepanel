@@ -357,6 +357,9 @@ describe("P1 — the interim admin-claim path is documented where operators look
     expect(s).toMatch(/\*\*Dry run first, then typed confirmation\.\*\* Without `--execute` the tool/);
     expect(s).toMatch(/\*\*No Production execution without separate authorization\.\*\* Each Production grant or revoke needs its own owner authorization/);
     expect(s).toMatch(/PR #295 is reviewed and approved but unmerged; its merge stays gated on S2/);
+    // Step 4's revocation sentence must keep the no-call cases (review N1 of 0d1e854).
+    expect(s).toMatch(/requests refresh-token revocation unless the fresh read immediately before the call/);
+    expect(s).not.toMatch(/Every executed revoke requests refresh-token revocation\./);
   });
 
   it("verification is the read-only checks", () => {
