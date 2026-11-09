@@ -106,7 +106,7 @@ const INTERIM_PATH_PINS: readonly RegExp[] = [
   /\bno defaults\b|Nothing is defaulted/i, //       explicit project and UID
   /--confirm-project/,
   /--target-uid/,
-  /dry run/i,
+  /dry run first/i, //                              dry run before any executed claim
   /--confirm-claim/, //                                typed confirmation
   /--result-file/, //                                  evidence kept outside the repo
   /audit rows/,
