@@ -37,6 +37,9 @@ const EXECUTING_MODEL_MODULES = [
   "lib/verification/claimConsensusPresentation",
   "lib/verification/cachedClaimProvenance",
   "components/adaptive/useRunIndependence",
+  // C-a: the corrected D-4 gate and the D-5 placeholder list (presentation only) — no decision module may import it.
+  "lib/panel/executionIdentity",
+  "components/adaptive/RunExecutionIdentityContext",
 ] as const;
 
 /** O16: decision module → executing-model module → the exact symbols it may import ("type X" for a type-only import). */

@@ -1,0 +1,114 @@
+/**
+ * C-a shared modules (plan §1.4 G-3, register I-7): the corrected D-4 gate `executionIdentityVerified` and the single
+ * D-5 placeholder-literal list. N-D4′ (a)–(d) at the gate; MU-mock; the I-7 single-import test.
+ */
+import { readdirSync, readFileSync, statSync } from "fs";
+import { join, relative } from "path";
+import {
+  executionIdentityVerified,
+  placeholderClass,
+  runExecutionIdentity,
+  STORED_PLACEHOLDER_LITERALS,
+  modelWrittenBlockLabel,
+  modelWrittenShortLabel,
+  runSlotStatement,
+} from "@/lib/panel/executionIdentity";
+import { rowsRecordExecutionIdentity, storedRunConsensusIndependence } from "@/lib/panel/independentVoices";
+import { SETS, rowsOf, referenceK, UV_SETS, BI35_SETS, DIGIT_NEXT_TO_INDEPENDENT, ok, sub, type SetName } from "./executionIdentityScenarios";
+
+describe("corrected D-4 gate: every scenario's kind, K and M", () => {
+  it.each(Object.keys(SETS) as SetName[])("%s", (name) => {
+    const id = runExecutionIdentity(rowsOf(name));
+    expect([name, id.kind, id.independentModels, id.answeredSlots]).toEqual([name, SETS[name].kind, SETS[name].K, SETS[name].M]);
+    expect(id.verified).toBe(SETS[name].K !== null);
+  });
+});
+
+describe("N-D4′", () => {
+  it.each(UV_SETS)("(a) %s: unverified, no K, wording without a digit next to 'independent'", (name) => {
+    const id = runExecutionIdentity(rowsOf(name));
+    expect(id.verified).toBe(false);
+    expect(id.independentModels).toBeNull();
+    for (const text of [modelWrittenBlockLabel(id), modelWrittenShortLabel(id), runSlotStatement(id)]) {
+      expect(text).toMatch(/model independence unverified/);
+      expect(text).not.toMatch(DIGIT_NEXT_TO_INDEPENDENT);
+    }
+  });
+
+  it("(b) K never comes from requested / dispatched slots: unanswered requested slots change neither K nor the UV verdict", () => {
+    for (const name of ["S2", "S1", "S3mn", "PRE62A_OK"] as SetName[]) {
+      const base = runExecutionIdentity(rowsOf(name));
+      const padded = runExecutionIdentity([...rowsOf(name), { modelId: "gemini", status: "failed", rawText: null } as any, { modelId: "perplexity", status: "timeout" } as any]);
+      expect([name, padded.independentModels, padded.verified]).toEqual([name, base.independentModels, base.verified]);
+    }
+  });
+
+  it.each(["S3mn", "S3mnRecorded", "PRE62A_SUB", "PRE62A_OK", "R_UV", "UNKNOWN_PROVIDER"] as SetName[])(
+    "(c) %s: the identity-only gate (b894828 helpers) would verify it; the corrected gate does not",
+    (name) => {
+      const rows = rowsOf(name);
+      expect(rowsRecordExecutionIdentity(rows)).toBe(true);
+      expect(storedRunConsensusIndependence({ runDocument: { perModel: rows.map((r: any) => ({ ...r, rawTextTruncated: r.rawText })) } })).not.toBe("unverified");
+      expect(executionIdentityVerified(rows)).toBe(false);
+    }
+  );
+
+  it.each(Object.keys(SETS) as SetName[])("(d) %s: displayed K equals the test-side reference (no resolveExecutingModelKeys)", (name) => {
+    expect(runExecutionIdentity(rowsOf(name)).independentModels).toBe(referenceK(rowsOf(name)));
+  });
+
+  it("(d) a mixed recorded + unrecorded substitute is never merged into the recorded one (no inferred identity)", () => {
+    const rows = [sub("chatgpt"), sub("claude", null), ok("grok")];
+    expect(runExecutionIdentity(rows).independentModels).toBeNull();
+  });
+
+  it("IND without substitution keeps a clean identity (renders as before)", () => {
+    for (const name of BI35_SETS) expect([name, runExecutionIdentity(rowsOf(name)).qualified]).toEqual([name, false]);
+  });
+});
+
+describe("D-5 closed placeholder list (E19 / E20 / J02)", () => {
+  it.each(Object.entries(STORED_PLACEHOLDER_LITERALS))("%s literal → INVALID_MOCK on a fresh row and a persisted (rawTextTruncated) row", (slot, literal) => {
+    expect(placeholderClass({ modelId: slot, status: "ok", rawText: literal })).toBe("INVALID_MOCK");
+    expect(placeholderClass({ modelId: slot, status: "ok", rawTextTruncated: `  ${literal}\n` })).toBe("INVALID_MOCK");
+  });
+
+  it("near misses are not placeholders: another slot's literal, a non-ok status, a quoted phrase (→ VALIDITY_UNKNOWN), plain text", () => {
+    expect(placeholderClass({ modelId: "grok", status: "ok", rawText: STORED_PLACEHOLDER_LITERALS.chatgpt })).toBe("VALIDITY_UNKNOWN");
+    expect(placeholderClass({ modelId: "claude", status: "ok", rawText: STORED_PLACEHOLDER_LITERALS.chatgpt })).toBe("VALIDITY_UNKNOWN");
+    expect(placeholderClass({ modelId: "chatgpt", status: "substituted", rawText: STORED_PLACEHOLDER_LITERALS.chatgpt })).toBe("VALIDITY_UNKNOWN");
+    expect(placeholderClass({ modelId: "chatgpt", status: "ok", rawText: "A model answer that quotes 'mock response' in prose." })).toBe("VALIDITY_UNKNOWN");
+    expect(placeholderClass({ modelId: "chatgpt", status: "ok", rawText: "Paris." })).toBeNull();
+  });
+
+  it("MU-mock: S9u (a phrase, not a listed literal) is NOT excluded as INVALID_MOCK — it makes the run unverified", () => {
+    const id = runExecutionIdentity(rowsOf("S9u"));
+    expect(id.placeholderSlots).toEqual([]);
+    expect(id.kind).toBe("UV");
+  });
+
+  it("S9: the two listed placeholders are excluded from K and M; the run is qualified (never presented as clean IND)", () => {
+    const id = runExecutionIdentity(rowsOf("S9"));
+    expect(id.placeholderSlots).toEqual(["chatgpt", "claude"]);
+    expect([id.independentModels, id.answeredSlots, id.qualified]).toEqual([3, 3, true]);
+  });
+
+  it("I-7: the literal list exists in exactly one source module, which every consumer imports", () => {
+    const roots = ["lib", "components", "app", "hooks"];
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        if (name === "node_modules" || name === "__tests__" || name === "__fixtures__") continue;
+        const p = join(dir, name);
+        if (statSync(p).isDirectory()) walk(p);
+        else if (/\.(ts|tsx)$/.test(name)) files.push(p);
+      }
+    };
+    roots.forEach((r) => walk(join(process.cwd(), r)));
+    const holders = files.filter((f) => /Mock response from (chatgpt|claude) \(no API key configured\)/.test(readFileSync(f, "utf8"))).map((f) => relative(process.cwd(), f));
+    expect(holders).toEqual(["lib/panel/executionIdentity.ts"]);
+    expect(files.some((f) => relative(process.cwd(), f) === "lib/panel/storedMockRow.ts")).toBe(false);
+    const importers = files.filter((f) => /from "@\/lib\/panel\/executionIdentity"/.test(readFileSync(f, "utf8"))).map((f) => relative(process.cwd(), f)).sort();
+    expect(importers).toEqual(expect.arrayContaining(["components/PanelSynthesisView.tsx", "components/ResultsDisplay.tsx", "components/adaptive/shared.tsx"]));
+  });
+});

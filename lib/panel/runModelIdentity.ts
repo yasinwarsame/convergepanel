@@ -61,6 +61,8 @@ export type RunModelProvenanceFacts = {
   substituted?: boolean;
   /** Persisted "<provider>:<model>" of what was originally requested (substituted rows only). */
   substitutedFrom?: string;
+  /** J02 (D-5): the slot's stored text is a listed placeholder, not a model response (presentation only). */
+  invalidProviderOutput?: true;
 };
 
 function present(value: unknown): value is string {

@@ -30,6 +30,16 @@ import { getPanelModelConfig, PanelModelId } from "@/lib/panelModels";
 import { runModelIdentityDetail, runModelIdentityLabel, runModelProvenanceFromResultRow } from "@/lib/panel/runModelIdentity";
 import { RunModelProvenanceContext } from "@/components/adaptive/RunModelProvenanceContext";
 import { RunSlotStatusContext } from "@/components/adaptive/RunSlotStatusContext";
+import { RunExecutionIdentityContext } from "@/components/adaptive/RunExecutionIdentityContext";
+import {
+  INDEPENDENCE_UNVERIFIED_SUFFIX,
+  INVALID_PROVIDER_OUTPUT_NOTICE,
+  VALIDITY_UNKNOWN_NOTICE,
+  independentModelsQualifier,
+  placeholderClass,
+  runExecutionIdentity,
+  withPlaceholderFact,
+} from "@/lib/panel/executionIdentity";
 import { normalizeBullets } from "@/lib/normalizeBullets";
 import { normalizeList } from "@/lib/normalizeList";
 import {
@@ -924,6 +934,12 @@ export default function ResultsDisplay({
     };
   }, [canonicalClusters]);
 
+  // C-a (corrected D-4 gate, lib/panel/executionIdentity.ts): which executing models answered, for presentation only.
+  // A verified independent run renders exactly as before; nothing here feeds the client report, gate or any decision.
+  const runIdentity = useMemo(() => runExecutionIdentity(results), [results]);
+  const identityQualified = runIdentity.qualified;
+  const identityUnverified = !runIdentity.verified;
+
   // CANONICAL COUNTS: Trust Summary counts derived from exact same arrays used for rendering
   const trustCounts = useMemo(() => ({
     strongConsensus: consensusClusters.length,
@@ -1132,7 +1148,9 @@ export default function ResultsDisplay({
         {process.env.NODE_ENV !== "production" && <AdaptiveDebugPanel adaptive={adaptive} />}
         {/* The run's own per-slot provenance (live or saved rows) for the
             adaptive surfaces that name a model's identity. */}
-        <RunModelProvenanceContext.Provider value={results.map(runModelProvenanceFromResultRow)}>
+        <RunModelProvenanceContext.Provider value={results.map((r) => withPlaceholderFact(runModelProvenanceFromResultRow(r), r))}>
+        {/* C-a (corrected D-4 gate): the run's execution identity for every count / model-written block it states. */}
+        <RunExecutionIdentityContext.Provider value={runIdentity}>
         {/* D-4: each slot's recorded call status, so a provider failure is never labelled an incompatible format. */}
         <RunSlotStatusContext.Provider value={new Map(results.map((r) => [r.modelId, String(r.status ?? "")]))}>
         <AdaptivePanelResponse
@@ -1167,6 +1185,7 @@ export default function ResultsDisplay({
           dsProvenance={dsProvenance}
         />
         </RunSlotStatusContext.Provider>
+        </RunExecutionIdentityContext.Provider>
         </RunModelProvenanceContext.Provider>
       </div>
     );
@@ -1217,8 +1236,9 @@ export default function ResultsDisplay({
     return `${latencyMs} ms`;
   };
 
-  const isMockResponse = (text?: string | null) =>
-    (text || "").toLowerCase().includes("mock response");
+  // E19 (D-5 exact oracle): only the listed stored placeholder texts are "not a model response"; text that merely
+  // mentions a mock response is of unknown validity (and makes the run's independence unverified).
+  const placeholderOf = (result: ModelResult) => placeholderClass({ modelId: result.modelId, status: result.status, rawText: getModelText(result) });
 
   // Separate successful and failed results for different display handling
   const successfulResults = results.filter((r) => r.status === "ok" || r.status === "substituted");
@@ -1462,7 +1482,7 @@ export default function ResultsDisplay({
               >
                 <span className="text-xl">✅</span>
                 <div className="flex flex-col leading-tight">
-                  <span className="text-xs font-semibold text-green-600 uppercase tracking-wide">Strong consensus</span>
+                  <span className="text-xs font-semibold text-green-600 uppercase tracking-wide">{identityUnverified ? `Strong consensus ${INDEPENDENCE_UNVERIFIED_SUFFIX}` : "Strong consensus"}</span>
                   <span className={`text-xl font-bold text-green-700 ${!analysisReady ? 'opacity-50' : ''}`}>
                     {displayCount(strongConsensusCount)}
                   </span>
@@ -1476,7 +1496,7 @@ export default function ResultsDisplay({
               >
                 <span className="text-xl">⚠️</span>
                 <div className="flex flex-col leading-tight">
-                  <span className="text-xs font-semibold text-orange-600 uppercase tracking-wide">Contested areas</span>
+                  <span className="text-xs font-semibold text-orange-600 uppercase tracking-wide">{identityUnverified ? `Contested areas ${INDEPENDENCE_UNVERIFIED_SUFFIX}` : "Contested areas"}</span>
                   <span className={`text-xl font-bold text-orange-700 ${!analysisReady ? 'opacity-50' : ''}`}>
                     {displayCount(contestedCount)}
                   </span>
@@ -1529,7 +1549,9 @@ export default function ResultsDisplay({
               <div className="mt-4 space-y-6">
                 {/* Summary text - uses same counts as KPI pills */}
                     <p className="text-slate-600 text-sm">
-                      This panel compared {modelCount} model{modelCount === 1 ? "" : "s"} and found{" "}
+                      {identityQualified
+                        ? `This panel compared ${modelCount} panel slot${modelCount === 1 ? "" : "s"} ${independentModelsQualifier(runIdentity)} and found `
+                        : <>This panel compared {modelCount} model{modelCount === 1 ? "" : "s"} and found{" "}</>}
                   <span className="font-semibold">{trustItems.strongConsensusItems.length}</span> strong consensus finding{trustItems.strongConsensusItems.length === 1 ? "" : "s"},{" "}
                   <span className="font-semibold">{trustItems.contestedItems.length}</span> contested area{trustItems.contestedItems.length === 1 ? "" : "s"},{" "}
                   and <span className="font-semibold">{trustItems.uncertainCount}</span> single-model or uncertain points.
@@ -1543,7 +1565,7 @@ export default function ResultsDisplay({
                       onClick={() => setExpandedStrongConsensus((prev) => !prev)}
                       className="flex w-full items-center justify-between bg-green-50 border-b border-green-200 px-4 py-3 hover:bg-green-100 transition-colors"
                     >
-                      <h4 className="text-base font-semibold text-slate-900">Strong Consensus</h4>
+                      <h4 className="text-base font-semibold text-slate-900">{identityUnverified ? `Strong Consensus ${INDEPENDENCE_UNVERIFIED_SUFFIX}` : "Strong Consensus"}</h4>
                       <svg
                         className={`h-5 w-5 text-slate-600 transition-transform ${expandedStrongConsensus ? "rotate-180" : ""}`}
                         fill="none"
@@ -1578,7 +1600,9 @@ export default function ResultsDisplay({
                               )}
                               <div className="flex items-center gap-2 mt-2 flex-wrap">
                                 <span className="text-xs font-medium text-green-700">
-                                  Agreed by {independentModelCountText(item.voices.length)}:{" "}
+                                  {identityUnverified
+                                    ? `Agreed by ${item.voices.reduce((n: number, v: ExecutingVoiceGroup) => n + v.slotIds.length, 0)} responses ${INDEPENDENCE_UNVERIFIED_SUFFIX}: `
+                                    : <>Agreed by {independentModelCountText(item.voices.length)}:{" "}</>}
                                 </span>
                                 <div className="flex flex-wrap gap-1.5">
                                   {item.voices.map((voice) => (
@@ -1613,7 +1637,7 @@ export default function ResultsDisplay({
                       onClick={() => setExpandedContestedAreas((prev) => !prev)}
                       className="flex w-full items-center justify-between bg-orange-50 border-b border-orange-200 px-4 py-3 hover:bg-orange-100 transition-colors"
                     >
-                      <h4 className="text-base font-semibold text-slate-900">Contested Areas</h4>
+                      <h4 className="text-base font-semibold text-slate-900">{identityUnverified ? `Contested Areas ${INDEPENDENCE_UNVERIFIED_SUFFIX}` : "Contested Areas"}</h4>
                       <svg
                         className={`h-5 w-5 text-slate-600 transition-transform ${expandedContestedAreas ? "rotate-180" : ""}`}
                         fill="none"
@@ -1811,7 +1835,7 @@ export default function ResultsDisplay({
                   case "consensus":
                     return {
                       icon: "✅",
-                      text: "Consensus",
+                      text: identityUnverified ? `Consensus ${INDEPENDENCE_UNVERIFIED_SUFFIX}` : "Consensus",
                       bgColor: "bg-green-50",
                       borderColor: "border-green-200",
                       textColor: "text-green-800",
@@ -1831,7 +1855,7 @@ export default function ResultsDisplay({
                     // For now, this should rarely/never appear since single-model claims are "single"
                     return {
                       icon: "⚠️",
-                      text: "Disagreement",
+                      text: identityUnverified ? `Disagreement ${INDEPENDENCE_UNVERIFIED_SUFFIX}` : "Disagreement",
                       bgColor: "bg-orange-50",
                       borderColor: "border-orange-200",
                       textColor: "text-orange-800",
@@ -2209,7 +2233,7 @@ export default function ResultsDisplay({
               {results.map((result) => {
                 const status = result.status;
                 const latencyLabel = formatLatency(result.latencyMs);
-                const mock = isMockResponse(getModelText(result));
+                const mock = placeholderOf(result);
                 // Check if this result is in the synthesized report (successful response)
                 const synthesizedResponse = synthesizedReport?.rawResponses?.find(
                   (r) => r.modelId === result.modelId
@@ -2295,9 +2319,9 @@ export default function ResultsDisplay({
                         );
                       })()}
                       {mock && (status === "ok" || status === "substituted") && (
-                        <div className="flex items-center gap-2 text-sm text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+                        <div className="flex items-center gap-2 text-sm text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2" data-testid="stored-placeholder-notice">
                           <span>ℹ</span>
-                          <span>Demo output – no API key configured.</span>
+                          <span>{mock === "INVALID_MOCK" ? INVALID_PROVIDER_OUTPUT_NOTICE : VALIDITY_UNKNOWN_NOTICE}</span>
                         </div>
                       )}
                       {(status === "ok" || status === "substituted") && (result as any).wasTruncated && (
@@ -2353,7 +2377,7 @@ export default function ResultsDisplay({
                 const isExpanded = expandedModels.has(result.modelId);
                 const status = result.status;
                 const latencyLabel = formatLatency(result.latencyMs);
-                const mock = isMockResponse(getModelText(result));
+                const mock = placeholderOf(result);
                 // Check if this result is in the synthesized report (successful response)
                 const synthesizedResponse = synthesizedReport?.rawResponses?.find(
                   (r) => r.modelId === result.modelId
@@ -2453,9 +2477,9 @@ export default function ResultsDisplay({
                           );
                         })()}
                         {mock && (status === "ok" || status === "substituted") && (
-                          <div className="flex items-center gap-2 text-sm text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+                          <div className="flex items-center gap-2 text-sm text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2" data-testid="stored-placeholder-notice">
                             <span>ℹ</span>
-                            <span>Demo output – no API key configured.</span>
+                            <span>{mock === "INVALID_MOCK" ? INVALID_PROVIDER_OUTPUT_NOTICE : VALIDITY_UNKNOWN_NOTICE}</span>
                           </div>
                         )}
                         {(status === "ok" || status === "substituted") && (result as any).wasTruncated && (
