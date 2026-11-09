@@ -21,7 +21,16 @@
  *         session cookie are both present, both must verify and name the same
  *         uid, or the request is 401. No slot falls back to the other; a
  *         present-but-empty or malformed `Authorization` header is a presented
- *         credential that failed, never "no bearer".
+ *         credential that failed, never "no bearer", and a present-but-empty
+ *         `__session` cookie is likewise a presented credential that failed.
+ *   A-2   A Google public-key fetch failure during verification is an
+ *         AVAILABILITY event (503), never a credential outcome. How that is
+ *         told apart from a bad credential without reading caller-controlled
+ *         text is the subject of `lib/admin/privilegedCredentialAdapter.ts`:
+ *         every credential is structurally pre-validated (compact JWS, RS256,
+ *         `kid`, `sub`, `aud` = project id, `iss`, `exp`) BEFORE the SDK is
+ *         called, so no claim value can reach an SDK error message, and the
+ *         remaining `auth/argument-error` population is bounded.
  *   SP-8  The retired bootstrap shared secret is never consulted: nothing here
  *         reads a secret or an environment variable. (The secret's name is kept
  *         out of this file on purpose so the repository-wide operator-token
@@ -47,8 +56,14 @@
 
 import "server-only";
 import { NextResponse, type NextRequest } from "next/server";
-import { adminAuth } from "@/lib/firebase/admin";
+import { adminAuth, getInitializedFirebaseProjectId } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
+import {
+  errorCodeOf,
+  verifyPrevalidatedCredential,
+  type CredentialKind,
+  type PrevalidatedCredential,
+} from "./privilegedCredentialAdapter";
 import { deriveVerifiedAdminScopes, readLiveAuthSnapshot } from "./verifiedAdminIdentity";
 
 export type PrivilegedTier = "SYSTEM_ADMIN" | "ADMIN_PORTAL" | "GOVERNANCE_ADMIN";
@@ -89,87 +104,67 @@ export type PrivilegedDecision = { ok: true; actor: PrivilegedActor } | Privileg
 
 const SESSION_COOKIE = "__session";
 
-/**
- * Firebase verification error codes that mean "this credential is not valid".
- * Anything NOT in this list — a network failure, a quota error, an internal
- * error, an unknown shape — is treated as Auth being unavailable (503), never
- * as an authentication outcome.
- */
-const CREDENTIAL_ERROR_CODES: ReadonlySet<string> = new Set([
-  "auth/argument-error",
-  "auth/invalid-argument",
-  "auth/invalid-id-token",
-  "auth/id-token-expired",
-  "auth/id-token-revoked",
-  "auth/session-cookie-expired",
-  "auth/session-cookie-revoked",
-  "auth/user-disabled",
-  "auth/user-not-found",
-]);
-
 type Verified = { uid: string; authTime: unknown; tokenClaimAdmin: boolean };
 type CredentialOutcome =
   | { present: false }
   | { present: true; ok: true; value: Verified }
   | { present: true; ok: false; unavailable: boolean; errorCode: string };
 
-function errorCodeOf(err: unknown): string {
-  if (typeof err === "object" && err !== null && "code" in err) {
-    const code = (err as { code?: unknown }).code;
-    return typeof code === "string" ? code : "";
-  }
-  return "";
-}
-
-function errorMessageOf(err: unknown): string {
-  if (typeof err === "object" && err !== null && "message" in err) {
-    const message = (err as { message?: unknown }).message;
-    return typeof message === "string" ? message : "";
-  }
-  return "";
-}
-
 /**
- * The SDK reports a Google public-key fetch failure as `auth/argument-error`
- * with an "Error fetching ..." message (firebase-admin `utils/jwt.js`). That is
- * an availability event (design assumption A-2), not a bad credential.
+ * SP-5: an `Authorization` header that EXISTS is a presented credential. An
+ * empty or whitespace-only value, or one without the `Bearer` scheme, is a
+ * presented credential that failed — it is never "no bearer", so it can never
+ * hand the request over to the cookie slot. (Correction round: the previous
+ * form returned `present: false` for an empty header, contradicting SP-5.)
  */
-function isUnavailableVerificationError(err: unknown): boolean {
-  const code = errorCodeOf(err);
-  if (!CREDENTIAL_ERROR_CODES.has(code)) return true;
-  return /error fetching/i.test(errorMessageOf(err));
-}
-
 function extractBearer(request: NextRequest): { present: false } | { present: true; token: string | null } {
   const header = request.headers.get("authorization");
-  if (header === null || header.trim() === "") return { present: false };
+  if (header === null) return { present: false };
   const match = /^Bearer\s+(.+)$/i.exec(header.trim());
   const token = match?.[1]?.trim();
   return { present: true, token: token ? token : null };
 }
 
-function verifiedFrom(decoded: unknown): Verified | null {
+/**
+ * The SDK's decoded claims, bound to what pre-validation proved about the same
+ * bytes: the SDK sets `uid = sub` (token-verifier.js:124), so the decoded
+ * subject MUST equal the pre-validated one. A disagreement cannot be produced
+ * by the caller (both parse the same bytes) and is reported as an anomaly.
+ */
+function verifiedFrom(decoded: unknown, proof: PrevalidatedCredential): Verified | null {
   if (decoded === null || typeof decoded !== "object") return null;
   const d = decoded as Record<string, unknown>;
   const uid = typeof d.uid === "string" && d.uid ? d.uid : typeof d.sub === "string" && d.sub ? d.sub : "";
-  if (!uid) return null;
+  if (!uid || uid !== proof.sub) return null;
   return { uid, authTime: d.auth_time, tokenClaimAdmin: d.admin === true };
 }
 
 async function verifyCredential(
-  kind: "bearer" | "cookie",
+  kind: CredentialKind,
   raw: string,
-  auth: NonNullable<typeof adminAuth>
+  auth: NonNullable<typeof adminAuth>,
+  projectId: string
 ): Promise<CredentialOutcome> {
-  try {
-    // checkRevoked is ALWAYS false: revocation is evaluated against the one
-    // live snapshot below, so the SDK must not perform a second user lookup.
-    const decoded = kind === "bearer" ? await auth.verifyIdToken(raw, false) : await auth.verifySessionCookie(raw, false);
-    const value = verifiedFrom(decoded);
-    if (!value) return { present: true, ok: false, unavailable: false, errorCode: "no_subject" };
-    return { present: true, ok: true, value };
-  } catch (err) {
-    return { present: true, ok: false, unavailable: isUnavailableVerificationError(err), errorCode: errorCodeOf(err) };
+  // checkRevoked is ALWAYS false: revocation is evaluated against the one
+  // live snapshot below, so the SDK must not perform a second user lookup.
+  const verify = (credential: string): Promise<unknown> =>
+    kind === "bearer" ? auth.verifyIdToken(credential, false) : auth.verifySessionCookie(credential, false);
+  const adapted = await verifyPrevalidatedCredential(kind, raw, projectId, Math.floor(Date.now() / 1000), verify);
+  switch (adapted.kind) {
+    case "rejected_shape":
+      // Structural failure: a credential outcome, decided before the SDK saw the bytes.
+      return { present: true, ok: false, unavailable: false, errorCode: `shape:${adapted.defect}` };
+    case "credential_error":
+      return { present: true, ok: false, unavailable: false, errorCode: adapted.errorCode };
+    case "unavailable":
+      return { present: true, ok: false, unavailable: true, errorCode: adapted.errorCode };
+    case "verified": {
+      const value = verifiedFrom(adapted.decoded, adapted.proof);
+      // The SDK accepted the bytes but reported a different (or no) subject:
+      // an integrity anomaly, not something the caller can induce → 503.
+      if (!value) return { present: true, ok: false, unavailable: true, errorCode: "decoded_subject_mismatch" };
+      return { present: true, ok: true, value };
+    }
   }
 }
 
@@ -212,27 +207,41 @@ async function decide(
   tier: PrivilegedTier,
   route: string
 ): Promise<{ decision: PrivilegedDecision; errorCode?: string }> {
-  // Step 1. The Admin SDK must exist. Absent is an availability failure.
+  // Step 1. The Admin SDK must exist, and the project id it was initialised
+  // with must be known: pre-validation binds `aud`/`iss` to it, and without it
+  // the SDK must not be called at all (its content errors would quote the
+  // credential). Either absence is an availability failure.
   const auth = adminAuth;
   if (!auth) return { decision: deny503("admin_sdk_uninitialized") };
+  const projectId = getInitializedFirebaseProjectId();
+  if (typeof projectId !== "string" || projectId === "") {
+    return { decision: deny503("auth_unavailable"), errorCode: "project_id_unavailable" };
+  }
 
   // Step 2. Credential extraction. Presence is decided per slot, before any
-  // verification, so a failing slot can never be silently skipped.
+  // verification, so a failing slot can never be silently skipped. A cookie
+  // that EXISTS (even with an empty value) is a presented credential, by the
+  // same SP-5 rule as the header.
   const bearerSlot = extractBearer(request);
   const cookieRaw = request.cookies.get(SESSION_COOKIE)?.value;
-  const cookiePresent = typeof cookieRaw === "string" && cookieRaw.length > 0;
+  const cookiePresent = cookieRaw !== undefined;
 
   if (!bearerSlot.present && !cookiePresent) return { decision: deny401("missing_credentials") };
   // D5: SYSTEM_ADMIN is bearer-only. A cookie alone never reaches it.
   if (tier === "SYSTEM_ADMIN" && !bearerSlot.present) return { decision: deny401("cookie_not_accepted_for_tier") };
 
-  // Step 3. Verify EVERY presented credential (signature / expiry only).
+  // Step 3. Verify EVERY presented credential (structure, then signature /
+  // expiry via the SDK — see privilegedCredentialAdapter.ts).
   const bearer: CredentialOutcome = !bearerSlot.present
     ? { present: false }
     : bearerSlot.token === null
       ? { present: true, ok: false, unavailable: false, errorCode: "malformed_authorization_header" }
-      : await verifyCredential("bearer", bearerSlot.token, auth);
-  const cookie: CredentialOutcome = cookiePresent ? await verifyCredential("cookie", cookieRaw as string, auth) : { present: false };
+      : await verifyCredential("bearer", bearerSlot.token, auth, projectId);
+  const cookie: CredentialOutcome = !cookiePresent
+    ? { present: false }
+    : cookieRaw === ""
+      ? { present: true, ok: false, unavailable: false, errorCode: "empty_session_cookie" }
+      : await verifyCredential("cookie", cookieRaw, auth, projectId);
 
   const presented = [bearer, cookie].filter((c): c is Exclude<CredentialOutcome, { present: false }> => c.present);
   const failed = presented.filter((c): c is Extract<CredentialOutcome, { ok: false }> => !c.ok);
