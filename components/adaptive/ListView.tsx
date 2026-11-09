@@ -32,7 +32,16 @@ import {
   ResultSchema,
 } from "@/lib/adaptiveSchema/types";
 import { TRUST_SCORE_CAP_REASON } from "@/lib/adaptiveSchema/config";
-import { Card, SectionLabel, BulletList, ConfidencePill, ProbabilityBar, TintBadge, SlotName } from "./shared";
+import { Card, SectionLabel, BulletList, ConfidencePill, ProbabilityBar, TintBadge, SlotName, SlotChip } from "./shared";
+import { useQualifiedExecutionIdentity } from "./RunExecutionIdentityContext";
+import {
+  RECORDED_DIFFERENCE_WORD,
+  SLOT_ALIGNMENT_UNVERIFIED_NOTE,
+  alsoAnsweredText,
+  otherSlotsAnsweredBySameModel,
+  runSlotStatement,
+  type RunExecutionIdentity,
+} from "@/lib/panel/executionIdentity";
 import ModelChip from "@/components/ModelChip";
 import { GateTone, gateChipText, gateTone, pageGateValue } from "@/lib/adaptiveSchema/gatePresentation";
 import { PanelCounts, ROW_COUNTS_UNAVAILABLE, SlotRowCounts, hasReadableRowBreakdown, panelCounts, readSlots, rowTypeOf, slotLabel, slotRowCounts } from "@/lib/adaptiveSchema/positionPresentation";
@@ -306,6 +315,12 @@ function MarkedSlotCounts({ marked }: { marked: NonNullable<RowVM["marked"]> }) 
   );
 }
 
+/** A14: the header's split figure across panel slots ("2 recorded differences" when one executing model answered). */
+function slotSplitText(splitCount: number, identity: RunExecutionIdentity): string {
+  if (identity.kind === "FC") return `${splitCount} ${RECORDED_DIFFERENCE_WORD}${splitCount === 1 ? "" : "s"}`;
+  return `${splitCount} split across panel slots`;
+}
+
 function RunHeaderStrip({
   schema,
   gate,
@@ -324,6 +339,9 @@ function RunHeaderStrip({
   /** Order 5 (Contract P): a marked report's rows counted by what they are (positionPresentation.panelCounts). */
   counts?: PanelCounts | null;
 }) {
+  // A14 (C-a): an unmarked report of a run whose slots are not verified independent executing models counts its rows
+  // across panel slots; one executing model's differing rows are recorded differences, never a "split".
+  const slotIdentity = useQualifiedExecutionIdentity();
   return (
     <Card className="flex items-center justify-between flex-wrap gap-3">
       <div className="flex items-center gap-2">
@@ -345,13 +363,14 @@ function RunHeaderStrip({
         {" · "}
         {alignedClaimsCount} aligned claim{alignedClaimsCount === 1 ? "" : "s"}
         {" · "}
-        {splitCount} split
+        {slotIdentity ? slotSplitText(splitCount, slotIdentity) : <>{splitCount} split</>}
         {limitedCoverageCount > 0 && (
           <>
             {" · "}
             {limitedCoverageCount} limited coverage
           </>
         )}
+        {slotIdentity && <span data-source="computed" data-testid="list-slot-counts">{` · ${runSlotStatement(slotIdentity)}`}</span>}
       </div>
       )}
     </Card>
@@ -521,6 +540,15 @@ function ModelAnswerBody({ schema, data }: { schema: ResultSchema; data: Record<
   );
 }
 
+/**
+ * A15 (C-a): the slot chip of a list row names the model that executed it — a substituted slot reads "DeepSeek
+ * (substituting Claude)" (SlotChip), never as the requested model. A marked report already states the substitution on
+ * the row (`vm.marked.substitutedLabel`), so it keeps the plain chip.
+ */
+function ExecutingSlotChip({ modelId }: { modelId: ModelId }) {
+  return usePositionPresentation() ? <ModelChip modelId={modelId} size="xs" /> : <SlotChip modelId={modelId} size="xs" />;
+}
+
 function ModelRow({
   schema,
   vm,
@@ -535,12 +563,15 @@ function ModelRow({
   const { result } = vm;
   // D-4: a recorded provider failure is never described as a parse/format failure.
   const notResponded = slotDidNotRespond(useRunSlotStatus(), result.modelId);
+  // A13 (C-a): a slot whose executing model also answered other slots says so next to its alignment figures.
+  const slotIdentity = useQualifiedExecutionIdentity();
+  const alsoAnswered = slotIdentity ? otherSlotsAnsweredBySameModel(slotIdentity, result.modelId) : 0;
 
   if (vm.failed) {
     return (
       <div className="px-4 py-3">
         <div className="flex items-center gap-2 flex-wrap">
-          <ModelChip modelId={result.modelId} size="xs" />
+          <ExecutingSlotChip modelId={result.modelId} />
           <TintBadge tone="danger">{notResponded ? "no response · excluded" : "parse error · excluded"}</TintBadge>
           <span className="ml-auto text-xs text-slate-400">{formatLatency(result.latencyMs)}</span>
         </div>
@@ -566,7 +597,7 @@ function ModelRow({
         className="w-full text-left px-4 py-3 hover:bg-slate-50/60 transition-colors"
       >
         <div className="flex items-center gap-x-3 gap-y-1.5 flex-wrap">
-          <ModelChip modelId={result.modelId} size="xs" />
+          <ExecutingSlotChip modelId={result.modelId} />
           <span className={`h-2 w-2 rounded-full shrink-0 ${HEALTH_DOT_COLORS[vm.parseHealth]}`} title={`Parse health: ${vm.parseHealth}`} />
           {vm.trustScore !== null && (
             <span className="text-xs text-slate-600 whitespace-nowrap">
@@ -585,6 +616,11 @@ function ModelRow({
           {vm.alignment && vm.alignment.participated > 0 && (
             <span className="text-xs text-slate-600 whitespace-nowrap">
               aligns {vm.alignment.matched}/{vm.alignment.participated}
+            </span>
+          )}
+          {alsoAnswered > 0 && (
+            <span data-source="computed" data-testid="also-answered" className="text-xs text-slate-500 whitespace-nowrap">
+              {alsoAnsweredText(alsoAnswered)}
             </span>
           )}
           {vm.marked && <MarkedSlotCounts marked={vm.marked} />}
@@ -667,6 +703,7 @@ function ListViewBody({
   const position = usePositionPresentation();
   const counts = useMemo(() => (position ? panelCounts(rows, position.roster) : null), [position, rows]);
   const slotsNotIndependent = !!useRunIndependence(synthesisReport);
+  const slotIdentity = useQualifiedExecutionIdentity();
   const [sortMode, setSortMode] = useState<SortMode>("trust");
   const [expandedModels, setExpandedModels] = useState<Set<ModelId>>(new Set());
 
@@ -709,7 +746,7 @@ function ListViewBody({
           onClick={() => onNavigateToSynthesis?.("agreement-disagreement-map")}
         />
         <PulseCard
-          label={counts ? "Recorded opposing positions" : "Split claims"}
+          label={counts ? "Recorded opposing positions" : slotIdentity?.kind === "FC" ? "Recorded differences" : slotIdentity ? slotCountedLabel("Split claims") : "Split claims"}
           value={counts ? counts.opposing : splitCount}
           accent="split"
           onClick={() => onNavigateToSynthesis?.("disagreements")}
@@ -728,6 +765,11 @@ function ListViewBody({
           </span>
           <SortControl sortMode={sortMode} onChange={setSortMode} />
         </div>
+        {slotIdentity && !slotIdentity.verified && (
+          <p data-source="computed" data-testid="list-alignment-unverified" className="mb-2 text-xs text-slate-500">
+            {SLOT_ALIGNMENT_UNVERIFIED_NOTE}
+          </p>
+        )}
         <div className="rounded-xl border border-slate-200 bg-white overflow-hidden divide-y divide-slate-100">
           {sortedVMs.map((vm) => (
             <ModelRow

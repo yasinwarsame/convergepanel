@@ -39,6 +39,7 @@ import { escapeMarkdownInline, markdownQuote, plainTextQuote, singleLineText } f
 import { X_MAX_WEIGHTED_LENGTH, XUrlSpan, parseXText, xPostableText, xUrlSpans } from "./xWeightedText";
 import { EMOJI } from "./xTextRules.generated";
 import { ADAPTIVE_RESEARCH_REPORT_KIND } from "@/lib/verification/generateMemo";
+import { modelWrittenBlockLabel, modelWrittenShortLabel, type RunExecutionIdentity } from "@/lib/panel/executionIdentity";
 import {
   adaptiveTopIndependence,
   adaptiveTopIndependenceStatement,
@@ -201,9 +202,15 @@ export function buildAdaptiveSynthesisMarkdown(
    * substituted is attributed to its executing model ("DeepSeek (substituting ChatGPT)"), never to the requested model.
    * Absent → family names, exactly as before.
    */
-  slotProvenance?: readonly RunModelProvenanceFacts[] | null
+  slotProvenance?: readonly RunModelProvenanceFacts[] | null,
+  /** D06 (C-a, O3 (a)): the run's execution identity; a qualified run's legacy model-written groups carry one label each. */
+  executionIdentity?: RunExecutionIdentity | null
 ): string {
   const report = shown(storedReport, positionInput, slotProvenance);
+  const groupLabel = legacyGroupLabel(report, executionIdentity);
+  const labelled = (out: string[]) => {
+    if (groupLabel) out.push(`_${groupLabel}_`);
+  };
   const slotName = (modelId: string) => executingVoiceName(modelId, slotProvenance ?? positionInput?.provenance ?? null);
   // The top claim's model independence (verdictIndependence.ts): a marked report carries it in its position view; an
   // unmarked one in its independence-qualified view. Null — exactly as before — for independent supporters.
@@ -221,21 +228,25 @@ export function buildAdaptiveSynthesisMarkdown(
   lines.push("## Unified Answer");
   // D8: an unrecognized stored gate is stated before the stored answer; a known gate exports exactly as before.
   answerLeadBlocks(presentUnifiedAnswer(report)).forEach((b) => lines.push(...markdownBlock(b)));
+  labelled(lines);
   lines.push(report.unifiedAnswer);
   lines.push("");
   lines.push("## Executive Summary");
+  labelled(lines);
   lines.push(report.executiveSummary);
   lines.push("");
 
   const agreementItems = qualifiedAgreementLines(report, (line, q) => `${line} — **${PANEL_RESULT_LABEL}:** ${q}`);
   if (agreementItems.length > 0) {
     lines.push(`## ${agreeHeading(report)}`);
+    labelled(lines);
     agreementItems.forEach((a) => lines.push(`- ${a}`));
     lines.push("");
   }
 
   if (report.disagreements.length > 0) {
     lines.push("## Where models disagree");
+    labelled(lines);
     report.disagreements.forEach((d) => {
       lines.push(`- **${d.topic}** — ${d.whyTheyDiffer}`);
       d.positions.forEach((p) => lines.push(`  - ${slotName(p.modelId)}: ${p.position}`));
@@ -252,11 +263,28 @@ export function buildAdaptiveSynthesisMarkdown(
   }
 
   lines.push("## Certainty");
+  labelled(lines);
   lines.push(`${Math.round(report.runCertainty * 100)}% (gate: ${legacyGateWord(report.gate)}) — ${report.certaintyAssessment}`);
   lines.push("");
   lines.push("Source: convergepanel.com");
 
   return lines.join("\n");
+}
+
+/**
+ * D06 (C-a, owner ruling O3 (a)): the label of a LEGACY (pre-presentation, unmarked) report's model-written block groups,
+ * or null — for a verified independent run, a presented or marked report, or without the run's identity — so every such
+ * output is exactly as before.
+ */
+function legacyGroupLabel(report: AdaptiveSynthesisReport, identity: RunExecutionIdentity | null | undefined): string | null {
+  if (!identity || !identity.qualified || report.presentation || positionView(report)) return null;
+  return modelWrittenBlockLabel(identity);
+}
+
+/** The X qualifier (O3 (a) short form): an unmarked report of a qualified run; never truncated. */
+function xQualifier(report: AdaptiveSynthesisReport, identity: RunExecutionIdentity | null | undefined): string | null {
+  if (!identity || !identity.qualified || positionView(report)) return null;
+  return modelWrittenShortLabel(identity);
 }
 
 function buildPresentedMarkdown(question: string, report: AdaptiveSynthesisReport, slotName: (modelId: string) => string, topIndependence: AdaptiveTopIndependence | null): string {
@@ -458,8 +486,15 @@ export function buildAdaptiveMemoInput(
   };
 }
 
-export function buildAdaptiveLinkedInPost(question: string, storedReport: AdaptiveSynthesisReport, positionInput?: PositionSafeInput): string {
+export function buildAdaptiveLinkedInPost(
+  question: string,
+  storedReport: AdaptiveSynthesisReport,
+  positionInput?: PositionSafeInput,
+  executionIdentity?: RunExecutionIdentity | null
+): string {
   const report = shown(storedReport, positionInput);
+  // D06 (C-a, O3 (a)): one label for the post's model-written lines of a legacy report of a qualified run.
+  const groupLabel = legacyGroupLabel(report, executionIdentity);
   // Order 5 (Contract P): a compact format — no per-slot positions, no model names; rows are stated by their own result.
   const marked = !!positionView(report);
   const lines: string[] = [];
@@ -478,6 +513,10 @@ export function buildAdaptiveLinkedInPost(question: string, storedReport: Adapti
   lines.push("");
 
   const presented = report.presentation;
+  if (groupLabel && (dedupedAgreementItems(report).length > 0 || report.disagreements.length > 0)) {
+    lines.push(groupLabel);
+    lines.push("");
+  }
   // A legacy line is shortened; its independence statement (computed) never is.
   const agreementItems = presented ? [] : qualifiedAgreementLines(report, (line, q) => plainQualified(truncate(line, 140), q));
   const view = positionView(report);
@@ -513,12 +552,22 @@ export function buildAdaptiveLinkedInPost(question: string, storedReport: Adapti
   return lines.join("\n");
 }
 
-export function buildAdaptiveXPost(question: string, storedReport: AdaptiveSynthesisReport, positionInput?: PositionSafeInput): string {
+export function buildAdaptiveXPost(
+  question: string,
+  storedReport: AdaptiveSynthesisReport,
+  positionInput?: PositionSafeInput,
+  executionIdentity?: RunExecutionIdentity | null
+): string {
   const report = shown(storedReport, positionInput);
   if (positionView(report)) return buildMarkedXPost(question, report);
-  const splitLabel = "Models split on: ";
+  // D03 / D06 (C-a): a budgeted build. The brand line and, for a qualified run, the one-line model-written qualifier are
+  // never cut: the question gives way first, then the split's text. An output that fits is exactly as before.
+  const qualifier = xQualifier(report, executionIdentity);
+  const oneModel = executionIdentity?.qualified && executionIdentity.kind === "FC";
+  const splitLabel = qualifier ? (oneModel ? "Recorded difference: " : "Split across panel slots on: ") : "Models split on: ";
   const parts: string[] = [];
-  parts.push(`Asked ${shortSharePanelPhrase(independenceQualification(report)?.run ?? null) ?? "a multi-model AI panel"}: "${truncate(question, 80)}"`);
+  const askedPrefix = `Asked ${shortSharePanelPhrase(independenceQualification(report)?.run ?? null) ?? "a multi-model AI panel"}: `;
+  parts.push(`${askedPrefix}"${truncate(question, 80)}"`);
   if (hasGatePresentation(report)) {
     const status = readGateStatus(report.gate);
     parts.push(`${gateLabel(status)}${status === "caution" ? ` (${CAUTION_NOTICE_SHORT})` : ""} · Certainty: ${Math.round(report.runCertainty * 100)}%`);
@@ -530,16 +579,28 @@ export function buildAdaptiveXPost(question: string, storedReport: AdaptiveSynth
   const run = independenceQualification(report)?.run ?? null;
   const storedSplit = report.presentation?.disagree[0];
   const split = storedSplit && run && typeof storedSplit.result === "string" ? { ...storedSplit, result: shortRunCountedResult(storedSplit.result, run) } : storedSplit;
+  const tail = [...(qualifier ? [qualifier] : []), "via ConvergePanel"];
   if (split) {
     // The post is capped at 280 characters: the claim gives way, the computed result never does.
-    const fixed = [...parts, "via ConvergePanel"].join("\n\n").length + 2;
+    const fixed = [...parts, ...tail].join("\n\n").length + 2;
     const room = 280 - fixed - splitLabel.length - shortClaimWithResult({ ...split, claim: "" }, 0).length;
     parts.push(`${splitLabel}${shortClaimWithResult(split, Math.max(12, Math.min(60, room)))}`);
   } else if (report.disagreements.length > 0) {
-    parts.push(`Models split on: ${truncate(report.disagreements[0].topic, 80)}`);
+    parts.push(`${splitLabel}${truncate(report.disagreements[0].topic, 80)}`);
   }
-  parts.push("via ConvergePanel");
-  return truncate(parts.join("\n\n"), 280);
+  const whole = [...parts, ...tail].join("\n\n");
+  if (whole.length <= 280) return whole;
+  // Over budget: shorten the question, then the split line; the tail (qualifier, brand) is kept whole.
+  const room = (others: string[]) => 280 - [...others, ...tail].join("\n\n").length - 2;
+  const rest = parts.slice(1);
+  const qRoom = room([askedPrefix, ...rest]) - askedPrefix.length;
+  if (qRoom >= 12) return [`${askedPrefix}"${truncate(question, Math.min(80, qRoom))}"`, ...rest, ...tail].join("\n\n");
+  const head = [`${askedPrefix}"${truncate(question, 12)}"`, ...parts.slice(1, 2)];
+  const last = rest.length > 1 ? rest[rest.length - 1] : null;
+  const lastRoom = last ? 280 - [...head, ...tail].join("\n\n").length - 2 : 0;
+  const shortLast = last && lastRoom > splitLabel.length + 12 ? truncate(last, lastRoom) : null;
+  const fitted = [...head, ...(shortLast ? [shortLast] : []), ...tail].join("\n\n");
+  return fitted.length <= 280 ? fitted : `${truncate([...head].join("\n\n"), Math.max(1, 280 - tail.join("\n\n").length - 2))}\n\n${tail.join("\n\n")}`;
 }
 
 // ─── X (Order 5, Contract P, m-1 / H-1) ─────────────────────────────────────

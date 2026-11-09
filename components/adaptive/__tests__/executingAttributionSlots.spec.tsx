@@ -57,7 +57,10 @@ describe("SlotName / SlotChip", () => {
   });
 });
 
-describe("Trust Summary: a repeated substitute reads 'not counted', not a parse failure", () => {
+// C-a A24 (Option C): L01 restored the slot rule, so no slot is ever excluded from agreement by executing model. The
+// former "not counted" health cell mislabelled a genuine parse failure on a repeated-substitute slot; it is removed and
+// every health cell shows the stored parse health (moved from the b894828 expectation; see the C-a moved-pin register).
+describe("Trust Summary: a failed repeated-substitute slot reads 'failed' (A24, Option C)", () => {
   const trust = (perModel: Array<[string, "ok" | "failed"]>) => ({
     perModel: perModel.map(([modelId, parseHealth]) => ({ modelId, claimsContributed: 1, majorityAlignment: 1, citationScore: 1, contradictionCount: 0, parseHealth, trustScore: parseHealth === "ok" ? 0.9 : 0, capped: parseHealth !== "ok" })),
     overallTrust: 0.9,
@@ -69,15 +72,15 @@ describe("Trust Summary: a repeated substitute reads 'not counted', not a parse 
     { modelId: "gemini", provider: "google", substituted: false },
   ];
 
-  it("second DeepSeek slot → 'not counted' (with the reason); a genuine parse failure still reads 'failed'", () => {
+  it("second DeepSeek slot failed → 'failed' (never 'not counted'); the executing model is still named", () => {
     const out = html(createElement(TrustSummaryTable, { trustSummary: trust([["chatgpt", "ok"], ["claude", "failed"], ["grok", "ok"], ["gemini", "failed"]]) } as any), TWO_SUBS);
-    expect(out).toContain(`title="${REPEATED_SUBSTITUTE_EXCLUDED}"`);
-    expect(out.match(/>not counted</g)).toHaveLength(1);
-    expect(out.match(/>failed</g)).toHaveLength(1);
+    expect(out).not.toContain(`title="${REPEATED_SUBSTITUTE_EXCLUDED}"`);
+    expect(out).not.toContain(">not counted<");
+    expect(out.match(/>failed</g)).toHaveLength(2);
     expect(text(out)).toContain("DeepSeek (substituting Claude)");
   });
 
-  it("the FIRST substituted slot that failed is a real failure (no earlier counted substitute)", () => {
+  it("the FIRST substituted slot that failed is a failure too", () => {
     const out = html(createElement(TrustSummaryTable, { trustSummary: trust([["chatgpt", "failed"], ["claude", "ok"], ["grok", "ok"]]) } as any), TWO_SUBS);
     expect(out).not.toContain(">not counted<");
     expect(out.match(/>failed</g)).toHaveLength(1);

@@ -105,7 +105,9 @@ import {
   uniformityBadge,
 } from "@/lib/adaptiveSchema/verdictIndependence";
 import { useRunIndependence } from "./useRunIndependence";
-import { executingModelKey, REPEATED_SUBSTITUTE_EXCLUDED } from "@/lib/panel/independentVoices";
+import { useQualifiedExecutionIdentity, useRunExecutionIdentity } from "./RunExecutionIdentityContext";
+import { modelWrittenBlockLabel, trustFiguresNote } from "@/lib/panel/executionIdentity";
+import { executingModelKey } from "@/lib/panel/independentVoices";
 import {
   buildAdaptiveSynthesisMarkdown,
   buildAdaptiveMemoInput,
@@ -330,20 +332,11 @@ export function TrustSummaryTable({ trustSummary }: { trustSummary: AdaptiveTrus
   // Order 5 (Contract P, F-2): on a marked report the computed trust inputs are labelled for what they count — every
   // scored row, value comparisons included — never as claim positions. The values are the stored ones, unchanged.
   const marked = !!usePositionPresentation();
-  const runProvenance = useRunModelProvenance();
+  // A12 (C-a): in a run whose slots are not verified independent executing models, one computed note says what the
+  // figures are per (values unchanged). A24 (C-a, Option C): no slot is excluded from agreement by executing model
+  // (L01), so every health cell shows the stored parse health; a failed repeated-substitute slot reads "failed".
+  const slotIdentity = useQualifiedExecutionIdentity();
   if (trustSummary.perModel.length === 0) return null;
-  // A slot answered by a substitute model that an earlier slot already counted is excluded from agreement by the
-  // independent-voice rule (orchestrate.ts), which stores it as parse health "failed". Its health cell says so instead
-  // of reading as a parse failure. Read from the run's own rows; the stored values are unchanged.
-  const notCounted = new Set<string>();
-  const countedSubstitutes = new Set<string>();
-  for (const m of trustSummary.perModel) {
-    const facts = runProvenance?.find((f) => f && f.modelId === m.modelId);
-    if (facts?.substituted !== true) continue;
-    const key = executingModelKey({ modelId: m.modelId, status: "substituted", provider: facts.provider });
-    if (m.parseHealth !== "failed") countedSubstitutes.add(key);
-    else if (countedSubstitutes.has(key)) notCounted.add(m.modelId);
-  }
   return (
     <Card>
       <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
@@ -354,6 +347,11 @@ export function TrustSummaryTable({ trustSummary }: { trustSummary: AdaptiveTrus
       </div>
       <p className="text-xs text-slate-500 mb-2">How well the models behaved — citations, consistency, contradictions — not how sure the panel is about the answer.</p>
       {marked && <p data-source="computed" className="text-xs text-slate-500 mb-2">{trustInputsNoteFor(trustSummary)}</p>}
+      {slotIdentity && (
+        <p data-source="computed" data-testid="trust-figures-note" className="text-xs text-slate-500 mb-2">
+          {trustFiguresNote(slotIdentity)}
+        </p>
+      )}
       <div className="overflow-x-auto">
         <table className="w-full text-sm border-collapse">
           <thead>
@@ -389,20 +387,11 @@ export function TrustSummaryTable({ trustSummary }: { trustSummary: AdaptiveTrus
                 <td className="py-2 pr-4 text-slate-700">{Math.round(m.citationScore * 100)}%</td>
                 <td className="py-2 pr-4 text-slate-700">{m.contradictionCount}</td>
                 <td className="py-2 pr-4">
-                  {notCounted.has(m.modelId) ? (
-                    <span
-                      className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium bg-slate-50 text-slate-600 border-slate-200"
-                      title={REPEATED_SUBSTITUTE_EXCLUDED}
-                    >
-                      not counted
-                    </span>
-                  ) : (
                   <span
                     className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${PARSE_HEALTH_STYLES[m.parseHealth]}`}
                   >
                     {m.parseHealth}
                   </span>
-                  )}
                 </td>
               </tr>
             ))}
@@ -410,6 +399,15 @@ export function TrustSummaryTable({ trustSummary }: { trustSummary: AdaptiveTrus
         </table>
       </div>
     </Card>
+  );
+}
+
+/** A26 / O3 (a): the one label above a model-written block group of a run that is not verified independent. */
+function ModelWrittenGroupLabel({ text }: { text: string }) {
+  return (
+    <p data-source="computed" data-testid="model-written-label" className="mb-1 text-xs text-amber-800">
+      {text}
+    </p>
   );
 }
 
@@ -1229,15 +1227,20 @@ export default function AdaptiveSynthesisReportView({
     [storedReport, alignedClaims, position, modelsUsed, modelProvenance]
   );
   const [generatedPost, setGeneratedPost] = useState<{ type: "linkedin" | "x"; text: string } | null>(null);
+  // A26 (C-a, owner ruling O3 (a)): a legacy (pre-presentation) report's model-written block groups each carry one label
+  // when the run is FC / PC / UV / MOCK; an independent run renders exactly as before.
+  const executionIdentity = useRunExecutionIdentity();
+  const blockLabel = executionIdentity?.qualified && !report.presentation ? modelWrittenBlockLabel(executionIdentity) : null;
+  const groupLabel = blockLabel ? <ModelWrittenGroupLabel text={blockLabel} /> : null;
   const agreeItems = presentAgreeItems(report);
   // Order 5 (Contract P, F-1): a marked report's entries in groups — claims, value comparisons, rows not joined.
   const agreeGroups = presentAgreeGroups(report);
 
   const handleCopy = useCallback(async () => {
-    const markdown = buildAdaptiveSynthesisMarkdown(question, report, undefined, modelProvenance);
+    const markdown = buildAdaptiveSynthesisMarkdown(question, report, undefined, modelProvenance, executionIdentity);
     const ok = await copyToClipboardWithFallback(markdown);
     if (!ok) throw new Error("copy failed");
-  }, [question, report, modelProvenance]);
+  }, [question, report, modelProvenance, executionIdentity]);
 
   const handleExportMemo = useCallback(() => {
     const memoInput = buildAdaptiveMemoInput(question, report, modelsUsed, runId || "", modelProvenance);
@@ -1246,12 +1249,12 @@ export default function AdaptiveSynthesisReportView({
   }, [question, report, modelsUsed, runId, modelProvenance]);
 
   const handleGenerateLinkedIn = useCallback(() => {
-    setGeneratedPost({ type: "linkedin", text: buildAdaptiveLinkedInPost(question, report) });
-  }, [question, report]);
+    setGeneratedPost({ type: "linkedin", text: buildAdaptiveLinkedInPost(question, report, undefined, executionIdentity) });
+  }, [question, report, executionIdentity]);
 
   const handleGenerateX = useCallback(() => {
-    setGeneratedPost({ type: "x", text: buildAdaptiveXPost(question, report) });
-  }, [question, report]);
+    setGeneratedPost({ type: "x", text: buildAdaptiveXPost(question, report, undefined, executionIdentity) });
+  }, [question, report, executionIdentity]);
 
   return (
     <PositionPresentationBoundary report={report} roster={position?.roster ?? modelsUsed} provenance={position?.provenance ?? modelProvenance}>
@@ -1261,10 +1264,12 @@ export default function AdaptiveSynthesisReportView({
       </div>
 
       <div data-section="unified-answer">
+        {report.unifiedAnswer && groupLabel}
         <UnifiedAnswerCard answer={report.unifiedAnswer} report={report} />
       </div>
 
       <div data-section="executive-summary">
+        {report.executiveSummary && groupLabel}
         <ExecutiveSummaryCard report={report} />
       </div>
 
@@ -1286,6 +1291,7 @@ export default function AdaptiveSynthesisReportView({
             </div>
           ) : (
             <>
+              {report.certaintyAssessment && groupLabel}
               <p className="mt-2 text-sm text-slate-600">{report.certaintyAssessment}</p>
               {/* D8: an unrecognized stored gate is stated after the stored line; a known gate renders exactly as before. */}
               <AnswerLeadBlocks blocks={presentCertainty(report).filter((b) => b.source === "computed")} />
@@ -1333,6 +1339,7 @@ export default function AdaptiveSynthesisReportView({
         <div data-section="where-models-agree">
           <Card>
             <SectionLabel>{independenceQualification(report)?.agreeHeading ?? "Where models agree"}</SectionLabel>
+            {groupLabel}
             <ul className="list-disc list-outside pl-5 space-y-1 text-sm leading-relaxed text-slate-800">
               {agreeItems.map((item, idx) =>
                 report.presentation ? (
@@ -1357,6 +1364,7 @@ export default function AdaptiveSynthesisReportView({
       )}
 
       <div data-section="disagreements">
+        {report.disagreements.length > 0 && groupLabel}
         <DisagreementsSection report={report} />
       </div>
 
@@ -1366,6 +1374,7 @@ export default function AdaptiveSynthesisReportView({
 
       {report.narrativeSections.length > 0 && (
         <div data-section="narrative-sections" className="space-y-4">
+          {groupLabel}
           {presentNarrativeSections(report).map((section, idx) => (
             <Card key={idx}>
               {section.titleSource === "model_explanation" ? (

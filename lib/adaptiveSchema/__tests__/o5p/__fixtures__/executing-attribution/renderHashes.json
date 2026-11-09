@@ -5,27 +5,29 @@
   "generic-substituted-and-failed": {
    "hashes": {
     "UTC": {
-     "ui.panelResponse": "4d75da0d999c1363d710710d75b44fa3758d98e3957fa9c265a05e7d726e8853",
+     "ui.panelResponse": "d791473e84e3b51fbd87ace8b9ed66b03d07079e0b597f88f1831d185e05b665",
      "ui.synthesisView": "8e73da197816ab324ed26c301c9d5ff1586888691fb6983f53ac6e2c0a2dcbcf",
      "ui.panelEvidence": "8147ee101d89a9acfbaf3e25e0abea05340405b367bb0fd76ef6d060b2df2765",
      "ui.claimMatrix": "3b92ada62b04bcb8a8551b63a8df3b995d79f91b76ebc45d2d33b3ae42d1041e",
      "ui.governance": "ca39559e774a3ea4b9f63fbcf5262fa89d7a539c544a46bf267af5f12f2b9cbf",
-     "text.markdown": "a31ad946d5961605701348191358cb7b7f51792b3c37b0a38c15f0239d28a94a"
+     "text.markdown": "a31ad946d5961605701348191358cb7b7f51792b3c37b0a38c15f0239d28a94a",
+     "ui.listView": "ac355e9cbbd57ee0caa1b4c1d7b8337246aa54e57355763bfe3cba4024cc7e67"
     },
     "Africa/Nairobi": {
-     "ui.panelResponse": "4d75da0d999c1363d710710d75b44fa3758d98e3957fa9c265a05e7d726e8853",
+     "ui.panelResponse": "d791473e84e3b51fbd87ace8b9ed66b03d07079e0b597f88f1831d185e05b665",
      "ui.synthesisView": "8e73da197816ab324ed26c301c9d5ff1586888691fb6983f53ac6e2c0a2dcbcf",
      "ui.panelEvidence": "8147ee101d89a9acfbaf3e25e0abea05340405b367bb0fd76ef6d060b2df2765",
      "ui.claimMatrix": "3b92ada62b04bcb8a8551b63a8df3b995d79f91b76ebc45d2d33b3ae42d1041e",
      "ui.governance": "ca39559e774a3ea4b9f63fbcf5262fa89d7a539c544a46bf267af5f12f2b9cbf",
-     "text.markdown": "a31ad946d5961605701348191358cb7b7f51792b3c37b0a38c15f0239d28a94a"
+     "text.markdown": "a31ad946d5961605701348191358cb7b7f51792b3c37b0a38c15f0239d28a94a",
+     "ui.listView": "ac355e9cbbd57ee0caa1b4c1d7b8337246aa54e57355763bfe3cba4024cc7e67"
     }
    },
    "labelCounts": {
-    "ui.panelResponse": 23,
+    "ui.panelResponse": 24,
     "ui.panelResponse.noProvenance": 0,
     "ui.synthesisView": 12,
-    "ui.listView": 0,
+    "ui.listView": 1,
     "ui.primaryStrip": 0,
     "ui.panelEvidence": 10,
     "ui.claimMatrix": 1,
@@ -40,10 +42,10 @@
     "export.docxXml": 0
    },
    "executingChipCounts": {
-    "ui.panelResponse": 12,
+    "ui.panelResponse": 13,
     "ui.panelResponse.noProvenance": 0,
     "ui.synthesisView": 6,
-    "ui.listView": 0,
+    "ui.listView": 1,
     "ui.primaryStrip": 0,
     "ui.panelEvidence": 6,
     "ui.claimMatrix": 0,
@@ -59,5 +61,21 @@
    }
   }
  },
- "chipMarkup": "\"h-2 w-2 shrink-0 rounded-full bg-cp-faint\" aria-hidden=\"true\"></span>"
+ "chipMarkup": "\"h-2 w-2 shrink-0 rounded-full bg-cp-faint\" aria-hidden=\"true\"></span>",
+ "repins": [
+  {
+   "date": "2026-11-09",
+   "track": "C-a",
+   "row": "A15",
+   "reason": "ListView slot chip names the executing model (SlotChip); +1 executing label/chip in ui.listView and in ui.panelResponse (which embeds the list view)",
+   "old": {
+    "ui.panelResponse": "4d75da0d999c1363d710710d75b44fa3758d98e3957fa9c265a05e7d726e8853",
+    "ui.listView": null
+   },
+   "new": {
+    "ui.panelResponse": "d791473e84e3b51fbd87ace8b9ed66b03d07079e0b597f88f1831d185e05b665",
+    "ui.listView": "ac355e9cbbd57ee0caa1b4c1d7b8337246aa54e57355763bfe3cba4024cc7e67"
+   }
+  }
+ ]
 }

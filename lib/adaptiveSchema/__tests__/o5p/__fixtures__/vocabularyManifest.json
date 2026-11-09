@@ -288,10 +288,17 @@
  },
  {
   "file": "components/adaptive/CausalExplanationView.tsx",
-  "literal": ">Contested<",
+  "literal": "\"Contested\"",
   "count": 1,
   "category": "other-schema",
   "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
+ },
+ {
+  "file": "components/adaptive/CausalExplanationView.tsx",
+  "literal": "`Contested ${ACROSS_PANEL_SLOTS}`",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "B05 C-a (corrected D-4 gate): shown only when the run is not verified independent; an independent run keeps the original literal"
  },
  {
   "file": "components/adaptive/CausalExplanationView.tsx",
@@ -400,17 +407,31 @@
  },
  {
   "file": "components/adaptive/DeepResearchView.tsx",
-  "literal": ">Areas of disagreement<",
+  "literal": "\"Areas of disagreement\"",
   "count": 1,
   "category": "other-schema",
   "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
  },
  {
   "file": "components/adaptive/DeepResearchView.tsx",
-  "literal": ">Contested<",
+  "literal": "`Areas of disagreement ${ACROSS_PANEL_SLOTS}`",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "B08 C-a (corrected D-4 gate): shown only when the run is not verified independent; an independent run keeps the original literal"
+ },
+ {
+  "file": "components/adaptive/DeepResearchView.tsx",
+  "literal": "\"Contested\"",
   "count": 1,
   "category": "other-schema",
   "rule": "Milestone-2 schema (out of Order 5 claim-row scope; O5-D8 / Order 6)"
+ },
+ {
+  "file": "components/adaptive/DeepResearchView.tsx",
+  "literal": "`Contested ${ACROSS_PANEL_SLOTS}`",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "B08 C-a (corrected D-4 gate): shown only when the run is not verified independent; an independent run keeps the original literal"
  },
  {
   "file": "components/adaptive/DeepResearchView.tsx",
@@ -450,9 +471,23 @@
  {
   "file": "components/adaptive/ListView.tsx",
   "literal": "\"Split claims\"",
+  "count": 2,
+  "category": "historical-path",
+  "rule": "marked: 'Recorded opposing positions'; C-a A14: also as slotCountedLabel(\"Split claims\") when the run is not verified independent"
+ },
+ {
+  "file": "components/adaptive/ListView.tsx",
+  "literal": "`${splitCount} split across panel slots`",
   "count": 1,
   "category": "historical-path",
-  "rule": "marked: 'Recorded opposing positions'"
+  "rule": "A14 C-a (corrected D-4 gate): shown only when the run is not verified independent; an independent run keeps the original literal"
+ },
+ {
+  "file": "components/adaptive/ListView.tsx",
+  "literal": "\"list-alignment-unverified\"",
+  "count": 1,
+  "category": "non-user",
+  "rule": "test id"
  },
  {
   "file": "components/adaptive/ListView.tsx",
@@ -631,10 +666,24 @@
  },
  {
   "file": "components/adaptive/RankedListView.tsx",
-  "literal": ">Rank disputed<",
+  "literal": "\"Rank disputed\"",
   "count": 1,
   "category": "other-schema",
   "rule": "Milestone-2 ranked list"
+ },
+ {
+  "file": "components/adaptive/RankedListView.tsx",
+  "literal": "`Rank disputed ${ACROSS_PANEL_SLOTS}`",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "B02 C-a (corrected D-4 gate): shown only when the run is not verified independent; an independent run keeps the original literal"
+ },
+ {
+  "file": "components/adaptive/RankedListView.tsx",
+  "literal": "`Rank agreement ${ACROSS_PANEL_SLOTS}: ${rankCorrelation.toFixed(2)}`",
+  "count": 1,
+  "category": "other-schema",
+  "rule": "B02 C-a (corrected D-4 gate): shown only when the run is not verified independent; an independent run keeps the original literal"
  },
  {
   "file": "components/adaptive/ReviewGovernanceSection.tsx",
@@ -1612,7 +1661,7 @@
  {
   "file": "lib/adaptiveSchema/shareBuilders.ts",
   "literal": "\"via ConvergePanel\"",
-  "count": 3,
+  "count": 2,
   "category": "brand",
   "rule": "product name"
  },
@@ -1667,10 +1716,17 @@
  },
  {
   "file": "lib/adaptiveSchema/shareBuilders.ts",
-  "literal": "`Models split on: ${truncate(report.disagreements[0].topic, 80)}`",
+  "literal": "`${splitLabel}${truncate(report.disagreements[0].topic, 80)}`",
   "count": 1,
   "category": "historical-path",
-  "rule": "marked X: 'Unresolved: '"
+  "rule": "marked X: 'Unresolved: '; C-a D03: splitLabel is 'Models split on: ' (independent run), 'Recorded difference: ' (FC) or 'Split across panel slots on: ' (PC / UV)"
+ },
+ {
+  "file": "lib/adaptiveSchema/shareBuilders.ts",
+  "literal": "\"Split across panel slots on: \"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "D03 C-a (corrected D-4 gate): shown only when the run is not verified independent; an independent run keeps the original literal"
  },
  {
   "file": "lib/adaptiveSchema/synthesisReport.ts",
@@ -2126,6 +2182,20 @@
   "count": 3,
   "category": "historical-or-shared",
   "rule": "claim / video / original research memos; marked: 'RUN CERTAINTY'"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "`CONSENSUS SCORE: ${input.consensusScore}/100 (${input.confidenceLabel} confidence; computed over ${slots.answeredSlots} answering slots by the saved synthesis; ${slots.independentModels} independent executing models)`",
+  "count": 1,
+  "category": "historical-or-shared",
+  "rule": "E11 C-a (corrected D-4 gate): shown only when the run is not verified independent; an independent run keeps the original literal"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "`This question was sent to ${slots.answeredSlots} answering panel slots via ConvergePanel, written by ${slots.independentModels} independent executing models (a model that answered several slots counts once). Each slot received identical instructions. The consensus score was computed over answering slots by the saved synthesis, so it is not a count of independent models.`",
+  "count": 1,
+  "category": "historical-or-shared",
+  "rule": "E11 C-a (corrected D-4 gate): shown only when the run is not verified independent; an independent run keeps the original literal"
  },
  {
   "file": "lib/verification/generateMemo.ts",
@@ -2616,5 +2686,12 @@
   "count": 1,
   "category": "contract-p-applied",
   "rule": "c16 (review of 48f3739): shown ONLY when the run's slots (or the row's positioned slots) are not independent recorded executing models, or their execution is not recorded (verdictIndependence.ts); states slot counts as panel slots and names executing models; independent runs render as before (stored contested note)"
+ },
+ {
+  "file": "components/adaptive/ConsensusMapView.tsx",
+  "literal": "\"consensus-map-run-qualifier\"",
+  "count": 1,
+  "category": "non-user",
+  "rule": "test id"
  }
 ]

@@ -18,6 +18,7 @@ import { useRunModelProvenance } from "./RunModelProvenanceContext";
 import { executingVoiceName } from "@/lib/panel/executingVoiceLabel";
 import { didNotRespondText, slotDidNotRespond, useRunSlotStatus } from "@/components/adaptive/RunSlotStatusContext";
 import { SAVED_COPY_NOTICES } from "@/lib/adaptiveSchema/savedCopyNotice";
+import { INVALID_PROVIDER_OUTPUT_NOTICE, slotCoverageText, type RunExecutionIdentity } from "@/lib/panel/executionIdentity";
 
 /**
  * A completed run's slot, named by product family only ("ChatGPT") — never a
@@ -108,6 +109,7 @@ export function BulletList({ items }: { items: string[] }) {
 export function FailedResultsNote({ failed }: { failed: AdaptiveModelResult[] }) {
   // D-4: a slot the run records as not having responded is described as such, never as an "incompatible format".
   const slotStatuses = useRunSlotStatus();
+  const runProvenance = useRunModelProvenance();
   if (failed.length === 0) return null;
   // Verification of 4d5429b MINOR-3: a saved-copy row describes the stored copy (its live retry may have succeeded), not
   // a model that failed. Each group is counted and headed separately, so the "couldn't be compared" count is exactly
@@ -131,6 +133,9 @@ export function FailedResultsNote({ failed }: { failed: AdaptiveModelResult[] })
             <div className="text-red-700">
               {slotDidNotRespond(slotStatuses, r.modelId) ? (
                 <p><SlotName modelId={r.modelId} /> {didNotRespondText(slotDidNotRespond(slotStatuses, r.modelId)!)}</p>
+              ) : runProvenance?.some((f) => f && f.modelId === r.modelId && f.invalidProviderOutput === true) ? (
+                // J02 (D-5): the stored text is a listed placeholder, not a model response — said so, never a format verdict.
+                <p data-testid="invalid-provider-output"><SlotName modelId={r.modelId} />: {INVALID_PROVIDER_OUTPUT_NOTICE}</p>
               ) : r.parseError && SAVED_COPY_NOTICES.has(r.parseError) ? (
                 // Ruling B: a statement about the stored copy (shortened, or unstructured first answer), never a format verdict.
                 <p><SlotName modelId={r.modelId} />: {r.parseError}</p>
@@ -267,6 +272,19 @@ const MODEL_COVERAGE_VERB: Record<ModelCoverageMode, string> = {
 
 export function formatModelCoverage({ covered, total, mode }: { covered: number; total: number; mode: ModelCoverageMode }): string {
   return `${covered} of ${total} models ${MODEL_COVERAGE_VERB[mode]}`;
+}
+
+/**
+ * B01 (C-a): the coverage count of a NON-Decision-Support milestone-2 view. A verified independent run (or a surface
+ * not handed the run's rows: `identity` null) reads exactly as `formatModelCoverage`; otherwise the count is stated as
+ * panel slots with the run's independent executing models, or "model independence unverified" (corrected D-4 gate).
+ * Decision Support keeps `formatModelCoverage` (frozen; owner ruling O17 (a)).
+ */
+export function formatSlotCoverage(
+  args: { covered: number; total: number; mode: ModelCoverageMode },
+  identity: RunExecutionIdentity | null | undefined
+): string {
+  return identity && identity.qualified ? slotCoverageText(args.covered, args.total, args.mode, identity) : formatModelCoverage(args);
 }
 
 /**

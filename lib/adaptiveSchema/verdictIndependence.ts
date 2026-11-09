@@ -293,7 +293,9 @@ export const COUNTED_BY_PANEL_SLOT = "(counted by panel slot)";
 /** The run's slots as a whole: null when every slot is its own recorded executing model, or without the run's rows. */
 export function runIndependence(provenance: readonly RunModelProvenanceFacts[] | null | undefined): QualifiedIndependence | null {
   if (!Array.isArray(provenance)) return null;
-  const t = adaptiveTopIndependence(null, provenance);
+  // J02 (D-5): a slot whose stored text is a listed placeholder is not a model response, so it is not a run-scope slot.
+  const responding = provenance.some((f) => f?.invalidProviderOutput === true) ? provenance.filter((f) => f?.invalidProviderOutput !== true) : provenance;
+  const t = adaptiveTopIndependence(null, responding);
   return t.kind === "independent" ? null : t;
 }
 
