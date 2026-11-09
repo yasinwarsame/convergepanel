@@ -1418,7 +1418,7 @@ Primary database. Firebase Admin SDK is server-only — import with `"server-onl
 | `runs/{runId}/humanReviewPanel/current` | Active multi-reviewer panel: reviewers, quorum, status (`open`/`cancelled`/`finalized`), revision |
 | `runs/{runId}/humanReviewVotes/{revision}:{reviewerUid}` | One vote per reviewer per panel revision |
 | `runs/{runId}/humanReviewPanelHistory/{revision}:{event}` | Append-only finalization/override history entries |
-| `appConfig/modelKeys` | Operator-managed API keys (runtime fallback to env vars if absent) |
+| `appConfig/modelKeys` | Operator-managed API keys (runtime fallback to env vars if absent). Server-only: `firestore.rules` denies every client principal, including an `admin` claim, the whole `appConfig/{doc=**}` subtree (SEC-2 / S4); reads and writes go through the Admin SDK |
 
 ### API key resolution
 

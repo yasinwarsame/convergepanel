@@ -39,10 +39,6 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == uid;
     }
 
-    function isAdminClaim() {
-      return isSignedIn() && request.auth.token.admin == true;
-    }
-
     match /users/{uid} {
 
       // Fields the browser legitimately owns: identity it already proved, and
@@ -151,9 +147,12 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // App config - only admins can read/write model keys
-    match /appConfig/modelKeys {
-      allow read, write: if isAdminClaim();
+    // App config (provider keys, governance policy) is server-only: read and
+    // written exclusively through the Admin SDK. No client principal, including
+    // a token carrying the `admin` claim, may touch it: rules cannot see a live
+    // demotion, so a claim-based grant here outlives the admin's authority.
+    match /appConfig/{doc=**} {
+      allow read, write: if false;
     }
 
     // Order 4 Slice 2a — Workspace Source Standing (current state + append-only
