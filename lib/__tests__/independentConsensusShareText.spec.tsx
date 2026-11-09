@@ -211,12 +211,15 @@ describe("A (controls): at least two independent executing models keep the conse
     const m = await memo(r);
     expect(m).toContain("CONSENSUS SCORE: 90/100");
     expect(m).toContain("WHERE MODELS AGREE");
-    expect(m).toContain(`${n} AI models researched this question independently.`);
+    // C-a E11 / E01: a PC run (TWO_SUBS_PLUS_GROK, 3 slots, 2 independent models) states its counts in units; an IND
+    // run (DISTINCT_REAL) keeps the 35933c8 wording.
+    const pc = rows.length > n;
+    expect(m).toContain(pc ? `${rows.length} panel slots answered this question; ${n} independent executing models wrote those answers.` : `${n} AI models researched this question independently.`);
     expect(await copied(r)).toContain("Top consensus:");
     const card = verdictCardText(r);
     expect(card).toContain("Top consensus");
-    expect(card).toContain(`Agreed by ${n} models`);
-    expect(card).toContain(`${n} models split`);
+    expect(card).toContain(pc ? `Agreed by ${n} independent executing models` : `Agreed by ${n} models`);
+    expect(card).toContain(pc ? `${n} independent executing models split` : `${n} models split`);
   });
 });
 
@@ -255,8 +258,9 @@ describe("B. disagreement count and severity count independent executing models"
     const rep = report(["chatgpt", "claude", "grok"]);
     (rep.keyFindings[0] as any).confidence = "Mixed";
     const r = await mountSynthesis(TWO_SUBS_PLUS_GROK, rep, { ...SUMMARY, modelsHealthy: 2, modelCount: 3 });
-    expect(verdictCardText(r)).toContain("2 models split");
-    expect(verdictCardText(r)).not.toContain("3 models split");
+    // C-a E01: the PC count carries its unit (independent executing models), still 2, never the 3 slots.
+    expect(verdictCardText(r)).toContain("2 independent executing models split");
+    expect(verdictCardText(r)).not.toMatch(/3 (independent executing )?models split/);
     // The Key Finding's severity badge (the first; the disagreement card's own badge follows).
     const findingBadge = (x: TestRenderer.ReactTestRenderer) => nodeText(x.root.findAll((n) => n.type === "span" && typeof n.props.title === "string" && /decisions|interpretation|low-impact/.test(n.props.title))[0]).trim();
     expect(findingBadge(r)).toBe("Low stakes");

@@ -508,9 +508,10 @@ describe("PanelSynthesisView (rendered)", () => {
     const r = await mountSynthesis(results, report, { ...SUMMARY, modelsHealthy: 2, modelCount: 3 });
     const text = textOf(r);
     expect(text).toContain("2 models: DeepSeek (substituting ChatGPT, Claude), Grok");
-    expect(text).toMatch(/Supported by 2\/\s*2 models/);
+    // C-a E21 / E01 (PC: 3 answering slots, 2 independent executing models): slot-unit support and the unit label.
+    expect(text).toContain("Supported by 3 of 3 answering slots (2 independent models)");
     expect(text).toContain("90/100");
-    expect(text).toContain("Agreed by 2 models");
+    expect(text).toContain("Agreed by 2 independent executing models");
     expect(text).not.toContain("No consensus score");
   });
 

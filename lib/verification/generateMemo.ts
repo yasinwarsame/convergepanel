@@ -79,6 +79,15 @@ export interface MemoInput {
   researchIndependenceUnverified?: boolean;
 
   /**
+   * C-a (E11): a research run whose answering slots outnumber its independent executing models (PC, corrected D-4 gate):
+   * the score and the "independently" sentence are stated over answering slots. Absent → exactly the memo as before.
+   */
+  researchSlotCounts?: { answeredSlots: number; independentModels: number };
+
+  /** C-a (E14): a label printed under CONFIDENCE ASSESSMENT (the text is the saved synthesis's own). Absent → as before. */
+  confidenceAssessmentLabel?: string;
+
+  /**
    * Research (legacy panel) memo only: the stored differences that are NOT disagreements between independent executing
    * models (`PanelVerdict.recordedDifferences`), stated in their own section with topic, reason and each position named
    * by its executing model — never under "where models disagree". Absent / empty → exactly the memo as before.
@@ -558,6 +567,8 @@ function generateResearchMemo(input: MemoInput): string {
   // Unknown execution identity: no consensus either, stated as unverified (never as one model's output).
   const unverified = !singleModel && input.researchIndependenceUnverified === true;
   const noConsensus = singleModel || unverified;
+  const rs = input.researchSlotCounts;
+  const slots = !noConsensus && rs && rs.independentModels >= 2 && rs.answeredSlots > rs.independentModels ? rs : null;
 
   lines.push("VERIFICATION MEMO");
   lines.push("ConvergePanel Multi-Model Research Report");
@@ -570,6 +581,8 @@ function generateResearchMemo(input: MemoInput): string {
     lines.push(CLAIM_MEMO_WITHHELD_CONSENSUS_LINE);
   } else if (noConsensus) {
     lines.push("CONSENSUS SCORE: none (fewer than two independent models responded; slots answered by the same substitute model count as one)");
+  } else if (slots) {
+    lines.push(`CONSENSUS SCORE: ${input.consensusScore}/100 (${input.confidenceLabel} confidence; computed over ${slots.answeredSlots} answering slots by the saved synthesis; ${slots.independentModels} independent executing models)`);
   } else {
     lines.push(`CONSENSUS SCORE: ${input.consensusScore}/100 (${input.confidenceLabel} confidence)`);
   }
@@ -588,7 +601,9 @@ function generateResearchMemo(input: MemoInput): string {
       ? RESEARCH_MEMO_UNVERIFIED_SUMMARY
       : noConsensus
       ? "Fewer than two independent AI models responded to this question, so there is no cross-model agreement to report. Treat the findings as a single model's output."
-      : `${n} AI models researched this question independently. ${researchSummarySentence(input.consensusScore, input.evidenceQuality)}`
+      : slots
+        ? `${slots.answeredSlots} panel slots answered this question; ${slots.independentModels} independent executing models wrote those answers. ${researchSummarySentence(input.consensusScore, input.evidenceQuality)}`
+        : `${n} AI models researched this question independently. ${researchSummarySentence(input.consensusScore, input.evidenceQuality)}`
   );
   lines.push("");
 
@@ -626,6 +641,7 @@ function generateResearchMemo(input: MemoInput): string {
   const assess = (input.confidenceAssessment ?? "").trim();
   if (assess) {
     lines.push("CONFIDENCE ASSESSMENT");
+    if (input.confidenceAssessmentLabel) lines.push(input.confidenceAssessmentLabel);
     lines.push(assess);
     lines.push("");
   }
@@ -640,7 +656,9 @@ function generateResearchMemo(input: MemoInput): string {
       ? RESEARCH_MEMO_UNVERIFIED_METHODOLOGY
       : noConsensus
       ? RESEARCH_MEMO_SINGLE_MODEL_METHODOLOGY
-      : `This question was independently researched by ${n} large language model${n === 1 ? "" : "s"} via ConvergePanel. Each model received identical instructions. Models were not shown each other's responses. Results were synthesized to identify areas of agreement and disagreement. The consensus score reflects the degree of convergence across models weighted by evidence quality and source backing.`
+      : slots
+        ? `This question was sent to ${slots.answeredSlots} answering panel slots via ConvergePanel, written by ${slots.independentModels} independent executing models (a model that answered several slots counts once). Each slot received identical instructions. The consensus score was computed over answering slots by the saved synthesis, so it is not a count of independent models.`
+        : `This question was independently researched by ${n} large language model${n === 1 ? "" : "s"} via ConvergePanel. Each model received identical instructions. Models were not shown each other's responses. Results were synthesized to identify areas of agreement and disagreement. The consensus score reflects the degree of convergence across models weighted by evidence quality and source backing.`
   );
   lines.push("");
   lines.push("DISCLAIMER");

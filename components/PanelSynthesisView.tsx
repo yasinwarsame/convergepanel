@@ -32,7 +32,7 @@
  * - Non-blocking: shows cached synthesis while generating new version in background
  */
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -41,6 +41,16 @@ import { StructuredSynthesis } from "@/lib/synthesis/structuredSchema";
 import { runModelIdentityLabel, runModelProvenanceFromResultRow } from "@/lib/panel/runModelIdentity";
 import { isUsableResult } from "@/lib/panel/publicize";
 import { clientRowText, independentSynthesisResponders, rowsRecordExecutionIdentity } from "@/lib/panel/independentVoices";
+import {
+  MODEL_WRITTEN_ASSESSMENT_LABEL,
+  MODEL_WRITTEN_FINDINGS_LABEL,
+  PLACEHOLDER_INSUFFICIENT_SCORE_TEXT,
+  independentModelsAmong,
+  modelWrittenBlockLabel,
+  runExecutionIdentity,
+  slotScoreStatement,
+  type RunExecutionIdentity,
+} from "@/lib/panel/executionIdentity";
 import { executingVoiceName, groupSlotsByExecutingVoice, independentModelCountText } from "@/lib/panel/executingVoiceLabel";
 import { coerceStatus } from "@/lib/panel/normalize";
 import { modelHealthSubstitution, substitutedProviderNames } from "@/lib/panel/substitutionDisplay";
@@ -553,16 +563,31 @@ function RecordedDifferencesList({ items, testId }: { items: RecordedDifference[
   );
 }
 
+/** O3 (a): the one label above a model-written block group of a run that is not verified independent (C-a). */
+function ModelWrittenLabel({ text }: { text: string }) {
+  return (
+    <p className="mb-3 text-xs text-amber-800" data-testid="model-written-label">
+      {text}
+    </p>
+  );
+}
+
 /* ─── Panel Verdict Summary Card ─── */
 
 function PanelVerdictCard({
   verdict,
   gate,
+  identity,
 }: {
   verdict: PanelVerdict;
   gate: VerificationGateResult;
+  /** C-a (E01): the run's execution identity; absent → exactly as before. */
+  identity?: RunExecutionIdentity;
 }) {
   const gateStyle = GATE_STYLES[gate.status] ?? GATE_STYLES.NEEDS_HUMAN_REVIEW;
+  // E01 (C-a): counts only under the corrected D-4 gate; a PC run's counts are labelled as independent executing models.
+  const unverified = !!verdict.independenceUnverified || (verdict.crossModel !== false && !!identity && !identity.verified);
+  const unitLabelled = !!identity && identity.verified && identity.qualified;
   const recorded = verdict.recordedDifferences ?? [];
 
   return (
@@ -616,7 +641,7 @@ function PanelVerdictCard({
             <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">
               {!verdict.crossModel
                 ? PANEL_VERDICT_SINGLE_MODEL_HEADING
-                : verdict.independenceUnverified
+                : unverified
                   ? PANEL_VERDICT_INDEPENDENCE_UNVERIFIED_HEADING
                   : "Top consensus"}
             </span>
@@ -626,9 +651,11 @@ function PanelVerdictCard({
                 <span className="whitespace-normal break-words">{verdict.topConsensus}</span>
               </li>
             </ul>
-            {verdict.crossModel && !verdict.independenceUnverified && verdict.consensusModelCount > 0 && (
+            {verdict.crossModel && !unverified && verdict.consensusModelCount > 0 && (
               <p className="mt-2 text-[11px] text-slate-400">
-                Agreed by {verdict.consensusModelCount} model{verdict.consensusModelCount !== 1 ? "s" : ""}
+                {unitLabelled
+                  ? `Agreed by ${verdict.consensusModelCount} independent executing model${verdict.consensusModelCount !== 1 ? "s" : ""}`
+                  : <>Agreed by {verdict.consensusModelCount} model{verdict.consensusModelCount !== 1 ? "s" : ""}</>}
               </p>
             )}
           </div>
@@ -652,9 +679,11 @@ function PanelVerdictCard({
                     </li>
                   )}
                 </ul>
-                {verdict.crossModel && !verdict.independenceUnverified && verdict.disagreementModelCount > 0 && (
+                {verdict.crossModel && !unverified && verdict.disagreementModelCount > 0 && (
                   <p className="mt-2 text-[11px] text-slate-400">
-                    {verdict.disagreementModelCount} model{verdict.disagreementModelCount !== 1 ? "s" : ""} split
+                    {unitLabelled
+                      ? `${verdict.disagreementModelCount} independent executing model${verdict.disagreementModelCount !== 1 ? "s" : ""} split`
+                      : <>{verdict.disagreementModelCount} model{verdict.disagreementModelCount !== 1 ? "s" : ""} split</>}
                   </p>
                 )}
               </>
@@ -671,7 +700,7 @@ function PanelVerdictCard({
               <p className="mt-2 text-sm text-slate-400 italic">
                 {verdict.crossModel === false
                   ? NO_CROSS_MODEL_COMPARISON_TEXT
-                  : verdict.independenceUnverified
+                  : unverified
                     ? INDEPENDENCE_UNVERIFIED_NO_DISAGREEMENT_TEXT
                     : "No major disagreements detected."}
               </p>
@@ -824,6 +853,9 @@ export default function PanelSynthesisView({
   // fallback are ONE model. Synthesis, the consensus score and cross-model
   // support are only offered / presented with at least two.
   const independentResponderCount = independentSynthesisResponders(results).length;
+  // C-a (corrected D-4 gate, lib/panel/executionIdentity.ts): which executing models answered, recorded per usable row.
+  // Presentation only: the gate input, the synthesis payload and every decision keep their 35933c8 inputs.
+  const runIdentity = useMemo(() => runExecutionIdentity(results), [results]);
 
   // Cleanup: abort ongoing request on component unmount
   useEffect(() => {
@@ -1551,6 +1583,17 @@ export default function PanelSynthesisView({
       // "unverified"): no consensus score, no cross-model support counts and no "where models agree" on any surface.
       const independenceUnverified = crossModel && !rowsRecordExecutionIdentity(results);
       const presentsConsensus = crossModel && !independenceUnverified;
+      // C-a: the corrected gate also requires a recorded provider on every usable row; a run that fails it is
+      // presented as "model independence unverified" (no count, no consensus score). Stored placeholder rows are not
+      // model responses (D-5): fewer than two independent models without them → no consensus score.
+      const identityUnverified = crossModel && !runIdentity.verified;
+      const shownUnverified = independenceUnverified || identityUnverified;
+      const placeholderBelowTwo = crossModel && runIdentity.verified && (runIdentity.independentModels ?? 0) < 2;
+      const showsConsensus = presentsConsensus && !identityUnverified && !placeholderBelowTwo;
+      // PC (or a run with stored placeholders): the score and support figures are stated over answering slots.
+      const slotCounted = showsConsensus && runIdentity.qualified;
+      const verifiedK = runIdentity.independentModels ?? 0;
+      const blockLabel = runIdentity.qualified ? modelWrittenBlockLabel(runIdentity) : null;
       // Only real disagreements between independent executing models; positions from slots answered by one model are
       // not a disagreement (and below two independent models there is none).
       const independentDisagreements = crossModelDisagreements(report.disagreements, results, crossModel);
@@ -1582,7 +1625,11 @@ export default function PanelSynthesisView({
     const consensusMeta = synthesisState.consensusSummary;
     const modelsHealthyResolved = consensusMeta?.modelsHealthy ?? independentResponderCount;
     const modelTotalResolved = consensusMeta?.modelCount ?? Math.max(1, results.length);
-    const panelVerdict = buildPanelVerdict(question, report, gate, results, { crossModel });
+    const builtVerdict = buildPanelVerdict(question, report, gate, results, { crossModel });
+    // C-a (E01 / E10): every verdict consumer (card, copied markdown, shares) reads the corrected D-4 gate — a run whose
+    // usable rows do not all record a provider is presented as "model independence unverified" (no model count).
+    const panelVerdict: PanelVerdict =
+      identityUnverified && !builtVerdict.independenceUnverified ? { ...builtVerdict, independenceUnverified: true } : builtVerdict;
     const policyRollup =
       consensusMeta != null
         ? rollupPolicyConsensusSummary(consensusMeta, report.keyFindings?.length ?? 0)
@@ -1591,26 +1638,31 @@ export default function PanelSynthesisView({
     // Share / memo text states what the screen states: the model count is of independent executing models, and with
     // fewer than two there is no consensus score and no "where models agree" (the on-screen
     // consensus-insufficient-independent-models treatment), whatever summary was stored.
-    const sharedModelCount = independentModelCountText(independentResponderCount);
+    // C-a: with stored placeholder rows excluded (D-5) the count is the verified K; otherwise exactly as before.
+    const presentedIndependentCount = runIdentity.verified && runIdentity.placeholderSlots.length > 0 ? verifiedK : independentResponderCount;
+    const shareCross = crossModel && !placeholderBelowTwo;
+    const sharedModelCount = independentModelCountText(presentedIndependentCount);
     const recordedDiffs = panelVerdict.recordedDifferences ?? [];
     const handleGenerateLinkedIn = () => {
       const q = (question ?? "").trim();
       const score = consensusMeta?.overallConsensusScore ?? 0;
       const confidence = policyRollup?.confidenceLabel ?? "Medium";
       const findings = extractResearchKeyFindings(report);
-      const agreements = presentsConsensus ? extractResearchAgreements(panelVerdict) : [];
+      const agreements = showsConsensus ? extractResearchAgreements(panelVerdict) : [];
       const disagreements = extractResearchDisagreements(independentDisagreements);
 
       const qShort = q.length > 120 ? `${q.slice(0, 117)}...` : q;
-      const head = independenceUnverified
+      const head = shownUnverified
         ? `I researched "${qShort}" with a ConvergePanel model panel (model independence unverified).`
-        : crossModel
+        : shareCross
         ? `I researched "${qShort}" across ${sharedModelCount} simultaneously using ConvergePanel.`
         : `I researched "${qShort}" using ConvergePanel; only ${sharedModelCount} responded independently.`;
-      const scoreLine = independenceUnverified
+      const scoreLine = shownUnverified
         ? INDEPENDENCE_UNVERIFIED_SCORE_SHARE_LINE
-        : crossModel
-          ? `Consensus score: ${score}/100 (${confidence})`
+        : shareCross
+          ? slotCounted
+            ? `Consensus score: ${score}/100 (${confidence}). ${slotScoreStatement(runIdentity)}`
+            : `Consensus score: ${score}/100 (${confidence})`
           : NO_CONSENSUS_SCORE_SHARE_LINE;
       const parts: string[] = [head, "", scoreLine, ""];
       if (findings.length > 0) {
@@ -1636,9 +1688,9 @@ export default function PanelSynthesisView({
         parts.push("");
       }
       parts.push(
-        independenceUnverified
+        shownUnverified
           ? INDEPENDENCE_UNVERIFIED_SHARE_TAGLINE
-          : crossModel
+          : shareCross
             ? "The disagreements tell you more than any single answer."
             : SINGLE_MODEL_SHARE_TAGLINE,
         "",
@@ -1658,14 +1710,20 @@ export default function PanelSynthesisView({
 
       const parts: string[] = [
         `${
-          independenceUnverified
+          shownUnverified
             ? "Asked a model panel (model independence unverified)"
-            : crossModel
+            : shareCross
               ? `Asked ${sharedModelCount}`
               : `Asked a model panel (${sharedModelCount} responded independently)`
         }: "${q.length > 80 ? `${q.slice(0, 77)}...` : q}"`,
         "",
-        independenceUnverified ? INDEPENDENCE_UNVERIFIED_SCORE_SHARE_LINE : crossModel ? `Consensus: ${score}/100` : NO_CONSENSUS_SCORE_SHARE_LINE,
+        shownUnverified
+          ? INDEPENDENCE_UNVERIFIED_SCORE_SHARE_LINE
+          : shareCross
+            ? slotCounted
+              ? `Consensus: ${score}/100 (${runIdentity.answeredSlots} slots; ${verifiedK} independent models)`
+              : `Consensus: ${score}/100`
+            : NO_CONSENSUS_SCORE_SHARE_LINE,
         "",
       ];
       if (findings.length > 0) {
@@ -1686,9 +1744,9 @@ export default function PanelSynthesisView({
         parts.push(`Recorded difference (${d.basisText}): ${line(positions ? `${d.topic} (${positions})` : d.topic, 100)}`, "");
       }
       parts.push(
-        independenceUnverified
+        shownUnverified
           ? INDEPENDENCE_UNVERIFIED_SHARE_TAGLINE
-          : crossModel
+          : shareCross
             ? "One model gives you a confident answer. Five give you the shape of the problem."
             : SINGLE_MODEL_SHARE_TAGLINE,
         "",
@@ -1724,6 +1782,7 @@ export default function PanelSynthesisView({
           {report.executiveSummary && (
             <div className="bg-white rounded-lg border border-gray-200 p-6 md:p-8">
               <h2 className="text-xl font-semibold text-slate-900 mb-4">Executive Summary</h2>
+              {blockLabel && <ModelWrittenLabel text={blockLabel} />}
       <div className="prose prose-slate max-w-none">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
                   {report.executiveSummary}
@@ -1732,10 +1791,20 @@ export default function PanelSynthesisView({
             </div>
           )}
 
-          {consensusMeta && presentsConsensus && (
+          {consensusMeta && showsConsensus && (
             <SynthesisConsensusSummaryBox summary={consensusMeta} modelTotal={modelTotalResolved} independentModels={independentResponderCount} />
           )}
-          {consensusMeta && independenceUnverified && (
+          {consensusMeta && slotCounted && (
+            <p className="-mt-3 text-xs text-slate-600" data-testid="consensus-score-slot-statement">
+              {slotScoreStatement(runIdentity)}
+            </p>
+          )}
+          {consensusMeta && placeholderBelowTwo && !identityUnverified && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900" data-testid="consensus-placeholder-insufficient">
+              {PLACEHOLDER_INSUFFICIENT_SCORE_TEXT}
+            </div>
+          )}
+          {consensusMeta && shownUnverified && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900" data-testid="consensus-independence-unverified">
               Consensus score withheld: which models actually answered could not be established, so there is no verified
               cross-model agreement to measure.
@@ -1752,6 +1821,7 @@ export default function PanelSynthesisView({
           {report.keyFindings && report.keyFindings.length > 0 && (
             <div>
               <h2 className="text-lg font-semibold text-slate-900 mb-4">Key Findings</h2>
+              {runIdentity.qualified && <ModelWrittenLabel text={MODEL_WRITTEN_FINDINGS_LABEL} />}
               <div className="space-y-3">
                 {report.keyFindings.map((finding, idx) => {
                   const severity = classifyClaimSeverity(
@@ -1787,7 +1857,7 @@ export default function PanelSynthesisView({
                               // one substitute are one model.
                               const voices = groupSlotsByExecutingVoice(finding.modelsSupporting, results);
                               // Unknown execution identity: the slots are listed, never counted as independent models.
-                              return independenceUnverified
+                              return shownUnverified
                                 ? `Supporting slots (model independence unverified): ${voices.map((v) => v.label).join(", ")}`
                                 : `${independentModelCountText(voices.length)}: ${voices.map((v) => v.label).join(", ")}`;
                             })()}
@@ -1795,16 +1865,23 @@ export default function PanelSynthesisView({
                           <span className="text-xs text-green-600">•</span>
                           <span className="text-xs text-green-600">{finding.confidence} confidence</span>
                         </div>
-                        {presentsConsensus &&
+                        {showsConsensus &&
                           finding.support &&
                           (finding.evidenceQuality === "strong" ||
                             finding.evidenceQuality === "mixed" ||
                             finding.evidenceQuality === "weak") && (
                             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-green-800/90">
+                              {slotCounted ? (
+                                // E21 (C-a, PC): slots over answering slots, with the supporters' independent models.
+                                <span data-testid="finding-support-slots">
+                                  {`Supported by ${finding.support.supportingModels.length} of ${Math.max(1, runIdentity.answeredSlots)} answering slots (${independentModelsAmong(runIdentity, finding.support.supportingModels)} independent model${independentModelsAmong(runIdentity, finding.support.supportingModels) === 1 ? "" : "s"})`}
+                                </span>
+                              ) : (
                               <span>
                                 Supported by {groupSlotsByExecutingVoice(finding.support.supportingModels, results).length}/
                                 {Math.max(1, modelsHealthyResolved)} models
                               </span>
+                              )}
                               <span
                                 className={`rounded-full px-2 py-0.5 font-semibold capitalize ${
                                   finding.evidenceQuality === "strong"
@@ -1814,7 +1891,7 @@ export default function PanelSynthesisView({
                                       : "bg-slate-200/90 text-slate-800"
                                 }`}
                               >
-                                {finding.evidenceQuality} evidence
+                                {finding.evidenceQuality} evidence{slotCounted ? " (scored over panel slots)" : ""}
                               </span>
                             </div>
                           )}
@@ -1904,6 +1981,7 @@ export default function PanelSynthesisView({
           {report.biasAndBlindSpots && report.biasAndBlindSpots.length > 0 ? (
             <div>
               <h2 className="text-lg font-semibold text-slate-900 mb-4">Bias & Blind Spots</h2>
+              {blockLabel && <ModelWrittenLabel text={blockLabel} />}
               <div className="space-y-4">
                 {report.biasAndBlindSpots.map((bias, idx) => {
                   // Support both old format (string[]) and new format (object[])
@@ -2026,6 +2104,7 @@ export default function PanelSynthesisView({
           {report.openQuestions && report.openQuestions.length > 0 && (
             <div>
               <h2 className="text-lg font-semibold text-slate-900 mb-4">Open Questions</h2>
+              {blockLabel && <ModelWrittenLabel text={blockLabel} />}
               <ul className="space-y-2">
                 {report.openQuestions.map((question, idx) => (
                   <li key={idx} className="flex items-start gap-2">
@@ -2041,12 +2120,13 @@ export default function PanelSynthesisView({
           {report.methodology && (
             <div className="bg-white rounded-lg border border-gray-200 p-6">
               <h2 className="text-lg font-semibold text-slate-900 mb-4">Methodology</h2>
+              {blockLabel && <ModelWrittenLabel text={blockLabel} />}
               <p className="text-slate-700">{report.methodology}</p>
             </div>
           )}
 
           {/* Panel Verdict Summary Card */}
-          <PanelVerdictCard verdict={panelVerdict} gate={gate} />
+          <PanelVerdictCard verdict={panelVerdict} gate={gate} identity={runIdentity} />
 
           <VerificationActions
             type="research"
@@ -2073,10 +2153,14 @@ export default function PanelSynthesisView({
                 confidenceLabel: policyRollup?.confidenceLabel ?? "Medium",
                 evidenceQuality: policyRollup?.evidenceQuality ?? "mixed",
                 // Independent executing models: below two the memo states no consensus score and no agreement.
-                independentModelCount: independentResponderCount,
+                independentModelCount: presentedIndependentCount,
                 keyFindings: (report.keyFindings ?? []).map((k) => k.claim),
-                synthesisAgreements: presentsConsensus && panelVerdict.topConsensus ? [panelVerdict.topConsensus] : [],
-                ...(independenceUnverified ? { researchIndependenceUnverified: true } : {}),
+                synthesisAgreements: showsConsensus && panelVerdict.topConsensus ? [panelVerdict.topConsensus] : [],
+                ...(shownUnverified ? { researchIndependenceUnverified: true } : {}),
+                // E11 (C-a, PC): the score and the "independently" sentence are stated over answering slots.
+                ...(slotCounted ? { researchSlotCounts: { answeredSlots: runIdentity.answeredSlots, independentModels: verifiedK } } : {}),
+                // E14 (C-a): the assessment is the saved synthesis's own text.
+                ...(runIdentity.qualified && (report.executiveSummary?.trim() || panelVerdict.keyBlindSpot) ? { confidenceAssessmentLabel: MODEL_WRITTEN_ASSESSMENT_LABEL } : {}),
                 synthesisDisagreements: disagreeLines,
                 ...(recordedDiffs.length > 0 ? { researchRecordedDifferences: recordedDiffs } : {}),
                 confidenceAssessment:

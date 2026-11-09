@@ -60,7 +60,8 @@ import { outsideRecordedDifferences } from "./recordedDifferencesText";
 import type { StructuredSynthesis } from "@/lib/synthesis/structuredSchema";
 
 const TEXT = "Paris is the capital of France. The city has been the seat of the French government for centuries.";
-const ok = (modelId: string) => ({ modelId, status: "ok", rawText: TEXT, latencyMs: 5 }) as ModelResult;
+// C-a (corrected D-4 gate): a 6.2a+ ok row records its runtime provider; a provider-less ok row is a pre-6.2a row (UV).
+const ok = (modelId: string) => ({ modelId, status: "ok", rawText: TEXT, latencyMs: 5, provider: `${modelId}-provider` }) as ModelResult;
 const sub = (modelId: string) => ({ modelId, status: "substituted", rawText: TEXT, latencyMs: 5, provider: "deepseek" }) as ModelResult;
 /** A failed row that records no model id: which models executed cannot be established (gate coverage "unverified"). */
 const ANON_FAILED = { status: "failed", rawText: "", latencyMs: 5 } as unknown as ModelResult;
@@ -283,7 +284,8 @@ describe("MINOR-2: collapsed run (DeepSeek serves ChatGPT and Claude, plus Grok)
     const card = verdictCardText(r);
     expect(card).toContain("Key disagreement");
     expect(card).toContain("First location");
-    expect(card).toContain("2 models split");
+    // C-a E01 (PC: 2 independent executing models over 3 slots): the count carries its unit.
+    expect(card).toContain("2 independent executing models split");
     const block = byTestId(r, "verdict-recorded-differences");
     expect(block).toHaveLength(1);
     expect(nodeText(block[0])).toContain(SAME.topic);

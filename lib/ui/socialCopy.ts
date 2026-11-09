@@ -61,6 +61,9 @@ export function buildIntroLine(params: {
   const gateLabel = gate?.label ?? "quick reliability pass";
 
   if (!topicLabel) {
+    // E09 (C-a): "multi-model" only when the panel had at least two independent executing models with recorded identity.
+    if (params.verdict?.crossModel === false) return `I ran a model panel (one independent model responded); verdict: ${gateLabel}.`;
+    if (params.verdict?.independenceUnverified === true) return `I ran a model panel (model independence unverified); verdict: ${gateLabel}.`;
     return `I ran a multi-model panel; verdict: ${gateLabel}.`;
   }
   return `Quick panel check on: ${topicLabel} — verdict: ${gateLabel}.`;

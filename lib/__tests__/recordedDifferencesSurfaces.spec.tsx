@@ -58,7 +58,8 @@ import type { ModelResult } from "@/lib/types";
 import type { StructuredSynthesis } from "@/lib/synthesis/structuredSchema";
 
 const TEXT = "Paris is the capital of France. The city has been the seat of the French government for centuries.";
-const ok = (modelId: string) => ({ modelId, status: "ok", rawText: TEXT, latencyMs: 5 }) as ModelResult;
+// C-a (corrected D-4 gate): a 6.2a+ ok row records its runtime provider; a provider-less ok row is a pre-6.2a row (UV).
+const ok = (modelId: string) => ({ modelId, status: "ok", rawText: TEXT, latencyMs: 5, provider: `${modelId}-provider` }) as ModelResult;
 const sub = (modelId: string) => ({ modelId, status: "substituted", rawText: TEXT, latencyMs: 5, provider: "deepseek" }) as ModelResult;
 const ANON_FAILED = { status: "failed", rawText: "", latencyMs: 5 } as unknown as ModelResult;
 /** Three answering slots plus a row with no model id: which models executed cannot be established. */
@@ -216,7 +217,8 @@ describe("genuine independent-model disagreement is unchanged", () => {
     expect(nodeText(byTestId(r, "recorded-differences")[0])).not.toContain(GENUINE.topic);
     const c = nodeText(card(r));
     expect(c).toContain("Key disagreement");
-    expect(c).toContain("2 models split");
+    // C-a E01 (PC: 2 independent executing models over 3 slots): the count carries its unit.
+    expect(c).toContain("2 independent executing models split");
     const s = await surfaces(r);
     expect(s.linkedIn).toContain(`Where models disagree:\n→ ${GENUINE.topic}: ${GENUINE.whyTheyDiffer}`);
     expect(s.x).toContain(`Models disagreed on: ${GENUINE.topic}`);

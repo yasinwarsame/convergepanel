@@ -53,7 +53,8 @@ import type { ModelResult } from "@/lib/types";
 import type { StructuredSynthesis } from "@/lib/synthesis/structuredSchema";
 
 const TEXT = "Paris is the capital of France. The city has been the seat of the French government for centuries.";
-const ok = (modelId: string) => ({ modelId, status: "ok", rawText: TEXT, latencyMs: 5 }) as ModelResult;
+// C-a (corrected D-4 gate): a 6.2a+ ok row records its runtime provider; a provider-less ok row is a pre-6.2a row (UV).
+const ok = (modelId: string) => ({ modelId, status: "ok", rawText: TEXT, latencyMs: 5, provider: `${modelId}-provider` }) as ModelResult;
 const sub = (modelId: string, provider: string | undefined = "deepseek") =>
   ({ modelId, status: "substituted", rawText: TEXT, latencyMs: 5, ...(provider ? { provider } : {}) }) as ModelResult;
 const TWO_SUBS = [sub("chatgpt"), sub("claude")];
