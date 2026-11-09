@@ -267,6 +267,12 @@ describe("prevalidateCredential (pure)", () => {
       expect(prevalidateCredential(raw, "bearer", PROJECT_ID, NOW)).toEqual({ ok: false, defect: "not_compact_jws" });
     }
   });
+  it("a header or payload that is JSON but not a plain object (array, string, number, null) is rejected as that segment, before any claim is read", () => {
+    for (const bad of [[PROJECT_ID], "Error fetching", 42, null]) {
+      expect(prevalidateCredential(`${b64(bad)}.${b64(claims("bearer"))}.c2ln`, "bearer", PROJECT_ID, NOW)).toEqual({ ok: false, defect: "header_not_object" });
+      expect(prevalidateCredential(`${b64(HEADER)}.${b64(bad)}.c2ln`, "bearer", PROJECT_ID, NOW)).toEqual({ ok: false, defect: "payload_not_object" });
+    }
+  });
   it("the sub grammar is the SDK's: 1..128 chars, any content", () => {
     expect(prevalidateCredential(mint("bearer", { sub: "x".repeat(128) }), "bearer", PROJECT_ID, NOW).ok).toBe(true);
     expect(prevalidateCredential(mint("bearer", { sub: "(.*)+$ Error fetching ✓" }), "bearer", PROJECT_ID, NOW).ok).toBe(true);
