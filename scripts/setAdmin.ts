@@ -9,8 +9,11 @@
  * liveness probe of any kind.
  *
  * Until the hardened operator CLI (PR #295) merges, an emergency `admin` claim
- * change is an OWNER action in the Firebase Console, never an agent action, and
- * is verified with the read-only `scripts/check-admin-claims.js` or
+ * change is an OWNER action, never an agent action: the owner runs the reviewed
+ * SYSTEM_ADMIN claim operator tool scripts/admin/set-system-admin-claim.ts
+ * (PR #295 at its exact reviewed commit f6039ea) locally, dry run first and then
+ * a typed confirmation, with no Production run without separate authorization.
+ * The result is verified with the read-only `scripts/check-admin-claims.js` or
  * `scripts/verify-admin-claims.js`. This file is retained only until its
  * deletion in security slice S5.
  *

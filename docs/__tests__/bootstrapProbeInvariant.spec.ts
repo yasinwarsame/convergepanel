@@ -9,9 +9,16 @@
  *
  * S1 deleted the route, the probe and the variable. Until the hardened operator
  * CLI (PR #295) merges, the only documented path for an emergency `admin` claim
- * change is an OWNER action in the Firebase Console, verified with the read-only
- * `scripts/check-admin-claims.js` / `scripts/verify-admin-claims.js`. The four
- * legacy minting scripts are NOT part of that path.
+ * change is an OWNER action, never an agent action: the reviewed SYSTEM_ADMIN
+ * claim operator tool (`scripts/admin/set-system-admin-claim.ts`, branch
+ * `fix/admin-claim-script-hardening`, PR #295) run LOCALLY from a checkout of its
+ * exact reviewed commit f6039ea — explicit project and UID, dry run then typed
+ * confirmation, audit rows and `--result-file` kept, no Production run without
+ * separate authorization — verified with the read-only
+ * `scripts/check-admin-claims.js` / `scripts/verify-admin-claims.js`. (Owner
+ * ruling OPTION B, 2026-11-09: the Firebase Console cannot set custom claims or
+ * revoke refresh tokens, so the earlier "Console" wording described no path.)
+ * The four legacy minting scripts are NOT part of that path.
  *
  * What this file now enforces, over every tracked non-test file that mentions
  * an operator token (discovered from git, classified, and pinned):
@@ -81,6 +88,33 @@ const units = (text: string) =>
 
 const recommendations = (text: string) =>
   units(text).filter((u) => FORBIDDEN_TARGET.test(u) && !NEGATION.test(u)).map(flat);
+
+/**
+ * The ruled interim path (owner OPTION B, 2026-11-09). Every operator site must
+ * state each element; a site that reverts to "owner action in the Firebase
+ * Console" (a path that does not exist) or drops the exact-commit pin, the
+ * local-only rule, the dry run or the Production bar fails here.
+ */
+const INTERIM_PATH_PINS: readonly RegExp[] = [
+  /set-system-admin-claim/, //                       the tool, by name
+  /fix\/admin-claim-script-hardening/, //            its branch
+  /PR #295/,
+  /\bf6039ea\b/, //                                   the exact reviewed commit, short form
+  /f6039eaecb659159f52019b7f4cff4cce6a4ed89/, //      and the full SHA `rev-parse HEAD` must print
+  /\blocal(?:ly)?\b/i, //                           local execution
+  /never from Vercel or any deployment/,
+  /\bno defaults\b|Nothing is defaulted/i, //       explicit project and UID
+  /--confirm-project/,
+  /--target-uid/,
+  /dry run/i,
+  /--confirm-claim/, //                                typed confirmation
+  /--result-file/, //                                  evidence kept outside the repo
+  /audit rows/,
+  /No Production (?:grant or revoke|execution) without (?:its own )?separate authorization/,
+  /gated on S2/, //                                    interim: #295 unmerged
+  /never an agent action/i,
+];
+const INTERIM_PATH_FORBIDDEN = /owner action in the Firebase Console/i;
 
 const invocations = (text: string) =>
   INVOCATIONS.filter((re) => re.test(text)).map(String);
@@ -305,10 +339,24 @@ describe("P1 — the interim admin-claim path is documented where operators look
     expect(section.length).toBeGreaterThan(800);
   });
 
-  it("names the owner, the Firebase Console, and forbids agent execution", () => {
+  it("names the owner and the reviewed local operator tool, and forbids agent and Console execution", () => {
     const s = flat(section);
-    expect(s).toMatch(/\*\*owner action in the Firebase Console\*\*\. It is never an agent action/);
+    expect(s).toMatch(
+      /\*\*owner action, run locally with the reviewed SYSTEM_ADMIN claim operator tool\*\*\. It is never an agent action/
+    );
     expect(s).toMatch(/Change only the `admin` key/);
+    expect(s).not.toMatch(INTERIM_PATH_FORBIDDEN);
+    for (const re of INTERIM_PATH_PINS) expect({ re: String(re), hit: re.test(s) }).toEqual({ re: String(re), hit: true });
+  });
+
+  it("names the exact reviewed commit f6039ea and forbids Production execution without separate authorization", () => {
+    const s = flat(section);
+    // The pin is the commit, not the branch: a checkout of a later head is not the reviewed tool.
+    expect(s).toMatch(/exact reviewed commit `f6039ea`/);
+    expect(s).toMatch(/`git -C <checkout> rev-parse HEAD` must print `f6039eaecb659159f52019b7f4cff4cce6a4ed89`/);
+    expect(s).toMatch(/\*\*Dry run first, then typed confirmation\.\*\* Without `--execute` the tool/);
+    expect(s).toMatch(/\*\*No Production execution without separate authorization\.\*\* Each Production grant or revoke needs its own owner authorization/);
+    expect(s).toMatch(/PR #295 is reviewed and approved but unmerged; its merge stays gated on S2/);
   });
 
   it("verification is the read-only checks", () => {
@@ -327,7 +375,9 @@ describe("P1 — the interim admin-claim path is documented where operators look
     "%s states the same interim path",
     (f) => {
       const s = flat(read(f));
-      expect(s).toMatch(/owner action in the Firebase Console\**,? never an agent action/);
+      expect(s).toMatch(/owner action\**,? never an agent action/);
+      expect(s).not.toMatch(INTERIM_PATH_FORBIDDEN);
+      for (const re of INTERIM_PATH_PINS) expect({ f, re: String(re), hit: re.test(s) }).toEqual({ f, re: String(re), hit: true });
       expect(s).toContain("scripts/check-admin-claims.js");
       expect(s).toMatch(/not\** part of (that|this) path/);
     }
@@ -385,6 +435,10 @@ describe("P2 — admin-minting scripts are classified BY CONTENT and marked DO N
     expect(s).toMatch(/DO NOT USE\. This script is NOT part of the interim admin-claim path/);
     expect(s).toMatch(/It is not a liveness probe of any kind/);
     for (const f of READ_ONLY_CHECKS) expect(s).toContain(f);
+    // The header points at the ruled interim path, not at a Console action that does not exist.
+    expect(s).toMatch(/set-system-admin-claim\.ts \(PR #295 at its exact reviewed commit f6039ea\) locally, dry run first/);
+    expect(s).toMatch(/no Production run without separate authorization/);
+    expect(s).not.toMatch(INTERIM_PATH_FORBIDDEN);
     // It must not point an operator at a tool that no longer exists.
     expect(s).not.toContain("probe-admin-secret");
     expect(s).not.toMatch(/ADMIN_SECRET/);

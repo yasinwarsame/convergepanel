@@ -142,8 +142,16 @@ describe("the SYSTEM_ADMIN containment procedure closes the bootstrap path", () 
     }
     expect(SECTION).not.toMatch(/use a service-account script/);
     const flat = SECTION.replace(/\s+/g, " ");
-    // Claim removal goes through the interim owner path.
-    expect(flat).toMatch(/use the interim path above \(an owner action in the Firebase Console\), not the route and not a legacy minting script/);
+    // Claim removal goes through the ruled interim owner path: the reviewed
+    // operator tool at its exact commit, locally, dry run then confirmation,
+    // and never in Production without its own authorization (owner OPTION B,
+    // 2026-11-09 — the Firebase Console cannot set claims, so that wording is
+    // forbidden here).
+    expect(flat).toMatch(
+      /use the interim path above \(the reviewed SYSTEM_ADMIN claim operator tool from PR #295 at commit `f6039ea`, run locally by the owner as a dry run and then a typed confirmation; a Production revoke needs its own separate authorization\), not the route and not a legacy minting script/
+    );
+    expect(flat).not.toMatch(/owner action in the Firebase Console/i);
+    expect(flat).toMatch(/An executed revoke through the interim tool requests this itself \(no opt-out\)/);
   });
 
   it("S1: historical deployments that still ship the retired route are in scope", () => {

@@ -121,14 +121,54 @@ document runs it.
 
 1. **Who and where.** An emergency change to the `admin` custom claim (granting
    it to a new SYSTEM_ADMIN, or removing it from a compromised one) is an
-   **owner action in the Firebase Console**. It is never an agent action.
-2. **Change only the `admin` key.** Leave every other custom claim on the account
-   as it was.
-3. **Verify read-only.** Confirm the result with
+   **owner action, run locally with the reviewed SYSTEM_ADMIN claim operator tool**.
+   It is never an agent action. The tool is `scripts/admin/set-system-admin-claim.ts`
+   (`npm run admin:set-system-admin-claim`) on branch `fix/admin-claim-script-hardening`,
+   PR #295, at its exact reviewed commit `f6039ea`; its logic is
+   `lib/admin/systemAdminClaimSafety.ts` and `lib/admin/systemAdminClaimExecution.ts`,
+   and its runbook is `docs/operations/system-admin-claim-script.md` on that branch.
+   The Firebase Console has no control for custom claims or refresh-token
+   revocation, so "do it in the Console" is not a path (owner ruling, OPTION B,
+   2026-11-09).
+2. **Exact commit, local checkout only.** Run the tool from a local checkout of
+   that commit and nothing else: `git -C <checkout> rev-parse HEAD` must print
+   `f6039eaecb659159f52019b7f4cff4cce6a4ed89` before any command is typed. It runs
+   on the owner's machine, never from Vercel or any deployment — the tool refuses
+   when `VERCEL`, `VERCEL_ENV` or `NEXT_RUNTIME` is set, when `NODE_ENV=production`,
+   or when an Auth/Firestore emulator host variable is set — and `--execute`
+   refuses while `scripts/admin` or `lib/admin` has uncommitted changes. The commit
+   SHA is recorded in the audit rows.
+3. **Explicit project and UID; no defaults.** `--confirm-project=<projectId>`,
+   `--credentials=<service-account key file, mode 0600>` (its `project_id` must
+   equal the confirmed project; the tool never reads `.env.local` or credential
+   environment variables), `--target-uid=<uid>` and `--operation=grant|revoke`
+   (`--allow-claim-reduction` is required with revoke). Nothing is defaulted.
+4. **Dry run first, then typed confirmation.** Without `--execute` the tool
+   resolves the target, prints the current claims, the intended claims, the
+   per-key diff and the exact confirmation string, and writes nothing. Only then
+   run it again with `--execute --confirm-claim=<exact string printed by the dry
+   run>` and `--operator-id-token-file=<file>` (mode 0600; the ID token of a
+   SYSTEM_ADMIN's own session in the same project), or `--bootstrap-first-admin`
+   only while zero accounts hold `admin === true`. Change only the `admin` key:
+   grant writes `{ ...existing, admin: true }`, revoke removes only the `admin`
+   key, and the tool refuses a run that would alter any other claim. Every
+   executed revoke requests refresh-token revocation.
+5. **Keep the evidence.** The tool's audit rows plus
+   `--result-file=<NEW *.json path outside every git checkout>`; keep that file
+   outside the repository.
+6. **No Production execution without separate authorization.** Each Production
+   grant or revoke needs its own owner authorization naming the operation, the
+   project and the UID. The ruling that this is the interim path authorizes no
+   run by itself.
+7. **Verify read-only.** Confirm the result with
    `scripts/check-admin-claims.js` or `scripts/verify-admin-claims.js`. Both call
    `getUser` and print the claims; neither writes anything.
-4. **The account signs out and back in** before a new claim appears in its ID
+8. **The account signs out and back in** before a new claim appears in its ID
    token.
+
+This is an interim path. PR #295 is reviewed and approved but unmerged; its
+merge stays gated on S2 and is not part of this slice. When it merges, this
+section is replaced by the merged runbook.
 
 **The legacy minting scripts are NOT part of this path. Do not use them:**
 `scripts/setAdmin.ts`, `scripts/set-admin-simple.js`, `scripts/set-admin-by-uid.js`
@@ -404,10 +444,14 @@ table is the contract.
 1. `[CONTAINMENT_REMOVE_CLAIM][REQUIRED]` **Remove the claim**: the effect is `setCustomUserClaims(uid, { admin: false })` (or
    dropping the key, with every other claim left in place). `/api/admin/set-role`
    does this, but it itself requires SYSTEM_ADMIN, so during an incident use the
-   interim path above (an owner action in the Firebase Console), not the route
-   and not a legacy minting script.
+   interim path above (the reviewed SYSTEM_ADMIN claim operator tool from PR #295
+   at commit `f6039ea`, run locally by the owner as a dry run and then a typed
+   confirmation; a Production revoke needs its own separate authorization), not
+   the route and not a legacy minting script.
 2. `[CONTAINMENT_REVOKE_REFRESH][REQUIRED]` **Revoke refresh tokens** — `adminAuth.revokeRefreshTokens(uid)`. Without this
-   the already-issued ID token keeps working.
+   the already-issued ID token keeps working. An executed revoke through the
+   interim tool requests this itself (no opt-out); confirm it in the tool's
+   result file.
 3. **Understand the residual window.** Every SYSTEM_ADMIN guard verifies with
    `verifyIdToken`, which does not consult revocation. Until the outstanding ID
    token expires (Firebase default one hour), a de-claimed or disabled

@@ -311,8 +311,23 @@ variable, so do not set it.
 
 1. Sign up a user account through the app (`/signup`).
 2. Until the hardened operator CLI (PR #295) merges, granting the `admin` custom
-   claim is an **owner action in the Firebase Console**, never an agent action.
-   Change only the `admin` key and leave every other claim in place.
+   claim is an **owner action**, never an agent action. The owner runs the reviewed
+   SYSTEM_ADMIN claim operator tool `scripts/admin/set-system-admin-claim.ts`
+   (`npm run admin:set-system-admin-claim`, branch `fix/admin-claim-script-hardening`,
+   PR #295) **locally**, from a checkout of its exact reviewed commit `f6039ea`:
+   `git -C <checkout> rev-parse HEAD` must print
+   `f6039eaecb659159f52019b7f4cff4cce6a4ed89`, and never from Vercel or any deployment.
+   The tool has no defaults: pass `--confirm-project=<projectId>`,
+   `--credentials=<service-account key file, mode 0600>`, `--target-uid=<uid>` and
+   `--operation=grant`. Run it as a dry run first (the default), then
+   `--execute --confirm-claim=<exact string the dry run printed>` with
+   `--operator-id-token-file=<file>` (or `--bootstrap-first-admin` only while zero
+   accounts hold the claim), exactly as `docs/operations/system-admin-claim-script.md`
+   on that branch describes. Keep the tool's audit rows and its `--result-file` (a NEW
+   `*.json` outside every git checkout). No Production grant or revoke without its own
+   separate authorization. This is an interim path: #295 is reviewed and approved but
+   unmerged, and its merge stays gated on S2. The tool changes only the `admin` key
+   and leaves every other claim in place.
 3. Verify read-only with `node scripts/check-admin-claims.js <UID>` or
    `scripts/verify-admin-claims.js`; neither writes anything.
 4. The user must sign out and sign back in for the claim to take effect.
