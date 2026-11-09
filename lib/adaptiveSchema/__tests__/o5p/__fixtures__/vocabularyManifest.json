@@ -2563,13 +2563,6 @@
  },
  {
   "file": "lib/adaptiveSchema/verdictIndependence.ts",
-  "literal": "`${status === \"consensus\" ? \"Top consensus\" : \"Top majority-supported claim\"} (${t.voices.length} independent models; a substitute model that answered several slots counted once)`",
-  "count": 1,
-  "category": "contract-p-applied",
-  "rule": "historical adaptive agreement independence (owner order C, review of cf74a52, 2026-11-06): shown ONLY when a stored consensus / majority statement's supporting slots (joined from the stored rows; unjoined, the run's slots) are recorded as answered by a repeated substitute model or carry no recorded execution identity (verdictIndependence.ts presentIndependenceQualifiedReport / rowView); states the executing models and independent-model counts; stored values unchanged; independent runs render byte-identically (historicalParity.spec.tsx, historicalAgreementIndependence.spec.tsx)"
- },
- {
-  "file": "lib/adaptiveSchema/verdictIndependence.ts",
   "literal": "\"Top consensus\"",
   "count": 1,
   "category": "contract-p-applied",
@@ -2693,5 +2686,54 @@
   "count": 1,
   "category": "non-user",
   "rule": "test id"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictIndependence.ts",
+  "literal": "\"Top finding (stored placeholder text among the supporting slots; not an independent consensus)\"",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "C-a review F-2 (owner ruling, 2026-11-09): shown ONLY when a supporting slot of a stored consensus / majority statement holds a listed D-5 placeholder (INVALID_MOCK, lib/panel/executionIdentity.ts; the J02 fact) — a stored placeholder is not a model response, so it is never counted as an independent model and the stored support count is never presented as 'agreed by N models' (verdictIndependence.ts kind 'placeholder'); stored values unchanged; runs without a placeholder slot render as before"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictIndependence.ts",
+  "literal": "`not an independent ${NOT_INDEPENDENT_WORD[status]}: ${held} — no model response supports it${disputes}`",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "C-a review F-2 (owner ruling, 2026-11-09): shown ONLY when a supporting slot of a stored consensus / majority statement holds a listed D-5 placeholder (INVALID_MOCK, lib/panel/executionIdentity.ts; the J02 fact) — a stored placeholder is not a model response, so it is never counted as an independent model and the stored support count is never presented as 'agreed by N models' (verdictIndependence.ts kind 'placeholder'); stored values unchanged; runs without a placeholder slot render as before"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictIndependence.ts",
+  "literal": "`not an independent ${NOT_INDEPENDENT_WORD[status]}: ${held}; the remaining panel slot was answered by one model, ${t.voices[0]}${disputes}`",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "C-a review F-2 (owner ruling, 2026-11-09): shown ONLY when a supporting slot of a stored consensus / majority statement holds a listed D-5 placeholder (INVALID_MOCK, lib/panel/executionIdentity.ts; the J02 fact) — a stored placeholder is not a model response, so it is never counted as an independent model and the stored support count is never presented as 'agreed by N models' (verdictIndependence.ts kind 'placeholder'); stored values unchanged; runs without a placeholder slot render as before"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictIndependence.ts",
+  "literal": "`recorded as ${RECORDED_STATUS_WORD[status]} of ${slotsText(s)}${disputes}; ${held}; the remaining ${slotsText(m)} were each answered by their own model (${t.voices.join(\"; \")})`",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "C-a review F-2 (owner ruling, 2026-11-09): shown ONLY when a supporting slot of a stored consensus / majority statement holds a listed D-5 placeholder (INVALID_MOCK, lib/panel/executionIdentity.ts; the J02 fact) — a stored placeholder is not a model response, so it is never counted as an independent model and the stored support count is never presented as 'agreed by N models' (verdictIndependence.ts kind 'placeholder'); stored values unchanged; runs without a placeholder slot render as before"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictIndependence.ts",
+  "literal": "`In this run ${placeholderSlotsClause(run.placeholders.length)}, so uniform responses across the remaining slots are not shown as agreement between independent models.`",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "C-a review F-2 (owner ruling, 2026-11-09): shown ONLY when a supporting slot of a stored consensus / majority statement holds a listed D-5 placeholder (INVALID_MOCK, lib/panel/executionIdentity.ts; the J02 fact) — a stored placeholder is not a model response, so it is never counted as an independent model and the stored support count is never presented as 'agreed by N models' (verdictIndependence.ts kind 'placeholder'); stored values unchanged; runs without a placeholder slot render as before"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictIndependence.ts",
+  "literal": "`not confirmed as agreement between independent models: ${placeholderSlotsClause(run.placeholders.length)}`",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "C-a review F-2 (owner ruling, 2026-11-09): shown ONLY when a supporting slot of a stored consensus / majority statement holds a listed D-5 placeholder (INVALID_MOCK, lib/panel/executionIdentity.ts; the J02 fact) — a stored placeholder is not a model response, so it is never counted as an independent model and the stored support count is never presented as 'agreed by N models' (verdictIndependence.ts kind 'placeholder'); stored values unchanged; runs without a placeholder slot render as before"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictIndependence.ts",
+  "literal": "\"Where models agree (a slot holding stored placeholder text is not counted)\"",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "C-a review F-2 (owner ruling, 2026-11-09): shown ONLY when a supporting slot of a stored consensus / majority statement holds a listed D-5 placeholder (INVALID_MOCK, lib/panel/executionIdentity.ts; the J02 fact) — a stored placeholder is not a model response, so it is never counted as an independent model and the stored support count is never presented as 'agreed by N models' (verdictIndependence.ts kind 'placeholder'); stored values unchanged; runs without a placeholder slot render as before"
  }
 ]

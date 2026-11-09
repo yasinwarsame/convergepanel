@@ -151,14 +151,16 @@ describe("substitution", () => {
 
 describe("row adapters", () => {
   it("result row: reads only the row; status 'substituted' is the only substitution claim", () => {
+    // C-a review F-1: the recorded status itself is kept on the facts (the shared gate reads it through identityRowFromFacts).
     expect(runModelProvenanceFromResultRow({ modelId: "claude", status: "substituted", provider: "deepseek", requestedModel: "claude-haiku-4-5-20251001", substitutedFrom: "anthropic:claude-haiku-4-5-20251001" })).toEqual({
       modelId: "claude",
+      status: "substituted",
       provider: "deepseek",
       requestedModel: "claude-haiku-4-5-20251001",
       substituted: true,
       substitutedFrom: "anthropic:claude-haiku-4-5-20251001",
     });
-    expect(runModelProvenanceFromResultRow({ modelId: "chatgpt", status: "ok", requestedModel: "gpt-4o-mini", substitutedFrom: "x:y" })).toEqual({ modelId: "chatgpt", requestedModel: "gpt-4o-mini", substituted: false });
+    expect(runModelProvenanceFromResultRow({ modelId: "chatgpt", status: "ok", requestedModel: "gpt-4o-mini", substitutedFrom: "x:y" })).toEqual({ modelId: "chatgpt", status: "ok", requestedModel: "gpt-4o-mini", substituted: false });
     expect(runModelProvenanceFromResultRow({ modelId: "chatgpt" })).toEqual({ modelId: "chatgpt" });
   });
   it("result row: a pre-6.2a saved row (no provenance keys) reads 'model not recorded'", () => {

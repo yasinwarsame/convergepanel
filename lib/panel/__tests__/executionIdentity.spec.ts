@@ -6,15 +6,18 @@ import { readdirSync, readFileSync, statSync } from "fs";
 import { join, relative } from "path";
 import {
   executionIdentityVerified,
+  identityRowFromFacts,
   placeholderClass,
   runExecutionIdentity,
   STORED_PLACEHOLDER_LITERALS,
   modelWrittenBlockLabel,
   modelWrittenShortLabel,
   runSlotStatement,
+  withPlaceholderFact,
 } from "@/lib/panel/executionIdentity";
+import { runModelProvenanceFromResultRow } from "@/lib/panel/runModelIdentity";
 import { rowsRecordExecutionIdentity, storedRunConsensusIndependence } from "@/lib/panel/independentVoices";
-import { SETS, rowsOf, referenceK, UV_SETS, BI35_SETS, DIGIT_NEXT_TO_INDEPENDENT, ok, sub, type SetName } from "./executionIdentityScenarios";
+import { SETS, rowsOf, referenceK, UV_SETS, BI35_SETS, DIGIT_NEXT_TO_INDEPENDENT, mock, ok, sub, type SetName } from "./executionIdentityScenarios";
 
 describe("corrected D-4 gate: every scenario's kind, K and M", () => {
   it.each(Object.keys(SETS) as SetName[])("%s", (name) => {
@@ -110,5 +113,47 @@ describe("D-5 closed placeholder list (E19 / E20 / J02)", () => {
     expect(files.some((f) => relative(process.cwd(), f) === "lib/panel/storedMockRow.ts")).toBe(false);
     const importers = files.filter((f) => /from "@\/lib\/panel\/executionIdentity"/.test(readFileSync(f, "utf8"))).map((f) => relative(process.cwd(), f)).sort();
     expect(importers).toEqual(expect.arrayContaining(["components/PanelSynthesisView.tsx", "components/ResultsDisplay.tsx", "components/adaptive/shared.tsx"]));
+    // C-a review F-1: the adaptive verdict surfaces import the gate from here (no second copy of the rule).
+    expect(importers).toContain("lib/adaptiveSchema/verdictIndependence.ts");
+    expect(readFileSync(join(process.cwd(), "lib/adaptiveSchema/verdictIndependence.ts"), "utf8")).not.toMatch(/function (executionIdentityVerified|recordedProvider|isUsable)\b/);
+  });
+});
+
+describe("C-a review F-1 / F-2: the facts adapter (identityRowFromFacts) reads the same gate over per-slot provenance facts", () => {
+  const facts = (rows: readonly unknown[]) => rows.map((r: any) => withPlaceholderFact(runModelProvenanceFromResultRow(r), r));
+
+  it.each(Object.keys(SETS).filter((n) => n !== "S6") as SetName[])("%s: the gate over the facts rows agrees with the gate over the result rows", (name) => {
+    const rows = rowsOf(name);
+    expect([name, executionIdentityVerified(facts(rows).map(identityRowFromFacts))]).toEqual([name, executionIdentityVerified(rows)]);
+    const viaFacts = runExecutionIdentity(facts(rows).map(identityRowFromFacts));
+    const viaRows = runExecutionIdentity(rows);
+    expect([name, viaFacts.kind, viaFacts.independentModels, viaFacts.placeholderSlots]).toEqual([name, viaRows.kind, viaRows.independentModels, viaRows.placeholderSlots]);
+  });
+
+  it("maps `substituted` to the recorded status, passes provider and the D-5 facts through, and completes nothing", () => {
+    expect(identityRowFromFacts({ modelId: "chatgpt", substituted: false, provider: "openai" })).toEqual({ modelId: "chatgpt", status: "ok", provider: "openai" });
+    expect(identityRowFromFacts({ modelId: "claude", substituted: true, provider: "deepseek" })).toEqual({ modelId: "claude", status: "substituted", provider: "deepseek" });
+    expect(identityRowFromFacts({ modelId: "grok" })).toEqual({ modelId: "grok" });
+    expect(identityRowFromFacts({ modelId: "chatgpt", substituted: false, provider: "openai", invalidProviderOutput: true })).toEqual({ modelId: "chatgpt", status: "ok", provider: "openai", invalidProviderOutput: true });
+    expect(identityRowFromFacts({ modelId: "chatgpt", substituted: false, provider: "openai", validityUnknown: true })).toEqual({ modelId: "chatgpt", status: "ok", provider: "openai", validityUnknown: true });
+    expect(identityRowFromFacts(null)).toEqual({});
+  });
+
+  it("the D-5 facts are read back as the recorded class; a facts row without them has no class (it holds no text)", () => {
+    expect(placeholderClass(identityRowFromFacts(withPlaceholderFact({ modelId: "chatgpt", substituted: false }, mock("chatgpt") as any)))).toBe("INVALID_MOCK");
+    expect(placeholderClass(identityRowFromFacts(withPlaceholderFact({ modelId: "chatgpt", substituted: false }, { ...ok("chatgpt"), rawText: "a mock response in prose" } as any)))).toBe("VALIDITY_UNKNOWN");
+    expect(placeholderClass(identityRowFromFacts({ modelId: "chatgpt", substituted: false, provider: "openai" }))).toBeNull();
+    // Only the literal `true` is a fact.
+    expect(placeholderClass({ modelId: "chatgpt", status: "ok", invalidProviderOutput: "true" })).toBeNull();
+    expect(placeholderClass({ modelId: "chatgpt", status: "ok", validityUnknown: 1 })).toBeNull();
+  });
+
+  it("a facts row with no recorded status, no provider, or provider 'unknown' fails the gate (nothing is inferred)", () => {
+    const verified = [{ modelId: "chatgpt", substituted: false, provider: "openai" }, { modelId: "claude", substituted: true, provider: "deepseek" }];
+    expect(executionIdentityVerified(verified.map(identityRowFromFacts))).toBe(true);
+    expect(executionIdentityVerified([{ modelId: "chatgpt", substituted: false }, verified[1]].map(identityRowFromFacts))).toBe(false);
+    expect(executionIdentityVerified([{ modelId: "chatgpt", provider: "openai" }, verified[1]].map(identityRowFromFacts))).toBe(false);
+    expect(executionIdentityVerified([verified[0], { modelId: "claude", substituted: true, provider: "unknown" }].map(identityRowFromFacts))).toBe(false);
+    expect(executionIdentityVerified([verified[0], { modelId: "claude", substituted: true }].map(identityRowFromFacts))).toBe(false);
   });
 });

@@ -125,7 +125,9 @@ describe("independent supporters are unaffected", () => {
         }
       }
     }
-  });
+    // 15 full renders (every consumer, PDF and DOCX included) in one test: under a loaded full-suite run this exceeded
+    // jest's 5 s default (seen on ff15cb6 before any C-a review change). The assertions are unchanged.
+  }, 120_000);
 
   it("without the run's rows (surface not handed the record) nothing is inferred", () => {
     expect(adaptiveTopIndependence(["chatgpt", "claude"], null)).toEqual({ kind: "independent" });
@@ -145,7 +147,9 @@ describe("the rule on its own", () => {
     expect(adaptiveTopIndependence(["chatgpt", "gemini"], [f("chatgpt", false)])).toEqual({ kind: "unverified", scope: "supporters" });
     expect(adaptiveTopIndependence(["chatgpt", "claude"], [f("chatgpt", false), f("claude")])).toEqual({ kind: "unverified", scope: "supporters" });
   });
-  it("two substitutes with no recorded provider are one model (nothing split)", () => {
-    expect(adaptiveTopIndependence(["chatgpt", "claude"], [f("chatgpt", true), f("claude", true)])).toMatchObject({ kind: "repeated_substitute" });
+  it("two substitutes with no recorded provider: their executing identity cannot be verified → unverified (nothing split)", () => {
+    // C-a review F-1 (owner ruling): the shared corrected D-4 gate (lib/panel/executionIdentity.ts) requires a recorded
+    // provider on every answered slot; an unrecorded substitute is never merged into "one model" by inference.
+    expect(adaptiveTopIndependence(["chatgpt", "claude"], [f("chatgpt", true), f("claude", true)])).toEqual({ kind: "unverified", scope: "supporters" });
   });
 });

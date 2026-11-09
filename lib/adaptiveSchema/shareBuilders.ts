@@ -433,7 +433,7 @@ export function buildAdaptiveMemoInput(
   // unverified (verdictIndependence.ts). Independent runs: nothing is added — the memo as before.
   const runIndependence = adaptiveTopIndependence(null, modelProvenance);
   const independenceInput =
-    runIndependence.kind === "repeated_substitute"
+    runIndependence.kind === "repeated_substitute" || runIndependence.kind === "placeholder"
       ? { independentModelCount: runIndependence.voices.length }
       : runIndependence.kind === "unverified"
         ? { researchIndependenceUnverified: true }

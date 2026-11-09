@@ -1115,14 +1115,20 @@ export function pdfLayoutFixtures(): PdfLayoutFixture[] {
   ];
 }
 
+/** The runtime provider Step 6.2a records for each slot's own connector (what a current export's frozen provenance carries). */
+const SLOT_RUNTIME_PROVIDER: Readonly<Record<string, string>> = { chatgpt: "openai", claude: "anthropic", grok: "xai", perplexity: "perplexity", gemini: "google" };
+
 /**
  * c16: the layout fixtures carry no frozen run provenance — by data they are pre-6.2b exports, whose model independence
  * is stated as unverified (owner ruling, exportPositionView.exportSlotProvenance). A spec whose subject is layout or
  * claim formatting on a current export (every slot its own recorded executing model) freezes this record's provenance:
- * each dispatched slot recorded as NOT substituted, and nothing else (no provider or model is invented, so every slot
- * label is unchanged). Returns the same (mutated) record.
+ * each dispatched slot recorded as NOT substituted and answered by its own runtime provider (C-a review F-1: the shared
+ * corrected D-4 gate verifies a slot only with a recorded provider, as Step 6.2a writes one), and nothing else (no
+ * requested model is invented, so every slot label is unchanged). Returns the same (mutated) record.
  */
 export function withIndependentFrozenProvenance<T extends { reportSnapshot: any }>(record: T): T {
-  record.reportSnapshot.runProvenance = { models: (record.reportSnapshot.models ?? []).map((m: { modelId: string }) => ({ modelId: m.modelId, substituted: false })) };
+  record.reportSnapshot.runProvenance = {
+    models: (record.reportSnapshot.models ?? []).map((m: { modelId: string }) => ({ modelId: m.modelId, substituted: false, provider: SLOT_RUNTIME_PROVIDER[m.modelId] ?? "openai" })),
+  };
   return record;
 }

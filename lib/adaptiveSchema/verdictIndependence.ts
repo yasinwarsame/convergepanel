@@ -10,15 +10,26 @@
  *  - "independent": every slot considered is its own executing model — the report renders exactly as before;
  *  - "repeated_substitute": two or more of those slots were answered by one substitute model — never an unqualified
  *    "Top consensus" / "agreed by N"; the executing models are named ("DeepSeek (substituting ChatGPT, Claude)");
- *  - "unverified": a slot considered has no recorded execution identity (no row, or a row without a recorded status)
- *    — model independence is stated as unverified; nothing is invented.
+ *  - "unverified": the executing identity of a slot considered cannot be verified under the shared corrected D-4 gate
+ *    (lib/panel/executionIdentity.ts `executionIdentityVerified`: no row, no recorded status, or an answered row
+ *    without a recorded provider — the pre-6.2a / S3mn records; C-a review F-1) — model independence is stated as
+ *    unverified; nothing is invented and no provider history is reconstructed;
+ *  - "placeholder": a supporting slot's stored text is a listed D-5 placeholder (INVALID_MOCK, the J02 fact), which is
+ *    not a model response — it is never counted as an independent model, and the stored support count is never
+ *    presented as "agreed by N models" (C-a review F-2); the remaining slots are each their own executing model.
+ * Stored placeholder slots are excluded from the slots considered in both scopes (they are not model responses) and
+ * their presence qualifies the statement in both scopes — the shared rule never presents such a run as a clean
+ * independent run (`runExecutionIdentity(...).qualified`), and a surface not handed the stored rows judges the top
+ * claim by the run, where the stored count would otherwise surface unqualified.
  * The slots considered are the top claim's supporting cells when the stored rows join it ("supporters"), otherwise
  * every slot the run records ("run"). Without the run's rows at all (`provenance` null — a surface not handed the
  * record, RunModelProvenanceContext's contract) nothing is inferred and the report renders as before.
  *
- * Pure, client-safe; imports no computation module (it is read by positionPresentation.ts).
+ * Pure, client-safe; imports no computation module (it is read by positionPresentation.ts). The identity rule is
+ * imported from lib/panel/executionIdentity.ts (presentation only), never re-implemented here.
  */
 
+import { executionIdentityVerified, identityRowFromFacts, placeholderClass } from "@/lib/panel/executionIdentity";
 import { groupSlotsByExecutingVoice } from "@/lib/panel/executingVoiceLabel";
 import type { RunModelProvenanceFacts } from "@/lib/panel/runModelIdentity";
 import { NO_CONSENSUS_IDENTIFIED, quoteClaim } from "./agreementNarrative";
@@ -27,7 +38,9 @@ import { VERDICT_NEXT_STEPS } from "./config";
 export type AdaptiveTopIndependence =
   | { kind: "independent" }
   | { kind: "repeated_substitute"; scope: "supporters" | "run"; voices: string[]; repeated: string[] }
-  | { kind: "unverified"; scope: "supporters" | "run" };
+  | { kind: "unverified"; scope: "supporters" | "run" }
+  /** F-2: `placeholders` are the excluded stored-placeholder slot ids; `voices` the remaining slots' executing models (each once). */
+  | { kind: "placeholder"; scope: "supporters" | "run"; voices: string[]; placeholders: string[] };
 
 const INDEPENDENT: AdaptiveTopIndependence = Object.freeze({ kind: "independent" as const });
 
@@ -35,6 +48,13 @@ const INDEPENDENT: AdaptiveTopIndependence = Object.freeze({ kind: "independent"
 export const ADAPTIVE_REPEATED_SUBSTITUTE_TOP_HEADING = "Top finding (repeated substitute model; not an independent consensus)";
 /** Heading in place of "Top consensus" / "Top majority-supported claim" / "Models agree" (execution identity not recorded). */
 export const ADAPTIVE_INDEPENDENCE_UNVERIFIED_TOP_HEADING = "Top finding (model independence unverified; not confirmed as a consensus)";
+/** Heading in place of "Top consensus" / "Top majority-supported claim" / "Models agree" (a supporting slot held stored placeholder text). */
+export const ADAPTIVE_PLACEHOLDER_TOP_HEADING = "Top finding (stored placeholder text among the supporting slots; not an independent consensus)";
+
+/** "1 panel slot held stored placeholder text (not a model response)" — the D-5 clause every placeholder statement carries. */
+export function placeholderSlotsClause(n: number): string {
+  return `${slotsText(n)} held stored placeholder text (not a model response)`;
+}
 
 /** The supporting slot ids (agrees / partial cells) of a stored aligned row, or null when it is not a readable row. */
 export function supportingSlotsOfRow(row: unknown): string[] | null {
@@ -50,6 +70,19 @@ export function supportingSlotsOfRow(row: unknown): string[] | null {
   return out;
 }
 
+const factsFor = (provenance: readonly RunModelProvenanceFacts[], slot: string) => provenance.find((f) => f && typeof f.modelId === "string" && f.modelId.trim() === slot);
+
+/** D-5: a slot whose facts carry the J02 placeholder class is not a model response (the shared oracle, read through the facts adapter). */
+function isPlaceholderSlot(provenance: readonly RunModelProvenanceFacts[], slot: string): boolean {
+  return placeholderClass(identityRowFromFacts(factsFor(provenance, slot))) === "INVALID_MOCK";
+}
+
+/** The slots of a list that are model responses (stored placeholder slots removed), and the removed placeholder slots. */
+function respondingSlots(slots: readonly string[], provenance: readonly RunModelProvenanceFacts[]): { responding: string[]; placeholders: string[] } {
+  const placeholders = slots.filter((s) => isPlaceholderSlot(provenance, s));
+  return { responding: slots.filter((s) => !placeholders.includes(s)), placeholders };
+}
+
 export function adaptiveTopIndependence(
   supporters: readonly string[] | null,
   provenance: readonly RunModelProvenanceFacts[] | null | undefined
@@ -57,19 +90,25 @@ export function adaptiveTopIndependence(
   if (!Array.isArray(provenance)) return INDEPENDENT;
   const scope = supporters ? "supporters" : "run";
   const source = supporters ?? provenance.map((f) => (f && typeof f.modelId === "string" ? f.modelId : ""));
-  const slots = Array.from(new Set(source.map((s) => String(s).trim()).filter((s) => s.length > 0)));
-  if (slots.length === 0) return scope === "run" && provenance.length > 0 ? { kind: "unverified", scope } : INDEPENDENT;
-  const factsOf = (slot: string) => provenance.find((f) => f && typeof f.modelId === "string" && f.modelId.trim() === slot);
-  if (slots.some((s) => typeof factsOf(s)?.substituted !== "boolean")) return { kind: "unverified", scope };
+  const considered = Array.from(new Set(source.map((s) => String(s).trim()).filter((s) => s.length > 0)));
+  if (considered.length === 0) return scope === "run" && provenance.length > 0 ? { kind: "unverified", scope } : INDEPENDENT;
   if (scope === "run" && provenance.some((f) => !f || typeof f.modelId !== "string" || !f.modelId.trim())) return { kind: "unverified", scope };
+  // F-2 (D-5): a stored placeholder slot is not a model response — never a considered slot, never an executing model.
+  const { responding: slots, placeholders } = respondingSlots(considered, provenance);
+  if (slots.length === 0) return placeholders.length > 0 ? { kind: "placeholder", scope, voices: [], placeholders } : INDEPENDENT;
+  // F-1: the shared corrected D-4 gate over the considered slots' rows (a slot with no row, no recorded status, or an
+  // answered row without a recorded provider fails it — nothing is inferred, no provider history is reconstructed).
+  const rows = slots.map((s) => factsFor(provenance, s));
+  if (rows.some((f) => !f) || !executionIdentityVerified(rows.map((f) => identityRowFromFacts(f)))) return { kind: "unverified", scope };
   const groups = groupSlotsByExecutingVoice(slots, provenance);
-  if (groups.length >= slots.length) return INDEPENDENT;
+  if (groups.length >= slots.length) return placeholders.length > 0 ? { kind: "placeholder", scope, voices: groups.map((g) => g.label), placeholders } : INDEPENDENT;
   return { kind: "repeated_substitute", scope, voices: groups.map((g) => g.label), repeated: groups.filter((g) => g.slotIds.length > 1).map((g) => g.label) };
 }
 
 export function adaptiveTopHeading(t: AdaptiveTopIndependence): string | null {
   if (t.kind === "repeated_substitute") return ADAPTIVE_REPEATED_SUBSTITUTE_TOP_HEADING;
   if (t.kind === "unverified") return ADAPTIVE_INDEPENDENCE_UNVERIFIED_TOP_HEADING;
+  if (t.kind === "placeholder") return ADAPTIVE_PLACEHOLDER_TOP_HEADING;
   return null;
 }
 
@@ -90,6 +129,11 @@ export function adaptiveTopIndependenceStatement(t: AdaptiveTopIndependence, sto
   }
   if (t.kind === "unverified") {
     return `Model independence unverified: ${recorded ? `${recorded.charAt(0).toLowerCase()}${recorded.slice(1)}, but which` : "which"} models answered ${t.scope === "supporters" ? "the supporting slots" : "this run's slots"} is not recorded.`;
+  }
+  if (t.kind === "placeholder") {
+    const m = t.voices.length;
+    const p = t.placeholders.length;
+    return `${recorded ? `${recorded}, answered by` : "Supporting slots answered by"} ${m} independent model${m === 1 ? "" : "s"}${m > 0 ? `: ${t.voices.join("; ")}` : ""}. ${placeholderSlotsClause(p)} and ${p === 1 ? "is" : "are"} not counted.`;
   }
   return null;
 }
@@ -178,6 +222,12 @@ export function qualifiedRowResult(row: unknown, t: QualifiedIndependence): stri
     return `recorded as ${RECORDED_STATUS_WORD[status]} of ${slotsText(s)}${disputes}; model independence unverified — which models answered the supporting slots is not recorded`;
   }
   const m = t.voices.length;
+  if (t.kind === "placeholder") {
+    const held = placeholderSlotsClause(t.placeholders.length);
+    if (m === 0) return `not an independent ${NOT_INDEPENDENT_WORD[status]}: ${held} — no model response supports it${disputes}`;
+    if (m === 1) return `not an independent ${NOT_INDEPENDENT_WORD[status]}: ${held}; the remaining panel slot was answered by one model, ${t.voices[0]}${disputes}`;
+    return `recorded as ${RECORDED_STATUS_WORD[status]} of ${slotsText(s)}${disputes}; ${held}; the remaining ${slotsText(m)} were each answered by their own model (${t.voices.join("; ")})`;
+  }
   if (m < 2) return `not an independent ${NOT_INDEPENDENT_WORD[status]}: the ${slotsText(s)} supporting it were all answered by one model, ${t.voices[0] ?? SUBSTITUTE_MODEL_FALLBACK}${disputes}`;
   return `recorded as ${RECORDED_STATUS_WORD[status]} of ${slotsText(s)}${disputes}; those slots were answered by ${m} independent models (${t.voices.join("; ")}) — a substitute model that answered several slots counts once`;
 }
@@ -231,7 +281,9 @@ export function rowIndependence(row: unknown, provenance: readonly RunModelProve
   if (participants.length === 0) return null;
   const t = adaptiveTopIndependence(participants, provenance);
   if (t.kind === "independent") return null;
-  const groups = groupSlotsByExecutingVoice(participants, provenance);
+  // F-2: stored placeholder slots are not executing models — they are no side's voice and never "on both sides".
+  const responding = (slots: readonly string[]) => respondingSlots(slots, provenance).responding;
+  const groups = groupSlotsByExecutingVoice(responding(participants), provenance);
   const bothSides = groups.filter((g) => g.slotIds.some((s) => supportSlots.includes(s)) && g.slotIds.some((s) => disputeSlots.includes(s))).map((g) => g.label);
   return {
     t,
@@ -239,8 +291,8 @@ export function rowIndependence(row: unknown, provenance: readonly RunModelProve
     dispute: disputeSlots.length ? adaptiveTopIndependence(disputeSlots, provenance) : INDEPENDENT,
     supportSlots,
     disputeSlots,
-    supportVoices: groupSlotsByExecutingVoice(supportSlots, provenance).map((g) => g.label),
-    disputeVoices: groupSlotsByExecutingVoice(disputeSlots, provenance).map((g) => g.label),
+    supportVoices: groupSlotsByExecutingVoice(responding(supportSlots), provenance).map((g) => g.label),
+    disputeVoices: groupSlotsByExecutingVoice(responding(disputeSlots), provenance).map((g) => g.label),
     bothSides: t.kind === "unverified" ? [] : bothSides,
   };
 }
@@ -249,6 +301,11 @@ export function rowIndependence(row: unknown, provenance: readonly RunModelProve
 function sideClause(n: number, verb: "support" | "dispute", side: AdaptiveTopIndependence, voices: readonly string[]): string {
   const counted = `${slotsText(n)} ${n === 1 ? `${verb}s` : verb} it`;
   if (side.kind === "unverified") return `${counted} (model independence unverified — which models answered ${n === 1 ? "it" : "them"} is not recorded)`;
+  if (side.kind === "placeholder") {
+    const m = voices.length;
+    const rest = m === 0 ? "" : m === 1 ? `; the remaining panel slot was answered by one model, ${voices[0]}` : `; the remaining ${slotsText(m)} were each answered by their own model (${voices.join("; ")})`;
+    return `${counted}; ${placeholderSlotsClause(side.placeholders.length)}${rest}`;
+  }
   if (voices.length === 1) return n === 1 ? `${counted} (${voices[0]})` : `${counted}, all answered by one model, ${voices[0]}`;
   if (voices.length < n) return `${counted}, answered by ${voices.length} independent models (${voices.join("; ")})`;
   return `${counted}, each answered by its own model (${voices.join("; ")})`;
@@ -293,9 +350,9 @@ export const COUNTED_BY_PANEL_SLOT = "(counted by panel slot)";
 /** The run's slots as a whole: null when every slot is its own recorded executing model, or without the run's rows. */
 export function runIndependence(provenance: readonly RunModelProvenanceFacts[] | null | undefined): QualifiedIndependence | null {
   if (!Array.isArray(provenance)) return null;
-  // J02 (D-5): a slot whose stored text is a listed placeholder is not a model response, so it is not a run-scope slot.
-  const responding = provenance.some((f) => f?.invalidProviderOutput === true) ? provenance.filter((f) => f?.invalidProviderOutput !== true) : provenance;
-  const t = adaptiveTopIndependence(null, responding);
+  // J02 (D-5): a slot whose stored text is a listed placeholder is not a model response, so it is never a run-scope
+  // voice; its presence qualifies the run (kind "placeholder"), as the shared rule never presents such a run as IND.
+  const t = adaptiveTopIndependence(null, provenance);
   return t.kind === "independent" ? null : t;
 }
 
@@ -327,9 +384,14 @@ export const SLOT_AGREEMENT_WORD: Readonly<Record<"strong" | "moderate" | "weak"
 
 /** The diagnostics' homogeneity badge, in place of "Unusually uniform agreement", for a run whose slots are not independent. */
 export function uniformityBadge(run: QualifiedIndependence): { label: string; title: string } {
-  return run.kind === "unverified"
-    ? { label: "Unusually uniform responses (model independence unverified)", title: "Which models answered this run's slots is not recorded, so uniform responses are not shown as agreement between independent models." }
-    : { label: "Unusually uniform responses across panel slots (not independent agreement)", title: `In this run ${run.repeated.join("; ")} answered several slots, so uniform responses across them are not agreement between independent models.` };
+  if (run.kind === "unverified") {
+    return { label: "Unusually uniform responses (model independence unverified)", title: "Which models answered this run's slots is not recorded, so uniform responses are not shown as agreement between independent models." };
+  }
+  const label = "Unusually uniform responses across panel slots (not independent agreement)";
+  if (run.kind === "placeholder") {
+    return { label, title: `In this run ${placeholderSlotsClause(run.placeholders.length)}, so uniform responses across the remaining slots are not shown as agreement between independent models.` };
+  }
+  return { label, title: `In this run ${run.repeated.join("; ")} answered several slots, so uniform responses across them are not agreement between independent models.` };
 }
 
 /** "(raised by 3 models)" for an item whose raising slots are not independent executing models. */
@@ -389,7 +451,7 @@ export function qualifiedStatusHeading(status: unknown, t: QualifiedIndependence
 
 /** Who supports such a row: the executing models, each once ("DeepSeek (substituting ChatGPT, Claude); Grok"). */
 export function qualifiedSupporters(t: QualifiedIndependence): string | null {
-  return t.kind === "repeated_substitute" && t.voices.length > 0 ? t.voices.join("; ") : null;
+  return (t.kind === "repeated_substitute" || t.kind === "placeholder") && t.voices.length > 0 ? t.voices.join("; ") : null;
 }
 
 /**
@@ -397,30 +459,30 @@ export function qualifiedSupporters(t: QualifiedIndependence): string | null {
  * slots are not all independent executing models: the stored text, then what it counts.
  */
 export function runScopeQualifier(run: QualifiedIndependence): string {
-  return run.kind === "unverified"
-    ? "counted by panel slot; model independence unverified — which models answered this run's slots is not recorded"
-    : `counted by panel slot; in this run ${run.repeated.join("; ")} answered several slots, so this is not a count of independent models`;
+  if (run.kind === "unverified") return "counted by panel slot; model independence unverified — which models answered this run's slots is not recorded";
+  if (run.kind === "placeholder") return `counted by panel slot; ${placeholderSlotsClause(run.placeholders.length)}, so this is not a count of independent models`;
+  return `counted by panel slot; in this run ${run.repeated.join("; ")} answered several slots, so this is not a count of independent models`;
 }
 
 /** A legacy "Where models agree" line (no stored status) when the rows are not held, in a run not all independent. */
 export function legacyRunScopeQualifier(run: QualifiedIndependence): string {
-  return run.kind === "unverified"
-    ? "not confirmed as agreement between independent models: which models answered this run's slots is not recorded"
-    : `not confirmed as agreement between independent models: in this run ${run.repeated.join("; ")} answered several slots`;
+  if (run.kind === "unverified") return "not confirmed as agreement between independent models: which models answered this run's slots is not recorded";
+  if (run.kind === "placeholder") return `not confirmed as agreement between independent models: ${placeholderSlotsClause(run.placeholders.length)}`;
+  return `not confirmed as agreement between independent models: in this run ${run.repeated.join("; ")} answered several slots`;
 }
 
 /** The note that follows a panel-level count ("Of 2 scored claims across 5 dispatched models: consensus on 2."). */
 export function runIndependenceNote(run: QualifiedIndependence): string {
-  return run.kind === "unverified"
-    ? "These counts are of panel slots: which models answered this run's slots is not recorded (model independence unverified)."
-    : `These counts are of panel slots: in this run ${run.repeated.join("; ")} answered several slots, so they are not counts of independent models.`;
+  if (run.kind === "unverified") return "These counts are of panel slots: which models answered this run's slots is not recorded (model independence unverified).";
+  if (run.kind === "placeholder") return `These counts are of panel slots: ${placeholderSlotsClause(run.placeholders.length)}, so they are not counts of independent models.`;
+  return `These counts are of panel slots: in this run ${run.repeated.join("; ")} answered several slots, so they are not counts of independent models.`;
 }
 
 /** Follows a legacy report's stored answer string, which names the slots that support each claim. */
 export function answerIndependenceNote(run: QualifiedIndependence): string {
-  return run.kind === "unverified"
-    ? "The models named and counted here are panel slots: which models answered them is not recorded (model independence unverified)."
-    : `The models named and counted here are panel slots: in this run ${run.repeated.join("; ")} answered several slots, so they are not all independent models.`;
+  if (run.kind === "unverified") return "The models named and counted here are panel slots: which models answered them is not recorded (model independence unverified).";
+  if (run.kind === "placeholder") return `The models named and counted here are panel slots: ${placeholderSlotsClause(run.placeholders.length)}, so they are not all independent models.`;
+  return `The models named and counted here are panel slots: in this run ${run.repeated.join("; ")} answered several slots, so they are not all independent models.`;
 }
 
 /**
@@ -431,6 +493,7 @@ export function answerIndependenceNote(run: QualifiedIndependence): string {
 export function sharePanelPhrase(run: QualifiedIndependence | null): string | null {
   if (!run) return null;
   if (run.kind === "unverified") return "an AI panel (model independence unverified: which models answered is not recorded)";
+  if (run.kind === "placeholder") return run.voices.length < 2 ? "an AI panel with fewer than two independent models once stored placeholder text (not a model response) is set aside" : null;
   return run.voices.length < 2 ? `an AI panel whose responding slots were all answered by one model, ${run.voices[0] ?? SUBSTITUTE_MODEL_FALLBACK}` : null;
 }
 
@@ -440,7 +503,14 @@ export function sharePanelPhrase(run: QualifiedIndependence | null): string | nu
  */
 export function shortRunCountedResult(storedResult: string, run: QualifiedIndependence): string {
   const status = /^([a-z][a-z ]*):/i.exec(storedResult)?.[1] ?? "recorded";
-  const what = run.kind === "unverified" ? "model independence unverified" : run.voices.length < 2 ? "one model answered every slot" : `${run.voices.length} independent models`;
+  const what =
+    run.kind === "unverified"
+      ? "model independence unverified"
+      : run.kind === "placeholder"
+        ? `${run.voices.length} independent model${run.voices.length === 1 ? "" : "s"}; stored placeholder text set aside`
+        : run.voices.length < 2
+          ? "one model answered every slot"
+          : `${run.voices.length} independent models`;
   return `${status} (counted by panel slot; ${what})`;
 }
 
@@ -448,6 +518,7 @@ export function shortRunCountedResult(storedResult: string, run: QualifiedIndepe
 export function shortSharePanelPhrase(run: QualifiedIndependence | null): string | null {
   if (!run) return null;
   if (run.kind === "unverified") return "an AI panel (model independence unverified)";
+  if (run.kind === "placeholder") return run.voices.length < 2 ? "an AI panel (stored placeholder text set aside)" : null;
   return run.voices.length < 2 ? "an AI panel (one model answered every slot)" : null;
 }
 
@@ -455,6 +526,7 @@ export function shortSharePanelPhrase(run: QualifiedIndependence | null): string
 export const AGREE_HEADING_ONE_EXECUTING_MODEL = "Points repeated across panel slots (not agreement between independent models)";
 export const AGREE_HEADING_REPEATED_SUBSTITUTE = "Where models agree (a substitute model that answered several slots is counted once)";
 export const AGREE_HEADING_UNVERIFIED = "Where models agree (model independence unverified)";
+export const AGREE_HEADING_PLACEHOLDER = "Where models agree (a slot holding stored placeholder text is not counted)";
 
 /**
  * The qualified top heading (N1): with two or more independent executing models among the supporters the stored
@@ -462,8 +534,12 @@ export const AGREE_HEADING_UNVERIFIED = "Where models agree (model independence 
  * is never headed as a consensus.
  */
 export function qualifiedTopHeading(t: QualifiedIndependence, status: unknown): string {
+  const lead = status === "consensus" ? "Top consensus" : "Top majority-supported claim";
   if (t.kind === "repeated_substitute" && t.scope === "supporters" && t.voices.length >= 2 && isAgreementStatus(status)) {
-    return `${status === "consensus" ? "Top consensus" : "Top majority-supported claim"} (${t.voices.length} independent models; a substitute model that answered several slots counted once)`;
+    return `${lead} (${t.voices.length} independent models; a substitute model that answered several slots counted once)`;
+  }
+  if (t.kind === "placeholder" && t.scope === "supporters" && t.voices.length >= 2 && isAgreementStatus(status)) {
+    return `${lead} (${t.voices.length} independent models; stored placeholder text set aside)`;
   }
   return adaptiveTopHeading(t)!;
 }
@@ -683,9 +759,11 @@ export function presentIndependenceQualifiedReport<R extends AdaptiveSynthesisRe
     ? null
     : headingT.kind === "unverified"
       ? AGREE_HEADING_UNVERIFIED
-      : headingT.voices.length < 2
-        ? AGREE_HEADING_ONE_EXECUTING_MODEL
-        : AGREE_HEADING_REPEATED_SUBSTITUTE;
+      : headingT.kind === "placeholder"
+        ? AGREE_HEADING_PLACEHOLDER
+        : headingT.voices.length < 2
+          ? AGREE_HEADING_ONE_EXECUTING_MODEL
+          : AGREE_HEADING_REPEATED_SUBSTITUTE;
   const qualification: IndependenceQualification = Object.freeze({ run, top, topStatus, topResultQualified, agreeHeading, legacyAgree });
   Object.defineProperty(out, QUALIFICATION, { value: qualification, enumerable: false });
   return out as unknown as R;

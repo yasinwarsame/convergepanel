@@ -36,6 +36,7 @@ import {
   attachRunIndependence,
   presentIndependenceQualifiedReport,
   COUNTED_BY_PANEL_SLOT,
+  placeholderSlotsClause,
   QUALIFIED_TOP_NEXT_STEP,
   qualifiedRowHeading,
   qualifiedRowText,
@@ -491,6 +492,11 @@ function splitIndependenceSentence(ri: RowIndependence): string {
   if (ri.t.kind === "unverified") return "Model independence unverified: which models answered these panel slots is not recorded.";
   if (ri.bothSides.length && ri.supportSlots.length && ri.disputeSlots.length) return `${ri.bothSides.join("; ")} answered slots on both sides, so this is not a disagreement between independent models.`;
   const m = ri.t.voices.length;
+  if (ri.t.kind === "placeholder") {
+    // F-2 (D-5): a stored placeholder slot is not a model response; the remaining slots are each their own model.
+    const held = placeholderSlotsClause(ri.t.placeholders.length);
+    return m === 0 ? `${held}; no model response took a position.` : m === 1 ? `${held}; the remaining panel slot was answered by one model, ${ri.t.voices[0]}.` : `${held}; the remaining ${m} panel slots were each answered by their own model (${ri.t.voices.join("; ")}).`;
+  }
   return m === 1 ? `These panel slots were all answered by one model, ${ri.t.voices[0]}.` : `These panel slots were answered by ${m} independent models (${ri.t.voices.join("; ")}).`;
 }
 
@@ -527,7 +533,7 @@ export function rowView(row: unknown, roster: readonly string[], provenance?: re
       const t = side === "support" ? ri?.support : ri?.dispute;
       // Several slots one substitute model answered are that model once; otherwise each slot's own label (which already
       // names a substitute's executing model).
-      return ri && t && t.kind === "repeated_substitute" ? (side === "support" ? ri.supportVoices : ri.disputeVoices) : perSlot;
+      return ri && t && (t.kind === "repeated_substitute" || t.kind === "placeholder") ? (side === "support" ? ri.supportVoices : ri.disputeVoices) : perSlot;
     };
     const supporters = sideLabels("support", reading.slots.filter((s) => s.kind === "position" && (s.stance === "agrees" || s.stance === "partial")).map((s) => label(s.slot)));
     const disputers = sideLabels("dispute", reading.slots.filter((s) => s.kind === "position" && s.stance === "disputes").map((s) => label(s.slot)));

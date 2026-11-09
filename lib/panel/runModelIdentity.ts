@@ -58,11 +58,15 @@ export type RunModelProvenanceFacts = {
   modelId: string;
   provider?: string;
   requestedModel?: string;
+  /** The row's recorded call status, as the result row carries it (`substituted` is derived from it); absent on export facts and statusless rows. */
+  status?: string;
   substituted?: boolean;
   /** Persisted "<provider>:<model>" of what was originally requested (substituted rows only). */
   substitutedFrom?: string;
   /** J02 (D-5): the slot's stored text is a listed placeholder, not a model response (presentation only). */
   invalidProviderOutput?: true;
+  /** D-5: the slot's stored text mentions a mock response without being a listed placeholder — its validity cannot be established (presentation only). */
+  validityUnknown?: true;
 };
 
 function present(value: unknown): value is string {
@@ -159,6 +163,7 @@ export function runModelProvenanceFromResultRow(row: {
   const substituted = status === undefined ? undefined : status === "substituted";
   return {
     modelId: row.modelId,
+    ...(status !== undefined ? { status } : {}),
     ...(present(row.provider) ? { provider: row.provider } : {}),
     ...(present(row.requestedModel) ? { requestedModel: row.requestedModel } : {}),
     ...(substituted !== undefined ? { substituted } : {}),

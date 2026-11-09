@@ -18,6 +18,11 @@
  * from the answered-slot count M here. That is a presentation statement only. Nothing in this module feeds a decision
  * (gate status, certainty, routing, consensus score, synthesis admission): those keep their 35933c8 inputs (Option C).
  *
+ * The adaptive verdict surfaces (lib/adaptiveSchema/verdictIndependence.ts) judge the same gate over per-slot
+ * RunModelProvenanceFacts (C-a review F-1): `identityRowFromFacts` is the one adapter from a facts row to the row shape
+ * the gate reads, and the J02 fact (`invalidProviderOutput`) is read back by `placeholderClass` as the recorded
+ * INVALID_MOCK class (a facts row carries no text). No second copy of the rule exists.
+ *
  * Pure, client-safe, never throws, never mutates its input.
  */
 
@@ -55,6 +60,10 @@ export type IdentityRow = {
   rawTextTruncated?: unknown;
   rawText?: unknown;
   text?: unknown;
+  /** J02: the recorded INVALID_MOCK class of a provenance-facts row (`withPlaceholderFact`); only `true` means anything. */
+  invalidProviderOutput?: unknown;
+  /** The recorded VALIDITY_UNKNOWN class of a provenance-facts row (`withPlaceholderFact`); only `true` means anything. */
+  validityUnknown?: unknown;
 };
 
 const TEXT_KEYS = ["rawTextFull", "rawTextTruncated", "rawText", "text"] as const;
@@ -78,9 +87,14 @@ export function identityRowText(row: IdentityRow): string {
  *  - INVALID_MOCK ⇔ status ok ∧ modelId ∈ {chatgpt, claude} ∧ text.trim() is exactly that slot's listed literal;
  *  - VALIDITY_UNKNOWN ⇔ not INVALID_MOCK ∧ the text mentions "mock response" (any case);
  *  - otherwise null.
+ * A row that carries the J02 fact (`invalidProviderOutput: true`) or the `validityUnknown: true` fact — both written by
+ * `withPlaceholderFact` from this same oracle — has that class: a provenance-facts row holds no text, so the fact is its
+ * recorded class.
  */
 export function placeholderClass(row: IdentityRow | null | undefined): PlaceholderClass | null {
   if (!row || typeof row !== "object") return null;
+  if (row.invalidProviderOutput === true) return "INVALID_MOCK";
+  if (row.validityUnknown === true) return "VALIDITY_UNKNOWN";
   const text = identityRowText(row);
   if (!text) return null;
   const slot = typeof row.modelId === "string" ? row.modelId.trim().toLowerCase() : "";
@@ -94,7 +108,30 @@ export function placeholderClass(row: IdentityRow | null | undefined): Placehold
  * card says so; run-scope independence excludes the slot). Every other slot's facts are returned unchanged (same object).
  */
 export function withPlaceholderFact(facts: RunModelProvenanceFacts, row: IdentityRow): RunModelProvenanceFacts {
-  return placeholderClass(row) === "INVALID_MOCK" ? { ...facts, invalidProviderOutput: true } : facts;
+  const cls = placeholderClass(row);
+  if (cls === "INVALID_MOCK") return { ...facts, invalidProviderOutput: true };
+  if (cls === "VALIDITY_UNKNOWN") return { ...facts, validityUnknown: true };
+  return facts;
+}
+
+/**
+ * A per-slot provenance-facts row (`RunModelProvenanceFacts`) as the gate reads it. The recorded `status` is read as
+ * recorded (a failed / timed-out slot is not a usable row and needs no provider, exactly as on the result rows); a
+ * facts row without it (a frozen export entry) is read from `substituted`, which was recorded from the row's status:
+ * `true` → "substituted", `false` → an answered, non-substituted row ("ok"), absent → no recorded status (the gate then
+ * fails). `provider` and the D-5 facts (`invalidProviderOutput`, `validityUnknown`) pass through; nothing is inferred
+ * or completed.
+ */
+export function identityRowFromFacts(facts: RunModelProvenanceFacts | null | undefined): IdentityRow {
+  if (!facts || typeof facts !== "object") return {};
+  const status = typeof facts.status === "string" && facts.status.length > 0 ? facts.status : facts.substituted === true ? "substituted" : facts.substituted === false ? "ok" : undefined;
+  return {
+    modelId: facts.modelId,
+    ...(status !== undefined ? { status } : {}),
+    ...(facts.provider !== undefined ? { provider: facts.provider } : {}),
+    ...(facts.invalidProviderOutput === true ? { invalidProviderOutput: true } : {}),
+    ...(facts.validityUnknown === true ? { validityUnknown: true } : {}),
+  };
 }
 
 // ─── The corrected D-4 gate ──────────────────────────────────────────────────────────────────────────────────────
