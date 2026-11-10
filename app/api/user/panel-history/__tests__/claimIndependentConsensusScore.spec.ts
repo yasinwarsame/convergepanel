@@ -39,6 +39,7 @@ import { claimHistoryConsensusSuffix } from "@/lib/verification/claimConsensusPr
 
 const row = (modelId: string, status: string, extra: Record<string, unknown> = {}) => ({ modelId, status, verdict: "accurate", ...extra });
 const DS = { substituted: true, provider: "deepseek" };
+const OPENAI = { provider: "openai" };
 const ver = (id: string, modelResults: unknown[] | undefined, selectedModels?: string[]) => ({
   id,
   data: {
@@ -67,11 +68,15 @@ async function items(): Promise<Record<string, any>> {
 
 describe("GET /api/user/panel-history — claim consensus score vs independent executing models", () => {
   it.each([
-    ["one-of-three", [row("chatgpt", "ok"), row("claude", "failed"), row("grok", "failed")], ["chatgpt", "claude", "grok"], null, "insufficient_independent_models", "insufficient", " · No consensus score (fewer than two independent models)"],
+    // C-b (CB-01): verified scenarios record each answering row's provider; provider-less rows (what stored own-provider
+    // claim rows hold, m-B) are unverified.
+    ["one-of-three", [row("chatgpt", "ok", OPENAI), row("claude", "failed"), row("grok", "failed")], ["chatgpt", "claude", "grok"], null, "insufficient_independent_models", "insufficient", " · No consensus score (fewer than two independent models)"],
     ["two-deepseek", [row("chatgpt", "ok", DS), row("claude", "ok", DS)], ["chatgpt", "claude"], null, "insufficient_independent_models", "insufficient", " · No consensus score (fewer than two independent models)"],
-    ["two-independent", [row("chatgpt", "ok"), row("claude", "ok")], ["chatgpt", "claude"], 100, undefined, "independent", " · 100 consensus"],
+    ["two-independent", [row("chatgpt", "ok", OPENAI), row("claude", "ok", { provider: "anthropic" })], ["chatgpt", "claude"], 100, undefined, "independent", " · 100 consensus"],
     ["missing-provenance", undefined, undefined, null, "independence_unverified", "unverified", " · Consensus score withheld (model independence not recorded)"],
-    ["legacy-two-ok-no-selected", [row("chatgpt", "ok"), row("gemini", "ok")], undefined, 100, undefined, "independent", " · 100 consensus"],
+    ["legacy-two-ok-no-selected", [row("chatgpt", "ok", OPENAI), row("gemini", "ok", { provider: "google" })], undefined, 100, undefined, "independent", " · 100 consensus"],
+    ["two-ok-provider-less", [row("chatgpt", "ok"), row("claude", "ok")], ["chatgpt", "claude"], null, "independence_unverified", "unverified", " · Consensus score withheld (model independence not recorded)"],
+    ["one-of-three-provider-less", [row("chatgpt", "ok"), row("claude", "failed"), row("grok", "failed")], ["chatgpt", "claude", "grok"], null, "independence_unverified", "unverified", " · Consensus score withheld (model independence not recorded)"],
   ])("%s", async (id, mr, sel, score, withheld, independence, suffix) => {
     const d = ver(id, mr as unknown[] | undefined, sel as string[] | undefined);
     const before = JSON.stringify(d.data);

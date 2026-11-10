@@ -87,6 +87,7 @@ function rng(seed: number) {
   };
 }
 const SLOTS = ["chatgpt", "claude", "gemini", "grok", "perplexity"];
+const OWN_PROVIDER: Record<string, string> = { chatgpt: "openai", claude: "anthropic", gemini: "google", grok: "xai", perplexity: "perplexity" };
 const FAMILY: Record<string, string> = { chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini", grok: "Grok", perplexity: "Perplexity" };
 const WORDS = "archive founding source scope figure estimate methodology record treaty census revision timeline dataset".split(" ");
 
@@ -160,6 +161,10 @@ function claimRecord(i: number) {
     return {
       modelId: s,
       status: "ok",
+      // C-b (CB-01): a genuine independent record under the shared gate records who executed each answering row. The
+      // provider is added without consuming the generator, and the 8584211 code ignored it on an own-provider row, so
+      // the pinned outputs are this record's 8584211 outputs (no false negative: genuine records render identically).
+      provider: OWN_PROVIDER[s],
       verdict: unanimous ? v0 : pick(["accurate", "inaccurate", "partially_accurate", "unverifiable"]),
       confidence: pick(["high", "medium", "low"]),
       summary: `${s} ${text(5)}`,

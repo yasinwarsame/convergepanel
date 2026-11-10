@@ -4,27 +4,27 @@
  * `storedRunConsensusIndependence` (lib/panel/independentVoices.ts).
  *
  * A claim verification asks every requested model for a verdict; its stored `consensusScore` is a cross-model figure.
- * Three requested models with one usable answer, or several slots answered by one executing provider, is not agreement
- * between models, so the score is shown only when the stored rows prove ≥ 2 independent executing models:
- *  - "independent": every requested model has a row with recorded execution identity, and the rows that answered
- *    (`status: "ok"`) reduce to ≥ 2 independent executing models (`independentVoices`: a substituted row is keyed by the
- *    provider that executed it, so several slots served by DeepSeek are ONE model);
- *  - "insufficient": execution identity is complete and the answered rows reduce to fewer than two;
- *  - "unverified": execution identity cannot be established — no `modelResults`, a row that is not an object, a row
- *    without a non-empty `modelId` naming a known panel slot, a row without a recorded status (`ok` / `parse_error` /
- *    `failed`), or a requested model (`selectedModels`) with no row. Nothing is inferred (fail closed: never presented
- *    as agreement).
+ * Since C-b (CB-01) the judgement is the ONE shared presentation gate (lib/panel/executionIdentity.ts,
+ * `runExecutionIdentity` / `executionIdentityVerified`) over the stored rows (`claimIdentityRow`); nothing here
+ * re-implements it:
+ *  - "independent": the gate verifies the rows (every answering row records who executed it — a provider for an `ok`
+ *    row, the substitute's provider for a substituted one) and K ≥ 2 independent executing models answered (a
+ *    substitute model that answered several slots is ONE model; failed / parse_error slots never answer);
+ *  - "insufficient": the gate verifies the rows and exactly one independent executing model answered;
+ *  - "unverified": everything else — no `modelResults`, a row that is not an object, a row without a non-empty
+ *    `modelId` naming a known panel slot, a row without a recorded status (`ok` / `parse_error` / `failed`), a requested
+ *    model (`selectedModels`) with no row, an `ok` row without a recorded provider (claim rows answered by their own
+ *    slot's provider record none — m-B — so such records are unverified), an unrecorded substitute, or no answering row
+ *    at all (K = 0 is never presented as verified). Nothing is inferred and no provider history is reconstructed.
  *
- * Execution identity of a stored claim row: the claim pipeline (`runClaimVerificationPanel`) calls each requested
- * slot's own connector (`CONNECTOR_MAP[modelId]`), with no fallback provider, so a row that records no substitution was
- * executed by its slot's provider. A row that records `substituted: true` (written by `buildClaimModelEvidence` when a
- * connector reports a substitute) is keyed by its recorded `provider`; one without a recorded provider counts as the
- * unrecorded substitute (all such rows together count at most once — `resolveExecutingModelKeys`).
+ * `storedVerificationExecutingRows` keeps its shape (it is the queue builder's row adapter); with the gate holding no
+ * unrecorded substitute answers, so its key resolution never merges anything for a verified record.
  *
  * Pure, server- and client-safe; never mutates its input.
  */
 
-import { independentVoices, MIN_INDEPENDENT_SYNTHESIS_MODELS, type StoredConsensusIndependence, type VoiceRow } from "./independentVoices";
+import { MIN_INDEPENDENT_SYNTHESIS_MODELS, type StoredConsensusIndependence, type VoiceRow } from "./independentVoices";
+import { runExecutionIdentity, type IdentityRow, type RunExecutionIdentity } from "./executionIdentity";
 import { RUN_MODEL_FAMILY_NAMES } from "./runModelIdentity";
 
 const STORED_CLAIM_ROW_STATUSES = new Set(["ok", "parse_error", "failed"]);
@@ -70,15 +70,96 @@ export function storedVerificationExecutingRows(
   return rows;
 }
 
-/** Distinct independent executing models among the stored rows that answered, or null when identity is not established. */
+/**
+ * C-b (CB-01): one stored / client claim row as the row the shared gate reads (lib/panel/executionIdentity.ts). Recorded
+ * facts only, nothing inferred:
+ *  - `status: "ok"` with `substituted: true` → "substituted" (the substitute's recorded `provider`, if any, as recorded);
+ *  - `status: "ok"` otherwise → "ok" with the row's recorded `provider` — a claim row answered by its slot's own
+ *    provider records none (buildClaimModelEvidence), so the gate does not verify it (no provider is reconstructed);
+ *  - `status: "parse_error"` / `"failed"` → "failed": the call produced no usable verdict, so the slot is never an
+ *    answering (supporting) slot;
+ *  - any other status (not a stored claim status — "timeout", "error", a crafted value, none) is not recorded as a
+ *    claim outcome: the row carries no status, so the gate fails closed (it is never read as a known failure).
+ * Claim rows carry no model text the gate could read (`summary` is the model's verdict summary, not its answer), so
+ * no text key is passed: a stored placeholder answer cannot be an `ok` claim row (it does not parse as a verdict).
+ */
+export function claimIdentityRow(raw: unknown): IdentityRow {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const r = raw as Record<string, unknown>;
+  const status =
+    r.status === "ok" ? (r.substituted === true ? "substituted" : "ok") : r.status === "parse_error" || r.status === "failed" ? "failed" : undefined;
+  return {
+    modelId: typeof r.modelId === "string" ? r.modelId.trim().toLowerCase() : r.modelId,
+    ...(status !== undefined ? { status } : {}),
+    ...(r.provider !== undefined ? { provider: r.provider } : {}),
+  };
+}
+
+/**
+ * The execution identity of a STORED claim verification, judged by the shared gate (C-b CB-01): UV whenever the record's
+ * shape is not established (`storedVerificationExecutingRows` returns null: no rows, an unknown slot or status, a
+ * requested model without a row), else `runExecutionIdentity` over the rows as `claimIdentityRow` presents them.
+ */
+export function storedVerificationExecutionIdentity(data: Record<string, unknown> | null | undefined): RunExecutionIdentity {
+  if (!storedVerificationExecutingRows(data)) return runExecutionIdentity([]);
+  return runExecutionIdentity((data!.modelResults as unknown[]).map(claimIdentityRow));
+}
+
+/**
+ * The execution identity of the claim rows a CLIENT payload holds (live result, saved payload), by the shared gate. The
+ * client has no `selectedModels`; the server's `modelIndependence` already covers that check
+ * (`claimPresentedIndependence`).
+ */
+export function claimRowsExecutionIdentity(rows: readonly unknown[] | null | undefined): RunExecutionIdentity {
+  return runExecutionIdentity(Array.isArray(rows) ? rows.map(claimIdentityRow) : []);
+}
+
+/**
+ * Distinct independent executing models among the stored rows that answered (the shared gate's K), or null when the
+ * gate does not verify the record's execution identity (C-b CB-01: an `ok` row without a recorded provider, an
+ * unrecorded substitute, no answering row, an unknown status, a requested model without a row).
+ */
 export function storedVerificationIndependentAnswerCount(data: Record<string, unknown> | null | undefined): number | null {
-  const rows = storedVerificationExecutingRows(data);
-  if (!rows) return null;
-  return independentVoices(rows.filter((r) => r.answered)).length;
+  const identity = storedVerificationExecutionIdentity(data);
+  return identity.verified ? identity.independentModels : null;
 }
 
 export function storedVerificationConsensusIndependence(data: Record<string, unknown> | null | undefined): StoredConsensusIndependence {
   const n = storedVerificationIndependentAnswerCount(data);
   if (n === null) return "unverified";
   return n >= MIN_INDEPENDENT_SYNTHESIS_MODELS ? "independent" : "insufficient";
+}
+
+/**
+ * The independence a claim CLIENT surface presents: the server's `modelIndependence` (fail closed: anything but
+ * "independent" / "insufficient" is "unverified"), confirmed by the shared gate over the rows the payload holds. A
+ * payload the server marks "independent" whose rows do not themselves verify ≥ 2 independent executing models (a payload
+ * cached before the rows carried their recorded provider) is presented "unverified" — never with a count it cannot
+ * state. Never upgrades the server's value.
+ */
+export function claimPresentedIndependence(serverValue: unknown, rows: readonly unknown[] | null | undefined): StoredConsensusIndependence {
+  if (serverValue !== "independent") return serverValue === "insufficient" ? "insufficient" : "unverified";
+  const identity = claimRowsExecutionIdentity(rows);
+  if (!identity.verified || identity.independentModels === null) return "unverified";
+  return identity.independentModels >= MIN_INDEPENDENT_SYNTHESIS_MODELS ? "independent" : "insufficient";
+}
+
+/**
+ * C-b (PQ-2 (a) STRICT): the independence of a STORED video verification, by the shared gate. Video rows record
+ * `modelId` and `status` and no provider (lib/video/videoVerificationExecution.ts `VisionModelRow`), so the gate never
+ * verifies them and every video surface reads "unverified". No video-family rule exists: `modelId` + `status` is not
+ * recorded executing identity. Video `parse_error` is a call with no usable verdict ("failed"); every other status is
+ * passed as recorded (an unknown one fails the gate closed).
+ */
+export function storedVideoConsensusIndependence(modelResults: unknown): StoredConsensusIndependence {
+  const rows = Array.isArray(modelResults)
+    ? modelResults.map((raw): IdentityRow => {
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+        const r = raw as Record<string, unknown>;
+        return { modelId: r.modelId, status: r.status === "parse_error" ? "failed" : r.status, ...(r.provider !== undefined ? { provider: r.provider } : {}) };
+      })
+    : [];
+  const identity = runExecutionIdentity(rows);
+  if (!identity.verified || identity.independentModels === null) return "unverified";
+  return identity.independentModels >= MIN_INDEPENDENT_SYNTHESIS_MODELS ? "independent" : "insufficient";
 }

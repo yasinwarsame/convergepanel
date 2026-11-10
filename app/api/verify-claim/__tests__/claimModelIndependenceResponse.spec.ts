@@ -120,9 +120,14 @@ describe("POST /api/verify-claim — modelIndependence on the live result", () =
   afterEach(() => jest.clearAllMocks());
 
   it.each([
-    ["one of three requested models responded", [modelResult("chatgpt", "accurate"), failed("claude"), failed("grok")], ["chatgpt", "claude", "grok"], "insufficient"],
+    // C-b (CB-01/CB-02/CB-03): an own-provider answer is stored without a provider (buildClaimModelEvidence, m-B), so
+    // the shared gate cannot verify who executed it: unverified — never presented as one model's assessment or as
+    // agreement. (Was "insufficient" / "independent" before the gate.)
+    ["one of three requested models responded", [modelResult("chatgpt", "accurate"), failed("claude"), failed("grok")], ["chatgpt", "claude", "grok"], "unverified"],
     ["two slots answered by the DeepSeek fallback", [substituted("chatgpt"), substituted("claude")], ["chatgpt", "claude"], "insufficient"],
-    ["two genuinely independent models", [modelResult("chatgpt", "accurate"), modelResult("claude", "inaccurate")], ["chatgpt", "claude"], "independent"],
+    ["two own-provider answers (no recorded provider)", [modelResult("chatgpt", "accurate"), modelResult("claude", "inaccurate")], ["chatgpt", "claude"], "unverified"],
+    ["every requested model failed", [failed("chatgpt"), failed("claude")], ["chatgpt", "claude"], "unverified"],
+    ["a substitute without a recorded provider in two slots", [{ ...substituted("chatgpt"), provider: undefined }, { ...substituted("claude"), provider: undefined }], ["chatgpt", "claude"], "unverified"],
   ])("%s", async (_label, results, models, expected) => {
     mockedRunClaimVerificationPanel.mockResolvedValueOnce(results);
     const res = await POST(buildRequest({ claim: "A claim.", models }));

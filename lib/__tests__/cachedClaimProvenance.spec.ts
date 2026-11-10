@@ -89,7 +89,8 @@ describe("B1: cached claim with missing inline provenance but valid authoritativ
   });
 
   it("opening it: the user's own persisted record (detail API mapping) is read and presented — score kept", async () => {
-    const record = mapStoredVerificationToClientPayload(storedRecord([okRow("chatgpt"), okRow("claude")]), "ver-1");
+    // C-b (CB-01): the persisted record proves two independent executing models only with each row's provider recorded.
+    const record = mapStoredVerificationToClientPayload(storedRecord([okRow("chatgpt", { provider: "openai" }), okRow("claude", { provider: "anthropic" })]), "ver-1");
     const lookup = jest.fn(async () => record);
     const r = await resolveClaimHistoryPayload("ver-1", legacyCached(), lookup);
     expect(lookup).toHaveBeenCalledTimes(1);

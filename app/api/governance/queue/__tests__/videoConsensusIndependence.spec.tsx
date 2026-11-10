@@ -195,7 +195,8 @@ describe("NIT n1: never '1/1 models say …'", () => {
       ver("n1", [
         vrow("chatgpt", "ok", "accurate", DS),
         vrow("claude", "ok", "inaccurate", DS),
-        vrow("grok", "ok", "accurate"),
+        // C-b (CB-01): the own-provider row records its provider, so the shared gate verifies the record.
+        vrow("grok", "ok", "accurate", { provider: "xai" }),
       ]),
     ];
     const r = (await rows())["n1"];
@@ -218,7 +219,8 @@ describe("NIT n2: same-executing-model digest pair in a run with ≥ 2 independe
       ver("n2", [
         vrow("chatgpt", "ok", "accurate", { ...DS, incorrectParts: [LONG_A] }),
         vrow("claude", "ok", "accurate", { ...DS, incorrectParts: [LONG_B] }),
-        vrow("grok", "ok", "accurate"),
+        // C-b (CB-01): the own-provider row records its provider, so the shared gate verifies the record.
+        vrow("grok", "ok", "accurate", { provider: "xai" }),
       ]),
     ];
     const r = (await rows())["n2"];

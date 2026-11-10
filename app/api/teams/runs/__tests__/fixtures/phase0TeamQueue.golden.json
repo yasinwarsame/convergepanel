@@ -1,5 +1,6 @@
 {
  "_source": "generated 2026-11-08 by phase0TeamQueueBaseline.spec.ts with PHASE0_GOLDEN_OUT in git-archive exports: base = 35933c8, presentation = b894828",
+ "_presentationRerecorded": "C-b (Order 32, owner ruling PQ-1 (a)): consensusWithheld and the rendered consensus text of these rows only were re-recorded against the authorized C-b diff (CB-01: claim rows judged by the shared gate — own-provider rows record no provider, so 'unverified'); base keys untouched. Rows: main:claim-v-ind, main:claim-v-one",
  "base": {
   "main": {
    "status": 200,
@@ -267,9 +268,9 @@
       "blockedByPolicy": false,
       "governanceReviewRequired": false,
       "consensusScore": null,
-      "consensusWithheld": "insufficient_independent_models"
+      "consensusWithheld": "independence_unverified"
      },
-     "consensusText": "No consensus score (fewer than two independent models)"
+     "consensusText": "Consensus score withheld (model independence not recorded)"
     },
     "claim-v-ind": {
      "dto": {
@@ -281,9 +282,10 @@
       "policyFlags": [],
       "blockedByPolicy": false,
       "governanceReviewRequired": false,
-      "consensusScore": 92
+      "consensusScore": 92,
+      "consensusWithheld": "independence_unverified"
      },
-     "consensusText": "Consensus 92/100"
+     "consensusText": "Consensus score withheld (model independence not recorded)"
     },
     "ownerb": {
      "dto": {

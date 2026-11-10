@@ -212,7 +212,8 @@ describe("T-teamq: GET /api/teams/runs?version=1 — Phase 0 DTO equals 35933c8;
   it("a withheld row keeps its stored score in the DTO and never renders it as a number", () => {
     if (process.env.PHASE0_GOLDEN_OUT) return;
     const withheld = Object.entries(grid.main.items).filter(([, i]) => i.dto.consensusWithheld);
-    expect(withheld.map(([id]) => id).sort()).toEqual(["claim-v-ds", "claim-v-none", "claim-v-one", "fc", "norows", "one", "statusless"]);
+    // C-b (CB-01, PQ-1 (a)): claim-v-ind's own-provider rows record no provider, so the shared gate withholds its score.
+    expect(withheld.map(([id]) => id).sort()).toEqual(["claim-v-ds", "claim-v-ind", "claim-v-none", "claim-v-one", "fc", "norows", "one", "statusless"]);
     for (const [id, i] of withheld) {
       expect([id, typeof i.dto.consensusScore]).toEqual([id, "number"]);
       expect([id, /Consensus \d+\/100/.test(i.consensusText ?? "")]).toEqual([id, false]);

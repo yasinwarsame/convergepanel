@@ -260,7 +260,8 @@ describe("GET /api/teams/runs?version=1 — legacy consensus score vs the linked
   const claimDoc = (verificationId: string) => legacyDoc({ type: "verification", runId: null, verificationId, consensusScore: 92 });
 
   it("claim row: three requested models, one answered → no consensus score (insufficient), never 'Consensus 92/100'", async () => {
-    seedVerification("v-one", [vrow("chatgpt", "ok"), vrow("claude", "failed"), vrow("grok", "parse_error")], ["chatgpt", "claude", "grok"]);
+    // C-b (CB-01): the answering row records its provider (the shared gate verifies it).
+    seedVerification("v-one", [vrow("chatgpt", "ok", { provider: "openai" }), vrow("claude", "failed"), vrow("grok", "parse_error")], ["chatgpt", "claude", "grok"]);
     teamRunDocs.set("claim-one", claimDoc("v-one"));
     const by = await legacyItems();
     expect([by["claim-one"].consensusScore, by["claim-one"].consensusWithheld]).toEqual([92, "insufficient_independent_models"]);
@@ -280,7 +281,7 @@ describe("GET /api/teams/runs?version=1 — legacy consensus score vs the linked
   });
 
   it("claim row: two independent executing models answered → score shown plainly", async () => {
-    seedVerification("v-two", [vrow("chatgpt", "ok"), vrow("claude", "ok"), vrow("grok", "failed")], ["chatgpt", "claude", "grok"]);
+    seedVerification("v-two", [vrow("chatgpt", "ok", { provider: "openai" }), vrow("claude", "ok", { provider: "anthropic" }), vrow("grok", "failed")], ["chatgpt", "claude", "grok"]);
     teamRunDocs.set("claim-two", claimDoc("v-two"));
     const by = await legacyItems();
     expect([by["claim-two"].consensusScore, "consensusWithheld" in by["claim-two"]]).toEqual([92, false]);
@@ -292,9 +293,12 @@ describe("GET /api/teams/runs?version=1 — legacy consensus score vs the linked
     seedVerification("v-partial", [vrow("chatgpt", "ok"), vrow("claude", "ok")], ["chatgpt", "claude", "grok"]);
     seedVerification("v-unknown", [vrow("chatgpt", "ok"), vrow("mystery-model", "ok")]);
     seedVerification("v-nostatus", [vrow("chatgpt", "ok"), { ...vrow("claude", "ok"), status: undefined }]);
-    for (const id of ["v-none", "v-partial", "v-unknown", "v-nostatus"]) teamRunDocs.set(id, claimDoc(id));
+    // C-b (CB-01): own-provider rows without a recorded provider (every stored own-provider claim row) are unverified.
+    seedVerification("v-providerless", [vrow("chatgpt", "ok"), vrow("claude", "ok"), vrow("grok", "failed")], ["chatgpt", "claude", "grok"]);
+    const ids = ["v-none", "v-partial", "v-unknown", "v-nostatus", "v-providerless"];
+    for (const id of ids) teamRunDocs.set(id, claimDoc(id));
     const by = await legacyItems();
-    for (const id of ["v-none", "v-partial", "v-unknown", "v-nostatus"]) {
+    for (const id of ids) {
       expect([id, by[id].consensusScore, by[id].consensusWithheld]).toEqual([id, 92, "independence_unverified"]);
       expect(html(by[id])).toContain(CONSENSUS_WITHHELD_TEXT.independence_unverified);
     }

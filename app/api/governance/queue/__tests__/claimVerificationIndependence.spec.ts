@@ -89,7 +89,8 @@ describe("GET /api/governance/queue — claim verification consensus vs independ
   // 35933c8 (governance-queue metadata); `consensusWithheld` / `modelIndependence` are additive presentation keys that
   // tell the dashboard to show the reason instead of the number (GovernanceDashboard queuePresentedScore).
   it("three requested, one answered → stored score + evidence quality kept; withheld reason additive (insufficient)", async () => {
-    verRows = [ver("one", [vrow("chatgpt", "ok"), vrow("claude", "failed"), vrow("grok", "parse_error")], ["chatgpt", "claude", "grok"])];
+    // C-b (CB-01): the answering row records its provider (the shared gate verifies it).
+    verRows = [ver("one", [vrow("chatgpt", "ok", { provider: "openai" }), vrow("claude", "failed"), vrow("grok", "parse_error")], ["chatgpt", "claude", "grok"])];
     const r = (await rows())["one"];
     expect([r.consensusScore, r.evidenceQuality, r.consensusWithheld, r.modelIndependence]).toEqual([
       92,
@@ -108,9 +109,22 @@ describe("GET /api/governance/queue — claim verification consensus vs independ
   });
 
   it("two independent models answered → score shown, no withheld reason", async () => {
-    verRows = [ver("two", [vrow("chatgpt", "ok"), vrow("claude", "ok"), vrow("grok", "failed")], ["chatgpt", "claude", "grok"])];
+    verRows = [ver("two", [vrow("chatgpt", "ok", { provider: "openai" }), vrow("claude", "ok", { provider: "anthropic" }), vrow("grok", "failed")], ["chatgpt", "claude", "grok"])];
     const r = (await rows())["two"];
     expect([r.consensusScore, r.evidenceQuality, "consensusWithheld" in r, "modelIndependence" in r]).toEqual([92, "strong", false, false]);
+  });
+
+  it("C-b (CB-01): provider-less own-provider rows, an unrecorded substitute, or no answer → unverified (never independent / one model)", async () => {
+    verRows = [
+      ver("pl-two", [vrow("chatgpt", "ok"), vrow("claude", "ok"), vrow("grok", "failed")], ["chatgpt", "claude", "grok"]),
+      ver("pl-one", [vrow("chatgpt", "ok"), vrow("claude", "failed"), vrow("grok", "parse_error")], ["chatgpt", "claude", "grok"]),
+      ver("unrec", [vrow("chatgpt", "ok", { substituted: true }), vrow("claude", "ok", { substituted: true })], ["chatgpt", "claude"]),
+      ver("allfail", [vrow("chatgpt", "failed"), vrow("claude", "parse_error")], ["chatgpt", "claude"]),
+    ];
+    const by = await rows();
+    for (const id of ["pl-two", "pl-one", "unrec", "allfail"]) {
+      expect([id, by[id].consensusScore, by[id].consensusWithheld, by[id].modelIndependence, "singleModelAssessment" in by[id]]).toEqual([id, 92, "independence_unverified", "unverified", false]);
+    }
   });
 
   it("missing / incomplete attribution → stored score kept, withheld reason additive (unverified)", async () => {

@@ -45,7 +45,15 @@ export type ClaimVerificationClientPayload = {
     correctParts: string[];
     incorrectParts: string[];
     unverifiableParts: string[];
+    /**
+     * C-b: the row's recorded execution facts, present only when recorded (a substitute answered the slot; the
+     * executing provider). Read only through the shared gate (lib/panel/storedVerificationIndependence.ts
+     * `claimPresentedIndependence`); a model count is never inferred from the slot.
+     */
+    substituted?: true;
+    provider?: string;
   }>;
+  /** Slot counts (rows / rows with a usable verdict), never model counts. */
   aggregateSummary: {
     totalModels: number;
     modelsAgreeAccurate: number;

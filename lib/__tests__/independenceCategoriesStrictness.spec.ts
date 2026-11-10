@@ -55,10 +55,16 @@ const vrow = (modelId: string, status: "ok" | "parse_error" | "failed", extra: R
 const ds = { substituted: true, provider: "deepseek" };
 
 describe("storedVerificationConsensusIndependence", () => {
+  // C-b (CB-01): judged by the shared gate — an own-provider `ok` row counts only when it records its provider.
+  const openai = { provider: "openai" };
+  const anthropic = { provider: "anthropic" };
   it("three requested models, only one answered → insufficient (1 independent answer)", () => {
-    const doc = { modelResults: [vrow("chatgpt", "ok"), vrow("claude", "failed"), vrow("grok", "parse_error")], selectedModels: ["chatgpt", "claude", "grok"] };
+    const doc = { modelResults: [vrow("chatgpt", "ok", openai), vrow("claude", "failed"), vrow("grok", "parse_error")], selectedModels: ["chatgpt", "claude", "grok"] };
     expect(storedVerificationIndependentAnswerCount(doc)).toBe(1);
     expect(storedVerificationConsensusIndependence(doc)).toBe("insufficient");
+    // The same record without the answering row's provider (every stored own-provider claim row, m-B): unverified.
+    const providerless = { modelResults: [vrow("chatgpt", "ok"), vrow("claude", "failed"), vrow("grok", "parse_error")], selectedModels: ["chatgpt", "claude", "grok"] };
+    expect([storedVerificationIndependentAnswerCount(providerless), storedVerificationConsensusIndependence(providerless)]).toEqual([null, "unverified"]);
   });
 
   it("multiple slots answered by DeepSeek count as ONE executing model", () => {
@@ -66,18 +72,24 @@ describe("storedVerificationConsensusIndependence", () => {
     expect([storedVerificationIndependentAnswerCount(two), storedVerificationConsensusIndependence(two)]).toEqual([1, "insufficient"]);
     const three = { modelResults: [vrow("chatgpt", "ok", ds), vrow("claude", "ok", ds), vrow("grok", "ok", ds)] };
     expect(storedVerificationConsensusIndependence(three)).toBe("insufficient");
-    // An unrecorded substitute may have been DeepSeek too: never an extra model.
+    // An unrecorded substitute does not inherit any independence and is never merged (C-b): unverified.
     const unrecorded = { modelResults: [vrow("chatgpt", "ok", ds), vrow("claude", "ok", { substituted: true })] };
-    expect(storedVerificationConsensusIndependence(unrecorded)).toBe("insufficient");
-    // DeepSeek + an own-provider answer: two independent models.
-    const mixed = { modelResults: [vrow("chatgpt", "ok", ds), vrow("claude", "ok", ds), vrow("grok", "ok")] };
+    expect(storedVerificationConsensusIndependence(unrecorded)).toBe("unverified");
+    // DeepSeek + an own-provider answer that records its provider: two independent models.
+    const mixed = { modelResults: [vrow("chatgpt", "ok", ds), vrow("claude", "ok", ds), vrow("grok", "ok", { provider: "xai" })] };
     expect([storedVerificationIndependentAnswerCount(mixed), storedVerificationConsensusIndependence(mixed)]).toEqual([2, "independent"]);
+    // …and without it: unverified.
+    const mixedProviderless = { modelResults: [vrow("chatgpt", "ok", ds), vrow("claude", "ok", ds), vrow("grok", "ok")] };
+    expect(storedVerificationConsensusIndependence(mixedProviderless)).toBe("unverified");
   });
 
   it("two independent own-provider answers → independent; errored slots are never counted as answers", () => {
-    expect(storedVerificationConsensusIndependence({ modelResults: [vrow("chatgpt", "ok"), vrow("claude", "ok")] })).toBe("independent");
-    expect(storedVerificationConsensusIndependence({ modelResults: [vrow("chatgpt", "ok"), vrow("claude", "failed"), vrow("grok", "failed")] })).toBe("insufficient");
-    expect(storedVerificationConsensusIndependence({ modelResults: [vrow("chatgpt", "parse_error"), vrow("claude", "failed")] })).toBe("insufficient");
+    expect(storedVerificationConsensusIndependence({ modelResults: [vrow("chatgpt", "ok", openai), vrow("claude", "ok", anthropic)] })).toBe("independent");
+    expect(storedVerificationConsensusIndependence({ modelResults: [vrow("chatgpt", "ok", openai), vrow("claude", "failed"), vrow("grok", "failed")] })).toBe("insufficient");
+    // No answering row (K = 0) is never presented as a verified run (shared gate rule 4): unverified.
+    expect(storedVerificationConsensusIndependence({ modelResults: [vrow("chatgpt", "parse_error"), vrow("claude", "failed")] })).toBe("unverified");
+    // Provider-less own-provider rows: unverified, never independent.
+    expect(storedVerificationConsensusIndependence({ modelResults: [vrow("chatgpt", "ok"), vrow("claude", "ok")] })).toBe("unverified");
   });
 
   it("missing / incomplete executing attribution → unverified (never presumed independent)", () => {
@@ -121,8 +133,10 @@ describe("buildClaimModelEvidence records substitution (execution attribution)",
       ["grok", "ok", undefined, undefined],
     ]);
     expect("substituted" in ev[2] || "provider" in ev[2]).toBe(false);
-    // …and the stored rows judge as two independent models (DeepSeek once + Grok), not three.
-    expect(storedVerificationIndependentAnswerCount({ modelResults: ev })).toBe(2);
+    // …and the stored rows never judge as three models. The own-provider row records no provider (m-B), so the shared
+    // gate does not verify the record (C-b CB-01): no count. With Grok's provider recorded: DeepSeek once + Grok = 2.
+    expect(storedVerificationIndependentAnswerCount({ modelResults: ev })).toBe(null);
+    expect(storedVerificationIndependentAnswerCount({ modelResults: [ev[0], ev[1], { ...ev[2], provider: "xai" }] })).toBe(2);
     // Substituted without a recorded provider: flagged, provider absent.
     const [unrec] = buildClaimModelEvidence([res("chatgpt", "substituted")]);
     expect([(unrec as any).substituted, "provider" in unrec]).toEqual([true, false]);

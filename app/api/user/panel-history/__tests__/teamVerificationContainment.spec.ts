@@ -49,8 +49,9 @@ const ts = (offsetMinutes: number) => Timestamp.fromMillis(T0 + offsetMinutes * 
 function claim(id: string, minute: number, extra: Record<string, unknown> = {}): Row {
   return {
     id,
-    // Two independent executing models answered, so the stored score is listed (claim independence rule).
-    data: { userId: UID, type: "claim_verification", claim: `Claim ${id}`, verdict: "accurate", consensusScore: 80, governanceStatus: "approved", timestamp: ts(minute), modelResults: [{ modelId: "chatgpt", status: "ok" }, { modelId: "claude", status: "ok" }], selectedModels: ["chatgpt", "claude"], ...extra },
+    // Two independent executing models answered, each with its recorded provider (C-b CB-01: the shared gate), so the
+    // stored score is listed (claim independence rule).
+    data: { userId: UID, type: "claim_verification", claim: `Claim ${id}`, verdict: "accurate", consensusScore: 80, governanceStatus: "approved", timestamp: ts(minute), modelResults: [{ modelId: "chatgpt", status: "ok", provider: "openai" }, { modelId: "claude", status: "ok", provider: "anthropic" }], selectedModels: ["chatgpt", "claude"], ...extra },
   };
 }
 function video(id: string, minute: number, extra: Record<string, unknown> = {}): Row {

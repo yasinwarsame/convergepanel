@@ -49,7 +49,13 @@ const ONE_MODEL = "One independent model's assessment — not agreement between 
 const UNVERIFIED = "Independent-model coverage unverified";
 
 type Row = Record<string, unknown>;
-const r = (modelId: string, status: "ok" | "parse_error" | "failed", verdict: string, extra: Row = {}): Row => ({
+/**
+ * C-b (CB-01): the shared gate verifies an own-provider `ok` row only when it records its provider, so the verified
+ * scenarios below record one (`OWN_PROVIDER`); `rp` builds the provider-less row every stored claim actually holds
+ * (buildClaimModelEvidence records no provider for a slot answered by its own provider, m-B).
+ */
+const OWN_PROVIDER: Record<string, string> = { chatgpt: "openai", claude: "anthropic", grok: "xai", gemini: "google", perplexity: "perplexity" };
+const rp = (modelId: string, status: "ok" | "parse_error" | "failed", verdict: string, extra: Row = {}): Row => ({
   modelId,
   status,
   verdict: status === "ok" ? verdict : status,
@@ -60,6 +66,8 @@ const r = (modelId: string, status: "ok" | "parse_error" | "failed", verdict: st
   unverifiableParts: [],
   ...extra,
 });
+const r = (modelId: string, status: "ok" | "parse_error" | "failed", verdict: string, extra: Row = {}): Row =>
+  rp(modelId, status, verdict, status === "ok" && extra.substituted !== true ? { provider: OWN_PROVIDER[modelId], ...extra } : extra);
 const DS = { substituted: true, provider: "deepseek" };
 
 function doc(modelResults: Row[] | undefined, selectedModels: string[] | undefined, verdict = "confirmed"): ClaimVerificationFirestoreDoc {
@@ -108,6 +116,11 @@ const SCENARIOS: Array<[string, ClaimVerificationFirestoreDoc, Expect]> = [
     "independent",
   ],
   ["legacy record (rows without substitution fields, no selectedModels)", doc([r("chatgpt", "ok", "accurate"), r("gemini", "ok", "accurate")], undefined), "independent"],
+  // C-b (CB-01): what stored claim records actually hold — own-provider rows without a recorded provider — is unverified.
+  ["stored record without recorded providers (two own-provider answers)", doc([rp("chatgpt", "ok", "accurate"), rp("claude", "ok", "accurate")], ["chatgpt", "claude"]), "unverified"],
+  ["one answer without a recorded provider, four failed", doc([rp("chatgpt", "ok", "accurate"), rp("claude", "failed", ""), rp("grok", "failed", ""), rp("gemini", "failed", ""), rp("perplexity", "failed", "")], ["chatgpt", "claude", "grok", "gemini", "perplexity"]), "unverified"],
+  ["an unrecorded substitute in two slots", doc([rp("chatgpt", "ok", "accurate", { substituted: true }), rp("claude", "ok", "accurate", { substituted: true })], ["chatgpt", "claude"]), "unverified"],
+  ["every slot failed", doc([rp("chatgpt", "failed", ""), rp("claude", "parse_error", "")], ["chatgpt", "claude"]), "unverified"],
 ];
 
 const html = (el: ReturnType<typeof createElement>) => renderToStaticMarkup(el).replace(/<!-- -->/g, "").replace(/&#x27;/g, "'");
