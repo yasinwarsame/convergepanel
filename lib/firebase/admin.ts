@@ -8,6 +8,7 @@ import admin from "firebase-admin";
 import { App, cert, getApps, initializeApp } from "firebase-admin/app";
 import { Auth, getAuth } from "firebase-admin/auth";
 import { Firestore, getFirestore } from "firebase-admin/firestore";
+import { createPreviewWorkloadIdentityClient, previewWorkloadIdentityCredential, resolvePreviewWorkloadIdentity } from "./previewWorkloadIdentity";
 import { evaluateServerFirebaseIsolation, serviceAccountProject, PRODUCTION_FIREBASE_PROJECT_ID, PRODUCTION_FIREBASE_PROJECT_NUMBER, type FirebaseIsolationVerdict } from "./projectIsolation";
 import { readOperatorGrant } from "./operatorGrant";
 
@@ -94,6 +95,31 @@ function initFirebaseAdmin() {
   if (app && adminAuth && adminDb) return;
 
   console.log("[firebase-admin] Starting initialization...");
+
+  // Order 33 (Preview isolation): a Vercel PREVIEW deployment configured for keyless Workload Identity Federation
+  // authenticates to the isolated Preview project only. Production and local runs never enter this branch.
+  const wif = resolvePreviewWorkloadIdentity(process.env);
+  if (wif.kind === "refused") throw new Error(`Firebase Admin initialization refused: preview_workload_identity_${wif.reason}`);
+  if (wif.kind === "ok") {
+    const { projectId, serviceAccountEmail } = wif.config;
+    enforceFirebaseIsolation(evaluateServerFirebaseIsolation({ projectId, clientEmail: serviceAccountEmail, deploymentEnv: process.env.VERCEL_ENV }), projectId, serviceAccountEmail);
+    console.log("[firebase-admin] projectId:", projectId, "(preview workload identity)");
+    const client = createPreviewWorkloadIdentityClient(wif.config);
+    const existing = getApps().find((a) => a.name === "[DEFAULT]");
+    app = existing ?? initializeApp({ credential: previewWorkloadIdentityCredential(client), projectId });
+    try {
+      enforceFirebaseIsolation(evaluateServerFirebaseIsolation({ projectId: app.options.projectId, clientEmail: serviceAccountEmail, deploymentEnv: process.env.VERCEL_ENV }), app.options.projectId, serviceAccountEmail);
+    } catch (refused) {
+      app = undefined;
+      throw refused;
+    }
+    adminAuth = getAuth(app);
+    // firebase-admin's getFirestore() accepts only a certificate or application-default credential, so the Preview
+    // Firestore client is built directly on the federated auth client (same settings as the certificate path).
+    adminDb = new Firestore({ projectId, authClient: client, ignoreUndefinedProperties: true } as ConstructorParameters<typeof Firestore>[0]);
+    console.log("[firebase-admin] Initialization complete (preview workload identity)");
+    return;
+  }
 
   const sa = loadServiceAccount();
 
