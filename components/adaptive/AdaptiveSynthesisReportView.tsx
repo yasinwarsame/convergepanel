@@ -162,6 +162,10 @@ export interface ReadableGateDisplay {
  * layout only (see ReadableGateDisplay).
  */
 export function GateBanner({ report, gate, readable }: { report: AdaptiveSynthesisReport | null; gate: unknown; readable?: ReadableGateDisplay }) {
+  // A historical banner ("Verified — panel converges") asserts panel agreement: in a run whose slots are not independent
+  // executing models (or whose execution is not recorded) the gate is stated as the gate it is. Called before the
+  // readable early return (integration: rules of hooks — main's readable branch and the connector's hook met here).
+  const runQ = useRunIndependence(report);
   if (readable) {
     return (
       <div data-readable-gate={readable.status} className={`rounded-xl border px-4 py-3 text-sm font-medium ${GATE_BANNER_STYLES[readable.tone]}`}>
@@ -171,9 +175,6 @@ export function GateBanner({ report, gate, readable }: { report: AdaptiveSynthes
     );
   }
   const shown = pageGateValue(report, gate);
-  // A historical banner ("Verified — panel converges") asserts panel agreement: in a run whose slots are not independent
-  // executing models (or whose execution is not recorded) the gate is stated as the gate it is.
-  const runQ = useRunIndependence(report);
   return <div className={`rounded-xl border px-4 py-3 text-sm font-medium ${GATE_BANNER_STYLES[gateTone(shown)]}`}>{gateBannerText(report, shown, { slotsNotIndependent: !!runQ })}</div>;
 }
 

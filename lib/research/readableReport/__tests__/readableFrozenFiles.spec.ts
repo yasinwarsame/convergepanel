@@ -156,7 +156,7 @@ const WIDENED_BY_INC1: Record<string, string> = {
  * Same 32-file pinned set.
  */
 const READABLE_GATE_OPTION_BY_INC1: Record<string, string> = {
-  "components/adaptive/AdaptiveSynthesisReportView.tsx": "207c1a7df4b9088b8a75e5cd112f961c613a2e38",
+  "components/adaptive/AdaptiveSynthesisReportView.tsx": "bcdf6ba2444c2aa3dc22ae049901cf72e55eb0bc",
   "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "0bd0750a98b91a3e7aeae202f5dc1e455969cb04",
   "lib/adaptiveSchema/shareBuilders.ts": "d34a619d18cf861040516309dc09417045a88ac4",
 };
