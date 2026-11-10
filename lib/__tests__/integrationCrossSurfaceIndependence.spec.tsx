@@ -202,3 +202,20 @@ describe("video (PQ-2 strict): every video family is independence-unverified", (
     expect(memo).not.toMatch(/vision-capable AI models independently analyzed/);
   });
 });
+
+describe("integration hunk #1: a presented report without a top-claim result still states the top claim's independence", () => {
+  it("Markdown (classic and readable) carries the Model independence line; an independent run carries none", () => {
+    const { buildAdaptiveSynthesisMarkdown } = require("@/lib/adaptiveSchema/shareBuilders");
+    const { provenanceOf } = require("@/lib/adaptiveSchema/__tests__/o5p/o5pRender");
+    const rec = clone(records["generic-consensus"]);
+    delete rec.synthesisReport.verdictCard.topConsensusAgreement;
+    const uv = provenanceOf(FIVE.map((m) => resultRow(m, "okNoProvider")));
+    const ind = provenanceOf(FIVE.map((m) => resultRow(m, "ok")));
+    const readable = { status: "caution", badge: "Verification gate: Caution", banner: "b", bannerNote: null };
+    for (const r of [undefined, readable]) {
+      const md = buildAdaptiveSynthesisMarkdown("Q", rec.synthesisReport, undefined, uv, undefined, r);
+      expect(md).toMatch(/\*\*Panel verdict:\*\* .*\n\*\*Model independence:\*\* /);
+      expect(buildAdaptiveSynthesisMarkdown("Q", rec.synthesisReport, undefined, ind, undefined, r)).not.toContain("**Model independence:**");
+    }
+  });
+});
