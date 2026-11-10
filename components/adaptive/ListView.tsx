@@ -564,7 +564,8 @@ function ModelRow({
   // D-4: a recorded provider failure is never described as a parse/format failure.
   const slotStatuses = useRunSlotStatus();
   const notResponded = slotDidNotRespond(slotStatuses, result.modelId);
-  const statusUnrecognized = !notResponded && slotStatusUnrecognized(slotStatuses, result.modelId);
+  // A recorded failure literal is never unrecognized (the two are exclusive), so did-not-respond is read first below.
+  const statusUnrecognized = slotStatusUnrecognized(slotStatuses, result.modelId);
   // A13 (C-a): a slot whose executing model also answered other slots says so next to its alignment figures.
   const slotIdentity = useQualifiedExecutionIdentity();
   const alsoAnswered = slotIdentity ? otherSlotsAnsweredBySameModel(slotIdentity, result.modelId) : 0;

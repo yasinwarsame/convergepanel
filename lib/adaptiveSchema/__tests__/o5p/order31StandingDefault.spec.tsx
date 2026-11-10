@@ -188,6 +188,8 @@ describe("Order 31 R-1 — no false negatives: two or more answering independent
       expect([k, texts[k].includes(TOO_FEW_ANSWERS_STATEMENT)]).toEqual([k, false]);
       expect([k, texts[k].includes("panel slots recorded as supporting it returned no successful model response")]).toEqual([k, true]);
     }
+    // the load-bearing line names the stored supporters as panel slots (one of them recorded a failed call)
+    expect(texts["ui.synthesisView"]).toContain("Panel result: Consensus (model independence unverified) (supported by ChatGPT, Claude, Grok, Perplexity, Gemini (panel slots; includes slots with no successful model response))");
     expect(per["export.pdf"]).toEqual([]);
   });
 });
