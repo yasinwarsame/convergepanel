@@ -231,8 +231,31 @@ describe("Order 30 round 2 (review m-D): the three reviewer survivors V17, V19, 
     const ri = rowIndependence(row, p)!;
     expect(ri.dispute).toEqual({ kind: "unverified", scope: "supporters", basis: "failed_supporters" });
     const text = qualifiedRowText(row, ri);
-    expect(text).toBe("recorded as split: 1 panel slot supports it (ChatGPT); panel slots that returned no successful model response are recorded as disputing it (model independence unverified; no count stated)");
+    // C-b (C-a review note): the disputing side mixes an answering slot (Claude) with a failed one (Grok), so the clause
+    // never reads as if every disputing slot returned no successful response.
+    expect(text).toBe("recorded as split: 1 panel slot supports it (ChatGPT); panel slots are recorded as disputing it, some of which returned no successful model response (model independence unverified; no count stated)");
     expect(/\d+ panel slots? disputes? it/.test(text)).toBe(false);
+  });
+  it("C-b (C-a review note): a split row in a ONE-answer run whose disputing side holds the single answering slot and failed slots — the clause never says every disputer returned no response", () => {
+    const row = { id: "s1", claimText: "s1", status: "split", cells: [cell("claude", "agrees"), cell("chatgpt", "disputes"), cell("grok", "disputes"), cell("gemini", "disputes")] };
+    // chatgpt is the only answering slot; claude, grok and gemini recorded failed calls (stored count 4 positioned slots).
+    const p = facts([ok("chatgpt"), failed("claude"), failed("grok"), failed("gemini", "error"), failed("perplexity")]);
+    const ri = rowIndependence(row, p)!;
+    expect(ri.support).toEqual({ kind: "unverified", scope: "supporters", basis: "no_responses" });
+    expect(ri.dispute).toEqual({ kind: "unverified", scope: "supporters", basis: "failed_supporters" });
+    const text = qualifiedRowText(row, ri);
+    expect(text).toBe(
+      "recorded as split: no successful model response supports it; panel slots are recorded as disputing it, some of which returned no successful model response (model independence unverified; no count stated)"
+    );
+    expect(text).not.toContain("panel slots that returned no successful model response are recorded as disputing it");
+    expect(/\d+ panel slots? disputes? it/.test(text)).toBe(false);
+    // The supporting-side analogue (FAILED_SUPPORTERS_CLAUSE) also says "some": a mixed side is never described as all-failed.
+    expect(FAILED_SUPPORTERS_CLAUSE.startsWith("some panel slots recorded as supporting it returned no successful model response")).toBe(true);
+    const mixedSupport = { id: "s2", claimText: "s2", status: "split", cells: [cell("chatgpt", "agrees"), cell("claude", "agrees"), cell("grok", "disputes")] };
+    const p2 = facts([ok("chatgpt"), failed("claude"), ok("grok"), ok("gemini"), ok("perplexity")]);
+    expect(qualifiedRowText(mixedSupport, rowIndependence(mixedSupport, p2)!)).toBe(
+      "recorded as split: panel slots are recorded as supporting it, some of which returned no successful model response (model independence unverified; no count stated); 1 panel slot disputes it (Grok)"
+    );
   });
   it("V19: the stored panel verdict is replaced by the constant / the too-few statement, never prefixed with the claim", () => {
     const stored = "5/5 models converge on “X”; certainty 100%; gate: pass.";

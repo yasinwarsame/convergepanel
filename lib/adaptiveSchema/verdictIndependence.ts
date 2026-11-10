@@ -57,8 +57,12 @@ const INDEPENDENT: AdaptiveTopIndependence = Object.freeze({ kind: "independent"
  * successful model response — no agreement, consensus or support count is claimed. Listed in the vocabulary manifest.
  */
 export const NO_SUCCESSFUL_MODEL_RESPONSES = "No successful model responses. Consensus unavailable. Model independence unverified.";
-/** Order 30 A2: a stored claim naming slots that recorded a failed call among its supporters — no support count stated. */
-export const FAILED_SUPPORTERS_CLAUSE = "panel slots recorded as supporting it returned no successful model response, so no support count is stated";
+/**
+ * Order 30 A2: a stored claim naming slots that recorded a failed call among its supporters — no support count stated.
+ * C-b: such a side always also holds a slot that did not record a failure (an all-failed side is "no_responses"), so
+ * the clause says "some" — it never attributes the failure to every supporting slot.
+ */
+export const FAILED_SUPPORTERS_CLAUSE = "some panel slots recorded as supporting it returned no successful model response, so no support count is stated";
 
 const basisOf = (t: AdaptiveTopIndependence): UnverifiedBasis | undefined => (t.kind === "unverified" ? t.basis : undefined);
 /** The run-scope judgement of an export whose every slot recorded a failed call (exportPositionView.ts, Order 30 A1). */
@@ -401,12 +405,24 @@ export function rowIndependence(row: unknown, provenance: readonly RunModelProve
   };
 }
 
+/**
+ * A row side whose positioned slots include slots that recorded a failed call AND at least one slot that did not: no
+ * count is stated, and the clause does not attribute the failure to every slot on the side (vocabulary manifest).
+ */
+export function mixedFailedSideClause(verb: "support" | "dispute"): string {
+  return `panel slots are recorded as ${verb === "support" ? "supporting" : "disputing"} it, some of which returned no successful model response (model independence unverified; no count stated)`;
+}
+
 /** One side of a row ("3 panel slots support it, answered by 2 independent models (…)"). */
 function sideClause(n: number, verb: "support" | "dispute", side: AdaptiveTopIndependence, voices: readonly string[]): string {
   const counted = `${slotsText(n)} ${n === 1 ? `${verb}s` : verb} it`;
   if (side.kind === "unverified" && side.basis === "no_responses") return `no successful model response ${verb}s it`;
   if (side.kind === "unverified" && side.basis === "too_few_answers") return `panel slots are recorded as ${verb === "support" ? "supporting" : "disputing"} it, but fewer than two independent models returned a successful response in this run (no count stated)`;
-  if (side.kind === "unverified" && side.basis === "failed_supporters") return `panel slots that returned no successful model response are recorded as ${verb === "support" ? "supporting" : "disputing"} it (model independence unverified; no count stated)`;
+  // C-b (C-a review note): a side judged "failed_supporters" mixes slots that recorded a failed call with at least one
+  // slot that did not (adaptiveTopIndependence: an all-failed side is "no_responses"). The clause says so — it never
+  // reads as if every slot on the side returned no successful response (e.g. the one answering slot of a one-answer
+  // run among the disputers).
+  if (side.kind === "unverified" && side.basis === "failed_supporters") return mixedFailedSideClause(verb);
   if (side.kind === "unverified") return `${counted} (model independence unverified — which models answered ${n === 1 ? "it" : "them"} is not recorded)`;
   if (side.kind === "placeholder") {
     const m = voices.length;
