@@ -10,6 +10,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import {
   FAILED_SUPPORTERS_CLAUSE,
+  TOO_FEW_ANSWERS_NAMES_SUFFIX,
   NO_RESPONSES_NAMES,
   NO_RESPONSES_STATUS_HEADING,
   NO_SUCCESSFUL_MODEL_RESPONSES,
@@ -123,7 +124,9 @@ describe("Order 30 A2 on the UI presentation (presentPositionSafeReport over res
   it("one genuine answer + 4 failed slots named as supporters: no unqualified support count anywhere", () => {
     const out = JSON.stringify(ui(CONS(), [ok("chatgpt"), ...["claude", "grok", "perplexity", "gemini"].map((m) => failed(m))]));
     expect(out).not.toMatch(CLAIMS);
-    expect(out).toContain(FAILED_SUPPORTERS_CLAUSE);
+    // Order 31 R-1: one answering model — the too-few statement replaces the failed-supporters clause on every row.
+    expect(out).toContain(TOO_FEW_ANSWERS_STATEMENT);
+    expect(out).not.toContain(FAILED_SUPPORTERS_CLAUSE);
   });
   it("every slot failed with a stored consensus joined: every joined statement states the shared constant; supporters named as none", () => {
     const out = ui(CONS(), FIVE.map((m) => failed(m))) as any;
@@ -173,7 +176,7 @@ describe("Order 30 A2 on the UI presentation (presentPositionSafeReport over res
     expect(independenceQualification(out)!.run).toBe(TOO_FEW_ANSWERS_RUN);
     expect(JSON.stringify(out)).not.toMatch(CLAIMS);
     expect(out.presentation.answer.claims.map((c: any) => c.result)).toEqual(out.presentation.answer.claims.map(() => TOO_FEW_ANSWERS_STATEMENT));
-    expect(out.presentation.answer.claims.every((c: any) => c.supporters.endsWith("(panel slots; includes slots with no successful model response)"))).toBe(true);
+    expect(out.presentation.answer.claims.every((c: any) => c.supporters.endsWith(TOO_FEW_ANSWERS_NAMES_SUFFIX))).toBe(true);
     expect(out.presentation.panelAgreement).toBe(TOO_FEW_ANSWERS_STATEMENT);
     expect(out.panelVerdict).toBe(TOO_FEW_ANSWERS_STATEMENT);
   });
@@ -183,7 +186,10 @@ describe("Order 30 A2 on the UI presentation (presentPositionSafeReport over res
     expect(storedSynthesisRunIndependence(one, false)).toBeNull();
     expect(storedSynthesisRunIndependence(facts([ok("chatgpt"), ok("claude"), failed("grok")]), true)).toBeNull();
     expect(storedSynthesisRunIndependence(facts([ok("chatgpt")]), true)).toBeNull();
-    expect(storedSynthesisRunIndependence([...facts([ok("chatgpt")]), { modelId: "claude", status: "ok", provider: "anthropic", invalidProviderOutput: true }, ...facts([failed("grok")])], true)).toMatchObject({ kind: "placeholder" });
+    // Order 31 R-1: one responding model once the stored placeholder is set aside, beside a recorded failure → too few
+    // answers (judged before the run's own kind); without a stated agreement the run's own kind (placeholder) stands.
+    expect(storedSynthesisRunIndependence([...facts([ok("chatgpt")]), { modelId: "claude", status: "ok", provider: "anthropic", invalidProviderOutput: true }, ...facts([failed("grok")])], true)).toBe(TOO_FEW_ANSWERS_RUN);
+    expect(storedSynthesisRunIndependence([...facts([ok("chatgpt")]), { modelId: "claude", status: "ok", provider: "anthropic", invalidProviderOutput: true }, ...facts([failed("grok")])], false)).toMatchObject({ kind: "placeholder" });
   });
   it("reportStatesAgreement reads only stored agreement statements", () => {
     expect(reportStatesAgreement(CONS().synthesisReport)).toBe(true);

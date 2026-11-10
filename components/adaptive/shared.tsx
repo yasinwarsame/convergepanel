@@ -16,7 +16,7 @@ import { substitutedSlotLabel } from "@/lib/adaptiveSchema/positionPresentation"
 import { usePositionPresentation } from "./PositionPresentationContext";
 import { useRunModelProvenance } from "./RunModelProvenanceContext";
 import { executingVoiceName } from "@/lib/panel/executingVoiceLabel";
-import { didNotRespondText, slotDidNotRespond, useRunSlotStatus } from "@/components/adaptive/RunSlotStatusContext";
+import { UNRECOGNIZED_STATUS_TEXT, didNotRespondText, slotDidNotRespond, slotStatusUnrecognized, useRunSlotStatus } from "@/components/adaptive/RunSlotStatusContext";
 import { SAVED_COPY_NOTICES } from "@/lib/adaptiveSchema/savedCopyNotice";
 import { INVALID_PROVIDER_OUTPUT_NOTICE, slotCoverageText, type RunExecutionIdentity } from "@/lib/panel/executionIdentity";
 
@@ -139,6 +139,9 @@ export function FailedResultsNote({ failed }: { failed: AdaptiveModelResult[] })
               ) : r.parseError && SAVED_COPY_NOTICES.has(r.parseError) ? (
                 // Ruling B: a statement about the stored copy (shortened, or unstructured first answer), never a format verdict.
                 <p><SlotName modelId={r.modelId} />: {r.parseError}</p>
+              ) : slotStatusUnrecognized(slotStatuses, r.modelId) ? (
+                // Order 31 (n-E): an unrecognized recorded status is unknown, never a format verdict.
+                <p><SlotName modelId={r.modelId} /> {UNRECOGNIZED_STATUS_TEXT}</p>
               ) : (
                 <p><SlotName modelId={r.modelId} /> returned an incompatible format and was excluded from comparison.</p>
               )}

@@ -14,7 +14,7 @@
  */
 
 import { createContext, useContext } from "react";
-import { isRecordedFailureStatus } from "@/lib/panel/persistedStatusOutcome";
+import { isRecordedFailureStatus, recordedSlotOutcome } from "@/lib/panel/persistedStatusOutcome";
 
 export const RunSlotStatusContext = createContext<ReadonlyMap<string, string> | null>(null);
 
@@ -32,6 +32,20 @@ export function slotDidNotRespond(statuses: ReadonlyMap<string, string> | null, 
   const status = statuses?.get(modelId);
   return isRecordedFailureStatus(status) ? (status as string) : null;
 }
+
+/**
+ * Order 31 (review n-E): a slot whose recorded call status is present but is not an exact literal of the shared status
+ * map ("OK ", "pending", "toString", …). What happened to that call is unknown, so it is never described as a format
+ * failure ("returned an incompatible format" asserts a response). An empty or missing status (a row from before statuses
+ * were recorded) is not judged here — the consumer keeps its original wording, as without the record.
+ */
+export function slotStatusUnrecognized(statuses: ReadonlyMap<string, string> | null, modelId: string): boolean {
+  const status = statuses?.get(modelId);
+  return typeof status === "string" && status !== "" && recordedSlotOutcome(status) === null;
+}
+
+/** The fixed wording for such a slot (vocabulary manifest). */
+export const UNRECOGNIZED_STATUS_TEXT = "has a recorded call status this version does not recognize, so what happened is not stated; it was excluded from comparison.";
 
 /**
  * Fixed, system-authored wording for a recorded non-response. Never provider error text.

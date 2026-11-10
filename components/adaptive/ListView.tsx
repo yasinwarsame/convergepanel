@@ -48,7 +48,7 @@ import { PanelCounts, ROW_COUNTS_UNAVAILABLE, SlotRowCounts, hasReadableRowBreak
 import { PositionPresentationBoundary, PositionPresentationState, usePositionPresentation } from "./PositionPresentationContext";
 import { slotCountedLabel } from "@/lib/adaptiveSchema/verdictIndependence";
 import { useRunIndependence } from "./useRunIndependence";
-import { didNotRespondText, slotDidNotRespond, useRunSlotStatus } from "@/components/adaptive/RunSlotStatusContext";
+import { UNRECOGNIZED_STATUS_TEXT, didNotRespondText, slotDidNotRespond, slotStatusUnrecognized, useRunSlotStatus } from "@/components/adaptive/RunSlotStatusContext";
 
 // Wording: gatePresentation.gateChipText (D6/D7); "neutral": an unrecognized stored gate (D8).
 const GATE_CHIP_STYLES: Record<GateTone, string> = {
@@ -562,7 +562,9 @@ function ModelRow({
 }) {
   const { result } = vm;
   // D-4: a recorded provider failure is never described as a parse/format failure.
-  const notResponded = slotDidNotRespond(useRunSlotStatus(), result.modelId);
+  const slotStatuses = useRunSlotStatus();
+  const notResponded = slotDidNotRespond(slotStatuses, result.modelId);
+  const statusUnrecognized = !notResponded && slotStatusUnrecognized(slotStatuses, result.modelId);
   // A13 (C-a): a slot whose executing model also answered other slots says so next to its alignment figures.
   const slotIdentity = useQualifiedExecutionIdentity();
   const alsoAnswered = slotIdentity ? otherSlotsAnsweredBySameModel(slotIdentity, result.modelId) : 0;
@@ -572,11 +574,11 @@ function ModelRow({
       <div className="px-4 py-3">
         <div className="flex items-center gap-2 flex-wrap">
           <ExecutingSlotChip modelId={result.modelId} />
-          <TintBadge tone="danger">{notResponded ? "no response · excluded" : "parse error · excluded"}</TintBadge>
+          <TintBadge tone="danger">{notResponded ? "no response · excluded" : statusUnrecognized ? "status not recognized · excluded" : "parse error · excluded"}</TintBadge>
           <span className="ml-auto text-xs text-slate-400">{formatLatency(result.latencyMs)}</span>
         </div>
         <p className="mt-1.5 text-sm text-red-700">
-          <SlotName modelId={result.modelId} /> {notResponded ? didNotRespondText(notResponded) : "returned an incompatible format and was excluded from comparison."}
+          <SlotName modelId={result.modelId} /> {notResponded ? didNotRespondText(notResponded) : statusUnrecognized ? UNRECOGNIZED_STATUS_TEXT : "returned an incompatible format and was excluded from comparison."}
         </p>
         {result.parseError && !notResponded && (
           <details className="mt-1">

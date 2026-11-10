@@ -246,10 +246,10 @@
  },
  {
   "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
-  "literal": "`disputed by ${disputes.join(\", \")}`",
+  "literal": "`disputed by ${disputes.join(\", \")}${slotsNote(ri?.dispute)}`",
   "count": 1,
   "category": "historical-path",
-  "rule": "legacy load-bearing claim; marked: rowView disputers"
+  "rule": "legacy load-bearing claim; marked: rowView disputers; Order 31 R-1: slots named beside a no-count judgement (too few answers / failed supporters) are stated as panel slots"
  },
  {
   "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
@@ -260,10 +260,10 @@
  },
  {
   "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
-  "literal": "`supported by ${supports.join(\", \")}`",
+  "literal": "`supported by ${supports.join(\", \")}${slotsNote(ri?.support)}`",
   "count": 1,
   "category": "historical-path",
-  "rule": "legacy load-bearing claim; marked: rowView supporters"
+  "rule": "legacy load-bearing claim; marked: rowView supporters; Order 31 R-1: slots named beside a no-count judgement (too few answers / failed supporters) are stated as panel slots"
  },
  {
   "file": "components/adaptive/AdaptiveSynthesisReportView.tsx",
@@ -2756,6 +2756,13 @@
   "count": 1,
   "category": "contract-p-applied",
   "rule": "Order 30 A2 (review m-3): a stored row side whose positioned slots include a slot recorded as a failed call — no support / dispute count is stated, model independence unverified; stored values unchanged; rows whose positioned slots all answered render as before"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictIndependence.ts",
+  "literal": "`panel slots are recorded as ${verb === \"support\" ? \"supporting\" : \"disputing\"} it, but fewer than two independent models returned a successful response in this run (no count stated)`",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "Order 31 R-1: a stored consensus / majority row side over a run with recorded failures and fewer than two answering independent models — no support / dispute count is stated, never presented as agreement between models; stored values unchanged; runs with two or more answering independent models render as before"
  },
  {
   "file": "lib/adaptiveSchema/verdictIndependence.ts",

@@ -41,6 +41,8 @@ import {
   placeholderSlotsClause,
   reportStatesAgreement,
   storedSynthesisRunIndependence,
+  TOO_FEW_ANSWERS_RUN,
+  TOO_FEW_ANSWERS_STATEMENT,
   QUALIFIED_TOP_NEXT_STEP,
   qualifiedRowHeading,
   qualifiedRowText,
@@ -926,8 +928,15 @@ export function presentPositionSafeReport<R extends AdaptiveSynthesisReport | nu
   const { verdictCard, panelVerdict, verdict } = presentVerdict(src, rows, input);
 
   // Order 30 round 2 (review m-A): with no successful model response the panel-level counts are not stated.
+  // Order 31 R-1: nor with fewer than two answering models when the stored synthesis states agreement.
   const panelAgreement =
-    input.noSuccessfulResponses === true ? NO_SUCCESSFUL_MODEL_RESPONSES : rows ? renderPositionPanelStatement(panelCounts(rows, roster)) : "Position details are unavailable: the scored rows are not available to this view.";
+    input.noSuccessfulResponses === true
+      ? NO_SUCCESSFUL_MODEL_RESPONSES
+      : storedSynthesisRunIndependence(input.provenance, reportStatesAgreement(src)) === TOO_FEW_ANSWERS_RUN
+        ? TOO_FEW_ANSWERS_STATEMENT
+        : rows
+          ? renderPositionPanelStatement(panelCounts(rows, roster))
+          : "Position details are unavailable: the scored rows are not available to this view.";
   const presentation = {
     ...p,
     panelAgreement,
@@ -1003,7 +1012,10 @@ function presentVerdict(src: AdaptiveSynthesisReport, rows: readonly unknown[] |
       if (view.claimStatus !== "consensus") topHeading = TOP_MAJORITY_HEADING;
       // Historical reports counted every slot a substitute model answered: the top claim is headed by what its
       // supporting slots' recorded execution proves (verdictIndependence.ts). Stored values are unchanged.
-      const independence = adaptiveTopIndependence(supportingSlotsOfRow(join.row), input.provenance);
+      let independence: AdaptiveTopIndependence = adaptiveTopIndependence(supportingSlotsOfRow(join.row), input.provenance);
+      // Order 31 R-1: over a run with fewer than two answering models the top row is not a consensus (rowIndependence).
+      const rowSupport = rowIndependence(join.row, input.provenance)?.support;
+      if (rowSupport && rowSupport.kind === "unverified" && rowSupport.basis === "too_few_answers") independence = rowSupport;
       if (independence.kind !== "independent") {
         topHeading = qualifiedTopHeading(independence, view.claimStatus);
         topIndependence = independence;

@@ -124,6 +124,27 @@ function respondingSlots(slots: readonly string[], provenance: readonly RunModel
   return { responding: slots.filter((s) => !placeholders.includes(s) && !isRecordedFailureSlot(provenance, s)), placeholders };
 }
 
+/**
+ * Order 31 R-1 (owner: stored counts are untrusted for independent-model presentation unless corroborated by execution
+ * evidence): the run records at least one failed call AND fewer than two independent executing models returned a
+ * response (the responding slots — recorded failures and stored placeholders removed — grouped by executing model). A
+ * stored consensus / majority statement over such a run cannot be agreement between models, whatever count it stores.
+ * A run with no recorded failure is never judged here (a single-slot run renders as before).
+ */
+export function fewerThanTwoAnsweringModels(provenance: readonly RunModelProvenanceFacts[] | null | undefined): boolean {
+  if (!Array.isArray(provenance) || !provenance.some((f) => isRecordedFailureFacts(f))) return false;
+  const ids = provenance.map((f) => (f && typeof f.modelId === "string" ? f.modelId.trim() : ""));
+  return groupSlotsByExecutingVoice(respondingSlots(ids, provenance).responding, provenance).length < 2;
+}
+
+const isRecordedFailureFacts = (f: RunModelProvenanceFacts | undefined) => identityRowRecordedFailure(identityRowFromFacts(f));
+
+/** Order 31 R-1: a stored consensus / majority row (or top claim) over a run with fewer than two answering models. */
+export const TOO_FEW_ANSWERS_ROW: Extract<AdaptiveTopIndependence, { kind: "unverified" }> = Object.freeze({ kind: "unverified" as const, scope: "supporters" as const, basis: "too_few_answers" as const });
+
+/** Who supports / disputes a statement in such a run: the stored names, stated as panel slots (vocabulary manifest). */
+export const TOO_FEW_ANSWERS_NAMES_SUFFIX = "(panel slots; fewer than two independent models returned a successful response in this run)";
+
 export function adaptiveTopIndependence(
   supporters: readonly string[] | null,
   provenance: readonly RunModelProvenanceFacts[] | null | undefined
@@ -191,6 +212,7 @@ export function adaptiveTopIndependenceStatement(t: AdaptiveTopIndependence, sto
   if (t.kind === "unverified") {
     if (t.basis === "no_responses") return NO_SUCCESSFUL_MODEL_RESPONSES;
     if (t.basis === "failed_supporters") return `Model independence unverified: ${FAILED_SUPPORTERS_CLAUSE}.`;
+    if (t.basis === "too_few_answers") return TOO_FEW_ANSWERS_STATEMENT;
     return `Model independence unverified: ${recorded ? `${recorded.charAt(0).toLowerCase()}${recorded.slice(1)}, but which` : "which"} models answered ${t.scope === "supporters" ? "the supporting slots" : "this run's slots"} is not recorded.`;
   }
   if (t.kind === "placeholder") {
@@ -223,6 +245,8 @@ export function unmarkedTopIndependence(
     if (status === "consensus" || status === "majority") supporters = supportingSlotsOfRow(same[0]);
   }
   const t = adaptiveTopIndependence(supporters, provenance);
+  // Order 31 R-1: a named top consensus over a run with fewer than two answering models is not agreement between models.
+  if (t.kind === "independent" && fewerThanTwoAnsweringModels(provenance)) return supporters ? TOO_FEW_ANSWERS_ROW : TOO_FEW_ANSWERS_RUN;
   return t.kind === "independent" ? null : t;
 }
 
@@ -261,8 +285,17 @@ export function rowSupportIndependence(row: unknown, provenance: readonly RunMod
   const supporters = supportingSlotsOfRow(row);
   if (!supporters || supporters.length === 0) return null;
   const t = adaptiveTopIndependence(supporters, provenance);
+  if (tooFewOverrides(t) && fewerThanTwoAnsweringModels(provenance)) return TOO_FEW_ANSWERS_ROW;
   return t.kind === "independent" ? null : t;
 }
+
+/**
+ * Order 31 R-1: the judgements a run with fewer than two answering models replaces on a consensus / majority row — an
+ * "independent" row (its positioned slots answered, but the stored count may include the failed ones) and a row naming
+ * failed slots among some answering ones. No-response, unrecorded-identity, repeated-substitute and placeholder
+ * judgements keep their own (already no-count) wording.
+ */
+const tooFewOverrides = (t: AdaptiveTopIndependence) => t.kind === "independent" || (t.kind === "unverified" && t.basis === "failed_supporters");
 
 const unique = (ids: readonly string[]) => Array.from(new Set(ids.map((s) => s.trim()).filter((s) => s.length > 0)));
 
@@ -284,6 +317,7 @@ export function qualifiedRowResult(row: unknown, t: QualifiedIndependence): stri
   const disputes = d > 0 ? `; ${slotsText(d)} ${d === 1 ? "disputes" : "dispute"} it` : "";
   if (t.kind === "unverified") {
     if (t.basis === "no_responses") return NO_SUCCESSFUL_MODEL_RESPONSES;
+    if (t.basis === "too_few_answers") return TOO_FEW_ANSWERS_STATEMENT;
     if (t.basis === "failed_supporters") return `recorded as ${RECORDED_STATUS_WORD[status]}; model independence unverified — ${FAILED_SUPPORTERS_CLAUSE}`;
     return `recorded as ${RECORDED_STATUS_WORD[status]} of ${slotsText(s)}${disputes}; model independence unverified — which models answered the supporting slots is not recorded`;
   }
@@ -345,7 +379,11 @@ export function rowIndependence(row: unknown, provenance: readonly RunModelProve
   const disputeSlots = disputingSlotsOfRow(row);
   const participants = unique([...supportSlots, ...disputeSlots]);
   if (participants.length === 0) return null;
-  const t = adaptiveTopIndependence(participants, provenance);
+  const judged = adaptiveTopIndependence(participants, provenance);
+  // Order 31 R-1: a consensus / majority row over a run with fewer than two answering models states no agreement, even
+  // when its own positioned slots answered (the stored count may include the failed ones) — TOO_FEW_ANSWERS_ROW.
+  const tooFew = isAgreementStatus(status) && tooFewOverrides(judged) && fewerThanTwoAnsweringModels(provenance);
+  const t = tooFew ? TOO_FEW_ANSWERS_ROW : judged;
   if (t.kind === "independent") return null;
   // F-2: stored placeholder slots are not executing models — they are no side's voice and never "on both sides".
   const responding = (slots: readonly string[]) => respondingSlots(slots, provenance).responding;
@@ -353,7 +391,7 @@ export function rowIndependence(row: unknown, provenance: readonly RunModelProve
   const bothSides = groups.filter((g) => g.slotIds.some((s) => supportSlots.includes(s)) && g.slotIds.some((s) => disputeSlots.includes(s))).map((g) => g.label);
   return {
     t,
-    support: supportSlots.length ? adaptiveTopIndependence(supportSlots, provenance) : INDEPENDENT,
+    support: tooFew ? TOO_FEW_ANSWERS_ROW : supportSlots.length ? adaptiveTopIndependence(supportSlots, provenance) : INDEPENDENT,
     dispute: disputeSlots.length ? adaptiveTopIndependence(disputeSlots, provenance) : INDEPENDENT,
     supportSlots,
     disputeSlots,
@@ -367,6 +405,7 @@ export function rowIndependence(row: unknown, provenance: readonly RunModelProve
 function sideClause(n: number, verb: "support" | "dispute", side: AdaptiveTopIndependence, voices: readonly string[]): string {
   const counted = `${slotsText(n)} ${n === 1 ? `${verb}s` : verb} it`;
   if (side.kind === "unverified" && side.basis === "no_responses") return `no successful model response ${verb}s it`;
+  if (side.kind === "unverified" && side.basis === "too_few_answers") return `panel slots are recorded as ${verb === "support" ? "supporting" : "disputing"} it, but fewer than two independent models returned a successful response in this run (no count stated)`;
   if (side.kind === "unverified" && side.basis === "failed_supporters") return `panel slots that returned no successful model response are recorded as ${verb === "support" ? "supporting" : "disputing"} it (model independence unverified; no count stated)`;
   if (side.kind === "unverified") return `${counted} (model independence unverified — which models answered ${n === 1 ? "it" : "them"} is not recorded)`;
   if (side.kind === "placeholder") {
@@ -438,14 +477,12 @@ export function storedSynthesisRunIndependence(provenance: readonly RunModelProv
   if (!Array.isArray(provenance)) return null;
   const failed = provenance.filter((f) => identityRowRecordedFailure(identityRowFromFacts(f)));
   if (provenance.length > 0 && failed.length === provenance.length) return NO_RESPONSES_RUN;
-  const run = runIndependence(provenance);
-  if (run) return run;
   // TOO_FEW_ANSWERS_RUN qualifies only a stored synthesis that states agreement (reportStatesAgreement): a stored
-  // single-source / no-consensus report over one answering model claims none, and renders as before.
-  if (failed.length === 0 || !statesAgreement) return null;
-  // Independent run (every answering slot its own verified executing model): its answering slots are its models.
-  const ids = provenance.map((f) => (f && typeof f.modelId === "string" ? f.modelId.trim() : ""));
-  return respondingSlots(ids, provenance).responding.length < 2 ? TOO_FEW_ANSWERS_RUN : null;
+  // single-source / no-consensus report over one answering model claims none, and renders as before. Order 31 R-1: it is
+  // judged before the run's own kind — a run whose responding slots were all answered by one substitute model, with
+  // recorded failures beside them, states no stored count (not even "counted by panel slot").
+  if (statesAgreement && fewerThanTwoAnsweringModels(provenance)) return TOO_FEW_ANSWERS_RUN;
+  return runIndependence(provenance);
 }
 
 /**
@@ -532,6 +569,7 @@ export const FAILED_SLOTS_ROW_LABEL = "model independence unverified; includes p
 export function slotAgreementLabel(agree: number, dispute: number, silent: number, total: number, ri: RowIndependence | null): string {
   // Order 30 round 2 (review m-A / A2): a row whose positioned slots include recorded failed calls states no count at all.
   if (ri && ri.t.kind === "unverified" && ri.t.basis === "no_responses") return NO_SUCCESSFUL_MODEL_RESPONSES;
+  if (ri && ri.t.kind === "unverified" && ri.t.basis === "too_few_answers") return TOO_FEW_ANSWERS_STATEMENT;
   if (ri && ri.t.kind === "unverified" && ri.t.basis !== undefined) return FAILED_SLOTS_ROW_LABEL;
   const parts = [`${agree} of ${slotsText(total)} agree`];
   if (dispute > 0) parts.push(`${dispute} dispute${dispute === 1 ? "s" : ""}`);
@@ -576,6 +614,7 @@ export const NO_RESPONSES_STATUS_HEADING = "No successful model responses";
 export function qualifiedStatusHeading(status: unknown, t: QualifiedIndependence): QualifiedStatusHeading | null {
   if (!isAgreementStatus(status)) return null;
   if (t.kind === "unverified" && t.basis === "no_responses") return NO_RESPONSES_STATUS_HEADING;
+  if (t.kind === "unverified" && t.basis === "too_few_answers") return `Not an independent ${NOT_INDEPENDENT_WORD[status]}`;
   if (t.kind === "unverified") return `${STATUS_HEADING_WORD[status]} (model independence unverified)`;
   return t.voices.length < 2 ? `Not an independent ${NOT_INDEPENDENT_WORD[status]}` : `${STATUS_HEADING_WORD[status]} (${t.voices.length} independent models)`;
 }
@@ -782,7 +821,8 @@ export function presentIndependenceQualifiedReport<R extends AdaptiveSynthesisRe
     if (typeof stored !== "string") return {};
     const basis = basisOf(st.row ? (side === "support" ? st.ri!.support : st.ri!.dispute) : st.t) ?? basisOf(st.t);
     if (basis === "no_responses") return { [side === "support" ? "supporters" : "disputers"]: NO_RESPONSES_NAMES };
-    if (basis === "failed_supporters" || basis === "too_few_answers") return { [side === "support" ? "supporters" : "disputers"]: `${stored} (panel slots; includes slots with no successful model response)` };
+    if (basis === "too_few_answers") return { [side === "support" ? "supporters" : "disputers"]: `${stored} ${TOO_FEW_ANSWERS_NAMES_SUFFIX}` };
+    if (basis === "failed_supporters") return { [side === "support" ? "supporters" : "disputers"]: `${stored} (panel slots; includes slots with no successful model response)` };
     const named = st.row ? qualifiedSideVoices(st.ri!, side) : null;
     return { [side === "support" ? "supporters" : "disputers"]: named ? named.join("; ") : `${stored} (panel slots)` };
   };

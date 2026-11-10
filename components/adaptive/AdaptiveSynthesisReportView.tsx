@@ -103,6 +103,8 @@ import {
   slotAgreementLabel,
   topIndependencePresentation,
   uniformityBadge,
+  TOO_FEW_ANSWERS_NAMES_SUFFIX,
+  type AdaptiveTopIndependence,
 } from "@/lib/adaptiveSchema/verdictIndependence";
 import { useRunIndependence, useStoredSynthesisRunIndependence } from "./useRunIndependence";
 import { useQualifiedExecutionIdentity, useRunExecutionIdentity } from "./RunExecutionIdentityContext";
@@ -1176,7 +1178,10 @@ function LoadBearingClaim({ claim }: { claim: AlignedClaim }) {
   const ri = rowIndependence(claim, runProvenance);
   const supports = (ri && qualifiedSideVoices(ri, "support")) || named(["agrees", "partial"]);
   const disputes = (ri && qualifiedSideVoices(ri, "dispute")) || named(["disputes"]);
-  const who = [supports.length > 0 ? `supported by ${supports.join(", ")}` : "", disputes.length > 0 ? `disputed by ${disputes.join(", ")}` : ""].filter(Boolean);
+  // Order 31 R-1: slots named beside a no-count judgement are panel slots, never a count of agreeing models.
+  const slotsNote = (side: AdaptiveTopIndependence | undefined) =>
+    side?.kind === "unverified" && side.basis === "too_few_answers" ? ` ${TOO_FEW_ANSWERS_NAMES_SUFFIX}` : side?.kind === "unverified" && side.basis === "failed_supporters" ? " (panel slots; includes slots with no successful model response)" : "";
+  const who = [supports.length > 0 ? `supported by ${supports.join(", ")}${slotsNote(ri?.support)}` : "", disputes.length > 0 ? `disputed by ${disputes.join(", ")}${slotsNote(ri?.dispute)}` : ""].filter(Boolean);
   return (
     <>
       <span data-source="model_claim">

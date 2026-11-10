@@ -413,7 +413,10 @@ describe("Order 30 A1 / A2 — exports: no successful response, or failed suppor
     expect(exportRunIndependence(rec)).toBe(TOO_FEW_ANSWERS_RUN);
     for (const [k, text] of await bothTexts(rec)) {
       expect([k, claimsIn(text)]).toEqual([k, []]);
-      expect([k, text.includes(FAILED_SUPPORTERS_CLAUSE)]).toEqual([k, true]);
+      // Order 31 R-1: over fewer than two answering models a joined consensus row states the too-few statement (it
+      // replaces the failed-supporters clause, which still applies when two or more models answered — next test).
+      expect([k, text.includes(TOO_FEW_ANSWERS_STATEMENT)]).toEqual([k, true]);
+      expect([k, text.includes(FAILED_SUPPORTERS_CLAUSE)]).toEqual([k, false]);
       expect([k, text.includes(ADAPTIVE_INDEPENDENCE_UNVERIFIED_TOP_HEADING)]).toEqual([k, true]);
       expect([k, text.includes(NO_SUCCESSFUL_MODEL_RESPONSES)]).toEqual([k, false]);
     }
