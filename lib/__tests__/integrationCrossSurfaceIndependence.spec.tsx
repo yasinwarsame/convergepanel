@@ -219,3 +219,24 @@ describe("integration hunk #1: a presented report without a top-claim result sti
     }
   });
 });
+
+describe("integration hunk #10b: the readable X post keeps the connector qualifier of a qualified run", () => {
+  it("legacy report: the short qualifier sits before the brand, never cut, within 280; an independent run has none", () => {
+    const { buildAdaptiveXPost } = require("@/lib/adaptiveSchema/shareBuilders");
+    const { modelWrittenShortLabel } = require("@/lib/panel/executionIdentity");
+    const rec = clone(records["generic-mixed"]);
+    delete rec.synthesisReport.presentation;
+    const readable = { status: "caution", badge: "Verification gate: Caution", banner: "Verification gate: Caution", bannerNote: null };
+    const uvRows = FIVE.map((m) => resultRow(m, "okNoProvider"));
+    const uv = runExecutionIdentity(uvRows);
+    expect(uv.qualified).toBe(true);
+    const long = "Across the last two decades of peer-reviewed labour-economics research, does a sustained shift to remote or hybrid work measurably change productivity?";
+    for (const q of ["Q?", long]) {
+      const post: string = buildAdaptiveXPost(q, rec.synthesisReport, undefined, uv, readable);
+      expect(post.length).toBeLessThanOrEqual(280);
+      expect(post.endsWith(`${modelWrittenShortLabel(uv)}\n\nvia ConvergePanel`)).toBe(true);
+    }
+    const ind = runExecutionIdentity(FIVE.map((m) => resultRow(m, "ok")));
+    expect(buildAdaptiveXPost("Q?", rec.synthesisReport, undefined, ind, readable)).toBe(buildAdaptiveXPost("Q?", rec.synthesisReport, undefined, undefined, readable));
+  });
+});
