@@ -11,6 +11,7 @@ import { DEEPSEEK_API_KEY } from "@/lib/env";
 import { getPanelModelConfig } from "@/lib/panelModels";
 import { GROK_MODEL } from "@/lib/env";
 import { PERPLEXITY_AGENT_MODEL } from "@/lib/providers/perplexityAgentResponse";
+import { GEMINI_MODEL_ID } from "@/lib/models/gemini";
 
 type ApiKeys = Partial<Record<ModelId, string | undefined>>;
 
@@ -21,7 +22,9 @@ const isDev = () => process.env.NODE_ENV !== "production";
 const ACTUAL_MODEL_STRINGS: Record<ModelId, string> = {
   chatgpt: "gpt-4o-mini",
   claude: "claude-haiku-4-5-20251001",
-  gemini: "gemini-2.0-flash",
+  // The model callGemini actually sends (was the shut-down gemini-2.0-flash,
+  // never the called model). New runs only; stored history is not rewritten.
+  gemini: GEMINI_MODEL_ID,
   grok: GROK_MODEL || "grok-4-1-fast-reasoning",
   // Physical model behind the logical "perplexity" slot (Perplexity Agent API).
   perplexity: PERPLEXITY_AGENT_MODEL,

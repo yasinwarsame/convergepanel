@@ -5,7 +5,7 @@
  * using the official @google/generative-ai SDK.
  * 
  * Implements function-based connector for Google Gemini.
- * Uses the Gemini 2.5 Flash model (stable) for fast, high-quality responses.
+ * Calls GEMINI_MODEL_ID (lib/models/gemini.ts — currently gemini-3.5-flash-lite).
  * 
  * This connector uses the GEMINI_API_KEY environment variable from @/lib/env.
  * The canonical model ID used across the app is "gemini".
@@ -18,6 +18,7 @@
 import { ModelResult } from "@/lib/types";
 import type { ConnectorCallOptions } from "./types";
 import { buildPanelPrompt } from "@/lib/panelPrompt";
+import { GEMINI_MODEL_ID } from "@/lib/models/gemini";
 import { MODEL_LIMITS, getModelTimeout } from "@/lib/modelConfig";
 import { getTotalTokensFromProviderResponse, modelIdToProviderKey, safeNum } from "@/lib/tokenExtraction";
 import { GoogleGenerativeAI } from "@google/generative-ai";
@@ -174,8 +175,10 @@ export async function callGemini(
         : sanitizedQuestion;
   }
   
-  // gemini-2.0-flash was deprecated/removed in mid-2026; use 2.5-flash as the stable successor
-  const GEMINI_MODEL = "gemini-2.5-flash";
+  // Single source of truth: lib/models/gemini.ts. gemini-2.0-flash was shut
+  // down 2026-06-01 and gemini-2.5-flash auto-routes to gemini-3.5-flash-lite
+  // from 2026-12-01, so we call the 3.5 Flash-Lite model by name.
+  const GEMINI_MODEL = GEMINI_MODEL_ID;
   
   // Defensive logging (dev-only, no API key value, no full prompt)
   if (process.env.NODE_ENV !== "production") {
@@ -261,15 +264,24 @@ export async function callGemini(
           contents: requestContents,
           generationConfig: {
             maxOutputTokens: effectiveMaxOutput,
-            temperature: 0.7,
+            // No `temperature`: Google's Gemini 3.6 / 3.5 Flash-Lite migration
+            // guide (aistudio.google.com/docs/whats-new-gemini-3.6, "Sampling
+            // parameter deprecation") says "`temperature`, `top_p`, and `top_k`
+            // are deprecated and ignored. In future model generations,
+            // supplying these parameters returns an HTTP 400 error. Remove
+            // these parameters from all requests."
+            //
             // thinkingConfig isn't in this SDK version's GenerationConfig type
-            // (installed @google/generative-ai predates it), but the REST API
-            // accepts it and gemini-2.5-flash shares its thinking-token budget
-            // with maxOutputTokens — without this, a small maxOutputTokens
-            // (e.g. the classifier's) can be silently consumed entirely by
-            // thinking, truncating the actual response to nothing.
-            ...(typeof opts?.thinkingBudget === "number"
-              ? { thinkingConfig: { thinkingBudget: opts.thinkingBudget } }
+            // (installed @google/generative-ai predates it); the SDK passes
+            // generationConfig through to the REST body unchanged. Gemini 3.x
+            // uses `thinkingLevel`, not `thinkingBudget` — the 3.5 Flash-Lite
+            // migration guide: "Replace `thinking_budget` with
+            // `thinking_level`"; the generateContent reference lists
+            // thinkingLevel values MINIMAL/LOW/MEDIUM/HIGH, "Recommended for
+            // Gemini 3 or later models". Omitted => the model default
+            // ("minimal" on gemini-3.5-flash-lite per the migration guide).
+            ...(opts?.thinkingLevel
+              ? { thinkingConfig: { thinkingLevel: opts.thinkingLevel } }
               : {}),
           } as any,
         });

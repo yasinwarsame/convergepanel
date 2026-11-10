@@ -196,7 +196,7 @@ Registered in `CONNECTOR_MAP` (`lib/connectors/index.ts`):
 | Claude Opus 4.5 | `claude` | `claude-haiku-4-5-20251001` | Anthropic |
 | Grok 4 | `grok` | `grok-4-1-fast-reasoning` (configurable via `GROK_MODEL` env) | xAI |
 | Perplexity Pro | `perplexity` | `perplexity/sonar` via the Agent API (`POST /v1/agent`, web search requested; see `lib/providers/perplexityAgentResponse.ts`) | Perplexity |
-| Gemini 2.0 Flash | `gemini` | `gemini-2.0-flash` | Google |
+| Gemini 3.5 Flash-Lite | `gemini` | `gemini-3.5-flash-lite` (`GEMINI_MODEL_ID`, `lib/models/gemini.ts`; also used by every adaptive stage and video vision; recorded as the run's `requestedModel` for new runs — runs before this change recorded `gemini-2.0-flash` while calling `gemini-2.5-flash`) | Google |
 
 DeepSeek is a fallback provider only — not in `CONNECTOR_MAP` directly.
 
@@ -927,7 +927,7 @@ Each verification stores an `AuditBundle`:
 |-------|----------------|
 | OpenAI | `gpt-4o` |
 | Anthropic | `claude-sonnet-4-20250514` |
-| Google | `gemini-2.0-flash` |
+| Google | `gemini-3.5-flash-lite` (`GEMINI_MODEL_ID`) |
 
 All three use 60-second timeouts and 8192 max output tokens.
 

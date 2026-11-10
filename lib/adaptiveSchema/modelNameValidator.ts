@@ -23,10 +23,11 @@ import { runModelFamilyName } from "@/lib/panel/runModelIdentity";
  * hallucinated/misremembered model name in generated prose. Heuristic, not
  * exhaustive — good enough to catch the version-number-guessing failure mode
  * ("Gemini 3 Pro", "GPT-4o", "Claude 3.5 Sonnet") without false-triggering on
- * ordinary sentences.
+ * ordinary sentences. "Flash-Lite" is matched whole so the real roster label
+ * "Gemini 3.5 Flash-Lite" is recognised rather than flagged as "Gemini 3.5 Flash".
  */
 const MODEL_NAME_TOKEN_PATTERN =
-  /\b(GPT[\s-]?\d[\w.]*(?:\s+(?:Turbo|Pro|mini|nano))?|Claude(?:\s+(?:Opus|Sonnet|Haiku))?[\s-]?\d[\w.]*(?:\s+(?:Opus|Sonnet|Haiku))?|Gemini[\s-]?\d[\w.]*(?:\s+(?:Pro|Flash|Ultra|Nano))?|Grok[\s-]?\d[\w.]*|Perplexity(?:\s+(?:Pro|Sonar))?|Llama[\s-]?\d[\w.]*|Mistral(?:\s+\w+)?|DeepSeek(?:[\s-]?\w+)?)\b/gi;
+  /\b(GPT[\s-]?\d[\w.]*(?:\s+(?:Turbo|Pro|mini|nano))?|Claude(?:\s+(?:Opus|Sonnet|Haiku))?[\s-]?\d[\w.]*(?:\s+(?:Opus|Sonnet|Haiku))?|Gemini[\s-]?\d[\w.]*(?:\s+(?:Pro|Flash(?:-Lite)?|Ultra|Nano))?|Grok[\s-]?\d[\w.]*|Perplexity(?:\s+(?:Pro|Sonar))?|Llama[\s-]?\d[\w.]*|Mistral(?:\s+\w+)?|DeepSeek(?:[\s-]?\w+)?)\b/gi;
 
 /** Returns every model-name-like token in `text` that isn't one of the run's actual display names. */
 export function findUnrecognizedModelNames(text: string, roster: ModelId[]): string[] {

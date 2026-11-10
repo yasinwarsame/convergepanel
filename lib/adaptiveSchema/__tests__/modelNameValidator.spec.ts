@@ -20,8 +20,14 @@ describe("findUnrecognizedModelNames", () => {
   });
 
   it("returns empty when every model-like token matches the roster's real display names", () => {
-    const text = "GPT 5.2, Claude Opus 4.5, Grok 4, Perplexity Pro, and Gemini 2.0 Flash all responded.";
+    const text = "GPT 5.2, Claude Opus 4.5, Grok 4, Perplexity Pro, and Gemini 3.5 Flash-Lite all responded.";
     expect(findUnrecognizedModelNames(text, ROSTER)).toEqual([]);
+  });
+
+  it("matches Flash-Lite whole: the real label is not flagged or half-stripped, a wrong Flash-Lite still is", () => {
+    expect(stripUnrecognizedModelNames("Gemini 3.5 Flash-Lite agrees.", ROSTER)).toBe("Gemini 3.5 Flash-Lite agrees.");
+    expect(findUnrecognizedModelNames("Gemini 3.1 Flash-Lite agrees.", ROSTER)).toEqual(["Gemini 3.1 Flash-Lite"]);
+    expect(findUnrecognizedModelNames("Gemini 3.5 Flash agrees.", ROSTER)).toEqual(["Gemini 3.5 Flash"]);
   });
 
   it("returns empty for plain prose with no model-name-like tokens", () => {
