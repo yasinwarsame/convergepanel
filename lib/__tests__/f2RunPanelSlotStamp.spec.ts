@@ -81,3 +81,42 @@ describe("F-2 claims: the INVALID_MOCK guard is defensive (the literal cannot pa
     expect(row).not.toHaveProperty("provider");
   });
 });
+
+/**
+ * N1 boundary (integration review): no connector source can return status "ok" with placeholder text. The dead
+ * BaseConnector (whose `getMockResponse` returned ok "[Mock response — …]") is deleted; this pins that it stays gone
+ * and that no file under lib/connectors carries a mock-response literal or an ok-mock path. The behavioural half (every
+ * non-answer path of every connector is non-ok) is the per-connector table in f2StructuredOutputClass.spec.ts.
+ */
+describe("F-2 / N1 boundary: no connector can return ok with placeholder text", () => {
+  const fs = jest.requireActual("fs") as typeof import("fs");
+  const path = jest.requireActual("path") as typeof import("path");
+  const dir = path.join(process.cwd(), "lib/connectors");
+  const sources = fs
+    .readdirSync(dir)
+    .filter((f) => /\.ts$/.test(f))
+    .map((f) => ({ f, src: fs.readFileSync(path.join(dir, f), "utf8") }));
+  const code = (src: string) =>
+    src
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split("\n")
+      .filter((l) => !/^\s*\/\//.test(l) && !/logger\.(debug|info|warn|error)\(/.test(l))
+      .join("\n");
+
+  it("the dead BaseConnector is gone and nothing references it", () => {
+    expect(fs.existsSync(path.join(dir, "base.ts"))).toBe(false);
+    for (const { f, src } of sources) expect([f, /BaseConnector|getMockResponse|from "\.\/base"/.test(src)]).toEqual([f, false]);
+  });
+
+  it("no connector code carries a mock-response literal (outside comments and log lines)", () => {
+    expect(sources.length).toBeGreaterThanOrEqual(5);
+    for (const { f, src } of sources) expect([f, /mock[\s_-]*response/i.test(code(src))]).toEqual([f, false]);
+  });
+
+  it("every CONNECTOR_MAP slot is a connector the fail-closed table covers", () => {
+    const index = sources.find((s) => s.f === "index.ts")!.src;
+    const map = index.slice(index.indexOf("export const CONNECTOR_MAP"), index.indexOf("};", index.indexOf("export const CONNECTOR_MAP")));
+    const slots = Array.from(map.matchAll(/^\s*(\w+):\s*(\w+),/gm)).map((m) => `${m[1]}:${m[2]}`);
+    expect(slots).toEqual(["chatgpt:callChatGPT", "claude:callClaude", "grok:callGrok", "perplexity:callPerplexity", "gemini:callGemini"]);
+  });
+});

@@ -161,7 +161,6 @@ ConvergePanel/
 │   ├── types.ts                  # TypeScript type definitions
 │   ├── consensus.ts              # Consensus engine and synthesis
 │   └── connectors/
-│       ├── base.ts               # Base connector class
 │       ├── chatgpt.ts            # OpenAI GPT 5.2 connector
 │       ├── claude.ts             # Anthropic Claude Opus 4.5 connector
 │       ├── grok.ts               # X.AI Grok 4 connector
@@ -222,37 +221,32 @@ To add a new model connector:
 1. Create a new connector file in `lib/connectors/` (e.g., `gemini.ts`):
 
 ```typescript
-import { BaseConnector } from "./base";
+import type { ModelResult } from "@/lib/types";
+import type { ConnectorCallOptions } from "./types";
 
-export class GeminiConnector extends BaseConnector {
-  id = "gemini" as const;
-  displayName = "Gemini 3 Pro";
-
-  async sendPrompt(question: string, systemWrapper: string) {
-    const startTime = Date.now();
-    const apiKey = this.getApiKey();
-
-    if (!apiKey) {
-      return this.getMockResponse();
-    }
-
-    try {
-      // Implement your API call here
-      // ...
-      
-      return {
-        status: "ok" as const,
-        rawText: responseText,
-        latencyMs: Date.now() - startTime,
-      };
-    } catch (error) {
-      // Handle errors
-      return {
-        status: "error" as const,
-        rawText: null,
-        latencyMs: Date.now() - startTime,
-      };
-    }
+// A connector is a plain function registered in CONNECTOR_MAP (lib/connectors/index.ts).
+// It must never throw, and it must never return status "ok" without a provider answer:
+// a missing key, a rejected key, an empty response or an exception is a non-ok result.
+export async function callGemini(
+  question: string,
+  context?: string | null,
+  apiKey?: string,
+  opts?: ConnectorCallOptions
+): Promise<ModelResult> {
+  const startTime = Date.now();
+  if (!apiKey) {
+    return { modelId: "gemini", status: "error", rawText: null, latencyMs: 0, errorMessage: "Gemini API key missing." };
+  }
+  try {
+    const responseText = ""; // Implement your API call here
+    return {
+      modelId: "gemini",
+      status: responseText ? "ok" : "error",
+      rawText: responseText || null,
+      latencyMs: Date.now() - startTime,
+    };
+  } catch {
+    return { modelId: "gemini", status: "error", rawText: null, latencyMs: Date.now() - startTime };
   }
 }
 ```

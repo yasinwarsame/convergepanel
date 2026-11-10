@@ -1243,7 +1243,10 @@ export default function ResultsDisplay({
 
   // E19 (D-5 exact oracle): only the listed stored placeholder texts are "not a model response"; text that merely
   // mentions a mock response is of unknown validity (and makes the run's independence unverified).
-  const placeholderOf = (result: ModelResult) => placeholderClass({ modelId: result.modelId, status: result.status, rawText: getModelText(result) });
+  // F-2 (Order 34): the structured `outputClass` fact travels with the row, so a stamped genuine answer is never classed
+  // by its text (the exact INVALID_MOCK literal still is); rows without the fact keep the text oracle.
+  const placeholderOf = (result: ModelResult) =>
+    placeholderClass({ modelId: result.modelId, status: result.status, rawText: getModelText(result), outputClass: result.outputClass });
 
   // Separate successful and failed results for different display handling
   const successfulResults = results.filter((r) => r.status === "ok" || r.status === "substituted");
