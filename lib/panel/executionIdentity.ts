@@ -70,6 +70,11 @@ export type IdentityRow = {
   invalidProviderOutput?: unknown;
   /** The recorded VALIDITY_UNKNOWN class of a provenance-facts row (`withPlaceholderFact`); only `true` means anything. */
   validityUnknown?: unknown;
+  /**
+   * F-2 (Order 34): the structured execution fact written for a NEW row ("model_response": the connector returned ok
+   * with no errorCode). Such a row is never VALIDITY_UNKNOWN by its text; only the exact value means anything.
+   */
+  outputClass?: unknown;
 };
 
 const TEXT_KEYS = ["rawTextFull", "rawTextTruncated", "rawText", "text"] as const;
@@ -106,6 +111,10 @@ export function placeholderClass(row: IdentityRow | null | undefined): Placehold
   const slot = typeof row.modelId === "string" ? row.modelId.trim().toLowerCase() : "";
   const literal = slot === "chatgpt" || slot === "claude" ? STORED_PLACEHOLDER_LITERALS[slot] : null;
   if (literal && row.status === "ok" && text.trim() === literal) return "INVALID_MOCK";
+  // F-2 (Order 34, owner ruling: response text is not a permanent authority signal): a row whose structured execution
+  // fact records a model response is never VALIDITY_UNKNOWN because its text mentions a mock response. Rows without the
+  // fact (every historical row) keep the text oracle; the exact literal above is still INVALID_MOCK.
+  if (row.outputClass === "model_response") return null;
   return VALIDITY_UNKNOWN_MARKER.test(text) ? "VALIDITY_UNKNOWN" : null;
 }
 

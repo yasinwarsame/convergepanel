@@ -154,10 +154,16 @@ const WIDENED_BY_INC1: Record<string, string> = {
  * other pins and assertions are unchanged.
  *   - dsProvenanceUiBoundaries.spec.ts: 4f2991601910578b95cd268cf466beb4e1d3a182 → abcee8eca3175d2c718b662a78c4f3796fcfd1f3.
  * Same 32-file pinned set.
+ *
+ * Re-pinned (owner-authorized F-2, Order 34 connector integration): dsProvenanceUiBoundaries.spec.ts changed only its own
+ * lib/user/runDocumentToPublicResults.ts pin (d1ed5a2 → 09f84f9: passthrough of the structured `outputClass` execution
+ * fact; no provenance code). The spec's other pins and assertions are unchanged.
+ *   - dsProvenanceUiBoundaries.spec.ts: 0bd0750a98b91a3e7aeae202f5dc1e455969cb04 → 1eb15948753574f91c8b949af4a1fbc19e8dd51e.
+ * Same 32-file pinned set.
  */
 const READABLE_GATE_OPTION_BY_INC1: Record<string, string> = {
   "components/adaptive/AdaptiveSynthesisReportView.tsx": "bcdf6ba2444c2aa3dc22ae049901cf72e55eb0bc",
-  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "0bd0750a98b91a3e7aeae202f5dc1e455969cb04",
+  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "1eb15948753574f91c8b949af4a1fbc19e8dd51e",
   "lib/adaptiveSchema/shareBuilders.ts": "d34a619d18cf861040516309dc09417045a88ac4",
 };
 

@@ -102,7 +102,7 @@ export function independentVoices<T extends VoiceRow>(rows: readonly T[]): T[] {
 export const MIN_INDEPENDENT_SYNTHESIS_MODELS = 2;
 
 /** A client-held result row: live `ModelResult` or a reloaded run's public row. */
-export type ClientSynthesisRow = VoiceRow & { rawTextFull?: unknown; rawText?: unknown; text?: unknown };
+export type ClientSynthesisRow = VoiceRow & { rawTextFull?: unknown; rawText?: unknown; text?: unknown; outputClass?: unknown };
 
 /**
  * The text a client row carries: the first NON-EMPTY of `rawTextFull`, `rawText`, `text`. The one text getter for the
@@ -161,7 +161,16 @@ export function storedRunPerModelRows(data: Record<string, unknown> | null | und
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
     const r = raw as Record<string, unknown>;
     if (typeof r.modelId !== "string" || r.modelId.trim().length === 0 || typeof r.status !== "string") return null;
-    rows.push({ modelId: r.modelId, status: r.status, provider: r.provider, rawTextFull: r.rawTextTruncated, rawText: r.rawText, text: r.text });
+    rows.push({
+      modelId: r.modelId,
+      status: r.status,
+      provider: r.provider,
+      rawTextFull: r.rawTextTruncated,
+      rawText: r.rawText,
+      text: r.text,
+      // F-2 (Order 34): the structured execution fact, passed as recorded (only the exact value is read by the gate).
+      ...(r.outputClass === "model_response" ? { outputClass: "model_response" as const } : {}),
+    });
   }
   return rows;
 }

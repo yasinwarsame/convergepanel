@@ -282,6 +282,8 @@ async function runSlotWithFallback(
       requestedModel,
       provider,
       actualModel: requestedModel,
+      // F-2 (Order 34): the structured execution fact — the slot's own connector returned ok with no errorCode.
+      ...(primaryResult.errorCode ? {} : { outputClass: "model_response" as const }),
     });
   }
 
@@ -296,6 +298,8 @@ async function runSlotWithFallback(
           requestedModel,
           provider,
           actualModel: requestedModel,
+          // F-2 (Order 34): the structured execution fact (see the primary attempt above).
+          ...(primaryResult.errorCode ? {} : { outputClass: "model_response" as const }),
         });
       }
       if (isNonRetryable(primaryResult)) break;

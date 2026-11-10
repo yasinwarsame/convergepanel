@@ -183,6 +183,14 @@ export interface ModelResult {
   provider?: string;
   actualModel?: string;
 
+  /**
+   * F-2 (Order 34): structured execution fact — the connector returned status "ok" with no errorCode, i.e. a model
+   * response (missing / rejected keys fail closed since b1a680e). Set by runPanel on a primary answer and frozen onto
+   * the perModel row at completion; absent on every historical row. The shared gate reads it instead of the
+   * "mock response" text oracle (VALIDITY_UNKNOWN); the exact placeholder literal (INVALID_MOCK) is still excluded.
+   */
+  outputClass?: "model_response";
+
   // Substitution metadata (only when status === "substituted")
   substitutedFrom?: string;
   substitutionReason?: string;

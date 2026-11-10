@@ -34,6 +34,8 @@ export function runDocumentToPublicResults(runDocument: RunDocument | null | und
       provider: p.provider,
       requestedModel: p.requestedModel,
       substitutedFrom: p.substitutedFrom,
+      // F-2 (Order 34): the structured execution fact, copied only when the persisted row carries it.
+      ...(p.outputClass === "model_response" ? { outputClass: "model_response" as const } : {}),
     };
     return normalizePersistedModelResult(raw) as unknown as PersistedPanelResultPublic;
   });

@@ -37,15 +37,18 @@ function substitutionAttribution(r: ModelResult): { substituted?: true; provider
 /**
  * Order 33 (owner ruling A): `{ provider }` for a SUCCESSFUL own-provider answer — the connector returned `status: "ok"`
  * with the provider the claim dispatch stamped from the connector function it invoked
- * (runClaimVerificationPanel), canonical (lib/panel/providerRegistry.ts), and text that is not a stored placeholder
- * (D-5: INVALID_MOCK / VALIDITY_UNKNOWN record no provider). `{}` otherwise: a failed / timed-out / refused /
+ * (runClaimVerificationPanel), canonical (lib/panel/providerRegistry.ts), and text that is not the exact stored
+ * placeholder literal (D-5 INVALID_MOCK records no provider; since F-2, Order 34, a genuine answer that merely mentions a
+ * "mock response" — the VALIDITY_UNKNOWN text oracle — is a model response). `{}` otherwise: a failed / timed-out / refused /
  * rate-limited / parse_error / placeholder / unstamped row records no provider, and its identity stays unverified.
  */
 function ownProviderAttribution(r: ModelResult): { provider?: string } {
   if (r.status !== "ok") return {};
   const provider = canonicalProvider(r.provider);
   if (!provider) return {};
-  if (placeholderClass({ modelId: r.modelId, status: "ok", rawText: r.rawText ?? "" }) !== null) return {};
+  // F-2 (Order 34): only the exact placeholder literal is excluded. A genuine answer that discusses a "mock response"
+  // is a model response (VALIDITY_UNKNOWN is a text oracle for historical rows, not an authority on a current write).
+  if (placeholderClass({ modelId: r.modelId, status: "ok", rawText: r.rawText ?? "" }) === "INVALID_MOCK") return {};
   return { provider };
 }
 

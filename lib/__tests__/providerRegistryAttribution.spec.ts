@@ -145,12 +145,13 @@ describe("ruling A: buildClaimModelEvidence writes a provider only for a success
     expect([e.status, "provider" in e]).toEqual(["parse_error", false]);
   });
 
-  it("placeholder texts (D-5) record no provider: the listed literal, and text whose validity cannot be established", () => {
+  it("the exact placeholder literal records no provider; a genuine answer that mentions a mock response does (F-2, Order 34)", () => {
     const [lit] = buildClaimModelEvidence([res("chatgpt", "ok", { provider: "openai", rawText: STORED_PLACEHOLDER_LITERALS.chatgpt })]);
     expect("provider" in lit).toBe(false);
-    const unknownValidity = JSON.stringify({ verdict: "accurate", confidence: "high", summary: "Mock response for the demo", correctParts: [], incorrectParts: [], unverifiableParts: [] });
-    const [vu] = buildClaimModelEvidence([res("claude", "ok", { provider: "anthropic", rawText: unknownValidity })]);
-    expect([vu.status, "provider" in vu]).toEqual(["ok", false]);
+    const mentions = JSON.stringify({ verdict: "accurate", confidence: "high", summary: "Mock response for the demo", correctParts: [], incorrectParts: [], unverifiableParts: [] });
+    const [vu] = buildClaimModelEvidence([res("claude", "ok", { provider: "anthropic", rawText: mentions })]);
+    // Was ["ok", false] (the VALIDITY_UNKNOWN text oracle); a current write is judged by structured status.
+    expect([vu.status, (vu as { provider?: string }).provider]).toEqual(["ok", "anthropic"]);
   });
 
   it("a substitution stores the substitute's provider exactly as today (trimmed, not re-normalized)", () => {

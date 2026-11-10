@@ -143,6 +143,8 @@ export interface RunDocument {
     requestedModel?: string;
     /** Present only when this execution actually substituted ("<provider>:<model>"). */
     substitutedFrom?: string;
+    /** F-2 (Order 34): "model_response" when the connector returned ok with no errorCode; absent on historical rows. */
+    outputClass?: "model_response";
   }>;
   synthesizedAnswer?: string;
   totals: {

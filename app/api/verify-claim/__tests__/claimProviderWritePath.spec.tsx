@@ -125,14 +125,16 @@ const CASES: Case[] = [
     k: 2,
   },
   {
-    name: "an answer whose validity cannot be established (D-5 VALIDITY_UNKNOWN) — no provider, record unverified",
-    chatgpt: A("accurate", { summary: "This is a mock response used for testing." }),
+    // F-2 (Order 34): a genuine answer that merely discusses a "mock response" is a model response on a current write
+    // (structured status, not text): it records its provider and the record is independent (was: no provider, unverified).
+    name: "a genuine answer that discusses a mock response (formerly VALIDITY_UNKNOWN) — provider recorded, independent",
+    chatgpt: A("accurate", { summary: "The vendor's demo returned a mock response instead of live data, as the claim says." }),
     claude: A(),
     grok: A(),
-    providers: [undefined, "anthropic", "xai"],
+    providers: ["openai", "anthropic", "xai"],
     statuses: ["ok", "ok", "ok"],
-    independence: "unverified",
-    k: null,
+    independence: "independent",
+    k: 3,
   },
 ];
 

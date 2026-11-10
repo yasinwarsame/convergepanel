@@ -139,7 +139,8 @@ it("adds fields to the ONE existing completion write — no other write operatio
   await complete([okRow(), substitutedRow()]);
   expect(db.writeLog.map((w) => [w.kind, w.path])).toEqual([["update", "runs/run-1"]]); // one write, an update, nothing else
   const [row] = (updates()[0].data as unknown as { runDocument: { perModel: Array<Record<string, unknown>> } }).runDocument.perModel;
-  expect(Object.keys(row).sort()).toEqual(["latencyMs", "modelId", "provider", "rawTextTruncated", "requestedModel", "status", "tokenUsage", "wasTruncated"]);
+  // F-2 (Order 34): an ok row (no errorCode) also carries the structured execution fact outputClass "model_response".
+  expect(Object.keys(row).sort()).toEqual(["latencyMs", "modelId", "outputClass", "provider", "rawTextTruncated", "requestedModel", "status", "tokenUsage", "wasTruncated"]);
 });
 
 it("deletion barrier (review round 2, M-2): model output is not written to a run whose deletion has started", async () => {

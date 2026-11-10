@@ -61,7 +61,11 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   // establishes as retried+included to reconstructModelResults (notice wording only); no provenance code.
   // 2d897bfb98ee985786a7fee696d2be7bb7534933 → ca6e3327bd8e3f2a651194aee1c2b459523b12bb.
   "lib/runs/runReadPayload.ts": "ca6e3327bd8e3f2a651194aee1c2b459523b12bb",
-  "lib/user/runDocumentToPublicResults.ts": "d1ed5a2d6d9caafa3d7e63d18307919ca7cb4cf1",
+  // Re-pinned (owner-authorized F-2, Order 34 — "mock response" text is not an authority signal): ONLY copies the
+  // persisted structured execution fact `outputClass` ("model_response", written on NEW rows at completion) onto the
+  // saved result row when the row carries it; no provenance code. d1ed5a2d6d9caafa3d7e63d18307919ca7cb4cf1 →
+  // 09f84f9f7256d2f5fc77b1bee2b7441f5e1b9367.
+  "lib/user/runDocumentToPublicResults.ts": "09f84f9f7256d2f5fc77b1bee2b7441f5e1b9367",
   // Order 6 critical-contrast slice (class-only; see criticalContrastSlice.ts): was 49c7924bbb7bf9466ab7cc8b7cd23a0f2294db85 at 9eca1e3.
   "components/adaptive/DecisionSupportView.tsx": "e3beb32c1161f42d84222b1633a6bd8b1bb98939",
   "components/adaptive/DsReceiptWording.tsx": "71b1542ecc11532f26f0bf8a758fffe311775ac6",
