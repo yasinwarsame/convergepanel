@@ -194,6 +194,17 @@ describe("CC-10 / CC-14 / CC-15 (QUEUE): the real queue GET and the real Fragmen
     }
   });
 
+  it("fail closed on independence alone: an unverified / insufficient row shows no stored line even without its qualified list", async () => {
+    docs.runs = [runDoc("uv", [ok("chatgpt", null), ok("grok", null)]), runDoc("one", [ok("chatgpt"), to("grok")])];
+    const all = (await (await GET_QUEUE(new NextRequest("http://localhost/api/governance/queue"))).json()).runs;
+    for (const id of ["uv", "one"]) {
+      const q = { ...all.find((r: { runId: string }) => r.runId === id) };
+      delete q.qualifiedDisagreements;
+      expect(q.disagreements.length).toBeGreaterThan(0);
+      expect([id, queueResearchDisagreementLines(q.disagreements, q), queueResearchDisagreementLines(q.disagreementPoints, q)]).toEqual([id, [], []]);
+    }
+  });
+
   it("genuine 2+3: the DeepSeek-vs-DeepSeek line is qualified, the genuine one stays (one rule with the live panel)", async () => {
     const rows = [ds("chatgpt"), ds("claude"), ok("grok"), ok("gemini")];
     docs.runs = [runDoc("mix", rows)];
