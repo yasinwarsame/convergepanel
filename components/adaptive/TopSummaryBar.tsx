@@ -44,8 +44,8 @@ import {
 } from "@/lib/adaptiveSchema/reportSummary";
 import { BadgeTone, Card, TintBadge } from "./shared";
 import { MARKED_GATE_LEVEL_FIELD, MARKED_GATE_LEVEL_WORD, isPositionMarked } from "@/lib/adaptiveSchema/positionPresentation";
-import { SLOT_AGREEMENT_FIELD, SLOT_AGREEMENT_WORD } from "@/lib/adaptiveSchema/verdictIndependence";
-import { useRunIndependence } from "./useRunIndependence";
+import { SLOT_AGREEMENT_FIELD, slotAgreementWord } from "@/lib/adaptiveSchema/verdictIndependence";
+import { useRunIndependence, useSchemaLevelRunIndependence } from "./useRunIndependence";
 import { DS_MODEL_AGREEMENT_FIELD, DS_SOURCES_FIELD, dsModelAgreement, dsSourcesSummary, isDecisionSupportSchema } from "@/lib/adaptiveSchema/dsLabelWording";
 import AdaptiveExportButton from "./AdaptiveExportButton";
 import AdaptiveExportHistorySection from "./AdaptiveExportHistorySection";
@@ -149,7 +149,9 @@ export default function TopSummaryBar(props: TopSummaryBarProps) {
   const runIndependence = useRunIndependence(props.synthesisReport);
   const schemaLevel =
     !!props.comparisonMatrix || !!props.checklistTaxonomy || !!props.decisionSupport || !!props.causalExplanation || !!props.definitionExplanation || !!props.rankedEnumeration || !!props.deepResearch || !!props.evidenceReview || !!props.biasBlindspotAudit;
-  const slotLevel = !!runIndependence && schemaLevel && !isDecisionSupportSchema(schemaId);
+  // Order 31 R-3: a schema-derived level is a stored result — no, or fewer than two, answering models make it unavailable.
+  const schemaRun = useSchemaLevelRunIndependence(consensus, runIndependence);
+  const slotLevel = !!schemaRun && schemaLevel && !isDecisionSupportSchema(schemaId);
   const gateLevelOnMarked =
     (isPositionMarked(props.synthesisReport) || !!runIndependence) &&
     !props.comparisonMatrix && !props.checklistTaxonomy && !props.decisionSupport && !props.causalExplanation && !props.definitionExplanation && !props.rankedEnumeration && !props.deepResearch && !props.evidenceReview && !props.biasBlindspotAudit;
@@ -230,7 +232,7 @@ export default function TopSummaryBar(props: TopSummaryBarProps) {
           </SummaryField>
         ) : slotLevel ? (
           <SummaryField label={SLOT_AGREEMENT_FIELD}>
-            <TintBadge tone={LEVEL_TONE[consensus]}>{SLOT_AGREEMENT_WORD[consensus]}</TintBadge>
+            <TintBadge tone={LEVEL_TONE[consensus]}>{slotAgreementWord(consensus, schemaRun)}</TintBadge>
           </SummaryField>
         ) : (
         <SummaryField label="Consensus">

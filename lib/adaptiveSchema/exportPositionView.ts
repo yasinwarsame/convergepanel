@@ -14,7 +14,7 @@ import type { AdaptiveSynthesisReport } from "./types";
 import { readFrozenRunExecutionProvenance } from "./exportRunProvenance";
 import { runModelProvenanceFromExport, type RunModelProvenanceFacts } from "@/lib/panel/runModelIdentity";
 import { PositionView, VERDICT_SECTION_HEADINGS, positionView, presentPositionSafeReport } from "./positionPresentation";
-import { FAILED_SUPPORTERS_RUN, NO_RESPONSES_RUN, independenceQualification, qualifiedTopHeading, reportStatesAgreement, rowIndependence, storedSynthesisRunIndependence, type QualifiedIndependence } from "./verdictIndependence";
+import { FAILED_SUPPORTERS_RUN, NO_RESPONSES_RUN, SLOT_AGREEMENT_FIELD, SLOT_AGREEMENT_NOTE, slotAgreementWord, independenceQualification, qualifiedTopHeading, reportStatesAgreement, rowIndependence, storedSynthesisRunIndependence, type QualifiedIndependence } from "./verdictIndependence";
 import { identityRowFromFacts, identityRowRecordedFailure } from "@/lib/panel/executionIdentity";
 
 /**
@@ -109,6 +109,19 @@ export function exportRunIndependence(record: AdaptiveResearchExportV1): Qualifi
   // record — the summary level is then the gate, never a "Strong consensus" tier built on that row's stored count.
   const rows = record.reportSnapshot.legacy?.alignedClaims;
   return Array.isArray(rows) && rows.some((r) => { const t = rowIndependence(r, provenance)?.t; return t?.kind === "unverified" && t.basis !== undefined; }) ? FAILED_SUPPORTERS_RUN : null;
+}
+
+/**
+ * Order 31 R-2: a Milestone-2 report has no verification gate — its summary level is the stored schema agreement ratio.
+ * When its run is not independent executing models it is labelled by panel slot, as the Milestone-2 UI labels it
+ * (SLOT_AGREEMENT_FIELD), and is unavailable with no / one answering model; never "Verification gate: Pass / Fail".
+ * Null for every other export (legacy-family reports keep their gate label; Decision Support keeps S-E.2).
+ */
+export function exportMilestone2SummaryLevel(record: AdaptiveResearchExportV1): { field: string; word: string; note: string } | null {
+  if (record.reportSnapshot.legacy?.synthesisReport || record.schemaFamily !== "milestone2" || record.schemaId === DECISION_SUPPORT_SCHEMA_ID) return null;
+  const run = exportRunIndependence(record);
+  if (!run) return null;
+  return { field: SLOT_AGREEMENT_FIELD, word: slotAgreementWord(record.reportSnapshot.consensusLevel, run), note: SLOT_AGREEMENT_NOTE };
 }
 
 export function exportPositionSafeReport(record: AdaptiveResearchExportV1): { report: AdaptiveSynthesisReport | undefined; view: PositionView | null; independence: ExportVerdictIndependence | null } {

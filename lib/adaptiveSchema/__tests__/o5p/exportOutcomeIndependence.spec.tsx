@@ -559,7 +559,10 @@ describe("Order 30 round 2 — exports: m-B (unjoined stored claim over one answ
     expect(exportRunIndependence(rec)).toEqual(expected);
     for (const [k, text] of await bothTexts(rec)) {
       expect([k, text.includes("Strong consensus")]).toEqual([k, false]);
-      expect([k, text.includes(GATE_NOTE)]).toEqual([k, true]);
+      // Order 31 PROPOSAL (R-2): a Milestone-2 report has no verification gate — labelled by panel slot, never the gate.
+      expect([k, text.includes(GATE_NOTE)]).toEqual([k, false]);
+      expect([k, /Verification gate/i.test(text)]).toEqual([k, false]);
+      expect([k, text.includes("Agreement by panel slot reflects stored agreement between panel slots")]).toEqual([k, true]);
     }
   });
 

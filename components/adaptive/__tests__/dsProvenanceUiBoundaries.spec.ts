@@ -42,8 +42,12 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   // verification gate when the exported run's slots are not independent executing models or its execution is not
   // recorded (pre-6.2b). Was 6bd87796ec04f361792a5afe6ccbf8cc21155591 (PDF) and c7c4d4ab97121e5a335ad5b7acd7aa934b138dca
   // (DOCX) at 48f3739. Pinned edit-by-edit by DS_FROZEN_EXPORT_DIFF below.
-  "lib/pdf/AdaptiveResearchDocument.tsx": "cdf8bba191f6f24770273c7420d7643db2fd0604",
-  "lib/docx/AdaptiveResearchDocxDocument.ts": "5c2e1b25ce67efc4661db0ab9004c18d1de6298e",
+  // Order 31 PROPOSAL (R-2 / R-3, needs owner authorization): ONLY the Milestone-2 summary level, labelled by panel slot
+  // (exportMilestone2SummaryLevel / slotAgreementWord). Was cdf8bba191f6f24770273c7420d7643db2fd0604.
+  "lib/pdf/AdaptiveResearchDocument.tsx": "80e8678d497d7f41a3d7bee48026832f0ec14736",
+  // Order 31 PROPOSAL (R-2 / R-3, needs owner authorization): ONLY the Milestone-2 summary level, labelled by panel slot
+  // (exportMilestone2SummaryLevel / slotAgreementWord). Was 5c2e1b25ce67efc4661db0ab9004c18d1de6298e.
+  "lib/docx/AdaptiveResearchDocxDocument.ts": "d62e84cffefc0a1c7abfb0e42df75ab0f35cf208",
   "lib/adaptiveSchema/dsLabelWording.ts": "db50c0e7b9cec1ad8416a566b2d08c4ed16fefa1",
   "lib/adaptiveSchema/decisionSupportAlignment.ts": "b19e49caacc05c52c17a4676a7321dca654d132c",
   "lib/adaptiveSchema/decisionReceiptBuilder.ts": "e32c42b64d7d1d05f41dee95c548dacc76668640",
@@ -63,7 +67,9 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   // c16 (review of 48f3739, MAJOR-2): ONLY the consensus field of a run whose slots are not independent executing models
   // (never Decision Support). Was ea8b059bbafe1589fe79f1a3824c298d5a68926b at 9eca1e3 and 48f3739; pinned edit-by-edit by
   // DS_FROZEN_EXPORT_DIFF below.
-  "components/adaptive/TopSummaryBar.tsx": "258f2cd0611c0abecd16cb5e9f226c901b69722b",
+  // Order 31 PROPOSAL (R-2 / R-3, needs owner authorization): ONLY the Milestone-2 summary level, labelled by panel slot
+  // (exportMilestone2SummaryLevel / slotAgreementWord). Was 258f2cd0611c0abecd16cb5e9f226c901b69722b.
+  "components/adaptive/TopSummaryBar.tsx": "0617d5ca9a3be1e6768655107de2b38a512f72eb",
   // Order 6 critical-contrast slice (class-only; see criticalContrastSlice.ts): was 52464f6b4c8d3d330ac1764ff711297e2c31ecbe at 9eca1e3.
   "components/workspace/projects/TeamResearchReviewSummary.tsx": "16a12b9d0f15c5297a8745958126cdd6ea50d263",
   // Connector fail-closed correction pass (owner-authorized 2026-11-05, finding C): ONLY the legacy-panel synthesis
@@ -121,6 +127,11 @@ const DS_FROZEN_EXPORT_DIFF: Record<string, { was: string; edits: [current: stri
   "lib/pdf/AdaptiveResearchDocument.tsx": {
     was: "10ba10b9d413214b7e4e00c422f9b15ab640d26a",
     edits: [
+      ['import { exportMilestone2SummaryLevel, exportPositionSafeReport, exportRunIndependence } from "@/lib/adaptiveSchema/exportPositionView";', 'import { exportPositionSafeReport, exportRunIndependence } from "@/lib/adaptiveSchema/exportPositionView";'],
+      ["\n  // Order 31 R-2: a Milestone-2 report has no verification gate — its level is labelled by panel slot instead.\n  const slotLevel = exportMilestone2SummaryLevel(record);", ""],
+      ["{slotLevel ? slotLevel.field : gateLevel ? MARKED_GATE_LEVEL_FIELD", "{gateLevel ? MARKED_GATE_LEVEL_FIELD"],
+      ["{slotLevel ? slotLevel.word : gateLevel ? MARKED_GATE_LEVEL_WORD", "{gateLevel ? MARKED_GATE_LEVEL_WORD"],
+      ["      {slotLevel ? (\n        <Text style={pdfStyles.mutedText}>{slotLevel.note}</Text>\n      ) : gateLevel ? (", "      {gateLevel ? ("],
       C16_IMPORT,
       [`${C16_STATUS_COMMENT}  const gateLevel = isPositionMarked(snapshot.legacy?.synthesisReport) || !!exportRunIndependence(record);`, "  const gateLevel = isPositionMarked(snapshot.legacy?.synthesisReport);"],
       [`${C3_COMMENT_PDF}  const { report: synthesis, view: positions, independence } = exportPositionSafeReport(record);`, "  const { report: synthesis, view: positions } = exportPositionSafeReport(record);"],
@@ -134,6 +145,11 @@ const DS_FROZEN_EXPORT_DIFF: Record<string, { was: string; edits: [current: stri
   "lib/docx/AdaptiveResearchDocxDocument.ts": {
     was: "4e8ba97ea8d0ad4bc9e13d2a598121da2ff657b0",
     edits: [
+      ['import { exportMilestone2SummaryLevel, exportPositionSafeReport, exportRunIndependence } from "@/lib/adaptiveSchema/exportPositionView";', 'import { exportPositionSafeReport, exportRunIndependence } from "@/lib/adaptiveSchema/exportPositionView";'],
+      [
+        '  // Order 31 R-2: a Milestone-2 report has no verification gate — its level is labelled by panel slot instead.\n  const slotLevel = exportMilestone2SummaryLevel(record);\n  if (slotLevel) {\n    return [\n      heading("Report status summary"),\n      ...fieldGrid([\n        ["Models", modelsText || "—"],\n        [slotLevel.field, slotLevel.word],\n        ["Source grounding", SOURCE_GROUNDING_LABELS[snapshot.sourceGroundingLevel]],\n      ]),\n      muted(slotLevel.note),\n    ];\n  }\n',
+        "",
+      ],
       C16_IMPORT,
       [`${C16_STATUS_COMMENT}  if (isPositionMarked(snapshot.legacy?.synthesisReport) || exportRunIndependence(record)) {`, "  if (isPositionMarked(snapshot.legacy?.synthesisReport)) {"],
       [`${C3_COMMENT_DOCX}  const { report: synthesis, view: positions, independence } = exportPositionSafeReport(record);`, "  const { report: synthesis, view: positions } = exportPositionSafeReport(record);"],
@@ -154,6 +170,9 @@ const DS_FROZEN_EXPORT_DIFF: Record<string, { was: string; edits: [current: stri
   "components/adaptive/TopSummaryBar.tsx": {
     was: "ea8b059bbafe1589fe79f1a3824c298d5a68926b",
     edits: [
+      ['import { SLOT_AGREEMENT_FIELD, slotAgreementWord } from "@/lib/adaptiveSchema/verdictIndependence";\nimport { useRunIndependence, useSchemaLevelRunIndependence } from "./useRunIndependence";', 'import { SLOT_AGREEMENT_FIELD, SLOT_AGREEMENT_WORD } from "@/lib/adaptiveSchema/verdictIndependence";\nimport { useRunIndependence } from "./useRunIndependence";'],
+      ["  // Order 31 R-3: a schema-derived level is a stored result — no, or fewer than two, answering models make it unavailable.\n  const schemaRun = useSchemaLevelRunIndependence(consensus, runIndependence);\n  const slotLevel = !!schemaRun && schemaLevel", "  const slotLevel = !!runIndependence && schemaLevel"],
+      ["{slotAgreementWord(consensus, schemaRun)}", "{SLOT_AGREEMENT_WORD[consensus]}"],
       ['import { SLOT_AGREEMENT_FIELD, SLOT_AGREEMENT_WORD } from "@/lib/adaptiveSchema/verdictIndependence";\nimport { useRunIndependence } from "./useRunIndependence";\n', ""],
       [
         "  // c16 (MAJOR-2): a run whose slots are not independent executing models (or whose execution is not recorded) never\n  // shows a \"Strong / Moderate / Weak consensus\" tier — a gate-derived level is labelled as the gate (as on a marked\n  // report); a schema-derived level as agreement by panel slot. An independent run: exactly as before.\n  const runIndependence = useRunIndependence(props.synthesisReport);\n  const schemaLevel =\n    !!props.comparisonMatrix || !!props.checklistTaxonomy || !!props.decisionSupport || !!props.causalExplanation || !!props.definitionExplanation || !!props.rankedEnumeration || !!props.deepResearch || !!props.evidenceReview || !!props.biasBlindspotAudit;\n  const slotLevel = !!runIndependence && schemaLevel && !isDecisionSupportSchema(schemaId);\n",

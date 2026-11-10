@@ -528,6 +528,19 @@ export const SLOT_AGREEMENT_WORD: Readonly<Record<"strong" | "moderate" | "weak"
   unscored: "Not scored",
 };
 
+/** Order 31 R-2 / R-3: a schema-derived (Milestone-2) level over a run with no, or fewer than two, answering models. */
+export const SLOT_AGREEMENT_NO_RESPONSES_WORD = "Unavailable (no successful model responses)";
+export const SLOT_AGREEMENT_TOO_FEW_WORD = "Unavailable (fewer than two independent models responded)";
+/** The status-summary note under a schema-derived level labelled by panel slot (a Milestone-2 report has no verification gate). */
+export const SLOT_AGREEMENT_NOTE = "Agreement by panel slot reflects stored agreement between panel slots, not agreement between independent models or factual correctness. Source grounding reflects citation coverage, not evidence strength.";
+
+/** The word for a schema-derived level in a run whose slots are not independent: unavailable when no / one model answered. */
+export function slotAgreementWord(level: keyof typeof SLOT_AGREEMENT_WORD, run: QualifiedIndependence | null): string {
+  if (run && run.kind === "unverified" && run.basis === "no_responses") return SLOT_AGREEMENT_NO_RESPONSES_WORD;
+  if (run && run.kind === "unverified" && run.basis === "too_few_answers") return SLOT_AGREEMENT_TOO_FEW_WORD;
+  return SLOT_AGREEMENT_WORD[level];
+}
+
 /** The diagnostics' homogeneity badge, in place of "Unusually uniform agreement", for a run whose slots are not independent. */
 export function uniformityBadge(run: QualifiedIndependence): { label: string; title: string } {
   if (run.kind === "unverified" && run.basis !== undefined) {

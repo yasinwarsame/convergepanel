@@ -51,7 +51,7 @@ import {
   governanceStatusDisplay,
 } from "@/lib/adaptiveSchema/exportContentDerivation";
 import { COLORS, badgeStyle, pdfStyles } from "./theme";
-import { exportPositionSafeReport, exportRunIndependence } from "@/lib/adaptiveSchema/exportPositionView";
+import { exportMilestone2SummaryLevel, exportPositionSafeReport, exportRunIndependence } from "@/lib/adaptiveSchema/exportPositionView";
 import { MARKED_GATE_LEVEL_FIELD, MARKED_GATE_LEVEL_NOTE, MARKED_GATE_LEVEL_WORD, isPositionMarked } from "@/lib/adaptiveSchema/positionPresentation";
 
 /**
@@ -400,6 +400,8 @@ function StatusSummary({ record }: { record: AdaptiveResearchExportV1 }) {
   // c16 (MAJOR-2): so is the level of a report whose run's slots are not independent executing models, or whose
   // execution is not recorded (a pre-6.2b export) — never a "Strong consensus" tier.
   const gateLevel = isPositionMarked(snapshot.legacy?.synthesisReport) || !!exportRunIndependence(record);
+  // Order 31 R-2: a Milestone-2 report has no verification gate — its level is labelled by panel slot instead.
+  const slotLevel = exportMilestone2SummaryLevel(record);
   return (
     <SectionCard label="Report status summary" bounded>
       <View style={pdfStyles.fieldGrid}>
@@ -415,8 +417,8 @@ function StatusSummary({ record }: { record: AdaptiveResearchExportV1 }) {
           </View>
         </View>
         <View style={pdfStyles.fieldCell}>
-          <Text style={pdfStyles.fieldLabel}>{gateLevel ? MARKED_GATE_LEVEL_FIELD : "Consensus"}</Text>
-          <Text style={pdfStyles.fieldValue}>{gateLevel ? MARKED_GATE_LEVEL_WORD[snapshot.consensusLevel] : CONSENSUS_LABELS[snapshot.consensusLevel]}</Text>
+          <Text style={pdfStyles.fieldLabel}>{slotLevel ? slotLevel.field : gateLevel ? MARKED_GATE_LEVEL_FIELD : "Consensus"}</Text>
+          <Text style={pdfStyles.fieldValue}>{slotLevel ? slotLevel.word : gateLevel ? MARKED_GATE_LEVEL_WORD[snapshot.consensusLevel] : CONSENSUS_LABELS[snapshot.consensusLevel]}</Text>
         </View>
         <View style={pdfStyles.fieldCell}>
           <Text style={pdfStyles.fieldLabel}>Source grounding</Text>
@@ -427,7 +429,9 @@ function StatusSummary({ record }: { record: AdaptiveResearchExportV1 }) {
           correctness, evidence strength, or valuation confidence; the
           labels above are exactly the same "Not scored"/"Weak"/etc. tiers
           the live UI shows, never a fabricated precise number. */}
-      {gateLevel ? (
+      {slotLevel ? (
+        <Text style={pdfStyles.mutedText}>{slotLevel.note}</Text>
+      ) : gateLevel ? (
         <Text style={pdfStyles.mutedText}>{MARKED_GATE_LEVEL_NOTE}</Text>
       ) : (
       <Text style={pdfStyles.mutedText}>
