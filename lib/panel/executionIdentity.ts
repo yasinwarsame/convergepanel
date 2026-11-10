@@ -9,7 +9,9 @@
  *     non-empty string that is not "unknown". For an `ok` row that is the runtime provider Step 6.2a writes; for a
  *     substituted row it is the substitute's provider.
  *  3. no row holds text whose validity cannot be established (VALIDITY_UNKNOWN, D-5);
- *  4. at least one usable row exists (K = 0 is never presented as a verified independent run; Order 29).
+ *  4. at least one usable row exists (K = 0 is never presented as a verified independent run; Order 29);
+ *  5. every row's status is an exact recorded status literal of the ONE shared map (lib/panel/persistedStatusOutcome.ts):
+ *     an unrecognized status is unknown and fails the gate closed — never read as a known failure (Order 30 A3).
  * When the gate holds, K is the number of distinct `executingModelKey`s over the usable rows. It never calls
  * `resolveExecutingModelKeys` (with the gate holding there is no unrecorded substitute to merge, so no inference path
  * exists), and it is never computed from requested slots, `selectedModels` or dispatched rows.
@@ -27,7 +29,7 @@
  * Pure, client-safe, never throws, never mutates its input.
  */
 
-import { coerceStatus } from "./normalize";
+import { isRecordedAnswerStatus, isRecordedFailureStatus, recordedSlotOutcome } from "./persistedStatusOutcome";
 import { executingModelKey, rowsRecordExecutionIdentity } from "./independentVoices";
 import type { RunModelProvenanceFacts } from "./runModelIdentity";
 
@@ -100,7 +102,7 @@ export function placeholderClass(row: IdentityRow | null | undefined): Placehold
   if (!text) return null;
   const slot = typeof row.modelId === "string" ? row.modelId.trim().toLowerCase() : "";
   const literal = slot === "chatgpt" || slot === "claude" ? STORED_PLACEHOLDER_LITERALS[slot] : null;
-  if (literal && typeof row.status === "string" && coerceStatus(row.status) === "ok" && text.trim() === literal) return "INVALID_MOCK";
+  if (literal && row.status === "ok" && text.trim() === literal) return "INVALID_MOCK";
   return VALIDITY_UNKNOWN_MARKER.test(text) ? "VALIDITY_UNKNOWN" : null;
 }
 
@@ -146,21 +148,31 @@ function recordedProvider(provider: unknown): boolean {
 
 /** A row that answered: status ok / substituted and, when the row carries text, non-empty text. */
 function isUsable(row: IdentityRow): boolean {
-  if (typeof row.status !== "string") return false;
-  const s = coerceStatus(row.status);
-  if (s !== "ok" && s !== "substituted") return false;
+  if (!isRecordedAnswerStatus(row.status)) return false;
   return carriesText(row) ? identityRowText(row).trim().length > 0 : true;
 }
 
-/** A row whose RECORDED status is a failure (failed / error / timeout / refused / rate_limited): a known fact, never a vote. */
+/**
+ * A row whose RECORDED status is a failure (failed / error / timeout / refused / rate_limited): a known fact, never a
+ * vote. Exact match through the ONE shared status map (lib/panel/persistedStatusOutcome.ts, Order 30 A3): an
+ * unrecognized status ("OK ", "Ok", "", "toString", "__proto__", …) is UNKNOWN — never a known failure — and fails the
+ * gate closed (`identityRowStatusUnknown`).
+ */
 export function identityRowRecordedFailure(row: IdentityRow | null | undefined): boolean {
-  if (!row || typeof row !== "object" || typeof row.status !== "string") return false;
-  return coerceStatus(row.status) === "failed";
+  if (!row || typeof row !== "object") return false;
+  return isRecordedFailureStatus(row.status);
+}
+
+/** A row whose status is not one of the exact recorded status literals (missing, non-string, crafted): unknown. */
+export function identityRowStatusUnknown(row: IdentityRow | null | undefined): boolean {
+  if (!row || typeof row !== "object") return true;
+  return recordedSlotOutcome(row.status) === null;
 }
 
 /**
  * The corrected D-4 gate (inventory v3.3 §0.1c, `executionIdentityVerified(rows)`): `rowsRecordExecutionIdentity` AND
- * every usable row records a provider AND no row is VALIDITY_UNKNOWN AND at least one row answered. INVALID_MOCK rows
+ * every usable row records a provider AND no row is VALIDITY_UNKNOWN AND at least one row answered AND every row's
+ * status is an exact recorded status literal (the shared map; an unknown status fails closed, Order 30 A3). INVALID_MOCK rows
  * are not usable rows here (they are not model responses), so they need no provider and do not count as an answer.
  * No rows → false. No answered row (every slot failed, or held only placeholder text) → false: with K = 0 there is no
  * independent model to present, so nothing is ever rendered as a verified independent run (Order 29, finding
@@ -170,6 +182,8 @@ export function executionIdentityVerified(rows: readonly unknown[] | null | unde
   if (!rowsRecordExecutionIdentity(rows)) return false;
   let answered = 0;
   for (const raw of rows as readonly IdentityRow[]) {
+    // Order 30 A3: a status that is not an exact recorded literal is unknown — the gate fails closed.
+    if (identityRowStatusUnknown(raw)) return false;
     const cls = placeholderClass(raw);
     if (cls === "VALIDITY_UNKNOWN") return false;
     if (cls === "INVALID_MOCK") continue;

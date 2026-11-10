@@ -186,7 +186,8 @@ describe("row adapters", () => {
   });
 
   describe("export (Order 29 A2): the frozen RECORDED outcome is the slot's status; anything else is no status", () => {
-    const entry = (over: Record<string, unknown>) => runModelProvenanceFromExport({ models: [{ modelId: "chatgpt" as never, provider: "openai", requestedModel: "m", ...over } as never] }, "chatgpt");
+    // The read-back carries the literal version marker 2 (Order 30 n-4: without it no recorded outcome is read).
+    const entry = (over: Record<string, unknown>) => runModelProvenanceFromExport({ provenanceVersion: 2, models: [{ modelId: "chatgpt" as never, provider: "openai", requestedModel: "m", ...over } as never] } as never, "chatgpt");
     it("answered → ok; answered + substituted → substituted (provider and substitution facts kept)", () => {
       expect(entry({ substituted: false, outcome: "answered", outcomeSource: "recorded" })).toEqual({ modelId: "chatgpt", provider: "openai", requestedModel: "m", status: "ok", substituted: false });
       expect(entry({ substituted: true, substitutedFrom: "openai:m", outcome: "answered", outcomeSource: "recorded" })).toEqual({ modelId: "chatgpt", provider: "openai", requestedModel: "m", status: "substituted", substituted: true, substitutedFrom: "openai:m" });
@@ -198,7 +199,7 @@ describe("row adapters", () => {
       ["rate_limited", "rate_limited"],
     ])("recorded failure outcome %s → status %s (a known fact, no vote, no provider needed)", (outcome, status) => {
       expect(entry({ substituted: false, outcome, outcomeSource: "recorded" })).toMatchObject({ status });
-      expect(runModelProvenanceFromExport({ models: [{ modelId: "gemini" as never, outcome, outcomeSource: "recorded" } as never] }, "gemini")).toEqual({ modelId: "gemini", status });
+      expect(runModelProvenanceFromExport({ provenanceVersion: 2, models: [{ modelId: "gemini" as never, outcome, outcomeSource: "recorded" } as never] } as never, "gemini")).toEqual({ modelId: "gemini", status });
     });
     it.each([
       ["a version-1 entry (no outcome)", { substituted: false }],
@@ -213,6 +214,18 @@ describe("row adapters", () => {
       const facts = entry(over);
       expect("status" in facts).toBe(false);
       expect(facts.provider).toBe("openai");
+    });
+    it.each([
+      ["no marker", {}],
+      ["marker 1", { provenanceVersion: 1 }],
+      ["marker '2'", { provenanceVersion: "2" }],
+      ["marker 3", { provenanceVersion: 3 }],
+    ])("Order 30 n-4: a read-back with %s yields no status even for a literal recorded outcome", (_label, marker) => {
+      for (const outcome of ["answered", "failed", "timeout", "refused", "rate_limited"]) {
+        const facts = runModelProvenanceFromExport({ ...marker, models: [{ modelId: "chatgpt", provider: "openai", substituted: false, outcome, outcomeSource: "recorded" }] } as never, "chatgpt");
+        expect("status" in facts).toBe(false);
+        expect(facts.provider).toBe("openai");
+      }
     });
     it("the D-5 facts pass through only as the literal true", () => {
       expect(entry({ substituted: false, outcome: "answered", outcomeSource: "recorded", invalidProviderOutput: true })).toMatchObject({ status: "ok", invalidProviderOutput: true });

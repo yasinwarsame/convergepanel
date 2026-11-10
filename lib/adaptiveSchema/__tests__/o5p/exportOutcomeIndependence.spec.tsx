@@ -22,7 +22,7 @@ import { join } from "path";
 import { buildExportSnapshot } from "@/lib/adaptiveSchema/exportSnapshot";
 import { readFrozenRunExecutionProvenance, readFrozenRunProvenance } from "@/lib/adaptiveSchema/exportRunProvenance";
 import { EXPORT_VERDICT_SECTION_INDEPENDENCE_UNVERIFIED, exportPositionSafeReport, exportRunIndependence } from "@/lib/adaptiveSchema/exportPositionView";
-import { ADAPTIVE_INDEPENDENCE_UNVERIFIED_TOP_HEADING, ADAPTIVE_PLACEHOLDER_RUN_TOP_HEADING, ADAPTIVE_PLACEHOLDER_TOP_HEADING, placeholderSlotsClause } from "@/lib/adaptiveSchema/verdictIndependence";
+import { ADAPTIVE_INDEPENDENCE_UNVERIFIED_TOP_HEADING, ADAPTIVE_PLACEHOLDER_RUN_TOP_HEADING, ADAPTIVE_PLACEHOLDER_TOP_HEADING, FAILED_SUPPORTERS_CLAUSE, FAILED_SUPPORTERS_RUN, NO_RESPONSES_RUN, NO_SUCCESSFUL_MODEL_RESPONSES, placeholderSlotsClause } from "@/lib/adaptiveSchema/verdictIndependence";
 import type { AdaptiveResearchExportV1 } from "@/lib/adaptiveSchema/researchExport";
 import { AdaptiveResearchDocument } from "@/lib/pdf/AdaptiveResearchDocument";
 import { renderAdaptiveResearchDocxV1 } from "@/lib/docx/renderAdaptiveResearchDocx";
@@ -268,7 +268,8 @@ describe("Order 29 — exports judge model independence from the frozen per-slot
     // (owner option (b)); the gate still reads the run as unverified.
     const crafted = exportOf(CONS(), rows);
     expect(exportIdentity(crafted)).toMatchObject({ kind: "UV", verified: false, independentModels: null, answeredSlots: 0 });
-    expect(exportRunIndependence(crafted)).toBeNull();
+    // Order 30 A1 (owner option (i)): a stored synthesis over a run with no successful response — the summary is the gate.
+    expect(exportRunIndependence(crafted)).toBe(NO_RESPONSES_RUN);
     expect(exportPositionSafeReport(crafted).independence?.topHeading).toBe(ADAPTIVE_INDEPENDENCE_UNVERIFIED_TOP_HEADING);
     for (const [k, text] of await bothTexts(crafted)) {
       expect([k, text.includes(ADAPTIVE_INDEPENDENCE_UNVERIFIED_TOP_HEADING)]).toEqual([k, true]);
@@ -312,5 +313,172 @@ describe("Order 29 — exports judge model independence from the frozen per-slot
     expect(JSON.stringify(rec)).toBe(before);
     expect(JSON.stringify(rows)).toContain('"status":"timeout"');
     expect(out.reportSnapshot.legacy!.synthesisReport!.verdictCard.consensusModelCount).toBe(5);
+  });
+});
+
+// ─── Order 30 (final C-a round): the standing attribution default in the exports ──────────────────────────────────
+
+/** Every agreement / consensus / support-count claim an export could make. */
+const AGREEMENT_CLAIM = /Strong consensus|Moderate consensus|Top consensus(?! \()|agreed by \d+|Models agree|\d+ independent model|consensus of \d+|all \d+ dispatched models support it|\d+ of \d+ (?:dispatched )?models/;
+/** The summary note the composers print when the summary level is the verification gate (MARKED_GATE_LEVEL_NOTE). */
+const GATE_NOTE = "The verification gate reflects computed checks on the scored rows";
+const claimsIn = (text: string) => (text.match(new RegExp(AGREEMENT_CLAIM.source, "g")) ?? []);
+
+describe("Order 30 A1 / A2 — exports: no successful response, or failed supporters → no agreement claim, the shared wording", () => {
+  const CONS = () => clone(records["generic-consensus"]);
+  const SUBF = () => clone(records["generic-substituted-and-failed"]);
+  const UNJOINED = () => ({ ...CONS(), alignedClaims: [] });
+  const fiveTimeouts = () => FIVE.map((m) => timedOut(m));
+  const fiveFailures = () => [errored("chatgpt"), R("claude", { status: "failed", rawText: null, provider: null }), errored("grok", "unknown"), R("perplexity", { status: "failed", rawText: null, provider: null }), errored("gemini")];
+  const mixedZero = () => [timedOut("chatgpt"), errored("claude", "unknown"), R("grok", { status: "refused", rawText: null, provider: null }), R("perplexity", { status: "rate_limited", rawText: null, provider: null }), R("gemini", { status: "failed", rawText: null, provider: null })];
+
+  async function expectNoResponses(rec: AdaptiveResearchExportV1) {
+    expect(exportIdentity(rec)).toMatchObject({ kind: "UV", verified: false, independentModels: null, answeredSlots: 0 });
+    expect(exportRunIndependence(rec)).toBe(NO_RESPONSES_RUN);
+    for (const [k, text] of await bothTexts(rec)) {
+      expect([k, claimsIn(text)]).toEqual([k, []]);
+      expect([k, text.includes(NO_SUCCESSFUL_MODEL_RESPONSES)]).toEqual([k, true]);
+      expect([k, (text.match(/\(failed\)/g) ?? []).length]).toEqual([k, 5]);
+      // the summary level is the verification gate, never a consensus tier
+      expect([k, text.includes(GATE_NOTE)]).toEqual([k, true]);
+      expect([k, /Consensus\s*(?:\|\s*)?Strong/.test(text)]).toEqual([k, false]);
+    }
+  }
+
+  it.each([
+    ["five timeouts + stored strong consensus (joined rows)", () => exportOf(CONS(), fiveTimeouts())],
+    ["five timeouts + stored strong consensus, no joinable rows (review D-P3)", () => exportOf(UNJOINED(), fiveTimeouts())],
+    ["five failures + stored consensus (joined)", () => exportOf(CONS(), fiveFailures())],
+    ["five failures + stored consensus (unjoined)", () => exportOf(UNJOINED(), fiveFailures())],
+    ["mixed failure / timeout / refused / rate_limited, zero answered (joined)", () => exportOf(CONS(), mixedZero())],
+    ["mixed failure / timeout / refused / rate_limited, zero answered (unjoined)", () => exportOf(UNJOINED(), mixedZero())],
+  ])("A1: %s → NO_SUCCESSFUL_MODEL_RESPONSES in the PDF and DOCX, no agreement claim", async (_label, make) => {
+    await expectNoResponses(make());
+  });
+
+  it("A1: a marked (Contract P) report over five timeouts states the constant and no agreement claim either", async () => {
+    const marked = CONS();
+    marked.synthesisReport.presentation.disagreementPositionVersion = 1;
+    const rec = exportOf(marked, fiveTimeouts());
+    expect(exportRunIndependence(rec)).toBe(NO_RESPONSES_RUN);
+    for (const [k, text] of await bothTexts(rec)) {
+      expect([k, claimsIn(text)]).toEqual([k, []]);
+      expect([k, text.includes(NO_SUCCESSFUL_MODEL_RESPONSES)]).toEqual([k, true]);
+      expect([k, /Supported by: ChatGPT slot/.test(text)]).toEqual([k, false]);
+    }
+  });
+
+  it("A1 controls: the real all-failed record (no synthesis) is unchanged — no constant, no gate relabel, run scope as before", async () => {
+    const real = exportOf({ ...clone(records["generic-all-failed"]), alignedClaims: [] }, fiveTimeouts());
+    expect(exportRunIndependence(real)).toBeNull();
+    expect(exportPositionSafeReport(real).independence).toBeNull();
+    for (const [k, text] of await bothTexts(real)) {
+      expect([k, text.includes(NO_SUCCESSFUL_MODEL_RESPONSES)]).toEqual([k, false]);
+      expect([k, text.includes("Not scored")]).toEqual([k, true]);
+      expect([k, text.includes(GATE_NOTE)]).toEqual([k, false]);
+    }
+  });
+
+  it("A2: one genuine answer + 4 failed slots that the stored claim names as supporters → no support count; the reason is stated", async () => {
+    const rec = exportOf(CONS(), [R("chatgpt"), timedOut("claude"), timedOut("grok"), errored("perplexity"), timedOut("gemini")]);
+    expect(exportIdentity(rec)).toMatchObject({ kind: "IND", verified: true, independentModels: 1, answeredSlots: 1 });
+    expect(exportRunIndependence(rec)).toBe(FAILED_SUPPORTERS_RUN);
+    for (const [k, text] of await bothTexts(rec)) {
+      expect([k, claimsIn(text)]).toEqual([k, []]);
+      expect([k, text.includes(FAILED_SUPPORTERS_CLAUSE)]).toEqual([k, true]);
+      expect([k, text.includes(ADAPTIVE_INDEPENDENCE_UNVERIFIED_TOP_HEADING)]).toEqual([k, true]);
+      expect([k, text.includes(NO_SUCCESSFUL_MODEL_RESPONSES)]).toEqual([k, false]);
+    }
+  });
+
+  it("A2: 4 answered + 1 failed slot named as a supporter (inconsistent stored record) → no '5' count; vs case 2's consistent record, unchanged", async () => {
+    const rec = exportOf(CONS(), [R("chatgpt"), R("claude"), R("grok"), R("perplexity"), timedOut("gemini")]);
+    expect(exportRunIndependence(rec)).toBe(FAILED_SUPPORTERS_RUN);
+    for (const [k, text] of await bothTexts(rec)) {
+      expect([k, claimsIn(text)]).toEqual([k, []]);
+      expect([k, text.includes(FAILED_SUPPORTERS_CLAUSE)]).toEqual([k, true]);
+    }
+    // the real record (the failed slot is no supporter) keeps its stored statements and no qualification
+    const consistent = exportOf(SUBF(), [R("chatgpt"), substitutedByDeepSeek("claude"), timedOut("grok"), R("perplexity"), R("gemini")]);
+    expect(exportRunIndependence(consistent)).toBeNull();
+    for (const [, text] of await bothTexts(consistent)) expect(text.includes(FAILED_SUPPORTERS_CLAUSE)).toBe(false);
+  });
+
+  it("genuine multi-model independent agreement: 5 distinct verified identities → still 5 independent; stored statements unchanged", async () => {
+    const rec = exportOf(CONS(), FIVE.map((m) => R(m)));
+    expect(exportIdentity(rec)).toMatchObject({ kind: "IND", verified: true, independentModels: 5, answeredSlots: 5, qualified: false });
+    expect(exportRunIndependence(rec)).toBeNull();
+    expect(exportPositionSafeReport(rec).report).toBe(rec.reportSnapshot.legacy!.synthesisReport);
+    for (const [k, text] of await bothTexts(rec)) {
+      expect([k, text.includes("consensus: all 5 dispatched models support it")]).toEqual([k, true]);
+      expect([k, text.includes("Strong consensus")]).toEqual([k, true]);
+      expect([k, text.includes(NO_SUCCESSFUL_MODEL_RESPONSES)]).toEqual([k, false]);
+      expect([k, UNVERIFIED_WORDS.test(text)]).toEqual([k, false]);
+    }
+  });
+
+  it("unknown historical execution status (version-1 frozen) over five timeouts → unverified, never the 'no successful responses' fact, no agreement claim", async () => {
+    const rec = asVersionOne(exportOf(CONS(), fiveTimeouts()));
+    expect(exportRunIndependence(rec)).toEqual({ kind: "unverified", scope: "run" });
+    for (const [k, text] of await bothTexts(rec)) {
+      expect([k, text.includes(NO_SUCCESSFUL_MODEL_RESPONSES)]).toEqual([k, false]);
+      expect([k, text.includes(ADAPTIVE_INDEPENDENCE_UNVERIFIED_TOP_HEADING)]).toEqual([k, true]);
+      expect([k, /Strong consensus|\d+ independent model|all \d+ dispatched models support it/.test(text)]).toEqual([k, false]);
+    }
+  });
+
+  it("substituted models: one executing model in 2 slots is counted once; with failed slots among the stored supporters, no count at all", async () => {
+    const counted = exportOf(CONS(), [substitutedByDeepSeek("chatgpt"), substitutedByDeepSeek("claude"), R("grok"), R("perplexity"), R("gemini")]);
+    expect(exportIdentity(counted)).toMatchObject({ kind: "PC", independentModels: 4, answeredSlots: 5 });
+    for (const [k, text] of await bothTexts(counted)) {
+      expect([k, text.includes("4 independent models")]).toEqual([k, true]);
+      expect([k, text.includes("5 independent model")]).toEqual([k, false]);
+    }
+    const withFailed = exportOf(CONS(), [substitutedByDeepSeek("chatgpt"), substitutedByDeepSeek("claude"), timedOut("grok"), timedOut("perplexity"), timedOut("gemini")]);
+    expect(exportIdentity(withFailed)).toMatchObject({ kind: "FC", independentModels: 1, answeredSlots: 2 });
+    for (const [k, text] of await bothTexts(withFailed)) {
+      expect([k, claimsIn(text)]).toEqual([k, []]);
+      expect([k, /\b2 independent model/.test(text)]).toEqual([k, false]);
+    }
+  });
+
+  it.each([
+    ["wrong version (1) on recorded outcomes", (p: any) => (p.provenanceVersion = 1)],
+    ["wrong version ('2' string)", (p: any) => (p.provenanceVersion = "2")],
+    ["version removed", (p: any) => delete p.provenanceVersion],
+    ["outcome is a prototype key", (p: any) => p.models.forEach((m: any) => (m.outcome = "toString"))],
+    ["outcome '__proto__'", (p: any) => p.models.forEach((m: any) => (m.outcome = "__proto__"))],
+    ["outcome 'constructor'", (p: any) => p.models.forEach((m: any) => (m.outcome = "constructor"))],
+    ["entries are arrays", (p: any) => (p.models = p.models.map((m: any) => [m]))],
+    ["models is an object", (p: any) => (p.models = { ...p.models })],
+  ])("malformed / unsupported provenance (%s) over five timeouts → unverified, never the recorded-failure fact, no agreement claim", async (_label, edit) => {
+    const rec = exportOf(CONS(), fiveTimeouts());
+    edit(rec.reportSnapshot.runProvenance);
+    expect(exportRunIndependence(rec)).toMatchObject({ kind: "unverified", scope: "run" });
+    expect(exportRunIndependence(rec)).not.toBe(NO_RESPONSES_RUN);
+    for (const [k, text] of await bothTexts(rec)) {
+      expect([k, text.includes(NO_SUCCESSFUL_MODEL_RESPONSES)]).toEqual([k, false]);
+      expect([k, /Strong consensus|\d+ independent model|all \d+ dispatched models support it/.test(text)]).toEqual([k, false]);
+    }
+  });
+
+  it.each([["a string", "x"], ["a number", 7], ["an array", [{ modelId: "chatgpt", outcome: "timeout", outcomeSource: "recorded" }]]])("non-object provenance (%s) → read as a pre-6.2b export: unverified, no agreement claim", async (_label, raw) => {
+    const rec = exportOf(CONS(), fiveTimeouts());
+    (rec.reportSnapshot as any).runProvenance = raw;
+    expect(exportRunIndependence(rec)).toEqual({ kind: "unverified", scope: "run" });
+    for (const [k, text] of await bothTexts(rec)) {
+      expect([k, text.includes(NO_SUCCESSFUL_MODEL_RESPONSES)]).toEqual([k, false]);
+      expect([k, /Strong consensus|\d+ independent model|all \d+ dispatched models support it/.test(text)]).toEqual([k, false]);
+    }
+  });
+
+  it("inconsistent stored record: a claim naming slots that do not exist in the run → unverified, no count", async () => {
+    const rec = CONS();
+    for (const row of rec.alignedClaims) row.cells = [...row.cells, { ...row.cells[0], modelId: "ghost" }, { ...row.cells[0], modelId: "phantom" }];
+    const out = exportOf(rec, FIVE.map((m) => R(m)));
+    for (const [k, text] of await bothTexts(out)) {
+      expect([k, text.includes(ADAPTIVE_INDEPENDENCE_UNVERIFIED_TOP_HEADING)]).toEqual([k, true]);
+      expect([k, /\d+ independent model|Top consensus(?! \()/.test(text)]).toEqual([k, false]);
+    }
   });
 });

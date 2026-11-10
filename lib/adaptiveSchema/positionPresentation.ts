@@ -36,6 +36,7 @@ import {
   attachRunIndependence,
   presentIndependenceQualifiedReport,
   COUNTED_BY_PANEL_SLOT,
+  NO_SUCCESSFUL_MODEL_RESPONSES,
   placeholderSlotsClause,
   QUALIFIED_TOP_NEXT_STEP,
   qualifiedRowHeading,
@@ -489,6 +490,8 @@ function validContested(row: Record<string, unknown>): string | null {
 
 /** A marked split row's slots, stated by executing model (its text already counts panel slots). */
 function splitIndependenceSentence(ri: RowIndependence): string {
+  if (ri.t.kind === "unverified" && ri.t.basis === "no_responses") return NO_SUCCESSFUL_MODEL_RESPONSES;
+  if (ri.t.kind === "unverified" && ri.t.basis === "failed_supporters") return "Model independence unverified: panel slots that returned no successful model response are recorded as taking a position here.";
   if (ri.t.kind === "unverified") return "Model independence unverified: which models answered these panel slots is not recorded.";
   if (ri.bothSides.length && ri.supportSlots.length && ri.disputeSlots.length) return `${ri.bothSides.join("; ")} answered slots on both sides, so this is not a disagreement between independent models.`;
   const m = ri.t.voices.length;
@@ -533,6 +536,8 @@ export function rowView(row: unknown, roster: readonly string[], provenance?: re
       const t = side === "support" ? ri?.support : ri?.dispute;
       // Several slots one substitute model answered are that model once; otherwise each slot's own label (which already
       // names a substitute's executing model).
+      // Order 30 A2: a side that names slots recorded as failed calls names no supporter / disputer (no count implied).
+      if (t && t.kind === "unverified" && t.basis !== undefined) return [];
       return ri && t && (t.kind === "repeated_substitute" || t.kind === "placeholder") ? (side === "support" ? ri.supportVoices : ri.disputeVoices) : perSlot;
     };
     const supporters = sideLabels("support", reading.slots.filter((s) => s.kind === "position" && (s.stance === "agrees" || s.stance === "partial")).map((s) => label(s.slot)));
@@ -810,6 +815,8 @@ export interface PositionSafeInput {
   rows: readonly unknown[] | null | undefined;
   roster: readonly string[];
   provenance?: readonly RunModelProvenanceFacts[] | null;
+  /** Exports only (exportPositionView.ts, Order 30 A1): every slot recorded a failed call — the run is NO_RESPONSES_RUN. */
+  noSuccessfulResponses?: boolean;
 }
 
 /** Why a stored entry has no position details (n-1): the rows are absent, or the entry matched no unique row. */

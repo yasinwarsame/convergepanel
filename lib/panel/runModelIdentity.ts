@@ -207,7 +207,8 @@ function frozenOutcomeStatus(entry: AdaptiveExportModelProvenance): string | und
 export function runModelProvenanceFromExport(provenance: AdaptiveExportRunProvenance | null, modelId: string): RunModelProvenanceFacts {
   const entry = provenance?.models.find((m) => m.modelId === modelId);
   if (!entry) return { modelId };
-  const status = frozenOutcomeStatus(entry);
+  // Order 30 n-4: a recorded outcome is read only from a read-back carrying the literal version marker 2.
+  const status = provenance?.provenanceVersion === 2 ? frozenOutcomeStatus(entry) : undefined;
   return {
     modelId,
     ...(present(entry.provider) ? { provider: entry.provider } : {}),

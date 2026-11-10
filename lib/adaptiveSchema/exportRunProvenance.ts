@@ -46,7 +46,9 @@
  * consume — byte-stable across both versions), `readFrozenRunExecutionProvenance`
  * the same facts with the execution read-back (what the independence judgement
  * of the PDF / DOCX reads, exportPositionView.ts). Both preserve only literal
- * valid values and treat anything else as unknown.
+ * valid values and treat anything else as unknown. A recorded outcome is
+ * trusted only inside a value that carries the literal version marker
+ * `provenanceVersion: 2` (Order 30 n-4); without it every entry reads unknown.
  */
 
 import type { GovernanceRecordV1 } from "./governanceRecord";
@@ -54,6 +56,7 @@ import type { AdaptiveExportModelProvenance, AdaptiveExportRunProvenance, Adapti
 import type { ModelId } from "../types";
 import { runModelIdentityLabel, runModelProvenanceFromExport } from "../panel/runModelIdentity";
 import { placeholderClass } from "../panel/executionIdentity";
+import { PERSISTED_STATUS_OUTCOMES as SHARED_PERSISTED_STATUS_OUTCOMES, recordedSlotOutcome } from "../panel/persistedStatusOutcome";
 
 const EVALUATED_AUTOMATED_STATUSES: readonly string[] = ["passed", "flagged", "blocked"];
 
@@ -75,18 +78,11 @@ function persistedSubstitutionState(status: unknown): boolean | undefined {
 export const FROZEN_RUN_PROVENANCE_VERSION = 2 as const;
 
 /**
- * Persisted `perModel.status` literal → frozen outcome. Exact match only (own property, the literal as persisted);
- * every real ConnectorStatus value is listed and nothing else is.
+ * Persisted `perModel.status` literal → frozen outcome: the ONE shared exact-match map (lib/panel/persistedStatusOutcome.ts,
+ * Order 30 A3), also read by the UI's shared gate. Exact match only (own property, the literal as persisted); every
+ * real ConnectorStatus value is listed and nothing else is.
  */
-export const PERSISTED_STATUS_OUTCOMES: Readonly<Record<string, Exclude<AdaptiveExportSlotOutcome, "unknown">>> = Object.freeze({
-  ok: "answered",
-  substituted: "answered",
-  failed: "failed",
-  error: "failed",
-  timeout: "timeout",
-  refused: "refused",
-  rate_limited: "rate_limited",
-});
+export const PERSISTED_STATUS_OUTCOMES: Readonly<Record<string, Exclude<AdaptiveExportSlotOutcome, "unknown">>> = SHARED_PERSISTED_STATUS_OUTCOMES;
 
 const RECORDED_OUTCOMES: readonly AdaptiveExportSlotOutcome[] = ["answered", "failed", "timeout", "refused", "rate_limited"];
 
@@ -95,8 +91,8 @@ const UNKNOWN_OUTCOME: FrozenOutcome = Object.freeze({ outcome: "unknown", outco
 
 /** The outcome an explicitly recorded persisted status freezes; unknown / absent for anything else. */
 export function persistedStatusOutcome(status: unknown): FrozenOutcome {
-  if (typeof status !== "string" || !Object.prototype.hasOwnProperty.call(PERSISTED_STATUS_OUTCOMES, status)) return UNKNOWN_OUTCOME;
-  return { outcome: PERSISTED_STATUS_OUTCOMES[status], outcomeSource: "recorded" };
+  const outcome = recordedSlotOutcome(status);
+  return outcome === null ? UNKNOWN_OUTCOME : { outcome, outcomeSource: "recorded" };
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -169,7 +165,7 @@ export function freezeExportRunProvenance(input: FreezeExportRunProvenanceInput)
 }
 
 /** The frozen entry's identity facts (version 1 shape) and, separately, its execution read-back. */
-function readFrozenEntry(entry: Record<string, unknown>): { identity: AdaptiveExportModelProvenance; execution: Partial<AdaptiveExportModelProvenance> } {
+function readFrozenEntry(entry: Record<string, unknown>, versioned: boolean): { identity: AdaptiveExportModelProvenance; execution: Partial<AdaptiveExportModelProvenance> } {
   // A literal boolean is preserved; anything else is an unknown state and omitted.
   const substituted = typeof entry.substituted === "boolean" ? entry.substituted : undefined;
   const identity: AdaptiveExportModelProvenance = {
@@ -179,9 +175,10 @@ function readFrozenEntry(entry: Record<string, unknown>): { identity: AdaptiveEx
     ...(substituted !== undefined ? { substituted } : {}),
     ...(substituted === true && nonEmptyString(entry.substitutedFrom) ? { substitutedFrom: entry.substitutedFrom } : {}),
   };
-  // Only a literal recorded outcome with the literal source "recorded" is a recorded outcome; anything else — a
+  // Only a literal recorded outcome with the literal source "recorded", inside a value carrying the literal version
+  // marker 2, is a recorded outcome (Order 30 n-4: an outcome in an unmarked value is not trusted); anything else — a
   // version-1 entry, "unknown", a crafted or non-string value — is unknown / absent. Only the literal `true` is a D-5 fact.
-  const recorded = typeof entry.outcome === "string" && (RECORDED_OUTCOMES as readonly string[]).includes(entry.outcome) && entry.outcomeSource === "recorded";
+  const recorded = versioned && typeof entry.outcome === "string" && (RECORDED_OUTCOMES as readonly string[]).includes(entry.outcome) && entry.outcomeSource === "recorded";
   const execution: Partial<AdaptiveExportModelProvenance> = {
     ...(recorded ? { outcome: entry.outcome as AdaptiveExportSlotOutcome, outcomeSource: "recorded" as const } : UNKNOWN_OUTCOME),
     ...(entry.invalidProviderOutput === true ? { invalidProviderOutput: true as const } : {}),
@@ -193,9 +190,10 @@ function readFrozenEntry(entry: Record<string, unknown>): { identity: AdaptiveEx
 function readFrozenEntries(raw: unknown): { policyVersion?: number; provenanceVersion?: 2; entries: ReturnType<typeof readFrozenEntry>[] } | null {
   if (!isPlainObject(raw) || !Array.isArray(raw.models)) return null;
   const entries: ReturnType<typeof readFrozenEntry>[] = [];
+  const versioned = raw.provenanceVersion === FROZEN_RUN_PROVENANCE_VERSION;
   for (const entry of raw.models) {
     if (!isPlainObject(entry) || !nonEmptyString(entry.modelId)) continue;
-    entries.push(readFrozenEntry(entry));
+    entries.push(readFrozenEntry(entry, versioned));
   }
   return {
     ...(validPolicyVersion(raw.policyVersion) ? { policyVersion: raw.policyVersion } : {}),

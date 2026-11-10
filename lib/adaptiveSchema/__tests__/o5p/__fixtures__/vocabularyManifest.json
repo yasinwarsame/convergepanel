@@ -2742,5 +2742,19 @@
   "count": 1,
   "category": "contract-p-applied",
   "rule": "C-a review F-2 (owner ruling, 2026-11-09): shown ONLY when a supporting slot of a stored consensus / majority statement holds a listed D-5 placeholder (INVALID_MOCK, lib/panel/executionIdentity.ts; the J02 fact) — a stored placeholder is not a model response, so it is never counted as an independent model and the stored support count is never presented as 'agreed by N models' (verdictIndependence.ts kind 'placeholder'); stored values unchanged; runs without a placeholder slot render as before"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictIndependence.ts",
+  "literal": "\"No successful model responses. Consensus unavailable. Model independence unverified.\"",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "Order 30 A1 (owner option (i), standing attribution default, 2026-11-10): NO_SUCCESSFUL_MODEL_RESPONSES — the ONE shared wording stated in place of any agreement / consensus / support-count claim when no considered slot returned a successful model response (every dispatched slot of an export with a stored synthesis recorded a failed call, or every slot a stored claim names as positioned recorded one); makes no agreement claim; stored values unchanged; the real all-failed record (no synthesis) and the UI run scope render as before"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictIndependence.ts",
+  "literal": "`panel slots that returned no successful model response are recorded as ${verb === \"support\" ? \"supporting\" : \"disputing\"} it (model independence unverified; no count stated)`",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "Order 30 A2 (review m-3): a stored row side whose positioned slots include a slot recorded as a failed call — no support / dispute count is stated, model independence unverified; stored values unchanged; rows whose positioned slots all answered render as before"
  }
 ]

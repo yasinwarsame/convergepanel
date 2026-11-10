@@ -140,10 +140,13 @@ describe("F-1: the shared verified-identity rule on the verdict surfaces (the ru
     // A2: a recorded failure is excluded from the voices — a repeated substitute beside a failed slot names only the answering models.
     const collapsed = [f("chatgpt", true, "deepseek"), f("claude", true, "deepseek"), f("grok", false, "xai"), { modelId: "gemini", status: "timeout" } as RunModelProvenanceFacts];
     expect(adaptiveTopIndependence(null, collapsed)).toEqual({ kind: "repeated_substitute", scope: "run", voices: ["DeepSeek (substituting ChatGPT, Claude)", "Grok"], repeated: ["DeepSeek (substituting ChatGPT, Claude)"] });
-    expect(raisedByText(["chatgpt", "claude", "grok", "gemini"], collapsed)).toBe("(raised by 4 panel slots, answered by 2 independent models: DeepSeek (substituting ChatGPT, Claude); Grok)");
+    // Order 30 A2: a raising-slot list that names the failed slot is an inconsistent record — no count; the answering slots alone are counted.
+    expect(raisedByText(["chatgpt", "claude", "grok", "gemini"], collapsed)).toBe("(raised by panel slots that include slots with no successful model response; model independence unverified)");
+    expect(raisedByText(["chatgpt", "claude", "grok"], collapsed)).toBe("(raised by 3 panel slots, answered by 2 independent models: DeepSeek (substituting ChatGPT, Claude); Grok)");
     // Finding K=0 → IND: a stored claim whose supporters all recorded failures is never an independent consensus.
-    expect(adaptiveTopIndependence(["chatgpt"], [{ modelId: "chatgpt", status: "timeout" }, ...VERIFIED])).toEqual({ kind: "unverified", scope: "supporters" });
-    expect(adaptiveTopIndependence(["chatgpt", "claude"], [{ modelId: "chatgpt", status: "timeout" }, { modelId: "claude", status: "failed" }])).toEqual({ kind: "unverified", scope: "supporters" });
+    // Order 30: with the reason (no successful response among them).
+    expect(adaptiveTopIndependence(["chatgpt"], [{ modelId: "chatgpt", status: "timeout" }, ...VERIFIED])).toEqual({ kind: "unverified", scope: "supporters", basis: "no_responses" });
+    expect(adaptiveTopIndependence(["chatgpt", "claude"], [{ modelId: "chatgpt", status: "timeout" }, { modelId: "claude", status: "failed" }])).toEqual({ kind: "unverified", scope: "supporters", basis: "no_responses" });
     // Run scope with nothing answered and no stored claim joined renders as before (owner option (b): the all-failed
     // panel's 2c17feee oracle holds); the shared gate still reads that run as unverified (K = 0 is never IND).
     const allFailed = [{ modelId: "chatgpt", status: "timeout" }, { modelId: "claude", status: "failed" }];

@@ -1131,7 +1131,13 @@ export function withIndependentFrozenProvenance<T extends { reportSnapshot: any 
   // shared gate reads as the slot's status (a version-1 entry without it reads as unverified, by owner ruling).
   record.reportSnapshot.runProvenance = {
     provenanceVersion: 2,
-    models: (record.reportSnapshot.models ?? []).map((m: { modelId: string }) => ({ modelId: m.modelId, substituted: false, provider: SLOT_RUNTIME_PROVIDER[m.modelId] ?? "openai", outcome: "answered", outcomeSource: "recorded" })),
+    // Order 30 (review n-3): a dispatched slot that failed (`ok === false`) is frozen as a recorded failure — never as an
+    // answer — and, as a failed call records none, with no provider.
+    models: (record.reportSnapshot.models ?? []).map((m: { modelId: string; ok?: boolean }) =>
+      m.ok === false
+        ? { modelId: m.modelId, substituted: false, outcome: "failed", outcomeSource: "recorded" }
+        : { modelId: m.modelId, substituted: false, provider: SLOT_RUNTIME_PROVIDER[m.modelId] ?? "openai", outcome: "answered", outcomeSource: "recorded" }
+    ),
   };
   return record;
 }

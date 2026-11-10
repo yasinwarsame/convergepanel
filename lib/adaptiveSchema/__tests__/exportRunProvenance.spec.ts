@@ -197,6 +197,11 @@ describe("frozen outcome (version 2, Order 29 M-1) — the explicitly recorded p
     ["null", null],
     ["missing", undefined],
     ["object", { status: "ok" }],
+    // Order 30 n-1: prototype keys are not own properties of the map (the R3 survivor of review c2a62df).
+    ["a prototype key", "toString"],
+    ["a prototype key", "constructor"],
+    ["a prototype key", "__proto__"],
+    ["a prototype key", "hasOwnProperty"],
   ])("a status that is %s (%p) → unknown / absent, never recorded", (_label, status) => {
     expect(persistedStatusOutcome(status)).toEqual(U);
     expect(withRow(0, (r) => {
@@ -293,8 +298,20 @@ describe("readFrozenRunExecutionProvenance — the execution facts as frozen, li
     ["timeout", "timeout"],
     ["refused", "refused"],
     ["rate_limited", "rate_limited"],
-  ])("a literal recorded outcome %s is preserved", (outcome) => {
-    expect(readFrozenRunExecutionProvenance({ models: [{ modelId: "a", outcome, outcomeSource: "recorded" }] })).toEqual({ models: [{ modelId: "a", outcome, outcomeSource: "recorded" }] });
+  ])("a literal recorded outcome %s is preserved (inside a value carrying the version marker 2)", (outcome) => {
+    expect(readFrozenRunExecutionProvenance({ provenanceVersion: 2, models: [{ modelId: "a", outcome, outcomeSource: "recorded" }] })).toEqual({ provenanceVersion: 2, models: [{ modelId: "a", outcome, outcomeSource: "recorded" }] });
+  });
+  it.each([
+    ["no marker", {}],
+    ["marker 1", { provenanceVersion: 1 }],
+    ["marker '2' (string)", { provenanceVersion: "2" }],
+    ["marker 3", { provenanceVersion: 3 }],
+    ["marker null", { provenanceVersion: null }],
+    ["marker [2]", { provenanceVersion: [2] }],
+  ])("Order 30 n-4: a literal recorded outcome in a value with %s is NOT trusted → unknown / absent", (_label, marker) => {
+    for (const outcome of ["answered", "failed", "timeout", "refused", "rate_limited"]) {
+      expect(readFrozenRunExecutionProvenance({ ...marker, models: [{ modelId: "a", outcome, outcomeSource: "recorded" }] })).toEqual({ models: [{ modelId: "a", ...U }] });
+    }
   });
   it.each([
     ["source absent", { outcome: "answered", outcomeSource: "absent" }],
@@ -308,14 +325,15 @@ describe("readFrozenRunExecutionProvenance — the execution facts as frozen, li
     ["non-string", { outcome: 1, outcomeSource: "recorded" }],
     ["null (Firestore)", { outcome: null, outcomeSource: null }],
   ])("an outcome that is %s → unknown / absent", (_label, over) => {
-    expect(readFrozenRunExecutionProvenance({ models: [{ modelId: "a", ...over }] })).toEqual({ models: [{ modelId: "a", ...U }] });
+    expect(readFrozenRunExecutionProvenance({ provenanceVersion: 2, models: [{ modelId: "a", ...over }] })).toEqual({ provenanceVersion: 2, models: [{ modelId: "a", ...U }] });
   });
   it("the D-5 facts are read back only as the literal true; the version marker only as the literal 2", () => {
     expect(readFrozenRunExecutionProvenance({ provenanceVersion: 2, models: [{ modelId: "a", ...A, invalidProviderOutput: true }, { modelId: "b", ...A, validityUnknown: true }] })).toEqual({
       provenanceVersion: 2,
       models: [{ modelId: "a", ...A, invalidProviderOutput: true }, { modelId: "b", ...A, validityUnknown: true }],
     });
-    expect(readFrozenRunExecutionProvenance({ provenanceVersion: "2", models: [{ modelId: "a", ...A, invalidProviderOutput: "true", validityUnknown: 1 }] })).toEqual({ models: [{ modelId: "a", ...A }] });
+    // Order 30 n-4: without the literal marker 2 the recorded outcome is not trusted either.
+    expect(readFrozenRunExecutionProvenance({ provenanceVersion: "2", models: [{ modelId: "a", ...A, invalidProviderOutput: "true", validityUnknown: 1 }] })).toEqual({ models: [{ modelId: "a", ...U }] });
     expect(readFrozenRunExecutionProvenance({ provenanceVersion: 3, models: [] })).toEqual({ models: [] });
   });
   it("the identity reader of the same value is its version-1 projection (keys and order unchanged)", () => {

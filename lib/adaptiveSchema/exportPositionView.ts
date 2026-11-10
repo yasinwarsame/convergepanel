@@ -14,7 +14,8 @@ import type { AdaptiveSynthesisReport } from "./types";
 import { readFrozenRunExecutionProvenance } from "./exportRunProvenance";
 import { runModelProvenanceFromExport, type RunModelProvenanceFacts } from "@/lib/panel/runModelIdentity";
 import { PositionView, VERDICT_SECTION_HEADINGS, positionView, presentPositionSafeReport } from "./positionPresentation";
-import { independenceQualification, qualifiedTopHeading, runIndependence, type QualifiedIndependence } from "./verdictIndependence";
+import { FAILED_SUPPORTERS_RUN, NO_RESPONSES_RUN, independenceQualification, qualifiedTopHeading, rowIndependence, runIndependence, type QualifiedIndependence } from "./verdictIndependence";
+import { identityRowFromFacts, identityRowRecordedFailure } from "@/lib/panel/executionIdentity";
 
 /**
  * An UNMARKED report's verdict section headings when its top claim's supporting slots are not independent executing
@@ -63,13 +64,33 @@ function exportSlotProvenance(record: AdaptiveResearchExportV1): RunModelProvena
 }
 
 /**
+ * Order 30 A1 (owner option (i), standing attribution default): an export that carries a stored synthesis but whose
+ * every dispatched slot is RECORDED (version-2 frozen outcome) as a failed call has no successful model response, so it
+ * makes no agreement, consensus or support-count claim: its run is NO_RESPONSES_RUN and every statement reads
+ * NO_SUCCESSFUL_MODEL_RESPONSES. Only the export path decides this — the shared run-scope rule (and so the UI and the
+ * 2c17feee oracle) is untouched, and an export without a stored synthesis (the real all-failed record) is unchanged.
+ * Stored values, the synthesis admission rule and every calculation are untouched.
+ */
+function exportHasNoSuccessfulResponses(record: AdaptiveResearchExportV1, provenance: readonly RunModelProvenanceFacts[]): boolean {
+  if (!record.reportSnapshot.legacy?.synthesisReport) return false;
+  return provenance.length > 0 && provenance.every((f) => identityRowRecordedFailure(identityRowFromFacts(f)));
+}
+
+/**
  * The exported run's model independence (the report status summary's level): null when every slot is its own recorded
  * executing model; a pre-6.2b export (no frozen provenance) is unverified. Only a gate-scored legacy-family report has
  * such a level; any other export → null (its summary is unchanged).
  */
 export function exportRunIndependence(record: AdaptiveResearchExportV1): QualifiedIndependence | null {
   if (!record.reportSnapshot.legacy?.synthesisReport) return null;
-  return runIndependence(exportSlotProvenance(record));
+  const provenance = exportSlotProvenance(record);
+  if (exportHasNoSuccessfulResponses(record, provenance)) return NO_RESPONSES_RUN;
+  const run = runIndependence(provenance);
+  if (run) return run;
+  // Order 30 A2: a stored row that names a slot recorded as a failed call among its positioned slots is an inconsistent
+  // record — the summary level is then the gate, never a "Strong consensus" tier built on that row's stored count.
+  const rows = record.reportSnapshot.legacy?.alignedClaims;
+  return Array.isArray(rows) && rows.some((r) => { const t = rowIndependence(r, provenance)?.t; return t?.kind === "unverified" && t.basis !== undefined; }) ? FAILED_SUPPORTERS_RUN : null;
 }
 
 export function exportPositionSafeReport(record: AdaptiveResearchExportV1): { report: AdaptiveSynthesisReport | undefined; view: PositionView | null; independence: ExportVerdictIndependence | null } {
@@ -81,7 +102,8 @@ export function exportPositionSafeReport(record: AdaptiveResearchExportV1): { re
   // An unmarked report is returned as stored, except that agreement statements whose slots are not independent
   // executing models are stated by their executing models (the frozen provenance decides; a pre-6.2b export records
   // none, so its model independence is stated as unverified — nothing is inferred).
-  const report = presentPositionSafeReport(stored, { rows: legacy.alignedClaims, roster, provenance });
+  const noSuccessfulResponses = exportHasNoSuccessfulResponses(record, provenance);
+  const report = presentPositionSafeReport(stored, { rows: legacy.alignedClaims, roster, provenance, ...(noSuccessfulResponses ? { noSuccessfulResponses } : {}) });
   const view = positionView(report);
   return { report, view, independence: view ? null : verdictIndependence(report) };
 }
