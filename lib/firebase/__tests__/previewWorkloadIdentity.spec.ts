@@ -47,17 +47,39 @@ describe("resolvePreviewWorkloadIdentity (pure)", () => {
     expect(resolvePreviewWorkloadIdentity({ ...OK_ENV, ...over })).toEqual({ kind: "refused", reason: "production_project" });
   });
   it("a service account from another project than the configured one is refused", () => {
-    expect(resolvePreviewWorkloadIdentity({ ...OK_ENV, FIREBASE_WIF_SERVICE_ACCOUNT: "x@other-project.iam.gserviceaccount.com" })).toEqual({ kind: "refused", reason: "service_account_project_mismatch" });
+    expect(resolvePreviewWorkloadIdentity({ ...OK_ENV, FIREBASE_WIF_SERVICE_ACCOUNT: "other-sa@other-project.iam.gserviceaccount.com" })).toEqual({ kind: "refused", reason: "service_account_project_mismatch" });
+  });
+  it.each([
+    ["URL-injection into the impersonation path (review #304 m-1)", "firebase-adminsdk-x%40convergepanel.iam.gserviceaccount.com:generateAccessToken?@convergepanel-preview.iam.gserviceaccount.com"],
+    ["path separator", "cp-preview-admin/x@convergepanel-preview.iam.gserviceaccount.com"],
+    ["query / fragment characters", "cp-preview-admin?a#b@convergepanel-preview.iam.gserviceaccount.com"],
+    ["a second @", "a@b@convergepanel-preview.iam.gserviceaccount.com"],
+    ["a non-IAM domain", "cp-preview-admin@convergepanel-preview.example.com"],
+    ["interior whitespace", "cp-preview admin@convergepanel-preview.iam.gserviceaccount.com"],
+  ])("a malformed service-account address is refused: %s", (_l, email) => {
+    expect(resolvePreviewWorkloadIdentity({ ...OK_ENV, FIREBASE_WIF_SERVICE_ACCOUNT: email })).toEqual({ kind: "refused", reason: "invalid_service_account" });
+  });
+  it("a Google-managed service agent address is refused (it does not belong to the configured project)", () => {
+    expect(resolvePreviewWorkloadIdentity({ ...OK_ENV, FIREBASE_WIF_SERVICE_ACCOUNT: "service-718071869099@gcp-sa-firestore.iam.gserviceaccount.com" }).kind).toBe("refused");
+  });
+  it("case and surrounding whitespace are normalized; the resolved address is lowercase", () => {
+    expect(resolvePreviewWorkloadIdentity({ ...OK_ENV, FIREBASE_WIF_SERVICE_ACCOUNT: `  ${PREVIEW_SA.toUpperCase()} ` })).toEqual({ kind: "ok", config: { projectId: "convergepanel-preview", audience: AUD, serviceAccountEmail: PREVIEW_SA } });
+  });
+  it("whitespace-only WIF variables do not opt in", () => {
+    expect(resolvePreviewWorkloadIdentity({ VERCEL_ENV: "preview", FIREBASE_WIF_AUDIENCE: "   ", FIREBASE_WIF_SERVICE_ACCOUNT: " " })).toEqual({ kind: "not_applicable" });
+  });
+  it("an audience whose provider lives in the Production project is refused (review #304 m-2)", () => {
+    expect(resolvePreviewWorkloadIdentity({ ...OK_ENV, FIREBASE_WIF_AUDIENCE: AUD.replace("718071869099", "907484474744") })).toEqual({ kind: "refused", reason: "production_project" });
   });
 });
 
 describe("the federated client and the firebase-admin credential adapter", () => {
   it("exchanges the Vercel OIDC token at Google STS and impersonates exactly the configured service account", async () => {
     const getVercelOidcToken = jest.fn(async () => "vercel-oidc-jwt");
-    let mod!: typeof import("../previewWorkloadIdentity");
+    let mod!: typeof import("../previewWorkloadIdentityClient");
     jest.isolateModules(() => {
       jest.doMock("@vercel/oidc", () => ({ getVercelOidcToken }));
-      mod = require("../previewWorkloadIdentity");
+      mod = require("../previewWorkloadIdentityClient");
     });
     const client = mod.createPreviewWorkloadIdentityClient({ projectId: "convergepanel-preview", audience: AUD, serviceAccountEmail: PREVIEW_SA });
     expect((client as any).audience).toBe(AUD);
@@ -69,7 +91,7 @@ describe("the federated client and the firebase-admin credential adapter", () =>
     expect(getVercelOidcToken).toHaveBeenCalledTimes(1);
   });
   it("the credential returns the federated access token and its remaining lifetime; an empty token throws", async () => {
-    const { previewWorkloadIdentityCredential } = jest.requireActual("../previewWorkloadIdentity") as typeof import("../previewWorkloadIdentity");
+    const { previewWorkloadIdentityCredential } = jest.requireActual("../previewWorkloadIdentityClient") as typeof import("../previewWorkloadIdentityClient");
     const now = Date.now();
     const ok = previewWorkloadIdentityCredential({ getAccessToken: async () => ({ token: "ya29.t" }), credentials: { expiry_date: now + 1800_000 } } as any);
     const t = await ok.getAccessToken();
@@ -89,7 +111,9 @@ const saved: Record<string, string | undefined> = {};
 beforeAll(() => ENV_KEYS.forEach((k) => (saved[k] = process.env[k])));
 afterEach(() => ENV_KEYS.forEach((k) => (saved[k] === undefined ? delete process.env[k] : (process.env[k] = saved[k]))));
 
+let clientModuleLoaded = false;
 function loadAdmin(env: Partial<Record<(typeof ENV_KEYS)[number], string>>, existingApps: unknown[] = []) {
+  clientModuleLoaded = false;
   ENV_KEYS.forEach((k) => delete process.env[k]);
   Object.entries(env).forEach(([k, v]) => (process.env[k] = v as string));
   const initializeApp = jest.fn((opts: { projectId: string; credential: unknown }) => ({ name: "[DEFAULT]", options: { projectId: opts.projectId } }));
@@ -104,6 +128,10 @@ function loadAdmin(env: Partial<Record<(typeof ENV_KEYS)[number], string>>, exis
     jest.doMock("firebase-admin/firestore", () => ({ getFirestore, Firestore: FirestoreCtor }));
     jest.doMock("google-auth-library", () => ({ IdentityPoolClient }));
     jest.doMock("@vercel/oidc", () => ({ getVercelOidcToken: async () => "jwt" }));
+    jest.doMock("../previewWorkloadIdentityClient", () => {
+      clientModuleLoaded = true;
+      return jest.requireActual("../previewWorkloadIdentityClient");
+    });
     const log = jest.spyOn(console, "log").mockImplementation(() => undefined);
     const err = jest.spyOn(console, "error").mockImplementation(() => undefined);
     try {
@@ -134,10 +162,21 @@ describe("admin.ts — Preview workload identity path", () => {
     expect(mod.adminDb.kind).toBe("wif-db");
     expect(mod.adminAuth).toEqual({ kind: "auth" });
   });
-  it("Production with WIF variables present never uses WIF (certificate path only)", () => {
-    const { IdentityPoolClient, FirestoreCtor } = loadAdmin({ ...OK_ENV, VERCEL_ENV: "production", FIREBASE_SERVICE_ACCOUNT_JSON: JSON.stringify({ project_id: "convergepanel", client_email: PROD_SA, private_key: "k" }) });
+  it("Production with WIF variables present never uses WIF (certificate path only) and never loads the federated client", () => {
+    const { IdentityPoolClient, FirestoreCtor, initializeApp } = loadAdmin({ ...OK_ENV, VERCEL_ENV: "production", FIREBASE_SERVICE_ACCOUNT_JSON: JSON.stringify({ project_id: "convergepanel", client_email: PROD_SA, private_key: "k" }) });
     expect(IdentityPoolClient).not.toHaveBeenCalled();
     expect(FirestoreCtor).not.toHaveBeenCalled();
+    expect(clientModuleLoaded).toBe(false);
+    expect((initializeApp.mock.calls[0][0] as any).credential).toEqual({ cert: expect.objectContaining({ projectId: "convergepanel" }) });
+  });
+  it("the WIF branch is the only place the federated client module is loaded", () => {
+    loadAdmin(OK_ENV);
+    expect(clientModuleLoaded).toBe(true);
+  });
+  it("the URL-injection service account (review #304 m-1) initializes nothing", () => {
+    const { initializeApp, IdentityPoolClient } = loadAdmin({ ...OK_ENV, FIREBASE_WIF_SERVICE_ACCOUNT: "firebase-adminsdk-x%40convergepanel.iam.gserviceaccount.com:generateAccessToken?@convergepanel-preview.iam.gserviceaccount.com" });
+    expect(initializeApp).not.toHaveBeenCalled();
+    expect(IdentityPoolClient).not.toHaveBeenCalled();
   });
   it.each([
     ["the Production project", { FIREBASE_PROJECT_ID: "convergepanel" }],

@@ -8,7 +8,7 @@ import admin from "firebase-admin";
 import { App, cert, getApps, initializeApp } from "firebase-admin/app";
 import { Auth, getAuth } from "firebase-admin/auth";
 import { Firestore, getFirestore } from "firebase-admin/firestore";
-import { createPreviewWorkloadIdentityClient, previewWorkloadIdentityCredential, resolvePreviewWorkloadIdentity } from "./previewWorkloadIdentity";
+import { resolvePreviewWorkloadIdentity } from "./previewWorkloadIdentity";
 import { evaluateServerFirebaseIsolation, serviceAccountProject, PRODUCTION_FIREBASE_PROJECT_ID, PRODUCTION_FIREBASE_PROJECT_NUMBER, type FirebaseIsolationVerdict } from "./projectIsolation";
 import { readOperatorGrant } from "./operatorGrant";
 
@@ -104,6 +104,8 @@ function initFirebaseAdmin() {
     const { projectId, serviceAccountEmail } = wif.config;
     enforceFirebaseIsolation(evaluateServerFirebaseIsolation({ projectId, clientEmail: serviceAccountEmail, deploymentEnv: process.env.VERCEL_ENV }), projectId, serviceAccountEmail);
     console.log("[firebase-admin] projectId:", projectId, "(preview workload identity)");
+    // Loaded only here, so Production and local runs never load the federated-client dependencies.
+    const { createPreviewWorkloadIdentityClient, previewWorkloadIdentityCredential } = require("./previewWorkloadIdentityClient") as typeof import("./previewWorkloadIdentityClient");
     const client = createPreviewWorkloadIdentityClient(wif.config);
     const existing = getApps().find((a) => a.name === "[DEFAULT]");
     app = existing ?? initializeApp({ credential: previewWorkloadIdentityCredential(client), projectId });
