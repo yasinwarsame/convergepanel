@@ -138,13 +138,15 @@ describe("B3: video queue rows — consensus score requires two independent exec
     const before = JSON.stringify(stored.data);
     vidRows = [stored];
     const r = (await rows())["v-one"];
+    // C-c (CC-12, PQ-2 (a) strict): video rows record no provider, so the shared gate reads every video record as
+    // UNVERIFIED (was "insufficient" under the modelId rule).
     expect([r.consensusScore, r.evidenceQuality, r.consensusWithheld, r.modelIndependence]).toEqual([
       80,
       "strong",
-      "insufficient_independent_models",
-      "insufficient",
+      "independence_unverified",
+      "unverified",
     ]);
-    expect(queueConsensusText(r, false)).toBe(CONSENSUS_WITHHELD_TEXT.insufficient_independent_models);
+    expect(queueConsensusText(r, false)).toBe(CONSENSUS_WITHHELD_TEXT.independence_unverified);
     expect(queueConsensusText(r, false)).not.toMatch(/\d/);
     // Stored record unchanged.
     expect(JSON.stringify(stored.data)).toBe(before);
@@ -153,7 +155,7 @@ describe("B3: video queue rows — consensus score requires two independent exec
   it("the same model id in two ok rows is one executing model: withheld at presentation (stored score kept)", async () => {
     vidRows = [vidWith("v-dup", {}, [vrow("gemini", "ok", "authentic"), vrow("gemini", "ok", "authentic")])];
     const r = (await rows())["v-dup"];
-    expect([r.consensusScore, r.consensusWithheld]).toEqual([80, "insufficient_independent_models"]);
+    expect([r.consensusScore, r.consensusWithheld]).toEqual([80, "independence_unverified"]); // C-c CC-12 (was insufficient)
   });
 
   it("unknown provenance (no modelResults, or a row without model id / status): withheld at presentation as UNVERIFIED (stored score kept)", async () => {
@@ -169,13 +171,18 @@ describe("B3: video queue rows — consensus score requires two independent exec
     }
   });
 
-  it("two independent video models: stored score and evidence quality unchanged, nothing withheld", async () => {
+  it("C-c (CC-12, PQ-2 strict): two ok video rows with distinct modelIds are NOT inferred independent — unverified, stored score kept", async () => {
     vidRows = [vidWith("v-two", {}, [vrow("gemini", "ok", "authentic"), vrow("chatgpt", "ok", "authentic")])];
     const r = (await rows())["v-two"];
-    expect([r.consensusScore, r.evidenceQuality]).toEqual([80, "strong"]);
-    expect("consensusWithheld" in r).toBe(false);
-    expect("modelIndependence" in r).toBe(false);
-    expect(queueConsensusText(r, false)).toBe(queueConsensusText({ consensusScore: 80 }, false));
+    expect([r.consensusScore, r.evidenceQuality, r.consensusWithheld, r.modelIndependence]).toEqual([80, "strong", "independence_unverified", "unverified"]);
+    expect(queueConsensusText(r, false)).toBe(CONSENSUS_WITHHELD_TEXT.independence_unverified);
+    expect(r.singleModelAssessment).toBeUndefined();
+  });
+
+  it("C-c (CC-12): the video rule is the shared gate — rows that recorded registered providers would verify (not a recorded shape today)", async () => {
+    vidRows = [vidWith("v-prov", {}, [vrow("gemini", "ok", "authentic", { provider: "google" }), vrow("chatgpt", "ok", "authentic", { provider: "openai" })])];
+    const r = (await rows())["v-prov"];
+    expect(["consensusWithheld" in r, "modelIndependence" in r]).toEqual([false, false]);
   });
 
   it("no stored score: nothing to withhold (no reason attached)", async () => {

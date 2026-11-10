@@ -124,7 +124,8 @@ describe("Video history containment", () => {
     videoRows = [video("vid-personal", 1, { governanceStatus: "needs_review" })];
     const { body } = await history();
     expect(body.items).toEqual([
-      { type: "video_verification", id: "vid-personal", at: new Date(T0 + 60_000).toISOString(), fileName: "vid-personal.mp4", durationSeconds: 12, verdict: "authentic_captured", consensusScore: 70, governanceStatus: "needs_review" },
+      // C-c (CC-07, PQ-2 strict): the stored video score (70) is withheld — video rows record no provider.
+      { type: "video_verification", id: "vid-personal", at: new Date(T0 + 60_000).toISOString(), fileName: "vid-personal.mp4", durationSeconds: 12, verdict: "authentic_captured", consensusWithheld: "independence_unverified", governanceStatus: "needs_review" },
     ]);
   });
 

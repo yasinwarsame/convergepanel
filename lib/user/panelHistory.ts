@@ -58,7 +58,13 @@ export type PanelHistoryVideoVerificationItem = {
   fileName: string;
   durationSeconds: number;
   verdict: string;
-  consensusScore: number;
+  /**
+   * The stored score; ABSENT when it is withheld (`consensusWithheld`; C-c CC-07/CC-08, PQ-2 strict: video rows record
+   * no provider, so a stored video score is never presented as a multi-model consensus). Absent rather than null so the
+   * frozen History renderer (app/page.tsx, number | undefined) is untouched.
+   */
+  consensusScore?: number;
+  consensusWithheld?: ConsensusScoreWithheldReason;
   governanceStatus?: PanelHistoryGovernanceStatus;
 };
 

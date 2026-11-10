@@ -13,7 +13,7 @@ import type { PanelHistoryItem, PanelHistoryResearchItem } from "@/lib/user/pane
 import type { ModelId } from "@/lib/types";
 import { createRunWorkspaceIntegrityBatch } from "@/lib/workspaces/runWorkspaceIntegrityBatch";
 import { consensusScoreWithheldReason, storedRunConsensusIndependence } from "@/lib/panel/independentVoices";
-import { storedVerificationConsensusIndependence } from "@/lib/panel/storedVerificationIndependence";
+import { storedVerificationConsensusIndependence, storedVideoConsensusIndependence } from "@/lib/panel/storedVerificationIndependence";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -206,6 +206,9 @@ export async function GET(req: NextRequest) {
       const meta = data.metadata as { duration?: number } | undefined;
       const durationSec =
         meta && typeof meta.duration === "number" && Number.isFinite(meta.duration) ? meta.duration : 0;
+      // C-c (CC-07, PQ-2 (a) strict): a video's stored score is a cross-model figure; the video rows record no provider,
+      // so the shared gate never verifies them and the score is withheld with the reason. Stored data is unchanged.
+      const videoWithheld = consensusScoreWithheldReason(storedVideoConsensusIndependence(data.modelResults));
       merged.push({
         sortKey,
         item: {
@@ -215,7 +218,9 @@ export async function GET(req: NextRequest) {
           fileName: typeof data.fileName === "string" ? data.fileName : "Uploaded video",
           durationSeconds: durationSec,
           verdict: String(data.verdict ?? "inconclusive"),
-          consensusScore: typeof data.consensusScore === "number" ? data.consensusScore : 0,
+          // Absent (not null) when withheld: the frozen History renderer (app/page.tsx) types it number | undefined and
+          // renders no " · N consensus" without it.
+          ...(videoWithheld ? { consensusWithheld: videoWithheld } : { consensusScore: typeof data.consensusScore === "number" ? data.consensusScore : 0 }),
           governanceStatus: normalizeGovernanceStatus(data.governanceStatus),
         },
       });

@@ -28,6 +28,7 @@ import {
 import {
   storedVerificationConsensusIndependence,
   storedVerificationExecutingRows,
+  storedVideoConsensusIndependence,
 } from "@/lib/panel/storedVerificationIndependence";
 import { groupSlotsByExecutingVoice } from "@/lib/panel/executingVoiceLabel";
 import { runModelFamilyName } from "@/lib/panel/runModelIdentity";
@@ -83,16 +84,12 @@ type Voice = { key: string; slotIds: string[]; label: string; verdicts: string[]
 
 const norm = (v: string) => v.toLowerCase().replace(/\s+/g, "_");
 
-/** Video slots are never substituted: each distinct `modelId` is its own executing model. */
+/**
+ * C-c (CC-12 / CC-13, PQ-2 (a) strict): a video record's independence is the shared gate's
+ * (`storedVideoConsensusIndependence`). Video rows record no provider, so it is "unverified"; no modelId-based rule.
+ */
 function videoIndependence(mr: readonly unknown[]): StoredConsensusIndependence {
-  const ids = new Set<string>();
-  for (const row of mr) {
-    if (!row || typeof row !== "object") return "unverified";
-    const m = row as Record<string, unknown>;
-    if (typeof m.modelId !== "string" || m.modelId.trim().length === 0 || typeof m.status !== "string") return "unverified";
-    if (m.status === "ok") ids.add(m.modelId.trim().toLowerCase());
-  }
-  return ids.size >= 2 ? "independent" : "insufficient";
+  return storedVideoConsensusIndependence(mr);
 }
 
 export function buildQueueVerificationAgreement(data: Record<string, unknown>, opts: Opts): QueueVerificationAgreement {
