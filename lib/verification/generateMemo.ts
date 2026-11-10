@@ -109,6 +109,22 @@ export interface MemoInput {
   claimModelIndependence?: "independent" | "insufficient" | "unverified";
 
   /**
+   * C-b (CB-11): claim memo only, with `claimModelIndependence: "independent"` — the shared gate's counts over the
+   * verification's rows (lib/panel/executionIdentity.ts): K independent executing models over M answering slots. The
+   * memo then states K (never the number of rows: a failed slot is not an answer), names the answering slots only, and
+   * states the slots when K < M (a substitute model that answered several slots counts once). Absent → as before.
+   */
+  claimExecution?: { independentModels: number; answeredSlots: number };
+
+  /**
+   * C-b (CB-12, PQ-2 (a) strict): video memo only — the independence of the video rows by the shared gate. Video rows
+   * record no provider, so callers pass "unverified"; anything but "independent" → no consensus score, no cross-model
+   * evidence quality, and the stored agreement / disagreement points (kept as recorded) under qualified headings.
+   * Absent → exactly the memo as before.
+   */
+  videoModelIndependence?: "independent" | "insufficient" | "unverified";
+
+  /**
    * Order 5 (Contract P): set ONLY by shareBuilders.buildAdaptiveMemoInput for an adaptive research report marked
    * presentation.disagreementPositionVersion === 1. Its findings, agreements and disagreements are then already stated
    * from the report's rows; the memo takes the adaptive-only path (isMarkedAdaptiveResearchMemo). Claim, video and
@@ -291,13 +307,36 @@ export const CLAIM_MEMO_SINGLE_MODEL_METHODOLOGY =
 export const CLAIM_MEMO_UNVERIFIED_METHODOLOGY =
   "This claim was sent to a panel of large language models via ConvergePanel with identical instructions. Which models actually executed could not be established from the stored record, so no consensus score is reported and nothing in this memo is presented as agreement between independent models.";
 
+/** The gate's counts a claim memo may state: only for an "independent" claim with K ≥ 1 and M ≥ K (else null: as before). */
+function claimExecutionCounts(input: MemoInput): { independentModels: number; answeredSlots: number } | null {
+  const e = input.claimExecution;
+  if (input.claimModelIndependence !== "independent" || !e) return null;
+  const k = e.independentModels;
+  const m = e.answeredSlots;
+  if (!Number.isInteger(k) || !Number.isInteger(m) || k < 1 || m < k) return null;
+  return { independentModels: k, answeredSlots: m };
+}
+
+/** Video memo lines when the video rows do not verify ≥ 2 independent executing models (always, for recorded video rows). */
+// The claim memo's "unverified" family, shared (mirrored, not forked).
+export const VIDEO_MEMO_UNVERIFIED_VERDICT_NOTE = CLAIM_MEMO_UNVERIFIED_VERDICT_NOTE;
+export const VIDEO_MEMO_WITHHELD_CONSENSUS_LINE = CLAIM_MEMO_WITHHELD_CONSENSUS_LINE;
+export const VIDEO_MEMO_UNVERIFIED_EVIDENCE = CLAIM_MEMO_UNVERIFIED_EVIDENCE;
+export const VIDEO_MEMO_UNVERIFIED_SUMMARY_LEAD = "Which models executed this review could not be established from the stored record, so nothing in this memo is presented as agreement between independent models.";
+export const VIDEO_MEMO_NOT_INDEPENDENT_AGREE_HEADING = "POINTS REPEATED ACROSS RESPONSES (NOT AGREEMENT BETWEEN INDEPENDENT MODELS)";
+export const VIDEO_MEMO_NOT_INDEPENDENT_DISAGREE_HEADING = "POINTS THAT DIFFER ACROSS RESPONSES (NOT A DISAGREEMENT BETWEEN INDEPENDENT MODELS)";
+export const VIDEO_MEMO_UNVERIFIED_METHODOLOGY_TAIL = "Which models actually executed could not be established from the stored record (model independence unverified), so no consensus score is reported.";
+
 function generateClaimMemo(input: MemoInput): string {
   const lines: string[] = [];
   const claim = (input.claim ?? "").trim() || "—";
   const verdictHuman = formatVerdictLabel(input.verdict ?? "");
   const rows = input.modelEvidence ?? [];
-  const n = rows.length > 0 ? rows.length : 0;
-  const modelNamesList = rows
+  const exec = claimExecutionCounts(input);
+  // C-b (CB-11): with the gate's counts the memo states independent executing models over the answering slots only.
+  const n = exec ? exec.independentModels : rows.length > 0 ? rows.length : 0;
+  const slotsOverModels = exec !== null && exec.answeredSlots > exec.independentModels;
+  const modelNamesList = (exec ? rows.filter((m) => m.status === "ok") : rows)
     .map((m) => modelDisplayName(m.modelId, m.modelName))
     .filter((x, i, a) => a.indexOf(x) === i);
 
@@ -326,7 +365,9 @@ function generateClaimMemo(input: MemoInput): string {
       ? CLAIM_MEMO_SINGLE_MODEL_SUMMARY
       : coverage === "unverified"
         ? CLAIM_MEMO_UNVERIFIED_SUMMARY
-        : `${Math.max(1, n)} AI models evaluated this claim independently. ${claimSummarySentence(input.verdict)}`
+        : slotsOverModels
+          ? `${exec!.answeredSlots} panel slots answered this claim; ${exec!.independentModels} independent executing models wrote those answers. ${claimSummarySentence(input.verdict)}`
+          : `${Math.max(1, n)} AI models evaluated this claim independently. ${claimSummarySentence(input.verdict)}`
   );
   lines.push("");
 
@@ -396,7 +437,9 @@ function generateClaimMemo(input: MemoInput): string {
       ? coverage === "insufficient"
         ? CLAIM_MEMO_SINGLE_MODEL_METHODOLOGY
         : CLAIM_MEMO_UNVERIFIED_METHODOLOGY
-      : `This claim was independently evaluated by ${nn} large language model${nn === 1 ? "" : "s"}${namesPhrase} via ConvergePanel. Each model received the claim with identical instructions to evaluate accuracy, identify correct and incorrect parts, and provide evidence. Models were not shown each other's responses. The consensus score reflects the degree of agreement across models weighted by evidence quality.`
+      : slotsOverModels
+        ? `This claim was sent to ${exec!.answeredSlots} answering panel slots${namesPhrase} via ConvergePanel, written by ${exec!.independentModels} independent executing models (a model that answered several slots counts once). Each slot received the claim with identical instructions to evaluate accuracy, identify correct and incorrect parts, and provide evidence. The consensus score was computed over answering slots, so it is not a count of independent models.`
+        : `This claim was independently evaluated by ${nn} large language model${nn === 1 ? "" : "s"}${namesPhrase} via ConvergePanel. Each model received the claim with identical instructions to evaluate accuracy, identify correct and incorrect parts, and provide evidence. Models were not shown each other's responses. The consensus score reflects the degree of agreement across models weighted by evidence quality.`
   );
   lines.push("");
   lines.push("DISCLAIMER");
@@ -439,17 +482,27 @@ function generateVideoMemo(input: MemoInput): string {
   lines.push(`Camera / device: ${meta.cameraModel?.trim() || "Not identified"}`);
   lines.push(`Has audio: ${meta.hasAudio === true ? "Yes" : meta.hasAudio === false ? "No" : "—"}`);
   lines.push("");
-  lines.push(`VERDICT: ${verdictHuman}`);
+  // C-b (CB-12, PQ-2 strict): the video rows record no provider, so independence is unverified — no consensus score,
+  // no cross-model evidence quality, no "independently" count; the stored points are kept under qualified headings.
+  const videoQualified = input.videoModelIndependence !== undefined && input.videoModelIndependence !== "independent";
+  lines.push(videoQualified ? `VERDICT: ${verdictHuman} (${VIDEO_MEMO_UNVERIFIED_VERDICT_NOTE})` : `VERDICT: ${verdictHuman}`);
   const ct = (input.contentType ?? "").trim().toLowerCase().replace(/\s+/g, "_");
   if (ct && ct !== "unknown") {
     lines.push(`CONTENT TYPE: ${videoContentTypeMemoLabels[ct] ?? input.contentType}`);
   }
-  lines.push(`CONSENSUS SCORE: ${input.consensusScore}/100 (${input.confidenceLabel} confidence)`);
-  lines.push(`EVIDENCE QUALITY: ${input.evidenceQuality}`);
+  if (videoQualified) {
+    lines.push(VIDEO_MEMO_WITHHELD_CONSENSUS_LINE);
+    lines.push(`EVIDENCE QUALITY: ${VIDEO_MEMO_UNVERIFIED_EVIDENCE}`);
+  } else {
+    lines.push(`CONSENSUS SCORE: ${input.consensusScore}/100 (${input.confidenceLabel} confidence)`);
+    lines.push(`EVIDENCE QUALITY: ${input.evidenceQuality}`);
+  }
   lines.push("");
   lines.push("SUMMARY");
   lines.push(
-    `${n} vision-capable AI models independently analyzed ${frames || "multiple"} frames extracted at regular intervals. ${videoSummarySentence(input.verdict)}`
+    videoQualified
+      ? `${VIDEO_MEMO_UNVERIFIED_SUMMARY_LEAD} ${models.length} panel slot${models.length === 1 ? "" : "s"} reviewed ${frames || "multiple"} frames extracted at regular intervals.`
+      : `${n} vision-capable AI models independently analyzed ${frames || "multiple"} frames extracted at regular intervals. ${videoSummarySentence(input.verdict)}`
   );
   lines.push("");
 
@@ -465,14 +518,14 @@ function generateVideoMemo(input: MemoInput): string {
 
   const agree = dedupeCap(input.agreementPoints ?? []);
   if (agree.length) {
-    lines.push("WHERE MODELS AGREE");
+    lines.push(videoQualified ? VIDEO_MEMO_NOT_INDEPENDENT_AGREE_HEADING : "WHERE MODELS AGREE");
     agree.forEach((p) => lines.push(`- ${p}`));
     lines.push("");
   }
 
   const disagree = dedupeCap(input.disagreementPoints ?? []);
   if (disagree.length) {
-    lines.push("WHERE MODELS DISAGREE");
+    lines.push(videoQualified ? VIDEO_MEMO_NOT_INDEPENDENT_DISAGREE_HEADING : "WHERE MODELS DISAGREE");
     disagree.forEach((p) => lines.push(`- ${p}`));
     lines.push("");
   }
@@ -519,7 +572,9 @@ function generateVideoMemo(input: MemoInput): string {
 
   lines.push("METHODOLOGY");
   lines.push(
-    `${frames || "Multiple"} frames were extracted at regular intervals from the uploaded video and sent to ${n} vision-capable AI model${n === 1 ? "" : "s"}${namesPhrase} via ConvergePanel. Each model independently analyzed frames for signs of AI generation, deepfake artifacts, and manipulation indicators. Models were not shown each other's responses. Video metadata was extracted from the file container and included in the analysis.`
+    videoQualified
+      ? `${frames || "Multiple"} frames were extracted at regular intervals from the uploaded video and sent to ${models.length} panel slot${models.length === 1 ? "" : "s"}${namesPhrase} via ConvergePanel with identical instructions to look for signs of AI generation, deepfake artifacts, and manipulation indicators. Video metadata was extracted from the file container and included in the analysis. ${VIDEO_MEMO_UNVERIFIED_METHODOLOGY_TAIL}`
+      : `${frames || "Multiple"} frames were extracted at regular intervals from the uploaded video and sent to ${n} vision-capable AI model${n === 1 ? "" : "s"}${namesPhrase} via ConvergePanel. Each model independently analyzed frames for signs of AI generation, deepfake artifacts, and manipulation indicators. Models were not shown each other's responses. Video metadata was extracted from the file container and included in the analysis.`
   );
   lines.push("");
   lines.push("DISCLAIMER");

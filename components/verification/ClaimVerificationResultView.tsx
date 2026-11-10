@@ -34,13 +34,19 @@ import type {
 import { CLAIM_VERDICT_CLIPBOARD_DISCLAIMER } from "@/lib/legal/clipboardDisclaimers";
 import {
   claimConsensusDisplay,
-  claimModelIndependence,
   claimVerdictQualifier,
   CLAIM_NOT_INDEPENDENT_AGREE_HEADING,
   CLAIM_NOT_INDEPENDENT_DISAGREE_HEADING,
   CLAIM_SINGLE_MODEL_BANNER_SUBTITLE,
   CLAIM_UNVERIFIED_BANNER_SUBTITLE,
 } from "@/lib/verification/claimConsensusPresentation";
+import { claimPresentedIndependence, claimRowsExecutionIdentity } from "@/lib/panel/storedVerificationIndependence";
+import {
+  independentModelsAmong,
+  rendersAsIndependent,
+  runSlotStatement,
+  type RunExecutionIdentity,
+} from "@/lib/panel/executionIdentity";
 
 function verdictBadgeClass(verdict: string): string {
   const v = verdict.toLowerCase();
@@ -145,12 +151,50 @@ function perModelAuditVerdictClass(verdictOrStatus: string): string {
   return "text-cp-muted";
 }
 
-/** When automatic phrase extraction finds nothing, explain counts from model verdicts. */
+/**
+ * The independence a claim view presents (C-b CB-06..CB-09): the server's `modelIndependence`, confirmed by the shared
+ * gate over the payload's rows (`claimPresentedIndependence`), and the gate's identity of those rows.
+ */
+export function claimViewIndependence(data: Pick<ClaimVerificationClientPayload, "modelIndependence" | "modelEvidence">): {
+  independence: ReturnType<typeof claimPresentedIndependence>;
+  identity: RunExecutionIdentity;
+} {
+  return {
+    independence: claimPresentedIndependence(data.modelIndependence, data.modelEvidence),
+    identity: claimRowsExecutionIdentity(data.modelEvidence),
+  };
+}
+
+/** True when the view's counts of rows are counts of independent executing models (verified, every answering slot its own model). */
+function slotCountsAreModelCounts(view: ReturnType<typeof claimViewIndependence>): boolean {
+  return view.independence === "independent" && view.identity.verified && rendersAsIndependent(view.identity);
+}
+
+/** C-b CB-07: what the slot counts of a qualified claim are (stated once, after the counts). */
+export function claimSlotCountsNote(view: ReturnType<typeof claimViewIndependence>): string {
+  // Never more than the presented independence states: an "unverified" claim states no K, whatever its rows hold.
+  const statement =
+    view.independence === "unverified"
+      ? "model independence unverified"
+      : view.identity.verified
+        ? runSlotStatement(view.identity)
+        : "fewer than two independent models answered";
+  return `These counts are of panel slots (${statement}), not of agreeing models.`;
+}
+
+/**
+ * When automatic phrase extraction finds nothing, explain counts from the stored verdicts. The counts are of models
+ * only when every answering slot is its own verified executing model (C-b CB-07); otherwise they are stated as panel
+ * slots, with what the shared gate establishes about them. Slots with no usable verdict are never counted as rating it.
+ */
 function agreementSectionFallbackCopy(data: ClaimVerificationClientPayload): string {
   const rows = data.modelEvidence;
   if (rows.length === 0) {
     return "No strong cross-model agreement phrases detected automatically.";
   }
+  const view = claimViewIndependence(data);
+  const asModels = slotCountsAreModelCounts(view);
+  const unit = (n: number) => (asModels ? `model${n === 1 ? "" : "s"}` : `panel slot${n === 1 ? "" : "s"}`);
 
   const notVerified = rows.filter(
     (m) =>
@@ -167,7 +211,7 @@ function agreementSectionFallbackCopy(data: ClaimVerificationClientPayload): str
 
   if (notVerified.length > 0) {
     sentences.push(
-      `${notVerified.length} of ${total} model${total === 1 ? "" : "s"} could not verify this claim.`
+      `${notVerified.length} of ${total} ${unit(total)} could not verify this claim.`
     );
   }
 
@@ -185,9 +229,9 @@ function agreementSectionFallbackCopy(data: ClaimVerificationClientPayload): str
           ? `${names[0]} and ${names[1]}`
           : `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
     if (models.length === 1) {
-      sentences.push(`1 model (${namePhrase}) rated it as ${singularLabel}.`);
+      sentences.push(`1 ${unit(1)} (${namePhrase}) rated it as ${singularLabel}.`);
     } else {
-      sentences.push(`${models.length} models (${namePhrase}) rated it as ${pluralLabel}.`);
+      sentences.push(`${models.length} ${unit(models.length)} (${namePhrase}) rated it as ${pluralLabel}.`);
     }
   };
 
@@ -198,6 +242,7 @@ function agreementSectionFallbackCopy(data: ClaimVerificationClientPayload): str
   if (sentences.length === 0) {
     return "No strong cross-model agreement phrases detected automatically.";
   }
+  if (!asModels) sentences.push(claimSlotCountsNote(view));
   return sentences.join(" ");
 }
 
@@ -207,9 +252,11 @@ export function buildClaimVerdictClipboardText(data: ClaimVerificationClientPayl
   lines.push(`ConvergePanel — Claim result`);
   lines.push(`Claim: ${data.claim}`);
   lines.push(`Aggregate verdict: ${data.verdict}`);
-  // A multi-model consensus score only with >= 2 independent executing models (claimConsensusPresentation).
-  const consensus = claimConsensusDisplay(data.consensusScore, data.modelIndependence);
-  const qualifier = claimVerdictQualifier(data.modelIndependence);
+  // A multi-model consensus score only with >= 2 independent executing models (claimConsensusPresentation), confirmed
+  // by the shared gate over the payload's rows (C-b CB-08).
+  const { independence } = claimViewIndependence(data);
+  const consensus = claimConsensusDisplay(data.consensusScore, independence);
+  const qualifier = claimVerdictQualifier(independence);
   if (consensus.kind === "score") {
     lines.push(`Consensus score: ${consensus.score} (${data.confidenceLabel} confidence)`);
   } else {
@@ -246,7 +293,8 @@ export function ClaimVerificationAuditTrailDetails({ data }: { data: ClaimVerifi
   const evidenceQ = data.evidenceQuality ?? bundle.evidenceQuality;
   // The stored bundle is shown as recorded, except that its cross-model figures (consensus, and the confidence and
   // evidence quality derived with it) are not presented as a consensus below two independent models.
-  const consensus = claimConsensusDisplay(bundle.consensusScore, data.modelIndependence);
+  const view = claimViewIndependence(data);
+  const consensus = claimConsensusDisplay(bundle.consensusScore, view.independence);
   return (
     <>
       <h3 className="text-sm font-semibold text-cp-text tracking-tight">Audit trail</h3>
@@ -284,7 +332,9 @@ export function ClaimVerificationAuditTrailDetails({ data }: { data: ClaimVerifi
       </dl>
 
       <p className="mt-5 text-xs font-semibold uppercase tracking-wide text-cp-faint">
-        Models ({bundle.perModel.length})
+        {/* C-b CB-09: the stored bundle's rows are panel slots; they are model counts only for a verified run in which
+            every answering slot is its own executing model. The bundle itself is shown as recorded. */}
+        {slotCountsAreModelCounts(view) ? "Models" : "Panel slots"} ({bundle.perModel.length})
       </p>
       <ul className="mt-2 space-y-1.5 text-sm">
         {bundle.perModel.map((row) => {
@@ -337,8 +387,10 @@ export default function ClaimVerificationResultView({
 }: ClaimVerificationResultViewProps) {
   const [openModels, setOpenModels] = useState<Record<string, boolean>>({});
 
-  const independence = claimModelIndependence(data.modelIndependence);
-  const consensus = claimConsensusDisplay(data.consensusScore, data.modelIndependence);
+  // C-b CB-06: the server's independence confirmed by the shared gate over the rows; counts come from the gate.
+  const view = useMemo(() => claimViewIndependence(data), [data]);
+  const independence = view.independence;
+  const consensus = claimConsensusDisplay(data.consensusScore, independence);
 
   const banner = useMemo((): {
     className: string;
@@ -346,9 +398,6 @@ export default function ClaimVerificationResultView({
     title: string;
     subtitle: string;
   } => {
-    const u = data.usableModelCount ?? data.modelEvidence.filter((m) => m.status === "ok").length;
-    const a = data.accurateAmongUsable ?? data.modelEvidence.filter((m) => m.status === "ok" && m.verdict === "accurate").length;
-
     const v: ClaimVerdictUi =
       data.verdict === "confirmed" ||
       data.verdict === "disputed" ||
@@ -371,6 +420,13 @@ export default function ClaimVerificationResultView({
         subtitle: independence === "insufficient" ? CLAIM_SINGLE_MODEL_BANNER_SUBTITLE : CLAIM_UNVERIFIED_BANNER_SUBTITLE,
       };
     }
+    // Independent executing models (the shared gate's K) and how many of them rated it accurate — never slot counts:
+    // a failed slot is not an answer and a substitute model that answered several slots counts once.
+    const u = view.identity.independentModels ?? 0;
+    const a = independentModelsAmong(
+      view.identity,
+      data.modelEvidence.filter((m) => m.status === "ok" && m.verdict === "accurate").map((m) => m.modelId)
+    );
     switch (v) {
       case "confirmed":
         return {
@@ -402,7 +458,7 @@ export default function ClaimVerificationResultView({
           subtitle: "Insufficient agreement or too many unknowns",
         };
     }
-  }, [data, independence]);
+  }, [data, independence, view]);
 
   return (
     <div className="rounded-2xl border border-cp-border bg-cp-surface text-cp-text shadow-sm overflow-hidden">

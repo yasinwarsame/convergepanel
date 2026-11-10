@@ -2752,10 +2752,10 @@
  },
  {
   "file": "lib/adaptiveSchema/verdictIndependence.ts",
-  "literal": "`panel slots that returned no successful model response are recorded as ${verb === \"support\" ? \"supporting\" : \"disputing\"} it (model independence unverified; no count stated)`",
+  "literal": "`panel slots are recorded as ${verb === \"support\" ? \"supporting\" : \"disputing\"} it, some of which returned no successful model response (model independence unverified; no count stated)`",
   "count": 1,
   "category": "contract-p-applied",
-  "rule": "Order 30 A2 (review m-3): a stored row side whose positioned slots include a slot recorded as a failed call — no support / dispute count is stated, model independence unverified; stored values unchanged; rows whose positioned slots all answered render as before"
+  "rule": "Order 30 A2 (review m-3): a stored row side whose positioned slots include a slot recorded as a failed call — no support / dispute count is stated, model independence unverified; stored values unchanged; rows whose positioned slots all answered render as before; C-b (C-a review note): the side always mixes failed slots with at least one slot that recorded no failure (an all-failed side states \"no successful model response … it\"), so the clause never attributes the failure to every slot on the side"
  },
  {
   "file": "lib/adaptiveSchema/verdictIndependence.ts",
@@ -2791,5 +2791,47 @@
   "count": 1,
   "category": "contract-p-applied",
   "rule": "Order 31 PROPOSAL (R-2): SLOT_AGREEMENT_NOTE — the PDF / DOCX status-summary note under a Milestone-2 level labelled by panel slot (a Milestone-2 report has no verification gate); never presented as agreement between independent models"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"Which models executed this review could not be established from the stored record, so nothing in this memo is presented as agreement between independent models.\"",
+  "count": 1,
+  "category": "shared-claim-video",
+  "rule": "video memo, only when MemoInput.videoModelIndependence is not \"independent\" (C-b CB-12, PQ-2 (a) strict: video rows record no provider, so the shared gate never verifies them — every recorded video memo takes this path): states that NO consensus score / agreement between independent models is presented; the stored agreement / disagreement points are listed as recorded under these qualified headings; memos without videoModelIndependence render as before"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"POINTS REPEATED ACROSS RESPONSES (NOT AGREEMENT BETWEEN INDEPENDENT MODELS)\"",
+  "count": 1,
+  "category": "shared-claim-video",
+  "rule": "video memo, only when MemoInput.videoModelIndependence is not \"independent\" (C-b CB-12, PQ-2 (a) strict: video rows record no provider, so the shared gate never verifies them — every recorded video memo takes this path): states that NO consensus score / agreement between independent models is presented; the stored agreement / disagreement points are listed as recorded under these qualified headings; memos without videoModelIndependence render as before"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"POINTS THAT DIFFER ACROSS RESPONSES (NOT A DISAGREEMENT BETWEEN INDEPENDENT MODELS)\"",
+  "count": 1,
+  "category": "shared-claim-video",
+  "rule": "video memo, only when MemoInput.videoModelIndependence is not \"independent\" (C-b CB-12, PQ-2 (a) strict: video rows record no provider, so the shared gate never verifies them — every recorded video memo takes this path): states that NO consensus score / agreement between independent models is presented; the stored agreement / disagreement points are listed as recorded under these qualified headings; memos without videoModelIndependence render as before"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"Which models actually executed could not be established from the stored record (model independence unverified), so no consensus score is reported.\"",
+  "count": 1,
+  "category": "shared-claim-video",
+  "rule": "video memo, only when MemoInput.videoModelIndependence is not \"independent\" (C-b CB-12, PQ-2 (a) strict: video rows record no provider, so the shared gate never verifies them — every recorded video memo takes this path): states that NO consensus score / agreement between independent models is presented; the stored agreement / disagreement points are listed as recorded under these qualified headings; memos without videoModelIndependence render as before"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "`${frames || \"Multiple\"} frames were extracted at regular intervals from the uploaded video and sent to ${models.length} panel slot${models.length === 1 ? \"\" : \"s\"}${namesPhrase} via ConvergePanel with identical instructions to look for signs of AI generation, deepfake artifacts, and manipulation indicators. Video metadata was extracted from the file container and included in the analysis. ${VIDEO_MEMO_UNVERIFIED_METHODOLOGY_TAIL}`",
+  "count": 1,
+  "category": "shared-claim-video",
+  "rule": "video memo, only when MemoInput.videoModelIndependence is not \"independent\" (C-b CB-12, PQ-2 (a) strict: video rows record no provider, so the shared gate never verifies them — every recorded video memo takes this path): states that NO consensus score / agreement between independent models is presented; the stored agreement / disagreement points are listed as recorded under these qualified headings; memos without videoModelIndependence render as before"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "`This claim was sent to ${exec!.answeredSlots} answering panel slots${namesPhrase} via ConvergePanel, written by ${exec!.independentModels} independent executing models (a model that answered several slots counts once). Each slot received the claim with identical instructions to evaluate accuracy, identify correct and incorrect parts, and provide evidence. The consensus score was computed over answering slots, so it is not a count of independent models.`",
+  "count": 1,
+  "category": "shared-claim-video",
+  "rule": "claim memo, only when MemoInput.claimModelIndependence is \"independent\" AND MemoInput.claimExecution states more answering slots than independent executing models (C-b CB-11: the shared gate's K over M, PC): states the counts as answering slots and independent executing models, never as K agreeing models; memos without claimExecution, and K = M, render as before"
  }
 ]
