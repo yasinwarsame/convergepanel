@@ -36,8 +36,11 @@ import {
   attachRunIndependence,
   presentIndependenceQualifiedReport,
   COUNTED_BY_PANEL_SLOT,
+  NO_RESPONSES_RUN,
   NO_SUCCESSFUL_MODEL_RESPONSES,
   placeholderSlotsClause,
+  reportStatesAgreement,
+  storedSynthesisRunIndependence,
   QUALIFIED_TOP_NEXT_STEP,
   qualifiedRowHeading,
   qualifiedRowText,
@@ -864,6 +867,9 @@ export function presentPositionSafeReport<R extends AdaptiveSynthesisReport | nu
   // An unmarked report renders as before, except that an agreement statement whose supporting slots are not independent
   // executing models is stated by its executing models (verdictIndependence.ts; the same object when nothing needs it).
   if (!isPositionMarked(report)) return presentIndependenceQualifiedReport(report, input);
+  // Order 30 round 2 (review m-A): a marked report is a stored synthesis — every slot a recorded failed call means no
+  // successful model response on every surface, not only in the exports (storedSynthesisRunIndependence).
+  if (input.noSuccessfulResponses !== true && storedSynthesisRunIndependence(input.provenance) === NO_RESPONSES_RUN) input = { ...input, noSuccessfulResponses: true };
   const rows = Array.isArray(input.rows) ? input.rows : null;
   const roster = [...input.roster];
   const src = report as AdaptiveSynthesisReport;
@@ -919,7 +925,9 @@ export function presentPositionSafeReport<R extends AdaptiveSynthesisReport | nu
 
   const { verdictCard, panelVerdict, verdict } = presentVerdict(src, rows, input);
 
-  const panelAgreement = rows ? renderPositionPanelStatement(panelCounts(rows, roster)) : "Position details are unavailable: the scored rows are not available to this view.";
+  // Order 30 round 2 (review m-A): with no successful model response the panel-level counts are not stated.
+  const panelAgreement =
+    input.noSuccessfulResponses === true ? NO_SUCCESSFUL_MODEL_RESPONSES : rows ? renderPositionPanelStatement(panelCounts(rows, roster)) : "Position details are unavailable: the scored rows are not available to this view.";
   const presentation = {
     ...p,
     panelAgreement,
@@ -963,7 +971,7 @@ export function presentPositionSafeReport<R extends AdaptiveSynthesisReport | nu
   Object.defineProperty(out, POSITION_VIEW, { value: view, enumerable: false });
   // The run as a whole (verdictIndependence.ts): a run with fewer than two independent executing models is never
   // introduced as a multi-model panel (LinkedIn / X). Rows are qualified by rowView; nothing else reads this here.
-  attachRunIndependence(out, input.provenance);
+  attachRunIndependence(out, input.provenance, reportStatesAgreement(src));
   return out as R;
 }
 

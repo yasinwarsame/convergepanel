@@ -27,6 +27,17 @@ import {
   answerIndependenceNote,
   slotAgreementLabel,
   NO_RESPONSES_RUN,
+  TOO_FEW_ANSWERS_RUN,
+  TOO_FEW_ANSWERS_STATEMENT,
+  FAILED_SLOTS_ROW_LABEL,
+  FAILED_SLOTS_COUNT_NOTE,
+  NO_SUCCESS_RUN_CLAUSE,
+  reportStatesAgreement,
+  shownRunIndependence,
+  storedSynthesisRunIndependence,
+  sharePanelPhrase,
+  uniformityBadge,
+  qualifiedPanelVerdict,
   independenceQualification,
   presentIndependenceQualifiedReport,
 } from "@/lib/adaptiveSchema/verdictIndependence";
@@ -95,7 +106,11 @@ describe("Order 30 A2: a stored claim naming failed slots among its supporters",
     expect(ri.t).toEqual({ kind: "unverified", scope: "supporters", basis: "failed_supporters" });
     expect(ri.dispute).toEqual({ kind: "unverified", scope: "supporters", basis: "no_responses" });
     expect(qualifiedRowText(row, ri)).toBe("recorded as split: 1 panel slot supports it (ChatGPT); no successful model response disputes it");
-    expect(slotAgreementLabel(1, 2, 0, 3, ri)).toBe("1 of 3 panel slots agree · 2 dispute · model independence unverified; includes panel slots with no successful model response");
+    // Order 30 round 2 (review m-A / A2): such a row states no count at all (was "1 of 3 panel slots agree · 2 dispute · …").
+    expect(slotAgreementLabel(1, 2, 0, 3, ri)).toBe(FAILED_SLOTS_ROW_LABEL);
+    expect(slotAgreementLabel(0, 2, 0, 2, rowIndependence({ ...row, cells: [row.cells[1], row.cells[2]] }, p)!)).toBe(NO_SUCCESSFUL_MODEL_RESPONSES);
+    // control: a row whose positioned slots all answered keeps its counts
+    expect(slotAgreementLabel(1, 0, 0, 3, null)).toBe("1 of 3 panel slots agree");
     const view = rowView(row, ["chatgpt", "claude", "grok"], p);
     expect(view.disputers).toEqual([]);
     expect(view.text).toContain("Model independence unverified: panel slots that returned no successful model response are recorded as taking a position here.");
@@ -128,9 +143,59 @@ describe("Order 30 A2 on the UI presentation (presentPositionSafeReport over res
     const rec = CONS();
     expect(ui(rec, FIVE.map(ok))).toBe(rec.synthesisReport);
   });
-  it("the UI run scope of an all-failed run with no stored claim joined is unchanged (option (b)): no qualification", () => {
+  // Order 30 round 2 (review m-A; coordinator ruling: UI BEHAVIOUR on a stored synthesis follows the standing default —
+  // supersedes the Order 29 option (b) acceptance for the stored-synthesis case only). Was: the same object, unqualified.
+  it("a stored synthesis over an all-failed run with no stored claim joined: every statement and count is the constant (m-A)", () => {
     const rec = { ...CONS(), alignedClaims: [] };
-    expect(ui(rec, FIVE.map((m) => failed(m)))).toBe(rec.synthesisReport);
+    const out = ui(rec, FIVE.map((m) => failed(m))) as any;
+    expect(out).not.toBe(rec.synthesisReport);
+    expect(independenceQualification(out)!.run).toBe(NO_RESPONSES_RUN);
+    expect(JSON.stringify(out)).not.toMatch(CLAIMS);
+    expect(out.presentation.panelAgreement).toBe(NO_SUCCESSFUL_MODEL_RESPONSES);
+    expect(out.certaintyAssessment).toBe(NO_SUCCESSFUL_MODEL_RESPONSES);
+    expect(out.panelVerdict).toBe(NO_SUCCESSFUL_MODEL_RESPONSES);
+    expect(out.verdictCard.topConsensusAgreement).toBe(NO_SUCCESSFUL_MODEL_RESPONSES);
+    expect(out.presentation.answer.claims.map((c: any) => [c.result, c.supporters])).toEqual(out.presentation.answer.claims.map(() => [NO_SUCCESSFUL_MODEL_RESPONSES, NO_RESPONSES_NAMES]));
+  });
+  it("controls: the run rule without a stored synthesis is unchanged (the real all-failed record has none — Order 29 option (b))", () => {
+    const p = facts(FIVE.map((m) => failed(m)));
+    expect(runIndependence(p)).toBeNull();
+    expect(shownRunIndependence(undefined, p)).toBeNull();
+    expect(shownRunIndependence(null, p)).toBeNull();
+    expect(shownRunIndependence({}, p)).toBe(NO_RESPONSES_RUN);
+    expect(storedSynthesisRunIndependence(p)).toBe(NO_RESPONSES_RUN);
+    expect(storedSynthesisRunIndependence([])).toBeNull();
+    expect(storedSynthesisRunIndependence(null)).toBeNull();
+  });
+  it("m-B: one genuine answer + 4 failed slots, a stored consensus with NO joined rows → no 'all 5 … support it', no supporters list as models", () => {
+    const rec = { ...CONS(), alignedClaims: [] };
+    const out = ui(rec, [ok("chatgpt"), ...["claude", "grok", "perplexity", "gemini"].map((m) => failed(m))]) as any;
+    expect(independenceQualification(out)!.run).toBe(TOO_FEW_ANSWERS_RUN);
+    expect(JSON.stringify(out)).not.toMatch(CLAIMS);
+    expect(out.presentation.answer.claims.map((c: any) => c.result)).toEqual(out.presentation.answer.claims.map(() => TOO_FEW_ANSWERS_STATEMENT));
+    expect(out.presentation.answer.claims.every((c: any) => c.supporters.endsWith("(panel slots; includes slots with no successful model response)"))).toBe(true);
+    expect(out.presentation.panelAgreement).toBe(TOO_FEW_ANSWERS_STATEMENT);
+    expect(out.panelVerdict).toBe(TOO_FEW_ANSWERS_STATEMENT);
+  });
+  it("m-B rule boundaries: two answering models, no failures, or no stated agreement → not TOO_FEW_ANSWERS_RUN", () => {
+    const one = facts([ok("chatgpt"), ...["claude", "grok"].map((m) => failed(m))]);
+    expect(storedSynthesisRunIndependence(one, true)).toBe(TOO_FEW_ANSWERS_RUN);
+    expect(storedSynthesisRunIndependence(one, false)).toBeNull();
+    expect(storedSynthesisRunIndependence(facts([ok("chatgpt"), ok("claude"), failed("grok")]), true)).toBeNull();
+    expect(storedSynthesisRunIndependence(facts([ok("chatgpt")]), true)).toBeNull();
+    expect(storedSynthesisRunIndependence([...facts([ok("chatgpt")]), { modelId: "claude", status: "ok", provider: "anthropic", invalidProviderOutput: true }, ...facts([failed("grok")])], true)).toMatchObject({ kind: "placeholder" });
+  });
+  it("reportStatesAgreement reads only stored agreement statements", () => {
+    expect(reportStatesAgreement(CONS().synthesisReport)).toBe(true);
+    expect(reportStatesAgreement(records["factual-single"].synthesisReport)).toBe(false);
+    expect(reportStatesAgreement({ verdictCard: { topConsensus: "No consensus identified." } })).toBe(false);
+    expect(reportStatesAgreement({ verdictCard: { topConsensus: "x" } })).toBe(true);
+    expect(reportStatesAgreement({ presentation: { agree: [{ claim: "a" }] } })).toBe(true);
+    expect(reportStatesAgreement({ presentation: { answer: { claims: [{ claim: "a" }] } } })).toBe(true);
+    expect(reportStatesAgreement({ gate: "fail", presentation: { answer: { claims: [{ claim: "a" }] } } })).toBe(false);
+    expect(reportStatesAgreement({ whereModelsAgree: ["a"] })).toBe(true);
+    expect(reportStatesAgreement({ whereModelsAgree: [] })).toBe(false);
+    expect(reportStatesAgreement(null)).toBe(false);
   });
 });
 
@@ -149,5 +214,47 @@ describe("Order 30 A1: the export-only no-successful-responses override of the q
     const plain = presentIndependenceQualifiedReport(report, { rows, provenance: [] }) as any;
     expect(independenceQualification(plain)?.legacyAgree.get(line)).not.toBe(NO_SUCCESSFUL_MODEL_RESPONSES);
     expect(plain.verdictCard.topConsensusAgreement).not.toBe(NO_SUCCESSFUL_MODEL_RESPONSES);
+  });
+});
+
+describe("Order 30 round 2 (review m-D): the three reviewer survivors V17, V19, V21 are pinned", () => {
+  const cell = (modelId: string, stance: string) => ({ modelId, stance, rawStance: stance === "agrees" ? "asserts" : "disputes", confidence: "majority_view", origin: { kind: "claim", field: "keyClaims", fieldClass: "unclassified" }, excerpt: "x", evidenceType: "empirical" });
+  it("V17: a split row whose DISPUTING side includes one failed slot states no dispute count", () => {
+    const row = { id: "s", claimText: "s", status: "split", cells: [cell("chatgpt", "agrees"), cell("claude", "disputes"), cell("grok", "disputes")] };
+    const p = facts([ok("chatgpt"), ok("claude"), failed("grok")]);
+    const ri = rowIndependence(row, p)!;
+    expect(ri.dispute).toEqual({ kind: "unverified", scope: "supporters", basis: "failed_supporters" });
+    const text = qualifiedRowText(row, ri);
+    expect(text).toBe("recorded as split: 1 panel slot supports it (ChatGPT); panel slots that returned no successful model response are recorded as disputing it (model independence unverified; no count stated)");
+    expect(/\d+ panel slots? disputes? it/.test(text)).toBe(false);
+  });
+  it("V19: the stored panel verdict is replaced by the constant / the too-few statement, never prefixed with the claim", () => {
+    const stored = "5/5 models converge on “X”; certainty 100%; gate: pass.";
+    expect(qualifiedPanelVerdict(stored, NO_SUCCESSFUL_MODEL_RESPONSES, true, NO_RESPONSES_RUN)).toBe(NO_SUCCESSFUL_MODEL_RESPONSES);
+    expect(qualifiedPanelVerdict(stored, NO_SUCCESSFUL_MODEL_RESPONSES, false, NO_RESPONSES_RUN)).toBe(NO_SUCCESSFUL_MODEL_RESPONSES);
+    expect(qualifiedPanelVerdict(stored, TOO_FEW_ANSWERS_STATEMENT, false, TOO_FEW_ANSWERS_RUN)).toBe(TOO_FEW_ANSWERS_STATEMENT);
+    // control: any other result keeps the stored certainty
+    expect(qualifiedPanelVerdict(stored, "r", true, null)).toBe("Top finding “X” — r; certainty 100%; gate: pass.");
+  });
+  it("V21: a joined claim whose supporters include failed slots names them as panel slots including non-responses (UI presentation)", () => {
+    const rec = clone(records["generic-consensus"]);
+    const out = presentPositionSafeReport(rec.synthesisReport, { rows: rec.alignedClaims, roster: FIVE, provenance: facts([ok("chatgpt"), ok("claude"), ok("grok"), ok("perplexity"), failed("gemini")]) }) as any;
+    for (const c of out.presentation.answer.claims) {
+      expect(c.supporters).toBe("ChatGPT, Claude, Grok, Perplexity, Gemini (panel slots; includes slots with no successful model response)");
+      expect(c.result).toContain(FAILED_SUPPORTERS_CLAUSE);
+    }
+    // A2 on the UI run level: the summary bar / banner are gated by the qualification's run (as the exports are)
+    expect(independenceQualification(out)!.run).toEqual({ kind: "unverified", scope: "run", basis: "failed_supporters" });
+    expect(out.presentation.panelAgreement).toBe(`Of 2 scored claims across 5 dispatched models: consensus on 2. ${FAILED_SLOTS_COUNT_NOTE}`);
+  });
+  it("run-level wording for a failed-call basis (summary badge, share phrase)", () => {
+    expect(uniformityBadge(NO_RESPONSES_RUN)).toEqual({ label: "Unusually uniform responses (model independence unverified)", title: NO_SUCCESS_RUN_CLAUSE });
+    expect(uniformityBadge({ kind: "unverified", scope: "run" }).title).not.toBe(NO_SUCCESS_RUN_CLAUSE);
+    expect(sharePanelPhrase(TOO_FEW_ANSWERS_RUN)).toBe("an AI panel (model independence unverified: panel slots of this run returned no successful model response)");
+    expect(sharePanelPhrase({ kind: "unverified", scope: "run" })).toBe("an AI panel (model independence unverified: which models answered is not recorded)");
+    for (const f of [runScopeQualifier, legacyRunScopeQualifier, runIndependenceNote, answerIndependenceNote]) expect(f(TOO_FEW_ANSWERS_RUN)).toBe(TOO_FEW_ANSWERS_STATEMENT);
+    expect(runIndependenceNote({ kind: "unverified", scope: "run", basis: "failed_supporters" })).toBe(FAILED_SLOTS_COUNT_NOTE);
+    expect(answerIndependenceNote({ kind: "unverified", scope: "run", basis: "failed_supporters" })).toBe(FAILED_SLOTS_COUNT_NOTE);
+    expect(TOO_FEW_ANSWERS_STATEMENT).toBe("Not an agreement between models: fewer than two independent models returned a successful response in this run. Model independence unverified.");
   });
 });

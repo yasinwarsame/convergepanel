@@ -14,7 +14,7 @@ import type { AdaptiveSynthesisReport } from "./types";
 import { readFrozenRunExecutionProvenance } from "./exportRunProvenance";
 import { runModelProvenanceFromExport, type RunModelProvenanceFacts } from "@/lib/panel/runModelIdentity";
 import { PositionView, VERDICT_SECTION_HEADINGS, positionView, presentPositionSafeReport } from "./positionPresentation";
-import { FAILED_SUPPORTERS_RUN, NO_RESPONSES_RUN, independenceQualification, qualifiedTopHeading, rowIndependence, runIndependence, type QualifiedIndependence } from "./verdictIndependence";
+import { FAILED_SUPPORTERS_RUN, NO_RESPONSES_RUN, independenceQualification, qualifiedTopHeading, reportStatesAgreement, rowIndependence, storedSynthesisRunIndependence, type QualifiedIndependence } from "./verdictIndependence";
 import { identityRowFromFacts, identityRowRecordedFailure } from "@/lib/panel/executionIdentity";
 
 /**
@@ -30,6 +30,13 @@ export interface ExportVerdictIndependence {
 
 export const EXPORT_VERDICT_SECTION_COUNTED_BY_EXECUTING_MODEL = "Where models agree / disagree (counted by executing model)";
 export const EXPORT_VERDICT_SECTION_INDEPENDENCE_UNVERIFIED = "Where models agree / disagree (model independence unverified)";
+
+/**
+ * The Decision Support schema id (dsLabelWording.DECISION_SUPPORT_SCHEMA_ID), stated here so this module does not import
+ * the S-E.2 wording module (the DS render-provenance graph pins the export renderers' imports). Pinned equal in
+ * exportOutcomeIndependence.spec.tsx.
+ */
+export const DECISION_SUPPORT_SCHEMA_ID = "decision_support";
 
 /** The composers' fixed top sub-label, kept when the top claim itself is supported by independent executing models. */
 const EXPORT_TOP_LABEL = "Agreement";
@@ -72,21 +79,31 @@ function exportSlotProvenance(record: AdaptiveResearchExportV1): RunModelProvena
  * Stored values, the synthesis admission rule and every calculation are untouched.
  */
 function exportHasNoSuccessfulResponses(provenance: readonly RunModelProvenanceFacts[]): boolean {
-  // Called only for an export that carries a stored synthesis (both callers return before it otherwise). An empty
+  // Called only for an export that carries a stored synthesis or Milestone-2 result (callers return before it otherwise). An empty
   // roster dispatched no model at all, so it has no successful response either (`every` over no slot is true).
   return provenance.every((f) => identityRowRecordedFailure(identityRowFromFacts(f)));
 }
 
 /**
  * The exported run's model independence (the report status summary's level): null when every slot is its own recorded
- * executing model; a pre-6.2b export (no frozen provenance) is unverified. Only a gate-scored legacy-family report has
- * such a level; any other export → null (its summary is unchanged).
+ * executing model; a pre-6.2b export (no frozen provenance) is unverified. A legacy-family report with a stored synthesis
+ * and (Order 30 round 2, review m-C) a Milestone-2 report — its stored schema result states the level — are judged from
+ * the same frozen provenance by the stored-synthesis run rule (storedSynthesisRunIndependence). Decision Support exports
+ * keep their own S-E.2 status summary (frozen DS semantics) and a legacy record without a stored synthesis (the real
+ * all-failed record) states no level: both → null (their summary is unchanged).
  */
 export function exportRunIndependence(record: AdaptiveResearchExportV1): QualifiedIndependence | null {
-  if (!record.reportSnapshot.legacy?.synthesisReport) return null;
+  const legacySynthesis = !!record.reportSnapshot.legacy?.synthesisReport;
+  // A Milestone-2 summary states agreement only as a consensus tier (strong / moderate / weak); "Not scored" / "Split"
+  // state none, so there is nothing to qualify and those exports render exactly as before.
+  const tier = record.reportSnapshot.consensusLevel;
+  const milestone2 =
+    !legacySynthesis && record.schemaFamily === "milestone2" && record.schemaId !== DECISION_SUPPORT_SCHEMA_ID && (tier === "strong" || tier === "moderate" || tier === "weak");
+  if (!legacySynthesis && !milestone2) return null;
   const provenance = exportSlotProvenance(record);
   if (exportHasNoSuccessfulResponses(provenance)) return NO_RESPONSES_RUN;
-  const run = runIndependence(provenance);
+  // A Milestone-2 result's level states agreement whenever it is a consensus tier; a legacy report as it states it.
+  const run = storedSynthesisRunIndependence(provenance, legacySynthesis ? reportStatesAgreement(record.reportSnapshot.legacy!.synthesisReport) : true);
   if (run) return run;
   // Order 30 A2: a stored row that names a slot recorded as a failed call among its positioned slots is an inconsistent
   // record — the summary level is then the gate, never a "Strong consensus" tier built on that row's stored count.

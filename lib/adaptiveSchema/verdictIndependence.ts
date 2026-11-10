@@ -48,7 +48,7 @@ export type AdaptiveTopIndependence =
   /** F-2: `placeholders` are the excluded stored-placeholder slot ids; `voices` the remaining slots' executing models (each once). */
   | { kind: "placeholder"; scope: "supporters" | "run"; voices: string[]; placeholders: string[] };
 
-export type UnverifiedBasis = "no_responses" | "failed_supporters";
+export type UnverifiedBasis = "no_responses" | "failed_supporters" | "too_few_answers";
 
 const INDEPENDENT: AdaptiveTopIndependence = Object.freeze({ kind: "independent" as const });
 
@@ -64,6 +64,14 @@ const basisOf = (t: AdaptiveTopIndependence): UnverifiedBasis | undefined => (t.
 /** The run-scope judgement of an export whose every slot recorded a failed call (exportPositionView.ts, Order 30 A1). */
 /** The summary-level judgement of an export holding a stored row that names failed slots among its positioned slots (Order 30 A2). */
 export const FAILED_SUPPORTERS_RUN: Extract<AdaptiveTopIndependence, { kind: "unverified" }> = Object.freeze({ kind: "unverified" as const, scope: "run" as const, basis: "failed_supporters" as const });
+/**
+ * Order 30 round 2 (review m-B): the run-scope judgement of a STORED SYNTHESIS over a run that records failed calls and
+ * in which fewer than two independent executing models answered — its stored agreement statements cannot be agreement
+ * between models, so an unjoined statement is never shown with its stored count.
+ */
+export const TOO_FEW_ANSWERS_RUN: Extract<AdaptiveTopIndependence, { kind: "unverified" }> = Object.freeze({ kind: "unverified" as const, scope: "run" as const, basis: "too_few_answers" as const });
+/** The statement shown in place of an unjoined stored agreement statement in such a run (vocabulary manifest). */
+export const TOO_FEW_ANSWERS_STATEMENT = "Not an agreement between models: fewer than two independent models returned a successful response in this run. Model independence unverified.";
 export const NO_RESPONSES_RUN: Extract<AdaptiveTopIndependence, { kind: "unverified" }> = Object.freeze({ kind: "unverified" as const, scope: "run" as const, basis: "no_responses" as const });
 
 /** Heading in place of "Top consensus" / "Top majority-supported claim" / "Models agree" (repeated substitute model). */
@@ -417,12 +425,53 @@ export function runIndependence(provenance: readonly RunModelProvenanceFacts[] |
 }
 
 /**
+ * Order 30 round 2 (review m-A / m-B, the standing attribution default on every surface): the run's slots as a whole
+ * when a STORED SYNTHESIS states agreement over them. The same as runIndependence, except that
+ *  - every slot the run records is a recorded failed call → NO_RESPONSES_RUN (no successful model response: no
+ *    agreement, consensus or support count is stated — the shared constant instead);
+ *  - the stored synthesis states agreement (`statesAgreement`, reportStatesAgreement), the run records failed calls and
+ *    fewer than two independent executing models answered → TOO_FEW_ANSWERS_RUN.
+ * The run-scope rule itself (runIndependence; Order 29 option (b)) is unchanged for a run WITHOUT a stored synthesis —
+ * the real all-failed record has none, so its rendering and the 2c17feee oracle do not move.
+ */
+export function storedSynthesisRunIndependence(provenance: readonly RunModelProvenanceFacts[] | null | undefined, statesAgreement = false): QualifiedIndependence | null {
+  if (!Array.isArray(provenance)) return null;
+  const failed = provenance.filter((f) => identityRowRecordedFailure(identityRowFromFacts(f)));
+  if (provenance.length > 0 && failed.length === provenance.length) return NO_RESPONSES_RUN;
+  const run = runIndependence(provenance);
+  if (run) return run;
+  // TOO_FEW_ANSWERS_RUN qualifies only a stored synthesis that states agreement (reportStatesAgreement): a stored
+  // single-source / no-consensus report over one answering model claims none, and renders as before.
+  if (failed.length === 0 || !statesAgreement) return null;
+  // Independent run (every answering slot its own verified executing model): its answering slots are its models.
+  const ids = provenance.map((f) => (f && typeof f.modelId === "string" ? f.modelId.trim() : ""));
+  return respondingSlots(ids, provenance).responding.length < 2 ? TOO_FEW_ANSWERS_RUN : null;
+}
+
+/**
+ * Whether a stored synthesis report states agreement: a named top consensus, a consensus / majority Unified Answer
+ * claim, a "Where models agree" entry, or a legacy "Where models agree" line. Read as stored, defensively.
+ */
+export function reportStatesAgreement(report: unknown): boolean {
+  if (!report || typeof report !== "object") return false;
+  const r = report as { verdictCard?: unknown; presentation?: unknown; whereModelsAgree?: unknown; gate?: unknown };
+  const card = r.verdictCard && typeof r.verdictCard === "object" ? (r.verdictCard as { topConsensus?: unknown }) : null;
+  if (card && typeof card.topConsensus === "string" && card.topConsensus && card.topConsensus !== NO_CONSENSUS_IDENTIFIED) return true;
+  const p = r.presentation && typeof r.presentation === "object" ? (r.presentation as { answer?: { claims?: unknown }; agree?: unknown }) : null;
+  if (p && Array.isArray(p.agree) && p.agree.length > 0) return true;
+  if (p && r.gate !== "fail" && p.answer && Array.isArray(p.answer.claims) && p.answer.claims.length > 0) return true;
+  return Array.isArray(r.whereModelsAgree) && r.whereModelsAgree.length > 0;
+}
+
+/**
  * The run's independence as a surface shows it: the qualified view's verdict when the surface holds that view (never
- * re-judged), else the run's own rows. Null — the surface renders as before — for an independent run or without rows.
+ * re-judged), else — when the surface holds a stored synthesis report — storedSynthesisRunIndependence, else the run's
+ * own rows. Null — the surface renders as before — for an independent run or without rows.
  */
 export function shownRunIndependence(report: unknown, provenance: readonly RunModelProvenanceFacts[] | null | undefined): QualifiedIndependence | null {
   const q = independenceQualification(report);
-  return q ? q.run : runIndependence(provenance);
+  if (q) return q.run;
+  return report && typeof report === "object" ? storedSynthesisRunIndependence(provenance, reportStatesAgreement(report)) : runIndependence(provenance);
 }
 
 // ─── Run-level wording shared by the summary bar, banner, lists, map and exports (c16) ───────────────────────────────
@@ -444,6 +493,9 @@ export const SLOT_AGREEMENT_WORD: Readonly<Record<"strong" | "moderate" | "weak"
 
 /** The diagnostics' homogeneity badge, in place of "Unusually uniform agreement", for a run whose slots are not independent. */
 export function uniformityBadge(run: QualifiedIndependence): { label: string; title: string } {
+  if (run.kind === "unverified" && run.basis !== undefined) {
+    return { label: "Unusually uniform responses (model independence unverified)", title: NO_SUCCESS_RUN_CLAUSE };
+  }
   if (run.kind === "unverified") {
     return { label: "Unusually uniform responses (model independence unverified)", title: "Which models answered this run's slots is not recorded, so uniform responses are not shown as agreement between independent models." };
   }
@@ -464,16 +516,28 @@ export function raisedByText(slots: readonly string[], provenance: readonly RunM
   return `(raised by ${slotsText(n)}, answered by ${t.voices.length} independent model${t.voices.length === 1 ? "" : "s"}: ${t.voices.join("; ")})`;
 }
 
+/** Follows a stored count whose rows name panel slots that recorded failed calls (Order 30 round 2, A2). */
+export const FAILED_SLOTS_COUNT_NOTE = "These counts are of panel slots and include slots that returned no successful model response, so they are not counts of agreeing models (model independence unverified).";
+
+/** Why a run judged with a failed-call basis is not presented as agreement between independent models. */
+export const NO_SUCCESS_RUN_CLAUSE = "Panel slots of this run returned no successful model response, so uniform responses are not shown as agreement between independent models.";
+
+/** An agreement-map row whose positioned slots include recorded failed calls (no count stated). */
+export const FAILED_SLOTS_ROW_LABEL = "model independence unverified; includes panel slots with no successful model response (no count stated)";
+
 /**
  * An agreement-map row's count line ("2 of 5 agree · 1 dispute") in a run whose slots are not independent: counted as
  * panel slots, and — when the row's own positioned slots are not independent (`ri`) — with their independent models.
  */
 export function slotAgreementLabel(agree: number, dispute: number, silent: number, total: number, ri: RowIndependence | null): string {
+  // Order 30 round 2 (review m-A / A2): a row whose positioned slots include recorded failed calls states no count at all.
+  if (ri && ri.t.kind === "unverified" && ri.t.basis === "no_responses") return NO_SUCCESSFUL_MODEL_RESPONSES;
+  if (ri && ri.t.kind === "unverified" && ri.t.basis !== undefined) return FAILED_SLOTS_ROW_LABEL;
   const parts = [`${agree} of ${slotsText(total)} agree`];
   if (dispute > 0) parts.push(`${dispute} dispute${dispute === 1 ? "s" : ""}`);
   if (silent > 0) parts.push(`${silent} silent`);
   if (!ri) return parts.join(" · ");
-  if (ri.t.kind === "unverified") parts.push(ri.t.basis ? "model independence unverified; includes panel slots with no successful model response" : "model independence unverified");
+  if (ri.t.kind === "unverified") parts.push("model independence unverified");
   else {
     const m = ri.t.voices.length;
     parts.push(`${m} independent model${m === 1 ? "" : "s"}${ri.bothSides.length && agree > 0 && dispute > 0 ? ` (${ri.bothSides.join("; ")} on both sides)` : ""}`);
@@ -487,7 +551,7 @@ export function slotAgreementLabel(agree: number, dispute: number, silent: numbe
  * A verdict in any other format is followed by what it counts. Never recomputed.
  */
 export function qualifiedPanelVerdict(stored: string, result: string, joined: boolean, run: QualifiedIndependence | null): string {
-  if (result === NO_SUCCESSFUL_MODEL_RESPONSES) return NO_SUCCESSFUL_MODEL_RESPONSES;
+  if (result === NO_SUCCESSFUL_MODEL_RESPONSES || result === TOO_FEW_ANSWERS_STATEMENT) return result;
   const m = /^(\d+)\/(\d+) models converge on ([\s\S]+?); (certainty [\s\S]*)$/.exec(stored);
   if (m && joined) return `Top finding ${m[3]} — ${result}; ${m[4]}`;
   if (m) return `${m[1]}/${m[2]} panel slots converge on ${m[3]} (${result}); ${m[4]}`;
@@ -527,6 +591,7 @@ export function qualifiedSupporters(t: QualifiedIndependence): string | null {
  */
 export function runScopeQualifier(run: QualifiedIndependence): string {
   if (basisOf(run) === "no_responses") return NO_SUCCESSFUL_MODEL_RESPONSES;
+  if (basisOf(run) === "too_few_answers") return TOO_FEW_ANSWERS_STATEMENT;
   if (run.kind === "unverified") return "counted by panel slot; model independence unverified — which models answered this run's slots is not recorded";
   if (run.kind === "placeholder") return `counted by panel slot; ${placeholderSlotsClause(run.placeholders.length)}, so this is not a count of independent models`;
   return `counted by panel slot; in this run ${run.repeated.join("; ")} answered several slots, so this is not a count of independent models`;
@@ -535,6 +600,7 @@ export function runScopeQualifier(run: QualifiedIndependence): string {
 /** A legacy "Where models agree" line (no stored status) when the rows are not held, in a run not all independent. */
 export function legacyRunScopeQualifier(run: QualifiedIndependence): string {
   if (basisOf(run) === "no_responses") return NO_SUCCESSFUL_MODEL_RESPONSES;
+  if (basisOf(run) === "too_few_answers") return TOO_FEW_ANSWERS_STATEMENT;
   if (run.kind === "unverified") return "not confirmed as agreement between independent models: which models answered this run's slots is not recorded";
   if (run.kind === "placeholder") return `not confirmed as agreement between independent models: ${placeholderSlotsClause(run.placeholders.length)}`;
   return `not confirmed as agreement between independent models: in this run ${run.repeated.join("; ")} answered several slots`;
@@ -543,6 +609,8 @@ export function legacyRunScopeQualifier(run: QualifiedIndependence): string {
 /** The note that follows a panel-level count ("Of 2 scored claims across 5 dispatched models: consensus on 2."). */
 export function runIndependenceNote(run: QualifiedIndependence): string {
   if (basisOf(run) === "no_responses") return NO_SUCCESSFUL_MODEL_RESPONSES;
+  if (basisOf(run) === "too_few_answers") return TOO_FEW_ANSWERS_STATEMENT;
+  if (basisOf(run) === "failed_supporters") return FAILED_SLOTS_COUNT_NOTE;
   if (run.kind === "unverified") return "These counts are of panel slots: which models answered this run's slots is not recorded (model independence unverified).";
   if (run.kind === "placeholder") return `These counts are of panel slots: ${placeholderSlotsClause(run.placeholders.length)}, so they are not counts of independent models.`;
   return `These counts are of panel slots: in this run ${run.repeated.join("; ")} answered several slots, so they are not counts of independent models.`;
@@ -551,6 +619,8 @@ export function runIndependenceNote(run: QualifiedIndependence): string {
 /** Follows a legacy report's stored answer string, which names the slots that support each claim. */
 export function answerIndependenceNote(run: QualifiedIndependence): string {
   if (basisOf(run) === "no_responses") return NO_SUCCESSFUL_MODEL_RESPONSES;
+  if (basisOf(run) === "too_few_answers") return TOO_FEW_ANSWERS_STATEMENT;
+  if (basisOf(run) === "failed_supporters") return FAILED_SLOTS_COUNT_NOTE;
   if (run.kind === "unverified") return "The models named and counted here are panel slots: which models answered them is not recorded (model independence unverified).";
   if (run.kind === "placeholder") return `The models named and counted here are panel slots: ${placeholderSlotsClause(run.placeholders.length)}, so they are not all independent models.`;
   return `The models named and counted here are panel slots: in this run ${run.repeated.join("; ")} answered several slots, so they are not all independent models.`;
@@ -563,6 +633,7 @@ export function answerIndependenceNote(run: QualifiedIndependence): string {
  */
 export function sharePanelPhrase(run: QualifiedIndependence | null): string | null {
   if (!run) return null;
+  if (run.kind === "unverified" && run.basis !== undefined) return "an AI panel (model independence unverified: panel slots of this run returned no successful model response)";
   if (run.kind === "unverified") return "an AI panel (model independence unverified: which models answered is not recorded)";
   if (run.kind === "placeholder") return run.voices.length < 2 ? "an AI panel with fewer than two independent models once stored placeholder text (not a model response) is set aside" : null;
   return run.voices.length < 2 ? `an AI panel whose responding slots were all answered by one model, ${run.voices[0] ?? SUBSTITUTE_MODEL_FALLBACK}` : null;
@@ -682,7 +753,7 @@ export function presentIndependenceQualifiedReport<R extends AdaptiveSynthesisRe
   const rows = Array.isArray(input.rows) ? input.rows : null;
   // Order 30 A1: an export whose every slot recorded a failed call judges the run as NO_RESPONSES_RUN (exports only;
   // exportPositionView.ts decides it from the frozen outcomes). Every other caller: the run's own rows, as before.
-  const run = input.noSuccessfulResponses === true ? NO_RESPONSES_RUN : runIndependence(provenance);
+  const run = input.noSuccessfulResponses === true ? NO_RESPONSES_RUN : storedSynthesisRunIndependence(provenance, reportStatesAgreement(report));
   const src = report as AdaptiveSynthesisReportLike;
 
   // One stored statement (a claim's text): its joined row's qualification, else — when the run itself is not
@@ -700,12 +771,18 @@ export function presentIndependenceQualifiedReport<R extends AdaptiveSynthesisRe
   };
   // No successful model response (Order 30 A1): the stored statement is not repeated — the shared wording replaces it.
   const qualifiedText = (stored: string, st: NonNullable<Statement>) =>
-    st.row ? qualifiedRowText(st.row, st.ri!) : basisOf(st.t) === "no_responses" ? NO_SUCCESSFUL_MODEL_RESPONSES : `${stored} (${runScopeQualifier(st.t)})`;
+    st.row
+      ? qualifiedRowText(st.row, st.ri!)
+      : basisOf(st.t) === "no_responses"
+        ? NO_SUCCESSFUL_MODEL_RESPONSES
+        : basisOf(st.t) === "too_few_answers"
+          ? TOO_FEW_ANSWERS_STATEMENT
+          : `${stored} (${runScopeQualifier(st.t)})`;
   const qualifiedNames = (stored: unknown, st: NonNullable<Statement>, side: "support" | "dispute") => {
     if (typeof stored !== "string") return {};
     const basis = basisOf(st.row ? (side === "support" ? st.ri!.support : st.ri!.dispute) : st.t) ?? basisOf(st.t);
     if (basis === "no_responses") return { [side === "support" ? "supporters" : "disputers"]: NO_RESPONSES_NAMES };
-    if (basis === "failed_supporters") return { [side === "support" ? "supporters" : "disputers"]: `${stored} (panel slots; includes slots with no successful model response)` };
+    if (basis === "failed_supporters" || basis === "too_few_answers") return { [side === "support" ? "supporters" : "disputers"]: `${stored} (panel slots; includes slots with no successful model response)` };
     const named = st.row ? qualifiedSideVoices(st.ri!, side) : null;
     return { [side === "support" ? "supporters" : "disputers"]: named ? named.join("; ") : `${stored} (panel slots)` };
   };
@@ -822,20 +899,24 @@ export function presentIndependenceQualifiedReport<R extends AdaptiveSynthesisRe
   const noteT = run ?? qualifiedKinds[0];
   const note = runIndependenceNote(noteT);
   const counted = (text: unknown) => typeof text === "string" && /across \d+ dispatched models?: /.test(text);
+  // Order 30 round 2 (review n-B): with no successful response, or fewer than two answering models, the stored panel-level
+  // count ("… consensus on 2.") is not repeated beside its negation — the statement replaces it.
+  const replacesCount = basisOf(noteT) === "no_responses" || basisOf(noteT) === "too_few_answers";
+  const withNote = (text: string) => (replacesCount ? note : `${text} ${note}`);
   if (presentation && typeof presentation.panelAgreement === "string" && presentation.panelAgreement) {
-    presentation = { ...presentation, panelAgreement: `${presentation.panelAgreement} ${note}` };
+    presentation = { ...presentation, panelAgreement: withNote(presentation.panelAgreement) };
   }
   const out: Record<string | symbol, unknown> = {
     ...src,
     ...(presentation !== p ? { presentation } : {}),
     ...(verdictCard !== card ? { verdictCard } : {}),
     ...(panelVerdict !== src.panelVerdict ? { panelVerdict } : {}),
-    ...(counted(src.certaintyAssessment) ? { certaintyAssessment: `${src.certaintyAssessment} ${note}` } : {}),
+    ...(counted(src.certaintyAssessment) ? { certaintyAssessment: withNote(src.certaintyAssessment as string) } : {}),
     ...(!p && typeof src.unifiedAnswer === "string" && src.unifiedAnswer
-      ? { unifiedAnswer: basisOf(noteT) === "no_responses" ? NO_SUCCESSFUL_MODEL_RESPONSES : `${src.unifiedAnswer} ${MODEL_INDEPENDENCE_QUALIFIER_LABEL}: ${answerIndependenceNote(noteT)}` }
+      ? { unifiedAnswer: replacesCount ? answerIndependenceNote(noteT) : `${src.unifiedAnswer} ${MODEL_INDEPENDENCE_QUALIFIER_LABEL}: ${answerIndependenceNote(noteT)}` }
       : {}),
     // A legacy report whose narrative fell back stores the same answer string as its executive summary.
-    ...(!p && typeof src.executiveSummary === "string" && src.executiveSummary && src.executiveSummary === src.unifiedAnswer ? { executiveSummary: basisOf(noteT) === "no_responses" ? NO_SUCCESSFUL_MODEL_RESPONSES : `${src.executiveSummary} ${MODEL_INDEPENDENCE_QUALIFIER_LABEL}: ${answerIndependenceNote(noteT)}` } : {}),
+    ...(!p && typeof src.executiveSummary === "string" && src.executiveSummary && src.executiveSummary === src.unifiedAnswer ? { executiveSummary: replacesCount ? answerIndependenceNote(noteT) : `${src.executiveSummary} ${MODEL_INDEPENDENCE_QUALIFIER_LABEL}: ${answerIndependenceNote(noteT)}` } : {}),
   };
   const headingT = run ?? qualifiedKinds[0];
   const agreeHeading = !anyAgreeQualified
@@ -847,7 +928,11 @@ export function presentIndependenceQualifiedReport<R extends AdaptiveSynthesisRe
         : headingT.voices.length < 2
           ? AGREE_HEADING_ONE_EXECUTING_MODEL
           : AGREE_HEADING_REPEATED_SUBSTITUTE;
-  const qualification: IndependenceQualification = Object.freeze({ run, top, topStatus, topResultQualified, agreeHeading, legacyAgree });
+  // Order 30 round 2 (A2 on the UI): a stored row naming recorded failed calls among its positioned slots makes the run
+  // level qualified too (the summary bar, banner and share phrase never state a consensus tier built on it) — the exports
+  // do the same (exportPositionView.exportRunIndependence).
+  const shownRun = run ?? (qualifiedKinds.some((k) => k.kind === "unverified" && k.basis !== undefined) ? FAILED_SUPPORTERS_RUN : null);
+  const qualification: IndependenceQualification = Object.freeze({ run: shownRun, top, topStatus, topResultQualified, agreeHeading, legacyAgree });
   Object.defineProperty(out, QUALIFICATION, { value: qualification, enumerable: false });
   return out as unknown as R;
 }
@@ -902,10 +987,11 @@ export function groupedSupportingVoices(row: unknown, provenance: readonly RunMo
  * A marked report's position view (positionPresentation.ts, whose rows are qualified by rowView) carries the run's own
  * independence for the surfaces that introduce the panel (LinkedIn / X). Nothing for an independent run or without rows.
  */
-export function attachRunIndependence(view: object, provenance: readonly RunModelProvenanceFacts[] | null | undefined): void {
+export function attachRunIndependence(view: object, provenance: readonly RunModelProvenanceFacts[] | null | undefined, statesAgreement = false): void {
   if (!Array.isArray(provenance) || independenceQualification(view)) return;
-  const t = adaptiveTopIndependence(null, provenance);
-  if (t.kind === "independent") return;
+  // A marked view is a stored synthesis: the stored-synthesis run rule (Order 30 round 2, m-A / m-B).
+  const t = storedSynthesisRunIndependence(provenance, statesAgreement);
+  if (!t) return;
   const qualification: IndependenceQualification = Object.freeze({ run: t, top: null, topStatus: null, topResultQualified: false, agreeHeading: null, legacyAgree: new Map() });
   Object.defineProperty(view, QUALIFICATION, { value: qualification, enumerable: false });
 }

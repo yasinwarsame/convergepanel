@@ -9,7 +9,7 @@
 
 import { usePositionPresentation } from "./PositionPresentationContext";
 import { useRunModelProvenance } from "./RunModelProvenanceContext";
-import { shownRunIndependence, type QualifiedIndependence } from "@/lib/adaptiveSchema/verdictIndependence";
+import { shownRunIndependence, storedSynthesisRunIndependence, type QualifiedIndependence } from "@/lib/adaptiveSchema/verdictIndependence";
 import type { RunModelProvenanceFacts } from "@/lib/panel/runModelIdentity";
 
 /** The provenance a surface judges rows by: a marked boundary's, else the page's. */
@@ -21,4 +21,9 @@ export function useJudgingProvenance(): readonly RunModelProvenanceFacts[] | nul
 
 export function useRunIndependence(report?: unknown): QualifiedIndependence | null {
   return shownRunIndependence(report, useJudgingProvenance());
+}
+
+/** A surface that is part of a stored synthesis report (its diagnostics) but is not handed the report: the stored-synthesis run rule. */
+export function useStoredSynthesisRunIndependence(): QualifiedIndependence | null {
+  return storedSynthesisRunIndependence(useJudgingProvenance());
 }

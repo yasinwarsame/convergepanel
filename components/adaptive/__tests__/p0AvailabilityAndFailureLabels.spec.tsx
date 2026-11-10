@@ -27,14 +27,27 @@ describe("D-4 failure labels", () => {
     expect(out).not.toContain("Empty response");
   });
 
+  // Order 30 round 2 (review m-E): the recorded status is the exact literal ("failed"); the label used to be passed as the
+  // status itself and only matched because any non-ok string counted as a non-response.
   it.each([
-    ["timeout", "did not respond in time"],
-    ["refused", "declined to answer"],
-    ["rate_limited", "rate-limited by its provider"],
-    ["failed (what saved rows actually record)", "did not respond and was excluded from comparison."],
-  ])("recorded status %s → %s", (status, phrase) => {
+    ["timeout", "timeout", "did not respond in time"],
+    ["refused", "refused", "declined to answer"],
+    ["rate_limited", "rate_limited", "rate-limited by its provider"],
+    ["failed (what saved rows actually record)", "failed", "did not respond and was excluded from comparison."],
+    ["error", "error", "did not respond and was excluded from comparison."],
+  ])("recorded status %s → %s", (_label, status, phrase) => {
     expect(html(createElement(FailedResultsNote, { failed: [failedRow("gemini")] }), new Map([["gemini", status]]))).toContain(phrase);
   });
+
+  it.each([["OK "], ["Ok"], ["pending"], ["toString"], ["__proto__"], ["constructor"], ["hasOwnProperty"], ["answered"], ["TIMEOUT"]])(
+    "Order 30 m-E: a crafted / unrecognized status %p is unknown — never 'did not respond' (the shared exact map)",
+    (status) => {
+      expect(slotDidNotRespond(new Map([["gemini", status]]), "gemini")).toBeNull();
+      const out = html(createElement(FailedResultsNote, { failed: [failedRow("gemini")] }), new Map([["gemini", status]]));
+      expect(out).not.toContain("did not respond");
+      expect(out).toContain("returned an incompatible format");
+    }
+  );
 
   it("a model that RESPONDED (recorded ok) but failed validation keeps 'incompatible format' and its parse details", () => {
     const out = html(createElement(FailedResultsNote, { failed: [failedRow("claude", "Unexpected token")] }), new Map([["claude", "ok"]]));

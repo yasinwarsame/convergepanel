@@ -97,14 +97,14 @@ import {
   COUNTED_BY_PANEL_SLOT,
   independenceQualification,
   qualifiedRowHeading,
-  runIndependence,
+  storedSynthesisRunIndependence,
   qualifiedSideVoices,
   rowIndependence,
   slotAgreementLabel,
   topIndependencePresentation,
   uniformityBadge,
 } from "@/lib/adaptiveSchema/verdictIndependence";
-import { useRunIndependence } from "./useRunIndependence";
+import { useRunIndependence, useStoredSynthesisRunIndependence } from "./useRunIndependence";
 import { useQualifiedExecutionIdentity, useRunExecutionIdentity } from "./RunExecutionIdentityContext";
 import { modelWrittenBlockLabel, trustFiguresNote } from "@/lib/panel/executionIdentity";
 import { executingModelKey } from "@/lib/panel/independentVoices";
@@ -603,7 +603,9 @@ export function AgreementDisagreementMap({ claims, modelsUsed }: { claims: Align
   const runProvenance = useRunModelProvenance();
   if (position) return <MarkedPositionMap claims={claims} roster={position.roster} provenance={position.provenance} />;
   // c16 (MINOR-1): in a run whose slots are not independent executing models every count here is of panel slots.
-  const slotsNotIndependent = !!runIndependence(runProvenance);
+  // Order 30 round 2: these rows are a stored synthesis's — the stored-synthesis run rule (no successful response, or fewer
+  // than two answering models, is never a count of agreeing models).
+  const slotsNotIndependent = !!storedSynthesisRunIndependence(runProvenance);
   // Coverage-1 claims (a single model's own claim, never corroborated or
   // disputed by anyone else) aren't agreement data — they're rendered
   // separately by SingleModelInsightsList below this section.
@@ -926,7 +928,7 @@ function CoverageGapCard({
 function DiagnosticsStrip({ diagnostics }: { diagnostics: AdaptiveSynthesisReport["diagnostics"] }) {
   const marked = !!usePositionPresentation();
   // N2: uniform responses across slots one model answered are not agreement between independent models.
-  const runQ = useRunIndependence();
+  const runQ = useStoredSynthesisRunIndependence();
   const uniformity = runQ ? uniformityBadge(runQ) : null;
   const citationPct = diagnostics.totalClaimCount > 0 ? diagnostics.citedClaimCount / diagnostics.totalClaimCount : null;
   const citationDanger = citationPct !== null && citationPct < CITATION_COVERAGE_DANGER_THRESHOLD;

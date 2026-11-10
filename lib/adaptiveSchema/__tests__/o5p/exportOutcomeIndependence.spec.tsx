@@ -22,7 +22,7 @@ import { join } from "path";
 import { buildExportSnapshot } from "@/lib/adaptiveSchema/exportSnapshot";
 import { readFrozenRunExecutionProvenance, readFrozenRunProvenance } from "@/lib/adaptiveSchema/exportRunProvenance";
 import { EXPORT_VERDICT_SECTION_INDEPENDENCE_UNVERIFIED, exportPositionSafeReport, exportRunIndependence } from "@/lib/adaptiveSchema/exportPositionView";
-import { ADAPTIVE_INDEPENDENCE_UNVERIFIED_TOP_HEADING, ADAPTIVE_PLACEHOLDER_RUN_TOP_HEADING, ADAPTIVE_PLACEHOLDER_TOP_HEADING, FAILED_SUPPORTERS_CLAUSE, FAILED_SUPPORTERS_RUN, NO_RESPONSES_RUN, NO_SUCCESSFUL_MODEL_RESPONSES, placeholderSlotsClause } from "@/lib/adaptiveSchema/verdictIndependence";
+import { ADAPTIVE_INDEPENDENCE_UNVERIFIED_TOP_HEADING, ADAPTIVE_PLACEHOLDER_RUN_TOP_HEADING, ADAPTIVE_PLACEHOLDER_TOP_HEADING, FAILED_SUPPORTERS_CLAUSE, FAILED_SUPPORTERS_RUN, NO_RESPONSES_RUN, TOO_FEW_ANSWERS_RUN, TOO_FEW_ANSWERS_STATEMENT, NO_SUCCESSFUL_MODEL_RESPONSES, placeholderSlotsClause } from "@/lib/adaptiveSchema/verdictIndependence";
 import type { AdaptiveResearchExportV1 } from "@/lib/adaptiveSchema/researchExport";
 import { AdaptiveResearchDocument } from "@/lib/pdf/AdaptiveResearchDocument";
 import { renderAdaptiveResearchDocxV1 } from "@/lib/docx/renderAdaptiveResearchDocx";
@@ -31,6 +31,8 @@ import { extractDocxText } from "@/lib/docx/__tests__/testUtils";
 import { identityRowFromFacts, runExecutionIdentity, executionIdentityVerified, STORED_PLACEHOLDER_LITERALS, type RunExecutionIdentity } from "@/lib/panel/executionIdentity";
 import { runModelProvenanceFromExport } from "@/lib/panel/runModelIdentity";
 import { withIndependentFrozenProvenance } from "@/lib/pdf/__fixtures__/layoutFixtures";
+import { DECISION_SUPPORT_SCHEMA_ID as EPV_DS_ID } from "@/lib/adaptiveSchema/exportPositionView";
+import { DECISION_SUPPORT_SCHEMA_ID as DS_ID } from "@/lib/adaptiveSchema/dsLabelWording";
 
 const records: Record<string, any> = JSON.parse(readFileSync(join(__dirname, "__fixtures__", "baseline-2c17fee", "records.json"), "utf8"));
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
@@ -406,7 +408,9 @@ describe("Order 30 A1 / A2 — exports: no successful response, or failed suppor
   it("A2: one genuine answer + 4 failed slots that the stored claim names as supporters → no support count; the reason is stated", async () => {
     const rec = exportOf(CONS(), [R("chatgpt"), timedOut("claude"), timedOut("grok"), errored("perplexity"), timedOut("gemini")]);
     expect(exportIdentity(rec)).toMatchObject({ kind: "IND", verified: true, independentModels: 1, answeredSlots: 1 });
-    expect(exportRunIndependence(rec)).toBe(FAILED_SUPPORTERS_RUN);
+    // Order 30 round 2 (m-B): one answering model under a stored agreement is TOO_FEW_ANSWERS_RUN (was FAILED_SUPPORTERS_RUN,
+    // the row-scan result; both gate the summary).
+    expect(exportRunIndependence(rec)).toBe(TOO_FEW_ANSWERS_RUN);
     for (const [k, text] of await bothTexts(rec)) {
       expect([k, claimsIn(text)]).toEqual([k, []]);
       expect([k, text.includes(FAILED_SUPPORTERS_CLAUSE)]).toEqual([k, true]);
@@ -504,5 +508,83 @@ describe("Order 30 A1 / A2 — exports: no successful response, or failed suppor
       expect([k, text.includes(ADAPTIVE_INDEPENDENCE_UNVERIFIED_TOP_HEADING)]).toEqual([k, true]);
       expect([k, /\d+ independent model|Top consensus(?! \()/.test(text)]).toEqual([k, false]);
     }
+  });
+});
+
+// ─── Order 30 round 2 (review of 22a7520: m-B, m-C, m-D) ──────────────────────────────────────────────────────────
+
+describe("Order 30 round 2 — exports: m-B (unjoined stored claim over one answer) and m-C (Milestone-2 status summary)", () => {
+  const CONS = () => clone(records["generic-consensus"]);
+  const oneAnswer = () => [R("chatgpt"), timedOut("claude"), timedOut("grok"), errored("perplexity"), timedOut("gemini")];
+
+  it("m-B: one genuine answer + 4 timeouts + a stored consensus with NO joined rows → no 'all 5 … support it', no 'Strong consensus'", async () => {
+    const rec = exportOf({ ...CONS(), alignedClaims: [] }, oneAnswer());
+    expect(exportIdentity(rec)).toMatchObject({ kind: "IND", verified: true, independentModels: 1 });
+    expect(exportRunIndependence(rec)).toBe(TOO_FEW_ANSWERS_RUN);
+    for (const [k, text] of await bothTexts(rec)) {
+      expect([k, claimsIn(text)]).toEqual([k, []]);
+      expect([k, text.includes(TOO_FEW_ANSWERS_STATEMENT)]).toEqual([k, true]);
+      expect([k, text.includes(GATE_NOTE)]).toEqual([k, true]);
+      expect([k, /Supported by: ChatGPT, Claude, Grok, Perplexity, Gemini(?! \()/.test(text)]).toEqual([k, false]);
+    }
+  });
+
+  it("m-B controls: two answering models (unjoined) keep the stored statements; one answer with a no-consensus report states nothing new", async () => {
+    const two = exportOf({ ...CONS(), alignedClaims: [] }, [R("chatgpt"), R("claude"), timedOut("grok"), timedOut("perplexity"), timedOut("gemini")]);
+    expect(exportRunIndependence(two)).toBeNull();
+    for (const [k, text] of await bothTexts(two)) expect([k, text.includes(TOO_FEW_ANSWERS_STATEMENT)]).toEqual([k, false]);
+    const single = exportOf(clone(records["factual-single"]), [R("chatgpt"), timedOut("claude")]);
+    expect(exportRunIndependence(single)).toBeNull();
+  });
+
+  const FIVE_IDS = ["chatgpt", "claude", "grok", "perplexity", "gemini"];
+  function m2(runProvenance: unknown, schemaId = "comparison_matrix"): AdaptiveResearchExportV1 {
+    return {
+      version: 1, exportId: "e", runId: "r", schemaId, schemaFamily: "milestone2", schemaVersion: 1, reportVersion: 1, createdAt: "2026-10-08T00:00:00.000Z", createdBy: "u", format: "pdf", artifactStatus: "ready", classification: "internal",
+      governanceStatusAtExport: { family: "milestone2", kind: "approved", isOwnerOverride: false },
+      reportSnapshot: { question: "Which?", models: FIVE_IDS.map((m) => ({ modelId: m })), reportTypeLabel: "Comparison Report", consensusLevel: "strong", sourceGroundingLevel: "strong", reportGeneratedAt: "2026-10-07T00:00:00.000Z", ...(runProvenance === undefined ? {} : { runProvenance }), milestone2: { schemaId, result: { subjects: [], attributes: [], cells: [] }, meta: {} } },
+      exportMetadata: { exportId: "e", runId: "r", schemaVersion: 1, exportedSections: ["reportSnapshot.milestone2"], createdAt: "2026-10-08T00:00:00.000Z", requestingUser: "u", finalReportVersion: 1 },
+    } as any;
+  }
+  const v2 = (entry: (m: string) => Record<string, unknown>) => ({ provenanceVersion: 2, policyVersion: 3, models: FIVE_IDS.map((m) => ({ modelId: m, requestedModel: `${m}-1`, substituted: false, ...entry(m) })) });
+
+  it.each([
+    ["every slot a recorded timeout", v2(() => ({ outcome: "timeout", outcomeSource: "recorded" })), NO_RESPONSES_RUN],
+    ["every slot 'model not recorded' (pre-6.2b, no frozen provenance)", undefined, { kind: "unverified", scope: "run" }],
+  ])("m-C: a Milestone-2 export whose %s never shows 'Strong consensus' in the PDF or DOCX status summary", async (_label, prov, expected) => {
+    const rec = m2(prov);
+    expect(exportRunIndependence(rec)).toEqual(expected);
+    for (const [k, text] of await bothTexts(rec)) {
+      expect([k, text.includes("Strong consensus")]).toEqual([k, false]);
+      expect([k, text.includes(GATE_NOTE)]).toEqual([k, true]);
+    }
+  });
+
+  it("m-C controls: 5 verified answered Milestone-2 slots keep 'Strong consensus'; a Decision Support export keeps its own summary (null)", async () => {
+    const PROV: Record<string, string> = { chatgpt: "openai", claude: "anthropic", grok: "xai", perplexity: "perplexity", gemini: "google" };
+    const verified = m2(v2((m) => ({ provider: PROV[m], outcome: "answered", outcomeSource: "recorded" })));
+    expect(exportRunIndependence(verified)).toBeNull();
+    for (const [k, text] of await bothTexts(verified)) expect([k, text.includes("Strong consensus")]).toEqual([k, true]);
+    expect(exportRunIndependence(m2(undefined, "decision_support"))).toBeNull();
+    // a legacy record without a stored synthesis (the real all-failed record) is still null
+    expect(exportRunIndependence(exportOf({ ...clone(records["generic-all-failed"]), alignedClaims: [] }, FIVE_IDS.map((m) => timedOut(m))))).toBeNull();
+  });
+});
+
+describe("Order 30 round 2 — m-C tier boundary", () => {
+  const FIVE_IDS = ["chatgpt", "claude", "grok", "perplexity", "gemini"];
+  const m2 = (consensusLevel: string, schemaFamily = "milestone2") =>
+    ({ schemaId: "comparison_matrix", schemaFamily, format: "pdf", reportSnapshot: { models: FIVE_IDS.map((m) => ({ modelId: m })), consensusLevel } }) as any;
+  it.each([["strong"], ["moderate"], ["weak"]])("a Milestone-2 '%s' tier over unrecorded slots is qualified", (lvl) => {
+    expect(exportRunIndependence(m2(lvl))).toEqual({ kind: "unverified", scope: "run" });
+  });
+  it.each([["unscored"], ["split"], [undefined]])("a Milestone-2 level %p states no agreement → null (renders as before)", (lvl) => {
+    expect(exportRunIndependence(m2(lvl as never))).toBeNull();
+  });
+  it("the Decision Support id is the S-E.2 module's", () => {
+    expect(EPV_DS_ID).toBe(DS_ID);
+  });
+  it("a record that is neither legacy-with-synthesis nor Milestone-2 → null", () => {
+    expect(exportRunIndependence(m2("strong", "legacy"))).toBeNull();
   });
 });

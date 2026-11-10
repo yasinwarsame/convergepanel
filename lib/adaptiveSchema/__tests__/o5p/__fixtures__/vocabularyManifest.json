@@ -2756,5 +2756,26 @@
   "count": 1,
   "category": "contract-p-applied",
   "rule": "Order 30 A2 (review m-3): a stored row side whose positioned slots include a slot recorded as a failed call — no support / dispute count is stated, model independence unverified; stored values unchanged; rows whose positioned slots all answered render as before"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictIndependence.ts",
+  "literal": "\"Not an agreement between models: fewer than two independent models returned a successful response in this run. Model independence unverified.\"",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "Order 30 round 2 (review m-B): TOO_FEW_ANSWERS_STATEMENT — a stored synthesis that states agreement over a run that records failed calls and in which fewer than two independent executing models answered; replaces each unjoined stored agreement statement and its panel-level count; no agreement claim; stored values unchanged; a run with two or more answering models, or a stored report stating no agreement, renders as before"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictIndependence.ts",
+  "literal": "\"These counts are of panel slots and include slots that returned no successful model response, so they are not counts of agreeing models (model independence unverified).\"",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "Order 30 round 2 (A2 on the run level): FAILED_SLOTS_COUNT_NOTE — follows a stored panel-level count when a stored row names panel slots that recorded failed calls; the count is qualified as slots, never models; stored values unchanged"
+ },
+ {
+  "file": "lib/adaptiveSchema/verdictIndependence.ts",
+  "literal": "\"Panel slots of this run returned no successful model response, so uniform responses are not shown as agreement between independent models.\"",
+  "count": 1,
+  "category": "contract-p-applied",
+  "rule": "Order 30 round 2: NO_SUCCESS_RUN_CLAUSE — the uniformity badge title for a run judged with a failed-call basis (no responses, too few answers, failed supporters); never presented as agreement; stored values unchanged"
  }
 ]
