@@ -22,6 +22,7 @@ import { GovernanceChip } from "@/components/shared/GovernanceChip";
 import { formatAbsoluteDate, UNFILED_PROJECT_LABEL } from "@/lib/workspaces/reviewQueuePresentation";
 import { teamVideoDetailHref } from "@/lib/workspaces/teamVideoDetailHref";
 import type { TeamVideoListItem, TeamVideoVerdict } from "@/hooks/useTeamVideoVerificationList";
+import { CONSENSUS_WITHHELD_TEXT } from "@/lib/panel/independentVoices";
 
 /**
  * Local pure mapping. Compact row labels that stay semantically aligned with
@@ -103,11 +104,18 @@ export function TeamVideoListRow({ workspaceId, item, showProject }: TeamVideoLi
         </p>
 
         <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-cp-muted">
-          <span data-testid="team-video-row-consensus">{item.consensusScore}/100 consensus</span>
-          <span aria-hidden="true">·</span>
-          <span data-testid="team-video-row-confidence">{item.confidenceLabel} confidence</span>
-          <span aria-hidden="true">·</span>
-          <span data-testid="team-video-row-evidence">{EVIDENCE_LABEL[item.evidenceQuality]}</span>
+          {item.consensusWithheld === undefined && item.consensusScore !== null ? (
+            <>
+              <span data-testid="team-video-row-consensus">{item.consensusScore}/100 consensus</span>
+              <span aria-hidden="true">·</span>
+              <span data-testid="team-video-row-confidence">{item.confidenceLabel} confidence</span>
+              <span aria-hidden="true">·</span>
+              <span data-testid="team-video-row-evidence">{EVIDENCE_LABEL[item.evidenceQuality]}</span>
+            </>
+          ) : (
+            // C-b (CB-18): not a multi-model consensus — no score, and no confidence / evidence quality derived with it.
+            <span data-testid="team-video-row-consensus">{CONSENSUS_WITHHELD_TEXT[item.consensusWithheld ?? "independence_unverified"]}</span>
+          )}
           <span aria-hidden="true">·</span>
           <span data-testid="team-video-row-frames">
             {item.frameCount} {item.frameCount === 1 ? "frame" : "frames"}
