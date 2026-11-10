@@ -15,7 +15,9 @@ import { AdaptiveResearchDocument } from "@/lib/pdf/AdaptiveResearchDocument";
 import { renderAdaptiveResearchDocxV1 } from "@/lib/docx/renderAdaptiveResearchDocx";
 import { extractPdfElementText } from "@/lib/pdf/__tests__/testUtils";
 import { extractDocxText } from "@/lib/docx/__tests__/testUtils";
-import { NO_SUCCESSFUL_MODEL_RESPONSES, TOO_FEW_ANSWERS_STATEMENT } from "@/lib/adaptiveSchema/verdictIndependence";
+import { NO_RESPONSES_RUN, NO_SUCCESSFUL_MODEL_RESPONSES, TOO_FEW_ANSWERS_RUN, TOO_FEW_ANSWERS_STATEMENT, independenceQualification } from "@/lib/adaptiveSchema/verdictIndependence";
+import { presentPositionSafeReport } from "@/lib/adaptiveSchema/positionPresentation";
+import { runModelProvenanceFromResultRow } from "@/lib/panel/runModelIdentity";
 
 const records: Record<string, any> = JSON.parse(readFileSync(join(__dirname, "__fixtures__", "baseline-2c17fee", "records.json"), "utf8"));
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
@@ -87,5 +89,33 @@ describe("Order 30 round 2 m-B: one answering model + a stored consensus with no
     const { per } = await claims(CONS(), FIVE.map(ok));
     expect(per["ui.panelResponse"]).toEqual(expect.arrayContaining(["Strong consensus", "all 5 dispatched models support it"]));
     expect(per["export.pdf"]).toEqual(expect.arrayContaining(["Strong consensus", "all 5 dispatched models support it"]));
+  });
+});
+
+describe("Order 30 round 2 — run-level surfaces of a stored synthesis (marked view, diagnostics badge, share phrase)", () => {
+  it("a marked view carries the stored-synthesis run judgement (no responses / too few answers), and the share introduces no multi-model panel", async () => {
+    const marked = () => { const c = CONS(); c.synthesisReport.presentation.disagreementPositionVersion = 1; return c; };
+    const zero = marked();
+    const facts = (rows: any[]) => rows.map((r) => runModelProvenanceFromResultRow(r));
+    const v0 = presentPositionSafeReport(zero.synthesisReport, { rows: zero.alignedClaims, roster: FIVE, provenance: facts(FIVE.map((m) => fl(m))) });
+    expect(independenceQualification(v0)!.run).toBe(NO_RESPONSES_RUN);
+    const one = marked();
+    const v1 = presentPositionSafeReport(one.synthesisReport, { rows: one.alignedClaims, roster: FIVE, provenance: facts([ok("chatgpt"), ...FIVE.slice(1).map((m) => fl(m))]) });
+    expect(independenceQualification(v1)!.run).toBe(TOO_FEW_ANSWERS_RUN);
+    const { texts } = await claims(marked(), [ok("chatgpt"), ...FIVE.slice(1).map((m) => fl(m))], ["text.linkedin"]);
+    expect(texts["text.linkedin"]).toContain("an AI panel (model independence unverified: panel slots of this run returned no successful model response)");
+    expect(texts["text.linkedin"]).not.toContain("multi-model AI panel");
+  });
+
+  it("the diagnostics uniformity badge of a stored synthesis over an all-failed run is never 'Unusually uniform agreement'", async () => {
+    const rec = CONS();
+    rec.synthesisReport.diagnostics = { ...rec.synthesisReport.diagnostics, homogeneityFlag: true };
+    const { texts } = await claims(rec, FIVE.map((m) => fl(m)), ["ui.synthesisView"]);
+    expect(texts["ui.synthesisView"]).toContain("Unusually uniform responses (model independence unverified)");
+    expect(texts["ui.synthesisView"]).not.toContain("Unusually uniform agreement");
+    // control: 5 verified answers keep the stored badge
+    const ctl = CONS();
+    ctl.synthesisReport.diagnostics = { ...ctl.synthesisReport.diagnostics, homogeneityFlag: true };
+    expect((await claims(ctl, FIVE.map(ok), ["ui.synthesisView"])).texts["ui.synthesisView"]).toContain("Unusually uniform agreement");
   });
 });

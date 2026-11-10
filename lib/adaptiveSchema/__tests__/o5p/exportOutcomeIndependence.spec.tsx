@@ -560,6 +560,13 @@ describe("Order 30 round 2 — exports: m-B (unjoined stored claim over one answ
     }
   });
 
+  it("m-C + m-B: a Milestone-2 consensus tier over one verified answer and four recorded timeouts is TOO_FEW_ANSWERS_RUN (no 'Strong consensus')", async () => {
+    const PROV: Record<string, string> = { chatgpt: "openai", claude: "anthropic", grok: "xai", perplexity: "perplexity", gemini: "google" };
+    const rec = m2(v2((m) => (m === "chatgpt" ? { provider: PROV[m], outcome: "answered", outcomeSource: "recorded" } : { outcome: "timeout", outcomeSource: "recorded" })));
+    expect(exportRunIndependence(rec)).toBe(TOO_FEW_ANSWERS_RUN);
+    for (const [k, text] of await bothTexts(rec)) expect([k, text.includes("Strong consensus")]).toEqual([k, false]);
+  });
+
   it("m-C controls: 5 verified answered Milestone-2 slots keep 'Strong consensus'; a Decision Support export keeps its own summary (null)", async () => {
     const PROV: Record<string, string> = { chatgpt: "openai", claude: "anthropic", grok: "xai", perplexity: "perplexity", gemini: "google" };
     const verified = m2(v2((m) => ({ provider: PROV[m], outcome: "answered", outcomeSource: "recorded" })));
