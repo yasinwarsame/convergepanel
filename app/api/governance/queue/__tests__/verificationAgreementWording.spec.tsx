@@ -65,7 +65,13 @@ import {
 } from "@/components/governance/GovernanceDashboard";
 import { QUALIFIED_DISAGREEMENT_TEXT } from "@/lib/panel/storedDisagreementIndependence";
 
-const vrow = (modelId: string, status: "ok" | "parse_error" | "failed", verdict: string, extra: Record<string, unknown> = {}) => ({
+/**
+ * C-b (CB-01): an own-provider `ok` claim row counts toward verified independence only when it records its provider, so
+ * the fixtures below record one (`OWN_PROVIDER`; video rows are judged by the queue's own video rule, C-c CC-12, which
+ * ignores it). `vrowNoProvider` is the row every stored own-provider claim actually holds (m-B).
+ */
+const OWN_PROVIDER: Record<string, string> = { chatgpt: "openai", claude: "anthropic", grok: "xai", gemini: "google", perplexity: "perplexity" };
+const vrowNoProvider = (modelId: string, status: "ok" | "parse_error" | "failed", verdict: string, extra: Record<string, unknown> = {}) => ({
   modelId,
   status,
   verdict: status === "ok" ? verdict : status,
@@ -76,6 +82,8 @@ const vrow = (modelId: string, status: "ok" | "parse_error" | "failed", verdict:
   unverifiableParts: [],
   ...extra,
 });
+const vrow = (modelId: string, status: "ok" | "parse_error" | "failed", verdict: string, extra: Record<string, unknown> = {}) =>
+  vrowNoProvider(modelId, status, verdict, status === "ok" && extra.substituted !== true ? { provider: OWN_PROVIDER[modelId], ...extra } : extra);
 const DS = { substituted: true, provider: "deepseek" };
 const ver = (id: string, modelResults: unknown[] | undefined, selectedModels?: string[]) => ({
   id,
@@ -199,12 +207,25 @@ describe("GET /api/governance/queue + GovernanceDashboard — claim wording by e
     expect("modelIndependence" in r).toBe(false);
     expect(r.agreementSummary).toBe("2/2 models say accurate");
     // Phase 0 (L15, O14 = A): the 35933c8 DTO line "(others disagree)" on a unanimous row is restored verbatim; it is
-    // known-wrong and is corrected at render time by track C-b (C-IND-agree2), not by Phase 0.
+    // known-wrong and is corrected at render time by track C-b (CB-21, PQ-3): the DTO keeps it, the dashboard drops it.
     expect(r.disagreementPoints).toEqual(["ChatGPT, Claude rated as accurate (others disagree)"]);
     const html = render(r);
     expect(html).toContain("Where models agree");
     expect(html).toContain("2/2 models say accurate");
-    expect(html).toContain("ChatGPT, Claude rated as accurate (others disagree)");
+    expect(html).not.toContain("others disagree");
+    expect(html).not.toContain("Where models disagree");
+  });
+
+  it("C-b (CB-01): provider-less own-provider rows (every stored own-provider claim) are unverified — nothing between models", async () => {
+    verRows = [ver("pl", [vrowNoProvider("chatgpt", "ok", "accurate"), vrowNoProvider("claude", "ok", "accurate"), vrowNoProvider("grok", "failed", "")], ["chatgpt", "claude", "grok"])];
+    const r = (await rows())["pl"];
+    expect(r.modelIndependence).toBe("unverified");
+    expect(r.qualifiedDisagreements).toEqual([
+      { text: "2/2 responses say accurate — model independence unverified, not confirmed as agreement between models", basis: "independence_unverified" },
+    ]);
+    const html = render(r);
+    expect(html).not.toMatch(MULTI_MODEL);
+    expect(html).toContain(QUEUE_VERIFICATION_INDEPENDENCE_NOTE.unverified);
   });
 
   it("one independent model with contested claims: its contested points are its own, not a disagreement between models", async () => {

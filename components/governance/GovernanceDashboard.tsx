@@ -722,6 +722,41 @@ export const QUEUE_VERIFICATION_INDEPENDENCE_NOTE: Readonly<Record<"insufficient
   unverified: "Independent-model coverage unverified — nothing here is presented as agreement or disagreement between models.",
 });
 
+/** The suffix the route's 35933c8 per-verdict line carries (`buildVerificationQueueReviewExtras` / `buildVideoQueueReviewExtras`). */
+const OTHERS_DISAGREE_SUFFIX = " (others disagree)";
+
+/**
+ * The route's `agreementSummary` ("k/n models say <verdict>", 35933c8) parsed to its tally, or null when it is absent,
+ * malformed, or names no verdict (a row without a stored `verdict` field — then the tally and the per-verdict lines may
+ * be grouped differently, so nothing is derived from it).
+ */
+export function queueAgreementTally(summary: string | undefined): { k: number; n: number; verdict: string } | null {
+  if (typeof summary !== "string") return null;
+  const m = /^(\d+)\/(\d+) models say (.*)$/.exec(summary);
+  if (!m) return null;
+  const k = Number(m[1]);
+  const n = Number(m[2]);
+  const verdict = m[3];
+  if (!Number.isInteger(k) || !Number.isInteger(n) || n < 1 || k < 1 || k > n || verdict.trim().length === 0) return null;
+  return { k, n, verdict };
+}
+
+/**
+ * C-b CB-21 (O14 render correction, PQ-3 ruling: a render-time rule from `agreementSummary`, no fifth DTO key). The
+ * route's stored-shape line "<names> rated as <verdict> (others disagree)" is emitted for every verdict group of one or
+ * two answering slots — also when every answering slot gave the SAME verdict, where no other model answered
+ * differently. The tally and those lines are computed over the same rows (status "ok"), and when the tally names a
+ * verdict every one of its rows recorded a `verdict` field, so both group the rows identically: a unanimous tally
+ * (k = n) proves no answering slot gave a different verdict, and every "(others disagree)" line is dropped. Any other
+ * tally (k < n, or none parseable) keeps the lines exactly as before. Lines without the suffix are never touched.
+ */
+export function queueRenderedDisagreementPoints(row: Pick<QueueRow, "disagreementPoints" | "agreementSummary">): string[] {
+  const lines = row.disagreementPoints ?? [];
+  const tally = queueAgreementTally(row.agreementSummary);
+  if (!tally || tally.k !== tally.n) return [...lines];
+  return lines.filter((line) => !line.endsWith(OTHERS_DISAGREE_SUFFIX));
+}
+
 /**
  * What a claim / video row's expanded view presents as agreement and disagreement between models. A row the route marks
  * with `modelIndependence` (fewer than two independent executing models, or independence not recorded) presents NONE
@@ -751,9 +786,11 @@ export function queueVerificationAgreementView(
   }
   const agreeLines =
     row.agreementPoints && row.agreementPoints.length > 0 ? row.agreementPoints : row.agreementSummary ? [row.agreementSummary] : [];
+  // C-b CB-21 (O14, PQ-3): render-time only — the DTO is unchanged.
+  const disagreementPoints = queueRenderedDisagreementPoints(row);
   const disagreeLines = [
-    ...(row.disagreementPoints ?? []),
-    ...(row.disagreementPoints?.length ? [] : row.dissentSummary ? [row.dissentSummary] : []),
+    ...disagreementPoints,
+    ...(disagreementPoints.length ? [] : row.dissentSummary ? [row.dissentSummary] : []),
     ...(row.disagreements ?? []),
   ];
   return { agreeLines, disagreeLines, note: null, singleModelAssessment: null, qualified };

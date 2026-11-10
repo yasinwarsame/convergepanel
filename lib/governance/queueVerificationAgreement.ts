@@ -64,8 +64,11 @@ export function unverifiedTallyText(max: number, n: number, verdict: string): st
   return `${max}/${n} responses say ${verdict} — model independence unverified, not confirmed as agreement between models`;
 }
 
+/**
+ * Cap on `disagreements` (genuine digest conflicts). That field is not part of the queue DTO (the route exports only
+ * `qualifiedDisagreements` and `singleModelAssessment` from this builder), so the cap hides nothing presented.
+ */
 const DIGEST_CAP = 3;
-const QUALIFIED_CAP = 5;
 
 type Opts = {
   /** Human verdict label (route-specific). */
@@ -158,8 +161,12 @@ export function buildQueueVerificationAgreement(data: Record<string, unknown>, o
         : runModelFamilyName(voice.slotIds[0]);
   }
 
+  // C-b CB-22: every recorded qualified signal is listed (no cap). A capped list silently dropped recorded lines (a
+  // same-executing-model digest point beyond the fifth entry was neither shown as genuine nor as qualified). The input
+  // is bounded: the stored digest (at most 12 points, lib/verification/agreementDigest.ts), one entry per executing
+  // model and one tally. Exact duplicates are listed once.
   const pushQualified = (text: string, basis: QualifiedDisagreementBasis) => {
-    if (out.qualifiedDisagreements.length < QUALIFIED_CAP && !out.qualifiedDisagreements.some((q) => q.text === text)) {
+    if (!out.qualifiedDisagreements.some((q) => q.text === text)) {
       out.qualifiedDisagreements.push({ text, basis });
     }
   };
