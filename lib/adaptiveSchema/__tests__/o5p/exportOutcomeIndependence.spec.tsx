@@ -30,6 +30,7 @@ import { extractPdfElementText } from "@/lib/pdf/__tests__/testUtils";
 import { extractDocxText } from "@/lib/docx/__tests__/testUtils";
 import { identityRowFromFacts, runExecutionIdentity, executionIdentityVerified, STORED_PLACEHOLDER_LITERALS, type RunExecutionIdentity } from "@/lib/panel/executionIdentity";
 import { runModelProvenanceFromExport } from "@/lib/panel/runModelIdentity";
+import { withIndependentFrozenProvenance } from "@/lib/pdf/__fixtures__/layoutFixtures";
 
 const records: Record<string, any> = JSON.parse(readFileSync(join(__dirname, "__fixtures__", "baseline-2c17fee", "records.json"), "utf8"));
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
@@ -366,6 +367,29 @@ describe("Order 30 A1 / A2 — exports: no successful response, or failed suppor
       expect([k, text.includes(NO_SUCCESSFUL_MODEL_RESPONSES)]).toEqual([k, true]);
       expect([k, /Supported by: ChatGPT slot/.test(text)]).toEqual([k, false]);
     }
+  });
+
+  it.each([["unmarked", false], ["marked (Contract P)", true]])("A1: an %s export with a stored synthesis and an empty roster (no model dispatched) has no successful response either", async (_label, isMarked) => {
+    const src = CONS();
+    if (isMarked) src.synthesisReport.presentation.disagreementPositionVersion = 1;
+    const rec = exportOf(src, []);
+    expect(rec.reportSnapshot.models).toEqual([]);
+    expect(exportRunIndependence(rec)).toBe(NO_RESPONSES_RUN);
+    for (const [k, text] of await bothTexts(rec)) {
+      expect([k, claimsIn(text)]).toEqual([k, []]);
+      expect([k, text.includes(NO_SUCCESSFUL_MODEL_RESPONSES)]).toEqual([k, true]);
+    }
+  });
+
+  it("n-3: the layout fixture freezes a failed slot as a recorded failure (no provider), an answered slot as answered", () => {
+    const rec = withIndependentFrozenProvenance({ reportSnapshot: { models: [{ modelId: "chatgpt", ok: true }, { modelId: "grok", ok: false }] } as any });
+    expect(rec.reportSnapshot.runProvenance).toEqual({
+      provenanceVersion: 2,
+      models: [
+        { modelId: "chatgpt", substituted: false, provider: "openai", outcome: "answered", outcomeSource: "recorded" },
+        { modelId: "grok", substituted: false, outcome: "failed", outcomeSource: "recorded" },
+      ],
+    });
   });
 
   it("A1 controls: the real all-failed record (no synthesis) is unchanged — no constant, no gate relabel, run scope as before", async () => {

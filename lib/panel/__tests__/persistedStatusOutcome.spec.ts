@@ -39,7 +39,8 @@ describe("Order 30 A3: one shared exact-match status map", () => {
   it.each(["OK ", "Ok", "", "toString", "__proto__", "constructor", "hasOwnProperty"])("UI path: a result row with status %p fails the shared gate closed (unverified), never read as a failure", (status) => {
     const rows = [okRow("chatgpt", "openai"), { modelId: "claude", status, provider: "anthropic", rawTextTruncated: "Paris." }];
     expect(executionIdentityVerified(rows)).toBe(false);
-    expect(runExecutionIdentity(rows)).toMatchObject({ kind: "UV", verified: false, independentModels: null });
+    // the crafted row is never counted as an answered slot either
+    expect(runExecutionIdentity(rows)).toMatchObject({ kind: "UV", verified: false, independentModels: null, answeredSlots: 1 });
     const facts = rows.map((r) => identityRowFromFacts(runModelProvenanceFromResultRow(r)));
     expect(executionIdentityVerified(facts)).toBe(false);
     // control: the same run with a recorded failure is verified over its one answer

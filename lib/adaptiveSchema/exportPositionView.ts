@@ -65,15 +65,16 @@ function exportSlotProvenance(record: AdaptiveResearchExportV1): RunModelProvena
 
 /**
  * Order 30 A1 (owner option (i), standing attribution default): an export that carries a stored synthesis but whose
- * every dispatched slot is RECORDED (version-2 frozen outcome) as a failed call has no successful model response, so it
+ * every dispatched slot (none, for an empty roster) is RECORDED (version-2 frozen outcome) as a failed call has no successful model response, so it
  * makes no agreement, consensus or support-count claim: its run is NO_RESPONSES_RUN and every statement reads
  * NO_SUCCESSFUL_MODEL_RESPONSES. Only the export path decides this — the shared run-scope rule (and so the UI and the
  * 2c17feee oracle) is untouched, and an export without a stored synthesis (the real all-failed record) is unchanged.
  * Stored values, the synthesis admission rule and every calculation are untouched.
  */
-function exportHasNoSuccessfulResponses(record: AdaptiveResearchExportV1, provenance: readonly RunModelProvenanceFacts[]): boolean {
-  if (!record.reportSnapshot.legacy?.synthesisReport) return false;
-  return provenance.length > 0 && provenance.every((f) => identityRowRecordedFailure(identityRowFromFacts(f)));
+function exportHasNoSuccessfulResponses(provenance: readonly RunModelProvenanceFacts[]): boolean {
+  // Called only for an export that carries a stored synthesis (both callers return before it otherwise). An empty
+  // roster dispatched no model at all, so it has no successful response either (`every` over no slot is true).
+  return provenance.every((f) => identityRowRecordedFailure(identityRowFromFacts(f)));
 }
 
 /**
@@ -84,7 +85,7 @@ function exportHasNoSuccessfulResponses(record: AdaptiveResearchExportV1, proven
 export function exportRunIndependence(record: AdaptiveResearchExportV1): QualifiedIndependence | null {
   if (!record.reportSnapshot.legacy?.synthesisReport) return null;
   const provenance = exportSlotProvenance(record);
-  if (exportHasNoSuccessfulResponses(record, provenance)) return NO_RESPONSES_RUN;
+  if (exportHasNoSuccessfulResponses(provenance)) return NO_RESPONSES_RUN;
   const run = runIndependence(provenance);
   if (run) return run;
   // Order 30 A2: a stored row that names a slot recorded as a failed call among its positioned slots is an inconsistent
@@ -102,7 +103,7 @@ export function exportPositionSafeReport(record: AdaptiveResearchExportV1): { re
   // An unmarked report is returned as stored, except that agreement statements whose slots are not independent
   // executing models are stated by their executing models (the frozen provenance decides; a pre-6.2b export records
   // none, so its model independence is stated as unverified — nothing is inferred).
-  const noSuccessfulResponses = exportHasNoSuccessfulResponses(record, provenance);
+  const noSuccessfulResponses = exportHasNoSuccessfulResponses(provenance);
   const report = presentPositionSafeReport(stored, { rows: legacy.alignedClaims, roster, provenance, ...(noSuccessfulResponses ? { noSuccessfulResponses } : {}) });
   const view = positionView(report);
   return { report, view, independence: view ? null : verdictIndependence(report) };

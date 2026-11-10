@@ -687,7 +687,10 @@ export function presentIndependenceQualifiedReport<R extends AdaptiveSynthesisRe
 
   // One stored statement (a claim's text): its joined row's qualification, else — when the run itself is not
   // independent — the run's (the row cannot prove its slots independent). Null: shown as stored.
+  const noResponses = input.noSuccessfulResponses === true;
   const statementFor = (claim: unknown, statuses: readonly string[]): Statement => {
+    // Order 30 A1: no slot returned a successful response — every statement, joined or not, is the run's (the constant).
+    if (noResponses) return { row: null, ri: null, t: run! };
     const row = joinRow(rows, claim, statuses);
     if (row) {
       const ri = rowIndependence(row, provenance);
@@ -752,9 +755,9 @@ export function presentIndependenceQualifiedReport<R extends AdaptiveSynthesisRe
   if (!p && Array.isArray(src.whereModelsAgree)) {
     for (const line of src.whereModelsAgree) {
       if (typeof line !== "string") continue;
-      const row = joinLegacyAgreeLine(rows, line);
+      const row = noResponses ? null : joinLegacyAgreeLine(rows, line);
       const ri = row ? rowIndependence(row, provenance) : null;
-      const t = ri ? ri.t : rows ? null : run;
+      const t = ri ? ri.t : rows && !noResponses ? null : run;
       if (!t) continue;
       legacyAgree.set(line, ri ? qualifiedRowText(row, ri) : legacyRunScopeQualifier(t));
       qualifiedKinds.push(t);

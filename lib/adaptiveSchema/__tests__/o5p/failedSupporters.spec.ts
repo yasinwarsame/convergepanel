@@ -16,6 +16,7 @@ import {
   adaptiveTopIndependence,
   adaptiveTopIndependenceStatement,
   qualifiedRowResult,
+  qualifiedRowText,
   qualifiedStatusHeading,
   raisedByText,
   rowIndependence,
@@ -26,6 +27,8 @@ import {
   answerIndependenceNote,
   slotAgreementLabel,
   NO_RESPONSES_RUN,
+  independenceQualification,
+  presentIndependenceQualifiedReport,
 } from "@/lib/adaptiveSchema/verdictIndependence";
 import { presentPositionSafeReport, rowView } from "@/lib/adaptiveSchema/positionPresentation";
 import { runModelProvenanceFromResultRow, type RunModelProvenanceFacts } from "@/lib/panel/runModelIdentity";
@@ -50,6 +53,14 @@ describe("Order 30 A2: a stored claim naming failed slots among its supporters",
     // run scope is unchanged (option (b)): failed slots are no voices, the answered slot is verified
     expect(adaptiveTopIndependence(null, p)).toEqual({ kind: "independent" });
     expect(runIndependence(facts(FIVE.map((m) => failed(m))))).toBeNull();
+  });
+  it("a stored placeholder beside failed supporters is no response either: basis no_responses", () => {
+    const p = [{ modelId: "chatgpt", status: "ok", provider: "openai", invalidProviderOutput: true as const }, { modelId: "claude", status: "timeout" }, { modelId: "grok", status: "ok", provider: "xai" }];
+    expect(adaptiveTopIndependence(["chatgpt", "claude"], p)).toEqual({ kind: "unverified", scope: "supporters", basis: "no_responses" });
+    expect(adaptiveTopIndependence(["chatgpt", "claude", "grok"], p)).toEqual({ kind: "unverified", scope: "supporters", basis: "failed_supporters" });
+  });
+  it("the shared wording is pinned literally", () => {
+    expect(NO_SUCCESSFUL_MODEL_RESPONSES).toBe("No successful model responses. Consensus unavailable. Model independence unverified.");
   });
   it("a supporter slot that does not exist, or whose status is unknown, is unverified without a failure basis", () => {
     const p = facts(FIVE.map(ok));
@@ -83,6 +94,7 @@ describe("Order 30 A2: a stored claim naming failed slots among its supporters",
     const ri = rowIndependence(row, p)!;
     expect(ri.t).toEqual({ kind: "unverified", scope: "supporters", basis: "failed_supporters" });
     expect(ri.dispute).toEqual({ kind: "unverified", scope: "supporters", basis: "no_responses" });
+    expect(qualifiedRowText(row, ri)).toBe("recorded as split: 1 panel slot supports it (ChatGPT); no successful model response disputes it");
     expect(slotAgreementLabel(1, 2, 0, 3, ri)).toBe("1 of 3 panel slots agree · 2 dispute · model independence unverified; includes panel slots with no successful model response");
     const view = rowView(row, ["chatgpt", "claude", "grok"], p);
     expect(view.disputers).toEqual([]);
@@ -119,5 +131,23 @@ describe("Order 30 A2 on the UI presentation (presentPositionSafeReport over res
   it("the UI run scope of an all-failed run with no stored claim joined is unchanged (option (b)): no qualification", () => {
     const rec = { ...CONS(), alignedClaims: [] };
     expect(ui(rec, FIVE.map((m) => failed(m)))).toBe(rec.synthesisReport);
+  });
+});
+
+describe("Order 30 A1: the export-only no-successful-responses override of the qualified view", () => {
+  it("a legacy report (no presentation): every joined 'Where models agree' line and the stored answer state the constant, even when the rows name slots the run does not hold", () => {
+    const rows = clone(records["generic-consensus"].alignedClaims);
+    const line = `“${rows[0].claimText}”`;
+    const report = { whereModelsAgree: [line], unifiedAnswer: "All five models agree.", verdictCard: { topConsensus: rows[0].claimText, topConsensusAgreement: "consensus: all 5 dispatched models support it" } };
+    const out = presentIndependenceQualifiedReport(report, { rows, provenance: [], noSuccessfulResponses: true }) as any;
+    const q = independenceQualification(out)!;
+    expect(q.run).toBe(NO_RESPONSES_RUN);
+    expect(q.legacyAgree.get(line)).toBe(NO_SUCCESSFUL_MODEL_RESPONSES);
+    expect(out.unifiedAnswer).toBe(NO_SUCCESSFUL_MODEL_RESPONSES);
+    expect(out.verdictCard.topConsensusAgreement).toBe(NO_SUCCESSFUL_MODEL_RESPONSES);
+    // control: without the override the same inputs are the ordinary unverified family, never the constant
+    const plain = presentIndependenceQualifiedReport(report, { rows, provenance: [] }) as any;
+    expect(independenceQualification(plain)?.legacyAgree.get(line)).not.toBe(NO_SUCCESSFUL_MODEL_RESPONSES);
+    expect(plain.verdictCard.topConsensusAgreement).not.toBe(NO_SUCCESSFUL_MODEL_RESPONSES);
   });
 });

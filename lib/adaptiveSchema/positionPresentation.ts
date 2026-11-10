@@ -824,23 +824,33 @@ function joinUnavailableText(join: RowJoin): string {
   return !join.row && join.reason === "no_rows" ? POSITION_ROWS_UNAVAILABLE : POSITION_DETAILS_UNAVAILABLE;
 }
 
-function joinedResult(join: RowJoin, roster: readonly string[], provenance: PositionSafeInput["provenance"]): { view: RowView | null; result: string } {
+/**
+ * A stored row's view for the position-safe report. Order 30 A1 (exports only, `noSuccessfulResponses`): no dispatched
+ * slot returned a successful response, so a claim row states NO_SUCCESSFUL_MODEL_RESPONSES and names no supporter or
+ * disputer, whatever its stored cells say. Every other caller: rowView, unchanged.
+ */
+function positionRowView(row: unknown, input: PositionSafeInput): RowView {
+  const view = rowView(row, input.roster, input.provenance);
+  return input.noSuccessfulResponses === true && view.rowType === "claim" ? { ...view, text: NO_SUCCESSFUL_MODEL_RESPONSES, supporters: [], disputers: [] } : view;
+}
+
+function joinedResult(join: RowJoin, input: PositionSafeInput): { view: RowView | null; result: string } {
   if (!join.row) return { view: null, result: joinUnavailableText(join) };
-  const view = rowView(join.row, roster, provenance);
+  const view = positionRowView(join.row, input);
   return { view, result: view.text };
 }
 
 function presentedAnswer(c: PresentedAnswerClaim, rows: readonly unknown[] | null, input: PositionSafeInput, statuses: readonly string[], nameSupporters: boolean): { entry: PresentedAnswerClaim; kind: PresentedRowKind } {
   // A malformed stored entry is kept as stored: the presenters read it without trusting it, as on historical reports.
   if (!isPlainObject(c) || typeof c.claim !== "string") return { entry: c, kind: "other" };
-  const { view, result } = joinedResult(uniqueRowByClaim(rows, c.claim, statuses), input.roster, input.provenance);
+  const { view, result } = joinedResult(uniqueRowByClaim(rows, c.claim, statuses), input);
   const supporters = nameSupporters && view && view.rowType === "claim" && view.supporters.length > 0 ? view.supporters.join(", ") : undefined;
   return { entry: { claim: c.claim, result, ...(view?.contested ? { contested: view.contested } : {}), ...(supporters ? { supporters } : {}) }, kind: presentedRowKind(view) };
 }
 
 function presentedClaim(c: PresentedClaim, join: RowJoin, input: PositionSafeInput): { entry: PresentedClaim; kind: PresentedRowKind } {
   if (!isPlainObject(c) || typeof c.claim !== "string") return { entry: c, kind: "other" };
-  const { view, result } = joinedResult(join, input.roster, input.provenance);
+  const { view, result } = joinedResult(join, input);
   return { entry: { claim: c.claim, result, ...(view?.contested ? { contested: view.contested } : {}) }, kind: presentedRowKind(view) };
 }
 
@@ -873,7 +883,7 @@ export function presentPositionSafeReport<R extends AdaptiveSynthesisReport | nu
     const join = splitRowAt(rows, i, isPlainObject(d) ? d.topic : undefined);
     const stored = storedDisagree[i];
     const entryJoin = join.row && (!isPlainObject(stored) || stored.claim !== d.topic) ? ({ row: null, reason: "mismatch" } as RowJoin) : join;
-    const { view, result } = joinedResult(entryJoin, roster, input.provenance);
+    const { view, result } = joinedResult(entryJoin, input);
     disagreementViews.push(view);
     return { claim: typeof d?.topic === "string" ? d.topic : "", result, ...(view?.contested ? { contested: view.contested } : {}), whySource: "computed" };
   });
@@ -886,7 +896,7 @@ export function presentPositionSafeReport<R extends AdaptiveSynthesisReport | nu
                 unresolvedKinds.push("other");
                 return u;
               }
-              const { view, result } = joinedResult(uniqueRowByClaim(rows, u.claim, ["split"]), roster, input.provenance);
+              const { view, result } = joinedResult(uniqueRowByClaim(rows, u.claim, ["split"]), input);
               unresolvedKinds.push(presentedRowKind(view));
               const claimRow = view && view.rowType === "claim";
               return {
@@ -978,7 +988,7 @@ function presentVerdict(src: AdaptiveSynthesisReport, rows: readonly unknown[] |
   let top: Partial<AdaptiveVerdictCard> = {};
   if (card.topConsensus !== NO_CONSENSUS_IDENTIFIED) {
     const join = uniqueRowByClaim(rows, card.topConsensus, ["consensus", "majority"]);
-    const view = join.row ? rowView(join.row, input.roster, input.provenance) : null;
+    const view = join.row ? positionRowView(join.row, input) : null;
     topKind = presentedRowKind(view);
     if (view && view.rowType === "claim") {
       topIsClaim = true;
@@ -1010,7 +1020,7 @@ function presentVerdict(src: AdaptiveSynthesisReport, rows: readonly unknown[] |
   let keyKind: PresentedRowKind = "other";
   if (card.keyDisagreement) {
     const join = uniqueRowByClaim(rows, card.keyDisagreement, ["split"]);
-    const view = join.row ? rowView(join.row, input.roster, input.provenance) : null;
+    const view = join.row ? positionRowView(join.row, input) : null;
     keyKind = presentedRowKind(view);
     if (view) {
       keyHeading = view.rowType === "claim" ? view.heading : `Key value comparison: ${view.heading.toLowerCase()}`;
