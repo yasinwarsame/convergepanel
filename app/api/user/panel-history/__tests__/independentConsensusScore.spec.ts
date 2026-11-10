@@ -65,16 +65,21 @@ describe("GET /api/user/panel-history — stored consensus score vs independent 
     const deepseek = { provider: "deepseek" };
     runRows = [
       run("two-deepseek", [row("chatgpt", "substituted", deepseek), row("claude", "substituted", deepseek)]),
-      run("one-independent", [row("chatgpt", "ok"), row("claude", "failed", { rawTextTruncated: "" })]),
-      run("missing-credentials", [row("chatgpt", "failed", { rawTextTruncated: "" }), row("claude", "failed", { rawTextTruncated: "" }), row("grok", "ok")]),
+      // C-c (CC-01): verified scenarios record each ok row's runtime provider; provider-less ok rows are pre-6.2a (UV).
+      run("one-independent", [row("chatgpt", "ok", { provider: "openai" }), row("claude", "failed", { rawTextTruncated: "" })]),
+      run("missing-credentials", [row("chatgpt", "failed", { rawTextTruncated: "" }), row("claude", "failed", { rawTextTruncated: "" }), row("grok", "ok", { provider: "xai" })]),
       run("legacy-no-perModel", undefined),
-      run("two-independent", [row("chatgpt", "ok"), row("grok", "ok")]),
+      run("two-independent", [row("chatgpt", "ok", { provider: "openai" }), row("grok", "ok", { provider: "xai" })]),
+      run("pre62a-two-ok", [row("chatgpt", "ok"), row("grok", "ok")]),
+      run("registry-rejected", [row("chatgpt", "ok", { provider: "n/a" }), row("grok", "ok", { provider: "grok" })]),
     ];
     const by = await items();
     for (const k of ["two-deepseek", "one-independent", "missing-credentials"]) {
       expect([k, by[k].synthesisConsensusScore, by[k].synthesisConsensusWithheld]).toEqual([k, undefined, "insufficient_independent_models"]);
     }
-    expect([by["legacy-no-perModel"].synthesisConsensusScore, by["legacy-no-perModel"].synthesisConsensusWithheld]).toEqual([undefined, "independence_unverified"]);
+    for (const k of ["legacy-no-perModel", "pre62a-two-ok", "registry-rejected"]) {
+      expect([k, by[k].synthesisConsensusScore, by[k].synthesisConsensusWithheld]).toEqual([k, undefined, "independence_unverified"]);
+    }
     expect(by["two-independent"].synthesisConsensusScore).toBe(90);
     expect("synthesisConsensusWithheld" in by["two-independent"]).toBe(false);
   });

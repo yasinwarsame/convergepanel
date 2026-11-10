@@ -250,7 +250,9 @@ describe("NIT: an unrecorded substitute merges with a recorded one", () => {
 });
 
 describe("stored-disagreement classifier (lib/panel/storedDisagreementIndependence.ts)", () => {
-  const row = (modelId: string, status: string, provider?: string) => ({ modelId, status, rawTextTruncated: `${modelId} text`, ...(provider ? { provider } : {}) });
+  // C-c (CC-01): a 6.2a+ ok row records its runtime provider (the shared gate verifies the stored run).
+  const OWN: Record<string, string> = { chatgpt: "openai", claude: "anthropic", grok: "xai" };
+  const row = (modelId: string, status: string, provider?: string) => ({ modelId, status, rawTextTruncated: `${modelId} text`, ...(provider ? { provider } : status === "ok" ? { provider: OWN[modelId] } : {}) });
   const runDoc = (perModel: unknown[] | undefined) => (perModel ? { runDocument: { perModel } } : {});
   const item = (slots: string[]) => ({ topic: "Founding date", positionsByModel: Object.fromEntries(slots.map((s) => [s, "x"])), whyTheyDiffer: "y" });
   const classify = (perModel: unknown[] | undefined, it: unknown) => classifyStoredDisagreement(it, storedRunIndependenceContext(runDoc(perModel)));

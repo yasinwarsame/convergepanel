@@ -292,7 +292,9 @@ describe("gate: four distinct categories", () => {
 describe("classifyStoredDisagreement — established classification with >= 2 independent executing models (review of 262ef64, B3)", () => {
   // A run whose usable slots are all independent models (grok failed): the classification is the one established before
   // executing-model attribution (every item genuine), identical to the live panel's crossModelDisagreements.
-  const row = (modelId: string, status: string, text = `${modelId} text`) => ({ modelId, status, rawTextTruncated: text });
+  // C-c (CC-01): a 6.2a+ ok row records its runtime provider (the shared gate verifies the stored run).
+  const OWN: Record<string, string> = { chatgpt: "openai", claude: "anthropic", grok: "xai" };
+  const row = (modelId: string, status: string, text = `${modelId} text`) => ({ modelId, status, rawTextTruncated: text, ...(status === "ok" ? { provider: OWN[modelId] } : {}) });
   const ctx = storedRunIndependenceContext({ runDocument: { perModel: [row("chatgpt", "ok"), row("claude", "ok"), row("grok", "failed", "")] } });
 
   it("an item naming ONE slot in a non-collapsed run stays cross_model (no 'same executing model' without a collapse)", () => {

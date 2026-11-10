@@ -48,11 +48,12 @@ describe("N-D4′", () => {
   });
 
   it.each(["S3mn", "S3mnRecorded", "PRE62A_SUB", "PRE62A_OK", "R_UV", "UNKNOWN_PROVIDER"] as SetName[])(
-    "(c) %s: the identity-only gate (b894828 helpers) would verify it; the corrected gate does not",
+    "(c) %s: the identity-only check (rowsRecordExecutionIdentity) would pass it; the corrected gate does not — and since C-c (CC-01) neither does the stored-run helper",
     (name) => {
       const rows = rowsOf(name);
       expect(rowsRecordExecutionIdentity(rows)).toBe(true);
-      expect(storedRunConsensusIndependence({ runDocument: { perModel: rows.map((r: any) => ({ ...r, rawTextTruncated: r.rawText })) } })).not.toBe("unverified");
+      // Was `.not.toBe("unverified")` (the b894828 identity-only helper); CC-01 routes it through the corrected gate.
+      expect(storedRunConsensusIndependence({ runDocument: { perModel: rows.map((r: any) => ({ ...r, rawTextTruncated: r.rawText })) } })).toBe("unverified");
       expect(executionIdentityVerified(rows)).toBe(false);
     }
   );

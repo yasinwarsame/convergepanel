@@ -20,7 +20,10 @@ import { independentSynthesisResponders, rowsRecordExecutionIdentity } from "@/l
 import type { StructuredSynthesis } from "@/lib/synthesis/structuredSchema";
 
 type PerModel = { modelId: string; status: string; provider?: string; rawTextTruncated?: string };
-const ok = (modelId: string): PerModel => ({ modelId, status: "ok", rawTextTruncated: `${modelId} answer` });
+// C-c (CC-01): a 6.2a+ ok row records its runtime provider (the shared gate verifies the stored run).
+const OWN: Record<string, string> = { chatgpt: "openai", claude: "anthropic", grok: "xai", gemini: "google", perplexity: "perplexity" };
+const ok = (modelId: string): PerModel => ({ modelId, status: "ok", provider: OWN[modelId], rawTextTruncated: `${modelId} answer` });
+const okPre62a = (modelId: string): PerModel => ({ modelId, status: "ok", rawTextTruncated: `${modelId} answer` });
 const ds = (modelId: string): PerModel => ({ modelId, status: "substituted", provider: "deepseek", rawTextTruncated: `${modelId} via deepseek` });
 const failed = (modelId: string): PerModel => ({ modelId, status: "failed", rawTextTruncated: "" });
 
@@ -32,7 +35,12 @@ const ITEMS = [
   { topic: "family names", positionsByModel: { ChatGPT: "a", Claude: "b" }, whyTheyDiffer: "Family-name keys" },
 ];
 
-type Scenario = { label: string; perModel: PerModel[] | null; legacy?: boolean; genuine: string[]; gateLabel?: string };
+/**
+ * `queueGenuine` (C-c CC-01/CC-14): the governance queue judges a STORED run by the shared presentation gate, so a run
+ * whose ok rows record no provider is "independence unverified" there, while the live panel / gate path (decision
+ * consumers, EXCL-01/02/03) keeps its established classification. Absent → the queue equals the live set.
+ */
+type Scenario = { label: string; perModel: PerModel[] | null; legacy?: boolean; genuine: string[]; queueGenuine?: string[]; gateLabel?: string };
 const SCENARIOS: Scenario[] = [
   { label: "one of three requested models responding", perModel: [ok("chatgpt"), failed("claude"), failed("grok")], genuine: [], gateLabel: INSUFFICIENT_INDEPENDENT_MODELS_GATE_LABEL },
   { label: "two responses from the same DeepSeek fallback", perModel: [ds("chatgpt"), ds("claude")], genuine: [], gateLabel: INSUFFICIENT_INDEPENDENT_MODELS_GATE_LABEL },
@@ -45,6 +53,14 @@ const SCENARIOS: Scenario[] = [
   { label: "genuine disagreement (three independent models)", perModel: [ok("chatgpt"), ok("claude"), ok("grok"), ok("gemini")], genuine: ITEMS.map((i) => i.topic) },
   {
     label: "legacy record (resultsCompact rows without provider)",
+    perModel: [okPre62a("chatgpt"), okPre62a("claude"), okPre62a("grok"), failed("gemini")],
+    legacy: true,
+    genuine: ITEMS.map((i) => i.topic),
+    // C-c: the queue presents no stored line of an unverified run as a model disagreement (stricter, presentation only).
+    queueGenuine: [],
+  },
+  {
+    label: "legacy record with provider rows (resultsCompact, 6.2a+)",
     perModel: [ok("chatgpt"), ok("claude"), ok("grok"), failed("gemini")],
     legacy: true,
     genuine: ITEMS.map((i) => i.topic),
@@ -74,11 +90,13 @@ describe.each(SCENARIOS)("run-level surfaces agree — $label", (s) => {
   const liveGenuine = crossModelDisagreements(ITEMS, rows, crossModel);
 
   it("queue classification equals the expected genuine set", () => {
-    expect(queueGenuine).toEqual(s.genuine);
+    expect(queueGenuine).toEqual(s.queueGenuine ?? s.genuine);
   });
 
-  it("live panel / share (crossModelDisagreements) equals the queue", () => {
-    expect(liveGenuine.map((i) => i.topic)).toEqual(queueGenuine);
+  it("live panel / share (crossModelDisagreements) equals the queue (or, for an unverified stored run, keeps its established set)", () => {
+    expect(liveGenuine.map((i) => i.topic)).toEqual(s.genuine);
+    if (s.queueGenuine === undefined) expect(liveGenuine.map((i) => i.topic)).toEqual(queueGenuine);
+    else expect(queueGenuine.every((t) => s.genuine.includes(t))).toBe(true); // the queue is only ever stricter
   });
 
   it("gate presents only the shared genuine set; label for reduced coverage; panel verdict's top disagreement is the first genuine", () => {

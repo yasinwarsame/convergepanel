@@ -84,10 +84,11 @@ describe("GET /api/governance/queue — research consensus score vs independent 
     const deepseek = { provider: "deepseek" };
     runRows = [
       run("two-deepseek", [row("chatgpt", "substituted", deepseek), row("claude", "substituted", deepseek)]),
-      run("one-independent", [row("chatgpt", "ok"), row("claude", "failed", { rawTextTruncated: "" })]),
-      run("missing-credentials", [row("chatgpt", "failed", { rawTextTruncated: "" }), row("grok", "ok")]),
+      // C-c (CC-01): verified scenarios record each ok row's runtime provider.
+      run("one-independent", [row("chatgpt", "ok", { provider: "openai" }), row("claude", "failed", { rawTextTruncated: "" })]),
+      run("missing-credentials", [row("chatgpt", "failed", { rawTextTruncated: "" }), row("grok", "ok", { provider: "xai" })]),
       run("legacy-no-perModel", undefined, { consensusScore: 88 }),
-      run("two-independent", [row("chatgpt", "ok"), row("grok", "ok")]),
+      run("two-independent", [row("chatgpt", "ok", { provider: "openai" }), row("grok", "ok", { provider: "xai" })]),
     ];
     const by = await rows();
     for (const k of ["two-deepseek", "one-independent", "missing-credentials"]) {

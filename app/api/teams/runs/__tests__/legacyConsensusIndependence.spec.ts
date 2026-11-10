@@ -202,9 +202,10 @@ const html = (item: unknown) => renderToStaticMarkup(createElement(LegacyReviewL
 describe("GET /api/teams/runs?version=1 — legacy consensus score vs the linked run's independent executing models", () => {
   it("two DeepSeek substitutions / one independent model → withheld (insufficient); two independent → shown plainly", async () => {
     seedRun("r-ds2", [pm("chatgpt", "substituted", "deepseek"), pm("claude", "substituted", "deepseek")]);
-    seedRun("r-one", [pm("chatgpt", "ok"), pm("claude", "failed")]);
-    seedRun("r-two", [pm("chatgpt", "ok"), pm("grok", "ok")]);
-    seedRun("r-mixed", [pm("chatgpt", "substituted", "deepseek"), pm("claude", "substituted", "deepseek"), pm("grok", "ok")]);
+    // C-c (CC-01): verified scenarios record each ok row's runtime provider (the shared gate).
+    seedRun("r-one", [pm("chatgpt", "ok", "openai"), pm("claude", "failed")]);
+    seedRun("r-two", [pm("chatgpt", "ok", "openai"), pm("grok", "ok", "xai")]);
+    seedRun("r-mixed", [pm("chatgpt", "substituted", "deepseek"), pm("claude", "substituted", "deepseek"), pm("grok", "ok", "xai")]);
     for (const [id, runId] of [["ds2", "r-ds2"], ["one", "r-one"], ["two", "r-two"], ["mixed", "r-mixed"]]) teamRunDocs.set(id, legacyDoc({ runId, consensusScore: 72 }));
     const by = await legacyItems();
     for (const id of ["ds2", "one"]) {
@@ -216,6 +217,18 @@ describe("GET /api/teams/runs?version=1 — legacy consensus score vs the linked
       expect([id, by[id].consensusScore, "consensusWithheld" in by[id]]).toEqual([id, 72, false]);
       expect(html(by[id])).toContain("<span>Consensus 72/100</span>");
       expect(html(by[id])).not.toContain("independence");
+    }
+  });
+
+  it("C-c (CC-01/CC-17): provider-less (pre-6.2a) and registry-rejected rows → withheld as unverified", async () => {
+    seedRun("r-pre62a", [pm("chatgpt", "ok"), pm("grok", "ok")]);
+    seedRun("r-rejected", [pm("chatgpt", "ok", "None"), pm("grok", "ok", "grok")]);
+    teamRunDocs.set("pre62a", legacyDoc({ runId: "r-pre62a", consensusScore: 72 }));
+    teamRunDocs.set("rejected", legacyDoc({ runId: "r-rejected", consensusScore: 72 }));
+    const by = await legacyItems();
+    for (const id of ["pre62a", "rejected"]) {
+      expect([id, by[id].consensusScore, by[id].consensusWithheld]).toEqual([id, 72, "independence_unverified"]);
+      expect(html(by[id])).toContain(CONSENSUS_WITHHELD_TEXT.independence_unverified);
     }
   });
 

@@ -32,6 +32,12 @@ const PERSISTED: Record<string, unknown[] | undefined> = {
   subsPlusGrok: [row("chatgpt", "substituted", { provider: "deepseek" }), row("claude", "substituted", { provider: "deepseek" }), row("grok", "ok", { provider: "xai" })],
   realPlusUnrecordedSub: [row("grok", "ok"), row("chatgpt", "substituted")],
   okButEmptyText: [row("chatgpt", "ok"), row("grok", "ok", { rawTextTruncated: "   " })],
+  // C-c (CC-01) adversarial fixtures.
+  okButEmptyTextRecorded: [row("chatgpt", "ok", { provider: "openai" }), row("grok", "ok", { provider: "xai", rawTextTruncated: "   " })],
+  registryRejected: [row("chatgpt", "ok", { provider: "None" }), row("grok", "ok", { provider: "acme" })],
+  oneAnswerStoredFive: [row("chatgpt", "ok", { provider: "openai" }), ...["claude", "grok", "perplexity", "gemini"].map((m) => row(m, "timeout", { rawTextTruncated: "" }))],
+  allTimeout: ["chatgpt", "claude", "grok"].map((m) => row(m, "timeout", { rawTextTruncated: "" })),
+  placeholderPlusOne: [row("chatgpt", "ok", { rawTextTruncated: "Mock response from chatgpt (no API key configured)" }), row("grok", "ok", { provider: "xai" })],
 };
 
 const doc = (perModel: unknown, extra: Record<string, unknown> = {}) => ({
@@ -48,11 +54,18 @@ describe("storedRunConsensusIndependence", () => {
     ["twoDeepSeekSubs", "insufficient"],
     ["oneIndependent", "insufficient"],
     ["missingCredentials", "insufficient"],
-    ["unrecordedSubs", "insufficient"],
-    ["okButEmptyText", "insufficient"],
+    // C-c (CC-01): judged by the shared gate — an unrecorded substitute, or an ok row without a registered provider,
+    // leaves the run unverified (was "insufficient" / "independent" under the identity-only rule).
+    ["unrecordedSubs", "unverified"],
+    ["okButEmptyText", "unverified"],
     ["twoIndependent", "independent"],
     ["subsPlusGrok", "independent"],
-    ["realPlusUnrecordedSub", "independent"],
+    ["realPlusUnrecordedSub", "unverified"],
+    ["okButEmptyTextRecorded", "insufficient"],
+    ["registryRejected", "unverified"],
+    ["oneAnswerStoredFive", "insufficient"],
+    ["allTimeout", "unverified"],
+    ["placeholderPlusOne", "insufficient"],
   ])("%s → %s", (k, expected) => {
     expect(storedRunConsensusIndependence(doc(PERSISTED[k]))).toBe(expected);
   });

@@ -32,6 +32,9 @@
 
 import { coerceStatus } from "./normalize";
 import { canonicalProvider } from "./providerRegistry";
+// C-c (CC-01): the shared gate, read only by `storedRunConsensusIndependence` at call time (executionIdentity imports
+// this module too; no top-level code of either module runs the other's functions, so the cycle is inert).
+import { runExecutionIdentity } from "./executionIdentity";
 
 /** Why a later slot answered by an already-counted substitute model is not an agreement input (adaptive runs). */
 export const REPEATED_SUBSTITUTE_EXCLUDED =
@@ -177,10 +180,25 @@ export function rowsRecordExecutionIdentity(rows: readonly unknown[] | null | un
   });
 }
 
+/**
+ * C-c (CC-01): the stored run's independence is judged by the ONE shared presentation gate
+ * (lib/panel/executionIdentity.ts `runExecutionIdentity`) over its persisted rows — nothing is re-implemented here:
+ *  - "unverified": no persisted rows, a row without a recorded status, or the gate fails (an ok row without a
+ *    registered provider — every pre-6.2a row —, an unrecorded or registry-rejected substitute, text whose validity
+ *    cannot be established, an unknown status, or no answering row at all);
+ *  - "insufficient": the gate verifies the rows and fewer than two independent executing models answered (a substitute
+ *    model in several slots counts once; failed slots and stored placeholder rows never answer);
+ *  - "independent": the gate verifies the rows and K ≥ 2.
+ * Presentation only (lists, history, Team queue, governance-queue additive keys). The primitives above
+ * (`executingModelKey`, `resolveExecutingModelKeys`, `independentVoices`, `independentSynthesisResponders`,
+ * `meetsIndependentSynthesisMinimum`) are unchanged (EXCL-01): they feed the verification gate.
+ */
 export function storedRunConsensusIndependence(data: Record<string, unknown> | null | undefined): StoredConsensusIndependence {
   const rows = storedRunPerModelRows(data);
   if (!rows) return "unverified";
-  return meetsIndependentSynthesisMinimum(rows) ? "independent" : "insufficient";
+  const identity = runExecutionIdentity(rows);
+  if (!identity.verified || identity.independentModels === null) return "unverified";
+  return identity.independentModels >= MIN_INDEPENDENT_SYNTHESIS_MODELS ? "independent" : "insufficient";
 }
 
 /** Why a stored consensus score is withheld from a list surface (absent when the score is shown). */

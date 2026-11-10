@@ -480,10 +480,11 @@ describe("GET /api/user/workspace/runs — pagination invariants", () => {
 
 describe("GET /api/user/workspace/runs — DTO shape", () => {
   it("returns the expected summary fields, no raw Firestore doc, no internal fields", async () => {
-    // Two independent executing models persisted → the stored score is listed.
+    // Two independent executing models persisted, each with its runtime provider (C-c CC-01: the shared gate) → the
+    // stored score is listed.
     const perModel = [
-      { modelId: "chatgpt", status: "ok", rawTextTruncated: "A" },
-      { modelId: "claude", status: "ok", rawTextTruncated: "B" },
+      { modelId: "chatgpt", status: "ok", rawTextTruncated: "A", provider: "openai" },
+      { modelId: "claude", status: "ok", rawTextTruncated: "B", provider: "anthropic" },
     ];
     seedRun("run-1", UID, WS_ID, ts(1000), { question: "What is the capital of France?", selectedModels: ["chatgpt", "claude"], runDocument: { perModel }, synthesisConsensusSummary: { overallConsensusScore: 88 }, governanceStatus: "approved" });
     const res = await GET(buildRequest());

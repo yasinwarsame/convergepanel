@@ -52,7 +52,9 @@ import type { ModelResult } from "@/lib/types";
 import type { StructuredSynthesis } from "@/lib/synthesis/structuredSchema";
 
 const TEXT = "Paris is the capital of France. The city has been the seat of the French government for centuries.";
-const ok = (modelId: string) => ({ modelId, status: "ok", rawText: TEXT, latencyMs: 5 }) as ModelResult;
+// C-c (CC-01): a 6.2a+ ok row records its runtime provider (the queue's stored-run judgement is the shared gate).
+const OWN_PROVIDER: Record<string, string> = { chatgpt: "openai", claude: "anthropic", grok: "xai", gemini: "google", perplexity: "perplexity" };
+const ok = (modelId: string) => ({ modelId, status: "ok", rawText: TEXT, latencyMs: 5, provider: OWN_PROVIDER[modelId] }) as ModelResult;
 const sub = (modelId: string) => ({ modelId, status: "substituted", rawText: TEXT, latencyMs: 5, provider: "deepseek" }) as ModelResult;
 /** ChatGPT and Claude both answered by the DeepSeek fallback, plus Grok: two independent executing models, collapsed. */
 const COLLAPSED = [sub("chatgpt"), sub("claude"), ok("grok")];

@@ -213,7 +213,8 @@ describe("T-teamq: GET /api/teams/runs?version=1 — Phase 0 DTO equals 35933c8;
     if (process.env.PHASE0_GOLDEN_OUT) return;
     const withheld = Object.entries(grid.main.items).filter(([, i]) => i.dto.consensusWithheld);
     // C-b (CB-01, PQ-1 (a)): claim-v-ind's own-provider rows record no provider, so the shared gate withholds its score.
-    expect(withheld.map(([id]) => id).sort()).toEqual(["claim-v-ds", "claim-v-ind", "claim-v-none", "claim-v-one", "fc", "norows", "one", "statusless"]);
+    // C-c (CC-01, PQ-1 (a)): pre62a / s3mn research rows (provider-less ok row / unrecorded substitute) are withheld too.
+    expect(withheld.map(([id]) => id).sort()).toEqual(["claim-v-ds", "claim-v-ind", "claim-v-none", "claim-v-one", "fc", "norows", "one", "pre62a", "s3mn", "statusless"]);
     for (const [id, i] of withheld) {
       expect([id, typeof i.dto.consensusScore]).toEqual([id, "number"]);
       expect([id, /Consensus \d+\/100/.test(i.consensusText ?? "")]).toEqual([id, false]);

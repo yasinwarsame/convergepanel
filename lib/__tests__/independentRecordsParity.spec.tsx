@@ -108,7 +108,9 @@ function researchRecord(i: number) {
   const perModel = slots.map((s) => {
     if (!answering.includes(s)) return { modelId: s, status: "failed", rawTextTruncated: "" };
     if (answering.indexOf(s) === subIdx) return { modelId: s, status: "substituted", provider: "deepseek", rawTextTruncated: `${s} via ds ${text(3)}` };
-    return { modelId: s, status: "ok", rawTextTruncated: `${s} ${text(4)}` };
+    // C-c (CC-01): a 6.2a+ research row records its runtime provider (no generator draw; 8584211 ignored it on an
+    // own-provider row), so the queue's stored-run judgement (the shared gate) verifies it.
+    return { modelId: s, status: "ok", provider: OWN_PROVIDER[s], rawTextTruncated: `${s} ${text(4)}` };
   });
   const items: any[] = [];
   const n = 1 + Math.floor(r() * 4);

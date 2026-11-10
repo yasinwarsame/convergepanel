@@ -355,9 +355,10 @@
       "policyFlags": [],
       "blockedByPolicy": false,
       "governanceReviewRequired": false,
-      "consensusScore": 72
+      "consensusScore": 72,
+      "consensusWithheld": "independence_unverified"
      },
-     "consensusText": "Consensus 72/100"
+     "consensusText": "Consensus score withheld (model independence not recorded)"
     },
     "pre62a": {
      "dto": {
@@ -369,9 +370,10 @@
       "policyFlags": [],
       "blockedByPolicy": false,
       "governanceReviewRequired": false,
-      "consensusScore": 72
+      "consensusScore": 72,
+      "consensusWithheld": "independence_unverified"
      },
-     "consensusText": "Consensus 72/100"
+     "consensusText": "Consensus score withheld (model independence not recorded)"
     },
     "one": {
      "dto": {
@@ -453,5 +455,6 @@
     }
    }
   }
- }
+ },
+ "_presentationRerecordedCC": "C-c (Order 33/34, PQ-1 (a)): consensusWithheld and the rendered consensus text of these rows only re-recorded against the authorized C-c diff (CC-01: research rows judged by the shared gate — provider-less ok rows / unrecorded substitutes are unverified); base keys untouched. Rows: main:pre62a, main:s3mn"
 }
