@@ -1,5 +1,11 @@
 /**
  * Base Connector Class
+ *
+ * DEAD CODE — nothing imports this class. The live connectors are the plain
+ * functions registered in CONNECTOR_MAP (lib/connectors/index.ts), and they
+ * never mock a response: a missing ChatGPT/Claude key fails closed with
+ * errorCode "provider_not_configured" (lib/connectors/providerNotConfigured.ts).
+ * The "mock response" behaviour described below is historical; do not revive it.
  * 
  * This is the abstract base class for all LLM model connectors (ChatGPT, Claude, etc.).
  * It provides common functionality that all connectors share:

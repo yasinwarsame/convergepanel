@@ -3,27 +3,140 @@
  * The export snapshot already carries everything the view needs — the stored rows (legacy.alignedClaims), the
  * dispatched slots (reportSnapshot.models) and the frozen per-slot provenance (reportSnapshot.runProvenance) — so the
  * composers state positions exactly as the report view does. The JSON export is not built from this view: it keeps the
- * stored report verbatim. An unmarked report is returned unchanged.
+ * stored report verbatim. An unmarked report is returned unchanged unless its agreement statements need their executing
+ * models stated (verdictIndependence.ts), with `independence` carrying the verdict section's headings in that case.
  *
  * Pure and client-safe: no "server-only", no I/O.
  */
 
 import type { AdaptiveResearchExportV1 } from "./researchExport";
 import type { AdaptiveSynthesisReport } from "./types";
-import { readFrozenRunProvenance } from "./exportRunProvenance";
-import { runModelProvenanceFromExport } from "@/lib/panel/runModelIdentity";
+import { readFrozenRunExecutionProvenance } from "./exportRunProvenance";
+import { runModelProvenanceFromExport, type RunModelProvenanceFacts } from "@/lib/panel/runModelIdentity";
 import { PositionView, VERDICT_SECTION_HEADINGS, positionView, presentPositionSafeReport } from "./positionPresentation";
+import { FAILED_SUPPORTERS_RUN, NO_RESPONSES_RUN, SLOT_AGREEMENT_FIELD, SLOT_AGREEMENT_NOTE, slotAgreementWord, independenceQualification, qualifiedTopHeading, reportStatesAgreement, rowIndependence, storedSynthesisRunIndependence, type QualifiedIndependence } from "./verdictIndependence";
+import { identityRowFromFacts, identityRowRecordedFailure } from "@/lib/panel/executionIdentity";
 
-export function exportPositionSafeReport(record: AdaptiveResearchExportV1): { report: AdaptiveSynthesisReport | undefined; view: PositionView | null } {
+/**
+ * An UNMARKED report's verdict section headings when its top claim's supporting slots are not independent executing
+ * models (verdictIndependence.ts): the section is "Where models agree / disagree (counted by executing model)" or
+ * "(model independence unverified)", and the top claim is headed as on the report view. Null otherwise — the composers
+ * then use their fixed headings, exactly as before.
+ */
+export interface ExportVerdictIndependence {
+  sectionHeading: string;
+  topHeading: string;
+}
+
+export const EXPORT_VERDICT_SECTION_COUNTED_BY_EXECUTING_MODEL = "Where models agree / disagree (counted by executing model)";
+export const EXPORT_VERDICT_SECTION_INDEPENDENCE_UNVERIFIED = "Where models agree / disagree (model independence unverified)";
+
+/**
+ * The Decision Support schema id (dsLabelWording.DECISION_SUPPORT_SCHEMA_ID), stated here so this module does not import
+ * the S-E.2 wording module (the DS render-provenance graph pins the export renderers' imports). Pinned equal in
+ * exportOutcomeIndependence.spec.tsx.
+ */
+export const DECISION_SUPPORT_SCHEMA_ID = "decision_support";
+
+/** The composers' fixed top sub-label, kept when the top claim itself is supported by independent executing models. */
+const EXPORT_TOP_LABEL = "Agreement";
+
+function verdictIndependence(report: AdaptiveSynthesisReport | undefined): ExportVerdictIndependence | null {
+  const q = independenceQualification(report);
+  // c16: the section states the run's slots as a whole (its key row, too, is counted by panel slot), not only the top.
+  const t = q?.top ?? q?.run;
+  if (!q || !t) return null;
+  return {
+    sectionHeading: t.kind === "unverified" ? EXPORT_VERDICT_SECTION_INDEPENDENCE_UNVERIFIED : EXPORT_VERDICT_SECTION_COUNTED_BY_EXECUTING_MODEL,
+    topHeading: q.top ? qualifiedTopHeading(q.top, q.topStatus) : EXPORT_TOP_LABEL,
+  };
+}
+
+function exportRoster(record: AdaptiveResearchExportV1): string[] {
+  return (record.reportSnapshot.models ?? []).map((m) => m.modelId as string);
+}
+
+/**
+ * The export's per-slot provenance for judging model independence. A pre-6.2b export carries no frozen provenance
+ * (owner ruling, c16 MINOR-3): every slot is then a slot whose execution is NOT RECORDED — no `substituted` fact — so
+ * every agreement statement is stated as "model independence unverified"; slot names stay the logical slot only (the
+ * labels read `substituted === true` alone) and no execution data is manufactured. A version-2 snapshot's frozen
+ * per-slot outcome becomes each slot's recorded status (runModelProvenanceFromExport); a version-1 entry has none, so
+ * the shared gate reads the export as "model independence unverified" (Order 29 A1 / A2, owner-accepted).
+ */
+function exportSlotProvenance(record: AdaptiveResearchExportV1): RunModelProvenanceFacts[] {
+  const roster = exportRoster(record);
+  const frozen = readFrozenRunExecutionProvenance(record.reportSnapshot.runProvenance);
+  return frozen ? roster.map((modelId) => runModelProvenanceFromExport(frozen, modelId)) : roster.map((modelId) => ({ modelId }));
+}
+
+/**
+ * Order 30 A1 (owner option (i), standing attribution default): an export that carries a stored synthesis but whose
+ * every dispatched slot (none, for an empty roster) is RECORDED (version-2 frozen outcome) as a failed call has no successful model response, so it
+ * makes no agreement, consensus or support-count claim: its run is NO_RESPONSES_RUN and every statement reads
+ * NO_SUCCESSFUL_MODEL_RESPONSES. Only the export path decides this — the shared run-scope rule (and so the UI and the
+ * 2c17feee oracle) is untouched, and an export without a stored synthesis (the real all-failed record) is unchanged.
+ * Stored values, the synthesis admission rule and every calculation are untouched.
+ */
+function exportHasNoSuccessfulResponses(provenance: readonly RunModelProvenanceFacts[]): boolean {
+  // Called only for an export that carries a stored synthesis or Milestone-2 result (callers return before it otherwise). An empty
+  // roster dispatched no model at all, so it has no successful response either (`every` over no slot is true).
+  return provenance.every((f) => identityRowRecordedFailure(identityRowFromFacts(f)));
+}
+
+/**
+ * The exported run's model independence (the report status summary's level): null when every slot is its own recorded
+ * executing model; a pre-6.2b export (no frozen provenance) is unverified. A legacy-family report with a stored synthesis
+ * and (Order 30 round 2, review m-C) a Milestone-2 report — its stored schema result states the level — are judged from
+ * the same frozen provenance by the stored-synthesis run rule (storedSynthesisRunIndependence). Decision Support exports
+ * keep their own S-E.2 status summary (frozen DS semantics) and a legacy record without a stored synthesis (the real
+ * all-failed record) states no level: both → null (their summary is unchanged).
+ */
+export function exportRunIndependence(record: AdaptiveResearchExportV1): QualifiedIndependence | null {
+  const legacySynthesis = !!record.reportSnapshot.legacy?.synthesisReport;
+  // A Milestone-2 summary states agreement only as a consensus tier (strong / moderate / weak); "Not scored" / "Split"
+  // state none, so there is nothing to qualify and those exports render exactly as before.
+  const tier = record.reportSnapshot.consensusLevel;
+  const milestone2 =
+    !legacySynthesis && record.schemaFamily === "milestone2" && record.schemaId !== DECISION_SUPPORT_SCHEMA_ID && (tier === "strong" || tier === "moderate" || tier === "weak");
+  if (!legacySynthesis && !milestone2) return null;
+  const provenance = exportSlotProvenance(record);
+  if (exportHasNoSuccessfulResponses(provenance)) return NO_RESPONSES_RUN;
+  // A Milestone-2 result's level states agreement whenever it is a consensus tier; a legacy report as it states it.
+  const run = storedSynthesisRunIndependence(provenance, legacySynthesis ? reportStatesAgreement(record.reportSnapshot.legacy!.synthesisReport) : true);
+  if (run) return run;
+  // Order 30 A2: a stored row that names a slot recorded as a failed call among its positioned slots is an inconsistent
+  // record — the summary level is then the gate, never a "Strong consensus" tier built on that row's stored count.
+  const rows = record.reportSnapshot.legacy?.alignedClaims;
+  return Array.isArray(rows) && rows.some((r) => { const t = rowIndependence(r, provenance)?.t; return t?.kind === "unverified" && t.basis !== undefined; }) ? FAILED_SUPPORTERS_RUN : null;
+}
+
+/**
+ * Order 31 R-2: a Milestone-2 report has no verification gate — its summary level is the stored schema agreement ratio.
+ * When its run is not independent executing models it is labelled by panel slot, as the Milestone-2 UI labels it
+ * (SLOT_AGREEMENT_FIELD), and is unavailable with no / one answering model; never "Verification gate: Pass / Fail".
+ * Null for every other export (legacy-family reports keep their gate label; Decision Support keeps S-E.2).
+ */
+export function exportMilestone2SummaryLevel(record: AdaptiveResearchExportV1): { field: string; word: string; note: string } | null {
+  if (record.reportSnapshot.legacy?.synthesisReport || record.schemaFamily !== "milestone2" || record.schemaId === DECISION_SUPPORT_SCHEMA_ID) return null;
+  const run = exportRunIndependence(record);
+  if (!run) return null;
+  return { field: SLOT_AGREEMENT_FIELD, word: slotAgreementWord(record.reportSnapshot.consensusLevel, run), note: SLOT_AGREEMENT_NOTE };
+}
+
+export function exportPositionSafeReport(record: AdaptiveResearchExportV1): { report: AdaptiveSynthesisReport | undefined; view: PositionView | null; independence: ExportVerdictIndependence | null } {
   const legacy = record.reportSnapshot.legacy;
   const stored = legacy?.synthesisReport;
-  if (!legacy || !stored) return { report: stored, view: null };
-  const roster = (record.reportSnapshot.models ?? []).map((m) => m.modelId as string);
-  const frozen = readFrozenRunProvenance(record.reportSnapshot.runProvenance);
-  // A pre-6.2b export carries no frozen provenance: slots are then named by their logical slot only.
-  const provenance = frozen ? roster.map((modelId) => runModelProvenanceFromExport(frozen, modelId)) : null;
-  const report = presentPositionSafeReport(stored, { rows: legacy.alignedClaims, roster, provenance });
-  return { report, view: positionView(report) };
+  if (!legacy || !stored) return { report: stored, view: null, independence: null };
+  const roster = exportRoster(record);
+  const provenance = exportSlotProvenance(record);
+  // An unmarked report is returned as stored, except that agreement statements whose slots are not independent
+  // executing models are stated by their executing models (the frozen provenance decides; a pre-6.2b export records
+  // none, so its model independence is stated as unverified — nothing is inferred).
+  const noSuccessfulResponses = exportHasNoSuccessfulResponses(provenance);
+  const report = presentPositionSafeReport(stored, { rows: legacy.alignedClaims, roster, provenance, ...(noSuccessfulResponses ? { noSuccessfulResponses } : {}) });
+  const view = positionView(report);
+  return { report, view, independence: view ? null : verdictIndependence(report) };
 }
 
 /** The composers' verdict section heading on a marked report whose top and key rows are claims (otherwise PositionView.verdict.sectionHeading names what they are). */

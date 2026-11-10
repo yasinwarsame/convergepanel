@@ -9,7 +9,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { FailedResultsNote } from "@/components/adaptive/shared";
-import { RunSlotStatusContext, didNotRespondText, slotDidNotRespond } from "@/components/adaptive/RunSlotStatusContext";
+import { RunSlotStatusContext, UNRECOGNIZED_STATUS_TEXT, didNotRespondText, slotDidNotRespond, slotStatusUnrecognized } from "@/components/adaptive/RunSlotStatusContext";
 import AnalysisAvailabilityNotice, { ANALYSIS_NOTICE_LINES, analysisAvailabilityLines } from "@/components/adaptive/AnalysisAvailabilityNotice";
 import { SAVED_COPY_RETRIED_INCLUDED, SAVED_COPY_SHORTENED, SAVED_COPY_UNSTRUCTURED } from "@/lib/adaptiveSchema/savedCopyNotice";
 
@@ -27,13 +27,38 @@ describe("D-4 failure labels", () => {
     expect(out).not.toContain("Empty response");
   });
 
+  // Order 30 round 2 (review m-E): the recorded status is the exact literal ("failed"); the label used to be passed as the
+  // status itself and only matched because any non-ok string counted as a non-response.
   it.each([
-    ["timeout", "did not respond in time"],
-    ["refused", "declined to answer"],
-    ["rate_limited", "rate-limited by its provider"],
-    ["failed (what saved rows actually record)", "did not respond and was excluded from comparison."],
-  ])("recorded status %s → %s", (status, phrase) => {
+    ["timeout", "timeout", "did not respond in time"],
+    ["refused", "refused", "declined to answer"],
+    ["rate_limited", "rate_limited", "rate-limited by its provider"],
+    ["failed (what saved rows actually record)", "failed", "did not respond and was excluded from comparison."],
+    ["error", "error", "did not respond and was excluded from comparison."],
+  ])("recorded status %s → %s", (_label, status, phrase) => {
     expect(html(createElement(FailedResultsNote, { failed: [failedRow("gemini")] }), new Map([["gemini", status]]))).toContain(phrase);
+  });
+
+  it.each([["OK "], ["Ok"], ["pending"], ["toString"], ["__proto__"], ["constructor"], ["hasOwnProperty"], ["answered"], ["TIMEOUT"]])(
+    "Order 30 m-E: a crafted / unrecognized status %p is unknown — never 'did not respond' (the shared exact map)",
+    (status) => {
+      expect(slotDidNotRespond(new Map([["gemini", status]]), "gemini")).toBeNull();
+      const out = html(createElement(FailedResultsNote, { failed: [failedRow("gemini")] }), new Map([["gemini", status]]));
+      expect(out).not.toContain("did not respond");
+      // Order 31 (n-E): unknown — never a format verdict, which would assert the model responded.
+      expect(out).not.toContain("returned an incompatible format");
+      expect(out).toContain(UNRECOGNIZED_STATUS_TEXT);
+    }
+  );
+
+  it("Order 31 (n-E): only a present, non-empty, unrecognized status is unknown; exact literals, an empty / missing status and no record keep their wording", () => {
+    for (const s of ["OK ", "Ok", "pending", "toString", "__proto__", "constructor", "hasOwnProperty", "answered", "TIMEOUT"]) expect([s, slotStatusUnrecognized(new Map([["gemini", s]]), "gemini")]).toEqual([s, true]);
+    for (const s of ["ok", "substituted", "failed", "error", "timeout", "refused", "rate_limited", ""]) expect([s, slotStatusUnrecognized(new Map([["gemini", s]]), "gemini")]).toEqual([s, false]);
+    expect(slotStatusUnrecognized(new Map([["chatgpt", "OK "]]), "gemini")).toBe(false);
+    expect(slotStatusUnrecognized(null, "gemini")).toBe(false);
+    // An empty status (a row from before statuses were recorded): the original wording, as without the record.
+    expect(html(createElement(FailedResultsNote, { failed: [failedRow("gemini")] }), new Map([["gemini", ""]]))).toContain("returned an incompatible format");
+    expect(UNRECOGNIZED_STATUS_TEXT).toBe("has a recorded call status this version does not recognize, so what happened is not stated; it was excluded from comparison.");
   });
 
   it("a model that RESPONDED (recorded ok) but failed validation keeps 'incompatible format' and its parse details", () => {

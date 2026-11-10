@@ -21,7 +21,9 @@ import {
   CausalFactorCategory,
   RiskLevel,
 } from "@/lib/adaptiveSchema/types";
-import { Card, EmptyStateCard, SectionLabel, TintBadge, formatModelCoverage, SlotChip } from "./shared";
+import { Card, EmptyStateCard, SectionLabel, TintBadge, formatSlotCoverage, SlotChip } from "./shared";
+import { useQualifiedExecutionIdentity } from "./RunExecutionIdentityContext";
+import { ACROSS_PANEL_SLOTS, slotCoverageNote } from "@/lib/panel/executionIdentity";
 import { ModelId } from "@/lib/types";
 
 const CATEGORY_LABEL: Record<CausalFactorCategory, string> = {
@@ -34,14 +36,16 @@ const CATEGORY_LABEL: Record<CausalFactorCategory, string> = {
 };
 
 function CoverageBadge({ coverageCount, totalModels }: { coverageCount: number; totalModels: number }) {
+  const slotIdentity = useQualifiedExecutionIdentity();
   return (
     <TintBadge tone={coverageCount / Math.max(totalModels, 1) >= 0.6 ? "accent" : "warning"} title="How many models raised this — not a certainty score">
-      {formatModelCoverage({ covered: coverageCount, total: totalModels, mode: "covered" })}
+      {formatSlotCoverage({ covered: coverageCount, total: totalModels, mode: "covered" }, slotIdentity)}
     </TintBadge>
   );
 }
 
 function FactorRow({ factor }: { factor: AggregatedCausalFactor }) {
+  const slotIdentity = useQualifiedExecutionIdentity();
   return (
     <li className="py-1.5">
       <div className="flex flex-wrap items-center gap-2">
@@ -49,7 +53,7 @@ function FactorRow({ factor }: { factor: AggregatedCausalFactor }) {
         <CoverageBadge coverageCount={factor.coverageCount} totalModels={factor.totalModels} />
         {factor.evidenceStrength === "contested" && (
           <TintBadge tone="danger" title="The panel itself flagged genuine disagreement about this factor">
-            Contested
+            {slotIdentity ? `Contested ${ACROSS_PANEL_SLOTS}` : "Contested"}
           </TintBadge>
         )}
         {factor.sourceBacked && (
@@ -87,6 +91,7 @@ export default function CausalExplanationView({
 }) {
   const { directAnswer, factors, causalChain, confounders, disputedInterpretations, unknowns, testsOrEvidenceNeeded, totalModels } =
     causalExplanation;
+  const slotIdentity = useQualifiedExecutionIdentity();
 
   if (totalModels === 0) {
     return <EmptyStateCard state="no_models" />;
@@ -246,10 +251,14 @@ export default function CausalExplanationView({
           <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-slate-500">
             Panel detail ({totalModels} model{totalModels === 1 ? "" : "s"})
           </summary>
+          {slotIdentity ? (
+            <p className="mt-1.5 text-xs text-slate-500">{slotCoverageNote(slotIdentity)}</p>
+          ) : (
           <p className="mt-1.5 text-xs text-slate-500">
             Coverage badges above show how many models converged on each point — this reflects panel agreement, not independent proof of
             causality.
           </p>
+          )}
           {contributingModels.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1">
               {contributingModels.map((modelId) => (

@@ -39,6 +39,7 @@ import type { UserProfile } from "@/lib/types";
 import { applyTeamGovernancePipeline, mergeGovernanceIntoBody } from "@/lib/governance/teamGovernancePipeline";
 import { evaluateAndStoreGovernance } from "@/lib/governance/evaluateAndStore";
 import type { GovernanceInput } from "@/lib/governance/evaluateGovernance";
+import { storedVerificationConsensusIndependence } from "@/lib/panel/storedVerificationIndependence";
 import { resolveClaimVerificationOrigin, type ClaimVerificationOrigin } from "@/lib/verification/claimVerificationOrigin";
 
 export const runtime = "nodejs";
@@ -411,6 +412,8 @@ async function executeAndPersistPersonalClaimVerification(args: {
       auditBundle,
       accurateAmongUsable,
       usableModelCount: usableForBanner.length,
+      // Presentation only: judged from the rows just persisted, exactly as a later read of the record judges them.
+      modelIndependence: storedVerificationConsensusIndependence({ modelResults: modelEvidence, selectedModels }),
       ...(orgGovernanceStatus ? { governanceStatus: orgGovernanceStatus } : {}),
       usage: {
         runsThisMonth: usage.runsThisMonth,

@@ -21,6 +21,7 @@ import { GovernanceChip } from "@/components/shared/GovernanceChip";
 import { formatAbsoluteDate, UNFILED_PROJECT_LABEL } from "@/lib/workspaces/reviewQueuePresentation";
 import { teamClaimDetailHref } from "@/lib/workspaces/teamClaimDetailHref";
 import type { TeamClaimListItem, TeamClaimVerdict } from "@/hooks/useTeamClaimVerificationList";
+import { CONSENSUS_WITHHELD_TEXT } from "@/lib/panel/independentVoices";
 
 /**
  * Local pure mapping, deliberately NOT `lib/verification/shareText.ts`'s
@@ -96,11 +97,18 @@ export function TeamClaimListRow({ workspaceId, item, showProject }: TeamClaimLi
         </p>
 
         <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-cp-muted">
-          <span data-testid="team-claim-row-consensus">{item.consensusScore}/100 consensus</span>
-          <span aria-hidden="true">·</span>
-          <span data-testid="team-claim-row-confidence">{item.confidenceLabel} confidence</span>
-          <span aria-hidden="true">·</span>
-          <span data-testid="team-claim-row-evidence">{EVIDENCE_LABEL[item.evidenceQuality]}</span>
+          {item.consensusWithheld === undefined && item.consensusScore !== null ? (
+            <>
+              <span data-testid="team-claim-row-consensus">{item.consensusScore}/100 consensus</span>
+              <span aria-hidden="true">·</span>
+              <span data-testid="team-claim-row-confidence">{item.confidenceLabel} confidence</span>
+              <span aria-hidden="true">·</span>
+              <span data-testid="team-claim-row-evidence">{EVIDENCE_LABEL[item.evidenceQuality]}</span>
+            </>
+          ) : (
+            // Not a multi-model consensus: no score, and no confidence / evidence quality derived with it.
+            <span data-testid="team-claim-row-consensus">{CONSENSUS_WITHHELD_TEXT[item.consensusWithheld ?? "independence_unverified"]}</span>
+          )}
           {showProject && (
             <>
               <span aria-hidden="true">·</span>

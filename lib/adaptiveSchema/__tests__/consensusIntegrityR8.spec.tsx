@@ -34,7 +34,7 @@ import PrimarySynthesisStrip from "@/components/adaptive/PrimarySynthesisStrip";
 import { renderAdaptiveResearchDocxV1 } from "@/lib/docx/renderAdaptiveResearchDocx";
 import { AdaptiveResearchDocument } from "@/lib/pdf/AdaptiveResearchDocument";
 import { extractPdfElementText } from "@/lib/pdf/__tests__/testUtils";
-import { pdfLayoutFixtures } from "@/lib/pdf/__fixtures__/layoutFixtures";
+import { pdfLayoutFixtures, withIndependentFrozenProvenance } from "@/lib/pdf/__fixtures__/layoutFixtures";
 import { AdaptiveSynthesisReport, AlignedClaim } from "@/lib/adaptiveSchema/types";
 import { ModelId, ModelResult } from "@/lib/types";
 import { historicalBuild, historicalFinalize } from "./historicalPresentationHelpers";
@@ -76,7 +76,8 @@ const asLegacyCard = (report: AdaptiveSynthesisReport): AdaptiveSynthesisReport 
   return legacy;
 };
 async function exportsOf(report: AdaptiveSynthesisReport) {
-  const record = JSON.parse(JSON.stringify(pdfLayoutFixtures().find((x) => (x.record as any).reportSnapshot?.legacy?.synthesisReport?.verdictCard)!.record));
+  // A current export (c16): every slot recorded as its own executing model — the pre-6.2b case is crossSurfaceIndependence.spec.tsx.
+  const record = withIndependentFrozenProvenance(JSON.parse(JSON.stringify(pdfLayoutFixtures().find((x) => (x.record as any).reportSnapshot?.legacy?.synthesisReport?.verdictCard)!.record)));
   record.reportSnapshot.legacy.synthesisReport = report;
   const { bytes } = await renderAdaptiveResearchDocxV1(record);
   const xml = await (await JSZip.loadAsync(bytes)).file("word/document.xml")!.async("string");

@@ -49,7 +49,15 @@ const UNCHANGED: [string, string][] = [
   ["lib/adaptiveSchema/dsProvenanceRouteAdapter.ts", "0c8c4050a8ec1011471053d09a616326955e8ff4b6084474e32063091562f2c5"],
   ["lib/adaptiveSchema/dsProvenanceViewMin.ts", "c069937e471802bba242da41b17857c30fc1058784cb14379738e28eca5b03df"],
   ["lib/adaptiveSchema/exportGeneratedBy.ts", "dfd7e1dfe4d7f635962d8bdacbbc013394ca0c61770b055638397964f19fbc6c"],
-  ["lib/adaptiveSchema/exportRunProvenance.ts", "eed9dd40aab626daa2aa88aaef16f707a05643d432505bb6b2adb8cbd34a5028"],
+  // Order 29 (C-a closeout, M-1 / m-1; owner Option (a)): frozen provenance version 2 — every entry also freezes the
+  // slot's recorded call outcome (exact persisted-status match) and the D-5 class of its persisted text, plus the
+  // version marker. The identity facts, the JSON export's provenance.run and the display lines are unchanged
+  // (readFrozenRunProvenance is the version-1 projection; exportRunProvenance.spec.ts and exportOutcomeIndependence.spec.tsx).
+  // Was eed9dd40aab626daa2aa88aaef16f707a05643d432505bb6b2adb8cbd34a5028 (byte-identical to 0249a4e5).
+  // Order 30 (A3 / n-4): the map is the ONE shared module lib/panel/persistedStatusOutcome.ts (same object, re-exported)
+  // and a recorded outcome is read back only inside a value carrying the literal version marker 2. Freeze output, the
+  // identity projection and the display lines are unchanged. Was 360550c46acd9b280810d2aa11e8e65dc5b7c39d6fe0a5a70ce89ce7d1c29edb.
+  ["lib/adaptiveSchema/exportRunProvenance.ts", "e43b5a67df2ec0d4dbc09fd1915f96c8267577e8723c50a7940bd231c9b5e333"],
 ];
 
 /**

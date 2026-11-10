@@ -8,10 +8,14 @@
  */
 
 import { AdaptiveRendererProps } from "./types";
+import { useQualifiedExecutionIdentity } from "./RunExecutionIdentityContext";
+import { independentModelsQualifier } from "@/lib/panel/executionIdentity";
 import { Card, SectionLabel, BulletList, FailedResultsNote, splitResults, SlotName } from "./shared";
 
 export default function StepDiffView({ results }: AdaptiveRendererProps) {
   const { ok, failed } = splitResults(results);
+  // A16 (C-a): in a run whose slots are not verified independent executing models the count is of panel slots.
+  const slotIdentity = useQualifiedExecutionIdentity();
 
   const maxSteps = Math.max(0, ...ok.map((r) => ((r.data?.steps as any[] | undefined)?.length ?? 0)));
   const rows = Array.from({ length: maxSteps }, (_, i) => i + 1);
@@ -59,7 +63,9 @@ export default function StepDiffView({ results }: AdaptiveRendererProps) {
                   </span>
                   {!isUniversal && (
                     <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">
-                      Only in {present.length} of {ok.length} models
+                      {slotIdentity
+                        ? `Only in ${present.length} of ${ok.length} panel slots ${independentModelsQualifier(slotIdentity)}`
+                        : <>Only in {present.length} of {ok.length} models</>}
                     </span>
                   )}
                 </div>

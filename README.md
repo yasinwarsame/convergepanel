@@ -104,7 +104,7 @@ PERPLEXITY_API_KEY=your_perplexity_api_key_here
    - Publish the rules
 
 **Note**: 
-- You don't need all API keys. Models without keys will return mock responses.
+- You don't need all API keys. ChatGPT or Claude without a key returns an explicit `provider_not_configured` error (never a mock or fabricated response), is never replaced by the DeepSeek fallback, and is excluded from consensus/agreement and from the responded-model counts (it still counts as a selected model). Gemini, Grok and Perplexity return their own missing-key errors; a missing Gemini key can still be answered by the labelled DeepSeek fallback when `DEEPSEEK_API_KEY` is set. A DeepSeek-substituted slot is always shown as "DeepSeek (substituting <model>)", never as the requested model, and several slots answered by DeepSeek count as one independent model: agreement, consensus and synthesis need at least two independent executing models (models dispatched ≥ successful responses ≥ independent executing models).
 - API keys can be managed via the Admin UI (Firestore) or via environment variables.
 - Firestore-stored keys take precedence over environment variables.
 

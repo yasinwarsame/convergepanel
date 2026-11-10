@@ -15,10 +15,12 @@
  */
 
 import { AggregatedDefinitionInterpretation, DefinitionExplanationResult } from "@/lib/adaptiveSchema/types";
-import { Card, EmptyStateCard, SectionLabel, TintBadge, formatModelCoverage, SlotChip } from "./shared";
+import { Card, EmptyStateCard, SectionLabel, TintBadge, formatSlotCoverage, SlotChip } from "./shared";
+import { useQualifiedExecutionIdentity } from "./RunExecutionIdentityContext";
 
 function CoverageBadge({ interpretation }: { interpretation: AggregatedDefinitionInterpretation }) {
-  const label = formatModelCoverage({ covered: interpretation.coverageCount, total: interpretation.totalModels, mode: "covered" });
+  const slotIdentity = useQualifiedExecutionIdentity();
+  const label = formatSlotCoverage({ covered: interpretation.coverageCount, total: interpretation.totalModels, mode: "covered" }, slotIdentity);
   return (
     <TintBadge tone={interpretation.coverageRatio >= 0.6 ? "accent" : "warning"} title={label}>
       {label}

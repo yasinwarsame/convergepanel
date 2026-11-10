@@ -19,6 +19,16 @@ import { join } from "path";
 
 const gitBlob = (data: Buffer) => createHash("sha1").update(Buffer.concat([Buffer.from(`blob ${data.length}\0`), data])).digest("hex");
 
+/**
+ * CONNECTOR INTEGRATION RE-PIN (Order 34, owner-approved integration of the accepted connector heads C-a 972fd29, C-b
+ * dd4cdcd, C-c c16ef7c into main 2cd71bb; register in ConvergePanel-Deployment-Evidence/2026-11-10-order34/integration).
+ * The connector track legitimately changed 14 of the files pinned below (owner-authorized presentation changes: model
+ * independence wording, panel-slot counts, substituted-slot attribution, D-5 placeholders). Ten are byte-identical to the
+ * accepted connector head; four (AdaptiveSynthesisReportView.tsx, shareBuilders.ts, dsProvenanceUiBoundaries.spec.ts,
+ * vocabularyManifest.json) are the conflict-resolved merge of both parents (readable gate option kept, connector rules on
+ * top). Each pin below that moved is re-recorded to the merged content; map names are kept for continuity — "unchanged"
+ * here means unchanged by the readable (#290) increment, not by the connector track.
+ */
 /** `git rev-parse 35933c8:<path>`. */
 const UNCHANGED_AT_35933C8: Record<string, string> = {
   "lib/adaptiveSchema/__tests__/o5p/__fixtures__/baseline-2c17fee/records.json": "322a80a944f4549e49bf45a803f4c623f074ca0e",
@@ -27,27 +37,27 @@ const UNCHANGED_AT_35933C8: Record<string, string> = {
   "lib/adaptiveSchema/__tests__/o5p/__fixtures__/baseline-2c17fee/builderHashes.json": "060ab7e2d9cc3bc3ad7e2288766347315262ea3a",
   "lib/adaptiveSchema/__tests__/o5p/__fixtures__/baseline-2c17fee/sharedMemos.json": "8ac7d5882ea2b67d0169677337c242e98d5f052c",
   "components/adaptive/__tests__/seSurfaces/__fixtures__/nonDsBaseline.json": "0d51dfacc64e8450de5ee8828b20cb9e4ffcea1f",
-  "lib/adaptiveSchema/__tests__/o5p/historicalParity.spec.tsx": "c699f3686c36a2cd576d3d7bcef66fa570788f9f",
-  "lib/adaptiveSchema/__tests__/o5p/o5pRender.ts": "453cffb18b9cfd9c66f8766b27d3e74e4e8cfe68",
+  "lib/adaptiveSchema/__tests__/o5p/historicalParity.spec.tsx": "eda40eb5583b2c83946f17045ea45f13d0061338",
+  "lib/adaptiveSchema/__tests__/o5p/o5pRender.ts": "d8dc0f262634d3d5afb4941fc9cab08be190adb9",
   "lib/adaptiveSchema/__tests__/o5p/o5pScenarios.ts": "d3e0ec5beb38d7eec80f76f2caf91bf275f65b85",
   "lib/adaptiveSchema/__tests__/o5p/vocabularyInventory.spec.ts": "d2bc041abf55fa88066faf9a2cda5b774f1d3b14",
   "components/adaptive/__tests__/nonDsWordingParity.spec.tsx": "5ff413cb8365ba413c600a043895ba55fc0d9014",
   "components/adaptive/__tests__/adaptiveAncillaryStructure.spec.ts": "cfab55ca124c4f918149df06901285390134745b",
   "lib/env.ts": "2b81ae7239ea4fd655b8320d5bf726c778149a20",
-  "components/adaptive/TopSummaryBar.tsx": "ea8b059bbafe1589fe79f1a3824c298d5a68926b",
-  "components/adaptive/PrimarySynthesisStrip.tsx": "61d4e96c83ef380a164cf9ac4ce69ed187ade8b0",
+  "components/adaptive/TopSummaryBar.tsx": "0617d5ca9a3be1e6768655107de2b38a512f72eb",
+  "components/adaptive/PrimarySynthesisStrip.tsx": "6c9ef7c8f6a4ee5b0137b943d9c16938ea9cd586",
   "components/adaptive/AnalysisAvailabilityNotice.tsx": "0886deb1b4828f5ea0d1995fe8efc4eaec2a5892",
   "lib/adaptiveSchema/reportSummary.ts": "3ba976c88335c289f335d94776061d765d5a9361",
   "lib/adaptiveSchema/reportStatus.ts": "52f0de27b3a7a790854b27c50e948e39dc73dde7",
   "lib/adaptiveSchema/agreementNarrative.ts": "98e8ecf75fc1e147e3a40f7e134fb63caa64f83a",
-  "lib/adaptiveSchema/reportPresentation.ts": "842f4d04595914652e5aaf6cd0c4bc1e5b509edd",
-  "lib/adaptiveSchema/positionPresentation.ts": "b8d05a23b3d19b260e3fc617db7ebe0ee87e7d69",
-  "lib/adaptiveSchema/gatePresentation.ts": "001454f32aae050f8e42ff269ba8873dba1a3ee6",
+  "lib/adaptiveSchema/reportPresentation.ts": "7982bddd87377876ea8e53935547a5ba14a5801b",
+  "lib/adaptiveSchema/positionPresentation.ts": "7265fe7440c4171284c56676c9098d7d9d33a6d8",
+  "lib/adaptiveSchema/gatePresentation.ts": "512a9d51e95feb8982e60a93832cdac94eee1d9f",
   "lib/adaptiveSchema/trustSummary.ts": "dc6ea9e337a8ae9851559f6d035fc7664422526e",
   "lib/adaptiveSchema/exportSnapshot.ts": "5af930878120bbda7ba49ec40045502416859d19",
-  "lib/pdf/AdaptiveResearchDocument.tsx": "10ba10b9d413214b7e4e00c422f9b15ab640d26a",
-  "lib/docx/AdaptiveResearchDocxDocument.ts": "4e8ba97ea8d0ad4bc9e13d2a598121da2ff657b0",
-  "app/page.tsx": "6dbe9b1f924731e1417655a68f41cd232f7cd16a",
+  "lib/pdf/AdaptiveResearchDocument.tsx": "80e8678d497d7f41a3d7bee48026832f0ec14736",
+  "lib/docx/AdaptiveResearchDocxDocument.ts": "d62e84cffefc0a1c7abfb0e42df75ab0f35cf208",
+  "app/page.tsx": "8d97e6296c16b9b0a41c30a8311a88e61de9c9a5",
 };
 
 /**
@@ -74,7 +84,7 @@ const UNCHANGED_AT_35933C8: Record<string, string> = {
  */
 const WIDENED_BY_INC1: Record<string, string> = {
   "lib/adaptiveSchema/__tests__/o5p/vocabularyScanner.ts": "37e23190b3585eaa57fa0ddad29c5b6d01d2f76f",
-  "lib/adaptiveSchema/__tests__/o5p/__fixtures__/vocabularyManifest.json": "7573b80eb23f9a492076da23a295a1619ed5109c",
+  "lib/adaptiveSchema/__tests__/o5p/__fixtures__/vocabularyManifest.json": "9774e44bba846e24cc08bcc7f85536eb607a3277",
 };
 
 /**
@@ -146,9 +156,9 @@ const WIDENED_BY_INC1: Record<string, string> = {
  * Same 32-file pinned set.
  */
 const READABLE_GATE_OPTION_BY_INC1: Record<string, string> = {
-  "components/adaptive/AdaptiveSynthesisReportView.tsx": "24f22d8ccd4e97eb762edbbca182bceca3be5c92",
-  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "abcee8eca3175d2c718b662a78c4f3796fcfd1f3",
-  "lib/adaptiveSchema/shareBuilders.ts": "e4f5188b64d66cdd424ef24a3857e57905b1e9c1",
+  "components/adaptive/AdaptiveSynthesisReportView.tsx": "207c1a7df4b9088b8a75e5cd112f961c613a2e38",
+  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "0bd0750a98b91a3e7aeae202f5dc1e455969cb04",
+  "lib/adaptiveSchema/shareBuilders.ts": "d34a619d18cf861040516309dc09417045a88ac4",
 };
 
 describe("#290 Increment 1 leaves the sealed and frozen files byte-identical to 35933c8", () => {

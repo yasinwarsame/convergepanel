@@ -227,6 +227,47 @@ describe("insufficient authoritative results fail closed — never rescued by th
     expect(mockedEvaluateAndStoreGovernance).not.toHaveBeenCalled();
     expect(runWrites).toHaveLength(0);
   });
+  // Phase 0 (L03 sites 1–2, L02, L05; owner Option C): admission and scoring count usable SLOTS, exactly as at
+  // 35933c8 — two answered slots synthesize whoever executed them. The executing-model attribution is presentation
+  // (kept elsewhere); it never changes admission, the consensus summary or the governance input.
+  it.each([
+    ["two DeepSeek-substituted slots (one independent model)", [{ modelId: "chatgpt", status: "substituted", rawTextTruncated: SERVER_A, provider: "deepseek" }, { modelId: "claude", status: "substituted", rawTextTruncated: SERVER_B, provider: "deepseek" }]],
+    ["two substituted slots with no recorded provider (older run)", [{ modelId: "chatgpt", status: "substituted", rawTextTruncated: SERVER_A }, { modelId: "claude", status: "substituted", rawTextTruncated: SERVER_B }]],
+    ["two DeepSeek substitutions + one failed slot", [{ modelId: "chatgpt", status: "substituted", rawTextTruncated: SERVER_A, provider: "deepseek" }, { modelId: "claude", status: "substituted", rawTextTruncated: SERVER_B, provider: "DeepSeek" }, { modelId: "grok", status: "failed", rawTextTruncated: "" }]],
+  ])("%s → synthesized as at 35933c8 (two usable slots): one LLM call, slot-count summary, governance evaluated", async (_l, perModel) => {
+    persistRun("run-iv", perModel);
+    const res = await post("run-iv");
+    expect(res.status).toBe(200);
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+    expect(mockedEvaluateAndStoreGovernance).toHaveBeenCalledTimes(1);
+    const summary = runDocs.get("run-iv")!.synthesisConsensusSummary as { modelsHealthy: number; modelCount: number };
+    expect([summary.modelsHealthy, summary.modelCount]).toEqual([2, 2]);
+  });
+
+  it("one real provider + one DeepSeek substitute → synthesized; the consensus summary counts 2 independent models of 2 responses", async () => {
+    persistRun("run-iv2", [
+      { modelId: "chatgpt", status: "substituted", rawTextTruncated: SERVER_A, provider: "deepseek" },
+      { modelId: "claude", status: "ok", rawTextTruncated: SERVER_B, provider: "anthropic" },
+    ]);
+    const res = await post("run-iv2");
+    expect(res.status).toBe(200);
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+    const summary = runDocs.get("run-iv2")!.synthesisConsensusSummary as { modelsHealthy: number; modelCount: number };
+    expect([summary.modelsHealthy, summary.modelCount]).toEqual([2, 2]);
+  });
+
+  it("Phase 0 slot rule: two DeepSeek substitutions + one real provider → synthesized; modelsHealthy counts usable slots (3 of 3, 35933c8)", async () => {
+    persistRun("run-iv3", [
+      { modelId: "chatgpt", status: "substituted", rawTextTruncated: SERVER_A, provider: "deepseek" },
+      { modelId: "claude", status: "substituted", rawTextTruncated: SERVER_B, provider: "deepseek" },
+      { modelId: "grok", status: "ok", rawTextTruncated: SERVER_B.replace("BRAVO", "CHARLIE"), provider: "xai" },
+    ]);
+    const res = await post("run-iv3");
+    expect(res.status).toBe(200);
+    const summary = runDocs.get("run-iv3")!.synthesisConsensusSummary as { modelsHealthy: number; modelCount: number };
+    expect([summary.modelsHealthy, summary.modelCount]).toEqual([3, 3]);
+  });
+
   it("a run without runDocument (no persisted results) → 409 even with perfect request results", async () => {
     runDocs.set("run-g2", { userId: "test-uid", question: STORED_QUESTION });
     const res = await post("run-g2");

@@ -122,10 +122,14 @@ export function withPageGateStatus<G extends { status: unknown }>(gate: G | unde
   return gate ? { ...gate, status: pageGateValue(report, gate.status) } : gate;
 }
 
-/** The gate banner (report view, governance section). */
-export function gateBannerText(report: Pick<AdaptiveSynthesisReport, "presentation"> | null | undefined, stored: unknown): string {
+/**
+ * The gate banner (report view, governance section). A historical banner asserts panel agreement ("Verified — panel
+ * converges"): when the run's slots are not independent executing models, or their execution is not recorded
+ * (verdictIndependence.shownRunIndependence, judged by the caller), the gate is stated as the gate it is (c16, MINOR-1).
+ */
+export function gateBannerText(report: Pick<AdaptiveSynthesisReport, "presentation"> | null | undefined, stored: unknown, opts?: { slotsNotIndependent?: boolean }): string {
   const status = readGateStatus(stored);
-  if (status === "unrecognized" || hasGatePresentation(report)) return gateLabel(status);
+  if (status === "unrecognized" || hasGatePresentation(report) || opts?.slotsNotIndependent === true) return gateLabel(status);
   return LEGACY_GATE_BANNER_LABEL[status];
 }
 
