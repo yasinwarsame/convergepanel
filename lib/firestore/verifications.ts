@@ -22,8 +22,11 @@ export type StoredVerificationModelSummary = {
   incorrectParts: string[];
   unverifiableParts: string[];
   /**
-   * Present only when the connector reported a substitute answered this slot (`status: "substituted"`); `provider` is
-   * the executing provider when recorded. Absent: the slot's own provider answered. Read by
+   * `substituted` is present only when the connector reported a substitute answered this slot (`status:
+   * "substituted"`); `provider` is then the substitute's executing provider when recorded. Since Order 33 `provider` is
+   * also written for a successful own-provider answer: the canonical provider of the connector function the claim
+   * dispatch invoked (never the slot name, never request data). Absent on failed / parse_error / placeholder rows and
+   * on records written before Order 33 (their identity stays unverified). Read by
    * lib/panel/storedVerificationIndependence.ts.
    */
   substituted?: true;

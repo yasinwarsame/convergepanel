@@ -13,8 +13,9 @@
  *  - "insufficient": the gate verifies the rows and exactly one independent executing model answered;
  *  - "unverified": everything else — no `modelResults`, a row that is not an object, a row without a non-empty
  *    `modelId` naming a known panel slot, a row without a recorded status (`ok` / `parse_error` / `failed`), a requested
- *    model (`selectedModels`) with no row, an `ok` row without a recorded provider (claim rows answered by their own
- *    slot's provider record none — m-B — so such records are unverified), an unrecorded substitute, or no answering row
+ *    model (`selectedModels`) with no row, an `ok` row without a recorded provider (claim rows written before Order 33
+ *    record none for an own-provider answer — m-B — so such records stay unverified; since Order 33 the claim dispatch
+ *    stamps the invoked connector's canonical provider, lib/verification/runClaimVerificationPanel.ts), an unrecorded substitute, or no answering row
  *    at all (K = 0 is never presented as verified). Nothing is inferred and no provider history is reconstructed.
  *
  * `storedVerificationExecutingRows` keeps its shape (it is the queue builder's row adapter); with the gate holding no
@@ -74,8 +75,9 @@ export function storedVerificationExecutingRows(
  * C-b (CB-01): one stored / client claim row as the row the shared gate reads (lib/panel/executionIdentity.ts). Recorded
  * facts only, nothing inferred:
  *  - `status: "ok"` with `substituted: true` → "substituted" (the substitute's recorded `provider`, if any, as recorded);
- *  - `status: "ok"` otherwise → "ok" with the row's recorded `provider` — a claim row answered by its slot's own
- *    provider records none (buildClaimModelEvidence), so the gate does not verify it (no provider is reconstructed);
+ *  - `status: "ok"` otherwise → "ok" with the row's recorded `provider` — written since Order 33 for a successful
+ *    own-provider answer (buildClaimModelEvidence); a record written before then has none, so the gate does not verify
+ *    it (no provider is reconstructed);
  *  - `status: "parse_error"` / `"failed"` → "failed": the call produced no usable verdict, so the slot is never an
  *    answering (supporting) slot;
  *  - any other status (not a stored claim status — "timeout", "error", a crafted value, none) is not recorded as a

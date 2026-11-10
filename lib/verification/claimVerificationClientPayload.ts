@@ -47,7 +47,7 @@ export type ClaimVerificationClientPayload = {
     unverifiableParts: string[];
     /**
      * C-b: the row's recorded execution facts, present only when recorded (a substitute answered the slot; the
-     * executing provider). Read only through the shared gate (lib/panel/storedVerificationIndependence.ts
+     * executing provider — since Order 33 also the own provider of a successful answer, stamped by the claim dispatch). Read only through the shared gate (lib/panel/storedVerificationIndependence.ts
      * `claimPresentedIndependence`); a model count is never inferred from the slot.
      */
     substituted?: true;
