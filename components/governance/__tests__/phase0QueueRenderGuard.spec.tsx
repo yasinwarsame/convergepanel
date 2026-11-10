@@ -45,7 +45,6 @@ import {
   queuePresentedEvidenceQuality,
   queuePresentedScore,
   queueResearchDisagreementLines,
-  QUEUE_QUALIFIED_DISAGREEMENTS_CAP,
 } from "@/components/governance/GovernanceDashboard";
 import { CONSENSUS_WITHHELD_TEXT } from "@/lib/panel/independentVoices";
 
@@ -142,7 +141,8 @@ describe("P0-H4: GovernanceDashboard withholds what the 35933c8 DTO carries but 
   });
 
   it("DeepSeek×2 + Grok: only the genuine DeepSeek-vs-Grok line is presented as a disagreement", async () => {
-    runRows = [run("mixed", [row("chatgpt", "substituted", deepseek), row("claude", "substituted", deepseek), row("grok", "ok")], [FOUNDING, VS_GROK])];
+    // C-c (CC-01): the Grok row records its runtime provider, so the shared gate verifies the run.
+    runRows = [run("mixed", [row("chatgpt", "substituted", deepseek), row("claude", "substituted", deepseek), row("grok", "ok", { provider: "xai" })], [FOUNDING, VS_GROK])];
     const r = (await rows())["mixed"];
     expect(r.disagreements).toEqual(["Founding date: ChatGPT says 1789, Claude says 1792", "Founder: Different sources"]);
     expect(queueResearchDisagreementLines(r.disagreements, r)).toEqual(["Founder: Different sources"]);
@@ -158,7 +158,7 @@ describe("P0-H4: GovernanceDashboard withholds what the 35933c8 DTO carries but 
   });
 
   it("control: two independent models — score, colour and every stored line presented exactly as stored", async () => {
-    runRows = [run("two", [row("chatgpt", "ok"), row("claude", "ok")], [FOUNDING])];
+    runRows = [run("two", [row("chatgpt", "ok", { provider: "openai" }), row("claude", "ok", { provider: "anthropic" })], [FOUNDING])];
     const r = (await rows())["two"];
     expect([queuePresentedScore(r), queuePresentedEvidenceQuality(r)]).toEqual([90, "strong"]);
     const { html, colourArg } = render(r);
@@ -179,8 +179,9 @@ describe("P0-H4: GovernanceDashboard withholds what the 35933c8 DTO carries but 
 const dis = (topic: string, a: string, b: string) => ({ topic, positionsByModel: { [a]: "x", [b]: "y" }, whyTheyDiffer: `${a} and ${b} differ on ${topic}` });
 const TOPICS = ["Founding date", "Capital city", "Population", "Official language", "Currency"];
 const FC = [row("chatgpt", "substituted", deepseek), row("claude", "substituted", deepseek)];
-const MIXED = [row("chatgpt", "substituted", deepseek), row("claude", "substituted", deepseek), row("grok", "ok")];
-const IND = [row("chatgpt", "ok"), row("claude", "ok"), row("grok", "ok")];
+// C-c (CC-01): own-provider rows record their runtime provider (Step 6.2a), so the shared gate verifies the run.
+const MIXED = [row("chatgpt", "substituted", deepseek), row("claude", "substituted", deepseek), row("grok", "ok", { provider: "xai" })];
+const IND = [row("chatgpt", "ok", { provider: "openai" }), row("claude", "ok", { provider: "anthropic" }), row("grok", "ok", { provider: "xai" })];
 const sections = (html: string) => ({
   key: section(html, "Key disagreements"),
   flags: section(html, "Where synthesis flags disagreements"),
@@ -225,14 +226,25 @@ describe("M-1: no same-model line is presented as a disagreement, whatever the n
     expect(flags).not.toContain("Founding date");
   });
 
-  it.each([2, 3])("mixed, %i same-model lines + one genuine: the qualified list is saturated, so nothing is presented as a disagreement (fail closed)", async (n) => {
+  // C-c (CC-16, D-2): the qualified list is uncapped, so the genuine line is no longer hidden behind a saturated list.
+  it.each([2])("mixed, %i same-model lines + one genuine: every same-model line is qualified, the genuine one still shows", async (n) => {
     runRows = [run("mixn", MIXED, [...TOPICS.slice(0, n).map((t) => dis(t, "chatgpt", "claude")), dis("Founder", "chatgpt", "grok")])];
     const r = (await rows())["mixn"];
-    expect(r.qualifiedDisagreements).toHaveLength(QUEUE_QUALIFIED_DISAGREEMENTS_CAP);
+    expect(r.qualifiedDisagreements.map((q: { basis: string }) => q.basis)).toEqual(Array(2 * n).fill("same_executing_model"));
     const html = render(r).html;
-    const { key, flags } = sections(html);
-    expect([key, flags]).toEqual([null, null]);
-    for (const t of TOPICS.slice(0, n)) expect(html.split(QUALIFIED_DISAGREEMENTS_HEADING)[0]).not.toContain(t);
+    const { key } = sections(html);
+    expect(key).toContain("Founder: chatgpt and grok differ on Founder");
+    for (const t of TOPICS.slice(0, n)) expect(html.split(QUALIFIED_DISAGREEMENTS_HEADING)[0]).not.toContain(`${t}: chatgpt and claude differ`);
+  });
+
+  it.each([3, 4])("mixed, %i same-model lines + one genuine: the 35933c8 DTO keeps only its first 3 lines (all same-model), so no line is shown as a disagreement and each is qualified", async (n) => {
+    runRows = [run("mixn", MIXED, [...TOPICS.slice(0, n).map((t) => dis(t, "chatgpt", "claude")), dis("Founder", "chatgpt", "grok")])];
+    const r = (await rows())["mixn"];
+    expect(r.disagreements).toHaveLength(3);
+    expect(r.qualifiedDisagreements.length).toBe(2 * n);
+    const html = render(r).html;
+    expect(sections(html).key).toBeNull();
+    for (const t of TOPICS.slice(0, n)) expect(html.split(QUALIFIED_DISAGREEMENTS_HEADING)[0]).not.toContain(`${t}: chatgpt and claude differ`);
   });
 
   it.each([2, 3, 5])("verified independent execution (3 real models), %i genuine lines: every DTO line still shows", async (n) => {
@@ -260,8 +272,10 @@ describe("M-1: no same-model line is presented as a disagreement, whatever the n
     expect(queueResearchDisagreementLines(r.disagreements, { qualifiedDisagreements: undefined })).toEqual(r.disagreements);
   });
 
-  it("the dashboard's cap constant equals the route's qualified-list cap (real GET)", async () => {
+  it("C-c (CC-16): the route's qualified list is uncapped (real GET) — every stored line is listed once", async () => {
     runRows = [run("cap", FC, TOPICS.map((t) => dis(t, "chatgpt", "claude")))];
-    expect((await rows())["cap"].qualifiedDisagreements).toHaveLength(QUEUE_QUALIFIED_DISAGREEMENTS_CAP);
+    const q = (await rows())["cap"].qualifiedDisagreements.map((x: { text: string }) => x.text);
+    for (const t of TOPICS) expect(q).toContain(`${t}: chatgpt and claude differ on ${t}`);
+    expect(new Set(q).size).toBe(q.length);
   });
 });

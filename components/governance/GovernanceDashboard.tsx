@@ -674,31 +674,22 @@ export function queuePresentedEvidenceQuality(row: Pick<QueueRow, "evidenceQuali
 }
 
 /**
- * The route's cap on `qualifiedDisagreements` (app/api/governance/queue/route.ts RESEARCH_LIST_CAP, pinned by
- * phase0QueueRenderGuard.spec.tsx through the real GET). Once the list holds this many entries it may be incomplete.
- */
-export const QUEUE_QUALIFIED_DISAGREEMENTS_CAP = 3;
-
-/**
  * A research row's stored disagreement lines presented as disagreements between independent executing models. Fails
  * closed — a line is shown only when the DTO positively establishes it as genuine:
  *  - the row's execution is verified independent (no `modelIndependence`: the persisted rows prove >= 2 independent
- *    executing models). Below that ("insufficient" / "unverified") NO stored line is a disagreement between models;
- *  - the route's qualified list is complete (fewer than QUEUE_QUALIFIED_DISAGREEMENTS_CAP entries). A saturated list may
- *    omit qualified lines, so no line can be established as genuine from it and none is shown — genuineness is never
- *    inferred from a line's absence from a capped list;
- *  - the line is not a qualified entry (the route lists every non-genuine line, bullet and point forms, by exact text
- *    whenever the list is below its cap).
- * Qualified lines stay under their own heading. Presentation only: the DTO and every decision are unchanged.
+ *    executing models, judged by the shared gate). Below that ("insufficient" / "unverified") NO stored line is a
+ *    disagreement between models;
+ *  - the line is not a qualified entry. Since C-c (CC-16, D-2) the route lists EVERY non-genuine stored line, bullet and
+ *    point forms, by exact text (no cap), so a line absent from the list is genuine; the former saturation rule (a
+ *    capped list hid every line once full) is gone.
+ * Qualified lines stay under their own heading. Presentation only: the DTO base keys and every decision are unchanged.
  */
 export function queueResearchDisagreementLines(
   lines: readonly string[] | undefined,
   row: Pick<QueueRow, "qualifiedDisagreements" | "modelIndependence">
 ): string[] {
   if (row.modelIndependence === "insufficient" || row.modelIndependence === "unverified") return [];
-  const listed = row.qualifiedDisagreements ?? [];
-  if (listed.length >= QUEUE_QUALIFIED_DISAGREEMENTS_CAP) return [];
-  const qualified = new Set(listed.map((d) => d.text));
+  const qualified = new Set((row.qualifiedDisagreements ?? []).map((d) => d.text));
   return (lines ?? []).filter((line) => !qualified.has(line));
 }
 

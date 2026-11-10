@@ -662,8 +662,11 @@ function verificationDisagreementDigest(data: Record<string, unknown>): Array<{ 
 /** One stored research disagreement: its display line and the raw stored item (kept for model attribution). */
 type StoredDisagreementLine = { text: string; item: unknown };
 
-/** How many qualified research lines the queue returns. */
-const RESEARCH_LIST_CAP = 3;
+/**
+ * C-c (CC-16, D-2): the qualified research list is NOT capped. A capped list hid genuine lines on the dashboard (a
+ * saturated list cannot establish any line as genuine, so every stored line was withheld). It is bounded by the stored
+ * report's own disagreement lists; exact duplicates are listed once. Base (35933c8) keys are unchanged.
+ */
 
 function pushStoredDisagreementLine(out: StoredDisagreementLine[], line: string, item: unknown) {
   const t = line.trim();
@@ -749,7 +752,7 @@ function storedResearchSynthesisDisagreementPoints(data: Record<string, unknown>
 
 /**
  * The stored research lines that are NOT disagreements between independent executing models
- * (lib/panel/storedDisagreementIndependence.ts), each with its reason, capped at RESEARCH_LIST_CAP.
+ * (lib/panel/storedDisagreementIndependence.ts), each with its reason (every one; C-c CC-16).
  */
 function qualifiedResearchDisagreements(
   lines: readonly StoredDisagreementLine[],
@@ -758,7 +761,7 @@ function qualifiedResearchDisagreements(
   const qualified: QueueQualifiedDisagreement[] = [];
   for (const line of lines) {
     const basis = classifyStoredDisagreement(line.item, ctx);
-    if (basis !== "cross_model" && qualified.length < RESEARCH_LIST_CAP) qualified.push({ text: line.text, basis });
+    if (basis !== "cross_model") qualified.push({ text: line.text, basis });
   }
   return qualified;
 }
@@ -774,7 +777,6 @@ function researchQueueIndependenceKeys(
     ...qualifiedResearchDisagreements(storedResearchDisagreementLines(data), independenceCtx),
     ...qualifiedResearchDisagreements(storedResearchSynthesisDisagreementPoints(data), independenceCtx),
   ]) {
-    if (qualifiedDisagreements.length >= RESEARCH_LIST_CAP) break;
     if (!qualifiedDisagreements.some((x) => x.text === q.text)) qualifiedDisagreements.push(q);
   }
   // A stored research score is presented only when the persisted rows prove ≥ 2 independent executing models

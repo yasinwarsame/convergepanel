@@ -3070,7 +3070,7 @@
    "question": "G-R0",
    "consensusScore": null,
    "evidenceQuality": null,
-   "consensusWithheld": "insufficient_independent_models",
+   "consensusWithheld": "independence_unverified",
    "governanceStatus": "needs_review",
    "governanceReasons": [
     "r1"
@@ -3083,18 +3083,22 @@
    "qualifiedDisagreements": [
     {
      "text": "Topic 0.0: w",
-     "basis": "single_independent_model"
+     "basis": "independence_unverified"
     },
     {
      "text": "Topic 0.1: w",
-     "basis": "single_independent_model"
+     "basis": "independence_unverified"
     },
     {
      "text": "Legacy 0.2: s",
-     "basis": "single_independent_model"
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic 0.3: w",
+     "basis": "independence_unverified"
     }
    ],
-   "modelIndependence": "insufficient",
+   "modelIndependence": "unverified",
    "createdAt": "2026-11-01T11:59:00.000Z",
    "userId": "owner-a",
    "userEmail": "owner-a"
@@ -3167,7 +3171,7 @@
    "question": "Video: G-V2 (unknown, ?x?)",
    "consensusScore": null,
    "evidenceQuality": null,
-   "consensusWithheld": "insufficient_independent_models",
+   "consensusWithheld": "independence_unverified",
    "governanceStatus": "needs_review",
    "governanceReasons": [
     "r1"
@@ -3185,11 +3189,16 @@
      "confidence": ""
     }
    ],
-   "singleModelAssessment": "One independent model's assessment (Gemini): likely manipulated — not agreement between models",
-   "modelIndependence": "insufficient",
+   "modelIndependence": "unverified",
    "createdAt": "2026-11-01T11:57:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "qualifiedDisagreements": [
+    {
+     "text": "1/1 responses say likely manipulated — model independence unverified, not confirmed as agreement between models",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "runs:G-R3": {
    "runId": "G-R3",
@@ -3212,7 +3221,15 @@
    ],
    "createdAt": "2026-11-01T11:56:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "qualifiedDisagreements": [
+    {
+     "text": "KD 3: kd",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "verifications:G-C4": {
    "runId": "G-C4",
@@ -3292,7 +3309,15 @@
    "dissentSummary": "Dissent: gpt4o: Likely manipulated; Claude: manipulated",
    "createdAt": "2026-11-01T11:54:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "qualifiedDisagreements": [
+    {
+     "text": "1/3 responses say authentic — model independence unverified, not confirmed as agreement between models",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "runs:G-R6": {
    "runId": "G-R6",
@@ -3325,7 +3350,31 @@
    ],
    "createdAt": "2026-11-01T11:53:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "qualifiedDisagreements": [
+    {
+     "text": "Point 6.0: models differ",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Point 6.1: models differ",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Legacy 6.2: s",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "KD 6: kd",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Legacy 6.2",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "verifications:G-C7": {
    "runId": "G-C7",
@@ -3430,7 +3479,15 @@
    "dissentSummary": "Dissent: gpt4o: manipulated",
    "createdAt": "2026-11-01T11:51:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "qualifiedDisagreements": [
+    {
+     "text": "2/3 responses say authentic — model independence unverified, not confirmed as agreement between models",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "runs:G-R9": {
    "runId": "G-R9",
@@ -3455,7 +3512,27 @@
    ],
    "createdAt": "2026-11-01T11:50:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "qualifiedDisagreements": [
+    {
+     "text": "Legacy 9.0: s",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Point 9.1: models differ",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Legacy 9.2: s",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic 9.3: w",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "verifications:G-C10": {
    "runId": "G-C10",
@@ -3551,7 +3628,15 @@
    "dissentSummary": "Dissent: Gemini: manipulated",
    "createdAt": "2026-11-01T11:48:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "qualifiedDisagreements": [
+    {
+     "text": "2/3 responses say authentic — model independence unverified, not confirmed as agreement between models",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "runs:G-R12": {
    "runId": "G-R12",
@@ -3584,7 +3669,35 @@
    ],
    "createdAt": "2026-11-01T11:47:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "qualifiedDisagreements": [
+    {
+     "text": "Point 12.0: models differ",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic 12.1: w",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic 12.2: w",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Point 12.3: models differ",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic 12.1",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic 12.2",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "verifications:G-C13": {
    "runId": "G-C13",
@@ -3662,7 +3775,7 @@
    "question": "Video: G-V14 (unknown, ?x?)",
    "consensusScore": null,
    "evidenceQuality": null,
-   "consensusWithheld": "insufficient_independent_models",
+   "consensusWithheld": "independence_unverified",
    "governanceStatus": "needs_review",
    "governanceReasons": [
     "r1"
@@ -3680,11 +3793,16 @@
      "confidence": ""
     }
    ],
-   "singleModelAssessment": "One independent model's assessment (Gemini): authentic — not agreement between models",
-   "modelIndependence": "insufficient",
+   "modelIndependence": "unverified",
    "createdAt": "2026-11-01T11:45:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "qualifiedDisagreements": [
+    {
+     "text": "1/1 responses say authentic — model independence unverified, not confirmed as agreement between models",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "runs:G-R15": {
    "runId": "G-R15",
@@ -3709,13 +3827,27 @@
    ],
    "qualifiedDisagreements": [
     {
+     "text": "Topic 15.0: w",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic 15.1: w",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Legacy 15.2: s",
+     "basis": "independence_unverified"
+    },
+    {
      "text": "KD 15: kd",
      "basis": "independence_unverified"
     }
    ],
    "createdAt": "2026-11-01T11:44:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified"
   },
   "verifications:G-C16": {
    "runId": "G-C16",
@@ -3833,7 +3965,15 @@
    "dissentSummary": "Dissent: gpt4o: Authentic",
    "createdAt": "2026-11-01T11:42:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "qualifiedDisagreements": [
+    {
+     "text": "1/2 responses say manipulated — model independence unverified, not confirmed as agreement between models",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "runs:G-R18": {
    "runId": "G-R18",
@@ -3842,7 +3982,7 @@
    "question": "G-R18",
    "consensusScore": null,
    "evidenceQuality": null,
-   "consensusWithheld": "insufficient_independent_models",
+   "consensusWithheld": "independence_unverified",
    "governanceStatus": "needs_review",
    "governanceReasons": [
     "r1"
@@ -3855,10 +3995,10 @@
    "qualifiedDisagreements": [
     {
      "text": "Legacy 18.0: s",
-     "basis": "single_independent_model"
+     "basis": "independence_unverified"
     }
    ],
-   "modelIndependence": "insufficient",
+   "modelIndependence": "unverified",
    "createdAt": "2026-11-01T11:41:00.000Z",
    "userId": "owner-a",
    "userEmail": "owner-a"
@@ -3958,7 +4098,15 @@
    "dissentSummary": "Dissent: Gemini: manipulated",
    "createdAt": "2026-11-01T11:39:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "qualifiedDisagreements": [
+    {
+     "text": "2/3 responses say authentic — model independence unverified, not confirmed as agreement between models",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "runs:G-R21": {
    "runId": "G-R21",
@@ -4070,7 +4218,7 @@
    "question": "Video: G-V23 (unknown, ?x?)",
    "consensusScore": null,
    "evidenceQuality": null,
-   "consensusWithheld": "insufficient_independent_models",
+   "consensusWithheld": "independence_unverified",
    "governanceStatus": "needs_review",
    "governanceReasons": [
     "r1"
@@ -4093,11 +4241,16 @@
      "confidence": ""
     }
    ],
-   "singleModelAssessment": "One independent model's assessment (Gemini): likely manipulated — not agreement between models",
-   "modelIndependence": "insufficient",
+   "modelIndependence": "unverified",
    "createdAt": "2026-11-01T11:36:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "qualifiedDisagreements": [
+    {
+     "text": "1/1 responses say likely manipulated — model independence unverified, not confirmed as agreement between models",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "runs:G-R24": {
    "runId": "G-R24",
@@ -4130,7 +4283,43 @@
    ],
    "createdAt": "2026-11-01T11:35:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "qualifiedDisagreements": [
+    {
+     "text": "Topic 24.0: w",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic 24.1: w",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic 24.2: w",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic 24.3: w",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic 24.0",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic 24.1",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic 24.2",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic 24.3",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "verifications:G-C25": {
    "runId": "G-C25",
@@ -4204,7 +4393,15 @@
    "dissentSummary": "Dissent: gpt4o: Authentic",
    "createdAt": "2026-11-01T11:33:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "qualifiedDisagreements": [
+    {
+     "text": "1/2 responses say manipulated — model independence unverified, not confirmed as agreement between models",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "runs:G-R27": {
    "runId": "G-R27",
@@ -4237,7 +4434,35 @@
    ],
    "createdAt": "2026-11-01T11:32:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "qualifiedDisagreements": [
+    {
+     "text": "Legacy 27.0: s",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Legacy 27.1: s",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic 27.2: w",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Legacy 27.0",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Legacy 27.1",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic 27.2",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "verifications:G-C28": {
    "runId": "G-C28",
@@ -4338,7 +4563,23 @@
    ],
    "createdAt": "2026-11-01T11:29:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "qualifiedDisagreements": [
+    {
+     "text": "Topic 30.0: w",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Legacy 30.1: s",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Legacy 30.2: s",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "verifications:G-C31": {
    "runId": "G-C31",
@@ -4414,7 +4655,7 @@
    "question": "Video: G-V32 (unknown, ?x?)",
    "consensusScore": null,
    "evidenceQuality": null,
-   "consensusWithheld": "insufficient_independent_models",
+   "consensusWithheld": "independence_unverified",
    "governanceStatus": "needs_review",
    "governanceReasons": [
     "r1"
@@ -4437,11 +4678,16 @@
      "confidence": ""
     }
    ],
-   "singleModelAssessment": "One independent model's assessment (gpt4o): likely manipulated — not agreement between models",
-   "modelIndependence": "insufficient",
+   "modelIndependence": "unverified",
    "createdAt": "2026-11-01T11:27:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "qualifiedDisagreements": [
+    {
+     "text": "1/1 responses say likely manipulated — model independence unverified, not confirmed as agreement between models",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "runs:G-R33": {
    "runId": "G-R33",
@@ -4581,7 +4827,15 @@
    "dissentSummary": "Dissent: gpt4o: Authentic",
    "createdAt": "2026-11-01T11:24:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "qualifiedDisagreements": [
+    {
+     "text": "1/2 responses say likely manipulated — model independence unverified, not confirmed as agreement between models",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "runs:G-R36": {
    "runId": "G-R36",
@@ -4614,7 +4868,43 @@
    ],
    "createdAt": "2026-11-01T11:23:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "qualifiedDisagreements": [
+    {
+     "text": "Topic 36.0: w",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic 36.1: w",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic 36.2: w",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic 36.3: w",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic 36.0",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic 36.1",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic 36.2",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic 36.3",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "verifications:G-C37": {
    "runId": "G-C37",
@@ -4714,7 +5004,15 @@
    "dissentSummary": "Dissent: gpt4o: Authentic",
    "createdAt": "2026-11-01T11:21:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "qualifiedDisagreements": [
+    {
+     "text": "2/3 responses say manipulated — model independence unverified, not confirmed as agreement between models",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "runs:G-R39": {
    "runId": "G-R39",
@@ -4740,7 +5038,15 @@
    ],
    "createdAt": "2026-11-01T11:20:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "qualifiedDisagreements": [
+    {
+     "text": "KD 39: kd",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "verifications:G-C40": {
    "runId": "G-C40",
@@ -4824,7 +5130,7 @@
    "question": "Video: G-V41 (unknown, ?x?)",
    "consensusScore": null,
    "evidenceQuality": null,
-   "consensusWithheld": "insufficient_independent_models",
+   "consensusWithheld": "independence_unverified",
    "governanceStatus": "needs_review",
    "governanceReasons": [
     "r1"
@@ -4842,11 +5148,16 @@
      "confidence": ""
     }
    ],
-   "singleModelAssessment": "One independent model's assessment (Gemini): manipulated — not agreement between models",
-   "modelIndependence": "insufficient",
+   "modelIndependence": "unverified",
    "createdAt": "2026-11-01T11:18:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "qualifiedDisagreements": [
+    {
+     "text": "1/1 responses say manipulated — model independence unverified, not confirmed as agreement between models",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "runs:G-R42": {
    "runId": "G-R42",
@@ -4871,7 +5182,31 @@
    ],
    "createdAt": "2026-11-01T11:17:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "qualifiedDisagreements": [
+    {
+     "text": "Point 42.0: models differ",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic 42.1: w",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic 42.2: w",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Legacy 42.3: s",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "KD 42: kd",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "verifications:G-C43": {
    "runId": "G-C43",
@@ -4926,7 +5261,7 @@
    "question": "Video: G-V44 (unknown, ?x?)",
    "consensusScore": null,
    "evidenceQuality": null,
-   "consensusWithheld": "insufficient_independent_models",
+   "consensusWithheld": "independence_unverified",
    "governanceStatus": "needs_review",
    "governanceReasons": [
     "r1"
@@ -4944,11 +5279,16 @@
      "confidence": ""
     }
    ],
-   "singleModelAssessment": "One independent model's assessment (Gemini): likely manipulated — not agreement between models",
-   "modelIndependence": "insufficient",
+   "modelIndependence": "unverified",
    "createdAt": "2026-11-01T11:15:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "qualifiedDisagreements": [
+    {
+     "text": "1/1 responses say likely manipulated — model independence unverified, not confirmed as agreement between models",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "runs:G-R45": {
    "runId": "G-R45",
@@ -4972,6 +5312,14 @@
    ],
    "qualifiedDisagreements": [
     {
+     "text": "Topic 45.0: w",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic 45.1: w",
+     "basis": "independence_unverified"
+    },
+    {
      "text": "Topic 45.2: w",
      "basis": "independence_unverified"
     },
@@ -4982,7 +5330,9 @@
    ],
    "createdAt": "2026-11-01T11:14:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified"
   },
   "verifications:G-C46": {
    "runId": "G-C46",
@@ -5074,7 +5424,15 @@
    "agreementSummary": "2/2 models say likely manipulated",
    "createdAt": "2026-11-01T11:12:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "qualifiedDisagreements": [
+    {
+     "text": "2/2 responses say likely manipulated — model independence unverified, not confirmed as agreement between models",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "runs:G-R48": {
    "runId": "G-R48",
@@ -5083,7 +5441,7 @@
    "question": "G-R48",
    "consensusScore": null,
    "evidenceQuality": null,
-   "consensusWithheld": "insufficient_independent_models",
+   "consensusWithheld": "independence_unverified",
    "governanceStatus": "needs_review",
    "governanceReasons": [
     "r1"
@@ -5096,10 +5454,10 @@
    "qualifiedDisagreements": [
     {
      "text": "Topic 48.0: w",
-     "basis": "single_independent_model"
+     "basis": "independence_unverified"
     }
    ],
-   "modelIndependence": "insufficient",
+   "modelIndependence": "unverified",
    "createdAt": "2026-11-01T11:11:00.000Z",
    "userId": "owner-a",
    "userEmail": "owner-a"
@@ -5213,7 +5571,15 @@
    "dissentSummary": "Dissent: gpt4o: Likely manipulated",
    "createdAt": "2026-11-01T11:09:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "qualifiedDisagreements": [
+    {
+     "text": "2/3 responses say manipulated — model independence unverified, not confirmed as agreement between models",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "runs:G-R51": {
    "runId": "G-R51",
@@ -5245,7 +5611,31 @@
    ],
    "createdAt": "2026-11-01T11:08:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "qualifiedDisagreements": [
+    {
+     "text": "Topic 51.0: w",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic 51.1: w",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "KD 51: kd",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic 51.0",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic 51.1",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "verifications:G-C52": {
    "runId": "G-C52",
@@ -5319,7 +5709,7 @@
    "question": "Video: G-V53 (unknown, ?x?)",
    "consensusScore": null,
    "evidenceQuality": null,
-   "consensusWithheld": "insufficient_independent_models",
+   "consensusWithheld": "independence_unverified",
    "governanceStatus": "needs_review",
    "governanceReasons": [
     "r1"
@@ -5337,11 +5727,16 @@
      "confidence": ""
     }
    ],
-   "singleModelAssessment": "One independent model's assessment (Gemini): authentic — not agreement between models",
-   "modelIndependence": "insufficient",
+   "modelIndependence": "unverified",
    "createdAt": "2026-11-01T11:06:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "qualifiedDisagreements": [
+    {
+     "text": "1/1 responses say authentic — model independence unverified, not confirmed as agreement between models",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "runs:G-R54": {
    "runId": "G-R54",
@@ -5460,7 +5855,15 @@
    "dissentSummary": "Dissent: gpt4o: Likely manipulated",
    "createdAt": "2026-11-01T11:03:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "qualifiedDisagreements": [
+    {
+     "text": "2/3 responses say manipulated — model independence unverified, not confirmed as agreement between models",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "runs:G-R57": {
    "runId": "G-R57",
@@ -5611,7 +6014,15 @@
    "dissentSummary": "Dissent: gpt4o: manipulated",
    "createdAt": "2026-11-01T11:00:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "qualifiedDisagreements": [
+    {
+     "text": "2/3 responses say authentic — model independence unverified, not confirmed as agreement between models",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "runs:G-R60": {
    "runId": "G-R60",
@@ -5634,13 +6045,19 @@
    ],
    "qualifiedDisagreements": [
     {
+     "text": "Topic 60.0: w",
+     "basis": "independence_unverified"
+    },
+    {
      "text": "KD 60: kd",
      "basis": "independence_unverified"
     }
    ],
    "createdAt": "2026-11-01T10:59:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified"
   },
   "runs:R-IND": {
    "runId": "R-IND",
@@ -5663,7 +6080,15 @@
    ],
    "createdAt": "2026-11-01T10:58:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "qualifiedDisagreements": [
+    {
+     "text": "Topic A: w",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "runs:R-FC": {
    "runId": "R-FC",
@@ -5715,12 +6140,18 @@
    "qualifiedDisagreements": [
     {
      "text": "Topic same-exec: w",
-     "basis": "same_executing_model"
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Topic genuine: w",
+     "basis": "independence_unverified"
     }
    ],
    "createdAt": "2026-11-01T10:56:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified"
   },
   "runs:R-UV": {
    "runId": "R-UV",
@@ -5743,7 +6174,15 @@
    ],
    "createdAt": "2026-11-01T10:55:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "qualifiedDisagreements": [
+    {
+     "text": "Topic A: w",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "runs:R-NOROWS": {
    "runId": "R-NOROWS",
@@ -5794,7 +6233,15 @@
    ],
    "createdAt": "2026-11-01T10:52:00.000Z",
    "userId": "owner-b",
-   "userEmail": "owner-b"
+   "userEmail": "owner-b",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "qualifiedDisagreements": [
+    {
+     "text": "Topic B: w",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "runs:R-CAP": {
    "runId": "R-CAP",
@@ -5818,20 +6265,30 @@
    "qualifiedDisagreements": [
     {
      "text": "Same 1: w",
-     "basis": "same_executing_model"
+     "basis": "independence_unverified"
     },
     {
      "text": "Same 2: w",
-     "basis": "same_executing_model"
+     "basis": "independence_unverified"
     },
     {
      "text": "Same 3: w",
-     "basis": "same_executing_model"
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Same 4: w",
+     "basis": "independence_unverified"
+    },
+    {
+     "text": "Genuine: w",
+     "basis": "independence_unverified"
     }
    ],
    "createdAt": "2026-11-01T10:51:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified"
   },
   "verifications:C-IND-agree2": {
    "runId": "C-IND-agree2",
@@ -6341,7 +6798,15 @@
    "dissentSummary": "Dissent: Claude: manipulated",
    "createdAt": "2026-11-01T10:41:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "qualifiedDisagreements": [
+    {
+     "text": "2/3 responses say authentic — model independence unverified, not confirmed as agreement between models",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "videoVerifications:V-ONE": {
    "runId": "V-ONE",
@@ -6350,7 +6815,7 @@
    "question": "Video: V-ONE (unknown, ?x?)",
    "consensusScore": null,
    "evidenceQuality": null,
-   "consensusWithheld": "insufficient_independent_models",
+   "consensusWithheld": "independence_unverified",
    "governanceStatus": "needs_review",
    "governanceReasons": [
     "r1"
@@ -6378,11 +6843,16 @@
      "confidence": ""
     }
    ],
-   "singleModelAssessment": "One independent model's assessment (Gemini): authentic — not agreement between models",
-   "modelIndependence": "insufficient",
+   "modelIndependence": "unverified",
    "createdAt": "2026-11-01T10:40:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "qualifiedDisagreements": [
+    {
+     "text": "1/1 responses say authentic — model independence unverified, not confirmed as agreement between models",
+     "basis": "independence_unverified"
+    }
+   ]
   },
   "videoVerifications:V-SUB": {
    "runId": "V-SUB",
@@ -6424,7 +6894,16 @@
    "agreementSummary": "2/2 models say authentic",
    "createdAt": "2026-11-01T10:39:00.000Z",
    "userId": "owner-a",
-   "userEmail": "owner-a"
+   "userEmail": "owner-a",
+   "consensusWithheld": "independence_unverified",
+   "modelIndependence": "unverified",
+   "qualifiedDisagreements": [
+    {
+     "text": "2/2 responses say authentic — model independence unverified, not confirmed as agreement between models",
+     "basis": "independence_unverified"
+    }
+   ]
   }
- }
+ },
+ "_presentationRerecordedCC": "C-c (Order 34, PQ-1 (a)): the four additive presentation keys of these rows only re-recorded against the authorized C-c diff (CC-01 research rows by the shared gate; CC-12 video rows strict; CC-16 uncapped qualified list); base keys untouched. Rows: runs:G-R0, runs:G-R12, runs:G-R15, runs:G-R18, runs:G-R24, runs:G-R27, runs:G-R3, runs:G-R30, runs:G-R36, runs:G-R39, runs:G-R42, runs:G-R45, runs:G-R48, runs:G-R51, runs:G-R6, runs:G-R60, runs:G-R9, runs:R-B-IND, runs:R-CAP, runs:R-IND, runs:R-PC, runs:R-UV, videoVerifications:G-V11, videoVerifications:G-V14, videoVerifications:G-V17, videoVerifications:G-V2, videoVerifications:G-V20, videoVerifications:G-V23, videoVerifications:G-V26, videoVerifications:G-V32, videoVerifications:G-V35, videoVerifications:G-V38, videoVerifications:G-V41, videoVerifications:G-V44, videoVerifications:G-V47, videoVerifications:G-V5, videoVerifications:G-V50, videoVerifications:G-V53, videoVerifications:G-V56, videoVerifications:G-V59, videoVerifications:G-V8, videoVerifications:V-IND, videoVerifications:V-ONE, videoVerifications:V-SUB"
 }
