@@ -1,7 +1,7 @@
 import "server-only";
 
 import { ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY } from "@/lib/env";
-import { GEMINI_MODEL_ID } from "@/lib/models/gemini";
+import { GEMINI_MODEL_ID, GEMINI_THINKING_LEVEL } from "@/lib/models/gemini";
 
 import type { ExtractedFrame } from "./videoPure";
 
@@ -206,7 +206,8 @@ export async function callGeminiVision(
             ],
           },
         ],
-        generationConfig: { maxOutputTokens: 8192 },
+        // Same thinking level as every other Gemini call (lib/models/gemini.ts).
+        generationConfig: { maxOutputTokens: 8192, thinkingConfig: { thinkingLevel: GEMINI_THINKING_LEVEL } },
       }),
     }
   );

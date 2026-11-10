@@ -49,8 +49,8 @@ const CLASSIFIER_TIMEOUT_MS = 8000;
 // every query, regardless of its actual type — the same "silently fell
 // through to generic" failure class as the CLASSIFIER_TIMEOUT_MS fix above,
 // just via truncation instead of timeout. thinkingLevel: "MINIMAL" below (the
-// Gemini 3.x replacement for the original thinkingBudget: 0) is the primary fix — this raise is
-// defense in depth in case thinking can't be fully suppressed.
+// Gemini 3.x replacement for the original thinkingBudget: 0) is the primary
+// fix — this raise is defense in depth in case thinking can't be fully suppressed.
 const CLASSIFIER_MAX_OUTPUT_TOKENS = 1024;
 const CONFIDENCE_THRESHOLD = 0.6;
 const CACHE_MAX_ENTRIES = 200;
@@ -299,11 +299,16 @@ export async function classifyQuery(query: string): Promise<QueryClassification>
         diagnosticOperation: "classification",
         systemPromptOverride: CLASSIFIER_SYSTEM_PROMPT,
         maxOutputTokens: CLASSIFIER_MAX_OUTPUT_TOKENS,
-        // Classification is a short structured-JSON task with no benefit
-        // from extended reasoning — disable thinking so the full output
-        // budget goes to the actual answer, not invisible thought tokens.
-        // Gemini 3.x: thinkingLevel replaces thinkingBudget (3.5 Flash-Lite
-        // migration guide); MINIMAL = "Little to no thinking" (generateContent ref).
+        // The one deliberate exception to GEMINI_THINKING_LEVEL (LOW): the
+        // classifier keeps MINIMAL ("Little to no thinking", generateContent
+        // ref; the 3.x replacement for the old thinkingBudget: 0). Measured
+        // live 2026-11-10 on the same five typed questions (order31
+        // VERIFICATION.md): LOW and MINIMAL returned identical queryTypes and
+        // confidences, but LOW spent up to 559 thought tokens of this
+        // 1,024-token cap (thought + JSON up to 749) and added latency against
+        // the 8 s CLASSIFIER_TIMEOUT_MS, while MINIMAL spent none. A truncated
+        // or slow classification silently falls back to "generic", so LOW
+        // adds risk here with no measured benefit.
         thinkingLevel: "MINIMAL",
       }),
       CLASSIFIER_TIMEOUT_MS

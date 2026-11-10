@@ -205,7 +205,7 @@ describe("classifyQuery", () => {
     });
   });
 
-  it("calls Gemini with thinkingLevel: \"MINIMAL\" — the Gemini 3.x replacement for the original thinkingBudget: 0 (regression: gemini-2.5-flash shared its thinking-token budget with maxOutputTokens, so a small maxOutputTokens silently starved the actual JSON response, truncating it to nothing and falling back to generic for every query regardless of type)", async () => {
+  it("calls Gemini with thinkingLevel: \"MINIMAL\" — the one override of the LOW default, and the Gemini 3.x replacement for the original thinkingBudget: 0 (regression: gemini-2.5-flash shared its thinking-token budget with maxOutputTokens, so a small maxOutputTokens silently starved the actual JSON response, truncating it to nothing and falling back to generic for every query regardless of type)", async () => {
     mockedCallGemini.mockResolvedValue(
       okResult(
         classification({

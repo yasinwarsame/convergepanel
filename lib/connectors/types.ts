@@ -11,9 +11,9 @@ export type ConnectorCallOptions = {
   /**
    * Gemini-only: generationConfig.thinkingConfig.thinkingLevel (Gemini 3.x;
    * replaces the 2.5-series `thinkingBudget`, which the 3.x migration guide
-   * says to replace). Use "MINIMAL" for short, structured, non-reasoning
-   * outputs (e.g. classification JSON) so thinking cannot starve the visible
-   * answer on a small maxOutputTokens. Omitted => the model's default level.
+   * says to replace). Omitted => GEMINI_THINKING_LEVEL (lib/models/gemini.ts,
+   * currently "LOW"); the connector always sends a level, never the model's
+   * implicit default. Set only to override that level for one call.
    */
   thinkingLevel?: GeminiThinkingLevel;
   /**

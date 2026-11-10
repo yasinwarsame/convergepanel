@@ -9,7 +9,8 @@
  *  2. The panel's recorded requestedModel for the gemini slot is exactly the
  *     model the SDK was asked for.
  *  3. The request body is the documented Gemini 3.x form: no `temperature`,
- *     no `thinkingBudget`; `thinkingConfig.thinkingLevel` only when asked.
+ *     no `thinkingBudget`; `thinkingConfig.thinkingLevel` is always sent and is
+ *     GEMINI_THINKING_LEVEL ("LOW", owner direction, Order 31) unless overridden.
  *  4. No customer-facing Gemini label names 2.0 / 2.5 / "3 Pro".
  *
  * No network: the Google SDK and `fetch` are doubles.
@@ -33,7 +34,7 @@ jest.mock("@/lib/env", () => ({
   GEMINI_API_KEY: "test-gemini-key",
 }));
 
-import { GEMINI_MODEL_ID, GEMINI_DISPLAY_NAME } from "@/lib/models/gemini";
+import { GEMINI_MODEL_ID, GEMINI_DISPLAY_NAME, GEMINI_THINKING_LEVEL } from "@/lib/models/gemini";
 import { callGemini } from "@/lib/connectors/gemini";
 import type { GeminiDiagnosticOperation } from "@/lib/connectors/types";
 
@@ -72,6 +73,10 @@ describe("the constant", () => {
     expect(GEMINI_MODEL_ID).toBe("gemini-3.5-flash-lite");
     expect(GEMINI_DISPLAY_NAME).toBe("Gemini 3.5 Flash-Lite");
   });
+
+  it("the thinking level every call sends is LOW (owner direction), not the model default", () => {
+    expect(GEMINI_THINKING_LEVEL).toBe("LOW");
+  });
 });
 
 describe("callGemini sends GEMINI_MODEL_ID with a Gemini 3.x request body", () => {
@@ -86,14 +91,20 @@ describe("callGemini sends GEMINI_MODEL_ID with a Gemini 3.x request body", () =
     expect(mockGetGenerativeModel.mock.calls[0][0]).toMatchObject({ model: "gemini-3.5-flash-lite" });
   });
 
-  it("default body: maxOutputTokens only — no temperature, no thinkingBudget, no thinkingConfig", async () => {
+  it("default body: maxOutputTokens + thinkingConfig LOW — no temperature, no thinkingBudget", async () => {
     await callGemini("Q", null, "k", { maxOutputTokens: 1234 });
     const req = mockGenerateContent.mock.calls[0][0];
-    expect(req.generationConfig).toEqual({ maxOutputTokens: 1234 });
+    expect(req.generationConfig).toEqual({ maxOutputTokens: 1234, thinkingConfig: { thinkingLevel: "LOW" } });
     expect(JSON.stringify(req)).not.toMatch(/temperature|thinkingBudget|thinking_budget|topP|topK/);
   });
 
-  it("thinkingLevel is sent as generationConfig.thinkingConfig.thinkingLevel (documented 3.x form)", async () => {
+  it("the research/claim panel call (no opts at all) also sends thinkingConfig LOW", async () => {
+    await callGemini("Q", null, "k");
+    const req = mockGenerateContent.mock.calls[0][0];
+    expect(req.generationConfig.thinkingConfig).toEqual({ thinkingLevel: "LOW" });
+  });
+
+  it("an explicit per-call thinkingLevel overrides the default, in the documented 3.x placement", async () => {
     await callGemini("Q", null, "k", { maxOutputTokens: 1024, thinkingLevel: "MINIMAL" });
     const req = mockGenerateContent.mock.calls[0][0];
     expect(req.generationConfig).toEqual({ maxOutputTokens: 1024, thinkingConfig: { thinkingLevel: "MINIMAL" } });
@@ -128,8 +139,10 @@ describe("adaptive stages reach Gemini only through callGemini (so they send GEM
     expect(src).not.toMatch(/thinkingBudget\s*:/);
   });
 
-  it("the classifier asks for MINIMAL thinking (the 3.x replacement for thinkingBudget: 0)", () => {
+  it("only the classifier overrides the thinking level (MINIMAL); every other stage sends the LOW default", () => {
     expect(read("lib/adaptiveSchema/classifier.ts")).toMatch(/thinkingLevel: "MINIMAL"/);
+    expect((code("lib/adaptiveSchema/classifier.ts").match(/thinkingLevel\s*:/g) ?? []).length).toBe(1);
+    for (const [file] of STAGES.filter(([f]) => !f.endsWith("classifier.ts"))) expect(code(file)).not.toMatch(/thinkingLevel\s*:/);
   });
 
   it("no non-test source outside lib/models/gemini.ts carries a Gemini model-id literal", () => {
@@ -153,7 +166,7 @@ describe("adaptive stages reach Gemini only through callGemini (so they send GEM
 });
 
 describe("video vision sends GEMINI_MODEL_ID", () => {
-  it("URL names the constant; body carries no deprecated sampling or thinkingBudget field", async () => {
+  it("URL names the constant; body sends thinkingConfig LOW and no deprecated sampling or thinkingBudget field", async () => {
     const calls: { url: string; body: any }[] = [];
     const savedFetch = (global as any).fetch;
     (global as any).fetch = jest.fn(async (url: string, init: any) => {
@@ -168,7 +181,7 @@ describe("video vision sends GEMINI_MODEL_ID", () => {
     }
     expect(calls).toHaveLength(1);
     expect(calls[0].url.split("?")[0]).toBe("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent");
-    expect(calls[0].body.generationConfig).toEqual({ maxOutputTokens: 8192 });
+    expect(calls[0].body.generationConfig).toEqual({ maxOutputTokens: 8192, thinkingConfig: { thinkingLevel: "LOW" } });
     expect(JSON.stringify(calls[0].body)).not.toMatch(/temperature|thinkingBudget|topP|topK/);
   });
 });

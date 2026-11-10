@@ -18,7 +18,7 @@
 import { ModelResult } from "@/lib/types";
 import type { ConnectorCallOptions } from "./types";
 import { buildPanelPrompt } from "@/lib/panelPrompt";
-import { GEMINI_MODEL_ID } from "@/lib/models/gemini";
+import { GEMINI_MODEL_ID, GEMINI_THINKING_LEVEL } from "@/lib/models/gemini";
 import { MODEL_LIMITS, getModelTimeout } from "@/lib/modelConfig";
 import { getTotalTokensFromProviderResponse, modelIdToProviderKey, safeNum } from "@/lib/tokenExtraction";
 import { GoogleGenerativeAI } from "@google/generative-ai";
@@ -278,11 +278,10 @@ export async function callGemini(
             // migration guide: "Replace `thinking_budget` with
             // `thinking_level`"; the generateContent reference lists
             // thinkingLevel values MINIMAL/LOW/MEDIUM/HIGH, "Recommended for
-            // Gemini 3 or later models". Omitted => the model default
-            // ("minimal" on gemini-3.5-flash-lite per the migration guide).
-            ...(opts?.thinkingLevel
-              ? { thinkingConfig: { thinkingLevel: opts.thinkingLevel } }
-              : {}),
+            // Gemini 3 or later models". Always sent: GEMINI_THINKING_LEVEL
+            // (LOW, owner direction) unless the caller overrides it, so no
+            // call silently falls back to the model default ("minimal").
+            thinkingConfig: { thinkingLevel: opts?.thinkingLevel ?? GEMINI_THINKING_LEVEL },
           } as any,
         });
 

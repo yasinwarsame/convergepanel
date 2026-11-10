@@ -27,3 +27,16 @@ export const GEMINI_DISPLAY_NAME = "Gemini 3.5 Flash-Lite" as const;
  * "Recommended for Gemini 3 or later models."
  */
 export type GeminiThinkingLevel = "MINIMAL" | "LOW" | "MEDIUM" | "HIGH";
+
+/**
+ * The thinking level every Gemini call sends (research and claim panel calls,
+ * the alignment, bias, coverage and synthesis stages, and video vision). The
+ * classifier alone overrides it with MINIMAL (reason at its call site). Owner
+ * direction (Order 31): LOW, not the model default ("minimal" on
+ * gemini-3.5-flash-lite), so the research slot keeps some of the reasoning
+ * gemini-2.5-flash did with dynamic thinking. Measured live on 2026-11-10
+ * (evidence 2026-11-10-order31/gemini/VERIFICATION.md): LOW is accepted (HTTP
+ * 200), and no call hit MAX_TOKENS at its existing maxOutputTokens cap.
+ * A caller can still override per call via ConnectorCallOptions.thinkingLevel.
+ */
+export const GEMINI_THINKING_LEVEL: GeminiThinkingLevel = "LOW";
