@@ -532,7 +532,7 @@ export const SLOT_AGREEMENT_WORD: Readonly<Record<"strong" | "moderate" | "weak"
 export const SLOT_AGREEMENT_NO_RESPONSES_WORD = "Unavailable (no successful model responses)";
 export const SLOT_AGREEMENT_TOO_FEW_WORD = "Unavailable (fewer than two independent models responded)";
 /** The status-summary note under a schema-derived level labelled by panel slot (a Milestone-2 report has no verification gate). */
-export const SLOT_AGREEMENT_NOTE = "Agreement by panel slot reflects stored agreement between panel slots, not agreement between independent models or factual correctness. Source grounding reflects citation coverage, not evidence strength.";
+export const SLOT_AGREEMENT_NOTE = "Agreement by panel slot reflects stored agreement between panel slots (not between independent models), not factual correctness. Source grounding reflects citation coverage, not evidence strength.";
 
 /** The word for a schema-derived level in a run whose slots are not independent: unavailable when no / one model answered. */
 export function slotAgreementWord(level: keyof typeof SLOT_AGREEMENT_WORD, run: QualifiedIndependence | null): string {

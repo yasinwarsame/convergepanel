@@ -2787,7 +2787,7 @@
  },
  {
   "file": "lib/adaptiveSchema/verdictIndependence.ts",
-  "literal": "\"Agreement by panel slot reflects stored agreement between panel slots, not agreement between independent models or factual correctness. Source grounding reflects citation coverage, not evidence strength.\"",
+  "literal": "\"Agreement by panel slot reflects stored agreement between panel slots (not between independent models), not factual correctness. Source grounding reflects citation coverage, not evidence strength.\"",
   "count": 1,
   "category": "contract-p-applied",
   "rule": "Order 31 PROPOSAL (R-2): SLOT_AGREEMENT_NOTE — the PDF / DOCX status-summary note under a Milestone-2 level labelled by panel slot (a Milestone-2 report has no verification gate); never presented as agreement between independent models"
