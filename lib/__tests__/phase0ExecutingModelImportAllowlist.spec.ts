@@ -40,6 +40,8 @@ const EXECUTING_MODEL_MODULES = [
   // C-a: the corrected D-4 gate and the D-5 placeholder list (presentation only) — no decision module may import it.
   "lib/panel/executionIdentity",
   "components/adaptive/RunExecutionIdentityContext",
+  // Order 33 (ruling B): the canonical provider registry the gate and the independent-voice key read.
+  "lib/panel/providerRegistry",
 ] as const;
 
 /** O16: decision module → executing-model module → the exact symbols it may import ("type X" for a type-only import). */

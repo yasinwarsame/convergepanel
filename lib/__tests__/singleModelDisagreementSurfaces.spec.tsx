@@ -54,7 +54,9 @@ import type { StructuredSynthesis } from "@/lib/synthesis/structuredSchema";
 
 const TEXT = "Paris is the capital of France. The city has been the seat of the French government for centuries.";
 // C-a (corrected D-4 gate): a 6.2a+ ok row records its runtime provider; a provider-less ok row is a pre-6.2a row (UV).
-const ok = (modelId: string) => ({ modelId, status: "ok", rawText: TEXT, latencyMs: 5, provider: `${modelId}-provider` }) as ModelResult;
+// Order 33 (ruling B): the runtime provider is a registered canonical provider (was the placeholder `${modelId}-provider`).
+const OWN_PROVIDER: Record<string, string> = { chatgpt: "openai", claude: "anthropic", grok: "xai", perplexity: "perplexity", gemini: "google" };
+const ok = (modelId: string) => ({ modelId, status: "ok", rawText: TEXT, latencyMs: 5, provider: OWN_PROVIDER[modelId] }) as ModelResult;
 const sub = (modelId: string, provider: string | undefined = "deepseek") =>
   ({ modelId, status: "substituted", rawText: TEXT, latencyMs: 5, ...(provider ? { provider } : {}) }) as ModelResult;
 const TWO_SUBS = [sub("chatgpt"), sub("claude")];

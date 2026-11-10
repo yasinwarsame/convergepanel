@@ -6,8 +6,10 @@
  * A count K of INDEPENDENT executing models is shown only when the rows record who executed every usable row:
  *  1. every row is an object with a non-empty string `modelId` and a string `status` (`rowsRecordExecutionIdentity`);
  *  2. every usable row (status ok / substituted, non-empty text when the row carries text) records a provider: a
- *     non-empty string that is not "unknown". For an `ok` row that is the runtime provider Step 6.2a writes; for a
- *     substituted row it is the substitute's provider.
+ *     token that normalizes (trim + lowercase) to a registered canonical provider (lib/panel/providerRegistry.ts,
+ *     Order 33 ruling B) — "unknown", "n/a", "none", empty, unregistered strings record none. For an `ok` row that
+ *     is the runtime provider Step 6.2a writes (research) or the claim dispatch stamps (Order 33); for a substituted
+ *     row it is the substitute's provider.
  *  3. no row holds text whose validity cannot be established (VALIDITY_UNKNOWN, D-5);
  *  4. at least one usable row exists (K = 0 is never presented as a verified independent run; Order 29);
  *  5. every row's status is an exact recorded status literal of the ONE shared map (lib/panel/persistedStatusOutcome.ts):
@@ -32,6 +34,7 @@
 import { isRecordedAnswerStatus, isRecordedFailureStatus, recordedSlotOutcome } from "./persistedStatusOutcome";
 import { executingModelKey, rowsRecordExecutionIdentity } from "./independentVoices";
 import type { RunModelProvenanceFacts } from "./runModelIdentity";
+import { canonicalProvider } from "./providerRegistry";
 
 // ─── D-5: the closed placeholder-literal list (the only copy in the tree) ─────────────────────────────────────────
 
@@ -140,10 +143,9 @@ export function identityRowFromFacts(facts: RunModelProvenanceFacts | null | und
 
 // ─── The corrected D-4 gate ──────────────────────────────────────────────────────────────────────────────────────
 
+/** Order 33 (ruling B): a provider is recorded only when it normalizes to the ONE canonical registry. */
 function recordedProvider(provider: unknown): boolean {
-  if (typeof provider !== "string") return false;
-  const p = provider.trim().toLowerCase();
-  return p.length > 0 && p !== "unknown";
+  return canonicalProvider(provider) !== null;
 }
 
 /** A row that answered: status ok / substituted and, when the row carries text, non-empty text. */

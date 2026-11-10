@@ -31,6 +31,7 @@
  */
 
 import { coerceStatus } from "./normalize";
+import { canonicalProvider } from "./providerRegistry";
 
 /** Why a later slot answered by an already-counted substitute model is not an agreement input (adaptive runs). */
 export const REPEATED_SUBSTITUTE_EXCLUDED =
@@ -42,10 +43,13 @@ export type VoiceRow = {
   provider?: unknown;
 };
 
+/**
+ * Order 33 (ruling B): a provider is recorded only when it normalizes to the ONE canonical registry
+ * (lib/panel/providerRegistry.ts). Every provider value the code has ever written is registered, so real rows key
+ * exactly as before; an unregistered token is an unrecorded provider (keyed UNRECORDED_SUBSTITUTE_KEY).
+ */
 function recordedProvider(provider: unknown): string | null {
-  if (typeof provider !== "string") return null;
-  const p = provider.trim().toLowerCase();
-  return p.length > 0 && p !== "unknown" ? p : null;
+  return canonicalProvider(provider);
 }
 
 /** The identity of the model that actually wrote this row's text. */

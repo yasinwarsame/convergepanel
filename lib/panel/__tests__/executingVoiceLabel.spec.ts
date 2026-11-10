@@ -65,9 +65,13 @@ describe("groupSlotsByExecutingVoice / independentVoiceCount", () => {
   });
 
   it("distinct substitute providers stay distinct; provider ids are compared case-insensitively", () => {
-    const rows = [SUB("chatgpt", "deepseek"), SUB("claude", "DeepSeek "), SUB("gemini", "otherfallback")];
+    // Order 33 (ruling B): a second substitute provider counts only when it is a registered canonical provider.
+    const rows = [SUB("chatgpt", "deepseek"), SUB("claude", "DeepSeek "), SUB("gemini", "openai")];
     expect(independentVoiceCount(["chatgpt", "claude"], rows)).toBe(1);
     expect(independentVoiceCount(["chatgpt", "gemini"], rows)).toBe(2);
+    // An unregistered token ("otherfallback") records no provider: an unrecorded substitute, never an extra voice.
+    const unregistered = [SUB("chatgpt", "deepseek"), SUB("gemini", "otherfallback")];
+    expect(independentVoiceCount(["chatgpt", "gemini"], unregistered)).toBe(1);
   });
 
   it("repeated / case-variant slot ids collapse (never more independence than can be proven)", () => {

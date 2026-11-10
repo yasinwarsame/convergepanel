@@ -76,8 +76,12 @@ describe("D03: X unmarked — budgeted; qualifier and brand never cut; fallback 
     expect(post.length).toBeLessThanOrEqual(280);
     expect(post.endsWith("via ConvergePanel")).toBe(true);
   });
-  it("S8d (two different substitute providers) is IND: no qualifier", () => {
-    expect(buildAdaptiveXPost(Q, legacy("generic-mixed"), undefined, runExecutionIdentity(rowsOf("S8d")))).toBe(buildAdaptiveXPost(Q, legacy("generic-mixed")));
+  it("S8d (a substitute provider outside the registry, Order 33 ruling B) is UV: the UV qualifier, no count", () => {
+    const id = runExecutionIdentity(rowsOf("S8d"));
+    expect(id.kind).toBe("UV");
+    const post = buildAdaptiveXPost(Q, legacy("generic-mixed"), undefined, id);
+    expect(post.endsWith(`${modelWrittenShortLabel(id)}\n\nvia ConvergePanel`)).toBe(true);
+    expect(post).not.toMatch(DIGIT_NEXT_TO_INDEPENDENT);
     expect(sub("chatgpt", "mistral").provider).toBe("mistral");
   });
 });

@@ -47,7 +47,13 @@ export const SETS = {
   S5: { rows: [ok("chatgpt"), ok("claude"), ok("grok")], kind: "IND", K: 3, M: 3 },
   S4f: { rows: [ok("chatgpt"), ok("claude"), ok("grok"), ok("perplexity"), failed("gemini")], kind: "IND", K: 4, M: 4 },
   S8b: { rows: [ok("chatgpt"), sub("claude")], kind: "IND", K: 2, M: 2 },
-  S8d: { rows: [sub("chatgpt", "deepseek"), sub("claude", "mistral")], kind: "IND", K: 2, M: 2 },
+  // Order 33 (ruling B): "mistral" is no provider the code has ever written (lib/panel/providerRegistry.ts), so the
+  // second substitute records no provider and the gate fails (was IND, K 2 before the registry).
+  S8d: { rows: [sub("chatgpt", "deepseek"), sub("claude", "mistral")], kind: "UV", K: null, M: 2 },
+  // Order 33 (ruling B): malformed / placeholder provider tokens record no provider.
+  MALFORMED_PROVIDER: { rows: [ok("chatgpt", "None"), ok("claude", "n/a"), ok("grok", "acme")], kind: "UV", K: null, M: 3 },
+  // Deterministic normalization only: " OpenAI " / "ANTHROPIC" are the registered openai / anthropic.
+  NORMALIZED_PROVIDER: { rows: [ok("chatgpt", " OpenAI "), ok("claude", "ANTHROPIC")], kind: "IND", K: 2, M: 2 },
   // MOCK (D-5): stored placeholder rows.
   S9: { rows: [mock("chatgpt"), mock("claude"), ok("grok"), ok("perplexity"), ok("gemini")], kind: "IND", K: 3, M: 3 },
   S9u: {
@@ -61,7 +67,7 @@ export const SETS = {
 export type SetName = keyof typeof SETS;
 export const rowsOf = (name: SetName): ModelResult[] => (SETS[name].rows as readonly ModelResult[]).map((r) => ({ ...r }) as ModelResult);
 
-export const UV_SETS: SetName[] = ["S3", "S3m", "S3mn", "S3mnRecorded", "S6", "PRE62A_SUB", "PRE62A_OK", "R_UV", "UNKNOWN_PROVIDER", "S9u"];
+export const UV_SETS: SetName[] = ["S3", "S3m", "S3mn", "S3mnRecorded", "S6", "PRE62A_SUB", "PRE62A_OK", "R_UV", "UNKNOWN_PROVIDER", "S9u", "S8d", "MALFORMED_PROVIDER"];
 export const BI35_SETS: SetName[] = ["S4", "S5", "S4f"];
 
 /**
@@ -78,9 +84,11 @@ export function referenceK(rows: readonly ModelResult[]): number | null {
     if (Object.values(STORED_PLACEHOLDER_LITERALS).includes(text.trim()) && r.status === "ok") continue;
     if ((r.status === "ok" || r.status === "substituted") && text.trim()) usable.push(r);
   }
+  // Order 33 (ruling B): the test-side copy of the provider registry (independent of the module under test).
+  const REGISTERED = ["openai", "anthropic", "xai", "perplexity", "google", "deepseek"];
   for (const r of usable as any[]) {
     const p = typeof r.provider === "string" ? r.provider.trim().toLowerCase() : "";
-    if (!p || p === "unknown") return null;
+    if (!REGISTERED.includes(p)) return null;
   }
   return new Set(usable.map((r) => executingModelKey(r as any))).size;
 }
