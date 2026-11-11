@@ -43,6 +43,7 @@
     "@sentry/core": "^10.56.0",
     "@sentry/nextjs": "^10.56.0",
     "@stripe/stripe-js": "^8.5.3",
+    "@vercel/oidc": "4.0.3",
     "docx": "9.7.1",
     "firebase": "^12.6.0",
     "firebase-admin": "^12.7.0",
