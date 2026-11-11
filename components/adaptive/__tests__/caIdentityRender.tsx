@@ -20,5 +20,5 @@ export function renderUnderRun(el: ReactElement, rows: readonly ModelResult[], i
   return renderToStaticMarkup(createElement(RunModelProvenanceContext.Provider, { value: facts }, withIdentity));
 }
 
-/** Markup → visible text, tags as separators. */
-export const textOf = (markup: string) => markup.replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/\s+/g, " ");
+/** Markup → visible text, tags as separators. `&amp;` is decoded last, so "&amp;quot;" stays "&quot;" (CodeQL js/double-escaping). */
+export const textOf = (markup: string) => markup.replace(/<[^>]+>/g, " ").replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ");

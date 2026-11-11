@@ -65,7 +65,18 @@ import { generateVerificationMemo } from "@/lib/verification/generateMemo";
  * Pinned: sha256 of the 8584211 outputs for the generated set (computed in a scratch export at that commit, without
  * normalisation). Was 96651b5d2288eb0fabcfb09cf1a582c1d99e93d34613fb78341c33a4bbf8ee02 (B2-normalised baseline).
  */
-const BASELINE_8584211_DIGEST = "ecda400490d0b6f10931dd72465941156b1ab332f752912e0e616a3232c5eb21";
+/**
+ * Order 36 (remote CI): the Team claim row prints its local "created" date, so the 8584211 output depends on the process
+ * timezone. Both digests were reproduced by running this file in a git-archive export of 8584211 (Africa/Nairobi, the
+ * capturing machine, reproduces the original pin; UTC is CI). Any other timezone fails: run with TZ=UTC.
+ */
+const BASELINE_8584211_DIGEST_BY_TIMEZONE: Record<string, string> = {
+  "Africa/Nairobi": "ecda400490d0b6f10931dd72465941156b1ab332f752912e0e616a3232c5eb21",
+  UTC: "cd20edfdff8380f04f8818da7be833a92f866adadf3db875678a31accf3b49d6",
+};
+const EFFECTIVE_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
+const ORACLE_TIMEZONE = ["UTC", "Etc/UTC", "Etc/GMT", "GMT", "Etc/Universal", "Universal", "Etc/Zulu", "Zulu"].includes(EFFECTIVE_TIMEZONE) ? "UTC" : EFFECTIVE_TIMEZONE;
+const BASELINE_8584211_DIGEST: string | undefined = BASELINE_8584211_DIGEST_BY_TIMEZONE[ORACLE_TIMEZONE];
 
 // Feature detection: the claim presentation module exists only after 8584211.
 let presentation: any = null;
@@ -326,6 +337,7 @@ describe("records with >= 2 independent executing models (no collapsed slots): i
       process.stdout.write(`PARITY_DIGEST=${digest}\n`);
       return;
     }
+    expect([EFFECTIVE_TIMEZONE, BASELINE_8584211_DIGEST !== undefined]).toEqual([EFFECTIVE_TIMEZONE, true]);
     expect(digest).toBe(BASELINE_8584211_DIGEST);
   });
 });
