@@ -145,5 +145,15 @@ describe("answeringIndependentModelCount", () => {
     expect(answeringIndependentModelCount(facts([ok("chatgpt"), { modelId: "claude", status: "ok", rawText: GENUINE }]))).toBeNull();
     expect(answeringIndependentModelCount([{ modelId: "chatgpt" }, ...facts([ok("claude")])])).toBeNull();
     expect(answeringIndependentModelCount([{ modelId: "" } as any, ...facts([ok("claude")])])).toBeNull();
+    // A row with no slot id at all (or a null row) makes the run's identity unknown: null, never a crash or a count.
+    expect(answeringIndependentModelCount([{ status: "timeout" } as any, ...facts([ok("claude"), ok("chatgpt")])])).toBeNull();
+    expect(answeringIndependentModelCount([null as any, ...facts([ok("claude"), ok("chatgpt")])])).toBeNull();
+    expect(answeringIndependentModelCount([{ modelId: 7, status: "ok" } as any, ...facts([ok("claude"), ok("chatgpt")])])).toBeNull();
+  });
+
+  it("a substitute answering several slots counts once (executing models, not answering slots)", () => {
+    const sub = (m: string): Row => ({ modelId: m, status: "substituted", provider: "deepseek", rawText: GENUINE, outputClass: "model_response", substitutedFrom: `x:${m}` });
+    expect(answeringIndependentModelCount(facts([sub("claude"), sub("gemini"), failed("chatgpt")]))).toBe(1);
+    expect(answeringIndependentModelCount(facts([sub("claude"), sub("gemini"), ok("chatgpt")]))).toBe(2);
   });
 });
