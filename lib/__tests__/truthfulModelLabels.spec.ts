@@ -18,7 +18,10 @@ const label = (id: string) => PANEL_MODELS.find((m) => m.id === id)!.label;
 const TRUTHFUL: Record<string, string> = {
   "gpt-4o-mini": "GPT-4o mini",
   "claude-haiku-4-5-20251001": "Claude Haiku 4.5",
-  "grok-4-1-fast-reasoning": "Grok 4.1 Fast",
+  // Legacy ID: xAI retired it 2026-05-15 and serves it with grok-4.3 (low reasoning effort) —
+  // https://docs.x.ai/developers/migration/may-15-retirement. The label names the served model;
+  // requestedModel keeps recording the legacy ID that was actually sent.
+  "grok-4-1-fast-reasoning": "Grok 4.3",
   "perplexity/sonar": "Perplexity Sonar",
 };
 
@@ -55,7 +58,7 @@ describe("truthful model labels", () => {
   it("no customer-facing source still advertises the retired labels", () => {
     let out = "";
     try {
-      out = execFileSync("git", ["grep", "-n", "-E", "GPT[ -]?5\\.2|Opus 4\\.5|Grok[ -]4([^.0-9-]|$)|Perplexity Pro", "--", "app", "components", "lib", "public", "README.md", ":!**/__tests__/**", ":!*.spec.*"], { cwd: root, encoding: "utf8" });
+      out = execFileSync("git", ["grep", "-n", "-E", "GPT[ -]?5\\.2|Opus 4\\.5|Grok[ -]4([^.0-9-]|$)|Grok[ -]4\\.1|Perplexity Pro", "--", "app", "components", "lib", "public", "README.md", ":!**/__tests__/**", ":!*.spec.*"], { cwd: root, encoding: "utf8" });
     } catch (e: any) {
       if (e.status !== 1) throw e; // 1 = no match
     }

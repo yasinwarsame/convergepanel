@@ -6,7 +6,7 @@ ConvergePanel is a production-ready MVP web application that sends one user ques
 
 ## Features
 
-- **Multi-Model Support**: Query GPT-4o mini, Claude Haiku 4.5, Grok 4.1 Fast, Perplexity Sonar, and Gemini 3.5 Flash-Lite simultaneously
+- **Multi-Model Support**: Query GPT-4o mini, Claude Haiku 4.5, Grok 4.3, Perplexity Sonar, and Gemini 3.5 Flash-Lite simultaneously
 - **Parallel Execution**: All models respond in parallel for faster results
 - **Consensus Analysis**: Automatically identifies areas of agreement and disagreement
 - **Numeric Conflict Detection**: Flags when models provide conflicting numbers or percentages
@@ -161,7 +161,7 @@ ConvergePanel/
 │       ├── base.ts               # Base connector class
 │       ├── chatgpt.ts            # OpenAI GPT-4o mini connector
 │       ├── claude.ts             # Anthropic Claude Haiku 4.5 connector
-│       ├── grok.ts               # X.AI Grok 4.1 Fast connector
+│       ├── grok.ts               # X.AI Grok 4.3 connector
 │       ├── perplexity.ts         # Perplexity Sonar connector
 │       ├── gemini.ts             # Google Gemini 3.5 Flash-Lite connector
 │       └── index.ts              # Connector exports
@@ -482,7 +482,7 @@ There are no built-in defaults: every `NEXT_PUBLIC_FIREBASE_*` value must be set
 |----------|-------------|----------|
 | `OPENAI_API_KEY` | OpenAI API key for GPT-4o mini | No (uses mock if missing) |
 | `ANTHROPIC_API_KEY` | Anthropic API key for Claude Haiku 4.5 | No (uses mock if missing) |
-| `XAI_API_KEY` | X.AI API key for Grok 4.1 Fast | No (uses mock if missing) |
+| `XAI_API_KEY` | X.AI API key for Grok 4.3 | No (uses mock if missing) |
 | `PERPLEXITY_API_KEY` | Perplexity API key for Perplexity Sonar | No (uses mock if missing) |
 | `GEMINI_API_KEY` | Google API key for Gemini 3.5 Flash-Lite | No (uses mock if missing) |
 

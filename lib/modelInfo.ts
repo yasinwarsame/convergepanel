@@ -25,7 +25,7 @@ import { GEMINI_DISPLAY_NAME } from "./models/gemini";
 export const MODEL_INFO: Record<ModelId, { displayName: string }> = {
   chatgpt: { displayName: "GPT-4o mini" },
   claude: { displayName: "Claude Haiku 4.5" },
-  grok: { displayName: "Grok 4.1 Fast" },
+  grok: { displayName: "Grok 4.3" },
   perplexity: { displayName: "Perplexity Sonar" },
   gemini: { displayName: GEMINI_DISPLAY_NAME },
 };

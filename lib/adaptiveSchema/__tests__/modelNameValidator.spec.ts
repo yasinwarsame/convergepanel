@@ -20,7 +20,7 @@ describe("findUnrecognizedModelNames", () => {
   });
 
   it("returns empty when every model-like token matches the roster's real display names", () => {
-    const text = "GPT-4o mini, Claude Haiku 4.5, Grok 4.1 Fast, Perplexity Sonar, and Gemini 3.5 Flash-Lite all responded.";
+    const text = "GPT-4o mini, Claude Haiku 4.5, Grok 4.3, Perplexity Sonar, and Gemini 3.5 Flash-Lite all responded.";
     expect(findUnrecognizedModelNames(text, ROSTER)).toEqual([]);
   });
 
@@ -83,7 +83,9 @@ describe("stripUnrecognizedModelNames", () => {
   });
 
   it("keeps the whole real Grok label and still strips a guessed Grok version (Order 37 truthful labels)", () => {
-    expect(stripUnrecognizedModelNames("Grok 4.1 Fast and Grok 5 disagree.", ROSTER)).toBe("Grok 4.1 Fast and the panel disagree.");
+    expect(stripUnrecognizedModelNames("Grok 4.3 and Grok 5 disagree.", ROSTER)).toBe("Grok 4.3 and the panel disagree.");
+    // The retired legacy name is not the served model; the API spelling of the served model is.
+    expect(stripUnrecognizedModelNames("Grok 4.1 Fast and grok-4.3 agree.", ROSTER)).toBe("the panel and grok-4.3 agree.");
   });
 
   it("leaves text with only real display names untouched", () => {

@@ -45,7 +45,7 @@ export const PANEL_MODELS: PanelModelConfig[] = [
   },
   {
     id: "grok",
-    label: "Grok 4.1 Fast",
+    label: "Grok 4.3",
     provider: "xai",
     colorClasses: "bg-amber-50 text-amber-700 border border-amber-200",
   },
