@@ -16,7 +16,7 @@ import { PRODUCTION_FIREBASE_PROJECT_ID, PRODUCTION_FIREBASE_PROJECT_NUMBER } fr
 
 export type DevelopmentAdcResolution =
   | { kind: "not_applicable" }
-  | { kind: "refused"; reason: "unknown_credential_source" | "adc_outside_development" | "missing_project_id" | "production_project" | "key_file_credentials" }
+  | { kind: "refused"; reason: "unknown_credential_source" | "adc_outside_development" | "missing_project_id" | "production_project" | "key_file_credentials" | "cloudsdk_config_unsupported" }
   | { kind: "ok"; projectId: string };
 
 /** Pure: decides from the given environment whether the development ADC path applies, and validates it fail-closed. */
@@ -28,6 +28,9 @@ export function resolveDevelopmentAdc(env: Record<string, string | undefined>): 
   if (env.VERCEL_ENV !== undefined && env.VERCEL_ENV !== "" && env.VERCEL_ENV !== "development") return { kind: "refused", reason: "adc_outside_development" };
   // Keyless only: a key file named by GOOGLE_APPLICATION_CREDENTIALS would make ADC a key credential again.
   if (typeof env.GOOGLE_APPLICATION_CREDENTIALS === "string" && env.GOOGLE_APPLICATION_CREDENTIALS.trim() !== "") return { kind: "refused", reason: "key_file_credentials" };
+  // Order 37 I (review M-1): firebase-admin and google-auth-library read ONLY the HOME (or APPDATA) well-known file and
+  // ignore CLOUDSDK_CONFIG, so with it set gcloud writes one file and the SDKs use another. Refused rather than guessed.
+  if (typeof env.CLOUDSDK_CONFIG === "string" && env.CLOUDSDK_CONFIG.trim() !== "") return { kind: "refused", reason: "cloudsdk_config_unsupported" };
   // Explicit only: admin.ts defaults FIREBASE_PROJECT_ID to Production, so the default is never used here.
   const projectId = (env.FIREBASE_PROJECT_ID ?? "").trim().toLowerCase();
   if (!projectId) return { kind: "refused", reason: "missing_project_id" };
@@ -46,7 +49,7 @@ const IMPERSONATION_URL = /^https:\/\/iamcredentials\.googleapis\.com\/v1\/proje
 
 export type AdcFileInspection =
   | { kind: "ok"; serviceAccountEmail: string }
-  | { kind: "refused"; reason: "adc_file_missing" | "adc_file_unreadable" | "adc_not_impersonated_service_account" | "adc_invalid_impersonation" };
+  | { kind: "refused"; reason: "adc_file_missing" | "adc_file_unreadable" | "adc_not_impersonated_service_account" | "adc_invalid_impersonation" | "adc_source_not_user_credential" };
 
 export function inspectAdcFile(text: string | null): AdcFileInspection {
   if (text === null) return { kind: "refused", reason: "adc_file_missing" };
@@ -57,15 +60,23 @@ export function inspectAdcFile(text: string | null): AdcFileInspection {
     return { kind: "refused", reason: "adc_file_unreadable" };
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { kind: "refused", reason: "adc_file_unreadable" };
-  const { type, service_account_impersonation_url: url } = parsed as { type?: unknown; service_account_impersonation_url?: unknown };
+  const { type, service_account_impersonation_url: url, source_credentials: source } = parsed as { type?: unknown; service_account_impersonation_url?: unknown; source_credentials?: unknown };
   if (type !== "impersonated_service_account") return { kind: "refused", reason: "adc_not_impersonated_service_account" };
+  // Order 37 I (review m-1): the impersonating source must be the developer's own user credential, never a key.
+  const sourceType = source && typeof source === "object" && !Array.isArray(source) ? (source as { type?: unknown }).type : undefined;
+  if (sourceType !== "authorized_user") return { kind: "refused", reason: "adc_source_not_user_credential" };
   const m = typeof url === "string" ? IMPERSONATION_URL.exec(url) : null;
   if (!m) return { kind: "refused", reason: "adc_invalid_impersonation" };
   return { kind: "ok", serviceAccountEmail: m[1] };
 }
 
-/** The file firebase-admin and google-auth-library read for application-default credentials (gcloud well-known path). */
-export function adcWellKnownFilePath(env: Record<string, string | undefined>, homedir: string): string {
-  const base = env.CLOUDSDK_CONFIG && env.CLOUDSDK_CONFIG.trim() !== "" ? env.CLOUDSDK_CONFIG : `${homedir}/.config/gcloud`;
-  return `${base}/application_default_credentials.json`;
+/**
+ * The file firebase-admin (credential-internal.js GCLOUD_CREDENTIAL_PATH) and google-auth-library
+ * (_tryGetApplicationCredentialsFromWellKnownFile) read: APPDATA on Windows, else HOME + .config — both from the
+ * environment variable, not os.homedir(). Null when that variable is unset: the SDKs then skip the file and fall back
+ * to the metadata server, which admin.ts refuses.
+ */
+export function adcWellKnownFilePath(env: Record<string, string | undefined>, platform: string): string | null {
+  if (platform.toLowerCase().startsWith("win")) return env.APPDATA ? `${env.APPDATA}/gcloud/application_default_credentials.json` : null;
+  return env.HOME ? `${env.HOME}/.config/gcloud/application_default_credentials.json` : null;
 }

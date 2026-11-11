@@ -2,7 +2,7 @@
  * Order 35 G (Development isolation D-2): keyless developer Admin credential on a non-Production project only.
  * The pure resolver, and the REAL lib/firebase/admin.ts on the development ADC path.
  */
-import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { adcWellKnownFilePath, inspectAdcFile, resolveDevelopmentAdc } from "../developmentAdc";
@@ -21,15 +21,26 @@ describe("inspectAdcFile (review M-1)", () => {
     ["a service-account KEY", JSON.stringify({ type: "service_account", project_id: "convergepanel-preview", private_key: "k", client_email: DEV_SA }), "adc_not_impersonated_service_account"],
     ["the developer's own user credential", JSON.stringify({ type: "authorized_user", client_id: "x" }), "adc_not_impersonated_service_account"],
     ["external account", JSON.stringify({ type: "external_account" }), "adc_not_impersonated_service_account"],
-    ["no impersonation URL", JSON.stringify({ type: "impersonated_service_account" }), "adc_invalid_impersonation"],
+    ["no impersonation URL", JSON.stringify({ type: "impersonated_service_account", source_credentials: { type: "authorized_user" } }), "adc_invalid_impersonation"],
     ["a URL that is not the IAM credentials endpoint", JSON.stringify({ ...impersonation(DEV_SA), service_account_impersonation_url: `https://evil.example/v1/projects/-/serviceAccounts/${DEV_SA}:generateAccessToken` }), "adc_invalid_impersonation"],
     ["a URL with path injection", JSON.stringify({ ...impersonation(DEV_SA), service_account_impersonation_url: `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/x%40convergepanel.iam.gserviceaccount.com:generateAccessToken?@convergepanel-preview.iam.gserviceaccount.com:generateAccessToken` }), "adc_invalid_impersonation"],
   ])("refuses %s", (_n, text, reason) => {
     expect(inspectAdcFile(text as string | null)).toEqual({ kind: "refused", reason });
   });
-  it("reads the same well-known path firebase-admin and google-auth-library read", () => {
-    expect(adcWellKnownFilePath({}, "/home/dev")).toBe("/home/dev/.config/gcloud/application_default_credentials.json");
-    expect(adcWellKnownFilePath({ CLOUDSDK_CONFIG: "/cfg" }, "/home/dev")).toBe("/cfg/application_default_credentials.json");
+  it.each([
+    ["an impersonation sourced from a service-account KEY", { ...impersonation(DEV_SA), source_credentials: { type: "service_account", private_key: "k" } }],
+    ["no source credential", { ...impersonation(DEV_SA), source_credentials: undefined }],
+    ["a malformed source credential", { ...impersonation(DEV_SA), source_credentials: ["authorized_user"] }],
+  ])("refuses %s (review m-1)", (_n, content) => {
+    expect(inspectAdcFile(JSON.stringify(content))).toEqual({ kind: "refused", reason: "adc_source_not_user_credential" });
+  });
+  it("reads the same well-known path firebase-admin and google-auth-library read (HOME / APPDATA, never CLOUDSDK_CONFIG)", () => {
+    expect(adcWellKnownFilePath({ HOME: "/home/dev" }, "darwin")).toBe("/home/dev/.config/gcloud/application_default_credentials.json");
+    expect(adcWellKnownFilePath({ HOME: "/home/dev", CLOUDSDK_CONFIG: "/cfg" }, "linux")).toBe("/home/dev/.config/gcloud/application_default_credentials.json");
+    expect(adcWellKnownFilePath({ APPDATA: "C:/AppData", HOME: "/home/dev" }, "win32")).toBe("C:/AppData/gcloud/application_default_credentials.json");
+    expect(adcWellKnownFilePath({}, "darwin")).toBeNull();
+    expect(adcWellKnownFilePath({ HOME: "" }, "linux")).toBeNull();
+    expect(adcWellKnownFilePath({ HOME: "/home/dev" }, "win32")).toBeNull();
   });
 });
 
@@ -54,12 +65,13 @@ describe("resolveDevelopmentAdc", () => {
     ["the Production project id, padded / cased", { FIREBASE_ADMIN_CREDENTIAL_SOURCE: "adc", FIREBASE_PROJECT_ID: " ConvergePanel " }, "production_project"],
     ["the Production project number", { FIREBASE_ADMIN_CREDENTIAL_SOURCE: "adc", FIREBASE_PROJECT_ID: "907484474744" }, "production_project"],
     ["a key file through GOOGLE_APPLICATION_CREDENTIALS", { FIREBASE_ADMIN_CREDENTIAL_SOURCE: "adc", FIREBASE_PROJECT_ID: "convergepanel-dev", GOOGLE_APPLICATION_CREDENTIALS: "/tmp/key.json" }, "key_file_credentials"],
+    ["CLOUDSDK_CONFIG (the SDKs would read a different file than gcloud wrote; review M-1)", { FIREBASE_ADMIN_CREDENTIAL_SOURCE: "adc", FIREBASE_PROJECT_ID: "convergepanel-dev", CLOUDSDK_CONFIG: "/cfg" }, "cloudsdk_config_unsupported"],
   ])("refuses %s", (_n, env, reason) => {
     expect(resolveDevelopmentAdc(env as Record<string, string>)).toEqual({ kind: "refused", reason });
   });
 });
 
-const ENV_KEYS = ["VERCEL_ENV", "FIREBASE_SERVICE_ACCOUNT_BASE64", "FIREBASE_SERVICE_ACCOUNT_JSON", "FIREBASE_CLIENT_EMAIL", "FIREBASE_PRIVATE_KEY", "FIREBASE_PROJECT_ID", "FIREBASE_WIF_AUDIENCE", "FIREBASE_WIF_SERVICE_ACCOUNT", "FIREBASE_ADMIN_CREDENTIAL_SOURCE", "GOOGLE_APPLICATION_CREDENTIALS", "CLOUDSDK_CONFIG"] as const;
+const ENV_KEYS = ["VERCEL_ENV", "FIREBASE_SERVICE_ACCOUNT_BASE64", "FIREBASE_SERVICE_ACCOUNT_JSON", "FIREBASE_CLIENT_EMAIL", "FIREBASE_PRIVATE_KEY", "FIREBASE_PROJECT_ID", "FIREBASE_WIF_AUDIENCE", "FIREBASE_WIF_SERVICE_ACCOUNT", "FIREBASE_ADMIN_CREDENTIAL_SOURCE", "GOOGLE_APPLICATION_CREDENTIALS", "CLOUDSDK_CONFIG", "HOME"] as const;
 const saved: Record<string, string | undefined> = {};
 beforeAll(() => ENV_KEYS.forEach((k) => (saved[k] = process.env[k])));
 afterEach(() => ENV_KEYS.forEach((k) => (saved[k] === undefined ? delete process.env[k] : (process.env[k] = saved[k]))));
@@ -67,10 +79,11 @@ afterEach(() => ENV_KEYS.forEach((k) => (saved[k] === undefined ? delete process
 let cfgDir: string;
 beforeEach(() => (cfgDir = mkdtempSync(join(tmpdir(), "cp-adc-"))));
 afterEach(() => rmSync(cfgDir, { recursive: true, force: true }));
-/** Writes the gcloud ADC file (null: none) into a temporary CLOUDSDK_CONFIG. */
-const adcFile = (content: unknown | null): { CLOUDSDK_CONFIG: string } => {
-  if (content !== null) writeFileSync(join(cfgDir, "application_default_credentials.json"), typeof content === "string" ? content : JSON.stringify(content));
-  return { CLOUDSDK_CONFIG: cfgDir };
+/** Writes the gcloud ADC file (null: none) at a temporary HOME's well-known path, the only file the SDKs read. */
+const adcFile = (content: unknown | null): { HOME: string } => {
+  mkdirSync(join(cfgDir, ".config", "gcloud"), { recursive: true });
+  if (content !== null) writeFileSync(join(cfgDir, ".config", "gcloud", "application_default_credentials.json"), typeof content === "string" ? content : JSON.stringify(content));
+  return { HOME: cfgDir };
 };
 
 function loadAdmin(env: Partial<Record<(typeof ENV_KEYS)[number], string>>, existingApps: unknown[] = []) {
@@ -120,6 +133,8 @@ describe("admin.ts — development application-default path", () => {
     ["a key file", { FIREBASE_ADMIN_CREDENTIAL_SOURCE: "adc", FIREBASE_PROJECT_ID: "convergepanel-dev", GOOGLE_APPLICATION_CREDENTIALS: "/k.json" }, "development_adc_key_file_credentials"],
     ["a service-account key as the ADC file", { FIREBASE_ADMIN_CREDENTIAL_SOURCE: "adc", FIREBASE_PROJECT_ID: "convergepanel-preview", __adc: { type: "service_account", private_key: "k", client_email: DEV_SA } }, "development_adc_adc_not_impersonated_service_account"],
     ["no ADC file (metadata-server fallback)", { FIREBASE_ADMIN_CREDENTIAL_SOURCE: "adc", FIREBASE_PROJECT_ID: "convergepanel-preview", __adc: null }, "development_adc_adc_file_missing"],
+    ["CLOUDSDK_CONFIG pointing at a different file than the SDKs read (review M-1)", { FIREBASE_ADMIN_CREDENTIAL_SOURCE: "adc", FIREBASE_PROJECT_ID: "convergepanel-preview", CLOUDSDK_CONFIG: "/elsewhere" }, "development_adc_cloudsdk_config_unsupported"],
+    ["an impersonation sourced from a service-account key (review m-1)", { FIREBASE_ADMIN_CREDENTIAL_SOURCE: "adc", FIREBASE_PROJECT_ID: "convergepanel-preview", __adc: { ...impersonation(DEV_SA), source_credentials: { type: "service_account", private_key: "k" } } }, "development_adc_adc_source_not_user_credential"],
     ["impersonating the Production Admin SA", { FIREBASE_ADMIN_CREDENTIAL_SOURCE: "adc", FIREBASE_PROJECT_ID: "convergepanel-preview", __adc: impersonation("firebase-adminsdk-fbsvc@convergepanel.iam.gserviceaccount.com") }, "production_project_outside_production"],
     ["impersonating an SA of another project", { FIREBASE_ADMIN_CREDENTIAL_SOURCE: "adc", FIREBASE_PROJECT_ID: "convergepanel-preview", __adc: impersonation("cp-dev-admin@other-project-123.iam.gserviceaccount.com") }, "credential_project_mismatch"],
   ])("refused on %s: Admin stays uninitialized and no certificate fallback is attempted", (_n, envIn, reason) => {
@@ -129,6 +144,15 @@ describe("admin.ts — development application-default path", () => {
     expect(cert).not.toHaveBeenCalled();
     expect(mod.adminDb).toBeUndefined();
     expect(errors.join("\n")).toContain(reason);
+  });
+
+  it("HOME unset: the SDKs would skip the well-known file and use the metadata server, so it is refused (review M-1)", () => {
+    adcFile(impersonation(DEV_SA));
+    const { initializeApp, mod, errors } = loadAdmin({ FIREBASE_ADMIN_CREDENTIAL_SOURCE: "adc", FIREBASE_PROJECT_ID: "convergepanel-preview" });
+    expect(process.env.HOME).toBeUndefined();
+    expect(initializeApp).not.toHaveBeenCalled();
+    expect(mod.adminDb).toBeUndefined();
+    expect(errors.join("\n")).toContain("development_adc_adc_file_missing");
   });
 
   it("an existing default app on the Production project is refused (isolation guard on the live app)", () => {

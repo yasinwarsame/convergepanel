@@ -133,10 +133,10 @@ function initFirebaseAdmin() {
     const { projectId } = dev;
     // Review M-1: only an impersonated developer service account; its address goes through the #294 guard.
     const { readFileSync } = require("fs") as typeof import("fs");
-    const { homedir } = require("os") as typeof import("os");
+    const adcPath = adcWellKnownFilePath(process.env, process.platform);
     let adcText: string | null = null;
     try {
-      adcText = readFileSync(adcWellKnownFilePath(process.env, homedir()), "utf8");
+      adcText = adcPath === null ? null : readFileSync(adcPath, "utf8");
     } catch {
       adcText = null;
     }
