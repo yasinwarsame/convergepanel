@@ -49,7 +49,6 @@ import {
   partitionModelResponses,
   summarizeModelResponses,
 } from "@/lib/research/modelResponsesPresentation";
-import SavedResponseBody from "@/components/research/SavedResponseBody";
 
 function ComparisonCellList({ cells }: { cells: ComparisonCell[] }) {
   if (!cells || cells.length === 0) return null;
@@ -313,7 +312,10 @@ function Milestone2ModelOutputList({ schema, results }: { schema: ResultSchema; 
             ) : (
               <div className="space-y-2" data-testid="saved-text-model-response" data-model-id={r.modelId}>
                 <p className="text-xs text-cp-muted">{r.parseError === SAVED_COPY_SHORTENED ? SAVED_TEXT_SHORTENED_LABEL : SAVED_TEXT_UNSTRUCTURED_LABEL}</p>
-                <SavedResponseBody text={r.savedResponseText ?? ""} />
+                {/* Review D2: plain text only, never parsed into structure. React escapes it. */}
+                <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded bg-cp-raised p-3 text-sm text-cp-text" data-testid="saved-text-plain">
+                  {r.savedResponseText ?? ""}
+                </pre>
               </div>
             )}
           </Card>

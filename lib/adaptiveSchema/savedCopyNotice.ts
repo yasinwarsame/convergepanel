@@ -37,7 +37,15 @@ export const SAVED_COPY_MISSING = "No saved copy of this response is available, 
 export const SAVED_TEXT_UNSTRUCTURED_LABEL =
   "Shown as saved text: this copy can't be read in this report's format. It is the model's first answer and may differ from what the report used.";
 export const SAVED_TEXT_SHORTENED_LABEL =
-  "Shown as saved text: this copy was shortened for storage, so it ends early and can't be read in this report's format.";
+  "Shown as saved text: this copy was shortened for storage, so it ends early and can't be read in this report's format. It is the model's first answer and may differ from what the report used.";
+
+/**
+ * Review D1: the saved first answer was shortened for storage AND the record ties a retry to this slot (a recorded retry
+ * call plus report cells attributed to it). The first answer is not shown. A shortened copy can't show that the first
+ * answer failed in full, so the retry's success is not claimed — only what the record holds.
+ */
+export const SAVED_COPY_RETRIED_SHORTENED =
+  "A retry was recorded for this response and the report includes data from this slot. The saved first answer was shortened for storage, and any corrected response was not preserved separately.";
 
 /** Messages that describe the saved copy, not the model's live outcome. Rendered as-is, never as "incompatible format". */
-export const SAVED_COPY_NOTICES: ReadonlySet<string> = new Set([SAVED_COPY_SHORTENED, SAVED_COPY_UNSTRUCTURED, SAVED_COPY_RETRIED_INCLUDED, SAVED_COPY_MISSING]);
+export const SAVED_COPY_NOTICES: ReadonlySet<string> = new Set([SAVED_COPY_SHORTENED, SAVED_COPY_UNSTRUCTURED, SAVED_COPY_RETRIED_INCLUDED, SAVED_COPY_MISSING, SAVED_COPY_RETRIED_SHORTENED]);

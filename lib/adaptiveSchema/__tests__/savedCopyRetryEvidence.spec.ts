@@ -23,6 +23,7 @@ import {
 import {
   SAVED_COPY_RETRIED_AFTER_NAME,
   SAVED_COPY_RETRIED_INCLUDED,
+  SAVED_COPY_RETRIED_SHORTENED,
   SAVED_COPY_SHORTENED,
   SAVED_COPY_UNSTRUCTURED,
 } from "@/lib/adaptiveSchema/savedCopyNotice";
@@ -169,9 +170,11 @@ describe("reconstructModelResults with retriedIncludedSlots", () => {
     const [s] = reconstructModelResults("comparison_matrix", [{ modelId: "gemini", status: "ok", rawText: fencedMissingComma }], { retriedIncludedSlots: new Set(["claude"]) });
     expect(s.parseError).toBe(SAVED_COPY_UNSTRUCTURED);
   });
-  it("shortened for storage keeps precedence over the retried notice", () => {
+  // Review D1 (2026-11-11): the recorded retry now outranks a shortened first answer, which is not shown; success is not
+  // claimed for a shortened copy (it can't show the first answer failed in full), so the notice is SAVED_COPY_RETRIED_SHORTENED.
+  it("a recorded retry outranks a shortened saved copy (no first-answer text, success not claimed)", () => {
     const [r] = reconstructModelResults("comparison_matrix", [{ modelId: "gemini", status: "ok", rawText: fencedMissingComma, wasTruncatedForStorage: true }], { retriedIncludedSlots: slots });
-    expect(r.parseError).toBe(SAVED_COPY_SHORTENED);
+    expect([r.parseError, r.savedResponseText]).toEqual([SAVED_COPY_RETRIED_SHORTENED, undefined]);
   });
   it("a saved copy that validates is returned as-is (no notice at all)", () => {
     const [r] = reconstructModelResults("comparison_matrix", [{ modelId: "gemini", status: "ok", rawText: validBody("gemini") }], { retriedIncludedSlots: slots });
@@ -220,9 +223,10 @@ describe("buildRunReadPayload fails closed on the retry record", () => {
       expect(n).not.toBe(SAVED_COPY_RETRIED_INCLUDED);
     }
   });
-  it("shortened saved copy keeps SHORTENED through the payload", async () => {
+  it("shortened saved copy with an established retry → RETRIED_SHORTENED through the payload (review D1); without the record → SHORTENED", async () => {
     const rows = [perModelRow("chatgpt", "ok", validBody("chatgpt")), perModelRow("gemini", "ok", fencedMissingComma, true)];
-    expect(await noticeOf(runDoc({ adaptiveOutput: env, adaptiveRetryUsage: usage({ gemini: entry(1) }) }, rows))).toBe(SAVED_COPY_SHORTENED);
+    expect(await noticeOf(runDoc({ adaptiveOutput: env, adaptiveRetryUsage: usage({ gemini: entry(1) }) }, rows))).toBe(SAVED_COPY_RETRIED_SHORTENED);
+    expect(await noticeOf(runDoc({ adaptiveOutput: env }, rows))).toBe(SAVED_COPY_SHORTENED);
   });
 });
 

@@ -67,6 +67,7 @@ import {
   SAVED_COPY_MISSING,
   SAVED_COPY_RETRIED_AFTER_NAME,
   SAVED_COPY_RETRIED_INCLUDED,
+  SAVED_COPY_RETRIED_SHORTENED,
   SAVED_COPY_SHORTENED,
   SAVED_COPY_UNSTRUCTURED,
   SAVED_TEXT_SHORTENED_LABEL,
@@ -414,6 +415,15 @@ describe("ORDER B — historical records", () => {
     expect(text(c[0])).toContain(SAVED_TEXT_UNSTRUCTURED_LABEL);
     expect(c[0].findAllByType("table")).toHaveLength(0);
     expect(card(r, "structured-model-response", "claude")).toHaveLength(0);
+    // Review D2: plain preformatted text, byte for byte; never parsed into sections, no second disclosure.
+    expect(byTestId(c[0], "saved-response-structured")).toHaveLength(0);
+    const plain = byTestId(c[0], "saved-text-plain");
+    expect(plain).toHaveLength(1);
+    expect(plain[0].type).toBe("pre");
+    expect(plain[0].props.className).toContain("whitespace-pre-wrap");
+    expect(plain[0].props.className).toContain("break-words");
+    expect(text(plain[0])).toBe(saved);
+    expect(c[0].findAllByType("details")).toHaveLength(0);
     expect(text(r)).not.toContain(SAVED_COPY_UNSTRUCTURED);
     expectNoProviderOrWrite();
   });
@@ -424,8 +434,29 @@ describe("ORDER B — historical records", () => {
     expect(c).toHaveLength(1);
     expect(text(c[0])).toContain(SAVED_TEXT_SHORTENED_LABEL);
     expect(text(c[0])).toContain(CLAUDE_CUT_OFF);
+    expect(text(c[0])).toContain("It is the model's first answer and may differ from what the report used.");
+    expect(text(byTestId(c[0], "saved-text-plain")[0])).toBe(CLAUDE_CUT_OFF);
     const payload = await readAs(await historical([row("claude", "ok", CLAUDE_CUT_OFF, true)]));
     expect(payload.adaptive.modelResults[0].parseError).toBe(SAVED_COPY_SHORTENED);
+  });
+
+  it("case 3 + retry record (review D1): the recorded retry outranks the shortened first answer, which is not shown", async () => {
+    const stored = await historical([row("chatgpt", "ok", CHATGPT_TEXT), row("claude", "ok", CLAUDE_CUT_OFF, true)], { adaptiveRetryUsage: retryRecord({ claude: 1 }) });
+    const r = await renderPersonal(stored);
+    expect(text(r)).toContain(`Claude: ${SAVED_COPY_RETRIED_SHORTENED}`);
+    expect(card(r, "saved-text-model-response", "claude")).toHaveLength(0);
+    expect(text(r)).not.toContain(CLAUDE_CUT_OFF);
+    expect(text(r)).not.toContain("successfully retried");
+    const rebuilt = (await readAs(stored)).adaptive.modelResults.find((m: any) => m.modelId === "claude");
+    expect([rebuilt.parseError, rebuilt.savedResponseText]).toEqual([SAVED_COPY_RETRIED_SHORTENED, undefined]);
+    expect(counts(r)).toEqual([["2 models requested · 2 answered", "1 structured response shown · 1 saved copy can't be shown"]]);
+  });
+
+  it("case 3 + a retry record for ANOTHER slot: the shortened first answer is still shown, with the first-answer caveat", async () => {
+    const r = await renderPersonal(await historical([row("chatgpt", "ok", CHATGPT_TEXT), row("claude", "ok", CLAUDE_CUT_OFF, true)], { adaptiveRetryUsage: retryRecord({ chatgpt: 1 }) }));
+    const c = card(r, "saved-text-model-response", "claude");
+    expect(c).toHaveLength(1);
+    expect(text(c[0])).toContain(SAVED_TEXT_SHORTENED_LABEL);
   });
 
   it("case 4: verified included retry, adopted text not saved → the corrected response can't be recovered separately", async () => {
