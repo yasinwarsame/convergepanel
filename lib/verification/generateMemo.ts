@@ -606,6 +606,14 @@ export const RESEARCH_MEMO_UNVERIFIED_SUMMARY =
 export const RESEARCH_MEMO_UNVERIFIED_METHODOLOGY =
   "This question was sent to a panel of large language models via ConvergePanel with identical instructions, but which models actually executed could not be established (model independence unverified). No consensus score is reported and nothing in this memo reflects agreement or convergence between models.";
 
+/** Order 35 A (F-1): research memo lines when no independent model returned a successful response. */
+export const RESEARCH_MEMO_NO_RESPONSES_CONSENSUS_LINE = "CONSENSUS SCORE: none (no successful model responses; consensus cannot be assessed)";
+export const RESEARCH_MEMO_NO_RESPONSES_EVIDENCE = "not assessed (no successful model responses)";
+export const RESEARCH_MEMO_NO_RESPONSES_SUMMARY =
+  "No model responses are available for this question, so consensus cannot be assessed and nothing in this memo is presented as agreement between models.";
+export const RESEARCH_MEMO_NO_RESPONSES_METHODOLOGY =
+  "This question was sent to a panel of large language models via ConvergePanel with identical instructions. No model returned a successful response, so no consensus score is reported and nothing in this memo reflects agreement or convergence between models.";
+
 function generateResearchMemo(input: MemoInput): string {
   const lines: string[] = [];
   const q = (input.question ?? "").trim() || "—";
@@ -621,6 +629,8 @@ function generateResearchMemo(input: MemoInput): string {
   const singleModel = independent !== null && independent < 2;
   // Unknown execution identity: no consensus either, stated as unverified (never as one model's output).
   const unverified = !singleModel && input.researchIndependenceUnverified === true;
+  // Order 35 A (F-1): no independent model returned a successful response — nothing to assess, never "one model".
+  const noResponses = independent === 0;
   const noConsensus = singleModel || unverified;
   const rs = input.researchSlotCounts;
   const slots = !noConsensus && rs && rs.independentModels >= 2 && rs.answeredSlots > rs.independentModels ? rs : null;
@@ -634,6 +644,8 @@ function generateResearchMemo(input: MemoInput): string {
   lines.push("");
   if (unverified) {
     lines.push(CLAIM_MEMO_WITHHELD_CONSENSUS_LINE);
+  } else if (noResponses) {
+    lines.push(RESEARCH_MEMO_NO_RESPONSES_CONSENSUS_LINE);
   } else if (noConsensus) {
     lines.push("CONSENSUS SCORE: none (fewer than two independent models responded; slots answered by the same substitute model count as one)");
   } else if (slots) {
@@ -645,7 +657,9 @@ function generateResearchMemo(input: MemoInput): string {
   lines.push(
     unverified
       ? `EVIDENCE QUALITY: ${CLAIM_MEMO_UNVERIFIED_EVIDENCE}`
-      : noConsensus
+      : noResponses
+        ? `EVIDENCE QUALITY: ${RESEARCH_MEMO_NO_RESPONSES_EVIDENCE}`
+        : noConsensus
         ? `EVIDENCE QUALITY: ${RESEARCH_MEMO_NO_CROSS_MODEL_EVIDENCE}`
         : `EVIDENCE QUALITY: ${input.evidenceQuality}`
   );
@@ -654,6 +668,8 @@ function generateResearchMemo(input: MemoInput): string {
   lines.push(
     unverified
       ? RESEARCH_MEMO_UNVERIFIED_SUMMARY
+      : noResponses
+      ? RESEARCH_MEMO_NO_RESPONSES_SUMMARY
       : noConsensus
       ? "Fewer than two independent AI models responded to this question, so there is no cross-model agreement to report. Treat the findings as a single model's output."
       : slots
@@ -709,6 +725,8 @@ function generateResearchMemo(input: MemoInput): string {
   lines.push(
     unverified
       ? RESEARCH_MEMO_UNVERIFIED_METHODOLOGY
+      : noResponses
+      ? RESEARCH_MEMO_NO_RESPONSES_METHODOLOGY
       : noConsensus
       ? RESEARCH_MEMO_SINGLE_MODEL_METHODOLOGY
       : slots

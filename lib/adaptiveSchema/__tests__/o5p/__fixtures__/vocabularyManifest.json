@@ -2500,6 +2500,27 @@
  },
  {
   "file": "lib/verification/generateMemo.ts",
+  "literal": "\"CONSENSUS SCORE: none (no successful model responses; consensus cannot be assessed)\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "research memo original path, legacy panel only, when MemoInput.independentModelCount === 0 (no independent executing model returned a successful response; Order 35 A, F-1 owner ruling): states that consensus cannot be assessed and that nothing in the memo is agreement between models"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"No model responses are available for this question, so consensus cannot be assessed and nothing in this memo is presented as agreement between models.\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "research memo original path, legacy panel only, when MemoInput.independentModelCount === 0 (no independent executing model returned a successful response; Order 35 A, F-1 owner ruling): states that consensus cannot be assessed and that nothing in the memo is agreement between models"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"This question was sent to a panel of large language models via ConvergePanel with identical instructions. No model returned a successful response, so no consensus score is reported and nothing in this memo reflects agreement or convergence between models.\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "research memo original path, legacy panel only, when MemoInput.independentModelCount === 0 (no independent executing model returned a successful response; Order 35 A, F-1 owner ruling): states that consensus cannot be assessed and that nothing in the memo is agreement between models"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
   "literal": "\"Fewer than two independent AI models responded to this question, so there is no cross-model agreement to report. Treat the findings as a single model's output.\"",
   "count": 1,
   "category": "historical-path",

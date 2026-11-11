@@ -43,6 +43,7 @@ import { modelWrittenBlockLabel, modelWrittenShortLabel, type RunExecutionIdenti
 import {
   adaptiveTopIndependence,
   adaptiveTopIndependenceStatement,
+  answeringIndependentModelCount,
   independenceQualification,
   presentIndependenceQualifiedReport,
   sharePanelPhrase,
@@ -542,13 +543,21 @@ function buildMemoInput(
   // agree" (the shared research memo): with a repeated substitute model in the run's rows the memo is told how many
   // independent executing models the run had, and without recorded execution identity that independence is
   // unverified (verdictIndependence.ts). Independent runs: nothing is added — the memo as before.
+  // Order 35 A (F-1): a run the shared rule judges independent is told how many independent executing models actually
+  // answered (verified execution evidence, answeringIndependentModelCount) — never the requested slot count or a stored
+  // count — so a run with zero or one answering model never reads "5 AI models researched this question independently"
+  // with a consensus score. Told only when it differs from the slot count (otherwise the memo already states it);
+  // without the run's rows nothing is inferred: the memo as before.
   const runIndependence = adaptiveTopIndependence(null, modelProvenance);
+  const answering = answeringIndependentModelCount(modelProvenance);
   const independenceInput =
     runIndependence.kind === "repeated_substitute" || runIndependence.kind === "placeholder"
       ? { independentModelCount: runIndependence.voices.length }
       : runIndependence.kind === "unverified"
         ? { researchIndependenceUnverified: true }
-        : {};
+        : answering !== null && answering !== modelsUsed.length
+          ? { independentModelCount: answering }
+          : {};
   if (report.presentation) {
     const agree = presentAgreeItems(report).map(claimLine);
     const summary = presentExecutiveSummary(report).map((b) => plainTextBlock(b)).join("\n\n");

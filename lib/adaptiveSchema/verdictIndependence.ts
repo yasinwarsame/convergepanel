@@ -143,6 +143,24 @@ export function fewerThanTwoAnsweringModels(provenance: readonly RunModelProvena
 
 const isRecordedFailureFacts = (f: RunModelProvenanceFacts | undefined) => identityRowRecordedFailure(identityRowFromFacts(f));
 
+/**
+ * Order 35 A (F-1, owner ruling): how many independent executing models returned a successful model response in this
+ * run, from verified execution evidence only — recorded failures and stored placeholders removed, the responding slots
+ * grouped by executing model (a substitute that answered several slots counts once). Never the requested slot count and
+ * never a stored count. Null when it cannot be established: no rows, a row without a slot id, or a responding slot that
+ * fails the shared D-4 gate (no recorded status, or an answer without a recorded provider) — nothing is inferred.
+ */
+export function answeringIndependentModelCount(provenance: readonly RunModelProvenanceFacts[] | null | undefined): number | null {
+  if (!Array.isArray(provenance) || provenance.length === 0) return null;
+  if (provenance.some((f) => !f || typeof f.modelId !== "string" || !f.modelId.trim())) return null;
+  const ids = Array.from(new Set(provenance.map((f) => f.modelId.trim())));
+  const { responding } = respondingSlots(ids, provenance);
+  if (responding.length === 0) return 0;
+  const rows = responding.map((s) => factsFor(provenance, s));
+  if (rows.some((f) => !f) || !executionIdentityVerified(rows.map((f) => identityRowFromFacts(f)))) return null;
+  return groupSlotsByExecutingVoice(responding, provenance).length;
+}
+
 /** Order 31 R-1: a stored consensus / majority row (or top claim) over a run with fewer than two answering models. */
 export const TOO_FEW_ANSWERS_ROW: Extract<AdaptiveTopIndependence, { kind: "unverified" }> = Object.freeze({ kind: "unverified" as const, scope: "supporters" as const, basis: "too_few_answers" as const });
 

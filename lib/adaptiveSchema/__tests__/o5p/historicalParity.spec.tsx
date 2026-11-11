@@ -57,6 +57,17 @@ type AttributionPins = {
 };
 const ATTRIBUTION: AttributionPins = JSON.parse(readFileSync(join(__dirname, "__fixtures__", "executing-attribution", "renderHashes.json"), "utf8"));
 const hasRecordedSubstitution = (rows: any[]) => rows.some((r) => r && r.status === "substituted");
+/**
+ * Order 35 A (F-1, owner ruling): the research memo states the verified count of independent executing models that
+ * answered. Exactly the listed scenario / output keys are superseded, by exact hash; the 2c17feee oracle files are
+ * untouched and every superseded entry's `sealed` hash must equal them (asserted below), so nothing else moved.
+ */
+type MemoSupersession = { entries: Record<string, Record<string, { sealed: string; superseding: string } | string>> };
+const F1: MemoSupersession = JSON.parse(readFileSync(join(__dirname, "__fixtures__", "order35-f1", "memoSupersession.json"), "utf8"));
+const F1_KEYS = ["text.memo", "text.memoInput"];
+const f1Overlay = (name: string): Record<string, string> =>
+  Object.fromEntries(F1_KEYS.filter((k) => typeof F1.entries[name]?.[k] === "object").map((k) => [k, (F1.entries[name][k] as { superseding: string }).superseding]));
+
 const occurrences = (text: string, needle: string) => text.split(needle).length - 1;
 
 describe("Contract P historical parity (2c17feee oracles)", () => {
@@ -109,7 +120,7 @@ describe("Contract P historical parity (2c17feee oracles)", () => {
     expect([name, pins !== undefined]).toEqual([name, hasRecordedSubstitution(scenario.results() as any[])]);
     if (!pins) {
       // No recorded substitution: the untouched 2c17feee oracle, every output, and the executing label nowhere.
-      expect(actual).toEqual(renderHashes![name]);
+      expect(actual).toEqual({ ...renderHashes![name], ...f1Overlay(name) });
       expect(Object.values(labelCounts).every((n) => n === 0)).toBe(true);
       return;
     }
@@ -121,7 +132,22 @@ describe("Contract P historical parity (2c17feee oracles)", () => {
     // Outputs that name the substituted slot: the exact pinned rendering. Every other output: the 2c17feee oracle.
     expect(Object.keys(pinnedForTimezone).sort()).toEqual(Object.keys(labelCounts).filter((k) => labelCounts[k] > 0).sort());
     for (const k of Object.keys(pinnedForTimezone)) expect([k, pinnedForTimezone[k] !== renderHashes![name][k]]).toEqual([k, true]);
-    expect(actual).toEqual({ ...renderHashes![name], ...pinnedForTimezone });
+    expect(actual).toEqual({ ...renderHashes![name], ...pinnedForTimezone, ...f1Overlay(name) });
+  });
+
+  it("Order 35 F-1: the supersession touches exactly two scenarios' memo outputs, each over its untouched sealed hash", () => {
+    expect(Object.keys(F1.entries).sort()).toEqual(["factual-single", "generic-substituted-and-failed"]);
+    for (const [name, e] of Object.entries(F1.entries)) {
+      const keys = Object.keys(e).filter((k) => typeof e[k] === "object");
+      expect([name, keys.sort()]).toEqual([name, [...F1_KEYS].sort()]);
+      for (const k of keys) {
+        const { sealed, superseding } = e[k] as { sealed: string; superseding: string };
+        for (const tz of Object.keys(ORACLE_BY_TIMEZONE)) expect([name, k, tz, ORACLE_BY_TIMEZONE[tz][name][k]]).toEqual([name, k, tz, sealed]);
+        expect([name, k, superseding === sealed]).toEqual([name, k, false]);
+        // A superseded memo output is never one an attribution pin also overrides.
+        expect([name, k, ATTRIBUTION.scenarios[name]?.hashes?.[ORACLE_TIMEZONE]?.[k]]).toEqual([name, k, undefined]);
+      }
+    }
   });
 
   it.each(Object.keys(SHARED_MEMO_INPUTS))("shared memo generator: %s is byte-identical", (key) => {

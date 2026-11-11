@@ -171,14 +171,19 @@ describe.each(CLASSES)("one independence across every surface — $name", (c) =>
       for (const [k, t] of Object.entries(texts)) expect([k, slotCount.test(t)]).toEqual([k, false]);
       expect(texts["text.memo"]).toContain(`${identity.independentModels} AI models researched this question independently`);
     } else {
-      // OWNER QUESTION F-1 (INTEGRATION.md): the adaptive research memo of a run with recorded failures and fewer than two
-      // answering models still states "N AI models researched this question independently" and the stored consensus
-      // score. That is the accepted C-a behaviour, held by the sealed 2c17feee oracle (historicalParity, factual-single)
-      // and Order 29 option (b), so the integration does not change it. It is pinned here as the recorded exception —
-      // this assertion must flip when the owner rules — and every other surface is held to the rule.
+      // Order 35 A (F-1, owner ruling): the memo of a run with fewer than two answering models states the verified count,
+      // never the requested slot count or the stored score — zero: no responses, consensus cannot be assessed; one: no
+      // multi-model agreement. Every surface, the memo included, is held to the rule below.
+      if (c.name === "all slots timed out") {
+        expect(texts["text.memo"]).toContain("CONSENSUS SCORE: none (no successful model responses; consensus cannot be assessed)");
+        expect(texts["text.memo"]).toContain("No model responses are available for this question");
+      }
+      if (c.name === "one answer, stored count 5") {
+        expect(texts["text.memo"]).toContain("CONSENSUS SCORE: none (fewer than two independent models responded");
+        expect(texts["text.memo"]).toContain("Treat the findings as a single model's output.");
+      }
       if (c.name === "all slots timed out" || c.name === "one answer, stored count 5") {
-        expect(texts["text.memo"]).toContain("5 AI models researched this question independently");
-        delete texts["text.memo"];
+        expect(texts["text.memo"]).not.toMatch(/\b\d+ AI models researched this question independently|CONSENSUS SCORE: \d+\/100|independently researched by \d+ large language models/);
       }
       for (const [k, t] of Object.entries(texts)) { const m = t.match(UNQUALIFIED_AGREEMENT); expect([k, m ? t.slice(Math.max(0, (m.index ?? 0) - 40), (m.index ?? 0) + 60) : null]).toEqual([k, null]); }
     }
