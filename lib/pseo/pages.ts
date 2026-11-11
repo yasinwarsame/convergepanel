@@ -8389,7 +8389,7 @@ export const PAGES: PSEOPage[] = [
       },
       {
         q: "Which AI model gives the best startup advice?",
-        a: "No single model is consistently best for startup analysis. GPT tends to be thorough and balanced; Claude adds nuance on risk and ethics; Gemini brings recent data; Grok is often more contrarian; Perplexity draws on current web sources. Together, they cover more of the relevant analytical landscape than any one of them alone.",
+        a: "No single model is consistently best for startup analysis. GPT tends to be thorough and balanced; Claude adds nuance on risk and ethics; Gemini gives concise summaries; Grok is often more contrarian; Perplexity draws on current web sources. Together, they cover more of the relevant analytical landscape than any one of them alone.",
       },
       {
         q: "How should I use AI perspectives — as advice or as questions to investigate?",

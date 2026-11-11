@@ -86,6 +86,11 @@ describe("stripUnrecognizedModelNames", () => {
     expect(stripUnrecognizedModelNames("Grok 4.3 and Grok 5 disagree.", ROSTER)).toBe("Grok 4.3 and the panel disagree.");
     // The retired legacy name is not the served model; the API spelling of the served model is.
     expect(stripUnrecognizedModelNames("Grok 4.1 Fast and grok-4.3 agree.", ROSTER)).toBe("the panel and grok-4.3 agree.");
+    // The API IDs the connectors actually send are the run's own names, kept whole and never mangled.
+    expect(stripUnrecognizedModelNames("grok-4-1-fast-reasoning agrees.", ROSTER)).toBe("grok-4-1-fast-reasoning agrees.");
+    expect(stripUnrecognizedModelNames("gpt-4o-mini and GPT-4o-mini agree.", ROSTER)).toBe("gpt-4o-mini and GPT-4o-mini agree.");
+    expect(stripUnrecognizedModelNames("Grok 4.1 Fast Reasoning agrees.", ROSTER)).toBe("the panel agrees.");
+    expect(stripUnrecognizedModelNames("grok-4-fast-non-reasoning agrees.", ROSTER)).toBe("the panel agrees.");
   });
 
   it("leaves text with only real display names untouched", () => {

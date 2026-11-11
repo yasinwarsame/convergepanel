@@ -51,6 +51,28 @@ describe("truthful model labels", () => {
     expect(label("gemini")).toBe(GEMINI_DISPLAY_NAME);
   });
 
+  it("each requestedModelId is the ID its connector actually sends", () => {
+    const sent: Record<string, string> = {
+      chatgpt: /model:\s*"([^"]+)"/.exec(src("lib/connectors/chatgpt.ts"))![1],
+      claude: /model:\s*"([^"]+)"/.exec(src("lib/connectors/claude.ts"))![1],
+      grok: /GROK_MODEL\s*=\s*process\.env\.GROK_MODEL\s*\|\|\s*"([^"]+)"/.exec(src("lib/env.ts"))![1],
+      perplexity: PERPLEXITY_AGENT_MODEL,
+      gemini: GEMINI_MODEL_ID,
+    };
+    expect(/model:\s*modelName/.test(src("lib/connectors/grok.ts"))).toBe(true); // grok sends GROK_MODEL
+    for (const m of PANEL_MODELS) expect(m.requestedModelId).toBe(sent[m.id]);
+  });
+
+  it("no customer-facing source claims live or recent web data for Grok or Gemini", () => {
+    let out = "";
+    try {
+      out = execFileSync("git", ["grep", "-n", "-i", "-E", "(grok|gemini)[^.\"]{0,80}(open-web|real-time|realtime|live web|web search|web access|recent data|timely)", "--", "app", "components", "lib", "public", "README.md", ":!**/__tests__/**", ":!*.spec.*"], { cwd: root, encoding: "utf8" });
+    } catch (e: any) {
+      if (e.status !== 1) throw e;
+    }
+    expect(out.split("\n").filter(Boolean)).toEqual([]);
+  });
+
   it("the deprecated MODEL_INFO copy carries the same labels", () => {
     for (const m of PANEL_MODELS) expect(MODEL_INFO[m.id as keyof typeof MODEL_INFO].displayName).toBe(m.label);
   });
