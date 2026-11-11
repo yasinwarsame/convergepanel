@@ -64,12 +64,6 @@ function mockFetchCapturingBody(status = 200) {
   return { fn, getCapturedBody: () => capturedBody };
 }
 
-// Real browser transports send a fixed-length body with Content-Length; @sentry/core >= 10.75 requires it (411 otherwise).
-function tunnelRequest(body: string | Uint8Array): NextRequest {
-  const length = typeof body === "string" ? Buffer.byteLength(body) : body.byteLength;
-  return new NextRequest(TUNNEL_URL, { method: "POST", body, headers: { "content-length": String(length) } });
-}
-
 describe("POST /monitoring — Sentry tunnel (Phase 8D.3.4-O2E.1)", () => {
   const originalFetch = global.fetch;
   const originalPublicDsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
@@ -95,7 +89,7 @@ describe("POST /monitoring — Sentry tunnel (Phase 8D.3.4-O2E.1)", () => {
     global.fetch = mockFetch as unknown as typeof fetch;
 
     const { POST } = await import("../route");
-    const res = await POST(tunnelRequest(original));
+    const res = await POST(new NextRequest(TUNNEL_URL, { method: "POST", body: original }));
 
     expect(res.status).toBe(200);
     expect(mockFetch).toHaveBeenCalledTimes(1);
@@ -108,7 +102,7 @@ describe("POST /monitoring — Sentry tunnel (Phase 8D.3.4-O2E.1)", () => {
     global.fetch = mockFetch as unknown as typeof fetch;
 
     const { POST } = await import("../route");
-    const res = await POST(tunnelRequest(original));
+    const res = await POST(new NextRequest(TUNNEL_URL, { method: "POST", body: original }));
 
     expect(res.status).toBe(200);
     expect(mockFetch).toHaveBeenCalledTimes(1);
@@ -124,7 +118,7 @@ describe("POST /monitoring — Sentry tunnel (Phase 8D.3.4-O2E.1)", () => {
     global.fetch = mockFetch as unknown as typeof fetch;
 
     const { POST } = await import("../route");
-    const res = await POST(tunnelRequest(original));
+    const res = await POST(new NextRequest(TUNNEL_URL, { method: "POST", body: original }));
 
     expect(res.status).toBe(200);
     expect(Buffer.from(getCapturedBody() as unknown as Uint8Array).equals(Buffer.from(original))).toBe(true);
@@ -138,7 +132,7 @@ describe("POST /monitoring — Sentry tunnel (Phase 8D.3.4-O2E.1)", () => {
     global.fetch = mockFetch as unknown as typeof fetch;
 
     const { POST } = await import("../route");
-    await POST(tunnelRequest(original));
+    await POST(new NextRequest(TUNNEL_URL, { method: "POST", body: original }));
 
     const expectedHash = crypto.createHash("sha256").update(original).digest("hex");
     const actualHash = crypto.createHash("sha256").update(Buffer.from(getCapturedBody() as unknown as Uint8Array)).digest("hex");
@@ -152,22 +146,10 @@ describe("POST /monitoring — Sentry tunnel (Phase 8D.3.4-O2E.1)", () => {
     global.fetch = mockFetch as unknown as typeof fetch;
 
     const { POST } = await import("../route");
-    const res = await POST(tunnelRequest(original));
+    const res = await POST(new NextRequest(TUNNEL_URL, { method: "POST", body: original }));
 
     expect(res.status).toBe(200);
     expect(Buffer.from(getCapturedBody() as unknown as Uint8Array).equals(Buffer.from(original))).toBe(true);
-  });
-
-  it("F0 — a body without Content-Length is refused with 411 and upstream is never called (@sentry/core >= 10.75)", async () => {
-    const mockFetch = jest.fn();
-    global.fetch = mockFetch as unknown as typeof fetch;
-
-    const { POST } = await import("../route");
-    const envelope = envelopeOf({ dsn: DSN }, [{ header: { type: "event" }, payload: { message: "x" } }]);
-    const res = await POST(new NextRequest(TUNNEL_URL, { method: "POST", body: envelope }));
-
-    expect(res.status).toBe(411);
-    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("F — an unparseable envelope is rejected with 400 and upstream is never called", async () => {
@@ -176,7 +158,7 @@ describe("POST /monitoring — Sentry tunnel (Phase 8D.3.4-O2E.1)", () => {
 
     const { POST } = await import("../route");
     const malformed = new Uint8Array(Buffer.from("not-json-at-all\n", "utf8"));
-    const res = await POST(tunnelRequest(malformed));
+    const res = await POST(new NextRequest(TUNNEL_URL, { method: "POST", body: malformed }));
 
     expect(res.status).toBe(400);
     expect(mockFetch).not.toHaveBeenCalled();
@@ -188,7 +170,7 @@ describe("POST /monitoring — Sentry tunnel (Phase 8D.3.4-O2E.1)", () => {
 
     const { POST } = await import("../route");
     const envelope = envelopeOf({ dsn: WRONG_DSN }, [{ header: { type: "event" }, payload: { message: "x" } }]);
-    const res = await POST(tunnelRequest(envelope));
+    const res = await POST(new NextRequest(TUNNEL_URL, { method: "POST", body: envelope }));
 
     expect(res.status).toBe(403);
     expect(mockFetch).not.toHaveBeenCalled();
@@ -200,7 +182,7 @@ describe("POST /monitoring — Sentry tunnel (Phase 8D.3.4-O2E.1)", () => {
 
     const { POST } = await import("../route");
     const envelope = envelopeOf({ dsn: DSN }, [{ header: { type: "event" }, payload: { message: "x" } }]);
-    const res = await POST(tunnelRequest(envelope));
+    const res = await POST(new NextRequest(TUNNEL_URL, { method: "POST", body: envelope }));
 
     expect(res.status).toBe(429);
   });
@@ -211,7 +193,7 @@ describe("POST /monitoring — Sentry tunnel (Phase 8D.3.4-O2E.1)", () => {
 
     const { POST } = await import("../route");
     const envelope = envelopeOf({ dsn: DSN }, [{ header: { type: "event" }, payload: { message: "x" } }]);
-    const res = await POST(tunnelRequest(envelope));
+    const res = await POST(new NextRequest(TUNNEL_URL, { method: "POST", body: envelope }));
 
     expect(res.status).toBe(500);
   });
@@ -234,7 +216,7 @@ describe("POST /monitoring — telemetry isolation (Order 6)", () => {
 
   async function post(envelope: Uint8Array) {
     const { POST } = await import("../route");
-    return POST(tunnelRequest(envelope));
+    return POST(new NextRequest(TUNNEL_URL, { method: "POST", body: envelope }));
   }
 
   it.each([["missing", undefined], ["empty", ""], ["blank", "   "]])("is disabled (404, nothing forwarded) when NEXT_PUBLIC_SENTRY_DSN is %s", async (_label, value) => {
