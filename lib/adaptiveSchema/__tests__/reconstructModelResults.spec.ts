@@ -14,7 +14,10 @@ const body = (m: string) => JSON.stringify({ subjects: [`${m} subject`], attribu
 describe("reconstructModelResults", () => {
   it("a responding row equals exactly what the live validator returns for the same saved text", () => {
     const [r] = reconstructModelResults("comparison_matrix", [{ modelId: "chatgpt", status: "ok", rawText: body("chatgpt") }]);
-    expect(r).toEqual(validateAdaptiveResponse("chatgpt" as never, getResultSchema("comparison_matrix" as never), body("chatgpt")));
+    // Saved-response presentation (2026-11-11): plus the saved copy itself, display only, for "Show original response".
+    const { savedResponseText, ...structured } = r;
+    expect(structured).toEqual(validateAdaptiveResponse("chatgpt" as never, getResultSchema("comparison_matrix" as never), body("chatgpt")));
+    expect(savedResponseText).toBe(body("chatgpt"));
     expect(r.ok).toBe(true);
   });
 

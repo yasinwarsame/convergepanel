@@ -15,15 +15,25 @@
  *     persisted record establishes that slot's retry succeeded and was included) and the row is exactly "ok", appears
  *     once, was not shortened, and its saved copy does not validate, the notice is SAVED_COPY_RETRIED_INCLUDED.
  *     Shortened keeps precedence; no evidence keeps SAVED_COPY_UNSTRUCTURED.
+ *
+ * Saved-response presentation (2026-11-11) — `savedResponseText`, display only, carries the saved copy exactly as
+ * stored wherever that copy is what the Model Responses section shows:
+ *   (1) the copy validates → the structured result, plus the copy (the "Show original response" disclosure);
+ *   (2) it is authentic but does not validate, and no record establishes a retry → the copy, shown as saved text;
+ *   (3) the storage cap shortened it → the copy, shown as saved text, labelled shortened;
+ *   (4) the record establishes the retry succeeded and was included → no copy (the saved first answer was superseded);
+ *       the notice says the corrected response was not preserved separately;
+ *   (5) the slot answered but there is no saved text → SAVED_COPY_MISSING, which claims neither inclusion nor exclusion.
+ * Nothing is parsed leniently and nothing is re-requested: the same validator, the same saved text, no provider call.
  */
 import "server-only";
 import type { AdaptiveModelResult } from "./types";
 import type { ModelId } from "@/lib/types";
 import { SCHEMA_REGISTRY, getResultSchema } from "./schemaRegistry";
 import { validateAdaptiveResponse } from "./validator";
-import { SAVED_COPY_RETRIED_INCLUDED, SAVED_COPY_SHORTENED, SAVED_COPY_UNSTRUCTURED } from "./savedCopyNotice";
+import { SAVED_COPY_MISSING, SAVED_COPY_RETRIED_INCLUDED, SAVED_COPY_SHORTENED, SAVED_COPY_UNSTRUCTURED } from "./savedCopyNotice";
 
-export { SAVED_COPY_RETRIED_INCLUDED, SAVED_COPY_SHORTENED, SAVED_COPY_UNSTRUCTURED };
+export { SAVED_COPY_MISSING, SAVED_COPY_RETRIED_INCLUDED, SAVED_COPY_SHORTENED, SAVED_COPY_UNSTRUCTURED };
 
 export type SavedPanelRow = { modelId: string; status?: unknown; rawText?: unknown; wasTruncatedForStorage?: unknown };
 
@@ -46,18 +56,21 @@ export function reconstructModelResults(
     if (!responded) return { modelId, schemaId: schema.id, ok: false, data: null, parseError: "Empty response" };
     // Silent: a read emits no log lines (the parse-error message can quote model text).
     const result = validateAdaptiveResponse(modelId, schema, text, { silent: true });
-    if (!result.ok && row.wasTruncatedForStorage === true) return { ...result, parseError: SAVED_COPY_SHORTENED };
+    // Display only: the saved copy exactly as stored, when there is one.
+    const saved = text !== null && text.trim().length > 0 ? { savedResponseText: text } : {};
+    if (result.ok) return { ...result, ...saved };
+    if (row.wasTruncatedForStorage === true) return { ...result, parseError: SAVED_COPY_SHORTENED, ...saved };
     if (
-      !result.ok &&
       row.status === "ok" &&
       row.wasTruncatedForStorage !== true &&
       occurrences.get(row.modelId) === 1 &&
       retriedIncluded?.has(row.modelId) === true
     ) {
+      // The saved first answer was superseded by the included retry: it is not shown as this model's response.
       return { ...result, parseError: SAVED_COPY_RETRIED_INCLUDED };
     }
+    if (!("savedResponseText" in saved)) return { ...result, parseError: SAVED_COPY_MISSING };
     // Review R2 MINOR-A: a live corrective retry is never saved, so a non-validating saved copy proves nothing about exclusion.
-    if (!result.ok) return { ...result, parseError: SAVED_COPY_UNSTRUCTURED };
-    return result;
+    return { ...result, parseError: SAVED_COPY_UNSTRUCTURED, ...saved };
   });
 }
