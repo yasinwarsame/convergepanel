@@ -93,7 +93,7 @@ export const MODEL_LIMITS: Record<ModelId, ModelLimits> = {
       if (envValue) {
         const parsed = parseInt(envValue, 10);
         if (Number.isFinite(parsed) && parsed > 0) {
-          // Cap at 8192 (reasonable upper limit for Gemini 2.0 Flash)
+          // Cap at 8192 (reasonable upper limit for the Gemini panel model)
           return Math.min(parsed, 8192);
         }
       }

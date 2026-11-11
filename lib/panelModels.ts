@@ -9,6 +9,8 @@
  * All other components will automatically use the updated values.
  */
 
+import { GEMINI_DISPLAY_NAME } from "./models/gemini";
+
 export type PanelModelId = "chatgpt" | "claude" | "grok" | "perplexity" | "gemini";
 
 export interface PanelModelConfig {
@@ -55,7 +57,7 @@ export const PANEL_MODELS: PanelModelConfig[] = [
   },
   {
     id: "gemini",
-    label: "Gemini 2.0 Flash", // Updated to match actual model ID: gemini-2.0-flash
+    label: GEMINI_DISPLAY_NAME, // Names the model actually called: GEMINI_MODEL_ID (lib/models/gemini.ts)
     provider: "google",
     colorClasses: "bg-rose-50 text-rose-700 border border-rose-200",
   },

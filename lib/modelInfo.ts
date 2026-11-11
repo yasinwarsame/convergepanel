@@ -12,6 +12,7 @@
 
 import { ModelId } from "./types";
 import { getPanelModelConfig, PanelModelId, isValidPanelModelId } from "./panelModels";
+import { GEMINI_DISPLAY_NAME } from "./models/gemini";
 
 /**
  * Model information mapping (DEPRECATED - use panelModels.ts instead)
@@ -26,7 +27,7 @@ export const MODEL_INFO: Record<ModelId, { displayName: string }> = {
   claude: { displayName: "Claude Opus 4.5" },
   grok: { displayName: "Grok 4" },
   perplexity: { displayName: "Perplexity Pro" },
-  gemini: { displayName: "Gemini 3 Pro" },
+  gemini: { displayName: GEMINI_DISPLAY_NAME },
 };
 
 /**

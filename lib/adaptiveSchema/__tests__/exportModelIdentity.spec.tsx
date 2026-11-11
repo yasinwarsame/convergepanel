@@ -23,11 +23,13 @@ import { AdaptiveResearchDocument } from "@/lib/pdf/AdaptiveResearchDocument";
 import { renderAdaptiveResearchDocxV1 } from "@/lib/docx/renderAdaptiveResearchDocx";
 import { exportModelIdentityLabel } from "@/lib/adaptiveSchema/exportRunProvenance";
 import { PANEL_MODELS } from "@/lib/panelModels";
+import { GEMINI_DISPLAY_NAME } from "@/lib/models/gemini";
 import { extractPdfElementText } from "@/lib/pdf/__tests__/testUtils";
 import { extractDocxText } from "@/lib/docx/__tests__/testUtils";
 
 const SLOTS = ["chatgpt", "claude", "grok", "perplexity", "gemini"] as const;
-const PRODUCT_LABELS = ["GPT 5.2", "Claude Opus 4.5", "Grok 4", "Perplexity Pro", "Gemini 2.0 Flash", "Gemini 3 Pro", "GPT-4o"];
+// GEMINI_DISPLAY_NAME is the live gemini product label (imported, so a future relabel stays covered).
+const PRODUCT_LABELS = ["GPT 5.2", "Claude Opus 4.5", "Grok 4", "Perplexity Pro", GEMINI_DISPLAY_NAME, "Gemini 2.0 Flash", "Gemini 3 Pro", "GPT-4o"];
 
 const INCIDENT_PROVENANCE: AdaptiveExportRunProvenance = {
   policyVersion: 2,
