@@ -68,9 +68,10 @@ import { generateVerificationMemo } from "@/lib/verification/generateMemo";
 /**
  * Order 36 (remote CI): re-derived with the Team claim row's environment-dependent "created" date replaced by a
  * placeholder (stripCreatedDate), by running this file in a git-archive export of 8584211 in Africa/Nairobi and in UTC
- * (identical digests). Before: ecda4004… (Nairobi only; UTC gave cd20edfd…, the CI runner bd731ab0…).
+ * and with the seeded shuffle below, under Node 24 (CI) and Node 26: identical digests. Before: ecda4004… (Nairobi,
+ * Node 26 only; UTC gave cd20edfd…, the Node 24 CI runner bd731ab0… / 8ed2dc66…).
  */
-const BASELINE_8584211_DIGEST = "e85e236dd43c14067a1b9a67a43b1622cd231a8eb5c2caec91cb0a5d8509e721";
+const BASELINE_8584211_DIGEST = "70afe439c128eaebcf8cb573b338b05f029bd3ebc2494739d4e3300123f89f68";
 const stripCreatedDate = (markup: string) => markup.replace(/(data-testid="team-claim-row-created">)[^<]*(<\/span>)/g, "$1[created]$2");
 
 // Feature detection: the claim presentation module exists only after 8584211.
@@ -81,6 +82,18 @@ try {
   presentation = null;
 }
 const IS_BASELINE = presentation === null;
+
+/**
+ * Order 36 (remote CI): a seeded Fisher–Yates shuffle. The former `[...xs].sort(() => r() - 0.5)` depended on the
+ * engine's sort algorithm (Node 24 and Node 26 produced different records from the same seed).
+ */
+function shuffle<T>(xs: T[], r: () => number): T[] {
+  for (let i = xs.length - 1; i > 0; i--) {
+    const j = Math.floor(r() * (i + 1));
+    [xs[i], xs[j]] = [xs[j], xs[i]];
+  }
+  return xs;
+}
 
 function rng(seed: number) {
   let a = seed >>> 0;
@@ -101,7 +114,7 @@ function gen(seed: number) {
   const r = rng(seed);
   const pick = <T,>(xs: readonly T[]) => xs[Math.floor(r() * xs.length)];
   const text = (n: number) => Array.from({ length: n }, () => pick(WORDS)).join(" ");
-  const shuffled = [...SLOTS].sort(() => r() - 0.5);
+  const shuffled = shuffle([...SLOTS], r);
   const slots = shuffled.slice(0, 2 + Math.floor(r() * 4));
   return { r, pick, text, slots };
 }
@@ -122,7 +135,7 @@ function researchRecord(i: number) {
   const n = 1 + Math.floor(r() * 4);
   for (let k = 0; k < n; k++) {
     const kind = Math.floor(r() * 6);
-    const names = [...slots].sort(() => r() - 0.5).slice(0, 1 + Math.floor(r() * 3));
+    const names = shuffle([...slots], r).slice(0, 1 + Math.floor(r() * 3));
     const key = (s: string) => (r() < 0.4 ? FAMILY[s] : s);
     const positionsByModel = Object.fromEntries(names.map((s) => [key(s), text(2)]));
     const topic = `${text(1 + Math.floor(r() * 5))} ${k}`;
