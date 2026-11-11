@@ -35,7 +35,7 @@ export interface AdaptivePanelVerdict {
 /**
  * Names a slot in generated synthesis text by its product family only
  * ("ChatGPT"). Neither product label source may be used here: lib/modelInfo.ts's
- * MODEL_INFO is stale ("Gemini 3 Pro"), and lib/panelModels.ts's labels
+ * MODEL_INFO (which once said "Gemini 3 Pro") and lib/panelModels.ts's labels
  * ("GPT 5.2") are selection copy that need not match the model this run
  * requested — this text is persisted with the run and must stay true later.
  */
