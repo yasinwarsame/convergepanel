@@ -37,7 +37,6 @@ const UNCHANGED_AT_35933C8: Record<string, string> = {
   "lib/adaptiveSchema/__tests__/o5p/__fixtures__/baseline-2c17fee/builderHashes.json": "060ab7e2d9cc3bc3ad7e2288766347315262ea3a",
   "lib/adaptiveSchema/__tests__/o5p/__fixtures__/baseline-2c17fee/sharedMemos.json": "8ac7d5882ea2b67d0169677337c242e98d5f052c",
   "components/adaptive/__tests__/seSurfaces/__fixtures__/nonDsBaseline.json": "0d51dfacc64e8450de5ee8828b20cb9e4ffcea1f",
-  "lib/adaptiveSchema/__tests__/o5p/historicalParity.spec.tsx": "eda40eb5583b2c83946f17045ea45f13d0061338",
   "lib/adaptiveSchema/__tests__/o5p/o5pRender.ts": "d8dc0f262634d3d5afb4941fc9cab08be190adb9",
   "lib/adaptiveSchema/__tests__/o5p/o5pScenarios.ts": "d3e0ec5beb38d7eec80f76f2caf91bf275f65b85",
   "lib/adaptiveSchema/__tests__/o5p/vocabularyInventory.spec.ts": "d2bc041abf55fa88066faf9a2cda5b774f1d3b14",
@@ -84,7 +83,7 @@ const UNCHANGED_AT_35933C8: Record<string, string> = {
  */
 const WIDENED_BY_INC1: Record<string, string> = {
   "lib/adaptiveSchema/__tests__/o5p/vocabularyScanner.ts": "37e23190b3585eaa57fa0ddad29c5b6d01d2f76f",
-  "lib/adaptiveSchema/__tests__/o5p/__fixtures__/vocabularyManifest.json": "9774e44bba846e24cc08bcc7f85536eb607a3277",
+  "lib/adaptiveSchema/__tests__/o5p/__fixtures__/vocabularyManifest.json": "5a18983d528bb88c055d0dbff7984b39472e8ef4",
 };
 
 /**
@@ -160,11 +159,24 @@ const WIDENED_BY_INC1: Record<string, string> = {
  * fact; no provenance code). The spec's other pins and assertions are unchanged.
  *   - dsProvenanceUiBoundaries.spec.ts: 0bd0750a98b91a3e7aeae202f5dc1e455969cb04 → 1eb15948753574f91c8b949af4a1fbc19e8dd51e.
  * Same 32-file pinned set.
+ *
+ * Re-pinned (owner-authorized F-1, Order 35 A — the research memo states the verified answering-model count):
+ *   - shareBuilders.ts: d34a619d18cf861040516309dc09417045a88ac4 → 3364318bbff38be700ed29b51cb8caf4a1015d84 (buildMemoInput
+ *     passes answeringIndependentModelCount when it differs from the slot count; nothing else).
+ *   - historicalParity.spec.tsx: moved here from UNCHANGED_AT_35933C8 (eda40eb5583b2c83946f17045ea45f13d0061338 →
+ *     fce2e3172049cd868607e83a8a0a0147ec4939f3). Additions only: the exact-hash supersession overlay
+ *     (__fixtures__/order35-f1/memoSupersession.json) for text.memo / text.memoInput of factual-single and
+ *     generic-substituted-and-failed, and a test that each superseded entry's sealed hash equals the untouched 2c17feee
+ *     oracle. The oracle files themselves stay pinned above, unchanged.
+ *   - vocabularyManifest.json (WIDENED_BY_INC1): 9774e44bba846e24cc08bcc7f85536eb607a3277 →
+ *     5a18983d528bb88c055d0dbff7984b39472e8ef4 (3 entries appended: the zero-response memo literals; none removed).
+ * Same 32-file pinned set.
  */
 const READABLE_GATE_OPTION_BY_INC1: Record<string, string> = {
   "components/adaptive/AdaptiveSynthesisReportView.tsx": "bcdf6ba2444c2aa3dc22ae049901cf72e55eb0bc",
   "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "1eb15948753574f91c8b949af4a1fbc19e8dd51e",
-  "lib/adaptiveSchema/shareBuilders.ts": "d34a619d18cf861040516309dc09417045a88ac4",
+  "lib/adaptiveSchema/shareBuilders.ts": "3364318bbff38be700ed29b51cb8caf4a1015d84",
+  "lib/adaptiveSchema/__tests__/o5p/historicalParity.spec.tsx": "fce2e3172049cd868607e83a8a0a0147ec4939f3",
 };
 
 describe("#290 Increment 1 leaves the sealed and frozen files byte-identical to 35933c8", () => {
