@@ -1136,6 +1136,15 @@ export interface AdaptiveModelResult {
    * certainty or governance.
    */
   savedResponseText?: string;
+  /**
+   * Read-time display only (Order 40 C, reconstructModelResults.ts): set when this slot's structured result comes from
+   * the run's saved record of the validated result the report used (adoptedDisplayResults.ts), naming where that
+   * result came from. Never set live, never persisted on this type, never read by scoring, consensus, gates,
+   * certainty or governance.
+   */
+  savedResultOrigin?: "original_accepted" | "retry_adopted_full" | "retry_adopted_partial";
+  /** Read-time display only (Order 40 C): the saved first answer in `savedResponseText` was shortened for storage. */
+  savedResponseShortened?: true;
 }
 
 // ─── Claim alignment (Phase 4b) ────────────────────────────────────────────

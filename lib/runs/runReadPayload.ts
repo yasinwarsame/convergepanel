@@ -14,6 +14,7 @@ import { parseGovernanceRecord } from "@/lib/adaptiveSchema/governanceRecordPars
 import { attachDeepResearchClaimIds } from "@/lib/verification/attachDeepResearchClaimIds";
 import { reconstructModelResults } from "@/lib/adaptiveSchema/reconstructModelResults";
 import { retriedIncludedSlotsFromRecord } from "@/lib/adaptiveSchema/savedCopyRetryEvidence";
+import { readAdoptedDisplayResults } from "@/lib/adaptiveSchema/adoptedDisplayResults";
 import type { AdaptiveModelResult } from "@/lib/adaptiveSchema/types";
 
 /**
@@ -80,6 +81,8 @@ export type RunReadPayload = {
         /**
          * Ruling B (2026-11-02): each model's structured result, rebuilt from the saved responses already in this
          * payload (`results`) with the live validator. Response-time only, never persisted. Additive.
+         * Order 40 C: a slot with a verified entry in the run's saved record of the validated result the report used
+         * (`adaptiveDisplayResults`) is that result instead, labelled `savedResultOrigin`. The record itself is never returned.
          */
         modelResults: AdaptiveModelResult[];
       }
@@ -232,6 +235,8 @@ export async function buildRunReadPayload(args: {
         // Only the notice wording depends on the retry record; the record itself is never returned.
         modelResults: reconstructModelResults(parsedAdaptive.output.schemaId, results, {
           retriedIncludedSlots: retriedIncludedSlotsFromRecord(data.adaptiveRetryUsage, parsedAdaptive.output),
+          // Order 40 C: verified against this run, schema and saved slots; malformed or foreign data yields no slots.
+          adoptedResults: readAdoptedDisplayResults(data.adaptiveDisplayResults, { runId, schemaId: parsedAdaptive.output.schemaId, rows: results }).slots,
         }),
       }
     : { status: parsedAdaptive.reason, output: null, humanReview: null, reviewRouting: "unknown" as const, automatedGovernance: null };

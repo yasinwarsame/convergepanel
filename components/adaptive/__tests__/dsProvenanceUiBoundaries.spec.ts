@@ -45,7 +45,11 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   // Re-pinned (owner-authorized saved-copy retry notice, 2026-11-07): passes the slots the persisted retry record
   // establishes as retried+included to reconstructModelResults (notice wording only); no provenance code.
   // 2d897bfb98ee985786a7fee696d2be7bb7534933 → ca6e3327bd8e3f2a651194aee1c2b459523b12bb.
-  "lib/runs/runReadPayload.ts": "ca6e3327bd8e3f2a651194aee1c2b459523b12bb",
+  // Re-pinned (owner-authorized Order 40 C, adopted-retry persistence): passes the verified slots of the run's saved
+  // `adaptiveDisplayResults` record (readAdoptedDisplayResults) to reconstructModelResults, which only changes
+  // `adaptive.modelResults`; the record is never returned; no other field and no provenance code.
+  // ca6e3327bd8e3f2a651194aee1c2b459523b12bb → ac10d544369c49a83819342ae2b817e40c6859b3.
+  "lib/runs/runReadPayload.ts": "ac10d544369c49a83819342ae2b817e40c6859b3",
   "lib/user/runDocumentToPublicResults.ts": "d1ed5a2d6d9caafa3d7e63d18307919ca7cb4cf1",
   // Order 6 critical-contrast slice (class-only; see criticalContrastSlice.ts): was 49c7924bbb7bf9466ab7cc8b7cd23a0f2294db85 at 9eca1e3.
   "components/adaptive/DecisionSupportView.tsx": "e3beb32c1161f42d84222b1633a6bd8b1bb98939",

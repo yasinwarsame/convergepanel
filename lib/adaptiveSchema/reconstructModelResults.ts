@@ -26,6 +26,12 @@
  *       the notice says the corrected response was not preserved separately;
  *   (5) the slot answered but there is no saved text → SAVED_COPY_MISSING, which claims neither inclusion nor exclusion.
  * Saved text is shown as plain text, never parsed into structure (review D2). Nothing is parsed leniently and nothing is re-requested: the same validator, the same saved text, no provider call.
+ *
+ * Order 40 C (owner-authorized): when the caller passes `adoptedResults` (adoptedDisplayResults.ts
+ * readAdoptedDisplayResults — the run's saved record of the validated result the report used, already verified against
+ * this run, schema and slot) and the row answered and its id occurs once, that result is shown instead, labelled by
+ * `savedResultOrigin`; the saved first answer stays in `savedResponseText` (the disclosure), flagged when shortened.
+ * Without a verified entry for the slot, every case above applies unchanged.
  */
 import "server-only";
 import type { AdaptiveModelResult } from "./types";
@@ -33,6 +39,7 @@ import type { ModelId } from "@/lib/types";
 import { SCHEMA_REGISTRY, getResultSchema } from "./schemaRegistry";
 import { validateAdaptiveResponse } from "./validator";
 import { SAVED_COPY_MISSING, SAVED_COPY_RETRIED_INCLUDED, SAVED_COPY_RETRIED_SHORTENED, SAVED_COPY_SHORTENED, SAVED_COPY_UNSTRUCTURED } from "./savedCopyNotice";
+import type { AdoptedSlotResult } from "./adoptedDisplayResults";
 
 export { SAVED_COPY_MISSING, SAVED_COPY_RETRIED_INCLUDED, SAVED_COPY_RETRIED_SHORTENED, SAVED_COPY_SHORTENED, SAVED_COPY_UNSTRUCTURED };
 
@@ -41,7 +48,7 @@ export type SavedPanelRow = { modelId: string; status?: unknown; rawText?: unkno
 export function reconstructModelResults(
   schemaId: string,
   rows: readonly SavedPanelRow[],
-  options: { retriedIncludedSlots?: ReadonlySet<string> } = {}
+  options: { retriedIncludedSlots?: ReadonlySet<string>; adoptedResults?: ReadonlyMap<string, AdoptedSlotResult> } = {}
 ): AdaptiveModelResult[] {
   // getResultSchema() falls back to `generic` for an unknown id; validating against the wrong schema would be a guess.
   if (!Object.prototype.hasOwnProperty.call(SCHEMA_REGISTRY, schemaId)) return [];
@@ -59,6 +66,12 @@ export function reconstructModelResults(
     const result = validateAdaptiveResponse(modelId, schema, text, { silent: true });
     // Display only: the saved copy exactly as stored, when there is one.
     const saved = text !== null && text.trim().length > 0 ? { savedResponseText: text } : {};
+    // Order 40 C: the verified saved record of what the report used for this slot outranks re-reading the first answer.
+    const adopted = occurrences.get(row.modelId) === 1 ? options.adoptedResults?.get(row.modelId) : undefined;
+    if (adopted) {
+      const shortened = "savedResponseText" in saved && row.wasTruncatedForStorage === true ? { savedResponseShortened: true as const } : {};
+      return { ...adopted.result, savedResultOrigin: adopted.origin, ...saved, ...shortened };
+    }
     if (result.ok) return { ...result, ...saved };
     const retryRecordedAndAttributed = row.status === "ok" && occurrences.get(row.modelId) === 1 && retriedIncluded?.has(row.modelId) === true;
     if (row.wasTruncatedForStorage === true) {

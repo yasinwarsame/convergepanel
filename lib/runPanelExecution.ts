@@ -62,6 +62,7 @@ import { finalizeAdaptiveRun, AdaptivePromptPlan } from "@/lib/adaptiveSchema/or
 import { computeAdaptiveRetryAccountingWaitMs, monotonicNowMs, type ResearchRequestBudget } from "@/lib/adaptiveSchema/retryBudget";
 import { AdaptiveRetryUsageSink } from "@/lib/adaptiveSchema/retryCorrection";
 import { applyAdaptiveRetryAccounting } from "@/lib/firestore/adaptiveRetryAccounting";
+import { persistAdaptiveDisplayResults } from "@/lib/firestore/adaptiveDisplayResults";
 import { emitProviderSearchEvidencePhase0 } from "@/lib/providers/providerSearchEvidencePhase0Emitter";
 import { attachDeepResearchClaimIds } from "@/lib/verification/attachDeepResearchClaimIds";
 import {
@@ -819,6 +820,28 @@ export async function executeOrdinaryRun(args: ExecuteOrdinaryRunArgs): Promise<
             schemaId: adaptiveOutput.schemaId,
             error: persistError?.message,
           });
+        }
+
+        // Order 40 C — the validated per-slot results the report used (adaptiveDisplayResults), saved once, right
+        // after the adaptive output, so a reopened report can show an adopted corrective retry. Only when that output
+        // and the saved first answers both exist; the writer never throws, never changes any other field, and its
+        // failure leaves the run reading exactly as before. Nothing downstream (governance, accounting, the response)
+        // reads it.
+        if (adaptivePayload.persistenceStatus === "saved" && completeRunSucceeded) {
+          try {
+            await persistAdaptiveDisplayResults({
+              runId,
+              schemaId: adaptiveOutput.schemaId,
+              panelResults: results,
+              adaptiveResults: adaptiveOutput.adaptiveResults,
+            });
+          } catch (displayPersistError: any) {
+            logger.warn("[run-panel] adaptiveDisplayResults persistence threw, run response unaffected", {
+              runId,
+              schemaId: adaptiveOutput.schemaId,
+              error: displayPersistError?.message,
+            });
+          }
         }
 
         // ============================================
