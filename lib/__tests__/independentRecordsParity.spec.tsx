@@ -66,17 +66,12 @@ import { generateVerificationMemo } from "@/lib/verification/generateMemo";
  * normalisation). Was 96651b5d2288eb0fabcfb09cf1a582c1d99e93d34613fb78341c33a4bbf8ee02 (B2-normalised baseline).
  */
 /**
- * Order 36 (remote CI): the Team claim row prints its local "created" date, so the 8584211 output depends on the process
- * timezone. Both digests were reproduced by running this file in a git-archive export of 8584211 (Africa/Nairobi, the
- * capturing machine, reproduces the original pin; UTC is CI). Any other timezone fails: run with TZ=UTC.
+ * Order 36 (remote CI): re-derived with the Team claim row's environment-dependent "created" date replaced by a
+ * placeholder (stripCreatedDate), by running this file in a git-archive export of 8584211 in Africa/Nairobi and in UTC
+ * (identical digests). Before: ecda4004… (Nairobi only; UTC gave cd20edfd…, the CI runner bd731ab0…).
  */
-const BASELINE_8584211_DIGEST_BY_TIMEZONE: Record<string, string> = {
-  "Africa/Nairobi": "ecda400490d0b6f10931dd72465941156b1ab332f752912e0e616a3232c5eb21",
-  UTC: "cd20edfdff8380f04f8818da7be833a92f866adadf3db875678a31accf3b49d6",
-};
-const EFFECTIVE_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
-const ORACLE_TIMEZONE = ["UTC", "Etc/UTC", "Etc/GMT", "GMT", "Etc/Universal", "Universal", "Etc/Zulu", "Zulu"].includes(EFFECTIVE_TIMEZONE) ? "UTC" : EFFECTIVE_TIMEZONE;
-const BASELINE_8584211_DIGEST: string | undefined = BASELINE_8584211_DIGEST_BY_TIMEZONE[ORACLE_TIMEZONE];
+const BASELINE_8584211_DIGEST = "e85e236dd43c14067a1b9a67a43b1622cd231a8eb5c2caec91cb0a5d8509e721";
+const stripCreatedDate = (markup: string) => markup.replace(/(data-testid="team-claim-row-created">)[^<]*(<\/span>)/g, "$1[created]$2");
 
 // Feature detection: the claim presentation module exists only after 8584211.
 let presentation: any = null;
@@ -289,7 +284,9 @@ async function outputs(): Promise<unknown> {
       audit: html(createElement(ClaimVerificationAuditTrailDetails, { data: payload })),
       clipboard: buildClaimVerdictClipboardText(payload),
       memo: stripGenerated(memo),
-      teamRow: html(createElement("ul", null, createElement(TeamClaimListRow, { workspaceId: "w", item: summary as any, showProject: false }))),
+      // Order 36 (remote CI): the row's local "created" date depends on the process timezone, locale and clock, so it is
+      // replaced by a placeholder on both sides (it is not an attribution output).
+      teamRow: stripCreatedDate(html(createElement("ul", null, createElement(TeamClaimListRow, { workspaceId: "w", item: summary as any, showProject: false })))),
       history,
       queue: {
         consensusScore: q.consensusScore,
@@ -337,7 +334,6 @@ describe("records with >= 2 independent executing models (no collapsed slots): i
       process.stdout.write(`PARITY_DIGEST=${digest}\n`);
       return;
     }
-    expect([EFFECTIVE_TIMEZONE, BASELINE_8584211_DIGEST !== undefined]).toEqual([EFFECTIVE_TIMEZONE, true]);
     expect(digest).toBe(BASELINE_8584211_DIGEST);
   });
 });
