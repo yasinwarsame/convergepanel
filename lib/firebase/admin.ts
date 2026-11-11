@@ -5,10 +5,11 @@
 import "server-only";
 
 import admin from "firebase-admin";
-import { App, cert, getApps, initializeApp } from "firebase-admin/app";
+import { App, applicationDefault, cert, getApps, initializeApp } from "firebase-admin/app";
 import { Auth, getAuth } from "firebase-admin/auth";
 import { Firestore, getFirestore } from "firebase-admin/firestore";
 import { resolvePreviewWorkloadIdentity } from "./previewWorkloadIdentity";
+import { resolveDevelopmentAdc } from "./developmentAdc";
 import { evaluateServerFirebaseIsolation, serviceAccountProject, PRODUCTION_FIREBASE_PROJECT_ID, PRODUCTION_FIREBASE_PROJECT_NUMBER, type FirebaseIsolationVerdict } from "./projectIsolation";
 import { readOperatorGrant } from "./operatorGrant";
 
@@ -120,6 +121,35 @@ function initFirebaseAdmin() {
     // Firestore client is built directly on the federated auth client (same settings as the certificate path).
     adminDb = new Firestore({ projectId, authClient: client, ignoreUndefinedProperties: true } as ConstructorParameters<typeof Firestore>[0]);
     console.log("[firebase-admin] Initialization complete (preview workload identity)");
+    return;
+  }
+
+  // Order 35 G (Development isolation D-2): a local / `vercel dev` run that opts in with FIREBASE_ADMIN_CREDENTIAL_SOURCE=adc
+  // authenticates keylessly (the developer's impersonated application-default credential) to a non-Production project.
+  // A refusal throws: there is no fallback to a certificate.
+  const dev = resolveDevelopmentAdc(process.env);
+  if (dev.kind === "refused") throw new Error(`Firebase Admin initialization refused: development_adc_${dev.reason}`);
+  if (dev.kind === "ok") {
+    const { projectId } = dev;
+    enforceFirebaseIsolation(evaluateServerFirebaseIsolation({ projectId, deploymentEnv: process.env.VERCEL_ENV }), projectId, undefined);
+    console.log("[firebase-admin] projectId:", projectId, "(development application-default credential)");
+    const existing = getApps().find((a) => a.name === "[DEFAULT]");
+    app = existing ?? initializeApp({ credential: applicationDefault(), projectId });
+    try {
+      enforceFirebaseIsolation(evaluateServerFirebaseIsolation({ projectId: app.options.projectId, deploymentEnv: process.env.VERCEL_ENV }), app.options.projectId, undefined);
+    } catch (refused) {
+      app = undefined;
+      throw refused;
+    }
+    adminAuth = getAuth(app);
+    adminDb = getFirestore(app);
+    try {
+      adminDb.settings({ ignoreUndefinedProperties: true });
+    } catch (settingsError: any) {
+      const alreadySet = typeof settingsError?.message === "string" && settingsError.message.includes("already been initialized");
+      if (!alreadySet) throw settingsError;
+    }
+    console.log("[firebase-admin] Initialization complete (development application-default credential)");
     return;
   }
 
