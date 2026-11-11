@@ -5,13 +5,27 @@
   "entries": {
     "factual-single": {
       "why": "1 answering slot (ChatGPT) + 1 error (Claude): the memo said '2 AI models researched this question independently' with CONSENSUS SCORE 33/100. One model answered; there is no cross-model consensus.",
-      "text.memo": { "sealed": "2749d389c63eeb23788ce263e41a76258a06a332e9cc8b838db89e4fd0f81e4e", "superseding": "bd889eec3486b20b3daecda861bbf505a053846f2fb54cc3731f9f59f912080c" },
-      "text.memoInput": { "sealed": "51033c8a6ab50ba3775d57720d858a2ba715a95ec474649b579bd1769ea6c095", "superseding": "b2af065c4d5992e5b3e1125bb156e4f8e32aad5bfa9cd5e035efd7e042855463" }
+      "text.memo": {
+        "sealed": "2749d389c63eeb23788ce263e41a76258a06a332e9cc8b838db89e4fd0f81e4e",
+        "superseding": "bd889eec3486b20b3daecda861bbf505a053846f2fb54cc3731f9f59f912080c"
+      },
+      "text.memoInput": {
+        "sealed": "51033c8a6ab50ba3775d57720d858a2ba715a95ec474649b579bd1769ea6c095",
+        "superseding": "b2af065c4d5992e5b3e1125bb156e4f8e32aad5bfa9cd5e035efd7e042855463"
+      },
+      "ownerRatification": "Within the original Order 35 A re-record authorization (factual-single)."
     },
     "generic-substituted-and-failed": {
       "why": "5 slots, 1 failed: 4 independent executing models answered (DeepSeek substituting Claude counts once and is distinct). The memo said '5 AI models researched this question independently' / 'independently researched by 5 large language models' (the requested slot count).",
-      "text.memo": { "sealed": "4523447c6a0a4be814fae9b3df168bc0dd42aba57c3959ac18660f9098bfb3fb", "superseding": "15b10283b5b42a87c1463c890ffbc39bacbc5558ed6ee6899737cfd4ab361f32" },
-      "text.memoInput": { "sealed": "5434e304d0bacea056579b586e10cb9ed1a0741fb5b223703831ca65e8fd7c36", "superseding": "2431b2a0f914bb50ff186c202949b04ae0f858952d649be96f2e34041f3b8560" }
+      "text.memo": {
+        "sealed": "4523447c6a0a4be814fae9b3df168bc0dd42aba57c3959ac18660f9098bfb3fb",
+        "superseding": "15b10283b5b42a87c1463c890ffbc39bacbc5558ed6ee6899737cfd4ab361f32"
+      },
+      "text.memoInput": {
+        "sealed": "5434e304d0bacea056579b586e10cb9ed1a0741fb5b223703831ca65e8fd7c36",
+        "superseding": "2431b2a0f914bb50ff186c202949b04ae0f858952d649be96f2e34041f3b8560"
+      },
+      "ownerRatification": "Owner-approved exception to the factual-single-only scope (Order 35 review / Order 36 B): ratified for the truthful count of successful responses (4 of 5 slots answered; the fifth failed). It does not establish that four distinct independent providers participated; independence is decided only by the shared verified-identity rule."
     }
   }
 }
