@@ -27,7 +27,11 @@ export function resolveDevelopmentAdc(env: Record<string, string | undefined>): 
   // Local runs (VERCEL_ENV unset) and `vercel dev` (development) only — never a Preview or Production deployment.
   if (env.VERCEL_ENV !== undefined && env.VERCEL_ENV !== "" && env.VERCEL_ENV !== "development") return { kind: "refused", reason: "adc_outside_development" };
   // Keyless only: a key file named by GOOGLE_APPLICATION_CREDENTIALS would make ADC a key credential again.
-  if (typeof env.GOOGLE_APPLICATION_CREDENTIALS === "string" && env.GOOGLE_APPLICATION_CREDENTIALS.trim() !== "") return { kind: "refused", reason: "key_file_credentials" };
+  // google-auth-library (used by Firestore) also honours the lowercase spelling (googleauth.js), so both are refused.
+  for (const name of ["GOOGLE_APPLICATION_CREDENTIALS", "google_application_credentials"]) {
+    const v = env[name];
+    if (typeof v === "string" && v.trim() !== "") return { kind: "refused", reason: "key_file_credentials" };
+  }
   // Order 37 I (review M-1): firebase-admin and google-auth-library read ONLY the HOME (or APPDATA) well-known file and
   // ignore CLOUDSDK_CONFIG, so with it set gcloud writes one file and the SDKs use another. Refused rather than guessed.
   if (typeof env.CLOUDSDK_CONFIG === "string" && env.CLOUDSDK_CONFIG.trim() !== "") return { kind: "refused", reason: "cloudsdk_config_unsupported" };

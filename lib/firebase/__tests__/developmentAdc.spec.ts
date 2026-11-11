@@ -65,13 +65,14 @@ describe("resolveDevelopmentAdc", () => {
     ["the Production project id, padded / cased", { FIREBASE_ADMIN_CREDENTIAL_SOURCE: "adc", FIREBASE_PROJECT_ID: " ConvergePanel " }, "production_project"],
     ["the Production project number", { FIREBASE_ADMIN_CREDENTIAL_SOURCE: "adc", FIREBASE_PROJECT_ID: "907484474744" }, "production_project"],
     ["a key file through GOOGLE_APPLICATION_CREDENTIALS", { FIREBASE_ADMIN_CREDENTIAL_SOURCE: "adc", FIREBASE_PROJECT_ID: "convergepanel-dev", GOOGLE_APPLICATION_CREDENTIALS: "/tmp/key.json" }, "key_file_credentials"],
+    ["a key file through the lowercase google_application_credentials google-auth-library also reads", { FIREBASE_ADMIN_CREDENTIAL_SOURCE: "adc", FIREBASE_PROJECT_ID: "convergepanel-dev", google_application_credentials: "/tmp/key.json" }, "key_file_credentials"],
     ["CLOUDSDK_CONFIG (the SDKs would read a different file than gcloud wrote; review M-1)", { FIREBASE_ADMIN_CREDENTIAL_SOURCE: "adc", FIREBASE_PROJECT_ID: "convergepanel-dev", CLOUDSDK_CONFIG: "/cfg" }, "cloudsdk_config_unsupported"],
   ])("refuses %s", (_n, env, reason) => {
     expect(resolveDevelopmentAdc(env as Record<string, string>)).toEqual({ kind: "refused", reason });
   });
 });
 
-const ENV_KEYS = ["VERCEL_ENV", "FIREBASE_SERVICE_ACCOUNT_BASE64", "FIREBASE_SERVICE_ACCOUNT_JSON", "FIREBASE_CLIENT_EMAIL", "FIREBASE_PRIVATE_KEY", "FIREBASE_PROJECT_ID", "FIREBASE_WIF_AUDIENCE", "FIREBASE_WIF_SERVICE_ACCOUNT", "FIREBASE_ADMIN_CREDENTIAL_SOURCE", "GOOGLE_APPLICATION_CREDENTIALS", "CLOUDSDK_CONFIG", "HOME"] as const;
+const ENV_KEYS = ["VERCEL_ENV", "FIREBASE_SERVICE_ACCOUNT_BASE64", "FIREBASE_SERVICE_ACCOUNT_JSON", "FIREBASE_CLIENT_EMAIL", "FIREBASE_PRIVATE_KEY", "FIREBASE_PROJECT_ID", "FIREBASE_WIF_AUDIENCE", "FIREBASE_WIF_SERVICE_ACCOUNT", "FIREBASE_ADMIN_CREDENTIAL_SOURCE", "GOOGLE_APPLICATION_CREDENTIALS", "google_application_credentials", "CLOUDSDK_CONFIG", "HOME"] as const;
 const saved: Record<string, string | undefined> = {};
 beforeAll(() => ENV_KEYS.forEach((k) => (saved[k] = process.env[k])));
 afterEach(() => ENV_KEYS.forEach((k) => (saved[k] === undefined ? delete process.env[k] : (process.env[k] = saved[k]))));
