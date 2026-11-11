@@ -8,7 +8,7 @@ import { join } from "path";
 import { adcWellKnownFilePath, inspectAdcFile, resolveDevelopmentAdc } from "../developmentAdc";
 
 const DEV_SA = "cp-dev-admin@convergepanel-preview.iam.gserviceaccount.com";
-const impersonation = (sa: string) => ({ type: "impersonated_service_account", service_account_impersonation_url: `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${sa}:generateAccessToken`, source_credentials: { type: "authorized_user" } });
+const impersonation = (sa: string) => ({ type: "impersonated_service_account", service_account_impersonation_url: `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${sa}:generateAccessToken`, source_credentials: { type: "authorized_user", client_id: "fake-id", client_secret: "fake-secret", refresh_token: "fake-refresh" } });
 
 describe("inspectAdcFile (review M-1)", () => {
   it("accepts only an impersonated service account and returns its address", () => {
@@ -66,6 +66,8 @@ describe("resolveDevelopmentAdc", () => {
     ["the Production project number", { FIREBASE_ADMIN_CREDENTIAL_SOURCE: "adc", FIREBASE_PROJECT_ID: "907484474744" }, "production_project"],
     ["a key file through GOOGLE_APPLICATION_CREDENTIALS", { FIREBASE_ADMIN_CREDENTIAL_SOURCE: "adc", FIREBASE_PROJECT_ID: "convergepanel-dev", GOOGLE_APPLICATION_CREDENTIALS: "/tmp/key.json" }, "key_file_credentials"],
     ["a key file through the lowercase google_application_credentials google-auth-library also reads", { FIREBASE_ADMIN_CREDENTIAL_SOURCE: "adc", FIREBASE_PROJECT_ID: "convergepanel-dev", google_application_credentials: "/tmp/key.json" }, "key_file_credentials"],
+    ["a whitespace-only GOOGLE_APPLICATION_CREDENTIALS (the SDKs treat it as a path; review MINOR 1)", { FIREBASE_ADMIN_CREDENTIAL_SOURCE: "adc", FIREBASE_PROJECT_ID: "convergepanel-dev", GOOGLE_APPLICATION_CREDENTIALS: " " }, "key_file_credentials"],
+    ["a whitespace-only google_application_credentials (review MINOR 1)", { FIREBASE_ADMIN_CREDENTIAL_SOURCE: "adc", FIREBASE_PROJECT_ID: "convergepanel-dev", google_application_credentials: "\t" }, "key_file_credentials"],
     ["CLOUDSDK_CONFIG (the SDKs would read a different file than gcloud wrote; review M-1)", { FIREBASE_ADMIN_CREDENTIAL_SOURCE: "adc", FIREBASE_PROJECT_ID: "convergepanel-dev", CLOUDSDK_CONFIG: "/cfg" }, "cloudsdk_config_unsupported"],
   ])("refuses %s", (_n, env, reason) => {
     expect(resolveDevelopmentAdc(env as Record<string, string>)).toEqual({ kind: "refused", reason });
@@ -94,13 +96,14 @@ function loadAdmin(env: Partial<Record<(typeof ENV_KEYS)[number], string>>, exis
   const applicationDefault = jest.fn(() => ({ kind: "adc" }));
   const cert = jest.fn((x: unknown) => ({ cert: x }));
   const getFirestore = jest.fn(() => ({ kind: "db", settings: () => undefined }));
+  const FirestoreCtor = jest.fn(function (this: any, settings: unknown) { this.kind = "dev-db"; this.settingsArg = settings; });
   const errors: string[] = [];
   let mod: any;
   jest.isolateModules(() => {
     jest.doMock("firebase-admin", () => ({ __esModule: true, default: {} }));
     jest.doMock("firebase-admin/app", () => ({ initializeApp, applicationDefault, getApps: () => existingApps, cert }));
     jest.doMock("firebase-admin/auth", () => ({ getAuth: () => ({ kind: "auth" }) }));
-    jest.doMock("firebase-admin/firestore", () => ({ getFirestore, Firestore: jest.fn() }));
+    jest.doMock("firebase-admin/firestore", () => ({ getFirestore, Firestore: FirestoreCtor }));
     const log = jest.spyOn(console, "log").mockImplementation(() => undefined);
     const err = jest.spyOn(console, "error").mockImplementation((...a: unknown[]) => void errors.push(a.map(String).join(" ")));
     try {
@@ -110,7 +113,7 @@ function loadAdmin(env: Partial<Record<(typeof ENV_KEYS)[number], string>>, exis
       err.mockRestore();
     }
   });
-  return { initializeApp, applicationDefault, cert, mod, errors };
+  return { initializeApp, applicationDefault, cert, getFirestore, FirestoreCtor, mod, errors };
 }
 
 const PROD_KEY_JSON = JSON.stringify({ project_id: "convergepanel", client_email: "firebase-adminsdk-fbsvc@convergepanel.iam.gserviceaccount.com", private_key: "k" });
@@ -118,13 +121,53 @@ const PROD_KEY_JSON = JSON.stringify({ project_id: "convergepanel", client_email
 const DEV_KEY_JSON = JSON.stringify({ project_id: "convergepanel-preview", client_email: "legacy-key@convergepanel-preview.iam.gserviceaccount.com", private_key: "k" });
 
 describe("admin.ts — development application-default path", () => {
-  it("opt-in on a non-Production project → Admin with the application-default credential, no certificate read", () => {
-    const { initializeApp, applicationDefault, cert, mod } = loadAdmin({ FIREBASE_ADMIN_CREDENTIAL_SOURCE: "adc", FIREBASE_PROJECT_ID: "convergepanel-preview", FIREBASE_SERVICE_ACCOUNT_JSON: DEV_KEY_JSON, ...adcFile(impersonation(DEV_SA)) });
-    expect(applicationDefault).toHaveBeenCalledTimes(1);
+  it("opt-in on a non-Production project → Admin with ONE impersonated client for Auth and Firestore; no applicationDefault(), no certificate", () => {
+    const { initializeApp, applicationDefault, cert, getFirestore, FirestoreCtor, mod } = loadAdmin({ FIREBASE_ADMIN_CREDENTIAL_SOURCE: "adc", FIREBASE_PROJECT_ID: "convergepanel-preview", FIREBASE_SERVICE_ACCOUNT_JSON: DEV_KEY_JSON, ...adcFile(impersonation(DEV_SA)) });
+    expect(applicationDefault).not.toHaveBeenCalled();
     expect(cert).not.toHaveBeenCalled();
-    expect(initializeApp).toHaveBeenCalledWith({ credential: { kind: "adc" }, projectId: "convergepanel-preview" });
-    expect(mod.adminDb).toBeDefined();
+    expect(getFirestore).not.toHaveBeenCalled();
+    expect(initializeApp).toHaveBeenCalledTimes(1);
+    const opts = initializeApp.mock.calls[0][0] as any;
+    expect(opts.projectId).toBe("convergepanel-preview");
+    expect(typeof opts.credential.getAccessToken).toBe("function");
+    expect(FirestoreCtor).toHaveBeenCalledTimes(1);
+    const s = FirestoreCtor.mock.calls[0][0] as any;
+    expect(s).toEqual({ projectId: "convergepanel-preview", authClient: expect.anything(), ignoreUndefinedProperties: true });
+    expect(s.authClient.getTargetPrincipal()).toBe(DEV_SA);
+    expect(opts.credential[Symbol.for("convergepanel.firebase.developmentAdcClient")]).toBe(s.authClient);
+    expect(mod.adminDb.kind).toBe("dev-db");
     expect(mod.getInitializedFirebaseProjectId()).toBe("convergepanel-preview");
+  });
+
+  it("the impersonated client is built from the bytes already read and validated: the ADC file is read exactly once", () => {
+    const fs = require("fs") as typeof import("fs");
+    const read = jest.spyOn(fs, "readFileSync");
+    try {
+      const env = adcFile(impersonation(DEV_SA));
+      const { mod } = loadAdmin({ FIREBASE_ADMIN_CREDENTIAL_SOURCE: "adc", FIREBASE_PROJECT_ID: "convergepanel-preview", ...env });
+      expect(mod.adminDb).toBeDefined();
+      const adcReads = read.mock.calls.filter(([p]) => String(p).endsWith("application_default_credentials.json"));
+      expect(adcReads).toHaveLength(1);
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  it("an existing default app on the same project is reused only with the client this path built for the validated SA", () => {
+    const first = loadAdmin({ FIREBASE_ADMIN_CREDENTIAL_SOURCE: "adc", FIREBASE_PROJECT_ID: "convergepanel-preview", ...adcFile(impersonation(DEV_SA)) });
+    const firstCredential = (first.initializeApp.mock.calls[0][0] as any).credential;
+    const ours = { name: "[DEFAULT]", options: { projectId: "convergepanel-preview", credential: firstCredential } };
+    const reused = loadAdmin({ FIREBASE_ADMIN_CREDENTIAL_SOURCE: "adc", FIREBASE_PROJECT_ID: "convergepanel-preview", ...adcFile(impersonation(DEV_SA)) }, [ours]);
+    expect(reused.initializeApp).not.toHaveBeenCalled();
+    expect((reused.FirestoreCtor.mock.calls[0][0] as any).authClient).toBe(firstCredential[Symbol.for("convergepanel.firebase.developmentAdcClient")]);
+    for (const credential of [{ kind: "adc" }, { cert: {} }, undefined]) {
+      const r = loadAdmin({ FIREBASE_ADMIN_CREDENTIAL_SOURCE: "adc", FIREBASE_PROJECT_ID: "convergepanel-preview", ...adcFile(impersonation(DEV_SA)) }, [{ name: "[DEFAULT]", options: { projectId: "convergepanel-preview", credential } }]);
+      expect(r.mod.adminDb).toBeUndefined();
+      expect(r.errors.join("\n")).toContain("development_adc_existing_app_credential_mismatch");
+    }
+    const other = loadAdmin({ FIREBASE_ADMIN_CREDENTIAL_SOURCE: "adc", FIREBASE_PROJECT_ID: "convergepanel-preview", ...adcFile(impersonation("cp-dev-other@convergepanel-preview.iam.gserviceaccount.com")) }, [ours]);
+    expect(other.mod.adminDb).toBeUndefined();
+    expect(other.errors.join("\n")).toContain("development_adc_existing_app_credential_mismatch");
   });
 
   it.each([

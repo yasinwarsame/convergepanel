@@ -5,7 +5,7 @@
 import "server-only";
 
 import admin from "firebase-admin";
-import { App, applicationDefault, cert, getApps, initializeApp } from "firebase-admin/app";
+import { App, cert, getApps, initializeApp } from "firebase-admin/app";
 import { Auth, getAuth } from "firebase-admin/auth";
 import { Firestore, getFirestore } from "firebase-admin/firestore";
 import { resolvePreviewWorkloadIdentity } from "./previewWorkloadIdentity";
@@ -141,15 +141,24 @@ function initFirebaseAdmin() {
       adcText = null;
     }
     const adc = inspectAdcFile(adcText);
-    adcText = null;
-    if (adc.kind === "refused") throw new Error(`Firebase Admin initialization refused: development_adc_${adc.reason}`);
+    if (adc.kind === "refused" || adcText === null) {
+      adcText = null;
+      throw new Error(`Firebase Admin initialization refused: development_adc_${adc.kind === "refused" ? adc.reason : "adc_file_missing"}`);
+    }
     const clientEmail = adc.serviceAccountEmail;
     enforceFirebaseIsolation(evaluateServerFirebaseIsolation({ projectId, clientEmail, deploymentEnv: process.env.VERCEL_ENV }), projectId, clientEmail);
     console.log("[firebase-admin] projectId:", projectId, "(development application-default credential, impersonated service account)");
     const existing = getApps().find((a) => a.name === "[DEFAULT]");
     // Review N-2: an existing default app for another project is never reused.
     if (existing && existing.options.projectId !== projectId) throw new Error("Firebase Admin initialization refused: development_adc_existing_app_project_mismatch");
-    app = existing ?? initializeApp({ credential: applicationDefault(), projectId });
+    // D-2 confirmation review MATERIAL: firebase-admin's applicationDefault() never impersonates (it only refreshes the
+    // developer's own user token), so one explicit impersonated client, built from the exact bytes validated above
+    // (never re-read), backs BOTH Firebase Auth and Firestore. A reused default app must carry this same client.
+    const { createDevelopmentImpersonatedClient, developmentImpersonatedCredential, developmentClientOf } = require("./developmentAdcClient") as typeof import("./developmentAdcClient");
+    const client = existing ? developmentClientOf(existing.options.credential, clientEmail) : createDevelopmentImpersonatedClient(adcText, clientEmail);
+    adcText = null;
+    if (!client) throw new Error("Firebase Admin initialization refused: development_adc_existing_app_credential_mismatch");
+    app = existing ?? initializeApp({ credential: developmentImpersonatedCredential(client), projectId });
     try {
       enforceFirebaseIsolation(evaluateServerFirebaseIsolation({ projectId: app.options.projectId, clientEmail, deploymentEnv: process.env.VERCEL_ENV }), app.options.projectId, clientEmail);
     } catch (refused) {
@@ -157,14 +166,9 @@ function initFirebaseAdmin() {
       throw refused;
     }
     adminAuth = getAuth(app);
-    adminDb = getFirestore(app);
-    try {
-      adminDb.settings({ ignoreUndefinedProperties: true });
-    } catch (settingsError: any) {
-      const alreadySet = typeof settingsError?.message === "string" && settingsError.message.includes("already been initialized");
-      if (!alreadySet) throw settingsError;
-    }
-    console.log("[firebase-admin] Initialization complete (development application-default credential)");
+    // Firestore receives the same client explicitly, so it never does a lazy application-default read of its own.
+    adminDb = new Firestore({ projectId, authClient: client, ignoreUndefinedProperties: true } as ConstructorParameters<typeof Firestore>[0]);
+    console.log("[firebase-admin] Initialization complete (development impersonated service account)");
     return;
   }
 
