@@ -66,7 +66,7 @@ describe("truthful model labels", () => {
   it("no customer-facing source claims live or recent web data for Grok or Gemini", () => {
     let out = "";
     try {
-      out = execFileSync("git", ["grep", "-n", "-i", "-E", "(grok|gemini)[^.]{0,80}(open-web|real-time|realtime|live web|web search|web access|recent data|timely)", "--", "app", "components", "lib", "public", "README.md", ":!**/__tests__/**", ":!*.spec.*"], { cwd: root, encoding: "utf8" });
+      out = execFileSync("git", ["grep", "-n", "-P", String.raw`(?i)\b(grok|gemini)(?:(?![.;!?]\s)[^\n]){0,120}?\b(open-web|real-time|realtime|live web|web search|web access|web sources|recent data|timely|live x|x posts|google search|grounded|grounding|up to date|up-to-date|current events|latest news|browse|browsing)`, "--", "app", "components", "lib", "public", "README.md", ":!**/__tests__/**", ":!*.spec.*"], { cwd: root, encoding: "utf8" });
     } catch (e: any) {
       if (e.status !== 1) throw e;
     }

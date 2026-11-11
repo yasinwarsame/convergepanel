@@ -29,7 +29,7 @@ import { runModelFamilyName } from "@/lib/panel/runModelIdentity";
  * in every spelling rather than flagged as "Gemini 3.5 Flash" or a bare version token.
  */
 const MODEL_NAME_TOKEN_PATTERN =
-  /\b(GPT[\s-]?\d[\w.]*(?:[\s-]+(?:Turbo|Pro|mini|nano))?|Claude(?:\s+(?:Opus|Sonnet|Haiku))?[\s-]?\d[\w.]*(?:\s+(?:Opus|Sonnet|Haiku))?|Gemini[\s-]?\d[\w.]*(?:[\s-]+(?:Pro|Flash(?:[\s-]+Lite)?|Ultra|Nano))?|Grok[\s-]?\d[\w.]*(?:-\d+)*(?:[\s-]+(?:Fast|Mini|Heavy))?(?:[\s-]+(?:non-)?reasoning)?|Perplexity(?:\s+(?:Pro|Sonar))?|Llama[\s-]?\d[\w.]*|Mistral(?:\s+\w+)?|DeepSeek(?:[\s-]?\w+)?)\b/gi;
+  /\b(GPT[\s-]?\d[\w.]*(?:[\s-]+(?:Turbo|Pro|mini|nano))?|Claude(?:\s+(?:Opus|Sonnet|Haiku))?[\s-]?\d[\w.]*(?:\s+(?:Opus|Sonnet|Haiku))?|Gemini[\s-]?\d[\w.]*(?:[\s-]+(?:Pro|Flash(?:[\s-]+Lite)?|Ultra|Nano))?|Grok[\s-]?\d[\w.]*(?:-\d+)*(?:[\s-]+(?:Fast|Mini|Heavy)(?:[\s-]+(?:non-)?reasoning)?|-(?:non-)?reasoning)?|Perplexity(?:\s+(?:Pro|Sonar))?|Llama[\s-]?\d[\w.]*|Mistral(?:\s+\w+)?|DeepSeek(?:[\s-]?\w+)?)\b/gi;
 
 /**
  * Comparison key for a model name: lower case, with every run of spaces and

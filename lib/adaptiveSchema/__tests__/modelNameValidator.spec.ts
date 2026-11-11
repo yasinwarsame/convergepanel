@@ -91,6 +91,11 @@ describe("stripUnrecognizedModelNames", () => {
     expect(stripUnrecognizedModelNames("gpt-4o-mini and GPT-4o-mini agree.", ROSTER)).toBe("gpt-4o-mini and GPT-4o-mini agree.");
     expect(stripUnrecognizedModelNames("Grok 4.1 Fast Reasoning agrees.", ROSTER)).toBe("the panel agrees.");
     expect(stripUnrecognizedModelNames("grok-4-fast-non-reasoning agrees.", ROSTER)).toBe("the panel agrees.");
+    // The English word "reasoning" after the real name is prose, not part of a model name.
+    expect(stripUnrecognizedModelNames("Grok 4.3 reasoning is sound.", ROSTER)).toBe("Grok 4.3 reasoning is sound.");
+    expect(stripUnrecognizedModelNames("Grok 4.3 reasoning-wise agrees.", ROSTER)).toBe("Grok 4.3 reasoning-wise agrees.");
+    expect(stripUnrecognizedModelNames("Grok 4.3 - reasoning aside.", ROSTER)).toBe("Grok 4.3 - reasoning aside.");
+    expect(stripUnrecognizedModelNames("grok-4-1-fast-non-reasoning agrees.", ROSTER)).toBe("the panel agrees.");
   });
 
   it("leaves text with only real display names untouched", () => {
