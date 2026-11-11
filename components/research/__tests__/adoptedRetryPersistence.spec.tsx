@@ -480,6 +480,22 @@ describe("persistence: failure, repetition, concurrency, size, deletion", () => 
     expect(logger.warn).toHaveBeenCalledWith("[adaptiveDisplayResults] Not written: write failed", expect.objectContaining({ runId: RUN_ID }));
   });
 
+  it("when the adaptive output did not save, the record is not written either (no adopted copy without its report)", async () => {
+    claude.mockResolvedValueOnce(retryOk("claude", bare("ClaudeRetry")));
+    const realRun = db.runTransaction.bind(db);
+    jest.spyOn(db, "runTransaction").mockImplementation(async (fn: any) =>
+      realRun(async (tx: any) => {
+        const out = await fn(tx);
+        if (tx.writes.some((w: any) => "adaptiveOutput" in w.data)) throw new Error("UNAVAILABLE: injected adaptiveOutput failure");
+        return out;
+      })
+    );
+    const { body, stored } = await execute([ok("chatgpt", bare("ChatGPT")), ok("claude", CLAUDE_PROSE_WRAPPED)]);
+    expect(body.adaptive.persistenceStatus).toBe("failed");
+    expect("adaptiveOutput" in stored).toBe(false);
+    expect(RECORD in stored).toBe(false);
+  });
+
   it("a repeated write is a no-op: the first record stays byte-identical", async () => {
     claude.mockResolvedValueOnce(retryOk("claude", bare("ClaudeRetry")));
     const { stored, live } = await execute([ok("chatgpt", bare("ChatGPT")), ok("claude", CLAUDE_PROSE_WRAPPED)]);

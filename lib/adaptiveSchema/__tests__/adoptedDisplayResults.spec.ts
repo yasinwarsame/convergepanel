@@ -22,6 +22,7 @@ import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
 import { validateAdaptiveResponse } from "@/lib/adaptiveSchema/validator";
 import { mergeAdaptiveRetry, ADAPTIVE_RETRY_OUTCOMES } from "@/lib/adaptiveSchema/retryCorrection";
 import type { AdaptiveModelResult } from "@/lib/adaptiveSchema/types";
+import { reconstructModelResults } from "@/lib/adaptiveSchema/reconstructModelResults";
 
 const schema = SCHEMA_REGISTRY.comparison_matrix;
 const RUN = "run-abc";
@@ -105,6 +106,14 @@ describe("builder — origin and the recorded retry outcome", () => {
     expect(record.bySlot.chatgpt).toEqual({ availability: "unavailable", reason: "no_validated_data", slotIndex: 0, executedStatus: "timeout", retryOutcome: null });
     expect(record.bySlot.claude).toEqual({ availability: "unavailable", reason: "no_validated_data", slotIndex: 1, executedStatus: "error", retryOutcome: null });
     expect((record.bySlot.grok as any).availability).toBe("unavailable");
+  });
+
+  it("a slot whose recorded status is not an answer never carries data, even if an adaptive result claims some", () => {
+    for (const status of ["error", "timeout", "refused", "rate_limited", "unknown_status"]) {
+      const { record } = build([panelRow("chatgpt", status)], [validated("chatgpt", answer("x"))]);
+      expect(record.bySlot.chatgpt).toMatchObject({ availability: "unavailable", reason: "no_validated_data" });
+      expect("data" in record.bySlot.chatgpt).toBe(false);
+    }
   });
 
   it("a substituted slot keeps its status; its ineligible retry outcome is recorded", () => {
@@ -283,6 +292,7 @@ describe("reader — accepts only a record bound to this run, schema and slot", 
     ["slotIndex not an integer", (r: any) => (r.bySlot.claude.slotIndex = 1.5)],
     ["recorded status differs from the saved row", (r: any) => (r.bySlot.claude.executedStatus = "substituted")],
     ["unknown origin", (r: any) => (r.bySlot.claude.origin = "retry_adopted")],
+    ["unknown origin with an outcome no rule rejects", (r: any) => Object.assign(r.bySlot.claude, { origin: "verbatim_retry", retryOutcome: null })],
     ["origin contradicts the outcome (full vs partial)", (r: any) => (r.bySlot.claude.retryOutcome = "adopted_partial")],
     ["origin original with an adopted outcome", (r: any) => (r.bySlot.claude.origin = "original_accepted")],
     ["unknown outcome", (r: any) => (r.bySlot.claude.retryOutcome = "maybe")],
@@ -302,6 +312,15 @@ describe("reader — accepts only a record bound to this run, schema and slot", 
     expect(got.status).toBe("valid");
     expect(got.slots.has("claude")).toBe(false);
     expect(got.slots.has("chatgpt")).toBe(true);
+  });
+
+  it("an accepted original whose recorded status differs from the saved row's is dropped (both directions)", () => {
+    const { rows, record } = healthyRecord();
+    const forged: any = roundTrip(record);
+    forged.bySlot.chatgpt.executedStatus = "substituted"; // origin original_accepted + null outcome is legal for substituted
+    expect(read(forged, rows).slots.has("chatgpt")).toBe(false);
+    expect(read(record, rows.map((r) => (r.modelId === "chatgpt" ? { ...r, status: "substituted" } : r))).slots.has("chatgpt")).toBe(false);
+    expect(read(record, rows).slots.has("chatgpt")).toBe(true);
   });
 
   it("a slot whose id occurs twice in the saved rows is never used", () => {
@@ -350,5 +369,19 @@ describe("sameJsonValue", () => {
     expect(sameJsonValue({ a: 1 }, { a: 1, b: 2 })).toBe(false);
     expect(sameJsonValue({ a: "1" }, { a: 1 })).toBe(false);
     expect(sameJsonValue({ a: [] }, { a: {} })).toBe(false);
+  });
+});
+
+describe("reconstructModelResults uses an adopted result only for a slot id seen once", () => {
+  it("duplicated rows never take an adopted entry, even when handed one", () => {
+    const adopted = new Map([["claude", { origin: "retry_adopted_full" as const, result: validated("claude", answer("Retry")) }]]);
+    const rows = [
+      { modelId: "claude", status: "ok", rawText: "not json" },
+      { modelId: "claude", status: "ok", rawText: "not json" },
+      { modelId: "grok", status: "ok", rawText: "not json" },
+    ];
+    const out = reconstructModelResults("comparison_matrix", rows, { adoptedResults: new Map([...adopted, ["grok", { origin: "original_accepted" as const, result: validated("grok", answer("G")) }]]) });
+    expect(out.slice(0, 2).map((r) => [r.ok, r.savedResultOrigin])).toEqual([[false, undefined], [false, undefined]]);
+    expect([out[2].ok, out[2].savedResultOrigin, out[2].savedResponseText]).toEqual([true, "original_accepted", "not json"]);
   });
 });
