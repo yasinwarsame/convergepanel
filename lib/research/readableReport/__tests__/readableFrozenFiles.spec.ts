@@ -83,7 +83,7 @@ const UNCHANGED_AT_35933C8: Record<string, string> = {
  */
 const WIDENED_BY_INC1: Record<string, string> = {
   "lib/adaptiveSchema/__tests__/o5p/vocabularyScanner.ts": "37e23190b3585eaa57fa0ddad29c5b6d01d2f76f",
-  "lib/adaptiveSchema/__tests__/o5p/__fixtures__/vocabularyManifest.json": "5a18983d528bb88c055d0dbff7984b39472e8ef4",
+  "lib/adaptiveSchema/__tests__/o5p/__fixtures__/vocabularyManifest.json": "d74147abf059576c671fdcc115e809917eb4fa06",
 };
 
 /**
@@ -171,11 +171,19 @@ const WIDENED_BY_INC1: Record<string, string> = {
  *   - vocabularyManifest.json (WIDENED_BY_INC1): 9774e44bba846e24cc08bcc7f85536eb607a3277 →
  *     5a18983d528bb88c055d0dbff7984b39472e8ef4 (3 entries appended: the zero-response memo literals; none removed).
  * Same 32-file pinned set.
+ *
+ * Re-pinned (owner-authorized F35-M1, Order 36 A — the marked adaptive memo states no run certainty with fewer than two
+ * verified independent successful responses):
+ *   - shareBuilders.ts: 3364318bbff38be700ed29b51cb8caf4a1015d84 → f5e67a0a0ee20e2da15917b2a2f195005943f1ba (the marked
+ *     branch passes the verified count 0 / 1, or identity-unverified; nothing else).
+ *   - vocabularyManifest.json: 5a18983d528bb88c055d0dbff7984b39472e8ef4 → d74147abf059576c671fdcc115e809917eb4fa06 (3
+ *     entries appended: the marked memo's insufficient-evidence literals; none removed).
+ * Same 32-file pinned set.
  */
 const READABLE_GATE_OPTION_BY_INC1: Record<string, string> = {
   "components/adaptive/AdaptiveSynthesisReportView.tsx": "bcdf6ba2444c2aa3dc22ae049901cf72e55eb0bc",
   "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "1eb15948753574f91c8b949af4a1fbc19e8dd51e",
-  "lib/adaptiveSchema/shareBuilders.ts": "3364318bbff38be700ed29b51cb8caf4a1015d84",
+  "lib/adaptiveSchema/shareBuilders.ts": "f5e67a0a0ee20e2da15917b2a2f195005943f1ba",
   "lib/adaptiveSchema/__tests__/o5p/historicalParity.spec.tsx": "fce2e3172049cd868607e83a8a0a0147ec4939f3",
 };
 

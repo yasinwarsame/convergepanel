@@ -751,6 +751,13 @@ function generateResearchMemo(input: MemoInput): string {
  * "where models agree / disagree"). The figure shown is the run certainty, as computed and stored — renamed from
  * "consensus score", never recomputed.
  */
+/** Order 36 A (F35-M1, owner ruling): marked memo lines with fewer than two verified independent successful responses. */
+export const MARKED_MEMO_RUN_CERTAINTY_NOT_ESTABLISHED = "RUN CERTAINTY: not established";
+export const MARKED_MEMO_EVIDENCE_NOT_ASSESSED = "not assessed (fewer than two verified independent model responses)";
+export const MARKED_MEMO_NO_RESPONSES = "No successful model responses. Consensus and run certainty cannot be established.";
+export const MARKED_MEMO_ONE_RESPONSE = "Only one model responded. Independent multi-model agreement and run certainty cannot be established.";
+export const MARKED_MEMO_IDENTITY_UNVERIFIED = "Which models answered this question could not be established. Independent multi-model agreement and run certainty cannot be established.";
+
 function generateMarkedAdaptiveResearchMemo(input: MemoInput): string {
   const lines: string[] = [];
   const q = (typeof input.question === "string" ? input.question : "").trim() || "—";
@@ -775,10 +782,21 @@ function generateMarkedAdaptiveResearchMemo(input: MemoInput): string {
   lines.push("RESEARCH QUERY");
   lines.push(`"${q}"`);
   lines.push("");
-  lines.push(`RUN CERTAINTY: ${input.consensusScore}/100 (${input.confidenceLabel} confidence)`);
-  lines.push(`EVIDENCE QUALITY: ${input.evidenceQuality}`);
+  // Order 36 A (F35-M1): fewer than two verified independent successful responses → no run certainty figure.
+  const verifiedCount =
+    typeof input.independentModelCount === "number" && Number.isFinite(input.independentModelCount) ? Math.max(0, Math.floor(input.independentModelCount)) : null;
+  const insufficient =
+    verifiedCount === 0 ? MARKED_MEMO_NO_RESPONSES : verifiedCount === 1 ? MARKED_MEMO_ONE_RESPONSE : verifiedCount === null && input.researchIndependenceUnverified === true ? MARKED_MEMO_IDENTITY_UNVERIFIED : null;
+  if (insufficient) {
+    lines.push(MARKED_MEMO_RUN_CERTAINTY_NOT_ESTABLISHED);
+    lines.push(`EVIDENCE QUALITY: ${MARKED_MEMO_EVIDENCE_NOT_ASSESSED}`);
+  } else {
+    lines.push(`RUN CERTAINTY: ${input.consensusScore}/100 (${input.confidenceLabel} confidence)`);
+    lines.push(`EVIDENCE QUALITY: ${input.evidenceQuality}`);
+  }
   lines.push("");
   lines.push("SUMMARY");
+  if (insufficient) lines.push(insufficient);
   // m-4: the record says how many slots were dispatched, not that each answered (a slot may have failed or been retried).
   lines.push(`${n} panel slot${n === 1 ? " was" : "s were"} dispatched for this question. Positions below are stated from the recorded panel rows; value comparisons are computed, not model positions.`);
   lines.push("");

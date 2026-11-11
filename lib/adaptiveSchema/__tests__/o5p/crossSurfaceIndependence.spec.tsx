@@ -126,7 +126,9 @@ const STRICT: { name: string; re: RegExp; qualifiedBy?: RegExp }[] = [
   { name: "legacy banner", re: /Verified — panel converges|Caution — partial convergence|Could not verify — panel split/g },
   { name: "raised by N models", re: /\braised by \d+ models\b/g },
   { name: "N of M agree", re: /\b\d+ of \d+ agree\b/g },
-  { name: "multi-model", re: /multi-model/g },
+  // Order 36 A (F35-M1, owner-mandated wording): only the exact negation "… multi-model agreement and run certainty cannot
+  // be established" qualifies; every other "multi-model" stays forbidden.
+  { name: "multi-model", re: /multi-model/g, qualifiedBy: /^ agreement and run certainty cannot be established\./ },
   { name: "uniform agreement", re: /Unusually uniform agreement/g },
   { name: "top consensus next step", re: /spot-check the top consensus claim/g },
   { name: "consensus pulse", re: /Consensus claims \d/g },

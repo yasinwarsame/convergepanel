@@ -2507,6 +2507,27 @@
  },
  {
   "file": "lib/verification/generateMemo.ts",
+  "literal": "\"No successful model responses. Consensus and run certainty cannot be established.\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "marked adaptive research memo (generateMarkedAdaptiveResearchMemo), when MemoInput.independentModelCount is 0 or 1 or execution identity is unverified (Order 36 A, F35-M1 owner ruling): states that agreement between models and run certainty cannot be established; no run certainty figure is shown"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"Only one model responded. Independent multi-model agreement and run certainty cannot be established.\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "marked adaptive research memo (generateMarkedAdaptiveResearchMemo), when MemoInput.independentModelCount is 0 or 1 or execution identity is unverified (Order 36 A, F35-M1 owner ruling): states that agreement between models and run certainty cannot be established; no run certainty figure is shown"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"Which models answered this question could not be established. Independent multi-model agreement and run certainty cannot be established.\"",
+  "count": 1,
+  "category": "historical-path",
+  "rule": "marked adaptive research memo (generateMarkedAdaptiveResearchMemo), when MemoInput.independentModelCount is 0 or 1 or execution identity is unverified (Order 36 A, F35-M1 owner ruling): states that agreement between models and run certainty cannot be established; no run certainty figure is shown"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
   "literal": "\"No model responses are available for this question, so consensus cannot be assessed and nothing in this memo is presented as agreement between models.\"",
   "count": 1,
   "category": "historical-path",

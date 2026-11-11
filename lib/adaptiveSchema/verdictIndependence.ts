@@ -31,6 +31,7 @@
 
 import { executionIdentityVerified, identityRowFromFacts, identityRowRecordedFailure, placeholderClass } from "@/lib/panel/executionIdentity";
 import { groupSlotsByExecutingVoice } from "@/lib/panel/executingVoiceLabel";
+import { canonicalProvider } from "@/lib/panel/providerRegistry";
 import type { RunModelProvenanceFacts } from "@/lib/panel/runModelIdentity";
 import { NO_CONSENSUS_IDENTIFIED, quoteClaim } from "./agreementNarrative";
 import { VERDICT_NEXT_STEPS } from "./config";
@@ -158,7 +159,10 @@ export function answeringIndependentModelCount(provenance: readonly RunModelProv
   if (responding.length === 0) return 0;
   const rows = responding.map((s) => factsFor(provenance, s));
   if (rows.some((f) => !f) || !executionIdentityVerified(rows.map((f) => identityRowFromFacts(f)))) return null;
-  return groupSlotsByExecutingVoice(responding, provenance).length;
+  // Order 36 A: slots whose verified rows record the same executing provider are one model, never two (the shared
+  // voice key groups unsubstituted slots by slot family, so the canonical providers bound the count from above).
+  const providers = new Set(rows.map((f) => canonicalProvider(f!.provider)).filter((p) => p !== null));
+  return Math.min(groupSlotsByExecutingVoice(responding, provenance).length, providers.size);
 }
 
 /** Order 31 R-1: a stored consensus / majority row (or top claim) over a run with fewer than two answering models. */

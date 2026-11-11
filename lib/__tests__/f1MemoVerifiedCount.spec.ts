@@ -155,5 +155,77 @@ describe("answeringIndependentModelCount", () => {
     const sub = (m: string): Row => ({ modelId: m, status: "substituted", provider: "deepseek", rawText: GENUINE, outputClass: "model_response", substitutedFrom: `x:${m}` });
     expect(answeringIndependentModelCount(facts([sub("claude"), sub("gemini"), failed("chatgpt")]))).toBe(1);
     expect(answeringIndependentModelCount(facts([sub("claude"), sub("gemini"), ok("chatgpt")]))).toBe(2);
+    // Order 36 A: two unsubstituted slots recording one executing provider are one model.
+    expect(answeringIndependentModelCount(facts([ok("chatgpt"), ok("claude", { provider: "openai" })]))).toBe(1);
+    expect(answeringIndependentModelCount(facts([ok("chatgpt"), ok("claude", { provider: " OpenAI " })]))).toBe(1);
+  });
+});
+
+/**
+ * Order 36 A (F35-M1, owner ruling): the MARKED adaptive memo (disagreementPositionVersion 1) states no run certainty
+ * figure when fewer than two verified independent successful responses exist; two or more → unchanged.
+ */
+describe("F35-M1 marked adaptive research memo", () => {
+  const RUN_CERT = /RUN CERTAINTY: \d+\/100/;
+  function markedMemo(rows: Row[] | null) {
+    const r = JSON.parse(JSON.stringify(records["generic-consensus"].synthesisReport));
+    r.runCertainty = 1;
+    r.presentation.disagreementPositionVersion = 1;
+    const input = buildAdaptiveMemoInput("Q?", r, [...ROSTER] as any, "run-m", rows ? facts(rows) : null, records["generic-consensus"].alignedClaims);
+    return { input, memo: generateVerificationMemo(input) };
+  }
+
+  it("is the marked path (control)", () => {
+    const { input } = markedMemo(ROSTER.map((m) => ok(m)));
+    expect(input.adaptivePositionPresentation).toEqual({ reportKind: "adaptive_research", disagreementPositionVersion: 1 });
+  });
+
+  it("zero successful responses with stored 100/100: no run certainty figure", () => {
+    const { input, memo } = markedMemo(ROSTER.map((m) => failed(m)));
+    expect(memo).toContain("RUN CERTAINTY: not established");
+    expect(memo).toContain("No successful model responses. Consensus and run certainty cannot be established.");
+    expect(memo).not.toMatch(RUN_CERT);
+    expect(memo).not.toContain("High confidence");
+    expect(input.consensusScore).toBe(100);
+  });
+
+  it("one successful response with stored 100/100: one model, no figure", () => {
+    const { memo } = markedMemo([ok("chatgpt"), ...ROSTER.slice(1).map((m) => failed(m))]);
+    expect(memo).toContain("Only one model responded. Independent multi-model agreement and run certainty cannot be established.");
+    expect(memo).not.toMatch(RUN_CERT);
+  });
+
+  it("two genuinely independent successes: the stored run certainty is shown", () => {
+    const { input, memo } = markedMemo([ok("chatgpt"), ok("claude"), failed("grok"), failed("perplexity"), failed("gemini")]);
+    expect(memo).toContain("RUN CERTAINTY: 100/100 (");
+    expect(input).not.toHaveProperty("independentModelCount");
+    expect(input).not.toHaveProperty("researchIndependenceUnverified");
+  });
+
+  it("two successes from one executing provider are one model: no figure", () => {
+    const { memo } = markedMemo([ok("chatgpt"), ok("claude", { provider: "openai" }), failed("grok"), failed("perplexity"), failed("gemini")]);
+    expect(memo).toContain("Only one model responded.");
+    expect(memo).not.toMatch(RUN_CERT);
+  });
+
+  it("a substituted provider distinct from the other answer: two models, figure shown", () => {
+    const sub: Row = { modelId: "claude", status: "substituted", provider: "deepseek", rawText: GENUINE, outputClass: "model_response", substitutedFrom: "anthropic:claude" };
+    const { memo } = markedMemo([ok("chatgpt"), sub, failed("grok"), failed("perplexity"), failed("gemini")]);
+    expect(memo).toMatch(RUN_CERT);
+  });
+
+  it("historical unknown identity (answered rows without a provider): no figure, identity stated as unestablished", () => {
+    const { memo } = markedMemo(ROSTER.map((m) => ({ modelId: m, status: "ok", rawText: GENUINE })));
+    expect(memo).toContain("Which models answered this question could not be established.");
+    expect(memo).not.toMatch(RUN_CERT);
+  });
+
+  it("normal consistent marked report (5/5 verified), and no rows handed over: unchanged", () => {
+    for (const rows of [ROSTER.map((m) => ok(m)), null]) {
+      const { input, memo } = markedMemo(rows);
+      expect(memo).toContain("RUN CERTAINTY: 100/100 (");
+      expect(input).not.toHaveProperty("independentModelCount");
+      expect(input).not.toHaveProperty("researchIndependenceUnverified");
+    }
   });
 });

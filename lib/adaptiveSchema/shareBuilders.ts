@@ -520,7 +520,18 @@ function buildMemoInput(
     const lead = answerLeadBlocks(answer);
     const gateFindings = lead.length > 0 ? [leadText(lead), ...(answer.unresolved ?? []).map(plainUnresolvedClaim), ...(answer.unresolvedUnreadable ? [answer.unresolvedUnreadable.text] : [])] : [];
     const withheld = [view.biasFindingsWithheld > 0 ? biasWithheldNotice(view.biasFindingsWithheld) : "", view.coverageGapsWithheld > 0 ? coverageWithheldNotice(view.coverageGapsWithheld) : ""].filter(Boolean);
+    // Order 36 A (F35-M1, owner ruling): with fewer than two verified independent successful responses the marked memo
+    // states no run certainty — told the verified count (0 / 1), or that identity is unverified. Without the run's rows
+    // nothing is inferred; with two or more the memo is unchanged.
+    const markedAnswering = answeringIndependentModelCount(modelProvenance);
+    const markedEvidence =
+      markedAnswering !== null && markedAnswering < 2
+        ? { independentModelCount: markedAnswering }
+        : markedAnswering === null && Array.isArray(modelProvenance) && modelProvenance.length > 0
+          ? { researchIndependenceUnverified: true as const }
+          : {};
     return {
+      ...markedEvidence,
       type: "research",
       adaptivePositionPresentation: { reportKind: ADAPTIVE_RESEARCH_REPORT_KIND, disagreementPositionVersion: 1 },
       question,
