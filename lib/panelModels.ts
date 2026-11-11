@@ -33,25 +33,25 @@ export interface PanelModelConfig {
 export const PANEL_MODELS: PanelModelConfig[] = [
   {
     id: "chatgpt",
-    label: "GPT 5.2",
+    label: "GPT-4o mini",
     provider: "openai",
     colorClasses: "bg-emerald-50 text-emerald-700 border border-emerald-200",
   },
   {
     id: "claude",
-    label: "Claude Opus 4.5",
+    label: "Claude Haiku 4.5",
     provider: "anthropic",
     colorClasses: "bg-indigo-50 text-indigo-700 border border-indigo-200",
   },
   {
     id: "grok",
-    label: "Grok 4",
+    label: "Grok 4.1 Fast",
     provider: "xai",
     colorClasses: "bg-amber-50 text-amber-700 border border-amber-200",
   },
   {
     id: "perplexity",
-    label: "Perplexity Pro",
+    label: "Perplexity Sonar",
     provider: "perplexity",
     colorClasses: "bg-sky-50 text-sky-700 border border-sky-200",
   },

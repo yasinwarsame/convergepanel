@@ -12,15 +12,15 @@ const ROSTER = ["chatgpt", "claude", "grok", "perplexity", "gemini"] as any[];
 
 describe("findUnrecognizedModelNames", () => {
   it("finds a hallucinated version-guessed model name not matching the run's actual display names", () => {
-    const text = "Both Gemini 3 Pro and GPT 5.2 agree on this point.";
+    const text = "Both Gemini 3 Pro and GPT-4o mini agree on this point.";
     const found = findUnrecognizedModelNames(text, ROSTER);
     expect(found).toContain("Gemini 3 Pro");
-    // "GPT 5.2" IS the roster's actual display name for chatgpt — not flagged.
-    expect(found).not.toContain("GPT 5.2");
+    // "GPT-4o mini" IS the roster's actual display name for chatgpt — not flagged.
+    expect(found).not.toContain("GPT-4o mini");
   });
 
   it("returns empty when every model-like token matches the roster's real display names", () => {
-    const text = "GPT 5.2, Claude Opus 4.5, Grok 4, Perplexity Pro, and Gemini 3.5 Flash-Lite all responded.";
+    const text = "GPT-4o mini, Claude Haiku 4.5, Grok 4.1 Fast, Perplexity Sonar, and Gemini 3.5 Flash-Lite all responded.";
     expect(findUnrecognizedModelNames(text, ROSTER)).toEqual([]);
   });
 
@@ -71,7 +71,7 @@ describe("containsUnrecognizedModelName", () => {
   });
 
   it("is false when text only uses real roster display names", () => {
-    expect(containsUnrecognizedModelName("Claude Opus 4.5 says so.", ROSTER)).toBe(false);
+    expect(containsUnrecognizedModelName("Claude Haiku 4.5 says so.", ROSTER)).toBe(false);
   });
 });
 
@@ -82,8 +82,12 @@ describe("stripUnrecognizedModelNames", () => {
     expect(cleaned).toContain("the panel");
   });
 
+  it("keeps the whole real Grok label and still strips a guessed Grok version (Order 37 truthful labels)", () => {
+    expect(stripUnrecognizedModelNames("Grok 4.1 Fast and Grok 5 disagree.", ROSTER)).toBe("Grok 4.1 Fast and the panel disagree.");
+  });
+
   it("leaves text with only real display names untouched", () => {
-    const text = "Claude Opus 4.5 strongly agrees.";
+    const text = "Claude Haiku 4.5 strongly agrees.";
     expect(stripUnrecognizedModelNames(text, ROSTER)).toBe(text);
   });
 });

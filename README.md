@@ -6,7 +6,7 @@ ConvergePanel is a production-ready MVP web application that sends one user ques
 
 ## Features
 
-- **Multi-Model Support**: Query GPT 5.2, Claude Opus 4.5, Grok 4, Perplexity Pro, and Gemini 3 Pro simultaneously
+- **Multi-Model Support**: Query GPT-4o mini, Claude Haiku 4.5, Grok 4.1 Fast, Perplexity Sonar, and Gemini 3.5 Flash-Lite simultaneously
 - **Parallel Execution**: All models respond in parallel for faster results
 - **Consensus Analysis**: Automatically identifies areas of agreement and disagreement
 - **Numeric Conflict Detection**: Flags when models provide conflicting numbers or percentages
@@ -159,11 +159,11 @@ ConvergePanel/
 │   ├── consensus.ts              # Consensus engine and synthesis
 │   └── connectors/
 │       ├── base.ts               # Base connector class
-│       ├── chatgpt.ts            # OpenAI GPT 5.2 connector
-│       ├── claude.ts             # Anthropic Claude Opus 4.5 connector
-│       ├── grok.ts               # X.AI Grok 4 connector
-│       ├── perplexity.ts         # Perplexity Pro connector
-│       ├── gemini.ts             # Google Gemini 3 Pro connector
+│       ├── chatgpt.ts            # OpenAI GPT-4o mini connector
+│       ├── claude.ts             # Anthropic Claude Haiku 4.5 connector
+│       ├── grok.ts               # X.AI Grok 4.1 Fast connector
+│       ├── perplexity.ts         # Perplexity Sonar connector
+│       ├── gemini.ts             # Google Gemini 3.5 Flash-Lite connector
 │       └── index.ts              # Connector exports
 ├── middleware.ts                 # Route protection middleware
 ├── package.json
@@ -223,7 +223,7 @@ import { BaseConnector } from "./base";
 
 export class GeminiConnector extends BaseConnector {
   id = "gemini" as const;
-  displayName = "Gemini 3 Pro";
+  displayName = "Gemini 3.5 Flash-Lite";
 
   async sendPrompt(question: string, systemWrapper: string) {
     const startTime = Date.now();
@@ -480,11 +480,11 @@ There are no built-in defaults: every `NEXT_PUBLIC_FIREBASE_*` value must be set
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `OPENAI_API_KEY` | OpenAI API key for GPT 5.2 | No (uses mock if missing) |
-| `ANTHROPIC_API_KEY` | Anthropic API key for Claude Opus 4.5 | No (uses mock if missing) |
-| `XAI_API_KEY` | X.AI API key for Grok 4 | No (uses mock if missing) |
-| `PERPLEXITY_API_KEY` | Perplexity API key for Perplexity Pro | No (uses mock if missing) |
-| `GEMINI_API_KEY` | Google API key for Gemini 3 Pro | No (uses mock if missing) |
+| `OPENAI_API_KEY` | OpenAI API key for GPT-4o mini | No (uses mock if missing) |
+| `ANTHROPIC_API_KEY` | Anthropic API key for Claude Haiku 4.5 | No (uses mock if missing) |
+| `XAI_API_KEY` | X.AI API key for Grok 4.1 Fast | No (uses mock if missing) |
+| `PERPLEXITY_API_KEY` | Perplexity API key for Perplexity Sonar | No (uses mock if missing) |
+| `GEMINI_API_KEY` | Google API key for Gemini 3.5 Flash-Lite | No (uses mock if missing) |
 
 **Note**: 
 - API keys can be set via environment variables OR via the Admin UI

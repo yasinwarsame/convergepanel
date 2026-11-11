@@ -75,8 +75,8 @@ export const MODEL_LIMITS: Record<ModelId, ModelLimits> = {
     softMaxTokens: 1800,
   },
   perplexity: {
-    // Increased maxTokens to 6000 for Perplexity Pro to support long research responses
-    // Perplexity Pro can generate comprehensive responses with multiple sections:
+    // Increased maxTokens to 6000 for Perplexity Sonar to support long research responses
+    // Perplexity Sonar can generate comprehensive responses with multiple sections:
     // SUMMARY, KEY CLAIMS, EVIDENCE, UNCERTAINTIES, BIASES, METRICS, METHODOLOGY, ALTERNATIVE PERSPECTIVES
     // 6000 tokens (~4500-5000 words) ensures all sections are included without truncation
     maxTokens: 6000,
