@@ -71,7 +71,7 @@ function loadRealAdmin() {
       requests.push({ via: "firebase-admin", method: config.method, url: config.url, authorization: header(config.headers, "authorization") });
       const ok = (data: unknown) => ({ status: 200, headers: {}, data, text: JSON.stringify(data), isJson: () => true });
       if (config.url === "https://www.googleapis.com/oauth2/v4/token") return ok({ access_token: USER_TOKEN, expires_in: 3600, token_type: "Bearer" });
-      if (String(config.url).startsWith(`https://identitytoolkit.googleapis.com/v1/projects/${PROJECT}/accounts:lookup`)) return ok({ kind: "identitytoolkit#GetAccountInfoResponse" });
+      if ((() => { const u = new URL(String(config.url)); return u.hostname === "identitytoolkit.googleapis.com" && u.pathname === `/v1/projects/${PROJECT}/accounts:lookup`; })()) return ok({ kind: "identitytoolkit#GetAccountInfoResponse" });
       throw new Error(`unexpected firebase-admin request ${config.method} ${config.url}`);
     });
 
@@ -117,7 +117,7 @@ describe("development ADC path — the Admin credential runs as the validated se
   it("a real Firebase Auth read carries the impersonated SA token, never the developer's user token", async () => {
     const { mod, requests } = loadRealAdmin();
     await expect(mod.adminAuth.getUser("nonexistent-probe-uid")).rejects.toMatchObject({ code: "auth/user-not-found" });
-    const lookup = requests.filter((r) => r.url.includes("identitytoolkit.googleapis.com"));
+    const lookup = requests.filter((r) => new URL(r.url).hostname === "identitytoolkit.googleapis.com");
     expect(lookup).toHaveLength(1);
     expect(lookup[0].authorization).toBe(`Bearer ${SA_TOKEN}`);
   });
