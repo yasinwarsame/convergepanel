@@ -9,7 +9,7 @@ import { App, applicationDefault, cert, getApps, initializeApp } from "firebase-
 import { Auth, getAuth } from "firebase-admin/auth";
 import { Firestore, getFirestore } from "firebase-admin/firestore";
 import { resolvePreviewWorkloadIdentity } from "./previewWorkloadIdentity";
-import { resolveDevelopmentAdc } from "./developmentAdc";
+import { adcWellKnownFilePath, inspectAdcFile, resolveDevelopmentAdc } from "./developmentAdc";
 import { evaluateServerFirebaseIsolation, serviceAccountProject, PRODUCTION_FIREBASE_PROJECT_ID, PRODUCTION_FIREBASE_PROJECT_NUMBER, type FirebaseIsolationVerdict } from "./projectIsolation";
 import { readOperatorGrant } from "./operatorGrant";
 
@@ -131,12 +131,27 @@ function initFirebaseAdmin() {
   if (dev.kind === "refused") throw new Error(`Firebase Admin initialization refused: development_adc_${dev.reason}`);
   if (dev.kind === "ok") {
     const { projectId } = dev;
-    enforceFirebaseIsolation(evaluateServerFirebaseIsolation({ projectId, deploymentEnv: process.env.VERCEL_ENV }), projectId, undefined);
-    console.log("[firebase-admin] projectId:", projectId, "(development application-default credential)");
+    // Review M-1: only an impersonated developer service account; its address goes through the #294 guard.
+    const { readFileSync } = require("fs") as typeof import("fs");
+    const { homedir } = require("os") as typeof import("os");
+    let adcText: string | null = null;
+    try {
+      adcText = readFileSync(adcWellKnownFilePath(process.env, homedir()), "utf8");
+    } catch {
+      adcText = null;
+    }
+    const adc = inspectAdcFile(adcText);
+    adcText = null;
+    if (adc.kind === "refused") throw new Error(`Firebase Admin initialization refused: development_adc_${adc.reason}`);
+    const clientEmail = adc.serviceAccountEmail;
+    enforceFirebaseIsolation(evaluateServerFirebaseIsolation({ projectId, clientEmail, deploymentEnv: process.env.VERCEL_ENV }), projectId, clientEmail);
+    console.log("[firebase-admin] projectId:", projectId, "(development application-default credential, impersonated service account)");
     const existing = getApps().find((a) => a.name === "[DEFAULT]");
+    // Review N-2: an existing default app for another project is never reused.
+    if (existing && existing.options.projectId !== projectId) throw new Error("Firebase Admin initialization refused: development_adc_existing_app_project_mismatch");
     app = existing ?? initializeApp({ credential: applicationDefault(), projectId });
     try {
-      enforceFirebaseIsolation(evaluateServerFirebaseIsolation({ projectId: app.options.projectId, deploymentEnv: process.env.VERCEL_ENV }), app.options.projectId, undefined);
+      enforceFirebaseIsolation(evaluateServerFirebaseIsolation({ projectId: app.options.projectId, clientEmail, deploymentEnv: process.env.VERCEL_ENV }), app.options.projectId, clientEmail);
     } catch (refused) {
       app = undefined;
       throw refused;
