@@ -137,3 +137,31 @@ describe("development ADC path — the Admin credential runs as the validated se
     expect(requests).toHaveLength(n);
   });
 });
+
+describe("createDevelopmentImpersonatedClient fails closed (no unimpersonated fallback)", () => {
+  const { createDevelopmentImpersonatedClient, developmentClientOf, developmentImpersonatedCredential } = jest.requireActual("../developmentAdcClient") as typeof import("../developmentAdcClient");
+  const text = JSON.stringify(FAKE_ADC);
+
+  it("targets exactly the validated SA with the cloud-platform scope", () => {
+    const client = createDevelopmentImpersonatedClient(text, DEV_SA);
+    expect(client.getTargetPrincipal()).toBe(DEV_SA);
+    expect((client as any).targetScopes).toContain("https://www.googleapis.com/auth/cloud-platform");
+    expect(developmentClientOf(developmentImpersonatedCredential(client), DEV_SA)).toBe(client);
+    expect(developmentClientOf(developmentImpersonatedCredential(client), "cp-dev-other@convergepanel-preview.iam.gserviceaccount.com")).toBeNull();
+  });
+  it("refuses a service account that is not the one the file was validated for", () => {
+    expect(() => createDevelopmentImpersonatedClient(text, "cp-dev-other@convergepanel-preview.iam.gserviceaccount.com")).toThrow(/does not match/);
+  });
+  it.each(["client_id", "client_secret", "refresh_token"])("refuses a source credential without %s, without echoing values", (field) => {
+    const source = { ...FAKE_ADC.source_credentials } as Record<string, unknown>;
+    delete source[field];
+    let message = "";
+    try {
+      createDevelopmentImpersonatedClient(JSON.stringify({ ...FAKE_ADC, source_credentials: source }), DEV_SA);
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).toMatch(/incomplete authorized_user/);
+    expect(message).not.toMatch(/fake-/);
+  });
+});
