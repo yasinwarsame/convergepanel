@@ -55,7 +55,7 @@ describe("truthful model labels", () => {
   it("no customer-facing source still advertises the retired labels", () => {
     let out = "";
     try {
-      out = execFileSync("git", ["grep", "-n", "-E", "GPT[ -]5\\.2|Opus 4\\.5|Grok 4([^.0-9]|$)|Perplexity Pro", "--", "app", "components", "lib", ":!**/__tests__/**", ":!*.spec.*"], { cwd: root, encoding: "utf8" });
+      out = execFileSync("git", ["grep", "-n", "-E", "GPT[ -]?5\\.2|Opus 4\\.5|Grok[ -]4([^.0-9-]|$)|Perplexity Pro", "--", "app", "components", "lib", "public", "README.md", ":!**/__tests__/**", ":!*.spec.*"], { cwd: root, encoding: "utf8" });
     } catch (e: any) {
       if (e.status !== 1) throw e; // 1 = no match
     }

@@ -3388,7 +3388,7 @@ export const PAGES: PSEOPage[] = [
     audience: "Researchers and knowledge workers",
     audienceDetail: "Anyone choosing between AI models for research work and wanting to understand their differences",
     problem:
-      "Each major AI model has been trained differently, has different relationships with web access, and has different tendencies when handling complex or contested research questions. Using only one model means inheriting its specific blind spots without realizing it.\n\nGPT-4o mini can overclaim on recent events where training data is thin. Claude Haiku 4.5 sometimes hedges on questions where a clear answer exists. Gemini 3.5 Flash-Lite can vary in depth on niche topics. Grok 4.1 Fast's real-time web access makes it valuable for recent events but prone to editorializing. Perplexity Sonar's citation-first approach is useful for source-finding but treats web consensus as truth.\n\nNone of these tendencies makes any model bad. But they make the choice of model consequential — and they make single-model research inherently incomplete.",
+      "Each major AI model has been trained differently, has different relationships with web access, and has different tendencies when handling complex or contested research questions. Using only one model means inheriting its specific blind spots without realizing it.\n\nGPT-4o mini can overclaim on recent events where training data is thin. Claude Haiku 4.5 sometimes hedges on questions where a clear answer exists. Gemini 3.5 Flash-Lite can vary in depth on niche topics. Grok 4.1 Fast reasons quickly and offers contrarian takes but is prone to editorializing. Perplexity Sonar's citation-first approach is useful for source-finding but treats web consensus as truth.\n\nNone of these tendencies makes any model bad. But they make the choice of model consequential — and they make single-model research inherently incomplete.",
     solution:
       "ConvergePanel runs your research question through all five models and synthesizes the results: where they agree, where they split, what each emphasizes, and what the disagreements reveal. You get the comparison without opening five separate tabs.",
     workflow: [
@@ -3419,8 +3419,8 @@ export const PAGES: PSEOPage[] = [
       rows: [
         ["GPT-4o mini", "Breadth, structured output", "Overclaim on recent events", "Confident errors on niche topics"],
         ["Claude Haiku 4.5", "Nuanced reasoning, caveats", "Hedge when a clear answer exists", "Over-caution on contested topics"],
-        ["Gemini 3.5 Flash-Lite", "Speed, recent data access", "Vary in depth on niche queries", "Inconsistency across question types"],
-        ["Grok 4.1 Fast", "Real-time web, contrarian takes", "Editorialize on contested topics", "Political bias on sensitive questions"],
+        ["Gemini 3.5 Flash-Lite", "Speed, concise summaries", "Vary in depth on niche queries", "Inconsistency across question types"],
+        ["Grok 4.1 Fast", "Fast reasoning, contrarian takes", "Editorialize on contested topics", "Political bias on sensitive questions"],
         ["Perplexity Sonar", "Live citations, source-first", "Treat web consensus as truth", "Shallow reasoning depth on complex claims"],
       ],
     },
@@ -9769,7 +9769,7 @@ export const PAGES: PSEOPage[] = [
           "Competitive positions change faster than model training cycles — a competitor's product line may look different today than at model training cutoff",
           "High consensus on an outdated competitive position is still high consensus on outdated information",
           "Check announcement dates: recent acquisitions, pivots, and product launches may not appear in model training data",
-          "Use models with web retrieval (Perplexity, Grok) to supplement models with fixed training cutoffs for time-sensitive competitive research",
+          "Use a model with web retrieval (Perplexity Sonar) to supplement models with fixed training cutoffs for time-sensitive competitive research",
           "When models disagree on something that changes rapidly, the disagreement often reflects different data vintage, not analytical disagreement",
         ],
       },
