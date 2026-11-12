@@ -439,7 +439,10 @@ describe("the saved record of what the report used", () => {
   });
 
   it("shortened original: a first answer that validated live but was shortened for storage is shown from the record, the shortened copy labelled", async () => {
-    const long = bare("ChatGPT", { uncertainties: Array.from({ length: 3 }, (_, i) => `u${i} ${"word ".repeat(1500)}`) });
+    // One long token in a field the aggregate never fuzzy-deduplicates (no word cap applies): shortened for storage, still
+    // valid live. (Three long uncertainties would also work but cost ~40 s in the pre-existing full-matrix Levenshtein of
+    // lib/adaptiveSchema/textSimilarity.ts — tracked separately.)
+    const long = bare("ChatGPT", { directConclusion: "x".repeat(MAX_CHARS_STORAGE_PER_MODEL + 100) });
     expect(long.length).toBeGreaterThan(MAX_CHARS_STORAGE_PER_MODEL);
     const { live, stored } = await execute([ok("chatgpt", long), ok("claude", bare("Claude"))]);
     expect(live.find((r) => r.modelId === "chatgpt").ok).toBe(true);
