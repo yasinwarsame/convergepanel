@@ -9,6 +9,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ListView from "@/components/adaptive/ListView";
+import { RunSlotStatusContext, UNRECOGNIZED_STATUS_TEXT } from "@/components/adaptive/RunSlotStatusContext";
 import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
 import {
   AdaptiveGateResult,
@@ -299,6 +300,24 @@ describe("ListView — failed model fixture", () => {
     expect(html).toContain("parse error · excluded");
     expect(html).toContain("Gemini returned an incompatible format and was excluded from comparison.");
     expect(html).toContain("Schema validation failed");
+  });
+
+  it.each([
+    ["OK ", "status not recognized · excluded", `Gemini ${UNRECOGNIZED_STATUS_TEXT}`],
+    ["pending", "status not recognized · excluded", `Gemini ${UNRECOGNIZED_STATUS_TEXT}`],
+    ["ok", "parse error · excluded", "Gemini returned an incompatible format and was excluded from comparison."],
+    ["timeout", "no response · excluded", "Gemini did not respond in time and was excluded from comparison."],
+  ])("Order 31 (n-E): recorded status %p → badge %p and line", (status, badge, line) => {
+    const html = renderToStaticMarkup(
+      createElement(
+        RunSlotStatusContext.Provider,
+        { value: new Map([["gemini", status]]) },
+        createElement(ListView, { schema, results: failedResults, alignedClaims: [], gate: { status: "caution", runCertainty: 0.5, loadBearingSplitCount: 0, loadBearingClaims: [] }, synthesisReport, trustSummary: failedTrustSummary })
+      )
+    );
+    expect(html).toContain(badge);
+    expect(html).toContain(line);
+    if (badge !== "parse error · excluded") expect(html).not.toContain("incompatible format");
   });
 });
 

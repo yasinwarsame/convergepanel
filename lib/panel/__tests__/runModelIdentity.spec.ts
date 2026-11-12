@@ -153,14 +153,16 @@ describe("substitution", () => {
 
 describe("row adapters", () => {
   it("result row: reads only the row; status 'substituted' is the only substitution claim", () => {
+    // C-a review F-1: the recorded status itself is kept on the facts (the shared gate reads it through identityRowFromFacts).
     expect(runModelProvenanceFromResultRow({ modelId: "claude", status: "substituted", provider: "deepseek", requestedModel: "claude-haiku-4-5-20251001", substitutedFrom: "anthropic:claude-haiku-4-5-20251001" })).toEqual({
       modelId: "claude",
+      status: "substituted",
       provider: "deepseek",
       requestedModel: "claude-haiku-4-5-20251001",
       substituted: true,
       substitutedFrom: "anthropic:claude-haiku-4-5-20251001",
     });
-    expect(runModelProvenanceFromResultRow({ modelId: "chatgpt", status: "ok", requestedModel: "gpt-4o-mini", substitutedFrom: "x:y" })).toEqual({ modelId: "chatgpt", requestedModel: "gpt-4o-mini", substituted: false });
+    expect(runModelProvenanceFromResultRow({ modelId: "chatgpt", status: "ok", requestedModel: "gpt-4o-mini", substitutedFrom: "x:y" })).toEqual({ modelId: "chatgpt", status: "ok", requestedModel: "gpt-4o-mini", substituted: false });
     expect(runModelProvenanceFromResultRow({ modelId: "chatgpt" })).toEqual({ modelId: "chatgpt" });
   });
   it("result row: a pre-6.2a saved row (no provenance keys) reads 'model not recorded'", () => {
@@ -183,6 +185,61 @@ describe("row adapters", () => {
   it("export: a slot with no frozen entry, or a pre-6.2b export, is 'model not recorded' — the export IS the record", () => {
     expect(runModelIdentityLabel(runModelProvenanceFromExport(FROZEN, "grok"))).toBe("Grok · model not recorded");
     for (const id of Object.keys(RUN_MODEL_FAMILY_NAMES)) expect(runModelIdentityLabel(runModelProvenanceFromExport(null, id))).toContain(MODEL_NOT_RECORDED);
+  });
+
+  describe("export (Order 29 A2): the frozen RECORDED outcome is the slot's status; anything else is no status", () => {
+    // The read-back carries the literal version marker 2 (Order 30 n-4: without it no recorded outcome is read).
+    const entry = (over: Record<string, unknown>) => runModelProvenanceFromExport({ provenanceVersion: 2, models: [{ modelId: "chatgpt" as never, provider: "openai", requestedModel: "m", ...over } as never] } as never, "chatgpt");
+    it("answered → ok; answered + substituted → substituted (provider and substitution facts kept)", () => {
+      expect(entry({ substituted: false, outcome: "answered", outcomeSource: "recorded" })).toEqual({ modelId: "chatgpt", provider: "openai", requestedModel: "m", status: "ok", substituted: false });
+      expect(entry({ substituted: true, substitutedFrom: "openai:m", outcome: "answered", outcomeSource: "recorded" })).toEqual({ modelId: "chatgpt", provider: "openai", requestedModel: "m", status: "substituted", substituted: true, substitutedFrom: "openai:m" });
+    });
+    it.each([
+      ["failed", "failed"],
+      ["timeout", "timeout"],
+      ["refused", "refused"],
+      ["rate_limited", "rate_limited"],
+    ])("recorded failure outcome %s → status %s (a known fact, no vote, no provider needed)", (outcome, status) => {
+      expect(entry({ substituted: false, outcome, outcomeSource: "recorded" })).toMatchObject({ status });
+      expect(runModelProvenanceFromExport({ provenanceVersion: 2, models: [{ modelId: "gemini" as never, outcome, outcomeSource: "recorded" } as never] } as never, "gemini")).toEqual({ modelId: "gemini", status });
+    });
+    it.each([
+      ["a version-1 entry (no outcome)", { substituted: false }],
+      ["the identity-only read-back of a substituted slot", { substituted: true, substitutedFrom: "openai:m" }],
+      ["outcome unknown / absent", { substituted: false, outcome: "unknown", outcomeSource: "absent" }],
+      ["a recorded word with source absent", { substituted: false, outcome: "answered", outcomeSource: "absent" }],
+      ["a recorded word with no source", { substituted: false, outcome: "answered" }],
+      ["a crafted outcome", { substituted: false, outcome: "ok", outcomeSource: "recorded" }],
+      ["a capitalised outcome", { substituted: false, outcome: "Answered", outcomeSource: "recorded" }],
+      ["a non-string outcome", { substituted: false, outcome: 1, outcomeSource: "recorded" }],
+    ])("%s → no status at all: `substituted` and the provider never stand in for it", (_label, over) => {
+      const facts = entry(over);
+      expect("status" in facts).toBe(false);
+      expect(facts.provider).toBe("openai");
+    });
+    it.each([
+      ["no marker", {}],
+      ["marker 1", { provenanceVersion: 1 }],
+      ["marker '2'", { provenanceVersion: "2" }],
+      ["marker 3", { provenanceVersion: 3 }],
+    ])("Order 30 n-4: a read-back with %s yields no status even for a literal recorded outcome", (_label, marker) => {
+      for (const outcome of ["answered", "failed", "timeout", "refused", "rate_limited"]) {
+        const facts = runModelProvenanceFromExport({ ...marker, models: [{ modelId: "chatgpt", provider: "openai", substituted: false, outcome, outcomeSource: "recorded" }] } as never, "chatgpt");
+        expect("status" in facts).toBe(false);
+        expect(facts.provider).toBe("openai");
+      }
+    });
+    it("the D-5 facts pass through only as the literal true", () => {
+      expect(entry({ substituted: false, outcome: "answered", outcomeSource: "recorded", invalidProviderOutput: true })).toMatchObject({ status: "ok", invalidProviderOutput: true });
+      expect(entry({ substituted: false, outcome: "answered", outcomeSource: "recorded", validityUnknown: true })).toMatchObject({ status: "ok", validityUnknown: true });
+      const crafted = entry({ substituted: false, outcome: "answered", outcomeSource: "recorded", invalidProviderOutput: "true", validityUnknown: 1 });
+      expect("invalidProviderOutput" in crafted || "validityUnknown" in crafted).toBe(false);
+    });
+    it("the label never changes with the outcome", () => {
+      for (const over of [{ outcome: "answered", outcomeSource: "recorded" }, { outcome: "timeout", outcomeSource: "recorded" }, {}]) {
+        expect(runModelIdentityLabel(entry({ substituted: false, ...over }))).toBe("ChatGPT · requested: m");
+      }
+    });
   });
 });
 

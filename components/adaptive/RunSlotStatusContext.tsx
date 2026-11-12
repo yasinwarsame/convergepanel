@@ -14,6 +14,7 @@
  */
 
 import { createContext, useContext } from "react";
+import { isRecordedFailureStatus, recordedSlotOutcome } from "@/lib/panel/persistedStatusOutcome";
 
 export const RunSlotStatusContext = createContext<ReadonlyMap<string, string> | null>(null);
 
@@ -21,12 +22,30 @@ export function useRunSlotStatus(): ReadonlyMap<string, string> | null {
   return useContext(RunSlotStatusContext);
 }
 
-/** A slot the run records as not having responded (any status other than ok/substituted). Unknown → false. */
+/**
+ * A slot the run RECORDS as not having responded: its status is an exact recorded failure literal of the ONE shared
+ * status map (lib/panel/persistedStatusOutcome.ts — failed / error / timeout / refused / rate_limited; Order 30 round 2,
+ * review m-E). An answer (ok / substituted), a missing value, or any crafted / unrecognized status ("OK ", "Ok",
+ * "pending", "toString", …) is unknown → null, and the consumer keeps its original wording.
+ */
 export function slotDidNotRespond(statuses: ReadonlyMap<string, string> | null, modelId: string): string | null {
   const status = statuses?.get(modelId);
-  if (typeof status !== "string" || status.length === 0) return null;
-  return status === "ok" || status === "substituted" ? null : status;
+  return isRecordedFailureStatus(status) ? (status as string) : null;
 }
+
+/**
+ * Order 31 (review n-E): a slot whose recorded call status is present but is not an exact literal of the shared status
+ * map ("OK ", "pending", "toString", …). What happened to that call is unknown, so it is never described as a format
+ * failure ("returned an incompatible format" asserts a response). An empty or missing status (a row from before statuses
+ * were recorded) is not judged here — the consumer keeps its original wording, as without the record.
+ */
+export function slotStatusUnrecognized(statuses: ReadonlyMap<string, string> | null, modelId: string): boolean {
+  const status = statuses?.get(modelId);
+  return typeof status === "string" && status !== "" && recordedSlotOutcome(status) === null;
+}
+
+/** The fixed wording for such a slot (vocabulary manifest). */
+export const UNRECOGNIZED_STATUS_TEXT = "has a recorded call status this version does not recognize, so what happened is not stated; it was excluded from comparison.";
 
 /**
  * Fixed, system-authored wording for a recorded non-response. Never provider error text.

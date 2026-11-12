@@ -14,8 +14,11 @@ import { runModelFamilyName } from "@/lib/panel/runModelIdentity";
 import ModelChip from "@/components/ModelChip";
 import { substitutedSlotLabel } from "@/lib/adaptiveSchema/positionPresentation";
 import { usePositionPresentation } from "./PositionPresentationContext";
-import { didNotRespondText, slotDidNotRespond, useRunSlotStatus } from "@/components/adaptive/RunSlotStatusContext";
+import { useRunModelProvenance } from "./RunModelProvenanceContext";
+import { executingVoiceName } from "@/lib/panel/executingVoiceLabel";
+import { UNRECOGNIZED_STATUS_TEXT, didNotRespondText, slotDidNotRespond, slotStatusUnrecognized, useRunSlotStatus } from "@/components/adaptive/RunSlotStatusContext";
 import { SAVED_COPY_NOTICES, SAVED_COPY_RETRIED_AFTER_NAME, SAVED_COPY_RETRIED_INCLUDED } from "@/lib/adaptiveSchema/savedCopyNotice";
+import { INVALID_PROVIDER_OUTPUT_NOTICE, slotCoverageText, type RunExecutionIdentity } from "@/lib/panel/executionIdentity";
 
 /**
  * A completed run's slot, named by product family only ("ChatGPT") — never a
@@ -28,21 +31,40 @@ export function getModelLabel(modelId: ModelId | string): string {
 }
 
 /**
- * Order 5 Contract P (H-2): a slot's name where a surface shows that slot's recorded output. On a marked report whose
- * recorded provenance says the slot was substituted, the full slot label — "Claude slot (substituted; answered by
- * DeepSeek)" — so the requested model is never named as the author of the substitute's response. Otherwise (and on
- * every unmarked report) exactly `getModelLabel`. Nothing is inferred: without recorded provenance the slot keeps its
- * family name.
+ * The name of the model that wrote a slot's recorded output, for a surface stating who agreed, supported or disputed.
+ *  - Marked report (Order 5 Contract P, H-2): a substituted slot is "Claude slot (substituted; answered by DeepSeek)".
+ *  - Unmarked report: a slot the run's rows (RunModelProvenanceContext) record as substituted is named by its executing
+ *    model, "DeepSeek (substituting Claude)" (lib/panel/executingVoiceLabel.ts) — never as the requested model.
+ *  - Otherwise `getModelLabel`. Nothing is inferred: without recorded provenance the slot keeps its family name.
  */
-export function SlotName({ modelId }: { modelId: ModelId | string }) {
+export function useSlotVoiceName(): (modelId: ModelId | string) => string {
   const position = usePositionPresentation();
-  return <>{(position && substitutedSlotLabel(String(modelId), position.provenance)) || getModelLabel(modelId)}</>;
+  const runProvenance = useRunModelProvenance();
+  return (modelId) => {
+    if (position) return substitutedSlotLabel(String(modelId), position.provenance) || getModelLabel(modelId);
+    return executingVoiceName(String(modelId), runProvenance);
+  };
 }
 
-/** `ModelChip`, followed on a marked report by the recorded substitution of a substituted slot (H-2); otherwise exactly `ModelChip`. */
+/** A slot's name where a surface shows that slot's recorded output — see `useSlotVoiceName`. */
+export function SlotName({ modelId }: { modelId: ModelId | string }) {
+  const name = useSlotVoiceName();
+  return <>{name(modelId)}</>;
+}
+
+/**
+ * `ModelChip`, followed on a marked report by the recorded substitution of a substituted slot (H-2). On an unmarked
+ * report a slot the run records as substituted is a chip naming its executing model ("DeepSeek (substituting
+ * ChatGPT)"); otherwise exactly `ModelChip`.
+ */
 export function SlotChip(props: React.ComponentProps<typeof ModelChip>) {
   const position = usePositionPresentation();
+  const runProvenance = useRunModelProvenance();
   const substituted = position ? substitutedSlotLabel(String(props.modelId), position.provenance) : null;
+  if (!position) {
+    const facts = runProvenance?.find((f) => f && f.modelId === String(props.modelId));
+    return facts?.substituted === true ? <ModelChip {...props} label={executingVoiceName(String(props.modelId), runProvenance)} /> : <ModelChip {...props} />;
+  }
   if (!substituted) return <ModelChip {...props} />;
   return (
     <>
@@ -87,6 +109,7 @@ export function BulletList({ items }: { items: string[] }) {
 export function FailedResultsNote({ failed, hideHeading = false }: { failed: AdaptiveModelResult[]; hideHeading?: boolean }) {
   // D-4: a slot the run records as not having responded is described as such, never as an "incompatible format".
   const slotStatuses = useRunSlotStatus();
+  const runProvenance = useRunModelProvenance();
   if (failed.length === 0) return null;
   // Verification of 4d5429b MINOR-3: a saved-copy row describes the stored copy (its live retry may have succeeded), not
   // a model that failed. Each group is counted and headed separately, so the "couldn't be compared" count is exactly
@@ -113,12 +136,18 @@ export function FailedResultsNote({ failed, hideHeading = false }: { failed: Ada
             <div className="text-red-700">
               {slotDidNotRespond(slotStatuses, r.modelId) ? (
                 <p><SlotName modelId={r.modelId} /> {didNotRespondText(slotDidNotRespond(slotStatuses, r.modelId)!)}</p>
+              ) : runProvenance?.some((f) => f && f.modelId === r.modelId && f.invalidProviderOutput === true) ? (
+                // J02 (D-5): the stored text is a listed placeholder, not a model response — said so, never a format verdict.
+                <p data-testid="invalid-provider-output"><SlotName modelId={r.modelId} />: {INVALID_PROVIDER_OUTPUT_NOTICE}</p>
               ) : r.parseError === SAVED_COPY_RETRIED_INCLUDED ? (
                 // Owner-authorized: the persisted record establishes this slot's retry succeeded and was included.
                 <p><SlotName modelId={r.modelId} />{SAVED_COPY_RETRIED_AFTER_NAME}</p>
               ) : r.parseError && SAVED_COPY_NOTICES.has(r.parseError) ? (
                 // Ruling B: a statement about the stored copy (shortened, or unstructured first answer), never a format verdict.
                 <p><SlotName modelId={r.modelId} />: {r.parseError}</p>
+              ) : slotStatusUnrecognized(slotStatuses, r.modelId) ? (
+                // Order 31 (n-E): an unrecognized recorded status is unknown, never a format verdict.
+                <p><SlotName modelId={r.modelId} /> {UNRECOGNIZED_STATUS_TEXT}</p>
               ) : (
                 <p><SlotName modelId={r.modelId} /> returned an incompatible format and was excluded from comparison.</p>
               )}
@@ -252,6 +281,19 @@ const MODEL_COVERAGE_VERB: Record<ModelCoverageMode, string> = {
 
 export function formatModelCoverage({ covered, total, mode }: { covered: number; total: number; mode: ModelCoverageMode }): string {
   return `${covered} of ${total} models ${MODEL_COVERAGE_VERB[mode]}`;
+}
+
+/**
+ * B01 (C-a): the coverage count of a NON-Decision-Support milestone-2 view. A verified independent run (or a surface
+ * not handed the run's rows: `identity` null) reads exactly as `formatModelCoverage`; otherwise the count is stated as
+ * panel slots with the run's independent executing models, or "model independence unverified" (corrected D-4 gate).
+ * Decision Support keeps `formatModelCoverage` (frozen; owner ruling O17 (a)).
+ */
+export function formatSlotCoverage(
+  args: { covered: number; total: number; mode: ModelCoverageMode },
+  identity: RunExecutionIdentity | null | undefined
+): string {
+  return identity && identity.qualified ? slotCoverageText(args.covered, args.total, args.mode, identity) : formatModelCoverage(args);
 }
 
 /**

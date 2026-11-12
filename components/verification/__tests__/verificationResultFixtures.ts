@@ -16,8 +16,9 @@ export function claimFixture(over: Partial<ClaimVerificationClientPayload> = {})
     evidenceQuality: "strong",
     supportRatio: 0.8,
     modelEvidence: [
-      { modelId: "chatgpt", status: "ok", verdict: "accurate", confidence: "high", summary: "Completed March 1889.", correctParts: ["1889 completion"], incorrectParts: [], unverifiableParts: [] },
-      { modelId: "claude", status: "ok", verdict: "partially_accurate", confidence: "medium", summary: "Opened to the public in May 1889.", correctParts: ["year"], incorrectParts: ["exact month"], unverifiableParts: ["attendance"] },
+      // C-b (CB-04/CB-06): each row's recorded provider, as the server mapper passes it through for a verified record.
+      { modelId: "chatgpt", status: "ok", verdict: "accurate", confidence: "high", summary: "Completed March 1889.", correctParts: ["1889 completion"], incorrectParts: [], unverifiableParts: [], provider: "openai" },
+      { modelId: "claude", status: "ok", verdict: "partially_accurate", confidence: "medium", summary: "Opened to the public in May 1889.", correctParts: ["year"], incorrectParts: ["exact month"], unverifiableParts: ["attendance"], provider: "anthropic" },
     ],
     aggregateSummary: { totalModels: 2, modelsAgreeAccurate: 1, modelsAgreeInaccurate: 0, modelsPartial: 1, modelsUnverifiable: 0 },
     whereModelsAgree: ["Completion year is 1889"],
@@ -40,6 +41,8 @@ export function claimFixture(over: Partial<ClaimVerificationClientPayload> = {})
     accurateAmongUsable: 1,
     usableModelCount: 2,
     governanceStatus: "needs_review",
+    // Two independent executing models answered (chatgpt, claude): what the server now sends with this record.
+    modelIndependence: "independent",
     ...over,
   };
 }

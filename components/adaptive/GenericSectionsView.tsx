@@ -21,6 +21,8 @@ import { Card, SectionLabel, BulletList, FailedResultsNote, splitResults, SlotNa
 import ClaimMatrix from "./ClaimMatrix";
 import { mergeAndRankTextItems, TextItemSource } from "@/lib/adaptiveSchema/textSimilarity";
 import { TEXT_DEDUP_THRESHOLDS, UNCERTAINTIES_MAX_ITEMS, FOLLOW_UPS_MAX_ITEMS } from "@/lib/adaptiveSchema/config";
+import { raisedByText } from "@/lib/adaptiveSchema/verdictIndependence";
+import { useJudgingProvenance } from "./useRunIndependence";
 
 function collectTextItems(ok: AdaptiveRendererProps["results"], field: "uncertainties" | "followUps"): TextItemSource[] {
   return ok.flatMap((r) => ((r.data?.[field] as string[] | undefined) || []).map((text) => ({ modelId: r.modelId, text })));
@@ -30,6 +32,11 @@ export default function GenericSectionsView({ results, alignedClaims }: Adaptive
   const { ok, failed } = splitResults(results);
   const modelIds = results.map((r) => r.modelId) as ModelId[];
   const claims = alignedClaims || [];
+  // c16 (MINOR-1): "(raised by N models)" counts slots; when those slots are not independent executing models (or their
+  // execution is not recorded) the count is stated by panel slot with its executing models.
+  const provenance = useJudgingProvenance();
+  const raised = (item: { text: string; modelCount: number; modelIds: readonly string[] }) =>
+    item.modelCount > 1 ? `${item.text} ${raisedByText(item.modelIds, provenance) ?? `(raised by ${item.modelCount} models)`}` : item.text;
 
   const uncertainties = mergeAndRankTextItems(collectTextItems(ok, "uncertainties"), {
     ...TEXT_DEDUP_THRESHOLDS,
@@ -66,14 +73,14 @@ export default function GenericSectionsView({ results, alignedClaims }: Adaptive
       {uncertainties.length > 0 && (
         <Card>
           <SectionLabel>Uncertainties</SectionLabel>
-          <BulletList items={uncertainties.map((u) => (u.modelCount > 1 ? `${u.text} (raised by ${u.modelCount} models)` : u.text))} />
+          <BulletList items={uncertainties.map(raised)} />
         </Card>
       )}
 
       {followUps.length > 0 && (
         <Card>
           <SectionLabel>Suggested follow-ups</SectionLabel>
-          <BulletList items={followUps.map((f) => (f.modelCount > 1 ? `${f.text} (raised by ${f.modelCount} models)` : f.text))} />
+          <BulletList items={followUps.map(raised)} />
         </Card>
       )}
     </div>

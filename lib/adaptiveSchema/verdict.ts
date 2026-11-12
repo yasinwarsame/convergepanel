@@ -117,14 +117,21 @@ export function selectUnifiedAnswer(rows: AlignedClaim[], gate: AdaptiveGateResu
   return { note: null, rows: candidates };
 }
 
-/** The models backing a Unified Answer claim (agrees/partial cells), by family name. */
-export function unifiedAnswerSupporters(row: AlignedClaim): string[] {
-  return row.cells.filter((c) => c && (c.stance === "agrees" || c.stance === "partial")).map((c) => modelLabel(c!.modelId));
+/**
+ * Names a slot in generated text. Default: the family name. The report builder passes the run's executing-model
+ * namer (lib/panel/executingVoiceLabel.ts) so a DeepSeek-substituted slot reads "DeepSeek (substituting ChatGPT)",
+ * never as the requested model.
+ */
+export type SlotNamer = (modelId: ModelId) => string;
+
+/** The models backing a Unified Answer claim (agrees/partial cells), by family name (or `name`). */
+export function unifiedAnswerSupporters(row: AlignedClaim, name: SlotNamer = modelLabel): string[] {
+  return row.cells.filter((c) => c && (c.stance === "agrees" || c.stance === "partial")).map((c) => name(c!.modelId));
 }
 
-/** The models disputing a claim (disputes cells only — an unclear position is neither side), by family name. */
-export function claimDisputers(row: AlignedClaim): string[] {
-  return row.cells.filter((c) => c && c.stance === "disputes").map((c) => modelLabel(c!.modelId));
+/** The models disputing a claim (disputes cells only — an unclear position is neither side), by family name (or `name`). */
+export function claimDisputers(row: AlignedClaim, name: SlotNamer = modelLabel): string[] {
+  return row.cells.filter((c) => c && c.stance === "disputes").map((c) => name(c!.modelId));
 }
 
 /**
@@ -146,7 +153,9 @@ export function buildAdaptiveUnifiedAnswer(
   rows: AlignedClaim[],
   gate: AdaptiveGateResult,
   /** Every dispatched model (the D3 denominator) — the computed status of a disclosed load-bearing split. */
-  dispatchedPanelSize: number
+  dispatchedPanelSize: number,
+  /** How a supporting slot is named (default: family name) — see SlotNamer. */
+  name: SlotNamer = modelLabel
 ): string {
   const selection = selectUnifiedAnswer(rows, gate);
   if (gate.status === "fail") {
@@ -158,7 +167,7 @@ export function buildAdaptiveUnifiedAnswer(
       ? selection.note
       : selection.rows
           .map((row) => {
-            const supportingModels = unifiedAnswerSupporters(row);
+            const supportingModels = unifiedAnswerSupporters(row, name);
             const names = supportingModels.length > 0 ? supportingModels.join(", ") : "the panel";
             const contested = describeContested(row);
             return contested ? `${quoteClaim(row.claimText)} (${names}; ${contested}).` : `${quoteClaim(row.claimText)} (${names}).`;

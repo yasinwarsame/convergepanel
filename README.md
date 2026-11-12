@@ -101,7 +101,7 @@ PERPLEXITY_API_KEY=your_perplexity_api_key_here
    - Publish the rules
 
 **Note**: 
-- You don't need all API keys. Models without keys will return mock responses.
+- You don't need all API keys. ChatGPT or Claude without a key returns an explicit `provider_not_configured` error (never a mock or fabricated response), is never replaced by the DeepSeek fallback, and is excluded from consensus/agreement and from the responded-model counts (it still counts as a selected model). Gemini, Grok and Perplexity return their own missing-key errors; a missing Gemini key can still be answered by the labelled DeepSeek fallback when `DEEPSEEK_API_KEY` is set. A DeepSeek-substituted slot is always shown as "DeepSeek (substituting <model>)", never as the requested model, and several slots answered by DeepSeek count as one independent model: agreement, consensus and synthesis need at least two independent executing models (models dispatched ≥ successful responses ≥ independent executing models).
 - API keys can be managed via the Admin UI (Firestore) or via environment variables.
 - Firestore-stored keys take precedence over environment variables.
 
@@ -158,7 +158,6 @@ ConvergePanel/
 │   ├── types.ts                  # TypeScript type definitions
 │   ├── consensus.ts              # Consensus engine and synthesis
 │   └── connectors/
-│       ├── base.ts               # Base connector class
 │       ├── chatgpt.ts            # OpenAI GPT-4o mini connector
 │       ├── claude.ts             # Anthropic Claude Haiku 4.5 connector
 │       ├── grok.ts               # X.AI Grok 4.3 connector
@@ -219,37 +218,32 @@ To add a new model connector:
 1. Create a new connector file in `lib/connectors/` (e.g., `gemini.ts`):
 
 ```typescript
-import { BaseConnector } from "./base";
+import type { ModelResult } from "@/lib/types";
+import type { ConnectorCallOptions } from "./types";
 
-export class GeminiConnector extends BaseConnector {
-  id = "gemini" as const;
-  displayName = "Gemini 3.5 Flash-Lite";
-
-  async sendPrompt(question: string, systemWrapper: string) {
-    const startTime = Date.now();
-    const apiKey = this.getApiKey();
-
-    if (!apiKey) {
-      return this.getMockResponse();
-    }
-
-    try {
-      // Implement your API call here
-      // ...
-      
-      return {
-        status: "ok" as const,
-        rawText: responseText,
-        latencyMs: Date.now() - startTime,
-      };
-    } catch (error) {
-      // Handle errors
-      return {
-        status: "error" as const,
-        rawText: null,
-        latencyMs: Date.now() - startTime,
-      };
-    }
+// A connector is a plain function registered in CONNECTOR_MAP (lib/connectors/index.ts).
+// It must never throw, and it must never return status "ok" without a provider answer:
+// a missing key, a rejected key, an empty response or an exception is a non-ok result.
+export async function callGemini(
+  question: string,
+  context?: string | null,
+  apiKey?: string,
+  opts?: ConnectorCallOptions
+): Promise<ModelResult> {
+  const startTime = Date.now();
+  if (!apiKey) {
+    return { modelId: "gemini", status: "error", rawText: null, latencyMs: 0, errorMessage: "Gemini API key missing." };
+  }
+  try {
+    const responseText = ""; // Implement your API call here
+    return {
+      modelId: "gemini",
+      status: responseText ? "ok" : "error",
+      rawText: responseText || null,
+      latencyMs: Date.now() - startTime,
+    };
+  } catch {
+    return { modelId: "gemini", status: "error", rawText: null, latencyMs: Date.now() - startTime };
   }
 }
 ```
@@ -480,11 +474,11 @@ There are no built-in defaults: every `NEXT_PUBLIC_FIREBASE_*` value must be set
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `OPENAI_API_KEY` | OpenAI API key for GPT-4o mini | No (uses mock if missing) |
-| `ANTHROPIC_API_KEY` | Anthropic API key for Claude Haiku 4.5 | No (uses mock if missing) |
-| `XAI_API_KEY` | X.AI API key for Grok 4.3 | No (uses mock if missing) |
-| `PERPLEXITY_API_KEY` | Perplexity API key for Perplexity Sonar | No (uses mock if missing) |
-| `GEMINI_API_KEY` | Google API key for Gemini 3.5 Flash-Lite | No (uses mock if missing) |
+| `OPENAI_API_KEY` | OpenAI API key for GPT-4o mini | No (explicit `provider_not_configured` error, never a mock or a substitute) |
+| `ANTHROPIC_API_KEY` | Anthropic API key for Claude Haiku 4.5 | No (explicit `provider_not_configured` error, never a mock or a substitute) |
+| `XAI_API_KEY` | X.AI API key for Grok 4.3 | No (explicit missing-key error, never a mock; answered by the labelled DeepSeek fallback only if `PANEL_DEEPSEEK_FALLBACK_FOR` includes `xai` and `DEEPSEEK_API_KEY` is set) |
+| `PERPLEXITY_API_KEY` | Perplexity API key for Perplexity Sonar | No (explicit missing-key error, never a mock; answered by the labelled DeepSeek fallback only if `PANEL_DEEPSEEK_FALLBACK_FOR` includes `perplexity` and `DEEPSEEK_API_KEY` is set) |
+| `GEMINI_API_KEY` | Google API key for Gemini 3.5 Flash-Lite | No (explicit missing-key error, never a mock; can be answered by the labelled DeepSeek fallback when `DEEPSEEK_API_KEY` is set and `google` is in the fallback list, which it is by default) |
 
 **Note**: 
 - API keys can be set via environment variables OR via the Admin UI

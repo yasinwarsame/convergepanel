@@ -27,9 +27,19 @@ import {
   ModelId,
 } from "@/lib/types";
 import { getPanelModelConfig, PanelModelId } from "@/lib/panelModels";
-import { runModelFamilyName, runModelIdentityDetail, runModelIdentityLabel, runModelProvenanceFromResultRow } from "@/lib/panel/runModelIdentity";
+import { runModelIdentityDetail, runModelIdentityLabel, runModelProvenanceFromResultRow } from "@/lib/panel/runModelIdentity";
 import { RunModelProvenanceContext } from "@/components/adaptive/RunModelProvenanceContext";
 import { RunSlotStatusContext } from "@/components/adaptive/RunSlotStatusContext";
+import { RunExecutionIdentityContext } from "@/components/adaptive/RunExecutionIdentityContext";
+import {
+  INDEPENDENCE_UNVERIFIED_SUFFIX,
+  INVALID_PROVIDER_OUTPUT_NOTICE,
+  VALIDITY_UNKNOWN_NOTICE,
+  independentModelsQualifier,
+  placeholderClass,
+  runExecutionIdentity,
+  withPlaceholderFact,
+} from "@/lib/panel/executionIdentity";
 import { normalizeBullets } from "@/lib/normalizeBullets";
 import { normalizeList } from "@/lib/normalizeList";
 import {
@@ -44,6 +54,8 @@ import type { SynthesisConsensusSummaryDetail } from "@/lib/verification/consens
 import ModelChip from "@/components/ModelChip";
 import { sanitizeModelText, truncateForSynthesis, MAX_CHARS_SYNTHESIS_PER_MODEL } from "@/lib/panel/sanitizeText";
 import { classifyClusterType, isAnalysisReady } from "@/lib/synthesis/trustSummary";
+import { meetsIndependentSynthesisMinimum } from "@/lib/panel/independentVoices";
+import { executingVoiceName, groupSlotsByExecutingVoice, independentModelCountText, type ExecutingVoiceGroup } from "@/lib/panel/executingVoiceLabel";
 import { shouldAutoTriggerSynthesis } from "@/lib/synthesis/autoSynthesisTrigger";
 import type { AdaptiveAncillaryPresentation } from "@/components/adaptive/adaptiveAncillaryPresentation";
 import type { ReportLayout } from "@/lib/research/readableReport/layoutMode";
@@ -143,6 +155,13 @@ function deduplicateClaims<T extends { modelId: string; text: string; id?: strin
   
   return Array.from(seen.values());
 }
+
+/**
+ * Shown in place of the unified-answer HTML when the usable responses come from fewer than two independent executing
+ * models (slots answered by one substitute model are one model): nothing is presented as agreement between models.
+ */
+export const UNIFIED_ANSWER_WITHHELD_TEXT =
+  "Fewer than two independent models responded, so no unified answer is presented as agreement between models.";
 
 /**
  * Centralized Trust Summary color system
@@ -790,7 +809,8 @@ export default function ResultsDisplay({
   reportLayout,
 }: ResultsDisplayProps) {
   const { user, authReady } = useAuth();
-  const results = Array.isArray(resultsProp) ? resultsProp : [];
+  // Memoised so the hooks that read it (attribution of agreement clusters among them) see a stable value.
+  const results = useMemo(() => (Array.isArray(resultsProp) ? resultsProp : []), [resultsProp]);
 
   const showGovBanner =
     teamGovernance &&
@@ -869,15 +889,29 @@ export default function ResultsDisplay({
         cluster.id || `${representativeText}|${[...modelIds].sort().join(",")}`;
       if (seen.has(key)) continue;
       seen.add(key);
+      // Executing-model attribution (lib/panel/executingVoiceLabel.ts): the
+      // cluster's slots grouped by the model that actually wrote them. A
+      // DeepSeek-substituted slot is named "DeepSeek (substituting ChatGPT)",
+      // and slots answered by one substitute are ONE voice. `voiceModelIds`
+      // (one slot per voice) is what classification counts, so a cluster
+      // whose slots collapse to one executing model — e.g. an analysis saved
+      // before the independent-voice rule — is never presented as consensus.
+      // `modelIds` (every slot, as stored) is left untouched.
+      const voices: ExecutingVoiceGroup[] = groupSlotsByExecutingVoice(modelIds as string[], results);
       deduped.push({
         ...cluster,
         modelIds,
+        voices,
+        voiceModelIds: voices.map((v) => v.slotIds[0]),
         representativeText,
       });
     }
 
     return deduped;
-  }, [synthesizedReport]);
+  }, [synthesizedReport, results]);
+
+  /** Classification by independent executing models (see `voices` above), shared by counts and cards. */
+  const classifyByVoices = (cluster: any) => classifyClusterType({ ...cluster, modelIds: cluster.voiceModelIds ?? cluster.modelIds });
 
   // CANONICAL COUNTS: Group clusters by type using the same classification logic as rendering
   // These arrays are the EXACT arrays used for rendering cards in Agreement Map
@@ -887,7 +921,7 @@ export default function ResultsDisplay({
     const single: any[] = [];
 
     for (const cluster of canonicalClusters) {
-      const clusterType = classifyClusterType(cluster);
+      const clusterType = classifyByVoices(cluster);
       if (clusterType === "consensus") {
         consensus.push(cluster);
       } else if (clusterType === "contested") {
@@ -903,6 +937,12 @@ export default function ResultsDisplay({
       singleModelClusters: single,
     };
   }, [canonicalClusters]);
+
+  // C-a (corrected D-4 gate, lib/panel/executionIdentity.ts): which executing models answered, for presentation only.
+  // A verified independent run renders exactly as before; nothing here feeds the client report, gate or any decision.
+  const runIdentity = useMemo(() => runExecutionIdentity(results), [results]);
+  const identityQualified = runIdentity.qualified;
+  const identityUnverified = !runIdentity.verified;
 
   // CANONICAL COUNTS: Trust Summary counts derived from exact same arrays used for rendering
   const trustCounts = useMemo(() => ({
@@ -931,13 +971,13 @@ export default function ResultsDisplay({
         id: cluster.id || `consensus-${idx}`,
         text: cluster.representativeText || cluster.claims?.[0]?.text || "",
         confidence: cluster.confidence,
-        models: cluster.modelIds || [],
+        voices: (cluster.voices || []) as ExecutingVoiceGroup[],
         refs: cluster.refs,
       })),
       contestedItems: contestedClusters.map((cluster: any, idx: number) => ({
         id: cluster.id || `contested-${idx}`,
         text: cluster.representativeText || cluster.claims?.[0]?.text || "",
-        models: cluster.modelIds || [],
+        voices: (cluster.voices || []) as ExecutingVoiceGroup[],
         refs: cluster.refs,
       })),
       uncertainCount: singleModelClusters.length,
@@ -1112,7 +1152,9 @@ export default function ResultsDisplay({
         {process.env.NODE_ENV !== "production" && <AdaptiveDebugPanel adaptive={adaptive} />}
         {/* The run's own per-slot provenance (live or saved rows) for the
             adaptive surfaces that name a model's identity. */}
-        <RunModelProvenanceContext.Provider value={results.map(runModelProvenanceFromResultRow)}>
+        <RunModelProvenanceContext.Provider value={results.map((r) => withPlaceholderFact(runModelProvenanceFromResultRow(r), r))}>
+        {/* C-a (corrected D-4 gate): the run's execution identity for every count / model-written block it states. */}
+        <RunExecutionIdentityContext.Provider value={runIdentity}>
         {/* D-4: each slot's recorded call status, so a provider failure is never labelled an incompatible format. */}
         <RunSlotStatusContext.Provider value={new Map(results.map((r) => [r.modelId, String(r.status ?? "")]))}>
         <AdaptivePanelResponse
@@ -1148,6 +1190,7 @@ export default function ResultsDisplay({
           reportLayout={reportLayout}
         />
         </RunSlotStatusContext.Provider>
+        </RunExecutionIdentityContext.Provider>
         </RunModelProvenanceContext.Provider>
       </div>
     );
@@ -1198,8 +1241,12 @@ export default function ResultsDisplay({
     return `${latencyMs} ms`;
   };
 
-  const isMockResponse = (text?: string | null) =>
-    (text || "").toLowerCase().includes("mock response");
+  // E19 (D-5 exact oracle): only the listed stored placeholder texts are "not a model response"; text that merely
+  // mentions a mock response is of unknown validity (and makes the run's independence unverified).
+  // F-2 (Order 34): the structured `outputClass` fact travels with the row, so a stamped genuine answer is never classed
+  // by its text (the exact INVALID_MOCK literal still is); rows without the fact keep the text oracle.
+  const placeholderOf = (result: ModelResult) =>
+    placeholderClass({ modelId: result.modelId, status: result.status, rawText: getModelText(result), outputClass: result.outputClass });
 
   // Separate successful and failed results for different display handling
   const successfulResults = results.filter((r) => r.status === "ok" || r.status === "substituted");
@@ -1329,6 +1376,11 @@ export default function ResultsDisplay({
   // Check both synthesizedReport (from consensus engine) and preGeneratedSynthesisReport (from API)
   // The API-generated synthesis report should be used if synthesizedReport is not available
   const unifiedHtml = synthesizedReport?.unifiedAnswer || null;
+  // The client report counts answered slots (lib/consensus.ts), so its unified-answer HTML ("Agreed by N models") is
+  // presented only when the usable responses come from at least 2 INDEPENDENT executing models: slots answered by one
+  // substitute model are one model, and their text is never presented as agreement between models. Presentation
+  // only — which view renders, the report, the gate inputs and every decision are unchanged.
+  const unifiedAnswerPresentable = meetsIndependentSynthesisMinimum(results ?? []);
   const hasUnifiedAnswer = !!unifiedHtml && okResults.length > 0;
   const hasPreGeneratedReport = !!preGeneratedSynthesisReport && okResults.length > 0;
 
@@ -1438,7 +1490,7 @@ export default function ResultsDisplay({
               >
                 <span className="text-xl">✅</span>
                 <div className="flex flex-col leading-tight">
-                  <span className="text-xs font-semibold text-green-600 uppercase tracking-wide">Strong consensus</span>
+                  <span className="text-xs font-semibold text-green-600 uppercase tracking-wide">{identityUnverified ? `Strong consensus ${INDEPENDENCE_UNVERIFIED_SUFFIX}` : "Strong consensus"}</span>
                   <span className={`text-xl font-bold text-green-700 ${!analysisReady ? 'opacity-50' : ''}`}>
                     {displayCount(strongConsensusCount)}
                   </span>
@@ -1452,7 +1504,7 @@ export default function ResultsDisplay({
               >
                 <span className="text-xl">⚠️</span>
                 <div className="flex flex-col leading-tight">
-                  <span className="text-xs font-semibold text-orange-600 uppercase tracking-wide">Contested areas</span>
+                  <span className="text-xs font-semibold text-orange-600 uppercase tracking-wide">{identityUnverified ? `Contested areas ${INDEPENDENCE_UNVERIFIED_SUFFIX}` : "Contested areas"}</span>
                   <span className={`text-xl font-bold text-orange-700 ${!analysisReady ? 'opacity-50' : ''}`}>
                     {displayCount(contestedCount)}
                   </span>
@@ -1505,7 +1557,9 @@ export default function ResultsDisplay({
               <div className="mt-4 space-y-6">
                 {/* Summary text - uses same counts as KPI pills */}
                     <p className="text-slate-600 text-sm">
-                      This panel compared {modelCount} model{modelCount === 1 ? "" : "s"} and found{" "}
+                      {identityQualified
+                        ? `This panel compared ${modelCount} panel slot${modelCount === 1 ? "" : "s"} ${independentModelsQualifier(runIdentity)} and found `
+                        : <>This panel compared {modelCount} model{modelCount === 1 ? "" : "s"} and found{" "}</>}
                   <span className="font-semibold">{trustItems.strongConsensusItems.length}</span> strong consensus finding{trustItems.strongConsensusItems.length === 1 ? "" : "s"},{" "}
                   <span className="font-semibold">{trustItems.contestedItems.length}</span> contested area{trustItems.contestedItems.length === 1 ? "" : "s"},{" "}
                   and <span className="font-semibold">{trustItems.uncertainCount}</span> single-model or uncertain points.
@@ -1519,7 +1573,7 @@ export default function ResultsDisplay({
                       onClick={() => setExpandedStrongConsensus((prev) => !prev)}
                       className="flex w-full items-center justify-between bg-green-50 border-b border-green-200 px-4 py-3 hover:bg-green-100 transition-colors"
                     >
-                      <h4 className="text-base font-semibold text-slate-900">Strong Consensus</h4>
+                      <h4 className="text-base font-semibold text-slate-900">{identityUnverified ? `Strong Consensus ${INDEPENDENCE_UNVERIFIED_SUFFIX}` : "Strong Consensus"}</h4>
                       <svg
                         className={`h-5 w-5 text-slate-600 transition-transform ${expandedStrongConsensus ? "rotate-180" : ""}`}
                         fill="none"
@@ -1554,15 +1608,17 @@ export default function ResultsDisplay({
                               )}
                               <div className="flex items-center gap-2 mt-2 flex-wrap">
                                 <span className="text-xs font-medium text-green-700">
-                                  Agreed by {item.models.length} model{item.models.length !== 1 ? "s" : ""}:{" "}
+                                  {identityUnverified
+                                    ? `Agreed by ${item.voices.reduce((n: number, v: ExecutingVoiceGroup) => n + v.slotIds.length, 0)} responses ${INDEPENDENCE_UNVERIFIED_SUFFIX}: `
+                                    : <>Agreed by {independentModelCountText(item.voices.length)}:{" "}</>}
                                 </span>
                                 <div className="flex flex-wrap gap-1.5">
-                                  {item.models.map((modelId: string) => (
+                                  {item.voices.map((voice) => (
                                     <span
-                                      key={modelId}
+                                      key={voice.key}
                                       className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-200"
                                     >
-                                      {runModelFamilyName(modelId)}
+                                      {voice.label}
                                     </span>
                                   ))}
                                 </div>
@@ -1589,7 +1645,7 @@ export default function ResultsDisplay({
                       onClick={() => setExpandedContestedAreas((prev) => !prev)}
                       className="flex w-full items-center justify-between bg-orange-50 border-b border-orange-200 px-4 py-3 hover:bg-orange-100 transition-colors"
                     >
-                      <h4 className="text-base font-semibold text-slate-900">Contested Areas</h4>
+                      <h4 className="text-base font-semibold text-slate-900">{identityUnverified ? `Contested Areas ${INDEPENDENCE_UNVERIFIED_SUFFIX}` : "Contested Areas"}</h4>
                       <svg
                         className={`h-5 w-5 text-slate-600 transition-transform ${expandedContestedAreas ? "rotate-180" : ""}`}
                         fill="none"
@@ -1620,12 +1676,12 @@ export default function ResultsDisplay({
                                   Different perspectives from:{" "}
                                 </span>
                                 <div className="flex flex-wrap gap-1.5">
-                                  {item.models.map((modelId: string) => (
+                                  {item.voices.map((voice) => (
                                     <span
-                                      key={modelId}
+                                      key={voice.key}
                                       className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800 border border-orange-200"
                                     >
-                                      {runModelFamilyName(modelId)}
+                                      {voice.label}
                                     </span>
                                   ))}
                                 </div>
@@ -1671,8 +1727,13 @@ export default function ResultsDisplay({
             {/* Synthesis body content (with trust summary removed from HTML since we display it as visual pills above) */}
             {/* Heading hierarchy: H2 (Unified Answer) → H3 (Trust Summary) → H3 (Overall Synthesis) → H4s (Bias, Open Questions, Methodology, etc.) */}
             <div className="text-[15px] leading-relaxed text-slate-800">
+              {!unifiedAnswerPresentable && (
+                <p className="text-sm text-slate-600" data-testid="unified-answer-withheld">
+                  {UNIFIED_ANSWER_WITHHELD_TEXT}
+                </p>
+              )}
               <CollapsibleUnifiedAnswer 
-                html={synthesizedReport?.unifiedAnswer || ""
+                html={(unifiedAnswerPresentable ? synthesizedReport?.unifiedAnswer || "" : "")
                   // Remove duplicate "Trust Summary" sections - already shown above as cards
                   // Remove entire Trust Summary section including any "What is uncertain" subsections
                   .replace(/<h[23]>\s*Trust Summary\s*<\/h[23]>[\s\S]*?(?=<h[23]|$)/gi, '')
@@ -1782,7 +1843,7 @@ export default function ResultsDisplay({
                   case "consensus":
                     return {
                       icon: "✅",
-                      text: "Consensus",
+                      text: identityUnverified ? `Consensus ${INDEPENDENCE_UNVERIFIED_SUFFIX}` : "Consensus",
                       bgColor: "bg-green-50",
                       borderColor: "border-green-200",
                       textColor: "text-green-800",
@@ -1802,7 +1863,7 @@ export default function ResultsDisplay({
                     // For now, this should rarely/never appear since single-model claims are "single"
                     return {
                       icon: "⚠️",
-                      text: "Disagreement",
+                      text: identityUnverified ? `Disagreement ${INDEPENDENCE_UNVERIFIED_SUFFIX}` : "Disagreement",
                       bgColor: "bg-orange-50",
                       borderColor: "border-orange-200",
                       textColor: "text-orange-800",
@@ -1822,7 +1883,7 @@ export default function ResultsDisplay({
 
               // Use canonical classification helper to determine cluster type
               // This ensures the rendering matches the Trust Summary counting logic
-              const clusterType = classifyClusterType(cluster);
+              const clusterType = classifyByVoices(cluster);
               const effectiveLabel = clusterType === "contested" ? "disagreement" : 
                                     clusterType === "single" ? "single" : 
                                     clusterType === "consensus" ? "consensus" :
@@ -1877,19 +1938,18 @@ export default function ResultsDisplay({
                         <div className="flex flex-wrap gap-2">
                           {/* Use the same PanelModelConfig as the Run Panel buttons so colors and labels always match.
                               Always attach the canonical PanelModelId so the frontend can color and label consistently. */}
-                          {cluster.modelIds.map((id: string) => {
-                            // Ensure we have a valid PanelModelId
-                            const modelId = id as PanelModelId;
-                            return (
-                              <ModelChip
-                                key={`${cluster.id}-${id}`}
-                                modelId={modelId}
-                                variant="outline"
-                                size="xs"
-                                uppercase={false}
-                              />
-                            );
-                          })}
+                          {/* One chip per EXECUTING model: a substituted slot reads
+                              "DeepSeek (substituting ChatGPT)", never as the slot's model. */}
+                          {(cluster.voices as ExecutingVoiceGroup[]).map((voice) => (
+                            <ModelChip
+                              key={`${cluster.id}-${voice.key}`}
+                              modelId={voice.slotIds[0] as PanelModelId}
+                              variant="outline"
+                              size="xs"
+                              uppercase={false}
+                              label={voice.substituted ? voice.label : undefined}
+                            />
+                          ))}
                         </div>
                         <svg
                           className={`h-4 w-4 text-slate-500 transition-transform ${isExpanded ? "rotate-180" : ""}`}
@@ -1941,8 +2001,8 @@ export default function ResultsDisplay({
                                     }`}
                                   >
                                     <span className="font-semibold text-gray-700">
-                                      {/* Slot reference: family name only, never a version. */}
-                                      {runModelFamilyName(claim.modelId)}:
+                                      {/* Executing model: family name for the slot's own model, "DeepSeek (substituting ChatGPT)" for a substitute. */}
+                                      {executingVoiceName(claim.modelId, results)}:
                                     </span>{" "}
                                     {claim.text}
                                   </div>
@@ -1981,19 +2041,18 @@ export default function ResultsDisplay({
                           This ensures Grok (and any future models) appear when they participate in a cluster */}
                       {/* Use the same PanelModelConfig as the Run Panel buttons so colors and labels always match.
                           Always attach the canonical PanelModelId so the frontend can color and label consistently. */}
-                      {cluster.modelIds.map((id: string) => {
-                        // Ensure we have a valid PanelModelId
-                        const modelId = id as PanelModelId;
-                        return (
-                          <ModelChip
-                            key={`${cluster.id}-${id}`}
-                            modelId={modelId}
-                            variant="outline"
-                            size="xs"
-                            uppercase={false}
-                          />
-                        );
-                      })}
+                      {/* One chip per EXECUTING model: a substituted slot reads
+                          "DeepSeek (substituting ChatGPT)", never as the slot's model. */}
+                      {(cluster.voices as ExecutingVoiceGroup[]).map((voice) => (
+                        <ModelChip
+                          key={`${cluster.id}-${voice.key}`}
+                          modelId={voice.slotIds[0] as PanelModelId}
+                          variant="outline"
+                          size="xs"
+                          uppercase={false}
+                          label={voice.substituted ? voice.label : undefined}
+                        />
+                      ))}
                     </div>
                   </div>
                   <div className={`px-4 py-3 ${
@@ -2029,8 +2088,8 @@ export default function ResultsDisplay({
                                 }`}
                               >
                                 <span className="font-semibold text-gray-700">
-                                  {/* Slot reference: family name only, never a version. */}
-                                  {runModelFamilyName(claim.modelId)}:
+                                  {/* Executing model: family name for the slot's own model, "DeepSeek (substituting ChatGPT)" for a substitute. */}
+                                  {executingVoiceName(claim.modelId, results)}:
                                 </span>{" "}
                                 {claim.text}
                               </div>
@@ -2182,7 +2241,7 @@ export default function ResultsDisplay({
               {results.map((result) => {
                 const status = result.status;
                 const latencyLabel = formatLatency(result.latencyMs);
-                const mock = isMockResponse(getModelText(result));
+                const mock = placeholderOf(result);
                 // Check if this result is in the synthesized report (successful response)
                 const synthesizedResponse = synthesizedReport?.rawResponses?.find(
                   (r) => r.modelId === result.modelId
@@ -2268,9 +2327,9 @@ export default function ResultsDisplay({
                         );
                       })()}
                       {mock && (status === "ok" || status === "substituted") && (
-                        <div className="flex items-center gap-2 text-sm text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+                        <div className="flex items-center gap-2 text-sm text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2" data-testid="stored-placeholder-notice">
                           <span>ℹ</span>
-                          <span>Demo output – no API key configured.</span>
+                          <span>{mock === "INVALID_MOCK" ? INVALID_PROVIDER_OUTPUT_NOTICE : VALIDITY_UNKNOWN_NOTICE}</span>
                         </div>
                       )}
                       {(status === "ok" || status === "substituted") && (result as any).wasTruncated && (
@@ -2326,7 +2385,7 @@ export default function ResultsDisplay({
                 const isExpanded = expandedModels.has(result.modelId);
                 const status = result.status;
                 const latencyLabel = formatLatency(result.latencyMs);
-                const mock = isMockResponse(getModelText(result));
+                const mock = placeholderOf(result);
                 // Check if this result is in the synthesized report (successful response)
                 const synthesizedResponse = synthesizedReport?.rawResponses?.find(
                   (r) => r.modelId === result.modelId
@@ -2426,9 +2485,9 @@ export default function ResultsDisplay({
                           );
                         })()}
                         {mock && (status === "ok" || status === "substituted") && (
-                          <div className="flex items-center gap-2 text-sm text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+                          <div className="flex items-center gap-2 text-sm text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2" data-testid="stored-placeholder-notice">
                             <span>ℹ</span>
-                            <span>Demo output – no API key configured.</span>
+                            <span>{mock === "INVALID_MOCK" ? INVALID_PROVIDER_OUTPUT_NOTICE : VALIDITY_UNKNOWN_NOTICE}</span>
                           </div>
                         )}
                         {(status === "ok" || status === "substituted") && (result as any).wasTruncated && (

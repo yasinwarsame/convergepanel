@@ -183,7 +183,25 @@ export interface AdaptiveExportModelProvenance {
   substituted?: boolean;
   /** `"<provider>:<model>"` originally requested — present only on a substituted row that persisted it. */
   substitutedFrom?: string;
+  /**
+   * Frozen provenance version 2 (C-a closeout, Order 29 M-1): what the slot's explicitly recorded persisted
+   * `perModel.status` says the call did, through the exact-match map in exportRunProvenance.ts
+   * (`PERSISTED_STATUS_OUTCOMES`) — "answered" (ok / substituted) or the recorded failure class — and `"unknown"`
+   * with `outcomeSource: "absent"` when the row, its status, or a recognised literal is missing. Never inferred from
+   * the provider's presence or absence. Absent on every version-1 snapshot (read back as unknown, never reconstructed).
+   */
+  outcome?: AdaptiveExportSlotOutcome;
+  /** `"recorded"` only when `outcome` came from a recognised persisted status literal; `"absent"` otherwise. */
+  outcomeSource?: AdaptiveExportSlotOutcomeSource;
+  /** D-5 / J02 (version 2): the persisted row's text is a listed stored placeholder, not a model response (presentation only). */
+  invalidProviderOutput?: true;
+  /** D-5 (version 2): the persisted row's text mentions a mock response without being a listed placeholder (presentation only). */
+  validityUnknown?: true;
 }
+
+/** The frozen per-slot call outcome (version 2). `"unknown"` is the fail-closed value, never a recorded one. */
+export type AdaptiveExportSlotOutcome = "answered" | "failed" | "timeout" | "refused" | "rate_limited" | "unknown";
+export type AdaptiveExportSlotOutcomeSource = "recorded" | "absent";
 
 /**
  * Step 6.2b — run-level provenance frozen into the export snapshot. Absent on
@@ -193,6 +211,8 @@ export interface AdaptiveExportModelProvenance {
 export interface AdaptiveExportRunProvenance {
   /** The governance policy version the run was evaluated under, from its own family's persisted source. */
   policyVersion?: number;
+  /** Frozen provenance version marker: `2` once per-slot outcomes are frozen (Order 29). Absent on version-1 snapshots. */
+  provenanceVersion?: 2;
   models: AdaptiveExportModelProvenance[];
 }
 

@@ -12,7 +12,8 @@
  */
 
 import { AggregatedEvidenceDimension, EvidenceReviewResult, RiskLevel } from "@/lib/adaptiveSchema/types";
-import { Card, EmptyStateCard, SectionLabel, TintBadge, formatModelCoverage, SlotChip } from "./shared";
+import { Card, EmptyStateCard, SectionLabel, TintBadge, formatSlotCoverage, SlotChip } from "./shared";
+import { useQualifiedExecutionIdentity } from "./RunExecutionIdentityContext";
 
 function StrengthBadge({ strength }: { strength: AggregatedEvidenceDimension["strength"] }) {
   if (strength === "unknown") return null;
@@ -22,9 +23,10 @@ function StrengthBadge({ strength }: { strength: AggregatedEvidenceDimension["st
 }
 
 function CoverageBadge({ coverageCount, totalModels }: { coverageCount: number; totalModels: number }) {
+  const slotIdentity = useQualifiedExecutionIdentity();
   return (
     <TintBadge tone={coverageCount / Math.max(totalModels, 1) >= 0.6 ? "accent" : "warning"} title="How many models raised this dimension — not a certainty score">
-      {formatModelCoverage({ covered: coverageCount, total: totalModels, mode: "covered" })}
+      {formatSlotCoverage({ covered: coverageCount, total: totalModels, mode: "covered" }, slotIdentity)}
     </TintBadge>
   );
 }

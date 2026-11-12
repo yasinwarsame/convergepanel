@@ -146,6 +146,14 @@ export type ModelStatus = "ok" | "substituted" | "failed";
 export type ConnectorStatus = ModelStatus | "error" | "timeout" | "refused" | "rate_limited";
 
 /**
+ * Machine-readable discriminator for a connector failure. Optional and additive:
+ * only set where a failure kind is known precisely.
+ *  - "provider_not_configured": the provider's API key was missing, empty or
+ *    whitespace-only, so no provider call was made. Never a model response.
+ */
+export type ModelResultErrorCode = "provider_not_configured";
+
+/**
  * Result from a single model execution
  * 
  * Contains the model's response along with metadata about the execution.
@@ -158,6 +166,8 @@ export interface ModelResult {
   status: ConnectorStatus;
   rawText: string | null;
   errorMessage?: string;
+  /** Typed failure discriminator (only on non-ok results). See ModelResultErrorCode. */
+  errorCode?: ModelResultErrorCode;
   latencyMs: number;
   tokenUsage?: {
     totalTokens: number;
@@ -172,6 +182,14 @@ export interface ModelResult {
   requestedModel?: string;
   provider?: string;
   actualModel?: string;
+
+  /**
+   * F-2 (Order 34): structured execution fact — the connector returned status "ok" with no errorCode, i.e. a model
+   * response (missing / rejected keys fail closed since b1a680e). Set by runPanel on a primary answer and frozen onto
+   * the perModel row at completion; absent on every historical row. The shared gate reads it instead of the
+   * "mock response" text oracle (VALIDITY_UNKNOWN); the exact placeholder literal (INVALID_MOCK) is still excluded.
+   */
+  outputClass?: "model_response";
 
   // Substitution metadata (only when status === "substituted")
   substitutedFrom?: string;

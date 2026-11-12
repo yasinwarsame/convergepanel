@@ -46,6 +46,7 @@ import {
 } from "./gatePresentation";
 import { dedupeTextList } from "./textSimilarity";
 import { TEXT_DEDUP_THRESHOLDS, WHERE_MODELS_AGREE_MAX_ITEMS } from "./config";
+import { independenceQualification } from "./verdictIndependence";
 import { MODEL_PROSE_WITHHELD, PresentedRowKind, positionView, presentedRowKind as presentedRowKindOf, rowKindLabel, rowKindsHeading } from "./positionPresentation";
 
 export const MODEL_EXPLANATION_LABEL = "Model-written explanation (not a verified finding)";
@@ -350,11 +351,17 @@ export function presentCertainty(report: AdaptiveSynthesisReport): TextBlock[] {
 export function presentAgreeItems(report: AdaptiveSynthesisReport): ClaimBlock[] {
   const p = report.presentation;
   if (!p) {
-    return dedupeTextList(report.whereModelsAgree, { ...TEXT_DEDUP_THRESHOLDS, cap: WHERE_MODELS_AGREE_MAX_ITEMS }).map((line) => ({
-      claim: legacy(line),
-      result: null,
-      contested: null,
-    }));
+    // A legacy line whose claim's supporting slots are not independent executing models carries its independence
+    // statement (verdictIndependence.ts, after the merge); every other line: as before.
+    const qualifiers = independenceQualification(report)?.legacyAgree;
+    return dedupeTextList(report.whereModelsAgree, { ...TEXT_DEDUP_THRESHOLDS, cap: WHERE_MODELS_AGREE_MAX_ITEMS }).map((line) => {
+      const qualifier = qualifiers?.get(line);
+      return {
+        claim: legacy(line),
+        result: qualifier ? { source: "computed" as const, label: PANEL_RESULT_LABEL, text: qualifier } : null,
+        contested: null,
+      };
+    });
   }
   const kinds = positionView(report)?.agreeKinds;
   return p.agree.slice(0, WHERE_MODELS_AGREE_MAX_ITEMS).map((c, i) => presentClaim(c, kinds?.[i]));

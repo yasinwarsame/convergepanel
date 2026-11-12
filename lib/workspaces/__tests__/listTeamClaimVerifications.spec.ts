@@ -214,7 +214,15 @@ describe("batched Project reference validation (scope all)", () => {
 
 describe("summary DTO", () => {
   it("summary fields only: no creator uid, raw timestamp, model evidence, audit bundle, origin or evidence sources", async () => {
-    claims(teamClaimDoc("v", { projectId: "p1", governanceStatus: "needs_review", origin: { type: "deep_research_claim", runId: "SECRET-RUN", claimId: "c" }, evidenceSources: [{ url: "https://x", hostname: "x" }] }, T));
+    // Two independent executing models answered, each with its recorded provider (C-b CB-01: the shared gate), so the
+    // stored score is listed (claim independence rule; a one-model or provider-less record is withheld — see
+    // lib/__tests__/claimIndependenceSurfaces.spec.tsx).
+    const provider: Record<string, string> = { chatgpt: "openai", claude: "anthropic" };
+    const twoModels = {
+      modelResults: ["chatgpt", "claude"].map((modelId) => ({ modelId, status: "ok", provider: provider[modelId], verdict: "accurate", confidence: "high", summary: "ok", correctParts: ["a"], incorrectParts: [], unverifiableParts: [] })),
+      selectedModels: ["chatgpt", "claude"],
+    };
+    claims(teamClaimDoc("v", { projectId: "p1", governanceStatus: "needs_review", origin: { type: "deep_research_claim", runId: "SECRET-RUN", claimId: "c" }, evidenceSources: [{ url: "https://x", hostname: "x" }], ...twoModels }, T));
     projects(projectDoc("p1"));
     const r = await list(ALL);
     expect(r.status === "ok" && r.items[0]).toEqual({

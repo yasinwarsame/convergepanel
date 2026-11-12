@@ -46,6 +46,7 @@ import {
   buildComparisonTable,
   comparisonEntryText,
   modelResponsesCountLines,
+  invalidProviderOutputSlots,
   partitionModelResponses,
   summarizeModelResponses,
 } from "@/lib/research/modelResponsesPresentation";
@@ -278,9 +279,10 @@ function OriginalResponseDisclosure({ text }: { text: string }) {
 
 function Milestone2ModelOutputList({ schema, results }: { schema: ResultSchema; results: AdaptiveModelResult[] }) {
   const statuses = useRunSlotStatus();
+  const invalidSlots = invalidProviderOutputSlots(useRunModelProvenance());
   if (results.length === 0) return <RawResponsesUnavailableNotice />;
-  const [panelLine, shownLine] = modelResponsesCountLines(summarizeModelResponses(results, statuses));
-  const { cards, notes } = partitionModelResponses(results, statuses);
+  const [panelLine, shownLine] = modelResponsesCountLines(summarizeModelResponses(results, statuses, invalidSlots));
+  const { cards, notes } = partitionModelResponses(results, statuses, invalidSlots);
   return (
     <div>
       <SectionLabel>Raw model output</SectionLabel>

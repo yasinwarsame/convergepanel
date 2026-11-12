@@ -70,7 +70,7 @@ describe("summarizeModelResponses / modelResponsesCountLines", () => {
     ];
     const statuses = new Map([["chatgpt", "ok"], ["claude", "ok"], ["grok", "substituted"], ["perplexity", "ok"], ["gemini", "timeout"]]);
     const s = summarizeModelResponses(results, statuses);
-    expect(s).toEqual({ requested: 5, answered: 4, substituted: 1, didNotRespond: 1, structuredShown: 1, savedTextShown: 1, savedCopyUnavailable: 1, unusable: 1 });
+    expect(s).toEqual({ requested: 5, answered: 4, substituted: 1, didNotRespond: 1, notAModelResponse: 0, structuredShown: 1, savedTextShown: 1, savedCopyUnavailable: 1, unusable: 1 });
     expect(modelResponsesCountLines(s)).toEqual([
       "5 models requested · 4 answered (1 by a substitute model) · 1 did not respond",
       "1 structured response shown · 1 shown as saved text · 1 saved copy can't be shown · 1 answered in a format that couldn't be used",
@@ -78,6 +78,27 @@ describe("summarizeModelResponses / modelResponsesCountLines", () => {
     const { cards, notes } = partitionModelResponses(results, statuses);
     expect(cards.map((r) => r.modelId)).toEqual(["chatgpt", "grok"]);
     expect(notes.map((r) => r.modelId)).toEqual(["claude", "perplexity", "gemini"]);
+  });
+
+  it("a stored no-API-key placeholder slot (J02) is counted once, as not a model response, and goes to the notes", () => {
+    const results = [
+      res("chatgpt"),
+      // Live (not reopened) J02 slot: the validator rejected the placeholder text; no saved text.
+      failed("claude", "Invalid JSON: Mock response from claude (no API key configured)"),
+      failed("grok", "Empty response"),
+    ];
+    const statuses = new Map([["chatgpt", "ok"], ["claude", "ok"], ["grok", "timeout"]]);
+    const s = summarizeModelResponses(results, statuses, new Set(["claude"]));
+    expect(s).toEqual({ requested: 3, answered: 1, substituted: 0, didNotRespond: 1, notAModelResponse: 1, structuredShown: 1, savedTextShown: 0, savedCopyUnavailable: 0, unusable: 0 });
+    expect(s.requested).toBe(s.answered + s.didNotRespond + s.notAModelResponse);
+    expect(modelResponsesCountLines(s)[0]).toBe("3 models requested · 1 answered · 1 did not respond · 1 not a model response (no API key configured)");
+    const { cards, notes } = partitionModelResponses(results, statuses, new Set(["claude"]));
+    expect(cards.map((r) => r.modelId)).toEqual(["chatgpt"]);
+    expect(notes.map((r) => r.modelId)).toEqual(["claude", "grok"]);
+    // Without recorded statuses the J02 slot is still not an answer.
+    const n = summarizeModelResponses(results, null, new Set(["claude"]));
+    expect([n.answered, n.notAModelResponse, n.didNotRespond]).toEqual([1, 1, 1]);
+    expect(partitionModelResponses(results, null, new Set(["claude"])).notes.map((r) => r.modelId)).toEqual(["claude", "grok"]);
   });
 
   it("without recorded statuses, only the validator's empty-response slot with no saved text is a non-response", () => {

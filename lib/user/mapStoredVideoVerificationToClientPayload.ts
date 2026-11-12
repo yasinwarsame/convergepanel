@@ -1,6 +1,7 @@
 import type { MetadataAnalysis, MetadataFlag, VideoMetadata } from "@/lib/video/videoPure";
 import type { PanelHistoryGovernanceStatus } from "@/lib/user/panelHistory";
 import type { VideoModelEvidenceRow, VideoVerificationClientPayload } from "@/lib/verification/videoVerificationClientPayload";
+import { storedVideoConsensusIndependence } from "@/lib/panel/storedVerificationIndependence";
 
 function timestampToIso(ts: unknown): string | null {
   if (
@@ -136,5 +137,7 @@ export function mapStoredVideoVerificationToClientPayload(
     warnings: Array.isArray(data.warnings) ? data.warnings.map((x) => String(x)) : [],
     governanceStatus: normalizeGovernance(data.governanceStatus),
     timestampIso: timestampToIso(data.timestamp),
+    // C-b (CB-16, PQ-2 strict), presentation only: the stored rows judged by the shared gate (no provider → unverified).
+    modelIndependence: storedVideoConsensusIndependence(modelSource),
   };
 }

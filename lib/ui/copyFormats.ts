@@ -4,7 +4,12 @@
  */
 
 import type { VerificationGateResult } from "@/lib/verificationGate/verificationGate";
-import type { PanelVerdict } from "@/lib/verificationGate/panelVerdict";
+import {
+  PANEL_VERDICT_INDEPENDENCE_UNVERIFIED_HEADING,
+  recordedDifferenceLines,
+  PANEL_VERDICT_SINGLE_MODEL_HEADING,
+  type PanelVerdict,
+} from "@/lib/verificationGate/panelVerdict";
 
 export interface ModelHealthForCopy {
   total: number;
@@ -81,7 +86,15 @@ export function buildSynthesisMarkdown(
   parts.push("");
 
   parts.push("## Panel Verdict");
-  parts.push("Top consensus:");
+  // Fewer than two independent executing models (verdict.crossModel === false): the top item is one model's finding.
+  // Unknown execution identity (verdict.independenceUnverified): never presented as a consensus.
+  parts.push(
+    verdict.crossModel === false
+      ? `${PANEL_VERDICT_SINGLE_MODEL_HEADING}:`
+      : verdict.independenceUnverified
+        ? `${PANEL_VERDICT_INDEPENDENCE_UNVERIFIED_HEADING}:`
+        : "Top consensus:"
+  );
   parts.push(`- ${verdict.topConsensus}`);
 
   if (verdict.topDisagreement) {
@@ -91,6 +104,13 @@ export function buildSynthesisMarkdown(
     if (verdict.disagreementDetail) {
       parts.push(`- Detail: ${verdict.disagreementDetail}`);
     }
+  }
+  // Stored differences that are not disagreements between independent models: their own section (topic, reason and
+  // each position named by its executing model), never under "Key disagreement", never reduced to a count.
+  const recorded = recordedDifferenceLines(verdict);
+  if (recorded.length > 0) {
+    parts.push("");
+    parts.push(...recorded);
   }
 
   if (verdict.keyBlindSpot) {

@@ -10,6 +10,8 @@
 import "server-only";
 import type { ClaimVerdict } from "@/lib/verification/claimVerdict";
 import { firestoreSecondsNanos } from "@/lib/runs/runSummary";
+import { consensusScoreWithheldReason, type ConsensusScoreWithheldReason } from "@/lib/panel/independentVoices";
+import { storedVerificationConsensusIndependence } from "@/lib/panel/storedVerificationIndependence";
 
 export type TeamClaimVerificationProjectDto = { id: string; name: string; status: string };
 
@@ -17,7 +19,12 @@ export type TeamClaimVerificationSummaryDto = {
   verificationId: string;
   claim: string;
   verdict: ClaimVerdict;
-  consensusScore: number;
+  /**
+   * The stored score, or null when it is withheld (`consensusWithheld`): the stored rows do not prove >= 2 independent
+   * executing models with a usable answer (lib/panel/storedVerificationIndependence.ts). Stored data is unchanged.
+   */
+  consensusScore: number | null;
+  consensusWithheld?: ConsensusScoreWithheldReason;
   confidenceLabel: "High" | "Medium" | "Low";
   evidenceQuality: "strong" | "mixed" | "weak";
   governanceStatus?: "approved" | "needs_review" | "blocked";
@@ -57,11 +64,13 @@ export function toTeamClaimVerificationSummary(args: {
   if (typeof d.confidenceLabel !== "string" || !CONFIDENCE.has(d.confidenceLabel)) return null;
   const evidenceQuality = typeof d.evidenceQuality === "string" && EVIDENCE.has(d.evidenceQuality) ? (d.evidenceQuality as TeamClaimVerificationSummaryDto["evidenceQuality"]) : "mixed";
   const governanceStatus = d.governanceStatus === "approved" || d.governanceStatus === "needs_review" || d.governanceStatus === "blocked" ? d.governanceStatus : undefined;
+  const consensusWithheld = consensusScoreWithheldReason(storedVerificationConsensusIndependence(d));
   return {
     verificationId: args.verificationId,
     claim: d.claim,
     verdict: d.verdict as ClaimVerdict,
-    consensusScore: d.consensusScore,
+    consensusScore: consensusWithheld ? null : d.consensusScore,
+    ...(consensusWithheld ? { consensusWithheld } : {}),
     confidenceLabel: d.confidenceLabel as TeamClaimVerificationSummaryDto["confidenceLabel"],
     evidenceQuality,
     ...(governanceStatus ? { governanceStatus } : {}),
