@@ -64,6 +64,65 @@ export interface MemoInput {
   synthesisDisagreements?: string[];
   confidenceAssessment?: string;
   modelsUsed?: string[];
+  /**
+   * Research (legacy panel) memo only: the number of INDEPENDENT executing models among the usable responses (slots
+   * answered by one substitute model are one model). When supplied it is the model count the memo states, and below two
+   * the memo states no consensus score and no "where models agree" section. Absent → exactly the memo as before.
+   */
+  independentModelCount?: number;
+
+  /**
+   * Research (legacy panel) memo only: true when two or more slots answered but the run's rows do not record which
+   * models executed (the gate's coverage "unverified"): the memo then withholds the consensus score and the cross-model
+   * evidence quality and states no "where models agree / disagree" sections. Absent / false → exactly the memo as before.
+   */
+  researchIndependenceUnverified?: boolean;
+
+  /**
+   * C-a (E11): a research run whose answering slots outnumber its independent executing models (PC, corrected D-4 gate):
+   * the score and the "independently" sentence are stated over answering slots. Absent → exactly the memo as before.
+   */
+  researchSlotCounts?: { answeredSlots: number; independentModels: number };
+
+  /** C-a (E14): a label printed under CONFIDENCE ASSESSMENT (the text is the saved synthesis's own). Absent → as before. */
+  confidenceAssessmentLabel?: string;
+
+  /**
+   * Research (legacy panel) memo only: the stored differences that are NOT disagreements between independent executing
+   * models (`PanelVerdict.recordedDifferences`), stated in their own section with topic, reason and each position named
+   * by its executing model — never under "where models disagree". Absent / empty → exactly the memo as before.
+   */
+  researchRecordedDifferences?: ReadonlyArray<{
+    topic: string;
+    whyTheyDiffer: string | null;
+    basisText: string;
+    positions: ReadonlyArray<{ voice: string; position: string }>;
+  }>;
+
+  /**
+   * Claim memo only: whether the verification's stored rows prove >= 2 independent executing models with a usable answer
+   * (`ClaimVerificationClientPayload.modelIndependence`). "insufficient" / "unverified" → no consensus score, no
+   * cross-model evidence quality, the verdict stated as one model's assessment (or with unverified coverage), and no
+   * "where models agree / disagree" sections. Absent → exactly the memo as before (callers that hold a payload always
+   * pass it; lib/verification/claimConsensusPresentation.ts fails a missing value closed to "unverified").
+   */
+  claimModelIndependence?: "independent" | "insufficient" | "unverified";
+
+  /**
+   * C-b (CB-11): claim memo only, with `claimModelIndependence: "independent"` — the shared gate's counts over the
+   * verification's rows (lib/panel/executionIdentity.ts): K independent executing models over M answering slots. The
+   * memo then states K (never the number of rows: a failed slot is not an answer), names the answering slots only, and
+   * states the slots when K < M (a substitute model that answered several slots counts once). Absent → as before.
+   */
+  claimExecution?: { independentModels: number; answeredSlots: number };
+
+  /**
+   * C-b (CB-12, PQ-2 (a) strict): video memo only — the independence of the video rows by the shared gate. Video rows
+   * record no provider, so callers pass "unverified"; anything but "independent" → no consensus score, no cross-model
+   * evidence quality, and the stored agreement / disagreement points (kept as recorded) under qualified headings.
+   * Absent → exactly the memo as before.
+   */
+  videoModelIndependence?: "independent" | "insufficient" | "unverified";
 
   /**
    * Order 5 (Contract P): set ONLY by shareBuilders.buildAdaptiveMemoInput for an adaptive research report marked
@@ -232,13 +291,52 @@ function formatModelsConsultedGrid(names: string[]): string {
   return lines.join("\n");
 }
 
+/** Claim memo lines when fewer than two independent models answered, or model independence is not recorded. */
+export const CLAIM_MEMO_SINGLE_MODEL_VERDICT_NOTE = "one independent model's assessment; not agreement between models";
+export const CLAIM_MEMO_UNVERIFIED_VERDICT_NOTE = "independent-model coverage unverified";
+export const CLAIM_MEMO_NO_CONSENSUS_LINE =
+  "CONSENSUS SCORE: none (fewer than two independent models answered; slots answered by the same substitute model count as one)";
+export const CLAIM_MEMO_WITHHELD_CONSENSUS_LINE = "CONSENSUS SCORE: withheld (model independence not recorded)";
+export const CLAIM_MEMO_UNVERIFIED_EVIDENCE = "not assessed (model independence not recorded)";
+export const CLAIM_MEMO_SINGLE_MODEL_SUMMARY =
+  "Fewer than two independent AI models answered this claim, so there is no cross-model agreement to report. Treat the verdict as a single model's assessment.";
+export const CLAIM_MEMO_UNVERIFIED_SUMMARY =
+  "Which models executed this verification could not be established, so the verdict is not presented as agreement between models.";
+export const CLAIM_MEMO_SINGLE_MODEL_METHODOLOGY =
+  "This claim was sent to a panel of large language models via ConvergePanel with identical instructions, but fewer than two independent models answered (slots answered by the same substitute model count as one). No cross-model comparison was possible: no consensus score is reported and nothing in this memo reflects agreement between models.";
+export const CLAIM_MEMO_UNVERIFIED_METHODOLOGY =
+  "This claim was sent to a panel of large language models via ConvergePanel with identical instructions. Which models actually executed could not be established from the stored record, so no consensus score is reported and nothing in this memo is presented as agreement between independent models.";
+
+/** The gate's counts a claim memo may state: only for an "independent" claim with K ≥ 1 and M ≥ K (else null: as before). */
+function claimExecutionCounts(input: MemoInput): { independentModels: number; answeredSlots: number } | null {
+  const e = input.claimExecution;
+  if (input.claimModelIndependence !== "independent" || !e) return null;
+  const k = e.independentModels;
+  const m = e.answeredSlots;
+  if (!Number.isInteger(k) || !Number.isInteger(m) || k < 1 || m < k) return null;
+  return { independentModels: k, answeredSlots: m };
+}
+
+/** Video memo lines when the video rows do not verify ≥ 2 independent executing models (always, for recorded video rows). */
+// The claim memo's "unverified" family, shared (mirrored, not forked).
+export const VIDEO_MEMO_UNVERIFIED_VERDICT_NOTE = CLAIM_MEMO_UNVERIFIED_VERDICT_NOTE;
+export const VIDEO_MEMO_WITHHELD_CONSENSUS_LINE = CLAIM_MEMO_WITHHELD_CONSENSUS_LINE;
+export const VIDEO_MEMO_UNVERIFIED_EVIDENCE = CLAIM_MEMO_UNVERIFIED_EVIDENCE;
+export const VIDEO_MEMO_UNVERIFIED_SUMMARY_LEAD = "Which models executed this review could not be established from the stored record, so nothing in this memo is presented as agreement between independent models.";
+export const VIDEO_MEMO_NOT_INDEPENDENT_AGREE_HEADING = "POINTS REPEATED ACROSS RESPONSES (NOT AGREEMENT BETWEEN INDEPENDENT MODELS)";
+export const VIDEO_MEMO_NOT_INDEPENDENT_DISAGREE_HEADING = "POINTS THAT DIFFER ACROSS RESPONSES (NOT A DISAGREEMENT BETWEEN INDEPENDENT MODELS)";
+export const VIDEO_MEMO_UNVERIFIED_METHODOLOGY_TAIL = "Which models actually executed could not be established from the stored record (model independence unverified), so no consensus score is reported.";
+
 function generateClaimMemo(input: MemoInput): string {
   const lines: string[] = [];
   const claim = (input.claim ?? "").trim() || "—";
   const verdictHuman = formatVerdictLabel(input.verdict ?? "");
   const rows = input.modelEvidence ?? [];
-  const n = rows.length > 0 ? rows.length : 0;
-  const modelNamesList = rows
+  const exec = claimExecutionCounts(input);
+  // C-b (CB-11): with the gate's counts the memo states independent executing models over the answering slots only.
+  const n = exec ? exec.independentModels : rows.length > 0 ? rows.length : 0;
+  const slotsOverModels = exec !== null && exec.answeredSlots > exec.independentModels;
+  const modelNamesList = (exec ? rows.filter((m) => m.status === "ok") : rows)
     .map((m) => modelDisplayName(m.modelId, m.modelName))
     .filter((x, i, a) => a.indexOf(x) === i);
 
@@ -249,13 +347,27 @@ function generateClaimMemo(input: MemoInput): string {
   lines.push("CLAIM VERIFIED");
   lines.push(`"${claim}"`);
   lines.push("");
-  lines.push(`VERDICT: ${verdictHuman}`);
-  lines.push(`CONSENSUS SCORE: ${input.consensusScore}/100 (${input.confidenceLabel} confidence)`);
-  lines.push(`EVIDENCE QUALITY: ${input.evidenceQuality}`);
+  const coverage = input.claimModelIndependence;
+  const noConsensus = coverage === "insufficient" || coverage === "unverified";
+  if (noConsensus) {
+    lines.push(`VERDICT: ${verdictHuman} (${coverage === "insufficient" ? CLAIM_MEMO_SINGLE_MODEL_VERDICT_NOTE : CLAIM_MEMO_UNVERIFIED_VERDICT_NOTE})`);
+    lines.push(coverage === "insufficient" ? CLAIM_MEMO_NO_CONSENSUS_LINE : CLAIM_MEMO_WITHHELD_CONSENSUS_LINE);
+    lines.push(`EVIDENCE QUALITY: ${coverage === "insufficient" ? RESEARCH_MEMO_NO_CROSS_MODEL_EVIDENCE : CLAIM_MEMO_UNVERIFIED_EVIDENCE}`);
+  } else {
+    lines.push(`VERDICT: ${verdictHuman}`);
+    lines.push(`CONSENSUS SCORE: ${input.consensusScore}/100 (${input.confidenceLabel} confidence)`);
+    lines.push(`EVIDENCE QUALITY: ${input.evidenceQuality}`);
+  }
   lines.push("");
   lines.push("SUMMARY");
   lines.push(
-    `${Math.max(1, n)} AI models evaluated this claim independently. ${claimSummarySentence(input.verdict)}`
+    coverage === "insufficient"
+      ? CLAIM_MEMO_SINGLE_MODEL_SUMMARY
+      : coverage === "unverified"
+        ? CLAIM_MEMO_UNVERIFIED_SUMMARY
+        : slotsOverModels
+          ? `${exec!.answeredSlots} panel slots answered this claim; ${exec!.independentModels} independent executing models wrote those answers. ${claimSummarySentence(input.verdict)}`
+          : `${Math.max(1, n)} AI models evaluated this claim independently. ${claimSummarySentence(input.verdict)}`
   );
   lines.push("");
 
@@ -273,14 +385,15 @@ function generateClaimMemo(input: MemoInput): string {
     lines.push("");
   }
 
-  const agree = dedupeCap(input.agreementPoints ?? []);
+  // Below two independent models (or with unverified coverage) nothing is agreement or disagreement between models.
+  const agree = noConsensus ? [] : dedupeCap(input.agreementPoints ?? []);
   if (agree.length) {
     lines.push("WHERE MODELS AGREE");
     agree.forEach((p) => lines.push(`- ${p}`));
     lines.push("");
   }
 
-  const disagree = dedupeCap(input.disagreementPoints ?? []);
+  const disagree = noConsensus ? [] : dedupeCap(input.disagreementPoints ?? []);
   if (disagree.length) {
     lines.push("WHERE MODELS DISAGREE");
     disagree.forEach((p) => lines.push(`- ${p}`));
@@ -320,7 +433,13 @@ function generateClaimMemo(input: MemoInput): string {
 
   lines.push("METHODOLOGY");
   lines.push(
-    `This claim was independently evaluated by ${nn} large language model${nn === 1 ? "" : "s"}${namesPhrase} via ConvergePanel. Each model received the claim with identical instructions to evaluate accuracy, identify correct and incorrect parts, and provide evidence. Models were not shown each other's responses. The consensus score reflects the degree of agreement across models weighted by evidence quality.`
+    noConsensus
+      ? coverage === "insufficient"
+        ? CLAIM_MEMO_SINGLE_MODEL_METHODOLOGY
+        : CLAIM_MEMO_UNVERIFIED_METHODOLOGY
+      : slotsOverModels
+        ? `This claim was sent to ${exec!.answeredSlots} answering panel slots${namesPhrase} via ConvergePanel, written by ${exec!.independentModels} independent executing models (a model that answered several slots counts once). Each slot received the claim with identical instructions to evaluate accuracy, identify correct and incorrect parts, and provide evidence. The consensus score was computed over answering slots, so it is not a count of independent models.`
+        : `This claim was independently evaluated by ${nn} large language model${nn === 1 ? "" : "s"}${namesPhrase} via ConvergePanel. Each model received the claim with identical instructions to evaluate accuracy, identify correct and incorrect parts, and provide evidence. Models were not shown each other's responses. The consensus score reflects the degree of agreement across models weighted by evidence quality.`
   );
   lines.push("");
   lines.push("DISCLAIMER");
@@ -363,17 +482,27 @@ function generateVideoMemo(input: MemoInput): string {
   lines.push(`Camera / device: ${meta.cameraModel?.trim() || "Not identified"}`);
   lines.push(`Has audio: ${meta.hasAudio === true ? "Yes" : meta.hasAudio === false ? "No" : "—"}`);
   lines.push("");
-  lines.push(`VERDICT: ${verdictHuman}`);
+  // C-b (CB-12, PQ-2 strict): the video rows record no provider, so independence is unverified — no consensus score,
+  // no cross-model evidence quality, no "independently" count; the stored points are kept under qualified headings.
+  const videoQualified = input.videoModelIndependence !== undefined && input.videoModelIndependence !== "independent";
+  lines.push(videoQualified ? `VERDICT: ${verdictHuman} (${VIDEO_MEMO_UNVERIFIED_VERDICT_NOTE})` : `VERDICT: ${verdictHuman}`);
   const ct = (input.contentType ?? "").trim().toLowerCase().replace(/\s+/g, "_");
   if (ct && ct !== "unknown") {
     lines.push(`CONTENT TYPE: ${videoContentTypeMemoLabels[ct] ?? input.contentType}`);
   }
-  lines.push(`CONSENSUS SCORE: ${input.consensusScore}/100 (${input.confidenceLabel} confidence)`);
-  lines.push(`EVIDENCE QUALITY: ${input.evidenceQuality}`);
+  if (videoQualified) {
+    lines.push(VIDEO_MEMO_WITHHELD_CONSENSUS_LINE);
+    lines.push(`EVIDENCE QUALITY: ${VIDEO_MEMO_UNVERIFIED_EVIDENCE}`);
+  } else {
+    lines.push(`CONSENSUS SCORE: ${input.consensusScore}/100 (${input.confidenceLabel} confidence)`);
+    lines.push(`EVIDENCE QUALITY: ${input.evidenceQuality}`);
+  }
   lines.push("");
   lines.push("SUMMARY");
   lines.push(
-    `${n} vision-capable AI models independently analyzed ${frames || "multiple"} frames extracted at regular intervals. ${videoSummarySentence(input.verdict)}`
+    videoQualified
+      ? `${VIDEO_MEMO_UNVERIFIED_SUMMARY_LEAD} ${models.length} panel slot${models.length === 1 ? "" : "s"} reviewed ${frames || "multiple"} frames extracted at regular intervals.`
+      : `${n} vision-capable AI models independently analyzed ${frames || "multiple"} frames extracted at regular intervals. ${videoSummarySentence(input.verdict)}`
   );
   lines.push("");
 
@@ -389,14 +518,14 @@ function generateVideoMemo(input: MemoInput): string {
 
   const agree = dedupeCap(input.agreementPoints ?? []);
   if (agree.length) {
-    lines.push("WHERE MODELS AGREE");
+    lines.push(videoQualified ? VIDEO_MEMO_NOT_INDEPENDENT_AGREE_HEADING : "WHERE MODELS AGREE");
     agree.forEach((p) => lines.push(`- ${p}`));
     lines.push("");
   }
 
   const disagree = dedupeCap(input.disagreementPoints ?? []);
   if (disagree.length) {
-    lines.push("WHERE MODELS DISAGREE");
+    lines.push(videoQualified ? VIDEO_MEMO_NOT_INDEPENDENT_DISAGREE_HEADING : "WHERE MODELS DISAGREE");
     disagree.forEach((p) => lines.push(`- ${p}`));
     lines.push("");
   }
@@ -443,7 +572,9 @@ function generateVideoMemo(input: MemoInput): string {
 
   lines.push("METHODOLOGY");
   lines.push(
-    `${frames || "Multiple"} frames were extracted at regular intervals from the uploaded video and sent to ${n} vision-capable AI model${n === 1 ? "" : "s"}${namesPhrase} via ConvergePanel. Each model independently analyzed frames for signs of AI generation, deepfake artifacts, and manipulation indicators. Models were not shown each other's responses. Video metadata was extracted from the file container and included in the analysis.`
+    videoQualified
+      ? `${frames || "Multiple"} frames were extracted at regular intervals from the uploaded video and sent to ${models.length} panel slot${models.length === 1 ? "" : "s"}${namesPhrase} via ConvergePanel with identical instructions to look for signs of AI generation, deepfake artifacts, and manipulation indicators. Video metadata was extracted from the file container and included in the analysis. ${VIDEO_MEMO_UNVERIFIED_METHODOLOGY_TAIL}`
+      : `${frames || "Multiple"} frames were extracted at regular intervals from the uploaded video and sent to ${n} vision-capable AI model${n === 1 ? "" : "s"}${namesPhrase} via ConvergePanel. Each model independently analyzed frames for signs of AI generation, deepfake artifacts, and manipulation indicators. Models were not shown each other's responses. Video metadata was extracted from the file container and included in the analysis.`
   );
   lines.push("");
   lines.push("DISCLAIMER");
@@ -457,13 +588,52 @@ function generateVideoMemo(input: MemoInput): string {
   return lines.join("\n").trimEnd() + "\n";
 }
 
+/** Research memo evidence-quality line when fewer than two independent models responded. */
+export const RESEARCH_MEMO_NO_CROSS_MODEL_EVIDENCE = "not assessed (fewer than two independent models responded)";
+
+/** Research memo METHODOLOGY when fewer than two independent models responded: no consensus or convergence is claimed. */
+export const RESEARCH_MEMO_SINGLE_MODEL_METHODOLOGY =
+  "This question was sent to a panel of large language models via ConvergePanel with identical instructions, but fewer than two independent models responded (slots answered by the same substitute model count as one). No cross-model comparison was possible: no consensus score is reported and nothing in this memo reflects agreement or convergence between models.";
+
+/** Research memo section of stored differences that are not disagreements between independent models. */
+export const RESEARCH_MEMO_RECORDED_DIFFERENCES_HEADING = "RECORDED DIFFERENCES NOT COUNTED AS MODEL DISAGREEMENTS";
+export const RESEARCH_MEMO_RECORDED_DIFFERENCES_NOTE =
+  "The synthesis recorded these differing positions, but they are not counted as disagreements between independent models. Each position is named by the model that actually answered.";
+
+/** Research memo lines when two or more slots answered but which models executed is not recorded. */
+export const RESEARCH_MEMO_UNVERIFIED_SUMMARY =
+  "Which models actually answered this question could not be established, so nothing in this memo is presented as agreement or disagreement between models.";
+export const RESEARCH_MEMO_UNVERIFIED_METHODOLOGY =
+  "This question was sent to a panel of large language models via ConvergePanel with identical instructions, but which models actually executed could not be established (model independence unverified). No consensus score is reported and nothing in this memo reflects agreement or convergence between models.";
+
+/** Order 35 A (F-1): research memo lines when no independent model returned a successful response. */
+export const RESEARCH_MEMO_NO_RESPONSES_CONSENSUS_LINE = "CONSENSUS SCORE: none (no successful model responses; consensus cannot be assessed)";
+export const RESEARCH_MEMO_NO_RESPONSES_EVIDENCE = "not assessed (no successful model responses)";
+export const RESEARCH_MEMO_NO_RESPONSES_SUMMARY =
+  "No model responses are available for this question, so consensus cannot be assessed and nothing in this memo is presented as agreement between models.";
+export const RESEARCH_MEMO_NO_RESPONSES_METHODOLOGY =
+  "This question was sent to a panel of large language models via ConvergePanel with identical instructions. No model returned a successful response, so no consensus score is reported and nothing in this memo reflects agreement or convergence between models.";
+
 function generateResearchMemo(input: MemoInput): string {
   const lines: string[] = [];
   const q = (input.question ?? "").trim() || "—";
   const findings = dedupeCap(input.keyFindings ?? []);
   const agree = dedupeCap(input.synthesisAgreements ?? []);
   const disagree = dedupeCap(input.synthesisDisagreements ?? []);
-  const n = Math.max(1, input.modelsUsed?.length ?? 0);
+  const independent =
+    typeof input.independentModelCount === "number" && Number.isFinite(input.independentModelCount)
+      ? Math.max(0, Math.floor(input.independentModelCount))
+      : null;
+  const n = independent !== null ? Math.max(1, independent) : Math.max(1, input.modelsUsed?.length ?? 0);
+  // Fewer than two independent executing models: one model's output is not a consensus.
+  const singleModel = independent !== null && independent < 2;
+  // Unknown execution identity: no consensus either, stated as unverified (never as one model's output).
+  const unverified = !singleModel && input.researchIndependenceUnverified === true;
+  // Order 35 A (F-1): no independent model returned a successful response — nothing to assess, never "one model".
+  const noResponses = independent === 0;
+  const noConsensus = singleModel || unverified;
+  const rs = input.researchSlotCounts;
+  const slots = !noConsensus && rs && rs.independentModels >= 2 && rs.answeredSlots > rs.independentModels ? rs : null;
 
   lines.push("VERIFICATION MEMO");
   lines.push("ConvergePanel Multi-Model Research Report");
@@ -472,12 +642,39 @@ function generateResearchMemo(input: MemoInput): string {
   lines.push("RESEARCH QUERY");
   lines.push(`"${q}"`);
   lines.push("");
-  lines.push(`CONSENSUS SCORE: ${input.consensusScore}/100 (${input.confidenceLabel} confidence)`);
-  lines.push(`EVIDENCE QUALITY: ${input.evidenceQuality}`);
+  if (unverified) {
+    lines.push(CLAIM_MEMO_WITHHELD_CONSENSUS_LINE);
+  } else if (noResponses) {
+    lines.push(RESEARCH_MEMO_NO_RESPONSES_CONSENSUS_LINE);
+  } else if (noConsensus) {
+    lines.push("CONSENSUS SCORE: none (fewer than two independent models responded; slots answered by the same substitute model count as one)");
+  } else if (slots) {
+    lines.push(`CONSENSUS SCORE: ${input.consensusScore}/100 (${input.confidenceLabel} confidence; computed over ${slots.answeredSlots} answering slots by the saved synthesis; ${slots.independentModels} independent executing models)`);
+  } else {
+    lines.push(`CONSENSUS SCORE: ${input.consensusScore}/100 (${input.confidenceLabel} confidence)`);
+  }
+  // The stored evidence quality is a cross-model support rollup: with one independent model it measures nothing.
+  lines.push(
+    unverified
+      ? `EVIDENCE QUALITY: ${CLAIM_MEMO_UNVERIFIED_EVIDENCE}`
+      : noResponses
+        ? `EVIDENCE QUALITY: ${RESEARCH_MEMO_NO_RESPONSES_EVIDENCE}`
+        : noConsensus
+        ? `EVIDENCE QUALITY: ${RESEARCH_MEMO_NO_CROSS_MODEL_EVIDENCE}`
+        : `EVIDENCE QUALITY: ${input.evidenceQuality}`
+  );
   lines.push("");
   lines.push("SUMMARY");
   lines.push(
-    `${n} AI models researched this question independently. ${researchSummarySentence(input.consensusScore, input.evidenceQuality)}`
+    unverified
+      ? RESEARCH_MEMO_UNVERIFIED_SUMMARY
+      : noResponses
+      ? RESEARCH_MEMO_NO_RESPONSES_SUMMARY
+      : noConsensus
+      ? "Fewer than two independent AI models responded to this question, so there is no cross-model agreement to report. Treat the findings as a single model's output."
+      : slots
+        ? `${slots.answeredSlots} panel slots answered this question; ${slots.independentModels} independent executing models wrote those answers. ${researchSummarySentence(input.consensusScore, input.evidenceQuality)}`
+        : `${n} AI models researched this question independently. ${researchSummarySentence(input.consensusScore, input.evidenceQuality)}`
   );
   lines.push("");
 
@@ -487,21 +684,35 @@ function generateResearchMemo(input: MemoInput): string {
     lines.push("");
   }
 
-  if (agree.length) {
+  if (agree.length && !noConsensus) {
     lines.push("WHERE MODELS AGREE");
     agree.forEach((p) => lines.push(`- ${p}`));
     lines.push("");
   }
 
-  if (disagree.length) {
+  // Below two independent models no disagreement between models exists to report.
+  if (disagree.length && !noConsensus) {
     lines.push("WHERE MODELS DISAGREE");
     disagree.forEach((p) => lines.push(`- ${p}`));
+    lines.push("");
+  }
+
+  const recorded = input.researchRecordedDifferences ?? [];
+  if (recorded.length) {
+    lines.push(RESEARCH_MEMO_RECORDED_DIFFERENCES_HEADING);
+    lines.push(RESEARCH_MEMO_RECORDED_DIFFERENCES_NOTE);
+    for (const d of recorded) {
+      lines.push(`- ${d.topic} — ${d.basisText}`);
+      if (d.whyTheyDiffer) lines.push(`  ${d.whyTheyDiffer}`);
+      d.positions.forEach((p) => lines.push(`  ${p.voice}: ${p.position}`));
+    }
     lines.push("");
   }
 
   const assess = (input.confidenceAssessment ?? "").trim();
   if (assess) {
     lines.push("CONFIDENCE ASSESSMENT");
+    if (input.confidenceAssessmentLabel) lines.push(input.confidenceAssessmentLabel);
     lines.push(assess);
     lines.push("");
   }
@@ -512,7 +723,15 @@ function generateResearchMemo(input: MemoInput): string {
 
   lines.push("METHODOLOGY");
   lines.push(
-    `This question was independently researched by ${n} large language model${n === 1 ? "" : "s"} via ConvergePanel. Each model received identical instructions. Models were not shown each other's responses. Results were synthesized to identify areas of agreement and disagreement. The consensus score reflects the degree of convergence across models weighted by evidence quality and source backing.`
+    unverified
+      ? RESEARCH_MEMO_UNVERIFIED_METHODOLOGY
+      : noResponses
+      ? RESEARCH_MEMO_NO_RESPONSES_METHODOLOGY
+      : noConsensus
+      ? RESEARCH_MEMO_SINGLE_MODEL_METHODOLOGY
+      : slots
+        ? `This question was sent to ${slots.answeredSlots} answering panel slots via ConvergePanel, written by ${slots.independentModels} independent executing models (a model that answered several slots counts once). Each slot received identical instructions. The consensus score was computed over answering slots by the saved synthesis, so it is not a count of independent models.`
+        : `This question was independently researched by ${n} large language model${n === 1 ? "" : "s"} via ConvergePanel. Each model received identical instructions. Models were not shown each other's responses. Results were synthesized to identify areas of agreement and disagreement. The consensus score reflects the degree of convergence across models weighted by evidence quality and source backing.`
   );
   lines.push("");
   lines.push("DISCLAIMER");
@@ -532,6 +751,13 @@ function generateResearchMemo(input: MemoInput): string {
  * "where models agree / disagree"). The figure shown is the run certainty, as computed and stored — renamed from
  * "consensus score", never recomputed.
  */
+/** Order 36 A (F35-M1, owner ruling): marked memo lines with fewer than two verified independent successful responses. */
+export const MARKED_MEMO_RUN_CERTAINTY_NOT_ESTABLISHED = "RUN CERTAINTY: not established";
+export const MARKED_MEMO_EVIDENCE_NOT_ASSESSED = "not assessed (fewer than two verified independent model responses)";
+export const MARKED_MEMO_NO_RESPONSES = "No successful model responses. Consensus and run certainty cannot be established.";
+export const MARKED_MEMO_ONE_RESPONSE = "Only one model responded. Independent multi-model agreement and run certainty cannot be established.";
+export const MARKED_MEMO_IDENTITY_UNVERIFIED = "Which models answered this question could not be established. Independent multi-model agreement and run certainty cannot be established.";
+
 function generateMarkedAdaptiveResearchMemo(input: MemoInput): string {
   const lines: string[] = [];
   const q = (typeof input.question === "string" ? input.question : "").trim() || "—";
@@ -556,10 +782,21 @@ function generateMarkedAdaptiveResearchMemo(input: MemoInput): string {
   lines.push("RESEARCH QUERY");
   lines.push(`"${q}"`);
   lines.push("");
-  lines.push(`RUN CERTAINTY: ${input.consensusScore}/100 (${input.confidenceLabel} confidence)`);
-  lines.push(`EVIDENCE QUALITY: ${input.evidenceQuality}`);
+  // Order 36 A (F35-M1): fewer than two verified independent successful responses → no run certainty figure.
+  const verifiedCount =
+    typeof input.independentModelCount === "number" && Number.isFinite(input.independentModelCount) ? Math.max(0, Math.floor(input.independentModelCount)) : null;
+  const insufficient =
+    verifiedCount === 0 ? MARKED_MEMO_NO_RESPONSES : verifiedCount === 1 ? MARKED_MEMO_ONE_RESPONSE : verifiedCount === null && input.researchIndependenceUnverified === true ? MARKED_MEMO_IDENTITY_UNVERIFIED : null;
+  if (insufficient) {
+    lines.push(MARKED_MEMO_RUN_CERTAINTY_NOT_ESTABLISHED);
+    lines.push(`EVIDENCE QUALITY: ${MARKED_MEMO_EVIDENCE_NOT_ASSESSED}`);
+  } else {
+    lines.push(`RUN CERTAINTY: ${input.consensusScore}/100 (${input.confidenceLabel} confidence)`);
+    lines.push(`EVIDENCE QUALITY: ${input.evidenceQuality}`);
+  }
   lines.push("");
   lines.push("SUMMARY");
+  if (insufficient) lines.push(insufficient);
   // m-4: the record says how many slots were dispatched, not that each answered (a slot may have failed or been retried).
   lines.push(`${n} panel slot${n === 1 ? " was" : "s were"} dispatched for this question. Positions below are stated from the recorded panel rows; value comparisons are computed, not model positions.`);
   lines.push("");

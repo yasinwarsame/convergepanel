@@ -54,7 +54,9 @@ export interface TeamClaimListItem {
   verificationId: string;
   claim: string;
   verdict: TeamClaimVerdict;
-  consensusScore: number;
+  /** null exactly when `consensusWithheld` is present (not a multi-model consensus). */
+  consensusScore: number | null;
+  consensusWithheld?: "insufficient_independent_models" | "independence_unverified";
   confidenceLabel: "High" | "Medium" | "Low";
   evidenceQuality: "strong" | "mixed" | "weak";
   governanceStatus?: "approved" | "needs_review" | "blocked";
@@ -137,7 +139,12 @@ function parseItem(raw: unknown, address: TeamClaimListAddress): TeamClaimListIt
   if (!nonEmptyString(raw.verificationId)) return null;
   if (!nonEmptyString(raw.claim)) return null;
   if (typeof raw.verdict !== "string" || !VERDICTS.has(raw.verdict)) return null;
-  if (typeof raw.consensusScore !== "number" || !Number.isFinite(raw.consensusScore)) return null;
+  // A withheld score arrives as null + its reason; a score with a reason, or neither, is not renderable honestly.
+  const withheld = raw.consensusWithheld;
+  if (withheld !== undefined) {
+    if (withheld !== "insufficient_independent_models" && withheld !== "independence_unverified") return null;
+    if (raw.consensusScore !== null) return null;
+  } else if (typeof raw.consensusScore !== "number" || !Number.isFinite(raw.consensusScore)) return null;
   if (typeof raw.confidenceLabel !== "string" || !CONFIDENCE.has(raw.confidenceLabel)) return null;
   if (typeof raw.evidenceQuality !== "string" || !EVIDENCE.has(raw.evidenceQuality)) return null;
   if (raw.governanceStatus !== undefined && (typeof raw.governanceStatus !== "string" || !GOVERNANCE.has(raw.governanceStatus))) return null;
@@ -175,7 +182,8 @@ function parseItem(raw: unknown, address: TeamClaimListAddress): TeamClaimListIt
     verificationId: raw.verificationId,
     claim: raw.claim,
     verdict: raw.verdict as TeamClaimVerdict,
-    consensusScore: raw.consensusScore,
+    consensusScore: withheld !== undefined ? null : (raw.consensusScore as number),
+    ...(withheld !== undefined ? { consensusWithheld: withheld as TeamClaimListItem["consensusWithheld"] } : {}),
     confidenceLabel: raw.confidenceLabel as TeamClaimListItem["confidenceLabel"],
     evidenceQuality: raw.evidenceQuality as TeamClaimListItem["evidenceQuality"],
     ...(raw.governanceStatus !== undefined ? { governanceStatus: raw.governanceStatus as TeamClaimListItem["governanceStatus"] } : {}),

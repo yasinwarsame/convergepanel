@@ -1,0 +1,16 @@
+{
+ "capturedAt": "fix/connector-missing-key-fail-closed, working tree on f2493e0 (connector fail-closed correction pass, 2026-11-05); at capture the result differed from the 2c17feee hash ONLY by the executing-model attribution of the recorded substituted claude slot (replacing the label with \"Claude\" reproduced 7d3492e0\u202674c10 exactly)",
+ "label": "DeepSeek (substituting Claude)",
+ "cases": {
+  "generic-substituted-and-failed": {
+   "result": "8e5c3bb8b1c0589eaa6e499b7b9a3b4efdc7cb339f827e3a414392d5de0ae25d",
+   "labelCount": 5,
+   "fieldCounts": {
+    "unifiedAnswer": 2,
+    "presentation.answer.claims[].supporters": 2,
+    "presentation.verificationGate.unresolvedLoadBearing[].supporters": 0,
+    "presentation.verificationGate.unresolvedLoadBearing[].disputers": 1
+   }
+  }
+ }
+}

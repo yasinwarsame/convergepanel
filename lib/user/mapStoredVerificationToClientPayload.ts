@@ -5,6 +5,7 @@
 import type { ClaimVerificationClientPayload, ClaimVerificationSourceResearch } from "@/lib/verification/claimVerificationClientPayload";
 import type { ClaimVerificationFirestoreDoc } from "@/lib/firestore/verifications";
 import { buildAgreementDisagreementDigest } from "@/lib/verification/agreementDigest";
+import { storedVerificationConsensusIndependence } from "@/lib/panel/storedVerificationIndependence";
 
 /**
  * Rebuilds the client verification payload from a Firestore `verifications` document.
@@ -34,6 +35,10 @@ export function mapStoredVerificationToClientPayload(
     correctParts: m.correctParts ?? [],
     incorrectParts: m.incorrectParts ?? [],
     unverifiableParts: m.unverifiableParts ?? [],
+    // C-b (CB-04): the row's recorded execution facts, as stored (only when recorded), so a client surface can state
+    // counts through the shared gate (claimPresentedIndependence). Never inferred or completed.
+    ...(m.substituted === true ? { substituted: true as const } : {}),
+    ...(typeof m.provider === "string" ? { provider: m.provider } : {}),
   }));
 
   const digest = buildAgreementDisagreementDigest(
@@ -55,6 +60,8 @@ export function mapStoredVerificationToClientPayload(
     }).length,
   };
 
+  // Slot counts (rows with a usable verdict), not model counts: a client states a model count only through the shared
+  // gate (C-b CB-04 / CB-06).
   const usableForBanner = modelEvidence.filter((m) => m.status === "ok");
 
   return {
@@ -77,6 +84,8 @@ export function mapStoredVerificationToClientPayload(
     data.governanceStatus === "blocked"
       ? { governanceStatus: data.governanceStatus }
       : {}),
+    // Presentation only: whether the stored score may be shown as a multi-model consensus (stored data unchanged).
+    modelIndependence: storedVerificationConsensusIndependence(data as unknown as Record<string, unknown>),
     ...(options ? { sourceResearch: options.sourceResearch } : {}),
   };
 }

@@ -49,7 +49,9 @@ const ts = (offsetMinutes: number) => Timestamp.fromMillis(T0 + offsetMinutes * 
 function claim(id: string, minute: number, extra: Record<string, unknown> = {}): Row {
   return {
     id,
-    data: { userId: UID, type: "claim_verification", claim: `Claim ${id}`, verdict: "accurate", consensusScore: 80, governanceStatus: "approved", timestamp: ts(minute), ...extra },
+    // Two independent executing models answered, each with its recorded provider (C-b CB-01: the shared gate), so the
+    // stored score is listed (claim independence rule).
+    data: { userId: UID, type: "claim_verification", claim: `Claim ${id}`, verdict: "accurate", consensusScore: 80, governanceStatus: "approved", timestamp: ts(minute), modelResults: [{ modelId: "chatgpt", status: "ok", provider: "openai" }, { modelId: "claude", status: "ok", provider: "anthropic" }], selectedModels: ["chatgpt", "claude"], ...extra },
   };
 }
 function video(id: string, minute: number, extra: Record<string, unknown> = {}): Row {
@@ -79,7 +81,7 @@ describe("Claim history containment", () => {
     const { status, body } = await history();
     expect(status).toBe(200);
     expect(body.items).toEqual([
-      { type: "verification", id: "vcl-personal", at: new Date(T0 + 60_000).toISOString(), claim: "Claim vcl-personal", verdict: "accurate", consensusScore: 80, governanceStatus: "approved" },
+      { type: "verification", id: "vcl-personal", at: new Date(T0 + 60_000).toISOString(), claim: "Claim vcl-personal", verdict: "accurate", consensusScore: 80, modelIndependence: "independent", governanceStatus: "approved" },
     ]);
   });
 
@@ -122,7 +124,8 @@ describe("Video history containment", () => {
     videoRows = [video("vid-personal", 1, { governanceStatus: "needs_review" })];
     const { body } = await history();
     expect(body.items).toEqual([
-      { type: "video_verification", id: "vid-personal", at: new Date(T0 + 60_000).toISOString(), fileName: "vid-personal.mp4", durationSeconds: 12, verdict: "authentic_captured", consensusScore: 70, governanceStatus: "needs_review" },
+      // C-c (CC-07, PQ-2 strict): the stored video score (70) is withheld — video rows record no provider.
+      { type: "video_verification", id: "vid-personal", at: new Date(T0 + 60_000).toISOString(), fileName: "vid-personal.mp4", durationSeconds: 12, verdict: "authentic_captured", consensusWithheld: "independence_unverified", governanceStatus: "needs_review" },
     ]);
   });
 

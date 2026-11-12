@@ -15,7 +15,7 @@
  */
 
 import { ModelId } from "@/lib/types";
-import { getModelDisplayNameSafe } from "@/lib/panelModels";
+import { getModelDisplayNameSafe, PANEL_MODELS } from "@/lib/panelModels";
 import { runModelFamilyName } from "@/lib/panel/runModelIdentity";
 
 /**
@@ -29,7 +29,7 @@ import { runModelFamilyName } from "@/lib/panel/runModelIdentity";
  * in every spelling rather than flagged as "Gemini 3.5 Flash" or a bare version token.
  */
 const MODEL_NAME_TOKEN_PATTERN =
-  /\b(GPT[\s-]?\d[\w.]*(?:\s+(?:Turbo|Pro|mini|nano))?|Claude(?:\s+(?:Opus|Sonnet|Haiku))?[\s-]?\d[\w.]*(?:\s+(?:Opus|Sonnet|Haiku))?|Gemini[\s-]?\d[\w.]*(?:[\s-]+(?:Pro|Flash(?:[\s-]+Lite)?|Ultra|Nano))?|Grok[\s-]?\d[\w.]*|Perplexity(?:\s+(?:Pro|Sonar))?|Llama[\s-]?\d[\w.]*|Mistral(?:\s+\w+)?|DeepSeek(?:[\s-]?\w+)?)\b/gi;
+  /\b(GPT[\s-]?\d[\w.]*(?:[\s-]+(?:Turbo|Pro|mini|nano))?|Claude(?:\s+(?:Opus|Sonnet|Haiku))?[\s-]?\d[\w.]*(?:\s+(?:Opus|Sonnet|Haiku))?|Gemini[\s-]?\d[\w.]*(?:[\s-]+(?:Pro|Flash(?:[\s-]+Lite)?|Ultra|Nano))?|Grok[\s-]?\d[\w.]*(?:-\d+)*(?:[\s-]+(?:Fast|Mini|Heavy)(?:[\s-]+(?:non-)?reasoning)?|-(?:non-)?reasoning)?|Perplexity(?:\s+(?:Pro|Sonar))?|Llama[\s-]?\d[\w.]*|Mistral(?:\s+\w+)?|DeepSeek(?:[\s-]?\w+)?)\b/gi;
 
 /**
  * Comparison key for a model name: lower case, with every run of spaces and
@@ -40,14 +40,15 @@ function nameKey(name: string): string {
   return name.toLowerCase().replace(/[\s-]+/g, " ").trim();
 }
 
-/** The run's own names (display name, family name, id) as comparison keys. */
+/** The run's own names (display name, family name, id, requested API model ID) as comparison keys. */
 function allowedNameKeys(roster: ModelId[]): Set<string> {
-  return new Set(roster.flatMap((id) => [getModelDisplayNameSafe(id), runModelFamilyName(id), id]).map(nameKey));
+  const requested = (id: ModelId) => PANEL_MODELS.find((m) => m.id === id)?.requestedModelId ?? id;
+  return new Set(roster.flatMap((id) => [getModelDisplayNameSafe(id), runModelFamilyName(id), id, requested(id)]).map(nameKey));
 }
 
 /** Returns every model-name-like token in `text` that isn't one of the run's actual display names. */
 export function findUnrecognizedModelNames(text: string, roster: ModelId[]): string[] {
-  // A roster model may be named by its display name ("Perplexity Pro"), its family name ("Perplexity") or
+  // A roster model may be named by its display name ("Perplexity Sonar"), its family name ("Perplexity") or
   // its ID ("perplexity") — the narrative prompt asks for IDs. Only names outside the roster are flagged.
   const allowed = allowedNameKeys(roster);
   const matches = text.match(MODEL_NAME_TOKEN_PATTERN) || [];

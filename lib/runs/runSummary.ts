@@ -17,6 +17,11 @@
 import "server-only";
 import type { ModelId } from "@/lib/types";
 import type { QueryType } from "@/lib/adaptiveSchema/types";
+import {
+  consensusScoreWithheldReason,
+  storedRunConsensusIndependence,
+  type ConsensusScoreWithheldReason,
+} from "@/lib/panel/independentVoices";
 
 export type RunSummaryBase = {
   id: string;
@@ -27,6 +32,12 @@ export type RunSummaryBase = {
   modelsOk?: number;
   modelsTotal?: number;
   synthesisConsensusScore?: number;
+  /**
+   * Present (and `synthesisConsensusScore` absent) when the run stores a synthesis consensus score that is not
+   * presentable as multi-model agreement: its persisted rows reduce to fewer than two independent executing models, or
+   * carry no execution identity (`storedRunConsensusIndependence`). The stored score itself is never changed.
+   */
+  synthesisConsensusWithheld?: ConsensusScoreWithheldReason;
   governanceStatus?: "approved" | "needs_review" | "blocked";
   hasAdaptiveOutput?: boolean;
   adaptiveSchemaId?: QueryType;
@@ -70,7 +81,9 @@ export function toRunSummaryBase(id: string, data: Record<string, unknown>): Run
     : undefined;
 
   const synSum = data.synthesisConsensusSummary as { overallConsensusScore?: number } | undefined;
-  const synthesisConsensusScore = typeof synSum?.overallConsensusScore === "number" ? synSum.overallConsensusScore : undefined;
+  const storedScore = typeof synSum?.overallConsensusScore === "number" ? synSum.overallConsensusScore : undefined;
+  const withheld = storedScore === undefined ? undefined : consensusScoreWithheldReason(storedRunConsensusIndependence(data));
+  const synthesisConsensusScore = withheld ? undefined : storedScore;
 
   const adaptiveOutput = data.adaptiveOutput as { schemaId?: unknown } | undefined;
   const hasAdaptiveOutput = !!adaptiveOutput && typeof adaptiveOutput.schemaId === "string";
@@ -84,6 +97,7 @@ export function toRunSummaryBase(id: string, data: Record<string, unknown>): Run
     modelsOk,
     modelsTotal: modelsTotal || undefined,
     synthesisConsensusScore,
+    ...(withheld ? { synthesisConsensusWithheld: withheld } : {}),
     governanceStatus: normalizeGovernanceStatus(data.governanceStatus),
     ...(hasAdaptiveOutput ? { hasAdaptiveOutput, adaptiveSchemaId: adaptiveOutput!.schemaId as QueryType } : {}),
   };

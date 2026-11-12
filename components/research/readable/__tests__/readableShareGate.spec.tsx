@@ -134,9 +134,11 @@ function generated(rec: any, readable?: ReadableShareGate) {
   const provenance = rows.map((r: any) => runModelProvenanceFromResultRow(r));
   const memoInput = buildAdaptiveMemoInput(QUESTION, rec.synthesisReport, ids, "run-290", provenance, undefined, readable);
   return {
-    linkedin: buildAdaptiveLinkedInPost(QUESTION, rec.synthesisReport, undefined, readable),
-    x: buildAdaptiveXPost(QUESTION, rec.synthesisReport, undefined, readable),
-    markdown: buildAdaptiveSynthesisMarkdown(QUESTION, rec.synthesisReport, undefined, readable),
+    linkedin: buildAdaptiveLinkedInPost(QUESTION, rec.synthesisReport, undefined, undefined, readable),
+    x: buildAdaptiveXPost(QUESTION, rec.synthesisReport, undefined, undefined, readable),
+    // Integration (connector attribution): the page also hands Copy the run's provenance, so a substituted slot's
+    // position is named by its executing model ("DeepSeek (substituting Claude)"); so does this.
+    markdown: buildAdaptiveSynthesisMarkdown(QUESTION, rec.synthesisReport, undefined, provenance, undefined, readable),
     memoInput,
     memo: normMemo(generateVerificationMemo(memoInput)),
   };
@@ -337,7 +339,7 @@ describe("Order 4 reports: the readable option gives exactly the classic output 
     // The marked builder (its row or its pointer to the full report), never the historical "Models split on: ".
     expect(classic).toMatch(/Unresolved: |unresolved rows? — see the full report/);
     expect(classic).not.toContain("Models split on: ");
-    const x = buildAdaptiveXPost(QUESTION, rec.synthesisReport, pos, { status: "unavailable", badge: UNAVAILABLE, banner: UNAVAILABLE_BANNER, bannerNote: STORED_TEXT_NOTE });
+    const x = buildAdaptiveXPost(QUESTION, rec.synthesisReport, pos, undefined, { status: "unavailable", badge: UNAVAILABLE, banner: UNAVAILABLE_BANNER, bannerNote: STORED_TEXT_NOTE });
     expect(x).toContain(`${UNAVAILABLE} · Certainty: ${pct(rec)}%`);
     expect(x).not.toMatch(/Verification gate: Caution|requires further review/);
     expect(x).toMatch(/Unresolved: |unresolved rows? — see the full report/); // still the marked builder
@@ -377,7 +379,16 @@ describe("the real readable page's Copy / Export memo / LinkedIn / X produce the
  * plus the remote-work fixture; per record the builders with no option (with and without position input; memo input and
  * memo text) and the classic page (HTML, and its actions' Markdown, memo and posts). 5,266 outputs.
  */
-const CLASSIC_DIGEST_AT_BB4AED5 = { count: 5266, sha256: "80d2700414be75d134ea8c2ff78f50ba442e59c96ce76227f553729a59160bb1" };
+// Re-recorded at the connector integration (Order 34, evidence INTEGRATION.md): was 80d27004…0bb1 at bb4aed5. Exactly 44 of
+// the 5,266 outputs differ from main 2cd71bb — the classic page's copied text and HTML of the two records with a
+// substituted slot (generic-substituted-and-failed, remote), where the accepted connector attribution names the
+// substituted slot's executing model; no other output moved (per-key diff in the evidence folder).
+// Re-recorded (owner-authorized F-1, Order 35 A): was ccae07a7…ea3d at the integration head 3e94848. Exactly 22 of the 5,266
+// outputs differ — the classic page's memo download of the two records with a failed and a substituted slot
+// (generic-substituted-and-failed × 10 gate edits × stored/legacy, remote × 2): "5 AI models researched … independently" /
+// "researched by 5 large language models" → 4 (the verified count of answering executing models). No other line or output
+// moved (per-key and per-line diff in the Order 35 evidence folder).
+const CLASSIC_DIGEST_AT_BB4AED5 = { count: 5266, sha256: "fcd45130e4ff0ddc0ad4732d9782551510f503c7b06afcbf2705bab7fd8969dd" };
 
 describe("frozen classic parity: every classic output over the broad fixture set is byte-identical to bb4aed5", () => {
   it("5,266 hashed classic outputs, one digest", () => {
@@ -477,7 +488,14 @@ describe("frozen classic parity: every classic output over the broad fixture set
  */
 const LONG_QUESTION_290B =
   "Across the last two decades of peer-reviewed labour-economics research, does a sustained shift to remote or hybrid work measurably change individual and team productivity, and how do sector, task type and measurement method change the answer?";
-const CLASSIC_DIGEST_AT_7212C47 = { count: 15798, sha256: "e7fa0463c219009056735ceaf7cff697f0b8e34935efec025ea233c63678dcab" };
+// Re-recorded at the connector integration (Order 34): was e7fa0463…dcab at 7212c47. 479 of 15,798 outputs differ from main
+// 2cd71bb: the classic X post (and the page's posts) for the long question, where the accepted connector D03 budget keeps
+// the computed result and the brand line whole (main's classic build cut both), and the substituted-slot attribution on the
+// two records with a substituted slot. The readable-unchanged digest below did not move.
+// Re-recorded (owner-authorized F-1, Order 35 A): was 201f5680…0b16 at 3e94848. Exactly 66 of 15,798 outputs differ, all the
+// classic page's memo download of the same two records, with the same single correction (5 → 4 independent answering
+// models); the readable-unchanged digest below did not move.
+const CLASSIC_DIGEST_AT_7212C47 = { count: 15798, sha256: "0f2af7f84de37cdf57135aef273c52de2bc5788e731b674949d80a821574441d" };
 const READABLE_UNCHANGED_DIGEST_AT_7212C47 = { count: 3840, sha256: "5db7b09c022b33834c028c03845c4fbadad9032c84cb01383fa3508a2508a17f" };
 
 function extendedRecords(): Array<[string, () => any, string]> {
@@ -590,9 +608,9 @@ describe("frozen parity extended (review of 7212c47)", () => {
       const rows = slotRows(base);
       const pos = { rows, roster: rows.map((x: any) => x.modelId) } as any;
       for (const [pk, pi] of [["nopos", undefined], ["pos", pos]] as const) {
-        out[`${key}|${p.status}|${pk}|li`] = sha290b(buildAdaptiveLinkedInPost(QUESTION, rec.synthesisReport, pi as any, p));
-        out[`${key}|${p.status}|${pk}|x`] = sha290b(buildAdaptiveXPost(QUESTION, rec.synthesisReport, pi as any, p));
-        if (p.status !== "unavailable") out[`${key}|${p.status}|${pk}|md`] = sha290b(buildAdaptiveSynthesisMarkdown(QUESTION, rec.synthesisReport, pi as any, p));
+        out[`${key}|${p.status}|${pk}|li`] = sha290b(buildAdaptiveLinkedInPost(QUESTION, rec.synthesisReport, pi as any, undefined, p));
+        out[`${key}|${p.status}|${pk}|x`] = sha290b(buildAdaptiveXPost(QUESTION, rec.synthesisReport, pi as any, undefined, p));
+        if (p.status !== "unavailable") out[`${key}|${p.status}|${pk}|md`] = sha290b(buildAdaptiveSynthesisMarkdown(QUESTION, rec.synthesisReport, pi as any, undefined, undefined, p));
       }
       if (p.status !== "unavailable") {
         const mi = buildAdaptiveMemoInput(QUESTION, rec.synthesisReport, rows.map((x: any) => x.modelId), "v1", null, rows, p);
