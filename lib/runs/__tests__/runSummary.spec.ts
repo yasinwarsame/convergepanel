@@ -80,8 +80,11 @@ describe("toRunSummaryBase", () => {
   });
 
   it("synthesisConsensusScore derived only when overallConsensusScore is a number", () => {
-    const withScore = toRunSummaryBase("r", { question: "q", selectedModels: [], createdAt: { toMillis: () => 1 }, synthesisConsensusSummary: { overallConsensusScore: 42 } });
+    // C-c (CC-01): each row records its runtime provider (the shared gate verifies the run).
+    const twoIndependent = { perModel: [{ modelId: "chatgpt", status: "ok", rawTextTruncated: "A", provider: "openai" }, { modelId: "grok", status: "ok", rawTextTruncated: "B", provider: "xai" }] };
+    const withScore = toRunSummaryBase("r", { question: "q", selectedModels: [], createdAt: { toMillis: () => 1 }, runDocument: twoIndependent, synthesisConsensusSummary: { overallConsensusScore: 42 } });
     expect(withScore.synthesisConsensusScore).toBe(42);
+    expect(withScore.synthesisConsensusWithheld).toBeUndefined();
     const withoutScore = toRunSummaryBase("r", { question: "q", selectedModels: [], createdAt: { toMillis: () => 1 }, synthesisConsensusSummary: { overallConsensusScore: "not-a-number" } });
     expect(withoutScore.synthesisConsensusScore).toBeUndefined();
   });

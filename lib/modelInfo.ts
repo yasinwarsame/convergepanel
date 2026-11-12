@@ -23,10 +23,10 @@ import { GEMINI_DISPLAY_NAME } from "./models/gemini";
  * The single source of truth for model metadata is now lib/panelModels.ts.
  */
 export const MODEL_INFO: Record<ModelId, { displayName: string }> = {
-  chatgpt: { displayName: "GPT 5.2" },
-  claude: { displayName: "Claude Opus 4.5" },
-  grok: { displayName: "Grok 4" },
-  perplexity: { displayName: "Perplexity Pro" },
+  chatgpt: { displayName: "GPT-4o mini" },
+  claude: { displayName: "Claude Haiku 4.5" },
+  grok: { displayName: "Grok 4.3" },
+  perplexity: { displayName: "Perplexity Sonar" },
   gemini: { displayName: GEMINI_DISPLAY_NAME },
 };
 

@@ -175,9 +175,11 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
   const { synthesisReport, alignedClaims, results } = props;
   const marked = isPositionMarked(synthesisReport);
   const roster = useMemo(() => results.map((r) => r.modelId as string), [results]);
+  // An unmarked report: the same object, except that agreement statements whose supporting slots are not independent
+  // executing models are stated by their executing models (verdictIndependence.ts) for every surface below.
   const shownReport = useMemo(
-    () => (marked ? presentPositionSafeReport(synthesisReport, { rows: alignedClaims, roster, provenance }) : synthesisReport),
-    [marked, synthesisReport, alignedClaims, roster, provenance]
+    () => presentPositionSafeReport(synthesisReport, { rows: alignedClaims, roster, provenance }),
+    [synthesisReport, alignedClaims, roster, provenance]
   );
   const position = useMemo<PositionPresentationState | null>(() => (marked ? { marked: true, roster, provenance } : null), [marked, roster, provenance]);
   // D-2/D-3: one notice naming the automated steps that did not run for this run (nothing when all ran).
@@ -186,7 +188,7 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
     return (
       <>
         {notice}
-        <AdaptivePanelResponseBody {...props} />
+        {shownReport === synthesisReport ? <AdaptivePanelResponseBody {...props} /> : <AdaptivePanelResponseBody {...props} synthesisReport={shownReport} />}
       </>
     );
   }
@@ -681,7 +683,7 @@ function AdaptivePanelResponseBody(props: AdaptivePanelResponseProps) {
   if (PHASE2_PILOT_SCHEMAS.has(schema.id)) {
     return withBar(
       <div className="space-y-4">
-        {synthesisReport && <PrimarySynthesisStrip synthesisReport={synthesisReport} />}
+        {synthesisReport && <PrimarySynthesisStrip synthesisReport={synthesisReport} alignedClaims={alignedClaims} />}
         <SchemaKeyFactsStrip schemaId={schema.id} results={results} alignedClaims={alignedClaims} />
         <AdaptiveResultsView {...props} />
         <ModelResponsesSection

@@ -65,6 +65,7 @@ function isRetryableResult(result: ModelResult): boolean {
 }
 
 function isNonRetryable(result: ModelResult): boolean {
+  if (result.errorCode === "provider_not_configured") return true;
   const msg = (result.errorMessage ?? "").toLowerCase();
   return (
     msg.includes("401") ||
@@ -79,6 +80,11 @@ function classifyPrimaryErrorCode(modelId: ModelId, result: ModelResult): string
   const provider = getPanelModelConfig(modelId).provider;
   const msg = (result.errorMessage ?? "").toLowerCase();
 
+  // Typed connector code wins over message sniffing: a missing key is a
+  // configuration gap, recorded as such (never as a generic provider error).
+  if (result.errorCode === "provider_not_configured") {
+    return `${provider}_not_configured`;
+  }
   if (result.status === "timeout" || msg.includes("timeout")) {
     return `${provider}_timeout`;
   }
@@ -106,6 +112,11 @@ const NON_TRANSIENT_QUOTA_PHRASES = [
 ];
 
 function shouldAttemptDeepSeek(primaryCode: string, primaryResult: ModelResult): boolean {
+  // A missing/empty provider key is a configuration failure, not a provider
+  // outage: the slot fails closed and is never answered by a substitute.
+  if (primaryResult.errorCode === "provider_not_configured" || primaryCode.endsWith("_not_configured")) {
+    return false;
+  }
   if (primaryCode.includes("_auth") || primaryCode.includes("_forbidden")) {
     return false;
   }
@@ -125,7 +136,10 @@ function shouldAttemptDeepSeek(primaryCode: string, primaryResult: ModelResult):
  *
  * CRITICAL GUARANTEE: Always returns exactly one result per selected model.
  * - Primary succeeds → status: "ok"
- * - Primary fails, DeepSeek succeeds → status: "substituted"
+ * - Primary fails transiently, DeepSeek succeeds → status: "substituted"
+ *   (provider: "deepseek", actualModel: the DeepSeek model, substitutedFrom,
+ *   substitutionReason). Never for a missing key (`*_not_configured`), an
+ *   auth/forbidden failure, or a non-transient quota failure.
  * - Both fail or fallback not allowed → status: "failed"
  */
 export async function runPanel(
@@ -271,6 +285,8 @@ async function runSlotWithFallback(
       requestedModel,
       provider,
       actualModel: requestedModel,
+      // F-2 (Order 34): the structured execution fact — the slot's own connector returned ok with no errorCode.
+      ...(primaryResult.errorCode ? {} : { outputClass: "model_response" as const }),
     });
   }
 
@@ -285,6 +301,8 @@ async function runSlotWithFallback(
           requestedModel,
           provider,
           actualModel: requestedModel,
+          // F-2 (Order 34): the structured execution fact (see the primary attempt above).
+          ...(primaryResult.errorCode ? {} : { outputClass: "model_response" as const }),
         });
       }
       if (isNonRetryable(primaryResult)) break;
@@ -386,6 +404,7 @@ function failedPlaceholder(modelId: ModelId, primaryResult: ModelResult, reason?
     status: "failed" as const,
     rawText: "Model unavailable.",
     errorMessage: primaryResult.errorMessage || `${modelId} failed`,
+    ...(primaryResult.errorCode ? { errorCode: primaryResult.errorCode } : {}),
     latencyMs: primaryResult.latencyMs || 0,
     tokenUsage: { totalTokens: 0, promptTokens: null, completionTokens: null },
     requestedModel,

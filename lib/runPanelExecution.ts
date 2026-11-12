@@ -450,6 +450,9 @@ export async function executeOrdinaryRun(args: ExecuteOrdinaryRunArgs): Promise<
         actualModel: result.actualModel,
         substitutedFrom: result.substitutedFrom,
         substitutionReason: result.substitutionReason,
+        // F-2 (Order 34): the structured execution fact the slot runner stamped (ok, no errorCode), carried as recorded so
+        // the live row and the saved row (runDocumentToPublicResults) read the same in the shared gate.
+        ...(result.outputClass === "model_response" ? { outputClass: "model_response" as const } : {}),
       };
 
       if ((result as any)?.finishReason) {
@@ -667,6 +670,8 @@ export async function executeOrdinaryRun(args: ExecuteOrdinaryRunArgs): Promise<
       actualModel: result.actualModel,
       substitutedFrom: result.substitutedFrom,
       substitutionReason: result.substitutionReason,
+      // F-2 (Order 34): the structured execution fact, carried as recorded (see the primary public row above).
+      ...(result.outputClass === "model_response" ? { outputClass: "model_response" as const } : {}),
     };
 
     if (result.errorMessage) {

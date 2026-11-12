@@ -32,6 +32,7 @@ import path from "path";
 import historicalRecords from "./__fixtures__/historicalRecords.json";
 import historicalBaseline from "./__fixtures__/historicalBaseline.json";
 import { D9, ORACLE, OLD_CAPTION, SHOWN_488, stateOf } from "./dsExportOracle";
+import { readFrozenRunProvenance } from "@/lib/adaptiveSchema/exportRunProvenance";
 import { CANDIDATE_SECTIONS, provenanceViolations, type BundleIdentity } from "./bundleProvenance";
 
 type Digest = { format: string; sha256: string; length: number; bundle?: string; parts?: Record<string, string>; text?: string; pages?: number; layoutViolations?: unknown[]; paragraphs?: string[] };
@@ -106,11 +107,22 @@ describe("unchanged-main renderer and runtime", () => {
     for (const k of ["node", "zlib", "platform", "arch", "deps", "pdfkitMainSha256"]) expect(suite.fingerprint[k]).toBeTruthy();
   });
 
-  it("the records unchanged main builds are the committed historical records (413e14b evidence), except the DOCX fileHash", () => {
-    const strip = (r: Record<string, unknown>) => ({ ...r, exportMetadata: { ...(r.exportMetadata as object), fileHash: null } });
+  it("the records unchanged main builds are the committed historical records (413e14b evidence), except the DOCX fileHash and the version-2 frozen provenance fields", () => {
+    // Order 29 (C-a closeout): exportRunProvenance.ts (not a vendored BASE file) freezes version-2 provenance — the
+    // per-slot recorded outcome / D-5 facts and the version marker — into every record it builds. The 413e14b records
+    // were frozen at version 1, so the comparison reads the identity facts (readFrozenRunProvenance, the JSON export's
+    // projection) and separately requires every BASE record to carry the version-2 fields.
+    const strip = (r: Record<string, unknown>) => {
+      const snapshot = r.reportSnapshot as Record<string, unknown>;
+      return { ...r, exportMetadata: { ...(r.exportMetadata as object), fileHash: null }, reportSnapshot: { ...snapshot, ...("runProvenance" in snapshot ? { runProvenance: readFrozenRunProvenance(snapshot.runProvenance) } : {}) } };
+    };
     const common = Object.keys(OLD_RECORDS);
     expect(common.length).toBe(105);
-    for (const k of common) expect(strip(suite.baseRecords[k])).toEqual(strip(OLD_RECORDS[k]));
+    for (const k of common) {
+      const frozen = (suite.baseRecords[k].reportSnapshot as Record<string, unknown>).runProvenance as Record<string, unknown> | undefined;
+      if ((OLD_RECORDS[k].reportSnapshot as Record<string, unknown>).runProvenance) expect([k, frozen?.provenanceVersion]).toEqual([k, 2]);
+      expect(strip(suite.baseRecords[k])).toEqual(strip(OLD_RECORDS[k]));
+    }
     expect(Object.keys(suite.baseRecords).filter((k) => !OLD_RECORDS[k]).sort()).toEqual(["pdf", "docx", "json"].map((f) => `ds.uncontested_choose_option.unreviewed_in_queue.synthetic_identities.${f}`).sort());
   });
 });

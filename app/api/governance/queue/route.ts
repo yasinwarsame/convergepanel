@@ -22,6 +22,19 @@ import {
   researchConsensusScoreFromRunDoc,
 } from "@/lib/governance/governanceInputFromDocs";
 import { runModelFamilyName } from "@/lib/panel/runModelIdentity";
+import {
+  consensusScoreWithheldReason,
+  type ConsensusScoreWithheldReason,
+  type StoredConsensusIndependence,
+} from "@/lib/panel/independentVoices";
+import { storedVerificationConsensusIndependence } from "@/lib/panel/storedVerificationIndependence";
+import { buildQueueVerificationAgreement } from "@/lib/governance/queueVerificationAgreement";
+import {
+  classifyStoredDisagreement,
+  storedRunIndependenceContext,
+  type QualifiedDisagreementBasis,
+  type StoredRunIndependenceContext,
+} from "@/lib/panel/storedDisagreementIndependence";
 import { buildAgreementDisagreementDigest } from "@/lib/verification/agreementDigest";
 import { governanceAdminListShapeForLog } from "@/lib/admin/config";
 import {
@@ -90,6 +103,9 @@ const VER_QUEUE_FIELDS = [
   "missingSourcesCount",
   "governanceMeta",
   "modelResults",
+  // Requested models: a requested model with no stored row makes independent-model coverage unverified
+  // (lib/panel/storedVerificationIndependence.ts).
+  "selectedModels",
   // TEAM-VERIFICATION-PARITY-R1 — projected so the structural scope rule can
   // see a Workspace-bound row at all; without it every row looks Personal.
   "workspaceId",
@@ -144,6 +160,8 @@ type QueueModelVerdictRow = {
   summary?: string;
 };
 
+type QueueQualifiedDisagreement = { text: string; basis: QualifiedDisagreementBasis };
+
 type RunSummary = {
   runId: string;
   collection: "runs" | "verifications" | "videoVerifications";
@@ -151,6 +169,13 @@ type RunSummary = {
   question: string;
   consensusScore: number | null;
   evidenceQuality: string | null;
+  /**
+   * Research, claim-verification and video rows: present when the stored per-model rows reduce to fewer than two
+   * independent executing models, or record no (or incomplete) execution identity. Additive presentation metadata
+   * only: `consensusScore` / `evidenceQuality` keep the stored values (the governance-queue DTO is unchanged), and the
+   * dashboard shows this reason instead of the number. The governance evaluation input and the stored run are unchanged.
+   */
+  consensusWithheld?: ConsensusScoreWithheldReason;
   governanceStatus: GovernanceStatus;
   governanceReasons: string[];
   modelHealth: { ok: number; substituted: number; failed: number };
@@ -171,6 +196,19 @@ type RunSummary = {
   incorrectParts?: string[];
   /** Research: short key finding lines from stored synthesis when available. */
   keyFindings?: string[];
+  /**
+   * Research / claim / video: stored signals that are NOT agreement or disagreement between independent executing
+   * models, each with the reason (lib/panel/storedDisagreementIndependence.ts). Additive: `disagreements` /
+   * `disagreementPoints` keep every stored line; a renderer lists these separately instead.
+   */
+  qualifiedDisagreements?: QueueQualifiedDisagreement[];
+  /** Research / claim / video verification: present when the stored per-model rows do not prove ≥ 2 independent executing models. */
+  modelIndependence?: Exclude<StoredConsensusIndependence, "independent">;
+  /**
+   * Claim / video verification: fewer than two independent executing models answered — the verdict as ONE model's
+   * assessment (never "1/1 models say …"). Additive presentation metadata.
+   */
+  singleModelAssessment?: string;
   /** Short rationale line for claim verdict (first model summary). */
   claimVerdictSummary?: string;
   createdAt: string;
@@ -590,6 +628,211 @@ function extractResearchSynthesisQueueExtras(data: Record<string, unknown>): {
   return { keyFindings, disagreementPoints };
 }
 
+/**
+ * Executing-model independence of a queue row, as ADDITIVE presentation keys only. The governance-queue DTO's base
+ * fields (consensus score, evidence quality, agreement / dissent / disagreement lines) are the stored values computed
+ * exactly as before the independent-voice rule; these keys only tell a renderer what may be presented as agreement or
+ * disagreement between independent executing models. Key order: consensusWithheld, modelIndependence,
+ * qualifiedDisagreements, singleModelAssessment.
+ */
+type QueueIndependenceKeys = Pick<
+  RunSummary,
+  "consensusWithheld" | "modelIndependence" | "qualifiedDisagreements" | "singleModelAssessment"
+>;
+
+/** The claim digest's conflicting-assessment points, each with the two slots it names (classified by the caller). */
+function verificationDisagreementDigest(data: Record<string, unknown>): Array<{ point: string; models: string[] }> {
+  const mr = data.modelResults;
+  if (!Array.isArray(mr)) return [];
+  const lines = mr
+    .filter((m) => m && typeof m === "object")
+    .map((m) => {
+      const o = m as Record<string, unknown>;
+      return {
+        modelId: String(o.modelId ?? ""),
+        correctParts: Array.isArray(o.correctParts) ? (o.correctParts as string[]) : [],
+        incorrectParts: Array.isArray(o.incorrectParts) ? (o.incorrectParts as string[]) : [],
+      };
+    })
+    .filter((x) => x.modelId);
+  if (lines.length === 0) return [];
+  return buildAgreementDisagreementDigest(lines).whereModelsDisagree;
+}
+
+/** One stored research disagreement: its display line and the raw stored item (kept for model attribution). */
+type StoredDisagreementLine = { text: string; item: unknown };
+
+/**
+ * C-c (CC-16, D-2): the qualified research list is NOT capped. A capped list hid genuine lines on the dashboard (a
+ * saturated list cannot establish any line as genuine, so every stored line was withheld). It is bounded by the stored
+ * report's own disagreement lists; exact duplicates are listed once. Base (35933c8) keys are unchanged.
+ */
+
+function pushStoredDisagreementLine(out: StoredDisagreementLine[], line: string, item: unknown) {
+  const t = line.trim();
+  if (t && !out.some((o) => o.text === t)) out.push({ text: t, item });
+}
+
+/** Every stored research disagreement line with its stored item (uncapped; the same lines as `extractResearchDisagreementBullets`). */
+function storedResearchDisagreementLines(data: Record<string, unknown>): StoredDisagreementLine[] {
+  const out: StoredDisagreementLine[] = [];
+  const candidates = [
+    data.synthesizedStructuredReport,
+    data.synthesizedReportV2,
+    data.structuredSynthesis,
+    (data.synthesis as Record<string, unknown> | undefined)?.structured,
+  ];
+  for (const rep of candidates) {
+    if (!rep || typeof rep !== "object") continue;
+    const r = rep as Record<string, unknown>;
+    const d1 = r.disagreements;
+    if (Array.isArray(d1)) {
+      for (const item of d1) {
+        if (typeof item === "string") pushStoredDisagreementLine(out, item, item);
+        else if (item && typeof item === "object") {
+          const o = item as Record<string, unknown>;
+          const topic = String(o.topic ?? "");
+          const why = String(o.whyTheyDiffer ?? o.description ?? o.summary ?? "");
+          const point = topic && why ? `${topic}: ${why}` : topic || why;
+          pushStoredDisagreementLine(out, truncate(point, 280), item);
+        }
+      }
+    }
+    const kd = r.keyDisagreements;
+    if (Array.isArray(kd)) {
+      for (const item of kd) {
+        if (typeof item === "string") pushStoredDisagreementLine(out, item, item);
+        else if (item && typeof item === "object") {
+          const o = item as Record<string, unknown>;
+          const topic = String(o.topic ?? "");
+          const summary = String(o.summary ?? "");
+          const point = topic && summary ? `${topic}: ${summary}` : topic || summary;
+          pushStoredDisagreementLine(out, truncate(point, 280), item);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/** Every stored synthesis disagreement point with its stored item (uncapped; the same points as `extractResearchSynthesisQueueExtras`). */
+function storedResearchSynthesisDisagreementPoints(data: Record<string, unknown>): StoredDisagreementLine[] {
+  const disagreementPoints: StoredDisagreementLine[] = [];
+  const seenD = new Set<string>();
+  const pushDisagreementPoint = (raw: string, item: unknown) => {
+    const t = raw.trim();
+    if (!t || seenD.has(t)) return;
+    seenD.add(t);
+    disagreementPoints.push({ text: truncate(t, 280), item });
+  };
+
+  const synthRoot = data.structuredSynthesis ?? data.synthesis;
+  const candidates: unknown[] = [];
+  if (synthRoot && typeof synthRoot === "object") {
+    candidates.push(synthRoot);
+    const nested = (synthRoot as Record<string, unknown>).structured;
+    if (nested && typeof nested === "object") candidates.push(nested);
+  }
+
+  for (const rep of candidates) {
+    if (!rep || typeof rep !== "object") continue;
+    const dg = (rep as Record<string, unknown>).disagreements;
+    if (Array.isArray(dg)) {
+      for (const d of dg) {
+        if (typeof d === "string") pushDisagreementPoint(d, d);
+        else if (d && typeof d === "object") {
+          const o = d as Record<string, unknown>;
+          pushDisagreementPoint(String(o.point ?? o.description ?? o.topic ?? o.whyTheyDiffer ?? ""), d);
+        }
+      }
+    }
+  }
+  return disagreementPoints;
+}
+
+/**
+ * The stored research lines that are NOT disagreements between independent executing models
+ * (lib/panel/storedDisagreementIndependence.ts), each with its reason (every one; C-c CC-16).
+ */
+function qualifiedResearchDisagreements(
+  lines: readonly StoredDisagreementLine[],
+  ctx: StoredRunIndependenceContext
+): QueueQualifiedDisagreement[] {
+  const qualified: QueueQualifiedDisagreement[] = [];
+  for (const line of lines) {
+    const basis = classifyStoredDisagreement(line.item, ctx);
+    if (basis !== "cross_model") qualified.push({ text: line.text, basis });
+  }
+  return qualified;
+}
+
+/** Research row: additive independence keys (presentation only). */
+function researchQueueIndependenceKeys(
+  data: Record<string, unknown>,
+  gi: { consensusScore: number | null; evidenceQuality: string | null }
+): QueueIndependenceKeys {
+  const independenceCtx = storedRunIndependenceContext(data);
+  const qualifiedDisagreements: QueueQualifiedDisagreement[] = [];
+  for (const q of [
+    ...qualifiedResearchDisagreements(storedResearchDisagreementLines(data), independenceCtx),
+    ...qualifiedResearchDisagreements(storedResearchSynthesisDisagreementPoints(data), independenceCtx),
+  ]) {
+    if (!qualifiedDisagreements.some((x) => x.text === q.text)) qualifiedDisagreements.push(q);
+  }
+  // A stored research score is presented only when the persisted rows prove ≥ 2 independent executing models
+  // (lib/panel/independentVoices.ts); the stored value itself stays in the DTO.
+  const consensusWithheld =
+    gi.consensusScore == null && gi.evidenceQuality == null
+      ? undefined
+      : consensusScoreWithheldReason(independenceCtx.independence);
+  return {
+    ...(consensusWithheld ? { consensusWithheld } : {}),
+    ...(independenceCtx.independence !== "independent" ? { modelIndependence: independenceCtx.independence } : {}),
+    ...(qualifiedDisagreements.length > 0 ? { qualifiedDisagreements } : {}),
+  };
+}
+
+/** Claim-verification row: additive independence keys (presentation only; lib/governance/queueVerificationAgreement.ts). */
+function verificationQueueIndependenceKeys(
+  data: Record<string, unknown>,
+  gi: { consensusScore: number | null; evidenceQuality: string | null }
+): QueueIndependenceKeys {
+  const agreement = buildQueueVerificationAgreement(data, {
+    kind: "verification",
+    humanize: humanizePerModelVerdict,
+    digest: verificationDisagreementDigest(data),
+  });
+  // Independence of the stored per-model rows (lib/panel/storedVerificationIndependence.ts).
+  const independence = storedVerificationConsensusIndependence(data);
+  const consensusWithheld =
+    gi.consensusScore == null && gi.evidenceQuality == null ? undefined : consensusScoreWithheldReason(independence);
+  return {
+    ...(consensusWithheld ? { consensusWithheld } : {}),
+    ...(independence !== "independent" ? { modelIndependence: independence } : {}),
+    ...(agreement.qualifiedDisagreements.length > 0 ? { qualifiedDisagreements: agreement.qualifiedDisagreements } : {}),
+    ...(agreement.singleModelAssessment ? { singleModelAssessment: agreement.singleModelAssessment } : {}),
+  };
+}
+
+/** Video row: additive independence keys (presentation only). Video slots are never substituted. */
+function videoQueueIndependenceKeys(data: Record<string, unknown>): QueueIndependenceKeys {
+  const agreement = buildQueueVerificationAgreement(data, {
+    kind: "video",
+    humanize: humanizeVideoVerdict,
+    digest: verificationDisagreementDigest(data),
+  });
+  const storedScore = typeof data.consensusScore === "number" ? data.consensusScore : null;
+  const storedEvidence = typeof data.evidenceQuality === "string" ? data.evidenceQuality : null;
+  const consensusWithheld =
+    storedScore == null && storedEvidence == null ? undefined : consensusScoreWithheldReason(agreement.modelIndependence);
+  return {
+    ...(consensusWithheld ? { consensusWithheld } : {}),
+    ...(agreement.modelIndependence !== "independent" ? { modelIndependence: agreement.modelIndependence } : {}),
+    ...(agreement.qualifiedDisagreements.length > 0 ? { qualifiedDisagreements: agreement.qualifiedDisagreements } : {}),
+    ...(agreement.singleModelAssessment ? { singleModelAssessment: agreement.singleModelAssessment } : {}),
+  };
+}
+
 function summarizeResearch(id: string, data: Record<string, unknown>, email: string): RunSummary {
   const reasons = Array.isArray(data.governanceReasons) ? (data.governanceReasons as string[]) : [];
   if (reasons.includes("Consensus score not available")) {
@@ -624,6 +867,7 @@ function summarizeResearch(id: string, data: Record<string, unknown>, email: str
     governanceReviewedAt: typeof data.governanceReviewedAt === "string" ? data.governanceReviewedAt : undefined,
     governanceReviewComment:
       typeof data.governanceReviewComment === "string" ? data.governanceReviewComment : undefined,
+    ...researchQueueIndependenceKeys(data, gi),
   };
 }
 
@@ -666,6 +910,7 @@ function summarizeVerification(id: string, data: Record<string, unknown>, email:
     governanceReviewedAt: typeof data.governanceReviewedAt === "string" ? data.governanceReviewedAt : undefined,
     governanceReviewComment:
       typeof data.governanceReviewComment === "string" ? data.governanceReviewComment : undefined,
+    ...verificationQueueIndependenceKeys(data, gi),
   };
 }
 
@@ -873,6 +1118,7 @@ function summarizeVideo(id: string, data: Record<string, unknown>, email: string
     governanceReviewedAt: typeof data.governanceReviewedAt === "string" ? data.governanceReviewedAt : undefined,
     governanceReviewComment:
       typeof data.governanceReviewComment === "string" ? data.governanceReviewComment : undefined,
+    ...videoQueueIndependenceKeys(data),
   };
 }
 

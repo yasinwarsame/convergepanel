@@ -4,7 +4,13 @@
  */
 
 import type { VerificationGateResult } from "@/lib/verificationGate/verificationGate";
-import type { PanelVerdict } from "@/lib/verificationGate/panelVerdict";
+import {
+  INDEPENDENCE_UNVERIFIED_FINDING_PREFIX,
+  INDEPENDENCE_UNVERIFIED_SHARE_TAGLINE,
+  recordedDifferenceLines,
+  SINGLE_MODEL_SHARE_TAGLINE,
+  type PanelVerdict,
+} from "@/lib/verificationGate/panelVerdict";
 
 export interface LinkedInModelHealth {
   total: number;
@@ -55,6 +61,9 @@ export function buildIntroLine(params: {
   const gateLabel = gate?.label ?? "quick reliability pass";
 
   if (!topicLabel) {
+    // E09 (C-a): "multi-model" only when the panel had at least two independent executing models with recorded identity.
+    if (params.verdict?.crossModel === false) return `I ran a model panel (one independent model responded); verdict: ${gateLabel}.`;
+    if (params.verdict?.independenceUnverified === true) return `I ran a model panel (model independence unverified); verdict: ${gateLabel}.`;
     return `I ran a multi-model panel; verdict: ${gateLabel}.`;
   }
   return `Quick panel check on: ${topicLabel} — verdict: ${gateLabel}.`;
@@ -92,11 +101,17 @@ export function buildLinkedInPost(params: LinkedInParams): string {
 
   // E) Consensus + agreed count
   const consensus = clamp(verdict.topConsensus, 200);
+  // Fewer than two independent executing models (verdict.crossModel === false), or execution identity not recorded
+  // (verdict.independenceUnverified): no consensus and no model count is claimed.
+  const crossModel = verdict.crossModel !== false;
+  const unverified = crossModel && verdict.independenceUnverified === true;
+  const presentsConsensus = crossModel && !unverified;
   const agreedBy =
-    verdict.consensusModelCount > 0
+    presentsConsensus && verdict.consensusModelCount > 0
       ? ` Agreed by ${verdict.consensusModelCount} model${verdict.consensusModelCount !== 1 ? "s" : ""}.`
       : "";
-  lines.push(`Consensus: ${consensus}${agreedBy}`);
+  const prefix = !crossModel ? "Finding (one independent model; not a consensus)" : unverified ? INDEPENDENCE_UNVERIFIED_FINDING_PREFIX : "Consensus";
+  lines.push(`${prefix}: ${consensus}${agreedBy}`);
   lines.push("");
 
   // F) Disagreement (topic + short why, ~180 chars)
@@ -105,6 +120,13 @@ export function buildLinkedInPost(params: LinkedInParams): string {
     const detail = verdict.disagreementDetail ? clamp(verdict.disagreementDetail, 180) : "";
     lines.push(`Disagreement: ${topic}`);
     if (detail) lines.push(detail);
+    lines.push("");
+  }
+
+  // Stored differences that are not disagreements between independent models: their own section, in full.
+  const recorded = recordedDifferenceLines(verdict, "•");
+  if (recorded.length > 0) {
+    lines.push(...recorded);
     lines.push("");
   }
 
@@ -133,7 +155,11 @@ export function buildLinkedInPost(params: LinkedInParams): string {
 
   // H) ConvergePanel mention
   lines.push(
-    "Built with ConvergePanel — a multi-model panel that highlights consensus, disagreements, and blind spots."
+    !crossModel
+      ? `Built with ConvergePanel. ${SINGLE_MODEL_SHARE_TAGLINE}`
+      : unverified
+        ? `Built with ConvergePanel. ${INDEPENDENCE_UNVERIFIED_SHARE_TAGLINE}`
+        : "Built with ConvergePanel — a multi-model panel that highlights consensus, disagreements, and blind spots."
   );
 
   // Optional hashtags (max 4)

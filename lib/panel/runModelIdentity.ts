@@ -17,7 +17,7 @@
  * answered, so nothing here says "actual", "verified" or "confirmed".
  *
  * Deliberately independent of `lib/panelModels.ts`: those product labels
- * ("GPT 5.2", "Claude Opus 4.5", …) are selection/marketing copy and may
+ * ("GPT-4o mini", "Claude Haiku 4.5", …) are selection/marketing copy and may
  * change at any time; a historical run's identity must not move with them,
  * nor with the current connector configuration. Nothing here reads either.
  * A missing fact is stated as not recorded, never inferred from the slot.
@@ -26,7 +26,7 @@
  */
 
 import type { ModelId } from "@/lib/types";
-import type { AdaptiveExportRunProvenance } from "@/lib/adaptiveSchema/researchExport";
+import type { AdaptiveExportModelProvenance, AdaptiveExportRunProvenance } from "@/lib/adaptiveSchema/researchExport";
 
 /** Version-free product-family names for the logical slots. */
 export const RUN_MODEL_FAMILY_NAMES: Readonly<Record<ModelId, string>> = Object.freeze({
@@ -58,9 +58,19 @@ export type RunModelProvenanceFacts = {
   modelId: string;
   provider?: string;
   requestedModel?: string;
+  /**
+   * The row's recorded call status, as the result row carries it (`substituted` is derived from it), or the status a
+   * frozen export entry's RECORDED outcome stands for (`runModelProvenanceFromExport`). Absent on statusless rows and
+   * on export facts without a recorded outcome (version-1 snapshots): the shared gate then fails closed.
+   */
+  status?: string;
   substituted?: boolean;
   /** Persisted "<provider>:<model>" of what was originally requested (substituted rows only). */
   substitutedFrom?: string;
+  /** J02 (D-5): the slot's stored text is a listed placeholder, not a model response (presentation only). */
+  invalidProviderOutput?: true;
+  /** D-5: the slot's stored text mentions a mock response without being a listed placeholder — its validity cannot be established (presentation only). */
+  validityUnknown?: true;
 };
 
 function present(value: unknown): value is string {
@@ -157,6 +167,7 @@ export function runModelProvenanceFromResultRow(row: {
   const substituted = status === undefined ? undefined : status === "substituted";
   return {
     modelId: row.modelId,
+    ...(status !== undefined ? { status } : {}),
     ...(present(row.provider) ? { provider: row.provider } : {}),
     ...(present(row.requestedModel) ? { requestedModel: row.requestedModel } : {}),
     ...(substituted !== undefined ? { substituted } : {}),
@@ -164,20 +175,49 @@ export function runModelProvenanceFromResultRow(row: {
   };
 }
 
+/** Frozen failure outcome → the recorded ConnectorStatus it stands for (exact match; nothing else maps). */
+const FROZEN_FAILURE_STATUS: Readonly<Record<string, string>> = Object.freeze({
+  failed: "failed",
+  timeout: "timeout",
+  refused: "refused",
+  rate_limited: "rate_limited",
+});
+
+/**
+ * The row status a frozen entry's RECORDED outcome stands for (Order 29 A2): "answered" → "ok", or "substituted"
+ * when the entry records the substitution (eligible for verified-identity accounting when its provider is verified);
+ * a recorded failure outcome → the matching failure status (a known fact: shown as failed, never a vote, and not by
+ * itself "independence unverified"); anything else — no outcome (a version-1 export entry or the identity-only
+ * read-back), `"unknown"`, an unrecorded source or a crafted value — no status at all, so the shared gate fails closed.
+ */
+function frozenOutcomeStatus(entry: AdaptiveExportModelProvenance): string | undefined {
+  if (entry.outcomeSource !== "recorded" || typeof entry.outcome !== "string") return undefined;
+  if (entry.outcome === "answered") return entry.substituted === true ? "substituted" : "ok";
+  return Object.prototype.hasOwnProperty.call(FROZEN_FAILURE_STATUS, entry.outcome) ? FROZEN_FAILURE_STATUS[entry.outcome] : undefined;
+}
+
 /**
  * Facts for one slot from an export's FROZEN run provenance (already read
- * back with `readFrozenRunProvenance`). A pre-6.2b export (`null`) or a slot
- * with no frozen entry yields only the slot — i.e. "model not recorded".
+ * back with `readFrozenRunProvenance` or, with the execution facts,
+ * `readFrozenRunExecutionProvenance`). A pre-6.2b export (`null`) or a slot
+ * with no frozen entry yields only the slot — i.e. "model not recorded". The
+ * recorded outcome, when the read-back carries one, becomes the row's
+ * `status` (`frozenOutcomeStatus`); the D-5 facts pass through as recorded.
  */
 export function runModelProvenanceFromExport(provenance: AdaptiveExportRunProvenance | null, modelId: string): RunModelProvenanceFacts {
   const entry = provenance?.models.find((m) => m.modelId === modelId);
   if (!entry) return { modelId };
+  // Order 30 n-4: a recorded outcome is read only from a read-back carrying the literal version marker 2.
+  const status = provenance?.provenanceVersion === 2 ? frozenOutcomeStatus(entry) : undefined;
   return {
     modelId,
     ...(present(entry.provider) ? { provider: entry.provider } : {}),
     ...(present(entry.requestedModel) ? { requestedModel: entry.requestedModel } : {}),
+    ...(status !== undefined ? { status } : {}),
     ...(typeof entry.substituted === "boolean" ? { substituted: entry.substituted } : {}),
     ...(entry.substituted === true && present(entry.substitutedFrom) ? { substitutedFrom: entry.substitutedFrom } : {}),
+    ...(entry.invalidProviderOutput === true ? { invalidProviderOutput: true as const } : {}),
+    ...(entry.validityUnknown === true ? { validityUnknown: true as const } : {}),
   };
 }
 

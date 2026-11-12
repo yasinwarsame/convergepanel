@@ -856,11 +856,13 @@ describe("Step 6.2b — the Team export freezes the run's persisted provenance",
     runDocs.set(RUN, teamRun({ runDocument: PERSISTED_ROWS, governanceRecord: governanceRecord("approved", { automatedGovernance: { status: "flagged", reasons: [], policyVersion: 9 } }) }));
     const r = await submit({ format: "pdf", runProvenance: { policyVersion: 999, models: [] }, runDocument: { perModel: [] } });
     expect(r.status).toBe(200);
+    // Order 29: frozen provenance version 2 — each entry also carries the slot's recorded outcome (both rows answered).
     expect(frozenOf()).toEqual({
       policyVersion: 9,
+      provenanceVersion: 2,
       models: [
-        { modelId: "chatgpt", provider: "openai", requestedModel: "gpt-RUN-1", substituted: false },
-        { modelId: "claude", provider: "deepseek", requestedModel: "claude-RUN-1", substituted: true, substitutedFrom: "anthropic:claude-RUN-1" },
+        { modelId: "chatgpt", provider: "openai", requestedModel: "gpt-RUN-1", substituted: false, outcome: "answered", outcomeSource: "recorded" },
+        { modelId: "claude", provider: "deepseek", requestedModel: "claude-RUN-1", substituted: true, substitutedFrom: "anthropic:claude-RUN-1", outcome: "answered", outcomeSource: "recorded" },
       ],
     });
   });
@@ -875,6 +877,13 @@ describe("Step 6.2b — the Team export freezes the run's persisted provenance",
   it("a pre-6.2a run freezes ids and substitution state only — nothing reconstructed", async () => {
     runDocs.set(RUN, teamRun({ governanceRecord: governanceRecord("approved") }));
     await submit();
-    expect(frozenOf()).toEqual({ models: [{ modelId: "chatgpt", substituted: false }, { modelId: "claude", substituted: false }] });
+    // Order 29: the recorded outcome comes from the persisted status alone (no provider, no requested model are reconstructed).
+    expect(frozenOf()).toEqual({
+      provenanceVersion: 2,
+      models: [
+        { modelId: "chatgpt", substituted: false, outcome: "answered", outcomeSource: "recorded" },
+        { modelId: "claude", substituted: false, outcome: "answered", outcomeSource: "recorded" },
+      ],
+    });
   });
 });

@@ -209,8 +209,9 @@ describe("ResultsDisplay → adaptive surfaces: the run's provenance is handed d
     const r = await mount(props(LIVE_ROWS, { adaptive: ADAPTIVE }));
     const probe = r.root.find((n) => n.props?.["data-testid"] === "provenance-probe");
     expect(JSON.parse((probe.children as string[]).join(""))).toEqual([
-      { modelId: "chatgpt", provider: "openai", requestedModel: "gpt-4o-mini", substituted: false },
-      { modelId: "claude", provider: "deepseek", requestedModel: "claude-haiku-4-5-20251001", substituted: true, substitutedFrom: "anthropic:claude-haiku-4-5-20251001" },
+      // C-a review F-1: the row's recorded status is carried on the facts (the shared gate reads it); still nothing invented.
+      { modelId: "chatgpt", status: "ok", provider: "openai", requestedModel: "gpt-4o-mini", substituted: false },
+      { modelId: "claude", status: "substituted", provider: "deepseek", requestedModel: "claude-haiku-4-5-20251001", substituted: true, substitutedFrom: "anthropic:claude-haiku-4-5-20251001" },
     ]);
   });
 
@@ -218,8 +219,8 @@ describe("ResultsDisplay → adaptive surfaces: the run's provenance is handed d
     const r = await mount(props(PRE_62A_ROWS, { adaptive: ADAPTIVE }));
     const probe = r.root.find((n) => n.props?.["data-testid"] === "provenance-probe");
     expect(JSON.parse((probe.children as string[]).join(""))).toEqual([
-      { modelId: "chatgpt", substituted: false },
-      { modelId: "gemini", substituted: false },
+      { modelId: "chatgpt", status: "ok", substituted: false },
+      { modelId: "gemini", status: "ok", substituted: false },
     ]);
   });
 });

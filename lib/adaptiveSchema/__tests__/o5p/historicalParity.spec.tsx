@@ -38,6 +38,38 @@ const TIMEZONE_KEYS = ["export.docxXml", "export.pdfTree"];
 const sharedMemos: Record<string, string> = JSON.parse(readFileSync(join(FIXTURES, "sharedMemos.json"), "utf8"));
 const sha = (s: string) => createHash("sha256").update(s, "utf8").digest("hex");
 
+/**
+ * Executing-model attribution (owner rule, connector fail-closed pass, 2026-11-05): a slot the run records as
+ * substituted is named by the model that wrote it, "DeepSeek (substituting Claude)", never as the requested model. The
+ * 2c17feee oracle predates that rule, so for a scenario whose rows record a substitution the outputs that name that
+ * slot are pinned EXACTLY here instead — full sha-256 of the rendered output (any dropped, duplicated or reverted label
+ * changes it) plus, per output key, the exact count of the executing label and of executing-model chips (neutral dot +
+ * label) — captured on this branch at the commit that
+ * introduced the file (see its `capturedAt`). Every other output of that scenario, and every output of every scenario
+ * with no recorded substitution, is still held to the untouched 2c17feee oracle. No output is transformed before hashing.
+ */
+type AttributionPins = {
+  capturedAt: string;
+  label: string;
+  /** A chip naming the executing model: the neutral dot (never the requested model's identity colour), then the label. */
+  chipMarkup: string;
+  scenarios: Record<string, { hashes: Record<string, Record<string, string>>; labelCounts: Record<string, number>; executingChipCounts: Record<string, number> }>;
+};
+const ATTRIBUTION: AttributionPins = JSON.parse(readFileSync(join(__dirname, "__fixtures__", "executing-attribution", "renderHashes.json"), "utf8"));
+const hasRecordedSubstitution = (rows: any[]) => rows.some((r) => r && r.status === "substituted");
+/**
+ * Order 35 A (F-1, owner ruling): the research memo states the verified count of independent executing models that
+ * answered. Exactly the listed scenario / output keys are superseded, by exact hash; the 2c17feee oracle files are
+ * untouched and every superseded entry's `sealed` hash must equal them (asserted below), so nothing else moved.
+ */
+type MemoSupersession = { entries: Record<string, Record<string, { sealed: string; superseding: string } | string>> };
+const F1: MemoSupersession = JSON.parse(readFileSync(join(__dirname, "__fixtures__", "order35-f1", "memoSupersession.json"), "utf8"));
+const F1_KEYS = ["text.memo", "text.memoInput"];
+const f1Overlay = (name: string): Record<string, string> =>
+  Object.fromEntries(F1_KEYS.filter((k) => typeof F1.entries[name]?.[k] === "object").map((k) => [k, (F1.entries[name][k] as { superseding: string }).superseding]));
+
+const occurrences = (text: string, needle: string) => text.split(needle).length - 1;
+
 describe("Contract P historical parity (2c17feee oracles)", () => {
   it("runs in a timezone a 2c17feee oracle was captured in (run with TZ=UTC)", () => {
     expect([EFFECTIVE_TIMEZONE, renderHashes !== undefined]).toEqual([EFFECTIVE_TIMEZONE, true]);
@@ -67,6 +99,8 @@ describe("Contract P historical parity (2c17feee oracles)", () => {
     // D-3 (2026-11-02): the owner-approved analysis-availability notice is removed before hashing against the 2c17feee
     // oracle, and required exactly where the record's synthesis is degraded (the narrative-failure scenario) and nowhere else.
     let notices = 0;
+    const labelCounts: Record<string, number> = {};
+    const chipCounts: Record<string, number> = {};
     const actual = Object.fromEntries(
       Object.entries(outputs).map(([k, v]) => {
         if (v === null) return [k, null];
@@ -74,12 +108,46 @@ describe("Contract P historical parity (2c17feee oracles)", () => {
         // Review MINOR-5: never more than one notice in one rendered output.
         expect([name, k, stripped.count <= 1]).toEqual([name, k, true]);
         notices += stripped.count;
+        labelCounts[k] = occurrences(stripped.markup, ATTRIBUTION.label);
+        chipCounts[k] = occurrences(stripped.markup, ATTRIBUTION.chipMarkup + ATTRIBUTION.label);
         return [k, sha(stripped.markup)];
       })
     );
     expect([name, notices > 0]).toEqual([name, records[name]?.synthesisReport?.degraded === true]);
     expect(renderHashes).toBeDefined();
-    expect(actual).toEqual(renderHashes![name]);
+    const pins = ATTRIBUTION.scenarios[name];
+    // Pinned exactly where (and only where) the run records a substitution.
+    expect([name, pins !== undefined]).toEqual([name, hasRecordedSubstitution(scenario.results() as any[])]);
+    if (!pins) {
+      // No recorded substitution: the untouched 2c17feee oracle, every output, and the executing label nowhere.
+      expect(actual).toEqual({ ...renderHashes![name], ...f1Overlay(name) });
+      expect(Object.values(labelCounts).every((n) => n === 0)).toBe(true);
+      return;
+    }
+    // Exact executing-label and executing-chip counts per output key (every key, zeros included).
+    expect(labelCounts).toEqual(pins.labelCounts);
+    expect(chipCounts).toEqual(pins.executingChipCounts);
+    const pinnedForTimezone = pins.hashes[ORACLE_TIMEZONE];
+    expect(pinnedForTimezone).toBeDefined();
+    // Outputs that name the substituted slot: the exact pinned rendering. Every other output: the 2c17feee oracle.
+    expect(Object.keys(pinnedForTimezone).sort()).toEqual(Object.keys(labelCounts).filter((k) => labelCounts[k] > 0).sort());
+    for (const k of Object.keys(pinnedForTimezone)) expect([k, pinnedForTimezone[k] !== renderHashes![name][k]]).toEqual([k, true]);
+    expect(actual).toEqual({ ...renderHashes![name], ...pinnedForTimezone, ...f1Overlay(name) });
+  });
+
+  it("Order 35 F-1: the supersession touches exactly two scenarios' memo outputs, each over its untouched sealed hash", () => {
+    expect(Object.keys(F1.entries).sort()).toEqual(["factual-single", "generic-substituted-and-failed"]);
+    for (const [name, e] of Object.entries(F1.entries)) {
+      const keys = Object.keys(e).filter((k) => typeof e[k] === "object");
+      expect([name, keys.sort()]).toEqual([name, [...F1_KEYS].sort()]);
+      for (const k of keys) {
+        const { sealed, superseding } = e[k] as { sealed: string; superseding: string };
+        for (const tz of Object.keys(ORACLE_BY_TIMEZONE)) expect([name, k, tz, ORACLE_BY_TIMEZONE[tz][name][k]]).toEqual([name, k, tz, sealed]);
+        expect([name, k, superseding === sealed]).toEqual([name, k, false]);
+        // A superseded memo output is never one an attribution pin also overrides.
+        expect([name, k, ATTRIBUTION.scenarios[name]?.hashes?.[ORACLE_TIMEZONE]?.[k]]).toEqual([name, k, undefined]);
+      }
+    }
   });
 
   it.each(Object.keys(SHARED_MEMO_INPUTS))("shared memo generator: %s is byte-identical", (key) => {

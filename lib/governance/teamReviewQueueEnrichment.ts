@@ -42,6 +42,11 @@ import type { GovernanceRecordV1 } from "../adaptiveSchema/governanceRecord";
 import type { AdaptiveHumanReviewAssignmentV1 } from "./adaptiveHumanReviewAssignment";
 import type { AdaptiveHumanReviewPanelV1 } from "./adaptiveHumanReviewPanel";
 import type { AdaptiveHumanReviewVoteV1 } from "./adaptiveHumanReviewVote";
+import {
+  consensusScoreWithheldReason,
+  type ConsensusScoreWithheldReason,
+  type StoredConsensusIndependence,
+} from "../panel/independentVoices";
 
 export interface EnrichedLegacyTeamRunListItemV1 extends Omit<LegacyTeamRunListItemV1, "humanDecision"> {
   humanDecision?: {
@@ -50,6 +55,38 @@ export interface EnrichedLegacyTeamRunListItemV1 extends Omit<LegacyTeamRunListI
     /** Resolved display identity of the decider — `null` only when `decidedBy` is absent (decision predates identity capture, extremely unlikely but handled). Never a raw uid. */
     reviewer: { displayName: string } | null;
   };
+  /**
+   * Present when the stored consensus score is withheld from presentation: the row's canonical artifact —
+   * the linked `runs/{runId}` (research) or `verifications/{verificationId}` (claim verification) — reduces to fewer
+   * than two independent executing models with a usable answer ("insufficient_independent_models"), or its execution
+   * identity cannot be established — artifact unreadable, no / incomplete per-model rows, or no linkage at all
+   * ("independence_unverified"). See `applyLegacyConsensusIndependence`. Additive only: `consensusScore` keeps the
+   * stored value (governance-queue metadata, as before the independent-voice rule); a renderer shows the reason instead
+   * of the number when this is set.
+   */
+  consensusWithheld?: ConsensusScoreWithheldReason;
+}
+
+/**
+ * Pure. Marks a legacy row's stored consensus score as withheld from presentation unless independence is proven. `independence` is computed by
+ * the caller from the row's canonical artifact, or null when that artifact could not be read:
+ *  - research row (`runId`): `storedRunConsensusIndependence` of `runs/{runId}`;
+ *  - claim-verification row (`verificationId`, no `runId`): `storedVerificationConsensusIndependence` of
+ *    `verifications/{verificationId}` — a claim score is a cross-model figure too, so one answering model (or several
+ *    slots served by one executing provider) is not consensus;
+ *  - a row naming neither: independence cannot be established → withheld as unverified.
+ * Shown only when "independent". The stored `consensusScore` is returned unchanged (queue metadata); only the additive
+ * `consensusWithheld` reason is added. A row without a stored score is unchanged. Never mutates its input.
+ */
+export function applyLegacyConsensusIndependence(
+  item: EnrichedLegacyTeamRunListItemV1,
+  independence: StoredConsensusIndependence | null
+): EnrichedLegacyTeamRunListItemV1 {
+  if (item.consensusScore == null) return item;
+  const linked = !!item.runId || !!item.verificationId;
+  const reason = linked ? consensusScoreWithheldReason(independence ?? "unverified") : "independence_unverified";
+  if (!reason) return item;
+  return { ...item, consensusWithheld: reason };
 }
 
 export interface EnrichedAdaptiveTeamRunListItemV1 extends AdaptiveTeamRunListItemV1 {

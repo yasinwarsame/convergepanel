@@ -93,6 +93,18 @@ export const COMPARISON_FIELD_LABEL: Record<string, string> = {
 /** Recorded call statuses that mean the slot produced an answer. Any other recorded status means it did not. */
 const ANSWERED_STATUSES = new Set(["ok", "substituted"]);
 
+const NO_SLOTS: ReadonlySet<string> = new Set();
+
+/**
+ * Slots the run's provenance facts record as the stored no-API-key placeholder (J02: `invalidProviderOutput === true`,
+ * written by `withPlaceholderFact` from the single `placeholderClass` oracle). Same predicate FailedResultsNote reads.
+ */
+export function invalidProviderOutputSlots(provenance: readonly ({ modelId?: unknown; invalidProviderOutput?: unknown } | null | undefined)[] | null): ReadonlySet<string> {
+  const out = new Set<string>();
+  for (const f of provenance ?? []) if (f && typeof f.modelId === "string" && f.invalidProviderOutput === true) out.add(f.modelId);
+  return out;
+}
+
 export interface ModelResponsesSummary {
   /** Panel slots the run requested (one result per slot). */
   requested: number;
@@ -102,6 +114,8 @@ export interface ModelResponsesSummary {
   substituted: number;
   /** Slots that failed, timed out, were refused or rate-limited: no answer. */
   didNotRespond: number;
+  /** Slots whose stored text is the no-API-key placeholder (the J02 fact): not a model response, never counted as answered. */
+  notAModelResponse: number;
   /** Answers shown as a structured response. */
   structuredShown: number;
   /** Saved answers shown as saved text (a reopened report whose copy can't be read in the report's format). */
@@ -117,18 +131,27 @@ export interface ModelResponsesSummary {
  * without one, a slot whose result is the validator's "Empty response" with no saved text did not respond. Text is
  * never inspected (a response that merely mentions "mock response" is an answer like any other).
  */
-export function summarizeModelResponses(results: readonly AdaptiveModelResult[], statuses: ReadonlyMap<string, string> | null): ModelResponsesSummary {
+export function summarizeModelResponses(
+  results: readonly AdaptiveModelResult[],
+  statuses: ReadonlyMap<string, string> | null,
+  invalidOutputSlots: ReadonlySet<string> = NO_SLOTS
+): ModelResponsesSummary {
   const summary: ModelResponsesSummary = {
     requested: results.length,
     answered: 0,
     substituted: 0,
     didNotRespond: 0,
+    notAModelResponse: 0,
     structuredShown: 0,
     savedTextShown: 0,
     savedCopyUnavailable: 0,
     unusable: 0,
   };
   for (const r of results) {
+    if (invalidOutputSlots.has(r.modelId)) {
+      summary.notAModelResponse += 1;
+      continue;
+    }
     const status = statuses?.get(r.modelId);
     const recorded = typeof status === "string" && status.length > 0;
     const answered = recorded ? ANSWERED_STATUSES.has(status) : !(r.parseError === "Empty response" && !r.ok && r.savedResponseText === undefined);
@@ -154,6 +177,7 @@ export function modelResponsesCountLines(s: ModelResponsesSummary): [string, str
     `${plural(s.requested, "model", "models")} requested`,
     `${s.answered} answered${s.substituted > 0 ? ` (${s.substituted} by a substitute model)` : ""}`,
     ...(s.didNotRespond > 0 ? [`${s.didNotRespond} did not respond`] : []),
+    ...(s.notAModelResponse > 0 ? [`${s.notAModelResponse} not a model response (no API key configured)`] : []),
   ];
   const shown = [
     `${plural(s.structuredShown, "structured response", "structured responses")} shown`,
@@ -169,10 +193,19 @@ export function modelResponsesCountLines(s: ModelResponsesSummary): [string, str
  * (no response, a saved copy with nothing to show, a live answer in an unusable format) goes to the failure note, which
  * states each once.
  */
-export function partitionModelResponses(results: readonly AdaptiveModelResult[], statuses: ReadonlyMap<string, string> | null) {
+export function partitionModelResponses(
+  results: readonly AdaptiveModelResult[],
+  statuses: ReadonlyMap<string, string> | null,
+  invalidOutputSlots: ReadonlySet<string> = NO_SLOTS
+) {
   const cards: AdaptiveModelResult[] = [];
   const notes: AdaptiveModelResult[] = [];
   for (const r of results) {
+    // A stored no-API-key placeholder is never shown as an answer: the failure note states it (J02 notice).
+    if (invalidOutputSlots.has(r.modelId)) {
+      notes.push(r);
+      continue;
+    }
     const status = statuses?.get(r.modelId);
     const recordedNoAnswer = typeof status === "string" && status.length > 0 && !ANSWERED_STATUSES.has(status);
     if (!recordedNoAnswer && ((r.ok && r.data) || typeof r.savedResponseText === "string")) cards.push(r);

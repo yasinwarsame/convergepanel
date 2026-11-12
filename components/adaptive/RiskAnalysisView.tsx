@@ -17,7 +17,8 @@
  */
 
 import { AggregatedChecklistItem, ChecklistItemSeverity, ChecklistTaxonomyResult } from "@/lib/adaptiveSchema/types";
-import { Card, EmptyStateCard, SectionLabel, TintBadge, BadgeTone, formatModelCoverage, SlotChip } from "./shared";
+import { Card, EmptyStateCard, SectionLabel, TintBadge, BadgeTone, formatSlotCoverage, SlotChip } from "./shared";
+import { useQualifiedExecutionIdentity } from "./RunExecutionIdentityContext";
 import { ModelId } from "@/lib/types";
 
 const SEVERITY_TONE: Record<ChecklistItemSeverity, BadgeTone> = {
@@ -50,6 +51,7 @@ function RiskDetailRow({ label, value }: { label: string; value?: string }) {
 }
 
 function RiskRegisterRow({ item }: { item: AggregatedChecklistItem }) {
+  const slotIdentity = useQualifiedExecutionIdentity();
   const modelIds = item.contributingModels as ModelId[];
   return (
     <li className="py-3 border-b border-slate-100 last:border-0">
@@ -61,7 +63,7 @@ function RiskRegisterRow({ item }: { item: AggregatedChecklistItem }) {
           tone={item.coverageRatio >= 0.6 ? "accent" : "warning"}
           title="How many models flagged this risk — a consensus/disagreement signal, not a certainty score."
         >
-          {formatModelCoverage({ covered: item.coverageCount, total: item.totalModels, mode: "covered" })}
+          {formatSlotCoverage({ covered: item.coverageCount, total: item.totalModels, mode: "covered" }, slotIdentity)}
         </TintBadge>
       </div>
       <RiskDetailRow label="Impact" value={item.impact} />

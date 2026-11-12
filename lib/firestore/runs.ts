@@ -205,16 +205,20 @@ export async function createRun(
  * deliberately not persisted: today it echoes the requested model and is not
  * provider-reported identity.
  */
-export function runtimeModelProvenance(result: Pick<ModelResult, "provider" | "requestedModel" | "substitutedFrom">): {
+export function runtimeModelProvenance(result: Pick<ModelResult, "provider" | "requestedModel" | "substitutedFrom"> & Partial<Pick<ModelResult, "status" | "errorCode">>): {
   provider?: string;
   requestedModel?: string;
   substitutedFrom?: string;
+  outputClass?: "model_response";
 } {
   const present = (value: unknown): value is string => typeof value === "string" && value.length > 0;
   return {
     ...(present(result.provider) ? { provider: result.provider } : {}),
     ...(present(result.requestedModel) ? { requestedModel: result.requestedModel } : {}),
     ...(present(result.substitutedFrom) ? { substitutedFrom: result.substitutedFrom } : {}),
+    // F-2 (Order 34): the structured execution fact for a NEW row — the connector returned ok with no errorCode (a
+    // model response; since b1a680e no non-answer path returns ok). Historical rows never get it (never backfilled).
+    ...(result.status === "ok" && !result.errorCode ? { outputClass: "model_response" as const } : {}),
   };
 }
 

@@ -553,7 +553,7 @@ describe("markup and script-like model text is inert", () => {
     const html = renderToStaticMarkup(
       createElement(RunSlotStatusContext.Provider, { value: new Map([["chatgpt", "ok"], ["claude", "ok"]]) }, createElement(ModelResponsesSection, { schema, results: results as AdaptiveModelResult[] }))
     );
-    expect(html).not.toMatch(/<script|<img|<b>attr/);
+    expect(html).not.toMatch(/<script|<img|<b>attr/i);
     expect(html).toContain("&lt;script&gt;");
     expect(html).toContain("&lt;b&gt;attr&lt;/b&gt;");
   });

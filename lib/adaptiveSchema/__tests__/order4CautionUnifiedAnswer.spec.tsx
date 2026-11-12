@@ -58,7 +58,7 @@ import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
 import { renderAdaptiveResearchDocxV1 } from "@/lib/docx/renderAdaptiveResearchDocx";
 import { AdaptiveResearchDocument } from "@/lib/pdf/AdaptiveResearchDocument";
 import { extractPdfElementText } from "@/lib/pdf/__tests__/testUtils";
-import { pdfLayoutFixtures } from "@/lib/pdf/__fixtures__/layoutFixtures";
+import { pdfLayoutFixtures, withIndependentFrozenProvenance } from "@/lib/pdf/__fixtures__/layoutFixtures";
 import { AdaptiveGateResult, AdaptiveSynthesisReport, AlignedClaim, QueryType } from "@/lib/adaptiveSchema/types";
 import { ModelId, ModelResult } from "@/lib/types";
 import { historicalBuild, historicalFinalize } from "./historicalPresentationHelpers";
@@ -331,7 +331,8 @@ function mdSection(md: string, heading: string): string {
 
 function recordOf(report: AdaptiveSynthesisReport, rows: AlignedClaim[]) {
   const base = pdfLayoutFixtures().find((x) => (x.record as any).reportSnapshot?.legacy?.synthesisReport?.verdictCard)!;
-  const record = JSON.parse(JSON.stringify(base.record));
+  // A current export (c16): every slot recorded as its own executing model — the pre-6.2b case is crossSurfaceIndependence.spec.tsx.
+  const record = withIndependentFrozenProvenance(JSON.parse(JSON.stringify(base.record)));
   record.reportSnapshot.legacy.synthesisReport = report;
   record.reportSnapshot.legacy.alignedClaims = rows;
   record.reportSnapshot.legacy.gate = { status: report.gate, runCertainty: report.runCertainty, loadBearingClaims: [], loadBearingSplitCount: 0 };

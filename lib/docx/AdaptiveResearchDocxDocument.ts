@@ -39,7 +39,7 @@ import {
   WidthType,
 } from "docx";
 import { AdaptiveResearchExportV1 } from "@/lib/adaptiveSchema/researchExport";
-import { exportPositionSafeReport } from "@/lib/adaptiveSchema/exportPositionView";
+import { exportMilestone2SummaryLevel, exportPositionSafeReport, exportRunIndependence } from "@/lib/adaptiveSchema/exportPositionView";
 import { MARKED_GATE_LEVEL_FIELD, MARKED_GATE_LEVEL_NOTE, MARKED_GATE_LEVEL_WORD, isPositionMarked } from "@/lib/adaptiveSchema/positionPresentation";
 import { exportModelIdentityLabel, exportRunProvenanceLines, readFrozenRunProvenance } from "@/lib/adaptiveSchema/exportRunProvenance";
 import { CONSENSUS_LABELS, SOURCE_GROUNDING_LABELS } from "@/lib/adaptiveSchema/reportSummary";
@@ -201,7 +201,22 @@ function statusSummarySection(record: AdaptiveResearchExportV1): (Paragraph | Ta
   const snapshot = record.reportSnapshot;
   const modelsText = snapshot.models.map((m) => `${exportModelIdentityLabel(snapshot.runProvenance, m.modelId)}${m.ok === false ? " (failed)" : ""}`).join(", ");
   // Order 5 (Contract P, m-5): a legacy-family (gate-scored) marked report's level is its gate, labelled so.
-  if (isPositionMarked(snapshot.legacy?.synthesisReport)) {
+  // c16 (MAJOR-2): so is the level of a report whose run's slots are not independent executing models, or whose
+  // execution is not recorded (a pre-6.2b export) — never a "Strong consensus" tier.
+  // Order 31 R-2: a Milestone-2 report has no verification gate — its level is labelled by panel slot instead.
+  const slotLevel = exportMilestone2SummaryLevel(record);
+  if (slotLevel) {
+    return [
+      heading("Report status summary"),
+      ...fieldGrid([
+        ["Models", modelsText || "—"],
+        [slotLevel.field, slotLevel.word],
+        ["Source grounding", SOURCE_GROUNDING_LABELS[snapshot.sourceGroundingLevel]],
+      ]),
+      muted(slotLevel.note),
+    ];
+  }
+  if (isPositionMarked(snapshot.legacy?.synthesisReport) || exportRunIndependence(record)) {
     return [
       heading("Report status summary"),
       ...fieldGrid([
@@ -334,7 +349,9 @@ function legacySection(record: AdaptiveResearchExportV1): (Paragraph | Table)[] 
   const legacy = record.reportSnapshot.legacy!;
   const schema = SCHEMA_REGISTRY[legacy.schemaId];
   // Order 5 (Contract P): a marked report is composed from its position-safe view; unmarked reports are unchanged.
-  const { report: synthesis, view: positions } = exportPositionSafeReport(record);
+  // An unmarked report whose top claim's supporting slots are not independent executing models: the verdict section is
+  // headed by what it counts (exportPositionView.ts); every other unmarked report exports exactly as before.
+  const { report: synthesis, view: positions, independence } = exportPositionSafeReport(record);
 
   const out: (Paragraph | Table)[] = [];
 
@@ -365,12 +382,12 @@ function legacySection(record: AdaptiveResearchExportV1): (Paragraph | Table)[] 
       for (const block of answerLeadBlocks(presentUnifiedAnswer(synthesis))) out.push(body(blockText(block)));
       out.push(body(synthesis.unifiedAnswer));
     }
-    out.push(heading(positions ? positions.verdict.sectionHeading : "Where models agree / disagree"));
+    out.push(heading(positions ? positions.verdict.sectionHeading : independence ? independence.sectionHeading : "Where models agree / disagree"));
     // Consensus Integrity: the quoted claim with its computed status (R4-1), and the canonical contested note
     // (verdictCard.ts). Each is absent on reports persisted before it existed, which export exactly as before.
     const card = synthesis.verdictCard;
     const top = presentVerdictClaim(card.topConsensus, card.topConsensusAgreement, positions?.verdict.topLabel);
-    out.push(muted(positions ? positions.verdict.topHeading : "Agreement"), body(top.claim));
+    out.push(muted(positions ? positions.verdict.topHeading : independence ? independence.topHeading : "Agreement"), body(top.claim));
     if (top.result) out.push(muted(top.result));
     if (card.topConsensusContested) out.push(muted(`Contested: ${card.topConsensusContested}`));
     if (card.keyDisagreement) {

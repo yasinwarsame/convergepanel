@@ -1114,3 +1114,30 @@ export function pdfLayoutFixtures(): PdfLayoutFixture[] {
     bareClosingLabel(),
   ];
 }
+
+/** The runtime provider Step 6.2a records for each slot's own connector (what a current export's frozen provenance carries). */
+const SLOT_RUNTIME_PROVIDER: Readonly<Record<string, string>> = { chatgpt: "openai", claude: "anthropic", grok: "xai", perplexity: "perplexity", gemini: "google" };
+
+/**
+ * c16: the layout fixtures carry no frozen run provenance — by data they are pre-6.2b exports, whose model independence
+ * is stated as unverified (owner ruling, exportPositionView.exportSlotProvenance). A spec whose subject is layout or
+ * claim formatting on a current export (every slot its own recorded executing model) freezes this record's provenance:
+ * each dispatched slot recorded as NOT substituted and answered by its own runtime provider (C-a review F-1: the shared
+ * corrected D-4 gate verifies a slot only with a recorded provider, as Step 6.2a writes one), and nothing else (no
+ * requested model is invented, so every slot label is unchanged). Returns the same (mutated) record.
+ */
+export function withIndependentFrozenProvenance<T extends { reportSnapshot: any }>(record: T): T {
+  // Version 2 (Order 29): a current export also freezes each slot's recorded outcome; a recorded "answered" is what the
+  // shared gate reads as the slot's status (a version-1 entry without it reads as unverified, by owner ruling).
+  record.reportSnapshot.runProvenance = {
+    provenanceVersion: 2,
+    // Order 30 (review n-3): a dispatched slot that failed (`ok === false`) is frozen as a recorded failure — never as an
+    // answer — and, as a failed call records none, with no provider.
+    models: (record.reportSnapshot.models ?? []).map((m: { modelId: string; ok?: boolean }) =>
+      m.ok === false
+        ? { modelId: m.modelId, substituted: false, outcome: "failed", outcomeSource: "recorded" }
+        : { modelId: m.modelId, substituted: false, provider: SLOT_RUNTIME_PROVIDER[m.modelId] ?? "openai", outcome: "answered", outcomeSource: "recorded" }
+    ),
+  };
+  return record;
+}
