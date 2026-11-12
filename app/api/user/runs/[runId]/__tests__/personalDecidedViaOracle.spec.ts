@@ -43,9 +43,11 @@ const mockAdminDb: any = {
   collection: () => ({
     doc: () => ({
       get: async () => ({ exists: runDoc !== null, data: () => runDoc }),
-      collection: () => ({
+      collection: (name: string) => ({
         doc: (id: string) => ({
           get: async () => {
+            // Only the humanReviewHistory collection is this spec's subject; the display record (Order 40 C) is absent.
+            if (name !== "humanReviewHistory") return { exists: false, data: () => undefined };
             historyIdsRequested.push(id);
             const row = historyById[id];
             return { exists: row !== undefined, data: () => row };

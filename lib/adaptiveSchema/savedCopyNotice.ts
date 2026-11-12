@@ -49,3 +49,21 @@ export const SAVED_COPY_RETRIED_SHORTENED =
 
 /** Messages that describe the saved copy, not the model's live outcome. Rendered as-is, never as "incompatible format". */
 export const SAVED_COPY_NOTICES: ReadonlySet<string> = new Set([SAVED_COPY_SHORTENED, SAVED_COPY_UNSTRUCTURED, SAVED_COPY_RETRIED_INCLUDED, SAVED_COPY_MISSING, SAVED_COPY_RETRIED_SHORTENED]);
+
+/**
+ * Order 40 C (owner-authorized): labels for a reopened Milestone-2 slot whose structured result comes from the run's
+ * saved record of the validated result the report used (adoptedDisplayResults.ts), by that record's origin. The
+ * record never holds a call's raw text, so the partial case says what the data is: the report's final validated data.
+ */
+export const ADOPTED_RESULT_ORIGIN_LABEL = {
+  original_accepted: "Saved result: the model's first answer, as validated when this report was made.",
+  retry_adopted_full:
+    "Saved result: the model's corrected response. Its first answer could not be read in this report's format, so it was asked once to correct it. This is the validated corrected response the report used.",
+  retry_adopted_partial:
+    "Saved result: the validated final data the report used for this model. Some fields come from its first answer and the rest from one corrective retry, so this is not the verbatim output of a single call.",
+} as const;
+
+/** Inside "Show original response" on a slot shown from that record: the disclosure holds the saved FIRST answer. */
+export const FIRST_ANSWER_DISCLOSURE_LABEL = "The model's first answer, exactly as saved.";
+/** Appended when the storage cap shortened that saved first answer. */
+export const FIRST_ANSWER_SHORTENED_NOTE = "It was shortened for storage, so it ends early.";

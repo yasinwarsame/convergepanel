@@ -179,10 +179,25 @@ const WIDENED_BY_INC1: Record<string, string> = {
  *   - vocabularyManifest.json: 5a18983d528bb88c055d0dbff7984b39472e8ef4 → d74147abf059576c671fdcc115e809917eb4fa06 (3
  *     entries appended: the marked memo's insufficient-evidence literals; none removed).
  * Same 32-file pinned set.
+ *
+ * Re-pinned (owner-authorized Order 40 C, adopted-retry persistence #313): dsProvenanceUiBoundaries.spec.ts changed only its
+ * own lib/runs/runReadPayload.ts pin (ca6e332 → ac10d54: the verified saved adopted results feed adaptive.modelResults
+ * only; no provenance code). The spec's other pins and assertions are unchanged.
+ *   - dsProvenanceUiBoundaries.spec.ts: 1eb15948753574f91c8b949af4a1fbc19e8dd51e → 98e4920e7810a5e4a458a4ad71185c17a7041d2f.
+ * Same 32-file pinned set.
+ *
+ * Re-pinned (owner-authorized Order 40 C O-2 correction, separate display document): dsProvenanceUiBoundaries.spec.ts
+ * changed only its own pins for the two read routes and runReadPayload.ts (the display record is loaded from its own
+ * document after the routes' gates and passed in). The spec's other pins and assertions are unchanged.
+ *   - dsProvenanceUiBoundaries.spec.ts: 98e4920e7810a5e4a458a4ad71185c17a7041d2f → c0774a6d0452c69795fd49442091d78f3cb8112d.
+ * Same 32-file pinned set.
+ *
+ * Re-pinned (review of O-2, NIT): dsProvenanceUiBoundaries.spec.ts changed only its Team detail route pin (comment-only
+ * route change). c0774a6d0452c69795fd49442091d78f3cb8112d → da95909bcc5ad3c9c477cab8dbabf60e99dd7fd9. Same 32-file pinned set.
  */
 const READABLE_GATE_OPTION_BY_INC1: Record<string, string> = {
   "components/adaptive/AdaptiveSynthesisReportView.tsx": "bcdf6ba2444c2aa3dc22ae049901cf72e55eb0bc",
-  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "1eb15948753574f91c8b949af4a1fbc19e8dd51e",
+  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "da95909bcc5ad3c9c477cab8dbabf60e99dd7fd9",
   "lib/adaptiveSchema/shareBuilders.ts": "f5e67a0a0ee20e2da15917b2a2f195005943f1ba",
   "lib/adaptiveSchema/__tests__/o5p/historicalParity.spec.tsx": "fce2e3172049cd868607e83a8a0a0147ec4939f3",
 };

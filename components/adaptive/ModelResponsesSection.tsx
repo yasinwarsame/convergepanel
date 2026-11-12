@@ -40,7 +40,14 @@ import { useRunSlotStatus } from "./RunSlotStatusContext";
 import ListView, { type ListScoreNames } from "./ListView";
 import type { ReadableGateDisplay } from "./AdaptiveSynthesisReportView";
 import { SCHEMA_ANSWER_SHAPE } from "@/lib/adaptiveSchema/persistedOutput";
-import { SAVED_COPY_SHORTENED, SAVED_TEXT_SHORTENED_LABEL, SAVED_TEXT_UNSTRUCTURED_LABEL } from "@/lib/adaptiveSchema/savedCopyNotice";
+import {
+  ADOPTED_RESULT_ORIGIN_LABEL,
+  FIRST_ANSWER_DISCLOSURE_LABEL,
+  FIRST_ANSWER_SHORTENED_NOTE,
+  SAVED_COPY_SHORTENED,
+  SAVED_TEXT_SHORTENED_LABEL,
+  SAVED_TEXT_UNSTRUCTURED_LABEL,
+} from "@/lib/adaptiveSchema/savedCopyNotice";
 import {
   COMPARISON_FIELD_LABEL,
   buildComparisonTable,
@@ -268,13 +275,24 @@ function ModelCardHeader({ modelId }: { modelId: string }) {
 }
 
 /** The saved copy exactly as stored, one keyboard-operable click away (native details/summary). React escapes it. */
-function OriginalResponseDisclosure({ text }: { text: string }) {
+function OriginalResponseDisclosure({ text, firstAnswerLabel }: { text: string; firstAnswerLabel?: string }) {
   return (
     <details className="text-xs text-cp-muted" data-testid="original-response">
       <summary className="cursor-pointer">Show original response</summary>
+      {firstAnswerLabel !== undefined && (
+        <p className="mt-2 text-xs text-cp-muted" data-testid="original-response-label">
+          {firstAnswerLabel}
+        </p>
+      )}
       <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded bg-cp-raised p-3 text-xs text-cp-text">{text}</pre>
     </details>
   );
+}
+
+/** Order 40 C: the origin of a slot shown from the run's saved record of what the report used; anything else is no origin. */
+function savedResultOriginOf(r: AdaptiveModelResult): keyof typeof ADOPTED_RESULT_ORIGIN_LABEL | null {
+  const origin = r.savedResultOrigin;
+  return origin === "original_accepted" || origin === "retry_adopted_full" || origin === "retry_adopted_partial" ? origin : null;
 }
 
 function Milestone2ModelOutputList({ schema, results }: { schema: ResultSchema; results: AdaptiveModelResult[] }) {
@@ -292,11 +310,18 @@ function Milestone2ModelOutputList({ schema, results }: { schema: ResultSchema; 
       </div>
       <div className="space-y-3">
         <FailedResultsNote failed={notes} hideHeading />
-        {cards.map((r, idx) => (
+        {cards.map((r, idx) => {
+          const origin = savedResultOriginOf(r);
+          return (
           <Card key={`${r.modelId}-${idx}`} className="bg-slate-50/60">
             <ModelCardHeader modelId={r.modelId} />
             {r.ok && r.data ? (
               <div className="space-y-3" data-testid="structured-model-response" data-model-id={r.modelId}>
+                {origin && (
+                  <p className="text-xs text-cp-muted" data-testid="saved-result-origin">
+                    {ADOPTED_RESULT_ORIGIN_LABEL[origin]}
+                  </p>
+                )}
                 {schema.fields
                   .filter((field) => hasFieldContent(r.data?.[field.key]))
                   .map((field) => (
@@ -309,7 +334,14 @@ function Milestone2ModelOutputList({ schema, results }: { schema: ResultSchema; 
                       )}
                     </div>
                   ))}
-                {typeof r.savedResponseText === "string" && <OriginalResponseDisclosure text={r.savedResponseText} />}
+                {typeof r.savedResponseText === "string" && (
+                  <OriginalResponseDisclosure
+                    text={r.savedResponseText}
+                    firstAnswerLabel={
+                      origin ? (r.savedResponseShortened === true ? `${FIRST_ANSWER_DISCLOSURE_LABEL} ${FIRST_ANSWER_SHORTENED_NOTE}` : FIRST_ANSWER_DISCLOSURE_LABEL) : undefined
+                    }
+                  />
+                )}
               </div>
             ) : (
               <div className="space-y-2" data-testid="saved-text-model-response" data-model-id={r.modelId}>
@@ -321,7 +353,8 @@ function Milestone2ModelOutputList({ schema, results }: { schema: ResultSchema; 
               </div>
             )}
           </Card>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
