@@ -5,8 +5,14 @@
  * model's FIRST answer, because completeRun runs before adaptive finalization. When a corrective retry was adopted
  * (retryCorrection.ts mergeAdaptiveRetry: "adopted_full" / "adopted_partial"), the result that fed the aggregate was
  * never saved, so a reopened report could only say so (#312). This module defines one small, versioned, bounded
- * record, `runs/{runId}.adaptiveDisplayResults`, written ONCE after the adaptive output is persisted, holding for each
- * slot ONLY the validated `data` the live run accepted, bound to that run, schema and slot.
+ * record, stored as its OWN document `runs/{runId}/adaptiveDisplayResults/v1` (never a field of the run document),
+ * written ONCE after the run's mandatory writes (adaptive output, governance initialization, retry accounting), holding
+ * for each slot ONLY the validated `data` the live run accepted, bound to that run, schema and slot.
+ *
+ * Why a separate document (owner ruling O-2, Order 40): the run document has later writers whose size no code bounds
+ * (e.g. a governance review comment). An optional display record inside it would consume capacity those required
+ * writes may need. In its own document it never changes the run document's size, so no governance, review or
+ * accounting write can be refused because of it. Research deletion removes it with the run's subtree.
  *
  * What it is not:
  *   - not the first answer (that stays in `runDocument.perModel`, byte for byte unchanged);
@@ -23,9 +29,9 @@
  * unavailable" and keeps #312's behaviour.
  *
  * Bounds (UTF-8 bytes, measured with Firestore's documented storage-size rules, firestoreValueBytes below): one slot
- * at most ADAPTIVE_DISPLAY_SLOT_MAX_BYTES, the whole record at most ADAPTIVE_DISPLAY_RECORD_MAX_BYTES, and never more
- * than the headroom the existing run document leaves under FIRESTORE_DOCUMENT_BUDGET_BYTES (Firestore's limit is
- * 1,048,576 bytes). A slot over a bound is OMITTED and marked unavailable ("size_limit"); its data is never truncated.
+ * at most ADAPTIVE_DISPLAY_SLOT_MAX_BYTES, the whole record at most ADAPTIVE_DISPLAY_RECORD_MAX_BYTES, and the display
+ * document (name + fields + 32) at most FIRESTORE_DOCUMENT_BUDGET_BYTES = 950,000 (Firestore's limit is 1,048,576
+ * bytes). A slot over a bound is OMITTED and marked unavailable ("size_limit"); its data is never truncated.
  *
  * Reading is strict (readAdoptedDisplayResults): any malformed, future-version, foreign-run, foreign-schema or
  * mismatched-slot data is ignored and the slot falls back to #312's presentation. The stored `data` must be a fixed
@@ -43,6 +49,12 @@ import { validateAdaptiveResponse } from "./validator";
 
 /** The run-document field. Top-level, written once, never by the client. */
 export const ADAPTIVE_DISPLAY_RESULTS_FIELD = "adaptiveDisplayResults";
+/** The record's own document: `runs/{runId}/adaptiveDisplayResults/v1` (O-2: never a field of the run document). */
+export const ADAPTIVE_DISPLAY_RESULTS_COLLECTION = ADAPTIVE_DISPLAY_RESULTS_FIELD;
+export const ADAPTIVE_DISPLAY_RESULTS_DOC_ID = "v1";
+export function adaptiveDisplayResultsDocPath(runId: string): [string, string, string, string] {
+  return ["runs", runId, ADAPTIVE_DISPLAY_RESULTS_COLLECTION, ADAPTIVE_DISPLAY_RESULTS_DOC_ID];
+}
 export const ADAPTIVE_DISPLAY_RESULTS_SCHEMA_VERSION = 1;
 
 export const ADAPTIVE_DISPLAY_RESULT_ORIGINS = ["original_accepted", "retry_adopted_full", "retry_adopted_partial"] as const;
@@ -101,10 +113,12 @@ export interface AdaptiveDisplayResultsV1 {
 
 /** Per-slot bound: a slot's entry (field name + value) larger than this is omitted. */
 export const ADAPTIVE_DISPLAY_SLOT_MAX_BYTES = 64 * 1024;
-/** Whole-record bound (field name + value), whatever the document headroom. */
+/** Whole-record bound (measured as field name + value, which over-counts the document's fields by the name), whatever budget a caller passes. */
 export const ADAPTIVE_DISPLAY_RECORD_MAX_BYTES = 256 * 1024;
-/** The run document must stay at or under this after the write (Firestore's hard limit is 1,048,576 bytes). */
-export const FIRESTORE_DOCUMENT_BUDGET_BYTES = 1_000_000;
+/** The display document's maximum total size (name + fields + overhead); Firestore's hard limit is 1,048,576 bytes. */
+export const FIRESTORE_DOCUMENT_BUDGET_BYTES = 950_000;
+/** Firestore's hard document limit, for reference in boundary checks. */
+export const FIRESTORE_DOCUMENT_LIMIT_BYTES = 1_048_576;
 /** Firestore's documented fixed per-document overhead. */
 const FIRESTORE_DOCUMENT_OVERHEAD_BYTES = 32;
 /** Firestore allows 20 levels of nested maps/arrays; this record stays well inside it. */
@@ -123,8 +137,9 @@ const utf8 = (s: string) => Buffer.byteLength(s, "utf8");
 /**
  * Storage size of a value under Firestore's documented rules: string = UTF-8 bytes + 1; boolean / null = 1;
  * number / timestamp = 8; bytes = length; array = sum of its values; map = sum of (key UTF-8 bytes + 1 + value).
- * A reference, geopoint or other class instance is measured as a map of its own enumerable fields (an
- * over-estimate for the run document's Timestamp, which is handled as 8 bytes first). Undefined fields are not stored.
+ * geopoint = 16; reference = the referenced document's name size. A Timestamp (duck-typed) is 8. Any other class
+ * instance cannot be measured from its enumerable fields, so it measures as +Infinity: a caller comparing against a
+ * budget then refuses, never under-counts. Undefined fields and functions are not stored.
  */
 export function firestoreValueBytes(value: unknown): number {
   if (value === undefined) return 0;
@@ -137,6 +152,9 @@ export function firestoreValueBytes(value: unknown): number {
   if (typeof value === "object") {
     const o = value as Record<string, unknown>;
     if (typeof o.seconds === "number" && typeof o.nanoseconds === "number" && typeof o.toMillis === "function") return 8;
+    if (typeof o.latitude === "number" && typeof o.longitude === "number" && typeof o.isEqual === "function") return 16;
+    if (typeof o.path === "string" && typeof o.id === "string" && typeof o.isEqual === "function") return firestoreDocumentNameBytes(o.path.split("/"));
+    if (!isPlainObject(value)) return Number.POSITIVE_INFINITY;
     let sum = 0;
     for (const [k, v] of Object.entries(o)) {
       if (v === undefined || typeof v === "function") continue;
@@ -147,12 +165,20 @@ export function firestoreValueBytes(value: unknown): number {
   return 0;
 }
 
+/**
+ * Firestore's documented document-name size: the UTF-8 size + 1 of each collection ID and document ID in the path,
+ * plus 16. For `runs/{runId}/adaptiveDisplayResults/v1`: 5 + (runId + 1) + 23 + 3 + 16.
+ */
+export function firestoreDocumentNameBytes(segments: ReadonlyArray<string>): number {
+  return segments.reduce((sum, seg) => sum + utf8(seg) + 1, 0) + 16;
+}
+
 /** Size of one top-level field as stored: name + value. */
 export function firestoreFieldBytes(name: string, value: unknown): number {
   return utf8(name) + 1 + firestoreValueBytes(value);
 }
 
-/** Size of a whole document's fields plus Firestore's fixed overhead (the document name is added by the caller's margin). */
+/** Size of a whole document's fields plus Firestore's fixed 32-byte overhead (the name: firestoreDocumentNameBytes). */
 export function firestoreDocumentBytes(data: Record<string, unknown> | undefined): number {
   if (!data) return FIRESTORE_DOCUMENT_OVERHEAD_BYTES;
   let sum = FIRESTORE_DOCUMENT_OVERHEAD_BYTES;
@@ -161,6 +187,11 @@ export function firestoreDocumentBytes(data: Record<string, unknown> | undefined
     sum += firestoreFieldBytes(k, v);
   }
   return sum;
+}
+
+/** The stored size of the display document for this run: name + every record field + 32. */
+export function adaptiveDisplayDocumentBytes(runId: string, record: Record<string, unknown>): number {
+  return firestoreDocumentNameBytes(adaptiveDisplayResultsDocPath(runId)) + firestoreDocumentBytes(record);
 }
 
 // ─── Serialization (write side) ─────────────────────────────────────────────
@@ -218,8 +249,8 @@ export type BuildAdaptiveDisplayResultsOutcome =
 
 /**
  * Builds the record from the live run's own values: the panel results (one per slot, in saved order) and the
- * finalized adaptive results (same order, same length). `maxRecordBytes` is the field-size budget the caller computed
- * from the run document (never above ADAPTIVE_DISPLAY_RECORD_MAX_BYTES). Deterministic: the same inputs and budget
+ * finalized adaptive results (same order, same length). `maxRecordBytes` is an optional tighter budget from the caller
+ * (never above ADAPTIVE_DISPLAY_RECORD_MAX_BYTES). Deterministic: the same inputs and budget
  * always produce the same record. Slots are admitted in slot order; once a slot does not fit, it is omitted and
  * marked "size_limit", and later slots that still fit are admitted.
  */

@@ -20,9 +20,15 @@ const read = (p: string) => readFileSync(join(ROOT, p), "utf8");
 
 /** `git rev-parse 9eca1e3:<path>` for every file S-2a must not change. */
 const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
-  "app/api/user/runs/[runId]/route.ts": "091f4ea06144891ee1a98779cec9fc4948d9e785",
+  // Re-pinned (owner-authorized Order 40 C O-2 correction, separate display document): after every access and containment
+  // gate, reads runs/{runId}/adaptiveDisplayResults/v1 (loadAdaptiveDisplayResults) only for a run with an adaptive output
+  // and passes it to buildRunReadPayload; no other change, no provenance code. 091f4ea06144891ee1a98779cec9fc4948d9e785 → c47083683a6f0b41c8e6b88180b6403e3e8d6153.
+  "app/api/user/runs/[runId]/route.ts": "c47083683a6f0b41c8e6b88180b6403e3e8d6153",
   "app/api/user/runs/[runId]/governance/route.ts": "91647ab52a8e933d63565cf8a47d49f246626814",
-  "app/api/workspaces/[workspaceId]/runs/[runId]/route.ts": "e3f4170cc226e463d1f35b385cce79f19bb2ab2f",
+  // Re-pinned (owner-authorized Order 40 C O-2 correction, separate display document): after every access and containment
+  // gate, reads runs/{runId}/adaptiveDisplayResults/v1 (loadAdaptiveDisplayResults) only for a run with an adaptive output
+  // and passes it to buildRunReadPayload; no other change, no provenance code. e3f4170cc226e463d1f35b385cce79f19bb2ab2f → 3495983e28f1b6e91cda4d35b9e381908cb1f3f3.
+  "app/api/workspaces/[workspaceId]/runs/[runId]/route.ts": "3495983e28f1b6e91cda4d35b9e381908cb1f3f3",
   "app/api/user/runs/[runId]/export/route.ts": "3b74c7472310a69bac896f5c87f17b3edf32890d",
   "app/api/user/runs/[runId]/exports/route.ts": "8968d1e5dc7f84954417311c6189dd80d2839084",
   "app/api/user/runs/[runId]/exports/[exportId]/route.ts": "b172893d368271c2b625133553ecb77e06c556cb",
@@ -64,7 +70,11 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   // `adaptiveDisplayResults` record (readAdoptedDisplayResults) to reconstructModelResults, which only changes
   // `adaptive.modelResults`; the record is never returned; no other field and no provenance code.
   // ca6e3327bd8e3f2a651194aee1c2b459523b12bb → ac10d544369c49a83819342ae2b817e40c6859b3.
-  "lib/runs/runReadPayload.ts": "ac10d544369c49a83819342ae2b817e40c6859b3",
+  // Re-pinned (owner-authorized Order 40 C O-2 correction, separate display document): the display record is now an
+  // explicit `adaptiveDisplayResults` argument loaded by the caller from its own document, never a run-document field;
+  // verification and use are unchanged; no provenance code. ac10d544369c49a83819342ae2b817e40c6859b3 →
+  // 7b5d9b47fee49698c174eff666c642da1e8cd9e2.
+  "lib/runs/runReadPayload.ts": "7b5d9b47fee49698c174eff666c642da1e8cd9e2",
   // Re-pinned (owner-authorized F-2, Order 34 — "mock response" text is not an authority signal): ONLY copies the
   // persisted structured execution fact `outputClass` ("model_response", written on NEW rows at completion) onto the
   // saved result row when the row carries it; no provenance code. d1ed5a2d6d9caafa3d7e63d18307919ca7cb4cf1 →

@@ -74,7 +74,9 @@ import { callGemini } from "@/lib/connectors/gemini";
 import { executeOrdinaryRun } from "@/lib/runPanelExecution";
 import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
 import { persistAdaptiveDisplayResults } from "@/lib/firestore/adaptiveDisplayResults";
-import { ADAPTIVE_DISPLAY_SLOT_MAX_BYTES, FIRESTORE_DOCUMENT_BUDGET_BYTES, firestoreDocumentBytes, firestoreFieldBytes } from "@/lib/adaptiveSchema/adoptedDisplayResults";
+import * as adoptedDisplay from "@/lib/adaptiveSchema/adoptedDisplayResults";
+import { ADAPTIVE_DISPLAY_SLOT_MAX_BYTES, FIRESTORE_DOCUMENT_BUDGET_BYTES, FIRESTORE_DOCUMENT_LIMIT_BYTES, adaptiveDisplayDocumentBytes, firestoreFieldBytes } from "@/lib/adaptiveSchema/adoptedDisplayResults";
+import { FirestoreError } from "@/lib/workspaces/__tests__/helpers/fakeTransactionalFirestore";
 import { buildRunReadPayload, type RunReadViewerRole } from "@/lib/runs/runReadPayload";
 import { interpretPersistedRunReadPayload } from "@/lib/research/persistedRunPresentation";
 import PersistedResearchResultView from "@/components/research/PersistedResearchResultView";
@@ -156,11 +158,70 @@ async function execute(results: ModelResult[], opts: { seed?: Record<string, unk
   }
   expect(res.status).toBe(200);
   const body = res.body as any;
-  return { body, live: body.adaptive.results as any[], stored: roundTrip(db.read(`runs/${RUN_ID}`)!) as Record<string, any> };
+  return { body, live: body.adaptive.results as any[], stored: viewOf(RUN_ID) };
 }
 
-async function readAs(stored: Record<string, unknown>, viewerRole: RunReadViewerRole = "owner", runId = RUN_ID) {
-  return roundTrip(await buildRunReadPayload({ runId, data: stored, viewerRole, mayReadDecisionContent: true, resolveReviewRouting: async () => "not_configured" })) as any;
+/**
+ * Order 40 C (O-2): the record is its own document, `runs/{runId}/adaptiveDisplayResults/v1`, never a run-document
+ * field. A spec "view" is the run document as a reader sees it: the run's fields plus, under RECORD, the display
+ * document (when it exists). readAs() splits it back into what the routes pass to buildRunReadPayload.
+ */
+const displayPath = (runId: string) => `runs/${runId}/adaptiveDisplayResults/v1`;
+function viewOf(runId: string): Record<string, any> {
+  const run = roundTrip(db.read(`runs/${runId}`)!) as Record<string, any>;
+  expect(RECORD in run).toBe(false); // never a field of the run document
+  const display = db.read(displayPath(runId));
+  return display === undefined ? run : { ...run, [RECORD]: roundTrip(display) };
+}
+
+/**
+ * An INDEPENDENT oracle of Firestore's documented storage size (never the production estimator): string = UTF-8 + 1;
+ * boolean / null = 1; number, Date, Timestamp, and the fake's stored FieldValue transforms (a number once applied) = 8;
+ * array = Σ values; map = Σ (key UTF-8 + 1 + value); document = name (Σ (segment UTF-8 + 1) + 16) + Σ fields + 32.
+ * Anything else throws, so an unmeasured value fails the test instead of being under-counted.
+ */
+function oracleValueBytes(v: unknown): number {
+  if (v === undefined) return 0;
+  if (v === null || typeof v === "boolean") return 1;
+  if (typeof v === "number") return 8;
+  if (typeof v === "string") return Buffer.byteLength(v, "utf8") + 1;
+  if (v instanceof Date) return 8;
+  if (Array.isArray(v)) return v.reduce((n: number, x) => n + oracleValueBytes(x), 0);
+  if (typeof v === "object") {
+    const ctor = (v as object).constructor?.name ?? "";
+    if (typeof (v as { toMillis?: unknown }).toMillis === "function" || /Transform$/.test(ctor)) return 8;
+    if (ctor !== "Object" && ctor !== "") throw new Error(`oracle cannot measure a ${ctor}`);
+    return Object.entries(v as Record<string, unknown>).reduce((n, [k, x]) => (x === undefined ? n : n + Buffer.byteLength(k, "utf8") + 1 + oracleValueBytes(x)), 0);
+  }
+  throw new Error(`oracle cannot measure ${typeof v}`);
+}
+function oracleDocumentBytes(path: string, data: Record<string, unknown>): number {
+  const name = path.split("/").reduce((n, seg) => n + Buffer.byteLength(seg, "utf8") + 1, 0) + 16;
+  return name + 32 + oracleValueBytes(data);
+}
+/** Makes the fake refuse, atomically, any commit that leaves a document over Firestore's 1,048,576-byte limit. */
+function enforceFirestoreDocumentLimit(): { refusals: string[] } {
+  const refusals: string[] = [];
+  const real = db.applyWrites.bind(db);
+  jest.spyOn(db, "applyWrites").mockImplementation((writes: any[], via?: any) => {
+    const paths = [...new Set(writes.map((w) => w.path))];
+    const before = new Map(paths.map((p) => [p, db.docs.get(p)]));
+    const logLength = db.writeLog.length;
+    real(writes, via);
+    const over = paths.find((p) => db.docs.has(p) && oracleDocumentBytes(p, db.docs.get(p)!.data) > FIRESTORE_DOCUMENT_LIMIT_BYTES);
+    if (over) {
+      for (const [p, prev] of before) (prev === undefined ? db.docs.delete(p) : db.docs.set(p, prev));
+      db.writeLog.length = logLength;
+      refusals.push(over);
+      throw new FirestoreError("INVALID_ARGUMENT", `Document ${over} exceeds the maximum allowed size of 1,048,576 bytes.`);
+    }
+  });
+  return { refusals };
+}
+
+async function readAs(view: Record<string, unknown>, viewerRole: RunReadViewerRole = "owner", runId = RUN_ID) {
+  const { [RECORD]: adaptiveDisplayResults, ...data } = view;
+  return roundTrip(await buildRunReadPayload({ runId, data, viewerRole, mayReadDecisionContent: true, resolveReviewRouting: async () => "not_configured", adaptiveDisplayResults })) as any;
 }
 const withoutRecord = (stored: Record<string, any>) => {
   const { adaptiveDisplayResults: _r, ...rest } = stored;
@@ -236,17 +297,25 @@ const RECORD = "adaptiveDisplayResults";
 
 describe("write site (lib/runPanelExecution.ts)", () => {
   const src = readFileSync(join(process.cwd(), "lib/runPanelExecution.ts"), "utf8");
-  it("is called once, after persistAdaptiveOutput, only when it saved and completeRun succeeded, and before governance initialization", () => {
+  it("O-2: captured only when the adaptive output saved and completeRun succeeded; written once, LAST — after governance initialization, automated governance and retry accounting", () => {
     const persist = src.indexOf("await persistAdaptiveOutput(runId, adaptiveOutput.persistedOutput)");
-    const call = src.indexOf("persistAdaptiveDisplayResults({");
+    const capture = src.indexOf("pendingDisplayResults = {");
     const init = src.indexOf("initializeAdaptiveGovernanceRecord({");
-    expect(src.split("persistAdaptiveDisplayResults({").length - 1).toBe(1);
-    expect(persist).toBeGreaterThan(-1);
-    expect(call).toBeGreaterThan(persist);
-    expect(init).toBeGreaterThan(call);
-    const gate = src.slice(src.lastIndexOf("if (", call), call);
+    const automated = src.indexOf("await persistAutomatedGovernanceUpdate(");
+    const accounting = src.indexOf("await applyAdaptiveRetryAccounting({");
+    const call = src.indexOf("await persistAdaptiveDisplayResults(pendingDisplayResults)");
+    expect(src.split("persistAdaptiveDisplayResults(").length - 1).toBe(1);
+    expect(src.split("pendingDisplayResults = {").length - 1).toBe(1);
+    for (const i of [persist, capture, init, automated, accounting, call]) expect(i).toBeGreaterThan(-1);
+    expect(capture).toBeGreaterThan(persist);
+    expect(call).toBeGreaterThan(init);
+    expect(call).toBeGreaterThan(automated);
+    expect(call).toBeGreaterThan(accounting);
+    const gate = src.slice(src.lastIndexOf("if (", capture), capture);
     expect(gate).toContain('adaptivePayload.persistenceStatus === "saved"');
     expect(gate).toContain("completeRunSucceeded");
+    const callGate = src.slice(src.lastIndexOf("if (", call), call);
+    expect(callGate).toContain("pendingDisplayResults && adaptivePayload");
   });
 });
 
@@ -453,7 +522,7 @@ describe("persistence: failure, repetition, concurrency, size, deletion", () => 
     jest.spyOn(db, "runTransaction").mockImplementation(async (fn: any) => {
       return realRun(async (tx: any) => {
         const out = await fn(tx);
-        if (failing && tx.writes.some((w: any) => RECORD in w.data)) throw new Error("UNAVAILABLE: injected commit failure");
+        if (failing && tx.writes.some((w: any) => w.path === displayPath(RUN_ID))) throw new Error("UNAVAILABLE: injected commit failure");
         return out;
       });
     });
@@ -470,9 +539,15 @@ describe("persistence: failure, repetition, concurrency, size, deletion", () => 
     failing = false;
     expect(res.status).toBe(200);
     expect((res.body as any).adaptive.persistenceStatus).toBe("saved");
-    const stored = roundTrip(db.read(`runs/${RUN_ID}`)!) as any;
+    const stored = viewOf(RUN_ID);
     expect(RECORD in stored).toBe(false);
+    expect(db.read(displayPath(RUN_ID))).toBeUndefined();
     expect(stored.adaptiveOutput).toBeDefined();
+    // Every mandatory write before it committed (case 8: the optional write's failure blocks nothing).
+    expect(stored.governanceRecord).toBeDefined();
+    expect(stored.governanceRecord.automatedGovernance).toBeDefined();
+    expect(stored.adaptiveRetryUsage).toBeDefined();
+    expect((res.body as any).adaptive.governanceInitializationStatus).toBe("created");
     claude.mockReset();
     const r = await renderPersonal(stored);
     expect(text(r)).toContain(`Claude${SAVED_COPY_RETRIED_AFTER_NAME}`);
@@ -494,6 +569,7 @@ describe("persistence: failure, repetition, concurrency, size, deletion", () => 
     expect(body.adaptive.persistenceStatus).toBe("failed");
     expect("adaptiveOutput" in stored).toBe(false);
     expect(RECORD in stored).toBe(false);
+    expect(db.read(displayPath(RUN_ID))).toBeUndefined();
   });
 
   it("a repeated write is a no-op: the first record stays byte-identical", async () => {
@@ -501,15 +577,13 @@ describe("persistence: failure, repetition, concurrency, size, deletion", () => 
     const { stored, live } = await execute([ok("chatgpt", bare("ChatGPT")), ok("claude", CLAUDE_PROSE_WRAPPED)]);
     const again = await persistAdaptiveDisplayResults({ runId: RUN_ID, schemaId: "comparison_matrix", panelResults: [{ modelId: "chatgpt", status: "ok" }, { modelId: "claude", status: "ok" }], adaptiveResults: live.map((r) => ({ ...r, data: { directConclusion: "DIFFERENT" } })) });
     expect(again).toEqual({ status: "already_exists" });
-    expect(roundTrip(db.read(`runs/${RUN_ID}`)!)).toEqual(stored);
+    expect(viewOf(RUN_ID)).toEqual(stored);
   });
 
   it("concurrent writers: exactly one record commits; the loser re-runs, sees it, and writes nothing", async () => {
     claude.mockResolvedValueOnce(retryOk("claude", bare("ClaudeRetry")));
     const { live } = await execute([ok("chatgpt", bare("ChatGPT")), ok("claude", CLAUDE_PROSE_WRAPPED)]);
-    const doc = db.read(`runs/${RUN_ID}`)!;
-    delete doc[RECORD];
-    db.seed(`runs/${RUN_ID}`, doc);
+    db.docs.delete(displayPath(RUN_ID));
     const rows = [{ modelId: "chatgpt", status: "ok" }, { modelId: "claude", status: "ok" }];
     const variant = live.map((r) => (r.modelId === "chatgpt" ? { ...r, data: { ...r.data, directConclusion: "competitor" } } : r));
     let injected = false;
@@ -521,43 +595,53 @@ describe("persistence: failure, repetition, concurrency, size, deletion", () => 
     const first = await persistAdaptiveDisplayResults({ runId: RUN_ID, schemaId: "comparison_matrix", panelResults: rows, adaptiveResults: live });
     db.hooks = {};
     expect(first).toEqual({ status: "already_exists" });
-    expect((db.read(`runs/${RUN_ID}`) as any)[RECORD].bySlot.chatgpt.data.directConclusion).toBe("competitor");
+    expect((db.read(displayPath(RUN_ID)) as any).bySlot.chatgpt.data.directConclusion).toBe("competitor");
   });
 
-  it("the Firestore size boundary: the record never takes the document past its budget; at the exact headroom it fits whole, one byte less omits a slot, never truncating it", async () => {
+  it("the display document's own boundary (950,000 bytes, Firestore's size rules): exactly at it is saved; one byte over is not written; the run document is never touched", async () => {
     claude.mockResolvedValueOnce(retryOk("claude", bare("ClaudeRetry")));
     const { live } = await execute([ok("chatgpt", bare("ChatGPT")), ok("claude", CLAUDE_PROSE_WRAPPED)]);
-    const doc = db.read(`runs/${RUN_ID}`)!;
-    const savedRecord = doc[RECORD];
-    delete doc[RECORD];
     const rows = [{ modelId: "chatgpt", status: "ok" }, { modelId: "claude", status: "ok" }];
-    const fullBytes = firestoreFieldBytes(RECORD, savedRecord);
-    const base = firestoreDocumentBytes(doc);
-    // Pre-existing bulk on the run (e.g. a large adaptive envelope) leaving exactly `headroom` bytes for the record.
-    const withHeadroom = (headroom: number) => db.seed(`runs/${RUN_ID}`, { ...doc, bulk: "f".repeat(FIRESTORE_DOCUMENT_BUDGET_BYTES - 1_024 - base - firestoreFieldBytes("bulk", "") - headroom) });
+    const runBefore = db.read(`runs/${RUN_ID}`);
+    // A record of a chosen exact document size (the builder's own 256 KiB bound cannot reach 950,000, so the ceiling is
+    // defence in depth; it is exercised here with a builder stand-in). Measured by an independent oracle, too.
+    const record = (pad: number) => ({ schemaVersion: 1, runId: RUN_ID, schemaId: "comparison_matrix", bySlot: { chatgpt: { availability: "unavailable", reason: "size_limit", pad: "p".repeat(pad) } } });
+    const base = adaptiveDisplayDocumentBytes(RUN_ID, record(0));
+    const atLimit = record(FIRESTORE_DOCUMENT_BUDGET_BYTES - base);
+    expect(oracleDocumentBytes(displayPath(RUN_ID), atLimit)).toBe(FIRESTORE_DOCUMENT_BUDGET_BYTES);
+    const spy = jest.spyOn(adoptedDisplay, "buildAdaptiveDisplayResultsRecord");
 
-    withHeadroom(fullBytes);
-    expect(await persistAdaptiveDisplayResults({ runId: RUN_ID, schemaId: "comparison_matrix", panelResults: rows, adaptiveResults: live })).toEqual({ status: "saved", slots: 2, omittedForSize: 0 });
-    let after = db.read(`runs/${RUN_ID}`) as any;
-    expect(after[RECORD]).toEqual(savedRecord);
-    expect(firestoreDocumentBytes(after)).toBe(FIRESTORE_DOCUMENT_BUDGET_BYTES - 1_024);
+    db.docs.delete(displayPath(RUN_ID));
+    spy.mockReturnValueOnce({ ok: true, record: atLimit as never, bytes: 0, omittedForSize: 0 });
+    expect(await persistAdaptiveDisplayResults({ runId: RUN_ID, schemaId: "comparison_matrix", panelResults: rows, adaptiveResults: live })).toEqual({ status: "saved", slots: 1, omittedForSize: 0, documentBytes: FIRESTORE_DOCUMENT_BUDGET_BYTES });
+    expect(db.read(displayPath(RUN_ID))).toEqual(atLimit);
 
-    withHeadroom(fullBytes - 1);
-    const out = await persistAdaptiveDisplayResults({ runId: RUN_ID, schemaId: "comparison_matrix", panelResults: rows, adaptiveResults: live });
-    expect(out).toMatchObject({ status: "saved", omittedForSize: 1 });
-    after = db.read(`runs/${RUN_ID}`) as any;
-    expect(firestoreDocumentBytes(after)).toBeLessThanOrEqual(FIRESTORE_DOCUMENT_BUDGET_BYTES - 1_024);
-    const slots = Object.values(after[RECORD].bySlot) as any[];
-    expect(slots.map((x) => x.availability).sort()).toEqual(["available", "unavailable"]);
+    db.docs.delete(displayPath(RUN_ID));
+    const overLimit = record(FIRESTORE_DOCUMENT_BUDGET_BYTES - base + 1);
+    expect(oracleDocumentBytes(displayPath(RUN_ID), overLimit)).toBe(FIRESTORE_DOCUMENT_BUDGET_BYTES + 1);
+    spy.mockReturnValueOnce({ ok: true, record: overLimit as never, bytes: 0, omittedForSize: 0 });
+    expect(await persistAdaptiveDisplayResults({ runId: RUN_ID, schemaId: "comparison_matrix", panelResults: rows, adaptiveResults: live })).toEqual({ status: "not_written", reason: "oversized" });
+    expect(db.read(displayPath(RUN_ID))).toBeUndefined();
+    // Truthful fallback: without the record the reopened slot is #312's saved first answer, never a truncated record.
+    const r = await renderPersonal(viewOf(RUN_ID));
+    expect(text(r)).toContain(`Claude${SAVED_COPY_RETRIED_AFTER_NAME}`);
+    expect(db.read(`runs/${RUN_ID}`)).toEqual(runBefore);
+  });
+
+  it("the record bound itself: a record at the 256 KiB record bound is kept whole; one byte less omits a slot, never truncating it", async () => {
+    claude.mockResolvedValueOnce(retryOk("claude", bare("ClaudeRetry")));
+    const { stored, live } = await execute([ok("chatgpt", bare("ChatGPT")), ok("claude", CLAUDE_PROSE_WRAPPED)]);
+    const rows = [{ modelId: "chatgpt", status: "ok" }, { modelId: "claude", status: "ok" }];
+    const fullBytes = firestoreFieldBytes(RECORD, stored[RECORD]);
+    const whole = adoptedDisplay.buildAdaptiveDisplayResultsRecord({ runId: RUN_ID, schemaId: "comparison_matrix", panelResults: rows, adaptiveResults: live as never, maxRecordBytes: fullBytes });
+    expect(whole).toMatchObject({ ok: true, omittedForSize: 0 });
+    const less = adoptedDisplay.buildAdaptiveDisplayResultsRecord({ runId: RUN_ID, schemaId: "comparison_matrix", panelResults: rows, adaptiveResults: live as never, maxRecordBytes: fullBytes - 1 });
+    expect(less).toMatchObject({ ok: true, omittedForSize: 1 });
+    const slots = Object.values((less as any).record.bySlot) as any[];
     for (const x of slots) {
       if (x.availability === "available") expect(x.data).toEqual(live[x.slotIndex].data);
       else expect([x.reason, "data" in x]).toEqual(["size_limit", false]);
     }
-
-    // With no headroom at all, nothing is written.
-    withHeadroom(0);
-    expect(await persistAdaptiveDisplayResults({ runId: RUN_ID, schemaId: "comparison_matrix", panelResults: rows, adaptiveResults: live })).toEqual({ status: "not_written", reason: "oversized" });
-    expect(RECORD in db.read(`runs/${RUN_ID}`)!).toBe(false);
   });
 
   it("a validated slot larger than the per-slot bound is omitted and marked; the other slot is saved whole; the reopened slot falls back", async () => {
@@ -573,25 +657,171 @@ describe("persistence: failure, repetition, concurrency, size, deletion", () => 
 
   it("a run whose deletion started is never written (deletion barrier)", async () => {
     const { stored, live } = await execute([ok("chatgpt", bare("ChatGPT"))]);
+    db.docs.delete(displayPath(RUN_ID));
     const doc = db.read(`runs/${RUN_ID}`)!;
-    delete doc[RECORD];
     db.seed(`runs/${RUN_ID}`, { ...doc, deletion: { requestedAt: "x" } });
     expect(await persistAdaptiveDisplayResults({ runId: RUN_ID, schemaId: "comparison_matrix", panelResults: [{ modelId: "chatgpt", status: "ok" }], adaptiveResults: live })).toEqual({ status: "refused", reason: "deleting" });
     db.docs.delete(`runs/${RUN_ID}`);
     expect(await persistAdaptiveDisplayResults({ runId: RUN_ID, schemaId: "comparison_matrix", panelResults: [{ modelId: "chatgpt", status: "ok" }], adaptiveResults: live })).toEqual({ status: "refused", reason: "missing" });
     expect(db.docs.has(`runs/${RUN_ID}`)).toBe(false);
+    expect(db.docs.has(displayPath(RUN_ID))).toBe(false);
     void stored;
   });
 });
 
+describe("O-2: storage order and capacity (owner ruling, Order 40)", () => {
+  const idx = (pred: (w: { path: string; data: Record<string, unknown> }) => boolean) => db.writeLog.findIndex(pred);
+  const runPath = `runs/${RUN_ID}`;
+  const isDisplay = (w: { path: string }) => w.path === displayPath(RUN_ID);
+
+  it("order at run time: the display document is written after governanceRecord, automated governance and retry accounting", async () => {
+    claude.mockResolvedValueOnce(retryOk("claude", bare("ClaudeRetry")));
+    await execute([ok("chatgpt", bare("ChatGPT")), ok("claude", CLAUDE_PROSE_WRAPPED)]);
+    const display = idx(isDisplay);
+    const governance = idx((w) => w.path === runPath && "governanceRecord" in w.data);
+    const automated = idx((w) => w.path === runPath && "governanceRecord.automatedGovernance" in w.data);
+    const accounting = idx((w) => w.path === runPath && "adaptiveRetryUsage" in w.data);
+    for (const i of [display, governance, automated, accounting]) expect(i).toBeGreaterThan(-1);
+    expect(display).toBeGreaterThan(Math.max(governance, automated, accounting));
+    expect(display).toBe(db.writeLog.length - 1);
+  });
+
+  it("a large run at Firestore's real limit: governance initializes, accounting applies, the record is saved in its own document, and the run document is exactly what it would be without the feature", async () => {
+    // Learn the final run-document size with no bulk.
+    claude.mockResolvedValueOnce(retryOk("claude", bare("ClaudeRetry")));
+    const probe = await execute([ok("chatgpt", bare("ChatGPT")), ok("claude", CLAUDE_PROSE_WRAPPED)]);
+    const finalRun = db.docs.get(runPath)!.data;
+    const finalBytes = oracleDocumentBytes(runPath, finalRun);
+    const record = probe.stored[RECORD];
+    // Bulk that leaves the finished run document 100 bytes under 1,048,576.
+    const bulkLen = FIRESTORE_DOCUMENT_LIMIT_BYTES - 100 - finalBytes - (Buffer.byteLength("bulk") + 1) - 1;
+    const enforced = enforceFirestoreDocumentLimit();
+    claude.mockResolvedValueOnce(retryOk("claude", bare("ClaudeRetry")));
+    const { body, stored } = await execute([ok("chatgpt", bare("ChatGPT")), ok("claude", CLAUDE_PROSE_WRAPPED)], { seed: { bulk: "b".repeat(bulkLen) } });
+    expect(enforced.refusals).toEqual([]);
+    expect(body.adaptive.governanceInitializationStatus).toBe("created");
+    expect(stored.governanceRecord.automatedGovernance).toBeDefined();
+    expect(stored.adaptiveRetryUsage).toBeDefined();
+    expect(stored[RECORD]).toEqual(record);
+    const runBytes = oracleDocumentBytes(runPath, db.docs.get(runPath)!.data);
+    expect(runBytes).toBe(FIRESTORE_DOCUMENT_LIMIT_BYTES - 100);
+    // The counterfactual: had the record been a field of this run document (the pre-correction design), it could not fit.
+    expect(runBytes + firestoreFieldBytes(RECORD, record)).toBeGreaterThan(FIRESTORE_DOCUMENT_LIMIT_BYTES);
+    expect(oracleDocumentBytes(displayPath(RUN_ID), record)).toBeLessThanOrEqual(FIRESTORE_DOCUMENT_BUDGET_BYTES);
+  });
+
+  it("no remaining capacity in the run document: the record still saves in its own document; the run document is byte-identical before and after the display write", async () => {
+    claude.mockResolvedValueOnce(retryOk("claude", bare("ClaudeRetry")));
+    const { live } = await execute([ok("chatgpt", bare("ChatGPT")), ok("claude", CLAUDE_PROSE_WRAPPED)]);
+    db.docs.delete(displayPath(RUN_ID));
+    const run = db.docs.get(runPath)!.data;
+    db.seed(runPath, { ...run, bulk: "b".repeat(FIRESTORE_DOCUMENT_LIMIT_BYTES - oracleDocumentBytes(runPath, run) - (Buffer.byteLength("bulk") + 1) - 1) });
+    expect(oracleDocumentBytes(runPath, db.docs.get(runPath)!.data)).toBe(FIRESTORE_DOCUMENT_LIMIT_BYTES);
+    const before = db.read(runPath);
+    const enforced = enforceFirestoreDocumentLimit();
+    const rows = [{ modelId: "chatgpt", status: "ok" }, { modelId: "claude", status: "ok" }];
+    expect(await persistAdaptiveDisplayResults({ runId: RUN_ID, schemaId: "comparison_matrix", panelResults: rows, adaptiveResults: live })).toMatchObject({ status: "saved", slots: 2 });
+    expect(enforced.refusals).toEqual([]);
+    expect(db.read(runPath)).toEqual(before);
+  });
+
+  it("governance initialization failure: the optional write neither causes it nor depends on it; the record is still saved", async () => {
+    claude.mockResolvedValueOnce(retryOk("claude", bare("ClaudeRetry")));
+    const realRun = db.runTransaction.bind(db);
+    jest.spyOn(db, "runTransaction").mockImplementation(async (fn: any) =>
+      realRun(async (tx: any) => {
+        const out = await fn(tx);
+        if (tx.writes.some((w: any) => w.path === runPath && "governanceRecord" in w.data)) throw new Error("UNAVAILABLE: injected governance failure");
+        return out;
+      })
+    );
+    const { body, stored } = await execute([ok("chatgpt", bare("ChatGPT")), ok("claude", CLAUDE_PROSE_WRAPPED)]);
+    expect(body.adaptive.governanceInitializationStatus).toBe("failed");
+    expect(stored.governanceRecord).toBeUndefined();
+    expect(stored[RECORD].bySlot.claude).toMatchObject({ origin: "retry_adopted_full" });
+  });
+
+  it("retry-accounting failure: the record is still saved after it; accounting is reported failed in the logs, the response is 200", async () => {
+    claude.mockResolvedValueOnce(retryOk("claude", bare("ClaudeRetry")));
+    const realRun = db.runTransaction.bind(db);
+    jest.spyOn(db, "runTransaction").mockImplementation(async (fn: any) =>
+      realRun(async (tx: any) => {
+        const out = await fn(tx);
+        if (tx.writes.some((w: any) => "adaptiveRetryUsage" in w.data)) throw new Error("UNAVAILABLE: injected accounting failure");
+        return out;
+      })
+    );
+    const { stored } = await execute([ok("chatgpt", bare("ChatGPT")), ok("claude", CLAUDE_PROSE_WRAPPED)]);
+    expect(stored.adaptiveRetryUsage).toBeUndefined();
+    expect(stored.governanceRecord).toBeDefined();
+    expect(stored[RECORD].bySlot.claude).toMatchObject({ origin: "retry_adopted_full" });
+    const { logger } = jest.requireMock("@/lib/logger");
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("Supplemental retry accounting FAILED"), expect.objectContaining({ runId: RUN_ID }));
+  });
+
+  it.each([
+    ["deletion started", (run: Record<string, unknown>) => db.seed(runPath, { ...run, deletion: { state: "pending", requestedAt: "x" } }), "deleting"],
+    ["run removed", () => db.docs.delete(runPath), "missing"],
+  ] as const)("run deleted between stages (%s, after retry accounting, before the display write): never written", async (_l, del, reason) => {
+    claude.mockResolvedValueOnce(retryOk("claude", bare("ClaudeRetry")));
+    const realRun = db.runTransaction.bind(db);
+    jest.spyOn(db, "runTransaction").mockImplementation(async (fn: any) => {
+      let accounting = false;
+      const out = await realRun(async (tx: any) => {
+        const r = await fn(tx);
+        accounting = tx.writes.some((w: any) => "adaptiveRetryUsage" in w.data);
+        return r;
+      });
+      if (accounting) del(db.read(runPath)!);
+      return out;
+    });
+    const spy = jest.spyOn(jest.requireMock("@/lib/logger").logger, "warn");
+    db.docs.clear();
+    db.hooks = {};
+    db.seed(runPath, { userId: OWNER, question: QUESTION, status: "running", selectedModels: ["chatgpt", "claude"] });
+    mockedRunPanel.mockResolvedValue([ok("chatgpt", bare("ChatGPT")), ok("claude", CLAUDE_PROSE_WRAPPED)]);
+    const res = await executeOrdinaryRun({
+      uid: OWNER, runId: RUN_ID, trimmedQuestion: QUESTION, context: null, selectedModels: ["chatgpt", "claude"] as never,
+      adaptivePlan: { classification: CLASSIFICATION, schema, promptOverrides: { chatgpt: SYSTEM_PROMPT, claude: SYSTEM_PROMPT }, routing: { kind: "active", schema } as never },
+      debugRawResponseRequested: false, requestBudget: { startedAtMonoMs: performance.now(), budgetMs: 300_000 },
+    });
+    expect(res.status).toBe(200);
+    expect(db.read(displayPath(RUN_ID))).toBeUndefined();
+    expect(spy).toHaveBeenCalledWith("[adaptiveDisplayResults] Not written: research write refused", expect.objectContaining({ runId: RUN_ID, refusal: reason }));
+  });
+
+  it("later required writes stay safe at the largest display record: a maximum review write to the run document fits exactly as it would without the feature", async () => {
+    // The largest record the builder can produce: two slots near the per-slot bound (record bound 256 KiB).
+    const big = (who: string) => bare(who, { directConclusion: "x".repeat(ADAPTIVE_DISPLAY_SLOT_MAX_BYTES - 1_200) });
+    await execute([ok("chatgpt", big("ChatGPT")), ok("claude", big("Claude"))]);
+    const display = db.read(displayPath(RUN_ID))!;
+    expect(Object.values((display as any).bySlot).every((x: any) => x.availability === "available")).toBe(true);
+    expect(oracleDocumentBytes(displayPath(RUN_ID), display)).toBeGreaterThan(100_000);
+    // Run document filled so that a 45,000-byte review write lands exactly at the limit.
+    const run = db.docs.get(runPath)!.data;
+    const REVIEW = 45_000;
+    const reviewValue = "r".repeat(REVIEW - (Buffer.byteLength("laterReview") + 1) - 1);
+    db.seed(runPath, { ...run, bulk: "b".repeat(FIRESTORE_DOCUMENT_LIMIT_BYTES - REVIEW - oracleDocumentBytes(runPath, run) - (Buffer.byteLength("bulk") + 1) - 1) });
+    const enforced = enforceFirestoreDocumentLimit();
+    await db.doc(runPath).set({ laterReview: reviewValue }, { merge: true });
+    expect(enforced.refusals).toEqual([]);
+    expect(oracleDocumentBytes(runPath, db.docs.get(runPath)!.data)).toBe(FIRESTORE_DOCUMENT_LIMIT_BYTES);
+    // Control: the enforcement is real — one byte more is refused.
+    await expect(db.doc(runPath).set({ laterReview: reviewValue + "r" }, { merge: true })).rejects.toThrow("exceeds the maximum allowed size");
+    // The display document was never involved.
+    expect(db.read(displayPath(RUN_ID))).toEqual(display);
+  });
+});
+
 describe("nothing else changes", () => {
-  it("the writer writes only its one field, once; no prompt, key, retry text or provider payload is stored in it", async () => {
+  it("the writer writes only its own document, once, by create; never the run document; no prompt, key, retry text or provider payload is stored in it", async () => {
     claude.mockResolvedValueOnce(retryOk("claude", bare("ClaudeRetry")));
     const { stored } = await execute([ok("chatgpt", bare("ChatGPT")), ok("claude", CLAUDE_PROSE_WRAPPED)]);
-    const writes = db.writeLog.filter((w) => RECORD in w.data);
+    const writes = db.writeLog.filter((w) => w.path === displayPath(RUN_ID));
     expect(writes).toHaveLength(1);
-    expect(Object.keys(writes[0].data)).toEqual([RECORD]);
-    expect(writes[0].kind).toBe("merge");
+    expect(Object.keys(writes[0].data)).toEqual(["schemaVersion", "runId", "schemaId", "bySlot"]);
+    expect(writes[0].kind).toBe("create");
+    expect(db.writeLog.filter((w) => w.path === `runs/${RUN_ID}`).every((w) => !Object.keys(w.data).some((k) => k.split(".")[0] === RECORD))).toBe(true);
     const json = JSON.stringify(stored[RECORD]);
     for (const banned of [SYSTEM_PROMPT, SECRET_KEY, "previous response failed validation", "Here is a structured comparison", "tokenUsage", "rawText", "parseError"]) {
       expect(json).not.toContain(banned);
@@ -644,8 +874,8 @@ describe("authenticated read (GET /api/user/runs/[runId])", () => {
     expect(JSON.stringify(intruder.body)).not.toMatch(/ClaudeRetry|ClaudeFirst|ChatGPT high/);
 
     // The same record copied onto ANOTHER run of the same owner is not that run's adopted copy.
-    const other = { ...stored, [RECORD]: stored[RECORD] };
-    db.seed(`runs/run-other-2`, { ...other, runDocument: { ...stored.runDocument, runId: "run-other-2" } });
+    db.seed(`runs/run-other-2`, { ...withoutRecord(stored), runDocument: { ...stored.runDocument, runId: "run-other-2" } });
+    db.seed(displayPath("run-other-2"), stored[RECORD]);
     const otherRead = await get(OWNER, "run-other-2");
     expect(otherRead.status).toBe(200);
     const oc = otherRead.body.adaptive.modelResults.find((m: any) => m.modelId === "claude");

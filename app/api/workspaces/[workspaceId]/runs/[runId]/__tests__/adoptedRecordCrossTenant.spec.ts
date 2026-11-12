@@ -3,6 +3,9 @@
  * (`runs/{runId}.adaptiveDisplayResults`) on the Team research detail read,
  * `GET /api/workspaces/{workspaceId}/runs/{runId}`.
  *
+ * The record is stored in its own document `runs/{runId}/adaptiveDisplayResults/v1` (owner ruling O-2); a denied
+ * request never even reads it.
+ *
  * REAL: the route, `resolveTeamRunWorkspaceAccess` → `resolveWorkspaceAccess` (admission, membership status, Team-type
  * guard, capabilities), the row validator, `buildRunReadPayload` and `readAdoptedDisplayResults`. Mocked only at their
  * module boundaries: identity, the two Firestore readers the access resolver uses (`getWorkspace`,
@@ -41,6 +44,9 @@ jest.mock("@/lib/workspaces/teamRunAssigneeEnrichment", () => ({ resolveRunAssig
 jest.mock("@/lib/firestore/runs", () => ({ getAdaptiveHumanReviewAssignment: jest.fn(async () => ({ status: "unassigned" })) }));
 jest.mock("@/lib/runs/resolveRunReviewRouting", () => ({ resolveRunReviewRouting: jest.fn(async () => "in_queue") }));
 const runDocs = new Map<string, Record<string, unknown>>();
+/** `runs/{runId}/adaptiveDisplayResults/v1`, keyed by run id; every read is recorded. */
+const displayDocs = new Map<string, Record<string, unknown>>();
+const displayReads: string[] = [];
 jest.mock("@/lib/firebase/admin", () => ({
   get adminDb() {
     return {
@@ -50,6 +56,15 @@ jest.mock("@/lib/firebase/admin", () => ({
             if (name !== "runs") throw new Error(`unexpected collection ${name}`);
             return { exists: runDocs.has(id), data: () => runDocs.get(id) };
           },
+          collection: (sub: string) => ({
+            doc: (docId: string) => ({
+              get: async () => {
+                if (name !== "runs" || sub !== "adaptiveDisplayResults" || docId !== "v1") throw new Error(`unexpected path ${name}/${id}/${sub}/${docId}`);
+                displayReads.push(id);
+                return { exists: displayDocs.has(id), data: () => displayDocs.get(id) };
+              },
+            }),
+          }),
         }),
       }),
     };
@@ -98,10 +113,11 @@ function runInB() {
     ] as never,
   });
   if (!built.ok) throw new Error(`fixture record not built: ${built.reason}`);
-  const data = fullTeamRunData({ workspaceId: WS_B, projectId: null, createdAt: T, completedAt: T, [ADAPTIVE_DISPLAY_RESULTS_FIELD]: built.record });
-  // The record's text exists nowhere else in the run document.
-  const { [ADAPTIVE_DISPLAY_RESULTS_FIELD]: _record, ...rest } = data;
-  expect(JSON.stringify(rest)).not.toContain(ADOPTED);
+  const data = fullTeamRunData({ workspaceId: WS_B, projectId: null, createdAt: T, completedAt: T });
+  // The record lives only in its own document (O-2); its text exists nowhere in the run document.
+  expect(JSON.stringify(data)).not.toContain(ADOPTED);
+  expect(data[ADAPTIVE_DISPLAY_RESULTS_FIELD]).toBeUndefined();
+  displayDocs.set(FIXTURE_RUN_ID, built.record as unknown as Record<string, unknown>);
   return data;
 }
 async function read(uid: string, workspaceId: string) {
@@ -122,6 +138,8 @@ beforeEach(() => {
   workspaces.clear();
   memberships.clear();
   runDocs.clear();
+  displayDocs.clear();
+  displayReads.length = 0;
   workspaces.set(WS_B, teamWorkspace(WS_B, FIXTURE_OWNER_UID));
   workspaces.set(WS_A, teamWorkspace(WS_A, "uid-owner-a"));
   memberships.set(`${WS_B}/${MEMBER_B}`, membership(WS_B, MEMBER_B));
@@ -136,6 +154,7 @@ describe("O-1: the saved adopted-result record never crosses a tenant boundary",
     expect(r.status).toBe(200);
     expect(r.text).toContain(ADOPTED);
     expect(builder).toHaveBeenCalledTimes(1);
+    expect(displayReads).toEqual([FIXTURE_RUN_ID]);
     // The record itself is never returned, only its effect on adaptive.modelResults.
     expect(r.text).not.toContain(ADAPTIVE_DISPLAY_RESULTS_FIELD);
   });
@@ -144,12 +163,14 @@ describe("O-1: the saved adopted-result record never crosses a tenant boundary",
     const r = await read(OUTSIDER, WS_B);
     expect(r).toEqual({ status: 404, text: WORKSPACE_CONCEALED });
     expect(builder).not.toHaveBeenCalled();
+    expect(displayReads).toEqual([]);
   });
 
   it("a member of ANOTHER tenant addressing the run through their own Workspace is concealed (cross-tenant containment)", async () => {
     const r = await read(MEMBER_A, WS_A);
     expect(r).toEqual({ status: 404, text: RUN_CONCEALED });
     expect(builder).not.toHaveBeenCalled();
+    expect(displayReads).toEqual([]);
   });
 
   it("the access denial is indistinguishable from addressing a Workspace that does not exist", async () => {
@@ -163,12 +184,14 @@ describe("O-1: the saved adopted-result record never crosses a tenant boundary",
     const r = await read(MEMBER_A, WS_B);
     expect(r).toEqual({ status: 404, text: WORKSPACE_CONCEALED });
     expect(builder).not.toHaveBeenCalled();
+    expect(displayReads).toEqual([]);
   });
 
   it("a removed member of the run's Workspace is concealed", async () => {
     const r = await read(REMOVED_B, WS_B);
     expect(r).toEqual({ status: 404, text: WORKSPACE_CONCEALED });
     expect(builder).not.toHaveBeenCalled();
+    expect(displayReads).toEqual([]);
   });
 
   it("the run's own creator, without a membership, gets no bypass", async () => {
@@ -176,5 +199,6 @@ describe("O-1: the saved adopted-result record never crosses a tenant boundary",
     const r = await read(FIXTURE_OWNER_UID, WS_B);
     expect(r).toEqual({ status: 404, text: WORKSPACE_CONCEALED });
     expect(builder).not.toHaveBeenCalled();
+    expect(displayReads).toEqual([]);
   });
 });

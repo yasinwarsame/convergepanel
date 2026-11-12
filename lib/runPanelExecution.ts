@@ -718,6 +718,8 @@ export async function executeOrdinaryRun(args: ExecuteOrdinaryRunArgs): Promise<
   // ============================================
   let adaptivePayload: OrdinaryRunAdaptivePayload | null = null;
   const adaptiveRetryUsageSink = new AdaptiveRetryUsageSink();
+  /** Order 40 C (O-2): the display record's inputs, written last (see the end of the adaptive block). */
+  let pendingDisplayResults: Parameters<typeof persistAdaptiveDisplayResults>[0] | null = null;
 
   if (adaptivePlan) {
     try {
@@ -827,26 +829,12 @@ export async function executeOrdinaryRun(args: ExecuteOrdinaryRunArgs): Promise<
           });
         }
 
-        // Order 40 C — the validated per-slot results the report used (adaptiveDisplayResults), saved once, right
-        // after the adaptive output, so a reopened report can show an adopted corrective retry. Only when that output
-        // and the saved first answers both exist; the writer never throws, never changes any other field, and its
-        // failure leaves the run reading exactly as before. Nothing downstream (governance, accounting, the response)
-        // reads it.
+        // Order 40 C — the display record (lib/firestore/adaptiveDisplayResults.ts) is captured here and written only
+        // AFTER governance initialization, automated governance and retry accounting (owner ruling O-2), so an optional
+        // display write can never run ahead of a mandatory one. Same gate: the adaptive output and the saved first
+        // answers both exist.
         if (adaptivePayload.persistenceStatus === "saved" && completeRunSucceeded) {
-          try {
-            await persistAdaptiveDisplayResults({
-              runId,
-              schemaId: adaptiveOutput.schemaId,
-              panelResults: results,
-              adaptiveResults: adaptiveOutput.adaptiveResults,
-            });
-          } catch (displayPersistError: any) {
-            logger.warn("[run-panel] adaptiveDisplayResults persistence threw, run response unaffected", {
-              runId,
-              schemaId: adaptiveOutput.schemaId,
-              error: displayPersistError?.message,
-            });
-          }
+          pendingDisplayResults = { runId, schemaId: adaptiveOutput.schemaId, panelResults: results, adaptiveResults: adaptiveOutput.adaptiveResults };
         }
 
         // ============================================
@@ -1254,6 +1242,23 @@ export async function executeOrdinaryRun(args: ExecuteOrdinaryRunArgs): Promise<
         runId,
         error: retryAccountingError?.message,
       });
+    }
+
+    // Order 40 C — the validated per-slot results the report used, saved once, LAST: after the adaptive output,
+    // governance initialization, automated governance and retry accounting (owner ruling O-2). It is written to its own
+    // document (runs/{runId}/adaptiveDisplayResults/v1), never the run document, so it cannot take capacity any of
+    // those writes, or a later review write, needs. Skipped when the adaptive finalize failed. The writer never throws;
+    // its failure leaves the run reading exactly as before. Nothing downstream (governance, accounting, the response)
+    // reads it.
+    if (pendingDisplayResults && adaptivePayload) {
+      try {
+        await persistAdaptiveDisplayResults(pendingDisplayResults);
+      } catch (displayPersistError: any) {
+        logger.warn("[run-panel] adaptiveDisplayResults persistence threw, run response unaffected", {
+          runId,
+          error: displayPersistError?.message,
+        });
+      }
     }
 
     // Observed request-budget margin at the end of adaptive work, so the

@@ -82,7 +82,8 @@ export type RunReadPayload = {
          * Ruling B (2026-11-02): each model's structured result, rebuilt from the saved responses already in this
          * payload (`results`) with the live validator. Response-time only, never persisted. Additive.
          * Order 40 C: a slot with a verified entry in the run's saved record of the validated result the report used
-         * (`adaptiveDisplayResults`) is that result instead, labelled `savedResultOrigin`. The record itself is never returned.
+         * (`runs/{runId}/adaptiveDisplayResults/v1`, passed in by the caller) is that result instead, labelled
+         * `savedResultOrigin`. The record itself is never returned.
          */
         modelResults: AdaptiveModelResult[];
       }
@@ -106,6 +107,11 @@ export async function buildRunReadPayload(args: {
   viewerRole: RunReadViewerRole;
   requestId?: string;
   resolveReviewRouting: RunReadReviewRoutingResolver;
+  /**
+   * Order 40 C (O-2): the raw display record from its own document `runs/{runId}/adaptiveDisplayResults/v1`, loaded by
+   * the caller AFTER its authorization gates (loadAdaptiveDisplayResults). Untrusted; verified below. Absent → #312.
+   */
+  adaptiveDisplayResults?: unknown;
 }): Promise<RunReadPayload> {
   const { runId, data, viewerRole } = args;
   const owner = String(data.userId ?? "");
@@ -236,7 +242,7 @@ export async function buildRunReadPayload(args: {
         modelResults: reconstructModelResults(parsedAdaptive.output.schemaId, results, {
           retriedIncludedSlots: retriedIncludedSlotsFromRecord(data.adaptiveRetryUsage, parsedAdaptive.output),
           // Order 40 C: verified against this run, schema and saved slots; malformed or foreign data yields no slots.
-          adoptedResults: readAdoptedDisplayResults(data.adaptiveDisplayResults, { runId, schemaId: parsedAdaptive.output.schemaId, rows: results }).slots,
+          adoptedResults: readAdoptedDisplayResults(args.adaptiveDisplayResults, { runId, schemaId: parsedAdaptive.output.schemaId, rows: results }).slots,
         }),
       }
     : { status: parsedAdaptive.reason, output: null, humanReview: null, reviewRouting: "unknown" as const, automatedGovernance: null };
