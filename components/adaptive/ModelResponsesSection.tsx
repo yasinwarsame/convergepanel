@@ -32,12 +32,23 @@
 
 import { FieldSpec, ComparisonCell, ResultSchema } from "@/lib/adaptiveSchema/types";
 import { AdaptiveGateResult, AdaptiveModelResult, AdaptiveSynthesisReport, AdaptiveTrustSummary, AlignedClaim } from "@/lib/adaptiveSchema/types";
-import { Card, SectionLabel, BulletList, FailedResultsNote, splitResults, getModelLabel } from "./shared";
+import { Card, SectionLabel, BulletList, FailedResultsNote, splitResults, getModelLabel, SlotName } from "./shared";
 import ModelChip from "@/components/ModelChip";
 import { runModelIdentityDetail } from "@/lib/panel/runModelIdentity";
 import { useRunModelProvenance } from "./RunModelProvenanceContext";
+import { useRunSlotStatus } from "./RunSlotStatusContext";
 import ListView, { type ListScoreNames } from "./ListView";
 import type { ReadableGateDisplay } from "./AdaptiveSynthesisReportView";
+import { SCHEMA_ANSWER_SHAPE } from "@/lib/adaptiveSchema/persistedOutput";
+import { SAVED_COPY_SHORTENED, SAVED_TEXT_SHORTENED_LABEL, SAVED_TEXT_UNSTRUCTURED_LABEL } from "@/lib/adaptiveSchema/savedCopyNotice";
+import {
+  COMPARISON_FIELD_LABEL,
+  buildComparisonTable,
+  comparisonEntryText,
+  modelResponsesCountLines,
+  partitionModelResponses,
+  summarizeModelResponses,
+} from "@/lib/research/modelResponsesPresentation";
 
 function ComparisonCellList({ cells }: { cells: ComparisonCell[] }) {
   if (!cells || cells.length === 0) return null;
@@ -149,6 +160,171 @@ function RawModelOutputList({ schema, results }: { schema: ResultSchema; results
   );
 }
 
+/**
+ * Saved-response and comparison presentation (2026-11-11) — the Milestone-2 schemas only (the nine with a persisted
+ * envelope, whose reopened reports rebuild these results from the saved copies). Every other schema keeps
+ * RawModelOutputList above unchanged, byte for byte (sealed historical-parity oracles).
+ */
+const MILESTONE2_SCHEMA_IDS: ReadonlySet<string> = new Set(Object.keys(SCHEMA_ANSWER_SHAPE));
+
+/** One model's own comparison, as a table: rows are subjects, columns attributes, each cell `value (Verdict)`. */
+function ComparisonTable({ cells, modelId }: { cells: ComparisonCell[]; modelId: string }) {
+  const table = buildComparisonTable(cells);
+  if (table.cellCount === 0) return null;
+  return (
+    <div className="space-y-2" data-testid="comparison-table">
+      {table.subjects.length > 0 && (
+        <div className="overflow-x-auto rounded-lg border border-cp-border bg-cp-surface" role="region" aria-label={`${getModelLabel(modelId)}'s comparison table`} tabIndex={0}>
+          <table className="min-w-full border-collapse text-left text-sm text-cp-text">
+            <caption className="caption-top px-3 py-2 text-left text-xs text-cp-muted">
+              <SlotName modelId={modelId} />&apos;s own comparison: this model&apos;s judgment, not verified findings or the panel&apos;s combined result.
+            </caption>
+            <thead className="bg-cp-raised">
+              <tr>
+                <th scope="col" className="border-b border-cp-border px-3 py-2 text-xs font-semibold text-cp-muted">
+                  Compared
+                </th>
+                {table.attributes.map((attribute, a) => (
+                  <th key={a} scope="col" className="min-w-[10rem] border-b border-cp-border px-3 py-2 text-xs font-semibold text-cp-muted break-words">
+                    {attribute}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {table.subjects.map((subject, sIdx) => (
+                <tr key={sIdx}>
+                  <th scope="row" className="border-b border-cp-border-soft px-3 py-2 font-medium text-cp-text break-words">
+                    {subject}
+                  </th>
+                  {table.attributes.map((_, a) => {
+                    const entries = table.entries[sIdx][a];
+                    return (
+                      <td key={a} className="border-b border-cp-border-soft px-3 py-2 break-words">
+                        {entries.length === 0 ? (
+                          <span className="text-cp-faint">Not assessed</span>
+                        ) : entries.length === 1 ? (
+                          comparisonEntryText(entries[0])
+                        ) : (
+                          <ul className="space-y-1" aria-label={`${entries.length} entries for this cell`}>
+                            {entries.map((entry, e) => (
+                              <li key={e}>{comparisonEntryText(entry)}</li>
+                            ))}
+                            <li className="text-xs text-cp-muted">Listed {entries.length} times by this model</li>
+                          </ul>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {table.unpaired.length > 0 && (
+        <div className="text-sm text-cp-text">
+          <p className="text-xs text-cp-muted">Entries without a subject or attribute:</p>
+          <ul className="list-disc pl-5">
+            {table.unpaired.map((cell, idx) => (
+              <li key={idx} className="break-words">
+                {[cell.subject, cell.attribute].filter((x) => x.trim().length > 0).join(" · ") || "(unnamed)"}: {comparisonEntryText({ value: cell.value, verdict: cell.verdict })}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function hasFieldContent(value: unknown): boolean {
+  if (value == null) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  return Array.isArray(value) ? value.length > 0 : false;
+}
+
+function fieldLabel(schema: ResultSchema, key: string): string {
+  if (schema.id === "comparison_matrix" && COMPARISON_FIELD_LABEL[key]) return COMPARISON_FIELD_LABEL[key];
+  return key.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase());
+}
+
+function ModelCardHeader({ modelId }: { modelId: string }) {
+  const provenance = useRunModelProvenance();
+  // The run's recorded identity for this slot, only when this surface holds that row.
+  const facts = provenance?.find((f) => f.modelId === modelId);
+  return (
+    <div className="mb-2">
+      <ModelChip modelId={modelId as never} size="xs" />
+      <span className="sr-only">{getModelLabel(modelId)}</span>
+      {facts && (
+        <span className="ml-2 text-xs text-slate-500" data-testid="run-model-identity-detail">
+          {runModelIdentityDetail(facts)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** The saved copy exactly as stored, one keyboard-operable click away (native details/summary). React escapes it. */
+function OriginalResponseDisclosure({ text }: { text: string }) {
+  return (
+    <details className="text-xs text-cp-muted" data-testid="original-response">
+      <summary className="cursor-pointer">Show original response</summary>
+      <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded bg-cp-raised p-3 text-xs text-cp-text">{text}</pre>
+    </details>
+  );
+}
+
+function Milestone2ModelOutputList({ schema, results }: { schema: ResultSchema; results: AdaptiveModelResult[] }) {
+  const statuses = useRunSlotStatus();
+  if (results.length === 0) return <RawResponsesUnavailableNotice />;
+  const [panelLine, shownLine] = modelResponsesCountLines(summarizeModelResponses(results, statuses));
+  const { cards, notes } = partitionModelResponses(results, statuses);
+  return (
+    <div>
+      <SectionLabel>Raw model output</SectionLabel>
+      <div className="mb-3 space-y-0.5 text-xs text-cp-muted" data-testid="model-response-counts">
+        <p>{panelLine}</p>
+        <p>{shownLine}</p>
+      </div>
+      <div className="space-y-3">
+        <FailedResultsNote failed={notes} hideHeading />
+        {cards.map((r, idx) => (
+          <Card key={`${r.modelId}-${idx}`} className="bg-slate-50/60">
+            <ModelCardHeader modelId={r.modelId} />
+            {r.ok && r.data ? (
+              <div className="space-y-3" data-testid="structured-model-response" data-model-id={r.modelId}>
+                {schema.fields
+                  .filter((field) => hasFieldContent(r.data?.[field.key]))
+                  .map((field) => (
+                    <div key={field.key}>
+                      <SectionLabel>{fieldLabel(schema, field.key)}</SectionLabel>
+                      {field.type === "comparisonCell[]" ? (
+                        <ComparisonTable cells={r.data![field.key] as ComparisonCell[]} modelId={r.modelId} />
+                      ) : (
+                        <FieldValue field={field} value={r.data?.[field.key]} />
+                      )}
+                    </div>
+                  ))}
+                {typeof r.savedResponseText === "string" && <OriginalResponseDisclosure text={r.savedResponseText} />}
+              </div>
+            ) : (
+              <div className="space-y-2" data-testid="saved-text-model-response" data-model-id={r.modelId}>
+                <p className="text-xs text-cp-muted">{r.parseError === SAVED_COPY_SHORTENED ? SAVED_TEXT_SHORTENED_LABEL : SAVED_TEXT_UNSTRUCTURED_LABEL}</p>
+                {/* Review D2: plain text only, never parsed into structure. React escapes it. */}
+                <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded bg-cp-raised p-3 text-sm text-cp-text" data-testid="saved-text-plain">
+                  {r.savedResponseText ?? ""}
+                </pre>
+              </div>
+            )}
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export interface ModelResponsesSectionProps {
   schema: ResultSchema;
   results: AdaptiveModelResult[];
@@ -183,7 +359,11 @@ export default function ModelResponsesSection({ schema, results, listView }: Mod
             onNavigateToSynthesis={() => {}}
           />
         )}
-        <RawModelOutputList schema={schema} results={results} />
+        {MILESTONE2_SCHEMA_IDS.has(schema.id) ? (
+          <Milestone2ModelOutputList schema={schema} results={results} />
+        ) : (
+          <RawModelOutputList schema={schema} results={results} />
+        )}
       </div>
     </details>
   );

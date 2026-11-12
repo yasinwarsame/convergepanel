@@ -54,12 +54,12 @@ Two credential paths are accepted by every API route:
 
 **Middleware** (`middleware.ts`) only checks for cookie *presence* to gate `/admin/*` routes. Full token validation and custom claim checks happen inside each API route.
 
-**Administrator authority has three human tiers plus one bootstrap mechanism** — see `docs/operations/admin-authority-tiers.md` for the full contract.
+**Administrator authority has three human tiers; the former secret bootstrap mechanism is retired** — see `docs/operations/admin-authority-tiers.md` for the full contract.
 
 - **ADMIN_PORTAL** — a verified, enabled Firebase Auth email on `ADMIN_EMAILS`, **or** the `admin: true` custom claim. A broad READ/monitoring tier over customer runs and user records. `ADMIN_EMAILS` membership grants this **by itself**; it does not merely make an account eligible for the claim.
 - **SYSTEM_ADMIN** — the Firebase custom claim `admin === true` **only**, never email-derived. Gates provider credentials, admin-claim minting, bulk purge, destructive user/billing mutation, and (since Phase C4) run deletion, governance-status override, `sync-subscription` and `test-webhook`.
 - **GOVERNANCE_ADMIN** — a verified, enabled Firebase Auth email on `GOVERNANCE_ADMIN_EMAILS` **only**. Governance policy writes, audit backfill, and global run visibility. Neither `ADMIN_EMAILS` nor the `admin` claim confers it.
-- **BOOTSTRAP_SECRET** — `ADMIN_SECRET` on `/api/admin/set-admin`, an exceptional mechanism that authenticates no identity. Not a human role; fails closed when unset.
+- **BOOTSTRAP_SECRET (retired in S1)** — the former `ADMIN_SECRET` check on `/api/admin/set-admin` is gone: the route is deleted (a current deployment answers 404) and no source reads either variable. Do not re-add it. Until the hardened operator CLI (PR #295) merges, an emergency `admin` claim change is an owner action, never an agent action: the owner runs the reviewed SYSTEM_ADMIN claim operator tool `scripts/admin/set-system-admin-claim.ts` (`npm run admin:set-system-admin-claim`, branch `fix/admin-claim-script-hardening`, PR #295) locally, from a checkout of its exact reviewed commit `f6039ea` (`git -C <checkout> rev-parse HEAD` must print `f6039eaecb659159f52019b7f4cff4cce6a4ed89`), never from Vercel or any deployment. No defaults: explicit `--confirm-project=<projectId>` and `--target-uid=<uid>`; dry run first (the default), then `--execute --confirm-claim=<exact string the dry run printed>`, as `docs/operations/system-admin-claim-script.md` on that branch describes. Keep the tool's audit rows and its `--result-file` (a NEW `*.json` outside every git checkout). No Production grant or revoke without its own separate authorization. This is interim: #295 is reviewed and approved but unmerged, and its merge stays gated on S2. Verify read-only with `scripts/check-admin-claims.js` / `scripts/verify-admin-claims.js`. The legacy minting scripts (`scripts/setAdmin.ts`, `scripts/set-admin-simple.js`, `scripts/set-admin-by-uid.js`, `scripts/set-admin-claim.js`) are not part of that path and must not be used. Deployments built before S1 still ship the route; their retirement is security step SEC-7.
 
 A **disabled** Firebase Auth account obtains no email-derived privilege in any tier.
 
@@ -265,11 +265,11 @@ Registered in `CONNECTOR_MAP` (`lib/connectors/index.ts`):
 
 | Display Label | ModelId | Actual API Model | Provider |
 |-------------|---------|-----------------|----------|
-| GPT 5.2 | `chatgpt` | `gpt-4o-mini` | OpenAI |
-| Claude Opus 4.5 | `claude` | `claude-haiku-4-5-20251001` | Anthropic |
-| Grok 4 | `grok` | `grok-4-1-fast-reasoning` (configurable via `GROK_MODEL` env) | xAI |
-| Perplexity Pro | `perplexity` | `perplexity/sonar` via the Agent API (`POST /v1/agent`, web search requested; see `lib/providers/perplexityAgentResponse.ts`) | Perplexity |
-| Gemini 2.0 Flash | `gemini` | `gemini-2.0-flash` | Google |
+| GPT-4o mini | `chatgpt` | `gpt-4o-mini` | OpenAI |
+| Claude Haiku 4.5 | `claude` | `claude-haiku-4-5-20251001` | Anthropic |
+| Grok 4.3 | `grok` | requests the legacy ID `grok-4-1-fast-reasoning` (configurable via `GROK_MODEL` env; recorded as the run's `requestedModel`). xAI retired that ID on 2026-05-15 and serves it with `grok-4.3` at `low` reasoning effort, billed at grok-4.3 pricing ($1.25 / $2.50 per 1M input / output tokens) — https://docs.x.ai/developers/migration/may-15-retirement. The connector does not record the provider-returned model per run. Changing the requested ID is a separate migration decision. | xAI |
+| Perplexity Sonar | `perplexity` | `perplexity/sonar` via the Agent API (`POST /v1/agent`, web search requested; see `lib/providers/perplexityAgentResponse.ts`) | Perplexity |
+| Gemini 3.5 Flash-Lite | `gemini` | `gemini-3.5-flash-lite` (`GEMINI_MODEL_ID`, `lib/models/gemini.ts`; also used by every adaptive stage and video vision; recorded as the run's `requestedModel` for new runs — runs before this change recorded `gemini-2.0-flash` while calling `gemini-2.5-flash`; every call sends `thinkingConfig.thinkingLevel` = `GEMINI_THINKING_LEVEL` (`"LOW"`), except the adaptive classifier, which sends `"MINIMAL"`) | Google |
 
 DeepSeek is a fallback provider only — not in `CONNECTOR_MAP` directly.
 
@@ -1000,7 +1000,7 @@ Each verification stores an `AuditBundle`:
 |-------|----------------|
 | OpenAI | `gpt-4o` |
 | Anthropic | `claude-sonnet-4-20250514` |
-| Google | `gemini-2.0-flash` |
+| Google | `gemini-3.5-flash-lite` (`GEMINI_MODEL_ID`) |
 
 All three use 60-second timeouts and 8192 max output tokens.
 

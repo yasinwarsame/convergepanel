@@ -17,7 +17,7 @@
  * answered, so nothing here says "actual", "verified" or "confirmed".
  *
  * Deliberately independent of `lib/panelModels.ts`: those product labels
- * ("GPT 5.2", "Claude Opus 4.5", …) are selection/marketing copy and may
+ * ("GPT-4o mini", "Claude Haiku 4.5", …) are selection/marketing copy and may
  * change at any time; a historical run's identity must not move with them,
  * nor with the current connector configuration. Nothing here reads either.
  * A missing fact is stated as not recorded, never inferred from the slot.

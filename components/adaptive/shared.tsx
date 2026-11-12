@@ -22,7 +22,7 @@ import { INVALID_PROVIDER_OUTPUT_NOTICE, slotCoverageText, type RunExecutionIden
 
 /**
  * A completed run's slot, named by product family only ("ChatGPT") — never a
- * product/marketing label with a version ("GPT 5.2"), which says nothing about
+ * product/marketing label with a version ("GPT-4o mini"), which says nothing about
  * what this run actually requested. The run's recorded model is shown
  * separately, from its own provenance, where the surface holds it.
  */
@@ -106,7 +106,7 @@ export function BulletList({ items }: { items: string[] }) {
 }
 
 /** Failed / parseError models: rendered as a small non-blocking notice, never crashes the comparison. */
-export function FailedResultsNote({ failed }: { failed: AdaptiveModelResult[] }) {
+export function FailedResultsNote({ failed, hideHeading = false }: { failed: AdaptiveModelResult[]; hideHeading?: boolean }) {
   // D-4: a slot the run records as not having responded is described as such, never as an "incompatible format".
   const slotStatuses = useRunSlotStatus();
   const runProvenance = useRunModelProvenance();
@@ -123,9 +123,12 @@ export function FailedResultsNote({ failed }: { failed: AdaptiveModelResult[] })
   ];
   return (
     <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-      <p className="font-semibold mb-1">
-        {headings.join(" · ")}
-      </p>
+      {/* `hideHeading`: a caller that already states these counts (ModelResponsesSection) shows each notice once. */}
+      {!hideHeading && (
+        <p className="font-semibold mb-1">
+          {headings.join(" · ")}
+        </p>
+      )}
       <ul className="space-y-1">
         {[...genuine, ...savedCopies].map((r) => (
           <li key={r.modelId} className="flex items-start gap-2">

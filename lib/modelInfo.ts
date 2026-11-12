@@ -12,6 +12,7 @@
 
 import { ModelId } from "./types";
 import { getPanelModelConfig, PanelModelId, isValidPanelModelId } from "./panelModels";
+import { GEMINI_DISPLAY_NAME } from "./models/gemini";
 
 /**
  * Model information mapping (DEPRECATED - use panelModels.ts instead)
@@ -22,11 +23,11 @@ import { getPanelModelConfig, PanelModelId, isValidPanelModelId } from "./panelM
  * The single source of truth for model metadata is now lib/panelModels.ts.
  */
 export const MODEL_INFO: Record<ModelId, { displayName: string }> = {
-  chatgpt: { displayName: "GPT 5.2" },
-  claude: { displayName: "Claude Opus 4.5" },
-  grok: { displayName: "Grok 4" },
-  perplexity: { displayName: "Perplexity Pro" },
-  gemini: { displayName: "Gemini 3 Pro" },
+  chatgpt: { displayName: "GPT-4o mini" },
+  claude: { displayName: "Claude Haiku 4.5" },
+  grok: { displayName: "Grok 4.3" },
+  perplexity: { displayName: "Perplexity Sonar" },
+  gemini: { displayName: GEMINI_DISPLAY_NAME },
 };
 
 /**

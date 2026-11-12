@@ -19,8 +19,15 @@
  * This does not check that a row's ✅/❌ marks are TRUE — that requires reading
  * the handler, and is what review is for. It checks that no route is missing,
  * which is the failure mode that actually occurred, twice.
+ *
+ * Security slice S1 retired `/api/admin/set-admin` and its secret. The table
+ * no longer lists it (it no longer exists on disk), and the containment
+ * procedure no longer tells a responder to rotate or probe that secret. Every
+ * assertion that pinned the old route text is replaced below by a NEGATIVE
+ * assertion that the retired route, the old secret, its probe and the legacy
+ * claim-overwriting scripts are not recommended.
  */
-import { readFileSync, readdirSync, statSync, mkdtempSync, writeFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync, mkdtempSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -61,7 +68,10 @@ describe("§A.6 evidence table is complete against the filesystem", () => {
   it("ANCHOR: the filesystem enumeration found the routes it is supposed to check", () => {
     // A broken walker returning [] would satisfy every per-route assertion.
     expect(ROUTES.length).toBeGreaterThan(20);
-    expect(ROUTES).toContain("/api/admin/set-admin");
+    // S1: the retired bootstrap route is gone from disk; set-role is the
+    // remaining claim-minting route and anchors the walk instead.
+    expect(ROUTES).toContain("/api/admin/set-role");
+    expect(ROUTES).not.toContain("/api/admin/set-admin");
     expect(ROUTES).toContain("/api/governance/review");
   });
 
@@ -69,13 +79,22 @@ describe("§A.6 evidence table is complete against the filesystem", () => {
     expect(TABLE).toContain(`\`${route}\``);
   });
 
-  it("names the bootstrap claim-minting route as having NO audit and NO success log", () => {
-    // The specific omission that made the C7 containment procedure incomplete.
-    const row = TABLE.split("\n").find((l) => l.includes("`/api/admin/set-admin`"));
+  it("S1: the retired bootstrap route has no table row, and the table says why", () => {
+    // Replaces the C8 row pin. The route no longer exists, so a row for it
+    // would cite a route that does not exist (r25 T5 also forbids that). What
+    // must survive is the incident-relevant fact: on a historical deployment it
+    // left no evidence of any kind.
+    expect(TABLE).not.toContain("/api/admin/set-admin");
+    expect(TABLE).not.toContain("BOOTSTRAP_SECRET");
+    const flat = SRC.replace(/\s+/g, " ");
+    expect(flat).toContain("**The retired secret bootstrap route is not in this table**");
+    expect(flat).toMatch(/historical deployment that still ships it, it produced no audit record and no success log/);
+  });
+
+  it("the set-role claim-minting row still records NO audit", () => {
+    const row = TABLE.split("\n").find((l) => l.includes("`/api/admin/set-role`"));
     expect(row).toBeDefined();
-    expect(row).toContain("BOOTSTRAP_SECRET");
-    // Two ❌ NONE cells: no durable record, and no runtime evidence either.
-    expect(row!.match(/❌ \*\*NONE\*\*/g) ?? []).toHaveLength(2);
+    expect(row).toContain("❌ **NONE**");
   });
 });
 
@@ -91,59 +110,60 @@ describe("the SYSTEM_ADMIN containment procedure closes the bootstrap path", () 
     expect(SECTION.length).toBeGreaterThan(1000);
   });
 
-  it("requires rotating or removing ADMIN_SECRET", () => {
-    expect(SECTION).toMatch(/Rotate `ADMIN_SECRET`|remove it entirely/);
+  /** Sentences, list items and table rows — a negation in one cannot launder another. */
+  const units = (text: string) =>
+    text.split(/(?<=[.!?])\s+|\n\s*\n|\n(?=\s*(?:[-*|>]|\d+\.|[a-z]\.)\s)/);
+
+  it("S1: does NOT tell the responder to rotate, re-set or probe the retired secret", () => {
+    // Replaces C8-C15 assertions that REQUIRED rotation, a deliberate deploy of
+    // the rotated value, and the two-phase probe. The route is gone, so those
+    // instructions are now wrong; the invariant kept is the negative one.
+    expect(SECTION).not.toMatch(/Rotate `ADMIN_SECRET`/);
+    expect(SECTION).not.toMatch(/remove it entirely/);
+    expect(SECTION).not.toContain("probe-admin-secret");
+    expect(SECTION).not.toContain("--production-two-phase");
+    expect(SECTION).not.toContain("OLD_ADMIN_SECRET");
+    expect(SECTION).not.toContain("PRODUCTION_CONTAINMENT_PROVEN");
+    expect(SECTION).not.toContain("/api/admin/set-admin");
+    // Every unit that still names the secret must negate it.
+    const named = units(SECTION).filter((u) => /ADMIN_SECRET|BOOTSTRAP_SECRET/.test(u));
+    for (const u of named) expect({ u, negated: /\b(not|never|retired|removed|deleted|no longer)\b|n't\b/i.test(u) }).toEqual({ u, negated: true });
   });
 
-  it("requires a deliberate deploy of the rotated value", () => {
-    expect(SECTION).toMatch(/Deploy deliberately|does not affect\s+running Production/);
-  });
-
-  it("requires proving the old secret is dead, not just changed", () => {
-    expect(SECTION.replace(/\s+/g, " ")).toMatch(/Only `PRE accepted -> POST rejected` prints/);
-  });
-
-  it("the prove-dead probe OMITS the uid, so it cannot mint a claim", () => {
-    /**
-     * C8 told responders to POST {uid, secret}. If the rotated config had not
-     * deployed, that probe re-mints admin:true on the uid used. The route
-     * validates the secret before the uid, so the safe probe carries no uid.
-     */
-    expect(SECTION).toContain("scripts/probe-admin-secret.mjs");
-    expect(SECTION).toContain("--production-two-phase");
-    // The secret is exported, never inlined on a command line where the shell
-    // would mangle it — that produced a false proof.
-    expect(SECTION).toContain("export OLD_ADMIN_SECRET");
-    expect(SECTION).not.toMatch(/OLD_ADMIN_SECRET=<old value> node/);
-    // The runbook must no longer reconstruct a request body of its own.
+  it("no request body in the section names a uid", () => {
+    // Kept from C8: the runbook must never reconstruct a uid-bearing body.
     expect(SECTION).not.toMatch(/["']uid["']\s*:/);
-    // The old, dangerous instruction must not survive anywhere in the section.
     expect(SECTION).not.toMatch(/POST\s+\/api\/admin\/set-admin\s+with the old secret must return 401/);
   });
 
-  it("states that 429 and 5xx are INCONCLUSIVE, not containment", () => {
-    // Row shape only; the SEMANTICS of each status are pinned by verdict token
-    // in docs/__tests__/bootstrapProbeInvariant.spec.ts, so a reworded row
-    // cannot invert the meaning the way it could in C9.
-    expect(SECTION.replace(/\s+/g, " ")).toMatch(/a 429 tells you nothing about the credential/);
-  });
-
-  it("does not tell the operator to bypass the rate limiter", () => {
-    // Phase FIRST-ADMIN-C15: this asserted the old "wait and re-run" sentence,
-    // which C14 made wrong — the proof must NOT be restarted. The invariant the
-    // row actually needs is "never bypass", plus the correct retry instruction.
+  it("S1: does NOT tell the responder to use a legacy claim-overwriting script", () => {
+    for (const script of ["setAdmin.ts", "set-admin-simple.js", "set-admin-by-uid.js", "set-admin-claim.js"]) {
+      expect(SECTION).not.toContain(script);
+    }
+    expect(SECTION).not.toMatch(/use a service-account script/);
     const flat = SECTION.replace(/\s+/g, " ");
-    expect(flat).toMatch(/[Nn]ever try to bypass the limiter/);
-    expect(flat).toMatch(/retry the post-check from that same armed proof/);
-    expect(flat).not.toMatch(/re-run rather than trying to bypass/);
+    // Claim removal goes through the ruled interim owner path: the reviewed
+    // operator tool at its exact commit, locally, dry run then confirmation,
+    // and never in Production without its own authorization (owner OPTION B,
+    // 2026-11-09 — the Firebase Console cannot set claims, so that wording is
+    // forbidden here).
+    expect(flat).toMatch(
+      /use the interim path above \(the reviewed SYSTEM_ADMIN claim operator tool from PR #295 at commit `f6039ea`, run locally by the owner as a dry run and then a typed confirmation; a Production revoke needs its own separate authorization\), not the route and not a legacy minting script/
+    );
+    expect(flat).not.toMatch(/owner action in the Firebase Console/i);
+    expect(flat).toMatch(
+      /An executed revoke through the interim tool requests this itself \(no opt-out flag\) unless its pre-call fresh read shows a stored cutoff ahead or is unusable \(exit 4 or 3, no call\), and the request can fail; confirm `revocationRequested` in the tool's result file/
+    );
+    // The no-call case must stay stated: an unqualified "every revoke requests revocation" is the F1 over-statement.
+    expect(flat).not.toMatch(/Every executed revoke requests refresh-token revocation\./);
   });
 
-  it("states plainly that containment is incomplete while the secret can re-mint", () => {
-    // Phase EXISTING_ADMIN_E2: this claim is now CONDITIONAL on the secret being
-    // CONFIGURED (non-empty), because an EMPTY value is already fail-closed and
-    // no containment is outstanding. The invariant itself is unchanged.
-    expect(SECTION).toMatch(/not complete while\s+(a|that) reusable bootstrap credential/);
-    expect(SECTION).toMatch(/If `ADMIN_SECRET` is `CONFIGURED`/);
+  it("S1: historical deployments that still ship the retired route are in scope", () => {
+    // Replaces "containment is not complete while a reusable bootstrap
+    // credential can re-mint": current code cannot, but pre-S1 deployments can.
+    const flat = SECTION.replace(/\s+/g, " ");
+    expect(flat).toMatch(/A deployment built before S1 is different: it still ships the retired route/);
+    expect(flat).toMatch(/Do not re-add the secret, do not restore the route, and never send a uid or a secret to it on any deployment/);
   });
 });
 
@@ -199,9 +219,9 @@ describe("evidence cells corrected in C9 stay corrected", () => {
     expect(row(route, "POST")).toContain("Stripe events");
   });
 
-  it("the containment pointer on the set-admin row names the bootstrap section", () => {
-    expect(row("/api/admin/set-admin", "POST")).toContain("§B.6");
-    expect(row("/api/admin/set-admin", "POST")).not.toContain("§B.4");
+  it("S1: no row points at the removed §B.6 probe procedure", () => {
+    // Replaces the C9 pointer pin: §B.6 (rotate + two-phase probe) is gone.
+    expect(TABLE).not.toContain("§B.6");
   });
 });
 
@@ -293,8 +313,9 @@ describe("STRUCTURED CONTAINMENT CONTRACT — steps identified by stable ID", ()
   const REQUIRED = [
     "CONTAINMENT_REMOVE_CLAIM",
     "CONTAINMENT_REVOKE_REFRESH",
-    "CONTAINMENT_ROTATE_BOOTSTRAP",
-    "CONTAINMENT_PROBE_OLD_SECRET",
+    // S1: CONTAINMENT_ROTATE_BOOTSTRAP and CONTAINMENT_PROBE_OLD_SECRET retired
+    // with the route; historical deployments are the remaining bootstrap risk.
+    "CONTAINMENT_HISTORICAL_BOOTSTRAP",
     "CONTAINMENT_DISABLE_ACCOUNT",
     "CONTAINMENT_REENUMERATE_CLAIMS",
     "CONTAINMENT_VERIFY_DENIAL",
@@ -326,6 +347,11 @@ describe("STRUCTURED CONTAINMENT CONTRACT — steps identified by stable ID", ()
   it("the obligation table declares no requirement this contract does not know about", () => {
     const declared = [...SECTION.matchAll(/\|\s*`(CONTAINMENT_[A-Z_]+)`\s*\|[^|]*\|\s*MUST\s*\|/g)].map((m) => m[1]);
     expect([...new Set(declared)].sort()).toEqual([...REQUIRED].sort());
+  });
+
+  it("S1: the retired rotate / probe IDs appear nowhere in the runbook", () => {
+    expect(src).not.toContain("CONTAINMENT_ROTATE_BOOTSTRAP");
+    expect(src).not.toContain("CONTAINMENT_PROBE_OLD_SECRET");
   });
 
   it("ANCHOR: downgrading a Mode is visible — no row may say MAY or SHOULD", () => {
@@ -372,54 +398,24 @@ describe("the session-mint claim matches the code", () => {
   });
 });
 
-describe("the documented bootstrap rate limit matches the route's constants", () => {
+describe("S1: the retired bootstrap route's rate-limit guidance is gone with it", () => {
   /**
-   * Phase FIRST-ADMIN-C11 (R7 F-1). The runbook stated "3 per 5 min per IP" as
-   * fact. The numbers happened to be right; the mechanism was broken and
-   * nothing tied the prose to the code. Both are now derived from the same
-   * exported constants.
+   * Phase FIRST-ADMIN-C11 pinned the runbook's "3 attempts per 300 seconds"
+   * against the route's RATE_LIMIT_* constants. S1 deleted the route, so those
+   * constants and that guidance no longer exist. What is kept is the negative:
+   * the runbook does not present a high-entropy ADMIN_SECRET as a boundary, and
+   * does not cite constants of a file that is gone.
    */
-  const ROUTE = readFileSync("app/api/admin/set-admin/route.ts", "utf8");
   const DOC = readFileSync("docs/operations/admin-authority-tiers.md", "utf8");
 
-  const constant = (name: string) => {
-    const m = ROUTE.match(new RegExp(`const ${name} = (\\d+);`));
-    expect(m).not.toBeNull();
-    return Number(m![1]);
-  };
-
-  it("ANCHOR: the route exports both constants and uses them in its limiter call", () => {
-    expect(constant("RATE_LIMIT_MAX_REQUESTS")).toBeGreaterThan(0);
-    expect(constant("RATE_LIMIT_WINDOW_SECONDS")).toBeGreaterThan(0);
-    expect(ROUTE).toContain("maxRequests: RATE_LIMIT_MAX_REQUESTS");
-    expect(ROUTE).toContain("windowSeconds: RATE_LIMIT_WINDOW_SECONDS");
+  it("the route file whose constants were pinned is gone", () => {
+    expect(existsSync("app/api/admin/set-admin/route.ts")).toBe(false);
   });
 
-  it("the runbook states the ACTUAL numbers, and they match the runtime constants", () => {
-    /**
-     * C11 cited only the constant NAMES, which made parity vacuous — the window
-     * could be changed from 300 to 5 with every test green, and an on-call
-     * responder had no way to know how long to wait. The numbers are back, and
-     * now they are checked.
-     */
-    const max = constant("RATE_LIMIT_MAX_REQUESTS");
-    const win = constant("RATE_LIMIT_WINDOW_SECONDS");
+  it("the runbook no longer cites the deleted route's limiter or its secret as a boundary", () => {
     const flat = DOC.replace(/\s+/g, " ");
-    expect(flat).toContain(`${max} attempts per ${win} seconds`);
-    expect(DOC).toContain("RATE_LIMIT_MAX_REQUESTS");
-    expect(DOC).toContain("RATE_LIMIT_WINDOW_SECONDS");
-  });
-
-  it("documents that the per-IP key depends on the hosting layer, not on this code", () => {
-    const flat = DOC.replace(/\s+/g, " ");
-    expect(flat).toContain("does **not** independently prevent header spoofing");
-    expect(flat).toMatch(/Vercel overwrites that header/);
-    expect(flat).toMatch(/operational dependency on the hosting layer/);
-  });
-
-  it("the runbook presents rate limiting as defence-in-depth, not the primary boundary", () => {
-    const flat = DOC.replace(/\s+/g, " ");
-    expect(flat).toContain("defence-in-depth only");
-    expect(flat).toMatch(/primary boundary is a high-entropy `ADMIN_SECRET`/);
+    expect(DOC).not.toContain("RATE_LIMIT_MAX_REQUESTS");
+    expect(DOC).not.toContain("RATE_LIMIT_WINDOW_SECONDS");
+    expect(flat).not.toMatch(/primary boundary is a high-entropy `ADMIN_SECRET`/);
   });
 });

@@ -41,10 +41,12 @@ import { buildAdaptiveUnifiedAnswer } from "@/lib/adaptiveSchema/verdict";
 import { generateVerificationMemo } from "@/lib/verification/generateMemo";
 import { buildClaimVerdictClipboardText } from "@/components/verification/ClaimVerificationResultView";
 import { PANEL_MODELS } from "@/lib/panelModels";
+import { GEMINI_DISPLAY_NAME } from "@/lib/models/gemini";
 import { synthesizeReport } from "@/lib/consensus";
 import type { AdaptiveSynthesisReport } from "@/lib/adaptiveSchema/types";
 
-const PRODUCT_LABELS = ["GPT 5.2", "Claude Opus 4.5", "Grok 4", "Perplexity Pro", "Gemini 2.0 Flash", "Gemini 3 Pro", "GPT-4o"];
+// GEMINI_DISPLAY_NAME is the live gemini product label (imported, so a future relabel stays covered).
+const PRODUCT_LABELS = ["GPT 5.2", "Claude Opus 4.5", "Grok 4", "Perplexity Pro", GEMINI_DISPLAY_NAME, "Gemini 2.0 Flash", "Gemini 3 Pro", "GPT-4o"];
 const expectNoProductLabel = (s: string) => {
   for (const label of PRODUCT_LABELS) expect(s).not.toContain(label);
 };

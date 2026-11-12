@@ -22,9 +22,11 @@ import {
   type RunModelProvenanceFacts,
 } from "@/lib/panel/runModelIdentity";
 import { PANEL_MODELS } from "@/lib/panelModels";
+import { GEMINI_DISPLAY_NAME } from "@/lib/models/gemini";
 import type { AdaptiveExportRunProvenance } from "@/lib/adaptiveSchema/researchExport";
 
-const PRODUCT_LABELS = ["GPT 5.2", "Claude Opus 4.5", "Grok 4", "Perplexity Pro", "Gemini 2.0 Flash", "Gemini 3 Pro", "GPT-4o"];
+// GEMINI_DISPLAY_NAME is the live gemini product label (imported, so a future relabel stays covered).
+const PRODUCT_LABELS = ["GPT 5.2", "Claude Opus 4.5", "Grok 4", "Perplexity Pro", GEMINI_DISPLAY_NAME, "Gemini 2.0 Flash", "Gemini 3 Pro", "GPT-4o"];
 
 /** The exact frozen provenance of the incident run behind this PR. */
 const INCIDENT: RunModelProvenanceFacts[] = [

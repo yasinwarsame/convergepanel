@@ -12,9 +12,10 @@
  * 
  * Model Configuration:
  * - The model name is controlled by the GROK_MODEL environment variable
- * - Default: "grok-4-1-fast-reasoning" (fast, cost-efficient, reasoning-capable)
- *   This model offers excellent reasoning capabilities at $0.20/$0.50 pricing with 2M context,
- *   making it ideal for research-style panel questions that require structured analysis.
+ * - Default: "grok-4-1-fast-reasoning" — a LEGACY ID. xAI retired it on 2026-05-15; requests to it are served by
+ *   grok-4.3 at "low" reasoning effort and billed at grok-4.3 pricing ($1.25 / $2.50 per 1M input / output tokens)
+ *   (https://docs.x.ai/developers/migration/may-15-retirement). The customer-facing label is therefore "Grok 4.3";
+ *   the run records the requested legacy ID as requestedModel. Changing the requested ID is a separate migration decision.
  * - Can be overridden in .env.local or hosting provider env settings
  * - Example: GROK_MODEL=grok-4-1-fast-non-reasoning (for non-reasoning variant)
  * 
@@ -126,7 +127,7 @@ export async function callGrok(
      * X.AI API endpoint: https://api.x.ai/v1/chat/completions
      * This is the standard OpenAI-compatible endpoint for X.AI's Grok models.
      * 
-     * Model: Uses GROK_MODEL env var (defaults to "grok-4-1-fast-reasoning" for fast, cost-efficient reasoning).
+     * Model: Uses GROK_MODEL env var (defaults to the legacy "grok-4-1-fast-reasoning", served by xAI as grok-4.3; see header).
      * 
      * Configuration:
      * - max_tokens: 2000 - Allows long, deep-research style answers so Grok can finish all 6 sections
@@ -139,10 +140,8 @@ export async function callGrok(
        * for better error handling and type safety.
        */
     const XAI_API_URL = "https://api.x.ai/v1/chat/completions";
-    // Using "grok-4-1-fast-reasoning" by default: fast, cost-efficient, and optimized for reasoning.
+    // Default "grok-4-1-fast-reasoning" is a legacy ID that xAI serves with grok-4.3 (see header).
     // Can be overridden via GROK_MODEL env variable.
-    // This model offers excellent reasoning capabilities at $0.20/$0.50 pricing with 2M context,
-    // making it ideal for research-style panel questions that require structured analysis.
     const modelName = GROK_MODEL;
     
     console.log(`[Grok connector] Making API call with model: "${modelName}"...`);

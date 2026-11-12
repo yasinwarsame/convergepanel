@@ -6,7 +6,7 @@ ConvergePanel is a production-ready MVP web application that sends one user ques
 
 ## Features
 
-- **Multi-Model Support**: Query GPT 5.2, Claude Opus 4.5, Grok 4, Perplexity Pro, and Gemini 3 Pro simultaneously
+- **Multi-Model Support**: Query GPT-4o mini, Claude Haiku 4.5, Grok 4.3, Perplexity Sonar, and Gemini 3.5 Flash-Lite simultaneously
 - **Parallel Execution**: All models respond in parallel for faster results
 - **Consensus Analysis**: Automatically identifies areas of agreement and disagreement
 - **Numeric Conflict Detection**: Flags when models provide conflicting numbers or percentages
@@ -87,9 +87,6 @@ FIREBASE_CLIENT_EMAIL=<service-account>@<isolated-project-id>.iam.gserviceaccoun
 # IMPORTANT: Keep the quotes and \n characters exactly as they appear in the JSON file
 FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC...\n-----END PRIVATE KEY-----\n"
 
-# Admin Secret (for setting first admin)
-ADMIN_SECRET=your-long-random-secret-string
-
 # Optional: API keys can be set here or via Admin UI
 # Firestore keys take precedence over environment variables
 OPENAI_API_KEY=your_openai_api_key_here
@@ -161,11 +158,11 @@ ConvergePanel/
 │   ├── types.ts                  # TypeScript type definitions
 │   ├── consensus.ts              # Consensus engine and synthesis
 │   └── connectors/
-│       ├── chatgpt.ts            # OpenAI GPT 5.2 connector
-│       ├── claude.ts             # Anthropic Claude Opus 4.5 connector
-│       ├── grok.ts               # X.AI Grok 4 connector
-│       ├── perplexity.ts         # Perplexity Pro connector
-│       ├── gemini.ts             # Google Gemini 3 Pro connector
+│       ├── chatgpt.ts            # OpenAI GPT-4o mini connector
+│       ├── claude.ts             # Anthropic Claude Haiku 4.5 connector
+│       ├── grok.ts               # X.AI Grok 4.3 connector
+│       ├── perplexity.ts         # Perplexity Sonar connector
+│       ├── gemini.ts             # Google Gemini 3.5 Flash-Lite connector
 │       └── index.ts              # Connector exports
 ├── middleware.ts                 # Route protection middleware
 ├── package.json
@@ -302,38 +299,37 @@ ConvergePanel uses Firebase Authentication with role-based access control.
 
 ### Setting Up the First Admin
 
-1. Sign up a user account through the app (`/signup`)
+The former secret bootstrap route (`/api/admin/set-admin`, gated by `ADMIN_SECRET`)
+was retired in security slice S1. The route is deleted and no source reads that
+variable, so do not set it.
 
-2. Get the user's UID from Firebase Console or from the user's profile page
+1. Sign up a user account through the app (`/signup`).
+2. Until the hardened operator CLI (PR #295) merges, granting the `admin` custom
+   claim is an **owner action**, never an agent action. The owner runs the reviewed
+   SYSTEM_ADMIN claim operator tool `scripts/admin/set-system-admin-claim.ts`
+   (`npm run admin:set-system-admin-claim`, branch `fix/admin-claim-script-hardening`,
+   PR #295) **locally**, from a checkout of its exact reviewed commit `f6039ea`:
+   `git -C <checkout> rev-parse HEAD` must print
+   `f6039eaecb659159f52019b7f4cff4cce6a4ed89`, and never from Vercel or any deployment.
+   The tool has no defaults: pass `--confirm-project=<projectId>`,
+   `--credentials=<service-account key file, mode 0600>`, `--target-uid=<uid>` and
+   `--operation=grant`. Run it as a dry run first (the default), then
+   `--execute --confirm-claim=<exact string the dry run printed>` with
+   `--operator-id-token-file=<file>` (or `--bootstrap-first-admin` only while zero
+   accounts hold the claim), exactly as `docs/operations/system-admin-claim-script.md`
+   on that branch describes. Keep the tool's audit rows and its `--result-file` (a NEW
+   `*.json` outside every git checkout). No Production grant or revoke without its own
+   separate authorization. This is an interim path: #295 is reviewed and approved but
+   unmerged, and its merge stays gated on S2. The tool changes only the `admin` key
+   and leaves every other claim in place.
+3. Verify read-only with `node scripts/check-admin-claims.js <UID>` or
+   `scripts/verify-admin-claims.js`; neither writes anything.
+4. The user must sign out and sign back in for the claim to take effect.
 
-3. Call the admin setter endpoint. **MINTS-AUTHORITY** — this grants
-   SYSTEM_ADMIN to the named uid:
-```bash
-curl -X POST http://localhost:3000/api/admin/set-admin \
-  -H "Content-Type: application/json" \
-  -d '{"uid": "USER_UID_HERE", "secret": "YOUR_ADMIN_SECRET"}'
-```
-
-> <!-- SAFE-PROBE:PROHIBITION -->
-> **Never reuse this request to check whether an old secret still works.** The
-> secret is validated before the uid, so a still-live old secret does not report
-> a failure here — it mints the claim again, with no audit record and no log. To
-> verify a rotation or removal, use the uid-less probe in
-> `docs/operations/admin-authority-tiers.md` §B.6 — send `{"secret": "..."}`
-> with **no uid**.
->
-> **A standalone `401` is NOT Production containment proof.** On its own it says
-> only that the origin you contacted rejected the string you supplied, which is
-> also what a preview deploy with no secret set, or a shell-mangled secret,
-> returns. A single response is an OBSERVATION: `400` + the accepted marker =
-> credential accepted, `401` + the rejected marker = credential rejected,
-> anything else = inconclusive. Containment requires the two-phase proof at the
-> canonical Production origin — pre-check accepted, then rotate and deploy, then
-> the SAME process observing that credential rejected.
-
-4. The user must sign out and sign back in for the admin claim to take effect
-
-**Note**: This endpoint is not linked in the UI for security. It's a one-time setup endpoint.
+The legacy minting scripts (`scripts/setAdmin.ts`, `scripts/set-admin-simple.js`,
+`scripts/set-admin-by-uid.js`, `scripts/set-admin-claim.js`) are **not** part of
+this path. Do not use them: they overwrite or mishandle the account's other
+claims. The full procedure is in `docs/operations/admin-authority-tiers.md`.
 
 ## Admin Dashboard
 
@@ -473,17 +469,16 @@ There are no built-in defaults: every `NEXT_PUBLIC_FIREBASE_*` value must be set
 | `FIREBASE_PROJECT_ID` | Firebase project ID | **Yes** |
 | `FIREBASE_CLIENT_EMAIL` | Service account email | **Yes** |
 | `FIREBASE_PRIVATE_KEY` | Service account private key | **Yes** |
-| `ADMIN_SECRET` | Secret for setting first admin | **Yes** |
 
 ### API Keys (Optional)
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `OPENAI_API_KEY` | OpenAI API key for GPT 5.2 | No (uses mock if missing) |
-| `ANTHROPIC_API_KEY` | Anthropic API key for Claude Opus 4.5 | No (uses mock if missing) |
-| `XAI_API_KEY` | X.AI API key for Grok 4 | No (uses mock if missing) |
-| `PERPLEXITY_API_KEY` | Perplexity API key for Perplexity Pro | No (uses mock if missing) |
-| `GEMINI_API_KEY` | Google API key for Gemini 3 Pro | No (uses mock if missing) |
+| `OPENAI_API_KEY` | OpenAI API key for GPT-4o mini | No (uses mock if missing) |
+| `ANTHROPIC_API_KEY` | Anthropic API key for Claude Haiku 4.5 | No (uses mock if missing) |
+| `XAI_API_KEY` | X.AI API key for Grok 4.3 | No (uses mock if missing) |
+| `PERPLEXITY_API_KEY` | Perplexity API key for Perplexity Sonar | No (uses mock if missing) |
+| `GEMINI_API_KEY` | Google API key for Gemini 3.5 Flash-Lite | No (uses mock if missing) |
 
 **Note**: 
 - API keys can be set via environment variables OR via the Admin UI
