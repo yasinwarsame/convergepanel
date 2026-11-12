@@ -229,6 +229,22 @@ describe("Firestore storage size rules", () => {
     expect(firestoreDocumentBytes({ f: "v" })).toBe(32 + 4);
     expect(firestoreDocumentBytes(undefined)).toBe(32);
   });
+
+  it("O-2: names, geopoints and references by Firestore's rules; an unmeasurable class instance is +Infinity, never under-counted", () => {
+    const mod = jest.requireActual("@/lib/adaptiveSchema/adoptedDisplayResults");
+    // Firestore's documented example: users/jeff/tasks/my_task_id → 6 + 5 + 6 + 11 + 16 = 44.
+    expect(mod.firestoreDocumentNameBytes(["users", "jeff", "tasks", "my_task_id"])).toBe(44);
+    expect(mod.firestoreDocumentNameBytes(mod.adaptiveDisplayResultsDocPath("r1"))).toBe(5 + 3 + 23 + 3 + 16);
+    expect(mod.adaptiveDisplayDocumentBytes("r1", { f: "v" })).toBe(5 + 3 + 23 + 3 + 16 + 32 + 4);
+    expect(firestoreValueBytes({ latitude: 1, longitude: 2, isEqual: () => true })).toBe(16);
+    expect(firestoreValueBytes({ path: "users/jeff", id: "jeff", isEqual: () => true })).toBe(6 + 5 + 16);
+    class Opaque { constructor(readonly hidden = "x".repeat(10)) {} }
+    expect(firestoreValueBytes(new Opaque())).toBe(Number.POSITIVE_INFINITY);
+    expect(firestoreDocumentBytes({ a: new Opaque() })).toBe(Number.POSITIVE_INFINITY);
+    expect(firestoreValueBytes(Object.create(null))).toBe(0);
+    expect(mod.FIRESTORE_DOCUMENT_BUDGET_BYTES).toBe(950_000);
+    expect(mod.FIRESTORE_DOCUMENT_LIMIT_BYTES).toBe(1_048_576);
+  });
 });
 
 // ─── Reader ─────────────────────────────────────────────────────────────────
