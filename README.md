@@ -474,11 +474,11 @@ There are no built-in defaults: every `NEXT_PUBLIC_FIREBASE_*` value must be set
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `OPENAI_API_KEY` | OpenAI API key for GPT-4o mini | No (that slot returns an explicit missing-key error, never a mock) |
-| `ANTHROPIC_API_KEY` | Anthropic API key for Claude Haiku 4.5 | No (that slot returns an explicit missing-key error, never a mock) |
-| `XAI_API_KEY` | X.AI API key for Grok 4.3 | No (that slot returns an explicit missing-key error, never a mock) |
-| `PERPLEXITY_API_KEY` | Perplexity API key for Perplexity Sonar | No (that slot returns an explicit missing-key error, never a mock) |
-| `GEMINI_API_KEY` | Google API key for Gemini 3.5 Flash-Lite | No (that slot returns an explicit missing-key error, never a mock) |
+| `OPENAI_API_KEY` | OpenAI API key for GPT-4o mini | No (explicit `provider_not_configured` error, never a mock or a substitute) |
+| `ANTHROPIC_API_KEY` | Anthropic API key for Claude Haiku 4.5 | No (explicit `provider_not_configured` error, never a mock or a substitute) |
+| `XAI_API_KEY` | X.AI API key for Grok 4.3 | No (explicit missing-key error, never a mock; answered by the labelled DeepSeek fallback only if `PANEL_DEEPSEEK_FALLBACK_FOR` includes `xai` and `DEEPSEEK_API_KEY` is set) |
+| `PERPLEXITY_API_KEY` | Perplexity API key for Perplexity Sonar | No (explicit missing-key error, never a mock; answered by the labelled DeepSeek fallback only if `PANEL_DEEPSEEK_FALLBACK_FOR` includes `perplexity` and `DEEPSEEK_API_KEY` is set) |
+| `GEMINI_API_KEY` | Google API key for Gemini 3.5 Flash-Lite | No (explicit missing-key error, never a mock; can be answered by the labelled DeepSeek fallback when `DEEPSEEK_API_KEY` is set and `google` is in the fallback list, which it is by default) |
 
 **Note**: 
 - API keys can be set via environment variables OR via the Admin UI

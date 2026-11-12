@@ -37,7 +37,6 @@ import ModelChip from "@/components/ModelChip";
 import { runModelIdentityDetail } from "@/lib/panel/runModelIdentity";
 import { useRunModelProvenance } from "./RunModelProvenanceContext";
 import { useRunSlotStatus } from "./RunSlotStatusContext";
-import { useRunModelProvenance } from "./RunModelProvenanceContext";
 import ListView, { type ListScoreNames } from "./ListView";
 import type { ReadableGateDisplay } from "./AdaptiveSynthesisReportView";
 import { SCHEMA_ANSWER_SHAPE } from "@/lib/adaptiveSchema/persistedOutput";
