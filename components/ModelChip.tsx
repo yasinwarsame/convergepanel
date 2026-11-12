@@ -14,7 +14,7 @@
  *
  * Naming: by default the chip names the logical slot by product FAMILY
  * ("ChatGPT") — the honest name on any run/result surface, where a product
- * label with a version ("GPT 5.2") would misstate what the run requested.
+ * label with a version ("GPT-4o mini") would misstate what the run requested.
  * Product/marketing surfaces that describe the offering (not a run) opt in to
  * the product label with `labelKind="product"`.
  */

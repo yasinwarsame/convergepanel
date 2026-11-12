@@ -19,7 +19,7 @@ import { SAVED_COPY_NOTICES, SAVED_COPY_RETRIED_AFTER_NAME, SAVED_COPY_RETRIED_I
 
 /**
  * A completed run's slot, named by product family only ("ChatGPT") — never a
- * product/marketing label with a version ("GPT 5.2"), which says nothing about
+ * product/marketing label with a version ("GPT-4o mini"), which says nothing about
  * what this run actually requested. The run's recorded model is shown
  * separately, from its own provenance, where the surface holds it.
  */
