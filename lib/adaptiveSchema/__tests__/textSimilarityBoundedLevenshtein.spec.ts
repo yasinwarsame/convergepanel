@@ -200,7 +200,7 @@ function expectPredicatesMatch(a: string, b: string): void {
 
 describe("the thresholds under test are the ones real callers pass", () => {
   it("every levenshteinMaxRatio literal in production code is covered", () => {
-    const root = process.cwd();
+    const root = join(__dirname, "../../..");
     const ratios = new Set<number>();
     for (const dir of ["lib", "components", "app"]) {
       for (const file of sourceFiles(join(root, dir))) {
