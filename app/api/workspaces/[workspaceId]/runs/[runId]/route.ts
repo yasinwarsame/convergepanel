@@ -207,7 +207,9 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
   const requestId = req.headers.get("x-vercel-id") ?? req.headers.get("x-request-id") ?? undefined;
   // Team viewers hold Workspace authority over this run's review, so the
   // decision's conditions are inside their capability.
-  // Order 40 C (O-2): the display record lives in its own document; read only now, after access and containment.
+  // Order 40 C (O-2): the display record lives in its own document; read only now, after access and Workspace
+  // containment, at the same point as the payload build. The Project-containment check below can still conceal the run;
+  // the record only feeds `payload`, which a denial never returns.
   const adaptiveDisplayResults = data.adaptiveOutput !== undefined ? await loadAdaptiveDisplayResults(runId) : undefined;
   const payload = await buildRunReadPayload({ runId, data, viewerRole, requestId, mayReadDecisionContent: true, resolveReviewRouting: resolveRunReviewRouting, adaptiveDisplayResults });
 

@@ -63,6 +63,7 @@ import { computeAdaptiveRetryAccountingWaitMs, monotonicNowMs, type ResearchRequ
 import { AdaptiveRetryUsageSink } from "@/lib/adaptiveSchema/retryCorrection";
 import { applyAdaptiveRetryAccounting } from "@/lib/firestore/adaptiveRetryAccounting";
 import { persistAdaptiveDisplayResults } from "@/lib/firestore/adaptiveDisplayResults";
+import { ADAPTIVE_DISPLAY_WRITE_MIN_WAIT_MS, computeAdaptiveDisplayWriteWaitMs } from "@/lib/adaptiveSchema/adoptedDisplayResults";
 import { emitProviderSearchEvidencePhase0 } from "@/lib/providers/providerSearchEvidencePhase0Emitter";
 import { attachDeepResearchClaimIds } from "@/lib/verification/attachDeepResearchClaimIds";
 import {
@@ -1229,14 +1230,15 @@ export async function executeOrdinaryRun(args: ExecuteOrdinaryRunArgs): Promise<
     // primary accounting already committed above, and never holds the
     // response longer than a bounded foreground wait (≤ 15 s, never into the
     // last 5 s of the request budget).
+    let retryAccountingStatus: string = "threw";
     try {
-      await applyAdaptiveRetryAccounting({
+      ({ status: retryAccountingStatus } = await applyAdaptiveRetryAccounting({
         runId,
         uid,
         usage: adaptiveRetryUsageSink.freeze(),
         gates: { completeRunSucceeded, primaryUserAccountingSucceeded },
         foregroundWaitMs: computeAdaptiveRetryAccountingWaitMs({ budget: requestBudget, nowMonoMs: monotonicNowMs() }),
-      });
+      }));
     } catch (retryAccountingError: any) {
       logger.error("[run-panel] Supplemental adaptive retry accounting threw", {
         runId,
@@ -1247,17 +1249,39 @@ export async function executeOrdinaryRun(args: ExecuteOrdinaryRunArgs): Promise<
     // Order 40 C — the validated per-slot results the report used, saved once, LAST: after the adaptive output,
     // governance initialization, automated governance and retry accounting (owner ruling O-2). It is written to its own
     // document (runs/{runId}/adaptiveDisplayResults/v1), never the run document, so it cannot take capacity any of
-    // those writes, or a later review write, needs. Skipped when the adaptive finalize failed. The writer never throws;
-    // its failure leaves the run reading exactly as before. Nothing downstream (governance, accounting, the response)
-    // reads it.
+    // those writes, or a later review write, needs. Nothing downstream (governance, accounting, the response) reads it.
+    // It is optional, so it yields (review of O-2, finding 1):
+    //   - skipped when the adaptive finalize failed;
+    //   - skipped when retry accounting may still be in flight (its foreground wait expired) or was skipped for lack of
+    //     budget, so it never commits ahead of accounting or contends with it;
+    //   - bounded by its own foreground wait inside the remaining budget, keeping the response-return reserve free; at
+    //     expiry the request stops waiting (the write-once transaction may still commit, at most once).
+    // The writer never throws; its failure or omission leaves the run reading exactly as before (#312's presentation).
     if (pendingDisplayResults && adaptivePayload) {
-      try {
-        await persistAdaptiveDisplayResults(pendingDisplayResults);
-      } catch (displayPersistError: any) {
-        logger.warn("[run-panel] adaptiveDisplayResults persistence threw, run response unaffected", {
+      const displayWaitMs = computeAdaptiveDisplayWriteWaitMs({ budget: requestBudget, nowMonoMs: monotonicNowMs() });
+      if (retryAccountingStatus === "foreground_wait_expired" || retryAccountingStatus === "skipped_insufficient_budget") {
+        logger.warn("[run-panel] adaptiveDisplayResults not written: retry accounting did not settle in the foreground", { runId, retryAccountingStatus });
+      } else if (!(displayWaitMs >= ADAPTIVE_DISPLAY_WRITE_MIN_WAIT_MS)) {
+        logger.warn("[run-panel] adaptiveDisplayResults not written: request budget exhausted", {
           runId,
-          error: displayPersistError?.message,
+          displayWaitMs: Number.isFinite(displayWaitMs) ? Math.round(displayWaitMs) : null,
         });
+      } else {
+        const write = persistAdaptiveDisplayResults(pendingDisplayResults).catch((displayPersistError: any) => {
+          logger.warn("[run-panel] adaptiveDisplayResults persistence threw, run response unaffected", { runId, error: displayPersistError?.message });
+          return null;
+        });
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const expired = new Promise<"expired">((resolve) => {
+          timer = setTimeout(() => resolve("expired"), displayWaitMs);
+        });
+        const winner = await Promise.race([write, expired]).finally(() => clearTimeout(timer));
+        if (winner === "expired") {
+          logger.warn("[run-panel] adaptiveDisplayResults foreground wait expired (write-once transaction not cancelled; may still commit at most once)", {
+            runId,
+            displayWaitMs: Math.round(displayWaitMs),
+          });
+        }
       }
     }
 

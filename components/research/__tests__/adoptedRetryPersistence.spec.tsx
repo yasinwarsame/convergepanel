@@ -130,7 +130,7 @@ const retryOk = (modelId: string, text: string) => ({ modelId, status: "ok", raw
 
 // ─── Write path: the production executor ────────────────────────────────────
 
-async function execute(results: ModelResult[], opts: { seed?: Record<string, unknown>; fakeTimers?: boolean } = {}) {
+async function execute(results: ModelResult[], opts: { seed?: Record<string, unknown>; fakeTimers?: boolean; remainingMs?: number; budget?: { startedAtMonoMs: number; budgetMs: number } } = {}) {
   db.docs.clear();
   db.hooks = {};
   db.writeLog.length = 0;
@@ -145,7 +145,7 @@ async function execute(results: ModelResult[], opts: { seed?: Record<string, unk
     selectedModels: results.map((r) => r.modelId) as never,
     adaptivePlan: { classification: CLASSIFICATION, schema, promptOverrides, routing: { kind: "active", schema } as never },
     debugRawResponseRequested: false,
-    requestBudget: { startedAtMonoMs: performance.now(), budgetMs: 300_000 },
+    requestBudget: opts.budget ?? { startedAtMonoMs: performance.now() - (300_000 - (opts.remainingMs ?? 300_000)), budgetMs: 300_000 },
   });
   let res: Awaited<typeof run>;
   if (opts.fakeTimers) {
@@ -303,7 +303,7 @@ describe("write site (lib/runPanelExecution.ts)", () => {
     const init = src.indexOf("initializeAdaptiveGovernanceRecord({");
     const automated = src.indexOf("await persistAutomatedGovernanceUpdate(");
     const accounting = src.indexOf("await applyAdaptiveRetryAccounting({");
-    const call = src.indexOf("await persistAdaptiveDisplayResults(pendingDisplayResults)");
+    const call = src.indexOf("persistAdaptiveDisplayResults(pendingDisplayResults)");
     expect(src.split("persistAdaptiveDisplayResults(").length - 1).toBe(1);
     expect(src.split("pendingDisplayResults = {").length - 1).toBe(1);
     for (const i of [persist, capture, init, automated, accounting, call]) expect(i).toBeGreaterThan(-1);
@@ -314,8 +314,14 @@ describe("write site (lib/runPanelExecution.ts)", () => {
     const gate = src.slice(src.lastIndexOf("if (", capture), capture);
     expect(gate).toContain('adaptivePayload.persistenceStatus === "saved"');
     expect(gate).toContain("completeRunSucceeded");
-    const callGate = src.slice(src.lastIndexOf("if (", call), call);
-    expect(callGate).toContain("pendingDisplayResults && adaptivePayload");
+    const outerGate = src.lastIndexOf("if (pendingDisplayResults && adaptivePayload)", call);
+    expect(outerGate).toBeGreaterThan(accounting);
+    const gated = src.slice(outerGate, call);
+    // Review of O-2, finding 1: never while accounting may still be in flight, never without budget, always bounded.
+    expect(gated).toContain('retryAccountingStatus === "foreground_wait_expired" || retryAccountingStatus === "skipped_insufficient_budget"');
+    expect(gated).toContain("computeAdaptiveDisplayWriteWaitMs({ budget: requestBudget");
+    expect(gated).toContain("displayWaitMs >= ADAPTIVE_DISPLAY_WRITE_MIN_WAIT_MS");
+    expect(src.slice(call, call + 900)).toContain("Promise.race([write, expired])");
   });
 });
 
@@ -791,6 +797,81 @@ describe("O-2: storage order and capacity (owner ruling, Order 40)", () => {
     expect(res.status).toBe(200);
     expect(db.read(displayPath(RUN_ID))).toBeUndefined();
     expect(spy).toHaveBeenCalledWith("[adaptiveDisplayResults] Not written: research write refused", expect.objectContaining({ runId: RUN_ID, refusal: reason }));
+  });
+
+  describe("the optional write yields to accounting and to the request budget (review of O-2, finding 1)", () => {
+    const delayCommitOf = (pred: (tx: any) => boolean, ms: number, onGovernance?: () => void) => {
+      const realRun = db.runTransaction.bind(db);
+      jest.spyOn(db, "runTransaction").mockImplementation(async (fn: any) =>
+        realRun(async (tx: any) => {
+          const out = await fn(tx);
+          if (onGovernance && tx.writes.some((w: any) => w.path === `runs/${RUN_ID}` && "governanceRecord" in w.data)) onGovernance();
+          if (pred(tx)) await new Promise((r) => setTimeout(r, ms));
+          return out;
+        })
+      );
+    };
+    /** A request that ran late: once governance commits, only `remainingMs` of the live budget is left. */
+    const lateAfterGovernance = (remainingMs: number) => {
+      const budget = { startedAtMonoMs: performance.now(), budgetMs: 300_000 };
+      return { budget, shrink: () => void (budget.budgetMs = performance.now() - budget.startedAtMonoMs + remainingMs) };
+    };
+    const warned = (msg: string) => (jest.requireMock("@/lib/logger").logger.warn as jest.Mock).mock.calls.some((c: any[]) => String(c[0]).startsWith(msg));
+
+    it("retry accounting's foreground wait expired (it may still commit): the display record is not written; the response is 200", async () => {
+      claude.mockResolvedValueOnce(retryOk("claude", bare("ClaudeRetry")));
+      // 7 s left at accounting → 2 s accounting wait; its commit takes 3 s.
+      const late = lateAfterGovernance(7_000);
+      delayCommitOf((tx) => tx.writes.some((w: any) => "adaptiveRetryUsage" in w.data), 3_000, late.shrink);
+      const { body } = await execute([ok("chatgpt", bare("ChatGPT")), ok("claude", CLAUDE_PROSE_WRAPPED)], { budget: late.budget });
+      expect(body.adaptive.persistenceStatus).toBe("saved");
+      expect(warned("[adaptiveRetryAccounting] Supplemental retry accounting foreground wait expired")).toBe(true);
+      expect(warned("[run-panel] adaptiveDisplayResults not written: retry accounting did not settle in the foreground")).toBe(true);
+      expect(db.read(displayPath(RUN_ID))).toBeUndefined();
+      await new Promise((r) => setTimeout(r, 1_500)); // the abandoned accounting commits; the record still never appears
+      expect(db.read(`runs/${RUN_ID}`)!.adaptiveRetryUsage).toBeDefined();
+      expect(db.read(displayPath(RUN_ID))).toBeUndefined();
+    });
+
+    it("too little budget for accounting (skipped_insufficient_budget): the display record is not written either", async () => {
+      claude.mockResolvedValueOnce(retryOk("claude", bare("ClaudeRetry")));
+      const late = lateAfterGovernance(5_500);
+      delayCommitOf(() => false, 0, late.shrink);
+      const { body, stored } = await execute([ok("chatgpt", bare("ChatGPT")), ok("claude", CLAUDE_PROSE_WRAPPED)], { budget: late.budget });
+      expect(body.adaptive.persistenceStatus).toBe("saved");
+      expect(stored.adaptiveRetryUsage).toBeUndefined();
+      expect(warned("[adaptiveRetryAccounting] Supplemental retry accounting not attempted: request budget exhausted")).toBe(true);
+      expect(RECORD in stored).toBe(false);
+      expect(warned("[run-panel] adaptiveDisplayResults not written: retry accounting did not settle in the foreground")).toBe(true);
+    });
+
+    it("no retry, but the budget is nearly spent: the display write is not started", async () => {
+      const { stored } = await execute([ok("chatgpt", bare("ChatGPT")), ok("claude", bare("Claude"))], { remainingMs: 5_800 });
+      expect(RECORD in stored).toBe(false);
+      expect(warned("[run-panel] adaptiveDisplayResults not written: request budget exhausted")).toBe(true);
+    });
+
+    it("a slow display write is bounded by its own wait, keeping the response-return reserve free", async () => {
+      // 8 s left → 3 s display wait; the display commit takes 6 s.
+      delayCommitOf((tx) => tx.writes.some((w: any) => w.path === displayPath(RUN_ID)), 6_000);
+      const t0 = Date.now();
+      const { stored } = await execute([ok("chatgpt", bare("ChatGPT")), ok("claude", bare("Claude"))], { remainingMs: 8_000 });
+      const elapsed = Date.now() - t0;
+      expect(elapsed).toBeLessThan(5_500);
+      expect(RECORD in stored).toBe(false);
+      expect(warned("[run-panel] adaptiveDisplayResults foreground wait expired")).toBe(true);
+      await new Promise((r) => setTimeout(r, 4_000)); // the write-once transaction commits later, at most once
+      expect(db.writeLog.filter((w) => w.path === displayPath(RUN_ID))).toHaveLength(1);
+    });
+
+    it("computeAdaptiveDisplayWriteWaitMs: min(10 s, remaining − 5 s reserve)", () => {
+      const at = (remainingMs: number) => adoptedDisplay.computeAdaptiveDisplayWriteWaitMs({ budget: { startedAtMonoMs: 0, budgetMs: 300_000 }, nowMonoMs: 300_000 - remainingMs });
+      expect(at(300_000)).toBe(10_000);
+      expect(at(15_000)).toBe(10_000);
+      expect(at(8_000)).toBe(3_000);
+      expect(at(6_000)).toBe(1_000);
+      expect(at(5_999)).toBeLessThan(adoptedDisplay.ADAPTIVE_DISPLAY_WRITE_MIN_WAIT_MS);
+    });
   });
 
   it("later required writes stay safe at the largest display record: a maximum review write to the run document fits exactly as it would without the feature", async () => {

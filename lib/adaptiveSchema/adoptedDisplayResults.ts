@@ -44,6 +44,7 @@ import type { AdaptiveModelResult, QueryType } from "./types";
 import { ADAPTIVE_RETRY_OUTCOMES, isAdaptiveRetryOutcome, type AdaptiveRetryOutcome } from "./retryCorrection";
 import { SCHEMA_REGISTRY, getResultSchema } from "./schemaRegistry";
 import { validateAdaptiveResponse } from "./validator";
+import { ADAPTIVE_RETRY_RESPONSE_RETURN_RESERVE_MS, type ResearchRequestBudget } from "./retryBudget";
 
 // ─── Contract ───────────────────────────────────────────────────────────────
 
@@ -187,6 +188,22 @@ export function firestoreDocumentBytes(data: Record<string, unknown> | undefined
     sum += firestoreFieldBytes(k, v);
   }
   return sum;
+}
+
+// ─── Request budget (review of O-2, finding 1) ──────────────────────────────
+
+/** Longest the request waits for the optional display write. */
+export const ADAPTIVE_DISPLAY_WRITE_WAIT_MS = 10_000;
+/** Below this, the optional display write is not started at all (the record is omitted; #312's presentation). */
+export const ADAPTIVE_DISPLAY_WRITE_MIN_WAIT_MS = 1_000;
+
+/**
+ * Pure. Foreground wait allowed for the optional display write right now: min(ADAPTIVE_DISPLAY_WRITE_WAIT_MS, remaining
+ * budget − the response-return reserve retry accounting keeps free). May be ≤ 0 when the request is already late.
+ */
+export function computeAdaptiveDisplayWriteWaitMs(args: { budget: ResearchRequestBudget; nowMonoMs: number }): number {
+  const remainingMs = args.budget.budgetMs - (args.nowMonoMs - args.budget.startedAtMonoMs);
+  return Math.min(ADAPTIVE_DISPLAY_WRITE_WAIT_MS, remainingMs - ADAPTIVE_RETRY_RESPONSE_RETURN_RESERVE_MS);
 }
 
 /** The stored size of the display document for this run: name + every record field + 32. */
