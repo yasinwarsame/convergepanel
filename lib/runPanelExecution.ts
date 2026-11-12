@@ -61,7 +61,7 @@ import { logger } from "@/lib/logger";
 import { finalizeAdaptiveRun, AdaptivePromptPlan } from "@/lib/adaptiveSchema/orchestrate";
 import { computeAdaptiveRetryAccountingWaitMs, monotonicNowMs, type ResearchRequestBudget } from "@/lib/adaptiveSchema/retryBudget";
 import { AdaptiveRetryUsageSink } from "@/lib/adaptiveSchema/retryCorrection";
-import { applyAdaptiveRetryAccounting } from "@/lib/firestore/adaptiveRetryAccounting";
+import { applyAdaptiveRetryAccounting, type AdaptiveRetryAccountingResult } from "@/lib/firestore/adaptiveRetryAccounting";
 import { persistAdaptiveDisplayResults } from "@/lib/firestore/adaptiveDisplayResults";
 import { ADAPTIVE_DISPLAY_WRITE_MIN_WAIT_MS, computeAdaptiveDisplayWriteWaitMs } from "@/lib/adaptiveSchema/adoptedDisplayResults";
 import { emitProviderSearchEvidencePhase0 } from "@/lib/providers/providerSearchEvidencePhase0Emitter";
@@ -1230,7 +1230,7 @@ export async function executeOrdinaryRun(args: ExecuteOrdinaryRunArgs): Promise<
     // primary accounting already committed above, and never holds the
     // response longer than a bounded foreground wait (≤ 15 s, never into the
     // last 5 s of the request budget).
-    let retryAccountingStatus: string = "threw";
+    let retryAccountingStatus: AdaptiveRetryAccountingResult["status"] | "threw" = "threw";
     try {
       ({ status: retryAccountingStatus } = await applyAdaptiveRetryAccounting({
         runId,

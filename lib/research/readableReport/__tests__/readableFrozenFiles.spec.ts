@@ -191,10 +191,13 @@ const WIDENED_BY_INC1: Record<string, string> = {
  * document after the routes' gates and passed in). The spec's other pins and assertions are unchanged.
  *   - dsProvenanceUiBoundaries.spec.ts: 98e4920e7810a5e4a458a4ad71185c17a7041d2f → c0774a6d0452c69795fd49442091d78f3cb8112d.
  * Same 32-file pinned set.
+ *
+ * Re-pinned (review of O-2, NIT): dsProvenanceUiBoundaries.spec.ts changed only its Team detail route pin (comment-only
+ * route change). c0774a6d0452c69795fd49442091d78f3cb8112d → da95909bcc5ad3c9c477cab8dbabf60e99dd7fd9. Same 32-file pinned set.
  */
 const READABLE_GATE_OPTION_BY_INC1: Record<string, string> = {
   "components/adaptive/AdaptiveSynthesisReportView.tsx": "bcdf6ba2444c2aa3dc22ae049901cf72e55eb0bc",
-  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "c0774a6d0452c69795fd49442091d78f3cb8112d",
+  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "da95909bcc5ad3c9c477cab8dbabf60e99dd7fd9",
   "lib/adaptiveSchema/shareBuilders.ts": "f5e67a0a0ee20e2da15917b2a2f195005943f1ba",
   "lib/adaptiveSchema/__tests__/o5p/historicalParity.spec.tsx": "fce2e3172049cd868607e83a8a0a0147ec4939f3",
 };

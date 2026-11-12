@@ -28,7 +28,9 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   // Re-pinned (owner-authorized Order 40 C O-2 correction, separate display document): after every access and containment
   // gate, reads runs/{runId}/adaptiveDisplayResults/v1 (loadAdaptiveDisplayResults) only for a run with an adaptive output
   // and passes it to buildRunReadPayload; no other change, no provenance code. e3f4170cc226e463d1f35b385cce79f19bb2ab2f → 3495983e28f1b6e91cda4d35b9e381908cb1f3f3.
-  "app/api/workspaces/[workspaceId]/runs/[runId]/route.ts": "3495983e28f1b6e91cda4d35b9e381908cb1f3f3",
+  // Re-pinned (review of O-2, NIT): comment only, stating the display load point exactly (before the Project-containment
+  // check; the record only feeds a payload a denial never returns). 3495983e28f1b6e91cda4d35b9e381908cb1f3f3 → 52494ec8ed140f58496da54bc6c01cfafa34689b.
+  "app/api/workspaces/[workspaceId]/runs/[runId]/route.ts": "52494ec8ed140f58496da54bc6c01cfafa34689b",
   "app/api/user/runs/[runId]/export/route.ts": "3b74c7472310a69bac896f5c87f17b3edf32890d",
   "app/api/user/runs/[runId]/exports/route.ts": "8968d1e5dc7f84954417311c6189dd80d2839084",
   "app/api/user/runs/[runId]/exports/[exportId]/route.ts": "b172893d368271c2b625133553ecb77e06c556cb",

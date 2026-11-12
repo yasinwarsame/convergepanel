@@ -664,6 +664,19 @@ describe("persistence: failure, repetition, concurrency, size, deletion", () => 
     expect(a.adaptive.modelResults[0]).toEqual(b.adaptive.modelResults[0]);
   });
 
+  it("the REAL research deletion workflow removes the display document (no assumption that deleting a parent deletes subcollections); a late write after it is refused", async () => {
+    claude.mockResolvedValueOnce(retryOk("claude", bare("ClaudeRetry")));
+    const { live } = await execute([ok("chatgpt", bare("ChatGPT")), ok("claude", CLAUDE_PROSE_WRAPPED)]);
+    expect(db.read(displayPath(RUN_ID))).toBeDefined();
+    const { deleteResearchRun } = jest.requireActual("@/lib/firestore/researchDeletion");
+    expect(await deleteResearchRun({ runId: RUN_ID, actorUid: "uid-sysadmin", reason: "admin_delete" })).toMatchObject({ status: "deleted", runId: RUN_ID });
+    expect(db.read(displayPath(RUN_ID))).toBeUndefined();
+    expect(db.paths(`runs/${RUN_ID}`)).toEqual([]);
+    const rows = [{ modelId: "chatgpt", status: "ok" }, { modelId: "claude", status: "ok" }];
+    expect(await persistAdaptiveDisplayResults({ runId: RUN_ID, schemaId: "comparison_matrix", panelResults: rows, adaptiveResults: live })).toMatchObject({ status: "refused" });
+    expect(db.paths(`runs/${RUN_ID}`)).toEqual([]);
+  });
+
   it("a run whose deletion started is never written (deletion barrier)", async () => {
     const { stored, live } = await execute([ok("chatgpt", bare("ChatGPT"))]);
     db.docs.delete(displayPath(RUN_ID));
