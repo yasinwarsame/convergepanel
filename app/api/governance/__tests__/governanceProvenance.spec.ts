@@ -80,21 +80,27 @@ function makeQuery(name: string) {
 }
 
 jest.mock("@/lib/firebase/admin", () => ({
+  // SEC-3 / S2-b correction: governance authentication is the privileged-access
+  // guard's (structural pre-validation, one live read, revocation). The SDK
+  // double reports the claims for a minted, well-formed credential, and the
+  // live record carries the uid it was read for.
   adminAuth: {
-    verifyIdToken: async () => tokenClaims,
-    verifySessionCookie: async () => tokenClaims,
-    getUser: async () => liveRecord,
+    verifyIdToken: async () => ({ auth_time: Math.floor(Date.now() / 1000) - 600, ...tokenClaims, sub: (tokenClaims as { uid: string }).uid }),
+    verifySessionCookie: async () => ({ auth_time: Math.floor(Date.now() / 1000) - 600, ...tokenClaims, sub: (tokenClaims as { uid: string }).uid }),
+    getUser: async (uid: string) => ({ uid, ...liveRecord }),
   },
+  getInitializedFirebaseProjectId: () => require("@/lib/admin/__tests__/privilegedRouteHarness").PROJECT_ID,
   adminDb: { collection: (n: string) => makeQuery(n) },
   firebaseAdmin: { firestore: { Timestamp: { now: () => "TS", fromDate: () => "TS" }, FieldValue: { serverTimestamp: () => "TS" } } },
 }));
 jest.mock("@/lib/admin/entitlements", () => ({ getEffectiveEntitlements: async () => ({ planId }) }));
 
 import { NextRequest } from "next/server";
+import { mintCredential } from "@/lib/admin/__tests__/privilegedRouteHarness";
 import { checkAdminOnly } from "@/lib/governance/authCheck";
 import { resolveGovernanceVisibleUserIds } from "@/lib/governance/governanceVisibleUserIds";
 
-const bearer = (url: string) => new NextRequest(url, { headers: { authorization: "Bearer t" } });
+const bearer = (url: string) => new NextRequest(url, { headers: { authorization: `Bearer ${mintCredential("bearer", String((tokenClaims as { uid: string }).uid))}` } });
 const queue = async () => {
   const { GET } = await import("@/app/api/governance/queue/route");
   return GET(bearer("http://localhost/api/governance/queue?status=all"));

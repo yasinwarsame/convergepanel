@@ -118,11 +118,16 @@ function collectionHandle(name: string) {
 }
 
 jest.mock("@/lib/firebase/admin", () => ({
+  // SEC-3 / S2-b correction: governance authentication is the privileged-access
+  // guard's (structural pre-validation, one live read, revocation). The SDK
+  // double reports the claims for a minted, well-formed credential, and the
+  // live record carries the uid it was read for.
   adminAuth: {
-    verifyIdToken: async () => tokenClaims,
-    verifySessionCookie: async () => tokenClaims,
-    getUser: async () => liveRecord,
+    verifyIdToken: async () => ({ auth_time: Math.floor(Date.now() / 1000) - 600, ...tokenClaims, sub: (tokenClaims as { uid: string }).uid }),
+    verifySessionCookie: async () => ({ auth_time: Math.floor(Date.now() / 1000) - 600, ...tokenClaims, sub: (tokenClaims as { uid: string }).uid }),
+    getUser: async (uid: string) => ({ uid, ...liveRecord }),
   },
+  getInitializedFirebaseProjectId: () => require("@/lib/admin/__tests__/privilegedRouteHarness").PROJECT_ID,
   adminDb: {
     collection: (n: string) => collectionHandle(n),
     // Transactions delegate to the same recorded doc handles, so every write the
@@ -151,12 +156,13 @@ jest.mock("@/lib/firebase/admin", () => ({
 jest.mock("@/lib/admin/entitlements", () => ({ getEffectiveEntitlements: async () => ({ planId }) }));
 
 import { NextRequest } from "next/server";
+import { mintCredential } from "@/lib/admin/__tests__/privilegedRouteHarness";
 
 const post = async (collection: Coll, runId: string) => {
   const { POST } = await import("@/app/api/governance/review/route");
   return POST(new NextRequest("http://localhost/api/governance/review", {
     method: "POST",
-    headers: { authorization: "Bearer t", "content-type": "application/json" },
+    headers: { authorization: `Bearer ${mintCredential("bearer", String((tokenClaims as { uid: string }).uid))}`, "content-type": "application/json" },
     body: JSON.stringify({ runId, collection, action: "approved", comment: "reviewed" }),
   }));
 };
@@ -170,7 +176,7 @@ const postHostile = async (collection: Coll, runId: string, extra: Record<string
   const { POST } = await import("@/app/api/governance/review/route");
   return POST(new NextRequest("http://localhost/api/governance/review", {
     method: "POST",
-    headers: { authorization: "Bearer t", "content-type": "application/json" },
+    headers: { authorization: `Bearer ${mintCredential("bearer", String((tokenClaims as { uid: string }).uid))}`, "content-type": "application/json" },
     body: JSON.stringify({ runId, collection, action: "approved", comment: "reviewed", ...extra }),
   }));
 };

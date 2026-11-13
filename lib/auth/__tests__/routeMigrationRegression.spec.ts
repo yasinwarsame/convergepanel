@@ -208,17 +208,9 @@ describe("POST /api/billing/validate-subscription", () => {
   });
 });
 
-describe("GET /api/governance/reviewer", () => {
-  it("no credentials -> 401", async () => {
-    setupNoCreds();
-    const { GET } = await import("@/app/api/governance/reviewer/route");
-    const res = await GET(noCredsReq("http://localhost/api/governance/reviewer"));
-    expect(res.status).toBe(401);
-  });
-  it("mismatched cookie/bearer -> 401 (fail closed)", async () => {
-    setupMismatch();
-    const { GET } = await import("@/app/api/governance/reviewer/route");
-    const res = await GET(mismatchReq("http://localhost/api/governance/reviewer"));
-    expect(res.status).toBe(401);
-  });
-});
+// SEC-3 / S2-b correction (owner ruling D): `/api/governance/reviewer` no longer
+// uses `resolveRequestIdentity`; it authenticates through the privileged-access
+// guard (`resolveGovernanceRequestUser`). Its no-credential, mismatch, revoked,
+// disabled, malformed and outage cases are covered through the real handler in
+// app/api/governance/__tests__/mixedAudienceGovernanceAuth.spec.ts.
+

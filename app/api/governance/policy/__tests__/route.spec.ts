@@ -6,9 +6,9 @@
  * caller's uid. Free and Lite callers get 403 and never reach
  * `loadGovernancePolicy()`. POST stays Governance Admin only.
  *
- * The REAL `authCheck` and `verifiedAdminIdentity` modules run: only the request
- * identity, the live Auth record, the entitlement lookup and the policy store
- * are faked. SEC-3 / S2-b: POST runs through the REAL privileged-access guard,
+ * The REAL `authCheck` and `verifiedAdminIdentity` modules run: only the Admin
+ * SDK, the live Auth record, the entitlement lookup and the policy store are
+ * faked. SEC-3 / S2-b: POST runs through the REAL privileged-access guard,
  * so its requests carry a structurally valid credential verified by the
  * harness's SDK double; the live record is the same `authRecord`.
  */
@@ -30,7 +30,6 @@ const entitlementCalls: string[] = [];
 const loadPolicy = jest.fn(async () => ({ policyVersion: 7, minConsensusToApprove: 80 }));
 const savePolicy = jest.fn(async () => ({ policyVersion: 8, minConsensusToApprove: 85 }));
 
-jest.mock("@/lib/auth/resolveRequestIdentity", () => ({ resolveRequestIdentity: async () => identity }));
 jest.mock("@/lib/auth/identityResolutionTelemetry", () => ({ logIdentityResolutionFailure: () => undefined }));
 jest.mock("@/lib/firebase/admin", () => {
   const h = require("@/lib/admin/__tests__/privilegedRouteHarness");
@@ -62,8 +61,21 @@ import { authState, mintCredential } from "@/lib/admin/__tests__/privilegedRoute
 import { GET, POST } from "@/app/api/governance/policy/route";
 
 const URL_ = "https://app.test/api/governance/policy";
-const get = (init: { headers?: Record<string, string>; query?: string } = {}) =>
-  GET(new NextRequest(`${URL_}${init.query ?? ""}`, { method: "GET", headers: init.headers }));
+/**
+ * SEC-3 / S2-b correction: GET authenticates through the privileged-access
+ * guard's authentication (no tier), so an "authenticated" caller presents a
+ * structurally valid bearer verified by the harness's SDK double; an
+ * "unauthenticated" one presents nothing.
+ */
+const get = (init: { headers?: Record<string, string>; query?: string } = {}) => {
+  const headers: Record<string, string> = { ...(init.headers ?? {}) };
+  if (identity.status === "authenticated") {
+    const token = mintCredential("bearer", identity.uid);
+    authState.tokens.set(token, { uid: identity.uid, sub: identity.uid, auth_time: Math.floor(Date.now() / 1000) - 60 });
+    headers.authorization = `Bearer ${token}`;
+  }
+  return GET(new NextRequest(`${URL_}${init.query ?? ""}`, { method: "GET", headers }));
+};
 const post = (body: unknown) => {
   const token = mintCredential("bearer", CALLER);
   authState.tokens.set(token, { uid: CALLER, sub: CALLER, auth_time: Math.floor(Date.now() / 1000) - 60 });

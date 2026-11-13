@@ -684,11 +684,16 @@ async function auditRowWrite(patch: Record<string, unknown>) {
 }
 
 jest.mock("@/lib/firebase/admin", () => ({
+  // SEC-3 / S2-b correction: governance authentication is the privileged-access
+  // guard's (structural pre-validation, one live read, revocation). The SDK
+  // double reports the claims for a minted, well-formed credential, and the
+  // live record carries the uid it was read for.
   adminAuth: {
-    verifyIdToken: async () => tokenClaims,
-    verifySessionCookie: async () => tokenClaims,
-    getUser: async () => liveRecord,
+    verifyIdToken: async () => ({ auth_time: Math.floor(Date.now() / 1000) - 600, ...tokenClaims, sub: (tokenClaims as { uid: string }).uid }),
+    verifySessionCookie: async () => ({ auth_time: Math.floor(Date.now() / 1000) - 600, ...tokenClaims, sub: (tokenClaims as { uid: string }).uid }),
+    getUser: async (uid: string) => ({ uid, ...liveRecord }),
   },
+  getInitializedFirebaseProjectId: () => require("@/lib/admin/__tests__/privilegedRouteHarness").PROJECT_ID,
   adminDb: {
     collection: (n: string) => collectionHandle(n),
     // Writes are buffered and applied when the callback completes, as a committed transaction would. A failing write
@@ -715,12 +720,13 @@ jest.mock("@/lib/workspaces/runWorkspaceIntegrity", () => ({
 }));
 
 import { NextRequest } from "next/server";
+import { mintCredential } from "@/lib/admin/__tests__/privilegedRouteHarness";
 
 const post = async (collection: Coll, runId: string) => {
   const { POST } = await import("@/app/api/governance/review/route");
   return POST(new NextRequest("http://localhost/api/governance/review", {
     method: "POST",
-    headers: { authorization: "Bearer t", "content-type": "application/json" },
+    headers: { authorization: `Bearer ${mintCredential("bearer", String((tokenClaims as { uid: string }).uid))}`, "content-type": "application/json" },
     body: JSON.stringify({ runId, collection, action: "approved", comment: "reviewed" }),
   }));
 };
@@ -1327,9 +1333,12 @@ describe("ZZ ENFORCEMENT LIVENESS — the automatic check actually ran", () => {
   });
 
   it("and it examined REAL sink calls, which no constant can manufacture", () => {
-    // Driving these routes produces hundreds of console invocations. A hook
-    // pointed at a filler string would leave this at zero.
-    expect(redactionSinkCallsInspected).toBeGreaterThan(100);
+    // Driving these routes produces many console invocations. A hook pointed
+    // at a filler string would leave this at zero. SEC-3 / S2-b correction:
+    // was > 100; governance authentication moved to the privileged-access
+    // guard, which logs through `logger` instead of the per-request
+    // `console.log` in lib/firebase/auth.ts, so the real count fell to 88.
+    expect(redactionSinkCallsInspected).toBeGreaterThan(60);
   });
 });
 

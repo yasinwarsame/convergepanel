@@ -16,14 +16,8 @@
 
 import "server-only";
 import type { NextRequest } from "next/server";
-import {
-  hasVerifiedGovernanceAdminAuthority,
-  resolveLiveAuthIdentityWithValidSince,
-} from "@/lib/admin/verifiedAdminIdentity";
-import { revokedBySnapshot, validAuthTime } from "@/lib/admin/privilegedAccess";
-import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
-import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
-import { adminAuth } from "@/lib/firebase/admin";
+import { hasVerifiedGovernanceAdminAuthority } from "@/lib/admin/verifiedAdminIdentity";
+import { authenticatePrivilegedPrincipal } from "@/lib/admin/privilegedAccess";
 import { getEffectiveEntitlements } from "@/lib/admin/entitlements";
 import { logger } from "@/lib/logger";
 
@@ -76,77 +70,40 @@ export async function checkGovernancePolicyReadAccess(
 }
 
 /**
- * Auth Identity Consistency Remediation, Step 7.15 — found during the
- * post-migration cross-route search, NOT in the originally-disclosed
- * 14-route inventory (that inventory only searched `app/api` directly;
- * this is a shared `lib/` helper five governance routes call indirectly).
- * Same root-cause pattern: previously checked the `__session` cookie
- * first and, on ANY thrown error (not just "absent"), silently swallowed
- * it and fell through to bearer — but if the cookie resolved to a valid
- * uid, bearer was NEVER even inspected, so a stale cookie still won
- * unconditionally over a fresh, different bearer token. Now a thin
- * wrapper around the shared `resolveRequestIdentity()`, same as every
- * other migrated route.
+ * Authentication for the MIXED-AUDIENCE governance handlers (policy GET, audit
+ * GET, queue GET, review POST, reviewer GET/POST).
+ *
+ * History: Step 7.15 moved this onto the shared `resolveRequestIdentity()`
+ * (strict cookie + bearer agreement); Phase FIRST-ADMIN-C6 added the live
+ * `disabled` refusal. SEC-3 / S2-b correction (owner ruling D): it is now the
+ * privileged-access guard's own authentication, without a tier decision —
+ * `authenticatePrivilegedPrincipal` (lib/admin/privilegedAccess.ts):
+ *
+ *   - every presented credential is verified; a present-but-invalid,
+ *     malformed, expired or REVOKED bearer never falls back to a cookie (or
+ *     the reverse), and two credentials must name the same uid (SP-5);
+ *   - ONE live Auth read; `disabled === false` is required; EVERY presented
+ *     credential (bearer and cookie) is checked against the live
+ *     `tokensValidAfterTime`, so `revokeRefreshTokens(uid)` takes effect on the
+ *     next request rather than when the ID token expires;
+ *   - a verifier or lookup outage is 503 (A-2 / SP-2), never a grant and never
+ *     a silent 401.
+ *
+ * Scope is NOT decided here: ordinary reviewer / Team / full-plan access and
+ * GOVERNANCE_ADMIN global scope are decided downstream, from the uid, by the
+ * same live-record resolvers as before (`resolveGovernanceVisibleUserIds*`,
+ * `checkGovernancePolicyReadAccess`).
  */
+export type GovernanceRequestUser =
+  | { ok: true; uid: string; email: string; emailVerified: boolean }
+  | { ok: false; status: 401 | 503 };
+
 export async function resolveGovernanceRequestUser(
-  request: NextRequest
-): Promise<{ ok: true; uid: string; email: string; emailVerified: boolean } | { ok: false; status: 401 }> {
-  if (!adminAuth) {
-    return { ok: false, status: 401 };
-  }
-
-  const identity = await resolveRequestIdentity(request, { withBearerAuthTime: true });
-  if (identity.status !== "authenticated") {
-    logIdentityResolutionFailure({ route: "resolveGovernanceRequestUser", failureCategory: identity.reason });
-    return { ok: false, status: 401 };
-  }
-
-  // Phase FIRESTORE-AUTHZ-P0.2: `emailVerified` travels WITH the email, out of
-  // the same live record read, so no downstream gate can honour an allowlisted
-  // address without the proof of ownership that belongs to it.
-  const live = await resolveLiveAuthIdentityWithValidSince(identity.uid);
-  if (live.status !== "resolved") {
-    return { ok: false, status: 401 };
-  }
-
-  // Phase FIRST-ADMIN-C6 — A DISABLED ACCOUNT REACHES NO GOVERNANCE ROUTE.
-  //
-  // C4 made `disabled` part of the live-record evidence and C5 added it to the
-  // visibility cache key, but THIS function — which gates every governance
-  // route — read the same record and ignored the field. Because ID tokens are
-  // verified without `checkRevoked`, a disabled reviewer holding a pre-disable
-  // token kept queue, audit AND the `/api/governance/review` cross-tenant WRITE
-  // for the remainder of the token's life.
-  //
-  // The rule applies to EVERY governance identity, not just allowlisted admins:
-  // an ordinary assigned reviewer is equally revoked by disabling the account.
-  if (live.disabled === true) {
-    logIdentityResolutionFailure({ route: "resolveGovernanceRequestUser", failureCategory: "account_disabled" });
-    return { ok: false, status: 401 };
-  }
-
-  // SEC-3 / S2-b correction — REVOCATION CUTOFF ON THE BEARER PATH.
-  //
-  // The cookie path is already verified with `checkRevoked = true`, but
-  // `verifyIdToken` is called without it, so before this a revoked-but-enabled
-  // caller (e.g. a GOVERNANCE_ADMIN_EMAILS member after `revokeRefreshTokens`)
-  // kept global queue/audit reads and cross-tenant review writes for the rest
-  // of the ID token's life (up to ~1h). The bearer's `auth_time` is now compared
-  // with the `tokensValidAfterTime` of the SAME live record read above (no
-  // second lookup), using the guard's own helpers: absent/null cutoff allows;
-  // an unparseable cutoff is treated as revoked; strictly earlier than the
-  // cutoff is revoked, equal is not. When a cutoff exists, a bearer whose
-  // `auth_time` is not a positive integer is also treated as revoked.
-  if (identity.source !== "session_cookie") {
-    const cutoff = live.tokensValidAfterTime;
-    const authTime = identity.bearerAuthTime;
-    const revoked =
-      cutoff !== undefined && cutoff !== null && (!validAuthTime(authTime) || revokedBySnapshot(authTime, cutoff));
-    if (revoked) {
-      logIdentityResolutionFailure({ route: "resolveGovernanceRequestUser", failureCategory: "revoked_session" });
-      return { ok: false, status: 401 };
-    }
-  }
-
-  return { ok: true, uid: identity.uid, email: live.email, emailVerified: live.emailVerified };
+  request: NextRequest,
+  opts: { route?: string } = {}
+): Promise<GovernanceRequestUser> {
+  const authn = await authenticatePrivilegedPrincipal(request, { route: opts.route ?? "governance" });
+  if (!authn.ok) return { ok: false, status: authn.status };
+  const p = authn.principal;
+  return { ok: true, uid: p.uid, email: p.email, emailVerified: p.emailVerified };
 }

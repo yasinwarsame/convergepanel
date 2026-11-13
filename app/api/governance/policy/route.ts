@@ -32,6 +32,7 @@ import {
 } from "@/lib/governance/governancePolicyStore";
 import { writeAuditEvent } from "@/lib/governance/auditLog";
 import { checkGovernancePolicyReadAccess, resolveGovernanceRequestUser } from "@/lib/governance/authCheck";
+import { governanceAuthDenialResponse } from "@/lib/governance/governanceAuthDenial";
 import { privilegedDenialResponse, requirePrivilegedAccess } from "@/lib/admin/privilegedAccess";
 
 export const runtime = "nodejs";
@@ -136,13 +137,8 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const resolved = await resolveGovernanceRequestUser(request);
-  if (!resolved.ok) {
-    return NextResponse.json(
-      { ok: false, error: { code: "unauthorized", message: "Authentication required" } },
-      { status: 401 }
-    );
-  }
+  const resolved = await resolveGovernanceRequestUser(request, { route: "GET /api/governance/policy" });
+  if (!resolved.ok) return governanceAuthDenialResponse(resolved.status);
 
   const readAccess = await checkGovernancePolicyReadAccess(resolved.uid);
   if (readAccess === "unavailable") {

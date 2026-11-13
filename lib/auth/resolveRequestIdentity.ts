@@ -52,13 +52,9 @@ export type RequestIdentityResult =
   | { status: "authenticated"; uid: string; source: RequestIdentitySource }
   | { status: "unauthenticated"; reason: RequestIdentityUnauthenticatedReason };
 
-export type RequestIdentityResultWithBearerAuthTime =
-  | { status: "authenticated"; uid: string; source: RequestIdentitySource; bearerAuthTime?: unknown }
-  | { status: "unauthenticated"; reason: RequestIdentityUnauthenticatedReason };
-
 type CredentialCheck =
   | { present: false }
-  | { present: true; ok: true; uid: string; authTime?: unknown }
+  | { present: true; ok: true; uid: string }
   | { present: true; ok: false; reason: RequestIdentityUnauthenticatedReason };
 
 /**
@@ -117,7 +113,7 @@ async function checkBearer(request: NextRequest): Promise<CredentialCheck> {
   if (!token) return { present: true, ok: false, reason: "invalid_bearer_token" };
   try {
     const decoded = await verifyIdToken(token);
-    return { present: true, ok: true, uid: decoded.uid, authTime: (decoded as { auth_time?: unknown }).auth_time };
+    return { present: true, ok: true, uid: decoded.uid };
   } catch (err) {
     return { present: true, ok: false, reason: classifyVerificationError(err, "bearer") };
   }
@@ -150,34 +146,11 @@ async function checkBearer(request: NextRequest): Promise<CredentialCheck> {
  * a DIFFERENT user B must not authenticate as A — the expired token is
  * still evidence of a second, unverifiable identity claim, not something
  * to silently discard.
- *
- * SEC-3 / S2-b correction — `{ withBearerAuthTime: true }` runs the SAME
- * resolution (identical truth table, identical verification calls) and
- * additionally reports the verified bearer token's raw `auth_time` whenever a
- * bearer took part in the authentication (`bearerAuthTime`; `undefined` for a
- * cookie-only result). `verifyIdToken` does not check revocation, so a caller
- * holding a live record can apply its own `tokensValidAfterTime` cutoff. Only
- * `resolveGovernanceRequestUser` (lib/governance/authCheck.ts) passes it; with
- * no options the result shape is exactly what it always was.
  */
-export async function resolveRequestIdentity(request: NextRequest): Promise<RequestIdentityResult>;
-export async function resolveRequestIdentity(
-  request: NextRequest,
-  opts: { withBearerAuthTime: true }
-): Promise<RequestIdentityResultWithBearerAuthTime>;
-export async function resolveRequestIdentity(
-  request: NextRequest,
-  opts?: { withBearerAuthTime: true }
-): Promise<RequestIdentityResultWithBearerAuthTime> {
+export async function resolveRequestIdentity(request: NextRequest): Promise<RequestIdentityResult> {
   const cookie = await checkCookie(request);
   const bearer = await checkBearer(request);
-  const result = decideIdentity(cookie, bearer);
-  if (opts?.withBearerAuthTime !== true || result.status !== "authenticated") return result;
-  const bearerAuthTime = result.source === "session_cookie" || !bearer.present || !bearer.ok ? undefined : bearer.authTime;
-  return { ...result, bearerAuthTime };
-}
 
-function decideIdentity(cookie: CredentialCheck, bearer: CredentialCheck): RequestIdentityResult {
   if (!cookie.present && !bearer.present) {
     return { status: "unauthenticated", reason: "missing_credentials" };
   }
