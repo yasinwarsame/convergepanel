@@ -349,7 +349,8 @@ describe("reviewer GET/POST: legitimate users see exactly the same behaviour", (
   });
 
   it("POST assign_reviewer still refuses self-assignment (email from the same live read, case-insensitive) with no extra getUser", async () => {
-    const me = signInAs("ordinary");
+    // The LIVE record stores a mixed-case address; the request uses another casing.
+    const me = signInAs("ordinary", { record: { email: " Outsider@Test-Invented.EXAMPLE " } });
     const res = await REVIEWER.POST(
       postJson("/api/governance/reviewer", { bearer: me.bearer }, { action: "assign_reviewer", reviewerEmail: `  ${EMAILS.outsider.toUpperCase()} ` })
     );
