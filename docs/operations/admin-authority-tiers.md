@@ -51,7 +51,14 @@ What the guard changes, stated precisely:
   `GET /api/governance/queue`, `POST /api/governance/review` (Governance Admin OR
   assigned reviewer) and `/api/governance/reviewer` (plan-gated self-service)
   are not a single privileged tier; they remain on `resolveGovernanceRequestUser`
-  and their own live-record scoping.
+  (or, for `/reviewer`, `resolveRequestIdentity`) and their own live-record
+  scoping. Revocation on them: a revoked `__session` cookie is 401 on all six
+  (verified with `checkRevoked`). A revoked bearer is 401 on the four
+  `resolveGovernanceRequestUser` handlers (policy GET, audit GET, queue GET,
+  review POST) — its `auth_time` is checked against the live
+  `tokensValidAfterTime` with the guard's rule — but NOT on
+  `/api/governance/reviewer` GET/POST, which hold no email-derived privilege and
+  keep a bearer until it expires (≤1 hour).
 
 ## Tiers
 
@@ -98,6 +105,16 @@ guard.
 **Guards:** `requirePrivilegedAccess(..., "GOVERNANCE_ADMIN")` for policy write and audit backfill (was `checkAdminOnly`); `resolveGovernanceVisibleUserIds` for governance-global visibility.
 **Grants:** governance-global visibility (every user's runs), governance policy
 write, audit backfill, and the governance dashboard/policy presentation.
+**Revocation:** policy write and audit backfill are on the guard (every credential
+checked against the live `tokensValidAfterTime`). The global reads and the
+cross-tenant review write — `GET /api/governance/{policy,audit,queue}` and
+`POST /api/governance/review`, via `resolveGovernanceRequestUser` — refuse (401) a
+revoked session cookie (`checkRevoked`) and, since the S2-b correction, a bearer
+whose `auth_time` is strictly earlier than the live `tokensValidAfterTime` (an
+unparseable cutoff, or a missing `auth_time` when a cutoff exists, also refuses;
+equal is not revoked). So `revokeRefreshTokens(uid)` on a still-enabled
+GOVERNANCE_ADMIN_EMAILS member ends those reads and writes on the next request,
+without waiting for the ID token to expire.
 
 **Governance policy read vs write (Step 6.0b).** `GET /api/governance/policy`
 returns the full policy to a verified Governance Admin **or** a caller whose

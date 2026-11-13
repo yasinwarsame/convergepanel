@@ -18,8 +18,9 @@ import "server-only";
 import type { NextRequest } from "next/server";
 import {
   hasVerifiedGovernanceAdminAuthority,
-  resolveLiveAuthIdentity,
+  resolveLiveAuthIdentityWithValidSince,
 } from "@/lib/admin/verifiedAdminIdentity";
+import { revokedBySnapshot, validAuthTime } from "@/lib/admin/privilegedAccess";
 import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
 import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { adminAuth } from "@/lib/firebase/admin";
@@ -94,7 +95,7 @@ export async function resolveGovernanceRequestUser(
     return { ok: false, status: 401 };
   }
 
-  const identity = await resolveRequestIdentity(request);
+  const identity = await resolveRequestIdentity(request, { withBearerAuthTime: true });
   if (identity.status !== "authenticated") {
     logIdentityResolutionFailure({ route: "resolveGovernanceRequestUser", failureCategory: identity.reason });
     return { ok: false, status: 401 };
@@ -103,7 +104,7 @@ export async function resolveGovernanceRequestUser(
   // Phase FIRESTORE-AUTHZ-P0.2: `emailVerified` travels WITH the email, out of
   // the same live record read, so no downstream gate can honour an allowlisted
   // address without the proof of ownership that belongs to it.
-  const live = await resolveLiveAuthIdentity(identity.uid);
+  const live = await resolveLiveAuthIdentityWithValidSince(identity.uid);
   if (live.status !== "resolved") {
     return { ok: false, status: 401 };
   }
@@ -122,6 +123,29 @@ export async function resolveGovernanceRequestUser(
   if (live.disabled === true) {
     logIdentityResolutionFailure({ route: "resolveGovernanceRequestUser", failureCategory: "account_disabled" });
     return { ok: false, status: 401 };
+  }
+
+  // SEC-3 / S2-b correction — REVOCATION CUTOFF ON THE BEARER PATH.
+  //
+  // The cookie path is already verified with `checkRevoked = true`, but
+  // `verifyIdToken` is called without it, so before this a revoked-but-enabled
+  // caller (e.g. a GOVERNANCE_ADMIN_EMAILS member after `revokeRefreshTokens`)
+  // kept global queue/audit reads and cross-tenant review writes for the rest
+  // of the ID token's life (up to ~1h). The bearer's `auth_time` is now compared
+  // with the `tokensValidAfterTime` of the SAME live record read above (no
+  // second lookup), using the guard's own helpers: absent/null cutoff allows;
+  // an unparseable cutoff is treated as revoked; strictly earlier than the
+  // cutoff is revoked, equal is not. When a cutoff exists, a bearer whose
+  // `auth_time` is not a positive integer is also treated as revoked.
+  if (identity.source !== "session_cookie") {
+    const cutoff = live.tokensValidAfterTime;
+    const authTime = identity.bearerAuthTime;
+    const revoked =
+      cutoff !== undefined && cutoff !== null && (!validAuthTime(authTime) || revokedBySnapshot(authTime, cutoff));
+    if (revoked) {
+      logIdentityResolutionFailure({ route: "resolveGovernanceRequestUser", failureCategory: "revoked_session" });
+      return { ok: false, status: 401 };
+    }
   }
 
   return { ok: true, uid: identity.uid, email: live.email, emailVerified: live.emailVerified };

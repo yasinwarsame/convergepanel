@@ -168,8 +168,12 @@ async function verifyCredential(
   }
 }
 
-/** `auth_time` must be a finite positive integer number of seconds. */
-function validAuthTime(v: unknown): v is number {
+/**
+ * `auth_time` must be a finite positive integer number of seconds.
+ * Exported (behaviour unchanged) so the mixed-audience governance resolver
+ * (`lib/governance/authCheck.ts`) applies the same rule to its bearer path.
+ */
+export function validAuthTime(v: unknown): v is number {
   return typeof v === "number" && Number.isInteger(v) && v > 0;
 }
 
@@ -178,8 +182,9 @@ function validAuthTime(v: unknown): v is number {
  * other value must parse to a finite instant, else the credential is treated as
  * revoked (stricter than the SDK). The comparison is the SDK's own: strictly
  * earlier than `validSince` is revoked, equal is not.
+ * Exported (behaviour unchanged) for the same governance resolver.
  */
-function revokedBySnapshot(authTimeSeconds: number, tokensValidAfterTime: unknown): boolean {
+export function revokedBySnapshot(authTimeSeconds: number, tokensValidAfterTime: unknown): boolean {
   if (tokensValidAfterTime === undefined || tokensValidAfterTime === null) return false;
   if (typeof tokensValidAfterTime !== "string") return true;
   const validSince = Date.parse(tokensValidAfterTime);

@@ -157,6 +157,27 @@ export async function resolveLiveAuthIdentity(uid: string): Promise<LiveAuthIden
 }
 
 /**
+ * SEC-3 / S2-b correction — the legacy projection PLUS the live record's raw
+ * `tokensValidAfterTime`, out of the SAME single `getUser()` read. Used only by
+ * `resolveGovernanceRequestUser` (lib/governance/authCheck.ts) so the bearer
+ * path of the mixed-audience governance handlers gets a revocation cutoff
+ * without a second lookup. `resolveLiveAuthIdentity` is left exactly as it was.
+ */
+export type LiveAuthIdentityWithValidSince =
+  | { status: "resolved"; email: string; emailVerified: boolean; disabled: boolean; tokensValidAfterTime: unknown }
+  | { status: "lookup_failed" };
+
+export async function resolveLiveAuthIdentityWithValidSince(uid: string): Promise<LiveAuthIdentityWithValidSince> {
+  const result = await readLiveAuthSnapshot(uid);
+  if (result.status !== "resolved") return { status: "lookup_failed" };
+  return {
+    status: "resolved",
+    ...identityFromSnapshot(result.snapshot),
+    tokensValidAfterTime: result.snapshot.tokensValidAfterTime,
+  };
+}
+
+/**
  * PRIVATE verified predicates. They take evidence, so they are deliberately not
  * exported: the review found that exported evidence-taking predicates are a
  * standing invitation to pass a session cookie's stale `email_verified`, which

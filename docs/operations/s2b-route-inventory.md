@@ -69,6 +69,22 @@ disabled-account refusal — or, for `/reviewer`, `resolveRequestIdentity`) plus
 their own uid-derived scoping. They are listed in the pin spec so a new governance
 handler cannot appear without a decision.
 
+**Revocation on these handlers (S2-b correction).** The `__session` cookie path is
+verified with `checkRevoked = true`, so a revoked cookie is 401 on all six. The
+bearer path is verified WITHOUT `checkRevoked`; for the four handlers on
+`resolveGovernanceRequestUser` (policy GET, audit GET, queue GET, review POST) the
+verified bearer's `auth_time` is now compared with the live record's
+`tokensValidAfterTime` from the single live read that function already performs —
+the guard's own rule (`revokedBySnapshot`): no cutoff on the record allows; an
+unparseable cutoff, or a missing/non-integer `auth_time` when a cutoff exists, is
+treated as revoked; strictly earlier than the cutoff is revoked, equal is not. A
+revoked bearer is 401 before any visibility, entitlement, policy or Firestore read
+(`app/api/governance/__tests__/bearerRevocationCutoff.spec.ts`). The two
+`/api/governance/reviewer` handlers make no live read at authentication and carry no
+email-derived privilege (plan-gated self-service only), so their bearer path still
+has no revocation cutoff: a revoked-but-enabled account keeps reviewer
+self-service until its ID token expires (≤1 hour).
+
 | Handler | Current guard | Audience | Writes |
 |---|---|---|---|
 | `GET /api/governance/policy` | `resolveGovernanceRequestUser` + `checkGovernancePolicyReadAccess` | GOVERNANCE_ADMIN **or** current `full` plan | no |
