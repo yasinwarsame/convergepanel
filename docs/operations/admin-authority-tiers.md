@@ -46,19 +46,17 @@ What the guard changes, stated precisely:
   account: 401. Authenticated but not holding the tier: 403 (most of these routes
   previously answered 401). Auth verifier or lookup outage: 503 (`Retry-After: 5`).
   Body: `{ "error": "...", "reason": "<code>" }`, `Cache-Control: no-store`.
-- **Governance mixed-audience routes are NOT on the guard.** `GET /api/governance/policy`
-  (Governance Admin OR current `full` plan), `GET /api/governance/audit`,
-  `GET /api/governance/queue`, `POST /api/governance/review` (Governance Admin OR
-  assigned reviewer) and `/api/governance/reviewer` (plan-gated self-service)
-  are not a single privileged tier; they remain on `resolveGovernanceRequestUser`
-  (or, for `/reviewer`, `resolveRequestIdentity`) and their own live-record
-  scoping. Revocation on them: a revoked `__session` cookie is 401 on all six
-  (verified with `checkRevoked`). A revoked bearer is 401 on the four
-  `resolveGovernanceRequestUser` handlers (policy GET, audit GET, queue GET,
-  review POST) — its `auth_time` is checked against the live
-  `tokensValidAfterTime` with the guard's rule — but NOT on
-  `/api/governance/reviewer` GET/POST, which hold no email-derived privilege and
-  keep a bearer until it expires (≤1 hour).
+- **Governance mixed-audience routes use the guard's AUTHENTICATION, not a tier.**
+  `GET /api/governance/policy` (Governance Admin OR current `full` plan),
+  `GET /api/governance/audit`, `GET /api/governance/queue`,
+  `POST /api/governance/review` (Governance Admin OR assigned reviewer) and
+  `/api/governance/reviewer` GET/POST (full-plan self-service, no privileged
+  capability) are not a single privileged tier. Since owner ruling D they
+  authenticate through `authenticatePrivilegedPrincipal` (via
+  `resolveGovernanceRequestUser`): the same SP-5 credential rules, one live read,
+  `disabled === false`, revocation of every presented credential, and 503 on a
+  verifier or lookup outage. Scope is still decided from the uid by their own
+  live-record resolvers. Details: `docs/operations/s2b-route-inventory.md`.
 
 ## Tiers
 
@@ -105,16 +103,15 @@ guard.
 **Guards:** `requirePrivilegedAccess(..., "GOVERNANCE_ADMIN")` for policy write and audit backfill (was `checkAdminOnly`); `resolveGovernanceVisibleUserIds` for governance-global visibility.
 **Grants:** governance-global visibility (every user's runs), governance policy
 write, audit backfill, and the governance dashboard/policy presentation.
-**Revocation:** policy write and audit backfill are on the guard (every credential
-checked against the live `tokensValidAfterTime`). The global reads and the
-cross-tenant review write — `GET /api/governance/{policy,audit,queue}` and
-`POST /api/governance/review`, via `resolveGovernanceRequestUser` — refuse (401) a
-revoked session cookie (`checkRevoked`) and, since the S2-b correction, a bearer
-whose `auth_time` is strictly earlier than the live `tokensValidAfterTime` (an
-unparseable cutoff, or a missing `auth_time` when a cutoff exists, also refuses;
-equal is not revoked). So `revokeRefreshTokens(uid)` on a still-enabled
-GOVERNANCE_ADMIN_EMAILS member ends those reads and writes on the next request,
-without waiting for the ID token to expire.
+**Revocation:** every GOVERNANCE_ADMIN surface checks each presented credential
+against the live `tokensValidAfterTime`: policy write and audit backfill through
+the tier guard, and the global reads and cross-tenant review write
+(`GET /api/governance/{policy,audit,queue}`, `POST /api/governance/review`) through
+the guard's authentication (owner ruling D). So `revokeRefreshTokens(uid)` or
+disabling the account ends them on the next request, for cookie and bearer alike;
+removing the address from `GOVERNANCE_ADMIN_EMAILS` ends global scope on the next
+request (the visibility cache key carries the live decision), and a full plan held
+by the same account restores only full-plan scope, never global.
 
 **Governance policy read vs write (Step 6.0b).** `GET /api/governance/policy`
 returns the full policy to a verified Governance Admin **or** a caller whose

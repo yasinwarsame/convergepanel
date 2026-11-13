@@ -60,39 +60,80 @@ by S2-b in every row (no route was broadened or narrowed).
 
 By tier: **SYSTEM_ADMIN 17**, **ADMIN_PORTAL 4**, **GOVERNANCE_ADMIN 2**.
 
-## Deliberately NOT wired (mixed audience)
+## Mixed audience: guard AUTHENTICATION, scope decided downstream (owner ruling D)
 
-These are not a single privileged tier, so the guard (which answers 403 to anyone
-not holding the tier) would lock out legitimate non-admin callers. They stay on
-their existing identity resolution (`resolveGovernanceRequestUser` — live record,
-disabled-account refusal — or, for `/reviewer`, `resolveRequestIdentity`) plus
-their own uid-derived scoping. They are listed in the pin spec so a new governance
-handler cannot appear without a decision.
+These six handlers are not a single privileged tier, so the tier guard (which
+answers 403 to anyone not holding the tier) would lock out legitimate non-admin
+callers. Since the owner's ruling D they use the guard's AUTHENTICATION without a
+tier decision — `authenticatePrivilegedPrincipal` (lib/admin/privilegedAccess.ts),
+via `resolveGovernanceRequestUser` (lib/governance/authCheck.ts) — and keep their
+existing uid-derived scoping. This is a FIXED inventory: the pin spec lists them,
+and any other app/api handler touching an authority surface must be classified.
 
-**Revocation on these handlers (S2-b correction).** The `__session` cookie path is
-verified with `checkRevoked = true`, so a revoked cookie is 401 on all six. The
-bearer path is verified WITHOUT `checkRevoked`; for the four handlers on
-`resolveGovernanceRequestUser` (policy GET, audit GET, queue GET, review POST) the
-verified bearer's `auth_time` is now compared with the live record's
-`tokensValidAfterTime` from the single live read that function already performs —
-the guard's own rule (`revokedBySnapshot`): no cutoff on the record allows; an
-unparseable cutoff, or a missing/non-integer `auth_time` when a cutoff exists, is
-treated as revoked; strictly earlier than the cutoff is revoked, equal is not. A
-revoked bearer is 401 before any visibility, entitlement, policy or Firestore read
-(`app/api/governance/__tests__/bearerRevocationCutoff.spec.ts`). The two
-`/api/governance/reviewer` handlers make no live read at authentication and carry no
-email-derived privilege (plan-gated self-service only), so their bearer path still
-has no revocation cutoff: a revoked-but-enabled account keeps reviewer
-self-service until its ID token expires (≤1 hour).
+What that authentication guarantees on all six:
 
-| Handler | Current guard | Audience | Writes |
-|---|---|---|---|
-| `GET /api/governance/policy` | `resolveGovernanceRequestUser` + `checkGovernancePolicyReadAccess` | GOVERNANCE_ADMIN **or** current `full` plan | no |
-| `GET /api/governance/audit` | `resolveGovernanceRequestUser` + `resolveGovernanceVisibleUserIdsCached` | GOVERNANCE_ADMIN (global) **or** reviewer (scoped) | no |
-| `GET /api/governance/queue` | `resolveGovernanceRequestUser` + `resolveGovernanceVisibleUserIdsCached` | GOVERNANCE_ADMIN (global) **or** reviewer (scoped) | no |
-| `POST /api/governance/review` | `resolveGovernanceRequestUser` + `resolveGovernanceVisibleUserIds` | GOVERNANCE_ADMIN **or** assigned reviewer | yes — review decision |
-| `GET /api/governance/reviewer` | `resolveRequestIdentity` + own plan gate | plan-gated self-service | no |
-| `POST /api/governance/reviewer` | `resolveRequestIdentity` + own plan gate | plan-gated self-service | yes |
+- **No silent fallback (SP-5).** A present-but-invalid, malformed, expired or
+  revoked bearer never hands the request to a cookie (or the reverse); two
+  credentials must name the same uid. Any of these is 401.
+- **One live read; account state.** `disabled === false` exactly; a deleted
+  account is 401.
+- **Revocation of every presented credential.** Each credential's `auth_time` is
+  compared with the live `tokensValidAfterTime` (absent cutoff allows; unparseable
+  cutoff is revoked; strictly earlier is revoked, equal is not). So
+  `revokeRefreshTokens(uid)` takes effect on the NEXT request for the cookie and the
+  bearer alike — including for a revoked bearer presented beside a fresh cookie.
+- **Outage is 503.** A verifier or Auth-lookup outage, or an uninitialised Admin
+  SDK, is 503 (`Retry-After: 5`) by the guard's A-2 classification — never a grant
+  and never a silent 401. (Before ruling D these were 401.)
+- **Neutral denials.** `{ ok: false, error: { code: "unauthorized" | "auth_unavailable", message } }`,
+  no identity, tier or scope data (`lib/governance/governanceAuthDenial.ts`).
+
+Scope, decided after authentication from the uid only (unchanged):
+
+- **Global scope** (`admin_global`, every owner's runs; review of any run) comes only
+  from `resolveGovernanceVisibleUserIds*`, whose own live read must show a verified,
+  enabled `GOVERNANCE_ADMIN_EMAILS` member. The 2-minute visibility cache key now
+  also carries that live governance-admin decision, so an address removed from the
+  list loses global scope on the next request even with a warm cache. Revoked or
+  disabled admins are already 401 at authentication.
+- **Ordinary reviewer / full-plan users** keep exactly their existing scope: the
+  owners who assigned them (`assigners`), or nothing (`no_assigners`); free / lite
+  callers get the plan refusal. A former GOVERNANCE_ADMIN who also holds a full plan
+  falls back to that full-plan scope only — never global.
+- **`/api/governance/reviewer` GET/POST** confer no privileged or cross-user /
+  global capability: GET returns the caller's own settings and the assigners who
+  chose the caller; POST changes the caller's own availability and own reviewer
+  assignment (full plan required for everyone — a free-plan GOVERNANCE_ADMIN gets
+  403). They are not a privileged path. They were moved onto the same
+  authentication anyway (revocation-safe), at the cost of ONE live Auth read per
+  request on a low-traffic settings surface; POST `assign_reviewer` takes the
+  caller's own email from that read instead of a second `getUser`, so it makes no
+  more Auth reads than before. Governance semantics are unchanged.
+
+Proof through the real handlers:
+`app/api/governance/__tests__/mixedAudienceGovernanceAuth.spec.ts` (each of the six:
+ordinary access, privileged access, revoked bearer, revoked bearer + fresh cookie,
+disabled, malformed, conflicting uids, verifier outage, getUser outage; cross-owner
+scope; removal / revocation / disablement of a GOVERNANCE_ADMIN who holds a full
+plan) and `lib/governance/__tests__/authCheckResolveGovernanceRequestUser.spec.ts`.
+Team-bound artifacts are outside these legacy (System-C) handlers and are covered by
+the existing `teamVerificationContainment` / `workspaceIntegrity` specs.
+
+| Handler | Authentication | Scope | Audience | Writes |
+|---|---|---|---|---|
+| `GET /api/governance/policy` | guard authentication | `checkGovernancePolicyReadAccess` | GOVERNANCE_ADMIN **or** current `full` plan | no |
+| `GET /api/governance/audit` | guard authentication | `resolveGovernanceVisibleUserIdsCached` | GOVERNANCE_ADMIN (global) **or** reviewer (scoped) | no |
+| `GET /api/governance/queue` | guard authentication | `resolveGovernanceVisibleUserIdsCached` | GOVERNANCE_ADMIN (global) **or** reviewer (scoped) | no |
+| `POST /api/governance/review` | guard authentication | `resolveGovernanceVisibleUserIds` | GOVERNANCE_ADMIN **or** assigned reviewer | yes — review decision |
+| `GET /api/governance/reviewer` | guard authentication | own plan gate; own data | full-plan self-service | no |
+| `POST /api/governance/reviewer` | guard authentication | own plan gate; own data | full-plan self-service | yes (own records) |
+
+## Mutation classification (correction rounds)
+
+| Mutant | Result | Evidence |
+|---|---|---|
+| `app/api/admin/users/[uid]/stripe/cancel/route.ts`: `adminUid: body.adminUid ?? auth.uid` | **KILLED** | Every mutating case in `privilegedRouteWiring.spec.ts` now carries `adminUid/byUid/actorUid/uid` = SPOOF in its body; the cancel attribution test fails (1 failure). The same mutant passed all 632 tests of the pre-correction spec, which never sent a spoofed `adminUid` to cancel. |
+| `app/api/governance/policy/route.ts`: `byUid: body.byUid ?? resolved.uid` | **EQUIVALENT BY BARRIER** | Unreachable: `validatePolicyPartial` rejects every key outside `ALLOWED_POST_KEYS` with 400 before the store or audit sink is touched, so no request that reaches the attribution line can carry `byUid`. The barrier is pinned (a SPOOFED body → 400, the four fields named, zero writes, zero audit rows), and the combined mutant (drop the unknown-key rejection AND read `body.byUid`) is KILLED. |
 
 Other non-route uses found by the grep, none of them authorization:
 `app/api/user/usage` emits the legacy presentation `role: "admin"` from
@@ -108,10 +149,8 @@ over `GET /api/admin/access`; `middleware.ts` checks only `__session` presence f
    `admin-authority-tiers.md` lists them as ADMIN_PORTAL. Kept at the STRICTER tier
    (SYSTEM_ADMIN, the code). Decide whether they should be ADMIN_PORTAL reads; if so
    it is a one-line tier change plus the pin row.
-2. **Mixed-audience governance handlers** (table above). Wiring them would need a
-   guard mode that returns the live snapshot without a tier decision (or a
-   "GOVERNANCE_ADMIN or reviewer" composite). Out of S2-b's approved design; decide
-   whether a follow-up slice should do it.
+2. **Mixed-audience governance handlers** — RESOLVED by owner ruling D: guard
+   authentication without a tier decision (section above).
 3. **Legacy helpers.** `requireSystemAdminAccess`, `requireAdminPortalAccess`,
    `requireAdminApiAccess`/`requireAdmin`, `verifyAdminToken`, `checkIsAdmin*`
    (`lib/firebase/auth-helpers.ts`), `requireSystemAdminBearer`/`getRequestUser`
