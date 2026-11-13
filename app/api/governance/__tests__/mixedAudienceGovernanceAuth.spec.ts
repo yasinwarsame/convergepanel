@@ -379,6 +379,37 @@ describe("losing GOVERNANCE_ADMIN ends global scope on the NEXT request, and an 
     for (const r of ROUTES) await expectAuthDenied(await r.call({ cookie: gov.cookie }), 401);
     expectNothingReached();
   });
+
+  // Invariant 6 at the VISIBILITY layer: authentication's live read succeeds, the
+  // visibility resolver's OWN live read then fails. That failure must never
+  // become global scope (it is not evidence the account is usable).
+  const failSecondLiveRead = () => {
+    const real = authCalls.getUser.getMockImplementation()!;
+    authCalls.getUser.mockImplementationOnce(real).mockImplementationOnce(async () => {
+      throw outage();
+    });
+  };
+
+  it("visibility-layer live-read outage after successful authentication: queue never admin_global, no foreign run", async () => {
+    const gov = signInAs("governance");
+    failSecondLiveRead();
+    const res = await QUEUE.GET(get("/api/governance/queue?status=all", { bearer: gov.bearer }));
+    const body = await res.json();
+    expect(authCalls.getUser).toHaveBeenCalledTimes(2);
+    expect(body.queueScope).not.toBe("admin_global");
+    expect(JSON.stringify(body)).not.toContain(OWNER_B);
+  });
+
+  it("visibility-layer live-read outage after successful authentication: audit drilldown and review of a foreign run refused, nothing written", async () => {
+    const gov = signInAs("governance");
+    failSecondLiveRead();
+    expect((await auditDrill({ bearer: gov.bearer }, "run-b")).status).not.toBe(200);
+    expect(authCalls.getUser).toHaveBeenCalledTimes(2);
+    failSecondLiveRead();
+    const res = await review({ bearer: gov.bearer }, "run-b");
+    expect(res.status).not.toBe(200);
+    expect(dbWrites().some((w) => w.path.startsWith("runs/run-b"))).toBe(false);
+  });
 });
 
 describe("M-2 invariant 4 — a reviewer assignment never confers global scope, even when the assigner IS a Governance Admin", () => {

@@ -413,6 +413,38 @@ function localFunctionNames(src: string): Set<string> {
 /** Calls allowed BEFORE authentication in a mixed handler: response construction and timing only. */
 const PRE_AUTH_ALLOWED = new Set(["NextResponse.json", "Date.now"]);
 
+function globalMarkers(files: FileSet) {
+    const producers: string[] = [];
+  const consumers: string[] = [];
+  const nullVisibilityCalls: string[] = [];
+  for (const [p, src] of files) {
+    const sf = ts.createSourceFile(p, src, ts.ScriptTarget.Latest, true, /\.(tsx|jsx)$/.test(p) ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+    const fnOf = (n: ts.Node) => {
+      for (let q: ts.Node | undefined = n.parent; q; q = q.parent) if (ts.isFunctionDeclaration(q) && q.name) return q.name.text;
+      return "<module>";
+    };
+    const v = (n: ts.Node) => {
+      if (ts.isStringLiteralLike(n) && n.text === "admin_global" && !ts.isLiteralTypeNode(n.parent)) {
+        const par = n.parent;
+        const isComparison =
+          ts.isBinaryExpression(par) &&
+          [ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken, ts.SyntaxKind.EqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsToken].includes(par.operatorToken.kind);
+        (isComparison || ts.isCaseClause(par) ? consumers : producers).push(`${p}::${fnOf(n)}::admin_global`);
+      }
+      if (ts.isPropertyAssignment(n) && ts.isIdentifier(n.name)) {
+        if (n.name.text === "visibleUserIds" && n.initializer.kind === ts.SyntaxKind.NullKeyword) producers.push(`${p}::${fnOf(n)}::visibleUserIds:null`);
+        if (n.name.text === "isSupportAdmin" && n.initializer.kind === ts.SyntaxKind.TrueKeyword) producers.push(`${p}::${fnOf(n)}::isSupportAdmin:true`);
+      }
+      if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === "runOwnerVisibleInGovernance" && n.arguments[0]?.kind === ts.SyntaxKind.NullKeyword) {
+        nullVisibilityCalls.push(p);
+      }
+      ts.forEachChild(n, v);
+    };
+    v(sf);
+  }
+  return { producers, consumers, nullVisibilityCalls };
+}
+
 describe("M-2 — global governance authority has exactly the pinned sources (parser-aware)", () => {
   const result = taintedExports(FILES, GOV_SEED);
 
@@ -451,39 +483,25 @@ describe("M-2 — global governance authority has exactly the pinned sources (pa
   });
 
   it("global-scope MARKERS have exactly one producer: \"admin_global\", `visibleUserIds: null`, `isSupportAdmin: true`, and no literal-null visibility check", () => {
-    const producers: string[] = [];
-    const consumers: string[] = [];
-    const nullVisibilityCalls: string[] = [];
-    for (const [p, src] of FILES) {
-      const sf = ts.createSourceFile(p, src, ts.ScriptTarget.Latest, true, /\.(tsx|jsx)$/.test(p) ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
-      const fnOf = (n: ts.Node) => {
-        for (let q: ts.Node | undefined = n.parent; q; q = q.parent) if (ts.isFunctionDeclaration(q) && q.name) return q.name.text;
-        return "<module>";
-      };
-      const v = (n: ts.Node) => {
-        if (ts.isStringLiteralLike(n) && n.text === "admin_global" && !ts.isLiteralTypeNode(n.parent)) {
-          const par = n.parent;
-          const isComparison =
-            ts.isBinaryExpression(par) &&
-            [ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken, ts.SyntaxKind.EqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsToken].includes(par.operatorToken.kind);
-          (isComparison || ts.isCaseClause(par) ? consumers : producers).push(`${p}::${fnOf(n)}::admin_global`);
-        }
-        if (ts.isPropertyAssignment(n) && ts.isIdentifier(n.name)) {
-          if (n.name.text === "visibleUserIds" && n.initializer.kind === ts.SyntaxKind.NullKeyword) producers.push(`${p}::${fnOf(n)}::visibleUserIds:null`);
-          if (n.name.text === "isSupportAdmin" && n.initializer.kind === ts.SyntaxKind.TrueKeyword) producers.push(`${p}::${fnOf(n)}::isSupportAdmin:true`);
-        }
-        if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === "runOwnerVisibleInGovernance" && n.arguments[0]?.kind === ts.SyntaxKind.NullKeyword) {
-          nullVisibilityCalls.push(p);
-        }
-        ts.forEachChild(n, v);
-      };
-      v(sf);
-    }
+    const { producers, consumers, nullVisibilityCalls } = globalMarkers(FILES);
     const P = "lib/governance/governanceVisibleUserIds.ts::resolveVisibilityForTrustedIdentity";
-    expect([...new Set(producers)].sort()).toEqual([`${P}::admin_global`, `${P}::isSupportAdmin:true`, `${P}::visibleUserIds:null`]);
+    // Exact occurrences, not a set: a SECOND producer inside the same function
+    // (e.g. a full-plan branch returning global scope) must fail too.
+    expect(producers.sort()).toEqual([`${P}::admin_global`, `${P}::isSupportAdmin:true`, `${P}::visibleUserIds:null`]);
     // Every other "admin_global" is a client-side comparison (display only).
     expect([...new Set(consumers.map((c) => c.split("::")[0]))]).toEqual(["components/governance/GovernanceDashboard.tsx"]);
     expect(nullVisibilityCalls).toEqual([]);
+  });
+
+  it("negative control: a second global-scope producer inside the SAME function (full plan -> global) is detected", () => {
+    const f = "lib/governance/governanceVisibleUserIds.ts";
+    const m = new Map(FILES);
+    m.set(f, FILES.get(f)!.replace('return { ok: true, visibleUserIds: [], isSupportAdmin: false, queueScope: "no_assigners" };', 'return { ok: true, visibleUserIds: null, isSupportAdmin: true, queueScope: "admin_global" };'));
+    expect(m.get(f)).not.toBe(FILES.get(f));
+    expect(globalMarkers(m).producers.length).toBe(globalMarkers(FILES).producers.length + 3);
+    const n = new Map(FILES);
+    n.set("lib/x/peek.ts", 'import { runOwnerVisibleInGovernance } from "@/lib/governance/governanceVisibleUserIds";\nexport const all = (o: string) => runOwnerVisibleInGovernance(null, o);');
+    expect(globalMarkers(n).nullVisibilityCalls).toEqual(["lib/x/peek.ts"]);
   });
 
   it.each(MIXED_HANDLERS)("$method $file authenticates through the guard BEFORE any tainted or protected call", ({ file, method }) => {
