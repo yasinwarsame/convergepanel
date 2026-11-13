@@ -196,6 +196,25 @@ const REPO_AUTHORITY_ALLOW: Record<string, { allowed: string[]; reason: string }
   },
 };
 
+/* ------------------------------------------------------------------------- *
+ * APP/API-WIDE HANDLER DISCOVERY (owner ruling E). Any route file anywhere under
+ * app/api that imports the guard, the governance authCheck, or uses a banned
+ * authority symbol must have EVERY handler classified: a tier in EXPECTED, a
+ * row in GOVERNANCE_MIXED_AUDIENCE, or an OTHER_CLASSIFIED entry with a reason.
+ * ------------------------------------------------------------------------- */
+const OTHER_CLASSIFIED: Record<string, string> = {
+  "GET /api/user/usage": "presentation only: emits the legacy role label from resolveVerifiedAdminScopes; authorizes nothing",
+};
+function touchesAuthority(src: string): boolean {
+  const code = stripComments(src);
+  return /["']@\/lib\/admin\/privilegedAccess["']|["']@\/lib\/governance\/authCheck["']/.test(code) || matchesIn(src).length > 0;
+}
+function authorityRouteHandlers(): Array<{ key: string; file: string }> {
+  return routeFiles("app/api")
+    .filter((f) => touchesAuthority(readFileSync(join(ROOT, f), "utf8")))
+    .flatMap((f) => handlers(f).map((h) => ({ key: h.key, file: f })));
+}
+
 describe("S2-b guard pin", () => {
   it("sees the real route tree (positive control)", () => {
     expect(ADMIN_FILES.length).toBe(16);
@@ -284,6 +303,30 @@ describe("S2-b guard pin", () => {
     expect(files.length).toBeGreaterThan(500);
     expect(files).toEqual(expect.arrayContaining(["middleware.ts", "lib/admin/privilegedAccess.ts", "app/api/user/usage/route.ts"]));
     expect(files.some((f) => /__tests__|\.(spec|test)\./.test(f))).toBe(false);
+  });
+
+  it("APP/API-WIDE: every route handler touching the guard, governance authCheck or an authority symbol is classified", () => {
+    const unclassified = authorityRouteHandlers()
+      .map((h) => h.key)
+      .filter((k) => !(k in EXPECTED) && !GOVERNANCE_MIXED_AUDIENCE.has(k) && !(k in OTHER_CLASSIFIED));
+    expect(unclassified).toEqual([]);
+  });
+
+  it("APP/API-WIDE: every OTHER_CLASSIFIED entry is a real handler still touching an authority surface (no stale entry)", () => {
+    const seen = new Set(authorityRouteHandlers().map((h) => h.key));
+    for (const [k, reason] of Object.entries(OTHER_CLASSIFIED)) {
+      expect(reason.length).toBeGreaterThan(20);
+      expect([k, seen.has(k)]).toEqual([k, true]);
+    }
+  });
+
+  it("APP/API-WIDE: discovery walks all of app/api and sees the known authority routes (positive control)", () => {
+    const files = new Set(authorityRouteHandlers().map((h) => h.file));
+    expect(files).toEqual(new Set([...ADMIN_FILES, ...GOV_FILES, "app/api/user/usage/route.ts"]));
+    expect(touchesAuthority('import { resolveGovernanceRequestUser } from "@/lib/governance/authCheck";')).toBe(true);
+    expect(touchesAuthority('import { requirePrivilegedAccess } from "@/lib/admin/privilegedAccess";')).toBe(true);
+    expect(touchesAuthority("if (decoded.admin === true) {}")).toBe(true);
+    expect(touchesAuthority('import { getPlanConfig } from "@/lib/plans";')).toBe(false);
   });
 
   it("REPO-WIDE: the authority matcher sees every forbidden form (positive control)", () => {
