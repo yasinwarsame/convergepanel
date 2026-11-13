@@ -556,6 +556,22 @@ describe("GET /api/admin/access reports the LIVE tiers", () => {
     expect(await res.json()).toEqual({ ok: true, adminPortal: true, systemAdmin });
   });
 
+  it.each(["system", "systemPlusGovernance"] as const)(
+    "%s with a COOKIE-ONLY session → systemAdmin false (SYSTEM_ADMIN routes are bearer-only)",
+    async (p) => {
+      const me = signInAs(p);
+      const res = await ACCESS.GET(routeRequest("/api/admin/access", { creds: { cookie: me.cookie } }) as never);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, adminPortal: true, systemAdmin: false });
+    }
+  );
+
+  it("system with bearer AND matching cookie → systemAdmin true", async () => {
+    const me = signInAs("system");
+    const res = await ACCESS.GET(routeRequest("/api/admin/access", { creds: { bearer: me.bearer, cookie: me.cookie } }) as never);
+    expect(await res.json()).toEqual({ ok: true, adminPortal: true, systemAdmin: true });
+  });
+
   it("a de-claimed administrator whose token still says admin is reported as NOT system admin", async () => {
     const me = signInAs("portal", { tokenClaimAdmin: true });
     const res = await ACCESS.GET(routeRequest("/api/admin/access", { creds: { bearer: me.bearer } }) as never);

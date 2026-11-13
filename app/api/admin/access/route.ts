@@ -31,9 +31,14 @@ export const dynamic = "force-dynamic";
  * (SP-1), never the presented token's claim, so a de-claimed administrator
  * stops being reported as SYSTEM_ADMIN on the next request. A caller who holds
  * neither tier receives the guard's uniform denial (401/403/503).
+ *
+ * `systemAdmin` is reported only for a BEARER caller: SYSTEM_ADMIN routes are
+ * bearer-only (a session cookie alone is 401 there), so a cookie-only caller
+ * cannot exercise the tier and is not told it holds it.
  */
 export async function GET(request: NextRequest) {
   const access = await requirePrivilegedAccess(request, "ADMIN_PORTAL", { route: "GET /api/admin/access" });
   if (!access.ok) return privilegedDenialResponse(access);
-  return NextResponse.json({ ok: true, adminPortal: true, systemAdmin: access.actor.heldTiers.systemAdmin });
+  const systemAdmin = access.actor.heldTiers.systemAdmin && access.actor.credential === "bearer";
+  return NextResponse.json({ ok: true, adminPortal: true, systemAdmin });
 }
