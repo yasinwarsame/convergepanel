@@ -11,7 +11,10 @@
  *   - a handler exists that this pin does not know about (a new route or
  *     method must be given a tier here, deliberately);
  *   - a legacy privileged helper or an inline claim / allowlist check
- *     reappears in any of these files (two divergent authorities).
+ *     reappears in any of these files (two divergent authorities);
+ *   - ANY non-test source file under app/, lib/ or middleware.ts, outside the
+ *     explicit REPO_AUTHORITY_ALLOW list, calls a legacy helper or a live-record
+ *     authority resolver, or reads the `admin` claim inline.
  *
  * The behaviour behind these pins is proven by privilegedRouteWiring.spec.ts;
  * this file only stops a future edit from bypassing it structurally.
@@ -110,6 +113,89 @@ const PROTECTED_TOUCH = /\badminDb\b|\badminAuth\b|\bstripe\b|\b(?:request|req)\
 const LEGACY_AUTHORITY =
   /requireSystemAdminAccess|requireSystemAdminBearer|requireAdminPortalAccess|requireAdminApiAccess|\brequireAdmin\b|verifyAdminToken|getRequestUser|checkIsAdmin|checkAdminOnly|hasVerifiedApplicationAdminAuthority|hasVerifiedGovernanceAdminAuthority|resolveVerifiedAdminScopes|isApplicationAdminEmail|isGovernanceAdminEmail|ADMIN_EMAILS|\.admin\s*===\s*true|customClaims\?*\.admin\s*===/;
 
+/* ------------------------------------------------------------------------- *
+ * REPO-WIDE AUTHORITY BAN. Every privilege decision goes through
+ * `requirePrivilegedAccess`. Outside the explicit allow-list below, no non-test
+ * source file under app/, lib/ or middleware.ts may call a legacy privileged
+ * helper or one of the live-record authority resolvers, or read the `admin`
+ * claim inline. The walk is the FILESYSTEM (a superset of the tracked files),
+ * so a new, not-yet-committed file is caught too.
+ * ------------------------------------------------------------------------- */
+const REPO_AUTHORITY =
+  /\b(requireSystemAdminAccess|requireSystemAdminBearer|requireAdminPortalAccess|requireAdminApiAccess|requireAdmin|verifyAdminToken|getRequestUser|checkIsAdmin|checkIsAdminFromToken|checkAdminOnly|hasVerifiedApplicationAdminAuthority|hasVerifiedGovernanceAdminAuthority|resolveVerifiedAdminScopes|deriveVerifiedAdminScopes|isApplicationAdminEmail|isGovernanceAdminEmail)\b|\.admin\s*===\s*true|customClaims\s*\??\.\s*admin\b|customClaims\s*(?:\?\.)?\s*\[\s*["']admin["']\s*\]|\btoken\s*\??\.\s*admin\b/g;
+
+/** Normalises a raw match to a stable label, so the allow-list names exactly what each file may use. */
+function labelOf(raw: string): string {
+  if (/^\.admin\s*===\s*true$/.test(raw)) return ".admin === true";
+  if (/^customClaims/.test(raw)) return "customClaims.admin";
+  if (/^token/.test(raw)) return "token.admin";
+  return raw;
+}
+const stripComments = (src: string) => src.replace(/\/\*[\s\S]*?\*\/|\{\/\*[\s\S]*?\*\/\}|\/\/.*$/gm, "");
+function matchesIn(src: string): string[] {
+  return [...new Set([...stripComments(src).matchAll(REPO_AUTHORITY)].map((m) => labelOf(m[0])))].sort();
+}
+const authorityMatches = (file: string) => matchesIn(readFileSync(join(ROOT, file), "utf8"));
+
+function repoSourceFiles(): string[] {
+  const walk = (dir: string, out: string[] = []): string[] => {
+    for (const e of readdirSync(join(ROOT, dir))) {
+      if (e === "__tests__" || e === "node_modules" || e.startsWith(".")) continue;
+      const p = join(dir, e);
+      if (statSync(join(ROOT, p)).isDirectory()) walk(p, out);
+      else if (/\.(ts|tsx|js|jsx|mjs|cjs)$/.test(e) && !/\.(spec|test)\.[a-z]+$/.test(e)) out.push(p);
+    }
+    return out;
+  };
+  return [...walk("app"), ...walk("lib"), "middleware.ts"];
+}
+
+/** THE ALLOW-LIST. Each entry names exactly which matches the file may contain, and why. */
+const REPO_AUTHORITY_ALLOW: Record<string, { allowed: string[]; reason: string }> = {
+  "lib/admin/privilegedAccess.ts": {
+    allowed: ["deriveVerifiedAdminScopes", ".admin === true"],
+    reason: "the guard itself: derives tiers from the live snapshot; the token claim is read for mismatch telemetry only",
+  },
+  "lib/admin/verifiedAdminIdentity.ts": {
+    allowed: [
+      "deriveVerifiedAdminScopes", "hasVerifiedApplicationAdminAuthority", "hasVerifiedGovernanceAdminAuthority",
+      "isApplicationAdminEmail", "isGovernanceAdminEmail", "resolveVerifiedAdminScopes",
+    ],
+    reason: "defining module of the live-record authority resolvers the guard is built on",
+  },
+  "lib/admin/config.ts": {
+    allowed: ["isApplicationAdminEmail", "isGovernanceAdminEmail"],
+    reason: "defining module of the ADMIN_EMAILS / GOVERNANCE_ADMIN_EMAILS membership predicates",
+  },
+  "lib/firebase/auth-helpers.ts": {
+    allowed: [
+      ".admin === true", "checkIsAdmin", "checkIsAdminFromToken", "requireAdmin", "requireAdminApiAccess",
+      "requireAdminPortalAccess", "requireSystemAdminAccess", "resolveVerifiedAdminScopes", "verifyAdminToken",
+    ],
+    reason: "definition site of the retired legacy helpers (no route callers; kept until their unit specs are retired)",
+  },
+  "lib/firebase/adminAuth.ts": {
+    allowed: ["getRequestUser", "requireSystemAdminBearer"],
+    reason: "definition site of the retired legacy SYSTEM_ADMIN bearer helper (no route callers)",
+  },
+  "lib/governance/authCheck.ts": {
+    allowed: ["checkAdminOnly", "hasVerifiedGovernanceAdminAuthority"],
+    reason: "mixed-audience governance: policy-READ audience (Governance Admin OR full plan) and the retired checkAdminOnly definition",
+  },
+  "lib/governance/governanceVisibleUserIds.ts": {
+    allowed: ["resolveVerifiedAdminScopes"],
+    reason: "mixed-audience governance: global-vs-reviewer queue/audit/review visibility for the unguarded handlers",
+  },
+  "app/api/user/usage/route.ts": {
+    allowed: ["resolveVerifiedAdminScopes"],
+    reason: "presentation only: emits the legacy role label, which authorizes nothing",
+  },
+  "app/api/admin/set-role/route.ts": {
+    allowed: ["customClaims.admin"],
+    reason: "logs the claim value this SYSTEM_ADMIN route is WRITING; not an authority read",
+  },
+};
+
 describe("S2-b guard pin", () => {
   it("sees the real route tree (positive control)", () => {
     expect(ADMIN_FILES.length).toBe(16);
@@ -172,6 +258,55 @@ describe("S2-b guard pin", () => {
       return HELPERS.test(code) || /from\s+"@\/lib\/firebase\/adminAuth"/.test(code);
     });
     expect(offenders).toEqual([]);
+  });
+
+  it("REPO-WIDE: no non-test source under app/, lib/ or middleware.ts re-derives privilege outside the allow-list", () => {
+    const offenders: Record<string, string[]> = {};
+    for (const f of repoSourceFiles()) {
+      const found = authorityMatches(f);
+      if (found.length === 0) continue;
+      const allowed = REPO_AUTHORITY_ALLOW[f]?.allowed ?? [];
+      const extra = found.filter((m) => !allowed.includes(m));
+      if (extra.length > 0) offenders[f] = extra;
+    }
+    expect(offenders).toEqual({});
+  });
+
+  it("REPO-WIDE: every allow-list entry is still a real use with exactly its listed matches (no stale exemptions)", () => {
+    for (const [f, { allowed, reason }] of Object.entries(REPO_AUTHORITY_ALLOW)) {
+      expect(reason.length).toBeGreaterThan(20);
+      expect([f, authorityMatches(f)]).toEqual([f, [...allowed].sort()]);
+    }
+  });
+
+  it("REPO-WIDE: the walk sees app/, lib/ and middleware.ts, and skips tests (positive control)", () => {
+    const files = repoSourceFiles();
+    expect(files.length).toBeGreaterThan(500);
+    expect(files).toEqual(expect.arrayContaining(["middleware.ts", "lib/admin/privilegedAccess.ts", "app/api/user/usage/route.ts"]));
+    expect(files.some((f) => /__tests__|\.(spec|test)\./.test(f))).toBe(false);
+  });
+
+  it("REPO-WIDE: the authority matcher sees every forbidden form (positive control)", () => {
+    for (const [src, m] of [
+      ["if (await hasVerifiedApplicationAdminAuthority(uid)) {}", "hasVerifiedApplicationAdminAuthority"],
+      ["await hasVerifiedGovernanceAdminAuthority(uid)", "hasVerifiedGovernanceAdminAuthority"],
+      ["const s = await resolveVerifiedAdminScopes(uid)", "resolveVerifiedAdminScopes"],
+      ["deriveVerifiedAdminScopes(snap)", "deriveVerifiedAdminScopes"],
+      ["isApplicationAdminEmail(e)", "isApplicationAdminEmail"],
+      ["isGovernanceAdminEmail(e)", "isGovernanceAdminEmail"],
+      ["await requireSystemAdminAccess(req)", "requireSystemAdminAccess"],
+      ["checkAdminOnly(uid)", "checkAdminOnly"],
+      ["if (decoded.admin === true) {}", ".admin === true"],
+      ["if (decoded.admin  ===  true) {}", ".admin === true"],
+      ["const a = record.customClaims?.admin;", "customClaims.admin"],
+      ["const a = record.customClaims.admin;", "customClaims.admin"],
+      ['const a = record.customClaims?.["admin"];', "customClaims.admin"],
+      ["if (token.admin) {}", "token.admin"],
+      ["if (token?.admin) {}", "token.admin"],
+    ] as const) {
+      expect(matchesIn(src)).toContain(m);
+    }
+    expect(matchesIn("const admin = true; tokenClaimAdmin; adminUid")).toEqual([]);
   });
 
   it("the legacy-authority matcher can see what it forbids (positive control)", () => {
