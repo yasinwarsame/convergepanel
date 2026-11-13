@@ -550,6 +550,11 @@ describe("P2 — admin-minting scripts are found BY CONTENT; only the hardened t
     expect(s).toContain("--confirm-claim=<exact string printed by the dry run>");
     expect(s).toContain(TOOL_RUNBOOK);
     expect(s).toMatch(/It replaces the retired scripts\/setAdmin\.ts/);
+    // Main's S1 deleted the probe and the Option 1/Option 2 enrollment split;
+    // the header must not point an operator at either.
+    expect(s).not.toContain("probe-admin-secret");
+    expect(s).not.toMatch(/Option 1/);
+    expect(s).toMatch(/retired in security slice S1/);
     for (const re of CLAIM_PATH_FORBIDDEN) expect({ re: String(re), hit: re.test(s) }).toEqual({ re: String(re), hit: false });
   });
 });

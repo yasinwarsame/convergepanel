@@ -4,10 +4,11 @@
  *
  * SAFE-PROBE:PROHIBITION — this tool changes SYSTEM_ADMIN authority. It is
  * never a secret-liveness probe and must not be used to check whether an old
- * bootstrap secret still works: it does not use that secret at all. To verify
- * a rotation use `scripts/probe-admin-secret.mjs`, which cannot mint anything.
+ * bootstrap secret still works: it does not use that secret at all. The secret
+ * bootstrap route and its probe were retired in security slice S1, so there is
+ * no secret rotation left to verify.
  *
- * This is the only supported out-of-band ("Option 1") path for the admin claim.
+ * This is the only supported out-of-band path for the admin claim.
  * It replaces the retired scripts/setAdmin.ts, scripts/set-admin-claim.js,
  * scripts/set-admin-simple.js and scripts/set-admin-by-uid.js.
  * Runbook: docs/operations/system-admin-claim-script.md.
