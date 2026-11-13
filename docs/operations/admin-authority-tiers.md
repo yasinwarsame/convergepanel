@@ -436,8 +436,8 @@ operator does; they are not automated.
    | **`/api/admin/test-webhook` POST** | SYSTEM_ADMIN | ❌ **NONE** | ✅ | **none** (reads Stripe only) |
    | **`/api/admin/users/[uid]` PATCH, DELETE** | SYSTEM_ADMIN | ❌ **NONE** | ❌ **NONE** | **none** |
    | `/api/admin/users` GET | ADMIN_PORTAL | ❌ | ✅ | — |
-   | `/api/admin/users/search` GET | ADMIN_PORTAL | ❌ | ❌ | none |
-   | `/api/admin/users/[uid]/details` GET | ADMIN_PORTAL | ❌ | ✅ | — |
+   | `/api/admin/users/search` GET | SYSTEM_ADMIN | ❌ | ❌ | none |
+   | `/api/admin/users/[uid]/details` GET | SYSTEM_ADMIN | ❌ | ✅ | — |
    | `/api/admin/access` GET | ADMIN_PORTAL probe | ❌ | ❌ | none |
    | `/api/governance/audit/backfill` POST | GOVERNANCE_ADMIN | ❌ **NONE** | ✅ | — |
    | `/api/governance/audit` GET | GOVERNANCE_ADMIN | ❌ | ✅ | — |

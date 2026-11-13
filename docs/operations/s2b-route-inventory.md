@@ -144,11 +144,12 @@ over `GET /api/admin/access`; `middleware.ts` checks only `__session` presence f
 
 ## Owner questions
 
-1. **`GET /api/admin/users/search` and `GET /api/admin/users/[uid]/details`.**
-   The code at the base commit gates both at SYSTEM_ADMIN; the A.6 evidence table in
-   `admin-authority-tiers.md` lists them as ADMIN_PORTAL. Kept at the STRICTER tier
-   (SYSTEM_ADMIN, the code). Decide whether they should be ADMIN_PORTAL reads; if so
-   it is a one-line tier change plus the pin row.
+1. **`GET /api/admin/users/search` and `GET /api/admin/users/[uid]/details`** —
+   RESOLVED by owner ruling (2026-11-14): SYSTEM_ADMIN is mandatory for both. They
+   return billing identifiers, subscription state, entitlement overrides and (details)
+   administrative audit history. The A.6 evidence table in `admin-authority-tiers.md`,
+   which listed them as ADMIN_PORTAL, is corrected to SYSTEM_ADMIN; the pin rows in
+   `privilegedGuardPin.spec.ts` stay SYSTEM_ADMIN.
 2. **Mixed-audience governance handlers** — RESOLVED by owner ruling D: guard
    authentication without a tier decision (section above).
 3. **Legacy helpers.** `requireSystemAdminAccess`, `requireAdminPortalAccess`,
@@ -161,3 +162,33 @@ over `GET /api/admin/access`; `middleware.ts` checks only `__session` presence f
    `disabledAccountAuthority`, `r25AdminSessionCookieGrantsNothing`,
    `privilegedRevocation`, `governanceClaimIsolation`). Proposed as a separate
    small slice.
+
+## Parser-aware authority-source pins (M-1 / M-2, owner authorization 2026-11-14)
+
+`app/api/admin/__tests__/privilegedAuthoritySources.spec.ts`, on the TypeScript AST
+(`lib/admin/__tests__/authoritySourceGraph.ts`), over every non-test source in the
+repository (app, lib, components, hooks, scripts, extension, prisma, root tools):
+
+- **M-1 — admin-claim reads.** Every read of an `admin` member in any spelling
+  (member, optional, element with literal / template / aliased-constant key,
+  destructuring incl. parameters and nesting, `in`, `Reflect.get` / `get` /
+  `hasOwnProperty` / `hasOwn`) is pinned to (file, enclosing function, count) with a
+  category: live-record (the guard's live snapshot), telemetry, retired (legacy
+  helpers — asserted zero importers), inert-field (`isAdmin` on the session verifier
+  — asserted zero server-side readers), write-log, client-ui, operator tooling.
+- **M-2 — global governance scope.** Taint from the sole reader of
+  `GOVERNANCE_ADMIN_EMAILS` (`isGovernanceAdminEmail`) is propagated through the whole
+  import graph (named, aliased, default, namespace, re-export, export-star, dynamic
+  import, require, module-local helpers/aliases). The tainted-export inventory and
+  the importer table are pinned exactly. Also pinned: one env-list reader; one
+  producer of each global marker (`"admin_global"`, `visibleUserIds: null`,
+  `isSupportAdmin: true`); no literal-null visibility check; and each of the six
+  mixed-audience handlers calls `resolveGovernanceRequestUser` before any tainted or
+  protected call (module-local helpers inlined).
+- Behavioural additions in `mixedAudienceGovernanceAuth.spec.ts`: with a warm
+  global cache — disabled → 401, live-record outage → 503, token-verifier outage →
+  503, revoked pre-revocation cookie → 401, each on all six handlers; a reviewer
+  assigned by a Governance Admin gets `assigners` scope only.
+- Stated limits: runtime-built keys (`"ad" + "min"`), access that never names
+  `admin`, and runtime-built module specifiers are not statically resolvable; the
+  behavioural specs remain the proof that the guard decides from the live record.

@@ -335,6 +335,77 @@ describe("losing GOVERNANCE_ADMIN ends global scope on the NEXT request, and an 
     authState.records.set(GOV_UID, { ...(authState.records.get(GOV_UID) as object), disabled: true });
     await expectAuthDenied(await QUEUE.GET(get("/api/governance/queue?status=all", { bearer: gov.bearer })), 401);
   });
+
+  // M-2 (owner authorization 2026-11-14): invariants 2, 5 and 6 on ALL SIX handlers.
+  const warmGlobal = async (creds: Credentials) =>
+    expect((await (await QUEUE.GET(get("/api/governance/queue?status=all", creds))).json()).queueScope).toBe("admin_global");
+  const resetReached = () => {
+    mockEntitlementCalls.length = 0;
+    dbLog.length = 0;
+  };
+
+  it("disabled with a warm global cache: 401 on EVERY handler, nothing reached", async () => {
+    const gov = signInAs("governance");
+    await warmGlobal({ bearer: gov.bearer });
+    authState.records.set(GOV_UID, { ...(authState.records.get(GOV_UID) as object), disabled: true });
+    resetReached();
+    for (const r of ROUTES) await expectAuthDenied(await r.call({ bearer: gov.bearer }), 401);
+    expectNothingReached();
+  });
+
+  it("live-record outage with a warm global cache: 503 on EVERY handler — the cached global scope is never served", async () => {
+    const gov = signInAs("governance");
+    await warmGlobal({ bearer: gov.bearer });
+    authState.records.set(GOV_UID, outage());
+    resetReached();
+    for (const r of ROUTES) await expectAuthDenied(await r.call({ bearer: gov.bearer }), 503);
+    expectNothingReached();
+  });
+
+  it("token-verifier outage with a warm global cache: 503 on EVERY handler", async () => {
+    const gov = signInAs("governance");
+    await warmGlobal({ bearer: gov.bearer });
+    authState.tokens.set(gov.bearer, outage());
+    resetReached();
+    for (const r of ROUTES) await expectAuthDenied(await r.call({ bearer: gov.bearer }), 503);
+    expectNothingReached();
+  });
+
+  it("revoked: the pre-revocation COOKIE alone (warm cache via that cookie) is 401 on EVERY handler — a previously valid credential cannot recover global scope", async () => {
+    const gov = signInAs("governance");
+    await warmGlobal({ cookie: gov.cookie });
+    authState.records.set(GOV_UID, { ...(authState.records.get(GOV_UID) as object), ...revokedRecord });
+    resetReached();
+    for (const r of ROUTES) await expectAuthDenied(await r.call({ cookie: gov.cookie }), 401);
+    expectNothingReached();
+  });
+});
+
+describe("M-2 invariant 4 — a reviewer assignment never confers global scope, even when the assigner IS a Governance Admin", () => {
+  // The visibility cache is module-level and keyed on (uid, live email, …); it
+  // caches refusals such as an earlier test's plan_required for this uid. A
+  // distinct live email gives this describe its own key (order-independent).
+  const ME = { record: { email: "inv4-reviewer@test-invented.example" } };
+  beforeEach(() => {
+    // GOV_UID (a GOVERNANCE_ADMIN_EMAILS member) assigns REVIEWER_UID (an ordinary full-plan user).
+    dbStore.set(`users/${GOV_UID}`, { email: EMAILS.governance, governanceReviewerUid: REVIEWER_UID, governanceReviewerEmail: EMAILS.outsider });
+  });
+
+  it("queue: 'assigners' scope, never admin_global, and no run of an owner who did not assign the reviewer", async () => {
+    const me = signInAs("ordinary", ME);
+    const res = await QUEUE.GET(get("/api/governance/queue?status=all", { bearer: me.bearer }));
+    const body = await res.json();
+    expect([res.status, body.queueScope, body.error]).toEqual([200, "assigners", undefined]);
+    expect(body.runs.map((r: { userId: string }) => r.userId)).not.toContain(OWNER_B);
+  });
+
+  it("audit drilldown and review on a run whose owner did not assign the reviewer: refused, nothing written", async () => {
+    const me = signInAs("ordinary", ME);
+    expect((await auditDrill({ bearer: me.bearer }, "run-b")).status).toBe(403);
+    const res = await review({ bearer: me.bearer }, "run-b");
+    expect([403, 404]).toContain(res.status);
+    expect(dbWrites().some((w) => w.path.startsWith("runs/run-b"))).toBe(false);
+  });
 });
 
 describe("reviewer GET/POST: legitimate users see exactly the same behaviour", () => {

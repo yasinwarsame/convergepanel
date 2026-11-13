@@ -14,7 +14,10 @@
  *     reappears in any of these files (two divergent authorities);
  *   - ANY non-test source file under app/, lib/ or middleware.ts, outside the
  *     explicit REPO_AUTHORITY_ALLOW list, calls a legacy helper or a live-record
- *     authority resolver, or reads the `admin` claim inline.
+ *     authority resolver, or reads the `admin` claim inline (lexical first line
+ *     of defence; the AUTHORITATIVE, parser-aware claim-read and authority-
+ *     source pins — every spelling, every directory — are in
+ *     privilegedAuthoritySources.spec.ts).
  *
  * The behaviour behind these pins is proven by privilegedRouteWiring.spec.ts;
  * this file only stops a future edit from bypassing it structurally.
@@ -56,12 +59,14 @@ const EXPECTED: Record<string, Tier> = {
 };
 
 /**
- * Governance handlers deliberately NOT on the guard: their audience is not a
- * single privileged tier (Governance Admin OR an assigned reviewer, OR a
- * `full`-plan caller, OR plan-gated self-service). They stay on
- * `resolveGovernanceRequestUser` + their own scoping; see
- * docs/operations/s2b-route-inventory.md. Listed so a new governance handler
- * cannot appear without a decision.
+ * Governance handlers deliberately NOT on the guard's TIER decision: their
+ * audience is not a single privileged tier (Governance Admin OR an assigned
+ * reviewer, OR a `full`-plan caller, OR plan-gated self-service). They
+ * authenticate through the guard's own authentication
+ * (`resolveGovernanceRequestUser` = `authenticatePrivilegedPrincipal`) and then
+ * apply their own scoping; see docs/operations/s2b-route-inventory.md and the
+ * parser-aware order / importer pins in privilegedAuthoritySources.spec.ts.
+ * Listed so a new governance handler cannot appear without a decision.
  */
 const GOVERNANCE_MIXED_AUDIENCE = new Set([
   "GET /api/governance/audit",
@@ -184,7 +189,7 @@ const REPO_AUTHORITY_ALLOW: Record<string, { allowed: string[]; reason: string }
   },
   "lib/governance/governanceVisibleUserIds.ts": {
     allowed: ["resolveVerifiedAdminScopes"],
-    reason: "mixed-audience governance: global-vs-reviewer queue/audit/review visibility for the unguarded handlers",
+    reason: "mixed-audience governance: global-vs-reviewer queue/audit/review visibility, reached only after the guard's authentication (privilegedAuthoritySources.spec.ts pins the order and every importer)",
   },
   "app/api/user/usage/route.ts": {
     allowed: ["resolveVerifiedAdminScopes"],
