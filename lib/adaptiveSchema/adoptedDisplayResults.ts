@@ -502,3 +502,63 @@ export function readAdoptedDisplayResults(
     return { status: "malformed", slots: NONE };
   }
 }
+
+// ─── Re-binding to a copy of the run (Order 41 D, #314) ─────────────────────
+
+export type RebindAdaptiveDisplayResultsOutcome =
+  | { ok: true; record: AdaptiveDisplayResultsV1; slots: number; documentBytes: number }
+  /** Nothing is copied: the copy keeps #312's presentation. Never an error for the caller. */
+  | { ok: false; reason: "absent" | "unsupported_version" | "malformed" | "foreign" | "no_verified_slots" | "oversized" | "rebind_mismatch" };
+
+/**
+ * Pure. The display record for a COPY of a run (a Team snapshot of a Personal run) that gets a new run id.
+ *
+ * 1. The source record is verified against the SOURCE run exactly as a reader of the source would
+ *    (readAdoptedDisplayResults with the source run id, schema and saved rows). Anything not "valid" copies nothing.
+ * 2. Only the slots that verify are copied, each entry VERBATIM as stored (data, origin, retryOutcome, slotIndex,
+ *    executedStatus, invalidFields, truncatedFields). Unavailable markers and slots that fail verification are not
+ *    copied; a reader ignores them anyway. Nothing is built from any other source, so no model text is invented.
+ * 3. The record is re-bound to the target run: only `runId` changes; `schemaVersion` and `schemaId` are kept.
+ * 4. Bounds are re-checked for the TARGET document: the record at most ADAPTIVE_DISPLAY_RECORD_MAX_BYTES and the
+ *    document at `runs/{targetRunId}/adaptiveDisplayResults/v1` (name + fields + 32, adaptiveDisplayDocumentBytes) at
+ *    most `documentBudgetBytes` (never above FIRESTORE_DOCUMENT_BUDGET_BYTES). Over a bound → nothing is copied.
+ * 5. Postcondition: the copy must read back, against the target run id, schema and rows, as exactly the same verified
+ *    slots with the same results. Otherwise nothing is copied.
+ */
+export function rebindAdaptiveDisplayResults(
+  raw: unknown,
+  args: {
+    sourceRunId: string;
+    targetRunId: string;
+    schemaId: string;
+    sourceRows: ReadonlyArray<{ modelId?: unknown; status?: unknown } | null | undefined>;
+    targetRows: ReadonlyArray<{ modelId?: unknown; status?: unknown } | null | undefined>;
+    documentBudgetBytes?: number;
+  }
+): RebindAdaptiveDisplayResultsOutcome {
+  try {
+    if (typeof args.targetRunId !== "string" || args.targetRunId.length === 0) return { ok: false, reason: "rebind_mismatch" };
+    const source = readAdoptedDisplayResults(raw, { runId: args.sourceRunId, schemaId: args.schemaId, rows: args.sourceRows });
+    if (source.status !== "valid") return { ok: false, reason: source.status };
+    if (source.slots.size === 0) return { ok: false, reason: "no_verified_slots" };
+    const stored = (raw as { bySlot: Record<string, AdaptiveDisplaySlotV1> }).bySlot;
+    const bySlot: Record<string, AdaptiveDisplaySlotV1> = {};
+    for (const modelId of Object.keys(stored)) {
+      if (source.slots.has(modelId)) bySlot[modelId] = stored[modelId];
+    }
+    const record: AdaptiveDisplayResultsV1 = { schemaVersion: ADAPTIVE_DISPLAY_RESULTS_SCHEMA_VERSION, runId: args.targetRunId, schemaId: args.schemaId, bySlot };
+    if (!(firestoreFieldBytes(ADAPTIVE_DISPLAY_RESULTS_FIELD, record) <= ADAPTIVE_DISPLAY_RECORD_MAX_BYTES)) return { ok: false, reason: "oversized" };
+    const budget = Math.min(args.documentBudgetBytes ?? FIRESTORE_DOCUMENT_BUDGET_BYTES, FIRESTORE_DOCUMENT_BUDGET_BYTES);
+    const documentBytes = adaptiveDisplayDocumentBytes(args.targetRunId, record as unknown as Record<string, unknown>);
+    if (!(documentBytes <= budget)) return { ok: false, reason: "oversized" };
+    const copy = readAdoptedDisplayResults(record, { runId: args.targetRunId, schemaId: args.schemaId, rows: args.targetRows });
+    if (copy.status !== "valid" || copy.slots.size !== source.slots.size) return { ok: false, reason: "rebind_mismatch" };
+    for (const [modelId, slot] of source.slots) {
+      const copied = copy.slots.get(modelId);
+      if (!copied || copied.origin !== slot.origin || !sameJsonValue(copied.result, slot.result)) return { ok: false, reason: "rebind_mismatch" };
+    }
+    return { ok: true, record, slots: source.slots.size, documentBytes };
+  } catch {
+    return { ok: false, reason: "malformed" };
+  }
+}
