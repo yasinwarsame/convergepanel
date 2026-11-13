@@ -4,16 +4,15 @@
  * Allows admins to list all users in the system.
  * 
  * Security:
- * - Only admins can access, via requireAdminPortalAccess(): the Firebase `admin`
- *   custom claim OR a VERIFIED allowlisted email (Phase FIRESTORE-AUTHZ-P0.2).
- *   NOT requireAdmin(), which this comment previously and incorrectly named.
+ * - ADMIN_PORTAL, via requirePrivilegedAccess (SEC-3 / S2-b): the LIVE Firebase
+ *   `admin` custom claim OR a live VERIFIED `ADMIN_EMAILS` member.
  * - Returns user data from Firestore (email, role, etc.)
  * 
  * Route: GET /api/admin/users
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdminPortalAccess } from "@/lib/firebase/auth-helpers";
+import { privilegedDenialResponse, requirePrivilegedAccess } from "@/lib/admin/privilegedAccess";
 import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
 
@@ -31,14 +30,9 @@ export const dynamic = "force-dynamic";
  * @returns Array of user objects with id, email, role, etc.
  */
 export async function GET(request: NextRequest) {
-  // Verify admin authentication
-  const auth = await requireAdminPortalAccess(request);
-  if (!auth) {
-    logger.error("[admin/users] Unauthorized access attempt");
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  logger.debug("[admin/users] Admin request", { uid: auth.uid });
+  // SEC-3 / S2-b: refused BEFORE any user document is read.
+  const access = await requirePrivilegedAccess(request, "ADMIN_PORTAL", { route: "GET /api/admin/users" });
+  if (!access.ok) return privilegedDenialResponse(access);
 
   try {
     if (!adminDb) {

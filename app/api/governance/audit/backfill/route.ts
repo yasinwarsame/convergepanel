@@ -1,5 +1,9 @@
 /**
  * One-time admin backfill: copy governanceEvents subdocuments into admin_audit_logs.
+ *
+ * SEC-3 / S2-b: GOVERNANCE_ADMIN only, via `requirePrivilegedAccess` — a live,
+ * verified, enabled `GOVERNANCE_ADMIN_EMAILS` member. Neither the `admin` claim
+ * nor `ADMIN_EMAILS` confers it.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -8,7 +12,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import type { GovernanceAuditLogAction } from "@/lib/governance/auditLog";
 import { sanitizeForFirestore } from "@/lib/firestore/sanitizeForFirestore";
 import { isResearchWriteRefusedError, runResearchWrite } from "@/lib/firestore/researchDeletionBarrier";
-import { checkAdminOnly, resolveGovernanceRequestUser } from "@/lib/governance/authCheck";
+import { privilegedDenialResponse, requirePrivilegedAccess } from "@/lib/admin/privilegedAccess";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -102,26 +106,14 @@ async function backfillCollection(collection: "runs" | "verifications"): Promise
 }
 
 export async function POST(request: NextRequest) {
+  // Refused BEFORE any run is read or any audit row is written.
+  const access = await requirePrivilegedAccess(request, "GOVERNANCE_ADMIN", { route: "POST /api/governance/audit/backfill" });
+  if (!access.ok) return privilegedDenialResponse(access);
+
   if (!adminDb) {
     return NextResponse.json(
       { ok: false, error: { code: "internal_error", message: "Database unavailable" } },
       { status: 500 }
-    );
-  }
-
-  const resolved = await resolveGovernanceRequestUser(request);
-  if (!resolved.ok) {
-    return NextResponse.json(
-      { ok: false, error: { code: "unauthorized", message: "Authentication required" } },
-      { status: 401 }
-    );
-  }
-
-  const isAdmin = await checkAdminOnly(resolved.uid);
-  if (!isAdmin) {
-    return NextResponse.json(
-      { ok: false, error: { code: "forbidden", message: "Only admins can backfill the audit log" } },
-      { status: 403 }
     );
   }
 

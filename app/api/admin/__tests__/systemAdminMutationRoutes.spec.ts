@@ -26,24 +26,12 @@
 process.env.STRIPE_PRICE_3_MODELS = "price_lite_m";
 jest.mock("@/lib/env", () => ({ ...jest.requireActual("@/lib/env"), STRIPE_PRICE_3_MODELS: "price_lite_m" }));
 
-const __PRIVILEGED_ENV_SNAPSHOT = {
-  ADMIN_EMAILS: process.env.ADMIN_EMAILS,
-  GOVERNANCE_ADMIN_EMAILS: process.env.GOVERNANCE_ADMIN_EMAILS,
-};
-afterAll(() => {
-  for (const [key, value] of Object.entries(__PRIVILEGED_ENV_SNAPSHOT)) {
-    if (value === undefined) delete process.env[key];
-    else process.env[key] = value;
-  }
-});
-
-const PORTAL_ONLY = "portal-only@test-invented.example";
-const GOV_ONLY = "governance-only@test-invented.example";
-const OUTSIDER = "nobody@test-invented.example";
-
-let decoded: Record<string, unknown> = {};
-let authRecord: Record<string, unknown> = {};
-let authRecordThrows = false;
+// SEC-3 / S2-b: identities are real structurally-valid credentials verified by
+// the REAL privileged-access guard; only the Firebase Admin SDK is doubled
+// (privilegedRouteHarness supplies adminAuth; this file keeps its own adminDb).
+// Denials now carry the guard's codes: authenticated non-holder 403, bad /
+// missing / revoked credential or disabled account 401, Auth outage 503.
+let currentBearer = "";
 
 /** Every privileged side effect this suite guards. */
 const docDelete = jest.fn(async () => undefined);
@@ -92,14 +80,10 @@ const docHandle = {
 };
 
 jest.mock("@/lib/firebase/admin", () => ({
-  adminAuth: {
-    verifyIdToken: async () => decoded,
-    verifySessionCookie: async () => decoded,
-    getUser: async () => {
-      if (authRecordThrows) throw new Error("auth unavailable");
-      return authRecord;
-    },
+  get adminAuth() {
+    return require("@/lib/admin/__tests__/privilegedRouteHarness").firebaseAdminModuleDouble().adminAuth;
   },
+  getInitializedFirebaseProjectId: () => require("@/lib/admin/__tests__/privilegedRouteHarness").PROJECT_ID,
   adminDb: {
     collection: (name: string) => ({
       doc: () => (name === "runDeletionJobs" ? tombstoneHandle : name === "admin_audit_logs" ? auditRowHandle : docHandle),
@@ -146,18 +130,26 @@ import { POST as SYNC_POST } from "@/app/api/admin/sync-subscription/route";
 import { POST as WEBHOOK_POST } from "@/app/api/admin/test-webhook/route";
 import { POST as PURGE_POST } from "@/app/api/admin/purge-runs/route";
 
-/** The four identities under test. */
+import { authState, installPrivilegedHarness, signInAs, type Persona } from "@/lib/admin/__tests__/privilegedRouteHarness";
+
+installPrivilegedHarness();
+const OUTSIDER = "system-admin@test-invented.example";
+
+/** The four identities under test (live records; the guard reads nothing else). */
+const as = (p: Persona, opts?: Parameters<typeof signInAs>[1]) => {
+  currentBearer = signInAs(p, opts).bearer;
+};
 const AS = {
-  portal: () => { decoded = { uid: "p", email: PORTAL_ONLY }; authRecord = { email: PORTAL_ONLY, emailVerified: true, disabled: false }; },
-  governance: () => { decoded = { uid: "g", email: GOV_ONLY }; authRecord = { email: GOV_ONLY, emailVerified: true, disabled: false }; },
-  ordinary: () => { decoded = { uid: "o", email: OUTSIDER }; authRecord = { email: OUTSIDER, emailVerified: true, disabled: false }; },
-  system: () => { decoded = { uid: "s", email: OUTSIDER, admin: true }; authRecord = { email: OUTSIDER, emailVerified: true, disabled: false }; },
+  portal: () => as("portal"),
+  governance: () => as("governance"),
+  ordinary: () => as("ordinary"),
+  system: () => as("system"),
 };
 
 const bearer = (url: string, body?: unknown, method = "POST") =>
   new NextRequest(url, {
     method,
-    headers: { authorization: "Bearer t", "content-type": "application/json" },
+    headers: { ...(currentBearer ? { authorization: `Bearer ${currentBearer}` } : {}), "content-type": "application/json" },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 
@@ -204,35 +196,31 @@ const ROUTES = [
 ];
 
 beforeEach(() => {
-  process.env.ADMIN_EMAILS = PORTAL_ONLY;
-  process.env.GOVERNANCE_ADMIN_EMAILS = GOV_ONLY;
   purgePagesServed = 0;
-  authRecordThrows = false;
+  currentBearer = "";
   for (const f of [docDelete, docUpdate, docSet, batchDelete, batchCommit, writeAuditEvent, handleSubscriptionChange, stripeRetrieve, resetUsageForNewPlan, deleteResearchRun, auditRowCreate]) f.mockClear();
   tombstoneExists = false;
-  decoded = {};
-  authRecord = {};
 });
 
 describe.each(ROUTES)("$name — SYSTEM_ADMIN only", ({ call, effects }) => {
   it("ADMIN_PORTAL-only is DENIED and performs NO privileged side effect", async () => {
     AS.portal();
     const res = await call();
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(403);
     for (const fn of effects()) expect(fn).not.toHaveBeenCalled();
   });
 
   it("GOVERNANCE_ADMIN-only is DENIED and performs NO privileged side effect", async () => {
     AS.governance();
     const res = await call();
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(403);
     for (const fn of effects()) expect(fn).not.toHaveBeenCalled();
   });
 
   it("an ordinary verified user is DENIED", async () => {
     AS.ordinary();
     const res = await call();
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(403);
     for (const fn of effects()) expect(fn).not.toHaveBeenCalled();
   });
 
@@ -256,17 +244,15 @@ describe.each(ROUTES)("$name — SYSTEM_ADMIN only", ({ call, effects }) => {
     ['string "true"', "true"],
     ["number 1", 1],
     ["empty object", {}],
-  ])("a non-boolean admin claim (%s) does NOT satisfy SYSTEM_ADMIN", async (_l, value) => {
-    decoded = { uid: "x", email: OUTSIDER, admin: value };
-    authRecord = { email: OUTSIDER, emailVerified: true, disabled: false };
+  ])("a non-boolean LIVE admin claim (%s) does NOT satisfy SYSTEM_ADMIN", async (_l, value) => {
+    as("ordinary", { record: { customClaims: { admin: value } } });
     const res = await call();
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(403);
     for (const fn of effects()) expect(fn).not.toHaveBeenCalled();
   });
 
   it("a DISABLED allowlisted portal account is DENIED", async () => {
-    decoded = { uid: "p", email: PORTAL_ONLY };
-    authRecord = { email: PORTAL_ONLY, emailVerified: true, disabled: true };
+    as("portal", { record: { disabled: true } });
     const res = await call();
     expect(res.status).toBe(401);
     for (const fn of effects()) expect(fn).not.toHaveBeenCalled();
@@ -278,7 +264,7 @@ describe("audit attribution on the SYSTEM_ADMIN run handlers", () => {
    * C4-R1: nothing asserted the audit actor at all, so `auditActorEmail()`
    * returning "" unconditionally survived the whole suite. `byUid` is the
    * authoritative identifier and must always be present; the address is a
-   * convenience that degrades to empty if the live lookup fails.
+   * convenience from the SAME live snapshot that proved the tier (S2-b).
    */
   const patch = () =>
     RUNS_PATCH(bearer("http://localhost/api/admin/runs/run-1", { collection: "runs", action: "set_governance_status", status: "blocked" }, "PATCH"), ctx);
@@ -288,17 +274,17 @@ describe("audit attribution on the SYSTEM_ADMIN run handlers", () => {
     await patch();
     // Research run: the audit row is created in the guarded transaction (auditRowCreate), with the same attribution.
     expect(auditRowCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ byUid: "s", byEmail: OUTSIDER, runId: "run-1", action: "admin_override" })
+      expect.objectContaining({ byUid: "uid-system-admin", byEmail: OUTSIDER, runId: "run-1", action: "admin_override" })
     );
   });
 
-  it("a failed live lookup still records the acting uid — attribution is never lost", async () => {
+  it("S2-b (replaces the C5 degraded-attribution case): a failed live lookup is 503 and NOTHING is written", async () => {
     AS.system();
-    authRecordThrows = true;
-    await patch();
-    expect(auditRowCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ byUid: "s", byEmail: "", runId: "run-1" })
-    );
+    authState.records.set("uid-system-admin", Object.assign(new Error("auth unavailable"), { code: "app/network-error" }));
+    const res = await patch();
+    expect(res.status).toBe(503);
+    expect(docSet).not.toHaveBeenCalled();
+    expect(auditRowCreate).not.toHaveBeenCalled();
   });
 });
 
@@ -328,32 +314,26 @@ describe("GET /api/admin/runs/[runId] deliberately REMAINS ADMIN_PORTAL", () => 
 
   it("GOVERNANCE_ADMIN-only is DENIED — governance confers no portal read", async () => {
     AS.governance();
-    expect((await get()).status).toBe(401);
+    expect((await get()).status).toBe(403);
   });
 
   it("an ordinary verified user is DENIED", async () => {
     AS.ordinary();
-    expect((await get()).status).toBe(401);
+    expect((await get()).status).toBe(403);
   });
 
   it("an unauthenticated caller is DENIED", async () => {
-    decoded = {};
-    authRecord = {};
     expect((await get()).status).toBe(401);
   });
 
   it("a DISABLED allowlisted portal account is DENIED", async () => {
-    decoded = { uid: "p", email: PORTAL_ONLY };
-    authRecord = { email: PORTAL_ONLY, emailVerified: true, disabled: true };
+    as("portal", { record: { disabled: true } });
     expect((await get()).status).toBe(401);
   });
 });
 
 describe("Order A / S1: an incomplete research deletion is never reported as deleted", () => {
-  const asSystem = () => {
-    decoded = { uid: "s", email: OUTSIDER, admin: true };
-    authRecord = { email: OUTSIDER, emailVerified: true, disabled: false };
-  };
+  const asSystem = () => AS.system();
   it("DELETE: workflow incomplete → 500 deletion_incomplete (retryable), never ok", async () => {
     asSystem();
     deleteResearchRun.mockResolvedValueOnce({ status: "incomplete", runId: "run-1", step: "subtree", error: "x" } as never);

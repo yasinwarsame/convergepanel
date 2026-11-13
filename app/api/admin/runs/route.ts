@@ -4,7 +4,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import type { QuerySnapshot } from "firebase-admin/firestore";
-import { requireAdminPortalAccess } from "@/lib/firebase/auth-helpers";
+import { privilegedDenialResponse, requirePrivilegedAccess } from "@/lib/admin/privilegedAccess";
 import { adminDb } from "@/lib/firebase/admin";
 import { createRunWorkspaceIntegrityBatch } from "@/lib/workspaces/runWorkspaceIntegrityBatch";
 import { logger } from "@/lib/logger";
@@ -171,10 +171,8 @@ async function fetchVideoSnapshot(perCol: number): Promise<QuerySnapshot> {
 }
 
 export async function GET(request: NextRequest) {
-  const auth = await requireAdminPortalAccess(request);
-  if (!auth) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  }
+  const access = await requirePrivilegedAccess(request, "ADMIN_PORTAL", { route: "GET /api/admin/runs" });
+  if (!access.ok) return privilegedDenialResponse(access);
   if (!adminDb) {
     return NextResponse.json({ ok: false, error: "Database unavailable" }, { status: 500 });
   }

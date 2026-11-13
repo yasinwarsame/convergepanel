@@ -492,12 +492,14 @@ describe("T1 — the legacy flow is not reachable", () => {
   it("no page resolves to /admin/login", () => {
     expect(PAGES).not.toContain("/admin/login");
   });
-  it("no production module imports the legacy helper (and the live Firebase helper is still imported)", () => {
+  it("no production module imports the legacy helper (and the live privileged guard is still imported)", () => {
     const imports = PROD_FILES.flatMap((f) => {
       const sf = ts.createSourceFile(f, readFileSync(f, "utf8"), ts.ScriptTarget.Latest, false);
       return sf.statements.filter(ts.isImportDeclaration).map((d) => (d.moduleSpecifier as ts.StringLiteral).text);
     });
-    expect(imports).toContain("@/lib/firebase/adminAuth");
+    // S2-b (moved pin): the positive control was "@/lib/firebase/adminAuth", whose last
+    // importers (keys, set-role) now use the privileged-access guard instead.
+    expect(imports).toContain("@/lib/admin/privilegedAccess");
     expect(imports.filter((s) => s === "@/lib/adminAuth" || /(^|\/)lib\/adminAuth$/.test(s))).toEqual([]);
     expect(existsSync("lib/adminAuth.ts")).toBe(false);
     expect(existsSync("lib/firebase/adminAuth.ts")).toBe(true);

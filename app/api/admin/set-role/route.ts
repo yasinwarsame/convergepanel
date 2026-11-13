@@ -4,7 +4,8 @@
  * Allows admins to update a user's role in both Firestore and Firebase Auth custom claims.
  * 
  * Security:
- * - Only admins can access (verified via getRequestUser() - same as /api/admin/users)
+ * - SYSTEM_ADMIN only (SEC-3 / S2-b: requirePrivilegedAccess — the LIVE `admin`
+ *   custom claim, bearer only; never email-derived)
  * - Updates both Firestore role field and Firebase Auth custom claims
  * - Merges custom claims to preserve existing claims when updating admin status
  * 
@@ -13,7 +14,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireSystemAdminBearer } from "@/lib/firebase/adminAuth";
+import { privilegedDenialResponse, requirePrivilegedAccess } from "@/lib/admin/privilegedAccess";
 import { adminAuth, adminDb, firebaseAdmin } from "@/lib/firebase/admin";
 
 // Ensure Node.js runtime (Firebase Admin requires Node.js, not Edge)
@@ -30,20 +31,11 @@ export const runtime = "nodejs";
  * @returns Success response with updated role
  */
 export async function POST(request: NextRequest) {
-  // Verify admin authentication using the same logic as /api/admin/users
-  const systemAdmin = await requireSystemAdminBearer(request);
-  if (!systemAdmin) {
-    console.error("[admin/set-role] Unauthorized access attempt", {
-      hasToken: !!systemAdmin,
-      isAdmin: false,
-    });
-    return NextResponse.json(
-      { error: "Unauthorized" },
-      { status: 401 }
-    );
-  }
-
-  console.log("[admin/set-role] Admin request from uid:", systemAdmin.uid);
+  // SEC-3 / S2-b: refused BEFORE the body is read or any claim is touched. The
+  // target uid comes from the body; the ACTOR uid comes only from the guard.
+  const access = await requirePrivilegedAccess(request, "SYSTEM_ADMIN", { route: "POST /api/admin/set-role" });
+  if (!access.ok) return privilegedDenialResponse(access);
+  const systemAdmin = access.actor;
 
   try {
     const body = await request.json();

@@ -5,9 +5,10 @@
  * Keys are stored in Firestore and used by the panel runner.
  * 
  * Security:
- * - SYSTEM_ADMIN only, via requireSystemAdminBearer(): the Firebase `admin`
- *   custom claim. NEVER email-derived — an ADMIN_EMAILS member must not be
- *   able to reach provider credentials or mint admin claims.
+ * - SYSTEM_ADMIN only, via requirePrivilegedAccess(..., "SYSTEM_ADMIN") (SEC-3 /
+ *   S2-b): the LIVE Firebase `admin` custom claim, bearer only. NEVER
+ *   email-derived — an ADMIN_EMAILS member must not be able to reach provider
+ *   credentials or mint admin claims.
  * - Keys are always masked in responses (never exposed in full)
  * - Keys are stored server-side only (never sent to client)
  * 
@@ -17,7 +18,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireSystemAdminBearer } from "@/lib/firebase/adminAuth";
+import { privilegedDenialResponse, requirePrivilegedAccess } from "@/lib/admin/privilegedAccess";
 import { adminDb } from "@/lib/firebase/admin";
 
 // Ensure Node.js runtime (Firebase Admin requires Node.js, not Edge)
@@ -39,17 +40,10 @@ const MODEL_KEYS_DOC_ID = "modelKeys";
  * @returns Key status with masked values and configuration flags
  */
 export async function GET(request: NextRequest) {
-  // Verify admin authentication using ID token
-  const systemAdmin = await requireSystemAdminBearer(request);
-  if (!systemAdmin) {
-    console.error("[admin/keys] Unauthorized access attempt", {
-      hasToken: !!systemAdmin,
-      isAdmin: false,
-    });
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  console.log("[admin/keys] Admin request from uid:", systemAdmin.uid);
+  // SEC-3 / S2-b: refused BEFORE any read of the credential document.
+  const access = await requirePrivilegedAccess(request, "SYSTEM_ADMIN", { route: "GET /api/admin/keys" });
+  if (!access.ok) return privilegedDenialResponse(access);
+  // The grant (route, tier, actor uid) is logged by the guard itself.
 
   try {
     if (!adminDb) {
@@ -155,17 +149,10 @@ export async function GET(request: NextRequest) {
  * @returns Updated key status with masked values
  */
 export async function POST(request: NextRequest) {
-  // Verify admin authentication using ID token
-  const systemAdmin = await requireSystemAdminBearer(request);
-  if (!systemAdmin) {
-    console.error("[admin/keys] Unauthorized access attempt", {
-      hasToken: !!systemAdmin,
-      isAdmin: false,
-    });
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  console.log("[admin/keys] Admin update request from uid:", systemAdmin.uid);
+  // SEC-3 / S2-b: refused BEFORE any read of the credential document.
+  const access = await requirePrivilegedAccess(request, "SYSTEM_ADMIN", { route: "POST /api/admin/keys" });
+  if (!access.ok) return privilegedDenialResponse(access);
+  // The grant (route, tier, actor uid) is logged by the guard itself.
 
   try {
     const body = await request.json();

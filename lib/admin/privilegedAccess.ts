@@ -1,6 +1,6 @@
 /**
- * SEC-3 / S2-a — THE PRIVILEGED-ACCESS GUARD (dark: no route imports it yet;
- * wiring is S2-b).
+ * SEC-3 / S2-a — THE PRIVILEGED-ACCESS GUARD. Wired into every privileged
+ * route by S2-b (see docs/operations/s2b-route-inventory.md).
  *
  * Node runtime only: it depends on the Firebase Admin SDK, so every route that
  * adopts it must keep `export const runtime = "nodejs"`.

@@ -8,7 +8,9 @@
  *
  * The REAL `authCheck` and `verifiedAdminIdentity` modules run: only the request
  * identity, the live Auth record, the entitlement lookup and the policy store
- * are faked.
+ * are faked. SEC-3 / S2-b: POST runs through the REAL privileged-access guard,
+ * so its requests carry a structurally valid credential verified by the
+ * harness's SDK double; the live record is the same `authRecord`.
  */
 
 const GOV_ADMIN_EMAIL = "gov-admin@test-invented.example";
@@ -30,10 +32,18 @@ const savePolicy = jest.fn(async () => ({ policyVersion: 8, minConsensusToApprov
 
 jest.mock("@/lib/auth/resolveRequestIdentity", () => ({ resolveRequestIdentity: async () => identity }));
 jest.mock("@/lib/auth/identityResolutionTelemetry", () => ({ logIdentityResolutionFailure: () => undefined }));
-jest.mock("@/lib/firebase/admin", () => ({
-  adminDb: {},
-  adminAuth: { getUser: async () => authRecord },
-}));
+jest.mock("@/lib/firebase/admin", () => {
+  const h = require("@/lib/admin/__tests__/privilegedRouteHarness");
+  return {
+    adminDb: {},
+    adminAuth: {
+      getUser: async (uid: string) => ({ uid, ...authRecord }),
+      verifyIdToken: (t: string, c?: boolean) => h.authDouble.verifyIdToken(t, c),
+      verifySessionCookie: (t: string, c?: boolean) => h.authDouble.verifySessionCookie(t, c),
+    },
+    getInitializedFirebaseProjectId: () => h.PROJECT_ID,
+  };
+});
 jest.mock("@/lib/admin/entitlements", () => ({
   getEffectiveEntitlements: async (uid: string) => {
     entitlementCalls.push(uid);
@@ -48,13 +58,19 @@ jest.mock("@/lib/governance/governancePolicyStore", () => ({
 jest.mock("@/lib/governance/auditLog", () => ({ writeAuditEvent: async () => undefined }));
 
 import { NextRequest } from "next/server";
+import { authState, mintCredential } from "@/lib/admin/__tests__/privilegedRouteHarness";
 import { GET, POST } from "@/app/api/governance/policy/route";
 
 const URL_ = "https://app.test/api/governance/policy";
 const get = (init: { headers?: Record<string, string>; query?: string } = {}) =>
   GET(new NextRequest(`${URL_}${init.query ?? ""}`, { method: "GET", headers: init.headers }));
-const post = (body: unknown) =>
-  POST(new NextRequest(URL_, { method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" } }));
+const post = (body: unknown) => {
+  const token = mintCredential("bearer", CALLER);
+  authState.tokens.set(token, { uid: CALLER, sub: CALLER, auth_time: Math.floor(Date.now() / 1000) - 60 });
+  return POST(
+    new NextRequest(URL_, { method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json", authorization: `Bearer ${token}` } })
+  );
+};
 
 beforeEach(() => {
   identity = { status: "authenticated", uid: CALLER };
@@ -130,7 +146,13 @@ describe("GET — permitted callers receive the full policy", () => {
   });
 });
 
-describe("POST — Governance Admin only (unchanged)", () => {
+describe("POST — Governance Admin only (unchanged tier; S2-b guard)", () => {
+  it("an unauthenticated caller is refused 401 and nothing is saved", async () => {
+    const res = await POST(new NextRequest(URL_, { method: "POST", body: "{}", headers: { "content-type": "application/json" } }));
+    expect(res.status).toBe(401);
+    expect(savePolicy).not.toHaveBeenCalled();
+  });
+
   it("a Full-plan non-admin is refused 403 and nothing is saved", async () => {
     planId = "full";
     const res = await post({ minConsensusToApprove: 85 });

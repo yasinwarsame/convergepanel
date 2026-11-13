@@ -36,6 +36,12 @@ import { logger } from "@/lib/logger";
  *
  * Phase FIRST-ADMIN-C1: this reads `GOVERNANCE_ADMIN_EMAILS` ONLY. Membership
  * of `ADMIN_EMAILS` no longer grants governance policy authority.
+ *
+ * SEC-3 / S2-b: NO ROUTE CALLS THIS ANY MORE. Policy write and audit backfill
+ * are gated by `requirePrivilegedAccess(..., "GOVERNANCE_ADMIN")`
+ * (lib/admin/privilegedAccess.ts), which applies the same live-record rule plus
+ * credential revocation. Kept only until its remaining unit specs are retired;
+ * app/api/admin/__tests__/privilegedGuardPin.spec.ts forbids any app/ caller.
  */
 export async function checkAdminOnly(uid: string): Promise<boolean> {
   return hasVerifiedGovernanceAdminAuthority(uid);
@@ -48,7 +54,8 @@ export async function checkAdminOnly(uid: string): Promise<boolean> {
  * Governance Admin, OR a caller whose CURRENT effective plan is `full`. Both are
  * derived here, server-side, from the caller's own uid — never from a client
  * `governanceDashboardEligible` flag, a Firestore role string, or any
- * request-supplied identity. Writes remain `checkAdminOnly()` only.
+ * request-supplied identity. Writes are GOVERNANCE_ADMIN only, via the
+ * privileged-access guard (SEC-3 / S2-b).
  *
  * An entitlement lookup failure is `unavailable` (fail closed), never `allowed`.
  */

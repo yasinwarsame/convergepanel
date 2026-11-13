@@ -196,7 +196,7 @@ export default function AdminDashboard() {
 
           {/*
             Phase FIRST-ADMIN-C3: bulk purge is SYSTEM_ADMIN only
-            (`/api/admin/purge-runs` -> requireSystemAdminAccess). R2 found this
+            (`/api/admin/purge-runs` -> requirePrivilegedAccess SYSTEM_ADMIN). R2 found this
             section rendering for every ADMIN_PORTAL caller, so an
             ADMIN_EMAILS-only administrator was shown a bulk-delete form —
             mode, date range, dry-run and a DELETE confirmation box — that the

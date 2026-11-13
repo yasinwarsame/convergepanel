@@ -5,7 +5,7 @@
  * Supports dry-run mode for preview before deletion.
  * 
  * Security:
- * - Admin-only access (verified via requireSystemAdminAccess())
+ * - SYSTEM_ADMIN only (SEC-3 / S2-b: requirePrivilegedAccess, live claim, bearer only)
  * - Batch deletes with hard caps (max 2000 docs per request)
  * - Input validation and bounds checking
  * 
@@ -13,7 +13,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireSystemAdminAccess } from "@/lib/firebase/auth-helpers";
+import { privilegedDenialResponse, requirePrivilegedAccess } from "@/lib/admin/privilegedAccess";
 import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
 import { Timestamp } from "firebase-admin/firestore";
@@ -238,14 +238,12 @@ async function deleteDocuments(
 export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
-  try {
-    // Verify admin authentication
-    const auth = await requireSystemAdminAccess(req);
-    if (!auth) {
-      logger.error("[admin/purge-runs] Unauthorized access attempt");
-      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-    }
+  // SEC-3 / S2-b: refused BEFORE the body is read or any run is queried.
+  const access = await requirePrivilegedAccess(req, "SYSTEM_ADMIN", { route: "POST /api/admin/purge-runs" });
+  if (!access.ok) return privilegedDenialResponse(access);
+  const auth = access.actor;
 
+  try {
     if (!adminDb) {
       logger.error("[admin/purge-runs] Firestore not available");
       return NextResponse.json({ ok: false, error: "Firestore not available" }, { status: 500 });

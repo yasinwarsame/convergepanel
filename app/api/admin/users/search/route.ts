@@ -6,7 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireSystemAdminAccess } from "@/lib/firebase/auth-helpers";
+import { privilegedDenialResponse, requirePrivilegedAccess } from "@/lib/admin/privilegedAccess";
 import { adminDb } from "@/lib/firebase/admin";
 import { getUserEffectiveEntitlement } from "@/lib/admin/entitlements";
 
@@ -14,10 +14,9 @@ import { getUserEffectiveEntitlement } from "@/lib/admin/entitlements";
 export const runtime = "nodejs";
 
 export async function GET(request: NextRequest) {
-  const auth = await requireSystemAdminAccess(request);
-  if (!auth) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  }
+  // SEC-3 / S2-b: SYSTEM_ADMIN (live claim, bearer only), refused BEFORE any read or write.
+  const access = await requirePrivilegedAccess(request, "SYSTEM_ADMIN", { route: "GET /api/admin/users/search" });
+  if (!access.ok) return privilegedDenialResponse(access);
 
   try {
     if (!adminDb) {

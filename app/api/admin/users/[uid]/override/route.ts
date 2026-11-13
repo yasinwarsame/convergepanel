@@ -8,7 +8,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireSystemAdminAccess } from "@/lib/firebase/auth-helpers";
+import { privilegedDenialResponse, requirePrivilegedAccess } from "@/lib/admin/privilegedAccess";
 import { adminDb } from "@/lib/firebase/admin";
 import { Timestamp } from "firebase-admin/firestore";
 import { writeAuditLog, createUserSnapshot, generateRequestId, getUserEmail } from "@/lib/admin/auditLog";
@@ -25,10 +25,10 @@ export async function POST(
   request: NextRequest,
   { params }: { params: { uid: string } }
 ) {
-  const auth = await requireSystemAdminAccess(request);
-  if (!auth) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  }
+  // SEC-3 / S2-b: SYSTEM_ADMIN (live claim, bearer only), refused BEFORE any read or write.
+  const access = await requirePrivilegedAccess(request, "SYSTEM_ADMIN", { route: "POST /api/admin/users/[uid]/override" });
+  if (!access.ok) return privilegedDenialResponse(access);
+  const auth = access.actor;
 
   try {
     if (!adminDb) {
@@ -150,10 +150,10 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: { uid: string } }
 ) {
-  const auth = await requireSystemAdminAccess(request);
-  if (!auth) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  }
+  // SEC-3 / S2-b: SYSTEM_ADMIN (live claim, bearer only), refused BEFORE any read or write.
+  const access = await requirePrivilegedAccess(request, "SYSTEM_ADMIN", { route: "DELETE /api/admin/users/[uid]/override" });
+  if (!access.ok) return privilegedDenialResponse(access);
+  const auth = access.actor;
 
   try {
     if (!adminDb) {

@@ -10,10 +10,14 @@
  * and validation is batched per distinct owner, never once per row.
  */
 
+// SEC-3 / S2-b: the route is gated by the privileged-access guard. This file
+// tests Layer-A integrity BEHIND it, so the guard is replaced by a grant here;
+// its wiring on this route is proven through the REAL guard in
+// app/api/admin/__tests__/privilegedRouteWiring.spec.ts.
 const mockedRequireAdminApiAccess = jest.fn();
-jest.mock("@/lib/firebase/auth-helpers", () => ({
-  requireAdminApiAccess: (...args: any[]) => mockedRequireAdminApiAccess(...args),
-  requireAdminPortalAccess: (...args: any[]) => mockedRequireAdminApiAccess(...args),
+jest.mock("@/lib/admin/privilegedAccess", () => ({
+  ...jest.requireActual("@/lib/admin/privilegedAccess"),
+  requirePrivilegedAccess: (...args: any[]) => mockedRequireAdminApiAccess(...args),
 }));
 
 type FakeRun = { id: string; data: Record<string, unknown> };
@@ -76,7 +80,7 @@ function buildRequest(qs = "") {
 beforeEach(() => {
   runRows = [];
   jest.clearAllMocks();
-  mockedRequireAdminApiAccess.mockResolvedValue({ uid: "admin-uid", email: "admin@example.com" });
+  mockedRequireAdminApiAccess.mockResolvedValue({ ok: true, actor: { uid: "admin-uid", email: "admin@example.com", tier: "ADMIN_PORTAL" } });
   mockedGetWorkspace.mockImplementation(async () => ({ status: "not_found" }));
 });
 
@@ -169,8 +173,8 @@ describe("GET /api/admin/runs — batching", () => {
 });
 
 describe("GET /api/admin/runs — legacy compatibility and admin auth unchanged", () => {
-  it("unauthenticated/non-admin caller -> 401, unaffected by Phase 4B", async () => {
-    mockedRequireAdminApiAccess.mockResolvedValue(null);
+  it("unauthenticated/non-admin caller -> the guard's denial, unaffected by Phase 4B", async () => {
+    mockedRequireAdminApiAccess.mockResolvedValue({ ok: false, status: 401, reason: "missing_credentials" });
     runRows = [{ id: "run-1", data: { userId: "owner-a", question: "q" } }];
     const res = await GET(buildRequest());
     expect(res.status).toBe(401);
