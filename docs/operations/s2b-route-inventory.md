@@ -20,7 +20,7 @@ repository grep (app/, lib/, components/, middleware.ts) for
 The earlier design estimate was ~22 admin + ~8 governance handlers. Actual:
 
 - **21** handlers in **16** route files under `app/api/admin/**` (17 SYSTEM_ADMIN,
-  4 ADMIN_PORTAL). The 22nd of the estimate was `POST /api/admin/set-admin`, retired
+  4 ADMIN_PORTAL). The 22nd of the estimate was the secret bootstrap route, retired
   in S1 (the file no longer exists).
 - **8** governance handlers in 6 files. Only **2** are a single privileged tier
   (GOVERNANCE_ADMIN) and are wired to the guard. The other 6 serve a mixed
