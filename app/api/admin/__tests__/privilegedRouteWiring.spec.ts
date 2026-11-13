@@ -86,6 +86,18 @@ installPrivilegedHarness();
 
 const TARGET = "uid-target-user";
 const SPOOF = "uid-spoofed-by-the-body";
+/**
+ * Every attribution-shaped field a handler could be tempted to read from the
+ * request. Spread into EVERY mutating case's body (and the query string where a
+ * handler takes no body), so each "attribution never from the body" assertion
+ * below has something to refuse. `uid` is omitted only where it is the
+ * request's own TARGET field (set-role). POST /api/governance/policy is the one
+ * exception: its body is a strict allow-list, so an attribution field is a 400
+ * before anything is written — asserted separately below.
+ */
+const SPOOFED = { adminUid: SPOOF, byUid: SPOOF, actorUid: SPOOF, uid: SPOOF } as const;
+const SPOOFED_NO_UID = { adminUid: SPOOF, byUid: SPOOF, actorUid: SPOOF } as const;
+const SPOOF_QUERY = `adminUid=${SPOOF}&byUid=${SPOOF}&actorUid=${SPOOF}&uid=${SPOOF}`;
 
 function subscription(over: Record<string, unknown> = {}) {
   return {
@@ -138,14 +150,14 @@ const CASES: Case[] = [
   {
     name: "POST /api/admin/keys",
     tier: "SYSTEM_ADMIN",
-    call: (c) => h(KEYS, "POST")(routeRequest("/api/admin/keys", { method: "POST", body: { chatgpt: "sk-test-invented-abcdefghij" }, creds: c })),
+    call: (c) => h(KEYS, "POST")(routeRequest("/api/admin/keys", { method: "POST", body: { chatgpt: "sk-test-invented-abcdefghij", ...SPOOFED }, creds: c })),
     effect: () => wrote("set", "appConfig/modelKeys"),
   },
   {
     name: "POST /api/admin/purge-runs",
     tier: "SYSTEM_ADMIN",
     seed: () => seedDoc("runs/old-1", { createdAt: "old", status: "complete" }),
-    call: (c) => h(PURGE, "POST")(routeRequest("/api/admin/purge-runs", { method: "POST", body: { mode: "olderThan", days: 30, dryRun: false }, creds: c })),
+    call: (c) => h(PURGE, "POST")(routeRequest("/api/admin/purge-runs", { method: "POST", body: { mode: "olderThan", days: 30, dryRun: false, ...SPOOFED }, creds: c })),
     effect: () => mockDeleteResearchRun.mock.calls.length > 0,
   },
   {
@@ -168,7 +180,7 @@ const CASES: Case[] = [
     seed: () => seedDoc("verifications/v-1", { userId: "owner", claim: "c", governanceStatus: "approved" }),
     call: (c) =>
       h(RUN, "PATCH")(
-        routeRequest("/api/admin/runs/v-1", { method: "PATCH", body: { action: "set_governance_status", collection: "verifications", status: "blocked", byUid: SPOOF }, creds: c }),
+        routeRequest("/api/admin/runs/v-1", { method: "PATCH", body: { action: "set_governance_status", collection: "verifications", status: "blocked", ...SPOOFED }, creds: c }),
         runCtx
       ),
     effect: () => wrote("set", "verifications/v-1") && wrote("add", "admin_audit_logs/"),
@@ -177,14 +189,14 @@ const CASES: Case[] = [
     name: "DELETE /api/admin/runs/[runId]",
     tier: "SYSTEM_ADMIN",
     seed: () => seedDoc("verifications/v-1", { userId: "owner", claim: "c" }),
-    call: (c) => h(RUN, "DELETE")(routeRequest("/api/admin/runs/v-1?collection=verifications", { method: "DELETE", body: { confirm: true }, creds: c }), runCtx),
+    call: (c) => h(RUN, "DELETE")(routeRequest(`/api/admin/runs/v-1?collection=verifications&${SPOOF_QUERY}`, { method: "DELETE", body: { confirm: true, ...SPOOFED }, creds: c }), runCtx),
     effect: () => wrote("delete", "verifications/v-1") && wrote("add", "admin_audit_logs/"),
   },
   {
     name: "POST /api/admin/set-role",
     tier: "SYSTEM_ADMIN",
     seed: () => void authState.records.set(TARGET, { uid: TARGET, email: EMAILS.outsider, emailVerified: true, disabled: false, customClaims: {} }),
-    call: (c) => h(SET_ROLE, "POST")(routeRequest("/api/admin/set-role", { method: "POST", body: { uid: TARGET, role: "admin" }, creds: c })),
+    call: (c) => h(SET_ROLE, "POST")(routeRequest("/api/admin/set-role", { method: "POST", body: { ...SPOOFED_NO_UID, uid: TARGET, role: "admin" }, creds: c })),
     effect: () => authCalls.setCustomUserClaims.mock.calls.length > 0 && wrote("set", `users/${TARGET}`),
   },
   {
@@ -194,14 +206,14 @@ const CASES: Case[] = [
       seedDoc(`users/${TARGET}`, { stripeCustomerId: "cus_x" });
       mockStripe.subscriptions.retrieve.mockResolvedValue(subscription());
     },
-    call: (c) => h(SYNC_SUB, "POST")(routeRequest("/api/admin/sync-subscription", { method: "POST", body: { subscriptionId: "sub_x" }, creds: c })),
+    call: (c) => h(SYNC_SUB, "POST")(routeRequest("/api/admin/sync-subscription", { method: "POST", body: { subscriptionId: "sub_x", ...SPOOFED }, creds: c })),
     effect: () => wrote("set", `users/${TARGET}`),
   },
   {
     name: "POST /api/admin/test-webhook",
     tier: "SYSTEM_ADMIN",
     seed: () => void mockStripe.subscriptions.retrieve.mockResolvedValue(subscription()),
-    call: (c) => h(TEST_WEBHOOK, "POST")(routeRequest("/api/admin/test-webhook", { method: "POST", body: { subscriptionId: "sub_x" }, creds: c })),
+    call: (c) => h(TEST_WEBHOOK, "POST")(routeRequest("/api/admin/test-webhook", { method: "POST", body: { subscriptionId: "sub_x", ...SPOOFED }, creds: c })),
     effect: () => mockHandleSubscriptionChange.mock.calls.length > 0,
   },
   {
@@ -221,14 +233,14 @@ const CASES: Case[] = [
   {
     name: "PATCH /api/admin/users/[uid]",
     tier: "SYSTEM_ADMIN",
-    call: (c) => h(USER, "PATCH")(routeRequest(`/api/admin/users/${TARGET}`, { method: "PATCH", body: { isDisabled: false }, creds: c }), userCtx),
+    call: (c) => h(USER, "PATCH")(routeRequest(`/api/admin/users/${TARGET}`, { method: "PATCH", body: { isDisabled: false, ...SPOOFED }, creds: c }), userCtx),
     effect: () => authCalls.updateUser.mock.calls.length > 0 && wrote("set", `users/${TARGET}`),
   },
   {
     name: "DELETE /api/admin/users/[uid]",
     tier: "SYSTEM_ADMIN",
     seed: () => seedDoc(`users/${TARGET}`, { email: "someone@test-invented.example" }),
-    call: (c) => h(USER, "DELETE")(routeRequest(`/api/admin/users/${TARGET}`, { method: "DELETE", creds: c }), userCtx),
+    call: (c) => h(USER, "DELETE")(routeRequest(`/api/admin/users/${TARGET}?${SPOOF_QUERY}`, { method: "DELETE", body: { ...SPOOFED }, creds: c }), userCtx),
     effect: () => authCalls.deleteUser.mock.calls.length > 0 && wrote("delete", `users/${TARGET}`),
   },
   {
@@ -244,7 +256,7 @@ const CASES: Case[] = [
     seed: () => seedDoc(`users/${TARGET}`, { email: "someone@test-invented.example", plan: "free" }),
     call: (c) =>
       h(USER_OVERRIDE, "POST")(
-        routeRequest(`/api/admin/users/${TARGET}/override`, { method: "POST", body: { plan: "3_models", reason: "support", adminUid: SPOOF }, creds: c }),
+        routeRequest(`/api/admin/users/${TARGET}/override`, { method: "POST", body: { plan: "3_models", reason: "support", ...SPOOFED }, creds: c }),
         userCtx
       ),
     effect: () => wrote("update", `users/${TARGET}`) && wrote("add", "admin_audit_logs/"),
@@ -253,7 +265,7 @@ const CASES: Case[] = [
     name: "DELETE /api/admin/users/[uid]/override",
     tier: "SYSTEM_ADMIN",
     seed: () => seedDoc(`users/${TARGET}`, { email: "someone@test-invented.example", plan: "lite", override: { active: true, plan: "3_models" } }),
-    call: (c) => h(USER_OVERRIDE, "DELETE")(routeRequest(`/api/admin/users/${TARGET}/override`, { method: "DELETE", creds: c }), userCtx),
+    call: (c) => h(USER_OVERRIDE, "DELETE")(routeRequest(`/api/admin/users/${TARGET}/override?${SPOOF_QUERY}`, { method: "DELETE", body: { ...SPOOFED }, creds: c }), userCtx),
     effect: () => wrote("update", `users/${TARGET}`) && wrote("add", "admin_audit_logs/"),
   },
   {
@@ -263,7 +275,7 @@ const CASES: Case[] = [
       seedDoc(`users/${TARGET}`, { stripeSubscriptionId: "sub_x", stripeCustomerId: "cus_x" });
       mockStripe.subscriptions.update.mockResolvedValue(subscription({ cancel_at_period_end: true }));
     },
-    call: (c) => h(STRIPE_CANCEL, "POST")(routeRequest(`/api/admin/users/${TARGET}/stripe/cancel`, { method: "POST", body: { mode: "period_end" }, creds: c }), userCtx),
+    call: (c) => h(STRIPE_CANCEL, "POST")(routeRequest(`/api/admin/users/${TARGET}/stripe/cancel`, { method: "POST", body: { mode: "period_end", ...SPOOFED }, creds: c }), userCtx),
     effect: () => mockStripe.subscriptions.update.mock.calls.length > 0 && wrote("add", "admin_audit_logs/"),
   },
   {
@@ -274,7 +286,7 @@ const CASES: Case[] = [
       mockStripe.subscriptions.retrieve.mockResolvedValue(subscription({ cancel_at_period_end: true }));
       mockStripe.subscriptions.update.mockResolvedValue(subscription());
     },
-    call: (c) => h(STRIPE_REACTIVATE, "POST")(routeRequest(`/api/admin/users/${TARGET}/stripe/reactivate`, { method: "POST", body: {}, creds: c }), userCtx),
+    call: (c) => h(STRIPE_REACTIVATE, "POST")(routeRequest(`/api/admin/users/${TARGET}/stripe/reactivate`, { method: "POST", body: { ...SPOOFED }, creds: c }), userCtx),
     effect: () => mockStripe.subscriptions.update.mock.calls.length > 0 && wrote("add", "admin_audit_logs/"),
   },
   {
@@ -284,7 +296,7 @@ const CASES: Case[] = [
       seedDoc(`users/${TARGET}`, { stripeSubscriptionId: "sub_x", stripeCustomerId: "cus_x" });
       mockStripe.subscriptions.retrieve.mockResolvedValue(subscription());
     },
-    call: (c) => h(STRIPE_SYNC, "POST")(routeRequest(`/api/admin/users/${TARGET}/stripe/sync`, { method: "POST", body: {}, creds: c }), userCtx),
+    call: (c) => h(STRIPE_SYNC, "POST")(routeRequest(`/api/admin/users/${TARGET}/stripe/sync`, { method: "POST", body: { ...SPOOFED }, creds: c }), userCtx),
     effect: () => wrote("update", `users/${TARGET}`) && wrote("add", "admin_audit_logs/"),
   },
   {
@@ -294,7 +306,7 @@ const CASES: Case[] = [
       seedDoc("verifications/v-1", { userId: "owner", governanceStatus: "approved", claim: "c" });
       seedDoc("verifications/v-1/governanceEvents/e-1", { action: "approved", byUid: "reviewer", at: "2026-11-01T00:00:00.000Z" });
     },
-    call: (c) => h(GOV_BACKFILL, "POST")(routeRequest("/api/governance/audit/backfill", { method: "POST", creds: c })),
+    call: (c) => h(GOV_BACKFILL, "POST")(routeRequest(`/api/governance/audit/backfill?${SPOOF_QUERY}`, { method: "POST", body: { ...SPOOFED }, creds: c })),
     effect: () => wrote("set", "admin_audit_logs/backfill__verifications__v-1__e-1"),
   },
   {
@@ -554,6 +566,17 @@ describe("GET /api/admin/access reports the LIVE tiers", () => {
 describe("audit attribution comes from the guard's actor, never the request body", () => {
   const auditRows = () =>
     [...dbStore.entries()].filter(([k]) => k.startsWith("admin_audit_logs/")).map(([, v]) => v as Record<string, unknown>);
+  /** Every persisted document (path AND data) plus every mutating SDK call's arguments. */
+  const everythingWritten = () =>
+    JSON.stringify({
+      store: [...dbStore.entries()],
+      claims: authCalls.setCustomUserClaims.mock.calls,
+      updates: authCalls.updateUser.mock.calls,
+      deletes: authCalls.deleteUser.mock.calls,
+      stripe: Object.values(mockStripe.subscriptions).map((f) => f.mock.calls),
+      webhook: mockHandleSubscriptionChange.mock.calls,
+      researchDeletion: mockDeleteResearchRun.mock.calls,
+    });
 
   it("PATCH /api/admin/runs/[runId]: byUid / byEmail are the actor's (same live snapshot)", async () => {
     const me = signInAs("system");
@@ -562,7 +585,7 @@ describe("audit attribution comes from the guard's actor, never the request body
     expect((await c.call({ bearer: me.bearer })).status).toBe(200);
     expect(auditRows()).toEqual([expect.objectContaining({ byUid: UIDS.system, byEmail: EMAILS.system, action: "admin_override" })]);
     expect(dbStore.get("verifications/v-1")).toMatchObject({ governanceReviewedBy: UIDS.system });
-    expect(JSON.stringify(auditRows())).not.toContain(SPOOF);
+    expect(everythingWritten()).not.toContain(SPOOF);
   });
 
   it("DELETE /api/admin/runs/[runId]: byUid is the actor's", async () => {
@@ -571,6 +594,7 @@ describe("audit attribution comes from the guard's actor, never the request body
     c.seed?.();
     expect((await c.call({ bearer: me.bearer })).status).toBe(200);
     expect(auditRows()).toEqual([expect.objectContaining({ byUid: UIDS.system, byEmail: EMAILS.system, action: "admin_deleted" })]);
+    expect(everythingWritten()).not.toContain(SPOOF);
   });
 
   it.each([
@@ -587,7 +611,7 @@ describe("audit attribution comes from the guard's actor, never the request body
     const rows = auditRows();
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ adminUid: UIDS.system, targetUid: TARGET });
-    expect(JSON.stringify(rows)).not.toContain(SPOOF);
+    expect(everythingWritten()).not.toContain(SPOOF);
   });
 
   it("POST /api/admin/purge-runs: the deletion workflow is attributed to the actor", async () => {
@@ -596,6 +620,8 @@ describe("audit attribution comes from the guard's actor, never the request body
     c.seed?.();
     expect((await c.call({ bearer: me.bearer })).status).toBe(200);
     expect(mockDeleteResearchRun).toHaveBeenCalledWith(expect.objectContaining({ runId: "old-1", actorUid: UIDS.system }));
+    expect(JSON.stringify(mockDeleteResearchRun.mock.calls)).not.toContain(SPOOF);
+    expect(everythingWritten()).not.toContain(SPOOF);
   });
 
   it("POST /api/governance/policy: byUid / byEmail are the governance actor's", async () => {
@@ -603,6 +629,34 @@ describe("audit attribution comes from the guard's actor, never the request body
     const c = CASES.find((x) => x.name === "POST /api/governance/policy") as Case;
     expect((await c.call({ bearer: me.bearer })).status).toBe(200);
     expect(auditRows()).toEqual([expect.objectContaining({ byUid: UIDS.governance, byEmail: EMAILS.governance, action: "policy_updated" })]);
+  });
+
+  it("POST /api/governance/policy: a body carrying attribution fields is refused (400) before anything is written", async () => {
+    const me = signInAs("governance");
+    const res = await GOV_POLICY.POST(
+      routeRequest("/api/governance/policy", { method: "POST", body: { minConsensusToApprove: 71, comment: "c", ...SPOOFED }, creds: { bearer: me.bearer } }) as never
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(Object.keys(body.error.fields).sort()).toEqual(Object.keys(SPOOFED).sort());
+    expect(dbWrites()).toEqual([]);
+    expect(auditRows()).toEqual([]);
+  });
+
+  it.each([
+    "POST /api/admin/keys",
+    "POST /api/admin/set-role",
+    "POST /api/admin/sync-subscription",
+    "POST /api/admin/test-webhook",
+    "PATCH /api/admin/users/[uid]",
+    "DELETE /api/admin/users/[uid]",
+    "POST /api/governance/audit/backfill",
+  ])("%s: no SPOOF reaches any write or audit row", async (name) => {
+    const c = CASES.find((x) => x.name === name) as Case;
+    const me = signInAs(HOLDER[c.tier]);
+    c.seed?.();
+    expect((await c.call({ bearer: me.bearer })).status).toBe(c.okStatus ?? 200);
+    expect(everythingWritten()).not.toContain(SPOOF);
   });
 
   it("POST /api/admin/set-role: the self-demotion check compares against the ACTOR uid", async () => {
