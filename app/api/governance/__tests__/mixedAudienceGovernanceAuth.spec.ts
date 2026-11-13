@@ -55,6 +55,8 @@ import * as AUDIT from "@/app/api/governance/audit/route";
 import * as QUEUE from "@/app/api/governance/queue/route";
 import * as REVIEW from "@/app/api/governance/review/route";
 import * as REVIEWER from "@/app/api/governance/reviewer/route";
+import * as VIS from "@/lib/governance/governanceVisibleUserIds";
+import * as AUTHCHECK from "@/lib/governance/authCheck";
 
 installPrivilegedHarness();
 
@@ -469,3 +471,99 @@ describe("reviewer GET/POST: legitimate users see exactly the same behaviour", (
     expect(dbWrites().map((w) => w.path)).toEqual([`users/${REVIEWER_UID}`]);
   });
 });
+
+/* ------------------------------------------------------------------------- *
+ * F-3 (owner authorization 2026-11-14) — every mixed handler evaluates scope for
+ * the AUTHENTICATED uid only. User A (REVIEWER_UID, ordinary full-plan reviewer
+ * for OWNER_A) is signed in; user B (GOV_UID, a Governance Admin with GLOBAL
+ * scope) exists. Requests carry B's uid in every request-supplied place a future
+ * edit might read. The REAL visibility resolver and policy-read check run; spies
+ * pass through and record the arguments they actually received.
+ * ------------------------------------------------------------------------- */
+describe("F-3 — scope is evaluated for the authenticated uid, never a request-supplied or other uid", () => {
+  let visCached: jest.SpyInstance;
+  let vis: jest.SpyInstance;
+  let policyRead: jest.SpyInstance;
+  beforeEach(() => {
+    visCached = jest.spyOn(VIS, "resolveGovernanceVisibleUserIdsCached");
+    vis = jest.spyOn(VIS, "resolveGovernanceVisibleUserIds");
+    policyRead = jest.spyOn(AUTHCHECK, "checkGovernancePolicyReadAccess");
+    signInAs("governance"); // B exists, with global scope
+  });
+  afterEach(() => {
+    visCached.mockRestore();
+    vis.mockRestore();
+    policyRead.mockRestore();
+  });
+  // Distinct live email = own visibility-cache key (the cache keeps earlier tests' refusals for this uid).
+  const A = { record: { email: "f3-reviewer@test-invented.example" } };
+  const SPOOF = `uid=${GOV_UID}&userId=${GOV_UID}&asUid=${GOV_UID}&viewerUid=${GOV_UID}&actorUid=${GOV_UID}`;
+  const scopeArgs = () => [...visCached.mock.calls, ...vis.mock.calls, ...policyRead.mock.calls].map((c) => c[0]);
+
+  it("spies observe the real calls (positive control: B's own request is evaluated for B and is global)", async () => {
+    const b = signInAs("governance");
+    const body = await (await QUEUE.GET(get("/api/governance/queue?status=all", { bearer: b.bearer }))).json();
+    expect(body.queueScope).toBe("admin_global");
+    expect(visCached.mock.calls).toEqual([[GOV_UID]]);
+  });
+
+  it("queue GET: resolver receives A's uid only; scope is A's 'assigners', not B's global", async () => {
+    const a = signInAs("ordinary", A);
+    const body = await (await QUEUE.GET(get(`/api/governance/queue?status=all&${SPOOF}`, { bearer: a.bearer }))).json();
+    expect(visCached.mock.calls).toEqual([[REVIEWER_UID]]);
+    expect(body.queueScope).toBe("assigners");
+    expect(body.runs.map((r: { userId: string }) => r.userId)).not.toContain(OWNER_B);
+  });
+
+  it("audit GET: list and drilldown evaluated for A only; B's global scope is not borrowed", async () => {
+    const a = signInAs("ordinary", A);
+    expect((await AUDIT.GET(get(`/api/governance/audit?${SPOOF}`, { bearer: a.bearer }))).status).toBe(200);
+    expect((await AUDIT.GET(get(`/api/governance/audit?runId=run-b&collection=runs&${SPOOF}`, { bearer: a.bearer }))).status).toBe(403);
+    expect(scopeArgs().length).toBeGreaterThan(0);
+    expect(new Set(scopeArgs())).toEqual(new Set([REVIEWER_UID]));
+  });
+
+  it("review POST: body identity fields are ignored; evaluated for A; foreign run refused, nothing written", async () => {
+    const a = signInAs("ordinary", A);
+    const res = await REVIEW.POST(postJson("/api/governance/review", { bearer: a.bearer }, { runId: "run-b", collection: "runs", action: "approved", uid: GOV_UID, userId: GOV_UID, actorUid: GOV_UID, reviewerUid: GOV_UID }));
+    expect([403, 404]).toContain(res.status);
+    expect(vis.mock.calls).toEqual([[REVIEWER_UID]]);
+    expect(dbWrites().some((w) => w.path.startsWith("runs/run-b"))).toBe(false);
+  });
+
+  it("policy GET: read access is evaluated for A only", async () => {
+    const a = signInAs("ordinary", A);
+    expect((await POLICY.GET(get(`/api/governance/policy?${SPOOF}`, { bearer: a.bearer }))).status).toBe(200);
+    expect(policyRead.mock.calls).toEqual([[REVIEWER_UID]]);
+  });
+
+  it("reviewer GET: reads A's own record and A's assigners; never B's record", async () => {
+    const a = signInAs("ordinary", A);
+    const res = await REVIEWER.GET(get(`/api/governance/reviewer?${SPOOF}`, { bearer: a.bearer }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect((body.reviewingFor ?? []).map((x: { uid?: string }) => x.uid)).toEqual([OWNER_A]);
+    expect(dbLog.some((o) => o.path === `users/${REVIEWER_UID}`)).toBe(true);
+    expect(dbLog.some((o) => o.path === `users/${GOV_UID}`)).toBe(false);
+  });
+
+  it("reviewer POST: a body uid naming B is ignored; only A's own document is written", async () => {
+    const a = signInAs("ordinary", A);
+    const res = await REVIEWER.POST(postJson("/api/governance/reviewer", { bearer: a.bearer }, { action: "toggle_reviewer", enabled: true, uid: GOV_UID, userId: GOV_UID }));
+    expect(res.status).toBe(200);
+    const writes = dbWrites().map((w) => w.path);
+    expect(writes).toContain(`users/${REVIEWER_UID}`);
+    expect(writes.some((p) => p.includes(GOV_UID))).toBe(false);
+  });
+
+  it.each([
+    ["absent credentials", () => ({})],
+    ["malformed bearer", () => ({ authorization: "Bearer not-a-jws" })],
+    ["mismatched bearer (A) / cookie (B)", () => ({ bearer: signInAs("ordinary", A).bearer, cookie: signInAs("governance").cookie })],
+  ] as Array<[string, () => Credentials]>)("%s: 401 on every handler and NO scope evaluation for any uid", async (_n, creds) => {
+    const c = creds();
+    for (const r of ROUTES) expect([r.name, (await r.call(c)).status]).toEqual([r.name, 401]);
+    expect(scopeArgs()).toEqual([]);
+  });
+});
+

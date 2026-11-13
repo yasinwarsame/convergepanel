@@ -192,3 +192,37 @@ repository (app, lib, components, hooks, scripts, extension, prisma, root tools)
 - Stated limits: runtime-built keys (`"ad" + "min"`), access that never names
   `admin`, and runtime-built module specifiers are not statically resolvable; the
   behavioural specs remain the proof that the guard decides from the live record.
+
+### Final bounded correction (F-1 / F-2 / F-3 / NIT, owner authorization 2026-11-14)
+
+- **F-1 — seed-module completeness.** Taint now starts at the function-level readers of
+  `GOVERNANCE_ADMIN_EMAILS` INSIDE `lib/admin/config.ts` (`isGovernanceAdminEmail`,
+  `governanceAdminListShapeForLog`), so a sibling wrapper in the same module is tainted by
+  local closure before traversal leaves it. Pinned: the function-level env readers
+  (`ENV_READERS`, incl. the module-level startup warning) and the exact export surface of
+  config.ts. Inventory change: +1 tainted export (`governanceAdminListShapeForLog`, log
+  counts only, seeded conservatively) and +1 importer edge (queue route already imports
+  it); importer FILE count unchanged.
+- **F-2 — indirect claim reads.** A repo-wide index resolves `"admin"` key constants across
+  files (named / aliased / re-exported / `export *` / namespace imports, object-const
+  members `C.ADMIN`, `NS.C.ADMIN`). New detections: enumeration (`Object.keys/entries/
+  values/getOwnPropertyNames`, `Reflect.ownKeys`, `for…in` combined with the key),
+  selection utilities (`pick`, `get`, `at`, … with the key or a key array). Fail-closed:
+  a non-literal computed key or any enumeration on a claim/token receiver
+  (`claims`, `customClaims`, `decoded*`, `idToken*`, `tokenResult`), and computed
+  destructuring with an unresolvable key, must be allow-listed. Allow-list rows are now
+  keyed file::function::kind. One reviewed false positive (`lib/agreementMap.ts`
+  `claims[i]`: research-claim array).
+- **F-3 — uid binding.** Structural: in all six mixed handlers every scope decision
+  (`resolveGovernanceVisibleUserIds*`, `checkGovernancePolicyReadAccess`,
+  `getAssignerUids`, the reviewer assigner query) receives a `const` uid derived from the
+  authenticated result (`resolved.uid` / `caller.uid`), the auth wrapper returns
+  `resolved.uid`, and the request-derived fields each handler reads are pinned (no
+  identity field). Behavioural: real handlers with pass-through spies — user A signed in,
+  user B (global Governance Admin) named in every request-supplied place — the resolver /
+  policy check receive A's uid only; absent / malformed / mismatched credentials evaluate
+  no scope at all.
+- **NIT — shorthand markers.** `const visibleUserIds = null` / `isSupportAdmin = true`,
+  their assignment forms, and reassignable bindings used in shorthand are producers.
+- Limits (unchanged in kind): runtime-built keys and specifiers; access through objects
+  that are not named as claim/token receivers and never name the key.
