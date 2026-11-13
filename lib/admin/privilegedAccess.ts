@@ -64,7 +64,7 @@ import {
   type CredentialKind,
   type PrevalidatedCredential,
 } from "./privilegedCredentialAdapter";
-import { deriveVerifiedAdminScopes, readLiveAuthSnapshot } from "./verifiedAdminIdentity";
+import { deriveVerifiedAdminScopes, readLiveAuthSnapshot, type LiveAuthSnapshot } from "./verifiedAdminIdentity";
 
 export type PrivilegedTier = "SYSTEM_ADMIN" | "ADMIN_PORTAL" | "GOVERNANCE_ADMIN";
 
@@ -199,7 +199,7 @@ function deny503(reason: PrivilegedUnavailableReason): PrivilegedDenial {
   return { ok: false, status: 503, reason };
 }
 
-function logDenial(route: string, tier: PrivilegedTier, d: PrivilegedDenial, errorCode?: string): void {
+function logDenial(route: string, tier: PrivilegedTier | "AUTHENTICATED", d: PrivilegedDenial, errorCode?: string): void {
   if (d.status === 503) {
     logger.error("privileged_auth_unavailable", { route, tier, reason: d.reason, errorCode: errorCode ?? "" });
   } else {
@@ -207,20 +207,37 @@ function logDenial(route: string, tier: PrivilegedTier, d: PrivilegedDenial, err
   }
 }
 
-async function decide(
+type Authenticated = {
+  uid: string;
+  credential: "bearer" | "cookie";
+  primary: Verified;
+  snapshot: LiveAuthSnapshot;
+  heldTiers: Readonly<{ systemAdmin: boolean; adminPortal: boolean; governanceAdmin: boolean }>;
+  email: string;
+  emailVerified: boolean;
+};
+
+/**
+ * Steps 1–6 of the decision, shared by the tier guard and by
+ * `authenticatePrivilegedPrincipal`: credential extraction (SP-5), verification
+ * of EVERY presented credential (A-2), one principal (SP-4), ONE live read
+ * (SP-1), account state, revocation of every presented credential against the
+ * snapshot, and the held tiers derived from that same snapshot.
+ * `bearerOnly` is the SYSTEM_ADMIN transport rule (D5).
+ */
+async function authenticate(
   request: NextRequest,
-  tier: PrivilegedTier,
-  route: string
-): Promise<{ decision: PrivilegedDecision; errorCode?: string }> {
+  bearerOnly: boolean
+): Promise<{ ok: true; value: Authenticated } | { ok: false; decision: PrivilegedDenial; errorCode?: string }> {
   // Step 1. The Admin SDK must exist, and the project id it was initialised
   // with must be known: pre-validation binds `aud`/`iss` to it, and without it
   // the SDK must not be called at all (its content errors would quote the
   // credential). Either absence is an availability failure.
   const auth = adminAuth;
-  if (!auth) return { decision: deny503("admin_sdk_uninitialized") };
+  if (!auth) return { ok: false, decision: deny503("admin_sdk_uninitialized") };
   const projectId = getInitializedFirebaseProjectId();
   if (typeof projectId !== "string" || projectId === "") {
-    return { decision: deny503("auth_unavailable"), errorCode: "project_id_unavailable" };
+    return { ok: false, decision: deny503("auth_unavailable"), errorCode: "project_id_unavailable" };
   }
 
   // Step 2. Credential extraction. Presence is decided per slot, before any
@@ -231,9 +248,9 @@ async function decide(
   const cookieRaw = request.cookies.get(SESSION_COOKIE)?.value;
   const cookiePresent = cookieRaw !== undefined;
 
-  if (!bearerSlot.present && !cookiePresent) return { decision: deny401("missing_credentials") };
+  if (!bearerSlot.present && !cookiePresent) return { ok: false, decision: deny401("missing_credentials") };
   // D5: SYSTEM_ADMIN is bearer-only. A cookie alone never reaches it.
-  if (tier === "SYSTEM_ADMIN" && !bearerSlot.present) return { decision: deny401("cookie_not_accepted_for_tier") };
+  if (bearerOnly && !bearerSlot.present) return { ok: false, decision: deny401("cookie_not_accepted_for_tier") };
 
   // Step 3. Verify EVERY presented credential (structure, then signature /
   // expiry via the SDK — see privilegedCredentialAdapter.ts).
@@ -252,24 +269,25 @@ async function decide(
   const failed = presented.filter((c): c is Extract<CredentialOutcome, { ok: false }> => !c.ok);
   if (failed.length > 0) {
     const unavailable = failed.find((f) => f.unavailable);
-    if (unavailable) return { decision: deny503("auth_unavailable"), errorCode: unavailable.errorCode };
-    return { decision: deny401("invalid_credential") };
+    if (unavailable) return { ok: false, decision: deny503("auth_unavailable"), errorCode: unavailable.errorCode };
+    return { ok: false, decision: deny401("invalid_credential") };
   }
   const verified = presented.map((c) => (c as Extract<CredentialOutcome, { ok: true }>).value);
   // SP-4 / SP-5: one principal. Two valid credentials for different uids fail.
   const uid = verified[0].uid;
-  if (verified.some((v) => v.uid !== uid)) return { decision: deny401("credential_mismatch") };
+  if (verified.some((v) => v.uid !== uid)) return { ok: false, decision: deny401("credential_mismatch") };
   for (const v of verified) {
-    if (!validAuthTime(v.authTime)) return { decision: deny401("invalid_credential") };
+    if (!validAuthTime(v.authTime)) return { ok: false, decision: deny401("invalid_credential") };
   }
   const primary = bearer.present ? (bearer as Extract<CredentialOutcome, { ok: true }>).value : verified[0];
   const credential: "bearer" | "cookie" = bearer.present ? "bearer" : "cookie";
 
   // Step 4. EXACTLY ONE live read.
   const live = await readLiveAuthSnapshot(uid);
-  if (live.status === "not_found") return { decision: deny401("account_not_found") };
+  if (live.status === "not_found") return { ok: false, decision: deny401("account_not_found") };
   if (live.status !== "resolved") {
     return {
+      ok: false,
       decision: deny503(live.reason === "admin_sdk_uninitialized" ? "admin_sdk_uninitialized" : "auth_unavailable"),
       errorCode: live.errorCode,
     };
@@ -277,21 +295,21 @@ async function decide(
   const snapshot = live.snapshot;
   if (snapshot.recordUid !== uid) {
     // Integrity anomaly: the record returned is not the one asked for.
-    return { decision: deny503("auth_unavailable"), errorCode: "record_uid_mismatch" };
+    return { ok: false, decision: deny503("auth_unavailable"), errorCode: "record_uid_mismatch" };
   }
 
   // Step 5. Account state, from the snapshot. Strict: only an explicit `false`
   // is proof that the account is usable.
-  if (snapshot.disabled !== false) return { decision: deny401("account_disabled") };
+  if (snapshot.disabled !== false) return { ok: false, decision: deny401("account_disabled") };
 
   // Step 6. Revocation, from the snapshot, for every presented credential.
   for (const v of verified) {
     if (revokedBySnapshot(v.authTime as number, snapshot.tokensValidAfterTime)) {
-      return { decision: deny401("credential_revoked") };
+      return { ok: false, decision: deny401("credential_revoked") };
     }
   }
 
-  // Step 7. Tiers, from the snapshot. The token claim is NOT read here.
+  // Step 7a. Tiers held, from the snapshot. The token claim is NOT read here.
   const systemAdmin = snapshot.claimAdmin === true;
   const scopes = deriveVerifiedAdminScopes(snapshot);
   const emailPortal = scopes.lookupStatus === "resolved" && scopes.adminPortal === true;
@@ -301,12 +319,28 @@ async function decide(
     adminPortal: systemAdmin || emailPortal,
     governanceAdmin,
   });
+  return {
+    ok: true,
+    value: { uid, credential, primary, snapshot, heldTiers, email: scopes.email, emailVerified: scopes.emailVerified },
+  };
+}
+
+async function decide(
+  request: NextRequest,
+  tier: PrivilegedTier,
+  route: string
+): Promise<{ decision: PrivilegedDecision; errorCode?: string }> {
+  const authn = await authenticate(request, tier === "SYSTEM_ADMIN");
+  if (!authn.ok) return { decision: authn.decision, errorCode: authn.errorCode };
+  const { uid, credential, primary, snapshot, heldTiers } = authn.value;
+  const systemAdmin = heldTiers.systemAdmin;
 
   if (primary.tokenClaimAdmin !== systemAdmin) {
     // Field names avoid "token"/"key": the logger redacts those.
     logger.warn("privileged_claim_mismatch", { uid, route, presentedClaimAdmin: primary.tokenClaimAdmin, liveAdmin: systemAdmin });
   }
 
+  // Step 7b. The requested tier.
   const held =
     tier === "SYSTEM_ADMIN" ? heldTiers.systemAdmin : tier === "ADMIN_PORTAL" ? heldTiers.adminPortal : heldTiers.governanceAdmin;
   if (!held) return { decision: { ok: false, status: 403, reason: "tier_not_held", tier } };
@@ -315,8 +349,8 @@ async function decide(
     uid,
     tier,
     heldTiers,
-    email: scopes.email,
-    emailVerified: scopes.emailVerified,
+    email: authn.value.email,
+    emailVerified: authn.value.emailVerified,
     credential,
     authTime: primary.authTime as number,
     snapshotTokensValidAfter: typeof snapshot.tokensValidAfterTime === "string" ? snapshot.tokensValidAfterTime : null,
@@ -347,6 +381,60 @@ export async function requirePrivilegedAccess(
     logDenial(route, tier, decision, result.errorCode);
   }
   return decision;
+}
+
+/**
+ * SEC-3 / S2-b correction (owner ruling D) — AUTHENTICATION WITHOUT A TIER.
+ *
+ * For the mixed-audience governance handlers, whose audience is not one tier
+ * (Governance Admin OR assigned reviewer OR full plan OR self-service). Runs
+ * exactly the guard's steps 1–6 — SP-5 credential handling (no slot ever falls
+ * back to the other), A-2 classification (verifier / lookup outage is 503,
+ * never a grant), one principal, ONE live read, `disabled === false`, and
+ * revocation of every presented credential against the live
+ * `tokensValidAfterTime` — and reports the tiers held in that same snapshot.
+ * It makes no tier decision: the caller decides scope from `heldTiers`.
+ * Cookie and bearer are both accepted (the SYSTEM_ADMIN bearer-only rule does
+ * not apply: no SYSTEM_ADMIN capability is reachable through this result).
+ * Never throws; any unexpected failure is 503.
+ */
+export type AuthenticatedPrincipal = Readonly<{
+  uid: string;
+  heldTiers: Readonly<{ systemAdmin: boolean; adminPortal: boolean; governanceAdmin: boolean }>;
+  email: string;
+  emailVerified: boolean;
+  credential: "bearer" | "cookie";
+  authTime: number;
+}>;
+export type PrincipalDenial = Extract<PrivilegedDenial, { status: 401 } | { status: 503 }>;
+
+export async function authenticatePrivilegedPrincipal(
+  request: NextRequest,
+  opts: { route: string }
+): Promise<{ ok: true; principal: AuthenticatedPrincipal } | PrincipalDenial> {
+  const route = opts?.route ?? "";
+  let result: Awaited<ReturnType<typeof authenticate>>;
+  try {
+    result = await authenticate(request, false);
+  } catch (err) {
+    result = { ok: false, decision: deny503("auth_unavailable"), errorCode: errorCodeOf(err) || "unexpected_error" };
+  }
+  if (!result.ok) {
+    logDenial(route, "AUTHENTICATED", result.decision, result.errorCode);
+    return result.decision as PrincipalDenial;
+  }
+  const v = result.value;
+  return {
+    ok: true,
+    principal: Object.freeze({
+      uid: v.uid,
+      heldTiers: v.heldTiers,
+      email: v.email,
+      emailVerified: v.emailVerified,
+      credential: v.credential,
+      authTime: v.primary.authTime as number,
+    }),
+  };
 }
 
 const DENIAL_MESSAGE: Record<401 | 403 | 503, string> = {
