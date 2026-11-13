@@ -204,6 +204,13 @@ describe.each(ROUTES)("$name", ({ call }) => {
     expect(calls.verifyIdToken).toEqual([[expect.any(String), false]]);
   });
 
+  it("a fresh bearer alongside a fresh same-uid cookie passes (the bearer's auth_time is carried for the matched pair)", async () => {
+    record.tokensValidAfterTime = iso(NOW_S - 100);
+    cookies.set("fresh-cookie", { uid: UID, auth_time: NOW_S - 10 });
+    const res = await call({ ...bearer(NOW_S - 10), cookie: "__session=fresh-cookie" });
+    expect(res.status).not.toBe(401);
+  });
+
   it("auth_time EQUAL to the cutoff is not revoked", async () => {
     record.tokensValidAfterTime = iso(NOW_S - 100);
     const res = await call(bearer(NOW_S - 100));
