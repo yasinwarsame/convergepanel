@@ -22,6 +22,7 @@ jest.mock("@/lib/verification/generateMemo", () => ({
   downloadTextFile: (...a: unknown[]) => mockedDownloadTextFile(...a),
 }));
 
+import { CONSENSUS_WITHHELD_TEXT, CLAIM_NOT_INDEPENDENT_AGREE_HEADING } from "@/lib/verification/claimConsensusPresentation";
 import { createElement, type ReactNode } from "react";
 import * as fs from "fs";
 import * as path from "path";
@@ -90,7 +91,9 @@ const VIEWS = [
   {
     kind: "Video",
     render: (props: Record<string, unknown> = {}) => createElement(VideoVerificationResultView as never, { data: videoFixture(), ...props } as never),
-    content: ["Authentic camera footage", "harbour-clip.mp4", "Consensus score", "Video details", "Metadata flags", "Consumer phone encoder", "Where models agree", "Per-model evidence", "Processing warnings", "Important Legal Notice"],
+    // C-b (CB-13, PQ-2 (a) strict): video rows record no provider, so the stored score is withheld and the stored points
+    // are shown under the qualified heading (the stored text itself is unchanged).
+    content: ["Authentic camera footage", "harbour-clip.mp4", CONSENSUS_WITHHELD_TEXT.independence_unverified, "Video details", "Metadata flags", "Consumer phone encoder", CLAIM_NOT_INDEPENDENT_AGREE_HEADING, "Camera capture", "Per-model evidence", "Processing warnings", "Important Legal Notice"],
     slots: ["governanceSurface", "actionsSurface"],
   },
 ];
@@ -155,7 +158,9 @@ describe("slot placement matches the Personal layout", () => {
       actionsSurface: createElement("i", null, "ACTIONS"),
     }));
     const t = text(r);
-    expect(t.indexOf("Consensus score")).toBeLessThan(t.indexOf("GOV"));
+    // C-b (CB-13): the video consensus card holds the withheld text (asserted present, so the ordering is not vacuous).
+    expect(t.indexOf(CONSENSUS_WITHHELD_TEXT.independence_unverified)).toBeGreaterThan(-1);
+    expect(t.indexOf(CONSENSUS_WITHHELD_TEXT.independence_unverified)).toBeLessThan(t.indexOf("GOV"));
     expect(t.indexOf("GOV")).toBeLessThan(t.indexOf("harbour-clip.mp4"));
     expect(t.indexOf("Processing warnings")).toBeLessThan(t.indexOf("ACTIONS"));
     expect(t.indexOf("ACTIONS")).toBeLessThan(t.indexOf("Important Legal Notice"));

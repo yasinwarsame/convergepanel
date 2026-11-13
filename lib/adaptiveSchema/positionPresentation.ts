@@ -31,6 +31,28 @@ import { normalizeForComparison } from "./comparisonNormalization";
 import { CAUTION_NEXT_STEP_WITHOUT_DISAGREEMENT, VERDICT_NEXT_STEPS } from "./config";
 import { singleLineText } from "./textSerialization";
 import { providerDisplayName, runModelFamilyName, type RunModelProvenanceFacts } from "@/lib/panel/runModelIdentity";
+import {
+  adaptiveTopIndependence,
+  attachRunIndependence,
+  presentIndependenceQualifiedReport,
+  COUNTED_BY_PANEL_SLOT,
+  NO_RESPONSES_RUN,
+  NO_SUCCESSFUL_MODEL_RESPONSES,
+  placeholderSlotsClause,
+  reportStatesAgreement,
+  storedSynthesisRunIndependence,
+  TOO_FEW_ANSWERS_RUN,
+  TOO_FEW_ANSWERS_STATEMENT,
+  QUALIFIED_TOP_NEXT_STEP,
+  qualifiedRowHeading,
+  qualifiedRowText,
+  qualifiedTopHeading,
+  rowIndependence,
+  supportingSlotsOfRow,
+  type RowIndependence,
+  type AdaptiveTopIndependence,
+  type QualifiedStatusHeading,
+} from "./verdictIndependence";
 
 // ─── Marker ─────────────────────────────────────────────────────────────────
 
@@ -408,7 +430,9 @@ export type RowHeading =
   | "Values differ"
   | "Comparison"
   | "No recorded positions"
-  | "Position details unavailable";
+  | "Position details unavailable"
+  | QualifiedStatusHeading
+  | `${"Consensus" | "Majority support" | "Limited coverage" | "Single source"} (counted by panel slot)`;
 
 export interface PresentedSlotPosition {
   slot: string;
@@ -469,6 +493,21 @@ function validContested(row: Record<string, unknown>): string | null {
   return `${m} of ${l} model${l === 1 ? "" : "s"} that listed this claim ${m === 1 ? "marks" : "mark"} it contested`;
 }
 
+/** A marked split row's slots, stated by executing model (its text already counts panel slots). */
+function splitIndependenceSentence(ri: RowIndependence): string {
+  if (ri.t.kind === "unverified" && ri.t.basis === "no_responses") return NO_SUCCESSFUL_MODEL_RESPONSES;
+  if (ri.t.kind === "unverified" && ri.t.basis === "failed_supporters") return "Model independence unverified: panel slots that returned no successful model response are recorded as taking a position here.";
+  if (ri.t.kind === "unverified") return "Model independence unverified: which models answered these panel slots is not recorded.";
+  if (ri.bothSides.length && ri.supportSlots.length && ri.disputeSlots.length) return `${ri.bothSides.join("; ")} answered slots on both sides, so this is not a disagreement between independent models.`;
+  const m = ri.t.voices.length;
+  if (ri.t.kind === "placeholder") {
+    // F-2 (D-5): a stored placeholder slot is not a model response; the remaining slots are each their own model.
+    const held = placeholderSlotsClause(ri.t.placeholders.length);
+    return m === 0 ? `${held}; no model response took a position.` : m === 1 ? `${held}; the remaining panel slot was answered by one model, ${ri.t.voices[0]}.` : `${held}; the remaining ${m} panel slots were each answered by their own model (${ri.t.voices.join("; ")}).`;
+  }
+  return m === 1 ? `These panel slots were all answered by one model, ${ri.t.voices[0]}.` : `These panel slots were answered by ${m} independent models (${ri.t.voices.join("; ")}).`;
+}
+
 /** The single entry point every consumer uses for one stored row. */
 export function rowView(row: unknown, roster: readonly string[], provenance?: readonly RunModelProvenanceFacts[] | null): RowView {
   const r = isPlainObject(row) ? row : {};
@@ -494,14 +533,32 @@ export function rowView(row: unknown, roster: readonly string[], provenance?: re
   if (type === "claim") {
     const status = r.status;
     const claimText = typeof r.claimText === "string" ? r.claimText : "";
-    const supporters = reading.slots.filter((s) => s.kind === "position" && (s.stance === "agrees" || s.stance === "partial")).map((s) => label(s.slot));
-    const disputers = reading.slots.filter((s) => s.kind === "position" && s.stance === "disputes").map((s) => label(s.slot));
-    const common = { ...base, slots: slotPositions(claimPosition), supporters, disputers, contested: validContested(r) };
+    // Historical reports counted every slot a substitute model answered as its own model: a claim row whose positioned
+    // slots (supporting and disputing) are not independent executing models is stated by its executing models
+    // (verdictIndependence.ts) — the stored status as recorded, never recomputed. Independent slots: as before.
+    const ri = isKnownStatus(status) || status === "split" ? rowIndependence(r, provenance) : null;
+    const sideLabels = (side: "support" | "dispute", perSlot: string[]) => {
+      const t = side === "support" ? ri?.support : ri?.dispute;
+      // Several slots one substitute model answered are that model once; otherwise each slot's own label (which already
+      // names a substitute's executing model).
+      // Order 30 A2: a side that names slots recorded as failed calls names no supporter / disputer (no count implied).
+      if (t && t.kind === "unverified" && t.basis !== undefined) return [];
+      return ri && t && (t.kind === "repeated_substitute" || t.kind === "placeholder") ? (side === "support" ? ri.supportVoices : ri.disputeVoices) : perSlot;
+    };
+    const supporters = sideLabels("support", reading.slots.filter((s) => s.kind === "position" && (s.stance === "agrees" || s.stance === "partial")).map((s) => label(s.slot)));
+    const disputers = sideLabels("dispute", reading.slots.filter((s) => s.kind === "position" && s.stance === "disputes").map((s) => label(s.slot)));
+    const contested = validContested(r);
+    const common = { ...base, slots: slotPositions(claimPosition), supporters, disputers, contested: contested && ri ? `${contested} ${COUNTED_BY_PANEL_SLOT}` : contested };
     if (status === "split") {
       const kind = claimKind(reading);
-      return { ...common, claimStatus: "split", heading: kind === "opposing_positions" ? "Recorded opposing positions" : kind === "no_positions" ? "No recorded positions" : "Unresolved claim", text: claimKindText(kind, reading), isOpposition: kind === "opposing_positions" };
+      const text = claimKindText(kind, reading);
+      return { ...common, claimStatus: "split", heading: kind === "opposing_positions" ? "Recorded opposing positions" : kind === "no_positions" ? "No recorded positions" : "Unresolved claim", text: ri ? `${text} ${splitIndependenceSentence(ri)}` : text, isOpposition: kind === "opposing_positions" };
     }
     if (!isKnownStatus(status)) return { ...common, heading: "Unrecognised status", text: `unrecognised status — not presented as agreement${readingTail(reading).length ? `; ${readingTail(reading).join("; ")}` : ""}` };
+    if (ri) {
+      const tail = readingTail(reading);
+      return { ...common, claimStatus: status, heading: qualifiedRowHeading(status, ri, STATUS_HEADING[status] as "Consensus" | "Majority support" | "Limited coverage" | "Single source"), text: `${qualifiedRowText(r, ri)}${tail.length ? `; ${tail.join("; ")}` : ""}` };
+    }
     return { ...common, claimStatus: status, heading: STATUS_HEADING[status], text: claimStatusText(status, reading, claimText, roster.length) };
   }
 
@@ -735,7 +792,21 @@ export interface PositionView {
   biasFindingsWithheld: number;
   coverageGapsWithheld: number;
   /** topLabel / keyLabel: the label of the card's top / key row text — "Claim" only for a claim row (m-6). */
-  verdict: { topHeading: string; keyHeading: string; noKeyText: string; topIsClaim: boolean; topLabel: string; keyLabel: string; sectionHeading: string };
+  verdict: {
+    topHeading: string;
+    keyHeading: string;
+    noKeyText: string;
+    topIsClaim: boolean;
+    topLabel: string;
+    keyLabel: string;
+    sectionHeading: string;
+    /**
+     * Present only when the top CLAIM's supporting slots are not independent executing models (a repeated substitute
+     * model) or their execution identity is not recorded (verdictIndependence.ts) — `topHeading` is then the qualified
+     * heading. Absent for every report whose supporters are independent models (rendered exactly as before).
+     */
+    topIndependence?: Exclude<AdaptiveTopIndependence, { kind: "independent" }>;
+  };
 }
 
 const POSITION_VIEW = Symbol.for("convergepanel.positionView");
@@ -749,6 +820,8 @@ export interface PositionSafeInput {
   rows: readonly unknown[] | null | undefined;
   roster: readonly string[];
   provenance?: readonly RunModelProvenanceFacts[] | null;
+  /** Exports only (exportPositionView.ts, Order 30 A1): every slot recorded a failed call — the run is NO_RESPONSES_RUN. */
+  noSuccessfulResponses?: boolean;
 }
 
 /** Why a stored entry has no position details (n-1): the rows are absent, or the entry matched no unique row. */
@@ -756,23 +829,33 @@ function joinUnavailableText(join: RowJoin): string {
   return !join.row && join.reason === "no_rows" ? POSITION_ROWS_UNAVAILABLE : POSITION_DETAILS_UNAVAILABLE;
 }
 
-function joinedResult(join: RowJoin, roster: readonly string[], provenance: PositionSafeInput["provenance"]): { view: RowView | null; result: string } {
+/**
+ * A stored row's view for the position-safe report. Order 30 A1 (exports only, `noSuccessfulResponses`): no dispatched
+ * slot returned a successful response, so a claim row states NO_SUCCESSFUL_MODEL_RESPONSES and names no supporter or
+ * disputer, whatever its stored cells say. Every other caller: rowView, unchanged.
+ */
+function positionRowView(row: unknown, input: PositionSafeInput): RowView {
+  const view = rowView(row, input.roster, input.provenance);
+  return input.noSuccessfulResponses === true && view.rowType === "claim" ? { ...view, text: NO_SUCCESSFUL_MODEL_RESPONSES, supporters: [], disputers: [] } : view;
+}
+
+function joinedResult(join: RowJoin, input: PositionSafeInput): { view: RowView | null; result: string } {
   if (!join.row) return { view: null, result: joinUnavailableText(join) };
-  const view = rowView(join.row, roster, provenance);
+  const view = positionRowView(join.row, input);
   return { view, result: view.text };
 }
 
 function presentedAnswer(c: PresentedAnswerClaim, rows: readonly unknown[] | null, input: PositionSafeInput, statuses: readonly string[], nameSupporters: boolean): { entry: PresentedAnswerClaim; kind: PresentedRowKind } {
   // A malformed stored entry is kept as stored: the presenters read it without trusting it, as on historical reports.
   if (!isPlainObject(c) || typeof c.claim !== "string") return { entry: c, kind: "other" };
-  const { view, result } = joinedResult(uniqueRowByClaim(rows, c.claim, statuses), input.roster, input.provenance);
+  const { view, result } = joinedResult(uniqueRowByClaim(rows, c.claim, statuses), input);
   const supporters = nameSupporters && view && view.rowType === "claim" && view.supporters.length > 0 ? view.supporters.join(", ") : undefined;
   return { entry: { claim: c.claim, result, ...(view?.contested ? { contested: view.contested } : {}), ...(supporters ? { supporters } : {}) }, kind: presentedRowKind(view) };
 }
 
 function presentedClaim(c: PresentedClaim, join: RowJoin, input: PositionSafeInput): { entry: PresentedClaim; kind: PresentedRowKind } {
   if (!isPlainObject(c) || typeof c.claim !== "string") return { entry: c, kind: "other" };
-  const { view, result } = joinedResult(join, input.roster, input.provenance);
+  const { view, result } = joinedResult(join, input);
   return { entry: { claim: c.claim, result, ...(view?.contested ? { contested: view.contested } : {}) }, kind: presentedRowKind(view) };
 }
 
@@ -782,7 +865,13 @@ function presentedClaim(c: PresentedClaim, join: RowJoin, input: PositionSafeInp
  * PositionView attached. Idempotent: a report this function returned is returned as is.
  */
 export function presentPositionSafeReport<R extends AdaptiveSynthesisReport | null | undefined>(report: R, input: PositionSafeInput): R {
-  if (!report || !isPositionMarked(report) || positionView(report)) return report;
+  if (!report || positionView(report)) return report;
+  // An unmarked report renders as before, except that an agreement statement whose supporting slots are not independent
+  // executing models is stated by its executing models (verdictIndependence.ts; the same object when nothing needs it).
+  if (!isPositionMarked(report)) return presentIndependenceQualifiedReport(report, input);
+  // Order 30 round 2 (review m-A): a marked report is a stored synthesis — every slot a recorded failed call means no
+  // successful model response on every surface, not only in the exports (storedSynthesisRunIndependence).
+  if (input.noSuccessfulResponses !== true && storedSynthesisRunIndependence(input.provenance) === NO_RESPONSES_RUN) input = { ...input, noSuccessfulResponses: true };
   const rows = Array.isArray(input.rows) ? input.rows : null;
   const roster = [...input.roster];
   const src = report as AdaptiveSynthesisReport;
@@ -802,7 +891,7 @@ export function presentPositionSafeReport<R extends AdaptiveSynthesisReport | nu
     const join = splitRowAt(rows, i, isPlainObject(d) ? d.topic : undefined);
     const stored = storedDisagree[i];
     const entryJoin = join.row && (!isPlainObject(stored) || stored.claim !== d.topic) ? ({ row: null, reason: "mismatch" } as RowJoin) : join;
-    const { view, result } = joinedResult(entryJoin, roster, input.provenance);
+    const { view, result } = joinedResult(entryJoin, input);
     disagreementViews.push(view);
     return { claim: typeof d?.topic === "string" ? d.topic : "", result, ...(view?.contested ? { contested: view.contested } : {}), whySource: "computed" };
   });
@@ -815,7 +904,7 @@ export function presentPositionSafeReport<R extends AdaptiveSynthesisReport | nu
                 unresolvedKinds.push("other");
                 return u;
               }
-              const { view, result } = joinedResult(uniqueRowByClaim(rows, u.claim, ["split"]), roster, input.provenance);
+              const { view, result } = joinedResult(uniqueRowByClaim(rows, u.claim, ["split"]), input);
               unresolvedKinds.push(presentedRowKind(view));
               const claimRow = view && view.rowType === "claim";
               return {
@@ -838,7 +927,16 @@ export function presentPositionSafeReport<R extends AdaptiveSynthesisReport | nu
 
   const { verdictCard, panelVerdict, verdict } = presentVerdict(src, rows, input);
 
-  const panelAgreement = rows ? renderPositionPanelStatement(panelCounts(rows, roster)) : "Position details are unavailable: the scored rows are not available to this view.";
+  // Order 30 round 2 (review m-A): with no successful model response the panel-level counts are not stated.
+  // Order 31 R-1: nor with fewer than two answering models when the stored synthesis states agreement.
+  const panelAgreement =
+    input.noSuccessfulResponses === true
+      ? NO_SUCCESSFUL_MODEL_RESPONSES
+      : storedSynthesisRunIndependence(input.provenance, reportStatesAgreement(src)) === TOO_FEW_ANSWERS_RUN
+        ? TOO_FEW_ANSWERS_STATEMENT
+        : rows
+          ? renderPositionPanelStatement(panelCounts(rows, roster))
+          : "Position details are unavailable: the scored rows are not available to this view.";
   const presentation = {
     ...p,
     panelAgreement,
@@ -880,6 +978,9 @@ export function presentPositionSafeReport<R extends AdaptiveSynthesisReport | nu
     verdictCard,
   };
   Object.defineProperty(out, POSITION_VIEW, { value: view, enumerable: false });
+  // The run as a whole (verdictIndependence.ts): a run with fewer than two independent executing models is never
+  // introduced as a multi-model panel (LinkedIn / X). Rows are qualified by rowView; nothing else reads this here.
+  attachRunIndependence(out, input.provenance, reportStatesAgreement(src));
   return out as R;
 }
 
@@ -899,16 +1000,28 @@ function presentVerdict(src: AdaptiveSynthesisReport, rows: readonly unknown[] |
   let topHeading = noClaimRows ? UNJOINED_TOP_HEADING : "Top consensus";
   let topIsClaim = false;
   let topKind: PresentedRowKind = "other";
+  let topIndependence: PositionView["verdict"]["topIndependence"];
   let panelVerdict = src.panelVerdict;
   let top: Partial<AdaptiveVerdictCard> = {};
   if (card.topConsensus !== NO_CONSENSUS_IDENTIFIED) {
     const join = uniqueRowByClaim(rows, card.topConsensus, ["consensus", "majority"]);
-    const view = join.row ? rowView(join.row, input.roster, input.provenance) : null;
+    const view = join.row ? positionRowView(join.row, input) : null;
     topKind = presentedRowKind(view);
     if (view && view.rowType === "claim") {
       topIsClaim = true;
       if (view.claimStatus !== "consensus") topHeading = TOP_MAJORITY_HEADING;
-      top = { topConsensusAgreement: view.text, consensusModelCount: view.supporters.length, ...(view.contested ? { topConsensusContested: view.contested } : {}) };
+      // Historical reports counted every slot a substitute model answered: the top claim is headed by what its
+      // supporting slots' recorded execution proves (verdictIndependence.ts). Stored values are unchanged.
+      let independence: AdaptiveTopIndependence = adaptiveTopIndependence(supportingSlotsOfRow(join.row), input.provenance);
+      // Order 31 R-1: over a run with fewer than two answering models the top row is not a consensus (rowIndependence).
+      const rowSupport = rowIndependence(join.row, input.provenance)?.support;
+      if (rowSupport && rowSupport.kind === "unverified" && rowSupport.basis === "too_few_answers") independence = rowSupport;
+      if (independence.kind !== "independent") {
+        topHeading = qualifiedTopHeading(independence, view.claimStatus);
+        topIndependence = independence;
+      }
+      // The recorded count is of supporting panel slots (as stored), never of the grouped executing models.
+      top = { topConsensusAgreement: view.text, consensusModelCount: rowView(join.row, input.roster).supporters.length, ...(view.contested ? { topConsensusContested: view.contested } : {}) };
     } else if (view) {
       topHeading = "Top value comparison";
       top = { topConsensusAgreement: view.text, consensusModelCount: 0 };
@@ -927,7 +1040,7 @@ function presentVerdict(src: AdaptiveSynthesisReport, rows: readonly unknown[] |
   let keyKind: PresentedRowKind = "other";
   if (card.keyDisagreement) {
     const join = uniqueRowByClaim(rows, card.keyDisagreement, ["split"]);
-    const view = join.row ? rowView(join.row, input.roster, input.provenance) : null;
+    const view = join.row ? positionRowView(join.row, input) : null;
     keyKind = presentedRowKind(view);
     if (view) {
       keyHeading = view.rowType === "claim" ? view.heading : `Key value comparison: ${view.heading.toLowerCase()}`;
@@ -944,14 +1057,29 @@ function presentVerdict(src: AdaptiveSynthesisReport, rows: readonly unknown[] |
     .filter((s) => s !== VERDICT_NEXT_STEPS.caution[2])
     .map((s) => (s === VERDICT_NEXT_STEPS.caution[0] && !keyIsOpposition ? (card.keyDisagreement ? (keyIsField ? NEUTRAL_KEY_VALUES_STEP : NEUTRAL_KEY_CLAIM_STEP) : CAUTION_NEXT_STEP_WITHOUT_DISAGREEMENT) : s))
     // The pass step names "the top consensus claim": only a consensus or majority CLAIM row is one.
-    .map((s) => (s === VERDICT_NEXT_STEPS.pass[0] && !topIsClaim ? NEUTRAL_TOP_RESULT_STEP : s));
+    .map((s) => (s === VERDICT_NEXT_STEPS.pass[0] && !topIsClaim ? NEUTRAL_TOP_RESULT_STEP : s))
+    // N1: a top claim whose support is not independent executing models is not "the top consensus claim".
+    .map((s) => (s === VERDICT_NEXT_STEPS.pass[0] && topIndependence ? QUALIFIED_TOP_NEXT_STEP : s));
   const verdictCard: AdaptiveVerdictCard = { ...card, ...top, ...key, caveat: null, recommendedNextSteps: steps };
   // The contested note is restated from the joined row only; the caveat is model-written and withheld.
   if (card.topConsensus !== NO_CONSENSUS_IDENTIFIED && !top.topConsensusContested) delete verdictCard.topConsensusContested;
   delete verdictCard.caveatSource;
   const shownKinds = [...(card.topConsensus !== NO_CONSENSUS_IDENTIFIED ? [topKind] : []), ...(card.keyDisagreement ? [keyKind] : [])];
   const sectionHeading = shownKinds.length > 0 ? rowKindsHeading(shownKinds, VERDICT_SECTION_HEADINGS) : noClaimRows ? VERDICT_SECTION_HEADINGS.other : VERDICT_SECTION_HEADINGS.claim;
-  return { verdictCard, panelVerdict, verdict: { topHeading, keyHeading, noKeyText: noClaimRows ? NO_UNRESOLVED_ROW : NO_RECORDED_OPPOSING_POSITIONS, topIsClaim, topLabel: rowKindLabel(topKind, CLAIM_LABEL), keyLabel: rowKindLabel(keyKind, CLAIM_LABEL), sectionHeading } };
+  return {
+    verdictCard,
+    panelVerdict,
+    verdict: {
+      topHeading,
+      keyHeading,
+      noKeyText: noClaimRows ? NO_UNRESOLVED_ROW : NO_RECORDED_OPPOSING_POSITIONS,
+      topIsClaim,
+      topLabel: rowKindLabel(topKind, CLAIM_LABEL),
+      keyLabel: rowKindLabel(keyKind, CLAIM_LABEL),
+      sectionHeading,
+      ...(topIndependence ? { topIndependence } : {}),
+    },
+  };
 }
 
 export const TOP_MAJORITY_HEADING = "Top majority-supported claim";

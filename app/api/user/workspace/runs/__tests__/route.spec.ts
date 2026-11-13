@@ -480,7 +480,13 @@ describe("GET /api/user/workspace/runs — pagination invariants", () => {
 
 describe("GET /api/user/workspace/runs — DTO shape", () => {
   it("returns the expected summary fields, no raw Firestore doc, no internal fields", async () => {
-    seedRun("run-1", UID, WS_ID, ts(1000), { question: "What is the capital of France?", selectedModels: ["chatgpt", "claude"], synthesisConsensusSummary: { overallConsensusScore: 88 }, governanceStatus: "approved" });
+    // Two independent executing models persisted, each with its runtime provider (C-c CC-01: the shared gate) → the
+    // stored score is listed.
+    const perModel = [
+      { modelId: "chatgpt", status: "ok", rawTextTruncated: "A", provider: "openai" },
+      { modelId: "claude", status: "ok", rawTextTruncated: "B", provider: "anthropic" },
+    ];
+    seedRun("run-1", UID, WS_ID, ts(1000), { question: "What is the capital of France?", selectedModels: ["chatgpt", "claude"], runDocument: { perModel }, synthesisConsensusSummary: { overallConsensusScore: 88 }, governanceStatus: "approved" });
     const res = await GET(buildRequest());
     const json = await res.json();
     expect(json.items[0]).toEqual({
@@ -489,10 +495,18 @@ describe("GET /api/user/workspace/runs — DTO shape", () => {
       question: "What is the capital of France?",
       selectedModels: ["chatgpt", "claude"],
       status: "complete",
+      modelsOk: 2,
       modelsTotal: 2,
       synthesisConsensusScore: 88,
       governanceStatus: "approved",
     });
+  });
+
+  it("withholds a stored score whose run lacks persisted execution identity (no perModel rows)", async () => {
+    seedRun("run-1", UID, WS_ID, ts(1000), { question: "Q", selectedModels: ["chatgpt", "claude"], synthesisConsensusSummary: { overallConsensusScore: 88 } });
+    const json = await (await GET(buildRequest())).json();
+    expect(json.items[0].synthesisConsensusScore).toBeUndefined();
+    expect(json.items[0].synthesisConsensusWithheld).toBe("independence_unverified");
   });
 
   it("adaptive marker included only when present", async () => {

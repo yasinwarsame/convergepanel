@@ -57,11 +57,18 @@ class FirestoreError extends Error {
  * test that inspects the transaction's own buffered writes (`txCreateLog` /
  * `txSetLog`) can tell the difference. That is the point.
  */
-function makeDocRef(collectionName: string, docId: string) {
+function makeDocRef(collectionName: string, docId: string): any {
   return {
     __collection: collectionName,
     __id: docId,
     id: docId,
+    // Order 41 D (#314): subcollections (the display record `runs/{id}/adaptiveDisplayResults/v1`) get their own store,
+    // keyed by the full collection path, created on first use.
+    collection: (sub: string) => {
+      const path = `${collectionName}/${docId}/${sub}`;
+      stores[path] ??= new Map();
+      return { doc: (subId: string) => makeDocRef(path, subId) };
+    },
     get: async () => {
       const entry = stores[collectionName].get(docId);
       return { exists: entry !== undefined, data: () => entry?.data, id: docId };

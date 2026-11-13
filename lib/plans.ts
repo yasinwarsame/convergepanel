@@ -8,6 +8,8 @@
  * All other modules must import from here - never hardcode plan limits elsewhere.
  */
 
+import { GEMINI_DISPLAY_NAME } from "@/lib/models/gemini";
+
 export type PlanId = "free" | "lite" | "full";
 export type BillingInterval = "month" | "year";
 
@@ -90,7 +92,7 @@ export const PLAN_CONFIGS: Record<PlanId, PlanConfig> = {
     advancedExportEnabled: true,
     features: [
       "Up to 80 panel runs / month",
-      "Use 3 models at a time (e.g., GPT 5.2 + Claude Opus 4.5 + Grok 4)",
+      "Use 3 models at a time (e.g., GPT-4o mini + Claude Haiku 4.5 + Grok 4.3)",
       "Full unified answer + trust summary",
       "Agreement / disagreement map across all models",
       "Save and revisit past panels - Available in next release",
@@ -116,7 +118,7 @@ export const PLAN_CONFIGS: Record<PlanId, PlanConfig> = {
     teamGovernanceAccess: true,
     features: [
       "Up to 150 panel runs / month",
-      "Use all 5 models at once (GPT 5.2, Claude Opus 4.5, Grok 4, Perplexity Pro, Gemini 3 Pro)",
+      `Use all 5 models at once (GPT-4o mini, Claude Haiku 4.5, Grok 4.3, Perplexity Sonar, ${GEMINI_DISPLAY_NAME})`,
       "Rich unified answer with strong consensus vs. contested areas",
       "Deep agreement / disagreement map across all models",
       "Compare View to see answers side-by-side",

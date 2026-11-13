@@ -1,0 +1,591 @@
+{
+ "_source": "generated 2026-11-08 by phase0ClientGateCallers.spec.tsx with PHASE0_GOLDEN_OUT in git-archive exports: base = 35933c8 (asserted), subject = b894828 (record only)",
+ "base": {
+  "history:FC2": {
+   "runRead": 1,
+   "resultsDisplayMounted": false,
+   "clientReport": {
+    "clusters": [
+     [
+      "chatgpt",
+      "claude"
+     ],
+     [
+      "chatgpt"
+     ],
+     [
+      "claude"
+     ]
+    ],
+    "trustSummary": {
+     "strongConsensus": 1,
+     "contestedAreas": 0,
+     "uncertainPoints": 2
+    }
+   },
+   "synthesisPosts": [
+    {
+     "url": "/api/synthesize-panel",
+     "resultModelIds": [
+      "chatgpt",
+      "claude"
+     ],
+     "agreementClusterModelIds": [
+      [
+       "chatgpt",
+       "claude"
+      ],
+      [
+       "chatgpt"
+      ],
+      [
+       "claude"
+      ]
+     ]
+    }
+   ],
+   "preflightRefusal": null,
+   "gateStatus": null
+  },
+  "history:FC2_NOPROV": {
+   "runRead": 1,
+   "resultsDisplayMounted": false,
+   "clientReport": {
+    "clusters": [
+     [
+      "chatgpt",
+      "claude"
+     ],
+     [
+      "chatgpt"
+     ],
+     [
+      "claude"
+     ]
+    ],
+    "trustSummary": {
+     "strongConsensus": 1,
+     "contestedAreas": 0,
+     "uncertainPoints": 2
+    }
+   },
+   "synthesisPosts": [
+    {
+     "url": "/api/synthesize-panel",
+     "resultModelIds": [
+      "chatgpt",
+      "claude"
+     ],
+     "agreementClusterModelIds": [
+      [
+       "chatgpt",
+       "claude"
+      ],
+      [
+       "chatgpt"
+      ],
+      [
+       "claude"
+      ]
+     ]
+    }
+   ],
+   "preflightRefusal": null,
+   "gateStatus": null
+  },
+  "history:PC3": {
+   "runRead": 1,
+   "resultsDisplayMounted": false,
+   "clientReport": {
+    "clusters": [
+     [
+      "chatgpt",
+      "claude",
+      "grok"
+     ],
+     [
+      "chatgpt",
+      "grok"
+     ],
+     [
+      "claude"
+     ]
+    ],
+    "trustSummary": {
+     "strongConsensus": 2,
+     "contestedAreas": 0,
+     "uncertainPoints": 1
+    }
+   },
+   "synthesisPosts": [
+    {
+     "url": "/api/synthesize-panel",
+     "resultModelIds": [
+      "chatgpt",
+      "claude",
+      "grok"
+     ],
+     "agreementClusterModelIds": [
+      [
+       "chatgpt",
+       "claude",
+       "grok"
+      ],
+      [
+       "chatgpt",
+       "grok"
+      ],
+      [
+       "claude"
+      ]
+     ]
+    }
+   ],
+   "preflightRefusal": null,
+   "gateStatus": null
+  },
+  "history:IND2": {
+   "runRead": 1,
+   "resultsDisplayMounted": false,
+   "clientReport": {
+    "clusters": [
+     [
+      "chatgpt",
+      "claude"
+     ],
+     [
+      "chatgpt"
+     ],
+     [
+      "claude"
+     ]
+    ],
+    "trustSummary": {
+     "strongConsensus": 1,
+     "contestedAreas": 0,
+     "uncertainPoints": 2
+    }
+   },
+   "synthesisPosts": [
+    {
+     "url": "/api/synthesize-panel",
+     "resultModelIds": [
+      "chatgpt",
+      "claude"
+     ],
+     "agreementClusterModelIds": [
+      [
+       "chatgpt",
+       "claude"
+      ],
+      [
+       "chatgpt"
+      ],
+      [
+       "claude"
+      ]
+     ]
+    }
+   ],
+   "preflightRefusal": null,
+   "gateStatus": null
+  },
+  "history:ONE": {
+   "runRead": 1,
+   "resultsDisplayMounted": false,
+   "clientReport": null,
+   "synthesisPosts": [],
+   "preflightRefusal": null,
+   "gateStatus": null
+  },
+  "history:EMPTY_TEXT": {
+   "runRead": 1,
+   "resultsDisplayMounted": false,
+   "clientReport": null,
+   "synthesisPosts": [],
+   "preflightRefusal": null,
+   "gateStatus": null
+  },
+  "live:IND2": {
+   "runRead": 1,
+   "resultsDisplayMounted": true,
+   "clientReport": {
+    "clusters": [
+     [
+      "chatgpt",
+      "claude"
+     ],
+     [
+      "chatgpt"
+     ],
+     [
+      "claude"
+     ]
+    ],
+    "trustSummary": {
+     "strongConsensus": 1,
+     "contestedAreas": 0,
+     "uncertainPoints": 2
+    }
+   },
+   "synthesisPosts": [
+    {
+     "url": "/api/synthesize-panel",
+     "resultModelIds": [
+      "chatgpt",
+      "claude"
+     ],
+     "agreementClusterModelIds": []
+    }
+   ],
+   "preflightRefusal": null,
+   "gateStatus": "SAFE_TO_EXPLORE"
+  },
+  "live:MIX4": {
+   "runRead": 1,
+   "resultsDisplayMounted": true,
+   "clientReport": {
+    "clusters": [
+     [
+      "chatgpt",
+      "claude",
+      "gemini",
+      "grok"
+     ],
+     [
+      "chatgpt",
+      "gemini",
+      "grok"
+     ],
+     [
+      "claude"
+     ]
+    ],
+    "trustSummary": {
+     "strongConsensus": 2,
+     "contestedAreas": 0,
+     "uncertainPoints": 1
+    }
+   },
+   "synthesisPosts": [
+    {
+     "url": "/api/synthesize-panel",
+     "resultModelIds": [
+      "chatgpt",
+      "claude",
+      "grok",
+      "gemini"
+     ],
+     "agreementClusterModelIds": []
+    }
+   ],
+   "preflightRefusal": null,
+   "gateStatus": "SAFE_TO_EXPLORE"
+  },
+  "live:MIX3_NOPROV": {
+   "runRead": 1,
+   "resultsDisplayMounted": true,
+   "clientReport": {
+    "clusters": [
+     [
+      "chatgpt",
+      "claude",
+      "grok"
+     ],
+     [
+      "chatgpt",
+      "grok"
+     ],
+     [
+      "claude"
+     ]
+    ],
+    "trustSummary": {
+     "strongConsensus": 2,
+     "contestedAreas": 0,
+     "uncertainPoints": 1
+    }
+   },
+   "synthesisPosts": [
+    {
+     "url": "/api/synthesize-panel",
+     "resultModelIds": [
+      "chatgpt",
+      "claude",
+      "grok"
+     ],
+     "agreementClusterModelIds": []
+    }
+   ],
+   "preflightRefusal": null,
+   "gateStatus": "SAFE_TO_EXPLORE"
+  },
+  "live:PC3": {
+   "runRead": 1,
+   "resultsDisplayMounted": true,
+   "clientReport": "not-called",
+   "synthesisPosts": [],
+   "preflightRefusal": null,
+   "gateStatus": null
+  },
+  "live:FC2": {
+   "runRead": 1,
+   "resultsDisplayMounted": true,
+   "clientReport": "not-called",
+   "synthesisPosts": [],
+   "preflightRefusal": null,
+   "gateStatus": null
+  }
+ },
+ "subject": {
+  "history:FC2": {
+   "runRead": 1,
+   "resultsDisplayMounted": false,
+   "clientReport": null,
+   "synthesisPosts": [],
+   "preflightRefusal": null,
+   "gateStatus": null
+  },
+  "history:FC2_NOPROV": {
+   "runRead": 1,
+   "resultsDisplayMounted": false,
+   "clientReport": null,
+   "synthesisPosts": [],
+   "preflightRefusal": null,
+   "gateStatus": null
+  },
+  "history:PC3": {
+   "runRead": 1,
+   "resultsDisplayMounted": false,
+   "clientReport": {
+    "clusters": [
+     [
+      "chatgpt",
+      "grok"
+     ],
+     [
+      "chatgpt",
+      "grok"
+     ]
+    ],
+    "trustSummary": {
+     "strongConsensus": 2,
+     "contestedAreas": 0,
+     "uncertainPoints": 0
+    }
+   },
+   "synthesisPosts": [
+    {
+     "url": "/api/synthesize-panel",
+     "resultModelIds": [
+      "chatgpt",
+      "claude",
+      "grok"
+     ],
+     "agreementClusterModelIds": [
+      [
+       "chatgpt",
+       "grok"
+      ],
+      [
+       "chatgpt",
+       "grok"
+      ]
+     ]
+    }
+   ],
+   "preflightRefusal": null,
+   "gateStatus": null
+  },
+  "history:IND2": {
+   "runRead": 1,
+   "resultsDisplayMounted": false,
+   "clientReport": {
+    "clusters": [
+     [
+      "chatgpt",
+      "claude"
+     ],
+     [
+      "chatgpt"
+     ],
+     [
+      "claude"
+     ]
+    ],
+    "trustSummary": {
+     "strongConsensus": 1,
+     "contestedAreas": 0,
+     "uncertainPoints": 2
+    }
+   },
+   "synthesisPosts": [
+    {
+     "url": "/api/synthesize-panel",
+     "resultModelIds": [
+      "chatgpt",
+      "claude"
+     ],
+     "agreementClusterModelIds": [
+      [
+       "chatgpt",
+       "claude"
+      ],
+      [
+       "chatgpt"
+      ],
+      [
+       "claude"
+      ]
+     ]
+    }
+   ],
+   "preflightRefusal": null,
+   "gateStatus": null
+  },
+  "history:ONE": {
+   "runRead": 1,
+   "resultsDisplayMounted": false,
+   "clientReport": null,
+   "synthesisPosts": [],
+   "preflightRefusal": null,
+   "gateStatus": null
+  },
+  "history:EMPTY_TEXT": {
+   "runRead": 1,
+   "resultsDisplayMounted": false,
+   "clientReport": null,
+   "synthesisPosts": [],
+   "preflightRefusal": null,
+   "gateStatus": null
+  },
+  "live:IND2": {
+   "runRead": 1,
+   "resultsDisplayMounted": true,
+   "clientReport": {
+    "clusters": [
+     [
+      "chatgpt",
+      "claude"
+     ],
+     [
+      "chatgpt"
+     ],
+     [
+      "claude"
+     ]
+    ],
+    "trustSummary": {
+     "strongConsensus": 1,
+     "contestedAreas": 0,
+     "uncertainPoints": 2
+    }
+   },
+   "synthesisPosts": [
+    {
+     "url": "/api/synthesize-panel",
+     "resultModelIds": [
+      "chatgpt",
+      "claude"
+     ],
+     "agreementClusterModelIds": []
+    }
+   ],
+   "preflightRefusal": null,
+   "gateStatus": "SAFE_TO_EXPLORE"
+  },
+  "live:MIX4": {
+   "runRead": 1,
+   "resultsDisplayMounted": true,
+   "clientReport": {
+    "clusters": [
+     [
+      "chatgpt",
+      "claude",
+      "grok"
+     ],
+     [
+      "chatgpt",
+      "grok"
+     ],
+     [
+      "claude"
+     ]
+    ],
+    "trustSummary": {
+     "strongConsensus": 2,
+     "contestedAreas": 0,
+     "uncertainPoints": 1
+    }
+   },
+   "synthesisPosts": [
+    {
+     "url": "/api/synthesize-panel",
+     "resultModelIds": [
+      "chatgpt",
+      "claude",
+      "grok",
+      "gemini"
+     ],
+     "agreementClusterModelIds": []
+    }
+   ],
+   "preflightRefusal": null,
+   "gateStatus": "SAFE_TO_EXPLORE"
+  },
+  "live:MIX3_NOPROV": {
+   "runRead": 1,
+   "resultsDisplayMounted": true,
+   "clientReport": {
+    "clusters": [
+     [
+      "chatgpt",
+      "claude",
+      "grok"
+     ],
+     [
+      "chatgpt",
+      "grok"
+     ],
+     [
+      "claude"
+     ]
+    ],
+    "trustSummary": {
+     "strongConsensus": 2,
+     "contestedAreas": 0,
+     "uncertainPoints": 1
+    }
+   },
+   "synthesisPosts": [
+    {
+     "url": "/api/synthesize-panel",
+     "resultModelIds": [
+      "chatgpt",
+      "claude",
+      "grok"
+     ],
+     "agreementClusterModelIds": []
+    }
+   ],
+   "preflightRefusal": null,
+   "gateStatus": "SAFE_TO_EXPLORE"
+  },
+  "live:PC3": {
+   "runRead": 1,
+   "resultsDisplayMounted": true,
+   "clientReport": "not-called",
+   "synthesisPosts": [],
+   "preflightRefusal": null,
+   "gateStatus": null
+  },
+  "live:FC2": {
+   "runRead": 1,
+   "resultsDisplayMounted": true,
+   "clientReport": "not-called",
+   "synthesisPosts": [],
+   "preflightRefusal": null,
+   "gateStatus": null
+  }
+ }
+}

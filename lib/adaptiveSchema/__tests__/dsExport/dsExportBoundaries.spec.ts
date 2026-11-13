@@ -39,13 +39,25 @@ const UNCHANGED: [string, string][] = [
   ["lib/adaptiveSchema/reportSummary.ts", "3acc265a3cc1ddf994d94bc09a48666b5a366980d7fe6e1f399778bbc12e948d"],
   ["lib/adaptiveSchema/exportContentDerivation.ts", "4f520bf8c61cba47e8508da6211f155dd281886d624037239f746bd215e4d298"],
   ["lib/adaptiveSchema/reportStatus.ts", "88dc403ded11dc7a52811d9a7102aa7f697abb69ccc5a19d52e639369ca5d957"],
-  ["firestore.rules", "7edff7ebf3a32fb3d646c53c5e9898718bc559aa94a969880af40e0bf2a594ed"],
+  // OWNER-AUTHORIZED EXCEPTION (2026-11-09, SEC-2 / S4 provider-key boundary). Was byte-identical to 0249a4e5, sha256
+  // 7edff7ebf3a32fb3d646c53c5e9898718bc559aa94a969880af40e0bf2a594ed. The only change: `isAdminClaim()` and the
+  // `appConfig/modelKeys` admin-claim grant removed, replaced by a deny-only `match /appConfig/{doc=**}`. Re-pinned to
+  // the exact new content (git blob 747ccef5). No other frozen file changes.
+  ["firestore.rules", "7cf97ec939cd9b88dc605fa950fd117a7ff815457cd930a87fa63a6cf8d58a1d"],
   ["lib/governance/auditLog.ts", "dc235b536961127e58af1c95c22e6ffd78b301a694b11f4668ec2973588d68db"],
   ["lib/env.ts", "8c824e1ef193bb13a128edecddfef1665564bb76a97a734d4bd913711386688a"],
   ["lib/adaptiveSchema/dsProvenanceRouteAdapter.ts", "0c8c4050a8ec1011471053d09a616326955e8ff4b6084474e32063091562f2c5"],
   ["lib/adaptiveSchema/dsProvenanceViewMin.ts", "c069937e471802bba242da41b17857c30fc1058784cb14379738e28eca5b03df"],
   ["lib/adaptiveSchema/exportGeneratedBy.ts", "dfd7e1dfe4d7f635962d8bdacbbc013394ca0c61770b055638397964f19fbc6c"],
-  ["lib/adaptiveSchema/exportRunProvenance.ts", "eed9dd40aab626daa2aa88aaef16f707a05643d432505bb6b2adb8cbd34a5028"],
+  // Order 29 (C-a closeout, M-1 / m-1; owner Option (a)): frozen provenance version 2 — every entry also freezes the
+  // slot's recorded call outcome (exact persisted-status match) and the D-5 class of its persisted text, plus the
+  // version marker. The identity facts, the JSON export's provenance.run and the display lines are unchanged
+  // (readFrozenRunProvenance is the version-1 projection; exportRunProvenance.spec.ts and exportOutcomeIndependence.spec.tsx).
+  // Was eed9dd40aab626daa2aa88aaef16f707a05643d432505bb6b2adb8cbd34a5028 (byte-identical to 0249a4e5).
+  // Order 30 (A3 / n-4): the map is the ONE shared module lib/panel/persistedStatusOutcome.ts (same object, re-exported)
+  // and a recorded outcome is read back only inside a value carrying the literal version marker 2. Freeze output, the
+  // identity projection and the display lines are unchanged. Was 360550c46acd9b280810d2aa11e8e65dc5b7c39d6fe0a5a70ce89ce7d1c29edb.
+  ["lib/adaptiveSchema/exportRunProvenance.ts", "e43b5a67df2ec0d4dbc09fd1915f96c8267577e8723c50a7940bd231c9b5e333"],
 ];
 
 /**

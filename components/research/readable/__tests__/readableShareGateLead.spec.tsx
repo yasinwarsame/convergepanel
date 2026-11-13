@@ -127,11 +127,11 @@ function outputs(rec: any, base: string, question: string, readable?: any) {
   const rows = slotRows(base);
   const memoInput = buildAdaptiveMemoInput(question, rec.synthesisReport, rows.map((r: any) => r.modelId), "run-290", null, undefined, readable);
   return {
-    markdown: buildAdaptiveSynthesisMarkdown(question, rec.synthesisReport, undefined, readable),
+    markdown: buildAdaptiveSynthesisMarkdown(question, rec.synthesisReport, undefined, undefined, undefined, readable),
     memoInput,
     memo: normMemo(generateVerificationMemo(memoInput)),
-    linkedin: buildAdaptiveLinkedInPost(question, rec.synthesisReport, undefined, readable),
-    x: buildAdaptiveXPost(question, rec.synthesisReport, undefined, readable),
+    linkedin: buildAdaptiveLinkedInPost(question, rec.synthesisReport, undefined, undefined, readable),
+    x: buildAdaptiveXPost(question, rec.synthesisReport, undefined, undefined, readable),
   };
 }
 
@@ -245,7 +245,7 @@ describe("review of 8def047 repro: the complete readable copied Markdown, openin
       "Unresolved load-bearing claim:",
       "- “Tariffs protect domestic manufacturing jobs” (split: 1 of 5 dispatched models support it and 1 disputes it)",
     ];
-    expect(buildAdaptiveSynthesisMarkdown(QUESTION, rec.synthesisReport, undefined, p).split("\n")).toEqual([
+    expect(buildAdaptiveSynthesisMarkdown(QUESTION, rec.synthesisReport, undefined, undefined, undefined, p).split("\n")).toEqual([
       "# Synthesis Report",
       "",
       "**Question:** Does remote work change productivity?",
@@ -304,7 +304,7 @@ describe("review of 8def047 repro: the complete readable copied Markdown, openin
     delete rec.synthesisReport.presentation;
     const p = presentationOf(rec);
     expect(p.status).toBe("unavailable");
-    const lines = buildAdaptiveSynthesisMarkdown(QUESTION, rec.synthesisReport, undefined, p).split("\n");
+    const lines = buildAdaptiveSynthesisMarkdown(QUESTION, rec.synthesisReport, undefined, undefined, undefined, p).split("\n");
     expect(lines.slice(0, 8)).toEqual(["# Synthesis Report", "", "**Question:** Does remote work change productivity?", "", BANNER, "", NOTE, ""]);
     const es = lines.indexOf("## Executive Summary");
     expect(lines.slice(es, es + 4)).toEqual(["## Executive Summary", "**Stored executive summary (historical; inconsistent with recorded inputs):**", FAIL_TEMPLATE, ""]);
@@ -320,7 +320,7 @@ describe("review of 8def047 repro: the complete readable copied Markdown, openin
     rec.synthesisReport.executiveSummary = "";
     const p = presentationOf(rec);
     expect(p.status).toBe("unavailable");
-    const lines = buildAdaptiveSynthesisMarkdown(QUESTION, rec.synthesisReport, undefined, p).split("\n");
+    const lines = buildAdaptiveSynthesisMarkdown(QUESTION, rec.synthesisReport, undefined, undefined, undefined, p).split("\n");
     const es = lines.indexOf("## Executive Summary");
     expect(lines.slice(es, es + 4)).toEqual(["## Executive Summary", "", "", "## Where models agree"]);
     expect(lines).not.toContain("**Stored executive summary (historical; inconsistent with recorded inputs):**");
@@ -334,7 +334,7 @@ describe("review of 8def047 repro: the complete readable copied Markdown, openin
     delete rec.synthesisReport.presentation.disagreementPositionVersion;
     const p = presentationOf(rec);
     expect(p.status).toBe("unavailable");
-    const lines = buildAdaptiveSynthesisMarkdown(QUESTION, rec.synthesisReport, undefined, p).split("\n");
+    const lines = buildAdaptiveSynthesisMarkdown(QUESTION, rec.synthesisReport, undefined, undefined, undefined, p).split("\n");
     expect(lines.slice(0, 8)).toEqual(["# Synthesis Report", "", "**Question:** Does remote work change productivity?", "", BANNER, "", NOTE, ""]);
     const es = lines.indexOf("## Executive Summary");
     expect(lines[es + 1]).toBe("**Stored executive summary (historical; inconsistent with recorded inputs):**");
@@ -407,7 +407,7 @@ describe("readable X post: at most 280 characters, the brand kept, the gate line
             const rec = record(n);
             shape(rec);
             if (rec.synthesisReport.presentation?.disagreementPositionVersion) continue; // the marked builder has its own budget
-            const x = buildAdaptiveXPost(q, rec.synthesisReport, undefined, g as any);
+            const x = buildAdaptiveXPost(q, rec.synthesisReport, undefined, undefined, g as any);
             const gateLine = `${g.badge}${g.status === "caution" ? " (requires further review)" : ""} · Certainty: ${pct(rec)}%`;
             checked += 1;
             expect(x.length).toBeLessThanOrEqual(280);
@@ -435,7 +435,7 @@ describe("readable X post: at most 280 characters, the brand kept, the gate line
     const rec = record("generic-splits");
     delete rec.synthesisReport.presentation;
     rec.synthesisReport.disagreements[0].topic = LONG_TOPIC;
-    const x = buildAdaptiveXPost(LONG_QUESTION, rec.synthesisReport, undefined, GATES[1] as any);
+    const x = buildAdaptiveXPost(LONG_QUESTION, rec.synthesisReport, undefined, undefined, GATES[1] as any);
     expect(x.length).toBeLessThanOrEqual(280);
     expect(x.endsWith("\n\nvia ConvergePanel")).toBe(true);
     expect(x).toContain(`Verification gate: Caution (requires further review) · Certainty: ${pct(rec)}%`);
@@ -447,7 +447,7 @@ describe("readable X post: at most 280 characters, the brand kept, the gate line
     delete rec.synthesisReport.presentation.verificationGate;
     delete rec.synthesisReport.presentation.disagreementPositionVersion;
     const p = presentationOf(rec);
-    const x = buildAdaptiveXPost(LONG_QUESTION, rec.synthesisReport, undefined, p);
+    const x = buildAdaptiveXPost(LONG_QUESTION, rec.synthesisReport, undefined, undefined, p);
     const split = rec.synthesisReport.presentation.disagree[0];
     expect(x.length).toBeLessThanOrEqual(280);
     expect(x.endsWith("\n\nvia ConvergePanel")).toBe(true);
@@ -463,7 +463,7 @@ describe("readable X post: at most 280 characters, the brand kept, the gate line
     delete rec.synthesisReport.presentation.disagreementPositionVersion;
     const p = presentationOf(rec);
     expect(p.status).toBe("unavailable");
-    expect(buildAdaptiveXPost(LONG_QUESTION, rec.synthesisReport, undefined, p)).toBe(
+    expect(buildAdaptiveXPost(LONG_QUESTION, rec.synthesisReport, undefined, undefined, p)).toBe(
       [
         "Asked a multi-model AI panel: \"Across the last two decades of peer-reviewed la…\"",
         "Verification gate: Unavailable · Certainty: 71%",
@@ -480,13 +480,13 @@ describe("readable X post: at most 280 characters, the brand kept, the gate line
     delete rec.synthesisReport.presentation.disagreementPositionVersion;
     rec.synthesisReport.presentation.disagree[0].result = `split: ${"x".repeat(200)}`;
     const p = presentationOf(rec);
-    expect(buildAdaptiveXPost(LONG_QUESTION, rec.synthesisReport, undefined, p)).toBe(["Asked a multi-model AI panel", "Verification gate: Unavailable · Certainty: 71%", "via ConvergePanel"].join("\n\n"));
+    expect(buildAdaptiveXPost(LONG_QUESTION, rec.synthesisReport, undefined, undefined, p)).toBe(["Asked a multi-model AI panel", "Verification gate: Unavailable · Certainty: 71%", "via ConvergePanel"].join("\n\n"));
   });
 
   it("a post that fits keeps the layout it had: the classic layout with the readable gate line", () => {
     const rec = record("generic-splits");
     delete rec.synthesisReport.presentation;
-    const x = buildAdaptiveXPost(QUESTION, rec.synthesisReport, undefined, GATES[1] as any);
+    const x = buildAdaptiveXPost(QUESTION, rec.synthesisReport, undefined, undefined, GATES[1] as any);
     expect(x).toBe(
       [`Asked a multi-model AI panel: "${QUESTION}"`, `Verification gate: Caution (requires further review) · Certainty: ${pct(rec)}%`, `Models split on: ${rec.synthesisReport.disagreements[0].topic}`, "via ConvergePanel"].join("\n\n")
     );

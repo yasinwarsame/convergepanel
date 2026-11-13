@@ -13,7 +13,7 @@ export const metadata: Metadata = {
 const MODEL_NOTES: Record<string, string> = {
   chatgpt: "Broad knowledge and reasoning.",
   claude: "Long-form analysis and careful phrasing.",
-  grok: "Strong on timely and open-web context.",
+  grok: "Fast reasoning; often contrarian.",
   perplexity: "Research-style answers with citations when available.",
   gemini: "Multimodal and general reasoning.",
 };

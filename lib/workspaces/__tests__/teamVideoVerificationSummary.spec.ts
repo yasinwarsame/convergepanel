@@ -40,7 +40,10 @@ describe("accepted rows", () => {
       fileName: "clip.mp4",
       verdict: "authentic_captured",
       contentType: "camera_footage",
-      consensusScore: 88,
+      // C-b (CB-18, PQ-2 (a) strict): video rows record no provider, so the shared gate never verifies them — the
+      // stored score (88) is withheld from the list row; the stored record is unchanged.
+      consensusScore: null,
+      consensusWithheld: "independence_unverified",
       confidenceLabel: "High",
       evidenceQuality: "strong",
       frameCount: 8,
@@ -85,7 +88,10 @@ describe("accepted rows", () => {
   });
 
   it.each([0, 100])("consensusScore boundary %i is accepted", (consensusScore) => {
-    expect(build({ consensusScore })?.consensusScore).toBe(consensusScore);
+    // Accepted as a valid stored value (the row is emitted), then withheld from presentation (C-b CB-18).
+    const row = build({ consensusScore });
+    expect(row).not.toBeNull();
+    expect([row?.consensusScore, row?.consensusWithheld]).toEqual([null, "independence_unverified"]);
   });
 
   it("frameCount 0 is accepted (a real value, not a fallback)", () => {

@@ -23,7 +23,7 @@ import { callGemini } from "@/lib/connectors/gemini";
 import { finalizeAdaptiveRun } from "@/lib/adaptiveSchema/orchestrate";
 import { getResultSchema } from "@/lib/adaptiveSchema/schemaRegistry";
 import { presentPositionSafeReport } from "@/lib/adaptiveSchema/positionPresentation";
-import { buildAdaptiveXPost, markedXFallback, xFit, xPostFits, xWeightedLength, X_TEXT_LIMIT } from "@/lib/adaptiveSchema/shareBuilders";
+import { buildAdaptiveXPost, markedXFallback, xFit, xPostFits, xWeightedLength, X_ASKED, X_TEXT_LIMIT } from "@/lib/adaptiveSchema/shareBuilders";
 import { MAX_QUESTION_LENGTH } from "@/lib/security/requestValidation";
 import * as XW from "@/lib/adaptiveSchema/xWeightedText";
 import ListView, { NAMED_SOURCE_VALUES_TITLE } from "@/components/adaptive/ListView";
@@ -178,7 +178,7 @@ describe("MINOR 1: a marked X post with a split row always discloses it (the row
   });
 
   it("the defined fallback stays valid and claims nothing it omits", () => {
-    const f = markedXFallback("Verification gate: Caution (requires further review) · Certainty: 71%");
+    const f = markedXFallback("Verification gate: Caution (requires further review) · Certainty: 71%", X_ASKED);
     expect(xPostFits(f)).toBe(true);
     expect(f).not.toMatch(/Unresolved|unresolved row|panel result/);
   });

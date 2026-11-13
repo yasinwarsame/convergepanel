@@ -29,16 +29,125 @@ function slugTokens(slug: string): string[] {
     .filter((t) => t.length > 0 && !STOPWORDS.has(t));
 }
 
-function levenshtein(a: string, b: string): number {
-  const dp: number[][] = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
-  for (let i = 0; i <= a.length; i++) dp[i][0] = i;
-  for (let j = 0; j <= b.length; j++) dp[0][j] = j;
-  for (let i = 1; i <= a.length; i++) {
-    for (let j = 1; j <= b.length; j++) {
-      dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
-    }
+/**
+ * The largest integer d in [0, maxLen] with `d / maxLen <= ratio`, evaluated
+ * with exactly that floating-point expression (so the boundary matches the
+ * original `levenshtein(a, b) / maxLen <= ratio` test bit for bit), or -1 when
+ * no such d exists (negative or NaN ratio). For a fixed positive maxLen,
+ * `d / maxLen` is monotone non-decreasing in the integer d (IEEE division is
+ * correctly rounded, and rounding is monotone), so the d satisfying the test
+ * are exactly 0..k: `d / maxLen <= ratio` ⇔ `d <= k`. The Levenshtein
+ * distance never exceeds maxLen, so k is capped there.
+ *
+ * Exported for the differential tests only (issue #315).
+ */
+export function maxEditsWithinRatio(maxLen: number, ratio: number): number {
+  let k = Math.floor(ratio * maxLen);
+  if (!(k >= 0)) k = -1; // negative or NaN
+  if (k > maxLen) k = maxLen;
+  // floor(ratio * maxLen) can miss by one under rounding (0.35 * 180 = 62.99…, yet 63 / 180 <= 0.35),
+  // so settle k with the original expression itself.
+  while (k >= 0 && k / maxLen > ratio) k--;
+  while (k < maxLen && (k + 1) / maxLen <= ratio) k++;
+  return k;
+}
+
+/**
+ * Exact Levenshtein distance between a and b (over UTF-16 code units, as the
+ * original full-matrix version) when it is ≤ k; Infinity when it exceeds k.
+ * Bounded so long inputs cost O(n·k) time and O(m) memory instead of a full
+ * (n+1)×(m+1) matrix (issue #315):
+ *
+ * - A common prefix and suffix never change the distance, so they are stripped.
+ * - The distance is at least the length difference δ, so δ > k ⇒ Infinity.
+ * - A cell (i, j) on any alignment path of total cost ≤ k satisfies
+ *   |j−i| + |δ−(j−i)| ≤ k (its own cost is ≥ |j−i|, the rest ≥ |δ−(j−i)|),
+ *   i.e. −⌊(k−δ)/2⌋ ≤ j−i ≤ ⌊(k+δ)/2⌋. Only that diagonal band is computed;
+ *   cells outside it count as k+1. By induction every computed value is
+ *   ≥ min(true value, k+1) and equals the true value along an optimal path of
+ *   cost ≤ k, so the final cell is exact when the distance is ≤ k and > k
+ *   otherwise.
+ * - Every path crosses every row, so once every band cell of a row exceeds k
+ *   the distance exceeds k (Ukkonen's cut-off).
+ *
+ * Exported for the differential tests only (issue #315).
+ */
+export function boundedLevenshtein(a: string, b: string, k: number): number {
+  if (!(k >= 0)) return Number.POSITIVE_INFINITY;
+  k = Math.floor(k);
+
+  let start = 0;
+  let endA = a.length;
+  let endB = b.length;
+  while (start < endA && start < endB && a.charCodeAt(start) === b.charCodeAt(start)) start++;
+  while (endA > start && endB > start && a.charCodeAt(endA - 1) === b.charCodeAt(endB - 1)) {
+    endA--;
+    endB--;
   }
-  return dp[a.length][b.length];
+
+  // s is the shorter remainder (length n), t the longer (length m); both begin at offset `start`.
+  let s = a;
+  let t = b;
+  let n = endA - start;
+  let m = endB - start;
+  if (n > m) {
+    s = b;
+    t = a;
+    const tmp = n;
+    n = m;
+    m = tmp;
+  }
+  const delta = m - n;
+  if (delta > k) return Number.POSITIVE_INFINITY;
+  if (n === 0) return m;
+
+  const lowT = -Math.floor((k - delta) / 2);
+  const highT = Math.floor((k + delta) / 2);
+  const big = k + 1;
+  const tCodes = new Uint16Array(m);
+  for (let j = 0; j < m; j++) tCodes[j] = t.charCodeAt(start + j);
+  let prev = new Int32Array(m + 1);
+  let cur = new Int32Array(m + 1);
+  for (let j = 0; j <= m; j++) prev[j] = j <= highT ? j : big;
+
+  for (let i = 1; i <= n; i++) {
+    const ci = s.charCodeAt(start + i - 1);
+    let lo = i + lowT;
+    const hi = Math.min(m, i + highT);
+    let rowMin: number;
+    if (lo <= 0) {
+      cur[0] = i;
+      rowMin = i;
+      lo = 1;
+    } else {
+      cur[lo - 1] = big;
+      rowMin = big;
+    }
+    for (let j = lo; j <= hi; j++) {
+      let v = prev[j - 1] + (ci === tCodes[j - 1] ? 0 : 1);
+      const del = prev[j] + 1;
+      if (del < v) v = del;
+      const ins = cur[j - 1] + 1;
+      if (ins < v) v = ins;
+      cur[j] = v;
+      if (v < rowMin) rowMin = v;
+    }
+    if (hi < m) cur[hi + 1] = big;
+    if (rowMin > k) return Number.POSITIVE_INFINITY;
+    const swap = prev;
+    prev = cur;
+    cur = swap;
+  }
+  const d = prev[m];
+  return d <= k ? d : Number.POSITIVE_INFINITY;
+}
+
+/** `levenshtein(normA, normB) / maxLen <= ratio`, exactly as the original full-matrix test, without the full matrix. */
+function normalizedLevenshteinWithin(normA: string, normB: string, ratio: number): boolean {
+  const maxLen = Math.max(normA.length, normB.length);
+  if (!(maxLen > 0)) return false;
+  const k = maxEditsWithinRatio(maxLen, ratio);
+  return k >= 0 && boundedLevenshtein(normA, normB, k) <= k;
 }
 
 /** Exact match, normalized Levenshtein ≤ 0.3, or ≥50% shared token stem. Tuned for short self-assigned claim-id slugs (alignment.ts pass 1). */
@@ -48,8 +157,7 @@ export function slugsMatch(slugA: string, slugB: string): boolean {
   if (!normA || !normB) return false;
   if (normA === normB) return true;
 
-  const maxLen = Math.max(normA.length, normB.length);
-  if (maxLen > 0 && levenshtein(normA, normB) / maxLen <= 0.3) {
+  if (normalizedLevenshteinWithin(normA, normB, 0.3)) {
     return true;
   }
 
@@ -79,8 +187,7 @@ export function textsAreNearDuplicates(
   if (!normA || !normB) return false;
   if (normA === normB) return true;
 
-  const maxLen = Math.max(normA.length, normB.length);
-  if (maxLen > 0 && levenshtein(normA, normB) / maxLen <= opts.levenshteinMaxRatio) {
+  if (normalizedLevenshteinWithin(normA, normB, opts.levenshteinMaxRatio)) {
     return true;
   }
 

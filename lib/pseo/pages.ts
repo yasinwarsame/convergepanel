@@ -1630,7 +1630,7 @@ export const PAGES: PSEOPage[] = [
     problem:
       "Most people who've used AI to check a claim have had the same experience: they paste something into ChatGPT, get a confident-sounding answer, and aren't sure whether to trust it. The model doesn't tell you how certain it is. It doesn't tell you which parts of its answer are well-supported and which are speculative. And it doesn't tell you when other models would disagree.\n\nThis is a structural limitation of single-model AI, not a bug in any specific product. A language model generates the most plausible continuation of your prompt based on its training. If the claim you're checking is widely repeated in its training data — true or false — the model will affirm it confidently. If the claim is contested among experts, the model will often pick one side without signalling the underlying dispute.\n\nUnderstanding how multi-model AI verification works — what each model does when it evaluates a claim, how verdicts are combined, and what the output means — makes you a sharper reader of results. This guide walks through the mechanics.",
     solution:
-      "Multi-model claim verification runs the same claim through several independent AI systems simultaneously, then structures the comparison. Each model brings different training data, different reasoning patterns, and different tendencies when handling uncertainty. The result isn't 'five opinions averaged' — it's a structured map of where AI knowledge about a claim converges and where it doesn't.\n\nConvergePanel queries GPT-5.2, Claude Opus 4.5, Grok 4, Perplexity Pro, and Gemini 2.0 Flash independently — each returns a verdict (accurate, partially accurate, inaccurate, or unverifiable) with supporting evidence. The consensus score (0–100) quantifies agreement across the panel. The per-model breakdown shows exactly where alignment exists and where it breaks down, which is where your critical reading should focus.",
+      "Multi-model claim verification runs the same claim through several independent AI systems simultaneously, then structures the comparison. Each model brings different training data, different reasoning patterns, and different tendencies when handling uncertainty. The result isn't 'five opinions averaged' — it's a structured map of where AI knowledge about a claim converges and where it doesn't.\n\nConvergePanel queries GPT-4o mini, Claude Haiku 4.5, Grok 4.3, Perplexity Sonar, and Gemini 3.5 Flash-Lite independently — each returns a verdict (accurate, partially accurate, inaccurate, or unverifiable) with supporting evidence. The consensus score (0–100) quantifies agreement across the panel. The per-model breakdown shows exactly where alignment exists and where it breaks down, which is where your critical reading should focus.",
     workflow: [
       "Isolate the specific claim — strip context, attribution, and framing until you have the bare assertion you're testing",
       "Paste it verbatim into ConvergePanel's Claim Verification mode — phrasing affects model responses, so use the exact language from the original source",
@@ -1825,7 +1825,7 @@ export const PAGES: PSEOPage[] = [
     problem:
       "Viral claims travel six times faster than corrections. By the time a debunk circulates, the original claim has already reached millions. Most people don't share falsehoods maliciously — they share content that feels emotionally resonant, statistically surprising, or confirms what they already believe. The anxiety isn't 'am I malicious?' It's 'what if I'm wrong and people believe me?'\n\nThe instinctive fix — 'let me ask AI' — creates a false sense of security. A single AI model gives you a confident, fluent answer regardless of whether it has solid evidence. It won't tell you three other models disagree. It won't show you the uncertainty underneath the confidence. You've just added one more opinion to the pile.\n\nViral claims come in many forms: health statistics, financial claims, political quotes, AI capability claims, climate data, breaking news assertions. Each type carries specific patterns of misinformation that a general check can miss. A structured multi-model check is faster than opening five tabs — and more reliable than one.",
     solution:
-      "ConvergePanel's Claim Verification mode runs your claim through five AI models simultaneously — GPT-5.2, Claude Opus 4.5, Grok 4, Perplexity Pro, and Gemini 2.0 Flash. Each rates it independently: accurate, partially accurate, inaccurate, or unverifiable. The consensus score (0–100) tells you at a glance how much agreement there is.\n\nA score above 80 means the models broadly agree the claim is well-supported. Below 50 means significant disagreement — that's the signal to pause before sharing. The per-model breakdown shows exactly where the split is and what evidence each model cites. For topic-specific viral claims, see the guides below for health, finance, political, AI, and climate claims.",
+      "ConvergePanel's Claim Verification mode runs your claim through five AI models simultaneously — GPT-4o mini, Claude Haiku 4.5, Grok 4.3, Perplexity Sonar, and Gemini 3.5 Flash-Lite. Each rates it independently: accurate, partially accurate, inaccurate, or unverifiable. The consensus score (0–100) tells you at a glance how much agreement there is.\n\nA score above 80 means the models broadly agree the claim is well-supported. Below 50 means significant disagreement — that's the signal to pause before sharing. The per-model breakdown shows exactly where the split is and what evidence each model cites. For topic-specific viral claims, see the guides below for health, finance, political, AI, and climate claims.",
     workflow: [
       "Copy the exact claim — the headline, quote, or statistic you want to check",
       "Paste it into ConvergePanel's Claim Verification mode",
@@ -3388,7 +3388,7 @@ export const PAGES: PSEOPage[] = [
     audience: "Researchers and knowledge workers",
     audienceDetail: "Anyone choosing between AI models for research work and wanting to understand their differences",
     problem:
-      "Each major AI model has been trained differently, has different relationships with web access, and has different tendencies when handling complex or contested research questions. Using only one model means inheriting its specific blind spots without realizing it.\n\nGPT-5.2 can overclaim on recent events where training data is thin. Claude Opus 4.5 sometimes hedges on questions where a clear answer exists. Gemini 2.0 Flash can vary in depth on niche topics. Grok 4's real-time web access makes it valuable for recent events but prone to editorializing. Perplexity Pro's citation-first approach is useful for source-finding but treats web consensus as truth.\n\nNone of these tendencies makes any model bad. But they make the choice of model consequential — and they make single-model research inherently incomplete.",
+      "Each major AI model has been trained differently, has different relationships with web access, and has different tendencies when handling complex or contested research questions. Using only one model means inheriting its specific blind spots without realizing it.\n\nGPT-4o mini can overclaim on recent events where training data is thin. Claude Haiku 4.5 sometimes hedges on questions where a clear answer exists. Gemini 3.5 Flash-Lite can vary in depth on niche topics. Grok 4.3 reasons quickly and offers contrarian takes but is prone to editorializing. Perplexity Sonar's citation-first approach is useful for source-finding but treats web consensus as truth.\n\nNone of these tendencies makes any model bad. But they make the choice of model consequential — and they make single-model research inherently incomplete.",
     solution:
       "ConvergePanel runs your research question through all five models and synthesizes the results: where they agree, where they split, what each emphasizes, and what the disagreements reveal. You get the comparison without opening five separate tabs.",
     workflow: [
@@ -3417,11 +3417,11 @@ export const PAGES: PSEOPage[] = [
     comparisonTable: {
       headers: ["Model", "Best at", "Tends to", "Watch for"],
       rows: [
-        ["GPT-5.2", "Breadth, structured output", "Overclaim on recent events", "Confident errors on niche topics"],
-        ["Claude Opus 4.5", "Nuanced reasoning, caveats", "Hedge when a clear answer exists", "Over-caution on contested topics"],
-        ["Gemini 2.0 Flash", "Speed, recent data access", "Vary in depth on niche queries", "Inconsistency across question types"],
-        ["Grok 4", "Real-time web, contrarian takes", "Editorialize on contested topics", "Political bias on sensitive questions"],
-        ["Perplexity Pro", "Live citations, source-first", "Treat web consensus as truth", "Shallow reasoning depth on complex claims"],
+        ["GPT-4o mini", "Breadth, structured output", "Overclaim on recent events", "Confident errors on niche topics"],
+        ["Claude Haiku 4.5", "Nuanced reasoning, caveats", "Hedge when a clear answer exists", "Over-caution on contested topics"],
+        ["Gemini 3.5 Flash-Lite", "Speed, concise summaries", "Vary in depth on niche queries", "Inconsistency across question types"],
+        ["Grok 4.3", "Fast reasoning, contrarian takes", "Editorialize on contested topics", "Political bias on sensitive questions"],
+        ["Perplexity Sonar", "Live citations, source-first", "Treat web consensus as truth", "Shallow reasoning depth on complex claims"],
       ],
     },
     bodySections: [
@@ -3429,7 +3429,7 @@ export const PAGES: PSEOPage[] = [
         heading: "Why the tendencies don't average out on their own",
         paragraphs: [
           "It's tempting to assume that combining five models with different tendencies automatically cancels out their individual weaknesses. It doesn't — not without something structuring the comparison. Five models can still all miss the same recent event or share a training-data gap on a niche topic.",
-          "What multi-model comparison actually gives you is visibility into which tendency is showing up on a specific question: is Perplexity's citation confidence outrunning the actual source quality here, is Claude hedging on something that has a clear answer, is Grok's real-time access adding real signal or just more opinion? ConvergePanel's synthesis is built to surface that, not to hide it behind a single blended answer.",
+          "What multi-model comparison actually gives you is visibility into which tendency is showing up on a specific question: is Perplexity's citation confidence outrunning the actual source quality here, is Claude hedging on something that has a clear answer, is Grok's contrarian take adding real signal or just more opinion? ConvergePanel's synthesis is built to surface that, not to hide it behind a single blended answer.",
         ],
       },
     ],
@@ -8389,7 +8389,7 @@ export const PAGES: PSEOPage[] = [
       },
       {
         q: "Which AI model gives the best startup advice?",
-        a: "No single model is consistently best for startup analysis. GPT tends to be thorough and balanced; Claude adds nuance on risk and ethics; Gemini brings recent data; Grok is often more contrarian; Perplexity draws on current web sources. Together, they cover more of the relevant analytical landscape than any one of them alone.",
+        a: "No single model is consistently best for startup analysis. GPT tends to be thorough and balanced; Claude adds nuance on risk and ethics; Gemini gives concise summaries; Grok is often more contrarian; Perplexity draws on current web sources. Together, they cover more of the relevant analytical landscape than any one of them alone.",
       },
       {
         q: "How should I use AI perspectives — as advice or as questions to investigate?",
@@ -9769,7 +9769,7 @@ export const PAGES: PSEOPage[] = [
           "Competitive positions change faster than model training cycles — a competitor's product line may look different today than at model training cutoff",
           "High consensus on an outdated competitive position is still high consensus on outdated information",
           "Check announcement dates: recent acquisitions, pivots, and product launches may not appear in model training data",
-          "Use models with web retrieval (Perplexity, Grok) to supplement models with fixed training cutoffs for time-sensitive competitive research",
+          "Use a model with web retrieval (Perplexity Sonar) to supplement models with fixed training cutoffs for time-sensitive competitive research",
           "When models disagree on something that changes rapidly, the disagreement often reflects different data vintage, not analytical disagreement",
         ],
       },
