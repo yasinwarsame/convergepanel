@@ -134,7 +134,7 @@ describe("callGemini (real connector): one sanitized Production log line per fai
     mockGenerateContent.mockRejectedValue(fetchError(400, "Bad Request", ["API_KEY_INVALID"]));
     const r = await callGemini(PROMPT, null, undefined, { systemPromptOverride: "sys", diagnosticOperation: "classification" });
     expect(r.status).toBe("error");
-    expect(onlyLog()).toMatchObject({ provider: "gemini", model: "gemini-2.5-flash", operation: "classification", category: "authentication", httpStatus: 400, reasons: ["API_KEY_INVALID"] });
+    expect(onlyLog()).toMatchObject({ provider: "gemini", model: "gemini-3.5-flash-lite", operation: "classification", category: "authentication", httpStatus: 400, reasons: ["API_KEY_INVALID"] });
   });
 
   it("a retired model (404) on the panel call is logged as model_unavailable, operation panel", async () => {

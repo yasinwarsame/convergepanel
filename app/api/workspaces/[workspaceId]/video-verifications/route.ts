@@ -102,6 +102,7 @@ import { mapStoredVideoVerificationToClientPayload } from "@/lib/user/mapStoredV
 import { teamRunAccessDeniedResponse, teamRunInsufficientCapabilityResponse } from "@/lib/workspaces/teamRunAccessResponse";
 import { listTeamVideoVerifications } from "@/lib/workspaces/listTeamVideoVerifications";
 import { VIDEO_VERIFICATION_DISCLAIMER } from "@/lib/legal/videoVerificationDisclaimer";
+import { storedVideoConsensusIndependence } from "@/lib/panel/storedVerificationIndependence";
 import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -460,6 +461,8 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
         modelEvidence: existing.modelEvidence,
         agreementPoints: existing.agreementPoints,
         disagreementPoints: existing.disagreementPoints,
+          // C-b (CB-17), presentation only: the stored rows judged by the shared gate (video rows record no provider).
+          modelIndependence: existing.modelIndependence,
         frameCount: existing.frameCount,
         warnings: existing.warnings,
         disclaimer: VIDEO_VERIFICATION_DISCLAIMER,
@@ -682,6 +685,9 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
       })),
       agreementPoints,
       disagreementPoints,
+      // C-b (CB-17), presentation only: the executed rows judged by the shared gate (video rows record no provider, so
+      // "unverified"); the persisted agreementPoints / disagreementPoints text is unchanged.
+      modelIndependence: storedVideoConsensusIndependence(modelResults),
       frameCount: frames.length,
       warnings: allWarnings,
       disclaimer: VIDEO_VERIFICATION_DISCLAIMER,

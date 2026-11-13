@@ -452,6 +452,8 @@ describe("POST /api/workspaces/[workspaceId]/video-verifications — dedup", () 
     expect(body.verificationId).toBe("vid-existing-1");
     expect(body.workspaceId).toBe(WS_ID);
     expect(body.projectId).toBeNull();
+    // C-b (CB-17): the replayed stored record is judged by the same gate (no rows → unverified).
+    expect(body.modelIndependence).toBe("unverified");
 
     expect(mockedCheckAndIncrementUsage).not.toHaveBeenCalled();
     expect(mockedExecuteVideoVerification).not.toHaveBeenCalled();
@@ -732,6 +734,11 @@ describe("POST /api/workspaces/[workspaceId]/video-verifications — Gate 2", ()
     expect(body.verificationId).toBe("vid-team-1");
     expect(body.workspaceId).toBe(WS_ID);
     expect(body.projectId).toBeNull();
+    // C-b (CB-17, PQ-2 (a) strict): additive presentation key — three ok vision rows record no provider, so the shared
+    // gate reads the live result as "unverified"; the stored score is still returned as computed.
+    expect(body.modelIndependence).toBe("unverified");
+    expect(body.consensusScore).toBe(100);
+    expect("modelIndependence" in (mockedSaveGate2.mock.calls[0][0] as Record<string, unknown>)).toBe(false);
     expect(body.role).toBeUndefined();
     expect(body.membership).toBeUndefined();
     expect(body.capabilities).toBeUndefined();

@@ -1,6 +1,7 @@
 import "server-only";
 
 import { ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY } from "@/lib/env";
+import { GEMINI_MODEL_ID, GEMINI_THINKING_LEVEL } from "@/lib/models/gemini";
 
 import type { ExtractedFrame } from "./videoPure";
 
@@ -187,7 +188,7 @@ export async function callGeminiVision(
   if (!apiKey) throw new Error("GEMINI_API_KEY not configured");
 
   const response = await fetchWithTimeout(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL_ID}:generateContent?key=${encodeURIComponent(apiKey)}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -205,7 +206,8 @@ export async function callGeminiVision(
             ],
           },
         ],
-        generationConfig: { maxOutputTokens: 8192 },
+        // Same thinking level as every other Gemini call (lib/models/gemini.ts).
+        generationConfig: { maxOutputTokens: 8192, thinkingConfig: { thinkingLevel: GEMINI_THINKING_LEVEL } },
       }),
     }
   );

@@ -51,7 +51,7 @@ import {
   governanceStatusDisplay,
 } from "@/lib/adaptiveSchema/exportContentDerivation";
 import { COLORS, badgeStyle, pdfStyles } from "./theme";
-import { exportPositionSafeReport } from "@/lib/adaptiveSchema/exportPositionView";
+import { exportMilestone2SummaryLevel, exportPositionSafeReport, exportRunIndependence } from "@/lib/adaptiveSchema/exportPositionView";
 import { MARKED_GATE_LEVEL_FIELD, MARKED_GATE_LEVEL_NOTE, MARKED_GATE_LEVEL_WORD, isPositionMarked } from "@/lib/adaptiveSchema/positionPresentation";
 
 /**
@@ -397,7 +397,11 @@ function StatusSummary({ record }: { record: AdaptiveResearchExportV1 }) {
   if (isDsLabelWordingMarked(record)) return <DsStatusSummaryV1 record={record} />;
   const snapshot = record.reportSnapshot;
   // Order 5 (Contract P, m-5): a legacy-family (gate-scored) marked report's level is its gate, labelled so.
-  const gateLevel = isPositionMarked(snapshot.legacy?.synthesisReport);
+  // c16 (MAJOR-2): so is the level of a report whose run's slots are not independent executing models, or whose
+  // execution is not recorded (a pre-6.2b export) — never a "Strong consensus" tier.
+  const gateLevel = isPositionMarked(snapshot.legacy?.synthesisReport) || !!exportRunIndependence(record);
+  // Order 31 R-2: a Milestone-2 report has no verification gate — its level is labelled by panel slot instead.
+  const slotLevel = exportMilestone2SummaryLevel(record);
   return (
     <SectionCard label="Report status summary" bounded>
       <View style={pdfStyles.fieldGrid}>
@@ -413,8 +417,8 @@ function StatusSummary({ record }: { record: AdaptiveResearchExportV1 }) {
           </View>
         </View>
         <View style={pdfStyles.fieldCell}>
-          <Text style={pdfStyles.fieldLabel}>{gateLevel ? MARKED_GATE_LEVEL_FIELD : "Consensus"}</Text>
-          <Text style={pdfStyles.fieldValue}>{gateLevel ? MARKED_GATE_LEVEL_WORD[snapshot.consensusLevel] : CONSENSUS_LABELS[snapshot.consensusLevel]}</Text>
+          <Text style={pdfStyles.fieldLabel}>{slotLevel ? slotLevel.field : gateLevel ? MARKED_GATE_LEVEL_FIELD : "Consensus"}</Text>
+          <Text style={pdfStyles.fieldValue}>{slotLevel ? slotLevel.word : gateLevel ? MARKED_GATE_LEVEL_WORD[snapshot.consensusLevel] : CONSENSUS_LABELS[snapshot.consensusLevel]}</Text>
         </View>
         <View style={pdfStyles.fieldCell}>
           <Text style={pdfStyles.fieldLabel}>Source grounding</Text>
@@ -425,7 +429,9 @@ function StatusSummary({ record }: { record: AdaptiveResearchExportV1 }) {
           correctness, evidence strength, or valuation confidence; the
           labels above are exactly the same "Not scored"/"Weak"/etc. tiers
           the live UI shows, never a fabricated precise number. */}
-      {gateLevel ? (
+      {slotLevel ? (
+        <Text style={pdfStyles.mutedText}>{slotLevel.note}</Text>
+      ) : gateLevel ? (
         <Text style={pdfStyles.mutedText}>{MARKED_GATE_LEVEL_NOTE}</Text>
       ) : (
       <Text style={pdfStyles.mutedText}>
@@ -791,7 +797,9 @@ function LegacyContent({ record }: { record: AdaptiveResearchExportV1 }) {
   const legacy = record.reportSnapshot.legacy!;
   const schema = SCHEMA_REGISTRY[legacy.schemaId];
   // Order 5 (Contract P): a marked report is composed from its position-safe view; unmarked reports are unchanged.
-  const { report: synthesis, view: positions } = exportPositionSafeReport(record);
+  // An unmarked report whose top claim's supporting slots are not independent executing models: the verdict section is
+  // headed by what it counts (exportPositionView.ts); every other unmarked report composes exactly as before.
+  const { report: synthesis, view: positions, independence } = exportPositionSafeReport(record);
 
   const shownFields = (r: { data?: Record<string, unknown> | null } | undefined) => schema.fields.filter((field) => r?.data?.[field.key] != null);
   const firstShownField = (r: { data?: Record<string, unknown> | null } | undefined) => shownFields(r)[0];
@@ -817,8 +825,8 @@ function LegacyContent({ record }: { record: AdaptiveResearchExportV1 }) {
               <VerdictCardBody verdictCard={synthesis.verdictCard} headings={{ top: positions.verdict.topHeading, key: positions.verdict.keyHeading, topLabel: positions.verdict.topLabel, keyLabel: positions.verdict.keyLabel }} />
             </SectionCard>
           ) : (
-            <SectionCard label="Where models agree / disagree">
-              <VerdictCardBody verdictCard={synthesis.verdictCard} />
+            <SectionCard label={independence ? independence.sectionHeading : "Where models agree / disagree"}>
+              <VerdictCardBody verdictCard={synthesis.verdictCard} {...(independence ? { headings: { top: independence.topHeading, key: "Disagreement" } } : {})} />
             </SectionCard>
           )}
         </View>

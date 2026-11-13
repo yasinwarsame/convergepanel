@@ -8,6 +8,8 @@ import admin from "firebase-admin";
 import { App, cert, getApps, initializeApp } from "firebase-admin/app";
 import { Auth, getAuth } from "firebase-admin/auth";
 import { Firestore, getFirestore } from "firebase-admin/firestore";
+import { resolvePreviewWorkloadIdentity } from "./previewWorkloadIdentity";
+import { adcWellKnownFilePath, inspectAdcFile, resolveDevelopmentAdc } from "./developmentAdc";
 import { evaluateServerFirebaseIsolation, serviceAccountProject, PRODUCTION_FIREBASE_PROJECT_ID, PRODUCTION_FIREBASE_PROJECT_NUMBER, type FirebaseIsolationVerdict } from "./projectIsolation";
 import { readOperatorGrant } from "./operatorGrant";
 
@@ -94,6 +96,81 @@ function initFirebaseAdmin() {
   if (app && adminAuth && adminDb) return;
 
   console.log("[firebase-admin] Starting initialization...");
+
+  // Order 33 (Preview isolation): a Vercel PREVIEW deployment configured for keyless Workload Identity Federation
+  // authenticates to the isolated Preview project only. Production and local runs never enter this branch.
+  const wif = resolvePreviewWorkloadIdentity(process.env);
+  if (wif.kind === "refused") throw new Error(`Firebase Admin initialization refused: preview_workload_identity_${wif.reason}`);
+  if (wif.kind === "ok") {
+    const { projectId, serviceAccountEmail } = wif.config;
+    enforceFirebaseIsolation(evaluateServerFirebaseIsolation({ projectId, clientEmail: serviceAccountEmail, deploymentEnv: process.env.VERCEL_ENV }), projectId, serviceAccountEmail);
+    console.log("[firebase-admin] projectId:", projectId, "(preview workload identity)");
+    // Loaded only here, so Production and local runs never load the federated-client dependencies.
+    const { createPreviewWorkloadIdentityClient, previewWorkloadIdentityCredential } = require("./previewWorkloadIdentityClient") as typeof import("./previewWorkloadIdentityClient");
+    const client = createPreviewWorkloadIdentityClient(wif.config);
+    const existing = getApps().find((a) => a.name === "[DEFAULT]");
+    app = existing ?? initializeApp({ credential: previewWorkloadIdentityCredential(client), projectId });
+    try {
+      enforceFirebaseIsolation(evaluateServerFirebaseIsolation({ projectId: app.options.projectId, clientEmail: serviceAccountEmail, deploymentEnv: process.env.VERCEL_ENV }), app.options.projectId, serviceAccountEmail);
+    } catch (refused) {
+      app = undefined;
+      throw refused;
+    }
+    adminAuth = getAuth(app);
+    // firebase-admin's getFirestore() accepts only a certificate or application-default credential, so the Preview
+    // Firestore client is built directly on the federated auth client (same settings as the certificate path).
+    adminDb = new Firestore({ projectId, authClient: client, ignoreUndefinedProperties: true } as ConstructorParameters<typeof Firestore>[0]);
+    console.log("[firebase-admin] Initialization complete (preview workload identity)");
+    return;
+  }
+
+  // Order 35 G (Development isolation D-2): a local / `vercel dev` run that opts in with FIREBASE_ADMIN_CREDENTIAL_SOURCE=adc
+  // authenticates keylessly (the developer's impersonated application-default credential) to a non-Production project.
+  // A refusal throws: there is no fallback to a certificate.
+  const dev = resolveDevelopmentAdc(process.env);
+  if (dev.kind === "refused") throw new Error(`Firebase Admin initialization refused: development_adc_${dev.reason}`);
+  if (dev.kind === "ok") {
+    const { projectId } = dev;
+    // Review M-1: only an impersonated developer service account; its address goes through the #294 guard.
+    const { readFileSync } = require("fs") as typeof import("fs");
+    const adcPath = adcWellKnownFilePath(process.env, process.platform);
+    let adcText: string | null = null;
+    try {
+      adcText = adcPath === null ? null : readFileSync(adcPath, "utf8");
+    } catch {
+      adcText = null;
+    }
+    const adc = inspectAdcFile(adcText);
+    if (adc.kind === "refused" || adcText === null) {
+      adcText = null;
+      throw new Error(`Firebase Admin initialization refused: development_adc_${adc.kind === "refused" ? adc.reason : "adc_file_missing"}`);
+    }
+    const clientEmail = adc.serviceAccountEmail;
+    enforceFirebaseIsolation(evaluateServerFirebaseIsolation({ projectId, clientEmail, deploymentEnv: process.env.VERCEL_ENV }), projectId, clientEmail);
+    console.log("[firebase-admin] projectId:", projectId, "(development application-default credential, impersonated service account)");
+    const existing = getApps().find((a) => a.name === "[DEFAULT]");
+    // Review N-2: an existing default app for another project is never reused.
+    if (existing && existing.options.projectId !== projectId) throw new Error("Firebase Admin initialization refused: development_adc_existing_app_project_mismatch");
+    // D-2 confirmation review MATERIAL: firebase-admin's applicationDefault() never impersonates (it only refreshes the
+    // developer's own user token), so one explicit impersonated client, built from the exact bytes validated above
+    // (never re-read), backs BOTH Firebase Auth and Firestore. A reused default app must carry this same client.
+    const { createDevelopmentImpersonatedClient, developmentImpersonatedCredential, developmentClientOf } = require("./developmentAdcClient") as typeof import("./developmentAdcClient");
+    const client = existing ? developmentClientOf(existing.options.credential, clientEmail) : createDevelopmentImpersonatedClient(adcText, clientEmail);
+    adcText = null;
+    if (!client) throw new Error("Firebase Admin initialization refused: development_adc_existing_app_credential_mismatch");
+    app = existing ?? initializeApp({ credential: developmentImpersonatedCredential(client), projectId });
+    try {
+      enforceFirebaseIsolation(evaluateServerFirebaseIsolation({ projectId: app.options.projectId, clientEmail, deploymentEnv: process.env.VERCEL_ENV }), app.options.projectId, clientEmail);
+    } catch (refused) {
+      app = undefined;
+      throw refused;
+    }
+    adminAuth = getAuth(app);
+    // Firestore receives the same client explicitly, so it never does a lazy application-default read of its own.
+    adminDb = new Firestore({ projectId, authClient: client, ignoreUndefinedProperties: true } as ConstructorParameters<typeof Firestore>[0]);
+    console.log("[firebase-admin] Initialization complete (development impersonated service account)");
+    return;
+  }
 
   const sa = loadServiceAccount();
 

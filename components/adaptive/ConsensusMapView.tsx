@@ -10,10 +10,15 @@
 import { ModelId } from "@/lib/types";
 import { AdaptiveRendererProps } from "./types";
 import { Card, SectionLabel, BulletList, FailedResultsNote, splitResults, SlotName } from "./shared";
+import { useQualifiedExecutionIdentity } from "./RunExecutionIdentityContext";
+import { consensusMapQualifier } from "@/lib/panel/executionIdentity";
 import ClaimMatrix from "./ClaimMatrix";
 
 export default function ConsensusMapView({ results, alignedClaims }: AdaptiveRendererProps) {
   const { ok, failed } = splitResults(results);
+  // A27 (C-a): the heading is unchanged; a run whose slots are not verified independent executing models states what
+  // the map's columns are (panel slots) under it. An independent run renders exactly as before.
+  const slotIdentity = useQualifiedExecutionIdentity();
   const modelIds = results.map((r) => r.modelId) as ModelId[];
   const claims = alignedClaims || [];
 
@@ -27,6 +32,11 @@ export default function ConsensusMapView({ results, alignedClaims }: AdaptiveRen
 
       <Card>
         <SectionLabel>Where the models land</SectionLabel>
+        {slotIdentity && (
+          <p data-source="computed" data-testid="consensus-map-run-qualifier" className="text-xs text-slate-500 mb-2">
+            {consensusMapQualifier(slotIdentity)}
+          </p>
+        )}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
           {ok.map((r) => (
             <div key={r.modelId} className="text-sm">

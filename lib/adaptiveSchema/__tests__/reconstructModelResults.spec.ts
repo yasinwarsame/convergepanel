@@ -4,7 +4,7 @@
  */
 const mockWarn = jest.fn();
 jest.mock("@/lib/logger", () => ({ logger: { warn: (...a: unknown[]) => mockWarn(...a), info: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
-import { reconstructModelResults, SAVED_COPY_SHORTENED, SAVED_COPY_UNSTRUCTURED } from "@/lib/adaptiveSchema/reconstructModelResults";
+import { reconstructModelResults, SAVED_COPY_RETRIED_SHORTENED, SAVED_COPY_SHORTENED, SAVED_COPY_UNSTRUCTURED } from "@/lib/adaptiveSchema/reconstructModelResults";
 import { validateAdaptiveResponse } from "@/lib/adaptiveSchema/validator";
 import { getResultSchema } from "@/lib/adaptiveSchema/schemaRegistry";
 import { buildRunReadPayload } from "@/lib/runs/runReadPayload";
@@ -14,7 +14,10 @@ const body = (m: string) => JSON.stringify({ subjects: [`${m} subject`], attribu
 describe("reconstructModelResults", () => {
   it("a responding row equals exactly what the live validator returns for the same saved text", () => {
     const [r] = reconstructModelResults("comparison_matrix", [{ modelId: "chatgpt", status: "ok", rawText: body("chatgpt") }]);
-    expect(r).toEqual(validateAdaptiveResponse("chatgpt" as never, getResultSchema("comparison_matrix" as never), body("chatgpt")));
+    // Saved-response presentation (2026-11-11): plus the saved copy itself, display only, for "Show original response".
+    const { savedResponseText, ...structured } = r;
+    expect(structured).toEqual(validateAdaptiveResponse("chatgpt" as never, getResultSchema("comparison_matrix" as never), body("chatgpt")));
+    expect(savedResponseText).toBe(body("chatgpt"));
     expect(r.ok).toBe(true);
   });
 
@@ -31,6 +34,20 @@ describe("reconstructModelResults", () => {
     expect(bad.ok).toBe(false);
     // Review R2 MINOR-A: a live retry is never saved, so a non-validating saved copy gets the neutral notice, never parse details.
     expect(bad.parseError).toBe(SAVED_COPY_UNSTRUCTURED);
+  });
+
+  it("review D1: shortened + a retry the record ties to the slot → the retry outcome, no first-answer text; without it → the shortened copy", () => {
+    const cut = JSON.stringify({ cells: [{ subject: "A", attribute: "x", value: "ClaudeFirst high", verdict: "better" }] }).slice(0, 60);
+    const row = { modelId: "claude", status: "ok", rawText: cut, wasTruncatedForStorage: true };
+    const [withRetry] = reconstructModelResults("comparison_matrix", [row], { retriedIncludedSlots: new Set(["claude"]) });
+    expect([withRetry.ok, withRetry.parseError, withRetry.savedResponseText]).toEqual([false, SAVED_COPY_RETRIED_SHORTENED, undefined]);
+    const [without] = reconstructModelResults("comparison_matrix", [row]);
+    expect([without.parseError, without.savedResponseText]).toEqual([SAVED_COPY_SHORTENED, cut]);
+    const [otherSlot] = reconstructModelResults("comparison_matrix", [row], { retriedIncludedSlots: new Set(["gemini"]) });
+    expect(otherSlot.parseError).toBe(SAVED_COPY_SHORTENED);
+    // A duplicated slot id can't be tied to the record: the shortened copy, never the retry outcome.
+    const dup = reconstructModelResults("comparison_matrix", [row, row], { retriedIncludedSlots: new Set(["claude"]) });
+    expect(dup.map((r) => r.parseError)).toEqual([SAVED_COPY_SHORTENED, SAVED_COPY_SHORTENED]);
   });
 
   it("a read logs nothing, even for unparseable text that a parse error would quote; live validation still logs", () => {

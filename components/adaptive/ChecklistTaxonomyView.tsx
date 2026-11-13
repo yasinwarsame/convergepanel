@@ -13,10 +13,12 @@
  */
 
 import { AggregatedChecklistItem, ChecklistTaxonomyResult } from "@/lib/adaptiveSchema/types";
-import { Card, EmptyStateCard, SectionLabel, TintBadge, formatModelCoverage, SlotChip } from "./shared";
+import { Card, EmptyStateCard, SectionLabel, TintBadge, formatSlotCoverage, SlotChip } from "./shared";
+import { useQualifiedExecutionIdentity } from "./RunExecutionIdentityContext";
 import { ModelId } from "@/lib/types";
 
 function ChecklistItemRow({ item }: { item: AggregatedChecklistItem }) {
+  const slotIdentity = useQualifiedExecutionIdentity();
   const modelIds = item.contributingModels as ModelId[];
   return (
     <li className="flex items-start gap-2.5 py-2 border-b border-slate-100 last:border-0">
@@ -26,7 +28,7 @@ function ChecklistItemRow({ item }: { item: AggregatedChecklistItem }) {
           <span className="text-sm text-slate-800">{item.label}</span>
           {item.critical && <TintBadge tone="danger">Critical</TintBadge>}
           <TintBadge tone={item.coverageRatio >= 0.6 ? "accent" : "warning"}>
-            {formatModelCoverage({ covered: item.coverageCount, total: item.totalModels, mode: "covered" })}
+            {formatSlotCoverage({ covered: item.coverageCount, total: item.totalModels, mode: "covered" }, slotIdentity)}
           </TintBadge>
         </div>
         {item.rationale && <p className="mt-0.5 text-xs text-slate-600">{item.rationale}</p>}

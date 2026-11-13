@@ -10,7 +10,6 @@
 
 import { Timestamp } from "firebase-admin/firestore";
 import { readFileSync, readdirSync } from "fs";
-import { execFileSync } from "child_process";
 import { join as joinPath } from "path";
 import * as tsApi from "typescript";
 import { violatesAssignmentSelfReviewGuard, violatesDecisionSelfReviewGuard } from "@/lib/workspaces/workspaceReviewEligibility";
@@ -3684,17 +3683,12 @@ describe("PR claim re-derivation — every measured count is computed from sourc
    *
    * What "audit-reader scope is closed" MEANS is a property of the source tree, and it holds identically
    * in any checkout: the four action strings exist only in the audited module, and no reader, display map,
-   * backfill or audit API references them. That is what is asserted. The git-derived file list remains as
-   * a bonus when the merge base happens to be present, and contributes to no pinned count.
+   * backfill or audit API references them. That is what is asserted. The git-derived file list was
+   * dropped (2026-11-09): `git diff abd032a5 HEAD` names the PR's files only while HEAD is that PR's
+   * branch tip. On main after the merge it names every later change, so the bonus failed on every full
+   * clone of main and passed only where the shallow checkout hid abd032a5. A check that is green only
+   * where it cannot run is not a check.
    */
-  const changedFilesFromGit = (): { files: string[]; gitAvailable: boolean } => {
-    try {
-      const out = execFileSync("git", ["diff", "--name-only", "abd032a5", "HEAD"], { cwd: joinPath(__dirname, "..", "..", ".."), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-      return { files: out.split("\n").map((l) => l.trim()).filter(Boolean).sort(), gitAvailable: true };
-    } catch {
-      return { files: [], gitAvailable: false };
-    }
-  };
 
   const repoRootPath = () => joinPath(__dirname, "..", "..", "..");
   const readIfPresent = (relative: string): string | null => {
@@ -3760,21 +3754,6 @@ describe("PR claim re-derivation — every measured count is computed from sourc
     // and they DISAGREE on the one value the route can never produce — which is why L9 exists
     const empty = "" as string | undefined;
     expect(`boolean:${Boolean(empty)} notUndefined:${empty !== undefined}`).toBe("boolean:false notUndefined:true");
-  });
-
-  it("BONUS, skipped without ceremony when the merge base is absent: git agrees the change is three files", () => {
-    const { files, gitAvailable } = changedFilesFromGit();
-    if (!gitAvailable) {
-      // a shallow checkout (CI) has no merge base. This contributes to NO pinned count — pinning an
-      // absolute number here is what turned a green local run into a red Quality Gate.
-      expect("gitScopeCheck:unavailable").toBe("gitScopeCheck:unavailable");
-      return;
-    }
-    expect(files).toEqual([
-      "docs/operations/workspace-governance-canary-runbook.md",
-      "lib/workspaces/__tests__/workspaceReviewPanelMutations.spec.ts",
-      "lib/workspaces/workspaceReviewPanelMutations.ts",
-    ]);
   });
 });
 

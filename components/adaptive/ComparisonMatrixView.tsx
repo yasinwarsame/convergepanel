@@ -13,7 +13,9 @@
  */
 
 import { AggregatedComparisonAttribute, AggregatedComparisonSubject, ComparisonMatrixResult } from "@/lib/adaptiveSchema/types";
-import { BulletList, Card, EmptyStateCard, SectionLabel, TintBadge, formatModelCoverage } from "./shared";
+import { BulletList, Card, EmptyStateCard, SectionLabel, TintBadge, formatSlotCoverage } from "./shared";
+import { useQualifiedExecutionIdentity } from "./RunExecutionIdentityContext";
+import { ONE_EXECUTING_MODEL_VALUES, VALUES_DIFFER_ACROSS_SLOTS } from "@/lib/panel/executionIdentity";
 
 /**
  * Always shown for comparison_matrix — no live verified pricing/spec/data
@@ -32,6 +34,7 @@ function CellContent({ comparisonMatrix, subject, attribute }: {
   subject: AggregatedComparisonSubject;
   attribute: AggregatedComparisonAttribute;
 }) {
+  const slotIdentity = useQualifiedExecutionIdentity();
   const cell = comparisonMatrix.cells.find(
     (c) => c.subjectId === subject.id && c.attributeId === attribute.id
   );
@@ -46,12 +49,18 @@ function CellContent({ comparisonMatrix, subject, attribute }: {
   // "single_source"/"split" aren't genuine cross-model agreement — only
   // consensus/majority mean the contributing models actually agreed on this
   // value, so only those two modes use the "agreed" wording.
-  const coverageLabel =
-    cell.agreement === "split"
+  // B03 (C-a): one executing model's values are recorded values, never a consensus or a split between models; in a
+  // qualified run a split is a difference across panel slots.
+  const oneModel = slotIdentity?.kind === "FC" && cell.agreement !== "single_source";
+  const coverageLabel = oneModel
+    ? `${cell.coverageCount} of ${cell.totalModels} panel slots: ${ONE_EXECUTING_MODEL_VALUES}`
+    : slotIdentity && cell.agreement === "split"
+      ? VALUES_DIFFER_ACROSS_SLOTS
+      : cell.agreement === "split"
       ? "Models disagree"
       : cell.agreement === "single_source"
-        ? formatModelCoverage({ covered: cell.coverageCount, total: cell.totalModels, mode: "assessed" })
-        : formatModelCoverage({ covered: cell.coverageCount, total: cell.totalModels, mode: "agreed" });
+        ? formatSlotCoverage({ covered: cell.coverageCount, total: cell.totalModels, mode: "assessed" }, slotIdentity)
+        : formatSlotCoverage({ covered: cell.coverageCount, total: cell.totalModels, mode: "agreed" }, slotIdentity);
 
   return (
     <div className="space-y-1">
@@ -67,7 +76,7 @@ function CellContent({ comparisonMatrix, subject, attribute }: {
         <p className="text-sm text-slate-900">{cell.consensusValue ?? Object.values(cell.valuesByModel)[0]}</p>
       )}
       <div className="flex flex-wrap items-center gap-1">
-        <TintBadge tone={tone} title={cell.agreement === "split" ? "Models disagree on this value" : coverageLabel}>
+        <TintBadge tone={tone} title={cell.agreement === "split" && !slotIdentity ? "Models disagree on this value" : coverageLabel}>
           {coverageLabel}
         </TintBadge>
         {verdictEntries.map(([verdict, count]) => (
@@ -96,6 +105,7 @@ function CellContent({ comparisonMatrix, subject, attribute }: {
 }
 
 function LowConfidenceAxisList({ label, items }: { label: string; items: { label: string; coverageCount: number; totalModels: number }[] }) {
+  const slotIdentity = useQualifiedExecutionIdentity();
   if (items.length === 0) return null;
   return (
     <details className="rounded-xl border border-slate-200 bg-white px-4 py-3">
@@ -105,7 +115,7 @@ function LowConfidenceAxisList({ label, items }: { label: string; items: { label
       <ul className="mt-2 flex flex-wrap gap-2">
         {items.map((item) => (
           <li key={item.label}>
-            <TintBadge tone="warning" title={formatModelCoverage({ covered: item.coverageCount, total: item.totalModels, mode: "covered" })}>
+            <TintBadge tone="warning" title={formatSlotCoverage({ covered: item.coverageCount, total: item.totalModels, mode: "covered" }, slotIdentity)}>
               {item.label} ({item.coverageCount}/{item.totalModels})
             </TintBadge>
           </li>

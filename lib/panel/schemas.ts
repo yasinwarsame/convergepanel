@@ -87,6 +87,8 @@ export interface PanelResultPublic {
   actualModel: string;
   substitutedFrom?: string;
   substitutionReason?: string;
+  /** F-2 (Order 34): structured execution fact — the slot's own connector returned ok with no errorCode. Server-set only. */
+  outputClass?: "model_response";
 }
 
 /**
@@ -143,6 +145,8 @@ export interface RunDocument {
     requestedModel?: string;
     /** Present only when this execution actually substituted ("<provider>:<model>"). */
     substitutedFrom?: string;
+    /** F-2 (Order 34): "model_response" when the connector returned ok with no errorCode; absent on historical rows. */
+    outputClass?: "model_response";
   }>;
   synthesizedAnswer?: string;
   totals: {

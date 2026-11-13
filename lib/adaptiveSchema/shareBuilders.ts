@@ -9,7 +9,8 @@
  */
 
 import { ModelId } from "@/lib/types";
-import { RunModelProvenanceFacts, runModelFamilyName, runModelLabels } from "@/lib/panel/runModelIdentity";
+import { RunModelProvenanceFacts, runModelLabels } from "@/lib/panel/runModelIdentity";
+import { executingVoiceName } from "@/lib/panel/executingVoiceLabel";
 import { MemoInput } from "@/lib/verification/generateMemo";
 import { AdaptiveSynthesisReport } from "./types";
 import { dedupeTextList } from "./textSimilarity";
@@ -38,6 +39,18 @@ import { escapeMarkdownInline, markdownQuote, plainTextQuote, singleLineText } f
 import { X_MAX_WEIGHTED_LENGTH, XUrlSpan, parseXText, xPostableText, xUrlSpans } from "./xWeightedText";
 import { EMOJI } from "./xTextRules.generated";
 import { ADAPTIVE_RESEARCH_REPORT_KIND } from "@/lib/verification/generateMemo";
+import { modelWrittenBlockLabel, modelWrittenShortLabel, type RunExecutionIdentity } from "@/lib/panel/executionIdentity";
+import {
+  adaptiveTopIndependence,
+  adaptiveTopIndependenceStatement,
+  answeringIndependentModelCount,
+  independenceQualification,
+  presentIndependenceQualifiedReport,
+  sharePanelPhrase,
+  shortRunCountedResult,
+  shortSharePanelPhrase,
+  type AdaptiveTopIndependence,
+} from "./verdictIndependence";
 import { POSITIONS_BY_SLOT_HEADING, PositionSafeInput, PresentedSlotPosition, biasWithheldNotice, coverageWithheldNotice, isPositionMarked, positionView, presentPositionSafeReport } from "./positionPresentation";
 
 /**
@@ -45,8 +58,16 @@ import { POSITIONS_BY_SLOT_HEADING, PositionSafeInput, PresentedSlotPosition, bi
  * already presented (positionPresentation.presentPositionSafeReport) is used as is; a marked stored report reaching a
  * builder directly is presented here, from the rows and roster the caller holds — without them no position is derived.
  */
-function shown(report: AdaptiveSynthesisReport, input?: PositionSafeInput): AdaptiveSynthesisReport {
-  return isPositionMarked(report) ? presentPositionSafeReport(report, input ?? { rows: null, roster: [] }) : report;
+function shown(report: AdaptiveSynthesisReport, input?: PositionSafeInput, slotProvenance?: readonly RunModelProvenanceFacts[] | null): AdaptiveSynthesisReport {
+  if (isPositionMarked(report)) return presentPositionSafeReport(report, input ?? { rows: null, roster: [] });
+  // An unmarked report: its agreement statements whose supporting slots are not independent executing models are
+  // stated by their executing models (verdictIndependence.ts) — the same object, as before, for every other report.
+  return presentIndependenceQualifiedReport(report, { rows: input?.rows ?? null, provenance: input?.provenance ?? slotProvenance ?? null });
+}
+
+/** "Where models agree", or its qualified heading when an entry under it is not agreement between independent models. */
+function agreeHeading(report: AdaptiveSynthesisReport): string {
+  return independenceQualification(report)?.agreeHeading ?? "Where models agree";
 }
 
 /** A row's positions by slot as plain lines (never quoted as verbatim model text). */
@@ -63,6 +84,53 @@ const POSITIONS_UNAVAILABLE_IN_FORMAT = "Position details are unavailable in thi
 // R6-2 / R6-3: in Markdown, every model-written string is serialized through textSerialization.ts — claims and
 // short model text escaped inline, model prose as an escaped blockquote under its label — so model text cannot
 // become a report heading, list, link or HTML. Headings and computed lines are written here.
+
+/**
+ * #290 Increment 1 — readable layout only. The readable page's ONE gate presentation (lib/research/readableReport/
+ * trustSignals readableGatePresentation, computed once per page; structurally the report view's ReadableGateDisplay),
+ * handed to the builders by the readable report view's Copy / Export memo / LinkedIn / X actions, so the generated text
+ * states the gate the page shows: on a legacy record whose stored gate contradicts its recorded inputs, "Verification
+ * gate: Unavailable" — never the stored "(gate: pass)" — and on every other record the page's own label ("Verification
+ * gate: Pass" …). Presentation only: the stored report is read, never written, and no gate is recomputed. Classic
+ * callers pass nothing: every builder's output is then byte-identical to before.
+ *
+ *   status:     the presentation's status ("pass" | "caution" | "fail" | "unrecognized" | "unavailable").
+ *   badge:      its one short label ("Verification gate: Unavailable"), used wherever a builder states the gate.
+ *   banner:     the page's banner ("Verification gate: Unavailable — the stored result is inconsistent with its recorded
+ *               inputs. …"); written only on the unavailable state (Markdown, memo), as the screen leads with it.
+ *   bannerNote: on the unavailable state only, the note that stored text (the certainty line, the answer) may name a
+ *               gate result and is not the gate result; written right after the banner.
+ *
+ * Review of 7212c47 (MINOR): on the unavailable state the copied Markdown and the memo LEAD with the banner and the
+ * note — right after the question, as the screen does — before any text stored with the report, and every stored
+ * verdict-bearing value they still reproduce (the panel verdict, the answer, the executive summary — review of
+ * 8def047 — and the certainty text) is labelled "Stored … (historical; inconsistent with recorded inputs)", never
+ * stated as the current conclusion. Every other
+ * readable status (a consistent record, an Order 4 report) keeps the ordering it had.
+ */
+export interface ReadableShareGate {
+  readonly status: string;
+  readonly badge: string;
+  readonly banner: string;
+  readonly bannerNote: string | null;
+}
+
+/** The readable page shows no gate result: a legacy record whose stored gate contradicts its recorded inputs. */
+const isUnavailable = (readable?: ReadableShareGate): readable is ReadableShareGate => readable?.status === "unavailable";
+
+/** The label of a stored verdict-bearing value reproduced beside the unavailable gate: "Stored panel verdict (historical; …)". */
+const storedHistoricalLabel = (what: string) => `Stored ${what} (historical; inconsistent with recorded inputs)`;
+
+/** The unavailable gate's lead, as the screen's banner: the banner, then the stored-text note. */
+const unavailableLead = (readable: ReadableShareGate): string[] => [readable.banner, ...(readable.bannerNote ? [readable.bannerNote] : [])];
+
+/** The row label of the (unmarked) X post, classic and readable. */
+const X_ROW_LABEL = "Models split on: ";
+
+/** The certainty figure beside the readable gate label: "Verification gate: Unavailable · Certainty: 40%". */
+function readableGateLine(gate: ReadableShareGate, report: AdaptiveSynthesisReport, caution: string): string {
+  return `${gate.badge}${gate.status === "caution" ? caution : ""} · Certainty: ${Math.round(report.runCertainty * 100)}%`;
+}
 
 /** The computed "Verification gate: …" block (reportPresentation): written as one line wherever it appears. */
 const isGateBlock = (b: TextBlock) => b.source === "computed" && b.label === GATE_LABEL;
@@ -91,10 +159,22 @@ function plainTextBlock(block: TextBlock, indent = ""): string {
   return [`${indent}${block.label}:`, ...plainTextQuote(block.text, indent)].join("\n");
 }
 
+/** The label of the line stating the top claim's model independence (only when it is not independent). */
+export const MODEL_INDEPENDENCE_LABEL = "Model independence";
+
+/** "**Model independence:** …" when the top claim's supporting slots are not independent executing models; else nothing. */
+function markdownTopIndependence(t: AdaptiveTopIndependence | null, report: AdaptiveSynthesisReport): string[] {
+  const text = t ? adaptiveTopIndependenceStatement(t, report.verdictCard?.consensusModelCount) : null;
+  return text ? [`**${MODEL_INDEPENDENCE_LABEL}:** ${text}`] : [];
+}
+
 /** The panel verdict for Markdown: the computed figures, and the top claim with its own result (R6-1, R6-3). */
-function markdownPanelVerdict(report: AdaptiveSynthesisReport): string[] {
+function markdownPanelVerdict(report: AdaptiveSynthesisReport, topIndependence: AdaptiveTopIndependence | null, readable?: ReadableShareGate): string[] {
   const card = report.verdictCard;
-  if (!card.topConsensusAgreement) return [`**Panel verdict:** ${escapeMarkdownInline(report.panelVerdict)}`];
+  if (!card.topConsensusAgreement) {
+    // #290 Inc 1 (review of 7212c47): beside the unavailable gate the stored verdict is labelled as such, never stated as the conclusion.
+    return [`**${isUnavailable(readable) ? storedHistoricalLabel("panel verdict") : "Panel verdict"}:** ${escapeMarkdownInline(report.panelVerdict)}`, ...markdownTopIndependence(topIndependence, report)];
+  }
   // Order 5 (Contract P, m-6): on a marked report the top row is labelled and headed by what it is.
   const verdict = positionView(report)?.verdict;
   const parts = [
@@ -102,11 +182,15 @@ function markdownPanelVerdict(report: AdaptiveSynthesisReport): string[] {
     `**${PANEL_RESULT_LABEL}:** ${card.topConsensusAgreement}`,
     ...(card.topConsensusContested ? [`**Contested:** ${card.topConsensusContested}`] : []),
   ];
-  return [`**Panel verdict:** certainty ${Math.round(report.runCertainty * 100)}%; ${markdownGate(report)}. ${verdict ? verdict.topHeading : "Top claim"}:`, parts.join(" — ")];
+  return [`**Panel verdict:** certainty ${Math.round(report.runCertainty * 100)}%; ${markdownGate(report, readable)}. ${verdict ? verdict.topHeading : "Top claim"}:`, parts.join(" — "), ...markdownTopIndependence(topIndependence, report)];
 }
 
-/** The gate inside a Markdown line: "Verification gate: Caution" on reports with the Order 4 presentation, else "gate: caution" as before. */
-function markdownGate(report: AdaptiveSynthesisReport): string {
+/**
+ * The gate inside a Markdown line: "Verification gate: Caution" on reports with the Order 4 presentation, else "gate: caution" as before.
+ * #290 Inc 1, readable only: the readable page's gate label.
+ */
+function markdownGate(report: AdaptiveSynthesisReport, readable?: ReadableShareGate): string {
+  if (readable) return readable.badge;
   return hasGatePresentation(report) ? gateLabel(readGateStatus(report.gate)) : `gate: ${legacyGateWord(report.gate)}`;
 }
 
@@ -148,42 +232,94 @@ function dedupedAgreementItems(report: AdaptiveSynthesisReport): string[] {
   return dedupeTextList(report.whereModelsAgree, { ...TEXT_DEDUP_THRESHOLDS, cap: WHERE_MODELS_AGREE_MAX_ITEMS });
 }
 
+/** The merged legacy lines, each followed by its independence statement when it has one (after the merge, never before it). */
+function qualifiedAgreementLines(report: AdaptiveSynthesisReport, format: (line: string, qualifier: string) => string): string[] {
+  const qualifiers = independenceQualification(report)?.legacyAgree;
+  return dedupedAgreementItems(report).map((line) => {
+    const q = qualifiers?.get(line);
+    return q ? format(line, q) : line;
+  });
+}
+
+const plainQualified = (line: string, q: string) => `${line} — ${PANEL_RESULT_LABEL}: ${q}`;
+
 function truncate(text: string, max: number): string {
   const trimmed = text.trim();
   return trimmed.length <= max ? trimmed : `${trimmed.slice(0, max - 1).trimEnd()}…`;
 }
 
-export function buildAdaptiveSynthesisMarkdown(question: string, storedReport: AdaptiveSynthesisReport, positionInput?: PositionSafeInput): string {
-  const report = shown(storedReport, positionInput);
-  if (report.presentation) return buildPresentedMarkdown(question, report);
+export function buildAdaptiveSynthesisMarkdown(
+  question: string,
+  storedReport: AdaptiveSynthesisReport,
+  positionInput?: PositionSafeInput,
+  /**
+   * The run's per-slot provenance, when the caller holds it: a disagreement position from a slot the run records as
+   * substituted is attributed to its executing model ("DeepSeek (substituting ChatGPT)"), never to the requested model.
+   * Absent → family names, exactly as before.
+   */
+  slotProvenance?: readonly RunModelProvenanceFacts[] | null,
+  /** D06 (C-a, O3 (a)): the run's execution identity; a qualified run's legacy model-written groups carry one label each. */
+  executionIdentity?: RunExecutionIdentity | null,
+  /** #290 Inc 1: readable layout only (see ReadableShareGate). Absent (every classic caller): unchanged. */
+  readable?: ReadableShareGate
+): string {
+  const report = shown(storedReport, positionInput, slotProvenance);
+  const groupLabel = legacyGroupLabel(report, executionIdentity);
+  const labelled = (out: string[]) => {
+    if (groupLabel) out.push(`_${groupLabel}_`);
+  };
+  const slotName = (modelId: string) => executingVoiceName(modelId, slotProvenance ?? positionInput?.provenance ?? null);
+  // The top claim's model independence (verdictIndependence.ts): a marked report carries it in its position view; an
+  // unmarked one in its independence-qualified view. Null — exactly as before — for independent supporters.
+  const view = positionView(report);
+  const topIndependence = view ? view.verdict.topIndependence ?? null : independenceQualification(report)?.top ?? null;
+  if (report.presentation) return buildPresentedMarkdown(question, report, slotName, topIndependence, readable);
   const lines: string[] = [];
   lines.push("# Synthesis Report");
   lines.push("");
   lines.push(`**Question:** ${question}`);
   lines.push("");
-  lines.push(`**Panel verdict:** ${report.panelVerdict}`);
+  const unavailable = isUnavailable(readable);
+  if (unavailable) {
+    // #290 Inc 1 (review of 7212c47): the readable page's unavailable gate leads, before any stored verdict or answer
+    // text; the stored panel verdict and answer follow, each labelled as stored and historical.
+    unavailableLead(readable).forEach((l) => lines.push(l, ""));
+    lines.push(`**${storedHistoricalLabel("panel verdict")}:** ${report.panelVerdict}`);
+  } else {
+    lines.push(`**Panel verdict:** ${report.panelVerdict}`);
+  }
+  lines.push(...markdownTopIndependence(topIndependence, report));
   lines.push("");
   lines.push("## Unified Answer");
   // D8: an unrecognized stored gate is stated before the stored answer; a known gate exports exactly as before.
   answerLeadBlocks(presentUnifiedAnswer(report)).forEach((b) => lines.push(...markdownBlock(b)));
+  if (unavailable && report.unifiedAnswer) lines.push(`**${storedHistoricalLabel("answer")}:**`);
+  labelled(lines);
   lines.push(report.unifiedAnswer);
   lines.push("");
   lines.push("## Executive Summary");
+  // #290 Inc 1 (review of 8def047): on a legacy record the stored summary is often the stored verdict itself (the
+  // pre-R5 fail template, or the answer with its "Verification gate: Caution." lead), so beside the unavailable gate it
+  // is labelled as stored and historical, as the answer is.
+  if (unavailable && report.executiveSummary) lines.push(`**${storedHistoricalLabel("executive summary")}:**`);
+  labelled(lines);
   lines.push(report.executiveSummary);
   lines.push("");
 
-  const agreementItems = dedupedAgreementItems(report);
+  const agreementItems = qualifiedAgreementLines(report, (line, q) => `${line} — **${PANEL_RESULT_LABEL}:** ${q}`);
   if (agreementItems.length > 0) {
-    lines.push("## Where models agree");
+    lines.push(`## ${agreeHeading(report)}`);
+    labelled(lines);
     agreementItems.forEach((a) => lines.push(`- ${a}`));
     lines.push("");
   }
 
   if (report.disagreements.length > 0) {
     lines.push("## Where models disagree");
+    labelled(lines);
     report.disagreements.forEach((d) => {
       lines.push(`- **${d.topic}** — ${d.whyTheyDiffer}`);
-      d.positions.forEach((p) => lines.push(`  - ${runModelFamilyName(p.modelId)}: ${p.position}`));
+      d.positions.forEach((p) => lines.push(`  - ${slotName(p.modelId)}: ${p.position}`));
     });
     lines.push("");
   }
@@ -197,26 +333,59 @@ export function buildAdaptiveSynthesisMarkdown(question: string, storedReport: A
   }
 
   lines.push("## Certainty");
-  lines.push(`${Math.round(report.runCertainty * 100)}% (gate: ${legacyGateWord(report.gate)}) — ${report.certaintyAssessment}`);
+  labelled(lines);
+  if (unavailable) lines.push(`${Math.round(report.runCertainty * 100)}% (${readable.badge})`, "", `**${storedHistoricalLabel("certainty text")}:** ${report.certaintyAssessment}`);
+  else lines.push(`${Math.round(report.runCertainty * 100)}% (${markdownGate(report, readable)}) — ${report.certaintyAssessment}`);
   lines.push("");
   lines.push("Source: convergepanel.com");
 
   return lines.join("\n");
 }
 
-function buildPresentedMarkdown(question: string, report: AdaptiveSynthesisReport): string {
+/**
+ * D06 (C-a, owner ruling O3 (a)): the label of a LEGACY (pre-presentation, unmarked) report's model-written block groups,
+ * or null — for a verified independent run, a presented or marked report, or without the run's identity — so every such
+ * output is exactly as before.
+ */
+function legacyGroupLabel(report: AdaptiveSynthesisReport, identity: RunExecutionIdentity | null | undefined): string | null {
+  if (!identity || !identity.qualified || report.presentation || positionView(report)) return null;
+  return modelWrittenBlockLabel(identity);
+}
+
+/** The X qualifier (O3 (a) short form): an unmarked report of a qualified run; never truncated. */
+function xQualifier(report: AdaptiveSynthesisReport, identity: RunExecutionIdentity | null | undefined): string | null {
+  if (!identity || !identity.qualified || positionView(report)) return null;
+  return modelWrittenShortLabel(identity);
+}
+
+function buildPresentedMarkdown(
+  question: string,
+  report: AdaptiveSynthesisReport,
+  slotName: (modelId: string) => string,
+  topIndependence: AdaptiveTopIndependence | null,
+  readable?: ReadableShareGate
+): string {
   const lines: string[] = [];
   lines.push("# Synthesis Report");
   lines.push("");
   lines.push(`**Question:** ${question}`);
   lines.push("");
-  lines.push(...markdownPanelVerdict(report));
+  const unavailable = isUnavailable(readable);
+  // #290 Inc 1 (review of 7212c47): the readable page's unavailable gate leads, before any stored text.
+  if (unavailable) unavailableLead(readable).forEach((l) => lines.push(l, ""));
+  lines.push(...markdownPanelVerdict(report, topIndependence, readable));
   lines.push("");
   lines.push("## Unified Answer");
-  lines.push(...markdownUnifiedAnswer(report));
+  const answerLines = markdownUnifiedAnswer(report);
+  if (unavailable && answerLines.length > 0) lines.push(`**${storedHistoricalLabel("answer")}:**`);
+  lines.push(...answerLines);
   lines.push("");
   lines.push("## Executive Summary");
-  for (const block of presentExecutiveSummary(report)) {
+  const summaryBlocks = presentExecutiveSummary(report);
+  // #290 Inc 1 (review of 8def047): the summary reproduces stored text (an R5 record's stored answer note — "Panel could
+  // not converge on a reliable answer." — or its model summary), so beside the unavailable gate it is labelled as stored.
+  if (unavailable && summaryBlocks.length > 0) lines.push(`**${storedHistoricalLabel("executive summary")}:**`);
+  for (const block of summaryBlocks) {
     lines.push(...markdownBlock(block));
     lines.push("");
   }
@@ -233,7 +402,7 @@ function buildPresentedMarkdown(question: string, report: AdaptiveSynthesisRepor
   } else {
     const agreeItems = presentAgreeItems(report);
     if (agreeItems.length > 0) {
-      lines.push("## Where models agree");
+      lines.push(`## ${agreeHeading(report)}`);
       agreeItems.forEach((a) => lines.push(`- ${markdownClaim(a)}`));
       lines.push("");
     }
@@ -266,7 +435,7 @@ function buildPresentedMarkdown(question: string, report: AdaptiveSynthesisRepor
       } else {
         lines.push(`  - ${d.why.text}`);
       }
-      report.disagreements[i].positions.forEach((p) => lines.push(`  - ${runModelFamilyName(p.modelId)}: ${escapeMarkdownInline(p.position)}`));
+      report.disagreements[i].positions.forEach((p) => lines.push(`  - ${slotName(p.modelId)}: ${escapeMarkdownInline(p.position)}`));
     });
     lines.push("");
   }
@@ -288,7 +457,8 @@ function buildPresentedMarkdown(question: string, report: AdaptiveSynthesisRepor
 
   lines.push("## Certainty");
   const [certaintyLine, ...certaintyRest] = presentCertainty(report);
-  lines.push(`${Math.round(report.runCertainty * 100)}% (${markdownGate(report)}) — ${certaintyLine.text}`);
+  if (unavailable) lines.push(`${Math.round(report.runCertainty * 100)}% (${readable.badge})`, "", `**${storedHistoricalLabel("certainty text")}:** ${certaintyLine.text}`);
+  else lines.push(`${Math.round(report.runCertainty * 100)}% (${markdownGate(report, readable)}) — ${certaintyLine.text}`);
   for (const block of certaintyRest) {
     lines.push("");
     lines.push(...markdownBlock(block));
@@ -310,6 +480,31 @@ export function buildAdaptiveMemoInput(
    * Without it, models are named by family only — never by a product label.
    */
   modelProvenance?: readonly RunModelProvenanceFacts[] | null,
+  positionRows?: readonly unknown[] | null,
+  /** #290 Inc 1: readable layout only (see ReadableShareGate). Absent (every classic caller): unchanged. */
+  readable?: ReadableShareGate
+): MemoInput {
+  const input = buildMemoInput(question, storedReport, modelsUsed, verificationId, modelProvenance, positionRows);
+  if (!readable) return input;
+  // The readable page's gate. Any status but unavailable is the stored one: unchanged.
+  if (readable.status !== "unavailable") return { ...input, confidenceLabel: GATE_CONFIDENCE_LABEL[readGateStatus(readable.status)] };
+  // Unavailable (review of 7212c47): no gate-based confidence level (as for an unrecognized gate); the banner and the
+  // stored-text note lead the findings — the memo's first statement after its computed figures, before any stored text —
+  // and the stored assessment it reproduces is labelled as stored and historical.
+  return {
+    ...input,
+    confidenceLabel: GATE_CONFIDENCE_LABEL[readGateStatus(readable.status)],
+    keyFindings: [unavailableLead(readable).join(" "), ...(input.keyFindings ?? [])],
+    ...(input.confidenceAssessment ? { confidenceAssessment: `${storedHistoricalLabel("assessment")}:\n${input.confidenceAssessment}` } : {}),
+  };
+}
+
+function buildMemoInput(
+  question: string,
+  storedReport: AdaptiveSynthesisReport,
+  modelsUsed: ModelId[],
+  verificationId: string,
+  modelProvenance?: readonly RunModelProvenanceFacts[] | null,
   positionRows?: readonly unknown[] | null
 ): MemoInput {
   const report = shown(storedReport, { rows: positionRows ?? null, roster: modelsUsed, provenance: modelProvenance });
@@ -325,7 +520,18 @@ export function buildAdaptiveMemoInput(
     const lead = answerLeadBlocks(answer);
     const gateFindings = lead.length > 0 ? [leadText(lead), ...(answer.unresolved ?? []).map(plainUnresolvedClaim), ...(answer.unresolvedUnreadable ? [answer.unresolvedUnreadable.text] : [])] : [];
     const withheld = [view.biasFindingsWithheld > 0 ? biasWithheldNotice(view.biasFindingsWithheld) : "", view.coverageGapsWithheld > 0 ? coverageWithheldNotice(view.coverageGapsWithheld) : ""].filter(Boolean);
+    // Order 36 A (F35-M1, owner ruling): with fewer than two verified independent successful responses the marked memo
+    // states no run certainty — told the verified count (0 / 1), or that identity is unverified. Without the run's rows
+    // nothing is inferred; with two or more the memo is unchanged.
+    const markedAnswering = answeringIndependentModelCount(modelProvenance);
+    const markedEvidence =
+      markedAnswering !== null && markedAnswering < 2
+        ? { independentModelCount: markedAnswering }
+        : markedAnswering === null && Array.isArray(modelProvenance) && modelProvenance.length > 0
+          ? { researchIndependenceUnverified: true as const }
+          : {};
     return {
+      ...markedEvidence,
       type: "research",
       adaptivePositionPresentation: { reportKind: ADAPTIVE_RESEARCH_REPORT_KIND, disagreementPositionVersion: 1 },
       question,
@@ -344,6 +550,25 @@ export function buildAdaptiveMemoInput(
       verificationId,
     };
   }
+  // Unmarked memos state "N AI models researched this question independently", a consensus score and "where models
+  // agree" (the shared research memo): with a repeated substitute model in the run's rows the memo is told how many
+  // independent executing models the run had, and without recorded execution identity that independence is
+  // unverified (verdictIndependence.ts). Independent runs: nothing is added — the memo as before.
+  // Order 35 A (F-1): a run the shared rule judges independent is told how many independent executing models actually
+  // answered (verified execution evidence, answeringIndependentModelCount) — never the requested slot count or a stored
+  // count — so a run with zero or one answering model never reads "5 AI models researched this question independently"
+  // with a consensus score. Told only when it differs from the slot count (otherwise the memo already states it);
+  // without the run's rows nothing is inferred: the memo as before.
+  const runIndependence = adaptiveTopIndependence(null, modelProvenance);
+  const answering = answeringIndependentModelCount(modelProvenance);
+  const independenceInput =
+    runIndependence.kind === "repeated_substitute" || runIndependence.kind === "placeholder"
+      ? { independentModelCount: runIndependence.voices.length }
+      : runIndependence.kind === "unverified"
+        ? { researchIndependenceUnverified: true }
+        : answering !== null && answering !== modelsUsed.length
+          ? { independentModelCount: answering }
+          : {};
   if (report.presentation) {
     const agree = presentAgreeItems(report).map(claimLine);
     const summary = presentExecutiveSummary(report).map((b) => plainTextBlock(b)).join("\n\n");
@@ -369,6 +594,7 @@ export function buildAdaptiveMemoInput(
       confidenceAssessment: summary || presentCertainty(report).map((b) => plainTextBlock(b)).join("\n\n"),
       modelsUsed: runModelLabels(modelsUsed, modelProvenance),
       verificationId,
+      ...independenceInput,
     };
   }
   return {
@@ -380,24 +606,40 @@ export function buildAdaptiveMemoInput(
     keyFindings: [
       // D8: an unrecognized stored gate leads the findings; a known gate exports exactly as before.
       ...(readGateStatus(report.gate) === "unrecognized" ? [leadText(answerLeadBlocks(presentUnifiedAnswer(report)))] : []),
-      ...dedupedAgreementItems(report).slice(0, 8),
+      ...qualifiedAgreementLines(report, plainQualified).slice(0, 8),
     ],
-    synthesisAgreements: dedupedAgreementItems(report),
+    synthesisAgreements: qualifiedAgreementLines(report, plainQualified),
     synthesisDisagreements: report.disagreements.map((d) => `${d.topic}: ${d.whyTheyDiffer}`),
     confidenceAssessment: report.executiveSummary || report.certaintyAssessment,
     modelsUsed: runModelLabels(modelsUsed, modelProvenance),
     verificationId,
+    ...independenceInput,
   };
 }
 
-export function buildAdaptiveLinkedInPost(question: string, storedReport: AdaptiveSynthesisReport, positionInput?: PositionSafeInput): string {
+export function buildAdaptiveLinkedInPost(
+  question: string,
+  storedReport: AdaptiveSynthesisReport,
+  positionInput?: PositionSafeInput,
+  executionIdentity?: RunExecutionIdentity | null,
+  /** #290 Inc 1: readable layout only (see ReadableShareGate). Absent (every classic caller): unchanged. */
+  readable?: ReadableShareGate
+): string {
   const report = shown(storedReport, positionInput);
+  // D06 (C-a, O3 (a)): one label for the post's model-written lines of a legacy report of a qualified run.
+  const groupLabel = legacyGroupLabel(report, executionIdentity);
   // Order 5 (Contract P): a compact format — no per-slot positions, no model names; rows are stated by their own result.
   const marked = !!positionView(report);
   const lines: string[] = [];
-  lines.push(`I researched "${truncate(question, 120)}" across a multi-model AI panel using ConvergePanel.`);
+  // A run whose slots are not all independent executing models is not introduced as an unqualified multi-model panel.
+  const panelPhrase = sharePanelPhrase(independenceQualification(report)?.run ?? null);
+  lines.push(panelPhrase ? `I researched "${truncate(question, 120)}" using ConvergePanel, across ${panelPhrase}.` : `I researched "${truncate(question, 120)}" across a multi-model AI panel using ConvergePanel.`);
   lines.push("");
-  if (hasGatePresentation(report)) {
+  if (readable) {
+    // #290 Inc 1, readable only: the readable page's gate (ReadableShareGate), and on caution the notice.
+    lines.push(readableGateLine(readable, report, ""));
+    if (readable.status === "caution") lines.push(CAUTION_NOTICE);
+  } else if (hasGatePresentation(report)) {
     // Order 4 (D5/D6): the gate in its neutral wording, the certainty as its own figure, and on caution the notice.
     const status = readGateStatus(report.gate);
     lines.push(`${gateLabel(status)} · Certainty: ${Math.round(report.runCertainty * 100)}%`);
@@ -408,7 +650,12 @@ export function buildAdaptiveLinkedInPost(question: string, storedReport: Adapti
   lines.push("");
 
   const presented = report.presentation;
-  const agreementItems = presented ? [] : dedupedAgreementItems(report);
+  if (groupLabel && (dedupedAgreementItems(report).length > 0 || report.disagreements.length > 0)) {
+    lines.push(groupLabel);
+    lines.push("");
+  }
+  // A legacy line is shortened; its independence statement (computed) never is.
+  const agreementItems = presented ? [] : qualifiedAgreementLines(report, (line, q) => plainQualified(truncate(line, 140), q));
   const view = positionView(report);
   if (view && presented) {
     // Order 5 (Contract P, F-1): claims and value comparisons under their own headings, up to two of each.
@@ -420,9 +667,9 @@ export function buildAdaptiveLinkedInPost(question: string, storedReport: Adapti
       lines.push("");
     });
   } else if (presented ? presented.agree.length > 0 : agreementItems.length > 0) {
-    lines.push("Where models agree:");
+    lines.push(`${agreeHeading(report)}:`);
     if (presented) presented.agree.slice(0, 2).forEach((a) => lines.push(`→ ${shortClaimWithResult(a, 100)}`));
-    else agreementItems.slice(0, 2).forEach((a) => lines.push(`→ ${truncate(a, 140)}`));
+    else agreementItems.slice(0, 2).forEach((a, i) => lines.push(`→ ${independenceQualification(report)?.legacyAgree.has(dedupedAgreementItems(report)[i]) ? a : truncate(a, 140)}`));
     lines.push("");
   }
 
@@ -442,29 +689,94 @@ export function buildAdaptiveLinkedInPost(question: string, storedReport: Adapti
   return lines.join("\n");
 }
 
-export function buildAdaptiveXPost(question: string, storedReport: AdaptiveSynthesisReport, positionInput?: PositionSafeInput): string {
+export function buildAdaptiveXPost(
+  question: string,
+  storedReport: AdaptiveSynthesisReport,
+  positionInput?: PositionSafeInput,
+  executionIdentity?: RunExecutionIdentity | null,
+  /** #290 Inc 1: readable layout only (see ReadableShareGate). Absent (every classic caller): unchanged. */
+  readable?: ReadableShareGate
+): string {
   const report = shown(storedReport, positionInput);
-  if (positionView(report)) return buildMarkedXPost(question, report);
-  const splitLabel = "Models split on: ";
+  if (positionView(report)) return buildMarkedXPost(question, report, readable);
+  // #290 Inc 1, readable only: the readable page's gate (ReadableShareGate), in a post that fits (review of 7212c47).
+  // Integration (connector D03 / D06 on the readable layout): a qualified run's one-line model-written qualifier is kept
+  // in the readable post too, beside the brand, never cut.
+  if (readable) return buildReadableXPost(question, report, readable, xQualifier(report, executionIdentity));
+  // D03 / D06 (C-a): a budgeted build. The brand line and, for a qualified run, the one-line model-written qualifier are
+  // never cut: the question gives way first, then the split's text. An output that fits is exactly as before.
+  const qualifier = xQualifier(report, executionIdentity);
+  const oneModel = executionIdentity?.qualified && executionIdentity.kind === "FC";
+  const splitLabel = qualifier ? (oneModel ? "Recorded difference: " : "Split across panel slots on: ") : X_ROW_LABEL;
   const parts: string[] = [];
-  parts.push(`Asked a multi-model AI panel: "${truncate(question, 80)}"`);
+  const askedPrefix = `Asked ${shortSharePanelPhrase(independenceQualification(report)?.run ?? null) ?? "a multi-model AI panel"}: `;
+  parts.push(`${askedPrefix}"${truncate(question, 80)}"`);
   if (hasGatePresentation(report)) {
     const status = readGateStatus(report.gate);
     parts.push(`${gateLabel(status)}${status === "caution" ? ` (${CAUTION_NOTICE_SHORT})` : ""} · Certainty: ${Math.round(report.runCertainty * 100)}%`);
   } else {
     parts.push(`Certainty: ${Math.round(report.runCertainty * 100)}% (${legacyGateWord(report.gate)})`);
   }
-  const split = report.presentation?.disagree[0];
+  // c16: in a run whose slots are not independent executing models the split's slot count is stated in X's budget as
+  // what it is (the full qualified statement would not fit and would be cut mid-sentence).
+  const run = independenceQualification(report)?.run ?? null;
+  const storedSplit = report.presentation?.disagree[0];
+  const split = storedSplit && run && typeof storedSplit.result === "string" ? { ...storedSplit, result: shortRunCountedResult(storedSplit.result, run) } : storedSplit;
+  const tail = [...(qualifier ? [qualifier] : []), "via ConvergePanel"];
   if (split) {
     // The post is capped at 280 characters: the claim gives way, the computed result never does.
-    const fixed = [...parts, "via ConvergePanel"].join("\n\n").length + 2;
+    const fixed = [...parts, ...tail].join("\n\n").length + 2;
     const room = 280 - fixed - splitLabel.length - shortClaimWithResult({ ...split, claim: "" }, 0).length;
     parts.push(`${splitLabel}${shortClaimWithResult(split, Math.max(12, Math.min(60, room)))}`);
   } else if (report.disagreements.length > 0) {
-    parts.push(`Models split on: ${truncate(report.disagreements[0].topic, 80)}`);
+    parts.push(`${splitLabel}${truncate(report.disagreements[0].topic, 80)}`);
   }
-  parts.push("via ConvergePanel");
-  return truncate(parts.join("\n\n"), 280);
+  const whole = [...parts, ...tail].join("\n\n");
+  if (whole.length <= 280) return whole;
+  // Over budget: shorten the question, then the split line; the tail (qualifier, brand) is kept whole.
+  const room = (others: string[]) => 280 - [...others, ...tail].join("\n\n").length - 2;
+  const rest = parts.slice(1);
+  const qRoom = room([askedPrefix, ...rest]) - askedPrefix.length;
+  if (qRoom >= 12) return [`${askedPrefix}"${truncate(question, Math.min(80, qRoom))}"`, ...rest, ...tail].join("\n\n");
+  const head = [`${askedPrefix}"${truncate(question, 12)}"`, ...parts.slice(1, 2)];
+  const last = rest.length > 1 ? rest[rest.length - 1] : null;
+  const lastRoom = last ? 280 - [...head, ...tail].join("\n\n").length - 2 : 0;
+  const shortLast = last && lastRoom > splitLabel.length + 12 ? truncate(last, lastRoom) : null;
+  const fitted = [...head, ...(shortLast ? [shortLast] : []), ...tail].join("\n\n");
+  return fitted.length <= 280 ? fitted : `${truncate([...head].join("\n\n"), Math.max(1, 280 - tail.join("\n\n").length - 2))}\n\n${tail.join("\n\n")}`;
+}
+
+/**
+ * #290 Inc 1, readable only (review of 7212c47, NIT): the X post with the readable page's gate line. The readable label
+ * is longer than the historical "(pass)", so the classic layout (question to 80, claim to its room or topic to 80) could
+ * pass 280 characters and the final cut then dropped "via ConvergePanel" and cut into the computed result. Here the
+ * classic layout is kept whenever it fits (the same text the readable post had); otherwise the model-written claim or
+ * topic gives way first (60, 40, 24, 12), then the question (80, 48, 24). The gate line, the certainty, a row's computed
+ * result and the brand are never cut; if even the shortest form does not fit, the defined fallback — the panel line, the
+ * gate line and the brand — is used. Same limit as classic: 280 characters (`string.length`).
+ */
+function buildReadableXPost(question: string, report: AdaptiveSynthesisReport, readable: ReadableShareGate, qualifier: string | null = null): string {
+  const gateLine = readableGateLine(readable, report, ` (${CAUTION_NOTICE_SHORT})`);
+  // The first presented row (claim and computed result), else a legacy report's first stored topic.
+  const firstRow = report.presentation?.disagree[0];
+  const topic = !firstRow && report.disagreements.length > 0 ? report.disagreements[0].topic : null;
+  const asked = (max: number) => `${X_ASKED}: "${truncate(question, max)}"`;
+  const row = (max: number) => (firstRow ? `${X_ROW_LABEL}${shortClaimWithResult(firstRow, max)}` : topic !== null ? `${X_ROW_LABEL}${truncate(topic, max)}` : null);
+  // Integration: the connector qualifier (when the run is qualified) sits before the brand and, like it, is never cut.
+  const tail = [...(qualifier ? [qualifier] : []), X_BRAND];
+  const post = (questionMax: number, rowLine: string | null) => [asked(questionMax), gateLine, ...(rowLine ? [rowLine] : []), ...tail].join("\n\n");
+  const fits = (text: string) => text.length <= 280;
+  // The classic layout: the claim takes the room left (12–60), a legacy topic up to 80.
+  const fixed = [asked(80), gateLine, ...tail].join("\n\n").length + 2;
+  const room = firstRow ? 280 - fixed - X_ROW_LABEL.length - shortClaimWithResult({ ...firstRow, claim: "" }, 0).length : 0;
+  const classicLayout = post(80, row(firstRow ? Math.max(12, Math.min(60, room)) : 80));
+  if (fits(classicLayout)) return classicLayout;
+  for (const questionMax of [80, 48, 24])
+    for (const rowMax of [60, 40, 24, 12]) {
+      const candidate = post(questionMax, row(rowMax));
+      if (fits(candidate)) return candidate;
+    }
+  return [X_ASKED, gateLine, ...tail].join("\n\n");
 }
 
 // ─── X (Order 5, Contract P, m-1 / H-1) ─────────────────────────────────────
@@ -608,7 +920,7 @@ function xFitter(text: string, truncated = false): ((budget: number) => string) 
 
 const X_BRAND = "via ConvergePanel";
 const X_UNRESOLVED_LABEL = "Unresolved: ";
-const X_ASKED = "Asked a multi-model AI panel";
+export const X_ASKED = "Asked a multi-model AI panel";
 
 /**
  * A marked report's X post, valid on X by weighted length (twitter-text v3 rules, checked on the finished post). The
@@ -619,8 +931,10 @@ const X_ASKED = "Asked a multi-model AI panel";
  * so no attribution can be wrong. Every URL in the post is one of the question's, the claim's or the computed result's, whole. If even the
  * shortest form is not a valid post, the defined fallback — the panel line, the gate line and the brand — is used.
  */
-function buildMarkedXPost(question: string, report: AdaptiveSynthesisReport): string {
-  const gateLine = hasGatePresentation(report)
+function buildMarkedXPost(question: string, report: AdaptiveSynthesisReport, readable?: ReadableShareGate): string {
+  const gateLine = readable
+    ? readableGateLine(readable, report, ` (${CAUTION_NOTICE_SHORT})`)
+    : hasGatePresentation(report)
     ? (() => {
         const status = readGateStatus(report.gate);
         return `${gateLabel(status)}${status === "caution" ? ` (${CAUTION_NOTICE_SHORT})` : ""} · Certainty: ${Math.round(report.runCertainty * 100)}%`;
@@ -632,7 +946,10 @@ function buildMarkedXPost(question: string, report: AdaptiveSynthesisReport): st
   const fitQuestion = xFitter(questionText.text, questionText.truncated);
   const fitClaim = xFitter(claimText.text, claimText.truncated);
   const allowed = new Set([...fitQuestion.urls, ...fitClaim.urls, ...xUrlSpans((split?.result ?? "").normalize("NFC"))].map((u) => u.url));
-  const asked = (q: string) => (q ? `${X_ASKED}: "${q}"` : X_ASKED);
+  // A run with fewer than two independent executing models (or unrecorded execution) is not "a multi-model AI panel".
+  const panel = shortSharePanelPhrase(independenceQualification(report)?.run ?? null);
+  const askedLine = panel ? `Asked ${panel}` : X_ASKED;
+  const asked = (q: string) => (q ? `${askedLine}: "${q}"` : askedLine);
   const post = (q: string, row: string | null) => [asked(q), gateLine, ...(row ? [row] : []), X_BRAND].join("\n\n");
   const rowLine = (claimBudget: number) => {
     if (!split) return null;
@@ -660,10 +977,11 @@ function buildMarkedXPost(question: string, report: AdaptiveSynthesisReport): st
     const candidate = post(qBudget ? fitQuestion(qBudget) : "", pointer);
     if (fits(candidate)) return candidate;
   }
-  return markedXFallback(gateLine);
+  return markedXFallback(gateLine, askedLine);
 }
 
 /** The defined safe fallback: no question, no row — only computed and fixed text, always a valid post. */
-export function markedXFallback(gateLine: string): string {
-  return [X_ASKED, gateLine, X_BRAND].join("\n\n");
+/** `askedLine` is required (R12): the caller's qualified "Asked an AI panel (…)" line is never silently replaced by X_ASKED. */
+export function markedXFallback(gateLine: string, askedLine: string): string {
+  return [askedLine, gateLine, X_BRAND].join("\n\n");
 }

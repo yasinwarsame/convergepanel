@@ -12,6 +12,8 @@ import type { ClaimVerificationFirestoreDoc } from "@/lib/firestore/verification
 import type { PanelHistoryItem, PanelHistoryResearchItem } from "@/lib/user/panelHistory";
 import type { ModelId } from "@/lib/types";
 import { createRunWorkspaceIntegrityBatch } from "@/lib/workspaces/runWorkspaceIntegrityBatch";
+import { consensusScoreWithheldReason, storedRunConsensusIndependence } from "@/lib/panel/independentVoices";
+import { storedVerificationConsensusIndependence, storedVideoConsensusIndependence } from "@/lib/panel/storedVerificationIndependence";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -132,8 +134,12 @@ export async function GET(req: NextRequest) {
         : undefined;
 
       const synSum = data.synthesisConsensusSummary as { overallConsensusScore?: number } | undefined;
-      const synthesisConsensusScore =
-        typeof synSum?.overallConsensusScore === "number" ? synSum.overallConsensusScore : undefined;
+      const storedScore = typeof synSum?.overallConsensusScore === "number" ? synSum.overallConsensusScore : undefined;
+      // A stored score is shown only when the persisted rows prove ≥ 2 independent executing models
+      // (lib/panel/independentVoices.ts); otherwise it is withheld with the reason. Stored data is unchanged.
+      const synthesisConsensusWithheld =
+        storedScore === undefined ? undefined : consensusScoreWithheldReason(storedRunConsensusIndependence(data));
+      const synthesisConsensusScore = synthesisConsensusWithheld ? undefined : storedScore;
 
       // Query-Routing Redesign, Phase 1 — summary-only: read just the
       // discriminator field off the persisted envelope, never the full
@@ -154,6 +160,7 @@ export async function GET(req: NextRequest) {
           modelsOk,
           modelsTotal: modelsTotal || undefined,
           synthesisConsensusScore,
+          ...(synthesisConsensusWithheld ? { synthesisConsensusWithheld } : {}),
           governanceStatus: normalizeGovernanceStatus(data.governanceStatus),
           ...(hasAdaptiveOutput ? { hasAdaptiveOutput, adaptiveSchemaId } : {}),
         },
@@ -168,6 +175,11 @@ export async function GET(req: NextRequest) {
       if (String(data.userId ?? "") !== uid) continue;
       if (data.type != null && data.type !== "claim_verification") continue;
       const sortKey = firestoreMillis(data.timestamp);
+      // A claim's stored score is a cross-model figure: listed only when the stored rows prove >= 2 independent
+      // executing models with a usable answer (lib/panel/storedVerificationIndependence.ts); otherwise withheld with
+      // the reason. Stored data is unchanged.
+      const claimIndependence = storedVerificationConsensusIndependence(data as Record<string, unknown>);
+      const claimWithheld = consensusScoreWithheldReason(claimIndependence);
       merged.push({
         sortKey,
         item: {
@@ -176,7 +188,9 @@ export async function GET(req: NextRequest) {
           at: new Date(sortKey || Date.now()).toISOString(),
           claim: String(data.claim ?? ""),
           verdict: String(data.verdict ?? "unverifiable"),
-          consensusScore: typeof data.consensusScore === "number" ? data.consensusScore : 0,
+          consensusScore: claimWithheld ? null : typeof data.consensusScore === "number" ? data.consensusScore : 0,
+          ...(claimWithheld ? { consensusWithheld: claimWithheld } : {}),
+          modelIndependence: claimIndependence,
           governanceStatus: normalizeGovernanceStatus(data.governanceStatus),
         },
       });
@@ -192,6 +206,9 @@ export async function GET(req: NextRequest) {
       const meta = data.metadata as { duration?: number } | undefined;
       const durationSec =
         meta && typeof meta.duration === "number" && Number.isFinite(meta.duration) ? meta.duration : 0;
+      // C-c (CC-07, PQ-2 (a) strict): a video's stored score is a cross-model figure; the video rows record no provider,
+      // so the shared gate never verifies them and the score is withheld with the reason. Stored data is unchanged.
+      const videoWithheld = consensusScoreWithheldReason(storedVideoConsensusIndependence(data.modelResults));
       merged.push({
         sortKey,
         item: {
@@ -201,7 +218,9 @@ export async function GET(req: NextRequest) {
           fileName: typeof data.fileName === "string" ? data.fileName : "Uploaded video",
           durationSeconds: durationSec,
           verdict: String(data.verdict ?? "inconclusive"),
-          consensusScore: typeof data.consensusScore === "number" ? data.consensusScore : 0,
+          // Absent (not null) when withheld: the frozen History renderer (app/page.tsx) types it number | undefined and
+          // renders no " · N consensus" without it.
+          ...(videoWithheld ? { consensusWithheld: videoWithheld } : { consensusScore: typeof data.consensusScore === "number" ? data.consensusScore : 0 }),
           governanceStatus: normalizeGovernanceStatus(data.governanceStatus),
         },
       });

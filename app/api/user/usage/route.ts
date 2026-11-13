@@ -170,7 +170,8 @@ async function workspaceReviewsUiEnabledFor(uid: string): Promise<boolean> {
  * admin.
  *
  * `userData.role` is retained: it is a SERVER-written field (see
- * `/api/admin/set-role`, `/api/admin/set-admin`) and, since P0.1, is not
+ * `/api/admin/set-role`; the secret bootstrap route that also wrote it was
+ * retired in S1) and, since P0.1, is not
  * client-writable. The dropped Firestore `email` fallback is the only removed
  * source, and it was never proof of anything.
  */

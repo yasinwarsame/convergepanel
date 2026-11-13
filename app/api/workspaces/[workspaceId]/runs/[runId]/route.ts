@@ -46,6 +46,7 @@ import { resolveRunAssigneesForPage } from "@/lib/workspaces/teamRunAssigneeEnri
 import type { TeamRunAssigneeDto } from "@/lib/workspaces/teamRunSummary";
 import { getAdaptiveHumanReviewAssignment } from "@/lib/firestore/runs";
 import { deriveTeamRunViewerRole } from "@/lib/workspaces/deriveTeamRunViewerRole";
+import { loadAdaptiveDisplayResults } from "@/lib/firestore/adaptiveDisplayResults";
 import { buildRunReadPayload, type RunReadPayload } from "@/lib/runs/runReadPayload";
 import { resolveRunReviewRouting } from "@/lib/runs/resolveRunReviewRouting";
 import { parseGovernanceRecord } from "@/lib/adaptiveSchema/governanceRecordParser";
@@ -206,7 +207,11 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
   const requestId = req.headers.get("x-vercel-id") ?? req.headers.get("x-request-id") ?? undefined;
   // Team viewers hold Workspace authority over this run's review, so the
   // decision's conditions are inside their capability.
-  const payload = await buildRunReadPayload({ runId, data, viewerRole, requestId, mayReadDecisionContent: true, resolveReviewRouting: resolveRunReviewRouting });
+  // Order 40 C (O-2): the display record lives in its own document; read only now, after access and Workspace
+  // containment, at the same point as the payload build. The Project-containment check below can still conceal the run;
+  // the record only feeds `payload`, which a denial never returns.
+  const adaptiveDisplayResults = data.adaptiveOutput !== undefined ? await loadAdaptiveDisplayResults(runId) : undefined;
+  const payload = await buildRunReadPayload({ runId, data, viewerRole, requestId, mayReadDecisionContent: true, resolveReviewRouting: resolveRunReviewRouting, adaptiveDisplayResults });
 
   // Project label — containment + label only (no Project ACL). A missing or
   // malformed Project document degrades to `null` (the run stays readable);

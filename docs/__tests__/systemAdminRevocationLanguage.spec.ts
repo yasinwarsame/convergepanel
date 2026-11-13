@@ -111,8 +111,8 @@ describe("no proof language about revocation (owner ruling: unbounded Firestore/
 
   it.each([
     ["docs/operations/system-admin-claim-script.md", (t: string) => t],
-    ["docs/operations/admin-authority-tiers.md (Option 1)", (t: string) => section(t, "**Option 1", "**Option 2")],
-    ["docs/operations/admin-authority-tiers.md (Phase C5 consequence)", (t: string) => section(t, "**Consequence to know before enrolling anyone", "### BOOTSTRAP_SECRET")],
+    ["docs/operations/admin-authority-tiers.md (claim tool section)", (t: string) => section(t, "### Changing the `admin` claim", "### Password admin session")],
+    ["docs/operations/admin-authority-tiers.md (Phase C5 consequence)", (t: string) => section(t, "**Consequence to know before enrolling anyone", "### Secret bootstrap route — RETIRED (S1)")],
     ["docs/operations/admin-authority-tiers.md (does NOT give you)", (t: string) => t.slice(t.indexOf("### What this procedure does NOT give you"))],
     ["docs/technical-documentation.md (operator claim tool)", (t: string) => section(t, "**Operator claim tool:**", "\n\n")],
   ])("%s", (label, pick) => {
@@ -166,8 +166,8 @@ describe("the assumption and the enforcement caveat are stated", () => {
     }
   });
 
-  it("the Option 1 paragraph and technical documentation state the assumption and the enforcement gap", () => {
-    const opt1 = section(read("docs/operations/admin-authority-tiers.md"), "**Option 1", "**Option 2");
+  it("the tiers claim-tool section and technical documentation state the assumption and the enforcement gap", () => {
+    const opt1 = section(read("docs/operations/admin-authority-tiers.md"), "### Changing the `admin` claim", "### Password admin session");
     expect(opt1).toMatch(/not proof of revocation/);
     expect(opt1).toMatch(/ASSUMES/);
     expect(opt1).toMatch(/S2/);
@@ -462,8 +462,8 @@ const tiersAfter = (from: string) => (t: string) => {
 
 const REVOKE_DOC_SCOPES: [string, (t: string) => string][] = [
   ["docs/operations/system-admin-claim-script.md", (t) => t],
-  ["docs/operations/admin-authority-tiers.md (Option 1)", (t) => section(t, "**Option 1", "**Option 2")],
-  ["docs/operations/admin-authority-tiers.md (Phase C5 consequence)", (t) => section(t, "**Consequence to know before enrolling anyone", "### BOOTSTRAP_SECRET")],
+  ["docs/operations/admin-authority-tiers.md (claim tool section)", (t) => section(t, "### Changing the `admin` claim", "### Password admin session")],
+  ["docs/operations/admin-authority-tiers.md (Phase C5 consequence)", (t) => section(t, "**Consequence to know before enrolling anyone", "### Secret bootstrap route — RETIRED (S1)")],
   ["docs/operations/admin-authority-tiers.md (incident procedure)", (t) => section(t, "## Incident procedure", "### What this procedure does NOT give you")],
   ["docs/operations/admin-authority-tiers.md (does NOT give you)", tiersAfter("### What this procedure does NOT give you")],
   ["docs/technical-documentation.md (operator claim tool)", (t) => section(t, "**Operator claim tool:**", "\n\n")],
@@ -597,11 +597,11 @@ describe("no unconditional revoke-effect claims (PR #295 sweep, owner order B)",
     ]) {
       expect({ gone, present: runbook.includes(gone) }).toEqual({ gone, present: false });
     }
-    const opt1 = flat(section(read("docs/operations/admin-authority-tiers.md"), "**Option 1", "**Option 2"));
+    const opt1 = flat(section(read("docs/operations/admin-authority-tiers.md"), "### Changing the `admin` claim", "### Password admin session"));
     expect(opt1).toMatch(/requests revocation of the target's refresh tokens/);
     expect(opt1).toMatch(/unknown outcome/);
     expect(opt1).toMatch(/overwrite-only/);
-    const c5 = flat(section(read("docs/operations/admin-authority-tiers.md"), "**Consequence to know before enrolling anyone", "### BOOTSTRAP_SECRET"));
+    const c5 = flat(section(read("docs/operations/admin-authority-tiers.md"), "**Consequence to know before enrolling anyone", "### Secret bootstrap route — RETIRED (S1)"));
     expect(c5).toMatch(/Neither of them shortens that ≤1 hour window for an already-issued ID token/);
     expect(c5).toMatch(/S2/);
     const tech = flat(section(read("docs/technical-documentation.md"), "**Operator claim tool:**", "\n\n"));
@@ -695,7 +695,7 @@ describe("G5: no monotonicity claims and no effect-implying 'revoked' (PR #295 O
     const allowed = "this tool refuses to write a value lower than the one it reads immediately before the call, and reports any lowering it observes within its own run";
     for (const [file, pick] of [
       ["docs/operations/system-admin-claim-script.md", (t: string) => t],
-      ["docs/operations/admin-authority-tiers.md", (t: string) => section(t, "**Option 1", "**Option 2")],
+      ["docs/operations/admin-authority-tiers.md", (t: string) => section(t, "### Changing the `admin` claim", "### Password admin session")],
       ["docs/technical-documentation.md", (t: string) => section(t, "**Operator claim tool:**", "\n\n")],
     ] as const) {
       expect({ file, present: pick(read(file)).replace(/\s+/g, " ").toLowerCase().includes(allowed) }).toEqual({ file, present: true });

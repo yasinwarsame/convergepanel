@@ -44,6 +44,8 @@ import {
 } from "@/lib/adaptiveSchema/reportSummary";
 import { BadgeTone, Card, TintBadge } from "./shared";
 import { MARKED_GATE_LEVEL_FIELD, MARKED_GATE_LEVEL_WORD, isPositionMarked } from "@/lib/adaptiveSchema/positionPresentation";
+import { SLOT_AGREEMENT_FIELD, slotAgreementWord } from "@/lib/adaptiveSchema/verdictIndependence";
+import { useRunIndependence, useSchemaLevelRunIndependence } from "./useRunIndependence";
 import { DS_MODEL_AGREEMENT_FIELD, DS_SOURCES_FIELD, dsModelAgreement, dsSourcesSummary, isDecisionSupportSchema } from "@/lib/adaptiveSchema/dsLabelWording";
 import AdaptiveExportButton from "./AdaptiveExportButton";
 import AdaptiveExportHistorySection from "./AdaptiveExportHistorySection";
@@ -141,8 +143,17 @@ export default function TopSummaryBar(props: TopSummaryBarProps) {
     biasBlindspotAudit: props.biasBlindspotAudit,
   });
   // m-5: the level is the gate's own tier only when no schema-specific result fed it (deriveConsensusLevel's last branch).
+  // c16 (MAJOR-2): a run whose slots are not independent executing models (or whose execution is not recorded) never
+  // shows a "Strong / Moderate / Weak consensus" tier — a gate-derived level is labelled as the gate (as on a marked
+  // report); a schema-derived level as agreement by panel slot. An independent run: exactly as before.
+  const runIndependence = useRunIndependence(props.synthesisReport);
+  const schemaLevel =
+    !!props.comparisonMatrix || !!props.checklistTaxonomy || !!props.decisionSupport || !!props.causalExplanation || !!props.definitionExplanation || !!props.rankedEnumeration || !!props.deepResearch || !!props.evidenceReview || !!props.biasBlindspotAudit;
+  // Order 31 R-3: a schema-derived level is a stored result — no, or fewer than two, answering models make it unavailable.
+  const schemaRun = useSchemaLevelRunIndependence(consensus, runIndependence);
+  const slotLevel = !!schemaRun && schemaLevel && !isDecisionSupportSchema(schemaId);
   const gateLevelOnMarked =
-    isPositionMarked(props.synthesisReport) &&
+    (isPositionMarked(props.synthesisReport) || !!runIndependence) &&
     !props.comparisonMatrix && !props.checklistTaxonomy && !props.decisionSupport && !props.causalExplanation && !props.definitionExplanation && !props.rankedEnumeration && !props.deepResearch && !props.evidenceReview && !props.biasBlindspotAudit;
   const sourceGrounding = deriveSourceGrounding({ meta, trustSummary });
   // Order 6 / S-E.1 (D-10 (b), K-1, K-6): Decision Support states what its stored result shows — never a consensus tier or
@@ -218,6 +229,10 @@ export default function TopSummaryBar(props: TopSummaryBarProps) {
           // Order 5 (Contract P, m-5): a gate-derived level on a marked report is labelled as the gate it is.
           <SummaryField label={MARKED_GATE_LEVEL_FIELD}>
             <TintBadge tone={LEVEL_TONE[consensus]}>{MARKED_GATE_LEVEL_WORD[consensus]}</TintBadge>
+          </SummaryField>
+        ) : slotLevel ? (
+          <SummaryField label={SLOT_AGREEMENT_FIELD}>
+            <TintBadge tone={LEVEL_TONE[consensus]}>{slotAgreementWord(consensus, schemaRun)}</TintBadge>
           </SummaryField>
         ) : (
         <SummaryField label="Consensus">

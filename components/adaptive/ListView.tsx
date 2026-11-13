@@ -31,13 +31,25 @@ import {
   ModelTrustSummary,
   ResultSchema,
 } from "@/lib/adaptiveSchema/types";
-import { TRUST_SCORE_CAP_REASON } from "@/lib/adaptiveSchema/config";
-import { Card, SectionLabel, BulletList, ConfidencePill, ProbabilityBar, TintBadge, SlotName } from "./shared";
+import { TRUST_SCORE_CAP_BY_HEALTH, TRUST_SCORE_CAP_REASON } from "@/lib/adaptiveSchema/config";
+import { Card, SectionLabel, BulletList, ConfidencePill, ProbabilityBar, TintBadge, SlotName, SlotChip } from "./shared";
+import { useQualifiedExecutionIdentity } from "./RunExecutionIdentityContext";
+import {
+  RECORDED_DIFFERENCE_WORD,
+  SLOT_ALIGNMENT_UNVERIFIED_NOTE,
+  alsoAnsweredText,
+  otherSlotsAnsweredBySameModel,
+  runSlotStatement,
+  type RunExecutionIdentity,
+} from "@/lib/panel/executionIdentity";
 import ModelChip from "@/components/ModelChip";
 import { GateTone, gateChipText, gateTone, pageGateValue } from "@/lib/adaptiveSchema/gatePresentation";
+import type { ReadableGateDisplay } from "./AdaptiveSynthesisReportView";
 import { PanelCounts, ROW_COUNTS_UNAVAILABLE, SlotRowCounts, hasReadableRowBreakdown, panelCounts, readSlots, rowTypeOf, slotLabel, slotRowCounts } from "@/lib/adaptiveSchema/positionPresentation";
 import { PositionPresentationBoundary, PositionPresentationState, usePositionPresentation } from "./PositionPresentationContext";
-import { didNotRespondText, slotDidNotRespond, useRunSlotStatus } from "@/components/adaptive/RunSlotStatusContext";
+import { slotCountedLabel } from "@/lib/adaptiveSchema/verdictIndependence";
+import { useRunIndependence } from "./useRunIndependence";
+import { UNRECOGNIZED_STATUS_TEXT, didNotRespondText, slotDidNotRespond, slotStatusUnrecognized, useRunSlotStatus } from "@/components/adaptive/RunSlotStatusContext";
 
 // Wording: gatePresentation.gateChipText (D6/D7); "neutral": an unrecognized stored gate (D8).
 const GATE_CHIP_STYLES: Record<GateTone, string> = {
@@ -257,6 +269,28 @@ function buildRowVM(
 
 export type SortMode = "trust" | "outliers" | "response_time";
 
+/**
+ * #290 Increment 1 — the readable layout's names for the per-model stored score (readable mode only). The readable
+ * trust panel calls that stored score the "model behaviour score"; a readable page passes these so the rows use the same
+ * name. Absent (every classic call site): the classic "trust" wording, unchanged.
+ */
+export interface ListScoreNames {
+  row: (percent: number) => string;
+  sort: string;
+  capped: string;
+  /**
+   * The capped-score hint's tooltip (classic: TRUST_SCORE_CAP_REASON, "trust score is capped"), given the row's parse
+   * health and its stored cap as a whole percent (null when none is configured). Shown only where classic shows its hint.
+   */
+  cappedReason: (parseHealth: ModelTrustSummary["parseHealth"], capPercent: number | null) => string;
+}
+
+/** #290 Inc 1 (readable only): the configured score cap for a parse health, as a whole percent; null when none. */
+function capPercent(parseHealth: ModelTrustSummary["parseHealth"]): number | null {
+  const cap = TRUST_SCORE_CAP_BY_HEALTH[parseHealth];
+  return cap === null || cap === undefined ? null : Math.round(cap * 100);
+}
+
 const SORT_OPTIONS: { mode: SortMode; label: string }[] = [
   { mode: "trust", label: "trust" },
   { mode: "outliers", label: "outliers first" },
@@ -304,6 +338,12 @@ function MarkedSlotCounts({ marked }: { marked: NonNullable<RowVM["marked"]> }) 
   );
 }
 
+/** A14: the header's split figure across panel slots ("2 recorded differences" when one executing model answered). */
+function slotSplitText(splitCount: number, identity: RunExecutionIdentity): string {
+  if (identity.kind === "FC") return `${splitCount} ${RECORDED_DIFFERENCE_WORD}${splitCount === 1 ? "" : "s"}`;
+  return `${splitCount} split across panel slots`;
+}
+
 function RunHeaderStrip({
   schema,
   gate,
@@ -312,24 +352,33 @@ function RunHeaderStrip({
   splitCount,
   limitedCoverageCount,
   counts,
+  readableGate,
 }: {
   schema: ResultSchema;
   gate: AdaptiveGateResult;
   synthesisReport: AdaptiveSynthesisReport;
+  /** #290 Inc 1: readable layout only — the page's one gate presentation (ReadableGateDisplay); absent (classic): unchanged. */
+  readableGate?: ReadableGateDisplay;
   alignedClaimsCount: number;
   splitCount: number;
   limitedCoverageCount: number;
   /** Order 5 (Contract P): a marked report's rows counted by what they are (positionPresentation.panelCounts). */
   counts?: PanelCounts | null;
 }) {
+  // A14 (C-a): an unmarked report of a run whose slots are not verified independent executing models counts its rows
+  // across panel slots; one executing model's differing rows are recorded differences, never a "split".
+  const slotIdentity = useQualifiedExecutionIdentity();
   return (
     <Card className="flex items-center justify-between flex-wrap gap-3">
       <div className="flex items-center gap-2">
         <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600">
           {schema.id.replace(/_/g, " ")}
         </span>
-        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${GATE_CHIP_STYLES[gateTone(pageGateValue(synthesisReport, gate.status))]}`}>
-          {gateChipText(synthesisReport, pageGateValue(synthesisReport, gate.status))}
+        <span
+          {...(readableGate ? { "data-readable-gate": readableGate.status } : {})}
+          className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${GATE_CHIP_STYLES[readableGate ? readableGate.tone : gateTone(pageGateValue(synthesisReport, gate.status))]}`}
+        >
+          {readableGate ? readableGate.chip : gateChipText(synthesisReport, pageGateValue(synthesisReport, gate.status))}
         </span>
       </div>
       {counts ? (
@@ -343,13 +392,14 @@ function RunHeaderStrip({
         {" · "}
         {alignedClaimsCount} aligned claim{alignedClaimsCount === 1 ? "" : "s"}
         {" · "}
-        {splitCount} split
+        {slotIdentity ? slotSplitText(splitCount, slotIdentity) : <>{splitCount} split</>}
         {limitedCoverageCount > 0 && (
           <>
             {" · "}
             {limitedCoverageCount} limited coverage
           </>
         )}
+        {slotIdentity && <span data-source="computed" data-testid="list-slot-counts">{` · ${runSlotStatement(slotIdentity)}`}</span>}
       </div>
       )}
     </Card>
@@ -379,7 +429,7 @@ function PulseCard({
   );
 }
 
-function SortControl({ sortMode, onChange }: { sortMode: SortMode; onChange: (mode: SortMode) => void }) {
+function SortControl({ sortMode, onChange, scoreNames }: { sortMode: SortMode; onChange: (mode: SortMode) => void; scoreNames?: ListScoreNames }) {
   return (
     <div className="flex items-center gap-1 text-xs text-slate-500">
       <span>Sort:</span>
@@ -391,7 +441,7 @@ function SortControl({ sortMode, onChange }: { sortMode: SortMode; onChange: (mo
             onClick={() => onChange(mode)}
             className={`px-1.5 py-0.5 rounded ${sortMode === mode ? "font-semibold text-slate-900 bg-slate-100" : "hover:text-slate-700"}`}
           >
-            {label}
+            {scoreNames && mode === "trust" ? scoreNames.sort : label}
           </button>
         </span>
       ))}
@@ -519,31 +569,48 @@ function ModelAnswerBody({ schema, data }: { schema: ResultSchema; data: Record<
   );
 }
 
+/**
+ * A15 (C-a): the slot chip of a list row names the model that executed it — a substituted slot reads "DeepSeek
+ * (substituting Claude)" (SlotChip), never as the requested model. A marked report already states the substitution on
+ * the row (`vm.marked.substitutedLabel`), so it keeps the plain chip.
+ */
+function ExecutingSlotChip({ modelId }: { modelId: ModelId }) {
+  return usePositionPresentation() ? <ModelChip modelId={modelId} size="xs" /> : <SlotChip modelId={modelId} size="xs" />;
+}
+
 function ModelRow({
   schema,
   vm,
   expanded,
   onToggle,
+  scoreNames,
 }: {
   schema: ResultSchema;
   vm: RowVM;
   expanded: boolean;
   onToggle: () => void;
+  scoreNames?: ListScoreNames;
 }) {
   const { result } = vm;
   // D-4: a recorded provider failure is never described as a parse/format failure.
-  const notResponded = slotDidNotRespond(useRunSlotStatus(), result.modelId);
+  const slotStatuses = useRunSlotStatus();
+  const notResponded = slotDidNotRespond(slotStatuses, result.modelId);
+  // A recorded failure literal is never unrecognized (the two are exclusive), so did-not-respond is read first below.
+  const statusUnrecognized = slotStatusUnrecognized(slotStatuses, result.modelId);
+  // A13 (C-a): a slot whose executing model also answered other slots says so next to its alignment figures.
+  const slotIdentity = useQualifiedExecutionIdentity();
+  const alsoAnswered = slotIdentity ? otherSlotsAnsweredBySameModel(slotIdentity, result.modelId) : 0;
 
   if (vm.failed) {
     return (
       <div className="px-4 py-3">
         <div className="flex items-center gap-2 flex-wrap">
-          <ModelChip modelId={result.modelId} size="xs" />
-          <TintBadge tone="danger">{notResponded ? "no response · excluded" : "parse error · excluded"}</TintBadge>
+          <ExecutingSlotChip modelId={result.modelId} />
+          <TintBadge tone="danger">{notResponded ? "no response · excluded" : statusUnrecognized ? "status not recognized · excluded" : "parse error · excluded"}</TintBadge>
           <span className="ml-auto text-xs text-slate-400">{formatLatency(result.latencyMs)}</span>
         </div>
         <p className="mt-1.5 text-sm text-red-700">
-          <SlotName modelId={result.modelId} /> {notResponded ? didNotRespondText(notResponded) : "returned an incompatible format and was excluded from comparison."}
+          <SlotName modelId={result.modelId} /> {notResponded ? didNotRespondText(notResponded) : statusUnrecognized ? UNRECOGNIZED_STATUS_TEXT : "returned an incompatible format and was excluded from comparison."}
         </p>
         {result.parseError && !notResponded && (
           <details className="mt-1">
@@ -564,15 +631,15 @@ function ModelRow({
         className="w-full text-left px-4 py-3 hover:bg-slate-50/60 transition-colors"
       >
         <div className="flex items-center gap-x-3 gap-y-1.5 flex-wrap">
-          <ModelChip modelId={result.modelId} size="xs" />
+          <ExecutingSlotChip modelId={result.modelId} />
           <span className={`h-2 w-2 rounded-full shrink-0 ${HEALTH_DOT_COLORS[vm.parseHealth]}`} title={`Parse health: ${vm.parseHealth}`} />
           {vm.trustScore !== null && (
             <span className="text-xs text-slate-600 whitespace-nowrap">
-              trust {Math.round(vm.trustScore * 100)}%
+              {scoreNames ? scoreNames.row(Math.round(vm.trustScore * 100)) : <>trust {Math.round(vm.trustScore * 100)}%</>}
               {vm.capped && TRUST_SCORE_CAP_REASON[vm.parseHealth] && (
                 <span
                   className="ml-1 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-amber-100 text-[9px] font-bold text-amber-700 cursor-help align-text-top"
-                  title={TRUST_SCORE_CAP_REASON[vm.parseHealth]!}
+                  title={scoreNames ? scoreNames.cappedReason(vm.parseHealth, capPercent(vm.parseHealth)) : TRUST_SCORE_CAP_REASON[vm.parseHealth]!}
                 >
                   !
                 </span>
@@ -583,6 +650,11 @@ function ModelRow({
           {vm.alignment && vm.alignment.participated > 0 && (
             <span className="text-xs text-slate-600 whitespace-nowrap">
               aligns {vm.alignment.matched}/{vm.alignment.participated}
+            </span>
+          )}
+          {alsoAnswered > 0 && (
+            <span data-source="computed" data-testid="also-answered" className="text-xs text-slate-500 whitespace-nowrap">
+              {alsoAnsweredText(alsoAnswered)}
             </span>
           )}
           {vm.marked && <MarkedSlotCounts marked={vm.marked} />}
@@ -613,7 +685,7 @@ function ModelRow({
                 {vm.citations} citation{vm.citations === 1 ? "" : "s"}
               </TintBadge>
             ))}
-          {vm.capped && <TintBadge tone="warning">degraded · trust capped</TintBadge>}
+          {vm.capped && <TintBadge tone="warning">{scoreNames ? scoreNames.capped : "degraded · trust capped"}</TintBadge>}
           <span className="ml-auto flex items-center gap-2 shrink-0">
             <span className="text-xs text-slate-400">{formatLatency(result.latencyMs)}</span>
             <Chevron expanded={expanded} />
@@ -639,6 +711,10 @@ export interface ListViewProps {
   gate: AdaptiveGateResult;
   synthesisReport: AdaptiveSynthesisReport;
   trustSummary?: AdaptiveTrustSummary;
+  /** #290 Inc 1: readable mode only — see ListScoreNames. */
+  scoreNames?: ListScoreNames;
+  /** #290 Inc 1: readable mode only — the run-header gate badge from the page's one gate presentation (ReadableGateDisplay). */
+  readableGate?: ReadableGateDisplay;
   /** Switches the parent tab shell to Synthesis Report and scrolls to the given `data-section` anchor. */
   onNavigateToSynthesis?: (sectionId: string) => void;
 }
@@ -659,11 +735,15 @@ function ListViewBody({
   gate,
   synthesisReport,
   trustSummary,
+  scoreNames,
+  readableGate,
   onNavigateToSynthesis,
 }: ListViewProps) {
   const rows = useMemo(() => alignedClaims || [], [alignedClaims]);
   const position = usePositionPresentation();
   const counts = useMemo(() => (position ? panelCounts(rows, position.roster) : null), [position, rows]);
+  const slotsNotIndependent = !!useRunIndependence(synthesisReport);
+  const slotIdentity = useQualifiedExecutionIdentity();
   const [sortMode, setSortMode] = useState<SortMode>("trust");
   const [expandedModels, setExpandedModels] = useState<Set<ModelId>>(new Set());
 
@@ -695,16 +775,19 @@ function ListViewBody({
         splitCount={splitCount}
         limitedCoverageCount={limitedCoverageCount}
         counts={counts}
+        readableGate={readableGate}
       />
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <PulseCard
-          label="Consensus claims"
+          // c16 (MINOR-1): consensus rows are counted by panel slot; in a run whose slots are not independent executing
+          // models that count is not one of independent-model consensus.
+          label={slotsNotIndependent ? slotCountedLabel("Consensus claims") : "Consensus claims"}
           value={counts ? counts.claimByStatus.consensus : consensusCount}
           onClick={() => onNavigateToSynthesis?.("agreement-disagreement-map")}
         />
         <PulseCard
-          label={counts ? "Recorded opposing positions" : "Split claims"}
+          label={counts ? "Recorded opposing positions" : slotIdentity?.kind === "FC" ? "Recorded differences" : slotIdentity ? slotCountedLabel("Split claims") : "Split claims"}
           value={counts ? counts.opposing : splitCount}
           accent="split"
           onClick={() => onNavigateToSynthesis?.("disagreements")}
@@ -721,8 +804,13 @@ function ListViewBody({
           <span className="text-xs text-slate-500">
             {results.length} model{results.length === 1 ? "" : "s"}
           </span>
-          <SortControl sortMode={sortMode} onChange={setSortMode} />
+          <SortControl sortMode={sortMode} onChange={setSortMode} scoreNames={scoreNames} />
         </div>
+        {slotIdentity && !slotIdentity.verified && (
+          <p data-source="computed" data-testid="list-alignment-unverified" className="mb-2 text-xs text-slate-500">
+            {SLOT_ALIGNMENT_UNVERIFIED_NOTE}
+          </p>
+        )}
         <div className="rounded-xl border border-slate-200 bg-white overflow-hidden divide-y divide-slate-100">
           {sortedVMs.map((vm) => (
             <ModelRow
@@ -731,6 +819,7 @@ function ListViewBody({
               vm={vm}
               expanded={expandedModels.has(vm.result.modelId)}
               onToggle={() => toggle(vm.result.modelId)}
+              scoreNames={scoreNames}
             />
           ))}
         </div>

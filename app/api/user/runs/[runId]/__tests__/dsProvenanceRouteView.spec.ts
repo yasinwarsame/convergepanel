@@ -105,6 +105,9 @@ jest.mock("@/lib/firebase/admin", () => ({
             doc: (id: string) => ({
               get: async () => {
                 mockIo.push(`${name}:${id}`);
+                // The history fixture is the humanReviewHistory collection only; any other subcollection (the display
+                // record, Order 40 C) is absent.
+                if (name !== "humanReviewHistory") return { exists: false, data: () => undefined };
                 if (mockHistory.mode === "throws") throw new Error("history read failed");
                 const row = mockHistory.rows.get(id);
                 return { exists: row !== undefined, data: () => row };
@@ -227,6 +230,14 @@ interface Observation {
    */
   modelResults: string | null;
   io: string[];
+  /**
+   * Order 40 C (O-2): reads of the display record's own document (`adaptiveDisplayResults:v1`), held out of `io` so
+   * the 45df2ea IO baseline still compares exactly. Pinned separately: once on an authorized 200 for a run with an
+   * adaptive output, after every gate read; otherwise never.
+   */
+  displayReads: number;
+  displayReadAfterGates: boolean;
+  hadAdaptiveOutput: boolean;
   logs: string;
   builderCalls: number;
 }
@@ -272,12 +283,19 @@ async function observe(c: RouteCase, flag: boolean): Promise<Observation> {
       : await w1Get(new NextRequest(`http://localhost/api/workspaces/${WS_ID}/runs/${RUN_ID}${v.query ?? ""}`, { headers }), { params: { workspaceId: WS_ID, runId: RUN_ID } });
   const raw = await res.text();
   const { text, modelResults } = holdOutModelResults(raw);
+  const DISPLAY = "adaptiveDisplayResults:v1";
+  const displayAt = mockIo.indexOf(DISPLAY);
+  const GATES = (x: string) => x === "runDoc" || x === "teamAccess" || x === "workspaceIntegrity" || x.startsWith("humanReviewHistory:");
+  const lastGate = mockIo.reduce((acc, x, i) => (GATES(x) ? i : acc), -1);
   return {
     status: res.status,
     headers: JSON.stringify([...res.headers.entries()].sort()),
     text,
     modelResults,
-    io: [...mockIo],
+    io: mockIo.filter((x) => x !== DISPLAY),
+    displayReads: mockIo.filter((x) => x === DISPLAY).length,
+    displayReadAfterGates: displayAt === -1 || displayAt > lastGate,
+    hadAdaptiveOutput: (mockRunDocs.get(RUN_ID) as Record<string, unknown> | undefined)?.adaptiveOutput !== undefined,
     logs: JSON.stringify(mockLogs),
     builderCalls: mockBuilderCalls.length,
   };
@@ -694,4 +712,23 @@ it("the case matrix includes every DS output, every record state and every viewe
   expect(new Set(CASES.map((c) => c.adaptive))).toEqual(new Set(Object.keys(ADAPTIVE)));
   expect(new Set(CASES.map((c) => c.record))).toEqual(new Set(Object.keys(RECORDS)));
   expect(CASES.some((c) => DS_ADAPTIVE.has(c.adaptive) && c.viewer.route === "W1" && oracleA(c).built)).toBe(true);
+});
+
+run("Order 40 C (O-2): the display record's own document is read once, only for an authorized viewer of a run with an adaptive output, after every gate", () => {
+  it.each(CASES.map((c) => [c.id, c] as const))("%s", (_id, c) => {
+    for (const o of [observations.get(c.id)!.off, observations.get(c.id)!.on]) {
+      // Authorized = every access and containment gate passed: the spec's viewer.role, or on W1 the sealed baseline's
+      // `assignment` read, which the Team route makes only after access and Workspace containment. A later Team
+      // enrichment outcome (the Project label read failing, or a Project bound to another Workspace) may still turn the
+      // response into a 503 / concealed 404, after the display read; the payload is then never returned.
+      const authorized = c.viewer.role !== null || (c.viewer.route === "W1" && BASELINE.cases[c.id].io.includes("assignment"));
+      expect(o.displayReads).toBe(authorized && o.hadAdaptiveOutput ? 1 : 0);
+      expect(o.displayReadAfterGates).toBe(true);
+    }
+  });
+  it("is not vacuous: some cases read it and some denials do not", () => {
+    const all = CASES.map((c) => observations.get(c.id)!.on);
+    expect(all.some((o) => o.displayReads === 1)).toBe(true);
+    expect(CASES.some((c) => c.viewer.role === null && observations.get(c.id)!.on.hadAdaptiveOutput && observations.get(c.id)!.on.displayReads === 0)).toBe(true);
+  });
 });

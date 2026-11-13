@@ -298,6 +298,8 @@ it("the kept headings cover every heading kind of a long legacy report", () => {
     if ("minPresenceAhead" in el.props) texts.push(extractPdfElementText(el).trim());
   });
   expect(texts).toContain("Model responses (5)");
-  expect(texts).toEqual(expect.arrayContaining(["Panel conclusion", "Where models agree / disagree", "Disagreement", "Settled Claims", "Disputed Claims", "Key Metrics", "Open Questions"]));
+  // c16 (owner ruling, MINOR-3): the layout fixtures carry no frozen run provenance (a pre-6.2b export), so the verdict
+  // section states model independence as unverified; the heading is kept with its content exactly as before.
+  expect(texts).toEqual(expect.arrayContaining(["Panel conclusion", "Where models agree / disagree (model independence unverified)", "Disagreement", "Settled Claims", "Disputed Claims", "Key Metrics", "Open Questions"]));
   expect(texts.filter((t) => / · /.test(t))).toHaveLength(5);
 });

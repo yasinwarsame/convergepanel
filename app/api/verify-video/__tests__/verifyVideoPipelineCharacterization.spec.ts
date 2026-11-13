@@ -320,6 +320,9 @@ describe("normal 3-model success", () => {
     }
     expect(body.agreementPoints).toEqual(expect.any(Array));
     expect(body.disagreementPoints).toEqual(expect.any(Array));
+    // C-b (CB-17, PQ-2 (a) strict): additive presentation key — the vision rows record no provider, so the shared gate
+    // reads the live result as "unverified" (3/3 ok rows are never inferred independent from their modelIds).
+    expect(body.modelIndependence).toBe("unverified");
     expect(body.aggregateSummary).toEqual(
       expect.objectContaining({ totalModels: 3, modelsAuthenticCaptured: 3, modelsManipulated: 0 })
     );
@@ -370,6 +373,8 @@ describe("persisted success document", () => {
       })
     );
     expect(doc.modelResults).toHaveLength(3);
+    // C-b (CB-17): presentation only — nothing is persisted for it, and the stored points are the executed ones.
+    expect("modelIndependence" in doc).toBe(false);
     expect(doc.timestamp).toBeTruthy(); // FieldValue.serverTimestamp() sentinel — not overfit to internals.
     expect(doc.workspaceId).toBeUndefined();
     expect(doc.projectId).toBeUndefined();
@@ -528,6 +533,8 @@ describe("dedup hit", () => {
     expect(res.status).toBe(200);
     expect(body._deduplicated).toBe(true);
     expect(body.verificationId).toBe(existingId);
+    // C-b (CB-17): the replayed stored record is judged by the shared gate too.
+    expect(body.modelIndependence).toBe("unverified");
 
     expect(mockCallOpenAIVision).not.toHaveBeenCalled();
     expect(mockCallClaudeVision).not.toHaveBeenCalled();

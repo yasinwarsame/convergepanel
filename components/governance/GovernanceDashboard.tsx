@@ -23,6 +23,8 @@ import { isValidReviewThresholdValue } from "@/lib/governance/familyReviewThresh
 import ScoreTypeThresholdsSection from "@/components/governance/ScoreTypeThresholdsSection";
 import { buildPolicyPatch } from "@/components/governance/policyPatch";
 import { runModelFamilyName } from "@/lib/panel/runModelIdentity";
+import { CONSENSUS_WITHHELD_TEXT, type ConsensusScoreWithheldReason, type StoredConsensusIndependence } from "@/lib/panel/independentVoices";
+import { QUALIFIED_DISAGREEMENT_TEXT, type QualifiedDisagreementBasis } from "@/lib/panel/storedDisagreementIndependence";
 import {
   formatFullDatetime,
   formatRelativeTime,
@@ -50,6 +52,8 @@ type QueueRow = {
   question: string;
   consensusScore: number | null;
   evidenceQuality: string | null;
+  /** Research: stored score withheld — fewer than two independent executing models, or independence not recorded. */
+  consensusWithheld?: ConsensusScoreWithheldReason;
   governanceStatus: "approved" | "needs_review" | "blocked";
   governanceReasons: string[];
   modelHealth: { ok: number; substituted: number; failed: number };
@@ -63,6 +67,12 @@ type QueueRow = {
   correctParts?: string[];
   incorrectParts?: string[];
   keyFindings?: string[];
+  /** Research / claim / video: stored signals that are not agreement or disagreement between independent models, with the reason. */
+  qualifiedDisagreements?: { text: string; basis: QualifiedDisagreementBasis }[];
+  /** Research / claim / video: the stored rows do not prove ≥ 2 independent executing models. */
+  modelIndependence?: Exclude<StoredConsensusIndependence, "independent">;
+  /** Claim / video: fewer than two independent models answered — the verdict as one model's assessment. */
+  singleModelAssessment?: string;
   claimVerdictSummary?: string;
   createdAt: string;
   userId: string;
@@ -639,6 +649,144 @@ function statusChipClasses(status: string): { wrap: string; label: string } {
   };
 }
 
+/**
+ * The queue's consensus text for a row: a research row whose stored score is withheld (fewer than two independent
+ * executing models, or independence not recorded — see `consensusWithheld`) shows the reason, never a number.
+ */
+export function queueConsensusText(row: Pick<QueueRow, "consensusScore" | "consensusWithheld">, withDenominator: boolean): string {
+  if (row.consensusWithheld) return CONSENSUS_WITHHELD_TEXT[row.consensusWithheld];
+  if (row.consensusScore == null) return "—";
+  return withDenominator ? `${Math.round(row.consensusScore)}/100` : String(Math.round(row.consensusScore));
+}
+
+/**
+ * Render-time withholding (governance queue): the queue DTO carries the STORED consensus score and evidence quality
+ * (governance-queue metadata, unchanged) plus the additive `consensusWithheld` reason. When the reason is set, neither
+ * the number, its colour nor the evidence-quality chip is presented — the score cell shows the reason instead.
+ */
+export function queuePresentedScore(row: Pick<QueueRow, "consensusScore" | "consensusWithheld">): number | null {
+  return row.consensusWithheld ? null : row.consensusScore ?? null;
+}
+
+/** The evidence quality the queue presents for a row: none while its stored score is withheld (`consensusWithheld`). */
+export function queuePresentedEvidenceQuality(row: Pick<QueueRow, "evidenceQuality" | "consensusWithheld">): string | null {
+  return row.consensusWithheld ? null : row.evidenceQuality ?? null;
+}
+
+/**
+ * A research row's stored disagreement lines presented as disagreements between independent executing models. Fails
+ * closed — a line is shown only when the DTO positively establishes it as genuine:
+ *  - the row's execution is verified independent (no `modelIndependence`: the persisted rows prove >= 2 independent
+ *    executing models, judged by the shared gate). Below that ("insufficient" / "unverified") NO stored line is a
+ *    disagreement between models;
+ *  - the line is not a qualified entry. Since C-c (CC-16, D-2) the route lists EVERY non-genuine stored line, bullet and
+ *    point forms, by exact text (no cap), so a line absent from the list is genuine; the former saturation rule (a
+ *    capped list hid every line once full) is gone.
+ * Qualified lines stay under their own heading. Presentation only: the DTO base keys and every decision are unchanged.
+ */
+export function queueResearchDisagreementLines(
+  lines: readonly string[] | undefined,
+  row: Pick<QueueRow, "qualifiedDisagreements" | "modelIndependence">
+): string[] {
+  if (row.modelIndependence === "insufficient" || row.modelIndependence === "unverified") return [];
+  const qualified = new Set((row.qualifiedDisagreements ?? []).map((d) => d.text));
+  return (lines ?? []).filter((line) => !qualified.has(line));
+}
+
+/**
+ * Heading of a research row's stored key findings: below two independent executing models (or with independence not
+ * recorded) they are one model's findings, never presented as the panel's.
+ */
+export function queueKeyFindingsHeading(row: Pick<QueueRow, "modelIndependence">): string {
+  if (row.modelIndependence === "insufficient") return "Key findings (synthesis — one independent model; not a consensus)";
+  if (row.modelIndependence === "unverified") return "Key findings (synthesis — model independence unverified)";
+  return "Key findings (synthesis)";
+}
+
+/** Heading of the stored disagreement lines that are not disagreements between independent models. */
+export const QUALIFIED_DISAGREEMENTS_HEADING = "Recorded differences not counted as model disagreements";
+
+/** Claim / video row note when the stored rows do not prove >= 2 independent executing models. */
+export const QUEUE_VERIFICATION_INDEPENDENCE_NOTE: Readonly<Record<"insufficient" | "unverified", string>> = Object.freeze({
+  insufficient:
+    "Fewer than two independent models answered (slots answered by the same substitute model count as one) — no agreement or disagreement between models.",
+  unverified: "Independent-model coverage unverified — nothing here is presented as agreement or disagreement between models.",
+});
+
+/** The suffix the route's 35933c8 per-verdict line carries (`buildVerificationQueueReviewExtras` / `buildVideoQueueReviewExtras`). */
+const OTHERS_DISAGREE_SUFFIX = " (others disagree)";
+
+/**
+ * The route's `agreementSummary` ("k/n models say <verdict>", 35933c8) parsed to its tally, or null when it is absent,
+ * malformed, or names no verdict (a row without a stored `verdict` field — then the tally and the per-verdict lines may
+ * be grouped differently, so nothing is derived from it).
+ */
+export function queueAgreementTally(summary: string | undefined): { k: number; n: number; verdict: string } | null {
+  if (typeof summary !== "string") return null;
+  const m = /^(\d+)\/(\d+) models say (.*)$/.exec(summary);
+  if (!m) return null;
+  const k = Number(m[1]);
+  const n = Number(m[2]);
+  const verdict = m[3];
+  if (!Number.isInteger(k) || !Number.isInteger(n) || n < 1 || k < 1 || k > n || verdict.trim().length === 0) return null;
+  return { k, n, verdict };
+}
+
+/**
+ * C-b CB-21 (O14 render correction, PQ-3 ruling: a render-time rule from `agreementSummary`, no fifth DTO key). The
+ * route's stored-shape line "<names> rated as <verdict> (others disagree)" is emitted for every verdict group of one or
+ * two answering slots — also when every answering slot gave the SAME verdict, where no other model answered
+ * differently. The tally and those lines are computed over the same rows (status "ok"), and when the tally names a
+ * verdict every one of its rows recorded a `verdict` field, so both group the rows identically: a unanimous tally
+ * (k = n) proves no answering slot gave a different verdict, and every "(others disagree)" line is dropped. Any other
+ * tally (k < n, or none parseable) keeps the lines exactly as before. Lines without the suffix are never touched.
+ */
+export function queueRenderedDisagreementPoints(row: Pick<QueueRow, "disagreementPoints" | "agreementSummary">): string[] {
+  const lines = row.disagreementPoints ?? [];
+  const tally = queueAgreementTally(row.agreementSummary);
+  if (!tally || tally.k !== tally.n) return [...lines];
+  return lines.filter((line) => !line.endsWith(OTHERS_DISAGREE_SUFFIX));
+}
+
+/**
+ * What a claim / video row's expanded view presents as agreement and disagreement between models. A row the route marks
+ * with `modelIndependence` (fewer than two independent executing models, or independence not recorded) presents NONE
+ * — whatever lines it carries — and shows the note, the single-model assessment and the qualified signals instead.
+ */
+export function queueVerificationAgreementView(
+  row: Pick<
+    QueueRow,
+    "agreementPoints" | "agreementSummary" | "disagreementPoints" | "dissentSummary" | "disagreements" | "modelIndependence" | "qualifiedDisagreements" | "singleModelAssessment"
+  >
+): {
+  agreeLines: string[];
+  disagreeLines: string[];
+  note: string | null;
+  singleModelAssessment: string | null;
+  qualified: { text: string; basis: QualifiedDisagreementBasis }[];
+} {
+  const qualified = row.qualifiedDisagreements ?? [];
+  if (row.modelIndependence === "insufficient" || row.modelIndependence === "unverified") {
+    return {
+      agreeLines: [],
+      disagreeLines: [],
+      note: QUEUE_VERIFICATION_INDEPENDENCE_NOTE[row.modelIndependence],
+      singleModelAssessment: row.singleModelAssessment ?? null,
+      qualified,
+    };
+  }
+  const agreeLines =
+    row.agreementPoints && row.agreementPoints.length > 0 ? row.agreementPoints : row.agreementSummary ? [row.agreementSummary] : [];
+  // C-b CB-21 (O14, PQ-3): render-time only — the DTO is unchanged.
+  const disagreementPoints = queueRenderedDisagreementPoints(row);
+  const disagreeLines = [
+    ...disagreementPoints,
+    ...(disagreementPoints.length ? [] : row.dissentSummary ? [row.dissentSummary] : []),
+    ...(row.disagreements ?? []),
+  ];
+  return { agreeLines, disagreeLines, note: null, singleModelAssessment: null, qualified };
+}
+
 function consensusColor(score: number | null): string {
   if (score == null) return "text-cp-faint";
   if (score > 75) return "text-emerald-400";
@@ -687,8 +835,7 @@ function ReviewModal(props: {
 
   const isBlock = mode === "blocked";
   const title = isBlock ? "Block this run" : "Request changes on this run";
-  const consensus =
-    row.consensusScore == null ? "—" : `${Math.round(row.consensusScore)}/100`;
+  const consensus = queueConsensusText(row, true);
   const statusLabel =
     row.governanceStatus === "needs_review"
       ? "Needs Review"
@@ -1502,7 +1649,7 @@ export default function GovernanceDashboard() {
                   {displayedQueueRows.map((row) => {
                     const chip = statusChipClasses(row.governanceStatus);
                     const mh = modelHealthDisplay(row.modelHealth);
-                    const ev = evidenceChip(row.evidenceQuality);
+                    const ev = evidenceChip(queuePresentedEvidenceQuality(row));
                     const exp = expanded.has(`${row.collection}:${row.runId}`);
                     const reasons = row.governanceReasons ?? [];
                     const firstReason = reasons[0] ?? "—";
@@ -1891,7 +2038,7 @@ export default function GovernanceDashboard() {
   );
 }
 
-function FragmentRow(props: {
+export function FragmentRow(props: {
   row: QueueRow;
   currentUserUid?: string;
   currentUserEmail?: string | null;
@@ -2003,8 +2150,12 @@ function FragmentRow(props: {
             </span>
           )}
         </td>
-        <td className={`px-3 py-2 font-semibold ${consensusColor(row.consensusScore)}`}>
-          {row.consensusScore == null ? "—" : Math.round(row.consensusScore)}
+        <td className={`px-3 py-2 font-semibold ${consensusColor(queuePresentedScore(row))}`}>
+          {row.consensusWithheld ? (
+            <span className="text-xs font-normal text-cp-muted">{queueConsensusText(row, false)}</span>
+          ) : (
+            queueConsensusText(row, false)
+          )}
         </td>
         <td className="hidden px-3 py-2 md:table-cell">
           <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${ev.cls}`}>
@@ -2106,7 +2257,7 @@ function FragmentRow(props: {
 
             {row.runType === "research" && row.keyFindings && row.keyFindings.length > 0 ? (
               <div className="mt-4 rounded-r-lg border-l-4 border-emerald-500 bg-emerald-50/80 pl-3 pr-3 py-3">
-                <p className="text-sm font-semibold text-emerald-900">Key findings (synthesis)</p>
+                <p className="text-sm font-semibold text-emerald-900">{queueKeyFindingsHeading(row)}</p>
                 <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-emerald-950/90">
                   {row.keyFindings.map((f, i) => (
                     <li key={i}>{f}</li>
@@ -2115,11 +2266,11 @@ function FragmentRow(props: {
               </div>
             ) : null}
 
-            {row.runType === "research" && row.disagreementPoints && row.disagreementPoints.length > 0 ? (
+            {row.runType === "research" && queueResearchDisagreementLines(row.disagreementPoints, row).length > 0 ? (
               <div className="mt-4 rounded-r-lg border-l-4 border-amber-600 bg-amber-50/90 pl-3 pr-3 py-3">
                 <p className="text-sm font-semibold text-amber-950">Where synthesis flags disagreements</p>
                 <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-amber-950/90">
-                  {row.disagreementPoints.map((d, i) => (
+                  {queueResearchDisagreementLines(row.disagreementPoints, row).map((d, i) => (
                     <li key={i}>{d}</li>
                   ))}
                 </ul>
@@ -2213,40 +2364,54 @@ function FragmentRow(props: {
               </div>
             ) : null}
 
-            {(row.runType === "verification" || row.runType === "video") &&
-            ((row.agreementPoints && row.agreementPoints.length > 0) || row.agreementSummary) ? (
-              <div className="mt-4 rounded-r-lg border-l-4 border-emerald-500 bg-emerald-50/70 pl-3 pr-3 py-3">
-                <p className="text-sm font-semibold text-emerald-900">Where models agree</p>
-                <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-emerald-950/90">
-                  {(row.agreementPoints && row.agreementPoints.length > 0
-                    ? row.agreementPoints
-                    : row.agreementSummary
-                      ? [row.agreementSummary]
-                      : []
-                  ).map((line, i) => (
-                    <li key={i}>{line}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-
             {row.runType === "verification" || row.runType === "video"
               ? (() => {
-                  const disagreeLines: string[] = [
-                    ...(row.disagreementPoints ?? []),
-                    ...(row.disagreementPoints?.length ? [] : row.dissentSummary ? [row.dissentSummary] : []),
-                    ...(row.disagreements ?? []),
-                  ];
-                  if (disagreeLines.length === 0) return null;
+                  const view = queueVerificationAgreementView(row);
                   return (
-                    <div className="mt-4 rounded-r-lg border-l-4 border-red-500 bg-red-50/60 pl-3 pr-3 py-3">
-                      <p className="text-sm font-semibold text-red-900">Where models disagree</p>
-                      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-red-950/90">
-                        {disagreeLines.map((line, i) => (
-                          <li key={i}>{line}</li>
-                        ))}
-                      </ul>
-                    </div>
+                    <>
+                      {view.note ? (
+                        <p className="mt-4 rounded-lg border border-cp-border bg-cp-raised px-3 py-2 text-sm text-cp-muted" data-testid="queue-verification-independence-note">
+                          {view.note}
+                        </p>
+                      ) : null}
+                      {view.singleModelAssessment ? (
+                        <p className="mt-2 text-sm text-cp-text" data-testid="queue-single-model-assessment">
+                          {view.singleModelAssessment}
+                        </p>
+                      ) : null}
+                      {view.agreeLines.length > 0 ? (
+                        <div className="mt-4 rounded-r-lg border-l-4 border-emerald-500 bg-emerald-50/70 pl-3 pr-3 py-3">
+                          <p className="text-sm font-semibold text-emerald-900">Where models agree</p>
+                          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-emerald-950/90">
+                            {view.agreeLines.map((line, i) => (
+                              <li key={i}>{line}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                      {view.disagreeLines.length > 0 ? (
+                        <div className="mt-4 rounded-r-lg border-l-4 border-red-500 bg-red-50/60 pl-3 pr-3 py-3">
+                          <p className="text-sm font-semibold text-red-900">Where models disagree</p>
+                          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-red-950/90">
+                            {view.disagreeLines.map((line, i) => (
+                              <li key={i}>{line}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                      {view.qualified.length > 0 ? (
+                        <div className="mt-4" data-testid="queue-verification-qualified-signals">
+                          <p className="text-sm font-semibold text-cp-text">{QUALIFIED_DISAGREEMENTS_HEADING}</p>
+                          <ul className="mt-1.5 list-disc space-y-1 pl-5 text-sm text-cp-muted">
+                            {view.qualified.map((d, i) => (
+                              <li key={i}>
+                                {d.text} <span className="text-xs text-cp-faint">({QUALIFIED_DISAGREEMENT_TEXT[d.basis]})</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                    </>
                   );
                 })()
               : null}
@@ -2273,12 +2438,25 @@ function FragmentRow(props: {
               </div>
             ) : null}
 
-            {row.disagreements && row.disagreements.length > 0 && row.runType === "research" ? (
+            {row.runType === "research" && queueResearchDisagreementLines(row.disagreements, row).length > 0 ? (
               <div className="mt-4">
                 <p className="text-sm font-semibold text-slate-900">Key disagreements</p>
                 <ul className="mt-1.5 list-disc space-y-1 pl-5 text-sm text-slate-700">
-                  {row.disagreements.map((d, i) => (
+                  {queueResearchDisagreementLines(row.disagreements, row).map((d, i) => (
                     <li key={i}>{d}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {row.runType === "research" && row.qualifiedDisagreements && row.qualifiedDisagreements.length > 0 ? (
+              <div className="mt-4" data-testid="queue-qualified-disagreements">
+                <p className="text-sm font-semibold text-cp-text">{QUALIFIED_DISAGREEMENTS_HEADING}</p>
+                <ul className="mt-1.5 list-disc space-y-1 pl-5 text-sm text-cp-muted">
+                  {row.qualifiedDisagreements.map((d, i) => (
+                    <li key={i}>
+                      {d.text} <span className="text-xs text-cp-faint">({QUALIFIED_DISAGREEMENT_TEXT[d.basis]})</span>
+                    </li>
                   ))}
                 </ul>
               </div>

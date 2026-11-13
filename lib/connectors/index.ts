@@ -16,6 +16,7 @@ import { callClaude } from "./claude";
 import { callGrok } from "./grok";
 import { callPerplexity } from "./perplexity";
 import { callGemini } from "./gemini";
+import type { CanonicalProvider } from "@/lib/panel/providerRegistry";
 
 /**
  * Connector function type
@@ -48,6 +49,25 @@ export const CONNECTOR_MAP: Record<ModelId, ConnectorFunction> = {
   perplexity: callPerplexity,
   gemini: callGemini,
 };
+
+/**
+ * Order 33 (owner ruling A): the provider each connector FUNCTION calls — a server-owned constant tied to the function
+ * itself, not to a slot name. The claim dispatch (lib/verification/runClaimVerificationPanel.ts) reads it for the
+ * connector it actually invoked, so a recorded provider always names the code that ran. Values are canonical providers
+ * (lib/panel/providerRegistry.ts) and match `PanelModelConfig.provider` (lib/panelModels.ts).
+ */
+const CONNECTOR_PROVIDER: ReadonlyMap<ConnectorFunction, CanonicalProvider> = new Map<ConnectorFunction, CanonicalProvider>([
+  [callChatGPT, "openai"],
+  [callClaude, "anthropic"],
+  [callGrok, "xai"],
+  [callPerplexity, "perplexity"],
+  [callGemini, "google"],
+]);
+
+/** The provider the given connector function calls, or null for a function this module does not own. */
+export function connectorProvider(connector: ConnectorFunction | undefined): CanonicalProvider | null {
+  return connector ? CONNECTOR_PROVIDER.get(connector) ?? null : null;
+}
 
 /**
  * Get connector function for a model ID

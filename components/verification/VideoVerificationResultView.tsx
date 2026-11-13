@@ -32,6 +32,29 @@ import {
 import type { VideoVerificationClientPayload } from "@/lib/verification/videoVerificationClientPayload";
 import { VIDEO_VERDICT_CLIPBOARD_DISCLAIMER } from "@/lib/legal/clipboardDisclaimers";
 import { VIDEO_VERIFICATION_DISCLAIMER } from "@/lib/legal/videoVerificationDisclaimer";
+import {
+  claimConsensusDisplay,
+  claimModelIndependence,
+  claimVerdictQualifier,
+  CLAIM_NOT_INDEPENDENT_AGREE_HEADING,
+  CLAIM_NOT_INDEPENDENT_DISAGREE_HEADING,
+} from "@/lib/verification/claimConsensusPresentation";
+
+/**
+ * C-b (CB-13, PQ-2 (a) strict): how a video result presents its stored cross-model figures. Video rows record no
+ * provider, so the shared gate never verifies them (`modelIndependence` "unverified"; absent → "unverified", fail
+ * closed): the stored consensus score and the metrics derived with it are withheld with the shared "unverified"
+ * wording of the claim family (mirrored, not forked), slot counts are stated as panel slots, and the stored agreement
+ * / disagreement points are shown as recorded under qualified headings — never rewritten.
+ */
+export function videoConsensusView(data: Pick<VideoVerificationClientPayload, "consensusScore" | "modelIndependence">) {
+  const independence = claimModelIndependence(data.modelIndependence);
+  return {
+    independence,
+    consensus: claimConsensusDisplay(data.consensusScore, independence),
+    qualifier: claimVerdictQualifier(independence),
+  };
+}
 
 function formatDuration(seconds: number): string {
   const mins = Math.floor(seconds / 60);
@@ -290,6 +313,7 @@ function ModelEvidenceCard({ model }: { model: VideoVerificationClientPayload["m
 
 /** Pure text for "Copy verdict". Formatting only — the caller decides whether and how to write it anywhere. */
 export function buildVideoVerdictClipboardText(data: VideoVerificationClientPayload): string {
+  const view = videoConsensusView(data);
   const verdictText: Record<string, string> = {
     authentic_captured: "Authentic — Camera footage with no manipulation indicators",
     authentic_produced: "Authentic — Legitimately produced content (not deceptive)",
@@ -306,13 +330,14 @@ export function buildVideoVerdictClipboardText(data: VideoVerificationClientPayl
     `VIDEO VERIFICATION RESULT`,
     `Verdict: ${verdictText[data.verdict] || data.verdict}`,
     ...(ct ? [`Content type: ${ct}`] : []),
-    `Consensus: ${data.consensusScore}/100 (${data.confidenceLabel})`,
-    `Evidence quality: ${data.evidenceQuality}`,
+    ...(view.consensus.kind === "score"
+      ? [`Consensus: ${view.consensus.score}/100 (${data.confidenceLabel})`, `Evidence quality: ${data.evidenceQuality}`]
+      : [`Verdict basis: ${view.qualifier}`, `Consensus: ${view.consensus.text}`]),
     ``,
     `Video: ${data.metadata.duration}s, ${data.metadata.width}x${data.metadata.height}, ${data.metadata.format}`,
     `Frames analyzed: ${data.frameCount}`,
     ``,
-    `Models:`,
+    view.consensus.kind === "score" ? `Models:` : `Panel slots:`,
     ...data.modelEvidence.map(
       (m) => `  ${m.modelName}: ${m.verdict} (${m.confidence} confidence) — ${m.summary}`
     ),
@@ -330,6 +355,7 @@ export function buildVideoVerdictClipboardText(data: VideoVerificationClientPayl
  * the caller.
  */
 export function VideoVerificationAuditTrailDetails({ data }: { data: VideoVerificationClientPayload }) {
+  const view = videoConsensusView(data);
   return (
     <>
       <h3 className="text-sm font-semibold text-slate-100 tracking-tight">Audit trail</h3>
@@ -346,11 +372,15 @@ export function VideoVerificationAuditTrailDetails({ data }: { data: VideoVerifi
           <dt className="text-slate-500 shrink-0">Verdict</dt>
           <dd className="text-slate-200">{data.verdict}</dd>
           <dt className="text-slate-500 shrink-0">Consensus</dt>
-          <dd className="text-white font-semibold tabular-nums">{data.consensusScore}/100</dd>
+          {view.consensus.kind === "score" ? (
+            <dd className="text-white font-semibold tabular-nums">{view.consensus.score}/100</dd>
+          ) : (
+            <dd className="text-slate-300" data-testid="video-audit-consensus-withheld">{view.consensus.text}</dd>
+          )}
         </div>
       </dl>
       <p className="mt-5 text-xs font-semibold uppercase tracking-wide text-slate-500">
-        Models ({data.modelEvidence.length})
+        {view.consensus.kind === "score" ? "Models" : "Panel slots"} ({data.modelEvidence.length})
       </p>
       <ul className="mt-2 space-y-1.5 text-sm text-slate-300">
         {data.modelEvidence.map((m) => (
@@ -377,6 +407,9 @@ export default function VideoVerificationResultView({
   const config = verdictConfig[data.verdict] ?? verdictConfig.inconclusive;
   const supportPct = supportPercent(data.supportRatio);
   const evidenceQ = data.evidenceQuality;
+  const view = videoConsensusView(data);
+  const refused = data.modelEvidence.filter((m) => m.status === "refused").length;
+  const responded = data.modelEvidence.filter((m) => m.status === "ok").length;
 
   return (
     <div className="rounded-2xl border border-slate-700 bg-slate-950 text-slate-100 shadow-xl overflow-hidden">
@@ -405,6 +438,11 @@ export default function VideoVerificationResultView({
             <div className="min-w-0 flex-1">
               <h2 className="text-xl font-bold text-slate-50">{config.title}</h2>
               <p className="text-sm text-slate-200/90 mt-1">{config.subtitle}</p>
+              {view.qualifier ? (
+                <p className="text-xs text-slate-300 mt-2" data-testid="video-verdict-qualifier">
+                  {view.qualifier}
+                </p>
+              ) : null}
               {data.contentType && data.contentType !== "unknown" && (
                 <span className="mt-3 inline-block text-sm px-3 py-1 rounded-full bg-gray-100 text-gray-700">
                   Content type: {contentTypeLabels[data.contentType] || data.contentType}
@@ -416,9 +454,15 @@ export default function VideoVerificationResultView({
 
         <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Consensus</p>
+          {view.consensus.kind === "withheld" ? (
+            <div className="mt-2" data-testid="video-consensus-withheld">
+              <p className="text-base font-semibold text-slate-100">{view.consensus.text}</p>
+              <p className="mt-1 text-xs text-slate-400">{view.qualifier}</p>
+            </div>
+          ) : (
           <div className="mt-2 flex flex-wrap items-end gap-4">
             <div>
-              <p className="text-3xl font-bold text-white">{data.consensusScore}</p>
+              <p className="text-3xl font-bold text-white">{view.consensus.score}</p>
               <p className="text-xs text-slate-400">Consensus score</p>
             </div>
             <div>
@@ -434,11 +478,12 @@ export default function VideoVerificationResultView({
               <p className="text-xs text-slate-400">Support ratio</p>
             </div>
           </div>
-          {data.modelEvidence.some((m) => m.status === "refused") && (
+          )}
+          {refused > 0 && (
             <p className="text-xs text-slate-500 mt-2">
-              Note: {data.modelEvidence.filter((m) => m.status === "refused").length} model(s) declined to analyze due
-              to content policy. Consensus is based on {data.modelEvidence.filter((m) => m.status === "ok").length}{" "}
-              responding model(s).
+              {view.consensus.kind === "score"
+                ? `Note: ${refused} model(s) declined to analyze due to content policy. Consensus is based on ${responded} responding model(s).`
+                : `Note: ${refused} panel slot(s) declined to analyze due to content policy; ${responded} panel slot(s) responded.`}
             </p>
           )}
           {governanceSurface}
@@ -542,7 +587,9 @@ export default function VideoVerificationResultView({
             <h3 className="font-semibold mb-3 text-slate-100">Agreement &amp; disagreement</h3>
             {data.agreementPoints.length > 0 && (
               <div className="mb-3">
-                <h4 className="text-sm font-medium text-green-400 mb-1">Where models agree</h4>
+                <h4 className="text-sm font-medium text-green-400 mb-1">
+                  {view.consensus.kind === "score" ? "Where models agree" : CLAIM_NOT_INDEPENDENT_AGREE_HEADING}
+                </h4>
                 <ul className="list-disc list-inside text-sm text-slate-300 space-y-1">
                   {data.agreementPoints.map((point, i) => (
                     <li key={i}>{point}</li>
@@ -552,7 +599,9 @@ export default function VideoVerificationResultView({
             )}
             {data.disagreementPoints.length > 0 && (
               <div>
-                <h4 className="text-sm font-medium text-red-400 mb-1">Where models disagree</h4>
+                <h4 className="text-sm font-medium text-red-400 mb-1">
+                  {view.consensus.kind === "score" ? "Where models disagree" : CLAIM_NOT_INDEPENDENT_DISAGREE_HEADING}
+                </h4>
                 <ul className="list-disc list-inside text-sm text-slate-300 space-y-1">
                   {data.disagreementPoints.map((point, i) => (
                     <li key={i}>{point}</li>

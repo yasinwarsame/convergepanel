@@ -186,6 +186,12 @@ today; each is a way a future regression passes review the way the last two did.
 
 ---
 
+> **Superseded by security slice S1 (2026-11-09).** The secret bootstrap route,
+> its two-phase containment probe, and their tests were deleted in S1. The C14 to
+> C16 rows below that concern them are a historical record of how those tests
+> were falsified. They are not instructions, and nothing in them is to be run.
+> The standing rule at the top of this document is unaffected.
+
 ## Phase FIRST-ADMIN-C14 — evidence table
 
 R10 falsified two C13 claims outright. Both are retired here, and each row below

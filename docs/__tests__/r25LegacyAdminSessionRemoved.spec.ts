@@ -480,7 +480,8 @@ describe("T1 — the legacy flow is not reachable", () => {
     expect(pagesRoutePathOf("pages/admin/login/index.jsx")).toBe("/admin/login");
   });
   it("ANCHOR: route and page enumeration works", () => {
-    expect(API_ROUTES).toContain("/api/admin/set-admin");
+    // S1 (moved pin): the bootstrap route was retired; set-role anchors instead.
+    expect(API_ROUTES).toContain("/api/admin/set-role");
     expect(API_ROUTES).toContain("/api/admin/access");
     expect(PAGES).toContain("/admin");
   });
@@ -515,7 +516,8 @@ describe("T5 — the authority evidence table names only routes that exist", () 
   it("ANCHOR: the table was found and cites routes", () => {
     expect(start).toBeGreaterThan(-1);
     expect(cited.length).toBeGreaterThan(15);
-    expect(cited).toContain("/api/admin/set-admin");
+    // S1 (moved pin): the retired bootstrap route has no table row any more.
+    expect(cited).toContain("/api/admin/set-role");
   });
   it.each(cited)("%s exists on disk", (route) => {
     expect(API_ROUTES).toContain(route);

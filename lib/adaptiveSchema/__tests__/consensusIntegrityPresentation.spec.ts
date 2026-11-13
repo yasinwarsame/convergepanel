@@ -344,7 +344,7 @@ describe("R5-3: naming a roster model keeps the narrative, its sentences and its
   it.each([
     ["perplexity (ID)", "perplexity"],
     ["Perplexity (family name)", "Perplexity"],
-    ["Perplexity Pro (display name)", "Perplexity Pro"],
+    ["Perplexity Sonar (display name)", "Perplexity Sonar"],
     ["chatgpt control", "chatgpt"],
     ["Claude control", "Claude"],
     ["grok control", "grok"],

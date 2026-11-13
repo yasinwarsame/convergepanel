@@ -70,7 +70,7 @@ export function provenanceOf(rows: ModelResult[]): RunModelProvenanceFacts[] {
   return rows.map((r) => runModelProvenanceFromResultRow(r as any));
 }
 
-function exportRecord(rec: RecordUnderTest, rows: ModelResult[], format: "pdf" | "docx" | "json"): AdaptiveResearchExportV1 | null {
+export function exportRecord(rec: RecordUnderTest, rows: ModelResult[], format: "pdf" | "docx" | "json"): AdaptiveResearchExportV1 | null {
   const legacy = rec as any;
   if (!legacy.synthesisReport && !legacy.alignedClaims) return null;
   const built = buildExportSnapshot({
@@ -106,9 +106,14 @@ export async function docxDocumentXml(record: AdaptiveResearchExportV1): Promise
 }
 
 /** Every consumer's output for one record. Keys are stable; absent consumers are null. */
-export async function renderRecord(rec: RecordUnderTest, rows: ModelResult[]): Promise<Record<string, string | null>> {
+/**
+ * `opts.provenance`: the per-slot facts to hand the UI and text surfaces in place of `provenanceOf(rows)` — what
+ * ResultsDisplay's adaptive branch provides (`withPlaceholderFact(runModelProvenanceFromResultRow(r), r)`), for the D-5
+ * placeholder cases. The exports still freeze the rows themselves.
+ */
+export async function renderRecord(rec: RecordUnderTest, rows: ModelResult[], opts?: { provenance?: RunModelProvenanceFacts[] }): Promise<Record<string, string | null>> {
   const schema = getResultSchema(rec.schemaId as any);
-  const prov = provenanceOf(rows);
+  const prov = opts?.provenance ?? provenanceOf(rows);
   const modelIds = rec.results.map((r: any) => r.modelId);
   const report = rec.synthesisReport;
   const gate = rec.gate;

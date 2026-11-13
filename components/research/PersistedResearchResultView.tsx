@@ -30,6 +30,7 @@ import ResultsDisplay, { type ReadOnlyExecutionTarget } from "@/components/Resul
 import type { AdaptiveAncillaryPresentation } from "@/components/adaptive/adaptiveAncillaryPresentation";
 import type { PersistedResearchPresentation } from "@/lib/research/persistedRunPresentation";
 import { governanceRunContextLines } from "@/lib/research/governanceRunContext";
+import type { ReportLayout } from "@/lib/research/readableReport/layoutMode";
 
 export type PersistedResearchResultViewProps = {
   presentation: PersistedResearchPresentation;
@@ -52,12 +53,17 @@ export type PersistedResearchResultViewProps = {
    * derives the mode from the presentation's viewerRole.
    */
   adaptiveAncillaryPresentation?: AdaptiveAncillaryPresentation;
+  /**
+   * #290 Increment 1 — report layout, forwarded unchanged. Absent → classic. Personal and Team shells pass the same
+   * value, resolved the same way, so the two surfaces stay one renderer.
+   */
+  reportLayout?: ReportLayout;
 };
 
 /** The execution callbacks stay required by `ResultsDisplay`'s prop contract; in read-only mode they are never invoked. */
 const noExecution = () => {};
 
-export default function PersistedResearchResultView({ presentation, onVerifyClaim, onRunFollowUp, readOnlyExecutionTarget, adaptiveAncillaryPresentation }: PersistedResearchResultViewProps) {
+export default function PersistedResearchResultView({ presentation, onVerifyClaim, onRunFollowUp, readOnlyExecutionTarget, adaptiveAncillaryPresentation, reportLayout }: PersistedResearchResultViewProps) {
   // Step 6.1 — persisted run-level governance context. Same lines for Personal
   // and Team, because both pass the same interpreted presentation.
   const contextLines = governanceRunContextLines(presentation.governanceContext, Date.now());
@@ -98,6 +104,7 @@ export default function PersistedResearchResultView({ presentation, onVerifyClai
           onRunFollowUp={onRunFollowUp}
           adaptiveAncillaryPresentation={adaptiveAncillaryPresentation}
           dsProvenance={presentation.dsProvenance}
+          reportLayout={reportLayout}
         />
       </div>
     </>

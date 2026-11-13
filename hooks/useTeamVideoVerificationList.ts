@@ -64,7 +64,9 @@ export interface TeamVideoListItem {
   fileName: string;
   verdict: TeamVideoVerdict;
   contentType?: string;
-  consensusScore: number;
+  /** null exactly when `consensusWithheld` is present (C-b CB-18: not a multi-model consensus). */
+  consensusScore: number | null;
+  consensusWithheld?: "insufficient_independent_models" | "independence_unverified";
   confidenceLabel: "High" | "Medium" | "Low";
   evidenceQuality: "strong" | "mixed" | "weak";
   frameCount: number;
@@ -160,8 +162,16 @@ function parseItem(raw: unknown, address: TeamVideoListAddress): TeamVideoListIt
   if (!nonEmptyString(raw.fileName)) return null;
   if (typeof raw.verdict !== "string" || !VERDICTS.has(raw.verdict)) return null;
   if (raw.contentType !== undefined && !nonEmptyString(raw.contentType)) return null;
-  if (typeof raw.consensusScore !== "number" || !Number.isFinite(raw.consensusScore)) return null;
-  if (raw.consensusScore < 0 || raw.consensusScore > 100) return null;
+  // A withheld score arrives as null + its reason; a score with a reason, or neither, is not renderable honestly (C-b
+  // CB-18, the Team claim rows' rule).
+  const withheld = raw.consensusWithheld;
+  if (withheld !== undefined) {
+    if (withheld !== "insufficient_independent_models" && withheld !== "independence_unverified") return null;
+    if (raw.consensusScore !== null) return null;
+  } else {
+    if (typeof raw.consensusScore !== "number" || !Number.isFinite(raw.consensusScore)) return null;
+    if (raw.consensusScore < 0 || raw.consensusScore > 100) return null;
+  }
   if (typeof raw.confidenceLabel !== "string" || !CONFIDENCE.has(raw.confidenceLabel)) return null;
   if (typeof raw.evidenceQuality !== "string" || !EVIDENCE.has(raw.evidenceQuality)) return null;
   if (typeof raw.frameCount !== "number" || !Number.isFinite(raw.frameCount) || !Number.isInteger(raw.frameCount) || raw.frameCount < 0) return null;
@@ -201,7 +211,8 @@ function parseItem(raw: unknown, address: TeamVideoListAddress): TeamVideoListIt
     fileName: raw.fileName,
     verdict: raw.verdict as TeamVideoVerdict,
     ...(raw.contentType !== undefined ? { contentType: raw.contentType } : {}),
-    consensusScore: raw.consensusScore,
+    consensusScore: withheld !== undefined ? null : (raw.consensusScore as number),
+    ...(withheld !== undefined ? { consensusWithheld: withheld as TeamVideoListItem["consensusWithheld"] } : {}),
     confidenceLabel: raw.confidenceLabel as TeamVideoListItem["confidenceLabel"],
     evidenceQuality: raw.evidenceQuality as TeamVideoListItem["evidenceQuality"],
     frameCount: raw.frameCount,

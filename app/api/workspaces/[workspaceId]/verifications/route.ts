@@ -79,6 +79,7 @@ import type { EvidenceSourceReference } from "@/lib/verification/evidenceSourceE
 import { resolveTeamRunWorkspaceAccess } from "@/lib/workspaces/resolveTeamRunWorkspaceAccess";
 import { teamRunAccessDeniedResponse, teamRunInsufficientCapabilityResponse } from "@/lib/workspaces/teamRunAccessResponse";
 import { listTeamClaimVerifications } from "@/lib/workspaces/listTeamClaimVerifications";
+import { storedVerificationConsensusIndependence } from "@/lib/panel/storedVerificationIndependence";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -415,6 +416,8 @@ async function executeAndPersistTeamClaimVerification(args: {
       auditBundle,
       accurateAmongUsable,
       usableModelCount: usableForBanner.length,
+      // Presentation only: judged from the rows just persisted, exactly as a later read of the record judges them.
+      modelIndependence: storedVerificationConsensusIndependence({ modelResults: modelEvidence, selectedModels }),
       ...(orgGovernanceStatus ? { governanceStatus: orgGovernanceStatus } : {}),
       workspaceId: gate2.workspaceId,
       projectId: gate2.projectId,

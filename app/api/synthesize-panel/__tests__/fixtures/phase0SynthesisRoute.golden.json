@@ -1,0 +1,4931 @@
+{
+ "_source": "generated 2026-11-08 by phase0RouteDecisionBaseline.spec.ts with PHASE0_GOLDEN_OUT in a git-archive export of 35933c8",
+ "fresh": {
+  "S1": {
+   "status": 200,
+   "reason": null,
+   "message": null,
+   "llmCalls": 1,
+   "hash": "dddf30582529da1a",
+   "promptDigest": "be83d3a5f90910b2",
+   "summary": {
+    "modelsHealthy": 5,
+    "modelCount": 5,
+    "highConfidenceClaims": 0,
+    "contestedClaims": 0,
+    "lowEvidenceClaims": 1,
+    "overallConsensusScore": 95,
+    "aggregateSupportRatio": 1
+   },
+   "policy": {
+    "overallConsensusScore": 95,
+    "supportRatio": 1,
+    "confidenceLabel": "High",
+    "evidenceQuality": "weak",
+    "lowEvidenceClaims": 1,
+    "modelsHealthy": 5,
+    "modelCount": 5,
+    "highConfidenceClaims": 0,
+    "contestedClaims": 0
+   },
+   "governanceInput": {
+    "consensusScore": 95,
+    "evidenceQuality": "weak",
+    "raw": {
+     "runId": "run-S1",
+     "collection": "runs",
+     "input": {
+      "scoreFamily": "research_synthesis_v1",
+      "consensusScore": 95,
+      "evidenceQuality": "weak",
+      "sourceBacked": false,
+      "missingSourcesCount": 0,
+      "modelHealth": {
+       "ok": 0,
+       "substituted": 5,
+       "failed": 0
+      },
+      "question": "Which island should we study first?",
+      "runType": "research"
+     },
+     "ownerUid": "test-uid"
+    }
+   },
+   "synthesizeReportRows": [
+    [
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "chatgpt",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 119
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "claude",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "gemini",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 115
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "grok",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "perplexity",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 103
+     }
+    ]
+   ],
+   "scoringRows": [
+    [
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "chatgpt",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 119
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "claude",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "gemini",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 115
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "grok",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "perplexity",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 103
+     }
+    ]
+   ],
+   "body": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ],
+       "support": {
+        "supportingModels": [
+         "chatgpt",
+         "claude",
+         "gemini",
+         "grok",
+         "perplexity"
+        ],
+        "dissentingModels": [],
+        "unknownModels": [],
+        "supportRatio": 1,
+        "confidenceLabel": "Medium"
+       },
+       "evidenceQuality": "weak"
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive first",
+       "positionsByModel": {
+        "chatgpt": "port",
+        "claude": "spice"
+       },
+       "whyTheyDiffer": "w"
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "consensusSummary": {
+     "modelsHealthy": 5,
+     "modelCount": 5,
+     "highConfidenceClaims": 0,
+     "contestedClaims": 0,
+     "lowEvidenceClaims": 1,
+     "overallConsensusScore": 95,
+     "aggregateSupportRatio": 1
+    },
+    "auditBundle": {
+     "runId": "run-S1",
+     "models": [
+      {
+       "modelId": "chatgpt",
+       "status": "substituted"
+      },
+      {
+       "modelId": "claude",
+       "status": "substituted"
+      },
+      {
+       "modelId": "gemini",
+       "status": "substituted"
+      },
+      {
+       "modelId": "grok",
+       "status": "substituted"
+      },
+      {
+       "modelId": "perplexity",
+       "status": "substituted"
+      }
+     ],
+     "overallConsensusScore": 95,
+     "claims": [
+      {
+       "claimTruncated": "Zanzibar holds the answer.",
+       "supportRatio": 1,
+       "evidenceQuality": "weak"
+      }
+     ]
+    }
+   },
+   "docFields": [
+    "policyConsensusSummary",
+    "question",
+    "runDocument",
+    "schemaVersion",
+    "synthesisConsensusAudit",
+    "synthesisConsensusSummary",
+    "synthesisInputHash",
+    "synthesisMetadata",
+    "synthesizedAt",
+    "synthesizedBy",
+    "synthesizedStructuredReport",
+    "userId"
+   ],
+   "units": {
+    "usableSlots": 5,
+    "modelsHealthy": 5,
+    "modelCount": 5,
+    "policyModelsHealthy": 5
+   },
+   "governanceClass": {
+    "status": "needs_review",
+    "reasons": [
+     "Evidence quality is weak",
+     "5 model(s) substituted"
+    ]
+   },
+   "storedReport": {
+    "disagreements": 1,
+    "keyFindings": 1
+   }
+  },
+  "S8a": {
+   "status": 200,
+   "reason": null,
+   "message": null,
+   "llmCalls": 1,
+   "hash": "4ea8204eb5af90e3",
+   "promptDigest": "5e4b07541b15f130",
+   "summary": {
+    "modelsHealthy": 2,
+    "modelCount": 2,
+    "highConfidenceClaims": 0,
+    "contestedClaims": 0,
+    "lowEvidenceClaims": 1,
+    "overallConsensusScore": 85,
+    "aggregateSupportRatio": 1
+   },
+   "policy": {
+    "overallConsensusScore": 85,
+    "supportRatio": 1,
+    "confidenceLabel": "High",
+    "evidenceQuality": "weak",
+    "lowEvidenceClaims": 1,
+    "modelsHealthy": 2,
+    "modelCount": 2,
+    "highConfidenceClaims": 0,
+    "contestedClaims": 0
+   },
+   "governanceInput": {
+    "consensusScore": 85,
+    "evidenceQuality": "weak",
+    "raw": {
+     "runId": "run-S8a",
+     "collection": "runs",
+     "input": {
+      "scoreFamily": "research_synthesis_v1",
+      "consensusScore": 85,
+      "evidenceQuality": "weak",
+      "sourceBacked": false,
+      "missingSourcesCount": 0,
+      "modelHealth": {
+       "ok": 0,
+       "substituted": 2,
+       "failed": 0
+      },
+      "question": "Which island should we study first?",
+      "runType": "research"
+     },
+     "ownerUid": "test-uid"
+    }
+   },
+   "synthesizeReportRows": [
+    [
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "chatgpt",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 119
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "claude",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 116
+     }
+    ]
+   ],
+   "scoringRows": [
+    [
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "chatgpt",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 119
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "claude",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 116
+     }
+    ]
+   ],
+   "body": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ],
+       "support": {
+        "supportingModels": [
+         "chatgpt",
+         "claude"
+        ],
+        "dissentingModels": [],
+        "unknownModels": [],
+        "supportRatio": 1,
+        "confidenceLabel": "Medium"
+       },
+       "evidenceQuality": "weak"
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive first",
+       "positionsByModel": {
+        "chatgpt": "port",
+        "claude": "spice"
+       },
+       "whyTheyDiffer": "w"
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "consensusSummary": {
+     "modelsHealthy": 2,
+     "modelCount": 2,
+     "highConfidenceClaims": 0,
+     "contestedClaims": 0,
+     "lowEvidenceClaims": 1,
+     "overallConsensusScore": 85,
+     "aggregateSupportRatio": 1
+    },
+    "auditBundle": {
+     "runId": "run-S8a",
+     "models": [
+      {
+       "modelId": "chatgpt",
+       "status": "substituted"
+      },
+      {
+       "modelId": "claude",
+       "status": "substituted"
+      }
+     ],
+     "overallConsensusScore": 85,
+     "claims": [
+      {
+       "claimTruncated": "Zanzibar holds the answer.",
+       "supportRatio": 1,
+       "evidenceQuality": "weak"
+      }
+     ]
+    }
+   },
+   "docFields": [
+    "policyConsensusSummary",
+    "question",
+    "runDocument",
+    "schemaVersion",
+    "synthesisConsensusAudit",
+    "synthesisConsensusSummary",
+    "synthesisInputHash",
+    "synthesisMetadata",
+    "synthesizedAt",
+    "synthesizedBy",
+    "synthesizedStructuredReport",
+    "userId"
+   ],
+   "units": {
+    "usableSlots": 2,
+    "modelsHealthy": 2,
+    "modelCount": 2,
+    "policyModelsHealthy": 2
+   },
+   "governanceClass": {
+    "status": "needs_review",
+    "reasons": [
+     "Evidence quality is weak",
+     "2 model(s) substituted"
+    ]
+   },
+   "storedReport": {
+    "disagreements": 1,
+    "keyFindings": 1
+   }
+  },
+  "S2": {
+   "status": 200,
+   "reason": null,
+   "message": null,
+   "llmCalls": 1,
+   "hash": "dddf30582529da1a",
+   "promptDigest": "e4dd85046ccf01a0",
+   "summary": {
+    "modelsHealthy": 5,
+    "modelCount": 5,
+    "highConfidenceClaims": 0,
+    "contestedClaims": 0,
+    "lowEvidenceClaims": 1,
+    "overallConsensusScore": 95,
+    "aggregateSupportRatio": 1
+   },
+   "policy": {
+    "overallConsensusScore": 95,
+    "supportRatio": 1,
+    "confidenceLabel": "High",
+    "evidenceQuality": "weak",
+    "lowEvidenceClaims": 1,
+    "modelsHealthy": 5,
+    "modelCount": 5,
+    "highConfidenceClaims": 0,
+    "contestedClaims": 0
+   },
+   "governanceInput": {
+    "consensusScore": 95,
+    "evidenceQuality": "weak",
+    "raw": {
+     "runId": "run-S2",
+     "collection": "runs",
+     "input": {
+      "scoreFamily": "research_synthesis_v1",
+      "consensusScore": 95,
+      "evidenceQuality": "weak",
+      "sourceBacked": false,
+      "missingSourcesCount": 0,
+      "modelHealth": {
+       "ok": 3,
+       "substituted": 2,
+       "failed": 0
+      },
+      "question": "Which island should we study first?",
+      "runType": "research"
+     },
+     "ownerUid": "test-uid"
+    }
+   },
+   "synthesizeReportRows": [
+    [
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "chatgpt",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 119
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "claude",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "gemini",
+      "status": "ok",
+      "provider": null,
+      "textLen": 115
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "grok",
+      "status": "ok",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "perplexity",
+      "status": "ok",
+      "provider": null,
+      "textLen": 103
+     }
+    ]
+   ],
+   "scoringRows": [
+    [
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "chatgpt",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 119
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "claude",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "gemini",
+      "status": "ok",
+      "provider": null,
+      "textLen": 115
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "grok",
+      "status": "ok",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "perplexity",
+      "status": "ok",
+      "provider": null,
+      "textLen": 103
+     }
+    ]
+   ],
+   "body": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ],
+       "support": {
+        "supportingModels": [
+         "chatgpt",
+         "claude",
+         "gemini",
+         "grok",
+         "perplexity"
+        ],
+        "dissentingModels": [],
+        "unknownModels": [],
+        "supportRatio": 1,
+        "confidenceLabel": "Medium"
+       },
+       "evidenceQuality": "weak"
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive first",
+       "positionsByModel": {
+        "chatgpt": "port",
+        "claude": "spice"
+       },
+       "whyTheyDiffer": "w"
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "consensusSummary": {
+     "modelsHealthy": 5,
+     "modelCount": 5,
+     "highConfidenceClaims": 0,
+     "contestedClaims": 0,
+     "lowEvidenceClaims": 1,
+     "overallConsensusScore": 95,
+     "aggregateSupportRatio": 1
+    },
+    "auditBundle": {
+     "runId": "run-S2",
+     "models": [
+      {
+       "modelId": "chatgpt",
+       "status": "substituted"
+      },
+      {
+       "modelId": "claude",
+       "status": "substituted"
+      },
+      {
+       "modelId": "gemini",
+       "status": "ok"
+      },
+      {
+       "modelId": "grok",
+       "status": "ok"
+      },
+      {
+       "modelId": "perplexity",
+       "status": "ok"
+      }
+     ],
+     "overallConsensusScore": 95,
+     "claims": [
+      {
+       "claimTruncated": "Zanzibar holds the answer.",
+       "supportRatio": 1,
+       "evidenceQuality": "weak"
+      }
+     ]
+    }
+   },
+   "docFields": [
+    "policyConsensusSummary",
+    "question",
+    "runDocument",
+    "schemaVersion",
+    "synthesisConsensusAudit",
+    "synthesisConsensusSummary",
+    "synthesisInputHash",
+    "synthesisMetadata",
+    "synthesizedAt",
+    "synthesizedBy",
+    "synthesizedStructuredReport",
+    "userId"
+   ],
+   "units": {
+    "usableSlots": 5,
+    "modelsHealthy": 5,
+    "modelCount": 5,
+    "policyModelsHealthy": 5
+   },
+   "governanceClass": {
+    "status": "needs_review",
+    "reasons": [
+     "Evidence quality is weak",
+     "2 model(s) substituted"
+    ]
+   },
+   "storedReport": {
+    "disagreements": 1,
+    "keyFindings": 1
+   }
+  },
+  "S2b": {
+   "status": 200,
+   "reason": null,
+   "message": null,
+   "llmCalls": 1,
+   "hash": "dddf30582529da1a",
+   "promptDigest": "c72d6f949bba7948",
+   "summary": {
+    "modelsHealthy": 5,
+    "modelCount": 5,
+    "highConfidenceClaims": 0,
+    "contestedClaims": 0,
+    "lowEvidenceClaims": 1,
+    "overallConsensusScore": 95,
+    "aggregateSupportRatio": 1
+   },
+   "policy": {
+    "overallConsensusScore": 95,
+    "supportRatio": 1,
+    "confidenceLabel": "High",
+    "evidenceQuality": "weak",
+    "lowEvidenceClaims": 1,
+    "modelsHealthy": 5,
+    "modelCount": 5,
+    "highConfidenceClaims": 0,
+    "contestedClaims": 0
+   },
+   "governanceInput": {
+    "consensusScore": 95,
+    "evidenceQuality": "weak",
+    "raw": {
+     "runId": "run-S2b",
+     "collection": "runs",
+     "input": {
+      "scoreFamily": "research_synthesis_v1",
+      "consensusScore": 95,
+      "evidenceQuality": "weak",
+      "sourceBacked": false,
+      "missingSourcesCount": 0,
+      "modelHealth": {
+       "ok": 1,
+       "substituted": 4,
+       "failed": 0
+      },
+      "question": "Which island should we study first?",
+      "runType": "research"
+     },
+     "ownerUid": "test-uid"
+    }
+   },
+   "synthesizeReportRows": [
+    [
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "chatgpt",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 119
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "claude",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "gemini",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 115
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "grok",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "perplexity",
+      "status": "ok",
+      "provider": null,
+      "textLen": 103
+     }
+    ]
+   ],
+   "scoringRows": [
+    [
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "chatgpt",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 119
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "claude",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "gemini",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 115
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "grok",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "perplexity",
+      "status": "ok",
+      "provider": null,
+      "textLen": 103
+     }
+    ]
+   ],
+   "body": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ],
+       "support": {
+        "supportingModels": [
+         "chatgpt",
+         "claude",
+         "gemini",
+         "grok",
+         "perplexity"
+        ],
+        "dissentingModels": [],
+        "unknownModels": [],
+        "supportRatio": 1,
+        "confidenceLabel": "Medium"
+       },
+       "evidenceQuality": "weak"
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive first",
+       "positionsByModel": {
+        "chatgpt": "port",
+        "claude": "spice"
+       },
+       "whyTheyDiffer": "w"
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "consensusSummary": {
+     "modelsHealthy": 5,
+     "modelCount": 5,
+     "highConfidenceClaims": 0,
+     "contestedClaims": 0,
+     "lowEvidenceClaims": 1,
+     "overallConsensusScore": 95,
+     "aggregateSupportRatio": 1
+    },
+    "auditBundle": {
+     "runId": "run-S2b",
+     "models": [
+      {
+       "modelId": "chatgpt",
+       "status": "substituted"
+      },
+      {
+       "modelId": "claude",
+       "status": "substituted"
+      },
+      {
+       "modelId": "gemini",
+       "status": "substituted"
+      },
+      {
+       "modelId": "grok",
+       "status": "substituted"
+      },
+      {
+       "modelId": "perplexity",
+       "status": "ok"
+      }
+     ],
+     "overallConsensusScore": 95,
+     "claims": [
+      {
+       "claimTruncated": "Zanzibar holds the answer.",
+       "supportRatio": 1,
+       "evidenceQuality": "weak"
+      }
+     ]
+    }
+   },
+   "docFields": [
+    "policyConsensusSummary",
+    "question",
+    "runDocument",
+    "schemaVersion",
+    "synthesisConsensusAudit",
+    "synthesisConsensusSummary",
+    "synthesisInputHash",
+    "synthesisMetadata",
+    "synthesizedAt",
+    "synthesizedBy",
+    "synthesizedStructuredReport",
+    "userId"
+   ],
+   "units": {
+    "usableSlots": 5,
+    "modelsHealthy": 5,
+    "modelCount": 5,
+    "policyModelsHealthy": 5
+   },
+   "governanceClass": {
+    "status": "needs_review",
+    "reasons": [
+     "Evidence quality is weak",
+     "4 model(s) substituted"
+    ]
+   },
+   "storedReport": {
+    "disagreements": 1,
+    "keyFindings": 1
+   }
+  },
+  "S4": {
+   "status": 200,
+   "reason": null,
+   "message": null,
+   "llmCalls": 1,
+   "hash": "dddf30582529da1a",
+   "promptDigest": "a992107a8a79f0ff",
+   "summary": {
+    "modelsHealthy": 5,
+    "modelCount": 5,
+    "highConfidenceClaims": 0,
+    "contestedClaims": 0,
+    "lowEvidenceClaims": 1,
+    "overallConsensusScore": 95,
+    "aggregateSupportRatio": 1
+   },
+   "policy": {
+    "overallConsensusScore": 95,
+    "supportRatio": 1,
+    "confidenceLabel": "High",
+    "evidenceQuality": "weak",
+    "lowEvidenceClaims": 1,
+    "modelsHealthy": 5,
+    "modelCount": 5,
+    "highConfidenceClaims": 0,
+    "contestedClaims": 0
+   },
+   "governanceInput": {
+    "consensusScore": 95,
+    "evidenceQuality": "weak",
+    "raw": {
+     "runId": "run-S4",
+     "collection": "runs",
+     "input": {
+      "scoreFamily": "research_synthesis_v1",
+      "consensusScore": 95,
+      "evidenceQuality": "weak",
+      "sourceBacked": false,
+      "missingSourcesCount": 0,
+      "modelHealth": {
+       "ok": 5,
+       "substituted": 0,
+       "failed": 0
+      },
+      "question": "Which island should we study first?",
+      "runType": "research"
+     },
+     "ownerUid": "test-uid"
+    }
+   },
+   "synthesizeReportRows": [
+    [
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "chatgpt",
+      "status": "ok",
+      "provider": null,
+      "textLen": 119
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "claude",
+      "status": "ok",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "gemini",
+      "status": "ok",
+      "provider": null,
+      "textLen": 115
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "grok",
+      "status": "ok",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "perplexity",
+      "status": "ok",
+      "provider": null,
+      "textLen": 103
+     }
+    ]
+   ],
+   "scoringRows": [
+    [
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "chatgpt",
+      "status": "ok",
+      "provider": null,
+      "textLen": 119
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "claude",
+      "status": "ok",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "gemini",
+      "status": "ok",
+      "provider": null,
+      "textLen": 115
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "grok",
+      "status": "ok",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "perplexity",
+      "status": "ok",
+      "provider": null,
+      "textLen": 103
+     }
+    ]
+   ],
+   "body": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ],
+       "support": {
+        "supportingModels": [
+         "chatgpt",
+         "claude",
+         "gemini",
+         "grok",
+         "perplexity"
+        ],
+        "dissentingModels": [],
+        "unknownModels": [],
+        "supportRatio": 1,
+        "confidenceLabel": "Medium"
+       },
+       "evidenceQuality": "weak"
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive first",
+       "positionsByModel": {
+        "chatgpt": "port",
+        "claude": "spice"
+       },
+       "whyTheyDiffer": "w"
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "consensusSummary": {
+     "modelsHealthy": 5,
+     "modelCount": 5,
+     "highConfidenceClaims": 0,
+     "contestedClaims": 0,
+     "lowEvidenceClaims": 1,
+     "overallConsensusScore": 95,
+     "aggregateSupportRatio": 1
+    },
+    "auditBundle": {
+     "runId": "run-S4",
+     "models": [
+      {
+       "modelId": "chatgpt",
+       "status": "ok"
+      },
+      {
+       "modelId": "claude",
+       "status": "ok"
+      },
+      {
+       "modelId": "gemini",
+       "status": "ok"
+      },
+      {
+       "modelId": "grok",
+       "status": "ok"
+      },
+      {
+       "modelId": "perplexity",
+       "status": "ok"
+      }
+     ],
+     "overallConsensusScore": 95,
+     "claims": [
+      {
+       "claimTruncated": "Zanzibar holds the answer.",
+       "supportRatio": 1,
+       "evidenceQuality": "weak"
+      }
+     ]
+    }
+   },
+   "docFields": [
+    "policyConsensusSummary",
+    "question",
+    "runDocument",
+    "schemaVersion",
+    "synthesisConsensusAudit",
+    "synthesisConsensusSummary",
+    "synthesisInputHash",
+    "synthesisMetadata",
+    "synthesizedAt",
+    "synthesizedBy",
+    "synthesizedStructuredReport",
+    "userId"
+   ],
+   "units": {
+    "usableSlots": 5,
+    "modelsHealthy": 5,
+    "modelCount": 5,
+    "policyModelsHealthy": 5
+   },
+   "governanceClass": {
+    "status": "needs_review",
+    "reasons": [
+     "Evidence quality is weak"
+    ]
+   },
+   "storedReport": {
+    "disagreements": 1,
+    "keyFindings": 1
+   }
+  },
+  "S7n": {
+   "status": 200,
+   "reason": null,
+   "message": null,
+   "llmCalls": 1,
+   "hash": "cc26621b2ff27dee",
+   "promptDigest": "5458332dbdd4fe52",
+   "summary": {
+    "modelsHealthy": 3,
+    "modelCount": 3,
+    "highConfidenceClaims": 0,
+    "contestedClaims": 0,
+    "lowEvidenceClaims": 1,
+    "overallConsensusScore": 85,
+    "aggregateSupportRatio": 1
+   },
+   "policy": {
+    "overallConsensusScore": 85,
+    "supportRatio": 1,
+    "confidenceLabel": "High",
+    "evidenceQuality": "weak",
+    "lowEvidenceClaims": 1,
+    "modelsHealthy": 3,
+    "modelCount": 3,
+    "highConfidenceClaims": 0,
+    "contestedClaims": 0
+   },
+   "governanceInput": {
+    "consensusScore": 85,
+    "evidenceQuality": "weak",
+    "raw": {
+     "runId": "run-S7n",
+     "collection": "runs",
+     "input": {
+      "scoreFamily": "research_synthesis_v1",
+      "consensusScore": 85,
+      "evidenceQuality": "weak",
+      "sourceBacked": false,
+      "missingSourcesCount": 0,
+      "modelHealth": {
+       "ok": 1,
+       "substituted": 2,
+       "failed": 2
+      },
+      "question": "Which island should we study first?",
+      "runType": "research"
+     },
+     "ownerUid": "test-uid"
+    }
+   },
+   "synthesizeReportRows": [
+    [
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "gemini",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 115
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "grok",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "perplexity",
+      "status": "ok",
+      "provider": null,
+      "textLen": 103
+     }
+    ]
+   ],
+   "scoringRows": [
+    [
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "gemini",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 115
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "grok",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "perplexity",
+      "status": "ok",
+      "provider": null,
+      "textLen": 103
+     }
+    ]
+   ],
+   "body": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ],
+       "support": {
+        "supportingModels": [
+         "gemini",
+         "grok",
+         "perplexity"
+        ],
+        "dissentingModels": [],
+        "unknownModels": [],
+        "supportRatio": 1,
+        "confidenceLabel": "Medium"
+       },
+       "evidenceQuality": "weak"
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive first",
+       "positionsByModel": {
+        "chatgpt": "port",
+        "claude": "spice"
+       },
+       "whyTheyDiffer": "w"
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "consensusSummary": {
+     "modelsHealthy": 3,
+     "modelCount": 3,
+     "highConfidenceClaims": 0,
+     "contestedClaims": 0,
+     "lowEvidenceClaims": 1,
+     "overallConsensusScore": 85,
+     "aggregateSupportRatio": 1
+    },
+    "auditBundle": {
+     "runId": "run-S7n",
+     "models": [
+      {
+       "modelId": "gemini",
+       "status": "substituted"
+      },
+      {
+       "modelId": "grok",
+       "status": "substituted"
+      },
+      {
+       "modelId": "perplexity",
+       "status": "ok"
+      }
+     ],
+     "overallConsensusScore": 85,
+     "claims": [
+      {
+       "claimTruncated": "Zanzibar holds the answer.",
+       "supportRatio": 1,
+       "evidenceQuality": "weak"
+      }
+     ]
+    }
+   },
+   "docFields": [
+    "policyConsensusSummary",
+    "question",
+    "runDocument",
+    "schemaVersion",
+    "synthesisConsensusAudit",
+    "synthesisConsensusSummary",
+    "synthesisInputHash",
+    "synthesisMetadata",
+    "synthesizedAt",
+    "synthesizedBy",
+    "synthesizedStructuredReport",
+    "userId"
+   ],
+   "units": {
+    "usableSlots": 3,
+    "modelsHealthy": 3,
+    "modelCount": 3,
+    "policyModelsHealthy": 3
+   },
+   "governanceClass": {
+    "status": "needs_review",
+    "reasons": [
+     "Evidence quality is weak",
+     "2 model(s) failed",
+     "2 model(s) substituted"
+    ]
+   },
+   "storedReport": {
+    "disagreements": 1,
+    "keyFindings": 1
+   }
+  },
+  "SMK": {
+   "status": 409,
+   "reason": "insufficient_results",
+   "message": "This run does not have enough saved model responses to synthesize.",
+   "llmCalls": 0,
+   "hash": null,
+   "promptDigest": null,
+   "summary": null,
+   "policy": null,
+   "governanceInput": null,
+   "synthesizeReportRows": [],
+   "scoringRows": [],
+   "body": {
+    "errorCode": "SYNTHESIS_SOURCE_UNAVAILABLE",
+    "message": "This run does not have enough saved model responses to synthesize.",
+    "details": {
+     "reason": "insufficient_results"
+    }
+   },
+   "docFields": [
+    "question",
+    "runDocument",
+    "userId"
+   ],
+   "units": null,
+   "governanceClass": null,
+   "storedReport": null
+  },
+  "S2u": {
+   "status": 200,
+   "reason": null,
+   "message": null,
+   "llmCalls": 1,
+   "hash": "dddf30582529da1a",
+   "promptDigest": "c875251afe02170c",
+   "summary": {
+    "modelsHealthy": 5,
+    "modelCount": 5,
+    "highConfidenceClaims": 0,
+    "contestedClaims": 0,
+    "lowEvidenceClaims": 1,
+    "overallConsensusScore": 95,
+    "aggregateSupportRatio": 1
+   },
+   "policy": {
+    "overallConsensusScore": 95,
+    "supportRatio": 1,
+    "confidenceLabel": "High",
+    "evidenceQuality": "weak",
+    "lowEvidenceClaims": 1,
+    "modelsHealthy": 5,
+    "modelCount": 5,
+    "highConfidenceClaims": 0,
+    "contestedClaims": 0
+   },
+   "governanceInput": {
+    "consensusScore": 95,
+    "evidenceQuality": "weak",
+    "raw": {
+     "runId": "run-S2u",
+     "collection": "runs",
+     "input": {
+      "scoreFamily": "research_synthesis_v1",
+      "consensusScore": 95,
+      "evidenceQuality": "weak",
+      "sourceBacked": false,
+      "missingSourcesCount": 0,
+      "modelHealth": {
+       "ok": 3,
+       "substituted": 2,
+       "failed": 0
+      },
+      "question": "Which island should we study first?",
+      "runType": "research"
+     },
+     "ownerUid": "test-uid"
+    }
+   },
+   "synthesizeReportRows": [
+    [
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "chatgpt",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 119
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "claude",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "gemini",
+      "status": "ok",
+      "provider": null,
+      "textLen": 115
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "grok",
+      "status": "ok",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "perplexity",
+      "status": "ok",
+      "provider": null,
+      "textLen": 103
+     }
+    ]
+   ],
+   "scoringRows": [
+    [
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "chatgpt",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 119
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "claude",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "gemini",
+      "status": "ok",
+      "provider": null,
+      "textLen": 115
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "grok",
+      "status": "ok",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "perplexity",
+      "status": "ok",
+      "provider": null,
+      "textLen": 103
+     }
+    ]
+   ],
+   "body": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ],
+       "support": {
+        "supportingModels": [
+         "chatgpt",
+         "claude",
+         "gemini",
+         "grok",
+         "perplexity"
+        ],
+        "dissentingModels": [],
+        "unknownModels": [],
+        "supportRatio": 1,
+        "confidenceLabel": "Medium"
+       },
+       "evidenceQuality": "weak"
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive first",
+       "positionsByModel": {
+        "chatgpt": "port",
+        "claude": "spice"
+       },
+       "whyTheyDiffer": "w"
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "consensusSummary": {
+     "modelsHealthy": 5,
+     "modelCount": 5,
+     "highConfidenceClaims": 0,
+     "contestedClaims": 0,
+     "lowEvidenceClaims": 1,
+     "overallConsensusScore": 95,
+     "aggregateSupportRatio": 1
+    },
+    "auditBundle": {
+     "runId": "run-S2u",
+     "models": [
+      {
+       "modelId": "chatgpt",
+       "status": "substituted"
+      },
+      {
+       "modelId": "claude",
+       "status": "substituted"
+      },
+      {
+       "modelId": "gemini",
+       "status": "ok"
+      },
+      {
+       "modelId": "grok",
+       "status": "ok"
+      },
+      {
+       "modelId": "perplexity",
+       "status": "ok"
+      }
+     ],
+     "overallConsensusScore": 95,
+     "claims": [
+      {
+       "claimTruncated": "Zanzibar holds the answer.",
+       "supportRatio": 1,
+       "evidenceQuality": "weak"
+      }
+     ]
+    }
+   },
+   "docFields": [
+    "policyConsensusSummary",
+    "question",
+    "runDocument",
+    "schemaVersion",
+    "synthesisConsensusAudit",
+    "synthesisConsensusSummary",
+    "synthesisInputHash",
+    "synthesisMetadata",
+    "synthesizedAt",
+    "synthesizedBy",
+    "synthesizedStructuredReport",
+    "userId"
+   ],
+   "units": {
+    "usableSlots": 5,
+    "modelsHealthy": 5,
+    "modelCount": 5,
+    "policyModelsHealthy": 5
+   },
+   "governanceClass": {
+    "status": "needs_review",
+    "reasons": [
+     "Evidence quality is weak",
+     "2 model(s) substituted"
+    ]
+   },
+   "storedReport": {
+    "disagreements": 1,
+    "keyFindings": 1
+   }
+  },
+  "S3mn": {
+   "status": 200,
+   "reason": null,
+   "message": null,
+   "llmCalls": 1,
+   "hash": "1b9ba6734069087d",
+   "promptDigest": "bc8c85323c25f8b7",
+   "summary": {
+    "modelsHealthy": 3,
+    "modelCount": 3,
+    "highConfidenceClaims": 0,
+    "contestedClaims": 0,
+    "lowEvidenceClaims": 1,
+    "overallConsensusScore": 85,
+    "aggregateSupportRatio": 1
+   },
+   "policy": {
+    "overallConsensusScore": 85,
+    "supportRatio": 1,
+    "confidenceLabel": "High",
+    "evidenceQuality": "weak",
+    "lowEvidenceClaims": 1,
+    "modelsHealthy": 3,
+    "modelCount": 3,
+    "highConfidenceClaims": 0,
+    "contestedClaims": 0
+   },
+   "governanceInput": {
+    "consensusScore": 85,
+    "evidenceQuality": "weak",
+    "raw": {
+     "runId": "run-S3mn",
+     "collection": "runs",
+     "input": {
+      "scoreFamily": "research_synthesis_v1",
+      "consensusScore": 85,
+      "evidenceQuality": "weak",
+      "sourceBacked": false,
+      "missingSourcesCount": 0,
+      "modelHealth": {
+       "ok": 2,
+       "substituted": 1,
+       "failed": 0
+      },
+      "question": "Which island should we study first?",
+      "runType": "research"
+     },
+     "ownerUid": "test-uid"
+    }
+   },
+   "synthesizeReportRows": [
+    [
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "chatgpt",
+      "status": "ok",
+      "provider": null,
+      "textLen": 119
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "claude",
+      "status": "ok",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "gemini",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 115
+     }
+    ]
+   ],
+   "scoringRows": [
+    [
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "chatgpt",
+      "status": "ok",
+      "provider": null,
+      "textLen": 119
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "claude",
+      "status": "ok",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "gemini",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 115
+     }
+    ]
+   ],
+   "body": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ],
+       "support": {
+        "supportingModels": [
+         "chatgpt",
+         "claude",
+         "gemini"
+        ],
+        "dissentingModels": [],
+        "unknownModels": [],
+        "supportRatio": 1,
+        "confidenceLabel": "Medium"
+       },
+       "evidenceQuality": "weak"
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive first",
+       "positionsByModel": {
+        "chatgpt": "port",
+        "claude": "spice"
+       },
+       "whyTheyDiffer": "w"
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "consensusSummary": {
+     "modelsHealthy": 3,
+     "modelCount": 3,
+     "highConfidenceClaims": 0,
+     "contestedClaims": 0,
+     "lowEvidenceClaims": 1,
+     "overallConsensusScore": 85,
+     "aggregateSupportRatio": 1
+    },
+    "auditBundle": {
+     "runId": "run-S3mn",
+     "models": [
+      {
+       "modelId": "chatgpt",
+       "status": "ok"
+      },
+      {
+       "modelId": "claude",
+       "status": "ok"
+      },
+      {
+       "modelId": "gemini",
+       "status": "substituted"
+      }
+     ],
+     "overallConsensusScore": 85,
+     "claims": [
+      {
+       "claimTruncated": "Zanzibar holds the answer.",
+       "supportRatio": 1,
+       "evidenceQuality": "weak"
+      }
+     ]
+    }
+   },
+   "docFields": [
+    "policyConsensusSummary",
+    "question",
+    "runDocument",
+    "schemaVersion",
+    "synthesisConsensusAudit",
+    "synthesisConsensusSummary",
+    "synthesisInputHash",
+    "synthesisMetadata",
+    "synthesizedAt",
+    "synthesizedBy",
+    "synthesizedStructuredReport",
+    "userId"
+   ],
+   "units": {
+    "usableSlots": 3,
+    "modelsHealthy": 3,
+    "modelCount": 3,
+    "policyModelsHealthy": 3
+   },
+   "governanceClass": {
+    "status": "needs_review",
+    "reasons": [
+     "Evidence quality is weak",
+     "1 model(s) substituted"
+    ]
+   },
+   "storedReport": {
+    "disagreements": 1,
+    "keyFindings": 1
+   }
+  },
+  "S1-MP": {
+   "status": 200,
+   "reason": null,
+   "message": null,
+   "llmCalls": 1,
+   "hash": "dddf30582529da1a",
+   "promptDigest": "be83d3a5f90910b2",
+   "summary": {
+    "modelsHealthy": 5,
+    "modelCount": 5,
+    "highConfidenceClaims": 1,
+    "contestedClaims": 0,
+    "lowEvidenceClaims": 1,
+    "overallConsensusScore": 75,
+    "aggregateSupportRatio": 0.9
+   },
+   "policy": {
+    "overallConsensusScore": 75,
+    "supportRatio": 0.9,
+    "confidenceLabel": "High",
+    "evidenceQuality": "weak",
+    "lowEvidenceClaims": 1,
+    "modelsHealthy": 5,
+    "modelCount": 5,
+    "highConfidenceClaims": 1,
+    "contestedClaims": 0
+   },
+   "governanceInput": {
+    "consensusScore": 75,
+    "evidenceQuality": "weak",
+    "raw": {
+     "runId": "run-S1-MP",
+     "collection": "runs",
+     "input": {
+      "scoreFamily": "research_synthesis_v1",
+      "consensusScore": 75,
+      "evidenceQuality": "weak",
+      "sourceBacked": true,
+      "missingSourcesCount": 1,
+      "modelHealth": {
+       "ok": 0,
+       "substituted": 5,
+       "failed": 0
+      },
+      "question": "Which island should we study first?",
+      "runType": "research"
+     },
+     "ownerUid": "test-uid"
+    }
+   },
+   "synthesizeReportRows": [
+    [
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "chatgpt",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 119
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "claude",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "gemini",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 115
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "grok",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "perplexity",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 103
+     }
+    ]
+   ],
+   "scoringRows": [
+    [
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "chatgpt",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 119
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "claude",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "gemini",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 115
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "grok",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "perplexity",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 103
+     }
+    ]
+   ],
+   "body": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [
+        "r1"
+       ],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ],
+       "support": {
+        "supportingModels": [
+         "chatgpt",
+         "claude",
+         "gemini",
+         "grok",
+         "perplexity"
+        ],
+        "dissentingModels": [],
+        "unknownModels": [],
+        "supportRatio": 1,
+        "confidenceLabel": "High"
+       },
+       "evidenceQuality": "strong"
+      },
+      {
+       "claim": "Archives are accessible.",
+       "confidence": "Low",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "grok"
+       ],
+       "support": {
+        "supportingModels": [
+         "claude",
+         "gemini",
+         "grok",
+         "perplexity"
+        ],
+        "dissentingModels": [],
+        "unknownModels": [
+         "chatgpt"
+        ],
+        "supportRatio": 0.8,
+        "confidenceLabel": "Medium"
+       },
+       "evidenceQuality": "weak"
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive should be consulted first for the study",
+       "positionsByModel": {
+        "chatgpt": "port records",
+        "claude": "spice ledgers",
+        "gemini": "colonial maps"
+       },
+       "whyTheyDiffer": "w"
+      },
+      {
+       "topic": "Whether Madagascar should precede Zanzibar in the plan",
+       "positionsByModel": {
+        "grok": "yes, first",
+        "perplexity": "no, second",
+        "claude": "in parallel"
+       },
+       "whyTheyDiffer": "w"
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "consensusSummary": {
+     "modelsHealthy": 5,
+     "modelCount": 5,
+     "highConfidenceClaims": 1,
+     "contestedClaims": 0,
+     "lowEvidenceClaims": 1,
+     "overallConsensusScore": 75,
+     "aggregateSupportRatio": 0.9
+    },
+    "auditBundle": {
+     "runId": "run-S1-MP",
+     "models": [
+      {
+       "modelId": "chatgpt",
+       "status": "substituted"
+      },
+      {
+       "modelId": "claude",
+       "status": "substituted"
+      },
+      {
+       "modelId": "gemini",
+       "status": "substituted"
+      },
+      {
+       "modelId": "grok",
+       "status": "substituted"
+      },
+      {
+       "modelId": "perplexity",
+       "status": "substituted"
+      }
+     ],
+     "overallConsensusScore": 75,
+     "claims": [
+      {
+       "claimTruncated": "Zanzibar holds the answer.",
+       "supportRatio": 1,
+       "evidenceQuality": "strong"
+      },
+      {
+       "claimTruncated": "Archives are accessible.",
+       "supportRatio": 0.8,
+       "evidenceQuality": "weak"
+      }
+     ]
+    }
+   },
+   "docFields": [
+    "policyConsensusSummary",
+    "question",
+    "runDocument",
+    "schemaVersion",
+    "synthesisConsensusAudit",
+    "synthesisConsensusSummary",
+    "synthesisInputHash",
+    "synthesisMetadata",
+    "synthesizedAt",
+    "synthesizedBy",
+    "synthesizedStructuredReport",
+    "userId"
+   ],
+   "units": {
+    "usableSlots": 5,
+    "modelsHealthy": 5,
+    "modelCount": 5,
+    "policyModelsHealthy": 5
+   },
+   "governanceClass": {
+    "status": "blocked",
+    "reasons": [
+     "Missing sources in source-backed run (1 missing)",
+     "Evidence quality is weak",
+     "5 model(s) substituted"
+    ]
+   },
+   "storedReport": {
+    "disagreements": 2,
+    "keyFindings": 2
+   }
+  },
+  "S2-MP": {
+   "status": 200,
+   "reason": null,
+   "message": null,
+   "llmCalls": 1,
+   "hash": "dddf30582529da1a",
+   "promptDigest": "e4dd85046ccf01a0",
+   "summary": {
+    "modelsHealthy": 5,
+    "modelCount": 5,
+    "highConfidenceClaims": 1,
+    "contestedClaims": 0,
+    "lowEvidenceClaims": 1,
+    "overallConsensusScore": 75,
+    "aggregateSupportRatio": 0.9
+   },
+   "policy": {
+    "overallConsensusScore": 75,
+    "supportRatio": 0.9,
+    "confidenceLabel": "High",
+    "evidenceQuality": "weak",
+    "lowEvidenceClaims": 1,
+    "modelsHealthy": 5,
+    "modelCount": 5,
+    "highConfidenceClaims": 1,
+    "contestedClaims": 0
+   },
+   "governanceInput": {
+    "consensusScore": 75,
+    "evidenceQuality": "weak",
+    "raw": {
+     "runId": "run-S2-MP",
+     "collection": "runs",
+     "input": {
+      "scoreFamily": "research_synthesis_v1",
+      "consensusScore": 75,
+      "evidenceQuality": "weak",
+      "sourceBacked": true,
+      "missingSourcesCount": 1,
+      "modelHealth": {
+       "ok": 3,
+       "substituted": 2,
+       "failed": 0
+      },
+      "question": "Which island should we study first?",
+      "runType": "research"
+     },
+     "ownerUid": "test-uid"
+    }
+   },
+   "synthesizeReportRows": [
+    [
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "chatgpt",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 119
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "claude",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "gemini",
+      "status": "ok",
+      "provider": null,
+      "textLen": 115
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "grok",
+      "status": "ok",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "perplexity",
+      "status": "ok",
+      "provider": null,
+      "textLen": 103
+     }
+    ]
+   ],
+   "scoringRows": [
+    [
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "chatgpt",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 119
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "claude",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "gemini",
+      "status": "ok",
+      "provider": null,
+      "textLen": 115
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "grok",
+      "status": "ok",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "perplexity",
+      "status": "ok",
+      "provider": null,
+      "textLen": 103
+     }
+    ]
+   ],
+   "body": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [
+        "r1"
+       ],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ],
+       "support": {
+        "supportingModels": [
+         "chatgpt",
+         "claude",
+         "gemini",
+         "grok",
+         "perplexity"
+        ],
+        "dissentingModels": [],
+        "unknownModels": [],
+        "supportRatio": 1,
+        "confidenceLabel": "High"
+       },
+       "evidenceQuality": "strong"
+      },
+      {
+       "claim": "Archives are accessible.",
+       "confidence": "Low",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "grok"
+       ],
+       "support": {
+        "supportingModels": [
+         "claude",
+         "gemini",
+         "grok",
+         "perplexity"
+        ],
+        "dissentingModels": [],
+        "unknownModels": [
+         "chatgpt"
+        ],
+        "supportRatio": 0.8,
+        "confidenceLabel": "Medium"
+       },
+       "evidenceQuality": "weak"
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive should be consulted first for the study",
+       "positionsByModel": {
+        "chatgpt": "port records",
+        "claude": "spice ledgers",
+        "gemini": "colonial maps"
+       },
+       "whyTheyDiffer": "w"
+      },
+      {
+       "topic": "Whether Madagascar should precede Zanzibar in the plan",
+       "positionsByModel": {
+        "grok": "yes, first",
+        "perplexity": "no, second",
+        "claude": "in parallel"
+       },
+       "whyTheyDiffer": "w"
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "consensusSummary": {
+     "modelsHealthy": 5,
+     "modelCount": 5,
+     "highConfidenceClaims": 1,
+     "contestedClaims": 0,
+     "lowEvidenceClaims": 1,
+     "overallConsensusScore": 75,
+     "aggregateSupportRatio": 0.9
+    },
+    "auditBundle": {
+     "runId": "run-S2-MP",
+     "models": [
+      {
+       "modelId": "chatgpt",
+       "status": "substituted"
+      },
+      {
+       "modelId": "claude",
+       "status": "substituted"
+      },
+      {
+       "modelId": "gemini",
+       "status": "ok"
+      },
+      {
+       "modelId": "grok",
+       "status": "ok"
+      },
+      {
+       "modelId": "perplexity",
+       "status": "ok"
+      }
+     ],
+     "overallConsensusScore": 75,
+     "claims": [
+      {
+       "claimTruncated": "Zanzibar holds the answer.",
+       "supportRatio": 1,
+       "evidenceQuality": "strong"
+      },
+      {
+       "claimTruncated": "Archives are accessible.",
+       "supportRatio": 0.8,
+       "evidenceQuality": "weak"
+      }
+     ]
+    }
+   },
+   "docFields": [
+    "policyConsensusSummary",
+    "question",
+    "runDocument",
+    "schemaVersion",
+    "synthesisConsensusAudit",
+    "synthesisConsensusSummary",
+    "synthesisInputHash",
+    "synthesisMetadata",
+    "synthesizedAt",
+    "synthesizedBy",
+    "synthesizedStructuredReport",
+    "userId"
+   ],
+   "units": {
+    "usableSlots": 5,
+    "modelsHealthy": 5,
+    "modelCount": 5,
+    "policyModelsHealthy": 5
+   },
+   "governanceClass": {
+    "status": "blocked",
+    "reasons": [
+     "Missing sources in source-backed run (1 missing)",
+     "Evidence quality is weak",
+     "2 model(s) substituted"
+    ]
+   },
+   "storedReport": {
+    "disagreements": 2,
+    "keyFindings": 2
+   }
+  },
+  "S2b-MP": {
+   "status": 200,
+   "reason": null,
+   "message": null,
+   "llmCalls": 1,
+   "hash": "dddf30582529da1a",
+   "promptDigest": "c72d6f949bba7948",
+   "summary": {
+    "modelsHealthy": 5,
+    "modelCount": 5,
+    "highConfidenceClaims": 1,
+    "contestedClaims": 0,
+    "lowEvidenceClaims": 1,
+    "overallConsensusScore": 75,
+    "aggregateSupportRatio": 0.9
+   },
+   "policy": {
+    "overallConsensusScore": 75,
+    "supportRatio": 0.9,
+    "confidenceLabel": "High",
+    "evidenceQuality": "weak",
+    "lowEvidenceClaims": 1,
+    "modelsHealthy": 5,
+    "modelCount": 5,
+    "highConfidenceClaims": 1,
+    "contestedClaims": 0
+   },
+   "governanceInput": {
+    "consensusScore": 75,
+    "evidenceQuality": "weak",
+    "raw": {
+     "runId": "run-S2b-MP",
+     "collection": "runs",
+     "input": {
+      "scoreFamily": "research_synthesis_v1",
+      "consensusScore": 75,
+      "evidenceQuality": "weak",
+      "sourceBacked": true,
+      "missingSourcesCount": 1,
+      "modelHealth": {
+       "ok": 1,
+       "substituted": 4,
+       "failed": 0
+      },
+      "question": "Which island should we study first?",
+      "runType": "research"
+     },
+     "ownerUid": "test-uid"
+    }
+   },
+   "synthesizeReportRows": [
+    [
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "chatgpt",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 119
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "claude",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "gemini",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 115
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "grok",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "perplexity",
+      "status": "ok",
+      "provider": null,
+      "textLen": 103
+     }
+    ]
+   ],
+   "scoringRows": [
+    [
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "chatgpt",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 119
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "claude",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "gemini",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 115
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "grok",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "perplexity",
+      "status": "ok",
+      "provider": null,
+      "textLen": 103
+     }
+    ]
+   ],
+   "body": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [
+        "r1"
+       ],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ],
+       "support": {
+        "supportingModels": [
+         "chatgpt",
+         "claude",
+         "gemini",
+         "grok",
+         "perplexity"
+        ],
+        "dissentingModels": [],
+        "unknownModels": [],
+        "supportRatio": 1,
+        "confidenceLabel": "High"
+       },
+       "evidenceQuality": "strong"
+      },
+      {
+       "claim": "Archives are accessible.",
+       "confidence": "Low",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "grok"
+       ],
+       "support": {
+        "supportingModels": [
+         "claude",
+         "gemini",
+         "grok",
+         "perplexity"
+        ],
+        "dissentingModels": [],
+        "unknownModels": [
+         "chatgpt"
+        ],
+        "supportRatio": 0.8,
+        "confidenceLabel": "Medium"
+       },
+       "evidenceQuality": "weak"
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive should be consulted first for the study",
+       "positionsByModel": {
+        "chatgpt": "port records",
+        "claude": "spice ledgers",
+        "gemini": "colonial maps"
+       },
+       "whyTheyDiffer": "w"
+      },
+      {
+       "topic": "Whether Madagascar should precede Zanzibar in the plan",
+       "positionsByModel": {
+        "grok": "yes, first",
+        "perplexity": "no, second",
+        "claude": "in parallel"
+       },
+       "whyTheyDiffer": "w"
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "consensusSummary": {
+     "modelsHealthy": 5,
+     "modelCount": 5,
+     "highConfidenceClaims": 1,
+     "contestedClaims": 0,
+     "lowEvidenceClaims": 1,
+     "overallConsensusScore": 75,
+     "aggregateSupportRatio": 0.9
+    },
+    "auditBundle": {
+     "runId": "run-S2b-MP",
+     "models": [
+      {
+       "modelId": "chatgpt",
+       "status": "substituted"
+      },
+      {
+       "modelId": "claude",
+       "status": "substituted"
+      },
+      {
+       "modelId": "gemini",
+       "status": "substituted"
+      },
+      {
+       "modelId": "grok",
+       "status": "substituted"
+      },
+      {
+       "modelId": "perplexity",
+       "status": "ok"
+      }
+     ],
+     "overallConsensusScore": 75,
+     "claims": [
+      {
+       "claimTruncated": "Zanzibar holds the answer.",
+       "supportRatio": 1,
+       "evidenceQuality": "strong"
+      },
+      {
+       "claimTruncated": "Archives are accessible.",
+       "supportRatio": 0.8,
+       "evidenceQuality": "weak"
+      }
+     ]
+    }
+   },
+   "docFields": [
+    "policyConsensusSummary",
+    "question",
+    "runDocument",
+    "schemaVersion",
+    "synthesisConsensusAudit",
+    "synthesisConsensusSummary",
+    "synthesisInputHash",
+    "synthesisMetadata",
+    "synthesizedAt",
+    "synthesizedBy",
+    "synthesizedStructuredReport",
+    "userId"
+   ],
+   "units": {
+    "usableSlots": 5,
+    "modelsHealthy": 5,
+    "modelCount": 5,
+    "policyModelsHealthy": 5
+   },
+   "governanceClass": {
+    "status": "blocked",
+    "reasons": [
+     "Missing sources in source-backed run (1 missing)",
+     "Evidence quality is weak",
+     "4 model(s) substituted"
+    ]
+   },
+   "storedReport": {
+    "disagreements": 2,
+    "keyFindings": 2
+   }
+  },
+  "S4-MP": {
+   "status": 200,
+   "reason": null,
+   "message": null,
+   "llmCalls": 1,
+   "hash": "dddf30582529da1a",
+   "promptDigest": "a992107a8a79f0ff",
+   "summary": {
+    "modelsHealthy": 5,
+    "modelCount": 5,
+    "highConfidenceClaims": 1,
+    "contestedClaims": 0,
+    "lowEvidenceClaims": 1,
+    "overallConsensusScore": 75,
+    "aggregateSupportRatio": 0.9
+   },
+   "policy": {
+    "overallConsensusScore": 75,
+    "supportRatio": 0.9,
+    "confidenceLabel": "High",
+    "evidenceQuality": "weak",
+    "lowEvidenceClaims": 1,
+    "modelsHealthy": 5,
+    "modelCount": 5,
+    "highConfidenceClaims": 1,
+    "contestedClaims": 0
+   },
+   "governanceInput": {
+    "consensusScore": 75,
+    "evidenceQuality": "weak",
+    "raw": {
+     "runId": "run-S4-MP",
+     "collection": "runs",
+     "input": {
+      "scoreFamily": "research_synthesis_v1",
+      "consensusScore": 75,
+      "evidenceQuality": "weak",
+      "sourceBacked": true,
+      "missingSourcesCount": 1,
+      "modelHealth": {
+       "ok": 5,
+       "substituted": 0,
+       "failed": 0
+      },
+      "question": "Which island should we study first?",
+      "runType": "research"
+     },
+     "ownerUid": "test-uid"
+    }
+   },
+   "synthesizeReportRows": [
+    [
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "chatgpt",
+      "status": "ok",
+      "provider": null,
+      "textLen": 119
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "claude",
+      "status": "ok",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "gemini",
+      "status": "ok",
+      "provider": null,
+      "textLen": 115
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "grok",
+      "status": "ok",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "perplexity",
+      "status": "ok",
+      "provider": null,
+      "textLen": 103
+     }
+    ]
+   ],
+   "scoringRows": [
+    [
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "chatgpt",
+      "status": "ok",
+      "provider": null,
+      "textLen": 119
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "claude",
+      "status": "ok",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "gemini",
+      "status": "ok",
+      "provider": null,
+      "textLen": 115
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "grok",
+      "status": "ok",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "perplexity",
+      "status": "ok",
+      "provider": null,
+      "textLen": 103
+     }
+    ]
+   ],
+   "body": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [
+        "r1"
+       ],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ],
+       "support": {
+        "supportingModels": [
+         "chatgpt",
+         "claude",
+         "gemini",
+         "grok",
+         "perplexity"
+        ],
+        "dissentingModels": [],
+        "unknownModels": [],
+        "supportRatio": 1,
+        "confidenceLabel": "High"
+       },
+       "evidenceQuality": "strong"
+      },
+      {
+       "claim": "Archives are accessible.",
+       "confidence": "Low",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "grok"
+       ],
+       "support": {
+        "supportingModels": [
+         "claude",
+         "gemini",
+         "grok",
+         "perplexity"
+        ],
+        "dissentingModels": [],
+        "unknownModels": [
+         "chatgpt"
+        ],
+        "supportRatio": 0.8,
+        "confidenceLabel": "Medium"
+       },
+       "evidenceQuality": "weak"
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive should be consulted first for the study",
+       "positionsByModel": {
+        "chatgpt": "port records",
+        "claude": "spice ledgers",
+        "gemini": "colonial maps"
+       },
+       "whyTheyDiffer": "w"
+      },
+      {
+       "topic": "Whether Madagascar should precede Zanzibar in the plan",
+       "positionsByModel": {
+        "grok": "yes, first",
+        "perplexity": "no, second",
+        "claude": "in parallel"
+       },
+       "whyTheyDiffer": "w"
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "consensusSummary": {
+     "modelsHealthy": 5,
+     "modelCount": 5,
+     "highConfidenceClaims": 1,
+     "contestedClaims": 0,
+     "lowEvidenceClaims": 1,
+     "overallConsensusScore": 75,
+     "aggregateSupportRatio": 0.9
+    },
+    "auditBundle": {
+     "runId": "run-S4-MP",
+     "models": [
+      {
+       "modelId": "chatgpt",
+       "status": "ok"
+      },
+      {
+       "modelId": "claude",
+       "status": "ok"
+      },
+      {
+       "modelId": "gemini",
+       "status": "ok"
+      },
+      {
+       "modelId": "grok",
+       "status": "ok"
+      },
+      {
+       "modelId": "perplexity",
+       "status": "ok"
+      }
+     ],
+     "overallConsensusScore": 75,
+     "claims": [
+      {
+       "claimTruncated": "Zanzibar holds the answer.",
+       "supportRatio": 1,
+       "evidenceQuality": "strong"
+      },
+      {
+       "claimTruncated": "Archives are accessible.",
+       "supportRatio": 0.8,
+       "evidenceQuality": "weak"
+      }
+     ]
+    }
+   },
+   "docFields": [
+    "policyConsensusSummary",
+    "question",
+    "runDocument",
+    "schemaVersion",
+    "synthesisConsensusAudit",
+    "synthesisConsensusSummary",
+    "synthesisInputHash",
+    "synthesisMetadata",
+    "synthesizedAt",
+    "synthesizedBy",
+    "synthesizedStructuredReport",
+    "userId"
+   ],
+   "units": {
+    "usableSlots": 5,
+    "modelsHealthy": 5,
+    "modelCount": 5,
+    "policyModelsHealthy": 5
+   },
+   "governanceClass": {
+    "status": "blocked",
+    "reasons": [
+     "Missing sources in source-backed run (1 missing)",
+     "Evidence quality is weak"
+    ]
+   },
+   "storedReport": {
+    "disagreements": 2,
+    "keyFindings": 2
+   }
+  },
+  "S7n-MP": {
+   "status": 200,
+   "reason": null,
+   "message": null,
+   "llmCalls": 1,
+   "hash": "cc26621b2ff27dee",
+   "promptDigest": "5458332dbdd4fe52",
+   "summary": {
+    "modelsHealthy": 3,
+    "modelCount": 3,
+    "highConfidenceClaims": 1,
+    "contestedClaims": 0,
+    "lowEvidenceClaims": 1,
+    "overallConsensusScore": 75,
+    "aggregateSupportRatio": 1
+   },
+   "policy": {
+    "overallConsensusScore": 75,
+    "supportRatio": 1,
+    "confidenceLabel": "High",
+    "evidenceQuality": "weak",
+    "lowEvidenceClaims": 1,
+    "modelsHealthy": 3,
+    "modelCount": 3,
+    "highConfidenceClaims": 1,
+    "contestedClaims": 0
+   },
+   "governanceInput": {
+    "consensusScore": 75,
+    "evidenceQuality": "weak",
+    "raw": {
+     "runId": "run-S7n-MP",
+     "collection": "runs",
+     "input": {
+      "scoreFamily": "research_synthesis_v1",
+      "consensusScore": 75,
+      "evidenceQuality": "weak",
+      "sourceBacked": true,
+      "missingSourcesCount": 1,
+      "modelHealth": {
+       "ok": 1,
+       "substituted": 2,
+       "failed": 2
+      },
+      "question": "Which island should we study first?",
+      "runType": "research"
+     },
+     "ownerUid": "test-uid"
+    }
+   },
+   "synthesizeReportRows": [
+    [
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "gemini",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 115
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "grok",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "perplexity",
+      "status": "ok",
+      "provider": null,
+      "textLen": 103
+     }
+    ]
+   ],
+   "scoringRows": [
+    [
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "gemini",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 115
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "grok",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "perplexity",
+      "status": "ok",
+      "provider": null,
+      "textLen": 103
+     }
+    ]
+   ],
+   "body": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [
+        "r1"
+       ],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ],
+       "support": {
+        "supportingModels": [
+         "gemini",
+         "grok",
+         "perplexity"
+        ],
+        "dissentingModels": [],
+        "unknownModels": [],
+        "supportRatio": 1,
+        "confidenceLabel": "High"
+       },
+       "evidenceQuality": "strong"
+      },
+      {
+       "claim": "Archives are accessible.",
+       "confidence": "Low",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "grok"
+       ],
+       "support": {
+        "supportingModels": [
+         "gemini",
+         "grok",
+         "perplexity"
+        ],
+        "dissentingModels": [],
+        "unknownModels": [],
+        "supportRatio": 1,
+        "confidenceLabel": "Medium"
+       },
+       "evidenceQuality": "weak"
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive should be consulted first for the study",
+       "positionsByModel": {
+        "chatgpt": "port records",
+        "claude": "spice ledgers",
+        "gemini": "colonial maps"
+       },
+       "whyTheyDiffer": "w"
+      },
+      {
+       "topic": "Whether Madagascar should precede Zanzibar in the plan",
+       "positionsByModel": {
+        "grok": "yes, first",
+        "perplexity": "no, second",
+        "claude": "in parallel"
+       },
+       "whyTheyDiffer": "w"
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "consensusSummary": {
+     "modelsHealthy": 3,
+     "modelCount": 3,
+     "highConfidenceClaims": 1,
+     "contestedClaims": 0,
+     "lowEvidenceClaims": 1,
+     "overallConsensusScore": 75,
+     "aggregateSupportRatio": 1
+    },
+    "auditBundle": {
+     "runId": "run-S7n-MP",
+     "models": [
+      {
+       "modelId": "gemini",
+       "status": "substituted"
+      },
+      {
+       "modelId": "grok",
+       "status": "substituted"
+      },
+      {
+       "modelId": "perplexity",
+       "status": "ok"
+      }
+     ],
+     "overallConsensusScore": 75,
+     "claims": [
+      {
+       "claimTruncated": "Zanzibar holds the answer.",
+       "supportRatio": 1,
+       "evidenceQuality": "strong"
+      },
+      {
+       "claimTruncated": "Archives are accessible.",
+       "supportRatio": 1,
+       "evidenceQuality": "weak"
+      }
+     ]
+    }
+   },
+   "docFields": [
+    "policyConsensusSummary",
+    "question",
+    "runDocument",
+    "schemaVersion",
+    "synthesisConsensusAudit",
+    "synthesisConsensusSummary",
+    "synthesisInputHash",
+    "synthesisMetadata",
+    "synthesizedAt",
+    "synthesizedBy",
+    "synthesizedStructuredReport",
+    "userId"
+   ],
+   "units": {
+    "usableSlots": 3,
+    "modelsHealthy": 3,
+    "modelCount": 3,
+    "policyModelsHealthy": 3
+   },
+   "governanceClass": {
+    "status": "blocked",
+    "reasons": [
+     "Missing sources in source-backed run (1 missing)",
+     "Evidence quality is weak",
+     "2 model(s) failed",
+     "2 model(s) substituted"
+    ]
+   },
+   "storedReport": {
+    "disagreements": 2,
+    "keyFindings": 2
+   }
+  },
+  "S2u-MP": {
+   "status": 200,
+   "reason": null,
+   "message": null,
+   "llmCalls": 1,
+   "hash": "dddf30582529da1a",
+   "promptDigest": "c875251afe02170c",
+   "summary": {
+    "modelsHealthy": 5,
+    "modelCount": 5,
+    "highConfidenceClaims": 1,
+    "contestedClaims": 0,
+    "lowEvidenceClaims": 1,
+    "overallConsensusScore": 75,
+    "aggregateSupportRatio": 0.9
+   },
+   "policy": {
+    "overallConsensusScore": 75,
+    "supportRatio": 0.9,
+    "confidenceLabel": "High",
+    "evidenceQuality": "weak",
+    "lowEvidenceClaims": 1,
+    "modelsHealthy": 5,
+    "modelCount": 5,
+    "highConfidenceClaims": 1,
+    "contestedClaims": 0
+   },
+   "governanceInput": {
+    "consensusScore": 75,
+    "evidenceQuality": "weak",
+    "raw": {
+     "runId": "run-S2u-MP",
+     "collection": "runs",
+     "input": {
+      "scoreFamily": "research_synthesis_v1",
+      "consensusScore": 75,
+      "evidenceQuality": "weak",
+      "sourceBacked": true,
+      "missingSourcesCount": 1,
+      "modelHealth": {
+       "ok": 3,
+       "substituted": 2,
+       "failed": 0
+      },
+      "question": "Which island should we study first?",
+      "runType": "research"
+     },
+     "ownerUid": "test-uid"
+    }
+   },
+   "synthesizeReportRows": [
+    [
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "chatgpt",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 119
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "claude",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "gemini",
+      "status": "ok",
+      "provider": null,
+      "textLen": 115
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "grok",
+      "status": "ok",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "perplexity",
+      "status": "ok",
+      "provider": null,
+      "textLen": 103
+     }
+    ]
+   ],
+   "scoringRows": [
+    [
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "chatgpt",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 119
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "claude",
+      "status": "substituted",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "gemini",
+      "status": "ok",
+      "provider": null,
+      "textLen": 115
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "grok",
+      "status": "ok",
+      "provider": null,
+      "textLen": 116
+     },
+     {
+      "keys": "modelId,rawText,status",
+      "modelId": "perplexity",
+      "status": "ok",
+      "provider": null,
+      "textLen": 103
+     }
+    ]
+   ],
+   "body": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [
+        "r1"
+       ],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ],
+       "support": {
+        "supportingModels": [
+         "chatgpt",
+         "claude",
+         "gemini",
+         "grok",
+         "perplexity"
+        ],
+        "dissentingModels": [],
+        "unknownModels": [],
+        "supportRatio": 1,
+        "confidenceLabel": "High"
+       },
+       "evidenceQuality": "strong"
+      },
+      {
+       "claim": "Archives are accessible.",
+       "confidence": "Low",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "grok"
+       ],
+       "support": {
+        "supportingModels": [
+         "claude",
+         "gemini",
+         "grok",
+         "perplexity"
+        ],
+        "dissentingModels": [],
+        "unknownModels": [
+         "chatgpt"
+        ],
+        "supportRatio": 0.8,
+        "confidenceLabel": "Medium"
+       },
+       "evidenceQuality": "weak"
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive should be consulted first for the study",
+       "positionsByModel": {
+        "chatgpt": "port records",
+        "claude": "spice ledgers",
+        "gemini": "colonial maps"
+       },
+       "whyTheyDiffer": "w"
+      },
+      {
+       "topic": "Whether Madagascar should precede Zanzibar in the plan",
+       "positionsByModel": {
+        "grok": "yes, first",
+        "perplexity": "no, second",
+        "claude": "in parallel"
+       },
+       "whyTheyDiffer": "w"
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "consensusSummary": {
+     "modelsHealthy": 5,
+     "modelCount": 5,
+     "highConfidenceClaims": 1,
+     "contestedClaims": 0,
+     "lowEvidenceClaims": 1,
+     "overallConsensusScore": 75,
+     "aggregateSupportRatio": 0.9
+    },
+    "auditBundle": {
+     "runId": "run-S2u-MP",
+     "models": [
+      {
+       "modelId": "chatgpt",
+       "status": "substituted"
+      },
+      {
+       "modelId": "claude",
+       "status": "substituted"
+      },
+      {
+       "modelId": "gemini",
+       "status": "ok"
+      },
+      {
+       "modelId": "grok",
+       "status": "ok"
+      },
+      {
+       "modelId": "perplexity",
+       "status": "ok"
+      }
+     ],
+     "overallConsensusScore": 75,
+     "claims": [
+      {
+       "claimTruncated": "Zanzibar holds the answer.",
+       "supportRatio": 1,
+       "evidenceQuality": "strong"
+      },
+      {
+       "claimTruncated": "Archives are accessible.",
+       "supportRatio": 0.8,
+       "evidenceQuality": "weak"
+      }
+     ]
+    }
+   },
+   "docFields": [
+    "policyConsensusSummary",
+    "question",
+    "runDocument",
+    "schemaVersion",
+    "synthesisConsensusAudit",
+    "synthesisConsensusSummary",
+    "synthesisInputHash",
+    "synthesisMetadata",
+    "synthesizedAt",
+    "synthesizedBy",
+    "synthesizedStructuredReport",
+    "userId"
+   ],
+   "units": {
+    "usableSlots": 5,
+    "modelsHealthy": 5,
+    "modelCount": 5,
+    "policyModelsHealthy": 5
+   },
+   "governanceClass": {
+    "status": "blocked",
+    "reasons": [
+     "Missing sources in source-backed run (1 missing)",
+     "Evidence quality is weak",
+     "2 model(s) substituted"
+    ]
+   },
+   "storedReport": {
+    "disagreements": 2,
+    "keyFindings": 2
+   }
+  }
+ },
+ "cached": {
+  "S1": {
+   "postStatus": 200,
+   "postCached": true,
+   "postLlmCalls": 0,
+   "getStatus": 200,
+   "getHasReport": true,
+   "postBody": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ]
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive first",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "chatgpt": "port",
+        "claude": "spice"
+       }
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "cached": true
+   },
+   "getBody": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ]
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive first",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "chatgpt": "port",
+        "claude": "spice"
+       }
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "cached": true
+   }
+  },
+  "S8a": {
+   "postStatus": 200,
+   "postCached": true,
+   "postLlmCalls": 0,
+   "getStatus": 200,
+   "getHasReport": true,
+   "postBody": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ]
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive first",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "chatgpt": "port",
+        "claude": "spice"
+       }
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "cached": true
+   },
+   "getBody": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ]
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive first",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "chatgpt": "port",
+        "claude": "spice"
+       }
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "cached": true
+   }
+  },
+  "S2": {
+   "postStatus": 200,
+   "postCached": true,
+   "postLlmCalls": 0,
+   "getStatus": 200,
+   "getHasReport": true,
+   "postBody": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ]
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive first",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "chatgpt": "port",
+        "claude": "spice"
+       }
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "cached": true
+   },
+   "getBody": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ]
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive first",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "chatgpt": "port",
+        "claude": "spice"
+       }
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "cached": true
+   }
+  },
+  "S2b": {
+   "postStatus": 200,
+   "postCached": true,
+   "postLlmCalls": 0,
+   "getStatus": 200,
+   "getHasReport": true,
+   "postBody": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ]
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive first",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "chatgpt": "port",
+        "claude": "spice"
+       }
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "cached": true
+   },
+   "getBody": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ]
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive first",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "chatgpt": "port",
+        "claude": "spice"
+       }
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "cached": true
+   }
+  },
+  "S4": {
+   "postStatus": 200,
+   "postCached": true,
+   "postLlmCalls": 0,
+   "getStatus": 200,
+   "getHasReport": true,
+   "postBody": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ]
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive first",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "chatgpt": "port",
+        "claude": "spice"
+       }
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "cached": true
+   },
+   "getBody": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ]
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive first",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "chatgpt": "port",
+        "claude": "spice"
+       }
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "cached": true
+   }
+  },
+  "S7n": {
+   "postStatus": 200,
+   "postCached": true,
+   "postLlmCalls": 0,
+   "getStatus": 200,
+   "getHasReport": true,
+   "postBody": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ]
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive first",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "chatgpt": "port",
+        "claude": "spice"
+       }
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "cached": true
+   },
+   "getBody": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ]
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive first",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "chatgpt": "port",
+        "claude": "spice"
+       }
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "cached": true
+   }
+  },
+  "SMK": {
+   "postStatus": 409,
+   "postCached": false,
+   "postLlmCalls": 0,
+   "getStatus": 200,
+   "getHasReport": true,
+   "postBody": {
+    "errorCode": "SYNTHESIS_SOURCE_UNAVAILABLE",
+    "message": "This run does not have enough saved model responses to synthesize.",
+    "details": {
+     "reason": "insufficient_results"
+    }
+   },
+   "getBody": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ]
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive first",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "chatgpt": "port",
+        "claude": "spice"
+       }
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "cached": true
+   }
+  },
+  "S2u": {
+   "postStatus": 200,
+   "postCached": true,
+   "postLlmCalls": 0,
+   "getStatus": 200,
+   "getHasReport": true,
+   "postBody": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ]
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive first",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "chatgpt": "port",
+        "claude": "spice"
+       }
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "cached": true
+   },
+   "getBody": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ]
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive first",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "chatgpt": "port",
+        "claude": "spice"
+       }
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "cached": true
+   }
+  },
+  "S3mn": {
+   "postStatus": 200,
+   "postCached": true,
+   "postLlmCalls": 0,
+   "getStatus": 200,
+   "getHasReport": true,
+   "postBody": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ]
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive first",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "chatgpt": "port",
+        "claude": "spice"
+       }
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "cached": true
+   },
+   "getBody": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ]
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive first",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "chatgpt": "port",
+        "claude": "spice"
+       }
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "cached": true
+   }
+  },
+  "S1-MP": {
+   "postStatus": 200,
+   "postCached": true,
+   "postLlmCalls": 0,
+   "getStatus": 200,
+   "getHasReport": true,
+   "postBody": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [
+        "r1"
+       ],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ]
+      },
+      {
+       "claim": "Archives are accessible.",
+       "confidence": "Low",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "grok"
+       ]
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive should be consulted first for the study",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "chatgpt": "port records",
+        "claude": "spice ledgers",
+        "gemini": "colonial maps"
+       }
+      },
+      {
+       "topic": "Whether Madagascar should precede Zanzibar in the plan",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "grok": "yes, first",
+        "perplexity": "no, second",
+        "claude": "in parallel"
+       }
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "cached": true
+   },
+   "getBody": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [
+        "r1"
+       ],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ]
+      },
+      {
+       "claim": "Archives are accessible.",
+       "confidence": "Low",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "grok"
+       ]
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive should be consulted first for the study",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "chatgpt": "port records",
+        "claude": "spice ledgers",
+        "gemini": "colonial maps"
+       }
+      },
+      {
+       "topic": "Whether Madagascar should precede Zanzibar in the plan",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "grok": "yes, first",
+        "perplexity": "no, second",
+        "claude": "in parallel"
+       }
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "cached": true
+   }
+  },
+  "S2-MP": {
+   "postStatus": 200,
+   "postCached": true,
+   "postLlmCalls": 0,
+   "getStatus": 200,
+   "getHasReport": true,
+   "postBody": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [
+        "r1"
+       ],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ]
+      },
+      {
+       "claim": "Archives are accessible.",
+       "confidence": "Low",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "grok"
+       ]
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive should be consulted first for the study",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "chatgpt": "port records",
+        "claude": "spice ledgers",
+        "gemini": "colonial maps"
+       }
+      },
+      {
+       "topic": "Whether Madagascar should precede Zanzibar in the plan",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "grok": "yes, first",
+        "perplexity": "no, second",
+        "claude": "in parallel"
+       }
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "cached": true
+   },
+   "getBody": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [
+        "r1"
+       ],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ]
+      },
+      {
+       "claim": "Archives are accessible.",
+       "confidence": "Low",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "grok"
+       ]
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive should be consulted first for the study",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "chatgpt": "port records",
+        "claude": "spice ledgers",
+        "gemini": "colonial maps"
+       }
+      },
+      {
+       "topic": "Whether Madagascar should precede Zanzibar in the plan",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "grok": "yes, first",
+        "perplexity": "no, second",
+        "claude": "in parallel"
+       }
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "cached": true
+   }
+  },
+  "S2b-MP": {
+   "postStatus": 200,
+   "postCached": true,
+   "postLlmCalls": 0,
+   "getStatus": 200,
+   "getHasReport": true,
+   "postBody": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [
+        "r1"
+       ],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ]
+      },
+      {
+       "claim": "Archives are accessible.",
+       "confidence": "Low",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "grok"
+       ]
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive should be consulted first for the study",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "chatgpt": "port records",
+        "claude": "spice ledgers",
+        "gemini": "colonial maps"
+       }
+      },
+      {
+       "topic": "Whether Madagascar should precede Zanzibar in the plan",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "grok": "yes, first",
+        "perplexity": "no, second",
+        "claude": "in parallel"
+       }
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "cached": true
+   },
+   "getBody": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [
+        "r1"
+       ],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ]
+      },
+      {
+       "claim": "Archives are accessible.",
+       "confidence": "Low",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "grok"
+       ]
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive should be consulted first for the study",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "chatgpt": "port records",
+        "claude": "spice ledgers",
+        "gemini": "colonial maps"
+       }
+      },
+      {
+       "topic": "Whether Madagascar should precede Zanzibar in the plan",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "grok": "yes, first",
+        "perplexity": "no, second",
+        "claude": "in parallel"
+       }
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "cached": true
+   }
+  },
+  "S4-MP": {
+   "postStatus": 200,
+   "postCached": true,
+   "postLlmCalls": 0,
+   "getStatus": 200,
+   "getHasReport": true,
+   "postBody": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [
+        "r1"
+       ],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ]
+      },
+      {
+       "claim": "Archives are accessible.",
+       "confidence": "Low",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "grok"
+       ]
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive should be consulted first for the study",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "chatgpt": "port records",
+        "claude": "spice ledgers",
+        "gemini": "colonial maps"
+       }
+      },
+      {
+       "topic": "Whether Madagascar should precede Zanzibar in the plan",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "grok": "yes, first",
+        "perplexity": "no, second",
+        "claude": "in parallel"
+       }
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "cached": true
+   },
+   "getBody": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [
+        "r1"
+       ],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ]
+      },
+      {
+       "claim": "Archives are accessible.",
+       "confidence": "Low",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "grok"
+       ]
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive should be consulted first for the study",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "chatgpt": "port records",
+        "claude": "spice ledgers",
+        "gemini": "colonial maps"
+       }
+      },
+      {
+       "topic": "Whether Madagascar should precede Zanzibar in the plan",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "grok": "yes, first",
+        "perplexity": "no, second",
+        "claude": "in parallel"
+       }
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "cached": true
+   }
+  },
+  "S7n-MP": {
+   "postStatus": 200,
+   "postCached": true,
+   "postLlmCalls": 0,
+   "getStatus": 200,
+   "getHasReport": true,
+   "postBody": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [
+        "r1"
+       ],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ]
+      },
+      {
+       "claim": "Archives are accessible.",
+       "confidence": "Low",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "grok"
+       ]
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive should be consulted first for the study",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "chatgpt": "port records",
+        "claude": "spice ledgers",
+        "gemini": "colonial maps"
+       }
+      },
+      {
+       "topic": "Whether Madagascar should precede Zanzibar in the plan",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "grok": "yes, first",
+        "perplexity": "no, second",
+        "claude": "in parallel"
+       }
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "cached": true
+   },
+   "getBody": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [
+        "r1"
+       ],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ]
+      },
+      {
+       "claim": "Archives are accessible.",
+       "confidence": "Low",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "grok"
+       ]
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive should be consulted first for the study",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "chatgpt": "port records",
+        "claude": "spice ledgers",
+        "gemini": "colonial maps"
+       }
+      },
+      {
+       "topic": "Whether Madagascar should precede Zanzibar in the plan",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "grok": "yes, first",
+        "perplexity": "no, second",
+        "claude": "in parallel"
+       }
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "cached": true
+   }
+  },
+  "S2u-MP": {
+   "postStatus": 200,
+   "postCached": true,
+   "postLlmCalls": 0,
+   "getStatus": 200,
+   "getHasReport": true,
+   "postBody": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [
+        "r1"
+       ],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ]
+      },
+      {
+       "claim": "Archives are accessible.",
+       "confidence": "Low",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "grok"
+       ]
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive should be consulted first for the study",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "chatgpt": "port records",
+        "claude": "spice ledgers",
+        "gemini": "colonial maps"
+       }
+      },
+      {
+       "topic": "Whether Madagascar should precede Zanzibar in the plan",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "grok": "yes, first",
+        "perplexity": "no, second",
+        "claude": "in parallel"
+       }
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "cached": true
+   },
+   "getBody": {
+    "ok": true,
+    "report": {
+     "executiveSummary": "Synthesis.",
+     "keyFindings": [
+      {
+       "claim": "Zanzibar holds the answer.",
+       "confidence": "Medium",
+       "evidenceRefs": [
+        "r1"
+       ],
+       "modelsSupporting": [
+        "chatgpt",
+        "claude",
+        "gemini"
+       ]
+      },
+      {
+       "claim": "Archives are accessible.",
+       "confidence": "Low",
+       "evidenceRefs": [],
+       "modelsSupporting": [
+        "grok"
+       ]
+      }
+     ],
+     "disagreements": [
+      {
+       "topic": "Which archive should be consulted first for the study",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "chatgpt": "port records",
+        "claude": "spice ledgers",
+        "gemini": "colonial maps"
+       }
+      },
+      {
+       "topic": "Whether Madagascar should precede Zanzibar in the plan",
+       "whyTheyDiffer": "w",
+       "positionsByModel": {
+        "grok": "yes, first",
+        "perplexity": "no, second",
+        "claude": "in parallel"
+       }
+      }
+     ],
+     "biasAndBlindSpots": [],
+     "openQuestions": [],
+     "methodology": "Cross-model comparison."
+    },
+    "schemaVersion": 1,
+    "synthesizedBy": "gpt-5.1",
+    "cached": true
+   }
+  }
+ }
+}

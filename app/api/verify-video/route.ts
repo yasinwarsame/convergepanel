@@ -40,6 +40,7 @@ import type { ExtractedFrame, VideoMetadata } from "@/lib/video/videoPure";
 import { analyzeMetadata } from "@/lib/video/videoPure";
 import { executeVideoVerification, VIDEO_VISION_MODEL_COUNT } from "@/lib/video/videoVerificationExecution";
 import { VIDEO_VERIFICATION_DISCLAIMER } from "@/lib/legal/videoVerificationDisclaimer";
+import { storedVideoConsensusIndependence } from "@/lib/panel/storedVerificationIndependence";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -419,6 +420,8 @@ export async function POST(request: NextRequest) {
           modelEvidence: existing.modelEvidence,
           agreementPoints: existing.agreementPoints,
           disagreementPoints: existing.disagreementPoints,
+          // C-b (CB-17), presentation only: the stored rows judged by the shared gate (video rows record no provider).
+          modelIndependence: existing.modelIndependence,
           frameCount: existing.frameCount,
           warnings: existing.warnings,
           disclaimer: VIDEO_VERIFICATION_DISCLAIMER,
@@ -671,6 +674,9 @@ export async function POST(request: NextRequest) {
     })),
     agreementPoints,
     disagreementPoints,
+    // C-b (CB-17), presentation only: the executed rows judged by the shared gate (video rows record no provider, so
+    // "unverified"); the persisted agreementPoints / disagreementPoints text is unchanged.
+    modelIndependence: storedVideoConsensusIndependence(modelResults),
     aggregateSummary: {
       totalModels: VIDEO_VISION_MODEL_COUNT,
       modelsAuthenticCaptured: verdictCounts.authentic_captured,

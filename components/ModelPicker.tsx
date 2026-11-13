@@ -136,7 +136,7 @@ export default function ModelPicker({
 
   return (
     <div className="space-y-5">
-      {/* NOTE: For MVP testing, all five models (ChatGPT, Claude, Grok, Perplexity, Gemini 3 Pro)
+      {/* NOTE: For MVP testing, all five models (ChatGPT, Claude, Grok, Perplexity, Gemini)
           are fully enabled regardless of plan. Gating will be reintroduced later. */}
 
       {/* Panel Preset Select */}

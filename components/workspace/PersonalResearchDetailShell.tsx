@@ -36,6 +36,7 @@ import { AddToTeamProjectDialog } from "@/components/workspace/AddToTeamProjectD
 import type { TeamResearchSnapshotDto } from "@/lib/workspaces/teamResearchSnapshotResponse";
 import { createGenerationGuard } from "@/lib/client/authGeneration";
 import PersistedResearchResultView from "@/components/research/PersistedResearchResultView";
+import { resolveShellReportLayout, type ReportLayout } from "@/lib/research/readableReport/layoutMode";
 import {
   interpretPersistedRunReadPayload,
   type PersistedResearchPresentation,
@@ -111,7 +112,8 @@ function toPersonalViewerRole(role: PersistedResearchPresentation["viewerRole"])
   return PERSONAL_VIEWER_ROLES.has(role) ? (role as PersonalViewerRole) : null;
 }
 
-export default function PersonalResearchDetailShell({ runId }: { runId: string }) {
+export default function PersonalResearchDetailShell({ runId, reportLayout }: { runId: string; /** #290 Inc 1: absent → the rollout switch (off → classic). */ reportLayout?: ReportLayout }) {
+  const layout = resolveShellReportLayout(reportLayout);
   const { user, authReady } = useAuth();
   const router = useRouter();
   const [state, setState] = useState<DetailState>({ kind: "loading" });
@@ -449,6 +451,7 @@ export default function PersonalResearchDetailShell({ runId }: { runId: string }
             onVerifyClaim={handleVerifyClaim}
             onRunFollowUp={handleRunFollowUp}
             readOnlyExecutionTarget={PERSONAL_READ_ONLY_EXECUTION_TARGET}
+            {...(layout === "readable" ? { reportLayout: layout } : {})}
           />
         </>
       )}

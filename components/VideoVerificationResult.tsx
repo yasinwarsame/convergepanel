@@ -20,6 +20,7 @@ import { VerificationActions } from "@/components/VerificationActions";
 import { downloadTextFile, generateVerificationMemo } from "@/lib/verification/generateMemo";
 import type { VideoVerificationClientPayload } from "@/lib/verification/videoVerificationClientPayload";
 import VideoVerificationResultView, {
+  videoConsensusView,
   buildVideoVerdictClipboardText,
   supportPercent,
   VideoVerificationAuditTrailDetails,
@@ -164,6 +165,8 @@ export default function VideoVerificationResult({
       metadataFlags: data.metadataAnalysis?.flags,
       frameCount: data.frameCount,
       verificationId: data.verificationId ?? "",
+      // C-b (CB-14, PQ-2 strict): the video rows' independence by the shared gate (absent → "unverified", fail closed).
+      videoModelIndependence: videoConsensusView(data).independence,
     });
     const base = data.verificationId?.replace(/[^a-zA-Z0-9-_]+/g, "-").slice(0, 48) || String(Date.now());
     downloadTextFile(memo, `video-memo-${base}.txt`);

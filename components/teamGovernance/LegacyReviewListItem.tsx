@@ -8,6 +8,21 @@
  */
 
 import type { EnrichedLegacyTeamRunListItemV1 } from "@/lib/governance/teamReviewQueueEnrichment";
+import { CONSENSUS_WITHHELD_TEXT } from "@/lib/panel/independentVoices";
+
+/**
+ * The consensus text of a legacy team-queue row. The route (`app/api/teams/runs/route.ts`,
+ * `applyLegacyConsensusIndependence`) decides from the canonical artifact's persisted per-model rows — `runs/{runId}`
+ * for research, `verifications/{verificationId}` for claim verification — whether the stored score may be shown: a
+ * withheld score arrives as `consensusScore: null` + `consensusWithheld` and is shown as its reason, never as a number;
+ * only a score backed by ≥ 2 independent executing models is shown plainly.
+ */
+export function legacyConsensusText(item: Pick<EnrichedLegacyTeamRunListItemV1, "consensusScore" | "consensusWithheld">): string {
+  if (item.consensusWithheld) return CONSENSUS_WITHHELD_TEXT[item.consensusWithheld];
+  const score = item.consensusScore;
+  if (score == null || !Number.isFinite(score)) return "No consensus score";
+  return `Consensus ${Math.round(score)}/100`;
+}
 
 function formatCreatedAt(iso: string): string {
   const d = new Date(iso);
@@ -37,7 +52,7 @@ export default function LegacyReviewListItem({ item }: { item: EnrichedLegacyTea
           {item.policyFlags.length} policy flag{item.policyFlags.length === 1 ? "" : "s"}
         </span>
         <span aria-hidden>&middot;</span>
-        <span>{item.consensusScore != null ? `Consensus ${Math.round(item.consensusScore)}/100` : "No consensus score"}</span>
+        <span>{legacyConsensusText(item)}</span>
         <span aria-hidden>&middot;</span>
         <span>{decisionLabel}</span>
       </div>

@@ -13,7 +13,9 @@
  */
 
 import { AggregatedEnumItem, RankedEnumerationResult } from "@/lib/adaptiveSchema/types";
-import { Card, EmptyStateCard, SectionLabel, TintBadge, formatModelCoverage, SlotChip } from "./shared";
+import { Card, EmptyStateCard, SectionLabel, TintBadge, formatSlotCoverage, SlotChip } from "./shared";
+import { useQualifiedExecutionIdentity } from "./RunExecutionIdentityContext";
+import { ACROSS_PANEL_SLOTS } from "@/lib/panel/executionIdentity";
 import { ModelId } from "@/lib/types";
 
 /**
@@ -40,6 +42,7 @@ export const RANK_DISAGREEMENT_MIN_VARIANCE = 1;
 const CLOSE_CALL_MAX_COVERAGE_GAP = 0.15;
 
 function RankItemRow({ item }: { item: AggregatedEnumItem }) {
+  const slotIdentity = useQualifiedExecutionIdentity();
   const modelIds = Object.keys(item.sourceRanks) as ModelId[];
   const hasSources = !!item.sources && item.sources.length > 0;
   const hasRankDisagreement = item.rankVariance !== undefined && item.rankVariance >= RANK_DISAGREEMENT_MIN_VARIANCE;
@@ -57,11 +60,11 @@ function RankItemRow({ item }: { item: AggregatedEnumItem }) {
             </span>
           )}
           <TintBadge tone={item.coverageRatio >= 0.6 ? "accent" : "warning"}>
-            {formatModelCoverage({ covered: item.coverageCount, total: item.totalModels, mode: "covered" })}
+            {formatSlotCoverage({ covered: item.coverageCount, total: item.totalModels, mode: "covered" }, slotIdentity)}
           </TintBadge>
           {hasRankDisagreement && (
             <TintBadge tone="danger" title="Models that covered this item placed it at noticeably different ranks — see Panel Evidence for the full list.">
-              Rank disputed
+              {slotIdentity ? `Rank disputed ${ACROSS_PANEL_SLOTS}` : "Rank disputed"}
             </TintBadge>
           )}
         </div>
@@ -91,6 +94,7 @@ function RankItemRow({ item }: { item: AggregatedEnumItem }) {
 
 export default function RankedListView({ rankedEnumeration }: { rankedEnumeration: RankedEnumerationResult }) {
   const { items, lowConfidenceItems, requestedCount, actualCount, shortfallNote, rankCorrelation, totalModels } = rankedEnumeration;
+  const slotIdentity = useQualifiedExecutionIdentity();
 
   if (totalModels === 0) {
     return <EmptyStateCard state="no_models" />;
@@ -125,7 +129,7 @@ export default function RankedListView({ rankedEnumeration }: { rankedEnumeratio
           <SectionLabel>Ranked list{requestedCount ? ` (${actualCount} of ${requestedCount} requested)` : ""}</SectionLabel>
           {rankCorrelation !== null && (
             <span className="text-xs text-slate-500" title="Mean Spearman rank correlation across every model pair with at least 2 commonly-covered items">
-              Rank agreement across models: {rankCorrelation.toFixed(2)}
+              {slotIdentity ? `Rank agreement ${ACROSS_PANEL_SLOTS}: ${rankCorrelation.toFixed(2)}` : <>Rank agreement across models: {rankCorrelation.toFixed(2)}</>}
             </span>
           )}
         </div>

@@ -43,15 +43,31 @@ Two paths accepted in every API route:
 1. Session cookie `__session` → `verifySessionCookie()` from `lib/firebase/auth-helpers.ts`
 2. `Authorization: Bearer <token>` fallback → `verifyIdToken()` from `lib/firebase/auth.ts`
 
-Middleware (`middleware.ts`) only checks cookie *presence* to gate `/admin/*` — real auth (token validity + custom claims) happens inside each API route. Administrator authority has THREE human tiers plus ONE bootstrap mechanism — see
+Middleware (`middleware.ts`) only checks cookie *presence* to gate `/admin/*` — real auth (token validity + custom claims) happens inside each API route. Administrator authority has THREE human tiers; the former secret bootstrap mechanism is retired — see
 `docs/operations/admin-authority-tiers.md`. Human tiers: `ADMIN_PORTAL` (verified
 `ADMIN_EMAILS` member or the `admin` claim), `SYSTEM_ADMIN` (the `admin` custom claim
 ONLY — credentials, claim minting, purge, destructive user/billing mutation), and
 `GOVERNANCE_ADMIN` (verified `GOVERNANCE_ADMIN_EMAILS` member only). `ADMIN_EMAILS`
 does NOT grant SYSTEM_ADMIN or governance authority.
-Separately, `BOOTSTRAP_SECRET` (`ADMIN_SECRET` on `/api/admin/set-admin`) can mint the
-first `admin` claim. It authenticates no identity at all — it is a deployment-time
-bootstrap, not a role, and it fails closed when the variable is empty or unset.
+The former secret bootstrap (`BOOTSTRAP_SECRET`: `ADMIN_SECRET` on `/api/admin/set-admin`)
+was retired in S1: the route is deleted and no source reads either variable. Do not re-add it.
+An `admin` claim change is an owner action, never an agent action: the owner runs the
+SYSTEM_ADMIN claim operator tool `scripts/admin/set-system-admin-claim.ts`
+(`npm run admin:set-system-admin-claim`, runbook `docs/operations/system-admin-claim-script.md`)
+LOCALLY, from a local checkout of `main` (record `git -C <checkout> rev-parse HEAD`; `--execute`
+refuses uncommitted changes in `scripts/admin` or `lib/admin`), and never from Vercel or any
+deployment. The tool has no defaults: explicit `--confirm-project=<projectId>` and
+`--target-uid=<uid>`; dry run first (the default), then
+`--execute --confirm-claim=<exact string the dry run printed>`. Keep the tool's audit rows and its
+`--result-file` (a NEW `*.json` outside every git checkout); exit 3 or 4 means incomplete or
+review required, never a no-op. No Production grant or revoke without its own separate
+authorization. Revocation is requested, not observed (`effectiveRevocation: "not_observable"`),
+and S2 is not live: SYSTEM_ADMIN bearer paths do not check revocation, so an already-issued ID
+token keeps `admin: true` for up to about an hour. Verify read-only with
+`scripts/check-admin-claims.js` / `scripts/verify-admin-claims.js`. The legacy minting scripts
+(`scripts/setAdmin.ts`, `set-admin-simple.js`, `set-admin-by-uid.js`, `set-admin-claim.js`)
+were removed and are not part of that path; never restore them. Before #295 merged, an S1
+interim path pinned the tool to a branch checkout at commit `f6039ea`; that is history now.
 A **disabled** Firebase Auth account obtains no email-derived privilege in any tier.
 ADMIN_PORTAL is a read/monitoring tier: run DELETE and PATCH, `/api/admin/sync-subscription`
 and `/api/admin/test-webhook` all require SYSTEM_ADMIN.

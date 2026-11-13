@@ -41,13 +41,31 @@
  *      record when the source is adaptive) and enforce the repository's
  *      total-document budget. Over budget → `snapshot_too_large`, nothing
  *      written, nothing truncated.
+ *   6b. Order 41 D (#314) — the source's saved display record
+ *      `runs/{sourceRunId}/adaptiveDisplayResults/v1` (the validated result a
+ *      report used, e.g. an adopted corrective retry), read through the SAME
+ *      transaction, only for an adaptive source, only after every gate above
+ *      passed and the lock was read as absent. It is verified against the
+ *      SOURCE run (`rebindAdaptiveDisplayResults` → `readAdoptedDisplayResults`
+ *      with the source id, schema and saved rows); only verified slots are
+ *      copied, verbatim, re-bound to the NEW run id, size re-checked for the
+ *      new document (950,000-byte ceiling) and read back against the new
+ *      run. Absent, invalid, foreign or oversized → the snapshot is created
+ *      WITHOUT a display document (#312's presentation), never an error.
  *   7. Writes, all-or-nothing: `tx.create(run)`, `tx.create(lock)`,
- *      `tx.set(workspaceMembershipEvents/{auto})` — SNAPSHOT COMMITTED IFF
- *      LOCK COMMITTED IFF AUDIT EVENT COMMITTED.
+ *      `tx.set(workspaceMembershipEvents/{auto})`, and the re-bound display
+ *      record `tx.create(runs/{newRunId}/adaptiveDisplayResults/v1)` when 6b
+ *      produced one — SNAPSHOT COMMITTED IFF LOCK COMMITTED IFF AUDIT EVENT
+ *      COMMITTED IFF (when copied) DISPLAY RECORD COMMITTED. If any one write
+ *      fails (the display create included), nothing commits and the result is
+ *      `transaction_failed`; the lock is absent, so the caller's retry creates
+ *      the complete snapshot. There is never a snapshot that silently lost a
+ *      display record it was entitled to.
  *
  * NEVER COPIED: `governanceRecord`, `governanceStatus`, `teamGovernance`,
  * `adaptiveExportCounter`, and every subcollection (review assignment /
- * panel / votes / history, governance events, exports). A Personal policy
+ * panel / votes / history, governance events, exports) except the one
+ * verified, re-bound display record of step 6b. A Personal policy
  * verdict does not cross the Workspace boundary. For an adaptive source a
  * FRESH `governanceRecord` (`humanReview.status = "unreviewed"`, the NEW
  * run id) is built by the pure `buildAdaptiveGovernanceRecord()` and
@@ -77,6 +95,12 @@ import { buildAdaptiveGovernanceRecord } from "@/lib/adaptiveSchema/governanceRe
 import type { PersistedAdaptiveOutputV1 } from "@/lib/adaptiveSchema/persistedOutput";
 import { estimateDocumentSize, MAX_TOTAL_DOC_SIZE } from "@/lib/panel/sanitizeText";
 import { readPersistedQuestionContext } from "@/lib/questionContext";
+import { parsePersistedAdaptiveOutput } from "@/lib/adaptiveSchema/persistedOutput";
+import { rebindAdaptiveDisplayResults } from "@/lib/adaptiveSchema/adoptedDisplayResults";
+import { adaptiveDisplayResultsRef } from "@/lib/firestore/adaptiveDisplayResults";
+import { runDocumentToPublicResults } from "@/lib/user/runDocumentToPublicResults";
+import { publicizePanelResults } from "@/lib/panel/publicize";
+import type { RunDocument } from "@/lib/panel/schemas";
 
 export type CreateTeamRunSnapshotResult =
   | { status: "created"; runId: string; workspaceId: string; projectId: string }
@@ -119,6 +143,16 @@ function hasOwn(obj: Record<string, unknown>, key: string): boolean {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * The saved panel rows a reader verifies the display record against — the same derivation as buildRunReadPayload
+ * (lib/runs/runReadPayload.ts): the rehydrated `runDocument` rows, or the legacy `results` array when there are none.
+ */
+function savedPanelRows(data: Record<string, unknown>): ReadonlyArray<{ modelId?: unknown; status?: unknown }> {
+  const rows = runDocumentToPublicResults(data.runDocument as RunDocument | undefined);
+  if (rows.length === 0 && Array.isArray(data.results)) return publicizePanelResults(data.results as unknown[]);
+  return rows;
 }
 
 type SnapshotBuildResult = { ok: true; payload: Record<string, unknown> } | { ok: false };
@@ -378,6 +412,33 @@ export async function createTeamRunSnapshotFromPersonal(args: {
         return { kind: "snapshot_too_large" };
       }
 
+      // 6b. Order 41 D (#314) — the source's display record, verified and re-bound (see the header). Still the read
+      // phase; read only for an adaptive source the reader would parse.
+      let displayCopy: { ref: FirebaseFirestore.DocumentReference; record: Record<string, unknown> } | null = null;
+      const parsedAdaptive = parsePersistedAdaptiveOutput(built.payload.adaptiveOutput);
+      if (parsedAdaptive.ok) {
+        const sourceDisplaySnap = await tx.get(adaptiveDisplayResultsRef(adminDb!, args.sourceRunId));
+        if (sourceDisplaySnap.exists) {
+          const rebound = rebindAdaptiveDisplayResults(sourceDisplaySnap.data(), {
+            sourceRunId: args.sourceRunId,
+            targetRunId: newRunId,
+            schemaId: parsedAdaptive.output.schemaId,
+            sourceRows: savedPanelRows(source),
+            targetRows: savedPanelRows(built.payload),
+          });
+          if (rebound.ok) {
+            displayCopy = { ref: adaptiveDisplayResultsRef(adminDb!, newRunId), record: rebound.record as unknown as Record<string, unknown> };
+          } else {
+            // Not an error: the snapshot shows the saved first answers (#312), exactly as a run without the record.
+            logger.warn("[firestore/teamRunSnapshots] Source display record not copied; the snapshot shows the saved first answers", {
+              workspaceId: args.workspaceId,
+              projectId: args.projectId,
+              reason: rebound.reason,
+            });
+          }
+        }
+      }
+
       // 7. Writes — all buffered in this SAME transaction attempt.
       tx.create(newRunRef, built.payload);
       tx.create(lockRef, {
@@ -389,6 +450,7 @@ export async function createTeamRunSnapshotFromPersonal(args: {
         createdBy: args.uid,
         createdAt: now,
       });
+      if (displayCopy) tx.create(displayCopy.ref, displayCopy.record);
       const eventRef = adminDb!.collection("workspaceMembershipEvents").doc();
       tx.set(
         eventRef,

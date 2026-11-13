@@ -20,9 +20,36 @@ import { parsedModelVerificationFromObject, type ModelVerdict } from "@/lib/veri
 import { cleanJsonResponse, repairTruncatedJson } from "@/lib/verification/cleanJsonResponse";
 import type { StoredVerificationModelSummary } from "@/lib/firestore/verifications";
 import { logger } from "@/lib/logger";
+import { canonicalProvider } from "@/lib/panel/providerRegistry";
+import { placeholderClass } from "@/lib/panel/executionIdentity";
 
 function isConnectorSuccess(r: ModelResult): boolean {
   return r.status === "ok" || r.status === "substituted";
+}
+
+/** `{ substituted: true, provider? }` for a substituted result (provider only when recorded); `{}` otherwise. */
+function substitutionAttribution(r: ModelResult): { substituted?: true; provider?: string } {
+  if (r.status !== "substituted") return {};
+  const provider = typeof r.provider === "string" && r.provider.trim().length > 0 ? r.provider.trim() : undefined;
+  return provider ? { substituted: true, provider } : { substituted: true };
+}
+
+/**
+ * Order 33 (owner ruling A): `{ provider }` for a SUCCESSFUL own-provider answer — the connector returned `status: "ok"`
+ * with the provider the claim dispatch stamped from the connector function it invoked
+ * (runClaimVerificationPanel), canonical (lib/panel/providerRegistry.ts), and text that is not the exact stored
+ * placeholder literal (D-5 INVALID_MOCK records no provider; since F-2, Order 34, a genuine answer that merely mentions a
+ * "mock response" — the VALIDITY_UNKNOWN text oracle — is a model response). `{}` otherwise: a failed / timed-out / refused /
+ * rate-limited / parse_error / placeholder / unstamped row records no provider, and its identity stays unverified.
+ */
+function ownProviderAttribution(r: ModelResult): { provider?: string } {
+  if (r.status !== "ok") return {};
+  const provider = canonicalProvider(r.provider);
+  if (!provider) return {};
+  // F-2 (Order 34): only the exact placeholder literal is excluded. A genuine answer that discusses a "mock response"
+  // is a model response (VALIDITY_UNKNOWN is a text oracle for historical rows, not an authority on a current write).
+  if (placeholderClass({ modelId: r.modelId, status: "ok", rawText: r.rawText ?? "" }) === "INVALID_MOCK") return {};
+  return { provider };
 }
 
 export function buildClaimModelEvidence(modelResults: ModelResult[]): StoredVerificationModelSummary[] {
@@ -87,6 +114,11 @@ export function buildClaimModelEvidence(modelResults: ModelResult[]): StoredVeri
       correctParts: d.correctParts,
       incorrectParts: d.incorrectParts,
       unverifiableParts: d.unverifiableParts,
+      // Execution attribution: a connector-reported substitute is recorded, never stored as the slot's own answer
+      // (lib/panel/storedVerificationIndependence.ts); an own-provider answer records the provider the dispatch
+      // stamped (Order 33). The requested slot (`modelId`) and the outcome (`status`) stay separate fields.
+      ...substitutionAttribution(r),
+      ...ownProviderAttribution(r),
     };
   });
 }

@@ -87,12 +87,29 @@ export const ADAPTIVE_SYNTHESIS_SECTION_IDS = [
   "disclaimer",
   "export-actions",
 ] as const;
-import { Card, SectionLabel, ProbabilityBar, StakesBadge, TintBadge, getModelLabel, SlotName, SlotChip } from "./shared";
+import { Card, SectionLabel, ProbabilityBar, StakesBadge, TintBadge, SlotName, SlotChip, useSlotVoiceName } from "./shared";
 import { classifyClaimSeverity } from "@/lib/verificationGate/claimSeverity";
 import { VerificationActions } from "@/components/VerificationActions";
 import { generateVerificationMemo, downloadTextFile } from "@/lib/verification/generateMemo";
 import { copyToClipboardWithFallback } from "@/lib/ui/copyFormats";
 import { useRunModelProvenance } from "./RunModelProvenanceContext";
+import {
+  COUNTED_BY_PANEL_SLOT,
+  independenceQualification,
+  qualifiedRowHeading,
+  storedSynthesisRunIndependence,
+  qualifiedSideVoices,
+  rowIndependence,
+  slotAgreementLabel,
+  topIndependencePresentation,
+  uniformityBadge,
+  TOO_FEW_ANSWERS_NAMES_SUFFIX,
+  type AdaptiveTopIndependence,
+} from "@/lib/adaptiveSchema/verdictIndependence";
+import { useRunIndependence, useStoredSynthesisRunIndependence } from "./useRunIndependence";
+import { useQualifiedExecutionIdentity, useRunExecutionIdentity } from "./RunExecutionIdentityContext";
+import { modelWrittenBlockLabel, trustFiguresNote } from "@/lib/panel/executionIdentity";
+import { executingModelKey } from "@/lib/panel/independentVoices";
 import {
   buildAdaptiveSynthesisMarkdown,
   buildAdaptiveMemoInput,
@@ -123,12 +140,42 @@ const GATE_ACCENT: Record<GateTone, string> = {
 };
 
 /**
- * The gate banner: worded by gatePresentation.gateBannerText (historical reports keep their wording, D7). With a report
- * it shows the report's stored gate — the one the Unified Answer and exports show (F4, pageGateValue).
+ * #290 Increment 1 — readable layout only: the page's one gate presentation (lib/research/readableReport/trustSignals
+ * readableGatePresentation, computed once per page by AdaptivePanelResponse's readable branch). Every readable gate
+ * display — this banner (words and tone), the Panel Verdict badge and accent, the Model Responses header badge — reads
+ * it, so one page never shows "Unavailable" beside a raw "pass" or a pass / fail colour. Classic call sites never pass
+ * it: their banner, badge and accent are gatePresentation's, byte for byte.
  */
-export function GateBanner({ report, gate }: { report: AdaptiveSynthesisReport | null; gate: unknown }) {
+export interface ReadableGateDisplay {
+  /** For tests and styling hooks only (data-readable-gate); never shown on its own. */
+  readonly status: string;
+  readonly tone: GateTone;
+  readonly banner: string;
+  readonly bannerNote: string | null;
+  readonly badge: string;
+  readonly chip: string;
+}
+
+/**
+ * The gate banner: worded by gatePresentation.gateBannerText (historical reports keep their wording, D7). With a report
+ * it shows the report's stored gate — the one the Unified Answer and exports show (F4, pageGateValue). readable: readable
+ * layout only (see ReadableGateDisplay).
+ */
+export function GateBanner({ report, gate, readable }: { report: AdaptiveSynthesisReport | null; gate: unknown; readable?: ReadableGateDisplay }) {
+  // A historical banner ("Verified — panel converges") asserts panel agreement: in a run whose slots are not independent
+  // executing models (or whose execution is not recorded) the gate is stated as the gate it is. Called before the
+  // readable early return (integration: rules of hooks — main's readable branch and the connector's hook met here).
+  const runQ = useRunIndependence(report);
+  if (readable) {
+    return (
+      <div data-readable-gate={readable.status} className={`rounded-xl border px-4 py-3 text-sm font-medium ${GATE_BANNER_STYLES[readable.tone]}`}>
+        {readable.banner}
+        {readable.bannerNote && <span className="mt-1 block font-normal">{readable.bannerNote}</span>}
+      </div>
+    );
+  }
   const shown = pageGateValue(report, gate);
-  return <div className={`rounded-xl border px-4 py-3 text-sm font-medium ${GATE_BANNER_STYLES[gateTone(shown)]}`}>{gateBannerText(report, shown)}</div>;
+  return <div className={`rounded-xl border px-4 py-3 text-sm font-medium ${GATE_BANNER_STYLES[gateTone(shown)]}`}>{gateBannerText(report, shown, { slotsNotIndependent: !!runQ })}</div>;
 }
 
 function agreementColorClass(score: number): string {
@@ -314,6 +361,10 @@ export function TrustSummaryTable({ trustSummary }: { trustSummary: AdaptiveTrus
   // Order 5 (Contract P, F-2): on a marked report the computed trust inputs are labelled for what they count — every
   // scored row, value comparisons included — never as claim positions. The values are the stored ones, unchanged.
   const marked = !!usePositionPresentation();
+  // A12 (C-a): in a run whose slots are not verified independent executing models, one computed note says what the
+  // figures are per (values unchanged). A24 (C-a, Option C): no slot is excluded from agreement by executing model
+  // (L01), so every health cell shows the stored parse health; a failed repeated-substitute slot reads "failed".
+  const slotIdentity = useQualifiedExecutionIdentity();
   if (trustSummary.perModel.length === 0) return null;
   return (
     <Card>
@@ -325,6 +376,11 @@ export function TrustSummaryTable({ trustSummary }: { trustSummary: AdaptiveTrus
       </div>
       <p className="text-xs text-slate-500 mb-2">How well the models behaved — citations, consistency, contradictions — not how sure the panel is about the answer.</p>
       {marked && <p data-source="computed" className="text-xs text-slate-500 mb-2">{trustInputsNoteFor(trustSummary)}</p>}
+      {slotIdentity && (
+        <p data-source="computed" data-testid="trust-figures-note" className="text-xs text-slate-500 mb-2">
+          {trustFiguresNote(slotIdentity)}
+        </p>
+      )}
       <div className="overflow-x-auto">
         <table className="w-full text-sm border-collapse">
           <thead>
@@ -372,6 +428,15 @@ export function TrustSummaryTable({ trustSummary }: { trustSummary: AdaptiveTrus
         </table>
       </div>
     </Card>
+  );
+}
+
+/** A26 / O3 (a): the one label above a model-written block group of a run that is not verified independent. */
+function ModelWrittenGroupLabel({ text }: { text: string }) {
+  return (
+    <p data-source="computed" data-testid="model-written-label" className="mb-1 text-xs text-amber-800">
+      {text}
+    </p>
   );
 }
 
@@ -564,7 +629,12 @@ function MarkedPositionMap({ claims, roster, provenance }: { claims: AlignedClai
 /** Exported — see UnifiedAnswerCard's export doc above. */
 export function AgreementDisagreementMap({ claims, modelsUsed }: { claims: AlignedClaim[]; modelsUsed: ModelId[] }) {
   const position = usePositionPresentation();
+  const runProvenance = useRunModelProvenance();
   if (position) return <MarkedPositionMap claims={claims} roster={position.roster} provenance={position.provenance} />;
+  // c16 (MINOR-1): in a run whose slots are not independent executing models every count here is of panel slots.
+  // Order 30 round 2: these rows are a stored synthesis's — the stored-synthesis run rule (no successful response, or fewer
+  // than two answering models, is never a count of agreeing models).
+  const slotsNotIndependent = !!storedSynthesisRunIndependence(runProvenance);
   // Coverage-1 claims (a single model's own claim, never corroborated or
   // disputed by anyone else) aren't agreement data — they're rendered
   // separately by SingleModelInsightsList below this section.
@@ -583,10 +653,21 @@ export function AgreementDisagreementMap({ claims, modelsUsed }: { claims: Align
       <div className="space-y-3">
         {sorted.map((claim) => {
           const { agreeModels, disputeModels, silentModels } = bucketModelsByStance(claim, modelsUsed);
+          // A slot answered by the same substitute model as a slot already shown agreeing / disputing is that model
+          // again, not a silent second model: its "Silent" chip is not shown (counts are unchanged).
+          const executingKey = (m: string) => {
+            const facts = runProvenance?.find((f) => f && f.modelId === m);
+            return executingModelKey({ modelId: m, status: facts?.substituted === true ? "substituted" : "ok", provider: facts?.provider });
+          };
+          const voiced = new Set([...agreeModels, ...disputeModels].map(executingKey));
+          const silentChips = silentModels.filter((m) => !voiced.has(executingKey(m)));
           const isSplit = claim.status === "split";
           const isLimitedCoverage = claim.status === "limited_coverage";
           const contestedNote = describeContested(claim);
           const severity = classifyClaimSeverity(claim.claimText, undefined, agreeModels.length + disputeModels.length, isSplit);
+          // A row whose positioned slots are not independent executing models: counted as panel slots, with its
+          // independent executing models (verdictIndependence.ts). Every other row: as before.
+          const ri = rowIndependence(claim, runProvenance);
           return (
             <div
               key={claim.id}
@@ -606,14 +687,14 @@ export function AgreementDisagreementMap({ claims, modelsUsed }: { claims: Align
                   />
                 </div>
                 <span className="shrink-0 text-xs text-slate-500 whitespace-nowrap">
-                  {agreementLabel(agreeModels.length, disputeModels.length, silentModels.length, modelsUsed.length)}
+                  {ri || slotsNotIndependent ? slotAgreementLabel(agreeModels.length, disputeModels.length, silentModels.length, modelsUsed.length, ri) : agreementLabel(agreeModels.length, disputeModels.length, silentModels.length, modelsUsed.length)}
                   {claim.disagreementType ? ` · ${claim.disagreementType.replace(/_/g, " ")}` : ""}
                   {isLimitedCoverage ? " · limited coverage" : ""}
                 </span>
               </div>
               {contestedNote && (
                 <p className="text-xs text-amber-700" data-testid="contested-note">
-                  Contested: {contestedNote}
+                  Contested: {contestedNote}{ri || slotsNotIndependent ? ` ${COUNTED_BY_PANEL_SLOT}` : ""}
                 </p>
               )}
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
@@ -633,10 +714,10 @@ export function AgreementDisagreementMap({ claims, modelsUsed }: { claims: Align
                     ))}
                   </div>
                 )}
-                {silentModels.length > 0 && (
+                {silentChips.length > 0 && (
                   <div className="flex items-center gap-1 flex-wrap">
                     <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400">Silent</span>
-                    {silentModels.map((m) => (
+                    {silentChips.map((m) => (
                       <SlotChip key={`silent-${m}`} modelId={m} size="xs" className="opacity-50" />
                     ))}
                   </div>
@@ -875,6 +956,9 @@ function CoverageGapCard({
 /** T3: a single compact strip of inline stats — never cards, per spec. */
 function DiagnosticsStrip({ diagnostics }: { diagnostics: AdaptiveSynthesisReport["diagnostics"] }) {
   const marked = !!usePositionPresentation();
+  // N2: uniform responses across slots one model answered are not agreement between independent models.
+  const runQ = useStoredSynthesisRunIndependence();
+  const uniformity = runQ ? uniformityBadge(runQ) : null;
   const citationPct = diagnostics.totalClaimCount > 0 ? diagnostics.citedClaimCount / diagnostics.totalClaimCount : null;
   const citationDanger = citationPct !== null && citationPct < CITATION_COVERAGE_DANGER_THRESHOLD;
 
@@ -897,14 +981,18 @@ function DiagnosticsStrip({ diagnostics }: { diagnostics: AdaptiveSynthesisRepor
         </TintBadge>
       )}
       {evidenceParts.length > 0 && <TintBadge tone="accent">Evidence mix: {evidenceParts.join(", ")}</TintBadge>}
-      {diagnostics.homogeneityFlag && (
+      {diagnostics.homogeneityFlag && (uniformity ? (
+        <TintBadge tone="accent" title={uniformity.title}>
+          {uniformity.label}
+        </TintBadge>
+      ) : (
         <TintBadge
           tone="accent"
           title="Models share training data — strong consensus is not independent verification."
         >
           Unusually uniform agreement
         </TintBadge>
-      )}
+      ))}
     </div>
   );
 }
@@ -981,19 +1069,27 @@ export function BiasBlindSpotsSection({
 }
 
 /** Exported — see UnifiedAnswerCard's export doc above. */
-export function PanelVerdictCard({ report, gate }: { report: AdaptiveSynthesisReport; gate: AdaptiveGateResult }) {
+export function PanelVerdictCard({ report, gate, alignedClaims, readable }: { report: AdaptiveSynthesisReport; gate: AdaptiveGateResult; alignedClaims?: AlignedClaim[]; readable?: ReadableGateDisplay }) {
   const v = report.verdictCard;
   // Order 5 (Contract P): a marked report's headings come from its rows (a value comparison is never "top consensus").
   const positions = positionView(report)?.verdict ?? null;
+  // Historical reports counted each slot a substitute model answered as its own supporter: a top claim whose supporting
+  // slots were answered by one substitute model, or whose execution is not recorded, is never an unqualified "Top
+  // consensus — agreed by N" (verdictIndependence.ts; stored values unchanged). Independent supporters: as before.
+  // The card's result line then states the executing models itself (verdictIndependence.ts, the report's qualified view).
+  const runProvenance = useRunModelProvenance();
+  const topIndependence = topIndependencePresentation(report, positions, alignedClaims ?? null, runProvenance);
   // R4-1: claim text is model-written; cards that carry the computed status show it beside the quoted claim.
   const top = presentVerdictClaim(v.topConsensus, v.topConsensusAgreement, positions?.topLabel);
   const split = v.keyDisagreement ? presentVerdictClaim(v.keyDisagreement, v.keyDisagreementAgreement, positions?.keyLabel) : null;
   const caveat = presentVerdictCaveat(v);
   // F4: the card shows the report's stored gate, as the Unified Answer does.
   const shownGate = pageGateValue(report, gate.status);
+  // #290 Inc 1: readable layout only — the page's one gate presentation (ReadableGateDisplay); classic: unchanged.
+  const tone = readable ? readable.tone : gateTone(shownGate);
   return (
     <div className="relative rounded-xl border border-slate-200 bg-white p-6 overflow-hidden">
-      <div className={`absolute left-0 top-0 h-1.5 w-full ${GATE_ACCENT[gateTone(shownGate)]}`} />
+      <div className={`absolute left-0 top-0 h-1.5 w-full ${GATE_ACCENT[tone]}`} />
 
       <div className="rounded-lg bg-sky-50 border border-sky-200 px-4 py-3 text-xs text-sky-800 mb-4">
         ConvergePanel is an AI-assisted research tool, not a forensic or fact-checking authority. Synthesis informs
@@ -1002,8 +1098,8 @@ export function PanelVerdictCard({ report, gate }: { report: AdaptiveSynthesisRe
 
       <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
         <h3 className="text-lg font-semibold text-slate-900">Panel Verdict</h3>
-        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${GATE_BADGE_STYLES[gateTone(shownGate)]}`}>
-          {gateBadgeText(report, shownGate)}
+        <span {...(readable ? { "data-readable-gate": readable.status } : {})} className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${GATE_BADGE_STYLES[tone]}`}>
+          {readable ? readable.badge : gateBadgeText(report, shownGate)}
         </span>
       </div>
 
@@ -1011,11 +1107,17 @@ export function PanelVerdictCard({ report, gate }: { report: AdaptiveSynthesisRe
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
         <div className="rounded-lg bg-slate-50 border border-slate-200 p-3">
-          <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">{positions ? positions.topHeading : "Top consensus"}</span>
+          <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">{topIndependence ? topIndependence.heading : positions ? positions.topHeading : "Top consensus"}</span>
           <p className="text-sm text-slate-800 mt-1">
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 mr-1.5" />
             {top.result ? <span data-source="model_claim">{top.claim}</span> : top.claim}
-            {v.consensusModelCount > 0 &&
+            {topIndependence ? (
+              topIndependence.statement && (
+                <span data-source="computed" data-testid="verdict-top-independence" className="block text-xs text-slate-600 mt-0.5">
+                  {topIndependence.statement}
+                </span>
+              )
+            ) : v.consensusModelCount > 0 &&
               (positions ? (
                 <span className="text-slate-500"> — supported or partially supported by {v.consensusModelCount} panel slot{v.consensusModelCount === 1 ? "" : "s"}</span>
               ) : (
@@ -1079,6 +1181,9 @@ export function PanelVerdictCard({ report, gate }: { report: AdaptiveSynthesisRe
  */
 function LoadBearingClaim({ claim }: { claim: AlignedClaim }) {
   const position = usePositionPresentation();
+  // Executing-model names: a substituted slot is never named as its requested model.
+  const voiceName = useSlotVoiceName();
+  const runProvenance = useRunModelProvenance();
   if (position) {
     // Order 5 (Contract P): the row's own computed statement; supporting / disputing slots for a claim row only.
     const view = rowView(claim, position.roster, position.provenance);
@@ -1096,17 +1201,23 @@ function LoadBearingClaim({ claim }: { claim: AlignedClaim }) {
     );
   }
   const named = (stances: string[]) =>
-    claim.cells.filter((c): c is AlignedClaimCell => !!c && stances.includes(c.stance)).map((c) => getModelLabel(c.modelId));
-  const supports = named(["agrees", "partial"]);
-  const disputes = named(["disputes"]);
-  const who = [supports.length > 0 ? `supported by ${supports.join(", ")}` : "", disputes.length > 0 ? `disputed by ${disputes.join(", ")}` : ""].filter(Boolean);
+    claim.cells.filter((c): c is AlignedClaimCell => !!c && stances.includes(c.stance)).map((c) => voiceName(c.modelId));
+  // A consensus / majority row whose supporting slots are not independent executing models: its qualified status and
+  // each executing model once (verdictIndependence.ts). Every other row: as before.
+  const ri = rowIndependence(claim, runProvenance);
+  const supports = (ri && qualifiedSideVoices(ri, "support")) || named(["agrees", "partial"]);
+  const disputes = (ri && qualifiedSideVoices(ri, "dispute")) || named(["disputes"]);
+  // Order 31 R-1: slots named beside a no-count judgement are panel slots, never a count of agreeing models.
+  const slotsNote = (side: AdaptiveTopIndependence | undefined) =>
+    side?.kind === "unverified" && side.basis === "too_few_answers" ? ` ${TOO_FEW_ANSWERS_NAMES_SUFFIX}` : side?.kind === "unverified" && side.basis === "failed_supporters" ? " (panel slots; includes slots with no successful model response)" : "";
+  const who = [supports.length > 0 ? `supported by ${supports.join(", ")}${slotsNote(ri?.support)}` : "", disputes.length > 0 ? `disputed by ${disputes.join(", ")}${slotsNote(ri?.dispute)}` : ""].filter(Boolean);
   return (
     <>
       <span data-source="model_claim">
         {CLAIM_LABEL}: {quoteClaim(claim.claimText)}
       </span>
       <span data-source="computed" className="block text-xs text-slate-500 mt-0.5">
-        {PANEL_RESULT_LABEL}: <span className="font-medium">{consensusStatusLabel(claim.status)}</span>
+        {PANEL_RESULT_LABEL}: <span className="font-medium">{ri ? qualifiedRowHeading(claim.status, ri, consensusStatusLabel(claim.status)) : consensusStatusLabel(claim.status)}</span>
         {who.length > 0 ? ` (${who.join("; ")})` : ""}
       </span>
     </>
@@ -1130,6 +1241,7 @@ export default function AdaptiveSynthesisReportView({
   modelsUsed,
   runId,
   onRunFollowUp,
+  readableGate,
 }: {
   report: AdaptiveSynthesisReport;
   gate: AdaptiveGateResult;
@@ -1140,10 +1252,13 @@ export default function AdaptiveSynthesisReportView({
   runId?: string | null;
   /** Bias & Blind Spots Tier 2 cards' "Run follow-up" action — pre-fills the question box, never auto-runs. */
   onRunFollowUp?: (question: string) => void;
+  /** #290 Inc 1: readable layout only — see ReadableGateDisplay. Absent (every classic caller): unchanged. */
+  readableGate?: ReadableGateDisplay;
 }) {
   const rows = alignedClaims || [];
   const modelProvenance = useRunModelProvenance();
   const position = usePositionPresentation();
+  const voiceName = useSlotVoiceName();
   // Order 5 (Contract P): normally already the position-safe view (AdaptivePanelResponse); a marked stored report
   // reaching this view directly is presented the same way. Unmarked reports are unchanged.
   const report = useMemo(
@@ -1151,42 +1266,52 @@ export default function AdaptiveSynthesisReportView({
     [storedReport, alignedClaims, position, modelsUsed, modelProvenance]
   );
   const [generatedPost, setGeneratedPost] = useState<{ type: "linkedin" | "x"; text: string } | null>(null);
+  // A26 (C-a, owner ruling O3 (a)): a legacy (pre-presentation) report's model-written block groups each carry one label
+  // when the run is FC / PC / UV / MOCK; an independent run renders exactly as before.
+  const executionIdentity = useRunExecutionIdentity();
+  const blockLabel = executionIdentity?.qualified && !report.presentation ? modelWrittenBlockLabel(executionIdentity) : null;
+  const groupLabel = blockLabel ? <ModelWrittenGroupLabel text={blockLabel} /> : null;
   const agreeItems = presentAgreeItems(report);
   // Order 5 (Contract P, F-1): a marked report's entries in groups — claims, value comparisons, rows not joined.
   const agreeGroups = presentAgreeGroups(report);
 
+  // #290 Inc 1: readable layout only — the generated text states the page's one gate presentation (shareBuilders
+  // ReadableShareGate), so a report shown as "Unavailable" never yields "(gate: pass)". Classic (no readableGate): the
+  // builders receive nothing extra and their output is unchanged.
   const handleCopy = useCallback(async () => {
-    const markdown = buildAdaptiveSynthesisMarkdown(question, report);
+    const markdown = buildAdaptiveSynthesisMarkdown(question, report, undefined, modelProvenance, executionIdentity, readableGate);
     const ok = await copyToClipboardWithFallback(markdown);
     if (!ok) throw new Error("copy failed");
-  }, [question, report]);
+  }, [question, report, modelProvenance, executionIdentity, readableGate]);
 
   const handleExportMemo = useCallback(() => {
-    const memoInput = buildAdaptiveMemoInput(question, report, modelsUsed, runId || "", modelProvenance);
+    const memoInput = buildAdaptiveMemoInput(question, report, modelsUsed, runId || "", modelProvenance, undefined, readableGate);
     const memo = generateVerificationMemo(memoInput);
     downloadTextFile(memo, `research-memo-${runId || "adaptive"}.txt`);
-  }, [question, report, modelsUsed, runId, modelProvenance]);
+  }, [question, report, modelsUsed, runId, modelProvenance, readableGate]);
 
   const handleGenerateLinkedIn = useCallback(() => {
-    setGeneratedPost({ type: "linkedin", text: buildAdaptiveLinkedInPost(question, report) });
-  }, [question, report]);
+    setGeneratedPost({ type: "linkedin", text: buildAdaptiveLinkedInPost(question, report, undefined, executionIdentity, readableGate) });
+  }, [question, report, executionIdentity, readableGate]);
 
   const handleGenerateX = useCallback(() => {
-    setGeneratedPost({ type: "x", text: buildAdaptiveXPost(question, report) });
-  }, [question, report]);
+    setGeneratedPost({ type: "x", text: buildAdaptiveXPost(question, report, undefined, executionIdentity, readableGate) });
+  }, [question, report, executionIdentity, readableGate]);
 
   return (
     <PositionPresentationBoundary report={report} roster={position?.roster ?? modelsUsed} provenance={position?.provenance ?? modelProvenance}>
     <div className="space-y-4">
       <div data-section="gate-banner">
-        <GateBanner report={report} gate={gate.status} />
+        <GateBanner report={report} gate={gate.status} readable={readableGate} />
       </div>
 
       <div data-section="unified-answer">
+        {report.unifiedAnswer && groupLabel}
         <UnifiedAnswerCard answer={report.unifiedAnswer} report={report} />
       </div>
 
       <div data-section="executive-summary">
+        {report.executiveSummary && groupLabel}
         <ExecutiveSummaryCard report={report} />
       </div>
 
@@ -1208,6 +1333,7 @@ export default function AdaptiveSynthesisReportView({
             </div>
           ) : (
             <>
+              {report.certaintyAssessment && groupLabel}
               <p className="mt-2 text-sm text-slate-600">{report.certaintyAssessment}</p>
               {/* D8: an unrecognized stored gate is stated after the stored line; a known gate renders exactly as before. */}
               <AnswerLeadBlocks blocks={presentCertainty(report).filter((b) => b.source === "computed")} />
@@ -1254,7 +1380,8 @@ export default function AdaptiveSynthesisReportView({
       {!agreeGroups && agreeItems.length > 0 && (
         <div data-section="where-models-agree">
           <Card>
-            <SectionLabel>Where models agree</SectionLabel>
+            <SectionLabel>{independenceQualification(report)?.agreeHeading ?? "Where models agree"}</SectionLabel>
+            {groupLabel}
             <ul className="list-disc list-outside pl-5 space-y-1 text-sm leading-relaxed text-slate-800">
               {agreeItems.map((item, idx) =>
                 report.presentation ? (
@@ -1262,7 +1389,15 @@ export default function AdaptiveSynthesisReportView({
                     <ClaimWithResult item={item} />
                   </li>
                 ) : (
-                  <li key={idx}>{item.claim.text}</li>
+                  <li key={idx}>
+                    {item.claim.text}
+                    {/* A legacy line whose supporting slots are not independent executing models: its statement (computed). */}
+                    {item.result && (
+                      <span data-source="computed" data-testid="agree-independence" className="block text-xs text-slate-600 mt-0.5">
+                        {item.result.label}: {item.result.text}
+                      </span>
+                    )}
+                  </li>
                 )
               )}
             </ul>
@@ -1271,6 +1406,7 @@ export default function AdaptiveSynthesisReportView({
       )}
 
       <div data-section="disagreements">
+        {report.disagreements.length > 0 && groupLabel}
         <DisagreementsSection report={report} />
       </div>
 
@@ -1280,6 +1416,7 @@ export default function AdaptiveSynthesisReportView({
 
       {report.narrativeSections.length > 0 && (
         <div data-section="narrative-sections" className="space-y-4">
+          {groupLabel}
           {presentNarrativeSections(report).map((section, idx) => (
             <Card key={idx}>
               {section.titleSource === "model_explanation" ? (
@@ -1326,7 +1463,7 @@ export default function AdaptiveSynthesisReportView({
                   {claim.cells.some(Boolean) && (
                     <span className="text-slate-500">
                       {" "}
-                      ({claim.cells.filter(Boolean).map((c) => getModelLabel(c!.modelId)).join(", ")})
+                      ({claim.cells.filter(Boolean).map((c) => voiceName(c!.modelId)).join(", ")})
                     </span>
                   )}
                 </li>
@@ -1338,7 +1475,7 @@ export default function AdaptiveSynthesisReportView({
       )}
 
       <div data-section="panel-verdict">
-        <PanelVerdictCard report={report} gate={gate} />
+        <PanelVerdictCard report={report} gate={gate} alignedClaims={alignedClaims} readable={readableGate} />
       </div>
 
       <div data-section="export-actions">

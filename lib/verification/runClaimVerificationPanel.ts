@@ -3,7 +3,7 @@
  */
 
 import type { ModelId, ModelResult } from "@/lib/types";
-import { CONNECTOR_MAP } from "@/lib/connectors";
+import { CONNECTOR_MAP, connectorProvider } from "@/lib/connectors";
 import { buildClaimVerificationPrompt } from "./claimVerificationPrompt";
 
 const VERIFY_USER_MESSAGE =
@@ -21,9 +21,13 @@ export async function runClaimVerificationPanel(
 ): Promise<ModelResult[]> {
   const system = buildClaimVerificationPrompt(claim.trim());
 
+  // The connector function each slot is dispatched to, captured once: the same function is invoked and names the
+  // provider recorded for its answer (Order 33).
+  const dispatched = selectedModels.map((modelId) => CONNECTOR_MAP[modelId]);
+
   const outcomes = await Promise.allSettled(
-    selectedModels.map((modelId) => {
-      const connector = CONNECTOR_MAP[modelId];
+    selectedModels.map((modelId, i) => {
+      const connector = dispatched[i];
       if (!connector) {
         return Promise.resolve({
           modelId,
@@ -45,7 +49,16 @@ export async function runClaimVerificationPanel(
     const outcome = outcomes[index];
     if (outcome.status === "fulfilled") {
       const r = outcome.value;
-      return r.modelId === modelId ? r : { ...r, modelId };
+      const row: ModelResult = r.modelId === modelId ? r : { ...r, modelId };
+      // Order 33 (owner ruling A): an own-provider ANSWER records the provider of the connector function this dispatch
+      // actually invoked (server-owned constant, never the slot name or anything the request carried). Any other
+      // outcome records none (a substitute keeps the provider its own result reports, as before).
+      if (row.status === "substituted") return row;
+      const provider = row.status === "ok" ? connectorProvider(dispatched[index]) : null;
+      if (provider) return { ...row, provider };
+      const { provider: _notRecorded, ...rest } = row;
+      void _notRecorded;
+      return rest;
     }
     return {
       modelId,

@@ -15,7 +15,8 @@ const indexes = readFileSync(join(root, "firestore.indexes.json"), "utf8");
 describe("firestore.rules posture", () => {
   it("positive control: the file is the real ruleset (users block + admin config block present)", () => {
     expect(rules).toMatch(/match \/users\/\{uid\}/);
-    expect(rules).toMatch(/match \/appConfig\/modelKeys/);
+    // SEC-2 / S4: the admin-claim `appConfig/modelKeys` grant became a deny-only `appConfig/{doc=**}` block.
+    expect(rules).toMatch(/match \/appConfig\/\{doc=\*\*\} \{\s*allow read, write: if false;\s*\}/);
   });
 
   // Order 4 Slice 2a added ONE explicit, deny-only block for Workspace Source

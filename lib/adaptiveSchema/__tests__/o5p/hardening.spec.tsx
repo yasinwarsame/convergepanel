@@ -31,7 +31,7 @@ import {
   NO_UNRESOLVED_ROW,
   substitutedSlotLabel,
   } from "@/lib/adaptiveSchema/positionPresentation";
-import { buildAdaptiveXPost, markedXFallback, xFit, xPostFits, xWeightedLength, X_POST_LIMIT } from "@/lib/adaptiveSchema/shareBuilders";
+import { buildAdaptiveXPost, markedXFallback, xFit, xPostFits, xWeightedLength, X_ASKED, X_POST_LIMIT } from "@/lib/adaptiveSchema/shareBuilders";
 import { parseXText, xUrlSpans } from "@/lib/adaptiveSchema/xWeightedText";
 import { generateVerificationMemo } from "@/lib/verification/generateMemo";
 import { buildAdaptiveMemoInput } from "@/lib/adaptiveSchema/shareBuilders";
@@ -258,7 +258,7 @@ describe("H-1: X weighted length follows twitter-text v3 (oracle: twitter-text 3
 
   it("12 safe fallback: always a valid post, only computed and fixed text", () => {
     for (const gate of ["Verification gate: Pass · Certainty: 100%", "Verification gate: Caution (verify before relying on it) · Certainty: 0%", "Certainty: 55% (gate: unrecognized)"]) {
-      const f = markedXFallback(gate);
+      const f = markedXFallback(gate, X_ASKED);
       expect([gate, xPostFits(f), f]).toEqual([gate, true, `Asked a multi-model AI panel\n\n${gate}\n\nvia ConvergePanel`]);
     }
   });

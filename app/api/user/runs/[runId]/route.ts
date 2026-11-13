@@ -16,6 +16,7 @@ import { classifyRunWorkspaceBindingShape } from "@/lib/workspaces/classifyRunWo
 import { resolveTeamRunWorkspaceAccess, type ResolveTeamRunWorkspaceAccessResult } from "@/lib/workspaces/resolveTeamRunWorkspaceAccess";
 import { classifyProjectIdFieldState } from "@/lib/projects/runProjectNormalizationEligibility";
 import { deriveTeamRunViewerRole } from "@/lib/workspaces/deriveTeamRunViewerRole";
+import { loadAdaptiveDisplayResults } from "@/lib/firestore/adaptiveDisplayResults";
 import { buildRunReadPayload, type RunReadViewerRole } from "@/lib/runs/runReadPayload";
 import { resolveRunReviewRouting } from "@/lib/runs/resolveRunReviewRouting";
 import { buildDsProvenanceRouteView } from "@/lib/adaptiveSchema/dsProvenanceRouteAdapter";
@@ -359,6 +360,8 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
   }
 
   const requestId = req.headers.get("x-vercel-id") ?? req.headers.get("x-request-id") ?? undefined;
+  // Order 40 C (O-2): the display record lives in its own document; read only now, after every denial has returned.
+  const adaptiveDisplayResults = data.adaptiveOutput !== undefined ? await loadAdaptiveDisplayResults(runId) : undefined;
   const payload = await buildRunReadPayload({
     runId,
     mayReadDecisionContent,
@@ -366,6 +369,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
     viewerRole,
     requestId,
     resolveReviewRouting: resolveRunReviewRouting,
+    adaptiveDisplayResults,
   });
 
   // Order 6 S-1b.1 — every denial has already returned. The route's own

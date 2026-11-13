@@ -184,13 +184,13 @@ describe("buildAdaptiveSynthesisReport", () => {
       .mockResolvedValueOnce({
         modelId: "gemini",
         status: "ok",
-        rawText: narrativeResponse({ executiveSummary: "Gemini 3 Pro cites survey data. GPT 5.2 cites the same emissions data." }),
+        rawText: narrativeResponse({ executiveSummary: "Gemini 3 Pro cites survey data. GPT-4o mini cites the same emissions data." }),
         latencyMs: 5,
       }) // narrative, 1st attempt — hallucinates
       .mockResolvedValueOnce({
         modelId: "gemini",
         status: "ok",
-        rawText: narrativeResponse({ executiveSummary: "Gemini 3 Pro cites survey data, still. GPT 5.2 cites the same emissions data, still." }),
+        rawText: narrativeResponse({ executiveSummary: "Gemini 3 Pro cites survey data, still. GPT-4o mini cites the same emissions data, still." }),
         latencyMs: 5,
       }); // narrative, regenerate attempt — still hallucinates
 
@@ -200,8 +200,8 @@ describe("buildAdaptiveSynthesisReport", () => {
 
     expect(mockedCallGemini).toHaveBeenCalledTimes(4); // bias + coverage audit + narrative + one regenerate
     expect(report.executiveSummary).not.toContain("Gemini 3 Pro"); // stripped after regenerate still failed
-    // "GPT 5.2" is left alone — it's chatgpt's REAL roster display name, not a hallucination.
-    expect(report.executiveSummary).toContain("GPT 5.2");
+    // "GPT-4o mini" is left alone — it's chatgpt's REAL roster display name, not a hallucination.
+    expect(report.executiveSummary).toContain("GPT-4o mini");
   });
 
   it("regenerates once, then strips, when the narrative call leaks raw markdown syntax", async () => {

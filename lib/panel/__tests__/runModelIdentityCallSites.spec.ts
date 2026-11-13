@@ -34,6 +34,9 @@ const RUN_SURFACES = [
   "lib/adaptiveSchema/verdict.ts",
   "lib/consensus.ts",
   "lib/panel/substitutionDisplay.ts",
+  // Executing-model attribution layer (substituted slot → "DeepSeek (substituting ChatGPT)"); itself names only
+  // through runModelIdentity. Surfaces that name agreeing models through it are run surfaces too.
+  "lib/panel/executingVoiceLabel.ts",
   "lib/verification/generateMemo.ts",
   "components/ResultsDisplay.tsx",
   "components/PanelSynthesisView.tsx",
@@ -67,6 +70,12 @@ function walk(dir: string, out: string[]): void {
 }
 
 describe("product-label readers are exactly the classified generic surfaces", () => {
+  it("the executing-model attribution layer names models only through runModelIdentity", () => {
+    const code = codeOf("lib/panel/executingVoiceLabel.ts");
+    expect(code).toMatch(/from "\.\/runModelIdentity"/);
+    expect(code).not.toMatch(PRODUCT_LABEL_READERS);
+  });
+
   it("no unclassified file reads a product-selection label", () => {
     const files: string[] = [];
     for (const root of ROOTS) walk(root, files);
@@ -77,6 +86,6 @@ describe("product-label readers are exactly the classified generic surfaces", ()
   it.each(RUN_SURFACES)("%s names models only through runModelIdentity", (rel) => {
     const code = codeOf(rel);
     expect(code).not.toMatch(PRODUCT_LABEL_READERS);
-    expect(code).toMatch(/runModelIdentity|exportModelIdentityLabel|getModelLabel/);
+    expect(code).toMatch(/runModelIdentity|exportModelIdentityLabel|getModelLabel|executingVoiceLabel|useSlotVoiceName/);
   });
 });

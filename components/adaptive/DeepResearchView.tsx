@@ -15,14 +15,17 @@
 
 import { useEffect, useRef } from "react";
 import { AggregatedResearchFinding, DeepResearchResult } from "@/lib/adaptiveSchema/types";
-import { Card, EmptyStateCard, SectionLabel, TintBadge, formatModelCoverage, SlotChip } from "./shared";
+import { Card, EmptyStateCard, SectionLabel, TintBadge, formatSlotCoverage, SlotChip } from "./shared";
+import { useQualifiedExecutionIdentity } from "./RunExecutionIdentityContext";
+import { ACROSS_PANEL_SLOTS, RECORDED_DIFFERENCES_ONE_MODEL_HEADING, slotCoverageNote } from "@/lib/panel/executionIdentity";
 
 const GENERAL_CATEGORY = "General";
 
 function CoverageBadge({ coverageCount, totalModels }: { coverageCount: number; totalModels: number }) {
+  const slotIdentity = useQualifiedExecutionIdentity();
   return (
     <TintBadge tone={coverageCount / Math.max(totalModels, 1) >= 0.6 ? "accent" : "warning"} title="How many models raised this — not a certainty score">
-      {formatModelCoverage({ covered: coverageCount, total: totalModels, mode: "covered" })}
+      {formatSlotCoverage({ covered: coverageCount, total: totalModels, mode: "covered" }, slotIdentity)}
     </TintBadge>
   );
 }
@@ -38,6 +41,7 @@ function FindingRow({
   onVerifyClaim?: (args: { runId: string; claimId: string }) => void;
   focusClaimId?: string | null;
 }) {
+  const slotIdentity = useQualifiedExecutionIdentity();
   // Phase 11A.4 — eligibility is exactly "the server attached a canonical
   // selector for this finding, and we know which run it came from." Never
   // derived from finding.id or this row's position in the array — those
@@ -78,7 +82,7 @@ function FindingRow({
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm font-medium text-slate-900">{finding.title}</span>
         <CoverageBadge coverageCount={finding.coverageCount} totalModels={finding.totalModels} />
-        {finding.evidenceStrength === "contested" && <TintBadge tone="danger">Contested</TintBadge>}
+        {finding.evidenceStrength === "contested" && <TintBadge tone="danger">{slotIdentity ? `Contested ${ACROSS_PANEL_SLOTS}` : "Contested"}</TintBadge>}
         {finding.sourceBacked && (
           <span className="text-[11px] text-slate-500" title="At least one contributing model cited a source for this finding">
             Source-cited
@@ -138,6 +142,7 @@ export default function DeepResearchView({
     sourceCoverage,
     totalModels,
   } = deepResearch;
+  const slotIdentity = useQualifiedExecutionIdentity();
 
   if (totalModels === 0) {
     return <EmptyStateCard state="no_models" />;
@@ -203,7 +208,7 @@ export default function DeepResearchView({
         {/* 3. Areas of disagreement — separate from findings. */}
         {disagreements.length > 0 && (
           <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
-            <SectionLabel>Areas of disagreement</SectionLabel>
+            <SectionLabel>{slotIdentity?.kind === "FC" ? RECORDED_DIFFERENCES_ONE_MODEL_HEADING : slotIdentity ? `Areas of disagreement ${ACROSS_PANEL_SLOTS}` : "Areas of disagreement"}</SectionLabel>
             <ul className="space-y-1.5">
               {disagreements.map((d, idx) => (
                 <li key={idx} className="text-sm text-amber-900">
@@ -300,10 +305,14 @@ export default function DeepResearchView({
           <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-slate-500">
             Panel detail ({totalModels} model{totalModels === 1 ? "" : "s"})
           </summary>
+          {slotIdentity ? (
+            <p className="mt-1.5 text-xs text-slate-500">{slotCoverageNote(slotIdentity)}</p>
+          ) : (
           <p className="mt-1.5 text-xs text-slate-500">
             Coverage badges above show how many models converged on each point — this reflects panel agreement, not independent
             verification.
           </p>
+          )}
           {contributingModels.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1">
               {contributingModels.map((modelId) => (

@@ -9,11 +9,15 @@
  * All other components will automatically use the updated values.
  */
 
+import { GEMINI_DISPLAY_NAME, GEMINI_MODEL_ID } from "./models/gemini";
+
 export type PanelModelId = "chatgpt" | "claude" | "grok" | "perplexity" | "gemini";
 
 export interface PanelModelConfig {
   id: PanelModelId;
   label: string;
+  /** The API model ID the connector sends by default (pinned to the connector sources by truthfulModelLabels.spec). */
+  requestedModelId: string;
   provider: "openai" | "anthropic" | "xai" | "perplexity" | "google";
   // Tailwind classes used for both selector buttons and badges
   colorClasses: string;
@@ -31,31 +35,37 @@ export interface PanelModelConfig {
 export const PANEL_MODELS: PanelModelConfig[] = [
   {
     id: "chatgpt",
-    label: "GPT 5.2",
+    label: "GPT-4o mini",
+    requestedModelId: "gpt-4o-mini",
     provider: "openai",
     colorClasses: "bg-emerald-50 text-emerald-700 border border-emerald-200",
   },
   {
     id: "claude",
-    label: "Claude Opus 4.5",
+    label: "Claude Haiku 4.5",
+    requestedModelId: "claude-haiku-4-5-20251001",
     provider: "anthropic",
     colorClasses: "bg-indigo-50 text-indigo-700 border border-indigo-200",
   },
   {
     id: "grok",
-    label: "Grok 4",
+    label: "Grok 4.3",
+    // Legacy ID: xAI serves it with grok-4.3 (https://docs.x.ai/developers/migration/may-15-retirement).
+    requestedModelId: "grok-4-1-fast-reasoning",
     provider: "xai",
     colorClasses: "bg-amber-50 text-amber-700 border border-amber-200",
   },
   {
     id: "perplexity",
-    label: "Perplexity Pro",
+    label: "Perplexity Sonar",
+    requestedModelId: "perplexity/sonar",
     provider: "perplexity",
     colorClasses: "bg-sky-50 text-sky-700 border border-sky-200",
   },
   {
     id: "gemini",
-    label: "Gemini 2.0 Flash", // Updated to match actual model ID: gemini-2.0-flash
+    label: GEMINI_DISPLAY_NAME, // Names the model actually called: GEMINI_MODEL_ID (lib/models/gemini.ts)
+    requestedModelId: GEMINI_MODEL_ID,
     provider: "google",
     colorClasses: "bg-rose-50 text-rose-700 border border-rose-200",
   },

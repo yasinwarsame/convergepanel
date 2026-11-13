@@ -52,7 +52,7 @@ import { deriveReportStatus, REPORT_STATUS_LABELS, ReportStatusInput } from "@/l
 import { decidedViaLabel, ReviewGovernanceReviewerView, ReviewGovernanceViewModel } from "@/lib/adaptiveSchema/reviewGovernanceViewModel";
 import { AdaptiveGateResult, AdaptiveSynthesisReport } from "@/lib/adaptiveSchema/types";
 import { Card, SectionLabel } from "./shared";
-import AdaptiveSynthesisReportView, { GateBanner, PanelVerdictCard } from "./AdaptiveSynthesisReportView";
+import AdaptiveSynthesisReportView, { GateBanner, PanelVerdictCard, type ReadableGateDisplay } from "./AdaptiveSynthesisReportView";
 import { presentPositionSafeReport } from "@/lib/adaptiveSchema/positionPresentation";
 import { PositionPresentationBoundary, usePositionPresentation } from "./PositionPresentationContext";
 import { useRunModelProvenance } from "./RunModelProvenanceContext";
@@ -438,6 +438,8 @@ export interface ReviewGovernanceSectionProps extends ReportStatusInput {
   modelsUsed?: ModelId[];
   question?: string;
   onRunFollowUp?: (question: string) => void;
+  /** #290 Inc 1: readable layout only — the page's one gate presentation for the banner, the Panel Verdict and the full synthesis report (see ReadableGateDisplay). Absent (every classic caller): unchanged. */
+  readableGate?: ReadableGateDisplay;
 }
 
 interface ReviewGovernanceBodyProps extends ReviewGovernanceSectionProps {
@@ -461,6 +463,7 @@ export function ReviewGovernanceBody({
   modelsUsed,
   question,
   onRunFollowUp,
+  readableGate,
   loading,
   unavailable,
   detail,
@@ -513,8 +516,8 @@ export function ReviewGovernanceBody({
           </>
         )}
 
-        {gate && <VerificationGate report={synthesisReport} gate={gate.status} />}
-        {gate && synthesisReport && <PanelVerdictCard report={synthesisReport} gate={gate} />}
+        {gate && <VerificationGate report={synthesisReport} gate={gate.status} readable={readableGate} />}
+        {gate && synthesisReport && <PanelVerdictCard report={synthesisReport} gate={gate} readable={readableGate} />}
 
         {/* GovernanceRecordV1 only exists for Milestone-2 schemas — skip the
             history fetch entirely (not just degrade it) when there's no
@@ -536,6 +539,7 @@ export function ReviewGovernanceBody({
                 modelsUsed={modelsUsed}
                 runId={runId}
                 onRunFollowUp={onRunFollowUp}
+                readableGate={readableGate}
               />
             </div>
           </details>
@@ -547,11 +551,11 @@ export function ReviewGovernanceBody({
 }
 
 /** The governance section's gate: the report view's banner — one wording source (gatePresentation.ts, D6). */
-function VerificationGate({ report, gate }: { report: AdaptiveSynthesisReport | undefined; gate: unknown }) {
+function VerificationGate({ report, gate, readable }: { report: AdaptiveSynthesisReport | undefined; gate: unknown; readable?: ReadableGateDisplay }) {
   return (
     <div>
       <SectionLabel>Verification gate</SectionLabel>
-      <GateBanner report={report ?? null} gate={gate} />
+      <GateBanner report={report ?? null} gate={gate} readable={readable} />
     </div>
   );
 }

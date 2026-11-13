@@ -15,6 +15,8 @@
 
 import { AggregatedPanelBlindSpot, BiasBlindspotAuditResult, BiasStructuralDiagnostics } from "@/lib/adaptiveSchema/types";
 import { Card, EmptyStateCard, SectionLabel, TintBadge } from "./shared";
+import { useQualifiedExecutionIdentity } from "./RunExecutionIdentityContext";
+import { slotCitationText, uniformResponsesNote } from "@/lib/panel/executionIdentity";
 import { BiasFindingCards } from "./AdaptiveSynthesisReportView";
 import { BIAS_EMPTY_REASON_LABELS } from "@/lib/adaptiveSchema/config";
 
@@ -45,12 +47,17 @@ function BlindSpotCard({ blindSpot, onRunFollowUp }: { blindSpot: AggregatedPane
 /** Tier 3 — compact, scannable inline stats, never cards. Homogeneity warning is prominent but framed as an explanatory caveat, not an alarm. */
 function StructuralDiagnosticsStrip({ diagnostics }: { diagnostics: BiasStructuralDiagnostics }) {
   const { citationCoverage, sourceConcentration, homogeneityFlag, homogeneityMessage } = diagnostics;
+  // B10 / B11 (C-a): in a run whose slots are not verified independent executing models the counts are panel slots,
+  // and the stored homogeneity message (written as agreement between models) is shown verbatim for an independent run only.
+  const slotIdentity = useQualifiedExecutionIdentity();
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
         {citationCoverage.totalModels > 0 && (
           <TintBadge tone={citationCoverage.ratio < 0.5 ? "warning" : "accent"}>
-            Citations: {citationCoverage.modelsWithSources} of {citationCoverage.totalModels} models cite a source
+            {slotIdentity
+              ? slotCitationText(citationCoverage.modelsWithSources, citationCoverage.totalModels, slotIdentity)
+              : <>Citations: {citationCoverage.modelsWithSources} of {citationCoverage.totalModels} models cite a source</>}
           </TintBadge>
         )}
         {sourceConcentration && (
@@ -61,7 +68,7 @@ function StructuralDiagnosticsStrip({ diagnostics }: { diagnostics: BiasStructur
       </div>
       {homogeneityFlag && homogeneityMessage && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-          <p className="text-xs text-amber-900 leading-relaxed">{homogeneityMessage}</p>
+          <p className="text-xs text-amber-900 leading-relaxed">{slotIdentity ? uniformResponsesNote(slotIdentity) : homogeneityMessage}</p>
         </div>
       )}
     </div>

@@ -25,6 +25,7 @@ import {
 } from "@/lib/adaptiveSchema/dsLabelWording";
 import type { AdaptiveResearchExportV1 } from "@/lib/adaptiveSchema/researchExport";
 import type { DecisionSupportResult } from "@/lib/adaptiveSchema/types";
+import { readFrozenRunProvenance } from "@/lib/adaptiveSchema/exportRunProvenance";
 
 const HISTORICAL = historicalRecords as unknown as Record<string, AdaptiveResearchExportV1>;
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
@@ -100,7 +101,12 @@ describe("marker assignment (buildExportSnapshot)", () => {
         const head = asStored(exportRecord(c, f));
         const historical = HISTORICAL[`${c.name}.${f}`];
         const { presentation, ...rest } = head.reportSnapshot;
-        expect(rest).toEqual(historical.reportSnapshot);
+        // Order 29 (C-a closeout): the frozen run provenance is version 2 (per-slot recorded outcome / D-5 facts and
+        // the version marker, exportRunProvenance.ts). The historical records were frozen at version 1; the identity
+        // facts (readFrozenRunProvenance, what the JSON export and the display lines read) must still be equal.
+        expect(rest.runProvenance).toMatchObject({ provenanceVersion: 2 });
+        for (const m of rest.runProvenance!.models) expect(["recorded", "absent"]).toContain(m.outcomeSource);
+        expect({ ...rest, runProvenance: readFrozenRunProvenance(rest.runProvenance) }).toEqual(historical.reportSnapshot);
         if (c.schemaId === "decision_support") expect(presentation).toStrictEqual({ dsLabelWordingVersion: 1 });
         else expect(presentation).toBeUndefined();
       }

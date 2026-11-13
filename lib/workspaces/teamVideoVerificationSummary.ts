@@ -23,6 +23,8 @@
  */
 
 import "server-only";
+import { consensusScoreWithheldReason, type ConsensusScoreWithheldReason } from "@/lib/panel/independentVoices";
+import { storedVideoConsensusIndependence } from "@/lib/panel/storedVerificationIndependence";
 
 export type TeamVideoVerificationProjectDto = { id: string; name: string; status: string };
 
@@ -31,7 +33,13 @@ export type TeamVideoVerificationSummaryDto = {
   fileName: string;
   verdict: string;
   contentType?: string;
-  consensusScore: number;
+  /**
+   * The stored score, or null when it is withheld (`consensusWithheld`, C-b CB-18): the video rows are judged by the
+   * shared gate and record no provider (PQ-2 (a) strict), so a stored video score is not presented as a multi-model
+   * consensus. The stored record is unchanged; the score is still validated as stored (row integrity).
+   */
+  consensusScore: number | null;
+  consensusWithheld?: ConsensusScoreWithheldReason;
   confidenceLabel: "High" | "Medium" | "Low";
   evidenceQuality: "strong" | "mixed" | "weak";
   frameCount: number;
@@ -124,12 +132,16 @@ export function toTeamVideoVerificationSummary(args: {
     governanceStatus = d.governanceStatus;
   }
 
+  // C-b (CB-18): presentation only — like the Team claim rows (teamClaimVerificationSummary.ts).
+  const consensusWithheld = consensusScoreWithheldReason(storedVideoConsensusIndependence(d.modelResults));
+
   return {
     verificationId: args.verificationId,
     fileName: d.fileName,
     verdict: d.verdict,
     ...(contentType !== undefined ? { contentType } : {}),
-    consensusScore: d.consensusScore,
+    consensusScore: consensusWithheld ? null : d.consensusScore,
+    ...(consensusWithheld ? { consensusWithheld } : {}),
     confidenceLabel: d.confidenceLabel as TeamVideoVerificationSummaryDto["confidenceLabel"],
     evidenceQuality: d.evidenceQuality as TeamVideoVerificationSummaryDto["evidenceQuality"],
     frameCount: d.frameCount,

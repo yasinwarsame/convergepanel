@@ -41,7 +41,8 @@ import { logger } from "@/lib/logger";
 import { stripJsonFences, withTimeout } from "./util";
 import { computeRunCertainty } from "./scoring";
 import { computeAdaptiveGate } from "./gate";
-import { buildAdaptiveVerdict, buildAdaptiveUnifiedAnswer, claimDisputers, selectUnifiedAnswer, unifiedAnswerSupporters, unresolvedLoadBearingRows } from "./verdict";
+import { buildAdaptiveVerdict, buildAdaptiveUnifiedAnswer, claimDisputers, selectUnifiedAnswer, unifiedAnswerSupporters, unresolvedLoadBearingRows, type SlotNamer } from "./verdict";
+import { executingVoiceName } from "@/lib/panel/executingVoiceLabel";
 import { describeContested } from "./consensusIntegrity";
 import { panelAgreementFacts, quoteClaim, renderPanelAgreement, renderRowAgreement, renderRowStatus, rowAgreementFacts } from "./agreementNarrative";
 import { NarrativeField, isAgreementBearing, withoutAgreementClaims } from "./narrativeIntegrity";
@@ -135,15 +136,15 @@ function presentedClaim(row: AlignedClaim, dispatchedPanelSize: number): Present
 }
 
 /** A Unified Answer claim: the presented claim plus the models backing it (R6-1) — named only for an answer claim, not for a gate-fail unresolved split. */
-function presentedAnswerClaim(row: AlignedClaim, dispatchedPanelSize: number, nameSupporters: boolean): PresentedAnswerClaim {
-  const supporters = nameSupporters ? unifiedAnswerSupporters(row) : [];
+function presentedAnswerClaim(row: AlignedClaim, dispatchedPanelSize: number, nameSupporters: boolean, name: SlotNamer): PresentedAnswerClaim {
+  const supporters = nameSupporters ? unifiedAnswerSupporters(row, name) : [];
   return { ...presentedClaim(row, dispatchedPanelSize), ...(supporters.length > 0 ? { supporters: supporters.join(", ") } : {}) };
 }
 
 /** A load-bearing split claim (Order 4, D3): the presented claim and the models on each side, from its own cells. */
-function presentedUnresolvedClaim(row: AlignedClaim, dispatchedPanelSize: number): PresentedUnresolvedClaim {
-  const supporters = unifiedAnswerSupporters(row);
-  const disputers = claimDisputers(row);
+function presentedUnresolvedClaim(row: AlignedClaim, dispatchedPanelSize: number, name: SlotNamer): PresentedUnresolvedClaim {
+  const supporters = unifiedAnswerSupporters(row, name);
+  const disputers = claimDisputers(row, name);
   return {
     ...presentedClaim(row, dispatchedPanelSize),
     ...(supporters.length > 0 ? { supporters: supporters.join(", ") } : {}),
@@ -316,11 +317,14 @@ export async function buildAdaptiveSynthesisReport(
 ): Promise<AdaptiveSynthesisReport> {
   const totalModelCount = rawResults.length;
   const modelRoster = rawResults.map((r) => r.modelId);
+  // Executing-model attribution: a slot the run's rows record as substituted is named by the model that wrote it
+  // ("DeepSeek (substituting ChatGPT)"); every other slot keeps its family name, exactly as before.
+  const voiceName: SlotNamer = (id) => executingVoiceName(String(id), rawResults);
 
   const runCertainty = computeRunCertainty(rows, schemaId);
   const gate = computeAdaptiveGate(rows, runCertainty, schemaId);
   const verdict = buildAdaptiveVerdict(rows, gate, totalModelCount);
-  const unifiedAnswer = buildAdaptiveUnifiedAnswer(rows, gate, totalModelCount);
+  const unifiedAnswer = buildAdaptiveUnifiedAnswer(rows, gate, totalModelCount, voiceName);
   const answerSelection = selectUnifiedAnswer(rows, gate);
 
   const agreeRows = rows.filter((r) => r.status === "consensus" || r.status === "majority");
@@ -349,13 +353,13 @@ export async function buildAdaptiveSynthesisReport(
 
   const presentation = (executiveSummarySource: AdaptiveReportPresentation["executiveSummarySource"], whySources: PresentedDisagreementSource[], certaintyExplanation?: string): AdaptiveReportPresentation => ({
     panelAgreement,
-    answer: { note: answerSelection.note, claims: answerSelection.rows.map((r) => presentedAnswerClaim(r, totalModelCount, gate.status !== "fail")) },
+    answer: { note: answerSelection.note, claims: answerSelection.rows.map((r) => presentedAnswerClaim(r, totalModelCount, gate.status !== "fail", voiceName)) },
     agree: agreeRows.map((r) => presentedClaim(r, totalModelCount)),
     disagree: disagreeRows.map((r, i) => ({ ...presentedClaim(r, totalModelCount), whySource: whySources[i] ?? "computed" })),
     executiveSummarySource,
     ...(certaintyExplanation ? { certaintyExplanation } : {}),
     // Order 4: the gate presentation boundary (D7) and the load-bearing split disclosure (D3). No gate reason (D1).
-    verificationGate: { unresolvedLoadBearing: unresolvedLoadBearingRows(gate).map((r) => presentedUnresolvedClaim(r, totalModelCount)) },
+    verificationGate: { unresolvedLoadBearing: unresolvedLoadBearingRows(gate).map((r) => presentedUnresolvedClaim(r, totalModelCount, voiceName)) },
     // Order 5 (Contract P): marks a new report over at least one row for the disagreement-position presentation. Written
     // after every computed value above exists and never read by computation.
     ...(rows.length > 0 ? { [DISAGREEMENT_POSITION_MARKER]: DISAGREEMENT_POSITION_VERSION } : {}),
