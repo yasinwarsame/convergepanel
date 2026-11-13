@@ -5,8 +5,9 @@
  * SAFE-PROBE:PROHIBITION — this tool changes SYSTEM_ADMIN authority. It is
  * never a secret-liveness probe and must not be used to check whether an old
  * bootstrap secret still works: it does not use that secret at all. The secret
- * bootstrap route and its probe were retired in security slice S1, so there is
- * no secret rotation left to verify.
+ * bootstrap route and its probe were retired in security slice S1; deployments
+ * built before S1 still ship the route, and their retirement is security step
+ * SEC-7.
  *
  * This is the only supported out-of-band path for the admin claim.
  * It replaces the retired scripts/setAdmin.ts, scripts/set-admin-claim.js,

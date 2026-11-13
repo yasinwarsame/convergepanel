@@ -66,7 +66,10 @@ and S2 is not live: SYSTEM_ADMIN bearer paths do not check revocation, so an alr
 token keeps `admin: true` for up to about an hour. Verify read-only with
 `scripts/check-admin-claims.js` / `scripts/verify-admin-claims.js`. The legacy minting scripts
 (`scripts/setAdmin.ts`, `set-admin-simple.js`, `set-admin-by-uid.js`, `set-admin-claim.js`)
-were removed and are not part of that path; never restore them. Before #295 merged, an S1
+were removed and are not part of that path; never restore them. They were unsafe: they could
+overwrite the account's existing custom claims or mishandle the `admin` claim value. The
+hardened operator tool changes only the `admin` custom-claim key and preserves unrelated claims.
+No agent may run it or make any other unapproved privileged mutation: it is owner-only. Before #295 merged, an S1
 interim path pinned the tool to a branch checkout at commit `f6039ea`; that is history now.
 A **disabled** Firebase Auth account obtains no email-derived privilege in any tier.
 ADMIN_PORTAL is a read/monitoring tier: run DELETE and PATCH, `/api/admin/sync-subscription`
