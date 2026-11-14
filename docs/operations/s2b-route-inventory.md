@@ -290,6 +290,23 @@ repository (app, lib, components, hooks, scripts, extension, prisma, root tools)
   (e.g. an array passed in and `push`ed), and runtime-built code are not modelled — this
   remains defence in depth, not a proof.
 - **NIT.** The misnamed exports-only-seed test is renamed to what it asserts.
+- **Static source analysis is defence in depth, not a proof.** These pins detect the
+  enumerated shapes of future change; they do not prove every future authorization edit
+  safe. The binding assurance remains the behavioural route tests, the live Preview
+  matrix and human review.
+- **Owner-accepted limitations (not fixed; NOT permission to introduce these patterns):**
+  F-2 — imported string-enum claim keys; dotted property paths in selector utilities
+  (`get(u, "customClaims.admin")`); multi-statement key enumeration (`const ks =
+  Object.keys(d); … ks.includes("admin")`); indexing a constant key array; dynamic claim
+  access through receivers not named as claims/tokens (`token`, `user`, `result`, `auth`).
+  F-3 — contrived variable shadowing can defeat the name-based uid-source assertion;
+  request headers are not part of the structural request-field pin. Mitigation for this
+  release: behavioural uid-binding tests on all six handlers, and focused human review of
+  every file that establishes administrator or global-governance authority.
+- **Follow-up (engineering):** when any authorization surface changes, extend the analyzer
+  with symbol-level (type-checker) resolution for enum keys, dotted selector paths,
+  cross-statement enumeration and const-array indexing, scope-aware uid tracking, and a
+  header pin.
 
 ### V5 behavioural gate and static-analysis scope freeze (owner ruling 2026-11-14)
 
@@ -329,20 +346,3 @@ repository (app, lib, components, hooks, scripts, extension, prisma, root tools)
   `lib/governance/governanceVisibleUserIds.ts`, the six mixed governance handlers)
   requires explicit security-focused review. The independent-review verdicts recorded
   for 11274af and b2a7cb5 (F-1 NOT CLEAN, test blind spots) stand as recorded.
-- **Static source analysis is defence in depth, not a proof.** These pins detect the
-  enumerated shapes of future change; they do not prove every future authorization edit
-  safe. The binding assurance remains the behavioural route tests, the live Preview
-  matrix and human review.
-- **Owner-accepted limitations (not fixed; NOT permission to introduce these patterns):**
-  F-2 — imported string-enum claim keys; dotted property paths in selector utilities
-  (`get(u, "customClaims.admin")`); multi-statement key enumeration (`const ks =
-  Object.keys(d); … ks.includes("admin")`); indexing a constant key array; dynamic claim
-  access through receivers not named as claims/tokens (`token`, `user`, `result`, `auth`).
-  F-3 — contrived variable shadowing can defeat the name-based uid-source assertion;
-  request headers are not part of the structural request-field pin. Mitigation for this
-  release: behavioural uid-binding tests on all six handlers, and focused human review of
-  every file that establishes administrator or global-governance authority.
-- **Follow-up (engineering):** when any authorization surface changes, extend the analyzer
-  with symbol-level (type-checker) resolution for enum keys, dotted selector paths,
-  cross-statement enumeration and const-array indexing, scope-aware uid tracking, and a
-  header pin.
