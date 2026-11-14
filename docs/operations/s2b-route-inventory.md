@@ -252,6 +252,40 @@ repository (app, lib, components, hooks, scripts, extension, prisma, root tools)
   the governance predicate; an application-only helper. Behaviour: on a FRESH import
   (`jest.isolateModules`, so module-level values see the configured lists) a
   governance-only address is not an application admin and vice versa.
+- **Correction (targeted review of 11274af, mutant E1b).** The statements above that
+  `isApplicationAdminEmail`'s closure "reads only `ADMIN_EMAILS` and no derived value" and
+  that the warning is "not a generic exemption" were overstated at 11274af: the
+  derivation follows module-level BINDINGS only, so a governance list stored as a
+  property of a function object (E1b: `governanceAdminListShapeForLog` writes it onto
+  `canonicalizePrivilegedEmail`, `isApplicationAdminEmail` reads it) passed every suite,
+  and a side effect in the warning CONDITION (E2) passed the static invariant. Corrected
+  in the E1b round below.
+- **E1b round (owner ruling 2026-11-14).** Static, over `lib/admin/config.ts` only:
+  `envDerivation(...).stateWrites` lists every assignment / compound assignment / `++` /
+  `--` / `delete` whose target is a property or element access (function-object
+  properties, computed keys, `process.env.X`, `globalThis.x`), every reference to
+  `globalThis` / `global`, every `window` use other than `typeof window`, and every
+  `Object.assign` / `Object.defineProperty(ies)` / `Object.setPrototypeOf` /
+  `Reflect.set` / `Reflect.defineProperty` / `Reflect.setPrototypeOf` call. Any entry not
+  in the reviewed-exception table (`REVIEWED_STATE_WRITES`, empty; each entry must name
+  the exact operation and why it cannot transfer authority) fails. The startup warning
+  is classified as such only with a PURE condition (no assignment / update / delete, no
+  global object, no call other than `.trim()`), no `else`, and a then-branch of
+  fixed-text `console.warn` only. Behaviour: in ONE fresh module instance the governance
+  code paths run first (`governanceAdminListShapeForLog`, `isGovernanceAdminEmail`), then
+  `isApplicationAdminEmail` for the same governance-only address must be false —
+  repeated three times — and the reverse direction holds. Controls: E1b and its computed-
+  key / `globalThis` / `Object.assign` / `Object.defineProperty` / `Reflect.set` variants
+  and three condition side effects (incl. E2) fail statically; legitimate refactors (a
+  function-local list, an application-only helper, a reordered pure condition) pass.
+  The two brittle controls are now set up syntax-aware (by function name), and the exact
+  closure pin on `isApplicationAdminEmail` was removed in favour of the semantic check.
+- **Scope of what is demonstrated.** Current runtime: the independent reviews found no
+  authorization defect, and the live Preview matrix passed. Future regression detection:
+  the shapes above are detected; state channels outside config.ts that never import a
+  governance-tainted export, mutation through method calls on received objects
+  (e.g. an array passed in and `push`ed), and runtime-built code are not modelled — this
+  remains defence in depth, not a proof.
 - **NIT.** The misnamed exports-only-seed test is renamed to what it asserts.
 - **Static source analysis is defence in depth, not a proof.** These pins detect the
   enumerated shapes of future change; they do not prove every future authorization edit
