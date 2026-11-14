@@ -180,20 +180,34 @@ function memberReads(path: string, src: string, key: string): ClaimRead[] {
  * PR #319 corrections: CodeQL #40 directive check, and the parse cache.
  * ========================================================================= */
 describe("CodeQL #40 — `\"use client\"` directive detection is parser-exact and linear", () => {
+  // Expected values = the ORIGINAL regex's decision (strictness contract), except rows marked
+  // STRICTER, where the parser says SERVER and the regex said CLIENT (allowed: the file stays checked).
   it.each([
     ["plain double-quoted", '"use client";\nexport const x = 1;', true],
     ["single-quoted, no semicolon", "'use client'\nexport const x = 1;", true],
+    ["no semicolon, CRLF line ends", '"use client"\r\nexport const x = 1;\r\n', true],
     ["after line and block comments and blank lines", '// header\n/* licence\n * text */\n\n"use client";\nexport {};', true],
-    ["after another directive", '"use strict";\n"use client";\nexport {};', true],
-    ["after a shebang", '#!/usr/bin/env node\n"use client";\nexport {};', true],
+    ["after a BOM and whitespace", '\uFEFF  \t\n"use client";\nexport {};', true],
+    ["after another directive (\"use strict\" first)", '"use strict";\n"use client";\nexport {};', false],
+    ["after a shebang", '#!/usr/bin/env node\n"use client";\nexport {};', false],
+    ["escaped spelling \\u0020", '"use\\u0020client";\nexport {};', false],
+    ["escaped spelling \\x20", "'use\\x20client';\nexport {};", false],
+    ["line comment ended by a bare CR", '// a\r"use client";\nexport {};', false],
+    ["line comment ended by U+2028", '// a\u2028"use client";\nexport {};', false],
     ["absent", "export const x = 1;", false],
-    ["after an import (not in the prologue)", 'import a from "a";\n"use client";\nexport {};', false],
+    ["after an import (not first)", 'import a from "a";\n"use client";\nexport {};', false],
+    ["after another statement", 'const a = 1;\n"use client";\nexport {};', false],
     ["inside a comment only", '// "use client"\nexport const x = 1;', false],
     ["inside a block comment only", '/* "use client" */\nexport const x = 1;', false],
     ["as a non-statement string", 'const s = "use client";', false],
-    ["parenthesized (an expression, not a directive)", '("use client");\nexport {};', false],
+    ["parenthesized", '("use client");\nexport {};', false],
     ["different text", '"use server";\nexport {};', false],
     ["template literal", "`use client`;\nexport {};", false],
+    ["STRICTER: inside an expression (+)", '"use client" + x;\nexport {};', false],
+    ["STRICTER: member access", '"use client".length;\nexport {};', false],
+    ["STRICTER: comma expression", '"use client", 1;\nexport {};', false],
+    ["STRICTER: mismatched quotes", "\"use client';\nexport {};", false],
+    ["STRICTER: unterminated block comment before it", '/* open\n"use client";\n', false],
   ])("%s", (_l, src, expected) => {
     expect(hasUseClientDirective("app/x/page.tsx", src)).toBe(expected);
   });
@@ -303,6 +317,20 @@ describe("M-1 — no privileged authority from a raw admin claim (parser-aware)"
     expect(s.has("app/api/admin/keys/route.ts")).toBe(true);
     expect(s.has("lib/firebase/auth-helpers.ts")).toBe(true);
     expect(s.has("app/admin/keys/page.tsx")).toBe(false); // "use client" page reads isAdmin from useAuth for display only
+  });
+
+  it.each([
+    ["M6 (reviewer): \"use strict\" then \"use client\"", '"use strict";\n"use client";\n'],
+    ["shebang then \"use client\"", '#!/usr/bin/env node\n"use client";\n'],
+    ["escaped directive", '"use\\u0020client";\n'],
+    ["bare-CR-terminated comment", '// x\r"use client";\n'],
+  ])("CONTROL %s: a server file reading the inert `isAdmin` field stays under the inert-field pin", (_l, header) => {
+    const P = "lib/admin/newServerThing.ts";
+    const m = new Map(FILES);
+    m.set(P, header + "export function f(u: any) { return u.isAdmin === true; }\n");
+    const s = serverFiles(m);
+    expect(s.has(P)).toBe(true);
+    expect(memberReads(P, s.get(P)!, "isAdmin").length).toBe(1);
   });
 
   describe("negative controls — the parser sees every forbidden spelling", () => {

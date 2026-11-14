@@ -351,11 +351,23 @@ repository (app, lib, components, hooks, scripts, extension, prisma, root tools)
 
 - **CodeQL #40 (`js/redos`, high, test-only).** The `"use client"` detector in
   `serverFiles()` (privilegedAuthoritySources.spec.ts) was an exponential-backtracking
-  regex introduced by S2-b. It is replaced by `hasUseClientDirective` (test-only helper):
-  a TypeScript directive-prologue check, linear in input size. On all 740 tracked
-  `app/` / `lib/` / `middleware.ts` non-test sources it classifies identically to the old
-  regex (33 client files, 0 differences); the regex is removed. Positive, negative and
-  adversarial cases are tested.
+  regex introduced by S2-b. It is replaced by `hasUseClientDirective` (test-only helper),
+  linear in input size; the regex is removed. **Strictness contract (owner ruling, after
+  the bounded review of 13c1921 found the first version weaker):** it answers CLIENT only
+  if the FIRST statement is a standalone string literal spelled raw exactly
+  `"use client"` / `'use client'`, AND the text before it is only whitespace, `//`
+  comments ended by "\n", and block comments (a linear scanner; no shebang, no other
+  line terminator, nothing else). Everything else is SERVER (fail closed: the file stays
+  under the server-side pins). So it never answers CLIENT where the original regex
+  answered SERVER; it is stricter for `"use client" + x`, `"use client".length`,
+  `"use client", 1`, mismatched quotes. Evidence: on the 737 `app/` / `lib/` /
+  `middleware.ts` files in the spec's own file set (`sourceFiles(ROOTS)`; a separate
+  `git ls-files` count gave 740 because it also counted three test-support files the spec
+  excludes by design: `lib/pdf/__fixtures__/layoutCanary.tsx`,
+  `lib/pdf/__fixtures__/layoutFixtures.ts` and `lib/synthesis/trustSummary.test.ts`) — 704 SERVER, 33 CLIENT, 0 differences; 200,000 generated headers —
+  0 cases of new-CLIENT/old-SERVER. The reviewer's M6 (a server file beginning
+  `"use strict"; "use client";` reading `isAdmin`) is a spec control and fails the
+  inert-field pin on the real tree.
 - **Parse memoization (test-only).** `parseCached` keys a tree on (script kind, file
   name, exact source text): identical content reuses the tree, any change reparses, and
   the cache is per jest test file and per process. Every security pin keeps its exact

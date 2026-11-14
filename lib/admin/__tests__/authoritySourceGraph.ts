@@ -105,16 +105,49 @@ function parse(path: string, src: string): ts.SourceFile {
 
 /**
  * CodeQL #40 remediation: does the file begin with a `"use client"` directive?
- * Parser-exact and linear (replaces an exponential-backtracking regex). A
- * directive is a string-literal expression statement in the directive prologue
- * (the leading run of such statements); comments and whitespace are trivia.
+ *
+ * STRICTNESS CONTRACT (owner ruling): this must never answer CLIENT for a file
+ * the original test regex answered SERVER, because a CLIENT file is excluded
+ * from the server-side pins. It answers CLIENT only when BOTH hold:
+ *   1. the leading text before the first statement consists solely of what the
+ *      original accepted — whitespace, `//` comments terminated by "\n", and
+ *      block comments — checked by a linear scanner (no shebang, no other line
+ *      terminator ending a `//` comment, nothing else);
+ *   2. the FIRST statement is a standalone expression statement whose expression
+ *      is a string literal spelled RAW exactly `"use client"` or `'use client'`
+ *      (escapes, other text, or an expression containing the string do not count).
+ * Anything else — including unparsable or unusual headers — is SERVER (fail closed,
+ * the file stays under the server-side pins). Linear in input size.
  */
-export function hasUseClientDirective(path: string, src: string): boolean {
-  for (const st of parseCached(path, src).statements) {
-    if (!(ts.isExpressionStatement(st) && ts.isStringLiteral(st.expression))) return false;
-    if (st.expression.text === "use client") return true;
+function leadingTriviaIsPlain(text: string): boolean {
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (/\s/.test(ch)) { i++; continue; }
+    if (text.startsWith("//", i)) {
+      const nl = text.indexOf("\n", i + 2);
+      if (nl < 0) return false;
+      i = nl + 1;
+      continue;
+    }
+    if (text.startsWith("/*", i)) {
+      const end = text.indexOf("*/", i + 2);
+      if (end < 0) return false;
+      i = end + 2;
+      continue;
+    }
+    return false;
   }
-  return false;
+  return true;
+}
+export function hasUseClientDirective(path: string, src: string): boolean {
+  const sf = parseCached(path, src);
+  const st = sf.statements[0];
+  if (!st || !ts.isExpressionStatement(st) || !ts.isStringLiteral(st.expression)) return false;
+  const start = st.getStart(sf);
+  if (!leadingTriviaIsPlain(src.slice(0, start))) return false;
+  const raw = st.expression.getText(sf);
+  return raw === '"use client"' || raw === "'use client'";
 }
 
 function enclosingName(n: ts.Node): string {
