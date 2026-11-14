@@ -278,8 +278,11 @@ repository (app, lib, components, hooks, scripts, extension, prisma, root tools)
   key / `globalThis` / `Object.assign` / `Object.defineProperty` / `Reflect.set` variants
   and three condition side effects (incl. E2) fail statically; legitimate refactors (a
   function-local list, an application-only helper, a reordered pure condition) pass.
-  The two brittle controls are now set up syntax-aware (by function name), and the exact
-  closure pin on `isApplicationAdminEmail` was removed in favour of the semantic check.
+  The F-1 controls are now set up syntax-aware (by function name, via test-only helpers)
+  instead of exact-text anchors, so a legitimate refactor of config.ts does not break a
+  control's set-up; the exact closure pin on `isApplicationAdminEmail` was removed in
+  favour of the semantic check. (Only the "warning with an `else`" control still slices the
+  warning text; it locates the statement, it does not depend on predicate bodies.)
 - **Scope of what is demonstrated.** Current runtime: the independent reviews found no
   authorization defect, and the live Preview matrix passed. Future regression detection:
   the shapes above are detected; state channels outside config.ts that never import a

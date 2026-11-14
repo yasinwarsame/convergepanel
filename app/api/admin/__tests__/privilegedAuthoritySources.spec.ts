@@ -905,8 +905,6 @@ describe("M-2 — global governance authority has exactly the pinned sources (pa
       expect(out).not.toBe(src);
       return out;
     };
-    const APP_RETURN = "return parsePrivilegedList(process.env.ADMIN_EMAILS).includes(c);";
-    const PARSE_DECL = "/** Number of entries dropped as invalid";
 
     it("the real config.ts satisfies every F-1 invariant", () => {
       expect(violations(SRC)).toEqual([]);
@@ -918,11 +916,13 @@ describe("M-2 — global governance authority has exactly the pinned sources (pa
     });
 
     it("CONTROL R1 (the reviewer's mutant): a module-level const read from the governance list feeding isApplicationAdminEmail FAILS", () => {
-      const r1 = replaceOnce(
-        replaceOnce(SRC, PARSE_DECL, `const GOVERNANCE_LIST = parsePrivilegedList(process.env.GOVERNANCE_ADMIN_EMAILS);\n\n${PARSE_DECL}`),
-        APP_RETURN,
-        "return parsePrivilegedList(process.env.ADMIN_EMAILS).includes(c) || GOVERNANCE_LIST.includes(c);"
+      // syntax-aware set-up (by function name), so a legitimate refactor of config.ts does not break the control
+      const r1 = prependToFunctionBody(
+        insertBeforeFunction(SRC, "isApplicationAdminEmail", "const GOVERNANCE_LIST = parsePrivilegedList(process.env.GOVERNANCE_ADMIN_EMAILS);"),
+        "isApplicationAdminEmail",
+        "if (GOVERNANCE_LIST.includes(canonicalizePrivilegedEmail(email) ?? \"\")) return true;"
       );
+      expect(r1).toContain("GOVERNANCE_LIST.includes(");
       const v = violations(r1);
       expect(v).toEqual(expect.arrayContaining([
         "derived:GOVERNANCE_LIST,governanceAdminListShapeForLog,isApplicationAdminEmail,isGovernanceAdminEmail",
@@ -933,14 +933,16 @@ describe("M-2 — global governance authority has exactly the pinned sources (pa
     });
 
     it.each([
-      ["R1 via bracket key", `const G = process.env["GOVERNANCE_ADMIN_EMAILS"];\n`, "|| parsePrivilegedList(G).includes(c);"],
-      ["R1 via a key constant", `const K = "GOVERNANCE_ADMIN_EMAILS";\n`, "|| parsePrivilegedList(process.env[K]).includes(c);"],
-      ["R1 via destructuring", `const { GOVERNANCE_ADMIN_EMAILS: G } = process.env;\n`, "|| parsePrivilegedList(G).includes(c);"],
-      ["R1 via a lazily filled module cache", `let cache: string[] | null = null;\nfunction govList() { return (cache ??= parsePrivilegedList(process.env.GOVERNANCE_ADMIN_EMAILS)); }\n`, "|| govList().includes(c);"],
-      ["write-through from the governance predicate", `const seen: string[] = [];\n`, "|| seen.includes(c);"],
-    ])("CONTROL %s FAILS", (_label, decl, appendToApp) => {
-      let src = replaceOnce(SRC, PARSE_DECL, `${decl}\n${PARSE_DECL}`);
-      src = replaceOnce(src, APP_RETURN, APP_RETURN.replace(/;$/, ` ${appendToApp}`));
+      ["R1 via bracket key", `const G = process.env["GOVERNANCE_ADMIN_EMAILS"];`, "parsePrivilegedList(G)"],
+      ["R1 via a key constant", `const K = "GOVERNANCE_ADMIN_EMAILS";`, "parsePrivilegedList(process.env[K])"],
+      ["R1 via destructuring", `const { GOVERNANCE_ADMIN_EMAILS: G } = process.env;`, "parsePrivilegedList(G)"],
+      ["R1 via a lazily filled module cache", `let cache: string[] | null = null;\nfunction govList() { return (cache ??= parsePrivilegedList(process.env.GOVERNANCE_ADMIN_EMAILS)); }`, "govList()"],
+      ["write-through from the governance predicate", `const seen: string[] = [];`, "seen"],
+    ])("CONTROL %s FAILS", (_label, decl, list) => {
+      // syntax-aware set-up (by function name)
+      let src = insertBeforeFunction(SRC, "isApplicationAdminEmail", decl);
+      src = prependToFunctionBody(src, "isApplicationAdminEmail", `if (${list}.includes(canonicalizePrivilegedEmail(email) ?? "")) return true;`);
+      expect(src).toContain(decl);
       if (_label.startsWith("write-through")) {
         // syntax-aware: replaces the predicate's body wherever / however it is written
         src = replaceFunctionBody(src, "isGovernanceAdminEmail", "{\n  const c = canonicalizePrivilegedEmail(email);\n  if (!c) return false;\n  const l = parsePrivilegedList(process.env.GOVERNANCE_ADMIN_EMAILS);\n  seen.push(...l);\n  return l.includes(c);\n}");
@@ -951,14 +953,16 @@ describe("M-2 — global governance authority has exactly the pinned sources (pa
     });
 
     it("CONTROL: a shared helper that defaults to the governance list (no module binding) FAILS tier separation", () => {
-      const src = replaceOnce(SRC, "  if (!raw?.trim()) return [];\n  const out", "  raw ??= process.env.GOVERNANCE_ADMIN_EMAILS;\n  if (!raw?.trim()) return [];\n  const out");
+      const src = prependToFunctionBody(SRC, "parsePrivilegedList", "raw ??= process.env.GOVERNANCE_ADMIN_EMAILS;");
+      expect(src).toContain("raw ??= process.env.GOVERNANCE_ADMIN_EMAILS;");
       const v = violations(src);
       expect(v.some((x) => x.startsWith("isApplicationAdminEmail-reads:"))).toBe(true);
       expect(v.some((x) => x.startsWith("derived:") && x.includes("parsePrivilegedList"))).toBe(true);
     });
 
     it("CONTROL: a dynamic process.env key in config.ts FAILS closed", () => {
-      const src = replaceOnce(SRC, APP_RETURN, "const k = ['ADMIN', 'EMAILS'].join('_'); return parsePrivilegedList(process.env[k]).includes(c);");
+      const src = prependToFunctionBody(SRC, "isApplicationAdminEmail", "const k = ['ADMIN', 'EMAILS'].join('_'); if (parsePrivilegedList(process.env[k]).includes(canonicalizePrivilegedEmail(email) ?? \"\")) return true;");
+      expect(src).toContain("process.env[k]");
       expect(violations(src).some((x) => x.startsWith("dynamic-env:"))).toBe(true);
     });
 
@@ -979,7 +983,7 @@ describe("M-2 — global governance authority has exactly the pinned sources (pa
       // Syntax-aware set-up (no exact-text anchors): each refactor is applied by function NAME.
       // function-local derived value inside the reviewed predicate
       const local = replaceFunctionBody(SRC, "isGovernanceAdminEmail", "{\n  const c = canonicalizePrivilegedEmail(email);\n  if (!c) return false;\n  const list = parsePrivilegedList(process.env.GOVERNANCE_ADMIN_EMAILS);\n  return list.includes(c);\n}");
-      expect(local).not.toBe(SRC);
+      expect(local).toContain("const list = parsePrivilegedList(process.env.GOVERNANCE_ADMIN_EMAILS);");
       expect(violations(local)).toEqual([]);
       // an application-only helper used by isApplicationAdminEmail
       const helper = replaceFunctionBody(
