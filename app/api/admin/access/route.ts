@@ -12,46 +12,33 @@
  *                 email-derived. Gates credential access, admin-claim minting,
  *                 bulk purge, and destructive account/billing mutation.
  *
- * Both are derived server-side from the verified token and a live Firebase Auth
- * read. Never from a Firestore role, a client-supplied value, a client email, or
- * the legacy `role: "admin"` presentation string. `ok` is preserved for
- * backward compatibility and means ADMIN_PORTAL.
+ * Both are derived server-side from ONE live Firebase Auth read made by the
+ * privileged-access guard (lib/admin/privilegedAccess.ts). Never from a
+ * Firestore role, a client-supplied value, a client email, or the legacy
+ * `role: "admin"` presentation string. `ok` is preserved for backward
+ * compatibility and means ADMIN_PORTAL.
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdminPortalAccess } from "@/lib/firebase/auth-helpers";
-import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
-import { adminAuth } from "@/lib/firebase/admin";
+import { privilegedDenialResponse, requirePrivilegedAccess } from "@/lib/admin/privilegedAccess";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** SYSTEM_ADMIN strictly from the verified custom claim. */
-async function resolveSystemAdmin(request: NextRequest): Promise<boolean> {
-  if (!adminAuth) return false;
-  const header = request.headers.get("authorization");
-  const raw =
-    header?.replace(/^Bearer\s+/i, "")?.trim() || request.cookies.get("__session")?.value;
-  if (!raw) return false;
-  try {
-    const decoded = await adminAuth.verifyIdToken(raw);
-    return decoded.admin === true;
-  } catch {
-    try {
-      const decoded = await adminAuth.verifySessionCookie(raw, true);
-      return decoded.admin === true;
-    } catch {
-      return false;
-    }
-  }
-}
-
+/**
+ * SEC-3 / S2-b: both tiers come from the privileged-access guard's ONE live
+ * Auth snapshot. `systemAdmin` is the LIVE `customClaims.admin === true`
+ * (SP-1), never the presented token's claim, so a de-claimed administrator
+ * stops being reported as SYSTEM_ADMIN on the next request. A caller who holds
+ * neither tier receives the guard's uniform denial (401/403/503).
+ *
+ * `systemAdmin` is reported only for a BEARER caller: SYSTEM_ADMIN routes are
+ * bearer-only (a session cookie alone is 401 there), so a cookie-only caller
+ * cannot exercise the tier and is not told it holds it.
+ */
 export async function GET(request: NextRequest) {
-  const auth = await requireAdminPortalAccess(request);
-  if (!auth) {
-    return NextResponse.json({ ok: false, adminPortal: false, systemAdmin: false }, { status: 401 });
-  }
-  void resolveRequestIdentity;
-  const systemAdmin = await resolveSystemAdmin(request);
+  const access = await requirePrivilegedAccess(request, "ADMIN_PORTAL", { route: "GET /api/admin/access" });
+  if (!access.ok) return privilegedDenialResponse(access);
+  const systemAdmin = access.actor.heldTiers.systemAdmin && access.actor.credential === "bearer";
   return NextResponse.json({ ok: true, adminPortal: true, systemAdmin });
 }

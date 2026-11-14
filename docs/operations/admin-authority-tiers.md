@@ -6,12 +6,64 @@ currently empty.
 
 Never write "application admin" without saying which tier is meant.
 
+## Current enforcement: the privileged-access guard (SEC-3 / S2-b)
+
+> **This section supersedes every statement below about which guard function
+> enforces a tier, and about revocation windows on the guarded routes.** The
+> older text is kept as history; where it names `requireAdminPortalAccess`,
+> `requireSystemAdminAccess`, `requireSystemAdminBearer` or `checkAdminOnly`,
+> read "`requirePrivilegedAccess` with that tier".
+
+Every handler under `app/api/admin/**`, plus `POST /api/governance/policy` and
+`POST /api/governance/audit/backfill`, calls
+`requirePrivilegedAccess(request, TIER, { route })` (`lib/admin/privilegedAccess.ts`)
+as its first statement and returns `privilegedDenialResponse` on refusal, before
+any body read, Firestore read or write, Stripe call or Auth mutation. The full
+handler-by-handler inventory is `docs/operations/s2b-route-inventory.md`; the tier
+of each handler is pinned by `app/api/admin/__tests__/privilegedGuardPin.spec.ts`
+and proven through the real handlers by
+`app/api/admin/__tests__/privilegedRouteWiring.spec.ts`.
+
+What the guard changes, stated precisely:
+
+- **Live authorization (SP-1).** Each request makes ONE live `getUser()` read.
+  SYSTEM_ADMIN is the LIVE `customClaims.admin === true`; the claim on the
+  presented ID token is recorded for mismatch telemetry only. Removing the claim
+  therefore denies SYSTEM_ADMIN on the next request, without waiting for the ID
+  token to expire.
+- **Disablement and revocation are immediate on guarded routes.** Every tier
+  requires `disabled === false` on the live record, and a credential whose
+  `auth_time` predates the live `tokensValidAfterTime` is refused (401). This
+  applies to bearer tokens and session cookies alike, so on the guarded routes
+  the "residual window" described in § B below no longer exists. It still exists
+  on non-guarded surfaces (e.g. minting a session cookie at `POST /api/auth/session`).
+- **Transport.** SYSTEM_ADMIN is bearer-only (a session cookie alone is 401).
+  ADMIN_PORTAL and GOVERNANCE_ADMIN accept a bearer or the `__session` cookie.
+  If BOTH are presented, both must verify and name the same uid, or the request
+  is 401 (SP-5) — a stale cookie for a different account no longer loses
+  silently to a fresh bearer.
+- **Status codes.** Missing / invalid / revoked credential, disabled or deleted
+  account: 401. Authenticated but not holding the tier: 403 (most of these routes
+  previously answered 401). Auth verifier or lookup outage: 503 (`Retry-After: 5`).
+  Body: `{ "error": "...", "reason": "<code>" }`, `Cache-Control: no-store`.
+- **Governance mixed-audience routes use the guard's AUTHENTICATION, not a tier.**
+  `GET /api/governance/policy` (Governance Admin OR current `full` plan),
+  `GET /api/governance/audit`, `GET /api/governance/queue`,
+  `POST /api/governance/review` (Governance Admin OR assigned reviewer) and
+  `/api/governance/reviewer` GET/POST (full-plan self-service, no privileged
+  capability) are not a single privileged tier. Since owner ruling D they
+  authenticate through `authenticatePrivilegedPrincipal` (via
+  `resolveGovernanceRequestUser`): the same SP-5 credential rules, one live read,
+  `disabled === false`, revocation of every presented credential, and 503 on a
+  verifier or lookup outage. Scope is still decided from the uid by their own
+  live-record resolvers. Details: `docs/operations/s2b-route-inventory.md`.
+
 ## Tiers
 
 ### ADMIN_PORTAL
 **Source:** a verified, **enabled** live Firebase Auth email on `ADMIN_EMAILS`,
 **or** the Firebase custom claim `admin === true`.
-**Guard:** `requireAdminPortalAccess`.
+**Guard:** `requirePrivilegedAccess(..., "ADMIN_PORTAL")` (was `requireAdminPortalAccess`).
 **Grants:** `/api/admin/access`, `/api/admin/users` (GET), `/api/admin/runs`
 (GET), `/api/admin/runs/[runId]` (**GET only**).
 
@@ -25,7 +77,7 @@ governance-changing or billing-changing action.
 
 ### SYSTEM_ADMIN
 **Source:** the custom claim `admin === true` **only**. Never email-derived.
-**Guards:** `requireSystemAdminAccess` and `requireSystemAdminBearer`.
+**Guard:** `requirePrivilegedAccess(..., "SYSTEM_ADMIN")` (was `requireSystemAdminAccess` and `requireSystemAdminBearer`).
 
 Both are **bearer-only in practice**. `requireSystemAdminBearer` reads the
 `Authorization` header and nothing else. `requireSystemAdminAccess` *appears* to
@@ -48,9 +100,18 @@ guard.
 ### GOVERNANCE_ADMIN
 **Source:** a verified, **enabled** live Firebase Auth email on
 `GOVERNANCE_ADMIN_EMAILS` **only**.
-**Guards:** `checkAdminOnly`, `resolveGovernanceVisibleUserIds`.
+**Guards:** `requirePrivilegedAccess(..., "GOVERNANCE_ADMIN")` for policy write and audit backfill (was `checkAdminOnly`); `resolveGovernanceVisibleUserIds` for governance-global visibility.
 **Grants:** governance-global visibility (every user's runs), governance policy
 write, audit backfill, and the governance dashboard/policy presentation.
+**Revocation:** every GOVERNANCE_ADMIN surface checks each presented credential
+against the live `tokensValidAfterTime`: policy write and audit backfill through
+the tier guard, and the global reads and cross-tenant review write
+(`GET /api/governance/{policy,audit,queue}`, `POST /api/governance/review`) through
+the guard's authentication (owner ruling D). So `revokeRefreshTokens(uid)` or
+disabling the account ends them on the next request, for cookie and bearer alike;
+removing the address from `GOVERNANCE_ADMIN_EMAILS` ends global scope on the next
+request (the visibility cache key carries the live decision), and a full plan held
+by the same account restores only full-plan scope, never global.
 
 **Governance policy read vs write (Step 6.0b).** `GET /api/governance/policy`
 returns the full policy to a verified Governance Admin **or** a caller whose
@@ -375,8 +436,8 @@ operator does; they are not automated.
    | **`/api/admin/test-webhook` POST** | SYSTEM_ADMIN | ❌ **NONE** | ✅ | **none** (reads Stripe only) |
    | **`/api/admin/users/[uid]` PATCH, DELETE** | SYSTEM_ADMIN | ❌ **NONE** | ❌ **NONE** | **none** |
    | `/api/admin/users` GET | ADMIN_PORTAL | ❌ | ✅ | — |
-   | `/api/admin/users/search` GET | ADMIN_PORTAL | ❌ | ❌ | none |
-   | `/api/admin/users/[uid]/details` GET | ADMIN_PORTAL | ❌ | ✅ | — |
+   | `/api/admin/users/search` GET | SYSTEM_ADMIN | ❌ | ❌ | none |
+   | `/api/admin/users/[uid]/details` GET | SYSTEM_ADMIN | ❌ | ✅ | — |
    | `/api/admin/access` GET | ADMIN_PORTAL probe | ❌ | ❌ | none |
    | `/api/governance/audit/backfill` POST | GOVERNANCE_ADMIN | ❌ **NONE** | ✅ | — |
    | `/api/governance/audit` GET | GOVERNANCE_ADMIN | ❌ | ✅ | — |

@@ -54,6 +54,11 @@ export async function getRequestUser(request: NextRequest) {
 /**
  * SYSTEM_ADMIN via a bearer token, named explicitly.
  *
+ * SEC-3 / S2-b: NO ROUTE CALLS THIS ANY MORE. Every privileged route is gated
+ * by `requirePrivilegedAccess` (lib/admin/privilegedAccess.ts). Kept only until
+ * its remaining unit specs are retired; app/api/admin/__tests__/privilegedGuardPin.spec.ts
+ * fails if any file under app/ (or middleware) calls it again.
+ *
  * `getRequestUser` returns a decoded token and says nothing about authority, so
  * routes were making the tier decision inline with `!decoded.admin`. That is how
  * `/api/admin/keys` (provider credentials) and `/api/admin/set-role` (mints

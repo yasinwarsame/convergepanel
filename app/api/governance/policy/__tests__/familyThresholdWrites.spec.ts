@@ -18,8 +18,13 @@ jest.mock("@/lib/env", () => ({
 jest.mock("@/lib/firebase/admin", () => ({ adminDb: {} }));
 jest.mock("@/lib/governance/authCheck", () => ({
   resolveGovernanceRequestUser: async () => ({ ok: true, uid: "gov-admin", email: "gov-admin@test-invented.example" }),
-  checkAdminOnly: async () => true,
   checkGovernancePolicyReadAccess: async () => "allowed",
+}));
+jest.mock("@/lib/admin/privilegedAccess", () => ({
+  ...jest.requireActual("@/lib/admin/privilegedAccess"),
+  // SEC-3 / S2-b: the POST guard is granted here (this file tests what is BEHIND it); the real guard's
+  // GOVERNANCE_ADMIN wiring is proven in app/api/admin/__tests__/privilegedRouteWiring.spec.ts.
+  requirePrivilegedAccess: async () => ({ ok: true, actor: { uid: "gov-admin", email: "gov-admin@test-invented.example", tier: "GOVERNANCE_ADMIN" } }),
 }));
 const loadPolicy = jest.fn();
 const savePolicy = jest.fn(async (..._a: unknown[]) => ({ policyVersion: 2 }));

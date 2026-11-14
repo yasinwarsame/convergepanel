@@ -28,7 +28,9 @@ const identity = { uid: "" };
 jest.mock("@/lib/auth/resolveRequestIdentity", () => ({ resolveRequestIdentity: async () => ({ status: "authenticated", uid: identity.uid, source: "session_cookie" }) }));
 jest.mock("@/lib/auth/identityResolutionTelemetry", () => ({ logIdentityResolutionFailure: jest.fn() }));
 jest.mock("@/lib/workspaces/approvalWorkflowRollout", () => ({ resolveApprovalWorkflowAdmission: () => ({ admitted: true }) }));
-jest.mock("@/lib/firebase/auth-helpers", () => ({ ...jest.requireActual("@/lib/firebase/auth-helpers"), requireSystemAdminAccess: async () => ({ uid: "uid-sysadmin" }) }));
+// SEC-3 / S2-b: the admin routes are gated by the privileged-access guard; granted here (its wiring is proven in
+// app/api/admin/__tests__/privilegedRouteWiring.spec.ts).
+jest.mock("@/lib/admin/privilegedAccess", () => ({ ...jest.requireActual("@/lib/admin/privilegedAccess"), requirePrivilegedAccess: async () => ({ ok: true, actor: { uid: "uid-sysadmin", email: "", tier: "SYSTEM_ADMIN" } }) }));
 
 import { NextRequest } from "next/server";
 import { submitReportReview, resubmitReportReview } from "@/lib/workspaces/reportReviewMutations";

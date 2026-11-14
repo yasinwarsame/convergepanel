@@ -35,13 +35,20 @@ export function truncateText(s: string, max: number): string {
   return `${t.slice(0, max)}…`;
 }
 
+/**
+ * Reads a human-readable error from an API response body. Handles both shapes
+ * the governance routes return: `{ error: { message } }` (route-level errors)
+ * and `{ error: "<message>", reason }` (the privileged-access guard's denial,
+ * e.g. `POST /api/governance/policy`), then a top-level `message`.
+ */
 export async function readApiErrorMessage(res: Response, fallback: string): Promise<string> {
   try {
     const j = (await res.json()) as {
-      error?: { message?: string };
-      message?: string;
+      error?: { message?: unknown } | string;
+      message?: unknown;
     };
-    if (j?.error && typeof j.error.message === "string") return j.error.message;
+    if (j?.error && typeof j.error === "object" && typeof j.error.message === "string") return j.error.message;
+    if (typeof j?.error === "string" && j.error.trim()) return j.error;
     if (typeof j?.message === "string") return j.message;
   } catch {
     /* ignore */

@@ -3937,7 +3937,7 @@ describe("governance-event `.add()` write sites — derived from the repository 
     // the governance review route now create the event in a transaction guarded by the deletion barrier.
     const sites = countGovernanceEventAddSites();
     expect(sites).toEqual([
-      "app/api/governance/review/route.ts:414",
+      "app/api/governance/review/route.ts:410",
       "lib/governance/evaluateAndStore.ts:128",
       "lib/governance/governanceBackfill.ts:63",
     ].sort());
@@ -3947,7 +3947,7 @@ describe("governance-event `.add()` write sites — derived from the repository 
   it("the walker searches `app/` as well as `lib/` (the R8 count missed the app route)", () => {
     const sites = countGovernanceEventAddSites();
     expect(sites.filter((s) => s.startsWith("lib/")).length).toBe(2);
-    expect(sites.filter((s) => s.startsWith("app/"))).toEqual(["app/api/governance/review/route.ts:414"]);
+    expect(sites.filter((s) => s.startsWith("app/"))).toEqual(["app/api/governance/review/route.ts:410"]);
   });
 
   it("the detector is not vacuously blind: it finds nothing in a tree with no such call, and finds one when there is one", () => {

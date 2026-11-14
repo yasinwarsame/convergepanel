@@ -3,7 +3,12 @@
  *
  * Step 6.0b: GET is limited to a verified Governance Admin or a caller whose
  * current effective plan is `full` (the governance dashboard audience), checked
- * BEFORE the policy is loaded. POST is Governance Admin only.
+ * BEFORE the policy is loaded. POST is Governance Admin only — since SEC-3 /
+ * S2-b via `requirePrivilegedAccess(..., "GOVERNANCE_ADMIN")`: a live, verified,
+ * enabled `GOVERNANCE_ADMIN_EMAILS` member, never the `admin` claim or
+ * `ADMIN_EMAILS`. GET keeps its mixed audience (Governance Admin OR the current
+ * `full` plan) on `checkGovernancePolicyReadAccess`, which is not a single
+ * privileged tier and so is not this guard's to decide.
  *
  * Step 6 D5.2A: the optional score-type map `scoreFamilyReviewThresholds`
  * (video / research only; number = set, null = clear). GET returns it as
@@ -26,7 +31,9 @@ import {
   type GovernancePolicyMutation,
 } from "@/lib/governance/governancePolicyStore";
 import { writeAuditEvent } from "@/lib/governance/auditLog";
-import { checkAdminOnly, checkGovernancePolicyReadAccess, resolveGovernanceRequestUser } from "@/lib/governance/authCheck";
+import { checkGovernancePolicyReadAccess, resolveGovernanceRequestUser } from "@/lib/governance/authCheck";
+import { governanceAuthDenialResponse } from "@/lib/governance/governanceAuthDenial";
+import { privilegedDenialResponse, requirePrivilegedAccess } from "@/lib/admin/privilegedAccess";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -130,13 +137,8 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const resolved = await resolveGovernanceRequestUser(request);
-  if (!resolved.ok) {
-    return NextResponse.json(
-      { ok: false, error: { code: "unauthorized", message: "Authentication required" } },
-      { status: 401 }
-    );
-  }
+  const resolved = await resolveGovernanceRequestUser(request, { route: "GET /api/governance/policy" });
+  if (!resolved.ok) return governanceAuthDenialResponse(resolved.status);
 
   const readAccess = await checkGovernancePolicyReadAccess(resolved.uid);
   if (readAccess === "unavailable") {
@@ -173,29 +175,16 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  // Refused BEFORE the body is read or the policy store is touched.
+  const access = await requirePrivilegedAccess(request, "GOVERNANCE_ADMIN", { route: "POST /api/governance/policy" });
+  if (!access.ok) return privilegedDenialResponse(access);
+  // Attribution: the guard's actor and the email from the SAME live snapshot.
+  const resolved = { uid: access.actor.uid, email: access.actor.email };
+
   if (!adminDb) {
     return NextResponse.json(
       { ok: false, error: { code: "internal_error", message: "Database unavailable" } },
       { status: 500 }
-    );
-  }
-
-  const resolved = await resolveGovernanceRequestUser(request);
-  if (!resolved.ok) {
-    return NextResponse.json(
-      { ok: false, error: { code: "unauthorized", message: "Authentication required" } },
-      { status: 401 }
-    );
-  }
-
-  const isAdmin = await checkAdminOnly(resolved.uid);
-  if (!isAdmin) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: { code: "forbidden", message: "Only admins can update governance policy" },
-      },
-      { status: 403 }
     );
   }
 
