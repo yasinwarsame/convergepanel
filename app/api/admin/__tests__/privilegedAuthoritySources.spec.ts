@@ -38,6 +38,10 @@ import {
   buildClaimKeyIndex,
   envDerivation,
   findAdminClaimReads,
+  insertBeforeFunction,
+  prependToFunctionBody,
+  replaceFunctionBody,
+  replaceTopLevelIfCondition,
   loadFiles,
   sourceFiles,
   taintedExports,
@@ -850,6 +854,13 @@ describe("M-2 — global governance authority has exactly the pinned sources (pa
       isGovernanceAdminEmail: "THE governance membership predicate (consumed only through the live-record verified resolver)",
     };
     /**
+     * E1b: reviewed state mutations in config.ts, keyed EXACTLY as
+     * `envDerivation(...).stateWrites` reports them ("<top-level>::<operation text>").
+     * Each entry must say why it cannot transfer privileged authority. There are
+     * none today; an unclassified write fails (no silent permission).
+     */
+    const REVIEWED_STATE_WRITES: Record<string, string> = {};
+    /**
      * Every F-1 invariant over one version of config.ts. Returns the violated
      * invariants; [] means all hold. The SAME function judges the real file and
      * every control below, so a control cannot pass for an unrelated reason.
@@ -869,6 +880,9 @@ describe("M-2 — global governance authority has exactly the pinned sources (pa
       if (ms.length !== 1 || ms[0].kind !== "startup-warning") v.push(`module-statements:${ms.map((s) => `${s.kind}[${s.text}]`).join("|")}`);
       // fail closed: no process.env use whose key cannot be resolved
       if (d.dynamicEnv.length) v.push(`dynamic-env:${d.dynamicEnv.join("|")}`);
+      // E1b: no unreviewed property / element / global-object write or reflective mutation (a side channel between functions)
+      const unreviewed = d.stateWrites.filter((w) => !(w in REVIEWED_STATE_WRITES));
+      if (unreviewed.length) v.push(`state-writes:${unreviewed.join("|")}`);
       // (3)+(4)+(5) tier separation, both directions, over the full local closure
       const tierReads = (fn: string) => {
         const scope = [fn, ...topLevelClosure(d, fn)];
@@ -899,7 +913,8 @@ describe("M-2 — global governance authority has exactly the pinned sources (pa
       const d = envDerivation(CFG, SRC, GOV);
       expect(d.moduleStatements.map((s) => [s.kind, s.envReads])).toEqual([["startup-warning", ["ADMIN_EMAILS", GOV]]]);
       expect(d.variableBindings).toEqual([]);
-      expect(topLevelClosure(d, "isApplicationAdminEmail")).toEqual(["canonicalizePrivilegedEmail", "parsePrivilegedList"]);
+      expect(d.stateWrites).toEqual([]);
+      // (the exact closure of isApplicationAdminEmail is NOT pinned: violations() checks it semantically, so an application-only helper stays allowed)
     });
 
     it("CONTROL R1 (the reviewer's mutant): a module-level const read from the governance list feeding isApplicationAdminEmail FAILS", () => {
@@ -927,7 +942,8 @@ describe("M-2 — global governance authority has exactly the pinned sources (pa
       let src = replaceOnce(SRC, PARSE_DECL, `${decl}\n${PARSE_DECL}`);
       src = replaceOnce(src, APP_RETURN, APP_RETURN.replace(/;$/, ` ${appendToApp}`));
       if (_label.startsWith("write-through")) {
-        src = replaceOnce(src, "return parsePrivilegedList(process.env.GOVERNANCE_ADMIN_EMAILS).includes(c);", "const l = parsePrivilegedList(process.env.GOVERNANCE_ADMIN_EMAILS); seen.push(...l); return l.includes(c);");
+        // syntax-aware: replaces the predicate's body wherever / however it is written
+        src = replaceFunctionBody(src, "isGovernanceAdminEmail", "{\n  const c = canonicalizePrivilegedEmail(email);\n  if (!c) return false;\n  const l = parsePrivilegedList(process.env.GOVERNANCE_ADMIN_EMAILS);\n  seen.push(...l);\n  return l.includes(c);\n}");
       }
       const v = violations(src);
       expect(v.some((x) => x.startsWith("isApplicationAdminEmail-reads:"))).toBe(true);
@@ -960,16 +976,52 @@ describe("M-2 — global governance authority has exactly the pinned sources (pa
     });
 
     it("POSITIVE CONTROL: legitimate refactors of governance-list reads are NOT blocked", () => {
+      // Syntax-aware set-up (no exact-text anchors): each refactor is applied by function NAME.
       // function-local derived value inside the reviewed predicate
-      const local = replaceOnce(SRC, "return parsePrivilegedList(process.env.GOVERNANCE_ADMIN_EMAILS).includes(c);", "const list = parsePrivilegedList(process.env.GOVERNANCE_ADMIN_EMAILS);\n  return list.includes(c);");
+      const local = replaceFunctionBody(SRC, "isGovernanceAdminEmail", "{\n  const c = canonicalizePrivilegedEmail(email);\n  if (!c) return false;\n  const list = parsePrivilegedList(process.env.GOVERNANCE_ADMIN_EMAILS);\n  return list.includes(c);\n}");
+      expect(local).not.toBe(SRC);
       expect(violations(local)).toEqual([]);
       // an application-only helper used by isApplicationAdminEmail
-      const helper = replaceOnce(
-        replaceOnce(SRC, PARSE_DECL, `function applicationListRaw(): string | undefined {\n  return process.env.ADMIN_EMAILS;\n}\n\n${PARSE_DECL}`),
-        APP_RETURN,
-        "return parsePrivilegedList(applicationListRaw()).includes(c);"
+      const helper = replaceFunctionBody(
+        insertBeforeFunction(SRC, "isApplicationAdminEmail", "function applicationListRaw(): string | undefined {\n  return process.env.ADMIN_EMAILS;\n}"),
+        "isApplicationAdminEmail",
+        "{\n  const c = canonicalizePrivilegedEmail(email);\n  if (!c) return false;\n  return parsePrivilegedList(applicationListRaw()).includes(c);\n}"
       );
+      expect(helper).toContain("applicationListRaw()");
       expect(violations(helper)).toEqual([]);
+    });
+
+    /* E1b (reviewer's surviving mutant) and its state-channel variants. Set-up is syntax-aware. */
+    const SHAPE_STASH_BODY = (stash: string) =>
+      `{\n  const raw = process.env.GOVERNANCE_ADMIN_EMAILS;\n  const configured = (raw ?? "").split(",").filter((e) => e.trim().length > 0).length;\n  const l = parsePrivilegedList(raw);\n  ${stash}\n  const valid = l.length;\n  return \`configured=\${configured} valid=\${valid} invalid=\${configured - valid}\`;\n}`;
+    it.each([
+      ["E1b: function-object property", "(canonicalizePrivilegedEmail as any).g = l;", "if (((canonicalizePrivilegedEmail as any).g ?? []).includes(canonicalizePrivilegedEmail(email))) return true;"],
+      ["computed property write", '(canonicalizePrivilegedEmail as any)["g"] = l;', 'if (((canonicalizePrivilegedEmail as any)["g"] ?? []).includes(canonicalizePrivilegedEmail(email))) return true;'],
+      ["globalThis property", "(globalThis as any).__cpg = l;", "if (((globalThis as any).__cpg ?? []).includes(canonicalizePrivilegedEmail(email))) return true;"],
+      ["Object.assign", "Object.assign(canonicalizePrivilegedEmail, { g: l });", "if (((canonicalizePrivilegedEmail as any).g ?? []).includes(canonicalizePrivilegedEmail(email))) return true;"],
+      ["Object.defineProperty", 'Object.defineProperty(canonicalizePrivilegedEmail, "g", { value: l, configurable: true });', "if (((canonicalizePrivilegedEmail as any).g ?? []).includes(canonicalizePrivilegedEmail(email))) return true;"],
+      ["Reflect.set", 'Reflect.set(canonicalizePrivilegedEmail, "g", l);', "if (((canonicalizePrivilegedEmail as any).g ?? []).includes(canonicalizePrivilegedEmail(email))) return true;"],
+    ])("CONTROL %s carrying the governance list into isApplicationAdminEmail FAILS statically", (_label, stash, read) => {
+      const src = prependToFunctionBody(replaceFunctionBody(SRC, "governanceAdminListShapeForLog", SHAPE_STASH_BODY(stash)), "isApplicationAdminEmail", read);
+      expect(src).toContain(stash);
+      expect(src).toContain(read);
+      expect(violations(src).some((x) => x.startsWith("state-writes:"))).toBe(true);
+    });
+
+    it.each([
+      ["E2: globalThis assignment in the condition", '!((globalThis as any).__cpg = process.env.GOVERNANCE_ADMIN_EMAILS)?.trim()'],
+      ["an update expression in the condition", 'typeof window === "undefined" && (globalCounter++ > -1) && !process.env.ADMIN_EMAILS?.trim()'],
+      ["a non-trim call in the condition", 'typeof window === "undefined" && !process.env.ADMIN_EMAILS?.trim() && !record(process.env.GOVERNANCE_ADMIN_EMAILS)'],
+    ])("CONTROL %s: the startup warning is no longer classified as the warning (FAILS without relying on a fresh import)", (_label, cond) => {
+      const src = replaceTopLevelIfCondition(SRC, cond);
+      expect(src).toContain(cond);
+      expect(violations(src).some((x) => x.startsWith("module-statements:"))).toBe(true);
+    });
+
+    it("POSITIVE CONTROL: the approved startup warning, re-written with an equivalent pure condition, is still the warning", () => {
+      const src = replaceTopLevelIfCondition(SRC, 'typeof window === "undefined" && !process.env.GOVERNANCE_ADMIN_EMAILS?.trim() && !process.env.ADMIN_EMAILS?.trim()');
+      expect(src).not.toBe(SRC);
+      expect(violations(src)).toEqual([]);
     });
   });
 
@@ -999,6 +1051,25 @@ describe("M-2 — global governance authority has exactly the pinned sources (pa
     it("an empty application list grants no application membership even when the governance list is populated", () => {
       const m = fresh("", "gov-only@test-invented.example");
       expect(m.isApplicationAdminEmail("gov-only@test-invented.example")).toBe(false);
+    });
+    it("E1b ORDER-SENSITIVE: after the governance code paths run in the SAME module instance (shape log, governance predicate), governance-only membership still never grants application membership — repeated; and the reverse", () => {
+      const GOV_ONLY = "gov-only@test-invented.example";
+      const APP_ONLY = "portal-only@test-invented.example";
+      const m = fresh(APP_ONLY, GOV_ONLY);
+      for (let round = 0; round < 3; round++) {
+        // the governance code paths production executes (queue GET logs the shape on every request)
+        expect(m.governanceAdminListShapeForLog()).toBe("configured=1 valid=1 invalid=0");
+        expect(m.isGovernanceAdminEmail(GOV_ONLY)).toBe(true);
+        // ... then the application-admin decision for the same address
+        expect([round, m.isApplicationAdminEmail(GOV_ONLY)]).toEqual([round, false]);
+        // reverse direction: the application paths first, then the governance decision
+        expect(m.isApplicationAdminEmail(APP_ONLY)).toBe(true);
+        expect([round, m.isGovernanceAdminEmail(APP_ONLY)]).toEqual([round, false]);
+      }
+      // still separated after interleaving in the opposite order on the same instance
+      expect(m.isApplicationAdminEmail(GOV_ONLY)).toBe(false);
+      expect(m.governanceAdminListShapeForLog()).toBe("configured=1 valid=1 invalid=0");
+      expect(m.isGovernanceAdminEmail(APP_ONLY)).toBe(false);
     });
   });
 

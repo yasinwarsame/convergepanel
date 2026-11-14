@@ -563,6 +563,19 @@ export type EnvDerivation = {
   moduleStatements: ModuleStatementClass[];
   /** `process.env` uses whose key cannot be resolved statically (fail closed). */
   dynamicEnv: string[];
+  /**
+   * E1b: state MUTATION anywhere in the module that could carry data between
+   * functions outside the derivation graph — assignment / compound assignment /
+   * ++ / -- / delete whose target is a property or element access (e.g. a property
+   * of a function object, `process.env.X`, `globalThis.x`), any reference to
+   * `globalThis` / `global`, a `window` reference other than `typeof window`, and
+   * Object.assign / Object.defineProperty / Object.defineProperties /
+   * Object.setPrototypeOf / Reflect.set / Reflect.defineProperty /
+   * Reflect.setPrototypeOf calls. Each entry is "<enclosing top-level>::<operation text>".
+   * Writes to plain local identifiers are not listed (module-level bindings are
+   * pinned separately, and function-local values are covered by the derivation).
+   */
+  stateWrites: string[];
   /** Top-level declarations deriving from `envName` (sorted). */
   derived: string[];
 };
@@ -632,7 +645,22 @@ export function envDerivation(path: string, src: string, envName: string): EnvDe
           x.expression.expression.getText() === "console.warn" &&
           x.expression.arguments.every((a) => ts.isStringLiteralLike(a)));
       };
-      const kind = ts.isIfStatement(st) && !st.elseStatement && thenOnlyWarn(st.thenStatement) ? "startup-warning" : "other";
+      // E2: the condition must be PURE — no assignment / update / delete, no global
+      // object, and no call other than a `.trim()` method call.
+      const pureCondition = (e: ts.Expression): boolean => {
+        let ok = true;
+        const w = (x: ts.Node) => {
+          if (ts.isBinaryExpression(x) && x.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && x.operatorToken.kind <= ts.SyntaxKind.LastAssignment) ok = false;
+          if ((ts.isPrefixUnaryExpression(x) || ts.isPostfixUnaryExpression(x)) && (x.operator === ts.SyntaxKind.PlusPlusToken || x.operator === ts.SyntaxKind.MinusMinusToken)) ok = false;
+          if (ts.isDeleteExpression(x)) ok = false;
+          if (ts.isIdentifier(x) && (x.text === "globalThis" || x.text === "global")) ok = false;
+          if (ts.isCallExpression(x) && !(ts.isPropertyAccessExpression(x.expression) && x.expression.name.text === "trim" && x.arguments.length === 0)) ok = false;
+          ts.forEachChild(x, w);
+        };
+        w(e);
+        return ok;
+      };
+      const kind = ts.isIfStatement(st) && !st.elseStatement && pureCondition(st.expression) && thenOnlyWarn(st.thenStatement) ? "startup-warning" : "other";
       moduleStatements.push({ kind, text: st.getText().replace(/\s+/g, " ").slice(0, 80), envReads: reads });
     }
   }
@@ -665,7 +693,36 @@ export function envDerivation(path: string, src: string, envName: string): EnvDe
       if (refs.some((r) => derived.has(r))) { derived.add(name); changed = true; }
     }
   }
-  return { envReads, topRefs, variableBindings: variableBindings.sort(), moduleStatements, dynamicEnv, derived: [...derived].sort() };
+  const stateWrites: string[] = [];
+  const MUTATORS = new Set(["Object.assign", "Object.defineProperty", "Object.defineProperties", "Object.setPrototypeOf", "Reflect.set", "Reflect.defineProperty", "Reflect.setPrototypeOf"]);
+  const topName = (n: ts.Node): string => {
+    let t: ts.Node = n;
+    while (t.parent && !ts.isSourceFile(t.parent)) t = t.parent;
+    if ((ts.isFunctionDeclaration(t) || ts.isClassDeclaration(t)) && t.name) return t.name.text;
+    if (ts.isVariableStatement(t)) return t.declarationList.declarations.map((d) => d.name.getText()).join(",");
+    return `<module-statement:${ts.SyntaxKind[t.kind]}>`;
+  };
+  const unwrap = (e: ts.Expression): ts.Expression => {
+    let x = e;
+    while (ts.isParenthesizedExpression(x) || ts.isAsExpression(x) || ts.isNonNullExpression(x) || ts.isTypeAssertionExpression(x) || ts.isSatisfiesExpression(x)) x = x.expression;
+    return x;
+  };
+  const isPropTarget = (e: ts.Expression) => {
+    const u = unwrap(e);
+    return ts.isPropertyAccessExpression(u) || ts.isElementAccessExpression(u);
+  };
+  const rec = (n: ts.Node) => stateWrites.push(`${topName(n)}::${n.getText().replace(/\s+/g, " ").slice(0, 100)}`);
+  const sw = (x: ts.Node) => {
+    if (ts.isBinaryExpression(x) && x.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && x.operatorToken.kind <= ts.SyntaxKind.LastAssignment && isPropTarget(x.left)) rec(x);
+    else if ((ts.isPrefixUnaryExpression(x) || ts.isPostfixUnaryExpression(x)) && (x.operator === ts.SyntaxKind.PlusPlusToken || x.operator === ts.SyntaxKind.MinusMinusToken) && isPropTarget(x.operand)) rec(x);
+    else if (ts.isDeleteExpression(x)) rec(x);
+    else if (ts.isCallExpression(x) && MUTATORS.has(unwrap(x.expression).getText().replace(/\s+/g, ""))) rec(x);
+    else if (ts.isIdentifier(x) && (x.text === "globalThis" || x.text === "global") && !(x.parent && ts.isPropertyAccessExpression(x.parent) && x.parent.name === x)) rec(x.parent ?? x);
+    else if (ts.isIdentifier(x) && x.text === "window" && !(x.parent && ts.isTypeOfExpression(x.parent)) && !(x.parent && ts.isPropertyAccessExpression(x.parent) && x.parent.name === x)) rec(x.parent ?? x);
+    ts.forEachChild(x, sw);
+  };
+  sw(sf);
+  return { envReads, topRefs, variableBindings: variableBindings.sort(), moduleStatements, dynamicEnv, stateWrites, derived: [...derived].sort() };
 }
 
 /** Transitive closure of top-level names reachable from `start` (excluding `start`). */
@@ -679,4 +736,39 @@ export function topLevelClosure(d: EnvDerivation, start: string): string[] {
     stack.push(...(d.topRefs.get(n) ?? []));
   }
   return [...seen].sort();
+}
+
+/* ------------------------------------------------------------------------- *
+ * Syntax-aware source edits for F-1 controls (replace exact-text anchors, so a
+ * legitimate refactor of config.ts does not break a control's set-up).
+ * ------------------------------------------------------------------------- */
+function topLevelFunction(src: string, name: string): ts.FunctionDeclaration {
+  const sf = ts.createSourceFile("x.ts", src, ts.ScriptTarget.Latest, true);
+  const fns = sf.statements.filter((st): st is ts.FunctionDeclaration => ts.isFunctionDeclaration(st) && st.name?.text === name && !!st.body);
+  if (fns.length !== 1) throw new Error(`expected exactly one top-level function ${name}, found ${fns.length}`);
+  return fns[0];
+}
+/** Replaces the whole body block (including braces) of top-level function `name`. */
+export function replaceFunctionBody(src: string, name: string, body: string): string {
+  const b = topLevelFunction(src, name).body!;
+  return src.slice(0, b.getStart()) + body + src.slice(b.getEnd());
+}
+/** Inserts `stmt` as the first statement of top-level function `name`. */
+export function prependToFunctionBody(src: string, name: string, stmt: string): string {
+  const b = topLevelFunction(src, name).body!;
+  const at = b.getStart() + 1;
+  return src.slice(0, at) + "\n  " + stmt + src.slice(at);
+}
+/** Inserts `text` immediately before the declaration (incl. its leading comment) of top-level function `name`. */
+export function insertBeforeFunction(src: string, name: string, text: string): string {
+  const fn = topLevelFunction(src, name);
+  return src.slice(0, fn.getFullStart()) + "\n" + text + "\n" + src.slice(fn.getFullStart());
+}
+/** Replaces the condition of the single top-level `if` statement. */
+export function replaceTopLevelIfCondition(src: string, cond: string): string {
+  const sf = ts.createSourceFile("x.ts", src, ts.ScriptTarget.Latest, true);
+  const ifs = sf.statements.filter(ts.isIfStatement);
+  if (ifs.length !== 1) throw new Error(`expected exactly one top-level if, found ${ifs.length}`);
+  const e = ifs[0].expression;
+  return src.slice(0, e.getStart()) + cond + src.slice(e.getEnd());
 }
