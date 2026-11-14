@@ -290,6 +290,45 @@ repository (app, lib, components, hooks, scripts, extension, prisma, root tools)
   (e.g. an array passed in and `push`ed), and runtime-built code are not modelled — this
   remains defence in depth, not a proof.
 - **NIT.** The misnamed exports-only-seed test is renamed to what it asserts.
+
+### V5 behavioural gate and static-analysis scope freeze (owner ruling 2026-11-14)
+
+- **Correction to the E1b paragraph above.** "No call other than `.trim()`" was overstated:
+  the purity check treats only plain call expressions as calls, so a tagged template
+  (and a `new` expression) in the warning condition is not rejected statically (V4b).
+- **V5 — found by the independent review of b2a7cb5; the previous tests did not detect
+  it.** `governanceAdminListShapeForLog` pushes the parsed list into `process.argv` only
+  when it has two or more entries, and `isApplicationAdminEmail` checks `process.argv`.
+  A method call on an ambient global is not a recorded state write, and every earlier
+  behaviour test used one-entry lists, so the channel never activated. Had it been
+  introduced, every governance admin would have gained ADMIN_PORTAL membership after
+  the first queue GET whenever two or more governance admins were configured. The
+  current implementation does NOT contain it (independent review; runtime diff empty).
+- **Fix (behaviour, not analyzer).** A fresh-module, order-sensitive test block over the
+  real exported functions: an empty `ADMIN_EMAILS` with two and with three governance
+  admins; one application-only admin alongside two governance-only admins; all six
+  execution orders of shape-log / governance check / application check, repeated and
+  reversed on one instance; a positive control (an address on both lists holds both
+  memberships, each list grants only its own tier). Env and `process.argv` are restored
+  after each test. The exact V5 mutation applied to the real config.ts fails these
+  tests on the application-admin assertion after the shape-log and governance calls.
+- **Static analysis frozen as defence in depth.** No further analyzer expansion. Known,
+  owner-accepted limitations of the config.ts static checks: mutation through methods of
+  shared global objects (`process.argv.push`, V1/V5), aliased or dynamically selected
+  mutators (`const asg = Object.assign`, V2), computed call paths (`Object["assign"]`, V3),
+  tagged-template and `new` side effects (V4b), channels activated only under
+  conditions a test does not exercise, runtime-generated code and other dynamic
+  behaviour, and the previously accepted F-2/F-3 limitations. A documented limitation is
+  NOT permission to introduce that pattern in security-sensitive code.
+- **What is and is not demonstrated.** Behavioural tests protect the demonstrated
+  invariants (ADMIN_PORTAL and GOVERNANCE_ADMIN memberships are independent, for one,
+  several, and empty lists, in any call order) but are not a universal proof against
+  future regressions. Any change to a privileged-authority source file
+  (`lib/admin/config.ts`, `lib/admin/verifiedAdminIdentity.ts`,
+  `lib/admin/privilegedAccess.ts`, `lib/firebase/auth-helpers.ts`,
+  `lib/governance/governanceVisibleUserIds.ts`, the six mixed governance handlers)
+  requires explicit security-focused review. The independent-review verdicts recorded
+  for 11274af and b2a7cb5 (F-1 NOT CLEAN, test blind spots) stand as recorded.
 - **Static source analysis is defence in depth, not a proof.** These pins detect the
   enumerated shapes of future change; they do not prove every future authorization edit
   safe. The binding assurance remains the behavioural route tests, the live Preview

@@ -1077,6 +1077,99 @@ describe("M-2 — global governance authority has exactly the pinned sources (pa
     });
   });
 
+  /* ----------------------------------------------------------------------- *
+   * V5 (owner ruling 2026-11-14): BEHAVIOURAL tier-separation gate with
+   * MULTI-ENTRY lists and an EMPTY application list. Real exported functions,
+   * fresh module instance per scenario, env and ambient process state isolated.
+   * (The single-entry tests above never activate a channel gated on list size.)
+   * ----------------------------------------------------------------------- */
+  describe("V5 — multi-entry / empty-list tier separation BEHAVIOUR (fresh module, order-sensitive)", () => {
+    const KEYS = ["ADMIN_EMAILS", "GOVERNANCE_ADMIN_EMAILS"] as const;
+    const saved: Record<string, string | undefined> = {};
+    let savedArgv: string[] = [];
+    beforeEach(() => {
+      for (const k of KEYS) saved[k] = process.env[k];
+      savedArgv = [...process.argv];
+    });
+    afterEach(() => {
+      for (const k of KEYS) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+      // restore ambient process state a (mutant) implementation could have altered
+      process.argv.splice(0, process.argv.length, ...savedArgv);
+    });
+    const fresh = (adminEmails: string, governanceEmails: string) => {
+      process.env.ADMIN_EMAILS = adminEmails;
+      process.env.GOVERNANCE_ADMIN_EMAILS = governanceEmails;
+      let mod!: typeof import("@/lib/admin/config");
+      jest.isolateModules(() => { mod = require("@/lib/admin/config"); });
+      return mod;
+    };
+    const G1 = "gov-one@test-invented.example";
+    const G2 = "gov-two@test-invented.example";
+    const G3 = "gov-three@test-invented.example";
+    const A1 = "app-only@test-invented.example";
+
+    it("Scenario 1 — ADMIN_EMAILS empty, two governance admins: after the governance paths run (repeatedly), neither governance admin is an application admin", () => {
+      const m = fresh("", `${G1},${G2}`);
+      expect(m.governanceAdminListShapeForLog()).toBe("configured=2 valid=2 invalid=0");
+      expect([m.isGovernanceAdminEmail(G1), m.isGovernanceAdminEmail(G2)]).toEqual([true, true]);
+      expect([m.isApplicationAdminEmail(G1), m.isApplicationAdminEmail(G2)]).toEqual([false, false]);
+      for (let i = 0; i < 5; i++) {
+        expect(m.governanceAdminListShapeForLog()).toBe("configured=2 valid=2 invalid=0");
+        expect([i, m.isGovernanceAdminEmail(G1), m.isGovernanceAdminEmail(G2)]).toEqual([i, true, true]);
+        expect([i, m.isApplicationAdminEmail(G1), m.isApplicationAdminEmail(G2)]).toEqual([i, false, false]);
+      }
+    });
+
+    it("Scenario 1b — three governance admins (larger list), application list empty: still no application membership", () => {
+      const m = fresh("", `${G1},${G2},${G3}`);
+      for (let i = 0; i < 3; i++) m.governanceAdminListShapeForLog();
+      for (const g of [G1, G2, G3]) {
+        expect([g, m.isGovernanceAdminEmail(g)]).toEqual([g, true]);
+        expect([g, m.isApplicationAdminEmail(g)]).toEqual([g, false]);
+      }
+    });
+
+    it("Scenario 2 — one application-only admin and two governance-only admins: memberships stay independent in one module instance", () => {
+      const m = fresh(A1, `${G1},${G2}`);
+      for (let i = 0; i < 3; i++) {
+        expect(m.governanceAdminListShapeForLog()).toBe("configured=2 valid=2 invalid=0");
+        expect([i, m.isGovernanceAdminEmail(G1), m.isGovernanceAdminEmail(G2)]).toEqual([i, true, true]);
+        expect([i, m.isApplicationAdminEmail(G1), m.isApplicationAdminEmail(G2)]).toEqual([i, false, false]);
+        expect([i, m.isApplicationAdminEmail(A1)]).toEqual([i, true]);
+        expect([i, m.isGovernanceAdminEmail(A1)]).toEqual([i, false]);
+      }
+    });
+
+    type Op = "shape" | "gov" | "app";
+    const ORDERS: Op[][] = [
+      ["shape", "gov", "app"], ["shape", "app", "gov"], ["gov", "shape", "app"],
+      ["gov", "app", "shape"], ["app", "shape", "gov"], ["app", "gov", "shape"],
+    ];
+    it.each(ORDERS.map((o) => [o.join(" → "), o]))("Scenario 3 — execution order %s (repeated, fresh module): results identical to the expected matrix", (_label, order) => {
+      const m = fresh(A1, `${G1},${G2}`);
+      const run = (op: Op) => {
+        if (op === "shape") return m.governanceAdminListShapeForLog();
+        if (op === "gov") return [G1, G2, A1].map((e) => m.isGovernanceAdminEmail(e));
+        return [G1, G2, A1].map((e) => m.isApplicationAdminEmail(e));
+      };
+      const expected: Record<Op, unknown> = { shape: "configured=2 valid=2 invalid=0", gov: [true, true, false], app: [false, false, true] };
+      for (let round = 0; round < 3; round++) {
+        for (const op of order as Op[]) expect([round, op, run(op)]).toEqual([round, op, expected[op]]);
+      }
+      // and once more in the reverse of this order, on the same instance
+      for (const op of [...(order as Op[])].reverse()) expect(["reverse", op, run(op)]).toEqual(["reverse", op, expected[op]]);
+    });
+
+    it("POSITIVE CONTROL — the same multi-entry module grants each tier to its own list (the gate is not vacuous)", () => {
+      const m = fresh(`${A1},${G1}`, `${G1},${G2}`);
+      m.governanceAdminListShapeForLog();
+      // G1 is deliberately on BOTH lists: both memberships, independently
+      expect([m.isApplicationAdminEmail(G1), m.isGovernanceAdminEmail(G1)]).toEqual([true, true]);
+      expect([m.isApplicationAdminEmail(G2), m.isGovernanceAdminEmail(G2)]).toEqual([false, true]);
+      expect([m.isApplicationAdminEmail(A1), m.isGovernanceAdminEmail(A1)]).toEqual([true, false]);
+    });
+  });
+
   it("global-scope MARKERS have exactly one producer: \"admin_global\", `visibleUserIds: null`, `isSupportAdmin: true`, and no literal-null visibility check", () => {
     const { producers, consumers, nullVisibilityCalls } = globalMarkers(FILES);
     const P = "lib/governance/governanceVisibleUserIds.ts::resolveVisibilityForTrustedIdentity";
