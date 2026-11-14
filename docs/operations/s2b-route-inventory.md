@@ -195,14 +195,17 @@ repository (app, lib, components, hooks, scripts, extension, prisma, root tools)
 
 ### Final bounded correction (F-1 / F-2 / F-3 / NIT, owner authorization 2026-11-14)
 
-- **F-1 — seed-module completeness.** Taint now starts at the function-level readers of
+- **F-1 — seed-module completeness.** Taint starts at the function-level readers of
   `GOVERNANCE_ADMIN_EMAILS` INSIDE `lib/admin/config.ts` (`isGovernanceAdminEmail`,
   `governanceAdminListShapeForLog`), so a sibling wrapper in the same module is tainted by
-  local closure before traversal leaves it. Pinned: the function-level env readers
-  (`ENV_READERS`, incl. the module-level startup warning) and the exact export surface of
-  config.ts. Inventory change: +1 tainted export (`governanceAdminListShapeForLog`, log
-  counts only, seeded conservatively) and +1 importer edge (queue route already imports
-  it); importer FILE count unchanged.
+  local closure before traversal leaves it. Pinned: the export surface of config.ts.
+  Inventory change: +1 tainted export (`governanceAdminListShapeForLog`, log counts only,
+  seeded conservatively) and +1 importer edge (queue route already imports it); importer
+  FILE count unchanged. **Correction (final review):** as first delivered this round did
+  NOT cover module-level reads — the reader pin filed every top-level read under one
+  de-duplicated `<module>` bucket, so a module-level constant built from the list and used
+  by `isApplicationAdminEmail` passed every suite (reviewer mutant R1). Superseded by the
+  F-1-only round below.
 - **F-2 — indirect claim reads.** A repo-wide index resolves `"admin"` key constants across
   files (named / aliased / re-exported / `export *` / namespace imports, object-const
   members `C.ADMIN`, `NS.C.ADMIN`). New detections: enumeration (`Object.keys/entries/
@@ -226,3 +229,44 @@ repository (app, lib, components, hooks, scripts, extension, prisma, root tools)
   their assignment forms, and reassignable bindings used in shorthand are producers.
 - Limits (unchanged in kind): runtime-built keys and specifiers; access through objects
   that are not named as claim/token receivers and never name the key.
+
+### F-1-only correction and owner-accepted static-analysis limits (owner ruling 2026-11-14)
+
+- **F-1 (module-level reads and derived values).** `envDerivation` (test-only helper) attributes
+  every env read in `lib/admin/config.ts` to its top-level declaration or statement — no
+  `<module>` bucket — and computes every top-level declaration DERIVED from
+  `GOVERNANCE_ADMIN_EMAILS` (direct read, reference to a derived declaration, or a
+  module variable referenced by a derived function). One `violations()` function judges
+  the real file and every control. Invariants: the derived set is exactly the two reviewed
+  declarations and equals the taint seed; config.ts has no module-level bindings; exactly
+  one module-level statement, classified as the startup warning (`if` without `else`,
+  then-branch only `console.warn` with literal text) — not a generic exemption; no
+  unresolvable `process.env` key; `isApplicationAdminEmail`'s full local closure reads only
+  `ADMIN_EMAILS` and no derived value, and `isGovernanceAdminEmail`'s only
+  `GOVERNANCE_ADMIN_EMAILS`. The repo-wide reader pin now records every occurrence (no
+  de-duplication) and names module-level bindings/statements. Controls that fail: R1
+  exactly, R1 via bracket key / key constant / destructuring / lazily filled cache,
+  write-through from the governance predicate, a shared helper defaulting to the
+  governance list, a dynamic env key, a non-warning module statement, a warning with an
+  `else`, a second warning. Positive controls that pass: a function-local derived value in
+  the governance predicate; an application-only helper. Behaviour: on a FRESH import
+  (`jest.isolateModules`, so module-level values see the configured lists) a
+  governance-only address is not an application admin and vice versa.
+- **NIT.** The misnamed exports-only-seed test is renamed to what it asserts.
+- **Static source analysis is defence in depth, not a proof.** These pins detect the
+  enumerated shapes of future change; they do not prove every future authorization edit
+  safe. The binding assurance remains the behavioural route tests, the live Preview
+  matrix and human review.
+- **Owner-accepted limitations (not fixed; NOT permission to introduce these patterns):**
+  F-2 — imported string-enum claim keys; dotted property paths in selector utilities
+  (`get(u, "customClaims.admin")`); multi-statement key enumeration (`const ks =
+  Object.keys(d); … ks.includes("admin")`); indexing a constant key array; dynamic claim
+  access through receivers not named as claims/tokens (`token`, `user`, `result`, `auth`).
+  F-3 — contrived variable shadowing can defeat the name-based uid-source assertion;
+  request headers are not part of the structural request-field pin. Mitigation for this
+  release: behavioural uid-binding tests on all six handlers, and focused human review of
+  every file that establishes administrator or global-governance authority.
+- **Follow-up (engineering):** when any authorization surface changes, extend the analyzer
+  with symbol-level (type-checker) resolution for enum keys, dotted selector paths,
+  cross-statement enumeration and const-array indexing, scope-aware uid tracking, and a
+  header pin.

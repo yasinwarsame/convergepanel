@@ -539,3 +539,144 @@ export function taintedExports(files: FileSet, seeds: TaintSeed[]): TaintResult 
 }
 
 export const repoRelative = (abs: string) => relative(REPO_ROOT, abs).replace(/\\/g, "/");
+
+/* ------------------------------------------------------------------------- *
+ * F-1 (final): exact env-derivation analysis of ONE module.
+ *
+ * Every read of an environment variable inside the module is attributed to the
+ * top-level declaration (or top-level statement) that contains it, and every
+ * top-level declaration whose value DERIVES from a given variable — directly, or
+ * by referencing another derived declaration, or (for variable bindings) by being
+ * referenced by a derived function that could write into it — is reported. There
+ * is no `<module>` bucket: a module-level binding is its own named declaration,
+ * and a module-level statement is classified individually.
+ * ------------------------------------------------------------------------- */
+export type ModuleStatementClass = { kind: "startup-warning" | "other"; text: string; envReads: string[] };
+export type EnvDerivation = {
+  /** Top-level declaration name -> env variables it reads directly (sorted). */
+  envReads: Map<string, string[]>;
+  /** Top-level declaration name -> top-level names it references (sorted). */
+  topRefs: Map<string, string[]>;
+  /** Names declared by top-level variable statements (const / let / var, incl. destructuring). */
+  variableBindings: string[];
+  /** Top-level non-declaration, non-import statements, classified. */
+  moduleStatements: ModuleStatementClass[];
+  /** `process.env` uses whose key cannot be resolved statically (fail closed). */
+  dynamicEnv: string[];
+  /** Top-level declarations deriving from `envName` (sorted). */
+  derived: string[];
+};
+
+function envKeysIn(n: ts.Node, out: { reads: Set<string>; dynamic: string[] }) {
+  const isProcessEnv = (x: ts.Node) =>
+    ts.isPropertyAccessExpression(x) && x.name.text === "env" && ts.isIdentifier(x.expression) && x.expression.text === "process";
+  const v = (x: ts.Node) => {
+    if (isProcessEnv(x)) {
+      const p = x.parent;
+      if (p && ts.isPropertyAccessExpression(p) && p.expression === x) out.reads.add(p.name.text);
+      else if (p && ts.isElementAccessExpression(p) && p.expression === x && ts.isStringLiteralLike(p.argumentExpression)) out.reads.add(p.argumentExpression.text);
+      else if (p && ts.isVariableDeclaration(p) && p.initializer === x && ts.isObjectBindingPattern(p.name)) {
+        for (const el of p.name.elements) {
+          const key = el.propertyName ?? el.name;
+          if (ts.isIdentifier(key) || ts.isStringLiteralLike(key)) out.reads.add(key.text);
+          else out.dynamic.push(x.parent.getText().slice(0, 80));
+        }
+      } else out.dynamic.push((p ?? x).getText().slice(0, 80));
+    }
+    ts.forEachChild(x, v);
+  };
+  v(n);
+}
+
+export function envDerivation(path: string, src: string, envName: string): EnvDerivation {
+  const sf = ts.createSourceFile(path, src, ts.ScriptTarget.Latest, true, /\.(tsx|jsx)$/.test(path) ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  const envReads = new Map<string, string[]>();
+  const topRefs = new Map<string, string[]>();
+  const variableBindings: string[] = [];
+  const moduleStatements: ModuleStatementClass[] = [];
+  const dynamicEnv: string[] = [];
+  const declNodes = new Map<string, ts.Node[]>();
+  const add = (name: string, node: ts.Node) => declNodes.set(name, [...(declNodes.get(name) ?? []), node]);
+  const readsOf = (node: ts.Node): string[] => {
+    const o = { reads: new Set<string>(), dynamic: [] as string[] };
+    envKeysIn(node, o);
+    // The variable NAME used anywhere in code (identifier, or a string literal that is not a message argument) also counts as a read.
+    const w = (x: ts.Node) => {
+      if ((ts.isIdentifier(x) || ts.isStringLiteralLike(x)) && x.text === envName) {
+        const inMessage = ts.isStringLiteralLike(x) && x.parent && (ts.isCallExpression(x.parent) || ts.isTemplateSpan(x.parent));
+        if (!inMessage) o.reads.add(envName);
+      }
+      ts.forEachChild(x, w);
+    };
+    w(node);
+    dynamicEnv.push(...o.dynamic);
+    return [...o.reads].sort();
+  };
+  for (const st of sf.statements) {
+    if (ts.isImportDeclaration(st) || ts.isTypeAliasDeclaration(st) || ts.isInterfaceDeclaration(st)) continue;
+    if ((ts.isFunctionDeclaration(st) || ts.isClassDeclaration(st) || ts.isEnumDeclaration(st)) && st.name) add(st.name.text, st);
+    else if (ts.isVariableStatement(st)) {
+      for (const d of st.declarationList.declarations) {
+        const bind = (b: ts.BindingName) => {
+          if (ts.isIdentifier(b)) { add(b.text, d); variableBindings.push(b.text); }
+          else for (const el of b.elements) if (!ts.isOmittedExpression(el)) bind(el.name);
+        };
+        bind(d.name);
+      }
+    } else {
+      const reads = readsOf(st);
+      const thenOnlyWarn = (s: ts.Statement): boolean => {
+        const list = ts.isBlock(s) ? [...s.statements] : [s];
+        return list.length > 0 && list.every((x) =>
+          ts.isExpressionStatement(x) && ts.isCallExpression(x.expression) &&
+          x.expression.expression.getText() === "console.warn" &&
+          x.expression.arguments.every((a) => ts.isStringLiteralLike(a)));
+      };
+      const kind = ts.isIfStatement(st) && !st.elseStatement && thenOnlyWarn(st.thenStatement) ? "startup-warning" : "other";
+      moduleStatements.push({ kind, text: st.getText().replace(/\s+/g, " ").slice(0, 80), envReads: reads });
+    }
+  }
+  const names = new Set(declNodes.keys());
+  for (const [name, nodes] of declNodes) {
+    const reads = new Set<string>();
+    const refs = new Set<string>();
+    for (const node of nodes) {
+      for (const r of readsOf(node)) reads.add(r);
+      const w = (x: ts.Node) => {
+        if (ts.isIdentifier(x) && names.has(x.text) && x.text !== name) refs.add(x.text);
+        ts.forEachChild(x, w);
+      };
+      w(node);
+    }
+    envReads.set(name, [...reads].sort());
+    topRefs.set(name, [...refs].sort());
+  }
+  const derived = new Set([...envReads].filter(([, r]) => r.includes(envName)).map(([n]) => n));
+  const isVar = new Set(variableBindings);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [name, refs] of topRefs) {
+      if (derived.has(name)) {
+        // A derived declaration that references a module-level VARIABLE could write into it.
+        for (const r of refs) if (isVar.has(r) && !derived.has(r)) { derived.add(r); changed = true; }
+        continue;
+      }
+      if (refs.some((r) => derived.has(r))) { derived.add(name); changed = true; }
+    }
+  }
+  return { envReads, topRefs, variableBindings: variableBindings.sort(), moduleStatements, dynamicEnv, derived: [...derived].sort() };
+}
+
+/** Transitive closure of top-level names reachable from `start` (excluding `start`). */
+export function topLevelClosure(d: EnvDerivation, start: string): string[] {
+  const seen = new Set<string>();
+  const stack = [...(d.topRefs.get(start) ?? [])];
+  while (stack.length) {
+    const n = stack.pop()!;
+    if (seen.has(n) || n === start) continue;
+    seen.add(n);
+    stack.push(...(d.topRefs.get(n) ?? []));
+  }
+  return [...seen].sort();
+}

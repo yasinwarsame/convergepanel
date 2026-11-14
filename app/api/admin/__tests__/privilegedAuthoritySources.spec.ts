@@ -36,10 +36,12 @@
 import ts from "typescript";
 import {
   buildClaimKeyIndex,
+  envDerivation,
   findAdminClaimReads,
   loadFiles,
   sourceFiles,
   taintedExports,
+  topLevelClosure,
   type ClaimRead,
   type FileSet,
   type TaintSeed,
@@ -378,10 +380,20 @@ function envListReaders(files: FileSet): string[] {
         // A string literal inside a log / error message is not a read.
         const inMessage = ts.isStringLiteralLike(n) && n.parent && (ts.isCallExpression(n.parent) || ts.isTemplateSpan(n.parent));
         if (!inMessage) {
-          let fn = "<module>";
+          let fn: string | null = null;
           for (let q: ts.Node | undefined = n.parent; q; q = q.parent) {
             if ((ts.isFunctionDeclaration(q) || ts.isMethodDeclaration(q)) && q.name) { fn = q.name.getText(); break; }
             if ((ts.isArrowFunction(q) || ts.isFunctionExpression(q)) && q.parent && ts.isVariableDeclaration(q.parent)) { fn = q.parent.name.getText(); break; }
+          }
+          if (fn === null) {
+            // Module level (final F-1): never one generic bucket. A module-level BINDING is
+            // named; a module-level STATEMENT is identified by its syntax kind.
+            let top: ts.Node = n;
+            while (top.parent && !ts.isSourceFile(top.parent)) top = top.parent;
+            if (ts.isVariableStatement(top)) {
+              const decl = top.declarationList.declarations.find((d) => d.pos <= n.pos && n.end <= d.end);
+              fn = `<module-binding:${decl ? decl.name.getText() : "?"}>`;
+            } else fn = `<module-statement:${ts.SyntaxKind[top.kind]}>`;
           }
           out.push(`${p}::${fn}`);
         }
@@ -390,10 +402,11 @@ function envListReaders(files: FileSet): string[] {
     };
     v(sf);
   }
-  return [...new Set(out)].sort();
+  // Every OCCURRENCE is kept (no de-duplication): a second read in an already-pinned place fails too.
+  return out.sort();
 }
 const ENV_READERS = [
-  "lib/admin/config.ts::<module>", // startup warning when both admin lists are empty; reads presence only, decides nothing
+  "lib/admin/config.ts::<module-statement:IfStatement>", // the startup warning, classified exactly by the F-1 derivation pin; reads presence only, decides nothing
   "lib/admin/config.ts::governanceAdminListShapeForLog", // log SHAPE (configured / valid / invalid counts); seeded anyway (conservative)
   "lib/admin/config.ts::isGovernanceAdminEmail", // THE membership predicate
 ];
@@ -752,7 +765,7 @@ describe("M-2 — global governance authority has exactly the pinned sources (pa
     expect(envListReaders(FILES)).toEqual(ENV_READERS);
     // Every non-module reader is a seed (no reader escapes the taint).
     const seeded = new Set(GOV_SEED.flatMap((sd) => (sd.locals ?? []).map((l) => `${sd.module}::${l}`)));
-    for (const r of ENV_READERS.filter((x) => !x.endsWith("::<module>"))) expect([r, seeded.has(r)]).toEqual([r, true]);
+    for (const r of ENV_READERS.filter((x) => !x.includes("::<module-"))) expect([r, seeded.has(r)]).toEqual([r, true]);
   });
 
   it("the env-list module's export surface is exactly pinned", () => {
@@ -813,12 +826,179 @@ describe("M-2 — global governance authority has exactly the pinned sources (pa
       expect(r.tainted.has("lib/x/cyc2.ts#b")).toBe(true);
     });
 
-    it("WITHOUT the seed locals the sibling wrapper would be missed (proves the F-1 change is what catches it)", () => {
+    it("an exports-only seed (no `locals`) ALSO catches the sibling wrapper: the engine's seed-module local closure, not the seed shape, is what catches it", () => {
       const m = new Map(FILES);
       m.set("lib/admin/config.ts", FILES.get("lib/admin/config.ts")! + "\nexport const isGovernanceListed = (e: string) => isGovernanceAdminEmail(e);\n");
       const legacySeed: TaintSeed[] = [{ module: "lib/admin/config.ts", exports: ["isGovernanceAdminEmail"], reason: "pre-F-1 seed shape" }];
       // Even the exports-only seed now taints the local closure (the engine fix), so the wrapper is caught either way.
       expect(taintedExports(m, legacySeed).tainted.has("lib/admin/config.ts#isGovernanceListed")).toBe(true);
+    });
+  });
+
+  /* ----------------------------------------------------------------------- *
+   * F-1 (final round): MODULE-LEVEL reads and DERIVED values in config.ts.
+   * The previous pin filed any top-level read under one `<module>` bucket with
+   * no count, so a module-level constant built from GOVERNANCE_ADMIN_EMAILS and
+   * consumed by isApplicationAdminEmail (reviewer mutant R1) passed every suite.
+   * ----------------------------------------------------------------------- */
+  describe("F-1 (final) — every governance-list read and every value derived from it is classified", () => {
+    const CFG = "lib/admin/config.ts";
+    const GOV = "GOVERNANCE_ADMIN_EMAILS";
+    /** Reviewed top-level declarations deriving from GOVERNANCE_ADMIN_EMAILS. Exactly these; nothing else in the module. */
+    const DERIVED: Record<string, string> = {
+      governanceAdminListShapeForLog: "log SHAPE only (configured / valid / invalid counts); grants nothing; seeded anyway",
+      isGovernanceAdminEmail: "THE governance membership predicate (consumed only through the live-record verified resolver)",
+    };
+    /**
+     * Every F-1 invariant over one version of config.ts. Returns the violated
+     * invariants; [] means all hold. The SAME function judges the real file and
+     * every control below, so a control cannot pass for an unrelated reason.
+     */
+    const violations = (src: string): string[] => {
+      const v: string[] = [];
+      const d = envDerivation(CFG, src, GOV);
+      // (1)+(2) every derived value is a reviewed declaration.
+      if (JSON.stringify(d.derived) !== JSON.stringify(Object.keys(DERIVED).sort())) v.push(`derived:${d.derived.join(",")}`);
+      // the taint seed covers exactly the derived set (no derived value escapes the inventory)
+      const seedLocals = [...(GOV_SEED.find((s) => s.module === CFG)?.locals ?? [])].sort();
+      if (JSON.stringify(seedLocals) !== JSON.stringify(d.derived)) v.push("seed-not-equal-derived");
+      // no module-level state at all: a derived value cannot be parked in a module binding
+      if (d.variableBindings.length) v.push(`module-bindings:${d.variableBindings.join(",")}`);
+      // (6) exactly ONE module-level statement, and it is the startup warning (console.warn with literal text only, no else)
+      const ms = d.moduleStatements;
+      if (ms.length !== 1 || ms[0].kind !== "startup-warning") v.push(`module-statements:${ms.map((s) => `${s.kind}[${s.text}]`).join("|")}`);
+      // fail closed: no process.env use whose key cannot be resolved
+      if (d.dynamicEnv.length) v.push(`dynamic-env:${d.dynamicEnv.join("|")}`);
+      // (3)+(4)+(5) tier separation, both directions, over the full local closure
+      const tierReads = (fn: string) => {
+        const scope = [fn, ...topLevelClosure(d, fn)];
+        return { derived: scope.filter((x) => d.derived.includes(x)), env: [...new Set(scope.flatMap((x) => d.envReads.get(x) ?? []))].sort() };
+      };
+      const app = tierReads("isApplicationAdminEmail");
+      if (app.derived.length || JSON.stringify(app.env) !== '["ADMIN_EMAILS"]') v.push(`isApplicationAdminEmail-reads:${app.env.join(",")}|derived:${app.derived.join(",")}`);
+      const gov = tierReads("isGovernanceAdminEmail");
+      if (JSON.stringify(gov.env) !== `["${GOV}"]`) v.push(`isGovernanceAdminEmail-reads:${gov.env.join(",")}`);
+      // the repo-wide occurrence pin agrees
+      const m = new Map(FILES);
+      m.set(CFG, src);
+      if (JSON.stringify(envListReaders(m)) !== JSON.stringify(ENV_READERS)) v.push(`env-readers:${envListReaders(m).filter((r) => r.startsWith(CFG)).join(",")}`);
+      return v;
+    };
+    const SRC = FILES.get(CFG)!;
+    const replaceOnce = (src: string, from: string, to: string) => {
+      expect(src.split(from).length - 1).toBe(1); // the control really edits the file
+      const out = src.replace(from, to);
+      expect(out).not.toBe(src);
+      return out;
+    };
+    const APP_RETURN = "return parsePrivilegedList(process.env.ADMIN_EMAILS).includes(c);";
+    const PARSE_DECL = "/** Number of entries dropped as invalid";
+
+    it("the real config.ts satisfies every F-1 invariant", () => {
+      expect(violations(SRC)).toEqual([]);
+      const d = envDerivation(CFG, SRC, GOV);
+      expect(d.moduleStatements.map((s) => [s.kind, s.envReads])).toEqual([["startup-warning", ["ADMIN_EMAILS", GOV]]]);
+      expect(d.variableBindings).toEqual([]);
+      expect(topLevelClosure(d, "isApplicationAdminEmail")).toEqual(["canonicalizePrivilegedEmail", "parsePrivilegedList"]);
+    });
+
+    it("CONTROL R1 (the reviewer's mutant): a module-level const read from the governance list feeding isApplicationAdminEmail FAILS", () => {
+      const r1 = replaceOnce(
+        replaceOnce(SRC, PARSE_DECL, `const GOVERNANCE_LIST = parsePrivilegedList(process.env.GOVERNANCE_ADMIN_EMAILS);\n\n${PARSE_DECL}`),
+        APP_RETURN,
+        "return parsePrivilegedList(process.env.ADMIN_EMAILS).includes(c) || GOVERNANCE_LIST.includes(c);"
+      );
+      const v = violations(r1);
+      expect(v).toEqual(expect.arrayContaining([
+        "derived:GOVERNANCE_LIST,governanceAdminListShapeForLog,isApplicationAdminEmail,isGovernanceAdminEmail",
+        "module-bindings:GOVERNANCE_LIST",
+        "isApplicationAdminEmail-reads:ADMIN_EMAILS,GOVERNANCE_ADMIN_EMAILS|derived:isApplicationAdminEmail,GOVERNANCE_LIST",
+      ]));
+      expect(v.some((x) => x.startsWith("env-readers:") && x.includes("<module-binding:GOVERNANCE_LIST>"))).toBe(true);
+    });
+
+    it.each([
+      ["R1 via bracket key", `const G = process.env["GOVERNANCE_ADMIN_EMAILS"];\n`, "|| parsePrivilegedList(G).includes(c);"],
+      ["R1 via a key constant", `const K = "GOVERNANCE_ADMIN_EMAILS";\n`, "|| parsePrivilegedList(process.env[K]).includes(c);"],
+      ["R1 via destructuring", `const { GOVERNANCE_ADMIN_EMAILS: G } = process.env;\n`, "|| parsePrivilegedList(G).includes(c);"],
+      ["R1 via a lazily filled module cache", `let cache: string[] | null = null;\nfunction govList() { return (cache ??= parsePrivilegedList(process.env.GOVERNANCE_ADMIN_EMAILS)); }\n`, "|| govList().includes(c);"],
+      ["write-through from the governance predicate", `const seen: string[] = [];\n`, "|| seen.includes(c);"],
+    ])("CONTROL %s FAILS", (_label, decl, appendToApp) => {
+      let src = replaceOnce(SRC, PARSE_DECL, `${decl}\n${PARSE_DECL}`);
+      src = replaceOnce(src, APP_RETURN, APP_RETURN.replace(/;$/, ` ${appendToApp}`));
+      if (_label.startsWith("write-through")) {
+        src = replaceOnce(src, "return parsePrivilegedList(process.env.GOVERNANCE_ADMIN_EMAILS).includes(c);", "const l = parsePrivilegedList(process.env.GOVERNANCE_ADMIN_EMAILS); seen.push(...l); return l.includes(c);");
+      }
+      const v = violations(src);
+      expect(v.some((x) => x.startsWith("isApplicationAdminEmail-reads:"))).toBe(true);
+      expect(v.some((x) => x.startsWith("module-bindings:"))).toBe(true);
+    });
+
+    it("CONTROL: a shared helper that defaults to the governance list (no module binding) FAILS tier separation", () => {
+      const src = replaceOnce(SRC, "  if (!raw?.trim()) return [];\n  const out", "  raw ??= process.env.GOVERNANCE_ADMIN_EMAILS;\n  if (!raw?.trim()) return [];\n  const out");
+      const v = violations(src);
+      expect(v.some((x) => x.startsWith("isApplicationAdminEmail-reads:"))).toBe(true);
+      expect(v.some((x) => x.startsWith("derived:") && x.includes("parsePrivilegedList"))).toBe(true);
+    });
+
+    it("CONTROL: a dynamic process.env key in config.ts FAILS closed", () => {
+      const src = replaceOnce(SRC, APP_RETURN, "const k = ['ADMIN', 'EMAILS'].join('_'); return parsePrivilegedList(process.env[k]).includes(c);");
+      expect(violations(src).some((x) => x.startsWith("dynamic-env:"))).toBe(true);
+    });
+
+    it("CONTROL: the startup-warning statement is NOT a generic exemption (other module-level statements FAIL)", () => {
+      const warn = SRC.slice(SRC.lastIndexOf("if ("));
+      // a module-level statement that stores state instead of warning
+      const side = SRC + '\nif (process.env.GOVERNANCE_ADMIN_EMAILS) { (globalThis as any).__gov = process.env.GOVERNANCE_ADMIN_EMAILS; }\n';
+      expect(violations(side).some((x) => x.startsWith("module-statements:"))).toBe(true);
+      // the warning given an else branch
+      const withElse = SRC + "";
+      const elsed = replaceOnce(withElse, warn, warn.trimEnd() + " else { (globalThis as any).__gov = 1; }\n");
+      expect(violations(elsed).some((x) => x.startsWith("module-statements:"))).toBe(true);
+      // a second warning-shaped statement (count is exact)
+      expect(violations(SRC + "\n" + warn).some((x) => x.startsWith("module-statements:"))).toBe(true);
+    });
+
+    it("POSITIVE CONTROL: legitimate refactors of governance-list reads are NOT blocked", () => {
+      // function-local derived value inside the reviewed predicate
+      const local = replaceOnce(SRC, "return parsePrivilegedList(process.env.GOVERNANCE_ADMIN_EMAILS).includes(c);", "const list = parsePrivilegedList(process.env.GOVERNANCE_ADMIN_EMAILS);\n  return list.includes(c);");
+      expect(violations(local)).toEqual([]);
+      // an application-only helper used by isApplicationAdminEmail
+      const helper = replaceOnce(
+        replaceOnce(SRC, PARSE_DECL, `function applicationListRaw(): string | undefined {\n  return process.env.ADMIN_EMAILS;\n}\n\n${PARSE_DECL}`),
+        APP_RETURN,
+        "return parsePrivilegedList(applicationListRaw()).includes(c);"
+      );
+      expect(violations(helper)).toEqual([]);
+    });
+  });
+
+  describe("F-1 (final) — tier separation BEHAVIOUR on a FRESH import (module-level values are evaluated at import time)", () => {
+    const KEYS = ["ADMIN_EMAILS", "GOVERNANCE_ADMIN_EMAILS"] as const;
+    const saved: Record<string, string | undefined> = {};
+    beforeEach(() => { for (const k of KEYS) saved[k] = process.env[k]; });
+    afterEach(() => { for (const k of KEYS) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } });
+    const fresh = (adminEmails: string, governanceEmails: string) => {
+      process.env.ADMIN_EMAILS = adminEmails;
+      process.env.GOVERNANCE_ADMIN_EMAILS = governanceEmails;
+      let mod!: typeof import("@/lib/admin/config");
+      jest.isolateModules(() => { mod = require("@/lib/admin/config"); });
+      return mod;
+    };
+    it("a governance-only address is NOT an application (ADMIN_PORTAL) admin, and vice versa", () => {
+      const m = fresh("portal-only@test-invented.example", "gov-only@test-invented.example");
+      expect(m.isApplicationAdminEmail("gov-only@test-invented.example")).toBe(false);
+      expect(m.isGovernanceAdminEmail("gov-only@test-invented.example")).toBe(true);
+      expect(m.isApplicationAdminEmail("portal-only@test-invented.example")).toBe(true);
+      expect(m.isGovernanceAdminEmail("portal-only@test-invented.example")).toBe(false);
+    });
+    it("an address on BOTH lists holds both memberships (independent, not blended)", () => {
+      const m = fresh("both@test-invented.example", "both@test-invented.example");
+      expect([m.isApplicationAdminEmail("both@test-invented.example"), m.isGovernanceAdminEmail("both@test-invented.example")]).toEqual([true, true]);
+    });
+    it("an empty application list grants no application membership even when the governance list is populated", () => {
+      const m = fresh("", "gov-only@test-invented.example");
+      expect(m.isApplicationAdminEmail("gov-only@test-invented.example")).toBe(false);
     });
   });
 
