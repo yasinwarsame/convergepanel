@@ -38,11 +38,14 @@ import {
   buildClaimKeyIndex,
   envDerivation,
   findAdminClaimReads,
+  hasUseClientDirective,
   insertBeforeFunction,
   prependToFunctionBody,
   replaceFunctionBody,
   replaceTopLevelIfCondition,
   loadFiles,
+  parseCached,
+  parseCacheStats,
   sourceFiles,
   taintedExports,
   topLevelClosure,
@@ -151,14 +154,15 @@ const ALLOWED_TABLE = Object.fromEntries(Object.entries(CLAIM_READ_ALLOW).map(([
 /** Server-side (non-"use client") sources: app, lib, middleware. */
 function serverFiles(files: FileSet): FileSet {
   return new Map(
-    [...files].filter(([p, src]) => /^(app|lib)\/|^middleware\.ts$/.test(p) && !/^\s*(?:\/\/[^\n]*\n|\/\*[\s\S]*?\*\/|\s)*["']use client["']/.test(src))
+    // CodeQL #40: parser-based directive-prologue check (was an exponential regex).
+    [...files].filter(([p, src]) => /^(app|lib)\/|^middleware\.ts$/.test(p) && !hasUseClientDirective(p, src))
   );
 }
 /** Reads of a named member (any spelling) — reuses the claim-read parser with another key. */
 function memberReads(path: string, src: string, key: string): ClaimRead[] {
   // findAdminClaimReads is keyed on "admin"; re-key by textual substitution of the
   // KEY is not safe, so walk the AST here for the two simple derived names.
-  const sf = ts.createSourceFile(path, src, ts.ScriptTarget.Latest, true, /\.(tsx|jsx)$/.test(path) ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  const sf = parseCached(path, src, /\.(tsx|jsx)$/.test(path) ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   const out: ClaimRead[] = [];
   const visit = (n: ts.Node) => {
     const hit =
@@ -171,6 +175,80 @@ function memberReads(path: string, src: string, key: string): ClaimRead[] {
   visit(sf);
   return out;
 }
+
+/* ========================================================================= *
+ * PR #319 corrections: CodeQL #40 directive check, and the parse cache.
+ * ========================================================================= */
+describe("CodeQL #40 — `\"use client\"` directive detection is parser-exact and linear", () => {
+  it.each([
+    ["plain double-quoted", '"use client";\nexport const x = 1;', true],
+    ["single-quoted, no semicolon", "'use client'\nexport const x = 1;", true],
+    ["after line and block comments and blank lines", '// header\n/* licence\n * text */\n\n"use client";\nexport {};', true],
+    ["after another directive", '"use strict";\n"use client";\nexport {};', true],
+    ["after a shebang", '#!/usr/bin/env node\n"use client";\nexport {};', true],
+    ["absent", "export const x = 1;", false],
+    ["after an import (not in the prologue)", 'import a from "a";\n"use client";\nexport {};', false],
+    ["inside a comment only", '// "use client"\nexport const x = 1;', false],
+    ["inside a block comment only", '/* "use client" */\nexport const x = 1;', false],
+    ["as a non-statement string", 'const s = "use client";', false],
+    ["parenthesized (an expression, not a directive)", '("use client");\nexport {};', false],
+    ["different text", '"use server";\nexport {};', false],
+    ["template literal", "`use client`;\nexport {};", false],
+  ])("%s", (_l, src, expected) => {
+    expect(hasUseClientDirective("app/x/page.tsx", src)).toBe(expected);
+  });
+
+  it("ADVERSARIAL: the input shape CodeQL named ('/*' + many '*//*') is handled in linear time", () => {
+    for (const n of [1_000, 10_000, 50_000]) {
+      const src = "/*" + "*//*".repeat(n) + "!";
+      const t0 = Date.now();
+      expect(hasUseClientDirective(`app/x/adv${n}.ts`, src)).toBe(false);
+      expect(hasUseClientDirective(`app/x/adv${n}b.ts`, src + '\n"use client";')).toBe(false);
+      // generous bound: the old regex needed ~17 ms at n=22 and doubled per repetition
+      expect([n, Date.now() - t0 < 5_000]).toEqual([n, true]);
+    }
+  });
+
+  it("serverFiles() keeps the same security decision: real client components are excluded, server modules are included", () => {
+    const server = serverFiles(FILES);
+    const clientInApp = [...FILES].filter(([p, src]) => /^(app|lib)\//.test(p) && hasUseClientDirective(p, src)).map(([p]) => p);
+    expect(clientInApp.length).toBeGreaterThan(0);
+    for (const p of clientInApp) expect([p, server.has(p)]).toEqual([p, false]);
+    for (const p of ["lib/admin/config.ts", "lib/admin/privilegedAccess.ts", "lib/firebase/auth-helpers.ts", "app/api/governance/queue/route.ts"]) expect([p, server.has(p)]).toEqual([p, true]);
+  });
+});
+
+describe("parse cache (test-only memoization) never serves a stale tree", () => {
+  it("identical content under the same name and kind reuses the tree; any change reparses", () => {
+    const a = 'export const v = 1;\n';
+    const t1 = parseCached("lib/x/cache.ts", a);
+    const t2 = parseCached("lib/x/cache.ts", a);
+    expect(t2).toBe(t1);
+    const b = a.replace("1", "2");
+    const t3 = parseCached("lib/x/cache.ts", b);
+    expect(t3).not.toBe(t1);
+    expect(t3.getFullText()).toBe(b);
+    expect(parseCached("lib/x/cache.ts", a)).toBe(t1); // original content: original tree, still correct text
+    expect(t1.getFullText()).toBe(a);
+    // same text, different file name or script kind: separate trees
+    expect(parseCached("lib/x/other.ts", a)).not.toBe(t1);
+    expect(parseCached("lib/x/cache.ts", a, ts.ScriptKind.TSX)).not.toBe(t1);
+  });
+
+  it("a mutated REAL source is analysed afresh: the cache does not hide an admin-claim read added after the original was parsed", () => {
+    const P = "lib/admin/config.ts";
+    const before = findAdminClaimReads(P, FILES.get(P)!, KEY_INDEX).length;
+    const hitsBefore = parseCacheStats.hits;
+    expect(findAdminClaimReads(P, FILES.get(P)!, KEY_INDEX).length).toBe(before); // re-analysing the original hits the cache
+    expect(parseCacheStats.hits).toBeGreaterThan(hitsBefore);
+    const mutated = FILES.get(P)! + "\nexport function leaked(d: any) { return d.admin === true; }\n";
+    const after = findAdminClaimReads(P, mutated, KEY_INDEX);
+    expect(after.length).toBe(before + 1);
+    expect(after.some((r) => r.fn === "leaked")).toBe(true);
+    // and the original is unaffected afterwards
+    expect(findAdminClaimReads(P, FILES.get(P)!, KEY_INDEX).length).toBe(before);
+  });
+});
 
 describe("M-1 — no privileged authority from a raw admin claim (parser-aware)", () => {
   it("sees the whole repository (positive control)", () => {
@@ -378,7 +456,7 @@ describe("F-2 — imported and indirect admin-claim reads (cross-file symbol res
 function envListReaders(files: FileSet): string[] {
   const out: string[] = [];
   for (const [p, src] of files) {
-    const sf = ts.createSourceFile(p, src, ts.ScriptTarget.Latest, true, /\.(tsx|jsx)$/.test(p) ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+    const sf = parseCached(p, src, /\.(tsx|jsx)$/.test(p) ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
     const v = (n: ts.Node) => {
       if ((ts.isIdentifier(n) || ts.isStringLiteralLike(n)) && n.text === "GOVERNANCE_ADMIN_EMAILS") {
         // A string literal inside a log / error message is not a read.
@@ -514,7 +592,7 @@ const MIXED_HANDLERS: Array<{ file: string; method: string }> = [
 
 /** Ordered call names reached from an exported handler, inlining module-local functions at their call site. */
 function handlerCallSequence(path: string, src: string, method: string): string[] {
-  const sf = ts.createSourceFile(path, src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const sf = parseCached(path, src, ts.ScriptKind.TS);
   const locals = new Map<string, ts.Node>();
   for (const st of sf.statements) {
     if (ts.isFunctionDeclaration(st) && st.name) locals.set(st.name.text, st);
@@ -555,7 +633,7 @@ function handlerCallSequence(path: string, src: string, method: string): string[
 const AUTH_CALL = "resolveGovernanceRequestUser";
 /** Module-local function names: their bodies are inlined into the sequence, so the bare name is not itself a protected call. */
 function localFunctionNames(src: string): Set<string> {
-  const sf = ts.createSourceFile("x.ts", src, ts.ScriptTarget.Latest, true);
+  const sf = parseCached("x.ts", src, ts.ScriptKind.TS);
   const out = new Set<string>();
   for (const st of sf.statements) {
     if (ts.isFunctionDeclaration(st) && st.name) out.add(st.name.text);
@@ -571,7 +649,7 @@ function globalMarkers(files: FileSet) {
   const consumers: string[] = [];
   const nullVisibilityCalls: string[] = [];
   for (const [p, src] of files) {
-    const sf = ts.createSourceFile(p, src, ts.ScriptTarget.Latest, true, /\.(tsx|jsx)$/.test(p) ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+    const sf = parseCached(p, src, /\.(tsx|jsx)$/.test(p) ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
     const fnOf = (n: ts.Node) => {
       for (let q: ts.Node | undefined = n.parent; q; q = q.parent) if (ts.isFunctionDeclaration(q) && q.name) return q.name.text;
       return "<module>";
@@ -627,7 +705,7 @@ function globalMarkers(files: FileSet) {
 
 /** The handler plus every module-local function it (transitively) calls by name. */
 function reachedFunctions(src: string, method: string): ts.Node[] {
-  const sf = ts.createSourceFile("h.ts", src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const sf = parseCached("h.ts", src, ts.ScriptKind.TS);
   const locals = new Map<string, ts.Node>();
   for (const st of sf.statements) {
     if (ts.isFunctionDeclaration(st) && st.name) locals.set(st.name.text, st);
@@ -773,7 +851,7 @@ describe("M-2 — global governance authority has exactly the pinned sources (pa
   });
 
   it("the env-list module's export surface is exactly pinned", () => {
-    const sf = ts.createSourceFile("c.ts", FILES.get("lib/admin/config.ts")!, ts.ScriptTarget.Latest, true);
+    const sf = parseCached("c.ts", FILES.get("lib/admin/config.ts")!, ts.ScriptKind.TS);
     const names: string[] = [];
     for (const st of sf.statements) {
       const exported = ts.canHaveModifiers(st) && (ts.getModifiers(st) ?? []).some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
@@ -1360,7 +1438,7 @@ describe("M-2 — global governance authority has exactly the pinned sources (pa
 
     it("a NEW reader of GOVERNANCE_ADMIN_EMAILS outside config.ts is visible to the AST", () => {
       const src = "export const gov = () => (process.env.GOVERNANCE_ADMIN_EMAILS ?? '').split(',');";
-      const sf = ts.createSourceFile("lib/x/env.ts", src, ts.ScriptTarget.Latest, true);
+      const sf = parseCached("lib/x/env.ts", src, ts.ScriptKind.TS);
       let hit = false;
       const v = (n: ts.Node) => { if (ts.isIdentifier(n) && n.text === "GOVERNANCE_ADMIN_EMAILS") hit = true; ts.forEachChild(n, v); };
       v(sf);

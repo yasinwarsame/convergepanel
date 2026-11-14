@@ -346,3 +346,21 @@ repository (app, lib, components, hooks, scripts, extension, prisma, root tools)
   `lib/governance/governanceVisibleUserIds.ts`, the six mixed governance handlers)
   requires explicit security-focused review. The independent-review verdicts recorded
   for 11274af and b2a7cb5 (F-1 NOT CLEAN, test blind spots) stand as recorded.
+
+### PR #319 CI corrections (owner authorization 2026-11-14)
+
+- **CodeQL #40 (`js/redos`, high, test-only).** The `"use client"` detector in
+  `serverFiles()` (privilegedAuthoritySources.spec.ts) was an exponential-backtracking
+  regex introduced by S2-b. It is replaced by `hasUseClientDirective` (test-only helper):
+  a TypeScript directive-prologue check, linear in input size. On all 740 tracked
+  `app/` / `lib/` / `middleware.ts` non-test sources it classifies identically to the old
+  regex (33 client files, 0 differences); the regex is removed. Positive, negative and
+  adversarial cases are tested.
+- **Parse memoization (test-only).** `parseCached` keys a tree on (script kind, file
+  name, exact source text): identical content reuses the tree, any change reparses, and
+  the cache is per jest test file and per process. Every security pin keeps its exact
+  expected value, and dedicated tests show that a mutated real source is analysed afresh.
+  Measured locally: privilegedAuthoritySources 149.2 s → 19.7 s.
+- **Quality Gate `timeout-minutes` 20 → 30** (`.github/workflows/quality-gate.yml`, the
+  Quality Gate job only). Main's runs were already 11.6–18.9 min; the PR #319 run was
+  cancelled at the 20-minute limit with 715 suites passed and 0 failed.

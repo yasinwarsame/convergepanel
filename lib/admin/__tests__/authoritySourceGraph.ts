@@ -66,9 +66,55 @@ export function loadFiles(paths: string[], root = REPO_ROOT): FileSet {
   return new Map(paths.map((p) => [p, readFileSync(join(root, p), "utf8")]));
 }
 
+/* ------------------------------------------------------------------------- *
+ * Parse memoization (PR #319 Quality Gate, owner Option C). TEST-ONLY.
+ *
+ * The cache identity is (scriptKind, fileName, EXACT source text): a tree is
+ * reused only for byte-identical content under the same name and kind, so a
+ * mutated source (every negative control, every mutation-worktree edit) is
+ * always parsed afresh. Trees are created with parent pointers and never
+ * mutated by any caller. The cache lives in this module instance, i.e. per jest
+ * test file (jest gives each test file its own module registry) and per
+ * process (each mutation worktree runs its own jest process), so nothing leaks
+ * across test files or worktrees. No external state influences a parse:
+ * target and setParentNodes are fixed.
+ * ------------------------------------------------------------------------- */
+const PARSE_CACHE = new Map<string, Map<string, ts.SourceFile>>();
+export const parseCacheStats = { hits: 0, misses: 0 };
+export function scriptKindFor(path: string): ts.ScriptKind {
+  return /\.(tsx|jsx)$/.test(path) ? ts.ScriptKind.TSX : /\.(js|mjs|cjs)$/.test(path) ? ts.ScriptKind.JS : ts.ScriptKind.TS;
+}
+export function parseCached(path: string, src: string, kind: ts.ScriptKind = scriptKindFor(path)): ts.SourceFile {
+  const id = `${kind}\u0000${path}`;
+  let byText = PARSE_CACHE.get(id);
+  if (!byText) PARSE_CACHE.set(id, (byText = new Map()));
+  const hit = byText.get(src);
+  if (hit) {
+    parseCacheStats.hits++;
+    return hit;
+  }
+  parseCacheStats.misses++;
+  const sf = ts.createSourceFile(path, src, ts.ScriptTarget.Latest, true, kind);
+  byText.set(src, sf);
+  return sf;
+}
+
 function parse(path: string, src: string): ts.SourceFile {
-  const kind = /\.(tsx|jsx)$/.test(path) ? ts.ScriptKind.TSX : /\.(js|mjs|cjs)$/.test(path) ? ts.ScriptKind.JS : ts.ScriptKind.TS;
-  return ts.createSourceFile(path, src, ts.ScriptTarget.Latest, true, kind);
+  return parseCached(path, src);
+}
+
+/**
+ * CodeQL #40 remediation: does the file begin with a `"use client"` directive?
+ * Parser-exact and linear (replaces an exponential-backtracking regex). A
+ * directive is a string-literal expression statement in the directive prologue
+ * (the leading run of such statements); comments and whitespace are trivia.
+ */
+export function hasUseClientDirective(path: string, src: string): boolean {
+  for (const st of parseCached(path, src).statements) {
+    if (!(ts.isExpressionStatement(st) && ts.isStringLiteral(st.expression))) return false;
+    if (st.expression.text === "use client") return true;
+  }
+  return false;
 }
 
 function enclosingName(n: ts.Node): string {
@@ -602,7 +648,7 @@ function envKeysIn(n: ts.Node, out: { reads: Set<string>; dynamic: string[] }) {
 }
 
 export function envDerivation(path: string, src: string, envName: string): EnvDerivation {
-  const sf = ts.createSourceFile(path, src, ts.ScriptTarget.Latest, true, /\.(tsx|jsx)$/.test(path) ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  const sf = parseCached(path, src, /\.(tsx|jsx)$/.test(path) ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   const envReads = new Map<string, string[]>();
   const topRefs = new Map<string, string[]>();
   const variableBindings: string[] = [];
@@ -743,7 +789,7 @@ export function topLevelClosure(d: EnvDerivation, start: string): string[] {
  * legitimate refactor of config.ts does not break a control's set-up).
  * ------------------------------------------------------------------------- */
 function topLevelFunction(src: string, name: string): ts.FunctionDeclaration {
-  const sf = ts.createSourceFile("x.ts", src, ts.ScriptTarget.Latest, true);
+  const sf = parseCached("x.ts", src, ts.ScriptKind.TS);
   const fns = sf.statements.filter((st): st is ts.FunctionDeclaration => ts.isFunctionDeclaration(st) && st.name?.text === name && !!st.body);
   if (fns.length !== 1) throw new Error(`expected exactly one top-level function ${name}, found ${fns.length}`);
   return fns[0];
@@ -766,7 +812,7 @@ export function insertBeforeFunction(src: string, name: string, text: string): s
 }
 /** Replaces the condition of the single top-level `if` statement. */
 export function replaceTopLevelIfCondition(src: string, cond: string): string {
-  const sf = ts.createSourceFile("x.ts", src, ts.ScriptTarget.Latest, true);
+  const sf = parseCached("x.ts", src, ts.ScriptKind.TS);
   const ifs = sf.statements.filter(ts.isIfStatement);
   if (ifs.length !== 1) throw new Error(`expected exactly one top-level if, found ${ifs.length}`);
   const e = ifs[0].expression;
