@@ -169,6 +169,49 @@ describe("validateUserSubscription — heals documents already shadowed by stale
     expect(calculateEffectiveEntitlement(storedDoc as never)).toMatchObject({ plan: "free", source: "free" });
   });
 
+  const STALE_FREE = { plan: "free", subscriptionStatus: "canceled", subscriptionStatusFromStripe: "active", planFromStripe: "5_models" };
+
+  it("free doc with stale paid authority under an ACTIVE override is skipped (no Stripe call, no write)", async () => {
+    storedDoc = { ...storedDoc, ...STALE_FREE, override: { active: true, plan: "5_models", runLimitMonthly: 150, expiresAt: new Date(Date.now() + 86_400_000).toISOString() } };
+    await validateUserSubscription("uid1");
+    expect(subscriptionsList).not.toHaveBeenCalled();
+    expect(writes).toHaveLength(0);
+  });
+
+  it("free doc with stale paid authority under an EXPIRED override is reconciled", async () => {
+    subscriptionsList.mockResolvedValue({ data: [withStatus("canceled")] });
+    storedDoc = { ...storedDoc, ...STALE_FREE, override: { active: true, plan: "5_models", runLimitMonthly: 150, expiresAt: new Date(Date.now() - 86_400_000).toISOString() } };
+    await validateUserSubscription("uid1");
+    expect(storedDoc.planFromStripe).toBeNull();
+    expect(calculateEffectiveEntitlement(storedDoc as never)).toMatchObject({ plan: "free", source: "free" });
+  });
+
+  it("free doc with stale paid authority but NO customer binding: no Stripe call, no write (documented limit)", async () => {
+    const { stripeCustomerId: _drop, ...rest } = { ...storedDoc, ...STALE_FREE };
+    storedDoc = rest;
+    await validateUserSubscription("uid1");
+    expect(subscriptionsList).not.toHaveBeenCalled();
+    expect(writes).toHaveLength(0);
+  });
+
+  it("free doc with stale paid authority and a single ACTIVE Stripe subscription is reconciled to the paid plan Stripe reports", async () => {
+    storedDoc = { ...storedDoc, ...STALE_FREE, billingInterval: "year" };
+    await validateUserSubscription("uid1");
+    expect(storedDoc).toMatchObject({ plan: "full", subscriptionStatus: "active", subscriptionStatusFromStripe: "active", planFromStripe: "5_models" });
+    expect(calculateEffectiveEntitlement(storedDoc as never)).toMatchObject({ plan: "5_models", source: "stripe" });
+  });
+
+  it("admin-sync past_due shape (plan free, planFromStripe 3_models, past_due) converges and stays unentitled", async () => {
+    subscriptionsList.mockResolvedValue({ data: [withStatus("past_due", "price_lite_y")] });
+    storedDoc = { ...storedDoc, plan: "free", subscriptionStatus: "past_due", subscriptionStatusFromStripe: "past_due", planFromStripe: "3_models", billingInterval: "year" };
+    await validateUserSubscription("uid1");
+    expect(storedDoc).toMatchObject({ plan: "lite", subscriptionStatusFromStripe: "past_due", planFromStripe: "3_models" });
+    expect(calculateEffectiveEntitlement(storedDoc as never)).toMatchObject({ plan: "free", source: "free" });
+    writes.length = 0;
+    await validateUserSubscription("uid1");
+    expect(writes).toHaveLength(0);
+  });
+
   it("a plain free document (no paid authority) is still skipped without a Stripe call", async () => {
     storedDoc = { plan: "free", stripeCustomerId: "cus_x", planFromStripe: null, ...USAGE };
     await validateUserSubscription("uid1");

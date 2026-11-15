@@ -95,8 +95,13 @@ export async function validateUserSubscription(
     // paid plan is NOT free to the entitlement resolver, which reads that field
     // first. Such a document (e.g. canceled after an admin sync, written before
     // the shared writer persisted the authority fields) must be reconciled, or
-    // its stale paid authority would never be cleared.
-    const stalePaidAuthority = userData?.planFromStripe === "3_models" || userData?.planFromStripe === "5_models";
+    // its stale paid authority would never be cleared. While an admin override
+    // is active the resolver ignores these fields, so the skip still applies
+    // (no Stripe call per request); reconciliation resumes once it expires.
+    // Known limit: a document with no stored customer binding returns at the
+    // identity check below and cannot be healed by this path.
+    const stalePaidAuthority =
+      (userData?.planFromStripe === "3_models" || userData?.planFromStripe === "5_models") && !isOverrideActive(userData);
     if ((currentPlan === "free" || !currentPlan) && !stalePaidAuthority) {
       return true; // No validation needed for free plan
     }
