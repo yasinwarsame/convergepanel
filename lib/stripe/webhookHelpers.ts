@@ -14,6 +14,20 @@ import type { SubscriptionBillingState } from "@/lib/billing/subscriptionBilling
 import { normalizePlanId } from "@/lib/admin/entitlements";
 
 /**
+ * The entitlement-authority fields the resolver (`calculateEffectiveEntitlement`)
+ * reads first. Single source for both the shared writer below and the
+ * request-time "already in sync" comparison, so the two cannot drift.
+ * `planFromStripe` is the entitlement form (3_models / 5_models); free → null.
+ */
+export function stripeAuthorityFields(
+  planMapping: Pick<SubscriptionPlanMapping, "planId">,
+  status: string
+): { subscriptionStatusFromStripe: string; planFromStripe: "3_models" | "5_models" | null } {
+  const plan = planMapping.planId === "free" ? null : normalizePlanId(planMapping.planId);
+  return { subscriptionStatusFromStripe: status, planFromStripe: plan === "free" ? null : plan };
+}
+
+/**
  * Update user plan in Firestore from Stripe subscription
  * 
  * This is the main function that updates Firestore with subscription data.
@@ -81,8 +95,7 @@ export async function updateUserPlanInFirestore(args: {
     // subscription kept paid access. Writing both here keeps every writer in
     // agreement. `planFromStripe` uses the entitlement form (3_models /
     // 5_models), mapped from the lite/full plan id; free → null.
-    subscriptionStatusFromStripe: status,
-    planFromStripe: planMapping.planId === "free" ? null : normalizePlanId(planMapping.planId),
+    ...stripeAuthorityFields(planMapping, status),
     billingInterval: billingInterval || null,
     planUpdatedAt: firebaseAdmin.firestore.Timestamp.now(),
     // Canonical period. Written ONLY when Stripe reported one, so a

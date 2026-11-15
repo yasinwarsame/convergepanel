@@ -146,6 +146,20 @@ describe("stale admin-synced authority no longer shadows automatic reconciliatio
 
   it("REGRESSION: stale active → past_due on an unrecognized legacy price with targetPlan also loses paid access", async () => {
     const { doc } = await syncSubscription(adminSyncedFullDoc(), sub({ status: "past_due", priceId: "price_legacy_2usd", metadata: { targetPlan: "full" } }));
+    expect(doc.planFromStripe).toBe("5_models");
+    expect(doc.subscriptionStatusFromStripe).toBe("past_due");
+    expect(calculateEffectiveEntitlement(doc as never)).toMatchObject({ plan: "free", source: "free" });
+  });
+
+  it("REGRESSION: active subscription on an unrecognized price WITHOUT targetPlan over stale 5_models resolves free", async () => {
+    const { doc } = await syncSubscription(adminSyncedFullDoc(), sub({ status: "active", priceId: "price_unknown" }));
+    expect(doc.planFromStripe).toBeNull();
+    expect(calculateEffectiveEntitlement(doc as never)).toMatchObject({ plan: "free", source: "free" });
+  });
+
+  it.each(["incomplete", "incomplete_expired"])("REGRESSION: stale active → %s loses paid access", async (status) => {
+    const { doc } = await syncSubscription(adminSyncedFullDoc(), sub({ status, priceId: "price_full_m" }));
+    expect(doc.subscriptionStatusFromStripe).toBe(status);
     expect(calculateEffectiveEntitlement(doc as never)).toMatchObject({ plan: "free", source: "free" });
   });
 
