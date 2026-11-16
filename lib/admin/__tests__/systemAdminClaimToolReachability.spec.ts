@@ -32,7 +32,7 @@
  * refuses to silently under-report.
  */
 
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, normalize } from "node:path";
 import * as ts from "typescript";
 import { REPO_ROOT, type FileSet } from "./authoritySourceGraph";
@@ -45,16 +45,22 @@ const TOOL = [
 const CLI = "scripts/admin/set-system-admin-claim.ts";
 
 const CODE = /\.(?:ts|tsx|js|jsx|mjs|cjs|mts|cts)$/;
-const SKIP_DIRS = new Set(["node_modules", ".next", ".git", ".vercel", "coverage", "dist", "build", "out", ".turbo"]);
+/** Skipped at ANY depth: package code and VCS metadata (a relative import into them resolves to no FILES entry and fails closed). */
+const SKIP_ANYWHERE = new Set(["node_modules", ".git"]);
+/** Build output skipped at the REPO ROOT only (review round 2: a nested `lib/build/` is repo code and must be walked). */
+const SKIP_AT_ROOT = new Set([".next", ".vercel", "coverage", "dist", "build", "out", ".turbo"]);
+/** Symlinks met during the walk: never followed; the pin fails if any exists (review round 2, finding 2). */
+const SYMLINKS: string[] = [];
 /** The WHOLE repository's code (not only fixed roots; test helpers included), as a FileSet. */
 function wholeRepoFiles(root = REPO_ROOT): FileSet {
   const out: FileSet = new Map();
   const walk = (rel: string) => {
     for (const e of readdirSync(join(root, rel))) {
-      if (SKIP_DIRS.has(e)) continue;
+      if (SKIP_ANYWHERE.has(e) || (rel === "" && SKIP_AT_ROOT.has(e))) continue;
       const r = rel ? `${rel}/${e}` : e;
-      const st = statSync(join(root, r));
-      if (st.isDirectory()) walk(r);
+      const lst = lstatSync(join(root, r));
+      if (lst.isSymbolicLink()) { SYMLINKS.push(r); continue; }
+      if (lst.isDirectory()) walk(r);
       else if (CODE.test(e) && !e.endsWith(".d.ts")) out.set(r, readFileSync(join(root, r), "utf8"));
     }
   };
@@ -69,14 +75,15 @@ type Resolution = { code: string } | { asset: string } | { missing: true } | { p
 /** Resolves `@/` and relative specifiers. A target that is no file at all is MISSING (fail-closed). */
 function resolveRepo(from: string, spec: string, files: FileSet): Resolution {
   let base: string;
-  if (spec.startsWith("@/")) base = spec.slice(2);
+  if (spec.startsWith("@/")) base = normalize(spec.slice(2)).replace(/\\/g, "/"); // review round 2: "@/lib/../lib/x" is normalised too
   else if (spec.startsWith(".")) base = normalize(join(dirname(from), spec)).replace(/\\/g, "/");
   else return { pkg: true };
   for (const e of [...EXTS, ...INDEX]) if (files.has(base + e)) return { code: base + e };
   const m = /^(.*)\.(js|jsx|mjs|cjs)$/.exec(base);
   if (m) for (const e of [".ts", ".tsx", ".mts", ".cts"]) if (files.has(m[1] + e)) return { code: m[1] + e };
-  // A real non-code file (css, json, svg …) is a leaf; only an absent target is unresolvable.
-  if (existsSync(join(REPO_ROOT, base)) && statSync(join(REPO_ROOT, base)).isFile()) return { asset: base };
+  // A real NON-CODE file (css, json, svg …) is a leaf. A CODE file the walker does not hold (skipped
+  // directory, symlink, outside the repo) is MISSING: fail closed (review round 2, finding 1).
+  if (!CODE.test(base) && !base.startsWith("..") && existsSync(join(REPO_ROOT, base)) && statSync(join(REPO_ROOT, base)).isFile()) return { asset: base };
   return { missing: true };
 }
 
@@ -221,6 +228,10 @@ describe("PR #295 claim tool is operator-only: unreachable from every deployed m
     });
   });
 
+  it("FAIL-CLOSED: the repository contains no symlink (a symlinked directory would index the tool under another name)", () => {
+    expect(SYMLINKS).toEqual([]);
+  });
+
   it("there is no second Next.js root (pages/, src/app, src/pages) the entry list would miss", () => {
     for (const d of ["pages", "src/app", "src/pages"]) expect({ d, exists: existsSync(join(REPO_ROOT, d)) }).toEqual({ d, exists: false });
     // and next.config.js declares no webpack resolve.alias the resolver would not know
@@ -271,12 +282,16 @@ describe("PR #295 claim tool is operator-only: unreachable from every deployed m
       ["barrel at index.jsx", { "lib/x/index.jsx": 'export * from "../admin/systemAdminClaimSafety";\n', [ROUTE]: routeWith('import * as x from "@/lib/x";') }],
       ["barrel at index.mjs", { "lib/y/index.mjs": 'export * from "../admin/systemAdminClaimSafety";\n', [ROUTE]: routeWith('import * as y from "@/lib/y";') }],
       ["webpack require.context over lib/admin", { [ROUTE]: routeWith('const ctx = require.context("../../../../lib/admin", false, /systemAdminClaim/);') }],
+      ["review round 2: nested lib/build/ directory with an explicit .js specifier", { "lib/build/gate.js": 'module.exports = require("../admin/systemAdminClaimSafety");\n', [ROUTE]: routeWith('import g from "@/lib/build/gate.js";') }],
+      ["review round 2: un-normalised @/ path with an explicit .ts extension", { [ROUTE]: routeWith('import * as g from "@/lib/../lib/admin/systemAdminClaimSafety.ts";') }],
+      ["review round 2: @/./ path", { [ROUTE]: routeWith('import * as g from "@/./lib/admin/systemAdminClaimSafety";') }],
     ] as Array<[string, Record<string, string>]>)("review round 1: %s → reached", (_l, extra) => {
       expect(deployedToolPaths(withFiles(extra)).length).toBeGreaterThan(0);
     });
 
     it.each([
       ["an unresolvable repo specifier (target file absent)", 'import "@/lib/does/not/exist";'],
+      ["a CODE file outside the walked set, named with its extension (review round 2)", 'import g from "@/node_modules/whatever/index.js";'],
       ["aliased require", 'const r = require; r("../../../../lib/admin/systemAdminClaimSafety");'],
       ["module.require", 'module.require("../../../../lib/admin/systemAdminClaimSafety");'],
       ["createRequire", 'import { createRequire } from "node:module"; const rq = createRequire(import.meta.url);'],

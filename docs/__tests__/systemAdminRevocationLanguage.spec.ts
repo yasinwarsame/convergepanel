@@ -275,7 +275,9 @@ const CLAIM_RULES: ClaimRule[] = [
       String.raw`|\b(?:invalidates?|revokes?|kills?)\s+(?:the\s+|every\s+|all\s+|any\s+)?(?:\w+'s\s+)?(?:already[- ]issued\s+|existing\s+|outstanding\s+|current\s+)?(?:admin\s+)?(?:ID|bearer)\s+tokens?\b` +
       // Review round 1 paraphrases: "previously issued / old / prior" tokens, "tokens issued before …".
       String.raw`|\b(?:previously[- ]issued|old|older|prior|earlier|stale)\s+(?:admin\s+)?(?:ID\s+|bearer\s+)?tokens?\b[^.;]{0,60}?\b(?:stops?\s+working|no\s+longer\s+works?|becomes?\s+(?:useless|invalid|unusable|worthless)|(?:is|are)\s+(?:invalidated|revoked|invalid|useless))\b` +
-      String.raw`|\b(?:ID\s+|bearer\s+)?tokens?\s+(?:issued|minted)\s+before\b[^.;]{0,40}?\b(?:no\s+longer\s+work|stop\s+working|(?:are|is)\s+(?:invalidated|revoked|invalid|useless))\b`,
+      String.raw`|\b(?:ID\s+|bearer\s+)?tokens?\s+(?:issued|minted)\s+(?:before|earlier)\b[^.;]{0,40}?\b(?:no\s+longer\s+works?|stops?\s+working|can\s+no\s+longer\s+be\s+used|(?:are|is)\s+(?:invalidated|revoked|invalid|useless))\b` +
+      // Review round 2: "old tokens can no longer be used".
+      String.raw`|\b(?:previously[- ]issued|old|older|prior|earlier|stale|existing|already[- ]issued)\s+(?:admin\s+)?(?:ID\s+|bearer\s+)?tokens?\s+can\s+no\s+longer\s+be\s+used\b`,
       "gi",
     ),
     negatable: true,
@@ -513,6 +515,11 @@ const POST_S2B_R4_NEGATIVE = [
   ["R4-universal-enforcement", "The admin loses access as soon as the claim is removed."],
   ["R4-universal-enforcement", "Every admin route now enforces the live claim."],
   ["R4-universal-enforcement", "S2-b closes the one-hour window entirely."],
+  // Singular / "earlier" forms the round-2 review showed passing (verbatim).
+  ["R4-token-invalidated", "A token issued before the revoke no longer works."],
+  ["R4-token-invalidated", "A token issued before the revoke stops working."],
+  ["R4-token-invalidated", "Any token minted earlier stops working."],
+  ["R4-token-invalidated", "Old tokens can no longer be used."],
 ] as const;
 
 /** POSITIVE: accurate, narrowly scoped post-S2-b statements every rule must pass. */
