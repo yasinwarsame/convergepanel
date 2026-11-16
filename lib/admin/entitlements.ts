@@ -144,14 +144,14 @@ export function calculateEffectiveEntitlement(userDoc: UserDocument | null | und
   // the year the customer already paid for; without "trialing" here that
   // repair would strip a paying customer down to free limits.
   //
-  // PLAN SOURCE (Phase MIG-B1): `planFromStripe` is written ONLY by the
-  // admin sync path (lib/admin/stripeSync.ts). The canonical subscription
-  // synchronization path — the Stripe webhook, via
-  // `updateUserPlanInFirestore()` — writes `plan` and never `planFromStripe`,
-  // so resolving entitlement from `planFromStripe` alone made a paid
-  // decision depend on a field the canonical writer does not set. `plan` is
-  // read as a fallback only when `planFromStripe` is absent, and both are
-  // gated by the same status predicate.
+  // PLAN SOURCE: `subscriptionStatusFromStripe` and `planFromStripe` are
+  // written by BOTH the admin sync path (lib/admin/stripeSync.ts) and the
+  // shared automatic writer `updateUserPlanInFirestore()` (webhook, sync-plan,
+  // request-time reconciliation, deletion) via `stripeAuthorityFields()`.
+  // Before that, only the admin sync wrote them, so stale admin-written values
+  // shadowed later automatic writes. `plan` / `subscriptionStatus` remain the
+  // fallback for documents that never received the authority fields, and both
+  // are gated by the same status predicate.
   //
   // Phase FIRESTORE-AUTHZ-P0.1: this comment previously asserted "Neither
   // field is client-writable" while `firestore.rules` granted

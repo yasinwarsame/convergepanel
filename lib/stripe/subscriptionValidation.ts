@@ -38,7 +38,7 @@ import { stripe } from "./client";
 import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
 import { mapSubscriptionToPlan } from "@/lib/billing/subscriptionMapper";
-import { updateUserPlanInFirestore } from "./webhookHelpers";
+import { updateUserPlanInFirestore, stripeAuthorityFields } from "./webhookHelpers";
 import { resolveSubscriptionBillingState } from "@/lib/billing/subscriptionBillingState";
 import {
   reportIncompleteAuthorityEnumeration,
@@ -91,7 +91,18 @@ export async function validateUserSubscription(
     // correct downwards, and upgrades are the webhook's job — reconciling
     // every free request would also put a Stripe call on the hot path of the
     // largest population of users for no billing benefit.
-    if (currentPlan === "free" || !currentPlan) {
+    // EXCEPTION: a document whose admin-written `planFromStripe` still names a
+    // paid plan is NOT free to the entitlement resolver, which reads that field
+    // first. Such a document (e.g. canceled after an admin sync, written before
+    // the shared writer persisted the authority fields) must be reconciled, or
+    // its stale paid authority would never be cleared. While an admin override
+    // is active the resolver ignores these fields, so the skip still applies
+    // (no Stripe call per request); reconciliation resumes once it expires.
+    // Known limit: a document with no stored customer binding returns at the
+    // identity check below and cannot be healed by this path.
+    const stalePaidAuthority =
+      (userData?.planFromStripe === "3_models" || userData?.planFromStripe === "5_models") && !isOverrideActive(userData);
+    if ((currentPlan === "free" || !currentPlan) && !stalePaidAuthority) {
       return true; // No validation needed for free plan
     }
 
@@ -224,11 +235,22 @@ export async function validateUserSubscription(
     const canonicalState = resolveSubscriptionBillingState(authoritative as never);
     const intervalMismatch = canonicalState.ok && userData?.billingInterval !== canonicalState.state.billingInterval;
 
+    // The resolver's authority fields are part of "matches": a document whose
+    // `plan` / `subscriptionStatus` agree with Stripe but whose admin-written
+    // `subscriptionStatusFromStripe` / `planFromStripe` are stale would
+    // otherwise be skipped forever while the resolver keeps reading the stale
+    // values (e.g. paid access through past_due, or a stale higher plan).
+    const expectedAuthority = stripeAuthorityFields(planMapping, authoritative.status);
+    const authorityMismatch =
+      (userData?.subscriptionStatusFromStripe ?? null) !== expectedAuthority.subscriptionStatusFromStripe ||
+      (userData?.planFromStripe ?? null) !== expectedAuthority.planFromStripe;
+
     const matches =
       currentPlan === planMapping.planId &&
       firestoreSubscriptionId === authoritative.id &&
       firestoreStatus === authoritative.status &&
-      !intervalMismatch;
+      !intervalMismatch &&
+      !authorityMismatch;
 
     if (matches) return true;
 
