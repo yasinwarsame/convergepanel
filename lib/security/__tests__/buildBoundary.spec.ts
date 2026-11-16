@@ -8,9 +8,7 @@ import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync, readFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const { CpBuildBoundaryPlugin, isForbidden, forbiddenSet, FORBIDDEN_FILES, VIOLATION } = require("../buildBoundary");
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const { checkBuildBoundary, classifyResourceless, TOOL_LITERALS } = require("../../../scripts/security/check-build-boundary");
 
 const REPO = join(__dirname, "..", "..", "..");
@@ -41,7 +39,6 @@ describe("isForbidden (canonical identity)", () => {
 });
 
 describe("Layer A under the real webpack 5 bundled by Next.js", () => {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
   const wp = require("next/dist/compiled/webpack/webpack");
   if (wp.init) wp.init();
   const webpack = wp.webpack;
