@@ -2,6 +2,18 @@
  * PR #295 × S2-b — OPERATOR-ONLY REACHABILITY of the SYSTEM_ADMIN claim tool
  * (owner ruling A).
  *
+ * STATUS (owner ruling after Round 4): this walker is a FAST, SECONDARY
+ * PRE-CHECK, NOT the authoritative proof. A hand-written resolver cannot be
+ * complete against webpack/Next resolution (Round 4 built three bypasses).
+ * The AUTHORITY is the build boundary: lib/security/buildBoundary.js
+ * (enforced inside webpack's own resolver on every compiler) plus
+ * scripts/security/check-build-boundary.js (independent check of the real
+ * build's manifests, Next file traces and emitted chunks), both run on every
+ * PR by the required Quality Gate. This spec additionally fails closed on the
+ * resolution features Round 4 used (private-next-* aliases, import.meta,
+ * nested package.json, file:/link:/workspace: dependencies, workspaces,
+ * tsconfig extends).
+ *
  * The claim tool reads and writes the `admin` custom claim. S2-b's authority
  * pins (privilegedGuardPin.spec.ts, privilegedAuthoritySources.spec.ts) allow
  * those reads ONLY because the tool is offline operator code. This spec is the
@@ -83,6 +95,7 @@ function resolveRepo(from: string, spec: string, files: FileSet): Resolution {
   let base: string;
   if (spec.startsWith("@/")) base = normalize(spec.slice(2)).replace(/\\/g, "/"); // review round 2: "@/lib/../lib/x" is normalised too
   else if (spec.startsWith(".")) base = normalize(join(dirname(from), spec)).replace(/\\/g, "/");
+  else if (/^private-(?:next|dot-next)/.test(spec)) return { missing: true }; // Round 4: Next's internal root/app aliases
   else if (BARE_PACKAGE.test(spec) && !spec.startsWith("node:") && REPO_TOP.has(spec.split("/")[0])) return { missing: true }; // "lib/admin/…" via baseUrl/modules
   else if (BARE_PACKAGE.test(spec)) return { pkg: true };
   else return { missing: true }; // absolute paths, "#imports", "file:" URLs, anything not a package name: fail closed
@@ -142,6 +155,10 @@ function edgesOf(path: string, src: string, files: FileSet): Edges {
         if (a && ts.isStringLiteralLike(a)) add(a.text, n);
         else unresolvable.push(`${where(n)} non-literal ${n.getText(sf).slice(0, 80)}`);
       }
+    }
+    // Round 4: import.meta (new Worker(new URL(…, import.meta.url)), import.meta.webpackContext, …) is not modelled: fail closed.
+    if (ts.isMetaProperty(n) && n.keywordToken === ts.SyntaxKind.ImportKeyword) {
+      unresolvable.push(`${where(n)} import.meta (not modelled: worker URLs, webpackContext)`);
     }
     // `require` used as a VALUE (aliased: const r = require; r(...)) cannot be followed: fail closed.
     if (ts.isIdentifier(n) && n.text === "require" && n.parent && !(ts.isCallExpression(n.parent) && n.parent.expression === n)
@@ -240,6 +257,28 @@ describe("PR #295 claim tool is operator-only: unreachable from every deployed m
     expect(SYMLINKS).toEqual([]);
   });
 
+  it("Round 4 pins: no nested package.json, no file:/link:/workspace: dependency, no workspaces, no tsconfig extends", () => {
+    const nested: string[] = [];
+    const walkPkg = (rel: string) => {
+      for (const e of readdirSync(join(REPO_ROOT, rel))) {
+        if (SKIP_ANYWHERE.has(e) || (rel === "" && SKIP_AT_ROOT.has(e))) continue;
+        const r = rel ? `${rel}/${e}` : e;
+        const lst = lstatSync(join(REPO_ROOT, r));
+        if (lst.isSymbolicLink()) continue;
+        if (lst.isDirectory()) walkPkg(r);
+        else if (e === "package.json" && rel !== "") nested.push(r);
+      }
+    };
+    walkPkg("");
+    expect(nested).toEqual([]); // a nested package.json "main"/"exports" can redirect a directory import (Round 4, finding 2)
+    const pkg = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8"));
+    const deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}), ...(pkg.optionalDependencies ?? {}), ...(pkg.peerDependencies ?? {}) } as Record<string, string>;
+    expect(Object.entries(deps).filter(([, v]) => /^(?:file|link|workspace|portal):/.test(String(v)))).toEqual([]);
+    expect(pkg.workspaces).toBeUndefined();
+    const tsconfig = JSON.parse(readFileSync(join(REPO_ROOT, "tsconfig.json"), "utf8"));
+    expect(tsconfig.extends).toBeUndefined();
+  });
+
   it("there is no second Next.js root (pages/, src/app, src/pages) the entry list would miss", () => {
     for (const d of ["pages", "src/app", "src/pages"]) expect({ d, exists: existsSync(join(REPO_ROOT, d)) }).toEqual({ d, exists: false });
     // and next.config.js declares no webpack resolve.alias the resolver would not know
@@ -311,6 +350,10 @@ describe("PR #295 claim tool is operator-only: unreachable from every deployed m
       ["review round 3: an absolute path", 'import "/vercel/path0/lib/admin/systemAdminClaimSafety";'],
       ["review round 3: a file: URL", 'import "file:///vercel/path0/lib/admin/systemAdminClaimSafety.ts";'],
       ["review round 3: a bare specifier naming a repo directory (baseUrl/modules)", 'import "lib/admin/systemAdminClaimSafety";'],
+      ["Round 4: private-next-root-dir alias", 'import "private-next-root-dir/lib/admin/systemAdminClaimSafety";'],
+      ["Round 4: private-next-app-dir alias", 'import "private-next-app-dir/api/admin/access/route";'],
+      ["Round 4: Worker URL (import.meta)", 'import { Worker } from "node:worker_threads"; new Worker(new URL("../../../../lib/admin/systemAdminClaimExecution.ts", import.meta.url));'],
+      ["Round 4: import.meta.webpackContext", 'const ctx = (import.meta as any).webpackContext("../../../../lib/admin", { regExp: /systemAdminClaim/ });'],
       ["aliased require", 'const r = require; r("../../../../lib/admin/systemAdminClaimSafety");'],
       ["module.require", 'module.require("../../../../lib/admin/systemAdminClaimSafety");'],
       ["createRequire", 'import { createRequire } from "node:module"; const rq = createRequire(import.meta.url);'],

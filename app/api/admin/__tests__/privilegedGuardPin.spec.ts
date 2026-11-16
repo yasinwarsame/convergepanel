@@ -197,7 +197,7 @@ const REPO_AUTHORITY_ALLOW: Record<string, { allowed: string[]; reason: string }
   },
   "lib/admin/systemAdminClaimSafety.ts": {
     allowed: [".admin === true", "customClaims.admin"],
-    reason: "OFFLINE OPERATOR TOOL (PR #295): the claim CLI's planning, last-admin count, operator self-check and read-back read the claims it writes; unreachable from any deployed module (systemAdminClaimToolReachability.spec.ts); per-function rows in privilegedAuthoritySources.spec.ts",
+    reason: "OFFLINE OPERATOR TOOL (PR #295): the claim CLI's planning, last-admin count, operator self-check and read-back read the claims it writes; conditional on the build boundary (lib/security/buildBoundary.js + scripts/security/check-build-boundary.js, required Quality Gate); walker = secondary pre-check; per-function rows in privilegedAuthoritySources.spec.ts",
   },
   "app/api/admin/set-role/route.ts": {
     allowed: ["customClaims.admin"],

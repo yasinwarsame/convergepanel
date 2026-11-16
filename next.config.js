@@ -5,8 +5,14 @@ const { withSentryConfig } = require("@sentry/nextjs");
 // before any page is built (no-op for Preview, development, local and CI builds).
 require("./lib/firebase/productionBuildConfigGuard").assertProductionBuildConfig(process.env);
 
+// PR #295 build boundary: the SYSTEM_ADMIN claim tool must never be resolved, bundled or traced by deployed code.
+// Enforced inside webpack's own resolver on every compiler (lib/security/buildBoundary.js); the post-build
+// checker scripts/security/check-build-boundary.js independently verifies the manifests, traces and chunks.
+const { withBuildBoundary } = require("./lib/security/buildBoundary");
+
 const nextConfig = {
   reactStrictMode: true,
+  webpack: (config, ctx) => withBuildBoundary(config, ctx),
   skipTrailingSlashRedirect: true,
   async rewrites() {
     return [
