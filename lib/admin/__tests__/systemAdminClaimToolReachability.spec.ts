@@ -21,14 +21,21 @@
  *      modules) imports a tool module, anywhere in the repository;
  *   4. tsconfig declares a path alias this walker does not resolve.
  *
- * The walker is deliberately CONSERVATIVE (type-only imports count as edges),
- * so it can only over-report reachability, never under-report it.
+ * The walker is deliberately CONSERVATIVE: type-only imports count as edges,
+ * `require.context` reaches every code file under its directory, and the file
+ * set is the WHOLE repository (minus node_modules, .next, .git and build
+ * output; test HELPERS included, spec files too) so nothing is out of view.
+ * Any `@/` or relative specifier that resolves to no file at all, and any
+ * module-loading form it cannot follow (non-literal targets, aliased
+ * `require`, `module.require`, `createRequire`), is reported as UNRESOLVABLE
+ * and fails the pin (review round 1, findings 1-2): it can over-report, and it
+ * refuses to silently under-report.
  */
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { dirname, join, normalize } from "node:path";
 import * as ts from "typescript";
-import { REPO_ROOT, loadFiles, resolveSpecifier, sourceFiles, type FileSet } from "./authoritySourceGraph";
+import { REPO_ROOT, type FileSet } from "./authoritySourceGraph";
 
 const TOOL = [
   "lib/admin/systemAdminClaimSafety.ts",
@@ -37,18 +44,48 @@ const TOOL = [
 ] as const;
 const CLI = "scripts/admin/set-system-admin-claim.ts";
 
-/** Every source the repository could ship or run (tests excluded by sourceFiles). */
-const ROOTS = [
-  "app", "lib", "components", "hooks", "scripts", "extension", "prisma",
-  "middleware.ts", "instrumentation.ts", "instrumentation-client.ts",
-  "sentry.edge.config.ts", "sentry.server.config.ts", "next.config.js",
-];
-const FILES: FileSet = loadFiles(sourceFiles(ROOTS));
+const CODE = /\.(?:ts|tsx|js|jsx|mjs|cjs|mts|cts)$/;
+const SKIP_DIRS = new Set(["node_modules", ".next", ".git", ".vercel", "coverage", "dist", "build", "out", ".turbo"]);
+/** The WHOLE repository's code (not only fixed roots; test helpers included), as a FileSet. */
+function wholeRepoFiles(root = REPO_ROOT): FileSet {
+  const out: FileSet = new Map();
+  const walk = (rel: string) => {
+    for (const e of readdirSync(join(root, rel))) {
+      if (SKIP_DIRS.has(e)) continue;
+      const r = rel ? `${rel}/${e}` : e;
+      const st = statSync(join(root, r));
+      if (st.isDirectory()) walk(r);
+      else if (CODE.test(e) && !e.endsWith(".d.ts")) out.set(r, readFileSync(join(root, r), "utf8"));
+    }
+  };
+  walk("");
+  return out;
+}
+const FILES: FileSet = wholeRepoFiles();
 
-/** Deployed entry points: everything Next.js can load from app/, plus the root runtime modules. */
+const EXTS = ["", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"];
+const INDEX = EXTS.filter(Boolean).map((e) => `/index${e}`);
+type Resolution = { code: string } | { asset: string } | { missing: true } | { pkg: true };
+/** Resolves `@/` and relative specifiers. A target that is no file at all is MISSING (fail-closed). */
+function resolveRepo(from: string, spec: string, files: FileSet): Resolution {
+  let base: string;
+  if (spec.startsWith("@/")) base = spec.slice(2);
+  else if (spec.startsWith(".")) base = normalize(join(dirname(from), spec)).replace(/\\/g, "/");
+  else return { pkg: true };
+  for (const e of [...EXTS, ...INDEX]) if (files.has(base + e)) return { code: base + e };
+  const m = /^(.*)\.(js|jsx|mjs|cjs)$/.exec(base);
+  if (m) for (const e of [".ts", ".tsx", ".mts", ".cts"]) if (files.has(m[1] + e)) return { code: m[1] + e };
+  // A real non-code file (css, json, svg …) is a leaf; only an absent target is unresolvable.
+  if (existsSync(join(REPO_ROOT, base)) && statSync(join(REPO_ROOT, base)).isFile()) return { asset: base };
+  return { missing: true };
+}
+
+/** A spec/test FILE is never deployed (a test HELPER is only reachable if deployed code imports it). */
+const isSpecFile = (f: string) => /\.(?:spec|test)\.[cm]?[jt]sx?$/.test(f);
+/** Deployed entry points: every non-spec module Next.js can load from app/, plus the root runtime modules. */
 function deployedEntries(files: FileSet): string[] {
   const roots = new Set(["middleware.ts", "instrumentation.ts", "instrumentation-client.ts", "sentry.edge.config.ts", "sentry.server.config.ts", "next.config.js"]);
-  return [...files.keys()].filter((f) => f.startsWith("app/") || roots.has(f)).sort();
+  return [...files.keys()].filter((f) => (f.startsWith("app/") && !isSpecFile(f)) || roots.has(f)).sort();
 }
 
 type Edges = { deps: string[]; unresolvable: string[] };
@@ -59,24 +96,46 @@ function edgesOf(path: string, src: string, files: FileSet): Edges {
   const sf = ts.createSourceFile(path, src, ts.ScriptTarget.Latest, true, kind);
   const deps = new Set<string>();
   const unresolvable: string[] = [];
-  const add = (spec: string) => {
-    const r = resolveSpecifier(path, spec, files);
-    if (r) deps.add(r);
+  const where = (n: ts.Node) => `${path}:${sf.getLineAndCharacterOfPosition(n.getStart()).line + 1}`;
+  const add = (spec: string, n: ts.Node) => {
+    const r = resolveRepo(path, spec, files);
+    if ("code" in r) deps.add(r.code);
+    else if ("missing" in r) unresolvable.push(`${where(n)} unresolved repo specifier ${JSON.stringify(spec)}`);
   };
   const visit = (n: ts.Node): void => {
-    if ((ts.isImportDeclaration(n) || ts.isExportDeclaration(n)) && n.moduleSpecifier && ts.isStringLiteral(n.moduleSpecifier)) add(n.moduleSpecifier.text);
-    if (ts.isImportEqualsDeclaration(n) && ts.isExternalModuleReference(n.moduleReference) && ts.isStringLiteral(n.moduleReference.expression)) add(n.moduleReference.expression.text);
-    if (ts.isImportTypeNode(n) && ts.isLiteralTypeNode(n.argument) && ts.isStringLiteral(n.argument.literal)) add(n.argument.literal.text);
+    if ((ts.isImportDeclaration(n) || ts.isExportDeclaration(n)) && n.moduleSpecifier && ts.isStringLiteral(n.moduleSpecifier)) add(n.moduleSpecifier.text, n);
+    if (ts.isImportEqualsDeclaration(n) && ts.isExternalModuleReference(n.moduleReference) && ts.isStringLiteral(n.moduleReference.expression)) add(n.moduleReference.expression.text, n);
+    if (ts.isImportTypeNode(n) && ts.isLiteralTypeNode(n.argument) && ts.isStringLiteral(n.argument.literal)) add(n.argument.literal.text, n);
     if (ts.isCallExpression(n)) {
       const callee = n.expression;
       const isDynImport = callee.kind === ts.SyntaxKind.ImportKeyword;
       const isRequire = ts.isIdentifier(callee) && callee.text === "require";
       const isRequireResolve = ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) && callee.expression.text === "require" && callee.name.text === "resolve";
-      if (isDynImport || isRequire || isRequireResolve) {
-        const a = n.arguments[0];
-        if (a && ts.isStringLiteralLike(a)) add(a.text);
-        else unresolvable.push(`${path}:${sf.getLineAndCharacterOfPosition(n.getStart()).line + 1} ${n.getText(sf).slice(0, 80)}`);
+      const isRequireContext = ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) && callee.expression.text === "require" && callee.name.text === "context";
+      const isModuleRequire = ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) && callee.expression.text === "module" && callee.name.text === "require";
+      const isCreateRequire = ts.isIdentifier(callee) && callee.text === "createRequire";
+      const a = n.arguments[0];
+      if (isRequireContext) {
+        // webpack bundles every match under the directory: conservatively, every code file under it.
+        if (a && ts.isStringLiteralLike(a) && a.text.startsWith(".")) {
+          const dir = normalize(join(dirname(path), a.text)).replace(/\\/g, "/").replace(/\/$/, "");
+          for (const f of files.keys()) if (f.startsWith(`${dir}/`)) deps.add(f);
+        } else unresolvable.push(`${where(n)} require.context with a non-literal or non-relative directory`);
+      } else if (isModuleRequire || isCreateRequire) {
+        unresolvable.push(`${where(n)} ${isCreateRequire ? "createRequire" : "module.require"} (not followed)`);
+      } else if (isDynImport || isRequire || isRequireResolve) {
+        if (a && ts.isStringLiteralLike(a)) add(a.text, n);
+        else unresolvable.push(`${where(n)} non-literal ${n.getText(sf).slice(0, 80)}`);
       }
+    }
+    // `require` used as a VALUE (aliased: const r = require; r(...)) cannot be followed: fail closed.
+    if (ts.isIdentifier(n) && n.text === "require" && n.parent && !(ts.isCallExpression(n.parent) && n.parent.expression === n)
+      && !(ts.isPropertyAccessExpression(n.parent) && n.parent.expression === n)
+      && !(ts.isTypeOfExpression(n.parent))
+      && !(ts.isPropertyAccessExpression(n.parent) && n.parent.name === n)
+      && !(ts.isPropertyAssignment(n.parent) && n.parent.name === n)
+      && !(ts.isImportSpecifier(n.parent) || ts.isExportSpecifier(n.parent))) {
+      unresolvable.push(`${where(n)} require used as a value (aliased require)`);
     }
     ts.forEachChild(n, visit);
   };
@@ -109,10 +168,11 @@ function reach(files: FileSet) {
   return { reached: new Set(parent.keys()), unresolvable, chain };
 }
 
-/** Direct importers of each tool module, across the WHOLE repository (deployed or not). */
+/** Direct NON-SPEC importers of each tool module, across the WHOLE repository (deployed or not; helpers included). */
 function toolImporters(files: FileSet): Record<string, string[]> {
   const out: Record<string, string[]> = Object.fromEntries(TOOL.map((t) => [t, [] as string[]]));
   for (const [f, src] of files) {
+    if (isSpecFile(f)) continue;
     for (const d of edgesOf(f, src, files).deps) if (d in out) out[d].push(f);
   }
   for (const t of TOOL) out[t].sort();
@@ -161,6 +221,12 @@ describe("PR #295 claim tool is operator-only: unreachable from every deployed m
     });
   });
 
+  it("there is no second Next.js root (pages/, src/app, src/pages) the entry list would miss", () => {
+    for (const d of ["pages", "src/app", "src/pages"]) expect({ d, exists: existsSync(join(REPO_ROOT, d)) }).toEqual({ d, exists: false });
+    // and next.config.js declares no webpack resolve.alias the resolver would not know
+    expect(readFileSync(join(REPO_ROOT, "next.config.js"), "utf8")).not.toMatch(/resolve\s*\.\s*alias|alias\s*:/);
+  });
+
   it("every tsconfig path alias is one the walker resolves (a new alias cannot hide an import)", () => {
     const tsconfig = JSON.parse(readFileSync(join(REPO_ROOT, "tsconfig.json"), "utf8"));
     expect(tsconfig.compilerOptions.paths).toEqual({ "@/*": ["./*"] });
@@ -197,6 +263,25 @@ describe("PR #295 claim tool is operator-only: unreachable from every deployed m
       expect(paths.length).toBeGreaterThan(0);
       // The diagnostic names a deployed entry point at the head of the chain.
       expect(paths.some((p) => /^(app\/|middleware\.ts)/.test(p))).toBe(true);
+    });
+
+    it.each([
+      ["new top-level directory outside the old roots", { "server/adminGate.ts": 'export * from "../lib/admin/systemAdminClaimSafety";\n', [ROUTE]: routeWith('import * as g from "@/server/adminGate";') }],
+      ["non-spec test helper imported by a route", { "lib/util/__tests__/gateHelper.ts": 'export { planClaimChange } from "../../admin/systemAdminClaimSafety";\n', [ROUTE]: routeWith('import { planClaimChange } from "@/lib/util/__tests__/gateHelper";') }],
+      ["barrel at index.jsx", { "lib/x/index.jsx": 'export * from "../admin/systemAdminClaimSafety";\n', [ROUTE]: routeWith('import * as x from "@/lib/x";') }],
+      ["barrel at index.mjs", { "lib/y/index.mjs": 'export * from "../admin/systemAdminClaimSafety";\n', [ROUTE]: routeWith('import * as y from "@/lib/y";') }],
+      ["webpack require.context over lib/admin", { [ROUTE]: routeWith('const ctx = require.context("../../../../lib/admin", false, /systemAdminClaim/);') }],
+    ] as Array<[string, Record<string, string>]>)("review round 1: %s → reached", (_l, extra) => {
+      expect(deployedToolPaths(withFiles(extra)).length).toBeGreaterThan(0);
+    });
+
+    it.each([
+      ["an unresolvable repo specifier (target file absent)", 'import "@/lib/does/not/exist";'],
+      ["aliased require", 'const r = require; r("../../../../lib/admin/systemAdminClaimSafety");'],
+      ["module.require", 'module.require("../../../../lib/admin/systemAdminClaimSafety");'],
+      ["createRequire", 'import { createRequire } from "node:module"; const rq = createRequire(import.meta.url);'],
+    ])("review round 1: %s in a route → reported as unresolvable (fail-closed)", (_l, line) => {
+      expect(reach(withFiles({ [ROUTE]: routeWith(line) })).unresolvable.some((u) => u.startsWith(`${ROUTE}:`))).toBe(true);
     });
 
     it("a non-literal dynamic import in a reachable module is reported as unresolvable (fail-closed)", () => {

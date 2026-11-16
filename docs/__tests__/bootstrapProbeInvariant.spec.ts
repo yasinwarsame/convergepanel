@@ -888,6 +888,21 @@ describe("P2 — admin-minting scripts are found BY CONTENT; only the hardened t
       (st): st is ts.FunctionDeclaration => ts.isFunctionDeclaration(st) && st.name?.text === "POST" && !!st.body,
     )!;
     expect(post).toBeDefined();
+    // 0. The guard is the REAL one: imported from @/lib/admin/privilegedAccess, never declared or shadowed locally (review round 1, NIT).
+    const guardImports = sf.statements.filter(
+      (st): st is ts.ImportDeclaration => ts.isImportDeclaration(st) && ts.isStringLiteral(st.moduleSpecifier)
+        && !!st.importClause?.namedBindings && ts.isNamedImports(st.importClause.namedBindings)
+        && st.importClause.namedBindings.elements.some((e) => e.name.text === "requirePrivilegedAccess"),
+    );
+    expect(guardImports.map((st) => (st.moduleSpecifier as ts.StringLiteral).text)).toEqual(["@/lib/admin/privilegedAccess"]);
+    const binding = (guardImports[0].importClause!.namedBindings as ts.NamedImports).elements.find((e) => e.name.text === "requirePrivilegedAccess")!;
+    expect(binding.propertyName).toBeUndefined(); // not `{ somethingElse as requirePrivilegedAccess }`
+    let localDecls = 0;
+    walk(sf, (n) => {
+      if ((ts.isFunctionDeclaration(n) || ts.isVariableDeclaration(n) || ts.isParameter(n) || ts.isClassDeclaration(n))
+        && n.name && ts.isIdentifier(n.name) && n.name.text === "requirePrivilegedAccess") localDecls++;
+    });
+    expect(localDecls).toBe(0);
     const [first, second, ...rest] = post.body!.statements;
     // 1. First statement: `const access = await requirePrivilegedAccess(request, "SYSTEM_ADMIN", { route: "POST /api/admin/set-role" })`.
     expect(ts.isVariableStatement(first)).toBe(true);

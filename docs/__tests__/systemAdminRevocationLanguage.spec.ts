@@ -272,7 +272,10 @@ const CLAIM_RULES: ClaimRule[] = [
     re: new RegExp(
       String.raw`\b(?:already[- ]issued|existing|outstanding|current)\s+(?:admin\s+)?(?:ID|bearer)\s+tokens?\b[^.;]{0,60}?\b(?:(?:is|are)\s+(?:invalidated|revoked|invalid)\b|stops?\s+working\b|no\s+longer\s+(?:carry|carries|contain|contains|hold|holds)\b|lose[sd]?\s+(?:their\s+|the\s+|its\s+)?(?:embedded\s+)?(?:admin\s+)?claim\b)` +
       String.raw`|\b(?:ID|bearer)(?:\s+ID)?\s+tokens?\s+(?:are|is|were|get|will\s+be)\s+(?:invalidated|revoked)\b(?!\s+(?:only|when|if|where|unless)\b)` +
-      String.raw`|\b(?:invalidates?|revokes?|kills?)\s+(?:the\s+|every\s+|all\s+|any\s+)?(?:\w+'s\s+)?(?:already[- ]issued\s+|existing\s+|outstanding\s+|current\s+)?(?:admin\s+)?(?:ID|bearer)\s+tokens?\b`,
+      String.raw`|\b(?:invalidates?|revokes?|kills?)\s+(?:the\s+|every\s+|all\s+|any\s+)?(?:\w+'s\s+)?(?:already[- ]issued\s+|existing\s+|outstanding\s+|current\s+)?(?:admin\s+)?(?:ID|bearer)\s+tokens?\b` +
+      // Review round 1 paraphrases: "previously issued / old / prior" tokens, "tokens issued before …".
+      String.raw`|\b(?:previously[- ]issued|old|older|prior|earlier|stale)\s+(?:admin\s+)?(?:ID\s+|bearer\s+)?tokens?\b[^.;]{0,60}?\b(?:stops?\s+working|no\s+longer\s+works?|becomes?\s+(?:useless|invalid|unusable|worthless)|(?:is|are)\s+(?:invalidated|revoked|invalid|useless))\b` +
+      String.raw`|\b(?:ID\s+|bearer\s+)?tokens?\s+(?:issued|minted)\s+before\b[^.;]{0,40}?\b(?:no\s+longer\s+work|stop\s+working|(?:are|is)\s+(?:invalidated|revoked|invalid|useless))\b`,
       "gi",
     ),
     negatable: true,
@@ -296,7 +299,12 @@ const CLAIM_RULES: ClaimRule[] = [
       String.raw`\b(?:immediately|instantly|at\s+once)\b[^.;]{0,60}?\b(?:everywhere\b|every\s+(?:route|surface|session|device|request|endpoint|path)s?\b|all\s+(?:routes|surfaces|sessions|devices|requests|endpoints|paths)\b)` +
       String.raw`|\b(?:every|all|any)\s+(?:routes?|surfaces?|endpoints?|paths?|services?)\b[^.;]{0,40}?\b(?:enforces?|rejects?|refuses?|denies?|checks?)\b` +
       String.raw`|\b${REVO}[^.;]{0,40}?\b(?:immediately|instantly)\s+(?:removes?|ends?|cuts?\s+off|strips?|terminates?)\b[^.;]{0,40}?\b(?:admin|privileges?|access|sessions?)\b` +
-      String.raw`|\b(?:claim\s+removal|removing\s+the\s+claim|the\s+revoke)\b[^.;]{0,40}?\b(?:immediately|instantly|at\s+once)\s+(?:removes?|ends?|cuts?\s+off|strips?|revokes?|terminates?)\b`,
+      String.raw`|\b(?:claim\s+removal|removing\s+the\s+claim|the\s+revoke)\b[^.;]{0,40}?\b(?:immediately|instantly|at\s+once)\s+(?:removes?|ends?|cuts?\s+off|strips?|revokes?|terminates?)\b` +
+      // Review round 1 paraphrases.
+      String.raw`|\btakes?\s+effect\s+(?:immediately|instantly|at\s+once)\b[^.;]{0,40}?\b(?:on|across|for|in)\s+(?:all|every|any)\b` +
+      String.raw`|\b(?:every|all|any)\s+(?:[\w-]+\s+){1,2}(?:routes?|surfaces?|endpoints?|paths?|services?)\b[^.;]{0,40}?\b(?:enforces?|rejects?|refuses?|denies?|checks?)\b` +
+      String.raw`|\blos(?:es|e|t|ing)\s+(?:all\s+)?(?:admin\s+|SYSTEM_ADMIN\s+)?(?:access|privileges?|admin)\b[^.;]{0,30}?\b(?:as\s+soon\s+as|the\s+moment|immediately|instantly)\b` +
+      String.raw`|\bclos(?:es|ed|ing|e)\s+(?:the\s+)?(?:(?:one|1)[- ]hour\s+|hour-long\s+|residual\s+|token\s+)?window\s+(?:entirely|completely|fully|everywhere|for\s+good)\b`,
       "gi",
     ),
     negatable: true,
@@ -497,6 +505,14 @@ const POST_S2B_R4_NEGATIVE = [
   ["R4-token-invalidated", "Claim removal invalidates the admin's ID token."],
   ["R4-token-invalidated", "Since S2-b, already-issued ID tokens are invalidated on the next request to a guarded route."],
   ["R4-token-invalidated", "After S2-b, an already-issued ID token no longer carries the admin claim."],
+  // Paraphrases the round-1 independent review showed passing every rule (verbatim).
+  ["R4-token-invalidated", "Previously issued ID tokens stop working once the claim is removed."],
+  ["R4-token-invalidated", "Tokens issued before the revoke no longer work."],
+  ["R4-token-invalidated", "The old ID token becomes useless after the revoke."],
+  ["R4-universal-enforcement", "Claim removal takes effect immediately on all admin routes."],
+  ["R4-universal-enforcement", "The admin loses access as soon as the claim is removed."],
+  ["R4-universal-enforcement", "Every admin route now enforces the live claim."],
+  ["R4-universal-enforcement", "S2-b closes the one-hour window entirely."],
 ] as const;
 
 /** POSITIVE: accurate, narrowly scoped post-S2-b statements every rule must pass. */
