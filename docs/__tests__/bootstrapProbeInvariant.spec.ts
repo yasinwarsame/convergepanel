@@ -144,7 +144,10 @@ const CLAIM_PATH_PINS: readonly RegExp[] = [
   /No Production (?:grant or revoke|execution) without (?:its own )?separate authorization/,
   /never an agent action/i,
   /effectiveRevocation: "not_observable"/, //          revocation is requested, never observed
-  /\bS2(?:-b)? is not live\b/, //                       the bearer-path window is still open
+  // Post-S2-b (owner ruling C): the CREDENTIAL is not invalidated ...
+  /\b(?:does|do) not invalidate an already-issued ID token|\balready-issued ID token is not invalidated\b/,
+  // ... and the DECISION on the guarded routes comes from the live record.
+  /\bsince S2-b the guarded routes\b|\bS2-b-guarded (?:server )?routes\b/,
 ];
 /** Wording that is wrong once #295 has merged, or never described a path. */
 const CLAIM_PATH_FORBIDDEN: readonly RegExp[] = [
@@ -155,6 +158,10 @@ const CLAIM_PATH_FORBIDDEN: readonly RegExp[] = [
   /on that branch describes/i,
   /must print `f6039eaecb659159f52019b7f4cff4cce6a4ed89`/, // present-tense pin to the pre-merge commit
   /\bThis is (?:an )?interim\b/i,
+  // Pre-S2-b wording: obsolete since S2-b went live (2026-11-16).
+  /\bS2(?:-b)? is not live\b/,
+  /\buntil S2\b/,
+  /keeps `admin: true` for up to about an hour/,
 ];
 
 /**
@@ -486,12 +493,14 @@ describe("P1 — the post-merge admin-claim path is documented where operators l
     expect(s).toMatch(/Precedence is 3 > 4 > 0/);
   });
 
-  it("states the revocation limits: not observable, and S2-b not live", () => {
+  it("states the revocation limits: not observable, and what S2-b enforces (credential vs decision)", () => {
     const s = flat(instruction);
     expect(s).toMatch(/effective revocation is never observable by the tool \(`effectiveRevocation: "not_observable"`\)/);
-    expect(s).toMatch(/\*\*What remains open: S2 is not live\.\*\*/);
-    expect(s).toMatch(/Revocation checking on those bearer paths is S2 \(S2-b\), and S2-b is not live/);
-    expect(s).toMatch(/an already-issued ID token keeps `admin: true` for up to about an hour/);
+    expect(s).toMatch(/\*\*Current privileges after a removal \(S2-b, live since 2026-11-16\)\.\*\*/);
+    expect(s).toMatch(/do not invalidate an already-issued ID token; it may still carry `admin: true` until it expires or is refreshed/);
+    expect(s).toMatch(/a subsequent guarded request is evaluated against the live `admin` claim, the live `disabled` state and the live `tokensValidAfterTime`/);
+    expect(s).toMatch(/Surfaces outside the S2-b guard coverage are not claimed to apply the same checks/);
+    expect(s).not.toMatch(/S2 is not live|S2-b is not live|keeps `admin: true` for up to about an hour/);
   });
 
   it("verification is the read-only checks", () => {
@@ -867,7 +876,48 @@ describe("P2 — admin-minting scripts are found BY CONTENT; only the hardened t
     // set-role makes the call itself, behind its SYSTEM_ADMIN gate; no lib helper does it for it.
     const route = codeOf(SET_ROLE, read(SET_ROLE));
     expect(route).toMatch(/await adminAuth\.setCustomUserClaims\(uid, customClaims\)/);
-    expect(route).toMatch(/await requireSystemAdminBearer\(request\)/);
+  });
+
+  it("set-role's gate is the S2-b guard: SYSTEM_ADMIN, its own route identity, first, denial returned before any side effect (AST)", () => {
+    // Behaviour (real handler, real guard: refused callers mint nothing; cookie-only is 401
+    // cookie_not_accepted_for_tier) is proven in app/api/admin/set-role/__tests__/systemAdminTier.spec.ts
+    // and app/api/admin/__tests__/privilegedRouteWiring.spec.ts. This pins the STRUCTURE that behaviour rests on.
+    const src = read(SET_ROLE);
+    const sf = parseSource(SET_ROLE, src);
+    const post = sf.statements.find(
+      (st): st is ts.FunctionDeclaration => ts.isFunctionDeclaration(st) && st.name?.text === "POST" && !!st.body,
+    )!;
+    expect(post).toBeDefined();
+    const [first, second, ...rest] = post.body!.statements;
+    // 1. First statement: `const access = await requirePrivilegedAccess(request, "SYSTEM_ADMIN", { route: "POST /api/admin/set-role" })`.
+    expect(ts.isVariableStatement(first)).toBe(true);
+    const decl = (first as ts.VariableStatement).declarationList.declarations[0];
+    expect(ts.isIdentifier(decl.name) && decl.name.text).toBe("access");
+    const aw = decl.initializer!;
+    expect(ts.isAwaitExpression(aw)).toBe(true);
+    const call = (aw as ts.AwaitExpression).expression as ts.CallExpression;
+    expect(ts.isCallExpression(call) && ts.isIdentifier(call.expression) && call.expression.text).toBe("requirePrivilegedAccess");
+    const [reqArg, tierArg, optsArg] = call.arguments;
+    expect(ts.isIdentifier(reqArg) && reqArg.text).toBe("request");
+    expect(ts.isStringLiteral(tierArg) && tierArg.text).toBe("SYSTEM_ADMIN");
+    const routeProp = ts.isObjectLiteralExpression(optsArg)
+      ? optsArg.properties.find((p): p is ts.PropertyAssignment => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === "route")
+      : undefined;
+    expect(routeProp && ts.isStringLiteral(routeProp.initializer) && routeProp.initializer.text).toBe("POST /api/admin/set-role");
+    // 2. Second statement: `if (!access.ok) return privilegedDenialResponse(access);`
+    expect(ts.isIfStatement(second)).toBe(true);
+    const ifs = second as ts.IfStatement;
+    expect(ifs.expression.getText(sf).replace(/\s+/g, "")).toBe("!access.ok");
+    const ret = ts.isBlock(ifs.thenStatement) ? ifs.thenStatement.statements[0] : ifs.thenStatement;
+    expect(ts.isReturnStatement(ret) && ret.expression!.getText(sf).replace(/\s+/g, "")).toBe("privilegedDenialResponse(access)");
+    // 3. Every side effect comes after the denial: the claim write, the body read and Firestore are only in `rest`.
+    const before = [first, second].map((n) => n.getText(sf)).join("\n");
+    expect(before).not.toMatch(/setCustomUserClaims|request\.json|adminDb|getUser\(/);
+    expect(rest.map((n) => n.getText(sf)).join("\n")).toMatch(/setCustomUserClaims/);
+    // 4. No legacy helper and no cookie-only authorization path anywhere in the file.
+    const code = codeOf(SET_ROLE, src);
+    expect(code).not.toMatch(/\b(requireSystemAdminBearer|requireSystemAdminAccess|requireAdminPortalAccess|requireAdminApiAccess|requireAdmin|verifyAdminToken|getRequestUser|verifySessionCookie|verifySessionCookieValue)\b/);
+    expect(code).not.toMatch(/__session|cookies\(\)/);
   });
 
   it("the four legacy minting scripts are absent from the tree, not merely unclassified", () => {

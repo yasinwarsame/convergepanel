@@ -342,7 +342,7 @@ these things apart:
 | `preCallCheck` | G2: `read` (`read` / `failed` / `not_attempted`), the fresh `tokensValidAfterTime`, `storedSeconds` (S), `localSeconds` (V), and `decision` (`call`, `skip_stored_ahead`, `refuse_unusable`, `refuse_read_failed`, `not_reached`) |
 | `tokensValidAfterTimeLowerThanBefore` | (f) `true` when the read-back value is earlier (whole seconds) than a value known earlier in this run — the pre-run read, the fresh pre-call read, or (after an acknowledged call) the V the call was cleared to write. The cause is not attributable: this run's call, a clock step, or another writer inside the run window. `false` when not; `null` when the read-back or every earlier value was missing or unparseable (direction UNKNOWN, never assumed forward). See "Lowered cutoffs". |
 | `clockAlignmentAssumption` | (c) the cross-service clock ASSUMPTION the comparison rests on (fixed text) |
-| `currentPrivilegeEnforcement` | (d) what the revocation does NOT do for current admin privileges until S2 (fixed text) |
+| `currentPrivilegeEnforcement` | (d) what current admin privileges depend on since S2-b, and what this tool does not do (fixed text). Rows written before S2-b carry the earlier text, which described the deployment at the time; they are not rewritten. |
 | `detail` | (e) every reason the run is not a clean exit 0, joined: why no call was made, why the cutoff was not observed, and any lowering text. `null` only on a clean `CUTOFF_OBSERVED`. A `CUTOFF_LOWERED` run whose cutoff WAS observed still carries the lowering text here. |
 
 (Before this change these fields were named `sessionRevocationEvidence`,
@@ -366,7 +366,7 @@ custody, not something the rules enforce.
 
 | Exit | Meaning | Database writes |
 |---|---|---|
-| `0` | Completed: `applied`, `claim_already_absent_revocation_cutoff_observed`, or a grant already in place (`no_change`). Every observable step succeeded: the claims read back as planned; on revoke, revocation was requested and acknowledged, there is a server-time anchor, the read-back `tokensValidAfterTime` is at or after the server-anchored cutoff, and it is not lower than any value read earlier in the run (`CUTOFF_OBSERVED`). The message reads "revocation requested and acknowledged; cutoff observed … under the Firestore≈Auth clock assumption …; effective revocation not observable" — not proof of revocation, and (until S2) without cutting off already-issued ID tokens. | As required by the operation (none for `no_change`). |
+| `0` | Completed: `applied`, `claim_already_absent_revocation_cutoff_observed`, or a grant already in place (`no_change`). Every observable step succeeded: the claims read back as planned; on revoke, revocation was requested and acknowledged, there is a server-time anchor, the read-back `tokensValidAfterTime` is at or after the server-anchored cutoff, and it is not lower than any value read earlier in the run (`CUTOFF_OBSERVED`). The message reads "revocation requested and acknowledged; cutoff observed … under the Firestore≈Auth clock assumption …; effective revocation not observable" — not proof of revocation, and not an invalidation of already-issued ID tokens (on the S2-b-guarded routes a subsequent request is decided from the live record). | As required by the operation (none for `no_change`). |
 | `2` | Refused, or dry run (the default). Also an unexpected error raised before any write call. | **None.** Guaranteed: exit 2 is only returned before the first write call (the attempt audit row included) is issued; the result file records `writeAttempted: false`. |
 | `3` | A write call was issued and the operation is INCOMPLETE: `audit_attempt_failed` (attempt row outcome unknown), `operator_clock_out_of_tolerance` (no claim, role or revocation call), `mint_failed`, `pre_call_read_failed` (no revocation call), `sessions_revoke_failed`, `sessions_revoke_unverified`, `users_doc_failed`, `verification_failed`, `audit_outcome_missing`, or an unexpected error after a write call. | Unknown / partial. Inspect the read-back in the result file. On a revoke, a failed or thrown revocation call is an UNKNOWN outcome, not a confirmed no-op. Re-running the same command is how an incomplete run is finished; it never re-applies a claim already in place or changes another claim, but a revoke re-run calls `revokeRefreshTokens` again unless the fresh pre-call read shows a stored value ahead (exit 4 `stored_cutoff_ahead`, no call) or is unusable, including no value when the pre-run read had one (no call; exit 3 with `pre_call_read_failed`, or with an earlier exit-3 code such as `mint_failed`) — sync the clock first (see "Retry" and "Lowered cutoffs"). |
 | `4` | REVIEW REQUIRED — do not re-run blindly, do not treat as done: `revocation_cutoff_lowered` (the read-back is lower than a value known earlier in the run, any cause) or `stored_cutoff_ahead` (the fresh pre-call read showed a stored value later than the value the call would write, so the call was NOT made). The row records `completed: false`; the message carries the review guidance, not the re-run guidance. | The role write of the run was made, and so was the claim write, except on a re-run whose `admin` claim was already absent (`claimWrite: "skipped_already_absent"`: no claim write was made). The claims and the role were read back (claim removal may be complete). On `stored_cutoff_ahead` no revocation call was made. |
@@ -487,17 +487,20 @@ message, the result file and the outcome audit row:
   "revocation requested and acknowledged; cutoff observed at or after the
   server-anchored cutoff under the Firestore≈Auth clock assumption (skew < 2 s
   assumed, unbounded); effective revocation not observable".
-- **(d) Enforcement of current admin privileges: not provided (until S2).**
-  Today the SYSTEM_ADMIN bearer guards call `verifyIdToken` WITHOUT `checkRevoked`
-  (`lib/firebase/auth-helpers.ts:56` `verifyAdminToken`, `:321`
-  `checkIsAdminFromToken`, `lib/firebase/adminAuth.ts:43` `getRequestUser`,
-  `app/api/admin/access/route.ts:37`). An already-issued ID token therefore
-  keeps `admin: true` for up to about an hour regardless of any revocation.
-  Session-cookie paths DO check revocation
-  (`verifySessionCookie(raw, true)` at `lib/firebase/auth-helpers.ts:127`,
-  `:277`, and `app/api/admin/access/route.ts:41`). Enforcing current
-  privileges on each request is S2 (live admin authorization in route
-  guards), a separate future change; this tool does not do it.
+- **(d) Enforcement of current admin privileges: by the S2-b guard, not by this tool.**
+  An already-issued ID token may still carry its embedded `admin: true` until it
+  expires or is refreshed; this tool does not invalidate it. Since S2-b (PR #319,
+  Production 2026-11-16) the server routes guarded by `requirePrivilegedAccess`
+  (`lib/admin/privilegedAccess.ts`) do not use that embedded claim as the
+  authority decision: once Firebase Auth reflects the change, a subsequent
+  guarded request is evaluated against the live `admin` claim, the live
+  `disabled` state and the live `tokensValidAfterTime` cutoff (403 without the
+  live claim; 401 for a disabled account, or for a credential whose `auth_time`
+  is earlier than the cutoff). Session-cookie paths outside the guard check
+  revocation too (`verifySessionCookie(raw, true)`). Claim removal and
+  refresh-token revocation are separate operations; this tool does not observe
+  request-time enforcement, and surfaces outside the S2-b guard coverage are not
+  claimed to apply the same checks.
 - **(e) Incomplete outcomes.** Anything short of (a)+(b) is exit 3 with the
   reason in `sessionRevocationObservations.detail` and `failureDetails`. Re-run
   the same command (see "Retry"). An observed lowering or a stored value ahead
@@ -720,8 +723,9 @@ stamps from the operator's local clock. The tool compares `validSince` with a
 Firestore-anchored cutoff, never with Firebase Auth's own `auth_time` clock,
 so this coverage holds only under the unproven cross-service clock assumption
 in (1). (3) A stored value ahead (an earlier fast clock or another writer)
-over-revokes until it passes; this tool does not lower it. (4) The
-already-issued-ID-token window below is unchanged by any of this until S2
+over-revokes until it passes; this tool does not lower it. (4) An
+already-issued ID token is not invalidated by any of this; since S2-b the
+guarded routes decide each subsequent request from the live record instead
 (fact (d) above). (5) Lowered cutoffs: any later `revokeRefreshTokens` call from a slower
 clock, by any caller, lowers the stored value ("Lowered cutoffs"); this tool
 refuses to write a value lower than the one it reads immediately before the
@@ -754,23 +758,23 @@ command.
 | Firebase refresh tokens | Firebase Auth (on the token exchange, in Google's backend) | Only if Firebase applied the request (an acknowledged call; a thrown call's effect is unknown). ASSUMED, not observable from the Admin SDK or this tool: Firebase then refuses to mint new ID tokens from a refresh token whose session `auth_time` is earlier than the stored `validSince`, so the client loses that session on its next refresh. A session whose `auth_time` is at or after `validSince` (operator clock behind, or cross-service skew) keeps refreshing. The tool does not observe which sessions are affected. |
 | `__session` cookie (5-day Firebase session cookie, `app/api/auth/session/route.ts:37`, `:76`) | `verifySessionCookie(cookie, true)` — revocation CHECKED — at `lib/firebase/auth-helpers.ts:127` (`verifySessionCookieValue`, used by `resolveRequestIdentity` / `resolveServerComponentIdentity` / `/api/auth/session`), `lib/firebase/auth-helpers.ts:277` (`requireAdminPortalAccess` cookie fallback) and `app/api/admin/access/route.ts:41` | Only if Firebase applied the request (an acknowledged call; a thrown call's effect is unknown): on its next request, a cookie whose session `auth_time` is earlier than the stored `validSince` fails the revocation check and is rejected. This is judged on `auth_time`, not on when the cookie was minted, so a cookie for a session whose `auth_time` is at or after `validSince` still passes; whether every pre-removal cookie is covered is NOT established by the tool. There is no `verifySessionCookie(..., false)` call in `lib/` or `app/`. |
 | App-side session store | — | None exists: no `sessions` / `admin_sessions` collection grants access (searched `lib/`, `app/`, `middleware.ts`). `middleware.ts:26` only checks that a `__session` cookie is present for `/admin/*` routing; it grants no API access. Nothing else to invalidate. |
-| Already-issued ID tokens (bearer, up to about 1 hour) | `verifyIdToken(token)` WITHOUT `checkRevoked` at `lib/firebase/auth-helpers.ts:56` (`verifyAdminToken` -> `requireSystemAdminAccess`), `lib/firebase/auth-helpers.ts:273` (`requireAdminPortalAccess`), `lib/firebase/adminAuth.ts:43` (`getRequestUser` -> `requireSystemAdminBearer`), `app/api/admin/access/route.ts:37`, `lib/firebase/auth.ts:30` (`checkRevoked: false`) | **NOT invalidated (until S2).** An ID token minted while the user held `admin: true` keeps `admin: true` until it expires, and these paths do not check revocation. |
+| Already-issued ID tokens (bearer, up to about 1 hour) | On every S2-b-guarded route: `requirePrivilegedAccess` (`lib/admin/privilegedAccess.ts`) checks the token's signature, then decides from one live `getUser` read: the live `admin` claim, `disabled`, and the token's `auth_time` against the live `tokensValidAfterTime`. The retired helpers (`verifyAdminToken`, `requireAdminPortalAccess`, `getRequestUser` / `requireSystemAdminBearer`) have no route callers. | **NOT invalidated.** The token may still carry `admin: true` until it expires. On the S2-b-guarded routes a subsequent request with it is refused when the live claim is gone (403) or when its `auth_time` is earlier than the stored `validSince` (401). Surfaces outside the S2-b guard coverage are not claimed to apply the same checks. |
 
-**The remaining risk (until S2) is already-issued ID tokens.** A refresh-token revocation
-request (`revokeRefreshTokens`), even an acknowledged one, is NOT sufficient
-to cut SYSTEM_ADMIN access off immediately. Until it expires (up to about an
-hour), a revoked admin's existing ID token still passes every bearer path
-listed above. Closing that window is a route change, outside this tool:
-privileged endpoints must enforce current state on each request —
-`verifyIdToken(token, true)` (revocation checked) and/or a live `getUser(uid)`
-read of `customClaims.admin` — rather than trusting the claim inside a token.
-(These route gaps are tracked separately; see admin-authority-tiers.md, "What
-this procedure does NOT give you".) If immediate cut-off matters, disable the
-account (`disabled: true`) out of band — before or after the revoke; on a
-disabled account the tool still removes the claim and calls
-`revokeRefreshTokens`, and never re-enables it. Firebase rejects ID tokens of
-a disabled user only when revocation is checked, so even that does not close
-the no-`checkRevoked` paths — treat the up-to-1-hour window as real.
+**The remaining risk is outside the S2-b guard.** A refresh-token revocation
+request (`revokeRefreshTokens`), even an acknowledged one, does not invalidate
+an already-issued ID token, and the tool does not observe what any route does
+with it. S2-b closed, for the guarded routes, the window this paragraph used to
+describe: they enforce current state on each request from a live `getUser(uid)`
+read instead of trusting the claim inside a token. A surface outside that
+coverage that checks an ID token without consulting the live record would
+still accept it until it expires (up to about an hour); none is known to grant
+a SYSTEM_ADMIN capability, and `app/api/admin/__tests__/privilegedGuardPin.spec.ts`
+and `privilegedAuthoritySources.spec.ts` fail if one reappears. Disabling the
+account (`disabled: true`) out of band is a further, separate step — before or
+after the revoke; on a disabled account the tool still removes the claim and
+calls `revokeRefreshTokens`, and never re-enables it. On the S2-b-guarded
+routes a subsequent request from a disabled account is refused (401
+`account_disabled`).
 
 Side effect of the policy: the revocation request is not limited to admin
 use. Where Firebase applies it (the conditions in the table above), it ends

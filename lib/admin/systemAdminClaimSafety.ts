@@ -833,13 +833,18 @@ export function verifyReadBack(plan: ClaimPlan, readBackClaims: unknown): { ok: 
  *       smaller. The comparison is therefore not proof of session revocation,
  *       and effective revocation is never observable by this tool
  *       (`effectiveRevocation: "not_observable"` on every revoke row).
- *   (d) Enforcement of current admin privileges is NOT provided by any of
- *       this (until S2): SYSTEM_ADMIN bearer guards call verifyIdToken without
- *       checkRevoked (lib/firebase/auth-helpers.ts verifyAdminToken,
- *       lib/firebase/adminAuth.ts getRequestUser), so an already-issued ID
- *       token keeps admin: true until it expires (up to ~1 h). Session-cookie
- *       paths (verifySessionCookie(cookie, true)) do check revocation. Live
- *       enforcement is the separate S2 change.
+ *   (d) Current admin privileges are enforced by the S2-b guard, not by this
+ *       tool. An already-issued ID token may still carry its embedded admin
+ *       claim until it expires or is refreshed; nothing here invalidates it.
+ *       Since S2-b, the routes guarded by requirePrivilegedAccess
+ *       (lib/admin/privilegedAccess.ts) do not use that embedded claim as the
+ *       authority decision: once Firebase Auth reflects the change, a
+ *       subsequent guarded request is evaluated against the live admin claim,
+ *       the live disabled state and the live tokensValidAfterTime cutoff.
+ *       Claim removal and refresh-token revocation are separate operations;
+ *       this tool observes neither request-time enforcement nor effective
+ *       revocation, and surfaces outside the S2-b guard coverage are not
+ *       claimed to apply the same checks.
  *   (e) Anything else (no anchor, no read-back, below cutoff, revocation call
  *       failed, claim write unconfirmed, operator clock out of tolerance,
  *       pre-call read failed) is INCOMPLETE (exit 3).
@@ -873,9 +878,14 @@ export const REVOCATION_SKEW_MARGIN_SECONDS = 2;
 export const REVOCATION_CLOCK_ASSUMPTION =
   `ASSUMPTION (unchecked by this tool): the Firestore and Firebase Auth server clocks differ by less than the ${REVOCATION_SKEW_MARGIN_SECONDS} s margin. Google publishes no bound on that skew (unbounded), so an observed cutoff is an observation under this assumption, not proof that sessions were revoked.`;
 
-/** (d) What the revocation does NOT do for current admin privileges (until S2). Printed and recorded verbatim. */
+/**
+ * (d) What current admin privileges depend on, and what this tool does not do.
+ * Printed, written to the result file and recorded verbatim in NEW revoke outcome audit
+ * rows (`metadata.sessionRevocationObservations.currentPrivilegeEnforcement`);
+ * rows written before S2-b keep the earlier text, which described the deployment then.
+ */
 export const CURRENT_PRIVILEGE_ENFORCEMENT_NOTE =
-  "Current admin privileges are NOT cut off by this (until S2): SYSTEM_ADMIN bearer guards verify ID tokens without checkRevoked, so an already-issued ID token keeps admin: true until it expires (up to about 1 hour) regardless of revocation. Session-cookie paths (verifySessionCookie with revocation checking) do reject sessions started before tokensValidAfterTime. Enforcement against current privileges awaits S2 (live admin authorization in route guards).";
+  "Current admin privileges: an already-issued Firebase ID token may still carry its embedded admin claim until it expires or is refreshed; this tool does not invalidate it. Since S2-b, the server routes guarded by requirePrivilegedAccess do not use that embedded claim as the authority decision: once Firebase Auth reflects the change, a subsequent guarded request is evaluated against the live admin claim, the live disabled state and the live tokensValidAfterTime cutoff. Claim removal and refresh-token revocation are separate operations. An observed cutoff and the revocation acknowledgment do not show that every active session ended, and this tool does not observe request-time enforcement. Surfaces outside the S2-b guard coverage are not claimed to apply the same checks.";
 
 /** (a)+(b)+(c) in one line: the exit-0 summary for a revoke. */
 export const REVOCATION_OBSERVED_SUMMARY =

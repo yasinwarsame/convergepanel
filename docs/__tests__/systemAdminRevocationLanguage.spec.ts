@@ -136,7 +136,7 @@ describe("no proof language about revocation (owner ruling: unbounded Firestore/
 });
 
 describe("the assumption and the enforcement caveat are stated", () => {
-  it("the success summary names acknowledgment, the observed cutoff, the unbounded 2 s assumption and S2", () => {
+  it("the success summary names acknowledgment, the observed cutoff, the unbounded 2 s assumption and the post-S2-b enforcement note", () => {
     const m = revocationSummary(SAMPLE_EVIDENCE);
     expect(m).toContain("revocation requested and acknowledged; cutoff observed at or after the server-anchored cutoff under the Firestore≈Auth clock assumption (skew < 2 s assumed, unbounded); effective revocation not observable");
     expect(m).toContain(REVOCATION_CLOCK_ASSUMPTION);
@@ -144,21 +144,29 @@ describe("the assumption and the enforcement caveat are stated", () => {
     expect(REVOCATION_CLOCK_ASSUMPTION).toMatch(/ASSUMPTION/);
     expect(REVOCATION_CLOCK_ASSUMPTION).toMatch(/unbounded/);
     expect(REVOCATION_CLOCK_ASSUMPTION).toMatch(/not proof/);
-    expect(CURRENT_PRIVILEGE_ENFORCEMENT_NOTE).toMatch(/without checkRevoked/);
-    expect(CURRENT_PRIVILEGE_ENFORCEMENT_NOTE).toMatch(/S2/);
+    // Post-S2-b (owner ruling C): the seven facts, each pinned; the pre-S2 wording is gone.
+    const N = CURRENT_PRIVILEGE_ENFORCEMENT_NOTE;
+    expect(N).toMatch(/an already-issued Firebase ID token may still carry its embedded admin claim until it expires or is refreshed; this tool does not invalidate it/);
+    expect(N).toMatch(/Since S2-b, the server routes guarded by requirePrivilegedAccess do not use that embedded claim as the authority decision/);
+    expect(N).toMatch(/once Firebase Auth reflects the change, a subsequent guarded request is evaluated against the live admin claim, the live disabled state and the live tokensValidAfterTime cutoff/);
+    expect(N).toMatch(/Claim removal and refresh-token revocation are separate operations/);
+    expect(N).toMatch(/An observed cutoff and the revocation acknowledgment do not show that every active session ended/);
+    expect(N).toMatch(/this tool does not observe request-time enforcement/);
+    expect(N).toMatch(/Surfaces outside the S2-b guard coverage are not claimed to apply the same checks/);
+    expect(N).not.toMatch(/until S2|awaits S2|S2 is not live|without checkRevoked|up to about 1 hour|NOT cut off/);
   });
 
-  it("the runbook states (a)-(e), the S2 dependency, the guard locations and the fast-clock recovery", () => {
+  it("the runbook states (a)-(e), the S2-b enforcement scope, the guard location and the fast-clock recovery", () => {
     const doc = read("docs/operations/system-admin-claim-script.md");
     for (const needle of [
       "**(a) API acknowledgment.**",
       "**(b) Observed cutoff.**",
       "**(c) Clock-alignment ASSUMPTION.**",
-      "**(d) Enforcement of current admin privileges: not provided (until S2).**",
+      "**(d) Enforcement of current admin privileges: by the S2-b guard, not by this tool.**",
       "**(e) Incomplete outcomes.**",
       "It is not proof\n  that sessions were revoked",
-      "S2 (live admin authorization in route\n  guards)",
-      "`lib/firebase/auth-helpers.ts:56`",
+      "this tool does not observe\n  request-time enforcement",
+      "`lib/admin/privilegedAccess.ts`",
       "`verifySessionCookie(raw, true)`",
       "**Fast operator clock: recovery.**",
     ]) {
@@ -187,8 +195,19 @@ describe("the assumption and the enforcement caveat are stated", () => {
  *   R3 session cookies are rejected immediately on revocation (only cookies
  *      whose auth_time is earlier than the stamped validSince, and only if the
  *      request was applied);
- *   R4 already-issued / bearer ID tokens are invalidated or lose admin at once
- *      (they do not: the bearer guards skip checkRevoked until S2);
+ *   R4 (reworked for S2-b, owner ruling C) — keep the CREDENTIAL and the
+ *      authority DECISION apart:
+ *      R4-token-invalidated: an already-issued / bearer ID token is
+ *        invalidated, revoked, stops working or loses its embedded claim
+ *        (never true: the token stays valid until it expires);
+ *      R4-privilege-loss-unscoped: a token "is rejected" / "loses admin"
+ *        WITHOUT naming the S2-b-guarded routes AND a subsequent request
+ *        (accurate only in that scope, where the live record decides);
+ *      R4-universal-enforcement: immediate or universal cut-off (every route,
+ *        every session, everywhere, "removing the claim immediately removes
+ *        access") — never accurate, scoped or not;
+ *      R4-stale-pre-S2: "until S2", "S2 is not live", "awaits S2", bearer
+ *        guards "without checkRevoked" — obsolete since S2-b went live;
  *   R5 an observed cutoff establishes end-to-end revocation / "the revocation
  *      worked" (it rests on an unproven cross-service clock assumption);
  *   R6 a repeated revocation request is harmless, idempotent, monotonic, "safe",
@@ -209,6 +228,8 @@ type ClaimRule = {
   /** Skip a match preceded (same clause) by a conditional: "whether a re-run is safe depends on ...". */
   conditionalOk?: boolean;
   sentenceAlso?: RegExp[];
+  /** The match is accurate when the SAME sentence matches every one of these (a narrow, named scope). */
+  scopedOk?: RegExp[];
 };
 
 /** Excludes a hedge between a verb and its object ("means the session MAY still be rejected"). */
@@ -247,14 +268,43 @@ const CLAIM_RULES: ClaimRule[] = [
     sentenceAlso: [/\bcookies?\b/i, new RegExp(String.raw`\b${REVO}\b`, "i")],
   },
   {
-    id: "R4-bearer-tokens-lose-admin",
+    id: "R4-token-invalidated",
     re: new RegExp(
-      String.raw`\b(?:already[- ]issued|existing|outstanding|current)\s+(?:admin\s+)?(?:ID|bearer)\s+tokens?\b[^.;]{0,60}?\b(?:(?:is|are)\s+(?:invalidated|revoked|rejected|invalid)\b|stops?\s+working\b|lose[sd]?\b|no\s+longer\b)` +
-      String.raw`|\b${REVO}[^.;]{0,40}?\b(?:immediately|instantly)\s+(?:removes?|ends?|cuts?\s+off|strips?)\b[^.;]{0,40}?\b(?:admin|privileges?|access)\b` +
-      String.raw`|\b(?:ID|bearer)(?:\s+ID)?\s+tokens?\s+(?:are|is|were|get|will\s+be)\s+(?:invalidated|revoked|rejected|cut\s+off)\b(?!\s+(?:only|when|if|where|unless)\b)`,
+      String.raw`\b(?:already[- ]issued|existing|outstanding|current)\s+(?:admin\s+)?(?:ID|bearer)\s+tokens?\b[^.;]{0,60}?\b(?:(?:is|are)\s+(?:invalidated|revoked|invalid)\b|stops?\s+working\b|no\s+longer\s+(?:carry|carries|contain|contains|hold|holds)\b|lose[sd]?\s+(?:their\s+|the\s+|its\s+)?(?:embedded\s+)?(?:admin\s+)?claim\b)` +
+      String.raw`|\b(?:ID|bearer)(?:\s+ID)?\s+tokens?\s+(?:are|is|were|get|will\s+be)\s+(?:invalidated|revoked)\b(?!\s+(?:only|when|if|where|unless)\b)` +
+      String.raw`|\b(?:invalidates?|revokes?|kills?)\s+(?:the\s+|every\s+|all\s+|any\s+)?(?:\w+'s\s+)?(?:already[- ]issued\s+|existing\s+|outstanding\s+|current\s+)?(?:admin\s+)?(?:ID|bearer)\s+tokens?\b`,
       "gi",
     ),
     negatable: true,
+  },
+  {
+    id: "R4-privilege-loss-unscoped",
+    re: new RegExp(
+      String.raw`\b(?:already[- ]issued|existing|outstanding|current)\s+(?:admin\s+)?(?:ID|bearer)\s+tokens?\b[^.;]{0,60}?\b(?:(?:is|are)\s+(?:rejected|refused|denied|cut\s+off)\b|lose[sd]?\s+(?:admin|SYSTEM_ADMIN|access|privileges?)\b)` +
+      String.raw`|\b(?:ID|bearer)(?:\s+ID)?\s+tokens?\s+(?:are|is|were|get|will\s+be)\s+(?:rejected|refused|denied|cut\s+off)\b(?!\s+(?:only|when|if|where|unless)\b)`,
+      "gi",
+    ),
+    negatable: true,
+    scopedOk: [
+      /\b(?:S2-b[- ](?:guarded|protected)|requirePrivilegedAccess|guarded\s+(?:server\s+)?routes?)\b/i,
+      /\b(?:subsequent|next|later)\s+(?:guarded\s+)?request\b/i,
+    ],
+  },
+  {
+    id: "R4-universal-enforcement",
+    re: new RegExp(
+      String.raw`\b(?:immediately|instantly|at\s+once)\b[^.;]{0,60}?\b(?:everywhere\b|every\s+(?:route|surface|session|device|request|endpoint|path)s?\b|all\s+(?:routes|surfaces|sessions|devices|requests|endpoints|paths)\b)` +
+      String.raw`|\b(?:every|all|any)\s+(?:routes?|surfaces?|endpoints?|paths?|services?)\b[^.;]{0,40}?\b(?:enforces?|rejects?|refuses?|denies?|checks?)\b` +
+      String.raw`|\b${REVO}[^.;]{0,40}?\b(?:immediately|instantly)\s+(?:removes?|ends?|cuts?\s+off|strips?|terminates?)\b[^.;]{0,40}?\b(?:admin|privileges?|access|sessions?)\b` +
+      String.raw`|\b(?:claim\s+removal|removing\s+the\s+claim|the\s+revoke)\b[^.;]{0,40}?\b(?:immediately|instantly|at\s+once)\s+(?:removes?|ends?|cuts?\s+off|strips?|revokes?|terminates?)\b`,
+      "gi",
+    ),
+    negatable: true,
+  },
+  {
+    id: "R4-stale-pre-S2",
+    re: /\buntil\s+S2\b|\bS2(?:-b)?\s+is\s+not\s+live\b|\bawaits?\s+S2\b|\bclosing\s+it\s+is\s+S2\b|\bthe\s+separate\s+S2\s+change\b|\bbearer\s+(?:guards?|paths?)\b[^.;]{0,60}?\bwithout\s+checkRevoked\b|\bverify\s+ID\s+tokens\s+without\s+checkRevoked\b/gi,
+    negatable: false,
   },
   {
     id: "R4-bearer-counterfactual",
@@ -306,6 +356,7 @@ function claimViolations(sentence: string): string[] {
   const out: string[] = [];
   for (const rule of CLAIM_RULES) {
     if (rule.sentenceAlso && !rule.sentenceAlso.every((r) => r.test(sentence))) continue;
+    if (rule.scopedOk && rule.scopedOk.every((r) => r.test(sentence))) continue;
     for (const m of sentence.matchAll(new RegExp(rule.re.source, rule.re.flags))) {
       const prefix = sentence.slice(Math.max(0, (m.index ?? 0) - 80), m.index);
       if (rule.negatable && NEGATED_PREFIX.test(prefix)) continue;
@@ -412,7 +463,7 @@ const CITED_B7C23DE = [
   // Paraphrases that passed the b7c23de scan.
   ["R2-always-revokes", "The tool never fails to revoke the target's sessions."],
   ["R1-signed-out-everywhere", "A revoke logs the user out on every device."],
-  ["R4-bearer-tokens-lose-admin", "Bearer tokens are invalidated by the revoke."],
+  ["R4-token-invalidated", "Bearer tokens are invalidated by the revoke."],
   ["R5-cutoff-establishes-revocation", "`cutoffObserved: true` means the revocation worked."],
   ["R6-repeat-is-harmless", "A repeated revocation is monotonic: validSince never moves backward."],
   ["R6-rerun-is-safe", "Retrying the revoke is always safe."],
@@ -422,6 +473,40 @@ const CITED_B7C23DE = [
   // Needs the code span KEPT: stripped, this sentence has no revocation term left.
   ["R6-repeat-is-harmless", "`validSince` is monotonic."],
 ] as const;
+
+/**
+ * Post-S2-b R4 rework (owner ruling C). NEGATIVE: the historical pre-S2 wording
+ * (verbatim from the tool and docs before this round) and overly broad NEW
+ * claims of immediate / universal cut-off. Each must be flagged by its rule.
+ */
+const POST_S2B_R4_NEGATIVE = [
+  // Historical wording, verbatim.
+  ["R4-stale-pre-S2", "Current admin privileges are NOT cut off by this (until S2): SYSTEM_ADMIN bearer guards verify ID tokens without checkRevoked, so an already-issued ID token keeps admin: true until it expires (up to about 1 hour) regardless of revocation."],
+  ["R4-stale-pre-S2", "**What remains open: S2 is not live.** Removing the claim and requesting refresh-token revocation do not end an already-issued ID token on the SYSTEM_ADMIN bearer paths."],
+  ["R4-stale-pre-S2", "Revocation checking on those bearer paths is S2 (S2-b), and S2-b is not live."],
+  ["R4-stale-pre-S2", "Enforcement against current privileges awaits S2 (live admin authorization in route guards)."],
+  ["R4-stale-pre-S2", "Neither of them shortens that window for an already-issued ID token on the bearer paths (no checkRevoked); closing it is S2."],
+  // Overly broad new claims.
+  ["R4-universal-enforcement", "Revocation immediately terminates every session everywhere."],
+  ["R4-universal-enforcement", "After the revoke, every route rejects the old token."],
+  ["R4-universal-enforcement", "Removing the claim immediately removes SYSTEM_ADMIN access."],
+  ["R4-universal-enforcement", "Since S2-b, all routes enforce the live claim."],
+  ["R4-privilege-loss-unscoped", "Already-issued ID tokens are rejected after the claim is removed."],
+  ["R4-privilege-loss-unscoped", "Once the claim is removed, existing bearer tokens lose admin."],
+  ["R4-privilege-loss-unscoped", "On the next request, an already-issued ID token is rejected."],
+  ["R4-token-invalidated", "Claim removal invalidates the admin's ID token."],
+  ["R4-token-invalidated", "Since S2-b, already-issued ID tokens are invalidated on the next request to a guarded route."],
+  ["R4-token-invalidated", "After S2-b, an already-issued ID token no longer carries the admin claim."],
+] as const;
+
+/** POSITIVE: accurate, narrowly scoped post-S2-b statements every rule must pass. */
+const POST_S2B_R4_POSITIVE = [
+  "On the S2-b-guarded routes, a subsequent request without the live admin claim is refused, even though the already-issued ID token may still carry admin: true until it expires.",
+  "Once Firebase Auth reflects the removal, the next request to a requirePrivilegedAccess route with an already-issued ID token is rejected with 403.",
+  "An already-issued ID token is not invalidated; it may still carry admin: true until it expires.",
+  "Surfaces outside the S2-b guard coverage are not claimed to apply the same checks.",
+  "Claim removal and refresh-token revocation are separate operations.",
+];
 
 /** Accurate, conditional or negated explanations: every rule must pass these. */
 const POSITIVE_CONTROLS = [
@@ -494,10 +579,29 @@ describe("no unconditional revoke-effect claims (PR #295 sweep, owner order B)",
     expect(claimOffending(s).flatMap((h) => h.rules)).toContain(rule);
   });
 
+  it.each(POST_S2B_R4_NEGATIVE.map(([rule, s]) => [rule, s]))("CONTROL (post-S2-b R4 negative): %s flags %j", (rule, s) => {
+    expect(claimOffending(s).flatMap((h) => h.rules)).toContain(rule);
+  });
+
+  it.each(POST_S2B_R4_POSITIVE)("POSITIVE CONTROL (post-S2-b, scoped): %s", (s) => {
+    expect(claimOffending(s)).toEqual([]);
+  });
+
+  it("R4 scope needs BOTH the guarded-route scope and a subsequent request; scope never excuses token invalidation or universality", () => {
+    const scoped = "Once Firebase Auth reflects the removal, the next request to a requirePrivilegedAccess route with an already-issued ID token is rejected with 403.";
+    expect(claimOffending(scoped)).toEqual([]);
+    // Drop either half of the scope: flagged.
+    expect(claimOffending("The next request with an already-issued ID token is rejected with 403.").flatMap((h) => h.rules)).toEqual(["R4-privilege-loss-unscoped"]);
+    expect(claimOffending("On a requirePrivilegedAccess route an already-issued ID token is rejected with 403.").flatMap((h) => h.rules)).toEqual(["R4-privilege-loss-unscoped"]);
+    // Scope does not excuse a claim about the credential itself, or universality.
+    expect(claimOffending("On the next request to a guarded route, already-issued ID tokens are invalidated.").flatMap((h) => h.rules)).toContain("R4-token-invalidated");
+    expect(claimOffending("On the next request to a guarded route, revocation immediately terminates all sessions.").flatMap((h) => h.rules)).toContain("R4-universal-enforcement");
+  });
+
   it("CONTROL: every rule has at least one failing example", () => {
-    const covered = new Set([...CITED_A528F9E, ...FIXED_ELSEWHERE, ...CITED_B7C23DE].map(([r]) => r));
+    const covered = new Set([...CITED_A528F9E, ...FIXED_ELSEWHERE, ...CITED_B7C23DE, ...POST_S2B_R4_NEGATIVE].map(([r]) => r));
     const synthetic: Record<string, string> = {
-      "R4-bearer-tokens-lose-admin": "After the revoke, existing ID tokens no longer carry admin.",
+      "R4-token-invalidated": "After the revoke, existing ID tokens no longer carry admin.",
       "R5-cutoff-establishes-revocation": "An observed cutoff confirms the sessions were revoked.",
     };
     for (const [id, s] of Object.entries(synthetic)) {
@@ -571,7 +675,7 @@ describe("no unconditional revoke-effect claims (PR #295 sweep, owner order B)",
       "**(b) Observed cutoff.**",
       "**(c) Clock-alignment ASSUMPTION.**",
       "is ASSUMED to apply the same rule",
-      "S2 (live admin authorization in route guards)",
+      "**(d) Enforcement of current admin privileges: by the S2-b guard, not by this tool.**",
       "Treat every credential in this table as still valid",
       "and re-run the same command",
       "### Lowered cutoffs (unresolved risk; narrowed for this tool only)",
@@ -594,6 +698,8 @@ describe("no unconditional revoke-effect claims (PR #295 sweep, owner order B)",
     for (const gone of [
       "can only reduce access", "repeating the request is harmless", "any exit 3 is safe", "**Re-running the same command is safe**", "The printed sessions line overstates",
       "WARNING (not a clean success)", "moved BACKWARD", "The local clock is never compared with anything", "this run's call LOWERED",
+      // Pre-S2-b statements (owner ruling C): obsolete since S2-b went live.
+      "until S2", "S2 is not live", "awaits S2", "closing it is S2", "treat the up-to-1-hour window as real",
     ]) {
       expect({ gone, present: runbook.includes(gone) }).toEqual({ gone, present: false });
     }
@@ -602,8 +708,10 @@ describe("no unconditional revoke-effect claims (PR #295 sweep, owner order B)",
     expect(opt1).toMatch(/unknown outcome/);
     expect(opt1).toMatch(/overwrite-only/);
     const c5 = flat(section(read("docs/operations/admin-authority-tiers.md"), "**Consequence to know before enrolling anyone", "### Secret bootstrap route — RETIRED (S1)"));
-    expect(c5).toMatch(/Neither of them shortens that ≤1 hour window for an already-issued ID token/);
-    expect(c5).toMatch(/S2/);
+    expect(c5).toMatch(/a subsequent guarded request is refused for a disabled account/);
+    expect(c5).toMatch(/An already-issued ID token is not invalidated by any of this/);
+    expect(c5).toMatch(/S2-b/);
+    expect(c5).not.toMatch(/closing it is S2|≤1 hour window/);
     const tech = flat(section(read("docs/technical-documentation.md"), "**Operator claim tool:**", "\n\n"));
     expect(tech).toMatch(/requests refresh-token revocation/);
     expect(tech).toMatch(/unknown outcome, not a confirmed no-op/);

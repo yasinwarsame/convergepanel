@@ -62,8 +62,9 @@ deployment. The tool has no defaults: explicit `--confirm-project=<projectId>` a
 `--result-file` (a NEW `*.json` outside every git checkout); exit 3 or 4 means incomplete or
 review required, never a no-op. No Production grant or revoke without its own separate
 authorization. Revocation is requested, not observed (`effectiveRevocation: "not_observable"`),
-and S2 is not live: SYSTEM_ADMIN bearer paths do not check revocation, so an already-issued ID
-token keeps `admin: true` for up to about an hour. Verify read-only with
+and an already-issued ID token is not invalidated (it may still carry `admin: true` until it
+expires); since S2-b the guarded routes decide each request from the live claim, disabled
+state and revocation cutoff instead. Verify read-only with
 `scripts/check-admin-claims.js` / `scripts/verify-admin-claims.js`. The legacy minting scripts
 (`scripts/setAdmin.ts`, `set-admin-simple.js`, `set-admin-by-uid.js`, `set-admin-claim.js`)
 were removed and are not part of that path; never restore them. They were unsafe: they could

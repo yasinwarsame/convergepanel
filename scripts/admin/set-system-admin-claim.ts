@@ -31,8 +31,9 @@
  *   revocation requested and acknowledged with the cutoff observed and not
  *   lower than the values read earlier in the run (an observation under an
  *   unbounded clock-alignment assumption, NOT proof of revocation; effective
- *   revocation is not observable; until S2, already-issued ID tokens keep
- *   admin: true on SYSTEM_ADMIN bearer routes until they expire) — or a grant
+ *   revocation is not observable; already-issued ID tokens are not
+ *   invalidated, and since S2-b the guarded routes decide each subsequent
+ *   request from the live record instead of their embedded claim) — or a grant
  *   already in place;
  * 2 refused or dry run — no Firebase write call was issued;
  * 3 a write call was issued (possibly only the attempt audit row) and the

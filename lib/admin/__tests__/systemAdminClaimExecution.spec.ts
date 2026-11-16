@@ -868,6 +868,26 @@ describe("R3 MAJOR: the revocation cutoff is observed against a SERVER-anchored 
     expect(w.audit.get(OUTCOME)!.metadata).toMatchObject({ outcome: "applied", completed: true, sessionRevocationObservations: { cutoffObserved: true } });
   });
 
+  it("a NEW revoke outcome audit row records the post-S2-b enforcement note verbatim, with the audit schema unchanged", async () => {
+    const w = adminWorld(0);
+    const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), deps(w));
+    expect([r.status, r.exitCode]).toEqual(["applied", 0]);
+    const row = w.audit.get("system-admin-claim:req_1_abc:outcome")!;
+    const obs = (row.metadata as Record<string, unknown>).sessionRevocationObservations as Record<string, unknown>;
+    // The text: exactly the current constant, in the audit row and in the result.
+    expect(obs.currentPrivilegeEnforcement).toBe(safety.CURRENT_PRIVILEGE_ENFORCEMENT_NOTE);
+    expect(r.sessionRevocationObservations!.currentPrivilegeEnforcement).toBe(safety.CURRENT_PRIVILEGE_ENFORCEMENT_NOTE);
+    expect(String(obs.currentPrivilegeEnforcement)).toMatch(/^Current admin privileges: an already-issued Firebase ID token may still carry/);
+    // The schema: the same field set as before this wording change (only the note's TEXT changed).
+    expect(Object.keys(obs).sort()).toEqual([
+      "anchorServerTime", "anchorSource", "claimWrite", "clockAlignmentAssumption", "currentPrivilegeEnforcement", "cutoff", "cutoffObserved",
+      "detail", "effectiveRevocation", "marginSeconds", "preCallCheck", "revocationApiAcknowledged", "revocationRequested", "sessionRevocationState",
+      "tokensValidAfterTimeAfter", "tokensValidAfterTimeBefore", "tokensValidAfterTimeLowerThanBefore", "validSinceMinusAnchorSeconds",
+    ]);
+    expect((row.metadata as Record<string, unknown>).effectiveRevocation).toBe("not_observable");
+    expect((row.metadata as Record<string, unknown>).sessionRevocationState).toBe("CUTOFF_OBSERVED");
+  });
+
   it("exit-0 output and observations keep the things apart: request + acknowledgment, observed cutoff, clock ASSUMPTION, effect not observable, enforcement caveat, no proof claim", async () => {
     const w = adminWorld(0);
     const r = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke")), deps(w));
@@ -876,9 +896,12 @@ describe("R3 MAJOR: the revocation cutoff is observed against a SERVER-anchored 
     expect(m).toContain("revocation requested and acknowledged; cutoff observed at or after the server-anchored cutoff under the Firestore≈Auth clock assumption (skew < 2 s assumed, unbounded); effective revocation not observable");
     expect(m).toContain("ASSUMPTION (unchecked by this tool)");
     expect(m).toMatch(/not proof that sessions were revoked/);
-    expect(m).toMatch(/verify ID tokens without checkRevoked/);
-    expect(m).toMatch(/up to about 1 hour/);
-    expect(m).toMatch(/awaits S2/);
+    // Post-S2-b enforcement note (owner ruling C): credential vs decision, scoped to the guarded routes.
+    expect(m).toContain(safety.CURRENT_PRIVILEGE_ENFORCEMENT_NOTE);
+    expect(m).toMatch(/may still carry its embedded admin claim until it expires or is refreshed; this tool does not invalidate it/);
+    expect(m).toMatch(/a subsequent guarded request is evaluated against the live admin claim, the live disabled state and the live tokensValidAfterTime cutoff/);
+    expect(m).toMatch(/this tool does not observe request-time enforcement/);
+    expect(m).not.toMatch(/until S2|awaits S2|without checkRevoked|up to about 1 hour/);
     // Only negated forms ("not proof") may appear; no affirmative proof wording.
     expect(m.replace(/\b(not|never|no)\s+(a\s+)?(proof|proven|guarantee|verified)\b/gi, "")).not.toMatch(/\b(proof|prove[sdn]?|proving|guarantee[sd]?|verified|verifies)\b/i);
     // No effect-implying "revoked" (the one negated use is the assumption text).
@@ -903,7 +926,8 @@ describe("R3 MAJOR: the revocation cutoff is observed against a SERVER-anchored 
     const r2 = await runSystemAdminClaim(ctx(args(REVOKE_EXEC, "revoke"), "req_2_again"), deps(w));
     expect(r2.status).toBe("claim_already_absent_revocation_cutoff_observed");
     expect(r2.message).toContain("skew < 2 s assumed, unbounded); effective revocation not observable");
-    expect(r2.message).toMatch(/awaits S2/);
+    expect(r2.message).toContain(safety.CURRENT_PRIVILEGE_ENFORCEMENT_NOTE);
+    expect(r2.message).not.toMatch(/awaits S2|until S2/);
     expect(r2.sessionRevocationObservations).toMatchObject({ claimWrite: "skipped_already_absent" });
     expect(w.audit.get("system-admin-claim:req_2_again:outcome")).toMatchObject({
       actionType: "SYSTEM_ADMIN_REVOCATION_CUTOFF_OBSERVED", metadata: { completed: true, effectiveRevocation: "not_observable" },

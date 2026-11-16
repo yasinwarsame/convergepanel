@@ -319,8 +319,9 @@ variable, so do not set it.
    every git checkout). An exit code of 3 or 4 means incomplete or review required, never
    a no-op. No Production grant or revoke without its own separate authorization. The
    tool changes only the `admin` key and leaves every other claim in place. Removing the
-   claim later does not end an already-issued ID token on SYSTEM_ADMIN bearer paths
-   (S2 is not live; `effectiveRevocation: "not_observable"`).
+   claim later does not invalidate an already-issued ID token; since S2-b the guarded
+   routes decide each subsequent request from the live claim instead
+   (`effectiveRevocation: "not_observable"`).
 3. Verify read-only with `node scripts/check-admin-claims.js --confirm-project=<projectId> --credentials=<key file> --uid=<UID>` or
    `scripts/verify-admin-claims.js`; neither writes anything.
 4. The user must sign out and sign back in for the claim to take effect.
