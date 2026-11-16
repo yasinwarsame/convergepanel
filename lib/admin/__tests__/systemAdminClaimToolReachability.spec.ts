@@ -44,7 +44,13 @@ const TOOL = [
 ] as const;
 const CLI = "scripts/admin/set-system-admin-claim.ts";
 
-const CODE = /\.(?:ts|tsx|js|jsx|mjs|cjs|mts|cts)$/;
+const CODE = /\.(?:ts|tsx|js|jsx|mjs|cjs|mts|cts)$/i;
+/** Review round 3: a leaf is decided by a POSITIVE list of asset types; anything else (incl. no extension) fails closed. */
+const ASSET = /\.(?:css|scss|sass|json|svg|png|jpe?g|gif|webp|avif|ico|bmp|woff2?|ttf|otf|eot|mp4|webm|mp3|wav)$/i;
+/** Top-level directories of THIS repository (a bare specifier naming one is not a package). */
+const REPO_TOP = new Set(readdirSync(REPO_ROOT).filter((e) => !e.startsWith(".") && e !== "node_modules"));
+/** A real bare package specifier ("next", "@sentry/nextjs", "node:fs", "firebase-admin/auth"). */
+const BARE_PACKAGE = /^(?:node:[a-z_/]+|(?:@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*(?:\/[^\s]*)?)$/i;
 /** Skipped at ANY depth: package code and VCS metadata (a relative import into them resolves to no FILES entry and fails closed). */
 const SKIP_ANYWHERE = new Set(["node_modules", ".git"]);
 /** Build output skipped at the REPO ROOT only (review round 2: a nested `lib/build/` is repo code and must be walked). */
@@ -77,13 +83,15 @@ function resolveRepo(from: string, spec: string, files: FileSet): Resolution {
   let base: string;
   if (spec.startsWith("@/")) base = normalize(spec.slice(2)).replace(/\\/g, "/"); // review round 2: "@/lib/../lib/x" is normalised too
   else if (spec.startsWith(".")) base = normalize(join(dirname(from), spec)).replace(/\\/g, "/");
-  else return { pkg: true };
+  else if (BARE_PACKAGE.test(spec) && !spec.startsWith("node:") && REPO_TOP.has(spec.split("/")[0])) return { missing: true }; // "lib/admin/…" via baseUrl/modules
+  else if (BARE_PACKAGE.test(spec)) return { pkg: true };
+  else return { missing: true }; // absolute paths, "#imports", "file:" URLs, anything not a package name: fail closed
   for (const e of [...EXTS, ...INDEX]) if (files.has(base + e)) return { code: base + e };
   const m = /^(.*)\.(js|jsx|mjs|cjs)$/.exec(base);
   if (m) for (const e of [".ts", ".tsx", ".mts", ".cts"]) if (files.has(m[1] + e)) return { code: m[1] + e };
   // A real NON-CODE file (css, json, svg …) is a leaf. A CODE file the walker does not hold (skipped
   // directory, symlink, outside the repo) is MISSING: fail closed (review round 2, finding 1).
-  if (!CODE.test(base) && !base.startsWith("..") && existsSync(join(REPO_ROOT, base)) && statSync(join(REPO_ROOT, base)).isFile()) return { asset: base };
+  if (ASSET.test(base) && !base.startsWith("..") && existsSync(join(REPO_ROOT, base)) && statSync(join(REPO_ROOT, base)).isFile()) return { asset: base };
   return { missing: true };
 }
 
@@ -241,6 +249,11 @@ describe("PR #295 claim tool is operator-only: unreachable from every deployed m
   it("every tsconfig path alias is one the walker resolves (a new alias cannot hide an import)", () => {
     const tsconfig = JSON.parse(readFileSync(join(REPO_ROOT, "tsconfig.json"), "utf8"));
     expect(tsconfig.compilerOptions.paths).toEqual({ "@/*": ["./*"] });
+    // Review round 3: an explicit baseUrl would make bare "lib/…" resolvable (Next puts it in resolve.modules).
+    expect(tsconfig.compilerOptions.baseUrl).toBeUndefined();
+    // … and package.json "imports" / "exports" would let "#x" or a self-reference reach repo code.
+    const pkg = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8"));
+    expect({ imports: pkg.imports, exports: pkg.exports }).toEqual({ imports: undefined, exports: undefined });
   });
 
   describe("negative controls — each deliberately unsafe mutation is caught", () => {
@@ -292,6 +305,12 @@ describe("PR #295 claim tool is operator-only: unreachable from every deployed m
     it.each([
       ["an unresolvable repo specifier (target file absent)", 'import "@/lib/does/not/exist";'],
       ["a CODE file outside the walked set, named with its extension (review round 2)", 'import g from "@/node_modules/whatever/index.js";'],
+      ["review round 3: an extension-less repo file", 'import "@/lib/x/gate";'],
+      ["review round 3: a repo file with a non-asset extension (.txt)", 'import "@/lib/x/gate2.txt";'],
+      ["review round 3: a package.json #imports specifier", 'import "#t";'],
+      ["review round 3: an absolute path", 'import "/vercel/path0/lib/admin/systemAdminClaimSafety";'],
+      ["review round 3: a file: URL", 'import "file:///vercel/path0/lib/admin/systemAdminClaimSafety.ts";'],
+      ["review round 3: a bare specifier naming a repo directory (baseUrl/modules)", 'import "lib/admin/systemAdminClaimSafety";'],
       ["aliased require", 'const r = require; r("../../../../lib/admin/systemAdminClaimSafety");'],
       ["module.require", 'module.require("../../../../lib/admin/systemAdminClaimSafety");'],
       ["createRequire", 'import { createRequire } from "node:module"; const rq = createRequire(import.meta.url);'],
