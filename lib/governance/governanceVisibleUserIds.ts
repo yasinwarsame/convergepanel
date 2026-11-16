@@ -230,6 +230,12 @@ export async function resolveGovernanceVisibleUserIdsCached(uid: string): Promis
     identity.email.trim().toLowerCase(),
     identity.emailVerified === true ? "verified" : "unverified",
     identity.disabled === true ? "disabled" : "enabled",
+    // SEC-3 / S2-b correction (owner ruling D): the LIVE governance-admin
+    // decision itself. Without it, removing an address from
+    // GOVERNANCE_ADMIN_EMAILS left the same key — uid, email, verification and
+    // enabled state all unchanged — so a cached `admin_global` survived for the
+    // rest of the TTL. Global scope must end on the next request.
+    identity.governanceAdmin === true ? "governance_admin" : "not_governance_admin",
   ].join("::");
   const now = Date.now();
   const hit = governanceVisibilityCache.get(key);

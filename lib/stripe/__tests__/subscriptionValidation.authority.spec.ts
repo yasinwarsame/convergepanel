@@ -225,7 +225,7 @@ describe("C6 P1 — B/C order-invariance matrix", () => {
 
 describe("C6 P1 — a truncated first page is not proof of absence", () => {
   it("REGRESSION: ten newer irrelevant subscriptions must not downgrade a paying customer", async () => {
-    storedDoc = { plan: "full", stripeCustomerId: MINE, stripeSubscriptionId: C, subscriptionStatus: "active", billingInterval: "year" };
+    storedDoc = { plan: "full", stripeCustomerId: MINE, stripeSubscriptionId: C, subscriptionStatus: "active", billingInterval: "year", subscriptionStatusFromStripe: "active", planFromStripe: "5_models" };
     live = [
       ...Array.from({ length: 10 }, (_, i) => sub({ id: `sub_noise_${i}`, status: "canceled", created: 1000 + i })),
       subC(1),
@@ -331,7 +331,7 @@ describe("C6 — exactly one candidate still reconciles", () => {
 
   it("writes nothing when local state already matches the single candidate", async () => {
     live = [subC()];
-    storedDoc = { plan: "full", stripeCustomerId: MINE, stripeSubscriptionId: C, subscriptionStatus: "active", billingInterval: "year" };
+    storedDoc = { plan: "full", stripeCustomerId: MINE, stripeSubscriptionId: C, subscriptionStatus: "active", billingInterval: "year", subscriptionStatusFromStripe: "active", planFromStripe: "5_models" };
     await validateUserSubscription(UID);
     expect(writes).toHaveLength(0);
   });
@@ -508,7 +508,7 @@ describe("R3 — the repaired Production topology at request time", () => {
   const beforeRepair = () => [sub({ id: "sub_1", status: "canceled", created: 1 }), sub({ id: "sub_2", status: "canceled", created: 2 }), monthly(DUPLICATES[0], "past_due", 3), monthly(DUPLICATES[1], "past_due", 4), monthly(DUPLICATES[2], "past_due", 5), monthly(ACTIVE, "active", 6)];
   const afterRepair = () => [sub({ id: "sub_1", status: "canceled", created: 1 }), sub({ id: "sub_2", status: "canceled", created: 2 }), monthly(DUPLICATES[0], "canceled", 3), monthly(DUPLICATES[1], "canceled", 4), monthly(DUPLICATES[2], "canceled", 5), monthly(ACTIVE, "active", 6)];
   const storedMatchesActive = () => {
-    storedDoc = { plan: "full", stripeCustomerId: MINE, stripeSubscriptionId: ACTIVE, subscriptionStatus: "active", billingInterval: "month" };
+    storedDoc = { plan: "full", stripeCustomerId: MINE, stripeSubscriptionId: ACTIVE, subscriptionStatus: "active", billingInterval: "month", subscriptionStatusFromStripe: "active", planFromStripe: "5_models" };
   };
 
   it("REGRESSION: the stored ACTIVE subscription is not chosen over three past_due duplicates — nothing is written", async () => {

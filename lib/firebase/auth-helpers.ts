@@ -168,6 +168,11 @@ export async function verifySessionCookie(
 /**
  * SYSTEM_ADMIN — the stronger application-administration tier.
  *
+ * SEC-3 / S2-b: NO ROUTE CALLS THIS ANY MORE. Every privileged route is gated
+ * by `requirePrivilegedAccess` (lib/admin/privilegedAccess.ts). Kept only until
+ * its remaining unit specs are retired; app/api/admin/__tests__/privilegedGuardPin.spec.ts
+ * fails if any file under app/ (or middleware) calls it again.
+ *
  * Source: the Firebase custom claim `admin === true` ONLY. It is never
  * email-derived, so an `ADMIN_EMAILS` member can never reach the capabilities
  * behind it: provider-credential access, admin-claim minting, bulk purge, and
@@ -206,6 +211,11 @@ export async function requireSystemAdminAccess(
 
 /**
  * ADMIN_PORTAL — the portal/support capability family.
+ *
+ * SEC-3 / S2-b: NO ROUTE CALLS THIS ANY MORE. Every privileged route is gated
+ * by `requirePrivilegedAccess` (lib/admin/privilegedAccess.ts). Kept only until
+ * its remaining unit specs are retired; app/api/admin/__tests__/privilegedGuardPin.spec.ts
+ * fails if any file under app/ (or middleware) calls it again.
  *
  * Source: the Firebase `admin` custom claim (which is SYSTEM_ADMIN, and
  * therefore also satisfies this) OR a VERIFIED `ADMIN_EMAILS` member.

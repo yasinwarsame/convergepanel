@@ -16,6 +16,7 @@ import { writeAuditEvent } from "@/lib/governance/auditLog";
 import { writeGuardedGovernanceAuditRow } from "@/lib/governance/governanceAuditRow";
 import { isResearchDeletedInTx, isResearchWriteRefusedError, runResearchWrite } from "@/lib/firestore/researchDeletionBarrier";
 import { resolveGovernanceRequestUser } from "@/lib/governance/authCheck";
+import { governanceAuthDenialResponse } from "@/lib/governance/governanceAuthDenial";
 import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
 import { logger } from "@/lib/logger";
 
@@ -32,13 +33,8 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const resolved = await resolveGovernanceRequestUser(request);
-  if (!resolved.ok) {
-    return NextResponse.json(
-      { ok: false, error: { code: "unauthorized", message: "Authentication required" } },
-      { status: 401 }
-    );
-  }
+  const resolved = await resolveGovernanceRequestUser(request, { route: "POST /api/governance/review" });
+  if (!resolved.ok) return governanceAuthDenialResponse(resolved.status);
 
   const vis = await resolveGovernanceVisibleUserIds(resolved.uid);
   if (!vis.ok) {

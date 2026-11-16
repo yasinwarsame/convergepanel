@@ -11,6 +11,21 @@ import { getPlanConfigById } from "@/lib/billing/planConfig";
 import { SubscriptionPlanMapping } from "@/lib/billing/subscriptionMapper";
 import { BillingInterval } from "@/lib/plans";
 import type { SubscriptionBillingState } from "@/lib/billing/subscriptionBillingState";
+import { normalizePlanId } from "@/lib/admin/entitlements";
+
+/**
+ * The entitlement-authority fields the resolver (`calculateEffectiveEntitlement`)
+ * reads first. Single source for both the shared writer below and the
+ * request-time "already in sync" comparison, so the two cannot drift.
+ * `planFromStripe` is the entitlement form (3_models / 5_models); free → null.
+ */
+export function stripeAuthorityFields(
+  planMapping: Pick<SubscriptionPlanMapping, "planId">,
+  status: string
+): { subscriptionStatusFromStripe: string; planFromStripe: "3_models" | "5_models" | null } {
+  const plan = planMapping.planId === "free" ? null : normalizePlanId(planMapping.planId);
+  return { subscriptionStatusFromStripe: status, planFromStripe: plan === "free" ? null : plan };
+}
 
 /**
  * Update user plan in Firestore from Stripe subscription
@@ -71,6 +86,16 @@ export async function updateUserPlanInFirestore(args: {
     monthlyLimit: planMapping.monthlyLimit, // CRITICAL: Must be stored for /api/user/usage
     maxModelsPerRun: planMapping.maxModelsPerRun, // CRITICAL: Must be stored for /api/user/usage
     subscriptionStatus: status,
+    // Entitlement authority. The resolver (`calculateEffectiveEntitlement`)
+    // reads `subscriptionStatusFromStripe` and `planFromStripe` BEFORE
+    // `subscriptionStatus` / `plan`. Only the admin sync used to write them,
+    // so once an admin had synced a customer, every later automatic write here
+    // (webhook, sync-plan, request-time reconciliation, deletion) was shadowed
+    // by the stale admin-written values — e.g. a past_due or canceled
+    // subscription kept paid access. Writing both here keeps every writer in
+    // agreement. `planFromStripe` uses the entitlement form (3_models /
+    // 5_models), mapped from the lite/full plan id; free → null.
+    ...stripeAuthorityFields(planMapping, status),
     billingInterval: billingInterval || null,
     planUpdatedAt: firebaseAdmin.firestore.Timestamp.now(),
     // Canonical period. Written ONLY when Stripe reported one, so a

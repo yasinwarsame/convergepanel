@@ -69,8 +69,10 @@ describe("BILLING-USAGE-Q1 — billing synchronization does not own run usage", 
     // and now holds more strongly. Behavioural coverage of the tier itself
     // lives in app/api/admin/__tests__/systemAdminMutationRoutes.spec.ts — this
     // source-text check only pins that SOME privileged guard is present.
-    expect(admin).toMatch(/requireSystemAdminAccess/);
-    expect(admin).not.toMatch(/requireAdminPortalAccess/);
+    // SEC-3 / S2-b (moved pin): was /requireSystemAdminAccess/; the route now
+    // calls the privileged-access guard at SYSTEM_ADMIN.
+    expect(admin).toMatch(/requirePrivilegedAccess\(req, "SYSTEM_ADMIN"/);
+    expect(admin).not.toMatch(/requireAdminPortalAccess|"ADMIN_PORTAL"/);
   });
 
   it("the canonical calendar-month transition still owns the reset", () => {

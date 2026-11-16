@@ -11,6 +11,7 @@ import {
   runOwnerVisibleInGovernance,
 } from "@/lib/governance/governanceVisibleUserIds";
 import { resolveGovernanceRequestUser } from "@/lib/governance/authCheck";
+import { governanceAuthDenialResponse } from "@/lib/governance/governanceAuthDenial";
 import { governanceTrailAccessible } from "@/lib/governance/governanceTrailAccess";
 import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
 import { createRunWorkspaceIntegrityBatch } from "@/lib/workspaces/runWorkspaceIntegrityBatch";
@@ -545,13 +546,8 @@ export async function GET(request: NextRequest) {
 
   const t0 = Date.now();
 
-  const resolved = await resolveGovernanceRequestUser(request);
-  if (!resolved.ok) {
-    return NextResponse.json(
-      { ok: false, error: { code: "unauthorized", message: "Authentication required" } },
-      { status: 401 }
-    );
-  }
+  const resolved = await resolveGovernanceRequestUser(request, { route: "GET /api/governance/audit" });
+  if (!resolved.ok) return governanceAuthDenialResponse(resolved.status);
 
   const tVis0 = Date.now();
   const vis = await resolveGovernanceVisibleUserIdsCached(resolved.uid);

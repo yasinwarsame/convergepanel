@@ -42,6 +42,7 @@ import {
   resolveGovernanceVisibleUserIdsCached,
 } from "@/lib/governance/governanceVisibleUserIds";
 import { resolveGovernanceRequestUser } from "@/lib/governance/authCheck";
+import { governanceAuthDenialResponse } from "@/lib/governance/governanceAuthDenial";
 import { createRunWorkspaceIntegrityBatch } from "@/lib/workspaces/runWorkspaceIntegrityBatch";
 import { logger } from "@/lib/logger";
 
@@ -1616,13 +1617,8 @@ export async function GET(request: NextRequest) {
 
   const t0 = Date.now();
 
-  const resolved = await resolveGovernanceRequestUser(request);
-  if (!resolved.ok) {
-    return NextResponse.json(
-      { ok: false, error: { code: "unauthorized", message: "Authentication required" } },
-      { status: 401 }
-    );
-  }
+  const resolved = await resolveGovernanceRequestUser(request, { route: "GET /api/governance/queue" });
+  if (!resolved.ok) return governanceAuthDenialResponse(resolved.status);
 
   // Phase FIRST-ADMIN-C6 — NO EMAIL-DERIVED GOVERNANCE PATH IN THIS ROUTE.
   //

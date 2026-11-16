@@ -12,111 +12,62 @@
  * privilege write — not which helper the module happens to import.
  */
 
-/**
- * Phase FIRST-ADMIN-C2 test hygiene: jest workers reuse a single `process.env`
- * across the test FILES they run, so a suite that sets a privileged allowlist
- * and never restores it leaks that value into every later file in the same
- * worker. Snapshot BEFORE this file's own assignments; restore afterwards.
+/*
+ * SEC-3 / S2-b: driven through the real privileged-access guard (doubles only
+ * at the Firebase Admin SDK boundary — privilegedRouteHarness). Denial status
+ * codes are the guard's: an authenticated non-holder is 403 (was 401), a
+ * missing or cookie-only credential is 401.
  */
-const __PRIVILEGED_ENV_SNAPSHOT = {
-  ADMIN_EMAILS: process.env.ADMIN_EMAILS,
-  GOVERNANCE_ADMIN_EMAILS: process.env.GOVERNANCE_ADMIN_EMAILS,
-};
-afterAll(() => {
-  for (const [key, value] of Object.entries(__PRIVILEGED_ENV_SNAPSHOT)) {
-    if (value === undefined) delete process.env[key];
-    else process.env[key] = value;
-  }
-});
 
-const PORTAL_ONLY = "portal-only@test-invented.example";
-const GOV_ONLY = "governance-only@test-invented.example";
+jest.mock("@/lib/firebase/admin", () => require("@/lib/admin/__tests__/privilegedRouteHarness").firebaseAdminModuleDouble());
 
-let decoded: Record<string, unknown> | null = null;
-let authRecord: Record<string, unknown> = {};
-const setCustomUserClaims = jest.fn(async () => undefined);
-const getUser = jest.fn(async () => authRecord);
-const docSet = jest.fn(async () => undefined);
-
-jest.mock("@/lib/firebase/admin", () => ({
-  adminAuth: {
-    verifyIdToken: async () => {
-      if (!decoded) throw new Error("invalid token");
-      return decoded;
-    },
-    verifySessionCookie: async () => {
-      if (!decoded) throw new Error("invalid cookie");
-      return decoded;
-    },
-    getUser: (...a: unknown[]) => getUser(...(a as [])),
-    setCustomUserClaims: (...a: unknown[]) => setCustomUserClaims(...(a as [])),
-  },
-  adminDb: { collection: () => ({ doc: () => ({ set: (...a: unknown[]) => docSet(...(a as [])) }) }) },
-  firebaseAdmin: { firestore: { FieldValue: { serverTimestamp: () => "TS" } } },
-}));
-
-import { NextRequest } from "next/server";
+import {
+  authCalls,
+  authState,
+  dbWrites,
+  installPrivilegedHarness,
+  routeRequest,
+  signInAs,
+  type Credentials,
+} from "@/lib/admin/__tests__/privilegedRouteHarness";
 import { POST } from "../route";
 
-const req = () =>
-  new NextRequest("http://localhost/api/admin/set-role", {
-    method: "POST",
-    headers: { authorization: "Bearer t", "content-type": "application/json" },
-    body: JSON.stringify({ uid: "target-uid", role: "admin" }),
-  });
+installPrivilegedHarness();
 
+const req = (c: Credentials) => POST(routeRequest("/api/admin/set-role", { method: "POST", body: { uid: "target-uid", role: "admin" }, creds: c }));
 beforeEach(() => {
-  process.env.ADMIN_EMAILS = PORTAL_ONLY;
-  process.env.GOVERNANCE_ADMIN_EMAILS = GOV_ONLY;
-  decoded = null;
-  authRecord = {};
-  setCustomUserClaims.mockClear();
-  getUser.mockClear();
-  docSet.mockClear();
+  authState.records.set("target-uid", { uid: "target-uid", email: "t@test-invented.example", emailVerified: false, disabled: false, customClaims: {} });
 });
 
 describe("POST /api/admin/set-role — SYSTEM_ADMIN tier", () => {
   it("THE CORE PROOF: a verified ADMIN_EMAILS member with no claim is refused, and mints nothing", async () => {
-    decoded = { uid: "portal", email: PORTAL_ONLY, email_verified: true };
-    authRecord = { email: PORTAL_ONLY, emailVerified: true };
-    const res = await POST(req());
-    expect(res.status).toBe(401);
-    expect(setCustomUserClaims).not.toHaveBeenCalled();
-    expect(docSet).not.toHaveBeenCalled();
+    const res = await req({ bearer: signInAs("portal").bearer });
+    expect(res.status).toBe(403);
+    expect(authCalls.setCustomUserClaims).not.toHaveBeenCalled();
+    expect(dbWrites()).toEqual([]);
   });
 
   it("a verified GOVERNANCE_ADMIN_EMAILS member is refused, and mints nothing", async () => {
-    decoded = { uid: "gov", email: GOV_ONLY, email_verified: true };
-    authRecord = { email: GOV_ONLY, emailVerified: true };
-    const res = await POST(req());
-    expect(res.status).toBe(401);
-    expect(setCustomUserClaims).not.toHaveBeenCalled();
+    const res = await req({ bearer: signInAs("governance").bearer });
+    expect(res.status).toBe(403);
+    expect(authCalls.setCustomUserClaims).not.toHaveBeenCalled();
   });
 
-  it("the verified admin custom claim is admitted and mints the claim", async () => {
-    decoded = { uid: "sys", email: "someone@test-invented.example", admin: true };
-    authRecord = { email: "someone@test-invented.example", emailVerified: false, customClaims: {} };
-    const res = await POST(req());
+  it("the live admin custom claim is admitted and mints the claim", async () => {
+    const res = await req({ bearer: signInAs("system").bearer });
     expect(res.status).toBe(200);
-    expect(setCustomUserClaims).toHaveBeenCalledWith("target-uid", expect.objectContaining({ admin: true }));
+    expect(authCalls.setCustomUserClaims).toHaveBeenCalledWith("target-uid", expect.objectContaining({ admin: true }));
   });
 
   it("an unauthenticated caller is refused", async () => {
-    decoded = null;
-    const res = await POST(req());
+    const res = await req({});
     expect(res.status).toBe(401);
-    expect(setCustomUserClaims).not.toHaveBeenCalled();
+    expect(authCalls.setCustomUserClaims).not.toHaveBeenCalled();
   });
 
   it("a session cookie alone never reaches this route, even holding the claim", async () => {
-    decoded = { uid: "sys", email: "someone@test-invented.example", admin: true };
-    const cookieOnly = new NextRequest("http://localhost/api/admin/set-role", {
-      method: "POST",
-      headers: { cookie: "__session=c", "content-type": "application/json" },
-      body: JSON.stringify({ uid: "target-uid", role: "admin" }),
-    });
-    const res = await POST(cookieOnly);
+    const res = await req({ cookie: signInAs("system").cookie });
     expect(res.status).toBe(401);
-    expect(setCustomUserClaims).not.toHaveBeenCalled();
+    expect(authCalls.setCustomUserClaims).not.toHaveBeenCalled();
   });
 });
