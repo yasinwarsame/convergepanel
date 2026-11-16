@@ -12,8 +12,13 @@
  * THAN PRETENDING THEY ARE:
  *
  *   SESSION COOKIES (`verifySessionCookie(raw, true)`) — revocation IS checked.
- *     Three sites: verifySessionCookieValue, the requireAdminPortalAccess
- *     cookie fallback, and the /api/admin/access cookie fallback. Firebase
+ *     Two sites: verifySessionCookieValue and the requireAdminPortalAccess
+ *     cookie fallback. (SEC-3 / S2-b moved pin: `/api/admin/access` was the
+ *     third site; it is now gated by the privileged-access guard, which calls
+ *     the SDK with checkRevoked = false and evaluates revocation and
+ *     disablement against its ONE live getUser snapshot instead — pinned in
+ *     lib/admin/__tests__/privilegedAccess.spec.ts and, through the real
+ *     route, in app/api/admin/__tests__/privilegedRouteWiring.spec.ts.) Firebase
  *     rejects a revoked cookie and a disabled user when the flag is set; with
  *     the flag false it validates the signature and expiry only.
  *
@@ -68,7 +73,6 @@ import {
   requireAdminPortalAccess,
   verifySessionCookieValue,
 } from "@/lib/firebase/auth-helpers";
-import { GET as ADMIN_ACCESS_GET } from "@/app/api/admin/access/route";
 
 /** Firebase's real error shapes for the two conditions the flag exists to catch. */
 const revoked = () => Object.assign(new Error("session cookie revoked"), { code: "auth/session-cookie-revoked" });
@@ -88,7 +92,7 @@ beforeEach(() => {
   verifySessionCookie.mockClear();
 });
 
-/** The three sites that must ask Firebase to check revocation. */
+/** The two sites that must ask Firebase to check revocation. */
 describe("session-cookie verification asks Firebase to check revocation", () => {
   it("verifySessionCookieValue passes checkRevoked = true", async () => {
     await verifySessionCookieValue("c");
@@ -101,17 +105,9 @@ describe("session-cookie verification asks Firebase to check revocation", () => 
     expect(verifySessionCookie).toHaveBeenCalledWith("c", true);
   });
 
-  it("the /api/admin/access cookie fallback passes checkRevoked = true", async () => {
-    tokenError = new Error("not an id token");
-    decoded = { uid: "u", email: PORTAL, admin: true };
-    await ADMIN_ACCESS_GET(cookieReq("http://localhost/api/admin/access"));
-    expect(verifySessionCookie).toHaveBeenCalledWith("c", true);
-  });
-
   it("EVERY verifySessionCookie call in a privileged path sets the flag", async () => {
     tokenError = new Error("not an id token");
     await requireAdminPortalAccess(cookieReq("http://localhost/api/admin/runs"));
-    await ADMIN_ACCESS_GET(cookieReq("http://localhost/api/admin/access"));
     await verifySessionCookieValue("c");
     expect(verifySessionCookie).toHaveBeenCalled();
     for (const call of verifySessionCookie.mock.calls) {
@@ -135,14 +131,6 @@ describe("a revoked session and a disabled user are denied", () => {
     await expect(
       requireAdminPortalAccess(cookieReq("http://localhost/api/admin/runs"))
     ).resolves.toBeNull();
-  });
-
-  it("revoked cookie -> /api/admin/access denied", async () => {
-    tokenError = new Error("not an id token");
-    cookieError = revoked();
-    const res = await ADMIN_ACCESS_GET(cookieReq("http://localhost/api/admin/access"));
-    expect(res.status).toBe(401);
-    await expect(res.json()).resolves.toEqual({ ok: false, adminPortal: false, systemAdmin: false });
   });
 
   it("revoked cookie -> verifySessionCookieValue rejects rather than returning an identity", async () => {

@@ -5,8 +5,8 @@
  * assert not only the decision but HOW it was reached: `checkRevoked === false`
  * on every verification, and exactly one `getUser(uid)` per request.
  *
- * The guard is dark at this step: the last block proves no file under `app/`
- * imports it.
+ * S2-a shipped the guard dark; since S2-b the last block pins its importers to
+ * exactly the wired privileged routes.
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -997,13 +997,25 @@ describe("static boundaries", () => {
     return out;
   }
 
-  it("is DARK at S2-a: nothing under app/ (or middleware) imports the guard yet", () => {
+  it("S2-b: the guard's importers under app/ (and middleware) are EXACTLY the wired privileged routes", () => {
+    // Was the S2-a darkness pin (importers === []). S2-b wires the guard; the
+    // set is now pinned exactly, so a new importer is a deliberate change here
+    // and the adapter is still never imported directly by a route.
     const files = [...walk(join(ROOT, "app")), join(ROOT, "middleware.ts")];
     expect(files.length).toBeGreaterThan(100);
     const importers = files
+      .filter((f) => !/__tests__/.test(f))
       .filter((f) => /privilegedAccess|privilegedCredentialAdapter/.test(readFileSync(f, "utf8")))
+      .map((f) => relative(ROOT, f))
+      .sort();
+    const adminRoutes = walk(join(ROOT, "app", "api", "admin"))
+      .filter((f) => !/__tests__/.test(f) && /\/route\.ts$/.test(f))
       .map((f) => relative(ROOT, f));
-    expect(importers).toEqual([]);
+    expect(adminRoutes).toHaveLength(16);
+    expect(importers).toEqual(
+      [...adminRoutes, "app/api/governance/audit/backfill/route.ts", "app/api/governance/policy/route.ts"].sort()
+    );
+    for (const f of importers) expect(readFileSync(join(ROOT, f), "utf8")).not.toMatch(/privilegedCredentialAdapter/);
   });
 
   it("the darkness scan can see an importer (positive control on the matcher)", () => {

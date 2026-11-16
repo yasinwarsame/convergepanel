@@ -8,8 +8,8 @@ import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { getEffectiveEntitlements } from "@/lib/admin/entitlements";
 import { getPlanConfig } from "@/lib/plans";
 import type { UserProfile } from "@/lib/types";
-import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
-import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
+import { resolveGovernanceRequestUser } from "@/lib/governance/authCheck";
+import { governanceAuthDenialResponse } from "@/lib/governance/governanceAuthDenial";
 import { logger } from "@/lib/logger";
 import { parseGovernanceReviewerFor } from "@/lib/governance/reviewerFields";
 
@@ -21,36 +21,21 @@ function planLabel(planId: "free" | "lite" | "full"): string {
 }
 
 /**
- * Auth Identity Consistency Remediation, Step 7 — resolves via the
- * shared, hardened resolver rather than this route's own duplicated
- * cookie-first logic. Note: this route's PREVIOUS implementation
- * swallowed a THROWN cookie-verification error and fell through to
- * trying the bearer token — the only one of the 14 migrated routes that
- * did so; every other route (and the shared resolver) fails closed on an
- * invalid cookie without ever trying bearer. Migrating this route onto
- * the shared resolver makes it consistent with the other 13 and with
- * `getRequestUid()` — strictly safer, not a functional regression (a
- * cookie that fails verification is not distinguishable, from this
- * route's caller's perspective, from "please sign in again").
+ * SEC-3 / S2-b correction (owner ruling D). Neither handler confers a
+ * privileged or global capability: GET returns the caller's own settings and
+ * the assigners who chose the caller; POST changes the caller's own
+ * availability and own reviewer assignment (plan-gated). They nevertheless use
+ * the privileged-access guard's authentication (via
+ * `resolveGovernanceRequestUser`), so a revoked, disabled, malformed or
+ * conflicting credential is refused (401) and a verifier / lookup outage is 503
+ * — this adds ONE live Auth read per request, which POST `assign_reviewer`
+ * repays by taking the caller's own email from that same read.
+ * (Step 7 history: this route previously used `resolveRequestIdentity`.)
  */
-async function resolveUid(req: NextRequest): Promise<string | NextResponse> {
-  const identity = await resolveRequestIdentity(req);
-  if (identity.status === "authenticated") return identity.uid;
-  logIdentityResolutionFailure({ route: "/api/governance/reviewer", failureCategory: identity.reason });
-  return NextResponse.json(
-    { ok: false, error: { code: "unauthorized", message: "Authentication required." } },
-    { status: 401 }
-  );
-}
-
-async function authEmailForUid(uid: string): Promise<string> {
-  if (!adminAuth) return "";
-  try {
-    const u = await adminAuth.getUser(uid);
-    return (u.email ?? "").trim().toLowerCase();
-  } catch {
-    return "";
-  }
+async function resolveCaller(req: NextRequest, route: string): Promise<{ uid: string; email: string } | NextResponse> {
+  const resolved = await resolveGovernanceRequestUser(req, { route });
+  if (!resolved.ok) return governanceAuthDenialResponse(resolved.status);
+  return { uid: resolved.uid, email: resolved.email };
 }
 
 function requireFullPlanResponse(): NextResponse {
@@ -74,9 +59,9 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const uidOrRes = await resolveUid(req);
-  if (uidOrRes instanceof NextResponse) return uidOrRes;
-  const uid = uidOrRes;
+  const caller = await resolveCaller(req, "GET /api/governance/reviewer");
+  if (caller instanceof NextResponse) return caller;
+  const uid = caller.uid;
 
   const entitlements = await getEffectiveEntitlements(uid);
   if (entitlements.planId !== "full") {
@@ -138,9 +123,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const uidOrRes = await resolveUid(req);
-  if (uidOrRes instanceof NextResponse) return uidOrRes;
-  const uid = uidOrRes;
+  const caller = await resolveCaller(req, "POST /api/governance/reviewer");
+  if (caller instanceof NextResponse) return caller;
+  const uid = caller.uid;
 
   const assignerEntitlements = await getEffectiveEntitlements(uid);
   if (assignerEntitlements.planId !== "full") {
@@ -187,7 +172,8 @@ export async function POST(req: NextRequest) {
     }
 
     const reviewerEmailNorm = rawEmail.toLowerCase();
-    const selfEmail = await authEmailForUid(uid);
+    // The caller's own address, from the same live read that authenticated them.
+    const selfEmail = caller.email.trim().toLowerCase();
     if (selfEmail && reviewerEmailNorm === selfEmail) {
       return NextResponse.json(
         { ok: false, error: { message: "You can't assign yourself as your own reviewer." } },

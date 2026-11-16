@@ -8,13 +8,15 @@
  * proceeding as if ownership were clear.
  */
 
-// Phase FIRST-ADMIN-C2: the route now names its tier explicitly
-// (`requireSystemAdminAccess`). Both are provided by the same mock so the
-// legacy alias and the canonical name behave identically here.
+// SEC-3 / S2-b: the route is gated by the privileged-access guard. This file
+// tests the Team-owner guard BEHIND it, so the guard itself is replaced by a
+// grant here; the guard's wiring on this route (every tier, every denial, zero
+// mutations on refusal) is proven through the REAL guard in
+// app/api/admin/__tests__/privilegedRouteWiring.spec.ts.
 const mockedRequireSystemAdmin = jest.fn();
-jest.mock("@/lib/firebase/auth-helpers", () => ({
-  requireAdmin: (...a: unknown[]) => mockedRequireSystemAdmin(...(a as [])),
-  requireSystemAdminAccess: (...a: unknown[]) => mockedRequireSystemAdmin(...(a as [])),
+jest.mock("@/lib/admin/privilegedAccess", () => ({
+  ...jest.requireActual("@/lib/admin/privilegedAccess"),
+  requirePrivilegedAccess: (...a: unknown[]) => mockedRequireSystemAdmin(...(a as [])),
 }));
 
 const mockUpdateUser = jest.fn();
@@ -53,7 +55,7 @@ function makeRequest(body: unknown) {
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockedRequireSystemAdmin.mockResolvedValue({ uid: "admin-uid" });
+  mockedRequireSystemAdmin.mockResolvedValue({ ok: true, actor: { uid: "admin-uid", tier: "SYSTEM_ADMIN" } });
   mockCheckTeamWorkspaceOwnershipForUid.mockResolvedValue({ kind: "clear" });
 });
 

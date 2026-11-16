@@ -6,10 +6,8 @@
  * destructive, governance-changing or billing-changing actions. See
  * docs/operations/admin-authority-tiers.md.
  *
- * TRANSPORT NOTE: the SYSTEM_ADMIN guards are bearer-only in practice
- * (`verifyAdminToken` passes the `__session` value to `verifyIdToken`, which
- * always rejects a Firebase session cookie). The portal guard this replaces
- * accepted either, so this route is now bearer-only. The admin UI calls it via
+ * TRANSPORT (SEC-3 / S2-b): gated by `requirePrivilegedAccess(..., "SYSTEM_ADMIN")`,
+ * which accepts only a bearer credential. The admin UI calls it via
  * `authedFetch`, which always sends an `Authorization: Bearer` header.
  */
 /**
@@ -24,7 +22,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { stripe } from "@/lib/stripe/client";
 import { adminDb, firebaseAdmin } from "@/lib/firebase/admin";
-import { requireSystemAdminAccess } from "@/lib/firebase/auth-helpers";
+import { privilegedDenialResponse, requirePrivilegedAccess } from "@/lib/admin/privilegedAccess";
 import { getPlanIdFromPriceId, getPlanConfigById } from "@/lib/billing/planConfig";
 import { BillingInterval } from "@/lib/plans";
 import { resetUsageForNewPlan } from "@/lib/stripe/usage";
@@ -34,17 +32,12 @@ import Stripe from "stripe";
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
-  try {
-    // Verify admin authentication — session cookie alone is not sufficient
-    // Phase FIRST-ADMIN-C4: mutates billing/subscription state.
-    const auth = await requireSystemAdminAccess(req);
-    if (!auth) {
-      return NextResponse.json(
-        { error: "Unauthorized. Admin access required." },
-        { status: 401 }
-      );
-    }
+  // Phase FIRST-ADMIN-C4: mutates billing/subscription state.
+  // SEC-3 / S2-b: refused BEFORE the body is read or Stripe is called.
+  const access = await requirePrivilegedAccess(req, "SYSTEM_ADMIN", { route: "POST /api/admin/sync-subscription" });
+  if (!access.ok) return privilegedDenialResponse(access);
 
+  try {
     if (!adminDb) {
       return NextResponse.json(
         { error: "Database not available" },

@@ -6,10 +6,8 @@
  * destructive, governance-changing or billing-changing actions. See
  * docs/operations/admin-authority-tiers.md.
  *
- * TRANSPORT NOTE: the SYSTEM_ADMIN guards are bearer-only in practice
- * (`verifyAdminToken` passes the `__session` value to `verifyIdToken`, which
- * always rejects a Firebase session cookie). The portal guard this replaces
- * accepted either, so this route is now bearer-only. The admin UI calls it via
+ * TRANSPORT (SEC-3 / S2-b): gated by `requirePrivilegedAccess(..., "SYSTEM_ADMIN")`,
+ * which accepts only a bearer credential. The admin UI calls it via
  * `authedFetch`, which always sends an `Authorization: Bearer` header.
  */
 /**
@@ -27,22 +25,17 @@ import { adminDb } from "@/lib/firebase/admin";
 
 // Ensure Node.js runtime (Firebase Admin requires Node.js, not Edge)
 export const runtime = "nodejs";
-import { requireSystemAdminAccess } from "@/lib/firebase/auth-helpers";
+import { privilegedDenialResponse, requirePrivilegedAccess } from "@/lib/admin/privilegedAccess";
 import { handleSubscriptionChange } from "@/app/api/stripe/webhook/route";
 import Stripe from "stripe";
 
 export async function POST(req: NextRequest) {
-  try {
-    // Verify admin authentication — session cookie alone is not sufficient
-    // Phase FIRST-ADMIN-C4: exercises billing/webhook mutation.
-    const auth = await requireSystemAdminAccess(req);
-    if (!auth) {
-      return NextResponse.json(
-        { error: "Unauthorized. Admin access required." },
-        { status: 401 }
-      );
-    }
+  // Phase FIRST-ADMIN-C4: exercises billing/webhook mutation.
+  // SEC-3 / S2-b: refused BEFORE the body is read or Stripe is called.
+  const access = await requirePrivilegedAccess(req, "SYSTEM_ADMIN", { route: "POST /api/admin/test-webhook" });
+  if (!access.ok) return privilegedDenialResponse(access);
 
+  try {
     if (!adminDb) {
       return NextResponse.json(
         { error: "Database not available" },

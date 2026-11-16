@@ -6,7 +6,7 @@
  * - Delete user accounts
  *
  * Security:
- * - Only admins can access (verified via requireSystemAdminAccess())
+ * - SYSTEM_ADMIN only (SEC-3 / S2-b: requirePrivilegedAccess — live claim, bearer only)
  * - Updates both Firebase Auth and Firestore for consistency
  *
  * Routes:
@@ -39,7 +39,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireSystemAdminAccess } from "@/lib/firebase/auth-helpers";
+import { privilegedDenialResponse, requirePrivilegedAccess } from "@/lib/admin/privilegedAccess";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { checkTeamWorkspaceOwnershipForUid } from "@/lib/workspaces/teamOwnerGuard";
 
@@ -60,11 +60,9 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: { uid: string } }
 ) {
-  // Verify admin authentication
-  const auth = await requireSystemAdminAccess(request);
-  if (!auth) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  // SEC-3 / S2-b: SYSTEM_ADMIN (live claim, bearer only), refused BEFORE any read or write.
+  const access = await requirePrivilegedAccess(request, "SYSTEM_ADMIN", { route: "PATCH /api/admin/users/[uid]" });
+  if (!access.ok) return privilegedDenialResponse(access);
 
   try {
     const { uid } = params;
@@ -164,11 +162,9 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: { uid: string } }
 ) {
-  // Verify admin authentication
-  const auth = await requireSystemAdminAccess(request);
-  if (!auth) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  // SEC-3 / S2-b: SYSTEM_ADMIN (live claim, bearer only), refused BEFORE any read or write.
+  const access = await requirePrivilegedAccess(request, "SYSTEM_ADMIN", { route: "DELETE /api/admin/users/[uid]" });
+  if (!access.ok) return privilegedDenialResponse(access);
 
   try {
     const { uid } = params;
