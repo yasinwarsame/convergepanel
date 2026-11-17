@@ -495,3 +495,68 @@ describe("m5: published error examples", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// m2 / m3: rate limits on every operation and the normative order of error-catalog.md §3.1
+// ---------------------------------------------------------------------------------------------
+describe("m2/m3: precedence and rate limits", () => {
+  it("every data-plane operation documents 429 TooManyRequests, which carries Retry-After", () => {
+    expect(raw.components.responses.TooManyRequests.headers["Retry-After"]).toBeDefined();
+    let ops = 0;
+    for (const [p, item] of Object.entries<Json>(raw.paths)) {
+      for (const [method, op] of Object.entries<Json>(item)) {
+        if (!op || typeof op !== "object" || !op.responses) continue;
+        ops++;
+        expect({ at: `${method} ${p}`, r429: op.responses["429"]?.$ref }).toEqual({ at: `${method} ${p}`, r429: "#/components/responses/TooManyRequests" });
+      }
+    }
+    expect(ops).toBe(9);
+  });
+
+  function precedenceTables(): Array<string[]> {
+    const md = fs.readFileSync(CATALOG, "utf8");
+    const sec = md.slice(md.indexOf("### 3.1 Data plane"), md.indexOf("### 3.2 Management plane"));
+    const tables: Array<string[]> = [];
+    let cur: string[] | null = null;
+    for (const line of sec.split("\n")) {
+      if (line.startsWith("| Step |")) { cur = []; tables.push(cur); continue; }
+      if (cur && /^\| \d+ \|/.test(line)) cur.push(line);
+      else if (cur && !line.startsWith("|")) cur = null;
+    }
+    return tables;
+  }
+  const rowOf = (rows: string[], code: string): number => {
+    const i = rows.findIndex((r) => r.includes(`\`${code}\``));
+    expect({ code, found: i >= 0 }).toEqual({ code, found: true });
+    return i;
+  };
+
+  it("create: transport < flood limit < auth < rate < org/scope < decoding < idempotency < every new-job-only check", () => {
+    const [create] = precedenceTables();
+    const order = (a: string, b: string): void => expect({ a, b, before: rowOf(create, a) < rowOf(create, b) }).toEqual({ a, b, before: true });
+    order("request_too_large", "invalid_api_key");
+    expect(create.filter((r) => r.includes("`rate_limited`")).length).toBe(2); // pre-auth and authenticated
+    order("invalid_api_key", "org_suspended");
+    expect(rowOf(create, "invalid_api_key")).toBeLessThan(create.findIndex((r, i) => i > rowOf(create, "invalid_api_key") && r.includes("`rate_limited`")) + 1);
+    order("org_suspended", "insufficient_scope");
+    order("insufficient_scope", "invalid_json");
+    order("invalid_json", "idempotency_key_reused");
+    for (const c of ["synthesis_unavailable", "fallback_unavailable", "option_unavailable_in_beta", "type_unavailable", "pipeline_processing_not_acknowledged", "model_unavailable", "model_limit_exceeded", "queue_unavailable", "concurrency_limit", "failed_job_threshold_exceeded", "quota_exceeded", "capacity_protection", "platform_spend_ceiling"]) {
+      order("idempotency_key_reused", c);
+      expect({ c, newJobOnly: create[rowOf(create, c)].includes("*New job only.*") }).toEqual({ c, newJobOnly: true });
+    }
+    // Authenticated rate limit (second rate_limited row) precedes all body decoding.
+    const rateRows = create.map((r, i) => (r.includes("`rate_limited`") ? i : -1)).filter((i) => i >= 0);
+    expect(rateRows[1]).toBeGreaterThan(rowOf(create, "invalid_api_key"));
+    expect(rateRows[1]).toBeLessThan(rowOf(create, "invalid_json"));
+  });
+
+  it("GET/poll/list/delete/cancel: rate limit is decided before the tenant-bound lookup", () => {
+    const [, reads] = precedenceTables();
+    expect(reads).toBeDefined();
+    expect(rowOf(reads, "rate_limited")).toBeLessThan(rowOf(reads, "invalid_api_key") + 2);
+    expect(rowOf(reads, "invalid_api_key")).toBeLessThan(reads.findIndex((r) => r.includes("Authenticated request rate")));
+    expect(reads.findIndex((r) => r.includes("Authenticated request rate"))).toBeLessThan(rowOf(reads, "verification_not_found"));
+    expect(reads.find((r) => r.includes("Authenticated request rate"))).toContain("before the path ID");
+  });
+});

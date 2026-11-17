@@ -277,7 +277,7 @@ const event = (name: string, apply: (sys: System) => void): Proc => ({
   },
 });
 
-interface Outcome { schedule: number[]; results: Array<ApiResponse | null>; sys: System }
+interface Outcome { schedule: number[]; results: Array<ApiResponse | null>; sys: System; finishedAt: number[] }
 
 /** Enumerates every interleaving (each step of each process is a scheduling choice). */
 function interleavings(setup: () => System, procs: Proc[]): Outcome[] {
@@ -286,14 +286,18 @@ function interleavings(setup: () => System, procs: Proc[]): Outcome[] {
     const sys = setup();
     const gens = procs.map((p) => p.start(sys));
     const results: Array<ApiResponse | null | undefined> = procs.map(() => undefined);
-    const step = (i: number): void => {
+    const finishedAt: number[] = procs.map(() => -1);
+    const step = (i: number, at: number): void => {
       const r = gens[i].next();
-      if (r.done) results[i] = r.value;
+      if (r.done) {
+        results[i] = r.value;
+        finishedAt[i] = at;
+      }
     };
-    for (const i of prefix) step(i);
+    prefix.forEach((i, at) => step(i, at));
     const runnable = results.map((r, i) => (r === undefined ? i : -1)).filter((i) => i >= 0);
     if (runnable.length === 0) {
-      out.push({ schedule: prefix, results: results as Array<ApiResponse | null>, sys });
+      out.push({ schedule: prefix, results: results as Array<ApiResponse | null>, sys, finishedAt });
       return;
     }
     for (const i of runnable) explore([...prefix, i]);
@@ -350,6 +354,13 @@ describe("m3: concurrency — every interleaving", () => {
       const accepted = o.results.filter((r): r is ApiResponse => r !== null && r.status === 202);
       expect(new Set(accepted.map((r) => r.body?.id)).size).toBeLessThanOrEqual(1);
       for (const r of o.results) if (r) expect(["202 new", "202 replay", "401 invalid_api_key", "409 request_in_progress"]).toContain(fmt(r));
+      // A request whose final (committing) step ran after the revocation never gets a 202:
+      // its transaction re-read the key, or its commit failed validation and retried.
+      const revokedAt = o.finishedAt[2];
+      for (const i of [0, 1]) {
+        const r = o.results[i] as ApiResponse;
+        if (o.finishedAt[i] > revokedAt) expect({ schedule: o.schedule, i, got: fmt(r) }).not.toEqual({ schedule: o.schedule, i, got: expect.stringMatching(/^202/) });
+      }
       // After the revocation, the key never obtains the replay.
       expect(fmt(send(o.sys, req(SAME)))).toBe("401 invalid_api_key");
     }
