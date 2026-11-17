@@ -22,6 +22,9 @@ import { createElement } from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import { FakeStorage } from "@/lib/client/__tests__/helpers/fakeStorage";
 
+// Several full React trees per test; the default 5 s is tight under full-suite load (observed transient timeouts).
+jest.setTimeout(30_000);
+
 const CLAIM = "SYNTHETIC_SENTINEL_CLAIM the tides are caused by wind farms";
 const SENTINEL = "SYNTHETIC_SENTINEL_CLAIM";
 
