@@ -112,10 +112,12 @@ describe("L3/L4 — provider error bodies (Grok, Perplexity)", () => {
   });
 
   it("Grok: an unparseable 200 body (model output) is not logged via the SyntaxError message", async () => {
-    respondWith(`${MODEL_OUTPUT} {not json`, 200);
+    // V8's SyntaxError quotes only the first ~10 characters of the body, so the
+    // sentinel must fit in that window for this assertion to be able to fail.
+    respondWith("LEAK10CHRS {not json", 200);
     const { callGrok } = require("@/lib/connectors/grok");
     await callGrok(QUESTION, null, "xai-synthetic-key");
-    expect(logged()).not.toContain("SYNTHETIC_MODEL_OUTPUT_SENTINEL");
+    expect(logged()).not.toContain("LEAK10CHRS");
     expect(logged()).toContain("Failed to parse JSON response");
   });
 
