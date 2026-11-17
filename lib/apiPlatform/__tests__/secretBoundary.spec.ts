@@ -23,7 +23,7 @@ const MODULE = "lib/apiPlatform/secrets.server.ts";
 const ALL_NAMES = [...Object.values(API_SECRET_NAMES), ...RESERVED_API_SECRET_NAMES];
 
 /** Importers allowed to import the secrets module (non-test). Empty on the boundary branch; API-1a adds keys.ts. */
-const IMPORTER_ALLOW_LIST: readonly string[] = [];
+const IMPORTER_ALLOW_LIST: readonly string[] = ["lib/apiPlatform/keys.ts"];
 
 const SKIP_DIRS = new Set(["node_modules", ".git", ".next", "coverage", "docs", "__tests__", "firestore-rules-tests", "public"]);
 const CODE_EXT = /\.(ts|tsx|js|jsx|mjs|cjs)$/;

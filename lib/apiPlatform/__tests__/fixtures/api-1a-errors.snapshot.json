@@ -1,0 +1,72 @@
+{
+  "source": "lib/apiPlatform/errors.ts",
+  "pr": 327,
+  "commit": "fa9146aef8b1513225f487f8ad8b7723f95b8a95",
+  "codes": {
+    "api_key_not_accepted": {
+      "status": 401,
+      "type": "authentication_error",
+      "message": "API keys are not accepted on this endpoint."
+    },
+    "api_unavailable": {
+      "status": 503,
+      "type": "service_unavailable",
+      "message": "The API is temporarily unavailable."
+    },
+    "fresh_session_required": {
+      "status": 403,
+      "type": "permission_error",
+      "message": "Sign in again to perform this action."
+    },
+    "identity_not_verified": {
+      "status": 403,
+      "type": "permission_error",
+      "message": "Verify your email address to perform this action."
+    },
+    "insufficient_role": {
+      "status": 403,
+      "type": "permission_error",
+      "message": "Your organization role does not allow this action."
+    },
+    "insufficient_scope": {
+      "status": 403,
+      "type": "permission_error",
+      "message": "The API key does not have the required scope."
+    },
+    "internal_error": {
+      "status": 500,
+      "type": "api_error",
+      "message": "An internal error occurred."
+    },
+    "invalid_api_key": {
+      "status": 401,
+      "type": "authentication_error",
+      "message": "The API key is invalid."
+    },
+    "invalid_request": {
+      "status": 400,
+      "type": "invalid_request_error",
+      "message": "The request is invalid."
+    },
+    "live_key_requires_plan": {
+      "status": 403,
+      "type": "permission_error",
+      "message": "Live keys require an active API plan."
+    },
+    "not_found": {
+      "status": 404,
+      "type": "not_found",
+      "message": "Not found."
+    },
+    "org_suspended": {
+      "status": 403,
+      "type": "permission_error",
+      "message": "The organization is suspended."
+    },
+    "session_required": {
+      "status": 401,
+      "type": "authentication_error",
+      "message": "A signed-in session is required."
+    }
+  }
+}
