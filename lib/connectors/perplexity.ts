@@ -120,7 +120,14 @@ export async function callPerplexity(
       if (!response.ok) {
         const latencyMs = Date.now() - startTime;
         const errorJson = await response.json().catch(() => null);
-        logger.error("[Perplexity connector] Perplexity API error", { status: response.status, error: errorJson });
+        // Privacy remediation (2026-11-17 audit, L4): never log the raw provider
+        // error body (it can echo request content). Status + error code/type
+        // only; the provider's message still reaches the ModelResult below.
+        logger.error("[Perplexity connector] Perplexity API error", {
+          status: response.status,
+          code: typeof errorJson?.error?.code === "string" || typeof errorJson?.error?.code === "number" ? errorJson.error.code : undefined,
+          type: typeof errorJson?.error?.type === "string" ? errorJson.error.type : undefined,
+        });
 
         // Perplexity returns: { error: { message, type, code, param? } }
         const errorMessage =

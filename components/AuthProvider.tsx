@@ -56,6 +56,8 @@ import { nextSessionSyncState, canPerformProtectedMutation, type SessionSyncStat
 import { createGenerationGuard } from "@/lib/client/authGeneration";
 import { establishServerSession, clearServerSession } from "@/lib/client/sessionSync";
 import { logAuthSessionClientEvent } from "@/lib/client/authSessionTelemetry";
+import { clearLocalPrivateDataOnSignOut, clearOtherAccountsLocalData } from "@/lib/client/localPrivateData";
+import posthog from "posthog-js";
 
 interface AuthContextType {
   user: User | null;
@@ -156,6 +158,24 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       // ── Signed out (explicit logout, revoked session, or the SDK could not refresh) ──
       if (!nextUser) {
+        // Privacy remediation (2026-11-17 audit): this branch is reached by
+        // EVERY sign-out path (TopNav, profile, revoked/expired session,
+        // fail-closed sync failure), so it is the one place that removes
+        // browser-side copies of user content — the per-uid history cache
+        // (claims + model output) and the /verify hand-off text — and, when
+        // an identity was actually signed in, unlinks the PostHog distinct
+        // id so later anonymous events are not attributed to that person.
+        // Synchronous and first, before any await, so nothing can re-read
+        // the cache in between.
+        const hadIdentity = prevUidRef.current !== null;
+        clearLocalPrivateDataOnSignOut();
+        if (hadIdentity) {
+          try {
+            posthog.reset();
+          } catch {
+            /* analytics never blocks sign-out */
+          }
+        }
         prevUidRef.current = null;
         dispatchSync({ type: "client_signed_out" });
         setUser(null);
@@ -179,6 +199,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setLoading(false);
 
       if (isNewIdentity) {
+        // Privacy remediation (2026-11-17): a direct account switch (no
+        // logout in between) must not leave the previous account's cached
+        // history on this browser.
+        clearOtherAccountsLocalData(nextUser.uid);
         dispatchSync({ type: "client_signed_in", uid: nextUser.uid });
         dispatchSync({ type: "session_sync_started" });
       } else {

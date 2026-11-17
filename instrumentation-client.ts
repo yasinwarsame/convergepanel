@@ -4,6 +4,7 @@
 
 import * as Sentry from "@sentry/nextjs";
 import { resolveSentryDsn } from "./lib/telemetry/sentryDsn";
+import { scrubReplayRecordingEvent, scrubSentryBreadcrumb, scrubSentryEvent } from "./lib/privacy/sentryScrub";
 
 // Telemetry isolation: only an explicitly configured DSN is used. Missing or
 // empty means browser Sentry is never initialized (see lib/telemetry/sentryDsn.ts).
@@ -15,18 +16,43 @@ if (dsn !== undefined) {
   Sentry.init({
     dsn,
     enabled: process.env.NODE_ENV === "production",
-    integrations: [Sentry.replayIntegration()],
+    integrations: [
+      Sentry.replayIntegration({
+        // Privacy remediation (2026-11-17 audit): masking pinned explicitly
+        // instead of relying on SDK defaults — claim text and model output
+        // are rendered on screen, so no text, input or media is recorded.
+        maskAllText: true,
+        maskAllInputs: true,
+        blockAllMedia: true,
+        // No network request/response bodies or headers in replays.
+        networkDetailAllowUrls: [],
+        // Recording events (rrweb meta `href`, DOM `href` attributes,
+        // navigation/fetch performance spans) bypass beforeSend and event
+        // processors entirely — scrub their URLs here.
+        beforeAddRecordingEvent: scrubReplayRecordingEvent,
+      }),
+    ],
     tracesSampleRate: 0.1,
     enableLogs: true,
     replaysSessionSampleRate: 0.05,
     replaysOnErrorSampleRate: 1.0,
-    sendDefaultPii: true,
-    beforeBreadcrumb: stripFragmentFromBreadcrumb,
+    // Privacy remediation (2026-11-17 audit): was `true`, which attached the
+    // visitor IP and user context to every event. No code path depends on it
+    // (Sentry.setUser is never called); errors, traces and replays still flow.
+    sendDefaultPii: false,
+    beforeSend: (event) => scrubSentryEvent(event),
+    beforeSendTransaction: (event) => scrubSentryEvent(event),
+    beforeBreadcrumb: scrubSentryBreadcrumb,
   });
 }
 
 /**
- * Team Workspace Invitations, Phase 8D.3.1 — URL-fragment redaction.
+ * Team Workspace Invitations, Phase 8D.3.1 — URL-fragment redaction,
+ * generalized by the 2026-11-17 privacy remediation: the processor now runs
+ * the shared scrubber (lib/privacy/sentryScrub.ts → lib/privacy/sanitizeUrl.ts),
+ * which drops the fragment AND redacts every query value outside the
+ * allowlist (claim / question text arrives as `?text=`, `?claim=`, `?q=`,
+ * and nested in `?redirect=`).
  *
  * A bearer-bearing acceptance link (`/workspace-invitations/accept
  * #invitationId=...&token=...`) never reaches the server, but Session
@@ -53,36 +79,6 @@ if (dsn !== undefined) {
  * explicit forceFlush or an independent debounced timer), so it can still
  * transmit the sensitive URL it was meant to suppress.
  */
-function stripUrlFragment(value: unknown): unknown {
-  return typeof value === "string" ? value.replace(/#.*$/, "") : value;
-}
-
-function stripFragmentFromBreadcrumb(breadcrumb: Sentry.Breadcrumb): Sentry.Breadcrumb {
-  if (!breadcrumb.data) return breadcrumb;
-  const data = { ...breadcrumb.data };
-  for (const key of ["url", "to", "from"]) {
-    if (key in data) data[key] = stripUrlFragment(data[key]);
-  }
-  return { ...breadcrumb, data };
-}
-
-Sentry.addEventProcessor((event) => {
-  const withReplayFields = event as typeof event & { urls?: unknown; initialUrl?: unknown };
-
-  if (Array.isArray(withReplayFields.urls)) {
-    withReplayFields.urls = withReplayFields.urls.map(stripUrlFragment);
-  }
-  if (typeof withReplayFields.initialUrl === "string") {
-    withReplayFields.initialUrl = stripUrlFragment(withReplayFields.initialUrl);
-  }
-  if (event.request?.url) {
-    event.request.url = stripUrlFragment(event.request.url) as string;
-  }
-  if (Array.isArray(event.breadcrumbs)) {
-    event.breadcrumbs = event.breadcrumbs.map(stripFragmentFromBreadcrumb);
-  }
-
-  return event;
-});
+Sentry.addEventProcessor((event) => scrubSentryEvent(event));
 
 export const onRouterTransitionStart = Sentry.captureRouterTransitionStart;

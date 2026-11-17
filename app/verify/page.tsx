@@ -6,12 +6,26 @@
  * Reads "text" and "source" from URL search params, prefills a textarea,
  * and shows the selected text to ALL visitors. Unauthenticated users see a
  * signup CTA; authenticated users get the action buttons.
+ *
+ * Privacy remediation (2026-11-17 audit): `text` is moved out of the address
+ * bar into this tab's sessionStorage on arrival (`lib/client/verifyPrefill.ts`)
+ * and the signup/login `redirect=` no longer carries it. The extension's
+ * `?text=` contract is unchanged.
  */
 
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/components/AuthProvider";
+import { consumeVerifyPrefill, takeVerifyPrefill, verifyReturnPath } from "@/lib/client/verifyPrefill";
+
+function tabSessionStorage(): Storage | null {
+  try {
+    return typeof window !== "undefined" ? window.sessionStorage : null;
+  } catch {
+    return null;
+  }
+}
 
 export default function VerifyPage() {
   const router = useRouter();
@@ -23,20 +37,30 @@ export default function VerifyPage() {
 
   // Initialize synchronously so the textarea and char count render immediately.
   // searchParams.get() already URL-decodes, so no further decoding is needed.
-  // The effect keeps claim in sync if the URL changes (e.g. post-signup redirect).
   const [claim, setClaim] = useState(rawText);
-  useEffect(() => { setClaim(rawText); }, [rawText]);
+  // On arrival (and whenever a new `text` arrives): move the text into this
+  // tab's sessionStorage and strip it from the address bar. With no `text` in
+  // the URL (e.g. back from the signup/login detour) this restores it from
+  // sessionStorage. Only a non-empty result updates the textarea, so the
+  // URL rewrite itself (rawText -> "") never clears what the user sees.
+  useEffect(() => {
+    const text = takeVerifyPrefill({ location: window.location, history: window.history, storage: tabSessionStorage() });
+    if (text) setClaim(text);
+  }, [rawText]);
 
   const handleClaimVerification = () => {
+    consumeVerifyPrefill(tabSessionStorage());
     router.push(`/?tab=verify&claim=${encodeURIComponent(claim)}`);
   };
 
   const handleDeepResearch = () => {
+    consumeVerifyPrefill(tabSessionStorage());
     router.push(`/?tab=research&q=${encodeURIComponent(claim)}`);
   };
 
-  const signupHref = `/signup?redirect=${encodeURIComponent(`/verify${window?.location?.search ?? ""}`)}`;
-  const loginHref  = `/login?redirect=${encodeURIComponent(`/verify${window?.location?.search ?? ""}`)}`;
+  const returnPath = verifyReturnPath(source);
+  const signupHref = `/signup?redirect=${encodeURIComponent(returnPath)}`;
+  const loginHref  = `/login?redirect=${encodeURIComponent(returnPath)}`;
 
   return (
     <main className="min-h-screen bg-cp-bg px-4 py-12 text-cp-text">

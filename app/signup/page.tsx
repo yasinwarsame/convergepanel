@@ -371,7 +371,10 @@ export default function SignupPage() {
           : "signup_verification_email_send_failed"
       );
 
-      posthog.identify(user.uid, { email: user.email ?? undefined, name: name.trim() || undefined });
+      // Privacy remediation (2026-11-17 audit): uid only — no email / name
+      // person properties. Nothing in the codebase reads them back; re-adding
+      // them is an owner decision (see PR body).
+      posthog.identify(user.uid);
       posthog.capture("user_signed_up", { method: "email" });
 
       // Workspace-Aware Writes for New Personal Adaptive Runs, Phase 3 —
