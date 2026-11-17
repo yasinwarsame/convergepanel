@@ -239,9 +239,10 @@ export default function HelpPage() {
 
           <FaqQ>What do paid plans add?</FaqQ>
           <FaqA>
-            More models per run (up to five on the full plan), higher monthly run limits, video
-            verification with its own monthly allowance (each video also uses one panel run), and longer
-            history retention on paid tiers. The 5-Model plan adds governance dashboards, peer review,
+            {/* OWNER/LEGAL VERIFY: "longer history retention on paid tiers" removed — no tier has a shorter retention today (lib/plans.ts historyRetentionDays is never read; audit 02 D-3). Restore only if a Free-tier limit is implemented. */}
+            More models per run (up to five on the full plan), higher monthly run limits, and video
+            verification with its own monthly allowance (each video also uses one panel run). The
+            5-Model plan adds governance dashboards, peer review,
             and the review audit log. See the{" "}
             <Link href="/pricing" className="font-medium text-sky-600 hover:text-sky-700">
               pricing page
