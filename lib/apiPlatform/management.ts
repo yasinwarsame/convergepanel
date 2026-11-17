@@ -71,26 +71,31 @@ export async function authorizeOrgManagement(
   capability: OrgCapability,
   deps: ManagementDeps,
 ): Promise<ManagementDecision> {
-  if (API_KEY_BEARER.test(headers.get("authorization") ?? "")) return { ok: false, code: "api_key_not_accepted" };
-  // Own fields only: an inherited `disabled: false` / `emailVerified: true` / role can never satisfy a check.
-  const id = ownRecord(identity);
-  if (!id || typeof id.uid !== "string" || id.uid.length === 0 || !Number.isInteger(id.authTimeSeconds)) {
-    return { ok: false, code: "session_required" };
-  }
-  const uid = id.uid;
-  const authTimeSeconds = id.authTimeSeconds as number;
-  // auth_time must be seconds and not in the future (300 s skew): a millisecond value would otherwise look fresh forever.
-  if (authTimeSeconds > deps.nowSeconds() + 300) return { ok: false, code: "session_required" };
-  // A disabled account obtains nothing, and is indistinguishable from "no session" (admin-authority-tiers.md).
-  if (id.disabled !== false) return { ok: false, code: "session_required" };
-  if (id.emailVerified !== true) return { ok: false, code: "identity_not_verified" };
-  if (!isOrgId(orgId)) return { ok: false, code: "not_found" };
+  // Every dependency touch (headers, identity getters, clock, membership read) is inside one fail-closed try:
+  // a throwing or malformed dependency denies with api_unavailable, never a rejected promise and never an allow.
   try {
+    if (API_KEY_BEARER.test(headers.get("authorization") ?? "")) return { ok: false, code: "api_key_not_accepted" };
+    // Own fields only: an inherited `disabled: false` / `emailVerified: true` / role can never satisfy a check.
+    const id = ownRecord(identity);
+    if (!id || typeof id.uid !== "string" || id.uid.length === 0 || !Number.isInteger(id.authTimeSeconds)) {
+      return { ok: false, code: "session_required" };
+    }
+    const uid = id.uid;
+    const authTimeSeconds = id.authTimeSeconds as number;
+    // The clock is read ONCE and must be a positive safe integer: NaN/undefined/float would make both time checks false (fail-open).
+    const now: unknown = deps.nowSeconds();
+    if (typeof now !== "number" || !Number.isSafeInteger(now) || now <= 0) return { ok: false, code: "api_unavailable" };
+    // auth_time must be seconds and not in the future (300 s skew): a millisecond value would otherwise look fresh forever.
+    if (authTimeSeconds > now + 300) return { ok: false, code: "session_required" };
+    // A disabled account obtains nothing, and is indistinguishable from "no session" (admin-authority-tiers.md).
+    if (id.disabled !== false) return { ok: false, code: "session_required" };
+    if (id.emailVerified !== true) return { ok: false, code: "identity_not_verified" };
+    if (!isOrgId(orgId)) return { ok: false, code: "not_found" };
     const m = ownRecord(await deps.getMembership(computeApiOrgMembershipId(orgId, uid)));
     // Non-members and removed members get not_found: org existence is not revealed.
     if (!m || m.orgId !== orgId || m.uid !== uid || m.status !== "active") return { ok: false, code: "not_found" };
     if (!roleHasCapability(m.role, capability)) return { ok: false, code: "insufficient_role" };
-    if (FRESH_SESSION_CAPABILITIES.has(capability) && deps.nowSeconds() - authTimeSeconds > FRESH_SESSION_SECONDS) {
+    if (FRESH_SESSION_CAPABILITIES.has(capability) && now - authTimeSeconds > FRESH_SESSION_SECONDS) {
       return { ok: false, code: "fresh_session_required" };
     }
     return { ok: true, uid, orgId, role: m.role as OrgRole };

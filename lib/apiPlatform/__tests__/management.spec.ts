@@ -211,3 +211,43 @@ describe("explicit capability matrix (every role × every capability) and fresh-
     expect(await authorizeOrgManagement(H, at(901), ORG, cap as OrgCapability, deps(member("u1", "owner")))).toEqual({ ok: false, code: "fresh_session_required" });
   });
 });
+
+describe("R2 review MAJOR-1/MINOR-1: a broken dependency always denies, never allows and never rejects", () => {
+  const OWNER = member("u1", "owner");
+  // A stale session (auth_time 1) on a FRESH capability: an unvalidated NaN clock used to make both time checks false → ok:true.
+  const stale = { uid: "u1", authTimeSeconds: 1, ...OK_ACCOUNT };
+
+  it("control: a valid clock refuses the stale session (fresh_session_required)", async () => {
+    expect(await authorizeOrgManagement(H, stale, ORG, "keys.live.create", deps(OWNER))).toEqual({ ok: false, code: "fresh_session_required" });
+  });
+
+  it.each([NaN, undefined, null, 1.5, -1, 0, Infinity, "2000000000", Number.MAX_SAFE_INTEGER + 2])(
+    "nowSeconds() = %p → api_unavailable, no membership read",
+    async (bad) => {
+      const reads: string[] = [];
+      const d = { getMembership: async (id: string) => (reads.push(id), OWNER[id] ?? null), nowSeconds: () => bad } as unknown as ManagementDeps;
+      for (const cap of ["keys.live.create", "usage.view"] as OrgCapability[]) {
+        expect(await authorizeOrgManagement(H, stale, ORG, cap, d)).toEqual({ ok: false, code: "api_unavailable" });
+        expect(await authorizeOrgManagement(H, fresh("u1"), ORG, cap, d)).toEqual({ ok: false, code: "api_unavailable" });
+      }
+      expect(reads).toEqual([]);
+    },
+  );
+
+  it("the clock is read once per decision", async () => {
+    let calls = 0;
+    const d: ManagementDeps = { getMembership: async (id) => OWNER[id] ?? null, nowSeconds: () => (calls++, NOW) };
+    expect((await authorizeOrgManagement(H, fresh("u1"), ORG, "keys.live.create", d)).ok).toBe(true);
+    expect(calls).toBe(1);
+  });
+
+  it("a throwing clock, identity getter or headers.get resolves to api_unavailable (no rejected promise)", async () => {
+    const throwingClock: ManagementDeps = { getMembership: async (id) => OWNER[id] ?? null, nowSeconds: () => { throw new Error("clock"); } };
+    await expect(authorizeOrgManagement(H, fresh("u1"), ORG, "usage.view", throwingClock)).resolves.toEqual({ ok: false, code: "api_unavailable" });
+    const id = { authTimeSeconds: NOW - 60, ...OK_ACCOUNT } as Record<string, unknown>;
+    Object.defineProperty(id, "uid", { enumerable: true, get() { throw new Error("getter"); } });
+    await expect(authorizeOrgManagement(H, id as never, ORG, "usage.view", deps(OWNER))).resolves.toEqual({ ok: false, code: "api_unavailable" });
+    const badHeaders = { get: () => { throw new Error("headers"); } } as unknown as Headers;
+    await expect(authorizeOrgManagement(badHeaders, fresh("u1"), ORG, "usage.view", deps(OWNER))).resolves.toEqual({ ok: false, code: "api_unavailable" });
+  });
+});

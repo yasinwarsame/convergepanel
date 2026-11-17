@@ -23,11 +23,11 @@ This supersedes the doc's tenancy-and-auth.md §4.2 sentence "each successful ve
 | Hash | `keys.ts` `computeKeyHash()` | `hex(HMAC-SHA256(subkey, "<mode>:<keyId>:<secret>"))`. |
 | Stored | `store.ts` `createApiKey` / `rotateApiKey` | `hash` plus `hashVersion: 1`. **Minting always uses the CURRENT pepper.** |
 | Verify | `keys.ts` `keyHashMatches()` | Checks the current pepper and, when one is configured, the previous pepper. Both HMACs are always computed, so the timing does not show which pepper matched. Constant-time comparison. |
-| Guard | `principal.ts` `requireApiPrincipal()` | Refuses `hashVersion !== 1`. Any pepper problem → `503 api_unavailable` before any lookup. |
+| Guard | `principal.ts` `requireApiPrincipal()` | Refuses `hashVersion !== 1`. A pepper reader result of `unavailable` (missing or malformed env) → `503 api_unavailable` before any lookup. A malformed injected pepper set fails later, at subkey derivation, still as `503` (see §3). |
 
 `hashVersion` names the **algorithm** (construction v1), not the pepper. **A key record does not show which pepper produced its hash.** This matters for §6: the only signal is `createdAt` against the rotation start time.
 
-Previous-pepper support is implemented (`API_KEY_PEPPER_PREVIOUS`). **Its time bound is operational, not enforced in code**: the window ends when an operator removes the variable. See §9 for the decision not to add a code-enforced expiry in this round.
+Previous-pepper support is implemented (`API_KEY_PEPPER_PREVIOUS`). **Its time bound is operational, not enforced in code**: the window ends when an operator removes the variable. See §12 for the decision not to add a code-enforced expiry in this round.
 
 ## 3. Missing or malformed secret: fail closed
 
@@ -71,7 +71,7 @@ Steps (Production; each step is recorded in the deployment evidence log):
 
 ## 6. Overlap window
 
-- **PROPOSAL: the window is at most 30 days** from `T_rotation`. The default is 30 days for a scheduled rotation. This matches `MAX_ROTATION_OVERLAP_SECONDS`, the per-key overlap cap, so a customer who rotates on the last day still gets a full key overlap within the window.
+- **PROPOSAL: the window is at most 30 days** from `T_rotation`. The default is 30 days for a scheduled rotation. A key minted under the previous pepper verifies only while `API_KEY_PEPPER_PREVIOUS` is set. Its per-key `expiresAt` overlap from `rotateApiKey` does **not** keep it alive after the window closes. The effective overlap a customer gets is therefore `min(per-key overlap, window end − time of replacement)`, and a customer who replaces a key on the last day gets almost none. Customer notices must ask for replacement early in the window (§7).
 - The window **expires** when `API_KEY_PEPPER_PREVIOUS` is removed (§5 step 7). It is never extended without a new written owner approval, and never beyond 60 days in total (PROPOSAL).
 - During the window, every request computes two HMACs. This cost is accepted and bounded.
 
