@@ -623,11 +623,23 @@ table is the contract.
    whose session `auth_time` is earlier than the stored `validSince`. But no
    SYSTEM_ADMIN route accepts a cookie, so this helps only the ADMIN_PORTAL
    surface.
-5. **A revoked-but-unexpired ID token can still be exchanged for a fresh session
-   cookie.** `POST /api/auth/session` mints with `verifyIdToken` and no
-   revocation check, so the cookie's own five-day life can begin AFTER the
-   revocation. Treat the effective ADMIN_PORTAL window as up to one hour plus the
-   cookie lifetime unless you also invalidate the session.
+5. **Minting a fresh session cookie is refused for a revoked or disabled
+   identity (SESSREV).** `POST /api/auth/session` verifies the ID token with
+   `verifyIdToken(idToken, true)` before `createSessionCookie`, so the SDK's
+   live `getUser` read rejects a disabled account (`auth/user-disabled`) and a
+   token whose `auth_time` is earlier than the stored `validSince`
+   (`auth/id-token-revoked`) — both 401, no cookie. A failure of that live read
+   itself is 503, also no cookie. On a deployment built BEFORE SESSREV the
+   route verified without `checkRevoked`, and the SDK's `createSessionCookie`
+   performs no live-record check of its own, so such a deployment mints a
+   cookie for a still-unexpired ID token of a revoked or disabled identity.
+   That cookie carries the ID token's `auth_time` (Firebase: the session cookie
+   has the same claims as the ID token — documented behaviour, not locally
+   observed against the live backend), so the revocation-checked verifiers in
+   4. reject it on every request while the revocation stands or the account is
+   disabled; if a disabled-but-not-revoked account is later re-enabled, such a
+   cookie becomes usable for the rest of its five-day life. Pair a disablement
+   with a revocation when containing an identity.
 6. `[CONTAINMENT_HISTORICAL_BOOTSTRAP][REQUIRED]` **Treat historical deployments as in scope.** Current code has no
    secret bootstrap route (§ "Secret bootstrap route — RETIRED (S1)"), so on a
    current deployment nothing re-creates the claim you removed in step 1 without
@@ -647,15 +659,20 @@ table is the contract.
      disabled check (as well as the revocation check). That is the whole of what
      "invalidate the session" means here — there is no separate
      session-invalidation endpoint.
-   - **Minting a NEW cookie is not blocked by this application.**
-     `POST /api/auth/session` calls `adminAuth.verifyIdToken(idToken)` **without
-     `checkRevoked`** (`app/api/auth/session/route.ts:67`) and then
-     `createSessionCookie` (`:76`). A C10 revision of this runbook claimed the
-     route "will refuse to mint a new cookie for a disabled account or a revoked
-     token" — false, and contradicting §B.5 two paragraphs above. Assume a
-     holder of a still-unexpired ID token can obtain a fresh cookie whose
-     lifetime begins AFTER your revocation. Do not record the ADMIN_PORTAL
-     surface as closed until that ID token has expired.
+   - **Minting a NEW cookie is refused for the disabled account (SESSREV).**
+     `POST /api/auth/session` calls `adminAuth.verifyIdToken(idToken, true)`
+     **with `checkRevoked`** before `createSessionCookie`, so a disabled
+     account (or a revoked token) gets 401 and no cookie; an outage of the
+     live read is 503 and no cookie. History: before SESSREV the route verified
+     WITHOUT `checkRevoked`, and a C10 revision of this runbook wrongly claimed
+     it already refused; on a deployment that predates SESSREV, assume a holder
+     of a still-unexpired ID token can obtain a cookie (rejected by the
+     revocation-checked verifiers while the account stays disabled or the
+     revocation stands — §B.5). This closes the MINT only: the already-issued
+     ID token is not invalidated and stays a valid bearer credential on any
+     surface that verifies ID tokens without `checkRevoked` until it expires.
+     Do not record the ADMIN_PORTAL surface as closed until that ID token has
+     expired.
    - On the S2-b-guarded routes the disabled state is read live, so a
      subsequent request from the disabled account is refused (401
      `account_disabled`) whether it carries a bearer token or a cookie. The

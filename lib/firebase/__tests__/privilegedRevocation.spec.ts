@@ -23,8 +23,10 @@
  *     the flag false it validates the signature and expiry only.
  *
  *   ID TOKENS (`verifyIdToken(token)`) — revocation is NOT checked. Firebase
- *     defaults `checkRevoked` to false, and every ID-token site here relies on
- *     that default. The mitigation is lifetime: ID tokens expire in one hour,
+ *     defaults `checkRevoked` to false, and every ID-token site in THIS suite
+ *     relies on that default. (Not the session MINT: `POST /api/auth/session`
+ *     passes checkRevoked = true since SESSREV — pinned in
+ *     app/api/auth/session/__tests__/.) The mitigation is lifetime: ID tokens expire in one hour,
  *     where a session cookie lives five days. This is the standard Firebase
  *     trade-off, recorded here so a future reader does not mistake the
  *     asymmetry for an oversight — and so that a change to it breaks a test.
