@@ -32,6 +32,7 @@ Where this set and the PRD disagree, the PRD's §21 rulings win, **subject to Ad
 | 16 | [`implementation-snapshots/api-1a-errors.json`](implementation-snapshots/api-1a-errors.json) | Generated snapshot of `lib/apiPlatform/errors.ts` at #327 @ `fa9146a` (generator beside it); pins the catalog to the draft implementation |
 | 17 | [`owner-decision-addendum-4.md`](owner-decision-addendum-4.md) | **2026-11-17 R2 disposition:** body cap decided (512 KiB raw, option d), metadata aggregate provisional, `js-yaml` declared, validator review (no change), cancel/deleted-marker 410, layered per-credential rate limits, exact transactional concurrency, D6 withdrawal; what the contract tests do not prove |
 | 18 | [`owner-decision-addendum-5.md`](owner-decision-addendum-5.md) | **2026-11-17 MAJOR-1 concurrency:** the accepted-job count moves to one unsharded, organization-scoped record `apiOrgConcurrency/{orgId}`; atomic admission, exactly one release, never negative, detection-only reconciliation with an audited repair |
+| 19 | [`owner-decision-addendum-6.md`](owner-decision-addendum-6.md) | **2026-11-18 deletion of a running job:** cancellation and settlement before purge (one idempotent deletion operation, 410 from acceptance, release by the job's own terminal transition, purge after release, late-write barrier); sweeper recovery for `synthesizing`; one-read-time drift detection; `worker_timeout` platform-caused; throughput disclosed with cited Firestore guidance |
 
 ## What the contract tests prove, and what they do not
 

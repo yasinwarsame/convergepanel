@@ -23,7 +23,7 @@ export const MAX_TX_ATTEMPTS = 3;
 export const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 
 export type Mode = "live" | "test";
-export type Scope = "verifications:write" | "verifications:read";
+export type Scope = "verifications:write" | "verifications:read" | "verifications:delete";
 
 export interface KeyDoc {
   orgId: string;
@@ -260,17 +260,20 @@ export class System {
     return this.store.keys("ledger/");
   }
 
-  /** DELETE /v1/verifications/{id} (retention-and-deletion.md §3.1), reduced to its effect here. */
-  deleteVerification(scopePath: string): void {
+  readonly settlements: string[] = [];
+  readonly releases: string[] = [];
+
+  /**
+   * Test helper: DELETE through the documented path (handleDelete, Addendum 6) and then one
+   * sweeper pass, which completes the deletion when no settlement is outstanding (a queued or
+   * terminal job). A running job's deletion stays pending until its terminal transition.
+   */
+  deleteVerification(scopePath: string, keyId = "live1"): ApiResponse {
     const rec = this.store.get<IdemRecord>(scopePath);
     if (!rec) throw new Error("no record");
-    // A non-terminal job is canceled first (retention-and-deletion.md §3.1), which releases it.
-    const before = this.store.get<JobDoc>(`jobs/${rec.verificationId}`);
-    runToEnd(finishJob(this, rec.verificationId, "canceled", before?.credits));
-    const job = this.store.get<JobDoc>(`jobs/${rec.verificationId}`) as JobDoc;
-    // The marker is content-free: no request hash, no response body.
-    this.store.put(scopePath, { kind: "deleted", verificationId: rec.verificationId, expiresAt: rec.expiresAt });
-    this.store.put(`jobs/${rec.verificationId}`, { ...job, deleted: true });
+    const res = runToEnd(handleDelete(this, keyId, rec.verificationId));
+    runToEnd(sweep(this));
+    return res;
   }
 }
 
@@ -439,7 +442,8 @@ export function* handleCreate(sys: System, req: CreateRequest): Generator<void, 
     const org3 = org2 as OrgDoc;
     // Admission: job (with its admission marker), reservation, monthly period counter and the
     // concurrency increment commit together, or none does. Counted only if this commit succeeds.
-    tx.create(`jobs/${id}`, { state: "pending_dispatch", orgId, credits, type: v.type, admissionId: id, [ADMISSION_MARKER_FIELD]: true, [RELEASE_MARKER_FIELD]: false, reservedMonth: month } satisfies JobDoc);
+    tx.create(`jobs/${id}`, { state: "pending_dispatch", orgId, credits, type: v.type, admissionId: id, [ADMISSION_MARKER_FIELD]: true, [RELEASE_MARKER_FIELD]: false, reservedMonth: month, queuedAt: sys.dynamic.now, idemScope: scope ?? undefined } satisfies JobDoc);
+    tx.create(`inputs/${id}`, { text: v.canonical }); // class (a) content, purged at deletion
     tx.create(`ledger/reserve_${id}`, { credits, month });
     tx.set(periodPath(orgId, month), { reservedCredits: period.reservedCredits + credits } satisfies PeriodDoc);
     tx.set(`orgs/${orgId}`, { ...org3, creditsRemaining: org3.creditsRemaining - credits });
@@ -461,7 +465,7 @@ export function* handleCreate(sys: System, req: CreateRequest): Generator<void, 
 // ------------------------------------------------------------------------------------------------
 // Job lifecycle: terminal transitions release the concurrency count exactly once (§5B)
 // ------------------------------------------------------------------------------------------------
-export type JobState = "pending_dispatch" | "queued" | "running" | "completed" | "partial" | "failed" | "canceled" | "expired";
+export type JobState = "pending_dispatch" | "queued" | "running" | "synthesizing" | "completed" | "partial" | "failed" | "canceled" | "expired";
 const TERMINAL: ReadonlySet<JobState> = new Set<JobState>(["completed", "partial", "failed", "canceled", "expired"]);
 
 export interface JobDoc {
@@ -474,8 +478,17 @@ export interface JobDoc {
   concurrencyReleased?: boolean;
   concurrencyReleaseAnomaly?: boolean;
   reservedMonth?: string;
+  /** Purged tombstone (Addendum 6): set only by completeDeletion, after settlement and release. */
   deleted?: boolean;
   cancelRequested?: boolean;
+  /** Deletion intent recorded by DELETE; the job stays counted until its terminal transition. */
+  deletionRequested?: boolean;
+  deletionId?: string;
+  idemScope?: string;
+  queuedAt?: number;
+  leaseExpiries?: number;
+  failureCode?: string;
+  callsMade?: number;
 }
 
 /**
@@ -487,12 +500,14 @@ export interface JobDoc {
  * audit/alert event is written, and the count is left for an audited repair.
  * `releaseCredits` is the unsettled remainder returned to the organization (billing, separate).
  */
-export function* finishJob(sys: System, id: string, to: JobState, releaseCredits?: number): Generator<void, ApiResponse, void> {
+export function* finishJob(sys: System, id: string, to: JobState, releaseCredits?: number, failureCode?: string, result?: unknown): Generator<void, ApiResponse, void> {
   if (!TERMINAL.has(to)) throw new Error(`not a terminal state: ${to}`);
   for (let attempt = 1; ; attempt++) {
     const tx = sys.store.begin();
     const job = tx.read<JobDoc>(`jobs/${id}`);
-    if (!job || job.deleted || TERMINAL.has(job.state)) {
+    // Deletion intent does NOT suppress the transition: a deletion-pending job is released by its
+    // terminal transition like any other (Addendum 6). A purged tombstone is always terminal.
+    if (!job || TERMINAL.has(job.state)) {
       tx.abort();
       return { status: 200 }; // idempotent: the first terminal transition already released it
     }
@@ -501,7 +516,7 @@ export function* finishJob(sys: System, id: string, to: JobState, releaseCredits
     const mustRelease = job[ADMISSION_MARKER_FIELD] === true && job[RELEASE_MARKER_FIELD] !== true;
     const conc = mustRelease ? tx.read<ConcurrencyDoc>(concurrencyPath(orgId)) ?? { active: 0, anomalies: 0 } : undefined;
     yield;
-    const next: JobDoc = { ...job, state: to };
+    const next: JobDoc = { ...job, state: to, ...(failureCode ? { failureCode } : {}) };
     let anomaly = false;
     if (mustRelease && conc) {
       next[RELEASE_MARKER_FIELD] = true;
@@ -513,8 +528,11 @@ export function* finishJob(sys: System, id: string, to: JobState, releaseCredits
       }
     }
     tx.set(`jobs/${id}`, next);
+    if (result !== undefined) tx.set(`results/${id}`, result); // written only by the winning transition
     tx.set(`orgs/${orgId}`, { ...org, creditsRemaining: org.creditsRemaining + (releaseCredits ?? 0) });
     if (tx.commit() === "committed") {
+      sys.settlements.push(id);
+      if (mustRelease && !anomaly) sys.releases.push(id);
       if (anomaly) sys.audit.push({ type: "concurrency.release_anomaly", orgId, detail: id });
       return { status: 200 };
     }
@@ -531,12 +549,37 @@ export function countedActive(sys: System, orgId: string): number {
   }).length;
 }
 
-/** Sweeper reconciliation: DETECTION ONLY. Never writes the record; emits an audit/alert event. */
+/**
+ * Sweeper reconciliation: DETECTION ONLY, never writes the record. The record and the job query are
+ * read at ONE read time (a read-only transaction: every read is validated together; a change in
+ * between retries the snapshot), so a concurrent admission or release cannot cause a spurious
+ * alert. Deletion-pending jobs are counted like any other counted, unreleased job.
+ */
+export function* detectDriftTx(sys: System, orgId: string): Generator<void, boolean, void> {
+  for (;;) {
+    const tx = sys.store.begin();
+    const stored = tx.read<ConcurrencyDoc>(concurrencyPath(orgId))?.active ?? 0;
+    yield;
+    let counted = 0;
+    for (const p of sys.store.keys("jobs/")) {
+      const j = tx.read<JobDoc>(p) as JobDoc;
+      if (j.orgId === orgId && j[ADMISSION_MARKER_FIELD] === true && j[RELEASE_MARKER_FIELD] !== true) counted++;
+    }
+    if (tx.commit() === "conflict") {
+      yield;
+      continue; // not one consistent read time: take a new snapshot
+    }
+    if (stored !== counted) sys.audit.push({ type: "concurrency.drift_detected", orgId, detail: `stored=${stored} counted=${counted}` });
+    return stored !== counted;
+  }
+}
+
 export function detectDrift(sys: System, orgId: string): boolean {
-  const stored = sys.store.get<ConcurrencyDoc>(concurrencyPath(orgId))?.active ?? 0;
-  const counted = countedActive(sys, orgId);
-  if (stored !== counted) sys.audit.push({ type: "concurrency.drift_detected", orgId, detail: `stored=${stored} counted=${counted}` });
-  return stored !== counted;
+  const g = detectDriftTx(sys, orgId);
+  for (;;) {
+    const r = g.next();
+    if (r.done) return r.value;
+  }
 }
 
 /**
@@ -583,15 +626,190 @@ export function* handleCancel(sys: System, keyId: string, id: string): Generator
   const job = sys.store.get<JobDoc>(`jobs/${id}`);
   // Tenant binding first: a foreign job, deleted or not, is indistinguishable from none.
   if (!job || job.orgId !== key.orgId) return notFound;
-  if (job.deleted) return { status: 410, code: "verification_deleted" };
+  if (job.deleted || job.deletionRequested) return { status: 410, code: "verification_deleted" };
   if (TERMINAL.has(job.state)) return { status: 409, code: "not_cancelable" };
-  if (job.state === "running") {
+  if (job.state === "running" || job.state === "synthesizing") {
     sys.store.put(`jobs/${id}`, { ...job, cancelRequested: true });
     return { status: 200 };
   }
   // pending_dispatch / queued: canceled now, full release, in one transaction.
   return yield* finishJob(sys, id, "canceled", job.credits);
 }
+
+// ------------------------------------------------------------------------------------------------
+// Deletion: cancellation and settlement before purge (Addendum 6; retention-and-deletion.md §3.1)
+// ------------------------------------------------------------------------------------------------
+export const LEASE_EXPIRY_LIMIT = 3;
+export const MAX_QUEUE_WAIT_MS = 10 * 60 * 1000;
+export const deletionPath = (delId: string): string => `apiDeletions/${delId}`;
+export const deletionIdFor = (verId: string): string => `del_${verId.slice(4)}`;
+
+export interface DeletionOp {
+  status: "pending" | "completed";
+  verificationId: string;
+  orgId: string;
+  attempts: number;
+  blockedBy?: "awaiting_terminal" | "awaiting_release";
+}
+
+function isCountedUnreleased(j: JobDoc): boolean {
+  return j[ADMISSION_MARKER_FIELD] === true && j[RELEASE_MARKER_FIELD] !== true;
+}
+
+/** Shared tenant-bound lookup of the read paths: foreign, nonexistent and malformed are one 404. */
+function lookupOwn(sys: System, key: KeyDoc, id: string): JobDoc | null {
+  if (!/^ver_[A-Za-z0-9]{24}$/.test(id)) return null;
+  const job = sys.store.get<JobDoc>(`jobs/${id}`);
+  return job && job.orgId === key.orgId ? job : null;
+}
+
+/** GET /v1/verifications/{id} (also /report, /models): 410 from the moment DELETE is accepted. */
+export function handleGet(sys: System, keyId: string, id: string): ApiResponse {
+  const key = sys.store.get<KeyDoc>(`keys/${keyId}`);
+  if (!key || key.revoked) return { status: 401, code: "invalid_api_key" };
+  const job = lookupOwn(sys, key, id);
+  if (!job) return { status: 404, code: "verification_not_found" };
+  if (job.deleted || job.deletionRequested) return { status: 410, code: "verification_deleted" };
+  return { status: 200 };
+}
+
+/**
+ * DELETE /v1/verifications/{id}: creates or reuses ONE idempotent deletion operation and returns
+ * 202 with it. Records the deletion intent and requests cancellation in one transaction, and turns
+ * the idempotency record into the content-free marker. Never releases or purges by itself.
+ */
+export function* handleDelete(sys: System, keyId: string, id: string): Generator<void, ApiResponse & { deletion?: DeletionOp & { id: string } }, void> {
+  const key = sys.store.get<KeyDoc>(`keys/${keyId}`);
+  if (!key || key.revoked) return { status: 401, code: "invalid_api_key" };
+  if (!key.scopes.includes("verifications:delete")) return { status: 403, code: "insufficient_scope" };
+  if (!lookupOwn(sys, key, id)) return { status: 404, code: "verification_not_found" };
+  const delId = deletionIdFor(id);
+  for (;;) {
+    const tx = sys.store.begin();
+    const job = tx.read<JobDoc>(`jobs/${id}`) as JobDoc;
+    const existing = tx.read<DeletionOp>(deletionPath(delId));
+    if (existing) {
+      tx.abort();
+      return { status: 202, deletion: { id: delId, ...existing } }; // duplicate DELETE: same operation
+    }
+    yield;
+    const op: DeletionOp = { status: "pending", verificationId: id, orgId: key.orgId, attempts: 0 };
+    tx.create(deletionPath(delId), op);
+    tx.set(`jobs/${id}`, { ...job, deletionRequested: true, deletionId: delId, ...(TERMINAL.has(job.state) ? {} : { cancelRequested: true }) });
+    if (job.idemScope) {
+      const rec = tx.read<IdemRecord>(job.idemScope);
+      if (rec) tx.set(job.idemScope, { kind: "deleted", verificationId: rec.verificationId, expiresAt: rec.expiresAt });
+    }
+    if (tx.commit() === "conflict") {
+      yield;
+      continue;
+    }
+    // A queued job has no worker to stop: cancel it now (its terminal transition releases it).
+    if (job.state === "pending_dispatch" || job.state === "queued") {
+      yield* finishJob(sys, id, "canceled", job.credits, "deletion_requested");
+    }
+    return { status: 202, deletion: { id: delId, ...op } };
+  }
+}
+
+/**
+ * A worker's provider call. Safe boundary: before the call, a job with cancellation requested (or
+ * deletion requested) stops; a call already in flight completes and its record is written while the
+ * job is still non-terminal. Late-write barrier: no record is written for a terminal or purged job.
+ */
+export function* workerProviderCall(sys: System, id: string): Generator<void, ApiResponse, void> {
+  const before = sys.store.get<JobDoc>(`jobs/${id}`);
+  if (!before || before.deleted || TERMINAL.has(before.state)) return { status: 409, code: "late_write_refused" };
+  if (before.cancelRequested) return { status: 409, code: "stopped_at_boundary" };
+  yield; // the provider call is in flight; it cannot be recalled
+  for (;;) {
+    const tx = sys.store.begin();
+    const job = tx.read<JobDoc>(`jobs/${id}`);
+    if (!job || job.deleted || TERMINAL.has(job.state)) {
+      tx.abort();
+      return { status: 409, code: "late_write_refused" };
+    }
+    const n = (job.callsMade ?? 0) + 1;
+    tx.set(`calls/${id}/${n}`, { text: "raw model text" }); // class (a), purged at deletion
+    tx.set(`jobs/${id}`, { ...job, callsMade: n });
+    if (tx.commit() === "committed") return { status: 200 };
+    yield;
+  }
+}
+
+/** The worker at a step boundary: stops a job whose cancellation was requested, settling work done. */
+export function* workerBoundary(sys: System, id: string): Generator<void, ApiResponse, void> {
+  const job = sys.store.get<JobDoc>(`jobs/${id}`);
+  if (!job || TERMINAL.has(job.state)) return { status: 200 };
+  if (!job.cancelRequested) return { status: 200 };
+  const unused = Math.max(0, job.credits - (job.callsMade ?? 0));
+  return yield* finishJob(sys, id, "canceled", unused, job.deletionRequested ? "deletion_requested" : "canceled");
+}
+
+/**
+ * Completes a deletion operation ONLY after settlement and release: the job must be terminal and
+ * its admission released. Otherwise the operation stays `pending`, counts the attempt and names
+ * what it waits for (observable, retryable). Then, in one transaction: purge content (inputs,
+ * calls, results), reduce the job to a minimal tombstone, mark the operation `completed`.
+ */
+export function* completeDeletion(sys: System, delId: string): Generator<void, ApiResponse, void> {
+  for (;;) {
+    const tx = sys.store.begin();
+    const op = tx.read<DeletionOp>(deletionPath(delId));
+    if (!op || op.status === "completed") {
+      tx.abort();
+      return { status: 200 };
+    }
+    const id = op.verificationId;
+    const job = tx.read<JobDoc>(`jobs/${id}`) as JobDoc;
+    const blockedBy = !TERMINAL.has(job.state) ? "awaiting_terminal" : isCountedUnreleased(job) ? "awaiting_release" : undefined;
+    yield;
+    if (blockedBy) {
+      tx.set(deletionPath(delId), { ...op, attempts: op.attempts + 1, blockedBy });
+      if (tx.commit() === "conflict") continue;
+      return { status: 202 };
+    }
+    for (const p of [`inputs/${id}`, `results/${id}`, ...sys.store.keys(`calls/${id}/`)]) {
+      if (tx.read(p) !== undefined) tx.set(p, undefined);
+    }
+    tx.set(`jobs/${id}`, {
+      state: job.state, orgId: job.orgId, credits: job.credits, type: job.type, admissionId: job.admissionId,
+      [ADMISSION_MARKER_FIELD]: job[ADMISSION_MARKER_FIELD], [RELEASE_MARKER_FIELD]: job[RELEASE_MARKER_FIELD],
+      deletionRequested: true, deletionId: delId, deleted: true,
+    } satisfies JobDoc);
+    tx.set(deletionPath(delId), { ...op, status: "completed", attempts: op.attempts + 1, blockedBy: undefined });
+    if (tx.commit() === "committed") return { status: 200 };
+  }
+}
+
+/**
+ * Sweeper pass (§4.4): bounded recovery for EVERY non-terminal state, deletion-pending or not.
+ * `running` / `synthesizing` with LEASE_EXPIRY_LIMIT expired leases → terminal (`failed:
+ * worker_timeout`, or `canceled: deletion_requested` when deletion is pending); `pending_dispatch` /
+ * `queued` past the max queue wait (or with deletion pending) → terminal with a full release. Then
+ * it retries every pending deletion operation.
+ */
+export function* sweep(sys: System): Generator<void, ApiResponse, void> {
+  for (const p of sys.jobs()) {
+    const j = sys.store.get<JobDoc>(p) as JobDoc;
+    if (TERMINAL.has(j.state)) continue;
+    const id = p.slice("jobs/".length);
+    if ((j.state === "running" || j.state === "synthesizing") && (j.leaseExpiries ?? 0) >= LEASE_EXPIRY_LIMIT) {
+      const unused = Math.max(0, j.credits - (j.callsMade ?? 0));
+      yield* finishJob(sys, id, j.deletionRequested ? "canceled" : "failed", unused, j.deletionRequested ? "deletion_requested" : "worker_timeout");
+    } else if ((j.state === "pending_dispatch" || j.state === "queued") && (j.deletionRequested || sys.dynamic.now - (j.queuedAt ?? 0) > MAX_QUEUE_WAIT_MS)) {
+      yield* finishJob(sys, id, j.deletionRequested ? "canceled" : "expired", j.credits, j.deletionRequested ? "deletion_requested" : "max_queue_wait");
+    }
+  }
+  for (const p of sys.store.keys("apiDeletions/")) {
+    const op = sys.store.get<DeletionOp>(p) as DeletionOp;
+    if (op.status === "pending") yield* completeDeletion(sys, p.slice("apiDeletions/".length));
+  }
+  return { status: 200 };
+}
+
+/** Failure codes the failed-job count and ratio exclude as platform-caused (ledger-and-billing.md §4). */
+export const PLATFORM_FAULT_CODES: readonly string[] = ["capacity_unavailable", "pipeline_disabled", "worker_timeout", "persistence_failed"];
 
 /** Runs a handler to completion with no interleaving. */
 export function runToEnd(gen: Generator<void, ApiResponse, void>): ApiResponse {

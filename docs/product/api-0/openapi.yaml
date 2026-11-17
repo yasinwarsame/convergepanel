@@ -314,6 +314,10 @@ paths:
         (b) customer-visible results and (d) auditable evidence for this verification,
         including model results and webhook delivery records. Class (c) billing records
         remain with no content. Idempotent. A queued or running job is canceled first.
+        Addendum 6: asynchronous. The 202 carries one deletion operation (`del_…`), reused by
+        every repeat call; its `status` stays `pending` until the job is terminal, its
+        concurrency admission released and its content purged, and only then is `completed`.
+        From acceptance, the owner's reads of the verification return 410.
       responses:
         '202':
           description: Deletion accepted. Completes asynchronously (target 24 h, placeholder).

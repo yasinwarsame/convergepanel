@@ -52,14 +52,15 @@ A shortened period applies to existing records at the next sweep (≤ 24 h). A l
 
 ### 3.1 `DELETE /v1/verifications/{id}` (OD-11)
 - **Scope:** `verifications:delete` (never default).
-- **Behaviour:** if `queued`/`running`, cancel first (settlement per normal rules). Then delete, across **all associated records**:
+- **Behaviour (*Addendum 6*: cancellation and settlement before purge).** `DELETE` creates, or on a repeat call returns, **one** idempotent deletion operation `apiDeletions/{deletionId}` (status `pending` → `completed`) and answers `202` at once. In the same transaction it records the deletion intent on the job and, for a non-terminal job, requests cancellation; the idempotency record becomes the content-free marker. A `pending_dispatch`/`queued` job is canceled immediately (full release). A `running`/`synthesizing` job is **not** marked deleted while its concurrency admission is outstanding: the worker stops before its next provider call at a safe step boundary (an in-flight provider call cannot be recalled and completes), settles the completed work and releases the remainder in its first terminal transition, which also releases the admission (`jobs-and-idempotency.md` §5B). A crashed or unresponsive worker is finalized by the sweeper's bounded recovery (§4.4 there). While deletion is pending, only the minimum internal job state needed for settlement, release, retries and audit is kept, and it is readable only by internal settlement paths. The operation completes **only after** the job is terminal and its admission released; then, in one transaction, it purges, across **all associated records**:
   - class (a): inputs, step outputs;
   - class (b): the verification document's result content, report data, `modelResults/*` (compact and full text), webhook delivery records;
   - class (d): `evidence/current`;
   - idempotency record → content-free `deleted` marker until its 24 h TTL (replays get `410 verification_deleted`).
 - **Kept:** class (c) entries (no content); a tombstone `apiDeletions/{deletionId}` (`verificationId`, `orgId`, `requestedBy` key prefix or uid, `requestedAt`, `completedAt`); audit event `verification.deleted`.
-- **Response:** `202` with `del_…` ID; completion target 24 h (placeholder); webhook `verification.deleted` when complete. Idempotent: a second call returns the same deletion.
-- **After deletion:** `GET` returns `410 verification_deleted` for the owning org (foreign orgs still get `404`).
+- **Response:** `202` with `del_…` ID; completion target 24 h (placeholder); webhook `verification.deleted` when complete. Idempotent: a second call returns the same deletion, with its current `status`. An operation that cannot complete (for example a job not yet terminal) stays `pending`, records its attempts and what it waits for, is retried by the sweeper, raises an alert past its completion target, and is **never** reported `completed` early.
+- **After `DELETE` is accepted** (pending or completed): `GET`, `/report` and `/models` return `410 verification_deleted` for the owning org (foreign orgs still get `404`), `cancel` returns `410`, and the list omits it. No content awaiting deletion is ever served to the customer.
+- **Late-write barrier.** After purge the job is a minimal tombstone (state, organization, admission and release markers, deletion ID). Every worker, callback or sweeper write checks the job inside its transaction and is refused for a terminal or purged job, so no late write can recreate a purged record; cost entries (class c, no content) are still recorded.
 - **Legal hold:** the only exception; class (d) is retained, the customer is told in the deletion response, and the hold is audited.
 
 ### 3.2 Dashboard deletion

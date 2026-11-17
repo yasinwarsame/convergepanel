@@ -31,8 +31,17 @@ import {
   RELEASE_MARKER_FIELD,
   concurrencyPath,
   countedActive,
+  DeletionOp,
+  PLATFORM_FAULT_CODES,
+  deletionPath,
   detectDrift,
+  detectDriftTx,
   finishJob,
+  handleDelete,
+  handleGet,
+  sweep,
+  workerBoundary,
+  workerProviderCall,
   periodPath,
   repairConcurrency,
   handleCancel,
@@ -77,7 +86,7 @@ function world(): System {
   const sys = new System();
   const org: OrgDoc = { status: "active", livePlanActive: true, creditsRemaining: 1000, pipelineAck: true, planMaxModels: 5, concurrencyLimit: 5 };
   sys.store.put("orgs/o1", org);
-  const live: KeyDoc = { orgId: "o1", appId: "a1", mode: "live", scopes: ["verifications:write", "verifications:read"], revoked: false };
+  const live: KeyDoc = { orgId: "o1", appId: "a1", mode: "live", scopes: ["verifications:write", "verifications:read", "verifications:delete"], revoked: false };
   sys.store.put("keys/live1", live);
   sys.store.put("keys/test1", { ...live, mode: "test" });
   sys.store.put("keys/live_app2", { ...live, appId: "a2" });
@@ -523,7 +532,7 @@ describe("Addendum 4 CX: cancel (jobs-and-idempotency.md §6.1, parsed)", () => 
   const setupCancel = (row: CancelRow): { sys: System; target: string } => {
     const sys = world();
     sys.store.put("orgs/o2", { ...(sys.store.get<OrgDoc>("orgs/o1") as OrgDoc) });
-    sys.store.put("keys/foreign", { orgId: "o2", appId: "b1", mode: "live", scopes: ["verifications:write"], revoked: false } satisfies KeyDoc);
+    sys.store.put("keys/foreign", { orgId: "o2", appId: "b1", mode: "live", scopes: ["verifications:write", "verifications:delete"], revoked: false } satisfies KeyDoc);
     const owner = row.target === "foreign" ? "foreign" : "live1";
     if (row.target === "nonexistent") return { sys, target: "ver_" + "9".repeat(24) };
     if (row.target === "malformed") return { sys, target: "ver_bad" };
@@ -534,7 +543,10 @@ describe("Addendum 4 CX: cancel (jobs-and-idempotency.md §6.1, parsed)", () => 
     const job = sys.store.get<JobDoc>(`jobs/${id}`) as JobDoc;
     if (row.state === "running") sys.store.put(`jobs/${id}`, { ...job, state: "running" });
     if (row.state === "completed") runToEnd(finishJob(sys, id, "completed"));
-    if (row.state === "deleted") sys.deleteVerification(scope);
+    if (row.state === "deleted") {
+      expect(sys.deleteVerification(scope, owner).status).toBe(202);
+      expect((sys.store.get<JobDoc>(`jobs/${id}`) as JobDoc).deleted).toBe(true);
+    }
     return { sys, target: id };
   };
 
@@ -665,8 +677,8 @@ describe("Addendum 5 MAJOR-1: concurrency record location and release rule", () 
       id: m[1], before: m[2], released: m[3], event: m[4], countBefore: Number(m[5]), after: m[6], countAfter: Number(m[7]), anomaly: m[8],
     }));
 
-  it("the release table has rows E1–E10", () => {
-    expect(releaseTable().map((r) => r.id)).toEqual(Array.from({ length: 10 }, (_, i) => `E${i + 1}`));
+  it("the release table has rows E1–E11", () => {
+    expect(releaseTable().map((r) => r.id)).toEqual(Array.from({ length: 11 }, (_, i) => `E${i + 1}`));
   });
 
   const TO: Record<string, "completed" | "failed" | "expired"> = { complete: "completed", worker_timeout: "failed", expire: "expired" };
@@ -690,7 +702,7 @@ describe("Addendum 5 MAJOR-1: concurrency record location and release rule", () 
     expect(job.state).toBe(row.after);
     expect(active(sys)).toBe(row.countAfter);
     expect(active(sys)).toBeGreaterThanOrEqual(0);
-    expect(job[RELEASE_MARKER_FIELD]).toBe(true);
+    expect(job[RELEASE_MARKER_FIELD]).toBe(["completed", "failed", "canceled", "expired", "partial"].includes(job.state));
     const anomalies = sys.audit.slice(auditBefore).filter((e) => e.type === "concurrency.release_anomaly");
     expect(anomalies.length).toBe(row.anomaly === "yes" ? 1 : 0);
     expect(job.concurrencyReleaseAnomaly === true).toBe(row.anomaly === "yes");
@@ -855,5 +867,216 @@ describe("Addendum 5 MAJOR-1: deterministic scenarios", () => {
     expect((sys.store.get<JobDoc>(`jobs/${a.body?.id}`) as JobDoc).state).toBe("completed");
     expect(sys.store.get<ConcurrencyDoc>(concurrencyPath("o1"))).toEqual({ active: 0, anomalies: 1 });
     expect(sys.audit.filter((e) => e.type === "concurrency.release_anomaly").length).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Addendum 6: deletion of a running job — cancellation and settlement before purge
+// ---------------------------------------------------------------------------------------------
+describe("Addendum 6: deletion lifecycle (jobs-and-idempotency.md §6.2, parsed)", () => {
+  interface DRow { id: string; at: string; then: string; read: string; releases: number; settlements: number; deletion: string; content: string }
+  const table = (): DRow[] => {
+    const md = fs.readFileSync(JOBS, "utf8");
+    const sec = md.slice(md.indexOf("### 6.2 Deletion lifecycle"), md.indexOf("## 7. Polling"));
+    return Array.from(sec.matchAll(/^\| (D\d+) \| (\w+) \| ([^|]+?) \| (\d{3}) \| (\d) \| (\d) \| (pending|completed) \| (purged|kept) \|$/gm), (m) => ({
+      id: m[1], at: m[2], then: m[3], read: m[4], releases: Number(m[5]), settlements: Number(m[6]), deletion: m[7], content: m[8],
+    }));
+  };
+  const count = (list: string[], id: string): number => list.filter((x) => x === id).length;
+  const contentOf = (s: System, id: string): string[] => [`inputs/${id}`, `results/${id}`, ...s.store.keys(`calls/${id}/`)].filter((p) => s.store.get(p) !== undefined);
+  const opOf = (s: System, id: string): DeletionOp => s.store.get<DeletionOp>(deletionPath(`del_${id.slice(4)}`)) as DeletionOp;
+  const invariant = (s: System): void => {
+    expect(active(s)).toBeGreaterThanOrEqual(0);
+    expect(active(s)).toBe(countedActive(s, "o1"));
+  };
+
+  it("the table has rows D1–D12", () => {
+    expect(table().map((r) => r.id)).toEqual(Array.from({ length: 12 }, (_, i) => `D${i + 1}`));
+  });
+
+  /** Runs one row; returns the system, the job ID and the owner's read while deletion is pending. */
+  function scenario(row: DRow): { sys: System; id: string; read: ApiResponse } {
+    const sys = world();
+    const id = send(sys, req(SAME)).body?.id as string;
+    const path = `jobs/${id}`;
+    const setState = (state: string): void => sys.store.put(path, { ...(sys.store.get<JobDoc>(path) as JobDoc), state });
+    if (row.at === "queued") setState("queued");
+    if (row.at === "running" || row.at === "synthesizing") setState(row.at);
+    if (row.at === "completed") runToEnd(finishJob(sys, id, "completed", 0, undefined, { summary: "result" }));
+    let inFlight: Generator<void, ApiResponse, void> | null = null;
+    if (row.id === "D3") {
+      inFlight = workerProviderCall(sys, id);
+      expect(inFlight.next().done).toBe(false); // call started before DELETE
+    }
+    const del = runToEnd(handleDelete(sys, "live1", id));
+    expect(del.status).toBe(202);
+    const read = handleGet(sys, "live1", id);
+    switch (row.id) {
+      case "D1": case "D7": runToEnd(sweep(sys)); break;
+      case "D2": case "D4": runToEnd(workerBoundary(sys, id)); runToEnd(sweep(sys)); break;
+      case "D3": runToEnd(inFlight as Generator<void, ApiResponse, void>); expect(sys.store.get(`calls/${id}/1`)).toBeDefined(); runToEnd(workerBoundary(sys, id)); runToEnd(sweep(sys)); break;
+      case "D5": sys.store.put(path, { ...(sys.store.get<JobDoc>(path) as JobDoc), leaseExpiries: 3 }); runToEnd(sweep(sys)); break;
+      case "D8": {
+        const again = runToEnd(handleDelete(sys, "live1", id)) as ApiResponse & { deletion?: { id: string } };
+        expect(again.status).toBe(202);
+        expect(again.deletion?.id).toBe(`del_${id.slice(4)}`);
+        runToEnd(workerBoundary(sys, id)); runToEnd(sweep(sys)); break;
+      }
+      case "D9": {
+        runToEnd(sweep(sys));
+        expect(opOf(sys, id)).toMatchObject({ status: "pending", blockedBy: "awaiting_terminal" });
+        runToEnd(workerBoundary(sys, id)); runToEnd(sweep(sys)); break;
+      }
+      case "D10": {
+        runToEnd(workerBoundary(sys, id)); runToEnd(sweep(sys));
+        expect(fmt(runToEnd(workerProviderCall(sys, id)))).toBe("409 late_write_refused");
+        runToEnd(finishJob(sys, id, "completed", 0, undefined, { summary: "late" }));
+        break;
+      }
+      case "D11": {
+        const crashed = workerBoundary(sys, id);
+        crashed.next(); // the stop transaction read the job, then the worker died
+        expect((sys.store.get<JobDoc>(path) as JobDoc).state).toBe("running");
+        runToEnd(workerBoundary(sys, id)); runToEnd(sweep(sys)); break;
+      }
+      case "D12": runToEnd(sweep(sys)); runToEnd(sweep(sys)); break;
+      default: throw new Error(`no scenario for ${row.id}`);
+    }
+    return { sys, id, read };
+  }
+
+  it.each(table().filter((r) => r.id !== "D6").map((r) => [`${r.id} ${r.at}: ${r.then}`, r] as const))("%s", (_n, row) => {
+    const { sys, id, read } = scenario(row);
+    expect(fmt(read)).toBe(`${row.read} verification_deleted`);
+    expect(count(sys.releases, id)).toBe(row.releases);
+    expect(count(sys.settlements, id)).toBe(row.settlements);
+    const op = opOf(sys, id);
+    expect(op.status).toBe(row.deletion);
+    if (row.content === "purged") expect(contentOf(sys, id)).toEqual([]);
+    else expect(contentOf(sys, id).length).toBeGreaterThan(0);
+    if (row.deletion === "pending") {
+      expect(op.attempts).toBeGreaterThanOrEqual(1);
+      expect(op.blockedBy).toBe("awaiting_terminal");
+      expect((sys.store.get<JobDoc>(`jobs/${id}`) as JobDoc)[RELEASE_MARKER_FIELD]).toBe(false); // still counted
+    } else {
+      const job = sys.store.get<JobDoc>(`jobs/${id}`) as JobDoc;
+      expect(job.deleted).toBe(true);
+      expect(job[RELEASE_MARKER_FIELD]).toBe(true);
+    }
+    expect(fmt(runToEnd(handleCancel(sys, "live1", id)))).toBe("410 verification_deleted");
+    invariant(sys);
+  });
+
+  it("D6 normal completion racing the deletion (every interleaving): one release, one settlement, then purge", () => {
+    const row = table().find((r) => r.id === "D6") as DRow;
+    const setup = (): System => {
+      const s = world();
+      const id = send(s, req(SAME)).body?.id as string;
+      s.store.put(`jobs/${id}`, { ...(s.store.get<JobDoc>(`jobs/${id}`) as JobDoc), state: "running" });
+      return s;
+    };
+    const idOf = (s: System): string => s.jobs()[0].slice("jobs/".length);
+    let n = 0;
+    for (const o of interleavings(setup, [
+      { name: "delete", start: (s) => handleDelete(s, "live1", idOf(s)) },
+      { name: "complete", start: (s) => finishJob(s, idOf(s), "completed", 0, undefined, { summary: "r" }) },
+    ])) {
+      n++;
+      const id = idOf(o.sys);
+      expect(fmt(handleGet(o.sys, "live1", id))).toBe(`${row.read} verification_deleted`);
+      runToEnd(workerBoundary(o.sys, id));
+      runToEnd(sweep(o.sys));
+      expect([count(o.sys.releases, id), count(o.sys.settlements, id)]).toEqual([row.releases, row.settlements]);
+      expect(opOf(o.sys, id).status).toBe(row.deletion);
+      expect(contentOf(o.sys, id)).toEqual([]);
+      invariant(o.sys);
+    }
+    expect(n).toBeGreaterThan(5);
+  });
+
+  it("the sweeper racing the worker's stop after DELETE (every interleaving): exactly one release", () => {
+    const setup = (): System => {
+      const s = world();
+      const id = send(s, req(SAME)).body?.id as string;
+      s.store.put(`jobs/${id}`, { ...(s.store.get<JobDoc>(`jobs/${id}`) as JobDoc), state: "running", leaseExpiries: 3 });
+      runToEnd(handleDelete(s, "live1", id));
+      return s;
+    };
+    const idOf = (s: System): string => s.jobs()[0].slice("jobs/".length);
+    for (const o of interleavings(setup, [
+      { name: "worker", start: (s) => workerBoundary(s, idOf(s)) },
+      { name: "sweeper", start: (s) => sweep(s) },
+    ])) {
+      runToEnd(sweep(o.sys));
+      const id = idOf(o.sys);
+      expect(count(o.sys.releases, id)).toBe(1);
+      expect(count(o.sys.settlements, id)).toBe(1);
+      expect(opOf(o.sys, id).status).toBe("completed");
+      invariant(o.sys);
+    }
+  });
+
+  it("at the limit, deleting every active job frees exactly the capacity, with no leak", () => {
+    const sys = world();
+    patchOrg(sys, { concurrencyLimit: 2 });
+    const a = send(sys, req(SAME, { idempotencyKey: "a" })).body?.id as string;
+    const b = send(sys, req(DIFFERENT, { idempotencyKey: "b" })).body?.id as string;
+    sys.store.put(`jobs/${b}`, { ...(sys.store.get<JobDoc>(`jobs/${b}`) as JobDoc), state: "running" });
+    expect(fmt(send(sys, req(SAME, { idempotencyKey: "c" })))).toBe("429 concurrency_limit");
+    runToEnd(handleDelete(sys, "live1", a));
+    runToEnd(handleDelete(sys, "live1", b));
+    expect(active(sys)).toBe(1); // the running job is still counted while its deletion is pending
+    expect(detectDrift(sys, "o1")).toBe(false);
+    runToEnd(workerBoundary(sys, b));
+    runToEnd(sweep(sys));
+    expect(active(sys)).toBe(0);
+    expect([a, b].map((id) => [count(sys.releases, id), opOf(sys, id).status])).toEqual([[1, "completed"], [1, "completed"]]);
+    expect(fmt(send(sys, req(SAME, { idempotencyKey: "c" })))).toBe("202 new");
+    invariant(sys);
+  });
+
+  it("drift detection racing admissions and releases (every interleaving) never reports a spurious drift", () => {
+    const setup = (): System => {
+      const s = world();
+      send(s, req(SAME, { idempotencyKey: "first" }));
+      return s;
+    };
+    const firstId = (s: System): string => s.jobs()[0].slice("jobs/".length);
+    let n = 0;
+    for (const o of interleavings(setup, [
+      { name: "detect", start: function* (s: System) { yield* detectDriftTx(s, "o1"); return null; } },
+      create("admit", { keyId: "live1", idempotencyKey: "second", body: DIFFERENT }),
+      { name: "release", start: (s) => finishJob(s, firstId(s), "completed") },
+    ])) {
+      n++;
+      expect({ schedule: o.schedule, drift: o.sys.audit.filter((e) => e.type === "concurrency.drift_detected").length }).toEqual({ schedule: o.schedule, drift: 0 });
+    }
+    expect(n).toBeGreaterThan(50);
+  });
+});
+
+describe("Addendum 6: worker_timeout and persistence_failed are platform-caused (ledger-and-billing.md §4.3)", () => {
+  it("the ledger's 'What counts' lists match the model's platform-fault codes", () => {
+    const md = fs.readFileSync(path.join(ROOT, "docs/product/api-0/ledger-and-billing.md"), "utf8");
+    const para = /\*\*What counts\.\*\*([^\n]+)/.exec(md)?.[1] ?? "";
+    const customer = /count customer-attributable failures: (.+?)\. They exclude/.exec(para)?.[1] ?? "";
+    const excluded = /They exclude platform-caused terminal states: (.+?)\./.exec(para)?.[1] ?? "";
+    const codes = (t: string): string[] => Array.from(t.matchAll(/`([a-z_]+)`/g), (m) => m[1]);
+    expect(codes(customer)).toEqual(["insufficient_usable_models"]);
+    for (const c of PLATFORM_FAULT_CODES) {
+      expect({ c, excluded: codes(excluded).includes(c), customer: codes(customer).includes(c) }).toEqual({ c, excluded: true, customer: false });
+    }
+  });
+
+  it("a crashed worker's job ends worker_timeout via the sweeper, for running AND synthesizing", () => {
+    for (const state of ["running", "synthesizing"]) {
+      const sys = world();
+      const id = send(sys, req(SAME)).body?.id as string;
+      sys.store.put(`jobs/${id}`, { ...(sys.store.get<JobDoc>(`jobs/${id}`) as JobDoc), state, leaseExpiries: 3 });
+      runToEnd(sweep(sys));
+      const job = sys.store.get<JobDoc>(`jobs/${id}`) as JobDoc;
+      expect({ state, after: job.state, code: job.failureCode, active: active(sys) }).toEqual({ state, after: "failed", code: "worker_timeout", active: 0 });
+      expect(PLATFORM_FAULT_CODES).toContain(job.failureCode);
+    }
   });
 });
