@@ -264,8 +264,8 @@ All numbers are **placeholders** (set per plan in `lib/apiPlatform/apiPlans.ts`,
 | Item | Limit | Over the limit |
 |---|---|---|
 | Request body | **524,288 bytes (512 KiB)**, owner-approved (Addendum 3, B); counted as received, from `Content-Length` when present and from the streamed byte count otherwise, **before any JSON parsing** | 413 `request_too_large` (step 1) |
-| `input.claim` | 1..4,000 code points (NFC), not whitespace-only | 400 `input_too_long` / `empty_input` |
-| `input.question` | 1..4,000 code points (NFC), not whitespace-only | 400 `input_too_long` / `empty_input` |
+| `input.claim` | 1..4,000 code points (NFC), with at least one visible code point (§4.2) | 400 `input_too_long` / `empty_input` |
+| `input.question` | 1..4,000 code points (NFC), with at least one visible code point (§4.2) | 400 `input_too_long` / `empty_input` |
 | `input.context` | 0..20,000 code points (NFC); research only | 400 `input_too_long` |
 | `models` | 2..5 unique items | 422 `too_few_models` / `model_limit_exceeded`; duplicate → 400 `invalid_model` |
 | `models[]` item | 1..64 characters, pattern `^[a-z0-9][a-z0-9._-]{0,63}$` | 400 `invalid_model` |

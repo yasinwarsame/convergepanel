@@ -705,7 +705,7 @@ components:
         claim:
           allOf: [{ $ref: '#/components/schemas/InputText' }]
           maxLength: 4000
-          description: '1..4000 Unicode code points after NFC (placeholder). Whitespace-only is 400 `empty_input`.'
+          description: '1..4000 Unicode code points after NFC (placeholder). Text with no visible code point (whitespace, zero-width, format or combining characters only; Addendum 3) is 400 `empty_input`.'
     ResearchInput:
       type: object
       required: [question]
@@ -715,7 +715,7 @@ components:
         question:
           allOf: [{ $ref: '#/components/schemas/InputText' }]
           maxLength: 4000
-          description: '1..4000 Unicode code points after NFC (placeholder). Whitespace-only is 400 `empty_input`.'
+          description: '1..4000 Unicode code points after NFC (placeholder). Text with no visible code point (whitespace, zero-width, format or combining characters only; Addendum 3) is 400 `empty_input`.'
         context:
           allOf: [{ $ref: '#/components/schemas/NoControlCharacters' }]
           type: string
