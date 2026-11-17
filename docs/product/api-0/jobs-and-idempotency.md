@@ -10,8 +10,8 @@ Every current research, synthesis and video route sets `maxDuration = 300`, and 
 
 A Firestore transaction cannot include a queue publish, so job creation never "enqueues in the transaction". It uses a **transactional outbox**:
 
-1. **Before any write** (no state is created, the idempotency key stays free): parse and validate the body, authenticate the key, check scope, apply the Redis-class rate limit, and refuse with `503 queue_unavailable` if the dispatcher's health check currently marks the queue unavailable.
-2. **One Firestore transaction (T-create)** reads the idempotency record, the org and the current period, then either replays, rejects, or writes **all** of:
+1. **Before any write** (no state is created, the idempotency key stays free): authenticate the key, apply the Redis-class rate limit, check organization state and scope, then decode, validate and canonicalize the body. *(Addendum 3, m3: the queue health check moved into T-create, after the idempotency read, so it can never turn a replay into `503`; the full order is §5A.)*
+2. **One Firestore transaction (T-create)** reads the idempotency record first, re-checks the key and the organization, and replays a committed record before any new-job-only check. Only for a new job does it then check options, availability, queue health (`503 queue_unavailable`), concurrency, credits and capacity, and write **all** of:
    - the job document with internal state `pending_dispatch`, `dispatchAttempts: 0`, `dispatchDueAt: now`;
    - the `reserve_{verId}` ledger entry and the period counter increment (`ledger-and-billing.md` §2.3);
    - the idempotency record (§5) holding the request hash, the verification ID and the exact `202` response body.
@@ -157,10 +157,96 @@ Every instrumented provider call (PRD §6.5) has a deterministic **call key** `{
 | Same key, same body, record exists | Return the stored original `202` status and body (`id` unchanged) with header `Idempotent-Replayed: true`. No new reservation, job or dispatch. This holds whether the job is still `pending_dispatch` or long terminal |
 | Same key, different body | `409 idempotency_key_reused`. Nothing created |
 | Two concurrent requests, same key | Firestore serializes the two transactions on the idempotency document. One commits; the other retries inside its own transaction, reads the committed record, and returns the replay (or `409 idempotency_key_reused` if its body differs). Only if a transaction exhausts its contention retries without reading a committed record does the request return `409 request_in_progress` with `Retry-After: 1`. Nothing was written by that request. A retry with the same key gets the replay, or creates the job if no other request committed |
-| Rejected before T-create (validation `400`, `401`, `403` scope, `413`, `422`, `429` rate, `503 queue_unavailable` from the pre-write health check) | No record is written. The key may be reused |
-| Rejected inside T-create (`402 quota_exceeded` / `spend_limit_reached`, `403 org_suspended` / `failed_job_threshold_exceeded` / `live_key_requires_plan`, `429 concurrency_limit`, `503 capacity_protection` / `platform_spend_ceiling`) | The transaction writes nothing, so no record exists. The key may be reused, and the same request may succeed later. Error responses are never stored or replayed |
+| Rejected before T-create (`401`, `403` org state, plan or scope, `413`, `415`, `429 rate_limited`, validation `400` and the schema-bound `422`s) | No record is written. The key may be reused |
+| Rejected inside T-create (*Addendum 3:* `401` / `403` from the in-transaction re-check of the key and organization; and, for a new job only, the beta-option and availability `422`s, `403 pipeline_processing_not_acknowledged`, `503 queue_unavailable`, `429 concurrency_limit`, `403 failed_job_threshold_exceeded`, `402 quota_exceeded` / `spend_limit_reached`, `503 capacity_protection` / `platform_spend_ceiling`) | The transaction writes nothing, so no record exists. The key may be reused, and the same request may succeed later. Error responses are never stored or replayed |
 | T-create committed but publishing failed | The record exists, the job is `pending_dispatch` and the sweeper dispatches it (§2). Replays return the same `id` and never create a second reservation |
 | Verification later deleted (OD-11) | Record kept as a content-free `deleted` marker until TTL; replay returns `410 verification_deleted` |
+
+*Addendum 3 (m3):* the rows above are unchanged in meaning; the **order** in which they are evaluated, and the behaviour when conditions change between the original request and its replay, are specified in §5A, which wins where it is more specific.
+
+## 5A. Replay precedence, transaction ordering and concurrency (Addendum 3, m3)
+
+**Requirement (owner, Addendum 3 §2).** A caller that is authenticated **and currently authorized** can replay the original accepted request, with the same `Idempotency-Key` and the same canonical request, and receives the original accepted response even if dynamic conditions changed since: a model became unavailable, credits decreased, the queue is unhealthy, the plan's model limit changed, a type was switched off, concurrency or capacity is exhausted. Revoked credentials, removed scope, a suspended organization or a lapsed live plan **never** regain access through a replay. A replay creates no job, no reservation, no dispatch and no charge. Rate limiting may throttle a replay (`429 rate_limited`, nothing written), but never causes duplicate work or billing.
+
+### 5A.1 Decision procedure
+
+| Step | Where | Check | Outcome on failure |
+|---|---|---|---|
+| 0–2 | before authentication | global availability; transport (`Content-Length` / streamed byte count, media type); pre-authentication flood limit per source address (`error-catalog.md` §3.4) | `503`, `413`, `415`, `429 rate_limited`; nothing read about any tenant |
+| 3 | outside T-create | authenticate the key (revoked, expired, unknown → one code) | `401 invalid_api_key` |
+| 4 | outside T-create | authenticated rate limit, per key then per organization | `429 rate_limited` (replays count) |
+| 5–6 | outside T-create | organization state and live plan, then scope `verifications:write` | `403 org_suspended`, `live_key_requires_plan`, `insufficient_scope` |
+| 7 | outside T-create | decode, validate, NFC, canonicalize (bounded: at most 524,288 bytes are ever parsed); `Idempotency-Key` format, and its presence for live keys | `400` codes, schema-bound `422`s |
+| 8a | **T-create, first read** | lock and read the idempotency record of `(org, app, mode, key)` | contention retries exhausted → `409 request_in_progress` |
+| 8b | T-create | **re-read the key and the organization** and repeat steps 3, 5 and 6 against them | `401` / `403` as above; **no replay is ever returned to a caller that fails here** |
+| 8c | T-create | a record whose `expiresAt` is in the future decides the response, and evaluation **stops**: `committed` + same canonical request → the stored `202` with `Idempotent-Replayed: true`; `committed` + different → `409 idempotency_key_reused`; `deleted` marker → `410 verification_deleted` | — |
+| 9–14 | T-create, **new job only** | beta options; type and model availability, D6 acknowledgement, plan model limit, repeated-failing input, research schema (proposed); queue health; concurrency; failed-job threshold, credits and spend limit; capacity and the platform spend ceiling (`error-catalog.md` §3.1) | the step's `422` / `403` / `503` / `429` / `402`; the transaction commits **no write** |
+| 15 | T-create | write the job (`pending_dispatch`), the `reserve_{verId}` ledger entry and period counter, and the idempotency record (`committed`, canonical request hash, the exact `202` body, `expiresAt = now + 24 h`) | commit conflict → retry from 8a |
+| 16 | after commit | dispatch (transactional outbox, §2) | the sweeper re-dispatches; the `202` does not depend on it |
+
+The D6 acknowledgement (step 10) is a new-job condition: it governs whether **new** content may be sent to the pipeline providers. A replay sends nothing to any provider and returns only the accepted-job body (no content), so a withdrawn acknowledgement does not block it. *(Engineering classification; listed for owner confirmation in Addendum 3 §4.)*
+
+**Validation is not a dynamic condition.** Step 7 runs before the lookup because the canonical request (the lookup's comparison value) only exists after it. A contract change that tightens validation therefore also applies to replays of earlier requests; such a change is a breaking change (PRD §8.7) and is announced in advance.
+
+### 5A.2 Transaction ordering (T-create)
+
+Inside the one Firestore transaction, in this order:
+1. **Lock and read** `apiOrganizations/{orgId}/idempotency/{sha256(appId|mode|key)}` (first read; omitted when no `Idempotency-Key` is sent, which only a test key may do).
+2. **Read** `apiKeys/{keyId}` and `apiOrganizations/{orgId}` (revocation, scope, status, plan) and decide 8b.
+3. Decide 8c from the record. On a replay, `409` or `410` the transaction commits **with no write**.
+4. New job only: read the current period document (`periods/{YYYY-MM}`, credits and reservations) and evaluate steps 9–14. Redis-class state (concurrency counters, shedding, queue health, provider health) is read here, inside the transaction callback, but is not part of the Firestore snapshot; the outcome a request receives is decided only after these reads.
+5. New job only: `tx.create` the job, `tx.create` the ledger entry, update the period counter, `tx.create` the idempotency record (or overwrite a record whose `expiresAt` has passed; Firestore TTL deletion is lazy, so expiry is checked explicitly). All commit together or none does.
+
+Every read in 1, 2 and 4 is validated at commit. A concurrent key revocation, organization suspension, credit change or record creation aborts the commit, and the transaction retries from 1 with fresh reads. The `lastUsedAt` sampling write on the key (`tenancy-and-auth.md` §4, at most once per minute) can cause such a retry; it never changes the outcome.
+
+### 5A.3 Truth table (normative; parsed by the reference-model spec)
+
+`any` in *New-job conditions* means: the same outcome for every value of that column (`pass`, `model_unavailable`, `credits_exhausted`, `queue_unhealthy`, `plan_models_reduced`, `type_disabled`, `ack_withdrawn`, `concurrency_full`, `capacity_shed`). *Record in scope* is the record of the caller's own `(org, app, mode, key)`: `in_progress` means another T-create for the same scope holds the record and has not committed during this request's bounded retries; `other_mode` / `other_app` mean a committed record exists only under the same key value in the other mode or another application. The original request of every `committed`, `expired`, `deleted`, `other_mode` and `other_app` row was accepted while every condition was `pass`.
+
+| Row | Record in scope | Canonical request | Caller | New-job conditions | Response | Job created |
+|---|---|---|---|---|---|---|
+| T1 | none | n/a | authorized | pass | 202 new | yes |
+| T2 | none | n/a | authorized | model_unavailable | 422 model_unavailable | no |
+| T3 | none | n/a | authorized | credits_exhausted | 402 quota_exceeded | no |
+| T4 | none | n/a | authorized | queue_unhealthy | 503 queue_unavailable | no |
+| T5 | none | n/a | authorized | plan_models_reduced | 422 model_limit_exceeded | no |
+| T6 | none | n/a | authorized | type_disabled | 422 type_unavailable | no |
+| T7 | none | n/a | authorized | ack_withdrawn | 403 pipeline_processing_not_acknowledged | no |
+| T8 | none | n/a | authorized | concurrency_full | 429 concurrency_limit | no |
+| T9 | none | n/a | authorized | capacity_shed | 503 capacity_protection | no |
+| T10 | committed | same | authorized | any | 202 replay | no |
+| T11 | committed | different | authorized | any | 409 idempotency_key_reused | no |
+| T12 | in_progress | same | authorized | any | 409 request_in_progress | no |
+| T13 | in_progress | different | authorized | any | 409 request_in_progress | no |
+| T14 | expired | same | authorized | pass | 202 new | yes |
+| T15 | expired | same | authorized | model_unavailable | 422 model_unavailable | no |
+| T16 | expired | different | authorized | pass | 202 new | yes |
+| T17 | deleted | same | authorized | any | 410 verification_deleted | no |
+| T18 | deleted | different | authorized | any | 410 verification_deleted | no |
+| T19 | other_mode | same | authorized | pass | 202 new | yes |
+| T20 | other_app | same | authorized | pass | 202 new | yes |
+| T21 | none | n/a | key_revoked | any | 401 invalid_api_key | no |
+| T22 | committed | same | key_revoked | any | 401 invalid_api_key | no |
+| T23 | committed | different | key_revoked | any | 401 invalid_api_key | no |
+| T24 | deleted | same | key_revoked | any | 401 invalid_api_key | no |
+| T25 | committed | same | scope_reduced | any | 403 insufficient_scope | no |
+| T26 | committed | same | org_suspended | any | 403 org_suspended | no |
+| T27 | committed | same | plan_lapsed | any | 403 live_key_requires_plan | no |
+| T28 | committed | same | rate_limited | any | 429 rate_limited | no |
+| T29 | none | n/a | scope_reduced | any | 403 insufficient_scope | no |
+| T30 | none | n/a | org_suspended | any | 403 org_suspended | no |
+
+Rows T12–T13: once the other transaction commits, a retry follows T10 or T11. Row T28: once the rate window resets, a retry follows T10. Row T18 (a different request under a deleted record's key also gets `410`) follows from the marker being **content-free**: it keeps no request hash, so the two cases cannot be told apart. This is an engineering decision within the approved deletion contract (retention-and-deletion.md §3.1) and is listed for owner confirmation (Addendum 3 §4).
+
+### 5A.4 Concurrency argument (two or more simultaneous identical first requests)
+
+1. Every request for the same `(org, app, mode, key)` reads and locks **the same** idempotency document as the first operation of T-create (§5A.2 step 1). Firestore serializes transactions on that document: while one holds it, another's read aborts and retries.
+2. The job, the reservation and the idempotency record are written in **one** commit (§5A.2 step 5), and the record is written with `tx.create` (or an expiry-checked overwrite). So the first transaction to commit creates exactly one job, one reservation and one record; no other commit can create a second record for the scope, and no job or reservation is ever written without its record.
+3. Every later transaction for the scope, on retry, reads the committed record at step 1 and stops at step 8c (replay or `409`), before any write. It therefore creates nothing.
+4. A transaction that exhausts its bounded retries while another holds the record returns `409 request_in_progress` and wrote nothing; its retry follows step 3.
+5. Hence, for any interleaving of N identical first requests: exactly one job, one reservation and one dispatch exist; every `202` carries the same `id` and body; every other response is `409 request_in_progress` with no write. The reference-model spec enumerates every interleaving of two and three requests and asserts exactly this.
+
+**Reference model and tests.** `docs/__tests__/support/idempotencyReferenceModel.ts` implements §5A.1–5A.2 over an in-memory transactional store with the Firestore semantics above; `docs/__tests__/apiIdempotencyReplayPrecedence.spec.ts` parses the table in §5A.3 and runs every row (each `any` expanded), the state transitions, the interleavings and the negative cases. The model is documentation, not the implementation.
 
 ## 6. Cancellation
 
