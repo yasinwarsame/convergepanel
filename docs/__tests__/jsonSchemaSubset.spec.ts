@@ -67,6 +67,24 @@ describe("jsonSchemaSubset: keywords", () => {
     expect(v(disc)(value)).toBe(ok);
   });
 
+  it("discriminator: the tag is required even when no branch lists it in `required` (as Ajv)", () => {
+    // Without the discriminator, a generic oneOf accepts {a:"1"} (only branch x matches), so
+    // this case distinguishes discriminator semantics from plain oneOf (mutants D10, D10b).
+    const loose = {
+      type: "object",
+      oneOf: [
+        { type: "object", properties: { t: { const: "x" }, a: { type: "string" } }, required: ["a"], additionalProperties: false },
+        { type: "object", properties: { t: { const: "y" }, b: { type: "string" } }, required: ["b"], additionalProperties: false },
+      ],
+      discriminator: { propertyName: "t" },
+    };
+    expect(v(loose)({ t: "x", a: "1" })).toBe(true);
+    expect(v(loose)({ a: "1" })).toBe(false);
+    expect(v(loose)({ t: 7, a: "1" })).toBe(false);
+    const { discriminator: _d, ...plain } = loose;
+    expect(v(plain)({ a: "1" })).toBe(true); // control: plain oneOf differs
+  });
+
   it("fails closed: an unsupported keyword or a bad pattern throws at compile time", () => {
     expect(() => v({ type: "string", format: "uri" })).toThrow(/unsupported keyword "format"/);
     expect(() => v({ if: { type: "string" } })).toThrow(/unsupported keyword "if"/);
