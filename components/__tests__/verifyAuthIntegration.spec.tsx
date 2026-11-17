@@ -248,11 +248,14 @@ describe("/verify + AuthProvider + PostHog — extension flow", () => {
   });
 
   it("an abandoned pending input is not retained past its expiry", async () => {
-    const t0 = Date.now();
+    // Pin the clock BEFORE capture: the record's expiry is stamped at capture time, and under
+    // full-suite load capture can run milliseconds after an unpinned t0 (observed flake).
+    const t0 = 1_800_000_000_000;
+    const clock = jest.spyOn(Date, "now").mockReturnValue(t0);
     load(EXT);
     await auth(null);
     expect(session.length).toBe(1);
-    jest.spyOn(Date, "now").mockReturnValue(t0 + 15 * 60 * 1000 + 1);
+    clock.mockReturnValue(t0 + 15 * 60 * 1000); // exactly at expiry: no longer live
     load("/verify?source=extension");
     await auth(null);
     expect(textarea()).toBe("");
