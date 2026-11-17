@@ -195,6 +195,10 @@ const REPO_AUTHORITY_ALLOW: Record<string, { allowed: string[]; reason: string }
     allowed: ["resolveVerifiedAdminScopes"],
     reason: "presentation only: emits the legacy role label, which authorizes nothing",
   },
+  "lib/admin/systemAdminClaimSafety.ts": {
+    allowed: [".admin === true", "customClaims.admin"],
+    reason: "OFFLINE OPERATOR TOOL (PR #295): the claim CLI's planning, last-admin count, operator self-check and read-back read the claims it writes; conditional on the build boundary (lib/security/buildBoundary.js + scripts/security/check-build-boundary.js, required Quality Gate); walker = secondary pre-check; per-function rows in privilegedAuthoritySources.spec.ts",
+  },
   "app/api/admin/set-role/route.ts": {
     allowed: ["customClaims.admin"],
     reason: "logs the claim value this SYSTEM_ADMIN route is WRITING; not an authority read",

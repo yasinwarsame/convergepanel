@@ -7,18 +7,18 @@
  * step became the breach. Phases C10–C17 policed that hazard with a uid-body
  * detector, a two-phase containment probe and an ordered BOOTSTRAP_* sequence.
  *
- * S1 deleted the route, the probe and the variable. Until the hardened operator
- * CLI (PR #295) merges, the only documented path for an emergency `admin` claim
- * change is an OWNER action, never an agent action: the reviewed SYSTEM_ADMIN
- * claim operator tool (`scripts/admin/set-system-admin-claim.ts`, branch
- * `fix/admin-claim-script-hardening`, PR #295) run LOCALLY from a checkout of its
- * exact reviewed commit f6039ea — explicit project and UID, dry run then typed
- * confirmation, audit rows and `--result-file` kept, no Production run without
- * separate authorization — verified with the read-only
- * `scripts/check-admin-claims.js` / `scripts/verify-admin-claims.js`. (Owner
- * ruling OPTION B, 2026-11-09: the Firebase Console cannot set custom claims or
- * revoke refresh tokens, so the earlier "Console" wording described no path.)
- * The four legacy minting scripts are NOT part of that path.
+ * S1 deleted the route, the probe and the variable. While PR #295 was unmerged,
+ * S1 documented an INTERIM path that pinned the hardened tool to a branch
+ * checkout at its exact reviewed commit f6039ea. PR #295's merge replaced that:
+ * the tool (`scripts/admin/set-system-admin-claim.ts`) is in the repository, and
+ * the only documented path for an `admin` claim change is an OWNER action, never
+ * an agent action — the tool run LOCALLY from a checkout of `main`, explicit
+ * project and UID, dry run then typed confirmation, audit rows and
+ * `--result-file` kept, exit codes read, no Production run without separate
+ * authorization — verified with the read-only `scripts/check-admin-claims.js` /
+ * `scripts/verify-admin-claims.js`. (Owner ruling OPTION B, 2026-11-09: the
+ * Firebase Console cannot set custom claims or revoke refresh tokens.) PR #295
+ * also DELETED the four legacy minting scripts; they must never return.
  *
  * What this file now enforces, over every tracked non-test file that mentions
  * an operator token (discovered from git, classified, and pinned):
@@ -30,14 +30,20 @@
  *   N2. No uid-bearing request body to the retired route exists anywhere.
  *   N3. The retired procedure (BOOTSTRAP_* sequence, SAFE-PROBE block, proof
  *       token) is gone from the runbook.
- *   P1. The interim path is documented where an operator looks for it.
- *   P2. Every legacy minting script — found BY CONTENT, not by name — declares
- *       itself DO NOT USE and points at the read-only checks.
+ *   P1. The post-merge admin-claim path is documented where an operator looks
+ *       for it, with no current guidance anywhere describing #295 as pending
+ *       or pointing at its branch, and the interim path kept as history in one
+ *       marked, boundary-pinned paragraph.
+ *   P2. Minting is found BY CONTENT, not by name: exactly one tracked script
+ *       mints (the hardened tool), the four legacy scripts are absent, and in
+ *       ALL tracked executable source only the hardened tool and the set-role
+ *       route name `setCustomUserClaims` (compiler-parsed scan).
  *
  * This needs a real checkout: discovery uses `git ls-files`.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { execSync } from "node:child_process";
+import * as ts from "typescript";
 
 const ROUTE = "/api/admin/set-admin";
 const RUNBOOK = "docs/operations/admin-authority-tiers.md";
@@ -48,6 +54,9 @@ const LEGACY_SCRIPTS = [
   "scripts/set-admin-claim.js",
 ] as const;
 const READ_ONLY_CHECKS = ["scripts/check-admin-claims.js", "scripts/verify-admin-claims.js"] as const;
+const HARDENED_TOOL = "scripts/admin/set-system-admin-claim.ts";
+const TOOL_RUNBOOK = "docs/operations/system-admin-claim-script.md";
+const TOOL_LOGIC = ["lib/admin/systemAdminClaimSafety.ts", "lib/admin/systemAdminClaimExecution.ts"] as const;
 
 const SKIP = /\.(png|jpe?g|gif|svg|ico|woff2?|ttf|eot|pdf|zip|lock)$|^package-lock\.json$/i;
 const TRACKED = execSync("git ls-files", { encoding: "utf8" })
@@ -59,6 +68,30 @@ const TRACKED = execSync("git ls-files", { encoding: "utf8" })
 
 const read = (f: string) => readFileSync(f, "utf8");
 const flat = (s: string) => s.replace(/\s+/g, " ");
+
+/** Files classified HISTORICAL_RECORD in the manifest below (pinned there). */
+const HISTORICAL_RECORDS = ["docs/operations/security-test-falsifiability.md"] as const;
+const HISTORICAL_MARKER = /Superseded by security slice S1/;
+
+// ─── TypeScript-compiler helpers (P2 executable scan, read-only verifiers) ──
+
+const scriptKindOf = (f: string) =>
+  f.endsWith(".tsx")
+    ? ts.ScriptKind.TSX
+    : f.endsWith(".jsx")
+      ? ts.ScriptKind.JSX
+      : /\.(js|mjs|cjs)$/.test(f)
+        ? ts.ScriptKind.JS
+        : ts.ScriptKind.TS;
+const parseSource = (f: string, src: string) =>
+  ts.createSourceFile(f, src, ts.ScriptTarget.Latest, true, scriptKindOf(f));
+/** The file's code re-emitted by the compiler with every comment removed. */
+const codeOf = (f: string, src: string) =>
+  ts.createPrinter({ removeComments: true }).printFile(parseSource(f, src));
+const walk = (node: ts.Node, visit: (n: ts.Node) => void) => {
+  visit(node);
+  node.forEachChild((c) => walk(c, visit));
+};
 
 // ─── detectors (each self-validated below) ──────────────────────────────────
 
@@ -90,18 +123,16 @@ const recommendations = (text: string) =>
   units(text).filter((u) => FORBIDDEN_TARGET.test(u) && !NEGATION.test(u)).map(flat);
 
 /**
- * The ruled interim path (owner OPTION B, 2026-11-09). Every operator site must
- * state each element; a site that reverts to "owner action in the Firebase
- * Console" (a path that does not exist) or drops the exact-commit pin, the
- * local-only rule, the dry run or the Production bar fails here.
+ * The admin-claim path after PR #295 merged (owner OPTION B, 2026-11-09, carried
+ * forward). Every operator site must state each element; a site that reverts to
+ * "owner action in the Firebase Console" (a path that does not exist), drops the
+ * local-only rule, the dry run, the Production bar or the revocation limits, or
+ * keeps a live "until #295 merges" instruction, fails here.
  */
-const INTERIM_PATH_PINS: readonly RegExp[] = [
+const CLAIM_PATH_PINS: readonly RegExp[] = [
   /set-system-admin-claim/, //                       the tool, by name
-  /fix\/admin-claim-script-hardening/, //            its branch
-  /PR #295/,
-  /\bf6039ea\b/, //                                   the exact reviewed commit, short form
-  /f6039eaecb659159f52019b7f4cff4cce6a4ed89/, //      and the full SHA `rev-parse HEAD` must print
-  /locally\**,? from a checkout|run locally with the reviewed|local checkout/i, // local execution, as a phrase (the bare word "local" also matches unrelated text)
+  /locally\**,? from a (?:local )?checkout of `main`|local checkout of `main`/i, // local execution from main, as a phrase
+  /rev-parse HEAD/, //                                the commit actually run is recorded
   /never from Vercel or any deployment/,
   /\bno defaults\b|Nothing is defaulted/i, //       explicit project and UID
   /--confirm-project/,
@@ -111,10 +142,71 @@ const INTERIM_PATH_PINS: readonly RegExp[] = [
   /--result-file/, //                                  evidence kept outside the repo
   /audit rows/,
   /No Production (?:grant or revoke|execution) without (?:its own )?separate authorization/,
-  /gated on S2/, //                                    interim: #295 unmerged
   /never an agent action/i,
+  /effectiveRevocation: "not_observable"/, //          revocation is requested, never observed
+  // Post-S2-b (owner ruling C): the CREDENTIAL is not invalidated ...
+  /\b(?:does|do) not invalidate an already-issued ID token|\balready-issued ID token is not invalidated\b/,
+  // ... and the DECISION on the guarded routes comes from the live record.
+  /\bsince S2-b the guarded routes\b|\bS2-b-guarded (?:server )?routes\b/,
 ];
-const INTERIM_PATH_FORBIDDEN = /owner action in the Firebase Console/i;
+/** Wording that is wrong once #295 has merged, or never described a path. */
+const CLAIM_PATH_FORBIDDEN: readonly RegExp[] = [
+  /owner action in the Firebase Console/i,
+  /\buntil (?:the hardened operator CLI )?\(?(?:PR )?#295\)? merges\b/i,
+  /reviewed and approved but unmerged/i,
+  /merge stays gated on S2/i,
+  /on that branch describes/i,
+  /must print `f6039eaecb659159f52019b7f4cff4cce6a4ed89`/, // present-tense pin to the pre-merge commit
+  /\bThis is (?:an )?interim\b/i,
+  // Pre-S2-b wording: obsolete since S2-b went live (2026-11-16).
+  /\bS2(?:-b)? is not live\b/,
+  /\buntil S2\b/,
+  /keeps `admin: true` for up to about an hour/,
+];
+
+/**
+ * Current guidance that still treats #295 as pending, awaiting merge or not
+ * integrated, or that sends an operator to its branch. Broader than
+ * CLAIM_PATH_FORBIDDEN (which lists the exact old sentences): any phrasing of
+ * that shape fails, wherever it appears in a tracked non-test file, EXCEPT inside
+ * the explicitly marked history region (see currentGuidance below). Past-tense
+ * history ("Before PR #295 merged, ...", "PR #295's merge replaced ...") passes.
+ */
+const PENDING_295: readonly RegExp[] = [
+  /\b(?:until|pending|awaiting|once|before)\b[^.]{0,60}#295\b(?!\)?\s+(?:merged|was merged|had (?:been )?merged)\b|['’]s merge (?:replaced|landed)\b)/i,
+  /#295\b[^.]{0,40}\b(?:is|remains|stays|still)\s+(?:not\s+(?:yet\s+)?(?:merged|integrated|landed)|unmerged|open|pending|in review|awaiting)\b/i,
+  /\bnot (?:yet )?(?:merged|integrated)\b[^.]{0,40}#295\b/i,
+  /\bfix\/admin-claim-script-hardening\b/,
+  /\bfrom (?:the |its )(?:(?:PR )?#295 |PR |pre-merge |feature )?branch\b|\bfrom branch\b/i,
+];
+
+/**
+ * The ONLY exemption from PENDING_295 inside a current-guidance file: the marked
+ * history paragraph of the runbook, located by BOTH of its pinned boundaries.
+ * Each boundary must occur exactly once, in order, and bound a region of
+ * plausible size; otherwise this throws, so a moved or deleted marker cannot
+ * silently widen the exemption to the whole file. Files classified
+ * HISTORICAL_RECORD are exempt whole only while they carry the S1 marker.
+ */
+const HISTORY_START = "**History: the S1 interim path (PR #299).**";
+const HISTORY_END = "This paragraph is history, not an instruction.";
+const HISTORY_MAX_CHARS = 1500;
+function currentGuidance(file: string, text: string): string {
+  const s = flat(text);
+  if ((HISTORICAL_RECORDS as readonly string[]).includes(file) && HISTORICAL_MARKER.test(s)) return "";
+  if (file !== RUNBOOK) return s;
+  const start = s.indexOf(HISTORY_START);
+  const end = s.indexOf(HISTORY_END);
+  const once = (m: string, at: number) => at !== -1 && s.indexOf(m, at + 1) === -1;
+  if (!once(HISTORY_START, start) || !once(HISTORY_END, end) || end < start || end - start > HISTORY_MAX_CHARS) {
+    throw new Error(`${file}: the marked history region is not bounded by exactly one start and one end marker`);
+  }
+  return s.slice(0, start) + s.slice(end + HISTORY_END.length);
+}
+const pendingMergeHits = (file: string, text: string) => {
+  const s = currentGuidance(file, text);
+  return PENDING_295.filter((re) => re.test(s)).map((re) => `${file}: ${re}`);
+};
 
 const invocations = (text: string) =>
   INVOCATIONS.filter((re) => re.test(text)).map(String);
@@ -205,7 +297,7 @@ describe("REPOSITORY-WIDE OPERATOR CONTRACT — discovered, classified, pinned",
     | "HISTORICAL_RECORD" //    invocation rule only; marked superseded
     | "INVENTORY" //            invocation rule only; lists files, instructs nothing
     | "IMPLEMENTATION" //       invocation rule only; code comments
-    | "MINTING_EXAMPLE"; //     P2 header contract
+    | "HARDENED_MINTING_TOOL"; // invocation rule + P2 hardened-tool header contract
 
   const MANIFEST: Record<string, Kind> = {
     "CLAUDE.md": "OPERATOR_INSTRUCTION",
@@ -214,10 +306,14 @@ describe("REPOSITORY-WIDE OPERATOR CONTRACT — discovered, classified, pinned",
     "docs/technical-documentation.md": "OPERATOR_INSTRUCTION",
     "docs/operations/security-test-falsifiability.md": "HISTORICAL_RECORD",
     "docs/operations/firebase-environment-isolation.md": "INVENTORY",
+    // PR #295: the tool's runbook names the removed scripts (as removed).
+    "docs/operations/system-admin-claim-script.md": "OPERATOR_INSTRUCTION",
     "lib/security/rateLimit.ts": "IMPLEMENTATION",
-    "scripts/set-admin-by-uid.js": "MINTING_EXAMPLE",
-    "scripts/set-admin-claim.js": "MINTING_EXAMPLE",
-    "scripts/setAdmin.ts": "MINTING_EXAMPLE",
+    // Comments explaining which retired-script defects a guard closes.
+    "lib/admin/systemAdminClaimSafety.ts": "IMPLEMENTATION",
+    // PR #295 deleted the three legacy MINTING_EXAMPLE entries; the hardened
+    // tool replaces them under its own contract (P2).
+    "scripts/admin/set-system-admin-claim.ts": "HARDENED_MINTING_TOOL",
   };
 
   const sitesOf = (...kinds: Kind[]) =>
@@ -234,11 +330,16 @@ describe("REPOSITORY-WIDE OPERATOR CONTRACT — discovered, classified, pinned",
     expect(DISCOVERED).toEqual(Object.keys(MANIFEST).sort());
   });
 
+  it("the historical-record site list is itself pinned (it is exempt from PENDING_295)", () => {
+    expect(sitesOf("HISTORICAL_RECORD")).toEqual([...HISTORICAL_RECORDS]);
+  });
+
   it("the operator-instruction site list is itself pinned", () => {
     expect(sitesOf("OPERATOR_INSTRUCTION")).toEqual([
       "CLAUDE.md",
       "README.md",
       "docs/operations/admin-authority-tiers.md",
+      "docs/operations/system-admin-claim-script.md",
       "docs/technical-documentation.md",
     ]);
   });
@@ -250,7 +351,7 @@ describe("REPOSITORY-WIDE OPERATOR CONTRACT — discovered, classified, pinned",
     }
   );
 
-  it.each(sitesOf("OPERATOR_INSTRUCTION", "HISTORICAL_RECORD", "INVENTORY", "IMPLEMENTATION"))(
+  it.each(sitesOf("OPERATOR_INSTRUCTION", "HISTORICAL_RECORD", "INVENTORY", "IMPLEMENTATION", "HARDENED_MINTING_TOOL"))(
     "N1 %s: carries no invocation of the retired route, secret, probe or a legacy script",
     (file) => {
       expect({ file, invocations: invocations(read(file)) }).toEqual({ file, invocations: [] });
@@ -326,92 +427,335 @@ describe("N3 — the retired bootstrap procedure is gone from the runbook", () =
   });
 });
 
-// ─── the interim path ───────────────────────────────────────────────────────
+// ─── the admin-claim path (post-#295) ───────────────────────────────────────
 
-describe("P1 — the interim admin-claim path is documented where operators look", () => {
+describe("P1 — the post-merge admin-claim path is documented where operators look", () => {
   const src = read(RUNBOOK);
-  const section = src.slice(
-    src.indexOf("### Interim path for an `admin` claim change"),
-    src.indexOf("### Password admin session")
-  );
+  const HEADING = "### Changing the `admin` claim — the SYSTEM_ADMIN claim operator tool";
+  const section = src.slice(src.indexOf(HEADING), src.indexOf("### Password admin session"));
+  const HISTORY = "**History: the S1 interim path (PR #299).**";
+  /** The instruction part of the section: everything before the history paragraph. */
+  const instruction = section.slice(0, section.indexOf(HISTORY));
+  const history = section.slice(section.indexOf(HISTORY));
 
-  it("ANCHOR: the interim section was located", () => {
-    expect(section.length).toBeGreaterThan(800);
+  it("ANCHOR: the section, its instruction part and its history paragraph were located", () => {
+    expect(src.indexOf(HEADING)).toBeGreaterThan(-1);
+    expect(section.length).toBeGreaterThan(3000);
+    expect(section.indexOf(HISTORY)).toBeGreaterThan(2000);
+    expect(history.length).toBeGreaterThan(400);
+    // The retired interim heading is gone.
+    expect(src).not.toContain("### Interim path for an `admin` claim change");
   });
 
-  it("names the owner and the reviewed local operator tool, and forbids agent and Console execution", () => {
-    const s = flat(section);
+  it("the tool, its logic and its runbook are tracked in this repository", () => {
+    for (const f of [HARDENED_TOOL, ...TOOL_LOGIC, TOOL_RUNBOOK, ...READ_ONLY_CHECKS]) {
+      expect({ f, tracked: TRACKED.includes(f) }).toEqual({ f, tracked: true });
+    }
+    const pkg = JSON.parse(read("package.json")) as { scripts: Record<string, string> };
+    expect(pkg.scripts["admin:set-system-admin-claim"]).toContain(HARDENED_TOOL);
+  });
+
+  it("names the owner and the local operator tool, and forbids agent and Console execution", () => {
+    const s = flat(instruction);
     expect(s).toMatch(
       /\*\*owner action, run locally with the reviewed SYSTEM_ADMIN claim operator tool\*\*\. It is never an agent action/
     );
     expect(s).toMatch(/Change only the `admin` key/);
-    expect(s).not.toMatch(INTERIM_PATH_FORBIDDEN);
-    for (const re of INTERIM_PATH_PINS) expect({ re: String(re), hit: re.test(s) }).toEqual({ re: String(re), hit: true });
+    for (const re of CLAIM_PATH_FORBIDDEN) expect({ re: String(re), hit: re.test(s) }).toEqual({ re: String(re), hit: false });
+    for (const re of CLAIM_PATH_PINS) expect({ re: String(re), hit: re.test(s) }).toEqual({ re: String(re), hit: true });
   });
 
-  it("names the exact reviewed commit f6039ea and forbids Production execution without separate authorization", () => {
-    const s = flat(section);
-    // The pin is the commit, not the branch: a checkout of a later head is not the reviewed tool.
-    expect(s).toMatch(/exact reviewed commit `f6039ea`/);
-    expect(s).toMatch(/`git -C <checkout> rev-parse HEAD` must print `f6039eaecb659159f52019b7f4cff4cce6a4ed89`/);
+  it("the instruction part runs the tool from main, not from the pre-merge branch or commit", () => {
+    const s = flat(instruction);
+    expect(s).toMatch(/\*\*Local checkout of `main`, clean, recorded\.\*\* Run the tool from a local checkout of `main` and nothing else/);
+    expect(s).toMatch(/`--execute` refuses while `scripts\/admin` or `lib\/admin` has uncommitted changes/);
+    expect(s).not.toContain("fix/admin-claim-script-hardening");
+    expect(s).not.toContain("f6039ea");
+  });
+
+  it("states dry run, typed confirmation, the Production bar and the revocation no-call cases", () => {
+    const s = flat(instruction);
     expect(s).toMatch(/\*\*Dry run first, then typed confirmation\.\*\* Without `--execute` the tool/);
-    expect(s).toMatch(/\*\*No Production execution without separate authorization\.\*\* Each Production grant or revoke needs its own owner authorization/);
-    expect(s).toMatch(/PR #295 is reviewed and approved but unmerged; its merge stays gated on S2/);
+    expect(s).toMatch(/\*\*No Production execution without separate authorization\.\*\* Each Production grant or revoke needs its own explicit owner authorization naming the operation, the project and the UID/);
     // Step 4's revocation sentence must keep the no-call cases (review N1 of 0d1e854).
     expect(s).toMatch(/requests refresh-token revocation unless the fresh read immediately before the call/);
     expect(s).not.toMatch(/Every executed revoke requests refresh-token revocation\./);
   });
 
-  it("verification is the read-only checks", () => {
-    for (const f of READ_ONLY_CHECKS) expect(section).toContain(f);
+  it("states how to handle an incomplete run: every exit code, precedence, never a no-op", () => {
+    const s = flat(instruction);
+    expect(s).toMatch(/\*\*Read the exit code; an incomplete run is not a no-op\.\*\*/);
+    expect(s).toMatch(/`2` refused or dry run: no Firebase write call was issued/);
+    expect(s).toMatch(/`3` a write call was issued \(possibly only the attempt audit row\) and the operation is incomplete/);
+    expect(s).toMatch(/a revoke re-run calls `revokeRefreshTokens` again, which overwrites `validSince`/);
+    expect(s).toMatch(/`4` review required: do not re-run blindly/);
+    expect(s).toMatch(/`1` the result file could not be written after an otherwise exit-0 run/);
+    expect(s).toMatch(/Precedence is 3 > 4 > 0/);
   });
 
-  it("names every legacy minting script inside a do-not-use passage", () => {
-    const s = flat(section);
-    const start = s.indexOf("**The legacy minting scripts are NOT part of this path. Do not use them:**");
+  it("states the revocation limits: not observable, and what S2-b enforces (credential vs decision)", () => {
+    const s = flat(instruction);
+    expect(s).toMatch(/effective revocation is never observable by the tool \(`effectiveRevocation: "not_observable"`\)/);
+    expect(s).toMatch(/\*\*Current privileges after a removal \(S2-b, live since 2026-11-16\)\.\*\*/);
+    expect(s).toMatch(/do not invalidate an already-issued ID token; it may still carry `admin: true` until it expires or is refreshed/);
+    expect(s).toMatch(/a subsequent guarded request is evaluated against the live `admin` claim, the live `disabled` state and the live `tokensValidAfterTime`/);
+    expect(s).toMatch(/Surfaces outside the S2-b guard coverage are not claimed to apply the same checks/);
+    expect(s).not.toMatch(/S2 is not live|S2-b is not live|keeps `admin: true` for up to about an hour/);
+  });
+
+  it("verification is the read-only checks", () => {
+    for (const f of READ_ONLY_CHECKS) expect(instruction).toContain(f);
+  });
+
+  it("names every legacy minting script inside a removed-never-restore passage", () => {
+    const s = flat(instruction);
+    const start = s.indexOf("**The legacy minting scripts were removed and must never be restored:**");
     expect(start).toBeGreaterThan(-1);
     const passage = s.slice(start, start + 600);
     for (const f of LEGACY_SCRIPTS) expect(passage).toContain(f);
+    expect(s).toMatch(/do not add any other script that calls `setCustomUserClaims`/);
+  });
+
+  it("keeps the S1 interim path as HISTORY: branch, exact commit, and that it was superseded", () => {
+    const h = flat(history);
+    expect(h).toMatch(/Before PR #295 merged, the tool existed only on branch `fix\/admin-claim-script-hardening`/);
+    expect(h).toMatch(/exact reviewed commit `f6039ea`/);
+    expect(h).toContain("f6039eaecb659159f52019b7f4cff4cce6a4ed89");
+    expect(h).toMatch(/The merge of PR #295 replaced that interim path with this section/);
+    expect(h).toMatch(/This paragraph is history, not an instruction\./);
   });
 
   it.each(["CLAUDE.md", "README.md", "docs/technical-documentation.md"])(
-    "%s states the same interim path",
+    "%s states the same post-merge path",
     (f) => {
       const s = flat(read(f));
       expect(s).toMatch(/owner action\**,? never an agent action/);
-      expect(s).not.toMatch(INTERIM_PATH_FORBIDDEN);
-      for (const re of INTERIM_PATH_PINS) expect({ f, re: String(re), hit: re.test(s) }).toEqual({ f, re: String(re), hit: true });
+      for (const re of CLAIM_PATH_FORBIDDEN) expect({ f, re: String(re), hit: re.test(s) }).toEqual({ f, re: String(re), hit: false });
+      for (const re of CLAIM_PATH_PINS) expect({ f, re: String(re), hit: re.test(s) }).toEqual({ f, re: String(re), hit: true });
       expect(s).toContain("scripts/check-admin-claims.js");
       expect(s).toMatch(/not\** part of (that|this) path/);
+      expect(s).toMatch(/never restore them/i);
     }
   );
 
-  it("the read-only checks really are read-only", () => {
-    for (const f of READ_ONLY_CHECKS) {
-      const code = read(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
-      expect(code).toMatch(/getUser\(/);
-      expect({ f, writes: code.match(/setCustomUserClaims|revokeRefreshTokens|updateUser|deleteUser|createUser|\.set\(|\.update\(|\.delete\(/g) ?? [] })
-        .toEqual({ f, writes: [] });
+  it("CLAUDE.md keeps why the legacy scripts were unsafe, what the tool preserves, and who may run it", () => {
+    const s = flat(read("CLAUDE.md"));
+    expect(s).toMatch(/were removed and are not part of that path; never restore them\./);
+    expect(s).toMatch(
+      /They were unsafe: they could overwrite the account's existing custom claims or mishandle the `admin` claim value\./
+    );
+    expect(s).toMatch(/The hardened operator tool changes only the `admin` custom-claim key and preserves unrelated claims\./);
+    expect(s).toMatch(/An `admin` claim change is an owner action, never an agent action/);
+    expect(s).toMatch(/No agent may run it or make any other unapproved privileged mutation: it is owner-only\./);
+  });
+
+  it("no tracked non-test file keeps a live interim instruction", () => {
+    const hits = TRACKED.filter((f) => /\.(md|ts|tsx|js|mjs|cjs)$/.test(f))
+      .flatMap((f) => CLAIM_PATH_FORBIDDEN.filter((re) => re.test(flat(read(f)))).map((re) => `${f}: ${re}`));
+    expect(hits).toEqual([]);
+  });
+
+  it("SELF-VALIDATION: the forbidden-wording list catches the pre-merge sentences", () => {
+    for (const bad of [
+      "Until the hardened operator CLI (PR #295) merges, an emergency `admin` claim change is an owner action.",
+      "until #295 merges",
+      "PR #295 is reviewed and approved but unmerged; its merge stays gated on S2.",
+      "exactly as `docs/operations/system-admin-claim-script.md` on that branch describes.",
+      "`git -C <checkout> rev-parse HEAD` must print `f6039eaecb659159f52019b7f4cff4cce6a4ed89`",
+      "This is interim: #295 is reviewed.",
+    ]) {
+      expect({ bad, caught: CLAIM_PATH_FORBIDDEN.some((re) => re.test(bad)) }).toEqual({ bad, caught: true });
     }
+    for (const ok of [
+      "Before PR #295 merged, the tool existed only on branch `fix/admin-claim-script-hardening`.",
+      "(`git -C <checkout> rev-parse HEAD` had to print `f6039eaecb659159f52019b7f4cff4cce6a4ed89`)",
+    ]) {
+      expect({ ok, caught: CLAIM_PATH_FORBIDDEN.some((re) => re.test(ok)) }).toEqual({ ok, caught: false });
+    }
+  });
+
+  it("no tracked non-test file describes #295 as pending or sends anyone to its branch", () => {
+    const files = TRACKED.filter((f) => !/\.(spec|test)\.[cm]?[jt]sx?$/.test(f));
+    expect(files.length).toBeGreaterThan(500);
+    expect(files).toEqual(expect.arrayContaining(["CLAUDE.md", "README.md", RUNBOOK, "docs/technical-documentation.md"]));
+    expect(files.flatMap((f) => pendingMergeHits(f, read(f)))).toEqual([]);
+  });
+
+  it("ANCHOR: the runbook's marked history region is bounded, small, and the only part exempted", () => {
+    const s = flat(src);
+    const start = s.indexOf(HISTORY_START);
+    const end = s.indexOf(HISTORY_END);
+    expect(start).toBeGreaterThan(-1);
+    expect(end - start).toBeGreaterThan(400);
+    expect(end - start).toBeLessThan(HISTORY_MAX_CHARS);
+    // The real history region does contain wording PENDING_295 would flag.
+    expect(PENDING_295.some((re) => re.test(s.slice(start, end)))).toBe(true);
+    // Only that region is removed: the instruction part survives intact.
+    expect(currentGuidance(RUNBOOK, src)).toContain("**Local checkout of `main`, clean, recorded.**");
+    expect(currentGuidance(RUNBOOK, src).length).toBeGreaterThan(s.length - HISTORY_MAX_CHARS - HISTORY_END.length);
+  });
+
+  it("SELF-VALIDATION: PENDING_295 catches pending-merge guidance and spares marked history", () => {
+    const variants = [
+      "Until PR #295 is merged, run the tool from the branch.",
+      "The operator tool (pending #295; run it from branch fix/admin-claim-script-hardening) is the only path.",
+    ];
+    // Positive: both surviving variants are detected in a current-guidance doc,
+    // and in the runbook OUTSIDE its marked history region.
+    for (const v of variants) {
+      const doc = `## Admin claims\n\nThe owner runs the tool locally. ${v} Keep the audit rows.\n`;
+      expect({ v, hits: pendingMergeHits("README.md", doc).length > 0 }).toEqual({ v, hits: true });
+      const runbook = `Intro. ${v} More.\n\n${HISTORY_START} Old text. ${HISTORY_END}\n`;
+      expect({ v, hits: pendingMergeHits(RUNBOOK, runbook).length > 0 }).toEqual({ v, hits: true });
+    }
+    for (const bad of [
+      "Once #295 merges, switch to main.",
+      "Awaiting merge of PR #295, use the branch checkout.",
+      "PR #295 is not yet merged.",
+      "This is not yet integrated (#295).",
+      "Run it from the PR branch.",
+      "Run it from the #295 branch.",
+    ]) {
+      expect({ bad, hits: pendingMergeHits("README.md", bad).length > 0 }).toEqual({ bad, hits: true });
+    }
+    // Negative: the same wording inside the marked history paragraph passes.
+    for (const v of variants) {
+      const runbook = `Intro.\n\n${HISTORY_START} Back then: ${v} ${HISTORY_END}\n\nOutro.`;
+      expect({ v, hits: pendingMergeHits(RUNBOOK, runbook) }).toEqual({ v, hits: [] });
+    }
+    // Negative: legitimate past-tense mentions of #295 outside any history region.
+    for (const ok of [
+      "PR #295 deleted them (S1 had scheduled that deletion for security slice S5).",
+      "Before PR #295 merged, an S1 interim path ran the tool from a branch checkout at commit `f6039ea`; that is history.",
+      "Before #295 merged, an S1 interim path pinned the tool to a branch checkout at commit `f6039ea`; that is history now.",
+      "PR #295's merge replaced that interim path.",
+    ]) {
+      expect({ ok, hits: pendingMergeHits("README.md", ok) }).toEqual({ ok, hits: [] });
+    }
+    // HISTORICAL_RECORD files are exempt only while they carry the S1 marker.
+    expect(pendingMergeHits(HISTORICAL_RECORDS[0], `> Superseded by security slice S1. ${variants[0]}`)).toEqual([]);
+    expect(pendingMergeHits(HISTORICAL_RECORDS[0], variants[0]).length).toBeGreaterThan(0);
+  });
+
+  it("SELF-VALIDATION: the history exemption fails closed when its boundaries are not pinned", () => {
+    const body = "Until PR #295 is merged, run the tool from the branch.";
+    for (const broken of [
+      `${HISTORY_START} ${body}`, //                                 no end marker
+      `${body} ${HISTORY_END}`, //                                    no start marker
+      `${HISTORY_END} ${body} ${HISTORY_START}`, //                   reversed
+      `${HISTORY_START} a ${HISTORY_END} ${HISTORY_START} ${body} ${HISTORY_END}`, // duplicated
+      `${HISTORY_START} ${"x ".repeat(HISTORY_MAX_CHARS)} ${body} ${HISTORY_END}`, // oversized
+    ]) {
+      expect(() => pendingMergeHits(RUNBOOK, broken)).toThrow(/marked history region/);
+    }
+  });
+
+  /**
+   * The read-only verifiers, checked through the TypeScript compiler. A write
+   * reached dynamically (a computed method name, `import()`, `createRequire`,
+   * `eval`, `Function(`) would evade the literal write list, so those shapes are
+   * forbidden too; check-admin-claims.js keeps a pinned set of element accesses
+   * on its own local argument/env objects, and any other computed access fails.
+   */
+  const ALIAS_BODY = [
+    `const { runAsCli } = require("./check-admin-claims.js");`,
+    `if (require.main === module) {`,
+    `    runAsCli(process.argv.slice(2), process.env);`,
+    `}`,
+    ``,
+  ].join("\n");
+  const CHECKER_ELEMENT_ACCESSES = [
+    `env[k]`,
+    `values["--confirm-project"]`,
+    `values["--confirm-project"]`,
+    `values["--credentials"]`,
+    `values["--uid"]`,
+    `values["--uid"]`,
+    `values[name]`,
+  ];
+  const CHECKER_REQUIRES = [`node:fs`, `node:path`, `firebase-admin/app`, `firebase-admin/auth`];
+
+  function readOnlyFindings(f: string, src: string) {
+    const sf = parseSource(f, src);
+    const code = codeOf(f, src);
+    const elementAccesses: string[] = [];
+    const requires: string[] = [];
+    const dynamic: string[] = [];
+    walk(sf, (n) => {
+      if (ts.isElementAccessExpression(n)) elementAccesses.push(n.getText(sf));
+      if (ts.isCallExpression(n) && n.expression.kind === ts.SyntaxKind.ImportKeyword) dynamic.push("import()");
+      if (ts.isImportDeclaration(n) || ts.isImportEqualsDeclaration(n)) dynamic.push("import declaration");
+      if (ts.isIdentifier(n) && ["createRequire", "eval", "Function"].includes(n.text)) dynamic.push(n.text);
+      // `require` only as a direct call or as `require.main`: an alias would hide what it loads.
+      if (ts.isIdentifier(n) && n.text === "require") {
+        const p = n.parent;
+        const direct = ts.isCallExpression(p) && p.expression === n;
+        const main = ts.isPropertyAccessExpression(p) && p.expression === n && p.name.text === "main";
+        if (!direct && !main) dynamic.push("require alias");
+      }
+      if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === "require") {
+        const a = n.arguments[0];
+        requires.push(n.arguments.length === 1 && ts.isStringLiteral(a) ? a.text : `<non-literal require: ${n.getText(sf)}>`);
+      }
+    });
+    // Lexical fallback over the comment-free code, for shapes the walk misses.
+    for (const m of code.match(/\bimport\s*\(|\bcreateRequire\b|\beval\b|\bFunction\s*\(/g) ?? []) dynamic.push(`lexical ${m}`);
+    const writes = code.match(/setCustomUserClaims|revokeRefreshTokens|updateUser|deleteUser|createUser|\.set\(|\.update\(|\.delete\(/g) ?? [];
+    return { code, elementAccesses: elementAccesses.sort(), requires, dynamic, writes };
+  }
+
+  it("the read-only checks really are read-only", () => {
+    const [checker, alias] = READ_ONLY_CHECKS;
+    const c = readOnlyFindings(checker, read(checker));
+    expect(c.code).toMatch(/getUser\(/);
+    expect({ writes: c.writes, dynamic: c.dynamic }).toEqual({ writes: [], dynamic: [] });
+    expect(c.elementAccesses).toEqual(CHECKER_ELEMENT_ACCESSES);
+    expect(c.requires).toEqual(CHECKER_REQUIRES);
+
+    // PR #295 made verify-admin-claims.js a thin alias for check-admin-claims.js:
+    // its whole comment-free body is pinned, so it can load or do nothing else.
+    const a = readOnlyFindings(alias, read(alias));
+    expect(a.code).toBe(ALIAS_BODY);
+    expect({ writes: a.writes, dynamic: a.dynamic, elementAccesses: a.elementAccesses, requires: a.requires }).toEqual({
+      writes: [],
+      dynamic: [],
+      elementAccesses: [],
+      requires: ["./check-admin-claims.js"],
+    });
+  });
+
+  it("SELF-VALIDATION: the read-only findings catch dynamic and computed writes", () => {
+    const base = `const { getAuth } = require("firebase-admin/auth");\nconst u = await getAuth().getUser(uid);\n`;
+    expect(readOnlyFindings("x.js", base)).toMatchObject({ writes: [], dynamic: [], elementAccesses: [] });
+    expect(readOnlyFindings("x.js", `${base}const m = await import("firebase-admin/auth"); m.getAuth().x(uid);`).dynamic).toContain("import()");
+    expect(readOnlyFindings("x.js", `${base}getAuth()["set" + "CustomUserClaims"](uid, {});`).elementAccesses).toHaveLength(1);
+    expect(readOnlyFindings("x.js", `${base}const { createRequire } = require("node:module"); createRequire(__filename)("x");`).dynamic).toContain("createRequire");
+    expect(readOnlyFindings("x.js", `${base}eval("getAuth().x()");`).dynamic).toContain("eval");
+    expect(readOnlyFindings("x.js", `${base}new Function("return 1")();`).dynamic).toContain("Function");
+    expect(readOnlyFindings("x.js", `${base}const r = require; r(name);`).dynamic).toContain("require alias");
+    expect(readOnlyFindings("x.js", `${base}require(name);`).requires[1]).toMatch(/non-literal require/);
+    // A comment mentioning these shapes is not code.
+    expect(readOnlyFindings("x.js", `${base}// eval import( createRequire Function( setCustomUserClaims`)).toMatchObject({ writes: [], dynamic: [] });
   });
 });
 
-// ─── legacy minting scripts, by content ─────────────────────────────────────
+// ─── minting scripts, by content ────────────────────────────────────────────
 
-describe("P2 — admin-minting scripts are classified BY CONTENT and marked DO NOT USE", () => {
+describe("P2 — admin-minting scripts are found BY CONTENT; only the hardened tool mints", () => {
   /**
-   * Phase C12 lesson kept: `scripts/setAdmin.ts` once escaped a filename glob.
-   * Minting is detected by content — a `setCustomUserClaims` call with an
-   * admin-true claim object, or any reference to the retired route alongside a
-   * uid — so a new minting tool under any name must carry the header.
+   * Phase C12 lesson kept: `scripts/setAdmin.ts` once escaped a filename glob,
+   * so minting is detected by content. Phase ADMIN-SCRIPT-HARDENING (PR #295)
+   * broadened the predicate: ANY `setCustomUserClaims(` call counts, whatever
+   * its claim argument, because the hardened tool writes a computed object
+   * (`plan.after`, built in lib/admin) that the old `admin: true` literal match
+   * would miss. Every literal form the old predicate caught still contains the
+   * call. A reference to the retired route alongside a uid still counts.
    */
   const SCRIPT_FILES = TRACKED.filter((f) => /^scripts\//.test(f) && /\.(js|cjs|mjs|ts|tsx)$/.test(f));
 
   const mintsAuthority = (src: string) => {
     const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
-    const setsClaim =
-      /setCustomUserClaims\s*\(/.test(code) &&
-      (/["']?admin["']?\s*:\s*true/.test(code) || /\{[^}]*\badmin\b[^}:]*\}/.test(code));
+    const setsClaim = /setCustomUserClaims\s*\(/.test(code);
     const postsUidToBootstrap = code.includes(ROUTE) && /\buid\b/i.test(code);
     return setsClaim || postsUidToBootstrap;
   };
@@ -422,29 +766,205 @@ describe("P2 — admin-minting scripts are classified BY CONTENT and marked DO N
     expect(mintsAuthority(`await adminAuth.setCustomUserClaims(uid, { admin: true });`)).toBe(true);
     expect(mintsAuthority(`const admin = true; await setCustomUserClaims(uid, { admin });`)).toBe(true);
     expect(mintsAuthority(`await setCustomUserClaims(uid, { "admin": true });`)).toBe(true);
+    // A computed claim object (the hardened tool's form) is still minting.
+    expect(mintsAuthority(`await auth.setCustomUserClaims(uid, plan.after);`)).toBe(true);
     expect(mintsAuthority(`await fetch("https://x.test/api/admin/set-admin", { body: JSON.stringify({ uid, secret }) });`)).toBe(true);
     expect(mintsAuthority(`// this script does not call setCustomUserClaims with admin: true`)).toBe(false);
     expect(mintsAuthority(`const u = await auth.getUser(uid); console.log(u.customClaims);`)).toBe(false);
   });
 
-  it("ANCHOR: the content scan finds exactly the known legacy minting tools", () => {
+  it("ANCHOR: the content scan finds exactly one minting tool — the hardened one", () => {
     expect(SCRIPT_FILES.length).toBeGreaterThan(5);
-    expect(MINTING.sort()).toEqual([...LEGACY_SCRIPTS].sort());
+    // Exact, not arrayContaining: a second minting script anywhere under
+    // scripts/ must be a deliberate, reviewed change to this list.
+    expect(MINTING).toEqual([HARDENED_TOOL]);
   });
 
-  it.each(MINTING)("%s declares itself MINTS-AUTHORITY and DO NOT USE", (file) => {
-    const s = flat(read(file).replace(/^\s*\*\s?/gm, ""));
+  /**
+   * Repository-wide: every tracked executable source file (not only scripts/),
+   * parsed with the TypeScript compiler. A file is a claim writer if its syntax
+   * tree names `setCustomUserClaims` as an identifier or property (direct and
+   * aliased calls, destructuring, `const f = auth.setCustomUserClaims`, `.bind(`,
+   * re-exporting wrappers) or as a string literal (`auth["setCustomUserClaims"]`),
+   * or if its comment-free code contains the name anywhere (lexical fallback).
+   *
+   * LIMIT: a lexical or syntax-tree scan cannot prove the ABSENCE of a call whose
+   * name is constructed at run time ("setCustom" + "UserClaims", decoded strings,
+   * reflection over the Auth prototype). It catches every spelled-out form; the
+   * rest is left to review.
+   */
+  const CLAIM_WRITER = "setCustomUserClaims";
+  const SET_ROLE = "app/api/admin/set-role/route.ts";
+  /** Exact: the hardened tool and the SYSTEM_ADMIN set-role route (which calls it directly). */
+  const CLAIM_WRITER_ALLOW_LIST = [SET_ROLE, HARDENED_TOOL].sort();
+  const isTestFile = (f: string) => /(^|\/)(__tests__|__fixtures__|__mocks__)\/|\.(spec|test)\.[cm]?[jt]sx?$/.test(f);
+  const EXECUTABLE_SOURCE = TRACKED.filter(
+    (f) => /\.(ts|tsx|js|jsx|mjs|cjs)$/.test(f) && !f.endsWith(".d.ts") && !isTestFile(f) && !f.includes("node_modules/")
+  );
+
+  function claimWriterEvidence(f: string, src: string) {
+    const sf = parseSource(f, src);
+    const evidence: string[] = [];
+    let calls = 0;
+    walk(sf, (n) => {
+      if ((ts.isIdentifier(n) || ts.isPrivateIdentifier(n)) && n.text === CLAIM_WRITER) evidence.push("identifier");
+      if ((ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) && n.text === CLAIM_WRITER) evidence.push("string");
+      if (ts.isCallExpression(n)) {
+        let callee: ts.Expression = n.expression;
+        while (ts.isParenthesizedExpression(callee) || ts.isNonNullExpression(callee)) callee = callee.expression;
+        const named =
+          (ts.isPropertyAccessExpression(callee) && callee.name.text === CLAIM_WRITER) ||
+          (ts.isElementAccessExpression(callee) &&
+            ts.isStringLiteralLike(callee.argumentExpression) &&
+            callee.argumentExpression.text === CLAIM_WRITER) ||
+          (ts.isIdentifier(callee) && callee.text === CLAIM_WRITER);
+        if (named) calls++;
+      }
+    });
+    if (codeOf(f, src).includes(CLAIM_WRITER)) evidence.push("lexical");
+    return { writes: evidence.length > 0, evidence, calls };
+  }
+
+  it("SELF-VALIDATION: the claim-writer scan catches every spelled-out form, not comments", () => {
+    for (const [f, bad] of [
+      ["a.ts", `await auth.setCustomUserClaims(uid, { admin: true });`],
+      ["a.ts", `await getAuth().setCustomUserClaims(uid, c);`],
+      ["a.ts", `const { setCustomUserClaims } = auth; await setCustomUserClaims(uid, c);`],
+      ["a.ts", `const { setCustomUserClaims: put } = getAuth(); await put(uid, c);`],
+      ["a.ts", `const f = auth.setCustomUserClaims; await f.call(auth, uid, c);`],
+      ["a.ts", `await auth["setCustomUserClaims"](uid, c);`],
+      ["a.ts", "await auth[`setCustomUserClaims`](uid, c);"],
+      ["a.ts", `const m = ["setCustomUserClaims"]; await auth[m[0]](uid, c);`],
+      ["a.ts", `const w = auth.setCustomUserClaims.bind(auth); await w(uid, c);`],
+      ["a.mjs", `export const write = (u, c) => getAuth().setCustomUserClaims(u, c);`],
+      ["a.js", `module.exports = { put: getAuth().setCustomUserClaims.bind(getAuth()) };`],
+      ["a.tsx", `const B = () => <button onClick={() => auth.setCustomUserClaims(u, c)} />;`],
+      ["a.ts", "const name = `x${1}setCustomUserClaims`;"],
+    ] as const) {
+      expect({ bad, writes: claimWriterEvidence(f, bad).writes }).toEqual({ bad, writes: true });
+    }
+    for (const ok of [
+      `// do not call setCustomUserClaims here`,
+      `/* setCustomUserClaims is SYSTEM_ADMIN only */ const u = await auth.getUser(uid);`,
+      `const claims = user.customClaims ?? {};`,
+    ]) {
+      expect({ ok, writes: claimWriterEvidence("a.ts", ok).writes }).toEqual({ ok, writes: false });
+    }
+    expect(claimWriterEvidence("a.ts", `await auth.setCustomUserClaims(uid, c);`).calls).toBe(1);
+    expect(claimWriterEvidence("a.ts", `await auth["setCustomUserClaims"](uid, c);`).calls).toBe(1);
+    expect(claimWriterEvidence("a.ts", `const f = auth.setCustomUserClaims;`).calls).toBe(0);
+  });
+
+  it("ANCHOR: the executable-source scan covers every tracked source directory", () => {
+    expect(EXECUTABLE_SOURCE.length).toBeGreaterThan(800);
+    for (const dir of ["app/", "lib/", "scripts/", "components/", "hooks/"]) {
+      expect({ dir, files: EXECUTABLE_SOURCE.some((f) => f.startsWith(dir)) }).toEqual({ dir, files: true });
+    }
+    for (const f of ["middleware.ts", "next.config.js", SET_ROLE, HARDENED_TOOL]) expect(EXECUTABLE_SOURCE).toContain(f);
+    expect(EXECUTABLE_SOURCE.filter(isTestFile)).toEqual([]);
+  });
+
+  it("only the allow-listed files write custom claims, anywhere in tracked executable source", () => {
+    const writers = EXECUTABLE_SOURCE.filter((f) => claimWriterEvidence(f, read(f)).writes).sort();
+    expect(writers).toEqual(CLAIM_WRITER_ALLOW_LIST);
+  });
+
+  it("each allow-listed file still calls setCustomUserClaims (identified, not silently excluded)", () => {
+    for (const f of CLAIM_WRITER_ALLOW_LIST) {
+      expect({ f, calls: claimWriterEvidence(f, read(f)).calls >= 1 }).toEqual({ f, calls: true });
+    }
+    // set-role makes the call itself, behind its SYSTEM_ADMIN gate; no lib helper does it for it.
+    const route = codeOf(SET_ROLE, read(SET_ROLE));
+    expect(route).toMatch(/await adminAuth\.setCustomUserClaims\(uid, customClaims\)/);
+  });
+
+  it("set-role's gate is the S2-b guard: SYSTEM_ADMIN, its own route identity, first, denial returned before any side effect (AST)", () => {
+    // Behaviour (real handler, real guard: refused callers mint nothing; cookie-only is 401
+    // cookie_not_accepted_for_tier) is proven in app/api/admin/set-role/__tests__/systemAdminTier.spec.ts
+    // and app/api/admin/__tests__/privilegedRouteWiring.spec.ts. This pins the STRUCTURE that behaviour rests on.
+    const src = read(SET_ROLE);
+    const sf = parseSource(SET_ROLE, src);
+    const post = sf.statements.find(
+      (st): st is ts.FunctionDeclaration => ts.isFunctionDeclaration(st) && st.name?.text === "POST" && !!st.body,
+    )!;
+    expect(post).toBeDefined();
+    // 0. The guard is the REAL one: imported from @/lib/admin/privilegedAccess, never declared or shadowed locally (review round 1, NIT).
+    const guardImports = sf.statements.filter(
+      (st): st is ts.ImportDeclaration => ts.isImportDeclaration(st) && ts.isStringLiteral(st.moduleSpecifier)
+        && !!st.importClause?.namedBindings && ts.isNamedImports(st.importClause.namedBindings)
+        && st.importClause.namedBindings.elements.some((e) => e.name.text === "requirePrivilegedAccess"),
+    );
+    expect(guardImports.map((st) => (st.moduleSpecifier as ts.StringLiteral).text)).toEqual(["@/lib/admin/privilegedAccess"]);
+    const binding = (guardImports[0].importClause!.namedBindings as ts.NamedImports).elements.find((e) => e.name.text === "requirePrivilegedAccess")!;
+    expect(binding.propertyName).toBeUndefined(); // not `{ somethingElse as requirePrivilegedAccess }`
+    let localDecls = 0;
+    walk(sf, (n) => {
+      if ((ts.isFunctionDeclaration(n) || ts.isVariableDeclaration(n) || ts.isParameter(n) || ts.isClassDeclaration(n))
+        && n.name && ts.isIdentifier(n.name) && n.name.text === "requirePrivilegedAccess") localDecls++;
+    });
+    expect(localDecls).toBe(0);
+    const [first, second, ...rest] = post.body!.statements;
+    // 1. First statement: `const access = await requirePrivilegedAccess(request, "SYSTEM_ADMIN", { route: "POST /api/admin/set-role" })`.
+    expect(ts.isVariableStatement(first)).toBe(true);
+    const decl = (first as ts.VariableStatement).declarationList.declarations[0];
+    expect(ts.isIdentifier(decl.name) && decl.name.text).toBe("access");
+    const aw = decl.initializer!;
+    expect(ts.isAwaitExpression(aw)).toBe(true);
+    const call = (aw as ts.AwaitExpression).expression as ts.CallExpression;
+    expect(ts.isCallExpression(call) && ts.isIdentifier(call.expression) && call.expression.text).toBe("requirePrivilegedAccess");
+    const [reqArg, tierArg, optsArg] = call.arguments;
+    expect(ts.isIdentifier(reqArg) && reqArg.text).toBe("request");
+    expect(ts.isStringLiteral(tierArg) && tierArg.text).toBe("SYSTEM_ADMIN");
+    const routeProp = ts.isObjectLiteralExpression(optsArg)
+      ? optsArg.properties.find((p): p is ts.PropertyAssignment => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === "route")
+      : undefined;
+    expect(routeProp && ts.isStringLiteral(routeProp.initializer) && routeProp.initializer.text).toBe("POST /api/admin/set-role");
+    // 2. Second statement: `if (!access.ok) return privilegedDenialResponse(access);`
+    expect(ts.isIfStatement(second)).toBe(true);
+    const ifs = second as ts.IfStatement;
+    expect(ifs.expression.getText(sf).replace(/\s+/g, "")).toBe("!access.ok");
+    const ret = ts.isBlock(ifs.thenStatement) ? ifs.thenStatement.statements[0] : ifs.thenStatement;
+    expect(ts.isReturnStatement(ret) && ret.expression!.getText(sf).replace(/\s+/g, "")).toBe("privilegedDenialResponse(access)");
+    // 3. Every side effect comes after the denial: the claim write, the body read and Firestore are only in `rest`.
+    const before = [first, second].map((n) => n.getText(sf)).join("\n");
+    expect(before).not.toMatch(/setCustomUserClaims|request\.json|adminDb|getUser\(/);
+    expect(rest.map((n) => n.getText(sf)).join("\n")).toMatch(/setCustomUserClaims/);
+    // 4. No legacy helper and no cookie-only authorization path anywhere in the file.
+    const code = codeOf(SET_ROLE, src);
+    expect(code).not.toMatch(/\b(requireSystemAdminBearer|requireSystemAdminAccess|requireAdminPortalAccess|requireAdminApiAccess|requireAdmin|verifyAdminToken|getRequestUser|verifySessionCookie|verifySessionCookieValue)\b/);
+    expect(code).not.toMatch(/__session|cookies\(\)/);
+  });
+
+  it("the four legacy minting scripts are absent from the tree, not merely unclassified", () => {
+    for (const f of LEGACY_SCRIPTS) {
+      expect({ f, tracked: TRACKED.includes(f), exists: existsSync(f) }).toEqual({ f, tracked: false, exists: false });
+    }
+  });
+
+  it("the hardened tool declares itself MINTS-AUTHORITY and states its safeguards", () => {
+    const raw = read(HARDENED_TOOL);
+    // The header is the file's leading block comment.
+    expect(raw.startsWith("/**")).toBe(true);
+    const header = flat(raw.slice(0, raw.indexOf("*/") + 2).replace(/^\s*\*\s?/gm, ""));
+    expect(header.length).toBeGreaterThan(1500);
+    expect(header).not.toMatch(/ADMIN_SECRET|BOOTSTRAP_SECRET|\/api\/admin\/set-admin/);
+    expect({ recommends: recommendations(header) }).toEqual({ recommends: [] });
+    expect(header).toMatch(/deployments built before S1 still ship the route, and their retirement is security step SEC-7/);
+    expect(header).not.toMatch(/no secret rotation left to verify/);
+    const s = flat(raw.replace(/^\s*\*\s?/gm, ""));
     expect(s).toContain("MINTS-AUTHORITY");
-    expect(s).toMatch(/DO NOT USE\. This script is NOT part of the interim admin-claim path/);
-    expect(s).toMatch(/It is not a liveness probe of any kind/);
-    for (const f of READ_ONLY_CHECKS) expect(s).toContain(f);
-    // The header points at the ruled interim path, not at a Console action that does not exist.
-    expect(s).toMatch(/set-system-admin-claim\.ts \(PR #295 at its exact reviewed commit f6039ea\) locally, dry run first/);
-    expect(s).toMatch(/no Production run without separate authorization/);
-    expect(s).not.toMatch(INTERIM_PATH_FORBIDDEN);
-    // It must not point an operator at a tool that no longer exists.
+    expect(s).toMatch(/never a secret-liveness probe/);
+    expect(s).toMatch(/dry run is the default; nothing is written without --execute/);
+    expect(s).toContain("--confirm-project=<projectId>");
+    expect(s).toContain("--target-uid=<uid>");
+    expect(s).toContain("--confirm-claim=<exact string printed by the dry run>");
+    expect(s).toContain(TOOL_RUNBOOK);
+    expect(s).toMatch(/It replaces the retired scripts\/setAdmin\.ts/);
+    // Main's S1 deleted the probe and the Option 1/Option 2 enrollment split;
+    // the header must not point an operator at either.
     expect(s).not.toContain("probe-admin-secret");
-    expect(s).not.toMatch(/ADMIN_SECRET/);
-    expect(s).not.toMatch(/preferred over the bootstrap route/);
+    expect(s).not.toMatch(/Option 1/);
+    expect(s).toMatch(/retired in security slice S1/);
+    for (const re of CLAIM_PATH_FORBIDDEN) expect({ re: String(re), hit: re.test(s) }).toEqual({ re: String(re), hit: false });
   });
 });

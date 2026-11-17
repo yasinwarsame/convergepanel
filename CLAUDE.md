@@ -51,21 +51,27 @@ ONLY — credentials, claim minting, purge, destructive user/billing mutation), 
 does NOT grant SYSTEM_ADMIN or governance authority.
 The former secret bootstrap (`BOOTSTRAP_SECRET`: `ADMIN_SECRET` on `/api/admin/set-admin`)
 was retired in S1: the route is deleted and no source reads either variable. Do not re-add it.
-Until the hardened operator CLI (PR #295) merges, an emergency `admin` claim change is an
-owner action, never an agent action: the owner runs the reviewed SYSTEM_ADMIN claim operator
-tool `scripts/admin/set-system-admin-claim.ts` (`npm run admin:set-system-admin-claim`, branch
-`fix/admin-claim-script-hardening`, PR #295) LOCALLY, from a checkout of its exact reviewed
-commit `f6039ea` — `git -C <checkout> rev-parse HEAD` must print
-`f6039eaecb659159f52019b7f4cff4cce6a4ed89` — and never from Vercel or any deployment. The tool
-has no defaults: explicit `--confirm-project=<projectId>` and `--target-uid=<uid>`; dry run first
-(the default), then `--execute --confirm-claim=<exact string the dry run printed>`, exactly as
-`docs/operations/system-admin-claim-script.md` on that branch describes. Keep the tool's audit
-rows and its `--result-file` (a NEW `*.json` outside every git checkout). No Production grant or
-revoke without its own separate authorization. This is interim: #295 is reviewed and approved but
-unmerged, and its merge stays gated on S2. Verify read-only with
+An `admin` claim change is an owner action, never an agent action: the owner runs the
+SYSTEM_ADMIN claim operator tool `scripts/admin/set-system-admin-claim.ts`
+(`npm run admin:set-system-admin-claim`, runbook `docs/operations/system-admin-claim-script.md`)
+LOCALLY, from a local checkout of `main` (record `git -C <checkout> rev-parse HEAD`; `--execute`
+refuses uncommitted changes in `scripts/admin` or `lib/admin`), and never from Vercel or any
+deployment. The tool has no defaults: explicit `--confirm-project=<projectId>` and
+`--target-uid=<uid>`; dry run first (the default), then
+`--execute --confirm-claim=<exact string the dry run printed>`. Keep the tool's audit rows and its
+`--result-file` (a NEW `*.json` outside every git checkout); exit 3 or 4 means incomplete or
+review required, never a no-op. No Production grant or revoke without its own separate
+authorization. Revocation is requested, not observed (`effectiveRevocation: "not_observable"`),
+and an already-issued ID token is not invalidated (it may still carry `admin: true` until it
+expires); since S2-b the guarded routes decide each request from the live claim, disabled
+state and revocation cutoff instead. Verify read-only with
 `scripts/check-admin-claims.js` / `scripts/verify-admin-claims.js`. The legacy minting scripts
 (`scripts/setAdmin.ts`, `set-admin-simple.js`, `set-admin-by-uid.js`, `set-admin-claim.js`)
-are not part of that path and must not be used: they overwrite or mishandle other claims.
+were removed and are not part of that path; never restore them. They were unsafe: they could
+overwrite the account's existing custom claims or mishandle the `admin` claim value. The
+hardened operator tool changes only the `admin` custom-claim key and preserves unrelated claims.
+No agent may run it or make any other unapproved privileged mutation: it is owner-only. Before #295 merged, an S1
+interim path pinned the tool to a branch checkout at commit `f6039ea`; that is history now.
 A **disabled** Firebase Auth account obtains no email-derived privilege in any tier.
 ADMIN_PORTAL is a read/monitoring tier: run DELETE and PATCH, `/api/admin/sync-subscription`
 and `/api/admin/test-webhook` all require SYSTEM_ADMIN.

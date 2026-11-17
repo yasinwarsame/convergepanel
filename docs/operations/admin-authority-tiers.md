@@ -135,20 +135,28 @@ authority. The requirement is written `disabled === false`, not `!disabled`, so
 a missing or non-boolean value denies. A failed lookup reports `disabled: true`
 and grants nothing.
 
-This does **not** change SYSTEM_ADMIN token/session semantics, which remain as
-reviewed: the ADMIN_PORTAL cookie path verifies with revocation checking, while
-every SYSTEM_ADMIN guard is bearer-only and relies on the ID token's short
-lifetime.
+This does **not** change how credentials are accepted: the ADMIN_PORTAL cookie
+path verifies with revocation checking, and every SYSTEM_ADMIN capability is
+bearer-only. Since S2-b (PR #319, Production 2026-11-16) the privileged-access
+guard decides each request from the live Auth record, not from the claim
+embedded in the ID token.
 
-**Consequence to know before enrolling anyone (Phase C5):** disabling an account
-revokes EMAIL-derived authority immediately, because every such decision re-reads
-the live record. It does **not** immediately revoke CLAIM-derived authority:
-`verifyIdToken` is called without `checkRevoked`, so a disabled or de-claimed
-SYSTEM_ADMIN keeps SYSTEM_ADMIN — including run deletion, governance-status
-override and both billing-mutation routes — until their ID token expires
-(≤1 hour). **For a SYSTEM_ADMIN the lever is claim revocation plus
-`revokeRefreshTokens(uid)`, not disablement alone.** Put both in the incident
-runbook.
+**Consequence to know before enrolling anyone (Phase C5, updated for S2-b):**
+every decision on the S2-b-guarded routes (`requirePrivilegedAccess`) re-reads
+the live Auth record, for email-derived and claim-derived authority alike. Once
+Firebase Auth reflects the change, a subsequent guarded request is refused for
+a disabled account (401 `account_disabled`), for an account without the live
+`admin` claim on a SYSTEM_ADMIN route (403), and for a credential whose
+`auth_time` is earlier than the live `tokensValidAfterTime` (401
+`credential_revoked`). An already-issued ID token is not invalidated by any of
+this and may still carry `admin: true` until it expires; surfaces outside the
+S2-b guard coverage are not claimed to apply the same checks. Claim removal and
+`revokeRefreshTokens(uid)` are separate operations: for a SYSTEM_ADMIN use the
+claim tool, which removes the claim and requests revocation, and treat
+disablement as a further step. `revokeRefreshTokens` affects only
+revocation-checked paths, only for sessions whose `auth_time` is earlier than
+the stamped `validSince`, and a later call from a slower clock can lower that
+value again. Put all of this in the incident runbook.
 
 ### Secret bootstrap route — RETIRED (S1)
 
@@ -174,31 +182,69 @@ it left no audit record and no success log.
   post-deploy check is a signed-out `GET` of that path on current Production, by
   the owner or under an authorized probe, which must return `404`.
 
-### Interim path for an `admin` claim change (until PR #295 merges)
+### Changing the `admin` claim — the SYSTEM_ADMIN claim operator tool
 
-Until the hardened operator CLI (PR #295) merges, this is the only documented path
-for an emergency `admin` claim change. It is a written procedure; nothing in this
-document runs it.
+The only documented path for a change to the `admin` custom claim (granting it to
+a new SYSTEM_ADMIN, or removing it from a compromised one) is the SYSTEM_ADMIN
+claim operator tool `scripts/admin/set-system-admin-claim.ts`
+(`npm run admin:set-system-admin-claim`), which is part of this repository. Its
+logic is `lib/admin/systemAdminClaimSafety.ts` and
+`lib/admin/systemAdminClaimExecution.ts`; its runbook — CLI, exit codes, retry
+and review rules — is `docs/operations/system-admin-claim-script.md`. This is a
+written procedure; nothing in this document runs it. The Firebase Console has no
+control for custom claims or refresh-token revocation, so "do it in the Console"
+is not a path (owner ruling, OPTION B, 2026-11-09).
 
-1. **Who and where.** An emergency change to the `admin` custom claim (granting
-   it to a new SYSTEM_ADMIN, or removing it from a compromised one) is an
-   **owner action, run locally with the reviewed SYSTEM_ADMIN claim operator tool**.
-   It is never an agent action. The tool is `scripts/admin/set-system-admin-claim.ts`
-   (`npm run admin:set-system-admin-claim`) on branch `fix/admin-claim-script-hardening`,
-   PR #295, at its exact reviewed commit `f6039ea`; its logic is
-   `lib/admin/systemAdminClaimSafety.ts` and `lib/admin/systemAdminClaimExecution.ts`,
-   and its runbook is `docs/operations/system-admin-claim-script.md` on that branch.
-   The Firebase Console has no control for custom claims or refresh-token
-   revocation, so "do it in the Console" is not a path (owner ruling, OPTION B,
-   2026-11-09).
-2. **Exact commit, local checkout only.** Run the tool from a local checkout of
-   that commit and nothing else: `git -C <checkout> rev-parse HEAD` must print
-   `f6039eaecb659159f52019b7f4cff4cce6a4ed89` before any command is typed. It runs
-   on the owner's machine, never from Vercel or any deployment — the tool refuses
-   when `VERCEL`, `VERCEL_ENV` or `NEXT_RUNTIME` is set, when `NODE_ENV=production`,
+**What the tool does and does not observe.** Run
+`scripts/admin/set-system-admin-claim.ts` (`npm run admin:set-system-admin-claim`)
+with an explicitly named service-account key file. It is a dry run unless given
+`--execute` plus an exact typed confirmation, preserves every other custom
+claim, refuses to GRANT to a disabled account (a revoke is allowed on one and
+never re-enables it), and writes create-only `admin_audit_logs`
+attempt/outcome rows. Every executed revoke requests revocation of the
+target's refresh tokens (owner policy), unless a fresh read immediately before
+the call shows the stored `tokensValidAfterTime` is later than the value the
+call would write (then no call, exit 4 `stored_cutoff_ahead`, review
+required). That request can fail or throw (`sessions_revoke_failed`, exit 3;
+a thrown call is an unknown outcome — re-run the same command). Before any
+claim write the tool also checks the operator clock against Firestore's
+commit time of the attempt row (2 s margin; otherwise exit 3
+`operator_clock_out_of_tolerance`, nothing changed). The tool reports exit 0
+only when Firebase acknowledged the revocation call AND the read-back
+`tokensValidAfterTime` is at or after a cutoff anchored on a Firestore server
+commit time taken after the claim removal AND is not lower than the values
+read earlier in the run. That is an observation, not proof of revocation: it
+ASSUMES the Firestore and Firebase Auth clocks differ by less than a 2 s
+margin, a bound Google does not publish, and effective revocation is never
+observable by the tool (`effectiveRevocation: "not_observable"`). Current
+privileges are a separate question from the tool's evidence: an
+already-issued ID token may still carry `admin: true` until it expires or is
+refreshed, but since S2-b the guarded server routes do not use that embedded
+claim as the authority decision; once Firebase Auth reflects the change, a
+subsequent guarded request is evaluated against the live claim, the live
+disabled state and the live `tokensValidAfterTime` cutoff. The tool does not
+observe that request-time enforcement. The cutoff is overwrite-only: `revokeRefreshTokens` overwrites
+`validSince` with the operator's clock and Firebase Auth offers no
+compare-and-set, so any caller can lower it. This tool refuses to write a
+value lower than the one it reads immediately before the call, and reports any
+lowering it observes within its own run (`tokensValidAfterTimeLowerThanBefore`,
+exit 4 `revocation_cutoff_lowered`, never a clean success); a lowering by
+another writer outside the run is not detected. Runbook, CLI, exit codes and retry:
+`docs/operations/system-admin-claim-script.md`.
+
+**Procedure.**
+
+1. **Who and where.** A change to the `admin` custom claim is an **owner action,
+   run locally with the reviewed SYSTEM_ADMIN claim operator tool**. It is never
+   an agent action.
+2. **Local checkout of `main`, clean, recorded.** Run the tool from a local
+   checkout of `main` and nothing else, and record
+   `git -C <checkout> rev-parse HEAD` before any command is typed; the tool
+   records the same commit SHA in its audit rows. It runs on the owner's
+   machine, never from Vercel or any deployment — the tool refuses when
+   `VERCEL`, `VERCEL_ENV` or `NEXT_RUNTIME` is set, when `NODE_ENV=production`,
    or when an Auth/Firestore emulator host variable is set — and `--execute`
-   refuses while `scripts/admin` or `lib/admin` has uncommitted changes. The commit
-   SHA is recorded in the audit rows.
+   refuses while `scripts/admin` or `lib/admin` has uncommitted changes.
 3. **Explicit project and UID; no defaults.** `--confirm-project=<projectId>`,
    `--credentials=<service-account key file, mode 0600>` (its `project_id` must
    equal the confirmed project; the tool never reads `.env.local` or credential
@@ -219,27 +265,60 @@ document runs it.
    itself can fail, so confirm `revocationRequested` in the result file.
 5. **Keep the evidence.** The tool's audit rows plus
    `--result-file=<NEW *.json path outside every git checkout>`; keep that file
-   outside the repository.
-6. **No Production execution without separate authorization.** Each Production
-   grant or revoke needs its own owner authorization naming the operation, the
-   project and the UID. The ruling that this is the interim path authorizes no
-   run by itself.
-7. **Verify read-only.** Confirm the result with
+   outside the repository. Every revoke audit row records
+   `effectiveRevocation: "not_observable"`.
+6. **Read the exit code; an incomplete run is not a no-op.** `0` completed; on a
+   revoke that is an observation under the clock assumption above, not proof of
+   revocation. `2` refused or dry run: no Firebase write call was issued. `3` a
+   write call was issued (possibly only the attempt audit row) and the operation
+   is incomplete: re-run the same command from a synced clock (NTP), knowing
+   that a revoke re-run calls `revokeRefreshTokens` again, which overwrites
+   `validSince`. `4` review required: do not re-run blindly; follow the
+   runbook's review guidance. `1` the result file could not be written after an
+   otherwise exit-0 run. Precedence is 3 > 4 > 0. Record every non-zero exit
+   with its result file and audit rows before deciding the next step.
+7. **No Production execution without separate authorization.** Each Production
+   grant or revoke needs its own explicit owner authorization naming the
+   operation, the project and the UID. This document authorizes no run by itself.
+8. **Verify read-only.** Confirm the result with
    `scripts/check-admin-claims.js` or `scripts/verify-admin-claims.js`. Both call
    `getUser` and print the claims; neither writes anything.
-8. **The account signs out and back in** before a new claim appears in its ID
+9. **The account signs out and back in** before a new claim appears in its ID
    token.
 
-This is an interim path. PR #295 is reviewed and approved but unmerged; its
-merge stays gated on S2 and is not part of this slice. When it merges, this
-section is replaced by the merged runbook.
+**Current privileges after a removal (S2-b, live since 2026-11-16).** Removing
+the claim and requesting refresh-token revocation do not invalidate an
+already-issued ID token; it may still carry `admin: true` until it expires or
+is refreshed. The S2-b-guarded server routes do not rely on that embedded
+claim: once Firebase Auth reflects the change, a subsequent guarded request is
+evaluated against the live `admin` claim, the live `disabled` state and the
+live `tokensValidAfterTime`, so a request without the live claim is refused
+(403) and a credential whose `auth_time` is earlier than the cutoff is refused
+(401). Surfaces outside the S2-b guard coverage are not claimed to apply the
+same checks. The incident sequence in §B below states the consequences.
 
-**The legacy minting scripts are NOT part of this path. Do not use them:**
+**The legacy minting scripts were removed and must never be restored:**
 `scripts/setAdmin.ts`, `scripts/set-admin-simple.js`, `scripts/set-admin-by-uid.js`
-and `scripts/set-admin-claim.js`. Each writes the account's whole custom-claim
-object without the CLI's safeguards: two of them drop every other claim, and two
-let an existing `admin` value silently override the grant. They are scheduled for
-deletion in security slice S5.
+and `scripts/set-admin-claim.js`. Each wrote the account's whole custom-claim
+object without the tool's safeguards: two of them dropped every other claim, and
+two let an existing `admin` value silently override the grant. PR #295 deleted
+them (S1 had scheduled that deletion for security slice S5), and
+`docs/__tests__/bootstrapProbeInvariant.spec.ts` keeps them absent. Do not re-add
+them, and do not add any other script that calls `setCustomUserClaims`.
+
+**History: the S1 interim path (PR #299).** Before PR #295 merged, the tool
+existed only on branch `fix/admin-claim-script-hardening`, so the S1 slice
+(PR #299) documented an interim path: the owner ran the tool locally from a
+checkout of its exact reviewed commit `f6039ea`
+(`git -C <checkout> rev-parse HEAD` had to print
+`f6039eaecb659159f52019b7f4cff4cce6a4ed89`), under the same owner-only, dry-run,
+typed-confirmation, project/UID, evidence and Production-authorization rules as
+the procedure above. The legacy minting scripts were kept during that period
+only with DO NOT USE headers. The interim text also described #295's merge as
+gated on S2. The merge of PR #295 replaced that interim path with this section;
+`lib/admin/systemAdminClaimSafety.ts` and `lib/admin/systemAdminClaimExecution.ts`
+merged byte-identical to `f6039ea`. This paragraph is history, not an
+instruction.
 
 > **CURRENT STATE (2026-09-09): no first-admin enrollment is pending.** Production
 > already has **two intended SYSTEM_ADMIN accounts**, both claim-derived
@@ -342,11 +421,14 @@ reviewed and deployed.
 
 ## Incident procedure: a compromised or departing privileged identity
 
-Revocation is **not symmetric across the tiers**, and the difference decides what
-you must do. Email-derived authority is re-derived from the live Firebase Auth
-record on every request, so it stops the moment the record changes.
-Claim-derived authority rides in the caller's ID token, which is verified
-WITHOUT `checkRevoked`, so it persists until that token expires.
+Two things must be kept apart, and the difference decides what you must do:
+the authority DECISION and the CREDENTIAL. Since S2-b, the guarded server
+routes re-derive both email-derived and claim-derived authority from the live
+Firebase Auth record on every request: the live `admin` claim, the live
+`disabled` state and the live `tokensValidAfterTime`. The credential is a
+different matter: an already-issued ID token is not invalidated and may still
+carry `admin: true` until it expires, and surfaces outside the S2-b guard
+coverage are not claimed to apply the same checks.
 
 **This repository performs no runtime revocation call.** `revokeRefreshTokens`
 is not invoked anywhere in application code, deliberately: it belongs in an
@@ -508,26 +590,39 @@ table is the contract.
 1. `[CONTAINMENT_REMOVE_CLAIM][REQUIRED]` **Remove the claim**: the effect is `setCustomUserClaims(uid, { admin: false })` (or
    dropping the key, with every other claim left in place). `/api/admin/set-role`
    does this, but it itself requires SYSTEM_ADMIN, so during an incident use the
-   interim path above (the reviewed SYSTEM_ADMIN claim operator tool from PR #295
-   at commit `f6039ea`, run locally by the owner as a dry run and then a typed
-   confirmation; a Production revoke needs its own separate authorization), not
-   the route and not a legacy minting script.
+   admin-claim procedure above (the SYSTEM_ADMIN claim operator tool
+   `scripts/admin/set-system-admin-claim.ts`, run locally by the owner as a dry
+   run and then a typed confirmation; a Production revoke needs its own separate
+   authorization), not the route and never a removed legacy minting script.
 2. `[CONTAINMENT_REVOKE_REFRESH][REQUIRED]` **Revoke refresh tokens** — `adminAuth.revokeRefreshTokens(uid)`. Without this
-   the already-issued ID token keeps working. An executed revoke through the
-   interim tool requests this itself (no opt-out flag) unless its pre-call
-   fresh read shows a stored cutoff ahead or is unusable (exit 4 or 3, no
-   call), and the request can fail; confirm `revocationRequested` in the
-   tool's result file before relying on it.
-3. **Understand the residual window.** Every SYSTEM_ADMIN guard verifies with
-   `verifyIdToken`, which does not consult revocation. Until the outstanding ID
-   token expires (Firebase default one hour), a de-claimed or disabled
-   SYSTEM_ADMIN retains SYSTEM_ADMIN — including run deletion, governance-status
-   override and both billing-mutation routes. Disabling the account does **not**
-   shorten this window on the bearer path.
+   the account's sessions can keep refreshing. With it — and only if Firebase
+   applied the request — revocation-checked session cookies (and, assumed, the
+   refresh-token exchange) reject sessions whose `auth_time` is earlier than
+   the `validSince` it stamps from the operator's clock. It does NOT invalidate
+   an already-issued ID token on the bearer path (step 3). It overwrites the
+   stored `validSince` rather than keeping the later value, so a repeated call
+   from a slower clock can LOWER it again: sync the operator clock (NTP) before
+   every call.
+   An executed revoke through the operator tool requests this itself (no
+   opt-out flag) unless its pre-call fresh read shows a stored cutoff ahead or
+   is unusable (exit 4 or 3, no call), and the request can fail; confirm
+   `revocationRequested` in the tool's result file before relying on it.
+3. **Understand what the next guarded request sees (S2-b).** Every SYSTEM_ADMIN
+   capability — including run deletion, governance-status override and both
+   billing-mutation routes — sits behind `requirePrivilegedAccess`. Once
+   Firebase Auth reflects the change, a subsequent guarded request is refused
+   without the live `admin` claim (403), for a disabled account (401
+   `account_disabled`) and for a credential whose `auth_time` is earlier than
+   the live `tokensValidAfterTime` (401 `credential_revoked`). A request already
+   in progress is not interrupted. The outstanding ID token itself is not
+   invalidated and may still carry `admin: true` until it expires (Firebase
+   default one hour); do not record that as a cut-off of the token.
 4. Session cookies are a separate artifact and are verified with
-   `verifySessionCookie(cookie, true)`, so revocation and disablement DO take
-   effect there immediately. But no SYSTEM_ADMIN route accepts a cookie, so this
-   helps only the ADMIN_PORTAL surface.
+   `verifySessionCookie(cookie, true)`, so disablement takes effect there on
+   the next request, and so does an applied revocation — but only for a cookie
+   whose session `auth_time` is earlier than the stored `validSince`. But no
+   SYSTEM_ADMIN route accepts a cookie, so this helps only the ADMIN_PORTAL
+   surface.
 5. **A revoked-but-unexpired ID token can still be exchanged for a fresh session
    cookie.** `POST /api/auth/session` mints with `verifyIdToken` and no
    revocation check, so the cookie's own five-day life can begin AFTER the
@@ -546,9 +641,10 @@ table is the contract.
    compromised (as opposed to a credential leak on an otherwise trusted
    account). Be precise about what this buys, per §B.3-B.5:
 
-   - **Existing session cookies stop working immediately.** Routes accepting a
-     cookie call `verifySessionCookie(cookie, true)`, and that second argument
-     performs the revocation/disabled check. That is the whole of what
+   - **Existing session cookies of the disabled account stop working on their
+     next request.** Routes accepting a cookie call
+     `verifySessionCookie(cookie, true)`, and that second argument performs the
+     disabled check (as well as the revocation check). That is the whole of what
      "invalidate the session" means here — there is no separate
      session-invalidation endpoint.
    - **Minting a NEW cookie is not blocked by this application.**
@@ -560,10 +656,12 @@ table is the contract.
      holder of a still-unexpired ID token can obtain a fresh cookie whose
      lifetime begins AFTER your revocation. Do not record the ADMIN_PORTAL
      surface as closed until that ID token has expired.
-   - `verifyIdToken` is called **without** `checkRevoked` on the SYSTEM_ADMIN
-     bearer path, so an already-issued ID token keeps working until it expires
-     (Firebase default one hour). Disabling does **not** shorten that window.
-     Do not record bearer-path cutoff as immediate.
+   - On the S2-b-guarded routes the disabled state is read live, so a
+     subsequent request from the disabled account is refused (401
+     `account_disabled`) whether it carries a bearer token or a cookie. The
+     already-issued ID token is not invalidated and may still carry
+     `admin: true` until it expires; surfaces outside the S2-b guard coverage
+     are not claimed to check the disabled state the same way.
 
 8. `[CONTAINMENT_REENUMERATE_CLAIMS][REQUIRED]` **Re-enumerate privileged claims across all accounts — unconditionally.**
    Not only when secret exposure is suspected: step 1 removed the claim from ONE
@@ -582,7 +680,14 @@ table is the contract.
 
 ### What this procedure does NOT give you
 
-Immediate, guaranteed cutoff for a claim-derived SYSTEM_ADMIN. If that matters
-for a given incident, the options are to wait out the token lifetime, or to add
-`checkRevoked` to the SYSTEM_ADMIN verification path — a deliberate change with
-a latency and quota cost, not made here.
+No invalidation of an already-issued ID token, and no observation of effective
+revocation. Removing the claim and requesting `revokeRefreshTokens` leave an
+already-issued ID token cryptographically valid until it expires (up to about an
+hour). Since S2-b the guarded server routes do not use its embedded claim as the
+authority decision, but surfaces outside the S2-b guard coverage are not claimed
+to apply the same checks, and the operator tool does not observe request-time
+enforcement. Even on revocation-checked paths the request covers only sessions
+whose `auth_time` is earlier than the stamped `validSince`, under an unproven
+Firestore/Auth clock assumption, and a later request from a slower clock can
+lower that value and stop the check from rejecting sessions an earlier revoke
+had excluded.

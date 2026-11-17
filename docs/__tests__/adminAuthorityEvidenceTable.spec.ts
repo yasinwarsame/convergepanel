@@ -142,17 +142,20 @@ describe("the SYSTEM_ADMIN containment procedure closes the bootstrap path", () 
     }
     expect(SECTION).not.toMatch(/use a service-account script/);
     const flat = SECTION.replace(/\s+/g, " ");
-    // Claim removal goes through the ruled interim owner path: the reviewed
-    // operator tool at its exact commit, locally, dry run then confirmation,
-    // and never in Production without its own authorization (owner OPTION B,
-    // 2026-11-09 — the Firebase Console cannot set claims, so that wording is
-    // forbidden here).
+    // Claim removal goes through the owner path: the SYSTEM_ADMIN claim
+    // operator tool, locally, dry run then confirmation, and never in
+    // Production without its own authorization (owner OPTION B, 2026-11-09 —
+    // the Firebase Console cannot set claims, so that wording is forbidden
+    // here). PR #295's merge replaced the S1 interim wording ("the interim
+    // path above ... from PR #295 at commit `f6039ea`"), which is now false.
     expect(flat).toMatch(
-      /use the interim path above \(the reviewed SYSTEM_ADMIN claim operator tool from PR #295 at commit `f6039ea`, run locally by the owner as a dry run and then a typed confirmation; a Production revoke needs its own separate authorization\), not the route and not a legacy minting script/
+      /use the admin-claim procedure above \(the SYSTEM_ADMIN claim operator tool `scripts\/admin\/set-system-admin-claim\.ts`, run locally by the owner as a dry run and then a typed confirmation; a Production revoke needs its own separate authorization\), not the route and never a removed legacy minting script/
     );
     expect(flat).not.toMatch(/owner action in the Firebase Console/i);
+    expect(flat).not.toMatch(/interim (?:path|tool)/i);
+    expect(flat).not.toContain("f6039ea");
     expect(flat).toMatch(
-      /An executed revoke through the interim tool requests this itself \(no opt-out flag\) unless its pre-call fresh read shows a stored cutoff ahead or is unusable \(exit 4 or 3, no call\), and the request can fail; confirm `revocationRequested` in the tool's result file/
+      /An executed revoke through the operator tool requests this itself \(no opt-out flag\) unless its pre-call fresh read shows a stored cutoff ahead or is unusable \(exit 4 or 3, no call\), and the request can fail; confirm `revocationRequested` in the tool's result file/
     );
     // The no-call case must stay stated: an unqualified "every revoke requests revocation" is the F1 over-statement.
     expect(flat).not.toMatch(/Every executed revoke requests refresh-token revocation\./);

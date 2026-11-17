@@ -304,32 +304,34 @@ was retired in security slice S1. The route is deleted and no source reads that
 variable, so do not set it.
 
 1. Sign up a user account through the app (`/signup`).
-2. Until the hardened operator CLI (PR #295) merges, granting the `admin` custom
-   claim is an **owner action**, never an agent action. The owner runs the reviewed
-   SYSTEM_ADMIN claim operator tool `scripts/admin/set-system-admin-claim.ts`
-   (`npm run admin:set-system-admin-claim`, branch `fix/admin-claim-script-hardening`,
-   PR #295) **locally**, from a checkout of its exact reviewed commit `f6039ea`:
-   `git -C <checkout> rev-parse HEAD` must print
-   `f6039eaecb659159f52019b7f4cff4cce6a4ed89`, and never from Vercel or any deployment.
-   The tool has no defaults: pass `--confirm-project=<projectId>`,
-   `--credentials=<service-account key file, mode 0600>`, `--target-uid=<uid>` and
-   `--operation=grant`. Run it as a dry run first (the default), then
-   `--execute --confirm-claim=<exact string the dry run printed>` with
+2. Granting the `admin` custom claim is an **owner action**, never an agent action.
+   The owner runs the SYSTEM_ADMIN claim operator tool
+   `scripts/admin/set-system-admin-claim.ts` (`npm run admin:set-system-admin-claim`)
+   **locally**, from a local checkout of `main` (record `git -C <checkout> rev-parse HEAD`;
+   `--execute` refuses uncommitted changes in `scripts/admin` or `lib/admin`), and never
+   from Vercel or any deployment. The tool has no defaults: pass
+   `--confirm-project=<projectId>`, `--credentials=<service-account key file, mode 0600>`,
+   `--target-uid=<uid>` and `--operation=grant`. Run it as a dry run first (the default),
+   then `--execute --confirm-claim=<exact string the dry run printed>` with
    `--operator-id-token-file=<file>` (or `--bootstrap-first-admin` only while zero
    accounts hold the claim), exactly as `docs/operations/system-admin-claim-script.md`
-   on that branch describes. Keep the tool's audit rows and its `--result-file` (a NEW
-   `*.json` outside every git checkout). No Production grant or revoke without its own
-   separate authorization. This is an interim path: #295 is reviewed and approved but
-   unmerged, and its merge stays gated on S2. The tool changes only the `admin` key
-   and leaves every other claim in place.
-3. Verify read-only with `node scripts/check-admin-claims.js <UID>` or
+   describes. Keep the tool's audit rows and its `--result-file` (a NEW `*.json` outside
+   every git checkout). An exit code of 3 or 4 means incomplete or review required, never
+   a no-op. No Production grant or revoke without its own separate authorization. The
+   tool changes only the `admin` key and leaves every other claim in place. Removing the
+   claim later does not invalidate an already-issued ID token; since S2-b the guarded
+   routes decide each subsequent request from the live claim instead
+   (`effectiveRevocation: "not_observable"`).
+3. Verify read-only with `node scripts/check-admin-claims.js --confirm-project=<projectId> --credentials=<key file> --uid=<UID>` or
    `scripts/verify-admin-claims.js`; neither writes anything.
 4. The user must sign out and sign back in for the claim to take effect.
 
 The legacy minting scripts (`scripts/setAdmin.ts`, `scripts/set-admin-simple.js`,
-`scripts/set-admin-by-uid.js`, `scripts/set-admin-claim.js`) are **not** part of
-this path. Do not use them: they overwrite or mishandle the account's other
-claims. The full procedure is in `docs/operations/admin-authority-tiers.md`.
+`scripts/set-admin-by-uid.js`, `scripts/set-admin-claim.js`) were removed and are
+**not** part of this path. Never restore them: they overwrote or mishandled the
+account's other claims. Before PR #295 merged, an S1 interim path ran the tool from a
+branch checkout at commit `f6039ea`; that is history. The full procedure is in
+`docs/operations/admin-authority-tiers.md`.
 
 ## Admin Dashboard
 

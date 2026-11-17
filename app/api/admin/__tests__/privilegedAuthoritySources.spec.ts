@@ -123,14 +123,41 @@ const CLAIM_READ_ALLOW: Record<string, { count: number; category: Category; reas
   "scripts/check-admin-claims.js::main::member": {
     count: 1, category: "operator", reason: "operator CLI that reports which accounts hold the claim; not deployed",
   },
-  "scripts/check-admin-claims.js::main::claim-enumeration": {
-    count: 1, category: "operator", reason: "the same operator CLI prints the account's claim object when it has any keys; not deployed",
-  },
-  "scripts/verify-admin-claims.js::main::member": {
-    count: 1, category: "operator", reason: "operator CLI that reports which accounts hold the claim; not deployed",
-  },
+  // PR #295 removed two rows here (narrowing): check-admin-claims.js no longer enumerates the claim
+  // object, and verify-admin-claims.js now delegates to it (runAsCli) and reads no claim itself.
   "force-token-refresh.js::<module>::member": {
     count: 2, category: "operator", reason: "developer console snippet that prints the current token's claim; not deployed",
+  },
+  // ── PR #295 operator claim tool: exact per-function rows (owner ruling A). No file- or directory-wide exemption. ──
+  "lib/admin/systemAdminClaimSafety.ts::checkOperatorAuthorization::member": {
+    count: 2, category: "operator", reason: "OFFLINE OPERATOR TOOL (PR #295): CONDITIONAL on the build boundary — lib/security/buildBoundary.js fails any production build whose webpack resolver reaches the tool, and scripts/security/check-build-boundary.js verifies the build artifacts (both in the required Quality Gate); the walker systemAdminClaimToolReachability.spec.ts is a secondary pre-check; the CLI refuses to run unless the OPERATOR's verified token AND live record both carry admin (stricter than the server tier); gates only the CLI, grants no request authority",
+  },
+  "lib/admin/systemAdminClaimSafety.ts::countAdminHolders::member": {
+    count: 1, category: "operator", reason: "OFFLINE OPERATOR TOOL (PR #295): CONDITIONAL on the build boundary — lib/security/buildBoundary.js fails any production build whose webpack resolver reaches the tool, and scripts/security/check-build-boundary.js verifies the build artifacts (both in the required Quality Gate); the walker systemAdminClaimToolReachability.spec.ts is a secondary pre-check; counts live admin holders for the last-administrator safeguard before a revoke; read-only",
+  },
+  "lib/admin/systemAdminClaimSafety.ts::planClaimChange::member": {
+    count: 7, category: "operator", reason: "OFFLINE OPERATOR TOOL (PR #295): CONDITIONAL on the build boundary — lib/security/buildBoundary.js fails any production build whose webpack resolver reaches the tool, and scripts/security/check-build-boundary.js verifies the build artifacts (both in the required Quality Gate); the walker systemAdminClaimToolReachability.spec.ts is a secondary pre-check; computes the planned claim diff (grant sets admin true last; revoke removes only admin) from the target's live claims; no decision about a caller",
+  },
+  "lib/admin/systemAdminClaimSafety.ts::planClaimChange::enumeration": {
+    count: 2, category: "operator", reason: "OFFLINE OPERATOR TOOL (PR #295): CONDITIONAL on the build boundary — lib/security/buildBoundary.js fails any production build whose webpack resolver reaches the tool, and scripts/security/check-build-boundary.js verifies the build artifacts (both in the required Quality Gate); the walker systemAdminClaimToolReachability.spec.ts is a secondary pre-check; copies every OTHER claim so they are preserved byte-for-byte (the retired scripts wiped them); enumeration is of the target's claims, not a privilege test",
+  },
+  "lib/admin/systemAdminClaimSafety.ts::planClaimChange::reflective": {
+    count: 2, category: "operator", reason: "OFFLINE OPERATOR TOOL (PR #295): CONDITIONAL on the build boundary — lib/security/buildBoundary.js fails any production build whose webpack resolver reaches the tool, and scripts/security/check-build-boundary.js verifies the build artifacts (both in the required Quality Gate); the walker systemAdminClaimToolReachability.spec.ts is a secondary pre-check; own-property presence of admin before/after (hasOwnProperty) to classify the diff as add/remove/no-change",
+  },
+  "lib/admin/systemAdminClaimSafety.ts::checkPlanInvariants::member": {
+    count: 1, category: "operator", reason: "OFFLINE OPERATOR TOOL (PR #295): CONDITIONAL on the build boundary — lib/security/buildBoundary.js fails any production build whose webpack resolver reaches the tool, and scripts/security/check-build-boundary.js verifies the build artifacts (both in the required Quality Gate); the walker systemAdminClaimToolReachability.spec.ts is a secondary pre-check; asserts the plan's resulting claims: a grant must end with admin === true",
+  },
+  "lib/admin/systemAdminClaimSafety.ts::checkPlanInvariants::reflective": {
+    count: 1, category: "operator", reason: "OFFLINE OPERATOR TOOL (PR #295): CONDITIONAL on the build boundary — lib/security/buildBoundary.js fails any production build whose webpack resolver reaches the tool, and scripts/security/check-build-boundary.js verifies the build artifacts (both in the required Quality Gate); the walker systemAdminClaimToolReachability.spec.ts is a secondary pre-check; asserts a revoke's resulting claims carry no admin key at all",
+  },
+  "lib/admin/systemAdminClaimSafety.ts::unrelatedClaimsFingerprint::enumeration": {
+    count: 2, category: "operator", reason: "OFFLINE OPERATOR TOOL (PR #295): CONDITIONAL on the build boundary — lib/security/buildBoundary.js fails any production build whose webpack resolver reaches the tool, and scripts/security/check-build-boundary.js verifies the build artifacts (both in the required Quality Gate); the walker systemAdminClaimToolReachability.spec.ts is a secondary pre-check; fingerprints every claim EXCEPT admin so the read-back can prove no other claim changed",
+  },
+  "lib/admin/systemAdminClaimSafety.ts::verifyReadBack::member": {
+    count: 1, category: "operator", reason: "OFFLINE OPERATOR TOOL (PR #295): CONDITIONAL on the build boundary — lib/security/buildBoundary.js fails any production build whose webpack resolver reaches the tool, and scripts/security/check-build-boundary.js verifies the build artifacts (both in the required Quality Gate); the walker systemAdminClaimToolReachability.spec.ts is a secondary pre-check; read-back after a grant: the stored claims must carry admin === true, else the run is incomplete (exit 3)",
+  },
+  "lib/admin/systemAdminClaimSafety.ts::verifyReadBack::reflective": {
+    count: 1, category: "operator", reason: "OFFLINE OPERATOR TOOL (PR #295): CONDITIONAL on the build boundary — lib/security/buildBoundary.js fails any production build whose webpack resolver reaches the tool, and scripts/security/check-build-boundary.js verifies the build artifacts (both in the required Quality Gate); the walker systemAdminClaimToolReachability.spec.ts is a secondary pre-check; read-back after a revoke: the stored claims must carry no admin key, else the run is incomplete (exit 3)",
   },
   "lib/agreementMap.ts::labelCluster::dynamic-claim-key": {
     count: 2, category: "reviewed-false-positive",

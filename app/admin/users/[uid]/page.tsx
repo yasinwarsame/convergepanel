@@ -45,6 +45,24 @@ interface StripeInfo {
   priceIdPlan: string | null;
 }
 
+/**
+ * Readable labels for the SYSTEM_ADMIN claim tool's audit rows
+ * (scripts/admin/set-system-admin-claim.ts). Other action types render as
+ * stored. A completed revoke row never claims an effect on sessions: effective
+ * revocation is not observable by the tool.
+ */
+const CLAIM_ACTION_TYPE_LABELS: Record<string, string> = {
+  SYSTEM_ADMIN_CLAIM_ATTEMPT: "SYSTEM_ADMIN claim: attempt (not a completed change)",
+  GRANT_SYSTEM_ADMIN_CLAIM: "SYSTEM_ADMIN claim granted (read back)",
+  REVOKE_SYSTEM_ADMIN_CLAIM: "SYSTEM_ADMIN claim removed (read back; revocation requested, cutoff observed; effect not observable)",
+  SYSTEM_ADMIN_REVOCATION_CUTOFF_OBSERVED: "SYSTEM_ADMIN claim already absent: revocation requested, cutoff observed (effect not observable)",
+  SYSTEM_ADMIN_CLAIM_INCOMPLETE: "SYSTEM_ADMIN claim: not completed (incomplete or review required)",
+};
+
+function auditActionTypeLabel(actionType: string): string {
+  return Object.prototype.hasOwnProperty.call(CLAIM_ACTION_TYPE_LABELS, actionType) ? CLAIM_ACTION_TYPE_LABELS[actionType] : actionType;
+}
+
 export default function AdminUserDetailsPage() {
   const { user: currentUser, loading: authLoading, authReady, isAdmin } = useAuth();
   const router = useRouter();
@@ -667,7 +685,7 @@ export default function AdminUserDetailsPage() {
             {auditLogs.map((log) => (
               <div key={log.id} className="border border-gray-200 rounded p-3 text-sm">
                 <div className="flex justify-between items-start mb-1">
-                  <span className="font-medium">{log.actionType}</span>
+                  <span className="font-medium" title={log.actionType}>{auditActionTypeLabel(log.actionType)}</span>
                   <span className="text-gray-500">{formatDate(log.createdAt)}</span>
                 </div>
                 <p className="text-gray-600">Admin: {log.adminEmail || log.adminUid}</p>
