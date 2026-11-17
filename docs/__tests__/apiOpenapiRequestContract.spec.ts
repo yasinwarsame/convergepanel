@@ -13,25 +13,30 @@
  *        descriptions, PRD §9.5, the Addendum 1 codes and the 12 implemented API-1a codes
  *        must agree.
  *
- * Not covered (server behaviour, API-3 tests): NFC normalization, lone surrogates, invalid
- * UTF-8, body byte limits and the error precedence order of error-catalog.md §3.
+ * Addendum 3 (Quality Correction R2) pins, in addition:
+ *   m1  the catalog against the draft implementation snapshot
+ *       docs/product/api-0/implementation-snapshots/api-1a-errors.json (generated from the real
+ *       lib/apiPlatform/errors.ts at #327 @ fa9146a), status + type + message;
+ *   m4  input text needs a VISIBLE code point (zero-width-only text is rejected, legitimate
+ *       joiners, marks and variation selectors are accepted);
+ *   m5  every published error example (PRD, OpenAPI, catalog) conforms to the catalog;
+ *   m6  no transitive Ajv: the schema is compiled by the purpose-built subset validator
+ *       ./support/jsonSchemaSubset.ts (its own spec: jsonSchemaSubset.spec.ts);
+ *   exception 2  DEL and C1 controls are rejected alongside C0.
+ *
+ * Not covered (server behaviour, API-3 tests): NFC normalization, lone surrogates in raw bytes,
+ * invalid UTF-8, body byte limits on the wire and the executed precedence order.
  */
 import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "js-yaml";
-
-const $RefParser = require("@apidevtools/json-schema-ref-parser");
-
-// The hoisted `ajv` is v6. Ajv v8 (JSON Schema 2020-12) is installed as ajv-formats' own
-// dependency (package-lock pins it), so resolve it from there and assert the major version.
-const ajvBase = path.dirname(require.resolve("ajv-formats/package.json"));
-const ajvPkg = require(require.resolve("ajv/package.json", { paths: [ajvBase] }));
-const Ajv2020 = require(require.resolve("ajv/dist/2020", { paths: [ajvBase] })).default;
+import { compile, dereference } from "./support/jsonSchemaSubset";
 
 const ROOT = path.resolve(__dirname, "..", "..");
 const OPENAPI = path.join(ROOT, "docs/product/api-0/openapi.yaml");
 const CATALOG = path.join(ROOT, "docs/product/api-0/error-catalog.md");
 const PRD = path.join(ROOT, "docs/product/api-platform-prd.md");
+const SNAPSHOT = path.join(ROOT, "docs/product/api-0/implementation-snapshots/api-1a-errors.json");
 
 type Json = any;
 
@@ -39,26 +44,11 @@ const raw: Json = yaml.load(fs.readFileSync(OPENAPI, "utf8"));
 let deref: Json;
 let validate: any;
 
-function stripMapping(node: Json): Json {
-  // Ajv's discriminator rejects `mapping`; the mapping is checked structurally below instead.
-  if (Array.isArray(node)) return node.map(stripMapping);
-  if (node && typeof node === "object") {
-    const out: Json = {};
-    for (const [k, v] of Object.entries(node)) {
-      if (k === "discriminator" && v && typeof v === "object") {
-        const { mapping: _m, ...rest } = v as Json;
-        out[k] = rest;
-      } else out[k] = stripMapping(v);
-    }
-    return out;
-  }
-  return node;
-}
-
-beforeAll(async () => {
-  deref = await $RefParser.dereference(JSON.parse(JSON.stringify(raw)));
-  const ajv = new Ajv2020({ strict: false, discriminator: true, allErrors: true });
-  validate = ajv.compile(stripMapping(deref.components.schemas.CreateVerificationRequest));
+beforeAll(() => {
+  // Only the request schema is dereferenced: response schemas elsewhere use `$ref` with
+  // sibling keywords (2020-12), which the subset dereferencer deliberately does not merge.
+  deref = dereference(raw, "#/components/schemas/CreateVerificationRequest");
+  validate = compile(deref);
 });
 
 const ok = (body: Json): boolean => validate(body) === true;
@@ -66,7 +56,7 @@ const ok = (body: Json): boolean => validate(body) === true;
 // ---------------------------------------------------------------------------------------------
 // Catalog parsing
 // ---------------------------------------------------------------------------------------------
-interface Row { status: number; type: string; plane: string; beta: string; implemented: boolean }
+interface Row { status: number; type: string; plane: string; beta: string; message: string; implemented: boolean; production: string }
 
 function catalogRows(): Map<string, Row> {
   const md = fs.readFileSync(CATALOG, "utf8");
@@ -76,10 +66,10 @@ function catalogRows(): Map<string, Row> {
   expect(end).toBeGreaterThan(start);
   const rows = new Map<string, Row>();
   for (const line of md.slice(start, end).split("\n")) {
-    const m = /^\| `([a-z_]+)` \| (\d{3}) \| `([a-z_]+)` \| (data|management|both) \| [^|]+ \| ([a-z-]+) \| (yes|no) \| [^|]+ \|$/.exec(line);
+    const m = /^\| `([a-z_]+)` \| (\d{3}) \| `([a-z_]+)` \| (data|management|both) \| [^|]+ \| ([a-z-]+) \| ([^|]+) \| (yes|no) \| (none) \|$/.exec(line);
     if (!m) continue;
     expect(rows.has(m[1])).toBe(false); // listed once
-    rows.set(m[1], { status: Number(m[2]), type: m[3], plane: m[4], beta: m[5], implemented: m[6] === "yes" });
+    rows.set(m[1], { status: Number(m[2]), type: m[3], plane: m[4], beta: m[5], message: m[6], implemented: m[7] === "yes", production: m[8] });
   }
   return rows;
 }
@@ -94,20 +84,8 @@ const ERROR_TYPES = new Set([
 const TYPE_AND_CODE = new Set(["not_found", "request_too_large"]);
 const NON_CODE_TOKENS = new Set(["retain_input", "retain_model_responses", "request_id", "param", "type", "charset"]);
 
-const IMPLEMENTED_API1A: ReadonlyArray<[string, number, string]> = [
-  ["invalid_api_key", 401, "authentication_error"],
-  ["api_key_not_accepted", 401, "authentication_error"],
-  ["session_required", 401, "authentication_error"],
-  ["insufficient_scope", 403, "permission_error"],
-  ["org_suspended", 403, "permission_error"],
-  ["live_key_requires_plan", 403, "permission_error"],
-  ["insufficient_role", 403, "permission_error"],
-  ["fresh_session_required", 403, "permission_error"],
-  ["not_found", 404, "not_found"],
-  ["invalid_request", 400, "invalid_request_error"],
-  ["internal_error", 500, "api_error"],
-  ["api_unavailable", 503, "service_unavailable"],
-];
+interface Snapshot { source: string; pr: number; commit: string; codes: Record<string, { status: number; type: string; message: string }> }
+const snapshot: Snapshot = JSON.parse(fs.readFileSync(SNAPSHOT, "utf8"));
 
 const RESPONSE_STATUS: Record<string, number> = {
   BadRequest: 400, Unauthorized: 401, PaymentRequired: 402, Forbidden: 403, NotFound: 404,
@@ -128,13 +106,18 @@ function codeTokens(text: string): string[] {
 
 // ---------------------------------------------------------------------------------------------
 describe("openapi.yaml parses and resolves", () => {
-  it("is OpenAPI 3.1 at 0.3.0-draft and uses the Ajv 8 2020-12 dialect for validation", () => {
+  it("is OpenAPI 3.1 at 0.4.0-draft", () => {
     expect(raw.openapi).toBe("3.1.0");
-    expect(raw.info.version).toBe("0.3.0-draft");
-    expect(String(ajvPkg.version).startsWith("8.")).toBe(true);
+    expect(raw.info.version).toBe("0.4.0-draft");
   });
 
-  it("every internal $ref points at an existing node, and none remain after dereferencing", () => {
+  it("m6: the spec loads no transitive validator (no Ajv, no ref-parser)", () => {
+    const src = fs.readFileSync(__filename, "utf8");
+    const banned = ["aj" + "v", "json-schema-" + "ref-parser", "ajv-" + "formats"];
+    for (const b of banned) expect({ b, used: new RegExp(`require\\([^)]*${b}|from "[^"]*${b}`).test(src) }).toEqual({ b, used: false });
+  });
+
+  it("every internal $ref points at an existing node, and none remain in the dereferenced request schema", () => {
     const refs: string[] = [];
     const walk = (n: Json): void => {
       if (Array.isArray(n)) n.forEach(walk);
@@ -153,7 +136,7 @@ describe("openapi.yaml parses and resolves", () => {
       }
       expect({ ref, found: node !== undefined }).toEqual({ ref, found: true });
     }
-    expect(JSON.stringify(deref)).not.toContain('"$ref"');
+    expect(JSON.stringify(deref)).not.toContain('"$ref":');
   });
 });
 
@@ -161,7 +144,7 @@ describe("C-1: CreateVerificationRequest is discriminated on type", () => {
   it("is a oneOf of exactly the claim and research variants, with a matching discriminator mapping", () => {
     const s = raw.components.schemas.CreateVerificationRequest;
     expect(s.discriminator?.propertyName).toBe("type");
-    // Ajv's discriminator passes non-objects through; the union itself must say `object`.
+    // A discriminator passes non-objects through; the union itself must say `object`.
     expect(s.type).toBe("object");
     expect(s.oneOf).toEqual([
       { $ref: "#/components/schemas/ClaimVerificationRequest" },
@@ -183,8 +166,8 @@ describe("C-1: CreateVerificationRequest is discriminated on type", () => {
 
   it("has positive and negative request examples", () => {
     const all = examples();
-    expect(all.filter(([, e]) => !e["x-expected-error"]).length).toBeGreaterThanOrEqual(4);
-    expect(all.filter(([, e]) => e["x-expected-error"]).length).toBeGreaterThanOrEqual(8);
+    expect(all.filter(([, e]) => !e["x-expected-error"]).length).toBeGreaterThanOrEqual(5);
+    expect(all.filter(([, e]) => e["x-expected-error"]).length).toBeGreaterThanOrEqual(11);
   });
 
   it("every positive example validates and every negative example fails", () => {
@@ -219,6 +202,25 @@ describe("C-1: CreateVerificationRequest is discriminated on type", () => {
     ["research with empty context", research({ ...Q, context: "" })],
     ["claim with every option false", claim(C, { options: { synthesis: false, allow_fallback: false, retain_input: false, retain_model_responses: false } })],
     ["claim with synthesis true (schema-valid; 422 synthesis_not_supported is semantic)", claim(C, { options: { synthesis: true } })],
+    ["research with synthesis true (schema-valid; 422 synthesis_unavailable is semantic, step 9)", research(Q, { options: { synthesis: true } })],
+    // m4: legitimate joiners, marks and selectors are accepted (and never stripped).
+    ["ZWJ emoji sequence", claim({ claim: "\u{1F469}\u200D\u{1F4BB}" })],
+    ["ZWNJ inside a Persian word", claim({ claim: "\u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645" })],
+    ["ZWNJ inside a Hindi word", research({ question: "\u0915\u094D\u200C\u0937" })],
+    ["decomposed combining sequence", claim({ claim: "cafe\u0301" })],
+    ["base with several combining marks", claim({ claim: "a\u0301\u0323\u0308" })],
+    ["variation selector after a base", claim({ claim: "\u2764\uFE0F" })],
+    ["one visible letter among zero-width characters", claim({ claim: "\u200Ba\u200B" })],
+    ["mark before a base", claim({ claim: "\u0301a" })],
+    ["bidi controls around real text", claim({ claim: "\u202Babc\u202C" })],
+    ["a single digit", claim({ claim: "7" })],
+    ["a single punctuation mark", claim({ claim: "?" })],
+    ["a single emoji", claim({ claim: "\u{1F642}" })],
+    ["private-use character (accepted edge, error-catalog §4.2)", claim({ claim: "\uE000" })],
+    ["braille pattern blank (accepted edge, error-catalog §4.2)", claim({ claim: "\u2800" })],
+    ["context made only of zero-width characters (context may be empty)", research({ ...Q, context: "\u200B\u200B" })],
+    ["metadata value made only of zero-width characters", claim(C, { metadata: { ref: "\u200B" } })],
+    ["metadata at the 4000 code-point aggregate", claim(C, { metadata: Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`k${i}`, "v".repeat(i < 7 ? 498 : 500 - 14)])) })],
     ["two models", claim(C, { models: ["chatgpt", "claude"] })],
     ["five models", research(Q, { models: ["chatgpt", "claude", "grok", "perplexity", "gemini"] })],
     ["64-character model ID", claim(C, { models: ["a".repeat(64), "claude"] })],
@@ -281,6 +283,33 @@ describe("C-1: CreateVerificationRequest is discriminated on type", () => {
     ["metadata non-string value", claim(C, { metadata: { n: 1 } })],
     ["metadata nested object", claim(C, { metadata: { n: { deep: "v" } } })],
     ["metadata value with C0", claim(C, { metadata: { ref: "a\u0001" } })],
+    ["metadata over the 4000 code-point aggregate", claim(C, { metadata: Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`k${i}`, "v".repeat(450)])) })],
+    // m4: no visible code point.
+    ["claim of ZWSP only", claim({ claim: "\u200B" })],
+    ["claim of ZWSP, ZWNJ, ZWJ, WJ, BOM", claim({ claim: "\u200B\u200C\u200D\u2060\uFEFF" })],
+    ["question of ZWJ only", research({ question: "\u200D\u200D" })],
+    ["claim of U+180E", claim({ claim: "\u180E" })],
+    ["claim of soft hyphen", claim({ claim: "\u00AD" })],
+    ["claim of bidi controls only", claim({ claim: "\u200E\u200F\u202A\u202B\u202C\u202D\u202E\u2066\u2067\u2068\u2069\u061C" })],
+    ["claim of variation selectors only", claim({ claim: "\uFE0F\uFE00\u{E0100}" })],
+    ["claim of combining marks only", claim({ claim: "\u0301\u0308" })],
+    ["claim of an enclosing mark only", claim({ claim: "\u20DD" })],
+    ["claim of a spacing mark only", claim({ claim: "\u093E" })],
+    ["claim of tag characters only", claim({ claim: "\u{E0001}\u{E0041}\u{E007F}" })],
+    ["claim of Hangul fillers only", claim({ claim: "\u115F\u1160\u3164\uFFA0" })],
+    ["claim of CGJ only", claim({ claim: "\u034F" })],
+    ["claim of interlinear annotation controls only", claim({ claim: "\uFFF9\uFFFA\uFFFB" })],
+    ["claim of zero-width and whitespace mixed", claim({ claim: " \u200B\t\u00A0\u2060\u3000" })],
+    ["claim of line and paragraph separators", claim({ claim: "\u2028\u2029" })],
+    // Reviewer exception 2: DEL and C1 are controls like C0.
+    ["claim with DEL", claim({ claim: "abc\u007Fdef" })],
+    ["claim with NEL (C1)", claim({ claim: "abc\u0085def" })],
+    ["claim with U+0080 (C1)", claim({ claim: "abc\u0080def" })],
+    ["claim with U+009F (C1)", claim({ claim: "abc\u009Fdef" })],
+    ["context with DEL", research({ ...Q, context: "x\u007F" })],
+    ["metadata value with C1", claim(C, { metadata: { ref: "a\u0090" } })],
+    ["claim with a lone high surrogate", claim({ claim: "abc\uD800def" })],
+    ["claim with a lone low surrogate", claim({ claim: "abc\uDC00" })],
     ["top-level array", [claim(C)]],
   ];
 
@@ -305,7 +334,7 @@ describe("C-4: one error catalog", () => {
     const mirror: Record<string, Json> = raw.components["x-error-catalog"].codes;
     expect(Object.keys(mirror).sort()).toEqual(Array.from(rows.keys()).sort());
     for (const [code, r] of rows) {
-      expect({ code, ...mirror[code] }).toEqual({ code, status: r.status, type: r.type, plane: r.plane, beta: r.beta });
+      expect({ code, ...mirror[code] }).toEqual({ code, status: r.status, type: r.type, plane: r.plane, beta: r.beta, message: r.message, implemented_in_draft: r.implemented });
     }
   });
 
@@ -336,13 +365,30 @@ describe("C-4: one error catalog", () => {
     }
   });
 
-  it("the 12 implemented API-1a codes appear with the same status and type, and are the only ones marked implemented", () => {
+  it("m1: the implementation snapshot is a generated record of #327 at a full commit SHA", () => {
+    expect(snapshot.source).toBe("lib/apiPlatform/errors.ts");
+    expect(snapshot.pr).toBe(327);
+    expect(snapshot.commit).toMatch(/^[0-9a-f]{40}$/);
+    expect(snapshot.commit.startsWith("fa9146a")).toBe(true);
+    expect(Object.keys(snapshot.codes)).toEqual(Object.keys(snapshot.codes).slice().sort());
+    expect(Object.keys(snapshot.codes).length).toBe(13);
+    // The catalog column header names the same commit.
+    expect(fs.readFileSync(CATALOG, "utf8")).toContain(`Draft implementation (#327 @ \`${snapshot.commit.slice(0, 7)}\`)`);
+  });
+
+  it("m1: every snapshot code is in the catalog with the identical status, type and message, and is marked implemented", () => {
     const rows = catalogRows();
-    for (const [code, status, type] of IMPLEMENTED_API1A) {
-      expect({ code, status: rows.get(code)?.status, type: rows.get(code)?.type }).toEqual({ code, status, type });
+    for (const [code, spec] of Object.entries(snapshot.codes)) {
+      const r = rows.get(code);
+      expect({ code, status: r?.status, type: r?.type, message: r?.message, implemented: r?.implemented })
+        .toEqual({ code, status: spec.status, type: spec.type, message: spec.message, implemented: true });
     }
     const marked = Array.from(rows).filter(([, r]) => r.implemented).map(([c]) => c).sort();
-    expect(marked).toEqual(IMPLEMENTED_API1A.map(([c]) => c).sort());
+    expect(marked).toEqual(Object.keys(snapshot.codes).sort());
+  });
+
+  it("m1: no code is active in Production (the API is dark)", () => {
+    for (const [code, r] of catalogRows()) expect({ code, production: r.production }).toEqual({ code, production: "none" });
   });
 
   it("every PRD §9.5 code appears with the PRD's status", () => {
@@ -370,10 +416,82 @@ describe("C-4: one error catalog", () => {
       ["synthesis_unavailable", 422], ["fallback_unavailable", 422],
     ];
     for (const [code, status] of want) expect({ code, status: rows.get(code)?.status }).toEqual({ code, status });
-    expect(rows.get("identity_not_verified")).toEqual({ status: 403, type: "permission_error", plane: "management", beta: "reserved", implemented: false });
+    expect(rows.get("identity_not_verified")).toEqual({ status: 403, type: "permission_error", plane: "management", beta: "active", message: "Verify your email address to perform this action.", implemented: true, production: "none" });
     expect(rows.get("research_schema_unsupported")?.beta).toBe("proposed");
     expect(rows.has("account_disabled")).toBe(false);
     expect(rows.get("verification_not_found")?.plane).toBe("data");
     expect(rows.get("not_found")?.plane).toBe("management");
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// m5: every published error example conforms to the catalog
+// ---------------------------------------------------------------------------------------------
+describe("m5: published error examples", () => {
+  const DOC_BASE = "https://docs.convergepanel.com/errors#";
+  const ENVELOPE_KEYS = ["code", "doc_url", "message", "param", "request_id", "type"];
+
+  /** Every ```json block in a markdown file whose JSON has a top-level `error` member. */
+  function markdownExamples(file: string): Array<{ where: string; value: Json }> {
+    const md = fs.readFileSync(file, "utf8");
+    const out: Array<{ where: string; value: Json }> = [];
+    for (const m of md.matchAll(/```json\n([\s\S]*?)```/g)) {
+      if (!/"error"\s*:/.test(m[1])) continue;
+      const where = `${path.relative(ROOT, file)}:${md.slice(0, m.index).split("\n").length}`;
+      out.push({ where, value: JSON.parse(m[1]) });
+    }
+    return out;
+  }
+
+  function openapiExamples(): Array<{ where: string; value: Json; status: number }> {
+    const out: Array<{ where: string; value: Json; status: number }> = [];
+    for (const [name, resp] of Object.entries<Json>(raw.components.responses)) {
+      const media = resp.content?.["application/json"];
+      if (media?.example) out.push({ where: `openapi components.responses.${name}.example`, value: media.example, status: RESPONSE_STATUS[name] });
+      for (const [ex, v] of Object.entries<Json>(media?.examples ?? {})) out.push({ where: `openapi components.responses.${name}.examples.${ex}`, value: v.value, status: RESPONSE_STATUS[name] });
+    }
+    return out;
+  }
+
+  function check(where: string, value: Json, status?: number): void {
+    const rows = catalogRows();
+    expect({ where, keys: Object.keys(value) }).toEqual({ where, keys: ["error"] });
+    const e = value.error;
+    expect({ where, keys: Object.keys(e).sort() }).toEqual({ where, keys: ENVELOPE_KEYS });
+    const r = rows.get(e.code);
+    expect({ where, code: e.code, known: r !== undefined }).toEqual({ where, code: e.code, known: true });
+    expect({ where, type: e.type, message: e.message, doc_url: e.doc_url })
+      .toEqual({ where, type: r?.type, message: r?.message, doc_url: `${DOC_BASE}${e.code}` });
+    if (status !== undefined) expect({ where, status: r?.status }).toEqual({ where, status });
+    expect(e.param === null || typeof e.param === "string").toBe(true);
+    expect(e.request_id).toMatch(/^req_[A-Za-z0-9…]+$/);
+  }
+
+  it("the PRD §9.5 envelope sample, every markdown example and every OpenAPI response example conform", () => {
+    const md = [PRD, CATALOG, ...fs.readdirSync(path.dirname(CATALOG)).filter((f) => f.endsWith(".md")).map((f) => path.join(path.dirname(CATALOG), f))];
+    const all = Array.from(new Set(md)).flatMap(markdownExamples);
+    const prd = all.filter((x) => x.where.startsWith("docs/product/api-platform-prd.md"));
+    expect(prd.length).toBeGreaterThanOrEqual(1);
+    expect(all.some((x) => x.where.startsWith("docs/product/api-0/error-catalog.md"))).toBe(true);
+    for (const x of all) check(x.where, x.value);
+    const oa = openapiExamples();
+    expect(oa.length).toBeGreaterThanOrEqual(2);
+    for (const x of oa) check(x.where, x.value, x.status);
+  });
+
+  it("the PRD sample for model_limit_exceeded has type unprocessable (the m5 defect)", () => {
+    const prd = markdownExamples(PRD).find((x) => x.value.error.code === "model_limit_exceeded");
+    expect(prd?.value.error.type).toBe("unprocessable");
+  });
+
+  it("every negative request example's x-expected-error names a catalog code, status and a dotted param", () => {
+    const rows = catalogRows();
+    for (const [name, ex] of Object.entries<Json>(raw.paths["/verifications"].post.requestBody.content["application/json"].examples)) {
+      const e = ex["x-expected-error"];
+      if (!e) continue;
+      expect({ name, keys: Object.keys(e).sort() }).toEqual({ name, keys: ["code", "param", "status"] });
+      expect({ name, status: rows.get(e.code)?.status }).toEqual({ name, status: e.status });
+      expect(e.param).toMatch(/^[A-Za-z0-9_.-]+$/);
+    }
   });
 });

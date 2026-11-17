@@ -6,6 +6,7 @@
 | 3.1 | 2026-11-03 | **Rev 3.1, confirmation-review fixes.** Auxiliary Gemini permits are sized to the real stance-backfill concurrency and never serialized inside timed call sites. Call records store the outcome the call site observed (timeouts included), and parallel auxiliary calls are keyed by slot. `loadGovernancePolicy` is a write in API mode: it goes through a non-writing port and fails closed. The `track*` call-site count is corrected. |
 | 3.2 | 2026-11-03 | **Rev 3.2, owner acceptance.** The owner accepted the PRD and the API-0 package as design artifacts. API-1 is not authorized. Two owner-recorded design dependencies are added in `api-0/dependencies-and-gates.md`. DEP-15: Gemini receives every research question whatever models are selected, so this must be corrected or deliberately constrained before claiming model-selection independence. DEP-16: API-1 secrets need a separately approved configuration design within the Order 6 environment boundary. Gemini routing and `lib/env.ts` are unchanged. |
 | 4 | 2026-11-17 | **Rev 4 — Owner Decision Addendum 1** (`api-0/owner-decision-addendum-1.md`). Records D1–D10 and the OQ-1..OQ-5 dispositions without rewriting OD-1..OD-21; each OD is marked retained, narrowed, superseded or deferred there (§2). D1 keeps OD-2. D2 supersedes the timing in OD-20 and DEP-1. D3 scopes a secret-only Order 6 boundary correction (`api-0/secret-boundary.md`). D4 lean controlled beta: claim + research, polling, history, capped credits, manual invoicing, every financial safeguard kept; no synthesis, webhooks, SDKs or Stripe API plans in the beta. D6 Gemini pipeline processing disclosed, acknowledged per org, fail closed. D9 adds `GET /v1/verifications`. Stage gates amended explicitly (`api-0/dependencies-and-gates.md` §5). Same-day release-gates decision (Addendum 1 §1.1): beta exclusions P1–P4 confirmed by the owner (they were engineering proposals in the first revision); the server-only secret-boundary design approved (`lib/apiPlatform/secrets.server.ts`, `lib/env.ts` unchanged, no secret created); queue, Redis, scheduler, infrastructure and provider-readiness conditions recorded. CR-1 and CR-2 unchanged |
+| 4 (A3) | 2026-11-17 | **Owner Decision Addendum 3, Quality Correction R2** (`api-0/owner-decision-addendum-3.md`), appended to Rev 4; no earlier owner ruling (OD-1..OD-21, D1–D10, P1–P4) and no beta exclusion changed. Records the owner's rulings R1 (beta excludes only the optional API synthesis feature; existing research-pipeline Gemini operations are inventoried and disclosed, not silently removed), R2 (no full raw model responses in the beta; only approved structured outputs and limited attributed excerpts under stated conditions), R3 (a unanimous "inaccurate" panel is not model disagreement; per-model verdict distribution preserved; `computeClaimVerdict` defect documented, web semantics unchanged here), R4 (consensus has a defined meaning per schema or is `unavailable`), the schema allowlist as NOT approved, the classifier versus pre-reservation conflict as unresolved, #327 R-7 (no lazy rehash-on-read), and the 512 KiB body cap (sizing evidence: owner decision still required for decomposed and escaped input). Corrections m1–m6: catalog reconciled with the #327 draft and drift-tested; documented rate limits and 429 on every operation; idempotent replay before every new-job-only check, with a tested reference model; visible-content input rule; this §9.5 sample; no transitive Ajv. `openapi.yaml` 0.4.0-draft. §8A, §9, §9.3, §9.4 and §9.5 carry appended notes |
 | 4 (A2) | 2026-11-17 | **Owner Decision Addendum 2** (`api-0/owner-decision-addendum-2.md`), appended to Rev 4; no owner ruling and no beta exclusion changed. Records the owner's disposition of the API v1 quality audit (contract preliminary, not frozen; #325 NO-GO until corrected and re-reviewed; #326 gated on #325; #327 NO-GO; C-5 schema allowlist pending owner approval) and that the audit supersedes the earlier CLEAN #325 record. Corrections: discriminated create request (C-1), request text and body rules (C-3), one error catalog `api-0/error-catalog.md` (C-4), normative error precedence (C-6); `openapi.yaml` 0.3.0-draft. §9 and §9.5 carry appended pointers |
 | **Author** | Planning workstream (docs-only), 2026-11-03 |
 | **Baseline** | `main` at `2f70d1f` (Rev 1–3.2); Rev 4 / Addendum 1 at `cabbdbb` |
@@ -632,11 +633,15 @@ The binding policy is §21A P-6.
 
 Full methodology descriptor catalogue: `docs/product/api-0/result-schema.md` §6.
 
+*Addendum 3 (2026-11-17, owner rulings R3, R4):* a claim verdict of `disputed` from `computeClaimVerdict` does **not** mean the models disagreed: when every usable model judges the claim inaccurate, the function falls through to `disputed` (a documented defect; web semantics are not changed by the API work). API results must preserve the per-model verdict distribution and must not describe a unanimous "inaccurate" panel as disagreement; agreement that a claim is inaccurate, genuine disagreement, and independent factual verification (which consensus never establishes) are three different things. Consensus has a defined meaning per schema, or its section is `unavailable` with a precise reason; it never stands in for factual accuracy, evidence reliability or confidence. Detail: `api-0/owner-decision-addendum-3.md` §1 and `api-0/result-schema.md` §4.1, §4.3, §8.
+
 ---
 
 ## 9. API surface
 
 Base URL: `https://api.convergepanel.com/v1` (OD-4, ruled: dedicated host; there is no path-based alternative). TLS only, HTTP requests are rejected, and HSTS is set. JSON only. Request bodies are capped at 64 KB. Claims are capped at 4,000 characters, questions at 4,000 and context at 20,000 (placeholders aligned with `lib/textLimits.ts` and `lib/security/requestValidation.ts`, to be confirmed).
+
+*Addendum 3 (2026-11-17):* the owner approved a body cap of **524,288 bytes (512 KiB)**, replacing the placeholder below; evidence and the remaining owner decision (decomposed and escaped input) are in `api-0/error-catalog.md` §4.3.1. Input text must contain a visible code point (zero-width-only text is `400 empty_input`); DEL and C1 controls are `400 invalid_encoding`.
 
 *Addendum 2 (2026-11-17):* the 64 KB cap is 65,536 bytes (64 KiB), a placeholder pending owner sizing. Character limits are Unicode code points after server-side NFC normalization. The body must be UTF-8 `application/json` (otherwise `415 unsupported_media_type`). The create request is discriminated on `type`: a claim carries only `input.claim`, research carries `input.question` and optional `input.context`. Full rules: `api-0/error-catalog.md` §4; schema: `api-0/openapi.yaml` `CreateVerificationRequest`.
 
@@ -740,6 +745,8 @@ X-Request-Id: req_01HF…
 - **Store (OD-5, ruled).** The existing Firestore limiter (`lib/security/rateLimit.ts`) uses one document per identifier, which can hit Firestore's per-document write throughput under API load. Request-rate windows, per-org concurrency counters and the per-provider API concurrency pool (§13A) use a Redis-class store (e.g. Upstash via the Vercel Marketplace; vendor confirmed in API-1). Entitlements, reservations, the usage and billing ledger and the internal cost ledger stay in Firestore transactions and are authoritative. Redis is never the source of truth for money or entitlement. If the Redis-class store is unreachable, the data plane fails closed for creates (`503`) and reads continue under a conservative in-instance limit.
 - **Platform protection.** Global queue capacity, per-org queue depth and API provider pools protect web customers (CR-2, §13A, §21A P-7).
 
+*Addendum 3 (2026-11-17, m2):* the full rate-limit layers (pre-authentication flood limit per source address; per key for create, write, read and list; per organization), their placeholder numbers, the 429 `rate_limited` response with `Retry-After` on every data-plane operation, and their place in the error precedence (right after authentication, before any body decoding; never dependent on the requested ID) are in `api-0/error-catalog.md` §3.1 and §3.4.
+
 ### 9.4 Idempotency
 - `Idempotency-Key` (≤ 255 chars) is **required** on `POST /v1/verifications` for live keys, because agents and workflow tools retry aggressively. Full semantics: `docs/product/api-0/jobs-and-idempotency.md`.
 - Scope is `(orgId, appId, mode, key)`: test and live keys of one application never collide. It is stored in `apiOrganizations/{orgId}/idempotency/{sha256(appId|mode|key)}` with `{ requestHash, verificationId, responseBody, createdAt }` and a 24-hour TTL.
@@ -747,13 +754,14 @@ X-Request-Id: req_01HF…
 - Same key and same body: returns the stored original `202` (same `id`, header `Idempotent-Replayed: true`), even if the publish failed and the sweeper has not yet dispatched it. Same key with a different body: `409 idempotency_key_reused`.
 - A request rejected before or inside the transaction (any `4xx`/`503`) writes no record, so the key may be reused. Error responses are never replayed.
 - `409 request_in_progress` is returned only when the create transaction exhausts its contention retries on the idempotency document without reading a committed record. The request wrote nothing. A retry gets the replay, or creates the job if no other request committed.
+- *Addendum 3 (2026-11-17, m3):* a currently authorized caller's replay is answered from the record **before** every new-job-only check (model and type availability, credits, queue health, plan limits, concurrency, capacity, beta options), so changed conditions never turn a replay into an error or a second job; the key and organization are re-checked inside the transaction, so a revoked key or suspended organization never obtains a replay. Order, truth table and concurrency argument: `api-0/jobs-and-idempotency.md` §5A.
 
 ### 9.5 Error model
 All errors use one envelope, which extends the existing `createErrorResponse` shape:
 
 ```json
-{ "error": { "type": "invalid_request_error", "code": "model_limit_exceeded",
-             "message": "Your plan allows up to 3 models per verification.",
+{ "error": { "type": "unprocessable", "code": "model_limit_exceeded",
+             "message": "Too many models are selected.",
              "param": "models", "request_id": "req_01HF…",
              "doc_url": "https://docs.convergepanel.com/errors#model_limit_exceeded" } }
 ```
@@ -772,6 +780,8 @@ All errors use one envelope, which extends the existing `createErrorResponse` sh
 | 429 | `rate_limit_error`: `rate_limited`, `concurrency_limit` |
 | 500 | `api_error`: `internal_error` |
 | 503 | `service_unavailable`: `queue_unavailable` (only from the pre-write queue health check; nothing written), `capacity_protection` (CR-2 load shedding), `platform_spend_ceiling`, `maintenance` |
+
+*Addendum 3 (2026-11-17, m5):* the envelope sample above was corrected: `model_limit_exceeded` is a 422 with `type: "unprocessable"` (the table's own 422 row), not `invalid_request_error`, and `message` is the code's fixed catalog string (messages never carry plan-specific values). A test pins every published error example to the catalog.
 
 *Addendum 2 (2026-11-17):* the table above is kept as ruled. The **single source** for error codes is now `api-0/error-catalog.md` §2, which reconciles this table, the OpenAPI response descriptions, the Addendum 1 codes and the implemented API-1a codes, and adds the normative error precedence (§3). `verification_not_found` stays the data-plane contract name; the generic `not_found` is the management-plane code (the implementation adds `verification_not_found`).
 
