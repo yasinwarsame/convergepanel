@@ -159,3 +159,66 @@ describe("identify payloads (login / signup)", () => {
     expect(calls).toEqual(["posthog.identify(user.uid)"]);
   });
 });
+
+describe("round 2 — PostHog paths that bypass before_send, and exception events", () => {
+  beforeEach(() => {
+    mockPathname = "/";
+    mockSearch = "";
+  });
+
+  it("pins PostHog's own personal-data masking with the content-bearing params", () => {
+    render();
+    expect(initConfig.mask_personal_data_properties).toBe(true);
+    expect(initConfig.custom_personal_data_properties).toEqual(expect.arrayContaining(["text", "claim", "q", "question", "redirect", "next"]));
+  });
+
+  it("the REAL posthog-js getPersonInfo (feeds $initial_person_info, session props and /flags) masks the claim under our config", () => {
+    render();
+    const g2 = globalThis as any;
+    const savedLocation = g2.location;
+    jest.isolateModules(() => {
+      g2.window = { location: { href: `https://convergepanel.com/verify?source=extension&text=${enc}` }, document: { referrer: "" } };
+      g2.location = g2.window.location;
+      g2.document = g2.window.document;
+      const realUtils = jest.requireActual("posthog-js/lib/src/utils/event-utils");
+      const info = realUtils.getPersonInfo(initConfig.mask_personal_data_properties, initConfig.custom_personal_data_properties);
+      expect(JSON.stringify(info)).not.toContain("lizards");
+      expect(info.u).toContain("source=extension"); // control: the URL itself is kept
+      // control: without our config the real library would have stored the claim
+      const unmasked = realUtils.getPersonInfo(false, []);
+      expect(JSON.stringify(unmasked)).toContain("lizards");
+    });
+    g2.location = savedLocation;
+    delete g2.document;
+  });
+
+  it("before_send scrubs $initial_person_info (u/r) in properties and $set_once", () => {
+    render();
+    const out = initConfig.before_send({
+      event: "$pageview",
+      properties: { $initial_person_info: { u: `https://convergepanel.com/?claim=${enc}`, r: `https://convergepanel.com/verify?text=${enc}` } },
+      $set_once: { $initial_person_info: { u: `https://convergepanel.com/?q=${enc}`, r: "$direct" } },
+    });
+    expect(JSON.stringify(out)).not.toContain("lizards");
+    expect(out.$set_once.$initial_person_info.r).toBe("$direct"); // control
+  });
+
+  it("before_send redacts $exception_list values / $exception_message (SyntaxError excerpts, URLs) but keeps types", () => {
+    render();
+    const out = initConfig.before_send({
+      event: "$exception",
+      properties: {
+        $exception_type: "SyntaxError",
+        $exception_message: `Unexpected token 'S', "${CLAIM.slice(0, 20)}"... is not valid JSON`,
+        $exception_list: [
+          { type: "SyntaxError", value: `JSON Parse error: Unexpected identifier "${CLAIM.slice(0, 24)}"`, stacktrace: { frames: [{ filename: `https://convergepanel.com/_next/p.js?claim=${enc}`, lineno: 1 }] } },
+          { type: "Error", value: `fetch failed https://convergepanel.com/?q=${enc}` },
+        ],
+      },
+    });
+    expect(JSON.stringify(out)).not.toContain("SYNTHETIC_CLAIM");
+    expect(JSON.stringify(out)).not.toContain("lizards");
+    expect(out.properties.$exception_list[0].type).toBe("SyntaxError"); // control
+    expect(out.properties.$exception_list[0].stacktrace.frames[0].lineno).toBe(1);
+  });
+});

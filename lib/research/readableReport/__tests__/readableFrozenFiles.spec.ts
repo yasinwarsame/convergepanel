@@ -56,7 +56,11 @@ const UNCHANGED_AT_35933C8: Record<string, string> = {
   "lib/adaptiveSchema/exportSnapshot.ts": "5af930878120bbda7ba49ec40045502416859d19",
   "lib/pdf/AdaptiveResearchDocument.tsx": "80e8678d497d7f41a3d7bee48026832f0ec14736",
   "lib/docx/AdaptiveResearchDocxDocument.ts": "d62e84cffefc0a1c7abfb0e42df75ab0f35cf208",
-  "app/page.tsx": "8d97e6296c16b9b0a41c30a8311a88e61de9c9a5",
+  // Re-pinned (owner-authorized privacy remediation PR #329 round 2, 2026-11-18, review B2): ONLY nine client
+  // console-logging arguments in handleRunPanel stop carrying model output (response excerpts, full results/response
+  // objects, SyntaxError messages) and log lengths / keys / ids instead; line count unchanged; no render, report or
+  // provenance code. 8d97e6296c16b9b0a41c30a8311a88e61de9c9a5 → f880b0562d904897d6bb6a6110a4f1371cd5e372.
+  "app/page.tsx": "f880b0562d904897d6bb6a6110a4f1371cd5e372",
 };
 
 /**
@@ -194,10 +198,14 @@ const WIDENED_BY_INC1: Record<string, string> = {
  *
  * Re-pinned (review of O-2, NIT): dsProvenanceUiBoundaries.spec.ts changed only its Team detail route pin (comment-only
  * route change). c0774a6d0452c69795fd49442091d78f3cb8112d → da95909bcc5ad3c9c477cab8dbabf60e99dd7fd9. Same 32-file pinned set.
+ *
+ * Re-pinned (owner-authorized privacy remediation PR #329 round 2, 2026-11-18): dsProvenanceUiBoundaries.spec.ts changed
+ * only its own app/page.tsx pin (client console-logging arguments, see the app/page.tsx entry above).
+ * da95909bcc5ad3c9c477cab8dbabf60e99dd7fd9 → 4a0d36e2914445e4b9573c749ee6b2b91928151a. Same 32-file pinned set.
  */
 const READABLE_GATE_OPTION_BY_INC1: Record<string, string> = {
   "components/adaptive/AdaptiveSynthesisReportView.tsx": "bcdf6ba2444c2aa3dc22ae049901cf72e55eb0bc",
-  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "da95909bcc5ad3c9c477cab8dbabf60e99dd7fd9",
+  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "4a0d36e2914445e4b9573c749ee6b2b91928151a",
   "lib/adaptiveSchema/shareBuilders.ts": "f5e67a0a0ee20e2da15917b2a2f195005943f1ba",
   "lib/adaptiveSchema/__tests__/o5p/historicalParity.spec.tsx": "fce2e3172049cd868607e83a8a0a0147ec4939f3",
 };

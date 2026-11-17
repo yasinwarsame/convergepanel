@@ -17,7 +17,12 @@ import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/components/AuthProvider";
-import { consumeVerifyPrefill, takeVerifyPrefill, verifyReturnPath } from "@/lib/client/verifyPrefill";
+import {
+  capturePendingVerifyInput,
+  consumePendingVerifyInput,
+  updatePendingVerifyInput,
+  verifyReturnPath,
+} from "@/lib/client/verifyPrefill";
 
 function tabSessionStorage(): Storage | null {
   try {
@@ -38,23 +43,44 @@ export default function VerifyPage() {
   // Initialize synchronously so the textarea and char count render immediately.
   // searchParams.get() already URL-decodes, so no further decoding is needed.
   const [claim, setClaim] = useState(rawText);
-  // On arrival (and whenever a new `text` arrives): move the text into this
-  // tab's sessionStorage and strip it from the address bar. With no `text` in
-  // the URL (e.g. back from the signup/login detour) this restores it from
-  // sessionStorage. Only a non-empty result updates the textarea, so the
+  const currentUid = user?.uid ?? null;
+  // On arrival (and whenever a new `text` arrives, or the signed-in identity
+  // resolves): move the text into this tab's bounded, expiring pending input
+  // (lib/client/verifyPrefill.ts) and strip it from the address bar. With no
+  // `text` in the URL (e.g. back from the signup/login detour) this restores
+  // the pending input. Only a non-empty result updates the textarea, so the
   // URL rewrite itself (rawText -> "") never clears what the user sees.
   useEffect(() => {
-    const text = takeVerifyPrefill({ location: window.location, history: window.history, storage: tabSessionStorage() });
+    const text = capturePendingVerifyInput({
+      location: window.location,
+      history: window.history,
+      storage: tabSessionStorage(),
+      currentUid,
+    });
     if (text) setClaim(text);
-  }, [rawText]);
+  }, [rawText, currentUid]);
 
+  const handleClaimChange = (value: string) => {
+    setClaim(value);
+    updatePendingVerifyInput(tabSessionStorage(), value, currentUid);
+  };
+
+  const handleDiscard = () => {
+    consumePendingVerifyInput(tabSessionStorage());
+    setClaim("");
+  };
+
+  // NOTE (residual, owner decision D5): the hand-off below still puts the text
+  // in `?claim=` / `?q=` because the hash-frozen app/page.tsx reads only those
+  // params (and router.replace("/")s them away after reading). Telemetry is
+  // protected by the boundary sanitizer; RSC request logs are not.
   const handleClaimVerification = () => {
-    consumeVerifyPrefill(tabSessionStorage());
+    consumePendingVerifyInput(tabSessionStorage());
     router.push(`/?tab=verify&claim=${encodeURIComponent(claim)}`);
   };
 
   const handleDeepResearch = () => {
-    consumeVerifyPrefill(tabSessionStorage());
+    consumePendingVerifyInput(tabSessionStorage());
     router.push(`/?tab=research&q=${encodeURIComponent(claim)}`);
   };
 
@@ -88,15 +114,24 @@ export default function VerifyPage() {
           <textarea
             id="verify-text"
             value={claim}
-            onChange={(e) => setClaim(e.target.value)}
+            onChange={(e) => handleClaimChange(e.target.value)}
             rows={6}
             className="w-full resize-y rounded-xl border border-cp-border bg-cp-raised px-4 py-3 text-sm text-cp-text placeholder:text-cp-faint focus:border-cp-accent focus:outline-none focus:ring-2 focus:ring-cp-primary-soft"
             placeholder="Paste a claim, quote, or statement to verify…"
           />
           {claim && (
-            <p className="mt-2 text-xs text-cp-faint">
-              {claim.length} character{claim.length !== 1 ? "s" : ""}
-            </p>
+            <div className="mt-2 flex items-center justify-between text-xs text-cp-faint">
+              <p>
+                {claim.length} character{claim.length !== 1 ? "s" : ""}
+              </p>
+              <button
+                type="button"
+                onClick={handleDiscard}
+                className="font-semibold text-cp-muted underline-offset-2 hover:text-cp-text hover:underline"
+              >
+                Discard text
+              </button>
+            </div>
           )}
         </div>
 
@@ -125,6 +160,7 @@ export default function VerifyPage() {
             </button>
             <Link
               href="/"
+              onClick={() => consumePendingVerifyInput(tabSessionStorage())}
               className="flex-1 rounded-[11px] border border-cp-border bg-cp-surface px-5 py-3 text-center text-sm font-semibold text-cp-text shadow-sm transition hover:border-cp-faint hover:bg-cp-raised"
             >
               Open Main App

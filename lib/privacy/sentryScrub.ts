@@ -11,6 +11,7 @@
  */
 
 import { scrubUrlFields } from "./sanitizeUrl";
+import { redactExceptionValue } from "./exceptionText";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -38,19 +39,50 @@ function scrubUser(user: unknown): void {
   delete u.username;
 }
 
+export const CONSOLE_MESSAGE_REDACTED = "[console message redacted]";
+
+/**
+ * Round 2 (review M1): a `console` breadcrumb carries the console call's
+ * message and its raw `data.arguments` — which, on this app, have included
+ * model output and API responses. Replay inherits these breadcrumbs. Keep the
+ * operational signal (category, level, timestamp, logger) and drop the content.
+ */
+function stripConsoleBreadcrumb(crumb: AnyRecord): void {
+  if (crumb.category !== "console") return;
+  crumb.message = CONSOLE_MESSAGE_REDACTED;
+  const data = crumb.data && typeof crumb.data === "object" ? (crumb.data as AnyRecord) : undefined;
+  crumb.data = data && typeof data.logger === "string" ? { logger: data.logger } : undefined;
+  if (crumb.data === undefined) delete crumb.data;
+}
+
+function scrubExceptions(exception: unknown): void {
+  const values = exception && typeof exception === "object" ? (exception as AnyRecord).values : undefined;
+  if (!Array.isArray(values)) return;
+  for (const v of values) {
+    if (v && typeof v === "object" && typeof (v as AnyRecord).value === "string") {
+      (v as AnyRecord).value = redactExceptionValue(String((v as AnyRecord).type ?? ""), (v as AnyRecord).value as string);
+    }
+  }
+}
+
 /** `beforeSend` / `beforeSendTransaction` / event processor body. Mutates and returns the event. */
 export function scrubSentryEvent<E>(event: E): E {
   if (!event || typeof event !== "object") return event;
   const e = event as unknown as AnyRecord;
   scrubRequest(e.request);
   scrubUser(e.user);
+  scrubExceptions(e.exception);
+  if (Array.isArray(e.breadcrumbs)) {
+    for (const crumb of e.breadcrumbs) if (crumb && typeof crumb === "object") stripConsoleBreadcrumb(crumb as AnyRecord);
+  }
   scrubUrlFields(e);
   return event;
 }
 
-/** `beforeBreadcrumb` body: navigation `from`/`to`, fetch/xhr `url`, any nested URL field. */
+/** `beforeBreadcrumb` body: console content dropped; navigation `from`/`to`, fetch/xhr `url`, any nested URL field scrubbed. */
 export function scrubSentryBreadcrumb<B>(breadcrumb: B): B {
   if (!breadcrumb || typeof breadcrumb !== "object") return breadcrumb;
+  stripConsoleBreadcrumb(breadcrumb as unknown as AnyRecord);
   scrubUrlFields(breadcrumb);
   return breadcrumb;
 }
@@ -64,6 +96,11 @@ export function scrubSentryBreadcrumb<B>(breadcrumb: B): B {
  */
 export function scrubReplayRecordingEvent<R>(recordingEvent: R): R {
   if (!recordingEvent || typeof recordingEvent !== "object") return recordingEvent;
+  // Breadcrumb custom events (`{type: 5, data: {tag: "breadcrumb", payload}}`) include console breadcrumbs
+  // with their arguments; strip them exactly as `beforeBreadcrumb` does.
+  const data = (recordingEvent as unknown as AnyRecord).data;
+  const payload = data && typeof data === "object" ? (data as AnyRecord).payload : undefined;
+  if (payload && typeof payload === "object") stripConsoleBreadcrumb(payload as AnyRecord);
   scrubUrlFields(recordingEvent, { maxDepth: 256 });
   return recordingEvent;
 }

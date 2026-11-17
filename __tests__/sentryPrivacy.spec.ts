@@ -217,3 +217,90 @@ describe("browser Sentry — Replay and the shared event processor", () => {
     expect(out.urls[1]).toBe("https://convergepanel.com/dashboard");
   });
 });
+
+/**
+ * Round 2 (review M1 / MINOR-3): console breadcrumbs, exception values,
+ * stack frames and fragments. Synthetic model output / claim sentinels.
+ */
+const MODEL_OUT = "SYNTHETIC_MODEL_OUTPUT_R2 the panel concluded the moon is hollow";
+
+describe.each([
+  ["browser", "../instrumentation-client"],
+  ["server", "../sentry.server.config"],
+  ["edge", "../sentry.edge.config"],
+])("%s Sentry — round 2 content sinks", (_label, modulePath) => {
+  function load() {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    require(modulePath);
+  }
+
+  it("beforeBreadcrumb: a console breadcrumb keeps category/level/logger but loses message and arguments", () => {
+    load();
+    const out = initConfig.beforeBreadcrumb(
+      { category: "console", level: "log", message: `[panel] Raw results ${MODEL_OUT}`, data: { arguments: ["[panel] Raw results", [{ rawText: MODEL_OUT }]], logger: "console" } },
+      {}
+    );
+    expect(JSON.stringify(out)).not.toContain("SYNTHETIC_MODEL_OUTPUT_R2");
+    expect(out).toEqual({ category: "console", level: "log", message: "[console message redacted]", data: { logger: "console" } });
+  });
+
+  it("beforeSend: console breadcrumbs embedded in an error event are stripped; others survive", () => {
+    load();
+    const out = initConfig.beforeSend(
+      {
+        exception: { values: [{ type: "Error", value: "boom" }] },
+        breadcrumbs: [
+          { category: "console", level: "error", message: MODEL_OUT, data: { arguments: [MODEL_OUT] } },
+          { category: "ui.click", message: "button#run" },
+        ],
+      },
+      {}
+    );
+    expect(JSON.stringify(out)).not.toContain("SYNTHETIC_MODEL_OUTPUT_R2");
+    expect(out.breadcrumbs[1]).toEqual({ category: "ui.click", message: "button#run" }); // control
+  });
+
+  it("beforeSend: a JSON SyntaxError value loses its quoted excerpt; frames lose query strings; fragments are redacted", () => {
+    load();
+    const out = initConfig.beforeSend(
+      {
+        exception: {
+          values: [
+            {
+              type: "SyntaxError",
+              value: `Unexpected token 'S', "${MODEL_OUT.slice(0, 26)}"... is not valid JSON`,
+              stacktrace: { frames: [{ filename: `app:///_next/static/chunks/page.js?claim=${enc}`, abs_path: `https://convergepanel.com/_next/x.js?text=${enc}`, lineno: 3, function: "handleRunPanel" }] },
+            },
+            { type: "Error", value: `Request failed for https://convergepanel.com/?q=${enc}` },
+          ],
+        },
+        contexts: { trace: { data: { "http.fragment": `text=${enc}` } } },
+      },
+      {}
+    );
+    const json = JSON.stringify(out);
+    expect(json).not.toContain("SYNTHETIC_MODEL_OUTPUT_R2");
+    expect(json).not.toContain("microchips");
+    expect(out.exception.values[0].stacktrace.frames[0].function).toBe("handleRunPanel"); // control
+    expect(out.exception.values[0].stacktrace.frames[0].lineno).toBe(3);
+    expect(out.exception.values[0].value).toContain("is not valid JSON"); // error class signal kept
+  });
+
+  it("beforeSend: an over-long exception value is capped", () => {
+    load();
+    const out = initConfig.beforeSend({ exception: { values: [{ type: "Error", value: "x".repeat(5000) }] } }, {});
+    expect(out.exception.values[0].value.length).toBeLessThan(400);
+  });
+});
+
+describe("browser Sentry — Replay console events (round 2)", () => {
+  it("beforeAddRecordingEvent strips console breadcrumb payloads", () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    require("../instrumentation-client");
+    const ev = { type: 5, timestamp: 1, data: { tag: "breadcrumb", payload: { category: "console", level: "log", message: MODEL_OUT, data: { arguments: [{ rawText: MODEL_OUT }], logger: "console" } } } };
+    const out = replayOptions.beforeAddRecordingEvent(ev);
+    expect(JSON.stringify(out)).not.toContain("SYNTHETIC_MODEL_OUTPUT_R2");
+    expect(out.data.payload.level).toBe("log");
+    expect(out.data.tag).toBe("breadcrumb");
+  });
+});

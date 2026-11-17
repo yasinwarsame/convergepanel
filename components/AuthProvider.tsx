@@ -121,6 +121,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
     let authReadySet = false;
     const generationGuard = createGenerationGuard();
     const prevUidRef = { current: null as string | null };
+    // Round 2 (review B1): the last identity Firebase reported in this tab,
+    // INCLUDING one whose server-session sync then failed (prevUidRef is reset
+    // before the fail-closed signOut). "Was someone signed in?" for the
+    // sign-out cleanup must not depend on whether their sync succeeded.
+    const lastIdentityRef = { current: null as string | null };
 
     const timeoutId = setTimeout(() => {
       if (!resolved && isMounted) {
@@ -162,13 +167,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
         // EVERY sign-out path (TopNav, profile, revoked/expired session,
         // fail-closed sync failure), so it is the one place that removes
         // browser-side copies of user content — the per-uid history cache
-        // (claims + model output) and the /verify hand-off text — and, when
+        // (claims + model output) and, for a real sign-out, the /verify
+        // pending input — and, when
         // an identity was actually signed in, unlinks the PostHog distinct
         // id so later anonymous events are not attributed to that person.
         // Synchronous and first, before any await, so nothing can re-read
         // the cache in between.
-        const hadIdentity = prevUidRef.current !== null;
-        clearLocalPrivateDataOnSignOut();
+        const hadIdentity = prevUidRef.current !== null || lastIdentityRef.current !== null;
+        lastIdentityRef.current = null;
+        // Round 2 (review B1): the /verify pending input is cleared only when
+        // a signed-in identity signs out — an anonymous cold load also lands
+        // here and must keep it (lib/client/verifyPrefill.ts).
+        clearLocalPrivateDataOnSignOut({ hadIdentity });
         if (hadIdentity) {
           try {
             posthog.reset();
@@ -203,6 +213,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         // logout in between) must not leave the previous account's cached
         // history on this browser.
         clearOtherAccountsLocalData(nextUser.uid);
+        lastIdentityRef.current = nextUser.uid;
         dispatchSync({ type: "client_signed_in", uid: nextUser.uid });
         dispatchSync({ type: "session_sync_started" });
       } else {

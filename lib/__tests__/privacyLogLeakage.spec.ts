@@ -141,3 +141,63 @@ describe("L3/L4 — provider error bodies (Grok, Perplexity)", () => {
     expect(out).toContain("bad_request"); // control
   });
 });
+
+/**
+ * Round 2 (review M2) — model-output previews in server/client logs.
+ */
+describe("M2 — lib/agreementMap.ts (runs on server and client)", () => {
+  it("buildAgreementMap logs counts / lengths only — no previews, no claim text", () => {
+    const { buildAgreementMap } = require("@/lib/agreementMap");
+    const body = (id: string) =>
+      `## Summary\n${MODEL_OUTPUT} ${id}. The ${MODEL_OUTPUT} keeps going for a while so that sentences are extracted.\n\n## Key Claims\n- ${MODEL_OUTPUT} first key claim sentence here.\n- ${MODEL_OUTPUT} second key claim sentence here.\n`;
+    buildAgreementMap([
+      { modelId: "chatgpt", status: "ok", rawText: body("a"), latencyMs: 1 },
+      { modelId: "claude", status: "ok", rawText: body("b"), latencyMs: 1 },
+    ]);
+    const out = logged();
+    expect(out).not.toContain("SYNTHETIC_MODEL_OUTPUT_SENTINEL");
+    expect(out).toContain("Claim extraction summary"); // control
+    expect(out).toContain("textLengthsByModel");
+  });
+});
+
+describe("M2 — lib/adaptiveSchema/validator.ts", () => {
+  const { validateAdaptiveResponse } = require("@/lib/adaptiveSchema/validator");
+  const { getResultSchema } = require("@/lib/adaptiveSchema/schemaRegistry");
+  const schema = getResultSchema("comparison_matrix");
+
+  it("invalid JSON: the SyntaxError excerpt of the model's text is not logged", () => {
+    validateAdaptiveResponse("chatgpt", schema, "LEAKVAL123 this is not json");
+    expect(logged()).not.toContain("LEAKVAL123");
+    expect(logged()).toContain("Response was not valid JSON"); // control
+  });
+
+  it("schema-invalid JSON: Zod messages (which quote received values) are not logged — field names are", () => {
+    const obj: Record<string, unknown> = {};
+    for (const f of schema.fields) obj[f.key] = `${MODEL_OUTPUT} ${f.key}`;
+    validateAdaptiveResponse("chatgpt", schema, JSON.stringify(obj));
+    const out = logged();
+    expect(out).not.toContain("SYNTHETIC_MODEL_OUTPUT_SENTINEL");
+    expect(out).toMatch(/issueFields|schema validation/i); // control
+  });
+});
+
+describe("M2 — source dispositions for provider / panel error logs", () => {
+  const read = (p: string) => require("fs").readFileSync(require("path").join(__dirname, "..", "..", p), "utf8");
+  it.each([
+    ["lib/connectors/deepseek.ts", /msg=\$\{msg\.slice/],
+    ["lib/panel.ts", /Promise rejected for model \$\{modelId\}:`, settled\.reason\)/],
+    ["lib/panel.ts", /Unexpected throw from \$\{modelId\}:`, err\)/],
+    ["lib/panel.ts", /\$\{dsResult\.message\}/],
+    ["lib/connectors/chatgpt.ts", /ChatGPT API error:", \{\s*message: error\?\.message/],
+    ["lib/connectors/claude.ts", /Claude API error:", \{\s*message: error\?\.message/],
+    ["lib/connectors/gemini.ts", /\bmessage: error\?\.message,|errorMessage: (?:fetchError|error)\?\.message,/],
+    ["lib/runPanelExecution.ts", /contentPreview\s*:/],
+    ["app/api/synthesize-panel/route.ts", /rawPreview\s*:|parseError: parseError\?\.message|validationErrors: validationError\?\.errors/],
+    ["components/PanelSynthesisView.tsx", /responsePreview\s*:|Failed to parse server response: \$\{parseError\.message\}/],
+    ["components/ResultsDisplay.tsx", /Received results:", results\)/],
+    ["app/page.tsx", /responseText\.substring|fullResponse: data|"Invalid response structure:", data\)|Raw results from API:", data\.results\)|Skipping malformed result:", result\)/],
+  ])("%s no longer contains %s", (file, pattern) => {
+    expect(read(file)).not.toMatch(pattern);
+  });
+});

@@ -132,7 +132,7 @@ export async function callChatGPT(
   } catch (error: any) {
     const latencyMs = Date.now() - startTime;
     console.error("ChatGPT API error:", {
-      message: error?.message,
+      code: typeof error?.code === "string" ? error.code : undefined, // privacy: was error.message (can echo request content)
       status: error?.status,
       name: error?.name,
     });

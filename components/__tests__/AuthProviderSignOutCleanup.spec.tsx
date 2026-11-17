@@ -11,6 +11,7 @@ import TestRenderer, { act } from "react-test-renderer";
 import { FakeStorage } from "@/lib/client/__tests__/helpers/fakeStorage";
 
 let tokenCallback: ((user: any) => Promise<void>) | undefined;
+let mockSyncOk = true;
 const mockSignOut = jest.fn(async () => undefined);
 jest.mock("firebase/auth", () => ({
   onIdTokenChanged: (_auth: unknown, cb: any) => {
@@ -23,7 +24,7 @@ jest.mock("firebase/auth", () => ({
 jest.mock("@/lib/firebase/client", () => ({ auth: {} }));
 jest.mock("@/lib/utils/performance", () => ({ perf: { mark: () => undefined, measure: () => undefined, logMetrics: () => undefined } }));
 jest.mock("@/lib/client/sessionSync", () => ({
-  establishServerSession: async (user: any) => ({ ok: true, uid: user.uid }),
+  establishServerSession: async (user: any) => (mockSyncOk ? { ok: true, uid: user.uid } : { ok: false, reason: "synthetic" }),
   clearServerSession: async () => true,
 }));
 jest.mock("@/lib/client/authSessionTelemetry", () => ({ logAuthSessionClientEvent: () => undefined }));
@@ -68,7 +69,7 @@ describe("AuthProvider — sign-out clears local private data", () => {
     await emit({ uid: "uid-a" });
     local.setItem("convergePanelHistoryV1:uid-a", HISTORY);
     local.setItem("unrelated-pref", "keep");
-    session.setItem("convergePanelVerifyPrefillV1", "SYNTHETIC_CLAIM_A");
+    session.setItem("convergePanelVerifyPendingV2", JSON.stringify({ v: 2, text: "SYNTHETIC_CLAIM_A", boundUid: "uid-a", expiresAt: Date.now() + 60_000 }));
 
     await emit(null);
 
@@ -83,6 +84,31 @@ describe("AuthProvider — sign-out clears local private data", () => {
     await emit(null);
     expect(local.getItem("convergePanelHistoryV1:uid-old")).toBeNull();
     expect(mockReset).not.toHaveBeenCalled();
+  });
+
+  it("round 2 (review B1): an anonymous cold load's null callback KEEPS the /verify pending input; a later sign-in claims it", async () => {
+    session.setItem("convergePanelVerifyPendingV2", JSON.stringify({ v: 2, text: "SYNTHETIC_CLAIM_ANON", boundUid: null, expiresAt: Date.now() + 60_000 }));
+    await emit(null);
+    expect(session.getItem("convergePanelVerifyPendingV2")).toContain("SYNTHETIC_CLAIM_ANON");
+    await emit({ uid: "uid-a" });
+    expect(JSON.parse(session.getItem("convergePanelVerifyPendingV2")!).boundUid).toBe("uid-a");
+  });
+
+  it("round 2: a pending input bound to A is removed when B signs in (direct switch)", async () => {
+    await emit({ uid: "uid-a" });
+    session.setItem("convergePanelVerifyPendingV2", JSON.stringify({ v: 2, text: "SYNTHETIC_CLAIM_A", boundUid: "uid-a", expiresAt: Date.now() + 60_000 }));
+    await emit({ uid: "uid-b" });
+    expect(session.getItem("convergePanelVerifyPendingV2")).toBeNull();
+  });
+
+  it("round 2: a failed server-session sync still counts as 'was signed in' — the fail-closed sign-out clears the pending input and resets PostHog", async () => {
+    mockSyncOk = false;
+    session.setItem("convergePanelVerifyPendingV2", JSON.stringify({ v: 2, text: "SYNTHETIC_CLAIM_X", boundUid: null, expiresAt: Date.now() + 60_000 }));
+    await emit({ uid: "uid-x" }); // claims it, then sync fails -> AuthProvider signs out
+    await emit(null);
+    expect(session.getItem("convergePanelVerifyPendingV2")).toBeNull();
+    expect(mockReset).toHaveBeenCalledTimes(1);
+    mockSyncOk = true;
   });
 
   it("a direct account switch (A -> B, no logout) removes A's cache and keeps B's", async () => {

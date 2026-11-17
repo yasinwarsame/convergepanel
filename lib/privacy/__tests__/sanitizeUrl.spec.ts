@@ -10,6 +10,7 @@ import {
   sanitizeUrlValue,
   sanitizeUrlsInText,
   scrubUrlFields,
+  TRUNCATED,
 } from "@/lib/privacy/sanitizeUrl";
 
 const CLAIM = "SYNTHETIC_CLAIM_the moon is made of cheese";
@@ -75,10 +76,27 @@ describe("sanitizeUrl — sensitive params are redacted (value gone, name kept)"
     }
   });
 
-  it("keeps every allowlisted param's value (control: non-sensitive telemetry still flows)", () => {
+  it("keeps every allowlisted param's well-shaped value (control: non-sensitive telemetry still flows)", () => {
+    const sample: Record<string, string> = { tab: "verify", page: "2", limit: "30", offset: "0", signedOut: "1", sessionClearFailed: "1", success: "true", canceled: "true", upgraded: "1" };
     for (const name of SAFE_QUERY_PARAMS) {
-      expect(sanitizeUrl(`/p?${name}=v1`)).toBe(`/p?${name}=v1`);
+      const v = sample[name] ?? (name.startsWith("utm_") ? "spring-2026_news.letter" : "needs_review");
+      expect(sanitizeUrl(`/p?${name}=${v}`)).toBe(`/p?${name}=${v}`);
     }
+  });
+
+  it("round 2: an allowlisted NAME with a content-shaped VALUE is redacted (?tab=<claim>)", () => {
+    for (const name of SAFE_QUERY_PARAMS) {
+      const out = sanitizeUrl(`/p?${name}=${enc}`);
+      expect(out).toBe(`/p?${name}=${REDACTED}`);
+    }
+    expect(sanitizeUrl("/?tab=moon")).toBe(`/?tab=${REDACTED}`); // tab is enumerated
+    expect(sanitizeUrl("/?page=2abc")).toBe(`/?page=${REDACTED}`);
+    expect(sanitizeUrl(`/?utm_campaign=${encodeURIComponent("the moon is cheese")}`)).toBe(`/?utm_campaign=${REDACTED}`);
+  });
+
+  it("round 2: ';' is a separator — a claim after ';' is redacted", () => {
+    expect(sanitizeUrl(`/?tab=verify;claim=${enc}`)).toBe(`/?tab=verify&claim=${REDACTED}`);
+    expect(sanitizeUrl(`/?source=extension;text=${enc}`)).not.toContain("cheese");
   });
 
   it("the allowlist contains no content-, identity- or redirect-bearing name", () => {
@@ -106,6 +124,13 @@ describe("sanitizeUrlsInText", () => {
     const text = `GET https://convergepanel.com/api/x?q=${enc} then "/verify?text=${enc}" done`;
     const out = sanitizeUrlsInText(text);
     expect(out).toBe(`GET https://convergepanel.com/api/x?q=${REDACTED} then "/verify?text=${REDACTED}" done`);
+  });
+
+  it("round 2: uppercase schemes, scheme-less host/path?q=, bare ?q= and app:/// frames are sanitized", () => {
+    const text = `HTTPS://CONVERGEPANEL.COM/verify?text=${enc} and convergepanel.com/verify?text=${enc} and ?q=${enc} at app:///_next/x.js?claim=${enc}`;
+    const out = sanitizeUrlsInText(text);
+    expect(out).not.toContain("cheese");
+    expect(out).toBe(`HTTPS://CONVERGEPANEL.COM/verify?text=${REDACTED} and convergepanel.com/verify?text=${REDACTED} and ?q=${REDACTED} at app:///_next/x.js?claim=${REDACTED}`);
   });
 
   it("leaves text with no URL unchanged (control)", () => {
@@ -143,6 +168,32 @@ describe("scrubUrlFields", () => {
     const o: any = { query_string: { claim: CLAIM, tab: "verify" } };
     scrubUrlFields(o);
     expect(o.query_string).toEqual({ claim: REDACTED, tab: "verify" });
+  });
+
+  it("round 2: DOM src/srcset/action, stack-frame filename/abs_path, exception value and fragment keys are scrubbed", () => {
+    const p: any = {
+      attributes: { src: `/img?q=${enc}`, srcset: `/a.png?text=${enc} 2x`, action: `/submit?claim=${enc}` },
+      frames: [{ filename: `app:///page.js?claim=${enc}`, abs_path: `https://h/x.js?q=${enc}`, function: "f" }],
+      values: [{ type: "Error", value: `failed at https://h/?claim=${enc}` }],
+      "http.fragment": `text=${enc}`,
+      "url.fragment": `#text=${enc}`,
+      $exception_message: `boom ?q=${enc}`,
+    };
+    scrubUrlFields(p);
+    expect(JSON.stringify(p)).not.toContain("cheese");
+    expect(p.frames[0].function).toBe("f");
+    expect(p["http.fragment"]).toBe(REDACTED);
+  });
+
+  it("round 2: depth bound FAILS CLOSED — an object below the bound is replaced, never sent unscrubbed", () => {
+    let deep: any = { url: `/x?q=${enc}`, inner: { href: `/y?q=${enc}` } };
+    for (let i = 0; i < 20; i++) deep = { child: deep };
+    scrubUrlFields(deep); // default bound 12
+    expect(JSON.stringify(deep)).not.toContain("cheese");
+    expect(JSON.stringify(deep)).toContain(TRUNCATED);
+    const arr: any = { a: [[[[[[[[[[[[[{ url: `/x?q=${enc}` }]]]]]]]]]]]]] };
+    scrubUrlFields(arr);
+    expect(JSON.stringify(arr)).not.toContain("cheese");
   });
 
   it("is cycle-safe and honours maxDepth", () => {

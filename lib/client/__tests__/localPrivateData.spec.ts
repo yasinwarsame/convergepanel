@@ -4,11 +4,11 @@
  */
 import {
   PANEL_HISTORY_STORAGE_PREFIX,
-  VERIFY_PREFILL_STORAGE_KEY,
+  clearLocalPrivateDataOnSignOut,
   clearPanelHistoryCache,
-  clearVerifyPrefill,
   panelHistoryStorageKey,
 } from "@/lib/client/localPrivateData";
+import { VERIFY_PENDING_STORAGE_KEY } from "@/lib/client/verifyPrefill";
 import { FakeStorage } from "./helpers/fakeStorage";
 
 const ITEM = JSON.stringify([{ claim: "SYNTHETIC_CLAIM", payload: { summary: "SYNTHETIC_MODEL_OUTPUT" } }]);
@@ -59,13 +59,32 @@ describe("clearPanelHistoryCache", () => {
   });
 });
 
-describe("clearVerifyPrefill", () => {
-  it("removes the /verify hand-off text only", () => {
-    const s = new FakeStorage();
-    s.setItem(VERIFY_PREFILL_STORAGE_KEY, "SYNTHETIC_CLAIM");
-    s.setItem("other", "keep");
-    clearVerifyPrefill(s);
-    expect(s.keys()).toEqual(["other"]);
-    expect(() => clearVerifyPrefill(null)).not.toThrow();
+describe("clearLocalPrivateDataOnSignOut (round 2, review B1)", () => {
+  const g = globalThis as any;
+  const saved = g.window;
+  afterEach(() => {
+    g.window = saved;
+  });
+  function setup() {
+    const local = new FakeStorage();
+    const session = new FakeStorage();
+    local.setItem("convergePanelHistoryV1:uid-a", ITEM);
+    session.setItem(VERIFY_PENDING_STORAGE_KEY, JSON.stringify({ v: 2, text: "SYNTHETIC_CLAIM", boundUid: null, expiresAt: Date.now() + 60_000 }));
+    g.window = { localStorage: local, sessionStorage: session };
+    return { local, session };
+  }
+
+  it("a real sign-out (hadIdentity) clears history AND the pending input", () => {
+    const { local, session } = setup();
+    clearLocalPrivateDataOnSignOut({ hadIdentity: true });
+    expect(local.length).toBe(0);
+    expect(session.length).toBe(0);
+  });
+
+  it("an anonymous cold load (no identity) clears history but KEEPS the pending input", () => {
+    const { local, session } = setup();
+    clearLocalPrivateDataOnSignOut({ hadIdentity: false });
+    expect(local.length).toBe(0);
+    expect(session.getItem(VERIFY_PENDING_STORAGE_KEY)).not.toBeNull();
   });
 });

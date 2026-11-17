@@ -6,6 +6,31 @@ import { PostHogProvider as PHProvider } from "posthog-js/react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, Suspense } from "react";
 import { sanitizeUrl, sanitizeUrlsInText, scrubUrlFields } from "@/lib/privacy/sanitizeUrl";
+import { redactExceptionValue } from "@/lib/privacy/exceptionText";
+
+/**
+ * Round 2 (review MINOR-1): query parameters PostHog's own personal-data
+ * masking must blank in every URL it stores or sends outside `before_send`
+ * (`$initial_person_info`, `$client_session_props`, the `/flags` request's
+ * `$initial_current_url` / `$current_url` person properties).
+ */
+export const POSTHOG_CONTENT_PARAMS = ["text", "claim", "q", "question", "redirect", "next", "selectedText"];
+
+/** `{ u: url, r: referrer }` (PostHog's compact person-info shape) — sanitized in place. */
+function scrubCompactPersonInfo(info: unknown): void {
+  if (!info || typeof info !== "object") return;
+  const rec = info as Record<string, unknown>;
+  for (const k of ["u", "r"]) if (typeof rec[k] === "string") rec[k] = sanitizeUrl(rec[k] as string);
+}
+
+function scrubExceptionList(list: unknown): void {
+  if (!Array.isArray(list)) return;
+  for (const item of list) {
+    if (item && typeof item === "object" && typeof (item as any).value === "string") {
+      (item as any).value = redactExceptionValue(String((item as any).type ?? ""), (item as any).value);
+    }
+  }
+}
 
 function PageviewTracker() {
   const pathname = usePathname();
@@ -48,6 +73,14 @@ function PageviewTracker() {
 const beforeSend: BeforeSendFn = (event: CaptureResult | null) => {
   if (!event) return event;
   if (event.properties) {
+    scrubExceptionList(event.properties.$exception_list);
+    if (typeof event.properties.$exception_message === "string") {
+      event.properties.$exception_message = redactExceptionValue(
+        String(event.properties.$exception_type ?? ""),
+        event.properties.$exception_message
+      );
+    }
+    scrubCompactPersonInfo(event.properties.$initial_person_info);
     scrubUrlFields(event.properties);
     if (typeof event.properties.$elements_chain === "string") {
       event.properties.$elements_chain = sanitizeUrlsInText(event.properties.$elements_chain);
@@ -62,7 +95,10 @@ const beforeSend: BeforeSendFn = (event: CaptureResult | null) => {
     }
   }
   if (event.$set) scrubUrlFields(event.$set);
-  if (event.$set_once) scrubUrlFields(event.$set_once);
+  if (event.$set_once) {
+    scrubCompactPersonInfo((event.$set_once as Record<string, unknown>).$initial_person_info);
+    scrubUrlFields(event.$set_once);
+  }
   return event;
 };
 
@@ -96,6 +132,13 @@ export function PostHogProvider({ children }: { children: React.ReactNode }) {
         recordHeaders: false,
         recordBody: false,
       },
+      // Round 2 (review MINOR-1): PostHog stores the raw landing URL in
+      // `$initial_person_info` / `$client_session_props` and sends
+      // `$initial_current_url` with the `/flags` request — paths that bypass
+      // `before_send`. Its own personal-data masking blanks these parameters
+      // in all of them.
+      mask_personal_data_properties: true,
+      custom_personal_data_properties: POSTHOG_CONTENT_PARAMS,
       before_send: beforeSend,
       loaded: (ph) => {
         if (process.env.NODE_ENV === "development") ph.debug();

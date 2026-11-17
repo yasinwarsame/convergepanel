@@ -77,6 +77,7 @@ import { isPathSafeRunId, resolveSynthesisRunAccess, SYNTHESIS_RUN_FORBIDDEN, SY
 import { synthesizeReport } from "@/lib/consensus";
 import type { ModelResult } from "@/lib/types";
 import { logger, redact } from "@/lib/logger";
+import { errorName, issueSummary } from "@/lib/privacy/contentFreeDiagnostics";
 import { buildSubstitutionBlock, substitutionEntryFromSupplied, coerceStatus, type SubstitutionBlockEntry } from "@/lib/panel/normalize";
 import type { UserProfile } from "@/lib/types";
 import { evaluateAndStoreGovernance } from "@/lib/governance/evaluateAndStore";
@@ -1894,8 +1895,8 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
     } catch (parseError: any) {
       logger.error(`[${requestId}] [synthesize-panel] JSON parse error`, {
         requestId,
-        error: parseError?.message,
-        rawPreview: synthesizedText.substring(0, 500),
+        errorName: errorName(parseError), // privacy: a SyntaxError message quotes the report text
+        rawLength: synthesizedText.length, // privacy: was rawPreview (first 500 chars of model output)
       });
       return NextResponse.json(
         createErrorResponse(
@@ -1903,7 +1904,7 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
           "Failed to parse synthesis report as JSON",
           requestId,
           {
-            parseError: parseError?.message,
+            parseError: errorName(parseError),
           }
         ),
         { status: 500 }
@@ -1943,9 +1944,9 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
     } catch (validationError: any) {
       logger.error(`[${requestId}] [synthesize-panel] Schema validation failed`, {
         requestId,
-        error: validationError?.message,
-        errors: validationError?.errors,
-        rawPreview: synthesizedText.substring(0, 500),
+        errorName: errorName(validationError), // privacy: Zod messages quote received values
+        issues: issueSummary(validationError),
+        rawLength: synthesizedText.length, // privacy: was rawPreview (first 500 chars of model output)
         parsedReportKeys: parsedReport ? Object.keys(parsedReport) : [],
       });
       
@@ -2025,10 +2026,10 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
         return NextResponse.json(
           createErrorResponse(
             ERROR_CODES.VALIDATION_FAILED,
-            `Schema validation failed: ${validationError?.message || "Invalid structure"}`,
+            `Schema validation failed: ${issueSummary(validationError).length} issue(s)`,
             requestId,
             {
-              validationErrors: validationError?.errors,
+              validationErrors: issueSummary(validationError),
               receivedKeys: parsedReport ? Object.keys(parsedReport) : [],
               requiredFields: ["executiveSummary", "keyFindings", "disagreements", "biasAndBlindSpots", "openQuestions", "methodology"],
               retryFailed: true,
