@@ -52,6 +52,8 @@ Two credential paths are accepted by every API route:
 1. **Session cookie** `__session` → `verifySessionCookie()` from `lib/firebase/auth-helpers.ts`
 2. **Bearer token** `Authorization: Bearer <idToken>` → `verifyIdToken()` from `lib/firebase/auth.ts`
 
+Both are verified with `checkRevoked = true` (cookie: `verifySessionCookieValue`; bearer: since BEARERREV), so each request makes one live Firebase Auth `getUser` read per presented credential and a disabled account or a token/cookie whose `auth_time` predates `tokensValidAfterTime` is refused (401). If that live read itself fails (`auth/internal-error`, `app/internal-error`, `app/network-error`, `app/network-timeout`) `resolveRequestIdentity` returns `unauthenticated` / `auth_unavailable` — never an allow; `teamApiAuth.getRequestUid` and `reportReviewCaller` answer 503, the other routes their existing 401. The S2-b privileged guard (`lib/admin/privilegedAccess.ts`) keeps its own single live snapshot.
+
 **Middleware** (`middleware.ts`) only checks for cookie *presence* to gate `/admin/*` routes. Full token validation and custom claim checks happen inside each API route.
 
 **Administrator authority has three human tiers; the former secret bootstrap mechanism is retired** — see `docs/operations/admin-authority-tiers.md` for the full contract.

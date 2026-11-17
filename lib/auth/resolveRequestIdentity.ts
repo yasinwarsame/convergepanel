@@ -46,7 +46,12 @@ export type RequestIdentityUnauthenticatedReason =
   | "invalid_bearer_token"
   | "credential_mismatch"
   | "revoked_session"
-  | "expired_session";
+  | "expired_session"
+  // BEARERREV: the verifier itself could not run (Auth backend / network) —
+  // the live `checkRevoked` read failed. Still `unauthenticated` (never an
+  // allow); wrappers that can answer 503 do so (teamApiAuth.getRequestUid,
+  // reportReviewCaller); every other route answers its existing 401.
+  | "auth_unavailable";
 
 export type RequestIdentityResult =
   | { status: "authenticated"; uid: string; source: RequestIdentitySource }
@@ -81,8 +86,24 @@ function extractBearerToken(request: NextRequest): { present: boolean; token: st
  * the generic `invalid_*` reason for anything else (malformed, wrong
  * project, signature failure, etc).
  */
+/**
+ * firebase-admin 12.x codes meaning "the verifier could not run", not "the
+ * credential is bad" — raised by the `checkRevoked` `getUser` read
+ * (AuthClientErrorCode.INTERNAL_ERROR; AppErrorCodes INTERNAL_ERROR /
+ * NETWORK_ERROR / NETWORK_TIMEOUT). Exact codes only. Same set as API-1a
+ * resolveManagementIdentity and the session-mint fix (SESSREV).
+ */
+const TRANSIENT_VERIFY_CODES: ReadonlySet<string> = new Set([
+  "auth/internal-error",
+  "app/internal-error",
+  "app/network-error",
+  "app/network-timeout",
+]);
+
 function classifyVerificationError(err: unknown, kind: "cookie" | "bearer"): RequestIdentityUnauthenticatedReason {
-  const code = typeof err === "object" && err !== null && "code" in err ? String((err as { code?: unknown }).code) : "";
+  const raw = typeof err === "object" && err !== null && "code" in err ? (err as { code?: unknown }).code : undefined;
+  const code = typeof raw === "string" ? raw : "";
+  if (TRANSIENT_VERIFY_CODES.has(code)) return "auth_unavailable";
   if (code.includes("revoked")) return "revoked_session";
   if (code.includes("expired")) return "expired_session";
   return kind === "cookie" ? "invalid_session_cookie" : "invalid_bearer_token";
