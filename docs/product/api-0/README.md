@@ -24,7 +24,7 @@ Where this set and the PRD disagree, the PRD's §21 rulings win, **subject to Ad
 | 8 | [`retention-and-deletion.md`](retention-and-deletion.md) | Four data classes (OD-10), deletion endpoint (OD-11), audit evidence, backups, provider-side retention, export |
 | 9 | [`developer-journeys.md`](developer-journeys.md) | Sign-up to delete, plus agent / tool-calling integration |
 | 10 | [`dependencies-and-gates.md`](dependencies-and-gates.md) | Implementation dependencies, per-stage gates API-1..API-7, web-capacity protection gate, open questions |
-| 11 | [`owner-decision-addendum-1.md`](owner-decision-addendum-1.md) | **2026-11-17 owner rulings D1–D10**: reconciliation of OD-1..OD-21, lean controlled beta scope, Gemini disclosure and acknowledgement, history endpoint, amended stage gates, infrastructure matrix, implementation sequence. Wins over this set and the PRD where it differs |
+| 11 | [`owner-decision-addendum-1.md`](owner-decision-addendum-1.md) | **2026-11-17 owner rulings D1–D10**, plus the same-day release-gates rulings (§1.1: P1–P4 confirmed, secret-boundary design approved, queue/Redis/scheduler/infrastructure/provider conditions): reconciliation of OD-1..OD-21, lean controlled beta scope, Gemini disclosure and acknowledgement, history endpoint, amended stage gates, infrastructure matrix, implementation sequence. Wins over this set and the PRD where it differs |
 | 12 | [`secret-boundary.md`](secret-boundary.md) | Secret-only Order 6 boundary (D3/OQ-1): server-only secrets module, inventory, readers, rules, tests, rebaseline evidence. Draft implementation on `feat/api-secret-boundary`; merge by separate decision |
 
 ## Fixed positions this set inherits from the PRD
@@ -36,7 +36,7 @@ Where this set and the PRD disagree, the PRD's §21 rulings win, **subject to Ad
 5. **Gemini** failures (owner-side Google billing) are shown as `failed` slots with a limitation. No configuration change.
 6. **Tenant isolation** by construction: every data-plane path is derived from the authenticated key's `orgId`.
 7. **Bounded spend.** Every job is pre-authorized against a hard cap; one authoritative customer ledger; an internal cost ledger records every provider call.
-8. **OD-21.** Dark releases use compile-time switches; `lib/env.ts` is byte-pinned by Order 6 suites, so new secrets need a separately approved Order 6 boundary change.
+8. **OD-21.** Dark releases use compile-time switches; `lib/env.ts` is byte-pinned by Order 6 suites, so new secrets need a separately approved Order 6 boundary change. *(Addendum 1 §1.1 SB: approved as the server-only `lib/apiPlatform/secrets.server.ts` boundary; `lib/env.ts` unchanged.)*
 
 ## Acceptance gates for leaving API-0
 

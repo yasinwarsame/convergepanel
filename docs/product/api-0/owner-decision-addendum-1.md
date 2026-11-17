@@ -172,11 +172,11 @@ These replace the API-6 **entry** criteria for the controlled beta. API-6's 30-d
 
 | Dependency | Needed by | Approval needed before | Evidence | Status |
 |---|---|---|---|---|
-| Secret boundary (pepper, cursor key) | API-1 secret-dependent paths | merge of the boundary branch | `secret-boundary.md`, branch review | Draft (Phase 1B) |
+| Secret boundary (pepper, cursor key) | API-1 secret-dependent paths | merge of the boundary branch | `secret-boundary.md`, branch review | Design approved (§1.1 SB); implementation on a draft branch, merged only by a separate owner decision |
 | Isolated Firebase project (E1–E7) | API-1 integration tests (emulator suffices for unit/rules), API-3 load and isolation | API-3 | Phase 1D-A | Owner steps pending |
 | #321 Layer B in the Vercel build | Broader Preview testing | API-3 Preview tests | Phase 1D-A | Open |
 | Redis-class store | API-1 rate limits (beta orgs can start on the existing Firestore limiter with documented caps), API-3 pools | API-3 | Phase 1D-D | Not selected |
-| Durable queue (+ Cloud Tasks fallback) | API-3 | API-3 | Phase 1D-C | Not selected |
+| Durable queue (+ Cloud Tasks fallback) | API-3 | API-3 | Phase 1D-C | Not selected. Vercel Queues: isolated feasibility only (§1.1 Q); replacement-dispatch fix and authenticated scheduler boundary (§1.1 S) before API-3 |
 | Vercel execution limits | API-3 step budgets | API-3 | Phase 1D-E | To measure |
 | Provider rate limits / web baseline (DEP-9) | WG-6, B-11 | API-3 live canary | Phase 1D-E | To measure |
 | `api.convergepanel.com` | External beta | B-10 | Owner (DNS/TLS) | Not provisioned |
