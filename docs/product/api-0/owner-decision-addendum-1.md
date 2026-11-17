@@ -67,7 +67,7 @@ CR-1 (model consensus is not factual verification) and CR-2 (API usage must not 
 - **Pagination.** Order is `created_at` descending, then `id` descending. `limit` is 1–100 (default 20). The opaque `next_cursor` carries `(cursorVersion, orgId, effective application scope, mode, filter set, position, expiresAt)` under an HMAC tag (subkey `cp-api/list-cursor/v1`). It expires **24 hours** after issue. A cursor that has expired, has been tampered with, or is replayed under a different organization, application scope, mode or filter set is rejected with `400 invalid_cursor`.
 - **Filters.** `status` (known public `JobStatus` values; an unknown value returns `400 invalid_request_error`, code `invalid_status`), `type`, `application_id`, `created_gte`, `created_lt`.
 - **Payload.** `VerificationSummary` only: no input text, no result sections, no model text. Deleted verifications are not listed.
-- **Index.** `apiOrganizations/{orgId}/verifications` on (`mode` asc, `appId` asc, `createdAt` desc) and (`mode` asc, `createdAt` desc), plus one per supported filter. Added to PRD §12.2 and deployed one at a time.
+- **Index.** `apiOrganizations/{orgId}/verifications` composites, each ending `createdAt` desc, `id` desc: (`mode`), (`mode`,`appId`), (`mode`,`status`), (`mode`,`type`), (`mode`,`appId`,`status`), (`mode`,`appId`,`type`), (`mode`,`status`,`type`), (`mode`,`appId`,`status`,`type`). The exact set is pinned by an index-coverage test against `firestore.indexes.json` in API-3; no reliance on index merging. Added to PRD §12.2 and deployed one at a time.
 - **Tests** (added to `threat-model.md` §6 as T-X2): a cross-org `application_id` returns empty; an app-scoped key cannot list sibling apps (byte-identical empty response for sibling and nonexistent IDs); a test key never lists live verifications and a live key never lists test ones; cursor tamper, expiry and replay under another org, app scope, mode or filter set are rejected; no summary contains input or model text; pagination is stable under concurrent creates.
 
 ## 4. Controlled beta scope (D4)
@@ -118,7 +118,7 @@ D4 names exactly what the beta excludes: synthesis, video, BYOK, MCP and broad a
 3. **Fail closed.** A research create from an org without a current acknowledgement returns `403 pipeline_processing_not_acknowledged` before any write or provider call. The acknowledgement is **re-checked at every worker step start**, with the same semantics as the hard-state checks (`ledger-and-billing.md` §4). Withdrawing it stops new creates at once. A job that has not started its panel step is canceled with a full release. A job past its panel step makes no further Gemini call: it finalizes with the work done, settled, and any remaining auxiliary section is marked `failed` with reason `pipeline_processing_withdrawn`.
 4. **Unavailable processing.** If Gemini is unavailable or not confirmed under §6 (P-9), research returns `422 type_unavailable` and nothing is sent elsewhere. No alternative pipeline provider is substituted silently.
 5. **Alternative routing** (an auxiliary provider that respects the selection) stays a separately authorized change to the shared web pipeline. Until it ships, the acknowledgement path is the only compliant route for research.
-6. **Fallback providers** (DeepSeek, Claude synthesis) are unreachable in the beta (§4), so beta content never reaches a provider that is neither selected nor acknowledged.
+6. **Fallback providers** (DeepSeek, Claude synthesis): if proposal P2 is confirmed, they are unreachable in the beta (§4), so beta content never reaches a provider that is neither selected nor acknowledged. If P2 is rejected, fallback stays a per-request customer opt-in (`allow_fallback`, never silent), and B-6 then requires confirmed terms for every fallback provider it can reach.
 
 ## 6. Controlled beta (pilot) acceptance requirements
 
@@ -131,7 +131,7 @@ These replace the API-6 **entry** criteria for the controlled beta. API-6's 30-d
 | B-3 | Isolated Firebase environment (E1–E7) complete and #321 merged | Owner record; #321 closure |
 | B-4 | Tenant-isolation suite (identity, data, list, cursor, deletion) green against the isolated environment | Test report |
 | B-5 | Ledger acceptance plan passed: reserve/settle/release math, settle ≤ reserve, parallel creates vs hard cap, platform spend ceiling, failed-job thresholds, estimated cost never 0, reconciliation zero drift, invoice export from the ledger | Phase 1D-F plan, results |
-| B-6 | Provider terms confirmed by owner/counsel for every provider that can receive beta content (the selectable `CONNECTOR_MAP` providers and Gemini as pipeline provider). An unconfirmed provider is `unavailable` in `/v1/models` | Counsel record |
+| B-6 | Provider terms confirmed by owner/counsel for every provider that can receive beta content (the selectable `CONNECTOR_MAP` providers and Gemini as pipeline provider, plus any fallback provider reachable under the P2 disposition). An unconfirmed provider is `unavailable` in `/v1/models` | Counsel record |
 | B-7 | Beta agreement, API ToS, DPA, AUP, subprocessor list and retention statement approved, reflecting §4 and §5, **including counsel's decision on maximum class (c) and (d) retention (OQ-3)** | Counsel record |
 | B-8 | D6 acknowledgement implemented and tested; every beta org that runs research has a current acknowledgement | Tests; org records |
 | B-9 | Secret boundary merged by separate decision; real secrets provisioned only for the approved environments | Owner record |
@@ -139,6 +139,7 @@ These replace the API-6 **entry** criteria for the controlled beta. API-6's 30-d
 | B-11 | Provider capacity, contractual permissions and rate limits evaluated (OQ-2), and the shared provider keys shown sufficient or separate credentials approved. Provider concurrency limits measured and `api_share` set (≤ 40 %) from measurements, not assumed (OQ-5). **Also a gate for API-3 live provider execution of any job type** (`dependencies-and-gates.md` §5.2) | Phase 1D-E report + measurements; owner record |
 | B-12 | Runbooks for key compromise, spend-ceiling trip, queue outage, provider outage and org suspension; on-call owner named. **Manual-invoice non-payment path:** with no Stripe in the beta, an unpaid invoice past its due date plus grace leads the owner to set org `status: suspended` through a SYSTEM_ADMIN management action (audited `org.suspended`, reason `manual_invoice_unpaid`). That has the same effect as a Stripe `past_due` suspension (`ledger-and-billing.md` §4): creates `403 org_suspended`, queued jobs canceled with release, reads for 30 days | Runbooks; management action + test |
 | B-13 | Each beta org approved by the owner, with a manual plan assignment PR and a named contact | Approval records |
+| B-14 | Owner disposition recorded for proposals P1–P4 (§4.1); the beta contract, docs and B-6 terms scope match the dispositions | Owner record |
 
 ## 7. Open questions: dispositions (D10)
 
@@ -172,7 +173,7 @@ Each item is its own PR, authorization, independent review and protected dark re
 
 | Order | Stage | Scope | In beta? |
 |---|---|---|---|
-| 0 | Secret boundary | `secret-boundary.md` implementation (separate merge decision) | prerequisite |
+| 0 | Secret boundary | `secret-boundary.md` implementation (separate merge decision). API-1 work may start with the pepper **injected**; the boundary must be approved and merged before any secret-dependent path runs outside tests (`dependencies-and-gates.md` §5.2) | prerequisite for secret-dependent paths |
 | 1 | **API-1a** | Core (all **new** under `lib/apiPlatform/`): IDs, key format, peppered verifier (pepper injected), org/app/key/membership records, deny-all rules + tests, `requireApiPrincipal` (**new**), error envelope, request IDs, transactional audit events | yes |
 | 2 | **API-1b** | Session-only management routes (org, app, key create/rotate/revoke, D6 acknowledgement), minimal developer UI, `GET /v1/models` | yes |
 | 3 | **API-2β** | Customer ledger (reserve/settle/release/adjust), period counters, compile-time beta plans, hard caps, spend ceiling, internal cost ledger, failed-job thresholds, reconciliation job, ledger-derived invoice export, `GET /v1/usage` | yes |
