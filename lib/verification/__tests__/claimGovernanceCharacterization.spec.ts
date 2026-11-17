@@ -25,8 +25,13 @@ import type { ModelId, ModelResult } from "@/lib/types";
 const SLOTS = ["chatgpt", "claude", "gemini", "grok", "perplexity"];
 const CLAIM = "The Eiffel Tower was completed in 1889.";
 
+/** `{ ds: verdict }` = the slot was answered by a DeepSeek substitute; `{ failed: true }` = the connector failed. */
 function connector(modelId: string, verdict: unknown): ModelResult {
-  const body = { ...(verdict === undefined ? {} : { verdict }), confidence: "high", summary: "s", correctParts: [], incorrectParts: [], unverifiableParts: [], reasoning: "r" };
+  if (verdict && typeof verdict === "object" && "failed" in verdict) return { modelId: modelId as ModelId, status: "error", rawText: "", errorMessage: "x", latencyMs: 1 } as unknown as ModelResult;
+  const sub = verdict && typeof verdict === "object" && "ds" in verdict ? (verdict as { ds: unknown }).ds : undefined;
+  const v = sub !== undefined ? sub : verdict;
+  const body = { ...(v === undefined ? {} : { verdict: v }), confidence: "high", summary: "s", correctParts: [], incorrectParts: [], unverifiableParts: [], reasoning: "r" };
+  if (sub !== undefined) return { modelId: modelId as ModelId, status: "substituted", provider: "deepseek", rawText: JSON.stringify(body), latencyMs: 1 } as unknown as ModelResult;
   return { modelId: modelId as ModelId, status: "ok", rawText: JSON.stringify(body), latencyMs: 1 } as unknown as ModelResult;
 }
 
@@ -80,6 +85,11 @@ const WELL_FORMED: Record<string, unknown[]> = {
   "5U": [U, U, U, U, U],
   "1A (single model)": [A],
   "1I (single model)": [I],
+  // Correction round: substitution and partial results (governance input is built exactly as the route builds it).
+  "DS×2 (I, U) + grok I": [{ ds: I }, { ds: U }, I],
+  "DS×3 accurate": [{ ds: A }, { ds: A }, { ds: A }],
+  "1 failed + 1 substituted + 2 own accurate": [A, { failed: true }, { ds: A }, A],
+  "2 own I + 1 failed": [I, I, { failed: true }],
 };
 
 const MALFORMED: Record<string, unknown[]> = {
@@ -215,6 +225,57 @@ const CABBDBB: Record<string, ReturnType<typeof run>> = {
       "Evidence quality is weak",
       "Claim verification verdict: disputed",
       "Consensus 52 below 70"
+    ]
+  },
+  "DS×2 (I, U) + grok I": {
+    "rows": "ok:inaccurate,ok:unverifiable,ok:inaccurate",
+    "verdict": "disputed",
+    "consensusScore": 52,
+    "confidenceLabel": "Medium",
+    "evidenceQuality": "weak",
+    "failed": 0,
+    "governance": "needs_review",
+    "reasons": [
+      "Evidence quality is weak",
+      "Claim verification verdict: disputed",
+      "Consensus 52 below 70"
+    ]
+  },
+  "DS×3 accurate": {
+    "rows": "ok:accurate,ok:accurate,ok:accurate",
+    "verdict": "confirmed",
+    "consensusScore": 100,
+    "confidenceLabel": "High",
+    "evidenceQuality": "strong",
+    "failed": 0,
+    "governance": "approved",
+    "reasons": []
+  },
+  "1 failed + 1 substituted + 2 own accurate": {
+    "rows": "ok:accurate,failed:failed,ok:accurate,ok:accurate",
+    "verdict": "confirmed",
+    "consensusScore": 100,
+    "confidenceLabel": "High",
+    "evidenceQuality": "strong",
+    "failed": 1,
+    "governance": "needs_review",
+    "reasons": [
+      "1 model(s) failed"
+    ]
+  },
+  "2 own I + 1 failed": {
+    "rows": "ok:inaccurate,ok:inaccurate,failed:failed",
+    "verdict": "disputed",
+    "consensusScore": 45,
+    "confidenceLabel": "Medium",
+    "evidenceQuality": "weak",
+    "failed": 1,
+    "governance": "needs_review",
+    "reasons": [
+      "Evidence quality is weak",
+      "1 model(s) failed",
+      "Claim verification verdict: disputed",
+      "Consensus 45 below 70"
     ]
   }
 };

@@ -212,13 +212,27 @@ describe("Team list client parser and row", () => {
 
   it.each([
     ["usable mismatch", { ...counts, usable: 2 }],
-    ["extra key", { ...counts, parse_error: 1 }],
     ["missing key", { accurate: 0, partially_accurate: 0, inaccurate: 3, usable: 3 }],
     ["negative", { ...counts, accurate: -1, usable: 2 }],
     ["string count", { ...counts, inaccurate: "3" }],
     ["null", null],
-  ])("present but malformed (%s) -> the page is malformed_response (strict when present)", (_l, mv) => {
-    expect(parse([{ ...base, modelVerdicts: mv }])).toEqual({ ok: false, errorCode: "malformed_response" });
+    ["array", [1, 2]],
+  ])("corrupt counts (%s): ONLY that row's counts are dropped — the row and the page are kept", (_l, mv) => {
+    const r = parse([{ ...base, modelVerdicts: mv }, { ...base, verificationId: "vcl-2", modelVerdicts: counts }]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.page.items.map((i) => i.verificationId)).toEqual(["vcl-1", "vcl-2"]);
+    expect("modelVerdicts" in r.page.items[0]).toBe(false);
+    expect(r.page.items[1].modelVerdicts).toEqual(counts);
+  });
+
+  it("forward-compatible: counts with additional keys are accepted (extra keys ignored, not carried)", () => {
+    const r = parse([{ ...base, modelVerdicts: { ...counts, failed: 1, malformed: 2, someFutureKey: "x" } }]);
+    expect(r.ok && r.page.items[0].modelVerdicts).toEqual(counts);
+  });
+
+  it("[CONTROL] a row that is itself malformed still fails the page (existing whole-page contract)", () => {
+    expect(parse([{ ...base, verdict: "rated_inaccurate", modelVerdicts: counts }])).toEqual({ ok: false, errorCode: "malformed_response" });
   });
 
   const render = (item: TeamClaimListItem) => html(createElement(TeamClaimListRow, { workspaceId: "ws-1", item, showProject: false }));

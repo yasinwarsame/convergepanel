@@ -935,7 +935,8 @@ Each model returns JSON matching:
 surrounding whitespace, runs of whitespace / `-` / `_`) plus the pre-existing alias `partial`. Any other value, or a
 missing verdict, yields `verdict: null` and `buildClaimModelEvidence` stores the existing `parse_error` row (summary
 says the verdict was missing / unrecognized; no raw value stored). It is never counted as a usable `unverifiable`
-judgement: it is excluded from the aggregate verdict, costs the existing low-evidence penalty in the score, and counts
+judgement. A non-string verdict (number, boolean, object or array — e.g. `["accurate"]`, which `String()` previously
+turned into "accurate") is unrecognized. A malformed row is excluded from the aggregate verdict, costs the existing low-evidence penalty in the score, and counts
 in governance `modelHealth.failed`. No semantic aliases (`true`, `mostly accurate`, …) are accepted without an owner
 decision (OD-2).
 
@@ -943,13 +944,21 @@ decision (OD-2).
 stored `auditBundle.perModel` rows (never `aggregateSummary`, which folds parse_error / failed into "unverifiable").
 Surfaces state the distribution from it, at read time, without changing the stored label / score / confidence: a stored
 `disputed` over answers none of which supported the claim is described from the answers ("3 of 3 models rated this
-claim inaccurate"), not as disagreement; a confidence label over split answers is shown with the split. The Team list
+claim inaccurate"), not as disagreement; a confidence label over split answers is shown with the split. Counts are of
+recorded slot responses (`claimSlotTally`: slots, usable, failed, malformed, substituted, distinct recorded providers),
+with one denominator. The no-support banner states "models" only when every answering slot is its own verified executing
+model, otherwise "answers" with the slots disclosed (several slots answered by one substitute model are not independent).
+The "supported by a/u models" banner keeps C-b CB-06 (a substitute in several slots counts once) only while every
+executing model answered all its slots the same way; otherwise it states "a of n answers" with the slots disclosed. The Team list
 summary DTO and the Personal history item carry an additive, optional `modelVerdicts` (absent when the bundle cannot be
-counted; the Team client parser accepts it absent and parses it strictly when present).
+counted; the Team client parser accepts it absent, ignores additional keys, and drops unusable counts for that row only —
+it never fails the page over them).
 
 **Agreement digest (PR-1, doc 14 D-5).** `buildAgreementDisagreementDigest` takes each row's verdict. "Conflicting
 assessments" is reported for a part one model lists as correct and another lists as incorrect, or (legacy heuristic)
-for low-overlap incorrect parts between two models on opposite sides; never between two models on the same side.
+for low-overlap incorrect parts between two models on opposite sides. The low-overlap heuristic never pairs two models
+on the same side (or a row with no usable verdict); a part-level correct-vs-incorrect clash is reported whatever the two
+models' overall verdicts, including two models on the same side.
 
 ### Claim verification consensus scoring
 

@@ -55,14 +55,13 @@ export function countClaimModelVerdicts(rows: ReadonlyArray<unknown>): ClaimMode
 const COUNT_KEYS = ["accurate", "partially_accurate", "inaccurate", "unverifiable", "usable"] as const;
 
 /**
- * Strict parse of a counts object received over the wire: exactly the five keys, each a non-negative integer, and
- * `usable` the sum of the four verdict counts. Null otherwise.
+ * Parse of a counts object received over the wire: the five keys must each be a non-negative integer and `usable` the
+ * sum of the four verdict counts; null otherwise (the caller then DROPS the counts for that row — it never fails the
+ * page). Additional keys are ignored, so a later server may add counts without breaking this client.
  */
 export function parseClaimModelVerdictCounts(v: unknown): ClaimModelVerdictCounts | null {
   if (!v || typeof v !== "object" || Array.isArray(v)) return null;
   const o = v as Record<string, unknown>;
-  const keys = Object.keys(o);
-  if (keys.length !== COUNT_KEYS.length || !COUNT_KEYS.every((k) => keys.includes(k))) return null;
   for (const k of COUNT_KEYS) {
     const n = o[k];
     if (typeof n !== "number" || !Number.isInteger(n) || n < 0) return null;
@@ -91,11 +90,75 @@ export function countClaimModelVerdictsFromAuditBundle(bundle: unknown): ClaimMo
 }
 
 /**
- * The counts a claim client payload states: from its audit bundle when that is countable, else from its rows (both are
- * written from the same rows by the verify routes; the bundle is the recorded audit form).
+ * What the stored rows record about the panel's SLOTS — actual responses, never an inferred number of independent
+ * models (owner ruling 2026-11-18):
+ *  - `slots`: rows recorded (one per selected model slot);
+ *  - `usable`: slots with a parsed, recognised verdict (`verdicts` breaks them down per verdict);
+ *  - `failed`: slots whose request failed; `malformed`: slots whose response had no recognised verdict (`parse_error`);
+ *  - `substitutedUsable`: usable slots answered by a substitute model (the row records `substituted: true`);
+ *  - `providers`: distinct recorded executing providers among the usable slots, or null when any usable slot records
+ *    none (historical rows) — never guessed.
+ * Null when a row cannot be classified (not an object, an unknown status, an "ok" row with an unknown verdict).
  */
-export function claimPayloadVerdictCounts(data: { auditBundle?: unknown; modelEvidence?: ReadonlyArray<unknown> }): ClaimModelVerdictCounts | null {
-  return countClaimModelVerdictsFromAuditBundle(data.auditBundle) ?? (Array.isArray(data.modelEvidence) ? countClaimModelVerdicts(data.modelEvidence) : null);
+export type ClaimSlotTally = {
+  slots: number;
+  usable: number;
+  failed: number;
+  malformed: number;
+  substitutedUsable: number;
+  providers: number | null;
+  verdicts: ClaimModelVerdictCounts;
+};
+
+export function claimSlotTally(rows: ReadonlyArray<unknown>): ClaimSlotTally | null {
+  const verdicts = countClaimModelVerdicts(rows);
+  if (verdicts === null) return null;
+  let failed = 0;
+  let malformed = 0;
+  let substitutedUsable = 0;
+  const providers = new Set<string>();
+  let providerUnknown = false;
+  for (const raw of rows) {
+    const r = raw as { status?: unknown; substituted?: unknown; provider?: unknown };
+    if (r.status === "failed") failed += 1;
+    else if (r.status === "parse_error") malformed += 1;
+    else if (r.status === "ok") {
+      if (r.substituted === true) substitutedUsable += 1;
+      if (typeof r.provider === "string" && r.provider.trim() !== "") providers.add(r.provider.trim().toLowerCase());
+      else providerUnknown = true;
+    } else return null;
+  }
+  return { slots: rows.length, usable: verdicts.usable, failed, malformed, substitutedUsable, providers: providerUnknown ? null : providers.size, verdicts };
+}
+
+/**
+ * The tally a claim payload states: its rows, cross-checked against the recorded audit bundle when that is countable —
+ * if the two disagree on the per-verdict counts nothing is stated (null).
+ */
+export function claimPayloadSlotTally(data: { auditBundle?: unknown; modelEvidence?: ReadonlyArray<unknown> }): ClaimSlotTally | null {
+  if (!Array.isArray(data.modelEvidence)) return null;
+  const t = claimSlotTally(data.modelEvidence);
+  if (t === null) return null;
+  const fromBundle = countClaimModelVerdictsFromAuditBundle(data.auditBundle);
+  if (fromBundle !== null && PER_MODEL_VERDICTS.some((v) => fromBundle[v] !== t.verdicts[v])) return null;
+  return t;
+}
+
+const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
+
+/**
+ * One line disclosing what the slot counts are, or null when there is nothing beyond "every slot answered with its own
+ * recorded provider": e.g. "3 of 5 slots answered; 1 failed; 1 malformed (no recognized verdict); 2 answered by a
+ * substitute model; 2 distinct executing providers".
+ */
+export function claimSlotTallyNote(t: ClaimSlotTally): string | null {
+  const parts: string[] = [];
+  if (t.usable < t.slots) parts.push(`${t.usable} of ${n(t.slots, "slot", "slots")} answered`);
+  if (t.failed > 0) parts.push(`${t.failed} failed`);
+  if (t.malformed > 0) parts.push(`${t.malformed} malformed (no recognized verdict)`);
+  if (t.substitutedUsable > 0) parts.push(`${t.substitutedUsable} answered by a substitute model`);
+  if (t.providers !== null && t.providers < t.usable) parts.push(n(t.providers, "distinct executing provider", "distinct executing providers"));
+  return parts.length === 0 ? null : parts.join("; ");
 }
 
 /**

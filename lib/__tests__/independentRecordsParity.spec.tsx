@@ -82,8 +82,14 @@ import { generateVerificationMemo } from "@/lib/verification/generateMemo";
  * side or a row with no usable verdict: of the base's 145 "Conflicting assessments" pairs, 70 same-side and 56
  * no-usable-side pairs are gone, 19 opposite-side pairs are kept, none added. Stored labels, scores and confidence are
  * unchanged. Same digest under TZ=UTC, Africa/Nairobi and America/New_York.
+ *
+ * Re-pinned (doc 14 PR-1 correction round, owner ruling 2026-11-18 "count actual responses"): 2961620a… → 95504140….
+ * Diffed against the 88ce3ff PARITY_DUMP: research byte-identical; all 266 claim differences are the added slot
+ * disclosure only — the consensus card's slot note ("2 of 4 slots answered; 2 failed", "… 1 malformed (no recognized
+ * verdict)") and the copied verdict's matching "Panel slots: …" line. No banner, label, count or digest changed (these
+ * generated records have one executing model per slot).
  */
-const BASELINE_8584211_DIGEST = "2961620a82103c2d41aa4a5247fc34cd2c37d82313ddf7eff3c39fa0862299ae";
+const BASELINE_8584211_DIGEST = "95504140bb24d44214ce8d1df82d5fc616c689c308a61467e4f4f2a95db4b4fc";
 const stripCreatedDate = (markup: string) => markup.replace(/(data-testid="team-claim-row-created">)[^<]*(<\/span>)/g, "$1[created]$2");
 
 // Feature detection: the claim presentation module exists only after 8584211.

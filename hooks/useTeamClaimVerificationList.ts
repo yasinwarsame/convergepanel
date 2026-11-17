@@ -154,9 +154,9 @@ function parseItem(raw: unknown, address: TeamClaimListAddress): TeamClaimListIt
   if (typeof raw.evidenceQuality !== "string" || !EVIDENCE.has(raw.evidenceQuality)) return null;
   if (raw.governanceStatus !== undefined && (typeof raw.governanceStatus !== "string" || !GOVERNANCE.has(raw.governanceStatus))) return null;
   if (!nonEmptyString(raw.createdAt) || Number.isNaN(Date.parse(raw.createdAt))) return null;
-  const modelVerdicts = raw.modelVerdicts === undefined ? undefined : parseClaimModelVerdictCounts(raw.modelVerdicts);
-  // Strict when present (exact five counts, usable = their sum); absent is accepted — older servers never send it.
-  if (modelVerdicts === null) return null;
+  // Additive counts: absent (older servers) or unusable counts are DROPPED for this row — the row and the page are kept.
+  // Extra keys are ignored (forward-compatible). See parseClaimModelVerdictCounts.
+  const modelVerdicts = raw.modelVerdicts === undefined ? null : parseClaimModelVerdictCounts(raw.modelVerdicts);
 
   // Workspace containment: the row's own binding must name the addressed Workspace.
   if (raw.workspaceId !== address.workspaceId) return null;
@@ -195,7 +195,7 @@ function parseItem(raw: unknown, address: TeamClaimListAddress): TeamClaimListIt
     confidenceLabel: raw.confidenceLabel as TeamClaimListItem["confidenceLabel"],
     evidenceQuality: raw.evidenceQuality as TeamClaimListItem["evidenceQuality"],
     ...(raw.governanceStatus !== undefined ? { governanceStatus: raw.governanceStatus as TeamClaimListItem["governanceStatus"] } : {}),
-    ...(modelVerdicts !== undefined ? { modelVerdicts } : {}),
+    ...(modelVerdicts !== null ? { modelVerdicts } : {}),
     createdAt: raw.createdAt,
     workspaceId: raw.workspaceId,
     projectId: projectId as string | null,

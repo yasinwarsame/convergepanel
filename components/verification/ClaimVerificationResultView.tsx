@@ -45,7 +45,8 @@ import {
   CLAIM_NO_SUPPORT_BANNER_SUBTITLE,
   claimNoSupportAnswerSentence,
   claimNoSupportStatement,
-  claimPayloadVerdictCounts,
+  claimPayloadSlotTally,
+  claimSlotTallyNote,
   claimSplitVerdictsQualifier,
   formatClaimVerdictCounts,
   hasSplitVerdicts,
@@ -263,7 +264,8 @@ export function buildClaimVerdictClipboardText(data: ClaimVerificationClientPayl
   lines.push(`Claim: ${data.claim}`);
   // Doc 14 W1: the stored label is copied as stored; over answers none of which supported the claim it is followed by
   // the distribution, so a bare "disputed" is never read as disagreement between models.
-  const counts = claimPayloadVerdictCounts(data);
+  const clipTally = claimPayloadSlotTally(data);
+  const counts = clipTally?.verdicts ?? null;
   lines.push(
     isDisputedWithoutSupport(data.verdict, counts)
       ? `Aggregate verdict: ${data.verdict} (${claimNoSupportAnswerSentence(counts)})`
@@ -278,6 +280,8 @@ export function buildClaimVerdictClipboardText(data: ClaimVerificationClientPayl
     // A confidence label over split answers is copied with the split (doc 14 D-3/D-4 presentation; stored label kept).
     const split = hasSplitVerdicts(counts) ? `; ${claimSplitVerdictsQualifier(counts)}` : "";
     lines.push(`Consensus score: ${consensus.score} (${data.confidenceLabel} confidence${split})`);
+    const note = clipTally ? claimSlotTallyNote(clipTally) : null;
+    if (note) lines.push(`Panel slots: ${note}`);
   } else {
     lines.push(`Verdict basis: ${qualifier}`);
     lines.push(`Consensus score: ${consensus.text}`);
@@ -391,6 +395,132 @@ export function ClaimVerificationAuditTrailDetails({ data }: { data: ClaimVerifi
   );
 }
 
+/**
+ * True when every verified executing model answered all of its slots with the same verdict (so a per-verdict count of
+ * models cannot place one model on two sides). False when unverified or when any model's slots differ.
+ */
+function executingModelsAnsweredConsistently(view: ReturnType<typeof claimViewIndependence>, rows: ClaimVerificationClientPayload["modelEvidence"]): boolean {
+  if (!view.identity.verified) return false;
+  const byModel = new Map<string, string>();
+  for (const r of rows) {
+    if (r.status !== "ok") continue;
+    const key = view.identity.slotKeys[String(r.modelId).trim()];
+    if (typeof key !== "string") return false;
+    const prev = byModel.get(key);
+    if (prev !== undefined && prev !== r.verdict) return false;
+    byModel.set(key, r.verdict);
+  }
+  return true;
+}
+
+/** What the verdict banner says. Pure: from the payload only (exported for the exhaustive truthfulness spec). */
+export function claimVerdictBanner(data: ClaimVerificationClientPayload): {
+  className: string;
+  icon: ReactNode;
+  title: string;
+  subtitle: string;
+} {
+  // C-b CB-06: the server's independence confirmed by the shared gate over the rows; counts come from the gate.
+  const view = claimViewIndependence(data);
+  const independence = view.independence;
+  // The recorded slot responses (doc 14 W1; owner ruling 2026-11-18): usable / failed / malformed / substituted.
+  const tally = claimPayloadSlotTally(data);
+  const v: ClaimVerdictUi =
+    data.verdict === "confirmed" ||
+    data.verdict === "disputed" ||
+    data.verdict === "partially_true" ||
+    data.verdict === "unverifiable"
+      ? data.verdict
+      : "unverifiable";
+  if (independence !== "independent") {
+    // Fewer than two independent executing models (or unknown execution): the verdict is not agreement between models.
+    const tone = {
+      confirmed: "bg-emerald-50 border-emerald-200 text-emerald-900",
+      disputed: "bg-rose-50 border-rose-200 text-rose-900",
+      partially_true: "bg-amber-50 border-amber-200 text-amber-900",
+      unverifiable: "bg-cp-raised border-cp-border text-cp-text",
+    }[v];
+    return {
+      className: tone,
+      icon: AGGREGATE_VERDICT_ICONS[v],
+      title: `${aggregateVerdictLabel(v)} — ${claimVerdictQualifier(independence)}`,
+      subtitle: independence === "insufficient" ? CLAIM_SINGLE_MODEL_BANNER_SUBTITLE : CLAIM_UNVERIFIED_BANNER_SUBTITLE,
+    };
+  }
+  // Independent executing models (the shared gate's K) and how many of them rated it accurate — never slot counts:
+  // a failed slot is not an answer and a substitute model that answered several slots counts once.
+  const u = view.identity.independentModels ?? 0;
+  const a = independentModelsAmong(
+    view.identity,
+    data.modelEvidence.filter((m) => m.status === "ok" && m.verdict === "accurate").map((m) => m.modelId)
+  );
+  switch (v) {
+    case "confirmed":
+      // C-b CB-06 keeps "a/u models" (a substitute in several slots counts once) while every executing model answered
+      // all its slots the same way. Owner ruling 2026-11-18: when one executing model answered slots with DIFFERENT
+      // verdicts, "a/u models" would count it as supporting while it also answered against — state the slot responses
+      // instead, and say what the slots are.
+      if (tally !== null && !executingModelsAnsweredConsistently(view, data.modelEvidence)) {
+        return {
+          className: "bg-emerald-50 border-emerald-200 text-emerald-900",
+          icon: AGGREGATE_VERDICT_ICONS.confirmed,
+          title: `This claim is supported by ${tally.verdicts.accurate} of ${tally.usable} answers`,
+          subtitle: `Majority agreement: accurate. ${claimSlotCountsNote(view)}`,
+        };
+      }
+      return {
+        className: "bg-emerald-50 border-emerald-200 text-emerald-900",
+        icon: AGGREGATE_VERDICT_ICONS.confirmed,
+        title: `This claim is supported by ${a}/${u} models`,
+        subtitle: "Majority agreement: accurate",
+      };
+    case "disputed": {
+      // Doc 14 W1: `disputed` is also what the stored vocabulary records when NO model supported the claim
+      // (claimVerdict.ts fall-through). That is not a disagreement: state the recorded answers instead.
+      if (tally !== null && isDisputedWithoutSupport(data.verdict, tally.verdicts)) {
+        // Owner ruling 2026-11-18: count the actual RESPONSES (usable slots), with one denominator — never a per-verdict
+        // count of independent models over a model total (a substitute that answered two slots with different
+        // verdicts would be on both sides). The unit is "models" only when every answering slot is its own verified
+        // executing model; otherwise "answers", and the subtitle says what the slots are.
+        const asModels = slotCountsAreModelCounts(view);
+        const c = tally.verdicts;
+        return {
+          className: "bg-rose-50 border-rose-200 text-rose-900",
+          icon: AGGREGATE_VERDICT_ICONS.disputed,
+          title: claimNoSupportStatement({
+            inaccurate: c.inaccurate,
+            unverifiable: c.unverifiable,
+            total: c.usable,
+            unit: (k) => (asModels ? `model${k === 1 ? "" : "s"}` : `answer${k === 1 ? "" : "s"}`),
+          }),
+          subtitle: asModels ? CLAIM_NO_SUPPORT_BANNER_SUBTITLE : `${CLAIM_NO_SUPPORT_BANNER_SUBTITLE} ${claimSlotCountsNote(view)}`,
+        };
+      }
+      return {
+        className: "bg-rose-50 border-rose-200 text-rose-900",
+        icon: AGGREGATE_VERDICT_ICONS.disputed,
+        title: "Models disagree on this claim",
+        subtitle: "Review per-model evidence below",
+      };
+    }
+    case "partially_true":
+      return {
+        className: "bg-amber-50 border-amber-200 text-amber-900",
+        icon: AGGREGATE_VERDICT_ICONS.partially_true,
+        title: "Core claim may hold — details need correction",
+        subtitle: "Partial agreement across models",
+      };
+    case "unverifiable":
+    default:
+      return {
+        className: "bg-cp-raised border-cp-border text-cp-text",
+        icon: AGGREGATE_VERDICT_ICONS.unverifiable,
+        title: "Models cannot verify this claim with sufficient confidence",
+        subtitle: "Insufficient agreement or too many unknowns",
+      };
+  }
+}
+
 export type ClaimVerificationResultViewProps = {
   data: ClaimVerificationClientPayload;
   noticeSurface?: ReactNode;
@@ -410,90 +540,12 @@ export default function ClaimVerificationResultView({
   const view = useMemo(() => claimViewIndependence(data), [data]);
   const independence = view.independence;
   const consensus = claimConsensusDisplay(data.consensusScore, independence);
-  // The per-model verdict distribution (answers with a usable verdict), from the recorded audit bundle (doc 14 W1).
-  const verdictCounts = useMemo(() => claimPayloadVerdictCounts(data), [data]);
+  // The recorded slot responses and their per-verdict counts (doc 14 W1; owner ruling 2026-11-18).
+  const tally = useMemo(() => claimPayloadSlotTally(data), [data]);
+  const verdictCounts = tally?.verdicts ?? null;
+  const tallyNote = tally ? claimSlotTallyNote(tally) : null;
 
-  const banner = useMemo((): {
-    className: string;
-    icon: ReactNode;
-    title: string;
-    subtitle: string;
-  } => {
-    const v: ClaimVerdictUi =
-      data.verdict === "confirmed" ||
-      data.verdict === "disputed" ||
-      data.verdict === "partially_true" ||
-      data.verdict === "unverifiable"
-        ? data.verdict
-        : "unverifiable";
-    if (independence !== "independent") {
-      // Fewer than two independent executing models (or unknown execution): the verdict is not agreement between models.
-      const tone = {
-        confirmed: "bg-emerald-50 border-emerald-200 text-emerald-900",
-        disputed: "bg-rose-50 border-rose-200 text-rose-900",
-        partially_true: "bg-amber-50 border-amber-200 text-amber-900",
-        unverifiable: "bg-cp-raised border-cp-border text-cp-text",
-      }[v];
-      return {
-        className: tone,
-        icon: AGGREGATE_VERDICT_ICONS[v],
-        title: `${aggregateVerdictLabel(v)} — ${claimVerdictQualifier(independence)}`,
-        subtitle: independence === "insufficient" ? CLAIM_SINGLE_MODEL_BANNER_SUBTITLE : CLAIM_UNVERIFIED_BANNER_SUBTITLE,
-      };
-    }
-    // Independent executing models (the shared gate's K) and how many of them rated it accurate — never slot counts:
-    // a failed slot is not an answer and a substitute model that answered several slots counts once.
-    const u = view.identity.independentModels ?? 0;
-    const a = independentModelsAmong(
-      view.identity,
-      data.modelEvidence.filter((m) => m.status === "ok" && m.verdict === "accurate").map((m) => m.modelId)
-    );
-    switch (v) {
-      case "confirmed":
-        return {
-          className: "bg-emerald-50 border-emerald-200 text-emerald-900",
-          icon: AGGREGATE_VERDICT_ICONS.confirmed,
-          title: `This claim is supported by ${a}/${u} models`,
-          subtitle: "Majority agreement: accurate",
-        };
-      case "disputed": {
-        // Doc 14 W1: `disputed` is also what the stored vocabulary records when NO model supported the claim
-        // (claimVerdict.ts fall-through). That is not a disagreement: state the independent models' answers instead.
-        if (isDisputedWithoutSupport(data.verdict, verdictCounts)) {
-          const usable = data.modelEvidence.filter((m) => m.status === "ok");
-          const inaccurate = independentModelsAmong(view.identity, usable.filter((m) => m.verdict === "inaccurate").map((m) => m.modelId));
-          const unverifiable = independentModelsAmong(view.identity, usable.filter((m) => m.verdict === "unverifiable").map((m) => m.modelId));
-          return {
-            className: "bg-rose-50 border-rose-200 text-rose-900",
-            icon: AGGREGATE_VERDICT_ICONS.disputed,
-            title: claimNoSupportStatement({ inaccurate, unverifiable, total: u, unit: (n) => `model${n === 1 ? "" : "s"}` }),
-            subtitle: CLAIM_NO_SUPPORT_BANNER_SUBTITLE,
-          };
-        }
-        return {
-          className: "bg-rose-50 border-rose-200 text-rose-900",
-          icon: AGGREGATE_VERDICT_ICONS.disputed,
-          title: "Models disagree on this claim",
-          subtitle: "Review per-model evidence below",
-        };
-      }
-      case "partially_true":
-        return {
-          className: "bg-amber-50 border-amber-200 text-amber-900",
-          icon: AGGREGATE_VERDICT_ICONS.partially_true,
-          title: "Core claim may hold — details need correction",
-          subtitle: "Partial agreement across models",
-        };
-      case "unverifiable":
-      default:
-        return {
-          className: "bg-cp-raised border-cp-border text-cp-text",
-          icon: AGGREGATE_VERDICT_ICONS.unverifiable,
-          title: "Models cannot verify this claim with sufficient confidence",
-          subtitle: "Insufficient agreement or too many unknowns",
-        };
-    }
-  }, [data, independence, view, verdictCounts]);
+  const banner = useMemo(() => claimVerdictBanner(data), [data]);
 
   return (
     <div className="rounded-2xl border border-cp-border bg-cp-surface text-cp-text shadow-sm overflow-hidden">
@@ -548,6 +600,11 @@ export default function ClaimVerificationResultView({
               <div data-testid="claim-verdict-counts">
                 <p className="text-lg font-semibold text-cp-text">{formatClaimVerdictCounts(verdictCounts)}</p>
                 <p className="text-xs text-cp-faint">{slotCountsAreModelCounts(view) ? "Model verdicts" : "Panel slot verdicts"}</p>
+                {tallyNote ? (
+                  <p className="mt-0.5 text-xs text-cp-faint" data-testid="claim-slot-tally-note">
+                    {tallyNote}
+                  </p>
+                ) : null}
               </div>
             )}
             {data.evidenceQuality && (

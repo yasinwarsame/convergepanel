@@ -12,7 +12,9 @@ import {
   UNRECOGNIZED_VERDICT_SUMMARY,
 } from "@/lib/verification/buildClaimModelEvidence";
 import {
-  claimPayloadVerdictCounts,
+  claimPayloadSlotTally,
+  claimSlotTally,
+  claimSlotTallyNote,
   claimVerdictShape,
   countClaimModelVerdicts,
   countClaimModelVerdictsFromAuditBundle,
@@ -134,15 +136,33 @@ describe("per-model verdict counts", () => {
     expect(countClaimModelVerdictsFromAuditBundle(b)).toBeNull();
   });
 
-  it("a payload is counted from its bundle, never from aggregateSummary (which folds parse_error into unverifiable)", () => {
+  it("a payload is counted from its rows cross-checked with its bundle, never from aggregateSummary (which folds parse_error into unverifiable)", () => {
+    const rows = [{ status: "ok", verdict: "inaccurate" }, { status: "ok", verdict: "inaccurate" }, { status: "parse_error", verdict: "parse_error" }];
     const payload = {
       auditBundle: bundle([pm("ok", "inaccurate"), pm("ok", "inaccurate"), pm("parse_error", null)]),
-      modelEvidence: [{ status: "ok", verdict: "accurate" }],
+      modelEvidence: rows,
       aggregateSummary: { totalModels: 3, modelsAgreeAccurate: 0, modelsAgreeInaccurate: 2, modelsPartial: 0, modelsUnverifiable: 1 },
     };
-    expect(claimPayloadVerdictCounts(payload)).toEqual({ accurate: 0, partially_accurate: 0, inaccurate: 2, unverifiable: 0, usable: 2 });
-    // Falls back to the rows only when the bundle is uncountable.
-    expect(claimPayloadVerdictCounts({ ...payload, auditBundle: undefined })).toEqual({ accurate: 1, partially_accurate: 0, inaccurate: 0, unverifiable: 0, usable: 1 });
+    expect(claimPayloadSlotTally(payload)?.verdicts).toEqual({ accurate: 0, partially_accurate: 0, inaccurate: 2, unverifiable: 0, usable: 2 });
+    expect(claimPayloadSlotTally(payload)?.malformed).toBe(1);
+    // An uncountable bundle does not block the rows; a bundle that DISAGREES with the rows states nothing.
+    expect(claimPayloadSlotTally({ ...payload, auditBundle: undefined })?.verdicts.inaccurate).toBe(2);
+    expect(claimPayloadSlotTally({ ...payload, modelEvidence: [{ status: "ok", verdict: "accurate" }] })).toBeNull();
+  });
+
+  it("slot tally: failed, malformed, unverifiable and usable stay distinct; substitution and providers as recorded", () => {
+    const t = claimSlotTally([
+      { status: "ok", verdict: "inaccurate", provider: "deepseek", substituted: true },
+      { status: "ok", verdict: "unverifiable", provider: "deepseek", substituted: true },
+      { status: "ok", verdict: "inaccurate", provider: "xai" },
+      { status: "failed", verdict: "failed" },
+      { status: "parse_error", verdict: "parse_error" },
+    ]);
+    expect(t).toEqual({ slots: 5, usable: 3, failed: 1, malformed: 1, substitutedUsable: 2, providers: 2, verdicts: { accurate: 0, partially_accurate: 0, inaccurate: 2, unverifiable: 1, usable: 3 } });
+    expect(claimSlotTallyNote(t!)).toBe("3 of 5 slots answered; 1 failed; 1 malformed (no recognized verdict); 2 answered by a substitute model; 2 distinct executing providers");
+    // Historic rows record no provider: providers unknown (null), never guessed.
+    expect(claimSlotTally([{ status: "ok", verdict: "accurate" }, { status: "ok", verdict: "accurate", provider: "openai" }])?.providers).toBeNull();
+    expect(claimSlotTally([{ status: "weird" }])).toBeNull();
   });
 
   it("row counting skips non-ok rows and rejects an ok row outside the vocabulary", () => {
@@ -180,10 +200,10 @@ describe("per-model verdict counts", () => {
     expect(formatClaimVerdictCounts(c(0, 2, 3, 1))).toBe("2 partially accurate, 3 inaccurate, 1 unverifiable");
   });
 
-  it("strict wire parse: exact keys, non-negative integers, usable = sum", () => {
+  it("wire parse: the five keys valid (non-negative integers, usable = sum); extra keys ignored (forward-compatible)", () => {
     expect(parseClaimModelVerdictCounts(c(4, 0, 1, 0))).toEqual(c(4, 0, 1, 0));
     expect(parseClaimModelVerdictCounts({ ...c(4, 0, 1, 0), usable: 4 })).toBeNull();
-    expect(parseClaimModelVerdictCounts({ ...c(4, 0, 1, 0), extra: 1 })).toBeNull();
+    expect(parseClaimModelVerdictCounts({ ...c(4, 0, 1, 0), failed: 2, malformed: 1 })).toEqual(c(4, 0, 1, 0));
     expect(parseClaimModelVerdictCounts({ ...c(4, 0, 1, 0), accurate: -1, usable: 0 })).toBeNull();
     expect(parseClaimModelVerdictCounts({ ...c(1, 0, 0, 0), accurate: 1.5, usable: 1.5 })).toBeNull();
     expect(parseClaimModelVerdictCounts({ accurate: 1, partially_accurate: 0, inaccurate: 0, usable: 1 })).toBeNull();

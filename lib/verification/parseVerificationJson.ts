@@ -37,6 +37,8 @@ const CONFS: ModelConfidence[] = ["high", "medium", "low"];
  */
 function normalizeVerdict(v: unknown): { verdict: ModelVerdict | null; issue: ModelVerdictIssue | null } {
   if (v === undefined || v === null) return { verdict: null, issue: "missing_verdict" };
+  // Any non-string (number, boolean, object, ARRAY) is unrecognized. Disclosed behaviour change: before PR-1,
+  // String(["accurate"]) === "accurate" made a one-element array a valid "accurate" verdict; it is now a parse_error.
   if (typeof v !== "string") return { verdict: null, issue: "unrecognized_verdict" };
   const s = v.trim().toLowerCase().replace(/[\s_-]+/g, "_");
   if (VERDICTS.includes(s as ModelVerdict)) return { verdict: s as ModelVerdict, issue: null };
