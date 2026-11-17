@@ -39,6 +39,7 @@ import "server-only";
  *
  * FAIL CLOSED.
  *   - A credential that does not verify (invalid / expired / revoked / disabled) → `unauthenticated`.
+ *   - The verifier itself failing (TRANSIENT_VERIFY_CODES: Firebase backend / network) → `unavailable` (503).
  *   - A `getUser` failure (other than user-not-found), a nullish record or a uid anomaly → `unavailable`:
  *     the account state could not be read, which is never evidence of anything and never a success.
  *   - Disabled and deleted accounts are `unauthenticated` (the route answers 401 `session_required`), so the
@@ -116,7 +117,16 @@ const CODE_FOR: Readonly<Record<ManagementIdentityFailureReason, ManagementIdent
   auth_unavailable: "api_unavailable",
 });
 
-const fail = (reason: ManagementIdentityFailureReason): ManagementIdentityResult => Object.freeze({ ok: false, reason, code: CODE_FOR[reason] });
+/**
+ * `reason` is diagnostic only and NON-ENUMERABLE: `JSON.stringify(result)`, `{ ...result }` and `Object.keys`
+ * never carry it, so a route that serializes the result by mistake still discloses only `ok` and `code`.
+ * Routes answer with `apiErrorResponse(result.code, …)` and may log `reason` server-side.
+ */
+const fail = (reason: ManagementIdentityFailureReason): ManagementIdentityResult => {
+  const r = { ok: false as const, code: CODE_FOR[reason] };
+  Object.defineProperty(r, "reason", { value: reason, enumerable: false, writable: false, configurable: false });
+  return Object.freeze(r) as ManagementIdentityResult;
+};
 
 type Check =
   | { present: false }
@@ -131,10 +141,21 @@ function errorCodeOf(err: unknown): string {
   return "";
 }
 
-/** Same classification as resolveRequestIdentity, plus the disabled-account code `checkRevoked` can raise. */
+/**
+ * Firebase Admin codes that mean "the verifier could not run" (backend / network), not "the credential is bad".
+ * They are 503 `api_unavailable`, never 401: still a denial (fail closed), but a client is not told to sign in
+ * again because of an outage. Exact codes only (firebase-admin 12.x: AuthClientErrorCode.INTERNAL_ERROR and
+ * AppErrorCodes INTERNAL_ERROR / NETWORK_ERROR / NETWORK_TIMEOUT, which the `checkRevoked` getUser can raise).
+ * LIMITATION: firebase-admin maps a Google public-key fetch failure to `auth/argument-error`, which cannot be
+ * told apart from a forged token, so that outage still answers 401 (fail closed either way).
+ */
+const TRANSIENT_VERIFY_CODES: ReadonlySet<string> = new Set(["auth/internal-error", "app/internal-error", "app/network-error", "app/network-timeout"]);
+
+/** Same classification as resolveRequestIdentity, plus the disabled-account code `checkRevoked` can raise and transient outages. */
 function classify(err: unknown, kind: "cookie" | "bearer"): ManagementIdentityFailureReason {
   const code = errorCodeOf(err);
   if (code === "auth/user-disabled") return "account_disabled";
+  if (TRANSIENT_VERIFY_CODES.has(code)) return "auth_unavailable";
   if (code.includes("revoked")) return "revoked_session";
   if (code.includes("expired")) return "expired_session";
   return kind === "cookie" ? "invalid_session_cookie" : "invalid_bearer_token";

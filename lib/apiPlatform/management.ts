@@ -18,6 +18,12 @@
  * - Membership is read server-side from apiOrgMemberships/{am_…}; client-supplied role/org claims are ignored.
  *   Non-members, removed members and records bound to another org or uid are 404 `not_found`.
  * - Sensitive capabilities need a session no older than 15 minutes (token auth_time).
+ * - Only OWN fields of the identity and the membership record are read (an inherited property never counts).
+ *
+ * PROVENANCE IS NOT TYPE-ENFORCED (deferred: api-1a-contract-reconciliation.md R-11): a branded
+ * type would have to be shared between lib/auth and this library, which may import nothing outside itself.
+ * The re-checks above are the runtime substitute: any hand-built identity must still be well-formed, enabled,
+ * verified and fresh, and membership is always read server-side.
  */
 import { FRESH_SESSION_CAPABILITIES, FRESH_SESSION_SECONDS, roleHasCapability, type OrgCapability } from "@/lib/apiPlatform/orgCapabilities";
 import { computeApiOrgMembershipId } from "@/lib/apiPlatform/tenantPaths";
@@ -53,6 +59,11 @@ export interface ManagementDeps {
 
 const API_KEY_BEARER = /^\s*bearer\s+cpk_/i;
 
+/** Null-prototype copy of an object's OWN enumerable fields (null for a non-object); never modifies the input. */
+function ownRecord(r: unknown): Record<string, unknown> | null {
+  return typeof r === "object" && r !== null && !Array.isArray(r) ? Object.assign(Object.create(null) as Record<string, unknown>, r) : null;
+}
+
 export async function authorizeOrgManagement(
   headers: Headers,
   identity: SessionIdentity | null,
@@ -61,24 +72,28 @@ export async function authorizeOrgManagement(
   deps: ManagementDeps,
 ): Promise<ManagementDecision> {
   if (API_KEY_BEARER.test(headers.get("authorization") ?? "")) return { ok: false, code: "api_key_not_accepted" };
-  if (!identity || typeof identity.uid !== "string" || identity.uid.length === 0 || !Number.isInteger(identity.authTimeSeconds)) {
+  // Own fields only: an inherited `disabled: false` / `emailVerified: true` / role can never satisfy a check.
+  const id = ownRecord(identity);
+  if (!id || typeof id.uid !== "string" || id.uid.length === 0 || !Number.isInteger(id.authTimeSeconds)) {
     return { ok: false, code: "session_required" };
   }
+  const uid = id.uid;
+  const authTimeSeconds = id.authTimeSeconds as number;
   // auth_time must be seconds and not in the future (300 s skew): a millisecond value would otherwise look fresh forever.
-  if (identity.authTimeSeconds > deps.nowSeconds() + 300) return { ok: false, code: "session_required" };
+  if (authTimeSeconds > deps.nowSeconds() + 300) return { ok: false, code: "session_required" };
   // A disabled account obtains nothing, and is indistinguishable from "no session" (admin-authority-tiers.md).
-  if (identity.disabled !== false) return { ok: false, code: "session_required" };
-  if (identity.emailVerified !== true) return { ok: false, code: "identity_not_verified" };
+  if (id.disabled !== false) return { ok: false, code: "session_required" };
+  if (id.emailVerified !== true) return { ok: false, code: "identity_not_verified" };
   if (!isOrgId(orgId)) return { ok: false, code: "not_found" };
   try {
-    const m = await deps.getMembership(computeApiOrgMembershipId(orgId, identity.uid));
+    const m = ownRecord(await deps.getMembership(computeApiOrgMembershipId(orgId, uid)));
     // Non-members and removed members get not_found: org existence is not revealed.
-    if (!m || m.orgId !== orgId || m.uid !== identity.uid || m.status !== "active") return { ok: false, code: "not_found" };
+    if (!m || m.orgId !== orgId || m.uid !== uid || m.status !== "active") return { ok: false, code: "not_found" };
     if (!roleHasCapability(m.role, capability)) return { ok: false, code: "insufficient_role" };
-    if (FRESH_SESSION_CAPABILITIES.has(capability) && deps.nowSeconds() - identity.authTimeSeconds > FRESH_SESSION_SECONDS) {
+    if (FRESH_SESSION_CAPABILITIES.has(capability) && deps.nowSeconds() - authTimeSeconds > FRESH_SESSION_SECONDS) {
       return { ok: false, code: "fresh_session_required" };
     }
-    return { ok: true, uid: identity.uid, orgId, role: m.role as OrgRole };
+    return { ok: true, uid, orgId, role: m.role as OrgRole };
   } catch {
     return { ok: false, code: "api_unavailable" };
   }

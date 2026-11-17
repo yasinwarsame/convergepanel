@@ -102,7 +102,21 @@ function req(opts: { cookie?: string; authorization?: string } = {}): NextReques
   return new NextRequest("http://localhost/api/developer/x", { headers });
 }
 
-const failed = (reason: string, code: string) => ({ ok: false, reason, code });
+/**
+ * Asymmetric matcher for a failure: exactly the ENUMERABLE keys `ok`, `code`, plus a non-enumerable `reason`.
+ * (A plain `{ ok, reason, code }` would not match a correct result, whose `reason` is hidden from serialization.)
+ */
+const failed = (reason: string, code: string) => ({
+  asymmetricMatch: (r: unknown) => {
+    if (typeof r !== "object" || r === null) return false;
+    const o = r as Record<string, unknown>;
+    const d = Object.getOwnPropertyDescriptor(o, "reason");
+    return JSON.stringify(Object.keys(o).sort()) === '["code","ok"]' && o.ok === false && o.code === code
+      && !!d && d.enumerable === false && d.value === reason && Object.isFrozen(o);
+  },
+  toString: () => `failed(${reason}, ${code})`,
+  toAsymmetricMatcher: () => `failed(${reason}, ${code})`,
+});
 
 function world() {
   const auth = new FakeAuth().user("uA").user("uB");
@@ -447,5 +461,91 @@ describe("boundaries", () => {
     expect(out).toContain(FILE);
     const importers = out.filter((f) => f !== FILE && specifiers(readFileSync(path.join(ROOT, f), "utf8")).some((s) => /resolveManagementIdentity$/.test(s)));
     expect(importers).toEqual([]);
+  });
+});
+
+describe("transient verifier failure → 503, never 401 and never success", () => {
+  const TRANSIENT = ["auth/internal-error", "app/internal-error", "app/network-error", "app/network-timeout"];
+  const NOT_TRANSIENT = ["auth/argument-error", "auth/internal-error-x", "auth/invalid-session-cookie-duration", "network-error", "", "AUTH/INTERNAL-ERROR"];
+  const throwing = (code: string): ManagementAuthPort => ({
+    verifySessionCookie: async () => { throw codeErr(code); },
+    verifyIdToken: async () => { throw codeErr(code); },
+    getUser: async (uid) => ({ uid, disabled: false, emailVerified: true }),
+  });
+
+  it.each(TRANSIENT)("%s on cookie or bearer verification → auth_unavailable (api_unavailable)", async (code) => {
+    expect(await resolveManagementIdentity(req({ cookie: "c" }), throwing(code), now)).toEqual(failed("auth_unavailable", "api_unavailable"));
+    expect(await resolveManagementIdentity(req({ authorization: "Bearer t" }), throwing(code), now)).toEqual(failed("auth_unavailable", "api_unavailable"));
+  });
+
+  it.each(NOT_TRANSIENT)("%j stays a 401 invalid credential (exact codes only)", async (code) => {
+    expect(await resolveManagementIdentity(req({ cookie: "c" }), throwing(code), now)).toEqual(failed("invalid_session_cookie", "session_required"));
+    expect(await resolveManagementIdentity(req({ authorization: "Bearer t" }), throwing(code), now)).toEqual(failed("invalid_bearer_token", "session_required"));
+  });
+
+  it("transient failure on ONE of two credentials still fails the request (no fallback to the other)", async () => {
+    const { auth, bearerA } = world();
+    const port: ManagementAuthPort = { ...auth, verifySessionCookie: async () => { throw codeErr("app/network-timeout"); }, verifyIdToken: auth.verifyIdToken.bind(auth), getUser: auth.getUser.bind(auth) };
+    expect(await resolveManagementIdentity(req({ cookie: "c", authorization: `Bearer ${bearerA}` }), port, now)).toEqual(failed("auth_unavailable", "api_unavailable"));
+  });
+
+  it("non-Error throwables (string, undefined, numeric code) are invalid credentials, never success", async () => {
+    for (const thrown of ["boom", undefined, { code: 500 }, null]) {
+      const port: ManagementAuthPort = { verifySessionCookie: async () => { throw thrown; }, verifyIdToken: async () => { throw thrown; }, getUser: async (uid) => ({ uid, disabled: false, emailVerified: true }) };
+      expect(await resolveManagementIdentity(req({ cookie: "c" }), port, now)).toEqual(failed("invalid_session_cookie", "session_required"));
+    }
+  });
+});
+
+describe("`reason` is never serialized", () => {
+  it("a failure's JSON, spread and keys carry only ok and code; reason is readable server-side", async () => {
+    const { auth, cookieA } = world();
+    auth.user("uA", { emailVerified: false });
+    const r = await resolveManagementIdentity(req({ cookie: cookieA }), auth, now);
+    expect(JSON.stringify(r)).toBe('{"ok":false,"code":"identity_not_verified"}');
+    expect({ ...r }).toStrictEqual({ ok: false, code: "identity_not_verified" });
+    expect(Object.keys(r)).toEqual(["ok", "code"]);
+    expect(!r.ok && r.reason).toBe("email_not_verified");
+    expect(() => { (r as { reason: string }).reason = "x"; }).toThrow(TypeError);
+  });
+
+  it("the API error body built from the result names no reason", async () => {
+    const { apiErrorBody } = jest.requireActual("@/lib/apiPlatform/errors") as typeof import("@/lib/apiPlatform/errors");
+    const { auth } = world();
+    const old = auth.token("cookie-rev", { kind: "cookie", uid: "uA" });
+    auth.user("uA", { tokensValidAfterSeconds: NOW });
+    const r = await resolveManagementIdentity(req({ cookie: old }), auth, now);
+    if (r.ok) throw new Error("expected failure");
+    const body = JSON.stringify(apiErrorBody(r.code, "req_x"));
+    expect(body).not.toContain("revoked");
+    expect(body).not.toContain(r.reason);
+  });
+
+  it("positive control: the failed() matcher rejects a wrong reason, an enumerable reason and an extra key", () => {
+    const hidden = (reason: string, extra: Record<string, unknown> = {}) => {
+      const o = { ok: false, code: "session_required", ...extra };
+      Object.defineProperty(o, "reason", { value: reason, enumerable: false });
+      return Object.freeze(o);
+    };
+    const m = failed("expired_session", "session_required");
+    expect(m.asymmetricMatch(hidden("expired_session"))).toBe(true);
+    expect(m.asymmetricMatch(hidden("revoked_session"))).toBe(false);
+    expect(m.asymmetricMatch(Object.freeze({ ok: false, code: "session_required", reason: "expired_session" }))).toBe(false);
+    expect(m.asymmetricMatch(hidden("expired_session", { uid: "uA" }))).toBe(false);
+    expect(m.asymmetricMatch({ ...hidden("expired_session") })).toBe(false);
+  });
+});
+
+describe("revocation checking is pinned to checkRevoked === true on both credential kinds", () => {
+  it("a port that only refuses revoked tokens when checkRevoked is strictly true: both paths refuse", async () => {
+    const seen: unknown[] = [];
+    const port: ManagementAuthPort = {
+      verifySessionCookie: async (_v, checkRevoked) => { seen.push(checkRevoked); if (checkRevoked === true) throw codeErr("auth/session-cookie-revoked"); return { uid: "uA", auth_time: NOW - 60 }; },
+      verifyIdToken: async (_v, checkRevoked) => { seen.push(checkRevoked); if (checkRevoked === true) throw codeErr("auth/id-token-revoked"); return { uid: "uA", auth_time: NOW - 60 }; },
+      getUser: async (uid) => ({ uid, disabled: false, emailVerified: true }),
+    };
+    expect(await resolveManagementIdentity(req({ cookie: "c" }), port, now)).toEqual(failed("revoked_session", "session_required"));
+    expect(await resolveManagementIdentity(req({ authorization: "Bearer t" }), port, now)).toEqual(failed("revoked_session", "session_required"));
+    expect(seen).toEqual([true, true]);
   });
 });
