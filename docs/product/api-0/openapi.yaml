@@ -4,7 +4,7 @@
 openapi: 3.1.0
 info:
   title: ConvergePanel Verification API (DRAFT)
-  version: 0.1.0-draft
+  version: 0.2.0-draft
   summary: Draft contract for claim and research verification. Not implemented.
   description: |
     **Status: DRAFT, NOT IMPLEMENTED.** This document is an API-0 design artifact.
@@ -28,6 +28,59 @@ tags:
   - name: Models
 paths:
   /verifications:
+    get:
+      tags: [Verifications]
+      operationId: listVerifications
+      summary: List verifications (authorized history, cursor-paginated)
+      description: |
+        Added by owner decision D9 (Addendum 1, 2026-11-17). Requires `verifications:read`.
+        Results are always scoped to the authenticated key's organization; an app-scoped key
+        (the default) lists only its own application's verifications, and `application_id`
+        can only narrow that scope, never widen it. Another application's or organization's ID
+        in `application_id` returns an empty list, never 403, so existence cannot be probed.
+        Ordered by `created_at` descending, then `id` descending (stable tiebreak). The cursor is
+        opaque, bound to the organization, application scope and filter set that produced it; a
+        cursor presented with a different key scope or different filters returns
+        400 `invalid_cursor`. Items are summaries: no input text, no result sections and no
+        model text. Deleted verifications are not listed.
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: cursor
+          in: query
+          description: Opaque `next_cursor` from the previous page.
+          schema: { type: string, maxLength: 512 }
+        - name: status
+          in: query
+          description: 'Filter by public JobStatus. Open enum.'
+          schema: { type: string }
+        - name: type
+          in: query
+          schema: { type: string, enum: [claim, research] }
+        - name: application_id
+          in: query
+          description: Narrow to one application of the key's organization. Never widens an app-scoped key.
+          schema: { type: string }
+        - name: created_gte
+          in: query
+          schema: { type: string, format: date-time }
+        - name: created_lt
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: One page of verification summaries.
+          headers:
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificationList'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
     post:
       tags: [Verifications]
       operationId: createVerification
@@ -309,7 +362,7 @@ components:
       schema: { type: string, pattern: '^req_[A-Za-z0-9]+$' }
   responses:
     BadRequest:
-      description: Invalid request.
+      description: 'Invalid request: `invalid_json`, `missing_field`, `input_too_long`, `invalid_model`, `invalid_cursor` (Addendum 1 D9: list cursor not valid for this key scope or filter set).'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     Unauthorized:
       description: '`invalid_api_key` for every key failure.'
@@ -318,7 +371,7 @@ components:
       description: '`quota_exceeded`, `spend_limit_reached`, `payment_required`.'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     Forbidden:
-      description: '`insufficient_scope`, `org_suspended`, `live_key_requires_plan` (authenticated live key, org without an active API plan; same response on every route), `failed_job_threshold_exceeded`, `model_response_access_disabled`.'
+      description: '`insufficient_scope`, `org_suspended`, `live_key_requires_plan` (authenticated live key, org without an active API plan; same response on every route), `failed_job_threshold_exceeded`, `model_response_access_disabled`, `pipeline_processing_not_acknowledged` (Addendum 1 D6: a research job needs auxiliary Gemini processing and the organization has not recorded an acknowledgement; nothing is written, nothing is sent to any provider).'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     NotFound:
       description: '`verification_not_found`. Also returned for other organizations'' IDs.'
@@ -333,7 +386,7 @@ components:
       description: '`request_too_large` (body > 64 KB).'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     Unprocessable:
-      description: '`model_unavailable`, `too_few_models`, `model_limit_exceeded`, `type_unavailable`, `synthesis_not_supported`, `synthesis_unavailable`, `fallback_unavailable`, `repeated_failing_input`.'
+      description: '`model_unavailable`, `too_few_models`, `model_limit_exceeded`, `type_unavailable`, `synthesis_not_supported`, `synthesis_unavailable` (also returned for every `options.synthesis: true` during the controlled beta, Addendum 1 D4), `fallback_unavailable`, `repeated_failing_input`, `option_unavailable_in_beta` (`retain_input` or `retain_model_responses` requested during the controlled beta, Addendum 1 OQ-4).'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     TooManyRequests:
       description: '`rate_limited`, `concurrency_limit`.'
@@ -645,6 +698,35 @@ components:
         response_text:
           $ref: '#/components/schemas/Section'
           description: not_requested by default (OD-19).
+    VerificationSummary:
+      type: object
+      description: History list item (D9). Never contains input text, result sections or model text.
+      required: [object, id, type, status, mode, created_at, application_id]
+      additionalProperties: false
+      properties:
+        object: { const: verification_summary }
+        id: { type: string }
+        type: { type: string, enum: [claim, research] }
+        status: { $ref: '#/components/schemas/JobStatus' }
+        mode: { type: string, enum: [live, test] }
+        created_at: { type: string, format: date-time }
+        completed_at: { type: [string, 'null'], format: date-time }
+        application_id: { type: string }
+        metadata:
+          type: object
+          additionalProperties: { type: string }
+        credits_charged: { type: [integer, 'null'], minimum: 0 }
+    VerificationList:
+      type: object
+      required: [object, data, has_more, next_cursor]
+      additionalProperties: false
+      properties:
+        object: { const: list }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/VerificationSummary' }
+        has_more: { type: boolean }
+        next_cursor: { type: [string, 'null'] }
     ModelResultList:
       type: object
       required: [object, data]

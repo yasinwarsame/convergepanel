@@ -2,9 +2,10 @@
 
 | | |
 |---|---|
-| **Status** | Planning draft, Rev 3. API-0 (design) is authorized to begin (OD-20). Nothing in this document is implemented, and no implementation stage (API-1 to API-7) is authorized. |
+| **Status** | Planning draft, **Rev 4** (amended by [Owner Decision Addendum 1](api-0/owner-decision-addendum-1.md), 2026-11-17). Nothing in this document is implemented. Addendum 1 accelerates the workstream (D2 supersedes OD-20's timing and DEP-1), defines a lean controlled beta (D4) and amends the stage gates; each implementation stage is still separately authorized and released (OD-20, retained). **Where this document and Addendum 1 disagree, Addendum 1 wins.** |
 | 3.1 | 2026-11-03 | **Rev 3.1, confirmation-review fixes.** Auxiliary Gemini permits are sized to the real stance-backfill concurrency and never serialized inside timed call sites. Call records store the outcome the call site observed (timeouts included), and parallel auxiliary calls are keyed by slot. `loadGovernancePolicy` is a write in API mode: it goes through a non-writing port and fails closed. The `track*` call-site count is corrected. |
 | 3.2 | 2026-11-03 | **Rev 3.2, owner acceptance.** The owner accepted the PRD and the API-0 package as design artifacts. API-1 is not authorized. Two owner-recorded design dependencies are added in `api-0/dependencies-and-gates.md`. DEP-15: Gemini receives every research question whatever models are selected, so this must be corrected or deliberately constrained before claiming model-selection independence. DEP-16: API-1 secrets need a separately approved configuration design within the Order 6 environment boundary. Gemini routing and `lib/env.ts` are unchanged. |
+| 4 | 2026-11-17 | **Rev 4 — Owner Decision Addendum 1** (`api-0/owner-decision-addendum-1.md`). Records D1–D10 and the OQ-1..OQ-5 dispositions without rewriting OD-1..OD-21; each OD is marked retained, narrowed, superseded or deferred there (§2). D1 keeps OD-2. D2 supersedes the timing in OD-20 and DEP-1. D3 scopes a secret-only Order 6 boundary correction (`api-0/secret-boundary.md`). D4 lean controlled beta: claim + research, polling, history, capped credits, manual invoicing, every financial safeguard kept; no synthesis, webhooks, SDKs or Stripe API plans in the beta. D6 Gemini pipeline processing disclosed, acknowledged per org, fail closed. D9 adds `GET /v1/verifications`. Stage gates amended explicitly (`api-0/dependencies-and-gates.md` §5). CR-1 and CR-2 unchanged |
 | **Author** | Planning workstream (docs-only), 2026-11-03 |
 | **Baseline** | `main` at `2f70d1f` |
 | **Workstream** | Dedicated future roadmap item, stages API-0 to API-7 |
@@ -1137,6 +1138,8 @@ Agent guidance in the docs:
 
 ## 19. Release plan
 
+> **Amended 2026-11-17 (Addendum 1 §9; `api-0/dependencies-and-gates.md` §5).** The stage order below is the 2026-11-03 plan, kept for the record. The current sequence inserts API-2β (ledger and every financial safeguard without Stripe) before API-3, ships API-4β/API-5β without synthesis, webhooks or SDKs, runs the controlled beta as API-6β, and moves Stripe API plans (API-2S), webhooks (API-5W) and SDKs (API-5S) after the beta. API-6's 30-day evidence becomes the Production v1 entry gate.
+
 Each stage needs separate owner authorization, its own tests, an independent review (a fresh reviewer per round) and a protected release. Every surface ships dark. **Ruled (OD-21):** `lib/env.ts` is frozen byte-for-byte by the Order 6 boundary suites, so initial dark releases use compile-time switches: rollout modules under `lib/apiPlatform/` (the pattern report review uses), turned on only by a reviewed PR. Runtime configuration is allowed only after a separately approved Order 6 boundary change. Because API-1 onward needs new secrets (§15.1), that boundary change is a prerequisite of API-1. No stage changes existing routes' behaviour, except the mechanical extractions in API-3, which are proven equivalent. Per-stage gates in full: `docs/product/api-0/dependencies-and-gates.md`.
 
 | Stage | Scope | Exit criteria | Key tests | Depends on |
@@ -1173,6 +1176,8 @@ Each stage needs separate owner authorization, its own tests, an independent rev
 ---
 
 ## 21. Owner decisions (ruled 2026-11-03)
+
+> **Reconciled 2026-11-17.** The table below is unchanged history. The current status of each ruling (retained, narrowed, superseded or deferred) is in `api-0/owner-decision-addendum-1.md` §2, which wins where it differs.
 
 All twenty-one decisions were ruled by the owner on 2026-11-03. Two (OD-10, OD-19) were modified from the Rev 1 recommendation. Each ruling has been propagated into the sections listed; no section recommends a superseded option.
 

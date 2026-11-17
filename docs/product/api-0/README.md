@@ -3,7 +3,8 @@
 | | |
 |---|---|
 | **Status** | **API-0 design only.** Authorized by owner ruling OD-20 (2026-11-03). Documents only. |
-| **Not authorized** | API-1 to API-7. No routes, code, credentials, Stripe products, workers, queues, KMS keys, DNS, environment variables or configuration may be created on the strength of these documents. |
+| **Amended** | [Owner Decision Addendum 1](owner-decision-addendum-1.md) (2026-11-17). |
+| **Not authorized** | API-1 to API-7, except where a separate owner authorization names a stage. No routes, code, credentials, Stripe products, workers, queues, KMS keys, DNS, environment variables or configuration may be created on the strength of these documents. |
 | **Parent document** | [`../api-platform-prd.md`](../api-platform-prd.md) (Rev 3: owner rulings 2026-11-03 + design review fixes) |
 | **Baseline** | `main` at `2f70d1f` |
 
@@ -23,6 +24,8 @@ Where this set and the PRD disagree, the PRD's §21 rulings win and the disagree
 | 8 | [`retention-and-deletion.md`](retention-and-deletion.md) | Four data classes (OD-10), deletion endpoint (OD-11), audit evidence, backups, provider-side retention, export |
 | 9 | [`developer-journeys.md`](developer-journeys.md) | Sign-up to delete, plus agent / tool-calling integration |
 | 10 | [`dependencies-and-gates.md`](dependencies-and-gates.md) | Implementation dependencies, per-stage gates API-1..API-7, web-capacity protection gate, open questions |
+| 11 | [`owner-decision-addendum-1.md`](owner-decision-addendum-1.md) | **2026-11-17 owner rulings D1–D10**: reconciliation of OD-1..OD-21, lean controlled beta scope, Gemini disclosure and acknowledgement, history endpoint, amended stage gates, infrastructure matrix, implementation sequence. Wins over this set and the PRD where it differs |
+| 12 | [`secret-boundary.md`](secret-boundary.md) | Secret-only Order 6 boundary (D3/OQ-1): server-only secrets module, inventory, readers, rules, tests, rebaseline evidence. Draft implementation on `feat/api-secret-boundary`; merge by separate decision |
 
 ## Fixed positions this set inherits from the PRD
 
