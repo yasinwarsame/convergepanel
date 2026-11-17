@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Design contract, 0.4.0-draft. Added by [Owner Decision Addendum 2](owner-decision-addendum-2.md) (2026-11-17) to resolve audit findings C-3, C-4 and C-6; amended by [Owner Decision Addendum 3](owner-decision-addendum-3.md) (2026-11-17, Quality Correction R2: m1–m6, the three reviewer exceptions, the body cap). **Not implemented and not active in Production.** 13 codes exist in the draft implementation on PR #327 (not merged); the API is dark, so **no code is returned by active Production** (§2, last column). |
+| **Status** | Design contract, 0.4.0-draft; amended again by [Owner Decision Addendum 4](owner-decision-addendum-4.md) (2026-11-17, R2 disposition: body cap decided, rate-limit layering, transactional concurrency, cancel → 410, D6 withdrawal). Added by [Owner Decision Addendum 2](owner-decision-addendum-2.md) (2026-11-17) to resolve audit findings C-3, C-4 and C-6; amended by [Owner Decision Addendum 3](owner-decision-addendum-3.md) (2026-11-17, Quality Correction R2: m1–m6, the three reviewer exceptions, the body cap). **Not implemented and not active in Production.** 13 codes exist in the draft implementation on PR #327 (not merged); the API is dark, so **no code is returned by active Production** (§2, last column). |
 | **Single source** | This file is the **only** list of error codes. PRD §9.5, the `openapi.yaml` response descriptions and `lib/apiPlatform/errors.ts` must agree with it. `openapi.yaml` mirrors §2 in `components.x-error-catalog`; `docs/__tests__/apiOpenapiRequestContract.spec.ts` pins the mirror, the OpenAPI response descriptions, every published error example, and the draft implementation snapshot `implementation-snapshots/api-1a-errors.json` (§2.3) to this table. |
 | **Changing it** | Add or change a row here first, in the same PR as the OpenAPI mirror. A new code is an additive change. Renaming or removing a code, or changing its status or `type`, is a breaking change (PRD §8.7). |
 | **Does not change** | Any owner ruling (OD-1..OD-21, Addendum 1 D1–D10, OQ-1..OQ-5, §1.1 P1–P4) or any beta exclusion (Addendum 1 §4). |
@@ -109,10 +109,10 @@ Every error uses `{ error: { type, code, message, param, request_id, doc_url } }
 - `model_response_access_disabled`: after the beta only (OD-19 opt-in). In the beta, `retain_model_responses: true` is rejected first by `option_unavailable_in_beta` (§3.1, step 9; step 6 before Addendum 3), so this code is never returned.
 - `payment_required`: Stripe API plans (API-2S) are excluded from the beta (D4).
 - `too_few_models`, `model_limit_exceeded`: also the codes for the absolute 2..5 bounds of `models` (§4.4), not only the plan limit.
-- `verification_deleted`: only for a verification of the caller's own organization and mode, including an idempotent replay of its create. Another organization's deleted verification returns 404 `verification_not_found`.
+- `verification_deleted`: only for a verification of the caller's own organization and mode, including an idempotent replay of its create. *Addendum 4:* also `POST …/cancel` on it. A replay under an unexpired deleted marker gets 410 whatever its body: the marker is content-free and keeps no request hash, so no comparison is possible. Another organization's deleted verification returns 404 `verification_not_found`.
 - `session_required`: includes a disabled Firebase account, an expired or revoked session, and an `auth_time` that is missing or in the future.
 - `identity_not_verified`: the server-read Firebase user record has `emailVerified !== true`. Evaluated after the account is known to be enabled, and before anything specific to an organization (§3.2). Implemented in the #327 draft (Addendum 3, m1).
-- `rate_limited`: every data-plane operation, from the pre-authentication flood limit or the authenticated per-key and per-organization limits (§3.4). Always with `Retry-After`. A replay may receive it; it never writes anything.
+- `rate_limited`: every data-plane operation, from the coarse edge limit (per source address, no lockout), the failed-authentication throttle per presented key ID (Addendum 4), or the authenticated per-key and per-organization limits (§3.4). Always with `Retry-After`. A replay may receive it; it never writes anything.
 - `empty_input`: also text with no visible code point (§4.2, Addendum 3, m4), not only whitespace-only text.
 - `invalid_encoding`: also DEL (U+007F) and the C1 controls U+0080..U+009F (Addendum 3, reviewer exception 2).
 - `research_schema_unsupported`: proposed. Must be returned before job creation and before credit reservation, with nothing written (Addendum 2 §2).
@@ -141,8 +141,8 @@ A request gets **one** error: the first failing step below. Steps are evaluated 
 |---|---|---|
 | 0 | Global availability (no tenant data) | 503 `api_unavailable`, `maintenance` |
 | 1 | Transport, from headers and the byte count only (the body is not decoded): `Content-Length` over the cap, or the streamed byte count passing it, stops reading at once | 413 `request_too_large`; 415 `unsupported_media_type` |
-| 2 | Pre-authentication flood limit per source address (§3.4); reads no tenant data | 429 `rate_limited` |
-| 3 | Authentication | 401 `invalid_api_key` |
+| 2 | Coarse edge abuse limit per source address (§3.4; high ceiling, no lockout); reads no tenant data | 429 `rate_limited` |
+| 3 | Authentication. *Addendum 4:* a presented key ID whose recent failed-authentication budget is exhausted, and whose secret fails again, gets 429 instead of 401; a correct secret always authenticates (§3.4) | 401 `invalid_api_key` (429 per presented key ID) |
 | 4 | Authenticated request rate: per key, then per organization (§3.4). Replays count | 429 `rate_limited` |
 | 5 | Organization and plan state of the key's own organization | 403 `org_suspended`, then 403 `live_key_requires_plan` |
 | 6 | Scope | 403 `insufficient_scope` |
@@ -162,13 +162,13 @@ A request gets **one** error: the first failing step below. Steps are evaluated 
 |---|---|---|
 | 0 | Global availability | 503 `api_unavailable`, `maintenance` |
 | 1 | Transport: none of these operations takes a request body (`openapi.yaml` defines none, including `cancel`); a body that is sent is not read, so no 413 or 415 is returned on these routes | — |
-| 2 | Pre-authentication flood limit per source address | 429 `rate_limited` |
-| 3 | Authentication | 401 `invalid_api_key` |
+| 2 | Coarse edge abuse limit per source address (high ceiling, no lockout) | 429 `rate_limited` |
+| 3 | Authentication (failed-authentication throttling per presented key ID, as for create) | 401 `invalid_api_key` (429 per presented key ID) |
 | 4 | Authenticated request rate, per key then per organization, in the operation's class (§3.4: `read`, `list` or `write`). **Decided before the path ID or any query parameter is examined**, from the caller's own buckets only | 429 `rate_limited` |
 | 5 | Organization and plan state | 403 `org_suspended`, `live_key_requires_plan` |
 | 6 | Scope of the operation | 403 `insufficient_scope` |
 | 7 | Query parameters (list): 400 `invalid_cursor`, `invalid_status`, `invalid_request` | 400 |
-| 8 | Tenant-bound lookup: a malformed, nonexistent or foreign ID → 404 `verification_not_found`. Then, per operation: **`GET`** `/verifications/{id}`, `/report`, `/models` on the caller's own deleted verification → 410 `verification_deleted`; **`DELETE`** is idempotent: a repeat `DELETE`, including after deletion completed, returns the same `202` deletion (`retention-and-deletion.md` §3.1; `openapi.yaml` defines no 410 for `DELETE`); **`cancel`** on a terminal job → 409 `not_cancelable`, and on the caller's own deleted verification also 409 `not_cancelable` (`openapi.yaml` defines no 410 for `cancel`; a deleted verification is always terminal, `jobs-and-idempotency.md` §3, since `DELETE` cancels a running job first) | 404 / 410 (GET only) / 202 (DELETE) / 409 (cancel) |
+| 8 | Tenant-bound lookup: a malformed, nonexistent or foreign ID (including another organization's deleted verification) → 404 `verification_not_found`. Then, per operation: **`GET`** `/verifications/{id}`, `/report`, `/models` on the caller's own deleted verification → 410 `verification_deleted`; **`DELETE`** is idempotent: a repeat `DELETE`, including after deletion completed, returns the same `202` deletion (`retention-and-deletion.md` §3.1; `openapi.yaml` defines no 410 for `DELETE`); **`cancel`** on the caller's own deleted verification → 410 `verification_deleted` (*Addendum 4*, ruling CX; supersedes the Addendum 3 reading of 409; `openapi.yaml` now lists 410 for `cancel`), and on another non-deleted terminal job → 409 `not_cancelable` | 404 / 410 (GET, cancel) / 202 (DELETE) / 409 (cancel) |
 
 **Adjustments, with reasons:**
 - **Transport (step 1) stays first.** It needs only headers and a byte count, rejects an oversized body before it is read in full, and reads no tenant data. Decoding and parsing the body before authentication would enlarge the unauthenticated parsing surface for no gain, so decoding is step 7.
@@ -210,23 +210,24 @@ Role is checked before freshness, so a member without the capability is not aske
 
 ### 3.4 Rate limits (Addendum 3, m2)
 
-All numbers are **placeholders** (set per plan in `lib/apiPlatform/apiPlans.ts`, compile-time, OD-21), stated so that implementation and tests have concrete values. Windows are sliding 60 s windows in the Redis-class store (OD-5).
+*Addendum 4 (2026-11-17) replaces the Addendum 3 layering.* The broad failed-authentication lockout per source address is **rejected**: it let one client behind a shared NAT or proxy lock out every other tenant's valid credentials behind the same address. Every number below is a **placeholder to be set by load testing**; none is an SLO and none is frozen. Windows are sliding 60 s windows in the Redis-class store (OD-5).
 
-| Layer | Bucket | Limit (placeholder) | Applies to | Step |
+| Layer | Bucket | Limit (placeholder; set by load testing) | Applies to | Step |
 |---|---|---|---|---|
-| Pre-authentication flood limit | source address (edge-reported client IP; IPv6 by /64) | 600 requests / min, all data-plane routes together | every request, before the key is looked at | 2 |
-| Pre-authentication failed-auth limit | source address | 30 failed authentications / min; then every request from the address gets 429 until the window clears | requests from an address that recently sent invalid keys | 2 |
-| Per key, `create` | API key | 60 / min (PRD §9.3) | `POST /verifications` (new and replay) | 4 |
-| Per key, `write` | API key | 60 / min | `DELETE /verifications/{id}`, `POST …/cancel` | 4 |
-| Per key, `read` (poll) | API key | 600 / min (`jobs-and-idempotency.md` §7) | `GET /verifications/{id}`, `/report`, `/models`, `GET /usage`, `GET /models` | 4 |
-| Per key, `list` | API key | 120 / min | `GET /verifications` | 4 |
-| Per organization (all keys) | organization | 5 × the per-key limit of each class | the same classes, summed over the organization's keys | 4 |
+| Coarse edge abuse protection | source address (edge-reported client IP; IPv6 by /64) | high ceiling, for example 6,000 requests / min across all data-plane routes | every request, before the key is looked at. **No lockout:** it never blocks a request because of another client's failures, and its ceiling is set well above any single tenant's legitimate per-key traffic | 2 |
+| Failed-authentication throttling | **presented key ID** (the `{keyId}` part of `cpk_{mode}_{keyId}_{secret}`, parsed from the header without any lookup) | for example 10 failed authentications / min per presented key ID | only requests whose secret **fails**: once the budget is exhausted, a further failure answers 429 instead of 401. A **correct secret always authenticates**, so a valid credential is never locked out by someone else's guesses. A malformed header without a key ID is counted under the source-address layer | 3 |
+| Per key, `create` | API key | for example 60 / min (PRD §9.3) | `POST /verifications` (new and replay) | 4 |
+| Per key, `write` | API key | for example 60 / min | `DELETE /verifications/{id}`, `POST …/cancel` | 4 |
+| Per key, `read` (poll) | API key | for example 600 / min (`jobs-and-idempotency.md` §7) | `GET /verifications/{id}`, `/report`, `/models`, `GET /usage`, `GET /models` | 4 |
+| Per key, `list` | API key | for example 120 / min | `GET /verifications` | 4 |
+| Per organization (all keys) | organization | for example 5 × the per-key limit of each class | the same classes, summed over the organization's keys | 4 |
 
+- **Cost-aware.** The edge layer and the failed-authentication layer each cost one Redis-class increment; the key-ID bucket is read before the key document, and the key document read (one Firestore read plus an HMAC) is the only per-request authentication cost. Unknown and existing key IDs are throttled identically, so the 429 is not an existence oracle.
 - **Response.** 429 `rate_limited` with `Retry-After` (seconds until the bucket admits one request) and `RateLimit-Limit` / `RateLimit-Remaining` / `RateLimit-Reset` for the bucket that refused. The body is the fixed envelope; producing it reads nothing but the bucket.
-- **Inexpensive and bounded.** Steps 2 and 4 are one Redis-class increment each, made before any Firestore read (step 2) or any body decoding (step 4). A refused request is not parsed. The pre-authentication limit cannot reveal key validity: once the failed-auth limit trips, valid and invalid keys from that address get the same 429.
+- **Inexpensive and bounded.** Steps 2 and 4 are one Redis-class increment each, made before any Firestore read (step 2) or any body decoding (step 4). A refused request is not parsed.
 - **Store unavailable.** If the Redis-class store is unreachable, `POST /verifications`, `DELETE` and `cancel` fail closed with 503 `api_unavailable`; reads continue under a conservative per-instance limit (PRD §9.3).
 - **Replays.** A replay counts against the `create` bucket. A throttled replay writes nothing and creates nothing (§3.1 step 4); its retry replays the original 202.
-- **Concurrency is separate.** 429 `concurrency_limit` (running jobs per organization) is a new-job-only check inside T-create (step 12), never applied to a replay.
+- **Concurrency is separate.** 429 `concurrency_limit` is a new-job-only check inside T-create (step 12), never applied to a replay. *Addendum 4:* it is exact, counted in a Firestore document inside T-create, never in the Redis-class store (`jobs-and-idempotency.md` §5B).
 
 
 ## 4. Request text and body rules (C-3)
@@ -292,13 +293,13 @@ Worst raw cost per **counted** code point (limits count the NFC form): an exhaus
 
 **Verdict.** 512 KiB is **sufficient** for every legal request whose strings are NFC, in any JSON encoding (worst 338,658 bytes, 64.59% of the cap), and for non-NFC requests sent as raw UTF-8 (336,458 bytes). It is **insufficient** for a legal request whose text is both decomposed (non-NFC) and fully `\u`-escaped: up to 1,010,418 bytes, 192.72% of the cap. It is not grossly excessive: the cap is 1.55 × the largest NFC request.
 
-**OWNER DECISION REQUIRED** (Addendum 3 §4, item 1). Options, each with its effect, no option chosen here:
+**DECIDED (Addendum 4, ruling B): option (d).** The options that were put to the owner (Addendum 3 §4, item 1), kept for the record:
 - **(a) Also bound raw code points.** Count every text limit on the received (pre-NFC) string as well as on its NFC form. Worst legal body becomes T5 (338,658 bytes): fits. Effect: a decomposed request near the limit is rejected with 400 `input_too_long` although its NFC form fits.
 - **(b) Reject non-NFC input.** 400 for any string that is not already NFC. Worst becomes T5: fits. Effect: rejects legitimate text from clients that send NFD (for example some macOS and input-method paths) that the current contract accepts.
 - **(c) Raise the cap** to at least 1,010,418 bytes (about 987 KiB). Effect: doubles the unauthenticated-read and authenticated-parse budget, and the bound grows again if a future Unicode version adds longer decompositions.
 - **(d) Keep 512 KiB and document the boundary.** A decomposed and fully escaped body over 524,288 bytes gets 413 although its NFC form is within the field limits; every NFC or unescaped request is guaranteed to fit.
 
-Until the owner decides, the approved 524,288-byte cap applies and step 1 (413) governs, which is the documented precedence; nothing else changes.
+**Contract (Addendum 4).** The raw body cap stays 524,288 bytes. A body over it gets 413 `request_too_large` at step 1 **even when its NFC field lengths would fit**, including heavily escaped or non-NFC Unicode such as tier T7. Valid non-NFC text under the cap remains accepted: there is no NFC rejection and no additional raw code-point bound. Clients that send decomposed text near the limits should send it unescaped (raw UTF-8, tier T6, fits) or NFC-normalize it first.
 
 ### 4.4 Schema violations → codes
 
@@ -322,7 +323,7 @@ C0, DEL and C1 controls and lone surrogates are found at step 7c, before the sch
 
 ### 4.5 Idempotency implication
 
-**Defaults are not filled in before hashing** (Addendum 3): a request that omits a member and one that sends its default explicitly (for example no `options` versus `options: { synthesis: false }`) are **different** canonical requests, so the second gets 409 `idempotency_key_reused`. This is fail-safe (never a wrong replay, never a second job); clients should resend the identical body.
+**Defaults are not filled in before hashing** (engineering decision awaiting owner confirmation, recorded in Addendum 4 §3; not an owner ruling): a request that omits a member and one that sends its default explicitly (for example no `options` versus `options: { synthesis: false }`) are **different** canonical requests, so the second gets 409 `idempotency_key_reused`. This is fail-safe (never a wrong replay, never a second job); clients should resend the identical body.
 
 The idempotency request hash (`jobs-and-idempotency.md` §5) is computed over the **canonical JSON of the NFC-normalized body** (sorted keys, no insignificant whitespace), only after step 7 passes. Two bodies that differ only in normalization form, member order or insignificant whitespace are the **same** request: the second gets the 202 replay, not 409. Bodies that differ in anything NFC preserves (for example full-width versus ASCII digits, or trailing whitespace inside a string) are **different** requests: the second gets 409 `idempotency_key_reused`. A rejected request stores nothing (unchanged).
 

@@ -234,8 +234,13 @@ export class System {
   deleteVerification(scopePath: string): void {
     const rec = this.store.get<IdemRecord>(scopePath);
     if (!rec) throw new Error("no record");
+    // A non-terminal job is canceled first (retention-and-deletion.md §3.1), which releases it.
+    const before = this.store.get<JobDoc>(`jobs/${rec.verificationId}`);
+    runToEnd(finishJob(this, rec.verificationId, "canceled", before?.credits));
+    const job = this.store.get<JobDoc>(`jobs/${rec.verificationId}`) as JobDoc;
+    // The marker is content-free: no request hash, no response body.
     this.store.put(scopePath, { kind: "deleted", verificationId: rec.verificationId, expiresAt: rec.expiresAt });
-    this.store.put(`jobs/${rec.verificationId}`, { deleted: true });
+    this.store.put(`jobs/${rec.verificationId}`, { ...job, deleted: true });
   }
 }
 
@@ -397,7 +402,7 @@ export function* handleCreate(sys: System, req: CreateRequest): Generator<void, 
     const credits = creditsFor(v);
     const body: AcceptedBody = { object: "verification", id, status: "queued", type: v.type, credits_reserved: credits };
     const org3 = org2 as OrgDoc;
-    tx.create(`jobs/${id}`, { state: "pending_dispatch", orgId: key2?.orgId });
+    tx.create(`jobs/${id}`, { state: "pending_dispatch", orgId: key2?.orgId, credits, type: v.type } satisfies JobDoc);
     tx.create(`ledger/reserve_${id}`, { credits });
     tx.set(`orgs/${key2?.orgId}`, { ...org3, creditsRemaining: org3.creditsRemaining - credits, running: org3.running + 1 });
     if (scope !== null) {
@@ -412,6 +417,73 @@ export function* handleCreate(sys: System, req: CreateRequest): Generator<void, 
     sys.dispatched.push(id);
     return { status: 202, body };
   }
+}
+
+// ------------------------------------------------------------------------------------------------
+// Job lifecycle: terminal transitions release the concurrency count exactly once (§5B)
+// ------------------------------------------------------------------------------------------------
+export type JobState = "pending_dispatch" | "queued" | "running" | "completed" | "partial" | "failed" | "canceled" | "expired";
+const TERMINAL: ReadonlySet<JobState> = new Set<JobState>(["completed", "partial", "failed", "canceled", "expired"]);
+
+export interface JobDoc {
+  state: JobState;
+  orgId: string | undefined;
+  credits: number;
+  type: string;
+  deleted?: boolean;
+  cancelRequested?: boolean;
+}
+
+/**
+ * Moves a job to a terminal state and releases its active-job count in the SAME transaction.
+ * Conditional on the job being non-terminal, so a repeated or concurrent release is a no-op.
+ * `releaseCredits` is the unsettled remainder returned to the organization.
+ */
+export function* finishJob(sys: System, id: string, to: JobState, releaseCredits?: number): Generator<void, ApiResponse, void> {
+  if (!TERMINAL.has(to)) throw new Error(`not a terminal state: ${to}`);
+  for (let attempt = 1; ; attempt++) {
+    const tx = sys.store.begin();
+    const job = tx.read<JobDoc>(`jobs/${id}`);
+    if (!job || job.deleted || TERMINAL.has(job.state)) {
+      tx.abort();
+      return { status: 200 }; // idempotent: already released
+    }
+    const org = tx.read<OrgDoc>(`orgs/${job.orgId}`) as OrgDoc;
+    if (org.running <= 0) throw new Error("reconciliation fault: active-job count would go negative");
+    yield;
+    tx.set(`jobs/${id}`, { ...job, state: to });
+    tx.set(`orgs/${job.orgId}`, { ...org, running: org.running - 1, creditsRemaining: org.creditsRemaining + (releaseCredits ?? 0) });
+    if (tx.commit() === "committed") return { status: 200 };
+    if (attempt >= MAX_TX_ATTEMPTS * 10) throw new Error("finishJob contention");
+    yield;
+  }
+}
+
+/** POST /v1/verifications/{id}/cancel (§6; error-catalog.md §3.1 read-path table). */
+export function* handleCancel(sys: System, keyId: string, id: string): Generator<void, ApiResponse, void> {
+  const key = sys.store.get<KeyDoc>(`keys/${keyId}`);
+  if (!key || key.revoked) return { status: 401, code: "invalid_api_key" };
+  const left = sys.dynamic.rateRemaining.get(keyId);
+  if (left !== undefined) {
+    if (left <= 0) return { status: 429, code: "rate_limited" };
+    sys.dynamic.rateRemaining.set(keyId, left - 1);
+  }
+  const pre = authorize(key, sys.store.get<OrgDoc>(`orgs/${key.orgId}`));
+  if (pre) return pre;
+  yield;
+  const notFound: ApiResponse = { status: 404, code: "verification_not_found" };
+  if (!/^ver_[A-Za-z0-9]{24}$/.test(id)) return notFound;
+  const job = sys.store.get<JobDoc>(`jobs/${id}`);
+  // Tenant binding first: a foreign job, deleted or not, is indistinguishable from none.
+  if (!job || job.orgId !== key.orgId) return notFound;
+  if (job.deleted) return { status: 410, code: "verification_deleted" };
+  if (TERMINAL.has(job.state)) return { status: 409, code: "not_cancelable" };
+  if (job.state === "running") {
+    sys.store.put(`jobs/${id}`, { ...job, cancelRequested: true });
+    return { status: 200 };
+  }
+  // pending_dispatch / queued: canceled now, full release, in one transaction.
+  return yield* finishJob(sys, id, "canceled", job.credits);
 }
 
 /** Runs a handler to completion with no interleaving. */

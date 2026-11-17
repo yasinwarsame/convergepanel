@@ -23,6 +23,9 @@ import {
   MAX_TX_ATTEMPTS,
   OrgDoc,
   System,
+  JobDoc,
+  finishJob,
+  handleCancel,
   handleCreate,
   idemPath,
   runToEnd,
@@ -472,5 +475,138 @@ describe("m3: negative cases", () => {
     send(sys, req(SAME, { keyId: "live_app2" }));
     expect(fmt(send(sys, req(SAME, { keyId: "nope" })))).toBe("401 invalid_api_key");
     expect(fmt(send(sys, req(DIFFERENT)))).toBe("202 new"); // own scope has no record
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Addendum 4: deleted marker, cancel, exact concurrency
+// ---------------------------------------------------------------------------------------------
+describe("Addendum 4 DM: an unexpired deleted marker answers 410 whatever the body, and keeps no request content", () => {
+  it.each([["same", SAME], ["different", DIFFERENT], ["NFC-equivalent", { ...SAME, models: ["chatgpt", "claude", "gemini"] }]])("%s body → 410", (_n, body) => {
+    const sys = world();
+    send(sys, req(SAME));
+    sys.deleteVerification(scopeOf(sys));
+    const marker = sys.store.get<IdemRecord>(scopeOf(sys)) as IdemRecord;
+    expect(Object.keys(marker).sort()).toEqual(["expiresAt", "kind", "verificationId"]);
+    expect(fmt(send(sys, req(body)))).toBe("410 verification_deleted");
+    expect(sys.jobs().filter((j) => !(sys.store.get<JobDoc>(j) as JobDoc).deleted).length).toBe(0);
+  });
+});
+
+interface CancelRow { id: string; target: string; state: string; response: string; count: string }
+function cancelTable(): CancelRow[] {
+  const md = fs.readFileSync(JOBS, "utf8");
+  const sec = md.slice(md.indexOf("### 6.1 Cancel truth table"), md.indexOf("## 7."));
+  return Array.from(sec.matchAll(/^\| (C\d+) \| (\w+) \| ([\w/]+) \| ([^|]+?) \| ([^|]+?) \|$/gm), (m) => ({ id: m[1], target: m[2], state: m[3], response: m[4], count: m[5] }));
+}
+
+describe("Addendum 4 CX: cancel (jobs-and-idempotency.md §6.1, parsed)", () => {
+  const rows = cancelTable();
+
+  it("the table has the eight documented rows", () => {
+    expect(rows.map((r) => r.id)).toEqual(["C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8"]);
+  });
+
+  const setupCancel = (row: CancelRow): { sys: System; target: string } => {
+    const sys = world();
+    sys.store.put("orgs/o2", { ...(sys.store.get<OrgDoc>("orgs/o1") as OrgDoc) });
+    sys.store.put("keys/foreign", { orgId: "o2", appId: "b1", mode: "live", scopes: ["verifications:write"], revoked: false } satisfies KeyDoc);
+    const owner = row.target === "foreign" ? "foreign" : "live1";
+    if (row.target === "nonexistent") return { sys, target: "ver_" + "9".repeat(24) };
+    if (row.target === "malformed") return { sys, target: "ver_bad" };
+    const res = send(sys, { keyId: owner, idempotencyKey: "c-" + row.id, body: SAME });
+    expect(res.status).toBe(202);
+    const id = res.body?.id as string;
+    const scope = idemPath(sys.store.get<KeyDoc>(`keys/${owner}`) as KeyDoc, "c-" + row.id);
+    const job = sys.store.get<JobDoc>(`jobs/${id}`) as JobDoc;
+    if (row.state === "running") sys.store.put(`jobs/${id}`, { ...job, state: "running" });
+    if (row.state === "completed") runToEnd(finishJob(sys, id, "completed"));
+    if (row.state === "deleted") sys.deleteVerification(scope);
+    return { sys, target: id };
+  };
+
+  it.each(rows.map((r) => [`${r.id} ${r.target}/${r.state} → ${r.response}`, r] as const))("%s", (_n, row) => {
+    const { sys, target } = setupCancel(row);
+    const runningBefore = (sys.store.get<OrgDoc>("orgs/o1") as OrgDoc).running;
+    const res = runToEnd(handleCancel(sys, "live1", target));
+    const expected = row.response.split(" ");
+    expect(res.status).toBe(Number(expected[0]));
+    if (res.status !== 200) expect(res.code).toBe(expected[1]);
+    const runningAfter = (sys.store.get<OrgDoc>("orgs/o1") as OrgDoc).running;
+    expect(runningAfter - runningBefore).toBe(row.count === "released" ? -1 : 0);
+  });
+
+  it("C5–C8 are byte-identical (a foreign deleted verification is not distinguishable from none)", () => {
+    const bodies = rows.filter((r) => ["foreign", "nonexistent", "malformed"].includes(r.target)).map((r) => {
+      const { sys, target } = setupCancel(r);
+      return JSON.stringify(runToEnd(handleCancel(sys, "live1", target)));
+    });
+    expect(new Set(bodies).size).toBe(1);
+  });
+
+  it("a queued cancel releases credits fully and is idempotent (second cancel → 409, no double release)", () => {
+    const sys = world();
+    const res = send(sys, req(SAME));
+    const id = res.body?.id as string;
+    const before = sys.store.get<OrgDoc>("orgs/o1") as OrgDoc;
+    expect(runToEnd(handleCancel(sys, "live1", id)).status).toBe(200);
+    const after = sys.store.get<OrgDoc>("orgs/o1") as OrgDoc;
+    expect(after.creditsRemaining - before.creditsRemaining).toBe(res.body?.credits_reserved);
+    expect(after.running).toBe(before.running - 1);
+    expect(fmt(runToEnd(handleCancel(sys, "live1", id)))).toBe("409 not_cancelable");
+    expect(runToEnd(finishJob(sys, id, "failed")).status).toBe(200); // no-op release
+    expect(sys.store.get<OrgDoc>("orgs/o1")).toEqual(after);
+  });
+});
+
+describe("Addendum 4 CC: exact concurrency across distinct keys", () => {
+  const limited = (limit: number) => (): System => {
+    const s = world();
+    patchOrg(s, { concurrencyLimit: limit });
+    s.store.put("keys/live2", { ...(s.store.get<KeyDoc>("keys/live1") as KeyDoc) });
+    return s;
+  };
+
+  it.each([
+    [1, 2],
+    [2, 3],
+  ])("limit %i, %i distinct-key creates racing → never more accepted jobs than the limit", (limit, n) => {
+    const procs = Array.from({ length: n }, (_, i) => create(`r${i}`, { keyId: i % 2 === 0 ? "live1" : "live2", idempotencyKey: `distinct-${i}`, body: SAME }));
+    const outcomes = interleavings(limited(limit), procs);
+    expect(outcomes.length).toBeGreaterThan(10);
+    let atLimit = 0;
+    for (const o of outcomes) {
+      const jobs = o.sys.jobs().length;
+      expect({ schedule: o.schedule, jobs, overLimit: jobs > limit }).toEqual({ schedule: o.schedule, jobs, overLimit: false });
+      expect((o.sys.store.get<OrgDoc>("orgs/o1") as OrgDoc).running).toBe(jobs);
+      for (const r of o.results) expect(["202 new", "429 concurrency_limit", "409 request_in_progress"]).toContain(fmt(r as ApiResponse));
+      if (jobs === limit) atLimit++;
+    }
+    expect(atLimit).toBeGreaterThan(0);
+  });
+
+  it("a terminal transition releases exactly once; the count never goes negative", () => {
+    const sys = limited(1)();
+    const a = send(sys, req(SAME, { idempotencyKey: "k-a" }));
+    expect(fmt(send(sys, req(DIFFERENT, { idempotencyKey: "k-b" })))).toBe("429 concurrency_limit");
+    const id = a.body?.id as string;
+    runToEnd(finishJob(sys, id, "completed"));
+    runToEnd(finishJob(sys, id, "completed"));
+    runToEnd(finishJob(sys, id, "failed"));
+    expect((sys.store.get<OrgDoc>("orgs/o1") as OrgDoc).running).toBe(0);
+    expect(fmt(send(sys, req(DIFFERENT, { idempotencyKey: "k-b" })))).toBe("202 new");
+  });
+
+  it("concurrent releases of the same job (every interleaving) release once", () => {
+    const setup = (): System => {
+      const s = limited(1)();
+      send(s, req(SAME));
+      return s;
+    };
+    const id = (s: System): string => s.jobs()[0].slice("jobs/".length);
+    const rel = (name: string, to: "completed" | "failed"): Proc => ({ name, start: (s) => finishJob(s, id(s), to) });
+    for (const o of interleavings(setup, [rel("a", "completed"), rel("b", "failed")])) {
+      expect((o.sys.store.get<OrgDoc>("orgs/o1") as OrgDoc).running).toBe(0);
+    }
   });
 });

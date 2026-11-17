@@ -53,7 +53,7 @@
 | T | Body `orgId` / `application_id` tampering; idempotency key collision across orgs, applications or test/live mode | All paths built from the authenticated key; idempotency scoped to `(orgId, appId, mode, key)` | T-D2 tampered fields ignored; same key in test and live creates two independent jobs |
 | R | Customer denies having created a job | Request log (`logger`) with key prefix, request ID; ledger reserve entry | T-D3 reserve entry exists per accepted job |
 | I | Org A reads Org B's result; enumeration via 403/404; inputs in logs; full model text leak | Path-scoped queries; foreign IDs 404; `redact` in `lib/logger.ts`; OD-19 four-condition gate | T-D4 isolation matrix (every endpoint × key × ID); T-D5 full text absent unless all four conditions |
-| D | Create flood; huge inputs; polling storms | Per-key rate (Redis-class, OD-5), per-org concurrency and queue depth, body ≤ 512 KiB (524,288 bytes, Addendum 3), input caps, pre-authentication flood limit per source address, separate read and list limits (`error-catalog.md` §3.4) | T-D6 limits at boundary values |
+| D | Create flood; huge inputs; polling storms | Per-key rate (Redis-class, OD-5), per-org concurrency and queue depth (exact, Firestore-transactional, Addendum 4), body ≤ 512 KiB (524,288 bytes, Addendum 3), input caps, pre-authentication flood limit per source address, separate read and list limits (`error-catalog.md` §3.4) | T-D6 limits at boundary values |
 | E | Scope bypass (read key creates jobs; non-`model_responses:read` key gets text) | Scope guard before any handler logic | T-D7 mutation test on scope guard |
 
 ### 3.3 Worker (queue consumer — new)

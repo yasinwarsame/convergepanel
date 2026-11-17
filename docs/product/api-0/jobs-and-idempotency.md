@@ -104,6 +104,7 @@ Read inside the lease transaction (Firestore) or immediately before it (Redis-cl
 | Platform daily API spend ceiling reached | `apiPlatformCounters/{YYYY-MM-DD}` (sharded, summed) | → `canceled` (`platform_spend_ceiling`), full release | synthesis `failed` (`platform_spend_ceiling`); finalize `partial` |
 | Pipeline switches (research needs `ADAPTIVE_SCHEMAS_ENABLED` and `ADAPTIVE_VERIFICATION_ENABLED`, result-schema §4.0) | `lib/env.ts` values at boot | → `failed: pipeline_disabled`, full release, excluded from failed-job count and ratio | — |
 | CR-2 load shedding engaged for this step class | Redis-class shedding state | yield (§4.3) | yield (§4.3) |
+| *Addendum 4:* research job and the organization's D6 acknowledgement withdrawn | org doc | → `canceled` (`pipeline_processing_acknowledgement_withdrawn`), full release | stop before the next provider call; settle completed work; release the remainder; `canceled` |
 
 `finalize` makes no provider call, so it runs even when the ceiling or a hard abuse state is reached. It settles only work already done.
 
@@ -172,8 +173,8 @@ Every instrumented provider call (PRD §6.5) has a deterministic **call key** `{
 
 | Step | Where | Check | Outcome on failure |
 |---|---|---|---|
-| 0–2 | before authentication | global availability; transport (`Content-Length` / streamed byte count, media type); pre-authentication flood limit per source address (`error-catalog.md` §3.4) | `503`, `413`, `415`, `429 rate_limited`; nothing read about any tenant |
-| 3 | outside T-create | authenticate the key (revoked, expired, unknown → one code) | `401 invalid_api_key` |
+| 0–2 | before authentication | global availability; transport (`Content-Length` / streamed byte count, media type); coarse edge abuse limit per source address, no lockout (`error-catalog.md` §3.4, Addendum 4) | `503`, `413`, `415`, `429 rate_limited`; nothing read about any tenant |
+| 3 | outside T-create | authenticate the key (revoked, expired, unknown → one code); failed-authentication throttling per presented key ID (Addendum 4) | `401 invalid_api_key`; `429 rate_limited` for a throttled failing key ID |
 | 4 | outside T-create | authenticated rate limit, per key then per organization | `429 rate_limited` (replays count) |
 | 5–6 | outside T-create | organization state and live plan, then scope `verifications:write` | `403 org_suspended`, `live_key_requires_plan`, `insufficient_scope` |
 | 7 | outside T-create | decode, validate, NFC, canonicalize (bounded: at most 524,288 bytes are ever parsed); `Idempotency-Key` format, and its presence for live keys | `400` codes, schema-bound `422`s |
@@ -184,7 +185,7 @@ Every instrumented provider call (PRD §6.5) has a deterministic **call key** `{
 | 15 | T-create | write the job (`pending_dispatch`), the `reserve_{verId}` ledger entry and period counter, and the idempotency record (`committed`, canonical request hash, the exact `202` body, `expiresAt = now + 24 h`) | commit conflict → retry from 8a |
 | 16 | after commit | dispatch (transactional outbox, §2) | the sweeper re-dispatches; the `202` does not depend on it |
 
-The D6 acknowledgement (step 10) is a new-job condition: it governs whether **new** content may be sent to the pipeline providers. A replay sends nothing to any provider and returns only the accepted-job body (no content), so a withdrawn acknowledgement does not block it. *(Engineering classification; listed for owner confirmation in Addendum 3 §4.)*
+*Addendum 4 (ruling D6W) supersedes the Addendum 3 classification of the D6 acknowledgement as a new-jobs-only condition.* Withdrawing the acknowledgement does not undo a provider call that already completed, but it **prevents every new provider call** once the withdrawal is effective: a new create is refused at step 10b (`403 pipeline_processing_not_acknowledged`); a queued research job is canceled with a full release; a running research job stops **before its next provider call**, settles the work already completed, and releases the remainder (§4.2, §6). A replay causes no new processing, so it still returns the original accepted body to an authorized caller (truth table T10); the job it names is then canceled or stopped as above, and remains readable where authorized.
 
 **Validation is not a dynamic condition.** Step 7 runs before the lookup because the canonical request (the lookup's comparison value) only exists after it. A contract change that tightens validation therefore also applies to replays of earlier requests; such a change is a breaking change (PRD §8.7) and is announced in advance.
 
@@ -194,8 +195,8 @@ Inside the one Firestore transaction, in this order:
 1. **Lock and read** `apiOrganizations/{orgId}/idempotency/{sha256(appId|mode|key)}` (first read; omitted when no `Idempotency-Key` is sent, which only a test key may do).
 2. **Read** `apiKeys/{keyId}` and `apiOrganizations/{orgId}` (revocation, scope, status, plan) and decide 8b.
 3. Decide 8c from the record. On a replay, `409` or `410` the transaction commits **with no write**.
-4. New job only: read the current period document (`periods/{YYYY-MM}`, credits and reservations) and evaluate steps 9–14. Redis-class state (concurrency counters, shedding, queue health, provider health) is read here, inside the transaction callback, but is not part of the Firestore snapshot; the outcome a request receives is decided only after these reads.
-5. New job only: `tx.create` the job, `tx.create` the ledger entry, update the period counter, `tx.create` the idempotency record (or overwrite a record whose `expiresAt` has passed; Firestore TTL deletion is lazy, so expiry is checked explicitly). All commit together or none does.
+4. New job only: read the current period document (`periods/{YYYY-MM}`: credits, reservations and, *Addendum 4*, the organization's active-job count, §5B) and evaluate steps 9–14. The concurrency check (step 12) is decided from that **transactional** count. Redis-class state (shedding, queue health, provider health) is read here, inside the transaction callback, but is not part of the Firestore snapshot; the outcome a request receives is decided only after these reads.
+5. New job only: `tx.create` the job, `tx.create` the ledger entry, update the period document (reservation and active-job count together), `tx.create` the idempotency record (or overwrite a record whose `expiresAt` has passed; Firestore TTL deletion is lazy, so expiry is checked explicitly). All commit together or none does.
 
 Every read in 1, 2 and 4 is validated at commit. A concurrent key revocation, organization suspension, credit change or record creation aborts the commit, and the transaction retries from 1 with fresh reads. The `lastUsedAt` sampling write on the key (`tenancy-and-auth.md` §4, at most once per minute) can cause such a retry; it never changes the outcome.
 
@@ -236,7 +237,7 @@ Every read in 1, 2 and 4 is validated at commit. A concurrent key revocation, or
 | T29 | none | n/a | scope_reduced | any | 403 insufficient_scope | no |
 | T30 | none | n/a | org_suspended | any | 403 org_suspended | no |
 
-Rows T12–T13: once the other transaction commits, a retry follows T10 or T11. Row T28: once the rate window resets, a retry follows T10. Row T18 (a different request under a deleted record's key also gets `410`) follows from the marker being **content-free**: it keeps no request hash, so the two cases cannot be told apart. This is an engineering decision within the approved deletion contract (retention-and-deletion.md §3.1) and is listed for owner confirmation (Addendum 3 §4).
+Rows T12–T13: once the other transaction commits, a retry follows T10 or T11. Row T28: once the rate window resets, a retry follows T10. Row T18 (a different request under a deleted record's key also gets `410`) follows from the marker being **content-free**: it keeps no request hash, so the two cases cannot be told apart. *Confirmed by the owner (Addendum 4, ruling DM):* an authorized request under an **unexpired** deleted marker gets 410 whatever its body; deleted request content is not retained to compare hashes.
 
 ### 5A.4 Concurrency argument (two or more simultaneous identical first requests)
 
@@ -249,17 +250,45 @@ Rows T12–T13: once the other transaction commits, a retry follows T10 or T11. 
 **Reference model and tests.** `docs/__tests__/support/idempotencyReferenceModel.ts` models **part** of §5A.1–5A.2 over an in-memory transactional store with the Firestore semantics above; `docs/__tests__/apiIdempotencyReplayPrecedence.spec.ts` parses the table in §5A.3 and runs every row (each `any` expanded), the state transitions, the interleavings and the negative cases. The model is documentation, not the implementation.
 
 - **Modelled:** steps 3, 4, 5–6, a reduced step 7 (object body, `type`, model-ID shape and 2..5 bound, NFC, canonical JSON, `Idempotency-Key` presence for live keys), 8a–8c, 10a, 10b, 10d, 10e, 11, 12, 13 (only `quota_exceeded`), 14 (only `capacity_protection`), 15, and dispatch after commit (16, as a list; no sweeper).
-- **Omitted:** steps 0–2; the full §4 validation; step 9 (beta options); 10c, 10f, 10g; step 13's `failed_job_threshold_exceeded`, `spend_limit_reached`, `payment_required`; step 14's `platform_spend_ceiling`; the sweeper and expiry of undispatched jobs. All omitted checks are new-job-only checks placed after 8c, so they cannot change a replay; their own outcomes are not exercised by the model.
-- **Concurrency-counter caveat.** The model keeps `running` in the organization document, read inside T-create and version-checked at commit, so its concurrency check is serializable. In the design the counter is in the Redis-class store, outside the Firestore snapshot (§5A.2 step 4), so two concurrent creates under **different** idempotency keys can both pass a read-only check and **over-admit** by up to the number of concurrent transactions. The implementation must use an atomic check-and-increment in the Redis-class store, released if the transaction aborts, or accept and document a bounded over-admission (Addendum 3 §4). This does not affect replays or the one-job-per-key property.
+- **Omitted:** steps 0–2; the full §4 validation; step 9 (beta options); 10c, 10f, 10g; step 13's `failed_job_threshold_exceeded`, `spend_limit_reached`, `payment_required`; step 14's `platform_spend_ceiling`; the sweeper and expiry of undispatched jobs. The omitted checks **after 8c** (steps 9, 10c, 10f, 10g and the omitted parts of 13 and 14) are all new-job-only, so they cannot change a replay. Steps 0–2 and the full §4 validation are also omitted, but they **precede** 8c and apply to replays exactly as to new requests; the model does not exercise them. The omitted outcomes themselves are not exercised by the model.
+- **Concurrency.** *Addendum 4 supersedes the over-admission caveat recorded here in Addendum 3:* the design now keeps the active-job count in a Firestore document inside T-create (§5B), exactly as the model does (`running` in the organization document, read inside T-create and version-checked at commit). Distinct keys racing at the limit can never over-admit; a test races them across every interleaving.
 - **Defaults.** Omitted and explicit-default members canonicalize differently, so they are different requests (`409 idempotency_key_reused`, fail-safe; `error-catalog.md` §4.5). Pinned by a test.
+
+## 5B. Concurrency accounting (Addendum 4, ruling CC)
+
+Concurrency control for **accepted** jobs is exact. No over-admission is allowed across distinct API keys or idempotency keys.
+
+- **Where.** The organization's active-job count (accepted jobs in any non-terminal state: `pending_dispatch`, `queued`, `running`, `synthesizing`) lives in a Firestore document of the organization (the current period document, which T-create already writes for the credit reservation). It is read and incremented **in the same transaction** as the credit reservation and the job create (§5A.2 steps 4–5). Every concurrent T-create of the organization therefore conflicts on that document, and Firestore serializes them: the check at step 12 and the increment are atomic. *Addendum 4 supersedes OD-5 (PRD §9.3) only for the per-organization concurrency counter, which moves out of the Redis-class store.*
+- **Redis-class store: provider permits only** (§4.3, CR-2 pools), plus rate windows (OD-5 unchanged for those). A provider permit limits concurrent provider calls; it never decides whether a job is accepted.
+- **Release.** The count is decremented **in the same transaction that moves the job to a terminal state** (`completed`, `partial`, `failed`, `canceled`, `expired`), and only by that transition. The transition is conditional on the job's current non-terminal state, so a duplicated or retried release is a no-op (**idempotent release**), and a job is released at most once.
+- **No negative counts.** A decrement is applied only together with a non-terminal → terminal transition of a job that was counted, so the count can never go below zero; a transaction that would make it negative aborts and is logged as a reconciliation fault.
+- **Lease expiry and crashes.** A worker that crashes holds no count of its own: the job stays non-terminal and counted until the sweeper fails it (`worker_timeout`, after three expired leases) or expires it (max queue wait), each a terminal transition that releases it.
+- **Sweeper reconciliation.** The sweeper periodically recounts the organization's non-terminal jobs and, if the stored count differs, corrects it in a transaction and writes an audit event. Drift is a defect to investigate, not a normal path.
+- **Throughput.** Serializing an organization's creates on one document bounds its sustained create rate (Firestore's per-document write rate). The bound is accepted for exactness; its value is measured in load testing, and the per-organization create rate limit (`error-catalog.md` §3.4) stays below it.
 
 ## 6. Cancellation
 
 `POST /v1/verifications/{id}/cancel`:
 - `pending_dispatch` / `queued` → `canceled` immediately in a transaction; reservation released; outbox `verification.canceled`. A worker that later receives the message finds a terminal state and does nothing.
 - `running` / `synthesizing` → `cancelRequested = true`. The step-start check (§4.2) stops the job at the next step boundary and settles for work already done (provider work happened). State `canceled`.
-- Terminal → `409 not_cancelable`.
+- Terminal → `409 not_cancelable`. *Addendum 4:* the caller's own **deleted** verification → `410 verification_deleted`; another organization's (deleted or not) or a nonexistent ID → the identical `404 verification_not_found`.
 - Org suspension cancels all `pending_dispatch` and `queued` jobs with full release. Running jobs are stopped by the step-start check.
+- *Addendum 4 (ruling D6W):* withdrawal of the D6 pipeline-processing acknowledgement, once effective, cancels the organization's `pending_dispatch` and `queued` **research** jobs with a full release (`failure.code: pipeline_processing_acknowledgement_withdrawn`). A `running` research job stops **before its next provider call**: the step-start check (§4.2) and the instrumented call site (PRD §6.5) both re-read the organization's acknowledgement, a call already in flight completes (it cannot be recalled), completed calls are settled, and the remainder of the reservation is released; the job ends `canceled` with the same failure code. Claim jobs do not use the auxiliary pipeline and are unaffected.
+
+### 6.1 Cancel truth table (Addendum 4; parsed by the reference-model spec)
+
+Caller authenticated and authorized (`verifications:write`). *Target* is relative to the caller's organization and mode. Rows C5–C8 are byte-identical except `request_id`.
+
+| Row | Target | Job state | Response | Active-job count |
+|---|---|---|---|---|
+| C1 | own | queued | 200 canceled | released |
+| C2 | own | running | 200 cancel_requested | kept until the step boundary |
+| C3 | own | completed | 409 not_cancelable | unchanged |
+| C4 | own | deleted | 410 verification_deleted | unchanged |
+| C5 | foreign | queued | 404 verification_not_found | unchanged |
+| C6 | foreign | deleted | 404 verification_not_found | unchanged |
+| C7 | nonexistent | n/a | 404 verification_not_found | unchanged |
+| C8 | malformed | n/a | 404 verification_not_found | unchanged |
 
 ## 7. Polling
 

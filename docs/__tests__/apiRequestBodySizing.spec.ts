@@ -210,7 +210,9 @@ describe("B: the 512 KiB body cap against every legal request encoding", () => {
     for (const t of tiers.filter((x) => x.nfc)) expect({ tier: t.id, fits: (bytes.get(t.id) as number) <= BODY_LIMIT }).toEqual({ tier: t.id, fits: true });
     expect(bytes.get("T5") as number).toBeLessThanOrEqual(BODY_LIMIT);
     expect(bytes.get("T7") as number).toBeGreaterThan(BODY_LIMIT);
-    expect(documentedTiers().text).toContain("OWNER DECISION REQUIRED");
+    // Addendum 4 closed the owner decision with option (d): keep 512 KiB raw; 413 governs.
+    expect(documentedTiers().text).toContain("DECIDED (Addendum 4, ruling B): option (d)");
+    expect(documentedTiers().text).not.toContain("OWNER DECISION REQUIRED");
   });
 
   it("error-catalog.md §4.3.1 records exactly the computed numbers (all tiers when the runtime Unicode version matches; NFC tiers always)", () => {
@@ -222,6 +224,20 @@ describe("B: the 512 KiB body cap against every legal request encoding", () => {
       console.warn(`apiRequestBodySizing: runtime Unicode ${process.versions.unicode} != documented ${DOCUMENTED_UNICODE}; ` +
         "the non-NFC tier figures (T6, T7) were NOT re-derived exactly; only the verdict was checked.");
     }
+    const verdictCell = (id: string): string | undefined =>
+      new RegExp(`^\\| ${id} \\| .* \\| (fits|exceeds) \\|$`, "m").exec(doc.text)?.[1];
+    // Version-independent checks, asserted on EVERY runtime (MINOR-1):
+    for (const t of tiers) {
+      const documented = doc.rows.get(t.id) as number;
+      // (1) each verdict cell agrees with this runtime's computed verdict for the tier;
+      expect({ tier: t.id, verdict: verdictCell(t.id) }).toEqual({ tier: t.id, verdict: (bytes.get(t.id) as number) <= BODY_LIMIT ? "fits" : "exceeds" });
+      // (2) each verdict cell agrees with the documented byte figure next to it.
+      expect({ tier: t.id, verdict: verdictCell(t.id) }).toEqual({ tier: t.id, verdict: documented <= BODY_LIMIT ? "fits" : "exceeds" });
+    }
+    // (3) a non-NFC worst case is never cheaper than the NFC worst case in the same encoding,
+    // because every NFC string is also a legal input for the non-NFC tier.
+    expect(doc.rows.get("T6") as number).toBeGreaterThanOrEqual(doc.rows.get("T3") as number);
+    expect(doc.rows.get("T7") as number).toBeGreaterThanOrEqual(doc.rows.get("T5") as number);
     for (const t of tiers) {
       if (!exact && !t.nfc) continue;
       const b = bytes.get(t.id) as number;

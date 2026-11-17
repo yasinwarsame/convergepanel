@@ -337,6 +337,9 @@ paths:
       description: |
         Requires `verifications:write`. A queued job is canceled and its reservation released.
         A running job stops at its next step boundary and settles for work already done.
+        Addendum 4: the caller's own deleted verification returns 410 `verification_deleted`;
+        another organization's ID (deleted or not), a nonexistent and a malformed ID return the
+        same 404 `verification_not_found`. A non-deleted terminal job returns 409 `not_cancelable`.
       responses:
         '200':
           description: Cancellation recorded.
@@ -348,6 +351,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '410': { $ref: '#/components/responses/Gone' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
         '500': { $ref: '#/components/responses/InternalError' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
@@ -599,7 +603,7 @@ components:
       description: '`idempotency_key_reused`; `request_in_progress` (the create transaction exhausted its contention retries on the idempotency record without reading a committed one; nothing was written; a retry gets the replay or creates the job); `not_cancelable`. Addendum 2: `not_cancelable` has type `invalid_request_error` (a state conflict, not an idempotency error). Catalog and precedence: error-catalog.md (Addendum 2).'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     Gone:
-      description: '`verification_deleted`. Addendum 2: only for a verification of the caller''s own organization and mode; otherwise 404 `verification_not_found`. Catalog and precedence: error-catalog.md (Addendum 2).'
+      description: '`verification_deleted`. Addendum 2: only for a verification of the caller''s own organization and mode; otherwise 404 `verification_not_found`. Addendum 4: also returned by the cancel operation on the caller''s own deleted verification, and by a create replay under an unexpired deleted idempotency marker whatever the body (the marker keeps no request hash). Catalog and precedence: error-catalog.md (Addendum 2).'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     TooLarge:
       description: '`request_too_large`. Addendum 3: the body as received is larger than 524,288 bytes (512 KiB, owner-approved), decided from `Content-Length` or the streamed byte count before any JSON parsing; evaluated before authentication (precedence step 1). Catalog and precedence: error-catalog.md (Addendum 2, amended by Addendum 3).'
@@ -612,7 +616,7 @@ components:
           example:
             error: { type: unprocessable, code: model_limit_exceeded, message: Too many models are selected., param: models, request_id: req_01HF3Z, doc_url: 'https://docs.convergepanel.com/errors#model_limit_exceeded' }
     TooManyRequests:
-      description: '`rate_limited`, `concurrency_limit`. Addendum 3 (m2): `rate_limited` is returned on every data-plane operation, always with `Retry-After`, by the pre-authentication flood limit (per source address) or the authenticated per-key and per-organization limits (error-catalog.md §3.4). It is decided before the request ID or body is looked at, so it never differs between a foreign and a nonexistent verification ID. Catalog and precedence: error-catalog.md (Addendum 2, amended by Addendum 3).'
+      description: '`rate_limited`, `concurrency_limit`. Addendum 3 (m2): `rate_limited` is returned on every data-plane operation, always with `Retry-After`, by the coarse edge limit (per source address, no lockout), the failed-authentication throttle per presented key ID (Addendum 4; a correct secret always authenticates), or the authenticated per-key and per-organization limits (error-catalog.md §3.4). It is decided before the request ID or body is looked at, so it never differs between a foreign and a nonexistent verification ID. Catalog and precedence: error-catalog.md (Addendum 2, amended by Addendum 3).'
       headers:
         Retry-After: { $ref: '#/components/headers/RetryAfter' }
       content:

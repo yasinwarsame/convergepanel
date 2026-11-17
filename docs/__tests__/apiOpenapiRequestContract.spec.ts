@@ -111,7 +111,7 @@ describe("openapi.yaml parses and resolves", () => {
     expect(raw.info.version).toBe("0.4.0-draft");
   });
 
-  it("m6: the exact set of undeclared packages imported anywhere under docs/__tests__ is [\"js-yaml\"] (owner decision pending)", () => {
+  it("m6: no undeclared package is imported anywhere under docs/__tests__ (Addendum 4)", () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
     const declared = new Set([...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.devDependencies ?? {})]);
     const builtins = new Set(require("module").builtinModules as string[]);
@@ -138,7 +138,9 @@ describe("openapi.yaml parses and resolves", () => {
         undeclared.add(`${name} (${path.relative(ROOT, f)})`.replace(/ \(.*\)$/, ""));
       }
     }
-    expect(Array.from(undeclared).sort()).toEqual(["js-yaml"]);
+    expect(Array.from(undeclared).sort()).toEqual([]);
+    // js-yaml is now declared exactly (Addendum 4, ruling M6), at the version the lockfile resolves.
+    expect(pkg.devDependencies["js-yaml"]).toBe("4.1.1");
   });
 
   it("m6: the spec loads no transitive validator (no Ajv, no ref-parser)", () => {
@@ -589,5 +591,51 @@ describe("m2/m3: precedence and rate limits", () => {
     expect(rowOf(reads, "invalid_api_key")).toBeLessThan(reads.findIndex((r) => r.includes("Authenticated request rate")));
     expect(reads.findIndex((r) => r.includes("Authenticated request rate"))).toBeLessThan(rowOf(reads, "verification_not_found"));
     expect(reads.find((r) => r.includes("Authenticated request rate"))).toContain("before the path ID");
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Addendum 4, ruling MA: metadata limits are a provisional contract; every bound is pinned
+// ---------------------------------------------------------------------------------------------
+describe("Addendum 4 MA: metadata limits (provisional contract)", () => {
+  const C = { claim: "Water boils at 100 C at sea level." };
+  const withMeta = (metadata: Json): Json => ({ type: "claim", input: C, metadata });
+  const nfcDeep = (x: Json): Json =>
+    typeof x === "string" ? x.normalize("NFC")
+      : Array.isArray(x) ? x.map(nfcDeep)
+        : x && typeof x === "object" ? Object.fromEntries(Object.entries(x).map(([k, val]) => [k.normalize("NFC"), nfcDeep(val)])) : x;
+  /** As the server does: NFC first (error-catalog.md §4.2), then the schema. */
+  const serverOk = (body: Json): boolean => ok(nfcDeep(body));
+  const entries = (n: number, value: (i: number) => string, key = (i: number) => `k${i}`): Json =>
+    Object.fromEntries(Array.from({ length: n }, (_, i) => [key(i), value(i)]));
+  const E = "\u{1F600}"; // supplementary: 1 code point, 2 UTF-16 units
+
+  it.each<[string, Json, boolean]>([
+    ["key count 20 (at limit)", entries(20, () => "v"), true],
+    ["key count 21 (over)", entries(21, () => "v"), false],
+    ["key length 40 (at limit)", { ["k".repeat(40)]: "v" }, true],
+    ["key length 41 (over)", { ["k".repeat(41)]: "v" }, false],
+    ["value length 500 (at limit)", { ref: "v".repeat(500) }, true],
+    ["value length 501 (over)", { ref: "v".repeat(501) }, false],
+    ["aggregate exactly 4,000 (8 × (2 + 498))", entries(8, () => "v".repeat(498)), true],
+    ["aggregate 4,001 (over by one)", entries(8, (i) => "v".repeat(i === 0 ? 499 : 498)), false],
+    ["supplementary value of 500 code points (1,000 UTF-16 units) is at the value limit", { ref: E.repeat(500) }, true],
+    ["supplementary value of 501 code points is over", { ref: E.repeat(501) }, false],
+    ["supplementary aggregate exactly 4,000", entries(8, () => E.repeat(498)), true],
+    ["supplementary aggregate 4,001", entries(8, (i) => E.repeat(i === 0 ? 499 : 498)), false],
+    ["decomposed value: 1,000 raw code points that NFC to 500 is at the limit", { ref: "e\u0301".repeat(500) }, true],
+    ["decomposed value that NFC-composes to 501 is over", { ref: "e\u0301".repeat(501) }, false],
+    ["combining marks that do not compose count after NFC (250 × (x + 2 overlay marks) = 750 > 500)", { ref: "x\u0335\u0336".repeat(250) }, false],
+    ["the same non-composing sequence within the limit (166 × 3 = 498)", { ref: "x\u0335\u0336".repeat(166) }, true],
+    ["supplementary character in a key is rejected (key pattern is ASCII)", { ["k" + E]: "v" }, false],
+    ["combining mark in a key is rejected", { ["ke\u0301y"]: "v" }, false],
+    ["precomposed non-ASCII letter in a key is rejected", { ["k\u00e9y"]: "v" }, false],
+  ])("%s", (_name, metadata, expected) => {
+    expect(serverOk(withMeta(metadata))).toBe(expected);
+  });
+
+  it("the provisional limits are the ones stated in openapi.yaml", () => {
+    const m = raw.components.schemas.RequestMetadata;
+    expect([m.maxProperties, m.propertyNames.maxLength, m.additionalProperties.maxLength, m["x-cp-max-total-code-points"]]).toEqual([20, 40, 500, 4000]);
   });
 });
