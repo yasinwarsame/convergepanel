@@ -17,6 +17,8 @@
  * unit-testable; callers pass `window.localStorage` / `window.sessionStorage`.
  */
 
+// Must equal `HISTORY_STORAGE_KEY` in app/page.tsx (a hash-frozen file, so it keeps
+// its own literal); lib/client/__tests__/localPrivateData.spec.ts pins the match.
 export const PANEL_HISTORY_STORAGE_PREFIX = "convergePanelHistoryV1";
 export const VERIFY_PREFILL_STORAGE_KEY = "convergePanelVerifyPrefillV1";
 

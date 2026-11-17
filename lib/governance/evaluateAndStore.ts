@@ -60,7 +60,8 @@ export async function evaluateAndStoreGovernance(params: {
     // `console.log` that wrote the first 50 characters of the user's claim /
     // question to the runtime log on every paid run. Now metadata only — the
     // question's LENGTH, never its text — via the shared logger, at info so the
-    // operational signal (which run, which scores) is unchanged.
+    // operational signal (which run, which scores) is unchanged. (Line count kept:
+    // workspaceReviewPanelMutations.spec.ts pins the `.add()` site below by line.)
     logger.info("[governance/evaluateAndStore] Evaluating governance", {
       runId: params.runId,
       collection: params.collection,

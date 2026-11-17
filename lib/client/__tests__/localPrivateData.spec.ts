@@ -18,6 +18,12 @@ describe("panelHistoryStorageKey", () => {
     expect(PANEL_HISTORY_STORAGE_PREFIX).toBe("convergePanelHistoryV1");
     expect(panelHistoryStorageKey("uid-a")).toBe("convergePanelHistoryV1:uid-a");
   });
+
+  it("matches the key app/page.tsx actually writes (page.tsx is hash-frozen, so it keeps its own constant)", () => {
+    const src = require("fs").readFileSync(require("path").join(__dirname, "..", "..", "..", "app", "page.tsx"), "utf8");
+    expect(src).toContain(`const HISTORY_STORAGE_KEY = "${PANEL_HISTORY_STORAGE_PREFIX}";`);
+    expect(src).toContain("return `${HISTORY_STORAGE_KEY}:${uid}`;");
+  });
 });
 
 describe("clearPanelHistoryCache", () => {

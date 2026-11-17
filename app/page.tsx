@@ -72,8 +72,6 @@ import type { PersistedAdaptiveOutput, PersistedLegacyAdaptiveOutputV1 } from "@
 import type { ReportStatusInput } from "@/lib/adaptiveSchema/reportStatus";
 import { adaptPersistedOutputToPanelPayload, adaptPersistedLegacyOutputToPanelPayload } from "@/lib/user/adaptivePersistedOutputAdapter";
 import type { SynthesisConsensusSummaryDetail } from "@/lib/verification/consensusScoring";
-// Privacy remediation (2026-11-17): the cache key now lives with its cleanup (cleared on sign-out by AuthProvider).
-import { panelHistoryStorageKey } from "@/lib/client/localPrivateData";
 
 // Lazy load heavy components - defer until after first paint
 const ResultsDisplay = dynamic(() => import("@/components/ResultsDisplay"), {
@@ -98,10 +96,14 @@ const ResultsDisplay = dynamic(() => import("@/components/ResultsDisplay"), {
  */
 type RunStatus = "idle" | "running" | "complete" | "error";
 
+const HISTORY_STORAGE_KEY = "convergePanelHistoryV1";
 const MAX_CLAIM_CHARS = 2000;
 const HISTORY_PAGE_SIZE = 30;
 const MAX_HISTORY_LOCAL_STORAGE = 50;
 
+function panelHistoryStorageKey(uid: string) {
+  return `${HISTORY_STORAGE_KEY}:${uid}`;
+}
 
 function truncateHistoryTitle(text: string, max = 88): string {
   const t = text.trim();
