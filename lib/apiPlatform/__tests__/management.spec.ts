@@ -35,7 +35,7 @@ describe("authorizeOrgManagement", () => {
     expect(await authorizeOrgManagement(H, fresh("u1"), ORG, "keys.live.create", deps(member("u1", "owner")))).toEqual({ ok: true, uid: "u1", orgId: ORG, role: "owner" });
   });
 
-  it.each(["Bearer cpk_live_AAAAAAAAAAAA_x", "bearer cpk_test_x", "  Bearer   cpk_"])("rejects an API-key bearer %j even with a valid session", async (a) => {
+  it.each(["Bearer cpk_live_AAAAAAAAAAAA_x", "bearer cpk_test_x", "Bearer   cpk_", "BEARER cpk_live_x"])("rejects an API-key bearer %j even with a valid session", async (a) => {
     expect(await authorizeOrgManagement(new Headers({ authorization: a }), fresh("u1"), ORG, "usage.view", deps(member("u1", "owner")))).toEqual({ ok: false, code: "api_key_not_accepted" });
   });
 
@@ -77,6 +77,15 @@ describe("authorizeOrgManagement", () => {
     expect(await authorizeOrgManagement(H, stale, ORG, "keys.live.create", deps(member("u1", "owner")))).toEqual({ ok: false, code: "fresh_session_required" });
     expect(await authorizeOrgManagement(H, { uid: "u1", authTimeSeconds: NOW - 15 * 60 }, ORG, "keys.live.create", deps(member("u1", "owner"))).then((r) => r.ok)).toBe(true);
     expect((await authorizeOrgManagement(H, stale, ORG, "usage.view", deps(member("u1", "owner")))).ok).toBe(true);
+  });
+
+  it("a membership record for another uid is not_found (uid bound, not just the hashed id)", async () => {
+    const forged = { [computeApiOrgMembershipId(ORG, "u1")]: { orgId: ORG, uid: "u2", role: "owner", status: "active" } };
+    expect(await authorizeOrgManagement(H, fresh("u1"), ORG, "usage.view", deps(forged))).toEqual({ ok: false, code: "not_found" });
+  });
+
+  it.each([NOW * 1000, NOW + 301, 1.5])("auth_time %p (milliseconds, future or non-integer) → session_required", async (t) => {
+    expect(await authorizeOrgManagement(H, { uid: "u1", authTimeSeconds: t }, ORG, "keys.live.create", deps(member("u1", "owner")))).toEqual({ ok: false, code: "session_required" });
   });
 
   it("membership read failure → api_unavailable", async () => {

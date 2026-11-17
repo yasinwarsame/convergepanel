@@ -10,6 +10,7 @@ export type OrgCapability =
   | "apps.manage"
   | "keys.test.create"
   | "keys.live.create"
+  | "keys.orgWide.create"
   | "keys.revoke"
   | "keys.revoke.own"
   | "usage.view"
@@ -18,11 +19,11 @@ export type OrgCapability =
 
 const ROLE_CAPABILITIES: Readonly<Record<OrgRole, ReadonlySet<OrgCapability>>> = Object.freeze({
   owner: new Set<OrgCapability>([
-    "org.manage", "members.manage", "apps.manage", "keys.test.create", "keys.live.create", "keys.revoke",
+    "org.manage", "members.manage", "apps.manage", "keys.test.create", "keys.live.create", "keys.orgWide.create", "keys.revoke",
     "keys.revoke.own", "usage.view", "audit.view", "settings.pipelineProcessing",
   ]),
   admin: new Set<OrgCapability>([
-    "members.manage", "apps.manage", "keys.test.create", "keys.live.create", "keys.revoke", "keys.revoke.own",
+    "members.manage", "apps.manage", "keys.test.create", "keys.live.create", "keys.orgWide.create", "keys.revoke", "keys.revoke.own",
     "usage.view", "audit.view", "settings.pipelineProcessing",
   ]),
   developer: new Set<OrgCapability>(["keys.test.create", "keys.revoke.own", "usage.view"]),

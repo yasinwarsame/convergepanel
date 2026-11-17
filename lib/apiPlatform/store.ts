@@ -9,6 +9,7 @@
  */
 import { newAppId, newAuditId, newOrgId, isAppId, isKeyId, isOrgId } from "@/lib/apiPlatform/ids";
 import { mintApiKey, type KeyMode, type PepperSet } from "@/lib/apiPlatform/keys";
+import { roleHasCapability } from "@/lib/apiPlatform/orgCapabilities";
 import { appPath, auditPath, computeApiOrgMembershipId, keyPath, membershipPath, orgPath } from "@/lib/apiPlatform/tenantPaths";
 import type { FirestoreLike, TransactionLike } from "@/lib/apiPlatform/firestorePort";
 import {
@@ -17,7 +18,14 @@ import {
   type ApiAuditEventRecord,
   type ApiScope,
   type AuditEventType,
+  type OrgRole,
 } from "@/lib/apiPlatform/types";
+
+/**
+ * Scopes that cannot be granted yet: `model_responses:read` is grantable only while the org's model-response
+ * access is enabled (PRD §7.3, OD-19); that setting does not exist in API-1a, so the scope is refused.
+ */
+const UNGRANTABLE_SCOPES: ReadonlySet<ApiScope> = new Set<ApiScope>(["model_responses:read"]);
 
 export type StoreFailure =
   | "invalid_input"
@@ -25,6 +33,8 @@ export type StoreFailure =
   | "org_not_active"
   | "app_not_active"
   | "already_revoked"
+  | "already_rotated"
+  | "not_permitted"
   | "peppers_unavailable";
 
 export type StoreResult<T> = { ok: true; value: T } | { ok: false; reason: StoreFailure };
@@ -114,6 +124,8 @@ export interface CreatedKey {
 }
 
 interface KeyInput {
+  /** The actor's org role, already resolved by authorizeOrgManagement; re-checked here (defence in depth). */
+  readonly actorRole: OrgRole;
   readonly orgId: string;
   readonly appId: string;
   readonly mode: KeyMode;
@@ -133,6 +145,10 @@ function validateKeyInput(input: KeyInput, now: number): readonly ApiScope[] | n
 export async function createApiKey(ctx: StoreContext, input: KeyInput, peppers: PepperSet): Promise<StoreResult<CreatedKey>> {
   const scopes = validateKeyInput(input, ctx.now);
   if (!scopes) return { ok: false, reason: "invalid_input" };
+  if (!roleHasCapability(input.actorRole, input.mode === "live" ? "keys.live.create" : "keys.test.create")) return { ok: false, reason: "not_permitted" };
+  // Org-wide keys (read every application's verifications) only by owner/admin (PRD §7.3).
+  if (input.appScoped === false && !roleHasCapability(input.actorRole, "keys.orgWide.create")) return { ok: false, reason: "not_permitted" };
+  if (scopes.some((s) => UNGRANTABLE_SCOPES.has(s))) return { ok: false, reason: "not_permitted" };
   const minted = mintApiKey(input.mode, peppers);
   if (!minted.ok) return { ok: false, reason: "peppers_unavailable" };
   const k = minted.key;
@@ -153,13 +169,17 @@ export async function createApiKey(ctx: StoreContext, input: KeyInput, peppers: 
 }
 
 /** Immediate revocation (no positive cache anywhere). A key of another org is "not_found". */
-export async function revokeApiKey(ctx: StoreContext, input: { orgId: string; keyId: string }): Promise<StoreResult<{ prefix: string }>> {
+export async function revokeApiKey(ctx: StoreContext, input: { actorRole: OrgRole; orgId: string; keyId: string }): Promise<StoreResult<{ prefix: string }>> {
   if (!isOrgId(input.orgId) || !isKeyId(input.keyId)) return { ok: false, reason: "invalid_input" };
+  const any = roleHasCapability(input.actorRole, "keys.revoke");
+  if (!any && !roleHasCapability(input.actorRole, "keys.revoke.own")) return { ok: false, reason: "not_permitted" };
   return ctx.db.runTransaction(async (tx) => {
     const ref = ctx.db.doc(keyPath(input.keyId));
     const snap = await tx.get(ref);
     const d = snap.data();
     if (!snap.exists || !d || d.orgId !== input.orgId) return { ok: false, reason: "not_found" } as const;
+    // keys.revoke.own: only keys the actor created (developer). Others' keys are not_found, not revealed.
+    if (!any && d.createdBy !== ctx.actorUid) return { ok: false, reason: "not_found" } as const;
     if (d.revokedAt !== null && d.revokedAt !== undefined) return { ok: false, reason: "already_revoked" } as const;
     tx.update(ref, { revokedAt: ctx.now, revokedBy: ctx.actorUid });
     audit(tx, ctx, "api_key.revoked", input.orgId, { appId: String(d.appId), credentialPrefix: String(d.prefix) });
@@ -173,10 +193,12 @@ export async function revokeApiKey(ctx: StoreContext, input: { orgId: string; ke
  */
 export async function rotateApiKey(
   ctx: StoreContext,
-  input: { orgId: string; keyId: string; overlapSeconds: number },
+  input: { actorRole: OrgRole; orgId: string; keyId: string; overlapSeconds: number },
   peppers: PepperSet,
 ): Promise<StoreResult<CreatedKey>> {
   if (!isOrgId(input.orgId) || !isKeyId(input.keyId)) return { ok: false, reason: "invalid_input" };
+  // Rotation mints a replacement with the same mode and scope breadth, so it needs revoke-any plus the create right.
+  if (!roleHasCapability(input.actorRole, "keys.revoke")) return { ok: false, reason: "not_permitted" };
   if (!Number.isInteger(input.overlapSeconds) || input.overlapSeconds < 0 || input.overlapSeconds > MAX_ROTATION_OVERLAP_SECONDS) {
     return { ok: false, reason: "invalid_input" };
   }
@@ -187,6 +209,8 @@ export async function rotateApiKey(
     if (!old.exists || !d || d.orgId !== input.orgId) return { ok: false, reason: "not_found" } as const;
     if (d.revokedAt !== null && d.revokedAt !== undefined) return { ok: false, reason: "already_revoked" } as const;
     if (d.expiresAt !== null && !(typeof d.expiresAt === "number" && d.expiresAt > ctx.now)) return { ok: false, reason: "already_revoked" } as const;
+    // A key rotates once: a second rotation (double submit, tx retry) would fork two live successors.
+    if (d.rotatedTo !== null) return { ok: false, reason: "already_rotated" } as const;
     const org = await tx.get(ctx.db.doc(orgPath(input.orgId)));
     const app = await tx.get(ctx.db.doc(appPath(String(d.appId))));
     if (!org.exists || !app.exists || app.data()?.orgId !== input.orgId) return { ok: false, reason: "not_found" } as const;
@@ -195,13 +219,15 @@ export async function rotateApiKey(
     const mode = d.mode === "live" ? "live" : d.mode === "test" ? "test" : null;
     const scopes = normalizeScopes(Array.isArray(d.scopes) ? (d.scopes as unknown[]) : undefined);
     if (!mode || !scopes || typeof d.appScoped !== "boolean") return { ok: false, reason: "invalid_input" } as const;
+    if (!roleHasCapability(input.actorRole, mode === "live" ? "keys.live.create" : "keys.test.create")) return { ok: false, reason: "not_permitted" } as const;
     const minted = mintApiKey(mode, peppers);
     if (!minted.ok) return { ok: false, reason: "peppers_unavailable" } as const;
     const k = minted.key;
     tx.create(ctx.db.doc(keyPath(k.keyId)), {
       keyId: k.keyId, orgId: input.orgId, appId: d.appId, mode, scopes, appScoped: d.appScoped,
       verifier: k.verifier, hashVersion: 1, prefix: k.prefix, createdBy: ctx.actorUid, createdAt: ctx.now,
-      expiresAt: null, revokedAt: null, revokedBy: null, rotatedTo: null,
+      // The successor never outlives the original's expiry (a short-lived key stays short-lived).
+      expiresAt: typeof d.expiresAt === "number" ? d.expiresAt : null, revokedAt: null, revokedBy: null, rotatedTo: null,
     });
     const oldExpiry = typeof d.expiresAt === "number" ? Math.min(d.expiresAt, ctx.now + input.overlapSeconds * 1000) : ctx.now + input.overlapSeconds * 1000;
     tx.update(oldRef, input.overlapSeconds === 0

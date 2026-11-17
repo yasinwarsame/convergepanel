@@ -12,6 +12,7 @@
 import { burnVerification, parseApiKey, verifierMatches, type KeyMode, type PepperSet } from "@/lib/apiPlatform/keys";
 import { API_SCOPES, type ApiScope } from "@/lib/apiPlatform/types";
 import type { ApiErrorCode } from "@/lib/apiPlatform/errors";
+import { isApprovedApiPlanId } from "@/lib/apiPlatform/apiPlans";
 
 export interface ApiPrincipal {
   readonly kind: "api_key";
@@ -42,7 +43,7 @@ const deny = (code: Extract<PrincipalDecision, { ok: false }>["code"]): Principa
 
 function orgHasActiveApiPlan(org: Record<string, unknown>): boolean {
   const plan = org.apiPlan as Record<string, unknown> | null | undefined;
-  return !!plan && typeof plan === "object" && plan.status === "active" && typeof plan.planId === "string" && plan.planId.length > 0;
+  return !!plan && typeof plan === "object" && plan.status === "active" && isApprovedApiPlanId(plan.planId);
 }
 
 export async function requireApiPrincipal(headers: Headers, scope: ApiScope, deps: PrincipalDeps): Promise<PrincipalDecision> {

@@ -6,6 +6,9 @@ import { randomBytes } from "node:crypto";
 import { mintApiKey, type PepperSet } from "@/lib/apiPlatform/keys";
 import { requireApiPrincipal, type PrincipalDeps } from "@/lib/apiPlatform/principal";
 import { newAppId, newOrgId } from "@/lib/apiPlatform/ids";
+import * as secrets from "@/lib/apiPlatform/secrets.server";
+
+jest.mock("@/lib/apiPlatform/apiPlans", () => ({ isApprovedApiPlanId: (id: unknown) => id === "beta_capped_v1", API_PLANS: [] }));
 
 const NOW = 1_800_000_000_000;
 const peppers: PepperSet = { status: "available", current: randomBytes(32), previous: null };
@@ -98,6 +101,8 @@ describe("requireApiPrincipal", () => {
     ["live key, no plan", { org: { apiPlan: null } }, "live_key_requires_plan"],
     ["live key, inactive plan", { org: { apiPlan: { planId: "beta", status: "inactive" } } }, "live_key_requires_plan"],
     ["live key, plan without id", { org: { apiPlan: { planId: "", status: "active" } } }, "live_key_requires_plan"],
+    ["live key, plan not in the compile-time list", { org: { apiPlan: { planId: "enterprise_unlimited", status: "active" } } }, "live_key_requires_plan"],
+    ["disabled app in a suspended org (401 before any 403)", { app: { status: "disabled" }, org: { status: "suspended" } }, "invalid_api_key"],
   ];
   it.each(RECORD_DENIALS)("%s → %s", async (_n, over, code) => {
     const f = fixture(over);
@@ -145,6 +150,33 @@ describe("requireApiPrincipal", () => {
     const f = fixture();
     const deps = { ...f.deps, getKey: async () => ({ ...f.key, keyId: "AAAAAAAAAAAA" }) };
     expect(await requireApiPrincipal(f.headers(), "verifications:read", deps)).toEqual({ ok: false, code: "invalid_api_key" });
+  });
+
+  describe("equal work on every rejection path (timing)", () => {
+    afterEach(() => jest.restoreAllMocks());
+    async function hmacs(headers: Headers, deps: PrincipalDeps): Promise<number> {
+      const spy = jest.spyOn(secrets, "hmacWith");
+      await requireApiPrincipal(headers, "verifications:read", deps);
+      const n = spy.mock.calls.length;
+      spy.mockRestore();
+      return n;
+    }
+    it("unknown key, wrong secret and valid key cost the same number of HMACs (1 pepper)", async () => {
+      const f = fixture();
+      const ok = await hmacs(f.headers(), f.deps);
+      const wrong = await hmacs(new Headers({ authorization: `Bearer ${f.m.key.prefix}_${"A".repeat(43)}` }), f.deps);
+      const missing = await hmacs(new Headers({ authorization: `Bearer cpk_live_ZZZZZZZZZZZZ_${"A".repeat(43)}` }), f.deps);
+      expect(ok).toBe(1);
+      expect([wrong, missing]).toEqual([1, 1]);
+    });
+    it("with a previous pepper, both peppers are always computed (2 HMACs on every path)", async () => {
+      const f = fixture();
+      const rot: PepperSet = { status: "available", current: (peppers as { current: Buffer }).current, previous: randomBytes(32) };
+      const deps = { ...f.deps, peppers: () => rot };
+      expect(await hmacs(f.headers(), deps)).toBe(2);
+      expect(await hmacs(new Headers({ authorization: `Bearer cpk_live_ZZZZZZZZZZZZ_${"A".repeat(43)}` }), deps)).toBe(2);
+      expect(await hmacs(new Headers({ authorization: `Bearer ${f.m.key.prefix}_${"A".repeat(43)}` }), deps)).toBe(2);
+    });
   });
 
   it("revocation takes effect on the very next call (no cache)", async () => {

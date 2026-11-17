@@ -108,6 +108,26 @@ describe("Firestore rules deny every api* collection to clients (rules file not 
   });
 });
 
+describe("tenantPaths validation", () => {
+  it("rejects malformed ids (no path injection)", () => {
+    const tp = jest.requireActual("@/lib/apiPlatform/tenantPaths") as typeof import("@/lib/apiPlatform/tenantPaths");
+    expect(() => tp.membershipPath("am_" + "0".repeat(63))).toThrow();
+    expect(() => tp.membershipPath("am_" + "0".repeat(64) + "/x")).toThrow();
+    expect(() => tp.membershipPath("am_" + "G".repeat(64))).toThrow();
+    expect(() => tp.orgPath("org_AAAAAAAAAAAAAAAAAAAA/apiKeys/x")).toThrow();
+    expect(() => tp.keyPath("../AAAAAAAAAA")).toThrow();
+    expect(tp.membershipPath("am_" + "0".repeat(64))).toBe(`apiOrgMemberships/am_${"0".repeat(64)}`);
+  });
+});
+
+describe("compile-time API plans", () => {
+  it("are empty until owner-approved, so no Firestore value can enable live keys", () => {
+    const plans = jest.requireActual("@/lib/apiPlatform/apiPlans") as typeof import("@/lib/apiPlatform/apiPlans");
+    expect(plans.API_PLANS).toEqual([]);
+    for (const id of ["beta_capped_v1", "x", "", null, "toString"]) expect(plans.isApprovedApiPlanId(id)).toBe(false);
+  });
+});
+
 describe("an API key is never a Firebase credential", () => {
   it("S2-b pre-validation rejects cpk_ keys as bearer and cookie", () => {
     const key = `cpk_live_AAAAAAAAAAAA_${"a".repeat(43)}`;

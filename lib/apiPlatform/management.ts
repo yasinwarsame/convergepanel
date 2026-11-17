@@ -38,9 +38,11 @@ export async function authorizeOrgManagement(
   deps: ManagementDeps,
 ): Promise<ManagementDecision> {
   if (API_KEY_BEARER.test(headers.get("authorization") ?? "")) return { ok: false, code: "api_key_not_accepted" };
-  if (!identity || typeof identity.uid !== "string" || identity.uid.length === 0 || !Number.isFinite(identity.authTimeSeconds)) {
+  if (!identity || typeof identity.uid !== "string" || identity.uid.length === 0 || !Number.isInteger(identity.authTimeSeconds)) {
     return { ok: false, code: "session_required" };
   }
+  // auth_time must be seconds and not in the future (300 s skew): a millisecond value would otherwise look fresh forever.
+  if (identity.authTimeSeconds > deps.nowSeconds() + 300) return { ok: false, code: "session_required" };
   if (!isOrgId(orgId)) return { ok: false, code: "not_found" };
   try {
     const m = await deps.getMembership(computeApiOrgMembershipId(orgId, identity.uid));
