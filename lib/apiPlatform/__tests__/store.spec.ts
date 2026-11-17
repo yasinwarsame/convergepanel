@@ -293,3 +293,28 @@ describe("review fixes: rotation invariants and store-side role enforcement", ()
     expect((await rotateApiKey(s.ctx(), { actorRole: "admin", orgId, keyId: k.keyId, overlapSeconds: 0 }, peppers)).ok).toBe(true);
   });
 });
+
+describe("same-transaction audit for EVERY mutation (a failing audit write commits nothing)", () => {
+  async function seeded() {
+    const s = setup();
+    const { orgId, appId } = await orgWithApp(s);
+    const k = await createApiKey(s.ctx(), { actorRole: "owner", orgId, appId, mode: "test" }, peppers);
+    if (!k.ok) throw new Error();
+    return { s, orgId, appId, keyId: k.value.keyId };
+  }
+  const OPS: [string, (x: Awaited<ReturnType<typeof seeded>>) => Promise<unknown>][] = [
+    ["createApplication", ({ s, orgId }) => createApplication(s.ctx(), { orgId, name: "Second" })],
+    ["createApiKey", ({ s, orgId, appId }) => createApiKey(s.ctx(), { actorRole: "owner", orgId, appId, mode: "test" }, peppers)],
+    ["revokeApiKey", ({ s, orgId, keyId }) => revokeApiKey(s.ctx(), { actorRole: "owner", orgId, keyId })],
+    ["rotateApiKey (overlap)", ({ s, orgId, keyId }) => rotateApiKey(s.ctx(), { actorRole: "owner", orgId, keyId, overlapSeconds: 60 }, peppers)],
+    ["rotateApiKey (overlap 0)", ({ s, orgId, keyId }) => rotateApiKey(s.ctx(), { actorRole: "owner", orgId, keyId, overlapSeconds: 0 }, peppers)],
+  ];
+  it.each(OPS)("%s: injected audit commit failure → rejects and every document is unchanged", async (_n, op) => {
+    const x = await seeded();
+    const before = JSON.stringify([...x.s.db.docs.entries()]);
+    x.s.db.failOn = "apiAuditEvents/";
+    await expect(op(x)).rejects.toThrow("injected commit failure");
+    x.s.db.failOn = null;
+    expect(JSON.stringify([...x.s.db.docs.entries()])).toBe(before);
+  });
+});
