@@ -23,8 +23,18 @@ import {
   MAX_TX_ATTEMPTS,
   OrgDoc,
   System,
+  ADMISSION_MARKER_FIELD,
+  CONCURRENCY_RECORD_TEMPLATE,
+  ConcurrencyDoc,
   JobDoc,
+  PeriodDoc,
+  RELEASE_MARKER_FIELD,
+  concurrencyPath,
+  countedActive,
+  detectDrift,
   finishJob,
+  periodPath,
+  repairConcurrency,
   handleCancel,
   handleCreate,
   idemPath,
@@ -65,7 +75,7 @@ const IDEM = "idem-key-0001";
 
 function world(): System {
   const sys = new System();
-  const org: OrgDoc = { status: "active", livePlanActive: true, creditsRemaining: 1000, pipelineAck: true, planMaxModels: 5, concurrencyLimit: 5, running: 0 };
+  const org: OrgDoc = { status: "active", livePlanActive: true, creditsRemaining: 1000, pipelineAck: true, planMaxModels: 5, concurrencyLimit: 5 };
   sys.store.put("orgs/o1", org);
   const live: KeyDoc = { orgId: "o1", appId: "a1", mode: "live", scopes: ["verifications:write", "verifications:read"], revoked: false };
   sys.store.put("keys/live1", live);
@@ -140,10 +150,13 @@ function applyCondition(sys: System, cond: Cond): void {
     case "plan_models_reduced": return patchOrg(sys, { planMaxModels: 2 });
     case "type_disabled": sys.dynamic.typeEnabled.research = false; return;
     case "ack_withdrawn": return patchOrg(sys, { pipelineAck: false });
-    case "concurrency_full": return patchOrg(sys, { running: 5 });
+    case "concurrency_full": sys.store.put(concurrencyPath("o1"), { active: 5, anomalies: 0 }); return;
     case "capacity_shed": sys.dynamic.capacityShed = true; return;
   }
 }
+
+/** The organization's concurrency record (the one counter, §5B). */
+const active = (sys: System, org = "o1"): number => sys.store.get<ConcurrencyDoc>(concurrencyPath(org))?.active ?? 0;
 
 const fmt = (r: ApiResponse): string => (r.status === 202 ? (r.replayed ? "202 replay" : "202 new") : `${r.status} ${r.code}`);
 
@@ -527,12 +540,12 @@ describe("Addendum 4 CX: cancel (jobs-and-idempotency.md §6.1, parsed)", () => 
 
   it.each(rows.map((r) => [`${r.id} ${r.target}/${r.state} → ${r.response}`, r] as const))("%s", (_n, row) => {
     const { sys, target } = setupCancel(row);
-    const runningBefore = (sys.store.get<OrgDoc>("orgs/o1") as OrgDoc).running;
+    const runningBefore = active(sys);
     const res = runToEnd(handleCancel(sys, "live1", target));
     const expected = row.response.split(" ");
     expect(res.status).toBe(Number(expected[0]));
     if (res.status !== 200) expect(res.code).toBe(expected[1]);
-    const runningAfter = (sys.store.get<OrgDoc>("orgs/o1") as OrgDoc).running;
+    const runningAfter = active(sys);
     expect(runningAfter - runningBefore).toBe(row.count === "released" ? -1 : 0);
   });
 
@@ -552,7 +565,7 @@ describe("Addendum 4 CX: cancel (jobs-and-idempotency.md §6.1, parsed)", () => 
     expect(runToEnd(handleCancel(sys, "live1", id)).status).toBe(200);
     const after = sys.store.get<OrgDoc>("orgs/o1") as OrgDoc;
     expect(after.creditsRemaining - before.creditsRemaining).toBe(res.body?.credits_reserved);
-    expect(after.running).toBe(before.running - 1);
+    expect(active(sys)).toBe(0);
     expect(fmt(runToEnd(handleCancel(sys, "live1", id)))).toBe("409 not_cancelable");
     expect(runToEnd(finishJob(sys, id, "failed")).status).toBe(200); // no-op release
     expect(sys.store.get<OrgDoc>("orgs/o1")).toEqual(after);
@@ -578,7 +591,7 @@ describe("Addendum 4 CC: exact concurrency across distinct keys", () => {
     for (const o of outcomes) {
       const jobs = o.sys.jobs().length;
       expect({ schedule: o.schedule, jobs, overLimit: jobs > limit }).toEqual({ schedule: o.schedule, jobs, overLimit: false });
-      expect((o.sys.store.get<OrgDoc>("orgs/o1") as OrgDoc).running).toBe(jobs);
+      expect(active(o.sys)).toBe(jobs);
       for (const r of o.results) expect(["202 new", "429 concurrency_limit", "409 request_in_progress"]).toContain(fmt(r as ApiResponse));
       if (jobs === limit) atLimit++;
     }
@@ -593,7 +606,7 @@ describe("Addendum 4 CC: exact concurrency across distinct keys", () => {
     runToEnd(finishJob(sys, id, "completed"));
     runToEnd(finishJob(sys, id, "completed"));
     runToEnd(finishJob(sys, id, "failed"));
-    expect((sys.store.get<OrgDoc>("orgs/o1") as OrgDoc).running).toBe(0);
+    expect(active(sys)).toBe(0);
     expect(fmt(send(sys, req(DIFFERENT, { idempotencyKey: "k-b" })))).toBe("202 new");
   });
 
@@ -606,7 +619,241 @@ describe("Addendum 4 CC: exact concurrency across distinct keys", () => {
     const id = (s: System): string => s.jobs()[0].slice("jobs/".length);
     const rel = (name: string, to: "completed" | "failed"): Proc => ({ name, start: (s) => finishJob(s, id(s), to) });
     for (const o of interleavings(setup, [rel("a", "completed"), rel("b", "failed")])) {
-      expect((o.sys.store.get<OrgDoc>("orgs/o1") as OrgDoc).running).toBe(0);
+      expect(active(o.sys)).toBe(0);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Addendum 5, MAJOR-1: one unsharded, organization-scoped concurrency record
+// ---------------------------------------------------------------------------------------------
+describe("Addendum 5 MAJOR-1: concurrency record location and release rule", () => {
+  const sec = (): string => {
+    const md = fs.readFileSync(JOBS, "utf8");
+    return md.slice(md.indexOf("## 5B. Concurrency accounting"), md.indexOf("## 6. Cancellation"));
+  };
+  const declared = (label: string): string | undefined => new RegExp(`^\\*\\*${label}:\\*\\* \`([^\`]+)\`$`, "m").exec(sec())?.[1];
+
+  it("the doc's declared counter location and markers equal the model's constants", () => {
+    expect(declared("Counter location")).toBe(CONCURRENCY_RECORD_TEMPLATE);
+    expect(declared("Release marker")).toBe(RELEASE_MARKER_FIELD);
+    expect(declared("Admission marker")).toBe(ADMISSION_MARKER_FIELD);
+    // Organization-scoped only: no month, period, year, shard or application in its identity.
+    expect(CONCURRENCY_RECORD_TEMPLATE).toMatch(/\{orgId\}/);
+    expect(CONCURRENCY_RECORD_TEMPLATE).not.toMatch(/YYYY|MM|month|period|shard|app/i);
+    // The create transaction reads that record, not the period document, for the count.
+    const md = fs.readFileSync(JOBS, "utf8");
+    const t = md.slice(md.indexOf("### 5A.2"), md.indexOf("### 5A.3"));
+    expect(t).toContain("`apiOrgConcurrency/{orgId}`");
+    expect(t).not.toMatch(/period document \([^)]*active-job count/);
+  });
+
+  it("the model writes the count only to that record, whatever the month", () => {
+    const sys = world();
+    for (const now of [Date.UTC(2026, 10, 30, 23, 59, 59, 999), Date.UTC(2026, 11, 1), Date.UTC(2027, 0, 1)]) {
+      sys.dynamic.now = now;
+      expect(send(sys, req(SAME, { idempotencyKey: `m-${now}` })).status).toBe(202);
+    }
+    expect(active(sys)).toBe(3);
+    const holders = sys.store.keys("").filter((k) => (sys.store.get<{ active?: number }>(k) ?? {}).active !== undefined);
+    expect(holders).toEqual([concurrencyPath("o1")]);
+  });
+
+  interface ERow { id: string; before: string; released: string; event: string; countBefore: number; after: string; countAfter: number; anomaly: string }
+  const releaseTable = (): ERow[] =>
+    Array.from(sec().matchAll(/^\| (E\d+) \| (\w+) \| (yes|no) \| (\w+) \| (\d+) \| (\w+) \| (\d+) \| (yes|no) \|$/gm), (m) => ({
+      id: m[1], before: m[2], released: m[3], event: m[4], countBefore: Number(m[5]), after: m[6], countAfter: Number(m[7]), anomaly: m[8],
+    }));
+
+  it("the release table has rows E1–E10", () => {
+    expect(releaseTable().map((r) => r.id)).toEqual(Array.from({ length: 10 }, (_, i) => `E${i + 1}`));
+  });
+
+  const TO: Record<string, "completed" | "failed" | "expired"> = { complete: "completed", worker_timeout: "failed", expire: "expired" };
+
+  it.each(releaseTable().map((r) => [`${r.id} ${r.before}/${r.event} → ${r.after}, count ${r.countBefore}→${r.countAfter}${r.anomaly === "yes" ? ", anomaly" : ""}`, r] as const))("%s", (_n, row) => {
+    const sys = world();
+    const res = send(sys, req(SAME));
+    const id = res.body?.id as string;
+    const path = `jobs/${id}`;
+    const scope = scopeOf(sys);
+    // Bring the job to its "before" state through the normal paths.
+    if (row.before === "running") sys.store.put(path, { ...(sys.store.get<JobDoc>(path) as JobDoc), state: "running" });
+    if (["completed", "canceled", "failed"].includes(row.before)) runToEnd(finishJob(sys, id, row.before as "completed" | "canceled" | "failed"));
+    expect((sys.store.get<JobDoc>(path) as JobDoc)[RELEASE_MARKER_FIELD]).toBe(row.released === "yes");
+    if (active(sys) !== row.countBefore) sys.store.put(concurrencyPath("o1"), { active: row.countBefore, anomalies: 0 });
+    const auditBefore = sys.audit.length;
+    if (row.event === "cancel") runToEnd(handleCancel(sys, "live1", id));
+    else if (row.event === "delete") sys.deleteVerification(scope);
+    else runToEnd(finishJob(sys, id, TO[row.event]));
+    const job = sys.store.get<JobDoc>(path) as JobDoc;
+    expect(job.state).toBe(row.after);
+    expect(active(sys)).toBe(row.countAfter);
+    expect(active(sys)).toBeGreaterThanOrEqual(0);
+    expect(job[RELEASE_MARKER_FIELD]).toBe(true);
+    const anomalies = sys.audit.slice(auditBefore).filter((e) => e.type === "concurrency.release_anomaly");
+    expect(anomalies.length).toBe(row.anomaly === "yes" ? 1 : 0);
+    expect(job.concurrencyReleaseAnomaly === true).toBe(row.anomaly === "yes");
+  });
+});
+
+describe("Addendum 5 MAJOR-1: deterministic scenarios", () => {
+  const limitedWorld = (limit: number, now?: number) => (): System => {
+    const s = world();
+    patchOrg(s, { concurrencyLimit: limit });
+    s.store.put("keys/live2", { ...(s.store.get<KeyDoc>("keys/live1") as KeyDoc) });
+    if (now !== undefined) s.dynamic.now = now;
+    return s;
+  };
+  /** No negative count and no silent leak: the record equals the counted, unreleased jobs. */
+  const invariant = (s: System): void => {
+    expect(active(s)).toBeGreaterThanOrEqual(0);
+    expect(active(s)).toBe(countedActive(s, "o1"));
+  };
+  const NOV_LAST = Date.UTC(2026, 10, 30, 23, 59, 59, 999);
+  const DEC_LAST = Date.UTC(2026, 11, 31, 23, 59, 59, 999);
+
+  it("creates at the limit: the limit is admitted, the next is 429, a release admits one more", () => {
+    const sys = limitedWorld(2)();
+    expect(fmt(send(sys, req(SAME, { idempotencyKey: "a" })))).toBe("202 new");
+    const b = send(sys, req(SAME, { idempotencyKey: "b" }));
+    expect(fmt(send(sys, req(SAME, { idempotencyKey: "c" })))).toBe("429 concurrency_limit");
+    invariant(sys);
+    runToEnd(finishJob(sys, b.body?.id as string, "completed"));
+    expect(fmt(send(sys, req(SAME, { idempotencyKey: "c" })))).toBe("202 new");
+    expect(active(sys)).toBe(2);
+    invariant(sys);
+  });
+
+  it("last minute of the month: the count and limit carry over the month boundary", () => {
+    const sys = limitedWorld(1, NOV_LAST)();
+    const a = send(sys, req(SAME, { idempotencyKey: "nov" }));
+    expect(a.status).toBe(202);
+    sys.dynamic.now = NOV_LAST + 1; // 2026-12-01T00:00:00.000Z
+    expect(fmt(send(sys, req(SAME, { idempotencyKey: "dec" })))).toBe("429 concurrency_limit");
+    runToEnd(finishJob(sys, a.body?.id as string, "completed"));
+    expect(fmt(send(sys, req(SAME, { idempotencyKey: "dec" })))).toBe("202 new");
+    invariant(sys);
+  });
+
+  it("creates racing the month boundary (every interleaving) never exceed the limit", () => {
+    const tick: Proc = event("month ends", (s) => { s.dynamic.now = NOV_LAST + 1; });
+    for (const o of interleavings(limitedWorld(1, NOV_LAST), [
+      create("a", { keyId: "live1", idempotencyKey: "x1", body: SAME }),
+      create("b", { keyId: "live2", idempotencyKey: "x2", body: SAME }),
+      tick,
+    ])) {
+      expect({ schedule: o.schedule, over: o.sys.jobs().length > 1 }).toEqual({ schedule: o.schedule, over: false });
+      invariant(o.sys);
+    }
+  });
+
+  it("a job running across year-end is released to the same record; the ledger month is the reservation month", () => {
+    const sys = limitedWorld(1, DEC_LAST)();
+    const a = send(sys, req(SAME));
+    const id = a.body?.id as string;
+    sys.store.put(`jobs/${id}`, { ...(sys.store.get<JobDoc>(`jobs/${id}`) as JobDoc), state: "running" });
+    sys.dynamic.now = DEC_LAST + 1; // 2027-01-01T00:00:00.000Z
+    runToEnd(finishJob(sys, id, "completed"));
+    expect(active(sys)).toBe(0);
+    expect(sys.store.get<{ month: string }>(`ledger/reserve_${id}`)?.month).toBe("2026-12");
+    expect(sys.store.get<PeriodDoc>(periodPath("o1", "2026-12"))?.reservedCredits).toBe(a.body?.credits_reserved);
+    expect(sys.store.get<PeriodDoc>(periodPath("o1", "2027-01"))).toBeUndefined();
+    expect(fmt(send(sys, req(DIFFERENT, { idempotencyKey: "jan" })))).toBe("202 new"); // capacity freed in the new year
+    invariant(sys);
+  });
+
+  it("a sweeper (worker_timeout) racing normal completion: one terminal state, one release", () => {
+    const setup = (): System => {
+      const s = limitedWorld(1)();
+      const r = send(s, req(SAME));
+      s.store.put(`jobs/${r.body?.id}`, { ...(s.store.get<JobDoc>(`jobs/${r.body?.id}`) as JobDoc), state: "running" });
+      return s;
+    };
+    const id = (s: System): string => s.jobs()[0].slice("jobs/".length);
+    const outcomes = interleavings(setup, [
+      { name: "worker", start: (s) => finishJob(s, id(s), "completed") },
+      { name: "sweeper", start: (s) => finishJob(s, id(s), "failed") },
+    ]);
+    const states = new Set<string>();
+    for (const o of outcomes) {
+      states.add((o.sys.store.get<JobDoc>(o.sys.jobs()[0]) as JobDoc).state);
+      expect(active(o.sys)).toBe(0);
+      expect(o.sys.audit.filter((e) => e.type === "concurrency.release_anomaly")).toEqual([]);
+      invariant(o.sys);
+    }
+    expect(Array.from(states).sort()).toEqual(["completed", "failed"]); // either may win; never both releases
+  });
+
+  it("cancellation followed by a late worker completion releases once and keeps the canceled state", () => {
+    const sys = limitedWorld(1)();
+    const a = send(sys, req(SAME));
+    const id = a.body?.id as string;
+    expect(runToEnd(handleCancel(sys, "live1", id)).status).toBe(200);
+    runToEnd(finishJob(sys, id, "completed")); // late worker
+    expect((sys.store.get<JobDoc>(`jobs/${id}`) as JobDoc).state).toBe("canceled");
+    expect(active(sys)).toBe(0);
+    invariant(sys);
+  });
+
+  it("a failed (crashed) release fails safe: capacity held, detectable, recovered by the sweeper", () => {
+    const sys = limitedWorld(1)();
+    const a = send(sys, req(SAME));
+    const id = a.body?.id as string;
+    const crashed = finishJob(sys, id, "completed");
+    crashed.next(); // reads done, then the worker dies before commit
+    expect((sys.store.get<JobDoc>(`jobs/${id}`) as JobDoc).state).toBe("pending_dispatch");
+    expect(active(sys)).toBe(1); // held, never double-freed
+    expect(fmt(send(sys, req(DIFFERENT, { idempotencyKey: "other" })))).toBe("429 concurrency_limit");
+    invariant(sys);
+    expect(detectDrift(sys, "o1")).toBe(false);
+    runToEnd(finishJob(sys, id, "failed")); // sweeper: worker_timeout
+    expect(active(sys)).toBe(0);
+    invariant(sys);
+  });
+
+  it("reconciliation detects drift without writing; the audited repair corrects it", () => {
+    const sys = limitedWorld(5)();
+    send(sys, req(SAME));
+    sys.store.put(concurrencyPath("o1"), { active: 3, anomalies: 0 }); // drift (corruption)
+    const before = sys.store.get<ConcurrencyDoc>(concurrencyPath("o1"));
+    expect(detectDrift(sys, "o1")).toBe(true);
+    expect(sys.store.get<ConcurrencyDoc>(concurrencyPath("o1"))).toEqual(before); // detection never writes
+    expect(sys.audit.map((e) => e.type)).toContain("concurrency.drift_detected");
+    runToEnd(repairConcurrency(sys, "o1"));
+    expect(active(sys)).toBe(1);
+    expect(sys.audit.map((e) => e.type)).toContain("concurrency.repaired");
+    invariant(sys);
+  });
+
+  it("the repair racing admissions and releases (every interleaving) ends consistent", () => {
+    const setup = (): System => {
+      const s = limitedWorld(5)();
+      const r = send(s, req(SAME, { idempotencyKey: "first" }));
+      s.store.put(concurrencyPath("o1"), { active: 4, anomalies: 0 }); // drift to repair
+      void r;
+      return s;
+    };
+    const firstId = (s: System): string => s.jobs()[0].slice("jobs/".length);
+    let n = 0;
+    for (const o of interleavings(setup, [
+      { name: "repair", start: (s) => repairConcurrency(s, "o1") },
+      create("admit", { keyId: "live2", idempotencyKey: "second", body: DIFFERENT }),
+      { name: "release", start: (s) => finishJob(s, firstId(s), "completed") },
+    ])) {
+      n++;
+      expect({ schedule: o.schedule, active: active(o.sys) }).toEqual({ schedule: o.schedule, active: countedActive(o.sys, "o1") });
+    }
+    expect(n).toBeGreaterThan(50);
+  });
+
+  it("a release due at count 0 commits the terminal state, records an anomaly, and never goes negative", () => {
+    const sys = limitedWorld(5)();
+    const a = send(sys, req(SAME));
+    sys.store.put(concurrencyPath("o1"), { active: 0, anomalies: 0 });
+    runToEnd(finishJob(sys, a.body?.id as string, "completed"));
+    expect((sys.store.get<JobDoc>(`jobs/${a.body?.id}`) as JobDoc).state).toBe("completed");
+    expect(sys.store.get<ConcurrencyDoc>(concurrencyPath("o1"))).toEqual({ active: 0, anomalies: 1 });
+    expect(sys.audit.filter((e) => e.type === "concurrency.release_anomaly").length).toBe(1);
   });
 });

@@ -101,7 +101,7 @@ Source: `owner-decision-addendum-1.md`. Sections 1–4 above are the 2026-11-03 
 | DEP-1 | Superseded (D2). |
 | DEP-2, DEP-16 | Narrowed to a secret-only boundary (D3, OQ-1); `secret-boundary.md`. |
 | DEP-3 (API host) | Needed for the **external** beta, not for API-1. The internal dark canary uses no public host. |
-| DEP-4 (Redis-class store) | Needed by API-3 (pools, concurrency). API-1/API-2β may use the existing fail-closed Firestore limiter at beta volumes. Vendor needs Phase 1D-D evidence and owner approval (D5). If the Firestore limiter is used, API identifiers live in a separate `api_rate_limits` collection (never the web `rate_limits` documents), so API traffic cannot contend with web limiter documents (CR-2). |
+| DEP-4 (Redis-class store) | Needed by API-3 (provider pools and rate windows; *Addendum 5:* job-admission concurrency is Firestore-transactional and does not need it). API-1/API-2β may use the existing fail-closed Firestore limiter at beta volumes. Vendor needs Phase 1D-D evidence and owner approval (D5). If the Firestore limiter is used, API identifiers live in a separate `api_rate_limits` collection (never the web `rate_limits` documents), so API traffic cannot contend with web limiter documents (CR-2). |
 | DEP-5 (queue) | Needed by API-3. Phase 1D-C evidence and owner approval (D5). Vercel Queues is approved for an isolated feasibility evaluation only (Addendum 1 §1.1 Q); the same-message-ID re-dispatch defect (`jobs-and-idempotency.md` §2 step 4) is resolved before API-3. |
 | DEP-6 (Stripe API products) | Deferred to API-2S, after the beta. |
 | DEP-7 (KMS) | Deferred to API-5W, after the beta. |

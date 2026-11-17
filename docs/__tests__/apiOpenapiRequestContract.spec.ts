@@ -639,3 +639,14 @@ describe("Addendum 4 MA: metadata limits (provisional contract)", () => {
     expect([m.maxProperties, m.propertyNames.maxLength, m.additionalProperties.maxLength, m["x-cp-max-total-code-points"]]).toEqual([20, 40, 500, 4000]);
   });
 });
+
+describe("Addendum 4 CX (Addendum 5 follow-up): cancel lists 410 in OpenAPI", () => {
+  it("POST /verifications/{id}/cancel documents 410 Gone, and Gone describes the cancel case", () => {
+    const cancel = raw.paths["/verifications/{id}/cancel"].post;
+    expect(cancel.responses["410"]?.$ref).toBe("#/components/responses/Gone");
+    expect(cancel.responses["404"]?.$ref).toBe("#/components/responses/NotFound");
+    expect(raw.components.responses.Gone.description).toMatch(/cancel operation on the caller's own deleted verification/);
+    // DELETE stays idempotent (same 202), so it does not list 410.
+    expect(raw.paths["/verifications/{id}"].delete.responses["410"]).toBeUndefined();
+  });
+});

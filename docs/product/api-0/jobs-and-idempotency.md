@@ -195,8 +195,8 @@ Inside the one Firestore transaction, in this order:
 1. **Lock and read** `apiOrganizations/{orgId}/idempotency/{sha256(appId|mode|key)}` (first read; omitted when no `Idempotency-Key` is sent, which only a test key may do).
 2. **Read** `apiKeys/{keyId}` and `apiOrganizations/{orgId}` (revocation, scope, status, plan) and decide 8b.
 3. Decide 8c from the record. On a replay, `409` or `410` the transaction commits **with no write**.
-4. New job only: read the current period document (`periods/{YYYY-MM}`: credits, reservations and, *Addendum 4*, the organization's active-job count, §5B) and evaluate steps 9–14. The concurrency check (step 12) is decided from that **transactional** count. Redis-class state (shedding, queue health, provider health) is read here, inside the transaction callback, but is not part of the Firestore snapshot; the outcome a request receives is decided only after these reads.
-5. New job only: `tx.create` the job, `tx.create` the ledger entry, update the period document (reservation and active-job count together), `tx.create` the idempotency record (or overwrite a record whose `expiresAt` has passed; Firestore TTL deletion is lazy, so expiry is checked explicitly). All commit together or none does.
+4. New job only: read the current period document (`periods/{YYYY-MM}`: credits and reservations only) and, *Addendum 5*, the organization's concurrency record `apiOrgConcurrency/{orgId}` (§5B), and evaluate steps 9–14. The concurrency check (step 12) is decided from that **transactional** count. Redis-class state (shedding, queue health, provider health) is read here, inside the transaction callback, but is not part of the Firestore snapshot; the outcome a request receives is decided only after these reads.
+5. New job only: `tx.create` the job (with its admission marker, §5B), `tx.create` the ledger entry, update the period document (reservation), increment the concurrency record (§5B), `tx.create` the idempotency record (or overwrite a record whose `expiresAt` has passed; Firestore TTL deletion is lazy, so expiry is checked explicitly). All commit together or none does.
 
 Every read in 1, 2 and 4 is validated at commit. A concurrent key revocation, organization suspension, credit change or record creation aborts the commit, and the transaction retries from 1 with fresh reads. The `lastUsedAt` sampling write on the key (`tenancy-and-auth.md` §4, at most once per minute) can cause such a retry; it never changes the outcome.
 
@@ -251,20 +251,55 @@ Rows T12–T13: once the other transaction commits, a retry follows T10 or T11. 
 
 - **Modelled:** steps 3, 4, 5–6, a reduced step 7 (object body, `type`, model-ID shape and 2..5 bound, NFC, canonical JSON, `Idempotency-Key` presence for live keys), 8a–8c, 10a, 10b, 10d, 10e, 11, 12, 13 (only `quota_exceeded`), 14 (only `capacity_protection`), 15, and dispatch after commit (16, as a list; no sweeper).
 - **Omitted:** steps 0–2; the full §4 validation; step 9 (beta options); 10c, 10f, 10g; step 13's `failed_job_threshold_exceeded`, `spend_limit_reached`, `payment_required`; step 14's `platform_spend_ceiling`; the sweeper and expiry of undispatched jobs. The omitted checks **after 8c** (steps 9, 10c, 10f, 10g and the omitted parts of 13 and 14) are all new-job-only, so they cannot change a replay. Steps 0–2 and the full §4 validation are also omitted, but they **precede** 8c and apply to replays exactly as to new requests; the model does not exercise them. The omitted outcomes themselves are not exercised by the model.
-- **Concurrency.** *Addendum 4 supersedes the over-admission caveat recorded here in Addendum 3:* the design now keeps the active-job count in a Firestore document inside T-create (§5B), exactly as the model does (`running` in the organization document, read inside T-create and version-checked at commit). Distinct keys racing at the limit can never over-admit; a test races them across every interleaving.
+- **Concurrency.** *Addendum 4 superseded the over-admission caveat recorded here in Addendum 3; Addendum 5 corrects the location.* The design and the model keep the accepted-job count in the same place, the organization's single concurrency record `apiOrgConcurrency/{orgId}` (§5B), read inside T-create and version-checked at commit, with the same release rule. A test parses §5B's declared counter location and release marker and compares them with the model's constants. Distinct keys racing at the limit can never over-admit; tests race them across every interleaving.
 - **Defaults.** Omitted and explicit-default members canonicalize differently, so they are different requests (`409 idempotency_key_reused`, fail-safe; `error-catalog.md` §4.5). Pinned by a test.
 
-## 5B. Concurrency accounting (Addendum 4, ruling CC)
+## 5B. Concurrency accounting (Addendum 4, ruling CC; corrected by Addendum 5, MAJOR-1)
 
-Concurrency control for **accepted** jobs is exact. No over-admission is allowed across distinct API keys or idempotency keys.
+Concurrency control for **accepted** jobs is exact. No over-admission is allowed across distinct API keys or idempotency keys. *Addendum 5 supersedes the Addendum 4 text of this section, which placed the count in the monthly (and possibly sharded) period document: a count there changes identity at month rollover, has no stable release target, and is not atomic across shards.*
 
-- **Where.** The organization's active-job count (accepted jobs in any non-terminal state: `pending_dispatch`, `queued`, `running`, `synthesizing`) lives in a Firestore document of the organization (the current period document, which T-create already writes for the credit reservation). It is read and incremented **in the same transaction** as the credit reservation and the job create (§5A.2 steps 4–5). Every concurrent T-create of the organization therefore conflicts on that document, and Firestore serializes them: the check at step 12 and the increment are atomic. *Addendum 4 supersedes OD-5 (PRD §9.3) only for the per-organization concurrency counter, which moves out of the Redis-class store.*
+**Counter location:** `apiOrgConcurrency/{orgId}`
+
+**Release marker:** `concurrencyReleased`
+
+**Admission marker:** `concurrencyCounted`
+
+- **One record, never sharded, never per period.** The organization's accepted-job count `active` (accepted jobs in any non-terminal state: `pending_dispatch`, `queued`, `running`, `synthesizing`) is a field of the single document `apiOrgConcurrency/{orgId}`. Its identity depends only on the organization: never on a calendar month, billing period, shard or application. Admission and release always address this same document, so a month or year rollover never changes the limit or the release target. **Why a dedicated document, not a field on `apiOrganizations/{orgId}`:** the organization document carries status, plan and settings that management actions write; a counter there would make every admission and every job completion contend with those writes, and would mix a high-churn operational value into a configuration record. **Why not the period document:** see the supersession note above. The monthly period documents (`ledger-and-billing.md` §2) keep only billing counters.
+- **The limit** is the plan's admission limit for accepted non-terminal jobs, read from the organization's plan at step 12; it is not stored per period. A plan change takes effect at the next admission; jobs already admitted are not evicted.
+- **Admission (atomic).** In T-create (§5A.2): read `apiOrgConcurrency/{orgId}` (absent = `active: 0`), check `active < limit` (otherwise 429 `concurrency_limit`), then in the **same commit** create the job with `concurrencyCounted: true`, `concurrencyReleased: false` and `admissionId` (= the verification ID), create the reservation ledger entry, update the period document, and write `active + 1`. A job is counted **only when this commit succeeds**; an aborted or rejected T-create writes nothing.
+- **Release (exactly once).** The count is decremented only by the **first valid non-terminal → terminal transition** of a job with `concurrencyCounted: true` and `concurrencyReleased: false`, in the **same transaction** that writes the terminal state, which also sets `concurrencyReleased: true` on the job. The transition is conditional on the job being non-terminal at commit (the job document is version-checked), so duplicate workers, retries, sweeper runs, a cancellation followed by a late worker completion, and deletion (which cancels a non-terminal job first and is a no-op for a terminal one) cannot decrement twice.
+- **Never negative.** If the record's `active` is already 0 when a counted job's release is due, the terminal transition **still commits** (a job's outcome is never held hostage by the counter): the job records `concurrencyReleased: true` and `concurrencyReleaseAnomaly: true`, the record's `anomalies` count is incremented in the same transaction, `active` is not changed, and an audit and alert event `concurrency.release_anomaly` is emitted. The count is then corrected only by the audited repair below.
+- **Failed or incomplete release fails safe.** Because release and terminal transition share one transaction, a failure leaves **both** undone: the job stays non-terminal and counted. That holds capacity (under-admission), never frees it twice (over-admission). It is detectable (a non-terminal job past its lease or queue deadline) and recoverable: the sweeper retries the terminal transition (`worker_timeout` after three expired leases, `expired` after the max queue wait), which releases it. There is no other release path.
+- **Reconciliation never overwrites from a query.** The sweeper's reconciliation is **detection only**: it compares `active` with the number of the organization's jobs that are counted and not released, and on a difference writes a `concurrency.drift_detected` audit and alert event, and **writes nothing to the record**. Correction is an **audited operator repair** that runs in one transaction: read `apiOrgConcurrency/{orgId}` first, then read (a transactional query) every job of the organization with `concurrencyCounted: true` and `concurrencyReleased: false`, and set `active` to that number. Every admission and every release writes the record, so any of them committing between the repair's reads and its commit aborts the repair, which retries with fresh reads. The repair writes `concurrency.repaired` with the before and after values.
 - **Redis-class store: provider permits only** (§4.3, CR-2 pools), plus rate windows (OD-5 unchanged for those). A provider permit limits concurrent provider calls; it never decides whether a job is accepted.
-- **Release.** The count is decremented **in the same transaction that moves the job to a terminal state** (`completed`, `partial`, `failed`, `canceled`, `expired`), and only by that transition. The transition is conditional on the job's current non-terminal state, so a duplicated or retried release is a no-op (**idempotent release**), and a job is released at most once.
-- **No negative counts.** A decrement is applied only together with a non-terminal → terminal transition of a job that was counted, so the count can never go below zero; a transaction that would make it negative aborts and is logged as a reconciliation fault.
-- **Lease expiry and crashes.** A worker that crashes holds no count of its own: the job stays non-terminal and counted until the sweeper fails it (`worker_timeout`, after three expired leases) or expires it (max queue wait), each a terminal transition that releases it.
-- **Sweeper reconciliation.** The sweeper periodically recounts the organization's non-terminal jobs and, if the stored count differs, corrects it in a transaction and writes an audit event. Drift is a defect to investigate, not a normal path.
-- **Throughput.** Serializing an organization's creates on one document bounds its sustained create rate (Firestore's per-document write rate). The bound is accepted for exactness; its value is measured in load testing, and the per-organization create rate limit (`error-catalog.md` §3.4) stays below it.
+- **Throughput.** Serializing an organization's admissions and releases on one document bounds its sustained create rate (Firestore's per-document write rate). The bound is accepted for exactness; its value is measured in load testing, and the per-organization create rate limit (`error-catalog.md` §3.4) stays below it.
+
+### 5B.1 Release truth table (normative; parsed by the reference-model spec)
+
+*Count before* / *Count after* are `active` of `apiOrgConcurrency/{orgId}`; every job in the table was admitted (counted). *Released before* is the job's `concurrencyReleased`.
+
+| Row | Job before | Released before | Event | Count before | Job after | Count after | Anomaly |
+|---|---|---|---|---|---|---|---|
+| E1 | queued | no | complete | 1 | completed | 0 | no |
+| E2 | running | no | worker_timeout | 1 | failed | 0 | no |
+| E3 | queued | no | expire | 1 | expired | 0 | no |
+| E4 | queued | no | cancel | 1 | canceled | 0 | no |
+| E5 | completed | yes | complete | 0 | completed | 0 | no |
+| E6 | canceled | yes | complete | 0 | canceled | 0 | no |
+| E7 | failed | yes | worker_timeout | 0 | failed | 0 | no |
+| E8 | running | no | complete | 0 | completed | 0 | yes |
+| E9 | completed | yes | delete | 0 | completed | 0 | no |
+| E10 | queued | no | delete | 1 | canceled | 0 | no |
+
+E5–E7 are duplicate or late terminal events (a duplicate worker, a late worker after cancellation, a sweeper after normal completion). E8 is the never-negative path. E9–E10: deletion of a terminal job changes nothing; deletion of a queued job cancels it first, which releases it (the job is then also marked deleted).
+
+### 5B.2 What the reference model and these tests do not prove
+
+The model runs the rules above against an in-memory store with Firestore-like transaction semantics. It does **not** prove the distributed implementation. Before any release decision, API-3 must add, at minimum:
+1. **Firestore-emulator tests** of T-create, the terminal transition and the repair transaction, with concurrent admissions under distinct keys at the limit, and real transaction retries and aborts;
+2. **failure-injection tests**: aborted commits, worker crashes between provider calls and finalize, lost queue publishes, sweeper and worker racing on the same job, a release due while `active` is 0;
+3. **month and year rollover tests** in the emulator with a controlled clock (admission before, release after);
+4. **isolated-environment tests** (no Production resources) of the same scenarios end to end, including the audit and alert events.
 
 ## 6. Cancellation
 

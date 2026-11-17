@@ -21,7 +21,7 @@ Entry fields: `entryId`, `type`, `orgId`, `appId`, `verificationId?`, `credits` 
 Deterministic entry IDs (`reserve_{verId}`, `settle_{verId}`, `release_{verId}`) with `tx.create()` make every entry exactly-once even under worker redelivery.
 
 ### 2.2 Period counters
-`periods/{YYYY-MM}`: `included`, `used`, `reserved`, `overage` (always 0 in the pilot), `hardCapCredits`, `spendLimitUsd`. Updated only inside the same transaction as the ledger entry. High-volume orgs use N sharded counter documents summed on read (N fixed per org, placeholder 10).
+`periods/{YYYY-MM}`: `included`, `used`, `reserved`, `overage` (always 0 in the pilot), `hardCapCredits`, `spendLimitUsd`. Updated only inside the same transaction as the ledger entry. High-volume orgs use N sharded counter documents summed on read (N fixed per org, placeholder 10). *Addendum 5:* period documents hold **billing counters only**; they never hold the accepted-job (concurrency) count, which lives in the single, unsharded `apiOrgConcurrency/{orgId}` record (`jobs-and-idempotency.md` §5B), so a month rollover or shard choice never affects admission or release.
 
 ### 2.3 Reserve (at create)
 This is the T-create transaction of the transactional outbox (`jobs-and-idempotency.md` §2). It is modelled on the transactional TOCTOU protection of `checkAndIncrementUsageForRun` (`lib/stripe/usageCheck.ts`), but org-scoped and amount-based:

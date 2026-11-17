@@ -39,8 +39,37 @@ export interface OrgDoc {
   creditsRemaining: number;
   pipelineAck: boolean;
   planMaxModels: number;
+  /** The plan's admission limit for accepted non-terminal jobs. Not a counter. */
   concurrencyLimit: number;
-  running: number;
+}
+
+// ------------------------------------------------------------------------------------------------
+// Concurrency record (jobs-and-idempotency.md §5B, Addendum 5). These constants are compared with
+// the normative document by the spec, so the model and the doc cannot drift.
+// ------------------------------------------------------------------------------------------------
+/** ONE organization-scoped, unsharded record; its identity never depends on a month or period. */
+export const CONCURRENCY_RECORD_TEMPLATE = "apiOrgConcurrency/{orgId}";
+/** Field on the job that records its single release, set in the terminal-transition transaction. */
+export const RELEASE_MARKER_FIELD = "concurrencyReleased";
+/** Field on the job that records that its admission was counted, set in T-create. */
+export const ADMISSION_MARKER_FIELD = "concurrencyCounted";
+export const concurrencyPath = (orgId: string): string => CONCURRENCY_RECORD_TEMPLATE.replace("{orgId}", orgId);
+export const monthOf = (now: number): string => new Date(now).toISOString().slice(0, 7);
+export const periodPath = (orgId: string, month: string): string => `periods/${orgId}/${month}`;
+
+export interface ConcurrencyDoc {
+  active: number;
+  anomalies: number;
+}
+
+export interface PeriodDoc {
+  reservedCredits: number;
+}
+
+export interface AuditEvent {
+  type: "concurrency.release_anomaly" | "concurrency.drift_detected" | "concurrency.repaired";
+  orgId: string;
+  detail: string;
 }
 
 export interface AcceptedBody {
@@ -215,6 +244,7 @@ export class System {
     rateRemaining: new Map(),
   };
   readonly dispatched: string[] = [];
+  readonly audit: AuditEvent[] = [];
   private seq = 0;
 
   newId(): string {
@@ -300,14 +330,14 @@ function authorize(key: KeyDoc | undefined, org: OrgDoc | undefined): ApiRespons
 }
 
 /** Steps 9–14: checks that apply ONLY to a request that would create a new job. */
-function newJobChecks(sys: System, req: ValidRequest, org: OrgDoc): ApiResponse | null {
+function newJobChecks(sys: System, req: ValidRequest, org: OrgDoc, active: number): ApiResponse | null {
   const d = sys.dynamic;
   if (!d.typeEnabled[req.type]) return { status: 422, code: "type_unavailable" };
   if (req.type === "research" && !org.pipelineAck) return { status: 403, code: "pipeline_processing_not_acknowledged" };
   if (req.models.some((m) => !d.modelsAvailable.has(m))) return { status: 422, code: "model_unavailable" };
   if (req.models.length > org.planMaxModels) return { status: 422, code: "model_limit_exceeded" };
   if (!d.queueHealthy) return { status: 503, code: "queue_unavailable" };
-  if (org.running >= org.concurrencyLimit) return { status: 429, code: "concurrency_limit" };
+  if (active >= org.concurrencyLimit) return { status: 429, code: "concurrency_limit" };
   if (org.creditsRemaining < creditsFor(req)) return { status: 402, code: "quota_exceeded" };
   if (d.capacityShed) return { status: 503, code: "capacity_protection" };
   return null;
@@ -385,7 +415,12 @@ export function* handleCreate(sys: System, req: CreateRequest): Generator<void, 
     }
 
     // Steps 9–14: new-job-only checks, still inside the transaction.
-    const reject = newJobChecks(sys, v, org2 as OrgDoc);
+    // Step 12 reads the ONE concurrency record inside T-create (version-checked at commit).
+    const orgId = key2?.orgId as string;
+    const conc = tx.read<ConcurrencyDoc>(concurrencyPath(orgId)) ?? { active: 0, anomalies: 0 };
+    const month = monthOf(sys.dynamic.now);
+    const period = tx.read<PeriodDoc>(periodPath(orgId, month)) ?? { reservedCredits: 0 };
+    const reject = newJobChecks(sys, v, org2 as OrgDoc, conc.active);
     if (reject) {
       if (tx.commit() === "conflict") {
         if (attempt >= MAX_TX_ATTEMPTS) return { status: 409, code: "request_in_progress" };
@@ -402,9 +437,13 @@ export function* handleCreate(sys: System, req: CreateRequest): Generator<void, 
     const credits = creditsFor(v);
     const body: AcceptedBody = { object: "verification", id, status: "queued", type: v.type, credits_reserved: credits };
     const org3 = org2 as OrgDoc;
-    tx.create(`jobs/${id}`, { state: "pending_dispatch", orgId: key2?.orgId, credits, type: v.type } satisfies JobDoc);
-    tx.create(`ledger/reserve_${id}`, { credits });
-    tx.set(`orgs/${key2?.orgId}`, { ...org3, creditsRemaining: org3.creditsRemaining - credits, running: org3.running + 1 });
+    // Admission: job (with its admission marker), reservation, monthly period counter and the
+    // concurrency increment commit together, or none does. Counted only if this commit succeeds.
+    tx.create(`jobs/${id}`, { state: "pending_dispatch", orgId, credits, type: v.type, admissionId: id, [ADMISSION_MARKER_FIELD]: true, [RELEASE_MARKER_FIELD]: false, reservedMonth: month } satisfies JobDoc);
+    tx.create(`ledger/reserve_${id}`, { credits, month });
+    tx.set(periodPath(orgId, month), { reservedCredits: period.reservedCredits + credits } satisfies PeriodDoc);
+    tx.set(`orgs/${orgId}`, { ...org3, creditsRemaining: org3.creditsRemaining - credits });
+    tx.set(concurrencyPath(orgId), { ...conc, active: conc.active + 1 } satisfies ConcurrencyDoc);
     if (scope !== null) {
       tx.set(scope, { kind: "committed", requestHash: v.canonical, verificationId: id, response: body, expiresAt: sys.dynamic.now + IDEMPOTENCY_TTL_MS });
     }
@@ -430,14 +469,23 @@ export interface JobDoc {
   orgId: string | undefined;
   credits: number;
   type: string;
+  admissionId?: string;
+  concurrencyCounted?: boolean;
+  concurrencyReleased?: boolean;
+  concurrencyReleaseAnomaly?: boolean;
+  reservedMonth?: string;
   deleted?: boolean;
   cancelRequested?: boolean;
 }
 
 /**
- * Moves a job to a terminal state and releases its active-job count in the SAME transaction.
- * Conditional on the job being non-terminal, so a repeated or concurrent release is a no-op.
- * `releaseCredits` is the unsettled remainder returned to the organization.
+ * The ONLY release path (jobs-and-idempotency.md §5B): the first valid non-terminal → terminal
+ * transition of a counted job releases it, in the SAME transaction, against the same record it
+ * was admitted to. A job that is already terminal (or deleted) is a no-op, so duplicate workers,
+ * retries, sweeper runs, cancellations and deletions cannot release twice. If the record would go
+ * negative, the terminal transition still commits; the release is recorded as an anomaly, an
+ * audit/alert event is written, and the count is left for an audited repair.
+ * `releaseCredits` is the unsettled remainder returned to the organization (billing, separate).
  */
 export function* finishJob(sys: System, id: string, to: JobState, releaseCredits?: number): Generator<void, ApiResponse, void> {
   if (!TERMINAL.has(to)) throw new Error(`not a terminal state: ${to}`);
@@ -446,15 +494,74 @@ export function* finishJob(sys: System, id: string, to: JobState, releaseCredits
     const job = tx.read<JobDoc>(`jobs/${id}`);
     if (!job || job.deleted || TERMINAL.has(job.state)) {
       tx.abort();
-      return { status: 200 }; // idempotent: already released
+      return { status: 200 }; // idempotent: the first terminal transition already released it
     }
-    const org = tx.read<OrgDoc>(`orgs/${job.orgId}`) as OrgDoc;
-    if (org.running <= 0) throw new Error("reconciliation fault: active-job count would go negative");
+    const orgId = job.orgId as string;
+    const org = tx.read<OrgDoc>(`orgs/${orgId}`) as OrgDoc;
+    const mustRelease = job[ADMISSION_MARKER_FIELD] === true && job[RELEASE_MARKER_FIELD] !== true;
+    const conc = mustRelease ? tx.read<ConcurrencyDoc>(concurrencyPath(orgId)) ?? { active: 0, anomalies: 0 } : undefined;
     yield;
-    tx.set(`jobs/${id}`, { ...job, state: to });
-    tx.set(`orgs/${job.orgId}`, { ...org, running: org.running - 1, creditsRemaining: org.creditsRemaining + (releaseCredits ?? 0) });
-    if (tx.commit() === "committed") return { status: 200 };
+    const next: JobDoc = { ...job, state: to };
+    let anomaly = false;
+    if (mustRelease && conc) {
+      next[RELEASE_MARKER_FIELD] = true;
+      if (conc.active >= 1) tx.set(concurrencyPath(orgId), { ...conc, active: conc.active - 1 });
+      else {
+        anomaly = true; // never negative: record, alert, leave for an audited repair
+        next.concurrencyReleaseAnomaly = true;
+        tx.set(concurrencyPath(orgId), { ...conc, anomalies: conc.anomalies + 1 });
+      }
+    }
+    tx.set(`jobs/${id}`, next);
+    tx.set(`orgs/${orgId}`, { ...org, creditsRemaining: org.creditsRemaining + (releaseCredits ?? 0) });
+    if (tx.commit() === "committed") {
+      if (anomaly) sys.audit.push({ type: "concurrency.release_anomaly", orgId, detail: id });
+      return { status: 200 };
+    }
     if (attempt >= MAX_TX_ATTEMPTS * 10) throw new Error("finishJob contention");
+    yield;
+  }
+}
+
+/** Counted, unreleased jobs of an organization (what the record must equal). Non-transactional. */
+export function countedActive(sys: System, orgId: string): number {
+  return sys.jobs().filter((p) => {
+    const j = sys.store.get<JobDoc>(p) as JobDoc;
+    return j.orgId === orgId && j[ADMISSION_MARKER_FIELD] === true && j[RELEASE_MARKER_FIELD] !== true;
+  }).length;
+}
+
+/** Sweeper reconciliation: DETECTION ONLY. Never writes the record; emits an audit/alert event. */
+export function detectDrift(sys: System, orgId: string): boolean {
+  const stored = sys.store.get<ConcurrencyDoc>(concurrencyPath(orgId))?.active ?? 0;
+  const counted = countedActive(sys, orgId);
+  if (stored !== counted) sys.audit.push({ type: "concurrency.drift_detected", orgId, detail: `stored=${stored} counted=${counted}` });
+  return stored !== counted;
+}
+
+/**
+ * Audited operator repair. In ONE transaction: read the concurrency record FIRST, then read every
+ * job of the organization (a transactional query in the Admin SDK), recount counted-and-unreleased
+ * jobs, and set the record. Every admission and release writes the record, so any of them that
+ * commits between this transaction's reads and its commit aborts it, and it retries.
+ */
+export function* repairConcurrency(sys: System, orgId: string): Generator<void, ApiResponse, void> {
+  for (let attempt = 1; ; attempt++) {
+    const tx = sys.store.begin();
+    const conc = tx.read<ConcurrencyDoc>(concurrencyPath(orgId)) ?? { active: 0, anomalies: 0 };
+    yield;
+    let count = 0;
+    for (const p of sys.store.keys("jobs/")) {
+      const j = tx.read<JobDoc>(p) as JobDoc;
+      if (j.orgId === orgId && j[ADMISSION_MARKER_FIELD] === true && j[RELEASE_MARKER_FIELD] !== true) count++;
+    }
+    yield;
+    tx.set(concurrencyPath(orgId), { ...conc, active: count });
+    if (tx.commit() === "committed") {
+      sys.audit.push({ type: "concurrency.repaired", orgId, detail: `from=${conc.active} to=${count}` });
+      return { status: 200 };
+    }
+    if (attempt >= MAX_TX_ATTEMPTS * 10) throw new Error("repair contention");
     yield;
   }
 }
