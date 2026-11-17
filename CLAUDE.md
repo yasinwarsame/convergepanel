@@ -90,7 +90,7 @@ DeepSeek is a fallback provider (not in CONNECTOR_MAP directly) — enabled via 
 
 ### Environment variables
 
-`lib/env.ts` is the **single source of truth** for all server-side env vars. Import from there; never access `process.env` directly in connectors or lib code. Firebase Admin supports three credential formats tried in order: `FIREBASE_SERVICE_ACCOUNT_BASE64` (recommended for Vercel), `FIREBASE_SERVICE_ACCOUNT_JSON`, or individual `FIREBASE_CLIENT_EMAIL` + `FIREBASE_PRIVATE_KEY`.
+`lib/env.ts` is the **single source of truth** for all server-side env vars. Import from there; never access `process.env` directly in connectors or lib code. **One scoped exception:** API-platform secrets (`API_KEY_PEPPER`, `API_KEY_PEPPER_PREVIOUS`, and the reserved names in `lib/apiPlatform/secrets.server.ts`) are read ONLY by that server-only module (owner Addendum 1 D3; `docs/product/api-0/secret-boundary.md`). Never read them anywhere else, never add them to `lib/env.ts`, and never put provider keys or flags in that module. Firebase Admin supports three credential formats tried in order: `FIREBASE_SERVICE_ACCOUNT_BASE64` (recommended for Vercel), `FIREBASE_SERVICE_ACCOUNT_JSON`, or individual `FIREBASE_CLIENT_EMAIL` + `FIREBASE_PRIVATE_KEY`.
 
 ### Data persistence
 
