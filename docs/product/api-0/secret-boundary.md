@@ -25,11 +25,11 @@ API-1 needs server-only secrets, first `API_KEY_PEPPER` for the key verifier. AP
 
 | Name | Purpose | Format / validation | Reader | Consumers | Needed by | Implemented on the branch? |
 |---|---|---|---|---|---|---|
-| `API_KEY_PEPPER` | HMAC-SHA256 key for API key verifiers (PRD §7.2) and the root for derived subkeys | base64url, decodes to ≥ 32 bytes; else `unavailable` | `secrets.server.ts` | `lib/apiPlatform/keys.ts` (API-1a), `lib/apiPlatform/listCursor.ts` (API-3) | API-1a | **Yes** |
+| `API_KEY_PEPPER` | HMAC-SHA256 key for API key verifiers (PRD §7.2) and the root for derived subkeys | base64url, decodes to ≥ 32 bytes; else `unavailable` | `secrets.server.ts` (**new**) | `lib/apiPlatform/keys.ts` (**new**, API-1a), `lib/apiPlatform/listCursor.ts` (**new**, API-3) | API-1a | **Yes** |
 | `API_KEY_PEPPER_PREVIOUS` | Verifies keys hashed under the previous pepper during a rotation window (`hashVersion`) | same; optional; must differ from current | `secrets.server.ts` | `keys.ts` | API-1a | **Yes** |
-| Redis-class store REST URL + token (names fixed by the chosen vendor, e.g. `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`) | Rate windows, concurrency counters, CR-2 pools | URL must be `https:`; token non-empty | `secrets.server.ts` | `lib/apiPlatform/rateStore.ts`, `providerPools.ts` (API-3) | API-3 | **No.** Reserved, added only after the D5 vendor approval |
-| Queue authentication | Authenticates queue → worker deliveries | Vercel Queues: platform OIDC, no stored secret (to confirm, Phase 1D-C). Cloud Tasks: Google-signed OIDC verified by audience, no stored secret; a shared secret `API_QUEUE_SHARED_SECRET` only if OIDC verification is impossible | `secrets.server.ts` (only if a stored secret is needed) | `app/api/internal/api-worker/*` (API-3) | API-3 | **No.** Reserved |
-| `API_STRIPE_WEBHOOK_SECRET` | Signature secret of the separate API billing webhook (OD-7) | `whsec_` prefix | `secrets.server.ts` | `app/api/stripe/api-platform-webhook/route.ts` (API-2S) | API-2S (post-beta) | **No.** Reserved |
+| Redis-class store REST URL + token. Names are fixed by the chosen vendor: the Upstash Marketplace integration injects `KV_REST_API_URL` / `KV_REST_API_TOKEN` (or `UPSTASH_REDIS_REST_*`, confirmed at provisioning, Phase 1D-D). The read-only token and `KV_URL`/`REDIS_URL` it also injects must **not** be read | Rate windows, concurrency counters, CR-2 pools | URL must be `https:`; token non-empty; per environment (Preview gets its own database) | `secrets.server.ts` | `lib/apiPlatform/rateStore.ts`, `providerPools.ts` (both **new**, API-3) | API-3 | **No.** Reserved, added only after the D5 vendor approval |
+| Queue authentication | Authenticates queue → worker deliveries | Vercel Queues: platform OIDC, no stored secret (Phase 1D-C). Cloud Tasks fallback: Google-signed OIDC verified by audience, with config only (`CLOUD_TASKS_QUEUE`, `CLOUD_TASKS_INVOKER_SA`, `CLOUD_TASKS_AUDIENCE`, not secrets); a shared secret `API_QUEUE_SHARED_SECRET` only if OIDC verification is impossible. A Vercel Cron sweeper uses the platform `CRON_SECRET`, already allow-listed elsewhere in the repo (`setAdminRouteRetired.spec.ts`), so it is not owned by this module | `secrets.server.ts` (only if a stored secret is needed) | `app/api/internal/api-worker/*` (**new**, API-3) | API-3 | **No.** Reserved |
+| `API_STRIPE_WEBHOOK_SECRET` | Signature secret of the separate API billing webhook (OD-7) | `whsec_` prefix | `secrets.server.ts` | `app/api/stripe/api-platform-webhook/route.ts` (**new**, API-2S) | API-2S (post-beta) | **No.** Reserved |
 | `API_WEBHOOK_ENCRYPTION_KEY` | AES-256-GCM fallback for webhook signing secrets, **only if managed KMS is unavailable** (OD-12) | base64url, decodes to 32 bytes | `secrets.server.ts` | `lib/apiPlatform/webhookSecrets.ts` (API-5W) | API-5W (post-beta) | **No.** Reserved; not created if KMS is approved |
 
 **Derived subkeys** come from `API_KEY_PEPPER` by HKDF-SHA256 with a fixed purpose label, so no extra stored secret is needed:
@@ -37,7 +37,7 @@ API-1 needs server-only secrets, first `API_KEY_PEPPER` for the key verifier. AP
 | Label | Use |
 |---|---|
 | `cp-api/key-verifier/v1` | Key verifier |
-| `cp-api/list-cursor/v1` | History-cursor HMAC tag (Addendum 1 §3). Cursors are short-lived, so a pepper rotation simply invalidates them |
+| `cp-api/list-cursor/v1` | History-cursor HMAC tag (Addendum 1 §3). Cursors expire after 24 h, and a pepper rotation simply invalidates them |
 
 The input fingerprint (class d) is **not** derived from the pepper. It needs stability across rotations, so it is designed in API-3 with its own versioned key.
 

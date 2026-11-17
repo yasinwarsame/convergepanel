@@ -100,7 +100,7 @@ Example prefix shown in dashboards and logs: `cpk_live_7Hk2mQ9xLp3A`.
 | Scope | Grants | Default |
 |---|---|---|
 | `verifications:write` | create, cancel | ✅ |
-| `verifications:read` | get result, report, compact models | ✅ |
+| `verifications:read` | get result, report, compact models, list history (`GET /v1/verifications`, Addendum 1 §3; scoped by org, app scope and mode) | ✅ |
 | `verifications:delete` | `DELETE /v1/verifications/{id}` (OD-11) | — |
 | `model_responses:read` | full model text with `?include=response_text`; grantable only while org model-response access is enabled (OD-19) | — |
 | `usage:read` | `GET /v1/usage` | — |

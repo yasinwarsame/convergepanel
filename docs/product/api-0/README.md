@@ -5,8 +5,8 @@
 | **Status** | **API-0 design only.** Authorized by owner ruling OD-20 (2026-11-03). Documents only. |
 | **Amended** | [Owner Decision Addendum 1](owner-decision-addendum-1.md) (2026-11-17). |
 | **Not authorized** | API-1 to API-7, except where a separate owner authorization names a stage. No routes, code, credentials, Stripe products, workers, queues, KMS keys, DNS, environment variables or configuration may be created on the strength of these documents. |
-| **Parent document** | [`../api-platform-prd.md`](../api-platform-prd.md) (Rev 3: owner rulings 2026-11-03 + design review fixes) |
-| **Baseline** | `main` at `2f70d1f` |
+| **Parent document** | [`../api-platform-prd.md`](../api-platform-prd.md) (Rev 4: owner rulings 2026-11-03, design review fixes, Addendum 1 of 2026-11-17) |
+| **Baseline** | `main` at `2f70d1f`; Addendum 1 at `cabbdbb` |
 
 Where this set and the PRD disagree, the PRD's §21 rulings win and the disagreement is a defect to fix in this set.
 

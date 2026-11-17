@@ -34,14 +34,16 @@ paths:
       summary: List verifications (authorized history, cursor-paginated)
       description: |
         Added by owner decision D9 (Addendum 1, 2026-11-17). Requires `verifications:read`.
-        Results are always scoped to the authenticated key's organization; an app-scoped key
-        (the default) lists only its own application's verifications, and `application_id`
-        can only narrow that scope, never widen it. Another application's or organization's ID
-        in `application_id` returns an empty list, never 403, so existence cannot be probed.
+        Results are always scoped to the authenticated key's organization AND mode (a test key
+        lists only test verifications, a live key only live ones). An app-scoped key (the
+        default) lists only its own application's verifications, and `application_id` can only
+        narrow that scope, never widen it. A sibling application's, another organization's or a
+        nonexistent ID in `application_id` returns a byte-identical empty list, never 403, so
+        existence cannot be probed.
         Ordered by `created_at` descending, then `id` descending (stable tiebreak). The cursor is
-        opaque, bound to the organization, application scope and filter set that produced it; a
-        cursor presented with a different key scope or different filters returns
-        400 `invalid_cursor`. Items are summaries: no input text, no result sections and no
+        opaque, HMAC-tagged, expires 24 hours after issue, and is bound to the organization,
+        application scope, mode and filter set that produced it; an expired or tampered cursor,
+        or one presented with a different scope, mode or filters, returns 400 `invalid_cursor`. Items are summaries: no input text, no result sections and no
         model text. Deleted verifications are not listed.
       parameters:
         - name: limit
@@ -53,8 +55,8 @@ paths:
           schema: { type: string, maxLength: 512 }
         - name: status
           in: query
-          description: 'Filter by public JobStatus. Open enum.'
-          schema: { type: string }
+          description: 'Filter by a known public JobStatus value. An unknown value returns 400 `invalid_status`.'
+          schema: { type: string, enum: [queued, running, synthesizing, completed, partial, failed, canceled, expired] }
         - name: type
           in: query
           schema: { type: string, enum: [claim, research] }
@@ -104,7 +106,7 @@ paths:
               $ref: '#/components/schemas/CreateVerificationRequest'
       responses:
         '200':
-          description: Synchronous wait succeeded (claims only).
+          description: Synchronous wait succeeded (claims only). Not available in the controlled beta if Addendum 1 proposal P1 is confirmed (the header is ignored and 202 is returned).
           headers:
             RateLimit-Limit: { $ref: '#/components/headers/RateLimitLimit' }
             RateLimit-Remaining: { $ref: '#/components/headers/RateLimitRemaining' }
@@ -243,7 +245,7 @@ paths:
         - name: include
           in: query
           required: false
-          description: Set to `response_text` to request full text (see conditions above).
+          description: Set to `response_text` to request full text (see conditions above). If Addendum 1 proposal P3 is confirmed, the controlled beta returns the `response_text` section as `not_requested`.
           schema:
             type: string
             enum: [response_text]
@@ -362,7 +364,7 @@ components:
       schema: { type: string, pattern: '^req_[A-Za-z0-9]+$' }
   responses:
     BadRequest:
-      description: 'Invalid request: `invalid_json`, `missing_field`, `input_too_long`, `invalid_model`, `invalid_cursor` (Addendum 1 D9: list cursor not valid for this key scope or filter set).'
+      description: 'Invalid request: `invalid_json`, `missing_field`, `input_too_long`, `invalid_model`, `invalid_cursor` (Addendum 1 D9: list cursor expired, tampered with, or not valid for this key scope, mode or filter set), `invalid_status`.'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     Unauthorized:
       description: '`invalid_api_key` for every key failure.'
@@ -386,7 +388,7 @@ components:
       description: '`request_too_large` (body > 64 KB).'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     Unprocessable:
-      description: '`model_unavailable`, `too_few_models`, `model_limit_exceeded`, `type_unavailable`, `synthesis_not_supported`, `synthesis_unavailable` (also returned for every `options.synthesis: true` during the controlled beta, Addendum 1 D4), `fallback_unavailable`, `repeated_failing_input`, `option_unavailable_in_beta` (`retain_input` or `retain_model_responses` requested during the controlled beta, Addendum 1 OQ-4).'
+      description: '`model_unavailable`, `too_few_models`, `model_limit_exceeded`, `type_unavailable`, `synthesis_not_supported`, `synthesis_unavailable` (also returned for every `options.synthesis: true` during the controlled beta, Addendum 1 D4), `fallback_unavailable`, `repeated_failing_input`, `option_unavailable_in_beta` (`retain_input` requested during the controlled beta, Addendum 1 OQ-4; `retain_model_responses` too if proposal P3 is confirmed).'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     TooManyRequests:
       description: '`rate_limited`, `concurrency_limit`.'

@@ -7,7 +7,7 @@
 | 3.2 | 2026-11-03 | **Rev 3.2, owner acceptance.** The owner accepted the PRD and the API-0 package as design artifacts. API-1 is not authorized. Two owner-recorded design dependencies are added in `api-0/dependencies-and-gates.md`. DEP-15: Gemini receives every research question whatever models are selected, so this must be corrected or deliberately constrained before claiming model-selection independence. DEP-16: API-1 secrets need a separately approved configuration design within the Order 6 environment boundary. Gemini routing and `lib/env.ts` are unchanged. |
 | 4 | 2026-11-17 | **Rev 4 — Owner Decision Addendum 1** (`api-0/owner-decision-addendum-1.md`). Records D1–D10 and the OQ-1..OQ-5 dispositions without rewriting OD-1..OD-21; each OD is marked retained, narrowed, superseded or deferred there (§2). D1 keeps OD-2. D2 supersedes the timing in OD-20 and DEP-1. D3 scopes a secret-only Order 6 boundary correction (`api-0/secret-boundary.md`). D4 lean controlled beta: claim + research, polling, history, capped credits, manual invoicing, every financial safeguard kept; no synthesis, webhooks, SDKs or Stripe API plans in the beta. D6 Gemini pipeline processing disclosed, acknowledged per org, fail closed. D9 adds `GET /v1/verifications`. Stage gates amended explicitly (`api-0/dependencies-and-gates.md` §5). CR-1 and CR-2 unchanged |
 | **Author** | Planning workstream (docs-only), 2026-11-03 |
-| **Baseline** | `main` at `2f70d1f` |
+| **Baseline** | `main` at `2f70d1f` (Rev 1–3.2); Rev 4 / Addendum 1 at `cabbdbb` |
 | **Workstream** | Dedicated future roadmap item, stages API-0 to API-7 |
 | **Decision owner** | Product owner (see §21, Owner decisions, ruled 2026-11-03) |
 | **Companion design set** | `docs/product/api-0/` (API-0 contracts, threat model, tenancy, jobs, ledger, pricing, retention, journeys, gates) |
@@ -893,6 +893,7 @@ Every request is pre-authorized. Every org has a hard ceiling. Test mode never c
 - `ledger`: (`createdAt` asc).
 - `webhookDeliveries`: (`status` asc, `nextAttemptAt` asc).
 - `apiAuditEvents`: (`orgId` asc, `createdAt` desc).
+- **Addendum 1 §3 (history list):** `apiOrganizations/{orgId}/verifications` on (`mode` asc, `appId` asc, `createdAt` desc) and (`mode` asc, `createdAt` desc), plus one per supported list filter.
 
 ### 12.3 Retention and deletion
 

@@ -141,6 +141,8 @@ Each obligation becomes a named test in the stage shown and must be proven to fa
 | Stage | Obligations |
 |---|---|
 | API-1 | T-M1..T-M6, T-D1, T-D7 (scopes), T-L1 (rules), T-X1 |
+| API-3 (list, Addendum 1 §3) | **T-X2:** cross-org and sibling-app `application_id` give a byte-identical empty page (same timing class as a nonexistent ID); test keys never list live verifications and live keys never list test ones; cursor tamper, expiry (24 h) and replay under another org, app scope, mode or filter set → `400 invalid_cursor`; summaries contain no input or model text; stable pagination under concurrent creates |
+| API-3 (D6, Addendum 1 §5) | **T-G1:** research create without a current acknowledgement → `403 pipeline_processing_not_acknowledged` with nothing written and no provider call; withdrawal re-checked at every step start (cancel before panel; no further Gemini call after it) |
 | API-2 | T-L2..T-L6 |
 | API-3 | T-D2..T-D6, T-W1..T-W5, T-P2, T-P3, T-P4, T-C1 (web-capacity protection gate); PR A default-hook call-sequence equivalence; PR B web spy equivalence |
 | API-4 | T-D5 (OD-19 matrix), T-P1, CR-1 schema rejection tests, injection corpus |
