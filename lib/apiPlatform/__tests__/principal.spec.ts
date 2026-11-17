@@ -99,7 +99,7 @@ describe("requireApiPrincipal", () => {
     ["app belongs to another org", { app: { orgId: "org_AAAAAAAAAAAAAAAAAAAA" } }, "invalid_api_key"],
     ["org suspended", { org: { status: "suspended" } }, "org_suspended"],
     ["live key, no plan", { org: { apiPlan: null } }, "live_key_requires_plan"],
-    ["live key, inactive plan", { org: { apiPlan: { planId: "beta", status: "inactive" } } }, "live_key_requires_plan"],
+    ["live key, approved plan id but inactive", { org: { apiPlan: { planId: "beta_capped_v1", status: "inactive" } } }, "live_key_requires_plan"],
     ["live key, plan without id", { org: { apiPlan: { planId: "", status: "active" } } }, "live_key_requires_plan"],
     ["live key, plan not in the compile-time list", { org: { apiPlan: { planId: "enterprise_unlimited", status: "active" } } }, "live_key_requires_plan"],
     ["disabled app in a suspended org (401 before any 403)", { app: { status: "disabled" }, org: { status: "suspended" } }, "invalid_api_key"],
