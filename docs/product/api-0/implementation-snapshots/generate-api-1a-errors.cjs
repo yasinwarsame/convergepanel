@@ -10,7 +10,8 @@
  *   node docs/product/api-0/implementation-snapshots/generate-api-1a-errors.cjs <commit> [pr]
  *     > docs/product/api-0/implementation-snapshots/api-1a-errors.json
  *
- * The mirror test inside #327 pins errors.ts to an identical snapshot; this repository's test
+ * The mirror test inside #327 (commit 96db2b6: lib/apiPlatform/__tests__/errorsSnapshot.spec.ts with
+ * fixtures/api-1a-errors.snapshot.json, byte-identical) pins errors.ts to an identical snapshot; this repository's test
  * (docs/__tests__/apiOpenapiRequestContract.spec.ts, "m1") pins the catalog to this snapshot.
  */
 "use strict";

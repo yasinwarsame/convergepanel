@@ -111,6 +111,36 @@ describe("openapi.yaml parses and resolves", () => {
     expect(raw.info.version).toBe("0.4.0-draft");
   });
 
+  it("m6: the exact set of undeclared packages imported anywhere under docs/__tests__ is [\"js-yaml\"] (owner decision pending)", () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+    const declared = new Set([...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.devDependencies ?? {})]);
+    const builtins = new Set(require("module").builtinModules as string[]);
+    const files: string[] = [];
+    const walk = (dir: string): void => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) walk(p);
+        else if (/\.(ts|tsx|js|cjs|mjs)$/.test(e.name)) files.push(p);
+      }
+    };
+    walk(__dirname);
+    expect(files.length).toBeGreaterThanOrEqual(10);
+    const undeclared = new Set<string>();
+    for (const f of files) {
+      const src = fs.readFileSync(f, "utf8");
+      for (const m of src.matchAll(/(?:\bfrom\s+|\brequire\(\s*|\bimport\(\s*|^\s*import\s+)["']([^"']+)["']/gm)) {
+        const spec = m[1];
+        if (spec.startsWith(".") || spec.startsWith("/") || spec.startsWith("@/") || spec.startsWith("node:")) continue;
+        // Only strings shaped like an npm package specifier (prose that says "from 'X, Y'" is not an import).
+        if (!/^(@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*(\/[A-Za-z0-9._/-]*)?$/.test(spec)) continue;
+        const name = spec.startsWith("@") ? spec.split("/").slice(0, 2).join("/") : spec.split("/")[0];
+        if (builtins.has(name) || declared.has(name)) continue;
+        undeclared.add(`${name} (${path.relative(ROOT, f)})`.replace(/ \(.*\)$/, ""));
+      }
+    }
+    expect(Array.from(undeclared).sort()).toEqual(["js-yaml"]);
+  });
+
   it("m6: the spec loads no transitive validator (no Ajv, no ref-parser)", () => {
     const src = fs.readFileSync(__filename, "utf8");
     const banned = ["aj" + "v", "json-schema-" + "ref-parser", "ajv-" + "formats"];
@@ -220,7 +250,7 @@ describe("C-1: CreateVerificationRequest is discriminated on type", () => {
     ["braille pattern blank (accepted edge, error-catalog §4.2)", claim({ claim: "\u2800" })],
     ["context made only of zero-width characters (context may be empty)", research({ ...Q, context: "\u200B\u200B" })],
     ["metadata value made only of zero-width characters", claim(C, { metadata: { ref: "\u200B" } })],
-    ["metadata at the 4000 code-point aggregate", claim(C, { metadata: Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`k${i}`, "v".repeat(i < 7 ? 498 : 500 - 14)])) })],
+    ["metadata at exactly the 4000 code-point aggregate (8 keys × 2 + 8 values × 498)", claim(C, { metadata: Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`k${i}`, "v".repeat(498)])) })],
     ["two models", claim(C, { models: ["chatgpt", "claude"] })],
     ["five models", research(Q, { models: ["chatgpt", "claude", "grok", "perplexity", "gemini"] })],
     ["64-character model ID", claim(C, { models: ["a".repeat(64), "claude"] })],
@@ -284,6 +314,7 @@ describe("C-1: CreateVerificationRequest is discriminated on type", () => {
     ["metadata nested object", claim(C, { metadata: { n: { deep: "v" } } })],
     ["metadata value with C0", claim(C, { metadata: { ref: "a\u0001" } })],
     ["metadata over the 4000 code-point aggregate", claim(C, { metadata: Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`k${i}`, "v".repeat(450)])) })],
+    ["metadata at 4001 code points (one over the aggregate)", claim(C, { metadata: Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`k${i}`, "v".repeat(i === 0 ? 499 : 498)])) })],
     // m4: no visible code point.
     ["claim of ZWSP only", claim({ claim: "\u200B" })],
     ["claim of ZWSP, ZWNJ, ZWJ, WJ, BOM", claim({ claim: "\u200B\u200C\u200D\u2060\uFEFF" })],

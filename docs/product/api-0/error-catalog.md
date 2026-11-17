@@ -124,7 +124,7 @@ Job-level outcomes are not HTTP errors on `GET`: they are `status` plus `failure
 `implementation-snapshots/api-1a-errors.json` is a machine-generated snapshot of `API_ERRORS` in `lib/apiPlatform/errors.ts` at the recorded PR and full commit SHA: `{ source, pr, commit, codes: { <code>: { status, type, message } } }`, codes sorted. It is produced by `implementation-snapshots/generate-api-1a-errors.cjs <commit>`, which reads the real file with `git show`, transpiles it with the declared `typescript` dependency and evaluates it in an isolated context; it is never edited by hand.
 
 - **This repository** (`apiOpenapiRequestContract.spec.ts`): every snapshot code is in §2 with the identical status, `type` and message, and is marked `yes` in the draft-implementation column; every code marked `yes` is in the snapshot.
-- **PR #327** carries the mirror test, which pins `errors.ts` to an identical snapshot. After the restack both copies coexist, so a change on either side fails a test until the other side is updated in the same PR.
+- **PR #327** carries the mirror test at commit `96db2b6` (`lib/apiPlatform/__tests__/errorsSnapshot.spec.ts` with `lib/apiPlatform/__tests__/fixtures/api-1a-errors.snapshot.json`, byte-identical to this repository's snapshot; `errors.ts` is unchanged from `fa9146a`), which pins `errors.ts` to the identical snapshot. #327 is not merged. After the restack both copies coexist, so a change on either side fails a test until the other side is updated in the same PR.
 - Refreshing the snapshot (a new #327 head) is a reviewed change: regenerate, then reconcile §2 in the same commit.
 
 ## 3. Error precedence (normative, C-6)
@@ -161,14 +161,14 @@ A request gets **one** error: the first failing step below. Steps are evaluated 
 | Step | Check | Codes |
 |---|---|---|
 | 0 | Global availability | 503 `api_unavailable`, `maintenance` |
-| 1 | Transport: a `GET` or `DELETE` body is not read; a `cancel` body over the cap → 413 | 413 |
+| 1 | Transport: none of these operations takes a request body (`openapi.yaml` defines none, including `cancel`); a body that is sent is not read, so no 413 or 415 is returned on these routes | — |
 | 2 | Pre-authentication flood limit per source address | 429 `rate_limited` |
 | 3 | Authentication | 401 `invalid_api_key` |
 | 4 | Authenticated request rate, per key then per organization, in the operation's class (§3.4: `read`, `list` or `write`). **Decided before the path ID or any query parameter is examined**, from the caller's own buckets only | 429 `rate_limited` |
 | 5 | Organization and plan state | 403 `org_suspended`, `live_key_requires_plan` |
 | 6 | Scope of the operation | 403 `insufficient_scope` |
 | 7 | Query parameters (list): 400 `invalid_cursor`, `invalid_status`, `invalid_request` | 400 |
-| 8 | Tenant-bound lookup: a malformed, nonexistent or foreign ID → 404 `verification_not_found`; the caller's own deleted verification → 410 `verification_deleted`; `cancel` on a terminal job → 409 `not_cancelable` | 404 / 410 / 409 |
+| 8 | Tenant-bound lookup: a malformed, nonexistent or foreign ID → 404 `verification_not_found`. Then, per operation: **`GET`** `/verifications/{id}`, `/report`, `/models` on the caller's own deleted verification → 410 `verification_deleted`; **`DELETE`** is idempotent: a repeat `DELETE`, including after deletion completed, returns the same `202` deletion (`retention-and-deletion.md` §3.1; `openapi.yaml` defines no 410 for `DELETE`); **`cancel`** on a terminal job → 409 `not_cancelable`, and on the caller's own deleted verification also 409 `not_cancelable` (`openapi.yaml` defines no 410 for `cancel`; a deleted verification is always terminal, `jobs-and-idempotency.md` §3, since `DELETE` cancels a running job first) | 404 / 410 (GET only) / 202 (DELETE) / 409 (cancel) |
 
 **Adjustments, with reasons:**
 - **Transport (step 1) stays first.** It needs only headers and a byte count, rejects an oversized body before it is read in full, and reads no tenant data. Decoding and parsing the body before authentication would enlarge the unauthenticated parsing surface for no gain, so decoding is step 7.
@@ -321,6 +321,8 @@ The create body is a union discriminated on `type` (`openapi.yaml` `CreateVerifi
 C0, DEL and C1 controls and lone surrogates are found at step 7c, before the schema, so the schema's `NoControlCharacters` rule is never the reported cause; it is there so that a client-side validator agrees with the server.
 
 ### 4.5 Idempotency implication
+
+**Defaults are not filled in before hashing** (Addendum 3): a request that omits a member and one that sends its default explicitly (for example no `options` versus `options: { synthesis: false }`) are **different** canonical requests, so the second gets 409 `idempotency_key_reused`. This is fail-safe (never a wrong replay, never a second job); clients should resend the identical body.
 
 The idempotency request hash (`jobs-and-idempotency.md` §5) is computed over the **canonical JSON of the NFC-normalized body** (sorted keys, no insignificant whitespace), only after step 7 passes. Two bodies that differ only in normalization form, member order or insignificant whitespace are the **same** request: the second gets the 202 replay, not 409. Bodies that differ in anything NFC preserves (for example full-width versus ASCII digits, or trailing whitespace inside a string) are **different** requests: the second gets 409 `idempotency_key_reused`. A rejected request stores nothing (unchanged).
 

@@ -661,11 +661,11 @@ components:
         closed (`additionalProperties: false`): an unknown member at any level returns 400
         `unknown_field` with `param` set to its dotted path (e.g. `input.question`).
         Text rules applied by the server BEFORE this schema (`error-catalog.md` §4): NFC
-        normalization of every string; lengths in Unicode code points after NFC; whitespace-only
-        input text is 400 `empty_input`; invalid UTF-8, lone surrogates and C0 controls other than
-        tab, LF and CR are 400 `invalid_encoding`. Addendum 3: input text with no visible code
-        point is 400 `empty_input`; DEL (U+007F) and C1 controls are 400 `invalid_encoding`;
-        `metadata` has an aggregate bound. Schema-keyword-to-code mapping:
+        normalization of every string; lengths in Unicode code points after NFC; input text
+        with no visible code point (only whitespace, zero-width, format, default-ignorable or
+        combining characters; Addendum 3) is 400 `empty_input`; invalid UTF-8, lone surrogates,
+        C0 controls other than tab, LF and CR, DEL (U+007F) and C1 controls (Addendum 3) are
+        400 `invalid_encoding`; `metadata` has an aggregate bound (Addendum 3). Schema-keyword-to-code mapping:
         `error-catalog.md` §4.4. Limits are placeholders.
       type: object
       oneOf:

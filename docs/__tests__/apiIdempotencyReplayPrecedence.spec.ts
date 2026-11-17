@@ -234,6 +234,21 @@ describe("m3: state transitions", () => {
     expect(fmt(send(sys, req(DIFFERENT)))).toBe("409 idempotency_key_reused");
   });
 
+  it.each([
+    ["one millisecond before expiresAt → replay", -1, "202 replay"],
+    ["exactly at expiresAt → expired, new job", 0, "202 new"],
+    ["one millisecond after expiresAt → expired, new job", 1, "202 new"],
+  ])("expiry boundary: %s", (_n, delta, expected) => {
+    const sys = world();
+    const first = send(sys, req(SAME));
+    const rec = sys.store.get<IdemRecord>(scopeOf(sys)) as IdemRecord;
+    sys.dynamic.now = rec.expiresAt + (delta as number);
+    const res = send(sys, req(SAME));
+    expect(fmt(res)).toBe(expected);
+    if (expected === "202 replay") expect(res.body).toEqual(first.body);
+    else expect(res.body?.id).not.toBe(first.body?.id);
+  });
+
   it("a throttled replay writes nothing, and the next window replays the same response", () => {
     const sys = world();
     const first = send(sys, req(SAME));
@@ -366,6 +381,34 @@ describe("m3: concurrency — every interleaving", () => {
     }
   });
 
+  it.each([
+    ["key scope reduction", (s: System) => patchKey(s, "live1", { scopes: ["verifications:read"] }), "403 insufficient_scope"],
+    ["organization suspension", (s: System) => patchOrg(s, { status: "suspended" }), "403 org_suspended"],
+    ["live plan lapsing", (s: System) => patchOrg(s, { livePlanActive: false }), "403 live_key_requires_plan"],
+  ] as Array<[string, (s: System) => void, string]>)("identical requests racing %s (step 8b) → no 202 after it commits", (_n, change, denied) => {
+    // Start from a committed record so both racers would replay; the change may land between
+    // the outside checks (steps 5–6) and T-create. Only the in-transaction re-check stops them.
+    const setup = (): System => {
+      const s = world();
+      expect(send(s, req(SAME)).status).toBe(202);
+      return s;
+    };
+    let raced = 0;
+    for (const o of interleavings(setup, [create("a", req(SAME)), create("b", req(SAME)), event("change", change)])) {
+      const changedAt = o.finishedAt[2];
+      for (const i of [0, 1]) {
+        const r = o.results[i] as ApiResponse;
+        if (o.finishedAt[i] > changedAt) {
+          raced++;
+          expect({ schedule: o.schedule, i, ok: [denied, "409 request_in_progress"].includes(fmt(r)) }).toEqual({ schedule: o.schedule, i, ok: true });
+        } else expect(["202 replay", denied]).toContain(fmt(r));
+      }
+      expect(o.sys.jobs().length).toBe(1);
+      expect(fmt(send(o.sys, req(SAME)))).toBe(denied);
+    }
+    expect(raced).toBeGreaterThan(0);
+  });
+
   it("identical requests racing a model becoming unavailable → at most one job; once accepted, replays survive", () => {
     for (const o of interleavings(world, [create("a", req(SAME)), create("b", req(SAME)), event("model down", (s) => s.dynamic.modelsAvailable.delete("gemini"))])) {
       expect(o.sys.jobs().length).toBeLessThanOrEqual(1);
@@ -408,6 +451,14 @@ describe("m3: negative cases", () => {
     const first = send(sys, req(composed));
     expect(send(sys, req(decomposed))).toEqual({ status: 202, body: first.body, replayed: true });
     expect(fmt(send(sys, req(trailing)))).toBe("409 idempotency_key_reused");
+  });
+
+  it("an omitted default and an explicit default are different requests (fail-safe 409, no second job)", () => {
+    const sys = world();
+    send(sys, req(SAME));
+    expect(fmt(send(sys, req({ ...SAME, options: { synthesis: false } })))).toBe("409 idempotency_key_reused");
+    expect(fmt(send(sys, req({ ...SAME, models: ["chatgpt", "claude", "gemini"] })))).toBe("202 replay"); // identical members replay
+    expect(sys.jobs().length).toBe(1);
   });
 
   it("a different Prefer header is a different request", () => {

@@ -24,6 +24,8 @@ const CATALOG = path.join(ROOT, "docs/product/api-0/error-catalog.md");
 const OPENAPI = path.join(ROOT, "docs/product/api-0/openapi.yaml");
 
 const BODY_LIMIT = 524_288;
+/** The Unicode version error-catalog.md §4.3.1 was computed with. Must equal the doc's statement. */
+const DOCUMENTED_UNICODE = "17.0";
 const LIMITS = { question: 4000, context: 20000, metaKeys: 20, metaKeyLen: 40, metaValueLen: 500, metaTotal: 4000, models: 5, modelLen: 64 };
 
 type Mode = "utf8" | "escape";
@@ -200,27 +202,37 @@ describe("B: the 512 KiB body cap against every legal request encoding", () => {
     expect(worst.utf8.bytesUtf8).toBeGreaterThanOrEqual(12);
   });
 
-  it("error-catalog.md §4.3.1 records exactly the computed numbers and the right verdict", () => {
+  it("the Unicode version the doc declares is pinned in this spec (the gate cannot be dodged by editing the doc)", () => {
+    expect(documentedTiers().unicode).toBe(DOCUMENTED_UNICODE);
+  });
+
+  it("verdict on THIS runtime's own computation: every NFC tier fits, the decomposed+escaped tier T7 exceeds", () => {
+    for (const t of tiers.filter((x) => x.nfc)) expect({ tier: t.id, fits: (bytes.get(t.id) as number) <= BODY_LIMIT }).toEqual({ tier: t.id, fits: true });
+    expect(bytes.get("T5") as number).toBeLessThanOrEqual(BODY_LIMIT);
+    expect(bytes.get("T7") as number).toBeGreaterThan(BODY_LIMIT);
+    expect(documentedTiers().text).toContain("OWNER DECISION REQUIRED");
+  });
+
+  it("error-catalog.md §4.3.1 records exactly the computed numbers (all tiers when the runtime Unicode version matches; NFC tiers always)", () => {
     const doc = documentedTiers();
     expect(Array.from(doc.rows.keys())).toEqual(tiers.map((t) => t.id));
-    const exact = doc.unicode === process.versions.unicode;
+    const exact = process.versions.unicode === DOCUMENTED_UNICODE;
+    if (!exact) {
+      // Visible on every run where the non-NFC figures could not be re-derived exactly.
+      console.warn(`apiRequestBodySizing: runtime Unicode ${process.versions.unicode} != documented ${DOCUMENTED_UNICODE}; ` +
+        "the non-NFC tier figures (T6, T7) were NOT re-derived exactly; only the verdict was checked.");
+    }
     for (const t of tiers) {
+      if (!exact && !t.nfc) continue;
       const b = bytes.get(t.id) as number;
-      const documented = doc.rows.get(t.id) as number;
-      if (exact || t.nfc) expect({ tier: t.id, bytes: documented }).toEqual({ tier: t.id, bytes: b });
-      // Verdict per row: "fits" iff the computed body is within the cap.
+      expect({ tier: t.id, bytes: doc.rows.get(t.id) }).toEqual({ tier: t.id, bytes: b });
       const row = new RegExp(`^\\| ${t.id} \\| .* \\| (fits|exceeds) \\|$`, "m").exec(doc.text)?.[1];
-      if (exact || t.nfc) expect({ tier: t.id, verdict: row }).toEqual({ tier: t.id, verdict: b <= BODY_LIMIT ? "fits" : "exceeds" });
+      expect({ tier: t.id, verdict: row }).toEqual({ tier: t.id, verdict: b <= BODY_LIMIT ? "fits" : "exceeds" });
     }
     if (exact) {
       expect(doc.text).toContain(`U+${worst.escape.cp.toString(16).toUpperCase()}`);
       expect(doc.text).toContain(`${worst.escape.bytesEscape} bytes`);
     }
-    // Every NFC tier fits; the decomposed-and-escaped tier does not, so the owner decision stands.
-    for (const t of tiers.filter((x) => x.nfc)) expect({ tier: t.id, fits: (bytes.get(t.id) as number) <= BODY_LIMIT }).toEqual({ tier: t.id, fits: true });
-    const anyExceeds = tiers.some((t) => (bytes.get(t.id) as number) > BODY_LIMIT);
-    expect(anyExceeds).toBe(true);
-    expect(doc.text).toContain("OWNER DECISION REQUIRED");
   });
 
   it("the body cap is 524,288 bytes everywhere it is stated", () => {
