@@ -53,19 +53,19 @@ const NAME_RE = /^[\p{L}\p{N} ._\-–—()&,'/]{1,80}$/u;
 function audit(
   tx: TransactionLike,
   ctx: StoreContext,
-  type: AuditEventType,
+  eventType: AuditEventType,
   orgId: string,
-  subject: ApiAuditEventRecord["subject"],
+  target: ApiAuditEventRecord["target"],
 ): void {
   const auditId = newAuditId();
   const row: ApiAuditEventRecord = {
     auditId,
-    type,
+    eventType,
     orgId,
     actor: { kind: "user", uid: ctx.actorUid },
-    at: ctx.now,
+    createdAt: ctx.now,
     requestId: ctx.requestId,
-    subject,
+    target,
   };
   tx.create(ctx.db.doc(auditPath(auditId)), row as unknown as Record<string, unknown>);
 }
@@ -79,10 +79,10 @@ export async function createOrganization(ctx: StoreContext, input: { name: strin
   const membershipId = computeApiOrgMembershipId(orgId, ctx.actorUid);
   await ctx.db.runTransaction(async (tx) => {
     tx.create(ctx.db.doc(orgPath(orgId)), {
-      orgId, name: input.name, status: "active", apiPlan: null, createdBy: ctx.actorUid, createdAt: ctx.now,
+      orgId, name: input.name, status: "active", plan: null, createdBy: ctx.actorUid, createdAt: ctx.now,
     });
     tx.create(ctx.db.doc(membershipPath(membershipId)), {
-      membershipId, orgId, uid: ctx.actorUid, role: "owner", status: "active", createdAt: ctx.now,
+      membershipId, orgId, uid: ctx.actorUid, role: "owner", status: "active", addedBy: ctx.actorUid, addedAt: ctx.now, inviteId: null,
     });
     audit(tx, ctx, "org.created", orgId, {});
     audit(tx, ctx, "member.added", orgId, { membershipRole: "owner" });
@@ -160,7 +160,7 @@ export async function createApiKey(ctx: StoreContext, input: KeyInput, peppers: 
     if (app.data()?.status !== "active") return { ok: false, reason: "app_not_active" } as const;
     tx.create(ctx.db.doc(keyPath(k.keyId)), {
       keyId: k.keyId, orgId: input.orgId, appId: input.appId, mode: k.mode, scopes, appScoped: input.appScoped ?? true,
-      verifier: k.verifier, hashVersion: 1, prefix: k.prefix, createdBy: ctx.actorUid, createdAt: ctx.now,
+      hash: k.hash, hashVersion: 1, prefix: k.prefix, createdBy: ctx.actorUid, createdAt: ctx.now,
       expiresAt: input.expiresAt ?? null, revokedAt: null, revokedBy: null, rotatedTo: null,
     });
     audit(tx, ctx, "api_key.created", input.orgId, { appId: input.appId, credentialPrefix: k.prefix });
@@ -225,7 +225,7 @@ export async function rotateApiKey(
     const k = minted.key;
     tx.create(ctx.db.doc(keyPath(k.keyId)), {
       keyId: k.keyId, orgId: input.orgId, appId: d.appId, mode, scopes, appScoped: d.appScoped,
-      verifier: k.verifier, hashVersion: 1, prefix: k.prefix, createdBy: ctx.actorUid, createdAt: ctx.now,
+      hash: k.hash, hashVersion: 1, prefix: k.prefix, createdBy: ctx.actorUid, createdAt: ctx.now,
       // The successor never outlives the original's expiry (a short-lived key stays short-lived).
       expiresAt: typeof d.expiresAt === "number" ? d.expiresAt : null, revokedAt: null, revokedBy: null, rotatedTo: null,
     });

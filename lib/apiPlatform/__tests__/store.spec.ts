@@ -44,10 +44,10 @@ describe("createOrganization", () => {
     const r = await createOrganization(s.ctx(), { name: "Acme" });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(s.db.get(`apiOrganizations/${r.value.orgId}`)).toMatchObject({ status: "active", apiPlan: null, createdBy: "uid_owner" });
+    expect(s.db.get(`apiOrganizations/${r.value.orgId}`)).toMatchObject({ status: "active", plan: null, createdBy: "uid_owner" });
     const mid = computeApiOrgMembershipId(r.value.orgId, "uid_owner");
     expect(s.db.get(`apiOrgMemberships/${mid}`)).toMatchObject({ role: "owner", status: "active", uid: "uid_owner", orgId: r.value.orgId });
-    expect(audits(s.db).map((a) => a.type).sort()).toEqual(["member.added", "org.created"]);
+    expect(audits(s.db).map((a) => a.eventType).sort()).toEqual(["member.added", "org.created"]);
   });
 
   it("atomic: a failing audit write commits nothing", async () => {
@@ -63,7 +63,7 @@ describe("createOrganization", () => {
 });
 
 describe("createApiKey", () => {
-  it("stores only the verifier; audit carries the prefix, never the secret or verifier", async () => {
+  it("stores only the key hash; audit carries the prefix, never the secret or hash", async () => {
     const s = setup();
     const { orgId, appId } = await orgWithApp(s);
     const r = await createApiKey(s.ctx(), { actorRole: "owner", orgId, appId, mode: "test" }, peppers);
@@ -75,9 +75,9 @@ describe("createApiKey", () => {
     const secret = r.value.displaySecret.slice(-43);
     const everything = JSON.stringify([...s.db.docs.values()]);
     expect(everything).not.toContain(secret);
-    const keyAudit = audits(s.db).find((a) => a.type === "api_key.created")!;
-    expect(keyAudit.subject).toEqual({ appId, credentialPrefix: r.value.prefix });
-    expect(JSON.stringify(keyAudit)).not.toContain(String(rec.verifier));
+    const keyAudit = audits(s.db).find((a) => a.eventType === "api_key.created")!;
+    expect(keyAudit.target).toEqual({ appId, credentialPrefix: r.value.prefix });
+    expect(JSON.stringify(keyAudit)).not.toContain(String(rec.hash));
   });
 
   it("cross-org: another org's app is not_found and writes nothing", async () => {
@@ -132,7 +132,7 @@ describe("end to end with the principal guard", () => {
     expect(await revokeApiKey(s.ctx(), { actorRole: "owner", orgId, keyId: k.value.keyId })).toEqual({ ok: true, value: { prefix: k.value.prefix } });
     expect(await requireApiPrincipal(auth(k.value.displaySecret), "verifications:read", s.deps)).toEqual({ ok: false, code: "invalid_api_key" });
     expect(await revokeApiKey(s.ctx(), { actorRole: "owner", orgId, keyId: k.value.keyId })).toEqual({ ok: false, reason: "already_revoked" });
-    expect(audits(s.db).filter((a) => a.type === "api_key.revoked")).toHaveLength(1);
+    expect(audits(s.db).filter((a) => a.eventType === "api_key.revoked")).toHaveLength(1);
   });
 
   it("a live key is refused until the org has an active API plan", async () => {
@@ -176,8 +176,8 @@ describe("end to end with the principal guard", () => {
     } finally {
       now = saved;
     }
-    const rotAudit = audits(s.db).find((a) => a.type === "api_key.rotated")!;
-    expect(rotAudit.subject).toEqual({ appId, credentialPrefix: rot.value.prefix, replacedCredentialPrefix: old.value.prefix });
+    const rotAudit = audits(s.db).find((a) => a.eventType === "api_key.rotated")!;
+    expect(rotAudit.target).toEqual({ appId, credentialPrefix: rot.value.prefix, replacedCredentialPrefix: old.value.prefix });
   });
 
   it("rotation with overlap 0 revokes the old key immediately", async () => {

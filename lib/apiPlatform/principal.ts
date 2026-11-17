@@ -4,12 +4,12 @@
  * it never consults Firebase Auth, custom claims, ADMIN_EMAILS or any administrator tier, and no
  * administrator module is reachable from it (pinned by apiPrincipalBoundary.spec.ts).
  *
- * Order of checks (PRD §7.2): parse → peppers → key lookup → verifier → revoked / expired / mode →
+ * Order of checks (PRD §7.2): parse → peppers → key lookup → hash (+ hashVersion) → revoked / expired / mode →
  * org + app → then the only two 403s that reveal nothing new to the key holder (org_suspended,
  * live_key_requires_plan) → scope. Every key failure is the same `invalid_api_key`.
  * Cookies are ignored entirely.
  */
-import { burnVerification, parseApiKey, verifierMatches, type KeyMode, type PepperSet } from "@/lib/apiPlatform/keys";
+import { burnVerification, keyHashMatches, parseApiKey, type KeyMode, type PepperSet } from "@/lib/apiPlatform/keys";
 import { API_SCOPES, type ApiScope } from "@/lib/apiPlatform/types";
 import type { ApiErrorCode } from "@/lib/apiPlatform/errors";
 import { isApprovedApiPlanId } from "@/lib/apiPlatform/apiPlans";
@@ -42,7 +42,7 @@ const AUTH_RE = /^Bearer (\S+)$/;
 const deny = (code: Extract<PrincipalDecision, { ok: false }>["code"]): PrincipalDecision => ({ ok: false, code });
 
 function orgHasActiveApiPlan(org: Record<string, unknown>): boolean {
-  const plan = org.apiPlan as Record<string, unknown> | null | undefined;
+  const plan = org.plan as Record<string, unknown> | null | undefined;
   return !!plan && typeof plan === "object" && plan.status === "active" && isApprovedApiPlanId(plan.planId);
 }
 
@@ -61,7 +61,8 @@ export async function requireApiPrincipal(headers: Headers, scope: ApiScope, dep
       burnVerification(parsed, peppers);
       return deny("invalid_api_key");
     }
-    if (key.keyId !== parsed.keyId || !verifierMatches(parsed, key.verifier, peppers)) return deny("invalid_api_key");
+    if (key.keyId !== parsed.keyId || !keyHashMatches(parsed, key.hash, peppers)) return deny("invalid_api_key");
+    if (key.hashVersion !== 1) return deny("invalid_api_key"); // unknown hash scheme: never accepted
     if (key.mode !== parsed.mode) return deny("invalid_api_key");
     if (key.revokedAt !== null) return deny("invalid_api_key"); // undefined (malformed) also denies
     const now = deps.now();

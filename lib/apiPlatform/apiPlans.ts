@@ -1,6 +1,6 @@
 /**
  * Compile-time API plan definitions (Addendum 1: OD-1 narrowed; beta plans assigned by reviewed PR).
- * EMPTY until the owner approves the beta plans: an org's `apiPlan.planId` enables live keys ONLY if it is
+ * EMPTY until the owner approves the beta plans: an org's `plan.planId` enables live keys ONLY if it is
  * listed here, so Firestore data alone can never turn on live access.
  */
 export interface ApiPlanDefinition {

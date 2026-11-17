@@ -21,10 +21,10 @@ function fixture(over: { key?: Record<string, unknown>; org?: Record<string, unk
   const appId = newAppId();
   const key: Record<string, unknown> = {
     keyId: m.key.keyId, orgId, appId, mode, scopes: ["verifications:read", "verifications:write", "models:read"],
-    appScoped: true, verifier: m.key.verifier, hashVersion: 1, prefix: m.key.prefix,
+    appScoped: true, hash: m.key.hash, hashVersion: 1, prefix: m.key.prefix,
     expiresAt: null, revokedAt: null, ...over.key,
   };
-  const org: Record<string, unknown> = { orgId, status: "active", apiPlan: { planId: "beta_capped_v1", status: "active" }, ...over.org };
+  const org: Record<string, unknown> = { orgId, status: "active", plan: { planId: "beta_capped_v1", status: "active" }, ...over.org };
   const app: Record<string, unknown> = { appId, orgId, status: "active", ...over.app };
   const calls: string[] = [];
   const deps: PrincipalDeps = {
@@ -90,6 +90,9 @@ describe("requireApiPrincipal", () => {
     ["expiresAt malformed", { key: { expiresAt: "2099" } }, "invalid_api_key"],
     ["record mode differs", { key: { mode: "test" } }, "invalid_api_key"],
     ["record keyId differs", { key: { keyId: "AAAAAAAAAAAA" } }, "invalid_api_key"],
+    ["hashVersion unknown", { key: { hashVersion: 2 } }, "invalid_api_key"],
+    ["hashVersion missing", { key: { hashVersion: undefined } }, "invalid_api_key"],
+    ["hashVersion as string", { key: { hashVersion: "1" } }, "invalid_api_key"],
     ["scopes malformed", { key: { scopes: "verifications:read" } }, "invalid_api_key"],
     ["appScoped malformed", { key: { appScoped: "yes" } }, "invalid_api_key"],
     ["org canceled", { org: { status: "canceled" } }, "invalid_api_key"],
@@ -98,10 +101,10 @@ describe("requireApiPrincipal", () => {
     ["app disabled", { app: { status: "disabled" } }, "invalid_api_key"],
     ["app belongs to another org", { app: { orgId: "org_AAAAAAAAAAAAAAAAAAAA" } }, "invalid_api_key"],
     ["org suspended", { org: { status: "suspended" } }, "org_suspended"],
-    ["live key, no plan", { org: { apiPlan: null } }, "live_key_requires_plan"],
-    ["live key, approved plan id but inactive", { org: { apiPlan: { planId: "beta_capped_v1", status: "inactive" } } }, "live_key_requires_plan"],
-    ["live key, plan without id", { org: { apiPlan: { planId: "", status: "active" } } }, "live_key_requires_plan"],
-    ["live key, plan not in the compile-time list", { org: { apiPlan: { planId: "enterprise_unlimited", status: "active" } } }, "live_key_requires_plan"],
+    ["live key, no plan", { org: { plan: null } }, "live_key_requires_plan"],
+    ["live key, approved plan id but inactive", { org: { plan: { planId: "beta_capped_v1", status: "inactive" } } }, "live_key_requires_plan"],
+    ["live key, plan without id", { org: { plan: { planId: "", status: "active" } } }, "live_key_requires_plan"],
+    ["live key, plan not in the compile-time list", { org: { plan: { planId: "enterprise_unlimited", status: "active" } } }, "live_key_requires_plan"],
     ["disabled app in a suspended org (401 before any 403)", { app: { status: "disabled" }, org: { status: "suspended" } }, "invalid_api_key"],
   ];
   it.each(RECORD_DENIALS)("%s → %s", async (_n, over, code) => {
@@ -110,9 +113,9 @@ describe("requireApiPrincipal", () => {
   });
 
   it("test key does not need a plan; suspension still applies", async () => {
-    const f = fixture({ mode: "test", org: { apiPlan: null } });
+    const f = fixture({ mode: "test", org: { plan: null } });
     expect((await requireApiPrincipal(f.headers(), "verifications:read", f.deps)).ok).toBe(true);
-    const g = fixture({ mode: "test", org: { apiPlan: null, status: "suspended" } });
+    const g = fixture({ mode: "test", org: { plan: null, status: "suspended" } });
     expect(await requireApiPrincipal(g.headers(), "verifications:read", g.deps)).toEqual({ ok: false, code: "org_suspended" });
   });
 
@@ -146,7 +149,7 @@ describe("requireApiPrincipal", () => {
     expect(await requireApiPrincipal(f.headers(), "verifications:read", deps)).toEqual({ ok: false, code: "api_unavailable" });
   });
 
-  it("a stored record whose keyId differs from the presented key is refused even if its verifier matches", async () => {
+  it("a stored record whose keyId differs from the presented key is refused even if its hash matches", async () => {
     const f = fixture();
     const deps = { ...f.deps, getKey: async () => ({ ...f.key, keyId: "AAAAAAAAAAAA" }) };
     expect(await requireApiPrincipal(f.headers(), "verifications:read", deps)).toEqual({ ok: false, code: "invalid_api_key" });
@@ -177,6 +180,15 @@ describe("requireApiPrincipal", () => {
       expect(await hmacs(new Headers({ authorization: `Bearer cpk_live_ZZZZZZZZZZZZ_${"A".repeat(43)}` }), deps)).toBe(2);
       expect(await hmacs(new Headers({ authorization: `Bearer ${f.m.key.prefix}_${"A".repeat(43)}` }), deps)).toBe(2);
     });
+  });
+
+  it("a pre-D-1 record (legacy `verifier` field, no `hash`) or an org with the legacy `apiPlan` field is refused", async () => {
+    const f = fixture();
+    const legacyKey = { ...f.key, verifier: f.key.hash };
+    delete (legacyKey as Record<string, unknown>).hash;
+    expect(await requireApiPrincipal(f.headers(), "verifications:read", { ...f.deps, getKey: async () => legacyKey })).toEqual({ ok: false, code: "invalid_api_key" });
+    const g = fixture({ org: { plan: undefined, apiPlan: { planId: "beta_capped_v1", status: "active" } } });
+    expect(await requireApiPrincipal(g.headers(), "verifications:read", g.deps)).toEqual({ ok: false, code: "live_key_requires_plan" });
   });
 
   it("revocation takes effect on the very next call (no cache)", async () => {

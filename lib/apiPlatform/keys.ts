@@ -2,9 +2,12 @@
  * API key format, minting and verification (PRD §7.2; tenancy-and-auth.md §4).
  *
  * Format: `cpk_{live|test}_{keyId}_{secret}` — keyId is 12 base62 chars (public lookup handle, shown as
- * the prefix), secret is 43 base62 chars (~256 bits). Only a verifier is stored:
- *   verifier = hex(HMAC-SHA256(HKDF(pepper, "cp-api/key-verifier/v1"), "<mode>:<keyId>:<secret>"))
- * Binding mode and keyId into the MAC input means a verifier cannot be replayed across keys or modes.
+ * the prefix), secret is 43 base62 chars (~256 bits). Only the key hash is stored (record fields `hash`,
+ * `hashVersion: 1`; tenancy-and-auth.md §7):
+ *   hash = hex(HMAC-SHA256(HKDF(pepper, "cp-api/key-verifier/v1"), "<mode>:<keyId>:<secret>"))
+ * Binding mode and keyId into the MAC input means a hash cannot be replayed across keys or modes. This differs
+ * from the doc's `HMAC(pepper, secret)`: docs/product/api-0/api-1a-contract-reconciliation.md R-4.
+ * Hashes made under the previous pepper are NOT rewritten on use (reconciliation R-7, owner decision).
  * Peppers are injected (a PepperSet); during a rotation window the previous pepper is also tried, and the
  * work done does not depend on which one matches.
  */
@@ -41,8 +44,8 @@ export function parseApiKey(presented: unknown): ParsedApiKey | null {
 
 export const keyPrefix = (mode: KeyMode, keyId: string) => `cpk_${mode}_${keyId}`;
 
-/** Verifier hex for (mode, keyId, secret) under one pepper. */
-export function computeVerifier(pepper: Buffer, mode: KeyMode, keyId: string, secret: string): string {
+/** Key-hash hex for (mode, keyId, secret) under one pepper (hashVersion 1). */
+export function computeKeyHash(pepper: Buffer, mode: KeyMode, keyId: string, secret: string): string {
   const subkey = deriveSubkey(pepper, SUBKEY_LABELS.keyVerifier);
   return hmacWith(subkey, `${mode}:${keyId}:${secret}`).toString("hex");
 }
@@ -53,7 +56,7 @@ export interface MintedKey {
   readonly keyId: string;
   readonly mode: KeyMode;
   readonly prefix: string;
-  readonly verifier: string;
+  readonly hash: string;
 }
 
 export type MintResult = { ok: true; key: MintedKey } | { ok: false; reason: "peppers_unavailable" };
@@ -69,7 +72,7 @@ export function mintApiKey(mode: KeyMode, peppers: PepperSet = readApiKeyPeppers
       keyId,
       mode,
       prefix: keyPrefix(mode, keyId),
-      verifier: computeVerifier(peppers.current, mode, keyId, secret),
+      hash: computeKeyHash(peppers.current, mode, keyId, secret),
     },
   };
 }
@@ -82,14 +85,14 @@ function equalHex(a: string, b: string): boolean {
 }
 
 /**
- * True iff `parsed` matches `storedVerifier` under the current pepper or (rotation window) the previous one.
+ * True iff `parsed` matches `storedHash` under the current pepper or (rotation window) the previous one.
  * Both candidates are always computed when a previous pepper exists.
  */
-export function verifierMatches(parsed: ParsedApiKey, storedVerifier: unknown, peppers: PepperSet): boolean {
-  if (peppers.status !== "available" || typeof storedVerifier !== "string" || !isKeyId(parsed.keyId)) return false;
-  const cur = equalHex(computeVerifier(peppers.current, parsed.mode, parsed.keyId, parsed.secret), storedVerifier);
+export function keyHashMatches(parsed: ParsedApiKey, storedHash: unknown, peppers: PepperSet): boolean {
+  if (peppers.status !== "available" || typeof storedHash !== "string" || !isKeyId(parsed.keyId)) return false;
+  const cur = equalHex(computeKeyHash(peppers.current, parsed.mode, parsed.keyId, parsed.secret), storedHash);
   const prev = peppers.previous
-    ? equalHex(computeVerifier(peppers.previous, parsed.mode, parsed.keyId, parsed.secret), storedVerifier)
+    ? equalHex(computeKeyHash(peppers.previous, parsed.mode, parsed.keyId, parsed.secret), storedHash)
     : false;
   return cur || prev;
 }
@@ -97,6 +100,6 @@ export function verifierMatches(parsed: ParsedApiKey, storedVerifier: unknown, p
 /** Dummy verification for the "no such key" path, so a missing key costs the same work as a wrong secret. */
 export function burnVerification(parsed: ParsedApiKey, peppers: PepperSet): void {
   if (peppers.status !== "available") return;
-  computeVerifier(peppers.current, parsed.mode, parsed.keyId, parsed.secret);
-  if (peppers.previous) computeVerifier(peppers.previous, parsed.mode, parsed.keyId, parsed.secret);
+  computeKeyHash(peppers.current, parsed.mode, parsed.keyId, parsed.secret);
+  if (peppers.previous) computeKeyHash(peppers.previous, parsed.mode, parsed.keyId, parsed.secret);
 }

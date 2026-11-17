@@ -1,10 +1,10 @@
 import { randomBytes } from "node:crypto";
 import {
   KEY_SECRET_LENGTH,
-  computeVerifier,
+  computeKeyHash,
   mintApiKey,
   parseApiKey,
-  verifierMatches,
+  keyHashMatches,
   type PepperSet,
 } from "@/lib/apiPlatform/keys";
 import { randomBase62 } from "@/lib/apiPlatform/ids";
@@ -12,7 +12,7 @@ import { randomBase62 } from "@/lib/apiPlatform/ids";
 const pep = (prev = false): PepperSet => ({ status: "available", current: randomBytes(32), previous: prev ? randomBytes(32) : null });
 
 describe("key format", () => {
-  it("mints cpk_{mode}_{12}_{43} with a matching prefix and a 64-hex verifier", () => {
+  it("mints cpk_{mode}_{12}_{43} with a matching prefix and a 64-hex hash", () => {
     for (const mode of ["live", "test"] as const) {
       const r = mintApiKey(mode, pep());
       expect(r.ok).toBe(true);
@@ -20,8 +20,8 @@ describe("key format", () => {
       expect(r.key.displaySecret).toMatch(/^cpk_(live|test)_[0-9A-Za-z]{12}_[0-9A-Za-z]{43}$/);
       expect(r.key.displaySecret.startsWith(`${r.key.prefix}_`)).toBe(true);
       expect(r.key.prefix).toBe(`cpk_${mode}_${r.key.keyId}`);
-      expect(r.key.verifier).toMatch(/^[0-9a-f]{64}$/);
-      expect(r.key.verifier).not.toContain(r.key.displaySecret.slice(-KEY_SECRET_LENGTH));
+      expect(r.key.hash).toMatch(/^[0-9a-f]{64}$/);
+      expect(r.key.hash).not.toContain(r.key.displaySecret.slice(-KEY_SECRET_LENGTH));
     }
   });
 
@@ -59,21 +59,21 @@ describe("key format", () => {
   });
 });
 
-describe("verifier", () => {
+describe("key hash", () => {
   it("matches only the exact (mode, keyId, secret) under the stored pepper", () => {
     const p = pep();
     const r = mintApiKey("live", p);
     if (!r.ok || p.status !== "available") throw new Error();
     const parsed = parseApiKey(r.key.displaySecret)!;
-    expect(verifierMatches(parsed, r.key.verifier, p)).toBe(true);
-    expect(verifierMatches({ ...parsed, secret: randomBase62(43) }, r.key.verifier, p)).toBe(false);
-    expect(verifierMatches({ ...parsed, mode: "test" }, r.key.verifier, p)).toBe(false);
-    expect(verifierMatches({ ...parsed, keyId: randomBase62(12) }, r.key.verifier, p)).toBe(false);
-    expect(verifierMatches(parsed, r.key.verifier, pep())).toBe(false); // other pepper
-    expect(verifierMatches(parsed, r.key.verifier.toUpperCase(), p)).toBe(false);
-    expect(verifierMatches(parsed, r.key.verifier.slice(2), p)).toBe(false);
-    expect(verifierMatches(parsed, undefined, p)).toBe(false);
-    expect(verifierMatches(parsed, r.key.verifier, { status: "unavailable", reason: "missing" })).toBe(false);
+    expect(keyHashMatches(parsed, r.key.hash, p)).toBe(true);
+    expect(keyHashMatches({ ...parsed, secret: randomBase62(43) }, r.key.hash, p)).toBe(false);
+    expect(keyHashMatches({ ...parsed, mode: "test" }, r.key.hash, p)).toBe(false);
+    expect(keyHashMatches({ ...parsed, keyId: randomBase62(12) }, r.key.hash, p)).toBe(false);
+    expect(keyHashMatches(parsed, r.key.hash, pep())).toBe(false); // other pepper
+    expect(keyHashMatches(parsed, r.key.hash.toUpperCase(), p)).toBe(false);
+    expect(keyHashMatches(parsed, r.key.hash.slice(2), p)).toBe(false);
+    expect(keyHashMatches(parsed, undefined, p)).toBe(false);
+    expect(keyHashMatches(parsed, r.key.hash, { status: "unavailable", reason: "missing" })).toBe(false);
   });
 
   it("rotation window: a key minted under the previous pepper verifies while previous is configured", () => {
@@ -82,15 +82,15 @@ describe("verifier", () => {
     if (!r.ok) throw new Error();
     const parsed = parseApiKey(r.key.displaySecret)!;
     const rotated: PepperSet = { status: "available", current: randomBytes(32), previous: old };
-    expect(verifierMatches(parsed, r.key.verifier, rotated)).toBe(true);
-    expect(verifierMatches(parsed, r.key.verifier, { ...rotated, previous: null })).toBe(false);
+    expect(keyHashMatches(parsed, r.key.hash, rotated)).toBe(true);
+    expect(keyHashMatches(parsed, r.key.hash, { ...rotated, previous: null })).toBe(false);
   });
 
-  it("verifier is bound to mode and keyId (no cross-key replay)", () => {
+  it("key hash is bound to mode and keyId (no cross-key replay)", () => {
     const p = randomBytes(32);
     const s = randomBase62(43);
-    const a = computeVerifier(p, "live", "AAAAAAAAAAAA", s);
-    expect(computeVerifier(p, "test", "AAAAAAAAAAAA", s)).not.toBe(a);
-    expect(computeVerifier(p, "live", "AAAAAAAAAAAB", s)).not.toBe(a);
+    const a = computeKeyHash(p, "live", "AAAAAAAAAAAA", s);
+    expect(computeKeyHash(p, "test", "AAAAAAAAAAAA", s)).not.toBe(a);
+    expect(computeKeyHash(p, "live", "AAAAAAAAAAAB", s)).not.toBe(a);
   });
 });

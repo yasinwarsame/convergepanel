@@ -28,6 +28,7 @@ export const API_ERRORS = Object.freeze({
   live_key_requires_plan: { status: 403, type: "permission_error", message: "Live keys require an active API plan." },
   insufficient_role: { status: 403, type: "permission_error", message: "Your organization role does not allow this action." },
   fresh_session_required: { status: 403, type: "permission_error", message: "Sign in again to perform this action." },
+  identity_not_verified: { status: 403, type: "permission_error", message: "Verify your email address to perform this action." },
   not_found: { status: 404, type: "not_found", message: "Not found." },
   invalid_request: { status: 400, type: "invalid_request_error", message: "The request is invalid." },
   internal_error: { status: 500, type: "api_error", message: "An internal error occurred." },

@@ -29,7 +29,8 @@ export interface ApiOrganizationRecord {
   readonly orgId: string;
   readonly name: string;
   readonly status: OrgStatus;
-  readonly apiPlan: ApiPlanAssignment | null;
+  /** tenancy-and-auth.md §7 `plan` (the doc gives no shape; {planId,status} is this stage's shape). */
+  readonly plan: ApiPlanAssignment | null;
   readonly createdBy: string;
   readonly createdAt: number;
 }
@@ -51,7 +52,8 @@ export interface ApiKeyRecord {
   readonly scopes: readonly ApiScope[];
   /** true (default): the key reads only its own application's verifications. */
   readonly appScoped: boolean;
-  readonly verifier: string;
+  /** tenancy-and-auth.md §7 `hash`: see keys.ts for the construction (reconciliation R-4). */
+  readonly hash: string;
   readonly hashVersion: 1;
   readonly prefix: string;
   readonly createdBy: string;
@@ -70,7 +72,11 @@ export interface ApiOrgMembershipRecord {
   readonly uid: string;
   readonly role: OrgRole;
   readonly status: "active" | "removed";
-  readonly createdAt: number;
+  /** uid that added the member (the creator, for the founding owner). */
+  readonly addedBy: string;
+  readonly addedAt: number;
+  /** The accepted invite; null for the founding owner (invites arrive in a later stage). */
+  readonly inviteId: string | null;
 }
 
 export type AuditEventType =
@@ -83,13 +89,13 @@ export type AuditEventType =
 
 export interface ApiAuditEventRecord {
   readonly auditId: string;
-  readonly type: AuditEventType;
+  readonly eventType: AuditEventType;
   readonly orgId: string;
   readonly actor: { readonly kind: "user"; readonly uid: string } | { readonly kind: "system" };
-  readonly at: number;
+  readonly createdAt: number;
   readonly requestId: string;
-  /** Identifiers only. Never secrets, verifiers or input text. */
-  readonly subject: {
+  /** Identifiers only. Never secrets, key hashes or input text. */
+  readonly target: {
     readonly appId?: string;
     readonly credentialPrefix?: string;
     readonly replacedCredentialPrefix?: string;
