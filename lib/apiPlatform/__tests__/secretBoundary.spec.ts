@@ -69,17 +69,53 @@ describe("server-only guard and importer allow-list", () => {
     expect(first).toBe('import "server-only";');
   });
 
-  const IMPORT_RE = /from\s+["'](?:@\/|(?:\.\.?\/)+)(?:lib\/)?apiPlatform\/secrets(?:\.server)?["']|require\(\s*["'][^"']*apiPlatform\/secrets(?:\.server)?["']\s*\)|import\(\s*["'][^"']*apiPlatform\/secrets(?:\.server)?["']\s*\)/;
+  /** Every module specifier in a file: static import/export-from, side-effect import, require(), import(), any quote style. */
+  const SPECIFIER_RES = [
+    /\b(?:import|export)\b[^;]*?\bfrom\s*["'`]([^"'`]+)["'`]/g,
+    /\bimport\s*["'`]([^"'`]+)["'`]/g,
+    /\brequire\s*\(\s*["'`]([^"'`]+)["'`]\s*\)/g,
+    /\bimport\s*\(\s*["'`]([^"'`]+)["'`]\s*\)/g,
+  ];
+  const TARGETS = new Set(["lib/apiPlatform/secrets.server", "lib/apiPlatform/secrets"]);
 
-  it("positive control: the import pattern matches the forms it must catch", () => {
-    expect(IMPORT_RE.test('import { x } from "@/lib/apiPlatform/secrets.server";')).toBe(true);
-    expect(IMPORT_RE.test("import { x } from '../apiPlatform/secrets.server';")).toBe(true);
-    expect(IMPORT_RE.test('const s = require("../../lib/apiPlatform/secrets.server")')).toBe(true);
-    expect(IMPORT_RE.test('await import("@/lib/apiPlatform/secrets")')).toBe(true);
+  function resolveSpecifier(fromFile: string, spec: string): string | null {
+    let rel: string;
+    if (spec.startsWith("@/")) rel = spec.slice(2);
+    else if (spec.startsWith(".")) rel = path.posix.normalize(path.posix.join(path.posix.dirname(fromFile), spec));
+    else return null; // bare package
+    return rel.replace(/\.(ts|tsx|js|jsx|mjs|cjs)$/, "").replace(/\/index$/, "");
+  }
+
+  function importsSecrets(fromFile: string, src: string): boolean {
+    for (const re of SPECIFIER_RES) {
+      for (const m of src.matchAll(re)) {
+        const r = resolveSpecifier(fromFile, m[1]);
+        if (r !== null && TARGETS.has(r)) return true;
+      }
+    }
+    return false;
+  }
+
+  it("positive control: the resolver catches every import form, from anywhere", () => {
+    const cases: [string, string][] = [
+      ["app/x/route.ts", 'import { x } from "@/lib/apiPlatform/secrets.server";'],
+      ["lib/billing/a.ts", "import { x } from '../apiPlatform/secrets.server';"],
+      ["lib/apiPlatform/keys.ts", 'import { x } from "./secrets.server";'],
+      ["lib/apiPlatform/index.ts", 'export * from "./secrets.server";'],
+      ["lib/apiPlatform/sub/deep.ts", 'export { readApiKeyPeppers } from "../secrets.server";'],
+      ["lib/apiPlatform/t.ts", 'import type { PepperSet } from "./secrets.server";'],
+      ["lib/apiPlatform/s.ts", 'import "./secrets.server";'],
+      ["components/C.tsx", 'const s = require("../lib/apiPlatform/secrets.server")'],
+      ["lib/apiPlatform/d.ts", "const s = await import(`./secrets.server`);"],
+      ["lib/apiPlatform/e.ts", 'import { x } from "./secrets.server.ts";'],
+    ];
+    for (const [file, src] of cases) expect([file, importsSecrets(file, src)]).toEqual([file, true]);
+    expect(importsSecrets("lib/apiPlatform/k.ts", 'import { x } from "./secretsOther";')).toBe(false);
+    expect(importsSecrets("lib/other/k.ts", 'import { x } from "./secrets.server";')).toBe(false);
   });
 
   it("only allow-listed non-test files import the module", () => {
-    const importers = FILES.filter((f) => f !== MODULE && IMPORT_RE.test(read(f)));
+    const importers = FILES.filter((f) => f !== MODULE && importsSecrets(f, read(f)));
     expect(importers.sort()).toEqual([...IMPORTER_ALLOW_LIST].sort());
   });
 
@@ -132,6 +168,12 @@ describe("readApiKeyPeppers (fail closed)", () => {
     const r = readApiKeyPeppers(env as NodeJS.ProcessEnv);
     expect(r).toEqual({ status: "unavailable", reason });
     expect(JSON.stringify(r)).not.toContain(cur);
+  });
+
+  it.each(["", "   "])("an empty previous pepper (%j) is ignored, not an outage", (prev) => {
+    const r = readApiKeyPeppers({ API_KEY_PEPPER: cur, API_KEY_PEPPER_PREVIOUS: prev } as NodeJS.ProcessEnv);
+    expect(r.status).toBe("available");
+    if (r.status === "available") expect(r.previous).toBeNull();
   });
 
   it("valid current, no previous → decoded Buffer, previous null", () => {
