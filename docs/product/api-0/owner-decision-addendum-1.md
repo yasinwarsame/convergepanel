@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Design amendment. It records owner rulings D1–D10 and the OQ-1..OQ-5 dispositions of 2026-11-17. **It authorizes no implementation stage by itself.** Each stage still needs its own authorization and release (OD-20, retained). |
-| **Authority** | Product owner, "OWNER AUTHORIZATION — ENTERPRISE API V1 ACCELERATION AND FOUNDATION", 2026-11-17 |
+| **Authority** | Product owner, "OWNER AUTHORIZATION — ENTERPRISE API V1 ACCELERATION AND FOUNDATION", 2026-11-17 (D1–D10, OQ-1..OQ-5). Product owner, "OWNER DECISION — ENTERPRISE API PHASE 1 RELEASE GATES", 2026-11-17, later the same day (§1.1: P1–P4, the secret-boundary design and the infrastructure rulings) |
 | **Amends** | `../api-platform-prd.md` (Rev 3.2 → Rev 4), `dependencies-and-gates.md`, `openapi.yaml` (0.1.0-draft → 0.2.0-draft), `README.md` |
 | **Does not rewrite** | OD-1..OD-21 (PRD §21) stay as ruled on 2026-11-03. This addendum states, for each one, whether it is **retained**, **narrowed**, **superseded** or **deferred**, and wins only where it says so. |
 | **Baseline** | `main` at `cabbdbb` |
@@ -31,6 +31,23 @@ Owner adjustments that bind every stage:
 3. **Gemini processing is a data-handling decision, not a footnote.** It is never shared silently (§5).
 4. **Stage-gate changes are explicit.** The lean beta changes the API-0 sequence (Stripe before jobs; webhooks and SDKs before the pilot). Those changes are new owner decisions, recorded in §2 and in `dependencies-and-gates.md` §5. They are not done by quietly skipping old gates.
 
+### 1.1 Owner rulings of 2026-11-17 (Phase 1 release-gates decision)
+
+The first revision of this addendum carried P1–P4 (§4.1) as **engineering proposals**. They were not part of D1–D10. The owner confirmed them in a later decision on the same day, with the conditions below. This section records that decision. It does not change when or by whom the proposals were made.
+
+| # | Ruling | Conditions |
+|---|---|---|
+| P1 | **Confirmed:** no synchronous wait in the controlled beta | Every create returns `202 Accepted`. Polling is the primary completion mechanism. |
+| P2 | **Confirmed:** no provider fallback in the controlled beta | No silent substitution. An unavailable provider produces an accurate partial or failed result, with correct usage, cost and credit settlement (`ledger-and-billing.md`). |
+| P3 | **Confirmed for the controlled beta only:** no full model response text | Compact machine-readable results stay available: verdicts, ratings, evidence summaries and the CR-1 methodology and limitations. OD-19 stays available as a later, separately approved opt-in. |
+| P4 | **Confirmed for the controlled beta only:** single-owner API organizations | The multi-member architecture (roles, `apiOrgMemberships`, capabilities) is kept. Invitations and additional member privileges are not activated. The sole owner gets no permission beyond the owner role. |
+| SB | **Approved:** `lib/apiPlatform/secrets.server.ts` as the scoped API secret boundary (`secret-boundary.md`); `lib/env.ts` unchanged and every Order 6 pinned invariant preserved | `server-only`; lazy reads; no build-time evaluation; explicit importer and secret-name allow-lists; purpose-separated derived keys; fail-closed validation and rotation; no logging of secret or credential material. The exception to the `lib/env.ts` convention is narrow, documented and independently tested. Approval of the design **does not** authorize creating or provisioning any secret. |
+| Q | **Vercel Queues approved for an isolated feasibility evaluation only**, not as the final Production transport | The evaluation must show at-least-once execution, durable recovery, independent worker idempotency and replacement dispatch with safe message identifiers. A job must not stay stuck because a duplicate dispatch was suppressed (`jobs-and-idempotency.md` §2 step 4). **Resolved before API-3.** |
+| R | **Upstash is the preferred Redis candidate only** | Evaluate fail-closed limiter behaviour, capacity, cost, region, observability and SOC 2 evidence. **No Prod Pack purchase** without explicit budget and compliance approval. Provisioning needs its own approval. |
+| S | **Scheduling uses verifiable workload authentication** | No unauthenticated sweeper route. `CRON_SECRET`, or a managed queue/scheduler identity, is resolved as a separate authenticated scheduler boundary **before API-3** (`secret-boundary.md` §2). |
+| I | **Disposable infrastructure: plans only** | Exact resource, isolation, cost and cleanup plans may be prepared. Creating any cloud resource needs explicit provisioning approval. |
+| PV | **Provider findings need confirmation** | Reports that a model is retired, or that a provider tier applies, are findings to confirm against official provider sources and current contract terms. The Gemini project's paid-service classification is confirmed before enterprise customer content is used. External customer traffic is not approved on estimated provider costs alone: actual rate limits, negotiated costs and measured retry behaviour are required. Legal and provider-terms review stays an external-beta gate (B-6, B-7). |
+
 ## 2. Reconciliation of OD-1..OD-21
 
 | OD | 2026-11-03 ruling (short) | Status after Addendum 1 | What changes |
@@ -53,7 +70,7 @@ Owner adjustments that bind every stage:
 | OD-16 | MCP post-launch | **Retained** | None. |
 | OD-17 | Secret scanning before GA | **Retained** | Registration for `cpk_` before Production v1. |
 | OD-18 | Sentry + structured logging first | **Retained** | None. |
-| OD-19 | Full model responses opt-in, default off | **Retained** (beta narrowing is **proposal P3**, §4.1, awaiting confirmation) | If P3 is confirmed, full model text is unavailable in the beta (`retain_model_responses: true` → `422 option_unavailable_in_beta`; `include=response_text` → `section.availability: not_requested`). |
+| OD-19 | Full model responses opt-in, default off | **Retained** (beta narrowing by **P3**, owner-confirmed for the beta only, §1.1) | Full model text is unavailable in the beta (`retain_model_responses: true` → `422 option_unavailable_in_beta`; `include=response_text` → `section.availability: not_requested`). |
 | OD-20 | API-0 may begin; implementation later, each stage separately authorized | **Timing superseded (D2); authorization rule retained** | API-1 no longer waits for the governance queue. Every stage still needs its own authorization, review and protected release. |
 | OD-21 | Compile-time switches; runtime config only after an Order 6 boundary change | **Retained, narrowed by D3 / OQ-1** | Only a **secret-only** boundary correction is in scope (`secret-boundary.md`). Switches, limits, the rate card and beta plans stay compile-time modules. |
 
@@ -84,21 +101,21 @@ CR-1 (model consensus is not factual verification) and CR-2 (API usage must not 
 | Idempotency, rate limits, concurrency limits, request IDs, error envelope | **Yes** | — | — |
 | Reservation, settlement, release, internal cost ledger, hard cap, platform spend ceiling, failed-job thresholds, reconciliation | **Yes, mandatory** | `402` / `403` / `503` per PRD §9.5 | Manual invoices are generated **from the ledger** |
 | Sandbox (test keys, fixture results, $0 provider spend) | **Yes** | — | — |
-| Sync wait (`Prefer: wait=60`) | No (**proposal P1**, §4.1) | Header ignored; normal `202` | Documented as unavailable |
+| Sync wait (`Prefer: wait=60`) | No (**P1**, owner-confirmed, §1.1) | Header ignored; normal `202` | Documented as unavailable |
 | Synthesis (`options.synthesis`) | No | `422 synthesis_unavailable` | Documented as unavailable |
-| Provider fallback (`options.allow_fallback`) | No (**proposal P2**, §4.1) | `422 fallback_unavailable` | No fallback provider receives beta content |
+| Provider fallback (`options.allow_fallback`) | No (**P2**, owner-confirmed, §1.1) | `422 fallback_unavailable` | No fallback provider receives beta content |
 | `retain_input` | No (OQ-4) | `422 option_unavailable_in_beta` | Inputs always deleted at the terminal state |
-| Full model text (`retain_model_responses`, `include=response_text`) | No (**proposal P3**, §4.1) | `422 option_unavailable_in_beta` / section `not_requested` | Compact results only |
+| Full model text (`retain_model_responses`, `include=response_text`) | No (**P3**, owner-confirmed, §1.1) | `422 option_unavailable_in_beta` / section `not_requested` | Compact results only |
 | Outbound webhooks | No | Not offered; no endpoint configuration | Polling documented as the integration method |
 | SDKs | No | — | OpenAPI + curl/TS/Python HTTP examples only |
 | Stripe API subscriptions, self-serve signup | No | Orgs approved manually; live keys only for approved orgs | Manual invoicing terms in the beta agreement |
 | Video, BYOK, MCP, batch, multi-step automation | No | `400 invalid_request_error` (unknown `type`/field) | Out of scope |
-| Org invites beyond a single owner | No (**proposal P4**, §4.1) | Management UI does not offer invites | Added before Production v1 |
+| Org invites beyond a single owner | No (**P4**, owner-confirmed, §1.1) | Management UI does not offer invites | Added before Production v1 |
 | SLA | No | — | Beta agreement states no SLA |
 
-### 4.1 Engineering proposals awaiting owner confirmation
+### 4.1 Beta exclusions P1–P4 (proposed by engineering; owner-confirmed in §1.1)
 
-D4 names exactly what the beta excludes: synthesis, video, BYOK, MCP and broad automation. OQ-4 adds `retain_input`. The four exclusions below go further. They are **engineering proposals, not owner rulings**. Each stays in effect for design purposes only until the owner confirms or rejects it. If one is rejected, its capability returns to the beta scope with its original API-0 controls.
+D4 names exactly what the beta excludes: synthesis, video, BYOK, MCP and broad automation. OQ-4 adds `retain_input`. The four exclusions below went further. They were raised as **engineering proposals, not owner rulings**, in the first revision of this addendum. The owner confirmed all four in the release-gates decision (§1.1), with the conditions recorded there. The rationale below is the original engineering rationale.
 
 | # | Proposal | Rationale |
 |---|---|---|
@@ -118,7 +135,7 @@ D4 names exactly what the beta excludes: synthesis, video, BYOK, MCP and broad a
 3. **Fail closed.** A research create from an org without a current acknowledgement returns `403 pipeline_processing_not_acknowledged` before any write or provider call. The acknowledgement is **re-checked at every worker step start**, with the same semantics as the hard-state checks (`ledger-and-billing.md` §4). Withdrawing it stops new creates at once. A job that has not started its panel step is canceled with a full release. A job past its panel step makes no further Gemini call: it finalizes with the work done, settled, and any remaining auxiliary section is marked `failed` with reason `pipeline_processing_withdrawn`.
 4. **Unavailable processing.** If Gemini is unavailable or not confirmed under §6 (P-9), research returns `422 type_unavailable` and nothing is sent elsewhere. No alternative pipeline provider is substituted silently.
 5. **Alternative routing** (an auxiliary provider that respects the selection) stays a separately authorized change to the shared web pipeline. Until it ships, the acknowledgement path is the only compliant route for research.
-6. **Fallback providers** (DeepSeek, Claude synthesis): if proposal P2 is confirmed, they are unreachable in the beta (§4), so beta content never reaches a provider that is neither selected nor acknowledged. If P2 is rejected, fallback stays a per-request customer opt-in (`allow_fallback`, never silent), and B-6 then requires confirmed terms for every fallback provider it can reach.
+6. **Fallback providers** (DeepSeek, Claude synthesis): P2 is owner-confirmed (§1.1), so they are unreachable in the beta (§4) and beta content never reaches a provider that is neither selected nor acknowledged. An unavailable selected provider yields an accurate partial or failed result with correct settlement, never a substitute.
 
 ## 6. Controlled beta (pilot) acceptance requirements
 
@@ -131,7 +148,7 @@ These replace the API-6 **entry** criteria for the controlled beta. API-6's 30-d
 | B-3 | Isolated Firebase environment (E1–E7) complete and #321 merged | Owner record; #321 closure |
 | B-4 | Tenant-isolation suite (identity, data, list, cursor, deletion) green against the isolated environment | Test report |
 | B-5 | Ledger acceptance plan passed: reserve/settle/release math, settle ≤ reserve, parallel creates vs hard cap, platform spend ceiling, failed-job thresholds, estimated cost never 0, reconciliation zero drift, invoice export from the ledger | Phase 1D-F plan, results |
-| B-6 | Provider terms confirmed by owner/counsel for every provider that can receive beta content (the selectable `CONNECTOR_MAP` providers and Gemini as pipeline provider, plus any fallback provider reachable under the P2 disposition). An unconfirmed provider is `unavailable` in `/v1/models` | Counsel record |
+| B-6 | Provider terms confirmed by owner/counsel for every provider that can receive beta content (the selectable `CONNECTOR_MAP` providers and Gemini as pipeline provider; P2 is confirmed, so no fallback provider is in scope). An unconfirmed provider is `unavailable` in `/v1/models` | Counsel record |
 | B-7 | Beta agreement, API ToS, DPA, AUP, subprocessor list and retention statement approved, reflecting §4 and §5, **including counsel's decision on maximum class (c) and (d) retention (OQ-3)** | Counsel record |
 | B-8 | D6 acknowledgement implemented and tested; every beta org that runs research has a current acknowledgement | Tests; org records |
 | B-9 | Secret boundary merged by separate decision; real secrets provisioned only for the approved environments | Owner record |
@@ -139,7 +156,7 @@ These replace the API-6 **entry** criteria for the controlled beta. API-6's 30-d
 | B-11 | Provider capacity, contractual permissions and rate limits evaluated (OQ-2), and the shared provider keys shown sufficient or separate credentials approved. Provider concurrency limits measured and `api_share` set (≤ 40 %) from measurements, not assumed (OQ-5). **Also a gate for API-3 live provider execution of any job type** (`dependencies-and-gates.md` §5.2) | Phase 1D-E report + measurements; owner record |
 | B-12 | Runbooks for key compromise, spend-ceiling trip, queue outage, provider outage and org suspension; on-call owner named. **Manual-invoice non-payment path:** with no Stripe in the beta, an unpaid invoice past its due date plus grace leads the owner to set org `status: suspended` through a SYSTEM_ADMIN management action (audited `org.suspended`, reason `manual_invoice_unpaid`). That has the same effect as a Stripe `past_due` suspension (`ledger-and-billing.md` §4): creates `403 org_suspended`, queued jobs canceled with release, reads for 30 days | Runbooks; management action + test |
 | B-13 | Each beta org approved by the owner, with a manual plan assignment PR and a named contact | Approval records |
-| B-14 | Owner disposition recorded for proposals P1–P4 (§4.1); the beta contract, docs and B-6 terms scope match the dispositions | Owner record |
+| B-14 | Owner disposition recorded for P1–P4 (§1.1, **recorded 2026-11-17**); the beta contract, docs and B-6 terms scope match the dispositions | Owner record (§1.1) |
 
 ## 7. Open questions: dispositions (D10)
 

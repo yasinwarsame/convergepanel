@@ -106,7 +106,7 @@ paths:
               $ref: '#/components/schemas/CreateVerificationRequest'
       responses:
         '200':
-          description: Synchronous wait succeeded (claims only). Not available in the controlled beta if Addendum 1 proposal P1 is confirmed (the header is ignored and 202 is returned).
+          description: 'Synchronous wait succeeded (claims only). Not available in the controlled beta (Addendum 1 P1, owner-confirmed): the header is ignored and 202 is returned.'
           headers:
             RateLimit-Limit: { $ref: '#/components/headers/RateLimitLimit' }
             RateLimit-Remaining: { $ref: '#/components/headers/RateLimitRemaining' }
@@ -245,7 +245,7 @@ paths:
         - name: include
           in: query
           required: false
-          description: Set to `response_text` to request full text (see conditions above). If Addendum 1 proposal P3 is confirmed, the controlled beta returns the `response_text` section as `not_requested`.
+          description: Set to `response_text` to request full text (see conditions above). In the controlled beta (Addendum 1 P3, owner-confirmed) the `response_text` section is returned as `not_requested`.
           schema:
             type: string
             enum: [response_text]
@@ -388,7 +388,7 @@ components:
       description: '`request_too_large` (body > 64 KB).'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     Unprocessable:
-      description: '`model_unavailable`, `too_few_models`, `model_limit_exceeded`, `type_unavailable`, `synthesis_not_supported`, `synthesis_unavailable` (also returned for every `options.synthesis: true` during the controlled beta, Addendum 1 D4), `fallback_unavailable`, `repeated_failing_input`, `option_unavailable_in_beta` (`retain_input` requested during the controlled beta, Addendum 1 OQ-4; `retain_model_responses` too if proposal P3 is confirmed).'
+      description: '`model_unavailable`, `too_few_models`, `model_limit_exceeded`, `type_unavailable`, `synthesis_not_supported`, `synthesis_unavailable` (also returned for every `options.synthesis: true` during the controlled beta, Addendum 1 D4), `fallback_unavailable` (also returned for every `options.allow_fallback: true` during the controlled beta, Addendum 1 P2), `repeated_failing_input`, `option_unavailable_in_beta` (`retain_input` requested during the controlled beta, Addendum 1 OQ-4; and `retain_model_responses`, Addendum 1 P3).'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     TooManyRequests:
       description: '`rate_limited`, `concurrency_limit`.'

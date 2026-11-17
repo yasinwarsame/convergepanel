@@ -1,6 +1,6 @@
 # API secret boundary (Addendum 1 D3 / OQ-1 / DEP-2 / DEP-16)
 
-**Status:** design, plus a draft implementation on its own branch (`feat/api-secret-boundary`). No real credential is created, no environment variable is set in any Vercel environment, nothing is deployed, and the branch merges only by a separate owner decision. There is no general relaxation of Order 6.
+**Status:** design **approved by the owner** (Addendum 1 §1.1 SB, 2026-11-17), plus a draft implementation on its own branch (`feat/api-secret-boundary`). No real credential is created, no environment variable is set in any Vercel environment, nothing is deployed, and the branch merges only through its own release gate (exact-head review, CI, fresh approval). Design approval does not authorize creating or provisioning any secret. There is no general relaxation of Order 6.
 
 ## 1. Problem
 
