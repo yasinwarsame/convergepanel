@@ -71,7 +71,19 @@ import { generateVerificationMemo } from "@/lib/verification/generateMemo";
  * and with the seeded shuffle below, under Node 24 (CI) and Node 26: identical digests. Before: ecda4004… (Nairobi,
  * Node 26 only; UTC gave cd20edfd…, the Node 24 CI runner bd731ab0… / 8ed2dc66…).
  */
-const BASELINE_8584211_DIGEST = "70afe439c128eaebcf8cb573b338b05f029bd3ebc2494739d4e3300123f89f68";
+/**
+ * Re-pinned (doc 14 PR-1, claim-verification correctness; owner scope 2026-11-17): 70afe439… → 2961620a…. Research
+ * outputs are byte-identical. Every claim difference was classified by diffing a PARITY_DUMP of this file at origin/main
+ * cabbdbb against PR-1, and each falls in an intended PR-1 change only: (1) the consensus card shows the per-model
+ * verdict counts ("Model verdicts"); (2) a stored High/Medium/Low label over split answers is qualified with the split
+ * (view, clipboard, memo, Team row "(verdicts split)"); (3) the Team row shows "Answers: …" from auditBundle.perModel;
+ * (4) a stored `disputed` over answers none of which supported the claim is stated from the answers (banner, memo
+ * summary, clipboard) instead of "Models disagree" / "Models diverged"; (5) the digest no longer pairs models on the same
+ * side or a row with no usable verdict: of the base's 145 "Conflicting assessments" pairs, 70 same-side and 56
+ * no-usable-side pairs are gone, 19 opposite-side pairs are kept, none added. Stored labels, scores and confidence are
+ * unchanged. Same digest under TZ=UTC, Africa/Nairobi and America/New_York.
+ */
+const BASELINE_8584211_DIGEST = "2961620a82103c2d41aa4a5247fc34cd2c37d82313ddf7eff3c39fa0862299ae";
 const stripCreatedDate = (markup: string) => markup.replace(/(data-testid="team-claim-row-created">)[^<]*(<\/span>)/g, "$1[created]$2");
 
 // Feature detection: the claim presentation module exists only after 8584211.

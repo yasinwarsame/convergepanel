@@ -83,7 +83,7 @@ const UNCHANGED_AT_35933C8: Record<string, string> = {
  */
 const WIDENED_BY_INC1: Record<string, string> = {
   "lib/adaptiveSchema/__tests__/o5p/vocabularyScanner.ts": "37e23190b3585eaa57fa0ddad29c5b6d01d2f76f",
-  "lib/adaptiveSchema/__tests__/o5p/__fixtures__/vocabularyManifest.json": "d74147abf059576c671fdcc115e809917eb4fa06",
+  "lib/adaptiveSchema/__tests__/o5p/__fixtures__/vocabularyManifest.json": "b343d7738c1f93a0b9e4b512e88b5abe283f68e8",
 };
 
 /**
@@ -194,6 +194,12 @@ const WIDENED_BY_INC1: Record<string, string> = {
  *
  * Re-pinned (review of O-2, NIT): dsProvenanceUiBoundaries.spec.ts changed only its Team detail route pin (comment-only
  * route change). c0774a6d0452c69795fd49442091d78f3cb8112d → da95909bcc5ad3c9c477cab8dbabf60e99dd7fd9. Same 32-file pinned set.
+ *
+ * Re-pinned (doc 14 PR-1, claim-verification correctness; owner scope 2026-11-17 authorises the manifest memo pins):
+ *   - vocabularyManifest.json: d74147abf059576c671fdcc115e809917eb4fa06 → b343d7738c1f93a0b9e4b512e88b5abe283f68e8 (3
+ *     claim-memo entries appended: the split-qualified CONSENSUS SCORE literal, its "; verdicts split:" fragment and the
+ *     no-support summary note; the existing CONSENSUS SCORE entry's count 3 → 2 with its rule extended; none removed).
+ * Same 32-file pinned set.
  */
 const READABLE_GATE_OPTION_BY_INC1: Record<string, string> = {
   "components/adaptive/AdaptiveSynthesisReportView.tsx": "bcdf6ba2444c2aa3dc22ae049901cf72e55eb0bc",

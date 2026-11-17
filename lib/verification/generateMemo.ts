@@ -9,6 +9,14 @@
 
 import { formatVerdictLabel } from "./shareText";
 import { RUN_MODEL_FAMILY_NAMES } from "@/lib/panel/runModelIdentity";
+import {
+  claimNoSupportAnswerSentence,
+  countClaimModelVerdicts,
+  formatClaimVerdictCounts,
+  hasSplitVerdicts,
+  isDisputedWithoutSupport,
+  type ClaimModelVerdictCounts,
+} from "@/lib/verification/claimVerdictCounts";
 
 export interface MemoInput {
   type: "claim" | "video" | "research";
@@ -231,8 +239,14 @@ function severityPrefix(sev: string): string {
   return "[i]";
 }
 
-function claimSummarySentence(verdict: string | undefined): string {
+/** Doc 14 W1 — memo note after the no-support sentence (kept here so the vocabulary gate classifies it). */
+export const CLAIM_MEMO_NO_SUPPORT_NOTE = "The recorded verdict label is Disputed; it does not indicate a split between models.";
+
+function claimSummarySentence(verdict: string | undefined, counts: ClaimModelVerdictCounts | null = null): string {
   const v = (verdict ?? "").toLowerCase().replace(/\s+/g, "_");
+  // Doc 14 W1: a stored `disputed` over answers none of which supported the claim is stated from the answers, not as
+  // models diverging (the stored label is still printed under VERDICT).
+  if (isDisputedWithoutSupport(v, counts)) return `${claimNoSupportAnswerSentence(counts)} ${CLAIM_MEMO_NO_SUPPORT_NOTE}`;
   if (v === "confirmed")
     return "The models largely supported the claim, with meaningful alignment on the core statement.";
   if (v === "disputed")
@@ -349,13 +363,17 @@ function generateClaimMemo(input: MemoInput): string {
   lines.push("");
   const coverage = input.claimModelIndependence;
   const noConsensus = coverage === "insufficient" || coverage === "unverified";
+  // The per-model verdict distribution over the rows with a usable verdict (never an aggregate summary).
+  const verdictCounts = countClaimModelVerdicts(rows);
   if (noConsensus) {
     lines.push(`VERDICT: ${verdictHuman} (${coverage === "insufficient" ? CLAIM_MEMO_SINGLE_MODEL_VERDICT_NOTE : CLAIM_MEMO_UNVERIFIED_VERDICT_NOTE})`);
     lines.push(coverage === "insufficient" ? CLAIM_MEMO_NO_CONSENSUS_LINE : CLAIM_MEMO_WITHHELD_CONSENSUS_LINE);
     lines.push(`EVIDENCE QUALITY: ${coverage === "insufficient" ? RESEARCH_MEMO_NO_CROSS_MODEL_EVIDENCE : CLAIM_MEMO_UNVERIFIED_EVIDENCE}`);
   } else {
     lines.push(`VERDICT: ${verdictHuman}`);
-    lines.push(`CONSENSUS SCORE: ${input.consensusScore}/100 (${input.confidenceLabel} confidence)`);
+    // Doc 14: a confidence label over split answers is printed with the split (stored label and score unchanged).
+    const split = hasSplitVerdicts(verdictCounts) ? `; verdicts split: ${formatClaimVerdictCounts(verdictCounts)}` : "";
+    lines.push(`CONSENSUS SCORE: ${input.consensusScore}/100 (${input.confidenceLabel} confidence${split})`);
     lines.push(`EVIDENCE QUALITY: ${input.evidenceQuality}`);
   }
   lines.push("");
@@ -366,8 +384,8 @@ function generateClaimMemo(input: MemoInput): string {
       : coverage === "unverified"
         ? CLAIM_MEMO_UNVERIFIED_SUMMARY
         : slotsOverModels
-          ? `${exec!.answeredSlots} panel slots answered this claim; ${exec!.independentModels} independent executing models wrote those answers. ${claimSummarySentence(input.verdict)}`
-          : `${Math.max(1, n)} AI models evaluated this claim independently. ${claimSummarySentence(input.verdict)}`
+          ? `${exec!.answeredSlots} panel slots answered this claim; ${exec!.independentModels} independent executing models wrote those answers. ${claimSummarySentence(input.verdict, verdictCounts)}`
+          : `${Math.max(1, n)} AI models evaluated this claim independently. ${claimSummarySentence(input.verdict, verdictCounts)}`
   );
   lines.push("");
 

@@ -125,8 +125,11 @@ const SCENARIOS: Array<[string, ClaimVerificationFirestoreDoc, Expect]> = [
 
 const html = (el: ReturnType<typeof createElement>) => renderToStaticMarkup(el).replace(/<!-- -->/g, "").replace(/&#x27;/g, "'");
 
-describe.each(SCENARIOS)("claim surfaces — %s", (_label, stored, expected) => {
+describe.each(SCENARIOS)("claim surfaces — %s", (label, stored, expected) => {
   const payload = mapStoredVerificationToClientPayload(stored, "vcl-1");
+  // Doc 14 PR-1: a stored confidence label over SPLIT answers (supporting vs inaccurate) is shown with the split; the
+  // only split scenario here is the genuine 1A/2I disagreement. Score and label are unchanged.
+  const split = label === "genuine disagreement between independent models" ? "; verdicts split: 1 accurate, 2 inaccurate" : "";
 
   it("server mapper carries the stored independence; the stored score is unchanged", () => {
     expect(payload.modelIndependence).toBe(expected);
@@ -162,7 +165,8 @@ describe.each(SCENARIOS)("claim surfaces — %s", (_label, stored, expected) => 
 
   it("copied verdict", () => {
     const text = buildClaimVerdictClipboardText(payload);
-    if (expected === "independent") expect(text).toContain("Consensus score: 93 (High confidence)");
+    // Doc 14 PR-1: before PR-1 every independent scenario pinned "Consensus score: 93 (High confidence)".
+    if (expected === "independent") expect(text).toContain(`Consensus score: 93 (High confidence${split})`);
     else {
       expect(text).not.toContain("Consensus score: 93");
       expect(text).toContain(`Consensus score: ${expected === "insufficient" ? NO_CONSENSUS : WITHHELD}`);
@@ -186,7 +190,8 @@ describe.each(SCENARIOS)("claim surfaces — %s", (_label, stored, expected) => 
     expect(input.claimModelIndependence).toBe(expected);
     const memo: string = realMemo(input);
     if (expected === "independent") {
-      expect(memo).toContain("CONSENSUS SCORE: 93/100 (High confidence)");
+      // Doc 14 PR-1: before PR-1 every independent scenario pinned "CONSENSUS SCORE: 93/100 (High confidence)".
+      expect(memo).toContain(`CONSENSUS SCORE: 93/100 (High confidence${split})`);
     } else {
       expect(memo).not.toContain("CONSENSUS SCORE: 93");
       expect(memo).toContain(expected === "insufficient" ? "CONSENSUS SCORE: none (fewer than two independent models answered" : "CONSENSUS SCORE: withheld (model independence not recorded)");

@@ -24,12 +24,6 @@ export function formatVerdictLabel(verdict: string): string {
   return labels[k] || verdict;
 }
 
-export function buildClaimShareText(claim: string, verdict: string, score: number): string {
-  const truncatedClaim = claim.length > 100 ? claim.substring(0, 97) + "..." : claim;
-  const verdictLabel = formatVerdictLabel(verdict);
-  return `Verified a claim using ConvergePanel:\n\n"${truncatedClaim}"\n\nVerdict: ${verdictLabel} | Consensus: ${score}/100\n5 AI models evaluated independently\n\nconvergepanel.com`;
-}
-
 export function buildVideoShareText(verdict: string, score: number): string {
   const verdictLabels: Record<string, string> = {
     authentic_captured: "Authentic Camera Footage",

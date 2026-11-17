@@ -2074,9 +2074,9 @@
  {
   "file": "lib/verification/generateMemo.ts",
   "literal": "`CONSENSUS SCORE: ${input.consensusScore}/100 (${input.confidenceLabel} confidence)`",
-  "count": 3,
+  "count": 2,
   "category": "historical-or-shared",
-  "rule": "claim / video / original research memos; marked: 'RUN CERTAINTY'"
+  "rule": "claim / video / original research memos; marked: 'RUN CERTAINTY'; doc 14 PR-1: the claim memo's independent branch now uses the `${split}` variant below (video + original research keep this literal)"
  },
  {
   "file": "lib/verification/generateMemo.ts",
@@ -3085,5 +3085,26 @@
   "count": 2,
   "category": "contract-p-applied",
   "rule": "C-a (uniformityBadge, unverified run scope): the diagnostics homogeneity badge in place of 'Unusually uniform agreement' when the run's execution identity is not verified — states responses, never agreement between independent models; unchanged connector literal, newly listed by main's #290 Inc 1 scanner widening (integration)"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "`CONSENSUS SCORE: ${input.consensusScore}/100 (${input.confidenceLabel} confidence${split})`",
+  "count": 1,
+  "category": "shared-claim-video",
+  "rule": "doc 14 PR-1: claim memo, independent branch — the stored score and confidence label as stored; `split` is empty unless the usable per-model verdicts sit on both sides (supporting vs inaccurate), then the split counts follow the label so a High label is never shown bare over split verdicts"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "`; verdicts split: ${formatClaimVerdictCounts(verdictCounts)}`",
+  "count": 1,
+  "category": "shared-claim-video",
+  "rule": "doc 14 PR-1: the per-model verdict counts (usable rows only, never aggregateSummary) appended to the claim memo consensus line only when verdicts are split"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"The recorded verdict label is Disputed; it does not indicate a split between models.\"",
+  "count": 1,
+  "category": "shared-claim-video",
+  "rule": "doc 14 PR-1 (W1): claim memo summary for a stored 'disputed' label over answers none of which supported the claim — states the stored label is not a disagreement (replaces 'Models diverged…' only in that case; a genuine split keeps it)"
  }
 ]

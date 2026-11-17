@@ -42,6 +42,16 @@ import {
 } from "@/lib/verification/claimConsensusPresentation";
 import { claimPresentedIndependence, claimRowsExecutionIdentity } from "@/lib/panel/storedVerificationIndependence";
 import {
+  CLAIM_NO_SUPPORT_BANNER_SUBTITLE,
+  claimNoSupportAnswerSentence,
+  claimNoSupportStatement,
+  claimPayloadVerdictCounts,
+  claimSplitVerdictsQualifier,
+  formatClaimVerdictCounts,
+  hasSplitVerdicts,
+  isDisputedWithoutSupport,
+} from "@/lib/verification/claimVerdictCounts";
+import {
   independentModelsAmong,
   rendersAsIndependent,
   runSlotStatement,
@@ -251,14 +261,23 @@ export function buildClaimVerdictClipboardText(data: ClaimVerificationClientPayl
   const lines: string[] = [];
   lines.push(`ConvergePanel — Claim result`);
   lines.push(`Claim: ${data.claim}`);
-  lines.push(`Aggregate verdict: ${data.verdict}`);
+  // Doc 14 W1: the stored label is copied as stored; over answers none of which supported the claim it is followed by
+  // the distribution, so a bare "disputed" is never read as disagreement between models.
+  const counts = claimPayloadVerdictCounts(data);
+  lines.push(
+    isDisputedWithoutSupport(data.verdict, counts)
+      ? `Aggregate verdict: ${data.verdict} (${claimNoSupportAnswerSentence(counts)})`
+      : `Aggregate verdict: ${data.verdict}`
+  );
   // A multi-model consensus score only with >= 2 independent executing models (claimConsensusPresentation), confirmed
   // by the shared gate over the payload's rows (C-b CB-08).
   const { independence } = claimViewIndependence(data);
   const consensus = claimConsensusDisplay(data.consensusScore, independence);
   const qualifier = claimVerdictQualifier(independence);
   if (consensus.kind === "score") {
-    lines.push(`Consensus score: ${consensus.score} (${data.confidenceLabel} confidence)`);
+    // A confidence label over split answers is copied with the split (doc 14 D-3/D-4 presentation; stored label kept).
+    const split = hasSplitVerdicts(counts) ? `; ${claimSplitVerdictsQualifier(counts)}` : "";
+    lines.push(`Consensus score: ${consensus.score} (${data.confidenceLabel} confidence${split})`);
   } else {
     lines.push(`Verdict basis: ${qualifier}`);
     lines.push(`Consensus score: ${consensus.text}`);
@@ -391,6 +410,8 @@ export default function ClaimVerificationResultView({
   const view = useMemo(() => claimViewIndependence(data), [data]);
   const independence = view.independence;
   const consensus = claimConsensusDisplay(data.consensusScore, independence);
+  // The per-model verdict distribution (answers with a usable verdict), from the recorded audit bundle (doc 14 W1).
+  const verdictCounts = useMemo(() => claimPayloadVerdictCounts(data), [data]);
 
   const banner = useMemo((): {
     className: string;
@@ -435,13 +456,27 @@ export default function ClaimVerificationResultView({
           title: `This claim is supported by ${a}/${u} models`,
           subtitle: "Majority agreement: accurate",
         };
-      case "disputed":
+      case "disputed": {
+        // Doc 14 W1: `disputed` is also what the stored vocabulary records when NO model supported the claim
+        // (claimVerdict.ts fall-through). That is not a disagreement: state the independent models' answers instead.
+        if (isDisputedWithoutSupport(data.verdict, verdictCounts)) {
+          const usable = data.modelEvidence.filter((m) => m.status === "ok");
+          const inaccurate = independentModelsAmong(view.identity, usable.filter((m) => m.verdict === "inaccurate").map((m) => m.modelId));
+          const unverifiable = independentModelsAmong(view.identity, usable.filter((m) => m.verdict === "unverifiable").map((m) => m.modelId));
+          return {
+            className: "bg-rose-50 border-rose-200 text-rose-900",
+            icon: AGGREGATE_VERDICT_ICONS.disputed,
+            title: claimNoSupportStatement({ inaccurate, unverifiable, total: u, unit: (n) => `model${n === 1 ? "" : "s"}` }),
+            subtitle: CLAIM_NO_SUPPORT_BANNER_SUBTITLE,
+          };
+        }
         return {
           className: "bg-rose-50 border-rose-200 text-rose-900",
           icon: AGGREGATE_VERDICT_ICONS.disputed,
           title: "Models disagree on this claim",
           subtitle: "Review per-model evidence below",
         };
+      }
       case "partially_true":
         return {
           className: "bg-amber-50 border-amber-200 text-amber-900",
@@ -458,7 +493,7 @@ export default function ClaimVerificationResultView({
           subtitle: "Insufficient agreement or too many unknowns",
         };
     }
-  }, [data, independence, view]);
+  }, [data, independence, view, verdictCounts]);
 
   return (
     <div className="rounded-2xl border border-cp-border bg-cp-surface text-cp-text shadow-sm overflow-hidden">
@@ -501,8 +536,20 @@ export default function ClaimVerificationResultView({
             </div>
             <div>
               <p className="text-lg font-semibold text-cp-accent">{data.confidenceLabel}</p>
-              <p className="text-xs text-cp-faint">Confidence</p>
+              <p className="text-xs text-cp-faint">
+                Confidence
+                {/* Doc 14: the stored label is shown as stored, never over split answers without the split. */}
+                {hasSplitVerdicts(verdictCounts) ? (
+                  <span data-testid="claim-confidence-split"> ({claimSplitVerdictsQualifier(verdictCounts)})</span>
+                ) : null}
+              </p>
             </div>
+            {verdictCounts !== null && verdictCounts.usable > 0 && (
+              <div data-testid="claim-verdict-counts">
+                <p className="text-lg font-semibold text-cp-text">{formatClaimVerdictCounts(verdictCounts)}</p>
+                <p className="text-xs text-cp-faint">{slotCountsAreModelCounts(view) ? "Model verdicts" : "Panel slot verdicts"}</p>
+              </div>
+            )}
             {data.evidenceQuality && (
               <div>
                 <p className="text-lg font-semibold text-cp-text capitalize">{data.evidenceQuality}</p>

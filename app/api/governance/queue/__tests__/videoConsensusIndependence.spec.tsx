@@ -222,18 +222,39 @@ describe("NIT n1: never '1/1 models say …'", () => {
 
 describe("NIT n2: same-executing-model digest pair in a run with ≥ 2 independent models", () => {
   it("DeepSeek×2 + Grok: the chatgpt-vs-claude conflict is qualified (same executing model), never a genuine disagreement", async () => {
+    // Doc 14 PR-1 (D-5): the pair is on OPPOSITE sides (accurate vs inaccurate) so the digest still reports it and this
+    // test keeps exercising the same-executing-model qualification. Before PR-1 both rows were "accurate"; two models
+    // on the same side are no longer a conflict (asserted in the next test).
     verRows = [
       ver("n2", [
         vrow("chatgpt", "ok", "accurate", { ...DS, incorrectParts: [LONG_A] }),
-        vrow("claude", "ok", "accurate", { ...DS, incorrectParts: [LONG_B] }),
+        vrow("claude", "ok", "inaccurate", { ...DS, incorrectParts: [LONG_B] }),
         // C-b (CB-01): the own-provider row records its provider, so the shared gate verifies the record.
         vrow("grok", "ok", "accurate", { provider: "xai" }),
       ]),
     ];
     const r = (await rows())["n2"];
     expect(r.modelIndependence).toBeUndefined();
-    expect(r.qualifiedDisagreements).toEqual([{ text: "Conflicting assessments: (chatgpt) vs (claude)", basis: "same_executing_model" }]);
+    // With the pair on opposite sides the existing verdict-dissent qualification of one executing model also applies
+    // (as in verificationAgreementWording.spec.tsx "two responses from the same DeepSeek fallback").
+    expect(r.qualifiedDisagreements).toEqual([
+      { text: "DeepSeek (substituting ChatGPT, Claude) rated as accurate; inaccurate — repeated outputs from one executing model", basis: "same_executing_model" },
+      { text: "Conflicting assessments: (chatgpt) vs (claude)", basis: "same_executing_model" },
+    ]);
     // Phase 0 (L15, O14 = A): the 35933c8 digest lines stay in the DTO; the qualification is additive.
     expect(r.disagreements).toEqual(["Conflicting assessments: (chatgpt) vs (claude)"]);
+  });
+
+  it("doc 14 PR-1 (D-5): the same DeepSeek pair on the SAME side (both accurate) is no conflict at all", async () => {
+    verRows = [
+      ver("n2s", [
+        vrow("chatgpt", "ok", "accurate", { ...DS, incorrectParts: [LONG_A] }),
+        vrow("claude", "ok", "accurate", { ...DS, incorrectParts: [LONG_B] }),
+        vrow("grok", "ok", "accurate", { provider: "xai" }),
+      ]),
+    ];
+    const r = (await rows())["n2s"];
+    expect(r.qualifiedDisagreements).toBeUndefined();
+    expect("disagreements" in r).toBe(false);
   });
 });

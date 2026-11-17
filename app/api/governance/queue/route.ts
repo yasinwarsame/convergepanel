@@ -392,6 +392,8 @@ function verificationDisagreementBullets(data: Record<string, unknown>): string[
         modelId: String(o.modelId ?? ""),
         correctParts: Array.isArray(o.correctParts) ? (o.correctParts as string[]) : [],
         incorrectParts: Array.isArray(o.incorrectParts) ? (o.incorrectParts as string[]) : [],
+        // The row's side of the claim (doc 14 D-5): same-side models are never a conflict; non-"ok" rows have none.
+        verdict: String(o.status ?? "") === "ok" && typeof o.verdict === "string" ? o.verdict : undefined,
       };
     })
     .filter((x) => x.modelId);
@@ -653,6 +655,8 @@ function verificationDisagreementDigest(data: Record<string, unknown>): Array<{ 
         modelId: String(o.modelId ?? ""),
         correctParts: Array.isArray(o.correctParts) ? (o.correctParts as string[]) : [],
         incorrectParts: Array.isArray(o.incorrectParts) ? (o.incorrectParts as string[]) : [],
+        // The row's side of the claim (doc 14 D-5): same-side models are never a conflict; non-"ok" rows have none.
+        verdict: String(o.status ?? "") === "ok" && typeof o.verdict === "string" ? o.verdict : undefined,
       };
     })
     .filter((x) => x.modelId);

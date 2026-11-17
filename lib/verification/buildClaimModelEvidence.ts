@@ -52,6 +52,12 @@ function ownProviderAttribution(r: ModelResult): { provider?: string } {
   return { provider };
 }
 
+/** Stored summary of a `parse_error` row whose JSON parsed but carried no verdict field. */
+export const MISSING_VERDICT_SUMMARY = "Model response had no verdict; not counted as a judgement.";
+/** Stored summary of a `parse_error` row whose verdict is outside the prompt's vocabulary. */
+export const UNRECOGNIZED_VERDICT_SUMMARY = "Model response had an unrecognized verdict; not counted as a judgement.";
+export const MALFORMED_VERDICT_PART = "Malformed response: no recognized verdict";
+
 export function buildClaimModelEvidence(modelResults: ModelResult[]): StoredVerificationModelSummary[] {
   return modelResults.map((r) => {
     if (!isConnectorSuccess(r)) {
@@ -104,6 +110,25 @@ export function buildClaimModelEvidence(modelResults: ModelResult[]): StoredVeri
           unverifiableParts: ["Non-JSON or malformed response"],
         };
       }
+    }
+    if (d.verdict === null) {
+      // D-1 (doc 14): JSON that parses but carries no recognised verdict is malformed model output, not a model's
+      // judgement that the claim is "unverifiable". It is the existing `parse_error` row (every consumer already
+      // excludes it from usable verdicts); no new status value, and no raw model text is stored.
+      logger.warn(`[verify-claim] Model response has no recognised verdict for ${modelId}`, { reason: d.verdictIssue });
+      return {
+        modelId,
+        status: "parse_error" as const,
+        verdict: "parse_error",
+        confidence: "low",
+        summary:
+          d.verdictIssue === "missing_verdict"
+            ? MISSING_VERDICT_SUMMARY
+            : UNRECOGNIZED_VERDICT_SUMMARY,
+        correctParts: [],
+        incorrectParts: [],
+        unverifiableParts: [MALFORMED_VERDICT_PART],
+      };
     }
     return {
       modelId,

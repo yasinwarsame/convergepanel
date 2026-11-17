@@ -45,6 +45,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { parseClaimModelVerdictCounts, type ClaimModelVerdictCounts } from "@/lib/verification/claimVerdictCounts";
 import type { User } from "firebase/auth";
 import { useAuth } from "@/components/AuthProvider";
 import { authedFetch } from "@/lib/client/authedFetch";
@@ -60,11 +61,15 @@ export interface TeamClaimListItem {
   confidenceLabel: "High" | "Medium" | "Low";
   evidenceQuality: "strong" | "mixed" | "weak";
   governanceStatus?: "approved" | "needs_review" | "blocked";
+  /** Doc 14 (PR-1), additive: usable per-model verdict counts. Absent from older servers (and uncountable bundles). */
+  modelVerdicts?: TeamClaimModelVerdicts;
   createdAt: string;
   workspaceId: string;
   projectId: string | null;
   project: { id: string; name: string; status: string } | null;
 }
+
+export type TeamClaimModelVerdicts = ClaimModelVerdictCounts;
 
 export type TeamClaimVerdict = "confirmed" | "disputed" | "partially_true" | "unverifiable";
 
@@ -149,6 +154,9 @@ function parseItem(raw: unknown, address: TeamClaimListAddress): TeamClaimListIt
   if (typeof raw.evidenceQuality !== "string" || !EVIDENCE.has(raw.evidenceQuality)) return null;
   if (raw.governanceStatus !== undefined && (typeof raw.governanceStatus !== "string" || !GOVERNANCE.has(raw.governanceStatus))) return null;
   if (!nonEmptyString(raw.createdAt) || Number.isNaN(Date.parse(raw.createdAt))) return null;
+  const modelVerdicts = raw.modelVerdicts === undefined ? undefined : parseClaimModelVerdictCounts(raw.modelVerdicts);
+  // Strict when present (exact five counts, usable = their sum); absent is accepted — older servers never send it.
+  if (modelVerdicts === null) return null;
 
   // Workspace containment: the row's own binding must name the addressed Workspace.
   if (raw.workspaceId !== address.workspaceId) return null;
@@ -187,6 +195,7 @@ function parseItem(raw: unknown, address: TeamClaimListAddress): TeamClaimListIt
     confidenceLabel: raw.confidenceLabel as TeamClaimListItem["confidenceLabel"],
     evidenceQuality: raw.evidenceQuality as TeamClaimListItem["evidenceQuality"],
     ...(raw.governanceStatus !== undefined ? { governanceStatus: raw.governanceStatus as TeamClaimListItem["governanceStatus"] } : {}),
+    ...(modelVerdicts !== undefined ? { modelVerdicts } : {}),
     createdAt: raw.createdAt,
     workspaceId: raw.workspaceId,
     projectId: projectId as string | null,
