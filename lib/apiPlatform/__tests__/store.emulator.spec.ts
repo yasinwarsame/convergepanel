@@ -194,14 +194,31 @@ maybe("REAL Firestore (emulator): API-1a store, principal and management", () =>
       const ops = Array.from({ length: 10 }, (_, i) => (i % 2 === 0
         ? rotateApiKey(ctx(), { actorRole: "owner", orgId, keyId: k.keyId, overlapSeconds: 3600 }, peppers)
         : revokeApiKey(ctx(), { actorRole: "owner", orgId, keyId: k.keyId })));
-      await Promise.allSettled(ops);
+      const settled = await Promise.allSettled(ops);
       const rec = (await read(`apiKeys/${k.keyId}`))!;
       const rotated = await audits("api_key.rotated");
       const revoked = await audits("api_key.revoked");
       expect(rotated.length).toBe(rec.rotatedTo === null ? 0 : 1);
       // overlap 3600: a rotation never sets revokedAt, so revokedAt is set iff exactly one revoke committed.
       expect(revoked.length).toBe(rec.revokedAt === null ? 0 : 1);
-      expect(rotated.length + revoked.length).toBeGreaterThanOrEqual(1);
+      // Every committed outcome is reported to exactly one caller, and every refusal has the expected reason.
+      const results = settled.map((s, i) => [i % 2 === 0 ? "rotate" : "revoke", s] as const);
+      const okCount = (kind: string) => results.filter(([k2, s]) => k2 === kind && s.status === "fulfilled" && s.value.ok).length;
+      expect(okCount("rotate")).toBe(rotated.length);
+      expect(okCount("revoke")).toBe(revoked.length);
+      for (const [kind, s] of results) {
+        if (s.status !== "fulfilled" || s.value.ok) continue;
+        const reason = (s.value as { reason: string }).reason;
+        expect([kind, reason]).toEqual([kind, kind === "rotate" ? expect.stringMatching(/^already_(rotated|revoked)$/) : "already_revoked"]);
+      }
+      // A revoke can only be refused because another revoke won (rotation never revokes at overlap 3600), so if
+      // any revoke call settled at all, exactly one revoke committed.
+      if (results.some(([kind, s]) => kind === "revoke" && s.status === "fulfilled")) expect(revoked.length).toBe(1);
+      // If a rotation committed, its successor exists, is live, and the audit row names the replaced key.
+      if (rec.rotatedTo !== null) {
+        expect(await read(`apiKeys/${String(rec.rotatedTo)}`)).toMatchObject({ revokedAt: null, rotatedTo: null, orgId, appId });
+        expect(rotated[0].target).toMatchObject({ replacedCredentialPrefix: k.prefix });
+      }
       expect((await admin.collection("apiKeys").get()).size).toBe(1 + rotated.length);
     }, 120_000);
 
@@ -224,6 +241,45 @@ maybe("REAL Firestore (emulator): API-1a store, principal and management", () =>
       expect(keys).toBe(r.ok ? 1 : 0);
       expect(await audits("api_key.created")).toHaveLength(keys);
       if (!r.ok) expect(r.reason).toBe("org_not_active");
+    }, 60_000);
+  });
+
+  describe("R-7: authentication is READ-ONLY against real Firestore", () => {
+    async function snapshotAll() {
+      const out: string[] = [];
+      for (const col of await admin.listCollections()) {
+        for (const d of (await col.get()).docs) out.push(`${d.ref.path}@${d.updateTime.toMillis()}.${d.updateTime.nanoseconds}=${JSON.stringify(d.data())}`);
+      }
+      return out.sort();
+    }
+
+    it("success, revoked, rotated (in and after overlap), wrong secret, unknown key and previous-pepper window: no document created or changed", async () => {
+      const { orgId, appId } = await orgWithApp();
+      const live = await testKey(orgId, appId);
+      const revoked = await testKey(orgId, appId);
+      const rotated = await testKey(orgId, appId);
+      await revokeApiKey(ctx(), { actorRole: "owner", orgId, keyId: revoked.keyId });
+      const succ = await rotateApiKey(ctx(), { actorRole: "owner", orgId, keyId: rotated.keyId, overlapSeconds: 60 }, peppers);
+      if (!succ.ok) throw new Error();
+      const before = await snapshotAll();
+      expect(before.length).toBeGreaterThanOrEqual(10);
+      const window: PepperSet = { status: "available", current: randomBytes(32), previous: (peppers as { current: Buffer }).current };
+      const windowDeps: PrincipalDeps = { ...deps(), peppers: () => window };
+      const closedDeps: PrincipalDeps = { ...deps(), peppers: () => ({ status: "available", current: (window as { current: Buffer }).current, previous: null }) };
+      const outcomes: string[] = [];
+      for (const [secret, d] of [
+        [live.displaySecret, deps()], [revoked.displaySecret, deps()], [rotated.displaySecret, deps()], [rotated.displaySecret, deps(NOW + 60_000)],
+        [succ.value.displaySecret, deps()], [`${live.prefix}_${"A".repeat(43)}`, deps()], [`cpk_test_ZZZZZZZZZZZZ_${"A".repeat(43)}`, deps()],
+        [live.displaySecret, windowDeps], [live.displaySecret, windowDeps], [live.displaySecret, closedDeps],
+      ] as [string, PrincipalDeps][]) {
+        const r = await requireApiPrincipal(auth(secret), "verifications:read", d);
+        outcomes.push(r.ok ? "ok" : r.code);
+      }
+      expect(outcomes).toEqual(["ok", "invalid_api_key", "ok", "invalid_api_key", "ok", "invalid_api_key", "invalid_api_key", "ok", "ok", "invalid_api_key"]);
+      expect(await snapshotAll()).toEqual(before);
+      // positive control: the snapshot sees a single field write (updateTime + data change)
+      await admin.doc(`apiKeys/${live.keyId}`).update({ revokedBy: "control" });
+      expect(await snapshotAll()).not.toEqual(before);
     }, 60_000);
   });
 

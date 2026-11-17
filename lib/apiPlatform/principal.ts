@@ -8,6 +8,10 @@
  * org + app → then the only two 403s that reveal nothing new to the key holder (org_suspended,
  * live_key_requires_plan) → scope. Every key failure is the same `invalid_api_key`.
  * Cookies are ignored entirely.
+ *
+ * READ-ONLY (owner ruling R-7): authentication performs no write of any kind. `PrincipalDeps` exposes only
+ * readers, records are read through own-field copies and never modified, and a key hashed under the previous
+ * pepper is NOT rehashed on use. Pinned by lib/apiPlatform/__tests__/principalReadOnly.spec.ts.
  */
 import { burnVerification, keyHashMatches, parseApiKey, type KeyMode, type PepperSet } from "@/lib/apiPlatform/keys";
 import { API_SCOPES, type ApiScope } from "@/lib/apiPlatform/types";
@@ -41,9 +45,18 @@ export interface PrincipalDeps {
 const AUTH_RE = /^Bearer (\S+)$/;
 const deny = (code: Extract<PrincipalDecision, { ok: false }>["code"]): PrincipalDecision => ({ ok: false, code });
 
+/**
+ * A null-prototype copy of a stored record's OWN enumerable fields (null for a non-object). Every check below
+ * reads the copy, so an inherited property (Object.prototype pollution, a class instance, a crafted
+ * prototype) can never satisfy one. Reading only: the stored record is never modified.
+ */
+function ownRecord(r: unknown): Record<string, unknown> | null {
+  return typeof r === "object" && r !== null && !Array.isArray(r) ? Object.assign(Object.create(null) as Record<string, unknown>, r) : null;
+}
+
 function orgHasActiveApiPlan(org: Record<string, unknown>): boolean {
-  const plan = org.plan as Record<string, unknown> | null | undefined;
-  return !!plan && typeof plan === "object" && plan.status === "active" && isApprovedApiPlanId(plan.planId);
+  const plan = ownRecord(org.plan);
+  return !!plan && plan.status === "active" && isApprovedApiPlanId(plan.planId);
 }
 
 export async function requireApiPrincipal(headers: Headers, scope: ApiScope, deps: PrincipalDeps): Promise<PrincipalDecision> {
@@ -56,7 +69,7 @@ export async function requireApiPrincipal(headers: Headers, scope: ApiScope, dep
     const peppers = deps.peppers();
     if (peppers.status !== "available") return deny("api_unavailable");
 
-    const key = await deps.getKey(parsed.keyId);
+    const key = ownRecord(await deps.getKey(parsed.keyId));
     if (!key) {
       burnVerification(parsed, peppers);
       return deny("invalid_api_key");
@@ -70,7 +83,7 @@ export async function requireApiPrincipal(headers: Headers, scope: ApiScope, dep
     if (typeof key.orgId !== "string" || typeof key.appId !== "string") return deny("invalid_api_key");
     if (typeof key.appScoped !== "boolean" || !Array.isArray(key.scopes)) return deny("invalid_api_key");
 
-    const [org, app] = await Promise.all([deps.getOrg(key.orgId), deps.getApp(key.appId)]);
+    const [org, app] = (await Promise.all([deps.getOrg(key.orgId), deps.getApp(key.appId)])).map(ownRecord);
     if (!org || org.orgId !== key.orgId) return deny("invalid_api_key");
     if (!app || app.appId !== key.appId || app.orgId !== key.orgId || app.status !== "active") return deny("invalid_api_key");
     if (org.status === "suspended") return deny("org_suspended");

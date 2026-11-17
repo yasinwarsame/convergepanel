@@ -197,4 +197,47 @@ describe("requireApiPrincipal", () => {
     f.key.revokedAt = NOW;
     expect(await requireApiPrincipal(f.headers(), "verifications:read", f.deps)).toEqual({ ok: false, code: "invalid_api_key" });
   });
+  describe("own fields only: an inherited property never satisfies a check", () => {
+    const inherit = (base: Record<string, unknown>, field: string) => {
+      const { [field]: v, ...own } = base;
+      return Object.assign(Object.create({ [field]: v }), own) as Record<string, unknown>;
+    };
+    it.each([
+      ["key.revokedAt", "key", "revokedAt", "invalid_api_key"],
+      ["key.expiresAt", "key", "expiresAt", "invalid_api_key"],
+      ["key.hashVersion", "key", "hashVersion", "invalid_api_key"],
+      ["key.hash", "key", "hash", "invalid_api_key"],
+      ["key.keyId", "key", "keyId", "invalid_api_key"],
+      ["key.scopes", "key", "scopes", "invalid_api_key"],
+      ["org.status", "org", "status", "invalid_api_key"],
+      ["org.orgId", "org", "orgId", "invalid_api_key"],
+      ["org.plan", "org", "plan", "live_key_requires_plan"],
+      ["app.status", "app", "status", "invalid_api_key"],
+      ["app.orgId", "app", "orgId", "invalid_api_key"],
+    ] as const)("%s inherited → %s", async (_n, which, field, code) => {
+      const f = fixture();
+      const recs = { key: f.key, org: f.org, app: f.app };
+      const deps: PrincipalDeps = {
+        ...f.deps,
+        [which === "key" ? "getKey" : which === "org" ? "getOrg" : "getApp"]: async () => inherit(recs[which], field),
+      };
+      expect(await requireApiPrincipal(f.headers(), "verifications:read", deps)).toEqual({ ok: false, code });
+    });
+    it("inherited plan.status / plan.planId → live_key_requires_plan", async () => {
+      const f = fixture({ org: { plan: Object.create({ planId: "beta_capped_v1", status: "active" }) } });
+      expect(await requireApiPrincipal(f.headers(), "verifications:read", f.deps)).toEqual({ ok: false, code: "live_key_requires_plan" });
+    });
+    it("control: the same records with own fields authenticate", async () => {
+      const f = fixture();
+      const copy = (r: Record<string, unknown>) => Object.assign(Object.create(null), r);
+      const deps: PrincipalDeps = { ...f.deps, getKey: async () => copy(f.key), getOrg: async () => copy(f.org), getApp: async () => copy(f.app) };
+      expect((await requireApiPrincipal(f.headers(), "verifications:read", deps)).ok).toBe(true);
+    });
+    it("a non-object record (string, array) is a missing key, never a crash or success", async () => {
+      const f = fixture();
+      for (const v of ["x", [f.key], 5]) {
+        expect(await requireApiPrincipal(f.headers(), "verifications:read", { ...f.deps, getKey: async () => v as never })).toEqual({ ok: false, code: "invalid_api_key" });
+      }
+    });
+  });
 });
