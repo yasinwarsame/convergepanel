@@ -46,6 +46,9 @@ describe("key format", () => {
     "cpk_live_AAAAAAAAAAAA_" + "a".repeat(42) + "\n",
     "CPK_live_AAAAAAAAAAAA_" + "a".repeat(43),
     "sk_live_AAAAAAAAAAAA_" + "a".repeat(43),
+    "cpk_live_AAAAAAAAAAAA_" + "a".repeat(42) + "-",
+    "cpk_live_AAAAAAAAAAAA_" + "!".repeat(43),
+    "cpk_live_AAAAAAAAAAAA_" + "a".repeat(21) + " " + "a".repeat(21),
   ])("parse rejects %j", (s) => expect(parseApiKey(s)).toBeNull());
 
   it("parse accepts a minted key and returns its parts", () => {

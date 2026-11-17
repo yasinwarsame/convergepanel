@@ -141,6 +141,12 @@ describe("requireApiPrincipal", () => {
     expect(await requireApiPrincipal(f.headers(), "verifications:read", deps)).toEqual({ ok: false, code: "api_unavailable" });
   });
 
+  it("a stored record whose keyId differs from the presented key is refused even if its verifier matches", async () => {
+    const f = fixture();
+    const deps = { ...f.deps, getKey: async () => ({ ...f.key, keyId: "AAAAAAAAAAAA" }) };
+    expect(await requireApiPrincipal(f.headers(), "verifications:read", deps)).toEqual({ ok: false, code: "invalid_api_key" });
+  });
+
   it("revocation takes effect on the very next call (no cache)", async () => {
     const f = fixture();
     expect((await requireApiPrincipal(f.headers(), "verifications:read", f.deps)).ok).toBe(true);

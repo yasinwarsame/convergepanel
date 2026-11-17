@@ -1,3 +1,4 @@
+import { computeMembershipId } from "@/lib/workspaces/membershipId";
 import { authorizeOrgManagement, type ManagementDeps } from "@/lib/apiPlatform/management";
 import { computeApiOrgMembershipId } from "@/lib/apiPlatform/tenantPaths";
 import { newOrgId } from "@/lib/apiPlatform/ids";
@@ -14,6 +15,20 @@ const member = (uid: string, role: string, status = "active") => ({
 });
 const fresh = (uid: string) => ({ uid, authTimeSeconds: NOW - 60 });
 const H = new Headers();
+
+describe("membership ids", () => {
+  it("use their own domain separator, distinct from workspace membership ids, and are pinned", () => {
+    const org = "org_AAAAAAAAAAAAAAAAAAAA";
+    const id = computeApiOrgMembershipId(org, "uid_1");
+    expect(id).toMatch(/^am_[0-9a-f]{64}$/);
+    expect(id.slice(3)).not.toBe(computeMembershipId(org, "uid_1").slice(3));
+    const { createHash } = jest.requireActual("node:crypto") as typeof import("node:crypto");
+    const lp = (v: string) => { const b = Buffer.from(v, "utf8"); const p = Buffer.alloc(4); p.writeUInt32BE(b.length, 0); return Buffer.concat([p, b]); };
+    const expected = createHash("sha256").update(Buffer.concat([Buffer.from("convergepanel.api-org-membership.v1", "utf8"), lp(org), lp("uid_1")])).digest("hex");
+    expect(id).toBe(`am_${expected}`);
+    expect(computeApiOrgMembershipId(org, "uid_12")).not.toBe(computeApiOrgMembershipId(org, "uid_1"));
+  });
+});
 
 describe("authorizeOrgManagement", () => {
   it("allows an owner", async () => {

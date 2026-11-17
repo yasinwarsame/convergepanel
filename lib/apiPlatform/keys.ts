@@ -33,7 +33,7 @@ export type { PepperSet };
 
 /** Strict parse. Anything else (whitespace, other prefixes, wrong lengths) is null. */
 export function parseApiKey(presented: unknown): ParsedApiKey | null {
-  if (typeof presented !== "string" || presented.length !== 4 + 5 + 12 + 1 + KEY_SECRET_LENGTH) return null;
+  if (typeof presented !== "string") return null;
   const m = KEY_RE.exec(presented);
   if (!m) return null;
   return { mode: m[1] as KeyMode, keyId: m[2], secret: m[3] };

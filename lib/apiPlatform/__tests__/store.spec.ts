@@ -185,7 +185,20 @@ describe("end to end with the principal guard", () => {
     if (!old.ok) throw new Error();
     const rot = await rotateApiKey(s.ctx(), { orgId, keyId: old.value.keyId, overlapSeconds: 0 }, peppers);
     if (!rot.ok) throw new Error();
+    expect(s.db.get(`apiKeys/${old.value.keyId}`)).toMatchObject({ revokedAt: now, revokedBy: "uid_owner", rotatedTo: rot.value.keyId });
     expect(await requireApiPrincipal(auth(old.value.displaySecret), "verifications:read", s.deps)).toEqual({ ok: false, code: "invalid_api_key" });
+  });
+
+  it("rotate/revoke trust the KEY's orgId, not the app's (forged inconsistent record → not_found)", async () => {
+    const s = setup();
+    const a = await orgWithApp(s, "uid_a");
+    const b = await orgWithApp(s, "uid_b");
+    const kb = await createApiKey(s.ctx("uid_b"), { orgId: b.orgId, appId: b.appId, mode: "test" }, peppers);
+    if (!kb.ok) throw new Error();
+    // A corrupted record points B's key at A's app; org A must still not be able to act on it.
+    s.db.docs.set(`apiKeys/${kb.value.keyId}`, { ...s.db.get(`apiKeys/${kb.value.keyId}`)!, appId: a.appId });
+    expect(await rotateApiKey(s.ctx("uid_a"), { orgId: a.orgId, keyId: kb.value.keyId, overlapSeconds: 0 }, peppers)).toEqual({ ok: false, reason: "not_found" });
+    expect(await revokeApiKey(s.ctx("uid_a"), { orgId: a.orgId, keyId: kb.value.keyId })).toEqual({ ok: false, reason: "not_found" });
   });
 
   it.each([-1, 1.5, 30 * 24 * 3600 + 1])("rotation rejects overlap %p", async (overlapSeconds) => {
