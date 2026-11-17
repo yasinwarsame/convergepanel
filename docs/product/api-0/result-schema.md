@@ -30,7 +30,7 @@
 | `mode` | `"live" \| "test"` | `test` results are fixtures (sandbox) |
 | `created_at`, `completed_at` | RFC 3339 | `completed_at` null until terminal |
 | `application_id` | `app_…` | |
-| `metadata` | object ≤ 20 string keys | Customer-supplied, echoed |
+| `metadata` | object ≤ 20 string keys | Customer-supplied, echoed. Key and value rules: `error-catalog.md` §4.3 (Addendum 2) |
 | `input` | `InputSummary` | Length, HMAC fingerprint, `retained` flag. Never the text unless `retain_input` and the result is fetched by an authorized key (§3.2) |
 | `research_schema` | `{ id, family } \| null` | Research only: the executed schema ID and its family (`dedicated` or `claims_matrix`, §4.0). `null` for claims and for research jobs that never executed a schema |
 | `verification_basis` | `VerificationBasis` | CR-1 top-level statement |
@@ -89,6 +89,8 @@ Section<T> = {
 ### 3.2 Input summary (OD-10 class a)
 
 `{ "char_count": 182, "context_char_count": 0, "fingerprint": "hmac256:<hex>", "retained": false }`. The fingerprint is `HMAC-SHA256(org-scoped key, normalized input)`, so it cannot be compared across orgs. It lets a customer prove a re-submission is the same input without ConvergePanel keeping the text.
+
+*Addendum 2 (2026-11-17):* `char_count` and `context_char_count` count Unicode code points of the NFC form, which is also the form the fingerprint is computed over (`error-catalog.md` §4.2). Under the discriminated request (`openapi.yaml` `CreateVerificationRequest`), `char_count` is the length of `input.claim` for a claim and of `input.question` for research; `context_char_count` is always 0 for a claim, which cannot carry `context`.
 
 ### 3.3 Verification basis (CR-1)
 

@@ -63,6 +63,7 @@ Membership is created **only** by accepting an invitation. The flow mirrors the 
 - Routes under `/api/developer/*` (**new**) on the main app domain authenticate **only** with the existing Firebase session through `resolveRequestIdentity()` (`lib/auth/resolveRequestIdentity.ts`: cookie `__session` or bearer ID token, fails closed on mismatch).
 - Any `Authorization: Bearer cpk_…` on a management route is rejected with 401 before identity resolution. A leaked API key can never create keys, webhooks or change settings.
 - **Disabled Firebase accounts** obtain nothing (consistent with `docs/operations/admin-authority-tiers.md`).
+  *Addendum 2:* a disabled account returns `401 session_required`, identical to no session, so the account's existence is not revealed; an unverified email returns `403 identity_not_verified` (reserved for #327). Order of checks: `error-catalog.md` §3.2.
 - **Fresh session** (`auth_time` ≤ 15 min) for: live key creation, webhook create/update, spend-limit change, retention change, enabling model-response access, deletion, member invite, invite acceptance, member role change, ownership transfer, org deletion.
 - Membership is read server-side from `apiOrgMemberships/{membershipId}`, where the ID is a domain-separated, length-prefixed SHA-256 of `(orgId, uid)`, the construction of `lib/workspaces/membershipId.ts` with its own domain separator. Client-supplied org or role values are ignored.
 - The platform admin tiers do not grant org roles. SYSTEM_ADMIN has a separate metadata-only support view (OD-13) and no org membership.

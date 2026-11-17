@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | **API-0 design only.** Authorized by owner ruling OD-20 (2026-11-03). Documents only. |
-| **Amended** | [Owner Decision Addendum 1](owner-decision-addendum-1.md) (2026-11-17). |
+| **Amended** | [Owner Decision Addendum 1](owner-decision-addendum-1.md) (2026-11-17). [Owner Decision Addendum 2](owner-decision-addendum-2.md) (2026-11-17): quality-audit disposition and contract corrections; `openapi.yaml` 0.3.0-draft. |
 | **Not authorized** | API-1 to API-7, except where a separate owner authorization names a stage. No routes, code, credentials, Stripe products, workers, queues, KMS keys, DNS, environment variables or configuration may be created on the strength of these documents. |
 | **Parent document** | [`../api-platform-prd.md`](../api-platform-prd.md) (Rev 4: owner rulings 2026-11-03, design review fixes, Addendum 1 of 2026-11-17) |
 | **Baseline** | `main` at `2f70d1f`; Addendum 1 at `cabbdbb` |
@@ -26,6 +26,8 @@ Where this set and the PRD disagree, the PRD's §21 rulings win, **subject to Ad
 | 10 | [`dependencies-and-gates.md`](dependencies-and-gates.md) | Implementation dependencies, per-stage gates API-1..API-7, web-capacity protection gate, open questions |
 | 11 | [`owner-decision-addendum-1.md`](owner-decision-addendum-1.md) | **2026-11-17 owner rulings D1–D10**, plus the same-day release-gates rulings (§1.1: P1–P4 confirmed, secret-boundary design approved, queue/Redis/scheduler/infrastructure/provider conditions): reconciliation of OD-1..OD-21, lean controlled beta scope, Gemini disclosure and acknowledgement, history endpoint, amended stage gates, infrastructure matrix, implementation sequence. Wins over this set and the PRD where it differs |
 | 12 | [`secret-boundary.md`](secret-boundary.md) | Secret-only Order 6 boundary (D3/OQ-1): server-only secrets module, inventory, readers, rules, tests, rebaseline evidence. Draft implementation on `feat/api-secret-boundary`; merge by separate decision |
+| 13 | [`error-catalog.md`](error-catalog.md) | **Single source** for every API error code (status, type, plane, stage, beta status, message), the normative error precedence for both planes with privacy rules, and the request text and body rules (NFC, code-point lengths, encoding, size, models and metadata limits) |
+| 14 | [`owner-decision-addendum-2.md`](owner-decision-addendum-2.md) | **2026-11-17 owner disposition of the quality audit** (contract preliminary; #325 NO-GO until corrected and re-reviewed; #326 gated; #327 NO-GO; C-5 pending) and the C-1/C-3/C-4/C-6 corrections. Supersedes the earlier CLEAN #325 record. Changes no owner ruling |
 
 ## Fixed positions this set inherits from the PRD
 

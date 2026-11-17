@@ -151,7 +151,7 @@ Every instrumented provider call (PRD §6.5) has a deterministic **call key** `{
 |---|---|
 | Header | `Idempotency-Key`, 1–255 printable ASCII. **Required** for live keys on `POST /v1/verifications`; optional for test keys |
 | Scope | `(orgId, appId, mode, key)`. Two applications, or the test and live mode of one application, may use the same key value independently. Stored at `apiOrganizations/{orgId}/idempotency/{sha256(appId + "\|" + mode + "\|" + key)}` |
-| Request hash | SHA-256 of the canonical JSON of the request body (sorted keys, no insignificant whitespace) plus `type` and the `Prefer` header |
+| Request hash | SHA-256 of the canonical JSON of the request body (sorted keys, no insignificant whitespace) plus `type` and the `Prefer` header. *Addendum 2:* the body is hashed after server-side NFC normalization of every string and only after validation passes, so bodies differing only in normalization form, member order or whitespace replay; any other difference is `409 idempotency_key_reused` (`error-catalog.md` §4.5) |
 | Creation | Inside T-create (§2) with `tx.create()` (the `runSnapshotLocks` pattern in `lib/workspaces/runSnapshotLock.ts`), together with the job (`pending_dispatch`) and the reservation. All three commit together or not at all |
 | TTL | 24 h from creation (Firestore TTL on `expiresAt`) |
 | Same key, same body, record exists | Return the stored original `202` status and body (`id` unchanged) with header `Idempotent-Replayed: true`. No new reservation, job or dispatch. This holds whether the job is still `pending_dispatch` or long terminal |

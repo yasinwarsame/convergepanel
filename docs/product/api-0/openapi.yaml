@@ -1,10 +1,12 @@
 # DRAFT — NOT IMPLEMENTED. API-0 design artifact only (owner ruling OD-20, 2026-11-03).
 # No route, credential, host, queue or billing object described here exists.
 # Source of truth for result semantics: docs/product/api-0/result-schema.md.
+# Source of truth for error codes, request text rules and error precedence:
+# docs/product/api-0/error-catalog.md (Addendum 2). components.x-error-catalog mirrors it (test-pinned).
 openapi: 3.1.0
 info:
   title: ConvergePanel Verification API (DRAFT)
-  version: 0.2.0-draft
+  version: 0.3.0-draft
   summary: Draft contract for claim and research verification. Not implemented.
   description: |
     **Status: DRAFT, NOT IMPLEMENTED.** This document is an API-0 design artifact.
@@ -14,6 +16,12 @@ info:
     provider-reported and are not fetched by ConvergePanel.
 
     First release scope: `type: claim` and `type: research` only.
+
+    0.3.0-draft (Owner Decision Addendum 2, 2026-11-17): the create request is a
+    discriminated union on `type` (`ClaimVerificationRequest` | `ResearchVerificationRequest`);
+    request text rules (NFC, code-point lengths, encoding, body size) and the normative
+    error precedence are in `error-catalog.md` §3 and §4; every error code is listed once in
+    `error-catalog.md` §2 and mirrored in `components.x-error-catalog`.
   license:
     name: Proprietary
     identifier: LicenseRef-Proprietary
@@ -95,6 +103,12 @@ paths:
         (transactional outbox); if it fails, a sweeper re-publishes, so the 202 never depends
         on it. Returns 202 with the job. With `Prefer: wait=60` on a claim, may return 200 with
         the completed result. Requires scope `verifications:write`.
+
+        Addendum 2 (0.3.0-draft): the body is `application/json` in UTF-8, at most 65,536 bytes
+        (64 KiB, placeholder pending owner sizing). The server applies NFC to every string, then
+        checks the text rules and the schema below; errors are evaluated in the normative order of
+        `error-catalog.md` §3. Examples named `invalid_*` are NEGATIVE examples: each carries
+        `x-expected-error` with the status and code the server returns, and must not validate.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/PreferWait'
@@ -104,6 +118,91 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateVerificationRequest'
+            examples:
+              claim_minimal:
+                summary: Claim, plan default panel
+                value:
+                  type: claim
+                  input: { claim: The EU AI Act entered into force in August 2024. }
+              claim_full:
+                summary: Claim with models, beta-compatible options and metadata
+                value:
+                  type: claim
+                  input: { claim: The EU AI Act entered into force in August 2024. }
+                  models: [chatgpt, claude, perplexity]
+                  options: { synthesis: false, allow_fallback: false, retain_input: false, retain_model_responses: false }
+                  metadata: { customer_ref: doc-4471, pipeline.stage: intake }
+              research_minimal:
+                summary: Research question only
+                value:
+                  type: research
+                  input: { question: What are the main evidence-based risks of intermittent fasting for adults over 65? }
+              research_with_context:
+                summary: Research with context and five models
+                value:
+                  type: research
+                  input:
+                    question: What are the main evidence-based risks of intermittent fasting for adults over 65?
+                    context: 'Audience: clinical content reviewers.'
+                  models: [chatgpt, claude, grok, perplexity, gemini]
+                  options: { synthesis: false }
+              invalid_claim_with_question:
+                summary: 'INVALID: a claim carries `question`'
+                x-expected-error: { status: 400, code: unknown_field, param: input.question }
+                value:
+                  type: claim
+                  input: { claim: Water boils at 100 C at sea level., question: Does it? }
+              invalid_claim_with_context:
+                summary: 'INVALID: a claim carries `context`'
+                x-expected-error: { status: 400, code: unknown_field, param: input.context }
+                value:
+                  type: claim
+                  input: { claim: Water boils at 100 C at sea level., context: Physics. }
+              invalid_research_with_claim:
+                summary: 'INVALID: research carries `claim` instead of `question`'
+                x-expected-error: { status: 400, code: unknown_field, param: input.claim }
+                value:
+                  type: research
+                  input: { claim: Water boils at 100 C at sea level. }
+              invalid_research_without_question:
+                summary: 'INVALID: research without `question`'
+                x-expected-error: { status: 400, code: missing_field, param: input.question }
+                value:
+                  type: research
+                  input: { context: Physics. }
+              invalid_claim_whitespace_only:
+                summary: 'INVALID: whitespace-only claim'
+                x-expected-error: { status: 400, code: empty_input, param: input.claim }
+                value:
+                  type: claim
+                  input: { claim: "  \t\n " }
+              invalid_unknown_top_level_field:
+                summary: 'INVALID: unknown top-level field'
+                x-expected-error: { status: 400, code: unknown_field, param: priority }
+                value:
+                  type: claim
+                  input: { claim: Water boils at 100 C at sea level. }
+                  priority: high
+              invalid_unknown_option:
+                summary: 'INVALID: unknown option'
+                x-expected-error: { status: 400, code: unknown_field, param: options.stream }
+                value:
+                  type: claim
+                  input: { claim: Water boils at 100 C at sea level. }
+                  options: { stream: true }
+              invalid_one_model:
+                summary: 'INVALID: one model (minimum is 2)'
+                x-expected-error: { status: 422, code: too_few_models, param: models }
+                value:
+                  type: claim
+                  input: { claim: Water boils at 100 C at sea level. }
+                  models: [claude]
+              invalid_unknown_type:
+                summary: 'INVALID: a type outside the first release (video)'
+                x-expected-error: { status: 400, code: invalid_request, param: type }
+                value:
+                  type: video
+                  input: { claim: Water boils at 100 C at sea level. }
       responses:
         '200':
           description: 'Synchronous wait succeeded (claims only). Not available in the controlled beta (Addendum 1 P1, owner-confirmed): the header is ignored and 202 is returned.'
@@ -140,6 +239,7 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
         '410': { $ref: '#/components/responses/Gone' }
         '413': { $ref: '#/components/responses/TooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
         '422': { $ref: '#/components/responses/Unprocessable' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
         '500': { $ref: '#/components/responses/InternalError' }
@@ -315,6 +415,60 @@ webhooks:
         '2XX':
           description: Any 2xx acknowledges. Other codes and timeouts (10 s) are retried.
 components:
+  x-error-catalog:
+    description: Mirror of error-catalog.md §2 (test-pinned). Keys are error codes.
+    codes:
+      invalid_request: { status: 400, type: invalid_request_error, plane: both, beta: active }
+      invalid_json: { status: 400, type: invalid_request_error, plane: data, beta: active }
+      invalid_encoding: { status: 400, type: invalid_request_error, plane: data, beta: active }
+      missing_field: { status: 400, type: invalid_request_error, plane: data, beta: active }
+      unknown_field: { status: 400, type: invalid_request_error, plane: data, beta: active }
+      empty_input: { status: 400, type: invalid_request_error, plane: data, beta: active }
+      input_too_long: { status: 400, type: invalid_request_error, plane: data, beta: active }
+      invalid_model: { status: 400, type: invalid_request_error, plane: data, beta: active }
+      invalid_cursor: { status: 400, type: invalid_request_error, plane: data, beta: active }
+      invalid_status: { status: 400, type: invalid_request_error, plane: data, beta: active }
+      invalid_api_key: { status: 401, type: authentication_error, plane: data, beta: active }
+      api_key_not_accepted: { status: 401, type: authentication_error, plane: management, beta: active }
+      session_required: { status: 401, type: authentication_error, plane: management, beta: active }
+      quota_exceeded: { status: 402, type: billing_error, plane: data, beta: active }
+      spend_limit_reached: { status: 402, type: billing_error, plane: data, beta: active }
+      payment_required: { status: 402, type: billing_error, plane: data, beta: future }
+      insufficient_scope: { status: 403, type: permission_error, plane: data, beta: active }
+      org_suspended: { status: 403, type: permission_error, plane: data, beta: active }
+      live_key_requires_plan: { status: 403, type: permission_error, plane: data, beta: active }
+      failed_job_threshold_exceeded: { status: 403, type: permission_error, plane: data, beta: active }
+      model_response_access_disabled: { status: 403, type: permission_error, plane: data, beta: future }
+      pipeline_processing_not_acknowledged: { status: 403, type: permission_error, plane: data, beta: active }
+      insufficient_role: { status: 403, type: permission_error, plane: management, beta: active }
+      fresh_session_required: { status: 403, type: permission_error, plane: management, beta: active }
+      identity_not_verified: { status: 403, type: permission_error, plane: management, beta: reserved }
+      verification_not_found: { status: 404, type: not_found, plane: data, beta: active }
+      not_found: { status: 404, type: not_found, plane: management, beta: active }
+      idempotency_key_reused: { status: 409, type: idempotency_error, plane: data, beta: active }
+      request_in_progress: { status: 409, type: idempotency_error, plane: data, beta: active }
+      not_cancelable: { status: 409, type: invalid_request_error, plane: data, beta: active }
+      verification_deleted: { status: 410, type: gone, plane: data, beta: active }
+      request_too_large: { status: 413, type: request_too_large, plane: data, beta: active }
+      unsupported_media_type: { status: 415, type: invalid_request_error, plane: data, beta: active }
+      model_unavailable: { status: 422, type: unprocessable, plane: data, beta: active }
+      too_few_models: { status: 422, type: unprocessable, plane: data, beta: active }
+      model_limit_exceeded: { status: 422, type: unprocessable, plane: data, beta: active }
+      type_unavailable: { status: 422, type: unprocessable, plane: data, beta: active }
+      synthesis_not_supported: { status: 422, type: unprocessable, plane: data, beta: active }
+      synthesis_unavailable: { status: 422, type: unprocessable, plane: data, beta: beta-rejection }
+      fallback_unavailable: { status: 422, type: unprocessable, plane: data, beta: beta-rejection }
+      option_unavailable_in_beta: { status: 422, type: unprocessable, plane: data, beta: beta-rejection }
+      repeated_failing_input: { status: 422, type: unprocessable, plane: data, beta: active }
+      research_schema_unsupported: { status: 422, type: unprocessable, plane: data, beta: proposed }
+      rate_limited: { status: 429, type: rate_limit_error, plane: data, beta: active }
+      concurrency_limit: { status: 429, type: rate_limit_error, plane: data, beta: active }
+      internal_error: { status: 500, type: api_error, plane: both, beta: active }
+      api_unavailable: { status: 503, type: service_unavailable, plane: both, beta: active }
+      queue_unavailable: { status: 503, type: service_unavailable, plane: data, beta: active }
+      capacity_protection: { status: 503, type: service_unavailable, plane: data, beta: active }
+      platform_spend_ceiling: { status: 503, type: service_unavailable, plane: data, beta: active }
+      maintenance: { status: 503, type: service_unavailable, plane: data, beta: active }
   securitySchemes:
     ApiKeyBearer:
       type: http
@@ -364,42 +518,45 @@ components:
       schema: { type: string, pattern: '^req_[A-Za-z0-9]+$' }
   responses:
     BadRequest:
-      description: 'Invalid request: `invalid_json`, `missing_field`, `input_too_long`, `invalid_model`, `invalid_cursor` (Addendum 1 D9: list cursor expired, tampered with, or not valid for this key scope, mode or filter set), `invalid_status`.'
+      description: 'Invalid request: `invalid_json`, `missing_field`, `input_too_long`, `invalid_model`, `invalid_cursor` (Addendum 1 D9: list cursor expired, tampered with, or not valid for this key scope, mode or filter set), `invalid_status`. Addendum 2 adds `invalid_encoding` (invalid UTF-8, a lone surrogate, or a C0 control other than tab, LF and CR), `unknown_field` (any level; `param` is the dotted path), `empty_input` (whitespace-only text) and the generic `invalid_request` (wrong JSON type, value out of range, `type` outside claim/research, metadata rules; always with `param`). Catalog and precedence: error-catalog.md (Addendum 2).'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     Unauthorized:
-      description: '`invalid_api_key` for every key failure.'
+      description: '`invalid_api_key` for every key failure. The management-plane 401 codes (`api_key_not_accepted`, `session_required`) are not part of this API. Catalog and precedence: error-catalog.md (Addendum 2).'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     PaymentRequired:
-      description: '`quota_exceeded`, `spend_limit_reached`, `payment_required`.'
+      description: '`quota_exceeded`, `spend_limit_reached`, `payment_required`. Addendum 2: `payment_required` is a future capability (Stripe API plans, API-2S); not emitted in the controlled beta. Catalog and precedence: error-catalog.md (Addendum 2).'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     Forbidden:
-      description: '`insufficient_scope`, `org_suspended`, `live_key_requires_plan` (authenticated live key, org without an active API plan; same response on every route), `failed_job_threshold_exceeded`, `model_response_access_disabled`, `pipeline_processing_not_acknowledged` (Addendum 1 D6: a research job needs auxiliary Gemini processing and the organization has not recorded an acknowledgement; nothing is written, nothing is sent to any provider).'
+      description: '`insufficient_scope`, `org_suspended`, `live_key_requires_plan` (authenticated live key, org without an active API plan; same response on every route), `failed_job_threshold_exceeded`, `model_response_access_disabled`, `pipeline_processing_not_acknowledged` (Addendum 1 D6: a research job needs auxiliary Gemini processing and the organization has not recorded an acknowledgement; nothing is written, nothing is sent to any provider). Addendum 2: `model_response_access_disabled` is never emitted in the controlled beta, because `retain_model_responses: true` is rejected first with 422 `option_unavailable_in_beta` (P3, precedence step 6). Catalog and precedence: error-catalog.md (Addendum 2).'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     NotFound:
-      description: '`verification_not_found`. Also returned for other organizations'' IDs.'
+      description: '`verification_not_found`. Also returned for other organizations'' IDs. Addendum 2: also returned for a malformed ID and for another organization''s deleted verification, byte-identical except `request_id`; `verification_not_found` is the contract name (the generic `not_found` is the management-plane code). Catalog and precedence: error-catalog.md (Addendum 2).'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     Conflict:
-      description: '`idempotency_key_reused`; `request_in_progress` (the create transaction exhausted its contention retries on the idempotency record without reading a committed one; nothing was written; a retry gets the replay or creates the job); `not_cancelable`.'
+      description: '`idempotency_key_reused`; `request_in_progress` (the create transaction exhausted its contention retries on the idempotency record without reading a committed one; nothing was written; a retry gets the replay or creates the job); `not_cancelable`. Addendum 2: `not_cancelable` has type `invalid_request_error` (a state conflict, not an idempotency error). Catalog and precedence: error-catalog.md (Addendum 2).'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     Gone:
-      description: '`verification_deleted`.'
+      description: '`verification_deleted`. Addendum 2: only for a verification of the caller''s own organization and mode; otherwise 404 `verification_not_found`. Catalog and precedence: error-catalog.md (Addendum 2).'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     TooLarge:
-      description: '`request_too_large` (body > 64 KB).'
+      description: '`request_too_large` (body > 64 KB). Addendum 2: 64 KiB = 65,536 bytes of the body as received, a placeholder pending owner sizing; evaluated before authentication (precedence step 1). Catalog and precedence: error-catalog.md (Addendum 2).'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     Unprocessable:
-      description: '`model_unavailable`, `too_few_models`, `model_limit_exceeded`, `type_unavailable`, `synthesis_not_supported`, `synthesis_unavailable` (also returned for every `options.synthesis: true` during the controlled beta, Addendum 1 D4), `fallback_unavailable` (also returned for every `options.allow_fallback: true` during the controlled beta, Addendum 1 P2), `repeated_failing_input`, `option_unavailable_in_beta` (`retain_input` requested during the controlled beta, Addendum 1 OQ-4; and `retain_model_responses`, Addendum 1 P3).'
+      description: '`model_unavailable`, `too_few_models`, `model_limit_exceeded`, `type_unavailable`, `synthesis_not_supported`, `synthesis_unavailable` (also returned for every `options.synthesis: true` during the controlled beta, Addendum 1 D4), `fallback_unavailable` (also returned for every `options.allow_fallback: true` during the controlled beta, Addendum 1 P2), `repeated_failing_input`, `option_unavailable_in_beta` (`retain_input` requested during the controlled beta, Addendum 1 OQ-4; and `retain_model_responses`, Addendum 1 P3). Addendum 2: `too_few_models` / `model_limit_exceeded` are also the codes for the absolute 2..5 bounds; on a claim, `options.synthesis: true` returns `synthesis_not_supported` (beta and post-beta); `research_schema_unsupported` is PROPOSED, pending owner approval of the C-5 scope decision (rejected before job creation and credit reservation). Catalog and precedence: error-catalog.md (Addendum 2).'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     TooManyRequests:
-      description: '`rate_limited`, `concurrency_limit`.'
+      description: '`rate_limited`, `concurrency_limit`. Catalog and precedence: error-catalog.md (Addendum 2).'
       headers:
         Retry-After: { $ref: '#/components/headers/RetryAfter' }
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     InternalError:
-      description: '`internal_error`.'
+      description: '`internal_error`. Catalog and precedence: error-catalog.md (Addendum 2).'
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    UnsupportedMediaType:
+      description: '`unsupported_media_type` (Addendum 2): the body is not `application/json`, or a `charset` other than `utf-8` is declared. Evaluated before authentication (precedence step 1). Catalog and precedence: error-catalog.md (Addendum 2).'
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     ServiceUnavailable:
-      description: '`queue_unavailable` (pre-write queue health check only; nothing written), `capacity_protection` (CR-2), `platform_spend_ceiling`, `maintenance`.'
+      description: '`queue_unavailable` (pre-write queue health check only; nothing written), `capacity_protection` (CR-2), `platform_spend_ceiling`, `maintenance`. Addendum 2 adds `api_unavailable` (the API is switched off or a dependency it needs failed; fails closed at any precedence step). Catalog and precedence: error-catalog.md (Addendum 2).'
       headers:
         Retry-After: { $ref: '#/components/headers/RetryAfter' }
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
@@ -418,62 +575,143 @@ components:
                 Open enum. Known: invalid_request_error, authentication_error, billing_error,
                 permission_error, not_found, idempotency_error, gone, request_too_large,
                 unprocessable, rate_limit_error, api_error, service_unavailable.
-            code: { type: string }
+            code:
+              type: string
+              description: 'Open set. Every known code, with status, type, plane, stage and beta status, is listed once in error-catalog.md §2 and mirrored in components.x-error-catalog. Clients must handle an unknown code by its HTTP status and `type`.'
             message: { type: string }
             param: { type: [string, 'null'] }
             request_id: { type: string }
             doc_url: { type: string, format: uri }
     CreateVerificationRequest:
+      description: |
+        Discriminated on `type` (Addendum 2, C-1). `type: claim` requires `input.claim` and
+        forbids `input.question` and `input.context`; `type: research` requires
+        `input.question` and allows `input.context`, and forbids `input.claim`. Every object is
+        closed (`additionalProperties: false`): an unknown member at any level returns 400
+        `unknown_field` with `param` set to its dotted path (e.g. `input.question`).
+        Text rules applied by the server BEFORE this schema (`error-catalog.md` §4): NFC
+        normalization of every string; lengths in Unicode code points after NFC; whitespace-only
+        input text is 400 `empty_input`; invalid UTF-8, lone surrogates and C0 controls other than
+        tab, LF and CR are 400 `invalid_encoding`. Schema-keyword-to-code mapping:
+        `error-catalog.md` §4.4. Limits are placeholders.
+      type: object
+      oneOf:
+        - $ref: '#/components/schemas/ClaimVerificationRequest'
+        - $ref: '#/components/schemas/ResearchVerificationRequest'
+      discriminator:
+        propertyName: type
+        mapping:
+          claim: '#/components/schemas/ClaimVerificationRequest'
+          research: '#/components/schemas/ResearchVerificationRequest'
+    ClaimVerificationRequest:
       type: object
       required: [type, input]
       additionalProperties: false
       properties:
-        type:
+        type: { type: string, const: claim }
+        input: { $ref: '#/components/schemas/ClaimInput' }
+        models: { $ref: '#/components/schemas/ModelSelection' }
+        options: { $ref: '#/components/schemas/VerificationOptions' }
+        metadata: { $ref: '#/components/schemas/RequestMetadata' }
+    ResearchVerificationRequest:
+      type: object
+      required: [type, input]
+      additionalProperties: false
+      properties:
+        type: { type: string, const: research }
+        input: { $ref: '#/components/schemas/ResearchInput' }
+        models: { $ref: '#/components/schemas/ModelSelection' }
+        options: { $ref: '#/components/schemas/VerificationOptions' }
+        metadata: { $ref: '#/components/schemas/RequestMetadata' }
+    ClaimInput:
+      type: object
+      required: [claim]
+      additionalProperties: false
+      description: 'Claim input. `question` and `context` are not allowed (400 `unknown_field`).'
+      properties:
+        claim:
+          allOf: [{ $ref: '#/components/schemas/InputText' }]
+          maxLength: 4000
+          description: '1..4000 Unicode code points after NFC (placeholder). Whitespace-only is 400 `empty_input`.'
+    ResearchInput:
+      type: object
+      required: [question]
+      additionalProperties: false
+      description: 'Research input. `claim` is not allowed (400 `unknown_field`).'
+      properties:
+        question:
+          allOf: [{ $ref: '#/components/schemas/InputText' }]
+          maxLength: 4000
+          description: '1..4000 Unicode code points after NFC (placeholder). Whitespace-only is 400 `empty_input`.'
+        context:
+          allOf: [{ $ref: '#/components/schemas/NoControlCharacters' }]
           type: string
-          enum: [claim, research]
-        input:
-          type: object
-          additionalProperties: false
-          properties:
-            claim: { type: string, minLength: 1, maxLength: 4000 }
-            question: { type: string, minLength: 1, maxLength: 4000 }
-            context: { type: string, maxLength: 20000 }
-          description: '`claim` for type claim; `question` (+ optional `context`) for type research. Limits are placeholders.'
-        models:
-          type: array
-          minItems: 2
-          maxItems: 5
-          uniqueItems: true
-          items: { type: string }
-          description: IDs from GET /models. Defaults to the plan default panel.
-        options:
-          type: object
-          additionalProperties: false
-          properties:
-            synthesis:
-              type: boolean
-              default: false
-              description: Research only. `true` on a claim returns 422 `synthesis_not_supported`.
-            allow_fallback:
-              type: boolean
-              default: false
-              description: |
-                Opt in to provider fallback: DeepSeek substitution for a failed research slot and
-                the Claude synthesis fallback. Default false: a failed slot stays `failed` and the
-                content is never sent to a provider the customer did not select. A substituted slot
-                reports the provider that actually answered. Claim slots never fall back.
-            retain_input:
-              type: boolean
-              default: false
-              description: Keep input text for the result retention period (OD-10 class a). Org may forbid.
-            retain_model_responses:
-              type: boolean
-              default: false
-              description: Store full sanitized model text. Rejected with 403 `model_response_access_disabled` unless org model-response access is enabled (OD-19).
-        metadata:
-          type: object
-          maxProperties: 20
-          additionalProperties: { type: string, maxLength: 500 }
+          maxLength: 20000
+          description: 'Optional. 0..20000 Unicode code points after NFC (placeholder). An empty context is accepted.'
+    InputText:
+      description: 'Non-empty after trimming Unicode White_Space (ECMAScript `\s`): `minLength: 1` plus `pattern: \S`. Violations are 400 `empty_input`.'
+      allOf: [{ $ref: '#/components/schemas/NoControlCharacters' }]
+      type: string
+      minLength: 1
+      pattern: '\S'
+    NoControlCharacters:
+      description: 'No C0 control character other than tab (U+0009), LF (U+000A) and CR (U+000D). The server reports a violation as 400 `invalid_encoding` (checked before the schema). DEL (U+007F) and C1 controls are accepted in 0.3.0-draft.'
+      not: { type: string, pattern: '[\u0000-\u0008\u000B\u000C\u000E-\u001F]' }
+    ModelSelection:
+      type: array
+      minItems: 2
+      maxItems: 5
+      uniqueItems: true
+      items:
+        type: string
+        minLength: 1
+        maxLength: 64
+        pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'
+      description: |
+        IDs from GET /models. Defaults to the plan default panel. 2..5 unique IDs; each ID is
+        1..64 characters of `[a-z0-9._-]` starting with a letter or digit. Fewer than 2 is 422
+        `too_few_models`; more than 5, or more than the plan allows, is 422
+        `model_limit_exceeded`; a malformed, duplicated or unknown ID is 400 `invalid_model`;
+        a known but disabled model is 422 `model_unavailable`.
+    VerificationOptions:
+      type: object
+      additionalProperties: false
+      description: 'Every option defaults to false. In the controlled beta only `false` (or omission) is accepted for each; `true` returns the 422 listed per option (Addendum 1 §4), evaluated at precedence step 6 (`error-catalog.md` §3).'
+      properties:
+        synthesis:
+          type: boolean
+          default: false
+          description: Research only. `true` on a claim returns 422 `synthesis_not_supported` (also during the beta, where it takes precedence over `synthesis_unavailable`). `true` on research during the controlled beta returns 422 `synthesis_unavailable` (Addendum 1 D4).
+        allow_fallback:
+          type: boolean
+          default: false
+          description: |
+            Opt in to provider fallback: DeepSeek substitution for a failed research slot and
+            the Claude synthesis fallback. Default false: a failed slot stays `failed` and the
+            content is never sent to a provider the customer did not select. A substituted slot
+            reports the provider that actually answered. Claim slots never fall back.
+            `true` during the controlled beta returns 422 `fallback_unavailable` (Addendum 1 P2).
+        retain_input:
+          type: boolean
+          default: false
+          description: Keep input text for the result retention period (OD-10 class a). Org may forbid. `true` during the controlled beta returns 422 `option_unavailable_in_beta` (Addendum 1 OQ-4).
+        retain_model_responses:
+          type: boolean
+          default: false
+          description: Store full sanitized model text. Rejected with 403 `model_response_access_disabled` unless org model-response access is enabled (OD-19). During the controlled beta `true` returns 422 `option_unavailable_in_beta` (Addendum 1 P3), before the 403 is evaluated.
+    RequestMetadata:
+      type: object
+      maxProperties: 20
+      propertyNames:
+        type: string
+        minLength: 1
+        maxLength: 40
+        pattern: '^[A-Za-z0-9_.-]{1,40}$'
+      additionalProperties:
+        allOf: [{ $ref: '#/components/schemas/NoControlCharacters' }]
+        type: string
+        maxLength: 500
+      description: 'Caller-supplied string map. At most 20 keys; key 1..40 characters of `[A-Za-z0-9_.-]`; value a string of 0..500 code points after NFC. Violations are 400 `invalid_request` with `param` `metadata` or `metadata.<key>`.'
     VerificationAccepted:
       type: object
       required: [object, id, status, type, format_version, usage]
