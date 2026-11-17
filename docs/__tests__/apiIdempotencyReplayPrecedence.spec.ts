@@ -1016,6 +1016,30 @@ describe("Addendum 6: deletion lifecycle (jobs-and-idempotency.md §6.2, parsed)
     }
   });
 
+  it("a repeat DELETE returns the SAME operation unchanged: never resets a pending or completed deletion", () => {
+    const sys = world();
+    const id = send(sys, req(SAME)).body?.id as string;
+    sys.store.put(`jobs/${id}`, { ...(sys.store.get<JobDoc>(`jobs/${id}`) as JobDoc), state: "running" });
+    runToEnd(handleDelete(sys, "live1", id));
+    runToEnd(sweep(sys)); // blocked: attempts 1, awaiting_terminal
+    const pending = opOf(sys, id);
+    expect(pending).toMatchObject({ status: "pending", attempts: 1, blockedBy: "awaiting_terminal" });
+    const again = runToEnd(handleDelete(sys, "live1", id)) as ApiResponse & { deletion?: DeletionOp };
+    expect(again.deletion).toMatchObject({ status: "pending", attempts: 1 });
+    expect(opOf(sys, id)).toEqual(pending);
+    runToEnd(workerBoundary(sys, id));
+    runToEnd(sweep(sys));
+    const done = opOf(sys, id);
+    expect(done.status).toBe("completed");
+    const jobAfter = sys.store.get<JobDoc>(`jobs/${id}`);
+    const third = runToEnd(handleDelete(sys, "live1", id)) as ApiResponse & { deletion?: DeletionOp };
+    expect(third.status).toBe(202);
+    expect(third.deletion?.status).toBe("completed");
+    expect(opOf(sys, id)).toEqual(done);
+    expect(sys.store.get<JobDoc>(`jobs/${id}`)).toEqual(jobAfter); // the tombstone is not rewritten
+    expect(count(sys.releases, id)).toBe(1);
+  });
+
   it("at the limit, deleting every active job frees exactly the capacity, with no leak", () => {
     const sys = world();
     patchOrg(sys, { concurrencyLimit: 2 });
