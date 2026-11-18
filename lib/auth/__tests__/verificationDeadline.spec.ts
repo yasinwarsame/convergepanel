@@ -217,7 +217,7 @@ describe("concurrent requests: each bounded by its OWN deadline, no shared state
     await jest.advanceTimersByTimeAsync(DEADLINE);
     for (const { i, t } of ts) if (i % 2) expect(t.value).toEqual(UNAVAILABLE);
     expect(jest.getTimerCount()).toBe(0);
-  });
+  }, 30_000); // fake time is exact; the wall-clock allowance only absorbs a CPU-starved worker
 
   it("a request started 5 s later gets its own deadline (15 s), not the earlier request's (10 s)", async () => {
     mockVerifyIdToken.mockImplementation(never);

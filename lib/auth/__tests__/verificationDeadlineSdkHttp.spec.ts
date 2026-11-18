@@ -154,14 +154,15 @@ function req(opts: { bearer?: string; cookie?: string }): NextRequest {
   return new NextRequest("http://localhost/api/x", { headers });
 }
 
-async function timed<T>(p: Promise<T>): Promise<{ value: T; ms: number }> {
+/** Takes a THUNK: the clock must start before the request starts (the deadline timer is armed synchronously). */
+async function timed<T>(start: () => Promise<T>): Promise<{ value: T; ms: number }> {
   const t0 = Date.now();
-  const value = await p;
+  const value = await start();
   return { value, ms: Date.now() - t0 };
 }
 
 it("ANCHOR: a normal record authenticates through the same local edge, far below the deadline", async () => {
-  const { value, ms } = await timed(resolveRequestIdentity(req({ bearer: idToken("valid") })));
+  const { value, ms } = await timed(() => resolveRequestIdentity(req({ bearer: idToken("valid") })));
   expect(value).toEqual({ status: "authenticated", uid: "valid", source: "bearer_token" });
   expect(ms).toBeLessThan(DEADLINE);
 });
@@ -169,9 +170,9 @@ it("ANCHOR: a normal record authenticates through the same local edge, far below
 it("Identity Toolkit HANGS: bearer, cookie, and cookie+bearer — each auth_unavailable at ~10 s (not ~132 s)", async () => {
   mockState.mode = "hang";
   const results = await Promise.all([
-    timed(resolveRequestIdentity(req({ bearer: idToken("h1") }))),
-    timed(resolveRequestIdentity(req({ cookie: sessionCookie("h2") }))),
-    timed(resolveRequestIdentity(req({ bearer: idToken("h3"), cookie: sessionCookie("h3") }))),
+    timed(() => resolveRequestIdentity(req({ bearer: idToken("h1") }))),
+    timed(() => resolveRequestIdentity(req({ cookie: sessionCookie("h2") }))),
+    timed(() => resolveRequestIdentity(req({ bearer: idToken("h3"), cookie: sessionCookie("h3") }))),
   ]);
   for (const { value, ms } of results) {
     expect(value).toEqual(UNAVAILABLE);
@@ -184,7 +185,7 @@ it("Identity Toolkit HANGS: bearer, cookie, and cookie+bearer — each auth_unav
 
 it("503 + Retry-After: 11 (the SDK sleeps past the deadline before retrying) → bounded at ~10 s", async () => {
   mockState.mode = "retry-after";
-  const { value, ms } = await timed(resolveRequestIdentity(req({ bearer: idToken("ra") })));
+  const { value, ms } = await timed(() => resolveRequestIdentity(req({ bearer: idToken("ra") })));
   expect(value).toEqual(UNAVAILABLE);
   expect(ms).toBeGreaterThanOrEqual(DEADLINE - 50);
   expect(ms).toBeLessThan(DEADLINE + SLACK);
@@ -194,8 +195,8 @@ it("503 + Retry-After: 11 (the SDK sleeps past the deadline before retrying) →
 it("the account lookup answers VALID 12 s late → auth_unavailable at the deadline; the late valid answer changes nothing", async () => {
   mockState.mode = "late-valid";
   const before = sdkCalls.length;
-  const p = resolveRequestIdentity(req({ bearer: idToken("late") }));
-  const { value, ms } = await timed(p);
+  let p!: Promise<unknown>;
+  const { value, ms } = await timed(() => (p = resolveRequestIdentity(req({ bearer: idToken("late") }))));
   const abandoned = sdkCalls.slice(before);
   expect(abandoned).toHaveLength(1);
   expect(value).toEqual(UNAVAILABLE);
