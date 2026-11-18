@@ -23,6 +23,15 @@ export default function PrivacyPage() {
             Privacy Policy explains how we collect, use, and protect your information when you use
             the ConvergePanel web application or the ConvergePanel Verify browser extension.
           </p>
+          <p className="text-cp-muted mb-3">
+            <strong className="text-cp-text">Who is responsible for your data.</strong> The ConvergePanel service
+            is operated by [LEGAL ENTITY NAME — OWNER VERIFY], [REGISTERED ADDRESS — OWNER VERIFY], which is
+            responsible for the personal information described in this policy. You can contact us at{" "}
+            <a href="mailto:support@convergepanel.com" className="text-sky-600 hover:underline">
+              support@convergepanel.com
+            </a>.
+          </p>
+          {/* OWNER/LEGAL VERIFY: legal entity name, registered address and its role (e.g. controller) are not stated anywhere in the repo (Terms page names no entity). Counsel to confirm the entity, its role, and whether a representative or privacy contact must be named. */}
           <p className="text-cp-muted">
             This policy may be updated as we add features and improve our service.
           </p>
@@ -41,7 +50,7 @@ export default function PrivacyPage() {
             <li>
               <strong className="text-cp-text">Invitations:</strong> If you invite someone to a team workspace, we
               store the invitee&apos;s email address and the invitation details, and we send them an invitation
-              email that includes your name and the workspace name
+              email that includes the workspace name, their role and the invitation link
             </li>
             <li>
               <strong className="text-cp-text">Content You Submit and Your Results:</strong> The claims, questions,
@@ -50,36 +59,39 @@ export default function PrivacyPage() {
             <li><strong className="text-cp-text">Usage Data:</strong> Number of runs, which models you selected, token usage, plan limits and usage counters, and product-analytics events about how you use the app</li>
             <li><strong className="text-cp-text">Technical Data:</strong> IP address, browser type, device information, the addresses of the pages you visit, and error reports</li>
           </ul>
-          {/* OWNER/LEGAL VERIFY: onboarding answers are stored on users/{uid} and sent to PostHog (app/onboarding/page.tsx:150-155). Stripe customer/subscription ids are stored on users/{uid}. Invitee data: lib/email/workspaceInvitations.ts (Resend). */}
+          {/* OWNER/LEGAL VERIFY: onboarding answers are stored on users/{uid} and sent to PostHog (app/onboarding/page.tsx:150-155). Stripe customer/subscription ids are stored on users/{uid}. Invitee data: lib/email/workspaceInvitations.ts (Resend); both callers pass inviterName: null, so the inviter's name is not sent today. */}
           <p className="text-cp-muted mb-3">
             <strong className="text-cp-text">What we store.</strong> When you are signed in and run a Claim
             Verification, we store the claim you submit (up to 2,000 characters) and the structured results each
             AI model returns (its verdict, confidence, summary and the parts it found correct, incorrect or
             unverifiable), together with consensus scores and an audit record of the run. When you run Deep
             Research, we store your question, any context you provide, the answers the AI models return, the
-            combined summary report and related analysis, and review and governance records for the run. For
-            Video Verification, see Section 6. We use this to show your history, let you reopen results, and
-            support review and governance features. For Claim Verification, we do not store the raw, unprocessed
+            combined summary report and related analysis, and review and governance records for the run. If you
+            export a research report, we may also store a snapshot of the exported content. For Video
+            Verification, see Section 6. We use this to show your history, let you reopen results, and support
+            review and governance features. For Claim Verification, we do not store the raw, unprocessed
             responses from AI providers.
           </p>
-          {/* OWNER/LEGAL VERIFY: Deep Research storage confirmed in lib/firestore/runs.ts (question, questionContext, per-model answer text capped for storage, governance/review records) but was outside the scope of audit 01's end-to-end trace. */}
+          {/* OWNER/LEGAL VERIFY: Deep Research storage confirmed in lib/firestore/runs.ts (question, questionContext, per-model answer text capped for storage, governance/review records) but was outside the scope of audit 01's end-to-end trace. Export snapshots: app/api/user/runs/[runId]/exports/route.ts + lib/firestore/adaptiveExports.ts, gated by ADAPTIVE_RESEARCH_EXPORT_ENABLED (Production value UNVERIFIED). */}
           <p className="text-cp-muted mb-3">
             On paid plans, an excerpt of each claim or question (up to its first 200 characters) is also recorded
-            in an audit log used for governance and administration, together with your account ID or email
-            address. If your account belongs to a team, a copy of the content you run is also kept for that team
-            (see Section 8).
+            in an audit log used for governance and administration, together with your account ID and, for some
+            records, your email address. When our staff delete a stored item, an audit-log entry containing a
+            similar excerpt is recorded on any plan. If your account belongs to a team, a copy of the content you
+            run is also kept for that team (see Section 8).
           </p>
           <p className="text-cp-muted mb-3">
             <strong className="text-cp-text">How long we keep it.</strong> We keep stored content and account data
-            until it is deleted (see Section 9). We do not currently delete it automatically after a fixed period.
-            We may also delete stored content ourselves, for example as part of data cleanup.
+            until it is deleted (see Section 11). We do not currently delete it automatically after a fixed
+            period, on any plan. We may also delete stored content ourselves, for example as part of data
+            cleanup.
           </p>
-          {/* OWNER/LEGAL VERIFY: no TTL or scheduled purge exists for verifications, audit-log copies or team copies (audit 01 §C); admin purge-runs exists for research runs only. If the owner adopts a fixed retention period, it must be implemented before it is stated here (D-3). */}
+          {/* OWNER/LEGAL VERIFY: no TTL or scheduled purge exists for verifications, audit-log copies or team copies (audit 01 §C); admin purge-runs exists for research runs only. If the owner adopts a fixed retention period, it must be implemented before it is stated here (D-3). The Pricing page Free-plan line "Store recent sessions (last 7 days)" (lib/plans.ts:75 -> components/PricingSection.tsx) contradicts this; it is corrected in the coordinated pricing-copy draft PR (historyRetentionDays is never read). */}
           <p className="text-cp-muted">
             <strong className="text-cp-text">Logs.</strong> Our hosting and monitoring providers keep technical
             logs. These logs can include identifiers such as your account ID and, in some cases, short excerpts of
-            what you submit or of AI model output. Retention periods for these logs, and for database backups, are
-            being established, and we will update this policy when they are set.
+            what you submit or of AI model output. Retention periods for these logs, and for database backups,
+            have not yet been confirmed.
           </p>
           {/* OWNER/LEGAL VERIFY: log and backup retention are UNKNOWN (10- A4/A5; 01 U1-U3, U6-U7). Do not publish a number until confirmed. */}
         </section>
@@ -111,7 +123,7 @@ export default function PrivacyPage() {
             You can remove all of these by clearing this site&apos;s data in your browser. The app does not
             currently offer a setting to turn off analytics or monitoring.
           </p>
-          {/* OWNER/LEGAL VERIFY: no cookie/consent banner or analytics opt-out exists in code. PostHog persistence is the SDK default (cookie + localStorage), not set in code. Counsel to confirm whether consent is required for PostHog/Sentry storage in the jurisdictions served (ePrivacy / UK PECR). */}
+          {/* OWNER/LEGAL VERIFY: no cookie/consent banner or analytics opt-out exists in code. PostHog persistence is the SDK default (cookie + localStorage), not set in code. Counsel to confirm whether consent is required for PostHog/Sentry storage in the jurisdictions served. */}
         </section>
 
         <section>
@@ -125,10 +137,11 @@ export default function PrivacyPage() {
             <li>Debug technical issues, monitor errors and improve reliability</li>
             <li>Understand how the product is used (product analytics)</li>
             <li>
-              Send essential service emails, such as email verification, password reset and team workspace
-              invitations
+              Send essential service emails, such as email verification, password reset, team workspace
+              invitations and payment receipts
             </li>
           </ul>
+          {/* OWNER/LEGAL VERIFY: payment receipts are sent by Stripe if receipt emails are enabled in the Stripe account (account setting UNVERIFIED); the app itself sends no receipt email. */}
           <p className="text-cp-muted">
             Essential service emails are part of providing the service. Product analytics are not required to
             provide the service. We do <strong className="text-cp-text">not</strong> sell your data to third
@@ -174,20 +187,21 @@ export default function PrivacyPage() {
           <h2 className="text-xl font-semibold text-cp-text mb-3">6. Video Data</h2>
           <p className="text-cp-muted mb-3">
             When you use video verification, your video file is processed in your browser. ConvergePanel
-            does not upload, store, or retain your complete video files on our servers. Only extracted
-            frame images, together with the file name and basic technical details of the video (such as its
-            duration, dimensions and format), are transmitted to our servers for the analysis request. The frames
-            and these details are sent to OpenAI, Anthropic and Google for analysis, regardless of which models
-            you select elsewhere, and are subject to their respective terms. After analysis is complete, frame
-            images are discarded.
+            does not upload, store, or retain your complete video files on our servers. Only extracted frame
+            images and technical details read from the file are transmitted to our servers for the analysis
+            request. These details include the file name, duration, resolution, codec, frame rate, file size,
+            format, whether it has audio, and, where the file contains them, its creation date, encoding software
+            and camera or device model. The frames and these technical details (but not the file name) are sent to
+            OpenAI, Anthropic and Google for analysis, regardless of which models you select elsewhere, and are
+            subject to their respective terms. After analysis is complete, frame images are discarded.
           </p>
           <p className="text-cp-muted mb-3">
-            We store the analysis results, the model verdicts, the file name and video details, and your account
-            email with the verification. As with other content, an audit-log entry (which can include the file
-            name) may be recorded on paid plans, and a copy is kept for your team if you run it in a team
-            workspace.
+            We store the analysis results, the model verdicts, the file name and the technical details above, and
+            your account email with the verification. As with other content, an audit-log entry (which can
+            include the file name) may be recorded on paid plans, and a copy is kept for your team if you run it
+            in a team workspace.
           </p>
-          {/* OWNER/LEGAL VERIFY: video path from independent review R1 (app/api/verify-video/route.ts:242,320-349; lib/video/videoVerificationPrompt.ts:21-30; lib/video/visionCalls.ts) — not traced end to end in audit 01. Confirm stored fields in videoVerifications and audit-log contents. */}
+          {/* OWNER/LEGAL VERIFY: video path from independent review (VideoUploaderSurface.tsx:217-225; app/api/verify-video/route.ts:242,327-349,501,509,596; lib/video/videoVerificationPrompt.ts:20-30; lib/video/visionCalls.ts) — not traced end to end in audit 01. Confirm stored fields in videoVerifications and audit-log contents. */}
           <p className="text-cp-muted">
             We do not sell your video content or verification results or use them for advertising. They are
             accessed and shared only as described in this policy (see Sections 7 and 8).
@@ -225,8 +239,7 @@ export default function PrivacyPage() {
             </li>
             <li>
               <strong className="text-cp-text">Resend:</strong> Delivery of team workspace invitation emails. Resend
-              receives the invitee&apos;s email address, the inviter&apos;s name, the workspace name, the role and
-              the invitation link.{" "}
+              receives the invitee&apos;s email address, the workspace name, the role and the invitation link.{" "}
               <a href="https://resend.com/legal/privacy-policy" target="_blank" rel="noopener noreferrer" className="text-sky-600 hover:underline">
                 Resend Privacy Policy
               </a>
@@ -238,51 +251,54 @@ export default function PrivacyPage() {
               xAI (Grok) and Perplexity. Perplexity also runs a live web search based on the text you submit.
               For Deep Research, your question and context, and all the model answers, are also sent to Google
               (Gemini API) to classify the question, compare the answers, check for bias and coverage, and write
-              the summary report, whether or not you selected a Google model. Deep Research answers may also be
-              sent to OpenAI (or Anthropic, as a fallback) to produce a combined summary. Video frames are sent as
-              described in Section 6. We do not send your name, email address or account ID to these providers.
-              Each provider handles the data it receives under its own terms and may log requests under its own
-              policies.
-              {/* OWNER/LEGAL VERIFY: Gemini auxiliary calls (classifier.ts, alignment.ts, biasDetection.ts, coverageAudit.ts, synthesisReport.ts via orchestrate.ts) run only when ADAPTIVE_SCHEMAS_ENABLED is true or the user is a canary uid (env.ts:74,92). Production value UNVERIFIED (10- A5). Keep this sentence unless confirmed off. */}
+              the summary report, whether or not you selected a Google model. Your Deep Research question and the
+              model answers may also be sent to OpenAI (or Anthropic, as a fallback) to produce a combined
+              summary, whether or not you selected those models. Video data is sent as described in Section 6. We
+              do not send your name, email address or account ID to these providers. Each provider handles the
+              data it receives under its own terms and may log requests under its own policies.
+              {/* OWNER/LEGAL VERIFY: Gemini auxiliary calls (classifier.ts, alignment.ts, biasDetection.ts, coverageAudit.ts, synthesisReport.ts via orchestrate.ts) run only when ADAPTIVE_SCHEMAS_ENABLED is true or the user is a canary uid (env.ts:74,92). Production value UNVERIFIED (10- A5). Keep this sentence unless confirmed off. Synthesis sends the question too (app/api/synthesize-panel/route.ts:1213,1261). */}
               {" "}For Deep Research, where our fallback is enabled, if a selected model is temporarily unavailable,
               your question and context may be sent to DeepSeek instead. DeepSeek states that it processes and
               stores data in the People&apos;s Republic of China.
               {/* OWNER/LEGAL VERIFY: DeepSeek fallback (lib/panel.ts) is active only when DEEPSEEK_API_KEY is set in Production — UNKNOWN (10- A5). Default slots are OpenAI/Anthropic/Google; PANEL_DEEPSEEK_FALLBACK_FOR can change them. Keep the sentence if the key is set; remove it if the fallback is disabled. DeepSeek is not reachable from Claim Verification. */}
-              {/* OWNER/LEGAL VERIFY: no training, retention, region, ZDR or DPA statements are made here on purpose (03 Part C; 10- §4). Gemini paid/unpaid tier, OpenAI/Anthropic opt-in and feedback settings, xAI ZDR status and DPAs are unverified (10- A1-A3). Counsel to decide whether provider-level detail is required. */}
+              {/* OWNER/LEGAL VERIFY: no training, retention, region, ZDR or DPA statements are made here on purpose (03 Part C; 10- §4). Gemini paid/unpaid tier, OpenAI/Anthropic opt-in and feedback settings, xAI ZDR status and DPAs are unverified (10- A1-A3). Links below point to API/commercial documentation where an official page was identified in 10- §4; owner to confirm each is the governing document for our accounts. Perplexity's downstream search infrastructure is UNKNOWN (10- S14, §5). */}
               <ul className="list-disc list-inside ml-6 mt-2 space-y-1">
-                <li><a href="https://openai.com/policies/privacy-policy" target="_blank" rel="noopener noreferrer" className="text-sky-600 hover:underline">OpenAI Privacy Policy</a></li>
-                <li><a href="https://www.anthropic.com/legal/privacy" target="_blank" rel="noopener noreferrer" className="text-sky-600 hover:underline">Anthropic Privacy Policy</a></li>
+                <li><a href="https://developers.openai.com/api/docs/guides/your-data" target="_blank" rel="noopener noreferrer" className="text-sky-600 hover:underline">OpenAI API data controls</a></li>
+                <li><a href="https://privacy.claude.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data" target="_blank" rel="noopener noreferrer" className="text-sky-600 hover:underline">Anthropic commercial data retention</a></li>
                 <li><a href="https://ai.google.dev/gemini-api/terms" target="_blank" rel="noopener noreferrer" className="text-sky-600 hover:underline">Google Gemini API Terms</a></li>
-                <li><a href="https://x.ai/legal/privacy" target="_blank" rel="noopener noreferrer" className="text-sky-600 hover:underline">xAI Privacy Policy</a></li>
+                <li><a href="https://docs.x.ai/docs/faq/security" target="_blank" rel="noopener noreferrer" className="text-sky-600 hover:underline">xAI API security and data FAQ</a></li>
                 <li><a href="https://www.perplexity.ai/hub/legal/perplexity-api-terms-of-service" target="_blank" rel="noopener noreferrer" className="text-sky-600 hover:underline">Perplexity API Terms of Service</a></li>
                 <li><a href="https://cdn.deepseek.com/policies/en-US/deepseek-privacy-policy.html" target="_blank" rel="noopener noreferrer" className="text-sky-600 hover:underline">DeepSeek Privacy Policy</a></li>
               </ul>
             </li>
           </ul>
-          {/* OWNER/LEGAL VERIFY: Sentry and PostHog are wired in code (instrumentation-client.ts, sentry.server.config.ts, components/PostHogProvider.tsx); whether each is live in Production depends on SENTRY_DSN / NEXT_PUBLIC_SENTRY_DSN / NEXT_PUBLIC_POSTHOG_KEY (10- A5-A7). Wording describes current code at cabbdbb (sendDefaultPii true; replay 5% + 100% on error; PostHog autocapture and session recording not disabled in code; full URLs incl. query). Do not narrow it until a fix (e.g. PR #329) is deployed to Production. */}
+          {/* OWNER/LEGAL VERIFY: Sentry and PostHog are wired in code (instrumentation-client.ts, sentry.server.config.ts, components/PostHogProvider.tsx); whether each is live in Production depends on SENTRY_DSN / NEXT_PUBLIC_SENTRY_DSN / NEXT_PUBLIC_POSTHOG_KEY (10- A5-A7). Code comments claim PostHog is not configured in Production (app/signup/page.tsx ~365; app/api/user/email-verification-telemetry/route.ts:6) — unverified; keep the disclosure until A5/A6 confirm. Wording describes current code at cabbdbb (sendDefaultPii true, no Sentry setUser; replay 5% + 100% on error; PostHog autocapture and session recording not disabled in code; full URLs incl. query). Do not narrow it until a fix (e.g. PR #329) is deployed to Production. */}
           <ul className="list-disc list-inside text-cp-muted space-y-2">
             <li>
               <strong className="text-cp-text">Sentry:</strong> Error monitoring, and session replay for a sample of
-              sessions and for sessions in which an error occurs. Sentry receives your IP address, user and
-              technical details about errors, and the addresses of the pages you visit. Session replay records
-              what happens on the page.{" "}
+              sessions and for sessions in which an error occurs. Sentry receives your IP address, technical
+              details about errors, and the addresses of the pages you visit. Session replay records what happens
+              on the page.{" "}
               <a href="https://sentry.io/privacy/" target="_blank" rel="noopener noreferrer" className="text-sky-600 hover:underline">
                 Sentry Privacy Policy
               </a>
             </li>
             <li>
-              <strong className="text-cp-text">PostHog (United States):</strong> Product analytics. PostHog
-              receives the pages you visit, including the full page address; your account ID, email address and,
-              if you provide it at sign-up, your name; your onboarding answers; errors in the app; and events about
-              how you interact with the app, which can include the text of buttons and items you click (such as the
+              <strong className="text-cp-text">PostHog (United States):</strong> Product analytics. Requests to
+              PostHog are routed through our own domain, and PostHog may receive your IP address. PostHog receives
+              the pages you visit, including the full page address; your account ID, email address and, if you
+              provide it at sign-up, your name; your onboarding answers; errors in the app; and events about how you
+              interact with the app, which can include the text of buttons and items you click (such as the
               beginning of a claim or question shown in your history). A page address can include text you passed
-              to ConvergePanel through a link or the browser extension. Our servers also send PostHog information
-              about Deep Research question classification and subscription events (including subscription
-              identifiers).{" "}
+              to ConvergePanel through a link or the browser extension. If session recording is enabled in our
+              PostHog settings, PostHog may also record your sessions, including text shown on screen. Our servers
+              may also send PostHog information about Deep Research question classification and subscription
+              events (including subscription identifiers).{" "}
               <a href="https://posthog.com/privacy" target="_blank" rel="noopener noreferrer" className="text-sky-600 hover:underline">
                 PostHog Privacy Policy
               </a>
             </li>
+            {/* OWNER VERIFICATION REQUIRED: PostHog session recording is not disabled in code at cabbdbb (components/PostHogProvider.tsx:56-64); whether it is on depends on PostHog project settings (10- A6). PostHog default masking covers inputs, not page text. Do not state it is disabled because PR #329 proposes that. IP: /ingest rewrite to us.i.posthog.com (next.config.js:28-29); whether the client IP is forwarded/stored depends on proxy headers and the "Discard client IP data" setting (A6). Server-side PostHog events (lib/adaptiveSchema/analytics.ts; stripe webhook) are flag/env-gated. */}
           </ul>
         </section>
 
@@ -310,20 +326,48 @@ export default function PrivacyPage() {
         </section>
 
         <section>
-          <h2 className="text-xl font-semibold text-cp-text mb-3">9. Your Rights</h2>
-          <p className="text-cp-muted mb-3">You have the right to:</p>
+          <h2 className="text-xl font-semibold text-cp-text mb-3">9. International Transfers</h2>
+          <p className="text-cp-muted">
+            The providers listed in Section 7 may process your information in countries other than the one you
+            live in, including the United States, and, where the Deep Research fallback is enabled, the
+            People&apos;s Republic of China. These countries may have data protection laws that differ from those
+            in your country. [TRANSFER SAFEGUARDS — OWNER/LEGAL VERIFY]
+          </p>
+          {/* OWNER/LEGAL VERIFY: no region pinning is used (Anthropic inference global; xAI api.x.ai global endpoint; Google "any country" with Google facilities; Firestore locationId UNVERIFIED; Vercel function region UNVERIFIED; Sentry region UNVERIFIED; PostHog US ingest; DeepSeek PRC) — 10- §2.2, §4. Transfer mechanisms (e.g. SCCs in signed DPAs) are UNVERIFIED (10- A3). Counsel to draft the safeguards sentence; do not name a mechanism until the agreement is located. */}
+        </section>
+
+        <section>
+          <h2 className="text-xl font-semibold text-cp-text mb-3">10. Children</h2>
+          <p className="text-cp-muted">
+            ConvergePanel is not intended for children. You must be at least [MINIMUM AGE — OWNER/LEGAL VERIFY]
+            to use the service. If you believe a child has provided us with personal information, contact us and
+            we will review the request.
+          </p>
+          {/* OWNER/LEGAL VERIFY: no minimum age is stated in the Terms or enforced at sign-up in code. Counsel to set the minimum age and confirm the wording; align the Terms. */}
+        </section>
+
+        <section>
+          <h2 className="text-xl font-semibold text-cp-text mb-3">11. Your Rights</h2>
+          <p className="text-cp-muted mb-3">
+            Depending on where you live, you may have rights over your personal information. You can ask us to:
+          </p>
           <ul className="list-disc list-inside text-cp-muted space-y-1 mb-3">
             <li>Access your account data</li>
-            <li>Ask us to delete your account and associated data</li>
-            <li>Request a copy of your data</li>
-            <li>Opt out of non-essential communications</li>
+            <li>Correct information that is inaccurate</li>
+            <li>Delete your account and associated data</li>
+            <li>Provide a copy of your data</li>
+            <li>Restrict or object to certain uses of your information</li>
+            <li>Stop non-essential communications</li>
           </ul>
+          {/* OWNER/LEGAL VERIFY: the list is phrased as requests, not as guaranteed statutory rights. Counsel to confirm which rights apply in the jurisdictions served and how each is fulfilled; correction, restriction and objection are manual today (no in-app mechanism). */}
           <p className="text-cp-muted mb-3">
-            To exercise these rights, contact us at{" "}
+            To make a request, contact us at{" "}
             <a href="mailto:support@convergepanel.com" className="text-sky-600 hover:underline">
               support@convergepanel.com
-            </a>.
+            </a>. If you are not satisfied with our response, you may have the right to complain to a data
+            protection authority where you live. [SUPERVISORY AUTHORITY / COMPLAINT DETAILS — OWNER/LEGAL VERIFY]
           </p>
+          {/* OWNER/LEGAL VERIFY: no supervisory authority, lead authority or representative is named; counsel to decide whether one must be. */}
           <p className="text-cp-muted">
             The app does not currently let you delete your account or individual verifications yourself, so
             deletion requests are handled by email. Our current account deletion removes your sign-in account and
@@ -337,7 +381,7 @@ export default function PrivacyPage() {
         </section>
 
         <section>
-          <h2 className="text-xl font-semibold text-cp-text mb-3">10. Changes to This Policy</h2>
+          <h2 className="text-xl font-semibold text-cp-text mb-3">12. Changes to This Policy</h2>
           <p className="text-cp-muted">
             We may update this Privacy Policy at any time. When we make significant changes, we will update the
             &quot;Last updated&quot; date at the top of this page and may also tell you by email or by a notice on
@@ -346,7 +390,7 @@ export default function PrivacyPage() {
         </section>
 
         <section>
-          <h2 className="text-xl font-semibold text-cp-text mb-3">11. Contact</h2>
+          <h2 className="text-xl font-semibold text-cp-text mb-3">13. Contact</h2>
           <p className="text-cp-muted">
             Questions about this Privacy Policy? Contact us at{" "}
             <a href="mailto:support@convergepanel.com" className="text-sky-600 hover:underline">

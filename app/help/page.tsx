@@ -107,9 +107,15 @@ export default function HelpPage() {
 
           <FaqQ>What formats are supported, and is my video kept?</FaqQ>
           <FaqA>
-            MP4, MOV, and WebM; max 50MB and 60 seconds. The file is processed in memory and not stored
-            as media — only analysis results and structured metadata are saved. Extracted frames are
-            discarded after the models finish.
+            {/* OWNER/LEGAL VERIFY: aligned with Privacy Policy §6 (frames + file details sent; file name and metadata stored). Confirm against app/api/verify-video/route.ts. */}
+            MP4, MOV, and WebM; max 50MB and 60 seconds. The file is processed in your browser and is not
+            uploaded or stored as media. Extracted frames and technical details read from the file are sent
+            for analysis; the analysis results, the file name and those details are saved. Extracted frames
+            are discarded after the models finish. See the{" "}
+            <Link href="/privacy" className="font-medium text-sky-600 hover:text-sky-700">
+              Privacy Policy
+            </Link>{" "}
+            for details.
           </FaqA>
         </section>
 
