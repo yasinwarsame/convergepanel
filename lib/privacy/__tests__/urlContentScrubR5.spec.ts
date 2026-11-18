@@ -428,3 +428,17 @@ describe("R5 (orchestrator A2 finding): Replay navigation.push `data.previous` i
     expect(ev.data.payload.data.previous).toBe("https://convergepanel.com/signup?redirect=[redacted]");
   });
 });
+
+describe("over-decoded nested targets (P8): a claim that itself contains `&<allowlisted name>=` cannot smuggle a param", () => {
+  it.each([
+    ["utm_source", `hello & utm_source=${SENTINEL} world`],
+    ["source", `hello &source=zqx7r5sentinel`],
+    ["tab", `hello &tab=verify&utm_campaign=${SENTINEL}`],
+    ["redirect", `x &redirect=/verify?text=${SENTINEL}`],
+  ])("%s", (_name, claim) => {
+    const win = makeWindow(`/onboarding?redirect=${enc(`/verify?source=extension&text=${claim}`)}`);
+    scrubUrlBeforeTelemetry(win as any);
+    expect(href(win)).toBe(`/onboarding?redirect=${enc("/verify?source=extension")}`);
+    expect(deepDecode(href(win)).toLowerCase()).not.toContain(SENTINEL.toLowerCase());
+  });
+});
