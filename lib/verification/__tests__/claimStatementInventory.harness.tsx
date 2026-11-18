@@ -337,6 +337,30 @@ const slotPairCheck = (a: string, b: string, o: Oracle) => {
   const pb = o.providerOfSlot(b);
   return need(!(o.reliable && pa && pb && pa !== pb), `pair ${a}/${b} of two identified models (${pa}/${pb}) filed as a slot difference`);
 };
+/**
+ * R5 (MINOR-4): a between-models pair printed with its SLOT ids is truthful only when each slot id's family is the
+ * executing model of that slot's provider (an own model answering only its own slot). Otherwise the ids name a model
+ * that did not run, and the pair must be named by its executing models.
+ */
+const slotIdsTruthful = (a: string, b: string, o: Oracle) => {
+  const pa = o.providerOfSlot(a);
+  const pb = o.providerOfSlot(b);
+  return need(!!pa && !!pb && o.providerLabel(pa) === FAMILY[a] && o.providerLabel(pb) === FAMILY[b], `pair (${a}) vs (${b}) named by slot ids, executing models '${pa ? o.providerLabel(pa) : "?"}' / '${pb ? o.providerLabel(pb) : "?"}'`);
+};
+/** R5 (MINOR-4): a between-models pair named by its executing models — two distinct providers, listed once. */
+const namedPairCheck = (la: string, lb: string, o: Oracle, ctx: Ctx) => {
+  const pa = o.providerOrder.find((p) => o.providerLabel(p) === la);
+  const pb = o.providerOrder.find((p) => o.providerLabel(p) === lb);
+  if (!pa || !pb || pa === pb) return `pair '${la}' vs '${lb}' is not two distinct executing models`;
+  const families = new Set(Object.values(FAMILY));
+  if (families.has(la) && families.has(lb)) return `pair '${la}' vs '${lb}' re-worded although the slot ids name the executing models`;
+  const key = [pa, pb].sort().join("|");
+  ctx.lastPair = [pa, pb];
+  if (ctx.pairs.has(key)) return `pair '${la}' vs '${lb}' repeats the executing-model pair ${key}`;
+  ctx.pairs.add(key);
+  return null;
+};
+const NAMED_PAIR = String.raw`Conflicting assessments: ([A-Z].*?) vs ([A-Z].*)`;
 const pairLabels = (o: Oracle, ctx: Ctx) => (ctx.lastPair ? ctx.lastPair.map((p) => o.providerLabel(p)).join(", ") : "<no pair>");
 
 const fmtCounts = (o: Oracle) => (["A", "P", "I", "U"] as const).filter((k) => o[k] > 0).map((k) => `${o[k]} ${{ A: "accurate", P: "partially accurate", I: "inaccurate", U: "unverifiable" }[k]}`).join(", ");
@@ -421,7 +445,8 @@ export const T: Template[] = [
   { id: "digest.where-models-disagree", surfaces: ["view"], re: /^Where models disagree$/, section: "disagree_models", check: (_m, o) => need(o.independence === "independent", "not independent") },
   { id: "digest.differ-heading", surfaces: ["view"], re: /^Points that differ across responses \(not a disagreement between independent models\)$/, section: "disagree_slots" },
   { id: "content.agreement-point", surfaces: ["view"], re: new RegExp(`^${SHARED_CORRECT}$`) },
-  { id: "content.conflict-point", surfaces: ["view"], re: /^Conflicting assessments: \((\w+)\) vs \((\w+)\)$/, check: (m, o, ctx) => { ctx.lastPair = null; return ctx.section === "disagree_models" ? modelsPairCheck(m[1], m[2], o, ctx) : ctx.section === "disagree_slots" ? slotPairCheck(m[1], m[2], o) : null; } },
+  { id: "content.conflict-point", surfaces: ["view"], re: /^Conflicting assessments: \((\w+)\) vs \((\w+)\)$/, check: (m, o, ctx) => { ctx.lastPair = null; return ctx.section === "disagree_models" ? modelsPairCheck(m[1], m[2], o, ctx) ?? slotIdsTruthful(m[1], m[2], o) : ctx.section === "disagree_slots" ? slotPairCheck(m[1], m[2], o) : null; } },
+  { id: "content.conflict-named", surfaces: ["view"], re: new RegExp(`^${NAMED_PAIR}$`), check: (m, o, ctx) => (ctx.section === "disagree_models" ? namedPairCheck(m[1], m[2], o, ctx) : `named pair outside the between-models list (${ctx.section})`) },
   // Between models the pair is named by its two EXECUTING models (R4); between slots by the two slot ids.
   { id: "content.conflict-models", surfaces: ["view"], re: /^— (.+)$/, check: (m, o, ctx) => (ctx.section === "disagree_models" ? need(m[1] === pairLabels(o, ctx), `pair named '${m[1]}', executing models '${pairLabels(o, ctx)}'`) : need(/^\w+, \w+$/.test(m[1]), "slot pair")) },
   // Shown only for a record with no rows, or rows that yield no sentence — not reachable from these mixes.
@@ -481,7 +506,8 @@ export const T: Template[] = [
   { id: "clip.where-models-disagree", surfaces: ["clip"], re: /^Where models disagree:$/, section: "disagree_models", check: (_m, o) => independenceIs("independent", o) },
   { id: "clip.differ", surfaces: ["clip"], re: /^Points that differ across responses \(not a disagreement between independent models\):$/, section: "disagree_slots" },
   { id: "clip.agreement-point", surfaces: ["clip"], re: new RegExp(`^• ${SHARED_CORRECT}$`) },
-  { id: "clip.conflict-point", surfaces: ["clip"], re: /^• Conflicting assessments: \((\w+)\) vs \((\w+)\) \[(.+)\]$/, check: (m, o, ctx) => (ctx.section === "disagree_models" ? modelsPairCheck(m[1], m[2], o, ctx) ?? need(m[3] === pairLabels(o, ctx), `pair named '${m[3]}', executing models '${pairLabels(o, ctx)}'`) : all(need(m[3] === `${m[1]}, ${m[2]}`, "slot pair"), ctx.section === "disagree_slots" ? slotPairCheck(m[1], m[2], o) : null)) },
+  { id: "clip.conflict-named", surfaces: ["clip"], re: new RegExp(`^• ${NAMED_PAIR}$`), check: (m, o, ctx) => (ctx.section === "disagree_models" ? namedPairCheck(m[1], m[2], o, ctx) : `named pair outside the between-models list (${ctx.section})`) },
+  { id: "clip.conflict-point", surfaces: ["clip"], re: /^• Conflicting assessments: \((\w+)\) vs \((\w+)\) \[(.+)\]$/, check: (m, o, ctx) => (ctx.section === "disagree_models" ? modelsPairCheck(m[1], m[2], o, ctx) ?? slotIdsTruthful(m[1], m[2], o) ?? need(m[3] === pairLabels(o, ctx), `pair named '${m[3]}', executing models '${pairLabels(o, ctx)}'`) : all(need(m[3] === `${m[1]}, ${m[2]}`, "slot pair"), ctx.section === "disagree_slots" ? slotPairCheck(m[1], m[2], o) : null)) },
   { id: "clip.disclaimer", surfaces: ["clip"], re: /^(⚠️ DISCLAIMER: This is an AI-assisted claim verification result, not expert fact-checking,|journalistic verification, or a legal determination of truth\. AI models may hallucinate or|reason incorrectly\. Do not use as legal evidence or the sole basis for consequential|decisions\. See convergepanel\.com\/terms for full terms\.)$/ },
 
   // ── Memo (the claim's exported explanatory content) ──
@@ -521,7 +547,8 @@ export const T: Template[] = [
   { id: "memo.where-models-disagree", surfaces: ["memo"], re: /^WHERE MODELS DISAGREE$/, section: "disagree_models", check: (_m, o) => independenceIs("independent", o) },
   { id: "memo.differ", surfaces: ["memo"], re: /^POINTS THAT DIFFER ACROSS RESPONSES \(NOT A DISAGREEMENT BETWEEN INDEPENDENT MODELS\)$/, section: "disagree_slots" },
   { id: "memo.content-bullet", surfaces: ["memo"], re: new RegExp(`^- (${SHARED_CORRECT}|${DISJOINT.join("|")})$`) },
-  { id: "memo.conflict-bullet", surfaces: ["memo"], re: /^- Conflicting assessments: \((\w+)\) vs \((\w+)\)(?: \[(.+)\])?$/, check: (m, o, ctx) => (ctx.section === "disagree_models" ? modelsPairCheck(m[1], m[2], o, ctx) ?? need(m[3] === pairLabels(o, ctx), `pair named '${m[3]}', executing models '${pairLabels(o, ctx)}'`) : all(need(m[3] === undefined, "slot pair named as models"), ctx.section === "disagree_slots" ? slotPairCheck(m[1], m[2], o) : null)) },
+  { id: "memo.conflict-named", surfaces: ["memo"], re: new RegExp(`^- ${NAMED_PAIR}$`), check: (m, o, ctx) => (ctx.section === "disagree_models" ? namedPairCheck(m[1], m[2], o, ctx) : `named pair outside the between-models list (${ctx.section})`) },
+  { id: "memo.conflict-bullet", surfaces: ["memo"], re: /^- Conflicting assessments: \((\w+)\) vs \((\w+)\)(?: \[(.+)\])?$/, check: (m, o, ctx) => (ctx.section === "disagree_models" ? modelsPairCheck(m[1], m[2], o, ctx) ?? slotIdsTruthful(m[1], m[2], o) ?? need(m[3] === pairLabels(o, ctx), `pair named '${m[3]}', executing models '${pairLabels(o, ctx)}'`) : all(need(m[3] === undefined, "slot pair named as models"), ctx.section === "disagree_slots" ? slotPairCheck(m[1], m[2], o) : null)) },
   // Methodology sentences
   {
     id: "memo.method-models",
@@ -595,9 +622,10 @@ export const T: Template[] = [
     re: /^Conflicting assessments: \((\w+)\) vs \((\w+)\)(?: \[(.+)\])?$/,
     check: (m, o, ctx) =>
       ctx.section === "gov_disagree"
-        ? modelsPairCheck(m[1], m[2], o, ctx) ?? (m[3] !== undefined ? need(m[3] === pairLabels(o, ctx), `pair named '${m[3]}', executing models '${pairLabels(o, ctx)}'`) : need(o.namedOwn, "a between-models pair of substituted / unidentified slots named only by slot ids"))
+        ? modelsPairCheck(m[1], m[2], o, ctx) ?? (m[3] !== undefined ? slotIdsTruthful(m[1], m[2], o) ?? need(m[3] === pairLabels(o, ctx), `pair named '${m[3]}', executing models '${pairLabels(o, ctx)}'`) : need(o.namedOwn, "a between-models pair of substituted / unidentified slots named only by slot ids"))
         : need(m[3] === undefined, "a qualified point named as models"),
   },
+  { id: "gov.conflict-named", surfaces: ["gov"], re: new RegExp(`^${NAMED_PAIR}$`), check: (m, o, ctx) => (ctx.section === "gov_disagree" ? namedPairCheck(m[1], m[2], o, ctx) : `named pair outside the between-models list (${ctx.section})`) },
   { id: "gov.qualified-heading", surfaces: ["gov"], re: /^Recorded differences not counted as model disagreements$/, section: "gov_qualified" },
   { id: "gov.qualified-basis", surfaces: ["gov"], re: /^\((Same executing model — not a disagreement between independent models|One independent model — not a disagreement between models|Model independence unverified — not confirmed as a disagreement between models)\)$/ },
   { id: "gov.slot-responses", surfaces: ["gov"], re: new RegExp(`^Panel slot responses: (.+)\\. ${NOTE}$`), check: (m, o) => all(need(m[1] === fmtCounts(o), `counts '${m[1]}'`), noteOk(m[2], o)) },

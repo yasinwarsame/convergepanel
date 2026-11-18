@@ -116,7 +116,8 @@ describe("governance queue claim rows on the shared statement basis (R4)", () =>
     // No count of slots presented as models, anywhere in the DTO or the rendered row.
     expect(json).not.toMatch(/4\/5 models/);
     expect(units.join(" | ")).not.toMatch(/\d+\/\d+ models/);
-    expect(r.agreementPoints ?? []).toEqual([]);
+    // The DTO omits the key (no agreement line about models); asserted as state, without masking (Quality Gate preflight).
+    expect(r.agreementPoints).toBeUndefined();
     expect(r.agreementSummary).toBeUndefined();
     // Per-row executing identity.
     expect(r.modelVerdicts.map((m: any) => m.label ?? m.modelId)).toEqual([
@@ -133,8 +134,9 @@ describe("governance queue claim rows on the shared statement basis (R4)", () =>
       "DeepSeek (substituting ChatGPT, Claude, Gemini, Grok) rated as accurate (others disagree)",
       "Perplexity rated as inaccurate (others disagree)",
     ]);
-    // One conflict observation for the one pair of distinct executing models (was four).
-    expect(r.disagreements).toEqual(["Conflicting assessments: (chatgpt) vs (perplexity) [DeepSeek (substituting ChatGPT, Claude, Gemini, Grok), Perplexity]"]);
+    // One conflict observation for the one pair of distinct executing models (was four), named by the executing models
+    // (R5 MINOR-4: was "(chatgpt) vs (perplexity) [DeepSeek (substituting …), Perplexity]").
+    expect(r.disagreements).toEqual(["Conflicting assessments: DeepSeek (substituting ChatGPT, Claude, Gemini, Grok) vs Perplexity"]);
     expect(units.filter((u) => u.startsWith("Conflicting assessments"))).toHaveLength(1);
     // The score is not independent corroboration.
     expect(r.consensusBasis).toBe("slot_responses");

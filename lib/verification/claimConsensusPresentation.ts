@@ -70,6 +70,30 @@ export function claimVerdictQualifier(independence: unknown): string | null {
   return i === "insufficient" ? CLAIM_SINGLE_MODEL_ASSESSMENT_TEXT : CLAIM_COVERAGE_UNVERIFIED_TEXT;
 }
 
+/** The presentation fields every claim score surface carries (the stored score + the additive keys). */
+export type ClaimScoreTextFields = {
+  consensusScore?: number | null;
+  /** Set when the score is not presented (below two independent executing models, or provenance not established). */
+  consensusWithheld?: ConsensusScoreWithheldReason | null;
+  /** "slot_responses" → the score carries `CLAIM_SCORE_SLOT_BASIS_QUALIFIER` (R4). Any other value adds nothing. */
+  consensusBasis?: unknown;
+};
+
+/**
+ * R5 — THE claim consensus-score text renderer. Every surface that prints a claim's stored consensus score as text
+ * (governance queue cell and modal, legacy Team review queue, governance Audit Log badge, admin runs tab, Personal
+ * history suffix) goes through this one function, so the withheld reason and the R4 slot-basis qualifier cannot drift
+ * surface by surface again (review record 16 F, MAJOR-1: they had been added one surface at a time). `format` only
+ * shapes the number ("92/100", "Consensus 92/100", …); `empty` is the surface's text for "no stored score".
+ */
+export function claimScoreText(row: ClaimScoreTextFields, format: (score: number) => string, empty: string): string {
+  if (row.consensusWithheld) return CONSENSUS_WITHHELD_TEXT[row.consensusWithheld];
+  const score = row.consensusScore;
+  if (typeof score !== "number" || !Number.isFinite(score)) return empty;
+  const text = format(score);
+  return row.consensusBasis === "slot_responses" ? `${text} (${CLAIM_SCORE_SLOT_BASIS_QUALIFIER})` : text;
+}
+
 /**
  * The Personal history row suffix for a claim: " · 92 consensus" only for an "independent" record (the server sends the
  * independence with every history row; a live result carries it from the verify response); otherwise
@@ -82,14 +106,17 @@ export function claimHistoryConsensusSuffix(item: {
   consensusBasis?: unknown;
   payload?: Parameters<typeof claimPayloadConsensusBasis>[0] | null;
 }): string {
-  const reason = consensusScoreWithheldReason(claimModelIndependence(item.modelIndependence));
-  if (reason) return ` · ${CONSENSUS_WITHHELD_TEXT[reason]}`;
-  if (item.consensusScore === null || item.consensusScore === undefined) return "";
+  let reason = consensusScoreWithheldReason(claimModelIndependence(item.modelIndependence));
   // R4 owner ruling: a score over slots that are not each a distinct identified executing model is qualified —
   // `consensusBasis` from the server row (app/api/user/panel-history), or derived from the rows of a live / cached item's
   // payload (lib/verification/claimStatementBasisSources.ts).
-  const basis = item.consensusBasis ?? (item.payload && Array.isArray(item.payload.modelEvidence) ? claimPayloadConsensusBasis(item.payload) : undefined);
-  return basis === "slot_responses"
-    ? ` · ${item.consensusScore} consensus (${CLAIM_SCORE_SLOT_BASIS_QUALIFIER})`
-    : ` · ${item.consensusScore} consensus`;
+  let basis = item.consensusBasis;
+  if (!reason && basis === undefined && item.payload) {
+    // R5 (fail closed): a live / cached payload that carries no rows proves no basis — the score is withheld as
+    // unverified rather than shown bare.
+    if (Array.isArray(item.payload.modelEvidence)) basis = claimPayloadConsensusBasis(item.payload);
+    else reason = "independence_unverified";
+  }
+  const text = claimScoreText({ consensusScore: item.consensusScore, consensusWithheld: reason, consensusBasis: basis }, (n) => `${n} consensus`, "");
+  return text ? ` · ${text}` : "";
 }

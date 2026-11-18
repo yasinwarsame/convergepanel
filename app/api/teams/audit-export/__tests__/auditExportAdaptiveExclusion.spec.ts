@@ -144,13 +144,15 @@ describe("GET /api/teams/audit-export — adaptive exclusion", () => {
     expect(body).toHaveLength(1);
   });
 
-  it("preserves the existing legacy CSV column contract unchanged", async () => {
+  it("preserves the existing legacy CSV column contract (R5: one column, consensusBasis, appended last)", async () => {
     teamRunDocs.set("l1", legacyDoc());
     const res = await GET(buildRequest("?format=csv"));
     const text = await res.text();
     const header = text.split("\n")[0];
+    // The ten established columns are an unchanged prefix, in order; R5 appends the claim score basis
+    // (app/api/teams/audit-export/__tests__/claimScoreBasisExport.spec.ts).
     expect(header).toBe(
-      "runId,timestamp,userEmail,type,queryTruncated,verdict,consensusScore,policyFlags,humanDecisionAction,humanDecisionNotes"
+      "runId,timestamp,userEmail,type,queryTruncated,verdict,consensusScore,policyFlags,humanDecisionAction,humanDecisionNotes,consensusBasis"
     );
   });
 

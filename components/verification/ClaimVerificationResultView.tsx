@@ -57,6 +57,7 @@ import {
   CLAIM_SLOT_RESPONSES_DIFFER_SUBTITLE,
   CLAIM_SLOT_RESPONSES_DIFFER_TITLE,
   splitClaimDisagreementsByIdentity,
+  claimConflictPointByModels,
   claimSplitVerdictsQualifier,
   formatClaimVerdictCounts,
   hasSplitVerdicts,
@@ -324,8 +325,11 @@ function agreementSectionFallbackCopy(data: ClaimVerificationClientPayload): str
 export function claimDigestSections(data: ClaimVerificationClientPayload): {
   agreeHeading: string;
   agree: string[];
-  /** One entry per pair of DISTINCT executing models (R4); `models` names the two executing models. */
-  disagreeBetweenModels: ClaimVerificationClientPayload["whereModelsDisagree"];
+  /**
+   * One entry per pair of DISTINCT executing models (R4); `models` names the two executing models. `named` (R5): the
+   * point re-worded to name those models when the stored slot ids would name models that did not run.
+   */
+  disagreeBetweenModels: Array<ClaimVerificationClientPayload["whereModelsDisagree"][number] & { named?: string }>;
   disagreeBetweenSlots: ClaimVerificationClientPayload["whereModelsDisagree"];
 } {
   const view = claimViewIndependence(data);
@@ -338,7 +342,11 @@ export function claimDigestSections(data: ClaimVerificationClientPayload): {
   return {
     agreeHeading: claimStatementBasisOf(data).oneModelPerSlot ? "Where models agree" : CLAIM_NOT_INDEPENDENT_AGREE_HEADING,
     agree: data.whereModelsAgree,
-    disagreeBetweenModels: split.betweenModels.map((p) => ({ ...p, models: betweenModelsLabels(data, split.providersOf, p) })),
+    disagreeBetweenModels: split.betweenModels.map((p) => {
+      const models = betweenModelsLabels(data, split.providersOf, p);
+      const named = split.providersOf(p) ? claimConflictPointByModels(p.point, p.models, models) : null;
+      return { ...p, models, ...(named ? { named } : {}) };
+    }),
     disagreeBetweenSlots: split.betweenSlots,
   };
 }
@@ -348,6 +356,7 @@ export function claimMemoCrossModel(data: ClaimVerificationClientPayload): Claim
   disagreementPointsBetweenModels: string[];
   disagreementPointsBetweenSlots: string[];
   disagreementModelsByPoint: Record<string, string[]>;
+  disagreementTextByPoint: Record<string, string>;
   scoreBasisQualifier: string | null;
 } {
   const digest = claimDigestSections(data);
@@ -356,6 +365,7 @@ export function claimMemoCrossModel(data: ClaimVerificationClientPayload): Claim
     disagreementPointsBetweenModels: digest.disagreeBetweenModels.map((d) => d.point),
     disagreementPointsBetweenSlots: digest.disagreeBetweenSlots.map((d) => d.point),
     disagreementModelsByPoint: Object.fromEntries(digest.disagreeBetweenModels.map((d) => [d.point, d.models])),
+    disagreementTextByPoint: Object.fromEntries(digest.disagreeBetweenModels.flatMap((d) => (d.named ? [[d.point, d.named]] : []))),
     scoreBasisQualifier: claimScoreBasisQualifier(data),
   };
 }
@@ -447,7 +457,7 @@ export function buildClaimVerdictClipboardText(data: ClaimVerificationClientPayl
   if (digest.disagreeBetweenModels.length) {
     lines.push("");
     lines.push("Where models disagree:");
-    digest.disagreeBetweenModels.forEach((x) => lines.push(`• ${x.point} [${x.models.join(", ")}]`));
+    digest.disagreeBetweenModels.forEach((x) => lines.push(x.named ? `• ${x.named}` : `• ${x.point} [${x.models.join(", ")}]`));
   }
   if (digest.disagreeBetweenSlots.length) {
     lines.push("");
@@ -841,10 +851,10 @@ export default function ClaimVerificationResultView({
             <div key={heading}>
               <p className="text-xs font-medium text-rose-700 mb-2">{heading}</p>
               <ul className="list-disc pl-5 text-sm text-cp-text space-y-1">
-                {points.map((x, i) => (
+                {points.map((x: (typeof points)[number] & { named?: string }, i) => (
                   <li key={i}>
-                    {x.point}
-                    {x.models?.length ? <span className="text-cp-faint"> — {x.models.join(", ")}</span> : null}
+                    {x.named ?? x.point}
+                    {!x.named && x.models?.length ? <span className="text-cp-faint"> — {x.models.join(", ")}</span> : null}
                   </li>
                 ))}
               </ul>

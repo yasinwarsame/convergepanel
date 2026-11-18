@@ -5,6 +5,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase/admin";
 import { resolveLegacyReadDomain, teamRunRowIsInLegacyReadDomain } from "@/lib/governance/legacyReviewReadDomain";
+import { storedClaimHistoryScoreFields } from "@/lib/verification/claimStatementBasisSources";
+import { logger } from "@/lib/logger";
 import {
   getRequestUid,
   loadUserAndTeam,
@@ -20,6 +22,56 @@ function tsMillis(t: unknown): number {
     return (t as { toMillis: () => number }).toMillis();
   }
   return 0;
+}
+
+/**
+ * R5 (review record 16 F, MINOR-1) — the basis of a CLAIM row's exported consensus score, from the linked
+ * `verifications/{verificationId}` persisted rows on the shared claim statement basis
+ * (lib/verification/claimStatementBasisSources.ts). Exported as the APPENDED `consensusBasis` column / JSON field; the
+ * stored `consensusScore` column is unchanged (still the number), so every established column keeps its position and
+ * format. Values:
+ *   "independent_models"              >= 2 independent executing models, one distinct identified model per slot
+ *   "slot_responses"                  computed over panel slot responses, not independent corroboration
+ *   "insufficient_independent_models" fewer than two independent executing models — not a consensus
+ *   "independence_unverified"         the executing models could not be established (missing/unreadable: fail closed)
+ *   ""                                not a claim row (the research score basis is outside this change)
+ */
+type ExportConsensusBasis = "independent_models" | "slot_responses" | "insufficient_independent_models" | "independence_unverified" | "";
+const CLAIM_BASIS_CHUNK = 100;
+
+function claimExportBasis(data: Record<string, unknown> | null): Exclude<ExportConsensusBasis, ""> {
+  if (!data) return "independence_unverified";
+  const f = storedClaimHistoryScoreFields(data);
+  if (f.consensusWithheld) return f.consensusWithheld;
+  return f.consensusBasis === "slot_responses" ? "slot_responses" : "independent_models";
+}
+
+/** The claim rows' linked verification ids (a classic row names a run OR a verification). */
+function claimVerificationIdOf(x: Record<string, unknown>): string | null {
+  const runId = typeof x.runId === "string" ? x.runId.trim() : "";
+  const verificationId = typeof x.verificationId === "string" ? x.verificationId.trim() : "";
+  return !runId && verificationId ? verificationId : null;
+}
+
+/** One batched, field-masked read per chunk of the claim rows being exported. Never throws (a failed chunk → unverified). */
+async function readClaimExportBases(ids: string[]): Promise<Map<string, Exclude<ExportConsensusBasis, "">>> {
+  const out = new Map<string, Exclude<ExportConsensusBasis, "">>();
+  const db = adminDb;
+  if (!db) return out;
+  const unique = [...new Set(ids)];
+  for (let i = 0; i < unique.length; i += CLAIM_BASIS_CHUNK) {
+    const chunk = unique.slice(i, i + CLAIM_BASIS_CHUNK);
+    try {
+      const snaps = await db.getAll(...chunk.map((id) => db.collection("verifications").doc(id)), { fieldMask: ["modelResults", "selectedModels"] });
+      chunk.forEach((id, j) => {
+        const snap = snaps[j];
+        out.set(id, claimExportBasis(snap && snap.exists === true ? ((snap.data() ?? {}) as Record<string, unknown>) : null));
+      });
+    } catch (err) {
+      logger.warn("[teams/audit-export] claim_score_basis_read_failed", { errorName: err instanceof Error ? err.name : typeof err });
+    }
+  }
+  return out;
 }
 
 function escapeCsv(s: string) {
@@ -131,9 +183,15 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  const claimBases = await readClaimExportBases(
+    eligibleDocs.map((d) => claimVerificationIdOf(d.data())).filter((id): id is string => id !== null)
+  );
+
   const rows = eligibleDocs
     .map((d) => {
       const x = d.data();
+      const claimId = claimVerificationIdOf(x);
+      const consensusBasis: ExportConsensusBasis = claimId ? claimBases.get(claimId) ?? "independence_unverified" : "";
       const t = tsMillis(x.timestamp);
       return {
         runId: d.id,
@@ -145,6 +203,7 @@ export async function GET(req: NextRequest) {
         consensusScore: Number(x.consensusScore ?? 0),
         policyFlags: Array.isArray(x.policyFlags) ? x.policyFlags : [],
         humanDecision: x.humanDecision ?? null,
+        consensusBasis,
       };
     })
     .filter((r) => {
@@ -178,6 +237,8 @@ export async function GET(req: NextRequest) {
     "policyFlags",
     "humanDecisionAction",
     "humanDecisionNotes",
+    // R5: appended last so every established column keeps its position and format.
+    "consensusBasis",
   ];
   const lines = [headers.join(",")];
   for (const r of rows) {
@@ -194,6 +255,7 @@ export async function GET(req: NextRequest) {
         escapeCsv((r.policyFlags as string[]).join(";")),
         escapeCsv(hd?.action ?? ""),
         escapeCsv(hd?.notes ?? ""),
+        escapeCsv(r.consensusBasis),
       ].join(",")
     );
   }

@@ -163,6 +163,8 @@ export interface MemoInput {
     disagreementPointsBetweenSlots?: string[];
     /** R4: the two executing models each between-models point is between. */
     disagreementModelsByPoint?: Record<string, string[]>;
+    /** R5: a between-models point re-worded to name its executing models (printed instead of "point [models]"). */
+    disagreementTextByPoint?: Record<string, string>;
     /** R4: the qualifier the consensus score line carries when the slots are not each a distinct identified model. */
     scoreBasisQualifier?: string | null;
   };
@@ -507,7 +509,8 @@ function generateClaimMemo(input: MemoInput): string {
     lines.push("WHERE MODELS DISAGREE");
     betweenModels.forEach((p) => {
       const who = cross?.disagreementModelsByPoint?.[p];
-      lines.push(who && who.length ? `- ${p} [${who.join(", ")}]` : `- ${p}`);
+      const named = cross?.disagreementTextByPoint?.[p];
+      lines.push(named ? `- ${named}` : who && who.length ? `- ${p} [${who.join(", ")}]` : `- ${p}`);
     });
     lines.push("");
   }

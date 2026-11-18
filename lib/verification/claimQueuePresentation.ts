@@ -26,6 +26,7 @@ import {
   claimRowExecutionLabel,
   claimScoreNeedsSlotQualifier,
   claimSlotResponsesNote,
+  claimConflictPointByModels,
   claimSlotTally,
   formatClaimVerdictCounts,
   splitClaimDisagreementsByIdentity,
@@ -145,7 +146,8 @@ export function claimQueuePresentation(
   for (const p of split.betweenModels) {
     if (lines.disagreements.length >= DIGEST_CAP) break;
     const pair = split.providersOf(p);
-    lines.disagreements.push(pair ? `${p.point} [${pair.map(label).join(", ")}]` : p.point);
+    const names = pair ? pair.map(label) : [];
+    lines.disagreements.push(pair ? claimConflictPointByModels(p.point, p.models, names) ?? `${p.point} [${names.join(", ")}]` : p.point);
   }
   for (const p of split.betweenSlots) {
     const [a, b] = p.models;

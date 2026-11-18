@@ -8,6 +8,8 @@ import { privilegedDenialResponse, requirePrivilegedAccess } from "@/lib/admin/p
 import { adminDb } from "@/lib/firebase/admin";
 import { createRunWorkspaceIntegrityBatch } from "@/lib/workspaces/runWorkspaceIntegrityBatch";
 import { logger } from "@/lib/logger";
+import { storedClaimHistoryScoreFields } from "@/lib/verification/claimStatementBasisSources";
+import type { ConsensusScoreWithheldReason } from "@/lib/panel/independentVoices";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,6 +49,9 @@ const VER_FIELDS = [
   "governanceReviewedAt",
   "governanceReviewComment",
   "type",
+  // R5: read for the claim score basis only (lib/verification/claimStatementBasisSources.ts); never returned.
+  "modelResults",
+  "selectedModels",
 ] as const;
 
 const VIDEO_FIELDS = [
@@ -73,6 +78,13 @@ export type AdminRunListRow = {
   userEmail: string;
   userId: string;
   consensusScore: number | null;
+  /**
+   * Claim rows only (R5, presentation): the stored score is withheld with this reason (fewer than two independent
+   * executing models, or the executing models not established). The stored `consensusScore` is unchanged.
+   */
+  consensusWithheld?: ConsensusScoreWithheldReason;
+  /** Claim rows only (R5, presentation): the score was computed over panel slot responses, not independent corroboration. */
+  consensusBasis?: "slot_responses";
   /** Claim or video authenticity verdict when present. */
   verdict: string | null;
   governanceStatus: string | null;
@@ -279,6 +291,7 @@ export async function GET(request: NextRequest) {
           firestoreMillis(data.createdAt) ||
           firestoreMillis(data.verifiedAt);
         const verdictRaw = data.verdict;
+        const scoreFields = storedClaimHistoryScoreFields(data);
         merged.push({
           sortMs: ms || 0,
           runId: doc.id,
@@ -288,6 +301,8 @@ export async function GET(request: NextRequest) {
           userEmail: typeof data.userEmail === "string" ? data.userEmail : "",
           userId,
           consensusScore: consensusFromData(data),
+          ...(scoreFields.consensusWithheld ? { consensusWithheld: scoreFields.consensusWithheld } : {}),
+          ...(scoreFields.consensusBasis ? { consensusBasis: scoreFields.consensusBasis } : {}),
           verdict: verdictRaw != null ? String(verdictRaw) : null,
           governanceStatus: gs,
           governanceReviewedBy:

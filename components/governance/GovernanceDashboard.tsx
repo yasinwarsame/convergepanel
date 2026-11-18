@@ -4,7 +4,7 @@
  * Org governance dashboard: review queue, policy editor, audit log.
  */
 
-import { CLAIM_SCORE_SLOT_BASIS_QUALIFIER } from "@/lib/verification/claimVerdictCounts";
+import { claimScoreText } from "@/lib/verification/claimConsensusPresentation";
 import {
   useCallback,
   useEffect,
@@ -24,7 +24,7 @@ import { isValidReviewThresholdValue } from "@/lib/governance/familyReviewThresh
 import ScoreTypeThresholdsSection from "@/components/governance/ScoreTypeThresholdsSection";
 import { buildPolicyPatch } from "@/components/governance/policyPatch";
 import { runModelFamilyName } from "@/lib/panel/runModelIdentity";
-import { CONSENSUS_WITHHELD_TEXT, type ConsensusScoreWithheldReason, type StoredConsensusIndependence } from "@/lib/panel/independentVoices";
+import type { ConsensusScoreWithheldReason, StoredConsensusIndependence } from "@/lib/panel/independentVoices";
 import { QUALIFIED_DISAGREEMENT_TEXT, type QualifiedDisagreementBasis } from "@/lib/panel/storedDisagreementIndependence";
 import {
   formatFullDatetime,
@@ -263,6 +263,10 @@ type AuditEvent = {
   trailAvailable?: boolean;
   question?: string;
   consensusScore?: number | null;
+  /** Claim events (R5, app/api/governance/audit): presentation-only — the recorded score is withheld with this reason. */
+  consensusWithheld?: ConsensusScoreWithheldReason;
+  /** Claim events (R5): the recorded score was computed over panel slot responses, not independent corroboration. */
+  consensusBasis?: "slot_responses";
 };
 
 /** Shown instead of the trail control when the trail can't be opened. Names no owner and no reason beyond scope. */
@@ -473,11 +477,13 @@ export function AuditLogEventCard(props: {
           {rt ? (
             <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${rt.cls}`}>{rt.label}</span>
           ) : null}
-          {score != null ? (
+          {ev.consensusWithheld ? (
+            <span className="text-xs font-medium text-cp-muted">{claimScoreText(ev, () => "", "")}</span>
+          ) : score != null ? (
             <span
               className={`text-sm font-bold tabular-nums ${auditConsensusDisplayClass(score)}`}
             >
-              {score}/100
+              {claimScoreText(ev, (n) => `${Math.round(n)}/100`, "")}
             </span>
           ) : null}
           <time
@@ -658,11 +664,9 @@ function statusChipClasses(status: string): { wrap: string; label: string } {
  * executing models, or independence not recorded — see `consensusWithheld`) shows the reason, never a number.
  */
 export function queueConsensusText(row: Pick<QueueRow, "consensusScore" | "consensusWithheld"> & { consensusBasis?: unknown }, withDenominator: boolean): string {
-  if (row.consensusWithheld) return CONSENSUS_WITHHELD_TEXT[row.consensusWithheld];
-  if (row.consensusScore == null) return "—";
-  const n = withDenominator ? `${Math.round(row.consensusScore)}/100` : String(Math.round(row.consensusScore));
-  // R4 owner ruling: a claim score over slots that are not each a distinct identified model is not corroboration.
-  return row.consensusBasis === "slot_responses" ? `${n} (${CLAIM_SCORE_SLOT_BASIS_QUALIFIER})` : n;
+  // R4 owner ruling: a claim score over slots that are not each a distinct identified model is not corroboration — the
+  // shared renderer (R5) adds the qualifier, exactly as on every other claim score surface.
+  return claimScoreText(row, (n) => (withDenominator ? `${Math.round(n)}/100` : String(Math.round(n))), "—");
 }
 
 /**

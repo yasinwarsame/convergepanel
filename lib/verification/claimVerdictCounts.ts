@@ -396,6 +396,22 @@ export function splitClaimDisagreementsByIdentity<T extends { models: string[] }
   return { betweenModels, betweenSlots, providersOf: (p: T) => pairOf.get(p) ?? null };
 }
 
+/**
+ * R5 (review record 16 F, MINOR-4): a between-models conflict point named by its EXECUTING models. The digest stores
+ * "Conflicting assessments: (slotA) vs (slotB)" (lib/verification/agreementDigest.ts); when either slot's executing
+ * label differs from its slot family (a substitute, an unidentified slot) the slot ids would name models that did not
+ * run, so the text names the executing models instead ("Conflicting assessments: DeepSeek (substituting ChatGPT) vs
+ * Perplexity"). Null → the established text is truthful and is kept (callers append the labels as before). The stored
+ * point is never modified.
+ */
+export function claimConflictPointByModels(point: string, slots: readonly unknown[] | undefined, labels: readonly string[]): string | null {
+  const [a, b] = slots ?? [];
+  if (labels.length !== 2 || typeof a !== "string" || typeof b !== "string") return null;
+  if (point !== `Conflicting assessments: (${a}) vs (${b})`) return null;
+  if (labels[0] === runModelFamilyName(a.trim()) && labels[1] === runModelFamilyName(b.trim())) return null;
+  return `Conflicting assessments: ${labels[0]} vs ${labels[1]}`;
+}
+
 /** One sentence qualifying slot-response counts, with the slot note when there is one. */
 export function claimSlotResponsesNote(t: ClaimSlotTally): string {
   const note = claimSlotTallyNote(t);
