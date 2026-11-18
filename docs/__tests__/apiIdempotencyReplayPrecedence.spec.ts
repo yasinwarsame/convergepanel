@@ -1104,3 +1104,29 @@ describe("Addendum 6: worker_timeout and persistence_failed are platform-caused 
     }
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// Addendum 7, M-1: deletion binds to the original verification, not to the key string
+// ---------------------------------------------------------------------------------------------
+describe("Addendum 7 M-1: deleting A never touches a newer record B under the same Idempotency-Key", () => {
+  it("A accepted with K; K expires; B accepted with K; A deleted → B still replays (no false 410)", () => {
+    const sys = world();
+    const a = send(sys, req(SAME));
+    expect(fmt(a)).toBe("202 new");
+    sys.dynamic.now += IDEMPOTENCY_TTL_MS + 1; // K's record for A expires
+    const b = send(sys, req(SAME));
+    expect(fmt(b)).toBe("202 new");
+    expect(b.body?.id).not.toBe(a.body?.id);
+    const recordBefore = sys.store.get<IdemRecord>(scopeOf(sys));
+    expect(recordBefore?.verificationId).toBe(b.body?.id);
+    expect(runToEnd(handleDelete(sys, "live1", a.body?.id as string)).status).toBe(202);
+    runToEnd(sweep(sys));
+    // B's record is left entirely unchanged, and B's replay is the original 202.
+    expect(sys.store.get<IdemRecord>(scopeOf(sys))).toEqual(recordBefore);
+    expect(send(sys, req(SAME))).toEqual({ status: 202, body: b.body, replayed: true });
+    expect(fmt(handleGet(sys, "live1", b.body?.id as string))).toBe("200 undefined");
+    expect(fmt(handleGet(sys, "live1", a.body?.id as string))).toBe("410 verification_deleted");
+    expect(sys.jobs().length).toBe(2);
+    expect(sys.dispatched).toEqual([a.body?.id, b.body?.id]);
+  });
+});
