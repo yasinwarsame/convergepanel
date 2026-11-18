@@ -261,6 +261,26 @@ describe("originClaimId accepts exactly what the real parser accepts (differenti
       expect(new URLSearchParams(after).get("originClaimId")).toBe(accepted ? value : null);
     });
   }
+  it("absolute (independent of the parser): suffixed, prefixed or resized ids are dropped, and no sentinel survives", () => {
+    const variants = [
+      `${base}&text=${SENTINEL}`,
+      `${base} ${SENTINEL}`,
+      `${base}#${SENTINEL}`,
+      `${base}?q=${SENTINEL}`,
+      `${base}/${SENTINEL}`,
+      `${base}${SENTINEL}`,
+      `${SENTINEL}${base}`,
+      `v1:findings:0:${fp}A`,
+      `v1:findings:0:${fp.slice(1)}`,
+      `v1:findings:0:${fp}${fp}`,
+    ];
+    for (const value of variants) {
+      expect(rules.isRoutingParamValue("originClaimId", value)).toBe(false);
+      const search = `?tab=verify&originClaimId=${enc(value)}`;
+      const after = scrubUrlParts({ pathname: "/", search, hash: "" }).search;
+      expect(after).toBe("?tab=verify");
+    }
+  });
   it("no accepted value can carry a space, &, =, #, ?, / or exceed the builder's longest id", () => {
     const longest = real[real.length - 1];
     for (const ch of [" ", "&", "=", "#", "?", "/", "%", "+", "\n"]) {
