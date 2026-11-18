@@ -104,7 +104,7 @@ export async function POST(request: NextRequest) {
   // Toolkit round trip, and firebase-admin has no per-call timeout we can set
   // (a hung upstream held this route ~132 s). Both run under ONE end-to-end
   // deadline (AUTH_VERIFICATION_DEADLINE_MS, shared with resolveRequestIdentity,
-  // including its per-instance cap on abandoned verifications). A call still
+  // including its per-instance cap on in-flight verifications). A call still
   // pending at the deadline — or refused at the cap — answers the same 503 as a
   // verifier outage; a result that arrives later is never read, so a late valid
   // verification can never reach createSessionCookie and a late cookie is never set.
@@ -160,7 +160,7 @@ export async function POST(request: NextRequest) {
 /**
  * The deadline / cap answer: the route's existing verifier-outage 503 (same
  * body and telemetry category). The cut-off itself is logged by the deadline
- * module (`[auth-verification] deadline_exceeded` / `abandoned_cap_refused`).
+ * module (`[auth-verification] deadline_exceeded` / `in_flight_cap_refused`).
  */
 function verificationUnavailable(step: string, cause: Exclude<VerificationOutcome<unknown>["kind"], "fulfilled" | "rejected">): NextResponse {
   logger.error(`[auth-session] POST failed: ${step}`, { cause });

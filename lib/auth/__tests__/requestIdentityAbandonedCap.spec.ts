@@ -1,7 +1,8 @@
 /**
  * R5 C (MINOR-1) — `resolveRequestIdentity` under the per-instance cap on
  * ABANDONED verifications. When the instance already holds
- * MAX_ABANDONED_AUTH_VERIFICATIONS verifications that were cut off at the
+ * MAX_INFLIGHT_AUTH_VERIFICATIONS upstream verifications in flight (R5 review: counted
+ * from start to settle; here they were cut off at the
  * deadline and are still unsettled, a request that PRESENTS a credential
  * fails fast with `auth_unavailable` (the same 503 / 401 path as the deadline)
  * and no new upstream verification is started. A request with no credential
@@ -24,7 +25,7 @@ jest.mock("@/lib/logger", () => ({ logger: { error: jest.fn(), warn: (...a: unkn
 
 import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
 import * as deadlineModule from "@/lib/auth/authVerificationDeadline";
-import { MAX_ABANDONED_AUTH_VERIFICATIONS, abandonedAuthVerificationsInFlight } from "@/lib/auth/authVerificationDeadline";
+import { MAX_INFLIGHT_AUTH_VERIFICATIONS, abandonedAuthVerificationsInFlight, authVerificationsInFlight } from "@/lib/auth/authVerificationDeadline";
 
 const DEADLINE = 10_000;
 const UNAVAILABLE = { status: "unauthenticated", reason: "auth_unavailable" };
@@ -42,11 +43,12 @@ const hang = () => new Promise((resolve) => releasers.push(resolve));
 /** Real requests whose bearer check hangs past the deadline fill the cap (one abandoned verification each). */
 async function fillCapWithHungRequests(): Promise<void> {
   mockVerifyIdToken.mockImplementation(hang);
-  const n = MAX_ABANDONED_AUTH_VERIFICATIONS - abandonedAuthVerificationsInFlight();
+  const n = MAX_INFLIGHT_AUTH_VERIFICATIONS - authVerificationsInFlight();
   const pending = Array.from({ length: n }, (_, i) => resolveRequestIdentity(req({ bearer: `hang-${i}` })));
   await jest.advanceTimersByTimeAsync(DEADLINE);
   for (const r of await Promise.all(pending)) expect(r).toEqual(UNAVAILABLE);
-  expect(abandonedAuthVerificationsInFlight()).toBe(MAX_ABANDONED_AUTH_VERIFICATIONS);
+  expect(abandonedAuthVerificationsInFlight()).toBe(MAX_INFLIGHT_AUTH_VERIFICATIONS);
+  expect(authVerificationsInFlight()).toBe(MAX_INFLIGHT_AUTH_VERIFICATIONS);
   mockVerifyIdToken.mockReset();
   mockVerifySessionCookie.mockReset();
   mockWarn.mockReset();
@@ -73,10 +75,11 @@ it("at the cap, a bearer request fails fast (no deadline wait) and the verifier 
   expect(r).toEqual(UNAVAILABLE);
   expect(mockVerifyIdToken).not.toHaveBeenCalled();
   expect(jest.getTimerCount()).toBe(0);
-  expect(mockWarn).toHaveBeenCalledWith("[auth-verification] abandoned_cap_refused", {
+  expect(mockWarn).toHaveBeenCalledWith("[auth-verification] in_flight_cap_refused", {
     site: "request_identity",
-    abandonedInFlight: MAX_ABANDONED_AUTH_VERIFICATIONS,
-    cap: MAX_ABANDONED_AUTH_VERIFICATIONS,
+    inFlight: MAX_INFLIGHT_AUTH_VERIFICATIONS,
+    abandonedInFlight: MAX_INFLIGHT_AUTH_VERIFICATIONS,
+    cap: MAX_INFLIGHT_AUTH_VERIFICATIONS,
   });
   expect(JSON.stringify(mockWarn.mock.calls)).not.toContain("fresh");
 });

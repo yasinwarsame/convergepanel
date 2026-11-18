@@ -396,21 +396,21 @@ describe.each(ROUTES)("$name", ({ kind, call, reached, body, lookups }) => {
       jest.useRealTimers();
     }
   });
-  // R5 C (MINOR-1) — at the per-instance cap on abandoned verifications the
+  // R5 C (MINOR-1) — at the per-instance cap on in-flight verifications the
   // route fails fast through the SAME auth_unavailable path, with NO Auth read.
-  deadlineIt("abandoned-verification cap reached → fails fast (inline 401; wrapper 503, exact generic body), no getUser, no data access", async () => {
+  deadlineIt("in-flight verification cap reached → fails fast (inline 401; wrapper 503, exact generic body), no getUser, no data access", async () => {
     jest.useFakeTimers();
     const releasers: Array<() => void> = [];
     // Required lazily so the rest of this matrix does not depend on the module's presence.
-    const { startVerificationDeadline, MAX_ABANDONED_AUTH_VERIFICATIONS, abandonedAuthVerificationsInFlight } =
+    const { startVerificationDeadline, MAX_INFLIGHT_AUTH_VERIFICATIONS, authVerificationsInFlight } =
       require("@/lib/auth/authVerificationDeadline") as typeof import("@/lib/auth/authVerificationDeadline");
     try {
       const d = startVerificationDeadline("request_identity");
-      const n = MAX_ABANDONED_AUTH_VERIFICATIONS - abandonedAuthVerificationsInFlight();
+      const n = MAX_INFLIGHT_AUTH_VERIFICATIONS - authVerificationsInFlight();
       for (let i = 0; i < n; i++) void d.run(() => new Promise<void>((resolve) => releasers.push(resolve)));
       await jest.advanceTimersByTimeAsync(10_000);
       d.dispose();
-      expect(abandonedAuthVerificationsInFlight()).toBe(MAX_ABANDONED_AUTH_VERIFICATIONS);
+      expect(authVerificationsInFlight()).toBe(MAX_INFLIGHT_AUTH_VERIFICATIONS);
       const r = await run(call, req(token("valid"), body));
       expect(r.status).toBe(kind === "inline" ? 401 : 503);
       if (kind === "wrapper503") expect(JSON.parse(r.body)).toEqual(WRAPPER_UNAVAILABLE_BODY);

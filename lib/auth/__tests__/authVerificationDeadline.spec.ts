@@ -12,7 +12,8 @@
  *   - a task still pending at the deadline → `deadline` (never its late value);
  *   - each such task counts as ONE abandoned verification until its promise
  *     settles — fulfilled or rejected — and then the count goes back down;
- *   - at MAX_ABANDONED_AUTH_VERIFICATIONS abandoned, a new upstream task is
+ *   - (R5 review) every upstream task counts IN FLIGHT from start to settle;
+ *     at MAX_INFLIGHT_AUTH_VERIFICATIONS in flight, a new upstream task is
  *     refused (`capped`) WITHOUT calling its start function;
  *   - a task that makes no upstream call (`upstream: false`) is neither capped nor counted;
  *   - distinct log lines for a deadline cut-off and a cap refusal, carrying no
@@ -25,14 +26,15 @@ jest.mock("@/lib/logger", () => ({ logger: { error: jest.fn(), warn: (...a: unkn
 import * as deadlineModule from "@/lib/auth/authVerificationDeadline";
 import {
   AUTH_VERIFICATION_DEADLINE_MS,
-  MAX_ABANDONED_AUTH_VERIFICATIONS,
+  MAX_INFLIGHT_AUTH_VERIFICATIONS,
+  authVerificationsInFlight,
   abandonedAuthVerificationsInFlight,
   startVerificationDeadline,
   type VerificationOutcome,
 } from "@/lib/auth/authVerificationDeadline";
 
 const DEADLINE = 10_000;
-const CAP = 100;
+const CAP = 256;
 
 /** A controllable upstream call: pending until released either way. */
 type Hung = { promise: Promise<string>; resolve: (v: string) => void; reject: (e: unknown) => void };
@@ -61,7 +63,7 @@ function track<T>(p: Promise<VerificationOutcome<T>>) {
 async function fillToCap(): Promise<Hung[]> {
   const before = hung.length;
   const d = startVerificationDeadline("request_identity");
-  const n = CAP - abandonedAuthVerificationsInFlight();
+  const n = CAP - authVerificationsInFlight();
   for (let i = 0; i < n; i++) void d.run(() => hang());
   await jest.advanceTimersByTimeAsync(DEADLINE);
   d.dispose();
@@ -78,14 +80,15 @@ afterEach(async () => {
   for (const h of hung.splice(0)) h.resolve("late");
   await jest.advanceTimersByTimeAsync(0);
   expect(abandonedAuthVerificationsInFlight()).toBe(0);
+  expect(authVerificationsInFlight()).toBe(0);
   expect(jest.getTimerCount()).toBe(0);
   jest.useRealTimers();
 });
 
 describe("frozen constants", () => {
-  it("the deadline is 10 s and the abandoned-verification cap is 100", () => {
+  it("the deadline is 10 s and the in-flight verification cap is 256", () => {
     expect(AUTH_VERIFICATION_DEADLINE_MS).toBe(DEADLINE);
-    expect(MAX_ABANDONED_AUTH_VERIFICATIONS).toBe(CAP);
+    expect(MAX_INFLIGHT_AUTH_VERIFICATIONS).toBe(CAP);
   });
 
   it("the deadline and cap outcomes are frozen objects", async () => {
@@ -264,18 +267,20 @@ describe("log lines (no credential, token or uid)", () => {
       deadlineMs: DEADLINE,
       abandoned: 2,
       abandonedInFlight: 2,
+      inFlight: 2,
     });
   });
 
-  it("a cap refusal logs `abandoned_cap_refused`, distinct from a deadline cut-off", async () => {
+  it("a cap refusal logs `in_flight_cap_refused`, distinct from a deadline cut-off", async () => {
     await fillToCap();
     mockWarn.mockReset();
     const d = startVerificationDeadline("session_mint");
     await d.run(async () => "x");
     d.dispose();
     expect(mockWarn).toHaveBeenCalledTimes(1);
-    expect(mockWarn).toHaveBeenCalledWith("[auth-verification] abandoned_cap_refused", {
+    expect(mockWarn).toHaveBeenCalledWith("[auth-verification] in_flight_cap_refused", {
       site: "session_mint",
+      inFlight: CAP,
       abandonedInFlight: CAP,
       cap: CAP,
     });

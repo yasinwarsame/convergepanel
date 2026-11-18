@@ -48,7 +48,7 @@ function req(opts: { cookie?: string; bearer?: string } = {}): NextRequest {
 /**
  * A verifier call that never answers on its own. R5: each one is RELEASED
  * (rejected) after its test, so abandoned verifications drain and the
- * per-instance abandoned-verification cap never carries over between tests.
+ * per-instance in-flight verification cap never carries over between tests.
  */
 const hungRejecters: Array<(e: unknown) => void> = [];
 const never = () => new Promise<never>((_, reject) => hungRejecters.push(reject));

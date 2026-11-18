@@ -161,7 +161,7 @@ function classifyVerificationError(err: unknown, kind: "cookie" | "bearer"): Req
 
 /**
  * What a credential slot becomes when its verification is still pending at the
- * deadline, or was refused at the abandoned-verification cap: the verifier
+ * deadline, or was refused at the in-flight verification cap: the verifier
  * could not answer in time — `auth_unavailable`, never an allow. Frozen.
  */
 export const DEADLINE_EXCEEDED: CredentialCheck = Object.freeze({ present: true, ok: false, reason: "auth_unavailable" } as const);
@@ -192,7 +192,7 @@ function credentialOutcome<T>(
  * mocks `verifySessionCookie` to represent.
  *
  * (R5: the raw cookie is read below ONLY to decide whether this check can go
- * upstream, i.e. whether the abandoned-verification cap applies — never to
+ * upstream, i.e. whether the in-flight verification cap applies — never to
  * decide present/absent, which stays verifySessionCookie's own answer.)
  */
 async function checkCookie(request: NextRequest, deadline: VerificationDeadline): Promise<CredentialCheck> {
@@ -249,7 +249,7 @@ export async function resolveRequestIdentity(request: NextRequest): Promise<Requ
   //
   // Each check runs against ONE per-request deadline (AUTH_VERIFICATION_DEADLINE_MS,
   // ./authVerificationDeadline): a slot still pending when it fires — or refused
-  // because the instance is at its abandoned-verification cap — becomes
+  // because the instance is at its in-flight verification cap — becomes
   // `auth_unavailable`, and the truth table below decides once; a result that
   // arrives later is never read. The deadline is per request (no shared timer
   // between concurrent requests) and is always cleared.
