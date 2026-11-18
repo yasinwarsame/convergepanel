@@ -53,16 +53,16 @@ export default function PrivacyPage() {
               email that includes the workspace name, their role and the invitation link
             </li>
             <li>
-              <strong className="text-cp-text">Content You Submit and Your Results:</strong> The claims, questions,
-              context and video information you submit, and the results produced for them (see below)
+              <strong className="text-cp-text">Content You Submit and Your Results:</strong> The claims, questions
+              and context you submit (including text read from files you attach), the video information you
+              submit, and the results produced for them (see below)
             </li>
             <li><strong className="text-cp-text">Usage Data:</strong> Number of runs, which models you selected, token usage, plan limits and usage counters, and product-analytics events about how you use the app</li>
             <li><strong className="text-cp-text">Technical Data:</strong> IP address, browser type, device information, the addresses of the pages you visit, and error reports</li>
           </ul>
           {/* OWNER/LEGAL VERIFY: onboarding answers are stored on users/{uid} and sent to PostHog (app/onboarding/page.tsx:150-155). Stripe customer/subscription ids are stored on users/{uid}. Invitee data: lib/email/workspaceInvitations.ts (Resend); both callers pass inviterName: null, so the inviter's name is not sent today. */}
           <p className="text-cp-muted mb-3">
-            <strong className="text-cp-text">What we store.</strong> When you are signed in and run a Claim
-            Verification, we store the claim you submit (up to 2,000 characters) and the structured results each
+            <strong className="text-cp-text">What we store.</strong> When you run a Claim Verification, we store the claim you submit (up to 2,000 characters) and the structured results each
             AI model returns (its verdict, confidence, summary and the parts it found correct, incorrect or
             unverifiable), together with consensus scores and an audit record of the run. When you run Deep
             Research, we store your question, any context you provide, the answers the AI models return, the
@@ -74,15 +74,18 @@ export default function PrivacyPage() {
           </p>
           {/* OWNER/LEGAL VERIFY: Deep Research storage confirmed in lib/firestore/runs.ts (question, questionContext, per-model answer text capped for storage, governance/review records) but was outside the scope of audit 01's end-to-end trace. Export snapshots: app/api/user/runs/[runId]/exports/route.ts + lib/firestore/adaptiveExports.ts, gated by ADAPTIVE_RESEARCH_EXPORT_ENABLED (Production value UNVERIFIED). */}
           <p className="text-cp-muted mb-3">
-            On paid plans, an excerpt of each claim or question (up to its first 200 characters) is also recorded
-            in an audit log used for governance and administration, together with your account ID and, for some
-            records, your email address. When our staff delete a stored claim or video verification, or change the
-            review status of a stored claim, research run or video verification, an audit-log entry containing a
-            similar excerpt (for a video, its file name) and your account email is recorded on any plan. If your
-            account belongs to a team, a copy of the content you run, together with your email address, is also
-            kept for that team (see Section 8).
+            On paid plans, when our governance checks evaluate a claim, research run or video verification, or a
+            review decision is made on it, an entry is recorded in an audit log used for governance and
+            administration. The entry contains an excerpt of the claim or question (up to its first 200
+            characters; for a video, its file name, duration and resolution) and your account ID, and, for a video
+            verification or a review decision, your account email. When our staff delete a stored claim or video
+            verification, or change the review status of a stored claim, research run or video verification, an
+            audit-log entry containing a similar excerpt and your account ID is recorded on any plan; it also
+            contains your account email where that email is stored with the record, which today is the case only
+            for video verifications. If your account belongs to a team, a copy of the content you run, together
+            with your email address, is also kept for that team (see Section 8).
           </p>
-          {/* Staff audit rows: app/api/admin/runs/[runId]/route.ts — DELETE writes the excerpt for verifications/videoVerifications only; research deletions are written redacted (:262). PATCH governance override writes auditQuestionFromDoc for all three collections (:177). Legacy team copy: lib/governance/teamGovernancePipeline.ts (userEmail + query up to 5,000 chars). */}
+          {/* Audit rows (R4o re-trace at cabbdbb): paid-plan evaluation lib/governance/evaluateAndStore.ts:52 (free -> skipped), :94-110 (question excerpt 200, runOwnerUid, runOwnerEmail = parent doc userEmail :120,:130); review decisions app/api/governance/review/route.ts:318-332 (owner email from record, else from users/{uid} profile), :366-380. Staff rows app/api/admin/runs/[runId]/route.ts — runOwnerEmail = prev.userEmail only (:176, :272); DELETE writes the excerpt for verifications/videoVerifications only; research deletions are written redacted (:262). PATCH governance override writes auditQuestionFromDoc for all three collections (:177). userEmail is stored only on video records (app/api/verify-video/route.ts:499; lib/firestore/teamVideoVerifications.ts:356), not on claim (lib/firestore/verifications.ts, teamClaimVerifications.ts) or research records (lib/firestore/runs.ts). Legacy team copy: lib/governance/teamGovernancePipeline.ts:105-107 (userEmail + query up to 5,000 chars). */}
           <p className="text-cp-muted mb-3">
             <strong className="text-cp-text">How long we keep it.</strong> We keep stored content and account data
             until it is deleted (see Section 11). We do not currently delete it automatically after a fixed
@@ -200,11 +203,12 @@ export default function PrivacyPage() {
           </p>
           <p className="text-cp-muted mb-3">
             We store the analysis results, the model verdicts, the file name and the technical details above, and
-            your account email with the verification. As with other content, an audit-log entry (which can
-            include the file name) may be recorded on paid plans. If you run it in a team workspace, it is stored in
-            that workspace (see Section 8).
+            your account email with the verification. Video verification is available on paid plans only. As
+            described in Section 2, audit-log entries about a video verification contain its file name, duration
+            and resolution, your account ID and your account email. If you run it in a team workspace, it is stored
+            in that workspace (see Section 8).
           </p>
-          {/* OWNER/LEGAL VERIFY: video path from independent review (VideoUploaderSurface.tsx:217-225; app/api/verify-video/route.ts:242,327-349,501,509,596; lib/video/videoVerificationPrompt.ts:20-30; lib/video/visionCalls.ts) — not traced end to end in audit 01. Confirm stored fields in videoVerifications and audit-log contents. */}
+          {/* R4o re-trace at cabbdbb (checklist PP-20): paid only (app/api/verify-video/route.ts:113; workspace route :362). Stored fields app/api/verify-video/route.ts:497-535 and lib/firestore/teamVideoVerifications.ts:354-370 = userId, userEmail, fileName, verdicts/scores, metadata (VideoMetadata lib/video/videoPure.ts:27-49), metadataAnalysis, trimmed per-model fields, agreement/disagreement points, frameCount, warnings, totalTokens, timestamp; no frames. Audit: evaluated entry question = "Video verification: <file> (<dur>s, <w>x<h>)" (route.ts:596; workspace :616) + runOwnerEmail from the record (evaluateAndStore.ts:130); review/staff rows use "Video: <file> (<dur>, <w>x<h>)". Owner still to confirm the end-to-end trace (audit 01 did not cover video). */}
           <p className="text-cp-muted">
             We do not sell your video content or verification results or use them for advertising. They are
             accessed and shared only as described in this policy (see Sections 7 and 8).
@@ -252,20 +256,26 @@ export default function PrivacyPage() {
             <li>
               <strong className="text-cp-text">AI Model Providers:</strong> To produce results, the text you
               submit is sent to the AI providers whose models you select: OpenAI, Anthropic, Google (Gemini API),
-              xAI (Grok) and Perplexity. For Deep Research, this includes your question and any context you add
-              (the text after a line starting with &quot;Context:&quot;, including text from a file you attach).
-              Perplexity also runs a live web search based on the text you submit. For Deep Research, your
-              question and all the model answers may also be sent to Google (Gemini API) to classify the
-              question, compare the answers, check for bias and coverage, and write the summary report, whether
-              or not you selected a Google model. The context you add is not sent separately in these steps, but
-              the model answers can quote or summarize it. For Deep Research, your question, any context you add
-              and the model answers may also be sent to OpenAI (or Anthropic, as a fallback) to produce a combined
-              summary, whether or not you selected those models. Video data is sent as described in Section 6. We
+              xAI (Grok) and Perplexity. Perplexity also runs a live web search based on the text you submit. Files
+              you attach are read in your browser; the file itself is not uploaded, and the text read from it
+              becomes part of the text you submit. For Deep Research, the text you submit is divided into a
+              question and, optionally, context. The context is everything from the first line that starts with
+              &quot;Context:&quot;. If you attach a file after typing a question, the app adds the file&apos;s
+              text under such a line, so it becomes context. If there is no such line, for example when you attach
+              a file while the question box is empty, the whole text, including any text from an attached file,
+              is treated as the question. If your text begins with such a line, the whole text is treated both as
+              the question and as context. The models you select receive both the question and any context. For
+              Deep Research, your question and all the model answers may also be sent to Google (Gemini API) to
+              classify the question, compare the answers, check for bias and coverage, and write the summary
+              report, whether or not you selected a Google model. Text that is treated only as context is not
+              sent in these steps, but the model answers can quote or summarize it. For Deep Research, your
+              question, any context and the model answers may also be sent to OpenAI (or Anthropic, as a
+              fallback) to produce a combined summary, whether or not you selected those models. Video data is sent as described in Section 6. We
               do not send your name, email address or account ID to these providers. Each provider handles the
               data it receives under its own terms and may log requests under its own policies.
-              {/* Traced at cabbdbb (R4 provider-input trace; pinned by app/privacy/__tests__/privacyPolicyProviderInputs.spec.tsx). Gemini auxiliary calls: lib/adaptiveSchema/classifier.ts:298, alignment.ts:217,376, biasDetection.ts:107, coverageAudit.ts:80, synthesisReport.ts:411 — every one passes context = null; inputs are the question (run-panel/route.ts:210 splits the "Context:" section off; orchestrate.ts:348; runPanelExecution.ts:730) plus model answers/claims. They run only when ADAPTIVE_SCHEMAS_ENABLED is true or the user is a canary uid (run-panel/route.ts:231). Production value UNVERIFIED (10- A5, checklist PP-12) — keep the sentence unless confirmed off. Synthesis: app/api/synthesize-panel/route.ts:822,835 -> lib/synthesis/authoritativeRunInputs.ts:70,96 -> composeSynthesisQuestion (lib/questionContext.ts:73-74) = question + persisted context; prompts route.ts:1213,1261,1664,1702; OpenAI route.ts:1391-1402 (+ retries :1746,:1974), Anthropic fallback route.ts:231-252 called at :1492,:1806,:1961. */}
+              {/* Traced at cabbdbb (R4/R4o provider-input trace; pinned by app/privacy/__tests__/privacyPolicyProviderInputs.spec.tsx). Attach: lib/client/extractFileText.ts reads the file in the browser (no upload; pdf worker same-origin /vendor/pdfjs); app/page.tsx:3058-3069 research attach — non-empty box -> base + "\n\nContext:\n" + file text; EMPTY box -> file text alone (no Context: line); verify tab app/page.tsx:3086-3097 (claim text, max 2,000). Split: lib/questionContext.ts:13-33 — no "Context:" line -> whole text is the question (:17-19); text beginning with "Context:" -> question = whole text AND context = whole text (:28-31). Server limit 10,000 chars (lib/security/requestValidation.ts:12). Gemini auxiliary calls: lib/adaptiveSchema/classifier.ts:298, alignment.ts:217,376, biasDetection.ts:107, coverageAudit.ts:80, synthesisReport.ts:411 — every one passes context = null; inputs are the question (run-panel/route.ts:210 splits the "Context:" section off; orchestrate.ts:348; runPanelExecution.ts:730) plus model answers/claims. They run only when ADAPTIVE_SCHEMAS_ENABLED is true or the user is a canary uid (run-panel/route.ts:231). Production value UNVERIFIED (10- A5, checklist PP-12) — keep the sentence unless confirmed off. Synthesis: app/api/synthesize-panel/route.ts:822,835 -> lib/synthesis/authoritativeRunInputs.ts:70,96 -> composeSynthesisQuestion (lib/questionContext.ts:73-74) = question + persisted context; prompts route.ts:1213,1261,1664,1702; OpenAI route.ts:1391-1402 (+ retries :1746,:1974), Anthropic fallback route.ts:231-252 called at :1492,:1806,:1961. */}
               {" "}For Deep Research, where our fallback is enabled, if a selected model is temporarily unavailable,
-              your question and any context you add may be sent to DeepSeek instead. DeepSeek states that it processes and
+              your question and any context may be sent to DeepSeek instead. DeepSeek states that it processes and
               stores data in the People&apos;s Republic of China.
               {/* OWNER/LEGAL VERIFY: DeepSeek fallback (lib/panel.ts) is active only when DEEPSEEK_API_KEY is set in Production — UNKNOWN (10- A5). Default slots are OpenAI/Anthropic/Google; PANEL_DEEPSEEK_FALLBACK_FOR can change them. Keep the sentence if the key is set; remove it if the fallback is disabled. DeepSeek is not reachable from Claim Verification. */}
               {/* OWNER/LEGAL VERIFY: no training, retention, region, ZDR or DPA statements are made here on purpose (03 Part C; 10- §4). Gemini paid/unpaid tier, OpenAI/Anthropic opt-in and feedback settings, xAI ZDR status and DPAs are unverified (10- A1-A3). Links below point to API/commercial documentation where an official page was identified in 10- §4; owner to confirm each is the governing document for our accounts. Perplexity's downstream search infrastructure is UNKNOWN (10- S14, §5). */}
@@ -279,13 +289,13 @@ export default function PrivacyPage() {
               </ul>
             </li>
           </ul>
-          {/* OWNER/LEGAL VERIFY: Sentry and PostHog are wired in code (instrumentation-client.ts, sentry.server.config.ts, components/PostHogProvider.tsx); whether each is live in Production depends on SENTRY_DSN / NEXT_PUBLIC_SENTRY_DSN / NEXT_PUBLIC_POSTHOG_KEY (10- A5-A7). Code comments claim PostHog is not configured in Production (app/signup/page.tsx ~365; app/api/user/email-verification-telemetry/route.ts:6) — unverified; keep the disclosure until A5/A6 confirm. Wording describes current code at cabbdbb (sendDefaultPii true, no Sentry setUser; replay 5% + 100% on error; PostHog autocapture and session recording not disabled in code; full URLs incl. query). Do not narrow it until a fix (e.g. PR #329) is deployed to Production. */}
+          {/* OWNER/LEGAL VERIFY: Sentry and PostHog are wired in code (instrumentation-client.ts, sentry.server.config.ts, components/PostHogProvider.tsx); whether each is live in Production depends on SENTRY_DSN / NEXT_PUBLIC_SENTRY_DSN / NEXT_PUBLIC_POSTHOG_KEY (10- A5-A7). Code comments claim PostHog is not configured in Production (app/signup/page.tsx ~365; app/api/user/email-verification-telemetry/route.ts:6) — unverified; keep the disclosure until A5/A6 confirm. Wording describes current code at cabbdbb (sendDefaultPii true, no Sentry setUser; replay 5% + 100% on error; Sentry.replayIntegration() is called with no options (instrumentation-client.ts:18), so @sentry/replay 10.75.2 defaults maskAllText/maskAllInputs/blockAllMedia = true apply (node_modules/@sentry/replay/build/npm/cjs/index.js:8167-8169); PostHog autocapture and session recording not disabled in code; full URLs incl. query). Do not narrow it until a fix (e.g. PR #329) is deployed to Production. */}
           <ul className="list-disc list-inside text-cp-muted space-y-2">
             <li>
               <strong className="text-cp-text">Sentry:</strong> Error monitoring, performance tracing for a sample of
               requests, and session replay for a sample of sessions and for sessions in which an error occurs. Sentry receives your IP address, technical
               details about errors, and the addresses of the pages you visit. Session replay records what happens
-              on the page.{" "}
+              on the page; with our current settings, text and form inputs are masked in these recordings.{" "}
               <a href="https://sentry.io/privacy/" target="_blank" rel="noopener noreferrer" className="text-sky-600 hover:underline">
                 Sentry Privacy Policy
               </a>
