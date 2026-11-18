@@ -11,9 +11,15 @@
  *                             decoded value matches the shape). Unchanged from R3.
  *   ROUTING_PARAM_SHAPES      every other parameter a page READS to route
  *                             (identifiers, enums, flags). The value stays in the
- *                             address bar so the page keeps working; the
- *                             sanitizer still REDACTS it in telemetry (it is not
- *                             in SAFE_QUERY_PARAM_SHAPES).
+ *                             address bar so the page keeps working. It is NOT
+ *                             telemetry-safe: the sanitizer redacts it wherever a
+ *                             payload passes through it (PostHog `before_send`,
+ *                             Sentry hooks, Replay `beforeAddRecordingEvent`), but
+ *                             SDK paths that read `location.href` without such a
+ *                             hook (Replay's meta `href`, PostHog `/flags` and the
+ *                             persisted `$initial_person_info`) see it RAW. That is
+ *                             why a routing value must never be able to carry
+ *                             user-authored text.
  *   NESTED_TARGET_PARAMS      `redirect` / `next`: a URL inside a parameter (the
  *                             signup / login / onboarding detours). Cleaned
  *                             recursively with these same rules.
@@ -26,6 +32,11 @@
  * user-authored text (shapes are checked on the DECODED value).
  */
 
+import { isDeepResearchClaimIdShape } from "../verification/deepResearchClaimIdGrammar";
+
+/** A decoded-value check: a RegExp, or an exact-shape validator taken from the value's real generator. */
+export type ParamValueShape = { test(value: string): boolean };
+
 // R3 (review MINOR): campaign values are human-readable ("Black Friday", "Spring Sale: 20% off"). The value is
 // checked DECODED ("+" and %-escapes already turned into characters): printable letters / digits / spaces and
 // common punctuation, at most 100 characters, no control characters. utm_* names are marketer-controlled.
@@ -33,8 +44,14 @@ const UTM_VALUE = /^[\p{L}\p{N} _.,:;!?'&()+%\/|#@-]{1,100}$/u;
 const LOWER_IDENTIFIER = /^[a-z][a-z0-9_]{0,31}$/;
 const SMALL_INTEGER = /^\d{1,6}$/;
 const FLAG = /^(?:|0|1|true|false|yes|no)$/i;
-/** A record / workspace / project / Stripe-session id as the app's producers encode it (no spaces, no punctuation). */
+/**
+ * A record / workspace / project / Stripe-session id as the app's generators produce it (letters, digits, `_`, `-`;
+ * no spaces, no punctuation): `run-<uuid>` / `vcl-<uuid>` / `vid-<uuid>` and their pre-2026-05 `<uid>-<ms>-…` forms,
+ * `personal-<uid>`, Firestore auto-ids, Stripe `cs_…` ids. See the PR's routing-parameter generator table.
+ */
 const OPAQUE_ID = /^[A-Za-z0-9_-]{1,128}$/;
+/** Exactly the ids `buildDeepResearchClaimId` issues (`v1:<section>:<index>:<43 base64url>`), from the shared grammar. */
+const DEEP_RESEARCH_CLAIM_ID: ParamValueShape = { test: isDeepResearchClaimIdShape };
 
 /**
  * Query parameters whose values may be transmitted to telemetry verbatim —
@@ -67,16 +84,17 @@ export const SAFE_QUERY_PARAM_SHAPES: ReadonlyMap<string, RegExp> = new Map([
 
 /**
  * Routing parameters READ by pages (inventory section C) that are not
- * telemetry-safe. Kept in the address bar (decoded value must match), redacted
- * in telemetry.
+ * telemetry-safe. Kept in the address bar when the decoded value matches the
+ * grammar of its REAL generator (not just the name its producer uses); redacted
+ * only on the sanitized telemetry paths (see the header).
  */
-export const ROUTING_PARAM_SHAPES: ReadonlyMap<string, RegExp> = new Map([
+export const ROUTING_PARAM_SHAPES: ReadonlyMap<string, ParamValueShape> = new Map<string, ParamValueShape>([
   // app/page.tsx deep links (governance / history) and origin-linked claim mode.
   ["openResearchRun", OPAQUE_ID],
   ["openVerification", OPAQUE_ID],
   ["openVideoVerification", OPAQUE_ID],
   ["originRunId", OPAQUE_ID],
-  ["originClaimId", OPAQUE_ID],
+  ["originClaimId", DEEP_RESEARCH_CLAIM_ID],
   // /billing: Stripe Checkout success_url `session_id={CHECKOUT_SESSION_ID}`.
   ["session_id", OPAQUE_ID],
   // /workspace/reviews (WorkspaceReviewQueueShell, server page): workspace id, project filter (id | all | unfiled).

@@ -27,8 +27,10 @@ import { SAFE_QUERY_PARAM_SHAPES, isSafeParamValue } from "./urlParamRules";
 export const REDACTED = "[redacted]";
 
 // R5 (owner ruling): the parameter rules live in ONE module shared with the pre-telemetry address-bar scrub
-// (lib/privacy/urlContentScrub.ts). Only SAFE_QUERY_PARAM_SHAPES values are ever transmitted; routing, nested-target
-// and content parameters — and every unknown one — are redacted here.
+// (lib/privacy/urlContentScrub.ts). On every payload that passes through this sanitizer only SAFE_QUERY_PARAM_SHAPES
+// values survive; routing, nested-target and content parameters — and every unknown one — are redacted here. SDK paths
+// that read location.href without a sanitizing hook (Replay meta href, PostHog /flags, $initial_person_info) see the
+// address bar as the pre-telemetry scrub left it, routing values included.
 export { SAFE_QUERY_PARAM_SHAPES, isSafeParamValue };
 
 /** The allowlisted parameter NAMES (values are additionally shape-checked). */
