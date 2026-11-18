@@ -24,6 +24,7 @@ jest.mock("@/lib/authTelemetry", () => ({ logAuthSessionEvent: jest.fn() }));
 
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/auth/session/route";
+import * as deadlineModule from "@/lib/auth/authVerificationDeadline";
 import { MAX_ABANDONED_AUTH_VERIFICATIONS, abandonedAuthVerificationsInFlight } from "@/lib/auth/authVerificationDeadline";
 
 const DEADLINE = 10_000;
@@ -74,4 +75,19 @@ it("logins whose verification hangs are abandoned (counted); at the cap the next
   const ok = await post();
   expect(ok.status).toBe(200);
   expect(ok.cookies.get("__session")?.value).toBe("cookie");
+}, 30_000);
+
+it("R5 review: HARD bound — 300 concurrent logins whose verification hangs INSIDE one window: verifyIdToken starts exactly 256 times; 44 answer 503 at once", async () => {
+  const mod = deadlineModule as unknown as Record<string, unknown>;
+  expect(mod.MAX_INFLIGHT_AUTH_VERIFICATIONS).toBe(256);
+  mockVerifyIdToken.mockImplementation(hang);
+  const done: Response[] = [];
+  const all = Array.from({ length: 300 }, () => post().then((r) => (done.push(r), r)));
+  await jest.advanceTimersByTimeAsync(0);
+  expect(mockVerifyIdToken).toHaveBeenCalledTimes(256);
+  expect(done).toHaveLength(44);
+  for (const r of done) expect(r.status).toBe(503);
+  await jest.advanceTimersByTimeAsync(DEADLINE);
+  for (const r of await Promise.all(all)) expect(r.status).toBe(503);
+  expect(mockCreateSessionCookie).not.toHaveBeenCalled();
 }, 30_000);

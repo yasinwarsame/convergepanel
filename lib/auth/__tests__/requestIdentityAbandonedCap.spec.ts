@@ -23,6 +23,7 @@ jest.mock("@/lib/firebase/auth", () => ({
 jest.mock("@/lib/logger", () => ({ logger: { error: jest.fn(), warn: (...a: unknown[]) => mockWarn(...a), info: jest.fn(), debug: jest.fn() } }));
 
 import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
+import * as deadlineModule from "@/lib/auth/authVerificationDeadline";
 import { MAX_ABANDONED_AUTH_VERIFICATIONS, abandonedAuthVerificationsInFlight } from "@/lib/auth/authVerificationDeadline";
 
 const DEADLINE = 10_000;
@@ -128,3 +129,25 @@ it("below the cap nothing changes: a hung check still waits the full deadline (t
   expect(settled).toBe(true);
   expect(abandonedAuthVerificationsInFlight()).toBe(1);
 });
+
+it("R5 review: HARD bound — 400 concurrent requests whose bearer check hangs, all INSIDE one window: the verifier starts exactly 256 times; the rest fail at once", async () => {
+  const mod = deadlineModule as unknown as Record<string, unknown>;
+  const cap = mod.MAX_INFLIGHT_AUTH_VERIFICATIONS as number;
+  expect(cap).toBe(256);
+  mockVerifyIdToken.mockImplementation(hang);
+  const settled: Array<{ done: boolean; v?: unknown }> = [];
+  for (let i = 0; i < 400; i++) {
+    const t: { done: boolean; v?: unknown } = { done: false };
+    void resolveRequestIdentity(req({ bearer: `h${i}` })).then((v) => { t.done = true; t.v = v; });
+    settled.push(t);
+  }
+  await jest.advanceTimersByTimeAsync(0);
+  expect(mockVerifyIdToken).toHaveBeenCalledTimes(256);
+  expect((mod.authVerificationsInFlight as () => number)()).toBe(256);
+  // the 144 refused requests answered immediately (no deadline wait)
+  const early = settled.filter((t) => t.done);
+  expect(early).toHaveLength(144);
+  for (const t of early) expect(t.v).toEqual(UNAVAILABLE);
+  await jest.advanceTimersByTimeAsync(DEADLINE);
+  for (const t of settled) expect(t.v).toEqual(UNAVAILABLE);
+}, 30_000);

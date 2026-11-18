@@ -22,6 +22,7 @@
 const mockWarn = jest.fn();
 jest.mock("@/lib/logger", () => ({ logger: { error: jest.fn(), warn: (...a: unknown[]) => mockWarn(...a), info: jest.fn(), debug: jest.fn() } }));
 
+import * as deadlineModule from "@/lib/auth/authVerificationDeadline";
 import {
   AUTH_VERIFICATION_DEADLINE_MS,
   MAX_ABANDONED_AUTH_VERIFICATIONS,
@@ -287,5 +288,127 @@ describe("log lines (no credential, token or uid)", () => {
     await jest.advanceTimersByTimeAsync(DEADLINE);
     d.dispose();
     expect(mockWarn).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * R5 C review (MINOR-1, reviewer of 773add4): the cap must be a HARD bound on
+ * upstream verification calls in flight — counted from START (inside the 10 s
+ * window too), released exactly once when the call settles (in time or after
+ * being abandoned). Counting only calls abandoned at the deadline let every
+ * call started inside a window through: 1,000 hung starts in 5 s all started,
+ * and each dip below the cap admitted another full window.
+ */
+describe("hard bound on in-flight upstream verifications (review overshoot scenarios)", () => {
+  const mod = deadlineModule as unknown as Record<string, unknown>;
+  const inFlight = () => (mod.authVerificationsInFlight as () => number)();
+  const HARD_CAP = 256;
+
+  it("the in-flight cap is 256", () => {
+    expect(mod.MAX_INFLIGHT_AUTH_VERIFICATIONS).toBe(HARD_CAP);
+  });
+
+  it("(review a) 1,000 hung starts over 5 s during a full hang: exactly 256 start; in flight never exceeds 256", async () => {
+    let started = 0;
+    let peak = 0;
+    const outcomes: Array<Promise<VerificationOutcome<string>>> = [];
+    const ds: Array<ReturnType<typeof startVerificationDeadline>> = [];
+    for (let i = 0; i < 1000; i++) {
+      const d = startVerificationDeadline("request_identity");
+      ds.push(d);
+      outcomes.push(d.run(() => { started += 1; return hang(); }));
+      peak = Math.max(peak, inFlight());
+      if (i % 200 === 199) await jest.advanceTimersByTimeAsync(1_000);
+    }
+    await jest.advanceTimersByTimeAsync(10_000);
+    peak = Math.max(peak, inFlight());
+    expect(started).toBe(HARD_CAP);
+    expect(peak).toBe(HARD_CAP);
+    const kinds = (await Promise.all(outcomes)).map((o) => o.kind);
+    expect(kinds.filter((k) => k === "capped")).toHaveLength(1000 - HARD_CAP);
+    expect(kinds.filter((k) => k === "deadline")).toHaveLength(HARD_CAP);
+    expect(abandonedAuthVerificationsInFlight()).toBe(HARD_CAP);
+    ds.forEach((d) => d.dispose());
+  });
+
+  it("(review b) at the cap, one call settles, 500 arrive: exactly ONE starts; in flight stays at 256", async () => {
+    let started = 0;
+    const fill = startVerificationDeadline("request_identity");
+    for (let i = 0; i < HARD_CAP; i++) void fill.run(() => { started += 1; return hang(); });
+    await jest.advanceTimersByTimeAsync(DEADLINE);
+    fill.dispose();
+    expect(inFlight()).toBe(HARD_CAP);
+    hung.shift()!.resolve("late");
+    await jest.advanceTimersByTimeAsync(0);
+    expect(inFlight()).toBe(HARD_CAP - 1);
+    started = 0;
+    const ds: Array<ReturnType<typeof startVerificationDeadline>> = [];
+    for (let i = 0; i < 500; i++) {
+      const d = startVerificationDeadline("request_identity");
+      ds.push(d);
+      void d.run(() => { started += 1; return hang(); });
+    }
+    await jest.advanceTimersByTimeAsync(DEADLINE);
+    expect(started).toBe(1);
+    expect(inFlight()).toBe(HARD_CAP);
+    ds.forEach((d) => d.dispose());
+  });
+
+  it("calls still INSIDE their window count: 256 slow-but-pending calls → the 257th is refused before start; one answering in time frees a slot", async () => {
+    const d = startVerificationDeadline("session_mint");
+    for (let i = 0; i < HARD_CAP; i++) void d.run(() => hang());
+    expect(inFlight()).toBe(HARD_CAP);
+    expect(abandonedAuthVerificationsInFlight()).toBe(0); // none abandoned yet: all inside the window
+    const start = jest.fn(async () => "x");
+    await expect(d.run(start)).resolves.toEqual({ kind: "capped" });
+    expect(start).not.toHaveBeenCalled();
+    hung.shift()!.resolve("in-time");
+    await jest.advanceTimersByTimeAsync(0);
+    expect(inFlight()).toBe(HARD_CAP - 1);
+    await expect(d.run(start)).resolves.toEqual({ kind: "fulfilled", value: "x" });
+    expect(start).toHaveBeenCalledTimes(1);
+    d.dispose();
+  });
+
+  it("each call is released EXACTLY once — in time, abandoned-then-fulfilled, abandoned-then-rejected, or synchronous throw", async () => {
+    const d = startVerificationDeadline("request_identity");
+    await d.run(async () => "fast");
+    await d.run(() => { throw new Error("sync"); });
+    expect(inFlight()).toBe(0);
+    void d.run(() => hang());
+    void d.run(() => hang());
+    expect(inFlight()).toBe(2);
+    await jest.advanceTimersByTimeAsync(DEADLINE);
+    d.dispose();
+    expect(inFlight()).toBe(2);
+    expect(abandonedAuthVerificationsInFlight()).toBe(2);
+    hung.shift()!.resolve("late");
+    hung.shift()!.reject(new Error("late failure"));
+    await jest.advanceTimersByTimeAsync(0);
+    expect(inFlight()).toBe(0);
+    expect(abandonedAuthVerificationsInFlight()).toBe(0);
+  });
+
+  it("`upstream: false` work is not counted in flight", async () => {
+    const d = startVerificationDeadline("request_identity");
+    void d.run(() => hang(), { upstream: false });
+    expect(inFlight()).toBe(0);
+    hung.shift()!.resolve("x");
+    await jest.advanceTimersByTimeAsync(0);
+    d.dispose();
+  });
+
+  it("the cap-refusal log reports the in-flight total (not just abandoned calls)", async () => {
+    const d = startVerificationDeadline("session_mint");
+    for (let i = 0; i < HARD_CAP; i++) void d.run(() => hang());
+    mockWarn.mockReset();
+    await d.run(async () => "x");
+    expect(mockWarn).toHaveBeenCalledWith("[auth-verification] in_flight_cap_refused", {
+      site: "session_mint",
+      inFlight: HARD_CAP,
+      abandonedInFlight: 0,
+      cap: HARD_CAP,
+    });
+    d.dispose();
   });
 });
