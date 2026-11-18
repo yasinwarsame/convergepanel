@@ -264,6 +264,8 @@ export class System {
 
   readonly settlements: string[] = [];
   readonly releases: string[] = [];
+  /** Final `422 repeated_failing_input` answers (failed-job controls, ledger-and-billing.md §4.3). */
+  readonly shortCircuitRejections: ShortCircuitRejection[] = [];
 
   /**
    * Test helper: DELETE through the documented path (handleDelete, Addendum 6) and then one
@@ -335,14 +337,19 @@ function authorize(key: KeyDoc | undefined, org: OrgDoc | undefined): ApiRespons
 }
 
 /** Steps 9–14: checks that apply ONLY to a request that would create a new job. */
-function newJobChecks(sys: System, req: ValidRequest, org: OrgDoc, active: number): ApiResponse | null {
+function newJobChecks(sys: System, req: ValidRequest, org: OrgDoc, active: number, controls: FailureControls | null): ApiResponse | null {
   const d = sys.dynamic;
   if (!d.typeEnabled[req.type]) return { status: 422, code: "type_unavailable" };
   if (req.type === "research" && !org.pipelineAck) return { status: 403, code: "pipeline_processing_not_acknowledged" };
   if (req.models.some((m) => !d.modelsAvailable.has(m))) return { status: 422, code: "model_unavailable" };
   if (req.models.length > org.planMaxModels) return { status: 422, code: "model_limit_exceeded" };
+  // 10f: repeated failing input (live keys; ledger-and-billing.md §4.3).
+  if (controls && controls.blockedFingerprints.has(req.canonical)) return { status: 422, code: "repeated_failing_input" };
   if (!d.queueHealthy) return { status: 503, code: "queue_unavailable" };
-  if (active >= org.concurrencyLimit) return { status: 429, code: "concurrency_limit" };
+  // Soft failed-job ratio: concurrency → 1.
+  if (active >= (controls?.soft ? Math.min(1, org.concurrencyLimit) : org.concurrencyLimit)) return { status: 429, code: "concurrency_limit" };
+  // 13: failed-job hard limits (count or cost), then credits.
+  if (controls?.hard) return { status: 403, code: "failed_job_threshold_exceeded" };
   if (org.creditsRemaining < creditsFor(req)) return { status: 402, code: "quota_exceeded" };
   if (d.capacityShed) return { status: 503, code: "capacity_protection" };
   return null;
@@ -425,12 +432,16 @@ export function* handleCreate(sys: System, req: CreateRequest): Generator<void, 
     const conc = tx.read<ConcurrencyDoc>(concurrencyPath(orgId)) ?? { active: 0, anomalies: 0 };
     const month = monthOf(sys.dynamic.now);
     const period = tx.read<PeriodDoc>(periodPath(orgId, month)) ?? { reservedCredits: 0 };
-    const reject = newJobChecks(sys, v, org2 as OrgDoc, conc.active);
+    const controls = key2?.mode === "live" ? failureControls(sys, orgId) : null;
+    const reject = newJobChecks(sys, v, org2 as OrgDoc, conc.active, controls);
     if (reject) {
       if (tx.commit() === "conflict") {
         if (attempt >= MAX_TX_ATTEMPTS) return { status: 409, code: "request_in_progress" };
         yield;
         continue;
+      }
+      if (reject.code === "repeated_failing_input") {
+        sys.shortCircuitRejections.push({ orgId, fingerprint: v.canonical, at: sys.dynamic.now, counted: rejectionCounts(sys, orgId, v.canonical) });
       }
       return reject;
     }
@@ -444,7 +455,7 @@ export function* handleCreate(sys: System, req: CreateRequest): Generator<void, 
     const org3 = org2 as OrgDoc;
     // Admission: job (with its admission marker), reservation, monthly period counter and the
     // concurrency increment commit together, or none does. Counted only if this commit succeeds.
-    tx.create(`jobs/${id}`, { state: "pending_dispatch", orgId, credits, type: v.type, admissionId: id, [ADMISSION_MARKER_FIELD]: true, [RELEASE_MARKER_FIELD]: false, reservedMonth: month, queuedAt: sys.dynamic.now, idemScope: scope ?? undefined, idemAcceptanceId: scope !== null ? `acc_${id.slice(4)}` : undefined } satisfies JobDoc);
+    tx.create(`jobs/${id}`, { state: "pending_dispatch", orgId, credits, type: v.type, admissionId: id, [ADMISSION_MARKER_FIELD]: true, [RELEASE_MARKER_FIELD]: false, reservedMonth: month, queuedAt: sys.dynamic.now, mode: key2?.mode, fingerprint: v.canonical, idemScope: scope ?? undefined, idemAcceptanceId: scope !== null ? `acc_${id.slice(4)}` : undefined } satisfies JobDoc);
     tx.create(`inputs/${id}`, { text: v.canonical }); // class (a) content, purged at deletion
     tx.create(`ledger/reserve_${id}`, { credits, month });
     tx.set(periodPath(orgId, month), { reservedCredits: period.reservedCredits + credits } satisfies PeriodDoc);
@@ -494,7 +505,14 @@ export interface JobDoc {
   queuedAt?: number;
   leaseExpiries?: number;
   failureCode?: string;
+  /** Recorded provider calls that returned usable output (the model's chargeable work). */
   callsMade?: number;
+  /** Recorded provider calls that failed (never chargeable; their cost is still recorded). */
+  failedCalls?: number;
+  mode?: Mode;
+  /** Input fingerprint for the repeated-failing-input short-circuit (stands in for a hash). */
+  fingerprint?: string;
+  finishedAt?: number;
 }
 
 /**
@@ -527,7 +545,7 @@ export function* finishJob(sys: System, id: string, to: JobState, failureCode?: 
     // capped at the reservation; the rest is released. charged + released == reserved, once.
     const charged = Math.min(job.credits, job.callsMade ?? 0);
     const released = job.credits - charged;
-    const next: JobDoc = { ...job, state: to, settledCharged: charged, settledReleased: released, ...(failureCode ? { failureCode } : {}) };
+    const next: JobDoc = { ...job, state: to, settledCharged: charged, settledReleased: released, finishedAt: sys.dynamic.now, ...(failureCode ? { failureCode } : {}) };
     let anomaly = false;
     if (mustRelease && conc) {
       next[RELEASE_MARKER_FIELD] = true;
@@ -541,6 +559,8 @@ export function* finishJob(sys: System, id: string, to: JobState, failureCode?: 
     tx.set(`jobs/${id}`, next);
     if (result !== undefined) tx.set(`results/${id}`, result); // written only by the winning transition
     tx.create(`ledger/settle_${id}`, { charged, released, reserved: job.credits }); // at most once (tx.create)
+    // Failed-job control record (no content beyond the fingerprint), kept across deletion.
+    tx.create(outcomePath(id), { orgId, mode: job.mode, state: to, code: failureCode, at: sys.dynamic.now, fingerprint: job.fingerprint, charged } satisfies OutcomeDoc);
     tx.set(`orgs/${orgId}`, { ...org, creditsRemaining: org.creditsRemaining + released });
     if (tx.commit() === "committed") {
       sys.settlements.push(id);
@@ -734,16 +754,18 @@ export function* handleDelete(sys: System, keyId: string, id: string): Generator
  * deletion requested) stops; a call already in flight completes and its record is written while the
  * job is still non-terminal. Late-write barrier: no record is written for a terminal or purged job.
  */
-export function* workerProviderCall(sys: System, id: string): Generator<void, ApiResponse, void> {
+export function* workerProviderCall(sys: System, id: string, outcome: CallOutcome = "ok", usd = 0.01): Generator<void, ApiResponse, void> {
   const before = sys.store.get<JobDoc>(`jobs/${id}`);
   if (!before || before.deleted || TERMINAL.has(before.state)) return { status: 409, code: "late_write_refused" };
   if (before.cancelRequested) return { status: 409, code: "stopped_at_boundary" };
   yield; // the provider call is in flight; it cannot be recalled
-  return yield* recordCallResult(sys, id);
+  return yield* recordCallResult(sys, id, outcome, usd);
 }
 
+export type CallOutcome = "ok" | "error";
+
 /** Second half of a provider call: its result arrives and is recorded behind the late-write barrier. */
-export function* recordCallResult(sys: System, id: string): Generator<void, ApiResponse, void> {
+export function* recordCallResult(sys: System, id: string, outcome: CallOutcome = "ok", usd = 0.01): Generator<void, ApiResponse, void> {
   for (;;) {
     const tx = sys.store.begin();
     const job = tx.read<JobDoc>(`jobs/${id}`);
@@ -751,12 +773,12 @@ export function* recordCallResult(sys: System, id: string): Generator<void, ApiR
       tx.abort();
       // The call happened (it could not be recalled): its internal cost entry (class c, no content)
       // is recorded; its content is refused and it is not charged to the customer (already settled).
-      sys.store.put(`cost/${id}/late_${sys.store.keys(`cost/${id}/`).length + 1}`, { usd: 0.01 });
+      sys.store.put(`cost/${id}/late_${sys.store.keys(`cost/${id}/`).length + 1}`, { usd, outcome } satisfies CostDoc);
       return { status: 409, code: "late_write_refused" };
     }
-    const n = (job.callsMade ?? 0) + 1;
-    tx.set(`calls/${id}/${n}`, { text: "raw model text" }); // class (a), purged at deletion
-    tx.set(`jobs/${id}`, { ...job, callsMade: n });
+    const n = (job.callsMade ?? 0) + (job.failedCalls ?? 0) + 1;
+    tx.set(`calls/${id}/${n}`, { text: "raw model text", outcome }); // class (a), purged at deletion
+    tx.set(`jobs/${id}`, outcome === "ok" ? { ...job, callsMade: (job.callsMade ?? 0) + 1 } : { ...job, failedCalls: (job.failedCalls ?? 0) + 1 });
     if (tx.commit() === "committed") return { status: 200 };
     yield;
   }
@@ -817,6 +839,7 @@ export function* completeDeletion(sys: System, delId: string): Generator<void, A
       [ADMISSION_MARKER_FIELD]: job[ADMISSION_MARKER_FIELD], [RELEASE_MARKER_FIELD]: job[RELEASE_MARKER_FIELD],
       ...(job.concurrencyReleaseAnomaly ? { concurrencyReleaseAnomaly: true } : {}),
       settledCharged: job.settledCharged, settledReleased: job.settledReleased, callsMade: job.callsMade,
+      ...(job.failedCalls !== undefined ? { failedCalls: job.failedCalls } : {}),
       deletionRequested: true, deletionId: delId, deleted: true,
     } satisfies JobDoc);
     tx.set(deletionPath(delId), { ...op, status: "completed", attempts: op.attempts + 1, blockedBy: undefined });
@@ -851,6 +874,114 @@ export function* sweep(sys: System): Generator<void, ApiResponse, void> {
 
 /** Failure codes the failed-job count and ratio exclude as platform-caused (ledger-and-billing.md §4). */
 export const PLATFORM_FAULT_CODES: readonly string[] = ["capacity_unavailable", "pipeline_disabled", "worker_timeout", "persistence_failed"];
+
+// ------------------------------------------------------------------------------------------------
+// Failed-job cost-abuse controls (ledger-and-billing.md §4.3, OD-8). Evaluated at create from the
+// rolling windows. Not modelled: the persistent `abuseState = review` and its SYSTEM_ADMIN lift,
+// the monthly-plan-price cost limit, the provider circuit breaker and the platform spend ceiling.
+// ------------------------------------------------------------------------------------------------
+export const HOUR_MS = 60 * 60 * 1000;
+/** Customer-attributable terminal failure codes (the failed-job count and ratio). */
+export const CUSTOMER_FAILURE_CODES: readonly string[] = ["insufficient_usable_models"];
+/** Terminal failure codes that feed the repeated-failing-input short-circuit (Addendum 7). */
+export const SHORT_CIRCUIT_CODES: readonly string[] = ["insufficient_usable_models", "persistence_failed", "worker_timeout"];
+export const SHORT_CIRCUIT_THRESHOLD = 3;
+export const SHORT_CIRCUIT_WINDOW_MS = HOUR_MS;
+export const SHORT_CIRCUIT_BLOCK_MS = HOUR_MS;
+export const FAILED_COUNT_HARD_1H = 10;
+export const FAILED_COUNT_HARD_24H = 25;
+export const FAILED_RATIO_SOFT = 0.3;
+export const FAILED_RATIO_MIN_JOBS = 20;
+export const FAILED_COST_HARD_USD_24H = 5;
+
+export const outcomePath = (id: string): string => `outcomes/${id}`;
+
+export interface OutcomeDoc {
+  orgId: string;
+  mode: Mode | undefined;
+  state: JobState;
+  code: string | undefined;
+  at: number;
+  fingerprint: string | undefined;
+  charged: number;
+}
+
+export interface CostDoc {
+  usd: number;
+  outcome: CallOutcome;
+}
+
+export interface ShortCircuitRejection {
+  orgId: string;
+  fingerprint: string;
+  at: number;
+  /** Whether this rejection counts toward the customer's failed-job count and ratio. */
+  counted: boolean;
+}
+
+export interface FailureControls {
+  /** Customer-attributable failures (count numerator) in the last hour and the last 24 h. */
+  count1h: number;
+  count24h: number;
+  /** Live jobs that ended in the last 24 h plus counted rejections (ratio denominator). */
+  jobs24h: number;
+  ratio: number;
+  /** Σ provider cost of fully released live jobs that ended in the last 24 h. */
+  releasedCostUsd24h: number;
+  soft: boolean;
+  hard: boolean;
+  blockedFingerprints: Set<string>;
+}
+
+function liveOutcomes(sys: System, orgId: string): OutcomeDoc[] {
+  return sys.store.keys("outcomes/").map((p) => sys.store.get<OutcomeDoc>(p) as OutcomeDoc).filter((o) => o.orgId === orgId && o.mode === "live");
+}
+
+/** A block is in force when 3 qualifying failures fell within 1 h and the third is < 1 h old. */
+function blockedBy(times: number[], now: number): boolean {
+  const t = times.filter((x) => x <= now).sort((a, b) => a - b);
+  for (let i = SHORT_CIRCUIT_THRESHOLD - 1; i < t.length; i++) {
+    if (t[i] - t[i - SHORT_CIRCUIT_THRESHOLD + 1] <= SHORT_CIRCUIT_WINDOW_MS && now - t[i] < SHORT_CIRCUIT_BLOCK_MS) return true;
+  }
+  return false;
+}
+
+/** Whether a short-circuit rejection of this fingerprint counts against the customer. */
+export function rejectionCounts(_sys: System, _orgId: string, _fingerprint: string): boolean {
+  return true; // ledger-and-billing.md §4.3 "What counts": the repeated-failing-input short-circuit
+}
+
+export function failureControls(sys: System, orgId: string): FailureControls {
+  const now = sys.dynamic.now;
+  const outs = liveOutcomes(sys, orgId);
+  const inWindow = (at: number, ms: number): boolean => at <= now && now - at < ms;
+  const customer = outs.filter((o) => o.state === "failed" && o.code !== undefined && CUSTOMER_FAILURE_CODES.includes(o.code));
+  const rejections = sys.shortCircuitRejections.filter((r) => r.orgId === orgId && r.counted);
+  const count = (ms: number): number => customer.filter((o) => inWindow(o.at, ms)).length + rejections.filter((r) => inWindow(r.at, ms)).length;
+  const count1h = count(HOUR_MS);
+  const count24h = count(24 * HOUR_MS);
+  const jobs24h = outs.filter((o) => inWindow(o.at, 24 * HOUR_MS)).length + rejections.filter((r) => inWindow(r.at, 24 * HOUR_MS)).length;
+  const ratio = jobs24h === 0 ? 0 : count24h / jobs24h;
+  let releasedCostUsd24h = 0;
+  for (const p of sys.store.keys("outcomes/")) {
+    const o = sys.store.get<OutcomeDoc>(p) as OutcomeDoc;
+    if (o.orgId !== orgId || o.mode !== "live" || o.charged !== 0 || !inWindow(o.at, 24 * HOUR_MS)) continue;
+    const id = p.slice("outcomes/".length);
+    for (const c of sys.store.keys(`cost/${id}/`)) releasedCostUsd24h += (sys.store.get<CostDoc>(c) as CostDoc).usd;
+  }
+  const byFingerprint = new Map<string, number[]>();
+  for (const o of outs) {
+    if (o.state !== "failed" || o.code === undefined || !SHORT_CIRCUIT_CODES.includes(o.code) || o.fingerprint === undefined) continue;
+    byFingerprint.set(o.fingerprint, [...(byFingerprint.get(o.fingerprint) ?? []), o.at]);
+  }
+  const blockedFingerprints = new Set(Array.from(byFingerprint).filter(([, ts]) => blockedBy(ts, now)).map(([f]) => f));
+  return {
+    count1h, count24h, jobs24h, ratio, releasedCostUsd24h,
+    soft: jobs24h >= FAILED_RATIO_MIN_JOBS && ratio > FAILED_RATIO_SOFT,
+    hard: count1h >= FAILED_COUNT_HARD_1H || count24h >= FAILED_COUNT_HARD_24H || releasedCostUsd24h > FAILED_COST_HARD_USD_24H,
+    blockedFingerprints,
+  };
+}
 
 /** Runs a handler to completion with no interleaving. */
 export function runToEnd(gen: Generator<void, ApiResponse, void>): ApiResponse {

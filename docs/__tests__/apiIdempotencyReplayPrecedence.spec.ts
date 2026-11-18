@@ -45,12 +45,27 @@ import {
   workerProviderCall,
   workerStart,
   periodPath,
+  failureControls,
+  FAILED_COUNT_HARD_1H,
+  FAILED_COST_HARD_USD_24H,
+  FAILED_RATIO_SOFT,
+  FAILED_RATIO_MIN_JOBS,
+  FAILED_COUNT_HARD_24H,
+  SHORT_CIRCUIT_THRESHOLD,
+  SHORT_CIRCUIT_CODES,
+  CUSTOMER_FAILURE_CODES,
+  outcomePath,
+  OutcomeDoc,
+  CostDoc,
+  CallOutcome,
+  JobState,
   repairConcurrency,
   handleCancel,
   handleCreate,
   idemPath,
   runToEnd,
 } from "./support/idempotencyReferenceModel";
+import * as model from "./support/idempotencyReferenceModel";
 
 const ROOT = path.resolve(__dirname, "..", "..");
 const JOBS = path.join(ROOT, "docs/product/api-0/jobs-and-idempotency.md");
@@ -1411,5 +1426,525 @@ describe("Addendum 7 m-5: platform-fault failures still feed the repeated-failin
     const clause = /the same input fingerprint ending (.+?) 3× in 1 h/.exec(rule)?.[1] ?? "";
     const codes = Array.from(clause.matchAll(/`([a-z_]+)`/g), (m) => m[1]).sort();
     expect(codes).toEqual(["insufficient_usable_models", "persistence_failed", "worker_timeout"]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Addendum 8 (R4): fully failed jobs are free; provider cost recorded separately; failed-job
+// controls intact; platform faults never counted against the customer; acceptance identity.
+// ---------------------------------------------------------------------------------------------
+const LEDGER = path.join(ROOT, "docs/product/api-0/ledger-and-billing.md");
+const RETENTION = path.join(ROOT, "docs/product/api-0/retention-and-deletion.md");
+
+type SettleEntry = { charged: number; released: number; reserved: number };
+const settleOf = (s: System, id: string): SettleEntry => s.store.get<SettleEntry>(`ledger/settle_${id}`) as SettleEntry;
+const jobOf = (s: System, id: string): JobDoc => s.store.get<JobDoc>(`jobs/${id}`) as JobDoc;
+const creditsOf = (s: System): number => (s.store.get<OrgDoc>("orgs/o1") as OrgDoc).creditsRemaining;
+const costsOf = (s: System, id: string): CostDoc[] => s.store.keys(`cost/${id}/`).map((k) => s.store.get<CostDoc>(k) as CostDoc);
+/** Independent oracle of ledger-and-billing.md §2.4/§2.5 (Addendum 8): NOT the model's own formula. */
+const expectedCharged = (to: JobState, usableCalls: number, reserved: number): number =>
+  to === "failed" || to === "expired" ? 0 : Math.min(reserved, usableCalls);
+
+let r4Seq = 0;
+/** A live job accepted through T-create and started by a worker, with the given provider calls recorded. */
+function runningJob(sys: System, calls: CallOutcome[] = [], body: unknown = SAME, usd = 0.01): string {
+  const res = send(sys, req(body, { idempotencyKey: `r4-${++r4Seq}` }));
+  expect(fmt(res)).toBe("202 new");
+  const id = res.body?.id as string;
+  expect(fmt(runToEnd(workerStart(sys, id)))).toBe("200 undefined");
+  for (const c of calls) expect(fmt(runToEnd(workerProviderCall(sys, id, c, usd)))).toBe("200 undefined");
+  return id;
+}
+
+/** Fully failed: charged 0, the whole reservation released, exactly once, balance restored. */
+function assertFullyFailed(sys: System, id: string, creditsBefore: number, providerCalls: number): void {
+  const job = jobOf(sys, id);
+  const e = settleOf(sys, id);
+  expect({ state: job.state, charged: e.charged, released: e.released, reserved: e.reserved }).toEqual({ state: "failed", charged: 0, released: job.credits, reserved: job.credits });
+  expect([job.settledCharged, job.settledReleased]).toEqual([0, job.credits]);
+  expect(creditsOf(sys)).toBe(creditsBefore);
+  expect(sys.settlements.filter((x) => x === id).length).toBe(1);
+  // Provider cost recorded independently of the customer charge: one cost entry per call.
+  expect(costsOf(sys, id).length).toBe(providerCalls);
+}
+
+describe("Addendum 8 E1/E2: a fully failed job charges 0 and releases the whole reservation", () => {
+  it("ledger-and-billing.md §2.5 lists failed and expired as charged 0 with a full release (parsed)", () => {
+    const md = fs.readFileSync(LEDGER, "utf8");
+    const line = /^`failed`, `canceled` \(before execution\), `expired`: `release_\{verId\}` for the whole estimate, `charged = 0` \(OD-8\)\. Canceled during execution settles for work done\.$/m.exec(md);
+    expect(line).not.toBeNull();
+    // Addendum 8 clarification: "fully failed" is every `failed` terminal state, whatever the cause.
+    const clar = /\*\*Fully failed \(Addendum 8\)\.\*\*([^\n]+)/.exec(md)?.[1] ?? "";
+    expect(clar).toContain("every job that ends `failed`");
+    expect(clar).toContain("whatever its failure code");
+    expect(clar).toContain("however many provider calls");
+  });
+
+  it("every `failed` row of the job state table (jobs-and-idempotency.md §3) releases; the model charges 0 for each code", () => {
+    const md = fs.readFileSync(JOBS, "utf8");
+    const sec = md.slice(md.indexOf("## 3. State machine"), md.indexOf("## 4. Steps"));
+    const rows = sec.split("\n").filter((l) => /^\| [^|]+ \| [^|]+ \| `?failed/.test(l));
+    expect(rows.length).toBeGreaterThanOrEqual(6);
+    const codes = new Set<string>();
+    for (const l of rows) {
+      const cells = l.split("|").map((c) => c.trim());
+      expect({ row: cells[3], side: /^release/.test(cells[4]) }).toEqual({ row: cells[3], side: true });
+      const STATES = new Set(["pending_dispatch", "queued", "running", "synthesizing", "failed", "canceled"]);
+      for (const m of cells[3].matchAll(/`failed: ([a-z_]+)`/g)) codes.add(m[1]);
+      for (const m of cells[2].matchAll(/`([a-z_]+)`/g)) if (!STATES.has(m[1])) codes.add(m[1]);
+    }
+    for (const c of ["insufficient_usable_models", "worker_timeout", "persistence_failed", "capacity_unavailable", "query_not_executable", "no_comparable_claims", "adaptive_finalize_failed"]) expect(codes).toContain(c);
+    for (const code of codes) {
+      const sys = world();
+      const before = creditsOf(sys);
+      const id = runningJob(sys, ["ok", "ok", "error"]);
+      runToEnd(finishJob(sys, id, "failed", code));
+      expect({ code, charged: settleOf(sys, id).charged }).toEqual({ code, charged: 0 });
+      assertFullyFailed(sys, id, before, 3);
+    }
+  });
+
+  it("E2-1: failed after one or more provider calls with usable output → charged 0, released = reserved", () => {
+    const sys = world();
+    const before = creditsOf(sys);
+    const id = runningJob(sys, ["ok", "error", "error"]);
+    expect(jobOf(sys, id).callsMade).toBe(1);
+    runToEnd(finishJob(sys, id, "failed", "insufficient_usable_models"));
+    assertFullyFailed(sys, id, before, 3);
+  });
+
+  it("E2-2: failed after every selected model fails → charged 0, every attempt's cost recorded", () => {
+    const sys = world();
+    const before = creditsOf(sys);
+    const id = runningJob(sys, ["error", "error", "error", "error"]);
+    runToEnd(finishJob(sys, id, "failed", "insufficient_usable_models"));
+    assertFullyFailed(sys, id, before, 4);
+    expect(costsOf(sys, id).map((c) => c.outcome)).toEqual(["error", "error", "error", "error"]);
+  });
+
+  it("E2-3: platform-caused failures (worker_timeout via the sweeper, persistence_failed, capacity_unavailable) → charged 0", () => {
+    {
+      const sys = world();
+      const before = creditsOf(sys);
+      const id = runningJob(sys, ["ok", "ok"]);
+      sys.store.put(`jobs/${id}`, { ...jobOf(sys, id), leaseExpiries: 3 });
+      runToEnd(sweep(sys));
+      expect(jobOf(sys, id).failureCode).toBe("worker_timeout");
+      assertFullyFailed(sys, id, before, 2);
+    }
+    {
+      const sys = world();
+      const before = creditsOf(sys);
+      const id = runningJob(sys, ["ok", "ok", "ok"]);
+      sys.store.put(`jobs/${id}`, { ...jobOf(sys, id), state: "synthesizing" });
+      runToEnd(finishJob(sys, id, "failed", "persistence_failed"));
+      assertFullyFailed(sys, id, before, 3);
+    }
+    {
+      const sys = world();
+      const before = creditsOf(sys);
+      const id = send(sys, req(SAME)).body?.id as string;
+      runToEnd(finishJob(sys, id, "failed", "capacity_unavailable"));
+      assertFullyFailed(sys, id, before, 0);
+    }
+  });
+
+  it("E2-4: a customer-attributable failure (insufficient_usable_models) is fully failed, and it counts against the customer", () => {
+    // Docs: jobs-and-idempotency.md §3 "< 2 usable models (`insufficient_usable_models`) | `failed` | release";
+    // ledger-and-billing.md §2.5 "`failed` … whole estimate, `charged = 0`"; PRD J6 "released in full".
+    const md = fs.readFileSync(JOBS, "utf8");
+    expect(md).toContain("| `running` | < 2 usable models (`insufficient_usable_models`) | `failed` | release; internal cost recorded; failed-job counters (OD-8) |");
+    const sys = world();
+    const before = creditsOf(sys);
+    const id = runningJob(sys, ["ok", "error", "error"]);
+    runToEnd(finishJob(sys, id, "failed", "insufficient_usable_models"));
+    assertFullyFailed(sys, id, before, 3);
+    expect(failureControls(sys, "o1").count1h).toBe(1);
+  });
+
+  it("E2-5: partial completion with usable work settles that work; the rest is released", () => {
+    const sys = world();
+    const before = creditsOf(sys);
+    const id = runningJob(sys, ["ok", "ok", "error"]);
+    runToEnd(finishJob(sys, id, "partial"));
+    const e = settleOf(sys, id);
+    expect([e.charged, e.released, e.reserved]).toEqual([2, jobOf(sys, id).credits - 2, jobOf(sys, id).credits]);
+    expect(creditsOf(sys)).toBe(before - 2);
+    expect(costsOf(sys, id).length).toBe(3);
+  });
+
+  it("E2-6: cancellation before processing → charged 0, whole reservation released, no provider cost", () => {
+    const sys = world();
+    const before = creditsOf(sys);
+    const id = send(sys, req(SAME)).body?.id as string;
+    expect(runToEnd(handleCancel(sys, "live1", id)).status).toBe(200);
+    const e = settleOf(sys, id);
+    expect([jobOf(sys, id).state, e.charged, e.released]).toEqual(["canceled", 0, e.reserved]);
+    expect(creditsOf(sys)).toBe(before);
+    expect(costsOf(sys, id)).toEqual([]);
+  });
+
+  it("E2-7: cancellation after chargeable work settles the work done (unchanged by Addendum 8)", () => {
+    const sys = world();
+    const before = creditsOf(sys);
+    const id = runningJob(sys, ["ok", "ok"]);
+    expect(runToEnd(handleCancel(sys, "live1", id)).status).toBe(200);
+    runToEnd(workerBoundary(sys, id));
+    const e = settleOf(sys, id);
+    expect([jobOf(sys, id).state, e.charged, e.released]).toEqual(["canceled", 2, e.reserved - 2]);
+    expect(creditsOf(sys)).toBe(before - 2);
+    expect(costsOf(sys, id).length).toBe(2);
+  });
+
+  it("E2-8: a failed transition whose transaction retries after a late call still charges 0 (no over- or under-refund)", () => {
+    for (const to of ["failed", "partial"] as const) {
+      const sys = world();
+      const before = creditsOf(sys);
+      const id = runningJob(sys, ["ok"]);
+      const fin = finishJob(sys, id, to, to === "failed" ? "insufficient_usable_models" : undefined);
+      fin.next(); // the terminal transaction has read callsMade = 1
+      runToEnd(recordCallResult(sys, id, "ok")); // a call result commits in between: callsMade = 2
+      runToEnd(fin); // conflict → retry from fresh reads
+      const e = settleOf(sys, id);
+      const want = expectedCharged(to, 2, e.reserved);
+      expect({ to, charged: e.charged, released: e.released }).toEqual({ to, charged: want, released: e.reserved - want });
+      expect(creditsOf(sys)).toBe(before - want);
+      expect(sys.settlements.filter((x) => x === id).length).toBe(1);
+    }
+  });
+
+  it("E2-9: duplicate terminal events (every interleaving of two terminal transitions) settle exactly once", () => {
+    const pairs: Array<[JobState, string | undefined, JobState, string | undefined]> = [
+      ["failed", "insufficient_usable_models", "failed", "insufficient_usable_models"],
+      ["failed", "worker_timeout", "completed", undefined],
+      ["failed", "persistence_failed", "partial", undefined],
+      ["canceled", "canceled", "failed", "worker_timeout"],
+    ];
+    let n = 0;
+    for (const [a, ac, b, bc] of pairs) {
+      let id = "";
+      let before = 0;
+      const setup = (): System => {
+        const s = world();
+        before = creditsOf(s);
+        id = runningJob(s, ["ok", "ok"]);
+        return s;
+      };
+      for (const o of interleavings(setup, [
+        { name: `${a}`, start: (s) => finishJob(s, id, a, ac) },
+        { name: `${b}`, start: (s) => finishJob(s, id, b, bc) },
+      ])) {
+        n++;
+        const job = jobOf(o.sys, id);
+        const e = settleOf(o.sys, id);
+        expect(o.sys.settlements.filter((x) => x === id).length).toBe(1);
+        expect(o.sys.releases.filter((x) => x === id).length).toBe(1);
+        expect(o.sys.store.keys(outcomePath(id)).length).toBe(1);
+        expect(e.charged).toBe(expectedCharged(job.state, 2, e.reserved));
+        expect(e.charged + e.released).toBe(e.reserved);
+        expect(creditsOf(o.sys)).toBe(before - e.charged);
+        // Further duplicates after the fact change nothing.
+        for (const again of ["failed", "completed", "canceled"] as const) runToEnd(finishJob(o.sys, id, again, "worker_timeout"));
+        runToEnd(sweep(o.sys));
+        expect(creditsOf(o.sys)).toBe(before - e.charged);
+        expect(o.sys.settlements.filter((x) => x === id).length).toBe(1);
+      }
+    }
+    expect(n).toBeGreaterThan(8);
+  });
+
+  it("E2-10: credit conservation across every outcome (exhaustive): charged + released == reserved, no negative balance, cost independent of charge", () => {
+    const sys = world();
+    patchOrg(sys, { creditsRemaining: 100_000 });
+    const initial = creditsOf(sys);
+    let totalCharged = 0;
+    let cases = 0;
+    const outcomes: Array<[JobState, string | undefined]> = [
+      ["completed", undefined], ["partial", undefined], ["canceled", "canceled"], ["canceled", "deletion_requested"],
+      ...["insufficient_usable_models", "worker_timeout", "persistence_failed", "capacity_unavailable", "query_not_executable", "no_comparable_claims", "adaptive_finalize_failed", "pipeline_disabled"].map((c): [JobState, string] => ["failed", c]),
+    ];
+    for (const [to, code] of outcomes) {
+      for (let ok = 0; ok <= 8; ok++) {
+        for (let bad = 0; bad <= 2; bad++) {
+          for (const del of [false, true]) {
+            sys.dynamic.now += 25 * 60 * 60 * 1000; // outside every failed-job window: controls never interfere
+            const calls: CallOutcome[] = [...Array(ok).fill("ok"), ...Array(bad).fill("error")];
+            const id = runningJob(sys, calls, { ...SAME, input: { question: `case ${cases}` } });
+            runToEnd(finishJob(sys, id, to, code));
+            if (del) {
+              runToEnd(handleDelete(sys, "live1", id));
+              runToEnd(sweep(sys));
+              expect(jobOf(sys, id).deleted).toBe(true);
+            }
+            const e = settleOf(sys, id);
+            const want = expectedCharged(to, ok, e.reserved);
+            expect({ to, code, ok, bad, del, charged: e.charged, sum: e.charged + e.released }).toEqual({ to, code, ok, bad, del, charged: want, sum: e.reserved });
+            expect(e.charged).toBeGreaterThanOrEqual(0);
+            expect(e.released).toBeGreaterThanOrEqual(0);
+            expect(costsOf(sys, id).length).toBe(ok + bad);
+            totalCharged += want;
+            expect(creditsOf(sys)).toBe(initial - totalCharged);
+            expect(creditsOf(sys)).toBeGreaterThanOrEqual(0);
+            cases++;
+          }
+        }
+      }
+    }
+    // Expired (never started) is always free.
+    for (let i = 0; i < 3; i++) {
+      const id = send(sys, req(SAME, { idempotencyKey: `exp-${i}` })).body?.id as string;
+      sys.dynamic.now += model.MAX_QUEUE_WAIT_MS + 1;
+      runToEnd(sweep(sys));
+      expect([jobOf(sys, id).state, settleOf(sys, id).charged]).toEqual(["expired", 0]);
+    }
+    expect(creditsOf(sys)).toBe(initial - totalCharged);
+    expect(sys.settlements.length).toBe(new Set(sys.settlements).size);
+    expect(cases).toBe(outcomes.length * 9 * 3 * 2);
+    expect(active(sys)).toBe(countedActive(sys, "o1"));
+  });
+
+  it("an organization with exactly the reservation left never goes negative when a job fails", () => {
+    const sys = world();
+    patchOrg(sys, { creditsRemaining: 6 });
+    const id = runningJob(sys, ["ok", "ok", "ok", "ok", "ok", "ok", "ok"]);
+    expect(creditsOf(sys)).toBe(0);
+    runToEnd(finishJob(sys, id, "failed", "insufficient_usable_models"));
+    expect(creditsOf(sys)).toBe(6);
+  });
+});
+
+describe("Addendum 8 E3: a provider call returning after the job became terminal (not yet purged)", () => {
+  it.each(["failed", "completed", "canceled"] as const)("after %s: content refused, cost recorded, settlement and balance unchanged", (to) => {
+    const sys = world();
+    const id = runningJob(sys, ["ok"]);
+    const inFlight = workerProviderCall(sys, id, "ok", 0.02);
+    inFlight.next(); // in flight
+    if (to === "failed") {
+      sys.store.put(`jobs/${id}`, { ...jobOf(sys, id), leaseExpiries: 3 });
+      runToEnd(sweep(sys)); // failed: worker_timeout
+    } else runToEnd(finishJob(sys, id, to));
+    const settled = settleOf(sys, id);
+    const credits = creditsOf(sys);
+    const job = jobOf(sys, id);
+    expect(job.deleted).toBeUndefined();
+    expect(fmt(runToEnd(inFlight))).toBe("409 late_write_refused");
+    expect(sys.store.keys(`calls/${id}/`).length).toBe(1);
+    expect(jobOf(sys, id)).toEqual(job);
+    expect(settleOf(sys, id)).toEqual(settled);
+    expect(creditsOf(sys)).toBe(credits);
+    expect(costsOf(sys, id).length).toBe(2);
+    expect(costsOf(sys, id).some((c) => c.usd === 0.02)).toBe(true);
+  });
+
+  it("every interleaving of an in-flight call with a failed transition: never charged, cost always recorded", () => {
+    let id = "";
+    let before = 0;
+    const setup = (): System => {
+      const s = world();
+      before = creditsOf(s);
+      id = runningJob(s, ["ok"]);
+      return s;
+    };
+    let n = 0;
+    for (const o of interleavings(setup, [
+      { name: "call", start: (s) => workerProviderCall(s, id, "ok") },
+      { name: "fail", start: (s) => finishJob(s, id, "failed", "insufficient_usable_models") },
+    ])) {
+      n++;
+      expect(settleOf(o.sys, id).charged).toBe(0);
+      expect(creditsOf(o.sys)).toBe(before);
+      expect(costsOf(o.sys, id).length).toBe(2);
+    }
+    expect(n).toBeGreaterThan(3);
+  });
+});
+
+describe("Addendum 8 E2: failed-job controls still bound a flood of fully failed jobs (ledger-and-billing.md §4.3)", () => {
+  it("the model's thresholds and code lists are the ledger's (parsed)", () => {
+    const md = fs.readFileSync(LEDGER, "utf8");
+    expect(md).toContain(`| Failed-job ratio | > ${FAILED_RATIO_SOFT * 100} % of an org's live jobs in a rolling 24 h with ≥ ${FAILED_RATIO_MIN_JOBS} jobs |`);
+    expect(md).toContain(`≥ ${FAILED_COUNT_HARD_24H} released (failed) live jobs per org in a rolling 24 h, or ≥ ${FAILED_COUNT_HARD_1H} in a rolling 1 h`);
+    expect(md).toContain(`of released jobs > $${FAILED_COST_HARD_USD_24H} / 24 h`);
+    expect(md).toContain(`| Same input fingerprint failed ${SHORT_CIRCUIT_THRESHOLD}× in 1 h |`);
+    const para = /\*\*What counts\.\*\*([^\n]+)/.exec(md)?.[1] ?? "";
+    const customer = /count customer-attributable failures: (.+?)\. They exclude/.exec(para)?.[1] ?? "";
+    expect(Array.from(customer.matchAll(/`([a-z_]+)`/g), (m) => m[1])).toEqual([...CUSTOMER_FAILURE_CODES]);
+    const rule = /\*\*Repeated failing input and platform faults \(Addendum 7\)\.\*\*([^\n]+)/.exec(md)?.[1] ?? "";
+    const clause = /the same input fingerprint ending (.+?) 3× in 1 h/.exec(rule)?.[1] ?? "";
+    expect(Array.from(clause.matchAll(/`([a-z_]+)`/g), (m) => m[1]).sort()).toEqual([...SHORT_CIRCUIT_CODES].sort());
+  });
+
+  it("a flood of distinct customer-attributable failures is stopped by the hard count limit, all free to the customer", () => {
+    const sys = world();
+    const before = creditsOf(sys);
+    let accepted = 0;
+    const answers: string[] = [];
+    for (let i = 0; i < 30; i++) {
+      const res = send(sys, req({ ...SAME, input: { question: `flood ${i}` } }, { idempotencyKey: `flood-${i}` }));
+      answers.push(fmt(res));
+      if (res.status !== 202) continue;
+      accepted++;
+      const id = res.body?.id as string;
+      runToEnd(workerStart(sys, id));
+      runToEnd(workerProviderCall(sys, id, "ok"));
+      runToEnd(workerProviderCall(sys, id, "error"));
+      runToEnd(finishJob(sys, id, "failed", "insufficient_usable_models"));
+    }
+    expect(accepted).toBe(FAILED_COUNT_HARD_1H);
+    expect(answers.slice(FAILED_COUNT_HARD_1H)).toEqual(Array(30 - FAILED_COUNT_HARD_1H).fill("403 failed_job_threshold_exceeded"));
+    expect(creditsOf(sys)).toBe(before);
+    const totalCost = sys.jobs().reduce((n, p) => n + costsOf(sys, p.slice(5)).length, 0);
+    expect(totalCost).toBe(2 * FAILED_COUNT_HARD_1H);
+  });
+
+  it("a flood of distinct platform-fault failures (excluded from the count) is stopped by the failed-job cost limit", () => {
+    const sys = world();
+    let accepted = 0;
+    let last = "";
+    for (let i = 0; i < 30; i++) {
+      const res = send(sys, req({ ...SAME, input: { question: `outage ${i}` } }, { idempotencyKey: `outage-${i}` }));
+      last = fmt(res);
+      if (res.status !== 202) break;
+      accepted++;
+      const id = res.body?.id as string;
+      runToEnd(workerStart(sys, id));
+      runToEnd(workerProviderCall(sys, id, "ok", 0.5));
+      runToEnd(workerProviderCall(sys, id, "ok", 0.5));
+      sys.store.put(`jobs/${id}`, { ...jobOf(sys, id), leaseExpiries: 3 });
+      runToEnd(sweep(sys));
+      expect(settleOf(sys, id).charged).toBe(0);
+    }
+    const c = failureControls(sys, "o1");
+    expect({ accepted, last, count: c.count24h }).toEqual({ accepted: 6, last: "403 failed_job_threshold_exceeded", count: 0 });
+    expect(c.releasedCostUsd24h).toBeGreaterThan(FAILED_COST_HARD_USD_24H);
+  });
+});
+
+describe("Addendum 8 E3: platform faults are excluded from customer-attributable failure counts and ratios", () => {
+  const failSame = (sys: System, code: string, n: number, body: unknown = SAME): void => {
+    for (let i = 0; i < n; i++) {
+      const id = runningJob(sys, ["ok"], body);
+      if (code === "worker_timeout") {
+        sys.store.put(`jobs/${id}`, { ...jobOf(sys, id), leaseExpiries: 3 });
+        runToEnd(sweep(sys));
+      } else runToEnd(finishJob(sys, id, "failed", code));
+    }
+  };
+
+  it("ledger-and-billing.md §4.3 specifies short-circuit attribution (parsed)", () => {
+    const md = fs.readFileSync(LEDGER, "utf8");
+    const para = /\*\*Short-circuit attribution \(Addendum 8\)\.\*\*([^\n]+)/.exec(md)?.[1] ?? "";
+    expect(para).toContain("counts toward the failed-job count and ratio only when the fingerprint's customer-attributable failures alone");
+    expect(para).toContain("never counts against the customer");
+  });
+
+  it("a short-circuit reached only through platform faults rejects, but never counts against the customer", () => {
+    const sys = world();
+    failSame(sys, "worker_timeout", SHORT_CIRCUIT_THRESHOLD);
+    for (let i = 0; i < 15; i++) expect(fmt(send(sys, req(SAME, { idempotencyKey: `sc-${i}` })))).toBe("422 repeated_failing_input");
+    const c = failureControls(sys, "o1");
+    expect({ count1h: c.count1h, count24h: c.count24h, ratio: c.ratio, hard: c.hard, soft: c.soft }).toEqual({ count1h: 0, count24h: 0, ratio: 0, hard: false, soft: false });
+    // A different input is still accepted: the outage did not suspend the customer.
+    expect(fmt(send(sys, req(DIFFERENT, { idempotencyKey: "other" })))).toBe("202 new");
+  });
+
+  it("mixed: 2 customer failures + 1 platform fault block the input, but the rejections do not count; a 3rd customer failure makes them count", () => {
+    const sys = world();
+    failSame(sys, "insufficient_usable_models", 2);
+    failSame(sys, "worker_timeout", 1);
+    expect(fmt(send(sys, req(SAME, { idempotencyKey: "m-1" })))).toBe("422 repeated_failing_input");
+    expect(failureControls(sys, "o1").count1h).toBe(2);
+    expect(sys.shortCircuitRejections.map((r) => r.counted)).toEqual([false]);
+    // The block is in force, so model a third customer failure on the same input from before the block.
+    const s2 = world();
+    failSame(s2, "insufficient_usable_models", 3);
+    expect(fmt(send(s2, req(SAME, { idempotencyKey: "m-2" })))).toBe("422 repeated_failing_input");
+    expect(s2.shortCircuitRejections.map((r) => r.counted)).toEqual([true]);
+    expect(failureControls(s2, "o1").count1h).toBe(4);
+  });
+
+  it("platform-fault rejections never push the ratio over the soft threshold", () => {
+    const sys = world();
+    for (let i = 0; i < 20; i++) {
+      const id = runningJob(sys, ["ok", "ok"], { ...SAME, input: { question: `fine ${i}` } });
+      runToEnd(finishJob(sys, id, "completed"));
+    }
+    failSame(sys, "persistence_failed", SHORT_CIRCUIT_THRESHOLD);
+    for (let i = 0; i < 15; i++) send(sys, req(SAME, { idempotencyKey: `pr-${i}` }));
+    const c = failureControls(sys, "o1");
+    expect(c.jobs24h).toBeGreaterThanOrEqual(FAILED_RATIO_MIN_JOBS);
+    expect({ ratio: c.ratio, soft: c.soft }).toEqual({ ratio: 0, soft: false });
+  });
+});
+
+describe("Addendum 8 E3: the acceptance identity is generated independently and is unique", () => {
+  const acceptances = (sys: System): string[] => sys.jobs().map((p) => (sys.store.get<JobDoc>(p) as JobDoc).idemAcceptanceId as string);
+
+  it("retention-and-deletion.md §3.1 specifies the generation and uniqueness rule (parsed); the model meets it", () => {
+    const md = fs.readFileSync(RETENTION, "utf8");
+    const para = /\*\*Acceptance identity \(Addendum 8\)\.\*\*([^\n]+)/.exec(md)?.[1] ?? "";
+    expect(para).toContain("cryptographically secure random generator");
+    expect(para).toContain("at least 128 bits");
+    expect(para).toContain("never derived from the client's `Idempotency-Key`, the verification ID, the request content or the time");
+    expect(para).toContain("unique across all organizations, applications, modes and keys");
+    expect(model.ACCEPTANCE_ID_BYTES).toBeGreaterThanOrEqual(16);
+  });
+
+  it("format: acc_ + 32 hex characters (128 bits); the job and the record carry the same value", () => {
+    const sys = world();
+    const id = send(sys, req(SAME)).body?.id as string;
+    const rec = sys.store.get<IdemRecord>(scopeOf(sys)) as IdemRecord;
+    expect(rec.acceptanceId).toMatch(/^acc_[0-9a-f]{32}$/);
+    expect(jobOf(sys, id).idemAcceptanceId).toBe(rec.acceptanceId);
+  });
+
+  it("not derived: two identical worlds produce the same verification IDs and scopes but different acceptance IDs", () => {
+    const run = (): System => {
+      const s = world();
+      send(s, req(SAME));
+      s.dynamic.now += IDEMPOTENCY_TTL_MS + 1;
+      send(s, req(SAME)); // the same Idempotency-Key reused after expiry
+      return s;
+    };
+    const a = run();
+    const b = run();
+    expect(a.jobs()).toEqual(b.jobs());
+    const [a1, a2] = acceptances(a);
+    const [b1, b2] = acceptances(b);
+    expect(new Set([a1, a2, b1, b2]).size).toBe(4);
+    for (const [acc, p] of [[a1, a.jobs()[0]], [a2, a.jobs()[1]]] as const) {
+      expect(acc).not.toContain(p.slice("jobs/ver_".length));
+      expect(acc).not.toContain(IDEM);
+    }
+  });
+
+  it("unique across many acceptances (orgs, apps, modes, key reuse)", () => {
+    const sys = world();
+    sys.store.put("orgs/o2", sys.store.get("orgs/o1"));
+    sys.store.put("keys/o2live", { ...(sys.store.get<KeyDoc>("keys/live1") as KeyDoc), orgId: "o2" });
+    const seen: string[] = [];
+    for (let round = 0; round < 25; round++) {
+      for (const keyId of ["live1", "test1", "live_app2", "o2live"]) {
+        const res = send(sys, req(SAME, { keyId, idempotencyKey: `u-${round % 3}` }));
+        if (fmt(res) === "202 new") {
+          runToEnd(finishJob(sys, res.body?.id as string, "completed"));
+          seen.push(jobOf(sys, res.body?.id as string).idemAcceptanceId as string);
+        }
+      }
+      sys.dynamic.now += IDEMPOTENCY_TTL_MS + 1;
+    }
+    expect(seen.length).toBe(100);
+    expect(new Set(seen).size).toBe(100);
+  });
+
+  it("a record with the same verification ID but a different acceptance identity (e.g. restored) is never overwritten", () => {
+    const sys = world();
+    const a = send(sys, req(SAME));
+    const scope = scopeOf(sys);
+    const restored = { ...(sys.store.get<IdemRecord>(scope) as IdemRecord), acceptanceId: "acc_" + "f".repeat(32) };
+    sys.store.put(scope, restored);
+    runToEnd(handleDelete(sys, "live1", a.body?.id as string));
+    runToEnd(sweep(sys));
+    expect(sys.store.get<IdemRecord>(scope)).toEqual(restored);
   });
 });
