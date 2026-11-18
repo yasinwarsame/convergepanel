@@ -209,3 +209,52 @@ describe("CONTROL: the SDK default (checkRevoked=false) would accept the revoked
     expect(mockGetUser).not.toHaveBeenCalled();
   });
 });
+
+describe("R4 — Auth getUser lookups per request type (availability / quota cost of checkRevoked)", () => {
+  const cases: Array<[string, { bearer?: string; cookie?: string; rawAuth?: string }, number]> = [
+    ["no credentials", {}, 0],
+    ["bearer only", { bearer: token("valid") }, 1],
+    ["cookie only", { cookie: token("valid") }, 1],
+    ["cookie + bearer, same uid", { cookie: token("valid"), bearer: token("valid") }, 2],
+    ["cookie A + bearer B (mismatch)", { cookie: token("valid"), bearer: token("valid2") }, 2],
+    ["cookie + EXPIRED bearer (expiry fails before the live read)", { cookie: token("valid"), bearer: token("valid", { exp: NOW - 10 }) }, 1],
+    ["cookie + malformed Authorization header (never reaches the SDK)", { cookie: token("valid"), rawAuth: "Basic abc" }, 1],
+    ["undecodable bearer only", { bearer: "not-a-jwt" }, 0],
+  ];
+  it.each(cases)("%s → %p lookup(s)", async (_n, opts, expected) => {
+    await resolveRequestIdentity(req(opts));
+    expect(mockGetUser).toHaveBeenCalledTimes(expected);
+  });
+});
+
+describe("R4 — classification of EVERY firebase-admin Auth/App error code raised by the live read (pinned table)", () => {
+  // The oracle is the SDK's own code catalogue, not our classifier's set.
+  const sdkErrors = require(require("path").join(require("path").dirname(require.resolve("firebase-admin/auth")), "../utils/error.js"));
+  const authCodes: string[] = Object.values(sdkErrors.AuthClientErrorCode as Record<string, { code: string }>).map((i) => `auth/${i.code}`);
+  const appCodes: string[] = Object.values(sdkErrors.AppErrorCodes as Record<string, string>).map((c) => `app/${c}`);
+  // Infrastructure: the verifier could not run (outage, quota, the server's own credential/permission). Pinned, exact.
+  const INFRA = new Set([
+    "auth/internal-error",
+    "auth/quota-exceeded",
+    "auth/insufficient-permission",
+    "auth/invalid-credential",
+    "app/internal-error",
+    "app/network-error",
+    "app/network-timeout",
+    "app/unable-to-parse-response",
+    "app/invalid-credential",
+  ]);
+  const expected = (code: string) =>
+    INFRA.has(code) ? "auth_unavailable" : code.includes("revoked") ? "revoked_session" : code.includes("expired") ? "expired_session" : "invalid_bearer_token";
+
+  it("ANCHOR: the catalogue is the real one (non-trivial, contains the codes this table relies on)", () => {
+    expect(authCodes.length).toBeGreaterThan(80);
+    for (const c of ["auth/quota-exceeded", "auth/user-disabled", "auth/id-token-revoked", "auth/argument-error"]) expect(authCodes).toContain(c);
+    for (const c of ["app/network-error", "app/unable-to-parse-response", "app/invalid-credential"]) expect(appCodes).toContain(c);
+    for (const c of INFRA) expect([...authCodes, ...appCodes]).toContain(c); // no pinned code is a typo
+  });
+  it.each([...new Set([...authCodes, ...appCodes])])("%s", async (code) => {
+    mockUsers.set("valid", Object.assign(new Error("upstream"), { code }));
+    await expect(resolveRequestIdentity(req({ bearer: token("valid") }))).resolves.toEqual({ status: "unauthenticated", reason: expected(code) });
+  });
+});
