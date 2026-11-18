@@ -125,6 +125,19 @@ export interface MemoInput {
   claimExecution?: { independentModels: number; answeredSlots: number };
 
   /**
+   * Doc 14 PR-1 R3 (owner ruling 2026-11-18): claim memo only — what the rows' RELIABLY IDENTIFIED executing providers
+   * establish (lib/verification/claimVerdictCounts.ts claimProviderSides, computed by the caller):
+   *  - `disagreement`: a supporting and an inaccurate answer from two different identified models — without it a stored
+   *    `disputed` is not stated as "Models diverged…";
+   *  - `oneModelPerSlot`: every answering slot is its own identified model — without it the agreement points are listed
+   *    as points repeated across responses, not "WHERE MODELS AGREE";
+   *  - `disagreementPointsBetweenModels`: the conflict points that are between two identified models; the other points
+   *    are listed as points that differ across responses.
+   * Absent → exactly the memo as before.
+   */
+  claimCrossModel?: { disagreement: boolean; oneModelPerSlot: boolean; disagreementPointsBetweenModels: string[] };
+
+  /**
    * C-b (CB-12, PQ-2 (a) strict): video memo only — the independence of the video rows by the shared gate. Video rows
    * record no provider, so callers pass "unverified"; anything but "independent" → no consensus score, no cross-model
    * evidence quality, and the stored agreement / disagreement points (kept as recorded) under qualified headings.
@@ -242,11 +255,16 @@ function severityPrefix(sev: string): string {
 /** Doc 14 W1 — memo note after the no-support sentence (kept here so the vocabulary gate classifies it). */
 export const CLAIM_MEMO_NO_SUPPORT_NOTE = "The recorded verdict label is Disputed; it does not indicate a split between models.";
 
-function claimSummarySentence(verdict: string | undefined, counts: ClaimModelVerdictCounts | null = null): string {
+/** Doc 14 PR-1 R3 — a stored `disputed` whose opposing responses do not come from two identified models. */
+export const CLAIM_MEMO_SLOT_RESPONSES_DIFFER =
+  "The panel slot responses differ, but the opposing responses did not come from two reliably identified executing models; this is not a disagreement between models. The recorded verdict label is Disputed.";
+
+function claimSummarySentence(verdict: string | undefined, counts: ClaimModelVerdictCounts | null = null, crossModel?: MemoInput["claimCrossModel"]): string {
   const v = (verdict ?? "").toLowerCase().replace(/\s+/g, "_");
   // Doc 14 W1: a stored `disputed` over answers none of which supported the claim is stated from the answers, not as
   // models diverging (the stored label is still printed under VERDICT).
   if (isDisputedWithoutSupport(v, counts)) return `${claimNoSupportAnswerSentence(counts)} ${CLAIM_MEMO_NO_SUPPORT_NOTE}`;
+  if (v === "disputed" && crossModel && !crossModel.disagreement) return CLAIM_MEMO_SLOT_RESPONSES_DIFFER;
   if (v === "confirmed")
     return "The models largely supported the claim, with meaningful alignment on the core statement.";
   if (v === "disputed")
@@ -384,8 +402,8 @@ function generateClaimMemo(input: MemoInput): string {
       : coverage === "unverified"
         ? CLAIM_MEMO_UNVERIFIED_SUMMARY
         : slotsOverModels
-          ? `${exec!.answeredSlots} panel slots answered this claim; ${exec!.independentModels} independent executing models wrote those answers. ${claimSummarySentence(input.verdict, verdictCounts)}`
-          : `${Math.max(1, n)} AI models evaluated this claim independently. ${claimSummarySentence(input.verdict, verdictCounts)}`
+          ? `${exec!.answeredSlots} panel slots answered this claim; ${exec!.independentModels} independent executing models wrote those answers. ${claimSummarySentence(input.verdict, verdictCounts, input.claimCrossModel)}`
+          : `${Math.max(1, n)} AI models evaluated this claim independently. ${claimSummarySentence(input.verdict, verdictCounts, input.claimCrossModel)}`
   );
   lines.push("");
 
@@ -404,17 +422,27 @@ function generateClaimMemo(input: MemoInput): string {
   }
 
   // Below two independent models (or with unverified coverage) nothing is agreement or disagreement between models.
+  const cross = input.claimCrossModel;
   const agree = noConsensus ? [] : dedupeCap(input.agreementPoints ?? []);
   if (agree.length) {
-    lines.push("WHERE MODELS AGREE");
+    // R3: agreement between models only when every answering slot is its own identified model.
+    lines.push(cross && !cross.oneModelPerSlot ? VIDEO_MEMO_NOT_INDEPENDENT_AGREE_HEADING : "WHERE MODELS AGREE");
     agree.forEach((p) => lines.push(`- ${p}`));
     lines.push("");
   }
 
   const disagree = noConsensus ? [] : dedupeCap(input.disagreementPoints ?? []);
-  if (disagree.length) {
+  // R3: a conflict point is a disagreement between models only when it is between two identified models.
+  const betweenModels = cross ? disagree.filter((p) => cross.disagreementPointsBetweenModels.includes(p)) : disagree;
+  const betweenSlots = cross ? disagree.filter((p) => !cross.disagreementPointsBetweenModels.includes(p)) : [];
+  if (betweenModels.length) {
     lines.push("WHERE MODELS DISAGREE");
-    disagree.forEach((p) => lines.push(`- ${p}`));
+    betweenModels.forEach((p) => lines.push(`- ${p}`));
+    lines.push("");
+  }
+  if (betweenSlots.length) {
+    lines.push(VIDEO_MEMO_NOT_INDEPENDENT_DISAGREE_HEADING);
+    betweenSlots.forEach((p) => lines.push(`- ${p}`));
     lines.push("");
   }
 

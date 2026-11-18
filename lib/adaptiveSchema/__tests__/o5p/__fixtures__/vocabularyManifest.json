@@ -3106,5 +3106,12 @@
   "count": 1,
   "category": "shared-claim-video",
   "rule": "doc 14 PR-1 (W1): claim memo summary for a stored 'disputed' label over answers none of which supported the claim — states the stored label is not a disagreement (replaces 'Models diverged…' only in that case; a genuine split keeps it)"
+ },
+ {
+  "file": "lib/verification/generateMemo.ts",
+  "literal": "\"The panel slot responses differ, but the opposing responses did not come from two reliably identified executing models; this is not a disagreement between models. The recorded verdict label is Disputed.\"",
+  "count": 1,
+  "category": "shared-claim-video",
+  "rule": "doc 14 PR-1 R3: claim memo summary for a stored 'disputed' whose supporting and inaccurate answers do not come from two different reliably identified executing providers (e.g. one substitute answering both sides) — replaces 'Models diverged…' only in that case, only when the caller passes claimCrossModel"
  }
 ]

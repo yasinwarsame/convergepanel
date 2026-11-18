@@ -17,6 +17,8 @@
  * Pure and client-safe. Read-time only — nothing here is persisted, so it applies to historical records unchanged.
  */
 
+import { canonicalProvider } from "@/lib/panel/providerRegistry";
+
 export type ClaimModelVerdictCounts = {
   accurate: number;
   partially_accurate: number;
@@ -96,8 +98,9 @@ export function countClaimModelVerdictsFromAuditBundle(bundle: unknown): ClaimMo
  *  - `usable`: slots with a parsed, recognised verdict (`verdicts` breaks them down per verdict);
  *  - `failed`: slots whose request failed; `malformed`: slots whose response had no recognised verdict (`parse_error`);
  *  - `substitutedUsable`: usable slots answered by a substitute model (the row records `substituted: true`);
- *  - `providers`: distinct recorded executing providers among the usable slots, or null when any usable slot records
- *    none (historical rows) — never guessed.
+ *  - `providers`: distinct RELIABLY IDENTIFIED executing providers (registered canonical tokens only) among the usable
+ *    slots, or null when any usable slot records none or an unregistered token ("unknown", "acme", historical rows) —
+ *    an unknown identity never inflates the count.
  * Null when a row cannot be classified (not an object, an unknown status, an "ok" row with an unknown verdict).
  */
 export type ClaimSlotTally = {
@@ -124,7 +127,8 @@ export function claimSlotTally(rows: ReadonlyArray<unknown>): ClaimSlotTally | n
     else if (r.status === "parse_error") malformed += 1;
     else if (r.status === "ok") {
       if (r.substituted === true) substitutedUsable += 1;
-      if (typeof r.provider === "string" && r.provider.trim() !== "") providers.add(r.provider.trim().toLowerCase());
+      const p = canonicalProvider(r.provider);
+      if (p !== null) providers.add(p);
       else providerUnknown = true;
     } else return null;
   }
@@ -160,6 +164,89 @@ export function claimSlotTallyNote(t: ClaimSlotTally): string | null {
   if (t.providers !== null && t.providers < t.usable) parts.push(n(t.providers, "distinct executing provider", "distinct executing providers"));
   return parts.length === 0 ? null : parts.join("; ");
 }
+
+/**
+ * Who stands on which side, by RELIABLY IDENTIFIED executing provider (owner ruling 2026-11-18, R3). Over the usable
+ * rows (status "ok", recognised verdict):
+ *  - `reliable`: every usable row records a registered canonical provider (otherwise nothing below may support a
+ *    statement about models);
+ *  - `providers`: distinct identified providers; `accurateProviders` / `supportProviders`: providers with an accurate /
+ *    an accurate-or-partially-accurate answer;
+ *  - `crossModelDisagreement`: a supporting answer and an inaccurate answer come from two DIFFERENT identified providers
+ *    (one substitute that answered both sides is differing slot responses, not a disagreement between models);
+ *  - `supportAgreement`: at least two different identified providers gave a supporting answer;
+ *  - `consistent`: every identified provider answered all its slots with the same verdict;
+ *  - `providerOfSlot`: the identified provider of each usable slot (by modelId).
+ * No score: identities and observations only.
+ */
+export type ClaimProviderSides = {
+  reliable: boolean;
+  providers: number;
+  accurateProviders: number;
+  supportProviders: number;
+  crossModelDisagreement: boolean;
+  supportAgreement: boolean;
+  consistent: boolean;
+  providerOfSlot: Readonly<Record<string, string>>;
+};
+
+export function claimProviderSides(rows: ReadonlyArray<unknown>): ClaimProviderSides {
+  const usable: Array<{ modelId: string; verdict: PerModelVerdict; provider: string | null }> = [];
+  for (const raw of Array.isArray(rows) ? rows : []) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const r = raw as { modelId?: unknown; status?: unknown; verdict?: unknown; provider?: unknown };
+    if (r.status !== "ok" || !isPerModelVerdict(r.verdict)) continue;
+    usable.push({ modelId: String(r.modelId ?? "").trim(), verdict: r.verdict, provider: canonicalProvider(r.provider) });
+  }
+  const reliable = usable.length > 0 && usable.every((u) => u.provider !== null);
+  const providerOfSlot: Record<string, string> = {};
+  const verdictsBy = new Map<string, Set<PerModelVerdict>>();
+  for (const u of usable) {
+    if (u.provider === null) continue;
+    providerOfSlot[u.modelId] = u.provider;
+    verdictsBy.set(u.provider, new Set([...(verdictsBy.get(u.provider) ?? []), u.verdict]));
+  }
+  const withVerdict = (pred: (v: PerModelVerdict) => boolean) => new Set(usable.filter((u) => u.provider !== null && pred(u.verdict)).map((u) => u.provider as string));
+  const support = withVerdict((v) => v === "accurate" || v === "partially_accurate");
+  const inaccurate = withVerdict((v) => v === "inaccurate");
+  return {
+    reliable,
+    providers: verdictsBy.size,
+    accurateProviders: withVerdict((v) => v === "accurate").size,
+    supportProviders: support.size,
+    crossModelDisagreement: reliable && [...support].some((s) => [...inaccurate].some((i) => i !== s)),
+    supportAgreement: reliable && support.size >= 2,
+    consistent: reliable && [...verdictsBy.values()].every((v) => v.size === 1),
+    providerOfSlot,
+  };
+}
+
+/**
+ * Split digest conflict points: a pair is between two models only when both slots are usable with two DIFFERENT
+ * identified providers; every other pair is a difference between panel slot responses.
+ */
+export function splitClaimDisagreementsByIdentity<T extends { models: string[] }>(points: readonly T[], sides: ClaimProviderSides): { betweenModels: T[]; betweenSlots: T[] } {
+  const betweenModels: T[] = [];
+  const betweenSlots: T[] = [];
+  for (const p of points) {
+    const [a, b] = p.models ?? [];
+    const pa = sides.reliable && typeof a === "string" ? sides.providerOfSlot[a.trim()] : undefined;
+    const pb = sides.reliable && typeof b === "string" ? sides.providerOfSlot[b.trim()] : undefined;
+    (pa && pb && pa !== pb ? betweenModels : betweenSlots).push(p);
+  }
+  return { betweenModels, betweenSlots };
+}
+
+/** One sentence qualifying slot-response counts, with the slot note when there is one. */
+export function claimSlotResponsesNote(t: ClaimSlotTally): string {
+  const note = claimSlotTallyNote(t);
+  return `These counts are of panel slot responses, not of agreeing models${note ? ` (${note})` : ""}.`;
+}
+
+/** Banner wording for a stored `disputed` whose opposing responses do not come from two identified models. */
+export const CLAIM_SLOT_RESPONSES_DIFFER_TITLE = "Panel slot responses differ on this claim";
+export const CLAIM_SLOT_RESPONSES_DIFFER_SUBTITLE =
+  "Recorded verdict: Disputed. The opposing responses did not come from two reliably identified executing models, so this is not a disagreement between models.";
 
 /**
  * Shape of the distribution (internal, never persisted or exported — not an API enum):

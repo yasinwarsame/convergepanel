@@ -46,7 +46,12 @@ import {
   claimNoSupportAnswerSentence,
   claimNoSupportStatement,
   claimPayloadSlotTally,
+  claimProviderSides,
+  claimSlotResponsesNote,
   claimSlotTallyNote,
+  CLAIM_SLOT_RESPONSES_DIFFER_SUBTITLE,
+  CLAIM_SLOT_RESPONSES_DIFFER_TITLE,
+  splitClaimDisagreementsByIdentity,
   claimSplitVerdictsQualifier,
   formatClaimVerdictCounts,
   hasSplitVerdicts,
@@ -257,6 +262,49 @@ function agreementSectionFallbackCopy(data: ClaimVerificationClientPayload): str
   return sentences.join(" ");
 }
 
+/**
+ * The agreement / disagreement sections a claim surface shows (owner ruling 2026-11-18, R3). With a multi-model
+ * consensus, "Where models agree" only when every answering slot is its own identified executing model (a shared point
+ * cannot then come from one model's several slots), and "Where models disagree" only for pairs from two different
+ * identified models; every other point is listed under the existing "points … across responses" headings. Without a
+ * consensus everything is under those headings, as before.
+ */
+export function claimDigestSections(data: ClaimVerificationClientPayload): {
+  agreeHeading: string;
+  agree: string[];
+  disagreeBetweenModels: ClaimVerificationClientPayload["whereModelsDisagree"];
+  disagreeBetweenSlots: ClaimVerificationClientPayload["whereModelsDisagree"];
+} {
+  const view = claimViewIndependence(data);
+  const consensus = claimConsensusDisplay(data.consensusScore, view.independence);
+  if (consensus.kind !== "score") {
+    return { agreeHeading: CLAIM_NOT_INDEPENDENT_AGREE_HEADING, agree: data.whereModelsAgree, disagreeBetweenModels: [], disagreeBetweenSlots: data.whereModelsDisagree };
+  }
+  const sides = claimProviderSides(data.modelEvidence);
+  const tally = claimPayloadSlotTally(data);
+  const oneModelPerSlot = tally !== null && sides.reliable && sides.providers === view.identity.independentModels && sides.providers === tally.usable;
+  const split = splitClaimDisagreementsByIdentity(data.whereModelsDisagree, sides);
+  return {
+    agreeHeading: oneModelPerSlot ? "Where models agree" : CLAIM_NOT_INDEPENDENT_AGREE_HEADING,
+    agree: data.whereModelsAgree,
+    disagreeBetweenModels: split.betweenModels,
+    disagreeBetweenSlots: split.betweenSlots,
+  };
+}
+
+/** The memo's `claimCrossModel` input for this payload (R3): what the identified providers establish. */
+export function claimMemoCrossModel(data: ClaimVerificationClientPayload): { disagreement: boolean; oneModelPerSlot: boolean; disagreementPointsBetweenModels: string[] } {
+  const view = claimViewIndependence(data);
+  const sides = claimProviderSides(data.modelEvidence);
+  const tally = claimPayloadSlotTally(data);
+  const digest = claimDigestSections(data);
+  return {
+    disagreement: sides.crossModelDisagreement,
+    oneModelPerSlot: tally !== null && sides.reliable && sides.providers === view.identity.independentModels && sides.providers === tally.usable,
+    disagreementPointsBetweenModels: digest.disagreeBetweenModels.map((d) => d.point),
+  };
+}
+
 /** Pure text for "Copy verdict". Formatting only — the caller decides whether and how to write it anywhere. */
 export function buildClaimVerdictClipboardText(data: ClaimVerificationClientPayload): string {
   const lines: string[] = [];
@@ -291,15 +339,21 @@ export function buildClaimVerdictClipboardText(data: ClaimVerificationClientPayl
   for (const m of data.modelEvidence) {
     lines.push(`- ${runModelFamilyName(m.modelId as ModelId)}: ${formatVerdictLabel(m.verdict)} — ${m.summary}`);
   }
-  if (data.whereModelsAgree.length) {
+  const digest = claimDigestSections(data);
+  if (digest.agree.length) {
     lines.push("");
-    lines.push(consensus.kind === "score" ? "Where models agree:" : `${CLAIM_NOT_INDEPENDENT_AGREE_HEADING}:`);
-    data.whereModelsAgree.forEach((x) => lines.push(`• ${x}`));
+    lines.push(`${digest.agreeHeading}:`);
+    digest.agree.forEach((x) => lines.push(`• ${x}`));
   }
-  if (data.whereModelsDisagree.length) {
+  if (digest.disagreeBetweenModels.length) {
     lines.push("");
-    lines.push(consensus.kind === "score" ? "Where models disagree:" : `${CLAIM_NOT_INDEPENDENT_DISAGREE_HEADING}:`);
-    data.whereModelsDisagree.forEach((x) => lines.push(`• ${x.point} [${x.models.join(", ")}]`));
+    lines.push("Where models disagree:");
+    digest.disagreeBetweenModels.forEach((x) => lines.push(`• ${x.point} [${x.models.join(", ")}]`));
+  }
+  if (digest.disagreeBetweenSlots.length) {
+    lines.push("");
+    lines.push(`${CLAIM_NOT_INDEPENDENT_DISAGREE_HEADING}:`);
+    digest.disagreeBetweenSlots.forEach((x) => lines.push(`• ${x.point} [${x.models.join(", ")}]`));
   }
   lines.push(CLAIM_VERDICT_CLIPBOARD_DISCLAIMER.trimEnd());
   return lines.join("\n");
@@ -395,24 +449,6 @@ export function ClaimVerificationAuditTrailDetails({ data }: { data: ClaimVerifi
   );
 }
 
-/**
- * True when every verified executing model answered all of its slots with the same verdict (so a per-verdict count of
- * models cannot place one model on two sides). False when unverified or when any model's slots differ.
- */
-function executingModelsAnsweredConsistently(view: ReturnType<typeof claimViewIndependence>, rows: ClaimVerificationClientPayload["modelEvidence"]): boolean {
-  if (!view.identity.verified) return false;
-  const byModel = new Map<string, string>();
-  for (const r of rows) {
-    if (r.status !== "ok") continue;
-    const key = view.identity.slotKeys[String(r.modelId).trim()];
-    if (typeof key !== "string") return false;
-    const prev = byModel.get(key);
-    if (prev !== undefined && prev !== r.verdict) return false;
-    byModel.set(key, r.verdict);
-  }
-  return true;
-}
-
 /** What the verdict banner says. Pure: from the payload only (exported for the exhaustive truthfulness spec). */
 export function claimVerdictBanner(data: ClaimVerificationClientPayload): {
   className: string;
@@ -447,43 +483,45 @@ export function claimVerdictBanner(data: ClaimVerificationClientPayload): {
       subtitle: independence === "insufficient" ? CLAIM_SINGLE_MODEL_BANNER_SUBTITLE : CLAIM_UNVERIFIED_BANNER_SUBTITLE,
     };
   }
-  // Independent executing models (the shared gate's K) and how many of them rated it accurate — never slot counts:
-  // a failed slot is not an answer and a substitute model that answered several slots counts once.
-  const u = view.identity.independentModels ?? 0;
-  const a = independentModelsAmong(
-    view.identity,
-    data.modelEvidence.filter((m) => m.status === "ok" && m.verdict === "accurate").map((m) => m.modelId)
-  );
+  // Owner ruling 2026-11-18 (R3): statements about MODELS rest on reliably identified executing providers; everything
+  // else is stated as panel slot responses. Fail closed: rows that cannot be counted get the unverified banner.
+  if (tally === null) {
+    return {
+      className: "bg-cp-raised border-cp-border text-cp-text",
+      icon: AGGREGATE_VERDICT_ICONS[v],
+      title: `${aggregateVerdictLabel(v)} — ${claimVerdictQualifier("unverified")}`,
+      subtitle: CLAIM_UNVERIFIED_BANNER_SUBTITLE,
+    };
+  }
+  const sides = claimProviderSides(data.modelEvidence);
+  // Model counts may be stated only when the identified providers are exactly the gate's independent models.
+  const modelsIdentified = sides.reliable && sides.providers === view.identity.independentModels;
+  const oneModelPerSlot = modelsIdentified && sides.providers === tally.usable;
+  const slotNote = claimSlotResponsesNote(tally);
+  const c = tally.verdicts;
   switch (v) {
     case "confirmed":
-      // C-b CB-06 keeps "a/u models" (a substitute in several slots counts once) while every executing model answered
-      // all its slots the same way. Owner ruling 2026-11-18: when one executing model answered slots with DIFFERENT
-      // verdicts, "a/u models" would count it as supporting while it also answered against — state the slot responses
-      // instead, and say what the slots are.
-      if (tally !== null && !executingModelsAnsweredConsistently(view, data.modelEvidence)) {
+      // C-b CB-06 "a/u models" (a substitute in several slots counts once) — only while the identified models answered
+      // consistently and a majority of at least two identified models rated it accurate; otherwise slot responses.
+      if (modelsIdentified && sides.consistent && sides.accurateProviders >= 2 && 2 * sides.accurateProviders > sides.providers) {
         return {
           className: "bg-emerald-50 border-emerald-200 text-emerald-900",
           icon: AGGREGATE_VERDICT_ICONS.confirmed,
-          title: `This claim is supported by ${tally.verdicts.accurate} of ${tally.usable} answers`,
-          subtitle: `Majority agreement: accurate. ${claimSlotCountsNote(view)}`,
+          title: `This claim is supported by ${sides.accurateProviders}/${sides.providers} models`,
+          subtitle: "Majority agreement: accurate",
         };
       }
       return {
         className: "bg-emerald-50 border-emerald-200 text-emerald-900",
         icon: AGGREGATE_VERDICT_ICONS.confirmed,
-        title: `This claim is supported by ${a}/${u} models`,
-        subtitle: "Majority agreement: accurate",
+        title: `This claim is supported by ${c.accurate} of ${c.usable} answers`,
+        subtitle: `Recorded verdict: Confirmed. ${slotNote}`,
       };
     case "disputed": {
-      // Doc 14 W1: `disputed` is also what the stored vocabulary records when NO model supported the claim
-      // (claimVerdict.ts fall-through). That is not a disagreement: state the recorded answers instead.
-      if (tally !== null && isDisputedWithoutSupport(data.verdict, tally.verdicts)) {
-        // Owner ruling 2026-11-18: count the actual RESPONSES (usable slots), with one denominator — never a per-verdict
-        // count of independent models over a model total (a substitute that answered two slots with different
-        // verdicts would be on both sides). The unit is "models" only when every answering slot is its own verified
-        // executing model; otherwise "answers", and the subtitle says what the slots are.
-        const asModels = slotCountsAreModelCounts(view);
-        const c = tally.verdicts;
+      // Doc 14 W1: `disputed` is also what the stored vocabulary records when NO answer supported the claim
+      // (claimVerdict.ts fall-through). That is not a disagreement: state the recorded responses instead, with one
+      // denominator; "models" only when every answering slot is its own identified executing model.
+      if (isDisputedWithoutSupport(data.verdict, c)) {
         return {
           className: "bg-rose-50 border-rose-200 text-rose-900",
           icon: AGGREGATE_VERDICT_ICONS.disputed,
@@ -491,16 +529,26 @@ export function claimVerdictBanner(data: ClaimVerificationClientPayload): {
             inaccurate: c.inaccurate,
             unverifiable: c.unverifiable,
             total: c.usable,
-            unit: (k) => (asModels ? `model${k === 1 ? "" : "s"}` : `answer${k === 1 ? "" : "s"}`),
+            unit: (k) => (oneModelPerSlot ? `model${k === 1 ? "" : "s"}` : `answer${k === 1 ? "" : "s"}`),
           }),
-          subtitle: asModels ? CLAIM_NO_SUPPORT_BANNER_SUBTITLE : `${CLAIM_NO_SUPPORT_BANNER_SUBTITLE} ${claimSlotCountsNote(view)}`,
+          subtitle: oneModelPerSlot ? CLAIM_NO_SUPPORT_BANNER_SUBTITLE : `${CLAIM_NO_SUPPORT_BANNER_SUBTITLE} ${slotNote}`,
+        };
+      }
+      // "Models disagree" only when a supporting and an inaccurate answer come from two DIFFERENT identified models.
+      // One substitute that answered both sides produced differing slot responses, not a disagreement between models.
+      if (sides.crossModelDisagreement) {
+        return {
+          className: "bg-rose-50 border-rose-200 text-rose-900",
+          icon: AGGREGATE_VERDICT_ICONS.disputed,
+          title: "Models disagree on this claim",
+          subtitle: "Review per-model evidence below",
         };
       }
       return {
         className: "bg-rose-50 border-rose-200 text-rose-900",
         icon: AGGREGATE_VERDICT_ICONS.disputed,
-        title: "Models disagree on this claim",
-        subtitle: "Review per-model evidence below",
+        title: CLAIM_SLOT_RESPONSES_DIFFER_TITLE,
+        subtitle: `${CLAIM_SLOT_RESPONSES_DIFFER_SUBTITLE} ${slotNote}`,
       };
     }
     case "partially_true":
@@ -508,7 +556,8 @@ export function claimVerdictBanner(data: ClaimVerificationClientPayload): {
         className: "bg-amber-50 border-amber-200 text-amber-900",
         icon: AGGREGATE_VERDICT_ICONS.partially_true,
         title: "Core claim may hold — details need correction",
-        subtitle: "Partial agreement across models",
+        // "Partial agreement across models" needs at least two identified models with a supporting answer.
+        subtitle: sides.supportAgreement ? "Partial agreement across models" : `Partial support in the panel slot responses. ${slotNote}`,
       };
     case "unverifiable":
     default:
@@ -544,6 +593,7 @@ export default function ClaimVerificationResultView({
   const tally = useMemo(() => claimPayloadSlotTally(data), [data]);
   const verdictCounts = tally?.verdicts ?? null;
   const tallyNote = tally ? claimSlotTallyNote(tally) : null;
+  const digest = useMemo(() => claimDigestSections(data), [data]);
 
   const banner = useMemo(() => claimVerdictBanner(data), [data]);
 
@@ -634,13 +684,11 @@ export default function ClaimVerificationResultView({
 
       <div className="px-5 py-5 md:px-8 space-y-4 border-b border-cp-border-soft">
         <h3 className="text-sm font-semibold text-cp-text">Agreement &amp; disagreement</h3>
-        {data.whereModelsAgree.length > 0 ? (
+        {digest.agree.length > 0 ? (
           <div>
-            <p className="text-xs font-medium text-emerald-700 mb-2">
-              {consensus.kind === "score" ? "Where models agree" : CLAIM_NOT_INDEPENDENT_AGREE_HEADING}
-            </p>
+            <p className="text-xs font-medium text-emerald-700 mb-2">{digest.agreeHeading}</p>
             <ul className="list-disc pl-5 text-sm text-cp-text space-y-1">
-              {data.whereModelsAgree.map((x, i) => (
+              {digest.agree.map((x, i) => (
                 <li key={i}>{x}</li>
               ))}
             </ul>
@@ -648,22 +696,25 @@ export default function ClaimVerificationResultView({
         ) : (
           <p className="text-sm text-cp-muted leading-relaxed">{agreementSectionFallbackCopy(data)}</p>
         )}
-        {data.whereModelsDisagree.length > 0 && (
-          <div>
-            <p className="text-xs font-medium text-rose-700 mb-2">
-              {consensus.kind === "score" ? "Where models disagree" : CLAIM_NOT_INDEPENDENT_DISAGREE_HEADING}
-            </p>
-            <ul className="list-disc pl-5 text-sm text-cp-text space-y-1">
-              {data.whereModelsDisagree.map((x, i) => (
-                <li key={i}>
-                  {x.point}
-                  {x.models?.length ? (
-                    <span className="text-cp-faint"> — {x.models.join(", ")}</span>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          </div>
+        {(
+          [
+            ["Where models disagree", digest.disagreeBetweenModels],
+            [CLAIM_NOT_INDEPENDENT_DISAGREE_HEADING, digest.disagreeBetweenSlots],
+          ] as const
+        ).map(([heading, points]) =>
+          points.length > 0 ? (
+            <div key={heading}>
+              <p className="text-xs font-medium text-rose-700 mb-2">{heading}</p>
+              <ul className="list-disc pl-5 text-sm text-cp-text space-y-1">
+                {points.map((x, i) => (
+                  <li key={i}>
+                    {x.point}
+                    {x.models?.length ? <span className="text-cp-faint"> — {x.models.join(", ")}</span> : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null
         )}
       </div>
 

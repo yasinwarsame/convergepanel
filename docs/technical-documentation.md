@@ -946,13 +946,20 @@ Surfaces state the distribution from it, at read time, without changing the stor
 `disputed` over answers none of which supported the claim is described from the answers ("3 of 3 models rated this
 claim inaccurate"), not as disagreement; a confidence label over split answers is shown with the split. Counts are of
 recorded slot responses (`claimSlotTally`: slots, usable, failed, malformed, substituted, distinct recorded providers),
-with one denominator. The no-support banner states "models" only when every answering slot is its own verified executing
-model, otherwise "answers" with the slots disclosed (several slots answered by one substitute model are not independent).
-The "supported by a/u models" banner keeps C-b CB-06 (a substitute in several slots counts once) only while every
-executing model answered all its slots the same way; otherwise it states "a of n answers" with the slots disclosed. The Team list
-summary DTO and the Personal history item carry an additive, optional `modelVerdicts` (absent when the bundle cannot be
-counted; the Team client parser accepts it absent, ignores additional keys, and drops unusable counts for that row only —
-it never fails the page over them).
+with one denominator. Statements about MODELS rest on reliably identified executing providers (`claimProviderSides`:
+registered canonical provider tokens only; an unknown or non-canonical id makes the record's identity unreliable and
+never inflates a provider count). Counts are stated in "models" only when the identified providers are exactly the
+gate's independent models (and, for the no-support banner, one per answering slot); otherwise in "answers" with the slot
+note. "Models disagree on this claim" / memo "Models diverged…" need a supporting and an inaccurate answer from two
+different identified providers — one substitute answering both sides is "Panel slot responses differ on this claim";
+"Partial agreement across models" needs two identified providers with a supporting answer; "supported by a/u models" +
+"Majority agreement" needs a consistent majority of at least two identified models; "Where models agree" needs one
+identified model per answering slot, and "Where models disagree" lists only pairs from two different identified
+providers (other points go under the "points … across responses" headings). Rows that cannot be counted (or that
+disagree with the audit bundle) get the unverified banner. The Team list summary DTO carries an additive, optional
+`modelVerdicts` (absent when the bundle cannot be counted; the Team client parser accepts it absent, ignores additional
+keys, and drops unusable counts for that row only — it never fails the page over them). The Personal history item does
+**not** carry it (deferred: `app/page.tsx` is byte-frozen).
 
 **Agreement digest (PR-1, doc 14 D-5).** `buildAgreementDisagreementDigest` takes each row's verdict. "Conflicting
 assessments" is reported for a part one model lists as correct and another lists as incorrect, or (legacy heuristic)

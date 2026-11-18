@@ -83,7 +83,7 @@ const UNCHANGED_AT_35933C8: Record<string, string> = {
  */
 const WIDENED_BY_INC1: Record<string, string> = {
   "lib/adaptiveSchema/__tests__/o5p/vocabularyScanner.ts": "37e23190b3585eaa57fa0ddad29c5b6d01d2f76f",
-  "lib/adaptiveSchema/__tests__/o5p/__fixtures__/vocabularyManifest.json": "b343d7738c1f93a0b9e4b512e88b5abe283f68e8",
+  "lib/adaptiveSchema/__tests__/o5p/__fixtures__/vocabularyManifest.json": "935b42fd472afea11e41044842cc3f33588e4240",
 };
 
 /**
@@ -200,6 +200,10 @@ const WIDENED_BY_INC1: Record<string, string> = {
  *     claim-memo entries appended: the split-qualified CONSENSUS SCORE literal, its "; verdicts split:" fragment and the
  *     no-support summary note; the existing CONSENSUS SCORE entry's count 3 → 2 with its rule extended; none removed).
  * Same 32-file pinned set.
+ *
+ * Re-pinned (doc 14 PR-1 R3, owner ruling 2026-11-18): vocabularyManifest.json b343d773… → 935b42fd… (1 claim-memo entry
+ * appended: the "panel slot responses differ" summary for a disputed record without a cross-model disagreement; none
+ * removed). Same 32-file pinned set.
  */
 const READABLE_GATE_OPTION_BY_INC1: Record<string, string> = {
   "components/adaptive/AdaptiveSynthesisReportView.tsx": "bcdf6ba2444c2aa3dc22ae049901cf72e55eb0bc",

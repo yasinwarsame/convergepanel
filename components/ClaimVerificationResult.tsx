@@ -24,6 +24,7 @@ import { GovernanceBadge } from "@/components/GovernanceBadge";
 import { VerificationActions } from "@/components/VerificationActions";
 import { downloadTextFile, generateVerificationMemo } from "@/lib/verification/generateMemo";
 import ClaimVerificationResultView, {
+  claimMemoCrossModel,
   claimViewIndependence,
   buildClaimVerdictClipboardText,
   ClaimVerificationAuditTrailDetails,
@@ -146,6 +147,8 @@ export default function ClaimVerificationResult({
       // Fail closed: a payload without recorded independence is "unverified" (no consensus score in the memo).
       claimModelIndependence: view.independence,
       ...(claimExecution ? { claimExecution } : {}),
+      // Doc 14 PR-1 R3: agreement / disagreement wording only as far as the identified providers establish it.
+      claimCrossModel: claimMemoCrossModel(data),
     });
     const base = data.verificationId?.replace(/[^a-zA-Z0-9-_]+/g, "-").slice(0, 48) || String(Date.now());
     downloadTextFile(memo, `claim-memo-${base}.txt`);

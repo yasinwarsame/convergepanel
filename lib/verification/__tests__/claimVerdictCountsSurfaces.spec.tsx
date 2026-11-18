@@ -247,6 +247,12 @@ describe("Team list client parser and row", () => {
     expect(split).toContain("Answers: 4 accurate, 1 inaccurate");
   });
 
+  it("R3: a row whose answers came partly from one substitute states answer counts only — no model agreement wording", () => {
+    const out = render({ ...(base as unknown as TeamClaimListItem), verdict: "disputed", modelVerdicts: { accurate: 1, partially_accurate: 0, inaccurate: 1, unverifiable: 1, usable: 3 } });
+    expect(out).toContain("Answers: 1 accurate, 1 inaccurate, 1 unverifiable");
+    expect(out).not.toMatch(/models? (disagree|diverged|agree)/i);
+  });
+
   it("[CONTROL] row without counts, or with a withheld score, renders as before", () => {
     const plain = render(base as unknown as TeamClaimListItem);
     expect(plain).not.toContain("Answers:");

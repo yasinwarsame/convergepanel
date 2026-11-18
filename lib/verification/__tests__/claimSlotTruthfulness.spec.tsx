@@ -123,7 +123,8 @@ function* mixes(): Generator<{ outs: Outcome[]; mode: Mode }> {
 const NO_SUPPORT = /^(\d+) of (\d+) (models?|answers?) rated this claim inaccurate(?:; (\d+) could not verify it)?$/;
 const SUPPORTED_MODELS = /^This claim is supported by (\d+)\/(\d+) models$/;
 const SUPPORTED_ANSWERS = /^This claim is supported by (\d+) of (\d+) answers$/;
-const SLOT_NOTE = "These counts are of panel slots";
+// R3: the disclosure is stated over slot RESPONSES (with the slot note), no longer through the gate's model count.
+const SLOT_NOTE = "These counts are of panel slot responses, not of agreeing models";
 
 function check(outs: Outcome[], mode: Mode): string[] {
   const errs: string[] = [];
@@ -152,7 +153,8 @@ function check(outs: Outcome[], mode: Mode): string[] {
     else if (Number(sm[1]) !== o.modelsA || Number(sm[2]) !== o.providers) errs.push(`supported ${sm[1]}/${sm[2]} vs models A=${o.modelsA} of ${o.providers}`);
   }
   const sa = SUPPORTED_ANSWERS.exec(banner.title);
-  if (sa && o.consistent) errs.push("answer counts where model counts are consistent (C-b CB-06 wording expected)");
+  // R3: C-b CB-06 model wording is expected only for a majority of >= 2 consistently answering identified models.
+  if (sa && o.consistent && o.providers !== null && o.modelsA >= 2 && 2 * o.modelsA > o.providers) errs.push("answer counts where a consistent identified majority exists (C-b CB-06 wording expected)");
   if (sa) {
     if (Number(sa[1]) !== o.A || Number(sa[2]) !== o.usable) errs.push(`supported answers ${sa[1]}/${sa[2]} vs A=${o.A} usable=${o.usable}`);
     if (!banner.subtitle.includes(SLOT_NOTE)) errs.push("supported-answers banner without the slot disclosure");
@@ -227,7 +229,7 @@ describe("exhaustive slot-response truthfulness (1–5 slots × 6 outcomes × pr
     const payload = mapStoredVerificationToClientPayload(storedDoc(rowsFor(["I", "U", "F", "I"], MODES[2])), "v");
     const b = claimVerdictBanner(payload);
     expect(b.title).toBe("2 of 3 answers rated this claim inaccurate; 1 could not verify it");
-    expect(b.subtitle).toContain("These counts are of panel slots (2 independent executing models answered 3 panel slots), not of agreeing models.");
+    expect(b.subtitle).toContain("These counts are of panel slot responses, not of agreeing models (3 of 4 slots answered; 1 failed; 2 answered by a substitute model; 2 distinct executing providers).");
     expect(b.title).not.toContain("2 of 2 models");
   });
 });
@@ -248,7 +250,7 @@ describe("named scenarios", () => {
     // DeepSeek answered its slots accurate AND inaccurate: it cannot be counted as a supporting model — slot responses.
     const mixed = claimVerdictBanner(mapStoredVerificationToClientPayload(storedDoc(rowsFor(["A", "I", "A", "A", "A"], MODES[2])), "v"));
     expect(mixed.title).toBe("This claim is supported by 4 of 5 answers");
-    expect(mixed.subtitle).toContain("These counts are of panel slots (4 independent executing models answered 5 panel slots), not of agreeing models.");
+    expect(mixed.subtitle).toContain("These counts are of panel slot responses, not of agreeing models (2 answered by a substitute model; 4 distinct executing providers).");
   });
 
   it("one model fails and another is substituted", () => {

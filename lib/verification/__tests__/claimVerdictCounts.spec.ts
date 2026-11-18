@@ -13,7 +13,9 @@ import {
 } from "@/lib/verification/buildClaimModelEvidence";
 import {
   claimPayloadSlotTally,
+  claimProviderSides,
   claimSlotTally,
+  splitClaimDisagreementsByIdentity,
   claimSlotTallyNote,
   claimVerdictShape,
   countClaimModelVerdicts,
@@ -163,6 +165,40 @@ describe("per-model verdict counts", () => {
     // Historic rows record no provider: providers unknown (null), never guessed.
     expect(claimSlotTally([{ status: "ok", verdict: "accurate" }, { status: "ok", verdict: "accurate", provider: "openai" }])?.providers).toBeNull();
     expect(claimSlotTally([{ status: "weird" }])).toBeNull();
+  });
+
+  it("R3: non-canonical provider ids never count as identities (providers unknown → null)", () => {
+    for (const bad of ["unknown", "acme", "", "  ", "OpenAI-ish"]) {
+      expect(claimSlotTally([{ status: "ok", verdict: "accurate", provider: bad }, { status: "ok", verdict: "accurate", provider: "openai" }])?.providers).toBeNull();
+    }
+    // Case / whitespace variants of a registered token are that provider (canonicalProvider), not a second one.
+    expect(claimSlotTally([{ status: "ok", verdict: "accurate", provider: " OpenAI " }, { status: "ok", verdict: "accurate", provider: "openai" }])?.providers).toBe(1);
+  });
+
+  it("R3: provider sides — opposite sides need two DIFFERENT identified providers; unknown ids make identity unreliable", () => {
+    const ds = (verdict: string, id: string) => ({ modelId: id, status: "ok", verdict, provider: "deepseek", substituted: true });
+    const own = (verdict: string, id: string, provider: string) => ({ modelId: id, status: "ok", verdict, provider });
+    const one = claimProviderSides([ds("accurate", "chatgpt"), ds("inaccurate", "claude"), own("unverifiable", "gemini", "google")]);
+    expect([one.reliable, one.crossModelDisagreement, one.providers, one.consistent]).toEqual([true, false, 2, false]);
+    const two = claimProviderSides([own("accurate", "chatgpt", "openai"), own("inaccurate", "claude", "anthropic")]);
+    expect(two.crossModelDisagreement).toBe(true);
+    const unknown = claimProviderSides([own("accurate", "chatgpt", "unknown"), own("inaccurate", "claude", "anthropic")]);
+    expect([unknown.reliable, unknown.crossModelDisagreement, unknown.supportAgreement]).toEqual([false, false, false]);
+    const partialOne = claimProviderSides([ds("partially_accurate", "chatgpt"), ds("partially_accurate", "claude"), own("unverifiable", "gemini", "google")]);
+    expect(partialOne.supportAgreement).toBe(false);
+    expect(claimProviderSides([own("partially_accurate", "chatgpt", "openai"), own("accurate", "claude", "anthropic")]).supportAgreement).toBe(true);
+    // An own slot recording another slot's provider is the same identified model.
+    expect(claimProviderSides([own("accurate", "chatgpt", "anthropic"), own("inaccurate", "claude", "anthropic")]).crossModelDisagreement).toBe(false);
+  });
+
+  it("R3: digest pairs are split by identified provider", () => {
+    const sides = claimProviderSides([
+      { modelId: "chatgpt", status: "ok", verdict: "accurate", provider: "deepseek", substituted: true },
+      { modelId: "claude", status: "ok", verdict: "inaccurate", provider: "deepseek", substituted: true },
+      { modelId: "grok", status: "ok", verdict: "inaccurate", provider: "xai" },
+    ]);
+    const pts = [{ point: "a", models: ["chatgpt", "claude"] }, { point: "b", models: ["chatgpt", "grok"] }, { point: "c", models: ["chatgpt", "gemini"] }];
+    expect(splitClaimDisagreementsByIdentity(pts, sides)).toEqual({ betweenModels: [pts[1]], betweenSlots: [pts[0], pts[2]] });
   });
 
   it("row counting skips non-ok rows and rejects an ok row outside the vocabulary", () => {

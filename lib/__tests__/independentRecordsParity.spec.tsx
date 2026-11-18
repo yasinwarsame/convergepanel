@@ -89,7 +89,16 @@ import { generateVerificationMemo } from "@/lib/verification/generateMemo";
  * verdict)") and the copied verdict's matching "Panel slots: …" line. No banner, label, count or digest changed (these
  * generated records have one executing model per slot).
  */
-const BASELINE_8584211_DIGEST = "95504140bb24d44214ce8d1df82d5fc616c689c308a61467e4f4f2a95db4b4fc";
+/**
+ * Re-pinned (doc 14 PR-1 R3, owner ruling 2026-11-18 — agreement wording needs identified models): 95504140… →
+ * 3172bf30…. Diffed against the 4da5487 PARITY_DUMP: research byte-identical; 119 claim view fields changed and EVERY one
+ * loses multi-model wording, none gains it: "supported by a/u models" + "Majority agreement" → "a of n answers" where
+ * fewer than two identified models (or no majority) rated it accurate; "Models disagree" → "Panel slot responses
+ * differ" where no supporting and inaccurate answers come from two different identified providers (here: stored
+ * `disputed` labels over answers without opposite sides); "Partial agreement across models" → "Partial support in the
+ * panel slot responses" with fewer than two identified supporting providers. Each new subtitle carries the slot note.
+ */
+const BASELINE_8584211_DIGEST = "3172bf30ddc07cbbfe566b5c45c065694237370e8dddfa765d20a85a5ac46d11";
 const stripCreatedDate = (markup: string) => markup.replace(/(data-testid="team-claim-row-created">)[^<]*(<\/span>)/g, "$1[created]$2");
 
 // Feature detection: the claim presentation module exists only after 8584211.

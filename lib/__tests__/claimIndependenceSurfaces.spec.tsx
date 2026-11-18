@@ -254,3 +254,40 @@ describe("fail closed + wiring", () => {
     expect(claimBranch).not.toContain("consensus`");
   });
 });
+
+describe("doc 14 PR-1 R3 — Personal wrapper memo wiring by identified executing models", () => {
+  const exportMemo = async (stored: ClaimVerificationFirestoreDoc) => {
+    mockedGenerateMemo.mockClear();
+    let tr!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      tr = TestRenderer.create(createElement(ClaimVerificationResult, { data: mapStoredVerificationToClientPayload(stored, "vcl-r3"), onVerifyAnother: () => {} }));
+    });
+    await act(async () => {
+      tr.root.findByType(VerificationActions).props.onExportMemo();
+    });
+    const input = mockedGenerateMemo.mock.calls[0][0] as Record<string, unknown>;
+    return { input, memo: realMemo(input) as string };
+  };
+  const LONG_A = "The completion year stated in the claim is wrong by twelve years";
+  const LONG_B = "Construction concluded during March of eighteen eighty-nine instead";
+
+  it("one substitute answering both sides (chatgpt=A, claude=I via DeepSeek; gemini=U): no 'Models diverged', no 'WHERE MODELS DISAGREE'", async () => {
+    const { input, memo } = await exportMemo(
+      doc([r("chatgpt", "ok", "accurate", { ...DS, incorrectParts: [LONG_A] }), r("claude", "ok", "inaccurate", { ...DS, incorrectParts: [LONG_B] }), r("gemini", "ok", "unverifiable")], ["chatgpt", "claude", "gemini"], "disputed")
+    );
+    expect(input.claimCrossModel).toEqual({ disagreement: false, oneModelPerSlot: false, disagreementPointsBetweenModels: [] });
+    expect(memo).not.toContain("Models diverged");
+    expect(memo).toContain("The panel slot responses differ, but the opposing responses did not come from two reliably identified executing models");
+    expect(memo).not.toContain("WHERE MODELS DISAGREE");
+    expect(memo).toContain("POINTS THAT DIFFER ACROSS RESPONSES (NOT A DISAGREEMENT BETWEEN INDEPENDENT MODELS)");
+  });
+
+  it("[CONTROL] genuine independent models on opposite sides keep 'Models diverged' and 'WHERE MODELS DISAGREE'", async () => {
+    const { input, memo } = await exportMemo(
+      doc([r("chatgpt", "ok", "partially_accurate", { incorrectParts: [LONG_A] }), r("claude", "ok", "inaccurate", { incorrectParts: [LONG_B] }), r("grok", "ok", "inaccurate")], ["chatgpt", "claude", "grok"], "disputed")
+    );
+    expect((input.claimCrossModel as { disagreement: boolean }).disagreement).toBe(true);
+    expect(memo).toContain("Models diverged on important aspects of this claim");
+    expect(memo).toContain("WHERE MODELS DISAGREE\n- Conflicting assessments: (chatgpt) vs (claude)");
+  });
+});
