@@ -88,16 +88,54 @@ function extractBearerToken(request: NextRequest): { present: boolean; token: st
  */
 /**
  * firebase-admin 12.x codes meaning "the verifier could not run", not "the
- * credential is bad" — raised by the `checkRevoked` `getUser` read
- * (AuthClientErrorCode.INTERNAL_ERROR; AppErrorCodes INTERNAL_ERROR /
- * NETWORK_ERROR / NETWORK_TIMEOUT). Exact codes only. Same set as API-1a
- * resolveManagementIdentity and the session-mint fix (SESSREV).
+ * credential is bad" — raised by the `checkRevoked` `getUser` read (or the
+ * SDK's own HTTP layer under it). Exact codes only; anything else is a
+ * credential failure (see the policy note below).
+ *
+ *   auth/internal-error           — AuthClientErrorCode.INTERNAL_ERROR; also the
+ *                                   SDK's mapping for any UNMAPPED server code
+ *                                   (e.g. a 429/500 `RESOURCE_EXHAUSTED`/`INTERNAL` body)
+ *   auth/quota-exceeded           — server `QUOTA_EXCEEDED` (Identity Toolkit project quota)
+ *   auth/insufficient-permission  — server `PERMISSION_DENIED`: THIS server's service account
+ *   auth/invalid-credential       — THIS server's Admin credential is unusable
+ *   app/internal-error            — AppErrorCodes.INTERNAL_ERROR (e.g. empty HTTP response)
+ *   app/network-error             — connection failure (after the SDK's own retries)
+ *   app/network-timeout           — request timeout
+ *   app/unable-to-parse-response  — non-JSON upstream body (e.g. an HTML 5xx page)
+ *   app/invalid-credential        — the Admin access-token fetch failed
+ *
+ * None of these can be induced by the bytes of a caller's credential: a
+ * malformed / mis-signed / wrong-project token fails as `auth/argument-error`,
+ * expiry as `auth/*-expired`, revocation as `auth/*-revoked`, a disabled or
+ * deleted account as `auth/user-disabled` / `auth/user-not-found` — all
+ * credential failures (401).
+ *
+ * POLICY for an UNKNOWN or absent code (R4, deliberate): it is a credential
+ * failure (`invalid_*`, 401) — never an allow. Rationale: a 503 tells the
+ * client to retry the SAME credential, while a 401 sends it through re-auth,
+ * so misclassifying an unlisted credential error as an outage would leave a
+ * user stuck retrying a bad token; and the SDK already funnels every unmapped
+ * server error into `auth/internal-error` (above), so new outage shapes still
+ * land in this set. Pinned by bearerRevocationRealSdk.spec.ts ("classification
+ * of EVERY firebase-admin Auth/App error code") and the near-miss tests.
+ *
+ * LIMITATION: a Google public-key fetch failure surfaces as
+ * `auth/argument-error`, indistinguishable here from a forged token, so that
+ * outage answers 401 — fail closed either way. S2-b
+ * (privilegedCredentialAdapter) tells the two apart, and uses the inverse
+ * default (unknown → 503), only because it pre-validates every credential's
+ * structure before the SDK runs.
  */
 const TRANSIENT_VERIFY_CODES: ReadonlySet<string> = new Set([
   "auth/internal-error",
+  "auth/quota-exceeded",
+  "auth/insufficient-permission",
+  "auth/invalid-credential",
   "app/internal-error",
   "app/network-error",
   "app/network-timeout",
+  "app/unable-to-parse-response",
+  "app/invalid-credential",
 ]);
 
 function classifyVerificationError(err: unknown, kind: "cookie" | "bearer"): RequestIdentityUnauthenticatedReason {
