@@ -17,7 +17,13 @@
  * Every inventory entry (P*, R*, H*) maps to at least one case below, plus a
  * seeded property test over random nesting / encoding. Synthetic sentinels only.
  */
+jest.mock("@/lib/firebase/admin", () => ({ adminDb: null }));
+import { randomUUID } from "crypto";
 import * as prefill from "@/lib/client/verifyPrefill";
+import { buildDeepResearchClaimId } from "@/lib/verification/claimVerificationOrigin";
+import { personalResearchVerifyClaimHref } from "@/lib/user/personalResearchHref";
+import { teamClaimOriginHandoffHref } from "@/lib/workspaces/teamClaimOriginHandoff";
+import { getPersonalWorkspaceId } from "@/lib/workspaces/personalWorkspaceId";
 import { scrubUrlBeforeTelemetry } from "@/lib/privacy/preTelemetryUrlScrub";
 import { SAFE_QUERY_PARAMS, sanitizeUrl } from "@/lib/privacy/sanitizeUrl";
 import { safeRedirect } from "@/lib/utils/safeRedirect";
@@ -27,6 +33,16 @@ const SENTINEL = "ZQX7R5SENTINEL";
 const CLAIM = `the moon is hollow ${SENTINEL} & tides obey wind farms?`;
 const UTM = "utm_source=newsletter&utm_campaign=Spring%20Sale";
 const enc = encodeURIComponent;
+
+// R5 correction (review MAJOR-1): routing ids come from the REAL generators, never invented literals.
+const RUN_ID = `run-${randomUUID()}`; // app/api/run-panel/route.ts
+const CLAIM_ID = buildDeepResearchClaimId({ runId: RUN_ID, section: "findings", index: 3, finding: { id: "f-1", summary: "a finding" } })!;
+const LOW_CLAIM_ID = buildDeepResearchClaimId({ runId: RUN_ID, section: "lowConfidenceFindings", index: 0, finding: { id: "f-2", summary: "another" } })!;
+const VERIFY_CLAIM_HREF = personalResearchVerifyClaimHref({ runId: RUN_ID, claimId: CLAIM_ID })!;
+const TEAM_CLAIM_HREF = teamClaimOriginHandoffHref({ workspaceId: "Wq8k2LmN4pR7sT1vX3yZ", runId: RUN_ID, claimId: LOW_CLAIM_ID });
+const PERSONAL_WS = (getPersonalWorkspaceId("Ab3dE5gH7jK9mN1pQ3sT5vX7zB9d") as { workspaceId: string }).workspaceId;
+const VCL_ID = `vcl-${randomUUID()}`; // app/api/verify-claim/route.ts
+const VID_ID = `vid-${randomUUID()}`; // app/api/verify-video/route.ts
 
 type Win = {
   location: { pathname: string; search: string; hash: string };
@@ -177,14 +193,14 @@ const INVENTORY: Array<[string, string, string, Expect]> = [
   ["R4", "invitation fragment (pre-existing, out of scope)", `/workspace-invitations/accept#invitationId=inv_123&token=tok_ABC-9`, { url: `/workspace-invitations/accept#invitationId=inv_123&token=tok_ABC-9` }],
   ["R5", "Stripe success_url", `/billing?success=true&session_id=cs_test_a1B2c3D4e5`, { url: `/billing?success=true&session_id=cs_test_a1B2c3D4e5` }],
   ["R5 cancel", "Stripe cancel_url", `/billing?canceled=true`, { url: `/billing?canceled=true` }],
-  ["R7", "pricing -> billing", `/billing?plan=pro&interval=year&upgraded=1`, { url: `/billing?plan=pro&interval=year&upgraded=1` }],
+  ["R7", "pricing -> billing", `/billing?plan=lite&interval=year&upgraded=1`, { url: `/billing?plan=lite&interval=year&upgraded=1` }],
   ["R8", "signed out", `/login?signedOut=1&sessionClearFailed=1`, { url: `/login?signedOut=1&sessionClearFailed=1` }],
-  ["R9", "origin-linked claim mode", `/?tab=verify&originRunId=run_abc123&originClaimId=claim-7`, { url: `/?tab=verify&originRunId=run_abc123&originClaimId=claim-7` }],
-  ["R10", "team claim origin", `/workspace/team/ws1/claims/new?originRunId=r1&originClaimId=c1`, { url: `/workspace/team/ws1/claims/new?originRunId=r1&originClaimId=c1` }],
-  ["R11", "governance deep link", `/?openResearchRun=AbC123xyz&${UTM}`, { url: `/?openResearchRun=AbC123xyz&${UTM}` }],
-  ["R11 v", "verification deep link", `/?openVerification=v1&openVideoVerification=vid1`, { url: `/?openVerification=v1&openVideoVerification=vid1` }],
-  ["R12", "team review queue", `/team/reviews?kind=research&flagged=true&reviewable=false&page=2`, { url: `/team/reviews?kind=research&flagged=true&reviewable=false&page=2` }],
-  ["R13", "workspace review queue", `/workspace/reviews?workspace=ws_1&view=needs_review&project=unfiled`, { url: `/workspace/reviews?workspace=ws_1&view=needs_review&project=unfiled` }],
+  ["R9", "origin-linked claim mode (real builders)", VERIFY_CLAIM_HREF, { url: VERIFY_CLAIM_HREF }],
+  ["R10", "team claim origin (real builders)", TEAM_CLAIM_HREF, { url: TEAM_CLAIM_HREF }],
+  ["R11", "governance deep link", `/?openResearchRun=${RUN_ID}&${UTM}`, { url: `/?openResearchRun=${RUN_ID}&${UTM}` }],
+  ["R11 v", "verification deep link", `/?openVerification=${VCL_ID}&openVideoVerification=${VID_ID}`, { url: `/?openVerification=${VCL_ID}&openVideoVerification=${VID_ID}` }],
+  ["R12", "team review queue", `/team/reviews?kind=adaptive&flagged=true&reviewable=false&page=2`, { url: `/team/reviews?kind=adaptive&flagged=true&reviewable=false&page=2` }],
+  ["R13", "workspace review queue", `/workspace/reviews?workspace=${PERSONAL_WS}&view=needs_review&project=unfiled`, { url: `/workspace/reviews?workspace=${PERSONAL_WS}&view=needs_review&project=unfiled` }],
   ["R14/R15", "branch return path + tab", `/signup?redirect=%2Fverify%3Fsource%3Dextension`, { url: `/signup?redirect=%2Fverify%3Fsource%3Dextension`, landing: "/verify?source=extension" }],
   ["anchor", "plain in-page anchor", `/pricing#faq`, { url: `/pricing#faq` }],
   ["utm +", "UTM with + kept byte-for-byte", `/pricing?utm_campaign=Spring+Sale&utm_source=x`, { url: `/pricing?utm_campaign=Spring+Sale&utm_source=x` }],

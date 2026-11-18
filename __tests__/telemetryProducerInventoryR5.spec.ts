@@ -19,7 +19,12 @@
  * Default-deny network: every request is answered by the harness (`context.route`); non-origin, non-Sentry hosts abort.
  * Requires the Playwright Chromium build; skipped (and says so) when it is not installed.
  */
+jest.mock("@/lib/firebase/admin", () => ({ adminDb: null }));
+import { randomUUID } from "crypto";
 import { safeRedirect } from "@/lib/utils/safeRedirect";
+import { buildDeepResearchClaimId } from "@/lib/verification/claimVerificationOrigin";
+import { personalResearchVerifyClaimHref } from "@/lib/user/personalResearchHref";
+import { teamClaimOriginHandoffHref } from "@/lib/workspaces/teamClaimOriginHandoff";
 import {
   ORIGIN,
   chromiumAvailable,
@@ -200,5 +205,41 @@ d("real posthog-js + Sentry (Replay forced): every producer-inventory URL shape"
         }
       });
     }
+  }
+});
+
+/**
+ * R5 correction (review MAJOR-1): the routing hand-offs built by the REAL builders survive the real pre-init scrub in
+ * real Chromium — the address bar at `posthog.init` and after load still holds the exact URL the page reads (personal
+ * "Verify claim" → app/page.tsx; team hand-off → reload of the claims/new page).
+ */
+d("real posthog-js + Sentry: routing hand-offs built by the real builders survive the pre-init scrub", () => {
+  const run = `run-${randomUUID()}`;
+  const claimId = buildDeepResearchClaimId({ runId: run, section: "findings", index: 4, finding: { id: "f-1", summary: "a finding" } })!;
+  const lowClaimId = buildDeepResearchClaimId({ runId: run, section: "lowConfidenceFindings", index: 0, finding: { id: "f-2", summary: "x" } })!;
+  const ROUTED: Array<[string, string]> = [
+    ["personal Verify claim", personalResearchVerifyClaimHref({ runId: run, claimId })!],
+    ["team claim origin", teamClaimOriginHandoffHref({ workspaceId: "Wq8k2LmN4pR7sT1vX3yZ", runId: run, claimId: lowClaimId })],
+  ];
+  for (const [label, path] of ROUTED) {
+    it(`${label} [normal]`, async () => {
+      const run2 = await openPage(path, { mode: "normal", forceReplaySampling: true });
+      try {
+        await run2.page.waitForRequest((r) => r.url().includes("/ingest/flags"), { timeout: 15_000 }).catch(() => undefined);
+        const atInit: Array<{ href: string }> = await run2.page.evaluate(() => (window as any).__cpAtInit ?? []);
+        const href = await run2.page.evaluate(() => window.location.href);
+        expect(atInit.length).toBe(1);
+        expect(atInit[0].href).toBe(`${ORIGIN}${path}`);
+        expect(href).toBe(`${ORIGIN}${path}`);
+        const u = new URL(href);
+        expect(u.searchParams.get("originRunId")).toBe(run);
+        expect(u.searchParams.get("originClaimId")).toBe(label.startsWith("team") ? lowClaimId : claimId);
+        // Reload (a shared link / back-forward restore is the same hard load).
+        await run2.page.reload({ waitUntil: "load" });
+        expect(await run2.page.evaluate(() => window.location.href)).toBe(`${ORIGIN}${path}`);
+      } finally {
+        await run2.close();
+      }
+    });
   }
 });
