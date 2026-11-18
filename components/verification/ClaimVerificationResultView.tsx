@@ -34,6 +34,7 @@ import type {
 import { CLAIM_VERDICT_CLIPBOARD_DISCLAIMER } from "@/lib/legal/clipboardDisclaimers";
 import {
   claimConsensusDisplay,
+  claimScoreText,
   claimVerdictQualifier,
   CLAIM_NOT_INDEPENDENT_AGREE_HEADING,
   CLAIM_NOT_INDEPENDENT_DISAGREE_HEADING,
@@ -481,6 +482,8 @@ export function ClaimVerificationAuditTrailDetails({ data }: { data: ClaimVerifi
   // evidence quality derived with it) are not presented as a consensus below two independent models.
   const view = claimViewIndependence(data);
   const consensus = claimConsensusDisplay(bundle.consensusScore, view.independence);
+  // R5 (review MINOR-2): the audit-trail score and confidence carry the same basis qualifier as the consensus card.
+  const scoreBasisQ = consensus.kind === "score" ? claimScoreBasisQualifier(data) : null;
   return (
     <>
       <h3 className="text-sm font-semibold text-cp-text tracking-tight">Audit trail</h3>
@@ -501,7 +504,13 @@ export function ClaimVerificationAuditTrailDetails({ data }: { data: ClaimVerifi
             </span>
           </dd>
           <dt className="text-cp-faint shrink-0">Consensus</dt>
-          {consensus.kind === "score" ? (
+          {consensus.kind === "score" && scoreBasisQ ? (
+            // R5: the shared claim score renderer — qualified when the slots are not each a distinct identified model.
+            <dd className="text-cp-text font-semibold tabular-nums">
+              {claimScoreText({ consensusScore: consensus.score, consensusBasis: "slot_responses" }, (n) => `${n}/100`, "—")}
+            </dd>
+          ) : consensus.kind === "score" ? (
+            // A valid basis: the established element, byte-identical.
             <dd className="text-cp-text font-semibold tabular-nums">{consensus.score}/100</dd>
           ) : (
             <dd className="text-cp-muted" data-testid="claim-audit-consensus-withheld">{consensus.text}</dd>
@@ -509,7 +518,9 @@ export function ClaimVerificationAuditTrailDetails({ data }: { data: ClaimVerifi
           {consensus.kind === "score" ? (
             <>
               <dt className="text-cp-faint shrink-0">Confidence</dt>
-              <dd className={confidenceLabelTextClass(bundle.confidenceLabel)}>{bundle.confidenceLabel}</dd>
+              <dd className={confidenceLabelTextClass(bundle.confidenceLabel)}>
+                {scoreBasisQ ? `${bundle.confidenceLabel} (${scoreBasisQ})` : bundle.confidenceLabel}
+              </dd>
               <dt className="text-cp-faint shrink-0">Evidence</dt>
               <dd className={evidenceQualityTextClass(evidenceQ)}>{evidenceQ}</dd>
             </>
