@@ -169,8 +169,12 @@ async function checkBearer(request: NextRequest): Promise<CredentialCheck> {
  * to silently discard.
  */
 export async function resolveRequestIdentity(request: NextRequest): Promise<RequestIdentityResult> {
-  const cookie = await checkCookie(request);
-  const bearer = await checkBearer(request);
+  // Both credentials are ALWAYS evaluated (see above), so they are verified
+  // concurrently: with checkRevoked on both slots each check makes one live
+  // Firebase Auth read, and running them in sequence doubled the latency of
+  // every cookie+bearer request. Neither check can reject (each catches its
+  // own verification error), so Promise.all never short-circuits a decision.
+  const [cookie, bearer] = await Promise.all([checkCookie(request), checkBearer(request)]);
 
   if (!cookie.present && !bearer.present) {
     return { status: "unauthenticated", reason: "missing_credentials" };

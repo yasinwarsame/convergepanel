@@ -189,6 +189,20 @@ describe("transient classification is EXACT-match (near-miss codes are credentia
   });
 });
 
+describe("cookie and bearer live reads run concurrently (latency: one Auth round trip, not two)", () => {
+  it("both getUser calls are issued before either resolves", async () => {
+    const pending: Array<() => void> = [];
+    mockGetUser.mockImplementation(
+      (uid: string) => new Promise((resolve) => pending.push(() => resolve(mockUsers.get(uid))))
+    );
+    const p = resolveRequestIdentity(req({ cookie: token("valid"), bearer: token("valid") }));
+    for (let i = 0; i < 50 && pending.length < 2; i++) await new Promise((r) => setImmediate(r));
+    expect(pending.length).toBe(2); // sequential evaluation would have issued only the cookie's read here
+    pending.forEach((release) => release());
+    await expect(p).resolves.toEqual({ status: "authenticated", uid: "valid", source: "matching_cookie_and_bearer" });
+  });
+});
+
 describe("CONTROL: the SDK default (checkRevoked=false) would accept the revoked / disabled bearer", () => {
   it.each(["revoked", "disabled"])("%s", async (uid) => {
     await expect(adminAuth!.verifyIdToken(token(uid))).resolves.toMatchObject({ uid });
