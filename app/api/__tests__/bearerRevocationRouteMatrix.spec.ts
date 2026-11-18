@@ -327,6 +327,9 @@ function expectNoAccessAfterDenial() {
   expect(mockGetUser).toHaveBeenCalledTimes(1);
 }
 
+/** The generic body both 503 wrappers (getRequestUid, reportReviewCaller) answer on auth_unavailable. */
+const WRAPPER_UNAVAILABLE_BODY = { ok: false, error: { code: "auth_unavailable", message: "Authentication is temporarily unavailable." } };
+
 /** Infrastructure failures of the live lookup (firebase-admin 12.x codes). */
 const OUTAGE_CODES = ["auth/internal-error", "app/network-error", "auth/quota-exceeded", "app/unable-to-parse-response", "auth/insufficient-permission"];
 
@@ -371,6 +374,8 @@ describe.each(ROUTES)("$name", ({ kind, call, reached, body, lookups }) => {
       const r = await pending;
       expect(r.status).toBe(kind === "inline" ? 401 : 503);
       for (const leak of ["deadline", "timeout", "test-proj"]) expect(r.body.toLowerCase()).not.toContain(leak);
+      // R5: the wrapper's deadline answer is EXACTLY its generic outage body (same as a fast outage).
+      if (kind === "wrapper503") expect(JSON.parse(r.body)).toEqual(WRAPPER_UNAVAILABLE_BODY);
       expectNoAccessAfterDenial();
     } finally {
       jest.useRealTimers();
@@ -384,9 +389,39 @@ describe.each(ROUTES)("$name", ({ kind, call, reached, body, lookups }) => {
       await jest.advanceTimersByTimeAsync(10_000);
       const r = await pending;
       expect(r.status).toBe(kind === "inline" ? 401 : 503);
+      if (kind === "wrapper503") expect(JSON.parse(r.body)).toEqual(WRAPPER_UNAVAILABLE_BODY);
       await jest.advanceTimersByTimeAsync(5_000); // the late VALID record arrives
       expectNoAccessAfterDenial();
     } finally {
+      jest.useRealTimers();
+    }
+  });
+  // R5 C (MINOR-1) — at the per-instance cap on abandoned verifications the
+  // route fails fast through the SAME auth_unavailable path, with NO Auth read.
+  deadlineIt("abandoned-verification cap reached → fails fast (inline 401; wrapper 503, exact generic body), no getUser, no data access", async () => {
+    jest.useFakeTimers();
+    const releasers: Array<() => void> = [];
+    // Required lazily so the rest of this matrix does not depend on the module's presence.
+    const { startVerificationDeadline, MAX_ABANDONED_AUTH_VERIFICATIONS, abandonedAuthVerificationsInFlight } =
+      require("@/lib/auth/authVerificationDeadline") as typeof import("@/lib/auth/authVerificationDeadline");
+    try {
+      const d = startVerificationDeadline("request_identity");
+      const n = MAX_ABANDONED_AUTH_VERIFICATIONS - abandonedAuthVerificationsInFlight();
+      for (let i = 0; i < n; i++) void d.run(() => new Promise<void>((resolve) => releasers.push(resolve)));
+      await jest.advanceTimersByTimeAsync(10_000);
+      d.dispose();
+      expect(abandonedAuthVerificationsInFlight()).toBe(MAX_ABANDONED_AUTH_VERIFICATIONS);
+      const r = await run(call, req(token("valid"), body));
+      expect(r.status).toBe(kind === "inline" ? 401 : 503);
+      if (kind === "wrapper503") expect(JSON.parse(r.body)).toEqual(WRAPPER_UNAVAILABLE_BODY);
+      expect(mockGetUser).not.toHaveBeenCalled();
+      expect(mockTouches).toEqual([]);
+      expect(mockReads).toEqual([]);
+      expect(mockWrites).toEqual([]);
+      expect(mockPortalCreate).not.toHaveBeenCalled();
+    } finally {
+      for (const r of releasers) r();
+      await jest.advanceTimersByTimeAsync(0);
       jest.useRealTimers();
     }
   });

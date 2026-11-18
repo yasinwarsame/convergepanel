@@ -29,6 +29,8 @@ jest.mock("@/lib/firebase/auth-helpers", () => ({
 jest.mock("@/lib/firebase/auth", () => ({
   verifyIdToken: (...args: unknown[]) => mockVerifyIdToken(...args),
 }));
+const mockWarn = jest.fn();
+jest.mock("@/lib/logger", () => ({ logger: { error: jest.fn(), warn: (...a: unknown[]) => mockWarn(...a), info: jest.fn(), debug: jest.fn() } }));
 
 import * as identityModule from "@/lib/auth/resolveRequestIdentity";
 import { resolveRequestIdentity, type RequestIdentityResult } from "@/lib/auth/resolveRequestIdentity";
@@ -43,7 +45,13 @@ function req(opts: { cookie?: string; bearer?: string } = {}): NextRequest {
   return new NextRequest("http://localhost/api/example", { headers });
 }
 
-const never = () => new Promise<never>(() => {});
+/**
+ * A verifier call that never answers on its own. R5: each one is RELEASED
+ * (rejected) after its test, so abandoned verifications drain and the
+ * per-instance abandoned-verification cap never carries over between tests.
+ */
+const hungRejecters: Array<(e: unknown) => void> = [];
+const never = () => new Promise<never>((_, reject) => hungRejecters.push(reject));
 function after<T>(ms: number, value: T): Promise<T> {
   return new Promise((resolve) => setTimeout(() => resolve(value), ms));
 }
@@ -68,10 +76,13 @@ beforeEach(() => {
   jest.useFakeTimers();
   mockVerifySessionCookie.mockReset();
   mockVerifyIdToken.mockReset();
+  mockWarn.mockReset();
   // Default: no cookie presented.
   mockVerifySessionCookie.mockResolvedValue(null);
 });
-afterEach(() => {
+afterEach(async () => {
+  for (const r of hungRejecters.splice(0)) r(Object.assign(new Error("released"), { code: "app/network-timeout" }));
+  await jest.advanceTimersByTimeAsync(0);
   jest.useRealTimers();
 });
 
@@ -241,5 +252,56 @@ describe("concurrent requests: each bounded by its OWN deadline, no shared state
     expect(slow.settled).toBe(false);
     await jest.advanceTimersByTimeAsync(DEADLINE);
     expect(slow.value).toEqual(UNAVAILABLE);
+  });
+});
+
+describe("R5 NITs: no result caching, a frozen deadline verdict, a distinct deadline log line", () => {
+  it("a VALID result for token T is never reused: a later request with the SAME T whose check hangs is auth_unavailable", async () => {
+    // There is no verification cache anywhere in this path (resolveRequestIdentity,
+    // lib/firebase/auth.verifyIdToken, firebase-admin verifyIdToken caches only
+    // Google's public keys). Pinned so one cannot be added silently.
+    mockVerifyIdToken.mockResolvedValueOnce({ uid: "u1" });
+    expect(await resolveRequestIdentity(req({ bearer: "same-T" }))).toEqual({ status: "authenticated", uid: "u1", source: "bearer_token" });
+    mockVerifyIdToken.mockImplementationOnce(never);
+    const t = track(resolveRequestIdentity(req({ bearer: "same-T" })));
+    await jest.advanceTimersByTimeAsync(DEADLINE - 1);
+    expect(t.settled).toBe(false);
+    await jest.advanceTimersByTimeAsync(1);
+    expect(t.value).toEqual(UNAVAILABLE);
+    expect(mockVerifyIdToken).toHaveBeenCalledTimes(2);
+    expect(mockVerifyIdToken).toHaveBeenNthCalledWith(2, "same-T");
+  });
+
+  it("the same for a session cookie value", async () => {
+    mockVerifySessionCookie.mockResolvedValueOnce({ uid: "u1", isAdmin: false });
+    expect(await resolveRequestIdentity(req({ cookie: "same-C" }))).toEqual({ status: "authenticated", uid: "u1", source: "session_cookie" });
+    mockVerifySessionCookie.mockImplementationOnce(never);
+    const t = track(resolveRequestIdentity(req({ cookie: "same-C" })));
+    await jest.advanceTimersByTimeAsync(DEADLINE);
+    expect(t.value).toEqual(UNAVAILABLE);
+    expect(mockVerifySessionCookie).toHaveBeenCalledTimes(2);
+  });
+
+  it("DEADLINE_EXCEEDED (the verdict a slot becomes at the deadline) is exported frozen", () => {
+    const v = (identityModule as Record<string, unknown>).DEADLINE_EXCEEDED;
+    expect(v).toEqual({ present: true, ok: false, reason: "auth_unavailable" });
+    expect(Object.isFrozen(v)).toBe(true);
+  });
+
+  it("a deadline cut-off logs `deadline_exceeded` (site request_identity); a FAST outage does not", async () => {
+    mockVerifyIdToken.mockRejectedValueOnce(fbError("auth/internal-error"));
+    expect(await resolveRequestIdentity(req({ bearer: "tok" }))).toEqual(UNAVAILABLE);
+    await jest.advanceTimersByTimeAsync(DEADLINE);
+    expect(mockWarn).not.toHaveBeenCalled();
+
+    mockVerifySessionCookie.mockImplementation(never);
+    mockVerifyIdToken.mockImplementation(never);
+    const t = track(resolveRequestIdentity(req({ cookie: "c", bearer: "tok" })));
+    await jest.advanceTimersByTimeAsync(DEADLINE);
+    expect(t.value).toEqual(UNAVAILABLE);
+    expect(mockWarn).toHaveBeenCalledTimes(1);
+    expect(mockWarn).toHaveBeenCalledWith("[auth-verification] deadline_exceeded", expect.objectContaining({ site: "request_identity", deadlineMs: DEADLINE, abandoned: 2 }));
+    // no credential material in the log line
+    expect(JSON.stringify(mockWarn.mock.calls)).not.toMatch(/tok|"c"|__session/);
   });
 });
