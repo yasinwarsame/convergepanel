@@ -21,6 +21,15 @@ import { PostHogProvider } from "@/components/PostHogProvider";
 
 (window as any).__cpProbe = { posthog, Sentry };
 
+// R5: what posthog-js reads at init (`$initial_person_info`, the `/flags` request) is the address bar and the referrer
+// at the moment `posthog.init` runs. Record both at exactly that moment (the provider calls init in its effect).
+const realInit = posthog.init.bind(posthog);
+(window as any).__cpAtInit = [];
+(posthog as any).init = (...args: Parameters<typeof posthog.init>) => {
+  (window as any).__cpAtInit.push({ sdk: "posthog", href: window.location.href, referrer: document.referrer });
+  return realInit(...args);
+};
+
 const el = document.createElement("div");
 document.body.appendChild(el);
 createRoot(el).render(createElement(PostHogProvider, null, createElement("main", null, "probe")));

@@ -207,6 +207,10 @@ export function decodeBodies(buf: Buffer | null): string[] {
   return Array.from(out);
 }
 
+/** The first 50 `Math.random()` calls return 0.001 (below every sample rate), then the real generator. */
+export const FORCE_REPLAY_SAMPLING =
+  "(() => { const real = Math.random; let n = 0; Math.random = function () { n += 1; return n <= 50 ? 0.001 : real(); }; })();";
+
 const HTML = (withBundle: boolean) =>
   `<!doctype html><html><head><meta charset="utf-8"><title>harness</title></head><body>${withBundle ? '<script src="/__cp_bundle.js"></script>' : "<p>elsewhere</p>"}</body></html>`;
 
@@ -233,7 +237,7 @@ export async function shutdown(): Promise<void> {
   browser = null;
 }
 
-export async function openPage(path: string, opts: { mode: StorageMode; referer?: string }): Promise<HarnessRun> {
+export async function openPage(path: string, opts: { mode: StorageMode; referer?: string; forceReplaySampling?: boolean }): Promise<HarnessRun> {
   const bundle = await buildEntryBundle();
   const b = await launch();
   // posthog-js drops events from bot user agents ("HeadlessChrome"): present the ordinary desktop Chrome UA.
@@ -285,6 +289,9 @@ export async function openPage(path: string, opts: { mode: StorageMode; referer?
   });
 
   await context.addInitScript(initScript(opts.mode));
+  // R5: force Sentry Replay's session sampling (replaysSessionSampleRate 0.05) so the rrweb meta event — whose `href`
+  // is read at Replay start, i.e. at Sentry.init — is actually sent and checked (positive control in the spec).
+  if (opts.forceReplaySampling) await context.addInitScript(FORCE_REPLAY_SAMPLING);
   const page = await context.newPage();
   page.on("websocket", (ws) => websockets.push(ws.url()));
   await page.goto(ORIGIN + path, { waitUntil: "load", ...(opts.referer ? { referer: opts.referer } : {}) });

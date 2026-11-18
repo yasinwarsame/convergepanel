@@ -296,6 +296,50 @@ describe("A2 frozen home page — React state is scoped to the identity on '/'",
     expect(draftValue()).toBe(A_DRAFT);
   });
 
+  // R5 (R4 review MINOR-1): the AuthProvider's 3 s cold-load timeout reports "no user" without Firebase having said so.
+  // That anonymous state is PROVISIONAL (identity unknown): the persisted account resolving afterwards is the first
+  // real identity of the page load and must not remount (it would erase the person's own draft).
+  const coldTimeout = async () => {
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 3_100));
+    });
+  };
+  it("R5 cold-load auth timeout, then the persisted account A resolves: A's draft is kept", async () => {
+    mount("/", home);
+    await coldTimeout();
+    expect(lastAuth.authReady).toBe(true); // the timeout unblocked the shell
+    typeDraft(A_DRAFT);
+    await auth({ uid: "uid-a" });
+    expect(draftValue()).toBe(A_DRAFT);
+  });
+  it("R5 cold-load auth timeout, then Firebase confirms 'signed out': the anonymous draft is kept", async () => {
+    mount("/", home);
+    await coldTimeout();
+    typeDraft(A_DRAFT);
+    await auth(null);
+    expect(draftValue()).toBe(A_DRAFT);
+  });
+  it("R5 after a cold-load timeout, A -> B still remounts (no frame of A's draft under B)", async () => {
+    mount("/", home);
+    await coldTimeout();
+    await auth({ uid: "uid-a" });
+    typeDraft(A_DRAFT);
+    await auth({ uid: "uid-b" });
+    expect(draftValue()).toBe("");
+    assertFrames("SENTINEL_R4_A_DRAFT", (f) => f.authReady && f.uid === "uid-a");
+  });
+  it("R5 after a cold-load timeout, A -> signed out -> B still remounts at each step", async () => {
+    mount("/", home);
+    await coldTimeout();
+    await auth({ uid: "uid-a" });
+    typeDraft(A_DRAFT);
+    await auth(null);
+    expect(draftValue()).toBe("");
+    await auth({ uid: "uid-b" });
+    expect(draftValue()).toBe("");
+    assertFrames("SENTINEL_R4_A_DRAFT", (f) => f.authReady && f.uid === "uid-a");
+  });
+
   it("other routes are not re-scoped (no unrelated behaviour change)", async () => {
     mount("/workspace", home);
     await auth({ uid: "uid-a" });
