@@ -71,8 +71,11 @@ describe("code facts: inputs sent to providers on auxiliary Deep Research paths"
     for (const [file, firstArgs] of Object.entries(GEMINI_AUX_CALLERS)) {
       const text = src(file);
       expect(text.split("callGemini(").length - 1).toBe(firstArgs.length);
-      for (const firstArg of firstArgs) {
-        expect(text).toContain(`callGemini(${firstArg}, null, GEMINI_API_KEY`);
+      // Every call site, counted individually: a duplicated first argument
+      // (alignment.ts has two) cannot let one null-context call vouch for another.
+      for (const firstArg of new Set(firstArgs)) {
+        const nullContextCalls = text.split(`callGemini(${firstArg}, null, GEMINI_API_KEY`).length - 1;
+        expect(nullContextCalls).toBe(firstArgs.filter((a) => a === firstArg).length);
       }
     }
   });
