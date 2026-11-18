@@ -178,27 +178,39 @@ describe("C2 §G T6 — personalResearchFollowUpHref encodes the outbound query 
 });
 
 describe("C2 §G T7 — the /verify producer still encodes its claim exactly once", () => {
-  it("builds both hand-off URLs with a single encodeURIComponent", () => {
-    expect(VERIFY_SOURCE).toContain("`/?tab=verify&claim=${encodeURIComponent(claim)}`");
-    expect(VERIFY_SOURCE).toContain("`/?tab=research&q=${encodeURIComponent(claim)}`");
+  // PR #329 R3 (owner D5): /verify no longer writes ?claim= / ?q= at all — it hands the text off through the
+  // one-time tab-scoped hand-off (`appHandoffHref`). The legacy URL survives only as the blocked-storage fallback
+  // inside lib/client/verifyPrefill.ts, which is where the single-encode contract now lives.
+  const HANDOFF_SOURCE = readFileSync(join(__dirname, "..", "..", "lib", "client", "verifyPrefill.ts"), "utf8");
+  it("builds both (fallback) hand-off URLs with a single encodeURIComponent, and /verify writes none itself", () => {
+    expect(HANDOFF_SOURCE).toContain("`/?tab=verify&claim=${encodeURIComponent(text)}`");
+    expect(HANDOFF_SOURCE).toContain("`/?tab=research&q=${encodeURIComponent(text)}`");
+    expect(VERIFY_SOURCE).not.toMatch(/\?tab=verify&claim=|\?tab=research&q=/);
   });
 
   it("never double-encodes", () => {
     expect(VERIFY_SOURCE).not.toMatch(/encodeURIComponent\(\s*encodeURIComponent/);
+    expect(HANDOFF_SOURCE).not.toMatch(/encodeURIComponent\(\s*encodeURIComponent/);
   });
 
   it("does not decode its own already-decoded search params", () => {
     // It reads `text` via searchParams.get() and uses it as-is: the same contract
     // this phase restores on the receiving side.
-    expect(VERIFY_SOURCE).toContain('searchParams.get("text")');
+    // PR #329 R3: `text` is read by the hand-off capture (URLSearchParams on the query and the fragment) and used as-is.
+    expect(HANDOFF_SOURCE).toContain("params.get(VERIFY_TEXT_PARAM)");
     expect(VERIFY_SOURCE).not.toContain("decodeURIComponent");
+    expect(HANDOFF_SOURCE).not.toContain("decodeURIComponent");
   });
 });
 
 describe("C2 §G T8 — the root consumer applies NO decode after URLSearchParams", () => {
   it("reads q and claim straight into state", () => {
-    expect(PAGE_SOURCE).toContain('const claim = params.get("claim");\n      if (claim) setClaimInput(claim);');
-    expect(PAGE_SOURCE).toContain('const q = params.get("q");\n      if (q) setQuestion(q);');
+    // PR #329 R3 (owner D5, frozen-file exception): the legacy param is still read FIRST, straight into state; the
+    // tab-scoped hand-off is the fallback. Neither path decodes.
+    expect(PAGE_SOURCE).toContain('const claim = params.get("claim") || consumeAppHandoff("verify", user.uid);');
+    expect(PAGE_SOURCE).toContain("if (claim) setClaimInput(claim);");
+    expect(PAGE_SOURCE).toContain('const q = params.get("q") || consumeAppHandoff("research", user.uid);');
+    expect(PAGE_SOURCE).toContain("if (q) setQuestion(q);");
   });
 
   it("contains no decodeURIComponent at all", () => {

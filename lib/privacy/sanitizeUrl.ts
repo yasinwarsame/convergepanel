@@ -24,7 +24,10 @@
 
 export const REDACTED = "[redacted]";
 
-const UTM_VALUE = /^[A-Za-z0-9_.\-]{1,64}$/;
+// R3 (review MINOR): campaign values are human-readable ("Black Friday", "Spring Sale: 20% off"). The value is
+// checked DECODED ("+" and %-escapes already turned into characters): printable letters / digits / spaces and
+// common punctuation, at most 100 characters, no control characters. utm_* names are marketer-controlled.
+const UTM_VALUE = /^[\p{L}\p{N} _.,:;!?'&()+%\/|#@-]{1,100}$/u;
 const LOWER_IDENTIFIER = /^[a-z][a-z0-9_]{0,31}$/;
 const SMALL_INTEGER = /^\d{1,6}$/;
 const FLAG = /^(?:|0|1|true|false|yes|no)$/i;
@@ -43,7 +46,8 @@ export const SAFE_QUERY_PARAM_SHAPES: ReadonlyMap<string, RegExp> = new Map([
   ["utm_campaign", UTM_VALUE],
   ["utm_term", UTM_VALUE],
   ["utm_content", UTM_VALUE],
-  ["tab", /^(?:verify|research|video)$/],
+  // Every tab value the app routes on (main app + admin + governance). Enumerated, not a pattern.
+  ["tab", /^(?:verify|research|video|users|runs|policies|queue|audit)$/],
   ["source", LOWER_IDENTIFIER],
   ["view", LOWER_IDENTIFIER],
   ["scope", LOWER_IDENTIFIER],

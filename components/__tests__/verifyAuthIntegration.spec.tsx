@@ -13,9 +13,8 @@
  *     output, or in localStorage after sign-out;
  *   - it is consumed once used / cancelled, removed when another account
  *     appears, and gone after its expiry.
- * The ONE place it still appears is the documented residual: the hand-off
- * `router.push("/?tab=verify&claim=…")` into the hash-frozen app/page.tsx
- * (owner decision D5) — asserted explicitly so it cannot silently widen.
+ * R3: the /verify -> app hand-off no longer carries the claim in the URL
+ * (owner D5); asserted on the router.push argument.
  */
 
 import { createElement } from "react";
@@ -77,6 +76,7 @@ jest.mock("next/link", () => ({
 import { PostHogProvider } from "@/components/PostHogProvider";
 import { AuthProvider } from "@/components/AuthProvider";
 import VerifyPage from "@/app/verify/page";
+import { ContentHandoffMigrator } from "@/components/ContentHandoffMigrator";
 
 const g = globalThis as any;
 const SAVED_WINDOW = g.window;
@@ -132,7 +132,7 @@ function load(path: string) {
   setUrl(path);
   act(() => {
     renderer = TestRenderer.create(
-      createElement(PostHogProvider, null, createElement(AuthProvider, null, createElement(VerifyPage)))
+      createElement(PostHogProvider, null, createElement(AuthProvider, null, createElement(ContentHandoffMigrator), createElement(VerifyPage)))
     );
   });
   expect(typeof tokenCallback).toBe("function");
@@ -188,9 +188,11 @@ describe("/verify + AuthProvider + PostHog — extension flow", () => {
     assertNoLeak();
 
     act(() => button("Run Claim Verification").props.onClick());
-    expect(session.length).toBe(0); // one-time consumption
-    // documented residual (D5): the hand-off into hash-frozen app/page.tsx still uses ?claim=
-    expect(mockPush).toHaveBeenCalledWith(`/?tab=verify&claim=${encodeURIComponent(CLAIM)}`);
+    expect(session.getItem("convergePanelVerifyPendingV2")).toBeNull(); // one-time consumption of the pending input
+    expect(session.getItem("convergePanelAppHandoffV1")).toContain(SENTINEL); // handed to the main app, tab-scoped
+    // R3 (owner D5): the claim travels in the one-time tab-scoped hand-off, not the URL
+    expect(mockPush).toHaveBeenCalledWith("/?tab=verify");
+    expect(JSON.stringify(mockPush.mock.calls)).not.toContain(SENTINEL);
     // retry from a reload: nothing left to resurrect
     load("/verify?source=extension");
     await auth({ uid: "uid-new" });

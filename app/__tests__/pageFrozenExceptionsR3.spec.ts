@@ -68,12 +68,21 @@ describe("new hand-off writers never put claim / question text in a URL", () => 
   it("/verify pushes /?tab=verify and /?tab=research only", () => {
     const src = read("app/verify/page.tsx");
     expect(src).not.toMatch(/\?tab=verify&claim=|\?tab=research&q=/);
-    expect(src).toContain('router.push("/?tab=verify")');
-    expect(src).toContain('router.push("/?tab=research")');
+    expect(src).toContain("appHandoffHref(kind, claim, viewer)");
   });
   it("the personal research follow-up writes the hand-off and pushes /?tab=research", () => {
     const src = read("components/workspace/PersonalResearchDetailShell.tsx");
     expect(src).not.toMatch(/personalResearchFollowUpHref\(/);
-    expect(src).toContain('router.push("/?tab=research")');
+    expect(src).toContain('router.push(appHandoffHref("research", trimmed, user?.uid ?? null))');
+  });
+  it("appHandoffHref returns /?tab=<kind> and writes the one-time hand-off (legacy URL only when storage is blocked)", () => {
+    const { appHandoffHref, consumeAppHandoff } = require("@/lib/client/verifyPrefill");
+    const { FakeStorage } = require("@/lib/client/__tests__/helpers/fakeStorage");
+    const st = new FakeStorage();
+    expect(appHandoffHref("research", "SENTINEL_Q what next?", "uid-a", st)).toBe("/?tab=research");
+    expect(consumeAppHandoff("research", "uid-a", st)).toBe("SENTINEL_Q what next?");
+    expect(consumeAppHandoff("research", "uid-a", st)).toBeNull(); // one-time
+    const blocked = { getItem: () => null, setItem: () => { throw new Error("blocked"); }, removeItem: () => undefined };
+    expect(appHandoffHref("verify", "x y", "uid-a", blocked)).toBe("/?tab=verify&claim=x%20y");
   });
 });

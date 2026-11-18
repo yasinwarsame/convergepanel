@@ -57,6 +57,7 @@ import { teamProjectAuthorizationDeniedResponse } from "@/lib/projects/teamProje
 import { runProjectAssociationTargetNotFoundResponse, projectArchivedTargetResponse } from "@/lib/projects/projectErrorResponse";
 import { validateNullableProjectIdValue } from "@/lib/projects/runProjectAssociationBody";
 import { logger } from "@/lib/logger";
+import { contentFreeError } from "@/lib/privacy/contentFreeDiagnostics";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -461,7 +462,7 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
       { status: execution.status }
     );
   } catch (err: any) {
-    logger.error("[POST /api/workspaces/[workspaceId]/runs] Unexpected error", { error: err?.message, stack: err?.stack });
+    logger.error("[POST /api/workspaces/[workspaceId]/runs] Unexpected error", { ...contentFreeError(err) }); // privacy (PR #329 R3): a body SyntaxError quotes the claim
     const baseResponse: any = { ok: false, errorCode: "internal_error", message: "Server error. Please try again. If this keeps happening, contact support." };
     if (process.env.NODE_ENV !== "production") {
       baseResponse.devDetails = `${err?.message || String(err)}\n\nStack: ${err?.stack || "No stack trace available"}`;

@@ -85,13 +85,16 @@ describe("sanitizeUrl — sensitive params are redacted (value gone, name kept)"
   });
 
   it("round 2: an allowlisted NAME with a content-shaped VALUE is redacted (?tab=<claim>)", () => {
+    // R3: utm_* deliberately accept human-readable campaign text (marketer-controlled names, owner requirement);
+    // every OTHER allowlisted name must reject content-shaped values.
     for (const name of SAFE_QUERY_PARAMS) {
+      if (name.startsWith("utm_")) continue;
       const out = sanitizeUrl(`/p?${name}=${enc}`);
       expect(out).toBe(`/p?${name}=${REDACTED}`);
     }
     expect(sanitizeUrl("/?tab=moon")).toBe(`/?tab=${REDACTED}`); // tab is enumerated
     expect(sanitizeUrl("/?page=2abc")).toBe(`/?page=${REDACTED}`);
-    expect(sanitizeUrl(`/?utm_campaign=${encodeURIComponent("the moon is cheese")}`)).toBe(`/?utm_campaign=${REDACTED}`);
+    expect(sanitizeUrl(`/?utm_campaign=${encodeURIComponent("x".repeat(101))}`)).toBe(`/?utm_campaign=${REDACTED}`);
   });
 
   it("round 2: ';' is a separator — a claim after ';' is redacted", () => {

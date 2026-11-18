@@ -77,7 +77,7 @@ import { isPathSafeRunId, resolveSynthesisRunAccess, SYNTHESIS_RUN_FORBIDDEN, SY
 import { synthesizeReport } from "@/lib/consensus";
 import type { ModelResult } from "@/lib/types";
 import { logger, redact } from "@/lib/logger";
-import { errorName, issueSummary } from "@/lib/privacy/contentFreeDiagnostics";
+import { contentFreeError, diagnosticCode, errorName, issueSummary } from "@/lib/privacy/contentFreeDiagnostics";
 import { buildSubstitutionBlock, substitutionEntryFromSupplied, coerceStatus, type SubstitutionBlockEntry } from "@/lib/panel/normalize";
 import type { UserProfile } from "@/lib/types";
 import { evaluateAndStoreGovernance } from "@/lib/governance/evaluateAndStore";
@@ -418,14 +418,14 @@ export async function POST(req: NextRequest) {
     // If body parsing fails, return error immediately (can't continue without body)
     logger.error(`[${requestId}] [synthesize-panel] Failed to parse request body`, {
       requestId,
-      error: parseError?.message,
+      ...contentFreeError(parseError), // privacy (PR #329 R3): a SyntaxError message quotes the request body
     });
     return NextResponse.json(
       createErrorResponse(
         ERROR_CODES.BAD_REQUEST,
         "Invalid request body",
         requestId,
-        { details: parseError?.message }
+        { details: diagnosticCode(parseError) }
       ),
       { status: 400 }
     );
@@ -1465,7 +1465,7 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
           wasTimeout,
           wasClientAbort,
           wasCombinedAbort,
-          error: llmError?.message || llmError,
+          ...contentFreeError(llmError), // privacy (PR #329 R3): provider messages can echo the prompt
         });
         return NextResponse.json(
           createErrorResponse(
@@ -1485,7 +1485,7 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
       // OpenAI failed (API error or other) — attempt Claude fallback before returning error
       logger.warn(`[${requestId}] [synthesize-panel] OpenAI failed, attempting Claude fallback`, {
         requestId,
-        openaiError: llmError?.message || String(llmError),
+        openaiError: diagnosticCode(llmError),
         openaiStatus: llmError?.status,
       });
       
@@ -1526,7 +1526,7 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
               "Both OpenAI and Claude failed to generate synthesis",
               requestId,
               {
-                openaiError: llmError?.message,
+                openaiError: diagnosticCode(llmError),
                 openaiStatus: llmError?.status,
                 claudeFallback: "returned_empty",
               }
@@ -1538,8 +1538,8 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
         // Claude fallback also failed — return original OpenAI error with fallback context
         logger.error(`[${requestId}] [synthesize-panel] Claude fallback also failed`, {
           requestId,
-          openaiError: llmError?.message,
-          claudeError: fallbackError?.message || String(fallbackError),
+          openaiError: diagnosticCode(llmError),
+          claudeError: diagnosticCode(fallbackError),
         });
         const isOpenAIError = llmError?.status && llmError.status >= 400 && llmError.status < 500;
         return NextResponse.json(
@@ -1548,9 +1548,9 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
             "Both OpenAI and Claude failed to generate synthesis",
             requestId,
             {
-              openaiError: llmError?.message,
+              openaiError: diagnosticCode(llmError),
               openaiStatus: llmError?.status,
-              claudeError: fallbackError?.message,
+              claudeError: diagnosticCode(fallbackError),
             }
           ),
           { status: 502 }
@@ -1789,7 +1789,7 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
       } catch (retryError: any) {
         logger.error(`[${requestId}] [synthesize-panel] Retry failed`, {
           requestId,
-          error: retryError?.message || retryError,
+          ...contentFreeError(retryError), // privacy (PR #329 R3)
           status: retryError?.status,
         });
         // Continue to error handling below if retry fails
@@ -1818,7 +1818,7 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
       } catch (fallbackError: any) {
         logger.error(`[${requestId}] [synthesize-panel] Claude fallback failed after OpenAI empty output`, {
           requestId,
-          error: fallbackError?.message || String(fallbackError),
+          ...contentFreeError(fallbackError), // privacy (PR #329 R3)
         });
       }
     }
@@ -2007,12 +2007,12 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
           logger.error(`[${requestId}] [synthesize-panel] API error in validation retry`, {
             requestId,
             status: retryError.status,
-            message: retryError?.message || retryError,
+            ...contentFreeError(retryError), // privacy (PR #329 R3)
           });
           return NextResponse.json(
             createErrorResponse(
               ERROR_CODES.OPENAI_API_ERROR,
-              retryError?.message || "API request failed during validation retry",
+              "API request failed during validation retry", // privacy (PR #329 R3): no provider message to the client
               requestId,
               {
                 status: retryError.status,
@@ -2273,8 +2273,7 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
     logger.error(`[${finalRequestId}] [synthesize-panel] Unexpected error`, {
       requestId: finalRequestId,
       elapsed,
-      error: error?.message || error,
-      stack: error?.stack,
+      ...contentFreeError(error), // privacy (PR #329 R3): no message / stack (can quote content)
       name: error?.name,
       wasClientAbort,
       clientSignalAborted: req.signal?.aborted || false,
@@ -2296,7 +2295,7 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
     return NextResponse.json(
       createErrorResponse(
         ERROR_CODES.INTERNAL_ERROR,
-        error?.message || "Failed to generate synthesis",
+        "Failed to generate synthesis", // privacy (PR #329 R3): no raw error message to the client
         finalRequestId,
         {
           errorName: error?.name,

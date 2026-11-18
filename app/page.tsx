@@ -72,6 +72,7 @@ import type { PersistedAdaptiveOutput, PersistedLegacyAdaptiveOutputV1 } from "@
 import type { ReportStatusInput } from "@/lib/adaptiveSchema/reportStatus";
 import { adaptPersistedOutputToPanelPayload, adaptPersistedLegacyOutputToPanelPayload } from "@/lib/user/adaptivePersistedOutputAdapter";
 import type { SynthesisConsensusSummaryDetail } from "@/lib/verification/consensusScoring";
+import { consumeAppHandoff } from "@/lib/client/verifyPrefill"; // privacy (PR #329 R3): tab-scoped /verify hand-off
 
 // Lazy load heavy components - defer until after first paint
 const ResultsDisplay = dynamic(() => import("@/components/ResultsDisplay"), {
@@ -2376,7 +2377,7 @@ export default function Home() {
        * `personalResearchVerifyClaimHref`) and no double-encoded protocol exists,
        * so a second decode has nothing to undo and can only corrupt content.
        */
-      const claim = params.get("claim");
+      const claim = params.get("claim") || consumeAppHandoff("verify", user.uid); // privacy (PR #329 R3): new links carry no claim
       if (claim) setClaimInput(claim);
       router.replace("/", { scroll: false });
     } else if (tab === "research") {
@@ -2388,7 +2389,7 @@ export default function Home() {
       supersedeRunningResearch();
       setPanelTab("research");
       // C2 §B — already decoded by `URLSearchParams`; see the `claim` site above.
-      const q = params.get("q");
+      const q = params.get("q") || consumeAppHandoff("research", user.uid); // privacy (PR #329 R3): new links carry no question
       if (q) setQuestion(q);
       router.replace("/", { scroll: false });
     }

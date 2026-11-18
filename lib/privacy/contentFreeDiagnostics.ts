@@ -39,3 +39,35 @@ export function issueFieldsFromStrings(issues: readonly string[]): string[] {
     return at === -1 ? "(unknown)" : s.slice(0, at);
   });
 }
+
+export type DiagnosticCode =
+  | "timeout"
+  | "aborted"
+  | "parse_error"
+  | "validation_error"
+  | "network_error"
+  | `http_${number}`
+  | "error";
+
+/**
+ * R3 (review MAJOR-1) — a BOUNDED, content-free classification of a thrown
+ * value for logs and client error responses. Never reads `err.message` text
+ * into the output (only tests it for the timeout keyword), never the stack.
+ */
+export function diagnosticCode(err: unknown): DiagnosticCode {
+  const e = (err && typeof err === "object" ? err : {}) as { name?: unknown; status?: unknown; code?: unknown; message?: unknown };
+  const name = typeof e.name === "string" ? e.name : "";
+  const status = typeof e.status === "number" && e.status >= 100 && e.status <= 599 ? e.status : undefined;
+  if (name === "AbortError") return "aborted";
+  if (name === "TimeoutError" || (typeof e.message === "string" && /\btimed? ?out\b|_timeout\b/i.test(e.message))) return "timeout";
+  if (name === "SyntaxError") return "parse_error";
+  if (name === "ZodError") return "validation_error";
+  if (status !== undefined) return `http_${status}`;
+  if (name === "TypeError" && typeof e.message === "string" && /fetch/i.test(e.message)) return "network_error";
+  return "error";
+}
+
+/** `{ errorName, errorCode }` — the shape every privacy-sensitive catch block logs instead of `err.message` / `err.stack`. */
+export function contentFreeError(err: unknown): { errorName: string; errorCode: DiagnosticCode } {
+  return { errorName: errorName(err), errorCode: diagnosticCode(err) };
+}

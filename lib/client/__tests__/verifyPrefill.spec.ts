@@ -10,7 +10,9 @@ import {
   capturePendingVerifyInput,
   clearPendingVerifyInputOnSignOut,
   consumePendingVerifyInput,
+  readVisiblePendingVerifyInput,
   reconcilePendingVerifyInputForIdentity,
+  sweepTabHandoffs,
   updatePendingVerifyInput,
   verifyReturnPath,
 } from "@/lib/client/verifyPrefill";
@@ -61,14 +63,16 @@ describe("capture", () => {
     const s = new FakeStorage();
     capturePendingVerifyInput(env(`?text=${encodeURIComponent(CLAIM)}`, "", null, s));
     const back = env("?source=extension", "", null, s);
-    expect(capturePendingVerifyInput({ ...back, now: T0 + PENDING_TTL_MS - 1 })).toBe(CLAIM);
+    expect(capturePendingVerifyInput({ ...back, now: T0 + PENDING_TTL_MS - 1 })).toBeNull(); // nothing arrived
     expect(back.replaceState).not.toHaveBeenCalled();
+    expect(readVisiblePendingVerifyInput(s, null, T0 + PENDING_TTL_MS - 1)).toBe(CLAIM); // R3: display is derived
   });
 
   it("EXPIRY: a record past its TTL is never returned and is removed", () => {
     const s = new FakeStorage();
     capturePendingVerifyInput(env(`?text=${encodeURIComponent(CLAIM)}`, "", null, s));
-    expect(capturePendingVerifyInput({ ...env("", "", null, s), now: T0 + PENDING_TTL_MS })).toBe("");
+    expect(readVisiblePendingVerifyInput(s, null, T0 + PENDING_TTL_MS)).toBe("");
+    sweepTabHandoffs(s, T0 + PENDING_TTL_MS);
     expect(s.length).toBe(0);
   });
 
@@ -82,7 +86,8 @@ describe("capture", () => {
     ]) {
       const s = new FakeStorage();
       s.setItem(VERIFY_PENDING_STORAGE_KEY, raw);
-      expect(capturePendingVerifyInput(env("", "", null, s))).toBe("");
+      expect(readVisiblePendingVerifyInput(s, null, T0)).toBe("");
+      sweepTabHandoffs(s, T0);
       expect(s.length).toBe(0);
     }
   });
@@ -90,20 +95,25 @@ describe("capture", () => {
   it("the round-1 legacy raw key is removed on sight and never read", () => {
     const s = new FakeStorage();
     s.setItem(LEGACY_VERIFY_PREFILL_STORAGE_KEY, CLAIM);
-    expect(capturePendingVerifyInput(env("", "", null, s))).toBe("");
+    expect(readVisiblePendingVerifyInput(s, null)).toBe("");
+    sweepTabHandoffs(s);
     expect(s.length).toBe(0);
   });
 
   it("a record bound to account A is removed, not shown, when account B is signed in", () => {
     const s = new FakeStorage();
     capturePendingVerifyInput(env(`?text=${encodeURIComponent(CLAIM)}`, "", "uid-a", s));
-    expect(capturePendingVerifyInput(env("", "", "uid-b", s))).toBe("");
+    expect(readVisiblePendingVerifyInput(s, "uid-b", T0)).toBe(""); // never displayed to B
+    expect(readVisiblePendingVerifyInput(s, null, T0)).toBe(""); // nor to an anonymous viewer
+    expect(readVisiblePendingVerifyInput(s, undefined, T0)).toBe(""); // nor while identity is unknown
+    expect(readVisiblePendingVerifyInput(s, "uid-a", T0)).toBe(CLAIM); // control
+    reconcilePendingVerifyInputForIdentity(s, "uid-b", T0);
     expect(s.length).toBe(0);
   });
 
   it("control: a plain /verify visit returns '' and changes nothing; an empty ?text= is stripped", () => {
     const e = env("");
-    expect(capturePendingVerifyInput(e)).toBe("");
+    expect(capturePendingVerifyInput(e)).toBeNull();
     expect(e.replaceState).not.toHaveBeenCalled();
     const e2 = env("?text=");
     expect(capturePendingVerifyInput(e2)).toBe("");
@@ -121,7 +131,7 @@ describe("capture", () => {
         currentUid: null,
       })
     ).toBe(CLAIM);
-    expect(capturePendingVerifyInput({ location: { pathname: "/verify", search: "", hash: "" }, history: null, storage: throwing, currentUid: null })).toBe("");
+    expect(capturePendingVerifyInput({ location: { pathname: "/verify", search: "", hash: "" }, history: null, storage: throwing, currentUid: null })).toBeNull();
     expect(() => consumePendingVerifyInput(throwing)).not.toThrow();
     expect(() => updatePendingVerifyInput(throwing, "x", null)).not.toThrow();
     expect(() => reconcilePendingVerifyInputForIdentity(throwing, "u")).not.toThrow();
@@ -178,7 +188,7 @@ describe("update / consume / return path", () => {
     capturePendingVerifyInput(env(`?text=${encodeURIComponent(CLAIM)}`, "", null, s));
     consumePendingVerifyInput(s);
     expect(s.length).toBe(0);
-    expect(capturePendingVerifyInput(env("", "", null, s))).toBe("");
+    expect(readVisiblePendingVerifyInput(s, null)).toBe("");
   });
 
   it("the signup/login return path carries source only — never the text", () => {

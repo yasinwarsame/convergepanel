@@ -1186,7 +1186,7 @@ export default function PanelSynthesisView({
           }
         } catch (textError: any) {
           console.error("[PanelSynthesisView] Failed to read error response:", {
-            error: textError?.message || textError,
+            errorName: textError?.name, // privacy (PR #329 R3): no message
           });
         }
         

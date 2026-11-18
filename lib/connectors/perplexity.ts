@@ -29,6 +29,7 @@ import { MODEL_LIMITS, getModelTimeout } from "@/lib/modelConfig";
 import { PERPLEXITY_API_KEY } from "@/lib/env";
 import { getTotalTokensFromProviderResponse, modelIdToProviderKey, safeNum } from "@/lib/tokenExtraction";
 import { logger } from "@/lib/logger";
+import { contentFreeError } from "@/lib/privacy/contentFreeDiagnostics";
 import {
   PERPLEXITY_AGENT_ENDPOINT,
   agentOutcome,
@@ -245,7 +246,7 @@ export async function callPerplexity(
         };
       }
 
-      logger.error("[Perplexity connector] Request failed", { error: err?.message });
+      logger.error("[Perplexity connector] Request failed", { ...contentFreeError(err) }); // privacy (PR #329 R3)
 
       // Re-throw to be caught by outer catch block for other error types
       throw new Error(err?.message || "Perplexity request failed. Please try again.");
@@ -254,7 +255,7 @@ export async function callPerplexity(
     // Never throw from here; return a structured error so the UI can render it safely.
     const latencyMs = Date.now() - startTime;
 
-    logger.error("[Perplexity connector] Request failed", { error: error?.message });
+    logger.error("[Perplexity connector] Request failed", { ...contentFreeError(error) }); // privacy (PR #329 R3)
 
     const errorMessage = error?.message || "Perplexity request failed. Please try again.";
 

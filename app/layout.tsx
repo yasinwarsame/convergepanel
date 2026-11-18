@@ -12,6 +12,8 @@ import { AuthProvider } from "@/components/AuthProvider";
 import { ErrorBoundaryWrapper } from "@/components/ErrorBoundaryWrapper";
 import { ServiceWorkerUnregister } from "@/components/ServiceWorkerUnregister";
 import { PostHogProvider } from "@/components/PostHogProvider";
+import { ContentHandoffMigrator } from "@/components/ContentHandoffMigrator";
+import { Suspense } from "react";
 import { GOOGLE_SITE_VERIFICATION, BING_SITE_VERIFICATION } from "@/lib/env";
 
 const hanken = Hanken_Grotesk({
@@ -110,6 +112,10 @@ export default function RootLayout({
         <PostHogProvider>
           <ErrorBoundaryWrapper>
             <AuthProvider>
+            {/* Privacy (PR #329 R3): moves claim text out of the URL before any page effect or pageview reads it. */}
+            <Suspense fallback={null}>
+              <ContentHandoffMigrator />
+            </Suspense>
             {/* Shell renders immediately - header is visible right away */}
             <TopNav />
             {/* Children (page content) render in parallel */}

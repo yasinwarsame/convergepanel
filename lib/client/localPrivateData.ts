@@ -20,7 +20,7 @@
  * unit-testable; callers pass `window.localStorage` / `window.sessionStorage`.
  */
 
-import { clearPendingVerifyInputOnSignOut, reconcilePendingVerifyInputForIdentity } from "@/lib/client/verifyPrefill";
+import { clearPendingVerifyInputOnSignOut, reconcilePendingVerifyInputForIdentity, sweepTabHandoffs } from "@/lib/client/verifyPrefill";
 
 // Must equal `HISTORY_STORAGE_KEY` in app/page.tsx (a hash-frozen file, so it keeps
 // its own literal); lib/client/__tests__/localPrivateData.spec.ts pins the match.
@@ -79,6 +79,7 @@ function browserStorage(kind: "localStorage" | "sessionStorage"): Storage | null
 export function clearLocalPrivateDataOnSignOut(options: { hadIdentity: boolean }): void {
   clearPanelHistoryCache(browserStorage("localStorage"));
   if (options.hadIdentity) clearPendingVerifyInputOnSignOut(browserStorage("sessionStorage"));
+  else sweepTabHandoffs(browserStorage("sessionStorage")); // anonymous: keep live input, drop expired
 }
 
 /**

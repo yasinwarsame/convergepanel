@@ -34,6 +34,7 @@
 
 import { cleanJsonResponse, repairTruncatedJson } from "@/lib/verification/cleanJsonResponse";
 import { logger } from "@/lib/logger";
+import { contentFreeError } from "@/lib/privacy/contentFreeDiagnostics";
 
 import type { ExtractedFrame, MetadataAnalysis, VideoMetadata } from "@/lib/video/videoPure";
 import { buildVideoVerificationPrompt } from "@/lib/video/videoVerificationPrompt";
@@ -264,7 +265,7 @@ export async function executeVideoVerification(
     } catch (err: unknown) {
       const elapsed = Date.now() - modelStart;
       const msg = err instanceof Error ? err.message : String(err);
-      logger.error(`[verify-video] ${model.id} failed`, { modelId: model.id, elapsedMs: elapsed, error: msg });
+      logger.error(`[verify-video] ${model.id} failed`, { modelId: model.id, elapsedMs: elapsed, ...contentFreeError(err) }); // privacy (PR #329 R3)
       return {
         modelId: model.id,
         modelName: model.name,
@@ -292,7 +293,7 @@ export async function executeVideoVerification(
     if (r.status === "fulfilled") return r.value;
     const model = visionModels[i];
     const msg = r.reason instanceof Error ? r.reason.message : String(r.reason);
-    logger.error(`[verify-video] ${model.id} promise rejected unexpectedly`, { modelId: model.id, error: msg });
+    logger.error(`[verify-video] ${model.id} promise rejected unexpectedly`, { modelId: model.id, ...contentFreeError(r.reason) }); // privacy (PR #329 R3)
     return {
       modelId: model.id,
       modelName: model.name,

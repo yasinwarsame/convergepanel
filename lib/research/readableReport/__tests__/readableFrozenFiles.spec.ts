@@ -60,7 +60,11 @@ const UNCHANGED_AT_35933C8: Record<string, string> = {
   // console-logging arguments in handleRunPanel stop carrying model output (response excerpts, full results/response
   // objects, SyntaxError messages) and log lengths / keys / ids instead; line count unchanged; no render, report or
   // provenance code. 8d97e6296c16b9b0a41c30a8311a88e61de9c9a5 → f880b0562d904897d6bb6a6110a4f1371cd5e372.
-  "app/page.tsx": "f880b0562d904897d6bb6a6110a4f1371cd5e372",
+  // Re-pinned (owner-authorized PR #329 R3, 2026-11-18, D5 frozen-file reader exception): ONLY one import line and
+  // the two hand-off reader lines (`params.get("claim") || consumeAppHandoff("verify", user.uid)` and the `q` twin);
+  // the legacy param is still read first. app/__tests__/pageFrozenExceptionsR3.spec.ts reverses exactly the R2 and
+  // R3 edits and requires the original 8d97e629 blob. f880b0562d904897d6bb6a6110a4f1371cd5e372 → 05d515b6170522b2f30d0497a212b8c780be527b.
+  "app/page.tsx": "05d515b6170522b2f30d0497a212b8c780be527b",
 };
 
 /**
@@ -202,10 +206,13 @@ const WIDENED_BY_INC1: Record<string, string> = {
  * Re-pinned (owner-authorized privacy remediation PR #329 round 2, 2026-11-18): dsProvenanceUiBoundaries.spec.ts changed
  * only its own app/page.tsx pin (client console-logging arguments, see the app/page.tsx entry above).
  * da95909bcc5ad3c9c477cab8dbabf60e99dd7fd9 → 4a0d36e2914445e4b9573c749ee6b2b91928151a. Same 32-file pinned set.
+ *
+ * Re-pinned (owner-authorized PR #329 R3, 2026-11-18): dsProvenanceUiBoundaries.spec.ts again changed only its own
+ * app/page.tsx pin (D5 reader exception). 4a0d36e2914445e4b9573c749ee6b2b91928151a → 2cbe00fe52d039eecdaa2125615d5761c198e794. Same 32-file pinned set.
  */
 const READABLE_GATE_OPTION_BY_INC1: Record<string, string> = {
   "components/adaptive/AdaptiveSynthesisReportView.tsx": "bcdf6ba2444c2aa3dc22ae049901cf72e55eb0bc",
-  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "4a0d36e2914445e4b9573c749ee6b2b91928151a",
+  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "2cbe00fe52d039eecdaa2125615d5761c198e794",
   "lib/adaptiveSchema/shareBuilders.ts": "f5e67a0a0ee20e2da15917b2a2f195005943f1ba",
   "lib/adaptiveSchema/__tests__/o5p/historicalParity.spec.tsx": "fce2e3172049cd868607e83a8a0a0147ec4939f3",
 };
