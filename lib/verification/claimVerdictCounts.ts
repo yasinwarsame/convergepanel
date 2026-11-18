@@ -18,6 +18,7 @@
  */
 
 import { canonicalProvider } from "@/lib/panel/providerRegistry";
+import { providerDisplayName, runModelFamilyName } from "@/lib/panel/runModelIdentity";
 
 export type ClaimModelVerdictCounts = {
   accurate: number;
@@ -248,6 +249,13 @@ export type ClaimStatementBasis = {
   unverifiableMajority: boolean;
   disagreement: boolean;
   substitutedUsable: number;
+  /**
+   * R4 owner rulings (MINOR-1 / MINOR-3): one identified model per answering slot AND every answering slot is its OWN
+   * model — not substituted, and the recorded provider is the slot family's own provider. Only then are slot family
+   * names the executing models (a slot recording another provider without the substituted flag is not an identified
+   * own model).
+   */
+  namedOwnModels: boolean;
 };
 
 export function claimStatementBasis(rows: ReadonlyArray<unknown>, independentModels: number | null, tally: ClaimSlotTally | null): ClaimStatementBasis {
@@ -263,23 +271,129 @@ export function claimStatementBasis(rows: ReadonlyArray<unknown>, independentMod
     unverifiableMajority: majority(sides.unverifiableProviders),
     disagreement: sides.crossModelDisagreement,
     substitutedUsable: tally?.substitutedUsable ?? 0,
+    namedOwnModels:
+      modelsIdentified &&
+      tally !== null &&
+      sides.providers === tally.usable &&
+      (Array.isArray(rows) ? rows : []).every((r) => !isUsableRow(r) || claimRowIsOwnModel(r)),
   };
+}
+
+function isUsableRow(raw: unknown): boolean {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+  const r = raw as { status?: unknown; verdict?: unknown };
+  return r.status === "ok" && isPerModelVerdict(r.verdict);
+}
+
+/**
+ * The provider each claim panel slot's OWN connector records (lib/verification/runClaimVerificationPanel.ts
+ * `CLAIM_CONNECTOR_PROVIDER`; pinned against it by lib/verification/__tests__/claimRowExecutionIdentity.spec.ts). A
+ * client-safe literal: this module must not import the connectors.
+ */
+export const CLAIM_SLOT_OWN_PROVIDER: Readonly<Record<string, string>> = Object.freeze({
+  chatgpt: "openai",
+  claude: "anthropic",
+  gemini: "google",
+  grok: "xai",
+  perplexity: "perplexity",
+});
+
+const slotKey = (modelId: unknown) => (typeof modelId === "string" ? modelId.trim().toLowerCase() : "");
+
+/**
+ * True when a stored / payload claim row is an answer by the slot's OWN identified model: status "ok", not substituted,
+ * and the recorded provider is the slot family's own registered provider (R4 MINOR-3: an own slot recording another
+ * provider without the substituted flag is NOT its family's model).
+ */
+export function claimRowIsOwnModel(raw: unknown): boolean {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+  const r = raw as { modelId?: unknown; status?: unknown; substituted?: unknown; provider?: unknown };
+  if (r.status !== "ok" || r.substituted === true) return false;
+  const own = CLAIM_SLOT_OWN_PROVIDER[slotKey(r.modelId)];
+  return own !== undefined && canonicalProvider(r.provider) === own;
+}
+
+/** Part of a row label when the executing model of a slot is not established (R4 MINOR-3). */
+export const CLAIM_EXECUTING_MODEL_NOT_IDENTIFIED = "executing model not identified";
+
+/**
+ * The name a claim surface gives ONE stored / payload row (R4 owner ruling: per-model rows show the validated executing
+ * identity, never a slot family name as if that model ran):
+ *  - a substituted row → "DeepSeek (substituting ChatGPT)" (registered provider only; otherwise "Substitute model
+ *    (substituting ChatGPT)");
+ *  - a row that records a provider that is not the slot family's own registered provider (R4 MINOR-3, no substituted
+ *    flag) → "ChatGPT slot (executing model not identified)";
+ *  - otherwise the slot family name — an own-provider row, or a row that records no provider at all (a record written
+ *    before providers were stamped: substitution was always flagged, so the slot's own model is the recorded fact; such
+ *    records are "unverified" for every statement about independence).
+ */
+export function claimRowExecutionLabel(raw: unknown): string {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return runModelFamilyName(undefined);
+  const r = raw as { modelId?: unknown; substituted?: unknown; provider?: unknown };
+  const family = runModelFamilyName(r.modelId);
+  const canonical = canonicalProvider(r.provider);
+  if (r.substituted === true) return `${canonical ? providerDisplayName(canonical) : "Substitute model"} (substituting ${family})`;
+  if (providerDisplayName(r.provider) !== null && canonical !== CLAIM_SLOT_OWN_PROVIDER[slotKey(r.modelId)]) {
+    return `${family} slot (${CLAIM_EXECUTING_MODEL_NOT_IDENTIFIED})`;
+  }
+  return family;
+}
+
+/**
+ * The name of ONE identified executing provider across all the usable rows it answered (a disagreement pair between
+ * models is named by these): "Perplexity" (its own slot only), "DeepSeek (substituting ChatGPT, Claude, Gemini, Grok)",
+ * or the row labels joined with " / " when the provider answered its own slot and others.
+ */
+export function claimProviderExecutionLabel(provider: string, rows: ReadonlyArray<unknown>): string {
+  const mine = (Array.isArray(rows) ? rows : []).filter((r) => isUsableRow(r) && canonicalProvider((r as { provider?: unknown }).provider) === provider);
+  const substituted = mine.filter((r) => (r as { substituted?: unknown }).substituted === true);
+  const others = mine.filter((r) => (r as { substituted?: unknown }).substituted !== true).map(claimRowExecutionLabel);
+  const parts = [...others, ...(substituted.length ? [`${providerDisplayName(provider)} (substituting ${substituted.map((r) => runModelFamilyName((r as { modelId?: unknown }).modelId)).join(", ")})`] : [])];
+  return parts.length ? parts.join(" / ") : (providerDisplayName(provider) ?? provider);
+}
+
+/**
+ * R4 owner ruling: a consensus score, confidence label or support ratio is presented as corroboration between models only
+ * when every answering slot is its own distinct identified executing model (`oneModelPerSlot`); otherwise it is
+ * qualified with this text next to the number. The stored values and their computation are unchanged.
+ */
+export const CLAIM_SCORE_SLOT_BASIS_QUALIFIER = "computed over panel slot responses, not independent corroboration";
+
+/** True when a score presented for an "independent" record must carry `CLAIM_SCORE_SLOT_BASIS_QUALIFIER`. */
+export function claimScoreNeedsSlotQualifier(basis: Pick<ClaimStatementBasis, "oneModelPerSlot">): boolean {
+  return !basis.oneModelPerSlot;
 }
 
 /**
  * Split digest conflict points: a pair is between two models only when both slots are usable with two DIFFERENT
- * identified providers; every other pair is a difference between panel slot responses.
+ * identified providers; every other pair is a difference between panel slot responses. Between models, each unordered
+ * pair of executing providers is listed ONCE (the first point); `providersOf` gives the pair's providers.
  */
-export function splitClaimDisagreementsByIdentity<T extends { models: string[] }>(points: readonly T[], sides: ClaimProviderSides): { betweenModels: T[]; betweenSlots: T[] } {
+export function splitClaimDisagreementsByIdentity<T extends { models: string[] }>(
+  points: readonly T[],
+  sides: ClaimProviderSides
+): { betweenModels: T[]; betweenSlots: T[]; providersOf: (p: T) => [string, string] | null } {
   const betweenModels: T[] = [];
   const betweenSlots: T[] = [];
+  const pairOf = new Map<T, [string, string]>();
+  const seen = new Set<string>();
   for (const p of points) {
     const [a, b] = p.models ?? [];
     const pa = sides.reliable && typeof a === "string" ? sides.providerOfSlot[a.trim()] : undefined;
     const pb = sides.reliable && typeof b === "string" ? sides.providerOfSlot[b.trim()] : undefined;
-    (pa && pb && pa !== pb ? betweenModels : betweenSlots).push(p);
+    if (!(pa && pb && pa !== pb)) {
+      betweenSlots.push(p);
+      continue;
+    }
+    // R4 owner ruling: one observation per pair of DISTINCT executing models — a substitute that answered several slots
+    // is one model, so its slot pairs against the same other model are the same disagreement, listed once.
+    const key = [pa, pb].sort().join("|");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    pairOf.set(p, [pa, pb]);
+    betweenModels.push(p);
   }
-  return { betweenModels, betweenSlots };
+  return { betweenModels, betweenSlots, providersOf: (p: T) => pairOf.get(p) ?? null };
 }
 
 /** One sentence qualifying slot-response counts, with the slot note when there is one. */

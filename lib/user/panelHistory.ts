@@ -48,6 +48,11 @@ export type PanelHistoryVerificationItem = {
   consensusWithheld?: ConsensusScoreWithheldReason;
   /** Whether the stored rows prove >= 2 independent executing models with a usable answer. */
   modelIndependence: StoredConsensusIndependence;
+  /**
+   * R4 owner ruling, additive: "slot_responses" when the presented score's answering slots are not each a distinct
+   * identified executing model — the history suffix then qualifies it (lib/verification/claimStatementBasisSources.ts).
+   */
+  consensusBasis?: "slot_responses";
   governanceStatus?: PanelHistoryGovernanceStatus;
 };
 

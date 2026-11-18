@@ -9,6 +9,9 @@ jest.mock("next/link", () => ({
   default: ({ href, children }: Record<string, unknown>) => require("react").createElement("a", { href }, children as never),
 }));
 jest.mock("server-only", () => ({}));
+// The Team list surface goes through the list hook's response parser; its module imports client-only auth.
+jest.mock("@/components/AuthProvider", () => ({ useAuth: () => ({ user: null, authReady: false }) }));
+jest.mock("@/lib/client/authedFetch", () => ({ authedFetch: async () => { throw new Error("no network in tests"); } }));
 
 import { expectSurfaceClean, inventoryCases, unhitTemplates, type Case } from "./claimStatementInventory.harness";
 import { buildCase, claimVerdictBanner, memoFor, MODES, MAX_SLOTS, type Mode, type Outcome } from "./claimStatementInventory.harness";

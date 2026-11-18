@@ -31,6 +31,11 @@ export interface MemoInput {
   modelEvidence?: Array<{
     modelId: string;
     modelName?: string;
+    /**
+     * Claim memo only (R4 owner ruling): the row's validated executing identity (lib/verification/claimVerdictCounts.ts
+     * `claimRowExecutionLabel`) — "DeepSeek (substituting ChatGPT)" — used for the row in MODEL VERDICTS.
+     */
+    executionLabel?: string;
     status?: string;
     verdict: string;
     confidence: string;
@@ -152,6 +157,14 @@ export interface MemoInput {
     partialSupportMajority?: boolean;
     unverifiableMajority?: boolean;
     substitutedUsable?: number;
+    /** R4 MINOR-1/3: every answering slot is its own identified model (family names are the executing models). */
+    namedOwnModels?: boolean;
+    /** R4: the conflict points listed as differences between slot responses (the between-models list is deduplicated). */
+    disagreementPointsBetweenSlots?: string[];
+    /** R4: the two executing models each between-models point is between. */
+    disagreementModelsByPoint?: Record<string, string[]>;
+    /** R4: the qualifier the consensus score line carries when the slots are not each a distinct identified model. */
+    scoreBasisQualifier?: string | null;
   };
 
   /**
@@ -441,7 +454,8 @@ function generateClaimMemo(input: MemoInput): string {
     lines.push(`VERDICT: ${verdictHuman}`);
     // Doc 14: a confidence label over split answers is printed with the split (stored label and score unchanged).
     const split = hasSplitVerdicts(verdictCounts) ? `; verdicts split: ${formatClaimVerdictCounts(verdictCounts)}` : "";
-    lines.push(`CONSENSUS SCORE: ${input.consensusScore}/100 (${input.confidenceLabel} confidence${split})`);
+    const basisQ = input.claimCrossModel?.scoreBasisQualifier;
+    lines.push(`CONSENSUS SCORE: ${input.consensusScore}/100 (${input.confidenceLabel} confidence${split}${basisQ ? `; ${basisQ}` : ""})`);
     lines.push(`EVIDENCE QUALITY: ${input.evidenceQuality}`);
   }
   lines.push("");
@@ -456,7 +470,7 @@ function generateClaimMemo(input: MemoInput): string {
   lines.push("");
 
   const modelLines = rows.map((m) => {
-    const name = modelDisplayName(m.modelId, m.modelName);
+    const name = m.executionLabel?.trim() || modelDisplayName(m.modelId, m.modelName);
     const st = m.status as string | undefined;
     if (st === "parse_error" || st === "failed") {
       return `  ${name}:    (${st === "parse_error" ? "Parse error" : "Failed"})`;
@@ -483,11 +497,18 @@ function generateClaimMemo(input: MemoInput): string {
   const disagree = noConsensus ? [] : dedupeCap(input.disagreementPoints ?? []);
   // R3: a conflict point is a disagreement between models only when it is between two identified models.
   // R4: fail closed — without the basis no point is presented as between models.
+  // R4: the between-models list is one point per pair of distinct executing models; a point the caller lists in neither
+  // list (a repeat of a listed model pair) is not printed again.
   const betweenModels = cross ? disagree.filter((p) => cross.disagreementPointsBetweenModels.includes(p)) : [];
-  const betweenSlots = cross ? disagree.filter((p) => !cross.disagreementPointsBetweenModels.includes(p)) : disagree;
+  const betweenSlots = cross
+    ? disagree.filter((p) => !cross.disagreementPointsBetweenModels.includes(p) && (cross.disagreementPointsBetweenSlots === undefined || cross.disagreementPointsBetweenSlots.includes(p)))
+    : disagree;
   if (betweenModels.length) {
     lines.push("WHERE MODELS DISAGREE");
-    betweenModels.forEach((p) => lines.push(`- ${p}`));
+    betweenModels.forEach((p) => {
+      const who = cross?.disagreementModelsByPoint?.[p];
+      lines.push(who && who.length ? `- ${p} [${who.join(", ")}]` : `- ${p}`);
+    });
     lines.push("");
   }
   if (betweenSlots.length) {
@@ -529,7 +550,7 @@ function generateClaimMemo(input: MemoInput): string {
   // R4: the answering slots are described as N named models only when each is its own identified model and none was
   // written by a substitute (the names are slot family names); K only when the identified providers are exactly K.
   const crossM = input.claimCrossModel;
-  const namedModels = exec !== null && !slotsOverModels && crossM?.oneModelPerSlot === true && crossM.substitutedUsable === 0;
+  const namedModels = exec !== null && !slotsOverModels && crossM?.oneModelPerSlot === true && crossM.substitutedUsable === 0 && crossM.namedOwnModels === true;
   const kIdentified = exec !== null && crossM?.modelsIdentified === true;
   const slotsPhrase = exec ? `${exec.answeredSlots} answering panel slot${exec.answeredSlots === 1 ? "" : "s"}` : `${rows.length} panel slot${rows.length === 1 ? "" : "s"}`;
 

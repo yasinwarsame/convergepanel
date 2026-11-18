@@ -3081,10 +3081,10 @@
  },
  {
   "file": "lib/verification/generateMemo.ts",
-  "literal": "`CONSENSUS SCORE: ${input.consensusScore}/100 (${input.confidenceLabel} confidence${split})`",
+  "literal": "`CONSENSUS SCORE: ${input.consensusScore}/100 (${input.confidenceLabel} confidence${split}${basisQ ? `; ${basisQ}` : \"\"})`",
   "count": 1,
   "category": "shared-claim-video",
-  "rule": "doc 14 PR-1: claim memo, independent branch — the stored score and confidence label as stored; `split` is empty unless the usable per-model verdicts sit on both sides (supporting vs inaccurate), then the split counts follow the label so a High label is never shown bare over split verdicts"
+  "rule": "doc 14 PR-1: claim memo, independent branch — the stored score and confidence label as stored; `split` is empty unless the usable per-model verdicts sit on both sides (supporting vs inaccurate), then the split counts follow the label so a High label is never shown bare over split verdicts; R4 owner ruling (2026-11-18): `basisQ` is the shared score-basis qualifier (\"computed over panel slot responses, not independent corroboration\"), present exactly when the answering slots are not one distinct identified executing model each — the score is never presented as independent corroboration without that basis"
  },
  {
   "file": "lib/verification/generateMemo.ts",

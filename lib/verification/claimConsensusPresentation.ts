@@ -25,6 +25,9 @@ import {
   type StoredConsensusIndependence,
 } from "@/lib/panel/independentVoices";
 
+import { CLAIM_SCORE_SLOT_BASIS_QUALIFIER } from "@/lib/verification/claimVerdictCounts";
+import { claimPayloadConsensusBasis } from "@/lib/verification/claimStatementBasisSources";
+
 export { CONSENSUS_WITHHELD_TEXT };
 
 /** The independence a claim payload / list item carries; anything missing or unknown is "unverified" (fail closed). */
@@ -73,8 +76,20 @@ export function claimVerdictQualifier(independence: unknown): string | null {
  * " · <withheld text>" — a row that does not carry its independence (e.g. one cached before it existed) is
  * "unverified", never shown as a consensus.
  */
-export function claimHistoryConsensusSuffix(item: { consensusScore?: number | null; modelIndependence?: unknown }): string {
+export function claimHistoryConsensusSuffix(item: {
+  consensusScore?: number | null;
+  modelIndependence?: unknown;
+  consensusBasis?: unknown;
+  payload?: Parameters<typeof claimPayloadConsensusBasis>[0] | null;
+}): string {
   const reason = consensusScoreWithheldReason(claimModelIndependence(item.modelIndependence));
   if (reason) return ` · ${CONSENSUS_WITHHELD_TEXT[reason]}`;
-  return item.consensusScore !== null && item.consensusScore !== undefined ? ` · ${item.consensusScore} consensus` : "";
+  if (item.consensusScore === null || item.consensusScore === undefined) return "";
+  // R4 owner ruling: a score over slots that are not each a distinct identified executing model is qualified —
+  // `consensusBasis` from the server row (app/api/user/panel-history), or derived from the rows of a live / cached item's
+  // payload (lib/verification/claimStatementBasisSources.ts).
+  const basis = item.consensusBasis ?? (item.payload && Array.isArray(item.payload.modelEvidence) ? claimPayloadConsensusBasis(item.payload) : undefined);
+  return basis === "slot_responses"
+    ? ` · ${item.consensusScore} consensus (${CLAIM_SCORE_SLOT_BASIS_QUALIFIER})`
+    : ` · ${item.consensusScore} consensus`;
 }

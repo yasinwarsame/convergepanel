@@ -116,7 +116,15 @@ import { generateVerificationMemo } from "@/lib/verification/generateMemo";
  * that case, else "Panel slots (n)" (133). No stored label, score or confidence changed. Classification script output
  * is in the R4 evidence (scratchpad r4/D).
  */
-const BASELINE_8584211_DIGEST = "d0962a74c6f3c204cdb5de9de7d86555aa280aa8f11dfb24d085f569ddf26017";
+/**
+ * Re-pinned (doc 14 PR-1, R4 owner rulings 2026-11-18 — a between-models conflict pair is named by its two EXECUTING
+ * models): d0962a74… → 45f4a969…. Diffed against the ac14afc PARITY_DUMP: research byte-identical; 45 claim fields of 15
+ * records changed (copied verdict, memo, view — 15 each) and EVERY one is that naming: the copied verdict's
+ * "[grok, chatgpt]" → "[Grok, ChatGPT]", the view's "— grok, chatgpt" → "— Grok, ChatGPT", and the memo's
+ * "WHERE MODELS DISAGREE" bullet gains " [Grok, ChatGPT]" (each field equal to the base modulo case after removing that
+ * bracket). These records have one own model per slot, so no qualifier, label or deduplication applies.
+ */
+const BASELINE_8584211_DIGEST = "45f4a9698ec8772b0f499c50036909d95ad327eef309a641eb2e96f6522db762";
 const stripCreatedDate = (markup: string) => markup.replace(/(data-testid="team-claim-row-created">)[^<]*(<\/span>)/g, "$1[created]$2");
 
 // Feature detection: the claim presentation module exists only after 8584211.

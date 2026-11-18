@@ -48,8 +48,11 @@ import {
   claimPayloadSlotTally,
   claimProviderSides,
   claimSlotResponsesNote,
-  claimStatementBasis,
   type ClaimStatementBasis,
+  claimRowExecutionLabel,
+  claimProviderExecutionLabel,
+  claimScoreNeedsSlotQualifier,
+  CLAIM_SCORE_SLOT_BASIS_QUALIFIER,
   claimSlotTallyNote,
   CLAIM_SLOT_RESPONSES_DIFFER_SUBTITLE,
   CLAIM_SLOT_RESPONSES_DIFFER_TITLE,
@@ -59,6 +62,7 @@ import {
   hasSplitVerdicts,
   isDisputedWithoutSupport,
 } from "@/lib/verification/claimVerdictCounts";
+import { claimPayloadStatementBasis } from "@/lib/verification/claimStatementBasisSources";
 import {
   independentModelsAmong,
   runSlotStatement,
@@ -188,9 +192,8 @@ export function claimViewIndependence(data: Pick<ClaimVerificationClientPayload,
  * the gate's K for a record presented "independent". Read-time only; nothing is re-scored.
  */
 export function claimStatementBasisOf(data: Pick<ClaimVerificationClientPayload, "modelIndependence" | "modelEvidence" | "auditBundle">): ClaimStatementBasis {
-  const view = claimViewIndependence(data);
-  const k = view.independence === "independent" && view.identity.verified ? view.identity.independentModels : null;
-  return claimStatementBasis(data.modelEvidence, k, claimPayloadSlotTally(data));
+  // The one shared derivation (lib/verification/claimStatementBasisSources.ts) — the stored-record surfaces read its twin.
+  return claimPayloadStatementBasis(data);
 }
 
 /** True when counts of the usable rows are counts of identified executing models (one identified model per slot). */
@@ -199,14 +202,32 @@ function slotCountsAreModelCounts(data: Parameters<typeof claimStatementBasisOf>
 }
 
 /**
- * True when the payload's rows may be listed as MODELS under their slot family names: one identified model per slot, no
- * slot written by a substitute (its family name would not be the executing model) and every row answered (a failed or
- * malformed slot is not a model's assessment).
+ * True when the payload's rows may be listed as MODELS under their slot family names: one identified model per slot,
+ * every answering slot its OWN model (not substituted, recording its family's own provider — R4 MINOR-3) and every row
+ * answered (a failed or malformed slot is not a model's assessment).
  */
 function rowsAreNamedModels(data: Parameters<typeof claimStatementBasisOf>[0]): boolean {
   const basis = claimStatementBasisOf(data);
   const tally = claimPayloadSlotTally(data);
-  return basis.oneModelPerSlot && basis.substitutedUsable === 0 && tally !== null && tally.usable === data.modelEvidence.length;
+  return basis.namedOwnModels && tally !== null && tally.usable === data.modelEvidence.length;
+}
+
+/**
+ * R4 owner ruling: the qualifier a presented consensus score / confidence / support ratio carries when the answering
+ * slots are not each a distinct identified executing model (null when the basis is valid). Stored values unchanged.
+ */
+export function claimScoreBasisQualifier(data: Parameters<typeof claimStatementBasisOf>[0]): string | null {
+  return claimScoreNeedsSlotQualifier(claimStatementBasisOf(data)) ? CLAIM_SCORE_SLOT_BASIS_QUALIFIER : null;
+}
+
+/** The two executing models a between-models conflict point is between, named by their identified providers. */
+function betweenModelsLabels(
+  data: ClaimVerificationClientPayload,
+  providersOf: (p: ClaimVerificationClientPayload["whereModelsDisagree"][number]) => [string, string] | null,
+  point: ClaimVerificationClientPayload["whereModelsDisagree"][number]
+): string[] {
+  const pair = providersOf(point);
+  return pair ? pair.map((p) => claimProviderExecutionLabel(p, data.modelEvidence)) : point.models;
 }
 
 /**
@@ -303,6 +324,7 @@ function agreementSectionFallbackCopy(data: ClaimVerificationClientPayload): str
 export function claimDigestSections(data: ClaimVerificationClientPayload): {
   agreeHeading: string;
   agree: string[];
+  /** One entry per pair of DISTINCT executing models (R4); `models` names the two executing models. */
   disagreeBetweenModels: ClaimVerificationClientPayload["whereModelsDisagree"];
   disagreeBetweenSlots: ClaimVerificationClientPayload["whereModelsDisagree"];
 } {
@@ -316,16 +338,25 @@ export function claimDigestSections(data: ClaimVerificationClientPayload): {
   return {
     agreeHeading: claimStatementBasisOf(data).oneModelPerSlot ? "Where models agree" : CLAIM_NOT_INDEPENDENT_AGREE_HEADING,
     agree: data.whereModelsAgree,
-    disagreeBetweenModels: split.betweenModels,
+    disagreeBetweenModels: split.betweenModels.map((p) => ({ ...p, models: betweenModelsLabels(data, split.providersOf, p) })),
     disagreeBetweenSlots: split.betweenSlots,
   };
 }
 
 /** The memo's `claimCrossModel` input for this payload (R3/R4): the shared statement basis and the digest split. */
-export function claimMemoCrossModel(data: ClaimVerificationClientPayload): ClaimStatementBasis & { disagreementPointsBetweenModels: string[] } {
+export function claimMemoCrossModel(data: ClaimVerificationClientPayload): ClaimStatementBasis & {
+  disagreementPointsBetweenModels: string[];
+  disagreementPointsBetweenSlots: string[];
+  disagreementModelsByPoint: Record<string, string[]>;
+  scoreBasisQualifier: string | null;
+} {
+  const digest = claimDigestSections(data);
   return {
     ...claimStatementBasisOf(data),
-    disagreementPointsBetweenModels: claimDigestSections(data).disagreeBetweenModels.map((d) => d.point),
+    disagreementPointsBetweenModels: digest.disagreeBetweenModels.map((d) => d.point),
+    disagreementPointsBetweenSlots: digest.disagreeBetweenSlots.map((d) => d.point),
+    disagreementModelsByPoint: Object.fromEntries(digest.disagreeBetweenModels.map((d) => [d.point, d.models])),
+    scoreBasisQualifier: claimScoreBasisQualifier(data),
   };
 }
 
@@ -351,6 +382,8 @@ export function claimMemoInput(data: ClaimVerificationClientPayload) {
     evidenceQuality: typeof evidenceQ === "string" ? evidenceQ : "mixed",
     modelEvidence: data.modelEvidence.map((m) => ({
       modelId: m.modelId,
+      // R4: the row's validated executing identity (MODEL VERDICTS); the slot family stays the row's `modelId`.
+      executionLabel: claimRowExecutionLabel(m),
       status: m.status,
       verdict: m.verdict,
       confidence: m.confidence,
@@ -391,7 +424,9 @@ export function buildClaimVerdictClipboardText(data: ClaimVerificationClientPayl
   if (consensus.kind === "score") {
     // A confidence label over split answers is copied with the split (doc 14 D-3/D-4 presentation; stored label kept).
     const split = hasSplitVerdicts(counts) ? `; ${claimSplitVerdictsQualifier(counts)}` : "";
-    lines.push(`Consensus score: ${consensus.score} (${data.confidenceLabel} confidence${split})`);
+    // R4: not presented as independent corroboration without one distinct identified model per answering slot.
+    const basisQ = claimScoreBasisQualifier(data);
+    lines.push(`Consensus score: ${consensus.score} (${data.confidenceLabel} confidence${split}${basisQ ? `; ${basisQ}` : ""})`);
     const note = clipTally ? claimSlotTallyNote(clipTally) : null;
     if (note) lines.push(`Panel slots: ${note}`);
   } else {
@@ -401,7 +436,7 @@ export function buildClaimVerdictClipboardText(data: ClaimVerificationClientPayl
   lines.push("");
   lines.push("Per model:");
   for (const m of data.modelEvidence) {
-    lines.push(`- ${runModelFamilyName(m.modelId as ModelId)}: ${formatVerdictLabel(m.verdict)} — ${m.summary}`);
+    lines.push(`- ${claimRowExecutionLabel(m)}: ${formatVerdictLabel(m.verdict)} — ${m.summary}`);
   }
   const digest = claimDigestSections(data);
   if (digest.agree.length) {
@@ -481,7 +516,9 @@ export function ClaimVerificationAuditTrailDetails({ data }: { data: ClaimVerifi
         {bundle.perModel.map((row) => {
           const ok = row.pipelineStatus === "ok";
           const icon = ok ? "✓" : "✗";
-          const name = runModelFamilyName(row.modelId as ModelId);
+          // R4: the validated executing identity of the slot (the payload row it records), never a bare family name.
+          const evidenceRow = data.modelEvidence.find((m) => m.modelId === row.modelId);
+          const name = evidenceRow ? claimRowExecutionLabel(evidenceRow) : runModelFamilyName(row.modelId as ModelId);
           let verdictKey: string;
           let verdictDisplay: string;
           if (ok && row.verdictLabel) {
@@ -686,6 +723,7 @@ export default function ClaimVerificationResultView({
   const verdictCounts = tally?.verdicts ?? null;
   const tallyNote = tally ? claimSlotTallyNote(tally) : null;
   const digest = useMemo(() => claimDigestSections(data), [data]);
+  const scoreBasisQualifier = useMemo(() => claimScoreBasisQualifier(data), [data]);
 
   const banner = useMemo(() => claimVerdictBanner(data), [data]);
 
@@ -763,6 +801,11 @@ export default function ClaimVerificationResultView({
             )}
           </div>
           )}
+          {consensus.kind === "score" && scoreBasisQualifier ? (
+            <p className="mt-2 text-xs text-cp-muted" data-testid="claim-consensus-basis">
+              Score, confidence and support ratio are {scoreBasisQualifier}.
+            </p>
+          ) : null}
           {governanceSurface}
         </div>
 
@@ -824,7 +867,7 @@ export default function ClaimVerificationResultView({
                 >
                   <div className="flex flex-wrap items-center gap-2 min-w-0">
                     <span className="font-medium text-cp-text truncate">
-                      {runModelFamilyName(m.modelId as ModelId)}
+                      {claimRowExecutionLabel(m)}
                     </span>
                     <span
                       className={`shrink-0 rounded-full border px-2 py-0.5 text-xs font-medium ${verdictBadgeClass(m.verdict)}`}

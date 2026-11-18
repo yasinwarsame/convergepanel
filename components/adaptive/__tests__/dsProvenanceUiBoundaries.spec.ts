@@ -112,7 +112,10 @@ const UNCHANGED_AT_9ECA1E3: Record<string, string> = {
   // legacy-panel synthesis-eligibility sites (L03 sites 3–4) are restored to the 35933c8 slot rule
   // (`okResults.length < 2` pre-flight; `filter(isUsableResult).length >= 2` history auto-synthesis) and the now-unused
   // meetsIndependentSynthesisMinimum import is removed; no provenance code. Was 70023e0b7a51822698b062dc8c0120bf8bf9aa81.
-  "app/page.tsx": "8d97e6296c16b9b0a41c30a8311a88e61de9c9a5",
+  // Doc 14 PR-1, R4 owner rulings (2026-11-18; claim score qualifier on the Personal history suffix): ONLY the history
+  // row mapper carrying the server's additive `consensusBasis` and its `HistoryItem` field (2 added lines; the suffix
+  // itself is claimHistoryConsensusSuffix); no provenance code. Was 8d97e6296c16b9b0a41c30a8311a88e61de9c9a5.
+  "app/page.tsx": "a3e49156e031b51cf4020b8a94f2061f14f30ead",
   // Re-pinned (owner-authorized SEC-2 / S4 provider-key boundary, 2026-11-09): `isAdminClaim()` and the
   // `appConfig/modelKeys` admin-claim grant removed, replaced by a deny-only `match /appConfig/{doc=**}`; no other
   // rule and no provenance code. 2fb80a11bfa6c55fe94e0438a980a3b0794aeafd → 747ccef5fc43f83bb08a986fadb49d5ca5d68e06.

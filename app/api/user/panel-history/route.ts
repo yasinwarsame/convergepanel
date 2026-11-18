@@ -13,7 +13,8 @@ import type { PanelHistoryItem, PanelHistoryResearchItem } from "@/lib/user/pane
 import type { ModelId } from "@/lib/types";
 import { createRunWorkspaceIntegrityBatch } from "@/lib/workspaces/runWorkspaceIntegrityBatch";
 import { consensusScoreWithheldReason, storedRunConsensusIndependence } from "@/lib/panel/independentVoices";
-import { storedVerificationConsensusIndependence, storedVideoConsensusIndependence } from "@/lib/panel/storedVerificationIndependence";
+import { storedVideoConsensusIndependence } from "@/lib/panel/storedVerificationIndependence";
+import { storedClaimHistoryScoreFields } from "@/lib/verification/claimStatementBasisSources";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -177,9 +178,9 @@ export async function GET(req: NextRequest) {
       const sortKey = firestoreMillis(data.timestamp);
       // A claim's stored score is a cross-model figure: listed only when the stored rows prove >= 2 independent
       // executing models with a usable answer (lib/panel/storedVerificationIndependence.ts); otherwise withheld with
-      // the reason. Stored data is unchanged.
-      const claimIndependence = storedVerificationConsensusIndependence(data as Record<string, unknown>);
-      const claimWithheld = consensusScoreWithheldReason(claimIndependence);
+      // the reason. R4: a presented score over slots that are not each a distinct identified model carries the basis
+      // marker (lib/verification/claimStatementBasisSources.ts). Stored data is unchanged.
+      const scoreFields = storedClaimHistoryScoreFields(data as Record<string, unknown>);
       merged.push({
         sortKey,
         item: {
@@ -188,9 +189,10 @@ export async function GET(req: NextRequest) {
           at: new Date(sortKey || Date.now()).toISOString(),
           claim: String(data.claim ?? ""),
           verdict: String(data.verdict ?? "unverifiable"),
-          consensusScore: claimWithheld ? null : typeof data.consensusScore === "number" ? data.consensusScore : 0,
-          ...(claimWithheld ? { consensusWithheld: claimWithheld } : {}),
-          modelIndependence: claimIndependence,
+          consensusScore: scoreFields.consensusScore,
+          ...(scoreFields.consensusWithheld ? { consensusWithheld: scoreFields.consensusWithheld } : {}),
+          modelIndependence: scoreFields.modelIndependence,
+          ...(scoreFields.consensusBasis ? { consensusBasis: scoreFields.consensusBasis } : {}),
           governanceStatus: normalizeGovernanceStatus(data.governanceStatus),
         },
       });

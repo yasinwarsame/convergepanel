@@ -688,7 +688,12 @@ function units(surface: Surface, c: Case): string[] {
     case "team": {
       const item = toTeamClaimVerificationSummary({ verificationId: "v", data: c.doc as unknown as Record<string, unknown>, workspaceId: "w", projectId: null, project: null });
       if (!item) return ["<team summary null>"];
-      return textNodes(renderToStaticMarkup(createElement(TeamClaimListRow, { workspaceId: "w", item: item as never, showProject: true })));
+      // Over the wire exactly as the Team list hook receives it (JSON) and parses it (R4: the hook keeps
+      // `consensusBasis`); the spec running this surface mocks the hook module's client-only imports.
+      const { parseTeamClaimListPageResponse } = require("@/hooks/useTeamClaimVerificationList");
+      const parsed = parseTeamClaimListPageResponse({ ok: true, status: 200, body: JSON.parse(JSON.stringify({ ok: true, scope: "all", hasMore: false, items: [item] })), address: { kind: "workspace", workspaceId: "w", scope: "all" } });
+      if (!parsed.ok) return [`<team list parse failed: ${parsed.errorCode}>`];
+      return textNodes(renderToStaticMarkup(createElement(TeamClaimListRow, { workspaceId: "w", item: parsed.page.items[0], showProject: true })));
     }
     case "history":
       // The real server row builder (app/api/user/panel-history/route.ts) → the real suffix (app/page.tsx).

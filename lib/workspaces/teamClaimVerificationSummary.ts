@@ -13,6 +13,7 @@ import { firestoreSecondsNanos } from "@/lib/runs/runSummary";
 import { consensusScoreWithheldReason, type ConsensusScoreWithheldReason } from "@/lib/panel/independentVoices";
 import { storedVerificationConsensusIndependence } from "@/lib/panel/storedVerificationIndependence";
 import { countClaimModelVerdictsFromAuditBundle, type ClaimModelVerdictCounts } from "@/lib/verification/claimVerdictCounts";
+import { storedClaimConsensusBasis, type ClaimConsensusBasis } from "@/lib/verification/claimStatementBasisSources";
 
 export type TeamClaimVerificationProjectDto = { id: string; name: string; status: string };
 
@@ -35,6 +36,11 @@ export type TeamClaimVerificationSummaryDto = {
    * / malformed): an uncountable bundle never fails the row or the window, it only omits the counts.
    */
   modelVerdicts?: ClaimModelVerdictCounts;
+  /**
+   * R4 owner ruling, ADDITIVE: "slot_responses" when the presented score's answering slots are not each a distinct
+   * identified executing model — the row then qualifies the score / confidence (lib/verification/claimStatementBasisSources.ts).
+   */
+  consensusBasis?: ClaimConsensusBasis;
   createdAt: string;
   workspaceId: string;
   projectId: string | null;
@@ -73,6 +79,7 @@ export function toTeamClaimVerificationSummary(args: {
   const governanceStatus = d.governanceStatus === "approved" || d.governanceStatus === "needs_review" || d.governanceStatus === "blocked" ? d.governanceStatus : undefined;
   const consensusWithheld = consensusScoreWithheldReason(storedVerificationConsensusIndependence(d));
   const modelVerdicts = countClaimModelVerdictsFromAuditBundle(d.auditBundle);
+  const consensusBasis = consensusWithheld ? undefined : storedClaimConsensusBasis(d);
   return {
     verificationId: args.verificationId,
     claim: d.claim,
@@ -83,6 +90,7 @@ export function toTeamClaimVerificationSummary(args: {
     evidenceQuality,
     ...(governanceStatus ? { governanceStatus } : {}),
     ...(modelVerdicts ? { modelVerdicts } : {}),
+    ...(consensusBasis ? { consensusBasis } : {}),
     createdAt: teamClaimTimestampIso(d.timestamp),
     workspaceId: args.workspaceId,
     projectId: args.projectId,

@@ -22,7 +22,7 @@ import { formatAbsoluteDate, UNFILED_PROJECT_LABEL } from "@/lib/workspaces/revi
 import { teamClaimDetailHref } from "@/lib/workspaces/teamClaimDetailHref";
 import type { TeamClaimListItem, TeamClaimVerdict } from "@/hooks/useTeamClaimVerificationList";
 import { CONSENSUS_WITHHELD_TEXT } from "@/lib/panel/independentVoices";
-import { formatClaimVerdictCounts, hasSplitVerdicts } from "@/lib/verification/claimVerdictCounts";
+import { CLAIM_SCORE_SLOT_BASIS_QUALIFIER, formatClaimVerdictCounts, hasSplitVerdicts } from "@/lib/verification/claimVerdictCounts";
 
 /**
  * Local pure mapping, deliberately NOT `lib/verification/shareText.ts`'s
@@ -105,6 +105,10 @@ export function TeamClaimListRow({ workspaceId, item, showProject }: TeamClaimLi
               <span data-testid="team-claim-row-confidence">
                 {item.confidenceLabel} confidence{hasSplitVerdicts(item.modelVerdicts ?? null) ? " (verdicts split)" : ""}
               </span>
+              {/* R4: a score over slots that are not each a distinct identified model is not independent corroboration. */}
+              {item.consensusBasis === "slot_responses" ? (
+                <span data-testid="team-claim-row-consensus-basis">({CLAIM_SCORE_SLOT_BASIS_QUALIFIER})</span>
+              ) : null}
               <span aria-hidden="true">·</span>
               <span data-testid="team-claim-row-evidence">{EVIDENCE_LABEL[item.evidenceQuality]}</span>
               {/* Doc 14 (PR-1): the answers behind the label, so a dissent or a no-support "Disputed" is visible here. */}

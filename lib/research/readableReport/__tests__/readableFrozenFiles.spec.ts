@@ -56,7 +56,7 @@ const UNCHANGED_AT_35933C8: Record<string, string> = {
   "lib/adaptiveSchema/exportSnapshot.ts": "5af930878120bbda7ba49ec40045502416859d19",
   "lib/pdf/AdaptiveResearchDocument.tsx": "80e8678d497d7f41a3d7bee48026832f0ec14736",
   "lib/docx/AdaptiveResearchDocxDocument.ts": "d62e84cffefc0a1c7abfb0e42df75ab0f35cf208",
-  "app/page.tsx": "8d97e6296c16b9b0a41c30a8311a88e61de9c9a5",
+  "app/page.tsx": "a3e49156e031b51cf4020b8a94f2061f14f30ead",
 };
 
 /**
@@ -83,7 +83,7 @@ const UNCHANGED_AT_35933C8: Record<string, string> = {
  */
 const WIDENED_BY_INC1: Record<string, string> = {
   "lib/adaptiveSchema/__tests__/o5p/vocabularyScanner.ts": "37e23190b3585eaa57fa0ddad29c5b6d01d2f76f",
-  "lib/adaptiveSchema/__tests__/o5p/__fixtures__/vocabularyManifest.json": "f2a47e1350304939ebb51991842b4c930bc4e7bc",
+  "lib/adaptiveSchema/__tests__/o5p/__fixtures__/vocabularyManifest.json": "9013684425a4776a0f2ad26560d765752917d5be",
 };
 
 /**
@@ -213,10 +213,18 @@ const WIDENED_BY_INC1: Record<string, string> = {
  *   historicalParity.spec.tsx: fce2e317… → 0a494367… (the three legacy claim memo inputs, which record no independence or
  *   identity, are superseded by exact hash over their untouched sealed 2c17feee entries; every other shared memo is
  *   still byte-identical). Same 32-file pinned set.
+ *
+ * Re-pinned (doc 14 PR-1, R4 owner rulings 2026-11-18 — claim score qualifier on the Personal history suffix; the
+ * orchestrator's frozen-file rule: strictly necessary, exact lines recorded): app/page.tsx 8d97e629… → a3e49156… — ONLY
+ * two added lines: `panelApiItemToHistoryItem` spreads the server row's additive `consensusBasis` ("slot_responses"),
+ * and the claim `HistoryItem` variant declares that optional field. No other line changed (`git diff 5f00064 --
+ * app/page.tsx`). dsProvenanceUiBoundaries.spec.ts da95909b… → 60b66ab8… (its app/page.tsx pin, the same
+ * record). vocabularyManifest.json f2a47e13… → 90136844… (1 claim-memo entry re-keyed, none added or removed: the
+ * CONSENSUS SCORE literal gains the `basisQ` score-basis qualifier; its rule extended accordingly). Same 32-file pinned set.
  */
 const READABLE_GATE_OPTION_BY_INC1: Record<string, string> = {
   "components/adaptive/AdaptiveSynthesisReportView.tsx": "bcdf6ba2444c2aa3dc22ae049901cf72e55eb0bc",
-  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "da95909bcc5ad3c9c477cab8dbabf60e99dd7fd9",
+  "components/adaptive/__tests__/dsProvenanceUiBoundaries.spec.ts": "60b66ab8bfd872fca9a09b7ab561efad7eb71ba2",
   "lib/adaptiveSchema/shareBuilders.ts": "f5e67a0a0ee20e2da15917b2a2f195005943f1ba",
   "lib/adaptiveSchema/__tests__/o5p/historicalParity.spec.tsx": "0a494367d95fe763465183b3d6fd5e5d306c4eb9",
 };

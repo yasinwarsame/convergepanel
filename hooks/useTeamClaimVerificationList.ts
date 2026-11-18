@@ -63,6 +63,8 @@ export interface TeamClaimListItem {
   governanceStatus?: "approved" | "needs_review" | "blocked";
   /** Doc 14 (PR-1), additive: usable per-model verdict counts. Absent from older servers (and uncountable bundles). */
   modelVerdicts?: TeamClaimModelVerdicts;
+  /** R4, additive: the presented score is over panel slot responses, not independent corroboration (qualified). */
+  consensusBasis?: "slot_responses";
   createdAt: string;
   workspaceId: string;
   projectId: string | null;
@@ -196,6 +198,7 @@ function parseItem(raw: unknown, address: TeamClaimListAddress): TeamClaimListIt
     evidenceQuality: raw.evidenceQuality as TeamClaimListItem["evidenceQuality"],
     ...(raw.governanceStatus !== undefined ? { governanceStatus: raw.governanceStatus as TeamClaimListItem["governanceStatus"] } : {}),
     ...(modelVerdicts !== null ? { modelVerdicts } : {}),
+    ...(withheld === undefined && raw.consensusBasis === "slot_responses" ? { consensusBasis: "slot_responses" as const } : {}),
     createdAt: raw.createdAt,
     workspaceId: raw.workspaceId,
     projectId: projectId as string | null,

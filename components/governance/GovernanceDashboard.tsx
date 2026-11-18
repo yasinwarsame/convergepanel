@@ -4,6 +4,7 @@
  * Org governance dashboard: review queue, policy editor, audit log.
  */
 
+import { CLAIM_SCORE_SLOT_BASIS_QUALIFIER } from "@/lib/verification/claimVerdictCounts";
 import {
   useCallback,
   useEffect,
@@ -54,11 +55,14 @@ type QueueRow = {
   evidenceQuality: string | null;
   /** Research: stored score withheld — fewer than two independent executing models, or independence not recorded. */
   consensusWithheld?: ConsensusScoreWithheldReason;
+  /** Claim rows (R4): the presented score is over panel slot responses, not independent corroboration. */
+  consensusBasis?: "slot_responses";
   governanceStatus: "approved" | "needs_review" | "blocked";
   governanceReasons: string[];
   modelHealth: { ok: number; substituted: number; failed: number };
   verificationVerdict?: string;
-  modelVerdicts?: { modelId: string; verdict: string; confidence: string; summary?: string }[];
+  /** `label` (claim rows, R4): the slot's validated executing identity when it is not the bare slot family. */
+  modelVerdicts?: { modelId: string; label?: string; verdict: string; confidence: string; summary?: string }[];
   agreementSummary?: string;
   dissentSummary?: string;
   disagreements?: string[];
@@ -653,10 +657,12 @@ function statusChipClasses(status: string): { wrap: string; label: string } {
  * The queue's consensus text for a row: a research row whose stored score is withheld (fewer than two independent
  * executing models, or independence not recorded — see `consensusWithheld`) shows the reason, never a number.
  */
-export function queueConsensusText(row: Pick<QueueRow, "consensusScore" | "consensusWithheld">, withDenominator: boolean): string {
+export function queueConsensusText(row: Pick<QueueRow, "consensusScore" | "consensusWithheld"> & { consensusBasis?: unknown }, withDenominator: boolean): string {
   if (row.consensusWithheld) return CONSENSUS_WITHHELD_TEXT[row.consensusWithheld];
   if (row.consensusScore == null) return "—";
-  return withDenominator ? `${Math.round(row.consensusScore)}/100` : String(Math.round(row.consensusScore));
+  const n = withDenominator ? `${Math.round(row.consensusScore)}/100` : String(Math.round(row.consensusScore));
+  // R4 owner ruling: a claim score over slots that are not each a distinct identified model is not corroboration.
+  return row.consensusBasis === "slot_responses" ? `${n} (${CLAIM_SCORE_SLOT_BASIS_QUALIFIER})` : n;
 }
 
 /**
@@ -2325,7 +2331,7 @@ export function FragmentRow(props: {
                       {row.modelVerdicts.map((m, i) => (
                         <tr key={`${m.modelId}-${i}`} className="border-b border-cp-border last:border-0">
                           <td className="px-3 py-2 font-medium text-cp-text align-top">
-                            {runModelFamilyName(m.modelId)}
+                            {m.label ?? runModelFamilyName(m.modelId)}
                           </td>
                           <td className="px-3 py-2 align-top">
                             <span
@@ -2354,7 +2360,7 @@ export function FragmentRow(props: {
                       (m, i) =>
                         m.summary && (
                           <li key={`sum-${m.modelId}-${i}`}>
-                            <span className="font-semibold text-cp-text">{runModelFamilyName(m.modelId)}: </span>
+                            <span className="font-semibold text-cp-text">{m.label ?? runModelFamilyName(m.modelId)}: </span>
                             {m.summary}
                           </li>
                         )

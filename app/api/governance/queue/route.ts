@@ -36,6 +36,7 @@ import {
   type StoredRunIndependenceContext,
 } from "@/lib/panel/storedDisagreementIndependence";
 import { buildAgreementDisagreementDigest } from "@/lib/verification/agreementDigest";
+import { claimQueuePresentation } from "@/lib/verification/claimQueuePresentation";
 import { governanceAdminListShapeForLog } from "@/lib/admin/config";
 import {
   governanceQueuePlanForbiddenResponse,
@@ -155,6 +156,12 @@ type GovernanceStatus = "approved" | "needs_review" | "blocked";
 
 type QueueModelVerdictRow = {
   modelId: string;
+  /**
+   * Claim rows, ADDITIVE (owner ruling 2026-11-18 R4): the slot's validated executing identity when it is not the bare
+   * slot family ("DeepSeek (substituting ChatGPT)", "ChatGPT slot (executing model not identified)"). Absent → the
+   * family name is the executing model (or no provider was ever recorded).
+   */
+  label?: string;
   verdict: string;
   confidence: string;
   /** Short excerpt from the model’s written rationale (capped server-side). */
@@ -177,6 +184,11 @@ type RunSummary = {
    * dashboard shows this reason instead of the number. The governance evaluation input and the stored run are unchanged.
    */
   consensusWithheld?: ConsensusScoreWithheldReason;
+  /**
+   * Claim rows, ADDITIVE (R4): "slot_responses" when the presented score's answering slots are not each a distinct
+   * identified executing model — the dashboard then qualifies the score (not independent corroboration).
+   */
+  consensusBasis?: "slot_responses";
   governanceStatus: GovernanceStatus;
   governanceReasons: string[];
   modelHealth: { ok: number; substituted: number; failed: number };
@@ -884,10 +896,30 @@ function summarizeVerification(id: string, data: Record<string, unknown>, email:
     firestoreMillis(data.verifiedAt) ||
     Date.now();
   const ownerUid = ownerUidFromVerificationDoc(data);
-  const reviewExtras = buildVerificationQueueReviewExtras(data);
-  const { agreementSummary, dissentSummary } = buildAgreementDissentFromVerification(data);
-  const digestDisagreements = verificationDisagreementBullets(data);
+  const established = buildVerificationQueueReviewExtras(data);
+  const establishedSummary = buildAgreementDissentFromVerification(data);
+  const establishedDigest = verificationDisagreementBullets(data);
   const claimVerdictSummary = firstVerificationModelSummary(data);
+  // Owner ruling 2026-11-18 (R4, MAJOR-1): the claim lines go through the shared statement basis
+  // (lib/verification/claimQueuePresentation.ts). The established lines are kept only when every answering slot is its
+  // own identified executing model; per-row labels and the score basis are additive. Governance evaluation untouched.
+  const claim = claimQueuePresentation(data, humanizePerModelVerdict, verificationDisagreementDigest(data));
+  const reviewExtras = {
+    ...established,
+    modelVerdicts: established.modelVerdicts.map((m) => {
+      const label = claim.rowLabels.get(m.modelId);
+      return label ? { modelId: m.modelId, label, verdict: m.verdict, confidence: m.confidence, ...(m.summary ? { summary: m.summary } : {}) } : m;
+    }),
+    ...(claim.lines ? { agreementPoints: claim.lines.agreementPoints, disagreementPoints: claim.lines.disagreementPoints } : {}),
+  };
+  const { agreementSummary, dissentSummary } = claim.lines
+    ? { agreementSummary: claim.lines.agreementSummary, dissentSummary: claim.lines.dissentSummary }
+    : establishedSummary;
+  const digestDisagreements = claim.lines ? claim.lines.disagreements : establishedDigest;
+  const independenceKeys = verificationQueueIndependenceKeys(data, gi);
+  const extraQualified = claim.lines?.qualified ?? [];
+  const qualifiedDisagreements = [...(independenceKeys.qualifiedDisagreements ?? [])];
+  for (const q of extraQualified) if (!qualifiedDisagreements.some((x) => x.text === q.text)) qualifiedDisagreements.push(q);
   return {
     runId: id,
     collection: "verifications",
@@ -915,7 +947,10 @@ function summarizeVerification(id: string, data: Record<string, unknown>, email:
     governanceReviewedAt: typeof data.governanceReviewedAt === "string" ? data.governanceReviewedAt : undefined,
     governanceReviewComment:
       typeof data.governanceReviewComment === "string" ? data.governanceReviewComment : undefined,
-    ...verificationQueueIndependenceKeys(data, gi),
+    ...independenceKeys,
+    ...(qualifiedDisagreements.length > 0 ? { qualifiedDisagreements } : {}),
+    ...(claim.singleModelAssessment && independenceKeys.singleModelAssessment ? { singleModelAssessment: claim.singleModelAssessment } : {}),
+    ...(claim.consensusBasis && !independenceKeys.consensusWithheld ? { consensusBasis: claim.consensusBasis } : {}),
   };
 }
 
