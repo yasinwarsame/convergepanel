@@ -357,4 +357,37 @@ describe.each(ROUTES)("$name", ({ kind, call, reached, body, lookups }) => {
     expect(r.body).not.toMatch(/\bvalid\b/); // the uid
     expectNoAccessAfterDenial();
   });
+
+  // R4o C1 — the END-TO-END verification deadline (resolveRequestIdentity, 10 s).
+  // S2-b (privilegedAccess) has its own verifier and no deadline: out of this
+  // change's scope, recorded as a residual.
+  const deadlineIt = kind === "s2b" ? it.skip : it;
+  deadlineIt("live read HANGS → cut off at the 10 s deadline (inline 401; wrapper 503, generic body), no data access", async () => {
+    jest.useFakeTimers();
+    try {
+      mockGetUser.mockImplementation(() => new Promise(() => {}));
+      const pending = run(call, req(token("valid"), body));
+      await jest.advanceTimersByTimeAsync(10_000);
+      const r = await pending;
+      expect(r.status).toBe(kind === "inline" ? 401 : 503);
+      for (const leak of ["deadline", "timeout", "test-proj"]) expect(r.body.toLowerCase()).not.toContain(leak);
+      expectNoAccessAfterDenial();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+  deadlineIt("live read answers VALID only AFTER the deadline → never authorizes; no data touched even once the late result lands", async () => {
+    jest.useFakeTimers();
+    try {
+      mockGetUser.mockImplementation((uid: string) => new Promise((resolve) => setTimeout(() => resolve(mockUsers.get(uid)), 10_001)));
+      const pending = run(call, req(token("valid"), body));
+      await jest.advanceTimersByTimeAsync(10_000);
+      const r = await pending;
+      expect(r.status).toBe(kind === "inline" ? 401 : 503);
+      await jest.advanceTimersByTimeAsync(5_000); // the late VALID record arrives
+      expectNoAccessAfterDenial();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });
