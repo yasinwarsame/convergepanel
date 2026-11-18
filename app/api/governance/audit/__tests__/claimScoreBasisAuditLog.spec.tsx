@@ -185,6 +185,17 @@ describe("governance Audit Log — claim score badge on the shared claim score b
     expect(card(r.body.events[0])).not.toContain("92/100");
   });
 
+  it("selectedModels is read: a requested model without a row makes otherwise-independent rows unverified (review M17)", async () => {
+    parents.set("verifications/v-req", { userId: CREATOR, type: "claim_verification", modelResults: OWN_TWO, selectedModels: ["chatgpt", "claude", "grok"] });
+    claimParent("v-own", OWN_TWO);
+    auditRows = [event("e02", "verifications", "v-req"), event("e01", "verifications", "v-own")];
+    asViewer();
+    const r = await get("?limit=20");
+    const by = Object.fromEntries(r.body.events.map((e: any) => [e.id, e]));
+    expect(by.e02.consensusWithheld).toBe("independence_unverified");
+    expect("consensusWithheld" in by.e01).toBe(false);
+  });
+
   it("drilldown (?runId=&collection=verifications): the trail rows carry the same presentation keys", async () => {
     claimParent("v-mix", MIX);
     auditRows = [event("e06", "verifications", "v-mix")];

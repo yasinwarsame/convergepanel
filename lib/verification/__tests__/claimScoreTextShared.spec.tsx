@@ -6,7 +6,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { buildCase, memoFor, MODES, textNodes } from "./claimStatementInventory.harness";
-import ClaimVerificationResultView, { buildClaimVerdictClipboardText } from "@/components/verification/ClaimVerificationResultView";
+import ClaimVerificationResultView, { buildClaimVerdictClipboardText, ClaimVerificationAuditTrailDetails } from "@/components/verification/ClaimVerificationResultView";
 import * as Presentation from "@/lib/verification/claimConsensusPresentation";
 import { claimQueuePresentation } from "@/lib/verification/claimQueuePresentation";
 
@@ -77,5 +77,22 @@ describe("conflict text names the executing models, not slot ids (R5 MINOR-4)", 
     const o = buildCase(["P", "P", "P", "P", "I"], mode("own"));
     expect(buildClaimVerdictClipboardText(o.payload)).toContain("• Conflicting assessments: (chatgpt) vs (perplexity) [ChatGPT, Perplexity]");
     expect(memoFor(o.payload)).toContain("- Conflicting assessments: (chatgpt) vs (perplexity) [ChatGPT, Perplexity]");
+  });
+});
+
+describe("audit trail details on the shared claim score basis (R5 review MINOR-2)", () => {
+  const units = (payload: unknown) => textNodes(renderToStaticMarkup(createElement(ClaimVerificationAuditTrailDetails, { data: payload } as never)));
+  it("collapsed slots: the audit-trail score and confidence carry the qualifier", () => {
+    const c = buildCase(["A", "A", "A", "A", "I"], mode("ds:1-4"));
+    const nodes = units(c.payload);
+    expect(nodes).toContain(`70/100 (${QUALIFIER})`);
+    expect(nodes).toContain(`High (${QUALIFIER})`);
+    expect(nodes).not.toContain("70/100");
+  });
+  it("own models: the audit trail is unchanged (bare 70/100, bare High)", () => {
+    const o = buildCase(["A", "A", "A", "A", "I"], mode("own"));
+    const nodes = units(o.payload);
+    expect(nodes).toContain("70/100");
+    expect(nodes.join("\n")).not.toContain(QUALIFIER);
   });
 });

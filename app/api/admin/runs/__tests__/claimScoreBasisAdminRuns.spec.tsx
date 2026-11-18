@@ -100,6 +100,16 @@ describe("admin runs tab — claim consensus column on the shared claim score ba
     expect(adminRunConsensusText({ ...by.r1, consensusScore: null })).toBe("—");
   });
 
+  it("selectedModels is projected: a requested model without a row makes otherwise-independent rows unverified (review M18)", async () => {
+    const req = ver("v-req", OWN_TWO, 9);
+    req.data.selectedModels = ["chatgpt", "claude", "grok"];
+    verRows = [req, ver("v-own", OWN_TWO, 8)];
+    const body = await (await GET(new NextRequest("http://localhost/api/admin/runs?type=claim&limit=50"))).json();
+    const by = Object.fromEntries(body.runs.map((r: any) => [r.runId, r]));
+    expect(by["v-req"].consensusWithheld).toBe("independence_unverified");
+    expect("consensusWithheld" in by["v-own"]).toBe(false);
+  });
+
   it("detail line: a claim's raw document is presented on the same basis; research / video unchanged", () => {
     const claim = { runType: "claim" } as const;
     expect(adminRunDetailConsensusText(claim, ver("x", MIX, 1).data)).toBe(`92 (${QUALIFIER})`);

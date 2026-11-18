@@ -150,6 +150,14 @@ describe("GET /api/teams/audit-export — claim score basis (R5)", () => {
     expect(lines.find((l) => l.startsWith('"c-own"'))?.endsWith(',"independent_models"')).toBe(true);
   });
 
+  it("selectedModels is read: a requested model without a row makes otherwise-independent rows unverified (review M19)", async () => {
+    (canonicalDocs.get("verifications/v-own") as Record<string, unknown>).selectedModels = ["chatgpt", "claude", "grok"];
+    const rows = await (await GET(new NextRequest("http://localhost/api/teams/audit-export"))).json();
+    const by = Object.fromEntries(rows.map((r: any) => [r.runId, r]));
+    expect(by["c-own"].consensusBasis).toBe("independence_unverified");
+    expect(by["c-mix"].consensusBasis).toBe("slot_responses");
+  });
+
   it("the basis read fails → claim rows are independence_unverified (fail closed), never independent_models", async () => {
     failBasisRead = true;
     const rows = await (await GET(new NextRequest("http://localhost/api/teams/audit-export"))).json();
