@@ -198,7 +198,10 @@ describe("per-model verdict counts", () => {
       { modelId: "grok", status: "ok", verdict: "inaccurate", provider: "xai" },
     ]);
     const pts = [{ point: "a", models: ["chatgpt", "claude"] }, { point: "b", models: ["chatgpt", "grok"] }, { point: "c", models: ["chatgpt", "gemini"] }];
-    expect(splitClaimDisagreementsByIdentity(pts, sides)).toEqual({ betweenModels: [pts[1]], betweenSlots: [pts[0], pts[2]] });
+    const split = splitClaimDisagreementsByIdentity(pts, sides);
+    expect({ betweenModels: split.betweenModels, betweenSlots: split.betweenSlots }).toEqual({ betweenModels: [pts[1]], betweenSlots: [pts[0], pts[2]] });
+    expect(split.providersOf(pts[1])).toEqual(["deepseek", "xai"]);
+    expect(split.providersOf(pts[0])).toBeNull();
   });
 
   it("row counting skips non-ok rows and rejects an ok row outside the vocabulary", () => {
