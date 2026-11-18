@@ -39,9 +39,11 @@ import {
   finishJob,
   handleDelete,
   handleGet,
+  recordCallResult,
   sweep,
   workerBoundary,
   workerProviderCall,
+  workerStart,
   periodPath,
   repairConcurrency,
   handleCancel,
@@ -509,7 +511,8 @@ describe("Addendum 4 DM: an unexpired deleted marker answers 410 whatever the bo
     send(sys, req(SAME));
     sys.deleteVerification(scopeOf(sys));
     const marker = sys.store.get<IdemRecord>(scopeOf(sys)) as IdemRecord;
-    expect(Object.keys(marker).sort()).toEqual(["expiresAt", "kind", "verificationId"]);
+    // Content-free: identifiers only (Addendum 7 adds the immutable acceptance identity).
+    expect(Object.keys(marker).sort()).toEqual(["acceptanceId", "expiresAt", "kind", "verificationId"]);
     expect(fmt(send(sys, req(body)))).toBe("410 verification_deleted");
     expect(sys.jobs().filter((j) => !(sys.store.get<JobDoc>(j) as JobDoc).deleted).length).toBe(0);
   });
@@ -902,45 +905,56 @@ describe("Addendum 6: deletion lifecycle (jobs-and-idempotency.md §6.2, parsed)
     const setState = (state: string): void => sys.store.put(path, { ...(sys.store.get<JobDoc>(path) as JobDoc), state });
     if (row.at === "queued") setState("queued");
     if (row.at === "running" || row.at === "synthesizing") setState(row.at);
-    if (row.at === "completed") runToEnd(finishJob(sys, id, "completed", 0, undefined, { summary: "result" }));
+    if (row.at === "completed") runToEnd(finishJob(sys, id, "completed", undefined, { summary: "result" }));
     let inFlight: Generator<void, ApiResponse, void> | null = null;
-    if (row.id === "D3") {
+    if (row.then === "in-flight provider call completes, then the boundary") {
       inFlight = workerProviderCall(sys, id);
       expect(inFlight.next().done).toBe(false); // call started before DELETE
     }
+    // Parse-bound (Addendum 7): the job's state at DELETE is the table's "Job at DELETE".
+    expect((sys.store.get<JobDoc>(path) as JobDoc).state).toBe(row.at === "queued" ? "queued" : row.at);
     const del = runToEnd(handleDelete(sys, "live1", id));
     expect(del.status).toBe(202);
     const read = handleGet(sys, "live1", id);
-    switch (row.id) {
-      case "D1": case "D7": runToEnd(sweep(sys)); break;
-      case "D2": case "D4": runToEnd(workerBoundary(sys, id)); runToEnd(sweep(sys)); break;
-      case "D3": runToEnd(inFlight as Generator<void, ApiResponse, void>); expect(sys.store.get(`calls/${id}/1`)).toBeDefined(); runToEnd(workerBoundary(sys, id)); runToEnd(sweep(sys)); break;
-      case "D5": sys.store.put(path, { ...(sys.store.get<JobDoc>(path) as JobDoc), leaseExpiries: 3 }); runToEnd(sweep(sys)); break;
-      case "D8": {
+    // Parse-bound (Addendum 7): the scenario is selected by the exact "Then" text.
+    const SCENARIO: Record<string, string> = {
+      "sweeper": "S", "worker reaches the next step boundary": "B", "in-flight provider call completes, then the boundary": "F",
+      "worker crashes; leases expire; sweeper": "X", "normal completion races the deletion": "R", "a second DELETE, then the boundary": "2",
+      "sweeper runs before the worker stops": "W", "worker stops; purge; then a late worker write": "L",
+      "first stop attempt crashes before commit; retried": "C", "worker stops responding; fewer than three leases have expired so far": "P",
+    };
+    const kind = SCENARIO[row.then];
+    expect({ row: row.id, then: row.then, known: kind !== undefined }).toEqual({ row: row.id, then: row.then, known: true });
+    switch (kind) {
+      case "S": runToEnd(sweep(sys)); break;
+      case "B": runToEnd(workerBoundary(sys, id)); runToEnd(sweep(sys)); break;
+      case "F": runToEnd(inFlight as Generator<void, ApiResponse, void>); expect(sys.store.get(`calls/${id}/1`)).toBeDefined(); runToEnd(workerBoundary(sys, id)); runToEnd(sweep(sys)); break;
+      case "X": sys.store.put(path, { ...(sys.store.get<JobDoc>(path) as JobDoc), leaseExpiries: 3 }); runToEnd(sweep(sys)); break;
+      case "2": {
         const again = runToEnd(handleDelete(sys, "live1", id)) as ApiResponse & { deletion?: { id: string } };
         expect(again.status).toBe(202);
         expect(again.deletion?.id).toBe(`del_${id.slice(4)}`);
         runToEnd(workerBoundary(sys, id)); runToEnd(sweep(sys)); break;
       }
-      case "D9": {
+      case "W": {
         runToEnd(sweep(sys));
         expect(opOf(sys, id)).toMatchObject({ status: "pending", blockedBy: "awaiting_terminal" });
         runToEnd(workerBoundary(sys, id)); runToEnd(sweep(sys)); break;
       }
-      case "D10": {
+      case "L": {
         runToEnd(workerBoundary(sys, id)); runToEnd(sweep(sys));
         expect(fmt(runToEnd(workerProviderCall(sys, id)))).toBe("409 late_write_refused");
-        runToEnd(finishJob(sys, id, "completed", 0, undefined, { summary: "late" }));
+        runToEnd(finishJob(sys, id, "completed", undefined, { summary: "late" }));
         break;
       }
-      case "D11": {
+      case "C": {
         const crashed = workerBoundary(sys, id);
         crashed.next(); // the stop transaction read the job, then the worker died
         expect((sys.store.get<JobDoc>(path) as JobDoc).state).toBe("running");
         runToEnd(workerBoundary(sys, id)); runToEnd(sweep(sys)); break;
       }
-      case "D12": runToEnd(sweep(sys)); runToEnd(sweep(sys)); break;
-      default: throw new Error(`no scenario for ${row.id}`);
+      case "P": sys.store.put(path, { ...(sys.store.get<JobDoc>(path) as JobDoc), leaseExpiries: 2 }); runToEnd(sweep(sys)); runToEnd(sweep(sys)); break;
+      default: throw new Error(`no scenario for "${row.then}"`);
     }
     return { sys, id, read };
   }
@@ -979,7 +993,7 @@ describe("Addendum 6: deletion lifecycle (jobs-and-idempotency.md §6.2, parsed)
     let n = 0;
     for (const o of interleavings(setup, [
       { name: "delete", start: (s) => handleDelete(s, "live1", idOf(s)) },
-      { name: "complete", start: (s) => finishJob(s, idOf(s), "completed", 0, undefined, { summary: "r" }) },
+      { name: "complete", start: (s) => finishJob(s, idOf(s), "completed", undefined, { summary: "r" }) },
     ])) {
       n++;
       const id = idOf(o.sys);
@@ -1128,5 +1142,253 @@ describe("Addendum 7 M-1: deleting A never touches a newer record B under the sa
     expect(fmt(handleGet(sys, "live1", a.body?.id as string))).toBe("410 verification_deleted");
     expect(sys.jobs().length).toBe(2);
     expect(sys.dispatched).toEqual([a.body?.id, b.body?.id]);
+  });
+});
+
+describe("Addendum 7 M-1: deletion binds to the original acceptance", () => {
+  const replayOf = (s: System, b: ApiResponse): void => expect(send(s, req(SAME))).toEqual({ status: 202, body: b.body, replayed: true });
+
+  it("deleting A while A's record is still current writes the marker for A only (documented 410 preserved)", () => {
+    const sys = world();
+    const a = send(sys, req(SAME));
+    runToEnd(handleDelete(sys, "live1", a.body?.id as string));
+    const marker = sys.store.get<IdemRecord>(scopeOf(sys)) as IdemRecord;
+    expect(marker).toMatchObject({ kind: "deleted", verificationId: a.body?.id, acceptanceId: `acc_${(a.body?.id as string).slice(4)}` });
+    expect(fmt(send(sys, req(SAME)))).toBe("410 verification_deleted");
+  });
+
+  it("an expired record is never recreated as a marker; after the marker expires the key accepts a new job", () => {
+    const sys = world();
+    const a = send(sys, req(SAME));
+    sys.dynamic.now += IDEMPOTENCY_TTL_MS + 1;
+    const before = sys.store.get<IdemRecord>(scopeOf(sys));
+    runToEnd(handleDelete(sys, "live1", a.body?.id as string));
+    expect(sys.store.get<IdemRecord>(scopeOf(sys))).toEqual(before); // expired: left unchanged
+    expect(fmt(send(sys, req(SAME)))).toBe("202 new");
+    // A marker written while unexpired also stops masking once it expires.
+    const s2 = world();
+    const x = send(s2, req(SAME));
+    runToEnd(handleDelete(s2, "live1", x.body?.id as string));
+    expect(fmt(send(s2, req(SAME)))).toBe("410 verification_deleted");
+    s2.dynamic.now += IDEMPOTENCY_TTL_MS + 1;
+    expect(fmt(send(s2, req(SAME)))).toBe("202 new");
+  });
+
+  it("repeated DELETEs of A after B reused the key never touch B's record", () => {
+    const sys = world();
+    const a = send(sys, req(SAME));
+    sys.dynamic.now += IDEMPOTENCY_TTL_MS + 1;
+    const b = send(sys, req(SAME));
+    const rec = sys.store.get<IdemRecord>(scopeOf(sys));
+    for (let i = 0; i < 3; i++) {
+      expect(runToEnd(handleDelete(sys, "live1", a.body?.id as string)).status).toBe(202);
+      runToEnd(sweep(sys));
+    }
+    expect(sys.store.get<IdemRecord>(scopeOf(sys))).toEqual(rec);
+    replayOf(sys, b);
+  });
+
+  it("deletion of A racing the reuse of K by B (every interleaving): B is never masked; one job, reservation and dispatch each", () => {
+    const setup = (): System => {
+      const s = world();
+      send(s, req(SAME));
+      s.dynamic.now += IDEMPOTENCY_TTL_MS + 1;
+      return s;
+    };
+    const aId = "ver_" + "1".padStart(24, "0");
+    let n = 0;
+    for (const o of interleavings(setup, [
+      { name: "delete A", start: (s) => handleDelete(s, "live1", aId) },
+      create("create B", req(SAME)),
+    ])) {
+      n++;
+      const b = o.results[1] as ApiResponse;
+      expect({ schedule: o.schedule, b: fmt(b) }).toEqual({ schedule: o.schedule, b: "202 new" });
+      replayOf(o.sys, b);
+      expect(fmt(handleGet(o.sys, "live1", aId))).toBe("410 verification_deleted");
+      expect(o.sys.jobs().length).toBe(2);
+      expect(o.sys.reservations().filter((r) => r.startsWith("ledger/reserve_")).length).toBe(2);
+      expect(o.sys.dispatched.length).toBe(2);
+    }
+    expect(n).toBeGreaterThan(5);
+  });
+
+  it("the binding holds under transaction contention: a replay of B racing the deletion of A (every interleaving)", () => {
+    const setup = (): System => {
+      const s = world();
+      send(s, req(SAME));
+      s.dynamic.now += IDEMPOTENCY_TTL_MS + 1;
+      send(s, req(SAME));
+      return s;
+    };
+    const aId = "ver_" + "1".padStart(24, "0");
+    for (const o of interleavings(setup, [
+      { name: "delete A", start: (s) => handleDelete(s, "live1", aId) },
+      create("replay B", req(SAME)),
+    ])) {
+      expect(["202 replay", "409 request_in_progress"]).toContain(fmt(o.results[1] as ApiResponse));
+      expect(fmt(send(o.sys, req(SAME)))).toBe("202 replay");
+    }
+  });
+});
+
+describe("Addendum 7 m-2: settlement amounts are conserved, computed in the transaction, and applied once", () => {
+  const conserve = (s: System, id: string): void => {
+    const settle = s.store.keys("ledger/").filter((k) => k === `ledger/settle_${id}`);
+    expect(settle.length).toBe(1);
+    const e = s.store.get<{ charged: number; released: number; reserved: number }>(`ledger/settle_${id}`) as { charged: number; released: number; reserved: number };
+    expect(e.charged + e.released).toBe(e.reserved);
+    expect(e.charged).toBe(Math.min(e.reserved, (s.store.get<JobDoc>(`jobs/${id}`) as JobDoc).callsMade ?? 0));
+  };
+
+  it("a stop whose transaction retries after a late call recomputes the settlement (no over-refund)", () => {
+    const sys = world();
+    const id = send(sys, req(SAME)).body?.id as string;
+    sys.store.put(`jobs/${id}`, { ...(sys.store.get<JobDoc>(`jobs/${id}`) as JobDoc), state: "running", callsMade: 1 });
+    sys.store.put(`calls/${id}/1`, { text: "t" });
+    const credits0 = (sys.store.get<OrgDoc>("orgs/o1") as OrgDoc).creditsRemaining;
+    runToEnd(handleDelete(sys, "live1", id)); // cancellation requested
+    const stop = workerBoundary(sys, id);
+    stop.next(); // the stop transaction has read callsMade = 1
+    runToEnd(recordCallResult(sys, id)); // an in-flight call's result commits: callsMade = 2
+    runToEnd(stop); // the stop's commit conflicts and retries from fresh reads
+    const job = sys.store.get<JobDoc>(`jobs/${id}`) as JobDoc;
+    expect([job.state, job.callsMade, job.settledCharged, job.settledReleased]).toEqual(["canceled", 2, 2, job.credits - 2]);
+    expect((sys.store.get<OrgDoc>("orgs/o1") as OrgDoc).creditsRemaining - credits0).toBe(job.credits - 2);
+    conserve(sys, id);
+  });
+
+  it.each(["completed", "failed", "canceled", "expired"] as const)("%s: charged + released == reserved, one settlement, repeated terminal events refund nothing more", (to) => {
+    const sys = world();
+    const id = send(sys, req(SAME)).body?.id as string;
+    sys.store.put(`jobs/${id}`, { ...(sys.store.get<JobDoc>(`jobs/${id}`) as JobDoc), state: "running", callsMade: 2 });
+    runToEnd(finishJob(sys, id, to));
+    const credits1 = (sys.store.get<OrgDoc>("orgs/o1") as OrgDoc).creditsRemaining;
+    for (const again of ["completed", "failed", "canceled"] as const) runToEnd(finishJob(sys, id, again));
+    runToEnd(handleCancel(sys, "live1", id));
+    runToEnd(sweep(sys));
+    expect((sys.store.get<OrgDoc>("orgs/o1") as OrgDoc).creditsRemaining).toBe(credits1);
+    expect(sys.settlements.filter((x) => x === id).length).toBe(1);
+    conserve(sys, id);
+  });
+
+  it("across every deletion row, total credits are conserved: initial − Σ charged == remaining", () => {
+    const sys = world();
+    const initial = (sys.store.get<OrgDoc>("orgs/o1") as OrgDoc).creditsRemaining;
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) ids.push(send(sys, req(SAME, { idempotencyKey: `cons-${i}` })).body?.id as string);
+    sys.store.put(`jobs/${ids[1]}`, { ...(sys.store.get<JobDoc>(`jobs/${ids[1]}`) as JobDoc), state: "running", callsMade: 3 });
+    for (const id of ids) runToEnd(handleDelete(sys, "live1", id));
+    runToEnd(workerBoundary(sys, ids[1]));
+    runToEnd(sweep(sys));
+    const charged = ids.map((id) => (sys.store.get<{ charged: number }>(`ledger/settle_${id}`) as { charged: number }).charged);
+    expect(charged).toEqual([0, 3, 0]);
+    expect((sys.store.get<OrgDoc>("orgs/o1") as OrgDoc).creditsRemaining).toBe(initial - 3);
+    for (const id of ids) conserve(sys, id);
+  });
+});
+
+describe("Addendum 7 m-1: the provider-call boundary", () => {
+  it("after cancellation (or deletion) is requested, the next provider call is NOT made", () => {
+    for (const request of ["delete", "cancel"] as const) {
+      const sys = world();
+      const id = send(sys, req(SAME)).body?.id as string;
+      sys.store.put(`jobs/${id}`, { ...(sys.store.get<JobDoc>(`jobs/${id}`) as JobDoc), state: "running" });
+      if (request === "delete") runToEnd(handleDelete(sys, "live1", id));
+      else expect(runToEnd(handleCancel(sys, "live1", id)).status).toBe(200);
+      const g = workerProviderCall(sys, id);
+      const first = g.next();
+      expect({ request, done: first.done, value: first.done ? fmt(first.value) : "in flight" }).toEqual({ request, done: true, value: "409 stopped_at_boundary" });
+      expect(sys.store.keys(`calls/${id}/`)).toEqual([]);
+      expect((sys.store.get<JobDoc>(`jobs/${id}`) as JobDoc).callsMade ?? 0).toBe(0);
+    }
+  });
+
+  it("a call started before the request completes; the one after it is not made", () => {
+    const sys = world();
+    const id = send(sys, req(SAME)).body?.id as string;
+    sys.store.put(`jobs/${id}`, { ...(sys.store.get<JobDoc>(`jobs/${id}`) as JobDoc), state: "running" });
+    const inFlight = workerProviderCall(sys, id);
+    inFlight.next();
+    runToEnd(handleDelete(sys, "live1", id));
+    expect(fmt(runToEnd(inFlight))).toBe("200 undefined");
+    expect(fmt(runToEnd(workerProviderCall(sys, id)))).toBe("409 stopped_at_boundary");
+    expect(sys.store.keys(`calls/${id}/`).length).toBe(1);
+  });
+});
+
+describe("Addendum 7 m-3: purge versus late writes, and dispatch versus delete (every interleaving)", () => {
+  const settleOnce = (s: System, id: string): void => {
+    expect(s.settlements.filter((x) => x === id).length).toBe(1);
+    expect(s.releases.filter((x) => x === id).length).toBe(1);
+    const e = s.store.get<{ charged: number; released: number; reserved: number }>(`ledger/settle_${id}`) as { charged: number; released: number; reserved: number };
+    expect(e.charged + e.released).toBe(e.reserved);
+  };
+
+  it("sweeper recovery + purge racing a late call result and a late completion", () => {
+    const setup = (): System => {
+      const s = world();
+      const id = send(s, req(SAME)).body?.id as string;
+      s.store.put(`jobs/${id}`, { ...(s.store.get<JobDoc>(`jobs/${id}`) as JobDoc), state: "running", leaseExpiries: 3 });
+      runToEnd(handleDelete(s, "live1", id));
+      return s;
+    };
+    const idOf = (s: System): string => s.jobs()[0].slice("jobs/".length);
+    let n = 0;
+    for (const o of interleavings(setup, [
+      { name: "sweeper", start: (s) => sweep(s) },
+      { name: "late call result", start: (s) => recordCallResult(s, idOf(s)) },
+      { name: "late completion", start: (s) => finishJob(s, idOf(s), "completed", undefined, { summary: "late" }) },
+    ])) {
+      n++;
+      runToEnd(sweep(o.sys)); // a later sweep completes any deletion still pending
+      const id = idOf(o.sys);
+      settleOnce(o.sys, id);
+      const op = o.sys.store.get<DeletionOp>(deletionPath(`del_${id.slice(4)}`)) as DeletionOp;
+      expect(op.status).toBe("completed");
+      expect([`inputs/${id}`, `results/${id}`, ...o.sys.store.keys(`calls/${id}/`)].filter((k) => o.sys.store.get(k) !== undefined)).toEqual([]);
+      expect(active(o.sys)).toBe(countedActive(o.sys, "o1"));
+    }
+    expect(n).toBeGreaterThan(20);
+  });
+
+  it("dispatch racing DELETE of a queued job: no provider call after the request, one release", () => {
+    const setup = (): System => {
+      const s = world();
+      send(s, req(SAME));
+      return s;
+    };
+    const idOf = (s: System): string => s.jobs()[0].slice("jobs/".length);
+    for (const o of interleavings(setup, [
+      { name: "dispatch", start: (s) => workerStart(s, idOf(s)) },
+      { name: "delete", start: (s) => handleDelete(s, "live1", idOf(s)) },
+    ])) {
+      const id = idOf(o.sys);
+      expect(fmt(runToEnd(workerProviderCall(o.sys, id)))).toMatch(/^409 (stopped_at_boundary|late_write_refused)$/);
+      runToEnd(workerBoundary(o.sys, id));
+      runToEnd(sweep(o.sys));
+      settleOnce(o.sys, id);
+      expect((o.sys.store.get<DeletionOp>(deletionPath(`del_${id.slice(4)}`)) as DeletionOp).status).toBe("completed");
+      expect(o.sys.store.keys(`calls/${id}/`)).toEqual([]);
+    }
+  });
+
+  it("the tombstone keeps the release-anomaly marker", () => {
+    const sys = world();
+    const id = send(sys, req(SAME)).body?.id as string;
+    sys.store.put(concurrencyPath("o1"), { active: 0, anomalies: 0 });
+    runToEnd(finishJob(sys, id, "completed"));
+    runToEnd(handleDelete(sys, "live1", id));
+    runToEnd(sweep(sys));
+    expect(sys.store.get<JobDoc>(`jobs/${id}`)).toMatchObject({ deleted: true, concurrencyReleaseAnomaly: true });
+  });
+});
+
+describe("Addendum 7 m-5: platform-fault failures still feed the repeated-failing-input short-circuit", () => {
+  it("ledger-and-billing.md §4.3 counts worker_timeout and persistence_failed toward repeated failing input", () => {
+    const md = fs.readFileSync(path.join(ROOT, "docs/product/api-0/ledger-and-billing.md"), "utf8");
+    const rule = /\*\*Repeated failing input and platform faults \(Addendum 7\)\.\*\*([^\n]+)/.exec(md)?.[1] ?? "";
+    for (const c of ["worker_timeout", "persistence_failed"]) expect({ c, counted: rule.includes(`\`${c}\``) }).toEqual({ c, counted: true });
+    expect(rule).toContain("fingerprint");
   });
 });

@@ -85,6 +85,8 @@ export interface IdemRecord {
   /** Canonical request (stands in for its SHA-256). Absent on a deleted marker (content-free). */
   requestHash?: string;
   verificationId: string;
+  /** Immutable acceptance identity (Addendum 7): set once at T-create, copied to the job. */
+  acceptanceId?: string;
   response?: AcceptedBody;
   expiresAt: number;
 }
@@ -442,14 +444,14 @@ export function* handleCreate(sys: System, req: CreateRequest): Generator<void, 
     const org3 = org2 as OrgDoc;
     // Admission: job (with its admission marker), reservation, monthly period counter and the
     // concurrency increment commit together, or none does. Counted only if this commit succeeds.
-    tx.create(`jobs/${id}`, { state: "pending_dispatch", orgId, credits, type: v.type, admissionId: id, [ADMISSION_MARKER_FIELD]: true, [RELEASE_MARKER_FIELD]: false, reservedMonth: month, queuedAt: sys.dynamic.now, idemScope: scope ?? undefined } satisfies JobDoc);
+    tx.create(`jobs/${id}`, { state: "pending_dispatch", orgId, credits, type: v.type, admissionId: id, [ADMISSION_MARKER_FIELD]: true, [RELEASE_MARKER_FIELD]: false, reservedMonth: month, queuedAt: sys.dynamic.now, idemScope: scope ?? undefined, idemAcceptanceId: scope !== null ? `acc_${id.slice(4)}` : undefined } satisfies JobDoc);
     tx.create(`inputs/${id}`, { text: v.canonical }); // class (a) content, purged at deletion
     tx.create(`ledger/reserve_${id}`, { credits, month });
     tx.set(periodPath(orgId, month), { reservedCredits: period.reservedCredits + credits } satisfies PeriodDoc);
     tx.set(`orgs/${orgId}`, { ...org3, creditsRemaining: org3.creditsRemaining - credits });
     tx.set(concurrencyPath(orgId), { ...conc, active: conc.active + 1 } satisfies ConcurrencyDoc);
     if (scope !== null) {
-      tx.set(scope, { kind: "committed", requestHash: v.canonical, verificationId: id, response: body, expiresAt: sys.dynamic.now + IDEMPOTENCY_TTL_MS });
+      tx.set(scope, { kind: "committed", requestHash: v.canonical, verificationId: id, acceptanceId: `acc_${id.slice(4)}`, response: body, expiresAt: sys.dynamic.now + IDEMPOTENCY_TTL_MS } satisfies IdemRecord);
     }
     if (tx.commit() === "conflict") {
       if (attempt >= MAX_TX_ATTEMPTS) return { status: 409, code: "request_in_progress" };
@@ -485,6 +487,10 @@ export interface JobDoc {
   deletionRequested?: boolean;
   deletionId?: string;
   idemScope?: string;
+  /** The acceptance identity of the idempotency record that accepted THIS job (Addendum 7). */
+  idemAcceptanceId?: string;
+  settledCharged?: number;
+  settledReleased?: number;
   queuedAt?: number;
   leaseExpiries?: number;
   failureCode?: string;
@@ -500,7 +506,7 @@ export interface JobDoc {
  * audit/alert event is written, and the count is left for an audited repair.
  * `releaseCredits` is the unsettled remainder returned to the organization (billing, separate).
  */
-export function* finishJob(sys: System, id: string, to: JobState, releaseCredits?: number, failureCode?: string, result?: unknown): Generator<void, ApiResponse, void> {
+export function* finishJob(sys: System, id: string, to: JobState, failureCode?: string, result?: unknown): Generator<void, ApiResponse, void> {
   if (!TERMINAL.has(to)) throw new Error(`not a terminal state: ${to}`);
   for (let attempt = 1; ; attempt++) {
     const tx = sys.store.begin();
@@ -516,7 +522,12 @@ export function* finishJob(sys: System, id: string, to: JobState, releaseCredits
     const mustRelease = job[ADMISSION_MARKER_FIELD] === true && job[RELEASE_MARKER_FIELD] !== true;
     const conc = mustRelease ? tx.read<ConcurrencyDoc>(concurrencyPath(orgId)) ?? { active: 0, anomalies: 0 } : undefined;
     yield;
-    const next: JobDoc = { ...job, state: to, ...(failureCode ? { failureCode } : {}) };
+    // Settlement (Addendum 7): computed HERE, from this transaction's read of the job, so a retried
+    // transaction recomputes it from fresh reads. Model rule: one credit per recorded provider call,
+    // capped at the reservation; the rest is released. charged + released == reserved, once.
+    const charged = Math.min(job.credits, job.callsMade ?? 0);
+    const released = job.credits - charged;
+    const next: JobDoc = { ...job, state: to, settledCharged: charged, settledReleased: released, ...(failureCode ? { failureCode } : {}) };
     let anomaly = false;
     if (mustRelease && conc) {
       next[RELEASE_MARKER_FIELD] = true;
@@ -529,7 +540,8 @@ export function* finishJob(sys: System, id: string, to: JobState, releaseCredits
     }
     tx.set(`jobs/${id}`, next);
     if (result !== undefined) tx.set(`results/${id}`, result); // written only by the winning transition
-    tx.set(`orgs/${orgId}`, { ...org, creditsRemaining: org.creditsRemaining + (releaseCredits ?? 0) });
+    tx.create(`ledger/settle_${id}`, { charged, released, reserved: job.credits }); // at most once (tx.create)
+    tx.set(`orgs/${orgId}`, { ...org, creditsRemaining: org.creditsRemaining + released });
     if (tx.commit() === "committed") {
       sys.settlements.push(id);
       if (mustRelease && !anomaly) sys.releases.push(id);
@@ -633,7 +645,7 @@ export function* handleCancel(sys: System, keyId: string, id: string): Generator
     return { status: 200 };
   }
   // pending_dispatch / queued: canceled now, full release, in one transaction.
-  return yield* finishJob(sys, id, "canceled", job.credits);
+  return yield* finishJob(sys, id, "canceled");
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -696,9 +708,14 @@ export function* handleDelete(sys: System, keyId: string, id: string): Generator
     const op: DeletionOp = { status: "pending", verificationId: id, orgId: key.orgId, attempts: 0 };
     tx.create(deletionPath(delId), op);
     tx.set(`jobs/${id}`, { ...job, deletionRequested: true, deletionId: delId, ...(TERMINAL.has(job.state) ? {} : { cancelRequested: true }) });
+    // Addendum 7: the marker binds to THIS job's acceptance. The current record (read in this
+    // transaction) is replaced only if it still represents exactly that acceptance and is unexpired;
+    // a record for a different or newer job, or an expired one, is left entirely unchanged.
     if (job.idemScope) {
       const rec = tx.read<IdemRecord>(job.idemScope);
-      if (rec) tx.set(job.idemScope, { kind: "deleted", verificationId: rec.verificationId, expiresAt: rec.expiresAt });
+      if (rec && rec.kind === "committed" && rec.verificationId === id && rec.acceptanceId !== undefined && rec.acceptanceId === job.idemAcceptanceId && rec.expiresAt > sys.dynamic.now) {
+        tx.set(job.idemScope, { kind: "deleted", verificationId: rec.verificationId, acceptanceId: rec.acceptanceId, expiresAt: rec.expiresAt } satisfies IdemRecord);
+      }
     }
     if (tx.commit() === "conflict") {
       yield;
@@ -706,7 +723,7 @@ export function* handleDelete(sys: System, keyId: string, id: string): Generator
     }
     // A queued job has no worker to stop: cancel it now (its terminal transition releases it).
     if (job.state === "pending_dispatch" || job.state === "queued") {
-      yield* finishJob(sys, id, "canceled", job.credits, "deletion_requested");
+      yield* finishJob(sys, id, "canceled", "deletion_requested");
     }
     return { status: 202, deletion: { id: delId, ...op } };
   }
@@ -722,11 +739,19 @@ export function* workerProviderCall(sys: System, id: string): Generator<void, Ap
   if (!before || before.deleted || TERMINAL.has(before.state)) return { status: 409, code: "late_write_refused" };
   if (before.cancelRequested) return { status: 409, code: "stopped_at_boundary" };
   yield; // the provider call is in flight; it cannot be recalled
+  return yield* recordCallResult(sys, id);
+}
+
+/** Second half of a provider call: its result arrives and is recorded behind the late-write barrier. */
+export function* recordCallResult(sys: System, id: string): Generator<void, ApiResponse, void> {
   for (;;) {
     const tx = sys.store.begin();
     const job = tx.read<JobDoc>(`jobs/${id}`);
     if (!job || job.deleted || TERMINAL.has(job.state)) {
       tx.abort();
+      // The call happened (it could not be recalled): its internal cost entry (class c, no content)
+      // is recorded; its content is refused and it is not charged to the customer (already settled).
+      sys.store.put(`cost/${id}/late_${sys.store.keys(`cost/${id}/`).length + 1}`, { usd: 0.01 });
       return { status: 409, code: "late_write_refused" };
     }
     const n = (job.callsMade ?? 0) + 1;
@@ -737,13 +762,28 @@ export function* workerProviderCall(sys: System, id: string): Generator<void, Ap
   }
 }
 
+/** Dispatch: a worker leases a queued job and starts it, unless cancellation was requested. */
+export function* workerStart(sys: System, id: string): Generator<void, ApiResponse, void> {
+  for (;;) {
+    const tx = sys.store.begin();
+    const job = tx.read<JobDoc>(`jobs/${id}`);
+    if (!job || TERMINAL.has(job.state) || job.cancelRequested || (job.state !== "pending_dispatch" && job.state !== "queued")) {
+      tx.abort();
+      return { status: 409, code: "not_started" };
+    }
+    yield;
+    tx.set(`jobs/${id}`, { ...job, state: "running" });
+    if (tx.commit() === "committed") return { status: 200 };
+    yield;
+  }
+}
+
 /** The worker at a step boundary: stops a job whose cancellation was requested, settling work done. */
 export function* workerBoundary(sys: System, id: string): Generator<void, ApiResponse, void> {
   const job = sys.store.get<JobDoc>(`jobs/${id}`);
   if (!job || TERMINAL.has(job.state)) return { status: 200 };
   if (!job.cancelRequested) return { status: 200 };
-  const unused = Math.max(0, job.credits - (job.callsMade ?? 0));
-  return yield* finishJob(sys, id, "canceled", unused, job.deletionRequested ? "deletion_requested" : "canceled");
+  return yield* finishJob(sys, id, "canceled", job.deletionRequested ? "deletion_requested" : "canceled");
 }
 
 /**
@@ -775,6 +815,8 @@ export function* completeDeletion(sys: System, delId: string): Generator<void, A
     tx.set(`jobs/${id}`, {
       state: job.state, orgId: job.orgId, credits: job.credits, type: job.type, admissionId: job.admissionId,
       [ADMISSION_MARKER_FIELD]: job[ADMISSION_MARKER_FIELD], [RELEASE_MARKER_FIELD]: job[RELEASE_MARKER_FIELD],
+      ...(job.concurrencyReleaseAnomaly ? { concurrencyReleaseAnomaly: true } : {}),
+      settledCharged: job.settledCharged, settledReleased: job.settledReleased, callsMade: job.callsMade,
       deletionRequested: true, deletionId: delId, deleted: true,
     } satisfies JobDoc);
     tx.set(deletionPath(delId), { ...op, status: "completed", attempts: op.attempts + 1, blockedBy: undefined });
@@ -795,10 +837,9 @@ export function* sweep(sys: System): Generator<void, ApiResponse, void> {
     if (TERMINAL.has(j.state)) continue;
     const id = p.slice("jobs/".length);
     if ((j.state === "running" || j.state === "synthesizing") && (j.leaseExpiries ?? 0) >= LEASE_EXPIRY_LIMIT) {
-      const unused = Math.max(0, j.credits - (j.callsMade ?? 0));
-      yield* finishJob(sys, id, j.deletionRequested ? "canceled" : "failed", unused, j.deletionRequested ? "deletion_requested" : "worker_timeout");
+      yield* finishJob(sys, id, j.deletionRequested ? "canceled" : "failed", j.deletionRequested ? "deletion_requested" : "worker_timeout");
     } else if ((j.state === "pending_dispatch" || j.state === "queued") && (j.deletionRequested || sys.dynamic.now - (j.queuedAt ?? 0) > MAX_QUEUE_WAIT_MS)) {
-      yield* finishJob(sys, id, j.deletionRequested ? "canceled" : "expired", j.credits, j.deletionRequested ? "deletion_requested" : "max_queue_wait");
+      yield* finishJob(sys, id, j.deletionRequested ? "canceled" : "expired", j.deletionRequested ? "deletion_requested" : "max_queue_wait");
     }
   }
   for (const p of sys.store.keys("apiDeletions/")) {

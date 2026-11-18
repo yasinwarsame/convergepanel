@@ -161,7 +161,7 @@ Every instrumented provider call (PRD §6.5) has a deterministic **call key** `{
 | Rejected before T-create (`401`, `403` org state, plan or scope, `413`, `415`, `429 rate_limited`, validation `400` and the schema-bound `422`s) | No record is written. The key may be reused |
 | Rejected inside T-create (*Addendum 3:* `401` / `403` from the in-transaction re-check of the key and organization; and, for a new job only, the beta-option and availability `422`s, `403 pipeline_processing_not_acknowledged`, `503 queue_unavailable`, `429 concurrency_limit`, `403 failed_job_threshold_exceeded`, `402 quota_exceeded` / `spend_limit_reached`, `503 capacity_protection` / `platform_spend_ceiling`) | The transaction writes nothing, so no record exists. The key may be reused, and the same request may succeed later. Error responses are never stored or replayed |
 | T-create committed but publishing failed | The record exists, the job is `pending_dispatch` and the sweeper dispatches it (§2). Replays return the same `id` and never create a second reservation |
-| Verification later deleted (OD-11) | Record kept as a content-free `deleted` marker until TTL; replay returns `410 verification_deleted` |
+| Verification later deleted (OD-11) | Record kept as a content-free `deleted` marker until TTL; replay returns `410 verification_deleted`. *Addendum 7:* only if the record still represents that verification's own acceptance; a record for a newer job under the same key is never changed |
 
 *Addendum 3 (m3):* the rows above are unchanged in meaning; the **order** in which they are evaluated, and the behaviour when conditions change between the original request and its replay, are specified in §5A, which wins where it is more specific.
 
@@ -344,9 +344,9 @@ Caller authenticated and authorized (`verifications:write`). *Target* is relativ
 | D9 | running | sweeper runs before the worker stops | 410 | 1 | 1 | completed | purged |
 | D10 | running | worker stops; purge; then a late worker write | 410 | 1 | 1 | completed | purged |
 | D11 | running | first stop attempt crashes before commit; retried | 410 | 1 | 1 | completed | purged |
-| D12 | running | worker never stops and its lease never expires | 410 | 0 | 0 | pending | kept |
+| D12 | running | worker stops responding; fewer than three leases have expired so far | 410 | 0 | 0 | pending | kept |
 
-D9: the sweeper retries the operation, which stays `pending` (`awaiting_terminal`) until the worker stops. D12: the operation stays observable as `pending` and is never reported complete; the job keeps its admission (capacity held, never leaked) until bounded recovery ends it.
+D9: the sweeper retries the operation, which stays `pending` (`awaiting_terminal`) until the worker stops. D12 (*Addendum 7:* reworded; a lease cannot stay live forever, §4.1): until the third lease expiry the operation stays observable as `pending` and is never reported complete; the job keeps its admission (capacity held, never leaked) until the sweeper's bounded recovery ends it, which is row D5. *Job at DELETE* and *Then* are bound to the spec: it selects each scenario by the exact *Then* text and checks the job's state at `DELETE` against *Job at DELETE*.
 
 ## 7. Polling
 
