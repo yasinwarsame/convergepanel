@@ -196,7 +196,7 @@ export async function runPanel(
       return settled.value;
     }
 
-    console.error(`[runPanel] Promise rejected for model ${modelId}:`, { errorName: (settled.reason as any)?.name ?? typeof settled.reason }); // privacy: no message
+    console.error("[runPanel] Promise rejected for model %s:", modelId, { errorName: (settled.reason as any)?.name ?? typeof settled.reason }); // privacy: no message
     return {
       modelId,
       status: "failed" as const,
@@ -374,7 +374,7 @@ async function safePrimaryCall(
   try {
     return await connector(question, context, apiKey, opts);
   } catch (err: any) {
-    console.error(`[runPanel] Unexpected throw from ${modelId}:`, { errorName: err?.name ?? typeof err }); // privacy: no message
+    console.error("[runPanel] Unexpected throw from %s:", modelId, { errorName: err?.name ?? typeof err }); // privacy: no message
     return {
       modelId,
       status: "error" as ConnectorStatus,

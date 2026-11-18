@@ -186,8 +186,8 @@ describe("M2 — source dispositions for provider / panel error logs", () => {
   const read = (p: string) => require("fs").readFileSync(require("path").join(__dirname, "..", "..", p), "utf8");
   it.each([
     ["lib/connectors/deepseek.ts", /msg=\$\{msg\.slice/],
-    ["lib/panel.ts", /Promise rejected for model \$\{modelId\}:`, settled\.reason\)/],
-    ["lib/panel.ts", /Unexpected throw from \$\{modelId\}:`, err\)/],
+    ["lib/panel.ts", /Promise rejected for model (?:\$\{modelId\}:`|%s:", modelId), settled\.reason\)/],
+    ["lib/panel.ts", /Unexpected throw from (?:\$\{modelId\}:`|%s:", modelId), err\)/],
     ["lib/panel.ts", /\$\{dsResult\.message\}/],
     ["lib/connectors/chatgpt.ts", /ChatGPT API error:", \{\s*message: error\?\.message/],
     ["lib/connectors/claude.ts", /Claude API error:", \{\s*message: error\?\.message/],
