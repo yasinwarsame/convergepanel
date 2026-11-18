@@ -55,7 +55,6 @@ import {
   SHORT_CIRCUIT_CODES,
   CUSTOMER_FAILURE_CODES,
   outcomePath,
-  OutcomeDoc,
   CostDoc,
   CallOutcome,
   JobState,
@@ -1187,7 +1186,8 @@ describe("Addendum 7 M-1: deletion binds to the original acceptance", () => {
     const a = send(sys, req(SAME));
     runToEnd(handleDelete(sys, "live1", a.body?.id as string));
     const marker = sys.store.get<IdemRecord>(scopeOf(sys)) as IdemRecord;
-    expect(marker).toMatchObject({ kind: "deleted", verificationId: a.body?.id, acceptanceId: `acc_${(a.body?.id as string).slice(4)}` });
+    expect(marker).toMatchObject({ kind: "deleted", verificationId: a.body?.id, acceptanceId: (sys.store.get<JobDoc>(`jobs/${a.body?.id}`) as JobDoc).idemAcceptanceId });
+    expect(marker.acceptanceId).toMatch(/^acc_[0-9a-f]{32}$/);
     expect(fmt(send(sys, req(SAME)))).toBe("410 verification_deleted");
   });
 
@@ -1272,7 +1272,9 @@ describe("Addendum 7 m-2: settlement amounts are conserved, computed in the tran
     expect(settle.length).toBe(1);
     const e = s.store.get<{ charged: number; released: number; reserved: number }>(`ledger/settle_${id}`) as { charged: number; released: number; reserved: number };
     expect(e.charged + e.released).toBe(e.reserved);
-    expect(e.charged).toBe(Math.min(e.reserved, (s.store.get<JobDoc>(`jobs/${id}`) as JobDoc).callsMade ?? 0));
+    // Addendum 8 (m-A): a fully failed or expired job charges 0 whatever calls were made.
+    const j = s.store.get<JobDoc>(`jobs/${id}`) as JobDoc;
+    expect(e.charged).toBe(j.state === "failed" || j.state === "expired" ? 0 : Math.min(e.reserved, j.callsMade ?? 0));
   };
 
   it("a stop whose transaction retries after a late call recomputes the settlement (no over-refund)", () => {
@@ -1746,6 +1748,7 @@ describe("Addendum 8 E3: a provider call returning after the job became terminal
       return s;
     };
     let n = 0;
+    const kinds = new Set<string>();
     for (const o of interleavings(setup, [
       { name: "call", start: (s) => workerProviderCall(s, id, "ok") },
       { name: "fail", start: (s) => finishJob(s, id, "failed", "insufficient_usable_models") },
@@ -1753,9 +1756,17 @@ describe("Addendum 8 E3: a provider call returning after the job became terminal
       n++;
       expect(settleOf(o.sys, id).charged).toBe(0);
       expect(creditsOf(o.sys)).toBe(before);
-      expect(costsOf(o.sys, id).length).toBe(2);
+      // Every call that was made has exactly one cost entry: recorded (with its call record) or late.
+      // A call not yet started when the job failed is not made (refused before the call).
+      const calls = o.sys.store.keys(`calls/${id}/`).length;
+      const late = o.sys.store.keys(`cost/${id}/late_`).length;
+      expect(costsOf(o.sys, id).length).toBe(calls + late);
+      if (fmt(o.results[0] as ApiResponse) === "200 undefined") expect([calls, late]).toEqual([2, 0]);
+      else expect(calls).toBe(1);
+      kinds.add(fmt(o.results[0] as ApiResponse) === "200 undefined" ? "recorded" : late === 1 ? "late" : "not made");
     }
     expect(n).toBeGreaterThan(3);
+    expect(Array.from(kinds).sort()).toEqual(["late", "not made", "recorded"]);
   });
 });
 

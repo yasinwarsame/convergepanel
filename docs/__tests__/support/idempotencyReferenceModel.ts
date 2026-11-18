@@ -19,6 +19,8 @@
  * scheduler can enumerate interleavings deterministically.
  */
 
+import { randomBytes } from "node:crypto";
+
 export const MAX_TX_ATTEMPTS = 3;
 export const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -281,6 +283,16 @@ export class System {
   }
 }
 
+/**
+ * Acceptance identity (Addendum 8; retention-and-deletion.md §3.1): generated independently at
+ * T-create from a CSPRNG, at least 128 bits, never derived from the Idempotency-Key, the
+ * verification ID, the request content or the time.
+ */
+export const ACCEPTANCE_ID_BYTES = 16;
+export function newAcceptanceId(): string {
+  return `acc_${randomBytes(ACCEPTANCE_ID_BYTES).toString("hex")}`;
+}
+
 export function idemPath(key: KeyDoc, idempotencyKey: string): string {
   return `orgs/${key.orgId}/idempotency/${key.appId}|${key.mode}|${idempotencyKey}`;
 }
@@ -450,19 +462,20 @@ export function* handleCreate(sys: System, req: CreateRequest): Generator<void, 
 
     // Step 15: job + reservation + idempotency record, one commit.
     const id = sys.newId();
+    const acceptanceId = newAcceptanceId(); // independent of id, key and content (Addendum 8)
     const credits = creditsFor(v);
     const body: AcceptedBody = { object: "verification", id, status: "queued", type: v.type, credits_reserved: credits };
     const org3 = org2 as OrgDoc;
     // Admission: job (with its admission marker), reservation, monthly period counter and the
     // concurrency increment commit together, or none does. Counted only if this commit succeeds.
-    tx.create(`jobs/${id}`, { state: "pending_dispatch", orgId, credits, type: v.type, admissionId: id, [ADMISSION_MARKER_FIELD]: true, [RELEASE_MARKER_FIELD]: false, reservedMonth: month, queuedAt: sys.dynamic.now, mode: key2?.mode, fingerprint: v.canonical, idemScope: scope ?? undefined, idemAcceptanceId: scope !== null ? `acc_${id.slice(4)}` : undefined } satisfies JobDoc);
+    tx.create(`jobs/${id}`, { state: "pending_dispatch", orgId, credits, type: v.type, admissionId: id, [ADMISSION_MARKER_FIELD]: true, [RELEASE_MARKER_FIELD]: false, reservedMonth: month, queuedAt: sys.dynamic.now, mode: key2?.mode, fingerprint: v.canonical, idemScope: scope ?? undefined, idemAcceptanceId: scope !== null ? acceptanceId : undefined } satisfies JobDoc);
     tx.create(`inputs/${id}`, { text: v.canonical }); // class (a) content, purged at deletion
     tx.create(`ledger/reserve_${id}`, { credits, month });
     tx.set(periodPath(orgId, month), { reservedCredits: period.reservedCredits + credits } satisfies PeriodDoc);
     tx.set(`orgs/${orgId}`, { ...org3, creditsRemaining: org3.creditsRemaining - credits });
     tx.set(concurrencyPath(orgId), { ...conc, active: conc.active + 1 } satisfies ConcurrencyDoc);
     if (scope !== null) {
-      tx.set(scope, { kind: "committed", requestHash: v.canonical, verificationId: id, acceptanceId: `acc_${id.slice(4)}`, response: body, expiresAt: sys.dynamic.now + IDEMPOTENCY_TTL_MS } satisfies IdemRecord);
+      tx.set(scope, { kind: "committed", requestHash: v.canonical, verificationId: id, acceptanceId, response: body, expiresAt: sys.dynamic.now + IDEMPOTENCY_TTL_MS } satisfies IdemRecord);
     }
     if (tx.commit() === "conflict") {
       if (attempt >= MAX_TX_ATTEMPTS) return { status: 409, code: "request_in_progress" };
@@ -540,11 +553,10 @@ export function* finishJob(sys: System, id: string, to: JobState, failureCode?: 
     const mustRelease = job[ADMISSION_MARKER_FIELD] === true && job[RELEASE_MARKER_FIELD] !== true;
     const conc = mustRelease ? tx.read<ConcurrencyDoc>(concurrencyPath(orgId)) ?? { active: 0, anomalies: 0 } : undefined;
     yield;
-    // Settlement (Addendum 7): computed HERE, from this transaction's read of the job, so a retried
-    // transaction recomputes it from fresh reads. Model rule: one credit per recorded provider call,
-    // capped at the reservation; the rest is released. charged + released == reserved, once.
-    const charged = Math.min(job.credits, job.callsMade ?? 0);
-    const released = job.credits - charged;
+    // Settlement (Addendum 7, corrected by Addendum 8): computed HERE, from this transaction's read
+    // of the job, so a retried transaction recomputes it from fresh reads. charged + released ==
+    // reserved, once.
+    const { charged, released } = settlementFor(job, to);
     const next: JobDoc = { ...job, state: to, settledCharged: charged, settledReleased: released, finishedAt: sys.dynamic.now, ...(failureCode ? { failureCode } : {}) };
     let anomaly = false;
     if (mustRelease && conc) {
@@ -571,6 +583,23 @@ export function* finishJob(sys: System, id: string, to: JobState, failureCode?: 
     if (attempt >= MAX_TX_ATTEMPTS * 10) throw new Error("finishJob contention");
     yield;
   }
+}
+
+/**
+ * Terminal states that charge 0 and release the whole reservation whatever work happened
+ * (ledger-and-billing.md §2.5, owner ruling E1 / Addendum 8): a fully failed job (every `failed`,
+ * whatever its failure code) and an expired job. Provider cost is recorded separately (cost/).
+ */
+export const FREE_TERMINAL_STATES: ReadonlySet<JobState> = new Set<JobState>(["failed", "expired"]);
+
+/**
+ * Model settlement rule. `completed`, `partial` and `canceled` settle the work done: one credit per
+ * recorded provider call with usable output, capped at the reservation (a canceled-before-execution
+ * job has none, so it is charged 0). Fully failed and expired jobs charge 0.
+ */
+export function settlementFor(job: JobDoc, to: JobState): { charged: number; released: number } {
+  const charged = FREE_TERMINAL_STATES.has(to) ? 0 : Math.min(job.credits, job.callsMade ?? 0);
+  return { charged, released: job.credits - charged };
 }
 
 /** Counted, unreleased jobs of an organization (what the record must equal). Non-transactional. */
@@ -778,6 +807,9 @@ export function* recordCallResult(sys: System, id: string, outcome: CallOutcome 
     }
     const n = (job.callsMade ?? 0) + (job.failedCalls ?? 0) + 1;
     tx.set(`calls/${id}/${n}`, { text: "raw model text", outcome }); // class (a), purged at deletion
+    // Internal cost entry (class c, no content), created with the per-call record whatever the
+    // outcome and whatever the customer is later charged (ledger-and-billing.md §3.1).
+    tx.create(`cost/${id}/${n}`, { usd, outcome } satisfies CostDoc);
     tx.set(`jobs/${id}`, outcome === "ok" ? { ...job, callsMade: (job.callsMade ?? 0) + 1 } : { ...job, failedCalls: (job.failedCalls ?? 0) + 1 });
     if (tx.commit() === "committed") return { status: 200 };
     yield;
@@ -947,8 +979,14 @@ function blockedBy(times: number[], now: number): boolean {
 }
 
 /** Whether a short-circuit rejection of this fingerprint counts against the customer. */
-export function rejectionCounts(_sys: System, _orgId: string, _fingerprint: string): boolean {
-  return true; // ledger-and-billing.md §4.3 "What counts": the repeated-failing-input short-circuit
+export function rejectionCounts(sys: System, orgId: string, fingerprint: string): boolean {
+  // Addendum 8 (ledger-and-billing.md §4.3 "Short-circuit attribution"): only when the
+  // fingerprint's customer-attributable failures ALONE would have triggered the block. A block that
+  // needed a platform fault (worker_timeout, persistence_failed) never counts against the customer.
+  const times = liveOutcomes(sys, orgId)
+    .filter((o) => o.fingerprint === fingerprint && o.state === "failed" && o.code !== undefined && CUSTOMER_FAILURE_CODES.includes(o.code))
+    .map((o) => o.at);
+  return blockedBy(times, sys.dynamic.now);
 }
 
 export function failureControls(sys: System, orgId: string): FailureControls {
